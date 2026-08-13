@@ -11,11 +11,15 @@ references:
 # Capturing learnings after landing (the `/learn` pass)
 
 `/learn` is perk's **knowledge-capture** step: when a plan has landed (`pending-learn` is set), turn
-the just-merged change into **durable learnings for future agents**. The orchestration flow — run
-the analyst wave, reconcile the typed reports, capture one classified decision or skip — is stated
-in your launch guidance; this skill is the judgment layer beneath it: why the wave is shaped this
-way, the full angle rubric, the child report contract, and the escape hatches. Judgment and the
-durable write stay with **you** (the parent).
+the just-merged change into **durable learnings for future agents**. This skill serves every learn
+session shape, and each shape's flow is its own launch guidance's: bare interactive `/learn` over a
+**gathered bundle** receives the orchestration guidance (run the analyst wave, reconcile the typed
+reports, capture one classified decision or skip) — the deterministic branches below decide which
+shape you are in — while the **simple shapes** (a cold `perk learn` launch, or the warm
+gather-unavailable fallback) receive the single-pass investigate+capture guidance and involve no
+wave. The rest of this skill is the judgment layer beneath the **orchestrated** branch: why the
+wave is shaped this way, the full angle rubric, the child report contract, and the escape hatches.
+Judgment and the durable write stay with **you** (the parent).
 
 ## Why fresh contexts
 

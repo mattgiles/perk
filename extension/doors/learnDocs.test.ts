@@ -153,3 +153,26 @@ test("/learn-docs: headless success gathers the inbox but drives no turn", async
     h.dispose();
   }
 });
+
+test("/learn-docs: headless with plan_save unavailable keeps materialize-only behavior", async () => {
+  // The guard is interactive-only (ctx.hasUI): a headless gated host — where plan_save is scoped
+  // off — must NOT be refused; the gather still runs so the inbox is materialized (no turn is
+  // driven headless, so the save hazard cannot occur). Losing the hasUI arm would fail this.
+  const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-only" } });
+  const argvFile = join(cwd, "argv.txt");
+  const bin = fakePerk(cwd, { stdout: GATHER_JSON, argvFile });
+  const h = await loadPerkSession({
+    cwd,
+    env: { PERK_RUN_ID: "01RID", PERK_BIN: bin },
+    headful: false,
+  });
+  const injected = spyInjections(h);
+  try {
+    await h.runCommandHandler("learn-docs", "");
+    assert.ok(existsSync(argvFile), "the headless gather still ran (materialize-only)");
+    assert.equal(injected.length, 0, "headless: no injection");
+    assert.equal(h.notifies.length, 0, "headless: no notify (no refusal)");
+  } finally {
+    h.dispose();
+  }
+});

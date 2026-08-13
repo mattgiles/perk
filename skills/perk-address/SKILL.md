@@ -7,12 +7,14 @@ disable-model-invocation: true
 
 # Addressing review feedback (the `/address` loop)
 
-`/address` is perk's **review-handling** stage: **classify-then-act**. The loop — classify in an
-isolated child via `classify_review_feedback`, fix only the actionable items yourself, publish +
-resolve via `finalize_address`, never push manually — is stated in your launch guidance; this skill
-carries the judgment detail. The verbose feedback fetch + classification runs in a read-only
-spawned child so the raw GitHub JSON never enters your session (route, don't relay); **you** (the
-parent) keep all judgment and durable writes.
+`/address` is perk's **review-handling** stage: **classify-then-act**. Each shape's flow is its own
+launch guidance's: the **action** shape states the loop — classify in an isolated child via
+`classify_review_feedback`, fix only the actionable items yourself, publish + resolve via
+`finalize_address`, never push manually — while the **`--preview`** shape states classification
+only, then an immediate stop (no fixes, no resolution, no landing). This skill carries the judgment
+detail. The verbose feedback fetch + classification runs in a read-only spawned child so the raw
+GitHub JSON never enters your session (route, don't relay); **you** (the parent) keep all judgment
+and durable writes.
 
 ## Loop detail (beyond the launch guidance)
 

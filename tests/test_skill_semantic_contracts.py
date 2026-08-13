@@ -51,6 +51,9 @@ def test_perk_learn_sole_carried_detail():
 
 def test_perk_learn_docs_sole_carried_detail():
     norm = _norm("perk-learn-docs")
+    # The inbox-only read rule (the untrusted-envelope boundary — no gh re-fetch).
+    assert "do **not** re-fetch them via `gh`" in norm
+    assert "<untrusted_learning>" in norm
     # The five knowledge-placement hierarchy rows.
     assert (
         "**Type/constant** (catalogs, fixed option sets, error codes) → source, not a doc" in norm
@@ -75,6 +78,9 @@ def test_perk_learn_docs_sole_carried_detail():
 
 def test_perk_learn_code_sole_carried_detail():
     norm = _norm("perk-learn-code")
+    # The inbox-only read rule (the untrusted-envelope boundary — no gh re-fetch).
+    assert "do **not** re-fetch them via `gh`" in norm
+    assert "<untrusted_learning>" in norm
     # The knowledge-placement hierarchy rows.
     assert (
         "**Type/constant** (catalogs, fixed option sets, error codes) → the source definition"
