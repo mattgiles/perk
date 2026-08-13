@@ -139,7 +139,7 @@ def _resolve_diff_base(worktree: Path) -> str | None:
 def watch_plan(ctx: click.Context, *, plan: str, dry_run: bool, hunk_args: tuple[str, ...]) -> None:
     """Live-watch PLAN's implementation diff in hunk (watch mode).
 
-    Annotated ``-> None`` (not ``NoReturn``): tests stub ``os.execv`` and control returns
+    Annotated ``-> None`` (not ``NoReturn``): tests stub ``os.execve`` and control returns
     (mirroring ``launch._exec_pi``).
 
     \b

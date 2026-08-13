@@ -3,7 +3,7 @@
 // the interior cache seam.
 
 import assert from "node:assert/strict";
-import { appendFileSync, mkdirSync, mkdtempSync, realpathSync } from "node:fs";
+import { appendFileSync, mkdirSync, mkdtempSync, realpathSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -15,6 +15,7 @@ import perkFeedback, {
   type HunkReviewNote,
   hunkWatchPaths,
   MAX_BODY_BYTES,
+  MAX_RECORD_BYTES,
   normalizeBody,
   type PublisherDeps,
   SUPPORTED_HUNK_API_VERSIONS,
@@ -199,6 +200,69 @@ test("publish: empty and oversized bodies are refused (never truncated, never 'q
   );
   assert.ok(oversized.status === "refused" && /NOT queued/.test(oversized.warning));
   assert.deepEqual(appends, []);
+});
+
+test("publish: byte bounds are UTF-8 bytes with exact boundaries (never char counts)", () => {
+  const root = tmp();
+  const { publisher, appends } = publisherIn(root);
+  // Exactly MAX_BODY_BYTES is legal…
+  const exact = publisher.publish(
+    { note: note({ body: "x".repeat(MAX_BODY_BYTES) }) },
+    { cwd: root, changesetId: null },
+  );
+  assert.equal(exact.status, "published");
+  // …and a MULTIBYTE body one byte over is refused even though its CHARACTER count is far
+  // below the limit (é = 2 UTF-8 bytes): the bound is bytes, not JS string length.
+  const multibyte = `${"é".repeat(MAX_BODY_BYTES / 2 - 1)}abc`; // 16385 bytes, 8194 chars
+  assert.equal(Buffer.byteLength(multibyte, "utf8"), MAX_BODY_BYTES + 1);
+  const over = publisher.publish(
+    { note: note({ body: multibyte }) },
+    { cwd: root, changesetId: null },
+  );
+  assert.ok(over.status === "refused" && /NOT queued/.test(over.warning));
+  assert.equal(appends.length, 1); // only the exact-boundary publish appended
+});
+
+test("publish: a legal body with oversized metadata trips the RECORD bound, nothing appended", () => {
+  const root = tmp();
+  const { publisher, appends } = publisherIn(root);
+  // Body legal (≤ 16 KiB) but a pathological filePath pushes the serialized record past 32 KiB.
+  const result = publisher.publish(
+    {
+      note: note({
+        body: "x".repeat(MAX_BODY_BYTES - 1),
+        filePath: `src/${"p".repeat(MAX_RECORD_BYTES - MAX_BODY_BYTES)}.ts`,
+      }),
+    },
+    { cwd: root, changesetId: null },
+  );
+  assert.ok(result.status === "refused");
+  assert.match(result.warning, /serialized feedback record exceeds/);
+  assert.deepEqual(appends, []);
+});
+
+test("publish: a symlinked outbox (or hunk-watch dir) is refused, nothing written through it", () => {
+  const root = tmp();
+  const paths = hunkWatchPaths(root);
+  mkdirSync(paths.dir, { recursive: true });
+  const elsewhere = join(root, "exfil.ndjson");
+  appendFileSync(elsewhere, "", "utf8");
+  symlinkSync(elsewhere, paths.outbox);
+  const { publisher, appends } = publisherIn(root);
+  const viaFile = publisher.publish({ note: note() }, { cwd: root, changesetId: null });
+  assert.ok(viaFile.status === "refused" && /outbox is a symlink/.test(viaFile.warning));
+  assert.deepEqual(appends, []);
+
+  // A symlinked FAMILY DIR is refused too (any component under the worktree root).
+  const root2 = tmp();
+  const real = join(root2, "elsewhere");
+  mkdirSync(real, { recursive: true });
+  mkdirSync(join(root2, ".perk", "workflow"), { recursive: true });
+  symlinkSync(real, join(root2, ".perk", "workflow", "hunk-watch"));
+  const second = publisherIn(root2);
+  const viaDir = second.publisher.publish({ note: note() }, { cwd: root2, changesetId: null });
+  assert.ok(viaDir.status === "refused" && /hunk-watch dir is symlinked/.test(viaDir.warning));
+  assert.deepEqual(second.appends, []);
 });
 
 test("publish: an append failure surfaces the concrete error and never claims queued", () => {

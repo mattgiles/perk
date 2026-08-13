@@ -26,6 +26,7 @@ import {
   hunkOutboxPath,
   hunkWatchDir,
 } from "../substrate/cache.ts";
+import { lsFiles } from "../substrate/git.ts";
 import {
   acquireLease,
   appendAcks,
@@ -117,6 +118,18 @@ export function createHunkFeedbackInbox(deps: InboxDeps): HunkFeedbackInbox {
       const watchDir = hunkWatchDir(identity.cwd);
       const { now, timers, report } = deps;
 
+      // Provenance fence (§8.58): the family is DISPOSABLE LOCAL state — a git-TRACKED entry
+      // under it means checkout-supplied bytes (a force-added outbox/symlink) are posing as
+      // live watch feedback. Refuse to open, loudly; nothing under the family is read.
+      const tracked = lsFiles(identity.cwd, watchDir);
+      if (tracked.length > 0) {
+        const reason =
+          "tracked file(s) under .perk/workflow/hunk-watch — repository-supplied feedback is " +
+          `refused (untrack them to re-enable the bridge): ${tracked.join(", ")}`;
+        report("error", reason);
+        return { passive: true, reason };
+      }
+
       // Quarantine sweep first (leftovers from a crashed reclaimer are harmless but dirty),
       // then the lease: a fresh foreign holder means this session never inspects the stream.
       for (const warning of sweepQuarantine(lockDir)) report("warning", warning);
@@ -133,12 +146,8 @@ export function createHunkFeedbackInbox(deps: InboxDeps): HunkFeedbackInbox {
 
       // Accepted-but-unacknowledged suppression lives here too: an id whose ack append failed
       // stays in this set for the rest of the session (may redeliver in a later one — §8.58).
-      let delivered: Set<string>;
-      try {
-        delivered = readDeliveredIds(deliveredPath);
-      } catch {
-        delivered = new Set();
-      }
+      const deliveredRead = readDeliveredIds(deliveredPath);
+      const delivered = deliveredRead.ids;
 
       type Phase = "idle" | "awaiting" | "backoff";
       let phase: Phase = "idle";
@@ -210,7 +219,7 @@ export function createHunkFeedbackInbox(deps: InboxDeps): HunkFeedbackInbox {
           pi_session_id: identity.piSessionId,
         }));
         try {
-          appendAcks(deliveredPath, acks);
+          appendAcks(identity.cwd, acks);
         } catch (error) {
           // The message IS on the transcript — suppress same-session redelivery in memory; a
           // later session may redeliver (at-least-once, stated plainly).
@@ -339,6 +348,8 @@ export function createHunkFeedbackInbox(deps: InboxDeps): HunkFeedbackInbox {
           reportOnce("warning", `feedback lease heartbeat failed: ${error}`);
         }
       };
+
+      for (const warning of deliveredRead.warnings) reportOnce("warning", warning);
 
       // The immediate initial drain, then low-latency watch + poll fallback + heartbeat.
       guard(dispatch);

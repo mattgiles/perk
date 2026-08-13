@@ -58,19 +58,33 @@ export function feedbackEligibility(args: EligibilityArgs): boolean {
 // --- rendering (pure) ---------------------------------------------------------------------------
 
 /**
+ * Flatten NON-HUMAN metadata (paths, ids) to one inert line before it is interpolated into the
+ * rendered message: git filenames and note ids may carry newlines/control characters that
+ * would otherwise break out of the descriptive bullet line and forge structure alongside the
+ * trusted human body. Control characters become U+FFFD — never removed silently to "fix" the
+ * string into a different valid value.
+ */
+export function sanitizeInline(value: string): string {
+  // biome-ignore lint/suspicious/noControlCharactersInRegex: stripping controls is the point
+  return value.replace(/[\u0000-\u001f\u007f]/g, "\ufffd");
+}
+
+/**
  * Render one batch as one real user message. The note bodies keep user-message authority (no
  * untrusted-data fencing — this is the human's own feedback); the bridge metadata around them
- * stays descriptive. Anchors are evidence, not authority — the trailer says so.
+ * stays descriptive and is sanitized to inert single-line text. Anchors are evidence, not
+ * authority — the trailer says so.
  */
 export function renderFeedbackMessage(planId: string, batch: readonly FeedbackRecord[]): string {
-  const displayId = /^\d+$/.test(planId) ? `#${planId}` : planId;
+  const safePlanId = sanitizeInline(planId);
+  const displayId = /^\d+$/.test(safePlanId) ? `#${safePlanId}` : safePlanId;
   const bullets = batch.map((record) => {
     const body = record.body
       .split("\n")
       .map((line) => `  ${line}`)
       .join("\n");
     return (
-      `- [feedback ${record.feedback_id}] ${record.anchor.file_path}, ` +
+      `- [feedback ${sanitizeInline(record.feedback_id)}] ${sanitizeInline(record.anchor.file_path)}, ` +
       `${record.anchor.side} line ${record.anchor.line}, hunk ${record.anchor.hunk_index + 1}:\n` +
       body
     );
@@ -86,10 +100,14 @@ export function renderFeedbackMessage(planId: string, batch: readonly FeedbackRe
   ].join("\n");
 }
 
-/** The observation needle: the first record's rendered `[feedback <id>]` literal. */
-export function batchMarker(batch: readonly FeedbackRecord[]): string {
-  const first = batch[0];
-  return first === undefined ? "" : `[feedback ${first.feedback_id}]`;
+/**
+ * The observation needles: EVERY record's rendered `[feedback <id>]` literal (sanitized exactly
+ * as rendered). Exact batch membership — not just the first record — must be proven in one
+ * persisted message before a batch is acknowledged (§8.58): a reconstructed larger batch that
+ * merely shares its first record with an older message must NOT be acked off that message.
+ */
+export function batchMarkers(batch: readonly FeedbackRecord[]): string[] {
+  return batch.map((record) => `[feedback ${sanitizeInline(record.feedback_id)}]`);
 }
 
 // --- the acceptance scan (pure) ----------------------------------------------------------------
@@ -100,31 +118,42 @@ interface MessageEntrySlice {
   message?: { role?: unknown; content?: unknown };
 }
 
+/** The text of one persisted USER-role message entry, or null for every other entry shape. */
+function userMessageText(entry: unknown): string | null {
+  if (typeof entry !== "object" || entry === null) return null;
+  const slice = entry as MessageEntrySlice;
+  if (slice.type !== "message") return null;
+  const message = slice.message;
+  if (typeof message !== "object" || message === null || message.role !== "user") return null;
+  const content = message.content;
+  if (typeof content === "string") return content;
+  if (!Array.isArray(content)) return null;
+  const texts: string[] = [];
+  for (const part of content) {
+    if (typeof part !== "object" || part === null) continue;
+    const text = (part as { text?: unknown }).text;
+    if (typeof text === "string") texts.push(text);
+  }
+  return texts.join("\n");
+}
+
 /**
- * True when `marker` appears in a PERSISTED USER-role message entry on the branch — the §8.58
- * acceptance evidence. Tool results, custom entries, and assistant messages can never satisfy
- * it: only `type === "message"` entries whose `message.role === "user"` are searched, and only
- * their text content (a string body, or the `text` parts of an array body).
+ * True when ONE persisted USER-role message entry on the branch carries EVERY marker — the
+ * §8.58 acceptance evidence (exact batch membership, not first-record overlap). Tool results,
+ * custom entries, and assistant messages can never satisfy it: only `type === "message"`
+ * entries whose `message.role === "user"` are searched, and only their text content (a string
+ * body, or the `text` parts of an array body). Residual false positive (accepted, §8.58): a
+ * human user message quoting every exact `[feedback <id>]` literal of the batch.
  */
-export function branchHasFeedbackMessage(entries: readonly unknown[], marker: string): boolean {
-  if (marker === "") return false;
+export function branchHasFeedbackMessage(
+  entries: readonly unknown[],
+  markers: readonly string[],
+): boolean {
+  if (markers.length === 0 || markers.some((marker) => marker === "")) return false;
   for (const entry of entries) {
-    if (typeof entry !== "object" || entry === null) continue;
-    const slice = entry as MessageEntrySlice;
-    if (slice.type !== "message") continue;
-    const message = slice.message;
-    if (typeof message !== "object" || message === null || slice.message?.role !== "user") continue;
-    const content = message.content;
-    if (typeof content === "string") {
-      if (content.includes(marker)) return true;
-      continue;
-    }
-    if (!Array.isArray(content)) continue;
-    for (const part of content) {
-      if (typeof part !== "object" || part === null) continue;
-      const text = (part as { text?: unknown }).text;
-      if (typeof text === "string" && text.includes(marker)) return true;
-    }
+    const text = userMessageText(entry);
+    if (text === null) continue;
+    if (markers.every((marker) => text.includes(marker))) return true;
   }
   return false;
 }
@@ -234,7 +263,7 @@ export function createHunkFeedbackReceiver(
             else pi.sendUserMessage(message, { deliverAs: "steer" });
           },
           isInjected(batch: readonly FeedbackRecord[]) {
-            return branchHasFeedbackMessage(ctx.sessionManager.getBranch(), batchMarker(batch));
+            return branchHasFeedbackMessage(ctx.sessionManager.getBranch(), batchMarkers(batch));
           },
           isIdle: () => ctx.isIdle(),
         };

@@ -8149,18 +8149,41 @@ One JSON object per line: `{ "schema": 1, "feedback_id", "delivered_at", "run_id
 **observed as a persisted user-role message entry on the session branch** (transcript evidence).
 Pi's `sendUserMessage` is a void fire-and-forget wrapper over in-memory queues (an abort
 discards them), so call-return is never acceptance; the typed transcript entry is the
-acceptance evidence. Duplicates are valid — readers collapse by id.
+acceptance evidence. Observation proves **exact batch membership**: one persisted user-role
+message must carry **every** record's rendered `[feedback <id>]` literal before the batch is
+acknowledged — a reconstructed larger batch that merely shares its first record with an older
+message is never acked off that message (it re-injects; the duplicate is the accepted
+residual). **Accepted residual false positive:** a human user message quoting every exact
+`[feedback <id>]` literal of an in-flight batch satisfies observation — tolerated, since the
+scan admits only user-role message text (tool results and assistant messages can never match).
+Duplicates are valid — readers collapse by id. On read, only a **structurally valid schema-1**
+acknowledgement suppresses delivery: a malformed line or unknown ack `schema` warns and never
+counts as delivered (the safe direction is a duplicate redelivery, never silent suppression).
 
 ### Append discipline + lenient reads
 
 One record per write, appended through an append-only call (the two NDJSON streams are the
 guarded `appendFileSync` exemptions on the interior plane — same O_APPEND rationale as the
-worker's `events.ndjson`). Reads are lenient and total: a missing file = no feedback; a trailing
+worker's `events.ndjson`). Reads are lenient and total: a MISSING file = no feedback (the
+normal silent state), while any other read failure (permissions, wrong file type, I/O) is
+reported once — queued feedback never stalls invisibly; a trailing
 partial line is **held** (a concurrent append in flight); a malformed complete line warns once
 and is skipped; an unknown `schema` is **paused** (never acked/delivered) with a loud version
 warning; duplicate `feedback_id`s collapse to the first valid record, and conflicting later
 bytes for the same id are reported as corruption. Full-file reads with ID indexing — no
 cursors/compaction in v1.
+
+**Provenance fences.** The family is disposable LOCAL state, so checkout-supplied bytes are
+refused on both planes: the receiver refuses to open (loudly, fail-closed) while any git-TRACKED
+entry exists under `hunk-watch/` (a force-added outbox posing as live feedback), and both
+appenders refuse symlinked path components (a force-tracked symlink at `.perk`/`workflow`/
+`hunk-watch` or at either stream file would redirect the O_APPEND write outside the worktree;
+check-then-append TOCTOU is accepted — the threat is static checkout content). Rendered
+messages sanitize all non-body metadata (paths, ids) to inert single-line text (control
+characters → U+FFFD), so a crafted filename cannot forge message structure. **Accepted
+residual:** a same-uid process that can already write the worktree can author records — the
+bridge authenticates the *channel shape*, not the author; the rendered header names the source
+("the live Hunk review") and the trailer keeps anchors evidence-only.
 
 ### Consumer lease (`consumer.lock/lease.json`)
 
@@ -8171,11 +8194,19 @@ foreign lease is never stolen — the later session stays passive and says so. A
 (heartbeat older than the stale threshold; a corrupt `lease.json` falls back to the lock-dir
 mtime) is reclaimed by an atomic rename to a unique quarantine name
 (`consumer.lock.stale-<unique>`) then fresh acquisition — competing reclaimers converge on one
-winner, the winner best-effort-removes its quarantine dir afterwards, and `open`
-best-effort-sweeps any leftover quarantine dirs (failures warn and leave them; the tier is
-disposable). Same-identity (`run_id` + `pi_session_id`) reacquire is idempotent (a fresh token
+winner (the rename loser can legitimately win the retry), a post-rename freshness re-check
+restores a mistakenly-swept FRESH successor lease (a completed competing reclaim in the
+judgment→rename window) and stays passive, the winner best-effort-removes its quarantine dir
+afterwards, and `open` best-effort-sweeps any leftover quarantine dirs (failures warn and leave
+them; the tier is disposable). Same-identity (`run_id` + `pi_session_id`) reacquire is idempotent (a fresh token
 is written — the fencing that retires a `/reload` predecessor instance); shutdown releases only
-on token match. Heartbeat 5 s / stale threshold 60 s — implementation constants, not config.
+on token match. Heartbeat renewal and release are additionally **inode-fenced**: the lock
+directory's identity is captured before the check and re-verified after the act, so a reclaim
+that replaces the directory mid-operation is detected and the operation throws/aborts. The
+residual sub-window (a clobbered successor lease) degrades to **both** consumers failing closed
+— the successor's own verify-before-inject fence rejects the foreign token — never to two live
+consumers or misdelivery. Heartbeat 5 s / stale threshold 60 s — implementation constants, not
+config.
 
 ### Receiver eligibility
 
@@ -8191,14 +8222,16 @@ plan-ref reconciliation, so an unclaimed or mislinked session never touches the 
 
 At most ONE batch exists between injection and acknowledgement; while it awaits observation no
 new batch is injected — new records only mark the inbox dirty. Batches are bounded (≤ 10
-records, ≤ 48 KiB of rendered bodies), append-ordered, and injected as one real user message:
+records, ≤ 48 KiB of **raw note-body bytes** — measured pre-render; rendering adds bounded
+indentation/metadata overhead on top), append-ordered, and injected as one real user message:
 `ctx.isIdle()` → plain `sendUserMessage`, busy → `{ deliverAs: "steer" }` (never `followUp`).
 Backoff (bounded exponential, 1 s doubling to a 60 s cap) resets **only on transcript
 observation**, never on dispatch; a synchronous `sendUserMessage` throw and a demotion (the
 in-flight batch's message never observed while the session is idle again ≥ one poll interval
 after injection — covering abort-discarded steer queues and failed turns) both route through
-backoff before the next dispatch. A batch whose message is already on the branch is acked
-without re-injection. Records whose `plan_id` mismatches the consumer's are held with a
+backoff before the next dispatch. A batch whose exact membership is already proven on the
+branch (one persisted user message carrying every record's marker) is acked without
+re-injection. Records whose `plan_id` mismatches the consumer's are held with a
 once-per-id warning — never delivered, never acked. Duplicates possible, loss not:
 accepted-but-unacknowledged ids (an ack append failed after observation) are suppressed
 in-memory for the rest of the session but may redeliver in a later one.

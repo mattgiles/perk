@@ -48,6 +48,16 @@ function git(cwd: string, args: string[], timeout?: number): string | null {
   }
 }
 
+/**
+ * Tracked files under `pathspec` (repo-relative names), [] when none or on ANY failure (not a
+ * repo, git missing — the module's fail-open style). Callers deciding trust on the result must
+ * treat [] as "nothing PROVEN tracked", not proof of cleanliness.
+ */
+export function lsFiles(cwd: string, pathspec: string): string[] {
+  const out = git(cwd, ["ls-files", "--", pathspec]);
+  return out === null ? [] : out.split("\n").filter((line) => line !== "");
+}
+
 /** The bounded best-effort `git fetch` budget (ms) — see `sinceBaseSha` step 2. */
 const FETCH_TIMEOUT_MS = 15_000;
 

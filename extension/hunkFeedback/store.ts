@@ -13,15 +13,17 @@
 import { randomBytes } from "node:crypto";
 import {
   appendFileSync,
+  lstatSync,
   mkdirSync,
   readdirSync,
   readFileSync,
+  realpathSync,
   renameSync,
   rmSync,
   statSync,
 } from "node:fs";
-import { basename, dirname, join } from "node:path";
-import { atomicWriteFileSync } from "../substrate/cache.ts";
+import { basename, dirname, join, relative } from "node:path";
+import { atomicWriteFileSync, hunkDeliveredPath, hunkWatchDir } from "../substrate/cache.ts";
 
 /** Heartbeat renewal cadence — an implementation constant (§8.58), not config. */
 export const HEARTBEAT_MS = 5_000;
@@ -113,13 +115,20 @@ function completeLines(content: string): { lines: string[]; heldPartial: boolean
   return { lines: lines.filter((line) => line.trim() !== ""), heldPartial };
 }
 
-/** The lenient §8.58 outbox read. A missing file is the normal no-feedback state. */
+/**
+ * The lenient §8.58 outbox read. A MISSING file is the normal, silent no-feedback state;
+ * every other read failure (EACCES, EISDIR, EIO, …) is surfaced as a warning — queued feedback
+ * must never stall invisibly (the caller's once-per-distinct-message dedupe bounds the noise).
+ */
 export function readOutbox(path: string): OutboxRead {
   let content: string;
   try {
     content = readFileSync(path, "utf8");
-  } catch {
-    return { records: [], held: 0, warnings: [] };
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      return { records: [], held: 0, warnings: [] };
+    }
+    return { records: [], held: 0, warnings: [`could not read the feedback outbox: ${error}`] };
   }
   const { lines, heldPartial } = completeLines(content);
   const records: FeedbackRecord[] = [];
@@ -168,33 +177,102 @@ export function readOutbox(path: string): OutboxRead {
   return { records, held, warnings };
 }
 
-/** The delivered-id set (same leniency; any line carrying a string feedback_id counts). */
-export function readDeliveredIds(path: string): Set<string> {
+function isDeliveryAck(
+  value: Record<string, unknown>,
+): value is DeliveryAck & Record<string, unknown> {
+  return (
+    typeof value.feedback_id === "string" &&
+    value.feedback_id !== "" &&
+    typeof value.delivered_at === "string" &&
+    typeof value.run_id === "string" &&
+    typeof value.pi_session_id === "string"
+  );
+}
+
+export interface DeliveredRead {
+  ids: Set<string>;
+  warnings: string[];
+}
+
+/**
+ * The delivered-id set — acknowledgement v1 ONLY (§8.58): an id is suppressed solely by a
+ * structurally valid, schema-1 acknowledgement (transcript-observation evidence). A malformed
+ * line or an unknown `schema` never counts as delivered (the safe direction is a duplicate
+ * redelivery, never a silent suppression) — both warn. A missing file is silent; other read
+ * failures warn (redelivery-safe).
+ */
+export function readDeliveredIds(path: string): DeliveredRead {
   let content: string;
   try {
     content = readFileSync(path, "utf8");
-  } catch {
-    return new Set();
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return { ids: new Set(), warnings: [] };
+    return {
+      ids: new Set(),
+      warnings: [`could not read the feedback acknowledgements: ${error}`],
+    };
   }
   const ids = new Set<string>();
+  const warnings: string[] = [];
   for (const line of completeLines(content).lines) {
+    let parsed: unknown;
     try {
-      const parsed: unknown = JSON.parse(line);
-      // Deliberately schema-lenient: taking the id from ANY parseable ack line can only
-      // suppress a duplicate redelivery, never cause loss.
-      if (isRecord(parsed) && typeof parsed.feedback_id === "string" && parsed.feedback_id !== "") {
-        ids.add(parsed.feedback_id);
-      }
+      parsed = JSON.parse(line);
     } catch {
-      // malformed ack lines are ignored — at-least-once tolerates the resulting duplicate
+      warnings.push(`skipping a malformed acknowledgement line (not JSON): ${line.slice(0, 80)}`);
+      continue;
     }
+    if (!isRecord(parsed)) {
+      warnings.push(`skipping a malformed acknowledgement line: ${line.slice(0, 80)}`);
+      continue;
+    }
+    if (parsed.schema !== 1) {
+      warnings.push(
+        `ignoring an acknowledgement with unknown schema ${JSON.stringify(parsed.schema)} — ` +
+          "its record may redeliver (a newer perk wrote it)",
+      );
+      continue;
+    }
+    if (!isDeliveryAck(parsed)) {
+      warnings.push(`skipping a structurally invalid acknowledgement: ${line.slice(0, 80)}`);
+      continue;
+    }
+    ids.add(parsed.feedback_id);
   }
-  return ids;
+  return { ids, warnings };
 }
 
-/** Append acknowledgements — one complete line + LF per ack (the O_APPEND discipline). */
-export function appendAcks(path: string, acks: readonly DeliveryAck[]): void {
+/**
+ * Refuse a symlinked append target (§8.58): every path component from the hunk-watch dir down
+ * must be a real directory/file under the CANONICAL family dir — a force-tracked symlink at
+ * `.perk`, `workflow`, `hunk-watch`, or the file itself would otherwise redirect the O_APPEND
+ * write outside the worktree. Symlinks ABOVE the worktree root stay legal (macOS /tmp).
+ * Check-then-append TOCTOU is accepted: the threat is force-tracked static checkout content,
+ * not a live same-uid attacker (who already owns the files).
+ */
+function assertUnredirectedAppendTarget(cwd: string, path: string): void {
+  const watchDir = hunkWatchDir(cwd);
+  const expected = join(realpathSync(cwd), relative(cwd, watchDir));
+  if (realpathSync(watchDir) !== expected) {
+    throw new Error(`refusing a symlinked hunk-watch dir (${watchDir} resolves elsewhere)`);
+  }
+  try {
+    if (lstatSync(path).isSymbolicLink()) {
+      throw new Error(`refusing a symlinked append target: ${path}`);
+    }
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+  }
+}
+
+/**
+ * Append acknowledgements — one complete line + LF per ack (the O_APPEND discipline), after
+ * refusing symlinked path components (the target must live in THIS worktree's family dir).
+ */
+export function appendAcks(cwd: string, acks: readonly DeliveryAck[]): void {
+  const path = hunkDeliveredPath(cwd);
   mkdirSync(dirname(path), { recursive: true });
+  assertUnredirectedAppendTarget(cwd, path);
   for (const ack of acks) {
     appendFileSync(path, `${JSON.stringify(ack)}\n`, "utf8");
   }
@@ -272,18 +350,28 @@ function tryFreshAcquire(lockDir: string, identity: LeaseIdentity, nowMs: number
   return lease.token;
 }
 
+/** Deterministic-interleave seams for the reclaim-race tests — never set in production. */
+export interface AcquireRaceHooks {
+  /** Runs after the stale lease is observed, before the quarantine rename. */
+  beforeQuarantine?(): void;
+  /** Runs after the quarantine rename attempt, before the fresh-acquire retry. */
+  afterQuarantine?(): void;
+}
+
 /**
  * Acquire the single-consumer lease (§8.58). Atomic directory creation is the primitive; on
  * contention: same-identity → idempotent reacquire with a FRESH token (the fencing that retires
  * a `/reload` predecessor instance); stale (heartbeat older than `STALE_LEASE_MS`, lock-dir
  * mtime when `lease.json` is corrupt) → quarantine-rename then ONE fresh-acquire retry
- * (competing reclaimers converge on one winner; the winner best-effort-removes its quarantine
- * dir); fresh foreign → passive. `now()` is injected for deterministic tests.
+ * (competing reclaimers converge on one winner — the rename loser can legitimately win the
+ * retry; the winner best-effort-removes its quarantine dir); fresh foreign → passive. `now()`
+ * is injected for deterministic tests.
  */
 export function acquireLease(
   lockDir: string,
   identity: LeaseIdentity,
   now: () => number,
+  hooks: AcquireRaceHooks = {},
 ): LeaseAcquisition {
   mkdirSync(dirname(lockDir), { recursive: true });
   const nowMs = now();
@@ -324,6 +412,7 @@ export function acquireLease(
 
   // Stale: quarantine the dead lock dir under a unique name, then ONE fresh-acquire retry.
   // A failed rename means a competing reclaimer already moved it — still take the retry.
+  hooks.beforeQuarantine?.();
   const quarantine = `${lockDir}.stale-${process.pid.toString(36)}-${randomBytes(4).toString("hex")}`;
   let renamed = false;
   try {
@@ -332,6 +421,30 @@ export function acquireLease(
   } catch {
     renamed = false;
   }
+  if (renamed) {
+    // Post-rename freshness re-check: between our staleness judgment and the rename, a
+    // competing reclaimer may have COMPLETED a full reclaim — the dir we just moved would
+    // then hold a FRESH successor lease, not the stale one we judged. Restore it and stay
+    // passive (a fresh foreign lease is never stolen). If the restore loses a further race,
+    // the quarantined holder fails closed on its own verify fence — never two live consumers.
+    const moved = readLease(quarantine);
+    const movedFresh =
+      moved !== null &&
+      !Number.isNaN(Date.parse(moved.heartbeat_at)) &&
+      nowMs - Date.parse(moved.heartbeat_at) < STALE_LEASE_MS;
+    if (movedFresh) {
+      try {
+        renameSync(quarantine, lockDir);
+      } catch {
+        // the name was retaken meanwhile — leave the quarantine for the sweep
+      }
+      return {
+        owned: false,
+        reason: `another live implement session holds the feedback lease: run ${moved.run_id} (session ${moved.pi_session_id})`,
+      };
+    }
+  }
+  hooks.afterQuarantine?.();
   const retried = tryFreshAcquire(lockDir, identity, nowMs);
   if (renamed) {
     try {
@@ -369,13 +482,31 @@ export function sweepQuarantine(lockDir: string): string[] {
   return warnings;
 }
 
-/** Renew `heartbeat_at` — throws on a lost/foreign lease (the caller reports, never renews). */
+/** The lock dir's inode — the directory-identity fence for check-then-act operations. */
+function lockDirIno(lockDir: string): bigint {
+  return statSync(lockDir, { bigint: true }).ino;
+}
+
+/**
+ * Renew `heartbeat_at` — throws on a lost/foreign lease (the caller reports, never renews).
+ *
+ * Inode-fenced against the reclaim race (§8.58): a stale reclaimer replaces the lock DIRECTORY
+ * (rename + fresh mkdir), so the inode captured before the read must still be the inode after
+ * the write — a mismatch means the write may have clobbered a successor's lease, and the throw
+ * makes THIS holder stop too. The residual sub-window degrades to BOTH consumers failing
+ * closed (the successor's own verifyLease fence rejects the clobbered token) — never to two
+ * live consumers.
+ */
 export function renewHeartbeat(lockDir: string, token: string, now: () => number): void {
+  const inoBefore = lockDirIno(lockDir);
   const lease = readLease(lockDir);
   if (lease === null || lease.token !== token) {
     throw new Error("feedback lease lost — heartbeat not renewed");
   }
   writeLease(lockDir, { ...lease, heartbeat_at: new Date(now()).toISOString() });
+  if (lockDirIno(lockDir) !== inoBefore) {
+    throw new Error("feedback lease lock dir was replaced during renewal — fencing lost");
+  }
 }
 
 /** True iff the on-disk lease still carries `token`. Any read failure is false (fail-closed). */
@@ -384,10 +515,17 @@ export function verifyLease(lockDir: string, token: string): boolean {
   return lease !== null && lease.token === token;
 }
 
-/** Release the lease — removes the lock dir only on token match; best-effort, never throws. */
+/**
+ * Release the lease — removes the lock dir only on token match; best-effort, never throws.
+ * Inode-fenced like `renewHeartbeat`: the verify-then-remove window is re-checked against the
+ * directory identity so a mid-release reclaim is (almost) never deleted; the residual window
+ * degrades to the successor failing closed, never to misdelivery.
+ */
 export function releaseLease(lockDir: string, token: string): void {
   try {
+    const inoBefore = lockDirIno(lockDir);
     if (!verifyLease(lockDir, token)) return;
+    if (lockDirIno(lockDir) !== inoBefore) return; // replaced mid-verify — not ours anymore
     rmSync(lockDir, { recursive: true, force: true });
   } catch {
     // best-effort — a leftover lock dir goes stale and is reclaimed by the next open

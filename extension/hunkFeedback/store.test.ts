@@ -10,16 +10,20 @@ import {
   mkdtempSync,
   readdirSync,
   readFileSync,
+  realpathSync,
+  symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
+import { hunkDeliveredPath } from "../substrate/cache.ts";
 import {
   acquireLease,
   appendAcks,
   type DeliveryAck,
   type FeedbackRecord,
+  type LeaseAcquisition,
   readDeliveredIds,
   readOutbox,
   releaseLease,
@@ -30,7 +34,9 @@ import {
 } from "./store.ts";
 
 function tmp(): string {
-  return mkdtempSync(join(tmpdir(), "perk-hunk-store-"));
+  // realpath'd: the ack appender canonicalizes the family path against the cwd (macOS /tmp is
+  // itself a symlink and must stay legal — only symlinks INSIDE the family are refused).
+  return realpathSync(mkdtempSync(join(tmpdir(), "perk-hunk-store-")));
 }
 
 function record(overrides: Partial<FeedbackRecord> = {}): FeedbackRecord {
@@ -125,6 +131,16 @@ test("readOutbox: an unknown schema is HELD with a loud version warning, never s
   assert.match(read.warnings[0] as string, /unknown schema 2/);
 });
 
+test("readOutbox: a non-missing read failure warns (never a silent empty stream)", () => {
+  const dir = tmp();
+  const path = join(dir, "outbox.ndjson");
+  mkdirSync(path); // a directory at the outbox path → EISDIR on read
+  const read = readOutbox(path);
+  assert.deepEqual(read.records, []);
+  assert.equal(read.warnings.length, 1);
+  assert.match(read.warnings[0] as string, /could not read the feedback outbox/);
+});
+
 test("readOutbox: duplicate ids collapse silently; conflicting bytes report corruption", () => {
   const path = join(tmp(), "outbox.ndjson");
   const a = record({ feedback_id: "w:1" });
@@ -138,44 +154,89 @@ test("readOutbox: duplicate ids collapse silently; conflicting bytes report corr
 
 // --- readDeliveredIds / appendAcks ------------------------------------------------------------
 
-test("delivered ids: missing file is empty; duplicates collapse; malformed lines ignored", () => {
+const ACK: DeliveryAck = {
+  schema: 1,
+  feedback_id: "w:1",
+  delivered_at: "2026-01-01T00:00:00.000Z",
+  run_id: "RID",
+  pi_session_id: "sess",
+};
+
+test("delivered ids: missing file is empty; duplicates collapse; malformed lines warn", () => {
   const dir = tmp();
   const path = join(dir, "delivered.ndjson");
-  assert.deepEqual(readDeliveredIds(path), new Set());
-  const ack: DeliveryAck = {
-    schema: 1,
-    feedback_id: "w:1",
-    delivered_at: "2026-01-01T00:00:00.000Z",
-    run_id: "RID",
-    pi_session_id: "sess",
-  };
+  assert.deepEqual(readDeliveredIds(path), { ids: new Set(), warnings: [] });
   writeLines(path, [
-    JSON.stringify(ack),
-    JSON.stringify(ack),
+    JSON.stringify(ACK),
+    JSON.stringify(ACK),
     "{torn",
-    JSON.stringify({ ...ack, feedback_id: "w:2" }),
+    JSON.stringify({ ...ACK, feedback_id: "w:2" }),
   ]);
-  assert.deepEqual(readDeliveredIds(path), new Set(["w:1", "w:2"]));
+  const read = readDeliveredIds(path);
+  assert.deepEqual(read.ids, new Set(["w:1", "w:2"]));
+  assert.equal(read.warnings.length, 1);
+  assert.match(read.warnings[0] as string, /malformed acknowledgement/);
+});
+
+test("delivered ids: only structurally valid schema-1 acks count (v1 validation)", () => {
+  // An unknown ack schema or a half-shaped line must NEVER suppress delivery — the safe
+  // direction is a duplicate redelivery, never silent suppression.
+  const dir = tmp();
+  const path = join(dir, "delivered.ndjson");
+  writeLines(path, [
+    JSON.stringify({ ...ACK, schema: 2 }), // unknown version → ignored + version warning
+    JSON.stringify({ schema: 1, feedback_id: "w:3" }), // missing v1 fields → invalid
+    JSON.stringify({ ...ACK, feedback_id: "" }), // empty id → invalid
+    JSON.stringify({ ...ACK, feedback_id: "w:4" }), // valid v1
+  ]);
+  const read = readDeliveredIds(path);
+  assert.deepEqual(read.ids, new Set(["w:4"]));
+  assert.equal(read.warnings.length, 3);
+  assert.match(read.warnings[0] as string, /unknown schema 2/);
+  assert.match(read.warnings[1] as string, /structurally invalid acknowledgement/);
+});
+
+test("delivered ids: a non-missing read failure warns and suppresses nothing", () => {
+  const dir = tmp();
+  const path = join(dir, "delivered.ndjson");
+  mkdirSync(path); // EISDIR
+  const read = readDeliveredIds(path);
+  assert.deepEqual(read.ids, new Set());
+  assert.equal(read.warnings.length, 1);
+  assert.match(read.warnings[0] as string, /could not read the feedback acknowledgements/);
 });
 
 test("appendAcks: creates the dir, appends one complete LF-terminated line per ack", () => {
-  const dir = tmp();
-  const path = join(dir, "hunk-watch", "delivered.ndjson");
-  const ack: DeliveryAck = {
-    schema: 1,
-    feedback_id: "w:1",
-    delivered_at: "2026-01-01T00:00:00.000Z",
-    run_id: "RID",
-    pi_session_id: "sess",
-  };
-  appendAcks(path, [ack, { ...ack, feedback_id: "w:2" }]);
+  const cwd = tmp();
+  const path = hunkDeliveredPath(cwd);
+  appendAcks(cwd, [ACK, { ...ACK, feedback_id: "w:2" }]);
   const content = readFileSync(path, "utf8");
   assert.equal(content.split("\n").length, 3); // two lines + trailing empty
   assert.ok(content.endsWith("\n"));
-  assert.deepEqual(readDeliveredIds(path), new Set(["w:1", "w:2"]));
+  assert.deepEqual(readDeliveredIds(path).ids, new Set(["w:1", "w:2"]));
   // Appending is additive — a second call never truncates.
-  appendAcks(path, [{ ...ack, feedback_id: "w:3" }]);
-  assert.deepEqual(readDeliveredIds(path), new Set(["w:1", "w:2", "w:3"]));
+  appendAcks(cwd, [{ ...ACK, feedback_id: "w:3" }]);
+  assert.deepEqual(readDeliveredIds(path).ids, new Set(["w:1", "w:2", "w:3"]));
+});
+
+test("appendAcks: a symlinked delivered file is refused (nothing written through it)", () => {
+  const cwd = tmp();
+  const path = hunkDeliveredPath(cwd);
+  mkdirSync(join(path, ".."), { recursive: true });
+  const elsewhere = join(cwd, "exfil.ndjson");
+  writeFileSync(elsewhere, "", "utf8");
+  symlinkSync(elsewhere, path);
+  assert.throws(() => appendAcks(cwd, [ACK]), /symlinked append target/);
+  assert.equal(readFileSync(elsewhere, "utf8"), ""); // nothing escaped the family dir
+});
+
+test("appendAcks: a symlinked hunk-watch dir is refused", () => {
+  const cwd = tmp();
+  const real = join(cwd, "elsewhere");
+  mkdirSync(real, { recursive: true });
+  mkdirSync(join(cwd, ".perk", "workflow"), { recursive: true });
+  symlinkSync(real, join(cwd, ".perk", "workflow", "hunk-watch"));
+  assert.throws(() => appendAcks(cwd, [ACK]), /symlinked hunk-watch dir/);
 });
 
 // --- the consumer lease -----------------------------------------------------------------------
@@ -282,20 +343,73 @@ test("lease: release removes only on token match; verify fails closed afterwards
   releaseLease(lockDir, holder.token); // idempotent
 });
 
-test("lease: competing stale reclaimers converge on one winner", () => {
-  // Deterministic interleave: reclaimer A quarantines the dead dir; before A's fresh acquire
-  // lands, reclaimer B (who lost the rename race) also retries. Exactly one owner results —
-  // simulated by acquiring with B immediately after A wins, under a fresh (non-stale) clock.
+test("lease: competing reclaimers — the rename WINNER can lose the acquisition (one owner)", () => {
+  // The true interleaving, driven deterministically via the race hooks: both contenders see
+  // the stale lease; A wins the quarantine rename, but B runs its whole acquisition inside
+  // A's rename→retry window (the dir is gone, so B fresh-acquires immediately). A's one retry
+  // then hits EEXIST — exactly one owner, and it is the rename LOSER.
+  const dir = tmp();
+  const lockDir = lockDirIn(dir);
+  let clock = 1_000_000;
+  const now = () => clock;
+  assert.ok(acquireLease(lockDir, OTHER, now).owned);
+  clock += STALE_LEASE_MS + 1;
+
+  let b: LeaseAcquisition | null = null;
+  const a = acquireLease(lockDir, IDENTITY, now, {
+    afterQuarantine: () => {
+      b = acquireLease(lockDir, { runId: "RID-3", piSessionId: "sess-3" }, now);
+    },
+  });
+  const winner = b as LeaseAcquisition | null;
+  assert.ok(winner?.owned, "B (in the window) must own");
+  assert.ok(!a.owned, "A (the rename winner) must converge to passive");
+  assert.match(a.reason, /reclaimed the stale feedback lease first/);
+  assert.ok(verifyLease(lockDir, winner.token));
+  // A (the loser) still cleaned up ITS quarantine dir on the way out.
+  const leftovers = readdirSync(join(dir, "hunk-watch")).filter((e) => e.includes(".stale-"));
+  assert.deepEqual(leftovers, []);
+});
+
+test("lease: competing reclaimers — the rename LOSER retries into passivity (one owner)", () => {
+  // The mirror interleaving: B completes the WHOLE reclaim (rename + fresh acquire) inside
+  // A's stale-observation→rename window. A's rename then fails (the dead dir is gone) and
+  // A's one fresh-acquire retry hits B's new lease → passive.
+  const dir = tmp();
+  const lockDir = lockDirIn(dir);
+  let clock = 1_000_000;
+  const now = () => clock;
+  assert.ok(acquireLease(lockDir, OTHER, now).owned);
+  clock += STALE_LEASE_MS + 1;
+
+  let b: LeaseAcquisition | null = null;
+  const a = acquireLease(lockDir, IDENTITY, now, {
+    beforeQuarantine: () => {
+      b = acquireLease(lockDir, { runId: "RID-3", piSessionId: "sess-3" }, now);
+    },
+  });
+  const winner = b as LeaseAcquisition | null;
+  assert.ok(winner?.owned, "B (the completed reclaim) must own");
+  assert.ok(!a.owned, "A must stay passive after losing both the rename and the retry");
+  assert.ok(verifyLease(lockDir, winner.token));
+  const leftovers = readdirSync(join(dir, "hunk-watch")).filter((e) => e.includes(".stale-"));
+  assert.deepEqual(leftovers, []);
+});
+
+test("lease: renewHeartbeat detects a lock-dir replacement (inode fence)", () => {
   const lockDir = lockDirIn(tmp());
   let clock = 1_000_000;
   const now = () => clock;
-  const dead = acquireLease(lockDir, OTHER, now);
-  assert.ok(dead.owned);
+  const holder = acquireLease(lockDir, IDENTITY, now);
+  assert.ok(holder.owned);
+  // A reclaimer replaces the directory wholesale (rename away + fresh mkdir): the directory
+  // identity changed, so the holder's renew must throw — whether via the token check or the
+  // inode fence — and never resurrect its claim.
   clock += STALE_LEASE_MS + 1;
-  const a = acquireLease(lockDir, IDENTITY, now);
-  const b = acquireLease(lockDir, { runId: "RID-3", piSessionId: "sess-3" }, now);
-  assert.ok(a.owned);
-  assert.ok(!b.owned); // the second reclaimer sees A's fresh lease and stays passive
+  const successor = acquireLease(lockDir, { runId: "RID-9", piSessionId: "sess-9" }, now);
+  assert.ok(successor.owned);
+  assert.throws(() => renewHeartbeat(lockDir, holder.token, now), /lease lost|fencing lost/);
+  assert.ok(verifyLease(lockDir, successor.token)); // the successor's lease is intact
 });
 
 test("sweepQuarantine: removes leftover consumer.lock.stale-* dirs, leaves everything else", () => {

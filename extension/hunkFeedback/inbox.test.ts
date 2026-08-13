@@ -2,6 +2,7 @@
 // with injected timers + clock and a scripted transport — no sleeps, no real fs.watch.
 
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import { appendFileSync, existsSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -173,17 +174,17 @@ test("open drains immediately and acks only after the entry is OBSERVED on the b
 
   // Drain-now: injected without any timer advance; NOT yet acknowledged (no observation).
   assert.equal(r.transport.injections.length, 1);
-  assert.deepEqual(readDeliveredIds(hunkDeliveredPath(r.cwd)), new Set());
+  assert.deepEqual(readDeliveredIds(hunkDeliveredPath(r.cwd)).ids, new Set());
 
   // A poll tick without observation (busy session) acks nothing.
   r.transport.idle = false;
   r.fake.advance(POLL_MS);
-  assert.deepEqual(readDeliveredIds(hunkDeliveredPath(r.cwd)), new Set());
+  assert.deepEqual(readDeliveredIds(hunkDeliveredPath(r.cwd)).ids, new Set());
 
   // Observation → acknowledgement on the next poll tick.
   r.transport.observeLast();
   r.fake.advance(POLL_MS);
-  assert.deepEqual(readDeliveredIds(hunkDeliveredPath(r.cwd)), new Set(["01WATCH:note-1"]));
+  assert.deepEqual(readDeliveredIds(hunkDeliveredPath(r.cwd)).ids, new Set(["01WATCH:note-1"]));
   handle.close();
 });
 
@@ -234,7 +235,7 @@ test("batches are bounded and append-ordered; the remainder re-marks dirty", () 
   handle.close();
 });
 
-test("the byte bound splits a batch before 48 KiB of rendered bodies", () => {
+test("the byte bound splits a batch before 48 KiB of raw body bytes (pre-render)", () => {
   const r = rig();
   const big = "x".repeat(20 * 1024);
   appendOutbox(r.cwd, [
@@ -290,7 +291,7 @@ test("demotion re-dispatches the same ids and backoff doubles until observation 
   // Observation acks and RESETS backoff (the only reset site).
   r.transport.observeLast();
   r.fake.advance(10_000); // t=70s poll: observed → acknowledged
-  assert.deepEqual(readDeliveredIds(hunkDeliveredPath(r.cwd)), new Set(["01WATCH:note-1"]));
+  assert.deepEqual(readDeliveredIds(hunkDeliveredPath(r.cwd)).ids, new Set(["01WATCH:note-1"]));
 
   // A fresh record failing again starts back at the 1 s base — proof the reset happened.
   appendOutbox(r.cwd, [record(2)]);
@@ -337,7 +338,7 @@ test("a batch already observed on the branch is acked WITHOUT re-injection", () 
   r.transport.observed.add(rec.feedback_id); // a prior injection survives on this branch
   const handle = assertOwned(r.open());
   assert.equal(r.transport.injections.length, 0);
-  assert.deepEqual(readDeliveredIds(hunkDeliveredPath(r.cwd)), new Set([rec.feedback_id]));
+  assert.deepEqual(readDeliveredIds(hunkDeliveredPath(r.cwd)).ids, new Set([rec.feedback_id]));
   handle.close();
 });
 
@@ -353,7 +354,7 @@ test("an ack-append failure warns but still suppresses same-session redelivery",
   const handle = assertOwned(r.open());
 
   assert.equal(r.transport.injections.length, 0); // acked via observation, no re-injection
-  const warnings = r.reports.filter((rep) => rep.message.includes("acknowledgements"));
+  const warnings = r.reports.filter((rep) => rep.message.includes("could not append feedback"));
   assert.equal(warnings.length, 1);
   // Same-session redelivery stays suppressed in memory across later polls.
   r.fake.advance(POLL_MS * 3);
@@ -365,7 +366,7 @@ test("delivered ids never re-batch", () => {
   const r = rig();
   const rec = record(1);
   appendOutbox(r.cwd, [rec]);
-  appendAcks(hunkDeliveredPath(r.cwd), [
+  appendAcks(r.cwd, [
     {
       schema: 1,
       feedback_id: rec.feedback_id,
@@ -386,10 +387,39 @@ test("a plan_id mismatch is held with a once-per-id warning — never delivered,
   const handle = assertOwned(r.open());
   r.fake.advance(POLL_MS * 3);
   assert.equal(r.transport.injections.length, 0);
-  assert.deepEqual(readDeliveredIds(hunkDeliveredPath(r.cwd)), new Set());
+  assert.deepEqual(readDeliveredIds(hunkDeliveredPath(r.cwd)).ids, new Set());
   const holds = r.reports.filter((rep) => rep.message.includes("holding feedback"));
   assert.equal(holds.length, 1); // warned once per id, not once per poll
   assert.match(holds[0]?.message ?? "", /plan 99.*plan 42/);
+  handle.close();
+});
+
+// --- provenance + read-failure arms --------------------------------------------------------------
+
+test("a git-TRACKED file under hunk-watch/ refuses to open (checkout-supplied feedback)", () => {
+  const r = rig();
+  const g = (...args: string[]) => execFileSync("git", args, { cwd: r.cwd, stdio: "ignore" });
+  g("init", "-q");
+  g("config", "user.email", "t@example.com");
+  g("config", "user.name", "perk tests");
+  appendOutbox(r.cwd, [record(1)]);
+  g("add", "-f", ".perk/workflow/hunk-watch/outbox.ndjson"); // the force-tracked attack shape
+  const result = r.open();
+  assert.ok("passive" in result);
+  assert.match(result.reason, /tracked file\(s\) under \.perk\/workflow\/hunk-watch/);
+  assert.ok(r.reports.some((rep) => rep.severity === "error" && rep.message.includes("tracked")));
+  assert.equal(r.transport.injections.length, 0); // nothing under the family was read
+});
+
+test("an unreadable outbox (non-missing) is reported once — never a silent stall", () => {
+  const r = rig();
+  mkdirSync(hunkOutboxPath(r.cwd), { recursive: true }); // a DIRECTORY at the outbox → EISDIR
+  const handle = assertOwned(r.open());
+  r.fake.advance(POLL_MS * 3);
+  const warnings = r.reports.filter((rep) =>
+    rep.message.includes("could not read the feedback outbox"),
+  );
+  assert.equal(warnings.length, 1); // reported once, polling continues
   handle.close();
 });
 
@@ -460,7 +490,7 @@ test("a poll-tick exception is reported once per distinct message and polling co
   r.transport.throwOnIsInjected = null;
   r.transport.observeLast();
   r.fake.advance(POLL_MS); // polling survived — observation still acknowledges
-  assert.deepEqual(readDeliveredIds(hunkDeliveredPath(r.cwd)), new Set(["01WATCH:note-1"]));
+  assert.deepEqual(readDeliveredIds(hunkDeliveredPath(r.cwd)).ids, new Set(["01WATCH:note-1"]));
   handle.close();
 });
 

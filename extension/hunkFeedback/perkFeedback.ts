@@ -15,7 +15,7 @@
 // append-only stream discipline), nothing flushed on shutdown, no daemon queries, no network,
 // no shell, no writes to reviewed files.
 
-import { appendFileSync, mkdirSync, realpathSync } from "node:fs";
+import { appendFileSync, lstatSync, mkdirSync, realpathSync } from "node:fs";
 import { join } from "node:path";
 
 // --- local structural mirrors of the Hunk extension API slice (verified generations) --------
@@ -166,6 +166,15 @@ export function buildFeedbackRecord(
   };
 }
 
+/** True when `path` exists AND is itself a symlink (a missing path is fine — fresh outbox). */
+function isSymlink(path: string): boolean {
+  try {
+    return lstatSync(path).isSymbolicLink();
+  } catch {
+    return false;
+  }
+}
+
 export type PublishResult =
   | { status: "published"; record: FeedbackRecordV1 }
   /** Nothing written, nothing to say aloud (drafts); `log` carries the anomaly diagnostic. */
@@ -246,6 +255,23 @@ export function createPublisher(deps: PublisherDeps): Publisher {
       const paths = hunkWatchPaths(declaredRoot);
       try {
         mkdirSync(paths.dir, { recursive: true });
+        // Symlink fence (§8.58): `declaredRoot` is already canonical, so every component of the
+        // store path must resolve to ITSELF — a force-tracked symlink at `.perk`/`workflow`/
+        // `hunk-watch` (or a symlinked outbox file) would otherwise redirect this append
+        // outside the worktree. Check-then-append TOCTOU is accepted: the threat is static
+        // checkout content, not a live same-uid attacker.
+        if (realpathSync(paths.dir) !== paths.dir) {
+          return {
+            status: "refused",
+            warning: `the hunk-watch dir is symlinked (${paths.dir} resolves elsewhere) — refusing to write`,
+          };
+        }
+        if (isSymlink(paths.outbox)) {
+          return {
+            status: "refused",
+            warning: `the feedback outbox is a symlink (${paths.outbox}) — refusing to write`,
+          };
+        }
         deps.append(paths.outbox, line); // the full record in ONE append call
       } catch (error) {
         return { status: "refused", warning: `could not write the feedback outbox: ${error}` };
