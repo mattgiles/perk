@@ -690,8 +690,34 @@ watched `--yes` invocation is the other half.
 
 ### Step 8 — the interrupted landing
 
-*(pending — the recorded `--dry-run`, the watched `--yes` run, the kill, both post-kill
-verification excerpts.)*
+Executed 2026-08-13 (operator, dev checkout root; the Part A watcher skeleton verbatim with
+`<N>` = 1698). Consent: the Step-7 recorded `--dry-run` immediately before + the watched
+`--yes` invocation.
+
+- **The watched run**: `perk objective stack land 1698 --yes > land.log 2>&1 &` under the
+  journal watcher — the watcher observed the `accepted` comment and SIGKILLed the process
+  mid-poll. `land.log` ends at the rendered consent plan (the 3-layer table + `top pin: pr
+  #1708 at 7ad1567d…`) with nothing after it — consistent with the kill landing inside the
+  poll (`land_cmd` renders nothing between the consent plan and the final outcome).
+- **Post-kill verification 1** (`perk objective stack status 1698 --json`): the unresolved
+  LAND row — `unresolved_operation: {"operation_id": "01KZXNT314VQNJ9EWS1FZQWQHC", "kind":
+  "land", "prepared_created": "2026-08-13T13:43:27Z"}`; `landed_prefix_len: 0` (no terminal
+  event — the train does not count the layers landed).
+- **Post-kill verification 2** (the journal, `gh issue view 1698 --comments`): for operation
+  `01KZXNT314VQNJ9EWS1FZQWQHC` — `prepared` (posted 13:43:29Z) and **`accepted`** (posted
+  13:43:33Z) present, **no `completed`/`abandoned`** — completed-absence proven from the
+  journal, as pinned.
+- **The server side kept going (expected — the merge request is GitHub's once accepted):**
+  all three PRs merged seconds after the kill — #1701 `mergedAt: 13:43:35Z`, #1705
+  `13:43:36Z`, #1708 `13:43:37Z`. The status read also shows `publication:
+  "publication_drift"` ×3 (recorded published heads vs the post-merge remote) — honest
+  unconcluded-state reporting, resolved by Step 9's classification, never by this read.
+- **Timing observed**: accepted → kill inside ~≤4 s (the watcher's 1 s cadence + `gh`
+  latency); the async merge concluded at +2–4 s. The kill-miss race did NOT occur — the
+  interruption arm fired live; the process died before observing any terminal state.
+
+The interrupted-LAND state now standing is exactly the Step-9 input: an unresolved operation
+with a journaled `accepted` handle and every layer PR observably `MERGED`.
 
 ### Step 9 — recovery conclusion (second clone)
 
