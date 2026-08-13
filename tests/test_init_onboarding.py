@@ -655,7 +655,9 @@ def test_json_field_set_is_unchanged_on_the_guided_paths(git_repo, stub_env, mon
     assert set(success) == _EXPECTED_REPORT_FIELDS
     env_entries = success["env"]
     assert isinstance(env_entries, list)
-    assert all(set(entry) == {"name", "ok", "detail", "remediation"} for entry in env_entries)
+    for entry in env_entries:
+        assert isinstance(entry, dict)
+        assert set(entry) == {"name", "ok", "detail", "remediation"}
 
     monkeypatch.setattr(env_mod, "check_environment", lambda: _env("pi"))
     monkeypatch.setattr(
