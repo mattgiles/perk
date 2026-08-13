@@ -19,7 +19,12 @@ export const sidebar = [
   {
     label: "Tutorials",
     collapsed: true,
-    items: ["tutorials", "tutorials/get-started", "tutorials/drive-an-objective"],
+    items: [
+      "tutorials",
+      "tutorials/get-started",
+      "tutorials/drive-an-objective",
+      "tutorials/drive-a-stacked-objective",
+    ],
   },
   {
     label: "How-to guides",
@@ -33,6 +38,7 @@ export const sidebar = [
           "how-to/resume-a-plan",
           "how-to/address-review-feedback",
           "how-to/review-a-foreign-pr",
+          "how-to/review-a-stacked-train",
           "how-to/replan-an-open-plan",
           "how-to/adopt-an-existing-issue",
           "how-to/capture-a-gist",
@@ -53,6 +59,7 @@ export const sidebar = [
           "how-to/advance-or-skip-nodes",
           "how-to/reconcile-an-objective",
           "how-to/check-an-objective-for-drift",
+          "how-to/recover-a-stacked-train",
           "how-to/run-the-learn-docs-factory",
           "how-to/run-the-learn-code-factory",
           "how-to/run-the-learn-harvest-factory",

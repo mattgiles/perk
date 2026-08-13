@@ -35,6 +35,9 @@ for exactly one goal.
   of a PR (foreign or the active worktree's own) with `/pr-review-terminal` (hunk) or
   `/pr-review-browser` (plannotator), triage findings together, and post with your explicit
   approval.
+- [How to review a stacked PR train](./review-a-stacked-train.md) — review each layer of a
+  stacked pull-request train on its incremental diff, leave feedback on any layer safely, and
+  never merge a layer individually.
 - [How to replan an open plan](./replan-an-open-plan.md) — re-author a saved-but-not-landed plan
   against the current codebase.
 - [How to adopt an existing issue as a plan](./adopt-an-existing-issue.md) — turn a pre-existing
@@ -71,6 +74,9 @@ for exactly one goal.
 - [How to check an objective for drift](./check-an-objective-for-drift.md) — detect and repair
   divergence between a Linear objective's manifest and its live state — plus the delivery-train
   diagnosis on every backend — with `perk objective doctor`.
+- [How to recover a stacked delivery train](./recover-a-stacked-train.md) — diagnose an
+  interrupted or drifted stacked-train operation from its symptom and conclude it with the
+  right sync or recover move.
 - [How to run the learn-docs factory](./run-the-learn-docs-factory.md) — consolidate accumulated
   doc-destined `perk:learn` issues into committed `docs/learned/` knowledge.
 - [How to run the learn-code factory](./run-the-learn-code-factory.md) — route pre-stamped

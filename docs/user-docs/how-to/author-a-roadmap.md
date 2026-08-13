@@ -73,6 +73,11 @@ objective:
 
 For the guided, end-to-end version of this flow, see
 [Tutorial 2 → Drive a multi-plan goal with an objective](../tutorials/drive-an-objective.md).
+For the guided, end-to-end **stacked** version, see
+[Drive a stacked objective to one atomic landing](../tutorials/drive-a-stacked-objective.md);
+day-to-day, [How to review a stacked PR train](./review-a-stacked-train.md) covers the
+reviewer's side and [How to recover a stacked delivery train](./recover-a-stacked-train.md)
+the triage moves when a train operation is interrupted or drifts.
 
 ---
 

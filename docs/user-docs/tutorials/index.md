@@ -22,6 +22,8 @@ followed to a real result, with nothing to decide along the way.
 
 </div>
 
-These two lessons are the whole quadrant — tutorials stay deliberately small. Once the
-basics feel familiar, the [how-to guides](../how-to/index.md) carry every day-to-day task
-from there.
+A third, advanced lesson —
+[Drive a stacked objective to one atomic landing](./drive-a-stacked-objective.md) — picks up
+where the second ends, for the goal whose plans must land together as one atomic PR train.
+Tutorials stay deliberately small: once the basics feel familiar, the
+[how-to guides](../how-to/index.md) carry every day-to-day task from there.

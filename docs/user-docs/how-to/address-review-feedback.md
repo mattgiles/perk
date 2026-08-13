@@ -30,6 +30,10 @@ the spine — you only enter it when there is feedback.)
    PR back in front of the reviewer, then warm `/land` once it is approved. (Both in-session
    commands; reference coming with Node 2.2.)
 
+> **On a stacked plan?** Feedback on a lower layer of a stacked PR train is addressed exactly the
+> same way — `/address` fixes it, and the automatic cascade rewrites the published layers above the
+> fix. See [How to review a stacked PR train](./review-a-stacked-train.md).
+
 ---
 
 ← Back to the [how-to router](index.md).
