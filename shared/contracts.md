@@ -3374,7 +3374,7 @@ everywhere — PRs are GitHub-universal. Concretely:
   (`planSave.ts`/`learn.ts`/`land.ts`/`objectiveSave.ts`/`learnFactory.ts`) are lockstep-strict on
   the string shapes.
 - CLI plan/objective arguments parse through the shared opaque-id validators
-  (`resume_cmd.parse_plan_id` / `objective/shared.parse_objective_id`): strip `#`/whitespace;
+  (`plan_selection.parse_plan_id` / `objective/shared.parse_objective_id`): strip `#`/whitespace;
   reject only empty or worktree-unsafe ids (`/`, `.`, `..`) — no int parse. The supervisor's
   in-flight resolution treats any non-empty node `pr` backlink as the plan id.
 - Plan worktrees are `plan-<id>` for any id shape (`plan-ENG-123` exploits Linear's branch-name

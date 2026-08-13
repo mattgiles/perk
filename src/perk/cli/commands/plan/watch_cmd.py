@@ -1,15 +1,26 @@
 """``perk plan watch PLAN`` — live-watch a plan's implementation diff in hunk.
 
-Resolves plan ``PLAN``'s implementation worktree (``plan-<id>`` under the **main checkout's**
-worktree root — correct from anywhere in the repo, including from inside a linked worktree),
-computes the diff base (the stacked layer's recorded parent when one resolves, else the
-since-base merge-base — the plan's full growing changeset, commits included), then chdirs into
-the worktree and **execs** ``hunk diff <sha12> --watch --extension <bundled publisher>
+Positions plan ``PLAN``'s implementation worktree through the shared reuse positioner
+(``launch.resolve_worktree`` — ``plan-<id>`` under the **main checkout's** worktree root,
+correct from anywhere in the repo, including from inside a linked worktree): an already-valid
+bound worktree stays offline-capable; a **missing** checkout triggers the canonical lookup +
+non-destructive restore from ``origin/plan-<id>`` (then the marker-gated ``[worktree] setup``);
+an existing-unbound checkout refuses ``worktree_unbound`` exactly like every other consumer —
+watch never silently rebinds. It then computes the diff base (the stacked layer's recorded
+parent when one resolves — exact after restoration via the restored ``layer-context.json`` —
+else the since-base merge-base: the plan's full growing changeset, commits included), chdirs
+into the worktree and **execs** ``hunk diff <sha12> --watch --extension <bundled publisher>
 [HUNK_ARGS…]`` — the terminal becomes a live, auto-reloading view of what the plan has
 changed, and saving a human note in it queues feedback for the live implement session (the
 watch feedback bridge, contracts §8.58: the bundled extension appends records to the
-worktree's ``.perk/workflow/hunk-watch/`` outbox; the Pi-side receiver drains them). Entirely
-offline-capable: no issue-backend read; the only network op is a best-effort ``git fetch``.
+worktree's ``.perk/workflow/hunk-watch/`` outbox; the Pi-side receiver drains them).
+
+``--dry-run`` is mutation-free: for an existing worktree the hunk command composes from local
+refs only (no fetch — degrading to the working-tree-only fallback with a note when the base is
+unresolvable offline); for a missing worktree it reports the planned restore + setup plus an
+explicit "command/base unavailable until restoration" status and composes no hunk argv. Real
+runs keep the fetch behavior; canonical/backend network reads happen only on a real run with no
+valid local checkout.
 
 Exit contract: dry-run success → 0 · pre-exec perk refusals → 1 (``not_a_repo`` → 2, via the
 shared ``EXIT_FOR_TYPE``) · a failed ``chdir``/``exec`` (``OSError``) → 1 · a **successful
@@ -21,21 +32,20 @@ spaced/metacharacter args stay paste-safe.
 import os
 import re
 import shlex
-import tomllib
 from pathlib import Path
 
 import click
 from ulid import ULID
 
 from perk._resources import hunk_feedback_extension_path
-from perk.cli.commands.plan.resume_cmd import parse_plan_id
 from perk.cli.context import require_repo
 from perk.cli.emit import fail
 from perk.cli.ensure import UserFacingCliError
+from perk.cli.plan_selection import load_main_config, main_repo_root, parse_plan_id
 from perk.convergence.init import HUNK_INSTALL_HINT, hunk_cli_path
+from perk.run.launch import WorktreeRequest, resolve_worktree, run_pending_setup
 from perk.state import cache
 from perk.substrate import git
-from perk.substrate.config import Config, ConfigError, load_config
 from perk.substrate.git import GitError
 from perk.substrate.output import log_warn, user_output
 
@@ -59,26 +69,7 @@ _EPILOG = (
 )
 
 
-def _load_main_config(main_root: Path) -> Config:
-    """Load config against the **main checkout's** root.
-
-    A small local twin of ``PerkContext.config()``'s error translation — ``require_config`` is
-    deliberately not used because it binds config to the *invocation* root, which would rebase
-    a relative ``[worktree] root`` under a linked worktree.
-    """
-    try:
-        return load_config(main_root)
-    except tomllib.TOMLDecodeError as exc:
-        raise UserFacingCliError(
-            f".perk/config.toml is not valid TOML ({exc})\nFix it, then re-run."
-        ) from exc
-    except ConfigError as exc:
-        raise UserFacingCliError(
-            f".perk config invalid: {exc}\nFix it, then re-run (perk doctor pinpoints the field)."
-        ) from exc
-
-
-def _resolve_diff_base(worktree: Path) -> str | None:
+def _resolve_diff_base(worktree: Path, *, fetch: bool = True) -> str | None:
     """The diff-base ladder (first match wins); ``None`` ⇒ working-tree-only fallback.
 
     a. **Stacked layer arm**: the worktree's ``layer-context.json`` ``parent_sha`` (the
@@ -90,6 +81,9 @@ def _resolve_diff_base(worktree: Path) -> str | None:
        plan-ref base → else the detected trunk; best-effort fetch (offline keeps the
        last-known ref); ``merge-base(HEAD, origin/<branch>)``.
     c. ``None`` — the caller composes a bare watch (uncommitted changes only), warned here.
+
+    ``fetch=False`` is the mutation-free dry-run mode: the since-base arm skips the network
+    fetch entirely and resolves from local refs only (the stacked arm never fetched anyway).
     """
     parent_sha = cache.read_layer_parent_sha(worktree)
     if parent_sha:
@@ -112,17 +106,20 @@ def _resolve_diff_base(worktree: Path) -> str | None:
         log_warn(f"unreadable plan-ref ({exc}) — resolving the base from the detected trunk")
     pinned = ref.base if ref is not None and ref.base is not None and ref.base.strip() else None
     branch = pinned or git.detect_trunk_branch(worktree)
-    try:
-        git.fetch(worktree)
-    except GitError as exc:
-        log_warn(
-            f"could not fetch origin ({exc}) — using the last-known origin/{branch} ref, "
-            "which may be STALE"
-        )
+    if fetch:
+        try:
+            git.fetch(worktree)
+        except GitError as exc:
+            log_warn(
+                f"could not fetch origin ({exc}) — using the last-known origin/{branch} ref, "
+                "which may be STALE"
+            )
     sha = git.merge_base(worktree, "HEAD", f"origin/{branch}")
     if sha is None:
+        detail = " (unresolvable offline — no fetch on a dry run)" if not fetch else ""
         log_warn(
-            "could not resolve a diff base — watching the working tree only (uncommitted changes)"
+            "could not resolve a diff base — watching the working tree only "
+            f"(uncommitted changes){detail}"
         )
     return sha
 
@@ -139,6 +136,12 @@ def _resolve_diff_base(worktree: Path) -> str | None:
 def watch_plan(ctx: click.Context, *, plan: str, dry_run: bool, hunk_args: tuple[str, ...]) -> None:
     """Live-watch PLAN's implementation diff in hunk (watch mode).
 
+    A valid local plan-<id> worktree is reused offline; a missing one is restored from
+    origin/plan-<id> (then [worktree] setup runs, marker-gated). Typed refusals
+    (worktree_unbound, worktree_branch_mismatch, worktree_plan_mismatch,
+    worktree_restore_failed) exit 1 before any launch — watch never rebinds or resets an
+    existing checkout. --dry-run mutates nothing (no fetch, no restore).
+
     Annotated ``-> None`` (not ``NoReturn``): tests stub ``os.execve`` and control returns
     (mirroring ``launch._exec_pi``).
 
@@ -150,8 +153,8 @@ def watch_plan(ctx: click.Context, *, plan: str, dry_run: bool, hunk_args: tuple
     """
     try:
         repo_root = require_repo(ctx)
-        main_root = git.main_worktree_root(repo_root) or repo_root
-        config = _load_main_config(main_root)
+        main_root = main_repo_root(repo_root)
+        config = load_main_config(main_root)
         plan_id = parse_plan_id(plan)
         # `--no-extensions` is hunk's hard-off switch for on-disk extensions: passed through, it
         # would silently disable the bundled feedback publisher while perk claims feedback is
@@ -165,15 +168,6 @@ def watch_plan(ctx: click.Context, *, plan: str, dry_run: bool, hunk_args: tuple
                 "For an extension-free watch, run hunk directly in the worktree: "
                 "hunk diff <base> --watch --no-extensions",
                 error_type="conflicting_hunk_arg",
-            )
-        # Inline composition: `parse_plan_id` already enforces the single-path-segment rule
-        # `resolve_plan_worktree_name` checks (that helper takes a PlanRef we don't need).
-        worktree_path = config.worktree_root / f"plan-{plan_id}"
-        if not worktree_path.is_dir():
-            raise UserFacingCliError(
-                f"Worktree not found: {worktree_path}\n"
-                f"Run `perk implement {plan_id}` (or `perk plan resume {plan_id}`) first.",
-                error_type="worktree_not_found",
             )
         # Resolve the ABSOLUTE hunk path before the chdir below: re-resolving the bare name
         # after entering the worktree would let a relative `PATH` entry (e.g. `.`) pick up an
@@ -196,7 +190,33 @@ def watch_plan(ctx: click.Context, *, plan: str, dry_run: bool, hunk_args: tuple
                 "broken.\nReinstall perk (e.g. 'uv tool install --force perk'), then re-run.",
                 error_type="watch_extension_missing",
             ) from exc
-        base_sha = _resolve_diff_base(worktree_path)
+        # Position the plan checkout through the shared reuse positioner (validated local
+        # reuse; restore-on-missing — the canonical/backend read happens only on a real run
+        # with no local checkout; typed fail-closed refusals otherwise). A dry run mutates
+        # nothing: a missing worktree is only REPORTED as a planned restore.
+        resolved = resolve_worktree(
+            repo_root=main_root,
+            config=config,
+            request=WorktreeRequest(policy="reuse", consumer="plan watch"),
+            worktree=None,
+            materialize=not dry_run,
+            plan_id=plan_id,
+        )
+        worktree_path = resolved.path
+        if dry_run and resolved.disposition == "restore-remote":
+            user_output(click.style("watch --dry-run (resolve only, no launch)", dim=True))
+            user_output(
+                f"  worktree: {worktree_path} (missing — would restore from {resolved.base})"
+            )
+            if config.worktree_setup:
+                user_output(f"  would run setup: {'; '.join(config.worktree_setup)}")
+            user_output("  command:  unavailable until restoration (base unresolved — no fetch)")
+            return
+        if not dry_run:
+            # Marker-gated `[worktree] setup`: runs after a restoration (or a reuse still
+            # carrying the marker from a previously failed setup); a no-op otherwise.
+            run_pending_setup(worktree_path, config.worktree_setup)
+        base_sha = _resolve_diff_base(worktree_path, fetch=not dry_run)
         # perk-owned args stay ahead of user pass-through; hunk's --extension is repeatable,
         # so a user-supplied --extension composes after (never displaces) the bundled one.
         argv = [

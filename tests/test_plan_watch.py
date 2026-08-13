@@ -38,6 +38,8 @@ def _plan_ref(**overrides) -> plan.PlanRef:
     ref = plan.PlanRef(
         provider="github", pr_id="42", url="https://gh/o/r/issues/42", labels=("perk:plan",)
     )
+    if "pr_id" in overrides and "url" not in overrides:
+        overrides["url"] = f"https://gh/o/r/issues/{overrides['pr_id']}"
     return dataclasses.replace(ref, **overrides)
 
 
@@ -54,17 +56,25 @@ def _layer_context() -> LayerContext:
     )
 
 
+def _make_plan_worktree(root: Path, plan_id: str) -> Path:
+    """A REAL registered `plan-<id>` worktree carrying its binding — what the shared positioner
+    validates before reuse (a bare mkdir would refuse `worktree_unregistered`)."""
+    wt = root / ".worktrees" / f"plan-{plan_id}"
+    git.worktree_add(root, wt, branch=f"plan-{plan_id}", create_branch=True)
+    cache.write_plan_ref(wt, _plan_ref(pr_id=plan_id))
+    return wt
+
+
 @pytest.fixture
-def watch_env(tmp_path, monkeypatch, unborn_git_repo_factory):
-    """A real repo at cwd, a `plan-42` worktree dir, and the stubbed process/git seams.
+def watch_env(tmp_path, monkeypatch, git_repo_factory):
+    """A real repo at cwd, a REAL bound `plan-42` worktree, and the stubbed process/git seams.
 
     Ordering matters: `monkeypatch.chdir` first, THEN the `os.chdir` stub — monkeypatch undoes
     in LIFO order, so the real `os.chdir` is restored before the cwd restore runs.
     """
-    unborn_git_repo_factory(tmp_path)
+    git_repo_factory(tmp_path)
     monkeypatch.chdir(tmp_path)
-    worktree = tmp_path / ".worktrees" / "plan-42"
-    worktree.mkdir(parents=True)
+    worktree = _make_plan_worktree(tmp_path, "42")
 
     # Every git fake records the REPO it was pointed at (resolved, so macOS /tmp symlink
     # prefixes never skew comparisons) plus an `ops` name log pinning the operation order —
@@ -188,16 +198,6 @@ def test_abbreviated_recorded_parent_is_rejected(watch_env, monkeypatch):
     assert watch_env.calls.execs == [(HUNK_PATH, _hunk_argv())]
 
 
-def test_malformed_plan_ref_warns_and_continues_on_the_trunk_arm(watch_env):
-    path = cache.plan_ref_path(watch_env.worktree)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text("{not json", encoding="utf-8")
-    result = _invoke(["42"])
-    assert result.exit_code == 0, result.output
-    assert "unreadable plan-ref" in result.stderr
-    assert [(a, b) for _r, a, b in watch_env.calls.merge_bases] == [("HEAD", "origin/main")]
-
-
 def test_unresolvable_merge_base_degrades_to_a_working_tree_watch(watch_env, monkeypatch):
     monkeypatch.setattr(git, "merge_base", lambda repo, a, b: None)
     result = _invoke(["42"])
@@ -267,11 +267,78 @@ def test_dry_run_renders_spaced_args_shlex_quoted(watch_env):
 # --- the failure arms ---------------------------------------------------------------------
 
 
-def test_missing_worktree_is_a_hinted_refusal(watch_env):
+def test_unbound_worktree_refuses_worktree_unbound(watch_env):
+    # An existing checkout with no readable binding is never silently rebound — the shared
+    # positioner refuses typed, exactly like every other consumer.
+    cache.plan_ref_path(watch_env.worktree).unlink()
+    result = _invoke(["42"])
+    assert result.exit_code == 1
+    assert "no readable plan-ref binding" in result.stderr
+    assert "git worktree remove" in result.stderr  # the remediation names the gesture
+    assert watch_env.calls.execs == [] and watch_env.calls.chdir == []
+
+
+def test_malformed_binding_refuses_worktree_unbound(watch_env):
+    # A corrupt binding reads as unreadable — the same fail-closed refusal, never a guess.
+    cache.plan_ref_path(watch_env.worktree).write_text("{not json", encoding="utf-8")
+    result = _invoke(["42"])
+    assert result.exit_code == 1
+    assert "no readable plan-ref binding" in result.stderr
+    assert watch_env.calls.execs == []
+
+
+def test_binding_for_another_plan_refuses_worktree_plan_mismatch(watch_env):
+    # plan-42's directory bound to plan #43: the id selection and the binding disagree.
+    cache.write_plan_ref(watch_env.worktree, _plan_ref(pr_id="43"))
+    result = _invoke(["42"])
+    assert result.exit_code == 1
+    assert "disagrees with the worktree binding" in result.stderr
+    assert watch_env.calls.execs == []
+
+
+def test_missing_worktree_dry_run_reports_planned_restore_without_network(watch_env, monkeypatch):
+    # A missing worktree under --dry-run is REPORTED as a planned restore: no canonical read,
+    # no fetch, no hunk command (the base is unresolvable until restoration).
+    from perk.run.launch import worktree as worktree_mod
+
+    def _no_backend(*_a, **_k):
+        raise AssertionError("a watch dry run must not read the issue backend")
+
+    monkeypatch.setattr(worktree_mod.backend_resolve, "resolve_issue_backend", _no_backend)
+    result = _invoke(["99", "--dry-run"])
+    assert result.exit_code == 0, result.output
+    assert "would restore from origin/plan-99" in result.stderr
+    assert "unavailable until restoration" in result.stderr
+    assert watch_env.calls.fetches == []  # zero network ops
+    assert watch_env.calls.execs == [] and watch_env.calls.chdir == []
+    assert not (watch_env.root / ".worktrees" / "plan-99").exists()
+
+
+def test_existing_worktree_dry_run_composes_from_local_refs_only(watch_env):
+    # The no-fetch dry-run mode for an existing worktree: the hunk command composes from local
+    # refs only — zero fetches, zero local-ref mutation.
+    result = _invoke(["42", "--dry-run"])
+    assert result.exit_code == 0, result.output
+    assert watch_env.calls.fetches == []  # dry-run never fetches
+    assert f"hunk diff {MERGE_SHA[:12]}" in result.stderr  # still composed, from local refs
+
+
+def test_missing_worktree_restore_failure_is_typed(watch_env, monkeypatch):
+    # A real run with a missing worktree and no restorable remote branch refuses typed
+    # (worktree_restore_failed) before any launch.
+    from perk.backends.github import plans
+
+    monkeypatch.setattr(
+        plans,
+        "get_plan",
+        lambda **_k: plans.PlanState(number=99, url="u/99", title="T", header={}, pr=None),
+    )
+    monkeypatch.setattr(
+        git, "fetch_refspecs", lambda *_a, **_k: (_ for _ in ()).throw(GitError("no such branch"))
+    )
     result = _invoke(["99"])
     assert result.exit_code == 1
-    assert "Worktree not found" in result.stderr
-    assert "perk implement 99" in result.stderr
+    assert "could not restore worktree" in result.stderr
     assert watch_env.calls.execs == []
 
 
@@ -303,10 +370,11 @@ def test_not_a_repo_exits_2(tmp_path, monkeypatch):
 # --- resolution shapes ---------------------------------------------------------------------
 
 
-def test_linked_worktree_invocation_resolves_under_the_main_root(watch_env, monkeypatch):
-    main_root = watch_env.root / "mainco"
-    main_wt = main_root / ".worktrees" / "plan-42"
-    main_wt.mkdir(parents=True)
+def test_linked_worktree_invocation_resolves_under_the_main_root(
+    watch_env, monkeypatch, git_repo_factory
+):
+    main_root = git_repo_factory(watch_env.root / "mainco")
+    main_wt = _make_plan_worktree(main_root, "42")
     monkeypatch.setattr(git, "main_worktree_root", lambda cwd: main_root)
     result = _invoke(["42"])
     assert result.exit_code == 0, result.output
@@ -323,7 +391,7 @@ def test_hash_prefixed_id_resolves_the_plain_worktree(watch_env):
 
 
 def test_backend_native_id_resolves_its_own_worktree(watch_env):
-    (watch_env.root / ".worktrees" / "plan-SAV-456").mkdir(parents=True)
+    _make_plan_worktree(watch_env.root, "SAV-456")
     result = _invoke(["SAV-456"])
     assert result.exit_code == 0, result.output
     assert [p.name for p in watch_env.calls.chdir] == ["plan-SAV-456"]
@@ -354,7 +422,7 @@ def test_real_launch_carries_the_bridge_env_without_mutating_os_environ(watch_en
 
 
 def test_backend_native_plan_id_is_carried_verbatim(watch_env):
-    (watch_env.root / ".worktrees" / "plan-SAV-456").mkdir(parents=True)
+    _make_plan_worktree(watch_env.root, "SAV-456")
     result = _invoke(["SAV-456"])
     assert result.exit_code == 0, result.output
     assert watch_env.calls.envs[0]["PERK_HUNK_PLAN_ID"] == "SAV-456"
@@ -407,7 +475,8 @@ def test_dry_run_mints_nothing_and_creates_no_storage(watch_env, monkeypatch):
     result = _invoke(["42", "--dry-run"])
     assert result.exit_code == 0, result.output
     assert watch_env.calls.envs == []  # no exec env was built
-    assert not (watch_env.worktree / ".perk").exists()  # no hunk-watch/ storage
+    # no hunk-watch/ storage (the .perk/workflow/ dir itself holds the fixture's binding)
+    assert not (watch_env.worktree / ".perk" / "workflow" / "hunk-watch").exists()
 
 
 # --- cache.read_layer_parent_sha (the fail-soft reader) ------------------------------------

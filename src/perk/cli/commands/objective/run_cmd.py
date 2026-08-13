@@ -30,6 +30,7 @@ from perk.cli.commands.objective.shared import (
 from perk.cli.context import require_config, require_github, require_repo
 from perk.cli.emit import fail
 from perk.cli.ensure import Ensure, UserFacingCliError
+from perk.cli.plan_selection import main_repo_root
 from perk.github import GitHubError
 from perk.run import discovery, launch, resume, run_report, runner
 from perk.state import cache
@@ -195,10 +196,11 @@ def _dispatch_stage_remote(
     """Dispatch ``implement``/``address`` to the remote runner for an in-flight node.
 
     Reconstructs the node's plan-ref (preserving ``objective_id`` so the eventual human land
-    reconciles the node), writes it to the repo-root ``cache.plan-ref`` (the seam
-    ``_drive_remote_target`` reads), then drives ``launch_stage`` — capturing its machine output so
-    the supervisor surfaces a single unified ``--json`` payload. Returns the minted ``run_id``.
-    Under ``--dry-run`` this performs no write/trigger and returns ``None``.
+    reconciles the node) and passes it **directly** into ``launch_stage`` (the dispatch never
+    re-reads the mutable selector), updating the **main-root** selector as a convenience —
+    capturing the machine output so the supervisor surfaces a single unified ``--json``
+    payload. Returns the minted ``run_id``. Under ``--dry-run`` this performs no write/trigger
+    and returns ``None``.
     """
     stage = _stage_by_id(stage_id)
     Ensure.invariant(
@@ -210,7 +212,7 @@ def _dispatch_stage_remote(
     )
     if dry_run:
         return None
-    cache.write_plan_ref(repo_root, plan_ref)
+    cache.write_plan_ref(main_repo_root(repo_root), plan_ref)
     buf = io.StringIO()
     with contextlib.redirect_stdout(buf):
         launch.launch_stage(
@@ -222,6 +224,7 @@ def _dispatch_stage_remote(
             remote=remote,
             pi_args=[],
             prompt_override=None,
+            plan_ref=plan_ref,
         )
     return _parse_run_id(buf.getvalue())
 

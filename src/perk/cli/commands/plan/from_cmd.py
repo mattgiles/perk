@@ -27,10 +27,10 @@ import click
 from perk.backends import resolve
 from perk.backends.engagement import render_adopted_engagement
 from perk.backends.issue_backend import IssueBackendError
-from perk.cli.commands.plan.resume_cmd import parse_plan_id
 from perk.cli.commands.seeded_door import SeededLaunch, run_seeded_door, seeded_door_options
 from perk.cli.context import require_github
 from perk.cli.ensure import UserFacingCliError
+from perk.cli.plan_selection import parse_plan_id
 from perk.cli.seed_file import detect_seed_file, read_seed_file, render_seed_file_scratch
 from perk.prompts import render
 from perk.run import launch

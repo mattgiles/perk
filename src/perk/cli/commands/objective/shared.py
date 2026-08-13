@@ -7,8 +7,8 @@ from pathlib import Path
 from perk import github, objective
 from perk.backends.issue_backend import IssueBackendError, PlanState
 from perk.backends.objective_store import ObjectiveState, ObjectiveStoreError
-from perk.cli.commands.plan.resume_cmd import parse_plan_id
 from perk.cli.ensure import UserFacingCliError
+from perk.cli.plan_selection import parse_plan_id
 from perk.delivery import observe
 from perk.delivery import train as train_mod
 from perk.delivery.persistence import TrainPersistenceError
@@ -20,7 +20,7 @@ def parse_objective_id(raw: str) -> str:
     """Validate an opaque objective issue id (``7``, ``#7``, or Linear's ``ENG-7``).
 
     The single shared parse for every ``perk objective`` verb — a thin alias of the re-typed
-    :func:`perk.cli.commands.plan.resume_cmd.parse_plan_id` (one definition, no duplication).
+    :func:`perk.cli.plan_selection.parse_plan_id` (one definition, no duplication).
     """
     return parse_plan_id(raw, what="objective")
 

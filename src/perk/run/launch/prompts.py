@@ -17,7 +17,6 @@ from pathlib import Path
 from perk import plan
 from perk.prompts import render
 from perk.run.launch.worktree import ResolvedWorktree
-from perk.state import cache
 from perk.substrate.binding_delivery import render_cold_bindings
 from perk.substrate.config import Config
 from perk.substrate.output import log_warn
@@ -148,13 +147,12 @@ def _resolve_prompt(
     D2 rule): it is appended between the resolved stage prompt and the binding suffix, and never
     synthesizes a prompt — an idle launch (no stage prompt) stays idle and the suffix is dropped.
     """
-    # Prime the session: when --worktree is given the derived ref is absent, so fall back
-    # to the repo-root active ref for the prompt. A `prompt_override` wins outright.
+    # Prime the session from the ONE resolved ref (launch authority — an explicit --worktree
+    # resolves through its own binding, so there is no root-selector fallback here). A
+    # `prompt_override` wins outright.
     prompt = prompt_override
     if prompt is None:
-        prompt = _initial_prompt(
-            stage, resolved.plan_ref or cache.read_plan_ref(repo_root), preview=preview
-        )
+        prompt = _initial_prompt(stage, resolved.plan_ref, preview=preview)
     # Augment-only suffix (caller-supplied judgment, e.g. the resume prior-work advisory):
     # appended after the stage prompt and before the binding suffix; never synthesizes a prompt.
     if prompt is not None and prompt_suffix is not None:

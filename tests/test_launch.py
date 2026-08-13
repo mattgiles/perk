@@ -4,7 +4,7 @@ import subprocess
 from pathlib import Path
 
 import pytest
-from _launch_helpers import _PLAN_REF, _PLAN_REF_JSON, _PLAN_REF_MODEL, _config, _stage
+from _launch_helpers import _PLAN_REF, _PLAN_REF_JSON, _PLAN_REF_MODEL, _config, _request, _stage
 
 from perk import __version__, plan
 from perk.cli.ensure import UserFacingCliError
@@ -92,7 +92,7 @@ def test_resolve_worktree_none_is_repo_root(tmp_path):
     resolved = resolve_worktree(
         repo_root=tmp_path,
         config=_config(tmp_path),
-        stage=_stage("plan"),
+        request=_request("plan"),
         worktree=None,
         materialize=True,
     )
@@ -157,7 +157,7 @@ def test_implement_no_plan_ref_errors(tmp_path):
         resolve_worktree(
             repo_root=tmp_path,
             config=_config(tmp_path),
-            stage=_stage("implement"),
+            request=_request("implement"),
             worktree=None,
             materialize=False,
         )
@@ -169,7 +169,7 @@ def test_implement_derives_name_from_active_plan_ref(tmp_path):
     resolved = resolve_worktree(
         repo_root=tmp_path,
         config=_config(tmp_path),
-        stage=_stage("implement"),
+        request=_request("implement"),
         worktree=None,
         materialize=False,  # dry-run: derive without creating
     )
@@ -898,7 +898,7 @@ def _resolve_implement(
     return resolve_worktree(
         repo_root=repo_root,
         config=Config(worktree_root=repo_root / ".worktrees"),
-        stage=_stage("implement"),
+        request=_request("implement"),
         worktree=worktree,
         materialize=True,
         base=base,
@@ -1043,36 +1043,45 @@ def test_create_bases_off_pinned_plan_base(git_repo_with_remote, monkeypatch):
     assert _sha(resolved.path) == _sha(clone, "origin/develop")
 
 
-def test_explicit_worktree_recovers_base_but_does_not_clobber_plan_ref(
-    git_repo_with_remote, monkeypatch, launch_context_factory
-):
-    # Regression guard: an explicit --worktree NAME recovers the active plan-ref's pinned
-    # base for the start-point, but must NOT write that ref into the named worktree (the returned
-    # ResolvedWorktree.plan_ref stays None on this path).
+def test_explicit_ref_with_directory_override_stays_on_plan_branch(git_repo_with_remote):
+    # An explicit plan id plus --worktree NAME changes only the directory: the branch stays
+    # plan-<id>, the pinned base still drives the start-point, and the positioner binds the
+    # fresh checkout to the selected ref (positioner-owned materialization).
     clone, _remote, _advance = git_repo_with_remote
     _push_origin_branch(clone, "develop")
-    cache.write_plan_ref(clone, dataclasses.replace(_PLAN_REF, base="develop"))
-    bases: list[str | None] = []
-    real_add = git_mod.worktree_add
-    monkeypatch.setattr(
-        "perk.run.launch.git.worktree_add",
-        lambda *a, **k: (bases.append(k.get("base")), real_add(*a, **k))[1],
-    )
-    resolved = _resolve_implement(clone, worktree="custom-wt")
-    ctx = launch_context_factory(
-        stage=_stage("implement"),
+    ref = dataclasses.replace(_PLAN_REF, base="develop")
+    resolved = resolve_worktree(
         repo_root=clone,
-        worktree=resolved.path,
-        plan_ref=resolved.plan_ref,
-        created=resolved.created,
-        base=resolved.base,
+        config=Config(worktree_root=clone / ".worktrees"),
+        request=_request("implement"),
+        worktree="custom-wt",
+        materialize=True,
+        selected_ref=ref,
     )
-    launch._write_session_handoff(ctx, None)
-    # The pinned base still drove the start-point...
-    assert bases == ["origin/develop"]
-    # ...but the named worktree's own cache.plan-ref was NOT written (no clobber).
-    named_ref = resolved.path / ".perk" / "workflow" / "plan-ref.json"
-    assert not named_ref.exists()
+    assert resolved.path == clone / ".worktrees" / "custom-wt"
+    assert resolved.disposition == "create-fresh"
+    assert resolved.branch == "plan-42"
+    assert resolved.base == "origin/develop"
+    head_branch = subprocess.run(
+        ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+        cwd=resolved.path,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    assert head_branch == "plan-42"  # the override never renames the plan branch
+    assert cache.read_plan_ref(resolved.path) == ref  # bound at creation
+
+
+def test_explicit_missing_worktree_without_plan_id_is_refused(git_repo_with_remote):
+    # A missing explicit custom directory without a plan id cannot invent a binding — the
+    # unrelated root selector is NOT consulted for it.
+    clone, _remote, _advance = git_repo_with_remote
+    cache.write_plan_ref(clone, _PLAN_REF)  # an unrelated root selector must not leak in
+    with pytest.raises(UserFacingCliError) as exc:
+        _resolve_implement(clone, worktree="custom-wt")
+    assert exc.value.error_type == "worktree_not_found"
+    assert not (clone / ".worktrees" / "custom-wt").exists()
 
 
 def test_dry_run_surfaces_base_without_fetching(git_repo_with_remote, monkeypatch, capsys):
@@ -1392,7 +1401,7 @@ def test_stacked_explicit_base_is_a_typed_refusal(git_repo_with_remote, monkeypa
         resolve_worktree(
             repo_root=clone,
             config=_config(clone),
-            stage=_stage("implement"),
+            request=_request("implement"),
             worktree=None,
             materialize=True,
             base="origin/main",
@@ -1413,7 +1422,7 @@ def test_stacked_not_ready_is_a_typed_refusal_and_creates_nothing(
         resolve_worktree(
             repo_root=clone,
             config=_config(clone),
-            stage=_stage("implement"),
+            request=_request("implement"),
             worktree=None,
             materialize=True,
         )
@@ -1438,7 +1447,7 @@ def test_stacked_resumed_layer_keeps_the_ordinary_resume_arm(git_repo_with_remot
     resolved = resolve_worktree(
         repo_root=clone,
         config=_config(clone),
-        stage=_stage("implement"),
+        request=_request("implement"),
         worktree=None,
         materialize=True,
     )
@@ -1468,7 +1477,7 @@ def test_stacked_dry_run_stays_offline_and_names_the_derivation(git_repo_with_re
     resolved = resolve_worktree(
         repo_root=clone,
         config=_config(clone),
-        stage=_stage("implement"),
+        request=_request("implement"),
         worktree=None,
         materialize=False,
     )

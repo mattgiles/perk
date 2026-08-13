@@ -9,6 +9,7 @@ not collect this module.
 from functools import cache
 
 from perk import plan
+from perk.run.launch.worktree import WorktreeRequest
 from perk.substrate.config import Config
 from perk.substrate.registry import Stage, load_registry
 
@@ -32,6 +33,12 @@ _PLAN_REF_JSON = plan.PlanRefOut.from_domain(_PLAN_REF).model_dump(mode="json")
 @cache
 def _stage(stage_id: str) -> Stage:
     return next(s for s in load_registry().stages if s.id == stage_id)
+
+
+@cache
+def _request(stage_id: str) -> WorktreeRequest:
+    """The stage's positioner request (the `resolve_worktree` policy+consumer input)."""
+    return WorktreeRequest.for_stage(_stage(stage_id))
 
 
 def _config(tmp_path, user_bindings=None) -> Config:

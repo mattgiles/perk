@@ -10,8 +10,8 @@ import os
 
 import click
 
-from perk.cli.commands.plan.resume_cmd import parse_plan_id
 from perk.cli.context import require_github, require_repo
+from perk.cli.plan_selection import parse_plan_id
 from perk.run import run_worker
 from perk.run.run_worker import DRIVABLE_DOOR
 from perk.substrate.registry import load_registry

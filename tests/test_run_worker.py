@@ -660,7 +660,7 @@ def test_positioning_parity_stacked_local_create_vs_remote_position(
     import json as json_mod
 
     from perk.delivery import observe
-    from perk.run.launch.worktree import resolve_worktree
+    from perk.run.launch.worktree import WorktreeRequest, resolve_worktree
     from perk.substrate.config import Config
     from perk.substrate.registry import load_registry
 
@@ -677,12 +677,12 @@ def test_positioning_parity_stacked_local_create_vs_remote_position(
     resolved = resolve_worktree(
         repo_root=local_clone,
         config=Config(worktree_root=local_clone / ".worktrees"),
-        stage=stage,
+        request=WorktreeRequest.for_stage(stage),
         worktree=None,
         materialize=True,
     )
     local_head = _g(resolved.path, "rev-parse", "HEAD").strip()
-    assert resolved.created is True
+    assert resolved.disposition == "create-fresh"
     assert resolved.base == parent_sha
     assert _g(resolved.path, "rev-parse", "--abbrev-ref", "HEAD").strip() == "plan-102"
 
