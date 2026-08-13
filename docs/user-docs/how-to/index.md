@@ -90,31 +90,29 @@ for exactly one goal.
 
 ## Headless & remote
 
-- [How to set up and verify the remote runner](./set-up-the-remote-runner.md) — converge the
-  managed runner and prove the wiring with `doctor workflow smoke-test`.
-- [How to dispatch a stage to a remote runner](./dispatch-a-stage-to-ci.md) — hand an unattended
-  stage off to CI with `--remote`.
-- [How to observe and control dispatched runs](./supervise-dispatched-runs.md) — list, cancel,
-  and retry remote runs from a cold shell.
-- [How to advance an objective with the run supervisor](./advance-an-objective-headlessly.md) —
-  push an objective forward one safe step with `perk objective run`.
+- [How to set up and verify the remote runner](./set-up-the-remote-runner.md) — install the managed
+  workflow and action, then prove them with a waited smoke.
+- [How to dispatch a stage to a remote runner](./dispatch-a-stage-to-ci.md) — send a saved plan's
+  unattended `implement` or `address` stage to CI.
+- [How to observe and control dispatched runs](./supervise-dispatched-runs.md) — identify, cancel,
+  or retry a remote Actions run from any clone.
+- [How to advance an objective with the run supervisor](./advance-an-objective-headlessly.md) — let
+  the deterministic supervisor make one safe objective decision.
 
 ## Customization
 
-- [How to attach your own skill to a stage or command](./attach-a-skill-to-a-stage.md) — bind an
-  installed skill to a stage or command via `[[bindings]]`, as a new trigger or an override (also
-  notes the auto-discovered `perk-expert` skill perk delivers for configuration/customization help).
-- [How to author a repo-specific skill](./author-a-repo-skill.md) — scaffold, author, commit-push-
-  resync, and refine a skill that lives in this repo under `.perk/skills/<name>/`.
-- [How to write a custom subagent](./write-a-custom-subagent.md) — author your own
-  `.pi/agents/<name>.md` agent def and invoke it via pi's native `subagent` tool.
-- [How to scope pi resources per-project](./scope-pi-resources-per-project.md) — disable or
-  filter a package's extensions/skills/prompts/themes in one repo via `pi config -l`, without
-  perk fighting the override.
+- [How to attach your own skill to a stage or command](./attach-a-skill-to-a-stage.md) — add one
+  `[[bindings]]` row and verify that the skill reaches its trigger.
+- [How to author a repo-specific skill](./author-a-repo-skill.md) — create, publish, synchronize,
+  refine, or remove a skill under `.perk/skills/<name>/`.
+- [How to write a custom subagent](./write-a-custom-subagent.md) — add a project agent under
+  `.pi/agents/`, list it, and run it through `workflowScript`.
+- [How to scope Pi resources per project](./scope-pi-resources-per-project.md) — filter one
+  package's extensions, skills, prompts, or themes with `pi config -l`.
 
 ## Providers & backends
 
-- [How to select a provider](./select-a-provider.md) — point the `[providers]` table
-  at a supported plan, footer, or web provider, then converge and validate.
-- [How to switch the issue backend to Linear](./switch-to-linear.md) — move the canonical issue
-  store from GitHub to Linear (auth, labels, what changes).
+- [How to select a provider](./select-a-provider.md) — switch `pi-status-footer` to `pi-default` and
+  prove that only the selected package changes.
+- [How to switch the issue backend to Linear](./switch-to-linear.md) — configure Linear, verify its
+  readiness, and confirm one issue create/read round trip.

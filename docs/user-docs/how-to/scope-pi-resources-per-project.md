@@ -1,62 +1,60 @@
 ---
-title: "How to scope pi resources per-project"
-description: "Disable or filter a package's extensions, skills, prompts, or themes in one repo using pi's per-project overrides."
+title: "How to scope Pi resources per project"
+description: "Disable or filter a package's extensions, skills, prompts, or themes in one repo using Pi's per-project overrides."
 sidebar:
   order: 2290
 sidebarGroup: "Customization"
 ---
 
-# How to scope pi resources per-project
+# How to scope Pi resources per project
 
-Disable or filter a package's extensions, skills, prompts, or themes in *this* repo only, using
-pi's own per-project resource overrides — without perk fighting you over `.pi/settings.json`. This
-is the sanctioned way to trim a *borrowed* or *provider* package's resources per-repo (e.g. drop a
-theme a borrowed package ships, or a skill you never use here).
-
-**Prerequisite:** the repo is perk-managed (`perk init` has run). Know which package or resource
-you want to scope; `pi config -l` (pi's interactive project-scope config UI) is the recommended
-editing surface.
+Use Pi's project settings to enable a package for this repository while narrowing the extensions,
+skills, prompts, or themes it loads.
 
 ## Steps
 
-1. **Open pi's project-scope config.** Run `pi config -l` in the repo. Toggling a resource off for
-   a package rewrites its `.pi/settings.json` `packages` entry to **object form** —
-   `{ "source": "<spec>", "extensions"/"skills"/"prompts"/"themes": [...] }` — or adds a
-   `-`/`!`-prefixed disable pattern to the top-level override arrays.
+1. **Open the project resource editor.** Run `pi config -l` from the repository. This starts in
+   project scope and writes `.pi/settings.json`; inherited global resources are shown separately.
+2. **Distinguish package state from resource filters.** The package-level control enables or
+   disables the package in this project. The extension, skill, prompt, and theme controls beneath a
+   package filter what an enabled package contributes. Those filters produce an object-form
+   `packages` entry such as:
 
-2. **Scope freely — perk's convergence respects both shapes.** `perk init` and
-   `perk doctor --fix` recognize a package entry by its *identity* in every form, so:
-   - An object-form entry is never duplicate-appended back as a string.
-   - Top-level `extensions`/`skills`/`prompts`/`themes` override arrays are yours; perk never
-     writes or rewrites them.
-   - If you filtered **perk's own package**, perk still keeps its version pin fresh by rewriting
-     only the entry's `source` — your filter keys survive byte-for-byte. (perk never *creates* an
-     object-form entry for its own package; it only reconciles the pin inside one you made.)
+   ```json
+   {
+     "source": "npm:example-package",
+     "extensions": ["extensions/*.ts", "!extensions/legacy.ts"],
+     "skills": [],
+     "prompts": ["+prompts/review.md"]
+   }
+   ```
 
-3. **Don't filter perk's own extension.** Filtering `@mgiles/perk`'s extension off (e.g.
-   `"extensions": []` on its entry) silently breaks every interactive stage session — no stage
-   tools, no footer, no gates. The same goes for disable patterns that hit perk's skills
-   (`perk-implement`, `perk-plan`, …): the stage sessions that inject them lose their guidance.
+   Omit a resource key to load all resources of that type, use `[]` to load none, and use glob
+   patterns with `!pattern` exclusions. `+path` force-includes one exact package-relative path and
+   `-path` force-excludes one. Filters can only narrow resources the package already exposes.
+3. **Keep top-level resources separate.** Top-level `extensions`, `skills`, `prompts`, and `themes`
+   arrays name project-local resources and their include/exclude patterns; they do not select a perk
+   provider. Similarly, filtering an installed package does not change the committed `[providers]`
+   choice.
+4. **Reconverge and inspect.** Run `perk init`, then `perk doctor`. perk recognizes package identity
+   in string or object form, preserves unrelated package entries and user-owned filters, and does not
+   rewrite the top-level resource arrays. Doctor reports malformed settings and warns when an
+   object-form override or disable pattern touches perk's own managed package/resources; it does not
+   treat ordinary filters on unrelated packages as provider selection.
+5. **Verify the loaded set.** Restart Pi in the project and confirm that the intended resource is
+   absent while the package's allowed resources still load. Return to `pi config -l` to undo or
+   adjust the filter.
 
-4. **Run `perk doctor` to validate.** The report-only `resource-overrides` check (group
-   `package`) **warns** — never fails, and `--fix` never touches it — when an override reaches
-   perk's own resources: an object-form perk entry (named with its filter keys) or a `-`/`!`
-   disable pattern mentioning `@mgiles/perk` or a perk skill name. The sweep is an honest
-   substring heuristic — perk does not reimplement pi's filter-pattern semantics, so a pattern
-   that matches perk resources without naming them escapes it. Overrides scoped to other
-   packages stay quiet.
+## Expected result
 
-5. **To undo,** re-enable the resource via `pi config -l` (or restore the plain string `packages`
-   entry by hand) and re-run `perk doctor`.
+The project loads only the selected resources, the override remains in `.pi/settings.json`, and
+subsequent perk convergence preserves it.
 
-## See also
+## Related
 
-- [`perk doctor`](../reference/cli.md#perk-doctor) — the `resource-overrides` check.
-- [How to select a provider](./select-a-provider.md) — swapping whole provider
-  packages (a `[providers]` selection, not a resource override).
-- [How to attach your own skill to a stage or command](./attach-a-skill-to-a-stage.md) — adding
-  guidance rather than trimming it.
-
----
-
-← Back to the [how-to router](index.md).
+- **Do:** [Select a provider](./select-a-provider.md) — swap a provider package rather than filter
+  one package's resources.
+- **Do:** [Attach a skill to a stage](./attach-a-skill-to-a-stage.md) — add guidance rather than trim
+  it.
+- **Look up:** [`perk doctor`](../reference/cli.md#perk-doctor) — resource and provider-package
+  diagnostics.

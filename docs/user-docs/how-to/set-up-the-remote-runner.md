@@ -8,43 +8,42 @@ sidebarGroup: "Headless & remote"
 
 # How to set up and verify the remote runner
 
-Get a repo ready to dispatch perk stages to a remote CI runner, and prove the wiring is live before
-you depend on it. This is the precondition for [dispatching a stage to CI](./dispatch-a-stage-to-ci.md):
-do it once per repo (and again whenever the managed runner artifact drifts).
+Install the managed GitHub Actions runner and prove that it can start with the credentials a remote
+perk stage needs.
 
 ## Steps
 
-1. **Converge the managed runner artifact.** Run
-   [`perk init`](../reference/cli.md#perk-init) to install (or re-converge) the managed
-   `.github/workflows/perk-run.yml`; run [`perk doctor --fix`](../reference/cli.md#perk-doctor) to
-   repair drift if the file was hand-edited or removed.
-2. **Run the static prereq check.** Run
-   [`perk doctor workflow check`](../reference/cli.md#perk-doctor-workflow-check) to verify GitHub
-   readiness, the runner prerequisites, and that the managed workflow is present. Add `--verbose`
-   for per-check detail or `--json` for a machine-readable report.
-3. **Configure the runner secrets and inspect the opt-out gate.** The runner pushes with a PAT
-   (`PERK_GH_PAT`), **not** the default `github.token`, so set that secret in the repo. It also
-   requires one model secret: `ANTHROPIC_API_KEY` or `OPENAI_API_KEY` (either is sufficient).
-   `PERK_ENABLED` is an opt-out repository variable: unset means the runner is enabled, while
-   `false` disables it. Nothing needs enabling unless the variable was set to `false`.
+1. **Converge the runner files.** Run [`perk init`](../reference/cli.md#perk-init). Review both
+   `.github/workflows/perk-run.yml` and `.github/actions/perk-remote-setup/action.yml`, then commit
+   and push them to the repository's default branch. A workflow that exists only in a local branch
+   cannot receive a dispatch.
+2. **Set the required repository secrets.** Add `PERK_GH_PAT` and one model-provider secret:
+   `ANTHROPIC_API_KEY` or `OPENAI_API_KEY`. The PAT is used for checkout, reporting, pushes, and
+   any private skill-source clones. Do not set `PERK_ENABLED` just to turn the runner on: the gate
+   is opt-out, so an absent value means enabled and `false` disables the runner.
+3. **Run the static check.** Run
+   [`perk doctor workflow check`](../reference/cli.md#perk-doctor-workflow-check). Fix every failure
+   before dispatching. Add `--verbose` for all individual checks or `--json` for structured output.
+4. **Run the waited smoke.** Run
+   [`perk doctor workflow smoke-test --wait`](../reference/cli.md#perk-doctor-workflow-smoke-test).
+   This directly dispatches the managed workflow's bounded smoke short-circuit: it validates the
+   secrets, starts the Actions job, prints the smoke confirmation, and exits without checking out a
+   plan or invoking a model. Waiting is capped at ten minutes; on timeout, perk reports the result as
+   inconclusive and makes a best-effort cancellation.
 
-   > **Note.** `PERK_GH_PAT` is also the credential the runner uses to clone the repo's declared
-   > skill sources when it syncs skills before driving — if a private repo authors its own skills
-   > (or declares another private source), the PAT must be able to read those repos. Public
-   > sources need nothing extra.
-4. **Prove the runner is live.** Run
-   [`perk doctor workflow smoke-test`](../reference/cli.md#perk-doctor-workflow-smoke-test) (add
-   `--wait` to block on the result). It dispatches a throwaway run that proves dispatchability,
-   runner-start, and secret-readability — and it writes nothing durable (no dispatch record, no
-   GitHub artifacts), so it never shows up in `perk workflow run list`.
+## Expected result
 
-> **Maturity.** The smoke test proves the *wiring* — that a run can be dispatched, the runner starts,
-> and its secrets are readable — but **not** the end-to-end worker/model drive that a real stage
-> needs. That full chain has live proofs on both the self-repo and a consumer repo (real
-> `implement` + `address` runs, end to end). See
-> [Headless and remote: how it works, and how proven it is](../explanation/headless-and-remote.md)
-> for the full maturity story.
+The static report is healthy and the waited smoke concludes successfully. The smoke creates only its
+GitHub Actions run: it writes no perk dispatch record or workflow artifact, and creates no branch,
+pull request, or issue. It therefore does not appear in `perk workflow run list`. A successful smoke
+proves the runner wiring and secret readability, not a full model-driven stage.
 
----
+## Related
 
-← Back to the [how-to router](index.md).
+- **Do:** [Dispatch a stage to CI](./dispatch-a-stage-to-ci.md) — hand off an unattended stage after
+  the smoke passes.
+- **Look up:** [`perk doctor workflow check`](../reference/cli.md#perk-doctor-workflow-check) and
+  [`perk doctor workflow smoke-test`](../reference/cli.md#perk-doctor-workflow-smoke-test) — exact
+  check and smoke command surfaces.
+- **Understand:** [Headless and remote](../explanation/headless-and-remote.md) — what smoke proves
+  versus a full model-driven run.

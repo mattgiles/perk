@@ -132,7 +132,7 @@ extension breaks every interactive stage session), or a `-`/`!` disable pattern 
 `extensions`/`skills`/`prompts`/`themes` override arrays that mentions `@mgiles/perk` or a perk
 skill name (a substring heuristic — perk does not reimplement pi's filter semantics). Review the
 overrides via `pi config -l`; see
-[How to scope pi resources per-project](../how-to/scope-pi-resources-per-project.md).
+[How to scope Pi resources per project](../how-to/scope-pi-resources-per-project.md).
 The `package` group also carries the report-only `subagent-compat` check: it reads the installed
 pi-subagents version and probes the installed source for the orchestration surfaces perk's
 guidance assumes (`workflowScript` orchestration, the `outputSchema` → `structuredOutput`
