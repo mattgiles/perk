@@ -771,12 +771,50 @@ envelopes teed to files and captured verbatim.
 
 ### Step 10 — reconcile
 
-*(pending — the reconcile session's writes, or the honest no-op.)*
+Executed 2026-08-13 — warm `/objective-reconcile 1698` in a pi session in the dev checkout
+(session record `2026-08-13T13-58-33-358Z_019ffb6a-e08e-74c3-b57f-ac4c4f36a5c7.jsonl`).
+Operator-provided outcome + durable carrier verification:
+
+- Rewrote ONLY the marker-bounded Reconcilable prose in the designated objective comment
+  (issue comment **5275906622**), preserving the mechanical roadmap table and immutable region.
+  The new prose records: the three-tier landed outcome; the docs-only dependency chain; PRs
+  #1701/#1705/#1708 as the atomic train; the `cli.md` verified no-op; actual layer scopes and
+  boundaries; the three PR grounding rows; objective complete.
+- Updated node **2.1**'s description to include the implementation-planning scope expansion:
+  the landing-router changes in `docs/user-docs/tutorials/index.md` and
+  `docs/user-docs/how-to/index.md` (durable in both the issue header's roadmap and the
+  mechanical table).
+- Added NO roadmap node: neither the merged diff nor engagement contained a concrete missing
+  follow-up unit.
+- End state preserved: all three nodes `done`; objective remains complete/closed.
+
+The warm session therefore made real, correctly-bounded reconciliation writes — not a no-op.
 
 ### Step 11 — post-landing census + residue sweep
 
-*(pending — merged PRs, docs on main, objective closed, `stack status` end-state,
-`just docs-check`, sweep census.)*
+**Post-landing census executed 2026-08-13; every durable/read-only row passes:**
+
+- **PR census:** #1701/#1705/#1708 all `MERGED`, at 13:43:35/36/37Z respectively, with
+  merge commits `d54e3948…` / `2f062e8e…` / `3d4f9773…` and the expected bases/heads.
+- **Issue census:** objective #1698 and plan issues #1699/#1704/#1707 all `CLOSED`; objective
+  roadmap nodes `done` ×3.
+- **Main census (the second clone, fast-forwarded cleanly):** `main @
+  3d4f977383d9fc169df3161f20dac514d109118a`; all four named deliverables present
+  (`drive-a-stacked-objective.md`, both stacked how-tos, perk-expert `stacked-delivery.md`).
+- **Terminal train read:** `published_prefix_len: 3`, `landed_prefix_len: 3`; every layer
+  `publication: "landed"`, `git: "synced"`, `pr: "merged"`, `finalization: "finalized"`;
+  `unresolved_operation: null`, `operations: []`, `blockers: []`, no continuation, no orphaned
+  worktrees/refs. The one information row (`base_advanced`) is the expected post-landing truth:
+  `main` advanced from the recorded objective base `597cf1b5…` to the train's final merged base
+  `3d4f9773…`; a landed train is never re-synced.
+- **Docs gate on updated main:** `just docs-check` GREEN — 24 pytest metadata/token/gate/
+  packaging tests; Biome clean; docs-site TypeScript clean; node tests clean; Astro build 52
+  pages; all 11 rendered-site checks pass (including the complete-corpus/sidebar routes and
+  both new stacked how-to + tutorial routes).
+
+**Physical cleanup pending** (capture-before-delete complete): remove the merged layer
+worktrees (dev checkout plans #1699/#1707; second-clone plan #1704) and delete `~/temp/perk`;
+then record the absence census below.
 
 ### Defect log
 
