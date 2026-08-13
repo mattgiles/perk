@@ -387,31 +387,68 @@ atomic landing or the § dispositions — never individually by hand outside tho
 
 ## Part B — the captured evidence (IN PROGRESS)
 
-> **Not yet executed.** The live legs run as post-submit follow-up phases; each phase lands its
-> dated evidence here as docs-only commits. Every table below is a skeleton to be filled —
-> no cell pre-claims an outcome (Decision 10).
+> **Execution in progress.** The live legs run as post-submit follow-up phases; each phase
+> lands its dated evidence here as docs-only commits. Unexecuted steps' tables remain
+> skeletons — no cell pre-claims an outcome (Decision 10).
 
 ### Provenance rows
 
 | Phase boundary | Main-checkout SHA | `which perk` | Notes |
 |---|---|---|---|
-| *(pending)* | | | |
+| Steps 0–1 (2026-08-13) | `597cf1b56babca5ef61631e984d051af5c6a7d51` | `/Users/mattgiles/.local/bin/perk` (`perk 2.3.0`, the uv tool shim) | operator-installed from the dev (main) checkout at that SHA; equals the observed remote `main` head at capture |
 
 ### Step 0 — preconditions
 
+Captured 2026-08-13. **Named timing deviation:** the capability rows were captured immediately
+*after* Step 1 (the operator authored first) — every read is stateless, so the order swap is
+harmless; recorded rather than silent.
+
 | Check | Expected | Observed |
 |---|---|---|
-| native-stack (host schema) | `stack` field on `PullRequest` | *(pending)* |
-| merge-rules | squash allowed; no `merge_queue` rule | *(pending)* |
-| remote-base | a real `refs/heads/main` SHA | *(pending)* |
-| atomic-push | no-op `--atomic --dry-run` accepted | *(pending)* |
-| required-review rule | none on `main` | *(pending)* |
-| second clone | fresh posture (no worktrees / stack metadata / caches), on `main`, `npm ci`, pinned binary | *(pending)* |
+| native-stack (host schema) | `stack` field on `PullRequest` | `["stack","stackEntry"]` (GraphQL introspection, filtered) |
+| merge-rules | squash allowed; no `merge_queue` rule | `allow_squash_merge: true`; `gh api repos/mattgiles/perk/rules/branches/main` → `[]` |
+| remote-base | a real `refs/heads/main` SHA | `597cf1b56babca5ef61631e984d051af5c6a7d51\trefs/heads/main` |
+| atomic-push | no-op `--atomic --dry-run` accepted | `= 597cf1b5…:refs/heads/main [up to date]` + `Done`, exit 0 (push URL `git@github.com:mattgiles/perk`, exact §8.45 argv) |
+| required-review rule | none on `main` | the same `rules/branches/main` read → `[]` — no branch rules of any type |
+| second clone | fresh posture (no worktrees / stack metadata / caches), on `main`, `npm ci`, pinned binary | created per operator (2026-08-13); *posture census pending — recorded before Step 3* |
 
 ### Step 1 — warm authoring
 
-*(pending — objective number, `delivery_lineage`, roadmap-vs-spec check, capability-preflight
-behavior, delivery-question + plannotator attestation.)*
+Executed 2026-08-13 (`perk objective author`, dev checkout, pinned binary). The docs objective:
+**#1698** — "Stacked-delivery documentation: reconcile, teach, mirror", created
+`2026-08-13T04:18:57Z`, `run_id: 01KZWN6RH4R1ATDM30WGSRES5W`. Header excerpt (the machine facts
+for the delivery choice):
+
+```yaml
+status: active
+base: null
+delivery: stacked
+delivery_lineage: 01KZWNGE6AC0SV30PBM8RGB3Y1
+```
+
+- **Roadmap-vs-spec check — named deviations (operator-accepted 2026-08-13, proceed):** the
+  authored roadmap deviates *cosmetically* from § Train spec: the title (authored
+  "Stacked-delivery documentation: reconcile, teach, mirror" vs the pinned "Stacked delivery
+  has a cohesive documented user experience"); the node ids (`1.1`/`2.1`/`3.1`, one node per
+  phase, vs the flat `1 → 2 → 3`); the slugs (`reconcile-stacked-reference` /
+  `stacked-teaching-quadrant` / `perk-expert-stacked-mirror` vs `stacked-reference` /
+  `stacked-guides` / `stacked-expert`); backticks stripped from the descriptions (YAML
+  flow-scalar rendering); one paraphrase (`recover <old-objective-id>` for the spec's
+  `recover <predecessor>` — same referent). **The material pins all hold:** `delivery:
+  stacked`; `delivery_lineage` minted; default base (`base: null`); a 3-node chain via
+  `depends_on` (1.1 → 2.1 → 3.1); the descriptions otherwise carry the spec verbatim — every
+  file path, sidebar order, boundary and scope guard intact. The layer planning sessions'
+  scope input is therefore materially the pinned one.
+- **Delivery-choice UX (dated operator attestation, 2026-08-13):** the authoring session asked
+  the delivery question (answered `stacked`) and rendered the choice for plannotator review
+  before save — both observed by the operator. The header excerpt above is the machine half of
+  this fact (per the fact-to-source matrix).
+- **Capability-preflight behavior:** nothing visible rendered during the save (the operator
+  observed no preflight output) — the designed silent-success behavior recorded by the prior
+  gate ("the preflight-in-save prints nothing on success"). The save succeeded and created
+  #1698, so the §8.45 preflight necessarily passed (it runs before the store mutation).
+- Roadmap state at capture: node 1.1 `planning` (the layer-1 planning session underway), 2.1
+  and 3.1 `pending`.
 
 ### Step 2 — layer 1
 
