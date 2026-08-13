@@ -64,9 +64,10 @@ lint: lint-py lint-js
 typecheck-py:
     uv run ty check
 
-# type-check typescript (tsc)
+# type-check typescript (tsc: extension; docs site: astro sync + tsc)
 typecheck-js:
     npm run typecheck
+    npm run docs:typecheck
 
 # type-check everything (ty + tsc)
 typecheck: typecheck-py typecheck-js
@@ -81,10 +82,12 @@ test-py *args:
 test-js:
     node --test --test-reporter=dot --test-concurrency=$(( $(getconf _NPROCESSORS_ONLN) * 2 )) "extension/**/*.test.ts" "docs/site/src/**/*.test.mjs"
 
-# run the test suite (python: pytest; extension TS + docs-site .mjs: node:test)
+# run the test suite (python: pytest; extension TS + docs-site .mjs: node:test; docs site:
+# static build + post-build checks)
 test *args:
     uv run pytest {{args}}
     node --test --test-reporter=dot --test-concurrency=$(( $(getconf _NPROCESSORS_ONLN) * 2 )) "extension/**/*.test.ts" "docs/site/src/**/*.test.mjs"
+    npm run docs:check
 
 # build the python wheel + sdist (pinned to perk — perk-dev is never published)
 build:
@@ -109,6 +112,13 @@ docs-build:
 # serve the built docs site (the Pagefind-accurate acceptance surface)
 docs-preview:
     npm run docs:preview
+
+# the standalone docs gate: docs-scoped pytest guards, site unit tests, static build
+# (schema/link/anchor/escape/sidebar-slug gates), post-build corpus/H1/TOC/EC/Pagefind checks
+docs-check:
+    uv run pytest tests/test_user_docs_metadata.py tests/test_docs_site_tokens.py tests/test_docs_gates.py "tests/test_packaging.py::test_docs_site_publish_isolation" -q
+    node --test --test-reporter=dot "docs/site/src/**/*.test.mjs"
+    npm run docs:check
 
 # validate CHANGELOG.md structure (two-phase convention: markers, headers, hash tokens)
 changelog-check:

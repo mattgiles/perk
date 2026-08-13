@@ -28,7 +28,9 @@ trusted = true
 # `command`, e.g. "build && test"). Project-supplied CI is untrusted by
 # default: an interactive session prompts to confirm (per-session latch), and headless runs need
 # `--allow-project-ci` — unless `trusted = true` above opts the whole repo in. These rows mirror
-# `just ci`'s verification targets (lint/typecheck/test/changelog-check); `setup` is environment
+# `just ci`'s verification targets (lint/typecheck/test/changelog-check) plus the scope-aware
+# `docs-check` docs gate (every surface it runs is also reached through lint/typecheck/test, so
+# a docs-only change still verifies when the code-suffix globs all skip); `setup` is environment
 # prep, not a verification check — it is owned by the [worktree] setup hook below.
 [[ci.checks]]
 name = "lint-py"
@@ -59,6 +61,11 @@ glob = "*.py"
 name = "test-js"
 command = "just test-js"
 glob = "*.ts,*.tsx,*.js,*.jsx,*.mjs"
+
+[[ci.checks]]
+name = "docs-check"
+command = "just docs-check"
+glob = "docs/user-docs/**,docs/site/**,package.json,package-lock.json,justfile"
 
 [[ci.checks]]
 name = "changelog-check"
