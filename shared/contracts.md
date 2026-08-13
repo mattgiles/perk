@@ -1390,7 +1390,31 @@ process orchestrating sessions.
 **non-fatal** in `init` (reported, exit 0); `github_unauthed` is reserved for the strict
 `require_github` path. On `skills_sync_failed` the report **preserves `changes`** (convergence
 already happened before the sync); `skills_conflict` short-circuits before any convergence
-(`changes` is `[]`).
+(`changes` is `[]`). A `missing_tool` failure after an **interactive guided pass** likewise
+preserves the accumulated `changes`/`warnings` (host installs completed before the failure —
+the `skills_sync_failed` clause's mirror); non-interactive `missing_tool` keeps `changes: []`.
+Missing `git` inside a real repo classifies **`missing_tool`, never `not_a_repo`** (the `git`
+env gate runs before the repo probe — in both modes).
+
+**Interactive onboarding gestures.** Interactive `perk init` is a guided onboarding flow: a
+confirm-then-install pass over the missing *supported* required tools (`gh` via brew, `pi` via
+`npm -g`, `skills` via its official installer script on macOS / `go install` elsewhere —
+`git`/`node` stay guide-only), an offered interactive `gh auth login` (re-probed afterward; the
+re-probe is the authority), a git `user.name`/`user.email` check with a prompted setup (scope
+confirm, global default), and — when the committed backend is `linear` with a `team` and no key
+resolves — a prompted, charset-guarded, auth-validated Linear API key persisted atomically
+(mode 0600) to the gitignored `.perk/local.toml`. Gestures are **gap-driven** (a healthy host
+prompts for nothing — idempotency holds) and run ONLY when interactive: never under
+`--no-interactive`, a non-TTY stdin, **or `--json`** (a machine surface — no prompt or
+inherited-stdio child may interleave with the one stdout JSON object). `perk doctor` stays a
+non-interactive report/repair surface; init owns onboarding. **Compatibility posture
+(deliberately narrow):** stable = exit codes + the `--json` *field schema* + the gesture
+gating; changed values = the remediation strings (all modes; they carry exact install
+commands), the probe-side git-identity warning (non-interactive included), the missing-git
+classification above, and the human render. Installs/identity/key writes ride `changes`
+(host/local-only lines use the stable prefixes `tool `, `hunk CLI:`, `git identity:`,
+`.perk/local.toml:`, `.perk/workflow/` — the render's commit-hint classification);
+declines/failures ride `warnings`.
 
 **`--json` object.**
 ```
@@ -1972,7 +1996,10 @@ status note in contracts-history.md §8.10. What remains outside the seam machin
 CLI is an **external CLI** (npm `hunkdiff`, binary `hunk`), not a Pi package — `perk init`
 (verified) attempts a best-effort `npm install -g hunkdiff` **unconditionally** when the binary
 is absent (failure → a warning, never fatal), and doctor owns the warn-level **`review-cli`**
-check (always probes PATH, verify-gated; `perk doctor --fix` retries the install). The
+check (always probes PATH, verify-gated; `perk doctor --fix` retries the install). Doctor also
+owns the warn-level **`git-identity`** check (group `environment`, verify-gated, report-only —
+no `--fix` arm): ok when `git config user.name`/`user.email` both resolve, warn when either is
+unset or the probe raises; the guided repair is interactive `perk init` (§8.5). The
 plannotator package `npm:@plannotator/pi-extension` is desired via the **plan** seam's
 `plannotator-plan` entry alone; the desired-**union** convergence mechanism stays generic
 (dict-keyed across every resolved seam) but its cross-seam instance retired with the seam. The

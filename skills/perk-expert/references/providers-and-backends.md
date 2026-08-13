@@ -120,7 +120,10 @@ state lives.
   `.perk/local.toml` even when a command runs inside a linked worktree (the gitignored file is
   never copied into worktrees), so a single entry authenticates every worktree session and
   cold-door (`/submit`, `/land`, …). Sent as a **plain `Authorization: <key>`** header — **not**
-  `Bearer`-prefixed.
+  `Bearer`-prefixed. **Interactive `perk init`** prompts for the key when the committed backend
+  is `linear` (with a `team`) and none resolves — hidden input, validated against Linear, stored
+  in `.perk/local.toml` (tightened to `0600`); disabled by `--no-interactive`, a non-TTY stdin,
+  or `--json`.
 - **Required config — `[issues] team`** — the Linear team **key** (e.g. `"ENG"`).
 - **Converged package** — `perk init` adds `npm:pi-mono-linear` (the borrowed Linear-tools
   extension) when Linear is selected, removes it when deselected.

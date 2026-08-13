@@ -220,6 +220,11 @@ checkout's** `.perk/local.toml` whenever a command runs inside a linked worktree
 `/land`, …), so a single entry in the main checkout authenticates every worktree session and
 cold-door even when the env-seed did not fire. Malformed local TOML is ignored (fail-soft).
 
+The key rarely needs writing by hand: when the committed `[issues] backend` is `"linear"` (with
+a `team`) and no key resolves, **interactive `perk init`** prompts for it (hidden input),
+validates it against Linear, and persists it here atomically — tightening the file to mode
+`0600`. The prompt never runs under `--no-interactive`, a non-TTY stdin, or `--json`.
+
 ```toml
 # .perk/local.toml (gitignored)
 [linear]

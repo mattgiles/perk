@@ -247,7 +247,7 @@ opaque — the configured backend remains the authority on whether it resolves.
 - **`issues-backend`** (group `issues`, offline) — validates the selection and, for Linear, that
   `team` is set.
 - **`linear-auth` / `linear-team` / `linear-labels`** (group `linear`, verify-gated) — the network
-  probes; always non-fatal `warn`, run only under `perk init --verify` / `perk doctor` with
+  probes; always non-fatal `warn`, run only under `perk init` / `perk doctor` with
   verification.
 - **`linear-project-scopes` / `linear-workflow-states`** (group `linear`, verify-gated, non-fatal)
   — the project-backed objective readiness probe: that the API token can read the team's Projects

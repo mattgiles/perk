@@ -59,7 +59,12 @@ labels, identifiers, doctor groups, maturity) is the
    linked worktree (the gitignored file is never copied into worktrees), so a single entry in the
    main checkout authenticates every worktree session and cold-door (`/submit`, `/land`, …).
 
-3. **Run `perk init --verify`.** This converges the borrowed Linear-tools package
+   You can also let **interactive `perk init`** do this step for you: when the committed backend
+   is `linear` (with a `team`) and no key resolves, init prompts for the key (hidden input),
+   validates it against Linear's API, and stores it in `.perk/local.toml` — tightening the file
+   to mode `0600`. The prompt never runs under `--no-interactive`, a non-TTY stdin, or `--json`.
+
+3. **Run `perk init`.** This converges the borrowed Linear-tools package
    `npm:pi-mono-linear` into `.pi/settings.json` `packages`, and the readiness probe ensures the
    six perk labels on the workspace: `perk:plan`, `perk:learn`, `perk:consolidated`,
    `perk:objective`, `perk:objective-node`, and `perk:gist`. perk creates them

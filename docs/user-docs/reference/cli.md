@@ -76,6 +76,20 @@ set; the same opt-out also silences the post-upgrade notice (see
 Init also records `.perk/managed-state.toml` — a machine-written version+hash record of every
 managed artifact, written as a convergence side effect (commit it; a converged repo re-runs
 without touching it).
+
+Run **interactively**, `perk init` is also a guided onboarding flow. It offers to install the
+missing *supported* required tools — `gh` via `brew install gh` (when brew is on PATH), `pi` via
+`npm install -g @earendil-works/pi-coding-agent` (when node ≥ 22 is present), and `skills` via
+its official installer script on macOS / `go install` elsewhere (`git` and `node` stay
+guide-only — the failure report carries their install commands). It offers to run `gh auth
+login` when the GitHub CLI is unauthenticated, checks your git commit identity
+(`user.name`/`user.email`) and prompts to set it (globally by default, or repo-local), and —
+when the committed `[issues] backend` is `"linear"` with a `team` and no API key resolves —
+prompts for a Linear API key (hidden input), validates it against Linear, and stores it in the
+gitignored `.perk/local.toml` (tightened to mode `0600`). Every gesture is gap-driven (a
+healthy host prompts for nothing), and **all of them are disabled** by `--no-interactive`, a
+non-TTY stdin, or `--json` (a machine surface — nothing may interleave with the stdout JSON).
+
 `--force` re-seeds
 the user-editable config to defaults; `--no-interactive`
 never prompts (CI/supervisor); `--json` emits a machine-readable report.
