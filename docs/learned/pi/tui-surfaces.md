@@ -59,7 +59,7 @@ keep a `setStatus`/string twin as the RPC-visible fallback. The custom footer fi
 key out of `getExtensionStatuses()` to avoid double display (the single-value `perk` slot keeps
 publishing via `setStatus` even though the footer renders the objective segment directly).
 
-## `setFooter` adoption facts (verified against pi 0.78.1)
+## `setFooter` adoption facts (verified against pi 0.78.1; footer-lifecycle bullets re-verified at pi 0.84.1)
 
 - **Factory assignability needs method syntax**: the factory accepts a *narrower structural*
   argument only if the mirror interfaces (theme-like, footer-data-like, `requestRender`) are
@@ -70,11 +70,13 @@ publishing via `setStatus` even though the footer renders the objective segment 
 - **`ctx.getContextUsage()`** returns `{ tokens, contextWindow, percent }` (tokens/percent
   nullable). There is **no model-change or context-usage event** for extensions — footer
   reactivity must be render-driven (read `ctx.model`/usage live in `render()`).
-- **Replaced-footer dispose is undocumented**: pi's contract for disposing a *replaced* footer
-  factory is unverified — hence the once-only install flag in `index.ts` (re-installing per
-  `session_start` could leak the previous factory's subscriptions). Accepted trade: the install
-  closures capture the *first* session's `ctx`; if pi ever invalidated old context objects, the
-  footer's model/context would silently freeze. Revisit if pi documents dispose-on-replace.
+- **Replaced-footer dispose is explicit as of pi 0.84.1**: `setExtensionFooter` disposes a
+  replaced footer factory, and `resetExtensionUI` restores the built-in footer on `/reload` and
+  before session replacement. Installing per headful `session_start` is therefore safe — perk's
+  once-only `footerInstalled` guard is retired (`extension/index.ts` installs on every headful
+  `session_start`, so each install's closures capture the *current* event's `ctx`; pinned by a
+  same-activation re-emit test via the harness seams `footerInstallCount()` /
+  `emitSessionStart()`).
 - **The footer is a single last-wins slot** — extensions receive `session_start` in settings load
   order, so a later-loaded package calling `ctx.ui.setFooter` silently replaces perk's footer (no
   error, no log). Borrowed packages must never call it; see `workflow/borrowed-packages.md` for
@@ -83,6 +85,11 @@ publishing via `setStatus` even though the footer renders the objective segment 
   verbatim strings with no theme hook — structurally incompatible with the
   never-pre-bake-theme-colors law. Re-check that API constraint before any "brand the spinner"
   idea.
+- **The fullscreen glitch symptoms remain UNATTRIBUTED.** The A–E attribution matrix is an
+  interactive visual protocol a headless session cannot run; the full protocol + blank results
+  template is posted on issue #1654 for an operator pass. Until it runs, nothing establishes
+  whether streaming flicker / footer loss / cursor oddities are pi's, perk's, or foreign-package
+  interplay — the pi-0.84 mirror-parity work was hygiene, not the diagnosed fix.
 
 ## Widget / windower patterns
 
@@ -202,7 +209,7 @@ the first production console-swap; prior swaps were all test-local):
 
 - `extension/surfaces/surfaces.ts`, `extension/surfaces/report.ts` — the surfaces module (the only sanctioned
   rich-UI call sites)
-- `extension/index.ts` — single-value perk-status handle creation, once-only footer install
+- `extension/index.ts` — single-value perk-status handle creation, per-`session_start` footer install
 - `extension/testing/harness.ts` — factory-widget/placement capture, `invokeCommand`
 - `shared/contracts.md` P2.T2c — the RPC dual-publish contract
 - `docs/design/tui-charter.md` — the charter the surfaces converge to
