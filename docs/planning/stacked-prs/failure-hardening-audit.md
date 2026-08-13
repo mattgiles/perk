@@ -71,7 +71,7 @@ base retarget, stack create/append, merge submission), while the resume contract
 idempotent re-upserts (the PR create/discovery pass, `update_pr_body`, checkpoint
 merge-writes) are allowed and never asserted to zero.
 
-### PUBLISH (`tests/test_delivery_publish.py`; all **raise**-technique — verified no exception-path durable cleanup)
+### PUBLISH (`tests/test_delivery_publish.py`; **raise**-technique except P7 — verified no exception-path durable cleanup)
 
 | Cell | Died… | Evidence |
 | --- | --- | --- |
@@ -85,7 +85,7 @@ merge-writes) are allowed and never asserted to zero.
 | P4b | after a stack **append** (layer ≥ 3), before the refetch | `test_crash_after_stack_append_before_refetch_resumes_without_second_append` |
 | P5 | after the plan-header identity write | `test_crash_after_identity_write_resumes_without_duplicate_mutation` (pre-existing) |
 | P6 | after the checkpoint write, before `completed` | `test_crash_before_the_completed_append_converges_on_rerun`; the checkpoint-write window itself: `test_crash_at_checkpoint_write_resumes_idempotently` (pre-existing) |
-| P7 | after `completed` | `test_rerun_after_completed_is_a_converged_noop` |
+| P7 | after `completed` | `test_rerun_after_completed_is_a_converged_noop` (construct — a genuine full run + ordinary rerun, no injected raise; the SYNC S5 row's technique) |
 
 The publish stateful fake grew fail-once hooks at each PR-effect and stack-mutation seam
 (`push_boom`, `create_pr_boom`, `after_effect_boom{reopen,retarget,body}`, `outcome_boom`,
@@ -121,7 +121,7 @@ arms: `test_resume_adopt_all_after_rolls_forward_record_driven`,
 | L1 | after `append_prepared` (read back), before the merge-async submit | recover's pre-handle rows: `test_no_handle_async_young_is_monotonic_only_with_the_remaining_wait`, `test_no_handle_unknown_age_is_monotonic_only_never_a_crash`, `test_terminal_probe_all_before_classifies_all_before` |
 | L2 | after a submit with a pending reply, before the `accepted` append | same pre-handle window (no handle exists): `test_no_handle_async_aged_is_observation_authoritative` (the 24h lifetime turns observation authoritative), `test_no_handle_async_young_is_monotonic_only_with_the_remaining_wait` |
 | L2m | after a submit whose reply is immediately `merged` (no `accepted` ever), before verification | `test_no_handle_async_aged_is_observation_authoritative` + prefix/all-after classification from pure observation; the handle×shape completeness pin `test_handle_by_shape_table_is_complete` |
-| L2s | after the dynamic singleton's `merge_direct` mutation (no handle exists on this path), before verification | `test_singleton_record_is_observation_authoritative_and_never_prefix`, `test_singleton_handle_row_is_observation_authoritative` |
+| L2s | after the dynamic singleton's `merge_direct` mutation (no handle exists on this path), before verification | the non-dry convergence proof `test_singleton_merge_direct_death_before_verification_concludes_on_recover` (post-crash merged-singleton state → real recover rolls forward: one completed under the same operation, finalize, close — and no probe/accepted/re-submission, which the recover surface cannot even express); classification arms `test_singleton_record_is_observation_authoritative_and_never_prefix`, `test_singleton_handle_row_is_observation_authoritative` |
 | L3 | after `accepted`, before the poll concludes | `test_live_probe_is_in_flight_for_every_shape` (probe in-flight → monotonic only), `tests/test_delivery_cross_machine.py::test_land_accepted_handle_concludes_from_a_fresh_clone` (probe merged → concluded from clone B); in-process analogue `tests/test_delivery_landing.py::test_poll_timeout_stays_pending_with_accepted_and_no_terminal` |
 | L4 | after per-PR merged verification, before `completed` | `test_land_all_after_rolls_forward_automatically`, `test_land_all_after_with_probe_merged_records_the_reported_sha`; the degrade arm `test_roll_forward_completed_append_failure_degrades_and_the_rerun_converges` |
 | L5 | after `completed`, mid per-layer finalization | `test_convergence_refinalizes_every_covered_corroborated_layer` (also proves the close conclusion), `test_roll_forward_finalize_failure_is_isolated_and_loud`; in-process analogue `tests/test_delivery_landing.py::test_finalize_failure_notes_and_remaining_layers_still_finalize` |
@@ -165,8 +165,16 @@ fail-closed while any LAND is unresolved or any node non-terminal; never on `--d
      the no-drift acceptance. *Recorded caveat:* Pydantic's serialization-mode JSON schema
      still declares `error` as a nullable property — it cannot express conditional omission —
      so the snapshot is a **drift tripwire, not an instance validator**.
-  2. The L7 close-then-evidence fix above (recover's `reconcile_evidence` **population rule**
-     widened — no new envelope field; `ObjectiveStackRecoverOut` already carried it).
+  2. The L7 close-then-evidence fix above — **cross-plane, two seams**: recover's
+     `reconcile_evidence` **population rule** widened (no new envelope field;
+     `ObjectiveStackRecoverOut` already carried it), **and** the warm consumer's
+     `driveStackReconcile` gate widened from `objective_closed === true` to evidence
+     presence (`extension/doors/objectiveStack.ts`). The gate widening is the re-fire the
+     plan's Key change 3 mandates ("the attached evidence re-fires the existing
+     `driveStackReconcile` consumer exactly as a fresh close transition would"): the
+     re-emission honestly reports `objective_closed: false`, so without the consumer-side
+     widening the repair would be dead code. Recorded on the plan issue as the edit's
+     cross-plane scope (contracts §8.51/§8.56 amended in the same turn).
 - Every other enumerated proof is expressible in the existing `status`/`sync`/`recover`/`land`
   envelopes — no envelope shape changed anywhere else.
 - **Out of scope (observed, recorded):** the doctor envelope was not the repo's only

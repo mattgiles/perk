@@ -1112,7 +1112,7 @@ test("driveStackReconcile: an out-of-vocabulary objective id never drives", () =
   assert.equal(calls.length, 0);
 });
 
-test("driveStackReconcile: streaming → followUp; gates hold (not closed / empty / dry-run)", () => {
+test("driveStackReconcile: streaming → followUp; gates hold (empty evidence / dry-run)", () => {
   const cwd = scaffoldRepo();
   const streamingCtx = {
     cwd,

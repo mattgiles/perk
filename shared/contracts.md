@@ -7163,7 +7163,9 @@ finalization-convergence pass; the landing mutation itself is §8.56).
 `unsupported_operation_kind` remains only for the impossible-by-construction TRANSFER
 abandon fallback. Cold-envelope decodes on the warm surface stay
 render-only — nothing is appended to workflow-state; the one drive is §8.56's reconcile
-drive (`driveStackReconcile`), gated on `objective_closed` + non-empty evidence.
+drive (`driveStackReconcile`), gated on non-empty `reconcile_evidence` — evidence
+presence, never `objective_closed` (§8.56), so this section's close-then-evidence
+crash-repair re-emission (which honestly rides `objective_closed: false`) re-fires it.
 
 ## §8.52 · Workflow convergence (automatic propagation, finalization, supervision, and reviewability)
 

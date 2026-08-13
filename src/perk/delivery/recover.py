@@ -1191,7 +1191,7 @@ def _converge_finalization(rec: _Recover, train: DeliveryTrain, effects: _LandEf
     closed = landing.state_aware_close(rec.store, train.objective_id, effects.notes)
     if closed:
         effects.objective_closed = True
-    elif not _closed_and_complete(rec, train.objective_id):
+    elif not _closed_and_complete(rec, train.objective_id, effects.notes):
         return
     if effects.reconcile_evidence is None:
         evidence = landing.assemble_land_evidence(fold)
@@ -1210,16 +1210,29 @@ def _converge_finalization(rec: _Recover, train: DeliveryTrain, effects: _LandEf
             )
 
 
-def _closed_and_complete(rec: _Recover, objective_id: str) -> bool:
+def _closed_and_complete(rec: _Recover, objective_id: str, notes: list[str]) -> bool:
     """Whether the objective reads CLOSED with every node terminal — the death-after-close
-    crash signature the evidence re-emission repairs. A read failure or an OPEN/partial
-    state answers ``False`` (the close arms already reported their own loud notes); the
-    fresh fetch corroborates the CURRENT state, never this invocation's earlier reads."""
+    crash signature the evidence re-emission repairs. The fresh fetch corroborates the
+    CURRENT state, never this invocation's earlier reads. An OPEN/partial state answers
+    ``False`` silently (the close arms already reported their own loud notes); a FAILED
+    fresh read answers ``False`` loudly — a transient backend error must never silently
+    defeat the crash repair (the operator reruns recover instead of trusting a clean
+    no-evidence exit)."""
     try:
         state = rec.store.get_objective(objective_id=objective_id)
-    except ObjectiveStoreError:
+    except ObjectiveStoreError as exc:
+        notes.append(
+            "reconcile-evidence re-emission skipped: the fresh objective corroboration "
+            f"read failed ({exc}) — rerun recover to retry"
+        )
         return False
-    if state is None or state.state == "open":
+    if state is None:
+        notes.append(
+            f"reconcile-evidence re-emission skipped: objective #{objective_id} was not "
+            "found on the fresh corroboration read — rerun recover to retry"
+        )
+        return False
+    if state.state == "open":
         return False
     return all(node.status in objective.TERMINAL for node in state.nodes)
 
