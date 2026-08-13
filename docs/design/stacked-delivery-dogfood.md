@@ -493,7 +493,49 @@ Executed 2026-08-13 (dev checkout, pinned binary).
 
 ### Step 3 — layer 2 (the second-clone arm; the stack CREATE)
 
-*(pending — clone parent derivation, PR facts, journal pair, `membership: exact` observation.)*
+Executed 2026-08-13. Planned locally (dev checkout); **implemented + published from the second
+clone** (`~/temp/perk`, census above).
+
+- **Warm planning** (`perk objective plan 1698`, dev checkout): plan issue **#1704**, created
+  `2026-08-13T05:06:30Z`; fresh per-session run id (`01KZWQD0A8BF7AYC5PYGSQCHPM`); the header
+  trio (`objective_id: '1698'`, `objective_node_id: '2.1'`,
+  `delivery_lineage: 01KZWNGE6A…`) plus `predecessor_plan_id: '1699'`.
+- **Second-clone interactive implement** (`perk implement 1704` in `~/temp/perk`;
+  operator-attested 2026-08-13, executed as pinned). The clone worktree's
+  `.perk/workflow/layer-context.json` (non-authoritative) — the parent derived from the
+  **reconstructed train** (nothing local to consult; fresh-checkout / durable-authority
+  independence):
+
+  ```json
+  { "parent_branch": "plan-1699", "parent_sha": "860ef57fb064f1415b90a8ad18022a45157f177f",
+    "predecessor_plan_id": "1699", "base": "main", "branch": "plan-1704",
+    "prepared_at": "2026-08-13T05:06:55Z" }
+  ```
+
+  `parent_sha` = layer 1's `published_head_sha` exactly. Implement run id journaled on the
+  header (`impl_run_ids: [01KZWR89S7NMZR6THGPV3QW1NH]`). *The launch's "reconstructing the
+  delivery train" progress lines were not captured from the session — the layer-context
+  record above stands as the durable half of this fact (evidence-gap noted).*
+- **`run_ci`**: operator-attested (2026-08-13) — in-session green before `/submit`; excerpt
+  not captured (same gap class as Step 2).
+- **Publish (warm `/submit` from the clone — the stack CREATE):**
+  - PR facts: `gh pr view 1705` → `{"number": 1705, "state": "OPEN", "isDraft": true,
+    "baseRefName": "plan-1699", "headRefName": "plan-1704",
+    "headRefOid": "5234991b386b06f70c6572bdbb93911b4ef5d67e", "mergedAt": null}` — base = the
+    layer-1 branch.
+  - Journal (issue #1698): operation **01KZWSP0PEW1KK1GRFAAXVZJKR**, `prepared` (posted
+    05:31:56Z) → `completed` (created 05:32:09Z; `observed: {branch_sha: 5234991b…, pr: 1705,
+    stack: [1701, 1705]}`).
+  - **Native stack registered:** `gh api 'repos/mattgiles/perk/stacks?pull_request=1705'` →
+    stack **#1706** (`"base": {"ref": "main"}`, `"open": true`, created 05:32:05Z), members
+    bottom→top `[#1701 @ plan-1699 860ef57f…, #1705 @ plan-1704 5234991b…]`.
+  - Checkpoint pair on the #1704 header: `parent_checkpoint_sha: 860ef57f…`,
+    `published_head_sha: 5234991b…`.
+- **Train read** (`perk objective stack status 1698 --json`): `published_prefix_len: 2`;
+  layers 1.1 and 2.1 both `publication: "published"`, **`membership: "exact"`**;
+  `observed_pr_base` = `expected_pr_base` (`main` / `plan-1699`); `unresolved_operation:
+  null`; `blockers: []`; `next_build_ready: {"node_id": "3.1", "ready": true, "reason":
+  null}`.
 
 ### Step 4 — layer 3 (the APPEND)
 
