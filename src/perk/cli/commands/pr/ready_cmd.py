@@ -67,7 +67,9 @@ def ready_pr(ctx: click.Context, *, plan: str | None, dry_run: bool, as_json: bo
                 # One canonical read: the selection's fetched state replaces the command's own
                 # plan re-read below (stacked train reconstruction keeps its per-layer reads).
                 selected = select_plan(main_repo_root(repo_root), plan)
-        result = _pr_ready_impl(repo_root=repo_root, dry_run=dry_run, selected=selected)
+        result = _pr_ready_impl(
+            repo_root=repo_root, dry_run=dry_run, selected=selected, plan_given=plan is not None
+        )
     except (delivery.LayerError, delivery.TrainReconstructionError) as exc:
         fail(
             ctx,
@@ -113,15 +115,20 @@ def _no_plan_ref_error() -> UserFacingCliError:
 
 
 def _pr_ready_impl(
-    *, repo_root: Path, dry_run: bool, selected: SelectedPlan | None = None
+    *,
+    repo_root: Path,
+    dry_run: bool,
+    selected: SelectedPlan | None = None,
+    plan_given: bool = False,
 ) -> PrReadyResult:
     """The ready mutation. ``selected`` is the explicit-PLAN selection (ref + the one already-
     fetched canonical state); without it the invoking checkout's ``cache.plan-ref`` is the
-    selector and the command performs its own single plan read."""
+    selector and the command performs its own single plan read. ``plan_given`` marks an explicit
+    PLAN that was parse-validated but (on ``--dry-run``) deliberately not fetched."""
     if dry_run:
         # Offline resolve-only preview (no cache requirement for an explicit PLAN, which was
-        # already parse-validated by the caller).
-        if selected is None and cache.read_plan_ref(repo_root) is None:
+        # already parse-validated by the caller — the dry run performs no backend read).
+        if not plan_given and cache.read_plan_ref(repo_root) is None:
             raise _no_plan_ref_error()
         return PrReadyResult(
             pr=github.PullRequest(

@@ -193,8 +193,26 @@ machine-readable report.
 
 The flat top-level launchers: the one earned working verb `implement`, plus the hot-path PR
 aliases. Each opens a primed `pi` session and accepts `--worktree`, `--dry-run`, and `--remote`
-(dispatching only for the remotely runnable stages, `implement` and `address`); passthrough
-`pi_args` are forwarded to `pi`.
+(dispatching only for the remotely runnable stages, `implement` and `address`).
+
+**Plan selection (one seam, fixed precedence).** The plan-selecting launchers resolve their plan
+from, in order: an explicit positional `PLAN` (canonical issue authority — one backend read; a
+real launch also updates the **main-checkout** active-plan selector for later no-argument runs) ›
+an explicit existing `--worktree`'s own binding › the invoking checkout's active saved plan
+(inside a plan worktree, that worktree's own plan). `--worktree NAME` changes only the checkout
+*directory* — never plan identity or the `plan-<id>` branch — and cannot combine with `--remote`
+(use the positional `PLAN`; no-argument `--remote` keeps the active-plan read). An existing
+checkout is **validated before reuse** (registered worktree, correct `plan-<id>` branch, binding
+equal to the selection) and refused with a typed error (`worktree_unbound`,
+`worktree_branch_mismatch`, `worktree_plan_mismatch`) rather than ever silently rebound or reset.
+A **missing** checkout for the reuse launchers (`submit`/`address`/`land` — not `learn`) is
+**restored** non-destructively from the existing `origin/plan-<id>` branch (see the setup-hook
+note in [Configuration](configuration.md#worktree)).
+
+**Pass-through grammar (`implement`/`address`).** Before the first bare `--`, perk accepts only
+its own options plus at most one positional `PLAN`; everything after the `--` is delivered to
+`pi` verbatim, in order — e.g. `perk address 1699 -- --model provider/model`. Unknown or extra
+pre-separator tokens are rejected with usage guidance.
 
 perk-launched sessions run the borrowed [pi-fff](https://github.com/dmtrKovalenko/fff.nvim)
 search extension in **override mode** (`find`/`grep` become FFF-backed — pre-indexed,
@@ -206,7 +224,9 @@ export `PI_FFF_MODE=tools-and-ui` (or any valid mode) to override.
 Do the work on a branch; requires fresh context (cold-only). `PLAN` is an optional plan issue id
 (`42`, `#42`, or `ENG-123`) — or the plan's **issue URL** (GitHub `.../issues/N`; Linear
 `.../issue/IDENT` or `.../project/SLUG`), which is peeled to the id; omit it to implement the active
-saved plan in this repo. The worktree
+saved plan in this repo (selection precedence and the strict `--` pass-through grammar are above).
+An explicit `PLAN` drives the launch directly and updates only the main-checkout selector —
+invoked from inside a linked worktree it never rewrites that worktree's own binding. The worktree
 branch is cut from the plan's pinned base (`origin/<base>`) when the plan declared one, else
 `origin/<trunk>` (see
 [Target a non-default base branch](../how-to/target-a-non-default-base-branch.md)). Adds `--base`
@@ -218,11 +238,12 @@ flag wins verbatim over the plan's pinned base but does not change the PR's merg
 Flat alias for [`perk pr submit`](#perk-pr-submit) (the canonical entry). Push the branch and open
 a draft PR (the implement → submit boundary); a session by default, the worker under `--json`.
 
-### `perk address`
+### `perk address [PLAN]`
 
-Flat alias for [`perk pr address`](#perk-pr-address) (the canonical entry). Classify PR review
+Flat alias for [`perk pr address`](#perk-pr-address-plan) (the canonical entry). Classify PR review
 feedback in an isolated child and resolve the threads (launcher-only); `--preview` classifies the
-feedback and takes no action.
+feedback and takes no action. `PLAN` selects the plan canonically (`perk address 1699` is a
+selector, never a first user message).
 
 ### `perk land`
 
@@ -230,11 +251,12 @@ Flat alias for [`perk pr land`](#perk-pr-land) (the canonical entry). Merge the 
 and reconcile, setting the pending-learn marker (submit → land); a session by default, the worker
 under `--json`. A learn-docs consolidation plan is exempt: no marker, no learn pass.
 
-### `perk ready`
+### `perk ready [PLAN]`
 
-Flat alias for [`perk pr ready`](#perk-pr-ready) (the canonical entry). Mark the active plan's
+Flat alias for [`perk pr ready`](#perk-pr-ready-plan) (the canonical entry). Mark a plan's
 draft PR ready for review (the deliberate review gate) — a worker-only command (`--dry-run` /
-`--json`).
+`--json`). `PLAN` selects the plan canonically and works from the repository root (no worktree
+needed); omitted, the invoking checkout's active saved plan is used.
 
 ## Command groups
 
@@ -335,11 +357,16 @@ there is no `adopted_from` stamp). A non-existent path falls through to the issu
 ### `perk plan watch PLAN`
 
 Live-watch plan `PLAN`'s implementation diff in [hunk](https://github.com/modem-dev/hunk)'s
-watch mode while the plan is being implemented. perk resolves the plan's `plan-<id>` worktree
+watch mode while the plan is being implemented. perk positions the plan's `plan-<id>` worktree
+through the shared validated positioner
 (`PLAN` is backend-agnostic: a GitHub number, a Linear identifier like `SAV-456`, or the plan's
 issue URL), computes the diff base, then chdirs into the worktree and **execs**
 `hunk diff <sha12> --watch [HUNK_ARGS…]` — the terminal becomes a live, auto-reloading view of
-everything the plan has changed (commits **and** uncommitted edits).
+everything the plan has changed (commits **and** uncommitted edits). A valid local worktree is
+reused as-is; a **missing** one is restored from the existing `origin/plan-<id>` branch (then
+the `[worktree] setup` hook runs, marker-gated); an existing checkout that fails validation
+(unbound, wrong branch, bound to another plan) is a typed refusal — watch never rebinds or
+resets a checkout.
 
 The diff base resolves by a first-match ladder:
 
@@ -380,15 +407,22 @@ for an extension-free watch, run `hunk diff <base> --watch --no-extensions` in t
 yourself).
 
 `--dry-run` resolves and prints the worktree + the composed hunk command (including the absolute
-bundled `--extension` path) without launching, minting, or creating anything (exit 0). A real
+bundled `--extension` path) without launching, minting, creating, or **fetching** anything
+(exit 0): for an existing worktree the command composes from local refs only (degrading to the
+working-tree-only fallback with a note when the base is unresolvable offline); for a missing
+worktree it reports the planned restore + setup and an explicit "command unavailable until
+restoration" status. A real
 run **hands the process off to hunk** — perk becomes hunk, and the terminal ultimately receives
 hunk's exit status. Pre-launch refusals exit 1 (2 outside a git repo).
 
-Entirely offline-capable (no issue-backend read; the fetch is best-effort — offline falls back to
-the last-known `origin/*` ref with a warning), and correct from **anywhere in the repo**,
+Offline-capable for a valid local worktree (no issue-backend read; the fetch is best-effort —
+offline falls back to
+the last-known `origin/*` ref with a warning — canonical/backend reads happen only on a real run
+that must restore a missing checkout), and correct from **anywhere in the repo**,
 including from inside a linked worktree (the worktree root is resolved against the main
-checkout). Failure arms: a missing `plan-<id>` worktree is an error naming the fix (run
-`perk implement <id>` or `perk plan resume <id>` first — watch never creates worktrees); a
+checkout). Failure arms: a missing `plan-<id>` worktree with no restorable remote branch is a
+typed `worktree_restore_failed` error (run `perk implement <id>` first if the plan was never
+pushed); a
 missing `hunk` binary names the install hint (`npm i -g hunkdiff`); a missing bundled feedback
 extension means a broken perk installation (reinstall perk — `perk doctor` reports it as the
 `watch-feedback` check).
@@ -908,13 +942,21 @@ cascade-only `operation {kind, operation_id, abandoned_operation_id, resumed, no
 notes[]}` block; flat `operation_id` remains the compatibility alias. Incremental plans are
 untouched (the fields are null).
 
-### `perk pr address`
+### `perk pr address [PLAN]`
 
 Classify PR review feedback (in an isolated child), publish committed fixes, then resolve the
 threads — launcher-only (no merged `--json` worker; its warm finalizer runs `pr submit` before the
-unchanged `pr resolve-threads` mechanical half). `--preview`
+unchanged `pr resolve-threads` mechanical half). `PLAN` is an optional plan issue id or pasted
+issue URL: it selects the plan canonically (one backend read), drives the launch directly, and on
+a real launch updates only the main-checkout selector; omit it to address the active saved plan
+(inside a plan worktree, that worktree's own binding). `perk address 1699 --remote` dispatches
+exactly the selected plan; `--worktree` + `--remote` is refused. A missing `plan-<id>` checkout
+is restored from the existing `origin/plan-<id>` branch; typed refusals (`plan_not_found`,
+`worktree_unbound`, `worktree_branch_mismatch`, `worktree_plan_mismatch`,
+`worktree_restore_failed`) exit 1 before any launch. `--preview`
 classifies the feedback only and takes no action (the warm `/address --preview` gesture; local-only,
-inert on `--remote`). Flat alias: [`perk address`](#perk-address).
+inert on `--remote`). pi args go after the bare `--` (the shared pass-through grammar). Flat
+alias: [`perk address`](#perk-address-plan).
 
 ### `perk pr land`
 
@@ -931,11 +973,15 @@ wins) before any mutation as `stacked_plan`: stacked layers land only as one ato
 individually (`--dry-run` refuses on the cached ref while staying offline). Flat
 alias: [`perk land`](#perk-land).
 
-### `perk pr ready`
+### `perk pr ready [PLAN]`
 
-Mark the active plan's draft PR ready for review (the deliberate review gate) — a **worker-only**
-command (not a merged L+W: `ready` is not a registry stage and has no launcher). `--dry-run`
-resolves the PR without marking it ready. For a stacked plan, the worker reconstructs the train and
+Mark a plan's draft PR ready for review (the deliberate review gate) — a **worker-only**
+command (not a merged L+W: `ready` is not a registry stage and has no launcher). `PLAN` is an
+optional plan issue id or pasted issue URL: it selects the plan canonically with one backend
+read, so `perk pr ready 1699` works from the repository root — ready needs no source files, no
+worktree, and never writes the active-plan selector; omitted, the invoking checkout's own saved
+plan is used (inside a plan worktree, that worktree's binding). `--dry-run`
+resolves the PR without marking it ready (an explicit `PLAN` is validated but not fetched). For a stacked plan, the worker reconstructs the train and
 fetches the projection-correlated PR: the target must be exactly published; marking a draft also
 requires no unresolved operation and no structural train blocker (unrelated operational drift does
 not block). An already-ready PR revalidates target identity/publication but skips those global
@@ -944,7 +990,7 @@ wrong-base, or otherwise drifted refuses as `layer_not_published`; if the projec
 published but the freshly fetched PR closed after reconstruction, that race refuses as
 `pr_not_open`. Other typed failures include `unresolved_operation` and `structural_blockers` (plus
 `no_pr` for a vanished correlated PR).
-`--json` emits the unchanged machine shape. Flat alias: [`perk ready`](#perk-ready).
+`--json` emits the unchanged machine shape. Flat alias: [`perk ready`](#perk-ready-plan).
 
 ### `perk pr check`
 

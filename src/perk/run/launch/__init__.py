@@ -334,7 +334,7 @@ def launch_stage(
     _warm_extension_install(ctx)
     _materialize_into_worktree(ctx)  # self-gates: worktree stages only
     _emit_linear_run_started(ctx)  # self-gates: implement only
-    _run_setup_hook(ctx)  # self-gates: freshly created + setup configured
+    _run_setup_hook(ctx)  # self-gates: marker-gated (set at create/restore materialization)
     _exec_pi(ctx)  # the CLI *becomes* pi — nothing after this runs
 
 

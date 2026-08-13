@@ -8,9 +8,10 @@ sidebarGroup: "Core workflow"
 
 # How to run a worktree setup hook
 
-Declare `[worktree] setup` commands once and have every **freshly created** perk worktree run them —
-in order, before `pi` starts — so a new session begins with a ready environment (dependencies
-installed, codegen done, etc.).
+Declare `[worktree] setup` commands once and have every **newly materialized** perk worktree —
+freshly created, or restored from the remote plan branch — run them in order, before `pi`
+starts, so a new session begins with a ready environment (dependencies installed, codegen
+done, etc.).
 
 **Prerequisite:** a `.perk/config.toml` (run [`perk init`](../reference/cli.md#perk-init) once if you
 have not). The `[worktree]` table is written there by default.
@@ -30,19 +31,21 @@ have not). The `[worktree]` table is written there by default.
    worktree as its working directory. Its output is **captured** — the launch narration shows each
    command as a `$ …` sub-bullet — and the full output is printed only if the command fails.
 
-2. **Trigger it.** The hook fires whenever perk **freshly creates** a worktree:
-   - a cold-door stage launch (e.g. `perk implement`) that creates the `plan-<id>` worktree, and
+2. **Trigger it.** The hook fires whenever perk **newly materializes** a worktree:
+   - a cold-door stage launch (e.g. `perk implement`) that creates the `plan-<id>` worktree,
+   - a launch (`perk submit`/`address`/`land`, `perk plan watch`) that **restores** a missing
+     worktree from the existing remote plan branch, and
    - a manual `perk worktree create NAME`.
 
-   It is **skipped** on idempotent resume/reuse (the worktree already exists), on `--dry-run` (which
-   only previews the planned commands), and on the remote runner (CI environment setup belongs to
-   the GitHub Actions composite action).
+   It is **skipped** on valid local resume/reuse (the worktree already exists and validates), on
+   `--dry-run` (which only previews the planned commands), and on the remote runner (CI
+   environment setup belongs to the GitHub Actions composite action).
 
-3. **Handle a failure.** If any setup command exits non-zero, exceeds its 10-minute cap, or
-   cannot start because `bash` is missing, perk **aborts the launch** before starting `pi` and
-   reports the failing command. The worktree is left in place. A normal retry reuses that
-   worktree and skips the hook, so fix the problem and run the failed and not-yet-run setup
-   commands yourself in the worktree before retrying the stage.
+3. **Handle a failure.** If any setup command exits non-zero (or times out, or `bash` is missing),
+   perk **aborts the launch** before starting `pi` and reports the failing command. The worktree is
+   left in place carrying a pending-setup marker — fix the problem, then re-run the same stage:
+   the existing worktree is reused (idempotent) and setup **retries** (the marker clears only on
+   success, so a failed setup is never silently skipped).
 
 4. **Override per-user (optional).** `[worktree] setup` is overlay-aware: a `local.toml`
    `[worktree] setup` array **replaces** the committed one wholesale (e.g. to point at a personal

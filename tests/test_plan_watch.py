@@ -314,6 +314,16 @@ def test_missing_worktree_dry_run_reports_planned_restore_without_network(watch_
     assert not (watch_env.root / ".worktrees" / "plan-99").exists()
 
 
+def test_missing_worktree_dry_run_previews_configured_setup(watch_env):
+    cfg = watch_env.root / ".perk"
+    cfg.mkdir(parents=True, exist_ok=True)
+    (cfg / "config.toml").write_text('[worktree]\nsetup = ["uv sync"]\n', encoding="utf-8")
+    result = _invoke(["99", "--dry-run"])
+    assert result.exit_code == 0, result.output
+    assert "would run setup: uv sync" in result.stderr
+    assert "unavailable until restoration" in result.stderr
+
+
 def test_existing_worktree_dry_run_composes_from_local_refs_only(watch_env):
     # The no-fetch dry-run mode for an existing worktree: the hunk command composes from local
     # refs only — zero fetches, zero local-ref mutation.
@@ -503,3 +513,63 @@ def test_read_layer_parent_sha_schema_mismatch_is_none(tmp_path):
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text("{}", encoding="utf-8")
     assert cache.read_layer_parent_sha(tmp_path) is None
+
+
+# --- restore-on-missing: real-git integration (the exact stacked base) -----------------------
+
+
+def test_missing_worktree_real_run_restores_and_stacked_base_is_exact(
+    git_repo_with_remote, monkeypatch
+):
+    # A real run with a missing checkout: canonical lookup → non-destructive restore from
+    # origin/plan-42 → layer-context rebuilt from the checkpoint pair → the layer-arm diff base
+    # is the EXACT recorded parent sha (never a degraded whole-stack merge-base).
+    import subprocess
+
+    from perk.backends.github import plans
+
+    clone, _remote, _advance = git_repo_with_remote
+    monkeypatch.chdir(clone)
+    parent_sha = subprocess.run(
+        ["git", "rev-parse", "main"], cwd=clone, check=True, capture_output=True, text=True
+    ).stdout.strip()
+    subprocess.run(["git", "checkout", "-q", "-b", "plan-42", "main"], cwd=clone, check=True)
+    (clone / "layer.txt").write_text("layer\n", encoding="utf-8")
+    subprocess.run(["git", "add", "."], cwd=clone, check=True)
+    subprocess.run(["git", "commit", "-qm", "layer work"], cwd=clone, check=True)
+    remote_sha = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=clone, check=True, capture_output=True, text=True
+    ).stdout.strip()
+    subprocess.run(["git", "push", "-q", "origin", "plan-42"], cwd=clone, check=True)
+    subprocess.run(["git", "checkout", "-q", "main"], cwd=clone, check=True)
+    subprocess.run(["git", "branch", "-qD", "plan-42"], cwd=clone, check=True)
+
+    header: dict[str, object] = {
+        "delivery_lineage": "01LINEAGE",
+        "objective_id": "500",
+        "objective_node_id": "1.1",
+        "parent_checkpoint_sha": parent_sha,
+        "published_head_sha": remote_sha,
+    }
+    monkeypatch.setattr(
+        plans,
+        "get_plan",
+        lambda **k: plans.PlanState(
+            number=42, url="https://gh/o/r/issues/42", title="T", header=header, pr=None
+        ),
+    )
+    monkeypatch.setattr(watch_cmd, "hunk_cli_path", lambda: HUNK_PATH)
+    monkeypatch.setattr(watch_cmd, "hunk_feedback_extension_path", lambda: Path(EXT_PATH))
+    execs: list[list[str]] = []
+    monkeypatch.setattr(watch_cmd.os, "chdir", lambda _p: None)
+    monkeypatch.setattr(watch_cmd.os, "execve", lambda _path, argv, _env: execs.append(list(argv)))
+    result = _invoke(["42"])
+    assert result.exit_code == 0, result.output
+    wt = clone / ".worktrees" / "plan-42"
+    assert wt.exists()
+    assert cache.read_plan_ref(wt) is not None  # bound by the positioner
+    # No setup hook configured ⇒ the marker-gated gesture cleared the marker immediately.
+    assert not cache.has_marker(wt, cache.SETUP_PENDING)
+    assert cache.read_layer_parent_sha(wt) == parent_sha  # the checkpoint pair, byte-exact
+    [argv] = execs
+    assert argv[:3] == ["hunk", "diff", parent_sha[:12]]  # the layer's own delta, exact

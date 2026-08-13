@@ -273,7 +273,9 @@ def test_full_lifecycle(monkeypatch: pytest.MonkeyPatch) -> None:
         result = runner.invoke(cli, ["implement", "ENG-2", "--dry-run"])
         assert result.exit_code == 0, result.output
         dry = json.loads(result.stdout)
-        assert dry["worktree"] == "plan-ENG-2"
+        # The unified launch preview reports the resolved worktree PATH; the name still derives
+        # from the backend-native identifier.
+        assert Path(dry["worktree"]).name == "plan-ENG-2"
         assert dry["plan_ref"]["pr_id"] == "ENG-2"
 
         # --- submit: header fields merged into the node-issue description -------------------
