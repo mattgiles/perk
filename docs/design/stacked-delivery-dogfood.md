@@ -55,6 +55,10 @@ deliverables touch disjoint files by construction (§ File-ownership boundary).
 > delegate to these same canonical workers. Node 6.2's own PR finishes with warm **`/land`**
 > (§ Sequencing).
 
+*(Era note, 2026-08-13: the quote's `perk address <plan>` shape is fiction — `perk address`
+takes no positional plan; the address leg runs `perk address --worktree plan-<id>`. Defect
+row d1.)*
+
 **Terminology note (fresh-checkout, not cross-machine).** The second-clone arm claims
 **fresh-checkout / durable-authority independence**: a second `git clone` on the same host, with
 no pre-existing worktrees, no local stack metadata, and no dispatch cache, driven purely from
@@ -268,7 +272,8 @@ layer-1 branch), the journal pair, the native-stack observation (`membership: ex
 real feedback on **layer 1's PR only after layer 3 has published**, pinned to layer-1-only
 files (`cli.md` / `in-session.md` — files no successor touches; node 2's one `objectives.md`
 edit is the delivery-section handoff line only, and feedback avoids that file).
-`perk address <plan-1>` resolves it and finishes through `finalize_address` → the
+`perk address --worktree plan-<layer-1-id>` (era-corrected — see defect d1; there is no
+positional plan argument) resolves it and finishes through `finalize_address` → the
 trigger-scoped suffix cascade republishes layers 2–3. Record: cascade journal records, all
 three new head SHAs, PR settle, thread resolution (`gh api`), `stack status` clean.
 **No-feedback branch:** an editorial-polish pass is legitimate, wanted feedback on
@@ -648,7 +653,7 @@ Every incident hit during the gate, its diagnosis artifacts, and its disposition
 
 | # | Incident | Diagnosis artifacts | Disposition |
 |---|----------|---------------------|-------------|
-| — | *(none yet)* | | |
+| d1 | the address leg's pinned command shape was fiction: `perk address 1699` selects no plan — positional args are `PI_ARGS` forwarded to pi (so `1699` became the session's first user message) and positioning fell back to the ACTIVE cache plan-ref (plan-1707, the most recent implement session), opening an address session for the wrong plan in the plan-1707 worktree. Compounding finding from the sanctioned `--dry-run`: even with `--worktree plan-1699`, the seeded prompt names the active-cache plan (`…plan github #1707…`) — `_resolve_prompt` (`src/perk/run/launch/prompts.py`) falls back to `cache.read_plan_ref(repo_root)` when `--worktree` is given — while the session's real plan identity is the target worktree's materialized plan-ref (verified: `plan-1699/.perk/workflow/plan-ref.json` → `pr_id: "1699"`) | the stray session transcript (first user message `1699`, positioned in `…/.worktrees/plan-1707`); `perk address --dry-run --worktree plan-1699` rendering the `#1707` banner | **split**: the invocation half is an **execution-arm error** — the plan (and this record's first Part A revision) pinned a command shape that never existed; Part A Step 5 + the Decision-8 quote are era-corrected in place (the pinned-protocol-drift rule). The prompt-misnaming half is a **perk defect, non-blocking** (classification/finalize operate on the worktree's plan-ref; only the prompt banner lies) → follow-up issue per the failure policy. Stray session abandoned; *operator confirmation pending* that it ran no `finalize_address` and committed nothing. The correct leg re-runs as `perk address --worktree plan-1699` |
 
 ### Evidence gaps (dated operator attestations)
 
