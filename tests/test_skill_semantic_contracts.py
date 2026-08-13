@@ -71,6 +71,10 @@ def test_perk_learn_docs_sole_carried_detail():
     assert "no `: `" in norm
     assert "`docs/learned/clusters.yaml` registry" in norm
     assert "an **existing id** from that registry" in norm
+    # The distillation-first contract (its ONE full carrier is the big-docs bullet).
+    assert "## Distillation" in norm
+    assert "12,288 bytes" in norm
+    assert "fully inside the file's first 80 lines" in norm
     # consumed_learn semantics: no per-item subsetting; the on-land label.
     assert "no per-item subsetting" in norm
     assert "`perk:consolidated`" in norm

@@ -78,6 +78,18 @@ it. Document **reality**, not aspiration (workarounds, quirks, tech debt all bel
   path + a conceptual description) instead. Narrow exceptions: data-format shape examples
   (JSON/YAML/TOML), third-party API references (with a `## Sources` section), explicitly-marked
   anti-patterns, and CLI input/output examples.
+- **Distillation-first for big docs.** A learned doc whose raw file size is **strictly >
+  12,288 bytes** must open with a `## Distillation` section: the **first `##` body section**
+  (frontmatter, the `# ` H1 title, and intro prose may precede it), **≤ 30 lines** (the heading
+  line and interior blanks count; trailing blank separator lines don't), and **fully inside the
+  file's first 80 lines** — so `read` with `limit: 80` always captures it. Content: tight
+  bullets carrying the routing-relevant facts, each naming the body section where its detail
+  lives, closing with a one-line pointer flagging historical/chronicle sections; distill, don't
+  restate, and the One Code Rule applies inside the header. **Born-bounded rule**: when a NEW
+  doc — or an UPDATE — lands a doc over the threshold, author the header in the same edit.
+  Enforcement: `perk learn docs-check` hard-fails on a missing/non-conformant header (gate #4)
+  and the live-corpus pytest pins it in perk's own CI; the raw size itself stays an advisory
+  note only (a doc under the threshold is never checked).
 - **Light frontmatter.** Each doc opens with `title` (a short name), `read_when` (a one-line
   retrieval cue describing the situation in which a future agent should pull this doc), and —
   **when the repo has a `docs/learned/clusters.yaml` registry** (perk's own repo does; a repo
