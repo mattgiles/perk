@@ -240,6 +240,16 @@ drops the keys each path doesn't want (the manifest path injects `status=PENDING
 `extra="ignore"` drop `pr`) — exactly what the deleted `_tolerate` used to do. Bad-type field-path
 errors still raise (no `str ← int` row preserves the malformed-edge message contract).
 
+## Per-field mapping extraction beats an all-or-nothing lenient model when field independence matters
+
+A lenient parse model nukes **every** field if ANY declared field is invalid — fine for the
+learned/skill frontmatter edge (one bad field ⇒ treat the whole block as absent), wrong where a
+malformed foreign key (`cluster: [a, b]`) must never contaminate independent fields like
+`title`/`description`. Reading fields directly off the parsed mapping through a tiny
+`_str_or_none`-style helper gives per-field fallback for free and never reads unknown keys; when
+falling back to a body walk, strip the frontmatter block first so fence/mapping lines can't be
+mistaken for content. Anchor: the user-docs frontmatter read in `src/perk/learn/docs_scan.py`.
+
 ## Whole-file lenient parse + a separate content pass (the cluster-registry read)
 
 When reading an untrusted config-like file, **parse the WHOLE file through one lenient parse

@@ -63,6 +63,14 @@ statement; the skills are the detail tier — see `plan-review-flow.md`). Note a
 "factory flows still instructing an autonomous `plan_save`" list has fully emptied — every
 factory flow is review-first; §8.10 now records the terminal state.
 
+The carrier-move corollary: **moving a statement's canonical carrier requires sweeping every
+contracts section that *names* the old carriers, not just the sections being amended** — the
+carrier map is *referenced* in more sections than it is *defined* in (the §8.57
+authoring-family migration enumerated six sections; review still found stale carrier
+attributions in §8.10, §8.27, and §8.32). After a carrier move, grep `shared/contracts.md` for
+the old carrier identifiers — constant names, skill names, template paths. (Carrier-migration
+craft lives in `prompt-carrier-layering.md`.)
+
 **`shared/contracts.md` §-numbering is not contiguous.** §8.8 is skipped entirely and §8.10 was
 already taken (provider selection), so the headless worker contract landed as **§8.11**. Always **grep the
 existing `## §8.` headings in `shared/contracts.md` before assigning a section number** — do not trust

@@ -152,6 +152,14 @@ plan's deliverables depended on operator action after the first `/submit`), the 
   incomplete) and how to plan against them, see `workflow/doc-reconciliation.md`'s sequencing
   section.
 
+### Cross-node accounting when shared plumbing pre-delivers a later node's clause
+
+When plumbing lands a later node's deliverable early (e.g. widening the root `lint` script
+pre-delivered a later node's "wire site lint into `just lint`" clause because `just lint-js`
+delegates to the npm script), name the pre-delivery explicitly in the plan/PR so the later
+node's planner *verifies rather than re-wires* — no objective edit is needed when a deliverable
+merely lands early.
+
 ## A node can outgrow the objective's boundary line (out-of-order sibling landings)
 
 When sibling nodes land their contracts **out of roadmap order**, an earlier-numbered node can

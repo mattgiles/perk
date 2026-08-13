@@ -11,7 +11,7 @@ clusters:
   - id: subagent-orchestration
     rollup: "Spawning and orchestrating subagents — pi-subagents mechanics, agent defs, report waves, lane semantics, streaming."
   - id: toolchain-gotchas
-    rollup: "Lint/typecheck/test toolchain gotchas — Biome/tsc, ruff, ty, node:test determinism, test parallelism, worktree node_modules resolution."
+    rollup: "Lint/typecheck/test toolchain gotchas — Biome/tsc, ruff, ty, node:test determinism, test parallelism, worktree node_modules, Astro/Starlight docs-site."
   - id: code-migration
     rollup: "Moving code shapes safely — Python module→package splits, TS module moves, src-layout conversion, dot-directory path-root migrations."
   - id: doors-and-launch
@@ -25,8 +25,8 @@ clusters:
   - id: config-and-convergence
     rollup: "Repo wiring and convergence — config tables, init/doctor, external CLIs, borrowed packages, provider seams, skill bindings/exposure, distribution."
   - id: cross-plane-contracts
-    rollup: "Cross-plane/cross-path agreement — shared/ parsed contracts, prompt-template render parity, execution-path parity testing."
+    rollup: "Cross-plane/cross-path agreement — shared/ parsed contracts, prompt-template render parity, execution-path parity testing, §8.57 prompt-carrier layering."
   - id: knowledge-stewardship
     rollup: "Keeping the record true — the /learn evidence pipeline and harvest core, doc-reconciliation craft, session-audit expectation curation, binding design records."
   - id: quality-and-guards
-    rollup: "Code-quality disciplines — source-scan guard tests, test-pin sweeps, broad-catch narrowing, Pydantic boundary models."
+    rollup: "Code-quality disciplines — source-scan guard tests, test-pin sweeps, broad-catch narrowing, Pydantic boundary models, lease-fenced outbox delivery."

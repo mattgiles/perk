@@ -35,6 +35,8 @@ raw text.
 - `ctx.mode` is `"tui" | "rpc" | "json" | "print"`, defaults to `"print"`, set via
   `bindExtensions({ mode })`. Use it when print-vs-rpc-vs-json matters.
 - `ctx.hasUI` is the binary UI gate (`true` for tui+rpc). Orthogonal to `ctx.mode` and coarser.
+- **Interactive-only gating is `ctx.mode === "tui"`** (reconfirmed) — `hasUI` also admits RPC and
+  is never the interactive gate.
 
 `ExtensionMode` is **not re-exported from the package root** — only from the deep
 `./core/extensions/index`, which `package.json` `exports` does not expose as a subpath. **Restate the
@@ -184,6 +186,10 @@ extension as the path package `..`. Three consequences:
   (`Tool … not found`). Hand-authoring the retired fallback path "works" but validates nothing
   about the migration — and re-runs the exact hazard the migration killed. Reload/restart (or
   plan for the stale-session arm) before trusting guidance that names the new tool.
+- **`/reload` re-runs the extension factory from disk**, so a stateful session-scoped receiver
+  (e.g. a lease-holding inbox consumer) re-claims **in place** under the new code — the
+  sanctioned live-smoke path for such receivers (see
+  `workflow/lease-outbox-delivery.md`).
 
 ## pi print mode executes slash commands fully offline
 
@@ -237,6 +243,14 @@ Two adjacent facts:
 - An in-payload `respond` callback plus **one persistent result listener** resolving a
   `Map<reviewId, resolver>` avoids depending on the event-bus unsubscribe return and naturally
   ignores mismatched ids.
+
+## `pi.sendUserMessage` is void fire-and-forget — only the persisted entry is delivery evidence
+
+`pi.sendUserMessage` enqueues over in-memory queues (`steer`/`followUp`); an abort discards them
+(`clearQueue`). Call-return proves **nothing** — the only acceptance evidence that a message was
+delivered is the message appearing as a **persisted user-role `SessionMessageEntry` on the
+branch**. Verified against pi 0.84.1. (The "spy on the session instance" section below remains
+the offline assertion path for pinning that an injection was *attempted*.)
 
 ## Asserting `pi.sendUserMessage` injection offline: spy on the session instance
 

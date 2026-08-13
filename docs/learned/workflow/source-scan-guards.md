@@ -57,6 +57,45 @@ routes through the atomic seam (see `workflow/session-data.md`). Notable mechani
 - Both guards carry **stale-allowlist self-checks** (an allowlist entry that no longer matches
   fails the guard).
 
+## The spec↔artifact agreement guard
+
+When an implementation artifact *transcribes* a binding design record, the guard
+(`tests/test_docs_site_tokens.py` — the visual-blueprint token stylesheet) parses **both** the
+record (markdown tables/snippets) and the artifact and asserts value-exact agreement, with no
+hand-maintained expectation table. Three review-hardened rules:
+
+1. **Zero third transcriptions** — parse every guarded value from the binding source, scoping
+   section extraction (`text.index(start)` → `index(end)`) so nearby non-binding snippets can't
+   be picked up. Test literals would let a reconciled blueprint edit pass while stale.
+2. **Guard the wiring, not just the artifact** — also assert the integration seam that makes the
+   leaf effective (the ordered `customCss` list in `docs/site/astro.config.mjs` + the entry
+   resolving to the guarded stylesheet).
+3. **Describe a normalizing comparison honestly** — never claim byte equality for a check that
+   normalizes quotes/whitespace/hex case.
+
+Plus: parser-sanity row-count asserts so a silently-empty markdown parse can't pass vacuously,
+and a no-extras sweep (declared tokens not bound by the blueprint fail).
+
+### Making a reconciliation rule structural
+
+Assert the **entire** `devDependencies` mapping equals a literal dict (names AND versions) —
+that defeats range expressions, dropped deps, and silent additions, turning a "changing a pin
+requires objective reconciliation" design rule into CI structure.
+
+## Live-corpus guard craft
+
+From the user-docs metadata guard (`tests/test_user_docs_metadata.py`), craft that generalizes to
+any filesystem-walk corpus guard:
+
+- **Collect ALL offenders per check before asserting** — one failure names every offending file,
+  instead of a fix-one-rerun loop.
+- **Add a non-vacuity floor** (`test_corpus_is_non_empty`, ≥40 routed files) — a filesystem-walk
+  guard must prove its own selector still bites.
+- **Exclude `bool` when validating YAML ints** (`isinstance(order, bool)`) — `bool` is an `int`
+  subclass, so YAML `true` would pass a bare `isinstance(x, int)` check.
+- **When two independent metadata records must agree**, a contiguous-run check over the sorted
+  sequence proves mutual consistency cheaply.
+
 ## Guarding a path family across a phased migration
 
 When a perk-owned dot-directory path root moves in phases (the `.pi/`→`.perk/` arc — see

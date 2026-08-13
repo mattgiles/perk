@@ -34,6 +34,16 @@ version.
 **Rule:** any plan that bumps a pinned Pi/SDK version must run `npm install` in the worktree (or the
 root checkout, depending on which `node_modules` is resolving), or the bump is inert.
 
+## Symptom 3: wildcard-peer resolutions go stale independently of the direct pins
+
+Bumping the `pi-coding-agent`/`pi-ai` devDependencies does **NOT** move the top-level
+`@earendil-works/pi-tui`/`typebox` resolutions — those are peer-only, and npm leaves an already
+installed satisfying version in place (they stayed at 0.78.0/1.1.39 across two prior SDK bumps).
+Direct imports of those packages then silently typecheck against ancient types. Fix shape: add
+**explicit devDependency pins matching pi's bundled versions**, `npm ci` *before* editing the
+manifest (so the install starts from lockfile truth), then `npm install` in the worktree, then
+verify the top-level resolutions with `npm ls`.
+
 ## Diagnosing pre-existing breakage (prove provenance FIRST)
 
 A stale SDK is only one cause of "red in files I never touched" — main itself can be genuinely
@@ -49,6 +59,11 @@ git stash && npx tsc --noEmit -p . && git stash pop
 pre-existing — fix-the-fixture in-scope when it's a one-line contract-shape correction, and never
 misattribute it to your change.
 
+**A green rebase doesn't freeze the target:** main can advance *again* mid-flight — a CI failure
+naming files/tests absent from your branch means *re-check `git log origin/main`*, not your diff
+(the same "red in files I never touched" family, with a moving branch point instead of a stale
+SDK).
+
 ### The delete/edit rebase-conflict recipe
 
 When main edits lines your branch *moved* to a new file, the rebase surfaces a delete/edit
@@ -56,6 +71,12 @@ conflict. Resolution: **keep the deletion, then verify the moved copy already ca
 (grep the new file for the fixed shape). When a payload shape changes, grep ALL test fixtures
 repo-wide, not just the owning module's suite (see `workflow/cold-door-client.md`'s merge-race
 fixture sweep).
+
+### Interrupted-rebase recovery
+
+When a rebase is interrupted mid-pick (e.g. a killed process leaves `.git/rebase-merge` behind),
+**never start another rebase**. Read `git status` first — it shows the done list and the staged
+pick's content — then `git commit -C <pick-sha>` the staged step and `git rebase --continue`.
 
 ## Commit hygiene after installing in a worktree
 
