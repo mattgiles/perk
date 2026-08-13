@@ -490,6 +490,11 @@ Executed 2026-08-13 (dev checkout, pinned binary).
   "not_applicable"`, `observed_pr_base: "main"` = `expected_pr_base`; `unresolved_operation:
   null`; `blockers: []`; `next_build_ready: {"node_id": "2.1", "ready": true, "reason":
   null}`.
+- **Layer-content note (a legitimate planned no-op):** the node-1.1 `cli.md` verification pass
+  produced no edit — PR #1701 touches only `in-session.md` + `objectives.md` (`gh pr view 1701
+  --json files`). Verified-accurate-with-no-diff is the doc-accuracy gate's honest no-op
+  outcome; it also means later feedback structurally cannot anchor to `cli.md` (see Step 5's
+  named deviation).
 
 ### Step 3 — layer 2 (the second-clone arm; the stack CREATE)
 
@@ -516,8 +521,19 @@ clone** (`~/temp/perk`, census above).
   header (`impl_run_ids: [01KZWR89S7NMZR6THGPV3QW1NH]`). *The launch's "reconstructing the
   delivery train" progress lines were not captured from the session — the layer-context
   record above stands as the durable half of this fact (evidence-gap noted).*
-- **`run_ci`**: operator-attested (2026-08-13) — in-session green before `/submit`; excerpt
-  not captured (same gap class as Step 2).
+- **`run_ci`** (operator-pasted excerpt, 2026-08-13 — the in-session run-all report before
+  `/submit`):
+
+  ```text
+  perk CI: all checks passed.
+  ⊘ lint-py (skipped — no changed files match *.py)
+  ✓ lint-js
+  ⊘ typecheck-py (skipped) ⊘ typecheck-js (skipped) ⊘ test-py (skipped)
+  ✓ test-js
+  ✓ docs-check
+  ⊘ changelog-check (skipped — no changed files match CHANGELOG.md)
+  Full gate green — the change is verified …
+  ```
 - **Publish (warm `/submit` from the clone — the stack CREATE):**
   - PR facts: `gh pr view 1705` → `{"number": 1705, "state": "OPEN", "isDraft": true,
     "baseRefName": "plan-1699", "headRefName": "plan-1704",
@@ -539,13 +555,66 @@ clone** (`~/temp/perk`, census above).
 
 ### Step 4 — layer 3 (the APPEND)
 
-*(pending — symmetric facts; `published_prefix_len: 3`.)*
+Executed 2026-08-13 (dev checkout, pinned binary).
+
+- **Warm planning**: plan issue **#1707**, created `2026-08-13T12:41:38Z`; fresh per-session
+  run id (`01KZXHN03Q0QPWV7HJTYQXPD02`); header trio (`objective_id: '1698'`,
+  `objective_node_id: '3.1'`, `delivery_lineage: 01KZWNGE6A…`) plus
+  `predecessor_plan_id: '1704'`.
+- **Interactive implement** (dev checkout; operator-attested 2026-08-13). The worktree's
+  `layer-context.json`: `parent_branch: "plan-1704"`, `parent_sha: "5234991b…"` (= layer 2's
+  published head exactly), `predecessor_plan_id: "1704"`, `prepared_at:
+  "2026-08-13T12:42:11Z"`; `impl_run_ids: [01KZXJ9XZWXEQMXW0QTNGZ9DF1]`.
+- **`run_ci`** (operator-pasted excerpt, 2026-08-13): line-identical to Step 3's report —
+  `perk CI: all checks passed.` with `✓ lint-js ✓ test-js ✓ docs-check` and the same skips.
+  *Observed behavior worth noting:* this layer's own files are `skills/perk-expert/**` only,
+  yet the js/docs checks ran — a stacked layer's worktree carries its predecessors' commits,
+  so scope-aware check globs resolve against the branch's cumulative diff, not the layer's own
+  files. Honest, conservative over-checking; recorded as an observation, not a defect.
+- **Publish (warm `/submit` — the stack APPEND):**
+  - PR facts: `gh pr view 1708` → `{"number": 1708, "state": "OPEN", "isDraft": true,
+    "baseRefName": "plan-1704", "headRefName": "plan-1707",
+    "headRefOid": "fadca4533eb357971732b40cbe0f6661de436934", "mergedAt": null}` — base = the
+    layer-2 branch.
+  - Journal (issue #1698): operation **01KZXJR41RQT11ZJKXVKN0SVTQ**, `prepared` (posted
+    12:50:00Z) → `completed` (created 12:50:12Z; `observed: {branch_sha: fadca453…,
+    pr: 1708, stack: [1701, 1705, 1708]}`) — the exact missing suffix appended.
+  - REST stack resource after the append: stack **#1706**, base `main`, `open: true`, members
+    bottom→top `[#1701 @ plan-1699 860ef57f…, #1705 @ plan-1704 5234991b…, #1708 @ plan-1707
+    fadca453…]`.
+  - Checkpoint pair on the #1707 header: `parent_checkpoint_sha: 5234991b…`,
+    `published_head_sha: fadca453…`.
+- **Train read** (`perk objective stack status 1698 --json`): **`published_prefix_len: 3`**;
+  all three layers `publication: "published"`, **`membership: "exact"`**, contiguous
+  bottom→top bases (`main` → `plan-1699` → `plan-1704`), `observed_pr_base` =
+  `expected_pr_base` ×3; `unresolved_operation: null`; `blockers: []`;
+  `next_build_ready: {"node_id": null, "ready": false, "reason": "all layers published or
+  landed"}`.
 
 ### Step 5 — review + the cascade
 
-*(pending — feedback threads, cascade journal records, new head SHAs, PR settle, thread
-resolution, `stack status` clean; or the honest no-feedback attestation + the `sync --base`
-arm.)*
+**Feedback half executed 2026-08-13; the address + cascade half is pending.**
+
+- **Review pass + feedback (operator, 2026-08-13):** the operator reviewed the three layer
+  diffs and left ONE actionable finding on **layer 1's PR #1701** — a `COMMENTED` review
+  (submitted `12:51:53Z`) with one thread: review comment `3775479485`,
+  `docs/user-docs/reference/objectives.md` line 146 (the merge-queue limitation bullet),
+  "Let's add a link to relevant document, so readers can learn what a merge queue even is."
+  **Decision-9 ordering held by machine timestamps:** feedback (12:51:53Z) landed after the
+  layer-3 publish completed (12:50:12Z).
+- **Named deviation (file pin):** Decision 9 pinned feedback to `cli.md` / `in-session.md` and
+  avoided `objectives.md` (the one file node 2 also edits). The finding landed on
+  `objectives.md` anyway — honest review found the real improvement there, and the pin's
+  primary target was structurally unavailable (the `cli.md` no-op above left it out of the
+  diff; review comments only anchor to diff lines). Hunk-adjacency analysis, recorded before
+  the cascade: node 2's `objectives.md` edit inserts a handoff paragraph immediately above the
+  "Current limitations" heading (patch anchor `@@ -141,6 +141,11 @@`); the feedback targets
+  the merge-queue bullet two unchanged lines below — adjacent, non-overlapping hunks. Expected:
+  a clean cascade rebase; if a conflict fires instead, it is the capture-if-fired
+  retained-conflict arm (`sync --continue`/`--abort`) — either outcome is recorded.
+
+*(Pending — `perk address 1699` through `finalize_address`: cascade journal records, all three
+new head SHAs, PR settle, thread resolution, `stack status` clean.)*
 
 ### Step 6 — ready
 
