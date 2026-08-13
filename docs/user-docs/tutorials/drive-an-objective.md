@@ -70,7 +70,9 @@ not edit it. Type one short request:
 > zero-divisor guard).
 
 The agent drafts the objective prose plus the 2-node roadmap, and asks you the **delivery
-choice** — pick **incremental** (the recommended default; each plan lands independently) — then
+choice** — pick **incremental** (the recommended default; each plan lands independently — the
+stacked path has its own lesson,
+[Drive a stacked objective to one atomic landing](./drive-a-stacked-objective.md)) — then
 perk presents it for your review. **Approve** it. On approval, perk **saves the objective as a GitHub issue** (a
 `perk:objective` issue), activates it, and the session leaves read-only mode. perk prints the
 issue URL; you can also see it with:

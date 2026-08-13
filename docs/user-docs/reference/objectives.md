@@ -141,6 +141,11 @@ retained-conflict continuation/discard (`--continue`/`--abort`);
 interrupted operations and sweeps orphaned residue. The in-session equivalents are
 `/objective-stack`, `/objective-sync`, `/objective-recover`, and `/objective-land`.
 
+Learn the full stacked flow in
+[Drive a stacked objective to one atomic landing](../tutorials/drive-a-stacked-objective.md);
+day-to-day, see [How to review a stacked PR train](../how-to/review-a-stacked-train.md) and
+[How to recover a stacked delivery train](../how-to/recover-a-stacked-train.md).
+
 **Current limitations (read before choosing stacked):**
 
 - **Merge-queue bases are unsupported.** The stacked capability check at save requires squash
