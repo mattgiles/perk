@@ -264,9 +264,13 @@ def test_zero_layers_with_a_train_blocker_is_blocked_never_nothing_to_land():
     assert result.plan is None
 
 
-def test_zero_layers_with_an_unresolved_operation_is_blocked():
+@pytest.mark.parametrize("kind", ["publish", "sync", "adopt", "transfer", "land"])
+def test_zero_layers_with_an_unresolved_operation_is_blocked(kind):
+    # One-unresolved-per-lineage, per kind: an unresolved record of EVERY kind blocks a new
+    # LAND (the readiness blocker is kind-agnostic — pinned per kind so no kind can grow a
+    # silent exemption).
     operation = train.UnresolvedOperationFacts(
-        operation_id="01OP", kind="publish", prepared_created="2026-01-01T00:00:00Z"
+        operation_id="01OP", kind=kind, prepared_created="2026-01-01T00:00:00Z"
     )
     result = _assess(_train((), unresolved_operations=(operation,)))
     assert result.disposition is land.LandDisposition.BLOCKED

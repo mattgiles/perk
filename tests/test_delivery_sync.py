@@ -954,11 +954,29 @@ def test_missing_lineage_is_not_stacked():
     assert _sync_error(world).error_type == "not_stacked"
 
 
-def test_foreign_unresolved_kind_refuses():
+@pytest.mark.parametrize(
+    "kind", [OperationKind.PUBLISH, OperationKind.TRANSFER, OperationKind.LAND]
+)
+def test_foreign_unresolved_kind_refuses(kind):
+    # One-unresolved-per-lineage, per kind: an unresolved record of EVERY foreign kind
+    # blocks a fresh sync (an unresolved SYNC/ADOPT routes to its own resume instead).
     world = _amended_middle_world()
-    record = _record(operation_kind=OperationKind.PUBLISH, affected_plans=("102",))
+    record = _record(operation_kind=kind, affected_plans=("102",))
     world.persistence.unresolved_records[record.operation_id] = record
     assert _sync_error(world).error_type == "unresolved_operation"
+
+
+def test_resume_deleted_branch_is_sync_drift_fail_closed():
+    # The drifted-world corroboration arm (per-ref leases): a recorded ref whose branch was
+    # DELETED since the crash matches neither its before nor after lease — sync_drift,
+    # nothing journaled, nothing pushed.
+    record = _record()
+    world = _resume_world(record)
+    world.remote["plan-103"] = None  # deleted since the crash; plan-102 still at before P2
+    error = _sync_error(world)
+    assert error.error_type == "sync_drift"
+    assert world.events("push_atomic") == []
+    assert world.persistence.prepared == [] and world.persistence.outcomes == []
 
 
 def test_pr_drift_rows():

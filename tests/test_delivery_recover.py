@@ -1355,6 +1355,84 @@ def test_publish_all_before_accepts_a_positively_absent_pr():
     assert ("pr_for_branch", "plan-103") in world.timeline
 
 
+# --- stale-prepared corroboration (the failure-hardening ledger's stale-record arms) ------
+# "Stale" means corroboration, not expiry: old/drifted/foreign unresolved records are
+# strictly decoded, corroborated against fresh authority, and never blindly trusted or
+# discarded. No age policy exists (LAND's 24-hour merge-request lifetime is the one
+# recorded exception, pinned in its own arms above).
+
+
+def test_republish_record_with_a_deleted_branch_is_mixed_never_abandonable():
+    # The drifted-world SYNC-sibling arm for PUBLISH: a REPUBLISH record carries a NON-null
+    # before sha, so a branch deleted since the crash is distinguishable drift — observed
+    # <absent> matches neither before nor after → mixed, report-only; --abandon is blocked
+    # with nothing journaled and no mutation.
+    record = _publish_record()  # before.branch.sha = P3 — the non-null republish shape
+    world = _three_layer_world([record])
+    world.remote["plan-103"] = None  # the branch was deleted since the crash
+    result = world.recover()
+    (row,) = result.operations
+    assert row.classification == "mixed" and row.action == "reported"
+    assert "matching neither" in row.detail
+    error = _recover_error(world, abandon=True, approve=lambda preview: True)
+    assert error.error_type == "abandon_blocked"
+    world.assert_nothing_journaled()
+
+
+def test_fresh_publish_record_with_a_deleted_branch_is_all_before_by_design():
+    # The honest null-before nuance, pinned as CORRECT classification (not a gap): a fresh
+    # publish captures before.branch.sha = null, and a branch pushed-then-deleted is
+    # byte-for-byte the recorded all-before state — deletion is indistinguishable from
+    # never-pushed without a history/tombstone authority this scope forbids. The classifier
+    # still demands the positive PR-absence and stack corroboration before saying so.
+    record = _publish_record()
+    creation = replace(
+        record,
+        before={
+            "branch": {"ref": "plan-103", "sha": None},
+            "pr": {"number": None, "base": None, "head_sha": None, "state": None},
+            "stack": {"members": None},
+        },
+    )
+    world = _three_layer_world([creation])
+    world.remote["plan-103"] = None  # pushed by the crashed run then deleted — or never pushed
+    world.pr_entries.pop(203)
+    world.stack_members = None
+    result = world.recover()
+    (row,) = result.operations
+    assert row.classification == "all_before"
+    assert ("pr_for_branch", "plan-103") in world.timeline  # the positive-absence probe ran
+
+
+def test_sync_record_with_a_deleted_branch_is_mixed_never_abandonable():
+    # The SYNC drifted-world arm rides its always-recorded per-ref leases: a recorded ref
+    # whose branch no longer exists matches neither its before nor after lease → mixed,
+    # report-only; --abandon is blocked with nothing journaled.
+    record = _sync_record()
+    world = _three_layer_world([record])
+    world.remote["plan-103"] = None  # deleted since the crash; plan-102 still at before P2
+    result = world.recover()
+    (row,) = result.operations
+    assert row.classification == "mixed" and row.action == "reported"
+    error = _recover_error(world, abandon=True, approve=lambda preview: True)
+    assert error.error_type == "abandon_blocked"
+    world.assert_nothing_journaled()
+
+
+def test_publish_record_with_a_foreign_lineage_classifies_mixed():
+    # The foreign-LINEAGE classification arm for PUBLISH records (the sync sibling is
+    # test_resume_foreign_lineage_record_is_sync_drift): a record minted under another
+    # lineage never corroborates against this train — mixed, report-only.
+    record = _publish_record()
+    foreign = replace(record, delivery_lineage="01FOREIGNLINEAGE")
+    world = _three_layer_world([foreign])
+    result = world.recover()
+    (row,) = result.operations
+    assert row.classification == "mixed"
+    assert "corroboration against fresh authority failed" in row.detail
+    world.assert_nothing_journaled()
+
+
 # ----------------------------------------------------------------- stale worktree-admin entries
 
 

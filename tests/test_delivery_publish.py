@@ -1208,15 +1208,27 @@ def test_closed_reused_pr_is_reopened_and_base_converged():
 # ----------------------------------------------------------------- routing refusals
 
 
-def test_foreign_unresolved_operation_refuses():
+@pytest.mark.parametrize(
+    ("kind", "plans"),
+    [
+        (OperationKind.PUBLISH, ("999",)),  # a PUBLISH for a DIFFERENT plan
+        (OperationKind.SYNC, ("101",)),
+        (OperationKind.ADOPT, ("101",)),
+        (OperationKind.TRANSFER, ("101",)),
+        (OperationKind.LAND, ("101",)),
+    ],
+)
+def test_foreign_unresolved_operation_refuses(kind, plans):
+    # One-unresolved-per-lineage, per kind: an unresolved record of every kind (or a
+    # PUBLISH for another plan) blocks a fresh publish on the lineage.
     foreign = PreparedRecord(
         operation_id=mint_operation_id(),
-        operation_kind=OperationKind.PUBLISH,
+        operation_kind=kind,
         delivery_lineage=LINEAGE,
         objective_id=OBJECTIVE,
         run_id="01RUN",
         created="t0",
-        affected_plans=("999",),
+        affected_plans=plans,
         before={},
         after={},
     )
