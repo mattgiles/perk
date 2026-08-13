@@ -57,19 +57,22 @@ bodies, and the door-suite tests (e.g. `extension/doors/prReviewTerminal.test.ts
   just prose moves.
 - **Evidence a later node depends on must land in the PR body via an explicit post-submit
   `gh pr edit` step** — perk's squash-land drops branch commit messages from main's history and
-  `submit` composes the PR body from the plan. Concrete debt: the §8.57 before/after byte
-  measurements (the byte-ceiling derivation input) live only in branch commit `bf224d85`,
-  reachable via PR #1675's commit list — the ceilings node must fetch them from there or
-  re-measure from pre-merge blobs.
-- **The pointer-recap bar is unsettled:** skill openings keeping a one-line orientation recap
-  after the pointer sentence, and pointer parentheticals that *name* the rules they defer to,
-  both merged by judgment — the ceilings node should settle whether a pointer may name the rules
-  it points at or must stay bare.
+  `submit` composes the PR body from the plan. (The §8.57 before/after byte measurements lived
+  only in a branch commit; the ceilings derived from a fresh committed-tree re-measure instead —
+  the re-measure resolved the debt, but the PR-body rule stands.)
+- **The pointer-recap bar is settled** (recorded in §8.57): a pointer sentence MAY name the
+  rules it defers to — the byte ceilings are the enforced bound; prose shape stays §8.57
+  judgment.
 
 ## Residuals
 
-- §8.57 remains a prose convention with no CI guard until the byte-ceilings node — skill bodies
-  have no content pins, so skill-tier drift is CI-inert.
+- §8.57's byte ceilings landed in `tests/test_prompt_surface_budgets.py` (skill ambient
+  descriptions + committed template files), but skill-body *content* pins remain **partial** —
+  exactly the five §8.57-rewritten skills in `tests/test_skill_semantic_contracts.py`
+  (`perk-learn`, `perk-learn-docs`, `perk-learn-code`, `perk-implement`, `perk-address`) plus
+  `perk-learn-harvest`'s dedicated test. The ceilings gate ambient descriptions and committed
+  template files only — they never measure a skill *body* — so body drift in the other perk
+  skills remains wholly CI-inert (no body-size guard exists).
 - Provider-neutral seed flow-pointers rest on the REPLACE-posture adapter genuinely carrying the
   flow — asserted in contracts, not verified per session shape by any test.
 

@@ -8172,9 +8172,28 @@ is the surface delta, not a restatement (the seeds' flow pointers stay provider-
 name whichever carrier is injected). No other stage or surface may claim these exceptions without
 amending this section.
 
-**Enforcement posture (flagged deferral).** The rule is a prose convention with **no CI guard**
-from this node; the byte ceilings that make regression loud arrive as node 5.2's named gates
-#2/#3, their constants pointing at this section.
+**Enforcement (gates #2/#3 of the named gate set).** The byte ceilings that make carrier
+regression loud live in `tests/test_prompt_surface_budgets.py` — three constants beside their
+checks: `SKILL_AMBIENT_DESCRIPTION_MAX_BYTES = 896` (gate #2: every `skills/perk-*/SKILL.md`
+frontmatter `description`, measured as UTF-8 bytes of the parsed scalar; membership
+cross-checked against `PERK_SKILLS` — the vendored `ast-grep` skill's upstream-owned
+frontmatter is outside the gate), `SEED_TEMPLATE_MAX_BYTES = 9_088` and
+`INJECTED_CONTEXT_TEMPLATE_MAX_BYTES = 1_984` (gate #3: every `prompts/**/*.md` except
+`prompts/README.md` and `prompts/_fixtures/**`, measured as raw committed file bytes,
+pre-render — `prompts/contexts/**` including adapter blocks is the INJECTED-CONTEXT class;
+everything else, include partials included, is the SEED/launch class — a closed rule, so prose
+cannot evade the gate by moving into a partial). Each ceiling derives per the settled rule —
+measured post-diet maximum × 1.25, rounded up to the next 64-byte boundary (688 B → 896 B;
+7,225 B → 9,088 B; 1,556 B → 1,984 B) — with the derivation fixed in each constant's comment; a
+reset is an ordinary human-reviewed code change justified in its PR — no automatic ratchet, no
+exemption list. The gate set's "node:test where TS-owned" clause is discharged as N/A: every
+prompt **template** surface — the class gate #3 covers — is a committed `prompts/` file read by
+both planes' twin render seams (`src/perk/prompts.py` / `extension/substrate/prompts.ts`), so no
+TS-owned template surface exists and both gates are pytest-only (TS-owned model-facing prose
+outside the template class — tool descriptions, code-assembled messages — is outside this gate
+set's scope). Pointer-recap bar: a pointer sentence MAY name the rules
+it defers to — the byte ceilings are the enforced bound; prose shape stays this section's
+judgment.
 
 **Migration recipe** (what nodes 3.2–3.4 execute, one stage family per node): (a) inventory
 each stage's contract statements across its launch statement(s), injected context(s), adapter

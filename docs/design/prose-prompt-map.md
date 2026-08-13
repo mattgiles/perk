@@ -5,8 +5,8 @@ This is the readable projection of perk's living, workflow-first prose graph. It
 
 ## Coverage
 
-- **202** canonical source units
-- **677** logical fragments
+- **203** canonical source units
+- **683** logical fragments
 - **16** session shapes and **10** assemblies
 - **15** explicitly excluded candidates (policy-only; not displayed)
 - **0** validation findings
@@ -568,7 +568,6 @@ Implement a plan, resolve conflicts, and maintain implementation-session discipl
 - `markdown:skills/perk-implement/SKILL.md`
   - `frontmatter:description` — Discovery description (`frontmatter.description`)
   - `section:implementing-a-perk-plan-the-implement-stage` — Implementing a perk plan (the implement stage) (`heading:implementing-a-perk-plan-the-implement-stage`)
-  - `section:implementing-a-perk-plan-the-implement-stage/progress-tracking-the-todo-checklist` — Progress tracking (the todo checklist) (`heading:implementing-a-perk-plan-the-implement-stage/progress-tracking-the-todo-checklist`)
 - `markdown:skills/perk-implement/backends/github.md`
   - `section:reading-the-plan-github-issue-backend` — Reading the plan — GitHub issue backend (`heading:reading-the-plan-github-issue-backend`)
 - `markdown:skills/perk-implement/backends/linear.md`
@@ -1107,7 +1106,7 @@ Classify review feedback, fix actionable items, publish, and resolve.
 - `markdown:skills/perk-address/SKILL.md`
   - `frontmatter:description` — Discovery description (`frontmatter.description`)
   - `section:addressing-review-feedback-the-address-loop` — Addressing review feedback (the `/address` loop) (`heading:addressing-review-feedback-the-address-loop`)
-  - `section:addressing-review-feedback-the-address-loop/the-loop` — The loop (`heading:addressing-review-feedback-the-address-loop/the-loop`)
+  - `section:addressing-review-feedback-the-address-loop/loop-detail-beyond-the-launch-guidance` — Loop detail (beyond the launch guidance) (`heading:addressing-review-feedback-the-address-loop/loop-detail-beyond-the-launch-guidance`)
   - `section:addressing-review-feedback-the-address-loop/preview` — Preview (`heading:addressing-review-feedback-the-address-loop/preview`)
   - `section:addressing-review-feedback-the-address-loop/plan-file-mode` — Plan File Mode (`heading:addressing-review-feedback-the-address-loop/plan-file-mode`)
   - `section:addressing-review-feedback-the-address-loop/untrusted-text-discipline` — Untrusted-text discipline (`heading:addressing-review-feedback-the-address-loop/untrusted-text-discipline`)
@@ -1208,12 +1207,12 @@ Capture learnings and route them into documentation, code, or harvested objectiv
 - `markdown:skills/perk-learn-code/SKILL.md`
   - `frontmatter:description` — Discovery description (`frontmatter.description`)
   - `section:routing-learnings-into-code-the-learn-code-factory` — Routing learnings into code (the `/learn-code` factory) (`heading:routing-learnings-into-code-the-learn-code-factory`)
-  - `section:routing-learnings-into-code-the-learn-code-factory/the-loop` — The loop (`heading:routing-learnings-into-code-the-learn-code-factory/the-loop`)
+  - `section:routing-learnings-into-code-the-learn-code-factory/loop-detail-beyond-the-launch-guidance` — Loop detail (beyond the launch guidance) (`heading:routing-learnings-into-code-the-learn-code-factory/loop-detail-beyond-the-launch-guidance`)
   - `section:routing-learnings-into-code-the-learn-code-factory/quality-rules` — Quality rules (`heading:routing-learnings-into-code-the-learn-code-factory/quality-rules`)
 - `markdown:skills/perk-learn-docs/SKILL.md`
   - `frontmatter:description` — Discovery description (`frontmatter.description`)
   - `section:consolidating-learnings-into-docs-learned-the-learn-docs-factory` — Consolidating learnings into `docs/learned/` (the `/learn-docs` factory) (`heading:consolidating-learnings-into-docs-learned-the-learn-docs-factory`)
-  - `section:consolidating-learnings-into-docs-learned-the-learn-docs-factory/the-loop` — The loop (`heading:consolidating-learnings-into-docs-learned-the-learn-docs-factory/the-loop`)
+  - `section:consolidating-learnings-into-docs-learned-the-learn-docs-factory/loop-detail-beyond-the-launch-guidance` — Loop detail (beyond the launch guidance) (`heading:consolidating-learnings-into-docs-learned-the-learn-docs-factory/loop-detail-beyond-the-launch-guidance`)
   - `section:consolidating-learnings-into-docs-learned-the-learn-docs-factory/content-quality-rules-the-cornerstone` — Content-quality rules (the cornerstone) (`heading:consolidating-learnings-into-docs-learned-the-learn-docs-factory/content-quality-rules-the-cornerstone`)
 - `markdown:skills/perk-learn-harvest/SKILL.md`
   - `frontmatter:description` — Discovery description (`frontmatter.description`)
@@ -1223,7 +1222,6 @@ Capture learnings and route them into documentation, code, or harvested objectiv
   - `section:harvesting-docs-learned-into-an-improvement-objective-the-perk-learn-harvest-factory/the-candidate-pipeline-the-fixed-curation-policy` — The candidate pipeline (the fixed curation policy) (`heading:harvesting-docs-learned-into-an-improvement-objective-the-perk-learn-harvest-factory/the-candidate-pipeline-the-fixed-curation-policy`)
   - `section:harvesting-docs-learned-into-an-improvement-objective-the-perk-learn-harvest-factory/the-three-output-buckets` — The three output buckets (`heading:harvesting-docs-learned-into-an-improvement-objective-the-perk-learn-harvest-factory/the-three-output-buckets`)
   - `section:harvesting-docs-learned-into-an-improvement-objective-the-perk-learn-harvest-factory/the-zero-opportunity-outcome` — The zero-opportunity outcome (`heading:harvesting-docs-learned-into-an-improvement-objective-the-perk-learn-harvest-factory/the-zero-opportunity-outcome`)
-  - `section:harvesting-docs-learned-into-an-improvement-objective-the-perk-learn-harvest-factory/the-incomplete-harvest-outcome` — The incomplete-harvest outcome (`heading:harvesting-docs-learned-into-an-improvement-objective-the-perk-learn-harvest-factory/the-incomplete-harvest-outcome`)
   - `section:harvesting-docs-learned-into-an-improvement-objective-the-perk-learn-harvest-factory/authoring-the-review-first-loop` — Authoring (the review-first loop) (`heading:harvesting-docs-learned-into-an-improvement-objective-the-perk-learn-harvest-factory/authoring-the-review-first-loop`)
   - `section:harvesting-docs-learned-into-an-improvement-objective-the-perk-learn-harvest-factory/boundaries` — Boundaries (`heading:harvesting-docs-learned-into-an-improvement-objective-the-perk-learn-harvest-factory/boundaries`)
 - `markdown:skills/perk-learn/SKILL.md`
@@ -1232,7 +1230,7 @@ Capture learnings and route them into documentation, code, or harvested objectiv
   - `section:capturing-learnings-after-landing-the-learn-pass/why-fresh-contexts` — Why fresh contexts (`heading:capturing-learnings-after-landing-the-learn-pass/why-fresh-contexts`)
   - `section:capturing-learnings-after-landing-the-learn-pass/the-deterministic-branches-ts-owned-before-you-spawn` — The deterministic branches (TS-owned, before you spawn) (`heading:capturing-learnings-after-landing-the-learn-pass/the-deterministic-branches-ts-owned-before-you-spawn`)
   - `section:capturing-learnings-after-landing-the-learn-pass/the-four-angle-menu` — The four-angle menu (`heading:capturing-learnings-after-landing-the-learn-pass/the-four-angle-menu`)
-  - `section:capturing-learnings-after-landing-the-learn-pass/the-flow` — The flow (`heading:capturing-learnings-after-landing-the-learn-pass/the-flow`)
+  - `section:capturing-learnings-after-landing-the-learn-pass/flow-detail-beyond-the-launch-guidance` — Flow detail (beyond the launch guidance) (`heading:capturing-learnings-after-landing-the-learn-pass/flow-detail-beyond-the-launch-guidance`)
   - `section:capturing-learnings-after-landing-the-learn-pass/the-manual-escape-hatches-decision-less` — The manual escape hatches (decision-less) (`heading:capturing-learnings-after-landing-the-learn-pass/the-manual-escape-hatches-decision-less`)
   - `section:capturing-learnings-after-landing-the-learn-pass/untrusted-text-discipline` — Untrusted-text discipline (`heading:capturing-learnings-after-landing-the-learn-pass/untrusted-text-discipline`)
   - `section:capturing-learnings-after-landing-the-learn-pass/configuring-the-analyst-model` — Configuring the analyst model (`heading:capturing-learnings-after-landing-the-learn-pass/configuring-the-analyst-model`)
@@ -1424,6 +1422,7 @@ Expert configuration guidance, structural search, and ancillary model utilities.
 | `markdown:skills/perk-expert/references/customization-recipes.md` | `skill-detail` | `both` | [`skills/perk-expert/references/customization-recipes.md`](../../skills/perk-expert/references/customization-recipes.md) · `file` | — |
 | `markdown:skills/perk-expert/references/mental-model.md` | `skill-detail` | `both` | [`skills/perk-expert/references/mental-model.md`](../../skills/perk-expert/references/mental-model.md) · `file` | — |
 | `markdown:skills/perk-expert/references/providers-and-backends.md` | `skill-detail` | `both` | [`skills/perk-expert/references/providers-and-backends.md`](../../skills/perk-expert/references/providers-and-backends.md) · `file` | — |
+| `markdown:skills/perk-expert/references/stacked-delivery.md` | `skill-detail` | `both` | [`skills/perk-expert/references/stacked-delivery.md`](../../skills/perk-expert/references/stacked-delivery.md) · `file` | — |
 
 <details>
 <summary>Logical fragments</summary>
@@ -1559,6 +1558,15 @@ Expert configuration guidance, structural search, and ancillary model utilities.
   - `section:perk-providers-issue-backends/fallback-semantics` — Fallback semantics (`heading:perk-providers-issue-backends/fallback-semantics`)
   - `section:perk-providers-issue-backends/issue-backend-linear` — Issue backend — Linear (`heading:perk-providers-issue-backends/issue-backend-linear`)
   - `section:perk-providers-issue-backends/maturity-caveat` — Maturity caveat (`heading:perk-providers-issue-backends/maturity-caveat`)
+- `markdown:skills/perk-expert/references/stacked-delivery.md`
+  - `section:perk-stacked-delivery-the-atomic-pr-train` — perk stacked delivery (the atomic PR train) (`heading:perk-stacked-delivery-the-atomic-pr-train`)
+  - `section:perk-stacked-delivery-the-atomic-pr-train/the-delivery-choice` — The delivery choice (`heading:perk-stacked-delivery-the-atomic-pr-train/the-delivery-choice`)
+  - `section:perk-stacked-delivery-the-atomic-pr-train/the-train-mental-model` — The train mental model (`heading:perk-stacked-delivery-the-atomic-pr-train/the-train-mental-model`)
+  - `section:perk-stacked-delivery-the-atomic-pr-train/daily-work-submit-address-ready-and-the-cascade` — Daily work: submit, address, ready — and the cascade (`heading:perk-stacked-delivery-the-atomic-pr-train/daily-work-submit-address-ready-and-the-cascade`)
+  - `section:perk-stacked-delivery-the-atomic-pr-train/the-command-surface` — The command surface (`heading:perk-stacked-delivery-the-atomic-pr-train/the-command-surface`)
+  - `section:perk-stacked-delivery-the-atomic-pr-train/recovery-routing` — Recovery routing (`heading:perk-stacked-delivery-the-atomic-pr-train/recovery-routing`)
+  - `section:perk-stacked-delivery-the-atomic-pr-train/current-limitations` — Current limitations (`heading:perk-stacked-delivery-the-atomic-pr-train/current-limitations`)
+  - `section:perk-stacked-delivery-the-atomic-pr-train/discover-the-live-surface` — Discover the live surface (`heading:perk-stacked-delivery-the-atomic-pr-train/discover-the-live-surface`)
 
 </details>
 
