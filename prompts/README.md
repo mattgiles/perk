@@ -33,7 +33,9 @@ headless primer — never by template path) states the flow once per session sha
 contexts** carry live state + pointers, never a restatement; **adapter blocks** carry only the
 provider-surface delta; the **bound skill** is the read-on-demand detail tier. One named
 exception: the `plan` stage launches idle, so its mode context
-(`contexts/plan-authoring.md`) is its designated flow carrier.
+(`contexts/plan-authoring.md`) is its designated flow carrier. Per-template byte budgets are
+CI-enforced by `tests/test_prompt_surface_budgets.py` (constants + derivation beside the
+checks; the canonical rule stays §8.57).
 
 ## Frozen template grammar
 
