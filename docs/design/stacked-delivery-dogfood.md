@@ -1,12 +1,17 @@
 # Dogfood: stacked delivery delivered as a live train (Objective #1431, Node 6.2)
 
-**Status:** validation record (the `stacked-publication-dogfood` genre — Part A the repeatable
-protocol, Part B the dated captured evidence + defect log) for the full stacked-delivery
-**lifecycle**, driven live in the designated durable dogfood repository (`mattgiles/perk`).
-**Part B is IN PROGRESS** — the protocol below is authored; the live legs run as post-submit
-follow-up phases, each landing its evidence as docs-only commits on this record's PR branch.
-This record's PR stays **draft** until Part B and the Verdict section are complete (the
-"what merges when" discipline in § Sequencing).
+**Status: PASSED 2026-08-13.** This validation record (the
+`stacked-publication-dogfood` genre — Part A the repeatable protocol, Part B the dated captured
+evidence + defect log) proves the full stacked-delivery **lifecycle** live in the designated
+durable dogfood repository (`mattgiles/perk`). The meaningful 3-layer docs train — objective
+#1698, PRs #1701/#1705/#1708 — landed atomically; the watcher SIGKILLed the landing process
+after its durable `accepted` event; cold `stack recover` from the second clone classified the
+still-unresolved operation `all_after` and rolled it forward under its original identity;
+finalization, objective close, warm reconcile, docs gate, and residue census all converged.
+**Overall verdict: PASS** (the § Verdict matrix's all-arms-pass row). Two non-blocking defects
+route to follow-ups #1709/#1710; the deliberate live-remote-runner skip remains the accepted
+named residual. Part B and the Verdict section are complete; this PR may leave draft at the
+explicit review gate (§ Sequencing).
 
 **Prior vs current coverage.** The prior gate record
 [`stacked-publication-dogfood.md`](./stacked-publication-dogfood.md) (node 2.4, PASSED
@@ -31,9 +36,9 @@ not:**
 
 Capability facts already proven live for `mattgiles/perk` by 2.4 and reused here: native-stack
 host schema, live per-repository enrollment (stack #1548 create + append), `allow_squash_merge`,
-no merge-queue rule, atomic push accepted. **Merge-async availability remains unproven until
-this gate's landing** — there is no sacrificial pre-probe; the real train is the probe
-(§ Landing-failure dispositions covers the terminal outcomes).
+no merge-queue rule, atomic push accepted. **At protocol-authoring time merge-async availability
+was the one unproven capability; the real train was deliberately the probe (no sacrificial
+pre-probe).** Step 8 proved it live: GitHub accepted and atomically merged the 3-layer train.
 
 **The substrate is the deliverable.** The train under proof is not sacrificial: it is a real
 3-layer docs objective ("Stacked delivery has a cohesive documented user experience", layers
@@ -400,7 +405,7 @@ This record's PR lands only after the train has landed (or its degraded disposit
 and Part B + the Verdict section are complete. The train's layer PRs merge only through the
 atomic landing or the § dispositions — never individually by hand outside those dispositions.
 
-## Part B — the captured evidence (IN PROGRESS)
+## Part B — the captured evidence (COMPLETE — PASS)
 
 > **Execution in progress.** The live legs run as post-submit follow-up phases; each phase
 > lands its dated evidence here as docs-only commits. Unexecuted steps' tables remain
@@ -811,10 +816,39 @@ The warm session therefore made real, correctly-bounded reconciliation writes �
   packaging tests; Biome clean; docs-site TypeScript clean; node tests clean; Astro build 52
   pages; all 11 rendered-site checks pass (including the complete-corpus/sidebar routes and
   both new stacked how-to + tutorial routes).
+- **This record PR's final run-all gate (2026-08-13):** `run_ci` → `perk CI: all checks
+  passed.`; `changelog-check` passed; Python/TypeScript lint/typecheck/test and docs-site checks
+  were intentionally glob-skipped for this docs/design/CHANGELOG-only diff; terminal report:
+  `Full gate green — the change is verified; no follow-up verification is needed.`
 
-**Physical cleanup pending** (capture-before-delete complete): remove the merged layer
-worktrees (dev checkout plans #1699/#1707; second-clone plan #1704) and delete `~/temp/perk`;
-then record the absence census below.
+- **Physical cleanup (capture-before-delete, then independently verified):** the merged layer
+  worktrees #1699/#1707 were removed by name from the dev checkout (the global wipe was
+  deliberately not used — its preview included 25 unrelated worktrees); the clone's scoped
+  wipe removed #1704; local + remote `plan-1699`/`plan-1704`/`plan-1707` branches were deleted;
+  worktree metadata pruned; `~/temp/perk` deleted. Final absence census: clone absent; no named
+  worktree; no named local branch; `git ls-remote` empty for all three refs.
+
+### Evidence-fill reconciliation sweep (2026-08-13)
+
+The pinned broad re-grep (`6\.2|deferred|live wire`) ran over updated `origin/main` across
+`docs/learned/`, `docs/design/`, `docs/planning/stacked-prs/`, `shared/contracts.md`, and
+`docs/user-docs/` (111 raw hits; every hit triaged, not mechanically rewritten):
+
+- **Settled pointers annotated:** the prior publication record's Status; the objective-delivery
+  learned doc (remote-runner residual narrowed, live GitHub suffix cascade, live merge-async +
+  L3 death/recover/close proof); the failure-hardening audit's hermetic/live header; the stacked
+  architecture's live-wire status; and the Phase-6 objective design's node-6.2 section.
+- **User docs no-op:** updated main's `reference/objectives.md` has the stale interrupted-LAND
+  limitation retired by PR #1701 and now routes recovery correctly. The old text seen in this
+  record branch was only its pre-train base — train-owned files remain disjoint and untouched by
+  this PR. All other user-doc `deferred` hits are generic reconciliation vocabulary or unrelated
+  provider residuals.
+- **Contracts no-op:** every hit is unrelated historical/deferred contract vocabulary or an
+  inventory section number; this docs/live-proof gate changes no normative contract.
+- **Remaining internal hits no-op:** generic deferral guidance, historical evidence, or another
+  objective's node 6.2. Rewriting them would manufacture scope rather than reconcile it.
+- `docs/index.md` now states the dated PASS; this PR carries the ONE actual-verdict
+  `[Unreleased]` CHANGELOG entry. Follow-ups #1709/#1710 close the two defect dispositions.
 
 ### Defect log
 
@@ -822,45 +856,55 @@ Every incident hit during the gate, its diagnosis artifacts, and its disposition
 
 | # | Incident | Diagnosis artifacts | Disposition |
 |---|----------|---------------------|-------------|
-| d1 | the address leg's pinned command shape was fiction: `perk address 1699` selects no plan — positional args are `PI_ARGS` forwarded to pi (so `1699` became the session's first user message) and positioning fell back to the ACTIVE cache plan-ref (plan-1707, the most recent implement session), opening an address session for the wrong plan in the plan-1707 worktree. Compounding finding from the sanctioned `--dry-run`: even with `--worktree plan-1699`, the seeded prompt names the active-cache plan (`…plan github #1707…`) — `_resolve_prompt` (`src/perk/run/launch/prompts.py`) falls back to `cache.read_plan_ref(repo_root)` when `--worktree` is given — while the session's real plan identity is the target worktree's materialized plan-ref (verified: `plan-1699/.perk/workflow/plan-ref.json` → `pr_id: "1699"`) | the stray session transcript (first user message `1699`, positioned in `…/.worktrees/plan-1707`); `perk address --dry-run --worktree plan-1699` rendering the `#1707` banner | **split**: the invocation half is an **execution-arm error** — the plan (and this record's first Part A revision) pinned a command shape that never existed; Part A Step 5 + the Decision-8 quote are era-corrected in place (the pinned-protocol-drift rule). The prompt-misnaming half is a **perk defect, non-blocking** (classification/finalize operate on the worktree's plan-ref; only the prompt banner lies) → follow-up issue per the failure policy. Stray session abandoned — **operator-confirmed (2026-08-13)**: no `finalize_address` ran, nothing committed. The corrected leg (`perk address --worktree plan-1699`) executed Step 5 successfully. **Operator verdict on scope (recorded verbatim in spirit):** the defect is not just the banner — the launcher's expected ergonomics don't work: the plan id should be sufficient (`perk address 1699`, parallel to `perk implement 1699`); `--worktree` is the wrong selector ergonomic. The same fiction-class was then caught **proactively** on the ready leg before execution: `perk pr ready <plan>` also takes no positional plan (the worker reads the LOCAL `cache.plan-ref` from inside the worktree) — Part A Step 6 era-corrected pre-run. ONE follow-up issue covering the launcher/worker plan-id selector ergonomics (address positional selector, the `--worktree` prompt-banner fallback, and the ready-from-worktree-only shape as one ergonomic surface) is deferred to the evidence-fill sweep, per the failure policy |
-| d2 | all three layer PRs report `optional_checks_failed: ["lint · typecheck · test"]` (hence `merge_state_status: UNSTABLE` at Step 7) — the GHA CI job fails in `tests/test_init_t5.py::test_not_a_repo_is_exit_2` + `::test_missing_tool_is_exit_2`: PR #1692's interactive onboarding confirm (`Install pi via npm …? [Y/n]`, `src/perk/substrate/output.py::user_confirm`) fires inside pytest where stdin is captured → `OSError: pytest: reading from stdin while output is captured` | the GHA failed-log excerpt (run 31703952984); `gh run list --branch main --workflow CI` showing **main itself red** at 03:36 and 04:11 — both merges of #1692's era, BEFORE any layer published | **pre-existing main defect, not a train or landing-path defect** (the layers are docs-only; the failure reproduces on main without them). Non-blocking here: the checks are optional (`required_checks_failed: []`), landing readiness is `ready`, and the verdict matrix is unaffected. Fix routes as an ordinary incremental PR to main **outside this gate** (the failure policy's non-blocking arm — no restart boundary: the acceptance-path code is untouched by the defect). Minor sibling observation, undiagnosed by choice: layers 2/3 list the failed check name twice (duplicate check-run reporting on cascade-rewritten heads) |
+| d1 | the address leg's pinned command shape was fiction: `perk address 1699` selects no plan — positional args are `PI_ARGS` forwarded to pi (so `1699` became the session's first user message) and positioning fell back to the ACTIVE cache plan-ref (plan-1707, the most recent implement session), opening an address session for the wrong plan in the plan-1707 worktree. Compounding finding from the sanctioned `--dry-run`: even with `--worktree plan-1699`, the seeded prompt names the active-cache plan (`…plan github #1707…`) — `_resolve_prompt` (`src/perk/run/launch/prompts.py`) falls back to `cache.read_plan_ref(repo_root)` when `--worktree` is given — while the session's real plan identity is the target worktree's materialized plan-ref (verified: `plan-1699/.perk/workflow/plan-ref.json` → `pr_id: "1699"`) | the stray session transcript (first user message `1699`, positioned in `…/.worktrees/plan-1707`); `perk address --dry-run --worktree plan-1699` rendering the `#1707` banner | **split**: the invocation half is an **execution-arm error** — the plan (and this record's first Part A revision) pinned a command shape that never existed; Part A Step 5 + the Decision-8 quote are era-corrected in place (the pinned-protocol-drift rule). The prompt-misnaming half is a **perk defect, non-blocking** (classification/finalize operate on the worktree's plan-ref; only the prompt banner lies) → follow-up issue per the failure policy. Stray session abandoned — **operator-confirmed (2026-08-13)**: no `finalize_address` ran, nothing committed. The corrected leg (`perk address --worktree plan-1699`) executed Step 5 successfully. **Operator verdict on scope (recorded verbatim in spirit):** the defect is not just the banner — the launcher's expected ergonomics don't work: the plan id should be sufficient (`perk address 1699`, parallel to `perk implement 1699`); `--worktree` is the wrong selector ergonomic. The same fiction-class was then caught **proactively** on the ready leg before execution: `perk pr ready <plan>` also takes no positional plan (the worker reads the LOCAL `cache.plan-ref` from inside the worktree) — Part A Step 6 era-corrected pre-run. ONE follow-up issue covers the launcher/worker plan-id selector ergonomics (address positional selector, the `--worktree` prompt-banner fallback, and the ready-from-worktree-only shape as one ergonomic surface): **#1709** |
+| d2 | all three layer PRs report `optional_checks_failed: ["lint · typecheck · test"]` (hence `merge_state_status: UNSTABLE` at Step 7) — the GHA CI job fails in `tests/test_init_t5.py::test_not_a_repo_is_exit_2` + `::test_missing_tool_is_exit_2`: PR #1692's interactive onboarding confirm (`Install pi via npm …? [Y/n]`, `src/perk/substrate/output.py::user_confirm`) fires inside pytest where stdin is captured → `OSError: pytest: reading from stdin while output is captured` | the GHA failed-log excerpt (run 31703952984); `gh run list --branch main --workflow CI` showing **main itself red** at 03:36 and 04:11 — both merges of #1692's era, BEFORE any layer published | **pre-existing main defect, not a train or landing-path defect** (the layers are docs-only; the failure reproduces on main without them). Non-blocking here: the checks are optional (`required_checks_failed: []`), landing readiness is `ready`, and the verdict matrix is unaffected. Fix routes as ordinary incremental work on **#1710**, outside this gate (the failure policy's non-blocking arm — no restart boundary: the acceptance-path code is untouched by the defect). Minor sibling observation, undiagnosed by choice: layers 2/3 list the failed check name twice (duplicate check-run reporting on cascade-rewritten heads) |
 
 ### Evidence gaps (dated operator attestations)
 
-*(none yet — facts with no durable machine source land here as dated inline attestations; a
-category distinct from the named residuals below.)*
+These are accepted inline evidence gaps, not named residuals and not verdict degradations: each
+has its durable machine half in this record.
+
+- **Warm authoring UX (2026-08-13):** the delivery question + plannotator rendering have the
+  operator attestation; the saved `delivery: stacked` header is the durable half.
+- **Layer-1 `run_ci` (2026-08-13):** green is operator-attested; its session report excerpt was
+  not retained. Layers 2/3 carry pasted green reports and Step 11's full docs gate is inlined.
+- **Second-clone launch narration (2026-08-13):** the progress lines were not retained; the
+  clone census + `layer-context.json` parent derivation are the durable half.
 
 ### Named residuals
 
 - **The live stacked remote-runner arm (pre-authored; deliberate — no follow-up issue).** The
-  node text sanctions "second clone **or** remote runner"; this gate runs the second clone.
+  node text sanctions "second clone **or** remote runner"; this gate ran the second clone.
   Coverage for the remote arm: node 6.1's hermetic positioning-parity suite
   (`tests/test_run_worker.py`), the cross-machine lane
   (`tests/test_delivery_cross_machine.py`), and the live non-stacked remote e2e dogfood records
   (`docs/design/remote-runner-e2e-dogfood.md`). Terminology discipline: this record claims
   fresh-checkout / durable-authority independence only — never host-level "cross-machine"
   independence.
-- **Capture-if-fired arms** (recorded live if they fire; unfired → the named pin stands, plus a
-  residual row here):
-  - retained sync rebase conflict (`sync --continue` / `--abort`) — pin: the §8.49 conflict
-    suites in `tests/test_delivery_sync.py`;
-  - base-advancement cascade (`sync --base`, Step 7) — fires only if main advances into a
-    landing blocker (near-certain over the run's days, per the no-feedback branch of
-    Decision 9).
+- **Retained sync conflict did not fire.** The real address cascade was clean; the
+  `sync --continue` / `--abort` arm remains pinned by the §8.49 conflict suites in
+  `tests/test_delivery_sync.py`.
+- **Base-advancement cascade did not fire.** Main remained at the pinned objective base until
+  the atomic landing, so Step 7 needed no `sync --base`. The required cascade arm DID fire via
+  real lower-layer feedback + `finalize_address`, so this capture-if-fired residual does not
+  degrade the cascade verdict.
 
 ### Verdicts
 
-Derived by § Verdict matrix from the evidence above — written only after the evidence exists.
+Derived by § Verdict matrix from the evidence above.
 
-| Arm | Verdict |
-|---|---|
-| Warm authoring UX | *(pending)* |
-| Warm build-readiness planning | *(pending)* |
-| Second-clone implementation (fresh-checkout independence) | *(pending)* |
-| Feedback + suffix cascade | *(pending)* |
-| Ready (bottom→top) | *(pending)* |
-| Atomic merge-async landing | *(pending)* |
-| Deliberate interruption → recovery conclusion | *(pending)* |
-| Finalization / close / reconcile | *(pending)* |
+| Arm | Verdict | Surviving evidence |
+|---|---|---|
+| Warm authoring UX | **PASS** | #1698 header + dated operator attestation; reviewed stacked choice |
+| Warm build-readiness planning | **PASS** | plan issues #1699/#1704/#1707; fresh session run ids; readiness advanced 1.1→2.1→3.1 |
+| Second-clone implementation (fresh-checkout independence) | **PASS** | clone census; layer-2 parent derivation; PR #1705; stack CREATE; `membership: exact` |
+| Feedback + suffix cascade | **PASS** | actionable #1701 thread; `finalize_address`; SYNC op `01KZXM50…`; all three heads rewritten; thread resolved |
+| Ready (bottom→top) | **PASS** | `was_draft: true` ×3 in order; `isDraft: false` ×3 after |
+| Atomic merge-async landing | **PASS** | accepted handle + PRs #1701/#1705/#1708 MERGED at sequential commits on main |
+| Deliberate interruption → recovery conclusion | **PASS** | SIGKILL after `accepted`; no terminal role; second-clone `all_after`; original op rolled forward + completed |
+| Finalization / close / reconcile | **PASS** | finalized/done ×3; #1698 closed; reconcile evidence complete; warm reconcile writes; docs gate + absence census green |
 
-**Overall: PENDING.**
+**Overall: PASS.** Every planned arm passed, including the interruption→conclusion arm and the
+real feedback cascade; this is the Verdict matrix's **all arms pass** row. The deliberate
+remote-runner choice and unfired capture-if-fired cases remain named honestly above. Defects d1
+and d2 were non-blocking, did not touch the acceptance path, and are tracked in #1709/#1710.
