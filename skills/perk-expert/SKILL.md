@@ -1,9 +1,10 @@
 ---
 name: perk-expert
-description: Expert guidance on how perk works and how to configure and customize it in a repo that uses perk — `.perk/config.toml` tables and the local overlay, the three provider seams (plan/footer/web), the GitHub vs Linear issue backend, skill bindings (`[[bindings]]`), CI checks (`[ci]` / `[[ci.checks]]`), the `[models]` namespace (default/per-stage/subagent model overrides), and worktree/base-branch settings. Use when answering "how does perk … / how do I configure … / which knob controls …" questions about a repo using perk, or when shaping perk's workflow behavior via config.
+description: Expert guidance on how perk works and how to configure and customize it in a repo that uses perk — `.perk/config.toml` tables and the local overlay, the three provider seams (plan/footer/web), the GitHub vs Linear issue backend, skill bindings (`[[bindings]]`), CI checks (`[ci]` / `[[ci.checks]]`), the `[models]` namespace (default/per-stage/subagent model overrides), worktree/base-branch settings, and stacked delivery trains (publish/cascade/sync/recover/atomic landing). Use when answering "how does perk … / how do I configure … / which knob controls … / how does a stacked train work" questions about a repo using perk, or when shaping perk's workflow behavior via config.
 stages: [plan, objective-plan, objective-author]
 references:
   - references/mental-model
+  - references/stacked-delivery
   - references/configuration
   - references/providers-and-backends
   - references/customization-recipes
@@ -47,6 +48,11 @@ Use these to confirm details rather than fabricating command/flag specifics.
   planes (Python CLI exterior / TypeScript extension interior); the three state tiers (GitHub
   canonical / `.perk/workflow/` cache / session transient); stages + the warm/cold two-door model; the
   spine. Read first for "how does perk work / what is a stage / a door / a plane" questions.
+- [Stacked delivery](./references/stacked-delivery.md) — the atomic PR train: the delivery choice +
+  validation/capability checks; the train mental model (layers, canonical order, published prefix,
+  checkpoints, the journal); daily work (submit/address/ready + the automatic cascade); the four
+  cold commands, four warm doors, five tools; recovery routing; current limitations. Read for "how
+  does stacked delivery work / how do I publish, sync, recover, or land a PR train" questions.
 - [Configuration](./references/configuration.md) — the `.perk/config.toml` committed config + the
   `.perk/local.toml` overlay and its semantics, then every table (`[models]` +
   `[models.stages.<id>]` / `[models.subagents]`, `[ci]` + `[[ci.checks]]`, `[workflow]`,
