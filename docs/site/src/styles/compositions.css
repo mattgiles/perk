@@ -95,7 +95,8 @@
 }
 
 /* Content-scoped conformance: intent cards onto the bound card system (no shadow,
- * border-first, card radius, surface fill) with a non-color-only hover cue. */
+ * border-first, card radius, surface fill); hover emphasizes the border (the card's link
+ * affordance itself stays non-color: title + arrow icon + focus outline). */
 .perk-band .sl-link-card {
   box-shadow: none;
   border: 1px solid var(--perk-border);

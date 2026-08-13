@@ -27,11 +27,11 @@ import WorkflowSpineDiagram from "../site/src/components/WorkflowSpineDiagram.as
 
 <WorkflowSpineDiagram />
 
-<p class="perk-diagram-text">
+<div class="perk-diagram-text">
   How does a change move through perk? It walks seven stages in order — plan, save,
   implement (shown in-flight above as an example), submit, then address only if review
   asks, then land, and finally learn.
-</p>
+</div>
 
 </section>
 
@@ -89,13 +89,15 @@ import WorkflowSpineDiagram from "../site/src/components/WorkflowSpineDiagram.as
 
 <TwoPlanesDiagram />
 
-<p class="perk-diagram-text">
+<div class="perk-diagram-text">
   Who owns what? The exterior — the perk CLI — scaffolds the repo, manages worktrees, and
-  launches Pi; the interior — the Pi session — drives stages, doors, and tools; the planes
-  never talk directly, coordinating only through durable state (plan and objective issues
-  on GitHub or Linear, pull requests, and pushed branch commits): the exterior exchanges
-  plan issues and branches with it, the interior plan issues and pull requests.
-</p>
+  launches Pi; the interior — the Pi session — drives stages, doors, and tools. The planes
+  share no in-process code: beyond the launch handoff and the static workflow description
+  both planes read, everything they must durably agree on lives in durable state — plans
+  and objectives (GitHub issues; on Linear, issues and projects), pull requests, and pushed
+  branch commits — with the exterior exchanging plan issues and branches, and the interior
+  plan issues and pull requests.
+</div>
 
 </section>
 
@@ -106,7 +108,7 @@ import WorkflowSpineDiagram from "../site/src/components/WorkflowSpineDiagram.as
 ## Requirements and provenance
 
 perk runs where you already work: it needs `git`, an authenticated `gh`, Node.js ≥ 22, the
-`pi` agent harness, and `uv`.
+`pi` agent harness, the `skills` CLI, and `uv`.
 
 These docs are built from the perk checkout they live in — they describe this code, not a
 hosted release. Source: [github.com/mattgiles/perk](https://github.com/mattgiles/perk).

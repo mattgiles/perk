@@ -164,40 +164,96 @@ test("the home page renders the hero actions and the five band sections", () => 
   }
 });
 
-test("the home page renders two diagram figures, each with two labeled SVG variants", () => {
+// The two home diagrams' semantic content, pinned per figure (document order: the workflow
+// spine, then the two planes) so the hand-duplicated wide/narrow variants cannot drift apart
+// silently: `ordered` labels must appear in source order in BOTH variants, `required` labels
+// must be present, and the arrowhead / dashed-conditional-connector counts must match.
+const DIAGRAM_CONTENT = [
+  {
+    name: "workflow spine",
+    ordered: ["○ plan", "○ save", "▸ implement", "○ submit", "◇ address", "○ land", "○ learn"],
+    required: ["(if review asks)"],
+    arrowheads: 6,
+    conditionalConnectors: 1,
+  },
+  {
+    name: "two planes",
+    ordered: ["Exterior", "Durable state", "Interior"],
+    required: [
+      "plans &amp; objectives",
+      "pull requests",
+      "pushed branch commits",
+      "plan issues · branches",
+      "plan issues · pull requests",
+    ],
+    arrowheads: 4,
+    conditionalConnectors: 0,
+  },
+];
+
+test("the home page renders two diagram figures, each with two labeled, content-equal SVG variants", () => {
   const html = fs.readFileSync(path.join(distDir, "index.html"), "utf8");
   const figures = [...html.matchAll(/<figure class="perk-diagram[^"]*".*?<\/figure>/gs)];
-  assert.equal(figures.length, 2, "expected exactly two perk-diagram figures");
+  assert.equal(figures.length, DIAGRAM_CONTENT.length, "expected exactly two perk-diagram figures");
 
   const seenIds = new Set();
-  for (const [figure] of figures) {
-    const svgs = [...figure.matchAll(/<svg[^>]*>/g)].map(([tag]) => tag);
-    assert.equal(svgs.length, 2, "each figure carries exactly two SVG variants");
-    const variants = svgs.map((tag) => tag.match(/data-variant="([^"]+)"/)?.[1]);
-    assert.deepEqual(variants.sort(), ["narrow", "wide"]);
-    for (const tag of svgs) {
-      assert.match(tag, /role="img"/, `SVG variant without role="img": ${tag}`);
+  figures.forEach(([figure], figureIndex) => {
+    const expected = DIAGRAM_CONTENT[figureIndex];
+    const svgs = [...figure.matchAll(/<svg.*?<\/svg>/gs)].map(([block]) => block);
+    assert.equal(svgs.length, 2, `${expected.name}: expected exactly two SVG variants`);
+    const variants = svgs.map((block) => block.match(/data-variant="([^"]+)"/)?.[1]);
+    assert.deepEqual([...variants].sort(), ["narrow", "wide"]);
+
+    for (const block of svgs) {
+      const tag = block.match(/^<svg[^>]*>/)[0];
+      const variant = `${expected.name} (${tag.match(/data-variant="([^"]+)"/)?.[1]})`;
+      assert.match(tag, /role="img"/, `${variant}: SVG without role="img"`);
+
+      // Accessible naming: aria-labelledby must resolve, WITHIN this SVG, to one <title>
+      // followed by one <desc>, both ids document-unique.
       const labelledby = tag.match(/aria-labelledby="([^"]+)"/)?.[1];
-      assert.ok(labelledby, `SVG variant without aria-labelledby: ${tag}`);
+      assert.ok(labelledby, `${variant}: SVG without aria-labelledby`);
       const ids = labelledby.split(/\s+/);
-      assert.equal(ids.length, 2, `expected a <title> + <desc> id pair: ${labelledby}`);
+      assert.equal(ids.length, 2, `${variant}: expected a <title> + <desc> id pair`);
+      const [titleId, descId] = ids;
+      assert.ok(block.includes(`<title id="${titleId}"`), `${variant}: first id must be its <title>`);
+      assert.ok(block.includes(`<desc id="${descId}"`), `${variant}: second id must be its <desc>`);
       for (const id of ids) {
         assert.ok(!seenIds.has(id), `duplicated accessible-name id: ${id}`);
         seenIds.add(id);
         const occurrences = [...html.matchAll(new RegExp(` id="${id}"`, "g"))];
         assert.equal(occurrences.length, 1, `id ${id} must be document-unique`);
-        assert.match(
-          html,
-          new RegExp(`<(title|desc) id="${id}"`),
-          `id ${id} must name an in-document <title>/<desc>`,
-        );
       }
+
+      // Variant content parity: same nodes, same reading order, same edge markers. The
+      // accessible <title>/<desc> prose mentions the same labels in sentence order, so the
+      // graphical markup is checked with both stripped.
+      const content = block.replace(/<title.*?<\/title>/s, "").replace(/<desc.*?<\/desc>/s, "");
+      let cursor = -1;
+      for (const label of expected.ordered) {
+        const at = content.indexOf(label);
+        assert.ok(at > cursor, `${variant}: label ${JSON.stringify(label)} missing or out of order`);
+        cursor = at;
+      }
+      for (const label of expected.required) {
+        assert.ok(content.includes(label), `${variant}: label ${JSON.stringify(label)} missing`);
+      }
+      assert.equal(
+        [...content.matchAll(/class="arrowhead/g)].length,
+        expected.arrowheads,
+        `${variant}: arrowhead count`,
+      );
+      assert.equal(
+        [...content.matchAll(/class="connector conditional/g)].length,
+        expected.conditionalConnectors,
+        `${variant}: dashed conditional-connector count`,
+      );
     }
-  }
+  });
 
   // Every figure has an adjacent textual equivalent (§5: one sentence introducing the
   // question + a sequence/relationship statement).
-  const texts = [...html.matchAll(/<\/figure>\s*<p class="perk-diagram-text"/g)];
+  const texts = [...html.matchAll(/<\/figure>\s*<div class="perk-diagram-text"/g)];
   assert.equal(texts.length, 2, "each diagram figure needs an adjacent perk-diagram-text");
 });
 
@@ -215,6 +271,13 @@ test("every route-style internal href on the home page maps to a built page", ()
     if (!fs.existsSync(target)) offenders.push(`${href} → missing ${target}`);
   }
   assert.deepEqual(offenders, []);
+
+  // The four-way intent router (band 3) is pinned exactly: one link card per quadrant
+  // landing, in §2 section order — dropping, duplicating, or retargeting a card fails here.
+  const cardHrefs = [
+    ...html.matchAll(/<div class="sl-link-card[^"]*">\s*<span[^>]*>\s*<a href="([^"]+)"/g),
+  ].map(([, href]) => href);
+  assert.deepEqual(cardHrefs, ["/tutorials/", "/how-to/", "/reference/", "/explanation/"]);
 });
 
 test("each quadrant landing renders a recommended-starts region with 2–3 links", () => {

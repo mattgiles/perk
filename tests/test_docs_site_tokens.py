@@ -196,6 +196,10 @@ def test_astro_config_wires_blueprint_custom_css():
     assert actual[: len(expected)] == expected
 
     additional = actual[len(expected) :]
+    # The compositions stylesheet is itself required wiring (the §4A/§4B band, landing, and
+    # diagram compositions are dead without it) — dropping it must fail here, not only in a
+    # visual diff, so the generic additional-entry checks below can never pass vacuously.
+    assert "./src/styles/compositions.css" in additional, additional
     assert all(re.fullmatch(r"\./src/styles/[^/]+\.css", e) for e in additional), additional
 
     # The bound tokens entry must still resolve to the guarded stylesheet from the config's
