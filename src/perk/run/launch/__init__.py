@@ -1,12 +1,18 @@
 """The cold-door launch primitive (cli-vs-pi §4.1): position the environment, then
 ``exec pi`` primed for a stage, and hand off (§2.3).
 
-Positioning is **plan-ref-aware**: for ``create``/``reuse`` stages, when no
-explicit ``--worktree`` is given, the worktree/branch name is **derived** from the active
-``cache.plan-ref`` (``plan-<pr_id>``, D1) and the plan-ref + handoff are **materialized into
-the worktree** (D5) so the launched ``pi`` links ``active_plan_ref`` on ``session_start``.
-``create`` is **idempotent** (D4): an existing worktree is reused (resume), not re-created.
-Arbitrary plan-``#N`` resolution is ``perk resume``; here the *active* ref is used (D2).
+Positioning runs FIRST and is **selection-aware** (contracts.md §8.38): ``resolve_worktree``
+settles the one launch-authority ref — an explicitly selected ``plan_ref`` > an explicit
+existing ``--worktree``'s own binding > the ``invocation_root`` active selector — derives the
+canonical ``plan-<pr_id>`` branch/worktree name (D1), validates or materializes the checkout,
+and **owns the worktree's plan-ref binding** (a fresh/restored checkout is bound at creation;
+an existing one is accepted only after the binding-equality check). ``launch_stage`` then
+writes only the run **handoff** (never the binding) and every later phase — seed prompt,
+plan-body snapshot, Linear emission, cwd, dry-run JSON — consumes ``ResolvedWorktree.plan_ref``
+so the launched ``pi`` links ``active_plan_ref`` on ``session_start`` (D5). ``create`` is
+**idempotent** (D4): an existing worktree is validated reuse, not re-created; a missing
+``reuse`` checkout restores from ``origin/plan-<id>`` (learn excepted). Arbitrary plan-``#N``
+resolution is ``perk resume``/the explicit ``PLAN`` selectors (D2).
 
 A ``--remote`` launch of a drivable stage (``implement``/``address``) is a **real drive**
 (contracts.md §8.13): :func:`_drive_remote_target` persists the ``run_id→plan``

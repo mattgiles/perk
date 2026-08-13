@@ -8,7 +8,8 @@ entry planes (CLI launchers / extension transitions) cannot drift. Generation is
 
 import click
 
-from perk.cli.context import require_config, require_repo
+from perk.cli.context import require_repo
+from perk.cli.plan_selection import load_main_config, main_repo_root
 from perk.run.launch import launch_stage
 from perk.substrate.registry import RegistryError, Stage, load_registry
 
@@ -94,15 +95,21 @@ def make_stage_launcher(stage: Stage) -> click.Command:
     ) -> None:
         # --no-sync is inert for stages that aren't read-only `worktree: none` (e.g. the hidden
         # `learn` launcher); launch_stage's gate ignores sync_main outside those stages.
+        # Two-roots rule: config + positioning anchor to the MAIN checkout (a relative worktree
+        # root must never resolve beneath a linked worktree); the invocation root is passed
+        # separately for the no-argument cache-fallback read only.
+        invocation_root = require_repo(ctx)
+        main_root = main_repo_root(invocation_root)
         launch_stage(
-            repo_root=require_repo(ctx),
-            config=require_config(ctx),
+            repo_root=main_root,
+            config=load_main_config(main_root),
             stage=stage,
             worktree=worktree,
             dry_run=dry_run,
             remote=remote,
             pi_args=list(pi_args),
             sync_main=not no_sync,
+            invocation_root=invocation_root,
         )
 
     return _cmd

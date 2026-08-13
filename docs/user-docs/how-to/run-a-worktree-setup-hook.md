@@ -43,8 +43,9 @@ have not). The `[worktree]` table is written there by default.
 
 3. **Handle a failure.** If any setup command exits non-zero (or times out, or `bash` is missing),
    perk **aborts the launch** before starting `pi` and reports the failing command. The worktree is
-   left in place carrying a pending-setup marker — fix the problem, then re-run the same stage:
-   the existing worktree is reused (idempotent) and setup **retries** (the marker clears only on
+   left in place carrying a pending-setup marker — fix the problem, then re-run the same command
+   (the stage launcher, or `perk worktree create NAME` itself for a manual worktree): the
+   existing worktree is reused (idempotent) and setup **retries** (the marker clears only on
    success, so a failed setup is never silently skipped).
 
 4. **Override per-user (optional).** `[worktree] setup` is overlay-aware: a `local.toml`

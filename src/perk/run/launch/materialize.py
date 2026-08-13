@@ -35,7 +35,9 @@ _WORKTREE_SETUP_TIMEOUT_S = 600
 
 
 def run_worktree_setup(worktree: Path, commands: list[str]) -> None:
-    """Run the project's `[worktree] setup` commands, in order, inside a freshly created worktree.
+    """Run the project's `[worktree] setup` commands, in order, inside a newly materialized
+    worktree (freshly created or restored from the remote plan branch — the marker-gated
+    ``launch.run_pending_setup`` decides *whether* to run; this function is the *how*).
 
     Each command runs via ``bash -lc <command>`` (the same mechanism the CI executor uses) with
     ``cwd`` = the worktree and **captured** stdio: output is swallowed on success (the per-command
@@ -48,7 +50,7 @@ def run_worktree_setup(worktree: Path, commands: list[str]) -> None:
     A no-op when ``commands`` is empty (no subprocess).
 
     The single canonical setup-execution path; the cold door and ``perk worktree create`` both
-    consume it (mirrors ``materialize_plan_body``).
+    consume it through the marker-gated ``run_pending_setup`` (mirrors ``materialize_plan_body``).
     """
     if not commands:
         return

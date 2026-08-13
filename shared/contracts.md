@@ -237,7 +237,8 @@ The local cache tier — written and read by **both** the CLI (exterior) and the
     let a stale **root selector** leak into a fresh planning session — hence the stage-gated
     reconciliation in §8.3.
   - **Two roots (the selection rule).** Every plan-selecting cold door (`implement`,
-    `pr address`/flat `address`, `pr ready`, `plan resume`, `plan watch`, `objective run`)
+    `pr address`/flat `address`, `pr ready`, `plan resume`, `plan watch`, `objective run`) —
+    and every generated stage launcher's config/positioning anchoring —
     distinguishes the **invocation root** (`git rev-parse --show-toplevel` at the cwd — used
     ONLY for the no-argument cache-fallback *read*: inside a plan worktree, that worktree's own
     binding is the selection) from the **main root** (`git.main_worktree_root(…) or
@@ -5275,34 +5276,46 @@ identically by dry-run previews and real setup/materialization gating (no create
 asymmetry). Selection precedence + the two roots are §8.1. The rest of the posture:
 
 - **Validated reuse (fail-closed).** An existing checkout is accepted only when it is a
-  registered git worktree at the resolved path (both sides `Path.resolve()`d), checked out on
+  registered git worktree at the resolved path (both sides `Path.resolve()`d) **whose own live
+  toplevel probe resolves back to exactly that path** (a prunable admin entry — the `.git`
+  gitfile gone — refuses `worktree_unregistered` with `git worktree repair` remediation, since
+  git commands there would silently resolve to the main checkout), checked out on
   the selected `plan-<id>` branch, and carrying a readable worktree-local binding equal to the
   selected ref across **every `PlanRef` field**. Disagreements refuse before handoff/exec with
   typed diagnostics: `worktree_unregistered`, `worktree_branch_mismatch`,
   `worktree_plan_mismatch`, and `worktree_unbound` (an existing checkout with no readable
   binding is **never silently rebound** — remediation is `git worktree remove`, then re-run).
   Valid reuse performs **no mutating or network git operation** (read-only probes only).
+  A **bare-id** selection (`plan watch`'s lazy arm) recomputes positioning from the
+  **canonical** id after its one lazy backend read — a backend-canonicalized selector (e.g.
+  GitHub `007` → `7`) reuses/restores `plan-7`, never a parallel `plan-007`.
 - **Non-destructive restore (missing `reuse` checkouts only).** `submit`/`address`/`land`/
   `plan watch` restore a missing checkout from the existing `origin/plan-<id>` branch: strict
   fetch; create the local branch from the remote tip when absent; attach when equal;
-  fast-forward only a provably-behind, un-checked-out local branch; refuse
+  fast-forward only a provably-behind, un-checked-out local branch — the checked-out guard sits
+  at the mutation boundary and the ref write is a **compare-and-swap** against the observed sha
+  (a concurrently advanced/checked-out branch refuses instead of being overwritten); refuse
   `worktree_restore_failed` **without changing local branch refs** when it is ahead, divergent,
   checked out elsewhere, unresolvable, or unfetchable. A missing-but-registered path (stale
   admin entry) refuses `worktree_stale_registration` with `git worktree prune` remediation —
   never auto-pruned. A missing plan branch is never synthesized. **`learn` never restores**
   (typed `worktree_not_found`): it runs post-squash-merge (the remote branch is commonly
   auto-deleted) and its real input — the machine-local session evidence — is not on any remote.
-- **Stacked restoration restores the operational record.** A restored checkout whose ref
-  carries `delivery_lineage` gets `layer-context.json` rewritten from the fetched canonical
-  header (`parent_sha` from the verified `parent_checkpoint_sha`; `parent_branch` from
-  `predecessor_plan_id`, else the base) so `plan watch`'s layer-arm diff base stays exact. A
-  stacked plan with a remote branch but no checkpoint pair refuses `worktree_restore_failed`.
+- **Stacked restoration restores the operational record — after verifying it.** A restored
+  checkout whose ref carries `delivery_lineage` gets `layer-context.json` rewritten from the
+  fetched canonical header (`parent_sha` from the verified `parent_checkpoint_sha`;
+  `parent_branch` from `predecessor_plan_id`, else the base) so `plan watch`'s layer-arm diff
+  base stays exact. The checkpoint pair is validated against the FETCHED tip before any
+  materialization: the recorded `published_head_sha` must BE the remote tip and
+  `parent_checkpoint_sha` must resolve and be an ancestor of it — a missing pair, a drifted
+  publication, or a non-ancestor parent (force-push residue) refuses `worktree_restore_failed`.
 - **Positioner-owned binding + the `setup-pending` marker.** A freshly created/restored
   checkout is bound (plan-ref written) immediately after checkout creation and marked
   `setup-pending` (`cache.markers`); the marker-gated setup gesture (`run_pending_setup`) runs
   the configured `[worktree] setup` and clears the marker **only on success** — a `reuse-local`
   checkout still carrying the marker re-runs the hook (a failed setup is never skipped
-  forever). Dry runs mutate nothing (no fetch, no writes, no markers) and preview the planned
+  forever). `perk worktree create` shares the gesture: creation sets the marker, and re-running
+  the same command on a marked existing path retries the hook instead of refusing. Dry runs mutate nothing (no fetch, no writes, no markers) and preview the planned
   restore/setup; `plan watch --dry-run` additionally composes its diff base from local refs
   only (the no-fetch mode).
 

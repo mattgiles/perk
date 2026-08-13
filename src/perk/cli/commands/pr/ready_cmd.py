@@ -43,7 +43,14 @@ class PrReadyResult:
 
 @click.command("ready")
 @click.argument("plan", required=False)
-@click.option("--dry-run", is_flag=True, help="Resolve the PR without marking it ready.")
+@click.option(
+    "--dry-run",
+    is_flag=True,
+    help=(
+        "Offline preview: validate the selection (PLAN is parse-checked; no backend or GitHub "
+        "read) and report what a real run would do — no PR is resolved or marked."
+    ),
+)
 @click.option("--json", "as_json", is_flag=True, help="Emit a machine-readable report to stdout.")
 @click.pass_context
 def ready_pr(ctx: click.Context, *, plan: str | None, dry_run: bool, as_json: bool) -> None:

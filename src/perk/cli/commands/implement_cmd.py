@@ -35,7 +35,11 @@ from perk.substrate.registry import stage_by_id
 @click.argument("plan", required=False)
 @click.option(
     "--worktree",
-    help="Directory name for the checkout (positioning only — never plan identity or branch).",
+    help=(
+        "Directory name for the checkout — never plan identity or the plan-<id> branch. "
+        "Without PLAN, an EXISTING named checkout selects through its own binding (ahead of "
+        "the invoking checkout's saved plan); a missing named directory requires PLAN."
+    ),
 )
 @click.option("--dry-run", is_flag=True, help="Print the launch plan without exec'ing pi.")
 @click.option(
@@ -65,11 +69,14 @@ def implement(
 
     \b
     PLAN is an optional plan issue id (e.g. 42, #42, ENG-123, or the pasted issue URL). Omit it
-    to implement the active saved plan: the no-argument form reads the invoking checkout's own
-    cache.plan-ref (inside a plan worktree that is the worktree's binding). An explicit PLAN is
+    to implement the active saved plan: the no-argument form selects, in order, an explicit
+    EXISTING --worktree's own binding, else the invoking checkout's cache.plan-ref (inside a
+    plan worktree that is the worktree's binding); a missing --worktree directory without PLAN
+    is refused (it cannot invent a binding). An explicit PLAN is
     canonical issue authority — it updates only the main-checkout selector and drives the
     launch directly. Typed failures (plan_not_found, worktree_plan_mismatch,
-    worktree_branch_mismatch, worktree_unbound, invalid_input) exit 1 before any launch.
+    worktree_branch_mismatch, worktree_unbound, worktree_not_found, invalid_input) exit 1
+    before any launch.
 
     \b
     Examples:

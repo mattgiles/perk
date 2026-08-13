@@ -980,8 +980,9 @@ command (not a merged L+W: `ready` is not a registry stage and has no launcher).
 optional plan issue id or pasted issue URL: it selects the plan canonically with one backend
 read, so `perk pr ready 1699` works from the repository root — ready needs no source files, no
 worktree, and never writes the active-plan selector; omitted, the invoking checkout's own saved
-plan is used (inside a plan worktree, that worktree's binding). `--dry-run`
-resolves the PR without marking it ready (an explicit `PLAN` is validated but not fetched). For a stacked plan, the worker reconstructs the train and
+plan is used (inside a plan worktree, that worktree's binding). `--dry-run` is an offline
+validation preview: it parse-checks an explicit `PLAN` and confirms a saved plan exists on the
+no-argument form, but performs no backend or GitHub read — no PR is resolved or marked. For a stacked plan, the worker reconstructs the train and
 fetches the projection-correlated PR: the target must be exactly published; marking a draft also
 requires no unresolved operation and no structural train blocker (unrelated operational drift does
 not block). An already-ready PR revalidates target identity/publication but skips those global
@@ -1083,6 +1084,13 @@ Capture and consolidate learnings. Bare `perk learn` launches the `learn` stage 
 session); its `capture`, `skip`, `code`, `docs`, and `evidence` verbs are the cold workers the
 warm doors delegate to; `harvest` is the cold-only objective factory that mines `docs/learned/`
 (it has no warm door); `pending` lists closed plans still awaiting /learn.
+
+**Local-checkout-only.** `learn` reuses the plan's local worktree but is the one reuse launcher
+that never restores a missing checkout: it runs after the squash-merge, when GitHub commonly
+auto-deletes `origin/plan-<id>`, and its real input — the session evidence under the worktree's
+gitignored run artifacts — is machine-local and not on any remote. A missing checkout is a typed
+refusal (`worktree_not_found`): run learn on the machine where the plan was implemented, or skip
+it (`perk learn skip`).
 
 ### `perk learn pending`
 
@@ -1322,7 +1330,9 @@ as expected. `NAME` `root` navigates back to the main checkout, and a bare plan 
 ### `perk worktree create NAME` (alias `new`)
 
 Create a worktree `NAME` under the configured worktree root. `--branch` sets the branch to create
-(default: the worktree name).
+(default: the worktree name). Runs the `[worktree] setup` hook marker-gated, exactly like the
+stage launchers: a failed setup exits non-zero and leaves the worktree in place with the
+pending-setup marker — re-running the same `worktree create NAME` retries the hook.
 
 ### `perk worktree list` (alias `ls`)
 

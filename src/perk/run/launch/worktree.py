@@ -306,6 +306,21 @@ def _validate_existing_checkout(
             "Move it aside (or delete it) and re-run to get a managed checkout.",
             error_type="worktree_unregistered",
         )
+    # A `git worktree list` entry alone is not proof of a usable checkout: git retains a
+    # prunable admin entry when the checkout's `.git` gitfile is gone — and because the path
+    # sits under the main repo, git commands run there would silently resolve to the MAIN
+    # checkout. Require a live read-only probe: the path's own toplevel must be exactly this
+    # resolved path.
+    live_top = git.repo_root(path)
+    if live_top is None or live_top.resolve() != path.resolve():
+        resolved_to = str(live_top) if live_top is not None else "no repository"
+        raise UserFacingCliError(
+            f"{path} is registered but not a usable git worktree (its checkout metadata is "
+            f"missing or broken — git resolves the path to {resolved_to}).\n"
+            f"Run `git worktree repair` in {repo_root}, or remove the entry "
+            f"(git worktree remove --force {path}) and re-run.",
+            error_type="worktree_unregistered",
+        )
     binding = _read_binding(path)
     if binding is None:
         raise UserFacingCliError(
@@ -384,6 +399,53 @@ def _checkpoint_pair(state: PlanState) -> tuple[str, str] | None:
     if not (isinstance(published, str) and published.strip()):
         return None
     return parent.strip(), published.strip()
+
+
+def _validate_stacked_checkpoints(*, repo_root: Path, branch: str, state: PlanState) -> None:
+    """Verify the canonical checkpoint pair against the FETCHED remote tip before any
+    materialization: the recorded ``published_head_sha`` must BE the remote tip and the recorded
+    ``parent_checkpoint_sha`` must resolve locally (the strict branch fetch brings the layer's
+    history) and be an ancestor of that tip. A force-pushed, manually-moved, or stale-header
+    branch refuses ``worktree_restore_failed`` here — otherwise an unrelated full sha would be
+    restored into ``layer-context.parent_sha`` and ``plan watch`` would trust it as the exact
+    layer delta. The strict fetch is shared with :func:`_restore_checkout` (idempotent).
+    """
+    parent_sha, published_sha = Ensure.not_none(
+        _checkpoint_pair(state), "stacked checkpoint validation reached without a pair"
+    )
+
+    def _refuse(reason: str) -> UserFacingCliError:
+        return UserFacingCliError(
+            f"could not restore worktree for plan branch {branch}: {reason}",
+            error_type="worktree_restore_failed",
+        )
+
+    try:
+        git.fetch_refspecs(repo_root, [branch])
+    except GitError as exc:
+        raise _refuse(
+            f"the remote branch could not be fetched ({exc}). If the plan was never "
+            "pushed, run `perk implement` first."
+        ) from exc
+    tip = git.resolve_commit(repo_root, f"refs/remotes/origin/{branch}")
+    if tip is None:
+        raise _refuse("origin has no such branch after fetch")
+    if published_sha != tip:
+        raise _refuse(
+            f"the canonical header records published head {published_sha[:12]} but "
+            f"origin/{branch} is at {tip[:12]} — the branch drifted from its recorded "
+            "publication. Run `perk objective stack status` (and sync/adopt) to reconcile, "
+            "then re-run."
+        )
+    if (
+        git.resolve_commit(repo_root, parent_sha) != parent_sha
+        or git.is_ancestor(repo_root, parent_sha, tip) is not True
+    ):
+        raise _refuse(
+            f"the recorded parent checkpoint {parent_sha[:12]} is not an ancestor of "
+            f"origin/{branch} — the layer's operational record is stale. Run "
+            "`perk objective stack status` to inspect the train."
+        )
 
 
 def _restore_layer_context(
@@ -469,13 +531,6 @@ def _restore_checkout(*, repo_root: Path, path: Path, branch: str) -> None:
                     repo_root, path, branch=branch, create_branch=True, base=f"origin/{branch}"
                 )
             else:
-                entries = git.worktree_list(repo_root)
-                holder = next((w for w in entries if w.branch == branch), None)
-                if holder is not None:
-                    raise _refuse(
-                        f"local branch {branch} is already checked out at {holder.path} — "
-                        "local branch refs were left unchanged"
-                    )
                 if local_sha != remote_sha:
                     behind = git.is_ancestor(repo_root, local_sha, remote_sha)
                     if behind is not True:
@@ -486,8 +541,24 @@ def _restore_checkout(*, repo_root: Path, path: Path, branch: str) -> None:
                             "touch it (local branch refs were left unchanged). Reconcile the "
                             "branch manually, then re-run."
                         )
-                    # Provably behind and not checked out anywhere: safe fast-forward.
-                    git.update_ref(repo_root, f"refs/heads/{branch}", remote_sha)
+                # The checked-out-elsewhere guard sits at the MUTATION boundary (immediately
+                # before the ref write below), and the fast-forward itself is a compare-and-swap
+                # against the observed sha — a branch another process advanced or checked out
+                # between the probes and the write refuses instead of being overwritten. (The
+                # final `worktree add` is git's own backstop: it refuses a branch that became
+                # checked out elsewhere in the residual window.)
+                entries = git.worktree_list(repo_root)
+                holder = next((w for w in entries if w.branch == branch), None)
+                if holder is not None:
+                    raise _refuse(
+                        f"local branch {branch} is already checked out at {holder.path} — "
+                        "local branch refs were left unchanged"
+                    )
+                if local_sha != remote_sha:
+                    # Provably behind and not checked out anywhere: safe fast-forward (CAS).
+                    git.update_ref(
+                        repo_root, f"refs/heads/{branch}", remote_sha, expected=local_sha
+                    )
                 git.worktree_add(repo_root, path, branch=branch, create_branch=False)
         except GitError as exc:
             raise _refuse(str(exc)) from exc
@@ -637,6 +708,24 @@ def resolve_worktree(
     if ref is None:  # a bare-id selection restores from canonical state (the one lazy read)
         state, provider = _fetch_plan_state(repo_root, selection.plan_id)
         ref = resume.reconstruct_plan_ref(state, provider=provider)
+        # The backend may canonicalize the raw selector (e.g. GitHub "007" → id "7"), so
+        # positioning is recomputed from the CANONICAL id — a restore can never materialize a
+        # `plan-007` directory bound to plan #7. A checkout that exists under the canonical
+        # name is validated reuse, exactly as if the canonical id had been passed.
+        canonical_branch = resolve_plan_worktree_name(ref)
+        if canonical_branch != branch:
+            selection = _Selection(ref=ref, plan_id=ref.pr_id, source=selection.source)
+            branch = canonical_branch
+            path = config.worktree_root / (
+                _checked_name(worktree) if worktree is not None else branch
+            )
+            if path.exists():
+                validated = _validate_existing_checkout(
+                    repo_root=repo_root, path=path, selection=selection
+                )
+                return ResolvedWorktree(
+                    path=path, plan_ref=validated, disposition="reuse-local", branch=branch
+                )
     if ref.delivery_lineage is not None:
         if state is None:
             state, _provider = _fetch_plan_state(repo_root, ref.pr_id)
@@ -647,6 +736,7 @@ def resolve_worktree(
                 "restored. Run `perk objective stack status` to inspect the train.",
                 error_type="worktree_restore_failed",
             )
+        _validate_stacked_checkpoints(repo_root=repo_root, branch=branch, state=state)
     _refuse_stale_registration(repo_root, path)
     _restore_checkout(repo_root=repo_root, path=path, branch=branch)
     _materialize_binding(path, ref)

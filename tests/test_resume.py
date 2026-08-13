@@ -255,13 +255,14 @@ def test_url_argument_peeled_to_id_reaches_backend(monkeypatch, unborn_git_repo_
 
 def test_real_resume_writes_ref_and_launches(monkeypatch, unborn_git_repo_factory):
     _authed(monkeypatch)
-    monkeypatch.setattr(plans, "get_plan", lambda **k: _state(pr=_pr("OPEN")))
+    state = _state(pr=_pr("OPEN"))
+    monkeypatch.setattr(plans, "get_plan", lambda **k: state)
     # An unresolved review thread makes the OPEN non-draft PR actionable → launch `address`.
     monkeypatch.setattr(github, "get_pr_feedback", lambda **k: _feedback(threads=(_thread(False),)))
-    launched: dict[str, object] = {}
+    launched: dict = {}
 
     def _launch(**k):
-        launched["stage"] = k["stage"].id
+        launched.update(k)
 
     monkeypatch.setattr(launch, "launch_stage", _launch)
     runner = CliRunner()
@@ -269,11 +270,43 @@ def test_real_resume_writes_ref_and_launches(monkeypatch, unborn_git_repo_factor
         _git_init(d, unborn_git_repo_factory)
         result = runner.invoke(cli, ["plan", "resume", "7"])
         assert result.exit_code == 0
-        assert launched["stage"] == "address"  # PR open + actionable feedback -> address
+        assert launched["stage"].id == "address"  # PR open + actionable feedback -> address
         assert "looking up plan #7" in result.stderr  # narrates the backend lookup wait
         assert "\u2713 found plan #7" in result.stderr  # the lookup step resolves on success
-        # the ref was materialized at the repo root for launch_stage to derive from
-        assert cache.read_plan_ref(Path(d)) is not None
+        # Direct-ref launch authority: the reconstructed ref + its fetched state are passed
+        # straight into the launch — the selector write below is a convenience, never the input.
+        assert launched["plan_ref"] is not None and launched["plan_ref"].pr_id == "7"
+        assert launched["plan_state"] is not None and launched["plan_state"].id == "7"
+        # the selector was ALSO materialized at the (main) repo root for later no-arg runs
+        assert cache.read_plan_ref(Path(d)) == launched["plan_ref"]
+
+
+def test_resume_inside_linked_worktree_anchors_to_the_main_root(monkeypatch, git_repo):
+    # Invoked from INSIDE a linked plan worktree, resume writes the selector at the MAIN root,
+    # positions against the MAIN root, and never rewrites the invoking worktree's own binding.
+    from perk.cli.context import PerkContext
+    from perk.substrate import git as git_mod
+    from perk.substrate.config import Config
+
+    _authed(monkeypatch)
+    monkeypatch.setattr(plans, "get_plan", lambda **k: _state(pr=_pr("OPEN")))
+    monkeypatch.setattr(github, "get_pr_feedback", lambda **k: _feedback(threads=(_thread(False),)))
+    other_ref = plan.PlanRef(provider="github", pr_id="9", url="u/9", labels=("perk:plan",))
+    wt9 = git_repo / ".worktrees" / "plan-9"
+    git_mod.worktree_add(git_repo, wt9, branch="plan-9", create_branch=True)
+    cache.write_plan_ref(wt9, other_ref)
+    binding_bytes = cache.plan_ref_path(wt9).read_bytes()
+    launched: dict = {}
+    monkeypatch.setattr(launch, "launch_stage", lambda **k: launched.update(k))
+    ctx = PerkContext.for_test(
+        cwd=wt9, repo_root=wt9, config=Config(worktree_root=git_repo / ".worktrees")
+    )
+    result = CliRunner().invoke(cli, ["plan", "resume", "7"], obj=ctx)
+    assert result.exit_code == 0, result.output
+    assert launched["repo_root"] == git_repo  # positioning anchors to the MAIN root
+    assert launched["plan_ref"] is not None and launched["plan_ref"].pr_id == "7"
+    assert cache.read_plan_ref(git_repo) == launched["plan_ref"]  # the MAIN-root selector
+    assert cache.plan_ref_path(wt9).read_bytes() == binding_bytes  # never clobbered
 
 
 def test_implement_resume_into_existing_worktree_carries_advisory(

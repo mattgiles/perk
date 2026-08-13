@@ -37,13 +37,15 @@ _ADDRESS_HELP = (
     "Classify PR review feedback (isolated child) and resolve the threads.\n\n"
     "Opens a primed pi session for the 'address' stage (use --dry-run to print the launch plan "
     "without exec'ing pi). PLAN is an optional plan issue id (e.g. 42, #42, ENG-123, or the "
-    "pasted issue URL): omit it to address the active saved plan (inside a plan worktree, that "
-    "worktree's own binding); pass it to select the plan canonically — the launch consumes the "
-    "resolved ref directly, and a real launch updates only the main-checkout selector. Typed "
-    "failures (plan_not_found, worktree_plan_mismatch, worktree_branch_mismatch, "
-    "worktree_unbound, invalid_input) exit 1 before any launch. Pass --preview to classify the "
-    "feedback only and take no action (the warm /address --preview gesture); --preview is "
-    "local-only (inert on --remote)."
+    "pasted issue URL): omit it to address the active saved plan — selected, in order, from an "
+    "explicit EXISTING --worktree's own binding, else the invoking checkout's cache.plan-ref "
+    "(inside a plan worktree, that worktree's own binding); a missing --worktree directory "
+    "without PLAN is refused. Pass PLAN to select the plan canonically — the launch consumes "
+    "the resolved ref directly, and a real launch updates only the main-checkout selector. "
+    "Typed failures (plan_not_found, worktree_plan_mismatch, worktree_branch_mismatch, "
+    "worktree_unbound, worktree_not_found, invalid_input) exit 1 before any launch. Pass "
+    "--preview to classify the feedback only and take no action (the warm /address --preview "
+    "gesture); --preview is local-only (inert on --remote)."
 )
 
 
@@ -56,7 +58,11 @@ _ADDRESS_HELP = (
 @click.argument("plan", required=False)
 @click.option(
     "--worktree",
-    help="Directory name for the checkout (positioning only — never plan identity or branch).",
+    help=(
+        "Directory name for the checkout — never plan identity or the plan-<id> branch. "
+        "Without PLAN, an EXISTING named checkout selects through its own binding (ahead of "
+        "the invoking checkout's saved plan); a missing named directory requires PLAN."
+    ),
 )
 @click.option("--dry-run", is_flag=True, help="Print the launch plan without exec'ing pi.")
 @click.option(

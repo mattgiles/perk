@@ -27,10 +27,10 @@ from perk.cli.commands.objective.shared import (
     stacked_lower_attention,
     stacked_selection,
 )
-from perk.cli.context import require_config, require_github, require_repo
+from perk.cli.context import require_github, require_repo
 from perk.cli.emit import fail
 from perk.cli.ensure import Ensure, UserFacingCliError
-from perk.cli.plan_selection import main_repo_root
+from perk.cli.plan_selection import load_main_config, main_repo_root
 from perk.github import GitHubError
 from perk.run import discovery, launch, resume, run_report, runner
 from perk.state import cache
@@ -212,6 +212,7 @@ def _dispatch_stage_remote(
     )
     if dry_run:
         return None
+    # `repo_root` is already the main root (normalized once in `_run_impl`).
     cache.write_plan_ref(main_repo_root(repo_root), plan_ref)
     buf = io.StringIO()
     with contextlib.redirect_stdout(buf):
@@ -297,8 +298,11 @@ def _run_impl(
     """The deterministic single-pass control flow. Returns the structured payload to render;
     raises ``UserFacingCliError``/``IssueBackendError``/``GitHubError`` for the command's ``fail``
     boundary."""
-    repo_root = require_repo(ctx)
-    config = require_config(ctx)
+    # Two-roots rule: the supervisor's config, canonical reads, dispatch records, and selector
+    # writes all anchor to the MAIN checkout — invoking from inside a linked worktree must not
+    # fork its state (objective run has no worktree-local fallback read).
+    repo_root = main_repo_root(require_repo(ctx))
+    config = load_main_config(repo_root)
     if not dry_run:
         require_github(ctx)
     store = resolve.resolve_objective_store(repo_root)

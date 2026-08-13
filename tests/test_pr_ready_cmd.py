@@ -444,3 +444,34 @@ def test_pr_ready_not_a_repo_exits_2(monkeypatch):
         result = runner.invoke(cli, ["pr", "ready", "--json"])
     assert result.exit_code == 2
     assert json.loads(result.output)["error_type"] == "not_a_repo"
+
+
+def test_pr_ready_no_arg_inside_linked_worktree_reads_its_own_binding(git_repo, monkeypatch):
+    # The retained no-argument form reads the INVOCATION checkout's binding: inside a plan
+    # worktree that is the worktree's own plan, even when the main-checkout selector conflicts.
+    from perk.cli.context import PerkContext
+    from perk.substrate import git as git_mod
+
+    _authed(monkeypatch)
+    _stub_plan(monkeypatch)
+    branches: list[str] = []
+
+    def _find(**k):
+        branches.append(k["branch"])
+        return github.PullRequest(
+            number=42, url="u/pr/42", is_draft=False, state="OPEN", existed=True
+        )
+
+    monkeypatch.setattr(github, "find_pr_for_branch", _find)
+    monkeypatch.setattr(github, "mark_pr_ready", lambda **k: None)
+    wt = git_repo / ".worktrees" / "plan-7"
+    git_mod.worktree_add(git_repo, wt, branch="plan-7", create_branch=True)
+    cache.write_plan_ref(wt, _REF)  # the worktree's own plan (#7)
+    cache.write_plan_ref(  # a CONFLICTING main-checkout selector (#9) that must not leak in
+        git_repo,
+        plan.PlanRef(provider="github", pr_id="9", url="u/9", labels=("perk:plan",)),
+    )
+    ctx = PerkContext.for_test(cwd=wt, repo_root=wt)
+    result = CliRunner().invoke(cli, ["pr", "ready", "--json"], obj=ctx)
+    assert result.exit_code == 0, result.output
+    assert branches == ["plan-7"]  # the invocation worktree's binding, not the main selector

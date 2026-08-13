@@ -17,10 +17,10 @@ import click
 from perk import github, plan
 from perk.backends import resolve
 from perk.backends.issue_backend import IssueBackendError
-from perk.cli.context import require_config, require_github, require_repo
+from perk.cli.context import require_github, require_repo
 from perk.cli.emit import fail
 from perk.cli.ensure import Ensure, UserFacingCliError
-from perk.cli.plan_selection import main_repo_root, parse_plan_id
+from perk.cli.plan_selection import load_main_config, main_repo_root, parse_plan_id
 from perk.github import GitHubError
 from perk.prompts import render
 from perk.run import launch, resume
@@ -64,13 +64,17 @@ def resume_cmd(
       perk plan resume https://github.com/o/r/issues/42   # paste the plan's URL instead of the id
     """
     try:
-        repo_root = require_repo(ctx)
+        invocation_root = require_repo(ctx)
         require_github(ctx)  # resume always reads GitHub (the dry run resolves via a read)
-        config = require_config(ctx)
+        # Two-roots rule: config, canonical reads, selector writes, and positioning all anchor
+        # to the MAIN checkout (a relative worktree root must never resolve beneath a linked
+        # worktree); resume has no cache-fallback read — the plan id is always explicit.
+        main_root = main_repo_root(invocation_root)
+        config = load_main_config(main_root)
         plan_id = parse_plan_id(plan)
-        backend = resolve.resolve_issue_backend(repo_root)
+        backend = resolve.resolve_issue_backend(main_root)
         # Banner first: head a real local launch with the banner BEFORE narrating the lookup wait.
-        launch.print_launch_banner_gated(repo_root, dry_run=dry_run, remote=remote)
+        launch.print_launch_banner_gated(main_root, dry_run=dry_run, remote=remote)
         # Narrate the backend lookup wait. The lookup runs on the dry-run path too (dry-run
         # resolves the stage via this same read), so the narration is NOT gated on `dry_run`; the
         # line goes to stderr, leaving the `--json` stdout payload byte-unchanged. The not-found
@@ -84,8 +88,8 @@ def resume_cmd(
             ref = resume.reconstruct_plan_ref(state, provider=backend.backend_id)
             next_action = resume.resolve_next_action(
                 state,
-                has_pending_learn=cache.has_marker(repo_root, cache.PENDING_LEARN),
-                get_feedback=lambda n: github.get_pr_feedback(pr_number=n, repo_root=repo_root),
+                has_pending_learn=cache.has_marker(main_root, cache.PENDING_LEARN),
+                get_feedback=lambda n: github.get_pr_feedback(pr_number=n, repo_root=main_root),
             )
             s.done(f"found plan #{plan_id}")
     except (IssueBackendError, GitHubError) as exc:
@@ -119,7 +123,7 @@ def resume_cmd(
     # Real run: update the MAIN-root selector (never a linked worktree's binding — the
     # two-roots rule), then launch the stage with the resolved ref passed directly (the
     # launch never re-reads that mutable cache write).
-    cache.write_plan_ref(main_repo_root(repo_root), ref)
+    cache.write_plan_ref(main_root, ref)
     stage = stage_by_id(stage_id)
     # Resume prior-work advisory (contracts.md §8.38): an implement resume into a worktree that
     # already exists locally (the D4 reuse arm — the same `worktree_root / name` join
@@ -130,7 +134,7 @@ def resume_cmd(
     if stage_id == "implement" and (config.worktree_root / worktree_name).exists():
         prompt_suffix = render("common/resume-advisory.md", {})
     launch.launch_stage(
-        repo_root=repo_root,
+        repo_root=main_root,
         config=config,
         stage=stage,
         worktree=None,
@@ -140,6 +144,7 @@ def resume_cmd(
         prompt_suffix=prompt_suffix,
         plan_ref=ref,  # the resolved ref is launch authority (never re-read from the cache)
         plan_state=state,
+        invocation_root=invocation_root,
     )
 
 

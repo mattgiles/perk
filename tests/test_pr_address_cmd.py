@@ -304,3 +304,49 @@ def test_real_launch_materialized_ref_handoff_and_cwd_agree(git_repo, monkeypatc
     assert handoff is not None and handoff.stage == "address"
     assert cache.read_plan_ref(wt7) == ref7  # the extension-consumed binding
     assert cache.read_plan_ref(git_repo) == ref7  # the main-root selector was updated
+
+
+def test_address_explicit_id_inside_linked_worktree_writes_main_selector_only(
+    git_repo, monkeypatch
+):
+    # Invoked from INSIDE a different plan's linked worktree, `perk address 7` updates only the
+    # MAIN-root selector, leaves the invoking worktree's durable binding byte-identical, and
+    # positions into the selected plan's own worktree under the MAIN root.
+    from perk.cli.context import PerkContext
+
+    _authed(monkeypatch)
+    ref7 = _canonical_plan(monkeypatch, "7")
+    wt7 = git_repo / ".worktrees" / "plan-7"
+    git.worktree_add(git_repo, wt7, branch="plan-7", create_branch=True)
+    cache.write_plan_ref(wt7, ref7)
+    invoking = _seed(git_repo)  # the plan-42 linked worktree we invoke FROM
+    binding_bytes = cache.plan_ref_path(invoking).read_bytes()
+    captured: dict = {}
+    monkeypatch.setattr(launch, "_exec_pi", lambda ctx: captured.update(ctx=ctx))
+    monkeypatch.setattr(launch, "_warm_extension_install", lambda _ctx: None)
+    monkeypatch.setattr(launch, "_materialize_into_worktree", lambda _ctx: None)
+    ctx = PerkContext.for_test(
+        cwd=invoking, repo_root=invoking, config=Config(worktree_root=git_repo / ".worktrees")
+    )
+    result = CliRunner().invoke(cli, ["pr", "address", "7"], obj=ctx)
+    assert result.exit_code == 0, result.output
+    assert captured["ctx"].resolved.path == wt7  # positioned under the MAIN root
+    assert captured["ctx"].resolved.plan_ref == ref7
+    assert cache.read_plan_ref(git_repo) == ref7  # the MAIN-root selector was written...
+    assert cache.plan_ref_path(invoking).read_bytes() == binding_bytes  # ...never the binding
+
+
+def test_address_no_arg_inside_linked_worktree_selects_its_own_plan(git_repo):
+    # The no-argument cache fallback reads the INVOCATION root: inside a plan worktree that is
+    # the worktree's own binding, even when the main-root selector names a different plan.
+    from perk.cli.context import PerkContext
+
+    wt42 = _seed(git_repo)
+    cache.write_plan_ref(
+        git_repo, plan.PlanRef(provider="github", pr_id="9", url="u/9", labels=("perk:plan",))
+    )
+    ctx = PerkContext.for_test(
+        cwd=wt42, repo_root=wt42, config=Config(worktree_root=git_repo / ".worktrees")
+    )
+    payload = _dry_payload(CliRunner().invoke(cli, ["pr", "address", "--dry-run"], obj=ctx))
+    assert payload["plan_ref"]["pr_id"] == "42"  # its own plan, not the main selector's #9

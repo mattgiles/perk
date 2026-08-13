@@ -115,10 +115,12 @@ PERK_TOML_TEMPLATE = """\
 root = ".worktrees"
 
 # Worktree setup hook (optional) — shell commands run, in order, inside each
-# freshly created worktree before pi starts (via `bash -lc`, cwd = the worktree).
-# Use it to prepare the environment (dependency installs, codegen). A non-zero
-# exit ABORTS the launch (re-run after fixing — the worktree is reused). Skipped
-# on resume/reuse and on the remote runner. Overlay-aware (a local.toml
+# newly materialized worktree (freshly created, or restored from the remote
+# plan branch) before pi starts (via `bash -lc`, cwd = the worktree). Use it to
+# prepare the environment (dependency installs, codegen). A non-zero exit
+# ABORTS the launch; the pending-setup marker makes the re-run RETRY the hook
+# (a failed setup is never silently skipped). Skipped on valid local
+# resume/reuse and on the remote runner. Overlay-aware (a local.toml
 # [worktree] setup array replaces this one wholesale).
 #
 # setup = ["uv sync", "npm ci"]
