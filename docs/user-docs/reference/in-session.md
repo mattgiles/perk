@@ -12,7 +12,7 @@ running `pi` session and the model-facing **tools** the agent calls on your beha
 interior counterpart to [CLI commands](./cli.md) (the session **exterior** — the `perk …`
 commands you run in your shell). It describes the surface; it does not teach a task (those belong
 in [how-to/](../how-to/index.md)) or argue a design (those belong in
-[explanation/](../explanation/index.md)). See the [user-docs router](../index.md) for how this
+[explanation/](../explanation/index.md)). See the [user-docs router](../index.mdx) for how this
 quadrant fits the whole.
 
 The in-session surface is registered in the TypeScript extension, so — unlike the CLI reference,
@@ -794,7 +794,7 @@ If you want the shell exterior — the `perk …` commands you run before a sess
 **[CLI commands](./cli.md)** reference. For task-focused recipes, see the
 **[how-to](../how-to/index.md)** quadrant. For the *why* behind stages, doors, and the two planes,
 see **[How perk thinks](../explanation/how-perk-thinks.md)** in the
-**[explanation](../explanation/index.md)** quadrant. The **[user-docs router](../index.md)** ties
+**[explanation](../explanation/index.md)** quadrant. The **[user-docs router](../index.mdx)** ties
 all four quadrants together.
 
 > **Status:** this page is part of Objective

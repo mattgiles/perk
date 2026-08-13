@@ -11,7 +11,7 @@ This page describes perk's **objective model**: the objective command surface at
 roadmap **node schema**, the **node statuses** (and the resumable-lease lifecycle), and the
 **metadata blocks** an objective stores on GitHub. It describes the model; it does not teach a task
 (those belong in [how-to/](../how-to/index.md)) or argue a design (those belong in
-[explanation/](../explanation/index.md)). See the [user-docs router](../index.md) for how this
+[explanation/](../explanation/index.md)). See the [user-docs router](../index.mdx) for how this
 quadrant fits the whole.
 
 This page is **human-reviewed for accuracy** against `perk/objective.py` (`NodeStatus`,
@@ -255,7 +255,7 @@ payload).
   [reconcile an objective](../how-to/reconcile-an-objective.md),
   [target a non-default base branch](../how-to/target-a-non-default-base-branch.md),
   [run the learn-docs factory](../how-to/run-the-learn-docs-factory.md).
-- The [user-docs router](../index.md).
+- The [user-docs router](../index.mdx).
 
 > **Status:** this page is part of Objective
 > [#453](https://github.com/mattgiles/perk/issues/453) (Node 3.2). The objective model is

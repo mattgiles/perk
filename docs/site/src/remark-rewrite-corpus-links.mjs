@@ -99,7 +99,12 @@ export function validateCorpusDir(corpusDir) {
  * through the markdown parser (imports/JSX parse as prose; markdown-syntax links are still
  * checked), and an `.mdx` target's heading-slug set is likewise the markdown-parse
  * approximation — headings emitted by imported components are invisible to anchor
- * validation. Zero `.mdx` pages exist today; an MDX-faithful path is deferred until one does.
+ * validation. The corpus has exactly one MDX page (the home, `index.mdx`): its
+ * markdown-syntax links and headings parse as mdast, so link rewriting, the dangling-link
+ * audit, and inbound-anchor validation all cover it; its JSX attribute hrefs (hero actions,
+ * intent cards) are invisible to this sweep and are covered by the post-build
+ * component-href integrity check (checks/built-site.test.mjs) instead. A fully MDX-faithful
+ * sweep stays deferred with that recorded justification.
  *
  * `escapeBaseline`/`anchorBaseline` are the hermetic test seam; production call sites omit
  * them (defaults = the checked-in consts). Returns the collected `{ escapes, fragments }`.
@@ -198,8 +203,8 @@ export function listCorpusFiles(dir) {
 
 /**
  * Route mapping (blueprint §2) for a corpus-relative file path: POSIX segments, minus
- * extension, drop a trailing `index` segment, directory-style with trailing slash; root
- * `index.md` → `/`. Shared by the link rewrite and the post-build checks (which map corpus
+ * extension, drop a trailing `index` segment, directory-style with trailing slash; the root
+ * index page → `/`. Shared by the link rewrite and the post-build checks (which map corpus
  * files onto `dist/` output paths with it).
  */
 export function corpusRoute(relPath) {

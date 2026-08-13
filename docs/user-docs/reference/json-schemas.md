@@ -10,7 +10,7 @@ sidebar:
 This page describes the **JSON Schema snapshots** perk commits for its cross-plane machine
 surfaces. It describes the surface; it does not teach a task (those belong in
 [how-to/](../how-to/index.md)) or argue a design (those belong in
-[explanation/](../explanation/index.md)). See the [user-docs router](../index.md) for how this
+[explanation/](../explanation/index.md)). See the [user-docs router](../index.mdx) for how this
 quadrant fits the whole.
 
 perk's machine-facing surfaces are Pydantic **boundary models** (`perk/boundary.py`). Their

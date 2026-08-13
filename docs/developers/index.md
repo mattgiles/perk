@@ -2,7 +2,7 @@
 
 This tree is the developer-facing product documentation for **perk's own repository**. It covers
 surfaces that exist only in the self-repo, including `perk-dev` maintainer tooling and repo-local
-agents. It is distinct from [`docs/user-docs/`](../user-docs/index.md), which documents perk for
+agents. It is distinct from [`docs/user-docs/`](../user-docs/index.mdx), which documents perk for
 operators using it on their own repositories, and from the internal research and design record
 indexed by [`docs/index.md`](../index.md).
 

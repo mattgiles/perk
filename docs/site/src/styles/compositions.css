@@ -1,0 +1,116 @@
+/*
+ * perk band/landing compositions — the repo-owned presentational classes the binding visual
+ * blueprint authorizes (docs/design/docs-site-visual-blueprint.md §4), realizing the §4A
+ * six-band home and §4B landing shapes. Consumes ONLY bound token custom properties
+ * (--perk-* plus the blueprint-§2 Starlight ramp / Starlight-owned --sl-* properties) —
+ * never literal color values. Loaded through Starlight `customCss` after tokens.css; the
+ * ordered wiring is guarded by tests/test_docs_site_tokens.py (blueprint entries as an exact
+ * ordered prefix, additional entries confined to ./src/styles/*.css).
+ *
+ * The .sl-link-card / .sl-link-button rules are content-scoped conformance treatments on
+ * Starlight's built-in CONTENT components (stock LinkCard ships a shadow + gray border,
+ * stock LinkButton a 999rem pill radius — both off the bound §2 system: border-first
+ * no-shadow cards, --perk-radius-control controls, pills only for compact statuses). They
+ * style content the page opted into — NOT Starlight shell component overrides; the §7
+ * committed override set stays empty.
+ */
+
+/* §4A bands: border separation + 24–48px responsive intervals (§2), eyebrow-styled h2s
+ * (§3 eyebrow type: small, 600, letter-spaced; mono per the §3 operational-label rule). */
+.perk-band {
+  border-top: 1px solid var(--perk-border);
+  padding-block: 1.5rem;
+  margin-block: 0;
+}
+
+@media (min-width: 768px) {
+  .perk-band {
+    padding-block: 2rem;
+  }
+}
+
+@media (min-width: 1280px) {
+  .perk-band {
+    padding-block: 3rem;
+  }
+}
+
+.perk-band h2 {
+  font-family: var(--sl-font-mono), monospace;
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--perk-muted);
+}
+
+/* Band 6 (requirements + provenance): compact, quiet. */
+.perk-band-compact {
+  padding-block: 1rem 1.5rem;
+  font-size: var(--sl-text-sm);
+  color: var(--perk-muted);
+}
+
+/* Bands 4 + 5 share a row at >= 1280px; stacked (source order) below. */
+.perk-home-duo {
+  display: grid;
+}
+
+@media (min-width: 1280px) {
+  .perk-home-duo {
+    grid-template-columns: 1fr 1fr;
+    column-gap: 3rem;
+  }
+}
+
+/* §5 diagram figure + the adjacent textual equivalent (muted caption tier). */
+.perk-diagram {
+  margin: 1.5rem 0 0.75rem;
+}
+
+.perk-diagram-text {
+  color: var(--perk-muted);
+  font-size: var(--sl-text-sm);
+  max-width: 72ch;
+}
+
+/* §4B recommended-start cards: an ordinary markdown list rendered as bordered surface
+ * cards — border-first, no shadow (§2 depth rule); one card per row at 320px, 2–3-up
+ * where the width makes that useful (§6 table). */
+.perk-recommended ul {
+  list-style: none;
+  padding: 0;
+  display: grid;
+  gap: 1rem;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 18rem), 1fr));
+}
+
+.perk-recommended li {
+  background: var(--perk-surface);
+  border: 1px solid var(--perk-border);
+  border-radius: var(--perk-radius-card);
+  box-shadow: none;
+  padding: 1rem;
+  margin-top: 0;
+}
+
+/* Content-scoped conformance: intent cards onto the bound card system (no shadow,
+ * border-first, card radius, surface fill); hover emphasizes the border (the card's link
+ * affordance itself stays non-color: title + arrow icon + focus outline). */
+.perk-band .sl-link-card {
+  box-shadow: none;
+  border: 1px solid var(--perk-border);
+  border-radius: var(--perk-radius-card);
+  background: var(--perk-surface);
+}
+
+.perk-band .sl-link-card:hover {
+  background: var(--perk-surface);
+  border-color: var(--perk-accent);
+}
+
+/* Content-scoped conformance: hero actions take the §2 control radius (pills are limited
+ * to compact statuses). */
+.hero .sl-link-button {
+  border-radius: var(--perk-radius-control);
+}

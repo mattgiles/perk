@@ -1,0 +1,116 @@
+---
+title: "A deliberate workflow for agent-assisted engineering"
+description: "Where to start with perk — the workflow spine at a glance, the four kinds of docs by reader need, and the paths operators walk most."
+sidebar:
+  order: 0
+template: splash
+hero:
+  tagline: "Turn intent into a reviewed plan, bounded change, PR, and learning."
+  actions:
+    - text: "Get started"
+      link: "/tutorials/get-started/"
+      variant: primary
+    - text: "Understand the workflow"
+      link: "/explanation/how-perk-thinks/"
+      variant: minimal
+---
+
+import { CardGrid, LinkCard } from "@astrojs/starlight/components";
+import TwoPlanesDiagram from "../site/src/components/TwoPlanesDiagram.astro";
+import WorkflowSpineDiagram from "../site/src/components/WorkflowSpineDiagram.astro";
+
+# A deliberate workflow for agent-assisted engineering
+
+<section class="perk-band">
+
+## The workflow
+
+<WorkflowSpineDiagram />
+
+<div class="perk-diagram-text">
+  How does a change move through perk? It walks seven stages in order — plan, save,
+  implement (shown in-flight above as an example), submit, then address only if review
+  asks, then land, and finally learn.
+</div>
+
+</section>
+
+<section class="perk-band">
+
+## Choose by intent
+
+<CardGrid>
+  <LinkCard
+    title="Learning perk for the first time?"
+    description="Tutorials — guided, completable lessons: start at zero, end at a merged PR."
+    href="/tutorials/"
+  />
+  <LinkCard
+    title="Trying to get something done?"
+    description="How-to guides — reliable step sequences, one bounded goal per guide."
+    href="/how-to/"
+  />
+  <LinkCard
+    title="Looking up an exact detail?"
+    description="Reference — commands, in-session tools, configuration, and schemas."
+    href="/reference/"
+  />
+  <LinkCard
+    title="Wondering why perk works this way?"
+    description="Explanation — the mental model and the trade-offs behind it."
+    href="/explanation/"
+  />
+</CardGrid>
+
+</section>
+
+<div class="perk-home-duo">
+
+<section class="perk-band">
+
+## Common paths
+
+- [Pick a plan back up where it left off](how-to/resume-a-plan.md) — re-enter any stage
+  from a cold shell.
+- [Author an objective roadmap](how-to/author-a-roadmap.md) — turn a multi-plan goal into
+  nodes that emit plans.
+- [Run CI checks in a session](how-to/run-ci-in-session.md) — verify a change without
+  leaving the agent.
+- [Switch the issue backend to Linear](how-to/switch-to-linear.md) — move the canonical
+  issue store off GitHub.
+- [Set up the remote runner](how-to/set-up-the-remote-runner.md) — hand unattended stages
+  to CI.
+
+</section>
+
+<section class="perk-band">
+
+## How perk fits together
+
+<TwoPlanesDiagram />
+
+<div class="perk-diagram-text">
+  Who owns what? The exterior — the perk CLI — scaffolds the repo, manages worktrees, and
+  launches Pi; the interior — the Pi session — drives stages, doors, and tools. The planes
+  share no in-process code: beyond the launch handoff and the static workflow description
+  both planes read, everything they must durably agree on lives in durable state — plans
+  and objectives (GitHub issues; on Linear, issues and projects), pull requests, and pushed
+  branch commits — with the exterior exchanging plan issues and branches, and the interior
+  plan issues and pull requests.
+</div>
+
+</section>
+
+</div>
+
+<section class="perk-band perk-band-compact">
+
+## Requirements and provenance
+
+perk runs where you already work: it needs `git`, an authenticated `gh`, Node.js ≥ 22, the
+`pi` agent harness, the `skills` CLI, and `uv`.
+
+These docs are built from the perk checkout they live in — they describe this code, not a
+hosted release. Source: [github.com/mattgiles/perk](https://github.com/mattgiles/perk).
+
+</section>

@@ -9,20 +9,55 @@ It deliberately carries no frontmatter. The binding source for everything below 
 working reference that later authoring passes extend; the blueprint stays the record of what is
 bound.
 
+## Scope: the operator, never contributors
+
+This tree is the documentation for the **operator** — someone using perk on their own
+repository. It is never for perk contributors: perk's internal research and planning record
+lives in [`docs/guiding-principles/`](../guiding-principles/), [`docs/design/`](../design/),
+and [`shared/contracts.md`](../../shared/contracts.md), and is never duplicated here. (Links
+from this file are unswept — it sits outside the routed corpus.)
+
+The tree follows the [Divio documentation system](https://docs.divio.com/documentation-system/):
+documentation is not one thing but **four distinct kinds**, each answering a different reader
+need — learning (tutorials), achieving a goal (how-to), looking something up (reference), and
+understanding (explanation). Mixing them is the system's named failure mode ("the tendency to
+collapse"): a tutorial that digresses into rationale stops being learnable; a reference that
+instructs stops being trustworthy. Each kind gets its own directory, and every page belongs to
+exactly one.
+
 ## Divio editorial contracts
 
 - **Tutorial** — one live-run path with observable results at each stage and a recap of what
-  the reader accomplished. The reader follows; the tutorial guarantees the outcome.
-- **How-to** — one bounded goal per guide; imperative, ordered steps; refusal states
-  documented at the step where they occur, with the recovery move.
+  the reader accomplished. The reader follows; the tutorial guarantees the outcome. Accuracy
+  is gated by a live run-through on a scratch repo before a tutorial lands, and the quadrant
+  stays deliberately small — anything beyond the basics belongs in how-to.
+- **How-to** — one bounded goal per guide, titled "How to …"; imperative, ordered steps;
+  refusal states documented at the step where they occur, with the recovery move. Guides
+  assume the basics and never re-teach them — tutorials own the teaching.
 - **Reference** — exact names, defaults, precedence, and failure modes, verified against
-  code / `--help` / schemas; parallel structure across entries of the same kind.
+  code / `--help` / schemas; parallel structure across entries of the same kind. The CLI
+  reference is written against real `--help` output and guarded by a pytest existence check,
+  so a documented-but-missing command fails CI.
 - **Explanation** — relationships and trade-offs; no ordered steps, no reference tables that
-  belong in the reference quadrant.
+  belong in the reference quadrant. Opinions and trade-offs are welcome here — admit what was
+  considered and why it was declined.
 
 Cross-cutting: **one primary intent per page** (a page serves exactly one quadrant), and
 **routed-or-excluded accounting** (every canonical source file is routed exactly once or
 explicitly excluded — no orphans).
+
+## Related links
+
+The bounded onward-pointer convention for article pages (applied by the batch migration
+passes, never ad hoc): a page that carries onward pointers ends with a final `## Related`
+section of **at most 3 items**, each shaped
+
+```markdown
+- **<Label>:** [Page title](relative-path.md) — why.
+```
+
+with the label drawn only from the closed set **Learn** (tutorials), **Do** (how-to),
+**Look up** (reference), **Understand** (explanation).
 
 ## Voice rules
 
@@ -61,13 +96,13 @@ sidebarGroup: "Core workflow"
 - **`sidebar.order` (required)** — the per-page record of the page's blueprint §3 sidebar
   position, numbered so it survives Starlight's min-order directory weighting: a **1000-block
   per section** (root home page `0`, tutorials `1000`, how-to `2000`, reference `3000`,
-  explanation `4000`); each section's `index.md` carries the block base; children ascend in
-  steps of 10. Insert a new page at the midpoint between its neighbors (e.g. `2105` between
+  explanation `4000`); each section's index page (`index.*` — the section index by stem)
+  carries the block base; children ascend in steps of 10. Insert a new page at the midpoint between its neighbors (e.g. `2105` between
   `2100` and `2110`). Orders are unique within a directory and never leave their section's
   block.
 - **`sidebarGroup` (conditionally required)** — the navigation-**ownership** record where
   ownership is not structural: the flat `how-to/` tree renders as the five §3 operator groups,
-  so every routed `how-to/` page except `index.md` carries exactly one of **Core workflow**,
+  so every routed `how-to/` page except the section index carries exactly one of **Core workflow**,
   **Objectives & learnings**, **Headless & remote**, **Customization**, **Providers &
   backends** — and the field is absent everywhere else (elsewhere, ownership is the
   directory/section). Pages sharing a group occupy a contiguous `sidebar.order` range, and the

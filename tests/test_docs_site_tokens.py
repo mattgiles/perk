@@ -184,15 +184,28 @@ def test_tokens_css_matches_blueprint():
 
 
 def test_astro_config_wires_blueprint_custom_css():
-    # The stylesheet is only effective if Starlight actually loads it: the config's `customCss`
-    # must be the blueprint §3 list verbatim — same entries, same order (fonts first, tokens
-    # last so they land after Starlight's `starlight` cascade layer). A dropped, added, or
-    # reordered entry fails here even though tokens.css itself still matches the blueprint.
+    # The stylesheet is only effective if Starlight actually loads it: the blueprint §3 list
+    # must be an EXACT ORDERED PREFIX of the config's `customCss` (fonts first, tokens last
+    # among the bound entries, so they land after Starlight's `starlight` cascade layer). A
+    # dropped, reordered, or mutated bound entry fails here even though tokens.css itself
+    # still matches the blueprint. Entries beyond the bound prefix are repo-owned
+    # presentational stylesheets (visual blueprint §4) and are confined to ./src/styles/.
     expected = _parse_blueprint_custom_css(BLUEPRINT.read_text(encoding="utf-8"))
     assert len(expected) == 5, expected
     actual = _parse_config_custom_css(ASTRO_CONFIG.read_text(encoding="utf-8"))
-    assert actual == expected
+    assert actual[: len(expected)] == expected
 
-    # The relative entry must resolve to the guarded stylesheet from the config's directory.
-    relative_entries = [e for e in actual if e.startswith("./")]
-    assert [(ASTRO_CONFIG.parent / e).resolve() for e in relative_entries] == [TOKENS_CSS]
+    additional = actual[len(expected) :]
+    # The compositions stylesheet is itself required wiring (the §4A/§4B band, landing, and
+    # diagram compositions are dead without it) — dropping it must fail here, not only in a
+    # visual diff, so the generic additional-entry checks below can never pass vacuously.
+    assert "./src/styles/compositions.css" in additional, additional
+    assert all(re.fullmatch(r"\./src/styles/[^/]+\.css", e) for e in additional), additional
+
+    # The bound tokens entry must still resolve to the guarded stylesheet from the config's
+    # directory, and every additional relative entry must resolve inside docs/site/src/styles/.
+    assert (ASTRO_CONFIG.parent / "./src/styles/tokens.css").resolve() == TOKENS_CSS
+    styles_dir = (ASTRO_CONFIG.parent / "src/styles").resolve()
+    for entry in additional:
+        resolved = (ASTRO_CONFIG.parent / entry).resolve()
+        assert resolved.is_file() and resolved.parent == styles_dir, entry

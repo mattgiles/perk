@@ -11,7 +11,7 @@ This page describes perk's **pluggable provider seams** (plan-authoring, footer,
 the **Linear issue backend**: the supported provider set, each provider's wiring posture, and the
 Linear backend's auth, labels, identifiers, doctor groups, and current maturity. It describes the
 surface; it does not teach a task (those belong in [how-to/](../how-to/index.md)) or argue a design
-(those belong in [explanation/](../explanation/index.md)). See the [user-docs router](../index.md)
+(those belong in [explanation/](../explanation/index.md)). See the [user-docs router](../index.mdx)
 for how this quadrant fits the whole.
 
 This page is **human-reviewed for accuracy** against the provider catalog
