@@ -144,9 +144,10 @@ interrupted operations and sweeps orphaned residue. The in-session equivalents a
 **Current limitations (read before choosing stacked):**
 
 - **Merge-queue bases are unsupported.** The stacked capability check at save requires squash
-  direct-merge allowed and no merge queue on the base; at landing, a queue-required base is a
-  readiness blocker, and a queue seizing the merge request is the unresolved
-  `unexpected_enqueued` outcome.
+  direct-merge allowed and no
+  [merge queue](https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/configuring-pull-request-merges/managing-a-merge-queue)
+  on the base; at landing, a queue-required base is a readiness blocker, and a queue seizing
+  the merge request is the unresolved `unexpected_enqueued` outcome.
 - **One train per objective.** All non-skipped roadmap nodes form ONE atomic train under a
   single `delivery_lineage` — there is no way to split a roadmap into independent trains or
   land a subset. Exclude work from the train by skipping its nodes.
