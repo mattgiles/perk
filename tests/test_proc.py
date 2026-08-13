@@ -91,6 +91,53 @@ def test_run_captured_spawn_arm(monkeypatch):
     assert failure.__cause__ is original  # facades discriminate FileNotFoundError via __cause__
 
 
+def test_run_interactive_inherits_stdio_and_returns_exit_code(monkeypatch):
+    """No capture kwargs: the child inherits the terminal; the exit code passes through."""
+    captured = {}
+
+    def fake_run(args, **kwargs):
+        captured["args"] = args
+        captured.update(kwargs)
+        return subprocess.CompletedProcess(args, 7)
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    assert proc.run_interactive(["gh", "auth", "login"], timeout=900) == 7
+    assert captured["args"] == ["gh", "auth", "login"]
+    assert captured["check"] is False
+    assert captured["timeout"] == 900
+    for forbidden in ("capture_output", "stdout", "stderr", "stdin", "text"):
+        assert forbidden not in captured
+
+
+def test_run_interactive_zero_exit(monkeypatch):
+    monkeypatch.setattr(subprocess, "run", lambda args, **_: subprocess.CompletedProcess(args, 0))
+    assert proc.run_interactive(["tool"], timeout=None) == 0
+
+
+def test_run_interactive_timeout_arm(monkeypatch):
+    def fake_run(args, **_):
+        raise subprocess.TimeoutExpired(cmd=args, timeout=5)
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    with pytest.raises(proc.ProcFailure) as excinfo:
+        proc.run_interactive(["tool", "arg"], timeout=5)
+    assert excinfo.value.kind == "timeout"
+    assert str(excinfo.value) == "tool arg timed out"
+
+
+def test_run_interactive_spawn_arm(monkeypatch):
+    original = FileNotFoundError(2, "No such file or directory")
+
+    def fake_run(args, **_):
+        raise original
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    with pytest.raises(proc.ProcFailure) as excinfo:
+        proc.run_interactive(["tool"], timeout=5)
+    assert excinfo.value.kind == "spawn"
+    assert excinfo.value.__cause__ is original
+
+
 def test_run_checked_returns_stdout_on_success(monkeypatch):
     def fake_run(args, **_):
         return subprocess.CompletedProcess(args, 0, stdout="payload\n", stderr="")

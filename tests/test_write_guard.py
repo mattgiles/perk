@@ -34,6 +34,11 @@ ALLOWED = frozenset(
         "convergence/init/repo_skills.py",
         "convergence/init/version_pin.py",
         "convergence/doctor/fixes.py",
+        # Secret writer restore arm: `save_local_linear_api_key`'s read-back-mismatch restore
+        # rewrites the gitignored `.perk/local.toml` it just replaced (single-process,
+        # human-invoked interactive init — never raced; the primary write path is already
+        # tmp-file + atomic replace at mode 0600).
+        "substrate/config.py",
         # Docs sync: rewrites tracked docs/AGENTS blocks in the main checkout (human-invoked).
         "learn/docs_sync.py",
         # Skills lifecycle: writes tracked, repo-authored skill files (human-invoked).

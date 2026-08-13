@@ -271,6 +271,13 @@ seeded environment). perk also reads this key directly from the **main checkout'
 so a single entry in the main checkout authenticates every worktree session and cold-door, even
 when the launch env-seed did not fire. Malformed local TOML is ignored (fail-soft).
 
+You rarely need to write this key by hand: when the committed `[issues] backend` is `"linear"`
+(with a `team`) and no key resolves, **interactive `perk init`** prompts for it (hidden input),
+validates it against Linear's API, and persists it here atomically — tightening the file to
+mode `0600` (it now holds a secret) and refusing outright unless the file is provably untracked
+and gitignored (a secret never lands in a committable file). The prompt never runs under
+`--no-interactive`, a non-TTY stdin, or `--json`.
+
 ```toml
 # .perk/local.toml (gitignored)
 [linear]

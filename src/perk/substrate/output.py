@@ -140,3 +140,17 @@ def user_confirm(prompt: str, *, default: bool = False) -> bool:
     """
     sys.stderr.flush()
     return click.confirm(prompt, default=default, err=True)
+
+
+def user_prompt(prompt: str, *, hide_input: bool = False, default: str = "") -> str:
+    """Prompt the user for free text on stderr — the interactive twin of ``user_confirm``.
+
+    ``hide_input`` masks the echo for secrets (e.g. an API key). ``default`` is returned on a
+    bare Enter (never shown — ``show_default=False`` keeps secret prompts clean). Callers use
+    this seam instead of importing click directly.
+    """
+    sys.stderr.flush()
+    answer = click.prompt(
+        prompt, hide_input=hide_input, default=default, show_default=False, err=True
+    )
+    return str(answer)

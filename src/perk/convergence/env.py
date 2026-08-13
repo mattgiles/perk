@@ -45,11 +45,20 @@ def _node_major(version: str) -> int | None:
 def _check_node() -> EnvCheck:
     version = _node_version()
     if version is None:
-        return EnvCheck("node", False, "not found", "Install Node.js >= 22 (https://nodejs.org).")
+        return EnvCheck(
+            "node",
+            False,
+            "not found",
+            "Install Node.js >= 22: brew install node / mise use -g node@22 (https://nodejs.org).",
+        )
     major = _node_major(version)
     if major is None or major < _MIN_NODE_MAJOR:
         return EnvCheck(
-            "node", False, version, f"Upgrade Node.js to >= {_MIN_NODE_MAJOR} (found {version})."
+            "node",
+            False,
+            version,
+            f"Upgrade Node.js to >= {_MIN_NODE_MAJOR} (found {version}): "
+            "brew upgrade node / mise use -g node@22 (https://nodejs.org).",
         )
     return EnvCheck("node", True, version, "")
 
@@ -74,13 +83,32 @@ def _check_optional_tool(name: str, remediation: str) -> EnvCheck:
 
 
 def check_environment() -> list[EnvCheck]:
-    """All required-tooling checks (presence + node version)."""
+    """All required-tooling checks (presence + node version).
+
+    The required-tool remediations carry the exact install command — rendered by init's
+    failure path, doctor, AND the interactive guided-install pass (which offers to run the
+    supported ones; the ``git``/``node`` strings are guide-only, OS-owned).
+    """
     return [
-        _check_tool("git", "Install git (https://git-scm.com)."),
-        _check_tool("gh", "Install the GitHub CLI (https://cli.github.com)."),
+        _check_tool(
+            "git",
+            "Install git: brew install git / xcode-select --install (macOS), "
+            "or your distro package manager (https://git-scm.com).",
+        ),
+        _check_tool(
+            "gh", "Install the GitHub CLI: brew install gh (or see https://cli.github.com)."
+        ),
         _check_node(),
-        _check_tool("pi", "Install Pi (the coding agent perk drives)."),
-        _check_tool("skills", "Install the skills CLI (https://github.com/mattgiles/skills)."),
+        _check_tool(
+            "pi",
+            "Install Pi: npm install -g @earendil-works/pi-coding-agent (requires Node >= 22).",
+        ),
+        _check_tool(
+            "skills",
+            "Install the skills CLI: curl -fsSL "
+            "https://raw.githubusercontent.com/mattgiles/skills/main/scripts/install.sh | sh "
+            "(macOS), or: go install github.com/mattgiles/skills/cmd/skills@latest",
+        ),
         _check_optional_tool(
             "ast-grep",
             "Optional: install ast-grep for structural code search "

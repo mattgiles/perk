@@ -22,6 +22,7 @@ from perk.convergence.doctor import (
     Check,
     DoctorReport,
     _config_check,
+    _git_identity_check,
     _issues_check,
     _models_check,
     _providers_check,
@@ -133,6 +134,56 @@ def test_healthy_after_init(scaffolded_perk_repo):
     groups = {c.group for c in report.checks}
     assert {"package", "repository", "registry", "state"} <= groups
     assert "environment" not in groups and "github" not in groups  # external shells skipped
+
+
+# --- the git-identity check (report-only; group environment) ---------------------------------
+
+
+def test_git_identity_check_ok_when_both_resolve(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        git,
+        "config_get",
+        lambda root, key: {"user.name": "Mat", "user.email": "m@x.com"}.get(key),
+    )
+    check = _git_identity_check(tmp_path)
+    assert check.name == "git-identity" and check.group == "environment"
+    assert check.status == "ok"
+    assert "Mat <m@x.com>" in check.message
+
+
+def test_git_identity_check_warns_when_missing(tmp_path, monkeypatch):
+    monkeypatch.setattr(git, "config_get", lambda root, key: "Mat" if key == "user.name" else None)
+    check = _git_identity_check(tmp_path)
+    assert check.status == "warn"
+    assert check.message == "git identity not set"
+    assert check.detail == "user.email"
+    assert "git config --global" in check.remediation
+    assert "re-run 'perk init' interactively" in check.remediation
+
+
+def test_git_identity_check_unverifiable_on_giterror(tmp_path, monkeypatch):
+    # Doctor does not short-circuit after _env_checks: a broken/absent git must yield a
+    # report, never a crash.
+    def _boom(root, key):
+        raise git.GitError("git exploded")
+
+    monkeypatch.setattr(git, "config_get", _boom)
+    check = _git_identity_check(tmp_path)
+    assert check.status == "warn"
+    assert check.message == "git identity unverifiable"
+    assert "git exploded" in check.detail
+
+
+def test_git_identity_check_absent_without_verify(scaffolded_perk_repo):
+    report = run_doctor(scaffolded_perk_repo, verify=False)
+    assert not any(c.name == "git-identity" for c in report.checks)
+
+
+def test_git_identity_check_present_under_verify(scaffolded_perk_repo, stub_env):
+    # stub_env's git.config_get stub returns a healthy identity deterministically.
+    report = run_doctor(scaffolded_perk_repo, verify=True)
+    check = next(c for c in report.checks if c.name == "git-identity")
+    assert check.status == "ok" and check.group == "environment"
 
 
 def test_providers_check_ok_on_default_repo(scaffolded_perk_repo):

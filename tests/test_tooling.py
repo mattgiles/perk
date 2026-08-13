@@ -44,6 +44,7 @@ def test_prek_ruff_rev_matches_pyproject_floor():
 # which is a different shape and keeps its own literals.
 _SANCTIONED_SUBPROCESS_WRAPPERS = {
     ("proc", "run_captured"),
+    ("proc", "run_interactive"),
     ("run_worker", "_spawn_worker"),
     ("materialize", "run_worktree_setup"),
     ("shared", "run_skills"),
