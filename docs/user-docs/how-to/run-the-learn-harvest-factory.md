@@ -46,6 +46,11 @@ summary (and in a coverage note on the objective when one is authored) — and a
 report-less wave is surfaced as an **incomplete harvest** recommending a bounded `--from`
 re-run, never a whole-corpus direct read.
 
----
+## Related
 
-← Back to the [how-to router](index.md).
+- **Do:** [How to author an objective roadmap](author-a-roadmap.md) — the hand-authored path to the
+  same objective shape.
+- **Do:** [How to run the learn-docs factory](run-the-learn-docs-factory.md) — grow the
+  docs/learned corpus harvest mines.
+- **Look up:** [Objectives — the roadmap model](../reference/objectives.md) — what the curated
+  objective becomes once saved.

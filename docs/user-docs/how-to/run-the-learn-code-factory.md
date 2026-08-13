@@ -39,6 +39,11 @@ learn-code plan factory — the additive sibling of
 > `/learn-code` produces a plan to route through the spine — don't expect it to edit code directly.
 > An empty inbox cross-hints `/learn-docs`, where doc-destined learnings are consolidated.
 
----
+## Related
 
-← Back to the [how-to router](index.md).
+- **Do:** [How to run the learn-docs factory](run-the-learn-docs-factory.md) — consolidate the
+  doc-destined learnings instead.
+- **Do:** [How to drive a change through the full spine](drive-the-full-spine.md) — the implement →
+  submit → land flow the saved plan rides.
+- **Look up:** [In-session commands & tools](../reference/in-session.md) — the exact `/learn-code`
+  semantics.

@@ -32,8 +32,8 @@ automatic `/land`-driven reconcile didn't run, or needs a redo.
 > the mirror of land's close-on-complete). A **superseded** objective is the one exemption: dead
 > lineage stays closed (`node-add` says so and skips the reopen).
 
-> **Weighs human engagement too.** The warm pass now also auto-reads **human comments + description
-> edits** on the objective and its node-issues (via
+> **Weighs human engagement too.** The warm pass auto-reads **human comments + description edits**
+> on the objective and its node-issues (via
 > [`perk objective engagement N`](../reference/cli.md#perk-objective-engagement-number)) and folds
 > that untrusted-DATA block into what may be stale — not only the merged diff. Humans may flag stale
 > scope/naming/decisions in a comment or edit, not only in code. It is harmless/empty when there is
@@ -47,6 +47,11 @@ automatic `/land`-driven reconcile didn't run, or needs a redo.
 > [`/land`](../reference/in-session.md#land) auto-drives `/objective-reconcile` — so this manual
 > path is for the off-spine or re-run case.
 
----
+## Related
 
-← Back to the [how-to router](index.md).
+- **Do:** [How to advance or skip roadmap nodes manually](advance-or-skip-nodes.md) — fix a node's
+  status itself, not the prose.
+- **Do:** [How to check an objective for drift](check-an-objective-for-drift.md) — detect structural
+  divergence beyond stale prose.
+- **Look up:** [Objectives — the roadmap model](../reference/objectives.md) — which region is
+  reconcilable and which is immutable.

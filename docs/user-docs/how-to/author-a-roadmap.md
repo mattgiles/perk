@@ -28,7 +28,8 @@ This runs in a **read-only** authoring session and is **local-only**.
    the `objective_save` tool).
 5. **Inspect it.** Run
    [`perk objective show N`](../reference/cli.md#perk-objective-show-number-alias-s) (alias
-   `perk objective s N`) to print the header, roadmap, and next actionable node.
+   `perk objective s N`) to print the objective's status summary and next actionable node (add
+   `--json` for the full roadmap).
 
 > **Roadmap shape.** Every node starts `pending`. Leave `depends_on` unset for **sequential**
 > dependencies (each node depends on the previous), use `[]` for **no** dependencies, or list node
@@ -51,7 +52,7 @@ objective:
   dry-run) — an unsupported repository refuses the stacked save with honest
   expected-vs-observed details.
 
-**Stacked's current limitations** — know these before choosing it:
+**Stacked's limitations** — know these before choosing it:
 
 - **Normal published-suffix rewrites converge automatically**: after committing a change to an
   already-published layer, re-run `/submit` or finish `/address` through `finalize_address`; perk
@@ -71,14 +72,16 @@ objective:
   prefix can be accepted explicitly as a recorded breach (`--accept-prefix`), after which
   the remainder re-lands via `stack sync --base` then `stack land`.
 
-For the guided, end-to-end version of this flow, see
-[Tutorial 2 → Drive a multi-plan goal with an objective](../tutorials/drive-an-objective.mdx).
-For the guided, end-to-end **stacked** version, see
+For the guided end-to-end stacked flow, see
 [Drive a stacked objective to one atomic landing](../tutorials/drive-a-stacked-objective.md);
-day-to-day, [How to review a stacked PR train](./review-a-stacked-train.md) covers the
-reviewer's side and [How to recover a stacked delivery train](./recover-a-stacked-train.md)
-the triage moves when a train operation is interrupted or drifts.
+day-to-day, [How to review a stacked PR train](review-a-stacked-train.md) covers the reviewer's
+side and [How to recover a stacked delivery train](recover-a-stacked-train.md) the triage moves.
 
----
+## Related
 
-← Back to the [how-to router](index.md).
+- **Learn:** [Drive a multi-plan goal with an objective](../tutorials/drive-an-objective.mdx) — the
+  guided end-to-end version of this flow.
+- **Do:** [How to replan an objective](replan-an-objective.md) — re-author the roadmap when it
+  drifts from reality.
+- **Look up:** [Objectives — the roadmap model](../reference/objectives.md) — the full node schema,
+  statuses, and delivery policies.

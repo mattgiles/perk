@@ -41,6 +41,11 @@ learned-docs plan factory.
 > `/learn-docs` produces a plan to route through the spine — don't expect it to edit `docs/learned/`
 > directly.
 
----
+## Related
 
-← Back to the [how-to router](index.md).
+- **Do:** [How to run the learn-code factory](run-the-learn-code-factory.md) — route the
+  SHOULD_BE_CODE learnings this factory defers.
+- **Do:** [How to drive a change through the full spine](drive-the-full-spine.md) — the implement →
+  submit → land flow the saved plan rides.
+- **Look up:** [In-session commands & tools](../reference/in-session.md) — the exact `/learn-docs`
+  and `/learn` semantics.
