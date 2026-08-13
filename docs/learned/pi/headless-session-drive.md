@@ -14,6 +14,23 @@ from the right path instead of rediscovering it.
 > **One Code Rule.** Everything below names files and describes behavior. It deliberately does **not**
 > paste constructor bodies — read the source at the pointers.
 
+## Distillation
+
+- Two SDK construction recipes exist — the isolated read-only child vs the read-WRITE worker with
+  the real extension — start from the closer one and flip ONLY the isolation axis — "Two
+  construction paths — pick by isolation axis".
+- Probe scripts launched from inside a perk session inherit `PERK_RUN_ID` — unset it or the
+  probe adopts the parent's run — "Probe scripts … inherit the run-id env — unset it".
+- The drive is a SINGLE `session.prompt(...)` — the SDK owns turn iteration and the await spans
+  settlement; never frame it as an iterate-until-terminal loop (idle ≠ done, premature idle has
+  no in-drive re-engagement) — "Single-prompt drive, NOT a `loop.ts` loop".
+- Never default the model to `getAvailable()[0]` (alphabetical → oldest; a live drive 404'd) —
+  leave it undefined — "Never default the model to `getAvailable()[0]`".
+- Offline e2e drives the REAL runtime with a faux pi-ai model at the `PERK_BIN` seam — "Driving
+  the real runtime offline with a faux model (the e2e worker tier)".
+- "Sources" pins the audited pi versions — re-verify on SDK bumps (a pin bump is a
+  session-construction migration audit).
+
 ## Two construction paths — pick by isolation axis
 
 There are two SDK-level construction recipes already in the tree, and they differ on **one axis**:

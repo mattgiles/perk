@@ -15,6 +15,22 @@ composite action), and the TS worker the runner ultimately drives (`extension/wo
 > **One Code Rule.** Everything below names files and describes behavior; it does not reproduce
 > source. Read the pointers.
 
+## Distillation
+
+- The seam is declarative (rendered YAML, unit-testable) + imperative (live execution) — the
+  declarative-correct / execution-untested GAP is a first-class risk (six defects shipped silent
+  in it) — "The seam in two halves — and the gap between them".
+- The dispatch abstraction is the `Runner` Protocol — "The `Runner` contract".
+- Two distinct run ids exist (perk's `run_id` vs the remote workflow-run handle) — NEVER
+  conflate them — "Two distinct run ids — never conflate".
+- Dispatch is establish-before-consume: write → read back → assert round-trip, hard-fail on
+  mismatch; failed records are kept, never deleted — "Establish-before-consume, realized".
+- Discovery is truth-with-a-local-cache, fail-soft everywhere — "Discovery truth with a local
+  cache, fail-soft everywhere".
+- An unbuildable step lands as a LOUD deferral (`::error::` + exit 1), never a silently-broken
+  placeholder — "Honest fiction vs. loud deferral" (its deferral has since been realized).
+- "Consumer dogfood facts" is a point-in-time validation record, not recurring coverage.
+
 ## The seam in two halves — and the gap between them
 
 The seam has a **declarative** half and an **imperative** half, and only the first is

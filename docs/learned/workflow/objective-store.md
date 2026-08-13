@@ -16,6 +16,28 @@ carved apart). This doc preserves the patterns that generalize the
 issue-backend extraction to a second tier off the same monolith, plus the Phase-3 node↔plan
 unification protocol.
 
+## Distillation
+
+- Splitting a tier off `IssueBackend` lands in two nodes: Node A = the dormant contract only
+  (Protocol + frozen results + fresh error type, implementation-free imports), Node B = atomic
+  removal + extraction + resolver + rewire — "The dormant-contract recipe (Node A / Node B
+  split)".
+- Carving a store off a substrate-heavy backend rides the facade-refactor pattern — "The
+  facade-refactor pattern for splitting a tier off a substrate-heavy backend".
+- "Behaviorally equivalent, not byte-identical": the store delegates LATE-BOUND to the same
+  module functions the CLI tests monkeypatch, keeping them green unchanged — "The equivalence
+  lock = late-bound delegation".
+- Nodes and plans unify through the node↔plan protocol (`pr`-field linkage, claim semantics) —
+  "The node↔plan unification protocol".
+- Objective replan is supersede (close-old/create-new, fresh `run_id`, bidirectional lineage) —
+  NOT an in-place upsert; `create_objective` is find-then-return idempotent — "Objective
+  replan: supersede ≠ upsert".
+- Scripted node-linked plan saves must mint a fresh run id per node — the ambient run id
+  triggers the same-run-id upsert that rewrites the previous plan in place — "The same-run-id
+  upsert trap".
+- Historical: the node-numbered growth narratives (Phase-4 protocol growth, the manifest/doctor
+  design arcs, adoption growth) chronicle landed work.
+
 ## The dormant-contract recipe (Node A / Node B split)
 
 The split lands in two roadmap nodes, directly reusing the proven `issue_backend.py` Node-1.1

@@ -6,6 +6,23 @@ cluster: config-and-convergence
 
 # `init` / `doctor` division
 
+## Distillation
+
+- `perk init` converges forward (idempotent desired state, never migrations); `doctor --fix`
+  repairs legacy oddities; bare `doctor` is the report-only diagnostic layer — "The split".
+- Doctor checks derive from the managed-convergence declarations — NEVER hand-author a parallel
+  check — "Managed convergence is the SSOT for doctor checks".
+- Growing `managed_artifacts()` requires the three-part eligibility test on the desired content —
+  "The managed-artifact set (`managed_artifacts()`) — the eligibility trio".
+- An unreadable config must make destructive reconciliation a NO-OP — substituting an empty
+  selection strips valid entries (contract §8.10) — "An unreadable config makes destructive
+  reconciliation a NO-OP".
+- Anything doing network I/O lives in the `fix AND verify`-gated repair gesture, never a
+  `ManagedConvergence` (which runs unconditionally in offline unit tests) — "Network repairs
+  live in the verify-gated repair gesture".
+- Removing a superseded substrate lifecycle follows the relocate-the-survivor recipe — "The
+  retire-an-orphaned-lifecycle recipe".
+
 ## The split
 
 - **`perk init` converges forward**: desired state, idempotent, never migrations. Maps to

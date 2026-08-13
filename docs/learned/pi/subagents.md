@@ -19,6 +19,30 @@ non-obvious rules an agent can't derive from any single file.
 > **One Code Rule.** Everything below names files and describes behavior; it does not reproduce
 > source (the one GitHub-API reference is flagged as such). Read the pointers.
 
+## Distillation
+
+- `subagents.agentOverrides` reaches **builtin** agents only — never `.pi/agents/` project
+  agents (its own section; a prior contracts note claiming otherwise is corrected there).
+- Builtins are OFF in every perk repo; the re-enable precedence lives in "Builtins are OFF in
+  every perk repo — and the re-enable precedence".
+- Child-posts vs parent-posts: the child posts its own mutation iff the spawned work's only
+  output sink is external (e.g. /pr-review posts, /address keeps the child read-only) — "Two
+  mutation shapes".
+- `context: "fresh"` = clean session (independent judgment); `"fork"` branches parent history —
+  "Isolation knob".
+- perk's agent defs (the sorted `PERK_AGENTS` tuple, the SSOT — never restate counts) are
+  delivered to consumer repos by `perk init` — "Agent-def delivery to consumer repos".
+- `contact_supervisor` exists in EVERY child regardless of `tools:`; the live parent relay loop
+  shape is pinned in "Supervisor-channel streaming". `outputSchema` injects an engine-validated
+  `structured_output` completion call (covered lane ⟺ ok ⟺ schema-valid report), and every wave
+  spawn passes the explicit `acceptance: {level: "none"}` disable — "Workflow structured
+  output".
+- A spawned child inherits the parent's read-only gate, but the engine's child-side tools
+  (`structured_output`, …) are load-time-injected and must ride `READ_ONLY_TOOLS` or gate sync
+  deactivates them — "The inherited read-only gate vs the engine's child-side tools".
+- Historical: the correction blocks and landed-arc passages (the agent-def delivery arc, the
+  reconverge ritual chronicle) record settled history — read them as records, not open work.
+
 ## `subagents.agentOverrides` reaches only BUILTIN agents — never project agents
 
 `subagents.agentOverrides` only applies to **builtin** agents; it does **not** reach project agents

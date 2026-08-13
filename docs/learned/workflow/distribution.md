@@ -13,6 +13,24 @@ build-backend decision that constrains every future packaging change, the one du
 workflow, the install-pin policy, and how init/doctor/launch took ownership of the consumer-side npm
 install (the mirror of the git-clone lifecycle, and the four places that mirror breaks).
 
+## Distillation
+
+- The version SSOT is `pyproject.toml [project] version`; `perk.__version__` derives via
+  `importlib.metadata` (installed → can go stale until `uv sync`); the three-way lockstep test
+  guards npm/pyproject/`__version__` — "Version SSOT architecture".
+- KEEP hatchling: the wheel force-includes `shared/` → `perk/_shared` and `agents/` →
+  `perk/_agents`, which `uv_build` cannot express; uv's release commands are backend-agnostic —
+  "Build-backend decision — KEEP hatchling".
+- One dual-plane `release.yml` publishes both packages — "The dual-plane `release.yml`
+  workflow" (+ the layered local `perk-dev release-*` commands beside it).
+- Install pinning is three-way: machine surfaces pin `__version__`, human docs stay unpinned,
+  the self-repo is exempt — "The three-way install-pin policy".
+- Parity is enforced by the launch env var, the soft drift signal, and the pin-lockstep test —
+  "Version-parity enforcement".
+- The extension wiring's reconcile discriminator flipped from PROTOCOL (git vs npm) to IDENTITY
+  (perk's own package name) when both categories collapsed onto npm — "The git→npm
+  extension-wiring flip".
+
 ## Version SSOT architecture
 
 The single source of truth is the static `[project] version` in `pyproject.toml`, bumped with

@@ -10,6 +10,22 @@ perk authored skills (`skills/perk-*`) are declared in a committed manifest frag
 (`.agents/manifest.d/perk.yaml`) and materialized by `perk init` shelling out to the external
 `skills` CLI (plan #51, PR #55). The patterns below generalize to any external CLI perk drives.
 
+## Distillation
+
+- Failure posture is per-CLI: skills delivery is load-bearing (a silent no-op is a broken
+  install — D3 superseded there); GitHub readiness stays best-effort/non-fatal — "Failure
+  posture: D3 superseded for the skills CLI".
+- Route the whole external-CLI shell through ONE module-level patchable seam so verified init
+  tests stay offline — "A single patchable seam keeps the suite offline".
+- The `skills` CLI is the SINGLE materialization path for `.agents/skills/perk-*` in both
+  self-repo and consumer trees (the pi package contributes only the extension) — "The `skills`
+  CLI is the single delivery path (both trees)".
+- `PERK_SKILLS` is a true SSOT: one alphabetical tuple edit cascades to the manifest fragment,
+  post-sync verification, and the doctor check — "The `PERK_SKILLS` SSOT cascade".
+- The manifest fragment is a committed declaration, never gitignored; the `skills` CLI owns the
+  `.agents/` gitignore boundary — perk's block never touches it — "Committed declaration vs.
+  transient state — the gitignore boundary".
+
 ## Failure posture: D3 superseded for the skills CLI (GitHub readiness stays non-fatal)
 
 The original D3 posture — "shelling out to an external CLI must never block init" — **no longer

@@ -18,6 +18,27 @@ is **removed**, the context-gated set-level validator is **removed**, and frozen
 `dataclasses.FrozenInstanceError` (not `pydantic.ValidationError`) — and ty statically flags the
 mutation line.
 
+## Distillation
+
+- Pydantic lives ONLY at the parse/serialize edge; the domain is a frozen `@dataclass` that
+  imports no pydantic (see the intro — this doc superseded the model-as-domain philosophy).
+- Three role-named bases — `LenientParseModel` (read edge: stored files + external APIs),
+  `StrictInputModel` (machine-authored CLI batch inputs), `OutputModel` (`--json` envelopes) —
+  "The three role-named bases in `perk/boundary.py`".
+- Every conversion follows lenient parse model → explicit `_to_X()` converter → frozen dataclass
+  → the unchanged `validate()` content pass — "The canonical per-model recipe" (the executable
+  reference is `tests/test_boundary.py`).
+- Pick the base by boundary DIRECTION (who authored the bytes), not by the data's importance —
+  "The boundary-DIRECTION decision (the big recurring correction)".
+- Converters copy fields EXPLICITLY — `**model_dump()` is the anti-pattern — "Explicit field
+  copy over `**model_dump()`" (+ the TWO decoupled field orderings beside it).
+- `--json` envelopes are golden-pinned via `OutputModel.from_domain(...).model_dump(mode="json")`
+  — "OUTPUT-envelope golden-pinning".
+- ty flags frozen-model mutation as `invalid-assignment` in tests — every conversion hits it;
+  the fix idiom is in "The ty `invalid-assignment` frozen-mutation gotcha".
+- Historical: the supersession records (the intro's old-framing warnings, the removed-validator
+  notes) document the migration, not current guidance to re-apply.
+
 ## The three role-named bases in `perk/boundary.py`
 
 `perk/boundary.py` exports three **role-named** bases plus the kept legacy `StrictBoundaryModel`. The

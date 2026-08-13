@@ -13,6 +13,25 @@ content into the session. The subsystem is **two-plane** (Python cold door + TS 
 contract** (`shared/bindings.yaml`), built across Objective #63 nodes 1.1–2.2. The cross-cutting
 knowledge below is what an agent can't derive from reading any single file.
 
+## Distillation
+
+- The two-plane subsystem rides one shared data contract (`shared/bindings.yaml`) + a resolver
+  per plane — "The data contract and the resolver".
+- Delivery filters to **user-originated** bindings only: a resolved binding value-equal to a
+  shipped default is dropped (frozen-dataclass set membership; the TS twin serializes a tuple
+  key) — "'User-originated' is the delivery filter".
+- Two delivery doors (cold + warm) share a dedup marker so a skill never lands twice — "The two
+  doors and the cold↔warm dedup marker".
+- Linked-worktree delivery works only because the cold door mirrors `.agents/skills/` during
+  launch positioning (gitignored — a dangling-binding warning in a worktree is the symptom) —
+  "Linked-worktree delivery depends on the cold door mirroring `.agents/skills/`".
+- A skill may carry NO binding and be discovered purely by frontmatter `description` (which is
+  then its primary documentation, and delivered references must be self-contained) —
+  "Description-discovered ≠ stage-bound (the perk-expert pattern)".
+- Delivery vs scoping are separate layers: bindings put a skill INTO a session; the exposure
+  model decides what a cold launch DISCOVERS (§8.39 is canonical) — "The layered
+  skills-exposure model (scoping)".
+
 ## The data contract and the resolver (Nodes 1.1, 1.2)
 
 The vocabulary, model, and shipped-default set live in `shared/bindings.yaml` — the **second**

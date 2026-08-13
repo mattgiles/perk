@@ -11,6 +11,22 @@ them — like `perk worktree wipe` (`perk/cli/commands/worktree/wipe_cmd.py`) �
 worktree's plan-ref *binding* role (see `plan-ref-lifecycle.md`). The mechanics below generalize to any
 worktree-batch command.
 
+## Distillation
+
+- On PR-state lookup failure (any `GitHubError`, `state is None`, `pr is None`): SKIP the
+  worktree, never delete — an offline run is a safe no-op — "Uncertainty ⇒ skip, never delete".
+- `--force` bypasses only LOCAL safety guards; it never relaxes the MERGED requirement — push
+  the decision into a pure classifier, keep I/O in the loop — "`--force` semantics are split".
+- Batch ops split gather (parallel classify) from act (parallel removal + batched deletes) —
+  "Gather (parallel) → act … split".
+- Removal self-heals: generous timeout, `shutil.rmtree` fallback on exactly the two recoverable
+  refusals (timeout / broken-gitlink validation), then prune — "Robust removal: self-heal slow +
+  broken worktrees, then prune".
+- Branch deletion is best-effort, FORCED (`-D` — wipe only touches provably-MERGED PRs), and
+  batched via the lenient runner — "Branch deletion is best-effort, forced, and batched".
+- Locate the MAIN checkout from inside a linked worktree via `main_worktree_root`
+  (`--git-common-dir`, both return forms handled) — "The `main_worktree_root` primitive".
+
 ## Worktree-candidate identification
 
 Filter `git.worktree_list()` by **both**:

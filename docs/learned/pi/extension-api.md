@@ -11,6 +11,24 @@ at 0.80.5 (the one notable 0.80 change is the pi-ai `/compat` split — the glob
 off the root; see `headless-session-drive.md`). These are the non-obvious API contours an agent
 can't derive from the package's root type exports.
 
+## Distillation
+
+- `getSystemPromptOptions()` exists only on COMMAND contexts — lifecycle-event handlers don't
+  get it — "`getSystemPromptOptions()` is command-context-only".
+- `ctx.mode` (interactive/print) and `ctx.hasUI` answer different questions — pick per use —
+  "`ctx.mode` vs `ctx.hasUI`".
+- `before_agent_start` fires BEFORE the submitting prompt is persisted, so a first-turn
+  transcript read misses it — "`before_agent_start` fires BEFORE the submitting prompt is
+  persisted (the first-turn hole)".
+- The `context` event runs on EVERY provider call (keep handlers cheap + idempotent) — "The
+  `context` event runs on EVERY provider call".
+- `pi.sendUserMessage` is void fire-and-forget — the PERSISTED session entry is the only
+  delivery evidence (spy on the session instance to assert it offline) — its own section +
+  "Asserting `pi.sendUserMessage` injection offline".
+- How pi resolves/loads a `git:`-package extension (clone root, package-manager internals) —
+  "How pi loads a `git:`-package extension".
+- "Sources" pins the audited pi versions — re-verify these facts on version bumps.
+
 ## `getSystemPromptOptions()` is command-context-only
 
 `getSystemPromptOptions()` lives on `ExtensionCommandContext` **only**, not on the plain

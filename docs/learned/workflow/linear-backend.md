@@ -16,6 +16,29 @@ this doc is the Linear-specific knowledge. Since #1355 the header/node/manifest 
 ride native Linear attachments (see the attachment-native section below); dual-encoding governs
 only the still-inline surfaces.
 
+## Distillation
+
+- Auth is a *plain* `Authorization: <key>` header (Bearer is OAuth2-only); rate limiting arrives
+  as HTTP 400 with `errors[].extensions.code == "RATELIMITED"`, so the client parses the body
+  errors-array-first regardless of status; partial GraphQL success fails loud and discards
+  partial data — "Linear API facts".
+- The client returns `data` or raises (`LinearGraphQLError.codes`, never message substrings);
+  lookup-miss `None` semantics belong to the backend — "The client/consumer contract".
+- Perk metadata kinds ride **native issue attachments** (URL-as-upsert-identity,
+  REPLACE-whole-envelope, the URL-reuse invariant) since #1355 — "Attachment-native perk
+  metadata"; dual-encoding governs only the still-inline surfaces — "Dual-encoding metadata
+  markers" (+ the presence-check bug class beside it).
+- init/doctor readiness is ONE never-raising report-shaped probe with two consumers (doctor
+  lookup-only vs init converge, split by `ensure_labels`) — "Readiness wiring (init/doctor)".
+- The project-backed objective store's live ops (node-issue materialization, milestone reuse,
+  relations) — "Linear Projects substrate" + "Project-backed objective ops".
+- Offline testing: httpx `MockTransport` recipes + the scripted GraphQL fake — "Offline test
+  recipes"; register more-specific query needles FIRST — "`_FakeLinear` insertion-order
+  substring footgun".
+- Historical: "Live smoke gate" and "Measurement-node / live-spike process facts" are validation
+  records; the landed-arc sections (E2E lifecycle, GraphQL type-literacy, idiomatic-backend)
+  chronicle their nodes.
+
 ## Linear API facts (audited against official docs)
 
 - **Auth**: personal API keys use a *plain* `Authorization: <key>` header — `Bearer` is
