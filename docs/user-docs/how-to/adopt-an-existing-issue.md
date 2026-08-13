@@ -56,6 +56,8 @@ read-only authoring session with it, and on save mints a **fresh** `perk:plan` i
 issue-id path unchanged. (To stamp the plan onto an existing issue instead, file the issue first and
 adopt it by id.)
 
----
+## Related
 
-← Back to the [how-to router](index.md).
+- **Do:** [How to capture a gist (a statement of intent)](capture-a-gist.md) — file the intent first when the work is not ready to plan.
+- **Do:** [How to adopt an existing project as an objective](adopt-an-existing-project.md) — the objective-level analog for project-sized sources.
+- **Look up:** [CLI commands](../reference/cli.md) — exact `perk plan from` syntax, flags, and refusals.

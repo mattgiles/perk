@@ -1,12 +1,12 @@
 ---
-title: "How to review a PR human-in-the-loop (`/pr-review-terminal`, `/pr-review-browser`)"
+title: "How to review a PR human-in-the-loop"
 description: "Run a human-in-the-loop adversarial review of any PR, where nothing reaches GitHub without your explicit approval."
 sidebar:
   order: 2040
 sidebarGroup: "Core workflow"
 ---
 
-# How to review a PR human-in-the-loop (`/pr-review-terminal`, `/pr-review-browser`)
+# How to review a PR human-in-the-loop
 
 Run a human-in-the-loop adversarial review of a PR — a foreign PR perk's own flow did not
 author, or the active worktree's own PR. Adversarial reviewers fan out asynchronously, finding
@@ -107,6 +107,8 @@ The same review on plannotator's browser UI — with the posting direction **fli
 If the browser server never becomes ready (or a findings push fails), the flow degrades loudly
 to the same in-session findings table — triage and posting are unchanged.
 
----
+## Related
 
-← Back to the [how-to router](index.md).
+- **Do:** [How to address review feedback on a PR](address-review-feedback.md) — the other side: responding to a review your plan received.
+- **Do:** [How to review a stacked PR train](review-a-stacked-train.md) — reviewing layer-by-layer when the PR is part of a stacked train.
+- **Look up:** [In-session commands & tools](../reference/in-session.md) — the full mode and refusal detail for both review doors.

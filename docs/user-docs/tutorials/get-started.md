@@ -227,7 +227,7 @@ Deleting a repository requires the `delete_repo` scope. If `gh` refuses the comm
 
 - **Learn:** [Drive a multi-plan goal with an objective](./drive-an-objective.mdx) — use an
   objective to carry a larger goal through bounded plans.
-- **Do:** [How to drive the complete plan spine](../how-to/drive-the-full-spine.md) — repeat
+- **Do:** [How to drive a change through the full spine](../how-to/drive-the-full-spine.md) — repeat
   the workflow on your own change.
 - **Understand:** [How perk thinks](../explanation/how-perk-thinks.md) — see why the workflow
   separates planning, implementation, review, and learning.

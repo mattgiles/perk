@@ -37,10 +37,13 @@ session and is **local-only**.
    milestone. Nodes with no `adopt_issue` mint fresh node-issues. (GitHub objectives have no child
    issues, so no mapping applies.)
 4. **Save.** Call the `objective_save` tool with the prose + structured roadmap. perk stamps the
-   objective metadata into the **same** source: the `objective-header` block (with `adopted_from`
-   provenance), the `objective-manifest`, the model-authored prose in the Reconcilable region, and
-   the original overview preserved verbatim in an `Adopted-from` Immutable note. No second
-   project/issue is created.
+   objective metadata into the **same** source: the `objective-header` record (with `adopted_from`
+   provenance) and the roadmap record — the `objective-roadmap` block on GitHub, the
+   `objective-manifest` attachment on Linear — plus the model-authored prose in the Reconcilable
+   region, and the original overview preserved verbatim in an `Adopted-from` Immutable note. No
+   second objective is created — the adopted source itself becomes the objective (on Linear the
+   header + manifest attachments ride a light metadata sentinel issue inside the project, and
+   unmapped nodes mint fresh node-issues, as step 3 notes).
 5. **Preview without launching (optional).** Add `--dry-run` to materialize the source and print
    the seed without opening a session: `perk objective author --from <source> --dry-run`.
 
@@ -72,13 +75,13 @@ child-issue mapping and no project concept — `adopt_issue` is ignored.
 `--from <source>` also accepts a path to a **local file** (relative or absolute):
 `perk objective author --from ./design.md`. This is **seed-from-file**, not in-place adoption — a
 file has no backend identity to stamp. perk reads the file as untrusted seed DATA, primes the
-read-only authoring session, and on save mints a **fresh** `perk:objective` issue (no `adopted_from`
-stamp). The file is never modified. A non-existent path falls through to the source-id path. (To
-stamp the objective onto an existing project/issue instead, pass its id.)
+read-only authoring session, and on save mints a **fresh** perk objective (a new `perk:objective`
+issue on GitHub; a new Linear Project on Linear) with no `adopted_from` stamp. The file is never
+modified. A non-existent path falls through to the source-id path. (To stamp the objective onto an
+existing project/issue instead, pass its id.)
 
-> **Live validation** is preview-grade at this node; final live proof lands later. Offline behavior
-> is fully covered.
+## Related
 
----
-
-← Back to the [how-to router](index.md).
+- **Do:** [How to adopt an existing issue as a plan](adopt-an-existing-issue.md) — the plan-level analog for single-issue sources.
+- **Do:** [How to author an objective roadmap](author-a-roadmap.md) — author a fresh objective when there is nothing to adopt.
+- **Look up:** [Objectives — the roadmap model](../reference/objectives.md) — the node states, records, and reconcile semantics.

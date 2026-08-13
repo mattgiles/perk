@@ -33,6 +33,8 @@ This runs in a **read-only** session and is **local-only**.
 > [`resume`](resume-a-plan.md) *continues* the plan at its current stage without changing the body.
 > Reach for replan when the plan is wrong; reach for resume when the plan is right but unfinished.
 
----
+## Related
 
-← Back to the [how-to router](index.md).
+- **Do:** [How to resume a plan at its current stage](resume-a-plan.md) — continue the plan unchanged when it is right but unfinished.
+- **Do:** [How to replan an objective](replan-an-objective.md) — the objective-level analog: supersede a whole roadmap.
+- **Look up:** [CLI commands](../reference/cli.md) — exact `perk plan replan` syntax and flags.

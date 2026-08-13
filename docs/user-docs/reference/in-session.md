@@ -133,8 +133,8 @@ Toggle perk plan mode — a read-only exploration + plan-authoring session. Pair
 
 ### `/plan-save`
 
-Persist the plan to GitHub as the canonical perk plan and link the session to it — the read-only
-→ read-write boundary. `/plan-save` is the manual failsafe for the approval → save flow. Paired
+Persist the plan to the issue backend as the canonical perk plan and link the session to it — the
+read-only → read-write boundary. `/plan-save` is the manual failsafe for the approval → save flow. Paired
 tool:
 
 - **`plan_save`** — the canonical save tool. *Terminating.*
