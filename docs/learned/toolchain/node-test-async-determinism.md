@@ -31,3 +31,21 @@ initial/final asserts. The streaming claim was never tested.
 The deterministic shape: gate each fake check on its **own deferred** and await a **specific
 intermediate emission while a sibling is still pending** — pure causal ordering, no timeouts. The
 test proves an emission happened *mid-flight*, which is the actual streaming contract.
+
+## Inject every effect seam, drive with a hand-rolled FakeTimers
+
+For a subsystem whose behavior is *made of* time (debounce, poll, backoff, heartbeat), inject
+every effect seam: the clock (`now()`), the timers (set/clear timeout **and** interval), the
+`fs.watch` factory, and the report sink. A ~60-line hand-rolled FakeTimers — absolute-time due
+ordering, intervals rescheduled on fire — then drives arbitrary debounce/poll/backoff/heartbeat
+interleavings with zero sleeps. Anchor: `extension/hunkFeedback/inbox.test.ts` (the `FakeTimers`
+class and the seam-injected inbox under test).
+
+## Sequential "race" tests are fiction — use test-only race hooks
+
+A test that performs step A, then step B, then asserts "the race is handled" never ran a race —
+it ran a sequence. Lease-reclaim races only became testable via explicit test-only hooks
+(`beforeQuarantine`/`afterQuarantine` in `acquireLease`, `extension/hunkFeedback/store.ts`) that
+run a competitor synchronously *inside* the check-then-act window — and the first hook-driven
+interleaving immediately exposed a real defect the sequential test had passed over. (The lease
+protocol itself is documented in `workflow/lease-outbox-delivery.md`.)
