@@ -12,8 +12,14 @@ from perk.substrate.proc import ProcFailure, run_checked
 from perk_dev.prose_map.models import (
     Candidate,
     DiscoveredCandidateInput,
+    DiscoveredOpaqueToolFieldInput,
+    DiscoveredToolFieldInput,
+    DiscoveryResult,
     Fragment,
+    OpaqueToolFieldIssue,
+    ToolFieldIssue,
     TypeScriptCatalogInput,
+    UnclassifiedToolFieldIssue,
 )
 
 _HEADING_RE = re.compile(r"^(#{1,6})\s+(.+?)\s*$")
@@ -300,7 +306,27 @@ def _from_discovered(value: DiscoveredCandidateInput) -> Candidate:
     )
 
 
-def _typescript_candidates(root: Path) -> tuple[list[Candidate], tuple[str, ...]]:
+def _from_tool_field_issue(value: DiscoveredToolFieldInput) -> ToolFieldIssue:
+    if isinstance(value, DiscoveredOpaqueToolFieldInput):
+        return OpaqueToolFieldIssue(
+            kind=value.kind,
+            field=value.field,
+            reason=value.reason,
+            tool=value.tool,
+            path=value.path,
+            selector=value.selector,
+        )
+    return UnclassifiedToolFieldIssue(
+        kind=value.kind,
+        field=value.field,
+        reason=value.reason,
+        tool=value.tool,
+        path=value.path,
+        selector=value.selector,
+    )
+
+
+def _typescript_candidates(root: Path) -> DiscoveryResult:
     script = root / "tools/prose-map/catalog.ts"
     if not script.is_file():
         raise DiscoveryError(f"TypeScript prose scanner is missing: {script}")
@@ -317,19 +343,26 @@ def _typescript_candidates(root: Path) -> tuple[list[Candidate], tuple[str, ...]
         catalog = TypeScriptCatalogInput.model_validate(raw)
     except (json.JSONDecodeError, ValidationError) as exc:
         raise DiscoveryError(f"TypeScript prose discovery returned invalid JSON: {exc}") from exc
-    return (
-        [_from_discovered(value) for value in catalog.candidates],
-        tuple(catalog.governed_tools),
+    return DiscoveryResult(
+        candidates=tuple(_from_discovered(value) for value in catalog.candidates),
+        governed_tools=tuple(catalog.governed_tools),
+        tool_field_issues=tuple(
+            _from_tool_field_issue(value) for value in catalog.tool_field_issues
+        ),
     )
 
 
-def discover(root: Path) -> tuple[tuple[Candidate, ...], tuple[str, ...]]:
+def discover(root: Path) -> DiscoveryResult:
     """Discover the complete production prose candidate catalog."""
     candidates = [
         *_markdown_candidates(root),
         *_python_candidates(root),
         *_managed_candidates(root),
     ]
-    typescript, governed_tools = _typescript_candidates(root)
-    candidates.extend(typescript)
-    return tuple(sorted(candidates, key=lambda candidate: candidate.id)), governed_tools
+    typescript = _typescript_candidates(root)
+    candidates.extend(typescript.candidates)
+    return DiscoveryResult(
+        candidates=tuple(sorted(candidates, key=lambda candidate: candidate.id)),
+        governed_tools=typescript.governed_tools,
+        tool_field_issues=typescript.tool_field_issues,
+    )
