@@ -75,5 +75,5 @@ or objective issues; finish them on GitHub or recreate the intended work in Line
   web seams.
 - **Look up:** [`[issues]` configuration](../reference/configuration/backends.md#issues) — Linear keys and
   credential precedence.
-- **Look up:** [Linear backend reference](../reference/providers-and-backends.md#issue-backend--linear-reference)
+- **Look up:** [Linear backend reference](../reference/providers-and-backends/issue-backends.md#linear)
   — backend effects, identifiers, labels, and maturity.

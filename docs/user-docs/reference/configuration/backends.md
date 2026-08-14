@@ -30,7 +30,7 @@ the command itself (`/pr-review-terminal` = hunk, `/pr-review-browser` = plannot
 `askuser`, or `todo` from `[providers]` if present.
 
 This is **config-key reference depth only**. The supported provider set, postures, and selection
-mechanics are in the [providers & issue backends reference](../providers-and-backends.md).
+mechanics are in the [Providers reference](../providers-and-backends/providers.md).
 
 ```toml
 [providers]
@@ -57,7 +57,7 @@ Selecting Linear also requires a personal `LINEAR_API_KEY`. Set it in the enviro
 gitignored `.perk/local.toml` `[linear] api_key`; never put it in the committed file. This is
 **config-key reference depth only**. The Linear backend reference for authentication, labels,
 identifiers, and maturity is in
-[Providers & issue backends](../providers-and-backends.md#issue-backend--linear-reference).
+[Issue backends — Linear](../providers-and-backends/issue-backends.md#linear).
 
 ```toml
 [issues]

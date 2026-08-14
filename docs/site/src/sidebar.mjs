@@ -110,8 +110,16 @@ export const sidebar = [
       "reference/configuration/models-and-compaction",
       "reference/configuration/skills-and-bindings",
       "reference/objectives",
-      "reference/providers-and-backends",
+      {
+        label: "Providers & issue backends",
+        items: [
+          "reference/providers-and-backends",
+          "reference/providers-and-backends/providers",
+          "reference/providers-and-backends/issue-backends",
+        ],
+      },
       "reference/json-schemas",
+      "reference/glossary",
     ],
   },
   {
