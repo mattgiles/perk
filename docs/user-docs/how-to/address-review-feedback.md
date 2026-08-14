@@ -23,7 +23,7 @@ the spine — you only enter it when there is feedback.)
    worktree is restored from the plan's remote branch automatically. Omit the id inside a plan
    worktree to address that worktree's own plan. Arguments for `pi` go after a bare `--`, e.g.
    `perk address 1699 -- --model provider/model`.
-2. **Run the address door.** Run warm [`/address`](../reference/in-session.md#address). perk
+2. **Run the address door.** Run warm [`/address`](../reference/in-session/workflow-commands.md#address). perk
    classifies the feedback in an isolated child session, then the parent fixes the actionable
    items and batch-resolves the threads.
 3. **Classify only, take no action (optional).** Run `/address --preview` to see the classification
@@ -31,8 +31,8 @@ the spine — you only enter it when there is feedback.)
 4. **Review and let perk resolve.** Confirm the classification, let perk apply the fixes and resolve
    the addressed threads.
 5. **Re-ready and land.** Once the feedback is addressed and committed, run warm
-   [`/ready`](../reference/in-session.md#ready) to put the PR back in front of the reviewer, then
-   warm [`/land`](../reference/in-session.md#land) once it is approved.
+   [`/ready`](../reference/in-session/workflow-commands.md#ready) to put the PR back in front of the reviewer, then
+   warm [`/land`](../reference/in-session/workflow-commands.md#land) once it is approved.
 
 > **On a stacked plan?** Feedback on a lower layer of a stacked PR train is addressed exactly the
 > same way — `/address` fixes it, and the automatic cascade rewrites the published layers above the
@@ -42,4 +42,4 @@ the spine — you only enter it when there is feedback.)
 
 - **Do:** [How to drive a change through the full spine](drive-the-full-spine.md) — where the address step sits on the way to landing.
 - **Do:** [How to review a stacked PR train](review-a-stacked-train.md) — addressing feedback on a layer of a stacked train.
-- **Look up:** [In-session commands & tools](../reference/in-session.md) — the exact `/address` semantics and preview mode.
+- **Look up:** [Workflow commands](../reference/in-session/workflow-commands.md) — the exact `/address` semantics and preview mode.

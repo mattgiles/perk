@@ -97,9 +97,11 @@ sidebarGroup: "Core workflow"
   position, numbered so it survives Starlight's min-order directory weighting: a **1000-block
   per section** (root home page `0`, tutorials `1000`, how-to `2000`, reference `3000`,
   explanation `4000`); each section's index page (`index.*` — the section index by stem)
-  carries the block base; children ascend in steps of 10. Insert a new page at the midpoint between its neighbors (e.g. `2105` between
-  `2100` and `2110`). Orders are unique within a directory and never leave their section's
-  block.
+  carries the block base; children normally ascend in steps of 10. Insert a new top-level page
+  at the midpoint between its neighbors (for example, `2105` between `2100` and `2110`). When a
+  hub splits into nested children and the flattened sidebar has no 10-step slots before the next
+  page, the children may use consecutive integers after the hub (for example, `3021`–`3024` after
+  `3020`). Orders remain unique within each directory and never leave their section's block.
 - **`sidebarGroup` (conditionally required)** — the navigation-**ownership** record where
   ownership is not structural: the flat `how-to/` tree renders as the five §3 operator groups,
   so every routed `how-to/` page except the section index carries exactly one of **Core workflow**,

@@ -32,11 +32,6 @@ export const ESCAPE_BASELINE = Object.freeze([
     source: "reference/configuration.md",
     url: "../../developers/session-audit.md",
   }),
-  // Removed by node 4.2 (in-session reference):
-  Object.freeze({
-    source: "reference/in-session.md",
-    url: "../../developers/session-audit.md",
-  }),
 ]);
 
 /**

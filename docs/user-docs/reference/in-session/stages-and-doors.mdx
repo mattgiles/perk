@@ -1,0 +1,66 @@
+---
+title: "Stages and doors"
+description: "The complete registry lookup for stage modes and warm, cold-local, and cold-remote door availability."
+sidebar:
+  order: 3021
+---
+
+import WarmColdDoorsDiagram from "../../../site/src/components/WarmColdDoorsDiagram.astro";
+
+# Stages and doors
+
+A **stage** names a workflow posture and its read-only or read-write mode. A **door** is a way to
+enter that stage or drive its operation. Four related facts must stay separate:
+
+- A **registry warm door** says the stage can be driven from an existing Pi session while keeping
+  that session's run id.
+- A **standalone slash command** is a human-typed launcher registered by the extension. A
+  warm-capable stage does not necessarily have one.
+- A **cold-local launcher** starts a fresh local session through the perk CLI and mints a run id.
+- **Cold-remote eligibility** allows the remote runner to dispatch the bounded stage. It is not a
+  synonym for having a cold-local launcher.
+
+That distinction matters for `gist-author` and `objective-author`, which are warm-capable but have
+no standalone slash launcher. It also matters for `implement`: registered `/implement` refreshes
+context only inside an existing implement worktree and does not make the stage warm-enterable.
+
+<WarmColdDoorsDiagram />
+
+<div class="perk-diagram-text">
+
+{/* BEGIN perk stage matrix */}
+Which doors are available for each registry stage?
+
+| Stage | Mode | Warm door | Warm command | Cold-local door | Cold command | Cold-remote door |
+| --- | --- | --- | --- | --- | --- | --- |
+| `gist-author` | read-only | yes | no standalone slash launcher | yes | `perk gist author` | — |
+| `gist-save` | read-write | yes | `/gist-save` | yes | `perk gist save` | — |
+| `objective-author` | read-only | yes | no standalone slash launcher | yes | `perk objective author` | — |
+| `objective-save` | read-write | yes | `/objective-save` | yes | `perk objective save` | — |
+| `objective-plan` | read-only | yes | `/objective-plan` | yes | `perk objective plan` | — |
+| `plan` | read-only | yes | `/plan` | yes | `perk plan` | — |
+| `save` | read-write | yes | `/plan-save` | yes | `perk plan save` | — |
+| `implement` | read-write | — | `/implement` refresh only; not a warm stage door | yes | `perk implement` | yes |
+| `submit` | read-write | yes | `/submit` | yes | `perk pr submit` | — |
+| `address` | read-write | yes | `/address` | yes | `perk pr address` | yes |
+| `land` | read-write | yes | `/land` | yes | `perk pr land` | — |
+| `learn` | read-write | yes | `/learn` | yes | `perk learn` | — |
+| `audit` (dev-only) | read-only | — | — | yes | `perk-dev audit judge` | — |
+{/* END perk stage matrix */}
+
+</div>
+
+## Notable cases
+
+- `gist-author` and `objective-author` can participate in warm authoring flows, but neither has a
+  `/gist-author` or `/objective-author` command. Their direct launchers are cold.
+- `/implement` is an in-worktree context refresh. Fresh or cross-worktree implementation starts
+  with `perk implement`.
+- `address` is the only stage available through all three door classes.
+- Cold-remote dispatch is deliberately limited to the bounded `implement` and `address` stages.
+- `audit` is an isolated, dev-only read-only stage reached through `perk-dev`, not the operator
+  `perk` CLI.
+
+For exact command and tool behavior, continue to [Workflow commands](./workflow-commands.md) and
+[Model-facing tools](./model-tools.md). Return to the [in-session surface map](../in-session.md)
+for the complete family index.

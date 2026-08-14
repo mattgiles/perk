@@ -14,7 +14,7 @@ automatic `/land`-driven reconcile didn't run, or needs a redo.
 ## Steps
 
 1. **Reconcile in a session (warm).** Inside a `pi` session, run
-   [`/objective-reconcile [N]`](../reference/in-session.md#objective-reconcile) (omit `N` to use the
+   [`/objective-reconcile [N]`](../reference/in-session/workflow-commands.md#objective-reconcile) (omit `N` to use the
    active objective). The agent rewrites **only** the Reconcilable prose region via the
    `reconcile_objective` tool.
 2. **Or reconcile from the shell (cold).** Run
@@ -44,7 +44,7 @@ automatic `/land`-driven reconcile didn't run, or needs a redo.
 > [Objectives — the roadmap model](../reference/objectives.md) for which region is reconcilable.
 
 > **Usually automatic.** When a merged plan is linked to an objective node,
-> [`/land`](../reference/in-session.md#land) auto-drives `/objective-reconcile` — so this manual
+> [`/land`](../reference/in-session/workflow-commands.md#land) auto-drives `/objective-reconcile` — so this manual
 > path is for the off-spine or re-run case.
 
 ## Related

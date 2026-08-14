@@ -176,7 +176,7 @@ node that creates them.
 | `docs/user-docs/reference/cli/learn-and-gist.md` *(split child — node 4.1)* | `/reference/cli/learn-and-gist/` | Reference › CLI |
 | `docs/user-docs/reference/cli/remote-and-utility.md` *(split child — node 4.1)* | `/reference/cli/remote-and-utility/` | Reference › CLI |
 | `docs/user-docs/reference/in-session.md` | `/reference/in-session/` | Reference › In-session (hub) |
-| `docs/user-docs/reference/in-session/stages-and-doors.md` *(split child — node 4.2)* | `/reference/in-session/stages-and-doors/` | Reference › In-session |
+| `docs/user-docs/reference/in-session/stages-and-doors.mdx` *(split child — node 4.2)* | `/reference/in-session/stages-and-doors/` | Reference › In-session |
 | `docs/user-docs/reference/in-session/workflow-commands.md` *(split child — node 4.2)* | `/reference/in-session/workflow-commands/` | Reference › In-session |
 | `docs/user-docs/reference/in-session/review-and-authoring.md` *(split child — node 4.2)* | `/reference/in-session/review-and-authoring/` | Reference › In-session |
 | `docs/user-docs/reference/in-session/model-tools.md` *(split child — node 4.2)* | `/reference/in-session/model-tools/` | Reference › In-session |
@@ -359,7 +359,7 @@ contents and the §5 anchor family-assignment rule.
 | Source path | Quadrant | Disposition | Hub + children | Editorial intent | Node |
 |---|---|---|---|---|---|
 | `docs/user-docs/reference/cli.md` | Reference | split | Hub `/reference/cli/` + 6 children | Hub keeps: orientation; the **stage-launcher spine entries** (`perk implement`, `perk submit`, `perk address`, `perk land`, `perk ready` stay on the hub as the command-map's spine); the command-group map; shared conventions (aliases, `--json`). Children by family: `cli/setup-and-health.md` (`perk init`, `perk doctor`, `perk doctor workflow` + `check`/`smoke-test`); `cli/plan.md` (the `perk plan` group); `cli/objective.md` (the `perk objective` group incl. `stack`); `cli/pr.md` (the `perk pr` group; cross-links the flat spine verbs on the hub); `cli/learn-and-gist.md` (the `perk learn` + `perk gist` groups); `cli/remote-and-utility.md` (`perk workflow`, `perk worktree`, `perk state`, `perk registry`, `perk skills`, `perk release-notes`). | 4.1 |
-| `docs/user-docs/reference/in-session.md` | Reference | split | Hub `/reference/in-session/` + 4 children | Hub keeps: orientation; the complete surface map; ancillary in-session features. Children by family: `in-session/stages-and-doors.md` (the stage/door model); `in-session/workflow-commands.md` (spine commands `/plan` `/plan-save` `/implement-here` `/implement` `/submit` `/ready` `/address` `/land` `/learn`, objective doors, gist doors, utility commands `/ci` `/commit-and-compact` `/perk-selfcheck` `/learn-docs` `/learn-code`); `in-session/review-and-authoring.md` (`/pr-review`, `/pr-review-dynamic`, `/pr-review-terminal`, `/pr-review-browser`, `/plan-review-browser`, `/objective-review-browser`); `in-session/model-tools.md` (the universal model-facing tools). | 4.2 |
+| `docs/user-docs/reference/in-session.md` | Reference | split | Hub `/reference/in-session/` + 4 children | Hub keeps: orientation; the complete surface map; ancillary in-session features. Children by family: `in-session/stages-and-doors.mdx` (the stage/door model); `in-session/workflow-commands.md` (spine commands `/plan` `/plan-save` `/implement-here` `/implement` `/submit` `/ready` `/address` `/land` `/learn`, objective doors, gist doors, utility commands `/ci` `/commit-and-compact` `/perk-selfcheck` `/learn-docs` `/learn-code`); `in-session/review-and-authoring.md` (`/pr-review`, `/pr-review-dynamic`, `/pr-review-terminal`, `/pr-review-browser`, `/plan-review-browser`, `/objective-review-browser`); `in-session/model-tools.md` (the universal model-facing tools). | 4.2 |
 | `docs/user-docs/reference/configuration.md` | Reference | split | Hub `/reference/configuration/` + 5 children | Hub keeps: orientation; file precedence + overlay semantics; the table map; value types. Children by family: `configuration/repository-layout.md` (the dot-directory contract); `configuration/workflow-and-ci.md` (`[worktree]`, `[workflow]`, `[ci]`, `[[ci.checks]]`); `configuration/backends.md` (`[providers]`, `[issues]`, `[linear]`); `configuration/models-and-compaction.md` (`[models]`, `[models.stages.<id>]`, `[models.subagents]`, `[compaction]`); `configuration/skills-and-bindings.md` (`[skills]`, `[[bindings]]`, repo-authored skills under `.perk/skills/`). **The fifth `backends` family is a deliberate blueprint refinement of node 4.3's four-name list** — the config tables `[providers]`/`[issues]`/`[linear]` fit none of the four named families; recorded here as a blueprint decision so 4.3's plan inherits it without re-deciding. | 4.3 |
 | `docs/user-docs/reference/providers-and-backends.md` | Reference | split | Hub `/reference/providers-and-backends/` + 2 children | Hub keeps: the supported-set overview + comparison; known caveats & maturity. Children by family: `providers-and-backends/providers.md` (the provider seam: postures, what selection does, fallback semantics); `providers-and-backends/issue-backends.md` (GitHub/Linear: auth, config, labels, identifiers, doctor groups, project-backed objectives, native footprint). User-confirmed split; satisfies node 4.4's "split only if the committed inventory requires it" and the `Linear` search-matrix row. | 4.4 |
 
@@ -506,16 +506,23 @@ the Part 2 rule. "Stays on hub" rows need no link updates at all.
 | `cli.md#perk-workflow-run-retry-run_id` | `cli/remote-and-utility.md#perk-workflow-run-retry-run_id` |
 | `cli.md#perk-release-notes` | `cli/remote-and-utility.md#perk-release-notes` |
 
-**`reference/in-session.md` (9 referenced anchors):**
+**`reference/in-session.md` (16 referenced anchors):**
 
 | Old anchor | New home |
 |---|---|
+| `in-session.md#plan` | `in-session/workflow-commands.md#plan` |
+| `in-session.md#plan-save` | `in-session/workflow-commands.md#plan-save` |
 | `in-session.md#implement-here` | `in-session/workflow-commands.md#implement-here` |
+| `in-session.md#submit` | `in-session/workflow-commands.md#submit` |
+| `in-session.md#ready` | `in-session/workflow-commands.md#ready` |
+| `in-session.md#address` | `in-session/workflow-commands.md#address` |
 | `in-session.md#land` | `in-session/workflow-commands.md#land` |
+| `in-session.md#learn` | `in-session/workflow-commands.md#learn` |
 | `in-session.md#objective` | `in-session/workflow-commands.md#objective` |
 | `in-session.md#objective-plan` | `in-session/workflow-commands.md#objective-plan` |
 | `in-session.md#objective-reconcile` | `in-session/workflow-commands.md#objective-reconcile` |
 | `in-session.md#objective-save` | `in-session/workflow-commands.md#objective-save` |
+| `in-session.md#ci` | `in-session/workflow-commands.md#ci` |
 | `in-session.md#learn-docs` | `in-session/workflow-commands.md#learn-docs` |
 | `in-session.md#learn-code` | `in-session/workflow-commands.md#learn-code` |
 | `in-session.md#pr-review-terminal` | `in-session/review-and-authoring.md#pr-review-terminal` |
@@ -577,7 +584,7 @@ Broad H2 anchors that span children stay on the hub as orientation headings:
 H2 sections that belong wholly to one family migrate to that child under the Part 2 rule
 (none of these span children): `cli.md#setup--health` → `cli/setup-and-health.md`;
 `cli.md#other` → `cli/remote-and-utility.md`; `in-session.md#the-stagedoor-model` →
-`in-session/stages-and-doors.md`; `in-session.md#warm-commands-by-stage-the-spine`,
+`in-session/stages-and-doors.mdx`; `in-session.md#warm-commands-by-stage-the-spine`,
 `in-session.md#objective-doors-warm`, `in-session.md#gist-doors-warm` →
 `in-session/workflow-commands.md`; `in-session.md#universal-model-facing-tools` →
 `in-session/model-tools.md`; `configuration.md#repository-layout--the-dot-directory-contract`

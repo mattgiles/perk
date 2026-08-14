@@ -41,7 +41,7 @@ For the *why* of objectives — how a roadmap emits bounded plans as it advances
 
 A compact recap of the objective surface. Each row links to its authoritative entry in the
 [CLI reference](./cli.md) (cold `perk …` commands) or the
-[in-session reference](./in-session.md) (warm `/…` commands + model tools).
+[Workflow commands](./in-session/workflow-commands.md) (warm `/…` commands + companion tools).
 
 | Surface | What it does |
 | --- | --- |
@@ -56,10 +56,10 @@ A compact recap of the objective surface. Each row links to its authoritative en
 | [`perk objective next`](./cli.md#perk-objective-next-number-alias-n) (`n`) | Print the next plannable node. |
 | [`perk objective run`](./cli.md#perk-objective-run-number-alias-r) (`r`) | Advance the backlog one autonomously-safe step. |
 | [`perk objective doctor`](./cli.md#perk-objective-doctor-number-alias-doc) (`doc`) | Detect (and `--fix` repair) drift: Linear manifest vs live state, plus the delivery-train diagnosis on every backend. |
-| [`/objective`](./in-session.md#objective) | Show, set, or clear the active objective + budget. |
-| [`/objective-plan`](./in-session.md#objective-plan) + `objective_node` | Start the plan factory; link a plan or advance a node. |
-| [`/objective-reconcile`](./in-session.md#objective-reconcile) + `reconcile_objective` | Reconcile the prose region post-land. |
-| [`/objective-save`](./in-session.md#objective-save) + `objective_draft` / `objective_save` | Draft and save an objective in-session. |
+| [`/objective`](./in-session/workflow-commands.md#objective) | Show, set, or clear the active objective + budget. |
+| [`/objective-plan`](./in-session/workflow-commands.md#objective-plan) + `objective_node` | Start the plan factory; link a plan or advance a node. |
+| [`/objective-reconcile`](./in-session/workflow-commands.md#objective-reconcile) + `reconcile_objective` | Reconcile the prose region post-land. |
+| [`/objective-save`](./in-session/workflow-commands.md#objective-save) + `objective_draft` / `objective_save` | Draft and save an objective in-session. |
 
 `perk objective author` has **no** warm slash twin — objective authoring is reached cold, or via
 plan-mode read-only authoring.
@@ -128,7 +128,7 @@ save time:
   the real Git/GitHub plane (native-stack API surface, squash direct-merge + no merge queue on
   the base, an atomic-push dry-run) before anything is written. Layers publish through the
   ordinary `/submit` door — see [`perk pr submit`](./cli.md#perk-pr-submit) and
-  [In-session commands](./in-session.md).
+  [Workflow commands](./in-session/workflow-commands.md).
 
 Day-to-day operation needs no dedicated commands: a published-suffix rewrite converges
 automatically from the normal workflow — re-run `/submit` after committing a published-layer
@@ -262,7 +262,7 @@ payload).
 ## See also
 
 - [CLI commands](./cli.md) — the authoritative `perk objective …` catalog.
-- [In-session commands & tools](./in-session.md) — the warm `/objective-*` commands and model tools.
+- [Workflow commands](./in-session/workflow-commands.md) — the warm `/objective-*` commands and companion tools.
 - [Tutorial 2 → Drive a multi-plan goal with an objective](../tutorials/drive-an-objective.mdx) — the
   guided lesson.
 - [How perk thinks](../explanation/how-perk-thinks.md) — the *why* behind objectives.

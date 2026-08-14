@@ -14,7 +14,7 @@ learned-docs plan factory.
 ## Steps
 
 1. **Start the factory.** Inside a `pi` session where a plan can be saved (the default
-   main-checkout session) run [`/learn-docs`](../reference/in-session.md#learn-docs), or from the
+   main-checkout session) run [`/learn-docs`](../reference/in-session/workflow-commands.md#learn-docs), or from the
    shell run [`perk learn docs`](../reference/cli.md#perk-learn-docs) (the cold door — it launches
    its own factory session). A session where the `plan_save` tool is not active (read-only, a
    worktree stage, or a provider restriction) refuses `/learn-docs` and points at the cold door.
@@ -37,7 +37,7 @@ learned-docs plan factory.
 5. **Land it.** On land, the consumed `perk:learn` issues are closed and labelled
    `perk:consolidated`.
 
-> **It is a plan factory.** Like [`/objective-plan`](../reference/in-session.md#objective-plan),
+> **It is a plan factory.** Like [`/objective-plan`](../reference/in-session/workflow-commands.md#objective-plan),
 > `/learn-docs` produces a plan to route through the spine — don't expect it to edit `docs/learned/`
 > directly.
 
@@ -47,5 +47,5 @@ learned-docs plan factory.
   SHOULD_BE_CODE learnings this factory defers.
 - **Do:** [How to drive a change through the full spine](drive-the-full-spine.md) — the implement →
   submit → land flow the saved plan rides.
-- **Look up:** [In-session commands & tools](../reference/in-session.md) — the exact `/learn-docs`
-  and `/learn` semantics.
+- **Look up:** [Workflow commands](../reference/in-session/workflow-commands.md) — the exact
+  `/learn-docs` and `/learn` semantics.

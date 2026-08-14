@@ -27,8 +27,9 @@ described as it is and structured to mirror the product.
   toolchain, installation floor, model credentials, optional surfaces, and version posture.
 - **[CLI commands](./cli.md)** — every `perk …` command, written against real `--help` and
   guarded by a pytest existence check.
-- **[In-session commands & tools](./in-session.md)** — the warm `/…` commands, the
-  model-facing tools, and the stage/door table for the session interior.
+- **[In-session commands & tools](./in-session.md)** — the stable session-interior hub, with
+  family references for stages and doors, workflow commands, review and authoring, and
+  model-facing tools.
 - **[Configuration files](./configuration.md)** — every `.perk/config.toml` table and the
   `.perk/local.toml` per-user overlay, with overlay semantics and the canonical repository layout
   (dot-directory) contract.

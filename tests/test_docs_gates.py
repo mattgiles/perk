@@ -53,8 +53,11 @@ def test_site_package_scripts_carry_the_gate_commands():
     ]
     # `astro sync` first, so a fresh checkout (no gitignored `.astro/types.d.ts`) typechecks.
     assert scripts["typecheck"] == "astro sync && tsc --noEmit"
-    # Build (schema/link/anchor/escape gates), then the post-build checks outside `src/`.
-    assert scripts["check"] == 'astro build && node --test "checks/**/*.test.mjs"'
+    # Build (schema/link/anchor/escape gates), then the explicit source/runtime vocabulary guard
+    # plus the post-build checks outside `src/`.
+    assert scripts["check"] == (
+        'astro build && node --test "src/in-session-reference.test.mjs" "checks/**/*.test.mjs"'
+    )
 
 
 def test_justfile_recipes_reach_every_docs_gate():

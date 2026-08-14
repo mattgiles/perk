@@ -34,7 +34,7 @@ improvement objective by running the learn-harvest objective factory.
    [`perk objective plan`](../reference/cli.md#perk-objective-plan-number) and take each through the
    ordinary implement → submit → land spine.
 
-> **It is an objective factory.** Like [`/objective-plan`](../reference/in-session.md#objective-plan)
+> **It is an objective factory.** Like [`/objective-plan`](../reference/in-session/workflow-commands.md#objective-plan)
 > is a plan factory, `perk learn harvest` produces an *objective* — it never edits `docs/learned/`
 > and never writes code.
 

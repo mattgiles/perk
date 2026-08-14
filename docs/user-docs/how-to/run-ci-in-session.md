@@ -26,7 +26,7 @@ project runs.
    sequence inside one row's `command` (e.g. `"build && test"`).
 2. **Run all checks.** Ask the agent to call the model-facing `run_ci` tool with no check
    argument when you need the full per-check report. For a quick human-run summary, run warm
-   [`/ci`](../reference/in-session.md#ci): it executes the same check set but surfaces only the
+   [`/ci`](../reference/in-session/workflow-commands.md#ci): it executes the same check set but surfaces only the
    one-line overall result. While `run_ci` works, its live progress line shows per-check status
    and elapsed time; its final report lists every result in declared order.
 3. **Run a subset (optional).** Ask the agent to call `run_ci` with one check name or a
@@ -55,7 +55,7 @@ interactive confirmation, or a per-session approval latch. A headless session wi
 
 - **Do:** [How to configure and verify CI checks](configure-and-verify-ci-checks.md) — author the
   `[[ci.checks]]` rows and prove each state before trusting the gate.
-- **Look up:** [In-session commands & tools](../reference/in-session.md) — the exact `/ci` and
-  `run_ci` semantics.
+- **Look up:** [Workflow commands](../reference/in-session/workflow-commands.md) — the exact `/ci`
+  and `run_ci` semantics.
 - **Look up:** [Configuration files](../reference/configuration.md) — the `[ci]` and
   `[[ci.checks]]` keys and change-scoped gating.

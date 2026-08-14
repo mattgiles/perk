@@ -27,7 +27,7 @@ Both doors share the same arg semantics and three modes: a PR number/URL reviews
 **foreign** PR (detached, read-only checkout — untrusted foreign code, nothing from it is ever
 executed); no arg reviews the **active worktree's own PR** in place; and pre-PR (no PR yet) each
 door opens a surface-only **since-base** review — no reviewers, nothing posts to GitHub. See the
-[in-session reference](../reference/in-session.md#pr-review-terminal) for the mode details.
+[Review and authoring](../reference/in-session/review-and-authoring.md#pr-review-terminal) for the mode details.
 
 **Prerequisites (per door):**
 
@@ -111,4 +111,4 @@ to the same in-session findings table — triage and posting are unchanged.
 
 - **Do:** [How to address review feedback on a PR](address-review-feedback.md) — the other side: responding to a review your plan received.
 - **Do:** [How to review a stacked PR train](review-a-stacked-train.md) — reviewing layer-by-layer when the PR is part of a stacked train.
-- **Look up:** [In-session commands & tools](../reference/in-session.md) — the full mode and refusal detail for both review doors.
+- **Look up:** [Review and authoring](../reference/in-session/review-and-authoring.md) — the full mode and refusal detail for both review doors.
