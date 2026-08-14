@@ -603,12 +603,13 @@ test("createReportDetailSink appends the exact generic type and payload", () => 
       entries.push({ customType, data });
     },
   });
-  sink("perk: submit — failed\ncomplete detail", "error");
+  const text = "perk: submit — failed\ncomplete \u001b[2Jdetail\u0007";
+  sink(text, "error");
   assert.equal(REPORT_DETAIL_TYPE, "perk:report-detail");
   assert.deepEqual(entries, [
     {
       customType: "perk:report-detail",
-      data: { text: "perk: submit — failed\ncomplete detail", severity: "error" },
+      data: { text, severity: "error" },
     },
   ]);
 });
@@ -668,6 +669,20 @@ for (const [severity, firstColor] of [
     ]);
   });
 }
+
+test("reportDetailEntryRenderer strips terminal controls only from rendered rows", () => {
+  const text =
+    "perk:\u001b[2J safe\u0007\r\n" +
+    "osc\u001b]0;title\u0007 kept\n" +
+    "apc\u001b_payload\u001b\\ done\n" +
+    "c1\u009b31mred\u009c!";
+  assert.deepEqual(renderMarker(reportDetailEntryRenderer, { text, severity: "error" }), [
+    "<error>perk: safe</>",
+    "<dim>osc kept</>",
+    "<dim>apc done</>",
+    "<dim>c1red!</>",
+  ]);
+});
 
 test("reportDetailEntryRenderer rejects malformed data", () => {
   for (const data of [
