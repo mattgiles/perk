@@ -13,10 +13,94 @@ from perk_dev.prose_map.catalog import (
     build,
     load_graph,
     validate_graph,
+    validate_scenario_fixtures,
 )
-from perk_dev.prose_map.models import Capability
+from perk_dev.prose_map.models import (
+    Assembly,
+    AssemblyLayer,
+    Candidate,
+    Capability,
+    Finding,
+    ProseMap,
+    Scenario,
+    SessionShape,
+)
 
 ROOT = Path(__file__).parents[1]
+_TEMPLATE_UNIT = "markdown:prompts/top.md"
+
+
+def _fixture_graph(
+    *,
+    variables: dict[str, str] | None,
+    referenced: bool = True,
+) -> ProseMap:
+    shapes = (
+        (
+            SessionShape(
+                id="preview",
+                capability="fixture",
+                label="Fixture preview",
+                delivery="warm",
+                trigger="/preview",
+                assembly="fixture",
+            ),
+        )
+        if referenced
+        else ()
+    )
+    scenarios = (
+        (
+            Scenario(
+                id="fixture-scenario",
+                assembly="fixture",
+                label="Fixture scenario",
+                variables=tuple(sorted(variables.items())),
+                include_ambient=True,
+                include_tools=True,
+            ),
+        )
+        if variables is not None
+        else ()
+    )
+    return ProseMap(
+        capabilities=(),
+        routes=(),
+        exclusions=(),
+        session_shapes=shapes,
+        assemblies=(
+            Assembly(
+                id="fixture",
+                layers=(
+                    AssemblyLayer(
+                        unit=_TEMPLATE_UNIT,
+                        boundary=None,
+                        label="Top-level prompt",
+                        optional=False,
+                    ),
+                ),
+            ),
+        ),
+        scenarios=scenarios,
+        concerns=(),
+        lineage=(),
+    )
+
+
+def _fixture_candidate() -> Candidate:
+    return Candidate(
+        id=_TEMPLATE_UNIT,
+        kind="markdown",
+        path="prompts/top.md",
+        selector="whole-file",
+        fragments=(),
+    )
+
+
+def _write_prompt(root: Path, name: str, source: str) -> None:
+    path = root / "prompts" / name
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(source, encoding="utf-8")
 
 
 @pytest.fixture(scope="module")
@@ -110,6 +194,111 @@ def test_semantic_validation_detects_capability_cycle() -> None:
     invalid = replace(graph, capabilities=(cyclic_root, child, *graph.capabilities[1:]))
     findings = validate_graph(invalid)
     assert any(finding.code == "capability-cycle" for finding in findings)
+
+
+def test_scenario_validation_requires_fixture_for_previewable_assembly(
+    tmp_path: Path,
+) -> None:
+    _write_prompt(tmp_path, "top.md", "No variables.\n")
+
+    assert validate_scenario_fixtures(
+        tmp_path,
+        _fixture_graph(variables=None),
+        (_fixture_candidate(),),
+    ) == [
+        Finding(
+            code="missing-assembly-scenario",
+            message="previewable assembly fixture has no scenario",
+        )
+    ]
+
+
+def test_scenario_validation_ignores_unreferenced_assembly(tmp_path: Path) -> None:
+    _write_prompt(tmp_path, "top.md", "No variables.\n")
+
+    assert (
+        validate_scenario_fixtures(
+            tmp_path,
+            _fixture_graph(variables=None, referenced=False),
+            (_fixture_candidate(),),
+        )
+        == []
+    )
+
+
+def test_scenario_validation_collects_conditional_and_included_variables(
+    tmp_path: Path,
+) -> None:
+    _write_prompt(
+        tmp_path,
+        "top.md",
+        "{% if enabled %}{{ primary }}{% else %}{{ fallback }}{% endif %}\n"
+        '{% include "shared/part.md" %}\n',
+    )
+    _write_prompt(tmp_path, "shared/part.md", "{{ included }}\n")
+
+    assert validate_scenario_fixtures(
+        tmp_path,
+        _fixture_graph(variables={"enabled": "yes", "primary": "shown"}),
+        (_fixture_candidate(),),
+    ) == [
+        Finding(
+            code="missing-scenario-variable",
+            message=(
+                "scenario fixture-scenario is missing variables for "
+                f"{_TEMPLATE_UNIT}: fallback, included"
+            ),
+        )
+    ]
+
+
+def test_scenario_validation_groups_and_sorts_missing_variables(tmp_path: Path) -> None:
+    _write_prompt(tmp_path, "top.md", "{{ zed }} {{ alpha }} {{ middle }}\n")
+
+    assert validate_scenario_fixtures(
+        tmp_path,
+        _fixture_graph(variables={}),
+        (_fixture_candidate(),),
+    ) == [
+        Finding(
+            code="missing-scenario-variable",
+            message=(
+                "scenario fixture-scenario is missing variables for "
+                f"{_TEMPLATE_UNIT}: alpha, middle, zed"
+            ),
+        )
+    ]
+
+
+def test_scenario_validation_accepts_extra_adapter_variable(tmp_path: Path) -> None:
+    _write_prompt(tmp_path, "top.md", "{{ required }}\n")
+
+    assert (
+        validate_scenario_fixtures(
+            tmp_path,
+            _fixture_graph(variables={"provider": "github", "required": "value"}),
+            (_fixture_candidate(),),
+        )
+        == []
+    )
+
+
+def test_scenario_validation_raises_contextual_error_for_malformed_template(
+    tmp_path: Path,
+) -> None:
+    _write_prompt(tmp_path, "top.md", "{% if broken %}\n")
+
+    with pytest.raises(
+        ProseMapError,
+        match=r"markdown:prompts/top\.md \(top\.md\)",
+    ) as raised:
+        validate_scenario_fixtures(
+            tmp_path,
+            _fixture_graph(variables={"broken": "yes"}),
+            (_fixture_candidate(),),
+        )
+
+    assert raised.value.__cause__ is not None
 
 
 def test_cli_check_reports_clean_catalog(

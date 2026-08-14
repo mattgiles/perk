@@ -561,16 +561,113 @@ assemblies:
       - { boundary: user-content, label: Requested capability and source material }
 
 scenarios:
-  - { id: plan-github-warm, assembly: plan-authoring, label: GitHub-backed warm planning, variables: { provider: github }, include_ambient: true, include_tools: true }
-  - { id: plan-linear-cold, assembly: plan-authoring, label: Linear-backed cold planning, variables: { provider: linear }, include_ambient: true, include_tools: true }
-  - { id: objective-new, assembly: objective-authoring, label: New objective, variables: {}, include_ambient: true, include_tools: true }
-  - { id: objective-node-stacked, assembly: objective-planning, label: Stacked objective node, variables: { delivery: stacked }, include_ambient: true, include_tools: true }
-  - { id: implement-interactive, assembly: implementation, label: Interactive implementation, variables: {}, include_ambient: true, include_tools: true }
-  - { id: implement-remote, assembly: implementation, label: Headless implementation, variables: {}, include_ambient: false, include_tools: true }
-  - { id: address-actionable, assembly: address, label: Actionable feedback, variables: {}, include_ambient: true, include_tools: true }
-  - { id: pr-review-focused, assembly: pr-review, label: Focused multi-angle review, variables: { directive: security }, include_ambient: true, include_tools: true }
-  - { id: learn-landed, assembly: learn, label: Landed-run learning pass, variables: {}, include_ambient: true, include_tools: true }
-  - { id: skill-create, assembly: skill-authoring, label: Create a repository skill, variables: {}, include_ambient: true, include_tools: true }
+  - id: plan-github-warm
+    assembly: plan-authoring
+    label: GitHub-backed warm planning
+    variables:
+      provider: "github"
+      marker: "[PLAN AUTHORING]"
+    include_ambient: true
+    include_tools: true
+  - id: plan-linear-cold
+    assembly: plan-authoring
+    label: Linear-backed cold planning
+    variables:
+      provider: "linear"
+      marker: "[PLAN AUTHORING]"
+    include_ambient: true
+    include_tools: true
+  - id: gist-new
+    assembly: gist-authoring
+    label: New gist
+    variables:
+      marker: "[GIST AUTHORING]"
+    include_ambient: true
+    include_tools: true
+  - id: objective-new
+    assembly: objective-authoring
+    label: New objective
+    variables:
+      marker: "[OBJECTIVE AUTHORING]"
+    include_ambient: true
+    include_tools: true
+  - id: objective-node-stacked
+    assembly: objective-planning
+    label: Stacked objective node
+    variables:
+      delivery: "stacked"
+      number: "7"
+      objective: "7"
+      title: "Ship it"
+      node_id: "1.2"
+      node: "1.2"
+      node_description: "Do the thing"
+      node_engagement: "<untrusted_node_engagement>\n[c-1 by Ada] please scope this down\n</untrusted_node_engagement>"
+      layer_context: "<stacked_layer_context>\nThis node is layer 2 of 3 in the delivery order.\n</stacked_layer_context>"
+      read_clause: "This objective is a Linear Project (https://linear.app/x/ENG-1). Its roadmap nodes are Linear issues in that Project — inspect a node-issue's detail or discussion with the `linear_get_issue` and `linear_list_comments` tools; if the linear tools are unavailable, open https://linear.app/x/ENG-1."
+    include_ambient: true
+    include_tools: true
+  - id: implement-interactive
+    assembly: implementation
+    label: Interactive implementation
+    variables:
+      provider: "github"
+      pr_id: "42"
+      url: "https://x/9"
+      read_cmd: "gh issue view 42 --comments"
+    include_ambient: true
+    include_tools: true
+  - id: implement-remote
+    assembly: implementation
+    label: Headless implementation
+    variables:
+      provider: "github"
+      pr_id: "42"
+      url: "https://x/9"
+      read_cmd: "gh issue view 42 --comments"
+    include_ambient: false
+    include_tools: true
+  - id: address-actionable
+    assembly: address
+    label: Actionable feedback
+    variables:
+      provider: "github"
+      pr_id: "148"
+      url: "https://github.com/mattgiles/perk/issues/148"
+    include_ambient: true
+    include_tools: true
+  - id: pr-review-focused
+    assembly: pr-review
+    label: Focused multi-angle review
+    variables:
+      directive: "security"
+    include_ambient: true
+    include_tools: true
+  - id: pr-review-child-plan-fidelity
+    assembly: pr-review-child
+    label: Plan-fidelity reviewer
+    variables: {}
+    include_ambient: false
+    include_tools: true
+  - id: learn-landed
+    assembly: learn
+    label: Landed-run learning pass
+    variables:
+      provider: "github"
+      pr_id: "42"
+      url: "https://x/9"
+      read_cmd: "gh issue view 42 --comments"
+    include_ambient: true
+    include_tools: true
+  - id: skill-create
+    assembly: skill-authoring
+    label: Create a repository skill
+    variables:
+      repo_skills_rel: ".pi/skills"
+      skill_name: "foo"
+      skill_path: ".pi/skills/foo/SKILL.md"
+    include_ambient: true
+    include_tools: true
 
 concerns:
   - id: review-first-save
