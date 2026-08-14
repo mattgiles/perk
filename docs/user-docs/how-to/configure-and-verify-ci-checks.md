@@ -72,5 +72,5 @@ in-session gate says exactly what you expect before you rely on it.
   → fix → verify loop these rows power.
 - **Look up:** [Workflow and CI](../reference/configuration/workflow-and-ci.md#ci) — the exact
   `[ci]` and `[[ci.checks]]` keys, types, and gating rules.
-- **Understand:** [How perk thinks](../explanation/how-perk-thinks.md) — why perk reports results
-  and never fixes them for you.
+- **Understand:** [Human gates and trust](../explanation/human-gates-and-trust.md) — why perk
+  reports results and keeps the fixing judgment with you.

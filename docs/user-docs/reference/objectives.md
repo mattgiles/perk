@@ -26,7 +26,8 @@ are blocking relations. See [Issue backends](./providers-and-backends/issue-back
 full GitHub/Linear storage comparison.
 
 For the *why* of objectives — how a roadmap emits bounded plans as it advances — read
-[How perk thinks](../explanation/how-perk-thinks.md). For a guided, end-to-end walkthrough, see
+[Gists, plans, and objectives](../explanation/gists-plans-and-objectives.md). For a guided,
+end-to-end walkthrough, see
 [Tutorial 2 → Drive a multi-plan goal with an objective](../tutorials/drive-an-objective.mdx).
 
 ## Objective commands at a glance
@@ -267,4 +268,4 @@ payload).
 
 - **Learn:** [Drive a multi-plan goal with an objective](../tutorials/drive-an-objective.mdx).
 - **Do:** [Author an objective roadmap](../how-to/author-a-roadmap.md).
-- **Understand:** [How perk thinks](../explanation/how-perk-thinks.md).
+- **Understand:** [Gists, plans, and objectives](../explanation/gists-plans-and-objectives.md).

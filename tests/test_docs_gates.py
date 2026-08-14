@@ -19,6 +19,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 
 DOCS_CHECK_PYTEST_TARGETS = (
     "tests/test_user_docs_metadata.py",
+    "tests/test_explanation_boundary.py",
     "tests/test_docs_site_tokens.py",
     "tests/test_docs_gates.py",
     '"tests/test_packaging.py::test_docs_site_publish_isolation"',

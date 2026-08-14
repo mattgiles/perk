@@ -128,6 +128,8 @@ export const sidebar = [
     items: [
       "explanation",
       "explanation/how-perk-thinks",
+      "explanation/gists-plans-and-objectives",
+      "explanation/human-gates-and-trust",
       "explanation/headless-and-remote",
       "explanation/perk-in-zed",
     ],

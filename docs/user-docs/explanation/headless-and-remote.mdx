@@ -1,0 +1,108 @@
+---
+title: "Headless and remote"
+description: "How the same workflow runs with nobody watching — one implementation in a remote process, coordinated through durable GitHub state, stopping at human judgment."
+sidebar:
+  order: 4040
+---
+
+import HeadlessRemoteDiagram from "../../site/src/components/HeadlessRemoteDiagram.astro";
+
+# Headless and remote
+
+[How perk thinks](./how-perk-thinks.md) establishes the headless model in one line: there is no
+separate headless workflow — headless is the cold door pointed at a remote target. This page
+assumes that model and explains what actually happens when nobody is watching: how one workflow
+runs in another process location, how the pieces coordinate without a terminal, where automation
+stops, and what the evidence behind the surface does and does not prove.
+
+<HeadlessRemoteDiagram />
+
+<div class="perk-diagram-text">
+  How does a remote run coordinate with nobody watching? The local operator — or the
+  deterministic supervisor acting for them — dispatches bounded work across a remote GitHub
+  Actions process boundary, where the implement and address stages run as the same stage
+  implementation a local run uses. The remote process reads the plan and branch from durable
+  GitHub state and writes the pushed branch, pull request, checks, and report comments back to
+  it. Durable GitHub state then reaches the human gate — review and land — and the flow does
+  not continue automatically past it: no automatic step leaves the human gate.
+</div>
+
+## One workflow, another process location
+
+A remote run is not a second workflow. When a stage is dispatched to a CI runner, the runner
+positions the same plan branch and worktree a local cold launch would and drives the **same
+stage implementation**: the same stage prompts, the same skill guidance content, the same tools
+with the same side effects — a remote implement opens its pull request through the very same
+submit implementation a local session uses — and the same reconstruction of the plan's state
+from its canonical issue. Those identities are pinned by parity tests rather than promised in
+prose, so the local and remote paths cannot silently drift apart.
+
+Only the **bounded, agentic** stages are eligible for the remote door: implement and address,
+where the goal is already pinned down by a saved plan or by concrete reviewer feedback. The
+interactive stages — planning above all — and the judgment acts stay where a human is, because a
+CI runner has no one beside it to make a design call.
+
+A few structural differences are deliberate, and worth knowing as differences rather than
+drift. A remote run declares its outcome by machine — a classifier decides whether the stage
+completed — and reports it back as pull-request comments and checks, neither of which has a
+local analogue, because a local run is observed directly. And skill delivery **fails closed**
+remotely: where a local session can surface a missing skill as a visible warning, a remote
+skills-delivery failure fails the run, since nobody would see the warning. The exact per-stage
+door matrix and the dispatch and supervision commands are reference and how-to material, linked
+below.
+
+## Durable coordination instead of a watched terminal
+
+Nothing about a remote run lives in a terminal you have to keep open. The dispatching machine,
+the Actions runner, and you all meet in the same place: **durable GitHub state**. The dispatch
+triggers a named workflow run whose identity embeds the run-to-plan correlation, so the run's
+existence is itself durable and discoverable from any machine — a second clone or a teammate's
+checkout can observe and control a run it never dispatched. The runner reads the plan and its
+branch from that durable state, and writes its results back to it: pushed commits, the pull
+request, checks, and report comments.
+
+The dispatching machine also keeps a small local dispatch record, and its tier matters: it is
+**cache and correlation, not canonical truth**. It enriches listings and preserves the only
+trace of a dispatch that never managed to start, but deleting it forgets nothing that exists
+remotely. This is the state-tier model doing its job — the canonical tier is what makes an
+unattended run legible.
+
+## Automation stops where judgment begins
+
+The most automated shape this surface takes is the objective run supervisor, and its defining
+property is that it is **deterministic** — it does no agentic reasoning. Each invocation
+advances the backlog by at most one autonomously safe step — typically dispatching the next
+ready implement or address stage — and then stops. Whenever the next step belongs to a person —
+a plan must be authored, a pull request is ready for review or waiting at review, a merge needs
+a decision — it reports that boundary instead of acting. Review and landing never happen
+unattended: the diagram's human gate has no outgoing edge on purpose. Why the judgment
+boundaries sit exactly where they do is the subject of
+[Human gates and trust](./human-gates-and-trust.md).
+
+## What the evidence proves
+
+The proof story behind this surface has three layers, and honesty requires keeping them
+distinct. Static checking — `perk doctor workflow check` — validates the **wiring**: that the
+managed workflow, secrets, and prerequisites are in place, without dispatching anything. The
+smoke test — `perk doctor workflow smoke-test` — proves **dispatch and startup**: a real run is
+triggered, the runner starts, and its secrets are readable, but it deliberately short-circuits
+before doing any stage work, so passing it means "the runner can start," not "a stage can
+complete." And deterministic **parity tests** pin the shared local/remote implementations —
+prompts, tools, submit side effects, plan reconstruction — so the "same workflow" claim is
+enforced continuously rather than asserted.
+
+What the layers do *not* add up to is a standing live end-to-end gate. Full remote runs have
+been driven start to finish as part of the surface's design validation, and those records
+remain useful evidence of the whole chain working — but they are point-in-time proofs, not a
+recurring check that re-proves remote completion on every change. If your work depends on the
+remote path, the smoke test is the cheap, repeatable way to re-verify your own repo's wiring
+before you lean on it.
+
+## Related
+
+- **Do:** [Set up the remote runner](../how-to/set-up-the-remote-runner.md) — provision the
+  managed workflow and prove the wiring live.
+- **Do:** [Advance an objective headlessly](../how-to/advance-an-objective-headlessly.md) —
+  drive the supervisor one safe step at a time.
+- **Look up:** [Stages and doors](../reference/in-session/stages-and-doors.mdx) — the exact
+  per-stage warm/cold-local/cold-remote door matrix.

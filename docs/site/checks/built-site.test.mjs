@@ -255,6 +255,58 @@ const OBJECTIVE_TUTORIAL_DIAGRAM_CONTENT = [
   },
 ];
 
+// The headless/remote flow figure additionally pins its exact directed-edge set through the
+// connectors' data-from/data-to attributes (`edges`), proving the human gate is terminal (no
+// edge originates at it) rather than relying on arrow count alone.
+const HEADLESS_REMOTE_DIAGRAM_CONTENT = [
+  {
+    name: "headless/remote flow",
+    ordered: [
+      "Local operator",
+      "GitHub Actions",
+      "○ implement",
+      "○ address",
+      "GitHub state",
+      "! HUMAN GATE",
+    ],
+    required: [
+      "deterministic supervisor",
+      "dispatch",
+      "plan · branch",
+      "PR · report",
+      "review + land",
+    ],
+    titleRequired: "headless remote flow",
+    descriptionRequired: [
+      "dispatches bounded work",
+      "GitHub Actions process boundary",
+      "implement and address",
+      "same stage implementation",
+      "durable GitHub state",
+      "HUMAN GATE",
+      "no automatic outgoing step",
+      "automation stops there",
+    ],
+    textRequired: [
+      "local operator",
+      "deterministic supervisor",
+      "dispatches bounded work",
+      "implement and address stages",
+      "same stage implementation",
+      "durable GitHub state",
+      "plan and branch",
+      "pushed branch, pull request, checks, and report comments",
+      "human gate — review and land",
+      "does not continue automatically",
+      "no automatic step leaves the human gate",
+    ],
+    arrowheads: 4,
+    conditionalConnectors: 0,
+    connectors: 4,
+    edges: ["operator→runner", "runner→github", "github→runner", "github→human-gate"],
+  },
+];
+
 const REGISTRY_MATRIX = loadRegistry().stages.map((stage) => ({
   id: stage.id,
   mode: stage.mode,
@@ -382,6 +434,26 @@ function assertDiagramFigures(page, expectedFigures) {
           `${variant}: connector count`,
         );
       }
+      if (expected.edges !== undefined) {
+        const pairs = [...content.matchAll(/<(?:line|path)[^>]*data-from="[^"]*"[^>]*>/g)].map(
+          ([tag]) => {
+            const from = tag.match(/data-from="([^"]+)"/)?.[1];
+            const to = tag.match(/data-to="([^"]+)"/)?.[1];
+            return `${from}→${to}`;
+          },
+        );
+        assert.deepEqual(
+          [...pairs].sort(),
+          [...expected.edges].sort(),
+          `${variant}: directed-edge set (data-from→data-to)`,
+        );
+        for (const pair of pairs) {
+          assert.ok(
+            !pair.startsWith("human-gate→"),
+            `${variant}: the human gate must be terminal — found outgoing edge ${pair}`,
+          );
+        }
+      }
       if (expected.matrix !== undefined) {
         const rowBlocks = [
           ...content.matchAll(/<g(?<attrs>[^>]*data-stage="[^"]+"[^>]*)>(?<body>.*?)<\/g>/gs),
@@ -496,6 +568,10 @@ test("diagram pages render labeled, content-equal wide and narrow SVG variants",
     "reference/in-session/stages-and-doors/index.html",
     STAGES_AND_DOORS_DIAGRAM_CONTENT,
   );
+  assertDiagramFigures(
+    "explanation/headless-and-remote/index.html",
+    HEADLESS_REMOTE_DIAGRAM_CONTENT,
+  );
 });
 
 test("every route-style internal href on an MDX page maps to a built page", () => {
@@ -505,6 +581,7 @@ test("every route-style internal href on an MDX page maps to a built page", () =
     "index.html",
     "tutorials/drive-an-objective/index.html",
     "reference/in-session/stages-and-doors/index.html",
+    "explanation/headless-and-remote/index.html",
   ];
   const offenders = [];
   for (const page of mdxPages) {

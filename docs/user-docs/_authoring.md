@@ -40,7 +40,15 @@ exactly one.
   so a documented-but-missing command fails CI.
 - **Explanation** — relationships and trade-offs; no ordered steps, no reference tables that
   belong in the reference quadrant. Opinions and trade-offs are welcome here — admit what was
-  considered and why it was declined.
+  considered and why it was declined. This boundary is machine-enforced over the live corpus
+  by `tests/test_explanation_boundary.py` (runs in `just test` and `just docs-check`), with
+  these exact rules: outside fenced code blocks, no `explanation/` source (`.md` or `.mdx`)
+  may contain an ordered-list marker (`1. …` / `1) …`, at any indentation) or a
+  Markdown/HTML table; and every article except the landing (`explanation/index.*`) must end
+  in a final `## Related` section of 1–3 one-item links in the standard shape below, labeled
+  only **Understand**, **Do**, or **Look up**, with at least one **Do** or **Look up** route
+  out to task/reference material. The landing is exempt only from the `Related` requirement,
+  not from the no-ordered-list/no-table rule.
 
 Cross-cutting: **one primary intent per page** (a page serves exactly one quadrant), and
 **routed-or-excluded accounting** (every canonical source file is routed exactly once or
@@ -57,7 +65,9 @@ section of **at most 3 items**, each shaped
 ```
 
 with the label drawn only from the closed set **Learn** (tutorials), **Do** (how-to),
-**Look up** (reference), **Understand** (explanation).
+**Look up** (reference), **Understand** (explanation). In the Explanation quadrant this
+convention is mandatory and machine-enforced with the narrower label subset (no **Learn**) —
+see the Explanation contract above; the other quadrants keep this general vocabulary.
 
 ## Voice rules
 

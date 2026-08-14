@@ -1,6 +1,7 @@
 # perk mental model (orientation)
 
-Four ideas make perk's commands stop feeling arbitrary.
+Four ideas make perk's commands stop feeling arbitrary; a fifth section separates the two
+meanings of "trust" (human gates vs execution trust).
 
 ## 1. perk is plan-oriented
 
@@ -12,9 +13,15 @@ and reason but not edit — and editing only becomes possible after the plan is 
 That gate forces understanding before doing.
 
 The **spine** a plan travels: *explore → plan → save → implement → submit → (address) → land →
-learn*. `address` is conditional (only when a reviewer leaves feedback). A longer-running
-**objective** — a roadmap that emits bounded plans as it advances — can feed plans into this same
-spine. An objective's reviewed **delivery** choice is how its plans land: **incremental** (the
+learn*. `address` is conditional (only when a reviewer leaves feedback).
+
+The plan sits on a three-artifact intent ladder. Upstream, a **gist** captures problem-space
+intent before any delivery shape is committed — no steps, no roadmap, no estimates; its `scope`
+(`plan`/`objective`) hints the eventual consumption tier without committing to it, and adoption
+into a plan/objective is a human-reviewed authoring pass, never automatic promotion. Above, a
+longer-running **objective** coordinates a multi-plan goal: its roadmap emits one bounded plan
+per non-skipped node, and those plans travel this same spine — an objective is never
+"implemented" directly. An objective's reviewed **delivery** choice is how its plans land: **incremental** (the
 recommended default — each plan lands as its own PR) or **stacked** (a supported authoring
 choice: all non-skipped roadmap nodes land as ONE atomic PR train of parent-targeted draft PRs,
 capability-checked at save) — see [Stacked delivery](./stacked-delivery.md) for the train model,
@@ -68,17 +75,44 @@ conversation (context hygiene). The cold door is parameterized by *where* the pr
 local machine, or a **remote CI runner** (headless = the cold door pointed at a remote target).
 The settled claim triple: **every stage is locally resumable** (cold local door + canonical plan);
 only the *agentic but bounded* stages (`implement`, `address`) are additionally **remotely
-runnable**; the human-gate stages (`submit`, `land`, `learn`) are **local-only by design**. The
-remote surface
-is the newest part of perk — the live chain is proven end-to-end on both the self-repo and
-consumer worker-entry paths (point-in-time dogfood proofs, 2026-07-04 and 2026-07-06; there is no
-recurring live-E2E gate). A remote run is the **same stage implementation** as a local one
-— same prompts, same guidance content, same tools and side effects, same classifier, same plan-ref
+runnable**; and the **human gates hold everywhere** — plan approval, marking ready, review, and
+landing stay with a person whichever door ran the work. Be precise about the remote-door shape:
+there is **no standalone cold-remote door** for `submit`/`land`/`learn`, but a remote `implement`
+session drives the **same registered submit side effects** a local one does (one submit door —
+`shared/contracts.md` §8.38 row 3), so "remote can't submit" is wrong; what never happens
+remotely is *judgment*. A remote run is the **same stage implementation** as a local one — same
+prompts, same guidance content, same tools and side effects, same classifier, same plan-ref
 reconstruction — and that identity is enforced by parity tests, not prose. The named intentional
-differences: `learn`/`submit`/`land` never run remotely; skill guidance is injected in-session
-remotely (appended to the prompt cold-locally, identical content); `address --preview` is
-local-only; only the remote worker machine-classifies completion; and run reporting (PR comments +
-job summaries) exists only for remote runs.
+differences (aligned with §8.38): no standalone remote door for `submit`/`land`/`learn` (`learn`
+never runs remotely); skill guidance is injected in-session remotely (appended to the prompt
+cold-locally, identical content) and skill delivery **fails closed** remotely (a delivery failure
+fails the run; locally it only warns); `address --preview` is local-only; only the remote worker
+machine-classifies completion; and run reporting (PR comments + job summaries) exists only for
+remote runs.
+
+The remote proof posture has **three layers**, kept distinct: static wiring validation
+(`perk doctor workflow check`); a smoke test proving dispatch/startup/secret readability that
+deliberately short-circuits before any stage work (`perk doctor workflow smoke-test`); and
+deterministic local/remote **parity tests** pinning the shared implementations (§8.38).
+Historical live dogfood runs are point-in-time design evidence — there is no recurring live-E2E
+completion gate.
+
+## 5. Human gates vs execution trust (two axes)
+
+**Human gates** keep judgment with a person: plan approval (the read-only → read-write
+boundary), PR review/ready/landing, and the deterministic objective supervisor's pauses (it
+advances at most one autonomously safe step and stops at human-required states). The gates are
+*structural* — plan-stage tool allowlists and mutation interception enforce the read-only
+posture; approval/save and review/land surfaces record the explicit human act.
+
+**Execution trust** is a separate axis: Pi project trust decides whether repo-local
+packages/settings/extensions load at all; perk worktree setup hooks run repository-configured
+commands with the user's permissions; the remote runner executes checkout-controlled setup with
+CI permissions. Approval means "load/run this project resource" — it is **not a sandbox**:
+nothing in perk's workflow gating isolates Pi, shell tools, hooks, or model output at the OS
+level. Strong isolation for untrusted/unmonitored work belongs in a container/VM/policy sandbox
+with minimal files and credentials. The in-perk contrast: foreign-PR review uses a detached
+read-only checkout and never executes the foreign PR's code.
 
 ## Schema snapshots
 
@@ -102,4 +136,6 @@ commands are the interior surface.
 
 ---
 
-*Canonical source: `docs/user-docs/explanation/how-perk-thinks.md` (+ the `reference/{cli,in-session}.md` orientations).*
+*Canonical sources: `docs/user-docs/explanation/how-perk-thinks.md`,
+`gists-plans-and-objectives.md`, `human-gates-and-trust.md`, and `headless-and-remote.mdx`
+(+ the `reference/{cli,in-session}.md` orientations).*

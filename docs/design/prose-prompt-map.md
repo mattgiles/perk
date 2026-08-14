@@ -6,7 +6,7 @@ This is the readable projection of perk's living, workflow-first prose graph. It
 ## Coverage
 
 - **203** canonical source units
-- **695** logical fragments
+- **696** logical fragments
 - **16** session shapes and **10** assemblies
 - **15** explicitly excluded candidates (policy-only; not displayed)
 - **0** validation findings
@@ -1552,6 +1552,7 @@ Expert configuration guidance, structural search, and ancillary model utilities.
   - `section:perk-mental-model-orientation/2-two-planes-exterior-and-interior` — 2. Two planes: exterior and interior (`heading:perk-mental-model-orientation/2-two-planes-exterior-and-interior`)
   - `section:perk-mental-model-orientation/3-the-three-state-tiers` — 3. The three state tiers (`heading:perk-mental-model-orientation/3-the-three-state-tiers`)
   - `section:perk-mental-model-orientation/4-stages-and-doors` — 4. Stages and doors (`heading:perk-mental-model-orientation/4-stages-and-doors`)
+  - `section:perk-mental-model-orientation/5-human-gates-vs-execution-trust-two-axes` — 5. Human gates vs execution trust (two axes) (`heading:perk-mental-model-orientation/5-human-gates-vs-execution-trust-two-axes`)
   - `section:perk-mental-model-orientation/schema-snapshots` — Schema snapshots (`heading:perk-mental-model-orientation/schema-snapshots`)
   - `section:perk-mental-model-orientation/discover-the-live-surface` — Discover the live surface (`heading:perk-mental-model-orientation/discover-the-live-surface`)
 - `markdown:skills/perk-expert/references/providers-and-backends.md`
