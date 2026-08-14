@@ -61,8 +61,9 @@ Every `registerPerkCommand` handler attaches a detail sink to its exact command-
 before the `running…` report and before the handler runs. A multiline report therefore projects to
 one managed headline plus one complete `perk:report-detail` entry. The WeakMap attachment remains
 available to background work launched by that command. Tool and lifecycle contexts without a
-command sink remain valid: tools carry complete detail in Results; pure lifecycle/event reports
-intentionally expose only the headline when headful.
+command sink append no transcript-detail entry: tools carry complete detail in Results. A headful
+lifecycle/event report emits the managed headline; when a headful RPC caller also sets `alsoLog`, it
+additionally mirrors the complete diagnostic to stderr.
 
 ### Direct `ctx.ui.notify` call sites (bypass `report()` — inconsistent grammar; node 2.1 routes these)
 
@@ -314,8 +315,10 @@ The two renderer shapes are intentionally distinct:
   invisible.
 - A **full `perk:report-detail` entry** always renders every logical row, regardless of Pi's
   expanded flag. The first row uses the report severity color (`error`, `warning`, or dim for
-  info); continuation rows are dim; blank interior rows stay blank. Every row passes through
-  `truncateToWidth`, and styling is computed in `render()` so theme changes are never cached.
+  info); continuation rows are dim; blank interior rows stay blank. Terminal escape and control
+  sequences are stripped only from the display projection, leaving the persisted payload exact.
+  Every displayed row passes through `truncateToWidth`, and styling is computed in `render()` so
+  theme changes are never cached.
   Its payload is exactly `{ text, severity }`, validated as a plain object with non-blank text and
   a known severity; malformed data renders nothing. These durable entries remain excluded from
   model context.
