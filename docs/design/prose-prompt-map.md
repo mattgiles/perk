@@ -175,6 +175,8 @@ Draft, review, save, and adopt lightweight statements of intent.
 4. `markdown:skills/perk-gist-author/SKILL.md` — Bound gist skill
 5. **Boundary: user-content** — Human intent
 
+Scenarios: `gist-new` (ambient tools)
+
 ### Objectives
 
 Author and save objectives and their roadmaps.
@@ -1071,6 +1073,8 @@ Automated, selector-driven, terminal, and browser PR-review families.
 1. **Boundary: pi-system** — Child-session engine contract
 2. `markdown:agents/pr-reviewer.md` — Reviewer definition
 3. **Boundary: runtime-state** — Assigned angle and fetched diff/plan data
+
+Scenarios: `pr-review-child-plan-fidelity` (tools)
 
 **Automated PR review** — `warm` via `/pr-review`
 

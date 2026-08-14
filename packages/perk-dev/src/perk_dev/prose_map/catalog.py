@@ -5,6 +5,7 @@ from fnmatch import fnmatchcase
 from pathlib import Path
 
 import yaml
+from jinja2 import Environment, FileSystemLoader, TemplateError, meta
 from pydantic import ValidationError
 
 from perk_dev.prose_map.discovery import DiscoveryError, discover
@@ -35,6 +36,10 @@ RENDERED_PATH = Path("docs/design/prose-prompt-map.md")
 
 class ProseMapError(Exception):
     """The authored graph or source catalog could not be loaded."""
+
+
+class _TemplateInspectionError(Exception):
+    """A prompt template cannot be inspected statically."""
 
 
 @dataclass(frozen=True)
@@ -300,6 +305,127 @@ def _validate_references(graph: ProseMap, candidate_ids: set[str]) -> list[Findi
     return findings
 
 
+type _TemplateMetadata = tuple[frozenset[str], tuple[str, ...]]
+
+
+def _template_metadata(
+    environment: Environment,
+    template_name: str,
+    cache: dict[str, _TemplateMetadata],
+) -> _TemplateMetadata:
+    cached = cache.get(template_name)
+    if cached is not None:
+        return cached
+    loader = environment.loader
+    if loader is None:
+        raise _TemplateInspectionError("template environment has no loader")
+    source, _, _ = loader.get_source(environment, template_name)
+    parsed = environment.parse(source)
+    references: list[str] = []
+    for reference in meta.find_referenced_templates(parsed):
+        if reference is None:
+            raise _TemplateInspectionError(
+                f"template {template_name} contains a dynamic template reference"
+            )
+        references.append(reference)
+    result = (
+        frozenset(meta.find_undeclared_variables(parsed)),
+        tuple(references),
+    )
+    cache[template_name] = result
+    return result
+
+
+def _collect_template_variables(
+    environment: Environment,
+    template_name: str,
+    cache: dict[str, _TemplateMetadata],
+    visited: set[str],
+) -> set[str]:
+    if template_name in visited:
+        return set()
+    visited.add(template_name)
+    variables, references = _template_metadata(environment, template_name, cache)
+    result = set(variables)
+    for reference in references:
+        result.update(_collect_template_variables(environment, reference, cache, visited))
+    return result
+
+
+def _template_variables(
+    environment: Environment,
+    unit_id: str,
+    template_name: str,
+    cache: dict[str, _TemplateMetadata],
+) -> set[str]:
+    try:
+        return _collect_template_variables(environment, template_name, cache, set())
+    except (OSError, UnicodeError, TemplateError, _TemplateInspectionError) as exc:
+        raise ProseMapError(
+            f"cannot inspect prompt template {unit_id} ({template_name}): {exc}"
+        ) from exc
+
+
+def validate_scenario_fixtures(
+    root: Path,
+    graph: ProseMap,
+    candidates: tuple[Candidate, ...],
+) -> list[Finding]:
+    """Validate scenarios against every static variable required by prompt layers."""
+    assemblies = {assembly.id: assembly for assembly in graph.assemblies}
+    previewable = {shape.assembly for shape in graph.session_shapes if shape.assembly in assemblies}
+    scenarios: dict[str, list[Scenario]] = {}
+    for scenario in graph.scenarios:
+        scenarios.setdefault(scenario.assembly, []).append(scenario)
+
+    findings: list[Finding] = []
+    candidates_by_id = {candidate.id: candidate for candidate in candidates}
+    environment = Environment(loader=FileSystemLoader(root / "prompts"))
+    cache: dict[str, _TemplateMetadata] = {}
+    prompt_root = Path("prompts")
+    for assembly_id in sorted(previewable):
+        assembly_scenarios = scenarios.get(assembly_id, [])
+        if not assembly_scenarios:
+            findings.append(
+                Finding(
+                    "missing-assembly-scenario",
+                    f"previewable assembly {assembly_id} has no scenario",
+                )
+            )
+
+        requirements: dict[str, set[str]] = {}
+        for layer in assemblies[assembly_id].layers:
+            if layer.unit is None:
+                continue
+            candidate = candidates_by_id.get(layer.unit)
+            if candidate is None or candidate.kind != "markdown":
+                continue
+            candidate_path = Path(candidate.path)
+            if candidate_path == prompt_root or not candidate_path.is_relative_to(prompt_root):
+                continue
+            template_name = candidate_path.relative_to(prompt_root).as_posix()
+            requirements[candidate.id] = _template_variables(
+                environment,
+                candidate.id,
+                template_name,
+                cache,
+            )
+
+        for scenario in assembly_scenarios:
+            supplied = {name for name, _ in scenario.variables}
+            for unit_id, required in requirements.items():
+                missing = sorted(required - supplied)
+                if missing:
+                    findings.append(
+                        Finding(
+                            "missing-scenario-variable",
+                            f"scenario {scenario.id} is missing variables for {unit_id}: "
+                            f"{', '.join(missing)}",
+                        )
+                    )
+    return findings
+
+
 def build_catalog(root: Path) -> Catalog:
     """Join discovered prose with the authored semantic overlay and validate the result."""
     graph = load_graph(root)
@@ -313,6 +439,7 @@ def build_catalog(root: Path) -> Catalog:
         findings.append(Finding("duplicate-unit", f"duplicate discovered unit id: {duplicate}"))
     candidate_id_set = set(candidate_ids)
     findings.extend(_validate_references(graph, candidate_id_set))
+    findings.extend(validate_scenario_fixtures(root, graph, candidates))
 
     units: list[RoutedUnit] = []
     excluded: list[Candidate] = []
