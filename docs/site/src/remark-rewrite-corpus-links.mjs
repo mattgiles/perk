@@ -99,12 +99,12 @@ export function validateCorpusDir(corpusDir) {
  * through the markdown parser (imports/JSX parse as prose; markdown-syntax links are still
  * checked), and an `.mdx` target's heading-slug set is likewise the markdown-parse
  * approximation — headings emitted by imported components are invisible to anchor
- * validation. The corpus has exactly two MDX pages (the home, `index.mdx`, and the objective
- * tutorial, `tutorials/drive-an-objective.mdx`): their markdown-syntax links and headings
- * parse as mdast, so link rewriting, the dangling-link audit, and inbound-anchor validation
- * all cover them. JSX attribute hrefs are invisible to this sweep; the post-build
- * component-href integrity check (checks/built-site.test.mjs) covers both pages' built
- * output instead. A fully MDX-faithful sweep stays deferred with that recorded justification.
+ * validation. The corpus has exactly three MDX pages: the home (`index.mdx`), the objective
+ * tutorial (`tutorials/drive-an-objective.mdx`), and the stage matrix
+ * (`reference/in-session/stages-and-doors.mdx`). Their markdown-syntax links and headings parse
+ * as mdast, so link rewriting, the dangling-link audit, and inbound-anchor validation all cover
+ * them. JSX attribute hrefs are invisible to this sweep; the post-build component-href integrity
+ * check (checks/built-site.test.mjs) covers all three pages' built output instead. A fully MDX-faithful sweep stays deferred with that recorded justification.
  *
  * `escapeBaseline`/`anchorBaseline` are the hermetic test seam; production call sites omit
  * them (defaults = the checked-in consts). Returns the collected `{ escapes, fragments }`.

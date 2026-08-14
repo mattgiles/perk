@@ -17,7 +17,7 @@ orphaned residue; [`perk objective stack recover
 unresolved operation against fresh authority **without acting**. Read first, then pick the
 row below that matches what you see. In a session, the same surfaces are `/objective-stack`,
 `/objective-sync`, `/objective-recover`, and `/objective-land` (see
-[In-session commands & tools](../reference/in-session.md)).
+[Workflow commands](../reference/in-session/workflow-commands.md)).
 
 ## Interrupted operations
 

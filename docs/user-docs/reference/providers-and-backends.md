@@ -139,7 +139,7 @@ How perk yields its own surface to a selected foreign provider differs by provid
   `ask_user_question` questionnaire tool is the borrowed `@juicesharp/rpiv-ask-user-question`
   package, installed for every repo via perk's borrowed package set — there is no provider to
   select and no `[providers]` key for it (a leftover `askuser` key hard-fails config load). See
-  the [in-session reference](./in-session.md) for the tool's contract.
+  [Model-facing tools](./in-session/model-tools.md) for the tool's contract.
 - **Built-in, not selectable (`todo`).** The todo seam is likewise **retired**: the todo
   checklist overlay is the borrowed `@juicesharp/rpiv-todo` package, installed for every repo via
   perk's borrowed package set — there is no provider to select and no `[providers]` key for it

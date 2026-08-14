@@ -1,804 +1,104 @@
 ---
 title: "In-session commands & tools"
-description: "The warm slash commands you type inside a running pi session and the model-facing tools the agent calls on your behalf."
+description: "A stable map of perk's warm slash commands, model-facing tools, workflow families, and ancillary session features."
 sidebar:
   order: 3020
 ---
 
 # In-session commands & tools
 
-This page references perk's **in-session surface**: the warm `/…` commands you type inside a
-running `pi` session and the model-facing **tools** the agent calls on your behalf. It is the
-interior counterpart to [CLI commands](./cli.md) (the session **exterior** — the `perk …`
-commands you run in your shell). It describes the surface; it does not teach a task (those belong
-in [how-to/](../how-to/index.md)) or argue a design (those belong in
-[explanation/](../explanation/index.md)). See the [user-docs router](../index.mdx) for how this
-quadrant fits the whole.
-
-The in-session surface is registered in the TypeScript extension, so — unlike the CLI reference,
-whose shape is fenced by structural drift guards (`test_cli_parity_smoke.py` +
-`test_cli_help_sections.py`) — these entries are **human-reviewed for accuracy** against the
-extension's command and tool registrations. Accuracy is the governing virtue: each summary is a
-reference paraphrase of the registered description.
+This page is the orientation hub for perk's **in-session surface**: the warm `/…` commands you
+type inside a running Pi session and the model-facing **tools** the agent calls on your behalf.
+It is the interior counterpart to [CLI commands](./cli.md), the session exterior where you run
+`perk …` commands in your shell.
 
 ## Orientation
 
-Inside a `pi` session you drive perk two ways. You type **warm `/…` commands** yourself, and the
-agent calls **tools** on your behalf. For the *why* of stages, doors, the two planes, and the
-state tiers — read [How perk thinks](../explanation/how-perk-thinks.md); this page only catalogs
-the surface and links back to it.
-
-**The warm-door twin pattern.** Most stages expose the same logic two ways inside a session: a
-model **tool** the agent calls and a **`/command`** twin you can invoke yourself. The table below
-pairs them; the per-stage sections document each pair together.
-
-**The read-only-mode allowlist.** While plan mode is active the agent is structurally restricted
-to read/search tools plus the sanctioned write tools (`plan_draft` / `objective_draft`), the
-review door (`plan_review`), and subagent delegation (spawned children run per their own agent
-definitions) — it cannot edit or run mutating commands until the read-only → 
-read-write boundary is crossed at save. The read-only `bash` sub-allowlist also permits the
-`agent-browser` CLI (the browser-automation skill) so it can be used for dogfooding / QA while
-exploring, alongside `ast-grep`, the read-only `gh` queries, and the read-only `perk objective`
-queries (`show`/`next` and the non-mutating `node-engagement` read). The borrowed web/Linear research
-tools are also allowed while exploring, as are the pi-fff search tools (`fffind`, `ffgrep`,
-`fff-multi-grep`, `multi_grep` — and the FFF-backed `find`/`grep` override names, already in the
-allowlist); their depth belongs to the config/provider reference nodes
-(4.1/4.2), so this page names them only as a pointer.
-
-**Stage-scoped tools.** When a stage session is read-write (the gate off), the agent's active
-tool set carries only that stage's perk tools: the table's "Model tool(s)" column, plus
-`ask_user_question` everywhere, plus — in the worktree stages (implement/submit/address/land/
-learn) — the shared PR-loop family (`submit`, `ready`, `run_ci`, `land`, `learn`,
-`classify_review_feedback`, `finalize_address`, `run_pr_review_wave`, `post_pr_review`,
-`submit_pr_review`) plus the reconcile trio
-(`reconcile_objective`, `add_objective_node`, `objective_node`), so any PR-loop step works from
-any worktree session — `/land` auto-drives objective reconciliation in-session, so the reconcile
-tools must be reachable there too. Borrowed-package tools are scoped too: research tools (web
-search/fetch + the Linear read tools + the pi-fff local search tools) stay available in every
-stage session; delegation
-(`subagent`/`wait`) and the `todo` checklist ride only the worktree stages; Linear's mutating
-tools and plannotator's submit tool are not offered in stage sessions. Bare sessions are
-unchanged, unknown foreign tools still pass through, and slash commands are unaffected.
-Sessions with no stage (bare `pi`) keep everything; an unrecognized stage id also scopes
-nothing (fail-open).
-
-**Terminating vs non-terminating tools.** A *terminating* tool ends the turn on success
-(`plan_save`, `plan_review` on approval, `submit`, `finalize_address`, `ready`, `land`, `learn`,
-`objective_save`). The rest are non-terminating — the turn continues (`plan_draft`,
-`objective_draft`, `objective_node`, `explore_objective_node`, `reconcile_objective`,
-`add_objective_node`, `classify_review_feedback`, `run_pr_review_wave`, `post_pr_review`,
-`submit_pr_review`, `run_ci`, `ask_user_question`).
-Each entry marks this property.
-
-## The stage/door model
-
-A compact lookup of the workflow spine as the operator sees it
-(*objective-author → objective-save → objective-plan → plan → save → implement → submit →
-address → land → learn*). The columns are the registry's `mode` and `doors`, the warm command and
-its model tool twin, and the cold CLI launcher.
-
-| Stage | Warm command | Model tool(s) | Cold CLI | Mode | Doors |
-| --- | --- | --- | --- | --- | --- |
-| objective-author | *(none)* | `objective_draft` | `perk objective author` | read-only | cold-local |
-| objective-save | `/objective-save` | `objective_draft`, `objective_save` | `perk objective save` | read-write | warm + cold-local |
-| objective-plan | `/objective-plan` | `objective_node`, `explore_objective_node` | `perk objective plan` | read-only | warm + cold-local |
-| plan | `/plan` | `plan_draft`, `plan_review` | `perk plan` | read-only | warm + cold-local |
-| save | `/plan-save` | `plan_save` | `perk plan save` | read-write | warm + cold-local |
-| implement | *(none)* | *(none)* | `perk implement` | read-write | cold-local + **cold-remote** |
-| submit | `/submit` | `submit` | `perk pr submit` | read-write | warm + cold-local |
-| address | `/address` | `classify_review_feedback`, `finalize_address` | `perk pr address` | read-write | warm + cold-local + **cold-remote** |
-| land | `/land` | `land` | `perk pr land` | read-write | warm + cold-local |
-| learn | `/learn` | `learn` | `perk learn` | read-write | warm + cold-local |
-
-Notable cells: `objective-author` has **no** warm slash command (it is reached cold via
-`perk objective author`, or via plan-mode read-only authoring); `implement` is **cold-only**
-(`warm: false`) and remote-runnable; `address` is also remote-runnable; every other stage is warm
-+ cold-local only.
-
-For *why* a stage is cold-only or remotely runnable, see
-[How perk thinks → Stages and doors](../explanation/how-perk-thinks.md).
-
-> **Dev-only:** perk's own repository also has an isolated `audit` stage with the
-> `run_audit_wave` tool. It is reached only through `perk-dev audit judge`; see the
-> [session audit reference](../../developers/session-audit.md).
-
-## Warm commands by stage (the spine)
-
-One subsection per spine stage, pairing the `/command` with its model tool twin where one exists.
-
-### `/plan`
-
-Toggle perk plan mode — a read-only exploration + plan-authoring session. Paired tools:
-
-- **`plan_draft`** — write (or overwrite) the working plan draft to the session data dir. This is
-  the only sanctioned write while read-only; it is **not** a save. *Non-terminating.*
-- **`plan_review`** — present the draft to the configured review surface (the Plannotator browser
-  UI when selected, else perk's in-TUI editor) and wait for the human decision; on approval the
-  plan is auto-saved and the turn ends. *Terminating on approval.* Before requesting review, the
-  shipped plan/objective authoring skills direct a pre-review grill — a one-question-at-a-time
-  stress-test of the plan via the `perk-grill` skill.
-
-  The Plannotator browser additionally lets the reviewer **edit the reviewed document directly**;
-  the edits come back as a `# Direct Edits` unified diff opening the review feedback. On the
-  **plan** arm an approval auto-applies the diff to the draft and saves the edited bytes (if the
-  diff cannot be applied, the plan is saved verbatim with a loud warning and the diff stays in
-  the feedback for a manual follow-up); a denial hands the diff to the agent to apply in its
-  `plan_draft` rewrite. On the **objective** arm an approval carrying direct edits does **not**
-  save — rendered-markdown edits cannot be folded into the structured draft mechanically, so perk
-  returns the diff for the agent to fold into `objective_draft`, followed by a confirming
-  re-review. The **gist** arm takes the same shape: an approval carrying direct edits saves
-  nothing — perk returns the diff for the agent to fold into the matching `gist_draft` fields (a
-  `# <title>` heading hunk → `title`, a `Scope:` line hunk → `scope`, prose hunks → `prose`),
-  followed by a confirming re-review.
-
-### `/plan-save`
-
-Persist the plan to the issue backend as the canonical perk plan and link the session to it — the
-read-only → read-write boundary. `/plan-save` is the manual failsafe for the approval → save flow. Paired
-tool:
-
-- **`plan_save`** — the canonical save tool. *Terminating.*
-
-### `/implement-here`
-
-Exit plan mode **without saving an issue** and implement the current plan draft in this session —
-the human-owned lightweight path for changes too small to warrant the full plan → issue →
-worktree → PR lifecycle. The read-only gate comes off with **no** issue created and no plan-ref
-written, and the agent is instructed to make the plan's edits directly in the current checkout —
-edits only; committing, branching, and pushing stay with you. The same exit is offered as a 4th
-verdict (“Implement here — no issue saved”) in perk's in-TUI plan review; when the Plannotator
-review surface is selected (approve/deny only), `/implement-here` is the way to take it.
-
-Because no issue or plan-ref exists, the PR-lifecycle doors (`/submit`, `/ready`, `/address`,
-`/land`, `/learn`) do not apply to this work. The plan draft artifact stays intact, so
-`/plan-save` can still create the canonical issue later if you change your mind. In an
-**objective-node planning session** the command refuses (and the review verdict is not offered) —
-a node-linked plan must always be saved. No paired tool: the exit is human-only by construction
-(the agent can never choose to skip the save on its own).
-
-### `/implement`
-
-Refresh implement context via an in-worktree handoff. The warm command only refreshes implement
-context *inside an existing implement worktree*; cross-worktree / fresh implement is the cold
-`perk implement` (cold-only in practice). No paired tool.
-
-### `/submit`
-
-Push the active plan's branch and open a draft PR linking the plan (implement → submit). Paired
-tool:
-
-- **`submit`** — push the branch and open the draft PR. *Terminating.*
-
-After the PR opens, `/submit` checks that it is **mergeable** against the target branch (a local
-`git merge-tree` probe). If it finds merge conflicts, it spawns a fresh, write-capable
-`perk.conflict-resolver` subagent that reads the plan + PR diff, rebases onto the target branch,
-carefully resolves every conflict so the diff stays clean and correct, and force-pushes — then you
-re-run `/submit` to confirm. This re-drive is bounded (at most twice); if conflicts persist past
-that, `/submit` surfaces them loudly so you can resolve them manually. The probe is best-effort: if
-it can't run (offline, old git), `/submit` completes with a note that mergeability wasn't determined.
-
-For a **stacked delivery layer** (a plan carrying a `delivery_lineage`), `/submit` routes through
-the delivery module's publish operation — which opens the draft PR onto the **parent layer's branch**,
-registers it in the native GitHub stack, and writes the publication checkpoints only after
-verifying the remote state; the success message carries a short stack suffix (e.g. `stack #3,
-layer 2/3`). Re-submitting a published lower layer automatically synchronizes the claimed
-published suffix above it through the same transactional sync operation: only this plan's committed
-head is a local source, every successor starts from its verified published head, and the submit
-itself authorizes the cascade. The success result says how many layers moved (or `suffix already in
-sync`) and reports operation notes; typed sync failures keep their normal stack-status/recover
-remedies. A failed stacked submit leaves a recoverable operation in the objective's journal —
-re-running `/submit` resumes it. Merge conflicts on a stacked layer are probed against the parent
-branch, so the conflict-resolver rebases onto the parent.
-
-### `/ready`
-
-Mark the active plan's draft PR ready for review — the deliberate publish gate (`/submit` keeps
-the PR draft on purpose; `/ready` publishes). Paired tool:
-
-- **`ready`** — mark the draft PR ready. *Terminating.*
-
-For a stacked plan, `/ready` validates the exact projection-correlated layer first. A draft can
-be marked ready only when that layer is verified published, no operation is unresolved, and the
-train has no structural blocker; unrelated operational drift does not block review. An already-ready
-PR revalidates the target publication but remains idempotent even if a later global veto exists.
-
-### `/address`
-
-Classify PR review feedback in an isolated child, fix only the actionable items yourself, then
-publish and resolve (submit → address). `--preview` classifies only. Paired tools:
-
-- **`classify_review_feedback`** — run the read-only `perk.review-classifier` child through the
-  perk wave module (engine-validated report schema; the configured `[models.subagents]
-  review-classifier` model is read at execute time) and return the typed classification. The raw
-  GitHub text never enters the session; on failure the agent surfaces the error and stops.
-  *Non-terminating.*
-- **`finalize_address`** — after fixes are committed, publish through the normal submit operation
-  first (including an automatic stacked suffix cascade), then reply to and resolve the addressed
-  threads. Full success records `last_review_batch` and terminates. A partial resolve with valid
-  per-thread results returns a reduced `retry_threads` batch that omits successes and strips replies
-  already reported as posted; an unstructured failure requires inspection before retrying. Never
-  push manually. *Terminating on full success.*
-
-### `/land`
-
-Squash-merge the approved PR (closing the plan issue), set the pending-learn marker, and drive
-reconciliation (submit → land). When the plan is linked to an objective node, `/land`
-auto-drives `/objective-reconcile`. A **learn-docs consolidation plan is exempt** from the
-land→learn cycle: no pending-learn marker is set and no `/learn` step follows (`learn_state:
-skipped` is stamped as today — the worktree is immediately releasable). Refuses a
-stacked-delivery plan (`delivery_lineage`) before any mutation: stacked layers land only as one
-atomic train, never individually. Paired tool:
-
-- **`land`** — squash-merge the approved PR, set pending-learn, and stamp the canonical
-  `learn_state` plan-header field (`pending`; `skipped` for a learn-docs plan, which also sets
-  no marker — the learn-docs exemption). *Terminating.*
-
-### `/learn`
-
-Investigate the landed change and capture learnings into a perk:learn issue, then clear the
-pending-learn semaphore and release the worktree. Bare interactive `/learn` is a **multi-angle
-orchestrator**: it gathers a **session-grounded evidence bundle** once — the planning +
-implementation sessions, the saved plan, the merged PR, and an existing-docs inventory (**missing
-evidence is surfaced, not guessed**) — then runs **2–4 fresh-context `perk.learn-analyst`
-children** (analyzing distinct angles in isolation) via the **`run_learn_wave`** tool, which
-returns **schema-validated structured reports** per angle (a failed analyst is a **reported
-skipped angle**, never a failed pass); the session reconciles those reports into **one classified
-decision**, and captures it with a **routable classification** persisted on the perk:learn issue
-header (the `{decision, target?}` shape — both backends), or skips when nothing durable survives. A
-learn-docs consolidation plan short-circuits to a marker-clear no-op (since the land→learn
-exemption, land no longer sets the marker for these plans — the short-circuit remains as the
-legacy/defensive path); if the bundle can't be
-gathered, `/learn` degrades to a simple single-pass capture (never a dead end). `/learn skip`
-records the skip canonically on the plan (`learn_state: skipped` via `perk learn skip`) and clears
-the marker; `/learn <text>` captures the text verbatim (decision-less). The analyst model is
-configurable via `[models.subagents] learn-analyst`. Paired tools:
-
-- **`run_learn_wave`** — run the analyst wave over the gathered bundle (2–4 angles,
-  `session-deviations` mandatory — tool-enforced) and return the typed per-angle reports plus
-  the explicitly-skipped angles. *Non-terminating.*
-- **`learn`** — capture learnings with an optional `decision`/`target` classification (or, with no
-  summary, record the skip on the plan and clear the marker). *Terminating.*
-
-## Objective doors (warm)
-
-The objective warm commands as commands. The *objective model* depth — roadmap node schema, node
-statuses, the objective-roadmap metadata block — is a later node (3.2); this section catalogs the
-command surface only.
-
-### `/objective`
-
-Show, set (`<id>`), or clear (`clear`) the active perk objective + budget for the session. No
-paired tool.
-
-### `/objective-plan`
-
-Start the objective plan factory: select the next node and author a bounded plan. Pass an
-objective number (else the active objective) and an optional `--node`. Paired tools:
-
-- **`objective_node`** — link a saved plan to its node (`pr:"#N"`) or advance a node's status (on
-  `status:"done"` it requires a completion `audit`). *Non-terminating.*
-- **`explore_objective_node`** — optionally (for a large node) explore the codebase in an
-  isolated read-only child (`perk.objective-explorer` through the perk wave module,
-  engine-validated report schema; the configured `[models.subagents] objective-explorer` model is
-  read at execute time) and return typed findings. On failure the agent explores directly
-  instead. *Non-terminating.*
-
-### `/objective-reconcile`
-
-Reconcile an objective's Reconcilable prose region against a merged PR (post-land); the roadmap
-table and Immutable notes are never touched. Paired tools:
-
-- **`reconcile_objective`** — rewrite the Reconcilable prose region wholesale. *Non-terminating.*
-- **`add_objective_node`** — add a genuinely-new roadmap node (auto-assigned `<phase>.<n>`). Used
-  **sparingly**, only when a real new unit of work emerged: a deferred follow-up the plan/PR
-  flagged, an uncovered defect or gap, a missing prerequisite for a later node, or
-  human-requested work from the engagement block. *Non-terminating.*
-
-### `/objective-save`
-
-Persist a drafted objective + structured roadmap to GitHub, activate it, and start budget
-tracking — the read-only → read-write objective boundary (the manual failsafe for the approval →
-save flow). Paired tools:
-
-- **`objective_draft`** — write the working objective draft to the session data dir (sanctioned
-  read-only write; not a save). Optional `base` targets a non-default branch (omit for the repo
-  default); optional `delivery` (`incremental` | `stacked`) records the reviewed delivery
-  choice — the agent asks the human explicitly, incremental recommended (omit ⇒ incremental).
-  *Non-terminating.*
-- **`objective_save`** — the canonical objective save tool (also accepts the optional `base`
-  and `delivery`). *Terminating.*
-
-The rendered review surface always carries a prominent `**Delivery:**` line directly under the
-title (`**Delivery: STACKED** — all non-skipped roadmap nodes land as ONE atomic pull-request
-train …` vs `**Delivery: incremental** (the default — each plan lands independently)`), so the
-reviewer approves the choice explicitly.
-
-The cold authoring door **`perk objective author`** has **no** warm slash twin — objective
-authoring is reached cold, or via plan-mode read-only authoring (`objective_draft` →
-`plan_review` / `objective_save`).
-
-### `/objective-stack`, `/objective-sync`, `/objective-recover`, `/objective-land`
-
-The stacked-delivery control surface (mutations stay canonical in the Python CLI — every tool
-delegates to the [`perk objective stack` workers](./cli.md#perk-objective-stack-status-objective)).
-The objective is inferred everywhere: explicit argument → the session's active objective → the
-plan-ref's linked objective.
-
-- **`/objective-stack [N]`** — a direct read door: render the delivery train (layers,
-  build readiness, blockers), unresolved operations, any pending conflict continuation, and
-  the orphaned-residue observation. Works in every session, including read-only ones.
-- **`/objective-sync [N]`**, **`/objective-recover [N]`**, and **`/objective-land [N]`** —
-  drive the session: preview first (`dry_run: true`), present the cascade/classification/land
-  plan, act via the typed tools only on your explicit approval. In a **read-only session all
-  three soft-refuse** (stack sync/recovery/landing mutates published branches and PRs —
-  finish or exit the gated session first).
-
-Paired tools (all *non-terminating*; strictly-decoded — any malformed field refuses the call):
-
-- **`objective_stack_status`** `{objective?}` — the read tool behind `/objective-stack`.
-- **`objective_stack_sync`** `{objective?, base?, dry_run?, continue?, abort?}` — the cascade
-  (modes mutually exclusive, mirroring the CLI's flag matrix). A conflict stop retains a
-  worktree you resolve yourself (`git rebase --continue`), then `continue: true` resumes /
-  `abort: true` discards. Every cold-worker `notes[]` warning is rendered in the tool result,
-  including cleanup leftovers and their `objective_stack_recover` remedy.
-- **`objective_stack_adopt`** `{objective?, node, dry_run?, confirm?}` — accept one node's
-  manually-pushed remote head, cascade successor branch heads, and update checkpoints (native
-  stack membership stays unchanged); the mutating call **requires `confirm: true`** (preview
-  first).
-- **`objective_stack_recover`** `{objective?, operation?, dry_run?, abandon?,
-  accept_prefix?, confirm?}` —
-  conclude unresolved operations (LAND included — an `all_after` rolls forward
-  automatically), converge LAND finalization, + sweep orphaned residue; `abandon: true`
-  **requires
-  `confirm: true`** and a proven all-before classification; `accept_prefix: true` **requires
-  `confirm: true`** and an `external_prefix` LAND classification — it records the externally
-  merged prefix as a degraded-atomicity breach, after which the remainder re-lands via
-  `objective_stack_sync {base: true}` then `objective_stack_land`.
-- **`objective_stack_land`** `{objective?, dry_run?, confirm?}` — land the remaining train
-  atomically (one merge, bottom→top; a dynamic singleton — or a one-PR remainder above a
-  landed prefix — lands as one SHA-pinned squash) and
-  close the objective once every node is terminal; the mutating call **requires
-  `confirm: true`** (preview first). A `pending`/`unexpected_enqueued` outcome means the
-  LAND operation is **unresolved** — report it and stop; once the merge settles (or its
-  request expires), `/objective-recover` classifies and concludes it.
-
-When a landing or recovery reports journal-assembled **landed-train evidence**, the session
-is driven straight into `/objective-reconcile` with the ordered evidence block (per-layer
-PR + base/head/merge-commit SHAs — diffs recovered at read time, never stored patches; the
-block is delimited as untrusted data and every id/SHA is whitelist-sanitized before
-injection). The trigger is evidence presence, never the close itself: a real close drives,
-and so does recover's re-emission for an already-closed objective whose reconcile drive was
-lost to a crash (`objective_closed` honestly `false`). The drive is at-least-once; the
-reconcile pass itself skips when nothing is stale.
-
-## Gist doors (warm)
-
-A **gist** is a rough, problem-space-focused statement of intent tracked in the issue backend —
-upstream of both plans and objectives, carrying no implementation detail (see the
-[`perk gist` group](./cli.md#perk-gist)). Authoring is the review-first mirror of
-plan/objective authoring, reached cold via `perk gist author`.
-
-### `/gist-save`
-
-Persist the working gist draft to the issue backend — the manual failsafe for the approval →
-save flow (artifact-first; drives the save only when no draft exists). Paired tools:
-
-- **`gist_draft`** — write the working gist draft (prose + optional `title`/`scope`) to the
-  session data dir (sanctioned read-only write; not a save). Full rewrite per call.
-  *Non-terminating.*
-- **`gist_save`** — the canonical gist save tool; delegates to `perk gist create` and relays the
-  consumption command (`perk plan from <id>` / `perk objective author --from <id>`).
-  *Terminating.*
-
-In a `gist-author` session, **`plan_review`** routes to the gist arm: it reviews the **rendered**
-gist (title + scope + prose) — view-only in the first-party in-TUI editor (deny + feedback is
-the change channel; implement-here is never offered) — and an APPROVED review auto-saves the
-draft artifact via `gist_save`'s seam. Under the `plannotator-plan` provider the browser reviewer
-may edit the rendered gist directly: an approval carrying `# Direct Edits` does **not** auto-save
-— perk returns the diff for a field-aware `gist_draft` fold and a confirming re-review.
+A **warm command** is a human gesture inside an existing session. A **model-facing tool** is a
+typed operation the agent can call when the current stage and read-only gate allow it. Warm-door
+availability, standalone slash-command registration, cold-local launch, and cold-remote
+eligibility are separate facts; [Stages and doors](./in-session/stages-and-doors.mdx) defines them
+and provides the complete registry matrix.
+
+Use these family references for exact behavior:
+
+- [Stages and doors](./in-session/stages-and-doors.mdx) — modes and warm, cold-local, and
+  cold-remote availability.
+- [Workflow commands](./in-session/workflow-commands.md) — the spine, objectives, gists,
+  factories, CI, and session utilities.
+- [Review and authoring](./in-session/review-and-authoring.md) — automated review and the
+  terminal/browser human-review doors.
+- [Model-facing tools](./in-session/model-tools.md) — the complete perk-owned, borrowed, and
+  child-only tool censuses plus gating and stage scoping.
+
+For the conceptual model behind stages, doors, the two planes, and state tiers, read
+[How perk thinks](../explanation/how-perk-thinks.md).
+
+### Surface map
+
+The map below lists every default perk-registered slash command exactly once. Commands are grouped
+by the family that explains them rather than by whichever stage happens to expose them.
+
+<!-- BEGIN perk command census -->
+| Family | Commands | Detailed reference |
+| --- | --- | --- |
+| Workflow spine | `/plan`, `/plan-save`, `/implement-here`, `/implement`, `/submit`, `/ready`, `/address`, `/land`, `/learn` | [Workflow commands](./in-session/workflow-commands.md#warm-commands-by-stage-the-spine) |
+| Objectives | `/objective`, `/objective-plan`, `/objective-reconcile`, `/objective-save`, `/objective-stack`, `/objective-sync`, `/objective-recover`, `/objective-land` | [Workflow commands](./in-session/workflow-commands.md#objective-doors-warm) |
+| Gists | `/gist-save` | [Workflow commands](./in-session/workflow-commands.md#gist-doors-warm) |
+| Utility and factories | `/ci`, `/commit-and-compact`, `/perk-selfcheck`, `/learn-docs`, `/learn-code` | [Workflow commands](./in-session/workflow-commands.md#utility-commands--factories) |
+| Review and authoring | `/pr-review`, `/pr-review-dynamic`, `/pr-review-terminal`, `/pr-review-browser`, `/plan-review-browser`, `/objective-review-browser` | [Review and authoring](./in-session/review-and-authoring.md) |
+| Ancillary human-only | `/btw` | [Ancillary in-session features](#ancillary-in-session-features) |
+<!-- END perk command census -->
 
 ## Utility commands & tools
 
-Standalone surfaces not tied to a single spine stage.
+The in-session utility surface spans three families:
 
-### `/ci`
-
-Run the project's configured CI checks and surface a one-line overall summary; never auto-fixes.
-Checks execute concurrently. A `check` argument runs one configured check — or a comma-separated
-list of names (e.g. `/ci lint,test`) to re-verify a subset. Use the paired tool for the detailed
-per-check report and failure output:
-
-- **`run_ci`** — run the configured checks and report results; read-only (the agent owns the
-  Run → Report → Fix → Verify loop: analyze a failure, fix it in its own turn, then re-verify).
-  While checks run, the tool row shows a single live progress line (per-check `✓`/`✗`/`⊘`/`…`
-  glyphs plus elapsed seconds) replaced in place; the final report supersedes it. The green
-  report is scope-aware: a green **run-all** (no `check` argument) is definitive — the full gate
-  is green, no follow-up re-verification, with glob-skipped checks disclosed as intentionally
-  out of scope for the diff — while a green **subset** run is marked as such ("selected checks
-  passed") and points at the run-all as the full gate.
-  *Non-terminating.*
-
-### `/commit-and-compact`
-
-Commit the work completed so far, then compact the session. On a dirty worktree it drives one
-model turn to stage exactly the changes that belong to the completed work and write a real commit
-message (never a blanket `git add -A`, never a push); once that driven run settles **and HEAD has
-actually advanced**, perk compacts the session with instructions referencing the new commit(s), so
-the compaction summary carries them. Clean-tree and read-only sessions compact immediately (there
-is nothing to commit). Two fail-safe skips — perk never compacts when uncommitted work might be
-lost: if the git worktree state cannot be determined, or if the driven turn produces **no** commit,
-compaction is skipped with a loud warning pointing at pi's builtin `/compact` (the always-available
-escape hatch). No paired tool — a human gesture by construction.
-
-### `/perk-selfcheck`
-
-Verify the session's wiring and report a per-surface payload census. The wiring check confirms
-perk's converged context actually reached the live system prompt — the ambient routing index
-(`.pi/APPEND_SYSTEM.md`) reached the append prompt, and the managed `AGENTS.md` block reached the
-context files. Division of labor: `perk doctor` checks the **disk** (files converged);
-`/perk-selfcheck` checks the **prompt** (the content reached the model). The census then reports
-derived counts for each context surface — the append prompt, context files, the skills catalog
-section, active tool definitions (grouped by registering source), and perk-injected branch
-context. Output is identifiers plus derived counts/bytes only — never prompt or message text — and
-report-only (never a gate). No paired tool.
-
-### `/pr-review`
-
-Multi-angle automated code review: run **one reviewer wave** of **2–4 angle-specialized
-fresh-context reviewer lanes** — always **Plan fidelity & completeness** plus 1–3 of **Correctness
-& regressions**, **Tests & validation adequacy**, **Code quality, simplicity & docs/contracts
-accuracy**, **API elegance & interface design** (`api-design`), **Code organization & repository
-design** (`code-organization`), **Idiomatic language usage** (`idioms`) — each reviewing one
-assigned angle and returning an **engine-validated structured report** (they never post). The wave runs through the flow-scoped **`run_pr_review_wave`** tool:
-the perk wave module renders and launches the wave itself (a module-rendered script, never
-model-authored mechanics) and applies **one bounded retry** inside the tool. The parent
-**reconciles** the per-angle reports (union, dedupe, derive one verdict) and posts a single
-verdict-driven outcome via the paired **`post_pr_review`** tool (actionable → an advisory COMMENT
-review; clean → a single 👍 reaction). Coverage is strict: if an angle still fails after the
-tool's retry the review is reported **incomplete** — actionable findings still post with an
-explicit coverage note, but a clean verdict is **never** posted from partial coverage
-(`post_pr_review` refuses it with `incomplete_coverage` while the session's recorded wave is
-incomplete). The reviewers read adversarially and the plan-fidelity angle
-runs an explicit **plan-conformance pass** — verifying the diff implements what the plan called for
-and flagging forgotten items (and noting when no plan body was found) — so a clean verdict means
-*no actionable findings after a genuine hunt*, not a rubber stamp.
-
-You can pass an **optional free-form focus note** after the command (everything after `/pr-review`),
-e.g. `/pr-review have one reviewer focus on the dignified-python skill`. It is threaded into the
-reviewer-angle selection step and steers angle selection/emphasis **within** the door's invariants
-— Plan fidelity stays mandatory, the 2–4-reviewer cap holds, and the clean/actionable posting bar
-is unchanged.
-
-- **`run_pr_review_wave`** — run the multi-angle reviewer wave (2–4 unique angles including
-  `plan-fidelity`, plus the optional operator directive threaded to every reviewer as DATA);
-  the tool owns the wave mechanics and the one bounded retry, and returns the typed aggregate
-  `{ complete, covered, retried, reports, failures }`. *Non-terminating.*
-- **`post_pr_review`** — post the reconciled multi-angle review to the PR (delegates to
-  `perk pr review-post`; records `last_pr_review` in workflow-state; refuses a clean verdict
-  while the session's recorded wave is incomplete). *Non-terminating.*
-
-### `/pr-review-dynamic`
-
-**Experimental.** The selector-driven sibling of `/pr-review`: instead of the parent session
-choosing the review angles, selection is **delegated to a fresh `perk.review-angle-selector`
-lane** run **concurrently with the mandatory plan-fidelity reviewer** inside one perk-rendered
-workflow. The selector classifies the change profile from its own `perk pr review-context` fetch
-and recommends angles; **module-rendered code normalizes the selection deterministically** —
-fixed additional angles come only from the
-`correctness`/`tests`/`quality`/`api-design`/`code-organization`/`idioms` allowlist (unknown
-slugs and any `plan-fidelity` echo dropped, duplicates deduped), plan-fidelity always runs and is
-never displaced, at most 3 additional angles (2–4 lanes total, matching `/pr-review`'s window,
-merged forced → picks → custom), operator-forced angles come first and are always honored, and a
-selection with neither valid picks nor a valid custom angle (including a failed or
-low-confidence selector) falls back to **correctness + tests**.
-
-The selector may additionally propose **at most one change-specific custom angle** (a slug plus a
-one-sentence scope grounded in the risks it observed). The proposal is validated entirely in
-module code — kebab-case slug (3–32 chars, never a reserved lane name), whitespace-collapsed
-scope capped at 300 chars, one custom lane max, and it survives only if it fits under the
-3-additional cap; an invalid proposal simply degrades to "no custom angle". The custom lane's
-task embeds the validated scope through a fixed template that frames it as
-scope-definition-only, and its report schema is locked to echo the custom slug. Otherwise
-reviewers never see the selector's output (bias control) — fixed-angle tasks come only from the
-embedded angle vocabulary. Reconciliation and posting
-are unchanged: the parent reconciles the typed reports and posts once via the **shared
-`post_pr_review`** tool, under the same clean guard (an incomplete dynamic wave makes a clean
-verdict refuse with `incomplete_coverage`). The baseline `/pr-review` stays canonical.
-
-An optional free-form focus note after the command rides `directive` (DATA to the selector and
-every reviewer); when the note **explicitly names angles**, the parent passes them as
-`force_angles` (1–3 slugs of the six additional angles) instead. Models: `[models.subagents] pr-reviewer` (every reviewer lane) and
-`review-angle-selector` (the selector lane) — both per-lane, so an unset selector key falls back
-to the selector agent's own default model.
-
-- **`run_pr_review_dynamic_wave`** — run the selector-driven dynamic review wave (optional
-  `directive`; optional `force_angles` = 1–3 unique slugs among
-  `correctness|tests|quality|api-design|code-organization|idioms`, never `plan-fidelity` — pass
-  it only when the operator explicitly names angles); the tool owns the whole dynamic workflow
-  and the one bounded retry, and returns the typed aggregate
-  `{ complete, covered, retried, reports, failures, selection }` (the `selection` metadata —
-  including any custom angle — is in-session DATA, never posted). *Non-terminating.*
-
-### `/pr-review-terminal`
-
-The **terminal-surface** entry into human-in-the-loop adversarial PR review — always the
-[hunk](https://github.com/modem-dev/hunk) TUI, no provider selection needed (the command names
-the surface). Both arguments are optional:
-`/pr-review-terminal [pr number|url] [focus note]`. With a **PR number or URL** it reviews that
-**foreign PR** — one perk's own flow did not author — from a detached read-only checkout
-(`perk pr review checkout` — untrusted foreign code: nothing from it is ever executed), with 2–3
-adversarial reviewers
-(`claimed-intent` always included; model via `[models.subagents] adversarial-reviewer`) — spawned
-**async**, so their **finding batches stream into your live hunk session while they still work**
-(each batch pushed incrementally, never the same anchor twice; held until the hunk handshake
-connects), with the reviewers' final reports reconciled as the source of truth — then the triage
-loop, one curated post via `submit_pr_review`, and cleanup. With **no PR argument** it reviews
-the **active worktree's own PR**: the same streaming flow
-runs in your own worktree (no checkout, no cleanup) on the local since-base diff — perk fetches
-the base branch best-effort (offline falls back to the stale local ref) and diffs from the
-merge-base; since this is usually your own PR, expect the `comment` event (GitHub rejects formal
-verdicts from the PR author). Any other text after the command is a **focus note** for the
-reviewers (a malformed `http(s)://` token is a usage error, never a silent focus note). **Before
-`/submit`** (a plan worktree whose branch has no PR yet) it degrades to a **surface-only**
-since-base review: hunk opens on the working tree's diff, no reviewers are spawned and nothing
-posts to GitHub — review, leave notes, and say when you're done; your notes are read back and
-triaged in-session.
-
-The door **auto-launches hunk in a terminal you can see** (a tmux pane, or your macOS terminal
-keyed off `$TERM_PROGRAM` — Ghostty / iTerm2 / Terminal.app; the first macOS run may show an
-Automation permission prompt attributed to your terminal app — denying or missing it just means
-you run the command yourself) and ALSO prints the launch command
-(`cd <worktree> && hunk diff <base_sha> --agent-notes`) loudly and copies it to your clipboard
-(`--agent-notes` makes pushed findings visible in hunk immediately). The auto-launched window
-runs the command through **your own login shell, interactively** (`$SHELL -i -l -c …`), so a
-`hunk` (and the `node` its shebang needs) that only your shell's rc files put on `PATH` (say,
-via mise/nvm activation) resolves there just like in your own terminal. The two env seams
-`PERK_TERMINAL_LAUNCH` and `PERK_CLIPBOARD_CMD` each take *unset* → the platform default,
-*empty* → disabled, *non-empty* → a custom launcher/copier (the launcher receives the worktree
-as `$1` and the command as `$2`). If hunk doesn't come up the flow **checks in and waits** — it
-re-shows the command and asks whether to keep checking or continue without hunk; it never
-degrades on a timer or on its own initiative (continuing without hunk degrades loudly to an
-in-session findings table — triage and posting are unchanged). The triage loop runs **with
-you** — keep / drop / reword each finding, your own hunk notes read back as first-class
-candidates, the review event (`comment` / `approve` / `request-changes`) settled last. Nothing
-perk-driven reaches GitHub before your triage, and all perk-side posting flows through
-`submit_pr_review` (below); on a foreign PR a final `perk pr review cleanup` removes the
-checkout. The door requires an interactive session and the `hunk` CLI (refusing with the
-install hint). The reviewer streaming is **tool-owned** (operator-visible behavior — args,
-modes, posting — is unchanged):
-
-- **`start_review_wave`** / **`collect_review_wave`** (shared by both review doors) — launch
-  the 2–3-lane adversarial-review wave non-blocking (the reviewer model still comes from
-  `[models.subagents] adversarial-reviewer`) and collect its typed reports
-  `{ complete, covered, reports, failures }` once the run completes; an incomplete wave is
-  reported honestly, never papered over. *Non-terminating.*
-- **`submit_pr_review`** — submit the human-curated review batch to the PR as ONE atomic
-  review (comments + body + event — the verdict never lands before the comments; delegates to
-  `perk pr review-submit`; records `last_review` in workflow-state). `dry_run: true` validates
-  the comment anchors without posting (the repair loop) and fails a formal event on your **own**
-  PR early (`own_pr` — GitHub always rejects approve/request-changes from the PR author, so only
-  `comment` can land there). Formal events (`approve` /
-  `request-changes`) raise a **blocking confirm dialog** and are refused headless; `comment`
-  posts on your conversational go-ahead alone. On `/pr-review-terminal` this tool is the sole
-  GitHub path; on `/pr-review-browser` it is used only for a request-changes verdict or on your
-  explicit ask (you post from the browser there). *Non-terminating.*
-
-### `/pr-review-browser`
-
-The **browser-surface** entry into the same human-in-the-loop adversarial review — always
-[plannotator](https://github.com/backnotprop/plannotator)'s browser code-review UI, no provider
-selection needed (the command names the surface). The
-arguments mirror `/pr-review-terminal`: `/pr-review-browser [pr number|url] [focus note]`. With
-a **PR number or URL** it reviews that foreign PR: detached read-only checkout, then the browser
-opens **in the background** — the door ends its turn immediately (the local server URL is known
-before the server is even up), 2–3 adversarial reviewers fan out **async**, and each arriving
-finding batch is pushed live into the browser as badged annotations (`perk:<angle>`; never the
-same anchor twice; batches are held and retried while the server is still starting). With **no
-PR argument** it reviews the **active worktree's own PR** in place (no checkout, no cleanup).
-Once the streaming turn ends **the session is free** — you review in the browser while the
-conversation stays usable. **You post to GitHub from the browser**: inline comments (yours and
-perk's pushed findings) plus an APPROVE or COMMENT verdict, natively — that is the GitHub path.
-Perk composes nothing by default; `submit_pr_review` (same gates) is used only for a
-**request-changes** verdict (the UI cannot post it) or when you explicitly ask perk to post. Any
-browser ending routes back into the session as a message — one shot. **Before `/submit`** (a
-plan worktree whose branch has no PR yet) it opens a **local since-base browser review** of the
-working tree against the plan's pinned base — no reviewers, nothing posts to GitHub; your
-feedback and annotations route back as a follow-up turn. If the browser server never becomes
-ready the flow degrades loudly to an in-session findings table — triage and posting are
-unchanged. The door fails fast when the plannotator extension is not loaded (select the
-plannotator plan provider — `[providers] plan = "plannotator-plan"` —
-then `perk init` and restart pi) or the session is headless. The streaming and the annotation
-delivery are **tool-owned** (operator-visible behavior — args, modes, posting — is unchanged):
-the reviewer fan-out rides the shared **`start_review_wave`** / **`collect_review_wave`** pair
-(above), and
-
-- **`push_annotations`** (browser door) — push each finding batch into the plannotator surface
-  as badged annotations (`perk:<angle>`; tool-owned mapping, dedupe, hold-and-retry, and
-  source-scoped replace). **Door-primed:** the door primes the surface when the browser opens
-  and clears it when the session ends or degrades, so the tool refuses (`no_surface`) outside a
-  door-opened flow. *Non-terminating.*
-
-### `/plan-review-browser`
-
-Summon a **human-in-the-loop browser review of the working plan draft** — always
-[plannotator](https://github.com/backnotprop/plannotator)'s plan-review UI, no provider
-selection needed (the command names the surface). Run it from a **plan-authoring session**
-(plan mode, an objective-node planning session, or a save-stage session) once a working draft
-exists: the browser opens **in the background** on the exact draft bytes, 2–3 **draft
-reviewers** (angles picked by the agent from grounding / scope / decision-completeness / risk)
-fan out **async**, and each arriving finding batch is pushed live into the browser as
-phrase-anchored annotations (`perk:<angle>`; batches are held and retried while the server is
-still starting). Any argument text defines an **extra custom review angle** in your own words —
-`/plan-review-browser check every step against the rollback story` runs it as its own `custom`
-lane. Once the streaming turn ends **the session is free** — you read, annotate, edit
-(plannotator Direct Edits), and decide in the browser while the conversation stays usable. The
-decision routes back automatically: **APPROVE auto-saves** through the normal pipeline (Direct
-Edits mechanically applied first; if the working draft changed while the review was open the
-approval is refused as **stale** — nothing saved, re-run the door; a failed save is loud,
-leaves the session read-only, and falls back to `/plan-save` — the manual failsafe); **DENY returns your feedback** to the agent
-for a `plan_draft` revision round — re-run the door for the next round. The door fails fast
-when the plannotator extension is not loaded (select the plannotator plan provider —
-`[providers] plan = "plannotator-plan"` — then `perk init` and restart pi), the session is
-headless, it is not a plan-authoring session, or no working draft exists (write it with
-`plan_draft` first — the door reviews **only** the validated draft artifact, never a pasted
-param or the transcript). If the browser server never becomes ready the flow degrades loudly to
-in-session findings. The streaming rides its own tool pair (plus `push_annotations` above):
-
-- **`start_draft_review_wave`** / **`collect_draft_review_wave`** — launch the 2–3-lane
-  draft-review wave non-blocking over the door-primed draft (the reviewer model comes from
-  `[models.subagents] draft-reviewer`; a custom lane rides automatically when you supplied one)
-  and collect its typed reports `{ complete, covered, reports, failures }`; an incomplete wave
-  is reported honestly, never papered over (zero retries by design). **Door-primed:** the
-  draft under review is primed by whichever draft-review door opened the browser
-  (`/plan-review-browser` or `/objective-review-browser`), never passed by the agent, so
-  reviewed bytes == browsed bytes == wave bytes. *Non-terminating.*
-
-### `/objective-review-browser`
-
-Summon a **human-in-the-loop browser review of the working objective draft** — always
-[plannotator](https://github.com/backnotprop/plannotator)'s plan-review UI, no provider
-selection needed (the command names the surface). Run it from an **objective-authoring
-session** (objective-author or objective-save) once a working draft exists: the **rendered**
-draft — the prose, the `**Delivery:**` line, and the roadmap table — opens in the browser
-**in the background**, 2–3 **draft reviewers** (angles picked by the agent from grounding /
-scope / decision-completeness / risk) fan out **async**, and each arriving finding batch is
-pushed live into the browser as phrase-anchored annotations (`perk:<angle>`; batches are held
-and retried while the server is still starting). Any argument text defines an **extra custom
-review angle** in your own words, run as its own `custom` lane. Once the streaming turn ends
-**the session is free** — you read, annotate, and decide in the browser while the conversation
-stays usable. The decision routes back automatically: **APPROVE auto-saves the objective**
-through the approval→save seam (the session exits read-only on success) — **but browser Direct
-Edits are never auto-applied to an objective**: the browser edits the rendered markdown while
-the save re-reads the structured artifact, so an approval carrying Direct Edits saves nothing
-and comes back as a **revise round** (the agent folds the diff into the draft with
-`objective_draft`, then the review re-runs to confirm). If the working draft changed while the
-review was open the approval is refused as **stale** — nothing saved, re-run the door; a
-failed save is loud, leaves the session read-only, and falls back to `/objective-save` (the
-manual failsafe). **DENY returns your feedback** to the agent for an `objective_draft`
-revision round — re-run the door for the next round. The door fails fast when the plannotator
-extension is not loaded (select the plannotator plan provider — `[providers] plan =
-"plannotator-plan"` — then `perk init` and restart pi), the session is headless, it is not an
-objective-authoring session, or no working draft exists (write it with `objective_draft`
-first — the door reviews **only** the validated draft artifact, rendered to markdown; never
-raw JSON, a pasted param, or the transcript). If the browser server never becomes ready the
-flow degrades loudly to in-session findings. The streaming rides the same door-primed
-companions as `/plan-review-browser` (`start_draft_review_wave` / `collect_draft_review_wave`
-/ `push_annotations` above).
-
-### `/learn-docs`
-
-Start the learned-docs plan factory: gather the **doc-destined** open perk:learn issues into an
-inbox and author a `docs/learned` consolidation plan. The cold door pre-routes by captured
-classification (pre-stamped `SHOULD_BE_CODE` issues go to `/learn-code`; legacy/unclassified default
-to docs); the inbox carries each learning's classification line and an existing-docs scan for
-cleanup-first placement. The factory is a **curator and verifier** — it still emits a
-`SHOULD_BE_CODE` follow-up step when a doc-destined learning belongs in code, and regenerates the
-routing via `perk learn docs-sync` (never by hand). Refused in an interactive session where the
-`plan_save` tool is not active (read-only, a worktree stage, or a provider restriction) — the
-`perk learn docs` cold door is the factory path there. No paired tool.
-
-### `/learn-code`
-
-Start the learn-code plan factory (the additive sibling of `/learn-docs`): gather the pre-stamped
-`SHOULD_BE_CODE` open perk:learn issues into a lean inbox (classification + `target`, no docs scan)
-and author a bounded plan that lands each insight in its real code home (a type/constant, comment,
-docstring, schema, or user-doc) after verifying the `target` against the codebase. Output stays a
-plan — it never edits code directly. Refused in an interactive session where the `plan_save` tool
-is not active (read-only, a worktree stage, or a provider restriction) — the `perk learn code`
-cold door is the factory path there. No paired tool.
-
-## Universal model-facing tools
-
-Tools available across stages, independent of a single command.
-
-- **`ask_user_question`** — ask the human a **structured questionnaire**: 1–4 questions per call,
-  each with 2–4 options, an automatic "Type something." free-text row on every question,
-  optional `multiSelect`, and optional per-option previews (side-by-side mockups/snippets). The
-  turn continues with the answers. *Non-terminating.* **Headless:** the tool is **stripped from
-  the active tool set** when there is no interactive UI (no sentinel — a headless session simply
-  carries no `ask_user_question`). Provided by the borrowed `@juicesharp/rpiv-ask-user-question`
-  package — built-in for every perk repo, not a provider seam (see the
-  [providers reference](./providers-and-backends.md)).
-
-The per-stage tools documented above are enumerable here in one place (see each command's section
-for the full description): `plan_draft`, `plan_review`, `plan_save`, `submit`, `ready`,
-`classify_review_feedback`, `finalize_address`, `run_pr_review_wave`, `post_pr_review`,
-`submit_pr_review`, `land`, `learn`, `run_ci`, `objective_draft`, `objective_save`,
-`objective_node`, `explore_objective_node`, `reconcile_objective`, `add_objective_node`,
-`gist_draft`, `gist_save`.
-
-**The read-only-mode allowlist (`READ_ONLY_TOOLS`).** While plan mode is active the agent is
-structurally limited to read/search/builtin tools plus the sanctioned write tools
-(`plan_draft` / `objective_draft` / `gist_draft`), the review door (`plan_review`), the
-draft-review doors' companions (`/plan-review-browser` + `/objective-review-browser`:
-`start_draft_review_wave` / `collect_draft_review_wave` /
-`push_annotations` — the browser draft review runs while gated), the subagent delegation
-family (`subagent` / `wait` + the supervisor pair), and the objective-plan explore tool
-(`explore_objective_node` — it spawns a read-only child and writes nothing to the worktree). Spawned children of a cold-launched read-only session
-**inherit the read-only gate** (edits blocked, `bash` sub-allowlisted) while keeping their
-engine-side tools available — `structured_output` (the schema-validated report call) and the
-supervisor channel; children of read-write sessions are not gate-restricted. The pi builtins
-(`read` / `edit` / `write` / `bash` / `grep` / `find` / `ls`) are pi's own surface — see pi's
-documentation, not re-documented here (in read-only mode `bash` is sub-allowlisted to read-only
-commands — the sub-allowlist also permits the `agent-browser` CLI (the browser-automation skill)
-for dogfooding / QA, alongside `ast-grep`, the read-only `gh` queries, and the read-only
-`perk objective` queries — `show`/`next` and the non-mutating `node-engagement` read). The borrowed web/Linear
-research tools are allowed while exploring; their depth belongs to the config/provider reference
-nodes (4.1/4.2).
+- [Workflow commands](./in-session/workflow-commands.md#utility-commands--factories) covers
+  `/ci`, `/commit-and-compact`, `/perk-selfcheck`, `/learn-docs`, and `/learn-code`.
+- [Review and authoring](./in-session/review-and-authoring.md) covers the six code-review and
+  draft-review commands and their companion tools.
+- [Model-facing tools](./in-session/model-tools.md) is the guarded index of every tool name,
+  including read-only and stage-scoping behavior.
 
 ## Ancillary in-session features
 
-Five small first-party features ride along inside the perk extension. None is a workflow
-stage, door, or model tool — they are human-facing only.
+Five small first-party features ride along inside the perk extension. None is a workflow stage,
+door, or model tool; they are human-facing only.
 
-- **The perk footer** — the one-line footer perk owns in the interactive TUI (it supersedes pi's
-  default footer wholesale): perk identity · 🎯 objective on the left; branch ·
-  model · thinking · **cache-hit rate** · context · guest-extension statuses right-aligned. The
-  cache segment (`CH42.3%`) restores pi's default-footer `CH` prompt-cache-hit display and stays
-  absent until the session shows cache activity. For per-miss detail, enable pi's
-  `showCacheMissNotices` setting **per-user** via `/settings` (user scope) — an operator
-  diagnostic perk deliberately **never converges** into managed repo settings. Reading the
-  notices: transition misses (stage flips, skill-binding deliveries) are expected and bounded;
-  idle-gap misses (the provider's ~5-minute cache TTL expiring between turns) are not perk's
-  doing.
-- **`/btw`** — a side-chat popover (a separate, in-memory conversation seeded with your main
-  conversation context, so it can give informed answers without polluting the main thread).
-  `/btw <text>` asks immediately; bare `/btw` opens (or, with an existing thread, offers to continue
-  or start fresh). Closing the popover offers to **inject a summary** of the side conversation back
-  into the main chat. Its side session's tools follow perk's read-only mode — read-only sessions get
-  `read` only, read-write sessions get the full tool set — so it never escapes the structural
-  read-only guarantee. **TUI-only** (it never opens in a headless / RPC / cold session) and exposes
-  **no model tool**.
-- **`whimsical`** — replaces pi's default “Working…” label with a random whimsical phrase each turn.
-  Ambient and cosmetic; always on, no command, no config toggle.
-- **The watch feedback receiver** — inside an eligible implement session, saved notes from a
-  live [`perk plan watch`](./cli.md#perk-plan-watch-plan) review arrive as real user messages
-  (see [How to send feedback from a hunk watch](../how-to/send-feedback-from-hunk-watch.md)).
-  Eligibility is strict: only the **interactive TUI** implement session whose active plan
-  matches the worktree's plan ever consumes feedback (headless/RPC sessions and other stages
-  never touch it). If the session is mid-turn the note is **steered** into the running turn;
-  idle, it starts an ordinary new turn. A note is acknowledged only once its message is
-  observed on the session transcript — delivery is at-least-once (a crash may duplicate a
-  note, never silently drop one). One consumer at a time: a single-consumer lease keeps a
-  second implement session on the same worktree passive (it says so once); queued notes wait
-  for the next eligible session. Failures degrade loudly and locally — receiver problems are
-  reported as notices, never injected into the model conversation.
-- **Transcript markers** — perk's workflow moments (run claims, read-only/read-write flips,
-  objective activation + budget start, node claims, `/btw` exchanges) render
-  as durable one-line markers in the interactive transcript (expandable where there is detail —
-  e.g. a `/btw` answer). They are display-only (never sent to the
-  model), appear only in the interactive TUI, and require pi ≥ 0.80.4 (on older hosts they are
-  silently absent). No config.
+- **The perk footer** — the one-line footer perk owns in the interactive TUI (it supersedes Pi's
+  default footer wholesale): perk identity · 🎯 objective on the left; branch · model · thinking ·
+  **cache-hit rate** · context · guest-extension statuses right-aligned. The cache segment
+  (`CH42.3%`) restores Pi's default-footer `CH` prompt-cache-hit display and stays absent until the
+  session shows cache activity. For per-miss detail, enable Pi's `showCacheMissNotices` setting
+  **per-user** via `/settings` (user scope) — an operator diagnostic perk deliberately never
+  converges into managed repo settings. Transition misses (stage flips and skill-binding
+  deliveries) are expected and bounded; idle-gap misses caused by the provider's cache TTL are not
+  perk's doing.
+- **`/btw`** — a side-chat popover: a separate in-memory conversation seeded with your main
+  conversation context, so it can answer without polluting the main thread. `/btw <text>` asks
+  immediately; bare `/btw` opens the thread or offers to continue/start fresh. Closing the popover
+  offers to inject a summary into the main chat. Its tools follow perk's read-only mode — read-only
+  sessions get `read` only and read-write sessions get the full tool set — so it cannot escape the
+  structural gate. It is TUI-only and exposes no model tool.
+- **`whimsical`** — replaces Pi's default “Working…” label with a random whimsical phrase each
+  turn. It is ambient and cosmetic, with no command or config toggle.
+- **The watch feedback receiver** — in an eligible implement session, saved notes from a live
+  [`perk plan watch`](./cli.md#perk-plan-watch-plan) review arrive as user messages (see
+  [How to send feedback from a hunk watch](../how-to/send-feedback-from-hunk-watch.md)). Only the
+  interactive TUI implement session whose active plan matches the worktree consumes feedback;
+  headless/RPC sessions and other stages do not. Mid-turn notes steer the running turn; idle notes
+  start a new turn. Delivery is acknowledged only after the message appears on the transcript and
+  is at-least-once. A single-consumer lease leaves a second matching session passive. Failures are
+  reported locally rather than injected into the model conversation.
+- **Transcript markers** — workflow moments such as run claims, read-only/read-write flips,
+  objective activation and budget start, node claims, and `/btw` exchanges render as durable
+  one-line markers in the interactive transcript. They are display-only, TUI-only, and require
+  Pi ≥ 0.80.4; older hosts silently omit them.
 
 ## See also
 
-If you want the shell exterior — the `perk …` commands you run before a session — that is the
-**[CLI commands](./cli.md)** reference. For task-focused recipes, see the
-**[how-to](../how-to/index.md)** quadrant. For the *why* behind stages, doors, and the two planes,
-see **[How perk thinks](../explanation/how-perk-thinks.md)** in the
-**[explanation](../explanation/index.md)** quadrant. The **[user-docs router](../index.mdx)** ties
-all four quadrants together.
-
-> **Status:** this page is part of Objective
-> [#453](https://github.com/mattgiles/perk/issues/453) (Node 2.2). The in-session surface is
-> human-reviewed for accuracy against the extension's command and tool registrations.
+- **Look up:** [CLI commands](./cli.md) — the shell exterior used before and around sessions.
+- **Do:** [How-to guides](../how-to/index.md) — task-focused recipes for operating perk.
+- **Understand:** [How perk thinks](../explanation/how-perk-thinks.md) — why stages, doors, and
+  the two planes have this shape.

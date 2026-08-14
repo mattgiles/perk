@@ -4,6 +4,7 @@ import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { parseFrontmatter } from "@astrojs/markdown-remark";
+import { loadRegistry } from "../../../extension/substrate/registry.ts";
 import { corpusRoute, listCorpusFiles } from "../src/remark-rewrite-corpus-links.mjs";
 import { sidebar } from "../src/sidebar.mjs";
 
@@ -254,6 +255,45 @@ const OBJECTIVE_TUTORIAL_DIAGRAM_CONTENT = [
   },
 ];
 
+const REGISTRY_MATRIX = loadRegistry().stages.map((stage) => ({
+  id: stage.id,
+  mode: stage.mode,
+  warm: stage.doors.warm,
+  coldLocal: stage.doors.cold_local,
+  coldRemote: stage.doors.cold_remote,
+  coldCommand: stage.id === "audit" ? `perk-dev ${stage.command}` : `perk ${stage.command}`,
+}));
+
+const STAGES_AND_DOORS_DIAGRAM_CONTENT = [
+  {
+    name: "warm and cold doors",
+    ordered: REGISTRY_MATRIX.map((stage) => `○ ${stage.id}`),
+    required: ["Warm", "Cold local", "Cold remote", "dev-only"],
+    titleRequired: "Warm and cold door availability by stage",
+    descriptionRequired: [
+      "thirteen-row matrix",
+      "Every stage has a cold-local door",
+      "Warm doors",
+      "Cold-remote doors",
+      "implement and address",
+      "yes or an em dash",
+    ],
+    textRequired: [
+      "Which doors are available for each registry stage?",
+      "Warm door",
+      "Cold-local door",
+      "Cold-remote door",
+      "no standalone slash launcher",
+      "/implement refresh only; not a warm stage door",
+      "perk-dev audit judge",
+    ],
+    arrowheads: 0,
+    conditionalConnectors: 0,
+    connectors: 0,
+    matrix: REGISTRY_MATRIX,
+  },
+];
+
 function normalizeMarkupText(markup) {
   return decodeEntities(markup.replace(/<[^>]*>/g, " "))
     .replace(/\s+/g, " ")
@@ -335,23 +375,113 @@ function assertDiagramFigures(page, expectedFigures) {
         expected.conditionalConnectors,
         `${variant}: dashed conditional-connector count`,
       );
+      if (expected.connectors !== undefined) {
+        assert.equal(
+          [...content.matchAll(/class="connector(?:\s|")/g)].length,
+          expected.connectors,
+          `${variant}: connector count`,
+        );
+      }
+      if (expected.matrix !== undefined) {
+        const rowBlocks = [
+          ...content.matchAll(/<g(?<attrs>[^>]*data-stage="[^"]+"[^>]*)>(?<body>.*?)<\/g>/gs),
+        ];
+        assert.equal(rowBlocks.length, expected.matrix.length, `${variant}: matrix row count`);
+        rowBlocks.forEach((match, rowIndex) => {
+          const attrs = match.groups.attrs;
+          const body = match.groups.body;
+          const attribute = (name) => attrs.match(new RegExp(`${name}="([^"]+)"`))?.[1];
+          const row = expected.matrix[rowIndex];
+          assert.equal(attribute("data-stage"), row.id, `${variant}: stage order`);
+          assert.equal(attribute("data-warm"), String(row.warm), `${variant}: ${row.id} warm`);
+          assert.equal(
+            attribute("data-cold-local"),
+            String(row.coldLocal),
+            `${variant}: ${row.id} cold-local`,
+          );
+          assert.equal(
+            attribute("data-cold-remote"),
+            String(row.coldRemote),
+            `${variant}: ${row.id} cold-remote`,
+          );
+          assert.ok(
+            body.includes(`○ ${row.id}`),
+            `${variant}: ${row.id} lost ordinary-stage glyph`,
+          );
+          const values = [
+            ...body.matchAll(
+              /<text class="(?:cell-value|door-value)(?:\s[^"]*)?"[^>]*>(.*?)<\/text>/gs,
+            ),
+          ].map((valueMatch) => normalizeMarkupText(valueMatch[1]));
+          assert.deepEqual(
+            values,
+            [row.warm, row.coldLocal, row.coldRemote].map((value) => (value ? "yes" : "—")),
+            `${variant}: ${row.id} visible values drifted from its data attributes`,
+          );
+        });
+      }
     }
   });
 
-  const texts = [
+  const textBlocks = [
     ...html.matchAll(/<\/figure>\s*<div class="perk-diagram-text"[^>]*>(.*?)<\/div>/gs),
-  ].map((match) => normalizeMarkupText(match[1]));
+  ].map((match) => match[1]);
+  const texts = textBlocks.map((block) => normalizeMarkupText(block));
   assert.equal(
     texts.length,
     expectedFigures.length,
     `${page}: each diagram figure needs an adjacent perk-diagram-text`,
   );
   texts.forEach((text, figureIndex) => {
-    for (const semantic of expectedFigures[figureIndex].textRequired) {
+    const expected = expectedFigures[figureIndex];
+    for (const semantic of expected.textRequired) {
       assert.ok(
         text.includes(semantic),
         `${page}: textual equivalent missing ${JSON.stringify(semantic)}`,
       );
+    }
+    if (expected.matrix !== undefined) {
+      const table = textBlocks[figureIndex].match(/<table[^>]*>(.*?)<\/table>/s)?.[1];
+      assert.ok(table, `${page}: matrix textual equivalent needs a rendered table`);
+      const rows = [...table.matchAll(/<tr[^>]*>(.*?)<\/tr>/gs)].map((rowMatch) =>
+        [...rowMatch[1].matchAll(/<t[hd][^>]*>(.*?)<\/t[hd]>/gs)].map((cellMatch) =>
+          normalizeMarkupText(cellMatch[1]),
+        ),
+      );
+      assert.deepEqual(rows[0], [
+        "Stage",
+        "Mode",
+        "Warm door",
+        "Warm command",
+        "Cold-local door",
+        "Cold command",
+        "Cold-remote door",
+      ]);
+      assert.equal(rows.length - 1, expected.matrix.length, `${page}: textual matrix row count`);
+      expected.matrix.forEach((stage, rowIndex) => {
+        const cells = rows[rowIndex + 1];
+        assert.equal(cells.length, 7, `${page}: ${stage.id} textual row width`);
+        assert.ok(cells[0].startsWith(stage.id), `${page}: ${stage.id} textual order`);
+        assert.equal(cells[1], stage.mode, `${page}: ${stage.id} textual mode`);
+        assert.equal(cells[2], stage.warm ? "yes" : "—", `${page}: ${stage.id} textual warm`);
+        assert.equal(
+          cells[4],
+          stage.coldLocal ? "yes" : "—",
+          `${page}: ${stage.id} textual cold-local`,
+        );
+        assert.equal(cells[5], stage.coldCommand, `${page}: ${stage.id} textual cold command`);
+        assert.equal(
+          cells[6],
+          stage.coldRemote ? "yes" : "—",
+          `${page}: ${stage.id} textual cold-remote`,
+        );
+        if (stage.id === "gist-author" || stage.id === "objective-author") {
+          assert.equal(cells[3], "no standalone slash launcher", `${page}: ${stage.id} warm label`);
+        }
+        if (stage.id === "implement") {
+          assert.match(cells[3], /refresh only; not a warm stage door/);
+        }
+      });
     }
   });
 }
@@ -362,12 +492,20 @@ test("diagram pages render labeled, content-equal wide and narrow SVG variants",
     "tutorials/drive-an-objective/index.html",
     OBJECTIVE_TUTORIAL_DIAGRAM_CONTENT,
   );
+  assertDiagramFigures(
+    "reference/in-session/stages-and-doors/index.html",
+    STAGES_AND_DOORS_DIAGRAM_CONTENT,
+  );
 });
 
 test("every route-style internal href on an MDX page maps to a built page", () => {
   // JSX attribute hrefs bypass the remark link rewriter and its audit. Check every internal
   // route in each MDX page's built output against dist/<path>/index.html instead.
-  const mdxPages = ["index.html", "tutorials/drive-an-objective/index.html"];
+  const mdxPages = [
+    "index.html",
+    "tutorials/drive-an-objective/index.html",
+    "reference/in-session/stages-and-doors/index.html",
+  ];
   const offenders = [];
   for (const page of mdxPages) {
     const html = fs.readFileSync(path.join(distDir, page), "utf8");
