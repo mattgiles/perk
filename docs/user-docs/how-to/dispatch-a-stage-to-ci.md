@@ -49,5 +49,5 @@ dispatch record preserves the same run-to-plan linkage for later supervision.
 - **Do:** [Set up the remote runner](./set-up-the-remote-runner.md) — provision and verify the
   prerequisite runner.
 - **Do:** [Supervise dispatched runs](./supervise-dispatched-runs.md) — observe or control the run.
-- **Understand:** [Headless and remote](../explanation/headless-and-remote.md) — why coordination uses
+- **Understand:** [Headless and remote](../explanation/headless-and-remote.mdx) — why coordination uses
   durable state rather than a watched terminal.

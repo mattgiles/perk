@@ -21,10 +21,12 @@ operator-facing; each entry links to the page that owns the detail.
   session, a **cold-local door** launches a fresh local session, and a **cold-remote door** runs an
   eligible bounded stage on the remote runner. See [Stages and doors](./in-session/stages-and-doors.mdx).
 - **Gist.** A rough, problem-space statement of intent upstream of both plans and objectives,
-  without implementation detail. See [How to capture a gist](../how-to/capture-a-gist.md).
-- **Human gate.** A workflow boundary that keeps review or judgment with a person rather than an
-  unattended runner; `submit`, `land`, and `learn` are local-only examples. See
-  [Why this shape](../explanation/how-perk-thinks.md#why-this-shape).
+  without implementation detail. See
+  [Gists, plans, and objectives](../explanation/gists-plans-and-objectives.md).
+- **Human gate.** A workflow boundary that keeps judgment with a person rather than a machine:
+  plan approval, marking a pull request ready, review, and landing. No standalone remote door
+  exists for the judgment stages, though a remote `implement` run drives the same shared submit
+  side effects. See [Human gates and trust](../explanation/human-gates-and-trust.md).
 - **Incremental delivery.** The default objective policy in which each node plan integrates
   independently when it is ready. Contrast **stacked delivery**. See
   [Objectives — Delivery](./objectives.md#delivery).
@@ -37,9 +39,9 @@ operator-facing; each entry links to the page that owns the detail.
 - **Layer.** One non-skipped roadmap node together with its plan, forming a delivery unit in a
   stacked train. See [Objectives — Delivery](./objectives.md#delivery).
 - **Objective.** A multi-plan goal whose roadmap emits one bounded plan per node as it advances.
-  See [Objectives — Orientation](./objectives.md#orientation).
+  See [Gists, plans, and objectives](../explanation/gists-plans-and-objectives.md).
 - **Plan.** A written, reviewed, durable description of one bounded change, authored before code
-  is edited. See [How perk thinks — plan-oriented](../explanation/how-perk-thinks.md#perk-is-plan-oriented).
+  is edited. See [Gists, plans, and objectives](../explanation/gists-plans-and-objectives.md).
 - **Provider.** A named selectable implementation from one seam's **supported set**;
   **selection** is a provider id in `[providers].<seam>`, and the catalog **default** is used when
   that key is omitted. See

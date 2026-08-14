@@ -45,5 +45,5 @@ proves the runner wiring and secret readability, not a full model-driven stage.
 - **Look up:** [`perk doctor workflow check`](../reference/cli.md#perk-doctor-workflow-check) and
   [`perk doctor workflow smoke-test`](../reference/cli.md#perk-doctor-workflow-smoke-test) — exact
   check and smoke command surfaces.
-- **Understand:** [Headless and remote](../explanation/headless-and-remote.md) — what smoke proves
+- **Understand:** [Headless and remote](../explanation/headless-and-remote.mdx) — what smoke proves
   versus a full model-driven run.

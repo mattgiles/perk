@@ -1,0 +1,234 @@
+{/*
+  The headless/remote flow — the fifth of the five-diagram family, conforming to the shared
+  legend and rendering contract (docs/design/docs-site-visual-blueprint.md §5): hand-authored
+  theme-aware inline SVG, colors only from the bound token custom properties
+  (--perk-* / --sl-color-*), operational labels IBM Plex Mono 500 at >= 16 CSS px, annotations
+  Inter, no animation, nothing hover-only.
+
+  One <figure class="perk-diagram"> wraps two fully-labeled <svg role="img"> variants
+  (data-variant="wide", data-variant="narrow" stacked vertical, same reading order); the
+  scoped media query display:none's exactly one at any width, removing it from rendering AND
+  the accessibility tree so a single accessible image is exposed. Each variant carries its own
+  <title> + <desc> associated via aria-labelledby (document-unique ids).
+
+  The semantic flow is fixed: the local operator / deterministic supervisor dispatches bounded
+  work into a dashed GitHub Actions process boundary holding the implement and address stage
+  nodes (the same stage implementation a local run uses); the remote process reads the plan
+  and branch from durable GitHub state and writes the pushed PR and reports back to it; the
+  durable state leads to a double-outline human gate (review + land) with NO outgoing
+  connector — automation stops there. Every connector carries data-from/data-to so the
+  post-build checks pin the exact four-edge set (and that no edge originates at human-gate).
+
+  Deliberately static and prop-free: a malformed component fails `astro build`, and the
+  post-build structural checks (docs/site/checks/built-site.test.mjs) cover the output.
+*/}
+
+<figure class="perk-diagram">
+  <svg
+    role="img"
+    data-variant="wide"
+    viewBox="0 0 736 510"
+    aria-labelledby="perk-headless-wide-title perk-headless-wide-desc"
+  >
+    <title id="perk-headless-wide-title">The headless remote flow</title>
+    <desc id="perk-headless-wide-desc">
+      A local operator or the deterministic supervisor dispatches bounded work into a dashed
+      GitHub Actions process boundary containing the implement and address stages — the same
+      stage implementation a local run uses. The remote process reads the plan and branch from
+      durable GitHub state and writes the pushed pull request, checks, and report comments back
+      to it. Durable GitHub state leads to a double-outline HUMAN GATE for review and land,
+      which has no automatic outgoing step: automation stops there.
+    </desc>
+    <g>
+      <rect class="node" data-node="operator" x="2" y="8" width="280" height="84" rx="6" />
+      <text class="node-label" x="18" y="42">Local operator /</text>
+      <text class="node-label" x="18" y="68">deterministic supervisor</text>
+
+      <line class="connector" data-from="operator" data-to="runner" x1="282" y1="50" x2="412" y2="50" />
+      <polygon class="arrowhead" points="412,46.5 412,53.5 420,50" />
+      <text class="edge-label" x="350" y="36">dispatch</text>
+
+      <rect class="boundary" data-node="runner" x="420" y="8" width="314" height="272" rx="2" />
+      <text class="node-label" x="436" y="38">GitHub Actions</text>
+      <text class="annotation muted" x="436" y="64">remote process boundary</text>
+      <rect class="stage" x="436" y="84" width="210" height="36" rx="6" />
+      <text class="node-label" x="452" y="108">○ implement</text>
+      <rect class="stage" x="436" y="132" width="210" height="36" rx="6" />
+      <text class="node-label" x="452" y="156">○ address</text>
+      <text class="annotation muted" x="436" y="212">same stage implementation</text>
+      <text class="annotation muted" x="436" y="238">as a local run</text>
+
+      <line class="connector" data-from="github" data-to="runner" x1="480" y1="352" x2="480" y2="288" />
+      <polygon class="arrowhead" points="476.5,288 483.5,288 480,280" />
+      <text class="edge-label end" x="464" y="322">plan · branch</text>
+
+      <line class="connector" data-from="runner" data-to="github" x1="560" y1="280" x2="560" y2="344" />
+      <polygon class="arrowhead" points="556.5,344 563.5,344 560,352" />
+      <text class="edge-label start" x="576" y="322">PR · report</text>
+
+      <rect class="artifact" data-node="github" x="420" y="340" width="64" height="26" rx="6" />
+      <rect class="artifact" x="420" y="352" width="314" height="150" rx="6" />
+      <text class="node-label" x="436" y="384">GitHub state</text>
+      <text class="annotation" x="436" y="414">plan issue</text>
+      <text class="annotation" x="436" y="442">pushed branch · pull request</text>
+      <text class="annotation" x="436" y="470">checks · comments</text>
+
+      <line class="connector" data-from="github" data-to="human-gate" x1="420" y1="407" x2="310" y2="407" />
+      <polygon class="arrowhead" points="310,403.5 310,410.5 302,407" />
+      <text class="edge-label" x="366" y="393">review</text>
+
+      <rect class="gate-outer" data-node="human-gate" x="2" y="352" width="300" height="110" rx="10" />
+      <rect class="gate-inner" x="8" y="358" width="288" height="98" rx="8" />
+      <text class="node-label gate-label" x="26" y="398">! HUMAN GATE —</text>
+      <text class="node-label gate-label" x="26" y="428">review + land</text>
+    </g>
+  </svg>
+  <svg
+    role="img"
+    data-variant="narrow"
+    viewBox="0 0 320 796"
+    aria-labelledby="perk-headless-narrow-title perk-headless-narrow-desc"
+  >
+    <title id="perk-headless-narrow-title">The headless remote flow (stacked)</title>
+    <desc id="perk-headless-narrow-desc">
+      Stacked top to bottom: a local operator or the deterministic supervisor dispatches
+      bounded work into a dashed GitHub Actions process boundary containing the implement and
+      address stages — the same stage implementation a local run uses. The remote process reads
+      the plan and branch from durable GitHub state and writes the pushed pull request, checks,
+      and report comments back to it. Durable GitHub state leads to a double-outline HUMAN GATE
+      for review and land, which has no automatic outgoing step: automation stops there.
+    </desc>
+    <g>
+      <rect class="node" data-node="operator" x="2" y="8" width="316" height="84" rx="6" />
+      <text class="node-label" x="18" y="42">Local operator /</text>
+      <text class="node-label" x="18" y="68">deterministic supervisor</text>
+
+      <line class="connector" data-from="operator" data-to="runner" x1="160" y1="92" x2="160" y2="140" />
+      <polygon class="arrowhead" points="156.5,140 163.5,140 160,148" />
+      <text class="edge-label start" x="178" y="124">dispatch</text>
+
+      <rect class="boundary" data-node="runner" x="2" y="148" width="316" height="244" rx="2" />
+      <text class="node-label" x="18" y="178">GitHub Actions</text>
+      <text class="annotation muted" x="18" y="204">remote process boundary</text>
+      <rect class="stage" x="18" y="222" width="284" height="36" rx="6" />
+      <text class="node-label" x="34" y="246">○ implement</text>
+      <rect class="stage" x="18" y="270" width="284" height="36" rx="6" />
+      <text class="node-label" x="34" y="294">○ address</text>
+      <text class="annotation muted" x="18" y="340">same stage implementation</text>
+      <text class="annotation muted" x="18" y="366">as a local run</text>
+
+      <line class="connector" data-from="github" data-to="runner" x1="200" y1="478" x2="200" y2="400" />
+      <polygon class="arrowhead" points="196.5,400 203.5,400 200,392" />
+      <text class="edge-label start" x="214" y="442">plan · branch</text>
+
+      <line class="connector" data-from="runner" data-to="github" x1="120" y1="392" x2="120" y2="470" />
+      <polygon class="arrowhead" points="116.5,470 123.5,470 120,478" />
+      <text class="edge-label end" x="106" y="442">PR · report</text>
+
+      <rect class="artifact" data-node="github" x="2" y="466" width="64" height="26" rx="6" />
+      <rect class="artifact" x="2" y="478" width="316" height="150" rx="6" />
+      <text class="node-label" x="18" y="510">GitHub state</text>
+      <text class="annotation" x="18" y="540">plan issue</text>
+      <text class="annotation" x="18" y="568">pushed branch · pull request</text>
+      <text class="annotation" x="18" y="596">checks · comments</text>
+
+      <line class="connector" data-from="github" data-to="human-gate" x1="160" y1="628" x2="160" y2="672" />
+      <polygon class="arrowhead" points="156.5,672 163.5,672 160,680" />
+      <text class="edge-label start" x="178" y="656">review</text>
+
+      <rect class="gate-outer" data-node="human-gate" x="2" y="680" width="316" height="108" rx="10" />
+      <rect class="gate-inner" x="8" y="686" width="304" height="96" rx="8" />
+      <text class="node-label gate-label" x="26" y="724">! HUMAN GATE —</text>
+      <text class="node-label gate-label" x="26" y="754">review + land</text>
+    </g>
+  </svg>
+</figure>
+
+<style>
+  svg {
+    display: block;
+    width: 100%;
+    height: auto;
+    margin-inline: auto;
+  }
+  svg[data-variant="wide"] {
+    max-width: 736px;
+  }
+  svg[data-variant="narrow"] {
+    max-width: 320px;
+    display: none;
+  }
+  @media (max-width: 767.98px) {
+    svg[data-variant="wide"] {
+      display: none;
+    }
+    svg[data-variant="narrow"] {
+      display: block;
+    }
+  }
+
+  .node,
+  .stage {
+    fill: var(--perk-surface);
+    stroke: var(--perk-border);
+    stroke-width: 1;
+  }
+  .boundary {
+    fill: var(--perk-canvas);
+    stroke: var(--perk-border);
+    stroke-width: 1;
+    stroke-dasharray: 6 4;
+  }
+  .artifact {
+    fill: var(--sl-color-accent-low);
+    stroke: var(--perk-border);
+    stroke-width: 1;
+  }
+  .gate-outer {
+    fill: none;
+    stroke: var(--perk-warning);
+    stroke-width: 2;
+  }
+  .gate-inner {
+    fill: var(--perk-warning-low);
+    stroke: var(--perk-warning);
+    stroke-width: 1;
+  }
+  .node-label {
+    font-family: var(--sl-font-mono), monospace;
+    font-size: 16px;
+    font-weight: 500;
+    fill: var(--perk-text);
+  }
+  .gate-label {
+    fill: var(--perk-warning);
+  }
+  .annotation {
+    font-family: var(--sl-font), sans-serif;
+    font-size: 16px;
+    fill: var(--perk-text);
+  }
+  .annotation.muted {
+    fill: var(--perk-muted);
+  }
+  .connector {
+    fill: none;
+    stroke: var(--perk-muted);
+    stroke-width: 1;
+  }
+  .arrowhead {
+    fill: var(--perk-muted);
+  }
+  .edge-label {
+    font-family: var(--sl-font), sans-serif;
+    font-size: 16px;
+    fill: var(--perk-muted);
+    text-anchor: middle;
+  }
+  .edge-label.start {
+    text-anchor: start;
+  }
+  .edge-label.end {
+    text-anchor: end;
+  }
+</style>

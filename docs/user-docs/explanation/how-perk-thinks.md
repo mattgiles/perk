@@ -28,7 +28,11 @@ edit files — it can read, search, and reason, but not change anything. Only on
 reviewed the plan and it has been saved does editing become possible. This is the antidote to
 the failure mode every coding agent is prone to: starting to edit before it understands the
 problem, then spending the rest of the session defending its first guess. By making the plan a
-gate rather than a suggestion, perk forces understanding to come first.
+gate rather than a suggestion, perk forces understanding to come first. The read-only posture
+is structural — enforced by which tools the session carries, not by reminders — and the
+approval that ends it is one of perk's **human gates**: the points where a decision belongs to
+a person. [Human gates and trust](./human-gates-and-trust.md) owns that boundary — and the
+separate question of execution trust — in depth.
 
 The plan is also what makes the whole workflow **resumable and hand-off-able**. Because the plan
 and its progress are durable and external — not trapped in one chat history on one laptop — a
@@ -42,10 +46,15 @@ It helps to name the **spine** a plan travels: *explore → plan → save → im
 the plan, save it as the canonical record, implement it on a branch, submit the result for
 review, *address* any feedback, land it, and capture what was learned. `address` is in
 parentheses because it is conditional: you only enter it when a reviewer leaves feedback to
-respond to. Section 4 explains how you actually move along this spine. Work can also be
-*generated* rather than hand-authored: a longer-running **objective** — a roadmap that emits
-bounded plans as it advances — can feed plans into this same spine, but that is its own topic
-and the objectives material is where its depth lives.
+respond to. Section 4 explains how you actually move along this spine.
+
+The plan also has neighbors on the intent ladder. Upstream, a **gist** captures problem-space
+intent *before* any delivery shape is committed — an idea worth keeping that has not yet earned
+a design conversation. Above, a longer-running **objective** coordinates a multi-plan goal as a
+roadmap that emits bounded plans as it advances, feeding them into this same spine. Both exist
+so the plan can stay what it is — one bounded, reviewable change; how the three artifacts
+divide the work of intent is the subject of
+[Gists, plans, and objectives](./gists-plans-and-objectives.md).
 
 ## Two planes: the exterior and the interior
 
@@ -187,18 +196,10 @@ state and triggers the runner. The runner then reports its progress and outcome 
 GitHub** — as PR comments and checks — so the run is observable without anyone staring at a
 console. The canonical tier is what makes a headless run legible.
 
-To name the concrete pieces (illustratively, not as a catalog): `perk init` installs a managed
-GitHub Actions workflow, `perk-run.yml`, that on dispatch checks out the repository and runs
-`perk run-worker` — the runner-side entrypoint that positions the plan branch and the worktree
-and drives the stage exactly as a local cold launch would. A supervisor — you, or an automated queue — observes and
-controls those runs with `perk workflow run list` (and its `cancel` and `retry` companions). The
-exact flags and outputs for these belong to the command reference, not to this page.
-
-A word on maturity: the live end-to-end chain — real `implement` and `address` runs, dispatch
-through reporting — is proven on **both** perk's own repo (2026-07-04) and a consumer repo through
-the published distributions (2026-07-06). For the operational depth and the current
-maturity story, see [Headless and remote: how it works, and how proven it is](./headless-and-remote.md);
-this page just places the surface in the mental model.
+That is as deep as this page goes. How the remote pieces fit together — the durable
+coordination, the deterministic supervisor, and what the evidence does and does not prove — is
+the subject of [Headless and remote](./headless-and-remote.mdx); this page just places the
+surface in the mental model.
 
 ## Why this shape
 
@@ -208,10 +209,12 @@ Because a plan is durable and canonical in GitHub, and because every stage has a
 door, **every stage is locally resumable** — from any machine, by anyone, with nothing more than
 the repo and the plan id. The **bounded agentic stages** — `implement` and `address`, where the
 goal is already pinned by a plan or by reviewer feedback — are additionally **remotely
-headless-able**: the same cold door pointed at a CI runner. And the **human gates stay local**:
-`submit`, `land`, and `learn` are local-only by design — review, merge, and judgment capture are
-deliberately kept where a human is. Resumability and the remote door are not two features but
-one property at two scopes.
+headless-able**: the same cold door pointed at a CI runner. And the **human gates hold
+everywhere**: plan approval, review, and landing stay with a person whichever door ran the
+work. Precision matters here — a remote implement run opens its pull request through the same
+submit implementation a local session uses, so it is not that remote work cannot *submit*; it
+is that no remote path *judges*: nothing marks ready, approves, or merges without you.
+Resumability and the remote door are not two features but one property at two scopes.
 
 Because there is exactly one implementation per stage in the interior, launched by a thin
 exterior, the two planes **cannot drift into two behaviors.** There is no second "implement" to
@@ -221,8 +224,11 @@ And because thinking — read-only planning — is structurally separated from d
 implement-on-a-branch — the agent is *constrained* to understand before it edits. The discipline
 that is hardest to enforce by good intentions is instead enforced by the shape of the machine.
 
-If you want the exact commands and tools, that is the **[reference](../reference/index.md)**
-quadrant. For task-focused recipes — the concrete steps to get a specific thing done — see the
-**[how-to](../how-to/index.md)** quadrant. To learn the basics hands-on, start in the
-**[tutorials](../tutorials/index.md)** quadrant. And the **[user-docs router](../index.mdx)** ties
-all four quadrants together.
+## Related
+
+- **Understand:** [Gists, plans, and objectives](./gists-plans-and-objectives.md) — the depth
+  behind the intent ladder this page only sketches.
+- **Understand:** [Human gates and trust](./human-gates-and-trust.md) — where judgment enters
+  the workflow, and why that differs from execution trust.
+- **Look up:** [Stages and doors](../reference/in-session/stages-and-doors.mdx) — the exact
+  per-stage door availability, modes, and commands.
