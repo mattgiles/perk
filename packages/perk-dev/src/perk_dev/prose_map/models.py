@@ -1,7 +1,7 @@
 """Boundary models and trusted domain values for the living prose map."""
 
 from dataclasses import dataclass
-from typing import Literal
+from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -137,9 +137,34 @@ class DiscoveredCandidateInput(_InputModel):
     fragments: list[DiscoveredFragmentInput] = Field(min_length=1)
 
 
+class _DiscoveredToolFieldInput(_InputModel):
+    tool: str = Field(min_length=1)
+    path: str = Field(min_length=1)
+    selector: str = Field(min_length=1)
+
+
+class DiscoveredUnclassifiedToolFieldInput(_DiscoveredToolFieldInput):
+    kind: Literal["unclassified"]
+    field: str = Field(min_length=1)
+    reason: Literal["unclassified-field"]
+
+
+class DiscoveredOpaqueToolFieldInput(_DiscoveredToolFieldInput):
+    kind: Literal["opaque"]
+    field: None
+    reason: Literal["spread-assignment", "dynamic-computed-property"]
+
+
+type DiscoveredToolFieldInput = Annotated[
+    DiscoveredUnclassifiedToolFieldInput | DiscoveredOpaqueToolFieldInput,
+    Field(discriminator="kind"),
+]
+
+
 class TypeScriptCatalogInput(_InputModel):
     candidates: list[DiscoveredCandidateInput]
     governed_tools: list[str]
+    tool_field_issues: list[DiscoveredToolFieldInput]
 
 
 @dataclass(frozen=True)
@@ -257,6 +282,36 @@ class Candidate:
     path: str
     selector: str
     fragments: tuple[Fragment, ...]
+
+
+@dataclass(frozen=True)
+class UnclassifiedToolFieldIssue:
+    kind: Literal["unclassified"]
+    field: str
+    reason: Literal["unclassified-field"]
+    tool: str
+    path: str
+    selector: str
+
+
+@dataclass(frozen=True)
+class OpaqueToolFieldIssue:
+    kind: Literal["opaque"]
+    field: None
+    reason: Literal["spread-assignment", "dynamic-computed-property"]
+    tool: str
+    path: str
+    selector: str
+
+
+type ToolFieldIssue = UnclassifiedToolFieldIssue | OpaqueToolFieldIssue
+
+
+@dataclass(frozen=True)
+class DiscoveryResult:
+    candidates: tuple[Candidate, ...]
+    governed_tools: tuple[str, ...]
+    tool_field_issues: tuple[ToolFieldIssue, ...]
 
 
 @dataclass(frozen=True)

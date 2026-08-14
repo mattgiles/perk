@@ -4,26 +4,33 @@ from pathlib import Path
 
 import pytest
 from click.testing import CliRunner
+from perk_dev.prose_map import catalog as catalog_module
 from perk_dev.prose_map import cli as prose_cli
+from perk_dev.prose_map import discovery as prose_discovery
 from perk_dev.prose_map.catalog import (
     GRAPH_PATH,
     RENDERED_PATH,
     BuildResult,
     ProseMapError,
     build,
+    build_catalog,
     load_graph,
     validate_graph,
     validate_scenario_fixtures,
+    validate_tool_field_governance,
 )
 from perk_dev.prose_map.models import (
     Assembly,
     AssemblyLayer,
     Candidate,
     Capability,
+    DiscoveryResult,
     Finding,
+    OpaqueToolFieldIssue,
     ProseMap,
     Scenario,
     SessionShape,
+    UnclassifiedToolFieldIssue,
 )
 
 ROOT = Path(__file__).parents[1]
@@ -103,9 +110,170 @@ def _write_prompt(root: Path, name: str, source: str) -> None:
     path.write_text(source, encoding="utf-8")
 
 
+def _write_scanner_script(root: Path) -> None:
+    path = root / "tools/prose-map/catalog.ts"
+    path.parent.mkdir(parents=True)
+    path.write_text("// scanner fixture\n", encoding="utf-8")
+
+
 @pytest.fixture(scope="module")
 def built() -> BuildResult:
     return build(ROOT)
+
+
+def test_typescript_field_issues_cross_the_strict_subprocess_boundary(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _write_scanner_script(tmp_path)
+    payload = {
+        "candidates": [],
+        "governed_tools": ["alpha", "beta", "gamma"],
+        "tool_field_issues": [
+            {
+                "kind": "unclassified",
+                "field": "promptEpilogue",
+                "reason": "unclassified-field",
+                "tool": "alpha",
+                "path": "extension/a.ts",
+                "selector": "tool:alpha.promptEpilogue",
+            },
+            {
+                "kind": "opaque",
+                "field": None,
+                "reason": "spread-assignment",
+                "tool": "beta",
+                "path": "extension/b.ts",
+                "selector": "tool:beta/member:2",
+            },
+            {
+                "kind": "opaque",
+                "field": None,
+                "reason": "dynamic-computed-property",
+                "tool": "gamma",
+                "path": "extension/c.ts",
+                "selector": "tool:gamma/member:3",
+            },
+        ],
+    }
+    monkeypatch.setattr(
+        prose_discovery,
+        "run_checked",
+        lambda *_args, **_kwargs: json.dumps(payload),
+    )
+
+    assert prose_discovery._typescript_candidates(tmp_path) == DiscoveryResult(
+        candidates=(),
+        governed_tools=("alpha", "beta", "gamma"),
+        tool_field_issues=(
+            UnclassifiedToolFieldIssue(
+                kind="unclassified",
+                field="promptEpilogue",
+                reason="unclassified-field",
+                tool="alpha",
+                path="extension/a.ts",
+                selector="tool:alpha.promptEpilogue",
+            ),
+            OpaqueToolFieldIssue(
+                kind="opaque",
+                field=None,
+                reason="spread-assignment",
+                tool="beta",
+                path="extension/b.ts",
+                selector="tool:beta/member:2",
+            ),
+            OpaqueToolFieldIssue(
+                kind="opaque",
+                field=None,
+                reason="dynamic-computed-property",
+                tool="gamma",
+                path="extension/c.ts",
+                selector="tool:gamma/member:3",
+            ),
+        ),
+    )
+
+
+def test_typescript_field_issue_discriminants_fail_strict_boundary_validation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _write_scanner_script(tmp_path)
+    payload = {
+        "candidates": [],
+        "governed_tools": ["alpha"],
+        "tool_field_issues": [
+            {
+                "kind": "opaque",
+                "field": "promptEpilogue",
+                "reason": "unclassified-field",
+                "tool": "alpha",
+                "path": "extension/a.ts",
+                "selector": "tool:alpha.promptEpilogue",
+            }
+        ],
+    }
+    monkeypatch.setattr(
+        prose_discovery,
+        "run_checked",
+        lambda *_args, **_kwargs: json.dumps(payload),
+    )
+
+    with pytest.raises(prose_discovery.DiscoveryError, match="returned invalid JSON"):
+        prose_discovery._typescript_candidates(tmp_path)
+
+
+def test_tool_field_governance_findings_have_exact_contract_messages() -> None:
+    issues = (
+        UnclassifiedToolFieldIssue(
+            kind="unclassified",
+            field="promptEpilogue",
+            reason="unclassified-field",
+            tool="alpha",
+            path="extension/a.ts",
+            selector="tool:alpha.promptEpilogue",
+        ),
+        OpaqueToolFieldIssue(
+            kind="opaque",
+            field=None,
+            reason="spread-assignment",
+            tool="beta",
+            path="extension/b.ts",
+            selector="tool:beta/member:2",
+        ),
+        OpaqueToolFieldIssue(
+            kind="opaque",
+            field=None,
+            reason="dynamic-computed-property",
+            tool="gamma",
+            path="extension/c.ts",
+            selector="tool:gamma/member:3",
+        ),
+    )
+
+    assert validate_tool_field_governance(issues) == [
+        Finding(
+            code="unclassified-tool-field",
+            message=(
+                "governed tool alpha has unclassified registered-tool field promptEpilogue at "
+                "extension/a.ts (tool:alpha.promptEpilogue); add a model-facing collector or a "
+                "reasoned non-prose policy entry"
+            ),
+        ),
+        Finding(
+            code="opaque-tool-contract",
+            message=(
+                "governed tool beta has opaque registered-tool member at extension/b.ts "
+                "(tool:beta/member:2): spread-assignment; replace it with statically named fields"
+            ),
+        ),
+        Finding(
+            code="opaque-tool-contract",
+            message=(
+                "governed tool gamma has opaque registered-tool member at extension/c.ts "
+                "(tool:gamma/member:3): dynamic-computed-property; replace it with statically "
+                "named fields"
+            ),
+        ),
+    ]
 
 
 def test_repository_prose_map_is_complete_and_current(built: BuildResult) -> None:
@@ -113,6 +281,77 @@ def test_repository_prose_map_is_complete_and_current(built: BuildResult) -> Non
     assert len(built.catalog.units) > 150
     assert len(built.catalog.governed_tools) == 35
     assert (ROOT / RENDERED_PATH).read_text(encoding="utf-8") == built.rendered
+
+
+def test_build_catalog_includes_converted_tool_field_issues(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    discovered = prose_discovery.discover(ROOT)
+    issue = UnclassifiedToolFieldIssue(
+        kind="unclassified",
+        field="promptEpilogue",
+        reason="unclassified-field",
+        tool="plan_review",
+        path="extension/doors/planTools.ts",
+        selector="tool:plan_review.promptEpilogue",
+    )
+    injected = replace(
+        discovered,
+        tool_field_issues=(*discovered.tool_field_issues, issue),
+    )
+    monkeypatch.setattr(catalog_module, "discover", lambda _root: injected)
+
+    assert build_catalog(ROOT).findings == (
+        Finding(
+            code="unclassified-tool-field",
+            message=(
+                "governed tool plan_review has unclassified registered-tool field promptEpilogue "
+                "at extension/doors/planTools.ts (tool:plan_review.promptEpilogue); add a "
+                "model-facing collector or a reasoned non-prose policy entry"
+            ),
+        ),
+    )
+
+
+def test_zero_fragment_governed_tool_reports_opaque_and_missing_contract(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    discovered = prose_discovery.discover(ROOT)
+    tool = "objective_stack_status"
+    candidate_id = f"typescript-tool:{tool}"
+    candidates = tuple(
+        candidate for candidate in discovered.candidates if candidate.id != candidate_id
+    )
+    assert len(candidates) == len(discovered.candidates) - 1
+    issue = OpaqueToolFieldIssue(
+        kind="opaque",
+        field=None,
+        reason="spread-assignment",
+        tool=tool,
+        path="extension/doors/objectiveStackTools.ts",
+        selector=f"tool:{tool}/member:1",
+    )
+    injected = replace(
+        discovered,
+        candidates=candidates,
+        tool_field_issues=(*discovered.tool_field_issues, issue),
+    )
+    monkeypatch.setattr(catalog_module, "discover", lambda _root: injected)
+
+    assert build_catalog(ROOT).findings == (
+        Finding(
+            code="missing-tool-contract",
+            message=f"PERK_TOOLS tool has no discovered contract: {tool}",
+        ),
+        Finding(
+            code="opaque-tool-contract",
+            message=(
+                f"governed tool {tool} has opaque registered-tool member at "
+                f"extension/doors/objectiveStackTools.ts (tool:{tool}/member:1): "
+                "spread-assignment; replace it with statically named fields"
+            ),
+        ),
+    )
 
 
 def test_tool_contracts_are_logical_fragments_without_copied_prose(built: BuildResult) -> None:
@@ -314,6 +553,38 @@ def test_cli_check_reports_clean_catalog(
         "changed": False,
         "rendered_path": str(ROOT / RENDERED_PATH),
         "findings": [],
+    }
+
+
+def test_cli_check_reports_unclassified_tool_field_as_invalid(
+    built: BuildResult, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    finding = Finding(
+        code="unclassified-tool-field",
+        message=(
+            "governed tool plan_review has unclassified registered-tool field promptEpilogue at "
+            "extension/doors/planTools.ts (tool:plan_review.promptEpilogue); add a model-facing "
+            "collector or a reasoned non-prose policy entry"
+        ),
+    )
+    invalid = replace(built, catalog=replace(built.catalog, findings=(finding,)))
+    monkeypatch.setattr(prose_cli, "_root", lambda: ROOT)
+    monkeypatch.setattr(prose_cli, "build", lambda _root: invalid)
+
+    result = CliRunner().invoke(prose_cli.prose_map, ["check", "--json"])
+
+    assert result.exit_code == 1
+    assert json.loads(result.output) == {
+        "success": False,
+        "error_type": "prose_map_invalid",
+        "changed": False,
+        "rendered_path": str(ROOT / RENDERED_PATH),
+        "findings": [
+            {
+                "code": finding.code,
+                "message": finding.message,
+            }
+        ],
     }
 
 

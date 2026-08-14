@@ -27,6 +27,8 @@ from perk_dev.prose_map.models import (
     RoutedUnit,
     Scenario,
     SessionShape,
+    ToolFieldIssue,
+    UnclassifiedToolFieldIssue,
 )
 from perk_dev.prose_map.render import render_markdown
 
@@ -426,14 +428,42 @@ def validate_scenario_fixtures(
     return findings
 
 
+def validate_tool_field_governance(issues: tuple[ToolFieldIssue, ...]) -> list[Finding]:
+    """Convert registered-tool field discovery issues into checker findings."""
+    findings: list[Finding] = []
+    for issue in issues:
+        if isinstance(issue, UnclassifiedToolFieldIssue):
+            findings.append(
+                Finding(
+                    "unclassified-tool-field",
+                    f"governed tool {issue.tool} has unclassified registered-tool field "
+                    f"{issue.field} at {issue.path} ({issue.selector}); add a model-facing "
+                    "collector or a reasoned non-prose policy entry",
+                )
+            )
+            continue
+        findings.append(
+            Finding(
+                "opaque-tool-contract",
+                f"governed tool {issue.tool} has opaque registered-tool member at "
+                f"{issue.path} ({issue.selector}): {issue.reason}; replace it with "
+                "statically named fields",
+            )
+        )
+    return findings
+
+
 def build_catalog(root: Path) -> Catalog:
     """Join discovered prose with the authored semantic overlay and validate the result."""
     graph = load_graph(root)
     try:
-        candidates, governed_tools = discover(root)
+        discovery = discover(root)
     except DiscoveryError as exc:
         raise ProseMapError(str(exc)) from exc
-    findings = validate_graph(graph)
+    candidates = discovery.candidates
+    governed_tools = discovery.governed_tools
+    findings = validate_tool_field_governance(discovery.tool_field_issues)
+    findings.extend(validate_graph(graph))
     candidate_ids = [candidate.id for candidate in candidates]
     for duplicate in sorted(_duplicates(candidate_ids)):
         findings.append(Finding("duplicate-unit", f"duplicate discovered unit id: {duplicate}"))

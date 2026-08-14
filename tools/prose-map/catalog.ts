@@ -2,6 +2,7 @@
 
 import path from "node:path";
 import { pathToFileURL } from "node:url";
+import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
 import ts from "typescript";
 
 type ProseKind = "typescript-tool" | "typescript-model-call" | "typescript-symbol";
@@ -20,20 +21,105 @@ export interface DiscoveredCandidate {
   fragments: DiscoveredFragment[];
 }
 
+export interface UnclassifiedToolFieldIssue {
+  kind: "unclassified";
+  field: string;
+  reason: "unclassified-field";
+  tool: string;
+  path: string;
+  selector: string;
+}
+
+export interface OpaqueToolFieldIssue {
+  kind: "opaque";
+  field: null;
+  reason: "spread-assignment" | "dynamic-computed-property";
+  tool: string;
+  path: string;
+  selector: string;
+}
+
+export type ToolFieldIssue = UnclassifiedToolFieldIssue | OpaqueToolFieldIssue;
+
 export interface TypeScriptCatalog {
   candidates: DiscoveredCandidate[];
   governed_tools: string[];
+  tool_field_issues: ToolFieldIssue[];
 }
 
-function propertyName(node: ts.ObjectLiteralElementLike): string | null {
-  if (!ts.isPropertyAssignment(node) && !ts.isShorthandPropertyAssignment(node)) {
-    return null;
+export type ToolFieldPolicy =
+  | {
+      kind: "model-facing-prose";
+      collector: "field" | "array-items-or-field";
+    }
+  | { kind: "parameter-schema" }
+  | { kind: "non-prose"; reason: string };
+
+export const TOOL_FIELD_POLICIES = {
+  name: {
+    kind: "non-prose",
+    reason: "represented by the registered-tool candidate id and selector",
+  },
+  label: { kind: "non-prose", reason: "human UI label only" },
+  description: { kind: "model-facing-prose", collector: "field" },
+  promptSnippet: { kind: "model-facing-prose", collector: "field" },
+  promptGuidelines: {
+    kind: "model-facing-prose",
+    collector: "array-items-or-field",
+  },
+  parameters: { kind: "parameter-schema" },
+  constrainedSampling: {
+    kind: "non-prose",
+    reason: "provider sampling behavior, not model-facing prose",
+  },
+  renderShell: { kind: "non-prose", reason: "human UI rendering only" },
+  prepareArguments: {
+    kind: "non-prose",
+    reason: "runtime argument preparation, not model-facing prose",
+  },
+  executionMode: {
+    kind: "non-prose",
+    reason: "runtime execution configuration, not model-facing prose",
+  },
+  execute: { kind: "non-prose", reason: "runtime implementation, not model-facing prose" },
+  renderCall: { kind: "non-prose", reason: "human UI rendering only" },
+  renderResult: { kind: "non-prose", reason: "human UI rendering only" },
+} satisfies Readonly<Record<keyof ToolDefinition, ToolFieldPolicy>>;
+
+export function validateToolFieldPolicies(
+  policies: Readonly<Record<string, ToolFieldPolicy>> = TOOL_FIELD_POLICIES,
+): void {
+  for (const [field, policy] of Object.entries(policies)) {
+    if (policy.kind === "non-prose" && policy.reason.trim().length === 0) {
+      throw new Error(`tool field policy ${field} has a blank non-prose reason`);
+    }
   }
-  const name = node.name;
+}
+
+validateToolFieldPolicies();
+
+function staticPropertyName(name: ts.PropertyName): string | null {
   if (ts.isIdentifier(name) || ts.isStringLiteral(name) || ts.isNumericLiteral(name)) {
     return name.text;
   }
+  if (ts.isComputedPropertyName(name)) {
+    const expression = name.expression;
+    if (
+      ts.isStringLiteral(expression) ||
+      ts.isNumericLiteral(expression) ||
+      ts.isNoSubstitutionTemplateLiteral(expression)
+    ) {
+      return expression.text;
+    }
+  }
   return null;
+}
+
+function propertyName(node: ts.ObjectLiteralElementLike): string | null {
+  if (ts.isSpreadAssignment(node)) {
+    return null;
+  }
+  return staticPropertyName(node.name);
 }
 
 function property(
@@ -62,13 +148,23 @@ function staticString(node: ts.Expression | null): string | null {
 
 function toolFragments(object: ts.ObjectLiteralExpression, toolName: string): DiscoveredFragment[] {
   const fragments: DiscoveredFragment[] = [];
-  for (const field of ["description", "promptSnippet", "promptGuidelines"] as const) {
+  for (const [field, policy] of Object.entries(TOOL_FIELD_POLICIES)) {
     const member = property(object, field);
-    if (member === null) {
+    if (member === null || policy.kind === "non-prose") {
       continue;
     }
     const value = initializer(member);
-    if (value !== null && ts.isArrayLiteralExpression(value)) {
+    if (policy.kind === "parameter-schema") {
+      if (value !== null) {
+        collectDescriptions(value, field, toolName, fragments);
+      }
+      continue;
+    }
+    if (
+      policy.collector === "array-items-or-field" &&
+      value !== null &&
+      ts.isArrayLiteralExpression(value)
+    ) {
       value.elements.forEach((_element, index) => {
         fragments.push({
           id: `${field}.${index}`,
@@ -76,21 +172,67 @@ function toolFragments(object: ts.ObjectLiteralExpression, toolName: string): Di
           selector: `tool:${toolName}.${field}.${index}`,
         });
       });
-    } else {
-      fragments.push({
-        id: field,
-        label: field,
+      continue;
+    }
+    fragments.push({
+      id: field,
+      label: field,
+      selector: `tool:${toolName}.${field}`,
+    });
+  }
+  return fragments;
+}
+
+function toolFieldPolicy(field: string): ToolFieldPolicy | undefined {
+  if (!Object.hasOwn(TOOL_FIELD_POLICIES, field)) {
+    return undefined;
+  }
+  return TOOL_FIELD_POLICIES[field as keyof typeof TOOL_FIELD_POLICIES];
+}
+
+function collectToolFieldIssues(
+  object: ts.ObjectLiteralExpression,
+  toolName: string,
+  sourcePath: string,
+): ToolFieldIssue[] {
+  const issues: ToolFieldIssue[] = [];
+  object.properties.forEach((member, index) => {
+    const selector = `tool:${toolName}/member:${index}`;
+    if (ts.isSpreadAssignment(member)) {
+      issues.push({
+        kind: "opaque",
+        field: null,
+        reason: "spread-assignment",
+        tool: toolName,
+        path: sourcePath,
+        selector,
+      });
+      return;
+    }
+    const field = propertyName(member);
+    if (field === null) {
+      issues.push({
+        kind: "opaque",
+        field: null,
+        reason: "dynamic-computed-property",
+        tool: toolName,
+        path: sourcePath,
+        selector,
+      });
+      return;
+    }
+    if (toolFieldPolicy(field) === undefined) {
+      issues.push({
+        kind: "unclassified",
+        field,
+        reason: "unclassified-field",
+        tool: toolName,
+        path: sourcePath,
         selector: `tool:${toolName}.${field}`,
       });
     }
-  }
-
-  const parameters = property(object, "parameters");
-  const parametersValue = parameters === null ? null : initializer(parameters);
-  if (parametersValue !== null) {
-    collectDescriptions(parametersValue, "parameters", toolName, fragments);
-  }
-  return fragments;
+  });
+  return issues;
 }
 
 function collectDescriptions(
@@ -149,12 +291,18 @@ function normalizedPath(root: string, fileName: string): string {
   return path.relative(root, fileName).split(path.sep).join("/");
 }
 
+interface SourceScanResult {
+  candidates: DiscoveredCandidate[];
+  toolFieldIssues: ToolFieldIssue[];
+}
+
 function scanSource(
   root: string,
   sourceFile: ts.SourceFile,
   ordinals: Map<string, number>,
-): DiscoveredCandidate[] {
+): SourceScanResult {
   const candidates: DiscoveredCandidate[] = [];
+  const toolFieldIssues: ToolFieldIssue[] = [];
   const sourcePath = normalizedPath(root, sourceFile.fileName);
 
   function nextOrdinal(key: string): number {
@@ -174,6 +322,7 @@ function scanSource(
         const nameMember = property(argument, "name");
         const name = nameMember === null ? null : staticString(initializer(nameMember));
         if (name !== null) {
+          toolFieldIssues.push(...collectToolFieldIssues(argument, name, sourcePath));
           const fragments = toolFragments(argument, name);
           if (fragments.length > 0) {
             candidates.push({
@@ -291,7 +440,7 @@ function scanSource(
   }
 
   visit(sourceFile);
-  return candidates;
+  return { candidates, toolFieldIssues };
 }
 
 function governedTools(program: ts.Program): string[] {
@@ -337,15 +486,37 @@ export function scanRepository(root: string): TypeScriptCatalog {
     target: ts.ScriptTarget.ES2022,
   });
   const ordinals = new Map<string, number>();
-  const candidates = program
+  const sourceScans = program
     .getSourceFiles()
     .filter(
       (sourceFile) =>
         !sourceFile.isDeclarationFile && sourceFile.fileName.startsWith(extensionRoot),
     )
-    .flatMap((sourceFile) => scanSource(root, sourceFile, ordinals))
+    .map((sourceFile) => scanSource(root, sourceFile, ordinals));
+  const candidates = sourceScans
+    .flatMap((result) => result.candidates)
     .sort((left, right) => left.id.localeCompare(right.id));
-  return { candidates, governed_tools: governedTools(program) };
+  const governed_tools = governedTools(program);
+  const governedSet = new Set(governed_tools);
+  const tool_field_issues = sourceScans
+    .flatMap((result) => result.toolFieldIssues)
+    .filter((issue) => governedSet.has(issue.tool))
+    .sort((left, right) => {
+      const leftKey = [left.path, left.tool, left.selector, left.kind, left.reason];
+      const rightKey = [right.path, right.tool, right.selector, right.kind, right.reason];
+      for (let index = 0; index < leftKey.length; index += 1) {
+        const leftValue = leftKey[index] ?? "";
+        const rightValue = rightKey[index] ?? "";
+        if (leftValue < rightValue) {
+          return -1;
+        }
+        if (leftValue > rightValue) {
+          return 1;
+        }
+      }
+      return 0;
+    });
+  return { candidates, governed_tools, tool_field_issues };
 }
 
 const entrypoint = process.argv[1];
