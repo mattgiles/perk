@@ -77,7 +77,9 @@ import {
   createPerkStatus,
   installPerkFooter,
   latestCacheHitRate,
+  REPORT_DETAIL_TYPE,
   registerTranscriptRenderer,
+  reportDetailEntryRenderer,
   workflowStateEntryRenderer,
 } from "./surfaces/surfaces.ts";
 import { registerBtw } from "./vendor/btw/btw.ts";
@@ -190,9 +192,10 @@ export default function (pi: ExtensionAPI) {
   // publisher below; the footer reads it back via get/subscribe.
   const perkStatus = createPerkStatus();
 
-  // Transcript marker for `perk:workflow-state` deltas (audit §2.3): the renderer body lives in
-  // surfaces.ts, this registration is wiring, and the seam carries the typeof feature-detect
-  // (pre-0.80.4 hosts stay inert). One registration covers every workflow-state appender.
+  // The generic full report-detail entry and the `perk:workflow-state` transition marker. Renderer
+  // bodies live in surfaces.ts; registration is wiring through the pre-0.80.4-safe seam. The report
+  // family is appended by command-attached sinks; one workflow registration covers every appender.
+  registerTranscriptRenderer(pi, REPORT_DETAIL_TYPE, reportDetailEntryRenderer);
   registerTranscriptRenderer(pi, WORKFLOW_STATE_TYPE, workflowStateEntryRenderer);
 
   // The hunk watch feedback receiver controller (contracts §8.58) — factory-scoped (no module

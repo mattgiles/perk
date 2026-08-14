@@ -12,6 +12,7 @@ import {
   btwThreadResetEntryRenderer,
   composeFooterLine,
   createPerkStatus,
+  createReportDetailSink,
   FOOTER_MAX_LINES,
   type FooterDataLike,
   type FooterParts,
@@ -24,8 +25,10 @@ import {
   NOTIFY_MAX_LINES,
   objectiveBudgetEntryRenderer,
   perkFooter,
+  REPORT_DETAIL_TYPE,
   registerTranscriptRenderer,
   report,
+  reportDetailEntryRenderer,
   STATUS_SLOT_PERK,
   type StandingTarget,
   setWorkingMessage,
@@ -591,9 +594,28 @@ test("registerTranscriptRenderer: a host without the method is a silent no-op (p
   });
 });
 
-// --- the transcript marker renderers ---------------------------------------------------------------
+// --- generic report-detail transcript entries ----------------------------------------------------
 
-/** Render a marker: `undefined` when the renderer declined, else the component's lines. */
+test("createReportDetailSink appends the exact generic type and payload", () => {
+  const entries: { customType: string; data?: unknown }[] = [];
+  const sink = createReportDetailSink({
+    appendEntry(customType, data) {
+      entries.push({ customType, data });
+    },
+  });
+  sink("perk: submit — failed\ncomplete detail", "error");
+  assert.equal(REPORT_DETAIL_TYPE, "perk:report-detail");
+  assert.deepEqual(entries, [
+    {
+      customType: "perk:report-detail",
+      data: { text: "perk: submit — failed\ncomplete detail", severity: "error" },
+    },
+  ]);
+});
+
+// --- the transcript renderers ---------------------------------------------------------------------
+
+/** Render an entry: `undefined` when the renderer declined, else the component's lines. */
 function renderMarker(
   renderer: TranscriptRenderer,
   data: unknown,
@@ -606,6 +628,78 @@ function renderMarker(
   );
   return component?.render(opts.width ?? 200);
 }
+
+test("reportDetailEntryRenderer renders every logical row with live severity styling", () => {
+  const text = "perk: submit — failed\r\nfetch first\n\rerror: rejected";
+  const expected = [
+    "<error>perk: submit — failed</>",
+    "<dim>fetch first</>",
+    "",
+    "<dim>error: rejected</>",
+  ];
+  assert.deepEqual(renderMarker(reportDetailEntryRenderer, { text, severity: "error" }), expected);
+  assert.deepEqual(
+    renderMarker(reportDetailEntryRenderer, { text, severity: "error" }, { expanded: true }),
+    expected,
+  );
+
+  let palette = "first";
+  const liveTheme: ThemeLike = { fg: (color, value) => `<${palette}:${color}>${value}</>` };
+  const component = reportDetailEntryRenderer(
+    { data: { text: "headline\ndetail", severity: "warning" } },
+    { expanded: false },
+    liveTheme,
+  );
+  assert.ok(component !== undefined);
+  assert.deepEqual(component.render(200), ["<first:warning>headline</>", "<first:dim>detail</>"]);
+  palette = "second";
+  assert.deepEqual(component.render(200), ["<second:warning>headline</>", "<second:dim>detail</>"]);
+});
+
+for (const [severity, firstColor] of [
+  ["info", "dim"],
+  ["warning", "warning"],
+  ["error", "error"],
+] as const) {
+  test(`reportDetailEntryRenderer styles ${severity} first row ${firstColor}`, () => {
+    assert.deepEqual(renderMarker(reportDetailEntryRenderer, { text: "first\nnext", severity }), [
+      `<${firstColor}>first</>`,
+      "<dim>next</>",
+    ]);
+  });
+}
+
+test("reportDetailEntryRenderer rejects malformed data", () => {
+  for (const data of [
+    undefined,
+    null,
+    [],
+    new Date(),
+    Object.create({ text: "text", severity: "info" }),
+    {},
+    { text: "text" },
+    { severity: "info" },
+    { text: "", severity: "info" },
+    { text: " \r\n\t", severity: "info" },
+    { text: 7, severity: "info" },
+    { text: "text", severity: "fatal" },
+  ]) {
+    assert.equal(renderMarker(reportDetailEntryRenderer, data), undefined, JSON.stringify(data));
+  }
+});
+
+test("reportDetailEntryRenderer truncates every row to the available width", () => {
+  const lines = renderMarker(
+    reportDetailEntryRenderer,
+    { text: "a very long headline\na very long continuation", severity: "info" },
+    { theme: plainTheme, width: 10 },
+  );
+  assert.ok(lines !== undefined);
+  assert.equal(lines.length, 2);
+  for (const line of lines) assert.ok(visibleWidth(line) <= 10, JSON.stringify(line));
+});
+
+// --- the transcript marker renderers ---------------------------------------------------------------
 
 test("workflowStateEntryRenderer: the headline-field vocabulary + precedence", () => {
   const collapsed = (data: unknown) => renderMarker(workflowStateEntryRenderer, data)?.[0];
