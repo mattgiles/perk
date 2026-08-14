@@ -4,13 +4,20 @@ import type { ReportTarget, Severity } from "../surfaces/report.ts";
 import { failFor, ok, type Result } from "./result.ts";
 
 /** A fake ReportTarget that records every notify call (mirrors report.test.ts). */
-function fakeTarget(hasUI: boolean): {
+function fakeTarget(
+  hasUI: boolean,
+  mode?: ReportTarget["mode"],
+): {
   target: ReportTarget;
   notifies: { message: string; type?: Severity }[];
 } {
   const notifies: { message: string; type?: Severity }[] = [];
   return {
-    target: { hasUI, ui: { notify: (message, type) => notifies.push({ message, type }) } },
+    target: {
+      hasUI,
+      ...(mode === undefined ? {} : { mode }),
+      ui: { notify: (message, type) => notifies.push({ message, type }) },
+    },
     notifies,
   };
 }
@@ -67,14 +74,33 @@ test("failFor() label defaults to scope; explicit label overrides content only",
   assert.deepEqual(notifies, [{ message: "perk: address — nope", type: "error" }]);
 });
 
-test("failFor() headful: notifies AND (alsoLog) writes stderr", () => {
-  const { target, notifies } = fakeTarget(true);
+test("failFor() headful print: headline only, complete soft result, no raw stderr", () => {
+  const { target, notifies } = fakeTarget(true, "print");
   const fail = failFor(target, "land");
+  const message = "kaboom\nfetch and rebase first\nerror: failed to push";
+  let result: ReturnType<typeof fail> | undefined;
   const stderr = captureStderr(() => {
-    fail("kaboom", "github_error");
+    result = fail(message, "github_error");
   });
   assert.deepEqual(notifies, [{ message: "perk: land — kaboom", type: "error" }]);
-  assert.deepEqual(stderr, ["perk: land — kaboom"]);
+  assert.deepEqual(stderr, []);
+  assert.deepEqual(result?.content, [{ type: "text", text: `land failed: ${message}` }]);
+  assert.deepEqual(result?.details, {
+    ok: false,
+    error: message,
+    error_type: "github_error",
+  });
+});
+
+test("failFor() headful RPC: headline plus complete stderr mirror", () => {
+  const { target, notifies } = fakeTarget(true, "rpc");
+  const fail = failFor(target, "land");
+  const message = "kaboom\ncomplete detail";
+  const stderr = captureStderr(() => {
+    fail(message, "github_error");
+  });
+  assert.deepEqual(notifies, [{ message: "perk: land — kaboom", type: "error" }]);
+  assert.deepEqual(stderr, [`perk: land — ${message}`]);
 });
 
 test("failFor() headless: stderr exactly once, no notify", () => {
