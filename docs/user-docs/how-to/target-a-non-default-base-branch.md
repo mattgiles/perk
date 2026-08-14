@@ -34,7 +34,7 @@ base = "develop"
 ```
 
 Standalone plans saved in this repo now target `develop` and base their worktrees off
-`origin/develop`. See the [`[workflow]` config reference](../reference/configuration.md#workflow).
+`origin/develop`. See the [`[workflow]` config reference](../reference/configuration/workflow-and-ci.md#workflow).
 
 ### Per-objective base — `objective create --base`
 
@@ -77,5 +77,5 @@ When no base is declared anywhere, behavior is unchanged: plans target the GitHu
   implement, and submit consume the pinned base.
 - **Do:** [How to author an objective roadmap](author-a-roadmap.md) — authoring the objective
   whose base every node plan inherits.
-- **Look up:** [Configuration files](../reference/configuration.md) — the exact `[workflow]` keys,
-  defaults, and overlay semantics.
+- **Look up:** [Workflow and CI](../reference/configuration/workflow-and-ci.md#workflow) — the
+  exact `[workflow]` keys, defaults, and overlay semantics.

@@ -67,5 +67,5 @@ agent's focused review output.
 
 - **Look up:** [pi-subagents authoring and workflow guidance](https://github.com/nicobailon/pi-subagents/blob/main/skills/pi-subagents/SKILL.md)
   — current agent and workflow guidance.
-- **Look up:** [`[models.subagents]`](../reference/configuration.md#modelssubagents) — perk-owned
+- **Look up:** [`[models.subagents]`](../reference/configuration/models-and-compaction.md#modelssubagents) — perk-owned
   agent model configuration and builtin override rules.

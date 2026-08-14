@@ -278,4 +278,4 @@ echoed-identity mismatch degrades honestly instead of poisoning the whole bundle
 - [`shared/contracts.md` §8.50](../../shared/contracts.md) — authoritative judge → wave → fold contract.
 - [`docs/design/session-audit-dogfood.md`](../design/session-audit-dogfood.md) — live calibration record and degradation-arm checklist.
 - [`docs/learned/workflow/session-audit-expectations.md`](../learned/workflow/session-audit-expectations.md) — catalog curation and checker semantics.
-- [`docs/user-docs/reference/configuration.md`](../user-docs/reference/configuration.md) — `[models.subagents] session-auditor` model key.
+- [`docs/user-docs/reference/configuration/models-and-compaction.md#modelssubagents`](../user-docs/reference/configuration/models-and-compaction.md#modelssubagents) — `[models.subagents] session-auditor` model key.

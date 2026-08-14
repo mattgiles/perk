@@ -21,11 +21,11 @@ perk-managed slice of `.pi/settings.json`, `.pi/agents/perk/*.md`, `.pi/APPEND_S
 `.agents/manifest.d/perk*.yaml`. **Never imply `.pi/` is generally perk-owned** — perk owns its
 own root and *contributes* materializations into the discovery roots.
 
-The SSOT for the contract is `docs/user-docs/reference/configuration.md` → section "Repository
-layout — the dot-directory contract"; the compact mirror is
-`skills/perk-expert/references/configuration.md` (user-docs is SSOT via its *Canonical source*
-footer). Per the config-surface second-mirror convention, **update BOTH the same turn** the
-topology changes.
+The SSOT for the contract is
+`docs/user-docs/reference/configuration/repository-layout.md` → section "Repository layout — the
+dot-directory contract"; the compact mirror is `skills/perk-expert/references/configuration.md`
+(user-docs is SSOT via its *Canonical sources* footer). Per the config-surface second-mirror
+convention, **update BOTH the same turn** the topology changes.
 
 ## The centralized path seam (Node 1.1)
 
@@ -205,4 +205,4 @@ narrative cites the merge PR). As of these learnings:
 - `docs/learned/workflow/init-external-cli.md` — the skills manifest reconverge
 - `docs/learned/workflow/write-capable-cold-doors.md` — `repo_skills_root` / the skills source dir
 - `docs/learned/workflow/worktree-lifecycle.md` — the worktree binding + gitignore dogfood hazard
-- `docs/user-docs/reference/configuration.md` — the canonical dot-directory contract (SSOT)
+- `docs/user-docs/reference/configuration/repository-layout.md` — the canonical dot-directory contract (SSOT)

@@ -70,7 +70,7 @@ in-session gate says exactly what you expect before you rely on it.
 
 - **Do:** [How to run CI checks in a session](run-ci-in-session.md) — the day-to-day run → report
   → fix → verify loop these rows power.
-- **Look up:** [Configuration files](../reference/configuration.md) — the exact `[ci]` and
-  `[[ci.checks]]` keys, types, and gating rules.
+- **Look up:** [Workflow and CI](../reference/configuration/workflow-and-ci.md#ci) — the exact
+  `[ci]` and `[[ci.checks]]` keys, types, and gating rules.
 - **Understand:** [How perk thinks](../explanation/how-perk-thinks.md) — why perk reports results
   and never fixes them for you.

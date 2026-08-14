@@ -62,7 +62,7 @@ cold door's `pi --approve` for the run). **Do not run perk stages in untrusted c
 
 - **Do:** [How to drive a change through the full spine](drive-the-full-spine.md) — the stage
   launches that cut the fresh worktrees this hook prepares.
-- **Look up:** [Configuration files](../reference/configuration.md) — the `[worktree]` keys and
-  local-overlay replacement semantics.
+- **Look up:** [Workflow and CI](../reference/configuration/workflow-and-ci.md#worktree) — the
+  `[worktree]` keys and local-overlay replacement semantics.
 - **Understand:** [How perk thinks](../explanation/how-perk-thinks.md) — why every stage starts in
   a fresh, isolated worktree.

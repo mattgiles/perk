@@ -16,8 +16,8 @@ described as it is and structured to mirror the product.
 
 - **[CLI commands](./cli.md)** — the surface you touch first: every `perk …` command,
   written against real `--help` output.
-- **[Configuration files](./configuration.md)** — every `.perk/config.toml` table and the
-  `.perk/local.toml` per-user overlay.
+- **[Configuration files](./configuration.md)** — the precedence and overlay hub, with five
+  exact-detail family references for every repository configuration surface.
 
 </div>
 
@@ -30,9 +30,9 @@ described as it is and structured to mirror the product.
 - **[In-session commands & tools](./in-session.md)** — the stable session-interior hub, with
   family references for stages and doors, workflow commands, review and authoring, and
   model-facing tools.
-- **[Configuration files](./configuration.md)** — every `.perk/config.toml` table and the
-  `.perk/local.toml` per-user overlay, with overlay semantics and the canonical repository layout
-  (dot-directory) contract.
+- **[Configuration files](./configuration.md)** — the precedence, overlay, and value-type hub,
+  with family references for repository layout, workflow and CI, backends, models and compaction,
+  and skills and bindings.
 - **[Objectives — the roadmap model](./objectives.md)** — the objective command recap, the
   roadmap node schema, node statuses, and the objective metadata blocks.
 - **[Providers & issue backends](./providers-and-backends.md)** — the supported provider set (the

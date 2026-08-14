@@ -14,7 +14,7 @@ its installed link.
 ## Prerequisites
 
 Run `perk init` once and make sure the repository has a GitHub origin. The
-[repo-authored skills configuration](../reference/configuration.md#repo-authored-skills-piskills)
+[repo-authored skills configuration](../reference/configuration/skills-and-bindings.md#repo-authored-skills-perkskills)
 uses that origin to resolve committed skill content.
 
 ## Steps
@@ -63,5 +63,5 @@ The source stays versioned at `.perk/skills/my-skill/`, while the synchronized
 - **Do:** [Attach a skill to a stage](./attach-a-skill-to-a-stage.md) — deliver the synchronized
   skill.
 - **Look up:** [`perk skills`](../reference/cli.md#perk-skills-alias-sk) — exact lifecycle commands.
-- **Look up:** [Skills configuration](../reference/configuration.md#skills) — exposure and
+- **Look up:** [Skills configuration](../reference/configuration/skills-and-bindings.md#skills) — exposure and
   resolution settings.

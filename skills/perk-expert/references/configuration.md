@@ -33,6 +33,8 @@ perk reads two files under `.perk/`:
    `.pi/settings.json` deterministic). Keys **read at runtime** honor it — `[models.stages.<id>]`,
    `[models.subagents]`, `[ci]`, `[compaction] objective_threshold`, `[workflow]`, `[worktree]`,
    `[providers]`, `[skills]`, `[[bindings]]`.
+4. `[linear] api_key` is **local-only**: perk reads it only from `.perk/local.toml`, and an
+   exported `LINEAR_API_KEY` takes precedence.
 
 ## Repository layout — the dot-directory contract
 
@@ -353,8 +355,10 @@ thinking = "xhigh"
 
 How the session manages its context. The `enabled` / `reserve_tokens` / `keep_recent_tokens`
 settings keys are **committed-only** — converged into `.pi/settings.json`'s `compaction` object by
-`perk init` / `perk doctor --fix` (re-run to re-converge). The `objective_threshold` sibling is
-**runtime-read** (overlay-aware) by the extension instead.
+`perk init` / `perk doctor --fix` (re-run to re-converge). Convergence is write-when-present and
+leave-when-absent per key: absent keys leave existing settings untouched, while removing them
+leaves previously written values in place to clean up by hand. The `objective_threshold` sibling
+is **runtime-read** (overlay-aware) by the extension instead.
 
 | Key | Type | Default | Notes |
 | --- | --- | --- | --- |
@@ -420,7 +424,8 @@ are untouched.
 
 ### `[[bindings]]`
 
-Array-of-tables; each row attaches a skill to a stage or command.
+Array-of-tables; each row attaches a skill to a stage or command. Every field is required, and
+rows have no defaults.
 
 | Key | Type | Notes |
 | --- | --- | --- |
@@ -461,4 +466,10 @@ or a declared stage id that isn't a registry stage.
 
 ---
 
-*Canonical source: `docs/user-docs/reference/configuration.md`.*
+*Canonical sources: `docs/user-docs/reference/configuration.md` for orientation, precedence,
+the table map, and value types; family detail in
+`docs/user-docs/reference/configuration/repository-layout.md`,
+`docs/user-docs/reference/configuration/workflow-and-ci.md`,
+`docs/user-docs/reference/configuration/backends.md`,
+`docs/user-docs/reference/configuration/models-and-compaction.md`, and
+`docs/user-docs/reference/configuration/skills-and-bindings.md`.*

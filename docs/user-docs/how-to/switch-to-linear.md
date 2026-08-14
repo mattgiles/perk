@@ -73,7 +73,7 @@ or objective issues; finish them on GitHub or recreate the intended work in Line
 
 - **Do:** [Select a provider](./select-a-provider.md) — configure the independent plan, footer, and
   web seams.
-- **Look up:** [`[issues]` configuration](../reference/configuration.md#issues) — Linear keys and
+- **Look up:** [`[issues]` configuration](../reference/configuration/backends.md#issues) — Linear keys and
   credential precedence.
 - **Look up:** [Linear backend reference](../reference/providers-and-backends.md#issue-backend--linear-reference)
   — backend effects, identifiers, labels, and maturity.

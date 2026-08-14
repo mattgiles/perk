@@ -207,7 +207,7 @@ equal to the selection) and refused with a typed error (`worktree_unbound`,
 `worktree_branch_mismatch`, `worktree_plan_mismatch`) rather than ever silently rebound or reset.
 A **missing** checkout for the reuse launchers (`submit`/`address`/`land` — not `learn`) is
 **restored** non-destructively from the existing `origin/plan-<id>` branch (see the setup-hook
-note in [Configuration](configuration.md#worktree)).
+note in [Workflow and CI](configuration/workflow-and-ci.md#worktree)).
 
 **Pass-through grammar (`implement`/`address`).** Before the first bare `--`, perk accepts only
 its own options plus at most one positional `PLAN`; everything after the `--` is delivered to
