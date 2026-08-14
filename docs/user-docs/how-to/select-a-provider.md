@@ -64,5 +64,5 @@ differences.
   after selection.
 - **Look up:** [`[providers]` configuration](../reference/configuration/backends.md#providers) — selector
   syntax and precedence.
-- **Look up:** [Providers and backends](../reference/providers-and-backends.md) — supported set,
-  postures, fallback, and packages.
+- **Look up:** [Providers](../reference/providers-and-backends/providers.md) — postures, fallback, and
+  package convergence; the parent hub carries the supported-set table.

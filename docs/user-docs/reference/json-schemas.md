@@ -7,84 +7,113 @@ sidebar:
 
 # JSON Schema snapshots
 
-This page describes the **JSON Schema snapshots** perk commits for its cross-plane machine
-surfaces. It describes the surface; it does not teach a task (those belong in
-[how-to/](../how-to/index.md)) or argue a design (those belong in
-[explanation/](../explanation/index.md)). See the [user-docs router](../index.mdx) for how this
-quadrant fits the whole.
+perk commits JSON Schema snapshots for its Pydantic boundary models so a machine-surface change is
+visible and reviewable in the same pull request as its code. The live registry contains **26**
+snapshots: 3 shared contracts, 5 machine inputs, and 18 output envelopes.
 
-perk's machine-facing surfaces are Pydantic **boundary models** (`perk/boundary.py`). Their
-`model_json_schema()` is committed as **golden snapshots** under `shared/schemas/`. Their function
-is making machine-surface shape changes **reviewable in PRs**: a change to any boundary model
-shows up as a schema diff guarded by the drift test, so a shape change is always deliberate. The
-snapshots are not a runtime resource — neither plane reads them at runtime (TypeScript reads the
-YAML contracts directly; Python validates via the live models) — and they carry no
-consumer-publication promise.
+The snapshots are golden artifacts under `shared/schemas/`. They are not runtime resources and do
+not promise a separately versioned public API: Python validates with the live models, while the two
+planes read their live shared contracts directly.
 
 ## Layout
 
-The snapshots are grouped by role under `shared/schemas/`:
+Snapshots are grouped by role:
 
-- `contracts/` — the shared-YAML parse contracts.
-- `inputs/` — the machine batch inputs.
-- `outputs/` — the `--json` output envelopes.
+- `contracts/` — shared-YAML parse contracts;
+- `inputs/` — machine-authored batch and structured inputs;
+- `outputs/` — JSON output envelopes.
 
-Files are `<name>.schema.json`.
+Every file uses the `<name>.schema.json` suffix. The filename column below is relative to its
+category directory.
 
 ## What each snapshot describes
 
 ### `contracts/` — shared-YAML parse contracts
 
-The three parsed cross-plane contracts (validation mode — the shape perk **accepts**):
+<!-- perk:reference-facts:schemas-contracts:start -->
+| Schema filename | Model class | Mode | Purpose |
+| --- | --- | --- | --- |
+| `registry.schema.json` | `RegistryFile` | `validation` | Accepted shape of the stage registry in `shared/registry.yaml`. |
+| `bindings.schema.json` | `BindingsFile` | `validation` | Accepted shape of the skill-binding set in `shared/bindings.yaml`. |
+| `providers.schema.json` | `ProvidersFile` | `validation` | Accepted shape of the provider catalog in `shared/providers.yaml`. |
+<!-- perk:reference-facts:schemas-contracts:end -->
 
-| Schema | Model | Describes |
-| --- | --- | --- |
-| `registry.schema.json` | `RegistryFile` | the stage registry (`shared/registry.yaml`) |
-| `bindings.schema.json` | `BindingsFile` | the skill-binding set (`shared/bindings.yaml`) |
-| `providers.schema.json` | `ProvidersFile` | the provider-selection catalog (`shared/providers.yaml`) |
+### `inputs/` — machine inputs
 
-### `inputs/` — machine batch inputs
+<!-- perk:reference-facts:schemas-inputs:start -->
+| Schema filename | Model class | Mode | Purpose |
+| --- | --- | --- | --- |
+| `review-post-batch.schema.json` | `ReviewBatchInput` | `validation` | Batch accepted by the advisory PR review-post surface. |
+| `review-submit-batch.schema.json` | `ReviewSubmitBatchInput` | `validation` | Atomic foreign-PR review submission batch. |
+| `resolve-threads-batch.schema.json` | `ResolveThreadsBatch` | `validation` | Review-thread reply and resolution batch. |
+| `handoff-arg.schema.json` | `HandoffArgInput` | `validation` | Structured run handoff accepted by stage launchers. |
+| `structured-roadmap-node.schema.json` | `StructuredRoadmapNode` | `validation` | One strict objective-roadmap authoring node. |
+<!-- perk:reference-facts:schemas-inputs:end -->
 
-The strict machine-authored CLI inputs (validation mode):
+### `outputs/` — JSON envelopes
 
-| Schema | Model | Describes |
-| --- | --- | --- |
-| `review-post-batch.schema.json` | `ReviewBatchInput` | the `pr review-post` batch |
-| `review-submit-batch.schema.json` | `ReviewSubmitBatchInput` | the `pr review-submit` batch |
-| `resolve-threads-batch.schema.json` | `ResolveThreadsBatch` | the resolve-threads batch |
-| `handoff-arg.schema.json` | `HandoffArgInput` | the `--handoff` payload object |
-| `structured-roadmap-node.schema.json` | `StructuredRoadmapNode` | one objective-roadmap node |
+<!-- perk:reference-facts:schemas-outputs:start -->
+| Schema filename | Model class | Mode | Purpose |
+| --- | --- | --- | --- |
+| `plan-save.schema.json` | `PlanSaveOut` | `serialization` | Saved plan reference, issue, and linkage result. |
+| `pr-submit.schema.json` | `PrSubmitOut` | `serialization` | Pull-request publication result. |
+| `pr-ready.schema.json` | `PrReadyOut` | `serialization` | Draft-to-ready transition result. |
+| `pr-land.schema.json` | `PrLandOut` | `serialization` | Pull-request landing and plan-finalization result. |
+| `pr-feedback.schema.json` | `PrFeedbackOut` | `serialization` | Classified PR feedback and thread inventory. |
+| `pr-review-context.schema.json` | `PrReviewContextOut` | `serialization` | Read-only PR review context. |
+| `pr-review-checkout.schema.json` | `PrReviewCheckoutOut` | `serialization` | Isolated PR review checkout result. |
+| `pr-review-cleanup.schema.json` | `PrReviewCleanupOut` | `serialization` | Review checkout cleanup result. |
+| `pr-review-submit.schema.json` | `PrReviewSubmitOut` | `serialization` | Atomic posted-review result. |
+| `learn-capture.schema.json` | `LearnCaptureOut` | `serialization` | Captured learning issue and pending-learn transition. |
+| `learn-skip.schema.json` | `LearnSkipOut` | `serialization` | Explicit learn-skip and pending-learn transition. |
+| `init-report.schema.json` | `InitReportOut` | `serialization` | Repository convergence and readiness report. |
+| `doctor-report.schema.json` | `DoctorReportOut` | `serialization` | Repository diagnosis and repair report. |
+| `objective-stack-status.schema.json` | `ObjectiveStackStatusOut` | `serialization` | Stacked delivery-train status and unresolved operations. |
+| `objective-stack-sync.schema.json` | `ObjectiveStackSyncOut` | `serialization` | Stack sync preview, cascade, or continuation result. |
+| `objective-stack-recover.schema.json` | `ObjectiveStackRecoverOut` | `serialization` | Interrupted-operation classification and recovery result. |
+| `objective-stack-land.schema.json` | `ObjectiveStackLandOut` | `serialization` | Atomic train readiness or landing result. |
+| `objective-doctor.schema.json` | `ObjectiveDoctorOut` | `serialization` | Objective manifest, cancellation, and train diagnosis. |
+<!-- perk:reference-facts:schemas-outputs:end -->
 
-### `outputs/` — `--json` output envelopes
-
-The thirteen `--json` envelopes (serialization mode — the shape consumers **receive**): `plan-save`,
-`pr-submit`, `pr-ready`, `pr-land`, `pr-feedback`, `pr-review-context`, `pr-review-checkout`,
-`pr-review-cleanup`, `pr-review-submit`, `learn-capture`, `learn-skip`, `init-report`,
-`doctor-report` (`.schema.json` each). Nested per-field sub-models ride along in `$defs`.
+The `validation` mode records what a parser accepts. The `serialization` mode records what a JSON
+producer emits. Nested field models appear under each snapshot's `$defs` rather than as additional
+registry entries.
 
 ## Where they ship
 
-The snapshots are bundled into both build artifacts — `perk/_shared/schemas/` in the Python wheel,
-`shared/schemas/` in the npm package — read at runtime by neither.
+The same snapshots are bundled into both distribution artifacts:
+
+- `perk/_shared/schemas/` in the Python wheel;
+- `shared/schemas/` in the npm package.
+
+Neither artifact reads the snapshots at runtime. Packaging them keeps the reviewed contract record
+available alongside each distributed plane.
 
 ## Generation, mode, and drift
 
-The snapshots are generated from the live boundary models via `model_json_schema()`. The **mode is
-per category**: parse/input contracts use **validation mode** (what perk accepts); output envelopes
-use **serialization mode** (what `--json` consumers receive).
+The registry in `tests/_schemas.py` is the single source of truth for snapshot path, model class,
+and mode. Regenerate committed files only with:
 
-The committed files are regenerated only via:
-
-```
+```sh
 PERK_UPDATE_SCHEMAS=1 uv run pytest tests/test_contract_schemas.py
 ```
 
-`tests/test_contract_schemas.py` fails CI on any un-regenerated drift — per-model drift assertions,
-a no-orphans/no-gaps coverage test, and a per-category mode-correctness check — so a schema change
-is always reviewed intentionally.
+`tests/test_contract_schemas.py` compares every file with a fresh `model_json_schema()` render,
+rejects orphan or missing snapshots, and checks category mode. The user-docs reference-facts guard
+also derives this inventory from the registry, so a new schema cannot leave these tables silently
+stale.
 
 ## Non-goals
 
-- `ConfigFileModel` (`.perk/config.toml`, TOML — not a shared YAML contract) is not snapshotted.
-- The stored-block serializers `PlanHeaderOut` / `PlanRefOut` get no standalone snapshots;
-  `PlanRefOut` appears transitively in `plan-save.schema.json`'s `$defs`.
+- `ConfigFileModel` describes TOML configuration rather than a shared YAML contract and is not
+  snapshotted.
+- Stored-block serializers such as `PlanHeaderOut` and `PlanRefOut` have no standalone snapshots;
+  `PlanRefOut` appears transitively in `plan-save.schema.json`.
+- The snapshots do not replace runtime validation or establish an independent compatibility
+  lifecycle.
+
+## Related
+
+- **Look up:** [CLI commands](./cli.md).
+- **Look up:** [Model-facing tools](./in-session/model-tools.md).
+- **Understand:** [How perk thinks](../explanation/how-perk-thinks.md).

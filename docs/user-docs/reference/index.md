@@ -33,11 +33,13 @@ described as it is and structured to mirror the product.
 - **[Configuration files](./configuration.md)** — the precedence, overlay, and value-type hub,
   with family references for repository layout, workflow and CI, backends, models and compaction,
   and skills and bindings.
-- **[Objectives — the roadmap model](./objectives.md)** — the objective command recap, the
-  roadmap node schema, node statuses, and the objective metadata blocks.
-- **[Providers & issue backends](./providers-and-backends.md)** — the supported provider set (the
-  plan, footer, and web seams) and the Linear issue-backend reference (auth, labels, identifiers,
-  maturity).
+- **[Objectives — the roadmap model](./objectives.md)** — the complete objective command map,
+  roadmap node model, delivery policies, and GitHub/Linear storage lifecycle.
+- **[Providers & issue backends](./providers-and-backends.md)** — the supported-set hub, with
+  separate references for [provider postures and selection](./providers-and-backends/providers.md)
+  and [GitHub/Linear storage mechanics](./providers-and-backends/issue-backends.md).
 - **[JSON Schema snapshots](./json-schemas.md)** — the committed golden snapshots of perk's
-  boundary models (the shared-YAML contracts, the machine batch inputs, and the `--json` output
-  envelopes), drift-guarded so shape changes are reviewable.
+  boundary models (the shared-YAML contracts, machine inputs, and JSON output envelopes), guarded
+  so shape changes remain reviewable.
+- **[Operator glossary](./glossary.md)** — the stable workflow terms used across commands,
+  messages, configuration, and these docs.

@@ -123,7 +123,7 @@ plane and perk bridges review without Plannotator's submit tool. Bare unscoped P
 their package-provided tools.
 
 For package selection, registration timing, and provider fallback behavior, use the
-[Providers and issue backends reference](../providers-and-backends.md).
+[Providers reference](../providers-and-backends/providers.md).
 
 ## Spawned-child tools
 

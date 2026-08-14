@@ -1,37 +1,29 @@
 ---
 title: "Objectives — the roadmap model"
-description: "The objective command surface at a glance, the roadmap node schema, node statuses, and the stored metadata blocks."
+description: "The objective command map, roadmap node model, delivery policies, and backend-specific storage and lifecycle."
 sidebar:
   order: 3040
 ---
 
 # Objectives — the roadmap model
 
-This page describes perk's **objective model**: the objective command surface at a glance, the
-roadmap **node schema**, the **node statuses** (and the resumable-lease lifecycle), and the
-**metadata blocks** an objective stores on GitHub. It describes the model; it does not teach a task
-(those belong in [how-to/](../how-to/index.md)) or argue a design (those belong in
-[explanation/](../explanation/index.md)). See the [user-docs router](../index.mdx) for how this
-quadrant fits the whole.
-
-This page is **human-reviewed for accuracy** against `perk/objective.py` (`NodeStatus`,
-`ObjectiveNode`, `TERMINAL`, the resumable-lease docstrings) and `shared/contracts.md` (the storage
-blocks), like the [in-session reference](./in-session.md).
+Use this page to look up the complete objective command map, roadmap node model, delivery
+policies, and backend-specific storage and lifecycle.
 
 ## Orientation
 
-An **objective** is a multi-plan goal whose storage is **backend-selectable** through the `[issues]`
-selection (see [Providers & issue backends](./providers-and-backends.md)). Objectives live in their
-own `ObjectiveStore` tier — distinct from the plan/learn issue tier but sharing the same `[issues]`
-selection. The **storage shape differs by backend**. Under the default **GitHub** backend, an
-objective is stored as a **GitHub issue + its first comment**: the issue body carries the compact
-header and the canonical roadmap (as collapsible `perk:`-namespaced metadata blocks); the first
-comment carries the human-readable rendered roadmap **table** plus reconcilable **prose**. Under the
-**Linear** backend, an objective is a **Linear Project** — the Project overview carries the header +
-reconcilable prose, each roadmap node is a **node-issue** in the Project, phases are **milestones**,
-and explicit `depends_on` edges are **blocking relations** (see
-[The manifest (Linear-Project objectives only)](#the-manifest-linear-project-objectives-only) below).
-As the roadmap advances, the objective emits bounded plans — one per node.
+An **objective** is a multi-plan goal. Its roadmap advances by emitting one bounded plan per node.
+The committed `[issues]` selection chooses the objective store as well as the plan/learning issue
+backend, so both tiers stay in the same tracker family while using distinct protocols.
+
+Under the default **GitHub** backend, an objective is a GitHub Issue plus its first comment. The
+issue body carries the compact header and canonical roadmap in metadata blocks; the first comment
+carries the rendered roadmap table and Reconcilable prose. Under **Linear**, an objective is a
+Linear Project. Its overview carries the copyable command callout and human Reconcilable prose;
+the objective header and manifest live as attachments on a metadata sentinel issue, and per-node
+state lives as attachments on node-issues. Phases are Project Milestones and explicit dependencies
+are blocking relations. See [Issue backends](./providers-and-backends/issue-backends.md) for the
+full GitHub/Linear storage comparison.
 
 For the *why* of objectives — how a roadmap emits bounded plans as it advances — read
 [How perk thinks](../explanation/how-perk-thinks.md). For a guided, end-to-end walkthrough, see
@@ -39,46 +31,56 @@ For the *why* of objectives — how a roadmap emits bounded plans as it advances
 
 ## Objective commands at a glance
 
-A compact recap of the objective surface. Each row links to its authoritative entry in the
-[CLI reference](./cli.md) (cold `perk …` commands) or the
-[Workflow commands](./in-session/workflow-commands.md) (warm `/…` commands + companion tools).
+Each row links to its authoritative entry in the [CLI reference](./cli.md) or the
+[Workflow commands](./in-session/workflow-commands.md).
 
 | Surface | What it does |
 | --- | --- |
-| [`perk objective author`](./cli.md#perk-objective-author) | Draft a new objective + roadmap in a read-only session (or adopt a pre-existing source in place with `--from`). |
-| [`perk objective save`](./cli.md#perk-objective-save) | Persist the drafted objective to GitHub (read-only → read-write boundary). |
+| [`perk objective author`](./cli.md#perk-objective-author) | Draft a new objective and roadmap, optionally adopting a pre-existing source with `--from`. |
+| [`perk objective save`](./cli.md#perk-objective-save) | Persist an authored objective at the read-only → read-write boundary. |
 | [`perk objective plan`](./cli.md#perk-objective-plan-number) | Select the next node and author a bounded plan. |
+| [`perk objective create`](./cli.md#perk-objective-create-alias-new) (`new`) | Create an objective directly from structured input. |
 | [`perk objective show`](./cli.md#perk-objective-show-number-alias-s) (`s`) | Show the header, roadmap, summary, and next node. |
-| [`perk objective node`](./cli.md#perk-objective-node-number) | Update one node (explicit-status-only). |
-| [`perk objective node-engagement`](./cli.md#perk-objective-node-engagement-number) | Read a node-issue's pre-planning human engagement (Linear-first). |
-| [`perk objective engagement`](./cli.md#perk-objective-engagement-number) | Read the objective + node-issue human engagement (comments + edits) as an untrusted-DATA block. |
-| [`perk objective reconcile`](./cli.md#perk-objective-reconcile-number-alias-rec) (`rec`) | Rewrite the Reconcilable prose region against the merged diff (now also weighs human engagement). |
+| [`perk objective node`](./cli.md#perk-objective-node-number) | Update one node with an explicit status or backlink change. |
+| [`perk objective node-add`](./cli.md#perk-objective-node-add-number) | Add a genuinely-new node and assign its next phase-local id. |
+| [`perk objective engagement`](./cli.md#perk-objective-engagement-number) | Read objective and node-issue human engagement as untrusted data. |
+| [`perk objective node-engagement`](./cli.md#perk-objective-node-engagement-number) | Read one node-issue's pre-planning engagement. |
+| [`perk objective reconcile`](./cli.md#perk-objective-reconcile-number-alias-rec) (`rec`) | Rewrite only the Reconcilable prose region after a merge. |
+| [`perk objective replan`](./cli.md#perk-objective-replan-number) | Re-author unfinished work as a superseding objective. |
 | [`perk objective next`](./cli.md#perk-objective-next-number-alias-n) (`n`) | Print the next plannable node. |
-| [`perk objective run`](./cli.md#perk-objective-run-number-alias-r) (`r`) | Advance the backlog one autonomously-safe step. |
-| [`perk objective doctor`](./cli.md#perk-objective-doctor-number-alias-doc) (`doc`) | Detect (and `--fix` repair) drift: Linear manifest vs live state, plus the delivery-train diagnosis on every backend. |
-| [`/objective`](./in-session/workflow-commands.md#objective) | Show, set, or clear the active objective + budget. |
+| [`perk objective run`](./cli.md#perk-objective-run-number-alias-r) (`r`) | Advance the backlog one autonomously safe step. |
+| [`perk objective doctor`](./cli.md#perk-objective-doctor-number-alias-doc) (`doc`) | Diagnose and optionally repair manifest, cancellation, or delivery-train drift. |
+| [`perk objective stack status`](./cli.md#perk-objective-stack-status-objective) | Report the published delivery train and unresolved operations. |
+| [`perk objective stack sync`](./cli.md#perk-objective-stack-sync-objective) | Preview or cascade a published suffix after an amend or base advance. |
+| [`perk objective stack recover`](./cli.md#perk-objective-stack-recover-objective) | Conclude an interrupted stack operation and sweep residue. |
+| [`perk objective stack land`](./cli.md#perk-objective-stack-land-objective) | Preview or atomically land the remaining train. |
+| [`/objective`](./in-session/workflow-commands.md#objective) | Show, set, or clear the active objective and budget. |
 | [`/objective-plan`](./in-session/workflow-commands.md#objective-plan) + `objective_node` | Start the plan factory; link a plan or advance a node. |
-| [`/objective-reconcile`](./in-session/workflow-commands.md#objective-reconcile) + `reconcile_objective` | Reconcile the prose region post-land. |
+| [`/objective-reconcile`](./in-session/workflow-commands.md#objective-reconcile) + `reconcile_objective` | Reconcile the prose region after land. |
 | [`/objective-save`](./in-session/workflow-commands.md#objective-save) + `objective_draft` / `objective_save` | Draft and save an objective in-session. |
 
-`perk objective author` has **no** warm slash twin — objective authoring is reached cold, or via
-plan-mode read-only authoring.
+`perk objective author` has no warm slash twin; objective authoring starts from the cold command or
+from plan-mode read-only authoring.
 
 ## The roadmap node schema
 
-Each roadmap node (`ObjectiveNode`) is a flat record. `id`, `description`, and `status` are
-required; the rest are optional.
+Structured authoring accepts `StructuredRoadmapNode`; stored roadmaps use `ObjectiveNode`. The
+input model supplies `pending` when `status` is omitted, but every stored node has an explicit
+status. `adopt_issue` is the other input-only field: authoring consumes it as an adoption side-map
+and drops it before persistence.
 
-| Field | Type | Required | Semantics |
+<!-- perk:reference-facts:objective-fields:start -->
+| Field | Structured authoring input | Stored node | Semantics |
 | --- | --- | --- | --- |
-| `id` | string | yes | Stable node id, e.g. `"1.2"`. The **phase** is derived from the id prefix (`"1.2"` → phase 1, `"2A.1"` → phase 2A) and is never stored. |
-| `description` | string | yes | What the node delivers. |
-| `status` | string | yes | One of the six [node statuses](#node-statuses) below. |
-| `pr` | string \| null | no | The linked plan/PR backlink (e.g. `"#456"`), or `null` when none. |
-| `depends_on` | list \| null | no | Dependency node ids. **Tri-state:** `null`/absent → infer **sequential** deps (the previous node); `[]` → explicitly **no** deps; `["1.1", …]` → **explicit** deps. |
-| `slug` | string | no | Optional short slug. |
-| `comment` | string | no | Optional note. |
-| `adopt_issue` | string | no | **Adoption only** (`objective author --from`, Linear): the id/identifier of a pre-existing source issue this node adopts in place. The mapped issue is reused as the node (title/body verbatim); unmapped nodes mint fresh node-issues. Ignored on GitHub. Carried as a side-map, not on the stored node. |
+| `id` | required string | required | Stable node id, e.g. `"1.2"`. The phase is derived from its prefix and is never stored separately. |
+| `description` | required string | required | What the node delivers. |
+| `status` | optional; defaults to `pending` | required | One of the six [node statuses](#node-statuses). |
+| `slug` | optional string | optional | Short stable label for the node. |
+| `pr` | optional string or null | optional | Linked plan/PR backlink, or null when none. |
+| `depends_on` | optional list or null | optional | Tri-state: absent/null infers the previous node; `[]` means no dependencies; a non-empty list is explicit. |
+| `comment` | optional string | optional | Operator note attached to the node. |
+| `adopt_issue` | optional string | not stored | Linear authoring-only source issue id; consumed as an adoption mapping and dropped from `ObjectiveNode`. |
+<!-- perk:reference-facts:objective-fields:end -->
 
 Nodes can also be **inserted post-hoc** during reconciliation — `add_objective_node` (warm tool) /
 [`perk objective node-add`](./cli.md#perk-objective-node-add-number) (cold) auto-assigns the next
@@ -95,6 +97,7 @@ the invariant rides node *insertion* only.
 
 A node's `status` is one of six values (`NodeStatus`):
 
+<!-- perk:reference-facts:objective-statuses:start -->
 | Status | Meaning |
 | --- | --- |
 | `pending` | Not yet started; plannable once its dependencies are terminal. |
@@ -103,6 +106,7 @@ A node's `status` is one of six values (`NodeStatus`):
 | `done` | Completed and landed. **Terminal.** |
 | `blocked` | Dependencies are not all terminal (or set explicitly). |
 | `skipped` | Deliberately not done. **Terminal** — satisfies the node as a dependency. |
+<!-- perk:reference-facts:objective-statuses:end -->
 
 - **Terminal set** = `{done, skipped}`. A dependency is "satisfied" only when terminal, so a
   terminal node **unblocks** the nodes that depend on it.
@@ -184,7 +188,7 @@ day-to-day, see [How to review a stacked PR train](../how-to/review-a-stacked-tr
 On GitHub, an objective stores three `perk:`-namespaced, schema-version-`"1"` metadata blocks as
 collapsible sections an operator can read with `gh issue view N` (under Linear the same header
 fields ride native **attachments** instead — see
-[Providers & backends](./providers-and-backends.md)):
+[Issue backends](./providers-and-backends/issue-backends.md)):
 
 - **`objective-header`** (issue body) — compact, queryable
   `{run_id, created, objective_comment_id, status, base}`, where `status` is the objective-level
@@ -259,20 +263,8 @@ own comments + edits; **Linear** surfaces the project's comments plus each node-
 comments/edits. You can inspect it directly with the same command (`--json` for the machine
 payload).
 
-## See also
+## Related
 
-- [CLI commands](./cli.md) — the authoritative `perk objective …` catalog.
-- [Workflow commands](./in-session/workflow-commands.md) — the warm `/objective-*` commands and companion tools.
-- [Tutorial 2 → Drive a multi-plan goal with an objective](../tutorials/drive-an-objective.mdx) — the
-  guided lesson.
-- [How perk thinks](../explanation/how-perk-thinks.md) — the *why* behind objectives.
-- How-to guides: [author a roadmap](../how-to/author-a-roadmap.md),
-  [advance or skip nodes](../how-to/advance-or-skip-nodes.md),
-  [reconcile an objective](../how-to/reconcile-an-objective.md),
-  [target a non-default base branch](../how-to/target-a-non-default-base-branch.md),
-  [run the learn-docs factory](../how-to/run-the-learn-docs-factory.md).
-- The [user-docs router](../index.mdx).
-
-> **Status:** this page is part of Objective
-> [#453](https://github.com/mattgiles/perk/issues/453) (Node 3.2). The objective model is
-> human-reviewed for accuracy against `perk/objective.py` and `shared/contracts.md`.
+- **Learn:** [Drive a multi-plan goal with an objective](../tutorials/drive-an-objective.mdx).
+- **Do:** [Author an objective roadmap](../how-to/author-a-roadmap.md).
+- **Understand:** [How perk thinks](../explanation/how-perk-thinks.md).
