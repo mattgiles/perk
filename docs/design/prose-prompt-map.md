@@ -6,7 +6,7 @@ This is the readable projection of perk's living, workflow-first prose graph. It
 ## Coverage
 
 - **203** canonical source units
-- **683** logical fragments
+- **695** logical fragments
 - **16** session shapes and **10** assemblies
 - **15** explicitly excluded candidates (policy-only; not displayed)
 - **0** validation findings
@@ -1556,12 +1556,24 @@ Expert configuration guidance, structural search, and ancillary model utilities.
   - `section:perk-mental-model-orientation/discover-the-live-surface` — Discover the live surface (`heading:perk-mental-model-orientation/discover-the-live-surface`)
 - `markdown:skills/perk-expert/references/providers-and-backends.md`
   - `section:perk-providers-issue-backends` — perk providers & issue backends (`heading:perk-providers-issue-backends`)
-  - `section:perk-providers-issue-backends/the-supported-provider-set` — The supported provider set (`heading:perk-providers-issue-backends/the-supported-provider-set`)
-  - `section:perk-providers-issue-backends/postures-how-perk-yields-its-surface` — Postures (how perk yields its surface) (`heading:perk-providers-issue-backends/postures-how-perk-yields-its-surface`)
-  - `section:perk-providers-issue-backends/what-selection-does` — What selection does (`heading:perk-providers-issue-backends/what-selection-does`)
-  - `section:perk-providers-issue-backends/fallback-semantics` — Fallback semantics (`heading:perk-providers-issue-backends/fallback-semantics`)
-  - `section:perk-providers-issue-backends/issue-backend-linear` — Issue backend — Linear (`heading:perk-providers-issue-backends/issue-backend-linear`)
-  - `section:perk-providers-issue-backends/maturity-caveat` — Maturity caveat (`heading:perk-providers-issue-backends/maturity-caveat`)
+  - `section:perk-providers-issue-backends/supported-provider-catalog` — Supported provider catalog (`heading:perk-providers-issue-backends/supported-provider-catalog`)
+  - `section:perk-providers-issue-backends/provider-postures` — Provider postures (`heading:perk-providers-issue-backends/provider-postures`)
+  - `section:perk-providers-issue-backends/provider-postures/plan-seam-durable-artifact-adapters` — Plan seam: durable-artifact adapters (`heading:perk-providers-issue-backends/provider-postures/plan-seam-durable-artifact-adapters`)
+  - `section:perk-providers-issue-backends/provider-postures/footer-seam-vacate-only` — Footer seam: vacate-only (`heading:perk-providers-issue-backends/provider-postures/footer-seam-vacate-only`)
+  - `section:perk-providers-issue-backends/provider-postures/web-seam-package-selection` — Web seam: package selection (`heading:perk-providers-issue-backends/provider-postures/web-seam-package-selection`)
+  - `section:perk-providers-issue-backends/provider-postures/built-in-not-selectable` — Built in, not selectable (`heading:perk-providers-issue-backends/provider-postures/built-in-not-selectable`)
+  - `section:perk-providers-issue-backends/provider-selection-convergence-and-fallback` — Provider selection, convergence, and fallback (`heading:perk-providers-issue-backends/provider-selection-convergence-and-fallback`)
+  - `section:perk-providers-issue-backends/issue-backend-comparison` — Issue backend comparison (`heading:perk-providers-issue-backends/issue-backend-comparison`)
+  - `section:perk-providers-issue-backends/github-backend` — GitHub backend (`heading:perk-providers-issue-backends/github-backend`)
+  - `section:perk-providers-issue-backends/linear-backend` — Linear backend (`heading:perk-providers-issue-backends/linear-backend`)
+  - `section:perk-providers-issue-backends/linear-backend/selection-auth-and-package` — Selection, auth, and package (`heading:perk-providers-issue-backends/linear-backend/selection-auth-and-package`)
+  - `section:perk-providers-issue-backends/linear-backend/issue-storage-labels-and-identifiers` — Issue storage, labels, and identifiers (`heading:perk-providers-issue-backends/linear-backend/issue-storage-labels-and-identifiers`)
+  - `section:perk-providers-issue-backends/linear-backend/readiness-checks` — Readiness checks (`heading:perk-providers-issue-backends/linear-backend/readiness-checks`)
+  - `section:perk-providers-issue-backends/linear-backend/project-backed-objectives` — Project-backed objectives (`heading:perk-providers-issue-backends/linear-backend/project-backed-objectives`)
+  - `section:perk-providers-issue-backends/linear-backend/native-attachment-metadata` — Native attachment metadata (`heading:perk-providers-issue-backends/linear-backend/native-attachment-metadata`)
+  - `section:perk-providers-issue-backends/linear-backend/replan-and-cancellation` — Replan and cancellation (`heading:perk-providers-issue-backends/linear-backend/replan-and-cancellation`)
+  - `section:perk-providers-issue-backends/linear-backend/optional-agentsession-emission` — Optional AgentSession emission (`heading:perk-providers-issue-backends/linear-backend/optional-agentsession-emission`)
+  - `section:perk-providers-issue-backends/current-caveats-and-maturity` — Current caveats and maturity (`heading:perk-providers-issue-backends/current-caveats-and-maturity`)
 - `markdown:skills/perk-expert/references/stacked-delivery.md`
   - `section:perk-stacked-delivery-the-atomic-pr-train` — perk stacked delivery (the atomic PR train) (`heading:perk-stacked-delivery-the-atomic-pr-train`)
   - `section:perk-stacked-delivery-the-atomic-pr-train/the-delivery-choice` — The delivery choice (`heading:perk-stacked-delivery-the-atomic-pr-train/the-delivery-choice`)

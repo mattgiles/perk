@@ -91,6 +91,9 @@ both planes, read at runtime by neither. The canonical reference is
 
 ## Discover the live surface
 
+For the selectable plan/footer/web catalog and the GitHub/Linear storage split, use the
+self-contained [providers and issue backends reference](./providers-and-backends.md).
+
 The reference shape is here; for the exact current commands/flags run `perk --help` /
 `perk <group> --help`, `perk doctor` (validates config + bindings, reports provider/backend
 resolution), and `perk registry show` (the stage graph); `perk release-notes` shows the bundled
