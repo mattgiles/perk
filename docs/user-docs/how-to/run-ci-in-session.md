@@ -57,5 +57,5 @@ interactive confirmation, or a per-session approval latch. A headless session wi
   `[[ci.checks]]` rows and prove each state before trusting the gate.
 - **Look up:** [Workflow commands](../reference/in-session/workflow-commands.md) — the exact `/ci`
   and `run_ci` semantics.
-- **Look up:** [Configuration files](../reference/configuration.md) — the `[ci]` and
-  `[[ci.checks]]` keys and change-scoped gating.
+- **Look up:** [Workflow and CI](../reference/configuration/workflow-and-ci.md#ci) — the `[ci]`
+  and `[[ci.checks]]` keys and change-scoped gating.

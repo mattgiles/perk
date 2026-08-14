@@ -62,7 +62,7 @@ differences.
 
 - **Do:** [Scope Pi resources per project](./scope-pi-resources-per-project.md) — filter resources
   after selection.
-- **Look up:** [`[providers]` configuration](../reference/configuration.md#providers) — selector
+- **Look up:** [`[providers]` configuration](../reference/configuration/backends.md#providers) — selector
   syntax and precedence.
 - **Look up:** [Providers and backends](../reference/providers-and-backends.md) — supported set,
   postures, fallback, and packages.

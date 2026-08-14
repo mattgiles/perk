@@ -52,5 +52,5 @@ trigger runs.
 - **Do:** [Author a repo skill](./author-a-repo-skill.md) — create the repo-local skill to bind.
 - **Do:** [Scope Pi resources per project](./scope-pi-resources-per-project.md) — trim package
   resources instead of adding guidance.
-- **Look up:** [`[[bindings]]` configuration](../reference/configuration.md#bindings) — exact fields,
+- **Look up:** [`[[bindings]]` configuration](../reference/configuration/skills-and-bindings.md#bindings) — exact fields,
   precedence, and validation.

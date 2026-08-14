@@ -42,8 +42,8 @@ Two related but distinct knobs live here:
   stored as an **issue** under GitHub but as a **Linear Project** under Linear).
 
 Both are selected by config keys documented at key depth in the
-[configuration reference](./configuration.md) — the `[providers]` table (`plan` /
-`footer` / `web`) and the `[issues]` table (`backend` / `team`). This page documents the **supported set** behind those keys
+[Backends configuration reference](./configuration/backends.md) — the `[providers]` table
+(`plan` / `footer` / `web`) and the `[issues]` table (`backend` / `team`). This page documents the **supported set** behind those keys
 and what selecting each option actually does. The **selection** is the per-repo pointer; the
 **supported set** is the catalog perk knows how to wire.
 
@@ -358,7 +358,7 @@ path.
   recipe.
 - [How to switch the issue backend to Linear](../how-to/switch-to-linear.md) — the Linear-switch
   recipe.
-- [Configuration reference — `[providers]` / `[issues]`](./configuration.md#providers) — the raw
+- [Configuration reference — `[providers]` / `[issues]`](./configuration/backends.md#providers) — the raw
   config keys.
 
 ---

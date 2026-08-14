@@ -53,12 +53,13 @@ Use these to confirm details rather than fabricating command/flag specifics.
   checkpoints, the journal); daily work (submit/address/ready + the automatic cascade); the four
   cold commands, four warm doors, five tools; recovery routing; current limitations. Read for "how
   does stacked delivery work / how do I publish, sync, recover, or land a PR train" questions.
-- [Configuration](./references/configuration.md) — the `.perk/config.toml` committed config + the
-  `.perk/local.toml` overlay and its semantics, then every table (`[models]` +
-  `[models.stages.<id>]` / `[models.subagents]`, `[ci]` + `[[ci.checks]]`, `[workflow]`,
-  `[worktree]`, `[[bindings]]`, `[issues]`, `[linear]`, `[providers]`, `[compaction]`) with
-  key/type/default/notes. Read for "which key / what table /
-  what default / how do the two files combine" questions.
+- [Configuration](./references/configuration.md) — the one self-contained reference for the
+  `.perk/config.toml` committed config and `.perk/local.toml` overlay: repository layout;
+  workflow and CI (`[worktree]`, `[workflow]`, `[ci]`, `[[ci.checks]]`); backends (`[providers]`,
+  `[issues]`, `[linear]`); models and compaction (`[models]`, `[models.stages.<id>]`,
+  `[models.subagents]`, `[compaction]`); and skills and bindings (`[skills]`, `[[bindings]]`,
+  `.perk/skills/`). Read this file before answering "which key / what table / what default / how
+  do the two files combine" questions.
 - [Providers & issue backends](./references/providers-and-backends.md) — the three provider seams,
   the supported-provider catalog, the postures (REPLACE / AUGMENT / vacate-only / install-nothing /
   built-in),

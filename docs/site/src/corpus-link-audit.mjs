@@ -27,11 +27,6 @@ export const ESCAPE_BASELINE = Object.freeze([
     source: "reference/cli.md",
     url: "../../guiding-principles/python-cli-guidelines.md",
   }),
-  // Removed by node 4.3 (configuration reference):
-  Object.freeze({
-    source: "reference/configuration.md",
-    url: "../../developers/session-audit.md",
-  }),
 ]);
 
 /**
@@ -40,13 +35,7 @@ export const ESCAPE_BASELINE = Object.freeze([
  * ESCAPE_BASELINE. A genuinely new dangling anchor never joins silently — see the sweep's
  * reason text and the corpus-edit policy it points at.
  */
-export const ANCHOR_BASELINE = Object.freeze([
-  // Stale anchor recorded in blueprint §5; fix owned by node 4.3:
-  Object.freeze({
-    source: "how-to/author-a-repo-skill.md",
-    url: "../reference/configuration.md#repo-authored-skills-piskills",
-  }),
-]);
+export const ANCHOR_BASELINE = Object.freeze([]);
 
 /**
  * Per-config-instance audit of corpus link findings (no module-level state — testable, and

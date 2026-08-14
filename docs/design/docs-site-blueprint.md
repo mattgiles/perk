@@ -527,11 +527,12 @@ the Part 2 rule. "Stays on hub" rows need no link updates at all.
 | `in-session.md#learn-code` | `in-session/workflow-commands.md#learn-code` |
 | `in-session.md#pr-review-terminal` | `in-session/review-and-authoring.md#pr-review-terminal` |
 
-**`reference/configuration.md` (8 referenced anchors):**
+**`reference/configuration.md` (9 referenced anchors):**
 
 | Old anchor | New home |
 |---|---|
 | `configuration.md#local-overrides--overlay-semantics` | stays on hub (precedence/overlay is hub content) |
+| `configuration.md#worktree` | `configuration/workflow-and-ci.md#worktree` |
 | `configuration.md#workflow` | `configuration/workflow-and-ci.md#workflow` |
 | `configuration.md#providers` | `configuration/backends.md#providers` |
 | `configuration.md#issues` | `configuration/backends.md#issues` |
