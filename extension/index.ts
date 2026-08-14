@@ -212,7 +212,8 @@ export default function (pi: ExtensionAPI) {
     const sessionFile = ctx.sessionManager.getSessionFile();
     const currentSessionId = sessionFile ? basename(sessionFile) : null;
 
-    // Headless-safe linkage failure: loud (notify if UI + stderr), non-fatal, leaves unclaimed.
+    // Terminal-safe linkage failure: managed headline when headful, complete stderr when headless
+    // (plus the explicit RPC mirror); non-fatal and leaves the run unclaimed.
     const reportError = (message: string) => {
       report(ctx, "workflow-state linkage error", "error", message, { alsoLog: true });
     };

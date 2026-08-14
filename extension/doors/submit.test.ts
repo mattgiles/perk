@@ -16,7 +16,8 @@ import {
   type SessionPointer,
 } from "../substrate/sessionPointers.ts";
 import { rebuildWorkflowState } from "../substrate/workflowState.ts";
-import { scaffoldRepo } from "../testing/harness.ts";
+import { REPORT_DETAIL_TYPE } from "../surfaces/surfaces.ts";
+import { fakePerk, loadPerkSession, scaffoldRepo } from "../testing/harness.ts";
 import {
   CONFLICT_RESOLUTION_ATTEMPT_CAP,
   conflictResolutionGuidance,
@@ -81,6 +82,11 @@ function world(opts?: {
   return { pi, ctx, entries, messages };
 }
 
+const PUSH_REJECTED_MESSAGE =
+  "Push rejected — the remote branch moved unexpectedly.\n" +
+  "Fetch/rebase onto the latest origin and re-submit.\n" +
+  "! [rejected] plan-7 -> plan-7 (non-fast-forward)";
+
 function submitJson(over: Record<string, unknown> = {}): string {
   return JSON.stringify({
     success: true,
@@ -96,6 +102,79 @@ function submitJson(over: Record<string, unknown> = {}): string {
     ...over,
   });
 }
+
+function pushRejectedJson(): string {
+  return JSON.stringify({
+    success: false,
+    error_type: "push_rejected",
+    message: PUSH_REJECTED_MESSAGE,
+    dry_run: false,
+  });
+}
+
+// --- command-vs-tool report projections ----------------------------------------------------------
+
+test("/submit: multiline push rejection is a headline plus one durable detail entry", async (t) => {
+  const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
+  const bin = fakePerk(cwd, { stdout: pushRejectedJson(), code: 1 });
+  const h = await loadPerkSession({
+    cwd,
+    env: { PERK_RUN_ID: "01RID", PERK_BIN: bin },
+    mode: "print",
+  });
+  const stderr: string[] = [];
+  t.mock.method(console, "error", (message: unknown) => stderr.push(String(message)));
+  try {
+    await h.invokeCommand("submit");
+    const errors = h.notifyEvents.filter((event) => event.severity === "error");
+    assert.deepEqual(errors, [
+      {
+        message: "perk: submit — Push rejected — the remote branch moved unexpectedly.",
+        severity: "error",
+      },
+    ]);
+
+    const entries = h.session.sessionManager.getEntries() as unknown as {
+      customType?: string;
+      data?: unknown;
+    }[];
+    const details = entries.filter((entry) => entry.customType === REPORT_DETAIL_TYPE);
+    assert.deepEqual(
+      details.map((entry) => entry.data),
+      [{ text: `perk: submit — ${PUSH_REJECTED_MESSAGE}`, severity: "error" }],
+    );
+    assert.deepEqual(stderr, []);
+  } finally {
+    h.dispose();
+  }
+});
+
+test("submit tool: multiline push rejection stays complete without a transcript detail", async (t) => {
+  const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
+  const bin = fakePerk(cwd, { stdout: pushRejectedJson(), code: 1 });
+  const h = await loadPerkSession({
+    cwd,
+    env: { PERK_RUN_ID: "01RID", PERK_BIN: bin },
+    mode: "print",
+  });
+  const stderr: string[] = [];
+  t.mock.method(console, "error", (message: unknown) => stderr.push(String(message)));
+  try {
+    const result = await h.invokeTool("submit", {});
+    assert.equal(result.content[0]?.text, `submit failed: ${PUSH_REJECTED_MESSAGE}`);
+    assert.deepEqual(result.details, {
+      ok: false,
+      error: PUSH_REJECTED_MESSAGE,
+      error_type: "push_rejected",
+    });
+
+    const entries = h.session.sessionManager.getEntries() as unknown as { customType?: string }[];
+    assert.equal(entries.filter((entry) => entry.customType === REPORT_DETAIL_TYPE).length, 0);
+    assert.deepEqual(stderr, []);
+  } finally {
+    h.dispose();
+  }
+});
 
 // --- conflictResolutionGuidance (pure) -----------------------------------------------------------
 
