@@ -13,13 +13,20 @@
 // is an RPC no-op).
 
 import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
+import type { ReportDetailSink } from "./report.ts";
 
 // `Key` is keybinding vocabulary (`pi.registerShortcut(Key.ctrlAlt("p"), …)`), not rich UI —
 // re-exported so pi-tui imports stay structurally confined to the surfaces module (the
 // surfacesGuard pi-tui import rule) without allowlisting the shortcut-registering modules.
 export { Key } from "@earendil-works/pi-tui";
 // Re-exports: the notify seam stays in report.ts; surfaces.ts is the one import for UI vocabulary.
-export { type ReportTarget, report, type Severity } from "./report.ts";
+export {
+  attachReportDetailSink,
+  type ReportDetailSink,
+  type ReportTarget,
+  report,
+  type Severity,
+} from "./report.ts";
 
 // --- standing-surface slot keys (charter §2) ---
 // The ONE perk status slot (D2): perk's single status value renders under this key.
@@ -404,12 +411,26 @@ export function formatBudgetLine(args: { tokens: number; elapsedMs: number }): s
   return `${formatTokens(args.tokens)} tok · ${formatElapsed(args.elapsedMs)}`;
 }
 
-// --- the transcript markers — display-only entry renderers ---------------------------------------
-// The audit §2.3 verdict (docs/design/pi-adoption-audit.md): perk's display-only custom-entry
-// families render as durable one-line transcript markers. Renderer BODIES live here (a transcript
-// renderer IS a rich-UI surface the surfaces module owns); registration is wiring at the feature
-// modules via the `registerTranscriptRenderer` seam below. Renderers are an interactive-TUI-only
-// concern (never invoked in json/RPC mode), so registration is inert-safe everywhere.
+// --- display-only transcript entry renderers -----------------------------------------------------
+// The audit §2.3 verdict (docs/design/pi-adoption-audit.md): perk's custom-entry families are
+// display-only. Most render as durable one-line transition markers; report detail is the generic
+// full-diagnostic family and always renders every logical row. Renderer BODIES live here (a
+// transcript renderer IS a rich-UI surface the surfaces module owns); registration is wiring at the
+// feature modules via the `registerTranscriptRenderer` seam below. Renderers are an
+// interactive-TUI-only concern (never invoked in json/RPC mode), so registration is inert-safe
+// everywhere.
+
+/** The generic display-only transcript entry carrying complete multiline warm-command reports. */
+export const REPORT_DETAIL_TYPE = "perk:report-detail";
+
+export interface ReportDetailEntryHost {
+  appendEntry(customType: string, data?: unknown): void;
+}
+
+/** Create the sink attached to each warm-command context by `registerPerkCommand`. */
+export function createReportDetailSink(host: ReportDetailEntryHost): ReportDetailSink {
+  return (text, severity) => host.appendEntry(REPORT_DETAIL_TYPE, { text, severity });
+}
 
 /** Structural slice of pi's `CustomEntry` — the only field the marker renderers read. */
 export interface TranscriptEntryLike {
@@ -476,6 +497,107 @@ function asRecord(value: unknown): Record<string, unknown> | null {
   if (typeof value !== "object" || value === null || Array.isArray(value)) return null;
   return value as Record<string, unknown>;
 }
+
+function asPlainRecord(value: unknown): Record<string, unknown> | null {
+  const record = asRecord(value);
+  if (record === null) return null;
+  const prototype = Object.getPrototypeOf(record);
+  if (prototype !== Object.prototype && prototype !== null) return null;
+  return record;
+}
+
+function skipControlString(text: string, start: number, osc: boolean): number {
+  let index = start;
+  while (index < text.length) {
+    const code = text.charCodeAt(index);
+    if ((osc && code === 0x07) || code === 0x9c) return index + 1;
+    if (code === 0x1b && text.charCodeAt(index + 1) === 0x5c) return index + 2;
+    index += 1;
+  }
+  return index;
+}
+
+function skipControlSequence(text: string, start: number): number {
+  let index = start;
+  while (index < text.length) {
+    const code = text.charCodeAt(index);
+    index += 1;
+    if (code >= 0x40 && code <= 0x7e) break;
+  }
+  return index;
+}
+
+/** Strip terminal controls from the display projection; the persisted report text stays exact. */
+function stripTerminalControls(text: string): string {
+  let clean = "";
+  let index = 0;
+  while (index < text.length) {
+    const code = text.charCodeAt(index);
+    if (code === 0x1b) {
+      const next = text.charCodeAt(index + 1);
+      if (next === 0x5b) {
+        index = skipControlSequence(text, index + 2);
+      } else if (next === 0x5d) {
+        index = skipControlString(text, index + 2, true);
+      } else if (next === 0x50 || next === 0x58 || next === 0x5e || next === 0x5f) {
+        index = skipControlString(text, index + 2, false);
+      } else {
+        index += 1;
+        while (index < text.length) {
+          const part = text.charCodeAt(index);
+          if (part < 0x20 || part > 0x2f) break;
+          index += 1;
+        }
+        const final = text.charCodeAt(index);
+        if (final >= 0x30 && final <= 0x7e) index += 1;
+      }
+      continue;
+    }
+    if (code === 0x9b) {
+      index = skipControlSequence(text, index + 1);
+      continue;
+    }
+    if (code === 0x9d) {
+      index = skipControlString(text, index + 1, true);
+      continue;
+    }
+    if (code === 0x90 || code === 0x98 || code === 0x9e || code === 0x9f) {
+      index = skipControlString(text, index + 1, false);
+      continue;
+    }
+    if (code <= 0x1f || (code >= 0x7f && code <= 0x9f)) {
+      index += 1;
+      continue;
+    }
+    clean += text[index];
+    index += 1;
+  }
+  return clean;
+}
+
+/**
+ * `perk:report-detail` full diagnostic renderer. Unlike collapsed transition markers, report detail
+ * always renders every logical row; the expanded flag does not alter it. The first row carries the
+ * live severity color and continuation rows are dim. Blank rows remain blank.
+ */
+export const reportDetailEntryRenderer: TranscriptRenderer = (entry, _options, theme) => {
+  const data = asPlainRecord(entry.data);
+  if (data === null) return undefined;
+  const text = data.text;
+  const severity = data.severity;
+  if (typeof text !== "string" || text.trim().length === 0) return undefined;
+  if (severity !== "info" && severity !== "warning" && severity !== "error") return undefined;
+  return {
+    render(width) {
+      return text.split(/\r\n|\n|\r/).map((line, index) => {
+        const safeLine = stripTerminalControls(line);
+        if (safeLine.length === 0) return "";
+        const color = index === 0 && severity !== "info" ? severity : "dim";
+        return truncateToWidth(theme.fg(color, safeLine), width);
+      });
+    },
+  };
+};
 
 /**
  * The first matching workflow-state field's marker message — a deliberately BOUNDED vocabulary

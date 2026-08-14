@@ -9,6 +9,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
 import { writePlanRef } from "../substrate/cache.ts";
+import { REPORT_DETAIL_TYPE } from "../surfaces/surfaces.ts";
 import {
   fakePerk,
   loadPerkSession,
@@ -820,41 +821,85 @@ test("renderLandOutcome: the mutation arms", () => {
 
 // --- the /objective-stack read door -----------------------------------------------------------------
 
-test("/objective-stack renders the status through the cold door (works gated too)", async () => {
+test("/objective-stack renders multiline status as a headline plus generic detail", async (t) => {
   const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-only" } });
   const bin = fakePerk(cwd, {
     stdout: JSON.stringify({
       success: true,
       objective: { id: "7" },
       no_train: "objective #7 is incremental",
-      orphaned_residue: { observed: true, reason: null, worktrees: [], refs: [] },
+      orphaned_residue: {
+        observed: true,
+        reason: null,
+        worktrees: ["/tmp/perk-sync"],
+        refs: ["refs/perk/sync"],
+      },
     }),
   });
-  const h = await loadPerkSession({ cwd, env: { PERK_RUN_ID: "01RID", PERK_BIN: bin } });
+  const h = await loadPerkSession({
+    cwd,
+    env: { PERK_RUN_ID: "01RID", PERK_BIN: bin },
+    mode: "print",
+  });
+  const stderr: string[] = [];
+  t.mock.method(console, "error", (message: unknown) => stderr.push(String(message)));
+  const complete =
+    "Objective #7: objective #7 is incremental\n" +
+    "orphaned residue: 1 worktree(s), 1 ref(s) — sweep via objective_stack_recover";
   try {
     await h.invokeCommand("objective-stack", "7");
-    assert.ok(
-      h.notifies.some((m) => /objective #7 is incremental/.test(m)),
-      "the read door rendered the status (gate-on included)",
+    assert.deepEqual(
+      h.notifyEvents.filter((event) => event.message.includes("objective #7 is incremental")),
+      [
+        {
+          message: "perk: objective-stack — Objective #7: objective #7 is incremental",
+          severity: "info",
+        },
+      ],
     );
+    const entries = h.session.sessionManager.getEntries() as unknown as {
+      customType?: string;
+      data?: unknown;
+    }[];
+    assert.deepEqual(
+      entries.filter((entry) => entry.customType === REPORT_DETAIL_TYPE).map((entry) => entry.data),
+      [{ text: `perk: objective-stack — ${complete}`, severity: "info" }],
+    );
+    assert.deepEqual(stderr, []);
   } finally {
     h.dispose();
   }
 });
 
-test("/objective-stack reports a cold-door failure loudly", async () => {
+test("/objective-stack reports a multiline cold-door failure without raw stderr", async (t) => {
   const cwd = scaffoldRepo();
+  const message = "no train\ninspect the objective linkage";
   const bin = fakePerk(cwd, {
-    stdout: JSON.stringify({ success: false, error_type: "not_stacked", message: "no train" }),
+    stdout: JSON.stringify({ success: false, error_type: "not_stacked", message }),
     code: 1,
   });
-  const h = await loadPerkSession({ cwd, env: { PERK_RUN_ID: undefined, PERK_BIN: bin } });
+  const h = await loadPerkSession({
+    cwd,
+    env: { PERK_RUN_ID: undefined, PERK_BIN: bin },
+    mode: "print",
+  });
+  const stderr: string[] = [];
+  t.mock.method(console, "error", (value: unknown) => stderr.push(String(value)));
   try {
     await h.invokeCommand("objective-stack", "7");
-    assert.ok(
-      h.notifyEvents.some((e) => e.severity === "error" && /no train/.test(e.message)),
-      "the typed failure surfaced",
+    assert.deepEqual(
+      h.notifyEvents.filter((event) => event.severity === "error"),
+      [{ message: "perk: objective-stack — no train", severity: "error" }],
     );
+    const entries = h.session.sessionManager.getEntries() as unknown as {
+      customType?: string;
+      data?: unknown;
+    }[];
+    assert.deepEqual(
+      entries.filter((entry) => entry.customType === REPORT_DETAIL_TYPE).map((entry) => entry.data),
+      [{ text: `perk: objective-stack — ${message}`, severity: "error" }],
+    );
+    assert.deepEqual(stderr, []);
   } finally {
     h.dispose();
   }

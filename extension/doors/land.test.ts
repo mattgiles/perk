@@ -9,7 +9,8 @@ import { test } from "node:test";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { markerPath, PENDING_LEARN } from "../substrate/cache.ts";
 import { BORROWED_TOOLS, PERK_TOOLS, STAGE_TOOLS } from "../substrate/toolGating.ts";
-import { fakePerk, loadPerkSession, scaffoldRepo } from "../testing/harness.ts";
+import { REPORT_DETAIL_TYPE } from "../surfaces/surfaces.ts";
+import { fakePerk, loadPerkSession, scaffoldRepo, spyInjections } from "../testing/harness.ts";
 import { driveReconcileAfterLand, type LandDetails, landPr } from "./land.ts";
 
 const LAND_JSON = JSON.stringify({
@@ -69,6 +70,19 @@ const LAND_JSON_WITH_OBJECTIVE = JSON.stringify({
   pending_learn: true,
   dry_run: false,
   objective: { id: "5", nodes_marked: ["1.2"], skipped_reason: null },
+});
+
+const LAND_JSON_WITH_REPORT_DETAIL = JSON.stringify({
+  success: true,
+  error_type: null,
+  message: null,
+  pr: { number: 42, state: "MERGED" },
+  branch: "plan-7",
+  issue: "7",
+  pending_learn: true,
+  dry_run: false,
+  objective: { id: "5", nodes_marked: ["1.2"], skipped_reason: null },
+  learn: { closed: ["45", "50"], skipped_reason: null },
 });
 
 // `landPr` is exercised directly here (not via the harness `invokeTool`) because the tool's
@@ -411,15 +425,47 @@ test("landPr: a malformed objective is dropped, land still succeeds", async () =
   assert.equal(calls.length, 0, "driveReconcileAfterLand not driven");
 });
 
-test("/land command: notifies success", async () => {
+test("/land command: multiline success is a headline plus one durable detail entry", async (t) => {
   const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
-  const bin = fakePerk(cwd, { stdout: LAND_JSON });
-  const h = await loadPerkSession({ cwd, env: { PERK_RUN_ID: "01RID", PERK_BIN: bin } });
+  const bin = fakePerk(cwd, { stdout: LAND_JSON_WITH_REPORT_DETAIL });
+  const h = await loadPerkSession({
+    cwd,
+    env: { PERK_RUN_ID: "01RID", PERK_BIN: bin },
+    mode: "print",
+  });
+  const injected = spyInjections(h);
+  const stderr: string[] = [];
+  t.mock.method(console, "error", (message: unknown) => stderr.push(String(message)));
+  const complete =
+    "Landed PR #42; run /learn to release the worktree.\n" +
+    "Objective #5 node(s) 1.2 marked done — reconciling the roadmap against the merged diff.\n" +
+    "Closed 2 learn issue(s) (#45, #50) into docs/learned.";
   try {
     await h.invokeCommand("land");
-    assert.ok(
-      h.notifies.some((n) => /#42/.test(n)),
-      "command notifies the landed PR",
+    assert.deepEqual(
+      h.notifyEvents.filter((event) => event.message.startsWith("perk: land — Landed PR")),
+      [
+        {
+          message: "perk: land — Landed PR #42; run /learn to release the worktree.",
+          severity: "info",
+        },
+      ],
+    );
+
+    const entries = h.session.sessionManager.getEntries() as unknown as {
+      customType?: string;
+      data?: unknown;
+    }[];
+    const details = entries.filter((entry) => entry.customType === REPORT_DETAIL_TYPE);
+    assert.deepEqual(
+      details.map((entry) => entry.data),
+      [{ text: `perk: land — ${complete}`, severity: "info" }],
+    );
+    assert.equal(injected.length, 1, "the objective reconcile drive was captured");
+    assert.deepEqual(
+      stderr.filter((line) => line.startsWith("perk: land —")),
+      [],
+      "report() emitted no raw stderr (unrelated binding warnings remain outside this fix)",
     );
   } finally {
     h.dispose();

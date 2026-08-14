@@ -7,6 +7,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { formatSkillsForPrompt, type Skill, type ToolInfo } from "@earendil-works/pi-coding-agent";
 import { BINDING_HEADER } from "../substrate/bindingDelivery.ts";
+import { REPORT_DETAIL_TYPE } from "../surfaces/surfaces.ts";
 import { loadPerkSession, scaffoldRepo } from "../testing/harness.ts";
 import {
   ambientIndexProbe,
@@ -431,19 +432,27 @@ test("selfcheck (live): converged ambient index + managed AGENTS reach the promp
   }
 });
 
-test("selfcheck (live): the report carries the census block", async () => {
+test("selfcheck (live): the report-detail entry carries the census block", async () => {
   const cwd = scaffoldRepo();
   convergeContext(cwd);
   const h = await loadPerkSession({ cwd });
   try {
     await h.invokeCommand("perk-selfcheck");
     const msg = h.notifies.at(-1) ?? "";
-    // The wiring summary line is unchanged — the census rides below it.
     assert.match(msg, /^perk: selfcheck — .*: ok/, `expected ok wiring, got: ${msg}`);
-    assert.match(msg, /\ncensus:\n/);
-    assert.match(msg, /append-system-prompt: \d+c/);
-    assert.match(msg, /tools: \d+ active \/ \d+ registered/);
-    assert.match(msg, /branch: \d+ entries; binding-header-copies=\d+/);
+    assert.doesNotMatch(msg, /\n/);
+
+    const entries = h.session.sessionManager.getEntries() as unknown as {
+      customType?: string;
+      data?: { text?: string; severity?: string };
+    }[];
+    const detail = entries.find((entry) => entry.customType === REPORT_DETAIL_TYPE);
+    assert.equal(detail?.data?.severity, "info");
+    const text = detail?.data?.text ?? "";
+    assert.match(text, /\ncensus:\n/);
+    assert.match(text, /append-system-prompt: \d+c/);
+    assert.match(text, /tools: \d+ active \/ \d+ registered/);
+    assert.match(text, /branch: \d+ entries; binding-header-copies=\d+/);
   } finally {
     h.dispose();
   }

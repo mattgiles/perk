@@ -53,8 +53,9 @@ export function ok<D extends object>(
 /**
  * Bind the module's fail constructor once: `const fail = failFor(ctx, scope)` (or
  * `failFor(ctx, scope, label)` when the content label differs from the report scope). Each call
- * reports loudly (`report(ctx, scope, "error", message, { alsoLog: true })`) and returns the
- * canonical soft failure: content `"<label> failed: <message>"`, details
+ * reports through the terminal-safe report seam (`alsoLog` mirrors complete diagnostics only in
+ * headless/RPC contexts) and returns the canonical soft failure: content
+ * `"<label> failed: <message>"`, details
  * `{ ok: false, error: message, error_type: errorType }`, no `terminate`. `X` is the
  * `FailDetails` extras hook: `failFor<X>(…)` lets a call attach module-specific fail details
  * (spread AFTER `error`/`error_type`) — e.g. the learn wave's attempt receipts. Extras stay

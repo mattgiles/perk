@@ -1072,7 +1072,7 @@ export function registerObjectiveStack(pi: ExtensionAPI, gating: ToolGating): vo
         report(ctx, "objective-stack", "error", r.message, { alsoLog: true });
         return;
       }
-      report(ctx, "objective-stack", "info", `\n${renderStackStatus(r.data)}`);
+      report(ctx, "objective-stack", "info", renderStackStatus(r.data));
     },
   });
 

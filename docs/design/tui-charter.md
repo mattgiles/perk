@@ -24,9 +24,14 @@ only — `createPerkStatus` kept its name, lost the segment map). Implement prog
   `[providers] todo` is selected (`isPerkCheckpointsReferenceSelected` in
   `extension/checkpoints.ts`); the charter governs only the perk-owned reference surface, never a
   foreign provider's rendering.
-- **Headless behavior is recorded law, unchanged.** The `report()` headless-fail-safe invariant —
-  `hasUI ? notify : console.error`, every rich-UI call `ctx.hasUI`-guarded — is charter law as it
-  stands. This charter redesigns nothing about stderr mirroring.
+- **Report-routed terminal ownership is recorded law.** `hasUI` is authoritative: a headless
+  target receives the complete prefixed report on stderr exactly once; every headful mode receives
+  a one-line Pi-managed notify. Only an explicitly mirrored RPC report may additionally write its
+  complete value to stderr. Headful TUI, print, json, and missing-mode contexts never raw-log through
+  `report()`. A warm command's multiline detail is persisted in a display-only
+  `perk:report-detail` transcript entry; the equivalent model tool keeps complete detail in its
+  Result. This boundary governs `report()` only — it does not claim every direct first-party stderr
+  write has been migrated.
 
 ## §2 Inventory (the audit)
 
@@ -35,11 +40,11 @@ Every UI emission in `extension/` at charter time, re-verified against the worki
 `perk: <scope> — <message>` grammar; "direct notify" rows bypass it (the inconsistency node 2.1
 fixes).
 
-### The `report()` seam (grammar-conformant notifies + headless stderr mirror)
+### The `report()` seam (one-line managed headline + complete diagnostic projection)
 
 | Call site (file · function/handler) | Surface | Trigger | Lifetime | Size |
 |---|---|---|---|---|
-| `report.ts` · `report()` | notify / stderr | (the seam itself) | transient toast | 1 line |
+| `report.ts` · `report()` | notify / stderr / attached detail entry | (the seam itself) | transient headline / durable command detail | 1-line headline / complete detail |
 | `planMode.ts` · plan-mode toggles | notify via `report()` (info) | `/plan`, gate enter/exit | transient | 1 line |
 | `objective.ts` · `/objective` handler + `reportError` | notify via `report()` (info/error) | `/objective [<id>\|clear]`, render failures | transient | 1 line |
 | `lifecycleGates.ts` · dirty gate + `/implement` handoff | notify via `report()` (warning/info) | `session_before_switch`/`fork`, `/implement` | transient | 1 line |
@@ -48,9 +53,17 @@ fixes).
 | `checkpoints.ts` · `/checkpoints` provider deferral | notify via `report()` (info) | `/checkpoints` with foreign todo provider | transient | 1 line |
 | `address.ts` · error path | notify via `report()` (error, `alsoLog`) | `/address` failure | transient | 1 line |
 | `index.ts` · workflow-state linkage error | notify via `report()` (error, `alsoLog`) | `session_start` linkage failure | transient | 1 line |
-| `result.ts` · `failSoft` | notify via `report()` (error, `alsoLog`) | any fail-soft tool path | transient | 1 line |
+| `result.ts` · `failFor` | notify via `report()` (error, `alsoLog`) | any soft-result tool path | transient | 1-line headline |
 | `objectivePlan.ts` · no-objective warnings | notify via `report()` (warning) | `/objective-plan`, `/objective-reconcile` arg errors | transient | 1 line |
 | `objectiveSave.ts` · failure path | notify via `report()` | `/objective-save` errors | transient | 1 line |
+
+Every `registerPerkCommand` handler attaches a detail sink to its exact command-context object
+before the `running…` report and before the handler runs. A multiline report therefore projects to
+one managed headline plus one complete `perk:report-detail` entry. The WeakMap attachment remains
+available to background work launched by that command. Tool and lifecycle contexts without a
+command sink append no transcript-detail entry: tools carry complete detail in Results. A headful
+lifecycle/event report emits the managed headline; when a headful RPC caller also sets `alsoLog`, it
+additionally mirrors the complete diagnostic to stderr.
 
 ### Direct `ctx.ui.notify` call sites (bypass `report()` — inconsistent grammar; node 2.1 routes these)
 
@@ -87,15 +100,16 @@ fixes).
 |---|---|---|---|---|
 | `ciExecutor.ts` · `runCiImpl` scope confirmation | `ctx.ui.confirm` | first CI run without trust/`--allow` | prompt | dialog (title + check list) |
 | `askUser.ts` · `runAskUserQuestion` | `ctx.ui.select` / `ctx.ui.input` | `ask_user_question` tool | prompt | dialog |
-| everywhere | `console.error` | `report()` headless fallback, `alsoLog`, logged-not-thrown render failures, headless door announces | log line | 1 line |
+| `report()` | `console.error` | headless complete fallback; explicitly mirrored RPC diagnostic | log block | complete report |
+| direct first-party writes outside `report()` | `console.error` / stderr | cache/config/session-data fallbacks, objective callbacks, binding warnings, worker/headless code | log | caller-owned |
 
 ### Not used today
 
 `setWorkingIndicator` (declined — D5 rescinded in node 3.1, see §6), `renderCall`/`renderResult`
 tool renderers. *(Charter-time entries since adopted: themed widget factories + `theme.fg` +
 `truncateToWidth`/`visibleWidth` + `placement: "belowEditor"` in node 2.2; `setFooter`/`footerData`
-in node 3.1; entry renderers — `pi.registerEntryRenderer` transcript markers for the four
-display-only entry families — in the pi 0.80.4+ audit §2.3 adoption, see §6.)*
+in node 3.1; entry renderers — the generic full-report entry plus collapsed transition-marker
+families — in the pi 0.80.4+ audit §2.3 adoption, see §6.)*
 
 ### Bounded exceptions / permitted text-only surfaces (vendored extensions)
 
@@ -114,13 +128,13 @@ never standing state.
 | Message class | Allowed surface | Severity | Examples |
 |---|---|---|---|
 | Door announce | notify (via `report()`) | info | `/address`, `/pr-review`, `/objective-plan` start |
-| Door result | notify (via `report()`) | info on success, error on failure | `/submit`, `/ready`, `/land`, `/learn` outcomes |
+| Door result | notify (via `report()`); multiline warm-command detail also uses `perk:report-detail` | info on success, error on failure | `/submit`, `/ready`, `/land`, `/learn` outcomes |
 | Gate / deferral | notify (via `report()`) | warning | dirty-tree gate, provider deferral, handoff cancel |
-| Error | notify (via `report()`), usually `alsoLog` | error | linkage failures, fail-soft tool paths |
+| Error | notify (via `report()`); `alsoLog` is only a headless/RPC diagnostic mirror | error | linkage failures, fail-soft tool paths |
 | Standing progress | footer segment / `belowEditor` widget | n/a (themed glyphs, §5) | checkpoint progress, objective budget |
 | Standing identity/state | footer | n/a | perk version, active objective, branch, model |
 | Interactive prompt | `confirm` / `select` / `input` | n/a | CI scope confirmation, `ask_user_question` |
-| Headless mirror | `console.error` | n/a | every class above when `!hasUI` (unchanged law, §1) |
+| Headless / RPC mirror | `console.error` | n/a | complete report when `!hasUI`; explicit `alsoLog` only when headful RPC |
 
 Placement rules:
 
@@ -131,14 +145,17 @@ Placement rules:
   surfaces module).
 - **D4 — widget placement: `belowEditor`** for all perk widgets. Progress is peripheral
   awareness, adjacent to the perk footer — it never pushes the conversation up.
-- Details belong in tool-result text, not toasts (see the D8 1-line notify budget, §4).
+- Details never belong in toasts (see the D8 1-line notify budget, §4). Model tools keep complete
+  detail in their Result; multiline warm commands append the complete display-only
+  `perk:report-detail` entry below the headline.
 
 ## §4 Height + width budgets
 
 ### Height (D8)
 
-- **Notify = 1 line.** Details belong in tool-result text. (The `/checkpoints` multi-line list is
-  the one current violator; it conforms when node 2.2 converges the checkpoint surfaces.)
+- **Notify = 1 line.** Tool detail belongs in Result text; multiline warm-command detail belongs in
+  the full `perk:report-detail` transcript entry. (The retired `/checkpoints` multi-line list was the
+  charter-time violator.)
 - **Footer = 1 line.**
 - **`perk-checkpoints` widget ≤ ~4 lines** — see the D1 windowing rule below.
 - **`perk-objective` widget ≤ 2 lines** — and it is expected to fold into the footer per D2; the
@@ -194,9 +211,11 @@ themed `▸` `accent`; `✓` `success` / `✗` `error` kept).
 - **Widget lines move from plain strings to theme-callback factories**
   (`(tui, theme) => ({ render, invalidate })`) so the glyph colors above are live-themed.
 - **The `report()` grammar is the notify grammar**: `perk: <scope> — <message>`, severity
-  `info | warning | error`. Severity semantics: *info* = expected transition (announce, success
-  result); *warning* = gate, deferral, degraded-but-continuing; *error* = failure the user must
-  see. Routing every notify through it is node 2.1.
+  `info | warning | error`. A headful notify uses the first non-empty logical message row, trimmed
+  and horizontally normalized; the complete prefixed bytes remain the diagnostic projection.
+  Severity semantics: *info* = expected transition (announce, success result); *warning* = gate,
+  deferral, degraded-but-continuing; *error* = failure the user must see. Routing every notify
+  through it is node 2.1.
 - **D10 — theme-invalidation law: perk components never pre-bake theme colors** into stored or
   cached strings (the pi-documented theme-switch trap). The safe patterns — binding on nodes
   2.2/3.1 — are stateless render with theme callbacks, or rebuilding themed content in
@@ -278,23 +297,31 @@ factory form so glyphs are theme-colored without pre-baking (§5).
 
 **`belowEditor` placement (D4).** All perk widgets render below the editor (§3).
 
-**Entry renderers (`pi.registerEntryRenderer`) — adopted for the four display-only entry
-families** (`perk:workflow-state`, `perk:checkpoint`, `perk:objective-budget`, btw's
-`btw-thread-entry`/`btw-thread-reset` — the pi 0.80.4+ audit §2.3 verdict). The policy answer,
-recorded: **a transcript renderer IS a rich-UI surface the surfaces module owns** — renderer
-bodies live in `surfaces.ts`; registration is wiring at the feature modules via the
-`registerTranscriptRenderer` seam, which carries the one `typeof` feature-detect (pre-0.80.4
-hosts lack the method and stay inert; in json/RPC mode pi never invokes renderers, so
-registration is inert-safe everywhere). Marker grammar: a **collapsed** marker is exactly ONE
-dim, width-truncated line in the `report()` transition grammar — `perk: <scope> — <message>`
-(scopes: `workflow`, `checkpoints`, `objective`, `btw`); the **expanded** view is
-human-requested scrollback and renders full detail unbounded. D3 emoji stay footer-only; themed
-§5 glyphs appear only in expanded checkpoint step lines; every emitted line obeys D9 truncation.
-Malformed/missing entry `data` renders nothing (invisible — the pre-renderer behavior). The
-workflow-state marker vocabulary is deliberately bounded: the four headline fields (run claim/
-fork, mode flip, objective set/clear, plan link) plus a SET `objective_node_claim`; bookkeeping
-deltas (`session_artifacts`, `last_review*`, `conflict_resolution_attempts`, cleared claims)
-stay invisible.
+**Entry renderers (`pi.registerEntryRenderer`) — adopted for display-only full reports and
+transition markers.** The generic full-detail family is `perk:report-detail`; transition-marker
+families are `perk:workflow-state`, `perk:objective-budget`, and btw's `btw-thread-entry` /
+`btw-thread-reset` (historical `perk:checkpoint` entries are no longer rendered). The policy
+answer remains: **a transcript renderer IS a rich-UI surface the surfaces module owns** — renderer
+bodies live in `surfaces.ts`; registration is wiring via the `registerTranscriptRenderer` seam,
+which carries the one `typeof` feature-detect (pre-0.80.4 hosts lack the method and stay inert; in
+json/RPC mode pi never invokes renderers, so registration is inert-safe everywhere).
+
+The two renderer shapes are intentionally distinct:
+
+- A **collapsed transition marker** is exactly one dim, width-truncated line in the
+  `perk: <scope> — <message>` grammar. Its expanded view is human-requested scrollback and may add
+  detail. The workflow-state marker vocabulary remains deliberately bounded: run claim/fork, mode
+  flip, objective set/clear, plan link, and a SET `objective_node_claim`; bookkeeping deltas stay
+  invisible.
+- A **full `perk:report-detail` entry** always renders every logical row, regardless of Pi's
+  expanded flag. The first row uses the report severity color (`error`, `warning`, or dim for
+  info); continuation rows are dim; blank interior rows stay blank. Terminal escape and control
+  sequences are stripped only from the display projection, leaving the persisted payload exact.
+  Every displayed row passes through `truncateToWidth`, and styling is computed in `render()` so
+  theme changes are never cached.
+  Its payload is exactly `{ text, severity }`, validated as a plain object with non-blank text and
+  a known severity; malformed data renders nothing. These durable entries remain excluded from
+  model context.
 
 ### Declined
 
@@ -353,6 +380,10 @@ stay invisible.
    catches up on the next repaint.
 4. **Working-indicator theming.** `setWorkingIndicator` frames render verbatim with pre-baked
    colors and cannot be live-themed — the D10 conflict that motivated declining D5.
+5. **Direct stderr outside `report()`.** Cache/config/session-data fallbacks, objective callbacks,
+   binding warnings, and worker/headless code still contain first-party direct writes. They are
+   outside the report-routing fix and remain an explicit interactive-layout residual risk; this
+   charter does not pretend the broader logging system has been migrated.
 
 ## §7 Implementation map
 

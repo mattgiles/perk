@@ -99,6 +99,11 @@ export interface PerkSession {
   /** Registered extension command invocation names (e.g. "perk-selfcheck"). */
   registeredCommands(): string[];
   /**
+   * Append a custom entry, then render that real persisted entry through the live runner's
+   * registered entry renderer. `undefined` means the custom type has no renderer.
+   */
+  renderAppendedEntry(customType: string, data: unknown, width?: number): string[] | undefined;
+  /**
    * A registered tool's declared definition surface (name/description/parameters/guidelines) —
    * the model-facing contract the door authors independently of its strict decode; null when the
    * tool is not registered. For schema pins (enum/maxItems) that would otherwise drift silently.
@@ -613,6 +618,17 @@ export async function loadPerkSession(opts: {
     entryIds: () => session.sessionManager.getEntries().map((e: SessionEntry) => e.id),
     registeredCommands: () =>
       session.extensionRunner.getRegisteredCommands().map((c) => c.invocationName),
+    renderAppendedEntry(customType, data, width = 80) {
+      const renderer = session.extensionRunner.getEntryRenderer(customType);
+      if (!renderer) return undefined;
+      const entryId = session.sessionManager.appendCustomEntry(customType, data);
+      const entry = session.sessionManager
+        .getEntries()
+        .find((candidate) => candidate.id === entryId);
+      if (!entry) throw new Error(`appended entry not found: ${entryId}`);
+      const theme = { fg: (color: string, text: string) => `<${color}>${text}</>` };
+      return renderer(entry as never, { expanded: false }, theme as never)?.render(width);
+    },
     registeredTool(name: string) {
       const def = session.extensionRunner.getToolDefinition(name);
       if (!def) return null;

@@ -11,6 +11,12 @@ These are perk's warm workflow commands: human gestures inside an existing Pi se
 names its companion model tool when one exists, marks whether that tool terminates the turn, and
 records the refusal or recovery path that keeps the operation safe.
 
+Every slash command acknowledges the gesture with a one-line `running…` notification. When its
+outcome has multiple lines, Pi shows a concise one-line headline and appends the complete diagnostic
+immediately below as a durable, display-only transcript entry. That entry stays in session
+scrollback but is excluded from model context. The equivalent model tool does not append a duplicate
+entry: its complete multiline detail remains in the tool Result.
+
 ## Warm commands by stage (the spine)
 
 The PR-loop commands resolve the active plan-ref and, where required, its PR. Missing plan or PR

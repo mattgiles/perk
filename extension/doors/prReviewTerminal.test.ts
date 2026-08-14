@@ -24,6 +24,7 @@ import { chmodSync, existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
 import { writePlanRef } from "../substrate/cache.ts";
+import { REPORT_DETAIL_TYPE } from "../surfaces/surfaces.ts";
 import { fakePerk, loadPerkSession, scaffoldRepo, spyInjections } from "../testing/harness.ts";
 import { parseReviewDoorArgs, prReviewTerminalGuidance } from "./prReviewTerminal.ts";
 
@@ -538,7 +539,7 @@ test("/pr-review-terminal (no arg): an unresolvable merge-base errors loudly, no
   }
 });
 
-test("/pr-review-terminal: the R7 warning notify carries the verbatim --agent-notes launch line", async () => {
+test("/pr-review-terminal: the R7 headline keeps the verbatim launch line in report detail", async () => {
   const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
   const bin = fakePerk(cwd, { stdout: CHECKOUT_OK_JSON });
   const hunkDir = fakeHunk(cwd);
@@ -553,7 +554,20 @@ test("/pr-review-terminal: the R7 warning notify carries the verbatim --agent-no
     const warn = h.notifyEvents.find((e) => e.message.includes("ACTION NEEDED"));
     assert.ok(warn, "the manual-action notify fired (harness seams disabled)");
     assert.equal(warn?.severity, "warning");
-    assert.ok(warn?.message.includes(launchLine), "the verbatim launch line is in the notify");
+    assert.equal(
+      warn?.message,
+      "perk: pr-review-terminal — ACTION NEEDED — run hunk in another terminal:",
+    );
+    const entries = h.session.sessionManager.getEntries() as unknown as {
+      customType?: string;
+      data?: { text?: string; severity?: string };
+    }[];
+    const detail = entries.find(
+      (entry) =>
+        entry.customType === REPORT_DETAIL_TYPE && entry.data?.text?.includes("ACTION NEEDED"),
+    );
+    assert.equal(detail?.data?.severity, "warning");
+    assert.ok(detail?.data?.text?.includes(`\n  ${launchLine}`), "detail keeps the launch line");
     assert.equal(injected.length, 1, "the guidance injection still follows (non-blocking)");
   } finally {
     h.dispose();

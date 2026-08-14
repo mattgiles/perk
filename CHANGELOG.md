@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 <!-- As of 80709df -->
 
+### Fixed
+
+- Multiline diagnostics routed through `report()` no longer write raw stderr across Pi's interactive layout: slash commands show a one-line managed headline plus complete display-only transcript detail, while equivalent model tools retain the full diagnostic in their Result. (9e304195)
+
 ## [3.0.0] - 2026-08-13
 
 ### Major Changes
