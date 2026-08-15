@@ -18,8 +18,10 @@ Following the reference quadrant's rule, every entry is written against the comm
 `--help` output. Structural surface tests (`tests/test_cli_parity_smoke.py` and the
 `tests/test_cli_help_sections.py` drift guard) catch real surface regressions, and the
 bi-directional `tests/test_user_docs_cli_reference.py` guard keeps the documented inventory
-complete against the live CLI: every documented command must exist, and every visible command
-must be documented on exactly one of these pages.
+complete against the live CLI: every documented command must exist, and every operator-facing
+command must be documented on exactly one of these pages. The one deliberate exception is
+`run-worker` — the internal CI worker entrypoint, allowlisted out of the inventory and the
+command map below.
 
 ## Orientation
 
@@ -136,9 +138,9 @@ needed); omitted, the invoking checkout's active saved plan is used.
 
 ## Command groups
 
-One row per visible root command: its purpose, and the page carrying its exact reference. The
-five stage launchers above are the spine; every other command's detail lives on its family
-reference page.
+One row per operator-facing root command (every visible root command except the internal
+`run-worker`): its purpose, and the page carrying its exact reference. The five stage launchers
+above are the spine; every other command's detail lives on its family reference page.
 
 <!-- BEGIN perk cli command map -->
 
