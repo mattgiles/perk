@@ -58,6 +58,84 @@ imports `WorkflowSpineDiagram.astro` and `TwoPlanesDiagram.astro`, the objective
 the headless/remote explanation imports `HeadlessRemoteDiagram.astro`, all by relative path and
 all conforming to the visual blueprint's §5 diagram legend and rendering contract.
 
+Each component renders two content-equal SVG variants and exposes exactly one at any width via
+a **container query on the actual content column**: `figure.perk-diagram` (compositions.css) is
+an `inline-size` container, the narrow variant is the default, and an
+`@container (min-width: 736px)` block flips to the wide variant only where the column fits its
+736-unit viewBox at scale 1. With each variant's `max-width` equal to its own viewBox width (no
+upscaling) and narrow viewBoxes ≤ 288 units (the content width at the 320px acceptance floor),
+every SVG label renders at its declared ≥16 CSS px at every width — including 200% zoom — by
+construction, not by viewport heuristics. Browsers without container-query support keep the
+content-identical narrow variant. `tests/test_docs_site_system.py` guards the geometry
+(variant/viewBox/max-width/@container shape, no viewport-media-query exposure, and every
+`<text>` resolving to a ≥16px rule in its component's own `<style>`).
+
+## Visual system stylesheet (`src/styles/system.css`)
+
+The third repo-owned stylesheet applies the visual blueprint's remaining bound decisions beyond
+tokens (tokens.css) and compositions (compositions.css); `customCss` is unlayered, so its rules
+beat Starlight's `@layer starlight.*` styles without specificity games:
+
+- **§3 type scale + consumers** — `--sl-text-base` 17px **plus the `body { font-size }`
+  consuming rule** (Starlight's body sets no font-size, so the token alone would be dead; a
+  root font-size change would rescale every rem), `--sl-text-h1..h4` narrow/`>=768px` values,
+  per-level heading line heights, small/meta + eyebrow line-height consumers, and the home
+  hero H1 (the sole display-sized text).
+- **§2 measure** — `--sl-content-width: 72ch` (`ch` resolves at the consuming container,
+  landing inside the blueprint's accepted 68–74ch rendered range).
+- **§2 inline code** — `--sl-color-bg-inline-code` set to the blueprint's prose-bound hexes
+  (`#ECEFE9` light / `#233029` dark): the one sanctioned literal-hex exception in the file
+  (tokens.css cannot host them — its no-stray-token guard).
+- **§2 focus** — a universal `:focus-visible` rule (3px `--perk-accent-strong`, 3px offset)
+  plus exactly one pinned inset exception: the mobile ToC's full-width `<summary>` keeps
+  Starlight's inside offset so the outline is not clipped at the viewport edge.
+- **§6 reduced motion** — a value-complete `prefers-reduced-motion: reduce` block
+  (`animation-iteration-count: 1`, not 0, so JS `animationend` contracts still fire while
+  motion collapses to a single ~0ms cycle).
+- **§4C table containment** — a visible border frame on `.sl-markdown-content table`, keeping
+  Starlight's block-contained horizontal scroll (the page never widens). Code blocks stay on
+  Expressive Code defaults.
+- **§4B landing eyebrows + §4C path eyebrow/92ch wide mode** — pure CSS keyed on the
+  sidebar's `aria-current="page"` link via `:has()`: the four quadrant landings render their
+  section eyebrow above the H1, and exactly the five `reference/configuration/*` children
+  (enumerated route-exact — a future sixth child must be enrolled deliberately) get a
+  monospaced `.perk/config.toml` eyebrow plus the 92ch wide mode with prose re-capped at 72ch.
+  The `content: … / ""` alt-text form keeps eyebrows out of the accessibility tree; browsers
+  without `:has()` support gracefully render no eyebrow. Zero corpus edits, zero component
+  overrides (the §7 set stays empty). The CSS↔sidebar coupling is pinned two ways:
+  `checks/built-site.test.mjs` asserts each keyed route's built page carries the exact
+  `aria-current` href, and `tests/test_docs_site_system.py` pins the enumerations.
+
+`tests/test_docs_site_system.py` guards the whole stylesheet spec↔artifact against the
+blueprint (values AND consuming rules), and carries the committed **WCAG-math contrast check**
+over the live tokens — all 28 §9 pairs plus the inline-code backgrounds in both themes.
+
+## Static accessibility gate (`checks/a11y.test.mjs`)
+
+`axe-core` runs in `jsdom` against **every routed built page** (enumerated exactly like the
+other post-build checks): any `serious`/`critical` violation fails the gate; lower-impact
+violations and jsdom-`incomplete` rules print but never fail. Pages load with
+`runScripts: "outside-only"` and no subresources — a deterministic static-DOM check, not a
+browser. Exactly one rule is disabled: `color-contrast` (it needs real layout); its substitute
+is the deterministic WCAG-math check in `tests/test_docs_site_system.py`. Belt-and-suspenders
+per page: exactly one `<main>` landmark and the `#_top` skip link. The gate lives in `checks/`,
+so the site `check` script runs it after `astro build` with no extra wiring.
+
+The pins: `axe-core` and `jsdom` are exact, dev-only, plan-selected accessibility tooling
+(guarded with the rest of the `devDependencies` literal in `tests/test_packaging.py`). jsdom
+stays on **29.x** deliberately: 30.x declares an engines floor (`^22.22.2 || …`) above the
+repo's documented effective dev floor (>=22.19.0, below) and would be rejected under the root
+`.npmrc`'s `engine-strict=true`; 29.1.1's floor (`^22.13.0 || …`) fits with no manifest/README
+floor change.
+
+**What is machine-proven here vs. rendered review:** local fonts, both themes' values,
+contrast, type scale/measure/focus/reduced-motion/containment structure, diagram geometry and
+labeling, landmark/skip-link/name rules, and the full-corpus axe bar are all deterministic
+gates in CI. The rendered residue — visual theme review, in-situ scroll/reflow/zoom QA,
+real keyboard traversal, screen-reader listen-through, Expressive Code syntax-token contrast —
+is assigned to the objective's final-gate human review (node 5.2), a recorded split, not a
+silent deferral.
+
 ## Sidebar & pagination
 
 Navigation is the **explicit sidebar** in `src/sidebar.mjs` — never autogenerated. The
@@ -139,7 +217,8 @@ carry the site's own gates:
   home/landing/objective-tutorial/stage-matrix/headless-remote
   structure (hero actions, the five band anchors, all five diagram figures'
   two-labeled-variant shape, component-href integrity, recommended-start regions, the how-to
-  group anchors);
+  group anchors, and the eyebrow/wide-mode `aria-current` coupling);
+  `a11y.test.mjs` runs the full-corpus static axe gate (above);
   `pagefind.test.mjs` runs the loopback-served **ten-query relevance matrix** (blueprint §7,
   top-5 bar, sharing `src/pagefind-ranking.mjs` with the browser UI so the two can never
   disagree on ranking) plus the `Divio` exclusion sentinel proving the authoring file never
@@ -186,7 +265,9 @@ explicit objective reconciliation (their shared reconciliation rule):
   Fontsource pins, `customCss` order, and the §2/§3 token and font values transcribed into
   `src/styles/tokens.css`. `tests/test_docs_site_tokens.py` guards value-exact agreement with
   the blueprint — for both the stylesheet and the `customCss` wiring order — normalizing only
-  quote style, whitespace, and hex case (Biome formats the CSS).
+  quote style, whitespace, and hex case (Biome formats the CSS); `tests/test_docs_site_system.py`
+  guards the §2/§3/§4/§6 system rules in `src/styles/system.css`, the §9 contrast evidence by
+  live WCAG math, and the §5 diagram-geometry label floor.
 
 ## Deliberately local-only
 
@@ -198,8 +279,6 @@ option (sitemap generation) is therefore expected and harmless.
 
 - **Label polish** — all non-Home sidebar entries take their labels from page titles; display
   label overrides are a migration-time decision under the blueprint §6 rule.
-- **Landing eyebrows** — the §4B quadrant-landing eyebrow is deferred to the visual-hardening
-  node (template chrome; redundant with the landing H1 today).
 - **`@astrojs/check` and an MDX-faithful link sweep** — both deferred with recorded
   justification above (static prop-free components; four MDX pages whose markdown links are
   swept and whose built hrefs are post-build-checked).
