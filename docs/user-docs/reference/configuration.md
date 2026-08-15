@@ -87,7 +87,9 @@ Legacy tables and keys (`[trust]`, `[objective]`, `[subagents]`, `[stages.<id>]`
 
 ## Related
 
-- [Setup and health](./cli/setup-and-health.md) — the exact `perk init` and `perk doctor`
-  reference.
-- [In-session commands & tools](./in-session.md) — the warm `/…` commands and model-facing tools.
-- [How perk thinks](../explanation/how-perk-thinks.md) — the workflow model behind the settings.
+- **Look up:** [Setup and health](./cli/setup-and-health.md) — the exact `perk init` and
+  `perk doctor` reference.
+- **Look up:** [In-session commands & tools](./in-session.md) — the warm `/…` commands and
+  model-facing tools.
+- **Understand:** [How perk thinks](../explanation/how-perk-thinks.md) — the workflow model
+  behind the settings.

@@ -3,6 +3,7 @@ import { unified } from "@astrojs/markdown-remark";
 import starlight from "@astrojs/starlight";
 import { defineConfig } from "astro/config";
 import { corpusLinkGate, createCorpusLinkAudit } from "./src/corpus-link-audit.mjs";
+import { ranking } from "./src/pagefind-ranking.mjs";
 import remarkRewriteCorpusLinks from "./src/remark-rewrite-corpus-links.mjs";
 import remarkStripFirstH1 from "./src/remark-strip-first-h1.mjs";
 import { sidebar } from "./src/sidebar.mjs";
@@ -46,10 +47,16 @@ export default defineConfig({
       // The explicit blueprint-§3 sidebar (src/sidebar.mjs; agreement with the corpus
       // frontmatter is guarded by src/sidebar.test.mjs).
       sidebar,
-      // Starlight's default prev/next links follow sidebar order across section boundaries,
-      // implying a linear reading order that is wrong for how-to/reference content. Node 4.6
-      // ("meaningful pagination") re-enables this deliberately, per-page or per-section.
+      // Pagination policy: globally OFF — Starlight's default prev/next links follow sidebar
+      // order across section boundaries, implying a linear reading order that is wrong for
+      // how-to/reference content. Pages opt in per-page (frontmatter `prev`/`next: true`)
+      // only where a deliberately linear reading sequence exists — currently exactly the
+      // three-tutorial chain (guarded by checks/built-site.test.mjs and
+      // tests/test_user_docs_findability.py).
       pagination: false,
+      // The shared ranking object (src/pagefind-ranking.mjs) keeps this UI and the relevance
+      // matrix (checks/pagefind.test.mjs) in exact agreement — see that module's comment.
+      pagefind: { ranking },
       customCss: [
         "@fontsource-variable/inter/index.css",
         "@fontsource/ibm-plex-mono/latin-400.css",

@@ -266,6 +266,9 @@ payload).
 
 ## Related
 
-- **Learn:** [Drive a multi-plan goal with an objective](../tutorials/drive-an-objective.mdx).
-- **Do:** [Author an objective roadmap](../how-to/author-a-roadmap.md).
-- **Understand:** [Gists, plans, and objectives](../explanation/gists-plans-and-objectives.md).
+- **Learn:** [Drive a multi-plan goal with an objective](../tutorials/drive-an-objective.mdx) —
+  author and land a first node hands-on.
+- **Do:** [Author an objective roadmap](../how-to/author-a-roadmap.md) — stand up an objective
+  from a real goal.
+- **Understand:** [Gists, plans, and objectives](../explanation/gists-plans-and-objectives.md) —
+  why objectives generate plans instead of being implemented directly.

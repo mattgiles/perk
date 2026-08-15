@@ -93,6 +93,6 @@ command = "just test"
 
 ## Related
 
-- [How to target a non-default base branch](../../how-to/target-a-non-default-base-branch.md) — set and verify the target branch.
-- [How to configure and verify CI checks](../../how-to/configure-and-verify-ci-checks.md) — add trusted checks and run the gate.
-- [How to run a worktree setup hook](../../how-to/run-a-worktree-setup-hook.md) — prepare newly materialized worktrees.
+- **Do:** [How to target a non-default base branch](../../how-to/target-a-non-default-base-branch.md) — set and verify the target branch.
+- **Do:** [How to configure and verify CI checks](../../how-to/configure-and-verify-ci-checks.md) — add trusted checks and run the gate.
+- **Do:** [How to run a worktree setup hook](../../how-to/run-a-worktree-setup-hook.md) — prepare newly materialized worktrees.

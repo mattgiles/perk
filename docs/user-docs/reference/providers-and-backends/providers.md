@@ -132,6 +132,9 @@ reference behavior.
 
 ## Related
 
-- **Look up:** [Providers & issue backends](../providers-and-backends.md).
-- **Do:** [Select a provider](../../how-to/select-a-provider.md).
-- **Look up:** [Backends configuration](../configuration/backends.md).
+- **Look up:** [Providers & issue backends](../providers-and-backends.md) — the supported-set
+  overview, comparison, and caveats.
+- **Do:** [Select a provider](../../how-to/select-a-provider.md) — apply a provider selection
+  end to end.
+- **Look up:** [Backends configuration](../configuration/backends.md) — the exact `[providers]`
+  selector keys.

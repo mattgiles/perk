@@ -466,3 +466,9 @@ failures (`land_blocked` — the readiness report rides the failure, `land_faile
 foreign merge request exists for the top PR, `land_drift`, `confirmation_required`,
 `operation_in_progress`, `plan_not_found`, an incremental objective as `not_stacked`,
 reconstruction failures, `no_objective`); `2` = not-a-repo.
+
+## Related
+
+- **Do:** [How to author an objective roadmap](../../how-to/author-a-roadmap.md) — stand up the objective these commands drive.
+- **Look up:** [Objectives — the roadmap model](../objectives.md) — the node model and delivery policies behind the commands.
+- **Understand:** [Gists, plans, and objectives](../../explanation/gists-plans-and-objectives.md) — why objectives emit plans instead of being implemented.

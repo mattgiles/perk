@@ -52,6 +52,6 @@ framed as materializations into a host tool's directory — not evidence that `.
 
 ## Related
 
-- [Configuration files](../configuration.md) — file precedence, overlay semantics, and the table map.
-- [How to diagnose a perk repo](../../how-to/diagnose-a-perk-repo.md) — investigate wiring and repair drift.
-- [How perk thinks](../../explanation/how-perk-thinks.md) — the workflow model that uses these paths.
+- **Look up:** [Configuration files](../configuration.md) — file precedence, overlay semantics, and the table map.
+- **Do:** [How to diagnose a perk repo](../../how-to/diagnose-a-perk-repo.md) — investigate wiring and repair drift.
+- **Understand:** [How perk thinks](../../explanation/how-perk-thinks.md) — the workflow model that uses these paths.

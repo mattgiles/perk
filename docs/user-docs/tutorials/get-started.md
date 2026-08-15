@@ -3,6 +3,7 @@ title: "Get started with perk"
 description: "Drive a tiny change through perk's complete workflow, from plan to merged PR to captured learning."
 sidebar:
   order: 1010
+next: true
 ---
 
 # Get started with perk

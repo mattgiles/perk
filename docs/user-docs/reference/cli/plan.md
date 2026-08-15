@@ -175,3 +175,9 @@ pushed); a
 missing `hunk` binary names the install hint (`npm i -g hunkdiff`); a missing bundled feedback
 extension means a broken perk installation (reinstall perk — `perk doctor` reports it as the
 `watch-feedback` check).
+
+## Related
+
+- **Do:** [How to resume a plan at its current stage](../../how-to/resume-a-plan.md) — pick the right re-entry command for an in-flight plan.
+- **Look up:** [Workflow commands](../in-session/workflow-commands.md) — the warm counterparts these launchers open into.
+- **Understand:** [Gists, plans, and objectives](../../explanation/gists-plans-and-objectives.md) — what a plan is, and when intent belongs elsewhere.

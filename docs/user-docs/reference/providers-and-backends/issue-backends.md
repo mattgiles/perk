@@ -214,6 +214,9 @@ unverified against a live workspace, so this is not part of the ordinary Linear 
 
 ## Related
 
-- **Look up:** [Providers & issue backends](../providers-and-backends.md).
-- **Do:** [Switch the issue backend to Linear](../../how-to/switch-to-linear.md).
-- **Look up:** [Objectives — the roadmap model](../objectives.md).
+- **Look up:** [Providers & issue backends](../providers-and-backends.md) — the supported-set
+  overview, comparison, and caveats.
+- **Do:** [Switch the issue backend to Linear](../../how-to/switch-to-linear.md) — the
+  migration recipe for this switch.
+- **Look up:** [Objectives — the roadmap model](../objectives.md) — how objectives are stored
+  and behave on each backend.

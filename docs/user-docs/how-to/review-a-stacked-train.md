@@ -45,6 +45,8 @@ default).
    see [Objectives → Delivery](../reference/objectives.md#delivery) for the landing shape
    and stacked delivery's current limitations.
 
----
+## Related
 
-← Back to the [how-to router](index.md).
+- **Learn:** [Drive a stacked objective to one atomic landing](../tutorials/drive-a-stacked-objective.md) — the full stacked workflow from authoring to landing.
+- **Do:** [How to recover a stacked delivery train](recover-a-stacked-train.md) — when a train operation is interrupted mid-review.
+- **Look up:** [Objective commands](../reference/cli/objective.md) — the stack subgroup's exact syntax.

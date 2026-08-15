@@ -24,7 +24,8 @@ inherits — never add a `markdown.remarkPlugins` key alongside; it would double
   offending URL + reason. Because the glob loader serves cached renders for unchanged sources
   (a target-only deletion never re-renders its dependents), the gate re-sweeps the **whole
   corpus from disk** at build completion — render-cache-independent — rather than trusting
-  render-time records alone.
+  render-time records alone. (`tests/test_user_docs_findability.py` guards the inbound side:
+  the repo's entry points — `README.md`, `docs/index.md` — keep resolving into the corpus.)
 
 The build-completion sweep validates two more link families beyond dangling targets:
 
@@ -44,9 +45,9 @@ The build-completion sweep validates two more link families beyond dangling targ
 - **Escapes** — a relative link that path-resolves *outside* `docs/user-docs/` fails the
   build unless it is a recorded deferral in `ESCAPE_BASELINE`
   (`src/corpus-link-audit.mjs`). The known-dangling anchors live in `ANCHOR_BASELINE`
-  likewise. Both baselines are exact `{ source, url }` pairs, each commented with the node
-  that owns its removal, and **ratcheted**: an entry that stops matching a live finding
-  fails the build as stale — baselines only ever shrink toward zero.
+  likewise. Both baselines are exact `{ source, url }` pairs and **ratcheted**: an entry
+  that stops matching a live finding fails the build as stale. The burn-down is complete —
+  both baselines are empty — and any new entry must record the owner of its removal.
 
 An exact-match Vite alias resolves the bare `@astrojs/starlight/components` specifier from the
 site tree so corpus `.mdx` pages can import Starlight components (Starlight's own internal
@@ -70,7 +71,10 @@ equality, `sidebar.order` ascent, subgroup membership, and the single label over
 
 `pagination: false` is deliberate: Starlight's default prev/next links follow sidebar order
 across section boundaries, implying a linear reading order that is wrong for how-to/reference
-content. A later node re-enables pagination deliberately where it means something.
+content. Pages opt in per-page (frontmatter `prev`/`next: true`) only where a deliberately
+linear reading sequence exists — currently exactly the tutorials chain. The four rendered
+edges are pinned by `checks/built-site.test.mjs`, and the frontmatter opt-ins themselves by
+`tests/test_user_docs_findability.py` (the source mirror).
 
 ## Corpus metadata contract
 
@@ -129,11 +133,17 @@ carry the site's own gates:
   `checks/` — deliberately outside `src/`, so the unit-test glob never runs them without a
   build. `built-site.test.mjs` asserts the complete corpus is routed, the single-rendered-H1
   contract (H1 text = frontmatter `title`), the Starlight TOC landmark on sectioned pages,
-  Expressive Code markup, and the home/landing/objective-tutorial/stage-matrix/headless-remote
+  Expressive Code markup, the exact tutorials-chain pagination edges, the exclusion proofs
+  (no built output for `_authoring`; the `data-pagefind-body` page set — the search-index
+  membership — equals the routed corpus), and the
+  home/landing/objective-tutorial/stage-matrix/headless-remote
   structure (hero actions, the five band anchors, all five diagram figures'
   two-labeled-variant shape, component-href integrity, recommended-start regions, the how-to
   group anchors);
-  `pagefind.test.mjs` is the loopback-served Pagefind query smoke. Runs inside `just test` and `just docs-check`.
+  `pagefind.test.mjs` runs the loopback-served **ten-query relevance matrix** (blueprint §7,
+  top-5 bar, sharing `src/pagefind-ranking.mjs` with the browser UI so the two can never
+  disagree on ranking) plus the `Divio` exclusion sentinel proving the authoring file never
+  enters the search index. Runs inside `just test` and `just docs-check`.
 
 CI reaches every docs gate through `just lint`/`just typecheck`/`just test`;
 `tests/test_docs_gates.py` is the structural proof of that wiring (scripts, recipes,
@@ -193,9 +203,3 @@ option (sitemap generation) is therefore expected and harmless.
 - **`@astrojs/check` and an MDX-faithful link sweep** — both deferred with recorded
   justification above (static prop-free components; four MDX pages whose markdown links are
   swept and whose built hrefs are post-build-checked).
-- **Meaningful pagination** — `pagination: false` until a later node re-enables prev/next
-  deliberately where a linear order exists.
-- **Pagefind relevance tuning** — the post-build search check is a query smoke, not a
-  relevance matrix.
-- **Baseline burn-down** — each `ESCAPE_BASELINE`/`ANCHOR_BASELINE` entry names the content
-  node that owns its removal; the stale-entry ratchet forces the bookkeeping.

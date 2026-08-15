@@ -212,3 +212,9 @@ locates that branch's PR; nothing on GitHub is mutated. The warm `/pr-review-bro
 `no_plan_ref` (run `/plan-save` then `perk implement` first); no PR for the plan branch is
 `no_pr` (run `/submit` first); a GitHub read failure is `github_error`. Exit `0` ok · `1`
 refusal/failure · `2` not-a-repo.
+
+## Related
+
+- **Do:** [How to address review feedback on a PR](../../how-to/address-review-feedback.md) — the address loop these commands launch.
+- **Do:** [How to review a PR human-in-the-loop](../../how-to/review-a-foreign-pr.md) — run the review workers on any PR safely.
+- **Look up:** [Review and authoring](../in-session/review-and-authoring.md) — the in-session review surfaces behind these launchers.

@@ -48,6 +48,8 @@ report names the **owning command** (`/submit` for PUBLISH, `stack sync` for a c
 `in_flight` only ever report — `mixed` needs human investigation, `in_flight` needs you to
 rerun recover once the live merge request settles or expires.
 
----
+## Related
 
-← Back to the [how-to router](index.md).
+- **Learn:** [Drive a stacked objective to one atomic landing](../tutorials/drive-a-stacked-objective.md) — the healthy end-to-end train the recovery moves restore.
+- **Do:** [How to review a stacked PR train](review-a-stacked-train.md) — resume review once the train is consistent.
+- **Look up:** [Objective commands](../reference/cli/objective.md) — exact `stack` sync and recover syntax.

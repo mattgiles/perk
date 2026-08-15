@@ -76,6 +76,9 @@ summarized in [Issue backends](./providers-and-backends/issue-backends.md).
 
 ## Related
 
-- **Do:** [Select a provider](../how-to/select-a-provider.md).
-- **Do:** [Switch the issue backend to Linear](../how-to/switch-to-linear.md).
-- **Look up:** [Backends configuration](./configuration/backends.md).
+- **Do:** [Select a provider](../how-to/select-a-provider.md) — swap a supported seam to a
+  foreign provider, or back to the default.
+- **Do:** [Switch the issue backend to Linear](../how-to/switch-to-linear.md) — the committed,
+  repo-wide backend switch.
+- **Look up:** [Backends configuration](./configuration/backends.md) — the exact `[providers]`,
+  `[issues]`, and `[linear]` keys.

@@ -145,3 +145,9 @@ workflow file). `--verbose` shows every check; `--json` emits a machine-readable
 Dispatch a throwaway CI run (a smoke short-circuit) to prove the runner is live. `--wait` polls
 the dispatched run to completion; `--verbose` shows every prereq check; `--json` emits a
 machine-readable report.
+
+## Related
+
+- **Do:** [How to diagnose a perk repo](../../how-to/diagnose-a-perk-repo.md) — read a failing doctor report and apply the bounded repair.
+- **Do:** [How to configure and verify CI checks](../../how-to/configure-and-verify-ci-checks.md) — author the check rows init and doctor converge.
+- **Look up:** [Configuration files](../configuration.md) — the tables `perk init` writes and `perk doctor` verifies.
