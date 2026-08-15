@@ -1,0 +1,215 @@
+/* The workbench's sole styling surface: the pinned CSP (`style-src 'self'`) forbids
+   inline style attributes, so every visual rule lives in this stylesheet. */
+
+:root {
+  color-scheme: light dark;
+  font-family: system-ui, sans-serif;
+  font-size: 14px;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+}
+
+#root {
+  height: 100vh;
+}
+
+/* Header row over three independently scrollable columns. */
+.app {
+  display: grid;
+  grid-template-rows: auto 1fr;
+  grid-template-columns: minmax(16rem, 22rem) minmax(0, 1fr) minmax(16rem, 24rem);
+  grid-template-areas:
+    "header header header"
+    "tree center inspector";
+  height: 100vh;
+}
+
+.app-header {
+  grid-area: header;
+  padding: 0.5rem 1rem;
+  border-bottom: 1px solid color-mix(in srgb, currentcolor 25%, transparent);
+}
+
+.app-header h1 {
+  margin: 0;
+  font-size: 1.1rem;
+}
+
+.pane {
+  overflow: auto;
+  padding: 0.75rem 1rem;
+  min-height: 0;
+}
+
+.tree-pane {
+  grid-area: tree;
+  border-right: 1px solid color-mix(in srgb, currentcolor 25%, transparent);
+}
+
+.center-pane {
+  grid-area: center;
+}
+
+.inspector-pane {
+  grid-area: inspector;
+  border-left: 1px solid color-mix(in srgb, currentcolor 25%, transparent);
+}
+
+.pane-hint {
+  opacity: 0.75;
+}
+
+/* ── Tree pane ─────────────────────────────────────────────────────────── */
+
+.tree-root,
+.tree-branch {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.tree-branch {
+  padding-left: 1rem;
+}
+
+.tree-toggle,
+.tree-entry {
+  display: inline-block;
+  width: 100%;
+  text-align: left;
+  background: none;
+  border: none;
+  color: inherit;
+  font: inherit;
+  padding: 0.15rem 0.25rem;
+  cursor: pointer;
+  border-radius: 0.25rem;
+}
+
+.tree-toggle:hover,
+.tree-entry:hover {
+  background: color-mix(in srgb, currentcolor 10%, transparent);
+}
+
+.tree-toggle.capability {
+  font-weight: 600;
+}
+
+.toggle-marker {
+  display: inline-block;
+  width: 1em;
+}
+
+.tree-entry.selected {
+  background: color-mix(in srgb, currentcolor 18%, transparent);
+}
+
+.tree-layer {
+  display: flex;
+  align-items: baseline;
+  gap: 0.35rem;
+}
+
+.layer-position {
+  opacity: 0.6;
+  min-width: 1.25rem;
+  text-align: right;
+}
+
+.delivery-badge,
+.kind-badge,
+.readonly-badge,
+.boundary-owner {
+  font-size: 0.8rem;
+  padding: 0.05rem 0.4rem;
+  border: 1px solid color-mix(in srgb, currentcolor 35%, transparent);
+  border-radius: 0.6rem;
+  opacity: 0.85;
+  white-space: nowrap;
+}
+
+.tree-entry.boundary {
+  font-style: italic;
+}
+
+/* ── Center pane ───────────────────────────────────────────────────────── */
+
+.mode-bar {
+  display: flex;
+  gap: 0.5rem;
+  margin-bottom: 0.75rem;
+}
+
+.mode-button {
+  font: inherit;
+  color: inherit;
+  background: none;
+  border: 1px solid color-mix(in srgb, currentcolor 35%, transparent);
+  border-radius: 0.25rem;
+  padding: 0.25rem 0.9rem;
+  cursor: pointer;
+}
+
+.mode-button[aria-pressed="true"] {
+  background: color-mix(in srgb, currentcolor 18%, transparent);
+  font-weight: 600;
+}
+
+.source-header {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  margin-bottom: 0.5rem;
+}
+
+.source-path {
+  font-family: ui-monospace, monospace;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.source-text {
+  margin: 0;
+  padding: 0.75rem;
+  border: 1px solid color-mix(in srgb, currentcolor 25%, transparent);
+  border-radius: 0.25rem;
+  overflow: auto;
+  font-family: ui-monospace, monospace;
+  font-size: 0.85rem;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.source-refused h2,
+.boundary-explanation h2,
+.identity-block h2 {
+  margin-top: 0;
+  font-size: 1rem;
+  overflow-wrap: anywhere;
+}
+
+/* ── Inspector pane ────────────────────────────────────────────────────── */
+
+.identity-block dl {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 0.25rem 0.75rem;
+  margin: 0.5rem 0;
+}
+
+.identity-block dt {
+  font-weight: 600;
+}
+
+.identity-block dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+  font-family: ui-monospace, monospace;
+}

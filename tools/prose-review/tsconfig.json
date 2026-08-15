@@ -16,5 +16,5 @@
     "noUnusedLocals": true,
     "noUnusedParameters": true
   },
-  "include": ["src", "vite.config.ts", "dom-sinks.test.ts", "summary.test.ts"]
+  "include": ["src", "vite.config.ts", "*.test.ts"]
 }

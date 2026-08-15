@@ -68,9 +68,9 @@ command = "just docs-check"
 glob = "docs/user-docs/**,docs/site/**,package.json,package-lock.json,justfile"
 
 # Mirror discipline: every surface this row runs is also reached through the generic checks
-# (typecheck-js runs the workspace tsc, test-js's tools/**/*.test.ts glob runs both node tests,
-# and test-py's server-integration fixture runs the Vite build) — the row exists so a
-# workspace-suffix-only change (.html/.json) still selects a check (the docs-check row's shape).
+# (typecheck-js runs the workspace tsc, test-js's tools/**/*.test.ts glob runs the workspace's
+# node tests, and test-py's server-integration fixture runs the Vite build) — the row exists so
+# a workspace-suffix-only change (.html/.json) still selects a check (the docs-check row's shape).
 [[ci.checks]]
 name = "prose-review-check"
 command = "just prose-review-check"

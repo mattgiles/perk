@@ -12,10 +12,15 @@ without revisiting it.
   plain uvicorn, no `[standard]` extras). perk-dev is dev-only and never published; `src/perk` is
   untouched. The bounded-deps posture: no other backend dependency is anticipated for the whole
   objective.
-- **Endpoints are sync `def`** — every query is pure in-memory work over the immutable
-  `CatalogSnapshot` (`load_catalog` builds once) — and return `*Out` Pydantic models
-  (`perk.boundary.OutputModel`, `from_domain` constructors). The HTTP layer never touches domain
-  objects.
+- **Endpoints are sync `def`** — catalog queries are pure in-memory work over the immutable
+  `CatalogSnapshot` (`load_catalog` builds once), and the only per-request filesystem work is the
+  two read families below — and return `*Out` Pydantic models (`perk.boundary.OutputModel`,
+  `from_domain` constructors). The HTTP layer never touches domain objects.
+- **Exactly two file-read families.** Built-asset reads (`index.html` included) go through
+  `web.read_contained`; canonical-source reads go through the SourceAdapter
+  (`perk_dev.prose_review.source_adapter`) — root-bound, catalog-membership-checked, text-only,
+  and the exclusive reader of canonical source content on the serving path (catalog *discovery*
+  reads mapped sources once at load time; that is the catalog module's own contract).
 - The FastAPI app is constructed with **`docs_url=None, redoc_url=None, openapi_url=None`**: the
   default `/docs` (Swagger UI) and `/redoc` pages load CDN-hosted assets and would violate the
   no-network-loaded-assets envelope; `/openapi.json` is locally generated but is an unused
@@ -61,7 +66,7 @@ CheckRunner.
 | Loopback origin only: exactly `127.0.0.1:<port>` | The launcher binds `127.0.0.1:0`; the guard requires the `Host` header to byte-equal the one printed origin (`localhost` spellings, foreign hosts, missing port all 403) | `test_prose_review_web.py::test_host_rejection` (×3); `test_prose_review_integration.py::test_wrong_host_is_rejected_over_real_http` |
 | Origin exact-match | An `Origin` header, when present, must equal `http://127.0.0.1:<port>` exactly, else 403 | `test_origin_exact_match_passes_and_foreign_origin_is_rejected` |
 | CSRF token on every non-GET/HEAD request | Meta-tag injection: `index.html`'s `__PROSE_REVIEW_CSRF__` placeholder is replaced at serve time with the process token (`secrets.token_urlsafe(32)`); the guard requires **exactly one** `X-Prose-Review-Csrf` header `secrets.compare_digest`-matching it (zero/duplicate/wrong → 403) | `test_csrf_all_four_arms` (403 ×3 + the pass-through 405 proof) |
-| Repo-rooted read containment | Every file read (`index.html` included) goes through one contained-read helper: re-resolve the dist root, require it under the resolved repo root, resolve the candidate, require it under the dist root and a regular file — an escaping `dist/` symlink cannot launder outside targets in | traversal, child-symlink, `assets/`-dir-symlink, `dist`-root-symlink, and `index.html`-symlink tests in `test_prose_review_web.py` |
+| Repo-rooted read containment | Every file read belongs to one of two families. Built-asset reads (`index.html` included) go through the contained-read helper: re-resolve the dist root, require it under the resolved repo root, resolve the candidate, require it under the dist root and a regular file — an escaping `dist/` symlink cannot launder outside targets in. Canonical-source reads go through the SourceAdapter (`perk_dev.prose_review.source_adapter`): lexical absolute-path rejection, resolved containment under the repo root, catalog membership, strict UTF-8 text only — serving-path-exclusive | traversal, child-symlink, `assets/`-dir-symlink, `dist`-root-symlink, and `index.html`-symlink tests in `test_prose_review_web.py`; traversal/absolute/symlink/NUL/non-text arms in `test_prose_review_source.py` |
 | Text-only rendering (this node's slice) | React JSX text interpolation (escaped by default) + a node:test source scan banning HTML sinks (`innerHTML`, `outerHTML`, `insertAdjacentHTML`, `dangerouslySetInnerHTML`, `document.write`) + the CSP as backstop | `tools/prose-review/dom-sinks.test.ts` (with a vacuousness self-check) |
 | CSP + hardening headers on **every** HTTP response | `Content-Security-Policy: default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self'; font-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'` plus `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer`, `Cache-Control: no-store` — stamped by the guard on rejections, 404s, and framework-generated 500s alike | header assertions on every response shape, incl. `test_unhandled_exception_response_is_still_header_stamped` (pins the outermost placement) |
 | No framework doc surfaces | `docs_url=None, redoc_url=None, openapi_url=None` | `test_framework_doc_surfaces_are_disabled` (×3) |

@@ -21,7 +21,7 @@ import uvicorn
 from perk_dev.prose_map.catalog import build_catalog
 from perk_dev.prose_review.catalog import CatalogSnapshot
 from perk_dev.prose_review.cli import build_frontend
-from perk_dev.prose_review.dto import CatalogSummaryOut
+from perk_dev.prose_review.dto import CapabilityTreeOut, CatalogSummaryOut
 from perk_dev.prose_review.web import create_app
 
 ROOT = Path(__file__).parents[1]
@@ -43,6 +43,11 @@ def server(tmp_path_factory: pytest.TempPathFactory) -> Iterator[_RunningServer]
     dist_dir = trust_root / "dist"
     build_frontend(ROOT, out_dir=dist_dir)
     assert (dist_dir / "index.html").is_file()
+
+    # One real candidate's bytes, copied to its catalog-relative path under the trust
+    # root, so the source read stays within this fixture's trust-root arrangement
+    # (pointing repo_root at the checkout would break the asset-containment tests).
+    (trust_root / "AGENTS.md").write_bytes((ROOT / "AGENTS.md").read_bytes())
 
     snapshot = CatalogSnapshot.from_catalog(build_catalog(ROOT))
     token = secrets.token_urlsafe(32)
@@ -111,6 +116,28 @@ def test_summary_endpoint_serves_the_snapshot_dto_over_real_http(
         response = client.get("/api/catalog/summary")
     assert response.status_code == 200
     assert response.json() == CatalogSummaryOut.from_domain(server.snapshot).model_dump(mode="json")
+
+
+def test_tree_endpoint_serves_the_fixed_order_tree_over_real_http(
+    server: _RunningServer,
+) -> None:
+    with httpx.Client(base_url=server.base_url, timeout=10) as client:
+        response = client.get("/api/catalog/tree")
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload == CapabilityTreeOut.from_domain(server.snapshot).model_dump(mode="json")
+    assert payload["capabilities"][0]["label"] == "Foundation"
+
+
+def test_source_endpoint_serves_the_trust_root_copy_over_real_http(
+    server: _RunningServer,
+) -> None:
+    with httpx.Client(base_url=server.base_url, timeout=10) as client:
+        response = client.get("/api/source", params={"unit": "managed:repo-agents"})
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["unit"] == "managed:repo-agents"
+    assert payload["content"] == (ROOT / "AGENTS.md").read_bytes().decode("utf-8")
 
 
 def test_wrong_host_is_rejected_over_real_http(server: _RunningServer) -> None:

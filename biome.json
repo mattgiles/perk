@@ -6,6 +6,7 @@
       "extension/**/*.ts",
       "tools/**/*.ts",
       "tools/**/*.tsx",
+      "tools/**/*.css",
       "docs/site/**/*.ts",
       "docs/site/**/*.mjs",
       "docs/site/**/*.css"

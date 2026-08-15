@@ -114,6 +114,44 @@ def test_catalog_summary_serves_the_snapshot_dto(snapshot: CatalogSnapshot, repo
     _assert_security_headers(response)
 
 
+def test_catalog_tree_serves_the_fixed_order_tree(snapshot: CatalogSnapshot, repo: Path) -> None:
+    response = _client(snapshot, repo).get("/api/catalog/tree")
+    assert response.status_code == 200
+    payload = response.json()
+    assert list(payload.keys()) == ["capabilities"]
+    assert payload["capabilities"][0]["label"] == "Foundation"
+    _assert_security_headers(response)
+
+
+def test_source_serves_the_on_disk_file(snapshot: CatalogSnapshot, tmp_path: Path) -> None:
+    # The repo root of trust is the real checkout for the source read; the dist dir
+    # stays a tmp fixture (the /api/source path never touches built assets).
+    _populate_dist(tmp_path / "dist")
+    client = _client(snapshot, ROOT, dist_dir=tmp_path / "dist")
+    response = client.get("/api/source", params={"unit": "managed:repo-agents"})
+    assert response.status_code == 200
+    payload = response.json()
+    assert list(payload.keys()) == ["unit", "path", "kind", "content"]
+    assert payload["unit"] == "managed:repo-agents"
+    assert payload["path"] == "AGENTS.md"
+    assert payload["kind"] == "managed-prose"
+    assert payload["content"] == (ROOT / "AGENTS.md").read_bytes().decode("utf-8")
+    _assert_security_headers(response)
+
+
+def test_source_unknown_unit_is_a_fixed_404(snapshot: CatalogSnapshot, repo: Path) -> None:
+    response = _client(snapshot, repo).get("/api/source", params={"unit": "markdown:missing.md"})
+    assert response.status_code == 404
+    assert response.json() == {"detail": "unknown unit"}
+    _assert_security_headers(response)
+
+
+def test_source_missing_unit_param_is_a_stamped_422(snapshot: CatalogSnapshot, repo: Path) -> None:
+    response = _client(snapshot, repo).get("/api/source")
+    assert response.status_code == 422
+    _assert_security_headers(response)
+
+
 @pytest.mark.parametrize(
     ("filename", "content_type"),
     [

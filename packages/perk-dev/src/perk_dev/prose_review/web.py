@@ -10,9 +10,12 @@ websockets must give them their own guard policy first. Pure ASGI keeps the guar
 streaming-transparent.
 
 Handlers see only the ``CatalogSnapshot`` in and ``*Out`` models out — no domain object
-reaches a response path. Every file read (``index.html`` included) goes through one
-contained-read helper that proves both the dist root and the candidate sit under the
-repository root of trust (a symlinked ``dist/`` must not launder outside targets in).
+reaches a response path. File reads fall into exactly two families: built-asset reads
+(``index.html`` included) go through the contained-read helper that proves both the
+dist root and the candidate sit under the repository root of trust (a symlinked
+``dist/`` must not launder outside targets in); canonical-source reads go through the
+SourceAdapter (:mod:`perk_dev.prose_review.source_adapter`) — root-bound,
+catalog-membership-checked, and text-only.
 """
 
 import json
@@ -24,8 +27,18 @@ from typing import Any
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import HTMLResponse, Response
 
+from perk_dev.prose_review import source_adapter
 from perk_dev.prose_review.catalog import CatalogSnapshot
-from perk_dev.prose_review.dto import CatalogSummaryOut
+from perk_dev.prose_review.dto import CapabilityTreeOut, CatalogSummaryOut, UnitSourceOut
+from perk_dev.prose_review.source_adapter import SourceReadError, SourceReadFailure
+
+# One fixed 404 detail per closed read-failure reason. Containment failures stay
+# indistinguishable from missing files (the no-leak posture).
+_SOURCE_READ_DETAILS: dict[SourceReadFailure, str] = {
+    "unknown_unit": "unknown unit",
+    "not_found": "source not found",
+    "not_text": "source is not utf-8 text",
+}
 
 # The ASGI vocabulary (identical to the spec's shapes) — local aliases so this module
 # depends only on the declared fastapi/uvicorn deps, not transitively on starlette.
@@ -174,6 +187,8 @@ def create_app(
     locally generated — is an unused machine-readable surface this app never serves.
     """
     repo_resolved = repo_root.resolve()
+    # The snapshot is immutable, so the tree DTO is computed exactly once.
+    tree = CapabilityTreeOut.from_domain(snapshot)
     app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
 
     @app.get("/", response_class=HTMLResponse)
@@ -186,6 +201,18 @@ def create_app(
     @app.get("/api/catalog/summary", response_model=CatalogSummaryOut)
     def catalog_summary() -> CatalogSummaryOut:
         return CatalogSummaryOut.from_domain(snapshot)
+
+    @app.get("/api/catalog/tree", response_model=CapabilityTreeOut)
+    def catalog_tree() -> CapabilityTreeOut:
+        return tree
+
+    @app.get("/api/source", response_model=UnitSourceOut)
+    def source(unit: str) -> UnitSourceOut:
+        try:
+            whole = source_adapter.read_whole_file(snapshot, repo_resolved, unit)
+        except SourceReadError as exc:
+            raise HTTPException(status_code=404, detail=_SOURCE_READ_DETAILS[exc.reason]) from exc
+        return UnitSourceOut.from_domain(whole)
 
     @app.get("/assets/{asset_path:path}")
     def asset(asset_path: str) -> Response:
