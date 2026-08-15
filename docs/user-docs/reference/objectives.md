@@ -37,24 +37,24 @@ Each row links to its authoritative entry in the [CLI reference](./cli.md) or th
 
 | Surface | What it does |
 | --- | --- |
-| [`perk objective author`](./cli.md#perk-objective-author) | Draft a new objective and roadmap, optionally adopting a pre-existing source with `--from`. |
-| [`perk objective save`](./cli.md#perk-objective-save) | Persist an authored objective at the read-only → read-write boundary. |
-| [`perk objective plan`](./cli.md#perk-objective-plan-number) | Select the next node and author a bounded plan. |
-| [`perk objective create`](./cli.md#perk-objective-create-alias-new) (`new`) | Create an objective directly from structured input. |
-| [`perk objective show`](./cli.md#perk-objective-show-number-alias-s) (`s`) | Show the header, roadmap, summary, and next node. |
-| [`perk objective node`](./cli.md#perk-objective-node-number) | Update one node with an explicit status or backlink change. |
-| [`perk objective node-add`](./cli.md#perk-objective-node-add-number) | Add a genuinely-new node and assign its next phase-local id. |
-| [`perk objective engagement`](./cli.md#perk-objective-engagement-number) | Read objective and node-issue human engagement as untrusted data. |
-| [`perk objective node-engagement`](./cli.md#perk-objective-node-engagement-number) | Read one node-issue's pre-planning engagement. |
-| [`perk objective reconcile`](./cli.md#perk-objective-reconcile-number-alias-rec) (`rec`) | Rewrite only the Reconcilable prose region after a merge. |
-| [`perk objective replan`](./cli.md#perk-objective-replan-number) | Re-author unfinished work as a superseding objective. |
-| [`perk objective next`](./cli.md#perk-objective-next-number-alias-n) (`n`) | Print the next plannable node. |
-| [`perk objective run`](./cli.md#perk-objective-run-number-alias-r) (`r`) | Advance the backlog one autonomously safe step. |
-| [`perk objective doctor`](./cli.md#perk-objective-doctor-number-alias-doc) (`doc`) | Diagnose and optionally repair manifest, cancellation, or delivery-train drift. |
-| [`perk objective stack status`](./cli.md#perk-objective-stack-status-objective) | Report the published delivery train and unresolved operations. |
-| [`perk objective stack sync`](./cli.md#perk-objective-stack-sync-objective) | Preview or cascade a published suffix after an amend or base advance. |
-| [`perk objective stack recover`](./cli.md#perk-objective-stack-recover-objective) | Conclude an interrupted stack operation and sweep residue. |
-| [`perk objective stack land`](./cli.md#perk-objective-stack-land-objective) | Preview or atomically land the remaining train. |
+| [`perk objective author`](./cli/objective.md#perk-objective-author) | Draft a new objective and roadmap, optionally adopting a pre-existing source with `--from`. |
+| [`perk objective save`](./cli/objective.md#perk-objective-save) | Persist an authored objective at the read-only → read-write boundary. |
+| [`perk objective plan`](./cli/objective.md#perk-objective-plan-number) | Select the next node and author a bounded plan. |
+| [`perk objective create`](./cli/objective.md#perk-objective-create-alias-new) (`new`) | Create an objective directly from structured input. |
+| [`perk objective show`](./cli/objective.md#perk-objective-show-number-alias-s) (`s`) | Show the header, roadmap, summary, and next node. |
+| [`perk objective node`](./cli/objective.md#perk-objective-node-number) | Update one node with an explicit status or backlink change. |
+| [`perk objective node-add`](./cli/objective.md#perk-objective-node-add-number) | Add a genuinely-new node and assign its next phase-local id. |
+| [`perk objective engagement`](./cli/objective.md#perk-objective-engagement-number) | Read objective and node-issue human engagement as untrusted data. |
+| [`perk objective node-engagement`](./cli/objective.md#perk-objective-node-engagement-number) | Read one node-issue's pre-planning engagement. |
+| [`perk objective reconcile`](./cli/objective.md#perk-objective-reconcile-number-alias-rec) (`rec`) | Rewrite only the Reconcilable prose region after a merge. |
+| [`perk objective replan`](./cli/objective.md#perk-objective-replan-number) | Re-author unfinished work as a superseding objective. |
+| [`perk objective next`](./cli/objective.md#perk-objective-next-number-alias-n) (`n`) | Print the next plannable node. |
+| [`perk objective run`](./cli/objective.md#perk-objective-run-number-alias-r) (`r`) | Advance the backlog one autonomously safe step. |
+| [`perk objective doctor`](./cli/objective.md#perk-objective-doctor-number-alias-doc) (`doc`) | Diagnose and optionally repair manifest, cancellation, or delivery-train drift. |
+| [`perk objective stack status`](./cli/objective.md#perk-objective-stack-status-objective) | Report the published delivery train and unresolved operations. |
+| [`perk objective stack sync`](./cli/objective.md#perk-objective-stack-sync-objective) | Preview or cascade a published suffix after an amend or base advance. |
+| [`perk objective stack recover`](./cli/objective.md#perk-objective-stack-recover-objective) | Conclude an interrupted stack operation and sweep residue. |
+| [`perk objective stack land`](./cli/objective.md#perk-objective-stack-land-objective) | Preview or atomically land the remaining train. |
 | [`/objective`](./in-session/workflow-commands.md#objective) | Show, set, or clear the active objective and budget. |
 | [`/objective-plan`](./in-session/workflow-commands.md#objective-plan) + `objective_node` | Start the plan factory; link a plan or advance a node. |
 | [`/objective-reconcile`](./in-session/workflow-commands.md#objective-reconcile) + `reconcile_objective` | Reconcile the prose region after land. |
@@ -84,7 +84,7 @@ and drops it before persistence.
 <!-- perk:reference-facts:objective-fields:end -->
 
 Nodes can also be **inserted post-hoc** during reconciliation — `add_objective_node` (warm tool) /
-[`perk objective node-add`](./cli.md#perk-objective-node-add-number) (cold) auto-assigns the next
+[`perk objective node-add`](./cli/objective.md#perk-objective-node-add-number) (cold) auto-assigns the next
 `<phase>.<n>` id and appends the node within its phase. Used sparingly, only for genuinely-new work
 (a deferred follow-up, an uncovered gap, a missing prerequisite, or human-requested work). Adding a
 **non-terminal** node to a closed objective **reopens it automatically** (the reopen-on-incomplete
@@ -132,17 +132,17 @@ save time:
   non-skipped nodes, no duplicate ids / unknown deps / cycles) and **capability-checked** against
   the real Git/GitHub plane (native-stack API surface, squash direct-merge + no merge queue on
   the base, an atomic-push dry-run) before anything is written. Layers publish through the
-  ordinary `/submit` door — see [`perk pr submit`](./cli.md#perk-pr-submit) and
+  ordinary `/submit` door — see [`perk pr submit`](./cli/pr.md#perk-pr-submit) and
   [Workflow commands](./in-session/workflow-commands.md).
 
 Day-to-day operation needs no dedicated commands: a published-suffix rewrite converges
 automatically from the normal workflow — re-run `/submit` after committing a published-layer
 change, or finish `/address` through `finalize_address`, and perk cascades the claimed suffix
 using the invoking plan's committed head and verified published heads for every successor. The
-explicit [`perk objective stack sync`](./cli.md#perk-objective-stack-sync-objective) owns base
+explicit [`perk objective stack sync`](./cli/objective.md#perk-objective-stack-sync-objective) owns base
 advancement (`--base`), preview (`--dry-run`), deliberate out-of-band adoption (`--adopt`), and
 retained-conflict continuation/discard (`--continue`/`--abort`);
-[`perk objective stack recover`](./cli.md#perk-objective-stack-recover-objective) concludes
+[`perk objective stack recover`](./cli/objective.md#perk-objective-stack-recover-objective) concludes
 interrupted operations and sweeps orphaned residue. The in-session equivalents are
 `/objective-stack`, `/objective-sync`, `/objective-recover`, and `/objective-land`.
 
@@ -226,7 +226,7 @@ identity**: each node's `id` / `slug` / `description` and explicit `depends_on`,
 milestone name per phase. `status`/`pr` are excluded (they are live state). Under Linear it is
 stored (with the `objective-header`) as an **attachment envelope on the project's metadata
 sentinel issue**, not in the overview. perk keeps this manifest
-in sync on every write; [`perk objective doctor`](./cli.md#perk-objective-doctor-number-alias-doc)
+in sync on every write; [`perk objective doctor`](./cli/objective.md#perk-objective-doctor-number-alias-doc)
 diffs it against the live Project to find — and safely repair — drift. GitHub objectives have no
 separate observed surface and so carry no manifest (doctor's second part — the delivery-train
 diagnosis — runs on every backend). See
@@ -249,7 +249,7 @@ description) **before** perk ever plans it. When you run `/objective-plan`, perk
 engagement and folds it into the plan-authoring context as an **untrusted-DATA** block (comments +
 description edits, with distinguishable authorship; perk's own machinery comments are skipped) — so
 the authored plan comprehends your feedback. You can inspect it directly with
-[`perk objective node-engagement N --node <id>`](./cli.md#perk-objective-node-engagement-number).
+[`perk objective node-engagement N --node <id>`](./cli/objective.md#perk-objective-node-engagement-number).
 GitHub single-issue objectives have no per-node issues, so this is a Linear-first behavior (empty on
 GitHub).
 
@@ -257,7 +257,7 @@ GitHub).
 
 The post-merge `/objective-reconcile` pass also weighs **human engagement on the objective + its
 node-issues** (comments + description edits), not only the landed PR diff: it auto-runs
-[`perk objective engagement N`](./cli.md#perk-objective-engagement-number) and folds the resulting
+[`perk objective engagement N`](./cli/objective.md#perk-objective-engagement-number) and folds the resulting
 `<untrusted_objective_engagement>` block — treated as untrusted DATA — into what may be stale, while
 obeying the same section-boundary and don't-churn rules. **GitHub** surfaces the objective issue's
 own comments + edits; **Linear** surfaces the project's comments plus each node-issue's

@@ -18,12 +18,12 @@ automatic `/land`-driven reconcile didn't run, or needs a redo.
    active objective). The agent rewrites **only** the Reconcilable prose region via the
    `reconcile_objective` tool.
 2. **Or reconcile from the shell (cold).** Run
-   [`perk objective reconcile N --body @FILE`](../reference/cli.md#perk-objective-reconcile-number-alias-rec)
+   [`perk objective reconcile N --body @FILE`](../reference/cli/objective.md#perk-objective-reconcile-number-alias-rec)
    (alias `perk objective rec`), supplying the replacement prose in a file; `--dry-run` composes
    without writing.
 
 > **A genuinely-new node** can also be added during reconcile — via the `add_objective_node` tool
-> (warm) or [`perk objective node-add`](../reference/cli.md#perk-objective-node-add-number) (cold).
+> (warm) or [`perk objective node-add`](../reference/cli/objective.md#perk-objective-node-add-number) (cold).
 > Use it **sparingly**: only when the PR revealed a real new unit of work that the roadmap is
 > missing — a deferred follow-up the plan/PR flagged, an uncovered defect or gap, a missing
 > prerequisite for a later node, or human-requested work from the engagement block — never to
@@ -34,7 +34,7 @@ automatic `/land`-driven reconcile didn't run, or needs a redo.
 
 > **Weighs human engagement too.** The warm pass auto-reads **human comments + description edits**
 > on the objective and its node-issues (via
-> [`perk objective engagement N`](../reference/cli.md#perk-objective-engagement-number)) and folds
+> [`perk objective engagement N`](../reference/cli/objective.md#perk-objective-engagement-number)) and folds
 > that untrusted-DATA block into what may be stale — not only the merged diff. Humans may flag stale
 > scope/naming/decisions in a comment or edit, not only in code. It is harmless/empty when there is
 > no engagement.

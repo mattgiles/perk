@@ -18,10 +18,10 @@ hands-on on a throwaway repo; this guide is the map, not the lesson.)
 
 1. **Author and save the plan.** Draft in a read-only authoring session — warm
    [`/plan`](../reference/in-session/workflow-commands.md#plan) from inside a running session, or cold
-   [`perk plan`](../reference/cli.md#perk-plan) for a fresh shell. Approve the plan to save it to
+   [`perk plan`](../reference/cli/plan.md#perk-plan) for a fresh shell. Approve the plan to save it to
    the issue backend (the read-only → read-write boundary); the manual save failsafe is warm
    [`/plan-save`](../reference/in-session/workflow-commands.md#plan-save), and the cold save worker is
-   [`perk plan save`](../reference/cli.md#perk-plan-save). *Trivial change?* The lightweight
+   [`perk plan save`](../reference/cli/plan.md#perk-plan-save). *Trivial change?* The lightweight
    alternative is [`/implement-here`](../reference/in-session/workflow-commands.md#implement-here) (also offered as
    a review verdict): exit plan mode **without** saving an issue and implement the reviewed draft
    right in the current session — skipping the rest of the spine (no issue, no worktree, no PR).
@@ -48,8 +48,8 @@ hands-on on a throwaway repo; this guide is the map, not the lesson.)
    durable learnings from the landed change (or skip it when nothing is durable — the skip is
    recorded on the plan too). Either outcome is canonical in the issue backend, so a merged
    plan's learned-vs-pending state survives machine switches and fresh clones.
-   [`perk learn pending`](../reference/cli.md#perk-learn-pending) lists landed plans still
-   awaiting this step. Cold worker: [`perk learn`](../reference/cli.md#perk-learn).
+   [`perk learn pending`](../reference/cli/learn-and-gist.md#perk-learn-pending) lists landed plans still
+   awaiting this step. Cold worker: [`perk learn`](../reference/cli/learn-and-gist.md#perk-learn).
 
 ## Detours off the spine
 

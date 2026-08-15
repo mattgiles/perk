@@ -13,7 +13,7 @@ leaving the session. perk **runs and reports** — it executes the checks and su
 failure output; it **never auto-fixes**. You own the fix; perk is the oracle.
 
 **Prerequisite:** one or more `[[ci.checks]]` checks in `.perk/config.toml`. The block is commented out by
-default after [`perk init`](../reference/cli.md#perk-init) — you define the named checks your
+default after [`perk init`](../reference/cli/setup-and-health.md#perk-init) — you define the named checks your
 project runs.
 
 ## Steps

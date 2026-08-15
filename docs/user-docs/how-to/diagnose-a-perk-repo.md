@@ -20,7 +20,7 @@ repair that check calls for, and prove the repository is healthy again.
    (`environment`), backend and runner readiness (`github`, `linear`, `runner`), package and
    extension install (`package`), repository-managed artifacts (`repository`, `registry`,
    `skills`, `bindings`), config integrations (`providers`, `issues`), and local workflow state
-   (`state`). Use the [`perk doctor` reference](../reference/cli.md#perk-doctor) for the
+   (`state`). Use the [`perk doctor` reference](../reference/cli/setup-and-health.md#perk-doctor) for the
    check-by-check detail.
 3. **Read the `Remediation` section.** Each failing or warning check with a repair contributes its
    remediation line here, so you can act without guessing from the summary alone.
@@ -43,5 +43,5 @@ drift; neither belongs to this repository-health procedure.
   the blocker is uncommitted changes, not repo health.
 - **Do:** [How to set up and verify the remote runner](set-up-the-remote-runner.md) — the dedicated
   doctor workflow checks for the remote subsystem.
-- **Look up:** [CLI commands](../reference/cli.md) — the complete check-by-check `perk doctor`
-  reference.
+- **Look up:** [Setup and health](../reference/cli/setup-and-health.md) — the complete
+  check-by-check `perk doctor` reference.

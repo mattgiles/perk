@@ -15,7 +15,7 @@ learned-docs plan factory.
 
 1. **Start the factory.** Inside a `pi` session where a plan can be saved (the default
    main-checkout session) run [`/learn-docs`](../reference/in-session/workflow-commands.md#learn-docs), or from the
-   shell run [`perk learn docs`](../reference/cli.md#perk-learn-docs) (the cold door — it launches
+   shell run [`perk learn docs`](../reference/cli/learn-and-gist.md#perk-learn-docs) (the cold door — it launches
    its own factory session). A session where the `plan_save` tool is not active (read-only, a
    worktree stage, or a provider restriction) refuses `/learn-docs` and points at the cold door.
    The factory gathers the

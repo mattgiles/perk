@@ -36,7 +36,7 @@ repository, commit, push, and sync it before binding it.
 
    A user row replaces a shipped binding with the same trigger; a new trigger is appended to the
    effective set.
-4. **Validate the row.** Run [`perk doctor`](../reference/cli.md#perk-doctor). Fix an unknown target,
+4. **Validate the row.** Run [`perk doctor`](../reference/cli/setup-and-health.md#perk-doctor). Fix an unknown target,
    duplicate trigger, unsupported mode, or missing installed skill before relying on the binding.
 5. **Verify delivery.** Run the chosen stage or command. A `nudge` should tell the session to read
    `.agents/skills/house-style/SKILL.md`; a `transclude` binding should place that skill's body in the

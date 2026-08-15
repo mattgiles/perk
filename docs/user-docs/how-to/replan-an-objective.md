@@ -30,7 +30,7 @@ This runs in a **read-only** authoring session and is **local-only**.
 
 ## Steps
 
-1. **Replan it.** Run [`perk objective replan 42`](../reference/cli.md#perk-objective-replan-number),
+1. **Replan it.** Run [`perk objective replan 42`](../reference/cli/objective.md#perk-objective-replan-number),
    where `42` is the open objective's id. perk materializes the old objective's prose + its
    unfinished nodes and launches a read-only authoring session.
 2. **Re-investigate.** Explore the current codebase — what shipped, what changed, what each
@@ -83,7 +83,7 @@ safe; the undiscoverable Project may need manual cleanup.
 
 If a transfer is interrupted (crash, network), re-saving the same replan rolls it forward. Across
 sessions, run
-[`perk objective stack recover <old-objective-id>`](../reference/cli.md#perk-objective-stack-recover-objective)
+[`perk objective stack recover <old-objective-id>`](../reference/cli/objective.md#perk-objective-stack-recover-objective)
 against the **predecessor** id. The bare command classifies first: an `all_after` transfer rolls
 forward automatically; an `all_before` transfer is reported and requires a second
 `--abandon` invocation plus confirmation to conclude; a mixed or corrupt transfer remains

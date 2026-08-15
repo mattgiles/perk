@@ -13,7 +13,7 @@ perk stage needs.
 
 ## Steps
 
-1. **Converge the runner files.** Run [`perk init`](../reference/cli.md#perk-init). Review both
+1. **Converge the runner files.** Run [`perk init`](../reference/cli/setup-and-health.md#perk-init). Review both
    `.github/workflows/perk-run.yml` and `.github/actions/perk-remote-setup/action.yml`, then commit
    and push them to the repository's default branch. A workflow that exists only in a local branch
    cannot receive a dispatch.
@@ -22,10 +22,10 @@ perk stage needs.
    any private skill-source clones. Do not set `PERK_ENABLED` just to turn the runner on: the gate
    is opt-out, so an absent value means enabled and `false` disables the runner.
 3. **Run the static check.** Run
-   [`perk doctor workflow check`](../reference/cli.md#perk-doctor-workflow-check). Fix every failure
+   [`perk doctor workflow check`](../reference/cli/setup-and-health.md#perk-doctor-workflow-check). Fix every failure
    before dispatching. Add `--verbose` for all individual checks or `--json` for structured output.
 4. **Run the waited smoke.** Run
-   [`perk doctor workflow smoke-test --wait`](../reference/cli.md#perk-doctor-workflow-smoke-test).
+   [`perk doctor workflow smoke-test --wait`](../reference/cli/setup-and-health.md#perk-doctor-workflow-smoke-test).
    This directly dispatches the managed workflow's bounded smoke short-circuit: it validates the
    secrets, starts the Actions job, prints the smoke confirmation, and exits without checking out a
    plan or invoking a model. Waiting is capped at ten minutes; on timeout, perk reports the result as
@@ -42,8 +42,8 @@ proves the runner wiring and secret readability, not a full model-driven stage.
 
 - **Do:** [Dispatch a stage to CI](./dispatch-a-stage-to-ci.md) — hand off an unattended stage after
   the smoke passes.
-- **Look up:** [`perk doctor workflow check`](../reference/cli.md#perk-doctor-workflow-check) and
-  [`perk doctor workflow smoke-test`](../reference/cli.md#perk-doctor-workflow-smoke-test) — exact
+- **Look up:** [`perk doctor workflow check`](../reference/cli/setup-and-health.md#perk-doctor-workflow-check) and
+  [`perk doctor workflow smoke-test`](../reference/cli/setup-and-health.md#perk-doctor-workflow-smoke-test) — exact
   check and smoke command surfaces.
 - **Understand:** [Headless and remote](../explanation/headless-and-remote.mdx) — what smoke proves
   versus a full model-driven run.

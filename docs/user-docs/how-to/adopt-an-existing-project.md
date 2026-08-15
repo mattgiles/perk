@@ -21,7 +21,7 @@ session and is **local-only**.
 ## Steps
 
 1. **Adopt it.** Run
-   [`perk objective author --from <source>`](../reference/cli.md#perk-objective-author), where
+   [`perk objective author --from <source>`](../reference/cli/objective.md#perk-objective-author), where
    `<source>` is a Linear project UUID or a GitHub issue id. perk reads the source, materializes its
    title + overview (and the project's existing issues + any human discussion, all as untrusted
    DATA), and launches a read-only session to author an objective + roadmap for the goal it

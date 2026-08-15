@@ -197,7 +197,7 @@ The cold `perk objective author` door has no `/objective-author` twin.
 ### `/objective-stack`, `/objective-sync`, `/objective-recover`, `/objective-land`
 
 The stacked-delivery control surface delegates mutations to the
-[`perk objective stack` workers](../cli.md#perk-objective-stack-status-objective). Every operation
+[`perk objective stack` workers](../cli/objective.md#perk-objective-stack-status-objective). Every operation
 resolves its objective from an explicit id, the active objective, then the linked plan. With no
 match it refuses and asks for an explicit objective.
 
@@ -235,7 +235,7 @@ nothing is stale.
 ## Gist doors (warm)
 
 A gist is a rough, problem-space statement of intent upstream of plans and objectives. See the
-[`perk gist` CLI group](../cli.md#perk-gist). Direct authoring starts cold with `perk gist author`.
+[`perk gist` CLI group](../cli/learn-and-gist.md#perk-gist). Direct authoring starts cold with `perk gist author`.
 
 ### `/gist-save`
 

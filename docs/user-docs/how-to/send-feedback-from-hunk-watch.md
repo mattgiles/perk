@@ -22,7 +22,7 @@ plan with an implementation worktree (run
 1. **Run the implement session.** `perk implement 42` (or `perk plan resume 42`) in one terminal
    — the interactive TUI implement session is the feedback consumer.
 2. **Start the watch.** In another terminal, run
-   [`perk plan watch 42`](../reference/cli.md#perk-plan-watch-plan). Hunk opens on the plan's
+   [`perk plan watch 42`](../reference/cli/plan.md#perk-plan-watch-plan). Hunk opens on the plan's
    live diff and shows the one-time notice *“perk feedback active — saving a human note sends it
    to the implementation session.”*
 3. **Save a note on a changed line.** Comment where the diff needs steering, as you would in a
@@ -62,4 +62,4 @@ plan with an implementation worktree (run
   the same live session.
 - **Do:** [How to review a PR human-in-the-loop](review-a-foreign-pr.md) — the review-time use of
   the same hunk surface.
-- **Look up:** [CLI commands](../reference/cli.md) — exact `perk plan watch` syntax and flags.
+- **Look up:** [Plan commands](../reference/cli/plan.md) — exact `perk plan watch` syntax and flags.

@@ -33,7 +33,7 @@ door opens a surface-only **since-base** review — no reviewers, nothing posts 
 
 - **`/pr-review-terminal`:** the `hunk` CLI installed — `perk init` installs it automatically
   (best-effort) whenever it is absent; `npm i -g hunkdiff` or `brew install hunk` is the manual
-  fallback. [`perk doctor`](../reference/cli.md#perk-doctor)'s `review-cli` check verifies it;
+  fallback. [`perk doctor`](../reference/cli/setup-and-health.md#perk-doctor)'s `review-cli` check verifies it;
   the door refuses at start with the install hint when it's absent.
 - **`/pr-review-browser`:** the `npm:@plannotator/pi-extension` package loaded — select the
   plannotator plan provider (`[providers] plan = "plannotator-plan"`), run `perk init`, then

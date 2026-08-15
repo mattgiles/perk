@@ -56,5 +56,5 @@ subsequent perk convergence preserves it.
   one package's resources.
 - **Do:** [Attach a skill to a stage](./attach-a-skill-to-a-stage.md) — add guidance rather than trim
   it.
-- **Look up:** [`perk doctor`](../reference/cli.md#perk-doctor) — resource and provider-package
+- **Look up:** [`perk doctor`](../reference/cli/setup-and-health.md#perk-doctor) — resource and provider-package
   diagnostics.

@@ -16,7 +16,7 @@ learn-code plan factory — the additive sibling of
 
 1. **Start the factory.** Inside a `pi` session where a plan can be saved (the default
    main-checkout session) run [`/learn-code`](../reference/in-session/workflow-commands.md#learn-code), or from the
-   shell run [`perk learn code`](../reference/cli.md#perk-learn-code) (the cold door — it launches
+   shell run [`perk learn code`](../reference/cli/learn-and-gist.md#perk-learn-code) (the cold door — it launches
    its own factory session). A session where the `plan_save` tool is not active (read-only, a
    worktree stage, or a provider restriction) refuses `/learn-code` and points at the cold door.
    The factory gathers only the open

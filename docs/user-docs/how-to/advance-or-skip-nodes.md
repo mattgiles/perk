@@ -16,11 +16,11 @@ This is **local-only** (a deterministic objective-storage write).
 ## Steps
 
 1. **Find the node id.** Run
-   [`perk objective show N --json`](../reference/cli.md#perk-objective-show-number-alias-s)
+   [`perk objective show N --json`](../reference/cli/objective.md#perk-objective-show-number-alias-s)
    and read the `nodes` array to find the node's id (the human-readable output prints only the
    status summary and next actionable node).
 2. **Set the status.** Run
-   [`perk objective node N --node <id> --status skipped`](../reference/cli.md#perk-objective-node-number)
+   [`perk objective node N --node <id> --status skipped`](../reference/cli/objective.md#perk-objective-node-number)
    — substitute `done`, `blocked`, `pending`, `planning`, or `in_progress` for any status verbatim.
    Add `--pr "#456"` to set the plan backlink (or `--pr ""` to clear it); `--dry-run` validates
    without writing.

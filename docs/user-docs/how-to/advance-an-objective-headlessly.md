@@ -14,7 +14,7 @@ next machine-safe or human boundary.
 ## Steps
 
 1. **Run the supervisor once.** Run
-   [`perk objective run <NUMBER>`](../reference/cli.md#perk-objective-run-number-alias-r) (alias `r`).
+   [`perk objective run <NUMBER>`](../reference/cli/objective.md#perk-objective-run-number-alias-r) (alias `r`).
    Each invocation reports the locally known cumulative run budget, makes at most one safe decision,
    and exits. There is no `--once` option because one decision per invocation is already the command's
    behavior.
