@@ -683,6 +683,36 @@ test("each quadrant landing renders a recommended-starts region with 2–3 links
   assert.deepEqual(offenders, []);
 });
 
+test("eyebrow/wide-mode CSS routes carry their aria-current sidebar link in the built HTML", () => {
+  // The §4B landing eyebrows and the §4C path-eyebrow/92ch wide mode (src/styles/system.css)
+  // are pure CSS keyed on the sidebar's `aria-current="page"` link — zero corpus edits, zero
+  // component overrides. That coupling holds only while each keyed route's built page renders
+  // a sidebar link with the EXACT href the CSS enumerates; this pins it, so restructuring the
+  // sidebar or the route shape fails loudly here instead of silently dropping the treatment.
+  const systemCss = fs.readFileSync(
+    fileURLToPath(new URL("../src/styles/system.css", import.meta.url)),
+    "utf8",
+  );
+  const hrefs = [
+    ...new Set([...systemCss.matchAll(/\[href="(\/[^"]+)"\]/g)].map(([, href]) => href)),
+  ];
+  // Four quadrant landings + five configuration children (the value-exact enumeration itself
+  // is guarded against the settled routes by tests/test_docs_site_system.py).
+  assert.equal(hrefs.length, 9, `unexpected keyed-route set: ${hrefs.join(", ")}`);
+  for (const href of hrefs) {
+    const distFile = path.join(distDir, href, "index.html");
+    assert.ok(fs.existsSync(distFile), `${href}: keyed route has no built page`);
+    const html = fs.readFileSync(distFile, "utf8");
+    assert.match(
+      html,
+      new RegExp(
+        `<a[^>]*href="${href}"[^>]*aria-current="page"|<a[^>]*aria-current="page"[^>]*href="${href}"`,
+      ),
+      `${href}: built page missing its aria-current="page" sidebar link with the exact href`,
+    );
+  }
+});
+
 test("the how-to landing retains the five operator-group heading anchors", () => {
   const html = fs.readFileSync(path.join(distDir, "how-to/index.html"), "utf8");
   const groupIds = [

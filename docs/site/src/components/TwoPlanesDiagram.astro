@@ -7,9 +7,13 @@
 
   One <figure class="perk-diagram"> wraps two fully-labeled <svg role="img"> variants
   (data-variant="wide" horizontal, data-variant="narrow" stacked vertical, same reading
-  order); the scoped media query display:none's exactly one at any width, removing it from
-  rendering AND the accessibility tree so a single accessible image is exposed. Each variant
-  carries its own <title> + <desc> associated via aria-labelledby (document-unique ids).
+  order); the scoped @container query on the figure's inline size (compositions.css makes
+  figure.perk-diagram an inline-size container) display:none's exactly one at any width —
+  narrow by default, wide only where the content column fits its 736-unit viewBox at scale 1,
+  so every label renders at its declared ≥16px size — removing it from rendering AND the
+  accessibility tree so a single accessible image is exposed. Browsers without container-query
+  support keep the content-identical narrow variant. Each variant carries its own <title> +
+  <desc> associated via aria-labelledby (document-unique ids).
 
   The two plane/ownership regions (10px-rounded containers) flank the durable-state artifact
   shape (document-tab: var(--sl-color-accent-low) fill + border) whose contents are the
@@ -127,17 +131,17 @@
   }
   svg[data-variant="wide"] {
     max-width: 736px;
+    display: none;
   }
   svg[data-variant="narrow"] {
     max-width: 288px;
-    display: none;
   }
-  @media (max-width: 767.98px) {
+  @container (min-width: 736px) {
     svg[data-variant="wide"] {
-      display: none;
+      display: block;
     }
     svg[data-variant="narrow"] {
-      display: block;
+      display: none;
     }
   }
 

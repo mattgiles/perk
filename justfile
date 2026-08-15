@@ -119,7 +119,7 @@ docs-preview:
 # tests, static build (schema/link/anchor/escape/sidebar-slug gates), post-build
 # corpus/H1/TOC/EC/Pagefind checks
 docs-check:
-    uv run pytest tests/test_user_docs_metadata.py tests/test_user_docs_cli_reference.py tests/test_explanation_boundary.py tests/test_user_docs_findability.py tests/test_docs_site_tokens.py tests/test_docs_gates.py "tests/test_packaging.py::test_docs_site_publish_isolation" -q
+    uv run pytest tests/test_user_docs_metadata.py tests/test_user_docs_cli_reference.py tests/test_explanation_boundary.py tests/test_user_docs_findability.py tests/test_docs_site_tokens.py tests/test_docs_site_system.py tests/test_docs_gates.py "tests/test_packaging.py::test_docs_site_publish_isolation" -q
     npx biome check docs/site
     npm run docs:typecheck
     node --test --test-reporter=dot "docs/site/src/**/*.test.mjs"

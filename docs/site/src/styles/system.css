@@ -1,0 +1,204 @@
+/*
+ * perk system stylesheet — the field-guide/instrument-panel system rules the binding visual
+ * blueprint (docs/design/docs-site-visual-blueprint.md) binds beyond tokens and compositions:
+ * the §3 type scale and its consuming rules, the §2 measure/focus/inline-code treatments, the
+ * §4C table containment and path-eyebrow/92ch wide mode, the §4B landing eyebrows, and the §6
+ * reduced-motion behavior. Loaded through Starlight `customCss` after compositions.css; the
+ * wiring is guarded by tests/test_docs_site_tokens.py and the values/consumers by
+ * tests/test_docs_site_system.py (spec↔artifact, parsed from the blueprint).
+ *
+ * Like compositions.css this file consumes only bound custom properties — with ONE documented
+ * exception: the §2 inline-code backgrounds, which the blueprint binds as prose hexes with no
+ * named token (tokens.css cannot host them — its no-stray-token guard). customCss is
+ * unlayered, so element rules here beat Starlight's `@layer starlight.*` styles without
+ * specificity games.
+ */
+
+/* §3 type scale — the custom properties AND their consumers. Starlight's body sets no
+ * font-size (reset.css gives it only font family + line-height), so the bound 17px body
+ * needs the explicit `body` consuming rule below — deliberately NOT a root font-size change,
+ * which would rescale every rem. The unlayered :root declarations also neutralize Starlight's
+ * own large-viewport --sl-text-h1..h4 bumps (layered, at 50em). */
+:root {
+  --sl-text-base: 1.0625rem; /* body 17px */
+  --sl-text-sm: 0.875rem; /* small/meta 14px */
+  --sl-line-height: 1.65; /* body line height (consumed by Starlight's body rule) */
+  --sl-text-h1: 2.25rem; /* article H1 36px (narrow) */
+  --sl-text-h2: 1.75rem; /* H2 28px (narrow) */
+  --sl-text-h3: 1.375rem; /* H3 22px (narrow) */
+  --sl-text-h4: 1.125rem; /* H4 18px (both) */
+
+  /* §2 measure: 72ch prose target. `ch` resolves at the consuming container against the body
+   * font, landing inside the blueprint's accepted 68–74ch rendered range (rendered-measure
+   * confirmation rides node 5.2's visual review). */
+  --sl-content-width: 72ch;
+
+  /* §2 inline code (dark/default theme) — the prose-bound hex with no named token: the one
+   * sanctioned literal-hex exception in this file. Code text stays the theme's primary text
+   * (Starlight default; no rule). */
+  --sl-color-bg-inline-code: #233029;
+}
+
+@media (min-width: 768px) {
+  :root {
+    --sl-text-h1: 2.625rem; /* article H1 42px */
+    --sl-text-h2: 2rem; /* H2 32px */
+    --sl-text-h3: 1.5rem; /* H3 24px (H4 unchanged) */
+  }
+}
+
+:root[data-theme="light"] {
+  /* §2 inline code (light theme) — see the dark-scope note above. */
+  --sl-color-bg-inline-code: #ecefe9;
+}
+
+/* The 17px body consumer — without it the token sits unused and prose stays at the browser's
+ * 16px default. */
+body {
+  font-size: var(--sl-text-base);
+}
+
+/* §3 small/meta line height 1.5 on the repo-owned small/meta surfaces (they would otherwise
+ * inherit the 1.65 body line height). */
+.perk-diagram-text,
+.perk-band-compact {
+  line-height: 1.5;
+}
+
+/* §3 per-level heading line heights — element-scoped because Starlight exposes only the
+ * single --sl-line-height-headings, and h1#_top lives outside .sl-markdown-content. */
+h1 {
+  line-height: 1.1;
+}
+h2 {
+  line-height: 1.2;
+}
+h3 {
+  line-height: 1.25;
+}
+h4 {
+  line-height: 1.3;
+}
+
+/* §3 eyebrow line height 1.4 for the compositions.css band eyebrows (h2-styled, so the
+ * global h2 1.2 above would otherwise apply). */
+.perk-band h2 {
+  line-height: 1.4;
+}
+
+/* §3 home hero H1 — the sole display-sized text (42px narrow, 64px at >= 768px, 1.05). */
+.hero h1 {
+  font-size: 2.625rem;
+  line-height: 1.05;
+}
+
+@media (min-width: 768px) {
+  .hero h1 {
+    font-size: 4rem;
+  }
+}
+
+/* §2 focus: universal 3px accent-strong outline at 3px offset… */
+:focus-visible {
+  outline: 3px solid var(--perk-accent-strong);
+  outline-offset: 3px;
+}
+
+/* …plus Starlight's one pinned inset-outline exception: the mobile ToC's full-width <summary>
+ * keeps its inside offset so the outline is not clipped at the viewport edge (its component
+ * rule would otherwise lose to the universal rule above). */
+mobile-starlight-toc summary:focus-visible {
+  outline-offset: var(--sl-outline-offset-inside);
+}
+
+/* §6 reduced motion: collapse every animation/transition to one effectively-instant cycle.
+ * `!important` so the block beats layered/component/inline declarations;
+ * `animation-iteration-count: 1` rather than 0 so JS `animationend` contracts still fire
+ * while motion collapses to a single ~0ms cycle. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  ::before,
+  ::after {
+    /* biome-ignore lint/complexity/noImportantStyles: §6 binds this block value-complete — it must beat layered/component/inline declarations */
+    animation-duration: 0.01ms !important;
+    /* biome-ignore lint/complexity/noImportantStyles: see above */
+    animation-iteration-count: 1 !important;
+    /* biome-ignore lint/complexity/noImportantStyles: see above */
+    transition-duration: 0.01ms !important;
+    /* biome-ignore lint/complexity/noImportantStyles: see above */
+    scroll-behavior: auto !important;
+  }
+}
+
+/* §4C table containment: a visible border frame around wide tables, keeping Starlight's
+ * `display: block; overflow: auto` block-contained horizontal scroll (the page itself never
+ * widens). Code blocks stay on Expressive Code defaults — no rule. */
+.sl-markdown-content table {
+  background: var(--perk-surface);
+  border: 1px solid var(--perk-border);
+  border-radius: var(--perk-radius-control);
+  padding: 0.5rem 1rem;
+}
+
+/* §4B landing eyebrows (shared style block; §3 eyebrow type + the bound 1.4 line height +
+ * an exact §2 spacing-step bottom margin). Rendered ABOVE the H1 — the bound §4B order —
+ * with no component override: the label rules below key on the sidebar's
+ * `aria-current="page"` link (each landing is its sidebar group's position-0 entry, so the
+ * link is guaranteed on the landing itself — pinned by checks/built-site.test.mjs). The
+ * `content: … / ""` alt-text form keeps the eyebrow OUT of the accessibility tree
+ * (decorative duplication of the section identity the H1 already carries — it must not
+ * pollute the H1's accessible name). Browsers without :has()/alt-text support gracefully
+ * render no eyebrow. This shared block only styles the ::before — without a matching
+ * `content` declaration below, no box is generated. */
+h1#_top::before {
+  display: block;
+  font-family: var(--sl-font-mono), monospace;
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  line-height: 1.4;
+  text-transform: uppercase;
+  color: var(--perk-muted);
+  margin-block: 0 0.5rem;
+}
+
+body:has(a[aria-current="page"][href="/tutorials/"]) h1#_top::before {
+  content: "Tutorials" / "";
+}
+
+body:has(a[aria-current="page"][href="/how-to/"]) h1#_top::before {
+  content: "How-to" / "";
+}
+
+body:has(a[aria-current="page"][href="/reference/"]) h1#_top::before {
+  content: "Reference" / "";
+}
+
+body:has(a[aria-current="page"][href="/explanation/"]) h1#_top::before {
+  content: "Explanation" / "";
+}
+
+/* §4C path eyebrow + 92ch reference-wide mode — ONE scope enumerating the five exact
+ * configuration-children routes (no prefix matching: a future sixth child must be enrolled
+ * deliberately, never silently). Tables may enter the 92ch mode; prose on the same page
+ * stays re-capped at 72ch (§3). The eyebrow is a file path, never uppercased. */
+body:has(
+  a[aria-current="page"]:is(
+      [href="/reference/configuration/repository-layout/"],
+      [href="/reference/configuration/workflow-and-ci/"],
+      [href="/reference/configuration/backends/"],
+      [href="/reference/configuration/models-and-compaction/"],
+      [href="/reference/configuration/skills-and-bindings/"]
+    )
+) {
+  --sl-content-width: 92ch;
+
+  h1#_top::before {
+    content: ".perk/config.toml" / "";
+    text-transform: none;
+  }
+
+  .sl-markdown-content :is(p, ul, ol, blockquote) {
+    max-width: 72ch;
+  }
+}

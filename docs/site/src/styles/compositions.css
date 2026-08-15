@@ -63,8 +63,12 @@
   }
 }
 
-/* §5 diagram figure + the adjacent textual equivalent (muted caption tier). */
+/* §5 diagram figure + the adjacent textual equivalent (muted caption tier). The figure is
+ * the inline-size container the components' @container variant-exposure queries key on: the
+ * wide (736-unit) variant is exposed only where the actual content column fits it at scale 1,
+ * so declared label sizes are final (the §5 ≥16px floor holds by construction). */
 .perk-diagram {
+  container-type: inline-size;
   margin: 1.5rem 0 0.75rem;
 }
 

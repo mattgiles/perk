@@ -300,11 +300,16 @@ def test_npm_pack_lists_shipped_and_excludes_dev():
 
 
 def test_docs_site_publish_isolation():
-    # The docs-site workspace is dev-only tooling: private, zero runtime deps, and pinned to the
-    # exact toolchain bound by docs/design/docs-site-bridge-spike.md +
-    # docs/design/docs-site-visual-blueprint.md. Moving off a bound pin requires an explicit
-    # objective reconciliation (the records' shared rule) — the literal mapping equality makes
-    # that rule structural: a bump, a dropped dep, or a range expression all fail here.
+    # The docs-site workspace is dev-only tooling: private, zero runtime deps, exact-pinned.
+    # Two pin classes share the literal below — either way, any drift fails here:
+    # - The shell/font pins (@astrojs/*, astro, @fontsource*) are design-bound by
+    #   docs/design/docs-site-bridge-spike.md + docs/design/docs-site-visual-blueprint.md;
+    #   moving one requires an explicit objective reconciliation (the records' shared rule).
+    # - axe-core/jsdom are dev-only, plan-selected accessibility tooling (the static a11y gate
+    #   in docs/site/checks/a11y.test.mjs) under the objective's "accessibility-test tool
+    #   selection may remain plan-time" allowance — still exact-pinned. jsdom stays on 29.x:
+    #   30.x's engines floor (^22.22.2 || …) exceeds the repo's documented effective dev floor
+    #   (>=22.19.0, docs/site/README.md) under the root .npmrc's engine-strict=true.
     site = json.loads((REPO_ROOT / "docs/site/package.json").read_text(encoding="utf-8"))
     assert site["private"] is True
     assert "dependencies" not in site, site.get("dependencies")
@@ -314,6 +319,8 @@ def test_docs_site_publish_isolation():
         "@fontsource-variable/inter": "5.3.0",
         "@fontsource/ibm-plex-mono": "5.3.0",
         "astro": "7.2.1",
+        "axe-core": "4.13.0",
+        "jsdom": "29.1.1",
     }
 
     root = _package_json()

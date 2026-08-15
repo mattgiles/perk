@@ -7,9 +7,13 @@
 
   One <figure class="perk-diagram"> wraps two fully-labeled <svg role="img"> variants
   (data-variant="wide", data-variant="narrow" stacked vertical, same reading order); the
-  scoped media query display:none's exactly one at any width, removing it from rendering AND
-  the accessibility tree so a single accessible image is exposed. Each variant carries its own
-  <title> + <desc> associated via aria-labelledby (document-unique ids).
+  scoped @container query on the figure's inline size (compositions.css makes
+  figure.perk-diagram an inline-size container) display:none's exactly one at any width —
+  narrow by default, wide only where the content column fits its 736-unit viewBox at scale 1,
+  so every label renders at its declared ≥16px size — removing it from rendering AND the
+  accessibility tree so a single accessible image is exposed. Browsers without container-query
+  support keep the content-identical narrow variant. Each variant carries its own <title> +
+  <desc> associated via aria-labelledby (document-unique ids).
 
   The semantic flow is fixed: the local operator / deterministic supervisor dispatches bounded
   work into a dashed GitHub Actions process boundary holding the implement and address stage
@@ -86,7 +90,7 @@
   <svg
     role="img"
     data-variant="narrow"
-    viewBox="0 0 320 796"
+    viewBox="0 0 288 796"
     aria-labelledby="perk-headless-narrow-title perk-headless-narrow-desc"
   >
     <title id="perk-headless-narrow-title">The headless remote flow (stacked)</title>
@@ -99,45 +103,45 @@
       for review and land, which has no automatic outgoing step: automation stops there.
     </desc>
     <g>
-      <rect class="node" data-node="operator" x="2" y="8" width="316" height="84" rx="6" />
+      <rect class="node" data-node="operator" x="2" y="8" width="284" height="84" rx="6" />
       <text class="node-label" x="18" y="42">Local operator /</text>
       <text class="node-label" x="18" y="68">deterministic supervisor</text>
 
-      <line class="connector" data-from="operator" data-to="runner" x1="160" y1="92" x2="160" y2="140" />
-      <polygon class="arrowhead" points="156.5,140 163.5,140 160,148" />
-      <text class="edge-label start" x="178" y="124">dispatch</text>
+      <line class="connector" data-from="operator" data-to="runner" x1="144" y1="92" x2="144" y2="140" />
+      <polygon class="arrowhead" points="140.5,140 147.5,140 144,148" />
+      <text class="edge-label start" x="162" y="124">dispatch</text>
 
-      <rect class="boundary" data-node="runner" x="2" y="148" width="316" height="244" rx="2" />
+      <rect class="boundary" data-node="runner" x="2" y="148" width="284" height="244" rx="2" />
       <text class="node-label" x="18" y="178">GitHub Actions</text>
       <text class="annotation muted" x="18" y="204">remote process boundary</text>
-      <rect class="stage" x="18" y="222" width="284" height="36" rx="6" />
+      <rect class="stage" x="18" y="222" width="252" height="36" rx="6" />
       <text class="node-label" x="34" y="246">○ implement</text>
-      <rect class="stage" x="18" y="270" width="284" height="36" rx="6" />
+      <rect class="stage" x="18" y="270" width="252" height="36" rx="6" />
       <text class="node-label" x="34" y="294">○ address</text>
       <text class="annotation muted" x="18" y="340">same stage implementation</text>
       <text class="annotation muted" x="18" y="366">as a local run</text>
 
-      <line class="connector" data-from="github" data-to="runner" x1="200" y1="478" x2="200" y2="400" />
-      <polygon class="arrowhead" points="196.5,400 203.5,400 200,392" />
-      <text class="edge-label start" x="214" y="442">plan · branch</text>
+      <line class="connector" data-from="github" data-to="runner" x1="170" y1="478" x2="170" y2="400" />
+      <polygon class="arrowhead" points="166.5,400 173.5,400 170,392" />
+      <text class="edge-label start" x="184" y="442">plan · branch</text>
 
-      <line class="connector" data-from="runner" data-to="github" x1="120" y1="392" x2="120" y2="470" />
-      <polygon class="arrowhead" points="116.5,470 123.5,470 120,478" />
-      <text class="edge-label end" x="106" y="442">PR · report</text>
+      <line class="connector" data-from="runner" data-to="github" x1="118" y1="392" x2="118" y2="470" />
+      <polygon class="arrowhead" points="114.5,470 121.5,470 118,478" />
+      <text class="edge-label end" x="104" y="442">PR · report</text>
 
       <rect class="artifact" data-node="github" x="2" y="466" width="64" height="26" rx="6" />
-      <rect class="artifact" x="2" y="478" width="316" height="150" rx="6" />
+      <rect class="artifact" x="2" y="478" width="284" height="150" rx="6" />
       <text class="node-label" x="18" y="510">GitHub state</text>
       <text class="annotation" x="18" y="540">plan issue</text>
       <text class="annotation" x="18" y="568">pushed branch · pull request</text>
       <text class="annotation" x="18" y="596">checks · comments</text>
 
-      <line class="connector" data-from="github" data-to="human-gate" x1="160" y1="628" x2="160" y2="672" />
-      <polygon class="arrowhead" points="156.5,672 163.5,672 160,680" />
-      <text class="edge-label start" x="178" y="656">review</text>
+      <line class="connector" data-from="github" data-to="human-gate" x1="144" y1="628" x2="144" y2="672" />
+      <polygon class="arrowhead" points="140.5,672 147.5,672 144,680" />
+      <text class="edge-label start" x="162" y="656">review</text>
 
-      <rect class="gate-outer" data-node="human-gate" x="2" y="680" width="316" height="108" rx="10" />
-      <rect class="gate-inner" x="8" y="686" width="304" height="96" rx="8" />
+      <rect class="gate-outer" data-node="human-gate" x="2" y="680" width="284" height="108" rx="10" />
+      <rect class="gate-inner" x="8" y="686" width="272" height="96" rx="8" />
       <text class="node-label gate-label" x="26" y="724">! HUMAN GATE —</text>
       <text class="node-label gate-label" x="26" y="754">review + land</text>
     </g>
@@ -153,17 +157,17 @@
   }
   svg[data-variant="wide"] {
     max-width: 736px;
-  }
-  svg[data-variant="narrow"] {
-    max-width: 320px;
     display: none;
   }
-  @media (max-width: 767.98px) {
+  svg[data-variant="narrow"] {
+    max-width: 288px;
+  }
+  @container (min-width: 736px) {
     svg[data-variant="wide"] {
-      display: none;
+      display: block;
     }
     svg[data-variant="narrow"] {
-      display: block;
+      display: none;
     }
   }
 

@@ -4,10 +4,14 @@
   theme tokens, keeps operational labels in IBM Plex Mono at 16px or larger, and carries the
   same labeled relationship in wide and narrow reading orders.
 
-  One figure wraps two fully named SVG variants. The media query removes one variant from both
-  rendering and the accessibility tree at every width. Each variant states the current node in
-  its description because color and line weight only reinforce that status. The neighboring MDX
-  copy supplies the required textual equivalent.
+  One figure wraps two fully named SVG variants. The @container query on the figure's inline
+  size (compositions.css makes figure.perk-diagram an inline-size container) removes one
+  variant from both rendering and the accessibility tree at every width — narrow by default,
+  wide only where the content column fits its 736-unit viewBox at scale 1, so every label
+  renders at its declared ≥16px size; browsers without container-query support keep the
+  content-identical narrow variant. Each variant states the current node in its description
+  because color and line weight only reinforce that status. The neighboring MDX copy supplies
+  the required textual equivalent.
 */}
 
 <figure class="perk-diagram">
@@ -63,7 +67,7 @@
   <svg
     role="img"
     data-variant="narrow"
-    viewBox="0 0 320 624"
+    viewBox="0 0 288 624"
     aria-labelledby="perk-plans-objectives-narrow-title perk-plans-objectives-narrow-desc"
   >
     <title id="perk-plans-objectives-narrow-title">Plans inside an objective (stacked)</title>
@@ -75,37 +79,37 @@
       + reconcile" leads back to the objective.
     </desc>
     <g>
-      <rect class="objective" x="18" y="8" width="284" height="208" rx="10" />
+      <rect class="objective" x="18" y="8" width="252" height="208" rx="10" />
       <text class="region-heading" x="32" y="38">Objective (durable issue)</text>
 
-      <rect class="node complete" x="32" y="54" width="256" height="38" rx="6" />
+      <rect class="node complete" x="32" y="54" width="224" height="38" rx="6" />
       <text class="node-label complete-label" x="48" y="79">✓ 1.1</text>
 
-      <rect class="node current" x="32" y="104" width="256" height="38" rx="6" />
+      <rect class="node current" x="32" y="104" width="224" height="38" rx="6" />
       <text class="node-label current-label" x="48" y="129">▸ 1.2</text>
 
-      <rect class="node" x="32" y="154" width="256" height="38" rx="6" />
+      <rect class="node" x="32" y="154" width="224" height="38" rx="6" />
       <text class="node-label" x="48" y="179">○ 1.3</text>
 
-      <path class="connector" d="M 288 123 H 308 V 258 H 160 V 274" />
-      <polygon class="arrowhead" points="155,274 165,274 160,284" />
+      <path class="connector" d="M 256 123 H 276 V 258 H 144 V 274" />
+      <polygon class="arrowhead" points="139,274 149,274 144,284" />
       <text class="edge-label side" x="32" y="248">perk objective plan</text>
 
-      <rect class="artifact" x="64" y="284" width="48" height="24" rx="6" />
-      <rect class="artifact" x="64" y="296" width="192" height="58" rx="6" />
-      <text class="artifact-label" x="96" y="331">plan issue</text>
+      <rect class="artifact" x="48" y="284" width="48" height="24" rx="6" />
+      <rect class="artifact" x="48" y="296" width="192" height="58" rx="6" />
+      <text class="artifact-label" x="80" y="331">plan issue</text>
 
-      <line class="connector" x1="160" y1="354" x2="160" y2="398" />
-      <polygon class="arrowhead" points="155,398 165,398 160,408" />
-      <text class="edge-label side" x="178" y="384">implement</text>
+      <line class="connector" x1="144" y1="354" x2="144" y2="398" />
+      <polygon class="arrowhead" points="139,398 149,398 144,408" />
+      <text class="edge-label side" x="162" y="384">implement</text>
 
-      <rect class="artifact" x="96" y="408" width="42" height="24" rx="6" />
-      <rect class="artifact" x="96" y="420" width="128" height="58" rx="6" />
-      <text class="artifact-label" x="144" y="455">PR</text>
+      <rect class="artifact" x="80" y="408" width="42" height="24" rx="6" />
+      <rect class="artifact" x="80" y="420" width="128" height="58" rx="6" />
+      <text class="artifact-label" x="128" y="455">PR</text>
 
-      <path class="connector" d="M 224 449 H 308 V 568 H 8 V 36 H 10" />
+      <path class="connector" d="M 208 449 H 276 V 568 H 8 V 36 H 10" />
       <polygon class="arrowhead" points="10,31 10,41 18,36" />
-      <text class="edge-label" x="160" y="602">merge → node done + reconcile</text>
+      <text class="edge-label" x="144" y="602">merge → node done + reconcile</text>
     </g>
   </svg>
 </figure>
@@ -119,17 +123,17 @@
   }
   svg[data-variant="wide"] {
     max-width: 736px;
-  }
-  svg[data-variant="narrow"] {
-    max-width: 320px;
     display: none;
   }
-  @media (max-width: 767.98px) {
+  svg[data-variant="narrow"] {
+    max-width: 288px;
+  }
+  @container (min-width: 736px) {
     svg[data-variant="wide"] {
-      display: none;
+      display: block;
     }
     svg[data-variant="narrow"] {
-      display: block;
+      display: none;
     }
   }
 

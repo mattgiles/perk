@@ -7,8 +7,12 @@
 
   Every row carries data attributes for the registry facts. Post-build checks compare the two
   variants with shared/registry.yaml and verify that each visible yes/— value agrees with those
-  attributes. The media query removes one complete variant from rendering and the accessibility
-  tree at every width. Each SVG owns its title and description ids.
+  attributes. The @container query on the figure's inline size (compositions.css makes
+  figure.perk-diagram an inline-size container) removes one complete variant from rendering and
+  the accessibility tree at every width — narrow by default, wide only where the content column
+  fits its 736-unit viewBox at scale 1, so every label renders at its declared ≥16px size;
+  browsers without container-query support keep the content-identical narrow variant. Each SVG
+  owns its title and description ids.
 */}
 
 <figure class="perk-diagram" data-diagram="warm-cold-doors">
@@ -164,7 +168,7 @@
   <svg
     role="img"
     data-variant="narrow"
-    viewBox="0 0 320 1536"
+    viewBox="0 0 288 1536"
     aria-labelledby="perk-doors-narrow-title perk-doors-narrow-desc"
   >
     <title id="perk-doors-narrow-title">Warm and cold door availability by stage (stacked)</title>
@@ -176,95 +180,95 @@
     </desc>
 
     <g data-stage="gist-author" data-warm="true" data-cold-local="true" data-cold-remote="false">
-      <rect class="stage" x="2" y="4" width="316" height="108" rx="6" />
+      <rect class="stage" x="2" y="4" width="284" height="108" rx="6" />
       <text class="stage-label" x="16" y="28">○ gist-author</text>
-      <text class="door-label" x="16" y="54">Warm</text><text class="door-value" x="300" y="54">yes</text>
-      <text class="door-label" x="16" y="80">Cold local</text><text class="door-value" x="300" y="80">yes</text>
-      <text class="door-label" x="16" y="106">Cold remote</text><text class="door-value" x="300" y="106">—</text>
+      <text class="door-label" x="16" y="54">Warm</text><text class="door-value" x="268" y="54">yes</text>
+      <text class="door-label" x="16" y="80">Cold local</text><text class="door-value" x="268" y="80">yes</text>
+      <text class="door-label" x="16" y="106">Cold remote</text><text class="door-value" x="268" y="106">—</text>
     </g>
     <g data-stage="gist-save" data-warm="true" data-cold-local="true" data-cold-remote="false">
-      <rect class="stage" x="2" y="122" width="316" height="108" rx="6" />
+      <rect class="stage" x="2" y="122" width="284" height="108" rx="6" />
       <text class="stage-label" x="16" y="146">○ gist-save</text>
-      <text class="door-label" x="16" y="172">Warm</text><text class="door-value" x="300" y="172">yes</text>
-      <text class="door-label" x="16" y="198">Cold local</text><text class="door-value" x="300" y="198">yes</text>
-      <text class="door-label" x="16" y="224">Cold remote</text><text class="door-value" x="300" y="224">—</text>
+      <text class="door-label" x="16" y="172">Warm</text><text class="door-value" x="268" y="172">yes</text>
+      <text class="door-label" x="16" y="198">Cold local</text><text class="door-value" x="268" y="198">yes</text>
+      <text class="door-label" x="16" y="224">Cold remote</text><text class="door-value" x="268" y="224">—</text>
     </g>
     <g data-stage="objective-author" data-warm="true" data-cold-local="true" data-cold-remote="false">
-      <rect class="stage" x="2" y="240" width="316" height="108" rx="6" />
+      <rect class="stage" x="2" y="240" width="284" height="108" rx="6" />
       <text class="stage-label" x="16" y="264">○ objective-author</text>
-      <text class="door-label" x="16" y="290">Warm</text><text class="door-value" x="300" y="290">yes</text>
-      <text class="door-label" x="16" y="316">Cold local</text><text class="door-value" x="300" y="316">yes</text>
-      <text class="door-label" x="16" y="342">Cold remote</text><text class="door-value" x="300" y="342">—</text>
+      <text class="door-label" x="16" y="290">Warm</text><text class="door-value" x="268" y="290">yes</text>
+      <text class="door-label" x="16" y="316">Cold local</text><text class="door-value" x="268" y="316">yes</text>
+      <text class="door-label" x="16" y="342">Cold remote</text><text class="door-value" x="268" y="342">—</text>
     </g>
     <g data-stage="objective-save" data-warm="true" data-cold-local="true" data-cold-remote="false">
-      <rect class="stage" x="2" y="358" width="316" height="108" rx="6" />
+      <rect class="stage" x="2" y="358" width="284" height="108" rx="6" />
       <text class="stage-label" x="16" y="382">○ objective-save</text>
-      <text class="door-label" x="16" y="408">Warm</text><text class="door-value" x="300" y="408">yes</text>
-      <text class="door-label" x="16" y="434">Cold local</text><text class="door-value" x="300" y="434">yes</text>
-      <text class="door-label" x="16" y="460">Cold remote</text><text class="door-value" x="300" y="460">—</text>
+      <text class="door-label" x="16" y="408">Warm</text><text class="door-value" x="268" y="408">yes</text>
+      <text class="door-label" x="16" y="434">Cold local</text><text class="door-value" x="268" y="434">yes</text>
+      <text class="door-label" x="16" y="460">Cold remote</text><text class="door-value" x="268" y="460">—</text>
     </g>
     <g data-stage="objective-plan" data-warm="true" data-cold-local="true" data-cold-remote="false">
-      <rect class="stage" x="2" y="476" width="316" height="108" rx="6" />
+      <rect class="stage" x="2" y="476" width="284" height="108" rx="6" />
       <text class="stage-label" x="16" y="500">○ objective-plan</text>
-      <text class="door-label" x="16" y="526">Warm</text><text class="door-value" x="300" y="526">yes</text>
-      <text class="door-label" x="16" y="552">Cold local</text><text class="door-value" x="300" y="552">yes</text>
-      <text class="door-label" x="16" y="578">Cold remote</text><text class="door-value" x="300" y="578">—</text>
+      <text class="door-label" x="16" y="526">Warm</text><text class="door-value" x="268" y="526">yes</text>
+      <text class="door-label" x="16" y="552">Cold local</text><text class="door-value" x="268" y="552">yes</text>
+      <text class="door-label" x="16" y="578">Cold remote</text><text class="door-value" x="268" y="578">—</text>
     </g>
     <g data-stage="plan" data-warm="true" data-cold-local="true" data-cold-remote="false">
-      <rect class="stage" x="2" y="594" width="316" height="108" rx="6" />
+      <rect class="stage" x="2" y="594" width="284" height="108" rx="6" />
       <text class="stage-label" x="16" y="618">○ plan</text>
-      <text class="door-label" x="16" y="644">Warm</text><text class="door-value" x="300" y="644">yes</text>
-      <text class="door-label" x="16" y="670">Cold local</text><text class="door-value" x="300" y="670">yes</text>
-      <text class="door-label" x="16" y="696">Cold remote</text><text class="door-value" x="300" y="696">—</text>
+      <text class="door-label" x="16" y="644">Warm</text><text class="door-value" x="268" y="644">yes</text>
+      <text class="door-label" x="16" y="670">Cold local</text><text class="door-value" x="268" y="670">yes</text>
+      <text class="door-label" x="16" y="696">Cold remote</text><text class="door-value" x="268" y="696">—</text>
     </g>
     <g data-stage="save" data-warm="true" data-cold-local="true" data-cold-remote="false">
-      <rect class="stage" x="2" y="712" width="316" height="108" rx="6" />
+      <rect class="stage" x="2" y="712" width="284" height="108" rx="6" />
       <text class="stage-label" x="16" y="736">○ save</text>
-      <text class="door-label" x="16" y="762">Warm</text><text class="door-value" x="300" y="762">yes</text>
-      <text class="door-label" x="16" y="788">Cold local</text><text class="door-value" x="300" y="788">yes</text>
-      <text class="door-label" x="16" y="814">Cold remote</text><text class="door-value" x="300" y="814">—</text>
+      <text class="door-label" x="16" y="762">Warm</text><text class="door-value" x="268" y="762">yes</text>
+      <text class="door-label" x="16" y="788">Cold local</text><text class="door-value" x="268" y="788">yes</text>
+      <text class="door-label" x="16" y="814">Cold remote</text><text class="door-value" x="268" y="814">—</text>
     </g>
     <g data-stage="implement" data-warm="false" data-cold-local="true" data-cold-remote="true">
-      <rect class="stage" x="2" y="830" width="316" height="108" rx="6" />
+      <rect class="stage" x="2" y="830" width="284" height="108" rx="6" />
       <text class="stage-label" x="16" y="854">○ implement</text>
-      <text class="door-label" x="16" y="880">Warm</text><text class="door-value" x="300" y="880">—</text>
-      <text class="door-label" x="16" y="906">Cold local</text><text class="door-value" x="300" y="906">yes</text>
-      <text class="door-label" x="16" y="932">Cold remote</text><text class="door-value" x="300" y="932">yes</text>
+      <text class="door-label" x="16" y="880">Warm</text><text class="door-value" x="268" y="880">—</text>
+      <text class="door-label" x="16" y="906">Cold local</text><text class="door-value" x="268" y="906">yes</text>
+      <text class="door-label" x="16" y="932">Cold remote</text><text class="door-value" x="268" y="932">yes</text>
     </g>
     <g data-stage="submit" data-warm="true" data-cold-local="true" data-cold-remote="false">
-      <rect class="stage" x="2" y="948" width="316" height="108" rx="6" />
+      <rect class="stage" x="2" y="948" width="284" height="108" rx="6" />
       <text class="stage-label" x="16" y="972">○ submit</text>
-      <text class="door-label" x="16" y="998">Warm</text><text class="door-value" x="300" y="998">yes</text>
-      <text class="door-label" x="16" y="1024">Cold local</text><text class="door-value" x="300" y="1024">yes</text>
-      <text class="door-label" x="16" y="1050">Cold remote</text><text class="door-value" x="300" y="1050">—</text>
+      <text class="door-label" x="16" y="998">Warm</text><text class="door-value" x="268" y="998">yes</text>
+      <text class="door-label" x="16" y="1024">Cold local</text><text class="door-value" x="268" y="1024">yes</text>
+      <text class="door-label" x="16" y="1050">Cold remote</text><text class="door-value" x="268" y="1050">—</text>
     </g>
     <g data-stage="address" data-warm="true" data-cold-local="true" data-cold-remote="true">
-      <rect class="stage" x="2" y="1066" width="316" height="108" rx="6" />
+      <rect class="stage" x="2" y="1066" width="284" height="108" rx="6" />
       <text class="stage-label" x="16" y="1090">○ address</text>
-      <text class="door-label" x="16" y="1116">Warm</text><text class="door-value" x="300" y="1116">yes</text>
-      <text class="door-label" x="16" y="1142">Cold local</text><text class="door-value" x="300" y="1142">yes</text>
-      <text class="door-label" x="16" y="1168">Cold remote</text><text class="door-value" x="300" y="1168">yes</text>
+      <text class="door-label" x="16" y="1116">Warm</text><text class="door-value" x="268" y="1116">yes</text>
+      <text class="door-label" x="16" y="1142">Cold local</text><text class="door-value" x="268" y="1142">yes</text>
+      <text class="door-label" x="16" y="1168">Cold remote</text><text class="door-value" x="268" y="1168">yes</text>
     </g>
     <g data-stage="land" data-warm="true" data-cold-local="true" data-cold-remote="false">
-      <rect class="stage" x="2" y="1184" width="316" height="108" rx="6" />
+      <rect class="stage" x="2" y="1184" width="284" height="108" rx="6" />
       <text class="stage-label" x="16" y="1208">○ land</text>
-      <text class="door-label" x="16" y="1234">Warm</text><text class="door-value" x="300" y="1234">yes</text>
-      <text class="door-label" x="16" y="1260">Cold local</text><text class="door-value" x="300" y="1260">yes</text>
-      <text class="door-label" x="16" y="1286">Cold remote</text><text class="door-value" x="300" y="1286">—</text>
+      <text class="door-label" x="16" y="1234">Warm</text><text class="door-value" x="268" y="1234">yes</text>
+      <text class="door-label" x="16" y="1260">Cold local</text><text class="door-value" x="268" y="1260">yes</text>
+      <text class="door-label" x="16" y="1286">Cold remote</text><text class="door-value" x="268" y="1286">—</text>
     </g>
     <g data-stage="learn" data-warm="true" data-cold-local="true" data-cold-remote="false">
-      <rect class="stage" x="2" y="1302" width="316" height="108" rx="6" />
+      <rect class="stage" x="2" y="1302" width="284" height="108" rx="6" />
       <text class="stage-label" x="16" y="1326">○ learn</text>
-      <text class="door-label" x="16" y="1352">Warm</text><text class="door-value" x="300" y="1352">yes</text>
-      <text class="door-label" x="16" y="1378">Cold local</text><text class="door-value" x="300" y="1378">yes</text>
-      <text class="door-label" x="16" y="1404">Cold remote</text><text class="door-value" x="300" y="1404">—</text>
+      <text class="door-label" x="16" y="1352">Warm</text><text class="door-value" x="268" y="1352">yes</text>
+      <text class="door-label" x="16" y="1378">Cold local</text><text class="door-value" x="268" y="1378">yes</text>
+      <text class="door-label" x="16" y="1404">Cold remote</text><text class="door-value" x="268" y="1404">—</text>
     </g>
     <g data-stage="audit" data-warm="false" data-cold-local="true" data-cold-remote="false">
-      <rect class="stage" x="2" y="1420" width="316" height="108" rx="6" />
+      <rect class="stage" x="2" y="1420" width="284" height="108" rx="6" />
       <text class="stage-label" x="16" y="1444">○ audit (dev-only)</text>
-      <text class="door-label" x="16" y="1470">Warm</text><text class="door-value" x="300" y="1470">—</text>
-      <text class="door-label" x="16" y="1496">Cold local</text><text class="door-value" x="300" y="1496">yes</text>
-      <text class="door-label" x="16" y="1522">Cold remote</text><text class="door-value" x="300" y="1522">—</text>
+      <text class="door-label" x="16" y="1470">Warm</text><text class="door-value" x="268" y="1470">—</text>
+      <text class="door-label" x="16" y="1496">Cold local</text><text class="door-value" x="268" y="1496">yes</text>
+      <text class="door-label" x="16" y="1522">Cold remote</text><text class="door-value" x="268" y="1522">—</text>
     </g>
   </svg>
 </figure>
@@ -278,17 +282,17 @@
   }
   svg[data-variant="wide"] {
     max-width: 736px;
-  }
-  svg[data-variant="narrow"] {
-    max-width: 320px;
     display: none;
   }
-  @media (max-width: 767.98px) {
+  svg[data-variant="narrow"] {
+    max-width: 288px;
+  }
+  @container (min-width: 736px) {
     svg[data-variant="wide"] {
-      display: none;
+      display: block;
     }
     svg[data-variant="narrow"] {
-      display: block;
+      display: none;
     }
   }
 
