@@ -317,8 +317,25 @@ def test_docs_site_publish_isolation():
     }
 
     root = _package_json()
-    assert root["workspaces"] == ["docs/site"]
+    assert root["workspaces"] == ["docs/site", "tools/prose-review"]
     assert not any(entry.startswith("docs") for entry in root["files"]), root["files"]
+
+    # The prose-review workspace shares the same dev-only isolation posture: private, zero
+    # runtime deps, exact-pinned toolchain (docs/design/prose-review-stack.md).
+    workbench = json.loads(
+        (REPO_ROOT / "tools/prose-review/package.json").read_text(encoding="utf-8")
+    )
+    assert workbench["private"] is True
+    assert "dependencies" not in workbench, workbench.get("dependencies")
+    assert workbench["devDependencies"] == {
+        "@types/react": "19.2.18",
+        "@types/react-dom": "19.2.4",
+        "@vitejs/plugin-react": "6.0.5",
+        "react": "19.2.8",
+        "react-dom": "19.2.8",
+        "vite": "8.2.1",
+    }
+    assert not any(entry.startswith("tools") for entry in root["files"]), root["files"]
 
 
 @pytest.mark.xdist_group("wheel_build")
