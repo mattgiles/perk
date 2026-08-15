@@ -67,7 +67,8 @@ function parseArray<T>(value: unknown, parseEntry: (entry: unknown) => T | null)
   return entries;
 }
 
-function parseUnitRef(value: unknown): UnitRef | null {
+/** Parse one unit reference (shared by the inspect/search parse boundaries). */
+export function parseUnitRef(value: unknown): UnitRef | null {
   if (
     !isRecord(value) ||
     typeof value.id !== "string" ||

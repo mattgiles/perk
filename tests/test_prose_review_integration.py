@@ -21,7 +21,13 @@ import uvicorn
 from perk_dev.prose_map.catalog import build_catalog
 from perk_dev.prose_review.catalog import CatalogSnapshot
 from perk_dev.prose_review.cli import build_frontend
-from perk_dev.prose_review.dto import CapabilityTreeOut, CatalogSummaryOut
+from perk_dev.prose_review.dto import (
+    CapabilityTreeOut,
+    CatalogSummaryOut,
+    SearchOut,
+    UnitInspectOut,
+)
+from perk_dev.prose_review.search import build_search_index, search
 from perk_dev.prose_review.web import create_app
 
 ROOT = Path(__file__).parents[1]
@@ -127,6 +133,31 @@ def test_tree_endpoint_serves_the_fixed_order_tree_over_real_http(
     payload = response.json()
     assert payload == CapabilityTreeOut.from_domain(server.snapshot).model_dump(mode="json")
     assert payload["capabilities"][0]["label"] == "Foundation"
+
+
+def test_inspect_endpoint_serves_the_snapshot_dto_over_real_http(
+    server: _RunningServer,
+) -> None:
+    unit = server.snapshot.get_unit("typescript-tool:plan_review")
+    assert unit is not None
+    with httpx.Client(base_url=server.base_url, timeout=10) as client:
+        response = client.get("/api/inspect", params={"unit": unit.candidate.id})
+    assert response.status_code == 200
+    assert response.json() == UnitInspectOut.from_domain(server.snapshot, unit).model_dump(
+        mode="json"
+    )
+
+
+def test_search_endpoint_serves_the_snapshot_dto_over_real_http(
+    server: _RunningServer,
+) -> None:
+    with httpx.Client(base_url=server.base_url, timeout=10) as client:
+        response = client.get("/api/search", params={"q": "plan_review"})
+    assert response.status_code == 200
+    index = build_search_index(server.snapshot)
+    assert response.json() == SearchOut.from_domain(search(index, "plan_review")).model_dump(
+        mode="json"
+    )
 
 
 def test_source_endpoint_serves_the_trust_root_copy_over_real_http(

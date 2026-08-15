@@ -9,8 +9,10 @@ websocket routes, so Starlette rejects any handshake, and a future node adding
 websockets must give them their own guard policy first. Pure ASGI keeps the guard
 streaming-transparent.
 
-Handlers see only the ``CatalogSnapshot`` in and ``*Out`` models out — no domain object
-reaches a response path. File reads fall into exactly two families: built-asset reads
+Handlers query the ``CatalogSnapshot`` and respond with ``*Out`` models only — a
+handler may look up domain values and hand them to a ``from_domain`` constructor, but
+no domain object is ever serialized into a response body. File reads fall into
+exactly two families: built-asset reads
 (``index.html`` included) go through the contained-read helper that proves both the
 dist root and the candidate sit under the repository root of trust (a symlinked
 ``dist/`` must not launder outside targets in); canonical-source reads go through the
@@ -27,9 +29,17 @@ from typing import Any
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import HTMLResponse, Response
 
+from perk_dev.prose_map.models import Audience, ProseKind, ProseRole
+from perk_dev.prose_review import search as search_module
 from perk_dev.prose_review import source_adapter
 from perk_dev.prose_review.catalog import CatalogSnapshot
-from perk_dev.prose_review.dto import CapabilityTreeOut, CatalogSummaryOut, UnitSourceOut
+from perk_dev.prose_review.dto import (
+    CapabilityTreeOut,
+    CatalogSummaryOut,
+    SearchOut,
+    UnitInspectOut,
+    UnitSourceOut,
+)
 from perk_dev.prose_review.source_adapter import SourceReadError, SourceReadFailure
 
 # One fixed 404 detail per closed read-failure reason. Containment failures stay
@@ -187,8 +197,10 @@ def create_app(
     locally generated — is an unused machine-readable surface this app never serves.
     """
     repo_resolved = repo_root.resolve()
-    # The snapshot is immutable, so the tree DTO is computed exactly once.
+    # The snapshot is immutable, so the tree DTO and the search index are computed
+    # exactly once.
     tree = CapabilityTreeOut.from_domain(snapshot)
+    search_index = search_module.build_search_index(snapshot)
     app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
 
     @app.get("/", response_class=HTMLResponse)
@@ -205,6 +217,25 @@ def create_app(
     @app.get("/api/catalog/tree", response_model=CapabilityTreeOut)
     def catalog_tree() -> CapabilityTreeOut:
         return tree
+
+    @app.get("/api/inspect", response_model=UnitInspectOut)
+    def inspect(unit: str) -> UnitInspectOut:
+        routed = snapshot.get_unit(unit)
+        if routed is None:
+            # The /api/source no-leak posture: one fixed detail for an unknown unit.
+            raise HTTPException(status_code=404, detail="unknown unit")
+        return UnitInspectOut.from_domain(snapshot, routed)
+
+    @app.get("/api/search", response_model=SearchOut)
+    def catalog_search(
+        q: str = "",
+        audience: Audience | None = None,
+        role: ProseRole | None = None,
+        kind: ProseKind | None = None,
+    ) -> SearchOut:
+        return SearchOut.from_domain(
+            search_module.search(search_index, q, audience=audience, role=role, kind=kind)
+        )
 
     @app.get("/api/source", response_model=UnitSourceOut)
     def source(unit: str) -> UnitSourceOut:
