@@ -20,6 +20,23 @@ export const DELIVERY_MODES = ["cold", "warm", "headless", "ambient", "subagent"
 
 export type DeliveryMode = (typeof DELIVERY_MODES)[number];
 
+export const AUDIENCES = ["shipped", "self-development", "both"] as const;
+
+export type Audience = (typeof AUDIENCES)[number];
+
+export const PROSE_ROLES = [
+  "launch",
+  "context",
+  "adapter",
+  "skill-detail",
+  "ambient-discovery",
+  "tool-contract",
+  "subagent-instruction",
+  "control-guidance",
+] as const;
+
+export type ProseRole = (typeof PROSE_ROLES)[number];
+
 export const BOUNDARY_KINDS = [
   "pi-system",
   "borrowed-prompt",
@@ -39,4 +56,12 @@ export function isDeliveryMode(value: unknown): value is DeliveryMode {
 
 export function isBoundaryKind(value: unknown): value is BoundaryKind {
   return typeof value === "string" && (BOUNDARY_KINDS as readonly string[]).includes(value);
+}
+
+export function isAudience(value: unknown): value is Audience {
+  return typeof value === "string" && (AUDIENCES as readonly string[]).includes(value);
+}
+
+export function isProseRole(value: unknown): value is ProseRole {
+  return typeof value === "string" && (PROSE_ROLES as readonly string[]).includes(value);
 }
