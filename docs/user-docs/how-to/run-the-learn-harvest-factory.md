@@ -14,7 +14,7 @@ improvement objective by running the learn-harvest objective factory.
 ## Steps
 
 1. **Start the factory.** From the shell run
-   [`perk learn harvest`](../reference/cli.md#perk-learn-harvest) (cold-only — there is no warm
+   [`perk learn harvest`](../reference/cli/learn-and-gist.md#perk-learn-harvest) (cold-only — there is no warm
    `/learn-harvest`). Bound the run with a repeatable `--from` (a file or directory inside
    `docs/learned/`), e.g. `perk learn harvest --from docs/learned/workflow`; the default is the
    full corpus.
@@ -31,7 +31,7 @@ improvement objective by running the learn-harvest objective factory.
 4. **Review and approve.** The objective rides the normal review-first authoring loop; approval
    saves (creates + activates) it like any other objective.
 5. **Drive the nodes.** Generate per-node plans with
-   [`perk objective plan`](../reference/cli.md#perk-objective-plan-number) and take each through the
+   [`perk objective plan`](../reference/cli/objective.md#perk-objective-plan-number) and take each through the
    ordinary implement → submit → land spine.
 
 > **It is an objective factory.** Like [`/objective-plan`](../reference/in-session/workflow-commands.md#objective-plan)

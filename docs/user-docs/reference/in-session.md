@@ -84,7 +84,7 @@ door, or model tool; they are human-facing only.
 - **`whimsical`** — replaces Pi's default “Working…” label with a random whimsical phrase each
   turn. It is ambient and cosmetic, with no command or config toggle.
 - **The watch feedback receiver** — in an eligible implement session, saved notes from a live
-  [`perk plan watch`](./cli.md#perk-plan-watch-plan) review arrive as user messages (see
+  [`perk plan watch`](./cli/plan.md#perk-plan-watch-plan) review arrive as user messages (see
   [How to send feedback from a hunk watch](../how-to/send-feedback-from-hunk-watch.md)). Only the
   interactive TUI implement session whose active plan matches the worktree consumes feedback;
   headless/RPC sessions and other stages do not. Mid-turn notes steer the running turn; idle notes

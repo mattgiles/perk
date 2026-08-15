@@ -21,13 +21,7 @@ import { sweepCorpusLinks, validateCorpusDir } from "./remark-rewrite-corpus-lin
  * (stale — remove it). Extend ONLY for a later-node-owned deferral; each entry names the
  * node that owns its removal.
  */
-export const ESCAPE_BASELINE = Object.freeze([
-  // Removed by node 4.1 (CLI reference):
-  Object.freeze({
-    source: "reference/cli.md",
-    url: "../../guiding-principles/python-cli-guidelines.md",
-  }),
-]);
+export const ESCAPE_BASELINE = Object.freeze([]);
 
 /**
  * The dangling-anchor baseline: blueprint-recorded deferrals only (docs/design/

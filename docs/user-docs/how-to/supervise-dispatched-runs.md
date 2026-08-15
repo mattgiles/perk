@@ -13,7 +13,7 @@ Find a remote run, confirm its identity and state, then cancel or retry it safel
 ## Steps
 
 1. **List current and historical runs.** Run
-   [`perk workflow run list`](../reference/cli.md#perk-workflow-run-list-alias-ls) (alias `ls`). The
+   [`perk workflow run list`](../reference/cli/remote-and-utility.md#perk-workflow-run-list-alias-ls) (alias `ls`). The
    default view discovers GitHub Actions runs first, so a fresh clone can see runs dispatched by
    another machine. Use `--limit` to bound the newest-first result or `--json` for structured data.
 2. **Inspect the run before acting.** Match the stage and plan, then read the dispatch status, live
@@ -49,5 +49,5 @@ it across clones.
 - **Do:** [Dispatch a stage to CI](./dispatch-a-stage-to-ci.md) — create a run to supervise.
 - **Do:** [Advance an objective headlessly](./advance-an-objective-headlessly.md) — let the objective
   supervisor choose one safe next step.
-- **Look up:** [`perk workflow run`](../reference/cli.md#perk-workflow-run-list-alias-ls) — list,
+- **Look up:** [`perk workflow run`](../reference/cli/remote-and-utility.md#perk-workflow-run-list-alias-ls) — list,
   cancel, and retry command family and output.

@@ -455,13 +455,13 @@ Every hit targeting one of the four split pages (as of 2026-08-12, all such hits
 `docs/user-docs/` itself) gets a row — H2 and H3 alike. Slugs are kept on the child page per
 the Part 2 rule. "Stays on hub" rows need no link updates at all.
 
-**`reference/cli.md` (46 referenced anchors):**
+**`reference/cli.md` (48 referenced anchors):**
 
 | Old anchor | New home |
 |---|---|
 | `cli.md#perk-implement-plan-alias-impl` | stays on hub (stage-launcher spine) |
 | `cli.md#perk-submit` | stays on hub (stage-launcher spine) |
-| `cli.md#perk-address` | stays on hub (stage-launcher spine) |
+| `cli.md#perk-address-plan` | stays on hub (stage-launcher spine) |
 | `cli.md#perk-land` | stays on hub (stage-launcher spine) |
 | `cli.md#perk-init` | `cli/setup-and-health.md#perk-init` |
 | `cli.md#perk-doctor` | `cli/setup-and-health.md#perk-doctor` |
@@ -475,6 +475,7 @@ the Part 2 rule. "Stays on hub" rows need no link updates at all.
 | `cli.md#perk-objective-author` | `cli/objective.md#perk-objective-author` |
 | `cli.md#perk-objective-save` | `cli/objective.md#perk-objective-save` |
 | `cli.md#perk-objective-plan-number` | `cli/objective.md#perk-objective-plan-number` |
+| `cli.md#perk-objective-create-alias-new` | `cli/objective.md#perk-objective-create-alias-new` |
 | `cli.md#perk-objective-show-number-alias-s` | `cli/objective.md#perk-objective-show-number-alias-s` |
 | `cli.md#perk-objective-node-number` | `cli/objective.md#perk-objective-node-number` |
 | `cli.md#perk-objective-node-add-number` | `cli/objective.md#perk-objective-node-add-number` |
@@ -488,6 +489,7 @@ the Part 2 rule. "Stays on hub" rows need no link updates at all.
 | `cli.md#perk-objective-stack-status-objective` | `cli/objective.md#perk-objective-stack-status-objective` |
 | `cli.md#perk-objective-stack-sync-objective` | `cli/objective.md#perk-objective-stack-sync-objective` |
 | `cli.md#perk-objective-stack-recover-objective` | `cli/objective.md#perk-objective-stack-recover-objective` |
+| `cli.md#perk-objective-stack-land-objective` | `cli/objective.md#perk-objective-stack-land-objective` |
 | `cli.md#perk-pr-submit` | `cli/pr.md#perk-pr-submit` |
 | `cli.md#perk-learn` | `cli/learn-and-gist.md#perk-learn` |
 | `cli.md#perk-learn-pending` | `cli/learn-and-gist.md#perk-learn-pending` |
@@ -556,7 +558,7 @@ Every H3 entry (a command, a config table, or a tool) not listed above migrates 
 of its family **per the §4 family lists** — deterministic, since §4 enumerates which
 command groups, config tables, and tool families belong to which child **and which content
 each hub keeps** — **keeping its slug on the owning page**. The hub is a family owner too:
-an H3 in a §4 "hub keeps" list stays on the hub unchanged (e.g. `cli.md#perk-ready`, the one
+an H3 in a §4 "hub keeps" list stays on the hub unchanged (e.g. `cli.md#perk-ready-plan`, the one
 stage-launcher spine entry with no Part 1 row above). Child examples:
 `cli.md#perk-plan-watch-plan` → `cli/plan.md#perk-plan-watch-plan`;
 `configuration.md#compaction` → `configuration/models-and-compaction.md#compaction`;

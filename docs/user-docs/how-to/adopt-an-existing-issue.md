@@ -17,7 +17,7 @@ This runs in a **read-only** session and is **local-only**.
 
 ## Steps
 
-1. **Adopt it.** Run [`perk plan from 123`](../reference/cli.md#perk-plan-from-issue), where `123`
+1. **Adopt it.** Run [`perk plan from 123`](../reference/cli/plan.md#perk-plan-from-issue), where `123`
    is the existing issue id (a Linear identifier like `PER-45` works too). perk reads the issue,
    materializes its title + body (and any human comments/description edits, as untrusted DATA), and
    launches a read-only session to author a plan for the work it describes.
@@ -45,7 +45,7 @@ This runs in a **read-only** session and is **local-only**.
   the backend writer too, so `perk plan save --adopt-from` cannot bypass it.
 
 > **Adopt vs. plan vs. replan.** `from` adopts a **pre-existing human issue** in place; a bare
-> [`perk plan`](../reference/cli.md#perk-plan) authors a fresh plan (minting a new issue on save);
+> [`perk plan`](../reference/cli/plan.md#perk-plan) authors a fresh plan (minting a new issue on save);
 > [`replan`](replan-an-open-plan.md) re-authors an existing **perk plan**. Reach for `from` when a
 > human already filed the issue and you want the plan to live *on that issue*.
 
@@ -63,4 +63,4 @@ adopt it by id.)
 
 - **Do:** [How to capture a gist (a statement of intent)](capture-a-gist.md) — file the intent first when the work is not ready to plan.
 - **Do:** [How to adopt an existing project as an objective](adopt-an-existing-project.md) — the objective-level analog for project-sized sources.
-- **Look up:** [CLI commands](../reference/cli.md) — exact `perk plan from` syntax, flags, and refusals.
+- **Look up:** [Plan commands](../reference/cli/plan.md) — exact `perk plan from` syntax, flags, and refusals.

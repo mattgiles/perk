@@ -14,8 +14,8 @@ described as it is and structured to mirror the product.
 
 <div class="perk-recommended">
 
-- **[CLI commands](./cli.md)** — the surface you touch first: every `perk …` command,
-  written against real `--help` output.
+- **[CLI commands](./cli.md)** — the surface you touch first: the command-map hub with the
+  stage-launcher spine, plus six exact-detail family references.
 - **[Configuration files](./configuration.md)** — the precedence and overlay hub, with five
   exact-detail family references for every repository configuration surface.
 
@@ -25,8 +25,10 @@ described as it is and structured to mirror the product.
 
 - **[Requirements and compatibility](./requirements-and-compatibility.md)** — the required
   toolchain, installation floor, model credentials, optional surfaces, and version posture.
-- **[CLI commands](./cli.md)** — every `perk …` command, written against real `--help` and
-  guarded by a pytest existence check.
+- **[CLI commands](./cli.md)** — the command-map hub carrying the stage-launcher spine and
+  shared conventions, with family references for setup and health, plan, objective, PR, learn
+  and gist, and remote and utility commands; kept complete by a bi-directional guard against
+  the live CLI.
 - **[In-session commands & tools](./in-session.md)** — the stable session-interior hub, with
   family references for stages and doors, workflow commands, review and authoring, and
   model-facing tools.

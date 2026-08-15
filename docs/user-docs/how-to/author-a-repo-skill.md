@@ -62,6 +62,6 @@ The source stays versioned at `.perk/skills/my-skill/`, while the synchronized
 
 - **Do:** [Attach a skill to a stage](./attach-a-skill-to-a-stage.md) — deliver the synchronized
   skill.
-- **Look up:** [`perk skills`](../reference/cli.md#perk-skills-alias-sk) — exact lifecycle commands.
+- **Look up:** [`perk skills`](../reference/cli/remote-and-utility.md#perk-skills-alias-sk) — exact lifecycle commands.
 - **Look up:** [Skills configuration](../reference/configuration/skills-and-bindings.md#skills) — exposure and
   resolution settings.

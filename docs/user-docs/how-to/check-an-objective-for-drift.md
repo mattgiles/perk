@@ -23,7 +23,7 @@ the remediation when it cannot.
 ## Steps
 
 1. **Report the drift.** Run
-   [`perk objective doctor N`](../reference/cli.md#perk-objective-doctor-number-alias-doc)
+   [`perk objective doctor N`](../reference/cli/objective.md#perk-objective-doctor-number-alias-doc)
    (alias `perk objective doc`). Each condition is printed with a severity
    (`ERROR`/`WARNING`/`INFO`), a stable code, and a message. Add `--json` for the machine-readable
    report (`drift`/`fix` for the manifest part, `train`/`train_fix` for the delivery train).
@@ -97,4 +97,4 @@ refused at entry and at the writers, so a detected signature is pre-existing dam
   operations doctor reports but cannot repair.
 - **Do:** [How to diagnose a perk repo](diagnose-a-perk-repo.md) — the repository-health sibling of
   this objective-scoped doctor.
-- **Look up:** [CLI commands](../reference/cli.md) — exact `perk objective doctor` syntax and flags.
+- **Look up:** [Objective commands](../reference/cli/objective.md) — exact `perk objective doctor` syntax and flags.

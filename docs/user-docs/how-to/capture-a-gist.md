@@ -18,7 +18,7 @@ This runs in a **read-only** session and is **local-only**.
 
 ## Steps
 
-1. **Open the authoring session.** Run [`perk gist author`](../reference/cli.md#perk-gist-author)
+1. **Open the authoring session.** Run [`perk gist author`](../reference/cli/learn-and-gist.md#perk-gist-author)
    from the repo root. Pass `--scope objective` if you already know the intent is
    objective-sized (a long-running, multi-plan goal); the default scope is `plan` (a bounded,
    single-plan-sized intent). The scope pre-seeds the save; you can still settle it during
@@ -36,7 +36,7 @@ This runs in a **read-only** session and is **local-only**.
    `gist_draft` fields (title/scope/prose) and re-runs the review to confirm. Approving
    **auto-saves** the gist to the issue backend and prints the consumption command. (`/gist-save`
    is the manual failsafe if the review was skipped.)
-4. **See the backlog.** [`perk gist list`](../reference/cli.md#perk-gist-list) shows the
+4. **See the backlog.** [`perk gist list`](../reference/cli/learn-and-gist.md#perk-gist-list) shows the
    unconsumed gists (adopted ones are hidden by default; `--all` marks them).
 5. **Consume it later.** When someone is ready to act on the gist, adopt it in place with the
    normal doors — nothing gist-specific:

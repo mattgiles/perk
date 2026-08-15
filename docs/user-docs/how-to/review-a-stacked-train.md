@@ -25,7 +25,7 @@ default).
    `### This layer` section and a `### Train context` table (every layer, bottom→top) into
    each layer PR's body. Both are **non-authoritative** and refresh only at publication —
    the delivery train itself is the authority. See the live train with
-   [`perk objective stack status`](../reference/cli.md#perk-objective-stack-status-objective)
+   [`perk objective stack status`](../reference/cli/objective.md#perk-objective-stack-status-objective)
    (one line per layer: plan, PR, publication state, plus any blockers).
 3. **Leave feedback on any layer — lower layers included — normally.** Feedback on a
    bottom layer is safe: the author addresses it through the ordinary `/address` flow (or a
@@ -41,7 +41,7 @@ default).
    but GitHub's UI will not refuse for you, so the discipline is yours. Landing is
    **objective-scoped and atomic**: the author/operator lands the whole remaining train in
    one confirmed merge (`/objective-land`, or
-   [`perk objective stack land`](../reference/cli.md#perk-objective-stack-land-objective)) —
+   [`perk objective stack land`](../reference/cli/objective.md#perk-objective-stack-land-objective)) —
    see [Objectives → Delivery](../reference/objectives.md#delivery) for the landing shape
    and stacked delivery's current limitations.
 

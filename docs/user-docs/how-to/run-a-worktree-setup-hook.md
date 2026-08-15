@@ -13,7 +13,7 @@ freshly created, or restored from the remote plan branch — run them in order, 
 starts, so a new session begins with a ready environment (dependencies installed, codegen
 done, etc.).
 
-**Prerequisite:** a `.perk/config.toml` (run [`perk init`](../reference/cli.md#perk-init) once if you
+**Prerequisite:** a `.perk/config.toml` (run [`perk init`](../reference/cli/setup-and-health.md#perk-init) once if you
 have not). The `[worktree]` table is written there by default.
 
 ## Steps

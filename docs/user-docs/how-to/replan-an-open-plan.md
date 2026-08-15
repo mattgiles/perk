@@ -16,7 +16,7 @@ This runs in a **read-only** session and is **local-only**.
 
 ## Steps
 
-1. **Replan it.** Run [`perk plan replan 42`](../reference/cli.md#perk-plan-replan-plan), where
+1. **Replan it.** Run [`perk plan replan 42`](../reference/cli/plan.md#perk-plan-replan-plan), where
    `42` is the open plan's issue id. perk materializes the prior plan and launches a read-only
    session to re-author it.
 2. **Re-investigate.** Explore the current codebase and note what changed since the plan was first
@@ -37,4 +37,4 @@ This runs in a **read-only** session and is **local-only**.
 
 - **Do:** [How to resume a plan at its current stage](resume-a-plan.md) — continue the plan unchanged when it is right but unfinished.
 - **Do:** [How to replan an objective](replan-an-objective.md) — the objective-level analog: supersede a whole roadmap.
-- **Look up:** [CLI commands](../reference/cli.md) — exact `perk plan replan` syntax and flags.
+- **Look up:** [Plan commands](../reference/cli/plan.md) — exact `perk plan replan` syntax and flags.

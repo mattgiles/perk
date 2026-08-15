@@ -35,10 +35,10 @@ for the boundary definition.
 2. **To keep the work — commit or stash it.** Commit the changes as a coherent unit (then
    `/submit` / `perk pr submit` will proceed), or set them aside with `git stash` to restore later.
 3. **To discard the work — confirm the refusal, then force removal.** First run
-   [`perk worktree remove NAME`](../reference/cli.md#perk-worktree-remove-name-alias-rm). A dirty
+   [`perk worktree remove NAME`](../reference/cli/remote-and-utility.md#perk-worktree-remove-name-alias-rm). A dirty
    worktree refuses with `git worktree remove failed: … use --force`; that is your last checkpoint
    to confirm the changes are expendable. Then run `perk worktree remove NAME --force` to remove
-   that worktree, or [`perk worktree wipe --force`](../reference/cli.md#perk-worktree-wipe) to clean
+   that worktree, or [`perk worktree wipe --force`](../reference/cli/remote-and-utility.md#perk-worktree-wipe) to clean
    up all merged plan worktrees.
 
 ## Watch out
@@ -60,7 +60,7 @@ for the boundary definition.
 
 - **Do:** [How to diagnose a perk repo](diagnose-a-perk-repo.md) — the health check to run when
   the snag is not just uncommitted changes.
-- **Look up:** [CLI commands](../reference/cli.md) — exact `perk worktree remove` and
-  `perk worktree wipe` syntax, guards, and sweeps.
+- **Look up:** [Remote and utility commands](../reference/cli/remote-and-utility.md) — exact
+  `perk worktree remove` and `perk worktree wipe` syntax, guards, and sweeps.
 - **Understand:** [How perk thinks](../explanation/how-perk-thinks.md) — the durability boundary
   that makes uncommitted work local-only.

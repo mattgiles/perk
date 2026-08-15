@@ -21,15 +21,15 @@ perk reads two files under `.perk/`:
   It is also perk's repo **initialization marker**.
 - **`.perk/local.toml`** — a gitignored, per-user overlay for personal settings and secrets.
 
-[`perk init`](./cli.md#perk-init) scaffolds both with a commented template, and
-[`perk doctor`](./cli.md#perk-doctor) validates them. See the
+[`perk init`](./cli/setup-and-health.md#perk-init) scaffolds both with a commented template, and
+[`perk doctor`](./cli/setup-and-health.md#perk-doctor) validates them. See the
 [Repository layout](./configuration/repository-layout.md) reference for the complete ownership and
 lifecycle contract.
 
 > **Migrating from `.pi/perk.toml`.** perk's config used to live at `.pi/perk.toml` /
 > `.pi/perk.local.toml`. A repo still carrying only the legacy committed file makes `perk init`
 > **refuse** (with a `perk doctor --fix` remediation) rather than re-scaffold over it. Run
-> [`perk doctor --fix`](./cli.md#perk-doctor): it migrates the config to `.perk/` secret-safely
+> [`perk doctor --fix`](./cli/setup-and-health.md#perk-doctor): it migrates the config to `.perk/` secret-safely
 > (the gitignored `.pi/perk.local.toml` secret moves to `.perk/local.toml` and is never promoted
 > into the committed file), then re-run `perk init`.
 
@@ -79,7 +79,7 @@ trust, and a quoted `"0.8"` objective threshold is ignored.
 Python-read keys are **validated at load**. An ill-typed value such as `base = 7` under
 `[workflow]` fails `perk` commands with a field-path error
 (`workflow.base: Input should be a valid string`), and
-[`perk doctor`](./cli.md#perk-doctor) pinpoints the bad field in its `config` check. The
+[`perk doctor`](./cli/setup-and-health.md#perk-doctor) pinpoints the bad field in its `config` check. The
 `[compaction]` integers must be positive native integers: a quoted numeric string such as
 `"16384"` is accepted by coercion, but a bare boolean such as `reserve_tokens = true` is rejected.
 Legacy tables and keys (`[trust]`, `[objective]`, `[subagents]`, `[stages.<id>]`, `[[ci]]`, and
@@ -87,6 +87,7 @@ Legacy tables and keys (`[trust]`, `[objective]`, `[subagents]`, `[stages.<id>]`
 
 ## Related
 
-- [CLI commands](./cli.md) — the `perk …` commands, including `perk init` and `perk doctor`.
+- [Setup and health](./cli/setup-and-health.md) — the exact `perk init` and `perk doctor`
+  reference.
 - [In-session commands & tools](./in-session.md) — the warm `/…` commands and model-facing tools.
 - [How perk thinks](../explanation/how-perk-thinks.md) — the workflow model behind the settings.
