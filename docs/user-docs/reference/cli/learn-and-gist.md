@@ -289,3 +289,9 @@ List open gists. The default view **hides adopted gists** (the "what's still unc
 view); `--all` shows everything with an adopted marker. `--json` emits
 `{gists: [{id, url, title, scope, adopted, kind}]}` (`kind` is `issue` or `project`). Exits 0 on
 an empty list.
+
+## Related
+
+- **Do:** [How to run the learn-docs factory](../../how-to/run-the-learn-docs-factory.md) — consolidate perk:learn issues into committed docs.
+- **Do:** [How to capture a gist (a statement of intent)](../../how-to/capture-a-gist.md) — the gist workflow end to end.
+- **Understand:** [Gists, plans, and objectives](../../explanation/gists-plans-and-objectives.md) — where gists sit in the intent ladder.

@@ -3,6 +3,7 @@ title: "Drive a stacked objective to one atomic landing"
 description: "Author a stacked objective, publish its layers as one pull-request train, cascade review feedback, and land the whole train atomically."
 sidebar:
   order: 1030
+prev: true
 ---
 
 # Drive a stacked objective to one atomic landing
@@ -328,8 +329,8 @@ The `perk-stacked-tutorial` repo was disposable — delete it whenever you like:
 gh repo delete perk-stacked-tutorial
 ```
 
-From here: [How to review a stacked PR train](../how-to/review-a-stacked-train.md) is the
-reviewer's side of what you just drove; [How to recover a stacked delivery train](../how-to/recover-a-stacked-train.md)
-is the triage map for when a train operation is interrupted or drifts; and
-[Objectives → Delivery](../reference/objectives.md#delivery) is the exact reference for the
-delivery choice — including stacked's current limitations.
+## Related
+
+- **Do:** [How to review a stacked PR train](../how-to/review-a-stacked-train.md) — review layers on their incremental diffs.
+- **Do:** [How to recover a stacked delivery train](../how-to/recover-a-stacked-train.md) — conclude an interrupted train operation.
+- **Understand:** [Gists, plans, and objectives](../explanation/gists-plans-and-objectives.md) — the artifact ladder stacked delivery builds on.

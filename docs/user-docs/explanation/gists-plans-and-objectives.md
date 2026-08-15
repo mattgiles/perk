@@ -10,9 +10,10 @@ sidebar:
 perk keeps three distinct artifacts for intent, and the separation is deliberate: each one
 answers a different question, carries a different level of commitment, and is consumed at a
 different moment. Collapsing them — treating a gist as a small plan, or an objective as a big
-one — loses exactly the property each was designed to protect. This page explains what each
-artifact is for, why moving between them is a judgment call rather than a promotion, and why the
-plan stays the only unit that is ever implemented.
+one — loses exactly the property each was designed to protect. Weighing a gist vs a plan, or a
+plan vs an objective, is therefore never a question of size — it is a question of commitment.
+This page explains what each artifact is for, why moving between them is a judgment call rather
+than a promotion, and why the plan stays the only unit that is ever implemented.
 
 ## Three artifacts answer three different questions
 

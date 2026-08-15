@@ -114,6 +114,9 @@ stale.
 
 ## Related
 
-- **Look up:** [CLI commands](./cli.md).
-- **Look up:** [Model-facing tools](./in-session/model-tools.md).
-- **Understand:** [How perk thinks](../explanation/how-perk-thinks.md).
+- **Look up:** [CLI commands](./cli.md) — the exterior commands whose `--json` envelopes these
+  snapshots pin.
+- **Look up:** [Model-facing tools](./in-session/model-tools.md) — the in-session tools with
+  machine-readable results.
+- **Understand:** [How perk thinks](../explanation/how-perk-thinks.md) — the two-plane model
+  these machine surfaces connect.

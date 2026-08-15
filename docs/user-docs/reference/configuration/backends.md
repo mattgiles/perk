@@ -101,6 +101,6 @@ api_key = "lin_api_…"
 
 ## Related
 
-- [How to select a provider](../../how-to/select-a-provider.md) — choose a provider for a supported seam.
-- [How to switch the issue backend to Linear](../../how-to/switch-to-linear.md) — configure the team and local credential.
-- [Providers & issue backends](../providers-and-backends.md) — supported providers and backend mechanics.
+- **Do:** [How to select a provider](../../how-to/select-a-provider.md) — choose a provider for a supported seam.
+- **Do:** [How to switch the issue backend to Linear](../../how-to/switch-to-linear.md) — configure the team and local credential.
+- **Look up:** [Providers & issue backends](../providers-and-backends.md) — supported providers and backend mechanics.

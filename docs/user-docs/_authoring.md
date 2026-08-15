@@ -69,6 +69,13 @@ with the label drawn only from the closed set **Learn** (tutorials), **Do** (how
 convention is mandatory and machine-enforced with the narrower label subset (no **Learn**) —
 see the Explanation contract above; the other quadrants keep this general vocabulary.
 
+Corpus-wide, the trailer is now the rule, not the exception: every routed article page ends
+with a `## Related` section, guarded by `tests/test_user_docs_findability.py` (shape, the
+1–3 bound, the closed label set). The only pages without one are the **deliberate
+omissions** — the pure routers and the lookup index: the home page, the four quadrant
+landings, and the glossary carry no Related trailer, and the guard's frozen allowlist pins
+exactly that set (an allowlisted page that gains a trailer fails as a stale entry).
+
 ## Voice rules
 
 - Second person, present tense, result first.
@@ -119,8 +126,15 @@ sidebarGroup: "Core workflow"
   backends** — and the field is absent everywhere else (elsewhere, ownership is the
   directory/section). Pages sharing a group occupy a contiguous `sidebar.order` range, and the
   five ranges appear in §3 group order.
-- **`sidebar.label` (optional)** — the only optional field: a sidebar display-label override,
-  used when the full title is too long for the sidebar; recorded at migration time.
+- **`sidebar.label` (optional)** — a sidebar display-label override, used when the full title
+  is too long for the sidebar; recorded at migration time.
+- **`prev` / `next` (optional)** — per-page pagination opt-in (`true` renders the
+  flattened-sidebar neighbor in that direction). Global pagination stays off; these keys are
+  allowed **only for a deliberately linear reading sequence** — currently exactly the
+  tutorials chain (`get-started → drive-an-objective → drive-a-stacked-objective`, four
+  edges: no prev into the tutorials landing, no next out of the last tutorial). The exact
+  key placement is guarded by `tests/test_user_docs_findability.py`, the rendered edges by
+  `docs/site/checks/built-site.test.mjs`.
 
 Titles and routes are unique corpus-wide. **Plain Markdown is the default**; MDX is admitted
 only where a content component materially improves comprehension, stays reviewable, and is

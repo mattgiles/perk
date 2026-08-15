@@ -48,6 +48,19 @@ function routedPages() {
   return pages;
 }
 
+/** Every file under `dir`, recursively (sorted — deterministic reports). */
+function listDistFiles(dir) {
+  const files = [];
+  const entries = fs.readdirSync(dir, { withFileTypes: true });
+  entries.sort((a, b) => a.name.localeCompare(b.name));
+  for (const entry of entries) {
+    const entryPath = path.join(dir, entry.name);
+    if (entry.isDirectory()) files.push(...listDistFiles(entryPath));
+    else files.push(entryPath);
+  }
+  return files;
+}
+
 test("the complete corpus is routed, with exactly one H1 equal to the frontmatter title", () => {
   const offenders = [];
   for (const { source, title, distFile } of routedPages()) {
@@ -121,16 +134,64 @@ test("the rendered navigation uses the explicit sidebar structure", () => {
   assert.deepEqual([...hrefs].sort(), [...routes].sort());
 });
 
-test("no page renders prev/next pagination controls (pagination is off)", () => {
+// The deliberate pagination policy: globally off, with per-page opt-in only where a linear
+// reading sequence exists — exactly the tutorials chain. The four rendered edges are pinned
+// here; every other routed page renders neither control.
+const PAGINATION_EDGES = {
+  "tutorials/get-started.md": { next: "/tutorials/drive-an-objective/" },
+  "tutorials/drive-an-objective.mdx": {
+    prev: "/tutorials/get-started/",
+    next: "/tutorials/drive-a-stacked-objective/",
+  },
+  "tutorials/drive-a-stacked-objective.md": { prev: "/tutorials/drive-an-objective/" },
+};
+
+test("prev/next pagination renders exactly the tutorials-chain edges", () => {
   const offenders = [];
   for (const { source, distFile } of routedPages()) {
     if (!fs.existsSync(distFile)) continue;
     const html = fs.readFileSync(distFile, "utf8");
-    if (html.includes('rel="prev"') || html.includes('rel="next"')) {
-      offenders.push(`${source}: pagination link markup present`);
+    const rendered = Object.fromEntries(
+      [...html.matchAll(/<a href="([^"]+)" rel="(prev|next)"/g)].map(([, href, rel]) => [
+        rel,
+        href,
+      ]),
+    );
+    const expected = PAGINATION_EDGES[source] ?? {};
+    for (const rel of ["prev", "next"]) {
+      if (rendered[rel] !== expected[rel]) {
+        offenders.push(
+          `${source}: rel="${rel}" is ${rendered[rel] ?? "(absent)"}, ` +
+            `expected ${expected[rel] ?? "(absent)"}`,
+        );
+      }
     }
   }
   assert.deepEqual(offenders, []);
+});
+
+test("the excluded authoring file produces no built output", () => {
+  // `_authoring.md` is excluded from the collection (the `[^_]` glob); a route directory or
+  // HTML for it anywhere under dist/ would mean the exclusion silently stopped holding.
+  const offenders = listDistFiles(distDir).filter((file) =>
+    path.relative(distDir, file).includes("_authoring"),
+  );
+  assert.deepEqual(offenders, []);
+});
+
+test("the search-indexed page set is exactly the routed corpus", () => {
+  // Pagefind indexes only `data-pagefind-body` content once the attribute exists anywhere in
+  // the build (Starlight stamps it on every docs page) — so the set of built pages carrying
+  // it IS the index membership, and it must equal the routed corpus route set.
+  const carrying = [];
+  for (const file of listDistFiles(distDir)) {
+    if (path.extname(file) !== ".html") continue;
+    if (!fs.readFileSync(file, "utf8").includes("data-pagefind-body")) continue;
+    const relative = path.relative(distDir, file).split(path.sep).join("/");
+    carrying.push(relative === "index.html" ? "/" : `/${relative.replace(/index\.html$/, "")}`);
+  }
+  const routes = routedPages().map(({ source }) => corpusRoute(source));
+  assert.deepEqual([...carrying].sort(), [...routes].sort());
 });
 
 test("Expressive Code renders code frames (spot: the get-started tutorial)", () => {

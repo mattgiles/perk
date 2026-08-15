@@ -125,6 +125,6 @@ resolve a declared skill. The commit-push-synchronize sequence fixes it.
 
 ## Related
 
-- [How to attach a skill to a stage or command](../../how-to/attach-a-skill-to-a-stage.md) — choose a trigger and delivery mode.
-- [How to author a repo-specific skill](../../how-to/author-a-repo-skill.md) — create, publish, and synchronize repository guidance.
-- [Configuration files](../configuration.md) — overlay semantics, value types, and the family map.
+- **Do:** [How to attach a skill to a stage or command](../../how-to/attach-a-skill-to-a-stage.md) — choose a trigger and delivery mode.
+- **Do:** [How to author a repo-specific skill](../../how-to/author-a-repo-skill.md) — create, publish, and synchronize repository guidance.
+- **Look up:** [Configuration files](../configuration.md) — overlay semantics, value types, and the family map.

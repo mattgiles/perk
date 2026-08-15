@@ -96,9 +96,8 @@ door, or model tool; they are human-facing only.
   one-line markers in the interactive transcript. They are display-only, TUI-only, and require
   Pi ≥ 0.80.4; older hosts silently omit them.
 
-## See also
+## Related
 
-- **Look up:** [CLI commands](./cli.md) — the shell exterior used before and around sessions.
-- **Do:** [How-to guides](../how-to/index.md) — task-focused recipes for operating perk.
-- **Understand:** [How perk thinks](../explanation/how-perk-thinks.md) — why stages, doors, and
-  the two planes have this shape.
+- **Look up:** [CLI commands](cli.md) — the exterior command surface that launches these sessions.
+- **Do:** [How to drive a change through the full spine](../how-to/drive-the-full-spine.md) — the warm commands in one worked sequence.
+- **Understand:** [Human gates and trust](../explanation/human-gates-and-trust.md) — why some tools are gated on a human decision.

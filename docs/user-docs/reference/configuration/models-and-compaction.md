@@ -173,6 +173,6 @@ objective_threshold = 0.8
 
 ## Related
 
-- [How to write a custom subagent](../../how-to/write-a-custom-subagent.md) — define an agent outside perk's fixed override table.
-- [Model-facing tools](../in-session/model-tools.md) — inspect the tools exposed inside sessions.
-- [Configuration files](../configuration.md) — file precedence, value types, and the family map.
+- **Do:** [How to write a custom subagent](../../how-to/write-a-custom-subagent.md) — define an agent outside perk's fixed override table.
+- **Look up:** [Model-facing tools](../in-session/model-tools.md) — inspect the tools exposed inside sessions.
+- **Look up:** [Configuration files](../configuration.md) — file precedence, value types, and the family map.

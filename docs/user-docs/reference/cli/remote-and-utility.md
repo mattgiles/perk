@@ -239,3 +239,9 @@ rules as the version warning — never in `--json`/CI/non-TTY/worker paths, and
 `PERK_SKIP_VERSION_CHECK` silences it — though unlike the warning it also fires outside a git
 repo. Downgrades never re-trigger it (the store keeps the max version seen), and it is never
 fatal: any store failure silently skips the notice.
+
+## Related
+
+- **Do:** [How to set up and verify the remote runner](../../how-to/set-up-the-remote-runner.md) — provision what the workflow commands supervise.
+- **Do:** [How to recover a dirty worktree](../../how-to/recover-a-dirty-worktree.md) — the recovery moves behind `perk worktree`.
+- **Understand:** [Headless and remote](../../explanation/headless-and-remote.mdx) — how remote runs coordinate through durable state.

@@ -180,3 +180,9 @@ upstream, diverged history, no remote, offline) **warns and skips** — it never
 never creates a merge commit, and never touches a dirty or detached tree. Pass `--no-sync` to any
 of these commands to opt out. (`perk plan resume` and `perk objective run` keep the default and
 have no `--no-sync` flag.)
+
+## Related
+
+- **Look up:** [In-session commands & tools](in-session.md) — the other command surface: what runs inside a session.
+- **Do:** [How to drive a change through the full spine](../how-to/drive-the-full-spine.md) — the stage launchers in one worked sequence.
+- **Understand:** [How perk thinks](../explanation/how-perk-thinks.md) — why the commands are shaped around stages.
