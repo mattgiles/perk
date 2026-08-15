@@ -15,7 +15,13 @@ from perk.substrate.proc import ProcFailure
 
 
 class _Snapshot:
-    """An opaque stand-in — the launcher hands it to create_app untouched."""
+    """A near-opaque stand-in — the launcher hands it to create_app untouched.
+
+    ``create_app`` precomputes the tree DTO once at construction, so the stub must
+    carry a walkable (empty) ``capability_tree``; everything else stays opaque.
+    """
+
+    capability_tree: tuple[()] = ()
 
 
 @dataclass

@@ -1,0 +1,42 @@
+// The shared wire vocabulary: closed literal arrays + type guards mirroring
+// perk_dev.prose_map.models (the summary.ts local-mirror posture — a vocabulary change
+// here is a deliberate wire-contract change, never a silent widening). Both parser
+// modules consume these guards, so unknown strings are rejected and a successful parse
+// is sound for its declared TypeScript type.
+
+export const PROSE_KINDS = [
+  "markdown",
+  "python-symbol",
+  "typescript-tool",
+  "typescript-model-call",
+  "typescript-symbol",
+  "managed-prose",
+  "ambient-routing",
+] as const;
+
+export type ProseKind = (typeof PROSE_KINDS)[number];
+
+export const DELIVERY_MODES = ["cold", "warm", "headless", "ambient", "subagent"] as const;
+
+export type DeliveryMode = (typeof DELIVERY_MODES)[number];
+
+export const BOUNDARY_KINDS = [
+  "pi-system",
+  "borrowed-prompt",
+  "user-content",
+  "runtime-state",
+] as const;
+
+export type BoundaryKind = (typeof BOUNDARY_KINDS)[number];
+
+export function isProseKind(value: unknown): value is ProseKind {
+  return typeof value === "string" && (PROSE_KINDS as readonly string[]).includes(value);
+}
+
+export function isDeliveryMode(value: unknown): value is DeliveryMode {
+  return typeof value === "string" && (DELIVERY_MODES as readonly string[]).includes(value);
+}
+
+export function isBoundaryKind(value: unknown): value is BoundaryKind {
+  return typeof value === "string" && (BOUNDARY_KINDS as readonly string[]).includes(value);
+}
