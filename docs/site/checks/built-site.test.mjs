@@ -4,6 +4,7 @@ import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { parseFrontmatter } from "@astrojs/markdown-remark";
+import { JSDOM } from "jsdom";
 import { loadRegistry } from "../../../extension/substrate/registry.ts";
 import { corpusRoute, listCorpusFiles } from "../src/remark-rewrite-corpus-links.mjs";
 import { sidebar } from "../src/sidebar.mjs";
@@ -725,4 +726,103 @@ test("the how-to landing retains the five operator-group heading anchors", () =>
   for (const id of groupIds) {
     assert.ok(html.includes(`<h2 id="${id}"`), `group heading anchor #${id} missing`);
   }
+});
+
+// --- No runtime network (launch-gate leg C) --------------------------------------------------
+
+// The local-only contract: a built page must render and function with no network access, so no
+// FETCHING position may reference an external origin. Plain `<a href>` external links are
+// deliberately allowed — they are content links a reader may choose to follow, not requests the
+// page performs. That distinction is why this check parses attributes (jsdom) rather than
+// grepping page text: code samples legitimately contain URLs as text.
+
+/** External origin = absolute http(s) or protocol-relative. `data:` and same-origin paths pass. */
+function isExternalUrl(value) {
+  return /^(?:https?:)?\/\//i.test(value.trim());
+}
+
+/** The URL half of each srcset candidate (`url [descriptor]`, comma-separated). */
+function srcsetUrls(value) {
+  return value
+    .split(",")
+    .map((candidate) => candidate.trim().split(/\s+/)[0])
+    .filter((url) => url.length > 0);
+}
+
+// Every attribute position where the BROWSER fetches (or navigates to) the URL at runtime.
+const FETCHING_POSITIONS = [
+  ["script[src]", "src"],
+  ["link[href]", "href"],
+  ["img[src]", "src"],
+  ["source[src]", "src"],
+  ["video[src]", "src"],
+  ["video[poster]", "poster"],
+  ["audio[src]", "src"],
+  ["track[src]", "src"],
+  ["iframe[src]", "src"],
+  ["embed[src]", "src"],
+  ["object[data]", "data"],
+  ["form[action]", "action"],
+];
+const SRCSET_POSITIONS = [
+  ["img[srcset]", "srcset"],
+  ["source[srcset]", "srcset"],
+];
+
+test("built assets and functionality reference no external origin", () => {
+  const files = listDistFiles(distDir);
+  const htmlFiles = files.filter((file) => path.extname(file) === ".html");
+  const cssFiles = files.filter((file) => path.extname(file) === ".css");
+  // Non-vacuity: the sweep must cover the full built output, 404 page and stylesheets included.
+  assert.ok(
+    htmlFiles.some((file) => path.basename(file) === "404.html"),
+    "expected 404.html in the built output",
+  );
+  assert.ok(htmlFiles.length > 1, "expected built HTML pages to sweep");
+  assert.ok(cssFiles.length > 0, "expected built CSS files to sweep");
+
+  const offenders = [];
+  for (const file of htmlFiles) {
+    const relative = path.relative(distDir, file).split(path.sep).join("/");
+    const dom = new JSDOM(fs.readFileSync(file, "utf8"), { runScripts: "outside-only" });
+    try {
+      const { document } = dom.window;
+      for (const [selector, attribute] of FETCHING_POSITIONS) {
+        for (const element of document.querySelectorAll(selector)) {
+          const value = element.getAttribute(attribute) ?? "";
+          if (isExternalUrl(value)) offenders.push(`${relative}: ${selector} → ${value}`);
+        }
+      }
+      for (const [selector, attribute] of SRCSET_POSITIONS) {
+        for (const element of document.querySelectorAll(selector)) {
+          for (const url of srcsetUrls(element.getAttribute(attribute) ?? "")) {
+            if (isExternalUrl(url)) offenders.push(`${relative}: ${selector} → ${url}`);
+          }
+        }
+      }
+      for (const meta of document.querySelectorAll('meta[http-equiv="refresh" i]')) {
+        const content = meta.getAttribute("content") ?? "";
+        const url = content.match(/url\s*=\s*['"]?([^'";]+)/i)?.[1];
+        if (url !== undefined && isExternalUrl(url)) {
+          offenders.push(`${relative}: meta[http-equiv=refresh] → ${url}`);
+        }
+      }
+    } finally {
+      dom.window.close();
+    }
+  }
+
+  // CSS fetches: url(…) references and @import (both the url(…) and bare-string forms).
+  for (const file of cssFiles) {
+    const relative = path.relative(distDir, file).split(path.sep).join("/");
+    const text = fs.readFileSync(file, "utf8");
+    for (const [, url] of text.matchAll(/url\(\s*['"]?([^'")]+?)['"]?\s*\)/g)) {
+      if (isExternalUrl(url)) offenders.push(`${relative}: url(${url})`);
+    }
+    for (const [, url] of text.matchAll(/@import\s+(?:url\(\s*)?['"]?([^'")\s;]+)/g)) {
+      if (isExternalUrl(url)) offenders.push(`${relative}: @import ${url}`);
+    }
+  }
+
+  assert.deepEqual(offenders, []);
 });
