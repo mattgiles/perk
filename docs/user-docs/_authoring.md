@@ -159,3 +159,13 @@ Two surfaces enforce this contract; a violation fails one of them, naming the fi
 - **The site build** (`just docs-build`) — Starlight's `docsSchema()` requires `title`, and the
   schema extension in `docs/site/src/content.config.ts` requires a non-empty `description` and
   validates `sidebarGroup` against the closed five-group set, with file-precise errors.
+- **The static accessibility gate** (`docs/site/checks/a11y.test.mjs`, in `just docs-check` /
+  `just test`) — every routed built page must pass axe-core with no `serious`/`critical`
+  violation. Ordinary well-formed Markdown passes by construction; the rule exists so a page
+  that smuggles in raw HTML with broken semantics (bad ARIA, empty links/buttons, skipped
+  landmark structure) fails CI naming the page and rule.
+
+Presentation you never author: the quadrant-landing eyebrows, the `.perk/config.toml` path
+eyebrow, and the 92ch wide mode on the configuration children are **automatic CSS** on the
+rendered site (keyed on the sidebar's current-page link) — no frontmatter, markers, or prose
+opt-in exists, and nothing in this tree should try to reproduce them.
