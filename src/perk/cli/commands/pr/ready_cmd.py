@@ -60,8 +60,9 @@ def ready_pr(ctx: click.Context, *, plan: str | None, dry_run: bool, as_json: bo
     PLAN is an optional plan issue id (e.g. 42, #42, ENG-123, or the pasted issue URL): pass it
     to select the plan canonically (works from the repository root — ready needs no worktree);
     omit it to read the invoking checkout's own cache.plan-ref (inside a plan worktree, that
-    worktree's binding). Typed failures (no_plan_ref, plan_not_found, no_pr, invalid_input)
-    exit 1.
+    worktree's binding). Typed failures (no_plan_ref, plan_not_found, issue_kind_mismatch,
+    no_pr, invalid_input) exit 1. Note: --dry-run performs no backend read, so the offline
+    preview classifies nothing (kind included).
     """
     try:
         repo_root = require_repo(ctx)

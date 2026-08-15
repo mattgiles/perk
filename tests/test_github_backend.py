@@ -137,15 +137,51 @@ class TestDelegation:
         pr = github.PullRequest(number=9, url="pu", is_draft=True, state="OPEN", existed=True)
         rec = _Recorder(
             plans.PlanState(
-                number=3, url="u3", title="t", header={"stage": "implement"}, pr=pr, state="OPEN"
+                number=3,
+                url="u3",
+                title="t",
+                header={"stage": "implement"},
+                pr=pr,
+                state="OPEN",
+                has_plan_header=True,
             )
         )
         monkeypatch.setattr(plans, "get_plan", rec)
         result = GitHubIssueBackend(tmp_path).get_plan(issue_id="3")
         assert rec.kwargs == {"number": 3, "repo_root": tmp_path}
         assert result == issue_backend.PlanState(
-            id="3", url="u3", title="t", header={"stage": "implement"}, pr=pr, state="OPEN"
+            id="3",
+            url="u3",
+            title="t",
+            header={"stage": "implement"},
+            pr=pr,
+            state="OPEN",
+            has_plan_header=True,
         )
+
+    def test_get_plan_maps_both_presence_flags(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # Both presence flags cross the native→neutral boundary verbatim.
+        monkeypatch.setattr(
+            plans,
+            "get_plan",
+            _Recorder(
+                plans.PlanState(
+                    number=3,
+                    url="u3",
+                    title="t",
+                    header={},
+                    pr=None,
+                    state="OPEN",
+                    has_plan_header=True,
+                    has_objective_header=True,
+                )
+            ),
+        )
+        result = GitHubIssueBackend(tmp_path).get_plan(issue_id="3")
+        assert result is not None
+        assert result.has_plan_header is True and result.has_objective_header is True
 
     def test_get_plan_none_passthrough(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -170,6 +206,23 @@ class TestDelegation:
         assert result == issue_backend.AdoptableIssue(
             id="7", url="u7", title="Human title", body="do it", state="OPEN"
         )
+
+    def test_read_issue_already_objective_from_the_body_block(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # The adapter computes already_objective from the objective-header body block
+        # (presence-only) — the native→neutral mapping for the wrong-kind door refusals.
+        body = plan.render_metadata_block(
+            objective.OBJECTIVE_HEADER_KEY, {"run_id": "01OBJ", "created": "t"}
+        )
+        monkeypatch.setattr(
+            plans,
+            "read_issue",
+            _Recorder(plans.IssueRead(number=63, url="u", title="t", body=body, state="OPEN")),
+        )
+        result = GitHubIssueBackend(tmp_path).read_issue(issue_id="63")
+        assert result is not None
+        assert result.already_objective is True and result.already_plan is False
 
     def test_read_issue_none_passthrough(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch

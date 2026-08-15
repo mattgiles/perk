@@ -11,8 +11,15 @@ import subprocess
 import pytest
 from _github_fakes import ROOT, _GhDispatch, _GhRecorder, _has, _header, _Proc
 
-from perk import github, plan
+from perk import github, objective, plan
 from perk.backends.github import plans
+
+
+def _objective_header_body() -> str:
+    """A body carrying only an objective-header block (the wrong-kind carrier shape)."""
+    return plan.render_metadata_block(
+        objective.OBJECTIVE_HEADER_KEY, {"run_id": "01OBJ", "created": "t"}
+    )
 
 
 def test_create_label_created(monkeypatch):
@@ -517,6 +524,25 @@ def test_update_plan_header_rejects_unknown_field(monkeypatch):
         plans.update_plan_header(issue=123, fields={"bogus": "x"}, repo_root=ROOT)
 
 
+def test_update_plan_header_refuses_a_blockless_body(monkeypatch):
+    # Merge-only (contracts §8.4): a body with NO plan-header block refuses — the write that
+    # created a plan-header beside an objective-header is structurally gone.
+    rec = _GhDispatch([(_has("issues/123", ".body"), _Proc(0, "just human prose"))])
+    monkeypatch.setattr(subprocess, "run", rec)
+    with pytest.raises(github.GitHubError, match="merge-only"):
+        plans.update_plan_header(issue=123, fields={"branch": "b"}, repo_root=ROOT)
+    assert rec.method_calls("PATCH") == 0  # refused before any write
+
+
+def test_update_plan_header_dry_run_refuses_a_blockless_body(monkeypatch):
+    # The refusal sits BEFORE the dry-run return: a dry run validates and must refuse a
+    # would-fail write.
+    rec = _GhDispatch([(_has("issues/123", ".body"), _Proc(0, _objective_header_body()))])
+    monkeypatch.setattr(subprocess, "run", rec)
+    with pytest.raises(github.GitHubError, match="merge-only"):
+        plans.update_plan_header(issue=123, fields={"branch": "b"}, repo_root=ROOT, dry_run=True)
+
+
 # ---------------------------------------------------- plan upsert (re-save)
 
 
@@ -690,6 +716,41 @@ def test_adopt_issue_as_plan_stamps_in_place(monkeypatch):
     assert not any("title=" in tok for c in rec.calls for tok in c)
 
 
+def test_adopt_issue_as_plan_refuses_an_objective_carrier(monkeypatch):
+    # Wrong-kind writer guard (§8.29): an objective-header'd body refuses BEFORE any write
+    # (no label add, no PATCH) — closes the `--adopt-from` direct-save bypass at the writer.
+    rec = _GhDispatch(
+        [
+            (
+                _has("view", "number,title,body,state,url"),
+                _Proc(
+                    0,
+                    json.dumps(
+                        {
+                            "number": 63,
+                            "title": "Objective",
+                            "body": _objective_header_body(),
+                            "state": "OPEN",
+                            "url": "u63",
+                        }
+                    ),
+                ),
+            ),
+        ]
+    )
+    monkeypatch.setattr(subprocess, "run", rec)
+    with pytest.raises(github.GitHubError, match="wrong kind for plan adoption"):
+        plans.adopt_issue_as_plan(
+            number=63,
+            header_fields={"run_id": "RID", "created": "t"},
+            plan_markdown="# p\n",
+            callout="C",
+            command="perk impl 63",
+            repo_root=ROOT,
+        )
+    assert rec.method_calls("POST") == 0 and rec.method_calls("PATCH") == 0
+
+
 def test_adopt_issue_as_plan_rejects_unknown_header_field(monkeypatch):
     monkeypatch.setattr(subprocess, "run", lambda *a, **k: _Proc(0, "{}"))
     with pytest.raises(github.GitHubError, match="unknown plan-header field"):
@@ -839,6 +900,42 @@ def test_get_plan_blank_or_none_pr_is_no_claim(monkeypatch, raw_pr):
     )
     state = plans.get_plan(number=7, repo_root=ROOT)
     assert state is not None and state.pr is None
+
+
+@pytest.mark.parametrize(
+    ("body", "expect_plan", "expect_objective"),
+    [
+        (_header("01RID"), True, False),
+        (_objective_header_body(), False, True),
+        (f"{_header('01RID')}\n\n{_objective_header_body()}", True, True),
+        ("no blocks at all", False, False),
+        # A malformed block (open marker, no close) still reads header={} — with
+        # has_plan_header=True: kind evidence survives damage (kind vs health separation).
+        ("<!-- perk:metadata-block:plan-header -->\ndangling", True, False),
+    ],
+)
+def test_get_plan_presence_flag_matrix(monkeypatch, body, expect_plan, expect_objective):
+    issue = {"number": 7, "title": "T", "body": body, "state": "OPEN", "url": "u/7"}
+    monkeypatch.setattr(
+        subprocess, "run", _GhDispatch([(_has("issue", "view"), _Proc(0, json.dumps(issue)))])
+    )
+    state = plans.get_plan(number=7, repo_root=ROOT)
+    assert state is not None
+    assert state.has_plan_header is expect_plan
+    assert state.has_objective_header is expect_objective
+
+
+def test_get_plan_malformed_plan_block_reads_empty_header_with_the_flag(monkeypatch):
+    # The absent-vs-malformed discriminator in one shot: `header == {}` yet
+    # has_plan_header=True — the exact ambiguity the presence flags fix.
+    body = "<!-- perk:metadata-block:plan-header -->\nno close marker"
+    issue = {"number": 7, "title": "T", "body": body, "state": "OPEN", "url": "u/7"}
+    monkeypatch.setattr(
+        subprocess, "run", _GhDispatch([(_has("issue", "view"), _Proc(0, json.dumps(issue)))])
+    )
+    state = plans.get_plan(number=7, repo_root=ROOT)
+    assert state is not None
+    assert state.header == {} and state.has_plan_header is True
 
 
 def test_get_plan_not_found(monkeypatch):

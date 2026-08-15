@@ -6,8 +6,9 @@ Resolve any plan to its next action and act on it. Reads the plan from the issue
 (reusing `launch_stage` — idempotent worktree + materialize + exec pi) or names the human gate
 without launching. Supervisor surface: `--json` to stdout, stable exit codes.
 
-Exit codes: 0 resumed / nothing-to-resume · 1 invalid input / unauthed / plan-not-found / op
-failure · 2 not-a-repo.
+Exit codes: 0 resumed / nothing-to-resume · 1 invalid input / unauthed / plan-not-found /
+kind-mismatch (``issue_kind_mismatch`` — an existing issue with no plan-header) / op failure ·
+2 not-a-repo.
 """
 
 import json
@@ -20,7 +21,12 @@ from perk.backends.issue_backend import IssueBackendError
 from perk.cli.context import require_github, require_repo
 from perk.cli.emit import fail
 from perk.cli.ensure import Ensure, UserFacingCliError
-from perk.cli.plan_selection import load_main_config, main_repo_root, parse_plan_id
+from perk.cli.plan_selection import (
+    load_main_config,
+    main_repo_root,
+    parse_plan_id,
+    require_plan_kind,
+)
 from perk.github import GitHubError
 from perk.prompts import render
 from perk.run import launch, resume
@@ -85,6 +91,9 @@ def resume_cmd(
                 raise UserFacingCliError(
                     f"Plan issue #{plan_id} not found", error_type="plan_not_found"
                 )
+            # Positive plan identification (contracts §8.1): a headerless issue must never bind
+            # and launch as a plan — refuse before reconstruction/classification.
+            require_plan_kind(state, plan_id, backend_id=backend.backend_id)
             ref = resume.reconstruct_plan_ref(state, provider=backend.backend_id)
             next_action = resume.resolve_next_action(
                 state,

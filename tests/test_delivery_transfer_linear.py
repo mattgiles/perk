@@ -157,18 +157,22 @@ class _Lane:
         self.pred_id = ref.id
         # The unified node↔plan model: a plan was saved into each node-issue — the
         # plan-header attachment IS the plan identity the transfer's ownership writes target.
-        for identifier, node_id, plan_run in (
-            (NODE_A, "1.1", "01JPLANA000000000000000000"),
-            (NODE_B, "1.2", "01JPLANB000000000000000000"),
+        # Seeded via `save_node_plan` (the node-plan unification writer, the sanctioned Linear
+        # plan-header creation seam — `update_plan_header` is merge-only and refuses to create).
+        for node_id, plan_run in (
+            ("1.1", "01JPLANA000000000000000000"),
+            ("1.2", "01JPLANB000000000000000000"),
         ):
-            self.issues.update_plan_header(
-                issue_id=identifier,
-                fields={
+            self.store.save_node_plan(
+                objective_id=self.pred_id,
+                node_id=node_id,
+                header_fields={
                     "run_id": plan_run,
                     "objective_id": self.pred_id,
                     "objective_node_id": node_id,
                     "delivery_lineage": LINEAGE,
                 },
+                plan_markdown=f"# Node {node_id} plan\n",
             )
 
     # ------------------------------------------------------------- live-read reconstruction

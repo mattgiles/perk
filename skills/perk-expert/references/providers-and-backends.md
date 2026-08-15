@@ -166,6 +166,13 @@ its first comment owns the rendered roadmap table and Reconcilable prose. Metada
 as marker-bounded blocks inspectable with `gh issue view`. The roadmap block is the authoritative
 manifest.
 
+Plan selection is positively identified by the plan-header body block: the explicit-id plan doors
+(`implement`, `address`, `ready`, `plan resume`) refuse an existing issue without one
+(`issue_kind_mismatch`; an objective issue's refusal names `perk objective plan <N>`). Plan-header
+writes are merge-only — `update_plan_header` refuses a blockless body (creation is confined to
+plan-issue creation and in-place adoption). A malformed-but-present block degrades to an empty
+header on read while still identifying a plan (the tolerant GitHub read posture).
+
 GitHub replan creates a new issue, carries unfinished roadmap rows as fresh rows, stamps the
 predecessor/successor lineage, and closes the old issue after the successor is established. There
 are no node-issue moves or backend-native node-cancellation projections.
@@ -204,6 +211,14 @@ assigned to the API-key user.
 Issue identifiers use team form such as `ENG-123`; worktrees use `plan-ENG-123`, and land writes
 `Plan: ENG-123 — <url>` instead of `Closes #N`. Commands accept Linear issue URLs and Project URLs,
 peel an opaque id, and leave resolution to the configured backend.
+
+Plan selection is positively identified by the plan-header **attachment**: the explicit-id plan
+doors refuse a Linear issue without one (`issue_kind_mismatch`, no right-door hint), and a Linear
+**Project** id resolves `plan_not_found` (a Project is not an issue). `update_plan_header` is
+merge-only (creation is confined to plan-issue creation, adoption, and the node-plan unification
+writer). Unlike GitHub's tolerant body-block read, a perk-marked plan attachment with a corrupt
+payload **fails loud** at every plan read — fail-early at the door, before any side effect;
+presence-only tolerance lives only in the adoption/doctor reads.
 
 ### Readiness checks
 

@@ -42,8 +42,9 @@ _ADDRESS_HELP = (
     "(inside a plan worktree, that worktree's own binding); a missing --worktree directory "
     "without PLAN is refused. Pass PLAN to select the plan canonically — the launch consumes "
     "the resolved ref directly, and a real launch updates only the main-checkout selector. "
-    "Typed failures (plan_not_found, worktree_plan_mismatch, worktree_branch_mismatch, "
-    "worktree_unbound, worktree_not_found, invalid_input) exit 1 before any launch. Pass "
+    "Typed failures (plan_not_found, issue_kind_mismatch, worktree_plan_mismatch, "
+    "worktree_branch_mismatch, worktree_unbound, worktree_not_found, invalid_input) exit 1 "
+    "before any launch. Pass "
     "--preview to classify the feedback only and take no action (the warm /address --preview "
     "gesture); --preview is local-only (inert on --remote)."
 )

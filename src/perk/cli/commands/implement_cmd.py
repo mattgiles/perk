@@ -74,9 +74,9 @@ def implement(
     plan worktree that is the worktree's binding); a missing --worktree directory without PLAN
     is refused (it cannot invent a binding). An explicit PLAN is
     canonical issue authority — it updates only the main-checkout selector and drives the
-    launch directly. Typed failures (plan_not_found, worktree_plan_mismatch,
-    worktree_branch_mismatch, worktree_unbound, worktree_not_found, invalid_input) exit 1
-    before any launch.
+    launch directly. Typed failures (plan_not_found, issue_kind_mismatch,
+    worktree_plan_mismatch, worktree_branch_mismatch, worktree_unbound, worktree_not_found,
+    invalid_input) exit 1 before any launch.
 
     \b
     Examples:

@@ -105,7 +105,12 @@ def _canonical_plan(monkeypatch, pr_id: str = "7") -> plan.PlanRef:
         plans,
         "get_plan",
         lambda **k: plans.PlanState(
-            number=int(pr_id), url=f"https://gh/o/r/issues/{pr_id}", title="T", header={}, pr=None
+            number=int(pr_id),
+            url=f"https://gh/o/r/issues/{pr_id}",
+            title="T",
+            header={},
+            pr=None,
+            has_plan_header=True,
         ),
     )
     return plan.PlanRef(

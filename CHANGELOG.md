@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 <!-- As of 80709df -->
 
+### Added
+
+- Positive plan identification at the explicit-id plan doors (contracts §8.1): `perk implement PLAN`, `perk pr address`/flat `address PLAN`, `perk pr ready PLAN`, and `perk plan resume PLAN` now refuse an existing issue that carries no plan-header (typed `issue_kind_mismatch`; a GitHub objective issue's refusal names the right door, `perk objective plan <N>`; a Linear Project id keeps resolving `plan_not_found`) — a plan door run with an objective's id can no longer bind and launch a non-plan carrier (3ec0a926)
+- Wrong-kind adoption refusals at the doors AND the writers (contracts §8.29/§8.30): `perk plan from` refuses a perk objective (`issue_kind_mismatch`, with the GitHub right-door hint) and `perk objective author --from` refuses a plan-header'd GitHub issue (`already_a_plan`); the backend adoption writers (`adopt_issue_as_plan` on both backends, GitHub `adopt_issue_as_objective`) refuse the wrong kind before any mutation — closing the `--adopt-from` direct-save bypasses; gist adoption stays exempt in both directions (3ec0a926)
+- `perk objective doctor` gains the report-only **both-headers corruption signature** check (contracts §8.54): the objective's issue-tier carrier (the objective issue on GitHub; the metadata sentinel issue on a Linear-Project objective, resolved via §8.43 `journal_carrier_id`) is read presence-only, and a carrier bearing BOTH `objective-header` and `plan-header` metadata yields one direction-neutral `both_headers` finding in the appended `corruption` field — never auto-repaired, printed only when detected, exit 0 (3ec0a926)
+
+### Changed
+
+- `update_plan_header` is now **merge-only** on both backends (contracts §8.4): a GitHub issue body with no plan-header block, or a Linear issue with no plan-header attachment, refuses loudly instead of creating one (Linear's run_id-keyed creation fallback is removed) — plan-header creation is confined to `create_plan_issue`, §8.29 adoption, and the Linear node-plan unification writer. This closes the #1719 corrupting write (a header stamped onto the wrong kind of carrier by a later-lifecycle write) (3ec0a926)
+
 ### Fixed
 
 - Multiline diagnostics routed through `report()` no longer write raw stderr across Pi's interactive layout: slash commands show a one-line managed headline plus complete display-only transcript detail, while equivalent model tools retain the full diagnostic in their Result. (9e304195)

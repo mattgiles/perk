@@ -29,7 +29,9 @@ _PLAN_REF = plan.PlanRef(
 
 
 def _state() -> plans.PlanState:
-    return plans.PlanState(number=7, url="https://gh/o/r/issues/7", title="T", header={}, pr=None)
+    return plans.PlanState(
+        number=7, url="https://gh/o/r/issues/7", title="T", header={}, pr=None, has_plan_header=True
+    )
 
 
 def _git_init(path: str) -> None:
@@ -95,6 +97,30 @@ def test_implement_plan_not_found_exits_1(monkeypatch):
         result = runner.invoke(cli, ["implement", "999"])
         assert result.exit_code == 1
         assert "not found" in result.output
+
+
+def test_implement_objective_issue_refuses_kind_mismatch(monkeypatch):
+    """The incident door (positive identification, contracts §8.1): implement of an
+    objective-shaped issue exits 1 typed — address/ready share the seam via the selector
+    unit tests."""
+    _authed(monkeypatch)
+    monkeypatch.setattr(
+        plans,
+        "get_plan",
+        lambda **k: plans.PlanState(
+            number=63, url="u/63", title="T", header={}, pr=None, has_objective_header=True
+        ),
+    )
+    monkeypatch.setattr(
+        launch, "launch_stage", lambda **k: (_ for _ in ()).throw(AssertionError("no launch"))
+    )
+    runner = CliRunner()
+    with runner.isolated_filesystem() as d:
+        _git_init(d)
+        result = runner.invoke(cli, ["implement", "63"])
+        assert result.exit_code == 1
+        assert "perk objective plan 63" in result.output
+        assert not cache.plan_ref_path(Path(d)).exists()  # refused before any selector write
 
 
 def test_implement_no_plan_uses_active_ref_without_github(monkeypatch):

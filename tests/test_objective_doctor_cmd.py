@@ -14,7 +14,7 @@ from dataclasses import dataclass, field
 from click.testing import CliRunner
 
 from perk import github, objective
-from perk.backends import objective_store, resolve
+from perk.backends import issue_backend, objective_store, resolve
 from perk.backends.objective_store import CancellationRepairOutcome
 from perk.cli.cli import cli
 from perk.delivery import observe
@@ -45,6 +45,11 @@ def _state(
     )
 
 
+# `_FakeStore.carrier` sentinel: default = the GitHub shape (the objective issue itself);
+# tests override it with a sentinel identifier (the Linear-project shape) or None.
+_DEFAULT_CARRIER: object = object()
+
+
 @dataclass
 class _FakeStore:
     """A GitHub-shaped store: no divergence surface, NOT a cancellation writer."""
@@ -54,11 +59,19 @@ class _FakeStore:
     repair: objective_store.RepairResult | None = None
     repair_calls: list[dict[str, object]] = field(default_factory=list)
     detect_calls: list[str] = field(default_factory=list)
+    carrier: object = _DEFAULT_CARRIER
 
     backend_id = "github"
 
     def get_objective(self, *, objective_id: str) -> objective_store.ObjectiveState | None:
         return self.objectives.get(objective_id.removeprefix("#"))
+
+    def journal_carrier_id(self, *, objective_id: str) -> str | None:
+        if self.carrier is not _DEFAULT_CARRIER:
+            assert self.carrier is None or isinstance(self.carrier, str)
+            return self.carrier
+        state = self.get_objective(objective_id=objective_id)
+        return None if state is None else objective_id.removeprefix("#")
 
     def detect_objective_drift(self, *, objective_id: str) -> DriftReport:
         self.detect_calls.append(objective_id)
@@ -164,9 +177,30 @@ def _authed(monkeypatch) -> None:
     )
 
 
-def _wire(monkeypatch, store, trains) -> None:
+def _wire(monkeypatch, store, trains, *, reads: dict[str, object] | None = None) -> None:
+    """Wire the three doctor seams. ``reads`` maps carrier id → ``AdoptableIssue`` for the
+    kind-corruption check's presence-only read (default: every read misses → no finding)."""
     monkeypatch.setattr(resolve, "resolve_objective_store", lambda _root: store)
     monkeypatch.setattr(observe, "reconstruct_repo_train", trains)
+
+    class _FakeIssueBackend:
+        def read_issue(self, *, issue_id: str):
+            return (reads or {}).get(issue_id)
+
+    monkeypatch.setattr(resolve, "resolve_issue_backend", lambda _root: _FakeIssueBackend())
+
+
+def _carrier_read(carrier: str, *, both: bool = True) -> issue_backend.AdoptableIssue:
+    """An issue-tier carrier read; ``both=True`` bears BOTH headers (the corruption shape)."""
+    return issue_backend.AdoptableIssue(
+        id=carrier,
+        url=f"u/{carrier}",
+        title="t",
+        body="b",
+        state="OPEN",
+        already_plan=both,
+        already_objective=True,
+    )
 
 
 _BLOCKER = TrainFinding(
@@ -208,6 +242,7 @@ def test_detect_stacked_reports_policy_annotated_findings(monkeypatch):
         "redirected_from",
         "train",
         "train_fix",
+        "corruption",
     ]
     assert payload["success"] is True and payload["error_type"] is None
     assert payload["drift"] == [] and payload["fix"] is None
@@ -607,6 +642,93 @@ def test_manifest_repair_with_applied_changes_rediagnoses_before_train_actions(m
     assert fix["state"] == "completed" and fix["applied"] == [] and fix["skipped"] == []
     assert store.writes == []  # the stale pre-repair candidate was never written
     assert trains.calls == ["42", "42"]  # initial diagnosis + the post-manifest re-diagnosis
+
+
+# ------------------------------------------- the both-headers corruption signature
+
+
+def _incremental_trains() -> _ScriptedTrains:
+    return _ScriptedTrains(
+        NoDeliveryTrain(objective_id="42", objective_url="u", redirected_from=None, reason="inc")
+    )
+
+
+def test_corruption_both_headers_yields_one_finding(monkeypatch):
+    # The kind-corruption signature (report-only): a carrier bearing BOTH headers yields
+    # exactly one finding — and the report stays clean (exit 0).
+    store = _FakeStore(objectives={"42": _state("42")})
+    _wire(monkeypatch, store, _incremental_trains(), reads={"42": _carrier_read("42")})
+    result = _invoke(["objective", "doctor", "42", "--json"])
+    assert result.exit_code == 0
+    payload = json.loads(result.output)
+    (finding,) = payload["corruption"]
+    assert list(finding.keys()) == ["code", "carrier", "message", "remediation"]
+    assert finding["code"] == "both_headers" and finding["carrier"] == "42"
+    assert "BOTH objective-header and plan-header" in finding["message"]
+    # Direction-neutral remediation: provenance inspection or supersession, never auto-repair.
+    assert "perk objective replan 42" in finding["remediation"]
+    assert "no automatic repair" in finding["remediation"]
+
+
+def test_corruption_human_render_prints_only_when_detected(monkeypatch):
+    _authed(monkeypatch)
+    store = _FakeStore(objectives={"42": _state("42")})
+    _wire(monkeypatch, store, _incremental_trains(), reads={"42": _carrier_read("42")})
+    result = _invoke(["objective", "doctor", "42"])
+    assert result.exit_code == 0
+    assert "Corruption: 1 finding(s)" in result.output
+    assert "ERROR both_headers [#42]:" in result.output
+    assert "remediation: report-only, no automatic repair" in result.output
+
+    # A clean carrier prints NOTHING — clean runs' output stays byte-unchanged.
+    store2 = _FakeStore(objectives={"42": _state("42")})
+    _wire(monkeypatch, store2, _incremental_trains(), reads={"42": _carrier_read("42", both=False)})
+    result2 = _invoke(["objective", "doctor", "42"])
+    assert result2.exit_code == 0
+    assert "Corruption" not in result2.output
+
+
+def test_corruption_linear_sentinel_carrier_is_resolved(monkeypatch):
+    # The carrier-resolution proof: on a Linear-project-shaped store the §8.43 carrier is the
+    # metadata SENTINEL issue — the finding names the sentinel, not the Project id.
+    store = _FakeStore(objectives={"42": _state("42")}, carrier="SEN-9")
+    _wire(monkeypatch, store, _incremental_trains(), reads={"SEN-9": _carrier_read("SEN-9")})
+    result = _invoke(["objective", "doctor", "42", "--json"])
+    assert result.exit_code == 0
+    (finding,) = json.loads(result.output)["corruption"]
+    assert finding["carrier"] == "SEN-9"
+    assert "#SEN-9" in finding["message"]
+
+
+def test_corruption_healthy_carrier_is_empty(monkeypatch):
+    store = _FakeStore(objectives={"42": _state("42")})
+    _wire(monkeypatch, store, _incremental_trains(), reads={"42": _carrier_read("42", both=False)})
+    result = _invoke(["objective", "doctor", "42", "--json"])
+    assert result.exit_code == 0
+    assert json.loads(result.output)["corruption"] == []
+
+
+def test_corruption_no_carrier_is_empty(monkeypatch):
+    store = _FakeStore(objectives={"42": _state("42")}, carrier=None)
+    _wire(monkeypatch, store, _incremental_trains())
+    result = _invoke(["objective", "doctor", "42", "--json"])
+    assert result.exit_code == 0
+    assert json.loads(result.output)["corruption"] == []
+
+
+def test_corruption_fix_never_touches_it(monkeypatch):
+    # `--fix` has NO repair arm for the signature: the finding survives a fix pass verbatim
+    # and the pass itself stays a clean completed run (exit 0).
+    _authed(monkeypatch)
+    store = _FakeStore(objectives={"42": _state("42")})
+    _wire(monkeypatch, store, _incremental_trains(), reads={"42": _carrier_read("42")})
+    result = _invoke(["objective", "doctor", "42", "--fix", "--json"])
+    assert result.exit_code == 0
+    payload = json.loads(result.output)
+    (finding,) = payload["corruption"]
+    assert finding["code"] == "both_headers"
+    assert payload["fix"]["applied"] == []  # no manifest repair references it
+    assert payload["train_fix"]["applied"] == []  # no train repair references it
 
 
 # ----------------------------------------------------------------- the human render

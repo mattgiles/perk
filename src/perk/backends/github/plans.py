@@ -2,7 +2,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from perk import plan
+from perk import objective, plan
 from perk.backends.issue_backend import parse_plan_pr
 from perk.boundary import LenientParseModel, translate_validation_errors
 from perk.github import _exec, prs
@@ -722,6 +722,11 @@ class PlanState:
     # ``perk replan`` requires an OPEN plan so its in-place ``run_id`` upsert re-targets the same
     # issue rather than silently creating a new one.
     state: str = ""
+    # Presence-only kind evidence from the body the read already fetched (`has_metadata_block`,
+    # never a payload decode): a malformed body block still reads `header={}` — now with
+    # `has_plan_header=True` (kind evidence survives damage).
+    has_plan_header: bool = False
+    has_objective_header: bool = False
 
 
 def update_plan_header(
@@ -729,12 +734,24 @@ def update_plan_header(
 ) -> PlanHeaderUpdate:
     """Merge ``fields`` into the issue body's ``plan-header`` block and PATCH it (REST).
 
-    Rejects unknown header keys (LBYL on the schema). A dry run validates + composes only.
+    Rejects unknown header keys (LBYL on the schema). **Merge-only**: refuses a body with no
+    plan-header block at all (creation is confined to the named seams) — the refusal sits before
+    the dry-run return (a dry run validates and must refuse a would-fail write). Malformed-but-
+    present shapes keep today's behavior (presence is kind evidence either way): open+close
+    markers with unparseable YAML merge over ``{}`` (block replaced wholesale — an incidental
+    self-heal); an open marker with no close marker makes ``replace_metadata_block`` a no-op —
+    the write PATCHes an unchanged body while reporting fields updated. A dry run validates +
+    composes only.
     """
     unknown = set(fields) - plan.PLAN_HEADER_FIELDS
     if unknown:
         raise _exec.GitHubError(f"unknown plan-header field(s): {sorted(unknown)}")
     body = _get_issue_body(issue, repo_root)
+    if not plan.has_metadata_block(body, plan.PLAN_HEADER_KEY):
+        raise _exec.GitHubError(
+            f"issue #{issue} has no plan-header block — update_plan_header is merge-only "
+            "(plan-header creation is confined to create_plan_issue and adoption)"
+        )
     header = plan.find_metadata_block(body, plan.PLAN_HEADER_KEY) or {}
     new_body = plan.replace_metadata_block(body, plan.PLAN_HEADER_KEY, {**header, **fields})
     if dry_run:
@@ -920,6 +937,13 @@ def adopt_issue_as_plan(
     src = read_issue(number=number, repo_root=repo_root)
     if src is None:
         raise _exec.GitHubError(f"issue #{number} not found")
+    # Wrong-kind writer guard (presence-only, before any mutation): an objective carrier is
+    # never adoptable as a plan — a gist carries `gist-header`, so gist adoption is exempt.
+    if plan.has_metadata_block(src.body, objective.OBJECTIVE_HEADER_KEY):
+        raise _exec.GitHubError(
+            f"issue #{number} carries an objective-header — wrong kind for plan adoption "
+            "(objectives are planned via perk objective plan)"
+        )
     if dry_run:
         return PlanAdoption(number=number, url=src.url, dry_run=True)
     # (a) ensure + additively add the perk:plan label.
@@ -970,7 +994,8 @@ def get_plan(*, number: int, repo_root: Path) -> PlanState | None:
     )
     if data is None:
         return None
-    header = plan.find_metadata_block(str(data.get("body", "")), plan.PLAN_HEADER_KEY) or {}
+    body = str(data.get("body", ""))
+    header = plan.find_metadata_block(body, plan.PLAN_HEADER_KEY) or {}
     # The shared tolerant read-boundary parser (§8.54): a malformed/non-positive header `pr`
     # resolves no PR (no lookup) while the raw value stays readable in `header`.
     pr_number = parse_plan_pr(header.get("pr"))
@@ -982,6 +1007,8 @@ def get_plan(*, number: int, repo_root: Path) -> PlanState | None:
         header=header,
         pr=pr,
         state=str(data.get("state", "")),
+        has_plan_header=plan.has_metadata_block(body, plan.PLAN_HEADER_KEY),
+        has_objective_header=plan.has_metadata_block(body, objective.OBJECTIVE_HEADER_KEY),
     )
 
 

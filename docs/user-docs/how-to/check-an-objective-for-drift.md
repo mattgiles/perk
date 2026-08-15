@@ -56,6 +56,26 @@ the remediation when it cannot.
 5. **Preview without writing.** Add `--dry-run` to `--fix` to see both would-apply repair sets
    without touching Linear.
 
+## The both-headers corruption signature
+
+Every doctor run also checks the objective's **issue-tier carrier** — on GitHub the objective
+issue itself, on a Linear-Project objective the metadata **sentinel** issue — for the
+**kind-corruption signature**: a carrier bearing BOTH `objective-header` and `plan-header`
+metadata. That state means one header was stamped onto the wrong kind of carrier (historically:
+a plan door run with an objective's id, or a wrong-kind adoption — both directions are now
+refused at entry and at the writers, so a detected signature is pre-existing damage).
+
+- **Direction-neutral.** The signature cannot prove which header is the stray one from the
+  carrier alone. Inspect provenance — the issue's edit history and each header's `run_id` — to
+  identify the stray side.
+- **Report-only, explicitly no auto-repair.** `--fix` never touches it (there is no repair code
+  path): removing a header is a destructive judgment call perk has no authority to make. Remove
+  the stray header by hand — or, when the objective side is the live one, retire the carrier by
+  superseding it (`perk objective replan N`); the supersession redirects doctor away from the
+  retired carrier, so it stops alarming.
+- **A clean report.** A detected finding rides the `corruption` field (and a `Corruption:`
+  section in the human report, printed only when detected) but keeps exit `0`.
+
 > **What perk will *not* auto-fix.** Report-only conditions are surfaced but never changed, because
 > repairing them would require perk to *invent* a decision it has no authority to make: duplicate
 > node ids, a blocking-relation **cycle**, a relation Linear has that the manifest does not (an

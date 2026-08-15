@@ -2,7 +2,9 @@
 uses (neutral: under ``perk/cli/``, not inside a command group).
 
 Owns the backend-agnostic id/URL parser (:func:`parse_plan_id`), the canonical one-read
-selection (:func:`select_plan` → :class:`SelectedPlan`), and the **two-roots rule**
+selection (:func:`select_plan` → :class:`SelectedPlan`), the positive plan-kind guard
+(:func:`require_plan_kind` — typed errors: ``invalid_input`` / ``plan_not_found`` /
+``issue_kind_mismatch``), and the **two-roots rule**
 (:func:`main_repo_root` / :func:`load_main_config`):
 
 - **invocation root** — ``require_repo(ctx)`` at the cwd. Used for worktree-local binding
@@ -71,25 +73,52 @@ class SelectedPlan:
     ref: plan.PlanRef
 
 
+def require_plan_kind(state: issue_backend.PlanState, plan_id: str, *, backend_id: str) -> None:
+    """Positive plan identification (contracts §8.1): refuse an existing issue with no
+    plan-header. GitHub objective carriers name the right door.
+
+    Presence-only kind evidence (``PlanState.has_plan_header``): an absent header means "not a
+    plan" — refuse; a present-but-malformed header still identifies a plan (kind vs health are
+    separate concerns). The right-door hint is GitHub-only: only there does the refused issue's
+    id equal the objective id (a Linear metadata-sentinel issue refuses with the generic
+    message; a Linear Project id never reaches this arm — ``get_plan`` returns ``None`` →
+    ``plan_not_found``). A both-headers carrier still selects as a plan (doctor is the
+    both-headers surface). Raises typed ``issue_kind_mismatch``.
+    """
+    if state.has_plan_header:
+        return
+    message = (
+        f"Issue #{plan_id} is not a perk plan (it has no plan-header) — pass a saved plan's id."
+    )
+    if state.has_objective_header and backend_id == "github":
+        message = (
+            f"Issue #{plan_id} is a perk objective, not a plan — objectives are planned "
+            f"node-by-node:\n  perk objective plan {plan_id}"
+        )
+    raise UserFacingCliError(message, error_type="issue_kind_mismatch")
+
+
 def select_plan(main_root: Path, raw: str, *, what: str = "plan") -> SelectedPlan:
     """Resolve an explicit plan selector (id or pasted URL) against the issue backend — ONE
     canonical read yielding matching ``PlanState``/``PlanRef``.
 
     Backend reads anchor to the **main root** (canonical-store selection must not fork inside a
-    linked worktree). Raises typed ``UserFacingCliError``s (``invalid_input`` /
-    ``plan_not_found``); backend transport failures (``IssueBackendError``) propagate for the
-    caller's own fail boundary.
+    linked worktree). Positive plan identification: an existing issue with no plan-header
+    refuses via :func:`require_plan_kind`. Raises typed ``UserFacingCliError``s
+    (``invalid_input`` / ``plan_not_found`` / ``issue_kind_mismatch``); backend transport
+    failures (``IssueBackendError``) propagate for the caller's own fail boundary.
     """
     plan_id = parse_plan_id(raw, what=what)
     backend = resolve.resolve_issue_backend(main_root)
     # Narrate the backend lookup wait (stderr — the `--json` stdout payload stays clean). The
-    # not-found raise escapes the step (dangling + the error text below).
+    # not-found and kind-mismatch raises escape the step (dangling + the error text below).
     with io_step(f"looking up plan #{plan_id}") as s:
         state = backend.get_plan(issue_id=plan_id)
         if state is None:
             raise UserFacingCliError(
                 f"Plan issue #{plan_id} not found", error_type="plan_not_found"
             )
+        require_plan_kind(state, plan_id, backend_id=backend.backend_id)
         s.done(f"found plan #{plan_id}")
     ref = resume.reconstruct_plan_ref(state, provider=backend.backend_id)
     return SelectedPlan(plan_id=plan_id, state=state, ref=ref)

@@ -626,6 +626,16 @@ def _issue_with_plan_attachment(
     }
 
 
+def _objective_attachment() -> dict[str, object]:
+    """A wire-shaped objective-header attachment node (the metadata-sentinel shape)."""
+    return _perk_attachment_node(
+        linear_attachments.OBJECTIVE_HEADER_KIND,
+        {"run_id": "01OBJ", "created": "t"},
+        url="https://perk.invalid/objective/01OBJ",
+        att_id="att-obj",
+    )
+
+
 class TestGistTwins:
     def test_find_gist_issue_uses_the_gist_url_namespace(self) -> None:
         # A plan issue sharing the run_id never matches: the gist find keys on the
@@ -862,14 +872,25 @@ class TestPlanUpserts:
         assert header["pr"] == "12" and header["run_id"] == "01HDR"
         assert not _queries(fake, "issueUpdate(")  # the description is never touched
 
-    def test_update_plan_header_absent_attachment_without_run_id_raises(self) -> None:
-        # Clean break: a Linear plan issue always got its attachment at create — an absent
-        # attachment with no run_id to key a fresh URL is a loud invariant violation.
-        backend, _ = _make_backend(
+    def test_update_plan_header_absent_attachment_refuses_merge_only(self) -> None:
+        # Merge-only (contracts §8.4): an absent attachment is an unconditional refusal —
+        # update_plan_header never creates a plan-header (creation is confined to the seams).
+        backend, fake = _make_backend(
             {"issue(id": [{"issue": {"id": "iss-1", "attachments": {"nodes": []}}}]}
         )
-        with pytest.raises(IssueBackendError, match="no plan-header attachment"):
+        with pytest.raises(IssueBackendError, match="merge-only"):
             backend.update_plan_header(issue_id="iss-1", fields={"branch": "b"})
+        assert not _queries(fake, "attachmentCreate(")  # refused before any write
+
+    def test_update_plan_header_absent_attachment_refuses_even_with_run_id(self) -> None:
+        # The old run_id-keyed creation fallback is GONE: a run_id in the merged fields no
+        # longer keys a fresh attachment — the refusal is unconditional.
+        backend, fake = _make_backend(
+            {"issue(id": [{"issue": {"id": "iss-1", "attachments": {"nodes": []}}}]}
+        )
+        with pytest.raises(IssueBackendError, match="merge-only"):
+            backend.update_plan_header(issue_id="iss-1", fields={"run_id": "01NEW"})
+        assert not _queries(fake, "attachmentCreate(")
 
     def test_update_plan_header_posts_pr_attachment(self, monkeypatch: pytest.MonkeyPatch) -> None:
         backend, fake = _make_backend(
@@ -1017,6 +1038,68 @@ class TestGetPlan:
         assert state.state == expected
         assert state.pr is None
         assert state.header["run_id"] == "01S"
+        assert state.has_plan_header is True and state.has_objective_header is False
+
+    def test_flags_from_attachment_presence(self) -> None:
+        # Presence-only kind evidence off the attachment nodes already fetched (no extra read):
+        # an objective-header attachment (a metadata sentinel) reads has_objective_header=True.
+        backend, _ = _make_backend(
+            {
+                "issue(id": [
+                    {
+                        "issue": {
+                            "id": "iss-1",
+                            "identifier": "SEN-9",
+                            "url": "u",
+                            "title": "T",
+                            "description": "",
+                            "state": {"type": "started"},
+                            "attachments": {"nodes": [_objective_attachment()]},
+                        }
+                    }
+                ]
+            }
+        )
+        state = backend.get_plan(issue_id="SEN-9")
+        assert state is not None
+        assert state.has_plan_header is False and state.has_objective_header is True
+        assert state.header == {}
+
+    def test_corrupt_plan_payload_still_raises(self) -> None:
+        # The fail-early read posture is deliberately unchanged: a perk-marked plan
+        # attachment with a corrupt payload_json keeps failing loud at get_plan — before any
+        # side effect — never degrading to header={}.
+        backend, _ = _make_backend(
+            {
+                "issue(id": [
+                    {
+                        "issue": {
+                            "id": "iss-1",
+                            "identifier": "ENG-7",
+                            "url": "u",
+                            "title": "T",
+                            "description": "",
+                            "state": {"type": "started"},
+                            "attachments": {
+                                "nodes": [
+                                    {
+                                        "id": "a1",
+                                        "url": "https://perk.invalid/plan/01P",
+                                        "metadata": {
+                                            "source": "perk",
+                                            "kind": "plan-header",
+                                            "payload_json": "{not json",
+                                        },
+                                    }
+                                ]
+                            },
+                        }
+                    }
+                ]
+            }
+        )
+        with pytest.raises(IssueBackendError, match="invalid payload_json"):
+            backend.get_plan(issue_id="ENG-7")
 
     def test_pr_header_field_resolves_via_late_bound_github(
         self, monkeypatch: pytest.MonkeyPatch
@@ -1265,6 +1348,8 @@ class TestReadIssueAndAdopt:
                 "commentCreate(": [{"commentCreate": {"success": True}}],
                 "attachmentCreate(": [_attachment_create_ok()],
                 "issue(id": [
+                    # First read: the wrong-kind writer guard's attachment scan (clean).
+                    {"issue": {"id": "iss-1", "attachments": {"nodes": []}}},
                     {
                         "issue": {
                             "id": "iss-1",
@@ -1273,7 +1358,7 @@ class TestReadIssueAndAdopt:
                             "description": "HUMAN BODY VERBATIM",
                             "labels": {"nodes": [{"id": "lbl-existing"}]},
                         }
-                    }
+                    },
                 ],
             }
         )
@@ -1308,6 +1393,50 @@ class TestReadIssueAndAdopt:
         [(_, create_vars)] = _queries(fake, "commentCreate(")
         comment_body = cast("str", _input_payload(create_vars)["body"])
         assert plan.extract_plan_body(comment_body) is not None
+
+    def test_adopt_issue_as_plan_refuses_an_objective_carrier(self) -> None:
+        # Wrong-kind writer guard (§8.29): an objective-header attachment refuses BEFORE any
+        # mutation — closes the `--adopt-from` direct-save bypass at the mutation boundary.
+        backend, fake = _make_backend(
+            {
+                "issue(id": [
+                    {"issue": {"id": "iss-1", "attachments": {"nodes": [_objective_attachment()]}}}
+                ],
+            }
+        )
+        with pytest.raises(IssueBackendError, match="wrong kind for plan adoption"):
+            backend.adopt_issue_as_plan(
+                issue_id="ENG-7",
+                header_fields={"run_id": "RID", "created": "t"},
+                plan_markdown="# P",
+                callout="c",
+                command="perk impl ENG-7",
+            )
+        # Presence-only guard read only — no label/update/comment/attachment mutation fired.
+        assert not _queries(fake, "issueUpdate(")
+        assert not _queries(fake, "attachmentCreate(")
+        assert not _queries(fake, "commentCreate(")
+
+    def test_read_issue_already_objective_from_the_objective_attachment(self) -> None:
+        backend, _ = _make_backend(
+            {
+                "issue(id": [
+                    {
+                        "issue": {
+                            "id": "iss-1",
+                            "identifier": "SEN-9",
+                            "url": "u",
+                            "title": "t",
+                            "description": "b",
+                            "state": {"type": "started"},
+                            "attachments": {"nodes": [_objective_attachment()]},
+                        }
+                    }
+                ]
+            }
+        )
+        src = backend.read_issue(issue_id="SEN-9")
+        assert src is not None and src.already_objective is True and src.already_plan is False
 
 
 class TestCommentOps:

@@ -5,7 +5,10 @@
 GitHub objectives have no divergence surface, so this part is trivially empty). **Part 2 (train
 diagnosis, §8.54)**: reconstruct the exact ``DeliveryTrain`` projection on every backend and
 report its findings annotated with the deterministic diagnosis policy
-(:mod:`perk.delivery.diagnostics` — severity / repairability / remediation).
+(:mod:`perk.delivery.diagnostics` — severity / repairability / remediation). A third,
+**report-only** check rides along: the both-headers kind-corruption signature over the
+objective's issue-tier carrier (§8.43 ``journal_carrier_id`` + a presence-only ``read_issue``)
+— detected findings ride the ``corruption`` field, never any repair batch, and keep exit 0.
 
 Both parts target ONE active objective: the requested id resolves forward through
 ``train.resolve_active_objective`` (``objective`` reports the active id; ``redirected_from``
@@ -290,6 +293,16 @@ class _RepairResultOut(OutputModel):
     dry_run: bool
 
 
+class _CorruptionFindingOut(OutputModel):
+    """One kind-corruption finding over the objective's issue-tier carrier (report-only —
+    ``--fix`` never touches it; no repair code path exists)."""
+
+    code: str  # "both_headers"
+    carrier: str  # the resolved issue-tier carrier id that was checked
+    message: str
+    remediation: str
+
+
 class ObjectiveDoctorOut(OutputModel):
     """The ``perk objective doctor --json`` report envelope (contracts.md §8.54). Field
     declaration order is load-bearing (the machine surface's exact key order) — do not
@@ -303,6 +316,43 @@ class ObjectiveDoctorOut(OutputModel):
     redirected_from: str | None
     train: _TrainDiagnosisOut
     train_fix: _TrainFixOut | None
+    corruption: tuple[_CorruptionFindingOut, ...]
+
+
+def _detect_kind_corruption(
+    store: ObjectiveStore, repo_root: Path, active_id: str
+) -> tuple[_CorruptionFindingOut, ...]:
+    """The both-headers corruption-signature check (report-only): resolve the objective's
+    issue-tier carrier via ``journal_carrier_id`` (§8.43 — GitHub → the objective issue,
+    Linear project store → the metadata sentinel issue's identifier) and read it
+    **presence-only** (``read_issue`` — never ``get_plan``, whose header-``pr`` chase could
+    abort the whole report on a PR-lookup infra failure). A carrier bearing BOTH
+    objective-header and plan-header is the kind-corruption signature — exactly one finding;
+    a healthy or unresolvable carrier yields ``()``. Direction-neutral: the signature cannot
+    prove which header is the stray one. Cost: up to two bounded reads per report."""
+    carrier = store.journal_carrier_id(objective_id=active_id)
+    if carrier is None:
+        return ()
+    read = resolve.resolve_issue_backend(repo_root).read_issue(issue_id=carrier)
+    if read is None or not (read.already_plan and read.already_objective):
+        return ()
+    return (
+        _CorruptionFindingOut(
+            code="both_headers",
+            carrier=carrier,
+            message=(
+                f"issue-tier carrier #{carrier} bears BOTH objective-header and plan-header — "
+                "one header was stamped onto the wrong kind of carrier (the kind-corruption "
+                "signature; the stray side is not provable from the carrier alone)"
+            ),
+            remediation=(
+                "report-only, no automatic repair: inspect provenance (issue history; each "
+                "header's run_id) to identify the stray header and remove it manually — or, "
+                "when the objective side is the live one, retire the carrier by superseding "
+                f"it (perk objective replan {active_id})"
+            ),
+        ),
+    )
 
 
 def _condition_out(cond: DriftCondition) -> _DriftConditionOut:
@@ -353,6 +403,10 @@ def doctor_objective(
         state, redirected_from = train_mod.resolve_active_objective(store, number)
         active_id = state.id
         report = store.detect_objective_drift(objective_id=active_id)
+        corruption = _detect_kind_corruption(store, repo_root, active_id)
+    except IssueBackendError as exc:
+        fail(ctx, as_json=as_json, error_type="github_error", message=str(exc))
+        return
     except TrainReconstructionError as exc:
         fail(ctx, as_json=as_json, error_type=exc.error_type, message=str(exc))
         return
@@ -425,11 +479,12 @@ def doctor_objective(
         redirected_from=redirected_from,
         train=train_diag,
         train_fix=train_fix,
+        corruption=corruption,
     )
     if as_json:
         machine_output(json.dumps(out.model_dump(mode="json")))
     else:
-        _render_human(active_id, report.conditions, fix_result, train_diag, train_fix)
+        _render_human(active_id, report.conditions, fix_result, train_diag, train_fix, corruption)
 
     # The exit code conveys unavailability / an aborted repair (the assembled report stays
     # success=true): a failed repairable write, an aborted train repair, or an unavailable
@@ -448,6 +503,7 @@ def _render_human(
     fix_result: RepairResult | None,
     train_diag: _TrainDiagnosisOut,
     train_fix: _TrainFixOut | None,
+    corruption: tuple[_CorruptionFindingOut, ...],
 ) -> None:
     if train_diag.redirected_from is not None:
         user_output(f"Objective #{train_diag.redirected_from} → active objective #{number}")
@@ -471,6 +527,14 @@ def _render_human(
                 click.style("  fix aborted: ", fg="red")
                 + f"{fix_result.failed.code.value}: {fix_result.failed.error}"
             )
+    # --- the both-headers corruption signature (printed ONLY when detected — clean runs'
+    # output stays byte-unchanged; report-only findings keep the report clean: exit 0) ---
+    if corruption:
+        user_output(f"Corruption: {len(corruption)} finding(s)")
+        for finding in corruption:
+            tag = click.style("ERROR", fg="red")
+            user_output(f"  {tag} {finding.code} [#{finding.carrier}]: {finding.message}")
+            user_output(f"    remediation: {finding.remediation}")
     # --- part 2: the delivery train ---
     if train_diag.state == "incremental":
         user_output(click.style("✓ ", fg="green") + f"Train: {train_diag.message}")

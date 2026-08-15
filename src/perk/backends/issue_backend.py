@@ -130,6 +130,11 @@ class PlanState:
 
     ``state`` is the normalized ``"OPEN" | "CLOSED"`` vocabulary (see the module docstring).
     ``header`` is the opaque plan-header mapping (backend-owned values).
+
+    ``has_plan_header``/``has_objective_header`` are presence-only kind evidence computed at the
+    backend read boundary (never a payload decode): they distinguish an absent header (not a
+    plan) from a present-but-malformed one (a damaged plan) — the two states ``header == {}``
+    collapses. Positive identification: no evidence = not a plan (defaults ``False``).
     """
 
     id: str
@@ -138,6 +143,10 @@ class PlanState:
     header: dict[str, object]
     pr: PullRequest | None
     state: str
+    # True when the backend's own storage carries the corresponding perk header for this
+    # issue — presence-only kind evidence (never a payload decode).
+    has_plan_header: bool = False
+    has_objective_header: bool = False
 
 
 @dataclass(frozen=True)
@@ -198,6 +207,9 @@ class AdoptableIssue:
     normalized ``"OPEN" | "CLOSED"`` vocabulary (the contract's state discipline).
     ``already_plan`` is True when the issue already carries perk's plan metadata (wherever the
     backend stores it) — the adoption refusal's backend-honest presence check.
+    ``already_objective`` is its objective-metadata twin (presence-only, tolerant): the
+    wrong-kind adoption refusal's evidence (backend-populated for the same reason — on Linear
+    the header rides an attachment the body cannot testify to).
     """
 
     id: str
@@ -206,6 +218,7 @@ class AdoptableIssue:
     body: str
     state: str
     already_plan: bool = False
+    already_objective: bool = False
 
 
 class IssueBackend(Protocol):
@@ -266,7 +279,11 @@ class IssueBackend(Protocol):
         self, *, issue_id: str, fields: dict[str, object], dry_run: bool = False
     ) -> PlanHeaderUpdate:
         """Merge ``fields`` into the plan-header block and write it back. Rejects keys outside
-        ``plan.PLAN_HEADER_FIELDS`` (LBYL on the schema). A dry run validates + composes only."""
+        ``plan.PLAN_HEADER_FIELDS`` (LBYL on the schema). **Merge-only**: refuses to create a
+        plan-header where none exists (plan-header creation is confined to
+        :meth:`create_plan_issue`, :meth:`adopt_issue_as_plan` (§8.29), and the Linear node-plan
+        unification writer ``save_node_plan``). A dry run validates + composes only — and must
+        refuse a would-fail write."""
         ...
 
     def prepend_plan_callout(
@@ -282,8 +299,11 @@ class IssueBackend(Protocol):
     def get_plan(self, *, issue_id: str) -> PlanState | None:
         """Read a plan issue's observable state (header + PR). The PR is resolved from the
         header's ``pr`` field via the (GitHub-universal) PR tier — legitimate for every backend.
-        ``state`` is normalized to ``"OPEN"``/``"CLOSED"``. None when the issue does not exist;
-        raises on an infra failure."""
+        ``state`` is normalized to ``"OPEN"``/``"CLOSED"``. The ``has_plan_header``/
+        ``has_objective_header`` flags are presence-only kind evidence from the backend's own
+        storage (body metadata blocks on GitHub, perk attachments on Linear) — never a payload
+        decode. None still means the issue does not exist, nothing else; raises on an infra
+        failure."""
         ...
 
     def get_plan_body(self, *, issue_id: str) -> str | None:

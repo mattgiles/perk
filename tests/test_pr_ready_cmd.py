@@ -42,7 +42,7 @@ def _stub_plan(monkeypatch, header: dict[str, object] | None = None) -> None:
         plans,
         "get_plan",
         lambda **kwargs: plans.PlanState(
-            number=7, url="u/7", title="Plan", header=header or {}, pr=None
+            number=7, url="u/7", title="Plan", header=header or {}, pr=None, has_plan_header=True
         ),
     )
 
@@ -345,7 +345,9 @@ def test_pr_ready_explicit_plan_from_root_is_a_single_read(monkeypatch):
 
     def _get_plan(**kwargs):
         reads.append(kwargs)
-        return plans.PlanState(number=7, url="u/7", title="Plan", header={}, pr=None)
+        return plans.PlanState(
+            number=7, url="u/7", title="Plan", header={}, pr=None, has_plan_header=True
+        )
 
     monkeypatch.setattr(plans, "get_plan", _get_plan)
     branches: list[str] = []

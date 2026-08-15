@@ -67,6 +67,14 @@ GitHub keeps perk metadata as readable, marker-bounded blocks in issue bodies or
 learning, gist, and objective headers remain inspectable with `gh issue view`; the objective's
 roadmap block is the authoritative manifest for that issue-backed model.
 
+Plan selection is **positively identified** by the backend's own plan-header carrier: the
+explicit-id plan doors (`implement`, `address`, `ready`, `plan resume`) refuse an existing issue
+with no plan-header block (`issue_kind_mismatch`); a GitHub objective issue's refusal names
+`perk objective plan <N>`. Plan-header writes are **merge-only**: `update_plan_header` refuses a
+body with no plan-header block (creation is confined to plan-issue creation and in-place
+adoption). A malformed-but-present body block degrades to an empty header on read (`{}`) while
+still identifying the issue as a plan — the GitHub read posture is tolerant.
+
 Objective replan creates a new objective issue with a fresh identity, carries unfinished roadmap
 rows into it, records the predecessor/successor lineage, and closes the old issue after the
 successor is established. Unlike Linear, GitHub has no node-issue move or native node-cancellation
@@ -119,6 +127,16 @@ shape, such as `ENG-123`; plan worktrees therefore use names such as `plan-ENG-1
 land footer uses `Plan: ENG-123 — <url>` instead of GitHub's `Closes #N`. Id-taking commands accept
 Linear issue URLs (`.../issue/ENG-123`) and Project URLs (`.../project/<slug>`); the parser leaves
 the resulting id opaque and lets the configured backend resolve it.
+
+Plan selection is positively identified by the plan-header **attachment**: the explicit-id plan
+doors refuse a Linear issue with no plan-header attachment (`issue_kind_mismatch`, without
+GitHub's right-door hint — a refused sentinel issue's id is not the objective's Project id), and
+a Linear **Project** id resolves `plan_not_found` (the honest miss — a Project is not an issue).
+Plan-header writes are merge-only here too: `update_plan_header` refuses an issue with no
+plan-header attachment (creation is confined to plan-issue creation, adoption, and the node-plan
+unification writer). Unlike GitHub's tolerant body-block read, Linear **fails loud** on a
+perk-marked plan attachment with a corrupt payload at every plan read — fail-early at the door,
+before any side effect (presence-only tolerance lives only in the adoption/doctor reads).
 
 ### Readiness checks
 

@@ -9,7 +9,7 @@ from pathlib import Path
 
 from click.testing import CliRunner
 
-from perk import github, plan
+from perk import github, objective, plan
 from perk.backends.github import engagement as gh_engagement
 from perk.backends.github import plans
 from perk.cli.cli import cli
@@ -236,6 +236,24 @@ def test_refuses_issue_already_a_plan(monkeypatch, unborn_git_repo_factory):
         payload = json.loads(result.stdout)
         assert payload["error_type"] == "already_a_plan"
         assert "replan" in payload["message"]
+
+
+def test_refuses_an_objective_carrier(monkeypatch, unborn_git_repo_factory):
+    # Wrong-kind door refusal (§8.29): an objective-header'd issue is never adoptable as a
+    # plan; the GitHub message names the right door (perk objective plan <N>).
+    _authed(monkeypatch)
+    header = plan.render_metadata_block(
+        objective.OBJECTIVE_HEADER_KEY, {"run_id": "01OBJ", "created": "t"}
+    )
+    _stub_issue(monkeypatch, issue=_issue(body=f"prose\n\n{header}\n"))
+    runner = CliRunner()
+    with runner.isolated_filesystem() as d:
+        _git_init(d, unborn_git_repo_factory)
+        result = runner.invoke(cli, ["plan", "from", "7", "--json"])
+        assert result.exit_code == 1
+        payload = json.loads(result.stdout)
+        assert payload["error_type"] == "issue_kind_mismatch"
+        assert "perk objective plan 7" in payload["message"]
 
 
 # --- seed-from-file mode (§8.33) ---

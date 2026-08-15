@@ -245,11 +245,19 @@ def _author_from(
                     f"`perk objective reconcile {source_id}` or plan its nodes normally.",
                     error_type="already_an_objective",
                 )
-            # GitHub-only OPEN refusal (Linear projects have no OPEN/CLOSED — skipped). Resolved
-            # via the issue tier's `read_issue.state` (the objective source shape carries no
-            # `state`).
+            # GitHub-only wrong-kind + OPEN refusals (Linear sources are Projects — no
+            # issue-tier read; honestly skipped, matching the OPEN check's existing scoping).
+            # Resolved via the issue tier's `read_issue` (the objective source shape carries no
+            # `state` and cannot see attachment-borne plan metadata).
             if store.backend_id == resolve.GITHUB_BACKEND_ID:
                 issue_read = resolve.resolve_issue_backend(repo_root).read_issue(issue_id=source_id)
+                if issue_read is not None and issue_read.already_plan:
+                    raise UserFacingCliError(
+                        f"Issue {source_id} is already a perk plan — plans are not adoptable as "
+                        f"objectives; re-author it with perk plan replan {source_id} or author a "
+                        "fresh objective.",
+                        error_type="already_a_plan",
+                    )
                 if issue_read is not None and issue_read.state != "OPEN":
                     raise UserFacingCliError(
                         f"Issue {source_id} is not open (state={issue_read.state or 'unknown'}); "
