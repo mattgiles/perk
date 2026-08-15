@@ -4,9 +4,9 @@
 [prose-review-app-prd.md](./prose-review-app-prd.md)). Selected and shipped with the walking
 skeleton — the minimal secure launcher (`perk-dev prose-review`) plus the served round-trip proof
 — and now carrying the three-pane workbench shell (capability tree / mode bar + read-only source
-view / inspector identity block) over the seeded whole-file SourceAdapter. Later nodes build the
-relationship inspector, fragment-level adapters, compare/assembly views, and writers on this
-stack without revisiting it.
+view) with the relationship inspector (consumers, consuming shapes + delivery siblings, concerns,
+lineage) and header catalog search over the seeded whole-file SourceAdapter. Later nodes build
+fragment-level adapters, compare/assembly views, and writers on this stack without revisiting it.
 
 ## HTTP layer: FastAPI + uvicorn
 
@@ -80,6 +80,10 @@ the served page is now the three-pane workbench shell, which fetches `/api/catal
 `/api/source` through their typed parse boundaries (`parseTree` / `parseUnitSource`, with the
 closed wire vocabulary in `tools/prose-review/src/wire.ts`). `/api/catalog/summary` still serves
 its original contract; `parseSummary` remains its typed local mirror, now exercised by tests only.
+The relationship inspector and catalog search added `/api/inspect` and `/api/search` — both pure
+in-memory snapshot queries (the search index is built once in `create_app`), so **no third
+file-read family** was added; `parseUnitInspect` / `parseSearch` join the typed parse boundaries
+(same reject-unknown posture, node:test-covered).
 The proof structure is unchanged: **server-integration** tests (real Vite build, real uvicorn on a
 pre-bound socket, real `*Out` DTOs) plus node:test coverage of each frontend parse boundary (local
 wire-shape mirrors; OpenAPI schema generation and runtime schema-validation libraries are out of
