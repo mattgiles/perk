@@ -263,7 +263,10 @@ The local cache tier — written and read by **both** the CLI (exterior) and the
     GitHub-only — a Linear metadata-sentinel issue refuses with the generic message, and a
     Linear **Project** id never reaches the arm (`get_plan` returns `None` → `plan_not_found`,
     the honest miss). A present-but-malformed header still identifies a plan (kind vs health
-    are separate concerns), and a **both-headers** carrier still selects as a plan (its plan
+    are separate concerns) — a **GitHub-only** reachable state: GitHub's tolerant body-block
+    read degrades a damaged block to `header={}` with `has_plan_header` true, while a corrupt
+    Linear plan-header attachment fails loud inside `get_plan`'s strict decode before
+    selection ever classifies kind. A **both-headers** carrier still selects as a plan (its plan
     side can be legitimate mid-incident; `perk objective doctor`'s corruption check is the
     both-headers surface, §8.54). `plan watch`/the positioner are explicitly **not**
     entry-guarded — their wrong-kind protection is the §8.4 merge-only write seam. `pr ready
@@ -677,9 +680,13 @@ update_plan_header{ issue, fields }                 -> PlanHeaderUpdate{ fields_
 prepend_plan_callout{ issue, callout, command }     -> bool
     # GET issue body -> plan.prepend_callout(body, callout, command=) -> PATCH .../issues/{n}
     # idempotent on `command`; True iff a write occurred (False when already present / dry-run)
-get_plan{ number }                                  -> PlanState{ number, url, title, header, pr, state } | null
+get_plan{ number }                                  -> PlanState{ number, url, title, header, pr, state,
+                                                                  has_plan_header, has_objective_header } | null
     # gh issue view --json (+ pulls/{n} when the header carries pr); the `perk resume` read.
     # `state` is the issue's OPEN/CLOSED state (the `replan` OPEN guard reads it).
+    # has_plan_header/has_objective_header: presence-only kind evidence from the body's own
+    # metadata blocks (the §8.1 kind guard reads them); a malformed block still reads
+    # header={} with its flag true.
 ```
 
 - **PR body:** `Closes #<issue>` (so the squash-merge closes the plan) + a `Plan: #<issue>` link
