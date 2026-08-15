@@ -139,6 +139,78 @@ def test_source_serves_the_on_disk_file(snapshot: CatalogSnapshot, tmp_path: Pat
     _assert_security_headers(response)
 
 
+def test_inspect_serves_the_relationship_payload(snapshot: CatalogSnapshot, repo: Path) -> None:
+    response = _client(snapshot, repo).get(
+        "/api/inspect", params={"unit": "typescript-tool:plan_review"}
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    assert list(payload.keys()) == [
+        "id",
+        "kind",
+        "path",
+        "selector",
+        "audience",
+        "role",
+        "breadcrumb",
+        "capability_children",
+        "consumers",
+        "shapes",
+        "concerns",
+        "lineage",
+    ]
+    assert payload["id"] == "typescript-tool:plan_review"
+    assert payload["kind"] == "typescript-tool"
+    _assert_security_headers(response)
+
+
+def test_inspect_unknown_unit_is_a_fixed_404(snapshot: CatalogSnapshot, repo: Path) -> None:
+    response = _client(snapshot, repo).get("/api/inspect", params={"unit": "markdown:missing.md"})
+    assert response.status_code == 404
+    assert response.json() == {"detail": "unknown unit"}
+    _assert_security_headers(response)
+
+
+def test_inspect_missing_unit_param_is_a_stamped_422(snapshot: CatalogSnapshot, repo: Path) -> None:
+    response = _client(snapshot, repo).get("/api/inspect")
+    assert response.status_code == 422
+    _assert_security_headers(response)
+
+
+def test_search_serves_results_with_breadcrumbs(snapshot: CatalogSnapshot, repo: Path) -> None:
+    response = _client(snapshot, repo).get("/api/search", params={"q": "plan_review"})
+    assert response.status_code == 200
+    payload = response.json()
+    assert list(payload.keys()) == ["total", "results"]
+    assert payload["total"] >= 1
+    result = payload["results"][0]
+    assert list(result.keys()) == ["kind", "id", "label", "breadcrumb", "unit", "matched"]
+    assert result["breadcrumb"], "every result keeps its capability breadcrumb"
+    _assert_security_headers(response)
+
+
+@pytest.mark.parametrize("param", ["audience", "role", "kind"])
+def test_search_invalid_filter_value_is_a_stamped_422(
+    snapshot: CatalogSnapshot, repo: Path, param: str
+) -> None:
+    response = _client(snapshot, repo).get("/api/search", params={param: "bogus"})
+    assert response.status_code == 422
+    _assert_security_headers(response)
+
+
+def test_search_filtered_query_returns_only_unit_backed_kinds(
+    snapshot: CatalogSnapshot, repo: Path
+) -> None:
+    response = _client(snapshot, repo).get("/api/search", params={"kind": "typescript-tool"})
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["total"] >= 1
+    for result in payload["results"]:
+        assert result["kind"] in ("unit", "fragment")
+        assert result["unit"] is not None
+    _assert_security_headers(response)
+
+
 def test_source_unknown_unit_is_a_fixed_404(snapshot: CatalogSnapshot, repo: Path) -> None:
     response = _client(snapshot, repo).get("/api/source", params={"unit": "markdown:missing.md"})
     assert response.status_code == 404

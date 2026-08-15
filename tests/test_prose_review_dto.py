@@ -10,9 +10,12 @@ from perk_dev.prose_review.dto import (
     CapabilityNodeOut,
     CapabilityTreeOut,
     CatalogSummaryOut,
+    SearchOut,
     SessionShapeOut,
+    UnitInspectOut,
     UnitSourceOut,
 )
+from perk_dev.prose_review.search import build_search_index, search
 from perk_dev.prose_review.source_adapter import WholeFileSource
 
 ROOT = Path(__file__).parents[1]
@@ -176,6 +179,128 @@ def test_shape_and_layer_key_order_matches_declaration(tree: CapabilityTreeOut) 
         "unit",
         "boundary",
     ]
+
+
+@pytest.fixture(scope="module")
+def inspect_out(snapshot: CatalogSnapshot) -> UnitInspectOut:
+    unit = snapshot.get_unit("typescript-tool:plan_review")
+    assert unit is not None
+    return UnitInspectOut.from_domain(snapshot, unit)
+
+
+def test_unit_inspect_out_identity_matches_the_routed_unit(
+    snapshot: CatalogSnapshot, inspect_out: UnitInspectOut
+) -> None:
+    unit = snapshot.get_unit("typescript-tool:plan_review")
+    assert unit is not None
+    assert inspect_out.id == unit.candidate.id
+    assert inspect_out.kind == unit.candidate.kind
+    assert inspect_out.path == unit.candidate.path
+    assert inspect_out.selector == unit.candidate.selector
+    assert inspect_out.audience == unit.audience
+    assert inspect_out.role == unit.role
+    assert [c.id for c in inspect_out.breadcrumb] == [
+        c.id for c in snapshot.capability_breadcrumb(unit.capability)
+    ]
+    assert inspect_out.breadcrumb, "breadcrumb must reach the assigned capability"
+
+
+def test_unit_inspect_out_relationships_mirror_the_snapshot_queries(
+    snapshot: CatalogSnapshot, inspect_out: UnitInspectOut
+) -> None:
+    unit_id = "typescript-tool:plan_review"
+    consumers = snapshot.consumers_for_unit(unit_id)
+    assert [(c.assembly, c.position, c.label, c.optional) for c in inspect_out.consumers] == [
+        (c.assembly.assembly.id, c.layer.position, c.layer.layer.label, c.layer.layer.optional)
+        for c in consumers
+    ]
+    assert inspect_out.consumers, "sampled unit has no consumers"
+
+    # One shape entry per consuming shape (aliases deduped by shape id), each
+    # carrying that shape's delivery siblings.
+    alias_shape_ids = []
+    for alias in snapshot.aliases_for_unit(unit_id):
+        if alias.session_shape.id not in alias_shape_ids:
+            alias_shape_ids.append(alias.session_shape.id)
+    assert [shape.id for shape in inspect_out.shapes] == alias_shape_ids
+    assert inspect_out.shapes, "sampled unit is consumed by no shape"
+    for shape_out in inspect_out.shapes:
+        assert [s.id for s in shape_out.siblings] == [
+            s.id for s in snapshot.delivery_siblings(shape_out.id)
+        ]
+
+    views = snapshot.concerns_for_unit(unit_id)
+    assert [concern.id for concern in inspect_out.concerns] == [view.concern.id for view in views]
+    assert inspect_out.concerns, "sampled unit belongs to no concern"
+    for concern_out, view in zip(inspect_out.concerns, views, strict=True):
+        selected = next(m for m in view.members if m.unit.candidate.id == unit_id)
+        assert concern_out.canonical == selected.canonical
+        assert concern_out.relation == selected.relation
+        assert [member.unit.id for member in concern_out.members] == [
+            m.unit.candidate.id for m in view.members if m.unit.candidate.id != unit_id
+        ]
+
+
+def test_unit_inspect_out_json_key_order_of_every_new_model(
+    inspect_out: UnitInspectOut,
+) -> None:
+    dumped = inspect_out.model_dump(mode="json")
+    json.dumps(dumped)  # must not raise
+    assert list(dumped.keys()) == [
+        "id",
+        "kind",
+        "path",
+        "selector",
+        "audience",
+        "role",
+        "breadcrumb",
+        "capability_children",
+        "consumers",
+        "shapes",
+        "concerns",
+        "lineage",
+    ]
+    assert list(dumped["breadcrumb"][0].keys()) == ["id", "label"]
+    assert list(dumped["consumers"][0].keys()) == ["assembly", "position", "label", "optional"]
+    shape = dumped["shapes"][0]
+    assert list(shape.keys()) == ["id", "label", "delivery", "breadcrumb", "siblings"]
+    assert list(shape["siblings"][0].keys()) == ["id", "label", "delivery"]
+    concern = dumped["concerns"][0]
+    assert list(concern.keys()) == [
+        "id",
+        "label",
+        "summary",
+        "canonical",
+        "relation",
+        "members",
+    ]
+    assert list(concern["members"][0].keys()) == ["unit", "relation", "canonical"]
+
+
+def test_lineage_out_shape_for_a_lineage_bearing_unit(snapshot: CatalogSnapshot) -> None:
+    view = next(view for view in snapshot.lineage if view.sources)
+    unit = view.sources[0]
+    dumped = UnitInspectOut.from_domain(snapshot, unit).model_dump(mode="json")
+    assert dumped["lineage"], "discovered unit lost its lineage rule"
+    rule = dumped["lineage"][0]
+    assert list(rule.keys()) == ["id", "relationship", "targets"]
+    assert rule["relationship"] in ("generated-from", "materializes-to", "bundled-as")
+    assert rule["targets"], "authored lineage rules always carry targets"
+
+
+def test_search_out_key_order_from_real_hits(snapshot: CatalogSnapshot) -> None:
+    index = build_search_index(snapshot)
+    results = search(index, "plan_review")
+    out = SearchOut.from_domain(results)
+    assert out.total == results.total
+    dumped = out.model_dump(mode="json")
+    json.dumps(dumped)  # must not raise
+    assert list(dumped.keys()) == ["total", "results"]
+    result = dumped["results"][0]
+    assert list(result.keys()) == ["kind", "id", "label", "breadcrumb", "unit", "matched"]
+    assert list(result["breadcrumb"][0].keys()) == ["id", "label"]
+    unit_result = next(entry for entry in dumped["results"] if entry["unit"] is not None)
+    assert list(unit_result["unit"].keys()) == ["id", "kind", "path"]
 
 
 def test_unit_source_out_field_order() -> None:
