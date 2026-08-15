@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { CenterPane } from "./CenterPane.tsx";
 import { InspectorPane } from "./InspectorPane.tsx";
+import { SearchBar } from "./SearchBar.tsx";
 import { TreePane } from "./TreePane.tsx";
 import { type CapabilityTree, parseTree, type UnitRef } from "./tree.ts";
 import type { BoundaryKind } from "./wire.ts";
@@ -55,10 +56,15 @@ export function App() {
     };
   }, []);
 
+  // Search and concern-member navigation only ever change `selection` — never
+  // `mode` (the shell invariant).
+  const selectUnit = (unit: UnitRef): void => setSelection({ type: "unit", unit });
+
   return (
     <div className="app">
       <header className="app-header">
         <h1>Prose Review</h1>
+        <SearchBar onSelect={selectUnit} />
       </header>
       <nav className="pane tree-pane" aria-label="Capability tree">
         {treeState.status === "loading" && <p className="pane-hint">Loading catalog tree…</p>}
@@ -71,7 +77,7 @@ export function App() {
         <CenterPane mode={mode} onModeChange={setMode} selection={selection} />
       </main>
       <aside className="pane inspector-pane" aria-label="Inspector">
-        <InspectorPane selection={selection} />
+        <InspectorPane selection={selection} onSelect={selectUnit} />
       </aside>
     </div>
   );
