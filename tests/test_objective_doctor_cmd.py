@@ -46,7 +46,8 @@ def _state(
 
 
 # `_FakeStore.carrier` sentinel: default = the GitHub shape (the objective issue itself);
-# tests override it with a sentinel identifier (the Linear-project shape) or None.
+# tests override it with a sentinel identifier (the Linear-project shape), None, or an
+# Exception to raise from the resolution seam.
 _DEFAULT_CARRIER: object = object()
 
 
@@ -68,6 +69,8 @@ class _FakeStore:
 
     def journal_carrier_id(self, *, objective_id: str) -> str | None:
         if self.carrier is not _DEFAULT_CARRIER:
+            if isinstance(self.carrier, Exception):
+                raise self.carrier
             assert self.carrier is None or isinstance(self.carrier, str)
             return self.carrier
         state = self.get_objective(objective_id=objective_id)
@@ -179,13 +182,17 @@ def _authed(monkeypatch) -> None:
 
 def _wire(monkeypatch, store, trains, *, reads: dict[str, object] | None = None) -> None:
     """Wire the three doctor seams. ``reads`` maps carrier id → ``AdoptableIssue`` for the
-    kind-corruption check's presence-only read (default: every read misses → no finding)."""
+    kind-corruption check's presence-only read (default: every read misses → no finding);
+    an ``Exception`` value raises from the read seam instead."""
     monkeypatch.setattr(resolve, "resolve_objective_store", lambda _root: store)
     monkeypatch.setattr(observe, "reconstruct_repo_train", trains)
 
     class _FakeIssueBackend:
         def read_issue(self, *, issue_id: str):
-            return (reads or {}).get(issue_id)
+            value = (reads or {}).get(issue_id)
+            if isinstance(value, Exception):
+                raise value
+            return value
 
     monkeypatch.setattr(resolve, "resolve_issue_backend", lambda _root: _FakeIssueBackend())
 
@@ -700,6 +707,32 @@ def test_corruption_linear_sentinel_carrier_is_resolved(monkeypatch):
     assert "#SEN-9" in finding["message"]
 
 
+def test_corruption_targets_the_active_successor_after_redirect(monkeypatch):
+    # The redirect proof for the corruption check: with BOTH carriers wired corrupt, the
+    # single finding names the ACTIVE successor — a predecessor-targeted read would surface
+    # a finding naming "42" instead of silently missing on the default-miss mask.
+    store = _FakeStore(
+        objectives={"42": _state("42", {"superseded_by": "#43"}), "43": _state("43")}
+    )
+    trains = _ScriptedTrains(
+        NoDeliveryTrain(objective_id="43", objective_url="u", redirected_from=None, reason="inc")
+    )
+    _wire(
+        monkeypatch,
+        store,
+        trains,
+        reads={"42": _carrier_read("42"), "43": _carrier_read("43")},
+    )
+    result = _invoke(["objective", "doctor", "42", "--json"])
+    assert result.exit_code == 0
+    payload = json.loads(result.output)
+    assert payload["redirected_from"] == "42"
+    (finding,) = payload["corruption"]
+    assert finding["carrier"] == "43"
+    # The active id rides the remediation string, not the requested predecessor's.
+    assert "perk objective replan 43" in finding["remediation"]
+
+
 def test_corruption_healthy_carrier_is_empty(monkeypatch):
     store = _FakeStore(objectives={"42": _state("42")})
     _wire(monkeypatch, store, _incremental_trains(), reads={"42": _carrier_read("42", both=False)})
@@ -729,6 +762,39 @@ def test_corruption_fix_never_touches_it(monkeypatch):
     assert finding["code"] == "both_headers"
     assert payload["fix"]["applied"] == []  # no manifest repair references it
     assert payload["train_fix"]["applied"] == []  # no train repair references it
+
+
+def test_carrier_read_failure_is_the_fail_envelope_github_error(monkeypatch):
+    # An IssueBackendError from the presence-only carrier read fails the whole report as
+    # github_error (§8.54: the assembly boundary's posture) — never a silent empty check.
+    store = _FakeStore(objectives={"42": _state("42")})
+    _wire(
+        monkeypatch,
+        store,
+        _incremental_trains(),
+        reads={"42": issue_backend.IssueBackendError("carrier read down")},
+    )
+    result = _invoke(["objective", "doctor", "42", "--json"])
+    assert result.exit_code == 1
+    payload = json.loads(result.output)
+    assert payload["success"] is False
+    assert payload["error_type"] == "github_error"
+    assert "carrier read down" in payload["message"]
+
+
+def test_carrier_resolution_failure_is_the_fail_envelope_github_error(monkeypatch):
+    # The other raising seam: a §8.43 journal_carrier_id failure rides the same arm.
+    store = _FakeStore(
+        objectives={"42": _state("42")},
+        carrier=issue_backend.IssueBackendError("carrier resolution down"),
+    )
+    _wire(monkeypatch, store, _incremental_trains())
+    result = _invoke(["objective", "doctor", "42", "--json"])
+    assert result.exit_code == 1
+    payload = json.loads(result.output)
+    assert payload["success"] is False
+    assert payload["error_type"] == "github_error"
+    assert "carrier resolution down" in payload["message"]
 
 
 # ----------------------------------------------------------------- the human render
