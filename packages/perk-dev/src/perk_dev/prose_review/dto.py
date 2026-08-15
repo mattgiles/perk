@@ -1,8 +1,9 @@
 """The Prose Review Workbench serialization edge: catalog snapshot → wire DTOs.
 
-The HTTP layer never touches domain objects — every response body is an
-``OutputModel`` built here via ``from_domain``. Declaration order is the JSON key
-order, so the field order below is deliberate.
+Every response body is an ``OutputModel`` built here via ``from_domain`` — the HTTP
+layer hands domain values to these constructors but never serializes a domain object
+directly. Declaration order is the JSON key order, so the field order below is
+deliberate.
 """
 
 from typing import Self

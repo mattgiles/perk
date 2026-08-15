@@ -4,6 +4,7 @@ from pathlib import Path
 
 import pytest
 from perk_dev.prose_map.catalog import build_catalog
+from perk_dev.prose_map.models import ProseRole
 from perk_dev.prose_review.catalog import CapabilityNode, CatalogSnapshot
 from perk_dev.prose_review.search import (
     SearchEntry,
@@ -128,6 +129,49 @@ def test_active_filter_excludes_capability_shape_and_concern_entries(
     # ...but any active filter restricts the corpus to unit/fragment entries.
     filtered = search(index, capability_label, role="tool-contract")
     assert all(hit.entry.kind in ("unit", "fragment") for hit in filtered.hits)
+
+
+def test_role_filter_includes_matching_and_excludes_non_matching_units(
+    snapshot: CatalogSnapshot, index: tuple[SearchEntry, ...]
+) -> None:
+    unit = snapshot.get_unit("typescript-tool:plan_review")
+    assert unit is not None
+    assert unit.role == "tool-contract"
+    matching = search(index, unit.candidate.id, role="tool-contract")
+    assert _unit_hits(matching.hits, unit.candidate.id)
+    non_matching = search(index, unit.candidate.id, role="launch")
+    assert not _unit_hits(non_matching.hits, unit.candidate.id)
+
+
+def test_role_filter_browse_returns_only_units_of_that_role(
+    snapshot: CatalogSnapshot, index: tuple[SearchEntry, ...]
+) -> None:
+    results = search(index, "", role="tool-contract")
+    assert results.total > 0
+    for hit in results.hits:
+        assert hit.entry.unit is not None
+        assert hit.entry.unit.role == "tool-contract"
+    # The filter is a real partition: at least one unit carries a different role.
+    assert results.total < len(snapshot.units) + len(snapshot.fragments)
+
+
+def test_role_filter_applies_to_a_fragment_through_its_owning_unit(
+    snapshot: CatalogSnapshot, index: tuple[SearchEntry, ...]
+) -> None:
+    routed = snapshot.fragments[0]
+    owner_role = routed.unit.role
+    other_role = "launch" if owner_role != "launch" else "context"
+
+    def fragment_hits(results_role: ProseRole) -> list[SearchHit]:
+        results = search(index, routed.fragment.label, role=results_role)
+        return [
+            hit
+            for hit in results.hits
+            if hit.entry.kind == "fragment" and hit.entry.entity_id == routed.fragment.id
+        ]
+
+    assert fragment_hits(owner_role), "fragment must inherit its owning unit's role"
+    assert not fragment_hits(other_role), "fragment must not match a foreign role"
 
 
 def test_audience_filter_is_exact_authored_value(

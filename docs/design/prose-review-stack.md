@@ -4,8 +4,9 @@
 [prose-review-app-prd.md](./prose-review-app-prd.md)). Selected and shipped with the walking
 skeleton — the minimal secure launcher (`perk-dev prose-review`) plus the served round-trip proof
 — and now carrying the three-pane workbench shell (capability tree / mode bar + read-only source
-view) with the relationship inspector (consumers, consuming shapes + delivery siblings, concerns,
-lineage) and header catalog search over the seeded whole-file SourceAdapter. Later nodes build
+view, served through the seeded whole-file SourceAdapter), the relationship inspector (consumers,
+consuming shapes + delivery siblings, concerns, lineage), and header catalog search — the
+inspector and search are pure in-memory `CatalogSnapshot` queries. Later nodes build
 fragment-level adapters, compare/assembly views, and writers on this stack without revisiting it.
 
 ## HTTP layer: FastAPI + uvicorn
@@ -17,7 +18,9 @@ fragment-level adapters, compare/assembly views, and writers on this stack witho
 - **Endpoints are sync `def`** — catalog queries are pure in-memory work over the immutable
   `CatalogSnapshot` (`load_catalog` builds once), and the only per-request filesystem work is the
   two read families below — and return `*Out` Pydantic models (`perk.boundary.OutputModel`,
-  `from_domain` constructors). The HTTP layer never touches domain objects.
+  `from_domain` constructors). Domain objects are never serialized into a response body —
+  handlers query the snapshot and hand domain values to the `from_domain` constructors; every
+  body is an `*Out` model.
 - **Exactly two file-read families.** Built-asset reads (`index.html` included) go through
   `web.read_contained`; canonical-source reads go through the SourceAdapter
   (`perk_dev.prose_review.source_adapter`) — root-bound, catalog-membership-checked, text-only,
@@ -87,6 +90,7 @@ file-read family** was added; `parseUnitInspect` / `parseSearch` join the typed 
 The proof structure is unchanged: **server-integration** tests (real Vite build, real uvicorn on a
 pre-bound socket, real `*Out` DTOs) plus node:test coverage of each frontend parse boundary (local
 wire-shape mirrors; OpenAPI schema generation and runtime schema-validation libraries are out of
-scope). The **browser** leg (the shell renders the tree, sources, and boundary explanations) is a
-manual acceptance step; the automated browser-level hostile-payload pass across all panes is a
-later node's deliverable by the objective's design.
+scope). The **browser** leg (the shell renders the tree, sources, and boundary explanations; the
+header search navigates to units; the inspector renders the relationship sections) is a manual
+acceptance step; the automated browser-level hostile-payload pass across all panes is a later
+node's deliverable by the objective's design.

@@ -123,8 +123,10 @@ function Relationships({ detail, onSelect }: { detail: UnitInspect; onSelect: Se
 
 // The relationship inspector for a unit selection: the identity block renders
 // immediately from the selection; the relationships arrive through the latest-wins
-// loader (one loader per mount, selected on every unit change, disposed on unmount —
-// a late response never updates a superseded view).
+// loader. The component is mounted with `key={unit.id}` (see InspectorPane), so a
+// selection change remounts it: the state resets to loading before anything renders
+// (no window where the new unit's identity shows the old unit's relationships) and
+// the superseded loader is disposed on unmount, dropping its in-flight response.
 function UnitInspector({ unit, onSelect }: { unit: UnitRef; onSelect: SelectUnit }) {
   const [state, setState] = useState<InspectLoadState>({ status: "loading" });
   const [loader] = useState(() => createInspectLoader(setState));
@@ -200,5 +202,5 @@ export function InspectorPane({
       </div>
     );
   }
-  return <UnitInspector unit={selection.unit} onSelect={onSelect} />;
+  return <UnitInspector key={selection.unit.id} unit={selection.unit} onSelect={onSelect} />;
 }

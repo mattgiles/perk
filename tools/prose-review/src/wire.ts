@@ -1,6 +1,6 @@
 // The shared wire vocabulary: closed literal arrays + type guards mirroring
 // perk_dev.prose_map.models (the summary.ts local-mirror posture — a vocabulary change
-// here is a deliberate wire-contract change, never a silent widening). Both parser
+// here is a deliberate wire-contract change, never a silent widening). The parser
 // modules consume these guards, so unknown strings are rejected and a successful parse
 // is sound for its declared TypeScript type.
 

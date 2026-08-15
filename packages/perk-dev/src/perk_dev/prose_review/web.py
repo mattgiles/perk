@@ -9,8 +9,10 @@ websocket routes, so Starlette rejects any handshake, and a future node adding
 websockets must give them their own guard policy first. Pure ASGI keeps the guard
 streaming-transparent.
 
-Handlers see only the ``CatalogSnapshot`` in and ``*Out`` models out — no domain object
-reaches a response path. File reads fall into exactly two families: built-asset reads
+Handlers query the ``CatalogSnapshot`` and respond with ``*Out`` models only — a
+handler may look up domain values and hand them to a ``from_domain`` constructor, but
+no domain object is ever serialized into a response body. File reads fall into
+exactly two families: built-asset reads
 (``index.html`` included) go through the contained-read helper that proves both the
 dist root and the candidate sit under the repository root of trust (a symlinked
 ``dist/`` must not launder outside targets in); canonical-source reads go through the

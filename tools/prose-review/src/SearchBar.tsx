@@ -1,7 +1,13 @@
 import { useEffect, useState } from "react";
 import type { CapabilityRef } from "./inspect.ts";
-import type { SearchResult, SearchResults } from "./search.ts";
-import { createSearchLoader, type SearchParams } from "./searchLoad.ts";
+import type { SearchResult } from "./search.ts";
+import {
+  createSearchPanel,
+  type Filters,
+  NO_FILTERS,
+  type PanelState,
+  panelHint,
+} from "./searchPanel.ts";
 import type { UnitRef } from "./tree.ts";
 import {
   AUDIENCES,
@@ -12,36 +18,8 @@ import {
   type ProseRole,
 } from "./wire.ts";
 
-// The results panel's closed state machine: `idle` renders no panel at all. The
-// loader's three states map onto the other three arms; idle is entered only through
-// the explicit clear path (empty query + no filter, the Clear button, or selecting a
-// result), which also invalidates any in-flight request — an in-flight response must
-// never reopen a closed panel.
-type PanelState =
-  | { status: "idle" }
-  | { status: "loading" }
-  | { status: "loaded"; results: SearchResults }
-  | { status: "failed" };
-
-type Filters = {
-  audience: Audience | "";
-  role: ProseRole | "";
-  kind: ProseKind | "";
-};
-
-const NO_FILTERS: Filters = { audience: "", role: "", kind: "" };
-
 function joinBreadcrumb(breadcrumb: CapabilityRef[]): string {
   return breadcrumb.map((capability) => capability.label).join(" / ");
-}
-
-function toParams(query: string, filters: Filters): SearchParams {
-  return {
-    q: query,
-    audience: filters.audience === "" ? null : filters.audience,
-    role: filters.role === "" ? null : filters.role,
-    kind: filters.kind === "" ? null : filters.kind,
-  };
 }
 
 // A unit-backed row (unit, fragment, concern) navigates to its canonical unit; a
@@ -81,33 +59,28 @@ function ResultRow({
 }
 
 // The PRD §5 top-bar search: a labeled query input, three closed-vocabulary filters,
-// and a dropdown results panel. No debounce — the catalog is small and in-memory;
-// latest-wins in the loader suppresses stale responses.
+// and a dropdown results panel. The panel state machine — idle/loading/loaded/failed,
+// the enter-idle rule, the in-flight invalidation on idle transitions, and the fixed
+// panel copy — lives in searchPanel.ts (node:test-covered); this component only
+// renders its states. No debounce — the catalog is small and in-memory; latest-wins
+// in the loader suppresses stale responses.
 export function SearchBar({ onSelect }: { onSelect: (unit: UnitRef) => void }) {
   const [query, setQuery] = useState("");
   const [filters, setFilters] = useState<Filters>(NO_FILTERS);
   const [panel, setPanel] = useState<PanelState>({ status: "idle" });
-  const [loader] = useState(() => createSearchLoader(setPanel));
+  const [controller] = useState(() => createSearchPanel(setPanel));
 
-  useEffect(() => () => loader.dispose(), [loader]);
+  useEffect(() => () => controller.dispose(), [controller]);
 
   function refresh(nextQuery: string, nextFilters: Filters): void {
     setQuery(nextQuery);
     setFilters(nextFilters);
-    const filterless =
-      nextFilters.audience === "" && nextFilters.role === "" && nextFilters.kind === "";
-    if (nextQuery.trim() === "" && filterless) {
-      setPanel({ status: "idle" });
-      loader.clear();
-      return;
-    }
-    loader.select(toParams(nextQuery, nextFilters));
+    controller.refresh(nextQuery, nextFilters);
   }
 
   function choose(unit: UnitRef): void {
     onSelect(unit);
-    setPanel({ status: "idle" });
-    loader.clear();
+    controller.close();
   }
 
   return (
@@ -174,11 +147,7 @@ export function SearchBar({ onSelect }: { onSelect: (unit: UnitRef) => void }) {
       </button>
       {panel.status !== "idle" && (
         <div className="search-panel">
-          {panel.status === "loading" && <p className="pane-hint">Searching…</p>}
-          {panel.status === "failed" && <p className="pane-hint">Search failed.</p>}
-          {panel.status === "loaded" && panel.results.total === 0 && (
-            <p className="pane-hint">No matches.</p>
-          )}
+          {panelHint(panel) !== null && <p className="pane-hint">{panelHint(panel)}</p>}
           {panel.status === "loaded" && panel.results.total > 0 && (
             <>
               <ul className="search-results">
