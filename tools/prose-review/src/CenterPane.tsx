@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import type { Mode, Selection } from "./App.tsx";
 import { BOUNDARY_INFO } from "./boundaries.ts";
-import { parseUnitSource, type UnitSource } from "./source.ts";
+import { createSourceLoader, type SourceLoadState } from "./sourceLoad.ts";
 import type { UnitRef } from "./tree.ts";
 import type { BoundaryKind } from "./wire.ts";
 
@@ -11,64 +11,20 @@ const MODES: { id: Mode; label: string }[] = [
   { id: "assembly", label: "Assembly" },
 ];
 
-// The closed source-load state machine: `refused` is the endpoint's deliberate 404
-// (one of its three fixed details); `failed` is everything else — network error,
-// non-ok status other than 404, a 404 without a string detail, invalid JSON, or a
-// parseUnitSource rejection.
-type SourceLoadState =
-  | { status: "loading" }
-  | { status: "loaded"; source: UnitSource }
-  | { status: "refused"; detail: string }
-  | { status: "failed" };
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null;
-}
-
 // Read-only whole-file source view, fetched on every selection change (no client
-// cache — edit buffers are a later milestone). The effect is keyed on the unit id
-// with a cleanup-set `cancelled` flag, so a response arriving after cleanup never
-// updates state and only the current selection can win.
+// cache — edit buffers are a later milestone). The load pipeline — the closed state
+// machine and the latest-wins stale-response suppression — lives in sourceLoad.ts
+// (node:test-covered); one loader per mount, selected on every unit change and
+// disposed on unmount, so a late response never updates a superseded view.
 function SourceView({ unit }: { unit: UnitRef }) {
   const [state, setState] = useState<SourceLoadState>({ status: "loading" });
+  const [loader] = useState(() => createSourceLoader(setState));
 
   useEffect(() => {
-    let cancelled = false;
-    setState({ status: "loading" });
-    const load = async (): Promise<void> => {
-      try {
-        const response = await fetch(`/api/source?unit=${encodeURIComponent(unit.id)}`);
-        if (response.status === 404) {
-          const body: unknown = await response.json();
-          if (isRecord(body) && typeof body.detail === "string") {
-            if (!cancelled) {
-              setState({ status: "refused", detail: body.detail });
-            }
-            return;
-          }
-          throw new Error("404 without a string detail");
-        }
-        if (!response.ok) {
-          throw new Error(`unexpected status ${response.status}`);
-        }
-        const source = parseUnitSource(await response.json());
-        if (source === null) {
-          throw new Error("ill-shaped source payload");
-        }
-        if (!cancelled) {
-          setState({ status: "loaded", source });
-        }
-      } catch {
-        if (!cancelled) {
-          setState({ status: "failed" });
-        }
-      }
-    };
-    void load();
-    return () => {
-      cancelled = true;
-    };
-  }, [unit.id]);
+    loader.select(unit.id);
+  }, [loader, unit.id]);
+
+  useEffect(() => () => loader.dispose(), [loader]);
 
   if (state.status === "loading") {
     return <p className="pane-hint">Loading source…</p>;
@@ -117,7 +73,7 @@ function EditMode({ selection }: { selection: Selection | null }) {
   if (selection.type === "boundary") {
     return <BoundaryExplanation boundary={selection.boundary} label={selection.label} />;
   }
-  return <SourceView key={selection.unit.id} unit={selection.unit} />;
+  return <SourceView unit={selection.unit} />;
 }
 
 // The persistent mode bar + mode content. Mode switches never touch the selection,

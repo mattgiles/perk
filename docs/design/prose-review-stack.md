@@ -2,9 +2,11 @@
 
 **Status:** binding stack selection for Objective #1764 (the Prose Review Workbench; PRD:
 [prose-review-app-prd.md](./prose-review-app-prd.md)). Selected and shipped with the walking
-skeleton — the minimal secure launcher (`perk-dev prose-review`) plus the served round-trip proof.
-Later nodes build the workbench UI, relationship DTOs, source reads, and writers on this stack
-without revisiting it.
+skeleton — the minimal secure launcher (`perk-dev prose-review`) plus the served round-trip proof
+— and now carrying the three-pane workbench shell (capability tree / mode bar + read-only source
+view / inspector identity block) over the seeded whole-file SourceAdapter. Later nodes build the
+relationship inspector, fragment-level adapters, compare/assembly views, and writers on this
+stack without revisiting it.
 
 ## HTTP layer: FastAPI + uvicorn
 
@@ -73,9 +75,14 @@ CheckRunner.
 
 ## The round-trip proof split
 
-The automated proof is a **server-integration** test (real Vite build, real uvicorn on a pre-bound
-socket, real `CatalogSummaryOut`) plus node:test coverage of the frontend's typed parse boundary
-(`parseSummary` in `tools/prose-review/src/summary.ts` — a local wire-shape mirror; OpenAPI schema
-generation and runtime schema-validation libraries are out of scope). The **browser** leg (the
-page fetches the DTO and renders it) is a manual acceptance step; the automated browser-level
-hostile-payload pass across all panes is a later node's deliverable by the objective's design.
+The original round-trip proof — the served page rendering `CatalogSummaryOut` — is **historical**:
+the served page is now the three-pane workbench shell, which fetches `/api/catalog/tree` and
+`/api/source` through their typed parse boundaries (`parseTree` / `parseUnitSource`, with the
+closed wire vocabulary in `tools/prose-review/src/wire.ts`). `/api/catalog/summary` still serves
+its original contract; `parseSummary` remains its typed local mirror, now exercised by tests only.
+The proof structure is unchanged: **server-integration** tests (real Vite build, real uvicorn on a
+pre-bound socket, real `*Out` DTOs) plus node:test coverage of each frontend parse boundary (local
+wire-shape mirrors; OpenAPI schema generation and runtime schema-validation libraries are out of
+scope). The **browser** leg (the shell renders the tree, sources, and boundary explanations) is a
+manual acceptance step; the automated browser-level hostile-payload pass across all panes is a
+later node's deliverable by the objective's design.

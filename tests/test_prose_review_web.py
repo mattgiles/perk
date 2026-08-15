@@ -146,6 +146,23 @@ def test_source_unknown_unit_is_a_fixed_404(snapshot: CatalogSnapshot, repo: Pat
     _assert_security_headers(response)
 
 
+def test_source_missing_file_is_a_fixed_404(snapshot: CatalogSnapshot, repo: Path) -> None:
+    # The tmp repo root carries no AGENTS.md, so the known unit's containment-checked
+    # read misses — the route must translate not_found into its fixed 404 shape.
+    response = _client(snapshot, repo).get("/api/source", params={"unit": "managed:repo-agents"})
+    assert response.status_code == 404
+    assert response.json() == {"detail": "source not found"}
+    _assert_security_headers(response)
+
+
+def test_source_non_utf8_file_is_a_fixed_404(snapshot: CatalogSnapshot, repo: Path) -> None:
+    (repo / "AGENTS.md").write_bytes(b"\xff\xfe\x00\x01")
+    response = _client(snapshot, repo).get("/api/source", params={"unit": "managed:repo-agents"})
+    assert response.status_code == 404
+    assert response.json() == {"detail": "source is not utf-8 text"}
+    _assert_security_headers(response)
+
+
 def test_source_missing_unit_param_is_a_stamped_422(snapshot: CatalogSnapshot, repo: Path) -> None:
     response = _client(snapshot, repo).get("/api/source")
     assert response.status_code == 422

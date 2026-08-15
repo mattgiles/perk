@@ -8,9 +8,10 @@ time to build the map; that is the catalog module's load-time contract, not a
 serving-path read. (``web.read_contained`` reads only built ``dist/`` assets,
 which are not canonical sources.)
 
-Every read is root-bound (resolved containment under the repository root),
-catalog-membership-checked (:func:`read_whole_file` refuses unit ids the snapshot
-does not know), and text-only (strict UTF-8 decode; no newline translation). This
+Every read is root-bound (resolved containment under the repository root) and
+text-only (strict UTF-8 decode; no newline translation). Catalog membership is
+:func:`read_whole_file`'s check — it refuses unit ids the snapshot does not know;
+:func:`read_unit_file` trusts its caller to supply a routed catalog member. This
 is the minimal whole-file seed — node 2.2 grows this module into the full adapter
 contract (adapter families, fragment-level reads) and converts it to a package.
 """
