@@ -33,17 +33,18 @@ def test_counts_match_the_snapshot_tuples(
     assert summary.lineage_rules == len(snapshot.lineage)
 
 
-def test_capabilities_are_the_fixed_order_top_level_labels(summary: CatalogSummaryOut) -> None:
-    assert [capability.label for capability in summary.capabilities] == [
-        "Foundation",
-        "Intent",
-        "Planning",
-        "Delivery",
-        "Review",
-        "Knowledge",
-        "Extension & utilities",
+def test_capabilities_are_the_fixed_order_top_level_ids_and_labels(
+    summary: CatalogSummaryOut,
+) -> None:
+    assert [(capability.id, capability.label) for capability in summary.capabilities] == [
+        ("foundation", "Foundation"),
+        ("intent", "Intent"),
+        ("planning", "Planning"),
+        ("delivery", "Delivery"),
+        ("review", "Review"),
+        ("knowledge", "Knowledge"),
+        ("extension", "Extension & utilities"),
     ]
-    assert all(capability.id for capability in summary.capabilities)
 
 
 def test_json_dump_is_serializable_with_declared_key_order(summary: CatalogSummaryOut) -> None:

@@ -20,14 +20,28 @@ test("parseSummary accepts the exact wire shape", () => {
   assert.deepEqual(parseSummary(WIRE), WIRE);
 });
 
-test("parseSummary rejects a missing count", () => {
-  const { units: _units, ...missingCount } = WIRE;
-  assert.equal(parseSummary(missingCount), null);
-});
+// Every count field is exercised for both defects: dropping any single field's runtime
+// check must fail at least one test, never pass silently.
+const COUNT_KEYS = [
+  "units",
+  "fragments",
+  "session_shapes",
+  "assemblies",
+  "scenarios",
+  "concerns",
+  "lineage_rules",
+] as const;
 
-test("parseSummary rejects a non-numeric count", () => {
-  assert.equal(parseSummary({ ...WIRE, concerns: "6" }), null);
-});
+for (const key of COUNT_KEYS) {
+  test(`parseSummary rejects a missing ${key}`, () => {
+    const { [key]: _omitted, ...missingCount } = WIRE;
+    assert.equal(parseSummary(missingCount), null);
+  });
+
+  test(`parseSummary rejects a non-numeric ${key}`, () => {
+    assert.equal(parseSummary({ ...WIRE, [key]: String(WIRE[key]) }), null);
+  });
+}
 
 test("parseSummary rejects missing capabilities", () => {
   const { capabilities: _capabilities, ...missingCapabilities } = WIRE;

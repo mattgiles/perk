@@ -38,6 +38,10 @@ type AsgiApp = Callable[[Scope, Receive, Send], Awaitable[None]]
 CSRF_HEADER = "X-Prose-Review-Csrf"
 CSRF_PLACEHOLDER = "__PROSE_REVIEW_CSRF__"
 
+# The guard's raw-scope matcher is derived from the one header-name SSOT above (ASGI
+# header names arrive lowercased).
+_CSRF_HEADER_BYTES = CSRF_HEADER.lower().encode("ascii")
+
 _CSP = (
     "default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; "
     "img-src 'self'; font-src 'self'; base-uri 'none'; form-action 'none'; "
@@ -70,19 +74,22 @@ def read_contained(repo_resolved: Path, dist_dir: Path, relative: str) -> bytes 
     ``dist/assets/``) symlink launder outside targets into the trusted root. The
     candidate must then resolve under the resolved dist root and be a regular file.
     Any containment failure (or read race) is ``None``; policy (404 vs 500) stays with
-    the routes.
+    the routes. The whole chain sits inside one failure boundary: ``relative`` is
+    URL-controlled (uvicorn percent-decodes request paths), so an OS-invalid path — an
+    embedded NUL (``ValueError``), a symlink loop or a mid-read race (``OSError``) —
+    must degrade to ``None``, never an unhandled 500.
     """
-    dist_resolved = dist_dir.resolve()
-    if not dist_resolved.is_relative_to(repo_resolved):
-        return None
-    candidate = (dist_resolved / relative).resolve()
-    if not candidate.is_relative_to(dist_resolved):
-        return None
-    if not candidate.is_file():
-        return None
     try:
+        dist_resolved = dist_dir.resolve()
+        if not dist_resolved.is_relative_to(repo_resolved):
+            return None
+        candidate = (dist_resolved / relative).resolve()
+        if not candidate.is_relative_to(dist_resolved):
+            return None
+        if not candidate.is_file():
+            return None
         return candidate.read_bytes()
-    except OSError:
+    except (OSError, ValueError):
         return None
 
 
@@ -135,7 +142,7 @@ class SecurityGuardMiddleware:
             await _reject(send, "forbidden origin")
             return
         if scope["method"] not in ("GET", "HEAD"):
-            tokens = [value for name, value in headers if name == b"x-prose-review-csrf"]
+            tokens = [value for name, value in headers if name == _CSRF_HEADER_BYTES]
             # Exactly one header, constant-time-equal to the process token: zero,
             # duplicate, and wrong-valued headers are all 403.
             if len(tokens) != 1 or not secrets.compare_digest(tokens[0], self._csrf_token):
@@ -162,8 +169,9 @@ def create_app(
 
     ``repo_root`` is resolved once here (the root of trust); ``dist_dir`` is kept
     unresolved and re-resolved per read by :func:`read_contained`. The default
-    ``/docs``/``/redoc``/``/openapi.json`` surfaces are disabled — they load
-    CDN-hosted assets and would violate the no-network-loaded-assets envelope.
+    framework surfaces are disabled: ``/docs``/``/redoc`` load CDN-hosted UI assets
+    (violating the no-network-loaded-assets envelope), and ``/openapi.json`` — though
+    locally generated — is an unused machine-readable surface this app never serves.
     """
     repo_resolved = repo_root.resolve()
     app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)

@@ -114,12 +114,24 @@ def test_catalog_summary_serves_the_snapshot_dto(snapshot: CatalogSnapshot, repo
     _assert_security_headers(response)
 
 
-def test_asset_route_serves_built_assets_with_explicit_content_type(
-    snapshot: CatalogSnapshot, repo: Path
+@pytest.mark.parametrize(
+    ("filename", "content_type"),
+    [
+        ("app.js", "text/javascript"),
+        ("app.css", "text/css"),
+        ("app.js.map", "application/json"),
+        ("logo.svg", "image/svg+xml"),
+        ("font.woff2", "font/woff2"),
+        ("blob.wasm", "application/octet-stream"),
+    ],
+)
+def test_asset_route_serves_the_whole_content_type_map(
+    snapshot: CatalogSnapshot, repo: Path, filename: str, content_type: str
 ) -> None:
-    response = _client(snapshot, repo).get("/assets/app.js")
+    (repo / "dist" / "assets" / filename).write_bytes(b"payload")
+    response = _client(snapshot, repo).get(f"/assets/{filename}")
     assert response.status_code == 200
-    assert response.headers["content-type"].startswith("text/javascript")
+    assert response.headers["content-type"].startswith(content_type)
     _assert_security_headers(response)
 
 
@@ -167,6 +179,14 @@ def test_csrf_all_four_arms(snapshot: CatalogSnapshot, repo: Path) -> None:
 def test_percent_encoded_traversal_is_contained(snapshot: CatalogSnapshot, repo: Path) -> None:
     (repo / "secret.txt").write_text("inside repo, outside dist\n", encoding="utf-8")
     response = _client(snapshot, repo).get("/assets/%2e%2e/secret.txt")
+    assert response.status_code == 404
+    _assert_security_headers(response)
+
+
+def test_os_invalid_asset_path_is_a_contained_404(snapshot: CatalogSnapshot, repo: Path) -> None:
+    # Uvicorn/Starlette percent-decode the path, so an encoded NUL reaches Path.resolve()
+    # as an embedded null byte — it must degrade to the contained 404, never a 500.
+    response = _client(snapshot, repo).get("/assets/%00.js")
     assert response.status_code == 404
     _assert_security_headers(response)
 

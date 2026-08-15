@@ -100,9 +100,11 @@ def prose_review(ctx: click.Context, *, no_open: bool) -> None:
         url = f"http://127.0.0.1:{port}"
         user_output(f"serving {url}  (Ctrl-C to stop)")
         if not no_open:
+            # A deliberate best-effort boundary: ANY opener failure degrades to the
+            # warning below (which names the URL) — the server must still start.
             try:
                 opened = _open_browser(url)
-            except (OSError, webbrowser.Error):
+            except Exception:
                 opened = False
             if not opened:
                 user_output(f"could not open a browser — visit {url} yourself")

@@ -17,8 +17,9 @@ without revisiting it.
   (`perk.boundary.OutputModel`, `from_domain` constructors). The HTTP layer never touches domain
   objects.
 - The FastAPI app is constructed with **`docs_url=None, redoc_url=None, openapi_url=None`**: the
-  default `/docs`/`/redoc`/`/openapi.json` surfaces load CDN assets and would violate the
-  no-network-loaded-assets envelope.
+  default `/docs` (Swagger UI) and `/redoc` pages load CDN-hosted assets and would violate the
+  no-network-loaded-assets envelope; `/openapi.json` is locally generated but is an unused
+  machine-readable surface this app never serves — disabled to minimize the surface area.
 
 ## Frontend: Vite + React + TypeScript
 
@@ -30,10 +31,14 @@ without revisiting it.
   assets — **single origin, no network-loaded assets, no dev-server proxying**. Vite's build emits
   only external `<script type="module">`/stylesheet tags (no inline scripts), so
   `script-src 'self'` holds.
-- **Frontend dev loop:** `npm run dev --workspace tools/prose-review` runs `vite build --watch`;
-  relaunch (or just reload against a fresh launch) to pick a build up. The Vite dev server is
-  deliberately unusable against the API: the single-origin Host guard rejects any other origin,
-  and no CORS/proxy escape hatch exists.
+- **Frontend dev loop (one `dist/` writer at a time):** launch the server once
+  (`perk-dev prose-review` rebuilds on launch), then start the **build watcher**
+  (`npm run dev --workspace tools/prose-review` = `vite build --watch`, not a dev server) and
+  simply reload the page — the server rereads `dist/` from disk on every request, so no relaunch
+  is needed to pick up watcher output. Stop the watcher before relaunching: the launcher's own
+  rebuild writes the same `dist/`, and two concurrent writers may race. Vite's actual dev server
+  is deliberately unusable against the API: the single-origin Host guard rejects any other
+  origin, and no CORS/proxy escape hatch exists.
 
 ## Build policy: rebuild on every launch
 

@@ -103,11 +103,12 @@ def test_opener_returning_false_warns_and_still_serves(
     assert len(happy.served) == 1
 
 
+@pytest.mark.parametrize("error", [OSError("no browser available"), RuntimeError("opener bug")])
 def test_opener_raising_warns_and_still_serves(
-    happy: _Calls, monkeypatch: pytest.MonkeyPatch
+    happy: _Calls, monkeypatch: pytest.MonkeyPatch, error: Exception
 ) -> None:
     def boom(_url: str) -> bool:
-        raise OSError("no browser available")
+        raise error
 
     monkeypatch.setattr(review_cli, "_open_browser", boom)
     result = _invoke()
