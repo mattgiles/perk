@@ -17,8 +17,9 @@ you follow them in order; there is one path, and you walk it to the end.
 ## Before you start
 
 perk drives the [`pi`](https://github.com/earendil-works/pi) agent harness and talks to
-GitHub through the `gh` CLI. Before you begin, confirm you have each of these — the same
-environment `perk init` checks for:
+GitHub through the `gh` CLI. Before you begin, confirm you have each of these. Apart from
+`uv` — used only to install perk in Step 1, before any perk command exists — this is the
+same environment `perk init` checks for:
 
 - **A git repo** — you will create one in Step 2.
 - **`git`** — `git --version`

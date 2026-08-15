@@ -8,9 +8,18 @@ for this record. Each live row records its starting state, dated identifiers, ex
 observed outcome, and cleanup. Secret values never appear: evidence names credential keys and
 whether they were present only.
 
-Nodes 3.4 and 3.6 append their assigned walkthrough rows here. Node 5.2 consumes this record
-alongside the final cold-context and search gates. A deferred row is deliberately not a pass;
-a later consumer can see the exact evidence gap without reconstructing session history.
+Nodes 3.4 and 3.6 appended their assigned walkthrough rows here. Node 5.2 (the launch gate,
+[`docs-site-launch-gate.md`](./docs-site-launch-gate.md)) completed the record: the two
+tutorial rows deferred on 2026-08-13 are resolved below as **source-verification records**
+(never live-run pass claims), and the five previously passed rows carry a dated change-audit
+disposition. The governing decision is the node 5.2 reviewer directive:
+
+> **Reviewer directive (binding, supersedes the planning-round protocol for walkthroughs):**
+> this gate runs **no live walkthrough reproductions and no perk commands as gate evidence**.
+> Tutorial and walkthrough evidence is completed by **following the code as documented** —
+> verifying every published step's claims against the current source. If runtime behavior
+> diverges from what the docs and source together say, that is explicitly **not this node's
+> responsibility**.
 
 ## Credential and Actions preflight — passed
 
@@ -49,42 +58,53 @@ the deletion, and received `Deleted repository mattgiles/perk-preflight-2026-08-
 `gh repo view` returned `Could not resolve to a Repository`, proving cleanup. Repository
 secrets were deleted with the repository.
 
-## Get-started tutorial — deferred by operator override
+## Get-started tutorial — source-verified (live execution waived by operator directive)
 
 | Field | Evidence |
 |---|---|
-| Date | 2026-08-13 |
-| Intended mode | Live, external, fresh disposable private GitHub repository; published tutorial steps only |
-| Version posture | The tutorial checks the installed version generically; no unpublished release version is asserted |
-| Repository / plan / PR / learning identifiers | Not recorded — the walkthrough was not executed |
-| Expected-output excerpts | Not recorded |
-| Cleanup proof | Not applicable; no walkthrough repository was created |
-| Outcome | **Deferred; no live-run pass claimed** |
+| Date | 2026-08-15 |
+| Executor | Implementing agent (node 5.2 launch gate) |
+| Method | Static source verification per the reviewer directive quoted above: every published step's commands, flags, output claims, preconditions, and refusals traced to the owning CLI/extension source and pinned tests. No live run, no disposable repository, no perk command executed as evidence |
+| Source tree | This node's launch-gate SHA ([`docs-site-launch-gate.md`](./docs-site-launch-gate.md), leg A) |
+| Defects | One prose over-claim found and fixed (launch-gate defect log, D6): the Before-you-start lead-in included `uv` in "the same environment `perk init` checks for", but `check_environment()` never probes `uv` |
+| Outcome | **Source-verified; live execution waived by operator directive** — explicitly not a live-run pass claim |
 
-The operator explicitly waived the release wait and directed the local-only docs delivery to
-proceed. The tutorial therefore keeps its version output generic rather than asserting an
-unpublished release, and this record does not manufacture the §7 evidence. A later gate that
-requires a live tutorial proof must run this row against an available release and replace this
-deferred record with dated identifiers, observed outputs, learning outcome, and cleanup.
+Per-step verification (`docs/user-docs/tutorials/get-started.md`):
 
-## Objective tutorial — deferred by operator override
+| Step | Behavioral claims | Source anchors | Verdict |
+|---|---|---|---|
+| Before you start | Required set `git`/`gh`/`node ≥ 22`/`pi`/`skills` is the init-checked environment; `ast-grep` optional, warn-only never blocking; the exact skills installer commands; `gh` must be authenticated | `src/perk/convergence/env.py` (`check_environment`, `_MIN_NODE_MAJOR = 22`, `_check_optional_tool("ast-grep")`, the skills-CLI remediation strings); `docs/user-docs/reference/requirements-and-compatibility.md` required-tools table | Pass after D6 fix (the lead-in over-claimed `uv` as init-checked; `uv` is now stated as the Step-1 installer only) |
+| Step 1 — Install | `uv tool install perk` installs into uv's tool bin (`~/.local/bin`); `uv tool update-shell` PATH remediation; `perk --version` prints `perk <version>` | uv-owned install behavior consistent with the requirements reference; `src/perk/cli/cli.py` `click.version_option(__version__, prog_name="perk", message="%(prog)s %(version)s")` | Pass |
+| Step 2 — Scratch repo | Plain `gh repo create --private --clone` / `git add|commit|push` usage; no perk behavior claimed | External `gh`/`git` surfaces only | Pass (no perk claims) |
+| Step 3 — Wire the repo | `perk init` scaffolds `.pi/settings.json` + the `.perk/workflow/` cache, writes managed `.gitignore`/`AGENTS.md` blocks, drops `.perk/config.toml` with `[[ci.checks]]` commented out; idempotent re-run is a no-op; interactive init offers guided installs (`gh`/`pi`/`skills`), `gh auth login`, and git identity; `perk doctor` reports grouped checks, green core groups with advisory warnings on a fresh repo | `src/perk/convergence/init/__init__.py` (settings/blocks/workflow-cache convergence, "Already converged (no changes)", `not_a_repo` gate); `templates.py` (commented `[[ci.checks]]` rows); `onboarding.py` (`guide_missing_tools` with `gh`/`pi`/`skills` installers, `offer_gh_login`, git-identity offer); `src/perk/convergence/doctor/checks.py` (grouped checks); corroborated by this file's live doctor baseline (2026-08-13) | Pass |
+| Step 4 — Plan | `perk plan` opens an interactive pi session in read-only plan mode (explore, not edit); approval saves the plan as a GitHub issue, prints its URL, and the session leaves read-only mode | `shared/registry.yaml` `plan` stage (`mode: read-only`, the read-only tool gate); `src/perk/cli/commands/plan/__init__.py`; `extension/factories/planSave.ts` (`approvalSave`: APPROVED review → `perk plan save --json` → "gate exit on a successful save"); `extension/substrate/toolGating.ts` | Pass |
+| Step 5 — Implement | No-argument `perk implement` picks up the active saved plan; explicit issue number accepted (`perk implement 1`); materializes a worktree branch and launches a fresh primed pi session | `src/perk/cli/commands/implement_cmd.py` (optional PLAN argument, active-plan fallback, examples); `src/perk/cli/plan_selection.py` (canonical selection); `shared/registry.yaml` `implement` stage | Pass |
+| Step 6 — /submit | Warm `/submit` opens a **draft** PR for the worktree branch and prints its URL | `extension/doors` submit surface delegating to `perk pr submit` (`src/perk/cli/commands/pr/submit_cmd.py`); `src/perk/github/prs.py` (`draft: bool = True` default on PR creation) | Pass |
+| Step 7 — /ready + /land | `/ready` flips draft → ready-for-review and runs no CI (CI is `/ci` over `[[ci.checks]]`); `/land` squash-merges the PR into `main` | `src/perk/github/prs.py` (`mark_pr_ready` shells `gh pr ready`); `src/perk/cli/commands/pr/ready_cmd.py` (no CI surface — CI lives in `extension/doors/ciExecutor.ts`); `extension/doors/land.ts` ("squash-merges the PR (closing the plan issue)"); `src/perk/delivery/landing.py` (`squash_commit_message`, direct squash) | Pass |
+| Step 8 — /learn | `/learn` captures a durable learning after the merge | `extension/doors/learn.ts` + `learnFactory.ts` (the perk:learn capture) | Pass |
+| Cleanup | `gh repo delete` requires the `delete_repo` scope; `gh auth refresh -h github.com -s delete_repo` remediation | External `gh` behavior, independently proven live in this file's preflight row (P1) | Pass |
+
+## Objective tutorial — source-verified (live execution waived by operator directive)
 
 | Field | Evidence |
 |---|---|
-| Date | 2026-08-13 |
-| Intended mode | Live, external, fresh disposable private GitHub repository; published tutorial steps only |
-| Intended result | Author a two-node incremental objective, plan and land node 1.1, observe auto-done, and capture reconcile output (stale-prose diff or explicit healthy no-op) |
-| Objective / plan / PR identifiers | Not recorded — the walkthrough was not executed |
-| Before/after objective state and reconcile transcript | Not recorded |
-| Expected-output excerpts | Not recorded |
-| Cleanup proof | Not applicable; no walkthrough repository was created |
-| Outcome | **Deferred; no live-run pass claimed** |
+| Date | 2026-08-15 |
+| Executor | Implementing agent (node 5.2 launch gate) |
+| Method | Static source verification per the reviewer directive quoted above: objective authoring, node planning, implement/land, auto-done, and reconcile claims each traced to their owning source and tests. No live run, no disposable repository, no perk command executed as evidence |
+| Source tree | This node's launch-gate SHA ([`docs-site-launch-gate.md`](./docs-site-launch-gate.md), leg A) |
+| Defects | One prose over-claim found and fixed (launch-gate defect log, D6, shared with the get-started row): the Before-you-start parenthetical listed `uv` inside "the environment it checks" |
+| Outcome | **Source-verified; live execution waived by operator directive** — explicitly not a live-run pass claim |
 
-The same operator override applies. No agent-driven or local substitute was used: it would not
-satisfy the matrix's published-steps criterion. A later gate that requires the proof must
-replace this row with the objective, plan, and PR identifiers; `perk objective show` evidence
-from before and after `/land`; the reconcile-turn excerpt plus comment-prose diff or explicit
-no-op; expected outputs; and cleanup.
+Per-step verification (`docs/user-docs/tutorials/drive-an-objective.mdx`):
+
+| Step | Behavioral claims | Source anchors | Verdict |
+|---|---|---|---|
+| Step 1 — Scratch repo | Same `perk init` wiring as Tutorial 1 Step 3 (cross-reference); plain `gh`/`git` seeding | Verified under the get-started Step-3 row above | Pass after D6 fix (the `uv` parenthetical) |
+| Step 2 — Author | `perk objective author` opens a read-only authoring session (the objective mirror of `perk plan`); the draft carries prose + roadmap and asks the delivery choice (incremental recommended; stacked has its own lesson); approval saves a `perk:objective` GitHub issue, activates it, leaves read-only mode, prints the URL; on a Linear backend the objective is a Linear Project; `perk objective show <N>` prints the pinned header/summary/next shape with both nodes `pending` | `shared/registry.yaml` `objective-author` (`mode: read-only`); `extension/factories/objectiveSave.ts` (the `--delivery` choice rides verbatim; sets `active_objective` + budget marker on save); `src/perk/backends/github/objectives.py` (issue body + first `objective-body` comment); `src/perk/backends/linear/project_store.py` (project-backed ObjectiveStore); `src/perk/cli/commands/objective/show_cmd.py` (exact `Objective #<id>: <title>` / `  summary: {…}` / `  next: 1.1` lines); `src/perk/objective/graph.py::summary` (dict-repr key order `pending, planning, in_progress, done, blocked, skipped, total` — matching the tutorial excerpts byte-for-byte in shape) | Pass |
+| Step 3 — Plan the node | `perk objective plan <N>` selects the next actionable node, marks it `planning`, and opens a read-only plan session scoped to that node; approval saves the plan issue linked to the node and advances it to `in_progress`; the sequential follower stays blocked, so `show` reports `next: — (in flight: node 1.1 pr #<plan-issue>)` | `src/perk/cli/commands/objective/plan_cmd.py` (claim → `planning`, read-only plan-mode launch seeded with the node); `src/perk/cli/commands/plan/save_cmd.py` (`--objective-id`/`--node-id`: backlink + `in_progress` advance); `show_cmd.py` (the in-flight `next` line, verbatim format) | Pass |
+| Step 4 — Implement and land | The Tutorial-1 spine claims restated (`perk implement` no-arg pickup, worktree branch, fresh session; `/submit` draft PR; `/ready` no-CI gate flip; `/land` squash-merge) | Verified under the get-started Steps 5–7 rows above | Pass |
+| Step 5 — Close the loop | Auto-done: landing a PR backlinked to a node marks the node `done` with no extra command; `/land` then auto-drives the objective-reconcile pass in the same session; a no-op is a healthy result; the reconcilable prose lives in the objective's first body comment (hence `gh issue view <N> --comments`); the objective closes only when **all** nodes are terminal | `extension/doors/land.ts` (`nodes_marked … marked done`; `driveReconcileAfterLand` injecting `reconcileGuidance`); `src/perk/delivery/finalize.py` (node marking; `closed` true only "when this land completed the roadmap (every node terminal)"); `src/perk/backends/github/objectives.py` (the first `objective-body` comment holds the rendered table + prose); `src/perk/cli/commands/objective/reconcile_cmd.py` (explicit no-op reporting) | Pass |
+| Cleanup | `gh repo delete` + `delete_repo` scope remediation | Same as Tutorial 1 (preflight row P1) | Pass |
 
 ## Dirty-worktree recovery — passed
 
@@ -391,12 +411,29 @@ covers the default-on gate, successful bounded Actions run, zero durable dispatc
 and complete secret/remote/local cleanup without recording any credential value. The walkthrough
 exposed no prose drift, so no defect-log row was added.
 
+## Node 5.2 change audit of the five passed rows — 2026-08-15
+
+The launch gate audited every guide backing a passed 2026-08-13 row for changes since that
+evidence date (`git log --oneline --since=2026-08-13 -- <guide files>`), classifying each
+change per the objective's "do not need to be repeated unless later content changes invalidate
+them" rule. Trailer/related-link normalization and split-page link retargeting leave the
+evidence standing; a changed step, command, or expected output would have required source
+re-verification (never a live re-run, per the reviewer directive). None was found.
+
+| Row | Guide file(s) | Commits since 2026-08-13 | Classification | Disposition |
+|---|---|---|---|---|
+| Dirty-worktree recovery | `how-to/recover-a-dirty-worktree.md` | `6caab05d` (#1767) | Related-link retargeting to the split CLI-reference family (`reference/cli.md#…` → `reference/cli/remote-and-utility.md#…`); no step/command/expected-output change | **Evidence stands** |
+| Doctor diagnosis | `how-to/diagnose-a-perk-repo.md` | `6caab05d` (#1767) | Link retargeting to `reference/cli/setup-and-health.md`; no step/command/expected-output change | **Evidence stands** |
+| CI configuration/verification | `how-to/configure-and-verify-ci-checks.md` + `how-to/run-ci-in-session.md` | `d6549101` (#1749), `a8275055` (#1753), `6fbaa4e9` (#1763), `6caab05d` (#1767) | Related-link retargeting after the in-session / configuration / CLI reference splits, plus one Understand-link swap to `explanation/human-gates-and-trust.md`; no step/command/expected-output change | **Evidence stands** |
+| Provider selection | `how-to/select-a-provider.md` | `a8275055` (#1753), `017966a0` (#1759) | Related-link retargeting after the configuration + providers/backends splits; no step/command/expected-output change | **Evidence stands** |
+| Remote runner | `how-to/set-up-the-remote-runner.md` | `6fbaa4e9` (#1763), `6caab05d` (#1767) | Link retargeting (`reference/cli/setup-and-health.md`; `explanation/headless-and-remote.md` → `.mdx`); no step/command/expected-output change | **Evidence stands** |
+
 ## Defect and rerun log
 
 | ID | Surface | Observation | Resolution | Full rerun required? |
 |---|---|---|---|---|
 | P1 | Preflight cleanup | Initial repository deletion was refused because the active `gh` token lacked `delete_repo`. | Refreshed the token with the documented scope command, deleted the repository, and proved absence. Both tutorials carry this remediation beside their cleanup command. | No — the smoke result remained valid and unconditional cleanup completed in the same attempt. |
-| D1 | Tutorial walkthroughs | No live walkthrough was attempted because the operator waived the release wait. | Recorded as deferred rather than fabricating evidence. | Pending if a later gate requires live proof. |
+| D1 | Tutorial walkthroughs | No live walkthrough was attempted because the operator waived the release wait. | **Resolved 2026-08-15 by the node 5.2 reviewer directive** (quoted in the evidence contract above): live tutorial evidence is replaced by the per-step source-verification records in this file; runtime divergence from documented behavior is explicitly out of the launch gate's scope. No live proof remains pending for the docs-site objective. | No — the directive supersedes the live-proof requirement. |
 | D2 | Worktree setup guide | Source re-verification showed that a failed hook leaves the new worktree in place, so a normal stage retry reuses it and skips setup; the prior guide incorrectly said setup ran again. | Corrected the how-to, configuration reference, and expert mirror to require running the failed and not-yet-run setup commands manually before retrying. | No executable row was assigned; the corrected claim was rechecked against the fresh-creation gate. |
 | D3 | Doctor fixture | Current `perk init` manages `.github/workflows/perk-run.yml`; the planned `perk-runner.yml` fixture name does not exist. | Used the emitted managed path, which fired the intended `runner-workflow` check in `repository`. | No — corrected before the published steps began; the complete walkthrough then passed. |
 | D4 | CI result surface | Warm `/ci` intentionally surfaces only the one-line overall summary; the prior guides/reference attributed the detailed per-check report to it. | Corrected the how-tos, in-session/config references, and expert mirrors: warm `/ci` is the summary twin; `run_ci` returns the detailed ordered report. | Yes — reran the complete CI walkthrough from a clean committed trunk after the guide text was final. |
