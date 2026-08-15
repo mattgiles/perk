@@ -250,6 +250,47 @@ def test_adopt_issue_as_objective_idempotent(monkeypatch):
     assert not any("PATCH" in c for c in rec.calls)
 
 
+def test_adopt_issue_as_objective_refuses_a_plan_carrier(monkeypatch):
+    # Wrong-kind writer guard (§8.30): a plan-header'd body refuses BEFORE any mutation —
+    # closes the `objective create --adopt-from` direct-save bypass at the writer.
+    plan_body = plan.render_metadata_block(plan.PLAN_HEADER_KEY, {"run_id": "01P", "created": "t"})
+    rec = _GhDispatch(
+        [
+            (_has("issues", "GET"), _Proc(0, "[]")),  # find_objective_issue -> none
+            (
+                _has("view", "number,title,body,state,url"),
+                _Proc(
+                    0,
+                    json.dumps(
+                        {
+                            "number": 7,
+                            "title": "Plan issue",
+                            "body": plan_body,
+                            "state": "OPEN",
+                            "url": "u7",
+                        }
+                    ),
+                ),
+            ),
+        ]
+    )
+    monkeypatch.setattr(subprocess, "run", rec)
+    with pytest.raises(github.GitHubError, match="wrong kind for objective adoption"):
+        objectives.adopt_issue_as_objective(
+            number=7,
+            title="t",
+            prose="p",
+            repo_root=ROOT,
+            run_id="01RID",
+            roadmap_nodes=[
+                objective.ObjectiveNode(
+                    id="1.1", description="A", status=objective.NodeStatus.PENDING
+                )
+            ],
+        )
+    assert rec.method_calls("POST") == 0 and rec.method_calls("PATCH") == 0
+
+
 def test_adopt_issue_as_objective_rejects_empty_roadmap(monkeypatch):
     rec = _GhDispatch([(_has("issues", "GET"), _Proc(0, "[]"))])
     monkeypatch.setattr(subprocess, "run", rec)

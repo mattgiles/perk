@@ -206,21 +206,19 @@ class LinearIssueBackend:
             raise IssueBackendError(f"unknown plan-header field(s): {sorted(unknown)}")
         nodes = self._ops.issue_attachments(issue_id)
         found = attachments.find_perk_attachment(nodes, kind=attachments.PLAN_HEADER_KIND)
-        merged = {**(found.payload if found is not None else {}), **fields}
-        if found is not None:
-            # Reuse the found attachment's URL — the upsert identity (never re-derive it, which
-            # would orphan the existing card on an identifier-keyed plan).
-            url = found.url
-        else:
-            # Under the clean break a Linear plan issue always got its attachment at create; an
-            # absent attachment with no run_id to key a fresh URL is a loud invariant violation.
-            run_id = merged.get("run_id")
-            if not isinstance(run_id, str) or not run_id:
-                raise IssueBackendError(
-                    f"Linear plan issue {issue_id!r} has no plan-header attachment and no run_id "
-                    "to key one"
-                )
-            url = attachments.plan_header_url(run_id)
+        # Merge-only: an absent attachment is an unconditional refusal (never a fresh create —
+        # plan-header creation is confined to the named seams). A present-but-corrupt payload
+        # already failed loud above (find_perk_attachment's strict decode).
+        if found is None:
+            raise IssueBackendError(
+                f"Linear issue {issue_id!r} has no plan-header attachment — update_plan_header "
+                "is merge-only (plan-header creation is confined to create_plan_issue, "
+                "adoption, and the node-plan unification writer)"
+            )
+        merged = {**found.payload, **fields}
+        # Reuse the found attachment's URL — the upsert identity (never re-derive it, which
+        # would orphan the existing card on an identifier-keyed plan).
+        url = found.url
         if dry_run:
             return issue_backend.PlanHeaderUpdate(fields_updated=tuple(fields), dry_run=True)
         self._ops.upsert_perk_attachment(
@@ -273,8 +271,12 @@ class LinearIssueBackend:
             return None
         with translate_validation_errors(IssueBackendError, source=f"read plan issue {issue_id!r}"):
             node = LinearIssueNodeModel.model_validate(issue)
+        attachment_nodes = node.attachment_nodes()
+        # Strict plan reconstruction (unchanged): a perk-marked plan attachment with a corrupt
+        # payload keeps failing loud HERE — fail-early at every door, before any side effect.
+        # Presence-only tolerance lives in the flags below (and in `read_issue`), never here.
         found = attachments.find_perk_attachment(
-            node.attachment_nodes(), kind=attachments.PLAN_HEADER_KIND
+            attachment_nodes, kind=attachments.PLAN_HEADER_KIND
         )
         header = found.payload if found is not None else {}
         # The shared tolerant read-boundary parser (§8.54): a malformed/non-positive header `pr`
@@ -288,6 +290,12 @@ class LinearIssueBackend:
             header=header,
             pr=pr,
             state=node.normalized_state(),
+            has_plan_header=attachments.has_perk_attachment(
+                attachment_nodes, kind=attachments.PLAN_HEADER_KIND
+            ),
+            has_objective_header=attachments.has_perk_attachment(
+                attachment_nodes, kind=attachments.OBJECTIVE_HEADER_KIND
+            ),
         )
 
     def _get_pr(self, number: int) -> github.PullRequest | None:
@@ -335,6 +343,9 @@ class LinearIssueBackend:
             already_plan=attachments.has_perk_attachment(
                 node.attachment_nodes(), kind=attachments.PLAN_HEADER_KIND
             ),
+            already_objective=attachments.has_perk_attachment(
+                node.attachment_nodes(), kind=attachments.OBJECTIVE_HEADER_KIND
+            ),
         )
 
     def adopt_issue_as_plan(
@@ -349,6 +360,16 @@ class LinearIssueBackend:
     ) -> issue_backend.IssueRef:
         if dry_run:
             return issue_backend.IssueRef(id=issue_id, url="(dry-run)", existed=True)
+        # Wrong-kind writer guard (presence-only, before the first mutation): an objective-
+        # metadata carrier is never adoptable as a plan. One extra read on an adoption write —
+        # acceptable for a rare mutation.
+        if attachments.has_perk_attachment(
+            self._ops.issue_attachments(issue_id), kind=attachments.OBJECTIVE_HEADER_KIND
+        ):
+            raise IssueBackendError(
+                f"Linear issue {issue_id!r} carries an objective-header attachment — wrong kind "
+                "for plan adoption (objectives are planned via perk objective plan)"
+            )
         # (a) ensure + additively add the perk:plan label (issueUpdate's labelIds REPLACES the
         # set, so read the existing ids and union the plan label in — never clobber them).
         label_id, _ = self._ops._ensure_label_id(

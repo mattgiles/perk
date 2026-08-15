@@ -1,5 +1,35 @@
 {
   "$defs": {
+    "_CorruptionFindingOut": {
+      "additionalProperties": false,
+      "description": "One kind-corruption finding over the objective's issue-tier carrier (report-only \u2014\n``--fix`` never touches it; no repair code path exists).",
+      "properties": {
+        "code": {
+          "title": "Code",
+          "type": "string"
+        },
+        "carrier": {
+          "title": "Carrier",
+          "type": "string"
+        },
+        "message": {
+          "title": "Message",
+          "type": "string"
+        },
+        "remediation": {
+          "title": "Remediation",
+          "type": "string"
+        }
+      },
+      "required": [
+        "code",
+        "carrier",
+        "message",
+        "remediation"
+      ],
+      "title": "_CorruptionFindingOut",
+      "type": "object"
+    },
     "_DriftConditionOut": {
       "additionalProperties": false,
       "properties": {
@@ -432,6 +462,13 @@
           "type": "null"
         }
       ]
+    },
+    "corruption": {
+      "items": {
+        "$ref": "#/$defs/_CorruptionFindingOut"
+      },
+      "title": "Corruption",
+      "type": "array"
     }
   },
   "required": [
@@ -442,7 +479,8 @@
     "fix",
     "redirected_from",
     "train",
-    "train_fix"
+    "train_fix",
+    "corruption"
   ],
   "title": "ObjectiveDoctorOut",
   "type": "object"

@@ -226,7 +226,10 @@ Do the work on a branch; requires fresh context (cold-only). `PLAN` is an option
 `.../issue/IDENT` or `.../project/SLUG`), which is peeled to the id; omit it to implement the active
 saved plan in this repo (selection precedence and the strict `--` pass-through grammar are above).
 An explicit `PLAN` drives the launch directly and updates only the main-checkout selector —
-invoked from inside a linked worktree it never rewrites that worktree's own binding. The worktree
+invoked from inside a linked worktree it never rewrites that worktree's own binding. An existing
+issue that carries **no plan-header** refuses before any launch (`issue_kind_mismatch` — positive
+plan identification; a GitHub objective issue's refusal names the right door,
+`perk objective plan <N>`). The worktree
 branch is cut from the plan's pinned base (`origin/<base>`) when the plan declared one, else
 `origin/<trunk>` (see
 [Target a non-default base branch](../how-to/target-a-non-default-base-branch.md)). Adds `--base`
@@ -323,7 +326,9 @@ remotely runnable (`implement`/`address`) — gate and `learn` outcomes stay loc
 machine-readable report carrying the verdict in a `next_action` field. A merged plan's
 learn-vs-done resolution reads the canonical plan-header `learn_state` field (so it works from any
 machine or a fresh clone); the local pending-learn marker is only the fallback for legacy plans
-that predate the field.
+that predate the field. An existing issue with no plan-header refuses before any classification
+or launch (`issue_kind_mismatch` — positive plan identification; a GitHub objective issue's
+refusal names `perk objective plan <N>`).
 
 ### `perk plan replan PLAN`
 
@@ -344,8 +349,10 @@ metadata **additively** into the *same* issue — the plan-header block (with `a
 provenance), the `perk:plan` label, the impl callout, and the plan-body comment — preserving the
 human title/body verbatim and **never minting a second object**. Local-only (`cold_remote:false`);
 `--dry-run` materializes the source issue and prints the seed without launching; `--worktree` and
-`--json` are also accepted. Refuses when the issue is not found, not open, or already a perk plan
-(use [`perk plan replan`](#perk-plan-replan-plan) for the latter). See
+`--json` are also accepted. Refuses when the issue is not found, not open, already a perk plan
+(use [`perk plan replan`](#perk-plan-replan-plan) for the latter), or a perk **objective**
+(`issue_kind_mismatch` — objectives are not adoptable as plans; on GitHub the message names
+`perk objective plan <N>`). See
 [Adopt an existing issue as a plan](../how-to/adopt-an-existing-issue.md).
 
 `ISSUE` may also be a path to a **local file** (relative to your shell's cwd, or absolute). When the
@@ -448,8 +455,10 @@ model-authored prose, and the original overview preserved verbatim in an `Adopte
 note — **never minting a second project/issue**. On Linear, a roadmap node's optional `adopt_issue`
 field maps it to an existing project issue (reused in place, title/body verbatim); GitHub is bounded
 to a single issue (no child mapping). `--dry-run` materializes the source and prints the seed
-without launching. Refuses when the source is not found, not open (GitHub issues only), or already a
-perk objective. See [Adopt an existing project as an objective](../how-to/adopt-an-existing-project.md).
+without launching. Refuses when the source is not found, not open (GitHub issues only), already a
+perk objective, or (GitHub issues only) already a perk **plan** (`already_a_plan` — plans are not
+adoptable as objectives; re-author with `perk plan replan <id>` or author a fresh objective). See
+[Adopt an existing project as an objective](../how-to/adopt-an-existing-project.md).
 
 `--from <source>` may also be a path to a **local file** (relative or absolute). When it resolves to
 an existing file, perk runs **seed-from-file** mode: it reads the file as untrusted seed DATA, primes
@@ -622,9 +631,20 @@ each conditional write, post-write verification, and a compensating rollback + l
 observed drift. Doctor never repairs plan identity, checkpoints, journal history, branches,
 PRs, or native stack membership — those findings carry explicit remediations instead.
 `--dry-run` (with `--fix`) plans both repair batches without writing. Report-only conditions
-perk has no authority to auto-resolve are surfaced but never touched. `--json` emits the full
-report (`drift`/`fix` plus the additive `redirected_from`/`train`/`train_fix`); the exit code
-conveys an unavailable train or an aborted repair (`1`) while the assembled report stays
+perk has no authority to auto-resolve are surfaced but never touched.
+
+A third, **report-only** check rides every report: the **both-headers corruption signature**.
+Doctor resolves the objective's issue-tier carrier (on GitHub the objective issue itself; on a
+Linear-Project objective the metadata **sentinel** issue) and reads it presence-only; a carrier
+bearing BOTH `objective-header` and `plan-header` metadata yields one `both_headers` finding in
+the `corruption` field — one header was stamped onto the wrong kind of carrier. The finding is
+direction-neutral (the stray side is not provable from the carrier alone), never auto-repaired
+(`--fix` has no repair arm for it), printed in the human report only when detected, and keeps
+exit `0` (a detected finding is still a clean report).
+
+`--json` emits the full
+report (`drift`/`fix` plus the additive `redirected_from`/`train`/`train_fix`/`corruption`); the
+exit code conveys an unavailable train or an aborted repair (`1`) while the assembled report stays
 `success: true`. See
 [How to check an objective for drift](../how-to/check-an-objective-for-drift.md).
 
@@ -952,6 +972,7 @@ a real launch updates only the main-checkout selector; omit it to address the ac
 (inside a plan worktree, that worktree's own binding). `perk address 1699 --remote` dispatches
 exactly the selected plan; `--worktree` + `--remote` is refused. A missing `plan-<id>` checkout
 is restored from the existing `origin/plan-<id>` branch; typed refusals (`plan_not_found`,
+`issue_kind_mismatch` (an existing issue with no plan-header — positive plan identification),
 `worktree_unbound`, `worktree_branch_mismatch`, `worktree_plan_mismatch`,
 `worktree_restore_failed`) exit 1 before any launch. `--preview`
 classifies the feedback only and takes no action (the warm `/address --preview` gesture; local-only,
@@ -980,9 +1001,11 @@ command (not a merged L+W: `ready` is not a registry stage and has no launcher).
 optional plan issue id or pasted issue URL: it selects the plan canonically with one backend
 read, so `perk pr ready 1699` works from the repository root — ready needs no source files, no
 worktree, and never writes the active-plan selector; omitted, the invoking checkout's own saved
-plan is used (inside a plan worktree, that worktree's binding). `--dry-run` is an offline
-validation preview: it parse-checks an explicit `PLAN` and confirms a saved plan exists on the
-no-argument form, but performs no backend or GitHub read — no PR is resolved or marked. For a stacked plan, the worker reconstructs the train and
+plan is used (inside a plan worktree, that worktree's binding). An explicit `PLAN` naming an
+existing issue with no plan-header refuses typed (`issue_kind_mismatch`). `--dry-run` is an
+offline validation preview: it parse-checks an explicit `PLAN` and confirms a saved plan exists
+on the no-argument form, but performs no backend or GitHub read — no PR is resolved or marked
+(and nothing is kind-classified). For a stacked plan, the worker reconstructs the train and
 fetches the projection-correlated PR: the target must be exactly published; marking a draft also
 requires no unresolved operation and no structural train blocker (unrelated operational drift does
 not block). An already-ready PR revalidates target identity/publication but skips those global

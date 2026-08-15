@@ -49,14 +49,25 @@ def _neutral_state(
 ) -> issue_backend.PlanState:
     """The backend-neutral shape consumed by the pure resolution functions."""
     return issue_backend.PlanState(
-        id="7", url="https://gh/o/r/issues/7", title="T", header=header or {}, pr=pr, state="OPEN"
+        id="7",
+        url="https://gh/o/r/issues/7",
+        title="T",
+        header=header or {},
+        pr=pr,
+        state="OPEN",
+        has_plan_header=True,
     )
 
 
 def _state(*, header: dict | None = None, pr: github.PullRequest | None = None) -> plans.PlanState:
     """The github-native shape returned by monkeypatched ``plans.get_plan`` fakes."""
     return plans.PlanState(
-        number=7, url="https://gh/o/r/issues/7", title="T", header=header or {}, pr=pr
+        number=7,
+        url="https://gh/o/r/issues/7",
+        title="T",
+        header=header or {},
+        pr=pr,
+        has_plan_header=True,
     )
 
 
@@ -495,6 +506,23 @@ def test_plan_not_found_exits_1(monkeypatch, unborn_git_repo_factory):
         assert result.exit_code == 1
         # Parse stdout (not the combined .output): the real-path `looking up …` line is on stderr.
         assert json.loads(result.stdout)["error_type"] == "plan_not_found"
+
+
+def test_headerless_issue_refuses_kind_mismatch(monkeypatch, unborn_git_repo_factory):
+    """Positive plan identification (contracts §8.1): an existing issue with no plan-header
+    must never bind and launch as a plan — the demonstrated wrong-kind entry, closed."""
+    _authed(monkeypatch)
+    monkeypatch.setattr(
+        plans,
+        "get_plan",
+        lambda **k: plans.PlanState(number=63, url="u/63", title="T", header={}, pr=None),
+    )
+    runner = CliRunner()
+    with runner.isolated_filesystem() as d:
+        _git_init(d, unborn_git_repo_factory)
+        result = runner.invoke(cli, ["plan", "resume", "63", "--json"])
+        assert result.exit_code == 1
+        assert json.loads(result.stdout)["error_type"] == "issue_kind_mismatch"
 
 
 def test_backend_error_exits_1(monkeypatch, unborn_git_repo_factory):

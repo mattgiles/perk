@@ -251,6 +251,12 @@ def adopt_issue_as_objective(
     src = plans.read_issue(number=number, repo_root=repo_root)
     if src is None:
         raise _exec.GitHubError(f"issue #{number} not found")
+    # Wrong-kind writer guard (presence-only, before any mutation): a plan carrier is never
+    # adoptable as an objective — a gist carries `gist-header`, so gist adoption is exempt.
+    if plan.has_metadata_block(src.body, plan.PLAN_HEADER_KEY):
+        raise _exec.GitHubError(
+            f"issue #{number} carries a plan-header — wrong kind for objective adoption"
+        )
 
     # (b) ensure + additively add the perk:objective label (never replaces the issue's labels).
     plans.create_label(

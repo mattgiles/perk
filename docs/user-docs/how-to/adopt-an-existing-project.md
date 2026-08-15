@@ -68,7 +68,11 @@ child-issue mapping and no project concept — `adopt_issue` is ignored.
 - **is not open** (GitHub issues only — Linear projects have no open/closed state) — reopen it or
   author a fresh objective;
 - **is already a perk objective** — reconcile it with
-  [`perk objective reconcile`](reconcile-an-objective.md) or plan its nodes normally instead.
+  [`perk objective reconcile`](reconcile-an-objective.md) or plan its nodes normally instead;
+- **is already a perk plan** (GitHub issues only — `already_a_plan`) — plans are not adoptable
+  as objectives; re-author it with [`perk plan replan <id>`](replan-an-open-plan.md) or author a
+  fresh objective. The refusal is enforced at the backend writer too, so
+  `perk objective create --adopt-from` cannot bypass it.
 
 ## From a local file
 

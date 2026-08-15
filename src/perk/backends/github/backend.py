@@ -206,6 +206,8 @@ class GitHubIssueBackend:
             header=state.header,
             pr=state.pr,
             state=state.state,
+            has_plan_header=state.has_plan_header,
+            has_objective_header=state.has_objective_header,
         )
 
     def get_plan_body(self, *, issue_id: str) -> str | None:
@@ -229,6 +231,7 @@ class GitHubIssueBackend:
             # Normalize `gh issue view`'s casing into the contract's OPEN/CLOSED vocabulary.
             state="CLOSED" if found.state.upper() == "CLOSED" else "OPEN",
             already_plan=plan.has_metadata_block(found.body, plan.PLAN_HEADER_KEY),
+            already_objective=plan.has_metadata_block(found.body, objective.OBJECTIVE_HEADER_KEY),
         )
 
     def adopt_issue_as_plan(

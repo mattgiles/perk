@@ -253,6 +253,22 @@ The local cache tier — written and read by **both** the CLI (exterior) and the
     dispatch and never re-read from the mutable selector after selection. `--worktree NAME` is
     directory positioning only (never plan identity or branch — the branch is always
     `plan-<id>` from selection) and is refused with `--remote` (`invalid_input`).
+  - **Positive plan identification (the kind guard).** Explicit-id selection at the four
+    guarded doors — the three `select_plan` callers (`implement`, `pr address`/flat `address`,
+    `pr ready`) plus `plan resume`'s own read — refuses an existing issue that carries **no
+    plan-header** (`PlanState.has_plan_header`, presence-only kind evidence from the backend's
+    own storage: body metadata blocks on GitHub, perk attachments on Linear — never a payload
+    decode): typed `issue_kind_mismatch` via `plan_selection.require_plan_kind`. A GitHub
+    objective-header'd issue names the right door (`perk objective plan <N>`); the hint is
+    GitHub-only — a Linear metadata-sentinel issue refuses with the generic message, and a
+    Linear **Project** id never reaches the arm (`get_plan` returns `None` → `plan_not_found`,
+    the honest miss). A present-but-malformed header still identifies a plan (kind vs health
+    are separate concerns), and a **both-headers** carrier still selects as a plan (its plan
+    side can be legitimate mid-incident; `perk objective doctor`'s corruption check is the
+    both-headers surface, §8.54). `plan watch`/the positioner are explicitly **not**
+    entry-guarded — their wrong-kind protection is the §8.4 merge-only write seam. `pr ready
+    --dry-run` performs no backend read, so the offline preview classifies nothing (kind
+    included; the existing exception, kept).
 
 State keys (registry vocabulary): `cache.plan`, `cache.plan-ref`, `cache.scratch`,
 `cache.handoff`, `cache.markers`, `cache.session-data`.
@@ -647,6 +663,17 @@ reopen_pr{ number }                                 -> void
 update_plan_header{ issue, fields }                 -> PlanHeaderUpdate{ fields_updated[], dry_run }
     # GET issue body -> merge fields into the plan-header block -> PATCH .../issues/{n}
     # rejects unknown header keys (LBYL on the schema); submit sets branch/pr/lifecycle_stage=impl
+    # MERGE-ONLY on both backends: refuses (before the dry-run return) when the backend's own
+    # storage carries no plan-header for the issue — GitHub: no plan-header body block;
+    # Linear: no plan-header attachment (the old run_id-keyed creation fallback is gone).
+    # Plan-header creation is confined to create_plan_issue, §8.29 adoption, and the Linear
+    # node-plan unification writer (save_node_plan). The refusal rides the backend error
+    # channel (GitHubError/IssueBackendError ⇒ github_error at CLI boundaries) — an invariant
+    # violation of a later-lifecycle write, not a selection error. Malformed-but-present
+    # GitHub shapes keep today's behavior (presence is kind evidence either way): open+close
+    # markers with unparseable YAML merge over {} (block replaced wholesale — an incidental
+    # self-heal); an open marker with no close marker makes replace_metadata_block a no-op
+    # (the write PATCHes an unchanged body while reporting fields updated).
 prepend_plan_callout{ issue, callout, command }     -> bool
     # GET issue body -> plan.prepend_callout(body, callout, command=) -> PATCH .../issues/{n}
     # idempotent on `command`; True iff a write occurred (False when already present / dry-run)
@@ -4340,9 +4367,11 @@ are verbatim human content". A normally-authored plan leaves it `None`.
 (mirrors `replan`/`resume`; `from` is a valid Click command string). It performs every Linear/GitHub
 read up front (the read-only plan-mode session has no `gh`/Linear access), then re-launches the
 `plan` stage seeded to author a plan over the materialized source. It **refuses** when: the issue is
-not found (`adopt_not_found`), not OPEN (`adopt_not_open`), or already a perk plan
+not found (`adopt_not_found`), not OPEN (`adopt_not_open`), already a perk plan
 (`AdoptableIssue.already_plan` — backend-decided: GitHub the body block, Linear the plan-header
-attachment → `already_a_plan`, hinting `perk plan replan <id>`).
+attachment → `already_a_plan`, hinting `perk plan replan <id>`), or a perk **objective**
+(`AdoptableIssue.already_objective` — presence-only, backend-decided like `already_plan` →
+`issue_kind_mismatch`; the GitHub message names the right door, `perk objective plan <N>`).
 Engagement is read fail-soft (`render_adopted_engagement` → `<untrusted_adopted_issue_engagement>`;
 `IssueBackendError` → omitted). The source is materialized to `scratch/adopt-<issue_id>.md` (title +
 body wrapped in `<untrusted_adopted_issue>` + the optional engagement block). A **fresh** `run_id`
@@ -4364,6 +4393,17 @@ prints the header/body (now including `adopted_from`) without writes.
 **Doctor (awareness note, not a check).** An adopted plan is identified by a populated
 `adopted_from` plan-header field; `doctor` does **not** rewrite or validate the human prose/title —
 the substantive deliverable is this contract section, not a new validating check.
+
+**Wrong-kind refusal at the writer (the mutation boundary).** `adopt_issue_as_plan` itself
+refuses an **objective-metadata carrier** before its first mutation, on both backends — GitHub:
+an `objective-header` body block on the source read it already performs; Linear: an
+`objective-header` attachment (one extra presence-only read on this rare mutation) — raising the
+backend error (“wrong kind for plan adoption”). This closes the `perk plan save --adopt-from`
+direct-invocation bypass and the door-gather→save race window; the door's `already_objective`
+refusal above is the friendlier typed UX layer over the same rule. **Gists are exempt** in both
+directions: a gist carries `gist-header`, so no refusal fires and the sanctioned
+plan-header-beside-gist-header stamp keeps working. Residual: the writer's read→PATCH race
+window is inherent to non-transactional backends (accepted).
 
 **Backend parity.** Honest on **both** GitHub and Linear (+ clean fake conformers). Live validation
 is a preview-grade observation here (Mode 7); final live
@@ -4463,6 +4503,10 @@ reconcile. Mapped issues' titles/bodies are independently preserved verbatim by 
 `adopt_not_found` (source `None`); GitHub-only `adopt_not_open` (the source issue is CLOSED, via the
 issue tier's `read_issue.state` — skipped for Linear projects, which have no OPEN/CLOSED);
 `already_an_objective` (the source prose already carries an `objective-header` block);
+GitHub-only `already_a_plan` (the source issue carries perk's plan metadata —
+`read_issue.already_plan`, checked in the same issue-tier read arm as the OPEN check; the
+message points at `perk plan replan <id>` or a fresh objective; Linear sources are Projects
+with no issue-tier read — honestly skipped, matching the OPEN check's scoping);
 `adopt_unsupported` (a `None` adoption return — in practice the resolver never returns the dormant
 store). Project-level engagement is read fail-soft (`render_adopted_engagement(comments, ())` →
 `<untrusted_adopted_issue_engagement>`; `ObjectiveStoreError` → omitted; per-issue engagement is
@@ -4482,6 +4526,14 @@ save it parses `adopt_map = parse_adopt_mapping(raw)` from the same `--roadmap` 
 produces a fresh perk objective, `existed=False`). `--dry-run` falls through to the offline
 `create_objective(dry_run=True)` compose-preview (the writer returns `None` on dry-run). No
 mutual-exclusion guard is needed (`objective create` has no `--node-id`).
+
+**Wrong-kind refusal at the writer (the mutation boundary).** GitHub
+`objectives.adopt_issue_as_objective` (the `adopt_source_as_objective` substrate) refuses a
+**plan-header carrier** before any mutation, keyed on the source body it already reads
+(“wrong kind for objective adoption”) — closing the `objective create --adopt-from` direct
+bypass, symmetric with §8.29's writer guard. The Linear **project** store adopts Projects (no
+issue-tier carrier — nothing to guard); the dormant issue-backed Linear store's adoption writer
+is out of scope. Gists stay exempt (a gist carries `gist-header`).
 
 **Backend parity.** Honest on **both** GitHub and Linear (+ clean fake conformers). Live validation
 is preview-grade here (Mode 8); final live proof is Node
@@ -7764,12 +7816,31 @@ repair aborted first — no train action, initial diagnosis remains), `unavailab
 records the verification failure)). Sequence: initial manifest/train reports → existing
 manifest repair → reconstruct if the manifest changed → per-action fresh conditional repair →
 final diagnosis in `remaining`. Top-level payload order stays
-`success,error_type,objective,drift,fix` then appends `redirected_from,train,train_fix`
-(without `--fix`, `train_fix` is null). An assembled report keeps `success: true`/null error;
-the EXIT code conveys unavailability/aborted repair: detect-with-findings 0; detect-unavailable
-1; manifest-abort 1; current-train-unavailable 1; write/verification abort 1; fix-succeeded
-(report-only drift remaining) 0; not-a-repo the fail envelope 2; active-resolution/store
-failure the fail envelope 1.
+`success,error_type,objective,drift,fix` then appends `redirected_from,train,train_fix,
+corruption` (without `--fix`, `train_fix` is null). An assembled report keeps `success:
+true`/null error; the EXIT code conveys unavailability/aborted repair: detect-with-findings 0;
+detect-unavailable 1; manifest-abort 1; current-train-unavailable 1; write/verification abort
+1; fix-succeeded (report-only drift remaining) 0; not-a-repo the fail envelope 2;
+active-resolution/store failure the fail envelope 1.
+
+**The both-headers corruption signature (report-only).** A third check rides every doctor
+report: `corruption: [_CorruptionFindingOut{code, carrier, message, remediation}]` (appended
+last — additive). The check resolves the ACTIVE objective's **issue-tier carrier** via the
+§8.43 `journal_carrier_id` (GitHub → the objective issue; Linear project store → the metadata
+**sentinel** issue's identifier — so a sentinel bearing both attachments is detected) and reads
+it **presence-only** via `IssueBackend.read_issue` (never `get_plan`, whose header-`pr` chase
+could abort the whole report on a PR-lookup infra failure). A carrier whose read shows
+`already_plan AND already_objective` yields exactly one `both_headers` finding (its `carrier`
+field = the resolved carrier id); a healthy or unresolvable carrier yields `[]`. Cost: up to
+two bounded reads per report. Semantics: **report-only** (`--fix` never touches it — no repair
+code path exists), **direction-neutral** (the signature cannot prove which header is the
+stray one; remediation is provenance inspection — issue history, each header's `run_id` — with
+manual removal, or supersession via `perk objective replan <active>` when the objective side is
+live), **active-objective-targeted** (a superseded predecessor is redirected away — the
+supersession IS the worked remediation), **exit-0** (a detected finding is still a clean
+report), and the human render prints the `Corruption:` part only when detected (clean runs'
+output is byte-unchanged). An `IssueBackendError` from the check fails the report as
+`github_error` (the assembly boundary's posture).
 
 **Compatibility.** No provenance ⇒ byte-existing behavior; the stack-status JSON shape is
 unchanged (new findings and `intent: canceled` are values inside existing string fields);

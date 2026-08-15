@@ -10,9 +10,8 @@ from pathlib import Path
 from click.testing import CliRunner
 
 from perk import github, objective, plan
-from perk.backends import objective_store, resolve
+from perk.backends import issue_backend, objective_store, resolve
 from perk.backends.github import engagement as gh_engagement
-from perk.backends.github import plans
 from perk.cli.cli import cli
 from perk.run import launch
 
@@ -63,12 +62,23 @@ class _FakeStore:
         return tuple(self._comments)
 
 
-def _stub(monkeypatch, *, store, sink: dict | None = None, issue_state="OPEN"):
+def _stub(
+    monkeypatch, *, store, sink: dict | None = None, issue_state="OPEN", issue_already_plan=False
+):
     monkeypatch.setattr(resolve, "resolve_objective_store", lambda _root: store)
 
     class _Backend:
         def read_issue(self, *, issue_id):
-            return plans.IssueRead(number=1, url="u", title="t", body="b", state=issue_state)
+            # The NEUTRAL read (`resolve_issue_backend` is what's patched): the door consumes
+            # `AdoptableIssue.state`/`already_plan` directly.
+            return issue_backend.AdoptableIssue(
+                id=str(issue_id),
+                url="u",
+                title="t",
+                body="b",
+                state=issue_state,
+                already_plan=issue_already_plan,
+            )
 
     monkeypatch.setattr(resolve, "resolve_issue_backend", lambda _root: _Backend())
     if sink is not None:
@@ -180,6 +190,25 @@ def test_refuses_already_an_objective(monkeypatch, unborn_git_repo_factory):
         payload = json.loads(result.stdout)
         assert payload["error_type"] == "already_an_objective"
         assert "reconcile" in payload["message"]
+
+
+def test_github_backend_refuses_a_plan_carrier(monkeypatch, unborn_git_repo_factory):
+    # Wrong-kind door refusal (§8.30): a plan-header'd GitHub issue is never adoptable as an
+    # objective — symmetric with `plan from`'s already_an_objective refusal.
+    _authed(monkeypatch)
+    _stub(
+        monkeypatch,
+        store=_FakeStore(backend_id="github", source=_source()),
+        issue_already_plan=True,
+    )
+    runner = CliRunner()
+    with runner.isolated_filesystem() as d:
+        _git_init(d, unborn_git_repo_factory)
+        result = runner.invoke(cli, ["objective", "author", "--from", "7", "--json"])
+        assert result.exit_code == 1
+        payload = json.loads(result.stdout)
+        assert payload["error_type"] == "already_a_plan"
+        assert "perk plan replan 7" in payload["message"]
 
 
 def test_github_backend_refuses_closed_issue(monkeypatch, unborn_git_repo_factory):

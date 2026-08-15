@@ -39,7 +39,10 @@ This runs in a **read-only** session and is **local-only**.
 - **does not exist** — nothing to adopt;
 - **is not open** — adoption stamps an *open* human issue; reopen it or author a fresh plan;
 - **is already a perk plan** — use [`perk plan replan <id>`](replan-an-open-plan.md) to re-author
-  it in place instead.
+  it in place instead;
+- **is a perk objective** (`issue_kind_mismatch`) — objectives are not adoptable as plans; on
+  GitHub the message names the right door, `perk objective plan <N>`. The refusal is enforced at
+  the backend writer too, so `perk plan save --adopt-from` cannot bypass it.
 
 > **Adopt vs. plan vs. replan.** `from` adopts a **pre-existing human issue** in place; a bare
 > [`perk plan`](../reference/cli.md#perk-plan) authors a fresh plan (minting a new issue on save);

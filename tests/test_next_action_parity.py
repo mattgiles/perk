@@ -87,7 +87,9 @@ def test_both_dry_runs_report_the_same_next_action(monkeypatch, pr, header, feed
     monkeypatch.setattr(
         plans,
         "get_plan",
-        lambda **k: plans.PlanState(number=7, url="u/7", title="P", header=header, pr=pr),
+        lambda **k: plans.PlanState(
+            number=7, url="u/7", title="P", header=header, pr=pr, has_plan_header=True
+        ),
     )
     monkeypatch.setattr(objectives, "get_objective", lambda **k: _objective_state())
     if feedback is not None:

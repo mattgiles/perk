@@ -167,6 +167,16 @@ def plan_from(
                     "to re-author it in place.",
                     error_type="already_a_plan",
                 )
+            if src.already_objective:
+                # Wrong-kind refusal (the door-level twin of the writer guard): an objective
+                # carrier is never adoptable as a plan. The right-door hint is GitHub-only —
+                # only there does the issue id equal the objective id.
+                message = (
+                    f"Issue {issue_id} is a perk objective — objectives are not adoptable as plans."
+                )
+                if backend.backend_id == "github":
+                    message += f"\nPlan its next node instead:\n  perk objective plan {issue_id}"
+                raise UserFacingCliError(message, error_type="issue_kind_mismatch")
 
             # Read the issue's human engagement, fail-soft: a backend hiccup must never break the
             # adoption launch. Empty/None on no engagement → the scratch + seed are byte-unchanged.
