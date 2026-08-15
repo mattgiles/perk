@@ -30,7 +30,8 @@
     ]
   },
   "workspaces": [
-    "docs/site"
+    "docs/site",
+    "tools/prose-review"
   ],
   "scripts": {
     "typecheck": "tsc --noEmit",
@@ -40,7 +41,9 @@
     "docs:build": "npm run build --workspace docs/site",
     "docs:preview": "npm run preview --workspace docs/site",
     "docs:typecheck": "npm run typecheck --workspace docs/site",
-    "docs:check": "npm run check --workspace docs/site"
+    "docs:check": "npm run check --workspace docs/site",
+    "prose-review:build": "npm run build --workspace tools/prose-review",
+    "prose-review:typecheck": "npm run typecheck --workspace tools/prose-review"
   },
   "peerDependencies": {
     "@earendil-works/pi-ai": "*",

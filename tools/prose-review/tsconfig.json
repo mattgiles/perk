@@ -4,8 +4,9 @@
     "module": "ESNext",
     "moduleResolution": "Bundler",
     "allowImportingTsExtensions": true,
-    "lib": ["ES2023"],
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
     "types": ["node"],
+    "jsx": "react-jsx",
     "strict": true,
     "noEmit": true,
     "skipLibCheck": true,
@@ -15,6 +16,5 @@
     "noUnusedLocals": true,
     "noUnusedParameters": true
   },
-  "include": ["extension", "tools"],
-  "exclude": ["tools/prose-review"]
+  "include": ["src", "vite.config.ts", "dom-sinks.test.ts", "summary.test.ts"]
 }

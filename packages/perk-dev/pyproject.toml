@@ -10,7 +10,7 @@ requires-python = ">=3.13"
 license = "MIT"
 authors = [{ name = "perk" }]
 classifiers = ["Private :: Do Not Upload"]
-dependencies = ["perk"]
+dependencies = ["perk", "fastapi>=0.115", "uvicorn>=0.30"]
 
 [project.scripts]
 perk-dev = "perk_dev.cli:main"

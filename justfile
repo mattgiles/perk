@@ -64,10 +64,11 @@ lint: lint-py lint-js
 typecheck-py:
     uv run ty check
 
-# type-check typescript (tsc: extension; docs site: astro sync + tsc)
+# type-check typescript (tsc: extension; docs site: astro sync + tsc; prose-review workspace tsc)
 typecheck-js:
     npm run typecheck
     npm run docs:typecheck
+    npm run prose-review:typecheck
 
 # type-check everything (ty + tsc)
 typecheck: typecheck-py typecheck-js
@@ -123,6 +124,14 @@ docs-check:
     npm run docs:typecheck
     node --test --test-reporter=dot "docs/site/src/**/*.test.mjs"
     npm run docs:check
+
+# the standalone prose-review workspace gate: workspace tsc + the sink-scan/typed-boundary
+# node tests + the Vite build — independently complete so a workspace-suffix-only change
+# (.html/.json) still runs every workspace surface, not just Vite transpilation
+prose-review-check:
+    npm run prose-review:typecheck
+    node --test tools/prose-review/dom-sinks.test.ts tools/prose-review/summary.test.ts
+    npm run prose-review:build
 
 # validate CHANGELOG.md structure (two-phase convention: markers, headers, hash tokens)
 changelog-check:
