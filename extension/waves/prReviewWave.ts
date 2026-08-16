@@ -143,9 +143,9 @@ export interface PrReviewWaveOptions {
 }
 
 export interface PrReviewWaveOutcome {
-  /** True ⟺ every selected angle is covered after the (at most one) retry. */
+  /** True ⟺ every effective lane (selected angles + final Ponytail) is covered after retry. */
   complete: boolean;
-  /** Lane keys with schema-valid reports after the retry (angle-selection order). */
+  /** Effective lane keys with schema-valid reports after retry (selected order + Ponytail). */
   covered: string[];
   /** Lane keys sent in the retry wave (empty when none ran). */
   retried: string[];

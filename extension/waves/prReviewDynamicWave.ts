@@ -426,9 +426,9 @@ export interface PrReviewDynamicOutcome {
   selection: DynamicSelection | null;
   /**
    * One output-free receipt per top-level launch, run order (observability only — never a
-   * decision input). A dynamic launch's `requestedKeys` is the PRE-LAUNCH manifest
-   * (plan-fidelity + angle-selector) — the fan-out lanes appear as receipt children, never
-   * reconstructed into the manifest.
+   * decision input). A dynamic launch's `requestedKeys` is the pre-launch manifest
+   * (plan-fidelity + angle-selector + Ponytail); selector-dependent fan-out lanes appear only as
+   * receipt children, never reconstructed into that manifest.
    */
   attempts: WaveAttemptReceipt[];
 }

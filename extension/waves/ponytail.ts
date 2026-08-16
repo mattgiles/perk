@@ -41,8 +41,14 @@ function frontmatter(text: string): Record<string, unknown> | null {
   const lines = text.split("\n");
   const end = lines.findIndex((line, index) => index > 0 && line === "---");
   if (end < 0) return null;
+
+  // Preflight needs only the one top-level `name` field. Parse that field through Perk's
+  // dependency-free YAML seam without widening the contract-file parser to every metadata shape
+  // an external skill may carry (notably folded description prose).
+  const nameLines = lines.slice(1, end).filter((line) => line.startsWith("name:"));
+  if (nameLines.length !== 1) return null;
   try {
-    const parsed = parseMiniYaml(lines.slice(1, end).join("\n"));
+    const parsed = parseMiniYaml(nameLines[0] ?? "");
     return isRecord(parsed) ? parsed : null;
   } catch {
     return null;
