@@ -1,4 +1,5 @@
 import json
+import keyword
 from dataclasses import replace
 from pathlib import Path
 
@@ -387,7 +388,24 @@ def test_python_owned_prompt_wrappers_are_ast_selected(built: BuildResult) -> No
         "python-symbol:src/perk/learn/normalize.py:_PREAMBLE",
     }
     assert set(python_units) == expected
-    assert all(candidate.selector.startswith("symbol:") for candidate in python_units.values())
+
+    python_backed = [
+        unit.candidate
+        for unit in built.catalog.units
+        if unit.candidate.kind == "python-symbol"
+        or (unit.candidate.kind == "managed-prose" and Path(unit.candidate.path).suffix == ".py")
+    ]
+    assert {candidate.id for candidate in python_backed if candidate.kind == "managed-prose"} == {
+        "managed:downstream-agents",
+        "managed:skill-scaffold",
+    }
+    for candidate in python_backed:
+        assert candidate.selector.startswith("symbol:")
+        name = candidate.selector.removeprefix("symbol:")
+        assert name.isidentifier()
+        assert not keyword.iskeyword(name)
+        assert candidate.fragments
+        assert all(fragment.selector == candidate.selector for fragment in candidate.fragments)
 
 
 def test_managed_repo_instructions_select_only_the_development_section(

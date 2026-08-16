@@ -19,6 +19,7 @@ from perk_dev.prose_review.source_adapter.contract import (
     WholeFileSource,
 )
 from perk_dev.prose_review.source_adapter.markdown import MarkdownSourceAdapter
+from perk_dev.prose_review.source_adapter.python import PythonSourceAdapter
 from perk_dev.prose_review.source_adapter.yaml import YamlSourceAdapter
 
 
@@ -31,6 +32,7 @@ class SourceReadError(Exception):
 
 
 _MARKDOWN_ADAPTER = MarkdownSourceAdapter()
+_PYTHON_ADAPTER = PythonSourceAdapter()
 _YAML_ADAPTER = YamlSourceAdapter()
 
 
@@ -75,6 +77,8 @@ def source_adapter_for(unit: RoutedUnit) -> SourceAdapter | None:
         return _MARKDOWN_ADAPTER
     if unit.candidate.kind == "ambient-routing" and suffix in (".yaml", ".yml"):
         return _YAML_ADAPTER
+    if unit.candidate.kind in ("python-symbol", "managed-prose") and suffix == ".py":
+        return _PYTHON_ADAPTER
     return None
 
 

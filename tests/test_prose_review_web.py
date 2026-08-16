@@ -21,6 +21,8 @@ CSP = (
     "img-src 'self'; font-src 'self'; base-uri 'none'; form-action 'none'; "
     "frame-ancestors 'none'"
 )
+PYTHON_UNIT_ID = "python-symbol:packages/perk-dev/src/perk_dev/audit/bounding.py:_PREAMBLE"
+
 INDEX_HTML = (
     "<!doctype html><html><head>"
     '<meta name="csrf-token" content="__PROSE_REVIEW_CSRF__">'
@@ -36,7 +38,7 @@ def snapshot() -> CatalogSnapshot:
 @pytest.fixture(scope="module")
 def fallback_snapshot() -> CatalogSnapshot:
     catalog = build_catalog(ROOT)
-    fragments = (
+    markdown_fragments = (
         Fragment(id="unsupported-selector", label="Unsupported selector", selector="heading:*"),
         Fragment(
             id="unsupported-source-shape",
@@ -51,9 +53,26 @@ def fallback_snapshot() -> CatalogSnapshot:
         ),
         Fragment(id="invalid-source", label="Invalid source", selector="file-body"),
     )
+    python_fragments = (
+        Fragment(id="python-missing", label="Python missing", selector="symbol:missing"),
+        Fragment(id="python-duplicate", label="Python duplicate", selector="symbol:_PREAMBLE"),
+        Fragment(id="python-malformed", label="Python malformed", selector="symbol:_PREAMBLE"),
+        Fragment(
+            id="python-compile-invalid",
+            label="Python compile invalid",
+            selector="symbol:_PREAMBLE",
+        ),
+        Fragment(
+            id="python-call-argument",
+            label="Python call argument",
+            selector="call-argument:render:value",
+        ),
+    )
     units = tuple(
-        replace(unit, candidate=replace(unit.candidate, fragments=fragments))
+        replace(unit, candidate=replace(unit.candidate, fragments=markdown_fragments))
         if unit.candidate.id == "managed:repo-agents"
+        else replace(unit, candidate=replace(unit.candidate, fragments=python_fragments))
+        if unit.candidate.id == PYTHON_UNIT_ID
         else unit
         for unit in catalog.units
     )
@@ -226,6 +245,54 @@ def test_source_serves_markdown_and_yaml_fragments(
 
 
 @pytest.mark.parametrize(
+    ("unit_id", "fragment_id", "kind"),
+    [
+        (PYTHON_UNIT_ID, "symbol:_PREAMBLE", "python-symbol"),
+        ("managed:downstream-agents", "symbol:_agents_inner", "managed-prose"),
+    ],
+)
+def test_source_serves_python_and_python_backed_managed_fragments(
+    snapshot: CatalogSnapshot,
+    tmp_path: Path,
+    unit_id: str,
+    fragment_id: str,
+    kind: str,
+) -> None:
+    _populate_dist(tmp_path / "dist")
+    response = _client(snapshot, ROOT, dist_dir=tmp_path / "dist").get(
+        "/api/source",
+        params={"unit": unit_id, "fragment": fragment_id},
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    assert list(payload.keys()) == [
+        "unit",
+        "fragment",
+        "path",
+        "kind",
+        "before",
+        "focus",
+        "after",
+        "editable",
+        "read_only_reason",
+    ]
+    unit = snapshot.get_unit(unit_id)
+    assert unit is not None
+    fragment = snapshot.get_fragment(unit_id, fragment_id)
+    assert fragment is not None
+    assert payload["unit"] == unit_id
+    assert payload["fragment"] == {"id": fragment_id, "label": fragment.fragment.label}
+    assert payload["path"] == unit.candidate.path
+    assert payload["kind"] == kind
+    assert payload["editable"] is True
+    assert payload["read_only_reason"] is None
+    assert payload["before"] + payload["focus"] + payload["after"] == (
+        ROOT / unit.candidate.path
+    ).read_text(encoding="utf-8")
+    _assert_security_headers(response)
+
+
+@pytest.mark.parametrize(
     ("fragment_id", "label", "text", "reason"),
     [
         (
@@ -279,6 +346,69 @@ def test_known_fragment_failures_are_guarded_readable_typed_200s(
         "fragment": {"id": fragment_id, "label": label},
         "path": "AGENTS.md",
         "kind": "managed-prose",
+        "before": "",
+        "focus": text,
+        "after": "",
+        "editable": False,
+        "read_only_reason": reason,
+    }
+    _assert_security_headers(response)
+
+
+@pytest.mark.parametrize(
+    ("fragment_id", "label", "text", "reason"),
+    [
+        ("python-missing", "Python missing", "other = 1\n", "selector-not-found"),
+        (
+            "python-duplicate",
+            "Python duplicate",
+            "_PREAMBLE = 1\n_PREAMBLE = 2\n",
+            "selector-ambiguous",
+        ),
+        (
+            "python-malformed",
+            "Python malformed",
+            "_PREAMBLE = 1\ndef broken(:\n",
+            "invalid-source",
+        ),
+        (
+            "python-compile-invalid",
+            "Python compile invalid",
+            "_PREAMBLE = 1\nreturn\n",
+            "invalid-source",
+        ),
+        (
+            "python-call-argument",
+            "Python call argument",
+            "_PREAMBLE = 1\n",
+            "unsupported-selector",
+        ),
+    ],
+)
+def test_python_fragment_failures_are_guarded_readable_typed_200s(
+    fallback_snapshot: CatalogSnapshot,
+    repo: Path,
+    fragment_id: str,
+    label: str,
+    text: str,
+    reason: str,
+) -> None:
+    unit = fallback_snapshot.get_unit(PYTHON_UNIT_ID)
+    assert unit is not None
+    source_path = repo / unit.candidate.path
+    source_path.parent.mkdir(parents=True)
+    source_path.write_text(text, encoding="utf-8")
+
+    response = _client(fallback_snapshot, repo).get(
+        "/api/source",
+        params={"unit": PYTHON_UNIT_ID, "fragment": fragment_id},
+    )
+    assert response.status_code == 200
+    assert response.json() == {
+        "unit": PYTHON_UNIT_ID,
+        "fragment": {"id": fragment_id, "label": label},
+        "path": unit.candidate.path,
+        "kind": "python-symbol",
         "before": "",
         "focus": text,
         "after": "",
