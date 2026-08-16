@@ -33,19 +33,23 @@ domain meanings; field names, APIs, and recovery algorithms remain in contracts 
 ## One deep module
 
 Stacked delivery is one deep Python package with a deliberately small repository-scoped public
-front door. The first migrated vertical slice is status:
+front door. Status and the authoring Prepare slice are realized:
 
 ```text
 resolve_delivery(repo_root) -> Delivery                  # construction performs no I/O
 Delivery.status(StatusRequest {objective_id}) -> StatusResult
 StatusResult -> exactly one of DeliveryTrain | no_train_reason
+Delivery.prepare(PrepareRequest {kind: authoring, base: str|null}) ->
+    PrepareResult {kind: authoring, base: effective-base}
 ```
 
-`DeliveryError` bounds status failures to the stable command error vocabulary. The pure
-`DeliveryTrain` reconstruction pipeline and production observation adapters are implementation
-seams, not package-level read APIs. Existing publish, synchronize, recover, transfer, and land
-operations remain explicit APIs until their own vertical slices migrate; the façade does not
-promise placeholder methods for them.
+`DeliveryError` bounds façade failures to the six stable status codes plus
+`capability_unsupported`. The pure `DeliveryTrain` reconstruction pipeline, private capability
+rows, and production observation adapters are implementation seams, not package-level APIs. The
+old public authoring composer/report/check surface is removed cleanly; only the sync-owned
+`probe_atomic_push_urls` helper remains temporarily. `prepare.plan_identity`,
+`prepare.layer_start`, publish, synchronize, recover, transfer, and land remain deferred vertical
+slices with their current explicit APIs; the façade does not promise placeholder methods for them.
 
 The façade receives three nominal aggregate authorities:
 
@@ -53,25 +57,30 @@ The façade receives three nominal aggregate authorities:
    `ObjectiveStore`, `IssueBackend`, and train journal persistence. Production backend selection
    is deferred until the first persistence read, is cached only after the backend identities agree,
    and leaves no partial selection after a failed attempt.
-2. **`DeliveryGit`.** Trunk detection, fetch, ref/ancestry/worktree observation, and the tolerant
-   live base-head read needed by status. Mutation-only Git capabilities stay with their operation
-   seams.
-3. **`DeliveryGitHub`.** Stable PR facts, tolerant native-stack membership, and all-state
-   branch-owned PR lookup. Mutation, rules, checks, and landing-readiness observations stay with
-   their operation seams until those slices migrate.
+2. **`DeliveryGit`.** Trunk detection, fetch, ref/ancestry/worktree observation, the tolerant
+   live base-head read needed by status, and authoring Prepare's configured push-URL resolution +
+   one no-op atomic probe. Other mutation-only Git capabilities stay with their operation seams.
+3. **`DeliveryGitHub`.** Stable PR facts, tolerant native-stack membership, all-state
+   branch-owned PR lookup, and authoring Prepare's host stack-capability + base merge-rule facts.
+   Checks and landing-readiness observations stay with their operation seams until those slices
+   migrate.
 
 The nominal interfaces make authority ownership explicit and support small owned in-memory fakes;
-production adapters must subclass them rather than relying on structural coincidence. The façade
-composes the pure projection by passing the aggregate objects into its narrower roles. That keeps
-business rules in the pure core while preventing callers from assembling five collaborating
-readers themselves.
+interface, real adapter, and constructor-configured fake move together. Calls that authoring
+Prepare must classify and continue return frozen nested success/error discriminants; only the real
+adapter catches expected Git/GitHub exceptions. Unexpected programming errors propagate. Another
+subgateway layer would currently be shallower than these aggregate interfaces, so none is added.
+The façade composes the pure projection by passing aggregates into narrower roles and owns
+Prepare's authority ordering itself.
 
 Construction is assignment-only: no config, credentials, subprocess, Git, or network access occurs
-until a method needs the corresponding authority. Status preserves branch-sensitive laziness too:
-an incremental objective returns its successful no-train result before trunk detection, fetch, or
-GitHub observation. Every effectful operation still reconstructs fresh state before deciding
-anything. Mutators return typed before/after projections and per-effect outcomes; command handlers
-do not infer success from log text or recreate stack rules themselves.
+until a method needs the corresponding authority. Status preserves branch-sensitive laziness: an
+incremental objective returns its successful no-train result before trunk detection, fetch, or
+GitHub observation. Authoring Prepare resolves optional trunk lazily and never touches persistence.
+The objective-create dry-run branch omits Prepare entirely, so no dry-run authority adapter exists
+and previews remain offline. Every effectful operation still reconstructs fresh state before
+deciding anything. Mutators return typed before/after projections and per-effect outcomes; command
+handlers do not infer success from log text or recreate stack rules themselves.
 
 The GitHub seam is explicit rather than a generic stack-provider interface. Perk has no second
 implementation to abstract, and Graphite's local/cache semantics are not substitutable for
@@ -83,10 +92,11 @@ Python workers, decodes typed envelopes, and renders results through the existin
 ## Authorities
 
 One fact has one authority. Other surfaces may cache or corroborate it but cannot silently replace
-it. The status façade does not invent a fourth authority: its three nominal adapters aggregate the
-existing persistence, Git, and GitHub rows below, and the pure projection decides from their
-observations. The repository path held by an adapter is composition context, not evidence; backend
-selection is cached only after objective/issue alignment succeeds.
+it. The status/Prepare façade does not invent a fourth authority: its three nominal adapters
+aggregate the existing persistence, Git, and GitHub rows below. The pure status projection decides
+from their observations; authoring Prepare orders only the Git/GitHub capability reads. The
+repository path held by an adapter is composition context, not evidence; backend selection is
+cached only after objective/issue alignment succeeds.
 
 | Fact | Authority | Notes |
 | --- | --- | --- |
@@ -302,6 +312,14 @@ review is a landing blocker; unresolved advisory threads are information; an abs
 for one published PR is not applicable; an absent stack for two PRs is a publication blocker.
 
 ## Capability and API convergence
+
+Stacked objective creation calls
+`Delivery.prepare(PrepareRequest(kind="authoring", base=<stored-base-or-null>))`; the façade
+resolves a null base through the Git authority, then observes native-stack, merge-rules, remote-base,
+and one atomic-push row per configured URL in that order. Independent failures aggregate into one
+bounded refusal; push probing is skipped without a positive remote-base SHA. A successful compact
+`PrepareResult` deliberately does not expose rows or claim repository preview enrollment/write
+permission. Dry-run creation never constructs the service or calls Prepare.
 
 Probe atomic-push support against the same authenticated push endpoint the mutator will use:
 
@@ -624,11 +642,16 @@ This prevents the subgroup from becoming a competing workflow with `stack create
 
 ## Verification strategy
 
-`just test` and `just ci` remain hermetic. Owned in-memory fakes for the three status authorities
-record calls and inject failures, proving façade branch semantics, bounded error translation,
-zero-I/O construction, and the incremental short circuit. Gateway fakes and tolerant boundary
-fixtures cover stack create/append convergence, exact Git commands, all async submit/poll states,
-required versus optional checks, journal failure injection, and every recovery row above.
+`just test` and `just ci` remain hermetic. Owned constructor-configured fakes for the three façade
+authorities record calls and seed typed failures/discriminants, proving status branches, authoring
+Prepare ordering/aggregation, bounded error translation, zero-I/O construction, no persistence
+access from Prepare, and the incremental/dry-run short circuits. Composed real-Git-adapter tests pin
+Prepare's narrow raw-cause preservation without changing status prefixes. Private formatter tests
+pin both capability honesty caveats, while the retained real-transport test proves an
+`advertiseAtomic=false` remote refuses the no-op probe without moving a ref. Gateway fakes and
+tolerant boundary fixtures cover stack create/append convergence, exact Git commands, all async
+submit/poll states, required versus optional checks, journal failure injection, and every recovery
+row above.
 
 Preview availability and server behavior get a separate operator-run dogfood in a designated
 durable repository configured for stacks, squash direct merge, no queue, and one stable required

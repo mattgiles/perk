@@ -16,7 +16,7 @@ from perk.cli.alias import alias
 from perk.cli.context import require_github, require_repo
 from perk.cli.emit import fail
 from perk.cli.ensure import UserFacingCliError
-from perk.delivery import capability, transfer
+from perk.delivery import DeliveryError, PrepareRequest, resolve_delivery, transfer
 from perk.delivery.journal import JournalCorruptionError
 from perk.delivery.persistence import TrainPersistenceError
 from perk.delivery.train import TrainReconstructionError
@@ -227,8 +227,8 @@ def create_objective(
         # The reviewed delivery choice (§8.45). Only an explicit `stacked` changes anything —
         # absent (and an explicit `incremental`, forwarded verbatim from the reviewed draft)
         # keeps every existing path byte-identical (§8.42's absence rule: incremental is never
-        # written). Order: strict train validation → the adopt refusal → capability preflight
-        # (skipped on --dry-run, which is offline) → the store mutation.
+        # written). Order: strict train validation → the adopt refusal → Prepare (skipped on
+        # --dry-run, which is offline) → the store mutation.
         resolved_delivery: objective.DeliveryPolicy | None = None
         delivery_lineage: str | None = None
         if delivery == "stacked":
@@ -246,20 +246,11 @@ def create_objective(
                     error_type="invalid_input",
                 )
             if not dry_run:
-                # The effective probe base mirrors the train read path (header base, else the
-                # detected trunk). Stored base semantics are unchanged (`resolved_base` may
-                # stay None).
-                probe_base = resolved_base or git.detect_trunk_branch(repo_root)
-                report = capability.preflight_stacked_authoring(repo_root, base=probe_base)
-                if not report.ok:
-                    failures = "\n".join(
-                        f"- {check.name}: {check.detail}" for check in report.failures()
-                    )
-                    raise UserFacingCliError(
-                        f"This repository cannot take a stacked delivery train against base "
-                        f"{probe_base!r}:\n{failures}",
-                        error_type="capability_unsupported",
-                    )
+                # Prepare resolves the effective probe base lazily while stored base semantics
+                # stay unchanged (`resolved_base` may remain None).
+                resolve_delivery(repo_root).prepare(
+                    PrepareRequest(kind="authoring", base=resolved_base)
+                )
                 resolved_delivery = objective.DeliveryPolicy.STACKED
                 if supersedes is None:
                     # A fresh stacked create mints the train identity here (§8.45); a
@@ -361,6 +352,9 @@ def create_objective(
                 dry_run=dry_run,
             )
     except transfer.TransferError as exc:
+        fail(ctx, as_json=as_json, error_type=exc.error_type, message=str(exc))
+        return
+    except DeliveryError as exc:
         fail(ctx, as_json=as_json, error_type=exc.error_type, message=str(exc))
         return
     except TrainReconstructionError as exc:

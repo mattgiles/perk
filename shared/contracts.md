@@ -5805,18 +5805,24 @@ facts and the seed instructs `delivery: stacked` without re-asking — the save 
 `validate_stacked_roadmap` (errors verbatim under the existing `invalid_roadmap` error_type —
 including the one-node "save it as a standalone plan" message; a fan-out/fan-in DAG passes) →
 the `--adopt-from` refusal (`invalid_input`: in-place adoption of a stacked objective is
-deferred — no roadmap node owns it) → effective probe-base resolution → capability preflight
-(**skipped on `--dry-run`**, which stays offline and still validates the bounds) → the write
-gate (checked **last**, so the operator gets full honest capability feedback even while
-gated) → the store mutation. Stored `base` semantics are unchanged; the **effective probe
-base** is explicit `--base` → `[workflow] base` → `git.detect_trunk_branch(repo_root)`
-(mirroring the train read path's `header.base or trunk`).
+deferred — no roadmap node owns it) → authoring Prepare (**skipped on `--dry-run`**, which stays
+offline and still validates the bounds) → the write gate (retired below) → the store mutation.
+Stored `base` semantics are unchanged. The CLI passes the stored base intent — explicit `--base`
+→ `[workflow] base` → `None` — to Prepare; optional-base trunk fallback now belongs to the
+façade and still yields the same effective probe base.
 
-**The capability preflight** is `perk.delivery.capability.preflight_stacked_authoring(repo_root,
-*, base)` → a `CapabilityReport` of `CapabilityCheck {name, ok, detail}` rows, probe callables
-keyword-injectable (production defaults; tests pass fakes). Import direction stays §8.44's
-(delivery → github/substrate; the CLI imports delivery). The checks, each with honest
-expected-vs-observed detail:
+**The capability boundary** is
+`resolve_delivery(repo_root).prepare(PrepareRequest(kind="authoring",
+base=<stored-base-or-null>))` → `PrepareResult(kind="authoring", base=<effective-base>)`.
+`resolve_delivery` remains zero-I/O; `Delivery.prepare` resolves a null base through
+`DeliveryGit.trunk_branch`, invokes the authorities in the order below, and returns only after
+every check passes. Capability rows are private implementation details: a complete failed-row set
+raises one `DeliveryError(error_type="capability_unsupported")` whose message is
+`This repository cannot take a stacked delivery train against base <repr>:` followed by every
+`- <name>: <detail>` row in observation order. Import direction stays §8.44's (delivery →
+github/substrate; the CLI imports delivery). A stacked `--dry-run` does not resolve a `Delivery`
+or invoke Prepare at all, so its compose-preview remains fully offline. The checks, each with
+honest expected-vs-observed detail:
 
 - **`native-stack`** — `stacks.stack_capability(repo_root)`: a GraphQL schema-introspection
   read (`__type(name: "PullRequest")` → a `stack` field exists). **Fail closed** (introspection
@@ -5825,8 +5831,9 @@ expected-vs-observed detail:
 - **`merge-rules`** — `stacks.base_merge_rules(repo_root, base)` → `MergeRules
   {squash_allowed, merge_queue_required}`: GraphQL `repository { squashMergeAllowed }` (squash
   direct merge must be allowed) + REST `GET repos/{owner}/{repo}/rules/branches/{base}` (any
-  effective `merge_queue` rule ⇒ reject). Strict reads — an infra failure raises
-  `GitHubError`, which the composer converts to a failed check (can't verify ⇒ don't promise).
+  effective `merge_queue` rule ⇒ reject). Strict reads — the real authority adapter converts an
+  expected `GitHubError` into its frozen `ProbeError`; Prepare records that discriminant as a
+  failed check and continues (can't verify ⇒ don't promise).
 - **`remote-base`** — `git.remote_branch_head`: the observed remote base SHA. An absent remote
   base branch is a **failed check** (honest message), never a crash; without it the push
   probes are skipped.
@@ -5837,10 +5844,10 @@ expected-vs-observed detail:
   failure). The detail states — on success AND failure — that the probe proves **server
   capability and authentication, not branch write permission**.
 
-A preflight failure fails the save with `error_type="capability_unsupported"`, the message
-carrying every failed check's expected-vs-observed detail. The probes run against the
-Git/GitHub plane **regardless of issue backend** (GitHub is the universal PR plane even when
-objectives live on Linear).
+Prepare aggregates independent failures: native stack, merge rules, and remote base are always
+observed in order; push-URL resolution and one atomic probe per URL run only after a positive
+remote-base SHA, and all URLs must pass. The probes run against the Git/GitHub plane **regardless
+of issue backend** (GitHub is the universal PR plane even when objectives live on Linear).
 
 **The write gate (retired).** Stacked authoring shipped behind a development-only environment
 opt-in (a missing opt-in failed the save with a typed gated refusal) until the publication
@@ -5982,31 +5989,45 @@ deliberately untouched (no cross-plane consumer yet — mirroring §8.42's postu
 
 ## §8.44 · The DeliveryTrain projection + stack status (read path)
 
-**The projection and public status boundary.** `perk.delivery.train.reconstruct_train` remains the
+**The projection and public façade boundary.** `perk.delivery.train.reconstruct_train` remains the
 internal pure core that rebuilds one **immutable** `DeliveryTrain` projection from the durable
 authorities — the objective store (policy, lineage, roadmap), plan issues (layer identity +
 checkpoints), the journal fold (§8.43), Git refs, and GitHub PR + native-stack state. The canonical
-repository-scoped read API is `resolve_delivery(repo_root).status(StatusRequest(objective_id))`.
-`resolve_delivery` performs ZERO I/O; `Delivery.status` returns a `StatusResult` whose invariant is
+repository-scoped status API is
+`resolve_delivery(repo_root).status(StatusRequest(objective_id))`; the realized authoring Prepare
+variant is §8.45's `Delivery.prepare(PrepareRequest(kind="authoring", base=<str|null>))`.
+`resolve_delivery` performs ZERO I/O. `Delivery.status` returns a `StatusResult` whose invariant is
 exactly one non-null branch: `train` OR the successful incremental `no_train_reason`, alongside
-`objective_id`, `objective_url`, and `redirected_from`.
+`objective_id`, `objective_url`, and `redirected_from`; successful authoring Prepare returns only
+`PrepareResult(kind="authoring", base=<effective-base>)`.
 
-The façade composes three nominal ABC authorities: `DeliveryPersistence` aggregates objective,
-plan, and journal reads; `DeliveryGit` aggregates trunk/fetch/ref/ancestry/worktree/base reads; and
-`DeliveryGitHub` aggregates stable PR, tolerant native-stack, and all-state branch-PR reads. The
-production `RepoDeliveryPersistence`, `RepoDeliveryGit`, and `RepoDeliveryGitHub` adapters live in
-`perk/delivery/observe.py`. Persistence resolves the backend-aligned objective store, issue backend,
-and `TrainPersistence` only on its first read, caches them only after backend identities agree, and
-keeps no partial cache after a failed attempt. The Git and GitHub adapters likewise store only the
-repo root at construction and observe on method calls. Narrow pure-core reader roles remain
-internal implementation details; owned call-recording/failure-injecting fakes exercise the nominal
-aggregate boundary.
+The façade composes three nominal ABC authorities, with each interface, real adapter, and owned
+constructor-configured fake moving in lockstep. `DeliveryPersistence` aggregates objective, plan,
+and journal reads. `DeliveryGit` aggregates trunk/fetch/ref/ancestry/worktree/base reads plus
+Prepare's push-URL resolution and no-op atomic probe. `DeliveryGitHub` aggregates stable PR,
+tolerant native-stack, and all-state branch-PR reads plus Prepare's host stack-capability and base
+merge-rule facts. The production `RepoDeliveryPersistence`, `RepoDeliveryGit`, and
+`RepoDeliveryGitHub` adapters live in `perk/delivery/observe.py`. Persistence resolves the
+backend-aligned objective store, issue backend, and `TrainPersistence` only on its first read,
+caches them only after backend identities agree, and keeps no partial cache after a failed attempt.
+The Git and GitHub adapters likewise store only constructor data and observe on method calls.
+
+For a new authority call whose consumer must record a failure and continue independent checks, the
+aggregate ABC owns frozen nested success/error discriminants: Git `PushUrlsResult`,
+`AtomicPushResult`, and `ProbeError`; GitHub `MergeRules` and `ProbeError`. Only the real adapter
+catches the expected substrate/gateway exception and converts it; fakes return constructor-seeded
+discriminants without catching programming errors. The existing terminal status methods retain
+their typed exceptions. No speculative subgateway split is warranted: each capability belongs to
+one existing aggregate authority, while narrow pure-core reader roles remain internal. There is no
+dry-run authority implementation because objective-create dry run omits Prepare entirely.
 
 Import direction stays §8.43's: nothing in `perk/backends/` or `perk/github/` imports
-`perk.delivery`. Read-only end to end; the projection works from a **fresh clone** — no local
-worktree or branch is authoritative, and local absence is never an error. Branch-sensitive laziness
-is load-bearing: the objective read and delivery-policy decision occur before fallback trunk
-resolution, so an incremental objective returns the no-train branch without any Git or GitHub read.
+`perk.delivery`. The projection is read-only and works from a **fresh clone** — no local worktree
+or branch is authoritative, and local absence is never an error. Branch-sensitive laziness is
+load-bearing: status reads objective policy before fallback trunk resolution, so an incremental
+objective returns the no-train branch without Git or GitHub work; authoring Prepare never resolves
+persistence, issue backends, credentials, or configuration and touches only its Git/GitHub
+authorities.
 
 **Layer axes.** Layer state is orthogonal, never one lossy enum: `intent`
 (`skipped|unplanned|planned|canceled` — skipped nodes contract out of the rendered layers;
@@ -6111,9 +6132,13 @@ journal **carrier** read, or `git fetch` is a status failure. At the pure-core s
 `TrainReconstructionError`; `Delivery.status` translates ONLY the declared status codes into
 `DeliveryError` with the same message and stable `error_type` (`objective_not_found |
 invalid_delivery_policy | invalid_train | git_error | github_error |
-supersession_corruption`). Expected objective-store, issue-backend, and train-persistence
-exceptions normalize to `github_error`. `DeliveryError` rejects unknown codes, and an unknown
-future pure-core code propagates rather than silently widening the façade contract. Only two reads
+supersession_corruption`). `DeliveryError`'s façade-wide vocabulary adds only
+`capability_unsupported`. Expected objective-store, issue-backend, and train-persistence exceptions
+normalize to `github_error`. `DeliveryError` rejects unknown codes, and an unknown future pure-core
+code propagates rather than silently widening the façade contract. Prepare reuses the status-owned
+trunk and remote-branch methods without changing their status messages: for a typed `git_error`
+wrapper it preserves the chained substrate `GitError` text when that guarded cause exists, else the
+wrapper text; a non-`git_error` reconstruction failure remains unexpected and propagates. Only two reads
 degrade: the **preview** native-stack read (membership `unknown` + information
 `stack_read_unavailable`, never a blocker — but unverifiable membership still declassifies the
 affected layers' publication to drift: the information posture governs the *finding*, not the

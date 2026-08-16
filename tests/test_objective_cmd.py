@@ -9,6 +9,7 @@ from perk import github, objective
 from perk.backends import resolve
 from perk.backends.github import objectives, plans
 from perk.cli.cli import cli
+from perk.cli.commands.objective import create_cmd
 
 N = objective.NodeStatus
 
@@ -304,7 +305,7 @@ class _AdoptStubStore:
         return False
 
 
-def _invoke_adopt(args, *, body, monkeypatch, store, write_handoff=None):
+def _invoke_adopt(args, *, body, monkeypatch, store, write_handoff=None, config=None):
     from perk.backends import resolve
     from perk.state import cache
 
@@ -314,6 +315,10 @@ def _invoke_adopt(args, *, body, monkeypatch, store, write_handoff=None):
         _git_init(d)
         bf = Path(d) / "obj.md"
         bf.write_text(body, encoding="utf-8")
+        if config is not None:
+            config_path = Path(d) / ".perk" / "config.toml"
+            config_path.parent.mkdir()
+            config_path.write_text(config, encoding="utf-8")
         if write_handoff is not None:
             run_id, blob = write_handoff
             cache.write_handoff(Path(d), run_id, blob)
@@ -552,7 +557,7 @@ def test_create_supersedes_dry_run_composes_without_superseding(monkeypatch):
     assert store.supersede_kwargs is None and store.created is True
 
 
-# --- the reviewed delivery choice (§8.45): validation → preflight → gate → lineage ---------
+# --- the reviewed delivery choice (§8.45): validation → Prepare → gate → lineage -----------
 
 
 class _DeliveryStubStore(_AdoptStubStore):
@@ -578,24 +583,30 @@ class _DeliveryStubStore(_AdoptStubStore):
         )
 
 
-def _capability_report(*, ok: bool):
-    from perk.delivery import capability
+class _PrepareStub:
+    def __init__(self, *, error=None) -> None:
+        self.error = error
+        self.requests = []
 
-    detail = "observed fine" if ok else "expected squash direct-merge allowed; observed disallowed"
-    return capability.CapabilityReport(
-        checks=(capability.CapabilityCheck(name="merge-rules", ok=ok, detail=detail),)
-    )
+    def prepare(self, request):
+        from perk.delivery import PrepareResult
+
+        self.requests.append(request)
+        if self.error is not None:
+            raise self.error
+        return PrepareResult(kind="authoring", base=request.base or "main")
 
 
-def _stub_preflight(monkeypatch, *, ok: bool, calls: list | None = None):
-    from perk.delivery import capability
+def _stub_prepare(monkeypatch, *, error=None, resolver_calls: list | None = None):
+    service = _PrepareStub(error=error)
 
-    def _preflight(repo_root, *, base, **_probes):
-        if calls is not None:
-            calls.append(base)
-        return _capability_report(ok=ok)
+    def _resolve(repo_root):
+        if resolver_calls is not None:
+            resolver_calls.append(repo_root)
+        return service
 
-    monkeypatch.setattr(capability, "preflight_stacked_authoring", _preflight)
+    monkeypatch.setattr(create_cmd, "resolve_delivery", _resolve)
+    return service
 
 
 def _two_nodes_roadmap() -> str:
@@ -607,6 +618,8 @@ def _two_nodes_roadmap() -> str:
 def test_create_stacked_one_node_rejected_with_standalone_plan_message(monkeypatch):
     _authed(monkeypatch)
     store = _DeliveryStubStore()
+    resolver_calls: list[Path] = []
+    _stub_prepare(monkeypatch, resolver_calls=resolver_calls)
     roadmap = json.dumps([{"id": "1.1", "description": "only"}])
     result = _invoke_adopt(
         ["objective", "create", "--json", "--delivery", "stacked", "--roadmap", roadmap],
@@ -619,12 +632,13 @@ def test_create_stacked_one_node_rejected_with_standalone_plan_message(monkeypat
     assert payload["success"] is False and payload["error_type"] == "invalid_roadmap"
     assert "save a one-node objective as a standalone plan instead" in payload["message"]
     assert store.created is False
+    assert resolver_calls == []
 
 
 def test_create_stacked_fan_out_fan_in_dag_accepted(monkeypatch):
     _authed(monkeypatch)
     store = _DeliveryStubStore()
-    _stub_preflight(monkeypatch, ok=True)
+    _stub_prepare(monkeypatch)
     roadmap = json.dumps(
         [
             {"id": "1.1", "description": "root", "depends_on": []},
@@ -663,6 +677,8 @@ def test_create_stacked_over_100_nodes_rejected(monkeypatch):
 def test_create_stacked_adopt_from_rejected(monkeypatch):
     _authed(monkeypatch)
     store = _DeliveryStubStore()
+    resolver_calls: list[Path] = []
+    _stub_prepare(monkeypatch, resolver_calls=resolver_calls)
     result = _invoke_adopt(
         [
             "objective",
@@ -684,12 +700,22 @@ def test_create_stacked_adopt_from_rejected(monkeypatch):
     assert payload["success"] is False and payload["error_type"] == "invalid_input"
     assert "in-place adoption of a stacked objective is deferred" in payload["message"]
     assert store.adopt_kwargs is None and store.created is False
+    assert resolver_calls == []
 
 
-def test_create_stacked_preflight_failure_maps_to_capability_unsupported(monkeypatch):
+def test_create_stacked_prepare_failure_maps_to_capability_unsupported(monkeypatch):
+    from perk.delivery import DeliveryError
+
     _authed(monkeypatch)
     store = _DeliveryStubStore()
-    _stub_preflight(monkeypatch, ok=False)
+    _stub_prepare(
+        monkeypatch,
+        error=DeliveryError(
+            "This repository cannot take a stacked delivery train against base 'main':\n"
+            "- merge-rules: expected squash direct-merge allowed; observed disallowed",
+            error_type="capability_unsupported",
+        ),
+    )
     result = _invoke_adopt(
         [
             "objective",
@@ -718,8 +744,7 @@ def test_create_stacked_stores_delivery_and_a_valid_ulid_lineage(monkeypatch):
 
     _authed(monkeypatch)
     store = _DeliveryStubStore()
-    preflight_bases: list = []
-    _stub_preflight(monkeypatch, ok=True, calls=preflight_bases)
+    prepare = _stub_prepare(monkeypatch)
     result = _invoke_adopt(
         [
             "objective",
@@ -739,8 +764,50 @@ def test_create_stacked_stores_delivery_and_a_valid_ulid_lineage(monkeypatch):
     assert store.create_kwargs["delivery"] == objective.DeliveryPolicy.STACKED
     lineage = store.create_kwargs["delivery_lineage"]
     assert str(ULID.from_str(lineage)) == lineage  # a freshly-minted, parseable ULID
-    # No explicit --base and no [workflow] base: the probe base fell to the detected trunk.
-    assert preflight_bases == ["main"]
+    # No explicit --base and no [workflow] base: Prepare receives stored-base intent as None;
+    # the façade owns trunk fallback.
+    from perk.delivery import PrepareRequest
+
+    assert prepare.requests == [PrepareRequest(kind="authoring", base=None)]
+
+
+@pytest.mark.parametrize(
+    ("extra_args", "config", "expected_base"),
+    [
+        (["--base", "develop"], None, "develop"),
+        ([], '[workflow]\nbase = "release"\n', "release"),
+        ([], None, None),
+    ],
+)
+def test_create_stacked_passes_stored_base_intent_to_prepare(
+    monkeypatch, extra_args, config, expected_base
+):
+    from perk.delivery import PrepareRequest
+
+    _authed(monkeypatch)
+    store = _DeliveryStubStore()
+    prepare = _stub_prepare(monkeypatch)
+    result = _invoke_adopt(
+        [
+            "objective",
+            "create",
+            "--json",
+            "--delivery",
+            "stacked",
+            "--roadmap",
+            _two_nodes_roadmap(),
+            *extra_args,
+        ],
+        body="# Obj\n\nprose",
+        monkeypatch=monkeypatch,
+        store=store,
+        config=config,
+    )
+
+    assert result.exit_code == 0, result.output
+    assert prepare.requests == [PrepareRequest(kind="authoring", base=expected_base)]
+    assert store.create_kwargs is not None
+    assert store.create_kwargs["base"] == expected_base
 
 
 def _stub_transfer(monkeypatch, calls: list):
@@ -767,7 +834,7 @@ def test_create_stacked_supersede_routes_through_the_transfer_protocol(monkeypat
     # plain store mutation), after the one classification read.
     _authed(monkeypatch)
     store = _DeliveryStubStore(old_header={"delivery": "stacked", "delivery_lineage": "01OLD"})
-    _stub_preflight(monkeypatch, ok=True)
+    _stub_prepare(monkeypatch)
     calls: list = []
     _stub_transfer(monkeypatch, calls)
     result = _invoke_adopt(
@@ -811,7 +878,7 @@ def test_transfer_carry_identity_matches_backend_contract(monkeypatch, backend_i
     # the existing node-issues named by adopt_issue.
     _authed(monkeypatch)
     store = _DeliveryStubStore(old_header={"delivery": "stacked", "delivery_lineage": "01OLD"})
-    _stub_preflight(monkeypatch, ok=True)
+    _stub_prepare(monkeypatch)
     calls: list = []
     _stub_transfer(monkeypatch, calls)
     monkeypatch.setattr(resolve, "resolve_objective_store_id", lambda _root: backend_id)
@@ -941,12 +1008,10 @@ def test_create_stacked_dry_run_skips_probes_and_gate_but_validates_bounds(monke
     _authed(monkeypatch)
     store = _DeliveryStubStore()
 
-    def _must_not_preflight(*_a, **_k):
-        raise AssertionError("--dry-run must not run the capability preflight")
+    def _must_not_resolve(*_args, **_kwargs):
+        raise AssertionError("--dry-run must not resolve Delivery")
 
-    from perk.delivery import capability
-
-    monkeypatch.setattr(capability, "preflight_stacked_authoring", _must_not_preflight)
+    monkeypatch.setattr(create_cmd, "resolve_delivery", _must_not_resolve)
     # Bounds still validate on a dry run: one node → invalid_roadmap.
     one = json.dumps([{"id": "1.1", "description": "only"}])
     result = _invoke_adopt(
@@ -998,12 +1063,10 @@ def test_create_explicit_incremental_behaves_like_absent(monkeypatch):
     _authed(monkeypatch)
     store = _DeliveryStubStore()
 
-    def _must_not_preflight(*_a, **_k):
-        raise AssertionError("incremental must not run the capability preflight")
+    def _must_not_resolve(*_args, **_kwargs):
+        raise AssertionError("incremental must not resolve Delivery")
 
-    from perk.delivery import capability
-
-    monkeypatch.setattr(capability, "preflight_stacked_authoring", _must_not_preflight)
+    monkeypatch.setattr(create_cmd, "resolve_delivery", _must_not_resolve)
     result = _invoke_adopt(
         [
             "objective",

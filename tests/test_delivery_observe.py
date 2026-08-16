@@ -13,6 +13,7 @@ from pathlib import Path
 import pytest
 
 from perk.delivery import land, observe
+from perk.delivery.facade import DeliveryGit, DeliveryGitHub
 from perk.delivery.train import (
     BaseHeadObservation,
     BranchPrView,
@@ -65,6 +66,70 @@ class TestRepoDeliveryGit:
         with pytest.raises(TrainReconstructionError) as excinfo:
             observe.RepoDeliveryGit(clone).fetch()
         assert excinfo.value.error_type == "git_error"
+
+    def test_push_urls_converts_success_and_expected_failure(
+        self, git_repo_with_remote, monkeypatch
+    ) -> None:
+        clone, _remote, _advance = git_repo_with_remote
+        seen: list[str] = []
+
+        def success(_root: Path, remote: str = "origin") -> list[str]:
+            seen.append(remote)
+            return ["fake://one", "fake://two"]
+
+        monkeypatch.setattr(git_mod, "push_urls", success)
+        probe = observe.RepoDeliveryGit(clone, remote="upstream")
+        assert probe.push_urls() == DeliveryGit.PushUrlsResult(urls=("fake://one", "fake://two"))
+        assert seen == ["upstream"]
+
+        def expected(*_args: object, **_kwargs: object) -> list[str]:
+            raise git_mod.GitError("no remote")
+
+        monkeypatch.setattr(git_mod, "push_urls", expected)
+        assert probe.push_urls() == DeliveryGit.ProbeError(message="no remote")
+
+    def test_atomic_push_converts_success_and_expected_failure(
+        self, git_repo_with_remote, monkeypatch
+    ) -> None:
+        clone, _remote, _advance = git_repo_with_remote
+        seen: list[tuple[str, str, str]] = []
+
+        def success(_root: Path, *, push_url: str, base_branch: str, base_sha: str) -> None:
+            seen.append((push_url, base_branch, base_sha))
+
+        monkeypatch.setattr(git_mod, "probe_atomic_push", success)
+        probe = observe.RepoDeliveryGit(clone)
+        assert (
+            probe.probe_atomic_push(push_url="fake://origin", base_branch="main", base_sha="a")
+            == DeliveryGit.AtomicPushResult()
+        )
+        assert seen == [("fake://origin", "main", "a")]
+
+        def expected(*_args: object, **_kwargs: object) -> None:
+            raise git_mod.GitError("atomic unsupported")
+
+        monkeypatch.setattr(git_mod, "probe_atomic_push", expected)
+        assert probe.probe_atomic_push(
+            push_url="fake://origin", base_branch="main", base_sha="a"
+        ) == DeliveryGit.ProbeError(message="atomic unsupported")
+
+    def test_prepare_git_probes_propagate_unexpected_errors(
+        self, git_repo_with_remote, monkeypatch
+    ) -> None:
+        clone, _remote, _advance = git_repo_with_remote
+
+        def boom(*_args: object, **_kwargs: object) -> None:
+            raise RuntimeError("programming error")
+
+        monkeypatch.setattr(git_mod, "push_urls", boom)
+        with pytest.raises(RuntimeError, match="programming error"):
+            observe.RepoDeliveryGit(clone).push_urls()
+
+        monkeypatch.setattr(git_mod, "probe_atomic_push", boom)
+        with pytest.raises(RuntimeError, match="programming error"):
+            observe.RepoDeliveryGit(clone).probe_atomic_push(
+                push_url="fake://origin", base_branch="main", base_sha="a"
+            )
 
     def test_remote_branch_sha_failure_is_typed_git_error(
         self, git_repo_with_remote, monkeypatch
@@ -147,6 +212,43 @@ class TestRepoDeliveryGit:
 
 
 class TestRepoDeliveryGitHub:
+    def test_stack_capability_passes_through_fail_closed_bool(
+        self, tmp_path: Path, monkeypatch
+    ) -> None:
+        monkeypatch.setattr(stacks, "stack_capability", lambda _root: False)
+        assert observe.RepoDeliveryGitHub(tmp_path).stack_capability() is False
+        monkeypatch.setattr(stacks, "stack_capability", lambda _root: True)
+        assert observe.RepoDeliveryGitHub(tmp_path).stack_capability() is True
+
+    def test_base_merge_rules_converts_success_and_expected_failure(
+        self, tmp_path: Path, monkeypatch
+    ) -> None:
+        monkeypatch.setattr(
+            stacks,
+            "base_merge_rules",
+            lambda _root, _base: stacks.MergeRules(squash_allowed=False, merge_queue_required=True),
+        )
+        probe = observe.RepoDeliveryGitHub(tmp_path)
+        assert probe.base_merge_rules("develop") == DeliveryGitHub.MergeRules(
+            squash_allowed=False, merge_queue_required=True
+        )
+
+        def expected(*_args: object, **_kwargs: object) -> stacks.MergeRules:
+            raise GitHubError("HTTP 500")
+
+        monkeypatch.setattr(stacks, "base_merge_rules", expected)
+        assert probe.base_merge_rules("develop") == DeliveryGitHub.ProbeError(message="HTTP 500")
+
+    def test_base_merge_rules_propagates_unexpected_error(
+        self, tmp_path: Path, monkeypatch
+    ) -> None:
+        def boom(*_args: object, **_kwargs: object) -> stacks.MergeRules:
+            raise RuntimeError("programming error")
+
+        monkeypatch.setattr(stacks, "base_merge_rules", boom)
+        with pytest.raises(RuntimeError, match="programming error"):
+            observe.RepoDeliveryGitHub(tmp_path).base_merge_rules("main")
+
     def test_pr_facts_converts_to_the_view_type(self, tmp_path, monkeypatch) -> None:
         facts = stacks.PrDeliveryFacts(
             number=201,
