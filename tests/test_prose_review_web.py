@@ -1,6 +1,8 @@
 """The Prose Review Workbench security envelope: guard, containment, header stamping."""
 
+import hashlib
 import json
+import stat
 import threading
 from collections.abc import Mapping, Sequence
 from dataclasses import replace
@@ -329,10 +331,18 @@ def test_source_serves_the_on_disk_whole_file(snapshot: CatalogSnapshot, tmp_pat
     response = client.get("/api/source", params={"unit": "managed:repo-agents"})
     assert response.status_code == 200
     payload = response.json()
-    assert list(payload.keys()) == [
+    assert list(payload) == ["file", "view"]
+    raw = (ROOT / "AGENTS.md").read_bytes()
+    assert payload["file"] == {
+        "path": "AGENTS.md",
+        "mode": stat.S_IMODE((ROOT / "AGENTS.md").stat().st_mode),
+        "newline_style": "lf",
+        "load_hash": hashlib.sha256(raw).hexdigest(),
+    }
+    view = payload["view"]
+    assert list(view) == [
         "unit",
         "fragment",
-        "path",
         "kind",
         "before",
         "focus",
@@ -340,15 +350,14 @@ def test_source_serves_the_on_disk_whole_file(snapshot: CatalogSnapshot, tmp_pat
         "editable",
         "read_only_reason",
     ]
-    assert payload["unit"] == "managed:repo-agents"
-    assert payload["fragment"] is None
-    assert payload["path"] == "AGENTS.md"
-    assert payload["kind"] == "managed-prose"
-    assert payload["before"] == ""
-    assert payload["focus"] == (ROOT / "AGENTS.md").read_bytes().decode("utf-8")
-    assert payload["after"] == ""
-    assert payload["editable"] is False
-    assert payload["read_only_reason"] == "whole-unit"
+    assert view["unit"] == "managed:repo-agents"
+    assert view["fragment"] is None
+    assert view["kind"] == "managed-prose"
+    assert view["before"] == ""
+    assert view["focus"] == raw.decode("utf-8")
+    assert view["after"] == ""
+    assert view["editable"] is False
+    assert view["read_only_reason"] == "whole-unit"
     _assert_security_headers(response)
 
 
@@ -365,7 +374,7 @@ def test_source_serves_markdown_and_yaml_fragments(
         },
     )
     assert markdown.status_code == 200
-    markdown_payload = markdown.json()
+    markdown_payload = markdown.json()["view"]
     assert markdown_payload["fragment"] == {
         "id": "section:agents/developing-perk",
         "label": "Developing perk",
@@ -385,7 +394,7 @@ def test_source_serves_markdown_and_yaml_fragments(
         },
     )
     assert yaml_response.status_code == 200
-    yaml_payload = yaml_response.json()
+    yaml_payload = yaml_response.json()["view"]
     assert yaml_payload["editable"] is True
     assert "Pi SDK/extension substrate craft" in yaml_payload["focus"]
     assert yaml_payload["before"] + yaml_payload["focus"] + yaml_payload["after"] == (
@@ -414,11 +423,12 @@ def test_source_serves_python_and_python_backed_managed_fragments(
         params={"unit": unit_id, "fragment": fragment_id},
     )
     assert response.status_code == 200
-    payload = response.json()
-    assert list(payload.keys()) == [
+    loaded = response.json()
+    assert list(loaded) == ["file", "view"]
+    payload = loaded["view"]
+    assert list(payload) == [
         "unit",
         "fragment",
-        "path",
         "kind",
         "before",
         "focus",
@@ -432,7 +442,7 @@ def test_source_serves_python_and_python_backed_managed_fragments(
     assert fragment is not None
     assert payload["unit"] == unit_id
     assert payload["fragment"] == {"id": fragment_id, "label": fragment.fragment.label}
-    assert payload["path"] == unit.candidate.path
+    assert loaded["file"]["path"] == unit.candidate.path
     assert payload["kind"] == kind
     assert payload["editable"] is True
     assert payload["read_only_reason"] is None
@@ -491,10 +501,9 @@ def test_known_fragment_failures_are_guarded_readable_typed_200s(
         params={"unit": "managed:repo-agents", "fragment": fragment_id},
     )
     assert response.status_code == 200
-    assert response.json() == {
+    assert response.json()["view"] == {
         "unit": "managed:repo-agents",
         "fragment": {"id": fragment_id, "label": label},
-        "path": "AGENTS.md",
         "kind": "managed-prose",
         "before": "",
         "focus": text,
@@ -554,10 +563,9 @@ def test_python_fragment_failures_are_guarded_readable_typed_200s(
         params={"unit": PYTHON_UNIT_ID, "fragment": fragment_id},
     )
     assert response.status_code == 200
-    assert response.json() == {
+    assert response.json()["view"] == {
         "unit": PYTHON_UNIT_ID,
         "fragment": {"id": fragment_id, "label": label},
-        "path": unit.candidate.path,
         "kind": "python-symbol",
         "before": "",
         "focus": text,
@@ -617,10 +625,9 @@ def test_typescript_fragment_failures_are_guarded_readable_typed_200s(
         params={"unit": unit.candidate.id, "fragment": fragment_id},
     )
     assert response.status_code == 200
-    assert response.json() == {
+    assert response.json()["view"] == {
         "unit": unit.candidate.id,
         "fragment": {"id": fragment_id, "label": label},
-        "path": unit.candidate.path,
         "kind": "typescript-tool",
         "before": "",
         "focus": text,
@@ -648,13 +655,14 @@ def test_typescript_fragment_is_a_guarded_editable_typed_200(
         params={"unit": unit.candidate.id, "fragment": fragment.fragment.id},
     )
     assert response.status_code == 200
-    payload = response.json()
+    loaded = response.json()
+    payload = loaded["view"]
     assert payload["unit"] == unit.candidate.id
     assert payload["fragment"] == {
         "id": fragment.fragment.id,
         "label": fragment.fragment.label,
     }
-    assert payload["path"] == unit.candidate.path
+    assert loaded["file"]["path"] == unit.candidate.path
     assert payload["kind"] == "typescript-tool"
     assert payload["editable"] is True
     assert payload["read_only_reason"] is None
@@ -684,13 +692,14 @@ def test_typescript_enclosing_symbol_fragment_is_editable_through_source_endpoin
         params={"unit": unit.candidate.id, "fragment": fragment.fragment.id},
     )
     assert response.status_code == 200
-    payload = response.json()
+    loaded = response.json()
+    payload = loaded["view"]
     assert payload["unit"] == unit.candidate.id
     assert payload["fragment"] == {
         "id": fragment.fragment.id,
         "label": fragment.fragment.label,
     }
-    assert payload["path"] == unit.candidate.path
+    assert loaded["file"]["path"] == unit.candidate.path
     assert payload["kind"] == "typescript-model-call"
     assert payload["editable"] is True
     assert payload["read_only_reason"] is None
@@ -735,7 +744,7 @@ def test_typescript_helper_failure_is_a_guarded_adapter_unavailable_200(
         params={"unit": unit.candidate.id, "fragment": "description"},
     )
     assert response.status_code == 200
-    payload = response.json()
+    payload = response.json()["view"]
     assert payload["editable"] is False
     assert payload["read_only_reason"] == "adapter-unavailable"
     assert payload["before"] == ""
@@ -811,7 +820,7 @@ def test_overlapping_typescript_requests_use_one_helper_and_recover(
         params={"unit": unit.candidate.id, "fragment": "description"},
     )
     assert second.status_code == 200
-    assert second.json()["read_only_reason"] == "adapter-unavailable"
+    assert second.json()["view"]["read_only_reason"] == "adapter-unavailable"
     assert calls == 1
     _assert_security_headers(second)
 
@@ -820,7 +829,7 @@ def test_overlapping_typescript_requests_use_one_helper_and_recover(
     assert not thread.is_alive()
     assert len(first) == 1
     assert first[0].status_code == 200
-    assert first[0].json()["editable"] is True
+    assert first[0].json()["view"]["editable"] is True
     _assert_security_headers(first[0])
 
     recovered = client.get(
@@ -828,9 +837,215 @@ def test_overlapping_typescript_requests_use_one_helper_and_recover(
         params={"unit": unit.candidate.id, "fragment": "description"},
     )
     assert recovered.status_code == 200
-    assert recovered.json()["editable"] is True
+    assert recovered.json()["view"]["editable"] is True
     assert calls == 2
     _assert_security_headers(recovered)
+
+
+@pytest.mark.parametrize(
+    ("unit_id", "fragment_id", "text", "marker"),
+    [
+        (
+            "managed:repo-agents",
+            "section:agents/developing-perk",
+            (ROOT / "AGENTS.md")
+            .read_text(encoding="utf-8")
+            .replace("Conventions for working", "Browser conventions for working", 1),
+            "Browser conventions",
+        ),
+        (
+            "ambient:learned-routing",
+            "cluster:pi-extension",
+            (ROOT / "docs/learned/clusters.yaml")
+            .read_text(encoding="utf-8")
+            .replace("Pi SDK/extension substrate craft", "Browser extension craft", 1),
+            "Browser extension craft",
+        ),
+        (
+            PYTHON_UNIT_ID,
+            "symbol:_PREAMBLE",
+            (ROOT / "packages/perk-dev/src/perk_dev/audit/bounding.py")
+            .read_text(encoding="utf-8")
+            .replace("bounded slice", "browser bounded slice", 1),
+            "browser bounded slice",
+        ),
+        (
+            "typescript-tool:plan_review",
+            "description",
+            (ROOT / "extension/factories/planReview.ts")
+            .read_text(encoding="utf-8")
+            .replace("Present the plan", "Present the browser plan", 1),
+            "browser plan",
+        ),
+    ],
+)
+def test_projection_uses_modified_supplied_text_for_every_editable_family(
+    snapshot: CatalogSnapshot,
+    repo: Path,
+    unit_id: str,
+    fragment_id: str,
+    text: str,
+    marker: str,
+) -> None:
+    response = _client(snapshot, repo).post(
+        "/api/source/project",
+        headers={web.CSRF_HEADER: TOKEN},
+        json={"unit": unit_id, "fragment": fragment_id, "text": text},
+    )
+    assert response.status_code == 200
+    view = response.json()
+    assert list(view) == [
+        "unit",
+        "fragment",
+        "kind",
+        "before",
+        "focus",
+        "after",
+        "editable",
+        "read_only_reason",
+    ]
+    assert view["unit"] == unit_id
+    assert view["fragment"]["id"] == fragment_id
+    assert view["editable"] is True
+    assert view["read_only_reason"] is None
+    assert view["before"] + view["focus"] + view["after"] == text
+    assert marker in view["focus"]
+    _assert_security_headers(response)
+
+
+def test_projection_returns_readable_invalid_fallback_without_storing_text(
+    fallback_snapshot: CatalogSnapshot,
+    repo: Path,
+) -> None:
+    client = _client(fallback_snapshot, repo)
+    invalid = "---\ndescription: [broken\n---\nbrowser text\n"
+    response = client.post(
+        "/api/source/project",
+        headers={web.CSRF_HEADER: TOKEN},
+        json={
+            "unit": "managed:repo-agents",
+            "fragment": "invalid-source",
+            "text": invalid,
+        },
+    )
+    assert response.status_code == 200
+    assert response.json()["focus"] == invalid
+    assert response.json()["read_only_reason"] == "invalid-source"
+
+    independent = client.post(
+        "/api/source/project",
+        headers={web.CSRF_HEADER: TOKEN},
+        json={"unit": "managed:repo-agents", "fragment": None, "text": "independent"},
+    )
+    assert independent.status_code == 200
+    assert independent.json()["focus"] == "independent"
+    _assert_security_headers(response)
+    _assert_security_headers(independent)
+
+
+def test_projection_never_invokes_a_canonical_source_reader(
+    snapshot: CatalogSnapshot,
+    repo: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def unexpected_read(*_args: object, **_kwargs: object) -> None:
+        raise AssertionError("projection attempted a canonical source read")
+
+    monkeypatch.setattr(web.source_adapter, "read_source", unexpected_read)
+    monkeypatch.setattr(web.source_adapter, "read_unit_file", unexpected_read)
+    monkeypatch.setattr(web.source_adapter, "read_whole_file", unexpected_read)
+    response = _client(snapshot, repo).post(
+        "/api/source/project",
+        headers={web.CSRF_HEADER: TOKEN},
+        json={"unit": "managed:repo-agents", "fragment": None, "text": "supplied text"},
+    )
+    assert response.status_code == 200
+    assert response.json()["focus"] == "supplied text"
+    _assert_security_headers(response)
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        {"unit": "managed:repo-agents", "text": "missing fragment"},
+        {"fragment": None, "text": "missing unit"},
+        {"unit": "managed:repo-agents", "fragment": None},
+        {"unit": "managed:repo-agents", "fragment": None, "text": "x", "path": "x.md"},
+        {"unit": 1, "fragment": None, "text": "x"},
+        {"unit": "managed:repo-agents", "fragment": 1, "text": "x"},
+        {"unit": "managed:repo-agents", "fragment": None, "text": 1},
+    ],
+)
+def test_projection_strict_input_rejects_missing_extra_and_wrong_typed_fields(
+    snapshot: CatalogSnapshot,
+    repo: Path,
+    body: object,
+) -> None:
+    response = _client(snapshot, repo).post(
+        "/api/source/project",
+        headers={web.CSRF_HEADER: TOKEN},
+        json=body,
+    )
+    assert response.status_code == 422
+    _assert_security_headers(response)
+
+
+@pytest.mark.parametrize(
+    ("body", "detail"),
+    [
+        ({"unit": "missing", "fragment": None, "text": "x"}, "unknown unit"),
+        (
+            {"unit": "managed:repo-agents", "fragment": "missing", "text": "x"},
+            "unknown fragment",
+        ),
+    ],
+)
+def test_projection_maps_unknown_catalog_targets_to_fixed_404s(
+    snapshot: CatalogSnapshot,
+    repo: Path,
+    body: dict[str, object],
+    detail: str,
+) -> None:
+    response = _client(snapshot, repo).post(
+        "/api/source/project",
+        headers={web.CSRF_HEADER: TOKEN},
+        json=body,
+    )
+    assert response.status_code == 404
+    assert response.json() == {"detail": detail}
+    _assert_security_headers(response)
+
+
+def test_projection_csrf_and_origin_guard_all_arms(
+    snapshot: CatalogSnapshot,
+    repo: Path,
+) -> None:
+    client = _client(snapshot, repo)
+    body = {"unit": "managed:repo-agents", "fragment": None, "text": "x"}
+    missing = client.post("/api/source/project", json=body)
+    wrong = client.post("/api/source/project", headers={web.CSRF_HEADER: "wrong"}, json=body)
+    duplicate = client.post(
+        "/api/source/project",
+        headers=[(web.CSRF_HEADER, TOKEN), (web.CSRF_HEADER, TOKEN)],
+        json=body,
+    )
+    foreign_origin = client.post(
+        "/api/source/project",
+        headers={web.CSRF_HEADER: TOKEN, "Origin": "http://evil.example"},
+        json=body,
+    )
+    passed = client.post(
+        "/api/source/project",
+        headers={web.CSRF_HEADER: TOKEN, "Origin": f"http://{ALLOWED_HOST}"},
+        json=body,
+    )
+    assert missing.status_code == 403
+    assert wrong.status_code == 403
+    assert duplicate.status_code == 403
+    assert foreign_origin.status_code == 403
+    assert passed.status_code == 200
+    for response in (missing, wrong, duplicate, foreign_origin, passed):
+        _assert_security_headers(response)
 
 
 def test_inspect_serves_the_relationship_payload(snapshot: CatalogSnapshot, repo: Path) -> None:

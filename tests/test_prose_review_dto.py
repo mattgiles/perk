@@ -1,5 +1,6 @@
 """The Prose Review Workbench serialization edge: snapshot → wire DTOs."""
 
+import hashlib
 import json
 from pathlib import Path
 
@@ -23,12 +24,14 @@ from perk_dev.prose_review.dto import (
     FragmentRefOut,
     SearchOut,
     SessionShapeOut,
+    SourceFileOut,
+    SourceViewOut,
     TreeUnitOut,
     UnitInspectOut,
     UnitSourceOut,
 )
 from perk_dev.prose_review.search import build_search_index, search
-from perk_dev.prose_review.source_adapter import FocusedSource
+from perk_dev.prose_review.source_adapter import FocusedSource, LoadedSource, WholeFileSource
 
 ROOT = Path(__file__).parents[1]
 
@@ -453,23 +456,34 @@ def test_search_out_key_order_from_real_hits(snapshot: CatalogSnapshot) -> None:
     assert list(unit_result["unit"].keys()) == ["id", "kind", "path"]
 
 
-def test_unit_source_out_field_order_and_fragment_shape() -> None:
-    source = FocusedSource(
+def test_unit_source_out_has_nested_file_and_view_with_exact_field_order() -> None:
+    content = "context\r\ncontent 😀\r\ntail"
+    raw = content.encode("utf-8")
+    file = WholeFileSource(
         unit_id="markdown:AGENTS.md",
         path="AGENTS.md",
         kind="markdown",
+        content=raw,
+        mode=0o6751,
+        newline_style="crlf",
+        load_hash=hashlib.sha256(raw).hexdigest(),
+    )
+    view = FocusedSource(
+        unit_id="markdown:AGENTS.md",
+        kind="markdown",
         fragment=Fragment(id="body", label="Document body", selector="file-body"),
-        before="context\n",
-        focus="content 😀\n",
-        after="tail\n",
+        before="context\r\n",
+        focus="content 😀\r\n",
+        after="tail",
         editable=True,
         read_only_reason=None,
     )
-    dumped = UnitSourceOut.from_domain(source).model_dump(mode="json")
-    assert list(dumped.keys()) == [
+    dumped = UnitSourceOut.from_domain(LoadedSource(file=file, view=view)).model_dump(mode="json")
+    assert list(dumped) == ["file", "view"]
+    assert list(dumped["file"]) == ["path", "mode", "newline_style", "load_hash"]
+    assert list(dumped["view"]) == [
         "unit",
         "fragment",
-        "path",
         "kind",
         "before",
         "focus",
@@ -478,13 +492,23 @@ def test_unit_source_out_field_order_and_fragment_shape() -> None:
         "read_only_reason",
     ]
     assert dumped == {
-        "unit": "markdown:AGENTS.md",
-        "fragment": {"id": "body", "label": "Document body"},
-        "path": "AGENTS.md",
-        "kind": "markdown",
-        "before": "context\n",
-        "focus": "content 😀\n",
-        "after": "tail\n",
-        "editable": True,
-        "read_only_reason": None,
+        "file": {
+            "path": "AGENTS.md",
+            "mode": 0o6751,
+            "newline_style": "crlf",
+            "load_hash": hashlib.sha256(raw).hexdigest(),
+        },
+        "view": {
+            "unit": "markdown:AGENTS.md",
+            "fragment": {"id": "body", "label": "Document body"},
+            "kind": "markdown",
+            "before": "context\r\n",
+            "focus": "content 😀\r\n",
+            "after": "tail",
+            "editable": True,
+            "read_only_reason": None,
+        },
     }
+    assert dumped["view"]["before"] + dumped["view"]["focus"] + dumped["view"]["after"] == content
+    assert SourceFileOut.from_domain(file).model_dump(mode="json") == dumped["file"]
+    assert SourceViewOut.from_domain(view).model_dump(mode="json") == dumped["view"]

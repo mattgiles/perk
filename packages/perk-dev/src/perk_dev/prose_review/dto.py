@@ -8,6 +8,8 @@ deliberate.
 
 from typing import Self
 
+from pydantic import Field
+
 from perk.boundary import OutputModel
 from perk_dev.prose_map.models import (
     Audience,
@@ -39,7 +41,13 @@ from perk_dev.prose_review.comparison import (
     ComparisonRelation,
 )
 from perk_dev.prose_review.search import MatchField, SearchEntryKind, SearchHit, SearchResults
-from perk_dev.prose_review.source_adapter import FocusedSource, ReadOnlyReason
+from perk_dev.prose_review.source_adapter import (
+    FocusedSource,
+    LoadedSource,
+    NewlineStyle,
+    ReadOnlyReason,
+    WholeFileSource,
+)
 
 
 class CapabilityOut(OutputModel):
@@ -208,12 +216,29 @@ class CapabilityTreeOut(OutputModel):
         )
 
 
-class UnitSourceOut(OutputModel):
-    """One whole-unit or fragment-focused source read as served over the wire."""
+class SourceFileOut(OutputModel):
+    """Immutable canonical-file metadata retained by the browser workspace."""
+
+    path: str
+    mode: int = Field(ge=0, le=0o7777)
+    newline_style: NewlineStyle
+    load_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+    @classmethod
+    def from_domain(cls, source: WholeFileSource) -> Self:
+        return cls(
+            path=source.path,
+            mode=source.mode,
+            newline_style=source.newline_style,
+            load_hash=source.load_hash,
+        )
+
+
+class SourceViewOut(OutputModel):
+    """One metadata-free whole-unit or fragment projection."""
 
     unit: str
     fragment: FragmentRefOut | None
-    path: str
     kind: ProseKind
     before: str
     focus: str
@@ -228,13 +253,26 @@ class UnitSourceOut(OutputModel):
             fragment=(
                 None if source.fragment is None else FragmentRefOut.from_domain(source.fragment)
             ),
-            path=source.path,
             kind=source.kind,
             before=source.before,
             focus=source.focus,
             after=source.after,
             editable=source.editable,
             read_only_reason=source.read_only_reason,
+        )
+
+
+class UnitSourceOut(OutputModel):
+    """One canonical file load and its requested nested projection."""
+
+    file: SourceFileOut
+    view: SourceViewOut
+
+    @classmethod
+    def from_domain(cls, source: LoadedSource) -> Self:
+        return cls(
+            file=SourceFileOut.from_domain(source.file),
+            view=SourceViewOut.from_domain(source.view),
         )
 
 

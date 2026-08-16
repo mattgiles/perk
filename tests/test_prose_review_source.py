@@ -1,7 +1,10 @@
 """The seeded whole-file SourceAdapter: containment, membership, text-only decode."""
 
 import ast
+import hashlib
 import json
+import os
+import stat
 import threading
 import token
 import tokenize
@@ -16,6 +19,7 @@ from perk_dev.prose_review import source_adapter
 from perk_dev.prose_review.catalog import CatalogSnapshot
 from perk_dev.prose_review.source_adapter import (
     FocusedSource,
+    LoadedSource,
     RangeResolution,
     ResolvedRange,
     SourceDiagnostic,
@@ -23,12 +27,14 @@ from perk_dev.prose_review.source_adapter import (
     SourceRange,
     SourceReadError,
     UnresolvedRange,
+    project_source,
     read_source,
     read_unit_file,
     read_whole_file,
     source_adapter_for,
 )
 from perk_dev.prose_review.source_adapter import python as python_adapter_module
+from perk_dev.prose_review.source_adapter import read as source_read_module
 from perk_dev.prose_review.source_adapter import typescript as typescript_adapter_module
 from perk_dev.prose_review.source_adapter.python import PythonSourceAdapter
 from perk_dev.prose_review.source_adapter.typescript import (
@@ -64,10 +70,63 @@ def _unit(path: str) -> RoutedUnit:
 
 def test_read_whole_file_returns_the_exact_decoded_bytes(snapshot: CatalogSnapshot) -> None:
     source = read_whole_file(snapshot, ROOT, "managed:repo-agents")
+    expected = (ROOT / "AGENTS.md").read_bytes()
     assert source.unit_id == "managed:repo-agents"
     assert source.path == "AGENTS.md"
     assert source.kind == "managed-prose"
-    assert source.text == (ROOT / "AGENTS.md").read_bytes().decode("utf-8")
+    assert source.content == expected
+    assert source.text == expected.decode("utf-8")
+    assert source.mode == stat.S_IMODE((ROOT / "AGENTS.md").stat().st_mode)
+    assert source.load_hash == hashlib.sha256(expected).hexdigest()
+
+
+@pytest.mark.parametrize(
+    ("name", "content", "newline_style"),
+    [
+        ("bom.md", b"\xef\xbb\xbfhello", "none"),
+        ("astral.md", "hello 😀".encode(), "none"),
+        ("empty.md", b"", "none"),
+        ("lf.md", b"one\ntwo\n", "lf"),
+        ("crlf.md", b"one\r\ntwo\r\n", "crlf"),
+        ("cr.md", b"one\rtwo\r", "cr"),
+        ("mixed.md", b"one\r\ntwo\nthree\r", "mixed"),
+    ],
+)
+def test_read_unit_file_preserves_exact_utf8_and_classifies_newlines(
+    tmp_path: Path,
+    name: str,
+    content: bytes,
+    newline_style: str,
+) -> None:
+    path = tmp_path / name
+    path.write_bytes(content)
+    path.chmod(0o6751)
+    source = read_unit_file(tmp_path, _unit(name))
+    assert source.content == content
+    assert source.text.encode("utf-8") == content
+    assert source.mode == stat.S_IMODE(path.stat().st_mode)
+    assert source.mode & 0o111 == 0o111
+    assert source.newline_style == newline_style
+    assert source.load_hash == hashlib.sha256(content).hexdigest()
+
+
+def test_read_unit_file_samples_mode_and_content_from_one_descriptor(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    path = tmp_path / "one.md"
+    path.write_text("one descriptor\n", encoding="utf-8")
+    seen: list[int] = []
+    real_fstat = os.fstat
+
+    def observing_fstat(fd: int) -> os.stat_result:
+        seen.append(fd)
+        return real_fstat(fd)
+
+    monkeypatch.setattr(source_read_module.os, "fstat", observing_fstat)
+    source = read_unit_file(tmp_path, _unit("one.md"))
+    assert source.content == b"one descriptor\n"
+    assert len(seen) == 1
 
 
 def test_unknown_unit_id_is_refused(snapshot: CatalogSnapshot) -> None:
@@ -132,6 +191,8 @@ def test_package_facade_has_the_exact_public_contract() -> None:
     assert source_adapter.__all__ == [
         "CheckHintId",
         "FocusedSource",
+        "LoadedSource",
+        "NewlineStyle",
         "RangeFailure",
         "RangeResolution",
         "ReadOnlyReason",
@@ -145,6 +206,7 @@ def test_package_facade_has_the_exact_public_contract() -> None:
         "SourceReadFailure",
         "UnresolvedRange",
         "WholeFileSource",
+        "project_source",
         "read_source",
         "read_unit_file",
         "read_whole_file",
@@ -171,7 +233,6 @@ def test_contract_values_validate_and_extract_uses_canonical_fallback() -> None:
     with pytest.raises(ValueError, match="requires a fragment"):
         FocusedSource(
             unit_id="u",
-            path="x.md",
             kind="markdown",
             fragment=None,
             before="",
@@ -461,12 +522,15 @@ def test_read_source_whole_markdown_yaml_unsupported_and_unknown_fragment(
     clusters.parent.mkdir(parents=True)
     clusters.write_bytes((ROOT / "docs/learned/clusters.yaml").read_bytes())
 
-    whole = read_source(snapshot, tmp_path, "managed:repo-agents")
+    loaded = read_source(snapshot, tmp_path, "managed:repo-agents")
+    assert isinstance(loaded, LoadedSource)
+    whole = loaded.view
     assert whole.fragment is None
     assert whole.editable is False
     assert whole.read_only_reason == "whole-unit"
     assert whole.before == "" and whole.after == ""
     assert whole.focus == (ROOT / "AGENTS.md").read_text(encoding="utf-8")
+    assert loaded.file.text == whole.focus
 
     markdown = read_source(
         snapshot,
@@ -474,10 +538,10 @@ def test_read_source_whole_markdown_yaml_unsupported_and_unknown_fragment(
         "managed:repo-agents",
         "section:agents/developing-perk",
     )
-    assert markdown.editable is True
-    assert markdown.fragment is not None
-    assert markdown.focus.startswith("\n*Conventions for working **on** perk itself")
-    assert markdown.before + markdown.focus + markdown.after == whole.focus
+    assert markdown.view.editable is True
+    assert markdown.view.fragment is not None
+    assert markdown.view.focus.startswith("\n*Conventions for working **on** perk itself")
+    assert markdown.view.before + markdown.view.focus + markdown.view.after == whole.focus
 
     yaml_source = read_source(
         snapshot,
@@ -485,11 +549,12 @@ def test_read_source_whole_markdown_yaml_unsupported_and_unknown_fragment(
         "ambient:learned-routing",
         "cluster:pi-extension",
     )
-    assert yaml_source.editable is True
-    assert yaml_source.fragment is not None
-    assert "Pi SDK/extension substrate craft" in yaml_source.focus
-    assert yaml_source.before + yaml_source.focus + yaml_source.after == clusters.read_text(
-        encoding="utf-8"
+    assert yaml_source.view.editable is True
+    assert yaml_source.view.fragment is not None
+    assert "Pi SDK/extension substrate craft" in yaml_source.view.focus
+    assert (
+        yaml_source.view.before + yaml_source.view.focus + yaml_source.view.after
+        == clusters.read_text(encoding="utf-8")
     )
 
     with pytest.raises(SourceReadError) as excinfo:
@@ -508,10 +573,10 @@ def test_read_source_whole_markdown_yaml_unsupported_and_unknown_fragment(
         unsupported_unit.candidate.id,
         unsupported_fragment.fragment.id,
     )
-    assert unsupported.editable is False
-    assert unsupported.read_only_reason == "unsupported-family"
-    assert unsupported.before == "" and unsupported.after == ""
-    assert unsupported.focus == unsupported_path.read_text(encoding="utf-8")
+    assert unsupported.view.editable is False
+    assert unsupported.view.read_only_reason == "unsupported-family"
+    assert unsupported.view.before == "" and unsupported.view.after == ""
+    assert unsupported.view.focus == unsupported_path.read_text(encoding="utf-8")
 
     focused_typescript = read_source(
         snapshot,
@@ -520,12 +585,15 @@ def test_read_source_whole_markdown_yaml_unsupported_and_unknown_fragment(
         "description",
         typescript_adapter=TypeScriptSourceAdapter(ROOT),
     )
-    assert focused_typescript.editable is True
-    assert focused_typescript.read_only_reason is None
-    assert focused_typescript.before + focused_typescript.focus + focused_typescript.after == (
-        unsupported_path.read_text(encoding="utf-8")
+    assert focused_typescript.view.editable is True
+    assert focused_typescript.view.read_only_reason is None
+    assert (
+        focused_typescript.view.before
+        + focused_typescript.view.focus
+        + focused_typescript.view.after
+        == unsupported_path.read_text(encoding="utf-8")
     )
-    assert focused_typescript.focus.startswith('"')
+    assert focused_typescript.view.focus.startswith('"')
 
     def unavailable(*_args: object, **_kwargs: object) -> str:
         raise ProcFailure("timeout", ("node",))
@@ -538,9 +606,106 @@ def test_read_source_whole_markdown_yaml_unsupported_and_unknown_fragment(
         "description",
         typescript_adapter=TypeScriptSourceAdapter(ROOT),
     )
-    assert fallback.editable is False
-    assert fallback.read_only_reason == "adapter-unavailable"
-    assert fallback.focus == unsupported_path.read_text(encoding="utf-8")
+    assert fallback.view.editable is False
+    assert fallback.view.read_only_reason == "adapter-unavailable"
+    assert fallback.view.focus == unsupported_path.read_text(encoding="utf-8")
+
+
+def test_project_source_uses_supplied_text_for_every_family_without_canonical_read(
+    snapshot: CatalogSnapshot,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def unexpected_read(*_args: object, **_kwargs: object) -> None:
+        raise AssertionError("projection attempted a canonical source read")
+
+    monkeypatch.setattr(source_read_module, "read_unit_file", unexpected_read)
+
+    whole = project_source(snapshot, "managed:repo-agents", None, "browser authority 😀")
+    assert whole.focus == "browser authority 😀"
+    assert whole.read_only_reason == "whole-unit"
+
+    markdown_text = (
+        (ROOT / "AGENTS.md")
+        .read_text(encoding="utf-8")
+        .replace("Conventions for working", "Browser-edited conventions for working", 1)
+    )
+    markdown = project_source(
+        snapshot,
+        "managed:repo-agents",
+        "section:agents/developing-perk",
+        markdown_text,
+    )
+    assert markdown.editable is True
+    assert markdown.before + markdown.focus + markdown.after == markdown_text
+    assert "Browser-edited conventions" in markdown.focus
+
+    yaml_text = (
+        (ROOT / "docs/learned/clusters.yaml")
+        .read_text(encoding="utf-8")
+        .replace(
+            "Pi SDK/extension substrate craft",
+            "Browser-edited extension craft",
+            1,
+        )
+    )
+    yaml_source = project_source(
+        snapshot,
+        "ambient:learned-routing",
+        "cluster:pi-extension",
+        yaml_text,
+    )
+    assert yaml_source.editable is True
+    assert yaml_source.before + yaml_source.focus + yaml_source.after == yaml_text
+    assert "Browser-edited extension craft" in yaml_source.focus
+
+    python_text = (ROOT / "packages/perk-dev/src/perk_dev/audit/bounding.py").read_text(
+        encoding="utf-8"
+    )
+    python_text = python_text.replace("bounded slice", "browser-edited bounded slice", 1)
+    python_source = project_source(
+        snapshot,
+        "python-symbol:packages/perk-dev/src/perk_dev/audit/bounding.py:_PREAMBLE",
+        "symbol:_PREAMBLE",
+        python_text,
+    )
+    assert python_source.editable is True
+    assert python_source.before + python_source.focus + python_source.after == python_text
+
+    typescript_text = (
+        (ROOT / "extension/factories/planReview.ts")
+        .read_text(encoding="utf-8")
+        .replace("Present the plan", "Present the browser-edited plan", 1)
+    )
+    typescript_source = project_source(
+        snapshot,
+        "typescript-tool:plan_review",
+        "description",
+        typescript_text,
+        typescript_adapter=TypeScriptSourceAdapter(ROOT),
+    )
+    assert typescript_source.editable is True
+    assert (
+        typescript_source.before + typescript_source.focus + typescript_source.after
+        == typescript_text
+    )
+
+
+@pytest.mark.parametrize(
+    ("unit_id", "fragment_id", "reason"),
+    [
+        ("missing", None, "unknown_unit"),
+        ("managed:repo-agents", "missing", "unknown_fragment"),
+    ],
+)
+def test_project_source_preserves_closed_lookup_failures(
+    snapshot: CatalogSnapshot,
+    unit_id: str,
+    fragment_id: str | None,
+    reason: str,
+) -> None:
+    with pytest.raises(SourceReadError) as excinfo:
+        project_source(snapshot, unit_id, fragment_id, "supplied")
+    assert excinfo.value.reason == reason
 
 
 def test_every_real_python_backed_fragment_resolves_and_recomposes(
@@ -563,9 +728,9 @@ def test_every_real_python_backed_fragment_resolves_and_recomposes(
             unit.candidate.id,
             fragments[0].fragment.id,
         )
-        assert source.editable is True
-        assert source.read_only_reason is None
-        assert source.before + source.focus + source.after == expected
+        assert source.view.editable is True
+        assert source.view.read_only_reason is None
+        assert source.view.before + source.view.focus + source.view.after == expected
 
 
 def _python_adapter() -> PythonSourceAdapter:

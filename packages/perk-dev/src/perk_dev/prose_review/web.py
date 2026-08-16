@@ -30,6 +30,7 @@ from typing import Any
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import HTMLResponse, Response
 
+from perk.boundary import StrictInputModel
 from perk_dev.prose_map.models import Audience, ProseKind, ProseRole
 from perk_dev.prose_review import comparison as comparison_module
 from perk_dev.prose_review import search as search_module
@@ -40,6 +41,7 @@ from perk_dev.prose_review.dto import (
     CatalogSummaryOut,
     ComparisonOptionsOut,
     SearchOut,
+    SourceViewOut,
     UnitInspectOut,
     UnitSourceOut,
 )
@@ -85,6 +87,16 @@ _SECURITY_HEADERS: tuple[tuple[bytes, bytes], ...] = (
 )
 
 # Explicit Content-Type map for served build assets; anything unlisted is an opaque blob.
+
+
+class SourceProjectionInput(StrictInputModel):
+    """The exact machine-authored body for stateless source projection."""
+
+    unit: str
+    fragment: str | None
+    text: str
+
+
 _CONTENT_TYPES: dict[str, str] = {
     ".js": "text/javascript",
     ".css": "text/css",
@@ -264,7 +276,7 @@ def create_app(
     @app.get("/api/source", response_model=UnitSourceOut)
     def source(unit: str, fragment: str | None = None) -> UnitSourceOut:
         try:
-            focused = source_adapter.read_source(
+            loaded = source_adapter.read_source(
                 snapshot,
                 repo_resolved,
                 unit,
@@ -273,7 +285,21 @@ def create_app(
             )
         except SourceReadError as exc:
             raise HTTPException(status_code=404, detail=_SOURCE_READ_DETAILS[exc.reason]) from exc
-        return UnitSourceOut.from_domain(focused)
+        return UnitSourceOut.from_domain(loaded)
+
+    @app.post("/api/source/project", response_model=SourceViewOut)
+    def project_source(request: SourceProjectionInput) -> SourceViewOut:
+        try:
+            view = source_adapter.project_source(
+                snapshot,
+                request.unit,
+                request.fragment,
+                request.text,
+                typescript_adapter=typescript_adapter,
+            )
+        except SourceReadError as exc:
+            raise HTTPException(status_code=404, detail=_SOURCE_READ_DETAILS[exc.reason]) from exc
+        return SourceViewOut.from_domain(view)
 
     @app.get("/assets/{asset_path:path}")
     def asset(asset_path: str) -> Response:
