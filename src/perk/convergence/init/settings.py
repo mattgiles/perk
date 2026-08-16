@@ -80,12 +80,20 @@ def _perk_npm_entry() -> str:
 # `hasUI`-gated checklist widget): the todo provider seam is retired and the checklist tool is
 # built-in for every repo. Vetted: zero-config, headless-safe (`hasUI`-gated overlay),
 # no `setFooter`.
+# `@dietrichgebert/ponytail` is the borrowed *review-lane context source*. It is the sole
+# filtered-borrow exception: `_reconcile_ponytail_entry` keeps all four Pi resource classes
+# disabled in ordinary sessions while exact review-agent paths opt one skill into one lane.
+PONYTAIL_PACKAGE = "npm:@dietrichgebert/ponytail"
+PONYTAIL_NPM_NAME = "@dietrichgebert/ponytail"
+PACKAGE_RESOURCE_FILTERS = ("extensions", "skills", "prompts", "themes")
+
 BORROWED_PACKAGES = [
     "npm:@tombell/pi-diff",
     "npm:pi-subagents",
     "npm:@ff-labs/pi-fff",
     "npm:@juicesharp/rpiv-ask-user-question",
     "npm:@juicesharp/rpiv-todo",
+    PONYTAIL_PACKAGE,
 ]
 
 # `pi-mono-linear` is the borrowed *Linear-tools Pi extension*, converged only when the repo
@@ -199,6 +207,66 @@ def _merge_static_packages(
     return packages, added, updated
 
 
+def _reconcile_ponytail_entry(packages: list[object]) -> tuple[list[object], list[str]]:
+    """Force the Ponytail borrow to one all-disabled object entry without discarding metadata.
+
+    Canonical donor selection is deterministic: the first object-form identity match, otherwise
+    the first match. The donor stays in its existing list position, keeps its exact ``source``
+    (including an operator pin) and every non-resource key, while all four Pi resource filters
+    become ``[]``. Every duplicate identity is removed. With no donor, append the unpinned managed
+    object. This is deliberately the sole exception to borrowed packages' normal string shape.
+    """
+    matches = [
+        (index, entry)
+        for index, entry in enumerate(packages)
+        if _package_identity(entry) == PONYTAIL_NPM_NAME
+    ]
+    if not matches:
+        packages.append(
+            {
+                "source": PONYTAIL_PACKAGE,
+                "extensions": [],
+                "skills": [],
+                "prompts": [],
+                "themes": [],
+            }
+        )
+        return packages, [f"added filtered {PONYTAIL_PACKAGE}"]
+
+    canonical_index, canonical = next(
+        (match for match in matches if isinstance(match[1], dict)), matches[0]
+    )
+    source = _entry_spec(canonical)
+    if source is None:  # unreachable: only identity matches are collected
+        source = PONYTAIL_PACKAGE
+    base: dict[object, object]
+    if isinstance(canonical, dict):
+        base = {
+            key: value for key, value in canonical.items() if key not in PACKAGE_RESOURCE_FILTERS
+        }
+    else:
+        base = {"source": source}
+    reconciled: dict[object, object] = {
+        **base,
+        "extensions": [],
+        "skills": [],
+        "prompts": [],
+        "themes": [],
+    }
+
+    changes: list[str] = []
+    if canonical != reconciled:
+        packages[canonical_index] = reconciled
+        changes.append(f"filtered {source}")
+    for index, duplicate in reversed(matches):
+        if index == canonical_index:
+            continue
+        duplicate_source = _entry_spec(duplicate) or PONYTAIL_PACKAGE
+        packages.pop(index)
+        changes.append(f"removed duplicate {duplicate_source}")
+    return packages, changes
+
+
 def _reconcile_perk_entry(packages: list[object], want: str, name: str) -> list[str]:
     """Reconcile perk's own already-present identity to the desired pin; returns the fragments.
 
@@ -272,6 +340,8 @@ def _converge_settings(root: Path, self_repo: bool, *, apply: bool = True) -> li
     packages = [p for p in packages if _package_identity(p) != GIT_PACKAGE]
 
     packages, added, updated = _merge_static_packages(packages, _desired_packages(self_repo))
+    packages, ponytail_changes = _reconcile_ponytail_entry(packages)
+    updated.extend(ponytail_changes)
 
     # Provider-driven two-directional wiring. Composes on top of the static layer
     # within this same body, so it stays inside the `settings-wiring` ManagedConvergence (D5 SSOT

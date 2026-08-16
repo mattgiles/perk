@@ -5,6 +5,8 @@ subdir, byte-for-byte from the bundled `agents/` sources, as a committed managed
 fresh delivery, idempotency, drift rewrite, stray pruning, and `apply=False` dry-run parity.
 """
 
+import yaml
+
 from perk import _resources
 from perk.convergence.init import PERK_AGENTS, _converge_subagent_agents
 
@@ -24,6 +26,46 @@ def test_fresh_delivery_writes_all_defs_byte_identical(tmp_path):
     # The committed `.gitkeep` keeps `.pi/agents/` present.
     assert (tmp_path / ".pi" / "agents" / ".gitkeep").is_file()
     assert ".pi/agents/: created" in changes
+
+
+def test_reviewer_defs_source_bind_only_the_exact_ponytail_skill_paths():
+    package_skills = "../../npm/node_modules/@dietrichgebert/ponytail/skills"
+    expected = {
+        "draft-reviewer": (
+            f"{package_skills}/ponytail/SKILL.md",
+            ".pi/npm/node_modules/@dietrichgebert/ponytail/skills/ponytail/SKILL.md",
+            "ponytail",
+        ),
+        "pr-reviewer": (
+            f"{package_skills}/ponytail-review/SKILL.md",
+            ".pi/npm/node_modules/@dietrichgebert/ponytail/skills/ponytail-review/SKILL.md",
+            "ponytail-review",
+        ),
+        "adversarial-reviewer": (
+            f"{package_skills}/ponytail-review/SKILL.md",
+            ".pi/npm/node_modules/@dietrichgebert/ponytail/skills/ponytail-review/SKILL.md",
+            "ponytail-review",
+        ),
+    }
+    for name, (skill_path, runtime_path, skill_name) in expected.items():
+        text = _source_bytes(name).decode()
+        frontmatter = yaml.safe_load(text.split("---", 2)[1])
+        assert frontmatter["inheritSkills"] is False
+        assert frontmatter["skillPath"] == [skill_path]
+        assert "skills" not in frontmatter
+        assert "**Source-bound Ponytail check.**" in text
+        assert runtime_path in text
+        assert f"frontmatter name is `{skill_name}`" in text
+        compact = " ".join(text.split())
+        assert "terminate without calling `structured_output`" in compact
+        assert "never resolve a same-named project/user skill" in compact
+
+
+def test_committed_reviewer_mirrors_are_byte_identical():
+    root = _resources.agents_dir().parent
+    for name in ("draft-reviewer", "pr-reviewer", "adversarial-reviewer"):
+        mirror = root / ".pi" / "agents" / "perk" / f"{name}.md"
+        assert mirror.read_bytes() == _source_bytes(name)
 
 
 def test_second_run_is_idempotent(tmp_path):

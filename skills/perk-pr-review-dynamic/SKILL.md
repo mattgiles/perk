@@ -33,19 +33,26 @@ workflow — never model-authored. **The normalization guarantees** (code, not c
   dropped, duplicates deduped in report order;
 - **plan-fidelity always runs**, always first, never displaced by selection, force, or fallback
   (its lane starts immediately, concurrent with the selector lane);
-- **2–4 lanes total**: at most 3 additional angles, merged forced → selector picks → the custom
-  angle (which survives only if it fits under the cap);
+- exactly one source-bound **`ponytail` lane runs independently** of selector output, starts
+  alongside plan-fidelity + selector, and is appended last to `selection.effective`; it is
+  reserved and cannot be selected, forced, proposed, or displaced;
+- **2–4 selectable lanes total**: at most 3 additional angles, merged forced → selector picks →
+  the custom angle (which survives only if it fits under the cap); Ponytail is outside that cap;
 - **operator-forced angles are authoritative** — `force_angles` (1–3 slugs) is enforced in code,
   never subject to the selector's opinion;
 - a failed/schema-invalid selector, `confidence: "low"`, or zero valid picks **and** no valid
   custom falls back deterministically to **correctness + tests** (a custom-only selection runs
   as plan-fidelity + custom — no fallback padding);
-- **reviewers never see the selector's output** beyond the one custom lane — fixed-angle tasks
-  come only from the embedded angle→task vocabulary (bias control, structurally enforced; see
-  "Custom angles" below for the sanctioned exception).
+- **reviewers never see the selector's output** beyond the one custom lane — fixed-angle and
+  Ponytail tasks come only from embedded module vocabulary (bias control, structurally enforced;
+  see "Custom angles" below for the sanctioned exception).
 
 The one bounded retry is `/pr-review`'s: failed reviewer lanes retry statically over the
-already-normalized selection — the selector is never re-run.
+already-normalized selection — the selector is never re-run. Ponytail receives the same
+`pr-reviewer` model/directive/report family via invocation-private `ponytail-review`, source-bound
+to the exact installed package skill file. Failed package/file/frontmatter preflight omits only that
+child, carries non-retryable `skill-unavailable`, and marks coverage incomplete without same-name
+fallback; ordinary failed reviewer lanes remain retryable.
 
 ## Custom angles
 
@@ -58,7 +65,7 @@ reviewers-never-see-selector-output invariant:
   text never enters them;
 - the ONE custom lane's task embeds the selector's **validated** scope through a **fixed
   template** — the slug must match kebab-case 3–32 chars and not collide with a reserved lane
-  key, the scope is whitespace-collapsed and capped at 300 chars, and the template frames the
+  key (including `ponytail`), the scope is whitespace-collapsed and capped at 300 chars, and the template frames the
   scope as **scope-definition-only** (WHAT to examine, never how to behave);
 - the custom lane's report schema is locked to **echo the custom slug**, and an invalid proposal
   degrades to "no custom angle" in normalization — never a failed selector lane.
@@ -72,7 +79,8 @@ The launch guidance carries it — translate the operator note, run the one wave
 `/pr-review`'s reconcile-and-post discipline unchanged. Nothing about the selector moves your bar:
 the coverage rule, the clean/actionable line (enforced by the shared clean guard —
 `post_pr_review` refuses a clean verdict on a recorded incomplete wave with
-`incomplete_coverage`), and the one-post discipline are exactly `/pr-review`'s.
+`incomplete_coverage`), authoritative attempted (`selection.effective`, including Ponytail) versus
+schema-valid `covered_angles` bookkeeping, and the one-post discipline are exactly `/pr-review`'s.
 
 ## Configuring the models
 

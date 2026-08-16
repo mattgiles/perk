@@ -133,6 +133,18 @@ test("decodeDynamicWaveParams refuses malformed force_angles (whole refusal)", (
 // --- run_pr_review_dynamic_wave: the flow tool over a script-EVALUATING fake responder --------
 
 /** What the fake responder observes: the spawn params and the evaluated script's inner calls. */
+function installPonytailReviewSkill(cwd: string): void {
+  const root = join(cwd, ".pi", "npm", "node_modules", "@dietrichgebert", "ponytail");
+  const skillDir = join(root, "skills", "ponytail-review");
+  mkdirSync(skillDir, { recursive: true });
+  writeFileSync(
+    join(root, "package.json"),
+    JSON.stringify({ name: "@dietrichgebert/ponytail", pi: { skills: ["./skills"] } }),
+    "utf8",
+  );
+  writeFileSync(join(skillDir, "SKILL.md"), "---\nname: ponytail-review\n---\n", "utf8");
+}
+
 interface DynamicSink {
   spawns: { workflowScript?: string; model?: string; outputSchema?: unknown }[];
   runCalls: { key: string; params: Record<string, unknown> }[];
@@ -273,6 +285,7 @@ const CLEAN_JSON = JSON.stringify({
 
 test("tool: run_pr_review_dynamic_wave end-to-end — models per-item, aggregate round-trip, clean guard passes", async () => {
   const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
+  installPonytailReviewSkill(cwd);
   // Both configured models must land PER-ITEM inside the rendered script (never workflow-level).
   mkdirSync(join(cwd, ".perk"), { recursive: true });
   writeFileSync(
@@ -314,27 +327,31 @@ test("tool: run_pr_review_dynamic_wave end-to-end — models per-item, aggregate
     };
     assert.equal(details.ok, true);
     assert.equal(details.complete, true);
-    assert.deepEqual(details.covered, ["plan-fidelity", "quality"]);
+    assert.deepEqual(details.covered, ["plan-fidelity", "quality", "ponytail"]);
     assert.deepEqual(details.retried, []);
     assert.deepEqual(details.failures, []);
-    assert.equal(details.reports?.length, 2);
+    assert.equal(details.reports?.length, 3);
     assert.equal(details.reports?.[0]?.report.angle, "plan-fidelity");
     assert.equal(details.reports?.[1]?.report.angle, "quality");
     // The selection metadata rides the aggregate (parent-facing DATA).
     assert.equal(details.selection?.source, "selector");
-    assert.deepEqual(details.selection?.effective, ["plan-fidelity", "quality"]);
+    assert.deepEqual(details.selection?.effective, ["plan-fidelity", "quality", "ponytail"]);
     assert.deepEqual(details.selection?.forced, []);
     assert.equal(details.selection?.selector_ok, true);
     // The attempt receipts ride the persisted details ONLY, keyed by the pre-launch manifest.
     assert.equal(details.attempts?.length, 1);
     assert.equal(details.attempts?.[0]?.flow, "pr-review-dynamic");
-    assert.deepEqual(details.attempts?.[0]?.requestedKeys, ["plan-fidelity", "angle-selector"]);
+    assert.deepEqual(details.attempts?.[0]?.requestedKeys, [
+      "plan-fidelity",
+      "angle-selector",
+      "ponytail",
+    ]);
     assert.equal(details.attempts?.[0]?.state, "complete");
     const text = result.content[0]?.text ?? "";
-    assert.match(text, /Dynamic review wave complete: covered 2\/2 angle\(s\)/);
+    assert.match(text, /Dynamic review wave complete: covered 3\/3 angle\(s\)/);
     assert.match(
       text,
-      /Selection: source=selector, confidence=high, effective=plan-fidelity, quality/,
+      /Selection: source=selector, confidence=high, effective=plan-fidelity, quality, ponytail/,
     );
     assert.match(text, /untrusted DATA/);
     assert.equal(text.includes("attempts"), false, "receipts never enter the model-facing prose");
@@ -350,9 +367,13 @@ test("tool: run_pr_review_dynamic_wave end-to-end — models per-item, aggregate
     assert.match(JSON.stringify(selector.params.outputSchema), /"change_profile"/);
     assert.match(selector.params.task as string, /focus on decode edges/);
     const pf = sink.runCalls.find((call) => call.key === "plan-fidelity");
+    const ponytail = sink.runCalls.find((call) => call.key === "ponytail");
     assert.ok(pf);
+    assert.ok(ponytail);
     assert.equal(pf.params.model, "test-wave-model");
     assert.match(pf.params.task as string, /focus on decode edges/);
+    assert.equal(ponytail.params.skill, "ponytail-review");
+    assert.equal(ponytail.params.model, "test-wave-model");
     for (const item of sink.allBatches[0] ?? []) {
       assert.equal(item.model, "test-wave-model");
       assert.match(item.task as string, /focus on decode edges/);
@@ -364,6 +385,12 @@ test("tool: run_pr_review_dynamic_wave end-to-end — models per-item, aggregate
       angles: ["plan-fidelity", "quality"],
     });
     assert.equal((post.details as { ok: boolean }).ok, true);
+    const record = h.workflowState().last_pr_review as {
+      angles?: string[];
+      covered_angles?: string[];
+    };
+    assert.deepEqual(record.angles, ["plan-fidelity", "quality", "ponytail"]);
+    assert.deepEqual(record.covered_angles, ["plan-fidelity", "quality", "ponytail"]);
   } finally {
     h.dispose();
   }
@@ -371,6 +398,7 @@ test("tool: run_pr_review_dynamic_wave end-to-end — models per-item, aggregate
 
 test("tool: a selector-proposed custom angle rides the dynamic wave end-to-end", async () => {
   const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
+  installPonytailReviewSkill(cwd);
   const bin = fakePerk(cwd, { stdout: CLEAN_JSON });
   const sink: DynamicSink = { spawns: [], runCalls: [], allBatches: [] };
   const h = await loadPerkSession({
@@ -398,7 +426,12 @@ test("tool: a selector-proposed custom angle rides the dynamic wave end-to-end",
     };
     assert.equal(details.ok, true);
     assert.equal(details.complete, true);
-    assert.deepEqual(details.covered, ["plan-fidelity", "correctness", "cache-invalidation"]);
+    assert.deepEqual(details.covered, [
+      "plan-fidelity",
+      "correctness",
+      "cache-invalidation",
+      "ponytail",
+    ]);
     assert.deepEqual(details.selection?.custom, {
       slug: "cache-invalidation",
       scope: "staleness of the new memoization layer",
@@ -414,7 +447,7 @@ test("tool: a selector-proposed custom angle rides the dynamic wave end-to-end",
     const text = result.content[0]?.text ?? "";
     assert.match(
       text,
-      /Selection: source=selector, confidence=high, effective=plan-fidelity, correctness, cache-invalidation, custom=cache-invalidation/,
+      /Selection: source=selector, confidence=high, effective=plan-fidelity, correctness, cache-invalidation, ponytail, custom=cache-invalidation/,
     );
   } finally {
     h.dispose();
@@ -455,6 +488,18 @@ test("tool: an unavailable dynamic wave degrades loud; the SHARED clean guard re
     assert.equal(cleanDetails.ok, false);
     assert.equal(cleanDetails.error_type, "incomplete_coverage");
     assert.equal(h.workflowState().last_pr_review, undefined, "a refused post records nothing");
+    const actionable = await h.invokeTool("post_pr_review", {
+      verdict: "actionable",
+      summary: "Dynamic review failed before selection",
+      angles: ["caller-value-is-ignored"],
+    });
+    assert.equal((actionable.details as { ok: boolean }).ok, true);
+    const record = h.workflowState().last_pr_review as {
+      angles?: string[];
+      covered_angles?: string[];
+    };
+    assert.deepEqual(record.angles, ["plan-fidelity", "ponytail"]);
+    assert.deepEqual(record.covered_angles, []);
   } finally {
     h.dispose();
   }

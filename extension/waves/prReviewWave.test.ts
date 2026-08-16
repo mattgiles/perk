@@ -13,10 +13,14 @@ import {
   PR_REVIEW_ANGLES,
   PR_REVIEW_REPORT_SCHEMA,
   type PrReviewAngle,
-  runPrReviewWave,
+  runPrReviewWave as runPrReviewWaveBase,
 } from "./prReviewWave.ts";
+import type { WaveAdapter } from "./reportWave.ts";
 
 const TWO_ANGLES: PrReviewAngle[] = ["plan-fidelity", "correctness"];
+const PREFLIGHT_OK = async () => ({ ok: true }) as const;
+const runPrReviewWave = (adapter: WaveAdapter, opts: Parameters<typeof runPrReviewWaveBase>[1]) =>
+  runPrReviewWaveBase(adapter, { ...opts, requiredSkillPreflight: PREFLIGHT_OK });
 
 /** A schema-valid aggregate entry as the rendered script's projection produces it. */
 function okEntry(key: string): unknown {
@@ -39,6 +43,7 @@ function laneItemsOf(script: string): Array<{
   task: string;
   label: string;
   phase?: string;
+  skill?: string;
 }> {
   const start = script.indexOf("runs.all(") + "runs.all(".length;
   const end = script.indexOf(");\nreturn");
@@ -49,35 +54,49 @@ function laneItemsOf(script: string): Array<{
     task: string;
     label: string;
     phase?: string;
+    skill?: string;
   }>;
 }
 
 // -------------------------------------------------------------------------- lane construction
 
-test("runPrReviewWave builds one lane per angle: key = label = slug, the fixed agent/phase, the vocabulary task", async () => {
+test("runPrReviewWave builds selected lanes plus one final Ponytail lane", async () => {
   const adapter = createMemoryWaveAdapter({
-    aggregate: { state: "complete", value: [okEntry("plan-fidelity"), okEntry("correctness")] },
+    aggregate: {
+      state: "complete",
+      value: [okEntry("plan-fidelity"), okEntry("correctness"), okEntry("ponytail")],
+    },
   });
   await runPrReviewWave(adapter, { angles: TWO_ANGLES, timeoutMs: 5_000 });
   assert.equal(adapter.calls.spawn.length, 1);
   const spawn = adapter.calls.spawn[0];
   assert.ok(spawn);
   const items = laneItemsOf(spawn.workflowScript);
-  assert.deepEqual(
-    items,
-    TWO_ANGLES.map((angle) => ({
+  assert.deepEqual(items, [
+    ...TWO_ANGLES.map((angle) => ({
       key: angle,
       agent: "perk.pr-reviewer",
       task: PR_REVIEW_ANGLES[angle],
       label: angle,
       phase: "review",
     })),
-  );
+    {
+      key: "ponytail",
+      agent: "perk.pr-reviewer",
+      task: "angle: ponytail — review ONLY over-engineering, deletion opportunities & YAGNI.",
+      label: "ponytail",
+      phase: "review",
+      skill: "ponytail-review",
+    },
+  ]);
 });
 
 test("runPrReviewWave appends ONE uniform directive suffix to EVERY lane task when set", async () => {
   const adapter = createMemoryWaveAdapter({
-    aggregate: { state: "complete", value: [okEntry("plan-fidelity"), okEntry("correctness")] },
+    aggregate: {
+      state: "complete",
+      value: [okEntry("plan-fidelity"), okEntry("correctness"), okEntry("ponytail")],
+    },
   });
   await runPrReviewWave(adapter, {
     angles: TWO_ANGLES,
@@ -87,25 +106,34 @@ test("runPrReviewWave appends ONE uniform directive suffix to EVERY lane task wh
   const spawn = adapter.calls.spawn[0];
   assert.ok(spawn);
   const items = laneItemsOf(spawn.workflowScript);
-  assert.equal(items.length, 2);
+  assert.equal(items.length, 3);
   for (const item of items) {
-    const angle = item.key as PrReviewAngle;
-    assert.ok(item.task.startsWith(PR_REVIEW_ANGLES[angle]), `${item.key} keeps the vocabulary`);
+    const opener =
+      item.key === "ponytail"
+        ? "angle: ponytail — review ONLY over-engineering, deletion opportunities & YAGNI."
+        : PR_REVIEW_ANGLES[item.key as PrReviewAngle];
+    assert.ok(item.task.startsWith(opener), `${item.key} keeps the vocabulary`);
     assert.match(item.task, /Operator focus \(DATA from the human/);
     assert.match(item.task, /emphasis within your assigned angle only/);
     assert.match(item.task, /focus on the dignified-python skill/);
   }
   // The suffix is identical across lanes (one uniform DATA note, never per-lane re-scoping).
   const suffixes = items.map((item) => {
-    const angle = item.key as PrReviewAngle;
-    return item.task.slice(PR_REVIEW_ANGLES[angle].length);
+    const opener =
+      item.key === "ponytail"
+        ? "angle: ponytail — review ONLY over-engineering, deletion opportunities & YAGNI."
+        : PR_REVIEW_ANGLES[item.key as PrReviewAngle];
+    return item.task.slice(opener.length);
   });
   assert.equal(new Set(suffixes).size, 1);
 });
 
 test("runPrReviewWave keeps lane tasks byte-identical to the vocabulary when no directive is set", async () => {
   const adapter = createMemoryWaveAdapter({
-    aggregate: { state: "complete", value: [okEntry("plan-fidelity"), okEntry("tests")] },
+    aggregate: {
+      state: "complete",
+      value: [okEntry("plan-fidelity"), okEntry("tests"), okEntry("ponytail")],
+    },
   });
   await runPrReviewWave(adapter, { angles: ["plan-fidelity", "tests"], timeoutMs: 5_000 });
   const spawn = adapter.calls.spawn[0];
@@ -113,11 +141,16 @@ test("runPrReviewWave keeps lane tasks byte-identical to the vocabulary when no 
   const items = laneItemsOf(spawn.workflowScript);
   assert.equal(items[0]?.task, PR_REVIEW_ANGLES["plan-fidelity"]);
   assert.equal(items[1]?.task, PR_REVIEW_ANGLES.tests);
+  assert.match(items[2]?.task ?? "", /^angle: ponytail/);
+  assert.equal(items[2]?.skill, "ponytail-review");
 });
 
 test("runPrReviewWave spawn params carry the report schema as outputSchema and the threaded model", async () => {
   const adapter = createMemoryWaveAdapter({
-    aggregate: { state: "complete", value: [okEntry("plan-fidelity"), okEntry("correctness")] },
+    aggregate: {
+      state: "complete",
+      value: [okEntry("plan-fidelity"), okEntry("correctness"), okEntry("ponytail")],
+    },
   });
   await runPrReviewWave(adapter, {
     angles: TWO_ANGLES,
@@ -193,6 +226,7 @@ test("PR_REVIEW_REPORT_SCHEMA pins the report shape (closed, all four fields req
     "api-design",
     "code-organization",
     "idioms",
+    "ponytail",
   ]);
   assert.deepEqual(s.properties.verdict.enum, ["clean", "actionable"]);
   assert.equal(s.properties.findings.items.additionalProperties, false);
@@ -207,15 +241,18 @@ test("PR_REVIEW_REPORT_SCHEMA pins the report shape (closed, all four fields req
 
 // -------------------------------------------------------------------- the bounded-retry matrix
 
-test("happy path: complete, all angles covered, no retry, ONE spawn", async () => {
+test("happy path: complete, all effective angles covered, no retry, ONE spawn", async () => {
   const adapter = createMemoryWaveAdapter({
-    aggregate: { state: "complete", value: [okEntry("plan-fidelity"), okEntry("correctness")] },
+    aggregate: {
+      state: "complete",
+      value: [okEntry("plan-fidelity"), okEntry("correctness"), okEntry("ponytail")],
+    },
   });
   const outcome = await runPrReviewWave(adapter, { angles: TWO_ANGLES, timeoutMs: 5_000 });
   assert.equal(outcome.complete, true);
-  assert.deepEqual(outcome.covered, ["plan-fidelity", "correctness"]);
+  assert.deepEqual(outcome.covered, ["plan-fidelity", "correctness", "ponytail"]);
   assert.deepEqual(outcome.retried, []);
-  assert.equal(outcome.reports.length, 2);
+  assert.equal(outcome.reports.length, 3);
   assert.deepEqual(outcome.failures, []);
   assert.equal(adapter.calls.spawn.length, 1);
 });
@@ -225,7 +262,11 @@ test("one failed lane: the retry wave carries ONLY the failed key; success merge
     aggregates: [
       {
         state: "complete",
-        value: [okEntry("plan-fidelity"), failedEntry("correctness", "lane exploded")],
+        value: [
+          okEntry("plan-fidelity"),
+          failedEntry("correctness", "lane exploded"),
+          okEntry("ponytail"),
+        ],
       },
       { state: "complete", value: [okEntry("correctness")] },
     ],
@@ -239,7 +280,7 @@ test("one failed lane: the retry wave carries ONLY the failed key; success merge
     ["correctness"],
   );
   assert.equal(outcome.complete, true);
-  assert.deepEqual(outcome.covered, ["plan-fidelity", "correctness"]);
+  assert.deepEqual(outcome.covered, ["plan-fidelity", "correctness", "ponytail"]);
   assert.deepEqual(outcome.retried, ["correctness"]);
   assert.deepEqual(outcome.failures, []);
 });
@@ -249,7 +290,11 @@ test("retry fails again: incomplete with the surviving lane failure; covered = t
     aggregates: [
       {
         state: "complete",
-        value: [okEntry("plan-fidelity"), failedEntry("correctness", "lane exploded")],
+        value: [
+          okEntry("plan-fidelity"),
+          failedEntry("correctness", "lane exploded"),
+          okEntry("ponytail"),
+        ],
       },
       { state: "complete", value: [failedEntry("correctness", "exploded again")] },
     ],
@@ -257,18 +302,21 @@ test("retry fails again: incomplete with the surviving lane failure; covered = t
   const outcome = await runPrReviewWave(adapter, { angles: TWO_ANGLES, timeoutMs: 5_000 });
   assert.equal(adapter.calls.spawn.length, 2);
   assert.equal(outcome.complete, false);
-  assert.deepEqual(outcome.covered, ["plan-fidelity"]);
+  assert.deepEqual(outcome.covered, ["plan-fidelity", "ponytail"]);
   assert.deepEqual(outcome.retried, ["correctness"]);
   assert.deepEqual(outcome.failures, [
     { key: "correctness", reason: "lane-failed", detail: "exploded again" },
   ]);
 });
 
-test("wave-level run-failed: the retry re-runs the WHOLE selection and can complete", async () => {
+test("wave-level run-failed: the retry re-runs the WHOLE effective selection and can complete", async () => {
   const adapter = createMemoryWaveAdapter({
     aggregates: [
       { state: "failed", error: "workflow script threw", value: undefined },
-      { state: "complete", value: [okEntry("plan-fidelity"), okEntry("correctness")] },
+      {
+        state: "complete",
+        value: [okEntry("plan-fidelity"), okEntry("correctness"), okEntry("ponytail")],
+      },
     ],
   });
   const outcome = await runPrReviewWave(adapter, { angles: TWO_ANGLES, timeoutMs: 5_000 });
@@ -277,12 +325,62 @@ test("wave-level run-failed: the retry re-runs the WHOLE selection and can compl
   assert.ok(retrySpawn);
   assert.deepEqual(
     laneItemsOf(retrySpawn.workflowScript).map((item) => item.key),
-    ["plan-fidelity", "correctness"],
+    ["plan-fidelity", "correctness", "ponytail"],
   );
   assert.equal(outcome.complete, true);
-  assert.deepEqual(outcome.covered, ["plan-fidelity", "correctness"]);
-  assert.deepEqual(outcome.retried, ["plan-fidelity", "correctness"]);
+  assert.deepEqual(outcome.covered, ["plan-fidelity", "correctness", "ponytail"]);
+  assert.deepEqual(outcome.retried, ["plan-fidelity", "correctness", "ponytail"]);
   assert.deepEqual(outcome.failures, []);
+});
+
+test("skill-unavailable is non-retryable while an ordinary failed lane still retries", async () => {
+  let preflightCalls = 0;
+  const adapter = createMemoryWaveAdapter({
+    aggregates: [
+      {
+        state: "complete",
+        value: [okEntry("plan-fidelity"), failedEntry("correctness", "retry me")],
+      },
+      { state: "complete", value: [okEntry("correctness")] },
+    ],
+  });
+  const outcome = await runPrReviewWaveBase(adapter, {
+    angles: TWO_ANGLES,
+    timeoutMs: 5_000,
+    requiredSkillPreflight: async () => {
+      preflightCalls += 1;
+      return { ok: false, detail: "exact Ponytail source is absent" };
+    },
+  });
+  assert.equal(preflightCalls, 1, "the source is checked once for the whole pass");
+  assert.equal(adapter.calls.spawn.length, 2);
+  const firstSpawn = adapter.calls.spawn[0];
+  const retrySpawn = adapter.calls.spawn[1];
+  assert.ok(firstSpawn);
+  assert.ok(retrySpawn);
+  assert.deepEqual(
+    laneItemsOf(firstSpawn.workflowScript).map((item) => item.key),
+    ["plan-fidelity", "correctness"],
+  );
+  assert.deepEqual(
+    laneItemsOf(retrySpawn.workflowScript).map((item) => item.key),
+    ["correctness"],
+  );
+  assert.equal(outcome.complete, false);
+  assert.deepEqual(outcome.covered, ["plan-fidelity", "correctness"]);
+  assert.deepEqual(outcome.retried, ["correctness"]);
+  assert.deepEqual(outcome.failures, [
+    {
+      key: "ponytail",
+      reason: "skill-unavailable",
+      detail: "exact Ponytail source is absent",
+    },
+  ]);
+  assert.deepEqual(outcome.attempts[0]?.requestedKeys, [
+    "plan-fidelity",
+    "correctness",
+    "ponytail",
+  ]);
 });
 
 test("unavailable: zero spawns, NO retry, incomplete (deterministic capability absence)", async () => {
@@ -320,15 +418,18 @@ test("empty angles throw (programmer error via renderWaveScript, never normalize
   const adapter = createMemoryWaveAdapter({});
   await assert.rejects(
     runPrReviewWave(adapter, { angles: [], timeoutMs: 5_000 }),
-    /at least one lane/,
+    /at least one selected angle/,
   );
 });
 
 // ---------------------------------------------------------------------- the attempt receipts
 
-test("attempts: a one-wave success records ONE complete attempt over the selected angles", async () => {
+test("attempts: a one-wave success records ONE complete attempt over the effective angles", async () => {
   const adapter = createMemoryWaveAdapter({
-    aggregate: { state: "complete", value: [okEntry("plan-fidelity"), okEntry("correctness")] },
+    aggregate: {
+      state: "complete",
+      value: [okEntry("plan-fidelity"), okEntry("correctness"), okEntry("ponytail")],
+    },
     completionDetail: {
       state: "complete",
       success: true,
@@ -343,7 +444,7 @@ test("attempts: a one-wave success records ONE complete attempt over the selecte
     {
       flow: "pr-review",
       attempt: 1,
-      requestedKeys: ["plan-fidelity", "correctness"],
+      requestedKeys: ["plan-fidelity", "correctness", "ponytail"],
       runId: "wave-async-1",
       asyncDir: "/memory/wave-async-1",
       state: "complete",
@@ -360,7 +461,11 @@ test("attempts: a lane-only retry preserves BOTH ordered attempts (distinct chil
     aggregates: [
       {
         state: "complete",
-        value: [okEntry("plan-fidelity"), failedEntry("correctness", "lane exploded")],
+        value: [
+          okEntry("plan-fidelity"),
+          failedEntry("correctness", "lane exploded"),
+          okEntry("ponytail"),
+        ],
       },
       { state: "complete", value: [okEntry("correctness")] },
     ],
@@ -381,7 +486,7 @@ test("attempts: a lane-only retry preserves BOTH ordered attempts (distinct chil
   // The failed lane and its relaunch stay distinguishable: attempt 1 keeps child-2 verbatim.
   assert.deepEqual(
     [first?.attempt, first?.requestedKeys, first?.runId, first?.state],
-    [1, ["plan-fidelity", "correctness"], "wave-async-1", "complete"],
+    [1, ["plan-fidelity", "correctness", "ponytail"], "wave-async-1", "complete"],
   );
   assert.deepEqual(
     first?.children.map((c) => [c.key, c.runId]),
@@ -404,7 +509,10 @@ test("attempts: a whole-wave retry preserves the failed first attempt", async ()
   const adapter = createMemoryWaveAdapter({
     aggregates: [
       { state: "failed", error: "workflow script threw", value: undefined },
-      { state: "complete", value: [okEntry("plan-fidelity"), okEntry("correctness")] },
+      {
+        state: "complete",
+        value: [okEntry("plan-fidelity"), okEntry("correctness"), okEntry("ponytail")],
+      },
     ],
   });
   const outcome = await runPrReviewWave(adapter, { angles: TWO_ANGLES, timeoutMs: 5_000 });
@@ -412,8 +520,8 @@ test("attempts: a whole-wave retry preserves the failed first attempt", async ()
   assert.deepEqual(
     outcome.attempts.map((a) => [a.attempt, a.state, a.runId, a.requestedKeys]),
     [
-      [1, "failed", "wave-async-1", ["plan-fidelity", "correctness"]],
-      [2, "complete", "wave-async-2", ["plan-fidelity", "correctness"]],
+      [1, "failed", "wave-async-1", ["plan-fidelity", "correctness", "ponytail"]],
+      [2, "complete", "wave-async-2", ["plan-fidelity", "correctness", "ponytail"]],
     ],
   );
 });
@@ -427,7 +535,7 @@ test("attempts: unavailable is preserved as a single handle-less attempt (no ret
     {
       flow: "pr-review",
       attempt: 1,
-      requestedKeys: ["plan-fidelity", "correctness"],
+      requestedKeys: ["plan-fidelity", "correctness", "ponytail"],
       state: "unavailable",
       children: [],
     },
@@ -446,7 +554,7 @@ test("attempts: a pre-aborted signal is a single handle-less cancelled attempt (
     {
       flow: "pr-review",
       attempt: 1,
-      requestedKeys: ["plan-fidelity", "correctness"],
+      requestedKeys: ["plan-fidelity", "correctness", "ponytail"],
       state: "cancelled",
       children: [],
     },

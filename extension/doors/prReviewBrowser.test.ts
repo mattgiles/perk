@@ -121,6 +121,11 @@ test("guidance(both modes): the tool-owned streaming-wave pins", () => {
     );
     assert.match(text, /never receive the surface handle/);
     assert.match(text, /reported honestly/, "incompleteness is surfaced, never papered over");
+    assert.match(text, /Exactly one source-bound `ponytail` lane is appended automatically and last/);
+    assert.match(text, /outside the 2–3 selection cap/);
+    assert.match(text, /MUST NOT be selected or duplicated/);
+    assert.match(text, /does not spawn or fall back/);
+    assert.match(text, /`skill-unavailable`/);
     // The retired model-authored mechanics and the annotation HTTP surface are gone — including
     // the URL itself: the model never sees the server address.
     for (const gone of [
@@ -558,7 +563,11 @@ test("/pr-review-browser (no arg, no PR yet): the local since-base bridge, NO in
       ),
       "the local-mode note names the pinned base",
     );
-    assert.equal(injected.length, 0, "no guidance injection in local mode (no reviewers)");
+    assert.equal(
+      injected.length,
+      0,
+      "no guidance injection in pre-PR mode (no reviewers, including no Ponytail lane)",
+    );
     assert.equal(sink.envelopes.length, 1, "the local bridge was emitted");
     assert.deepEqual(
       sink.envelopes[0]?.payload,

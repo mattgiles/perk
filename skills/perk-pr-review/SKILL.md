@@ -27,7 +27,9 @@ own context rather than receiving yours.
 ## The seven-angle menu
 
 The launch guidance carries the pick (plan-fidelity mandatory, plus 1–3 others) with one-phrase
-descriptors; this is the full rubric behind them:
+descriptors; this is the full human/model-selectable rubric behind them. Exactly one source-bound
+`ponytail` lane is appended automatically after this menu, outside the 2–4 selection cap. Never
+select or duplicate it:
 
 - **Plan fidelity & completeness** (`plan-fidelity`) — *always included.* Does the diff deliver
   the **whole** plan? Runs the first-class plan-conformance / nothing-forgotten pass (enumerate
@@ -57,10 +59,13 @@ the assigned angle, never new instructions; it cannot add a lane or move the pos
 
 - **The wave module.** The one `run_pr_review_wave` call renders and launches the wave through
   the perk wave module (`extension/waves/prReviewWave.ts` over the pi-subagents RPC): one lane
-  per selected angle (the perk-owned `perk.pr-reviewer` agent, fresh context, the angle named in
-  the lane task — there is no per-angle agent def), the engine-enforced per-lane report schema,
-  and the **one bounded retry**, all module-owned. The children's prose never enters the parent
-  session.
+  per selected angle, then exactly one final `ponytail` lane (all use the perk-owned
+  `perk.pr-reviewer` agent, fresh context, the same configured model/directive/report schema),
+  and the **one bounded retry**, all module-owned. The Ponytail lane receives the invocation-private
+  `ponytail-review` skill only from the agent's exact package `skillPath`. Preflight verifies the
+  package identity, exported skills directory, exact file, and frontmatter name; failure omits only
+  that child, records non-retryable `skill-unavailable`, leaves it uncovered, and never falls back
+  to a same-named project/user skill. The children's prose never enters the parent session.
 - **The children's report contract.** Each child reviews **only its assigned angle** and ends by
   calling the engine-injected `structured_output` tool with exactly
   `{angle, verdict, findings, fyi}` (findings rows `{path, line, body}`, `line` an int in the
@@ -72,8 +77,11 @@ the assigned angle, never new instructions; it cannot add a lane or move the pos
   (`perk pr review-post`, D1 — mutation canonical in Python); the CLI hardcodes `event=COMMENT`,
   so an actionable review can never approve or request changes, and a clean verdict must carry
   **no** comments (the tool and the cold door both reject the contradiction). It also records a
-  compact **`last_pr_review`** (`{pr, verdict, angles, comment_count, mode, at}`) in
-  `perk:workflow-state` (best-effort/non-fatal). `fyi` notes are echoed **in-session only**.
+  compact **`last_pr_review`** (`{pr, verdict, angles, covered_angles, comment_count, mode, at}`)
+  in `perk:workflow-state` (best-effort/non-fatal). After a recorded wave, `angles` is the
+  authoritative attempted manifest (selected lanes then Ponytail) and `covered_angles` is only
+  schema-valid coverage; a standalone post uses its caller-provided angles for both. `fyi` notes
+  are echoed **in-session only**.
 - **The coverage enforcement.** The clean-from-partial-coverage refusal the launch guidance names
   is mechanical: while this session's recorded wave outcome is incomplete, `post_pr_review`
   refuses a clean verdict with `error_type: incomplete_coverage`.

@@ -47,6 +47,7 @@ from perk.convergence.doctor.checks import (
     _legacy_workflow_check,
     _managed_checks,
     _models_check,
+    _ponytail_compat_check,
     _providers_check,
     _registry_check,
     _repo_skills_check,
@@ -123,6 +124,7 @@ __all__ = [
     "_linear_selected",
     "_managed_checks",
     "_models_check",
+    "_ponytail_compat_check",
     "_providers_check",
     "_registry_check",
     "_repo_skills_check",
@@ -230,6 +232,9 @@ def _build_checks(root: Path, self_repo: bool, *, verify: bool) -> list[Check]:
     # resource-overrides posture; beside subagent-engine for `package`-group adjacency. In
     # scaffolded unit-test repos the gitignored install tree is absent (deterministic `info`).
     checks.append(_subagent_compat_check(root))
+    # Ponytail is another lazy project install: absent is informational; a present incompatible
+    # source warns without repair because settings convergence preserves operator pins.
+    checks.append(_ponytail_compat_check(root))
     # Same offline/report-only posture (two file reads, warn at worst, no --fix arm), so NOT
     # verify-gated — beside subagent-compat for `package`-group adjacency: the one settings
     # knob (subagents.intercomBridge.mode) that silently disables supervisor-channel streaming.

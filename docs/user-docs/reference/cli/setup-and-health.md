@@ -100,12 +100,21 @@ wrapper, the completion-receipt surfaces — the wait-completion projection,
 `details.completions` on `subagent_wait`, and the serialized workflow child `runId` — and the
 streaming-wave delivery-chain surfaces: session-scoped supervisor delivery, the orchestrator
 session env stamps, the in-process async workflow host, and the foreground default for workflow
-children — plus the explicit acceptance-disable surface the report-wave spawn contract relies
-on). When the package is
+children — plus the explicit acceptance-disable surface and invocation-local skill mechanics the
+report-wave spawn contract relies on: workflow-item `skill`, agent `skillPath`, local-path
+precedence over global name resolution, and async skill injection). When the package is
 not installed (pi lazy-installs it at launch) the check is `info` — compatibility is simply not
 evaluated. On any divergence it warns **loudly** but never fails, and there is no `--fix` arm —
 pi-subagents deliberately stays unpinned, so the check is an early-warning surface, not an
 enforcement gate.
+The package group also carries a report-only `ponytail-compat` check for the managed internal
+review dependency. A lazy install that is not present yet is `info`. When installed, doctor verifies
+package identity, the `./skills` export, both exact `SKILL.md` files, and their `ponytail` /
+`ponytail-review` frontmatter names. Divergence is a warning, never a failure, and has no `--fix`
+arm because Perk preserves operator source pins. Set the managed entry's source to known-good
+`npm:@dietrichgebert/ponytail@4.9.0`, run `perk init`, and restart the Perk/Pi session. Runtime
+review-wave preflight is the enforcement boundary: an incompatible Ponytail lane remains explicitly
+uncovered rather than resolving a same-named skill elsewhere.
 The `package` group also carries the report-only `subagent-bridge-config` check: it reads
 `subagents.intercomBridge.mode` from both pi settings scopes — the project `.pi/settings.json`
 and the user-global `~/.pi/agent/settings.json` — and warns (never fails, no `--fix` arm — perk

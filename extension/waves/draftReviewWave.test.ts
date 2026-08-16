@@ -20,6 +20,9 @@ import {
 import { createMemoryWaveAdapter } from "./memoryAdapter.ts";
 
 const TWO_ANGLES: DraftReviewAngle[] = ["grounding", "scope"];
+const PREFLIGHT_OK = async () => ({ ok: true }) as const;
+const PREFLIGHT_UNAVAILABLE = async () =>
+  ({ ok: false, detail: "exact Ponytail core skill is unavailable" }) as const;
 
 /** A schema-valid aggregate entry as the rendered script's projection produces it. */
 function okEntry(key: string): unknown {
@@ -57,6 +60,18 @@ test("buildDraftReviewLanes: key = label = slug, the fixed agent/phase, the exac
       phase: "draft-review",
       task: "Angle: scope.\nDraft type: plan.\n\n<untrusted_draft>\n# The draft\n</untrusted_draft>",
     },
+    {
+      key: "ponytail",
+      label: "ponytail",
+      agent: "perk.draft-reviewer",
+      phase: "draft-review",
+      task: "Angle: ponytail.\nDraft type: plan.\n\n<untrusted_draft>\n# The draft\n</untrusted_draft>",
+      skill: "ponytail",
+      requiredSkill: {
+        skill: "ponytail",
+        skillFile: ".pi/npm/node_modules/@dietrichgebert/ponytail/skills/ponytail/SKILL.md",
+      },
+    },
   ]);
 });
 
@@ -68,7 +83,7 @@ test("buildDraftReviewLanes: the custom lane appears iff `custom` is supplied, c
   });
   assert.deepEqual(
     withoutCustom.map((lane) => lane.key),
-    ["grounding"],
+    ["grounding", "ponytail"],
   );
 
   const lanes = buildDraftReviewLanes({
@@ -79,7 +94,7 @@ test("buildDraftReviewLanes: the custom lane appears iff `custom` is supplied, c
   });
   assert.deepEqual(
     lanes.map((lane) => lane.key),
-    ["grounding", "custom"],
+    ["grounding", "custom", "ponytail"],
   );
   const custom = lanes[1];
   assert.ok(custom);
@@ -102,7 +117,7 @@ test("buildDraftReviewLanes: every lane task embeds the draft type and the untru
     draftType: "objective",
     draft: "the rendered objective draft",
   });
-  assert.equal(lanes.length, 5);
+  assert.equal(lanes.length, 6);
   for (const lane of lanes) {
     assert.equal(lane.agent, "perk.draft-reviewer");
     // Each lane opens with ITS OWN angle opener (key = angle, the custom lane included) — a
@@ -147,6 +162,7 @@ test("DRAFT_REVIEW_REPORT_SCHEMA pins the verdict-free report shape (closed, all
     "decision-completeness",
     "risk",
     "custom",
+    "ponytail",
   ]);
   // NO verdict field and no if/then conditional — the human adjudicates, nothing derives a verdict.
   assert.equal("verdict" in s.properties, false);
@@ -246,7 +262,10 @@ test("the agent def completes via structured_output with the schema's four field
 
 test("startDraftReviewWave: spawn params pin the module contract, the schema, and the threaded model", async () => {
   const adapter = createMemoryWaveAdapter({
-    aggregate: { state: "complete", value: [okEntry("grounding"), okEntry("scope")] },
+    aggregate: {
+      state: "complete",
+      value: [okEntry("grounding"), okEntry("scope"), okEntry("ponytail")],
+    },
   });
   const start = await startDraftReviewWave(adapter, {
     angles: TWO_ANGLES,
@@ -254,6 +273,7 @@ test("startDraftReviewWave: spawn params pin the module contract, the schema, an
     draft: "# The draft",
     model: "openai/gpt-5.2",
     timeoutMs: 1_234,
+    requiredSkillPreflight: PREFLIGHT_OK,
   });
   assert.equal(start.ok, true);
   if (!start.ok) return;
@@ -261,7 +281,7 @@ test("startDraftReviewWave: spawn params pin the module contract, the schema, an
   assert.equal(result.complete, true);
   assert.deepEqual(
     result.reports.map((r) => r.key),
-    ["grounding", "scope"],
+    ["grounding", "scope", "ponytail"],
   );
   assert.equal(adapter.calls.spawn.length, 1);
   const spawn = adapter.calls.spawn[0];
@@ -276,6 +296,41 @@ test("startDraftReviewWave: spawn params pin the module contract, the schema, an
   assert.match(spawn.workflowScript, /perk\.draft-reviewer/);
 });
 
+test("startDraftReviewWave: failed Ponytail preflight omits only that child and stays incomplete without retry", async () => {
+  const adapter = createMemoryWaveAdapter({
+    aggregate: {
+      state: "complete",
+      value: [okEntry("grounding"), okEntry("scope")],
+    },
+  });
+  const start = await startDraftReviewWave(adapter, {
+    angles: TWO_ANGLES,
+    draftType: "plan",
+    draft: "# The draft",
+    requiredSkillPreflight: PREFLIGHT_UNAVAILABLE,
+  });
+  assert.equal(start.ok, true, "ordinary lanes still launch");
+  if (!start.ok) return;
+  const result = await start.result;
+  assert.equal(result.complete, false);
+  assert.deepEqual(
+    result.reports.map((report) => report.key),
+    ["grounding", "scope"],
+  );
+  assert.deepEqual(result.failures, [
+    {
+      key: "ponytail",
+      reason: "skill-unavailable",
+      detail: "exact Ponytail core skill is unavailable",
+    },
+  ]);
+  assert.equal(adapter.calls.spawn.length, 1, "zero-retry wave launches once");
+  const script = adapter.calls.spawn[0]?.workflowScript ?? "";
+  assert.doesNotMatch(script, /\"key\":\s*\"ponytail\"/, "the unavailable child never spawns");
+  assert.match(script, /\"key\":\s*\"grounding\"/);
+  assert.match(script, /\"key\":\s*\"scope\"/);
+});
+
 test("startDraftReviewWave: strict completeness — a failed lane leaves the wave incomplete (zero retries)", async () => {
   const adapter = createMemoryWaveAdapter({
     aggregate: {
@@ -283,6 +338,7 @@ test("startDraftReviewWave: strict completeness — a failed lane leaves the wav
       value: [
         okEntry("grounding"),
         { key: "scope", ok: false, error: "lane exploded", report: null },
+        okEntry("ponytail"),
       ],
     },
   });
@@ -291,6 +347,7 @@ test("startDraftReviewWave: strict completeness — a failed lane leaves the wav
     draftType: "plan",
     draft: "# The draft",
     timeoutMs: 5_000,
+    requiredSkillPreflight: PREFLIGHT_OK,
   });
   assert.equal(start.ok, true);
   if (!start.ok) return;
@@ -298,7 +355,7 @@ test("startDraftReviewWave: strict completeness — a failed lane leaves the wav
   assert.equal(result.complete, false);
   assert.deepEqual(
     result.reports.map((r) => r.key),
-    ["grounding"],
+    ["grounding", "ponytail"],
   );
   assert.deepEqual(result.failures, [
     { key: "scope", reason: "lane-failed", detail: "lane exploded" },
@@ -312,6 +369,7 @@ test("startDraftReviewWave: the wave-level launch failure comes back normalized 
     angles: TWO_ANGLES,
     draftType: "objective",
     draft: "body",
+    requiredSkillPreflight: PREFLIGHT_OK,
   });
   assert.equal(start.ok, false);
   if (start.ok) return;
@@ -332,6 +390,7 @@ test("startDraftReviewWave: the flow is named 'draft-review' (observed via the p
     draftType: "plan",
     draft: "# The draft",
     signal: AbortSignal.abort(),
+    requiredSkillPreflight: PREFLIGHT_OK,
   });
   assert.equal(start.ok, false);
   if (start.ok) return;
@@ -347,6 +406,7 @@ test("startDraftReviewWave: duplicate angles throw at start time (programmer err
       angles: ["grounding", "grounding"],
       draftType: "plan",
       draft: "# The draft",
+      requiredSkillPreflight: PREFLIGHT_OK,
     }),
     /duplicate lane key 'grounding'/,
   );

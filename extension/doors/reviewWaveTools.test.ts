@@ -24,12 +24,18 @@ import {
 import {
   decodeStartReviewWaveParams,
   executeCollectReviewWave,
-  executeStartReviewWave,
+  executeStartReviewWave as executeStartReviewWaveBase,
   registerReviewWaveTools,
   WAVE_COLLECT_GRACE_MS,
 } from "./reviewWaveTools.ts";
 
 const TWO_ANGLES: AdversarialReviewAngle[] = ["claimed-intent", "correctness"];
+const PREFLIGHT_OK = async () => ({ ok: true }) as const;
+const executeStartReviewWave = (...args: Parameters<typeof executeStartReviewWaveBase>) =>
+  executeStartReviewWaveBase(args[0], args[1], {
+    ...args[2],
+    requiredSkillPreflight: PREFLIGHT_OK,
+  });
 
 /** A schema-valid aggregate entry as the rendered script's projection produces it. */
 function okEntry(key: string): unknown {
@@ -190,7 +196,10 @@ test("executeStartReviewWave: happy path stores the pending wave and returns the
   resetState();
   const { target } = fakeTarget();
   const adapter = createMemoryWaveAdapter({
-    aggregate: { state: "complete", value: [okEntry("claimed-intent"), okEntry("correctness")] },
+    aggregate: {
+      state: "complete",
+      value: [okEntry("claimed-intent"), okEntry("correctness"), okEntry("ponytail")],
+    },
   });
   const result = await executeStartReviewWave(adapter, target, START_OPTS);
   assert.equal(result.details.ok, true);
@@ -201,7 +210,7 @@ test("executeStartReviewWave: happy path stores the pending wave and returns the
   };
   assert.equal(details.asyncId, "wave-async-1");
   assert.equal(details.asyncDir, "/memory/wave-async-1");
-  assert.deepEqual(details.angles, ["claimed-intent", "correctness"]);
+  assert.deepEqual(details.angles, ["claimed-intent", "correctness", "ponytail"]);
   const text = result.content[0]?.text ?? "";
   assert.match(text, /claimed-intent, correctness/);
   assert.match(text, /subagent_wait/);
@@ -236,7 +245,7 @@ test("executeStartReviewWave: a launch failure soft-fails with the wave reason a
     {
       flow: "adversarial-review",
       attempt: 1,
-      requestedKeys: ["claimed-intent", "correctness"],
+      requestedKeys: ["claimed-intent", "correctness", "ponytail"],
       state: "unavailable",
       children: [],
     },
@@ -267,7 +276,10 @@ test("executeCollectReviewWave: no_wave without a launch; wave_running retains t
   // soft-fails wave_running and RETAINS the pending wave.
   const adapter = createMemoryWaveAdapter({
     completion: false,
-    aggregate: { state: "complete", value: [okEntry("claimed-intent"), okEntry("correctness")] },
+    aggregate: {
+      state: "complete",
+      value: [okEntry("claimed-intent"), okEntry("correctness"), okEntry("ponytail")],
+    },
   });
   const start = await executeStartReviewWave(adapter, target, START_OPTS);
   assert.equal(start.details.ok, true);
@@ -288,17 +300,17 @@ test("executeCollectReviewWave: no_wave without a launch; wave_running retains t
     attempts?: { flow: string; attempt: number; requestedKeys: string[]; state: string }[];
   };
   assert.equal(details.complete, true);
-  assert.deepEqual(details.covered, ["claimed-intent", "correctness"]);
+  assert.deepEqual(details.covered, ["claimed-intent", "correctness", "ponytail"]);
   assert.deepEqual(
     details.reports?.map((r) => r.key),
-    ["claimed-intent", "correctness"],
+    ["claimed-intent", "correctness", "ponytail"],
   );
   assert.deepEqual(details.failures, []);
   assert.deepEqual(details.attempts, [
     {
       flow: "adversarial-review",
       attempt: 1,
-      requestedKeys: ["claimed-intent", "correctness"],
+      requestedKeys: ["claimed-intent", "correctness", "ponytail"],
       runId: "wave-async-1",
       asyncDir: "/memory/wave-async-1",
       state: "complete",
@@ -306,7 +318,7 @@ test("executeCollectReviewWave: no_wave without a launch; wave_running retains t
     },
   ]);
   const text = collected.content[0]?.text ?? "";
-  assert.match(text, /Review wave complete: covered 2\/2 angle\(s\)/);
+  assert.match(text, /Review wave complete: covered 3\/3 angle\(s\)/);
   assert.match(text, /untrusted DATA/);
   assert.equal(text.includes("attempts"), false, "receipts never enter the model-facing prose");
 });
@@ -320,6 +332,7 @@ test("executeCollectReviewWave: an incomplete wave is an ok result with the loud
       value: [
         okEntry("claimed-intent"),
         { key: "correctness", ok: false, error: "lane exploded", report: null },
+        okEntry("ponytail"),
       ],
     },
   });
@@ -332,12 +345,12 @@ test("executeCollectReviewWave: an incomplete wave is an ok result with the loud
     failures?: { key: string | null; reason: string }[];
   };
   assert.equal(details.complete, false);
-  assert.deepEqual(details.covered, ["claimed-intent"]);
+  assert.deepEqual(details.covered, ["claimed-intent", "ponytail"]);
   assert.deepEqual(
     details.failures?.map((f) => [f.key, f.reason]),
     [["correctness", "lane-failed"]],
   );
-  assert.match(collected.content[0]?.text ?? "", /Review wave INCOMPLETE: covered 1\/2 angle\(s\)/);
+  assert.match(collected.content[0]?.text ?? "", /Review wave INCOMPLETE: covered 2\/3 angle\(s\)/);
   assert.ok(
     notified.some(
       (n) =>
@@ -383,7 +396,10 @@ test("registerReviewWaveTools registers exactly the two tools and resets the pen
   resetState();
   const { target } = fakeTarget();
   const adapter = createMemoryWaveAdapter({
-    aggregate: { state: "complete", value: [okEntry("claimed-intent"), okEntry("correctness")] },
+    aggregate: {
+      state: "complete",
+      value: [okEntry("claimed-intent"), okEntry("correctness"), okEntry("ponytail")],
+    },
   });
   await executeStartReviewWave(adapter, target, START_OPTS);
 
@@ -452,6 +468,18 @@ test("registered start_review_wave: a bad selection decodes to bad_input before 
 /** The spawn params the fake responder observes (the tool-boundary threading assertions). */
 interface SpawnSink {
   spawns: { workflowScript?: string; model?: string; outputSchema?: unknown }[];
+}
+
+function installPonytailReviewSkill(cwd: string): void {
+  const root = join(cwd, ".pi", "npm", "node_modules", "@dietrichgebert", "ponytail");
+  const skillDir = join(root, "skills", "ponytail-review");
+  mkdirSync(skillDir, { recursive: true });
+  writeFileSync(
+    join(root, "package.json"),
+    JSON.stringify({ name: "@dietrichgebert/ponytail", pi: { skills: ["./skills"] } }),
+    "utf8",
+  );
+  writeFileSync(join(skillDir, "SKILL.md"), "---\nname: ponytail-review\n---\n", "utf8");
 }
 
 /**
@@ -536,6 +564,7 @@ function fakeSubagentsResponder(sink: SpawnSink): (pi: ExtensionAPI) => void {
 
 test("tools: start_review_wave threads the configured model + directive; collect drains the aggregate", async () => {
   const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
+  installPonytailReviewSkill(cwd);
   // The configured adversarial-reviewer model must reach the wave as its workflow-level default.
   mkdirSync(join(cwd, ".perk"), { recursive: true });
   writeFileSync(
@@ -560,7 +589,7 @@ test("tools: start_review_wave threads the configured model + directive; collect
     const startDetails = started.details as { ok: boolean; asyncId?: string; angles?: string[] };
     assert.equal(startDetails.ok, true);
     assert.ok(startDetails.asyncId);
-    assert.deepEqual(startDetails.angles, ["claimed-intent", "quality"]);
+    assert.deepEqual(startDetails.angles, ["claimed-intent", "quality", "ponytail"]);
     // The tool-boundary threading pins: the configured model and the directive both reached the
     // actual spawn (config → execute → startAdversarialReviewWave → adapter).
     assert.equal(sink.spawns.length, 1);
@@ -568,16 +597,17 @@ test("tools: start_review_wave threads the configured model + directive; collect
     const script = sink.spawns[0]?.workflowScript ?? "";
     const lanes = JSON.parse(
       script.slice(script.indexOf("runs.all(") + "runs.all(".length, script.indexOf(");\nreturn")),
-    ) as Array<{ key: string; agent: string; task: string }>;
+    ) as Array<{ key: string; agent: string; task: string; skill?: string }>;
     assert.deepEqual(
       lanes.map((lane) => lane.key),
-      ["claimed-intent", "quality"],
+      ["claimed-intent", "quality", "ponytail"],
     );
     for (const lane of lanes) {
       assert.equal(lane.agent, "perk.adversarial-reviewer");
       assert.match(lane.task, /Review PR #42 at \/abs\/wt\./);
       assert.match(lane.task, /focus on the workflow edits/);
     }
+    assert.equal(lanes.at(-1)?.skill, "ponytail-review");
 
     const collected = await h.invokeTool("collect_review_wave", {});
     const details = collected.details as {
@@ -589,7 +619,7 @@ test("tools: start_review_wave threads the configured model + directive; collect
     };
     assert.equal(details.ok, true);
     assert.equal(details.complete, true);
-    assert.deepEqual(details.covered, ["claimed-intent", "quality"]);
+    assert.deepEqual(details.covered, ["claimed-intent", "quality", "ponytail"]);
     assert.equal(details.reports?.[0]?.report.angle, "claimed-intent");
     assert.deepEqual(details.failures, []);
   } finally {
@@ -597,8 +627,58 @@ test("tools: start_review_wave threads the configured model + directive; collect
   }
 });
 
+test("tools: missing exact Ponytail skill omits only that child and collects explicit incomplete coverage", async () => {
+  const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
+  const sink: SpawnSink = { spawns: [] };
+  const h = await loadPerkSession({
+    cwd,
+    env: { PERK_RUN_ID: "01RID" },
+    extraExtensions: [fakeSubagentsResponder(sink)],
+  });
+  try {
+    const started = await h.invokeTool("start_review_wave", {
+      angles: ["claimed-intent", "correctness"],
+      pr: 42,
+      worktree: "/abs/wt",
+    });
+    const startDetails = started.details as { ok: boolean; angles?: string[] };
+    assert.equal(startDetails.ok, true, "ordinary reviewers still launch");
+    assert.deepEqual(startDetails.angles, ["claimed-intent", "correctness", "ponytail"]);
+    assert.equal(sink.spawns.length, 1);
+    const script = sink.spawns[0]?.workflowScript ?? "";
+    assert.doesNotMatch(script, /\"key\":\s*\"ponytail\"/, "Ponytail never reaches runs.all");
+    assert.match(script, /\"key\":\s*\"claimed-intent\"/);
+    assert.match(script, /\"key\":\s*\"correctness\"/);
+
+    const collected = await h.invokeTool("collect_review_wave", {});
+    const details = collected.details as {
+      ok: boolean;
+      complete?: boolean;
+      covered?: string[];
+      failures?: { key: string | null; reason: string }[];
+      attempts?: { requestedKeys: string[] }[];
+    };
+    assert.equal(details.ok, true);
+    assert.equal(details.complete, false);
+    assert.deepEqual(details.covered, ["claimed-intent", "correctness"]);
+    assert.deepEqual(
+      details.failures?.map((failure) => [failure.key, failure.reason]),
+      [["ponytail", "skill-unavailable"]],
+    );
+    assert.deepEqual(details.attempts?.[0]?.requestedKeys, [
+      "claimed-intent",
+      "correctness",
+      "ponytail",
+    ]);
+    assert.match(collected.content[0]?.text ?? "", /INCOMPLETE: covered 2\/3 angle\(s\)/);
+  } finally {
+    h.dispose();
+  }
+});
+
 test("tools: start_review_wave ignores an already-aborted per-call signal (the wave outlives the call)", async () => {
   const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
+  installPonytailReviewSkill(cwd);
   const sink: SpawnSink = { spawns: [] };
   const h = await loadPerkSession({
     cwd,
@@ -639,7 +719,7 @@ test("tools: start_review_wave ignores an already-aborted per-call signal (the w
     const details = collected.details as { ok: boolean; complete?: boolean; covered?: string[] };
     assert.equal(details.ok, true);
     assert.equal(details.complete, true);
-    assert.deepEqual(details.covered, ["claimed-intent", "tests"]);
+    assert.deepEqual(details.covered, ["claimed-intent", "tests", "ponytail"]);
   } finally {
     h.dispose();
   }

@@ -9,7 +9,7 @@ from perk import __version__, _resources
 from perk.convergence.init import run_init
 from perk.convergence.init.agents import PERK_AGENTS
 from perk.convergence.init.blocks import GITIGNORE_BODY, _agents_inner, _apply_managed_block
-from perk.convergence.init.settings import BORROWED_PACKAGES
+from perk.convergence.init.settings import BORROWED_PACKAGES, PONYTAIL_PACKAGE
 from perk.convergence.init.skills import _desired_skills_manifest
 from perk.convergence.init.version_pin import render_version_pin
 from perk.convergence.managed_state import (
@@ -494,6 +494,46 @@ class TestObservedPayloads:
             {"source": p, "extensions": ["./index.ts"]} if p == "npm:@ff-labs/pi-fff" else p
             for p in settings["packages"]
         ]
+        settings_path.write_text(json.dumps(settings, indent=2) + "\n", encoding="utf-8")
+        assert descriptor.observed_hash(tmp_path) != base
+
+    def test_settings_filtered_ponytail_pin_and_metadata_are_health_equivalent(self, tmp_path):
+        assert run_init(tmp_path, verify=False).ok
+        descriptor = _descriptor("settings-wiring")
+        base = descriptor.observed_hash(tmp_path)
+        settings_path = tmp_path / ".pi" / "settings.json"
+        settings = json.loads(settings_path.read_text(encoding="utf-8"))
+        ponytail = next(
+            entry
+            for entry in settings["packages"]
+            if isinstance(entry, dict) and entry.get("source") == PONYTAIL_PACKAGE
+        )
+        ponytail["source"] = f"{PONYTAIL_PACKAGE}@4.9.0"
+        ponytail["operator-note"] = "preserved metadata"
+        settings_path.write_text(json.dumps(settings, indent=2) + "\n", encoding="utf-8")
+        assert descriptor.observed_hash(tmp_path) == base
+
+    @pytest.mark.parametrize(
+        ("filter_key", "value"),
+        [("skills", ["./skills"]), ("themes", None)],
+    )
+    def test_settings_filtered_ponytail_enabled_or_missing_filter_is_drift(
+        self, tmp_path, filter_key, value
+    ):
+        assert run_init(tmp_path, verify=False).ok
+        descriptor = _descriptor("settings-wiring")
+        base = descriptor.observed_hash(tmp_path)
+        settings_path = tmp_path / ".pi" / "settings.json"
+        settings = json.loads(settings_path.read_text(encoding="utf-8"))
+        ponytail = next(
+            entry
+            for entry in settings["packages"]
+            if isinstance(entry, dict) and entry.get("source") == PONYTAIL_PACKAGE
+        )
+        if value is None:
+            ponytail.pop(filter_key)
+        else:
+            ponytail[filter_key] = value
         settings_path.write_text(json.dumps(settings, indent=2) + "\n", encoding="utf-8")
         assert descriptor.observed_hash(tmp_path) != base
 

@@ -16,34 +16,45 @@ lives in [Model-facing tools](./model-tools.md).
 
 ### `/pr-review`
 
-Run one automated wave with 2–4 fresh-context reviewer lanes. **Plan fidelity & completeness** is
-mandatory; the parent chooses 1–3 additional angles from correctness, tests, quality, API design,
-code organization, and idiomatic language use. Every lane returns an engine-validated report and
-never posts.
+Run one automated wave with 2–4 selected fresh-context reviewer lanes. **Plan fidelity &
+completeness** is mandatory; the parent chooses 1–3 additional angles from correctness, tests,
+quality, API design, code organization, and idiomatic language use. Perk then appends exactly one
+automatic final `ponytail` lane outside that selection cap. It uses the same reviewer model,
+directive, and report schema family; it is not selectable and must not be duplicated. Every lane
+returns an engine-validated report and never posts.
 
 The parent unions and deduplicates findings, derives one verdict, then posts once. Actionable work
 becomes an advisory COMMENT review; a clean result becomes a 👍 reaction. Coverage is strict: the
 wave applies one bounded retry, reports any remaining failure as incomplete, and
-`post_pr_review` refuses a clean verdict with `incomplete_coverage`. Actionable findings may still
-post with the incomplete-coverage note. An optional free-form focus note follows the command and
-steers emphasis without removing plan fidelity or changing the 2–4 lane limit.
+`post_pr_review` refuses a clean verdict with `incomplete_coverage`. Exact Ponytail package/skill
+preflight failure is non-retryable: the child does not spawn or fall back to a same-named skill,
+and the attempted `ponytail` lane remains explicitly uncovered with `skill-unavailable` while the
+other lanes continue. Actionable findings may still post with the incomplete-coverage note. An
+optional free-form focus note follows the command and steers emphasis without removing plan
+fidelity or changing the 2–4 selected-angle limit.
 
 Companion tools:
 
-- **`run_pr_review_wave`** — run 2–4 unique angles including `plan-fidelity`, thread the optional
-  directive to every lane as data, apply one bounded retry, and return
-  `{ complete, covered, retried, reports, failures }`. *Non-terminating.*
+- **`run_pr_review_wave`** — run 2–4 unique selected angles including `plan-fidelity`, append the
+  automatic final Ponytail lane, thread the optional directive to every lane as data, apply one
+  bounded retry to retryable failures, and return `{ complete, covered, retried, reports,
+  failures }`. *Non-terminating.*
 - **`post_pr_review`** — post the reconciled result through `perk pr review-post` and record
-  `last_pr_review`; it enforces the incomplete-clean refusal. *Non-terminating.*
+  `last_pr_review`; it enforces the incomplete-clean refusal. After a recorded wave,
+  `last_pr_review.angles` is the authoritative attempted manifest (including Ponytail), while
+  `covered_angles` contains only successful schema-valid coverage. A standalone call uses the
+  caller-supplied angles for both fields. *Non-terminating.*
 
 ### `/pr-review-dynamic`
 
 **Experimental.** This sibling delegates additional-angle selection to a fresh
-`perk.review-angle-selector` lane that runs concurrently with mandatory plan fidelity. Module code
-normalizes the selector output: fixed angles come only from
-`correctness|tests|quality|api-design|code-organization|idioms`, unknown and duplicate entries are
-dropped, forced angles run first, and at most three additional lanes survive. A failed,
-low-confidence, or empty valid selection falls back to correctness plus tests.
+`perk.review-angle-selector` lane that runs concurrently with mandatory plan fidelity and an
+independent automatic Ponytail reviewer. Module code normalizes the selector output: fixed angles
+come only from `correctness|tests|quality|api-design|code-organization|idioms`, unknown and
+duplicate entries are dropped, forced angles run first, and at most three additional lanes survive.
+Ponytail is reserved from selector/custom output, stays outside that cap, and appears last in
+`selection.effective`. A failed, low-confidence, or empty valid selection falls back to correctness
+plus tests without affecting Ponytail.
 
 The selector may propose one change-specific custom angle. Module code accepts only a non-reserved
 3–32 character kebab-case slug and a whitespace-collapsed scope of at most 300 characters, and only
@@ -55,9 +66,11 @@ A free-form note rides `directive`; when it explicitly names fixed angles, the p
 as `force_angles` instead. Companion tool:
 
 - **`run_pr_review_dynamic_wave`** — run the selector-driven workflow with optional `directive`
-  and 1–3 optional forced fixed angles, apply one bounded retry, and return
-  `{ complete, covered, retried, reports, failures, selection }`. Selection metadata is in-session
-  data and is never posted. *Non-terminating.*
+  and 1–3 optional forced fixed angles, run the independent source-bound Ponytail lane, apply one
+  bounded retry to retryable reviewer failures, and return `{ complete, covered, retried, reports,
+  failures, selection }`. Selection metadata is in-session data and is never posted. Ponytail uses
+  the same reviewer model/directive/report family; an exact-source failure remains uncovered and
+  incomplete rather than falling back. *Non-terminating.*
 
 The shared `post_pr_review` tool posts the reconciled result.
 
@@ -73,8 +86,12 @@ Open a human-in-the-loop adversarial review in the
 ```
 
 With a PR target, perk creates a detached read-only checkout for a foreign PR, never executes its
-code, and streams batches from 2–3 adversarial reviewers into hunk while they run. `claimed-intent`
-is mandatory. With no target and an active PR, the same flow reviews the current worktree's
+code, and streams batches from 2–3 selected adversarial reviewers plus one automatic final
+source-bound Ponytail reviewer into hunk while they run. `claimed-intent` is mandatory; Ponytail is
+outside the 2–3 input cap, uses the same model/directive/report family, and is never selected or
+duplicated. A failed exact-source preflight leaves Ponytail explicitly uncovered with
+`skill-unavailable` while other lanes continue. With no target and an active PR, the same flow
+reviews the current worktree's
 since-base diff in place. Before `/submit`, it becomes a local surface-only review: no reviewers,
 no GitHub posting, and your hunk notes return for in-session triage. A malformed `http(s)://` token
 is a usage error rather than a focus note.
@@ -92,9 +109,9 @@ install hint. Foreign review always cleans up its checkout.
 
 Companion tools:
 
-- **`start_review_wave`** / **`collect_review_wave`** — launch the 2–3 lane wave non-blocking and
-  collect `{ complete, covered, reports, failures }`. Incomplete coverage is reported, never
-  hidden. *Non-terminating.*
+- **`start_review_wave`** / **`collect_review_wave`** — launch 2–3 selected lanes plus automatic
+  final Ponytail non-blocking and collect `{ complete, covered, reports, failures }`. Incomplete
+  coverage is reported, never hidden. *Non-terminating.*
 - **`submit_pr_review`** — validate with `dry_run: true`, then submit comments, body, and event as
   one atomic review through `perk pr review-submit`, recording `last_review`. It rejects formal
   approve/request-changes events on your own PR (`own_pr`), because GitHub rejects them, and
@@ -134,9 +151,11 @@ and adds:
 Both draft doors review the exact validated artifact primed by the command. They never accept
 pasted draft text from the model. The shared companion tools are:
 
-- **`start_draft_review_wave`** / **`collect_draft_review_wave`** — run 2–3 non-blocking
-  `perk.draft-reviewer` lanes over the primed bytes and return
-  `{ complete, covered, reports, failures }`. A supplied custom angle rides automatically.
+- **`start_draft_review_wave`** / **`collect_draft_review_wave`** — run 2–3 selected non-blocking
+  `perk.draft-reviewer` lanes over the primed bytes, followed by an optional supplied custom lane
+  and exactly one automatic final source-bound Ponytail lane, and return `{ complete, covered,
+  reports, failures }`. Ponytail is outside the selected/custom menus and uses the same model/report
+  family. An exact-source failure is `skill-unavailable`, uncovered, and never falls back.
   Coverage failures are reported with no retry. *Non-terminating.*
 - **`push_annotations`** — deliver phrase-anchored findings to the same primed browser surface.
   *Non-terminating.*
@@ -147,8 +166,10 @@ pasted draft text from the model. The shared companion tools are:
 ### `/plan-review-browser`
 
 Review the working plan draft from plan mode, an objective-node planning session, or a save-stage
-session. The browser opens on the exact draft bytes; 2–3 grounding/scope/decision-completeness/risk
-lanes stream phrase annotations. Any argument text adds one custom review lane.
+session. The browser opens on the exact draft bytes; 2–3 selected
+grounding/scope/decision-completeness/risk lanes stream phrase annotations. Any argument text adds
+one custom review lane, and exactly one automatic final core-Ponytail lane follows outside both
+menus/caps.
 
 **APPROVE** applies Direct Edits to the plan artifact, then auto-saves. If the artifact changed
 while the browser was open, approval refuses as stale and saves nothing; re-run the door. A failed
@@ -163,7 +184,7 @@ and retry. If the browser cannot become ready, findings degrade loudly to the in
 
 Review the rendered structured objective draft — prose, explicit `**Delivery:**` line, and roadmap
 table — from `objective-author` or `objective-save`. The browser and reviewer wave otherwise behave
-like plan review, including the optional custom lane.
+like plan review, including the optional custom lane and automatic final core-Ponytail lane.
 
 **APPROVE** normally auto-saves and exits read-only, but Direct Edits never auto-apply to an
 objective: the browser edited rendered Markdown while save re-reads structured fields. An approval

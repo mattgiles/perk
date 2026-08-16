@@ -53,6 +53,9 @@ from perk.convergence.init.settings import (
     BORROWED_PACKAGES,
     LINEAR_PACKAGE,
     NPM_PACKAGE,
+    PACKAGE_RESOURCE_FILTERS,
+    PONYTAIL_NPM_NAME,
+    PONYTAIL_PACKAGE,
     _converge_compaction,
     _converge_linear_package,
     _converge_models,
@@ -63,6 +66,7 @@ from perk.convergence.init.settings import (
     _merge_static_packages,
     _npm_name,
     _package_identity,
+    _reconcile_ponytail_entry,
 )
 from perk.convergence.init.skills import (
     PERK_SKILLS_MANIFEST_DIR,
@@ -179,19 +183,26 @@ class ArtifactDescriptor:
 
 
 def _canonical_package_entry(entry: object) -> object:
-    """Collapse a **source-only** object-form entry to its plain-string spec (merge-equivalence).
+    """Normalize package shapes that convergence intentionally treats as health-equivalent.
 
-    Convergence is merge-based and dedups by identity, so `"npm:x"` and `{"source": "npm:x"}`
-    are interchangeable in a converged repo (e.g. a package once provider-converged in object
-    form, later reclassified as a plain-string borrowed entry — the merge keeps the existing
-    shape). Only the bare `{"source": …}` shape collapses — an entry carrying filter keys is
-    semantically richer than the string and must keep classifying as different.
+    A source-only object is merge-equivalent to its string spec. Ponytail is the one richer
+    exception: when every managed resource filter is present and exactly ``[]``, canonicalize it
+    to the unpinned npm identity while ignoring preserved operator metadata. That makes a
+    compatible pinned donor health-equivalent without hiding any omitted/non-empty filter drift.
     """
-    if isinstance(entry, dict) and set(entry) == {"source"}:
-        # Iterate items to read `source` (the `_entry_spec` idiom): the narrowed
-        # `dict[Unknown, Unknown]` rejects a literal-key subscript under ty.
+    if isinstance(entry, dict):
         source: object = next((v for key, v in entry.items() if key == "source"), None)
-        if isinstance(source, str):
+        if (
+            isinstance(source, str)
+            and _package_identity(entry) == PONYTAIL_NPM_NAME
+            and all(
+                next((v for key, v in entry.items() if key == filter_key), None) == []
+                for filter_key in PACKAGE_RESOURCE_FILTERS
+            )
+            and all(filter_key in entry for filter_key in PACKAGE_RESOURCE_FILTERS)
+        ):
+            return PONYTAIL_PACKAGE
+        if set(entry) == {"source"} and isinstance(source, str):
             return source
     return entry
 
@@ -227,6 +238,7 @@ def _settings_portion(root: Path, *, self_repo: bool) -> bytes:
     — see :func:`_canonical_package_order`.
     """
     packages, _, _ = _merge_static_packages([], _desired_packages(self_repo))
+    packages, _ = _reconcile_ponytail_entry(packages)
     packages, _ = _converge_provider_packages(root, packages)
     packages, _ = _converge_linear_package(root, packages)
     stub: dict[str, object] = {}

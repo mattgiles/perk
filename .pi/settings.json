@@ -13,6 +13,13 @@
     },
     {
       "source": "npm:@juicesharp/rpiv-ask-user-question"
+    },
+    {
+      "source": "npm:@dietrichgebert/ponytail",
+      "extensions": [],
+      "skills": [],
+      "prompts": [],
+      "themes": []
     }
   ],
   "subagents": {

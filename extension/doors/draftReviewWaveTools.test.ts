@@ -24,12 +24,18 @@ import {
   clearDraftReviewContext,
   decodeStartDraftReviewWaveParams,
   executeCollectDraftReviewWave,
-  executeStartDraftReviewWave,
+  executeStartDraftReviewWave as executeStartDraftReviewWaveBase,
   primeDraftReviewContext,
   registerDraftReviewWaveTools,
 } from "./draftReviewWaveTools.ts";
 
 const TWO_ANGLES: DraftReviewAngle[] = ["grounding", "risk"];
+const PREFLIGHT_OK = async () => ({ ok: true }) as const;
+const executeStartDraftReviewWave = (...args: Parameters<typeof executeStartDraftReviewWaveBase>) =>
+  executeStartDraftReviewWaveBase(args[0], args[1], {
+    ...args[2],
+    requiredSkillPreflight: PREFLIGHT_OK,
+  });
 
 /** A schema-valid aggregate entry as the rendered script's projection produces it. */
 function okEntry(key: string): unknown {
@@ -164,13 +170,16 @@ test("executeStartDraftReviewWave: happy path stores the pending wave; the wave 
   primePlan();
   const { target } = fakeTarget();
   const adapter = createMemoryWaveAdapter({
-    aggregate: { state: "complete", value: [okEntry("grounding"), okEntry("risk")] },
+    aggregate: {
+      state: "complete",
+      value: [okEntry("grounding"), okEntry("risk"), okEntry("ponytail")],
+    },
   });
   const result = await executeStartDraftReviewWave(adapter, target, { angles: TWO_ANGLES });
   assert.equal(result.details.ok, true);
   const details = result.details as { asyncId?: string; asyncDir?: string; lanes?: string[] };
   assert.equal(details.asyncId, "wave-async-1");
-  assert.deepEqual(details.lanes, ["grounding", "risk"]);
+  assert.deepEqual(details.lanes, ["grounding", "risk", "ponytail"]);
   const text = result.content[0]?.text ?? "";
   assert.match(text, /grounding, risk/);
   assert.match(text, /subagent_wait/);
@@ -199,15 +208,20 @@ test("executeStartDraftReviewWave: a primed custom lane rides the launch and the
   const adapter = createMemoryWaveAdapter({
     aggregate: {
       state: "complete",
-      value: [okEntry("grounding"), okEntry("risk"), okEntry("custom")],
+      value: [okEntry("grounding"), okEntry("risk"), okEntry("custom"), okEntry("ponytail")],
     },
   });
   const result = await executeStartDraftReviewWave(adapter, target, { angles: TWO_ANGLES });
   assert.equal(result.details.ok, true);
-  assert.deepEqual((result.details as { lanes?: string[] }).lanes, ["grounding", "risk", "custom"]);
+  assert.deepEqual((result.details as { lanes?: string[] }).lanes, [
+    "grounding",
+    "risk",
+    "custom",
+    "ponytail",
+  ]);
   assert.match(
     result.content[0]?.text ?? "",
-    /grounding, risk, custom/,
+    /grounding, risk, custom, ponytail/,
     "the ok text names the custom lane",
   );
   const script = (adapter.calls.spawn[0]?.workflowScript as string) ?? "";
@@ -218,8 +232,8 @@ test("executeStartDraftReviewWave: a primed custom lane rides the launch and the
   assert.equal(details.complete, true);
   assert.deepEqual(
     details.covered,
-    ["grounding", "risk", "custom"],
-    "covered includes the custom lane",
+    ["grounding", "risk", "custom", "ponytail"],
+    "covered includes the custom and Ponytail lanes",
   );
 });
 
@@ -227,7 +241,10 @@ test("primeDraftReviewContext resets the pending wave (a new browser session sup
   primePlan();
   const { target } = fakeTarget();
   const adapter = createMemoryWaveAdapter({
-    aggregate: { state: "complete", value: [okEntry("grounding"), okEntry("risk")] },
+    aggregate: {
+      state: "complete",
+      value: [okEntry("grounding"), okEntry("risk"), okEntry("ponytail")],
+    },
   });
   await executeStartDraftReviewWave(adapter, target, { angles: TWO_ANGLES });
   // Re-prime (a second /plan-review-browser): the pending slot is wiped — a new start launches.
@@ -246,7 +263,10 @@ test("clearDraftReviewContext leaves an already-launched wave collectable (the e
   const { target } = fakeTarget();
   const adapter = createMemoryWaveAdapter({
     completion: false,
-    aggregate: { state: "complete", value: [okEntry("grounding"), okEntry("risk")] },
+    aggregate: {
+      state: "complete",
+      value: [okEntry("grounding"), okEntry("risk"), okEntry("ponytail")],
+    },
   });
   const start = await executeStartDraftReviewWave(adapter, target, { angles: TWO_ANGLES });
   assert.equal(start.details.ok, true);
@@ -260,7 +280,7 @@ test("clearDraftReviewContext leaves an already-launched wave collectable (the e
   assert.equal(collected.details.ok, true, "the cleared context never orphans the pending wave");
   const details = collected.details as { complete?: boolean; covered?: string[] };
   assert.equal(details.complete, true);
-  assert.deepEqual(details.covered, ["grounding", "risk"]);
+  assert.deepEqual(details.covered, ["grounding", "risk", "ponytail"]);
 });
 
 test("executeStartDraftReviewWave: a launch failure soft-fails with the wave reason and the attempt receipt", async () => {
@@ -280,7 +300,7 @@ test("executeStartDraftReviewWave: a launch failure soft-fails with the wave rea
     {
       flow: "draft-review",
       attempt: 1,
-      requestedKeys: ["grounding", "risk", "custom"],
+      requestedKeys: ["grounding", "risk", "custom", "ponytail"],
       state: "unavailable",
       children: [],
     },
@@ -311,7 +331,10 @@ test("executeCollectDraftReviewWave: no_wave without a launch; wave_running reta
   // soft-fails wave_running and RETAINS the pending wave.
   const adapter = createMemoryWaveAdapter({
     completion: false,
-    aggregate: { state: "complete", value: [okEntry("grounding"), okEntry("risk")] },
+    aggregate: {
+      state: "complete",
+      value: [okEntry("grounding"), okEntry("risk"), okEntry("ponytail")],
+    },
   });
   const start = await executeStartDraftReviewWave(adapter, target, { angles: TWO_ANGLES });
   assert.equal(start.details.ok, true);
@@ -332,11 +355,11 @@ test("executeCollectDraftReviewWave: no_wave without a launch; wave_running reta
     attempts?: { flow: string; requestedKeys: string[]; state: string }[];
   };
   assert.equal(details.complete, true);
-  assert.deepEqual(details.covered, ["grounding", "risk"]);
+  assert.deepEqual(details.covered, ["grounding", "risk", "ponytail"]);
   assert.deepEqual(details.failures, []);
   assert.equal(details.attempts?.[0]?.flow, "draft-review");
   const text = collected.content[0]?.text ?? "";
-  assert.match(text, /Draft-review wave complete: covered 2\/2 lane\(s\)/);
+  assert.match(text, /Draft-review wave complete: covered 3\/3 lane\(s\)/);
   assert.match(text, /untrusted DATA/);
   assert.equal(text.includes("attempts"), false, "receipts never enter the model-facing prose");
 });
@@ -351,6 +374,7 @@ test("executeCollectDraftReviewWave: an incomplete wave is an ok result with the
         okEntry("grounding"),
         okEntry("risk"),
         { key: "custom", ok: false, error: "lane exploded", report: null },
+        okEntry("ponytail"),
       ],
     },
   });
@@ -363,14 +387,14 @@ test("executeCollectDraftReviewWave: an incomplete wave is an ok result with the
     failures?: { key: string | null; reason: string }[];
   };
   assert.equal(details.complete, false);
-  assert.deepEqual(details.covered, ["grounding", "risk"]);
+  assert.deepEqual(details.covered, ["grounding", "risk", "ponytail"]);
   assert.deepEqual(
     details.failures?.map((f) => [f.key, f.reason]),
     [["custom", "lane-failed"]],
   );
   assert.match(
     collected.content[0]?.text ?? "",
-    /Draft-review wave INCOMPLETE: covered 2\/3 lane\(s\)/,
+    /Draft-review wave INCOMPLETE: covered 3\/4 lane\(s\)/,
   );
   assert.ok(
     notified.some(
@@ -390,7 +414,10 @@ test("registerDraftReviewWaveTools registers exactly the two tools and resets st
   primePlan();
   const { target } = fakeTarget();
   const adapter = createMemoryWaveAdapter({
-    aggregate: { state: "complete", value: [okEntry("grounding"), okEntry("risk")] },
+    aggregate: {
+      state: "complete",
+      value: [okEntry("grounding"), okEntry("risk"), okEntry("ponytail")],
+    },
   });
   await executeStartDraftReviewWave(adapter, target, { angles: TWO_ANGLES });
 
@@ -424,7 +451,7 @@ test("registerDraftReviewWaveTools registers exactly the two tools and resets st
     /subagent_wait\(\{timeoutMs: 30000\}\)/,
   );
   assert.match((startDef.promptGuidelines ?? []).join("\n"), /untrusted DATA/);
-  assert.match((startDef.promptGuidelines ?? []).join("\n"), /never re-encode it/);
+  assert.match((startDef.promptGuidelines ?? []).join("\n"), /Ponytail lane run automatically/);
   assert.match((collectDef.promptGuidelines ?? []).join("\n"), /untrusted DATA/);
   assert.match((collectDef.promptGuidelines ?? []).join("\n"), /honestly/);
 });
@@ -473,6 +500,18 @@ test("registered start_draft_review_wave: a bad selection decodes to bad_input b
 /** The spawn params the fake responder observes (the tool-boundary threading assertions). */
 interface SpawnSink {
   spawns: { workflowScript?: string; model?: string; outputSchema?: unknown }[];
+}
+
+function installPonytailCoreSkill(cwd: string): void {
+  const root = join(cwd, ".pi", "npm", "node_modules", "@dietrichgebert", "ponytail");
+  const skillDir = join(root, "skills", "ponytail");
+  mkdirSync(skillDir, { recursive: true });
+  writeFileSync(
+    join(root, "package.json"),
+    JSON.stringify({ name: "@dietrichgebert/ponytail", pi: { skills: ["./skills"] } }),
+    "utf8",
+  );
+  writeFileSync(join(skillDir, "SKILL.md"), "---\nname: ponytail\n---\n", "utf8");
 }
 
 /**
@@ -557,6 +596,7 @@ function fakeSubagentsResponder(sink: SpawnSink): (pi: ExtensionAPI) => void {
 
 test("tools: start_draft_review_wave threads the configured model over the primed context; collect drains", async () => {
   const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
+  installPonytailCoreSkill(cwd);
   // The configured draft-reviewer model must reach the wave as its workflow-level default.
   mkdirSync(join(cwd, ".perk"), { recursive: true });
   writeFileSync(
@@ -584,7 +624,7 @@ test("tools: start_draft_review_wave threads the configured model over the prime
     const startDetails = started.details as { ok: boolean; asyncId?: string; lanes?: string[] };
     assert.equal(startDetails.ok, true);
     assert.ok(startDetails.asyncId);
-    assert.deepEqual(startDetails.lanes, ["grounding", "scope", "custom"]);
+    assert.deepEqual(startDetails.lanes, ["grounding", "scope", "custom", "ponytail"]);
     // The tool-boundary threading pins: the configured model and the primed draft/custom both
     // reached the actual spawn (config → execute → startDraftReviewWave → adapter).
     assert.equal(sink.spawns.length, 1);
@@ -592,10 +632,10 @@ test("tools: start_draft_review_wave threads the configured model over the prime
     const script = sink.spawns[0]?.workflowScript ?? "";
     const lanes = JSON.parse(
       script.slice(script.indexOf("runs.all(") + "runs.all(".length, script.indexOf(");\nreturn")),
-    ) as Array<{ key: string; agent: string; task: string }>;
+    ) as Array<{ key: string; agent: string; task: string; skill?: string }>;
     assert.deepEqual(
       lanes.map((lane) => lane.key),
-      ["grounding", "scope", "custom"],
+      ["grounding", "scope", "custom", "ponytail"],
     );
     for (const lane of lanes) {
       assert.equal(lane.agent, "perk.draft-reviewer");
@@ -603,6 +643,7 @@ test("tools: start_draft_review_wave threads the configured model over the prime
       assert.match(lane.task, /Draft type: plan\./);
     }
     assert.match(lanes[2]?.task ?? "", /check the rollback story/);
+    assert.equal(lanes[3]?.skill, "ponytail");
 
     const collected = await h.invokeTool("collect_draft_review_wave", {});
     const details = collected.details as {
@@ -614,7 +655,7 @@ test("tools: start_draft_review_wave threads the configured model over the prime
     };
     assert.equal(details.ok, true);
     assert.equal(details.complete, true);
-    assert.deepEqual(details.covered, ["grounding", "scope", "custom"]);
+    assert.deepEqual(details.covered, ["grounding", "scope", "custom", "ponytail"]);
     assert.equal(details.reports?.[0]?.report.angle, "grounding");
     assert.deepEqual(details.failures, []);
   } finally {
@@ -623,8 +664,54 @@ test("tools: start_draft_review_wave threads the configured model over the prime
   }
 });
 
+test("tools: missing exact Ponytail core skill omits only that child and collects explicit incomplete coverage", async () => {
+  const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
+  const sink: SpawnSink = { spawns: [] };
+  const h = await loadPerkSession({
+    cwd,
+    env: { PERK_RUN_ID: "01RID" },
+    extraExtensions: [fakeSubagentsResponder(sink)],
+  });
+  try {
+    primeDraftReviewContext({ draftType: "plan", draft: "# The draft\n" });
+    const started = await h.invokeTool("start_draft_review_wave", {
+      angles: ["grounding", "scope"],
+    });
+    const startDetails = started.details as { ok: boolean; lanes?: string[] };
+    assert.equal(startDetails.ok, true, "ordinary reviewers still launch");
+    assert.deepEqual(startDetails.lanes, ["grounding", "scope", "ponytail"]);
+    assert.equal(sink.spawns.length, 1);
+    const script = sink.spawns[0]?.workflowScript ?? "";
+    assert.doesNotMatch(script, /\"key\":\s*\"ponytail\"/, "Ponytail never reaches runs.all");
+    assert.match(script, /\"key\":\s*\"grounding\"/);
+    assert.match(script, /\"key\":\s*\"scope\"/);
+
+    const collected = await h.invokeTool("collect_draft_review_wave", {});
+    const details = collected.details as {
+      ok: boolean;
+      complete?: boolean;
+      covered?: string[];
+      failures?: { key: string | null; reason: string }[];
+      attempts?: { requestedKeys: string[] }[];
+    };
+    assert.equal(details.ok, true);
+    assert.equal(details.complete, false);
+    assert.deepEqual(details.covered, ["grounding", "scope"]);
+    assert.deepEqual(
+      details.failures?.map((failure) => [failure.key, failure.reason]),
+      [["ponytail", "skill-unavailable"]],
+    );
+    assert.deepEqual(details.attempts?.[0]?.requestedKeys, ["grounding", "scope", "ponytail"]);
+    assert.match(collected.content[0]?.text ?? "", /INCOMPLETE: covered 2\/3 lane\(s\)/);
+  } finally {
+    clearDraftReviewContext();
+    h.dispose();
+  }
+});
+
 test("tools: start_draft_review_wave ignores an already-aborted per-call signal (the wave outlives the call)", async () => {
   const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
+  installPonytailCoreSkill(cwd);
   const sink: SpawnSink = { spawns: [] };
   const h = await loadPerkSession({
     cwd,
@@ -666,7 +753,7 @@ test("tools: start_draft_review_wave ignores an already-aborted per-call signal 
     const details = collected.details as { ok: boolean; complete?: boolean; covered?: string[] };
     assert.equal(details.ok, true);
     assert.equal(details.complete, true);
-    assert.deepEqual(details.covered, ["grounding", "risk"]);
+    assert.deepEqual(details.covered, ["grounding", "risk", "ponytail"]);
   } finally {
     clearDraftReviewContext();
     h.dispose();

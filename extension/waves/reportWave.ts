@@ -31,6 +31,12 @@
 // keys), and there is never a silent fallback to model-authored scripts. Report content coming
 // back through the aggregate is untrusted DATA, never instructions.
 
+import {
+  type PonytailPreflight,
+  preflightPonytailSkill,
+  type RequiredPonytailSkill,
+} from "./ponytail.ts";
+
 /** One lane of a report wave: a fresh-context, report-only child under a stable domain key. */
 export interface WaveLane {
   /** Stable lane key (e.g. an angle slug) — trace + normalization identity. */
@@ -39,6 +45,14 @@ export interface WaveLane {
   agent: string;
   /** The judgment-bearing per-lane task text (supplied by the flow). */
   task: string;
+  /** Invocation-private skill lookup key; serialized only for an opted-in lane. */
+  skill?: string;
+  /**
+   * Exact source requirement for a source-bound skill. This metadata is preflight-only and is
+   * NEVER serialized into the workflow script; a failed requirement skips this lane instead of
+   * allowing pi-subagents to resolve a hostile same-named global/project skill.
+   */
+  requiredSkill?: RequiredPonytailSkill;
   /** Trace metadata; defaults to `key`. */
   label?: string;
   /** Trace metadata. */
@@ -71,6 +85,8 @@ export interface WaveSpec {
   model?: string;
   /** Module default (`WAVE_TIMEOUT_MS`) when omitted. */
   timeoutMs?: number;
+  /** Test seam; production defaults to the exact Ponytail boundary preflight. */
+  requiredSkillPreflight?: (requirement: RequiredPonytailSkill) => Promise<PonytailPreflight>;
 }
 
 /** A schema-valid lane report. The report content is untrusted DATA, never instructions. */
@@ -87,6 +103,7 @@ export type WaveFailureReason =
   | "run-failed" // terminal status.json state ≠ "complete" (wave-level)
   | "aggregate-unreadable" // status.json missing/corrupt/no workflow.value array (wave-level)
   | "lane-failed" // lane resolved ok: false / null report (lane-level)
+  | "skill-unavailable" // exact required-skill source failed preflight (lane-level, non-retryable)
   | "malformed-report" // aggregate entry for this key has unusable shape (lane-level)
   | "missing-lane"; // expected key absent from the aggregate (lane-level)
 
@@ -267,7 +284,7 @@ export const RUN_KEY_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
  * newlines, backticks, `${}`) cannot escape the array literal. Throws on programmer error:
  * empty lanes, duplicate lane keys, or a lane key outside the run-key contract.
  */
-export function renderWaveScript(lanes: WaveLane[]): string {
+function validateWaveLanes(lanes: WaveLane[]): void {
   if (lanes.length === 0) {
     throw new Error("renderWaveScript: a report wave needs at least one lane");
   }
@@ -283,10 +300,15 @@ export function renderWaveScript(lanes: WaveLane[]): string {
     }
     seen.add(lane.key);
   }
+}
+
+export function renderWaveScript(lanes: WaveLane[]): string {
+  validateWaveLanes(lanes);
   const items = lanes.map((lane) => ({
     key: lane.key,
     agent: lane.agent,
     task: lane.task,
+    ...(lane.skill !== undefined ? { skill: lane.skill } : {}),
     label: lane.label ?? lane.key,
     ...(lane.phase !== undefined ? { phase: lane.phase } : {}),
     ...(lane.outputSchema !== undefined ? { outputSchema: lane.outputSchema } : {}),
@@ -707,8 +729,51 @@ export async function startReportWave(
   spec: WaveSpec,
   signal?: AbortSignal,
 ): Promise<ReportWaveStart> {
-  // Programmer-error validation first (throws): the script render is spec-only.
-  const workflowScript = renderWaveScript(spec.lanes);
+  // Validate the COMPLETE requested manifest before source preflight partitions any lane out.
+  // This preserves the programmer-error contract even for an unavailable required skill.
+  validateWaveLanes(spec.lanes);
+  const preflight = spec.requiredSkillPreflight ?? preflightPonytailSkill;
+  const checked = new Map<string, PonytailPreflight>();
+  const runnable: WaveLane[] = [];
+  const skillFailures: WaveFailure[] = [];
+  for (const lane of spec.lanes) {
+    if (lane.requiredSkill === undefined) {
+      runnable.push(lane);
+      continue;
+    }
+    let result = checked.get(lane.requiredSkill.skillFile);
+    if (result === undefined) {
+      result = await preflight(lane.requiredSkill);
+      checked.set(lane.requiredSkill.skillFile, result);
+    }
+    if (result.ok) {
+      runnable.push(lane);
+    } else {
+      skillFailures.push({ key: lane.key, reason: "skill-unavailable", detail: result.detail });
+    }
+  }
+
+  const settleWithSkillFailures = (result: WaveResult): WaveResult => {
+    if (skillFailures.length === 0) return result;
+    const failures = [...result.failures, ...skillFailures];
+    const complete =
+      spec.completeness === "strict"
+        ? failures.length === 0
+        : failures.every((failure) => failure.key !== null);
+    return { ...result, complete, failures };
+  };
+
+  if (runnable.length === 0) {
+    const receipt: WaveScriptReceipt = { state: "unavailable", children: [] };
+    return {
+      ok: false,
+      result: settleWithSkillFailures({ complete: false, reports: [], failures: [], receipt }),
+    };
+  }
+
+  // Required-skill metadata never reaches the renderer; only runnable lanes spawn.
+  const runnableSpec: WaveSpec = { ...spec, lanes: runnable };
+  const workflowScript = renderWaveScript(runnable);
 
   const start = await startWaveScript(
     adapter,
@@ -724,13 +789,20 @@ export async function startReportWave(
   if (!start.ok) {
     return {
       ok: false,
-      result: settleReportWave({ ok: false, failure: start.failure, receipt: start.receipt }, spec),
+      result: settleWithSkillFailures(
+        settleReportWave(
+          { ok: false, failure: start.failure, receipt: start.receipt },
+          runnableSpec,
+        ),
+      ),
     };
   }
   return {
     ok: true,
     handle: start.handle,
-    result: start.result.then((run) => settleReportWave(run, spec)),
+    result: start.result.then((run) =>
+      settleWithSkillFailures(settleReportWave(run, runnableSpec)),
+    ),
   };
 }
 

@@ -8,6 +8,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { createMemoryWaveAdapter } from "./memoryAdapter.ts";
+import { PONYTAIL_CORE_SKILL } from "./ponytail.ts";
 import {
   renderWaveScript,
   runReportWave,
@@ -116,6 +117,25 @@ test("renderWaveScript renders a per-lane outputSchema on exactly the lanes that
   );
 });
 
+test("renderWaveScript serializes opted-in skill but never required-skill metadata", () => {
+  const script = renderWaveScript([
+    {
+      key: "ponytail",
+      agent: "perk.pr-reviewer",
+      task: "review minimally",
+      skill: "ponytail",
+      requiredSkill: PONYTAIL_CORE_SKILL,
+    },
+    { key: "plain", agent: "perk.pr-reviewer", task: "review plainly" },
+  ]);
+  const start = script.indexOf("runs.all(") + "runs.all(".length;
+  const end = script.indexOf(");\nreturn");
+  const items = JSON.parse(script.slice(start, end)) as Array<Record<string, unknown>>;
+  assert.equal(items[0]?.skill, "ponytail");
+  assert.equal("requiredSkill" in (items[0] ?? {}), false);
+  assert.equal("skill" in (items[1] ?? {}), false);
+});
+
 test("renderWaveScript throws on duplicate lane keys and empty lanes", () => {
   assert.throws(
     () =>
@@ -196,6 +216,52 @@ test("runReportWave: spawn params carry the fixed module contract + spec fields"
     model: "anthropic/claude-sonnet-4",
     timeoutMs: 1_234,
   });
+});
+
+test("runReportWave: failed required-skill preflight skips only that lane and stays uncovered", async () => {
+  const lanes: WaveLane[] = [
+    LANES[0] as WaveLane,
+    {
+      key: "ponytail",
+      agent: "perk.pr-reviewer",
+      task: "review minimally",
+      skill: "ponytail",
+      requiredSkill: PONYTAIL_CORE_SKILL,
+    },
+  ];
+  let preflights = 0;
+  const adapter = createMemoryWaveAdapter({
+    aggregate: {
+      state: "complete",
+      value: [okEntry("plan-fidelity", { verdict: "clean" })],
+    },
+  });
+  const result = await runReportWave(
+    adapter,
+    makeSpec({
+      lanes,
+      requiredSkillPreflight: async () => {
+        preflights++;
+        return { ok: false, detail: "exact Ponytail source missing" };
+      },
+    }),
+  );
+  assert.equal(preflights, 1);
+  assert.equal(result.complete, false);
+  assert.deepEqual(result.reports, [{ key: "plan-fidelity", report: { verdict: "clean" } }]);
+  assert.deepEqual(result.failures, [
+    { key: "ponytail", reason: "skill-unavailable", detail: "exact Ponytail source missing" },
+  ]);
+  const spawned = adapter.calls.spawn[0];
+  assert.ok(spawned !== undefined);
+  assert.doesNotMatch(spawned.workflowScript, /ponytail/);
+  const attempt = toAttemptReceipt(
+    "pr-review",
+    1,
+    lanes.map((lane) => lane.key),
+    result.receipt,
+  );
+  assert.deepEqual(attempt.requestedKeys, ["plan-fidelity", "ponytail"]);
 });
 
 test("runReportWave: a failed lane is incomplete under strict, complete under best-effort", async () => {

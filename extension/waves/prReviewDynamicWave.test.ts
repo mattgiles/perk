@@ -18,9 +18,16 @@ import {
   DYNAMIC_FALLBACK_ANGLES,
   REVIEW_ANGLE_SELECTOR_SCHEMA,
   renderDynamicReviewScript,
-  runPrReviewDynamicWave,
+  runPrReviewDynamicWave as runPrReviewDynamicWaveBase,
 } from "./prReviewDynamicWave.ts";
 import { directiveSuffix, PR_REVIEW_ANGLES, PR_REVIEW_REPORT_SCHEMA } from "./prReviewWave.ts";
+import type { WaveAdapter } from "./reportWave.ts";
+
+const PREFLIGHT_OK = async () => ({ ok: true }) as const;
+const runPrReviewDynamicWave = (
+  adapter: WaveAdapter,
+  opts: Parameters<typeof runPrReviewDynamicWaveBase>[1] = {},
+) => runPrReviewDynamicWaveBase(adapter, { ...opts, requiredSkillPreflight: PREFLIGHT_OK });
 
 const AsyncFunction = Object.getPrototypeOf(async () => {}).constructor as new (
   ...args: string[]
@@ -101,6 +108,11 @@ async function execScript(script: string, config: ExecConfig = {}): Promise<Exec
           };
         });
       }
+      if (key === "ponytail") {
+        return (config.reviewerFail ?? []).includes(key)
+          ? Promise.reject(new Error("reviewer exploded"))
+          : Promise.resolve({ key, ok: true, error: null, structuredOutput: cleanReport(key) });
+      }
       if (config.selectorReject !== undefined) {
         events.push("selector-settled");
         return Promise.reject(new Error(config.selectorReject));
@@ -143,13 +155,27 @@ test("renderDynamicReviewScript embeds the seven-angle task map and forced angle
     "correctness",
     "idioms",
     "plan-fidelity",
+    "ponytail",
     "quality",
     "tests",
   ]);
   for (const [angle, task] of Object.entries(PR_REVIEW_ANGLES)) {
     assert.equal(tasks[angle], task, `${angle} task is byte-identical to the vocabulary`);
   }
+  assert.match(tasks.ponytail ?? "", /^angle: ponytail/);
   assert.ok(script.includes('const FORCED = ["quality"];'));
+});
+
+test("renderDynamicReviewScript launches one invocation-private Ponytail reviewer independently", async () => {
+  const { runCalls, value } = await execScript(render({ forceAngles: [] }), {
+    report: selectorReport({ selected_angles: ["quality"] }),
+  });
+  const ponytail = runCalls.filter((call) => call.key === "ponytail");
+  assert.equal(ponytail.length, 1);
+  assert.equal(ponytail[0]?.params.agent, "perk.pr-reviewer");
+  assert.equal(ponytail[0]?.params.skill, "ponytail-review");
+  assert.equal(value.selection.effective.at(-1), "ponytail");
+  assert.equal(value.lanes.at(-1)?.key, "ponytail");
 });
 
 test("renderDynamicReviewScript embeds the selector item with its own outputSchema and model", async () => {
@@ -183,7 +209,9 @@ test("renderDynamicReviewScript threads the reviewer model onto plan-fidelity an
     { report: selectorReport() },
   );
   const pf = runCalls.find((call) => call.key === "plan-fidelity");
+  const ponytail = runCalls.find((call) => call.key === "ponytail");
   assert.equal(pf?.params.model, "test-reviewer-model");
+  assert.equal(ponytail?.params.model, "test-reviewer-model");
   assert.equal(pf?.params.agent, "perk.pr-reviewer");
   assert.equal(pf?.params.task, PR_REVIEW_ANGLES["plan-fidelity"]);
   for (const item of allBatches[0] ?? []) {
@@ -195,8 +223,11 @@ test("renderDynamicReviewScript threads the reviewer model onto plan-fidelity an
 test("renderDynamicReviewScript omits reviewer models when unconfigured", async () => {
   const { runCalls, allBatches } = await execScript(render(), { report: selectorReport() });
   const pf = runCalls.find((call) => call.key === "plan-fidelity");
+  const ponytail = runCalls.find((call) => call.key === "ponytail");
   assert.ok(pf);
+  assert.ok(ponytail);
   assert.equal("model" in pf.params, false);
+  assert.equal("model" in ponytail.params, false);
   for (const item of allBatches[0] ?? []) {
     assert.equal("model" in item, false);
   }
@@ -210,7 +241,9 @@ test("hostile directive text (quotes/backticks/interpolations) cannot escape its
   const selector = runCalls.find((call) => call.key === "angle-selector");
   assert.ok((selector?.params.task as string).includes(hostile));
   const pf = runCalls.find((call) => call.key === "plan-fidelity");
+  const ponytail = runCalls.find((call) => call.key === "ponytail");
   assert.ok((pf?.params.task as string).includes(hostile));
+  assert.ok((ponytail?.params.task as string).includes(hostile));
   for (const item of allBatches[0] ?? []) {
     assert.ok((item.task as string).includes(hostile));
   }
@@ -227,7 +260,9 @@ test("the directive rides the selector task and every reviewer lane as ONE unifo
   assert.match(suffix, /Operator focus \(DATA from the human/);
   assert.match(suffix, /focus on decode edges/);
   const selector = runCalls.find((call) => call.key === "angle-selector");
+  const ponytail = runCalls.find((call) => call.key === "ponytail");
   assert.ok((selector?.params.task as string).endsWith(suffix));
+  assert.ok((ponytail?.params.task as string).endsWith(suffix));
   for (const item of allBatches[0] ?? []) {
     assert.ok((item.task as string).endsWith(suffix), `${item.key} carries the uniform suffix`);
   }
@@ -251,7 +286,12 @@ test("script: a valid selection is honored in report order (source: selector)", 
     report: selectorReport({ selected_angles: ["tests", "correctness"] }),
   });
   assert.equal(value.selection.source, "selector");
-  assert.deepEqual(value.selection.effective, ["plan-fidelity", "tests", "correctness"]);
+  assert.deepEqual(value.selection.effective, [
+    "plan-fidelity",
+    "tests",
+    "correctness",
+    "ponytail",
+  ]);
   assert.equal(value.selection.selector_ok, true);
   assert.equal(value.selection.selector_error, null);
 });
@@ -261,14 +301,14 @@ test("script: unknown slugs are dropped", async () => {
     report: selectorReport({ selected_angles: ["security", "quality", "vibes"] }),
   });
   assert.equal(value.selection.source, "selector");
-  assert.deepEqual(value.selection.effective, ["plan-fidelity", "quality"]);
+  assert.deepEqual(value.selection.effective, ["plan-fidelity", "quality", "ponytail"]);
 });
 
 test("script: duplicate picks are deduped preserving report order", async () => {
   const { value } = await execScript(render(), {
     report: selectorReport({ selected_angles: ["tests", "tests", "quality", "tests"] }),
   });
-  assert.deepEqual(value.selection.effective, ["plan-fidelity", "tests", "quality"]);
+  assert.deepEqual(value.selection.effective, ["plan-fidelity", "tests", "quality", "ponytail"]);
 });
 
 test("script: more than 3 valid picks are capped at 3", async () => {
@@ -277,7 +317,13 @@ test("script: more than 3 valid picks are capped at 3", async () => {
       selected_angles: ["quality", "correctness", "tests", "api-design"],
     }),
   });
-  assert.deepEqual(value.selection.effective, ["plan-fidelity", "quality", "correctness", "tests"]);
+  assert.deepEqual(value.selection.effective, [
+    "plan-fidelity",
+    "quality",
+    "correctness",
+    "tests",
+    "ponytail",
+  ]);
 });
 
 test("script: picks from the widened allowlist are honored", async () => {
@@ -290,6 +336,7 @@ test("script: picks from the widened allowlist are honored", async () => {
     "api-design",
     "code-organization",
     "idioms",
+    "ponytail",
   ]);
 });
 
@@ -298,7 +345,7 @@ test("script: a plan-fidelity echo is filtered from the picks (never a duplicate
     report: selectorReport({ selected_angles: ["plan-fidelity", "tests"] }),
   });
   assert.equal(value.selection.source, "selector");
-  assert.deepEqual(value.selection.effective, ["plan-fidelity", "tests"]);
+  assert.deepEqual(value.selection.effective, ["plan-fidelity", "tests", "ponytail"]);
   assert.deepEqual(
     (allBatches[0] ?? []).map((item) => item.key),
     ["tests"],
@@ -311,14 +358,24 @@ test("script: confidence 'low' falls back to correctness+tests even with valid p
     report: selectorReport({ selected_angles: ["quality"], confidence: "low" }),
   });
   assert.equal(value.selection.source, "fallback");
-  assert.deepEqual(value.selection.effective, ["plan-fidelity", "correctness", "tests"]);
+  assert.deepEqual(value.selection.effective, [
+    "plan-fidelity",
+    "correctness",
+    "tests",
+    "ponytail",
+  ]);
   assert.equal(value.selection.selector_ok, true, "a low-confidence report is still a report");
 });
 
 test("script: a selector lane failure falls back (selector_ok false, error captured)", async () => {
   const { value } = await execScript(render(), { selectorReject: "selector lane exploded" });
   assert.equal(value.selection.source, "fallback");
-  assert.deepEqual(value.selection.effective, ["plan-fidelity", "correctness", "tests"]);
+  assert.deepEqual(value.selection.effective, [
+    "plan-fidelity",
+    "correctness",
+    "tests",
+    "ponytail",
+  ]);
   assert.equal(value.selection.selector_ok, false);
   assert.match(value.selection.selector_error ?? "", /selector lane exploded/);
   assert.equal(value.selection.report, null);
@@ -329,14 +386,25 @@ test("script: zero valid picks after filtering falls back", async () => {
     report: selectorReport({ selected_angles: ["plan-fidelity", "security"] }),
   });
   assert.equal(value.selection.source, "fallback");
-  assert.deepEqual(value.selection.effective, ["plan-fidelity", "correctness", "tests"]);
+  assert.deepEqual(value.selection.effective, [
+    "plan-fidelity",
+    "correctness",
+    "tests",
+    "ponytail",
+  ]);
 });
 
 test("script: forced angles come first and cap the additional set with selector picks", async () => {
   const { value } = await execScript(render({ forceAngles: ["quality"] }), {
     report: selectorReport({ selected_angles: ["correctness", "tests", "idioms"] }),
   });
-  assert.deepEqual(value.selection.effective, ["plan-fidelity", "quality", "correctness", "tests"]);
+  assert.deepEqual(value.selection.effective, [
+    "plan-fidelity",
+    "quality",
+    "correctness",
+    "tests",
+    "ponytail",
+  ]);
   assert.deepEqual(value.selection.forced, ["quality"]);
   assert.equal(value.selection.source, "selector");
 });
@@ -348,7 +416,13 @@ test("script: three forced angles fully displace the selector's picks (cap 3 add
       report: selectorReport({ selected_angles: ["correctness"] }),
     },
   );
-  assert.deepEqual(value.selection.effective, ["plan-fidelity", "quality", "tests", "api-design"]);
+  assert.deepEqual(value.selection.effective, [
+    "plan-fidelity",
+    "quality",
+    "tests",
+    "api-design",
+    "ponytail",
+  ]);
   assert.deepEqual(
     (allBatches[0] ?? []).map((item) => item.key),
     ["quality", "tests", "api-design"],
@@ -359,7 +433,7 @@ test("script: a forced angle dedupes against the same selector pick", async () =
   const { value } = await execScript(render({ forceAngles: ["tests"] }), {
     report: selectorReport({ selected_angles: ["tests", "quality"] }),
   });
-  assert.deepEqual(value.selection.effective, ["plan-fidelity", "tests", "quality"]);
+  assert.deepEqual(value.selection.effective, ["plan-fidelity", "tests", "quality", "ponytail"]);
 });
 
 test("script: forced angles hold under selector failure (forced first, fallback fills)", async () => {
@@ -367,7 +441,13 @@ test("script: forced angles hold under selector failure (forced first, fallback 
     selectorReject: "boom",
   });
   assert.equal(value.selection.source, "fallback");
-  assert.deepEqual(value.selection.effective, ["plan-fidelity", "quality", "correctness", "tests"]);
+  assert.deepEqual(value.selection.effective, [
+    "plan-fidelity",
+    "quality",
+    "correctness",
+    "tests",
+    "ponytail",
+  ]);
 });
 
 test("script: plan-fidelity is always present and always first", async () => {
@@ -385,12 +465,17 @@ test("script: plan-fidelity is always present and always first", async () => {
 test("script: concurrency shape — plan-fidelity launches first, fan-out runs while it is pending", async () => {
   const { events } = await execScript(render(), { report: selectorReport() });
   const pfLaunch = events.indexOf("run:plan-fidelity");
+  const ponytailLaunch = events.indexOf("run:ponytail");
   const selectorSettled = events.indexOf("selector-settled");
   const fanOut = events.findIndex((event) => event.startsWith("all:"));
   const pfResolved = events.indexOf("plan-fidelity-resolved");
   assert.ok(
     pfLaunch !== -1 && pfLaunch < selectorSettled,
     "plan-fidelity launched before the selector settled",
+  );
+  assert.ok(
+    ponytailLaunch !== -1 && ponytailLaunch < selectorSettled,
+    "ponytail launched independently before the selector settled",
   );
   assert.ok(
     fanOut !== -1 && fanOut < pfResolved,
@@ -409,7 +494,9 @@ test("script: bias control — the selector's text never enters any fan-out task
     }
   }
   const pf = runCalls.find((call) => call.key === "plan-fidelity");
+  const ponytail = runCalls.find((call) => call.key === "ponytail");
   assert.ok(!(pf?.params.task as string).includes(canary));
+  assert.ok(!(ponytail?.params.task as string).includes(canary));
 });
 
 test("script: a failed plan-fidelity lane projects as a lane failure (never a script throw)", async () => {
@@ -434,7 +521,7 @@ test("script: the aggregate is exactly {selection, lanes} with the compact lane 
   );
   assert.deepEqual(
     value.lanes.map((lane) => lane.key),
-    ["plan-fidelity", "tests"],
+    ["plan-fidelity", "tests", "ponytail"],
   );
   const failed = value.lanes[1];
   assert.ok(failed);
@@ -466,6 +553,7 @@ test("script: a valid custom proposal launches a lane with the fixed template ta
     "plan-fidelity",
     "correctness",
     "cache-invalidation",
+    "ponytail",
   ]);
   const item = (allBatches[0] ?? []).find((entry) => entry.key === "cache-invalidation");
   assert.ok(item);
@@ -492,6 +580,7 @@ test("script: invalid custom slugs are dropped (pattern, reserved names, length)
     "quality", // reserved fixed slug
     "plan-fidelity", // reserved fixed slug (structural)
     "angle-selector", // reserved lane key
+    "ponytail", // reserved automatic lane key
     "-leading-dash", // pattern (must start with a letter)
   ]) {
     const { value } = await execScript(render(), {
@@ -504,7 +593,7 @@ test("script: invalid custom slugs are dropped (pattern, reserved names, length)
     assert.equal(value.selection.custom, null, `${slug} is dropped`);
     assert.deepEqual(
       value.selection.effective,
-      ["plan-fidelity", "tests"],
+      ["plan-fidelity", "tests", "ponytail"],
       "the fixed picks proceed unaffected",
     );
   }
@@ -530,7 +619,7 @@ test("script: the custom scope is whitespace-collapsed; an over-long scope drops
     }),
   });
   assert.equal(overlong.selection.custom, null);
-  assert.deepEqual(overlong.selection.effective, ["plan-fidelity", "tests"]);
+  assert.deepEqual(overlong.selection.effective, ["plan-fidelity", "tests", "ponytail"]);
 });
 
 test("script: low confidence drops the custom proposal along with the picks", async () => {
@@ -544,7 +633,12 @@ test("script: low confidence drops the custom proposal along with the picks", as
   });
   assert.equal(value.selection.custom, null);
   assert.equal(value.selection.source, "fallback");
-  assert.deepEqual(value.selection.effective, ["plan-fidelity", "correctness", "tests"]);
+  assert.deepEqual(value.selection.effective, [
+    "plan-fidelity",
+    "correctness",
+    "tests",
+    "ponytail",
+  ]);
 });
 
 test("script: the custom angle is ordered last and sliced off by the 3-additional cap (custom ⇒ null)", async () => {
@@ -556,7 +650,13 @@ test("script: the custom angle is ordered last and sliced off by the 3-additiona
     }),
   });
   // forced → picks → custom, capped at 3: the custom did not launch, so custom is null.
-  assert.deepEqual(value.selection.effective, ["plan-fidelity", "quality", "tests", "correctness"]);
+  assert.deepEqual(value.selection.effective, [
+    "plan-fidelity",
+    "quality",
+    "tests",
+    "correctness",
+    "ponytail",
+  ]);
   assert.equal(value.selection.custom, null);
   assert.deepEqual(
     (allBatches[0] ?? []).map((item) => item.key),
@@ -573,7 +673,7 @@ test("script: a custom-only selection runs WITHOUT fallback padding (source: sel
     }),
   });
   assert.equal(value.selection.source, "selector");
-  assert.deepEqual(value.selection.effective, ["plan-fidelity", "release-artifacts"]);
+  assert.deepEqual(value.selection.effective, ["plan-fidelity", "release-artifacts", "ponytail"]);
   assert.deepEqual(value.selection.custom, {
     slug: "release-artifacts",
     scope: "completeness of the packaging changes",
@@ -620,7 +720,7 @@ test("script: hostile custom-scope text stays contained in exactly the custom la
     );
   }
   for (const call of runCalls) {
-    if (call.key === "angle-selector" || call.key === "plan-fidelity") {
+    if (call.key === "angle-selector" || call.key === "plan-fidelity" || call.key === "ponytail") {
       assert.ok(
         !(call.params.task as string).includes("CANARY-hostile-scope"),
         `${call.key} task is scope-free`,
@@ -637,10 +737,13 @@ function dynamicValue(
   laneOverrides: Record<string, { ok: boolean; error?: string; report?: unknown }> = {},
   selectionOverrides: Record<string, unknown> = {},
 ): unknown {
+  const effectiveWithPonytail = effective.includes("ponytail")
+    ? effective
+    : [...effective, "ponytail"];
   return {
     selection: {
       source: "selector",
-      effective,
+      effective: effectiveWithPonytail,
       forced: [],
       custom: null,
       selector_ok: true,
@@ -648,7 +751,7 @@ function dynamicValue(
       report: selectorReport(),
       ...selectionOverrides,
     },
-    lanes: effective.map((key) => {
+    lanes: effectiveWithPonytail.map((key) => {
       const override = laneOverrides[key];
       if (override === undefined) {
         return { key, ok: true, error: null, report: cleanReport(key) };
@@ -672,7 +775,7 @@ test("runner: happy path — complete, covered = the effective selection, ONE sp
   });
   const outcome = await runPrReviewDynamicWave(adapter, { timeoutMs: 5_000 });
   assert.equal(outcome.complete, true);
-  assert.deepEqual(outcome.covered, ["plan-fidelity", "correctness", "tests"]);
+  assert.deepEqual(outcome.covered, ["plan-fidelity", "correctness", "tests", "ponytail"]);
   assert.deepEqual(outcome.retried, []);
   assert.deepEqual(outcome.failures, []);
   assert.equal(outcome.selection?.source, "selector");
@@ -697,10 +800,10 @@ test("runner: a malformed value shape is aggregate-unreadable — then ONE full 
   const outcome = await runPrReviewDynamicWave(adapter, { timeoutMs: 5_000 });
   assert.equal(adapter.calls.spawn.length, 2);
   assert.equal(outcome.complete, true);
-  assert.deepEqual(outcome.covered, ["plan-fidelity", "quality"]);
+  assert.deepEqual(outcome.covered, ["plan-fidelity", "quality", "ponytail"]);
   // The re-run's whole effective selection is what was retried; its selection supersedes.
-  assert.deepEqual(outcome.retried, ["plan-fidelity", "quality"]);
-  assert.equal(outcome.selection?.effective.join(","), "plan-fidelity,quality");
+  assert.deepEqual(outcome.retried, ["plan-fidelity", "quality", "ponytail"]);
+  assert.equal(outcome.selection?.effective.join(","), "plan-fidelity,quality,ponytail");
 });
 
 test("runner: selection drift (out-of-allowlist / missing plan-fidelity / >4 / dupes) is aggregate-unreadable", async () => {
@@ -736,7 +839,12 @@ test("runner: a valid custom selection round-trips (parseDynamicValue accepts it
   });
   const outcome = await runPrReviewDynamicWave(adapter, { timeoutMs: 5_000 });
   assert.equal(outcome.complete, true);
-  assert.deepEqual(outcome.covered, ["plan-fidelity", "correctness", "cache-invalidation"]);
+  assert.deepEqual(outcome.covered, [
+    "plan-fidelity",
+    "correctness",
+    "cache-invalidation",
+    "ponytail",
+  ]);
   assert.deepEqual(outcome.selection?.custom, custom);
 });
 
@@ -842,7 +950,7 @@ test("runner: lane-level failure — the retry is a STATIC runs.all carrying exa
   assert.equal(retrySpawn.outputSchema, PR_REVIEW_REPORT_SCHEMA);
   // Merge semantics: first-run successes kept for non-retried keys; the retry covers the rest.
   assert.equal(outcome.complete, true);
-  assert.deepEqual(outcome.covered, ["plan-fidelity", "correctness", "tests"]);
+  assert.deepEqual(outcome.covered, ["plan-fidelity", "correctness", "tests", "ponytail"]);
   assert.deepEqual(outcome.retried, ["tests"]);
   assert.deepEqual(outcome.failures, []);
   assert.equal(outcome.selection?.source, "selector", "the first run's selection is kept");
@@ -898,7 +1006,7 @@ test("runner: a failed custom lane retries statically with the byte-identical ta
   );
   assert.deepEqual(items[0]?.outputSchema, customReportSchema(custom.slug));
   assert.equal(outcome.complete, true);
-  assert.deepEqual(outcome.covered, ["plan-fidelity", "cache-invalidation"]);
+  assert.deepEqual(outcome.covered, ["plan-fidelity", "cache-invalidation", "ponytail"]);
   assert.deepEqual(outcome.retried, ["cache-invalidation"]);
 });
 
@@ -949,7 +1057,12 @@ test("runner: a mixed fixed+custom failure retries both in ONE static wave", asy
   assert.deepEqual(items[1]?.outputSchema, customReportSchema(custom.slug));
   assert.equal(outcome.complete, true);
   assert.deepEqual(outcome.retried, ["correctness", "cache-invalidation"]);
-  assert.deepEqual(outcome.covered, ["plan-fidelity", "correctness", "cache-invalidation"]);
+  assert.deepEqual(outcome.covered, [
+    "plan-fidelity",
+    "correctness",
+    "cache-invalidation",
+    "ponytail",
+  ]);
 });
 
 test("runner: a retry that fails again survives as incomplete with the retry's failures", async () => {
@@ -970,7 +1083,7 @@ test("runner: a retry that fails again survives as incomplete with the retry's f
   const outcome = await runPrReviewDynamicWave(adapter, { timeoutMs: 5_000 });
   assert.equal(adapter.calls.spawn.length, 2);
   assert.equal(outcome.complete, false);
-  assert.deepEqual(outcome.covered, ["plan-fidelity"]);
+  assert.deepEqual(outcome.covered, ["plan-fidelity", "ponytail"]);
   assert.deepEqual(outcome.retried, ["correctness"]);
   assert.deepEqual(outcome.failures, [
     { key: "correctness", reason: "lane-failed", detail: "again" },
@@ -1000,8 +1113,8 @@ test("runner: a retryable wave-level failure re-runs the WHOLE dynamic script on
     assert.match(spawn.workflowScript, /angle-selector/);
   }
   assert.equal(outcome.complete, true);
-  assert.deepEqual(outcome.covered, ["plan-fidelity", "correctness", "quality"]);
-  assert.deepEqual(outcome.retried, ["plan-fidelity", "correctness", "quality"]);
+  assert.deepEqual(outcome.covered, ["plan-fidelity", "correctness", "quality", "ponytail"]);
+  assert.deepEqual(outcome.retried, ["plan-fidelity", "correctness", "quality", "ponytail"]);
   assert.equal(outcome.selection?.source, "fallback", "the re-run's selection supersedes");
 });
 
@@ -1022,6 +1135,36 @@ test("runner: a double wave-level failure ends with the second failure and no se
     [[null, "run-failed"]],
   );
   assert.match(outcome.failures[0]?.detail ?? "", /second/);
+});
+
+test("runner: failed Ponytail preflight omits only that child and is never retried", async () => {
+  let preflightCalls = 0;
+  const value = dynamicValue(["plan-fidelity", "correctness"]) as {
+    lanes: Array<{ key: string }>;
+  };
+  value.lanes = value.lanes.filter((lane) => lane.key !== "ponytail");
+  const adapter = createMemoryWaveAdapter({ aggregate: { state: "complete", value } });
+  const outcome = await runPrReviewDynamicWaveBase(adapter, {
+    timeoutMs: 5_000,
+    requiredSkillPreflight: async () => {
+      preflightCalls += 1;
+      return { ok: false, detail: "exact Ponytail source is absent" };
+    },
+  });
+  assert.equal(preflightCalls, 1);
+  assert.equal(adapter.calls.spawn.length, 1);
+  assert.match(adapter.calls.spawn[0]?.workflowScript ?? "", /const PONYTAIL_ENABLED = false/);
+  assert.equal(outcome.complete, false);
+  assert.deepEqual(outcome.selection?.effective, ["plan-fidelity", "correctness", "ponytail"]);
+  assert.deepEqual(outcome.covered, ["plan-fidelity", "correctness"]);
+  assert.deepEqual(outcome.retried, []);
+  assert.deepEqual(outcome.failures, [
+    {
+      key: "ponytail",
+      reason: "skill-unavailable",
+      detail: "exact Ponytail source is absent",
+    },
+  ]);
 });
 
 test("runner: unavailable — zero spawns, NO retry, incomplete, no selection", async () => {
@@ -1135,7 +1278,7 @@ test("attempts: one dynamic run — pre-launch manifest keys, dynamic agent enri
       attempt: 1,
       // The PRE-LAUNCH manifest: the fan-out keys are unknowable before launch — observed
       // fan-out lanes appear as receipt children only.
-      requestedKeys: ["plan-fidelity", "angle-selector"],
+      requestedKeys: ["plan-fidelity", "angle-selector", "ponytail"],
       runId: "wave-async-1",
       asyncDir: "/memory/wave-async-1",
       state: "complete",
@@ -1162,8 +1305,8 @@ test("attempts: [dynamic, dynamic-rerun] — both attempts keep the dynamic mani
   assert.deepEqual(
     outcome.attempts.map((a) => [a.attempt, a.state, a.runId, a.requestedKeys]),
     [
-      [1, "failed", "wave-async-1", ["plan-fidelity", "angle-selector"]],
-      [2, "complete", "wave-async-2", ["plan-fidelity", "angle-selector"]],
+      [1, "failed", "wave-async-1", ["plan-fidelity", "angle-selector", "ponytail"]],
+      [2, "complete", "wave-async-2", ["plan-fidelity", "angle-selector", "ponytail"]],
     ],
   );
 });
@@ -1192,7 +1335,7 @@ test("attempts: [dynamic, static-retry] — the retry attempt carries the retrie
   assert.deepEqual(
     outcome.attempts.map((a) => [a.attempt, a.state, a.requestedKeys]),
     [
-      [1, "complete", ["plan-fidelity", "angle-selector"]],
+      [1, "complete", ["plan-fidelity", "angle-selector", "ponytail"]],
       [2, "complete", ["tests"]],
     ],
   );
@@ -1210,7 +1353,7 @@ test("attempts: unavailable — a single handle-less attempt, no retry", async (
     {
       flow: "pr-review-dynamic",
       attempt: 1,
-      requestedKeys: ["plan-fidelity", "angle-selector"],
+      requestedKeys: ["plan-fidelity", "angle-selector", "ponytail"],
       state: "unavailable",
       children: [],
     },

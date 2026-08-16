@@ -31,7 +31,8 @@ CAPABILITIES: tuple[Capability, ...] = (
     Capability(
         "borrowed-packages",
         "crossover scaffolding "
-        "(diff + subagents engine + fff search + askuser questionnaire + todo checklist)",
+        "(diff + subagents engine + fff search + askuser questionnaire + todo checklist + "
+        "ambiently-disabled Ponytail review context)",
         required=True,
         scope="both",
     ),

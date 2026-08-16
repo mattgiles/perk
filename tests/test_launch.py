@@ -383,6 +383,43 @@ def test_skill_exposure_injected_between_model_args_and_pi_args(tmp_path, capsys
     assert argv[argv.index("--skill") + 1] == ".agents/skills/perk-implement"
 
 
+def test_skill_exposure_never_reintroduces_ambiently_disabled_ponytail(tmp_path, capsys):
+    pi_dir = tmp_path / ".pi"
+    pi_dir.mkdir()
+    pi_dir.joinpath("settings.json").write_text(
+        json.dumps(
+            {
+                "packages": [
+                    {
+                        "source": "npm:@dietrichgebert/ponytail",
+                        "extensions": [],
+                        "skills": [],
+                        "prompts": [],
+                        "themes": [],
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    config = dataclasses.replace(_config(tmp_path), skills=SkillsPolicy(include_packages=True))
+    cache.write_plan_ref(tmp_path, _PLAN_REF)
+    launch_stage(
+        repo_root=tmp_path,
+        config=config,
+        stage=_stage("implement"),
+        worktree=None,
+        dry_run=True,
+        remote=None,
+        pi_args=[],
+    )
+    captured = capsys.readouterr()
+    argv = json.loads(captured.out)["argv"]
+    assert "ponytail" not in " ".join(argv)
+    assert "ponytail-review" not in " ".join(argv)
+    assert "ponytail" not in captured.err
+
+
 def test_skill_exposure_binding_trigger_override_selects_command_bindings(tmp_path, capsys):
     # A stage-borrowing cold door's `binding_trigger` override drives the bound-skill union on
     # its command trigger — the same normalization `_resolve_prompt` uses.

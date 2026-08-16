@@ -7,6 +7,12 @@ def test_inventory_all_required_in_phase0():
     assert all(c.scope == "both" for c in capabilities.CAPABILITIES)
 
 
+def test_borrowed_packages_capability_names_ponytail_context():
+    capability = next(c for c in capabilities.CAPABILITIES if c.name == "borrowed-packages")
+    assert "Ponytail" in capability.summary
+    assert "ambiently-disabled" in capability.summary
+
+
 def test_subagent_engine_capability_present():
     assert "subagent-engine" in {c.name for c in capabilities.CAPABILITIES}
 

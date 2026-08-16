@@ -212,6 +212,18 @@ interface SpawnSink {
   spawns: { workflowScript?: string; model?: string; outputSchema?: unknown }[];
 }
 
+function installPonytailReviewSkill(cwd: string): void {
+  const root = join(cwd, ".pi", "npm", "node_modules", "@dietrichgebert", "ponytail");
+  const skillDir = join(root, "skills", "ponytail-review");
+  mkdirSync(skillDir, { recursive: true });
+  writeFileSync(
+    join(root, "package.json"),
+    JSON.stringify({ name: "@dietrichgebert/ponytail", pi: { skills: ["./skills"] } }),
+    "utf8",
+  );
+  writeFileSync(join(skillDir, "SKILL.md"), "---\nname: ponytail-review\n---\n", "utf8");
+}
+
 /**
  * A fake pi-subagents responder bound as a bus peer (the fakePlannotator pattern): answers
  * ping/spawn on `pi.events` with the v1 envelope, writes a terminal `status.json` carrying one
@@ -321,6 +333,7 @@ const CLEAN_JSON = JSON.stringify({
 
 test("tool: run_pr_review_wave end-to-end happy path; a following clean post passes the guard", async () => {
   const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
+  installPonytailReviewSkill(cwd);
   // The configured review model must reach the wave as its workflow-level default (the silent
   // fallback to the agent default is exactly the failure the module headers disavow).
   mkdirSync(join(cwd, ".perk"), { recursive: true });
@@ -358,10 +371,10 @@ test("tool: run_pr_review_wave end-to-end happy path; a following clean post pas
     };
     assert.equal(details.ok, true);
     assert.equal(details.complete, true);
-    assert.deepEqual(details.covered, ["plan-fidelity", "quality"]);
+    assert.deepEqual(details.covered, ["plan-fidelity", "quality", "ponytail"]);
     assert.deepEqual(details.retried, []);
     assert.deepEqual(details.failures, []);
-    assert.equal(details.reports?.length, 2);
+    assert.equal(details.reports?.length, 3);
     assert.equal(details.reports?.[0]?.report.angle, "plan-fidelity");
     assert.equal(details.reports?.[1]?.report.verdict, "clean");
     // The attempt receipts ride the persisted details ONLY — an identity-only completion (no
@@ -369,11 +382,15 @@ test("tool: run_pr_review_wave end-to-end happy path; a following clean post pas
     assert.equal(details.attempts?.length, 1);
     assert.equal(details.attempts?.[0]?.flow, "pr-review");
     assert.equal(details.attempts?.[0]?.attempt, 1);
-    assert.deepEqual(details.attempts?.[0]?.requestedKeys, ["plan-fidelity", "quality"]);
+    assert.deepEqual(details.attempts?.[0]?.requestedKeys, [
+      "plan-fidelity",
+      "quality",
+      "ponytail",
+    ]);
     assert.equal(details.attempts?.[0]?.state, "complete");
     assert.deepEqual(details.attempts?.[0]?.children, []);
     const text = result.content[0]?.text ?? "";
-    assert.match(text, /Review wave complete: covered 2\/2 angle\(s\)/);
+    assert.match(text, /Review wave complete: covered 3\/3 angle\(s\)/);
     assert.match(text, /untrusted DATA/);
     assert.equal(text.includes("attempts"), false, "receipts never enter the model-facing prose");
     // The tool-boundary threading pins: the configured model and the operator directive both
@@ -383,12 +400,13 @@ test("tool: run_pr_review_wave end-to-end happy path; a following clean post pas
     const script = sink.spawns[0]?.workflowScript ?? "";
     const lanes = JSON.parse(
       script.slice(script.indexOf("runs.all(") + "runs.all(".length, script.indexOf(");\nreturn")),
-    ) as Array<{ key: string; task: string }>;
-    assert.equal(lanes.length, 2);
+    ) as Array<{ key: string; task: string; skill?: string }>;
+    assert.equal(lanes.length, 3);
     for (const lane of lanes) {
       assert.match(lane.task, /Operator focus \(DATA from the human/);
       assert.match(lane.task, /focus on decode edges/);
     }
+    assert.equal(lanes.at(-1)?.skill, "ponytail-review");
     // The recorded wave is complete → the clean guard lets a clean post through.
     const post = await h.invokeTool("post_pr_review", {
       verdict: "clean",
@@ -396,6 +414,12 @@ test("tool: run_pr_review_wave end-to-end happy path; a following clean post pas
       angles: ["plan-fidelity", "quality"],
     });
     assert.equal((post.details as { ok: boolean }).ok, true);
+    const record = h.workflowState().last_pr_review as {
+      angles?: string[];
+      covered_angles?: string[];
+    };
+    assert.deepEqual(record.angles, ["plan-fidelity", "quality", "ponytail"]);
+    assert.deepEqual(record.covered_angles, ["plan-fidelity", "quality", "ponytail"]);
   } finally {
     h.dispose();
   }
@@ -442,9 +466,15 @@ test("tool: an unavailable wave degrades loud; the clean guard refuses; an actio
       verdict: "actionable",
       summary: "Incomplete coverage (correctness failed): one issue found",
       comments: [{ path: "a.ts", line: 12, body: "fix" }],
-      angles: ["plan-fidelity"],
+      angles: ["caller-supplied-is-ignored"],
     });
     assert.equal((actionable.details as { ok: boolean }).ok, true);
+    const record = h.workflowState().last_pr_review as {
+      angles?: string[];
+      covered_angles?: string[];
+    };
+    assert.deepEqual(record.angles, ["plan-fidelity", "correctness", "ponytail"]);
+    assert.deepEqual(record.covered_angles, []);
   } finally {
     h.dispose();
   }
@@ -471,12 +501,14 @@ test("tool: post_pr_review delegates an actionable batch, records last_pr_review
       pr?: number;
       verdict?: string;
       angles?: string[];
+      covered_angles?: string[];
       comment_count?: number;
       mode?: string;
     };
     assert.equal(rec?.pr, 42);
     assert.equal(rec?.verdict, "actionable");
     assert.deepEqual(rec?.angles, ["plan-fidelity", "correctness"]);
+    assert.deepEqual(rec?.covered_angles, ["plan-fidelity", "correctness"]);
     assert.equal(rec?.comment_count, 2);
     assert.equal(rec?.mode, "review");
   } finally {
@@ -499,8 +531,15 @@ test("tool: post_pr_review delegates a clean batch (👍), records last_pr_revie
     const details = result.details as { ok: boolean; verdict?: string };
     assert.equal(details.ok, true);
     assert.match(result.content[0]?.text ?? "", /Next step: \/land/);
-    const rec = h.workflowState().last_pr_review as { verdict?: string; comment_count?: number };
+    const rec = h.workflowState().last_pr_review as {
+      verdict?: string;
+      angles?: string[];
+      covered_angles?: string[];
+      comment_count?: number;
+    };
     assert.equal(rec?.verdict, "clean");
+    assert.deepEqual(rec?.angles, ["plan-fidelity"]);
+    assert.deepEqual(rec?.covered_angles, ["plan-fidelity"]);
     assert.equal(rec?.comment_count, 0);
   } finally {
     h.dispose();
