@@ -10,6 +10,7 @@ from perk.backends.issue_backend import IssueBackendError
 from perk.cli.ensure import UserFacingCliError
 from perk.convergence import capabilities, env, init, managed_state
 from perk.convergence.doctor.data import _MANAGED_GROUP, Check, Status
+from perk.convergence.init.settings import PONYTAIL_NPM_NAME
 from perk.convergence.managed_state import ArtifactHealth, HealthStatus
 from perk.state import cache, gc
 from perk.substrate import bindings, git, paths, providers, registry
@@ -24,6 +25,7 @@ from perk.substrate.config import (
     load_config,
 )
 from perk.substrate.paths import CONFIG_FILENAME, LOCAL_CONFIG_FILENAME
+from perk.substrate.skill_exposure import parse_skill_frontmatter
 
 # --- group builders (impure: shells / file reads) -------------------------------------------
 
@@ -623,7 +625,7 @@ _SUBAGENTS_PACKAGE_DIRNAME = "pi-subagents"
 
 # The pi-subagents version perk's guidance was source-read against; bumped only on a
 # deliberate re-verify of the guidance (never a pin — the package stays unpinned).
-_SUBAGENTS_GUIDANCE_VERIFIED_VERSION = "0.46.0"
+_SUBAGENTS_GUIDANCE_VERIFIED_VERSION = "0.50.0"
 
 # One row per surface expectation perk's subagent guidance assumes:
 # (label, relative file path in the installed package, required substrings). Probes are
@@ -717,6 +719,38 @@ _SUBAGENT_COMPAT_PROBES: tuple[tuple[str, str, tuple[str, ...]], ...] = (
         "src/runs/shared/acceptance.ts",
         ("explicitAcceptanceCanDisable", "formatAcceptancePrompt"),
     ),
+    # Exact-path skill injection relied on by Ponytail review lanes. The invocation's `skill`
+    # is resolved against the agent-local `skillPath` before any global same-named skill; async
+    # workflow execution carries that path and injects the resolved skill content.
+    (
+        "workflow item skill override",
+        "src/shared/settings.ts",
+        (
+            "const taskSkillInput = normalizeSkillInput(task.skill);",
+            "skills = [...taskSkillInput];",
+        ),
+    ),
+    (
+        "agent skillPath parsing",
+        "src/agents/agents.ts",
+        (
+            "const skillPath = parseFrontmatterList(frontmatter.skillPath);",
+            "...(skillPath?.length ? { skillPath } : {}),",
+        ),
+    ),
+    (
+        "invocation-local skill precedence",
+        "src/agents/skills.ts",
+        (
+            "const local = localByName.get(trimmed);",
+            "let skill = local ? readSkill(trimmed, local.filePath, local.source) : undefined;",
+        ),
+    ),
+    (
+        "async workflow skill injection",
+        "src/runs/background/async-execution.ts",
+        ("a.skillPath,", "const injection = buildSkillInjection(resolvedSkills);"),
+    ),
 )
 
 
@@ -793,8 +827,9 @@ def _subagent_compat_check(root: Path) -> Check:
         "serialized workflow child runId) + streaming-wave delivery chain (session-scoped "
         "supervisor delivery, orchestrator env stamps, in-process async workflow host, "
         "foreground workflow children) + explicit acceptance disable (the report-wave "
-        "acceptance-none spawn contract); "
-        "report-only — the package stays unpinned"
+        "acceptance-none spawn contract) + exact-path skill injection (workflow item override, "
+        "agent skillPath parsing, invocation-local precedence, async injection); report-only — "
+        "the package stays unpinned"
     )
     if version != _SUBAGENTS_GUIDANCE_VERIFIED_VERSION:
         detail += (
@@ -808,6 +843,90 @@ def _subagent_compat_check(root: Path) -> Check:
         "ok",
         f"pi-subagents {version} — installed orchestration surface matches perk's guidance",
         detail,
+    )
+
+
+_PONYTAIL_PACKAGE_DIR = Path("@dietrichgebert") / "ponytail"
+_PONYTAIL_SKILLS = (
+    ("ponytail", Path("skills") / "ponytail" / "SKILL.md"),
+    ("ponytail-review", Path("skills") / "ponytail-review" / "SKILL.md"),
+)
+_PONYTAIL_REMEDIATION = (
+    "Set the managed Ponytail entry source to "
+    "npm:@dietrichgebert/ponytail@4.9.0, run 'perk init', and restart the Perk/Pi session."
+)
+
+
+def _ponytail_compat_check(root: Path) -> Check:
+    """Report-only compatibility probe for the lazily installed Ponytail review context.
+
+    Absence is expected before Pi's lazy package install and reports ``info``. A present install
+    must identify the reviewed package, advertise ``./skills``, and carry both exact readable
+    skill files with their expected frontmatter names. Divergence warns but never auto-fixes: the
+    managed settings reconciler deliberately preserves operator pins, while runtime preflight
+    fails only the affected automatic lane closed.
+    """
+    package_dir = init.consumer_npm_install_root(root) / "node_modules" / _PONYTAIL_PACKAGE_DIR
+    if not package_dir.is_dir():
+        return Check(
+            "ponytail-compat",
+            "package",
+            "info",
+            "Ponytail not installed — compatibility not evaluated",
+            "pi lazy-installs the all-disabled npm:@dietrichgebert/ponytail package at launch",
+        )
+
+    problems: list[str] = []
+    manifest_path = package_dir / "package.json"
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        manifest = None
+        problems.append(f"package.json unreadable: {exc}")
+    if isinstance(manifest, dict):
+        if manifest.get("name") != PONYTAIL_NPM_NAME:
+            problems.append(
+                f"package.json name is {manifest.get('name')!r}, expected {PONYTAIL_NPM_NAME!r}"
+            )
+        pi_section = manifest.get("pi")
+        advertised = pi_section.get("skills") if isinstance(pi_section, dict) else None
+        if not isinstance(advertised, list) or "./skills" not in advertised:
+            problems.append("package.json pi.skills does not advertise `./skills`")
+    elif manifest is not None:
+        problems.append("package.json is not an object")
+
+    for expected_name, relative_path in _PONYTAIL_SKILLS:
+        skill_file = package_dir / relative_path
+        try:
+            text = skill_file.read_text(encoding="utf-8")
+        except OSError as exc:
+            problems.append(f"{relative_path.as_posix()} unreadable: {exc}")
+            continue
+        frontmatter, reason = parse_skill_frontmatter(text)
+        if reason is not None:
+            problems.append(f"{relative_path.as_posix()}: {reason}")
+            continue
+        actual_name = frontmatter.get("name")
+        if actual_name != expected_name:
+            problems.append(
+                f"{relative_path.as_posix()} name is {actual_name!r}, expected {expected_name!r}"
+            )
+
+    if problems:
+        return Check(
+            "ponytail-compat",
+            "package",
+            "warn",
+            f"Ponytail install is incompatible ({len(problems)} problem(s))",
+            "; ".join(problems),
+            _PONYTAIL_REMEDIATION,
+        )
+    return Check(
+        "ponytail-compat",
+        "package",
+        "ok",
+        "Ponytail review skills compatible",
+        "exact package identity, ./skills advertisement, and both source-bound skills verified",
     )
 
 

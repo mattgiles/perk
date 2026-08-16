@@ -336,6 +336,39 @@ def test_include_packages_false_omits_the_tier(tmp_path):
     assert warnings == []
 
 
+def test_object_package_with_skills_disabled_is_never_enumerated(tmp_path):
+    _add_skill(tmp_path, "declared", "all")
+    _write_settings(
+        tmp_path,
+        [
+            {
+                "source": "npm:@dietrichgebert/ponytail",
+                "extensions": [],
+                "skills": [],
+                "prompts": [],
+                "themes": [],
+            }
+        ],
+    )
+    # No install tree is needed: `skills: []` removes the package from the cold skill tier, so
+    # it neither emits --skill nor forces the whole composition to fail open.
+    args, warnings = _compose(tmp_path, "implement")
+    assert args == ["--no-skills", "--skill", ".agents/skills/declared"]
+    assert "ponytail" not in " ".join(args)
+    assert warnings == []
+
+
+def test_other_object_filter_shapes_keep_existing_package_fail_open(tmp_path):
+    _add_skill(tmp_path, "declared", "all")
+    _write_settings(
+        tmp_path,
+        [{"source": "npm:@dietrichgebert/ponytail", "skills": ["./skills"]}],
+    )
+    args, warnings = _compose(tmp_path, "implement")
+    assert args == []
+    assert any("@dietrichgebert/ponytail" in warning for warning in warnings)
+
+
 def test_absent_package_dir_degrades_whole_composition(tmp_path):
     _add_skill(tmp_path, "declared", "all")  # engaged via the declaration
     _write_settings(tmp_path, ["npm:ghost"])

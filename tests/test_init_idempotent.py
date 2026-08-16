@@ -6,6 +6,11 @@ import pytest
 from perk import __version__
 from perk.cli.ensure import UserFacingCliError
 from perk.convergence.init import run_init
+from perk.convergence.init.settings import (
+    PACKAGE_RESOURCE_FILTERS,
+    PONYTAIL_PACKAGE,
+    _reconcile_ponytail_entry,
+)
 from perk.substrate import paths
 
 
@@ -92,6 +97,18 @@ def test_init_converges_and_is_idempotent(tmp_path):
     # pi-web-access is no longer borrowed — it is the `web` seam's default provider, converged
     # via the provider path (object form on a fresh init), so it still lands in `packages`.
     assert "npm:pi-web-access" in _identities(packages)
+    ponytail = next(
+        entry
+        for entry in packages
+        if isinstance(entry, dict) and entry.get("source") == PONYTAIL_PACKAGE
+    )
+    assert ponytail == {
+        "source": PONYTAIL_PACKAGE,
+        "extensions": [],
+        "skills": [],
+        "prompts": [],
+        "themes": [],
+    }
 
     # The whole `.perk/workflow/` cache tree is gitignored — no committed `.gitkeep`; init creates
     # the four cache subtrees on demand.
@@ -166,6 +183,87 @@ def _identities(packages):
         elif isinstance(p, dict) and isinstance(p.get("source"), str):
             out.add(p["source"])
     return out
+
+
+def test_ponytail_reconciliation_appends_the_filtered_object_when_absent():
+    packages, changes = _reconcile_ponytail_entry(["npm:left", "npm:right"])
+    assert packages == [
+        "npm:left",
+        "npm:right",
+        {
+            "source": PONYTAIL_PACKAGE,
+            "extensions": [],
+            "skills": [],
+            "prompts": [],
+            "themes": [],
+        },
+    ]
+    assert changes == [f"added filtered {PONYTAIL_PACKAGE}"]
+
+
+def test_ponytail_reconciliation_converts_a_string_and_preserves_its_pin_and_position():
+    pinned = f"{PONYTAIL_PACKAGE}@4.9.0"
+    packages, changes = _reconcile_ponytail_entry(["npm:left", pinned, "npm:right"])
+    assert packages[0] == "npm:left" and packages[2] == "npm:right"
+    assert packages[1] == {
+        "source": pinned,
+        "extensions": [],
+        "skills": [],
+        "prompts": [],
+        "themes": [],
+    }
+    assert changes == [f"filtered {pinned}"]
+
+
+def test_ponytail_reconciliation_prefers_first_object_and_removes_mixed_duplicates():
+    donor = {
+        "source": f"{PONYTAIL_PACKAGE}@4.9.0",
+        "autoload": False,
+        "owner-note": "keep",
+        "extensions": ["extension.ts"],
+        "skills": ["skills/*"],
+    }
+    packages, changes = _reconcile_ponytail_entry(
+        [
+            "npm:left",
+            PONYTAIL_PACKAGE,
+            "npm:middle",
+            donor,
+            f"{PONYTAIL_PACKAGE}@5.0.0",
+            "npm:right",
+        ]
+    )
+    assert packages == [
+        "npm:left",
+        "npm:middle",
+        {
+            "source": f"{PONYTAIL_PACKAGE}@4.9.0",
+            "autoload": False,
+            "owner-note": "keep",
+            "extensions": [],
+            "skills": [],
+            "prompts": [],
+            "themes": [],
+        },
+        "npm:right",
+    ]
+    assert changes[0] == f"filtered {PONYTAIL_PACKAGE}@4.9.0"
+    assert sum("removed duplicate" in change for change in changes) == 2
+    # The converged donor is a fixed point.
+    again, again_changes = _reconcile_ponytail_entry(packages)
+    assert again == packages and again_changes == []
+
+
+def test_ponytail_reconciliation_first_match_wins_when_all_matches_are_strings():
+    first = f"{PONYTAIL_PACKAGE}@4.9.0"
+    packages, _ = _reconcile_ponytail_entry([first, "npm:middle", PONYTAIL_PACKAGE])
+    assert [entry for entry in packages if isinstance(entry, dict)] == [
+        {
+            "source": first,
+            **{key: [] for key in PACKAGE_RESOURCE_FILTERS},
+        }
+    ]
+    assert packages[1] == "npm:middle"
 
 
 def test_init_writes_required_perk_version(tmp_path):

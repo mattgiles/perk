@@ -5,6 +5,8 @@ subdir, byte-for-byte from the bundled `agents/` sources, as a committed managed
 fresh delivery, idempotency, drift rewrite, stray pruning, and `apply=False` dry-run parity.
 """
 
+import yaml
+
 from perk import _resources
 from perk.convergence.init import PERK_AGENTS, _converge_subagent_agents
 
@@ -24,6 +26,28 @@ def test_fresh_delivery_writes_all_defs_byte_identical(tmp_path):
     # The committed `.gitkeep` keeps `.pi/agents/` present.
     assert (tmp_path / ".pi" / "agents" / ".gitkeep").is_file()
     assert ".pi/agents/: created" in changes
+
+
+def test_reviewer_defs_source_bind_only_the_exact_ponytail_skill_paths():
+    package_skills = "../../npm/node_modules/@dietrichgebert/ponytail/skills"
+    expected = {
+        "draft-reviewer": f"{package_skills}/ponytail/SKILL.md",
+        "pr-reviewer": f"{package_skills}/ponytail-review/SKILL.md",
+        "adversarial-reviewer": f"{package_skills}/ponytail-review/SKILL.md",
+    }
+    for name, skill_path in expected.items():
+        text = _source_bytes(name).decode()
+        frontmatter = yaml.safe_load(text.split("---", 2)[1])
+        assert frontmatter["inheritSkills"] is False
+        assert frontmatter["skillPath"] == [skill_path]
+        assert "skills" not in frontmatter
+
+
+def test_committed_reviewer_mirrors_are_byte_identical():
+    root = _resources.agents_dir().parent
+    for name in ("draft-reviewer", "pr-reviewer", "adversarial-reviewer"):
+        mirror = root / ".pi" / "agents" / "perk" / f"{name}.md"
+        assert mirror.read_bytes() == _source_bytes(name)
 
 
 def test_second_run_is_idempotent(tmp_path):

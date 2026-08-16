@@ -14,12 +14,13 @@
 //   - block mappings (indentation-nested) and block sequences (`- item`, incl. `- id: x`
 //     map-as-sequence-item),
 //   - flow mappings `{ k: v, ... }` and flow sequences `[a, b]` / `[]`,
-//   - scalars: integers, `true`/`false`, `null`, bare strings, and double-quoted strings (whose
-//     contents may contain `:` / `@` / `/`, and where a `#` is NOT a comment),
+//   - scalars: integers, `true`/`false`, `null`, bare strings, double-quoted strings (whose
+//     contents may contain `:` / `@` / `/`, and where a `#` is NOT a comment), and the folded
+//     block scalar `>` used by source-bound package skill frontmatter,
 //   - trailing `#` comments (outside double quotes), whole-line `#` comments, and blank lines.
 //
 // Explicitly UNSUPPORTED (and made to throw loudly rather than silently mis-parse): YAML
-// anchors/aliases (`&`/`*`), block/multiline scalars (`|`/`>`), single-quoted strings, `~` null,
+// anchors/aliases (`&`/`*`), literal block scalars (`|`), single-quoted strings, `~` null,
 // floats, and multi-document `---`/`...` streams. An unsupported future edit fails CI loudly.
 //
 // Fidelity to the reference `yaml` library is pinned by `miniYaml.test.ts`, which deep-equals this
@@ -209,6 +210,15 @@ function parseMapping(lines: Line[], cursor: Cursor, indent: number): Record<str
       } else {
         map[key] = null;
       }
+    } else if (rest === ">") {
+      const folded: string[] = [];
+      while (cursor.i < lines.length) {
+        const continuation = lines[cursor.i];
+        if (continuation === undefined || continuation.indent <= indent) break;
+        folded.push(continuation.text.trim());
+        cursor.i++;
+      }
+      map[key] = folded.join(" ");
     } else {
       map[key] = parseFlowOrScalar(rest);
     }

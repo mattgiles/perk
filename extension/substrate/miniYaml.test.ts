@@ -85,6 +85,13 @@ test("strips trailing and whole-line comments and blank lines", () => {
   assert.deepStrictEqual(miniParse(text), { schema_version: 1, name: "perk" });
 });
 
+test("folds the `>` block scalar used by package skill frontmatter", () => {
+  assert.deepStrictEqual(
+    miniParse("name: ponytail\ndescription: >\n  lazy senior\n  minimal code\nlicense: MIT\n"),
+    { name: "ponytail", description: "lazy senior minimal code", license: "MIT" },
+  );
+});
+
 test("throws loudly on an unsupported block scalar (`|`)", () => {
   assert.throws(() => miniParse("body: |\n  some block\n  text\n"), /not supported|unsupported/i);
 });

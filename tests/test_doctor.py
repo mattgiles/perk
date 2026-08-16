@@ -25,6 +25,7 @@ from perk.convergence.doctor import (
     _git_identity_check,
     _issues_check,
     _models_check,
+    _ponytail_compat_check,
     _providers_check,
     _repo_skills_check,
     _resource_overrides_check,
@@ -833,16 +834,51 @@ def test_subagent_compat_probe_table_covers_verified_surfaces():
 
 
 def test_subagent_compat_acceptance_probe_is_pinned_exactly():
-    # The 0.46.0 re-verify pins: the guidance-verified version itself, and the load-bearing
+    # The 0.50.0 re-verify pins: the guidance-verified version itself, and the load-bearing
     # acceptance-disable probe row IN FULL (label + file + both markers). The generated fake
     # tree derives from the probe table, so without this exact pin the suite would stay green
     # if the version bump, the row's label, or either marker were dropped.
-    assert _SUBAGENTS_GUIDANCE_VERIFIED_VERSION == "0.46.0"
+    assert _SUBAGENTS_GUIDANCE_VERIFIED_VERSION == "0.50.0"
     assert (
         "explicit acceptance disable",
         "src/runs/shared/acceptance.ts",
         ("explicitAcceptanceCanDisable", "formatAcceptancePrompt"),
     ) in _SUBAGENT_COMPAT_PROBES
+
+
+def test_subagent_compat_exact_skill_injection_probes_are_pinned():
+    expected = {
+        (
+            "workflow item skill override",
+            "src/shared/settings.ts",
+            (
+                "const taskSkillInput = normalizeSkillInput(task.skill);",
+                "skills = [...taskSkillInput];",
+            ),
+        ),
+        (
+            "agent skillPath parsing",
+            "src/agents/agents.ts",
+            (
+                "const skillPath = parseFrontmatterList(frontmatter.skillPath);",
+                "...(skillPath?.length ? { skillPath } : {}),",
+            ),
+        ),
+        (
+            "invocation-local skill precedence",
+            "src/agents/skills.ts",
+            (
+                "const local = localByName.get(trimmed);",
+                "let skill = local ? readSkill(trimmed, local.filePath, local.source) : undefined;",
+            ),
+        ),
+        (
+            "async workflow skill injection",
+            "src/runs/background/async-execution.ts",
+            ("a.skillPath,", "const injection = buildSkillInjection(resolvedSkills);"),
+        ),
+    }
+    assert expected <= set(_SUBAGENT_COMPAT_PROBES)
 
 
 def test_subagent_compat_ok_detail_names_the_acceptance_surface(scaffolded_perk_repo):
@@ -874,6 +910,97 @@ def test_subagent_compat_unreadable_package_json_is_warn(scaffolded_perk_repo):
     compat = _subagent_compat_check(scaffolded_perk_repo)
     assert compat.status == "warn"
     assert "version unreadable" in compat.detail
+
+
+def _plant_ponytail_tree(root):
+    package = root / ".pi" / "npm" / "node_modules" / "@dietrichgebert" / "ponytail"
+    package.mkdir(parents=True, exist_ok=True)
+    (package / "package.json").write_text(
+        json.dumps(
+            {
+                "name": "@dietrichgebert/ponytail",
+                "pi": {"skills": ["./skills", "./extra-skills"]},
+            }
+        ),
+        encoding="utf-8",
+    )
+    for name in ("ponytail", "ponytail-review"):
+        skill = package / "skills" / name / "SKILL.md"
+        skill.parent.mkdir(parents=True)
+        skill.write_text(
+            f"---\nname: {name}\ndescription: test\n---\n\n# {name}\n",
+            encoding="utf-8",
+        )
+    return package
+
+
+def test_ponytail_compat_absent_is_info(scaffolded_perk_repo):
+    check = _ponytail_compat_check(scaffolded_perk_repo)
+    assert check.status == "info" and check.group == "package"
+    assert "not installed" in check.message
+
+
+def test_ponytail_compat_compatible_tree_is_ok(scaffolded_perk_repo):
+    _plant_ponytail_tree(scaffolded_perk_repo)
+    check = _ponytail_compat_check(scaffolded_perk_repo)
+    assert check.status == "ok"
+    assert "source-bound skills verified" in check.detail
+
+
+def test_ponytail_compat_malformed_manifest_warns_with_known_good_remediation(
+    scaffolded_perk_repo,
+):
+    package = _plant_ponytail_tree(scaffolded_perk_repo)
+    (package / "package.json").write_text("not json{", encoding="utf-8")
+    check = _ponytail_compat_check(scaffolded_perk_repo)
+    assert check.status == "warn" and "package.json unreadable" in check.detail
+    assert "npm:@dietrichgebert/ponytail@4.9.0" in check.remediation
+    assert "perk init" in check.remediation and "restart" in check.remediation
+
+
+@pytest.mark.parametrize(
+    ("mutate", "expected"),
+    [
+        (
+            lambda package: (package / "package.json").write_text(
+                json.dumps({"name": "hostile", "pi": {"skills": ["./skills"]}}),
+                encoding="utf-8",
+            ),
+            "expected '@dietrichgebert/ponytail'",
+        ),
+        (
+            lambda package: (package / "package.json").write_text(
+                json.dumps({"name": "@dietrichgebert/ponytail", "pi": {"skills": []}}),
+                encoding="utf-8",
+            ),
+            "does not advertise `./skills`",
+        ),
+        (
+            lambda package: (package / "skills" / "ponytail" / "SKILL.md").unlink(),
+            "ponytail/SKILL.md unreadable",
+        ),
+        (
+            lambda package: (
+                (package / "skills" / "ponytail" / "SKILL.md").unlink(),
+                (package / "skills" / "ponytail" / "SKILL.md").mkdir(),
+            ),
+            "ponytail/SKILL.md unreadable",
+        ),
+        (
+            lambda package: (package / "skills" / "ponytail-review" / "SKILL.md").write_text(
+                "---\nname: hostile\ndescription: test\n---\n",
+                encoding="utf-8",
+            ),
+            "expected 'ponytail-review'",
+        ),
+    ],
+)
+def test_ponytail_compat_divergence_warns(scaffolded_perk_repo, mutate, expected):
+    package = _plant_ponytail_tree(scaffolded_perk_repo)
+    mutate(package)
+    check = _ponytail_compat_check(scaffolded_perk_repo)
+    assert check.status == "warn" and check.status != "fail"
+    assert expected in check.detail
 
 
 def _isolate_home(monkeypatch, tmp_path, *, bridge_mode=None):

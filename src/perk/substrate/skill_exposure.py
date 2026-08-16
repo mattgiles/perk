@@ -147,6 +147,19 @@ class _PackageTierUnavailable(Exception):
     ``.pi/settings.json``) — the whole composition degrades to unscoped (§8.39 fail-open)."""
 
 
+@dataclass(frozen=True)
+class _NpmPackageDescriptor:
+    """One npm settings package relevant to cold skill enumeration.
+
+    ``skills_disabled`` is true only for pi's exact object-filter opt-out (``skills: []``).
+    Other missing/non-list/pattern shapes retain the existing fail-open enumeration posture;
+    Perk deliberately does not reimplement Pi's package-filter language.
+    """
+
+    name: str
+    skills_disabled: bool
+
+
 def skill_exposure_argv(
     repo_root: Path,
     *,
@@ -288,7 +301,10 @@ def _enumerate_package_skills(repo_root: Path, warnings: list[str]) -> list[_Enu
     (per-package skips would silently drop pi-subagents/librarian).
     """
     items: list[_EnumeratedSkill | str] = []
-    for pkg in _settings_npm_package_names(repo_root):
+    for descriptor in _settings_npm_packages(repo_root):
+        if descriptor.skills_disabled:
+            continue
+        pkg = descriptor.name
         pkg_rel = f"{NPM_PACKAGES_REL}/{pkg}"
         pkg_dir = repo_root / NPM_PACKAGES_REL / pkg
         if not pkg_dir.is_dir():
@@ -359,14 +375,13 @@ def _package_skill_roots(
     return roots, False
 
 
-def _settings_npm_package_names(repo_root: Path) -> list[str]:
-    """The ``npm:`` package names from ``.pi/settings.json`` ``packages`` (strings or
-    ``{source}`` rows), in declaration order.
+def _settings_npm_packages(repo_root: Path) -> list[_NpmPackageDescriptor]:
+    """The filter-aware npm descriptors from ``.pi/settings.json``, in declaration order.
 
-    Local-path sources (the self-repo's ``".."``) and ``git:`` sources are deliberately not
-    enumerated — first-party skills come from ``.agents/skills`` full stop. A missing file yields
-    ``[]`` (no packages); an unreadable/malformed file raises :class:`_PackageTierUnavailable`
-    (the whole-composition degrade while the package tier is enabled).
+    Object-form packages whose ``skills`` key is exactly ``[]`` remain installed but contribute
+    no cold ``--skill`` entries and cannot make an absent install trigger package-tier fail-open.
+    Local/git sources are ignored as before. Missing settings yields ``[]``; malformed settings
+    raises :class:`_PackageTierUnavailable` while the package tier is enabled.
     """
     settings = repo_root / ".pi" / "settings.json"
     if not settings.is_file():
@@ -386,18 +401,23 @@ def _settings_npm_package_names(repo_root: Path) -> list[str]:
             "skills: .pi/settings.json `packages` is not a list — "
             "launching with pi's full skill discovery"
         )
-    names: list[str] = []
+    descriptors: list[_NpmPackageDescriptor] = []
     for entry in packages:
+        skills_disabled = False
         if isinstance(entry, dict):
             source: object = next((v for key, v in entry.items() if key == "source"), None)
+            skills_disabled = (
+                "skills" in entry
+                and next((v for key, v in entry.items() if key == "skills"), None) == []
+            )
         else:
             source = entry
         if not isinstance(source, str) or not source.startswith("npm:"):
             continue
         name = _npm_package_name(source)
         if name:
-            names.append(name)
-    return names
+            descriptors.append(_NpmPackageDescriptor(name=name, skills_disabled=skills_disabled))
+    return descriptors
 
 
 def _npm_package_name(spec: str) -> str:
