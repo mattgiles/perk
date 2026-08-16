@@ -11,13 +11,14 @@ streaming-transparent.
 
 Handlers query the ``CatalogSnapshot`` and respond with ``*Out`` models only — a
 handler may look up domain values and hand them to a ``from_domain`` constructor, but
-no domain object is ever serialized into a response body. File reads fall into
-exactly two families: built-asset reads
-(``index.html`` included) go through the contained-read helper that proves both the
-dist root and the candidate sit under the repository root of trust (a symlinked
-``dist/`` must not launder outside targets in); canonical-source reads go through the
-SourceAdapter (:mod:`perk_dev.prose_review.source_adapter`) — root-bound,
-catalog-membership-checked, and text-only.
+no domain object is ever serialized into a response body. Repository-content reads
+fall into exactly two families: built-asset reads (``index.html`` included) go through
+the contained-read helper that proves both the dist root and the candidate sit under
+the repository root of trust (a symlinked ``dist/`` must not launder outside targets
+in); canonical-source reads go through the SourceAdapter
+(:mod:`perk_dev.prose_review.source_adapter`) — root-bound, catalog-membership-checked,
+and text-only. The TypeScript adapter's random temporary snapshot is controlled IPC
+over that already-authorized text, not another repository-content read family.
 """
 
 import json
@@ -41,6 +42,7 @@ from perk_dev.prose_review.dto import (
     UnitSourceOut,
 )
 from perk_dev.prose_review.source_adapter import SourceReadError, SourceReadFailure
+from perk_dev.prose_review.source_adapter.typescript import TypeScriptSourceAdapter
 
 # One fixed 404 detail per closed read-failure reason. Containment failures stay
 # indistinguishable from missing files (the no-leak posture).
@@ -185,19 +187,22 @@ def create_app(
     *,
     snapshot: CatalogSnapshot,
     repo_root: Path,
+    selector_root: Path,
     dist_dir: Path,
     allowed_host: str,
     csrf_token: str,
 ) -> SecurityGuardMiddleware:
     """Build the guard-wrapped workbench app over one immutable catalog snapshot.
 
-    ``repo_root`` is resolved once here (the root of trust); ``dist_dir`` is kept
+    ``repo_root`` is resolved once here (the source root of trust); ``selector_root``
+    locates fixed helper code and dependencies separately; ``dist_dir`` is kept
     unresolved and re-resolved per read by :func:`read_contained`. The default
     framework surfaces are disabled: ``/docs``/``/redoc`` load CDN-hosted UI assets
     (violating the no-network-loaded-assets envelope), and ``/openapi.json`` — though
     locally generated — is an unused machine-readable surface this app never serves.
     """
     repo_resolved = repo_root.resolve()
+    typescript_adapter = TypeScriptSourceAdapter(selector_root)
     # The snapshot is immutable, so the tree DTO and the search index are computed
     # exactly once.
     tree = CapabilityTreeOut.from_domain(snapshot)
@@ -241,7 +246,13 @@ def create_app(
     @app.get("/api/source", response_model=UnitSourceOut)
     def source(unit: str, fragment: str | None = None) -> UnitSourceOut:
         try:
-            focused = source_adapter.read_source(snapshot, repo_resolved, unit, fragment)
+            focused = source_adapter.read_source(
+                snapshot,
+                repo_resolved,
+                unit,
+                fragment,
+                typescript_adapter=typescript_adapter,
+            )
         except SourceReadError as exc:
             raise HTTPException(status_code=404, detail=_SOURCE_READ_DETAILS[exc.reason]) from exc
         return UnitSourceOut.from_domain(focused)

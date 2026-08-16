@@ -20,6 +20,7 @@ from perk_dev.prose_review.source_adapter.contract import (
 )
 from perk_dev.prose_review.source_adapter.markdown import MarkdownSourceAdapter
 from perk_dev.prose_review.source_adapter.python import PythonSourceAdapter
+from perk_dev.prose_review.source_adapter.typescript import TypeScriptAdapterUnavailable
 from perk_dev.prose_review.source_adapter.yaml import YamlSourceAdapter
 
 
@@ -70,7 +71,11 @@ def read_whole_file(snapshot: CatalogSnapshot, repo_root: Path, unit_id: str) ->
     return read_unit_file(repo_root, unit)
 
 
-def source_adapter_for(unit: RoutedUnit) -> SourceAdapter | None:
+def source_adapter_for(
+    unit: RoutedUnit,
+    *,
+    typescript_adapter: SourceAdapter | None = None,
+) -> SourceAdapter | None:
     """Dispatch by both routed kind and concrete source suffix."""
     suffix = Path(unit.candidate.path).suffix.lower()
     if unit.candidate.kind in ("markdown", "managed-prose") and suffix == ".md":
@@ -79,6 +84,11 @@ def source_adapter_for(unit: RoutedUnit) -> SourceAdapter | None:
         return _YAML_ADAPTER
     if unit.candidate.kind in ("python-symbol", "managed-prose") and suffix == ".py":
         return _PYTHON_ADAPTER
+    if (
+        unit.candidate.kind in ("typescript-tool", "typescript-model-call", "typescript-symbol")
+        and suffix == ".ts"
+    ):
+        return typescript_adapter
     return None
 
 
@@ -106,6 +116,8 @@ def read_source(
     repo_root: Path,
     unit_id: str,
     fragment_id: str | None = None,
+    *,
+    typescript_adapter: SourceAdapter | None = None,
 ) -> FocusedSource:
     """Read one whole unit or exact composite fragment target."""
     unit = snapshot.get_unit(unit_id)
@@ -122,10 +134,15 @@ def read_source(
         return _read_only(whole, fragment=None, reason="whole-unit")
 
     fragment = routed_fragment.fragment
-    adapter = source_adapter_for(unit)
+    adapter = source_adapter_for(unit, typescript_adapter=typescript_adapter)
     if adapter is None:
         return _read_only(whole, fragment=fragment, reason="unsupported-family")
-    extraction = adapter.extract(whole.text, fragment.selector)
+    try:
+        extraction = adapter.extract(whole.text, fragment.selector)
+    except TypeScriptAdapterUnavailable:
+        if adapter is not typescript_adapter:
+            raise
+        return _read_only(whole, fragment=fragment, reason="adapter-unavailable")
     if isinstance(extraction.resolution, UnresolvedRange):
         return _read_only(whole, fragment=fragment, reason=extraction.resolution.reason)
     return FocusedSource(

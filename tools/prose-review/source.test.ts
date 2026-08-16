@@ -102,6 +102,11 @@ test("read-only presentation copy is exact and exhaustive", () => {
       heading: "Adapter not available",
       explanation: "This source family is readable, but its focused adapter has not landed yet.",
     },
+    "adapter-unavailable": {
+      badge: "Read-only source",
+      heading: "Adapter unavailable",
+      explanation: "The source is readable, but its focused adapter could not run safely.",
+    },
     "unsupported-selector": {
       badge: "Read-only source",
       heading: "Unsupported selector",

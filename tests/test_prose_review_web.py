@@ -1,5 +1,8 @@
 """The Prose Review Workbench security envelope: guard, containment, header stamping."""
 
+import json
+import threading
+from collections.abc import Mapping, Sequence
 from dataclasses import replace
 from pathlib import Path
 
@@ -10,7 +13,10 @@ from perk_dev.prose_map.catalog import build_catalog
 from perk_dev.prose_map.models import Fragment
 from perk_dev.prose_review import web
 from perk_dev.prose_review.catalog import CatalogSnapshot
+from perk_dev.prose_review.source_adapter import typescript as typescript_adapter_module
 from perk_dev.prose_review.web import create_app
+
+from perk.substrate.proc import ProcFailure
 
 ROOT = Path(__file__).parents[1]
 
@@ -53,6 +59,28 @@ def fallback_snapshot() -> CatalogSnapshot:
         ),
         Fragment(id="invalid-source", label="Invalid source", selector="file-body"),
     )
+    typescript_fragments = (
+        Fragment(
+            id="typescript-shape",
+            label="TypeScript shape",
+            selector="tool:fixture.description",
+        ),
+        Fragment(
+            id="typescript-missing",
+            label="TypeScript missing",
+            selector="tool:fixture.promptSnippet",
+        ),
+        Fragment(
+            id="typescript-ambiguous",
+            label="TypeScript ambiguous",
+            selector="tool:fixture.description",
+        ),
+        Fragment(
+            id="typescript-invalid",
+            label="TypeScript invalid",
+            selector="tool:fixture.description",
+        ),
+    )
     python_fragments = (
         Fragment(id="python-missing", label="Python missing", selector="symbol:missing"),
         Fragment(id="python-duplicate", label="Python duplicate", selector="symbol:_PREAMBLE"),
@@ -73,6 +101,8 @@ def fallback_snapshot() -> CatalogSnapshot:
         if unit.candidate.id == "managed:repo-agents"
         else replace(unit, candidate=replace(unit.candidate, fragments=python_fragments))
         if unit.candidate.id == PYTHON_UNIT_ID
+        else replace(unit, candidate=replace(unit.candidate, fragments=typescript_fragments))
+        if unit.candidate.id == "typescript-tool:plan_review"
         else unit
         for unit in catalog.units
     )
@@ -109,6 +139,7 @@ def _client(
     app = create_app(
         snapshot=snapshot,
         repo_root=repo_root,
+        selector_root=ROOT,
         dist_dir=dist_dir if dist_dir is not None else repo_root / "dist",
         allowed_host=ALLOWED_HOST,
         csrf_token=TOKEN,
@@ -418,11 +449,76 @@ def test_python_fragment_failures_are_guarded_readable_typed_200s(
     _assert_security_headers(response)
 
 
-def test_unsupported_family_fragment_is_a_guarded_readable_typed_200(
+@pytest.mark.parametrize(
+    ("fragment_id", "label", "text", "reason"),
+    [
+        (
+            "typescript-shape",
+            "TypeScript shape",
+            'const indirect = "text"; '
+            'pi.registerTool({ name: "fixture", description: indirect });\n',
+            "unsupported-source-shape",
+        ),
+        (
+            "typescript-missing",
+            "TypeScript missing",
+            'pi.registerTool({ name: "fixture", description: "text" });\n',
+            "selector-not-found",
+        ),
+        (
+            "typescript-ambiguous",
+            "TypeScript ambiguous",
+            'pi.registerTool({ name: "fixture", description: "one", description: "two" });\n',
+            "selector-ambiguous",
+        ),
+        (
+            "typescript-invalid",
+            "TypeScript invalid",
+            'pi.registerTool({ name: "fixture", description: ;\n',
+            "invalid-source",
+        ),
+    ],
+)
+def test_typescript_fragment_failures_are_guarded_readable_typed_200s(
+    fallback_snapshot: CatalogSnapshot,
+    repo: Path,
+    fragment_id: str,
+    label: str,
+    text: str,
+    reason: str,
+) -> None:
+    unit = fallback_snapshot.get_unit("typescript-tool:plan_review")
+    assert unit is not None
+    source_path = repo / unit.candidate.path
+    source_path.parent.mkdir(parents=True, exist_ok=True)
+    source_path.write_text(text, encoding="utf-8")
+
+    response = _client(fallback_snapshot, repo).get(
+        "/api/source",
+        params={"unit": unit.candidate.id, "fragment": fragment_id},
+    )
+    assert response.status_code == 200
+    assert response.json() == {
+        "unit": unit.candidate.id,
+        "fragment": {"id": fragment_id, "label": label},
+        "path": unit.candidate.path,
+        "kind": "typescript-tool",
+        "before": "",
+        "focus": text,
+        "after": "",
+        "editable": False,
+        "read_only_reason": reason,
+    }
+    _assert_security_headers(response)
+
+
+def test_typescript_fragment_is_a_guarded_editable_typed_200(
     snapshot: CatalogSnapshot, repo: Path
 ) -> None:
-    unit = next(unit for unit in snapshot.units if unit.candidate.kind == "typescript-tool")
-    fragment = snapshot.fragments_for_unit(unit.candidate.id)[0].fragment
+    unit = snapshot.get_unit("typescript-tool:plan_review")
+    assert unit is not None
+    fragment = snapshot.get_fragment(unit.candidate.id, "description")
+    assert fragment is not None
     source_path = repo / unit.candidate.path
     source_path.parent.mkdir(parents=True, exist_ok=True)
     text = (ROOT / unit.candidate.path).read_text(encoding="utf-8")
@@ -430,21 +526,192 @@ def test_unsupported_family_fragment_is_a_guarded_readable_typed_200(
 
     response = _client(snapshot, repo).get(
         "/api/source",
-        params={"unit": unit.candidate.id, "fragment": fragment.id},
+        params={"unit": unit.candidate.id, "fragment": fragment.fragment.id},
     )
     assert response.status_code == 200
-    assert response.json() == {
-        "unit": unit.candidate.id,
-        "fragment": {"id": fragment.id, "label": fragment.label},
-        "path": unit.candidate.path,
-        "kind": "typescript-tool",
-        "before": "",
-        "focus": text,
-        "after": "",
-        "editable": False,
-        "read_only_reason": "unsupported-family",
+    payload = response.json()
+    assert payload["unit"] == unit.candidate.id
+    assert payload["fragment"] == {
+        "id": fragment.fragment.id,
+        "label": fragment.fragment.label,
     }
+    assert payload["path"] == unit.candidate.path
+    assert payload["kind"] == "typescript-tool"
+    assert payload["editable"] is True
+    assert payload["read_only_reason"] is None
+    assert payload["before"] + payload["focus"] + payload["after"] == text
+    assert payload["focus"].startswith('"')
     _assert_security_headers(response)
+
+
+def test_typescript_enclosing_symbol_fragment_is_editable_through_source_endpoint(
+    snapshot: CatalogSnapshot,
+    repo: Path,
+) -> None:
+    unit = snapshot.get_unit(
+        "typescript-model-call:extension/adapters/planAdapterPlannotator.ts:module:before-agent-start:0"
+    )
+    assert unit is not None
+    fragment = snapshot.get_fragment(unit.candidate.id, "handler")
+    assert fragment is not None
+    assert fragment.fragment.selector == "symbol:module/event:before_agent_start/0/handler"
+    source_path = repo / unit.candidate.path
+    source_path.parent.mkdir(parents=True, exist_ok=True)
+    text = (ROOT / unit.candidate.path).read_text(encoding="utf-8")
+    source_path.write_text(text, encoding="utf-8")
+
+    response = _client(snapshot, repo).get(
+        "/api/source",
+        params={"unit": unit.candidate.id, "fragment": fragment.fragment.id},
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["unit"] == unit.candidate.id
+    assert payload["fragment"] == {
+        "id": fragment.fragment.id,
+        "label": fragment.fragment.label,
+    }
+    assert payload["path"] == unit.candidate.path
+    assert payload["kind"] == "typescript-model-call"
+    assert payload["editable"] is True
+    assert payload["read_only_reason"] is None
+    assert payload["focus"]
+    assert payload["before"] + payload["focus"] + payload["after"] == text
+    _assert_security_headers(response)
+
+
+@pytest.mark.parametrize("failure", ["spawn", "timeout", "exit", "protocol"])
+def test_typescript_helper_failure_is_a_guarded_adapter_unavailable_200(
+    snapshot: CatalogSnapshot,
+    repo: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    failure: str,
+) -> None:
+    unit = snapshot.get_unit("typescript-tool:plan_review")
+    assert unit is not None
+    source_path = repo / unit.candidate.path
+    source_path.parent.mkdir(parents=True, exist_ok=True)
+    text = (ROOT / unit.candidate.path).read_text(encoding="utf-8")
+    source_path.write_text(text, encoding="utf-8")
+
+    def fail(
+        _argv: Sequence[str],
+        *,
+        cwd: Path | None = None,
+        timeout: int,
+        env_overlay: Mapping[str, str] | None = None,
+    ) -> str:
+        del cwd, timeout, env_overlay
+        if failure == "protocol":
+            return "{}"
+        if failure == "spawn":
+            raise ProcFailure("spawn", ("node",), cause_text="missing")
+        if failure == "timeout":
+            raise ProcFailure("timeout", ("node",))
+        raise ProcFailure("exit", ("node",), returncode=1, stderr="failed")
+
+    monkeypatch.setattr(typescript_adapter_module, "run_checked", fail)
+    response = _client(snapshot, repo).get(
+        "/api/source",
+        params={"unit": unit.candidate.id, "fragment": "description"},
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["editable"] is False
+    assert payload["read_only_reason"] == "adapter-unavailable"
+    assert payload["before"] == ""
+    assert payload["focus"] == text
+    assert payload["after"] == ""
+    _assert_security_headers(response)
+
+
+def test_overlapping_typescript_requests_use_one_helper_and_recover(
+    snapshot: CatalogSnapshot,
+    repo: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    unit = snapshot.get_unit("typescript-tool:plan_review")
+    assert unit is not None
+    source_path = repo / unit.candidate.path
+    source_path.parent.mkdir(parents=True, exist_ok=True)
+    text = (ROOT / unit.candidate.path).read_text(encoding="utf-8")
+    source_path.write_text(text, encoding="utf-8")
+    expected_start = 0
+    expected_end = 1
+
+    entered = threading.Event()
+    release = threading.Event()
+    calls = 0
+
+    def blocked(
+        argv: Sequence[str],
+        *,
+        cwd: Path | None = None,
+        timeout: int,
+        env_overlay: Mapping[str, str] | None = None,
+    ) -> str:
+        del cwd, timeout, env_overlay
+        nonlocal calls
+        calls += 1
+        request = json.loads(Path(argv[2]).read_text(encoding="utf-8"))
+        selector = request["selectors"][0]
+        entered.set()
+        assert release.wait(timeout=5)
+        return json.dumps(
+            {
+                "version": 1,
+                "status": "ok",
+                "results": [
+                    {
+                        "selector": selector,
+                        "status": "resolved",
+                        "start": expected_start,
+                        "end": expected_end,
+                    }
+                ],
+            }
+        )
+
+    monkeypatch.setattr(typescript_adapter_module, "run_checked", blocked)
+    client = _client(snapshot, repo)
+    first: list[Response] = []
+
+    def request_first() -> None:
+        first.append(
+            client.get(
+                "/api/source",
+                params={"unit": unit.candidate.id, "fragment": "description"},
+            )
+        )
+
+    thread = threading.Thread(target=request_first)
+    thread.start()
+    assert entered.wait(timeout=5)
+    second = client.get(
+        "/api/source",
+        params={"unit": unit.candidate.id, "fragment": "description"},
+    )
+    assert second.status_code == 200
+    assert second.json()["read_only_reason"] == "adapter-unavailable"
+    assert calls == 1
+    _assert_security_headers(second)
+
+    release.set()
+    thread.join(timeout=5)
+    assert not thread.is_alive()
+    assert len(first) == 1
+    assert first[0].status_code == 200
+    assert first[0].json()["editable"] is True
+    _assert_security_headers(first[0])
+
+    recovered = client.get(
+        "/api/source",
+        params={"unit": unit.candidate.id, "fragment": "description"},
+    )
+    assert recovered.status_code == 200
+    assert recovered.json()["editable"] is True
+    assert calls == 2
+    _assert_security_headers(recovered)
 
 
 def test_inspect_serves_the_relationship_payload(snapshot: CatalogSnapshot, repo: Path) -> None:
