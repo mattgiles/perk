@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 from perk_dev.prose_map.catalog import build_catalog
-from perk_dev.prose_map.models import Candidate, RoutedUnit
+from perk_dev.prose_map.models import Candidate, ProseKind, RoutedUnit
 from perk_dev.prose_review import source_adapter
 from perk_dev.prose_review.catalog import CatalogSnapshot
 from perk_dev.prose_review.source_adapter import (
@@ -140,6 +140,7 @@ def test_package_facade_has_the_exact_public_contract() -> None:
         "source_adapter_for",
     ]
     assert not hasattr(source_adapter, "MarkdownSourceAdapter")
+    assert not hasattr(source_adapter, "PythonSourceAdapter")
     assert not hasattr(source_adapter, "YamlSourceAdapter")
 
 
@@ -236,6 +237,25 @@ def test_markdown_adapter_rejects_valid_multidocument_frontmatter() -> None:
     assert len(diagnostics) == 1
     assert diagnostics[0].code == "unsupported-source-shape"
     assert diagnostics[0].line == 4
+
+
+def _python_unit(
+    path: str = "module.py",
+    *,
+    kind: ProseKind = "python-symbol",
+) -> RoutedUnit:
+    return RoutedUnit(
+        candidate=Candidate(
+            id=f"{kind}:fixture",
+            kind=kind,
+            path=path,
+            selector="symbol:target",
+            fragments=(),
+        ),
+        capability="foundation",
+        audience="both",
+        role="context",
+    )
 
 
 def _yaml_unit(path: str = "routing.yaml") -> RoutedUnit:
@@ -360,14 +380,24 @@ def test_yaml_id_sequence_duplicate_and_batch_diagnostic_order() -> None:
 def test_adapter_dispatch_and_semantic_check_hints() -> None:
     markdown = source_adapter_for(_unit("doc.md"))
     yaml_adapter = source_adapter_for(_yaml_unit("doc.yml"))
+    python_adapter = source_adapter_for(_python_unit())
+    managed_python = source_adapter_for(_python_unit(kind="managed-prose"))
+    managed_markdown = source_adapter_for(_python_unit("AGENTS.md", kind="managed-prose"))
     assert markdown is not None
     assert yaml_adapter is not None
+    assert python_adapter is not None
+    assert managed_python is python_adapter
+    assert managed_python is not markdown
+    assert managed_markdown is markdown
     assert markdown.affected_check_hints(_unit("doc.md")) == ("prose-map",)
+    assert python_adapter.affected_check_hints(_python_unit()) == ("prose-map",)
     assert yaml_adapter.affected_check_hints(_yaml_unit()) == (
         "prose-map",
         "learned-docs",
     )
     assert source_adapter_for(_unit("doc.py")) is None
+    assert source_adapter_for(_python_unit("doc.md")) is None
+    assert source_adapter_for(_python_unit("doc.ts", kind="managed-prose")) is None
 
 
 def test_read_source_whole_markdown_yaml_unsupported_and_unknown_fragment(
@@ -431,8 +461,35 @@ def test_read_source_whole_markdown_yaml_unsupported_and_unknown_fragment(
     assert unsupported.focus == unsupported_path.read_text(encoding="utf-8")
 
 
+def test_every_real_python_backed_fragment_resolves_and_recomposes(
+    snapshot: CatalogSnapshot,
+) -> None:
+    units = [
+        unit
+        for unit in snapshot.units
+        if unit.candidate.kind == "python-symbol"
+        or (unit.candidate.kind == "managed-prose" and Path(unit.candidate.path).suffix == ".py")
+    ]
+    assert len(units) == 15
+    for unit in units:
+        expected = (ROOT / unit.candidate.path).read_text(encoding="utf-8")
+        fragments = snapshot.fragments_for_unit(unit.candidate.id)
+        assert len(fragments) == 1
+        source = read_source(
+            snapshot,
+            ROOT,
+            unit.candidate.id,
+            fragments[0].fragment.id,
+        )
+        assert source.editable is True
+        assert source.read_only_reason is None
+        assert source.before + source.focus + source.after == expected
+
+
 def _python_adapter() -> PythonSourceAdapter:
-    return PythonSourceAdapter()
+    adapter = source_adapter_for(_python_unit())
+    assert isinstance(adapter, PythonSourceAdapter)
+    return adapter
 
 
 @pytest.mark.parametrize(
