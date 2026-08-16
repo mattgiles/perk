@@ -1,7 +1,7 @@
 """Tests for ``perk objective stack status`` (``commands/objective/stack/status_cmd.py``).
 
-CLI-level via ``CliRunner`` over the full ``cli`` in an isolated repo, with the reconstruction
-seam (``train.reconstruct_train``) monkeypatched — the projection itself is pinned in
+CLI-level via ``CliRunner`` over the full ``cli`` in an isolated repo, with the
+``Delivery.status`` seam monkeypatched — the projection itself is pinned in
 ``test_delivery_train.py``; here the envelope, resolution order, exit codes, and the
 stdout/stderr split are the contract.
 """
@@ -17,7 +17,7 @@ from perk import plan
 from perk.cli.cli import cli
 from perk.cli.commands.objective.stack import status_cmd
 from perk.cli.ensure import UserFacingCliError
-from perk.delivery import continuation, recover, train
+from perk.delivery import DeliveryError, StatusResult, continuation, recover, train
 from perk.state import cache
 
 _URL = "https://github.com/o/r/issues/1431"
@@ -77,19 +77,33 @@ def _train(
 
 
 def _invoke(args, *, monkeypatch, result=None, git_init=True, setup=None):
-    """Invoke the CLI in an isolated repo with ``reconstruct_train`` returning (or raising)
-    ``result``; records the objective id the reconstruction was asked for. ``setup``
-    receives the isolated repo root before the invocation (planting local residue)."""
+    """Invoke the CLI with ``Delivery.status`` returning (or raising) ``result`` and record
+    the requested objective id. ``setup`` receives the repo root before invocation."""
     asked: list[str] = []
 
-    def fake_reconstruct(objective_id, **_kwargs):
-        asked.append(objective_id)
-        if isinstance(result, Exception):
-            raise result
-        assert result is not None, "reconstruct_train must not be reached"
-        return result
+    class FakeDelivery:
+        def status(self, request):
+            asked.append(request.objective_id)
+            if isinstance(result, Exception):
+                raise result
+            assert result is not None, "Delivery.status must not be reached"
+            if isinstance(result, train.NoDeliveryTrain):
+                return StatusResult(
+                    objective_id=result.objective_id,
+                    objective_url=result.objective_url,
+                    redirected_from=result.redirected_from,
+                    train=None,
+                    no_train_reason=result.reason,
+                )
+            return StatusResult(
+                objective_id=result.objective_id,
+                objective_url=result.objective_url,
+                redirected_from=result.redirected_from,
+                train=result,
+                no_train_reason=None,
+            )
 
-    monkeypatch.setattr(train, "reconstruct_train", fake_reconstruct)
+    monkeypatch.setattr(status_cmd, "resolve_delivery", lambda _root: FakeDelivery())
     runner = CliRunner()
     with runner.isolated_filesystem() as d:
         if git_init:
@@ -294,9 +308,7 @@ def test_no_objective_is_a_typed_failure(monkeypatch):
 
 
 def test_reconstruction_failure_maps_error_type(monkeypatch):
-    error = train.TrainReconstructionError(
-        "no canonical delivery order exists: cycle", error_type="invalid_train"
-    )
+    error = DeliveryError("no canonical delivery order exists: cycle", error_type="invalid_train")
     result, _ = _invoke(
         ["objective", "stack", "status", "1431", "--json"],
         monkeypatch=monkeypatch,

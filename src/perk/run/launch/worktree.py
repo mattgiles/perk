@@ -17,12 +17,9 @@ from typing import Literal
 from perk import plan
 from perk.backends import resolve as backend_resolve
 from perk.backends.issue_backend import IssueBackendError, PlanState
-from perk.backends.objective_store import ObjectiveStoreError
 from perk.cli.ensure import Ensure, UserFacingCliError
+from perk.delivery import DeliveryError, StatusRequest, resolve_delivery
 from perk.delivery import layer as layer_mod
-from perk.delivery import observe
-from perk.delivery import train as train_mod
-from perk.delivery.persistence import TrainPersistenceError
 from perk.run import resume
 from perk.state import cache
 from perk.substrate import git
@@ -219,9 +216,10 @@ def _sync_main_checkout(repo_root: Path) -> None:
 def prepare_stacked_layer(repo_root: Path, plan_ref: plan.PlanRef) -> layer_mod.PreparedLayerStart:
     """The parent-aware creation gate for a stacked layer (contracts.md §8.46).
 
-    Reconstructs the delivery train fresh (the `delivery_lineage` routing field only routes —
-    the train is the authority), requires this plan's layer to BE the readiness-derived
-    candidate, then fetches and verifies the latest parent head. Typed failures surface as
+    Reads the delivery train fresh through ``Delivery.status`` (the `delivery_lineage` routing
+    field only routes — the train is the authority), requires this plan's layer to BE the
+    readiness-derived candidate, then fetches and verifies the latest parent head. Typed failures
+    surface as
     :class:`UserFacingCliError` preserving their ``error_type``.
     """
     objective_id = plan_ref.objective_id
@@ -233,17 +231,16 @@ def prepare_stacked_layer(repo_root: Path, plan_ref: plan.PlanRef) -> layer_mod.
         )
     with io_step("reconstructing the delivery train") as s:
         try:
-            status = observe.reconstruct_repo_train(repo_root, objective_id)
-        except train_mod.TrainReconstructionError as exc:
+            result = resolve_delivery(repo_root).status(StatusRequest(objective_id=objective_id))
+        except DeliveryError as exc:
             raise UserFacingCliError(str(exc), error_type=exc.error_type) from exc
-        except (IssueBackendError, ObjectiveStoreError, TrainPersistenceError) as exc:
-            raise UserFacingCliError(str(exc), error_type="github_error") from exc
-        if not isinstance(status, train_mod.DeliveryTrain):
+        status = result.train
+        if status is None:
             # The routing field says stacked but the objective is incremental now — fail
             # closed rather than silently creating off trunk.
             raise UserFacingCliError(
                 f"plan #{plan_ref.pr_id} carries delivery_lineage but objective "
-                f"#{objective_id} has no delivery train ({status.reason}).",
+                f"#{objective_id} has no delivery train ({result.no_train_reason}).",
                 error_type="invalid_train",
             )
         try:

@@ -1,9 +1,9 @@
-"""The immutable ``DeliveryTrain`` projection — the delivery module's read path
-(contracts.md §8.44).
+"""The internal pure ``DeliveryTrain`` projection (contracts.md §8.44).
 
-Pure orchestration over injected seams: :func:`reconstruct_train` rebuilds one immutable
-projection of a stacked objective's delivery train from the durable authorities — the objective
-store (policy, lineage, roadmap), the plan issues (layer identity + checkpoints), the journal
+The canonical public status entry is :class:`perk.delivery.facade.Delivery`; this module keeps
+its fine-grained Protocols and immutable reconstruction pipeline as the pure decision core.
+:func:`reconstruct_train` rebuilds one stacked objective's train from durable authorities — the
+objective store (policy, lineage, roadmap), plan issues (layer identity + checkpoints), journal
 fold (unresolved operations), Git refs (branch content), and GitHub PR + native-stack state —
 and classifies every discrepancy as a **blocker** or **information** finding whose message
 carries the exact expected-vs-observed values.
@@ -279,6 +279,8 @@ class GitProbe(Protocol):
     """Read-only Git observation. Failures surface as typed
     :class:`TrainReconstructionError` (``git_error``) from the wiring, never raw substrate
     errors."""
+
+    def trunk_branch(self) -> str: ...
 
     def fetch(self) -> None: ...
 
@@ -1761,7 +1763,6 @@ def reconstruct_train(
     persistence: JournalReader,
     git: GitProbe,
     github: GitHubProbe,
-    trunk: str,
 ) -> TrainStatus:
     """Reconstruct one immutable :class:`DeliveryTrain` projection (or the
     :class:`NoDeliveryTrain` answer for an incremental objective).
@@ -1890,7 +1891,7 @@ def reconstruct_train(
     _check_publish_coverage(layers, fold, findings=findings)
     _check_checkpoint_topology(layers, findings=findings)
     _check_predecessors(layers, findings=findings)
-    base = _objective_header_str(state.header, "base", objective_id=active_id) or trunk
+    base = _objective_header_str(state.header, "base", objective_id=active_id) or git.trunk_branch()
     # The landed pre-pass (§8.44) runs BEFORE the Git/PR observation: the corroborated
     # landed marks make the deleted-branch/retarget observations coverage-aware, and the
     # corroborating PR reads are cached so nothing is read twice.

@@ -1,7 +1,7 @@
 """Tests for the delivery module's production wiring leaf (``perk/delivery/observe.py``).
 
-The seam the pure-reconstruction suite deliberately fakes: ``RepoGitProbe`` over a real local
-git repo + bare remote (hermetic, offline) and ``GatewayGitHubProbe`` over monkeypatched
+The seam the pure-reconstruction suite deliberately fakes: ``RepoDeliveryGit`` over a real
+local git repo + bare remote (hermetic, offline) and ``RepoDeliveryGitHub`` over monkeypatched
 ``perk.github.stacks`` reads — pinning both the successful conversions into the ``train.py``
 view types and the §8.44 failure-posture split (`GitError` → typed ``git_error``, stable
 ``GitHubError`` → typed ``github_error``, preview ``GitHubError`` → ``available=False``).
@@ -30,18 +30,30 @@ def _g(cwd: Path, *args: str) -> str:
     ).stdout
 
 
-# ----------------------------------------------------------------- RepoGitProbe
+# ----------------------------------------------------------------- RepoDeliveryGit
 
 
-class TestRepoGitProbe:
+class TestRepoDeliveryGit:
     def test_fetch_and_remote_branch_sha(self, git_repo_with_remote) -> None:
         clone, _remote, advance = git_repo_with_remote
-        probe = observe.RepoGitProbe(clone)
+        probe = observe.RepoDeliveryGit(clone)
+        assert probe.trunk_branch() == "main"
         advanced = advance()
         probe.fetch()
         # ls-remote asks the remote itself; an absent branch is an observation, not an error.
         assert probe.remote_branch_sha("main") == advanced
         assert probe.remote_branch_sha("absent") is None
+
+    def test_trunk_failure_is_typed_git_error(self, git_repo_with_remote, monkeypatch) -> None:
+        clone, _remote, _advance = git_repo_with_remote
+
+        def boom(*_args: object, **_kwargs: object) -> None:
+            raise git_mod.GitError("no trunk")
+
+        monkeypatch.setattr(git_mod, "detect_trunk_branch", boom)
+        with pytest.raises(TrainReconstructionError) as excinfo:
+            observe.RepoDeliveryGit(clone).trunk_branch()
+        assert excinfo.value.error_type == "git_error"
 
     def test_fetch_failure_is_typed_git_error(self, git_repo_with_remote, monkeypatch) -> None:
         clone, _remote, _advance = git_repo_with_remote
@@ -51,7 +63,7 @@ class TestRepoGitProbe:
 
         monkeypatch.setattr(git_mod, "fetch", boom)
         with pytest.raises(TrainReconstructionError) as excinfo:
-            observe.RepoGitProbe(clone).fetch()
+            observe.RepoDeliveryGit(clone).fetch()
         assert excinfo.value.error_type == "git_error"
 
     def test_remote_branch_sha_failure_is_typed_git_error(
@@ -64,12 +76,12 @@ class TestRepoGitProbe:
 
         monkeypatch.setattr(git_mod, "remote_branch_head", boom)
         with pytest.raises(TrainReconstructionError) as excinfo:
-            observe.RepoGitProbe(clone).remote_branch_sha("main")
+            observe.RepoDeliveryGit(clone).remote_branch_sha("main")
         assert excinfo.value.error_type == "git_error"
 
     def test_is_ancestor_arms(self, git_repo_with_remote) -> None:
         clone, _remote, advance = git_repo_with_remote
-        probe = observe.RepoGitProbe(clone)
+        probe = observe.RepoDeliveryGit(clone)
         initial = _g(clone, "rev-parse", "HEAD").strip()
         advanced = advance()
         probe.fetch()  # bring the advanced objects local
@@ -83,7 +95,7 @@ class TestRepoGitProbe:
         # ls-remote asks the remote itself: a freshly-pushed base head is observed WITHOUT a
         # fetch, and an absent branch is the honest "ref absent" arm (failure=None).
         clone, _remote, advance = git_repo_with_remote
-        probe = observe.RepoGitProbe(clone)
+        probe = observe.RepoDeliveryGit(clone)
         advanced = advance()
         assert probe.base_head("main") == BaseHeadObservation(sha=advanced, failure=None)
         assert probe.base_head("absent") == BaseHeadObservation(sha=None, failure=None)
@@ -103,7 +115,7 @@ class TestRepoGitProbe:
         _g(remote, "update-ref", "-d", "refs/heads/develop")
         _g(clone, "fetch", "-q", "origin")  # no --prune: the tracking ref survives
         assert git_mod.remote_ref_exists(clone, "origin/develop") is True  # the stale ref
-        assert observe.RepoGitProbe(clone).base_head("develop") == BaseHeadObservation(
+        assert observe.RepoDeliveryGit(clone).base_head("develop") == BaseHeadObservation(
             sha=None, failure=None
         )
 
@@ -116,7 +128,7 @@ class TestRepoGitProbe:
             raise git_mod.GitError("network down")
 
         monkeypatch.setattr(git_mod, "remote_branch_head", boom)
-        observation = observe.RepoGitProbe(clone).base_head("main")
+        observation = observe.RepoDeliveryGit(clone).base_head("main")
         assert observation.sha is None
         assert observation.failure is not None and "network down" in observation.failure
 
@@ -125,16 +137,16 @@ class TestRepoGitProbe:
         side = clone.parent / "side-wt"
         _g(clone, "worktree", "add", "-q", "-b", "side", str(side))
         (side / "dirty.txt").write_text("uncommitted\n", encoding="utf-8")
-        facts = {f.branch: f for f in observe.RepoGitProbe(clone).worktree_branches()}
+        facts = {f.branch: f for f in observe.RepoDeliveryGit(clone).worktree_branches()}
         assert facts["main"].dirty is False
         assert facts["side"].dirty is True
         assert facts["side"].path == str(side)
 
 
-# ----------------------------------------------------------------- GatewayGitHubProbe
+# ----------------------------------------------------------------- RepoDeliveryGitHub
 
 
-class TestGatewayGitHubProbe:
+class TestRepoDeliveryGitHub:
     def test_pr_facts_converts_to_the_view_type(self, tmp_path, monkeypatch) -> None:
         facts = stacks.PrDeliveryFacts(
             number=201,
@@ -145,7 +157,7 @@ class TestGatewayGitHubProbe:
             head_sha="b" * 40,
         )
         monkeypatch.setattr(stacks, "pr_delivery_facts", lambda **_kw: facts)
-        view = observe.GatewayGitHubProbe(tmp_path).pr_facts(201)
+        view = observe.RepoDeliveryGitHub(tmp_path).pr_facts(201)
         assert view == PrFactsView(
             number=201,
             state="OPEN",
@@ -157,7 +169,7 @@ class TestGatewayGitHubProbe:
 
     def test_pr_facts_none_passthrough(self, tmp_path, monkeypatch) -> None:
         monkeypatch.setattr(stacks, "pr_delivery_facts", lambda **_kw: None)
-        assert observe.GatewayGitHubProbe(tmp_path).pr_facts(201) is None
+        assert observe.RepoDeliveryGitHub(tmp_path).pr_facts(201) is None
 
     def test_pr_facts_failure_is_typed_github_error(self, tmp_path, monkeypatch) -> None:
         def boom(**_kw: object) -> None:
@@ -165,7 +177,7 @@ class TestGatewayGitHubProbe:
 
         monkeypatch.setattr(stacks, "pr_delivery_facts", boom)
         with pytest.raises(TrainReconstructionError) as excinfo:
-            observe.GatewayGitHubProbe(tmp_path).pr_facts(201)
+            observe.RepoDeliveryGitHub(tmp_path).pr_facts(201)
         assert excinfo.value.error_type == "github_error"
 
     def test_pr_for_branch_converts_to_the_view_type(self, tmp_path, monkeypatch) -> None:
@@ -179,13 +191,13 @@ class TestGatewayGitHubProbe:
             return pr
 
         monkeypatch.setattr(prs, "find_pr_for_branch", fake)
-        view = observe.GatewayGitHubProbe(tmp_path).pr_for_branch("plan-101")
+        view = observe.RepoDeliveryGitHub(tmp_path).pr_for_branch("plan-101")
         assert view == BranchPrView(number=201, state="MERGED")
         assert seen == ["plan-101"]
 
     def test_pr_for_branch_none_passthrough(self, tmp_path, monkeypatch) -> None:
         monkeypatch.setattr(prs, "find_pr_for_branch", lambda **_kw: None)
-        assert observe.GatewayGitHubProbe(tmp_path).pr_for_branch("plan-101") is None
+        assert observe.RepoDeliveryGitHub(tmp_path).pr_for_branch("plan-101") is None
 
     def test_pr_for_branch_failure_is_typed_github_error(self, tmp_path, monkeypatch) -> None:
         # A STABLE read (§8.54): the cancellation proof must fail closed on an unobservable
@@ -195,7 +207,7 @@ class TestGatewayGitHubProbe:
 
         monkeypatch.setattr(prs, "find_pr_for_branch", boom)
         with pytest.raises(TrainReconstructionError) as excinfo:
-            observe.GatewayGitHubProbe(tmp_path).pr_for_branch("plan-101")
+            observe.RepoDeliveryGitHub(tmp_path).pr_for_branch("plan-101")
         assert excinfo.value.error_type == "github_error"
 
     def test_pr_stack_failure_degrades_to_unavailable(self, tmp_path, monkeypatch) -> None:
@@ -205,19 +217,19 @@ class TestGatewayGitHubProbe:
             raise GitHubError("could not resolve")
 
         monkeypatch.setattr(stacks, "pr_stack", boom)
-        assert observe.GatewayGitHubProbe(tmp_path).pr_stack(201) == StackView(available=False)
+        assert observe.RepoDeliveryGitHub(tmp_path).pr_stack(201) == StackView(available=False)
 
     def test_pr_stack_unavailable_passthrough(self, tmp_path, monkeypatch) -> None:
         monkeypatch.setattr(
             stacks, "pr_stack", lambda **_kw: stacks.StackObservation(available=False)
         )
-        assert observe.GatewayGitHubProbe(tmp_path).pr_stack(201) == StackView(available=False)
+        assert observe.RepoDeliveryGitHub(tmp_path).pr_stack(201) == StackView(available=False)
 
     def test_pr_stack_null_stack_is_not_stacked(self, tmp_path, monkeypatch) -> None:
         monkeypatch.setattr(
             stacks, "pr_stack", lambda **_kw: stacks.StackObservation(available=True, stack=None)
         )
-        assert observe.GatewayGitHubProbe(tmp_path).pr_stack(201) == StackView(
+        assert observe.RepoDeliveryGitHub(tmp_path).pr_stack(201) == StackView(
             available=True, stacked=False
         )
 
@@ -235,7 +247,7 @@ class TestGatewayGitHubProbe:
             ),
         )
         monkeypatch.setattr(stacks, "pr_stack", lambda **_kw: observation)
-        view = observe.GatewayGitHubProbe(tmp_path).pr_stack(201)
+        view = observe.RepoDeliveryGitHub(tmp_path).pr_stack(201)
         assert view.available is True and view.stacked is True and view.truncated is True
         assert [(e.position, e.pr_number) for e in view.entries] == [(1, 201), (2, 202)]
 
@@ -328,14 +340,3 @@ class TestGatewayLandObservations:
         assert observe.GatewayLandObservations(tmp_path, base="main").stack_capability() is False
         monkeypatch.setattr(stacks, "stack_capability", lambda _root: True)
         assert observe.GatewayLandObservations(tmp_path, base="main").stack_capability() is True
-
-
-# ----------------------------------------------------------------- composition
-
-
-def test_resolve_train_reads_composes_offline(git_repo_with_remote) -> None:
-    clone, _remote, _advance = git_repo_with_remote
-    reads = observe.resolve_train_reads(clone)
-    assert reads.trunk == "main"
-    assert isinstance(reads.git, observe.RepoGitProbe)
-    assert isinstance(reads.github, observe.GatewayGitHubProbe)

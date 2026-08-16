@@ -1,6 +1,6 @@
-"""``perk objective stack status`` — the DeliveryTrain read-path worker (contracts.md §8.44).
+"""``perk objective stack status`` — the ``Delivery.status`` worker (contracts.md §8.44).
 
-Reconstructs one immutable train projection from the durable authorities and reports it —
+Reads one immutable train projection from the canonical delivery façade and reports it —
 read-only end to end, working from a fresh clone. Blockers are a successful *detection*
 (exit 0, mirroring ``perk objective doctor``'s report-vs-abort split); exit 1 is reserved for
 the typed reconstruction failures (no honest projection exists); exit 2 = not-a-repo.
@@ -11,15 +11,20 @@ from pathlib import Path
 
 import click
 
-from perk.backends.issue_backend import IssueBackendError
-from perk.backends.objective_store import ObjectiveStoreError
 from perk.boundary import OutputModel
 from perk.cli.commands.objective.stack.shared import resolve_objective_id
 from perk.cli.context import require_config, require_repo
 from perk.cli.emit import emit, fail
 from perk.cli.ensure import UserFacingCliError
-from perk.delivery import continuation, observe, recover, train
-from perk.delivery.persistence import TrainPersistenceError
+from perk.delivery import (
+    DeliveryError,
+    StatusRequest,
+    StatusResult,
+    continuation,
+    recover,
+    resolve_delivery,
+    train,
+)
 from perk.substrate import git
 from perk.substrate.output import user_output
 
@@ -193,24 +198,25 @@ class ObjectiveStackStatusOut(OutputModel):
     @classmethod
     def from_domain(
         cls,
-        status: train.TrainStatus,
+        result: StatusResult,
         *,
         continuation_out: ContinuationOut | None,
         orphaned_residue: OrphanedResidueOut,
     ) -> "ObjectiveStackStatusOut":
         objective_out = ObjectiveOut(
-            id=status.objective_id,
-            url=status.objective_url,
-            redirected_from=status.redirected_from,
+            id=result.objective_id,
+            url=result.objective_url,
+            redirected_from=result.redirected_from,
         )
-        if isinstance(status, train.NoDeliveryTrain):
+        status = result.train
+        if status is None:
             return cls(
                 success=True,
                 error_type=None,
                 objective=objective_out,
                 delivery="incremental",
                 train=None,
-                no_train=status.reason,
+                no_train=result.no_train_reason,
                 operations=(),
                 continuation=continuation_out,
                 orphaned_residue=orphaned_residue,
@@ -238,10 +244,11 @@ class ObjectiveStackStatusOut(OutputModel):
 # --- the machine-local CLI-side observations (§8.44 detailed status) ---
 
 
-def _observe_continuation(repo_root: Path, status: train.TrainStatus) -> ContinuationOut | None:
+def _observe_continuation(repo_root: Path, result: StatusResult) -> ContinuationOut | None:
     """This lineage's pending continuation manifest, read tolerantly (status stays read-only
     and never fails on a local observation)."""
-    if isinstance(status, train.NoDeliveryTrain) or status.delivery_lineage is None:
+    status = result.train
+    if status is None or status.delivery_lineage is None:
         return None
     try:
         pending = continuation.pending_continuation(repo_root, status.delivery_lineage)
@@ -326,11 +333,12 @@ def _layer_line(layer: train.TrainLayer) -> str:
     return " ".join(parts)
 
 
-def _render_human(status: train.TrainStatus) -> None:
-    if status.redirected_from is not None:
-        user_output(click.style(f"redirected from #{status.redirected_from}", dim=True))
-    if isinstance(status, train.NoDeliveryTrain):
-        user_output(f"Objective #{status.objective_id}: {status.reason}")
+def _render_human(result: StatusResult) -> None:
+    if result.redirected_from is not None:
+        user_output(click.style(f"redirected from #{result.redirected_from}", dim=True))
+    status = result.train
+    if status is None:
+        user_output(f"Objective #{result.objective_id}: {result.no_train_reason}")
         return
     landed = f", landed {status.landed_prefix_len}" if status.landed_prefix_len else ""
     user_output(
@@ -405,22 +413,9 @@ def status_stack(ctx: click.Context, *, objective: str | None, as_json: bool) ->
     try:
         repo_root = require_repo(ctx)
         objective_id = resolve_objective_id(repo_root, objective)
-        reads = observe.resolve_train_reads(repo_root)
-        status = train.reconstruct_train(
-            objective_id,
-            store=reads.store,
-            issues=reads.issues,
-            persistence=reads.persistence,
-            git=reads.git,
-            github=reads.github,
-            trunk=reads.trunk,
-        )
-    except train.TrainReconstructionError as exc:
+        status = resolve_delivery(repo_root).status(StatusRequest(objective_id=objective_id))
+    except DeliveryError as exc:
         fail(ctx, as_json=as_json, error_type=exc.error_type, message=str(exc))
-        return
-    except (IssueBackendError, ObjectiveStoreError, TrainPersistenceError) as exc:
-        # The backend-read translation matching `objective show` (an authority read failed).
-        fail(ctx, as_json=as_json, error_type="github_error", message=str(exc))
         return
     except UserFacingCliError as exc:
         fail(

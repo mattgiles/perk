@@ -903,13 +903,14 @@ def test_stacked_publication_error_maps_to_its_error_type(monkeypatch):
 
 def test_stacked_infra_reconstruction_error_is_delivery_error(monkeypatch):
     from perk import delivery
+    from perk.delivery.train import TrainReconstructionError
 
     _authed(monkeypatch)
     _stub_gh(monkeypatch)
     _stub_get_plan_header(monkeypatch, {"delivery_lineage": "01LINEAGE", "run_id": "01HDR"})
 
     def _fail(repo_root, **kwargs):
-        raise delivery.TrainReconstructionError("no order", error_type="invalid_train")
+        raise TrainReconstructionError("no order", error_type="invalid_train")
 
     monkeypatch.setattr(delivery, "publish_layer", _fail)
     result = _run_stacked(monkeypatch, ["pr", "submit", "--json"])

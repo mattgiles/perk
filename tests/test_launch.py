@@ -8,6 +8,7 @@ from _launch_helpers import _PLAN_REF, _PLAN_REF_JSON, _PLAN_REF_MODEL, _config,
 
 from perk import __version__, plan
 from perk.cli.ensure import UserFacingCliError
+from perk.delivery import DeliveryError, StatusResult
 from perk.run import launch
 from perk.run.launch import (
     _address_prompt,
@@ -22,6 +23,7 @@ from perk.run.launch import (
     resolve_target,
     resolve_worktree,
 )
+from perk.run.launch import worktree as worktree_mod
 from perk.state import cache
 from perk.substrate import git as git_mod
 from perk.substrate.bindings import Binding
@@ -1366,6 +1368,24 @@ def _stacked_train(*, ready: bool = True, next_node: str | None = "1.2"):
     )
 
 
+def _stub_delivery(monkeypatch, result) -> None:
+    class FakeDelivery:
+        def status(self, request):
+            if isinstance(result, DeliveryError):
+                raise result
+            if isinstance(result, StatusResult):
+                return result
+            return StatusResult(
+                objective_id=result.objective_id,
+                objective_url=result.objective_url,
+                redirected_from=result.redirected_from,
+                train=result,
+                no_train_reason=None,
+            )
+
+    monkeypatch.setattr(worktree_mod, "resolve_delivery", lambda _root: FakeDelivery())
+
+
 def _push_side_branch(remote: Path, name: str, *, parent_dir: Path) -> str:
     """Push branch ``name`` (one commit ahead of main) to the bare remote from a side clone;
     return its head SHA. Keeps the primary clone free of local stack metadata."""
@@ -1389,12 +1409,10 @@ def _push_side_branch(remote: Path, name: str, *, parent_dir: Path) -> str:
 
 def test_stacked_explicit_base_is_a_typed_refusal(git_repo_with_remote, monkeypatch):
     clone, _remote, _advance = git_repo_with_remote
-    from perk.delivery import observe
-
     monkeypatch.setattr(
-        observe,
-        "reconstruct_repo_train",
-        lambda *_a: pytest.fail("--base refusal must pre-empt reconstruction"),
+        worktree_mod,
+        "resolve_delivery",
+        lambda *_a: pytest.fail("--base refusal must pre-empt Delivery.status"),
     )
     cache.write_plan_ref(clone, _stacked_ref())
     with pytest.raises(UserFacingCliError) as excinfo:
@@ -1414,9 +1432,7 @@ def test_stacked_not_ready_is_a_typed_refusal_and_creates_nothing(
     git_repo_with_remote, monkeypatch
 ):
     clone, _remote, _advance = git_repo_with_remote
-    from perk.delivery import observe
-
-    monkeypatch.setattr(observe, "reconstruct_repo_train", lambda *_a: _stacked_train(ready=False))
+    _stub_delivery(monkeypatch, _stacked_train(ready=False))
     cache.write_plan_ref(clone, _stacked_ref())
     with pytest.raises(UserFacingCliError) as excinfo:
         resolve_worktree(
@@ -1431,17 +1447,62 @@ def test_stacked_not_ready_is_a_typed_refusal_and_creates_nothing(
     assert not (_config(clone).worktree_root / "plan-102").exists()
 
 
+def test_stacked_status_error_preserves_code_and_message(git_repo_with_remote, monkeypatch):
+    clone, _remote, _advance = git_repo_with_remote
+    _stub_delivery(monkeypatch, DeliveryError("journal unavailable", error_type="github_error"))
+    cache.write_plan_ref(clone, _stacked_ref())
+
+    with pytest.raises(UserFacingCliError) as excinfo:
+        resolve_worktree(
+            repo_root=clone,
+            config=_config(clone),
+            request=_request("implement"),
+            worktree=None,
+            materialize=True,
+        )
+
+    assert excinfo.value.error_type == "github_error"
+    assert str(excinfo.value) == "journal unavailable"
+    assert not (_config(clone).worktree_root / "plan-102").exists()
+
+
+def test_stacked_status_without_train_fails_closed(git_repo_with_remote, monkeypatch):
+    clone, _remote, _advance = git_repo_with_remote
+    _stub_delivery(
+        monkeypatch,
+        StatusResult(
+            objective_id="10",
+            objective_url="u/10",
+            redirected_from=None,
+            train=None,
+            no_train_reason="objective uses incremental delivery",
+        ),
+    )
+    cache.write_plan_ref(clone, _stacked_ref())
+
+    with pytest.raises(UserFacingCliError) as excinfo:
+        resolve_worktree(
+            repo_root=clone,
+            config=_config(clone),
+            request=_request("implement"),
+            worktree=None,
+            materialize=True,
+        )
+
+    assert excinfo.value.error_type == "invalid_train"
+    assert "has no delivery train (objective uses incremental delivery)" in str(excinfo.value)
+    assert not (_config(clone).worktree_root / "plan-102").exists()
+
+
 def test_stacked_resumed_layer_keeps_the_ordinary_resume_arm(git_repo_with_remote, monkeypatch):
     # An existing origin/plan-<id> (a resumed layer) never routes into the parent-aware path —
     # it tracks the remote branch exactly like an incremental resume.
     clone, remote, _advance = git_repo_with_remote
     layer_sha = _push_side_branch(remote, "plan-102", parent_dir=clone.parent)
-    from perk.delivery import observe
-
     monkeypatch.setattr(
-        observe,
-        "reconstruct_repo_train",
-        lambda *_a: pytest.fail("a resumed layer must not reconstruct the train"),
+        worktree_mod,
+        "resolve_delivery",
+        lambda *_a: pytest.fail("a resumed layer must not read Delivery.status"),
     )
     cache.write_plan_ref(clone, _stacked_ref())
     resolved = resolve_worktree(
@@ -1465,12 +1526,11 @@ def test_stacked_resumed_layer_keeps_the_ordinary_resume_arm(git_repo_with_remot
 
 def test_stacked_dry_run_stays_offline_and_names_the_derivation(git_repo_with_remote, monkeypatch):
     clone, _remote, _advance = git_repo_with_remote
-    from perk.delivery import observe
     from perk.run.launch.worktree import STACKED_DRY_RUN_BASE
 
     monkeypatch.setattr(
-        observe,
-        "reconstruct_repo_train",
+        worktree_mod,
+        "resolve_delivery",
         lambda *_a: pytest.fail("a dry run must stay offline"),
     )
     cache.write_plan_ref(clone, _stacked_ref())

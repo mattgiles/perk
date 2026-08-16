@@ -25,6 +25,7 @@ from perk.cli.context import require_github, require_repo
 from perk.cli.emit import emit, fail
 from perk.cli.ensure import UserFacingCliError
 from perk.delivery.publish import DeliveryOperationFacts
+from perk.delivery.train import TrainReconstructionError
 from perk.github import GitHubError
 from perk.run import launch
 from perk.run.writer_probe import GhaRemoteWriterProbe
@@ -129,7 +130,7 @@ def submit_pr(ctx: click.Context, *, dry_run: bool, as_json: bool, run_id: str |
     except (
         delivery.TrainPersistenceError,
         delivery.JournalCorruptionError,
-        delivery.TrainReconstructionError,
+        TrainReconstructionError,
     ) as exc:
         fail(
             ctx,

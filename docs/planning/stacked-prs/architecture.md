@@ -32,32 +32,46 @@ domain meanings; field names, APIs, and recovery algorithms remain in contracts 
 
 ## One deep module
 
-Stacked delivery should be implemented as one deep Python module, referred to here as the
-**delivery module** rather than prescribing a package name. Its interface should be substantially
-smaller than its implementation:
+Stacked delivery is one deep Python package with a deliberately small repository-scoped public
+front door. The first migrated vertical slice is status:
 
 ```text
-reconstruct objective/lineage -> DeliveryTrain
-publish     DeliveryTrain + LayerContext -> OperationResult
-synchronize DeliveryTrain + changed/adopted layer -> OperationResult
-recover     DeliveryTrain + prepared operation -> OperationResult
-transfer    old/new objective + DeliveryTrain -> OperationResult
-land        complete DeliveryTrain -> OperationResult
+resolve_delivery(repo_root) -> Delivery                  # construction performs no I/O
+Delivery.status(StatusRequest {objective_id}) -> StatusResult
+StatusResult -> exactly one of DeliveryTrain | no_train_reason
 ```
 
-Every public operation reconstructs fresh state before deciding anything. Mutators return typed
-before/after projections and per-effect outcomes; command handlers do not infer success from log
-text or recreate stack rules themselves.
+`DeliveryError` bounds status failures to the stable command error vocabulary. The pure
+`DeliveryTrain` reconstruction pipeline and production observation adapters are implementation
+seams, not package-level read APIs. Existing publish, synchronize, recover, transfer, and land
+operations remain explicit APIs until their own vertical slices migrate; the façade does not
+promise placeholder methods for them.
 
-The module receives three injected seams:
+The façade receives three nominal aggregate authorities:
 
-1. **Train persistence.** A backend-aligned adapter composing the existing `ObjectiveStore` and
-   `IssueBackend`. The two interfaces remain useful lifecycle seams, but the selected backend is
-   always the same and the delivery module needs one coherent persistence view.
-2. **Git.** Fetch, resolve refs, inspect ancestry/worktrees, create the isolated candidate
-   worktree, manage temporary refs, rebase, and issue exact-leased atomic pushes.
-3. **GitHub-native delivery.** Repository capability, PR reads/writes, rules/reviews/checks,
-   native stack reads/create/append, and asynchronous direct merge.
+1. **`DeliveryPersistence`.** A backend-aligned authority composing the existing
+   `ObjectiveStore`, `IssueBackend`, and train journal persistence. Production backend selection
+   is deferred until the first persistence read, is cached only after the backend identities agree,
+   and leaves no partial selection after a failed attempt.
+2. **`DeliveryGit`.** Trunk detection, fetch, ref/ancestry/worktree observation, and the tolerant
+   live base-head read needed by status. Mutation-only Git capabilities stay with their operation
+   seams.
+3. **`DeliveryGitHub`.** Stable PR facts, tolerant native-stack membership, and all-state
+   branch-owned PR lookup. Mutation, rules, checks, and landing-readiness observations stay with
+   their operation seams until those slices migrate.
+
+The nominal interfaces make authority ownership explicit and support small owned in-memory fakes;
+production adapters must subclass them rather than relying on structural coincidence. The façade
+composes the pure projection by passing the aggregate objects into its narrower roles. That keeps
+business rules in the pure core while preventing callers from assembling five collaborating
+readers themselves.
+
+Construction is assignment-only: no config, credentials, subprocess, Git, or network access occurs
+until a method needs the corresponding authority. Status preserves branch-sensitive laziness too:
+an incremental objective returns its successful no-train result before trunk detection, fetch, or
+GitHub observation. Every effectful operation still reconstructs fresh state before deciding
+anything. Mutators return typed before/after projections and per-effect outcomes; command handlers
+do not infer success from log text or recreate stack rules themselves.
 
 The GitHub seam is explicit rather than a generic stack-provider interface. Perk has no second
 implementation to abstract, and Graphite's local/cache semantics are not substitutable for
@@ -69,7 +83,10 @@ Python workers, decodes typed envelopes, and renders results through the existin
 ## Authorities
 
 One fact has one authority. Other surfaces may cache or corroborate it but cannot silently replace
-it.
+it. The status façade does not invent a fourth authority: its three nominal adapters aggregate the
+existing persistence, Git, and GitHub rows below, and the pure projection decides from their
+observations. The repository path held by an adapter is composition context, not evidence; backend
+selection is cached only after objective/issue alignment succeeds.
 
 | Fact | Authority | Notes |
 | --- | --- | --- |
@@ -230,11 +247,15 @@ evidence becomes unavailable, reconciliation remains loudly retryable.
 
 ## Reconstructing `DeliveryTrain`
 
-Reconstruction is a pure orchestration pipeline over adapters:
+`Delivery.status` is the repository boundary: it invokes the internal pure reconstruction exactly
+once and converts the answer into the explicit `StatusResult` train/no-train branches. Stable
+pure-core failures cross that boundary only through the bounded `DeliveryError` vocabulary.
+Reconstruction itself remains a pure orchestration pipeline over injected authorities:
 
 1. Resolve the requested objective, following supersession to the active objective for its
    delivery lineage when appropriate.
-2. Read the objective header and roadmap from the selected backend.
+2. Read the objective header and roadmap from the selected backend; incremental policy returns the
+   successful no-train result immediately, before fallback trunk, fetch, or GitHub reads.
 3. Fold journal events ONCE and fetch remote refs — both BEFORE any cancellation
    normalization, because unresolved facts, publication coverage, and the cancellation proof
    all read them (local refs/worktrees are observed without treating absence as an error).
@@ -253,9 +274,11 @@ Reconstruction is a pure orchestration pipeline over adapters:
    is never re-joined); load its plan header and staged branch/PR facts.
 7. Resolve predecessor plan identities from canonical order and compare them to stored identities.
 8. Identify an unresolved operation from the fold, if any.
-9. Fetch each PR and its actual base/head/state.
-10. For two or more PRs, fetch GitHub native stack membership and order through a member PR.
-11. Classify every layer and train-wide invariant.
+9. Resolve the objective base: use its pinned header value when present, otherwise call
+   `DeliveryGit.trunk_branch` at this decision point rather than during service construction.
+10. Fetch each PR and its actual base/head/state.
+11. For two or more PRs, fetch GitHub native stack membership and order through a member PR.
+12. Classify every layer and train-wide invariant.
 
 The result is one immutable projection. Suggested layer state is orthogonal rather than a single
 lossy enum:
@@ -601,9 +624,11 @@ This prevents the subgroup from becoming a competing workflow with `stack create
 
 ## Verification strategy
 
-`just test` and `just ci` remain hermetic. Gateway fakes and tolerant boundary fixtures cover stack
-create/append convergence, exact Git commands, all async submit/poll states, required versus
-optional checks, journal failure injection, and every recovery row above.
+`just test` and `just ci` remain hermetic. Owned in-memory fakes for the three status authorities
+record calls and inject failures, proving façade branch semantics, bounded error translation,
+zero-I/O construction, and the incremental short circuit. Gateway fakes and tolerant boundary
+fixtures cover stack create/append convergence, exact Git commands, all async submit/poll states,
+required versus optional checks, journal failure injection, and every recovery row above.
 
 Preview availability and server behavior get a separate operator-run dogfood in a designated
 durable repository configured for stacks, squash direct merge, no queue, and one stable required

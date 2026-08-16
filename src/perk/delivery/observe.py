@@ -1,33 +1,26 @@
-"""The delivery module's production wiring leaf (contracts.md §8.44).
+"""Production adapters for the delivery façade and deferred internal readers.
 
-The one place the delivery module touches the Git substrate and the GitHub gateway:
-:class:`RepoGitProbe` and :class:`GatewayGitHubProbe` satisfy the narrow Protocols
-:mod:`perk.delivery.train` declares (converting substrate/gateway types into the pure core's
-view vocabulary), :class:`GatewayLandObservations` satisfies
-:class:`perk.delivery.land.LandObservations` the same way (contracts.md §8.55), and
-:func:`resolve_train_reads` composes every read authority
-``perk objective stack status`` needs from the committed ``[issues]`` selection.
+:func:`resolve_delivery` is the sole public production constructor for the canonical
+:class:`perk.delivery.facade.Delivery` status slice. Construction is assignment-only and does
+no configuration, credential, Git, subprocess, or network work; the nominal adapters resolve
+or observe their authorities only when a status method needs them.
 
-Import direction stays legal: this leaf imports ``perk.substrate.git`` + ``perk.github.stacks``
-one-directionally; nothing in ``perk/backends/`` or ``perk/github/`` imports the delivery
-module. Failure translation is per consumer: the **train probes** translate substrate/gateway
-failures into the typed :class:`~perk.delivery.train.TrainReconstructionError` (``git_error``
-/ ``github_error``) — except the tolerant preview stack read, which degrades to
-``StackView(available=False)`` (the §8.44 failure-posture split) — while the **landing
-observations** wrap ``GitHubError`` into
-:class:`~perk.delivery.land.LandObservationError` (the assessment converts it into a
-fail-closed readiness blocker, never an abort; §8.55), with the capability probe staying the
-gateway's fail-closed boolean.
+The compatibility ``TrainReads`` / ``resolve_train_reads`` / ``reconstruct_repo_train`` seams
+remain internal while the later delivery operation families migrate. Landing observations also
+remain here. Stable Git/GitHub failures become typed pure-core errors, while the preview stack
+read and landing-readiness enrichment retain their documented tolerant/fail-closed postures.
 """
 
 from dataclasses import dataclass
 from pathlib import Path
 
-from perk.backends.issue_backend import IssueBackend
-from perk.backends.objective_store import ObjectiveStore
+from perk.backends.issue_backend import IssueBackend, PlanState
+from perk.backends.objective_store import ObjectiveState, ObjectiveStore
 from perk.backends.resolve import resolve_issue_backend, resolve_objective_store
 from perk.delivery import land
-from perk.delivery.persistence import TrainPersistence, resolve_train_persistence
+from perk.delivery.facade import Delivery, DeliveryGit, DeliveryGitHub, DeliveryPersistence
+from perk.delivery.journal import JournalFold
+from perk.delivery.persistence import TrainPersistence, TrainPersistenceError
 from perk.delivery.train import (
     BaseHeadObservation,
     BranchPrView,
@@ -43,8 +36,8 @@ from perk.github import GitHubError, prs, stacks
 from perk.substrate import git as git_mod
 
 
-class RepoGitProbe:
-    """The production :class:`~perk.delivery.train.GitProbe`: read-only Git observation over
+class RepoDeliveryGit(DeliveryGit):
+    """The production aggregate Git authority: read-only observation over
     one repo. Failures raise the typed ``git_error`` — except local-observation gaps
     (unavailable objects, an unreadable worktree), which degrade honestly per the seam's
     contract."""
@@ -52,6 +45,14 @@ class RepoGitProbe:
     def __init__(self, repo_root: Path, *, remote: str = "origin") -> None:
         self._repo_root = repo_root
         self._remote = remote
+
+    def trunk_branch(self) -> str:
+        try:
+            return git_mod.detect_trunk_branch(self._repo_root)
+        except git_mod.GitError as exc:
+            raise TrainReconstructionError(
+                f"git trunk detection failed: {exc}", error_type="git_error"
+            ) from exc
 
     def fetch(self) -> None:
         try:
@@ -107,8 +108,8 @@ class RepoGitProbe:
         return tuple(facts)
 
 
-class GatewayGitHubProbe:
-    """The production :class:`~perk.delivery.train.GitHubProbe` over ``perk.github.stacks``:
+class RepoDeliveryGitHub(DeliveryGitHub):
+    """The production aggregate GitHub authority over ``perk.github.stacks``:
     the stable PR read hard-fails as ``github_error``; the preview stack read tolerates every
     ``GitHubError`` to ``StackView(available=False)`` (Decision: preview instability is
     information, never a command failure)."""
@@ -215,37 +216,79 @@ class GatewayLandObservations:
         return stacks.stack_capability(self._repo_root)
 
 
+class RepoDeliveryPersistence(DeliveryPersistence):
+    """The lazily resolved, backend-aligned aggregate persistence authority.
+
+    The objective store, issue backend, and ``TrainPersistence`` are cached only after both
+    resolvers succeed and their backend identities agree. A failed attempt leaves no partial
+    selection for a later call to reuse.
+    """
+
+    def __init__(self, repo_root: Path) -> None:
+        self._repo_root = repo_root
+        self._resolved: tuple[ObjectiveStore, IssueBackend, TrainPersistence] | None = None
+
+    def _resolve(self) -> tuple[ObjectiveStore, IssueBackend, TrainPersistence]:
+        if self._resolved is not None:
+            return self._resolved
+        store = resolve_objective_store(self._repo_root)
+        issues = resolve_issue_backend(self._repo_root)
+        if store.backend_id != issues.backend_id:
+            raise TrainPersistenceError(
+                "delivery backend mismatch: objective store is "
+                f"{store.backend_id!r}, issue backend is {issues.backend_id!r}"
+            )
+        resolved = (store, issues, TrainPersistence(store, issues))
+        self._resolved = resolved
+        return resolved
+
+    def get_objective(self, *, objective_id: str) -> ObjectiveState | None:
+        store, _issues, _persistence = self._resolve()
+        return store.get_objective(objective_id=objective_id)
+
+    def get_plan(self, *, issue_id: str) -> PlanState | None:
+        _store, issues, _persistence = self._resolve()
+        return issues.get_plan(issue_id=issue_id)
+
+    def read_journal(self, objective_id: str) -> JournalFold:
+        _store, _issues, persistence = self._resolve()
+        return persistence.read_journal(objective_id)
+
+
+def resolve_delivery(repo_root: Path) -> Delivery:
+    """Construct the repository-scoped delivery façade without performing I/O."""
+    return Delivery(
+        persistence=RepoDeliveryPersistence(repo_root),
+        git=RepoDeliveryGit(repo_root),
+        github=RepoDeliveryGitHub(repo_root),
+    )
+
+
 @dataclass(frozen=True)
 class TrainReads:
-    """Every read authority :func:`~perk.delivery.train.reconstruct_train` needs, composed
-    from one committed ``[issues]`` selection (the backend-aligned guarantee)."""
+    """Internal compatibility composition for delivery operations not yet on the façade."""
 
-    store: ObjectiveStore
-    issues: IssueBackend
-    persistence: TrainPersistence
-    git: RepoGitProbe
-    github: GatewayGitHubProbe
-    trunk: str
+    store: RepoDeliveryPersistence
+    issues: RepoDeliveryPersistence
+    persistence: RepoDeliveryPersistence
+    git: RepoDeliveryGit
+    github: RepoDeliveryGitHub
 
 
 def resolve_train_reads(repo_root: Path) -> TrainReads:
-    """Compose the repo's train-read authorities: the objective store + issue backend (the
-    ``[issues]`` selection), the succession-folding persistence, the two probes, and the
-    detected trunk branch (the base fallback when the objective header pins none)."""
+    """Compose deferred internal train readers without eagerly resolving any authority."""
+    persistence = RepoDeliveryPersistence(repo_root)
     return TrainReads(
-        store=resolve_objective_store(repo_root),
-        issues=resolve_issue_backend(repo_root),
-        persistence=resolve_train_persistence(repo_root),
-        git=RepoGitProbe(repo_root),
-        github=GatewayGitHubProbe(repo_root),
-        trunk=git_mod.detect_trunk_branch(repo_root),
+        store=persistence,
+        issues=persistence,
+        persistence=persistence,
+        git=RepoDeliveryGit(repo_root),
+        github=RepoDeliveryGitHub(repo_root),
     )
 
 
 def reconstruct_repo_train(repo_root: Path, objective_id: str) -> TrainStatus:
-    """Reconstruct one train projection from the repo's live read authorities — the composed
-    convenience every execution-path consumer shares (``resolve_train_reads`` +
-    ``reconstruct_train``); tests monkeypatch this seam on the module."""
+    """Internal compatibility reconstruction for deferred delivery operation families."""
     reads = resolve_train_reads(repo_root)
     return reconstruct_train(
         objective_id,
@@ -254,5 +297,4 @@ def reconstruct_repo_train(repo_root: Path, objective_id: str) -> TrainStatus:
         persistence=reads.persistence,
         git=reads.git,
         github=reads.github,
-        trunk=reads.trunk,
     )

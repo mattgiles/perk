@@ -3,7 +3,8 @@
 **Part 1 (manifest drift)**: build the observed snapshot, diff it against the persisted
 ``objective-manifest`` baseline, and report every drift condition (the Linear-Project surface;
 GitHub objectives have no divergence surface, so this part is trivially empty). **Part 2 (train
-diagnosis, §8.54)**: reconstruct the exact ``DeliveryTrain`` projection on every backend and
+diagnosis, §8.54)**: read the exact ``DeliveryTrain`` projection through ``Delivery.status``
+on every backend and
 report its findings annotated with the deterministic diagnosis policy
 (:mod:`perk.delivery.diagnostics` — severity / repairability / remediation). A third,
 **report-only** check rides along: the both-headers kind-corruption signature over the
@@ -47,10 +48,17 @@ from perk.cli.commands.objective.shared import parse_objective_id
 from perk.cli.context import require_github, require_repo
 from perk.cli.emit import fail
 from perk.cli.ensure import UserFacingCliError
-from perk.delivery import diagnostics, observe
+from perk.delivery import (
+    Delivery,
+    DeliveryError,
+    StatusRequest,
+    diagnostics,
+    observe,
+    resolve_delivery,
+)
 from perk.delivery import train as train_mod
 from perk.delivery.persistence import TrainPersistenceError
-from perk.delivery.train import NoDeliveryTrain, TrainReconstructionError, TrainStatus
+from perk.delivery.train import TrainReconstructionError, TrainStatus
 from perk.substrate.output import machine_output, user_output
 
 # ----------------------------------------------------------------- output models
@@ -124,14 +132,13 @@ def _reconstruct_normalized(repo_root: Path, active_id: str) -> TrainStatus:
 
 
 def _diagnose_train(
-    repo_root: Path, active_id: str, *, redirected_from: str | None
+    delivery: Delivery, active_id: str, *, redirected_from: str | None
 ) -> _TrainDiagnosisOut:
-    """One train diagnosis over the live read authorities: stacked carries policy-annotated
-    findings; incremental carries the no-train message; a typed reconstruction failure is the
-    ``unavailable`` state (assembled into the report, conveyed via the exit code)."""
+    """One façade-backed diagnosis: stacked carries policy-annotated findings; incremental
+    carries the no-train message; a typed status failure is the ``unavailable`` report arm."""
     try:
-        status = _reconstruct_normalized(repo_root, active_id)
-    except TrainReconstructionError as exc:
+        result = delivery.status(StatusRequest(objective_id=active_id))
+    except DeliveryError as exc:
         return _TrainDiagnosisOut(
             state="unavailable",
             objective_id=active_id,
@@ -141,13 +148,14 @@ def _diagnose_train(
             blockers=(),
             information=(),
         )
-    if isinstance(status, NoDeliveryTrain):
+    status = result.train
+    if status is None:
         return _TrainDiagnosisOut(
             state="incremental",
-            objective_id=status.objective_id,
+            objective_id=result.objective_id,
             redirected_from=redirected_from,
             error_type=None,
-            message=status.reason,
+            message=result.no_train_reason,
             blockers=(),
             information=(),
         )
@@ -179,6 +187,7 @@ def _run_train_fix(
     repo_root: Path,
     active_id: str,
     store: ObjectiveStore,
+    delivery: Delivery,
     *,
     current: _TrainDiagnosisOut,
     redirected_from: str | None,
@@ -221,7 +230,7 @@ def _run_train_fix(
         result = diagnostics.CancellationRepairResult(
             actions=(), failed=None, aborted=False, dry_run=dry_run
         )
-    final = _diagnose_train(repo_root, active_id, redirected_from=redirected_from)
+    final = _diagnose_train(delivery, active_id, redirected_from=redirected_from)
     remaining = final.blockers + final.information
     applied = tuple(
         _action_out(a) for a in result.actions if a.outcome in ("applied", "would_apply")
@@ -398,6 +407,7 @@ def doctor_objective(
         repo_root = require_repo(ctx)
         number = parse_objective_id(number)
         store = resolve.resolve_objective_store(repo_root)
+        delivery = resolve_delivery(repo_root)
         # ONE active-objective resolution for both report parts (a superseded id redirects
         # forward; the predecessor is never targeted, read or written).
         state, redirected_from = train_mod.resolve_active_objective(store, number)
@@ -424,7 +434,7 @@ def doctor_objective(
         )
         return
 
-    train_diag = _diagnose_train(repo_root, active_id, redirected_from=redirected_from)
+    train_diag = _diagnose_train(delivery, active_id, redirected_from=redirected_from)
 
     fix_result: RepairResult | None = None
     train_fix: _TrainFixOut | None = None
@@ -459,12 +469,13 @@ def doctor_objective(
         else:
             current = train_diag
             if fix_result.applied and not dry_run:
-                # The manifest changed — reconstruct before any train action.
-                current = _diagnose_train(repo_root, active_id, redirected_from=redirected_from)
+                # The manifest changed — re-diagnose before any train action.
+                current = _diagnose_train(delivery, active_id, redirected_from=redirected_from)
             train_fix = _run_train_fix(
                 repo_root,
                 active_id,
                 store,
+                delivery,
                 current=current,
                 redirected_from=redirected_from,
                 dry_run=dry_run,
