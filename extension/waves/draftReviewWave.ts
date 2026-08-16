@@ -24,11 +24,13 @@
 // without reshaping; the `agents/draft-reviewer.md` def completes via the `structured_output`
 // tool this wave's `outputSchema` injects per lane.
 
+import { PONYTAIL_CORE_SKILL } from "./ponytail.ts";
 import {
   type ReportWaveStart,
   startReportWave,
   type WaveAdapter,
   type WaveLane,
+  type WaveSpec,
 } from "./reportWave.ts";
 
 /** The four-slug settled draft-review angle allowlist (the custom lane rides separately). */
@@ -73,7 +75,7 @@ export const DRAFT_REVIEW_REPORT_SCHEMA = {
   properties: {
     angle: {
       type: "string",
-      enum: ["grounding", "scope", "decision-completeness", "risk", "custom"],
+      enum: ["grounding", "scope", "decision-completeness", "risk", "custom", "ponytail"],
     },
     summary: { type: "string" },
     findings: {
@@ -139,6 +141,15 @@ export function buildDraftReviewLanes(opts: {
         `for this lane): ${opts.custom}\n${tail}`,
     });
   }
+  lanes.push({
+    key: "ponytail",
+    label: "ponytail",
+    agent: "perk.draft-reviewer",
+    phase: "draft-review",
+    task: `Angle: ponytail.\n${tail}`,
+    skill: "ponytail",
+    requiredSkill: PONYTAIL_CORE_SKILL,
+  });
   return lanes;
 }
 
@@ -156,6 +167,8 @@ export interface DraftReviewWaveOptions {
   timeoutMs?: number;
   /** Accepted for parity/tests only — the flow tool deliberately never threads its own signal. */
   signal?: AbortSignal;
+  /** Test seam; production validates the exact source-bound Ponytail skill. */
+  requiredSkillPreflight?: WaveSpec["requiredSkillPreflight"];
 }
 
 /**
@@ -183,6 +196,9 @@ export async function startDraftReviewWave(
       completeness: "strict",
       ...(opts.model !== undefined ? { model: opts.model } : {}),
       ...(opts.timeoutMs !== undefined ? { timeoutMs: opts.timeoutMs } : {}),
+      ...(opts.requiredSkillPreflight !== undefined
+        ? { requiredSkillPreflight: opts.requiredSkillPreflight }
+        : {}),
     },
     opts.signal,
   );

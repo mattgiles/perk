@@ -166,6 +166,15 @@ own resources (an object-form perk entry, or a disable pattern mentioning `@mgil
 skill name; a substring heuristic). To undo, re-enable via `pi config -l` or restore the plain
 string entry.
 
+**Managed-filter exception:** Perk owns the `npm:@dietrichgebert/ponytail` entry's
+`extensions`/`skills`/`prompts`/`themes` filters as `[]`. That package is an installed internal
+review-lane context source, not an ambient Pi resource provider. `perk init` preserves the first
+object donor's source pin, metadata, and list position, forces all four filters empty, and removes
+same-identity duplicates; cold skill exposure also excludes packages whose `skills` key is exactly
+`[]`. Do not use `pi config -l` to enable Ponytail resources: exact-path review-agent binding plus
+runtime preflight is the only supported exposure. `perk doctor` reports a missing lazy install as
+info and incompatible package/skill identity as warn, with a known-good `4.9.0` remediation.
+
 ## Change pi-fff's search mode (`PI_FFF_MODE`)
 
 perk borrows `@ff-labs/pi-fff` (FFF-powered fuzzy file/content search) in every repo, and

@@ -403,7 +403,7 @@ end of the section).
 | `active_plan_ref` | object \| null | the provider-agnostic plan ref (§8.4); null during early `plan` |
 | `active_objective` | string \| null | the active objective id (`/objective <id>` sets it, `/objective clear` nulls it) |
 | `last_review_batch` | object \| null | the last fully processed review batch, appended by `finalize_address` only after publication and thread resolution succeed: `{ pr, counts:{actionable,informational,praise,question}, resolved_thread_ids:[…], at:ISO }` |
-| `last_pr_review` | object \| null | the last `/pr-review` (or the experimental `/pr-review-dynamic`) outcome posted via the shared warm `post_pr_review` tool: `{ pr, verdict, angles, comment_count, mode, at:ISO }`; best-effort tier (the PR review is the canonical record) |
+| `last_pr_review` | object \| null | the last `/pr-review` (or the experimental `/pr-review-dynamic`) outcome posted via the shared warm `post_pr_review` tool: `{ pr, verdict, angles, covered_angles, comment_count, mode, at:ISO }`; after a recorded wave, `angles` is its authoritative ordered attempted manifest and `covered_angles` is the ordered schema-valid subset (caller-supplied angles are ignored for these fields); standalone posting uses caller-supplied angles for both (or `[]`); best-effort tier (the PR review is the canonical record) |
 | `last_review` | object \| null | the last review-door outcome posted via the warm `submit_pr_review` tool: `{ pr, event, comment_count, mode, at:ISO }`; best-effort tier (the submitted PR review is the canonical record) |
 | `session_artifacts` | object \| null | per-name session-artifact provenance pointers `{run_id, name, path, digest, at}` (§8.1); appends carry the **whole merged map** (per-field LWW); strict-append tier |
 | `objective_node_claim` | object \| null | the objective node this session has claimed `planning` (`{ objective, node }`); written by the warm `objective_node` tool on a successful `planning` transition, cleared on a successful non-planning transition for the same node and after a successful node-linked plan save; best-effort tier (cheaply reconstructable; loud-but-non-fatal) |
@@ -833,13 +833,29 @@ add_pr_reaction{ pr_number }                        -> void
     # failure (mutations raise; nothing review-shaped is lost).
 ```
 
+The static `/pr-review` input remains 2–4 selected angles with `plan-fidelity` mandatory. Its
+effective manifest is those angles followed by exactly one automatic final **`ponytail`** lane,
+outside the input menu/cap. That lane uses the same `perk.pr-reviewer` model, directive, timeout,
+and report schema family, with invocation-private `skill: "ponytail-review"` source-bound by the
+agent's exact package `skillPath`. Perk preflights package name, `pi.skills`, the exact readable
+skill file, and its frontmatter name before rendering. A failed preflight omits only that child,
+records deterministic non-retryable `skill-unavailable`, retains Ponytail in attempted receipts,
+and leaves it uncovered/incomplete; ordinary failed lanes retain the one bounded retry. No
+same-named project/user skill fallback is possible. The parent records the explicit effective
+attempted and covered arrays before `post_pr_review`; the shared post tool uses them for §8.3's
+authoritative `last_pr_review` fields and refuses clean whenever any effective lane is uncovered.
+
 The experimental `/pr-review-dynamic` door shares `post_pr_review`/`review-post` and the clean
 guard unchanged — angle selection is delegated to a fresh `perk.review-angle-selector` lane and
 normalized in module-rendered code (`extension/waves/prReviewDynamicWave.ts`); the baseline
-`/pr-review` stays canonical. The selector picks from the six-slug additional-angle allowlist
+`/pr-review` stays canonical. One Ponytail promise starts independently alongside plan-fidelity
+and the selector, never consumes selector output, and is appended last to `selection.effective`;
+`ponytail` is a reserved custom key and the lane remains outside the selector cap. The selector
+picks from the six-slug additional-angle allowlist
 (`correctness`/`tests`/`quality`/`api-design`/`code-organization`/`idioms` — the shared
 seven-angle vocabulary minus the structural `plan-fidelity`), capped at 3 additional angles
-(2–4 lanes total, the same window as `/pr-review`; `force_angles` takes 1–3 slugs, merged
+(2–4 selectable lanes, the same window as `/pr-review`, plus automatic final Ponytail;
+`force_angles` takes 1–3 slugs, merged
 forced → picks → custom). The selector may additionally propose AT MOST ONE change-specific
 custom angle: validated deterministically in the module-rendered normalization (kebab-case slug
 3–32 chars, not a reserved lane key, whitespace-collapsed non-empty scope ≤ 300 chars; an
@@ -847,10 +863,13 @@ invalid proposal degrades to no-custom, never a failed selector lane), its lane 
 a fixed scope-definition-only template (the one sanctioned exception to "reviewer tasks come
 only from the embedded vocabulary"), its per-item report schema locked to echo the custom slug,
 and the lane retryable through the per-lane `outputSchema` seam on `WaveLane`; the
-correctness+tests fallback fires only with zero valid picks AND no valid custom. Both wave
-tools (`run_pr_review_wave`, `run_pr_review_dynamic_wave`) persist ordered attempt receipts in
-their tool-result details (observability only — §8.35's output-free receipt contract; the clean
-guard and completeness are unchanged).
+correctness+tests fallback fires only with zero valid picks AND no valid custom. Dynamic Ponytail
+uses the same source-bound preflight/non-retryable failure semantics as static review; its
+pre-launch receipt manifest is `plan-fidelity`, `angle-selector`, `ponytail`, and a pre-selection
+failure still records the deterministic attempted reviewer manifest `plan-fidelity`, `ponytail`.
+Both wave tools (`run_pr_review_wave`, `run_pr_review_dynamic_wave`) persist ordered attempt
+receipts in their tool-result details (observability only — §8.35's output-free receipt contract;
+the clean guard and completeness are unchanged).
 
 ### PR-review toolbox ops (checkout / cleanup / review-submit)
 
@@ -1005,12 +1024,17 @@ prompt; the contracts pin the output shape, not the judgment rubric.
 - **Input (per-spawn task prompt):** the assigned angle, the PR number, and the absolute path to
   the detached read-only head worktree (the checkout above). The child fetches its own context
   via `perk pr review-context --pr <n> --json` (`plan_body` may be null).
-- **Angles** (one per spawn; the adversarial menu is exactly these four — `pr-reviewer`'s
-  autonomous menu is wider, seven fixed angles plus the dynamic flow's custom lane): `claimed-intent` (the PR text's claims
-  checked against the diff, plus a first-class hunt for **undisclosed scope**; the parent always
-  includes this angle) · `correctness` (incl. the untrusted-code supply-chain axes: CI/workflow
-  edits, dependency pins, install/build scripts, secrets handling, obfuscated code) · `tests`
-  (adequacy by reasoning only) · `quality`.
+- **Angles** (one per spawn; the adversarial selectable menu is exactly these four —
+  `pr-reviewer`'s autonomous menu is wider, seven fixed angles plus the dynamic flow's custom
+  lane): `claimed-intent` (the PR text's claims checked against the diff, plus a first-class hunt
+  for **undisclosed scope**; the parent always includes this angle) · `correctness` (incl. the
+  untrusted-code supply-chain axes: CI/workflow edits, dependency pins, install/build scripts,
+  secrets handling, obfuscated code) · `tests` (adequacy by reasoning only) · `quality`. Every
+  PR-backed adversarial wave appends exactly one automatic final `ponytail` lane outside the 2–3
+  selection cap, using the same model/directive/report schema plus invocation-private
+  `ponytail-review` from the exact package `skillPath`. Package/file/frontmatter preflight failure
+  omits only that child, records non-retryable `skill-unavailable`, and leaves it uncovered without
+  fallback.
 - **Posture:** all fetched text is untrusted DATA, and the PR title/body are **unverified claims
   by the PR author** (an author not trusted by default) — checked against the diff, never built
   on. **Never-execute-the-head:** inside the head worktree the child uses
@@ -1074,13 +1098,14 @@ pieces; a neutral re-home is a deferred residual).
   (2–3 unique angle slugs, `claimed-intent` mandatory), the `pr`/`worktree` relayed verbatim
   from the guidance and the operator focus passed verbatim as `directive` — and the tool renders
   and launches the wave itself, NON-BLOCKING (module-owned mechanics; the model never authors
-  workflowScripts): one fresh-context `perk.adversarial-reviewer` lane per angle, a task naming
-  the angle, the PR number, and the worktree path ONLY — the surface handle is structurally
-  unrepresentable (no URL parameter exists). The tool resolves the
-  `[models.subagents] adversarial-reviewer` override at execute time (the doors read no config);
-  a pending (launched, uncollected) wave makes a second start refuse `wave_active`; a launch
-  failure is a LOUD soft-fail (`error_type` = the wave reason) with no retry — ZERO retries by
-  design, honest incompleteness. The parent then holds the model-held
+  workflowScripts): one fresh-context `perk.adversarial-reviewer` lane per selected angle, then
+  the automatic final source-bound Ponytail lane, each task naming the angle, the PR number, and
+  the worktree path ONLY — the surface handle is structurally unrepresentable (no URL parameter
+  exists). The effective manifest/receipts/coverage denominator is selected + Ponytail. The tool
+  resolves the `[models.subagents] adversarial-reviewer` override at execute time (the doors read
+  no config); a pending (launched, uncollected) wave makes a second start refuse `wave_active`; a
+  launch failure is a LOUD soft-fail (`error_type` = the wave reason) with no retry — ZERO retries
+  by design, honest incompleteness. The parent then holds the model-held
   `subagent_wait({ timeoutMs })` relay loop — unchanged as the streaming cadence: progress
   updates never wake `subagent_wait` and never enter pi-subagents' `pending` map — delivery is
   an injected (`triggerTurn`-bearing) message when a tool call returns — so the timed wait loop
@@ -1573,7 +1598,10 @@ pin + the report-only `cli-version` CLI-vs-repo-pin warning (warn, never fail) +
 fail, no `--fix` arm — §8.6a) + the report-only `subagent-compat` pi-subagents surface probe
 (installed version + source-file markers for the orchestration surfaces perk's guidance assumes;
 `info` when not installed; warn on divergence, never fail; no `--fix` arm — the package stays
-unpinned) + the report-only `subagent-bridge-config` check (reads
+unpinned) + the report-only `ponytail-compat` exact package/`pi.skills`/two-skill-file/frontmatter
+probe (`info` when the lazy install is absent; warn on divergence, never fail; no `--fix` arm because
+operator pins are preserved; known-good remediation `npm:@dietrichgebert/ponytail@4.9.0` +
+`perk init` + session restart) + the report-only `subagent-bridge-config` check (reads
 `subagents.intercomBridge.mode` from the project `.pi/settings.json` and the user-global
 `~/.pi/agent/settings.json`; warns — never fails, no `--fix` arm — when either scope sets
 `"off"` or `"fork-only"`, either of which silently disables the supervisor channel perk's
@@ -1601,9 +1629,15 @@ Keeping a consumer's pi-loaded perk extension runnable rests on two invariants:
   own `packages` entry **in place** (list position preserved) when its `@mgiles/perk` identity already
   exists but the full spec differs from the desired pin — so a stale `npm:@mgiles/perk@0.0.0` is
   reconciled to `@{__version__}` (extra string duplicates of that identity collapse to one). Only
-  perk's own npm identity is version-reconciled; the borrowed npm packages stay unpinned/append-only
-  (distinguished by `_npm_name` identity vs `_npm_name(NPM_PACKAGE)`), and a user's other packages
-  are never in the desired set so they stay untouched/append-only. The in-body migration strips a
+  perk's own npm identity is version-reconciled; borrowed npm packages normally stay
+  unpinned/append-only (distinguished by `_npm_name` identity vs `_npm_name(NPM_PACKAGE)`), and a
+  user's other packages are never in the desired set so they stay untouched/append-only. The one
+  managed-filter exception is `npm:@dietrichgebert/ponytail`: desired settings always carry one
+  object entry with `extensions`/`skills`/`prompts`/`themes: []`. Reconciliation chooses the first
+  object donor else first match, preserves its exact source pin, non-filter metadata, position
+  relative to unrelated entries, forces all four filters empty, converts a string donor, and drops
+  duplicate identities. Managed-state health canonicalizes a correctly filtered donor to npm
+  identity while ignoring pin/metadata; any omitted or nonempty managed filter is drift. The in-body migration strips a
   repo's legacy **`git:` perk** entry (any ref, **any entry form** — by
   `_package_identity == GIT_PACKAGE`, covering a user-rewritten object-form entry) so the flip from
   the old git wiring converges; a user's unrelated `git:` packages are preserved. **Presence is
@@ -3603,12 +3637,18 @@ one-stop current shape.
     construction. The **custom lane is the draft doors' user-input channel** (no `directive`
     param exists), riding the primed context automatically as its own `custom` lane; the
     surface handle is structurally unrepresentable in the wave (no URL parameter exists).
-    **Zero retries** — honest incompleteness surfaced to the human (the uncovered lane(s)
-    named, never papered over); a pending wave makes a second start refuse `wave_active`;
-    `collect_draft_review_wave` mirrors the PR pair (`no_wave` / grace-raced `wave_running`
-    with the pending wave retained / the typed aggregate `{complete, covered, reports,
-    failures}`, `covered` including the custom lane). The `[models.subagents] draft-reviewer`
-    override is resolved by the tool at execute time (the door reads no config); the per-call
+    After selected lanes and the optional custom lane, the tool appends exactly one automatic
+    final `ponytail` lane outside both menus/caps. It uses the same `perk.draft-reviewer` model,
+    timeout, and report schema with invocation-private `skill: "ponytail"` source-bound by the
+    agent's exact package `skillPath`; package/file/frontmatter preflight failure omits only that
+    child, records non-retryable `skill-unavailable`, and leaves it in the requested manifest but
+    uncovered, with no same-name fallback. **Zero retries** — honest incompleteness surfaced to
+    the human (the uncovered lane(s) named, never papered over); a pending wave makes a second
+    start refuse `wave_active`; `collect_draft_review_wave` mirrors the PR pair (`no_wave` /
+    grace-raced `wave_running` with the pending wave retained / the typed aggregate `{complete,
+    covered, reports, failures}`, `covered` ordered across selected + optional custom + Ponytail).
+    The `[models.subagents] draft-reviewer` override is resolved by the tool at execute time (the
+    door reads no config); the per-call
     signal is deliberately not threaded (the wave outlives the call; the module timeout is the
     orphan insurance). Findings are the plan-mode `PlanFinding` shape (`{phrase, severity,
     confidence, body}`), pushed phrase-byte-exact via `push_annotations` (streamed batches
@@ -5497,8 +5537,10 @@ an extra user `--skill` stays additive — pi merges explicit skill paths even u
 1. `--no-skills`;
 2. the `include_dirs` whitelist entries (absolute `--skill <dir>`, config order);
 3. the **npm-package skills** (unless `include_packages = false`): from `.pi/settings.json`
-   `packages` (strings or `{source}` rows), **`npm:` sources only** →
-   `.pi/npm/node_modules/<name>`. Local-path sources (the self-repo's `".."`) and `git:` sources
+   `packages` (strings or `{source}` rows), except an object-form package whose `skills` key is
+   exactly `[]` is excluded before package-directory probing and cannot trigger the package-tier
+   wholesale fail-open. Remaining **`npm:` sources only** → `.pi/npm/node_modules/<name>`.
+   Local-path sources (the self-repo's `".."`) and `git:` sources
    are deliberately **not** enumerated — first-party skills come from `.agents/skills` full stop
    (no committed-`skills/` fallback); enumerating the self-repo's local-path (`..`) package would
    also re-import the committed-`skills/` vs `.agents/skills` name-collision noise (the 16-way

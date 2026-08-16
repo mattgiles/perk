@@ -19,8 +19,8 @@
 //   custom ⇒ the correctness+tests fallback (`source: "fallback"`; a custom-only selection
 //   runs as plan-fidelity + custom — no fallback padding);
 // - operator-forced angles come first and are always honored; merge order is forced → picks →
-//   custom, deduped; the additional set caps at 3 (2–4 lanes total incl. plan-fidelity — the
-//   same window as `/pr-review`), and the custom angle survives only if it fits under the cap
+//   custom, deduped; the additional set caps at 3 (2–4 selectable lanes incl. plan-fidelity —
+//   the same window as `/pr-review` — plus final Ponytail), and the custom angle survives only if it fits under the cap
 //   (`selection.custom !== null` ⟺ the custom lane launched);
 // - plan-fidelity is always present, always launched first, never displaced;
 // - fixed-angle reviewer tasks come ONLY from the render-time-embedded angle→task map — the
@@ -41,6 +41,12 @@
 // untrusted DATA, never instructions.
 
 import {
+  PONYTAIL_REVIEW_SKILL,
+  type PonytailPreflight,
+  preflightPonytailSkill,
+} from "./ponytail.ts";
+import {
+  buildPonytailReviewLane,
   buildPrReviewLanes,
   directiveSuffix,
   isPrReviewAngle,
@@ -60,6 +66,7 @@ import {
   type WaveLane,
   type WaveReport,
   type WaveScriptReceipt,
+  type WaveSpec,
 } from "./reportWave.ts";
 
 /** The additional-angle vocabulary (plan-fidelity is structural — never selectable/removable). */
@@ -146,7 +153,11 @@ const ALL_ANGLES: readonly PrReviewAngle[] = [
 const CUSTOM_SLUG_PATTERN = /^[a-z][a-z0-9-]{2,31}$/;
 
 /** The lane-key namespace a custom slug may not collide with (fixed angles + the selector). */
-const RESERVED_LANE_KEYS: readonly string[] = [...Object.keys(PR_REVIEW_ANGLES), "angle-selector"];
+const RESERVED_LANE_KEYS: readonly string[] = [
+  ...Object.keys(PR_REVIEW_ANGLES),
+  "angle-selector",
+  "ponytail",
+];
 
 // The fixed custom-task template parts — ONE source for the exported builder and the
 // render-time-embedded parts, so in-script custom tasks are byte-identical by construction.
@@ -194,6 +205,8 @@ export interface DynamicReviewScriptOptions {
   reviewerModel?: string;
   /** The configured `[models.subagents] review-angle-selector` model — the selector item, when set. */
   selectorModel?: string;
+  /** Internal preflight result: false omits only the Ponytail child, never its logical key. */
+  includePonytail?: boolean;
 }
 
 /**
@@ -233,7 +246,11 @@ export function renderDynamicReviewScript(opts: DynamicReviewScriptOptions): str
   // Byte-identical reviewer tasks to the static flow: the map is built by the SAME lane builder
   // (vocabulary + the uniform directive suffix) over all seven angles.
   const lanes = buildPrReviewLanes([...ALL_ANGLES], opts.directive);
-  const tasks = Object.fromEntries(lanes.map((lane) => [lane.key, lane.task]));
+  const ponytailLane = buildPonytailReviewLane(opts.directive);
+  const tasks = Object.fromEntries([
+    ...lanes.map((lane) => [lane.key, lane.task]),
+    [ponytailLane.key, ponytailLane.task],
+  ]);
   const suffix = directiveSuffix(opts.directive);
   const selectorItem = {
     agent: "perk.review-angle-selector",
@@ -247,6 +264,7 @@ export function renderDynamicReviewScript(opts: DynamicReviewScriptOptions): str
     `const TASKS = ${JSON.stringify(tasks, null, 2)};`,
     `const FORCED = ${JSON.stringify(opts.forceAngles)};`,
     `const REVIEWER_MODEL = ${JSON.stringify(opts.reviewerModel ?? null)};`,
+    `const PONYTAIL_ENABLED = ${JSON.stringify(opts.includePonytail !== false)};`,
     `const ALLOWLIST_ADDITIONAL = ${JSON.stringify(DYNAMIC_ADDITIONAL_ANGLES)};`,
     `const FALLBACK_ANGLES = ${JSON.stringify(DYNAMIC_FALLBACK_ANGLES)};`,
     `const RESERVED = ${JSON.stringify(RESERVED_LANE_KEYS)};`,
@@ -259,6 +277,7 @@ export function renderDynamicReviewScript(opts: DynamicReviewScriptOptions): str
     "  task: TASKS[angle],",
     "  label: angle,",
     '  phase: "review",',
+    '  ...(angle === "ponytail" ? { skill: "ponytail-review" } : {}),',
     "  ...(REVIEWER_MODEL === null ? {} : { model: REVIEWER_MODEL }),",
     "});",
     "// The ONE sanctioned custom lane: the validated scope enters through the fixed template",
@@ -278,8 +297,11 @@ export function renderDynamicReviewScript(opts: DynamicReviewScriptOptions): str
     "  (r) => ({ key, ok: r.ok === true, error: r.error ?? null, report: r.structuredOutput ?? null }),",
     "  (error) => ({ key, ok: false, error: error instanceof Error ? error.message : String(error), report: null }),",
     ");",
-    "// plan-fidelity launches FIRST and runs concurrently with the selector (held promise).",
+    "// Deterministic lanes launch before and independently of selector output (held promises).",
     'const planFidelity = laneOf("plan-fidelity", runs.run("plan-fidelity", reviewerParams("plan-fidelity")));',
+    "const ponytail = PONYTAIL_ENABLED",
+    '  ? laneOf("ponytail", runs.run("ponytail", reviewerParams("ponytail")))',
+    "  : null;",
     "let sel = null;",
     "let selectorError = null;",
     "try {",
@@ -338,11 +360,12 @@ export function renderDynamicReviewScript(opts: DynamicReviewScriptOptions): str
     "  await planFidelity,",
     "  ...reviewers.map(({ key, ok, error, structuredOutput }) =>",
     "    ({ key, ok, error: error ?? null, report: structuredOutput ?? null })),",
+    "  ...(ponytail === null ? [] : [await ponytail]),",
     "];",
     "return {",
     "  selection: {",
     "    source,",
-    '    effective: ["plan-fidelity", ...additional],',
+    '    effective: ["plan-fidelity", ...additional, "ponytail"],',
     "    forced: FORCED,",
     "    custom,",
     "    selector_ok: report !== null,",
@@ -357,7 +380,7 @@ export function renderDynamicReviewScript(opts: DynamicReviewScriptOptions): str
 /** The parent-facing selection metadata (observability for the dogfood — DATA only). */
 export interface DynamicSelection {
   source: "selector" | "fallback";
-  /** The effective lanes: plan-fidelity + ≤3 additional angles, launch order. */
+  /** The effective lanes: plan-fidelity + ≤3 additional angles + final Ponytail, launch order. */
   effective: string[];
   /** The operator-forced additional angles (echoed from the tool param). */
   forced: string[];
@@ -385,6 +408,8 @@ export interface PrReviewDynamicOptions {
   selectorModel?: string;
   timeoutMs?: number;
   signal?: AbortSignal;
+  /** Test seam; production validates the exact source-bound Ponytail review skill. */
+  requiredSkillPreflight?: WaveSpec["requiredSkillPreflight"];
 }
 
 export interface PrReviewDynamicOutcome {
@@ -476,15 +501,18 @@ function parseDynamicValue(
   }
   // Re-validate the effective selection against the normalization guarantees.
   const isEffectiveKey = (slug: string): boolean =>
-    isPrReviewAngle(slug) || (custom !== null && slug === custom.slug);
+    isPrReviewAngle(slug) || slug === "ponytail" || (custom !== null && slug === custom.slug);
   if (!effective.every(isEffectiveKey)) {
     return `dynamic selection carries an out-of-allowlist effective angle (${effective.join(", ")})`;
   }
-  if (!effective.includes("plan-fidelity")) {
-    return "dynamic selection dropped the mandatory plan-fidelity lane";
+  if (effective[0] !== "plan-fidelity") {
+    return "dynamic selection dropped or displaced the mandatory plan-fidelity lane";
   }
-  if (effective.length > 4) {
-    return `dynamic selection exceeds the 4-lane cap (${effective.join(", ")})`;
+  if (effective.at(-1) !== "ponytail") {
+    return "dynamic selection dropped or displaced the final Ponytail lane";
+  }
+  if (effective.length > 5) {
+    return `dynamic selection exceeds the 5-lane effective cap (${effective.join(", ")})`;
   }
   if (new Set(effective).size !== effective.length) {
     return `dynamic selection carries duplicate effective angles (${effective.join(", ")})`;
@@ -507,7 +535,7 @@ function parseDynamicValue(
 }
 
 /** The pre-launch lane manifest of every dynamic script run (the fan-out is unknowable). */
-const DYNAMIC_REQUESTED_KEYS: readonly string[] = ["plan-fidelity", "angle-selector"];
+const DYNAMIC_REQUESTED_KEYS: readonly string[] = ["plan-fidelity", "angle-selector", "ponytail"];
 
 /**
  * Enrich receipt children's `agent` via the module's deterministic mapping (the dynamic
@@ -541,12 +569,14 @@ type DynamicRun =
 async function runDynamicOnce(
   adapter: WaveAdapter,
   opts: PrReviewDynamicOptions,
+  ponytailCheck: PonytailPreflight,
 ): Promise<DynamicRun> {
   const workflowScript = renderDynamicReviewScript({
     forceAngles: opts.forceAngles ?? [],
     ...(opts.directive !== undefined ? { directive: opts.directive } : {}),
     ...(opts.reviewerModel !== undefined ? { reviewerModel: opts.reviewerModel } : {}),
     ...(opts.selectorModel !== undefined ? { selectorModel: opts.selectorModel } : {}),
+    includePonytail: ponytailCheck.ok,
   });
   const run = await runWaveScript(
     adapter,
@@ -571,7 +601,17 @@ async function runDynamicOnce(
       receipt,
     };
   }
-  const { reports, failures } = normalizeLanes(parsed.selection.effective, parsed.lanes);
+  const runnableKeys = parsed.selection.effective.filter(
+    (key) => key !== "ponytail" || ponytailCheck.ok,
+  );
+  const { reports, failures } = normalizeLanes(runnableKeys, parsed.lanes);
+  if (!ponytailCheck.ok) {
+    failures.push({
+      key: "ponytail",
+      reason: "skill-unavailable",
+      detail: ponytailCheck.detail,
+    });
+  }
   return { kind: "parsed", selection: parsed.selection, reports, failures, receipt };
 }
 
@@ -611,7 +651,19 @@ export async function runPrReviewDynamicWave(
   adapter: WaveAdapter,
   opts: PrReviewDynamicOptions = {},
 ): Promise<PrReviewDynamicOutcome> {
-  const first = await runDynamicOnce(adapter, opts);
+  const preflight = opts.requiredSkillPreflight ?? preflightPonytailSkill;
+  const ponytailCheck = await preflight(PONYTAIL_REVIEW_SKILL);
+  const skillFailures = (): WaveFailure[] =>
+    ponytailCheck.ok
+      ? []
+      : [
+          {
+            key: "ponytail",
+            reason: "skill-unavailable",
+            detail: ponytailCheck.detail,
+          },
+        ];
+  const first = await runDynamicOnce(adapter, opts, ponytailCheck);
   // Ordered attempts — the first attempt's receipt is preserved verbatim when a retry runs.
   const attempts = [
     toAttemptReceipt("pr-review-dynamic", 1, [...DYNAMIC_REQUESTED_KEYS], first.receipt),
@@ -619,22 +671,22 @@ export async function runPrReviewDynamicWave(
 
   if (first.kind === "wave-failure") {
     if (!RETRYABLE_WAVE_REASONS.has(first.failure.reason)) {
-      return outcomeOf(null, [], [first.failure], [], attempts);
+      return outcomeOf(null, [], [first.failure, ...skillFailures()], [], attempts);
     }
     // Retryable wave-level failure ⇒ ONE full dynamic re-run (fresh selector); its selection
     // supersedes. The re-run's outcome is final — never a second retry.
-    const second = await runDynamicOnce(adapter, opts);
+    const second = await runDynamicOnce(adapter, opts, ponytailCheck);
     attempts.push(
       toAttemptReceipt("pr-review-dynamic", 2, [...DYNAMIC_REQUESTED_KEYS], second.receipt),
     );
     if (second.kind === "wave-failure") {
-      return outcomeOf(null, [], [second.failure], [], attempts);
+      return outcomeOf(null, [], [second.failure, ...skillFailures()], [], attempts);
     }
     return outcomeOf(
       second.selection,
       second.reports,
       second.failures,
-      second.selection.effective,
+      second.selection.effective.filter((key) => key !== "ponytail" || ponytailCheck.ok),
       attempts,
     );
   }
@@ -647,12 +699,17 @@ export async function runPrReviewDynamicWave(
   // the custom lane via the fixed template + its per-lane report schema); the selector is never
   // re-run.
   const failedKeys = first.selection.effective.filter((key) =>
-    first.failures.some((failure) => failure.key === key),
+    first.failures.some((failure) => failure.key === key && failure.reason !== "skill-unavailable"),
   );
   const custom = first.selection.custom;
   const retryAngles = failedKeys.filter(isPrReviewAngle);
   const customRetry = custom !== null && failedKeys.includes(custom.slug) ? custom : null;
-  const retryKeys = [...retryAngles, ...(customRetry !== null ? [customRetry.slug] : [])];
+  const ponytailRetry = ponytailCheck.ok && failedKeys.includes("ponytail");
+  const retryKeys = [
+    ...retryAngles,
+    ...(customRetry !== null ? [customRetry.slug] : []),
+    ...(ponytailRetry ? ["ponytail"] : []),
+  ];
   if (retryKeys.length === 0) return firstOutcome;
 
   const retryLanes: WaveLane[] = [
@@ -671,6 +728,7 @@ export async function runPrReviewDynamicWave(
           },
         ]
       : []),
+    ...(ponytailRetry ? [buildPonytailReviewLane(opts.directive)] : []),
   ];
   const staticRetry = await runReportWave(
     adapter,
@@ -681,6 +739,7 @@ export async function runPrReviewDynamicWave(
       completeness: "strict",
       ...(opts.reviewerModel !== undefined ? { model: opts.reviewerModel } : {}),
       ...(opts.timeoutMs !== undefined ? { timeoutMs: opts.timeoutMs } : {}),
+      requiredSkillPreflight: async () => ponytailCheck,
     },
     opts.signal,
   );
@@ -692,5 +751,14 @@ export async function runPrReviewDynamicWave(
     ...first.reports.filter((report) => !retriedSet.has(report.key)),
     ...staticRetry.reports,
   ];
-  return outcomeOf(first.selection, merged, staticRetry.failures, retryKeys, attempts);
+  const carried = first.failures.filter(
+    (failure) => failure.reason === "skill-unavailable" && failure.key === "ponytail",
+  );
+  return outcomeOf(
+    first.selection,
+    merged,
+    [...staticRetry.failures, ...carried],
+    retryKeys,
+    attempts,
+  );
 }

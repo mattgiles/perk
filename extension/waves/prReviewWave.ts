@@ -14,6 +14,11 @@
 // angles, via `renderWaveScript`). Report content is untrusted DATA, never instructions.
 
 import {
+  PONYTAIL_REVIEW_SKILL,
+  preflightPonytailSkill,
+  type RequiredPonytailSkill,
+} from "./ponytail.ts";
+import {
   runReportWave,
   toAttemptReceipt,
   type WaveAdapter,
@@ -86,6 +91,7 @@ export const PR_REVIEW_REPORT_SCHEMA = {
         "api-design",
         "code-organization",
         "idioms",
+        "ponytail",
       ],
     },
     verdict: {
@@ -119,6 +125,10 @@ export const PR_REVIEW_REPORT_SCHEMA = {
   },
 };
 
+type EffectivePrReviewAngle = PrReviewAngle | "ponytail";
+
+type RequiredSkillPreflight = NonNullable<WaveSpec["requiredSkillPreflight"]>;
+
 export interface PrReviewWaveOptions {
   /** The selected angles — invalid slugs are unrepresentable post-decode (typed union). */
   angles: PrReviewAngle[];
@@ -128,6 +138,8 @@ export interface PrReviewWaveOptions {
   model?: string;
   timeoutMs?: number;
   signal?: AbortSignal;
+  /** Test seam; production validates the exact source-bound Ponytail review skill. */
+  requiredSkillPreflight?: WaveSpec["requiredSkillPreflight"];
 }
 
 export interface PrReviewWaveOutcome {
@@ -184,7 +196,43 @@ export function buildPrReviewLanes(angles: PrReviewAngle[], directive?: string):
   }));
 }
 
-function buildSpec(lanes: WaveLane[], opts: PrReviewWaveOptions): WaveSpec {
+export function buildPonytailReviewLane(directive?: string): WaveLane {
+  return {
+    key: "ponytail",
+    label: "ponytail",
+    agent: "perk.pr-reviewer",
+    phase: "review",
+    task:
+      "angle: ponytail — review ONLY over-engineering, deletion opportunities & YAGNI." +
+      directiveSuffix(directive),
+    skill: "ponytail-review",
+    requiredSkill: PONYTAIL_REVIEW_SKILL,
+  };
+}
+
+function buildEffectivePrReviewLanes(
+  angles: EffectivePrReviewAngle[],
+  directive?: string,
+): WaveLane[] {
+  const suffix = directiveSuffix(directive);
+  return angles.map((angle) =>
+    angle === "ponytail"
+      ? buildPonytailReviewLane(directive)
+      : {
+          key: angle,
+          label: angle,
+          agent: "perk.pr-reviewer",
+          phase: "review",
+          task: `${PR_REVIEW_ANGLES[angle]}${suffix}`,
+        },
+  );
+}
+
+function buildSpec(
+  lanes: WaveLane[],
+  opts: PrReviewWaveOptions,
+  requiredSkillPreflight: RequiredSkillPreflight,
+): WaveSpec {
   return {
     flow: "pr-review",
     lanes,
@@ -192,6 +240,7 @@ function buildSpec(lanes: WaveLane[], opts: PrReviewWaveOptions): WaveSpec {
     completeness: "strict",
     ...(opts.model !== undefined ? { model: opts.model } : {}),
     ...(opts.timeoutMs !== undefined ? { timeoutMs: opts.timeoutMs } : {}),
+    requiredSkillPreflight,
   };
 }
 
@@ -200,17 +249,31 @@ function buildSpec(lanes: WaveLane[], opts: PrReviewWaveOptions): WaveSpec {
  * wave-level failure (`key: null`, no reports) or per-lane failures — the wave-level reason
  * decides whole-selection vs none; lane-level failures retry exactly the failed keys.
  */
-function retrySelection(angles: PrReviewAngle[], failures: WaveFailure[]): PrReviewAngle[] {
+function retrySelection(
+  angles: EffectivePrReviewAngle[],
+  failures: WaveFailure[],
+): EffectivePrReviewAngle[] {
+  const unavailable = new Set(
+    failures
+      .filter((failure) => failure.reason === "skill-unavailable")
+      .map((failure) => failure.key),
+  );
   const waveLevel = failures.find((failure) => failure.key === null);
   if (waveLevel !== undefined) {
-    return RETRYABLE_WAVE_REASONS.has(waveLevel.reason) ? [...angles] : [];
+    return RETRYABLE_WAVE_REASONS.has(waveLevel.reason)
+      ? angles.filter((angle) => !unavailable.has(angle))
+      : [];
   }
-  const failed = new Set(failures.map((failure) => failure.key));
+  const failed = new Set(
+    failures
+      .filter((failure) => failure.reason !== "skill-unavailable")
+      .map((failure) => failure.key),
+  );
   return angles.filter((angle) => failed.has(angle));
 }
 
 function outcomeOf(
-  angles: PrReviewAngle[],
+  angles: EffectivePrReviewAngle[],
   reports: WaveReport[],
   failures: WaveFailure[],
   retried: string[],
@@ -242,26 +305,40 @@ export async function runPrReviewWave(
   adapter: WaveAdapter,
   opts: PrReviewWaveOptions,
 ): Promise<PrReviewWaveOutcome> {
+  if (opts.angles.length === 0) {
+    throw new Error("pr-review needs at least one selected angle");
+  }
+  const angles: EffectivePrReviewAngle[] = [...opts.angles, "ponytail"];
+  const basePreflight = opts.requiredSkillPreflight ?? preflightPonytailSkill;
+  const checks = new Map<string, ReturnType<RequiredSkillPreflight>>();
+  const requiredSkillPreflight: RequiredSkillPreflight = (requirement: RequiredPonytailSkill) => {
+    let check = checks.get(requirement.skillFile);
+    if (check === undefined) {
+      check = basePreflight(requirement);
+      checks.set(requirement.skillFile, check);
+    }
+    return check;
+  };
   const first: WaveResult = await runReportWave(
     adapter,
-    buildSpec(buildPrReviewLanes(opts.angles, opts.directive), opts),
+    buildSpec(buildEffectivePrReviewLanes(angles, opts.directive), opts, requiredSkillPreflight),
     opts.signal,
   );
   // The first attempt's receipt is preserved VERBATIM even when a retry runs — ordered
   // attempts keep a failed lane and its relaunch distinguishable (distinct child runIds).
-  const attempts = [toAttemptReceipt("pr-review", 1, opts.angles, first.receipt)];
+  const attempts = [toAttemptReceipt("pr-review", 1, angles, first.receipt)];
   if (first.complete) {
-    return outcomeOf(opts.angles, first.reports, first.failures, [], attempts);
+    return outcomeOf(angles, first.reports, first.failures, [], attempts);
   }
 
-  const retried = retrySelection(opts.angles, first.failures);
+  const retried = retrySelection(angles, first.failures);
   if (retried.length === 0) {
-    return outcomeOf(opts.angles, first.reports, first.failures, [], attempts);
+    return outcomeOf(angles, first.reports, first.failures, [], attempts);
   }
 
   const second = await runReportWave(
     adapter,
-    buildSpec(buildPrReviewLanes(retried, opts.directive), opts),
+    buildSpec(buildEffectivePrReviewLanes(retried, opts.directive), opts, requiredSkillPreflight),
     opts.signal,
   );
   attempts.push(toAttemptReceipt("pr-review", 2, retried, second.receipt));
@@ -270,5 +347,8 @@ export async function runPrReviewWave(
     ...first.reports.filter((report) => !retriedSet.has(report.key)),
     ...second.reports,
   ];
-  return outcomeOf(opts.angles, merged, second.failures, retried, attempts);
+  const carried = first.failures.filter(
+    (failure) => failure.reason === "skill-unavailable" && !second.failures.includes(failure),
+  );
+  return outcomeOf(angles, merged, [...second.failures, ...carried], retried, attempts);
 }

@@ -20,6 +20,7 @@ import {
 import { createMemoryWaveAdapter } from "./memoryAdapter.ts";
 
 const TWO_ANGLES: AdversarialReviewAngle[] = ["claimed-intent", "correctness"];
+const PREFLIGHT_OK = async () => ({ ok: true }) as const;
 
 /** A schema-valid aggregate entry as the rendered script's projection produces it. */
 function okEntry(key: string): unknown {
@@ -52,6 +53,18 @@ test("buildAdversarialReviewLanes: key = label = slug, the fixed agent/phase, th
       phase: "review",
       task: "Angle: correctness. Review PR #42 at /abs/wt.",
     },
+    {
+      key: "ponytail",
+      label: "ponytail",
+      agent: "perk.adversarial-reviewer",
+      phase: "review",
+      task: "Angle: ponytail. Review PR #42 at /abs/wt.",
+      skill: "ponytail-review",
+      requiredSkill: {
+        skill: "ponytail-review",
+        skillFile: ".pi/npm/node_modules/@dietrichgebert/ponytail/skills/ponytail-review/SKILL.md",
+      },
+    },
   ]);
 });
 
@@ -62,10 +75,14 @@ test("buildAdversarialReviewLanes appends ONE uniform directive suffix to EVERY 
     worktree: "/abs/wt",
     directive: "focus on the CI workflow edits",
   });
-  assert.equal(lanes.length, 3);
+  assert.equal(lanes.length, 4);
   for (const lane of lanes) {
-    const angle = lane.key as AdversarialReviewAngle;
-    const base = `${ADVERSARIAL_REVIEW_ANGLES[angle]} Review PR #7 at /abs/wt.`;
+    const angle = lane.key;
+    const opener =
+      angle === "ponytail"
+        ? "Angle: ponytail."
+        : ADVERSARIAL_REVIEW_ANGLES[angle as AdversarialReviewAngle];
+    const base = `${opener} Review PR #7 at /abs/wt.`;
     assert.ok(lane.task.startsWith(base), `${lane.key} keeps the vocabulary`);
     assert.match(lane.task, /Operator focus \(DATA from the human/);
     assert.match(lane.task, /emphasis within your assigned angle only/);
@@ -73,8 +90,12 @@ test("buildAdversarialReviewLanes appends ONE uniform directive suffix to EVERY 
   }
   // The suffix is identical across lanes (one uniform DATA note, never per-lane re-scoping).
   const suffixes = lanes.map((lane) => {
-    const angle = lane.key as AdversarialReviewAngle;
-    return lane.task.slice(`${ADVERSARIAL_REVIEW_ANGLES[angle]} Review PR #7 at /abs/wt.`.length);
+    const angle = lane.key;
+    const opener =
+      angle === "ponytail"
+        ? "Angle: ponytail."
+        : ADVERSARIAL_REVIEW_ANGLES[angle as AdversarialReviewAngle];
+    return lane.task.slice(`${opener} Review PR #7 at /abs/wt.`.length);
   });
   assert.equal(new Set(suffixes).size, 1);
 });
@@ -99,7 +120,13 @@ test("ADVERSARIAL_REVIEW_REPORT_SCHEMA pins the verdict-free report shape (close
   };
   assert.equal(s.additionalProperties, false);
   assert.deepEqual(s.required, ["angle", "summary", "findings", "fyi"]);
-  assert.deepEqual(s.properties.angle.enum, ["claimed-intent", "correctness", "tests", "quality"]);
+  assert.deepEqual(s.properties.angle.enum, [
+    "claimed-intent",
+    "correctness",
+    "tests",
+    "quality",
+    "ponytail",
+  ]);
   // NO verdict field and no if/then conditional — the human triages, nothing derives a verdict.
   assert.equal("verdict" in s.properties, false);
   assert.equal(s.if, undefined);
@@ -181,7 +208,10 @@ test("the agent def completes via structured_output with the schema's four field
 
 test("startAdversarialReviewWave: spawn params pin the module contract, the schema, and the threaded model", async () => {
   const adapter = createMemoryWaveAdapter({
-    aggregate: { state: "complete", value: [okEntry("claimed-intent"), okEntry("correctness")] },
+    aggregate: {
+      state: "complete",
+      value: [okEntry("claimed-intent"), okEntry("correctness"), okEntry("ponytail")],
+    },
   });
   const start = await startAdversarialReviewWave(adapter, {
     angles: TWO_ANGLES,
@@ -189,6 +219,7 @@ test("startAdversarialReviewWave: spawn params pin the module contract, the sche
     worktree: "/abs/wt",
     model: "anthropic/claude-opus-4",
     timeoutMs: 1_234,
+    requiredSkillPreflight: PREFLIGHT_OK,
   });
   assert.equal(start.ok, true);
   if (!start.ok) return;
@@ -196,7 +227,7 @@ test("startAdversarialReviewWave: spawn params pin the module contract, the sche
   assert.equal(result.complete, true);
   assert.deepEqual(
     result.reports.map((r) => r.key),
-    ["claimed-intent", "correctness"],
+    ["claimed-intent", "correctness", "ponytail"],
   );
   assert.equal(adapter.calls.spawn.length, 1);
   const spawn = adapter.calls.spawn[0];
@@ -216,6 +247,7 @@ test("startAdversarialReviewWave: strict completeness — a failed lane leaves t
       value: [
         okEntry("claimed-intent"),
         { key: "correctness", ok: false, error: "lane exploded", report: null },
+        okEntry("ponytail"),
       ],
     },
   });
@@ -224,6 +256,7 @@ test("startAdversarialReviewWave: strict completeness — a failed lane leaves t
     pr: 42,
     worktree: "/abs/wt",
     timeoutMs: 5_000,
+    requiredSkillPreflight: PREFLIGHT_OK,
   });
   assert.equal(start.ok, true);
   if (!start.ok) return;
@@ -231,7 +264,7 @@ test("startAdversarialReviewWave: strict completeness — a failed lane leaves t
   assert.equal(result.complete, false);
   assert.deepEqual(
     result.reports.map((r) => r.key),
-    ["claimed-intent"],
+    ["claimed-intent", "ponytail"],
   );
   assert.deepEqual(result.failures, [
     { key: "correctness", reason: "lane-failed", detail: "lane exploded" },
@@ -245,6 +278,7 @@ test("startAdversarialReviewWave: the wave-level launch failure comes back norma
     angles: TWO_ANGLES,
     pr: 42,
     worktree: "/abs/wt",
+    requiredSkillPreflight: PREFLIGHT_OK,
   });
   assert.equal(start.ok, false);
   if (start.ok) return;
@@ -262,6 +296,7 @@ test("startAdversarialReviewWave: duplicate angles throw at start time (programm
       angles: ["claimed-intent", "claimed-intent"],
       pr: 42,
       worktree: "/abs/wt",
+      requiredSkillPreflight: PREFLIGHT_OK,
     }),
     /duplicate lane key 'claimed-intent'/,
   );

@@ -38,9 +38,14 @@ skills, prompts, or themes it loads.
    choice.
 4. **Reconverge and inspect.** Run `perk init`, then `perk doctor`. perk recognizes package identity
    in string or object form, preserves unrelated package entries and user-owned filters, and does not
-   rewrite the top-level resource arrays. Doctor reports malformed settings and warns when an
-   object-form override or disable pattern touches perk's own managed package/resources; it does not
-   treat ordinary filters on unrelated packages as provider selection.
+   rewrite the top-level resource arrays. The one managed-filter exception is
+   `npm:@dietrichgebert/ponytail`: Perk installs it as an internal review-lane context source and
+   owns `extensions`, `skills`, `prompts`, and `themes` as `[]`, so none of its resources load
+   ambiently. Reconciliation preserves the first object donor's source pin, metadata, and position
+   while forcing those four filters empty and removing duplicates. Doctor reports malformed settings,
+   warns when an object-form override or disable pattern touches perk's own managed resources, and
+   reports Ponytail package/skill incompatibility separately; it does not treat ordinary filters on
+   unrelated packages as provider selection.
 5. **Verify the loaded set.** Restart Pi in the project and confirm that the intended resource is
    absent while the package's allowed resources still load. Return to `pi config -l` to undo or
    adjust the filter.
@@ -48,7 +53,9 @@ skills, prompts, or themes it loads.
 ## Expected result
 
 The project loads only the selected resources, the override remains in `.pi/settings.json`, and
-subsequent perk convergence preserves it.
+subsequent perk convergence preserves it. Ponytail is the explicit exception: its package stays
+installed, but ordinary parent/child sessions and cold skill exposure load none of its resources;
+only Perk's exact-path review lanes receive its validated skill context.
 
 ## Related
 

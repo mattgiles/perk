@@ -26,7 +26,8 @@ there is no provider selection:
 Both doors share the same arg semantics and three modes: a PR number/URL reviews that
 **foreign** PR (detached, read-only checkout — untrusted foreign code, nothing from it is ever
 executed); no arg reviews the **active worktree's own PR** in place; and pre-PR (no PR yet) each
-door opens a surface-only **since-base** review — no reviewers, nothing posts to GitHub. See the
+door opens a surface-only **since-base** review — no reviewers (including no Ponytail lane),
+nothing posts to GitHub. See the
 [Review and authoring](../reference/in-session/review-and-authoring.md#pr-review-terminal) for the mode details.
 
 **Prerequisites (per door):**
@@ -56,8 +57,12 @@ door opens a surface-only **since-base** review — no reviewers, nothing posts 
    Automation permission prompt (attributed to your terminal app); denying or missing it just
    means you run the printed command yourself.** Either way the launch command also arrives as a
    loud message *and* on your clipboard, so you can paste it into any terminal. Meanwhile 2–3
-   adversarial reviewers are already reviewing in parallel (the `claimed-intent` angle is always
-   included; the model comes from `[models.subagents] adversarial-reviewer`). Set
+   selected adversarial reviewers plus exactly one automatic final source-bound Ponytail reviewer
+   are already reviewing in parallel (`claimed-intent` is always selected; Ponytail is outside the
+   input cap and uses the same `[models.subagents] adversarial-reviewer` model and focus note).
+   Never select or duplicate Ponytail. If its exact installed package skill fails validation, that
+   child does not spawn or fall back; the lane is shown as uncovered with `skill-unavailable` while
+   the other reviewers continue. Set
    `PERK_TERMINAL_LAUNCH` to a custom launcher (it receives the worktree as `$1` and the command
    as `$2`) or `PERK_CLIPBOARD_CMD` to a custom copier if the defaults don't fit; set either to
    the empty string to turn that side effect off.
@@ -88,9 +93,9 @@ The same review on plannotator's browser UI — with the posting direction **fli
 1. **The browser opens for you, in the background.** No launch command — the door starts the
    local review server and injects the flow immediately (the PR fetch can take a little while;
    an info note lands when the browser is up).
-2. **Findings stream in live.** Finding batches are pushed into the browser as badged
-   annotations (`perk:<angle>`) while the reviewers still work — you watch them arrive, and you
-   can annotate freely alongside them.
+2. **Findings stream in live.** Finding batches from the selected reviewers and automatic final
+   Ponytail reviewer are pushed into the browser as badged annotations (`perk:<angle>`) while the
+   reviewers still work — you watch them arrive, and you can annotate freely alongside them.
 3. **You post directly from the UI — that is the GitHub path.** The browser posts inline
    comments (yours and perk's pushed findings) to GitHub natively, with an APPROVE or COMMENT
    verdict — never REQUEST_CHANGES (that verdict always travels perk's gated path). A platform

@@ -26,8 +26,8 @@ The launch guidance carries each mode's flow; these bullets are the shape deltas
   same flow re-homed to the human's own worktree: **no checkout, no cleanup**, and the own-PR
   authorship note at posting time is the common case.
 - **pre-PR** (no PR yet) — the door opens a since-base browser review and injects **no
-  guidance**: no reviewers, no annotation pushes, nothing posts to GitHub; the single browser
-  respond routes back later as a message.
+  guidance**: no reviewers (including no Ponytail lane), no annotation pushes, nothing posts to
+  GitHub; the single browser respond routes back later as a message.
 
 ## The posting contract (FLIPPED)
 
@@ -53,7 +53,11 @@ launch statement's rules:
 - **The angle rubric.** `claimed-intent` is the foreign twin of plan-fidelity: PR-text claims
   checked against the diff, plus the hunt for undisclosed scope. `correctness` carries the
   foreign-code supply-chain axes (CI/workflow edits, dependency pins, install/build scripts,
-  secrets).
+  secrets). The 2–3 angle input is followed by exactly one automatic final `ponytail` lane,
+  outside the selection cap. It uses the same model/directive/report family and invocation-private
+  exact-package `ponytail-review` skill; never select or duplicate it. Failed exact-source
+  preflight omits only that child, reports non-retryable `skill-unavailable`, leaves it uncovered,
+  and never falls back to a same-named skill.
 - **The reviewer model.** The configured `[models.subagents] adversarial-reviewer` model is
   resolved by `start_review_wave` at execute time — the door reads no config and the guidance
   carries no model plumbing.

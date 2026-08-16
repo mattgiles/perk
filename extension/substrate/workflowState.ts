@@ -45,8 +45,10 @@ export interface WorkflowState {
   last_review_batch?: unknown;
   /**
    * The last `/pr-review` outcome posted via the `post_pr_review` warm tool (§8.3):
-   * `{pr, verdict, angles, comment_count, mode, at}`. Best-effort tier (per-field LWW in
-   * `rebuildWorkflowState`, no rebuild change). The PR comment stays canonical.
+   * `{pr, verdict, angles, covered_angles, comment_count, mode, at}`. After a recorded wave,
+   * `angles` is the authoritative attempted manifest and `covered_angles` is its schema-valid
+   * subset; standalone posts use the caller's `angles` for both. Best-effort tier (per-field LWW
+   * in `rebuildWorkflowState`, no rebuild change). The PR comment stays canonical.
    */
   last_pr_review?: unknown;
   /**

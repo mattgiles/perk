@@ -23,7 +23,11 @@ end your turn; this skill is the judgment and detail layer behind it.
   true? **scope** — right-sized: neither bloated nor missing the ask? **decision-completeness** —
   are the decisions an implementer needs actually settled? **risk** — what could go wrong:
   migrations, compatibility, irreversibility? Pick what fits *this* draft; skip lenses that
-  would produce noise.
+  would produce noise. The selected 2–3 lanes and optional human custom lane are followed by
+  exactly one automatic final `ponytail` lane, outside both menus/caps. It uses the same model and
+  report family plus the invocation-private exact-package core `ponytail` skill; never select or
+  duplicate it. Failed exact-source preflight omits only that child, reports non-retryable
+  `skill-unavailable`, leaves it uncovered, and never falls back to a same-named skill.
 - **The reviewer model.** The configured `[models.subagents] draft-reviewer` model is resolved
   by `start_draft_review_wave` at execute time — the door reads no config and the guidance
   carries no model plumbing.

@@ -24,8 +24,8 @@ The launch guidance carries each mode's flow; these bullets are the shape deltas
   same flow re-homed to the human's own worktree: **no checkout and no cleanup step**, and the
   own-PR authorship check is the common case.
 - **pre-PR** (no PR yet) — surface-only: hunk is launched on the since-base diff, **no reviewers
-  are spawned and nothing posts to GitHub**; its own launch statement carries the notes
-  read-back loop.
+  are spawned (including no Ponytail lane) and nothing posts to GitHub**; its own launch
+  statement carries the notes read-back loop.
 
 Every launch line carries `--agent-notes` (pushed findings render in hunk immediately).
 
@@ -56,7 +56,11 @@ lands before (or without) the comments it summarizes.
 - **The angle rubric.** `claimed-intent` is the foreign twin of plan-fidelity: PR-text claims
   checked against the diff, plus the hunt for undisclosed scope. `correctness` carries the
   foreign-code supply-chain axes (CI/workflow edits, dependency pins, install/build scripts,
-  secrets).
+  secrets). The 2–3 angle input is followed by exactly one automatic final `ponytail` lane,
+  outside the selection cap. It uses the same model/directive/report family and invocation-private
+  exact-package `ponytail-review` skill; never select or duplicate it. Failed exact-source
+  preflight omits only that child, reports non-retryable `skill-unavailable`, leaves it uncovered,
+  and never falls back to a same-named skill.
 - **The reviewer model.** The configured `[models.subagents] adversarial-reviewer` model is
   resolved by `start_review_wave` at execute time — the door reads no config and the guidance
   carries no model plumbing.
