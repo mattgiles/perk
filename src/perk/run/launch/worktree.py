@@ -18,7 +18,7 @@ from perk import plan
 from perk.backends import resolve as backend_resolve
 from perk.backends.issue_backend import IssueBackendError, PlanState
 from perk.cli.ensure import Ensure, UserFacingCliError
-from perk.delivery import DeliveryError, StatusRequest, resolve_delivery
+from perk.delivery import DeliveryError, PrepareRequest, resolve_delivery
 from perk.delivery import layer as layer_mod
 from perk.run import resume
 from perk.state import cache
@@ -211,45 +211,6 @@ def _sync_main_checkout(repo_root: Path) -> None:
             )
             return
         s.done(f"synced {branch} → {upstream}")
-
-
-def prepare_stacked_layer(repo_root: Path, plan_ref: plan.PlanRef) -> layer_mod.PreparedLayerStart:
-    """The parent-aware creation gate for a stacked layer (contracts.md §8.46).
-
-    Reads the delivery train fresh through ``Delivery.status`` (the `delivery_lineage` routing
-    field only routes — the train is the authority), requires this plan's layer to BE the
-    readiness-derived candidate, then fetches and verifies the latest parent head. Typed failures
-    surface as
-    :class:`UserFacingCliError` preserving their ``error_type``.
-    """
-    objective_id = plan_ref.objective_id
-    if objective_id is None:
-        raise UserFacingCliError(
-            f"plan #{plan_ref.pr_id} carries delivery_lineage but no objective_id — its "
-            "delivery train cannot be reconstructed.",
-            error_type="invalid_train",
-        )
-    with io_step("reconstructing the delivery train") as s:
-        try:
-            result = resolve_delivery(repo_root).status(StatusRequest(objective_id=objective_id))
-        except DeliveryError as exc:
-            raise UserFacingCliError(str(exc), error_type=exc.error_type) from exc
-        status = result.train
-        if status is None:
-            # The routing field says stacked but the objective is incremental now — fail
-            # closed rather than silently creating off trunk.
-            raise UserFacingCliError(
-                f"plan #{plan_ref.pr_id} carries delivery_lineage but objective "
-                f"#{objective_id} has no delivery train ({result.no_train_reason}).",
-                error_type="invalid_train",
-            )
-        try:
-            ctx = layer_mod.require_ready_layer(status, plan_id=plan_ref.pr_id)
-            prepared = layer_mod.prepare_layer_start(repo_root, ctx)
-        except layer_mod.LayerError as exc:
-            raise UserFacingCliError(str(exc), error_type=exc.error_type) from exc
-        s.done(f"layer {ctx.node_id} starts from {ctx.parent_branch} @ {prepared.parent_sha[:12]}")
-    return prepared
 
 
 @dataclass(frozen=True)
@@ -791,18 +752,42 @@ def _create_fresh(
     _refuse_stale_registration(repo_root, path)
     _fetch_best_effort(repo_root)  # network sync first so a fresh origin/* is seen
     if stacked and not git.remote_ref_exists(repo_root, f"origin/{branch}"):
-        # Fresh stacked creation: the layer starts from the VERIFIED parent commit, not a
-        # moving ref. An existing origin/plan-<id> (a resumed layer) keeps the ordinary arm
-        # below — the parent-aware path only governs creation.
-        prepared = prepare_stacked_layer(repo_root, ref)
-        resolved_base = prepared.parent_sha
+        # Fresh stacked creation: Prepare owns reconstruction, readiness, and executable parent
+        # verification. An existing origin/plan-<id> (a resumed layer) keeps the ordinary arm.
+        if ref.objective_id is None:
+            raise UserFacingCliError(
+                f"plan #{ref.pr_id} carries delivery_lineage but no objective_id — its "
+                "delivery train cannot be reconstructed.",
+                error_type="invalid_train",
+            )
+        with io_step("reconstructing the delivery train") as s:
+            try:
+                prepared = resolve_delivery(repo_root).prepare(
+                    PrepareRequest(
+                        kind="layer_start",
+                        mode="execution",
+                        objective_id=ref.objective_id,
+                        plan_id=ref.pr_id,
+                    )
+                )
+            except DeliveryError as exc:
+                raise UserFacingCliError(str(exc), error_type=exc.error_type) from exc
+            context = Ensure.not_none(
+                prepared.layer, "execution Prepare must carry a layer context"
+            )
+            parent_sha = Ensure.not_none(
+                prepared.parent_sha, "execution Prepare must carry a parent SHA"
+            )
+            s.done(
+                f"layer {context.node_id} starts from {context.parent_branch} @ {parent_sha[:12]}"
+            )
+        resolved_base = parent_sha
         with io_step(
-            f"creating worktree {path.name} from {prepared.context.parent_branch} @ "
-            f"{prepared.parent_sha[:12]}"
+            f"creating worktree {path.name} from {context.parent_branch} @ {parent_sha[:12]}"
         ) as s:
             try:
                 git.worktree_add(
-                    repo_root, path, branch=branch, create_branch=True, base=prepared.parent_sha
+                    repo_root, path, branch=branch, create_branch=True, base=parent_sha
                 )
             except GitError as exc:
                 raise UserFacingCliError(f"git worktree add failed: {exc}") from exc
@@ -810,7 +795,7 @@ def _create_fresh(
         _materialize_binding(path, ref)
         # The session-scoped operational record (§8.46) — never authoritative; publication
         # re-verifies live.
-        cache.write_layer_context(path, prepared.context, prepared.parent_sha)
+        cache.write_layer_context(path, context, parent_sha)
     else:
         resolved_base = resolve_base(repo_root, branch, base, plan_base)
         # The GitError raise escapes the step (dangling + the error text below, as today).

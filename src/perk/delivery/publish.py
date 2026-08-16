@@ -604,11 +604,10 @@ def _prepare_parent(pub: _Publish, ctx: LayerContext) -> str:
     ``prepare_layer_start`` path; typed ``LayerError``s map onto the publication vocabulary."""
     try:
         prepared = prepare_layer_start(
-            pub.repo_root,
             ctx,
-            fetch=pub.fetch,
-            remote_head=pub.remote_head,
-            resolve_commit=pub.local_head,
+            fetch=lambda refs: pub.fetch(pub.repo_root, list(refs)),
+            remote_head=lambda branch: pub.remote_head(pub.repo_root, branch),
+            resolve_commit=lambda ref: pub.local_head(pub.repo_root, ref),
         )
     except LayerError as exc:
         raise PublicationError(str(exc), error_type=exc.error_type) from exc

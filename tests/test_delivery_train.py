@@ -59,11 +59,12 @@ class _FakeStore:
         *,
         header: dict[str, object] | None = None,
         nodes: tuple[ObjectiveNode, ...] = (),
+        title: str = "t",
     ) -> None:
         self.objectives[objective_id] = ObjectiveState(
             id=objective_id,
             url=f"fake://objective/{objective_id}",
-            title="t",
+            title=title,
             header=dict(header or {}),
             nodes=nodes,
         )
@@ -461,6 +462,34 @@ class TestPolicy:
         assert _codes(status, FindingKind.INFO) == ["dynamic_singleton"]
         assert [layer.node_id for layer in status.layers] == ["1.2"]
         assert status.layers[0].membership is LayerMembership.NOT_APPLICABLE
+
+    def test_reconstruction_captures_objective_facts_without_growing_train_output(self) -> None:
+        from perk.cli.commands.objective.stack.status_cmd import TrainOut
+
+        nodes = (_node("1.1"), _node("1.2"))
+        store = _FakeStore()
+        store.add("10", header=_stacked_header(), nodes=nodes, title="Captured title")
+        status = _reconstruct(store)
+
+        assert status.objective_title == "Captured title"
+        assert status.objective_nodes == nodes
+        output = TrainOut.from_domain(status).model_dump(mode="json")
+        assert "objective_title" not in output
+        assert "objective_nodes" not in output
+
+        direct = status.__class__(
+            objective_id="10",
+            objective_url="u/10",
+            delivery_lineage="lineage",
+            base="main",
+            redirected_from=None,
+            layers=(),
+            published_prefix_len=0,
+            unresolved_operation=None,
+            findings=(),
+            build_readiness=status.build_readiness,
+        )
+        assert direct.objective_title == "" and direct.objective_nodes == ()
 
     def test_all_skipped_completes_without_a_merge(self) -> None:
         store = _FakeStore()

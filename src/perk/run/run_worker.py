@@ -30,10 +30,11 @@ from perk.convergence.init.extension_install import (
     consumer_npm_install_root,
     consumer_perk_package_dir,
 )
+from perk.delivery import DeliveryError, PrepareRequest, resolve_delivery
 from perk.run import launch, resume, run_report
 from perk.state import cache
 from perk.substrate import git
-from perk.substrate.output import user_output
+from perk.substrate.output import io_step, user_output
 from perk.substrate.registry import Stage, load_registry
 
 # The cold remote door: only stages that declare it are remotely drivable (implement/address).
@@ -142,12 +143,12 @@ def position_branch(repo_root: Path, plan_ref: plan.PlanRef, base: str | None) -
     - Absent + incremental: create ``plan-<N>`` from ``origin/<base>`` (behavior-equivalent
       to the removed shell arms; ``base`` is the dispatched workflow input, falling back to
       the plan's pinned base, then the detected trunk).
-    - Absent + stacked (``delivery_lineage`` set, contracts.md §8.46): reconstruct the train,
-      require this layer to be the readiness-derived candidate, fetch + verify the latest
-      parent head (the shared :func:`launch.prepare_stacked_layer` path), create ``plan-<N>``
-      at the verified parent SHA, and write the ``layer-context.json`` operational record.
-      The in-place ``checkout -b`` (vs the local path's ``worktree add``) is a named gesture
-      difference (§8.38); both consume the same ``LayerContext`` + ``prepare_layer_start``.
+    - Absent + stacked (``delivery_lineage`` set, contracts.md §8.46): execution Prepare
+      reconstructs the train, requires this layer to be the readiness-derived candidate, and
+      fetches/verifies the latest parent head; create ``plan-<N>`` at its verified parent SHA and
+      write the ``layer-context.json`` operational record. The in-place ``checkout -b`` (vs the
+      local path's ``worktree add``) is a named gesture difference (§8.38); both consume the same
+      execution Prepare result.
     """
     branch = f"plan-{plan_ref.pr_id}"
     try:
@@ -170,13 +171,37 @@ def position_branch(repo_root: Path, plan_ref: plan.PlanRef, base: str | None) -
         git.fetch_refspecs(repo_root, [resolved_base])
         git.create_branch_at(repo_root, branch, f"origin/{resolved_base}")
         return
-    prepared = launch.prepare_stacked_layer(repo_root, plan_ref)
+    if plan_ref.objective_id is None:
+        raise UserFacingCliError(
+            f"plan #{plan_ref.pr_id} carries delivery_lineage but no objective_id — its "
+            "delivery train cannot be reconstructed.",
+            error_type="invalid_train",
+        )
+    with io_step("reconstructing the delivery train") as step:
+        try:
+            prepared = resolve_delivery(repo_root).prepare(
+                PrepareRequest(
+                    kind="layer_start",
+                    mode="execution",
+                    objective_id=plan_ref.objective_id,
+                    plan_id=plan_ref.pr_id,
+                )
+            )
+        except DeliveryError as exc:
+            raise UserFacingCliError(str(exc), error_type=exc.error_type) from exc
+        context = prepared.layer
+        parent_sha = prepared.parent_sha
+        if context is None or parent_sha is None:
+            raise ValueError("execution Prepare returned an invalid result")
+        step.done(
+            f"layer {context.node_id} starts from {context.parent_branch} @ {parent_sha[:12]}"
+        )
     user_output(
-        f"run-worker: stacked layer {prepared.context.node_id} — creating {branch} from "
-        f"{prepared.context.parent_branch} @ {prepared.parent_sha[:12]}"
+        f"run-worker: stacked layer {context.node_id} — creating {branch} from "
+        f"{context.parent_branch} @ {parent_sha[:12]}"
     )
-    git.create_branch_at(repo_root, branch, prepared.parent_sha)
-    cache.write_layer_context(repo_root, prepared.context, prepared.parent_sha)
+    git.create_branch_at(repo_root, branch, parent_sha)
+    cache.write_layer_context(repo_root, context, parent_sha)
 
 
 def position_worktree(

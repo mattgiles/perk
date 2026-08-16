@@ -79,6 +79,7 @@ class FakeDeliveryGit(_FailureMixin, DeliveryGit):
         *,
         trunk: str = "main",
         branches: Mapping[str, str] | None = None,
+        resolutions: Mapping[str, str] | None = None,
         push_urls: tuple[str, ...] = ("fake://origin",),
         push_urls_error: str | None = None,
         atomic_push_errors: Mapping[str, str] | None = None,
@@ -90,6 +91,7 @@ class FakeDeliveryGit(_FailureMixin, DeliveryGit):
         super().__init__(errors)
         self._trunk = trunk
         self._branches = dict(branches or {})
+        self._resolutions = dict(resolutions or {})
         self._push_urls = tuple(push_urls)
         self._push_urls_error = push_urls_error
         self._atomic_push_errors = dict(atomic_push_errors or {})
@@ -108,6 +110,17 @@ class FakeDeliveryGit(_FailureMixin, DeliveryGit):
         call: Call = ("fetch",)
         self.calls.append(call)
         self._raise_failure(call)
+
+    def fetch_refs(self, refs: tuple[str, ...]) -> None:
+        call: Call = ("fetch_refs", *refs)
+        self.calls.append(call)
+        self._raise_failure(call)
+
+    def resolve_commit(self, ref: str) -> str | None:
+        call: Call = ("resolve_commit", ref)
+        self.calls.append(call)
+        self._raise_failure(call)
+        return self._resolutions.get(ref)
 
     def remote_branch_sha(self, branch: str) -> str | None:
         call: Call = ("remote_branch_sha", branch)

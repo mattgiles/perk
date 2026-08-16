@@ -8,7 +8,7 @@ from _launch_helpers import _PLAN_REF, _PLAN_REF_JSON, _PLAN_REF_MODEL, _config,
 
 from perk import __version__, plan
 from perk.cli.ensure import UserFacingCliError
-from perk.delivery import DeliveryError, StatusResult
+from perk.delivery import DeliveryError, PrepareResult
 from perk.run import launch
 from perk.run.launch import (
     _address_prompt,
@@ -1327,63 +1327,39 @@ def _stacked_ref(pr_id: str = "102") -> plan.PlanRef:
     return dataclasses.replace(_PLAN_REF, pr_id=pr_id, objective_id="10", delivery_lineage=_LINEAGE)
 
 
-def _stacked_train(*, ready: bool = True, next_node: str | None = "1.2"):
-    from perk.delivery import train as train_mod
+def _prepared_start(parent_sha: str = "a" * 40) -> PrepareResult:
+    from perk.delivery import layer as layer_mod
 
-    def layer(node_id, plan_id, branch):
-        return train_mod.TrainLayer(
-            node_id=node_id,
-            plan_id=plan_id,
-            branch=branch,
-            pr_number=None,
-            intent=train_mod.LayerIntent.PLANNED,
-            publication=train_mod.LayerPublication.UNPUBLISHED,
-            git=train_mod.LayerGit.ABSENT,
-            pr=train_mod.LayerPr.ABSENT,
-            membership=train_mod.LayerMembership.NOT_APPLICABLE,
-            writer=train_mod.LayerWriter.FREE,
-            finalization=train_mod.LayerFinalization.NOT_MERGED,
-            parent_checkpoint_sha=None,
-            published_head_sha=None,
-            observed_remote_head_sha=None,
-            observed_pr_base=None,
-            expected_pr_base=None,
-        )
-
-    return train_mod.DeliveryTrain(
+    context = layer_mod.LayerContext(
         objective_id="10",
-        objective_url="u/10",
+        node_id="1.2",
+        plan_id="102",
         delivery_lineage=_LINEAGE,
+        predecessor_plan_id="101",
         base="main",
-        redirected_from=None,
-        layers=(layer("1.1", "101", "plan-101"), layer("1.2", "102", "plan-102")),
-        published_prefix_len=0,
-        unresolved_operation=None,
-        findings=(),
-        build_readiness=train_mod.BuildReadiness(
-            next_node_id=next_node,
-            ready=ready,
-            reason=None if ready else "the train has blocker findings: [x] y",
-        ),
+        parent_branch="plan-101",
+        branch="plan-102",
+    )
+    return PrepareResult(
+        kind="layer_start",
+        mode="execution",
+        layer=context,
+        parent_sha=parent_sha,
     )
 
 
-def _stub_delivery(monkeypatch, result) -> None:
+def _stub_delivery(monkeypatch, result):
+    calls = []
+
     class FakeDelivery:
-        def status(self, request):
+        def prepare(self, request):
+            calls.append(request)
             if isinstance(result, DeliveryError):
                 raise result
-            if isinstance(result, StatusResult):
-                return result
-            return StatusResult(
-                objective_id=result.objective_id,
-                objective_url=result.objective_url,
-                redirected_from=result.redirected_from,
-                train=result,
-                no_train_reason=None,
-            )
+            return result
 
     monkeypatch.setattr(worktree_mod, "resolve_delivery", lambda _root: FakeDelivery())
+    return calls
 
 
 def _push_side_branch(remote: Path, name: str, *, parent_dir: Path) -> str:
@@ -1428,11 +1404,40 @@ def test_stacked_explicit_base_is_a_typed_refusal(git_repo_with_remote, monkeypa
     assert "derived from the delivery train" in str(excinfo.value)
 
 
+def test_stacked_missing_objective_refuses_without_reconstruction_step(
+    git_repo_with_remote, monkeypatch, capsys
+):
+    clone, _remote, _advance = git_repo_with_remote
+    ref = dataclasses.replace(_stacked_ref(), objective_id=None)
+    monkeypatch.setattr(
+        worktree_mod,
+        "resolve_delivery",
+        lambda *_a: pytest.fail("missing-objective guard must pre-empt Prepare"),
+    )
+    cache.write_plan_ref(clone, ref)
+    with pytest.raises(UserFacingCliError) as excinfo:
+        resolve_worktree(
+            repo_root=clone,
+            config=_config(clone),
+            request=_request("implement"),
+            worktree=None,
+            materialize=True,
+        )
+    assert excinfo.value.error_type == "invalid_train"
+    assert "reconstructing the delivery train" not in capsys.readouterr().err
+
+
 def test_stacked_not_ready_is_a_typed_refusal_and_creates_nothing(
     git_repo_with_remote, monkeypatch
 ):
     clone, _remote, _advance = git_repo_with_remote
-    _stub_delivery(monkeypatch, _stacked_train(ready=False))
+    _stub_delivery(
+        monkeypatch,
+        DeliveryError(
+            "layer 1.2 (plan #102) is not build-ready: the train has blocker findings: [x] y",
+            error_type="node_not_build_ready",
+        ),
+    )
     cache.write_plan_ref(clone, _stacked_ref())
     with pytest.raises(UserFacingCliError) as excinfo:
         resolve_worktree(
@@ -1470,12 +1475,10 @@ def test_stacked_status_without_train_fails_closed(git_repo_with_remote, monkeyp
     clone, _remote, _advance = git_repo_with_remote
     _stub_delivery(
         monkeypatch,
-        StatusResult(
-            objective_id="10",
-            objective_url="u/10",
-            redirected_from=None,
-            train=None,
-            no_train_reason="objective uses incremental delivery",
+        DeliveryError(
+            "plan #102 carries delivery_lineage but objective #10 has no delivery train "
+            "(objective uses incremental delivery).",
+            error_type="invalid_train",
         ),
     )
     cache.write_plan_ref(clone, _stacked_ref())

@@ -5322,7 +5322,7 @@ identity).
 | 2 | prompt generation (local vs worker) | canonical templates `prompts/stages/*` via the §8.31 render seam; `_implement_prompt`/`_address_prompt` ↔ `initialPromptFor` ↔ `implementHandoffPrompt`/`addressGuidance` | `tests/test_prompt_parity.py` (live cross-engine byte parity) + goldens; reciprocal substring suites `tests/test_worker_prompt_parity.py` ↔ `extension/worker/worker.test.ts`; binding-content byte parity `tests/test_binding_render_parity.py` (via `extension/testing/renderBindingsLive.ts`) |
 | 3 | submit side effects | one Python door, `perk pr submit --json`; the warm `submit` tool/`/submit` command delegate via `submitPr` (`extension/doors/submit.ts`), and the remote worker drives that same registered tool | `extension/worker/workerE2e.test.ts` (implement HAPPY drives the real tool through the real extension into a stubbed `PERK_BIN` router), `extension/doors/submit.test.ts`, `tests/test_pr_submit.py` |
 | 4 | address terminal criteria | `finalize_address` (`extension/doors/address.ts`) runs submit first, delegates its internal resolve half to `perk pr resolve-threads --json`, and appends `last_review_batch`; the worker requires finalizer success + that write + successful effective submit evidence with `mergeable !== false` | `workerE2e.test.ts` (address HAPPY binds both real door writes to classification), `worker.test.ts` `evaluateTerminal` matrix; post-address the supervisor re-classifies via row 1 |
-| 5 | plan-ref reconstruction + positioning | one function, `resume.reconstruct_plan_ref` — all reconstruction sites converge on it (`cli/plan_selection.py::select_plan` for the explicit-id doors, `plan/resume_cmd.py`, `objective/run_cmd.py`, `run/run_worker.py`, the positioner's restore arm); one validating selector/positioner, `launch.resolve_worktree` (see the positioning semantics below) used by every cold door needing a plan checkout (`implement`/`submit`/`address`/`land`/`learn`/`plan watch`); `run_worker.position_worktree` mirrors `launch_stage`'s positioning, and stacked branch starts share `prepare_stacked_layer` (`require_ready_layer` + `prepare_layer_start`, §8.46) across `resolve_worktree` and `run_worker.position_branch` | `tests/test_plan_ref_parity.py` (the save→reconstruct round trip + the `PlanRef` field census), `tests/test_plan_selection.py`, `tests/test_resume.py`, `tests/test_launch_restore.py` (the non-destructive restore matrix), `tests/test_run_worker.py::test_positioning_parity_local_launch_vs_remote_worker` (artifact byte parity, `run_id` excepted; the explicit-ref twin pins the direct-ref arm), `tests/test_run_worker.py::test_positioning_parity_stacked_local_create_vs_remote_position` (same start SHA + `layer-context.json` parity, timestamps excepted) |
+| 5 | plan-ref reconstruction + positioning | one function, `resume.reconstruct_plan_ref` — all reconstruction sites converge on it (`cli/plan_selection.py::select_plan` for the explicit-id doors, `plan/resume_cmd.py`, `objective/run_cmd.py`, `run/run_worker.py`, the positioner's restore arm); one validating selector/positioner, `launch.resolve_worktree` (see the positioning semantics below) used by every cold door needing a plan checkout (`implement`/`submit`/`address`/`land`/`learn`/`plan watch`); `run_worker.position_worktree` mirrors `launch_stage`'s positioning, and fresh stacked starts independently call the same execution `Delivery.prepare(PrepareRequest(kind="layer_start", mode="execution", …))` boundary (§8.46) from `resolve_worktree` and `run_worker.position_branch` | `tests/test_plan_ref_parity.py` (the save→reconstruct round trip + the `PlanRef` field census), `tests/test_plan_selection.py`, `tests/test_resume.py`, `tests/test_launch_restore.py` (the non-destructive restore matrix), `tests/test_run_worker.py::test_positioning_parity_local_launch_vs_remote_worker` (artifact byte parity, `run_id` excepted; the explicit-ref twin pins the direct-ref arm), `tests/test_run_worker.py::test_positioning_parity_stacked_local_create_vs_remote_position` (same start SHA + `layer-context.json` parity, timestamps excepted) |
 | 6 | run reporting | **remote-only by design**: `perk/run/run_report.py` derives the §8.15 plan-issue comments + job summary solely from the §8.12 events stream + exit code | `tests/test_run_report.py` (incl. the `RunOutcome` lockstep literals) ↔ `worker.test.ts` (the frozen `assembleOutcome` shapes) |
 
 ### Positioning semantics (`launch.resolve_worktree` — the one selector/positioner)
@@ -5409,9 +5409,9 @@ asymmetry). Selection precedence + the two roots are §8.1. The rest of the post
    scoping applies there. Warm sessions and bare interactive `pi` are likewise untouched.
 8. **The stacked branch-creation gesture differs; the prepared start does not.** A fresh
    stacked layer starts locally via `git worktree add … <parent_sha>` and remotely via an
-   in-place `git checkout -b plan-<N> <parent_sha>` (§8.46) — both consume the same
-   `LayerContext` + `prepare_layer_start`, land on the same verified parent commit, and write
-   the same `layer-context.json` (timestamps excepted).
+   in-place `git checkout -b plan-<N> <parent_sha>` (§8.46) — both independently call the same
+   execution Prepare variant, consume its internal `LayerContext` + verified `parent_sha`, land
+   on the same commit, and write the same `layer-context.json` (timestamps excepted).
 9. **The resume prior-work advisory is `plan resume`-cold-local-only.** When `perk plan resume`
    resolves to `implement` and the plan worktree already exists locally (the D4 reuse arm), the
    door appends `prompts/common/resume-advisory.md` to the implement primer via `launch_stage`'s
@@ -5774,9 +5774,13 @@ fields are now **written** by stacked authoring: the `objective create` cold doo
 capability preflight; the TS plane carries the reviewed choice
 end-to-end (`objective_draft`/`objective_save` → `--delivery`). The **layer-identity trio**
 (`objective_node_id`/`delivery_lineage`/`predecessor_plan_id`) is now written at node-linked
-plan save (§8.46); the checkpoint pair (`parent_checkpoint_sha`/`published_head_sha`) is
-written by the §8.47 publish operation — together, in one write, only after publication
-verification.
+plan save through `PrepareRequest(kind="plan_identity", mode=…)` (§8.46): Prepare owns the
+single objective read and returns the independently optional objective base plus nested
+`PlanIdentity {objective_node_id, delivery_lineage, predecessor_plan_id}`. Every header write arm
+receives all three identity fields; `PlanRef` remains deliberately narrower and stores **only**
+`delivery_lineage` as its routing field (no node/predecessor/schema growth). The checkpoint pair
+(`parent_checkpoint_sha`/`published_head_sha`) is written by the §8.47 publish operation —
+together, in one write, only after publication verification.
 
 ## §8.45 · Stacked authoring: the reviewed delivery choice + capability preflight
 
@@ -5993,18 +5997,41 @@ deliberately untouched (no cross-plane consumer yet — mirroring §8.42's postu
 internal pure core that rebuilds one **immutable** `DeliveryTrain` projection from the durable
 authorities — the objective store (policy, lineage, roadmap), plan issues (layer identity +
 checkpoints), the journal fold (§8.43), Git refs, and GitHub PR + native-stack state. The canonical
-repository-scoped status API is
-`resolve_delivery(repo_root).status(StatusRequest(objective_id))`; the realized authoring Prepare
-variant is §8.45's `Delivery.prepare(PrepareRequest(kind="authoring", base=<str|null>))`.
-`resolve_delivery` performs ZERO I/O. `Delivery.status` returns a `StatusResult` whose invariant is
-exactly one non-null branch: `train` OR the successful incremental `no_train_reason`, alongside
-`objective_id`, `objective_url`, and `redirected_from`; successful authoring Prepare returns only
-`PrepareResult(kind="authoring", base=<effective-base>)`.
+repository-scoped APIs are `resolve_delivery(repo_root).status(StatusRequest(objective_id))` and
+one flat frozen `Delivery.prepare(PrepareRequest(...))` family. `resolve_delivery` performs ZERO
+I/O. `Delivery.status` returns a `StatusResult` whose invariant is exactly one non-null branch:
+`train` OR the successful incremental `no_train_reason`, alongside `objective_id`, `objective_url`,
+and `redirected_from`.
+
+Prepare's legal request/result variants are closed shapes (an unknown `kind` retains the exact
+`unknown prepare kind: <repr>` diagnostic; every other illegal shape raises `ValueError`):
+
+- `authoring`: optional request `base`, no mode/ids; result carries only effective `base`;
+- `plan_identity`: explicit `mode=strict|best_effort`, required objective, optional node (strict
+  requires it), no base/plan request fields; result carries independently optional objective
+  `base` and nested `PlanIdentity`, or — only for a best-effort expected read failure —
+  `notice=str(exc)` with base/identity absent. The empty string is a valid notice and
+  `notice is not None` is the failure discriminator;
+- planning `layer_start`: `mode=planning`, required objective, optional requested node; result
+  carries exactly one internally-valid nested `PlanningDecision`; and
+- execution `layer_start`: `mode=execution`, required plan, nullable objective solely for the
+  defensive missing-objective refusal; result carries the internal `layer.LayerContext` plus a
+  nonblank verified `parent_sha`.
+
+The nested detail vocabulary adds no package-root exports: `PlanIdentity`; `PlanningNode`;
+`PlanningContext {position, layer_count, delivery_lineage, base, predecessor_node_id,
+predecessor_plan_id, parent_branch, observed_parent_head_sha}` (one-based position/count); and
+`PlanningDecision {kind, objective_id, objective_title, objective_url, requested_node_id, node,
+reason, skipped_claim_ids, context}`. Decision `kind` is exactly `ready | build_blocked |
+in_flight | wrong_candidate | complete | node_not_found | terminal | blocked | no_actionable`;
+node/reason/skipped/context presence is shape-validated (context only on train-derived `ready`; the
+all-layers-published graph fallback may be `ready` without context).
 
 The façade composes three nominal ABC authorities, with each interface, real adapter, and owned
 constructor-configured fake moving in lockstep. `DeliveryPersistence` aggregates objective, plan,
-and journal reads. `DeliveryGit` aggregates trunk/fetch/ref/ancestry/worktree/base reads plus
-Prepare's push-URL resolution and no-op atomic probe. `DeliveryGitHub` aggregates stable PR,
+and journal reads. `DeliveryGit` aggregates trunk/fetch/exact-ref-fetch/local-commit-resolution/
+ref/ancestry/worktree/base reads plus Prepare's push-URL resolution and no-op atomic probe.
+`DeliveryGitHub` aggregates stable PR,
 tolerant native-stack, and all-state branch-PR reads plus Prepare's host stack-capability and base
 merge-rule facts. The production `RepoDeliveryPersistence`, `RepoDeliveryGit`, and
 `RepoDeliveryGitHub` adapters live in `perk/delivery/observe.py`. Persistence resolves the
@@ -6027,7 +6054,9 @@ or branch is authoritative, and local absence is never an error. Branch-sensitiv
 load-bearing: status reads objective policy before fallback trunk resolution, so an incremental
 objective returns the no-train branch without Git or GitHub work; authoring Prepare never resolves
 persistence, issue backends, credentials, or configuration and touches only its Git/GitHub
-authorities.
+authorities. Identity Prepare performs exactly one objective read and no Git/GitHub call; planning
+delegates to exactly one status reconstruction; execution delegates to status and then exact
+parent-ref verification.
 
 **Layer axes.** Layer state is orthogonal, never one lossy enum: `intent`
 (`skipped|unplanned|planned|canceled` — skipped nodes contract out of the rendered layers;
@@ -6122,7 +6151,10 @@ projection-only PENDING ordering surrogates, never returned/persisted) → roadm
 `delivery_order` over the effective nodes → the node↔plan join (idempotent per layer — a plan
 preloaded by the cancellation proof is never re-joined, so canonical findings emit once) →
 PUBLISH coverage + checkpoint topology → predecessors → Git observation (reusing the fetch) →
-PRs → publication → membership → prefix → base → readiness. `DeliveryTrain` additionally
+PRs → publication → membership → prefix → base → readiness. Production reconstruction also
+captures `objective_title` and the exact active-state `objective_nodes` tuple on the immutable
+train for planning Prepare; both are defaulted internal projection inputs and are deliberately
+absent from `TrainOut`, so status human/JSON bytes do not grow. `DeliveryTrain` additionally
 carries the §8.54 projection facts `projected_canceled_nodes` /
 `repairable_canceled_nodes` (default-empty tuples of `ProjectedCancellation(node_id,
 persisted_status)`).
@@ -6132,10 +6164,13 @@ journal **carrier** read, or `git fetch` is a status failure. At the pure-core s
 `TrainReconstructionError`; `Delivery.status` translates ONLY the declared status codes into
 `DeliveryError` with the same message and stable `error_type` (`objective_not_found |
 invalid_delivery_policy | invalid_train | git_error | github_error |
-supersession_corruption`). `DeliveryError`'s façade-wide vocabulary adds only
-`capability_unsupported`. Expected objective-store, issue-backend, and train-persistence exceptions
-normalize to `github_error`. `DeliveryError` rejects unknown codes, and an unknown future pure-core
-code propagates rather than silently widening the façade contract. Prepare reuses the status-owned
+supersession_corruption`). The private status allowlist remains exactly those six even though
+`DeliveryError`'s façade-wide vocabulary is fourteen: the status six plus
+`capability_unsupported | invalid_input | missing_lineage | stacked_predecessor_missing |
+unknown_layer | node_not_build_ready | parent_missing | parent_unverified`. Expected
+objective-store, issue-backend, and train-persistence exceptions normalize to `github_error`.
+`DeliveryError` rejects unknown codes, and a status error outside its six-code subset propagates
+rather than silently widening status. Prepare reuses the status-owned
 trunk and remote-branch methods without changing their status messages: for a typed `git_error`
 wrapper it preserves the chained substrate `GitError` text when that guarded cause exists, else the
 wrapper text; a non-`git_error` reconstruction failure remains unexpected and propagates. Only two reads
@@ -6257,60 +6292,68 @@ untouched. `perk objective stack status` surfaces it additively: the `--json` `t
 gains `next_build_ready {node_id, ready, reason}` (schema snapshot regenerated) and the human
 render one line (`next build-ready: <id>` / `build blocked: <reason>`).
 
-**Stacked selection replaces dep-terminal planning gating.** For a stacked objective the single
-planning candidate is the readiness-derived next node — roadmap DAG deps still shape
-`delivery_order` but stop acting as a separate terminal-status planning gate, which is what
-permits planning layer k+1 while layer k is published-but-unmerged. The one shared seam is
-`stacked_selection(repo_root, state)` (`commands/objective/shared.py`): `None` for incremental
-(byte-identical behavior), else a `StackedSelection {kind, node, ready, reason, train}` with
-`kind ∈ build_blocked | plannable | in_flight | no_candidate` (`no_candidate` = every layer
-published → consumers fall through to the existing graph classification; completion semantics
-unchanged). It reads the live train through
-`resolve_delivery(repo_root).status(StatusRequest(objective_id=state.id))`; `DeliveryError` maps
-to a typed CLI error preserving its `error_type`. Three consumers: the **plan door** (`perk
-objective plan` — auto-select takes the candidate; `build_blocked` refuses with
-`error_type="node_not_build_ready"` + a
-`perk objective stack status <N>` hint; an explicit `--node` must equal the candidate or the
-same refusal names the actually-ready node; `in_flight` keeps the incremental
-`objective_in_flight` message shape), **`perk objective next`** (`next_node` becomes the
-plannable candidate or `null`, plus an additive `build_ready {ready, reason}` block), and the
-**`objective run` supervisor** (a new honest `action: "build_blocked"` report arm, exit 0,
-carrying `reason` + the stack-status remediation). The shared selector preserves the already-read
-incremental short circuit, then calls the lazy repository façade exactly once. **`--dry-run` skips
-the status read** on the plan door and the run supervisor (offline graph classification kept) — and
-BOTH
-dry-run payloads gain `"build_readiness": "unchecked (dry-run)"` (stacked only; incremental
-payloads stay byte-identical), saying so rather than pretending the check ran. `objective show`
-stays a status renderer; the run supervisor's repair and lower-address prioritization has landed
-in §8.52.
+**Stacked planning replaces dep-terminal gating with one planning Prepare snapshot.** For a
+stacked objective the single live planning candidate is the readiness-derived next node — roadmap
+DAG deps still shape `delivery_order` but stop acting as a separate terminal-status planning gate,
+which permits planning layer k+1 while layer k is published-but-unmerged. After the plan door's
+initial objective read chooses stacked versus incremental, a real stacked launch calls exactly
+one `Delivery.prepare(PrepareRequest(kind="layer_start", mode="planning", objective_id,
+node_id?))`; that operation calls `Delivery.status` exactly once and performs no extra persistence
+read. The returned train is the sole post-Prepare authority: title/URL/node presentation, graph
+fallback, and resumable claims come from its captured objective snapshot; base/lineage/order,
+position/count, predecessor branch/head, blockers, and readiness come from the same immutable
+projection. The initial read is never reused for those facts. Incremental planning stays
+byte-identical; stacked `--dry-run` remains offline on the existing graph path and reports
+`"build_readiness": "unchecked (dry-run)"`.
+
+Planning classification returns the nested decision vocabulary from §8.44. A non-ready train is
+`build_blocked`; a pending or planning-without-plan candidate is `ready` unless an explicit other
+node was requested (`wrong_candidate`); in-progress or planning-with-plan is `in_flight` before
+that comparison; another candidate status is `build_blocked`. Without a readiness candidate, the
+captured dependency graph yields explicit `ready | in_flight | node_not_found | terminal |
+blocked`, or automatic `ready | in_flight | complete | no_actionable`; a graph-fallback `ready`
+contains no train context. `skipped_claim_ids` comes from that same graph and excludes the selected
+node. The CLI mapper preserves every existing refusal code/message (`node_not_build_ready`,
+`objective_in_flight`, `no_actionable_node`) and consumes the decision's title/URL/node/context for
+seed, lookup completion, mark, engagement, notes, and handoff.
+
+Hard failures are distinct from decisions and preserve exact precedence: `redirected_from` (the
+only supersession signal — provider normalization such as `007`→`7` with no redirect is accepted)
+is checked before train/no-train; no train is `invalid_train`; a readiness candidate absent from
+`train.layers` is `unknown_layer`; and a ready child whose predecessor has no plan/branch is
+`stacked_predecessor_missing`. Planning never exact-fetches a parent or returns a parent SHA.
+Prepare runs before the existing `update_objective_node(..., planning)` write, but this is an
+**observation followed by a non-CAS mark, not a lease or atomic claim**: concurrent edits,
+supersession after observation, and duplicate launches remain possible and are outside this
+contract.
+
+`stacked_selection(repo_root, state)` remains unchanged for **`perk objective next`** and the
+**`objective run` supervisor**: it still returns `StackedSelection {kind, node, ready, reason,
+train}`, calls status once, supplies `build_ready {ready, reason}` to next, and drives the
+supervisor's honest `action: "build_blocked"`/remediation arms. The run supervisor's dry-run status
+omission and repair/lower-address prioritization remain §8.52 behavior.
 
 **Predecessor context seeds stacked planning.** The plan door's seed gains a stacked-only DATA
-block (`_layer_context_block` → the `layer_context` template var; incremental seeds stay
+block (`_layer_context_block` is pure presentation over `PlanningContext`; incremental seeds stay
 byte-identical): the layer's position in the delivery order; for a child layer the predecessor
-node/plan, its branch, and the verified remote head from the reconstructed train's observed
-facts (the objective base for the bottom layer); a note that `origin/<parent branch>` is
-already fetched and locally inspectable; and the explicit statement that perk records **no
-planning-time parent SHA** — later movement of the predecessor/codebase is a normal
-implementation danger.
+node/plan, its branch, and the status-observed remote head (the objective base for the bottom
+layer); a note that `origin/<parent branch>` is already fetched and locally inspectable; and the
+explicit statement that perk records **no planning-time parent SHA** — later movement of the
+predecessor/codebase is a normal implementation danger.
 
-**Save-time layer identity.** A **node-linked** save (`objective_id` + `node_id`, real run)
-reads the linked objective **strictly** — a failed read fails the save (`github_error`) and a
-proven-missing objective is a typed `objective_not_found` refusal; a save that cannot
-determine the delivery policy must not guess or proceed unstamped (unlinked saves keep the
-fail-soft base lookup). When the objective is
-stacked, `perk plan save` composes the **layer-identity trio** into the plan header on every
-write arm (initial create, the re-save `update_plan_header` merge, and the `save_node_plan`
-unification arm via the same rendered fields): `objective_node_id = node_id`,
-`delivery_lineage` = the objective header's lineage, `predecessor_plan_id` = the
-delivery-order predecessor node's linked plan id (`None`/absent on the bottom layer). Two
-typed refusals fire **before any write**: a stacked objective with a missing/invalid
-`delivery_lineage` is **`missing_lineage`** (an unstamped routing field would silently send a
-child layer down the incremental path), and a
-non-bottom save whose predecessor node has no linked plan is
-**`stacked_predecessor_missing`**. `parent_checkpoint_sha`/
-`published_head_sha` stay unwritten — the durable checkpoint pair is publication-owned.
-Incremental saves stay byte-identical. A dry run composes the trio best-effort from the same
-read and omits it when the objective is unreadable.
+**Save-time layer identity.** `perk plan save` delegates its one objective read and identity
+policy to `PrepareRequest(kind="plan_identity")`: `mode=strict` only for a real node-linked save;
+objective-only real saves and every dry run use `best_effort`. Strict expected read failures map
+to the established `github_error`, and proven absence to `objective_not_found`. Best-effort
+returns `notice=str(exc)` (including the empty string) for an expected read failure and otherwise
+treats absence silently; unexpected exceptions propagate. The independently optional normalized
+objective base and nested `PlanIdentity` come from the same snapshot. A no-node request returns
+the base without policy/lineage/order validation. A node request applies the existing pure policy:
+incremental has no identity; stacked requires a nonblank lineage, target membership, and a linked
+predecessor for non-bottom layers (`missing_lineage`, `invalid_input`, or
+`stacked_predecessor_missing` before any write). Every initial/re-save/unification arm receives all
+three identity fields. `PlanRef` persists only lineage, and the publication-owned checkpoint pair
+stays unwritten. Dry-run output prints a best-effort notice when one exists and omits identity.
 
 **The `PlanRef` routing field.** `PlanRef`/`PlanRefModel`/`PlanRefOut` grow one nullable field,
 `delivery_lineage` (amending §8.42's deliberate-non-growth note): stamped at save, recovered by
@@ -6318,50 +6361,33 @@ read and omits it when the objective is unreadable.
 reconstructor in lockstep). It only **routes** a launch into the stacked path — every decision
 still reconstructs the train fresh; the ref is never train-authoritative.
 
-**`LayerContext` + the one parent-preparation path** (`perk/delivery/layer.py`, a delivery leaf
-touching `perk.substrate.git` alongside `observe.py`/`capability.py`). Frozen
-`LayerContext {objective_id, node_id, plan_id, delivery_lineage, predecessor_plan_id, base,
-parent_branch, branch}` — `parent_branch` equals `base` for the bottom layer, else the
-predecessor layer's branch (the train's branch resolution: plan-header `branch` else
-`plan-<plan-id>`); `branch` is this layer's `plan-<plan_id>`. `derive_layer_context(train, *,
-plan_id)` is pure (typed `unknown_layer`/`stacked_predecessor_missing` errors);
-`require_ready_layer` additionally requires the layer to BE the readiness candidate
-(`node_not_build_ready` carrying the exact veto). `prepare_layer_start(repo_root, ctx, *,
-fetch=…, remote_head=…, resolve_commit=…)` (keyword-injectable probes, the `capability.py`
-precedent) fetches exactly the parent ref, reads the live remote head, and verifies the commit
-resolves locally — **always the LATEST head, never a stored checkpoint**; an absent remote
-parent (`parent_missing`) or an unresolvable head (`parent_unverified`) is a typed error naming
-the expected ref. The result is the **operational** record: `cache.write_layer_context(root,
-ctx, parent_sha)` atomically writes `.perk/workflow/layer-context.json` (`LayerContextOut`:
-the full context + verified `parent_sha` + `prepared_at`) — session-scoped, gitignored with the
-workflow dir, and **NEVER authoritative** (publication re-verifies live; the durable
-`parent_checkpoint_sha`/`published_head_sha` pair stays publication-owned).
+**`LayerContext` is internal; execution Prepare is the sole fresh-start proof.** The frozen
+internal `LayerContext {objective_id, node_id, plan_id, delivery_lineage, predecessor_plan_id,
+base, parent_branch, branch}` and pure `derive_layer_context`/`require_ready_layer` core remain in
+`perk.delivery.layer`, but none is exported from `perk.delivery`. Both launch paths independently
+call `Delivery.prepare(PrepareRequest(kind="layer_start", mode="execution", plan_id,
+objective_id?))`; there is no launch wrapper. It refuses a missing objective id before lookup,
+performs one status reconstruction, rejects no-train, locates the plan layer, proves it is
+build-ready, then derives the context. Execution does not inspect `redirected_from`; the freshly
+reconstructed active train remains authoritative. The bottom layer uses objective base; a child
+requires predecessor identity/plan/branch.
 
-**Local launch (fresh creation only).** `resolve_worktree`'s fresh-create arm, when
-`plan_ref.delivery_lineage` is set and no `origin/plan-<id>` exists: read the train through
-`Delivery.status`, require its train branch and the ready candidate, `prepare_layer_start`, then
-`git worktree add` **at the verified `parent_sha`** (a real commit, not a moving ref) and write
-`layer-context.json` into the fresh worktree. `DeliveryError` preserves the existing typed launch
-refusal through `UserFacingCliError`. An explicit `--base` on a stacked layer is a typed
-`invalid_input` refusal (the
-parent is derived, never chosen). Explicit `--worktree NAME`, reuse, `worktree: none`, and the
-resume arm (an existing `origin/plan-<id>`) are untouched — the parent-aware path only governs
-creation; a stacked dry run reports `"stacked layer — parent derived at create"` and stays
-offline.
+Prepare next calls `DeliveryGit.fetch_refs` once for the exact parent branch,
+`remote_branch_sha(parent_branch)` once, then `resolve_commit(observed_sha)` once. A fetch or remote
+observation failure is `git_error`; an absent remote branch is `parent_missing`; an observed SHA
+that does not resolve locally is `parent_unverified`. No fallback is permitted: the result's
+nonblank `parent_sha` is the verified latest remote head, never a stored checkpoint. Deferred
+publication still calls callback-only `prepare_layer_start` internally; that core has no
+repository/global defaults.
 
-**Remote positioning relocates into `run_worker`.** The managed workflow's "Check out the plan
-branch" shell step is **deleted** (§8.14 amended; the §8.13 input contract and `gh auth
-setup-git` are unchanged); `run_worker` now calls `position_branch(repo_root, plan_ref, base)`
-before `position_worktree`: an existing remote `plan-<N>` (either policy) → checkout +
-`reset --hard origin/plan-<N>`; absent + incremental → create from `origin/<base>`
-(behavior-equivalent to the removed shell arms; `base` = the dispatched input, else the plan's
-pinned base, else the detected trunk — the `base` param is now consumed); absent + stacked →
-the same façade-backed status/readiness gate + `prepare_layer_start`, then
-`git checkout -b plan-<N> <parent_sha>` and `layer-context.json`. The branch-creation
-**gesture** intentionally differs (local
-`worktree add` vs remote in-place `checkout -b`) — a named §8.38 difference; both consume the
-same `LayerContext` + `prepare_layer_start`, and local/remote parity is proven for fresh
-creation (same start SHA, byte-identical `layer-context.json`, timestamps excepted).
+**Local and remote creation consume the same result.** Local `resolve_worktree` runs execution
+Prepare immediately before `git worktree add … <parent_sha>`; remote `position_branch` runs it
+immediately before `git checkout -b plan-<N> <parent_sha>`. Neither path fetches or derives the
+parent independently. Both write the returned context and SHA to `layer-context.json`; commit
+start and artifact match (timestamps and path gesture excepted). `DeliveryError` remains a typed
+CLI refusal, and an explicit local `--base` remains `invalid_input`. Existing branch/worktree reuse,
+`worktree: none`, resume, incremental creation, and stacked dry-run behavior are unchanged; the
+boundary governs fresh creation and never resets an active layer.
 
 **Status.** Everything here is inert for incremental objectives; stacked authoring and layer
 publication are supported (the §8.45 dogfood gate passed —
