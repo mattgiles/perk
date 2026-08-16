@@ -5,9 +5,11 @@ from pathlib import Path
 import pytest
 from click.testing import CliRunner
 
-from perk import delivery, github, plan
+from perk import github, plan
 from perk.backends.github import plans
 from perk.cli.cli import cli
+from perk.delivery import observe
+from perk.delivery import train as train_mod
 from perk.state import cache
 
 _REF = plan.PlanRef(
@@ -105,43 +107,43 @@ def test_pr_ready_no_pr_exits_1(monkeypatch):
 
 def _stacked_train(
     *,
-    publication: delivery.LayerPublication = delivery.LayerPublication.PUBLISHED,
-    findings: tuple[delivery.TrainFinding, ...] = (),
-    unresolved: tuple[delivery.UnresolvedOperationFacts, ...] = (),
-) -> delivery.DeliveryTrain:
-    layer = delivery.TrainLayer(
+    publication: train_mod.LayerPublication = train_mod.LayerPublication.PUBLISHED,
+    findings: tuple[train_mod.TrainFinding, ...] = (),
+    unresolved: tuple[train_mod.UnresolvedOperationFacts, ...] = (),
+) -> train_mod.DeliveryTrain:
+    layer = train_mod.TrainLayer(
         node_id="1.1",
         plan_id="7",
         branch="plan-7",
         pr_number=42,
-        intent=delivery.LayerIntent.PLANNED,
+        intent=train_mod.LayerIntent.PLANNED,
         publication=publication,
         git=(
-            delivery.LayerGit.SYNCED
-            if publication is delivery.LayerPublication.PUBLISHED
-            else delivery.LayerGit.REMOTE_AHEAD
+            train_mod.LayerGit.SYNCED
+            if publication is train_mod.LayerPublication.PUBLISHED
+            else train_mod.LayerGit.REMOTE_AHEAD
         ),
-        pr=delivery.LayerPr.DRAFT,
-        membership=delivery.LayerMembership.NOT_APPLICABLE,
-        writer=delivery.LayerWriter.FREE,
-        finalization=delivery.LayerFinalization.NOT_MERGED,
+        pr=train_mod.LayerPr.DRAFT,
+        membership=train_mod.LayerMembership.NOT_APPLICABLE,
+        writer=train_mod.LayerWriter.FREE,
+        finalization=train_mod.LayerFinalization.NOT_MERGED,
         parent_checkpoint_sha="p" * 40,
         published_head_sha="h" * 40,
         observed_remote_head_sha="h" * 40,
         observed_pr_base="main",
         expected_pr_base="main",
     )
-    return delivery.DeliveryTrain(
+    return train_mod.DeliveryTrain(
         objective_id="500",
         objective_url="u/objective/500",
         delivery_lineage="01LINEAGE",
         base="main",
         redirected_from=None,
         layers=(layer,),
-        published_prefix_len=1 if publication is delivery.LayerPublication.PUBLISHED else 0,
+        published_prefix_len=1 if publication is train_mod.LayerPublication.PUBLISHED else 0,
         unresolved_operation=unresolved[0] if unresolved else None,
         findings=findings,
-        build_readiness=delivery.BuildReadiness(
+        build_readiness=train_mod.BuildReadiness(
             next_node_id=None, ready=False, reason="all layers published"
         ),
         unresolved_operations=unresolved,
@@ -151,7 +153,7 @@ def _stacked_train(
 def _stub_stacked(
     monkeypatch,
     *,
-    train: delivery.DeliveryTrain,
+    train: train_mod.DeliveryTrain,
     is_draft: bool,
     pr_exists: bool = True,
     pr_state: str = "OPEN",
@@ -161,7 +163,7 @@ def _stub_stacked(
         {"delivery_lineage": "01LINEAGE", "objective_id": "500"},
     )
     calls: dict[str, object] = {"marked": False, "get_pr": None}
-    monkeypatch.setattr(delivery, "reconstruct_repo_train", lambda root, objective_id: train)
+    monkeypatch.setattr(observe, "reconstruct_repo_train", lambda root, objective_id: train)
 
     def get_pr(*, number, repo_root):
         calls["get_pr"] = number
@@ -198,9 +200,9 @@ def test_stacked_ready_fetches_published_pr_then_marks(monkeypatch):
 
 def test_stacked_already_ready_validates_target_but_ignores_global_vetoes(monkeypatch):
     _authed(monkeypatch)
-    operation = delivery.UnresolvedOperationFacts("01OP", "sync", "t0")
-    finding = delivery.TrainFinding(
-        kind=delivery.FindingKind.BLOCKER,
+    operation = train_mod.UnresolvedOperationFacts("01OP", "sync", "t0")
+    finding = train_mod.TrainFinding(
+        kind=train_mod.FindingKind.BLOCKER,
         code="missing_lineage",
         message="lineage absent",
     )
@@ -237,15 +239,15 @@ def test_stacked_ready_rejects_freshly_closed_pr(monkeypatch):
 
 def test_stacked_ready_target_drift_is_layer_not_published(monkeypatch):
     _authed(monkeypatch)
-    finding = delivery.TrainFinding(
-        kind=delivery.FindingKind.BLOCKER,
+    finding = train_mod.TrainFinding(
+        kind=train_mod.FindingKind.BLOCKER,
         code="checkpoint_drift",
         message="expected h, observed x",
         node_id="1.1",
         plan_id="7",
     )
     train = _stacked_train(
-        publication=delivery.LayerPublication.PUBLICATION_DRIFT,
+        publication=train_mod.LayerPublication.PUBLICATION_DRIFT,
         findings=(finding,),
     )
     calls = _stub_stacked(monkeypatch, train=train, is_draft=True)
@@ -260,7 +262,7 @@ def test_stacked_ready_target_drift_is_layer_not_published(monkeypatch):
 @pytest.mark.parametrize("pr_state", ["CLOSED", "MERGED"])
 def test_stacked_ready_projected_non_open_keeps_layer_not_published(monkeypatch, pr_state):
     _authed(monkeypatch)
-    train = _stacked_train(publication=delivery.LayerPublication.PUBLICATION_DRIFT)
+    train = _stacked_train(publication=train_mod.LayerPublication.PUBLICATION_DRIFT)
     calls = _stub_stacked(
         monkeypatch,
         train=train,
@@ -275,15 +277,15 @@ def test_stacked_ready_projected_non_open_keeps_layer_not_published(monkeypatch,
 
 def test_stacked_already_ready_target_drift_is_layer_not_published(monkeypatch):
     _authed(monkeypatch)
-    finding = delivery.TrainFinding(
-        kind=delivery.FindingKind.BLOCKER,
+    finding = train_mod.TrainFinding(
+        kind=train_mod.FindingKind.BLOCKER,
         code="checkpoint_drift",
         message="expected h, observed x",
         node_id="1.1",
         plan_id="7",
     )
     train = _stacked_train(
-        publication=delivery.LayerPublication.PUBLICATION_DRIFT,
+        publication=train_mod.LayerPublication.PUBLICATION_DRIFT,
         findings=(finding,),
     )
     calls = _stub_stacked(monkeypatch, train=train, is_draft=False)
@@ -295,7 +297,7 @@ def test_stacked_already_ready_target_drift_is_layer_not_published(monkeypatch):
 
 def test_stacked_ready_draft_refuses_unresolved_operation(monkeypatch):
     _authed(monkeypatch)
-    operation = delivery.UnresolvedOperationFacts("01OP", "sync", "t0")
+    operation = train_mod.UnresolvedOperationFacts("01OP", "sync", "t0")
     calls = _stub_stacked(
         monkeypatch,
         train=_stacked_train(unresolved=(operation,)),
@@ -309,8 +311,8 @@ def test_stacked_ready_draft_refuses_unresolved_operation(monkeypatch):
 
 def test_stacked_ready_draft_refuses_structural_blocker(monkeypatch):
     _authed(monkeypatch)
-    finding = delivery.TrainFinding(
-        kind=delivery.FindingKind.BLOCKER,
+    finding = train_mod.TrainFinding(
+        kind=train_mod.FindingKind.BLOCKER,
         code="missing_lineage",
         message="lineage absent",
     )

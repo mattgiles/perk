@@ -540,7 +540,6 @@ def _land_dry_run(ctx: click.Context, *, objective: str | None, as_json: bool) -
             persistence=reads.persistence,
             git=reads.git,
             github=reads.github,
-            trunk=reads.trunk,
         )
     except train.TrainReconstructionError as exc:
         fail(ctx, as_json=as_json, error_type=exc.error_type, message=str(exc))

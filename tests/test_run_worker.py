@@ -12,7 +12,9 @@ from perk.backends.issue_backend import IssueBackendError
 from perk.backends.linear import agent as linear_agent
 from perk.cli.ensure import UserFacingCliError
 from perk.convergence import init as init_mod
+from perk.delivery import StatusResult
 from perk.run import launch, run_report, run_worker
+from perk.run.launch import worktree as worktree_mod
 from perk.state import cache
 from perk.substrate import git as gitmod
 from perk.substrate.config import Config
@@ -653,6 +655,20 @@ def _stacked_train(*, ready: bool = True):
     )
 
 
+def _stub_delivery(monkeypatch, result) -> None:
+    class FakeDelivery:
+        def status(self, request):
+            return StatusResult(
+                objective_id=result.objective_id,
+                objective_url=result.objective_url,
+                redirected_from=result.redirected_from,
+                train=result,
+                no_train_reason=None,
+            )
+
+    monkeypatch.setattr(worktree_mod, "resolve_delivery", lambda _root: FakeDelivery())
+
+
 def test_position_branch_existing_remote_branch_resets_to_the_remote_tip(
     git_repo_with_remote, stub_position_branch
 ):
@@ -683,9 +699,7 @@ def test_position_branch_stacked_not_ready_is_a_typed_refusal(
     git_repo_with_remote, stub_position_branch, monkeypatch
 ):
     clone, _remote, _advance = git_repo_with_remote
-    from perk.delivery import observe
-
-    monkeypatch.setattr(observe, "reconstruct_repo_train", lambda *_a: _stacked_train(ready=False))
+    _stub_delivery(monkeypatch, _stacked_train(ready=False))
     with pytest.raises(UserFacingCliError) as excinfo:
         stub_position_branch.real(clone, _stacked_ref(), "main")
     assert excinfo.value.error_type == "node_not_build_ready"
@@ -701,7 +715,6 @@ def test_positioning_parity_stacked_local_create_vs_remote_position(
     differs (worktree add vs in-place checkout -b); the prepared start does not."""
     import json as json_mod
 
-    from perk.delivery import observe
     from perk.run.launch.worktree import WorktreeRequest, resolve_worktree
     from perk.substrate.config import Config
     from perk.substrate.registry import load_registry
@@ -711,7 +724,7 @@ def test_positioning_parity_stacked_local_create_vs_remote_position(
     remote_clone = local_clone.parent / "remote-clone"
     shutil.copytree(local_clone, remote_clone, symlinks=True)
 
-    monkeypatch.setattr(observe, "reconstruct_repo_train", lambda *_a: _stacked_train())
+    _stub_delivery(monkeypatch, _stacked_train())
 
     # Path A — local fresh creation (the launch path).
     cache.write_plan_ref(local_clone, _stacked_ref())

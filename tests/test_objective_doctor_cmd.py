@@ -2,9 +2,9 @@
 exact DeliveryTrain diagnosis, the train-repair state machine, the single active-objective
 resolution (superseded-id redirect), and the exit-code table.
 
-The store and the train reconstruction are both faked at their seams
-(`resolve.resolve_objective_store` / `observe.reconstruct_repo_train`) — the projection's own
-behavior is pinned in test_delivery_train.py; here the command's report/repair surface is.
+The store, façade-backed report diagnosis, and retained repair-proof reconstruction are faked
+at their explicit seams. The projection's own behavior is pinned in test_delivery_train.py;
+here the command's report/repair surface is.
 """
 
 import json
@@ -17,7 +17,8 @@ from perk import github, objective
 from perk.backends import issue_backend, objective_store, resolve
 from perk.backends.objective_store import CancellationRepairOutcome
 from perk.cli.cli import cli
-from perk.delivery import observe
+from perk.cli.commands.objective import doctor_cmd
+from perk.delivery import DeliveryError, StatusResult, observe
 from perk.delivery.train import (
     BuildReadiness,
     DeliveryTrain,
@@ -25,7 +26,6 @@ from perk.delivery.train import (
     NoDeliveryTrain,
     ProjectedCancellation,
     TrainFinding,
-    TrainReconstructionError,
 )
 from perk.objective import NodeStatus
 from perk.objective.drift import DriftCode, DriftCondition, DriftReport, ObjectiveDriftSeverity
@@ -152,18 +152,48 @@ def _train(
 
 
 class _ScriptedTrains:
-    """`observe.reconstruct_repo_train` stand-in: a queue of results/exceptions, last reused."""
+    """Two explicit scripted seams over one ordered scenario.
+
+    ``status`` returns the façade's ``StatusResult``/``DeliveryError`` contract for report
+    diagnosis; ``reconstruct`` returns the retained internal train status for cancellation
+    proof reads. The shared step queue preserves effect-boundary ordering assertions.
+    """
 
     def __init__(self, *steps: object) -> None:
         self._steps = list(steps)
         self.calls: list[str] = []
+        self.status_calls: list[str] = []
+        self.reconstruction_calls: list[str] = []
 
-    def __call__(self, repo_root, objective_id: str):
+    def _next(self, objective_id: str):
         self.calls.append(objective_id)
         step = self._steps.pop(0) if len(self._steps) > 1 else self._steps[0]
         if isinstance(step, Exception):
             raise step
         return step
+
+    def status(self, request):
+        self.status_calls.append(request.objective_id)
+        step = self._next(request.objective_id)
+        if isinstance(step, NoDeliveryTrain):
+            return StatusResult(
+                objective_id=step.objective_id,
+                objective_url=step.objective_url,
+                redirected_from=step.redirected_from,
+                train=None,
+                no_train_reason=step.reason,
+            )
+        return StatusResult(
+            objective_id=step.objective_id,
+            objective_url=step.objective_url,
+            redirected_from=step.redirected_from,
+            train=step,
+            no_train_reason=None,
+        )
+
+    def reconstruct(self, repo_root, objective_id: str):
+        self.reconstruction_calls.append(objective_id)
+        return self._next(objective_id)
 
 
 def _invoke(args, *, git: bool = True):
@@ -181,11 +211,12 @@ def _authed(monkeypatch) -> None:
 
 
 def _wire(monkeypatch, store, trains, *, reads: dict[str, object] | None = None) -> None:
-    """Wire the three doctor seams. ``reads`` maps carrier id → ``AdoptableIssue`` for the
+    """Wire the doctor seams. ``reads`` maps carrier id → ``AdoptableIssue`` for the
     kind-corruption check's presence-only read (default: every read misses → no finding);
     an ``Exception`` value raises from the read seam instead."""
     monkeypatch.setattr(resolve, "resolve_objective_store", lambda _root: store)
-    monkeypatch.setattr(observe, "reconstruct_repo_train", trains)
+    monkeypatch.setattr(doctor_cmd, "resolve_delivery", lambda _root: trains)
+    monkeypatch.setattr(observe, "reconstruct_repo_train", trains.reconstruct)
 
     class _FakeIssueBackend:
         def read_issue(self, *, issue_id: str):
@@ -301,7 +332,7 @@ def test_detect_incremental_is_the_no_train_message(monkeypatch):
 
 def test_detect_train_unavailable_exits_1_with_the_assembled_report(monkeypatch):
     store = _FakeStore(objectives={"42": _state("42")})
-    trains = _ScriptedTrains(TrainReconstructionError("git down", error_type="git_error"))
+    trains = _ScriptedTrains(DeliveryError("git down", error_type="git_error"))
     _wire(monkeypatch, store, trains)
     result = _invoke(["objective", "doctor", "42", "--json"])
     assert result.exit_code == 1
@@ -423,6 +454,8 @@ def test_fix_applies_the_cancellation_repair_and_reports_remaining(monkeypatch):
     assert write["expected_status"] is NodeStatus.PENDING
     assert write["new_status"] is NodeStatus.SKIPPED
     assert write["require_native_canceled"] is True
+    assert trains.status_calls == ["42", "42"]
+    assert trains.reconstruction_calls == ["42", "42", "42"]
 
 
 def test_fix_dry_run_would_apply_without_writing(monkeypatch):
@@ -473,7 +506,7 @@ def test_fix_write_verification_failure_is_an_aborted_train_fix(monkeypatch):
 def test_fix_current_train_unavailable_is_the_unavailable_state(monkeypatch):
     _authed(monkeypatch)
     store = _FakeWriterStore(objectives={"42": _state("42")})
-    trains = _ScriptedTrains(TrainReconstructionError("gone", error_type="github_error"))
+    trains = _ScriptedTrains(DeliveryError("gone", error_type="github_error"))
     _wire(monkeypatch, store, trains)
     result = _invoke(["objective", "doctor", "42", "--fix", "--json"])
     assert result.exit_code == 1
@@ -850,7 +883,7 @@ def test_human_render_clean_report_and_incremental_train(monkeypatch):
 def test_human_render_unavailable_train_names_the_typed_error(monkeypatch):
     _authed(monkeypatch)
     store = _FakeStore(objectives={"42": _state("42")})
-    trains = _ScriptedTrains(TrainReconstructionError("gone", error_type="github_error"))
+    trains = _ScriptedTrains(DeliveryError("gone", error_type="github_error"))
     _wire(monkeypatch, store, trains)
     result = _invoke(["objective", "doctor", "42"])
     assert result.exit_code == 1

@@ -1,34 +1,10 @@
-"""The deep delivery module — stacked-delivery train persistence + the read path
-(contracts.md §8.43/§8.44).
+"""The compact public delivery façade and temporarily retained operation exports.
 
-The stacked-delivery architecture's deep module: the pure operation-journal layer
-(:mod:`perk.delivery.journal` — marker grammar, strict records, canonical byte identity, the
-fail-closed fold), the backend-aligned persistence adapter (:mod:`perk.delivery.persistence` —
-succession-folding reads, gated read-back appends, the typed train-state writers), the
-immutable ``DeliveryTrain`` projection (:mod:`perk.delivery.train` — pure reconstruction over
-narrow probe Protocols, blockers-vs-information classification), and its production wiring
-(:mod:`perk.delivery.observe` — the Git/GitHub probes + ``resolve_train_reads``), the
-stacked-authoring capability preflight (:mod:`perk.delivery.capability` — the §8.45
-composed capability checks the ``objective create`` cold door runs before a stacked save),
-the layer publication operation (:mod:`perk.delivery.publish` — the §8.47 exact-lease
-publish `/submit` routes a stacked plan through), the idempotent post-merge land
-finalization (:mod:`perk.delivery.finalize` — the four durable bookkeeping effects
-`perk pr land` performs per merged plan, reusable per stacked layer; reconstructed inputs
-only, never the worktree cache), and the journaled atomic landing operation
-(:mod:`perk.delivery.landing` — the §8.56 mutation over the §8.55 readiness projection:
-merge-async for the multi-layer train, the SHA-pinned direct squash for the dynamic
-singleton).
-
-Import direction: ``perk.delivery`` imports the ``perk.backends.*`` contracts one-directionally
-(and only :mod:`perk.delivery.observe`, :mod:`perk.delivery.capability`,
-:mod:`perk.delivery.layer`, :mod:`perk.delivery.publish`, :mod:`perk.delivery.continuation`,
-:mod:`perk.delivery.sync`, :mod:`perk.delivery.finalize`, and :mod:`perk.delivery.landing`
-touch ``perk.substrate`` / ``perk.github``); nothing in ``perk/backends/`` or
-``perk/github/`` imports ``perk.delivery``,
-and nothing here imports ``perk.state`` or the Linear agent module (``state/cache.py`` imports
-:mod:`perk.delivery.layer` at module scope — the atomic-write seam is reached through
-``perk.substrate.fs`` instead; the agent activity emission is a worktree-session-scoped caller
-concern, kept out of :mod:`perk.delivery.finalize`).
+The canonical read surface is the repository-scoped :class:`Delivery` status slice with three
+nominal aggregate authorities. Pure train projection, production observation adapters, and
+compatibility readers are internal modules. Existing journal, authoring, continuation, layer,
+publication, synchronization, finalization, and landing exports remain temporarily public while
+their operation families migrate onto the façade; no unimplemented operation methods are implied.
 """
 
 from perk.delivery.capability import (
@@ -45,6 +21,15 @@ from perk.delivery.continuation import (
     manifest_path,
     pending_continuation,
     write_manifest,
+)
+from perk.delivery.facade import (
+    Delivery,
+    DeliveryError,
+    DeliveryGit,
+    DeliveryGitHub,
+    DeliveryPersistence,
+    StatusRequest,
+    StatusResult,
 )
 from perk.delivery.finalize import (
     LandedPlan,
@@ -102,14 +87,7 @@ from perk.delivery.layer import (
     require_ready_layer,
     require_reviewable_layer,
 )
-from perk.delivery.observe import (
-    GatewayGitHubProbe,
-    GatewayLandObservations,
-    RepoGitProbe,
-    TrainReads,
-    reconstruct_repo_train,
-    resolve_train_reads,
-)
+from perk.delivery.observe import GatewayLandObservations, resolve_delivery
 from perk.delivery.persistence import (
     AppendResult,
     JournalAppendAmbiguous,
@@ -135,66 +113,30 @@ from perk.delivery.sync import (
     derive_claimed_prefix,
     synchronize_train,
 )
-from perk.delivery.train import (
-    NO_TRAIN_INCREMENTAL_REASON,
-    STRUCTURAL_BLOCKER_CODES,
-    BaseHeadObservation,
-    BuildReadiness,
-    DeliveryTrain,
-    FindingKind,
-    GitHubProbe,
-    GitProbe,
-    JournalReader,
-    LayerFinalization,
-    LayerGit,
-    LayerIntent,
-    LayerMembership,
-    LayerPr,
-    LayerPublication,
-    LayerWriter,
-    NoDeliveryTrain,
-    ObjectiveReader,
-    PlanReader,
-    PrFactsView,
-    StackEntryView,
-    StackView,
-    TrainFinding,
-    TrainLayer,
-    TrainReconstructionError,
-    TrainStatus,
-    UnresolvedOperationFacts,
-    WorktreeFacts,
-    reconstruct_train,
-)
 from perk.delivery.writers import RemoteWriterProbe, WriterObservationError
 
 __all__ = [
     "JOURNAL_EVENT_MAX_CHARS",
     "JOURNAL_SCHEMA_VERSION",
-    "NO_TRAIN_INCREMENTAL_REASON",
-    "STRUCTURAL_BLOCKER_CODES",
     "AppendResult",
-    "BaseHeadObservation",
-    "BuildReadiness",
     "CapabilityCheck",
     "CapabilityReport",
     "CheckView",
     "ClaimedLayer",
     "ContinuationLayer",
     "ContinuationManifest",
+    "Delivery",
+    "DeliveryError",
+    "DeliveryGit",
+    "DeliveryGitHub",
     "DeliveryOperationFacts",
-    "DeliveryTrain",
+    "DeliveryPersistence",
     "EventRole",
-    "FindingKind",
-    "GatewayGitHubProbe",
     "GatewayLandObservations",
-    "GitHubProbe",
-    "GitProbe",
     "JournalAppendAmbiguous",
     "JournalCorruptionError",
     "JournalEvent",
     "JournalFold",
-    "JournalReader",
     "JournalRecordTooLarge",
     "LandDisposition",
     "LandError",
@@ -212,48 +154,29 @@ __all__ = [
     "LayerContext",
     "LayerContextOut",
     "LayerError",
-    "LayerFinalization",
-    "LayerGit",
-    "LayerIntent",
-    "LayerMembership",
-    "LayerPr",
-    "LayerPublication",
-    "LayerWriter",
     "LearnConsumeUpdate",
     "MergeRulesView",
-    "NoDeliveryTrain",
     "ObjectiveLandUpdate",
-    "ObjectiveReader",
     "OperationKind",
     "OperationState",
     "OutcomeRecord",
     "PendingContinuation",
-    "PlanReader",
-    "PrFactsView",
     "PrLandView",
     "PreparedLayerStart",
     "PreparedRecord",
     "PublicationError",
     "PublicationResult",
     "RemoteWriterProbe",
-    "RepoGitProbe",
-    "StackEntryView",
-    "StackView",
+    "StatusRequest",
+    "StatusResult",
     "SyncCascade",
     "SyncError",
     "SyncResult",
     "SyncedLayer",
-    "TrainFinding",
-    "TrainLayer",
     "TrainPersistence",
     "TrainPersistenceError",
-    "TrainReads",
-    "TrainReconstructionError",
     "TrainRowFacts",
-    "TrainStatus",
     "UnresolvedOperationError",
-    "UnresolvedOperationFacts",
-    "WorktreeFacts",
     "WriterObservationError",
     "assess_land_readiness",
     "canonical_payload",
@@ -272,13 +195,11 @@ __all__ = [
     "prepare_layer_start",
     "probe_atomic_push_urls",
     "publish_layer",
-    "reconstruct_repo_train",
-    "reconstruct_train",
     "render_event",
     "require_ready_layer",
     "require_reviewable_layer",
+    "resolve_delivery",
     "resolve_train_persistence",
-    "resolve_train_reads",
     "squash_commit_message",
     "synchronize_train",
     "write_manifest",

@@ -5,13 +5,12 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from perk import github, objective
-from perk.backends.issue_backend import IssueBackendError, PlanState
-from perk.backends.objective_store import ObjectiveState, ObjectiveStoreError
+from perk.backends.issue_backend import PlanState
+from perk.backends.objective_store import ObjectiveState
 from perk.cli.ensure import UserFacingCliError
 from perk.cli.plan_selection import parse_plan_id
-from perk.delivery import observe
+from perk.delivery import DeliveryError, StatusRequest, resolve_delivery
 from perk.delivery import train as train_mod
-from perk.delivery.persistence import TrainPersistenceError
 from perk.prompts import render
 from perk.run import resume
 
@@ -67,7 +66,7 @@ def stacked_selection(repo_root: Path, state: ObjectiveState) -> StackedSelectio
     gating). For a stacked objective this REPLACES that gating: the single planning candidate
     is the readiness-derived next layer (the first unpublished layer in delivery order), which
     is what permits planning layer k+1 while layer k is published-but-unmerged. Performs a
-    live train reconstruction (network); a ``TrainReconstructionError`` maps to a typed
+    live ``Delivery.status`` read (network); a ``DeliveryError`` maps to a typed
     :class:`UserFacingCliError` preserving its ``error_type``.
     """
     try:
@@ -77,14 +76,11 @@ def stacked_selection(repo_root: Path, state: ObjectiveState) -> StackedSelectio
     if policy is objective.DeliveryPolicy.INCREMENTAL:
         return None
     try:
-        status = observe.reconstruct_repo_train(repo_root, state.id)
-    except train_mod.TrainReconstructionError as exc:
+        result = resolve_delivery(repo_root).status(StatusRequest(objective_id=state.id))
+    except DeliveryError as exc:
         raise UserFacingCliError(str(exc), error_type=exc.error_type) from exc
-    except (IssueBackendError, ObjectiveStoreError, TrainPersistenceError) as exc:
-        # The authority-read translation the stack-status and launch paths already apply —
-        # every consumer of this seam gets the stable error surface, not a traceback.
-        raise UserFacingCliError(str(exc), error_type="github_error") from exc
-    if not isinstance(status, train_mod.DeliveryTrain):  # defensive: the policy said stacked
+    status = result.train
+    if status is None:  # defensive: the already-read policy said stacked
         return None
     readiness = status.build_readiness
     if readiness.next_node_id is None:

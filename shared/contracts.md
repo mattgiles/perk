@@ -5982,20 +5982,31 @@ deliberately untouched (no cross-plane consumer yet — mirroring §8.42's postu
 
 ## §8.44 · The DeliveryTrain projection + stack status (read path)
 
-**The projection.** `perk.delivery.train.reconstruct_train` rebuilds one **immutable**
-`DeliveryTrain` projection of a stacked objective from the durable authorities — the objective
-store (policy, lineage, roadmap), the plan issues (layer identity + checkpoints), the journal
-fold (§8.43), Git refs, and GitHub PR + native-stack state. Pure orchestration over narrow
-injected Protocols declared in `train.py` (`ObjectiveReader`/`PlanReader`/`JournalReader`/
-`GitProbe`/`GitHubProbe`); the production wiring is the leaf `perk/delivery/observe.py`
-(`RepoGitProbe`, `GatewayGitHubProbe`, `resolve_train_reads(repo_root)`, and the composed
-`reconstruct_repo_train` convenience) — `observe.py` + `capability.py` (§8.45) + `layer.py`
-(§8.46) + `finalize.py` (the land path) are the delivery leaves touching `perk.substrate.git` /
-`perk.github`. Import
-direction stays §8.43's: nothing in
-`perk/backends/` or `perk/github/` imports `perk.delivery`. Read-only end to end; the
-projection works from a **fresh clone** — no local worktree or branch is authoritative, and
-local absence is never an error.
+**The projection and public status boundary.** `perk.delivery.train.reconstruct_train` remains the
+internal pure core that rebuilds one **immutable** `DeliveryTrain` projection from the durable
+authorities — the objective store (policy, lineage, roadmap), plan issues (layer identity +
+checkpoints), the journal fold (§8.43), Git refs, and GitHub PR + native-stack state. The canonical
+repository-scoped read API is `resolve_delivery(repo_root).status(StatusRequest(objective_id))`.
+`resolve_delivery` performs ZERO I/O; `Delivery.status` returns a `StatusResult` whose invariant is
+exactly one non-null branch: `train` OR the successful incremental `no_train_reason`, alongside
+`objective_id`, `objective_url`, and `redirected_from`.
+
+The façade composes three nominal ABC authorities: `DeliveryPersistence` aggregates objective,
+plan, and journal reads; `DeliveryGit` aggregates trunk/fetch/ref/ancestry/worktree/base reads; and
+`DeliveryGitHub` aggregates stable PR, tolerant native-stack, and all-state branch-PR reads. The
+production `RepoDeliveryPersistence`, `RepoDeliveryGit`, and `RepoDeliveryGitHub` adapters live in
+`perk/delivery/observe.py`. Persistence resolves the backend-aligned objective store, issue backend,
+and `TrainPersistence` only on its first read, caches them only after backend identities agree, and
+keeps no partial cache after a failed attempt. The Git and GitHub adapters likewise store only the
+repo root at construction and observe on method calls. Narrow pure-core reader roles remain
+internal implementation details; owned call-recording/failure-injecting fakes exercise the nominal
+aggregate boundary.
+
+Import direction stays §8.43's: nothing in `perk/backends/` or `perk/github/` imports
+`perk.delivery`. Read-only end to end; the projection works from a **fresh clone** — no local
+worktree or branch is authoritative, and local absence is never an error. Branch-sensitive laziness
+is load-bearing: the objective read and delivery-policy decision occur before fallback trunk
+resolution, so an incremental objective returns the no-train branch without any Git or GitHub read.
 
 **Layer axes.** Layer state is orthogonal, never one lossy enum: `intent`
 (`skipped|unplanned|planned|canceled` — skipped nodes contract out of the rendered layers;
@@ -6096,19 +6107,24 @@ carries the §8.54 projection facts `projected_canceled_nodes` /
 persisted_status)`).
 
 **Failure-posture split.** Stable authorities hard-fail: a failed objective read, plan join,
-journal **carrier** read, or `git fetch` is a command failure — `TrainReconstructionError`
-with a stable `error_type` (`objective_not_found | invalid_delivery_policy | invalid_train |
-git_error | github_error | supersession_corruption`). Only two reads degrade: the **preview**
-native-stack read (membership `unknown` + information `stack_read_unavailable`, never a
-blocker — but unverifiable membership still declassifies the affected layers' publication to
-drift: the information posture governs the *finding*, not the verification bar) and journal
-**corruption** (`JournalCorruptionError` → the `journal_corruption` blocker; unresolved-
-operation facts report unknown). A superseded objective **redirects forward** along
-`superseded_by` (cycle guard + depth cap 50; breach ⇒ `supersession_corruption`) to the active
-objective and reports `redirected_from`. An incremental objective short-circuits before any
-Git/GitHub work into the successful `NoDeliveryTrain` answer; a junk `delivery` value fails
-closed (`invalid_delivery_policy`). `delivery: stacked` without a lineage renders the train
-with the `missing_lineage` blocker and skips the journal fold (report, don't abort).
+journal **carrier** read, or `git fetch` is a status failure. At the pure-core seam this remains
+`TrainReconstructionError`; `Delivery.status` translates ONLY the declared status codes into
+`DeliveryError` with the same message and stable `error_type` (`objective_not_found |
+invalid_delivery_policy | invalid_train | git_error | github_error |
+supersession_corruption`). Expected objective-store, issue-backend, and train-persistence
+exceptions normalize to `github_error`. `DeliveryError` rejects unknown codes, and an unknown
+future pure-core code propagates rather than silently widening the façade contract. Only two reads
+degrade: the **preview** native-stack read (membership `unknown` + information
+`stack_read_unavailable`, never a blocker — but unverifiable membership still declassifies the
+affected layers' publication to drift: the information posture governs the *finding*, not the
+verification bar) and journal **corruption** (`JournalCorruptionError` → the
+`journal_corruption` blocker; unresolved-operation facts report unknown). A superseded objective
+**redirects forward** along `superseded_by` (cycle guard + depth cap 50; breach ⇒
+`supersession_corruption`) to the active objective and reports `redirected_from`. An incremental
+objective short-circuits before fallback trunk detection, fetch, or any GitHub work into the
+successful `StatusResult.no_train_reason` branch; a junk `delivery` value fails closed
+(`invalid_delivery_policy`). `delivery: stacked` without a lineage renders the train with the
+`missing_lineage` blocker and skips the journal fold (report, don't abort).
 
 **The GitHub-native read adapter.** `perk/github/stacks.py` splits the reads by schema
 stability: `pr_delivery_facts(number, repo_root)` reads the **stable** GraphQL surface
@@ -6165,9 +6181,12 @@ observation, never the command).
 (`commands/objective/stack/`, the recursive group-dir template; the group carries `status` +
 `sync` (§8.49) + `recover` (§8.51) + `land` (§8.55 dry-run readiness + §8.56 the landing
 mutation); the shared objective resolution and run-id resolution live in
-`stack/shared.py`). Resolution:
-explicit argument → the plan worktree's `cache.plan-ref` `objective_id` → a typed
-`no_objective` refusal. Envelope (`ObjectiveStackStatusOut`, snapshotted at
+`stack/shared.py`). It is a migrated façade consumer: after objective-id resolution it constructs
+one lazy repository service and makes one `Delivery.status(StatusRequest(...))` call; it never
+imports or assembles the pure reconstruction readers. Resolution: explicit argument → the plan
+worktree's `cache.plan-ref` `objective_id` → a typed `no_objective` refusal. A `DeliveryError`
+preserves the declared status error type/message at the command boundary. Envelope
+(`ObjectiveStackStatusOut`, snapshotted at
 `shared/schemas/outputs/objective-stack-status.schema.json`): `{success, error_type,
 objective{id,url,redirected_from}, delivery: incremental|stacked, train|null, no_train|null,
 operations[], continuation|null, orphaned_residue}` — the last three are the additive
@@ -6197,9 +6216,10 @@ doctor findings are a later node's contract.
 
 ## §8.46 · Stacked build readiness + parent-aware execution
 
-**Build readiness is a derived fact of the projection — never a node status.**
-`reconstruct_train` computes a frozen `BuildReadiness {next_node_id, ready, reason}` at the end
-of the pipeline and carries it on `DeliveryTrain.build_readiness`. `next_node_id` is the first
+**Build readiness is a derived fact of the projection — never a node status.** The internal pure
+projection computes a frozen `BuildReadiness {next_node_id, ready, reason}` at the end of the
+pipeline and carries it on `DeliveryTrain.build_readiness`; repository consumers obtain that
+projection through `Delivery.status`, never by assembling the pure readers. `next_node_id` is the first
 layer in delivery order whose `publication` is not `PUBLISHED` (`None` when every layer is
 published, or the layer list is empty/all-skipped — the contiguous-prefix invariant makes the
 candidate's predecessor published by construction; a violation is already a `prefix_gap`
@@ -6220,17 +6240,20 @@ permits planning layer k+1 while layer k is published-but-unmerged. The one shar
 (byte-identical behavior), else a `StackedSelection {kind, node, ready, reason, train}` with
 `kind ∈ build_blocked | plannable | in_flight | no_candidate` (`no_candidate` = every layer
 published → consumers fall through to the existing graph classification; completion semantics
-unchanged). It reconstructs the train live (`reconstruct_repo_train`, the composed
-`observe.py` convenience); `TrainReconstructionError` maps to a typed CLI error preserving its
-`error_type`. Three consumers: the **plan door** (`perk objective plan` — auto-select takes the
-candidate; `build_blocked` refuses with `error_type="node_not_build_ready"` + a
+unchanged). It reads the live train through
+`resolve_delivery(repo_root).status(StatusRequest(objective_id=state.id))`; `DeliveryError` maps
+to a typed CLI error preserving its `error_type`. Three consumers: the **plan door** (`perk
+objective plan` — auto-select takes the candidate; `build_blocked` refuses with
+`error_type="node_not_build_ready"` + a
 `perk objective stack status <N>` hint; an explicit `--node` must equal the candidate or the
 same refusal names the actually-ready node; `in_flight` keeps the incremental
 `objective_in_flight` message shape), **`perk objective next`** (`next_node` becomes the
 plannable candidate or `null`, plus an additive `build_ready {ready, reason}` block), and the
 **`objective run` supervisor** (a new honest `action: "build_blocked"` report arm, exit 0,
-carrying `reason` + the stack-status remediation). **`--dry-run` skips train reconstruction**
-on the plan door and the run supervisor (offline graph classification kept) — and BOTH
+carrying `reason` + the stack-status remediation). The shared selector preserves the already-read
+incremental short circuit, then calls the lazy repository façade exactly once. **`--dry-run` skips
+the status read** on the plan door and the run supervisor (offline graph classification kept) — and
+BOTH
 dry-run payloads gain `"build_readiness": "unchecked (dry-run)"` (stacked only; incremental
 payloads stay byte-identical), saying so rather than pretending the check ran. `objective show`
 stays a status renderer; the run supervisor's repair and lower-address prioritization has landed
@@ -6290,10 +6313,12 @@ workflow dir, and **NEVER authoritative** (publication re-verifies live; the dur
 `parent_checkpoint_sha`/`published_head_sha` pair stays publication-owned).
 
 **Local launch (fresh creation only).** `resolve_worktree`'s fresh-create arm, when
-`plan_ref.delivery_lineage` is set and no `origin/plan-<id>` exists: reconstruct the train,
-require the ready candidate, `prepare_layer_start`, then `git worktree add` **at the verified
-`parent_sha`** (a real commit, not a moving ref) and write `layer-context.json` into the fresh
-worktree. An explicit `--base` on a stacked layer is a typed `invalid_input` refusal (the
+`plan_ref.delivery_lineage` is set and no `origin/plan-<id>` exists: read the train through
+`Delivery.status`, require its train branch and the ready candidate, `prepare_layer_start`, then
+`git worktree add` **at the verified `parent_sha`** (a real commit, not a moving ref) and write
+`layer-context.json` into the fresh worktree. `DeliveryError` preserves the existing typed launch
+refusal through `UserFacingCliError`. An explicit `--base` on a stacked layer is a typed
+`invalid_input` refusal (the
 parent is derived, never chosen). Explicit `--worktree NAME`, reuse, `worktree: none`, and the
 resume arm (an existing `origin/plan-<id>`) are untouched — the parent-aware path only governs
 creation; a stacked dry run reports `"stacked layer — parent derived at create"` and stays
@@ -6306,8 +6331,9 @@ before `position_worktree`: an existing remote `plan-<N>` (either policy) → ch
 `reset --hard origin/plan-<N>`; absent + incremental → create from `origin/<base>`
 (behavior-equivalent to the removed shell arms; `base` = the dispatched input, else the plan's
 pinned base, else the detected trunk — the `base` param is now consumed); absent + stacked →
-the same readiness gate + `prepare_layer_start`, then `git checkout -b plan-<N> <parent_sha>`
-and `layer-context.json`. The branch-creation **gesture** intentionally differs (local
+the same façade-backed status/readiness gate + `prepare_layer_start`, then
+`git checkout -b plan-<N> <parent_sha>` and `layer-context.json`. The branch-creation
+**gesture** intentionally differs (local
 `worktree add` vs remote in-place `checkout -b`) — a named §8.38 difference; both consume the
 same `LayerContext` + `prepare_layer_start`, and local/remote parity is proven for fresh
 creation (same start SHA, byte-identical `layer-context.json`, timestamps excepted).
@@ -7798,15 +7824,21 @@ conditional validation with no write/compensation. This is not distributed atomi
 prevents stale snapshots from writing and compensates observed drift. Doctor never repairs plan
 identity, checkpoints, journal history, branches, PRs, or native stack membership.
 
-**The two-part doctor.** Expected authority-read failures (issue-backend / objective-store /
-train-persistence errors) normalize onto the typed reconstruction failure at doctor's
-diagnosis and repair boundaries — a routine plan/journal outage is the modeled `unavailable`
-state, never an escape. `perk objective doctor` resolves the requested objective through
-`train.resolve_active_objective` ONCE — manifest detection/repair and train
-reconstruction/repair all target the ACTIVE id (`objective` reports it; additive
-`redirected_from` preserves the requested id; a predecessor is never mutated by
-`doctor OLD --fix`). The report is two parts: the existing Linear manifest drift plus the exact
-`DeliveryTrain` findings on every backend, each annotated with the diagnosis policy
+**The two-part doctor.** Report diagnosis is a migrated façade consumer. One zero-I/O `Delivery`
+is constructed per command and reused for initial diagnosis, post-manifest re-diagnosis, and the
+final remaining-findings read. Each diagnosis calls
+`Delivery.status(StatusRequest(objective_id=active_id))`; its bounded `DeliveryError` becomes the
+modeled `unavailable` state with the same error type/message, so a routine plan/journal/store
+outage is never an escape. The cancellation repair's effect-boundary proof remains an internal
+raw-projection callback because the repair algorithm consumes `DeliveryTrain` directly and must
+normalize expected authority exceptions to `TrainReconstructionError`; it does not reintroduce a
+public read API.
+
+`perk objective doctor` resolves the requested objective through `train.resolve_active_objective`
+ONCE — manifest detection/repair and train reconstruction/repair all target the ACTIVE id
+(`objective` reports it; additive `redirected_from` preserves the requested id; a predecessor is
+never mutated by `doctor OLD --fix`). The report is two parts: the existing Linear manifest drift
+plus the exact `DeliveryTrain` findings on every backend, each annotated with the diagnosis policy
 (`TrainFindingOut: code, severity, node_id, plan_id, message, repairable, remediation`).
 `TrainDiagnosisOut` (field order load-bearing): `state: stacked|incremental|unavailable,
 objective_id, redirected_from, error_type, message, blockers[], information[]` — stacked

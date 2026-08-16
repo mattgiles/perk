@@ -2,7 +2,7 @@
 
 The ONE readiness-derived classification the plan door, ``objective next``, and the run
 supervisor consume — pinned here once; the three consumers stub it at their module boundaries.
-``observe.reconstruct_repo_train`` is monkeypatched (no network).
+``Delivery.status`` is monkeypatched (no network).
 """
 
 from dataclasses import replace
@@ -15,7 +15,7 @@ from perk.backends.issue_backend import PlanState
 from perk.backends.objective_store import ObjectiveState
 from perk.cli.commands.objective import shared
 from perk.cli.ensure import UserFacingCliError
-from perk.delivery import observe
+from perk.delivery import DeliveryError, StatusResult
 from perk.delivery import train as train_mod
 
 N = objective.NodeStatus
@@ -66,11 +66,27 @@ def _ready(node_id: str) -> train_mod.BuildReadiness:
     return train_mod.BuildReadiness(next_node_id=node_id, ready=True, reason=None)
 
 
+def _stub_status(monkeypatch, result: train_mod.DeliveryTrain | DeliveryError) -> None:
+    class FakeDelivery:
+        def status(self, request):
+            if isinstance(result, DeliveryError):
+                raise result
+            return StatusResult(
+                objective_id=result.objective_id,
+                objective_url=result.objective_url,
+                redirected_from=result.redirected_from,
+                train=result,
+                no_train_reason=None,
+            )
+
+    monkeypatch.setattr(shared, "resolve_delivery", lambda _root: FakeDelivery())
+
+
 def test_incremental_objective_returns_none_without_reconstructing(monkeypatch, tmp_path: Path):
     monkeypatch.setattr(
-        observe,
-        "reconstruct_repo_train",
-        lambda *_a: pytest.fail("incremental must not reconstruct"),
+        shared,
+        "resolve_delivery",
+        lambda *_a: pytest.fail("incremental must not read Delivery.status"),
     )
     assert shared.stacked_selection(tmp_path, _state((), header={})) is None
 
@@ -82,7 +98,7 @@ def test_junk_delivery_policy_fails_closed(tmp_path: Path):
 
 
 def test_pending_candidate_is_plannable(monkeypatch, tmp_path: Path):
-    monkeypatch.setattr(observe, "reconstruct_repo_train", lambda *_a: _train(_ready("1.2")))
+    _stub_status(monkeypatch, _train(_ready("1.2")))
     selection = shared.stacked_selection(
         tmp_path, _state((_node("1.1", N.IN_PROGRESS, "#101"), _node("1.2", N.PENDING)))
     )
@@ -93,7 +109,7 @@ def test_pending_candidate_is_plannable(monkeypatch, tmp_path: Path):
 
 
 def test_planning_claim_without_a_plan_is_plannable(monkeypatch, tmp_path: Path):
-    monkeypatch.setattr(observe, "reconstruct_repo_train", lambda *_a: _train(_ready("1.2")))
+    _stub_status(monkeypatch, _train(_ready("1.2")))
     selection = shared.stacked_selection(
         tmp_path, _state((_node("1.1", N.IN_PROGRESS, "#101"), _node("1.2", N.PLANNING)))
     )
@@ -101,7 +117,7 @@ def test_planning_claim_without_a_plan_is_plannable(monkeypatch, tmp_path: Path)
 
 
 def test_committed_plan_is_in_flight(monkeypatch, tmp_path: Path):
-    monkeypatch.setattr(observe, "reconstruct_repo_train", lambda *_a: _train(_ready("1.2")))
+    _stub_status(monkeypatch, _train(_ready("1.2")))
     selection = shared.stacked_selection(
         tmp_path, _state((_node("1.1", N.DONE, "#101"), _node("1.2", N.IN_PROGRESS, "#102")))
     )
@@ -111,12 +127,9 @@ def test_committed_plan_is_in_flight(monkeypatch, tmp_path: Path):
 
 
 def test_readiness_veto_is_build_blocked_with_the_reason(monkeypatch, tmp_path: Path):
-    monkeypatch.setattr(
-        observe,
-        "reconstruct_repo_train",
-        lambda *_a: _train(
-            train_mod.BuildReadiness(next_node_id="1.2", ready=False, reason="[x] y")
-        ),
+    _stub_status(
+        monkeypatch,
+        _train(train_mod.BuildReadiness(next_node_id="1.2", ready=False, reason="[x] y")),
     )
     selection = shared.stacked_selection(tmp_path, _state((_node("1.2", N.PENDING),)))
     assert selection is not None
@@ -125,10 +138,9 @@ def test_readiness_veto_is_build_blocked_with_the_reason(monkeypatch, tmp_path: 
 
 
 def test_all_published_is_no_candidate(monkeypatch, tmp_path: Path):
-    monkeypatch.setattr(
-        observe,
-        "reconstruct_repo_train",
-        lambda *_a: _train(
+    _stub_status(
+        monkeypatch,
+        _train(
             train_mod.BuildReadiness(next_node_id=None, ready=False, reason="all layers published")
         ),
     )
@@ -141,7 +153,7 @@ def test_all_published_is_no_candidate(monkeypatch, tmp_path: Path):
 def test_blocked_status_candidate_fails_closed(monkeypatch, tmp_path: Path):
     # A candidate in a non-plannable, non-in-flight status (an explicitly blocked node) is an
     # honest build_blocked, never waved through.
-    monkeypatch.setattr(observe, "reconstruct_repo_train", lambda *_a: _train(_ready("1.2")))
+    _stub_status(monkeypatch, _train(_ready("1.2")))
     selection = shared.stacked_selection(tmp_path, _state((_node("1.2", N.BLOCKED),)))
     assert selection is not None
     assert selection.kind == "build_blocked"
@@ -149,10 +161,7 @@ def test_blocked_status_candidate_fails_closed(monkeypatch, tmp_path: Path):
 
 
 def test_reconstruction_error_maps_to_a_typed_cli_error(monkeypatch, tmp_path: Path):
-    def _boom(*_a):
-        raise train_mod.TrainReconstructionError("no order", error_type="invalid_train")
-
-    monkeypatch.setattr(observe, "reconstruct_repo_train", _boom)
+    _stub_status(monkeypatch, DeliveryError("no order", error_type="invalid_train"))
     with pytest.raises(UserFacingCliError) as excinfo:
         shared.stacked_selection(tmp_path, _state((_node("1.2", N.PENDING),)))
     assert excinfo.value.error_type == "invalid_train"
@@ -367,15 +376,9 @@ def test_lower_attention_missing_plan_fails_closed(tmp_path: Path):
 
 
 def test_authority_read_failures_map_to_the_stable_github_error(monkeypatch, tmp_path: Path):
-    # The reconstruction can raise the backend/persistence read errors too (a broken journal
-    # carrier, an issue-backend failure) — the shared boundary translates them so every
-    # consumer keeps its stable error/JSON surface instead of a traceback.
-    from perk.delivery.persistence import TrainPersistenceError
-
-    def _boom(*_a):
-        raise TrainPersistenceError("journal carrier missing")
-
-    monkeypatch.setattr(observe, "reconstruct_repo_train", _boom)
+    # The façade has already normalized backend/persistence failures; the shared boundary
+    # preserves that stable code and message for every consumer.
+    _stub_status(monkeypatch, DeliveryError("journal carrier missing", error_type="github_error"))
     with pytest.raises(UserFacingCliError) as excinfo:
         shared.stacked_selection(tmp_path, _state((_node("1.2", N.PENDING),)))
     assert excinfo.value.error_type == "github_error"

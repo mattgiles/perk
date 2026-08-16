@@ -581,7 +581,7 @@ class TransferPlan:
 
 
 def _default_worktree_branches(repo_root: Path) -> tuple[WorktreeFacts, ...]:
-    return observe.RepoGitProbe(repo_root).worktree_branches()
+    return observe.RepoDeliveryGit(repo_root).worktree_branches()
 
 
 # ----------------------------------------------------------------- the public entry (D15)

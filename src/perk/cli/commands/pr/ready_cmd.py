@@ -19,7 +19,7 @@ from pathlib import Path
 
 import click
 
-from perk import delivery, github
+from perk import github
 from perk.backends import resolve
 from perk.backends.issue_backend import IssueBackendError
 from perk.backends.objective_store import ObjectiveStoreError
@@ -28,6 +28,11 @@ from perk.cli.context import require_github, require_repo
 from perk.cli.emit import emit, fail
 from perk.cli.ensure import UserFacingCliError
 from perk.cli.plan_selection import SelectedPlan, main_repo_root, parse_plan_id, select_plan
+from perk.delivery import journal as journal_mod
+from perk.delivery import layer as layer_mod
+from perk.delivery import observe
+from perk.delivery import train as train_mod
+from perk.delivery.persistence import TrainPersistenceError
 from perk.github import GitHubError
 from perk.run import launch
 from perk.state import cache
@@ -78,7 +83,7 @@ def ready_pr(ctx: click.Context, *, plan: str | None, dry_run: bool, as_json: bo
         result = _pr_ready_impl(
             repo_root=repo_root, dry_run=dry_run, selected=selected, plan_given=plan is not None
         )
-    except (delivery.LayerError, delivery.TrainReconstructionError) as exc:
+    except (layer_mod.LayerError, train_mod.TrainReconstructionError) as exc:
         fail(
             ctx,
             as_json=as_json,
@@ -91,8 +96,8 @@ def ready_pr(ctx: click.Context, *, plan: str | None, dry_run: bool, as_json: bo
         GitHubError,
         IssueBackendError,
         ObjectiveStoreError,
-        delivery.TrainPersistenceError,
-        delivery.JournalCorruptionError,
+        TrainPersistenceError,
+        journal_mod.JournalCorruptionError,
     ) as exc:
         fail(
             ctx,
@@ -184,13 +189,13 @@ def _pr_ready_impl(
             "stacked layer always belongs to an objective",
             error_type="not_stacked",
         )
-    train = delivery.reconstruct_repo_train(repo_root, objective_id.strip())
-    if isinstance(train, delivery.NoDeliveryTrain):
+    train = observe.reconstruct_repo_train(repo_root, objective_id.strip())
+    if isinstance(train, train_mod.NoDeliveryTrain):
         raise UserFacingCliError(
             f"objective {train.objective_id} has no delivery train ({train.reason})",
             error_type="not_stacked",
         )
-    ctx = delivery.derive_layer_context(train, plan_id=plan_ref.pr_id)
+    ctx = layer_mod.derive_layer_context(train, plan_id=plan_ref.pr_id)
     layer = next(candidate for candidate in train.layers if candidate.node_id == ctx.node_id)
     if layer.pr_number is None:
         raise UserFacingCliError(
@@ -206,14 +211,14 @@ def _pr_ready_impl(
     # Validate projection authority before interpreting the freshly fetched state. A target the
     # train already classifies as closed/merged/drifted keeps the settled `layer_not_published`
     # outcome; `pr_not_open` is reserved for a close that raced after reconstruction.
-    delivery.require_reviewable_layer(train, plan_id=plan_ref.pr_id, mutating=False)
+    layer_mod.require_reviewable_layer(train, plan_id=plan_ref.pr_id, mutating=False)
     if pr.state.upper() != "OPEN":
         raise UserFacingCliError(
             f"PR #{pr.number} for published layer {layer.node_id} is {pr.state}, not OPEN",
             error_type="pr_not_open",
         )
     if pr.is_draft:
-        delivery.require_reviewable_layer(train, plan_id=plan_ref.pr_id, mutating=True)
+        layer_mod.require_reviewable_layer(train, plan_id=plan_ref.pr_id, mutating=True)
         github.mark_pr_ready(number=pr.number, repo_root=repo_root)
         was_draft = True
     else:

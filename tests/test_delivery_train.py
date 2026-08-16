@@ -104,6 +104,7 @@ class _FakeJournal:
 
 @dataclass
 class _FakeGit:
+    trunk: str = "main"
     branches: dict[str, str] = field(default_factory=dict)
     ancestry: dict[tuple[str, str], bool | None] = field(default_factory=dict)
     worktrees: tuple[WorktreeFacts, ...] = ()
@@ -114,6 +115,11 @@ class _FakeGit:
     base_head_sha: str | None = _SHA_A
     base_head_failure: str | None = None
     base_head_queries: list[str] = field(default_factory=list)
+    trunk_queries: int = 0
+
+    def trunk_branch(self) -> str:
+        self.trunk_queries += 1
+        return self.trunk
 
     def fetch(self) -> None:
         self.fetches += 1
@@ -331,7 +337,6 @@ def _reconstruct(
     persistence: _FakeJournal | None = None,
     git: _FakeGit | None = None,
     github: _FakeGitHub | None = None,
-    trunk: str = "main",
 ):
     return reconstruct_train(
         objective_id,
@@ -340,7 +345,6 @@ def _reconstruct(
         persistence=persistence or _FakeJournal(),
         git=git or _FakeGit(),
         github=github or _FakeGitHub(),
-        trunk=trunk,
     )
 
 
@@ -410,8 +414,9 @@ class TestPolicy:
             redirected_from=None,
             reason=NO_TRAIN_INCREMENTAL_REASON,
         )
-        # Short-circuits before any Git/GitHub work.
+        # Short-circuits before trunk or any other Git/GitHub work.
         assert git.fetches == 0
+        assert git.trunk_queries == 0
 
     def test_junk_delivery_policy_fails_closed(self) -> None:
         store = _FakeStore()
