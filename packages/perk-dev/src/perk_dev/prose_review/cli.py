@@ -93,6 +93,7 @@ def prose_review(ctx: click.Context, *, no_open: bool) -> None:
         app = create_app(
             snapshot=snapshot,
             repo_root=root,
+            selector_root=root,
             dist_dir=root / _DIST_RELATIVE,
             allowed_host=f"127.0.0.1:{port}",
             csrf_token=token,

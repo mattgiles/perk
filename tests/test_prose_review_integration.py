@@ -33,6 +33,8 @@ from perk_dev.prose_review.web import create_app
 ROOT = Path(__file__).parents[1]
 PYTHON_UNIT_ID = "python-symbol:packages/perk-dev/src/perk_dev/audit/bounding.py:_PREAMBLE"
 PYTHON_SOURCE_PATH = Path("packages/perk-dev/src/perk_dev/audit/bounding.py")
+TYPESCRIPT_UNIT_ID = "typescript-tool:plan_review"
+TYPESCRIPT_SOURCE_PATH = Path("extension/factories/planReview.ts")
 
 # One xdist worker: the module fixture builds the frontend and owns a live server.
 pytestmark = pytest.mark.xdist_group("prose_review_frontend")
@@ -62,6 +64,9 @@ def server(tmp_path_factory: pytest.TempPathFactory) -> Iterator[_RunningServer]
     python_source = trust_root / PYTHON_SOURCE_PATH
     python_source.parent.mkdir(parents=True)
     python_source.write_bytes((ROOT / PYTHON_SOURCE_PATH).read_bytes())
+    typescript_source = trust_root / TYPESCRIPT_SOURCE_PATH
+    typescript_source.parent.mkdir(parents=True)
+    typescript_source.write_bytes((ROOT / TYPESCRIPT_SOURCE_PATH).read_bytes())
 
     snapshot = CatalogSnapshot.from_catalog(build_catalog(ROOT))
     token = secrets.token_urlsafe(32)
@@ -72,6 +77,7 @@ def server(tmp_path_factory: pytest.TempPathFactory) -> Iterator[_RunningServer]
     app = create_app(
         snapshot=snapshot,
         repo_root=trust_root,
+        selector_root=ROOT,
         dist_dir=dist_dir,
         allowed_host=f"127.0.0.1:{port}",
         csrf_token=token,
@@ -191,6 +197,10 @@ def test_source_endpoint_serves_whole_and_fragment_focus_over_real_http(
             "/api/source",
             params={"unit": PYTHON_UNIT_ID, "fragment": "symbol:_PREAMBLE"},
         )
+        typescript_response = client.get(
+            "/api/source",
+            params={"unit": TYPESCRIPT_UNIT_ID, "fragment": "description"},
+        )
 
     assert whole_response.status_code == 200
     whole = whole_response.json()
@@ -232,6 +242,18 @@ def test_source_endpoint_serves_whole_and_fragment_focus_over_real_http(
     assert python_source["before"] + python_source["focus"] + python_source["after"] == (
         ROOT / PYTHON_SOURCE_PATH
     ).read_text(encoding="utf-8")
+
+    assert typescript_response.status_code == 200
+    typescript_source = typescript_response.json()
+    assert list(typescript_source) == list(python_source)
+    assert typescript_source["unit"] == TYPESCRIPT_UNIT_ID
+    assert typescript_source["fragment"]["id"] == "description"
+    assert typescript_source["kind"] == "typescript-tool"
+    assert typescript_source["editable"] is True
+    assert typescript_source["read_only_reason"] is None
+    assert typescript_source["before"] + typescript_source["focus"] + typescript_source[
+        "after"
+    ] == (ROOT / TYPESCRIPT_SOURCE_PATH).read_text(encoding="utf-8")
 
 
 def test_wrong_host_is_rejected_over_real_http(server: _RunningServer) -> None:

@@ -1,10 +1,13 @@
 """The seeded whole-file SourceAdapter: containment, membership, text-only decode."""
 
 import ast
+import json
+import threading
 import token
 import tokenize
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from pathlib import Path
+from typing import Literal
 
 import pytest
 from perk_dev.prose_map.catalog import build_catalog
@@ -13,6 +16,7 @@ from perk_dev.prose_review import source_adapter
 from perk_dev.prose_review.catalog import CatalogSnapshot
 from perk_dev.prose_review.source_adapter import (
     FocusedSource,
+    RangeResolution,
     ResolvedRange,
     SourceDiagnostic,
     SourceExtraction,
@@ -25,7 +29,14 @@ from perk_dev.prose_review.source_adapter import (
     source_adapter_for,
 )
 from perk_dev.prose_review.source_adapter import python as python_adapter_module
+from perk_dev.prose_review.source_adapter import typescript as typescript_adapter_module
 from perk_dev.prose_review.source_adapter.python import PythonSourceAdapter
+from perk_dev.prose_review.source_adapter.typescript import (
+    TypeScriptAdapterUnavailable,
+    TypeScriptSourceAdapter,
+)
+
+from perk.substrate.proc import ProcFailure
 
 ROOT = Path(__file__).parents[1]
 
@@ -141,6 +152,8 @@ def test_package_facade_has_the_exact_public_contract() -> None:
     ]
     assert not hasattr(source_adapter, "MarkdownSourceAdapter")
     assert not hasattr(source_adapter, "PythonSourceAdapter")
+    assert not hasattr(source_adapter, "TypeScriptAdapterUnavailable")
+    assert not hasattr(source_adapter, "TypeScriptSourceAdapter")
     assert not hasattr(source_adapter, "YamlSourceAdapter")
 
 
@@ -250,6 +263,24 @@ def _python_unit(
             kind=kind,
             path=path,
             selector="symbol:target",
+            fragments=(),
+        ),
+        capability="foundation",
+        audience="both",
+        role="context",
+    )
+
+
+def _typescript_unit(
+    kind: ProseKind = "typescript-tool",
+    path: str = "module.ts",
+) -> RoutedUnit:
+    return RoutedUnit(
+        candidate=Candidate(
+            id=f"{kind}:fixture",
+            kind=kind,
+            path=path,
+            selector="tool:fixture",
             fragments=(),
         ),
         capability="foundation",
@@ -399,9 +430,31 @@ def test_adapter_dispatch_and_semantic_check_hints() -> None:
     assert source_adapter_for(_python_unit("doc.md")) is None
     assert source_adapter_for(_python_unit("doc.ts", kind="managed-prose")) is None
 
+    typescript_adapter = TypeScriptSourceAdapter(ROOT)
+    for kind in ("typescript-tool", "typescript-model-call", "typescript-symbol"):
+        unit = _typescript_unit(kind)
+        assert source_adapter_for(unit, typescript_adapter=typescript_adapter) is typescript_adapter
+        assert source_adapter_for(unit) is None
+    assert (
+        source_adapter_for(
+            _typescript_unit("typescript-tool", "module.js"),
+            typescript_adapter=typescript_adapter,
+        )
+        is None
+    )
+    assert (
+        source_adapter_for(
+            _python_unit("module.ts", kind="python-symbol"),
+            typescript_adapter=typescript_adapter,
+        )
+        is None
+    )
+
 
 def test_read_source_whole_markdown_yaml_unsupported_and_unknown_fragment(
-    snapshot: CatalogSnapshot, tmp_path: Path
+    snapshot: CatalogSnapshot,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     (tmp_path / "AGENTS.md").write_bytes((ROOT / "AGENTS.md").read_bytes())
     clusters = tmp_path / "docs/learned/clusters.yaml"
@@ -459,6 +512,35 @@ def test_read_source_whole_markdown_yaml_unsupported_and_unknown_fragment(
     assert unsupported.read_only_reason == "unsupported-family"
     assert unsupported.before == "" and unsupported.after == ""
     assert unsupported.focus == unsupported_path.read_text(encoding="utf-8")
+
+    focused_typescript = read_source(
+        snapshot,
+        tmp_path,
+        unsupported_unit.candidate.id,
+        "description",
+        typescript_adapter=TypeScriptSourceAdapter(ROOT),
+    )
+    assert focused_typescript.editable is True
+    assert focused_typescript.read_only_reason is None
+    assert focused_typescript.before + focused_typescript.focus + focused_typescript.after == (
+        unsupported_path.read_text(encoding="utf-8")
+    )
+    assert focused_typescript.focus.startswith('"')
+
+    def unavailable(*_args: object, **_kwargs: object) -> str:
+        raise ProcFailure("timeout", ("node",))
+
+    monkeypatch.setattr(typescript_adapter_module, "run_checked", unavailable)
+    fallback = read_source(
+        snapshot,
+        tmp_path,
+        unsupported_unit.candidate.id,
+        "description",
+        typescript_adapter=TypeScriptSourceAdapter(ROOT),
+    )
+    assert fallback.editable is False
+    assert fallback.read_only_reason == "adapter-unavailable"
+    assert fallback.focus == unsupported_path.read_text(encoding="utf-8")
 
 
 def test_every_real_python_backed_fragment_resolves_and_recomposes(
@@ -753,3 +835,409 @@ def test_python_adapter_decorator_token_mismatch_fails_closed(
 
 def test_python_adapter_check_hint_is_only_prose_map() -> None:
     assert _python_adapter().affected_check_hints(_unit("doc.py")) == ("prose-map",)
+
+
+def _typescript_adapter() -> TypeScriptSourceAdapter:
+    return TypeScriptSourceAdapter(ROOT)
+
+
+def _ok_response(*results: dict[str, object]) -> str:
+    return json.dumps({"version": 1, "status": "ok", "results": results})
+
+
+def _resolved_result(selector: str, start: int = 0, end: int = 1) -> dict[str, object]:
+    return {
+        "selector": selector,
+        "status": "resolved",
+        "start": start,
+        "end": end,
+    }
+
+
+def test_typescript_adapter_invokes_exact_temp_snapshot_protocol_and_cleans_up(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    helper_root = tmp_path / "helper checkout"
+    helper_root.mkdir()
+    text = 'const value = "exact 😀";\n'
+    selectors = ("symbol:value", "tool:demo.description")
+    observed: dict[str, object] = {}
+
+    def fake_run_checked(
+        argv: Sequence[str],
+        *,
+        cwd: Path | None = None,
+        timeout: int,
+        env_overlay: Mapping[str, str] | None = None,
+    ) -> str:
+        request_path = Path(argv[2])
+        observed.update(
+            argv=tuple(argv),
+            cwd=cwd,
+            timeout=timeout,
+            env_overlay=env_overlay,
+            request_path=request_path,
+            request=json.loads(request_path.read_text(encoding="utf-8")),
+            existed=request_path.is_file(),
+        )
+        return _ok_response(
+            _resolved_result(selectors[0], 0, 5),
+            {
+                "selector": selectors[1],
+                "status": "unresolved",
+                "reason": "selector-not-found",
+                "line": None,
+                "column": None,
+            },
+        )
+
+    monkeypatch.setattr(typescript_adapter_module, "run_checked", fake_run_checked)
+    adapter = TypeScriptSourceAdapter(helper_root)
+    diagnostics = adapter.validate(text, selectors)
+
+    assert diagnostics == (
+        SourceDiagnostic(
+            code="selector-not-found",
+            message="The selector does not resolve in the current TypeScript source.",
+            selector=selectors[1],
+            line=None,
+            column=None,
+        ),
+    )
+    assert observed["argv"] == (
+        "node",
+        str(helper_root / "tools/prose-map/selector.ts"),
+        str(observed["request_path"]),
+    )
+    assert observed["cwd"] == helper_root
+    assert observed["timeout"] == 5
+    assert observed["env_overlay"] is None
+    assert observed["request"] == {
+        "version": 1,
+        "source": text,
+        "selectors": list(selectors),
+    }
+    assert observed["existed"] is True
+    request_path = observed["request_path"]
+    assert isinstance(request_path, Path)
+    assert not request_path.exists()
+    assert not str(request_path).startswith(str(helper_root))
+    assert text not in str(observed["argv"])
+
+
+def test_typescript_adapter_real_helper_resolves_and_recomposes_representative_sites() -> None:
+    adapter = _typescript_adapter()
+    text = (
+        'pi.registerTool({ name: "demo", description: "direct" + suffix, '
+        "promptSnippet: helper });\n"
+        "function owner() { client.complete(`hello ${name}`); }\n"
+    )
+    direct = adapter.extract(text, "tool:demo.description")
+    assert direct.focus == '"direct" + suffix'
+    assert direct.before + direct.focus + direct.after == text
+    assert isinstance(direct.resolution, ResolvedRange)
+
+    call = adapter.extract(text, "symbol:owner/call:complete/0/argument:0")
+    assert call.focus == "`hello ${name}`"
+    assert call.before + call.focus + call.after == text
+    assert isinstance(call.resolution, ResolvedRange)
+
+    unsupported = adapter.extract(text, "tool:demo.promptSnippet")
+    assert isinstance(unsupported.resolution, UnresolvedRange)
+    assert unsupported.resolution.reason == "unsupported-source-shape"
+    assert unsupported.before == ""
+    assert unsupported.focus == text
+    assert unsupported.after == ""
+
+
+def test_typescript_adapter_maps_every_diagnostic_and_parser_short_circuits_empty_batch(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    selectors = (
+        "unsupported",
+        "shape",
+        "missing",
+        "duplicate",
+    )
+    response = _ok_response(
+        {
+            "selector": selectors[0],
+            "status": "unresolved",
+            "reason": "unsupported-selector",
+            "line": None,
+            "column": None,
+        },
+        {
+            "selector": selectors[1],
+            "status": "unresolved",
+            "reason": "unsupported-source-shape",
+            "line": 1,
+            "column": 1,
+        },
+        {
+            "selector": selectors[2],
+            "status": "unresolved",
+            "reason": "selector-not-found",
+            "line": None,
+            "column": None,
+        },
+        {
+            "selector": selectors[3],
+            "status": "unresolved",
+            "reason": "selector-ambiguous",
+            "line": 1,
+            "column": 2,
+        },
+    )
+    calls = 0
+
+    def fake_run_checked(
+        _argv: Sequence[str],
+        *,
+        cwd: Path | None = None,
+        timeout: int,
+        env_overlay: Mapping[str, str] | None = None,
+    ) -> str:
+        del cwd, timeout, env_overlay
+        nonlocal calls
+        calls += 1
+        return response
+
+    monkeypatch.setattr(typescript_adapter_module, "run_checked", fake_run_checked)
+    diagnostics = _typescript_adapter().validate("text", selectors)
+    actual_diagnostics = [
+        (item.code, item.message, item.selector, item.line, item.column) for item in diagnostics
+    ]
+    assert actual_diagnostics == [
+        (
+            "unsupported-selector",
+            "The selector is not supported by the TypeScript adapter.",
+            "unsupported",
+            None,
+            None,
+        ),
+        (
+            "unsupported-source-shape",
+            "The TypeScript selector resolves to a source shape that is not safely editable.",
+            "shape",
+            1,
+            1,
+        ),
+        (
+            "selector-not-found",
+            "The selector does not resolve in the current TypeScript source.",
+            "missing",
+            None,
+            None,
+        ),
+        (
+            "selector-ambiguous",
+            "The selector resolves more than once in the current TypeScript source.",
+            "duplicate",
+            1,
+            2,
+        ),
+    ]
+    assert calls == 1
+
+    monkeypatch.setattr(
+        typescript_adapter_module,
+        "run_checked",
+        lambda *_args, **_kwargs: json.dumps(
+            {"version": 1, "status": "invalid-source", "line": 1, "column": 2}
+        ),
+    )
+    assert _typescript_adapter().validate("x", ()) == (
+        SourceDiagnostic(
+            code="syntax-error",
+            message="The TypeScript source is not syntactically valid.",
+            selector=None,
+            line=1,
+            column=2,
+        ),
+    )
+
+
+@pytest.mark.parametrize(
+    "stdout",
+    [
+        "not json",
+        json.dumps({"version": 2, "status": "ok", "results": []}),
+        json.dumps({"version": 1, "status": "unknown", "results": []}),
+        json.dumps({"version": 1, "status": "ok", "results": [], "extra": True}),
+        _ok_response(_resolved_result("wrong")),
+        _ok_response(_resolved_result("selected", -1, 1)),
+        _ok_response(_resolved_result("selected", 1, 1)),
+        _ok_response(_resolved_result("selected", 0, 5)),
+        _ok_response(
+            {
+                "selector": "selected",
+                "status": "unresolved",
+                "reason": "selector-not-found",
+                "line": 1,
+                "column": 1,
+            }
+        ),
+        _ok_response(
+            {
+                "selector": "selected",
+                "status": "unresolved",
+                "reason": "selector-ambiguous",
+                "line": None,
+                "column": None,
+            }
+        ),
+        _ok_response(
+            {
+                "selector": "selected",
+                "status": "unresolved",
+                "reason": "selector-ambiguous",
+                "line": 1,
+                "column": None,
+            }
+        ),
+        _ok_response(
+            {
+                "selector": "selected",
+                "status": "unresolved",
+                "reason": "selector-ambiguous",
+                "line": 2,
+                "column": 1,
+            }
+        ),
+        _ok_response(
+            {
+                "selector": "selected",
+                "status": "unresolved",
+                "reason": "selector-ambiguous",
+                "line": 1,
+                "column": 3,
+            }
+        ),
+        json.dumps({"version": 1, "status": "invalid-source", "line": 2, "column": 1}),
+    ],
+)
+def test_typescript_adapter_rejects_protocol_corruption(
+    monkeypatch: pytest.MonkeyPatch,
+    stdout: str,
+) -> None:
+    monkeypatch.setattr(
+        typescript_adapter_module,
+        "run_checked",
+        lambda *_args, **_kwargs: stdout,
+    )
+    with pytest.raises(TypeScriptAdapterUnavailable):
+        _typescript_adapter().resolve_range("x", "selected")
+
+
+@pytest.mark.parametrize("kind", ["spawn", "timeout", "exit"])
+def test_typescript_adapter_translates_every_process_failure_and_releases_slot(
+    monkeypatch: pytest.MonkeyPatch,
+    kind: Literal["spawn", "timeout", "exit"],
+) -> None:
+    def fail(
+        _argv: Sequence[str],
+        *,
+        cwd: Path | None = None,
+        timeout: int,
+        env_overlay: Mapping[str, str] | None = None,
+    ) -> str:
+        del cwd, timeout, env_overlay
+        raise ProcFailure(kind, ("node",))
+
+    monkeypatch.setattr(typescript_adapter_module, "run_checked", fail)
+    adapter = _typescript_adapter()
+    with pytest.raises(TypeScriptAdapterUnavailable):
+        adapter.resolve_range("x", "selected")
+
+    monkeypatch.setattr(
+        typescript_adapter_module,
+        "run_checked",
+        lambda *_args, **_kwargs: _ok_response(_resolved_result("selected")),
+    )
+    assert adapter.resolve_range("x", "selected") == ResolvedRange(
+        status="resolved",
+        source_range=SourceRange(start=0, end=1),
+    )
+
+
+def test_typescript_adapter_translates_tempfile_failure_and_releases_slot(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    adapter = _typescript_adapter()
+    original_temporary_directory = typescript_adapter_module.tempfile.TemporaryDirectory
+
+    def fail_tempfile(*_args: object, **_kwargs: object) -> object:
+        raise OSError("fixture tempfile failure")
+
+    monkeypatch.setattr(typescript_adapter_module.tempfile, "TemporaryDirectory", fail_tempfile)
+    with pytest.raises(TypeScriptAdapterUnavailable):
+        adapter.resolve_range("x", "selected")
+
+    monkeypatch.setattr(
+        typescript_adapter_module.tempfile,
+        "TemporaryDirectory",
+        original_temporary_directory,
+    )
+    monkeypatch.setattr(
+        typescript_adapter_module,
+        "run_checked",
+        lambda *_args, **_kwargs: _ok_response(_resolved_result("selected")),
+    )
+    assert isinstance(adapter.resolve_range("x", "selected"), ResolvedRange)
+
+
+def test_typescript_adapter_is_fail_fast_under_overlap_and_recovers(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    entered = threading.Event()
+    release = threading.Event()
+    calls = 0
+
+    def blocked(
+        _argv: Sequence[str],
+        *,
+        cwd: Path | None = None,
+        timeout: int,
+        env_overlay: Mapping[str, str] | None = None,
+    ) -> str:
+        del cwd, timeout, env_overlay
+        nonlocal calls
+        calls += 1
+        entered.set()
+        assert release.wait(timeout=5)
+        return _ok_response(_resolved_result("selected"))
+
+    monkeypatch.setattr(typescript_adapter_module, "run_checked", blocked)
+    adapter = _typescript_adapter()
+    first_result: list[RangeResolution] = []
+    failures: list[BaseException] = []
+
+    def first() -> None:
+        try:
+            first_result.append(adapter.resolve_range("x", "selected"))
+        except BaseException as exc:
+            failures.append(exc)
+
+    thread = threading.Thread(target=first)
+    thread.start()
+    assert entered.wait(timeout=5)
+    with pytest.raises(TypeScriptAdapterUnavailable, match="busy"):
+        adapter.resolve_range("x", "selected")
+    assert calls == 1
+
+    release.set()
+    thread.join(timeout=5)
+    assert not thread.is_alive()
+    assert failures == []
+    assert first_result == [
+        ResolvedRange(status="resolved", source_range=SourceRange(start=0, end=1))
+    ]
+
+    assert isinstance(adapter.resolve_range("x", "selected"), ResolvedRange)
+    assert calls == 2
+
+
+def test_typescript_adapter_check_hint_is_only_prose_map() -> None:
+    assert _typescript_adapter().affected_check_hints(_python_unit("module.ts")) == ("prose-map",)

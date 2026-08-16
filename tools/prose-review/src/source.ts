@@ -4,6 +4,7 @@ import { isProseKind, type ProseKind } from "./wire.ts";
 export const READ_ONLY_REASONS = [
   "whole-unit",
   "unsupported-family",
+  "adapter-unavailable",
   "unsupported-selector",
   "unsupported-source-shape",
   "selector-not-found",
@@ -24,6 +25,11 @@ export const READ_ONLY_PRESENTATION = {
     badge: "Read-only source",
     heading: "Adapter not available",
     explanation: "This source family is readable, but its focused adapter has not landed yet.",
+  },
+  "adapter-unavailable": {
+    badge: "Read-only source",
+    heading: "Adapter unavailable",
+    explanation: "The source is readable, but its focused adapter could not run safely.",
   },
   "unsupported-selector": {
     badge: "Read-only source",

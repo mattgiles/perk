@@ -25,6 +25,7 @@ type SourceReadFailure = Literal["unknown_unit", "unknown_fragment", "not_found"
 type ReadOnlyReason = Literal[
     "whole-unit",
     "unsupported-family",
+    "adapter-unavailable",
     "unsupported-selector",
     "unsupported-source-shape",
     "selector-not-found",
