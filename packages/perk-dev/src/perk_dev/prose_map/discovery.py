@@ -21,6 +21,7 @@ from perk_dev.prose_map.models import (
     TypeScriptCatalogInput,
     UnclassifiedToolFieldIssue,
 )
+from perk_dev.prose_map.python import python_symbol_name, python_symbols
 
 _TYPESCRIPT_SCAN_TIMEOUT_S = 60
 _PYTHON_PROSE_MARKERS = (
@@ -59,25 +60,6 @@ def _markdown_candidates(root: Path) -> list[Candidate]:
                 )
             )
     return candidates
-
-
-def _python_symbols(tree: ast.Module) -> list[ast.AST]:
-    return [
-        node
-        for node in tree.body
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Assign, ast.AnnAssign))
-    ]
-
-
-def _symbol_name(node: ast.AST) -> str | None:
-    if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-        return node.name
-    if isinstance(node, ast.Assign):
-        names = [target.id for target in node.targets if isinstance(target, ast.Name)]
-        return names[0] if len(names) == 1 else None
-    if isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
-        return node.target.id
-    return None
 
 
 def _without_docstring(node: ast.AST) -> list[ast.AST]:
@@ -123,7 +105,9 @@ def _parse_python(path: Path) -> ast.Module:
 
 def _require_python_symbol(root: Path, relative: str, name: str) -> None:
     path = root / relative
-    matches = [node for node in _python_symbols(_parse_python(path)) if _symbol_name(node) == name]
+    matches = [
+        node for node in python_symbols(_parse_python(path)) if python_symbol_name(node) == name
+    ]
     if len(matches) != 1:
         raise DiscoveryError(
             f"Python prose selector {relative}::symbol:{name} resolved {len(matches)} times"
@@ -135,8 +119,8 @@ def _python_candidates(root: Path) -> list[Candidate]:
     for source_root in _PYTHON_SOURCE_ROOTS:
         for path in sorted((root / source_root).rglob("*.py")):
             relative = path.relative_to(root).as_posix()
-            for node in _python_symbols(_parse_python(path)):
-                name = _symbol_name(node)
+            for node in python_symbols(_parse_python(path)):
+                name = python_symbol_name(node)
                 if name is None:
                     continue
                 strings = _owned_strings(node)
