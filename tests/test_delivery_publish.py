@@ -8,11 +8,12 @@ checkpoint pair → completed). OFFLINE — no git / gh / network.
 
 from dataclasses import replace
 from pathlib import Path
+from typing import cast
 
 import pytest
 
 from perk.backends.issue_backend import PlanHeaderUpdate, PlanState
-from perk.delivery import publish, sync
+from perk.delivery import DeliveryError, SyncRequest, SyncResult, publish
 from perk.delivery.journal import (
     EventRole,
     JournalEvent,
@@ -231,8 +232,8 @@ class _World:
         self.bodies: list[str] = []
         self.reconstruct_error: Exception | None = None
         self.writer_probe = _WriterProbe()
-        self.sync_result: sync.SyncResult | None = None
-        self.sync_error: sync.SyncError | None = None
+        self.sync_result: SyncResult | None = None
+        self.sync_error: DeliveryError | None = None
         self.sync_checkpoint_updates: dict[str, tuple[str | None, str | None]] = {}
         self.sync_calls: list[dict[str, object]] = []
 
@@ -505,8 +506,8 @@ class _World:
 
     # ---------------------------------------------------------------- driving
 
-    def _synchronize(self, repo_root: Path, **kwargs) -> sync.SyncResult:
-        self.sync_calls.append({"repo_root": repo_root, **kwargs})
+    def _synchronize(self, request: SyncRequest, *, consent=None) -> SyncResult:
+        self.sync_calls.append({"request": request, "consent": consent})
         if self.sync_error is not None:
             raise self.sync_error
         if self.sync_result is None:
@@ -534,48 +535,60 @@ class _World:
             )
         return self.sync_result
 
-    def publish(self, plan_id: str, *, run_id: str = "01RUN") -> publish.PublicationResult:
+    def publish(
+        self,
+        plan_id: str,
+        *,
+        run_id: str = "01RUN",
+        trigger_run_id: str | None = None,
+    ) -> publish.PublicationResult:
         def _reconstruct(root: Path, objective_id: str):
             if self.reconstruct_error is not None:
                 raise self.reconstruct_error
             return self._reconstruct(root, objective_id)
 
-        return publish.publish_layer(
-            ROOT,
-            plan_id=plan_id,
-            run_id=run_id,
-            title="T",
-            compose_body=lambda facts, pr_number: (
-                f"body layer {facts.position}/{facts.total}"
-                + (f"\n\n`gh pr checkout {pr_number}`" if pr_number is not None else "")
-            ),
-            header_fields=lambda pr_number: {"branch": "b", "pr": str(pr_number)},
-            remote_writers=self.writer_probe,
-            worktree_root=Path("/wt"),
-            synchronize=self._synchronize,
-            reconstruct=_reconstruct,
-            persistence_factory=lambda root: self.persistence,
-            issues_factory=lambda root: self._issues(),
-            stack_probe=self._stack_probe,
-            pr_facts=self._pr_facts,
-            stack_read=self._stack_read,
-            stack_create=self._stack_create,
-            stack_append=self._stack_append,
-            create_pr=self._create_pr,
-            get_pr=self._get_pr,
-            update_pr_body=self._update_pr_body,
-            update_pr_base=self._update_pr_base,
-            reopen_pr=self._reopen_pr,
-            validate_pr_body=lambda body, *, pr_number: self.validate_errors,
-            fetch=self._fetch,
-            remote_head=self._remote_head,
-            local_head=self._local_head,
-            is_ancestor=self._is_ancestor,
-            push=self._push,
-            pr_for_branch=self._pr_for_branch,
-            sleep=self.sleeps.append,
-            now=lambda: "2026-01-01T00:00:00Z",
-        )
+        world = self
+
+        class _Delivery:
+            def sync(self, request: SyncRequest, *, consent=None) -> SyncResult:
+                return world._synchronize(request, consent=consent)
+
+        with pytest.MonkeyPatch.context() as monkeypatch:
+            monkeypatch.setattr(publish.observe, "resolve_delivery", lambda root: _Delivery())
+            return publish.publish_layer(
+                ROOT,
+                plan_id=plan_id,
+                run_id=run_id,
+                trigger_run_id=trigger_run_id,
+                title="T",
+                compose_body=lambda facts, pr_number: (
+                    f"body layer {facts.position}/{facts.total}"
+                    + (f"\n\n`gh pr checkout {pr_number}`" if pr_number is not None else "")
+                ),
+                header_fields=lambda pr_number: {"branch": "b", "pr": str(pr_number)},
+                reconstruct=_reconstruct,
+                persistence_factory=lambda root: self.persistence,
+                issues_factory=lambda root: self._issues(),
+                stack_probe=self._stack_probe,
+                pr_facts=self._pr_facts,
+                stack_read=self._stack_read,
+                stack_create=self._stack_create,
+                stack_append=self._stack_append,
+                create_pr=self._create_pr,
+                get_pr=self._get_pr,
+                update_pr_body=self._update_pr_body,
+                update_pr_base=self._update_pr_base,
+                reopen_pr=self._reopen_pr,
+                validate_pr_body=lambda body, *, pr_number: self.validate_errors,
+                fetch=self._fetch,
+                remote_head=self._remote_head,
+                local_head=self._local_head,
+                is_ancestor=self._is_ancestor,
+                push=self._push,
+                pr_for_branch=self._pr_for_branch,
+                sleep=self.sleeps.append,
+                now=lambda: "2026-01-01T00:00:00Z",
+            )
 
     def events(self, kind: str) -> list[tuple]:
         return [t for t in self.timeline if t[0] == kind]
@@ -1289,13 +1302,13 @@ def _lower_published_world() -> _World:
 
 def _sync_result(
     *,
-    affected: tuple[sync.SyncedLayer, ...],
+    affected: tuple[SyncResult.Layer, ...],
     operation_id: str | None = "01SYNC",
     no_op: bool = False,
     resumed: bool = False,
     notes: tuple[str, ...] = (),
-) -> sync.SyncResult:
-    return sync.SyncResult(
+) -> SyncResult:
+    return SyncResult(
         objective_id=OBJECTIVE,
         objective_url="u",
         redirected_from=None,
@@ -1314,20 +1327,22 @@ def _sync_result(
 def test_lower_claimed_layer_delegates_to_triggered_sync():
     world = _lower_published_world()
     affected = (
-        sync.SyncedLayer("1", "101", "plan-101", 55, P1, C1),
-        sync.SyncedLayer("2", "102", "plan-102", 56, P2, C2),
+        SyncResult.Layer("1", "101", "plan-101", 55, P1, C1),
+        SyncResult.Layer("2", "102", "plan-102", 56, P2, C2),
     )
     world.sync_result = _sync_result(affected=affected, notes=("residue",))
 
-    result = world.publish("101")
+    result = world.publish("101", trigger_run_id="01RAW")
 
     (call,) = world.sync_calls
-    assert call["objective_id"] == OBJECTIVE
-    assert call["run_id"] == "01RUN"
-    assert call["remote_writers"] is world.writer_probe
-    assert call["worktree_root"] == Path("/wt")
-    assert call["trigger_plan_id"] == "101" and call["approve"] is None
-    assert "include_base" not in call
+    assert call["request"] == SyncRequest(
+        mode="cascade",
+        objective_id=OBJECTIVE,
+        run_id="01RUN",
+        trigger_plan_id="101",
+        trigger_run_id="01RAW",
+    )
+    assert call["consent"] is None
     assert result.operation_id == "01SYNC"
     assert result.parent_checkpoint_sha == MAIN and result.published_head_sha == C1
     assert (
@@ -1355,13 +1370,14 @@ def test_drifted_claimed_successor_still_routes_to_cascade():
         published_head_sha=C3,
     )
     world.pr_entries[57] = _PrEntry(57, "plan-103", "plan-102")
-    affected = (sync.SyncedLayer("2", "102", "plan-102", 56, P2, C2),)
+    affected = (SyncResult.Layer("2", "102", "plan-102", 56, P2, C2),)
     world.sync_result = _sync_result(affected=affected)
 
     result = world.publish("102")
 
     assert len(world.sync_calls) == 1
-    assert world.sync_calls[0]["trigger_plan_id"] == "102"
+    request = cast(SyncRequest, world.sync_calls[0]["request"])
+    assert request.trigger_plan_id == "102"
     assert result.published_head_sha == C2
 
 
@@ -1381,7 +1397,7 @@ def test_cascade_noop_uses_fresh_post_sync_checkpoints_and_typed_operation():
 def test_cascade_refuses_sync_result_missing_the_trigger():
     world = _lower_published_world()
     world.sync_result = _sync_result(
-        affected=(sync.SyncedLayer("2", "102", "plan-102", 56, P2, C2),)
+        affected=(SyncResult.Layer("2", "102", "plan-102", 56, P2, C2),)
     )
     with pytest.raises(publish.PublicationError) as excinfo:
         world.publish("101")
@@ -1392,7 +1408,7 @@ def test_cascade_refuses_sync_result_missing_the_trigger():
 def test_cascade_refuses_checkpoint_disagreement_after_sync():
     world = _lower_published_world()
     world.sync_result = _sync_result(
-        affected=(sync.SyncedLayer("1", "101", "plan-101", 55, P1, C1),)
+        affected=(SyncResult.Layer("1", "101", "plan-101", 55, P1, C1),)
     )
     world.sync_checkpoint_updates["1"] = (MAIN, C3)
     with pytest.raises(publish.PublicationError) as excinfo:
@@ -1413,9 +1429,9 @@ def test_cascade_noop_refuses_incomplete_fresh_checkpoint_pair():
 
 def test_cascade_propagates_sync_error_raw():
     world = _lower_published_world()
-    expected = sync.SyncError("branch drift", error_type="remote_drift")
+    expected = DeliveryError("branch drift", error_type="remote_drift")
     world.sync_error = expected
-    with pytest.raises(sync.SyncError) as excinfo:
+    with pytest.raises(DeliveryError) as excinfo:
         world.publish("101")
     assert excinfo.value is expected
 

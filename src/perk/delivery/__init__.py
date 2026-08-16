@@ -1,11 +1,10 @@
 """The compact public delivery façade and retained operation exports.
 
-The canonical surface is the repository-scoped :class:`Delivery` status plus flat Prepare family
-over three nominal aggregate authorities. Pure train projection, layer context/core, private
-capability rows, production adapters, and compatibility readers are internal modules. Existing
-journal, continuation, publication, synchronization, finalization, and landing exports remain
-public while their operation families migrate; ``probe_atomic_push_urls`` is retained only for
-the deferred sync owner.
+The canonical surface is the repository-scoped :class:`Delivery` status, Prepare, and sync
+families over three nominal aggregate authorities. Pure train projection, layer context/core,
+capability rows, production adapters, synchronization internals, and compatibility readers are
+internal modules. Journal, publication, finalization, and landing exports remain public while
+their operation families migrate.
 """
 
 from perk.delivery.facade import (

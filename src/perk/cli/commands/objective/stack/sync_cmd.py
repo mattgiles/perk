@@ -1,11 +1,11 @@
 """``perk objective stack sync`` — the published-suffix synchronization worker
 (contracts.md §8.49).
 
-The cold surface over ``perk.delivery.sync``: resolve the objective + run id, wire the
-fail-closed remote-writer probe, render the cascade (or abort preview) for confirmation on
+The cold surface over ``Delivery.sync``: resolve the objective + run id, build one closed
+request, render the cascade (or abort preview) for confirmation on
 stderr (``--yes`` auto-approves; non-interactive without ``--yes`` is a typed refusal —
 never a hang, never a silent push), and report the result-arm envelope. The control flags:
-``--dry-run`` (side-effect-free preview; no confirmation needed), ``--adopt NODE`` (accept
+``--dry-run`` (pre-consent preview; no confirmation needed), ``--adopt NODE`` (accept
 an out-of-band remote edit as a cascade source), ``--continue``/``--abort`` (resume or
 discard a retained conflict stop).
 """

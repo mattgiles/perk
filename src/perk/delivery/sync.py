@@ -17,7 +17,7 @@ from pathlib import Path
 from typing import Protocol, cast
 
 from perk import plan
-from perk.delivery import continuation, oplock
+from perk.delivery import continuation, oplock, writers
 from perk.delivery.capability import (
     _atomic_push_check,
     _empty_push_urls_check,
@@ -49,7 +49,6 @@ from perk.delivery.train import (
     LayerWriter,
     TrainReconstructionError,
 )
-from perk.delivery.writers import WriterObservationError
 from perk.github import GitHubError, stacks
 from perk.substrate import config as config_mod
 from perk.substrate import git as git_mod
@@ -556,7 +555,7 @@ def _preflight(
             trigger_plan_id=request.trigger_plan_id,
             trigger_run_id=request.trigger_run_id,
         )
-    except WriterObservationError as exc:
+    except writers.WriterObservationError as exc:
         raise SyncError(
             f"could not observe the active remote writers ({exc}) — refusing to cascade "
             "under an unreadable writer preflight",

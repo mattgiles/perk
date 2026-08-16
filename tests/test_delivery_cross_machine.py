@@ -32,7 +32,6 @@ from perk import objective
 from perk.backends.issue_backend import PlanHeaderUpdate, PlanState
 from perk.backends.objective_store import ObjectiveRef, ObjectiveState
 from perk.delivery import continuation, publish, recover
-from perk.delivery import sync as sync_mod
 from perk.delivery import transfer as transfer_mod
 from perk.delivery.finalize import (
     LandFinalization,
@@ -291,11 +290,6 @@ class _SharedWorld:
                 state=old.state,
             )
         return True
-
-
-class _WriterProbe:
-    def active_plan_ids(self, plan_ids) -> frozenset[str]:
-        return frozenset()
 
 
 # ----------------------------------------------------------------- one machine
@@ -597,9 +591,6 @@ class _Machine:
         )
 
     def publish(self, plan_id: str, *, run_id: str = "01RUNB") -> publish.PublicationResult:
-        def _no_sync(repo_root: Path, **kwargs) -> sync_mod.SyncResult:
-            raise AssertionError("no suffix synchronization expected on this arm")
-
         return publish.publish_layer(
             self.root,
             plan_id=plan_id,
@@ -607,9 +598,6 @@ class _Machine:
             title="T",
             compose_body=lambda facts, pr_number: f"body layer {facts.position}/{facts.total}",
             header_fields=lambda pr_number: {"branch": "b", "pr": str(pr_number)},
-            remote_writers=_WriterProbe(),
-            worktree_root=self.root / ".wt",
-            synchronize=_no_sync,
             reconstruct=self._reconstruct,
             persistence_factory=lambda root: self.shared.persistence,
             issues_factory=lambda root: self.shared,

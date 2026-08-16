@@ -33,7 +33,7 @@ class _FailureMixin:
 
 
 class FakeDeliveryPersistence(_FailureMixin, DeliveryPersistence):
-    """Minimum status fake for objective, plan, and journal reads."""
+    """Persistence authority fake for status, Prepare, and synchronization."""
 
     def __init__(
         self,
@@ -113,7 +113,7 @@ class FakeDeliveryPersistence(_FailureMixin, DeliveryPersistence):
 
 
 class FakeDeliveryGit(_FailureMixin, DeliveryGit):
-    """Minimum status/Prepare fake for trunk and Git observations."""
+    """Git authority fake for status, Prepare, and synchronization."""
 
     def __init__(
         self,
@@ -292,7 +292,7 @@ class FakeDeliveryGit(_FailureMixin, DeliveryGit):
 
 
 class FakeDeliveryGitHub(_FailureMixin, DeliveryGitHub):
-    """Minimum status/Prepare fake for GitHub observations."""
+    """GitHub authority fake for status, Prepare, and synchronization."""
 
     def __init__(
         self,

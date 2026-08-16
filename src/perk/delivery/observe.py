@@ -1,12 +1,12 @@
 """Production adapters for the delivery façade and deferred internal readers.
 
 :func:`resolve_delivery` is the sole public production constructor for the canonical
-:class:`perk.delivery.facade.Delivery` status and Prepare variants. Construction is
+:class:`perk.delivery.facade.Delivery` status, Prepare, and sync variants. Construction is
 assignment-only and does no configuration, credential, Git, subprocess, or network work; the
 nominal adapters resolve or observe their authorities only when an operation needs them.
 
 The compatibility ``TrainReads`` / ``resolve_train_reads`` / ``reconstruct_repo_train`` seams
-remain internal while the later delivery operation families migrate. Landing observations also
+remain internal while the deferred delivery operation families migrate. Landing observations also
 remain here. Stable Git/GitHub failures become typed pure-core errors, while the preview stack
 read and landing-readiness enrichment retain their documented tolerant/fail-closed postures.
 """
@@ -35,8 +35,6 @@ from perk.delivery.train import (
     reconstruct_train,
 )
 from perk.github import GitHubError, prs, stacks
-from perk.run import discovery
-from perk.state import cache
 from perk.substrate import git as git_mod
 
 
@@ -197,6 +195,8 @@ def _corroborated_remote_run_id(
     """Return an invoking remote run only when local run authority proves the exact pair."""
     if requested_run_id is None or environ.get("PERK_RUN_ID") != requested_run_id:
         return None
+    from perk.state import cache  # noqa: PLC0415 — preserve delivery import ordering
+
     try:
         handoff = cache.read_handoff(repo_root, requested_run_id)
         plan_ref = cache.read_plan_ref(repo_root)
@@ -267,6 +267,8 @@ class RepoDeliveryGitHub(DeliveryGitHub):
         trigger_plan_id: str | None,
         trigger_run_id: str | None,
     ) -> frozenset[str]:
+        from perk.run import discovery  # noqa: PLC0415 — preserve delivery import ordering
+
         excluded_run_id: str | None = None
         excluded_plan_id: str | None = None
         if trigger_plan_id is not None and trigger_run_id is not None:

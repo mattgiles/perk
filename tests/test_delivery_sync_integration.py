@@ -1,9 +1,9 @@
 """Candidate-calculation integration for the sync operation (real repos + a bare remote).
 
-The one non-hermetic sync lane: ``synchronize_train`` runs with its PRODUCTION git seams
+The one non-hermetic sync lane: ``Delivery.sync`` runs with ``RepoDeliveryGit``
 (fetch/rebase/atomic push/temp refs/isolated worktree) against a real three-layer train on a
-bare ``origin`` — only the train reconstruction, the GitHub reads, persistence, and the
-writer probe are faked. Pins the exact transplanted heads (parentage, tree content), that
+bare ``origin`` — only the status projection, GitHub reads, and persistence are faked. Pins
+the exact transplanted heads (parentage, tree content), that
 user branches/worktrees never move, and that the isolated calculation residue is cleaned.
 The protocol arms themselves are pinned hermetically in ``test_delivery_sync.py``.
 """
@@ -11,12 +11,24 @@ The protocol arms themselves are pinned hermetically in ``test_delivery_sync.py`
 import os
 import shutil
 import subprocess
+from dataclasses import replace
 from pathlib import Path
-from typing import ClassVar
+from typing import ClassVar, cast
 
 import pytest
 
-from perk.delivery import continuation, recover, sync
+from perk.delivery import (
+    Delivery,
+    DeliveryGitHub,
+    DeliveryPersistence,
+    StatusRequest,
+    StatusResult,
+    SyncRequest,
+    continuation,
+    observe,
+    recover,
+    sync,
+)
 from perk.delivery.journal import (
     EventRole,
     JournalFold,
@@ -35,9 +47,9 @@ from perk.delivery.train import (
     LayerPr,
     LayerPublication,
     LayerWriter,
+    PrFactsView,
     TrainLayer,
 )
-from perk.github.stacks import PrDeliveryFacts, StackRestEntry, StackRestFacts
 from perk.substrate import git as git_mod
 
 
@@ -81,13 +93,8 @@ class _Recorder:
         self.checkpoints.append((plan_id, parent_checkpoint_sha, published_head_sha))
 
 
-class _NoWriters:
-    def active_plan_ids(self, plan_ids) -> frozenset[str]:
-        return frozenset()
-
-
-class _PrState:
-    """GitHub's branch-head view without repeatedly shelling into the bare test remote."""
+class _GitHub:
+    """Strict GitHub facts backed by the real test remote's branch heads."""
 
     _BRANCHES: ClassVar[dict[int, tuple[str, str]]] = {
         201: ("plan-101", "main"),
@@ -95,24 +102,53 @@ class _PrState:
         203: ("plan-103", "plan-102"),
     }
 
-    def __init__(self, heads: dict[str, str]) -> None:
-        self._heads = heads
+    def __init__(self, repo_root: Path) -> None:
+        self._repo_root = repo_root
 
-    def read(self, *, number: int, repo_root: Path) -> PrDeliveryFacts | None:
+    def pr_facts(self, number: int) -> PrFactsView | None:
         branch, base = self._BRANCHES[number]
-        return PrDeliveryFacts(
-            number=number,
-            state="OPEN",
-            is_draft=True,
-            base_ref=base,
-            head_ref=branch,
-            head_sha=self._heads[branch],
+        head = git_mod.remote_branch_head(self._repo_root, branch)
+        assert head is not None
+        return PrFactsView(number, "OPEN", True, base, branch, head)
+
+    def strict_stack_members(self, number: int) -> tuple[int, ...] | None:
+        return (201, 202, 203) if number in self._BRANCHES else None
+
+    def active_writer_plan_ids(
+        self,
+        plan_ids: tuple[str, ...],
+        *,
+        trigger_plan_id: str | None,
+        trigger_run_id: str | None,
+    ) -> frozenset[str]:
+        return frozenset()
+
+
+class _IntegrationDelivery(Delivery):
+    def __init__(self, repo_root: Path, recorder: _Recorder, train: DeliveryTrain) -> None:
+        self._train = train
+        super().__init__(
+            persistence=cast("DeliveryPersistence", recorder),
+            git=observe.RepoDeliveryGit(repo_root),
+            github=cast("DeliveryGitHub", _GitHub(repo_root)),
         )
 
-    def push_atomic(self, repo: Path, updates: list[git_mod.RefUpdate]) -> None:
-        git_mod.push_atomic_with_leases(repo, updates)
-        for update in updates:
-            self._heads[update.branch] = update.new_sha
+    def status(self, request: StatusRequest) -> StatusResult:
+        return StatusResult(
+            self._train.objective_id,
+            self._train.objective_url,
+            self._train.redirected_from,
+            self._train,
+            None,
+        )
+
+
+def _runtime(worktree_root: Path) -> sync._SyncRuntime:
+    return replace(
+        sync._DEFAULT_SYNC_RUNTIME,
+        worktree_root=lambda repo_root: worktree_root,
+        sleep=lambda seconds: None,
+    )
 
 
 def _layer(node_id: str, plan_id: str, pr: int, parent: str, head: str) -> TrainLayer:
@@ -182,31 +218,11 @@ def test_amended_bottom_layer_cascades_with_exact_transplants(tmp_path):
         observed_base_head_sha=main_sha,
     )
 
-    pr_state = _PrState({"plan-101": a1, "plan-102": b1, "plan-103": c1})
-
-    def stack_read(*, number: int, repo_root: Path) -> StackRestFacts | None:
-        entries = tuple(
-            StackRestEntry(
-                pr_number=n, state="open", draft=True, merged=False, head_ref="", head_sha=""
-            )
-            for n in (201, 202, 203)
-        )
-        return StackRestFacts(number=9, size=3, entries=entries)
-
     recorder = _Recorder()
-    result = sync.synchronize_train(
-        work,
-        objective_id="500",
-        run_id="01RUN",
-        remote_writers=_NoWriters(),
-        worktree_root=work / ".worktrees",
-        reconstruct=lambda root, oid: train,
-        persistence_factory=lambda root: recorder,
-        pr_facts=pr_state.read,
-        stack_read=stack_read,
-        push_atomic=pr_state.push_atomic,
-        sleep=lambda seconds: None,
-    )
+    delivery = _IntegrationDelivery(work, recorder, train)
+    with pytest.MonkeyPatch.context() as monkeypatch:
+        monkeypatch.setattr(sync, "_DEFAULT_SYNC_RUNTIME", _runtime(work / ".worktrees"))
+        result = delivery.sync(SyncRequest(mode="cascade", objective_id="500", run_id="01RUN"))
 
     # The whole claimed prefix cascaded from the amended bottom layer.
     assert [s.plan_id for s in result.affected] == ["101", "102", "103"]
@@ -243,8 +259,8 @@ def test_amended_bottom_layer_cascades_with_exact_transplants(tmp_path):
 def test_conflicted_cascade_resolves_through_the_real_continue_arc(tmp_path):
     """The full §8.49 continue arc with production git seams: a real conflicted rebase stop
     (residue retained under the manifest), a human-style resolution (`git rebase
-    --continue` in the retained worktree), then ``continue_train_sync`` completing against
-    the bare remote under the manifest's operation identity."""
+    --continue` in the retained worktree), then ``Delivery.sync(mode="continue")``
+    completing against the bare remote under the manifest's operation identity."""
     work = tmp_path / "work"
     work.mkdir()
     _git(work, "init", "-q", "-b", "main")
@@ -288,32 +304,12 @@ def test_conflicted_cascade_resolves_through_the_real_continue_arc(tmp_path):
         observed_base_head_sha=main_sha,
     )
 
-    pr_state = _PrState({"plan-101": a1, "plan-102": b1, "plan-103": c1})
-
-    def stack_read(*, number: int, repo_root: Path) -> StackRestFacts | None:
-        entries = tuple(
-            StackRestEntry(
-                pr_number=n, state="open", draft=True, merged=False, head_ref="", head_sha=""
-            )
-            for n in (201, 202, 203)
-        )
-        return StackRestFacts(number=9, size=3, entries=entries)
-
     recorder = _Recorder()
-    with pytest.raises(sync.SyncError) as excinfo:
-        sync.synchronize_train(
-            work,
-            objective_id="500",
-            run_id="01RUN",
-            remote_writers=_NoWriters(),
-            worktree_root=work / ".worktrees",
-            reconstruct=lambda root, oid: train,
-            persistence_factory=lambda root: recorder,
-            pr_facts=pr_state.read,
-            stack_read=stack_read,
-            push_atomic=pr_state.push_atomic,
-            sleep=lambda seconds: None,
-        )
+    delivery = _IntegrationDelivery(work, recorder, train)
+    with pytest.MonkeyPatch.context() as monkeypatch:
+        monkeypatch.setattr(sync, "_DEFAULT_SYNC_RUNTIME", _runtime(work / ".worktrees"))
+        with pytest.raises(sync.SyncError) as excinfo:
+            delivery.sync(SyncRequest(mode="cascade", objective_id="500", run_id="01RUN"))
     assert excinfo.value.error_type == "rebase_conflict"
     assert recorder.prepared == []  # pre-journal: nothing appended at the stop
 
@@ -340,18 +336,9 @@ def test_conflicted_cascade_resolves_through_the_real_continue_arc(tmp_path):
     )
     assert git_mod.rebase_in_progress(retained) is False
 
-    result = sync.continue_train_sync(
-        work,
-        objective_id="500",
-        remote_writers=_NoWriters(),
-        worktree_root=work / ".worktrees",
-        reconstruct=lambda root, oid: train,
-        persistence_factory=lambda root: recorder,
-        pr_facts=pr_state.read,
-        stack_read=stack_read,
-        push_atomic=pr_state.push_atomic,
-        sleep=lambda seconds: None,
-    )
+    with pytest.MonkeyPatch.context() as monkeypatch:
+        monkeypatch.setattr(sync, "_DEFAULT_SYNC_RUNTIME", _runtime(work / ".worktrees"))
+        result = delivery.sync(SyncRequest(mode="continue", objective_id="500"))
     assert result.continued is True and result.operation_id == manifest.operation_id
     record = recorder.prepared[0]
     assert record.operation_id == manifest.operation_id and record.run_id == "01RUN"

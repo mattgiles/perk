@@ -1,24 +1,37 @@
 """Hermetic fake-driven tests for the delivery sync operation (contracts.md §8.49).
 
-Every effectful seam of ``synchronize_train`` is injected with an in-memory world: a
-scriptable mini remote (branch heads, PR facts, one native stack), a recording persistence
-fake, in-memory temp refs / worktrees / continuation manifests, and a timeline that pins the
-load-bearing ordering (candidates → approval → re-observation → prepared → one atomic push →
-verify → checkpoints bottom→top → completed). OFFLINE — no git / gh / network.
+Every effectful aggregate authority used by ``Delivery.sync`` is backed by an in-memory
+world: a scriptable mini remote (branch heads, PR facts, one native stack), a recording
+persistence fake, in-memory temp refs / worktrees / continuation manifests, and a timeline
+that pins the load-bearing ordering (candidates → approval → re-observation → prepared →
+one atomic push → verify → checkpoints bottom→top → completed). OFFLINE — no git / gh / network.
 """
 
 import contextlib
 from collections.abc import Callable, Iterator
 from dataclasses import replace as dataclasses_replace
 from pathlib import Path
+from typing import cast
 
 import pytest
 
 from perk.delivery import continuation, oplock, sync
+from perk.delivery.facade import (
+    Delivery,
+    DeliveryError,
+    DeliveryGit,
+    DeliveryGitHub,
+    DeliveryPersistence,
+    StatusRequest,
+    StatusResult,
+    SyncRequest,
+    SyncResult,
+)
 from perk.delivery.journal import (
     EventRole,
     JournalEvent,
     JournalFold,
+    JournalRecordTooLarge,
     OperationKind,
     OperationState,
     OutcomeRecord,
@@ -27,7 +40,6 @@ from perk.delivery.journal import (
     mint_operation_id,
 )
 from perk.delivery.persistence import AppendResult, UnresolvedOperationError
-from perk.delivery.sync import AbortPreview, SyncCascade, SyncResult
 from perk.delivery.train import (
     STRUCTURAL_BLOCKER_CODES,
     BuildReadiness,
@@ -41,9 +53,11 @@ from perk.delivery.train import (
     LayerPublication,
     LayerWriter,
     NoDeliveryTrain,
+    PrFactsView,
     TrainFinding,
     TrainLayer,
 )
+from perk.delivery.writers import WriterObservationError
 from perk.github import GitHubError
 from perk.github.stacks import PrDeliveryFacts, StackRestEntry, StackRestFacts
 from perk.substrate import git
@@ -123,6 +137,7 @@ class _FakePersistence:
         # completed append lands. Faithful for the DURABLE axes (journal, remote refs,
         # checkpoint headers): sync's finally-cleanup touches only machine-local temp
         # refs/worktrees, whose post-death residue is S1's separately proven cell.
+        self.prepared_boom: Exception | None = None
         self.checkpoints_boom_at: tuple[int, Exception] | None = None
         self.completed_boom: Exception | None = None
         self._checkpoint_calls = 0
@@ -153,6 +168,8 @@ class _FakePersistence:
         )
 
     def append_prepared(self, objective_id: str, record: PreparedRecord) -> AppendResult:
+        if self.prepared_boom is not None:
+            raise self.prepared_boom
         if self.unresolved_records:
             raise UnresolvedOperationError("an operation is already unresolved")
         self._world.timeline.append(("prepared", record.operation_id))
@@ -192,8 +209,141 @@ class _FakePersistence:
                 break
 
 
+class _WorldGit:
+    """Aggregate Git authority backed by the existing scriptable world."""
+
+    def __init__(self, world: "_World") -> None:
+        self._world = world
+
+    @property
+    def repo_root(self) -> Path:
+        return ROOT
+
+    def fetch_refs(self, refs: tuple[str, ...]) -> None:
+        self._world._fetch(ROOT, list(refs))
+
+    def remote_branch_sha(self, branch: str) -> str | None:
+        return self._world._remote_head(ROOT, branch)
+
+    def resolve_commit(self, ref: str, *, cwd: Path | None = None) -> str | None:
+        return self._world._local_head(cwd or ROOT, ref)
+
+    def is_ancestor(self, ancestor: str, descendant: str) -> bool | None:
+        return self._world._is_ancestor(ROOT, ancestor, descendant)
+
+    def push_urls(self) -> DeliveryGit.PushUrlsResult:
+        return DeliveryGit.PushUrlsResult(urls=tuple(self._world._push_urls(ROOT)))
+
+    def probe_atomic_push(
+        self, *, push_url: str, base_branch: str, base_sha: str
+    ) -> DeliveryGit.AtomicPushResult | DeliveryGit.ProbeError:
+        try:
+            self._world._atomic_probe(ROOT, push_url, base_branch, base_sha)
+        except git.GitError as exc:
+            return DeliveryGit.ProbeError(message=str(exc))
+        return DeliveryGit.AtomicPushResult()
+
+    def push_atomic(self, updates: tuple[git.RefUpdate, ...]) -> None:
+        self._world._push_atomic(ROOT, list(updates))
+
+    def update_ref(self, ref: str, sha: str) -> None:
+        self._world._update_ref(ROOT, ref, sha)
+
+    def delete_ref(self, ref: str) -> None:
+        self._world._delete_ref(ROOT, ref)
+
+    def list_refs(self, prefix: str) -> tuple[str, ...]:
+        return tuple(self._world._list_refs(ROOT, prefix))
+
+    def add_detached_worktree(self, path: Path, commit: str) -> None:
+        self._world._worktree_add(ROOT, path, commit)
+
+    def remove_worktree(self, path: Path) -> None:
+        self._world._worktree_remove(ROOT, path)
+
+    def prune_worktrees(self) -> None:
+        self._world._worktree_prune(ROOT)
+
+    def checkout_detached(self, worktree: Path, sha: str) -> None:
+        self._world._checkout_detached(worktree, sha)
+
+    def rebase_onto(self, worktree: Path, *, onto: str, upstream: str) -> git.RebaseOutcome:
+        return self._world._rebase_onto(worktree, onto=onto, upstream=upstream)
+
+    def rebase_in_progress(self, worktree: Path) -> bool:
+        return self._world._rebase_in_progress(worktree)
+
+    def worktree_dirty(self, worktree: Path) -> bool:
+        return self._world._worktree_dirty(worktree)
+
+
+class _WorldGitHub:
+    """Aggregate GitHub authority backed by the existing scriptable world."""
+
+    def __init__(self, world: "_World") -> None:
+        self._world = world
+
+    def pr_facts(self, number: int) -> PrFactsView | None:
+        facts = self._world._pr_facts(number=number, repo_root=ROOT)
+        if facts is None:
+            return None
+        return PrFactsView(
+            number=facts.number,
+            state=facts.state.upper(),
+            is_draft=facts.is_draft,
+            base_ref=facts.base_ref,
+            head_ref=facts.head_ref,
+            head_sha=facts.head_sha,
+        )
+
+    def strict_stack_members(self, number: int) -> tuple[int, ...] | None:
+        observed = self._world._stack_read(number=number, repo_root=ROOT)
+        return None if observed is None else observed.member_numbers
+
+    def active_writer_plan_ids(
+        self,
+        plan_ids: tuple[str, ...],
+        *,
+        trigger_plan_id: str | None,
+        trigger_run_id: str | None,
+    ) -> frozenset[str]:
+        del trigger_plan_id, trigger_run_id
+        return self._world.writer_probe.active_plan_ids(plan_ids)
+
+
+class _WorldDelivery(Delivery):
+    """Use the world train projection while exercising the real sync façade dispatch."""
+
+    def __init__(self, world: "_World") -> None:
+        self._world = world
+        super().__init__(
+            persistence=cast("DeliveryPersistence", world.persistence),
+            git=cast("DeliveryGit", _WorldGit(world)),
+            github=cast("DeliveryGitHub", _WorldGitHub(world)),
+        )
+
+    def status(self, request: StatusRequest) -> StatusResult:
+        self._world.status_calls.append(request)
+        observed = self._world._reconstruct(ROOT, request.objective_id)
+        if isinstance(observed, NoDeliveryTrain):
+            return StatusResult(
+                observed.objective_id,
+                observed.objective_url,
+                observed.redirected_from,
+                None,
+                observed.reason,
+            )
+        return StatusResult(
+            observed.objective_id,
+            observed.objective_url,
+            observed.redirected_from,
+            observed,
+            None,
+        )
+
+
 class _World:
-    """The injectable mini remote + recorders for one ``synchronize_train`` invocation."""
+    """The injectable mini remote + recorders for one ``Delivery.sync`` invocation."""
 
     def __init__(
         self,
@@ -207,6 +357,7 @@ class _World:
         self.findings: tuple[TrainFinding, ...] = ()
         self.no_train = False
         self.timeline: list[tuple] = []
+        self.status_calls: list[StatusRequest] = []
         self.persistence = _FakePersistence(self, unresolved or [])
         self.writer_probe = _WriterProbe()
         # Git state.
@@ -451,6 +602,29 @@ class _World:
 
     # ---------------------------------------------------------------- driving
 
+    def _runtime(self) -> sync._SyncRuntime:
+        return sync._SyncRuntime(
+            worktree_root=lambda repo_root: WT_ROOT,
+            operation_lock=self._lock,
+            pending_continuation=self._pending_read,
+            write_manifest=self._manifest_write,
+            clear_manifest=self._manifest_clear,
+            validate_targets=continuation.validated_targets,
+            path_exists=self._path_exists,
+            mint_operation_id=mint_operation_id,
+            now=lambda: "2026-01-01T00:00:00Z",
+            sleep=self.sleeps.append,
+        )
+
+    def _invoke(
+        self,
+        request: SyncRequest,
+        consent: Callable[..., bool] | None,
+    ) -> SyncResult:
+        with pytest.MonkeyPatch.context() as monkeypatch:
+            monkeypatch.setattr(sync, "_DEFAULT_SYNC_RUNTIME", self._runtime())
+            return _WorldDelivery(self).sync(request, consent=consent)
+
     def sync(
         self,
         *,
@@ -458,110 +632,42 @@ class _World:
         dry_run: bool = False,
         adopt_node: str | None = None,
         trigger_plan_id: str | None = None,
-        approve: Callable[[sync.SyncCascade], bool] | None = None,
+        trigger_run_id: str | None = None,
+        approve: Callable[[SyncResult.Cascade], bool] | None = None,
         run_id: str = "01RUN",
-    ) -> sync.SyncResult:
-        return sync.synchronize_train(
-            ROOT,
-            objective_id=OBJECTIVE,
-            run_id=run_id,
-            include_base=include_base,
-            dry_run=dry_run,
-            adopt_node=adopt_node,
-            trigger_plan_id=trigger_plan_id,
-            approve=approve,
-            remote_writers=self.writer_probe,
-            worktree_root=WT_ROOT,
-            reconstruct=self._reconstruct,
-            persistence_factory=lambda root: self.persistence,
-            pr_facts=self._pr_facts,
-            stack_read=self._stack_read,
-            fetch=self._fetch,
-            remote_head=self._remote_head,
-            local_head=self._local_head,
-            is_ancestor=self._is_ancestor,
-            push_urls=self._push_urls,
-            atomic_push_probe=self._atomic_probe,
-            push_atomic=self._push_atomic,
-            update_ref=self._update_ref,
-            delete_ref=self._delete_ref,
-            list_refs=self._list_refs,
-            worktree_add=self._worktree_add,
-            worktree_remove=self._worktree_remove,
-            worktree_prune=self._worktree_prune,
-            checkout_detached=self._checkout_detached,
-            rebase_onto=self._rebase_onto,
-            pending_read=self._pending_read,
-            manifest_write=self._manifest_write,
-            manifest_clear=self._manifest_clear,
-            path_exists=self._path_exists,
-            rebase_in_progress=self._rebase_in_progress,
-            worktree_dirty=self._worktree_dirty,
-            lock=self._lock,
-            sleep=self.sleeps.append,
-            now=lambda: "2026-01-01T00:00:00Z",
+    ) -> SyncResult:
+        return self._invoke(
+            SyncRequest(
+                mode="cascade",
+                objective_id=OBJECTIVE,
+                run_id=run_id,
+                include_base=include_base,
+                dry_run=dry_run,
+                adopt_node=adopt_node,
+                trigger_plan_id=trigger_plan_id,
+                trigger_run_id=trigger_run_id,
+            ),
+            approve,
         )
 
     def continue_sync(
         self,
         *,
-        # Bare names: the `sync` METHOD above shadows the module inside the class body.
-        approve: Callable[[SyncCascade], bool] | None = None,
+        approve: Callable[[SyncResult.Cascade], bool] | None = None,
     ) -> SyncResult:
-        return sync.continue_train_sync(
-            ROOT,
-            objective_id=OBJECTIVE,
-            approve=approve,
-            remote_writers=self.writer_probe,
-            worktree_root=WT_ROOT,
-            reconstruct=self._reconstruct,
-            persistence_factory=lambda root: self.persistence,
-            pr_facts=self._pr_facts,
-            stack_read=self._stack_read,
-            fetch=self._fetch,
-            remote_head=self._remote_head,
-            local_head=self._local_head,
-            is_ancestor=self._is_ancestor,
-            push_urls=self._push_urls,
-            atomic_push_probe=self._atomic_probe,
-            push_atomic=self._push_atomic,
-            update_ref=self._update_ref,
-            delete_ref=self._delete_ref,
-            list_refs=self._list_refs,
-            worktree_add=self._worktree_add,
-            worktree_remove=self._worktree_remove,
-            worktree_prune=self._worktree_prune,
-            checkout_detached=self._checkout_detached,
-            rebase_onto=self._rebase_onto,
-            pending_read=self._pending_read,
-            manifest_write=self._manifest_write,
-            manifest_clear=self._manifest_clear,
-            path_exists=self._path_exists,
-            rebase_in_progress=self._rebase_in_progress,
-            worktree_dirty=self._worktree_dirty,
-            lock=self._lock,
-            sleep=self.sleeps.append,
-            now=lambda: "2026-01-01T00:00:00Z",
+        return self._invoke(
+            SyncRequest(mode="continue", objective_id=OBJECTIVE),
+            approve,
         )
 
     def abort_sync(
         self,
         *,
-        approve: Callable[[AbortPreview], bool] | None = None,
+        approve: Callable[[SyncResult.AbortPreview], bool] | None = None,
     ) -> SyncResult:
-        return sync.abort_train_sync(
-            ROOT,
-            objective_id=OBJECTIVE,
-            approve=approve,
-            worktree_root=WT_ROOT,
-            reconstruct=self._reconstruct,
-            delete_ref=self._delete_ref,
-            list_refs=self._list_refs,
-            worktree_remove=self._worktree_remove,
-            worktree_prune=self._worktree_prune,
-            pending_read=self._pending_read,
-            manifest_clear=self._manifest_clear,
-            lock=self._lock,
+        return self._invoke(
+            SyncRequest(mode="abort", objective_id=OBJECTIVE),
+            approve,
         )
 
     def events(self, kind: str) -> list[tuple]:
@@ -730,9 +836,9 @@ def test_the_cascade_is_offered_for_approval_with_base_facts():
     world = _three_layer_world()
     world.base_head = NEWBASE
     world.remote["main"] = NEWBASE
-    seen: list[sync.SyncCascade] = []
+    seen: list[SyncResult.Cascade] = []
 
-    def approve(cascade: sync.SyncCascade) -> bool:
+    def approve(cascade: SyncResult.Cascade) -> bool:
         seen.append(cascade)
         return True
 
@@ -911,10 +1017,10 @@ def test_trigger_must_name_a_claimed_layer():
 
 def test_trigger_refuses_base_and_adopt_composition():
     world = _three_layer_world()
-    assert (
-        _sync_error(world, trigger_plan_id="102", include_base=True).error_type == "invalid_input"
-    )
-    assert _sync_error(world, trigger_plan_id="102", adopt_node="1.2").error_type == "invalid_input"
+    with pytest.raises(ValueError, match="trigger-scoped synchronization"):
+        world.sync(trigger_plan_id="102", include_base=True)
+    with pytest.raises(ValueError, match="trigger-scoped synchronization"):
+        world.sync(trigger_plan_id="102", adopt_node="1.2")
 
 
 # ----------------------------------------------------------------- drift reachability
@@ -1038,7 +1144,7 @@ def test_active_remote_writer_refuses():
 
 def test_writer_probe_failure_fails_closed():
     world = _amended_middle_world()
-    world.writer_probe.boom = sync.WriterObservationError("gh api down")
+    world.writer_probe.boom = WriterObservationError("gh api down")
     error = _sync_error(world)
     assert error.error_type == "writer_observation_unavailable"
     assert "gh api down" in str(error)
@@ -1160,7 +1266,7 @@ def test_cross_lineage_manifest_does_not_gate():
 def test_remote_mutation_during_approval_is_remote_drift_with_no_record():
     world = _amended_middle_world()
 
-    def approve(cascade: sync.SyncCascade) -> bool:
+    def approve(cascade: SyncResult.Cascade) -> bool:
         world.remote["plan-103"] = "9" * 40  # a foreign writer moves a lease mid-approval
         return True
 
@@ -1176,7 +1282,7 @@ def test_base_mutation_during_approval_is_remote_drift():
     world.base_head = NEWBASE
     world.remote["main"] = NEWBASE
 
-    def approve(cascade: sync.SyncCascade) -> bool:
+    def approve(cascade: SyncResult.Cascade) -> bool:
         world.remote["main"] = "9" * 40
         return True
 
@@ -1377,6 +1483,7 @@ def test_trigger_resume_all_after_rolls_forward_then_cascades_fresh_head():
         EventRole.COMPLETED,
     ]
     assert len(world.persistence.prepared) == 1
+    assert world.status_calls == [StatusRequest(OBJECTIVE), StatusRequest(OBJECTIVE)]
 
 
 def test_trigger_resume_all_after_then_fresh_noop_when_head_already_published():
@@ -1411,6 +1518,33 @@ def test_trigger_resume_all_after_keeps_completion_when_fresh_preflight_refuses(
     assert world.events("push_atomic") == []
 
 
+def test_oversized_prepared_record_is_typed_before_any_remote_effect() -> None:
+    world = _amended_middle_world()
+    world.persistence.prepared_boom = JournalRecordTooLarge("prepared record exceeds 10000 chars")
+
+    with pytest.raises(DeliveryError) as excinfo:
+        world.sync()
+
+    assert excinfo.value.error_type == "journal_record_too_large"
+    assert "10000" in str(excinfo.value)
+    assert world.persistence.prepared == [] and world.events("push_atomic") == []
+    assert world.remote["plan-102"] == P2 and world.remote["plan-103"] == P3
+
+
+def test_oversized_completed_record_leaves_the_prepared_operation_unresolved() -> None:
+    world = _amended_middle_world()
+    world.persistence.completed_boom = JournalRecordTooLarge("completed record exceeds 10000 chars")
+
+    with pytest.raises(DeliveryError) as excinfo:
+        world.sync()
+
+    assert excinfo.value.error_type == "journal_record_too_large"
+    (prepared,) = world.persistence.prepared
+    assert prepared.operation_id in world.persistence.unresolved_records
+    assert world.remote["plan-102"] == C2 and world.remote["plan-103"] == R3
+    assert world.persistence.outcomes == []
+
+
 # --- the process-death completion-side cells (the failure-hardening ledger's S4/S4b/S5) --
 # Genuine kill-at-the-boundary + rerun: the crash run dies inside `_persist_completion`
 # (fail-once raise — faithful for the durable axes: sync's finally-cleanup touches only
@@ -1425,8 +1559,9 @@ def test_crash_mid_checkpoint_writes_rolls_forward_on_rerun():
     # checkpoint re-writes are idempotent merge-writes (allowed); completed lands once.
     world = _amended_middle_world()
     world.persistence.checkpoints_boom_at = (2, GitHubError("process death mid checkpoints"))
-    with pytest.raises(GitHubError):
+    with pytest.raises(DeliveryError) as excinfo:
         world.sync()
+    assert excinfo.value.error_type == "github_error"
     (record,) = world.persistence.prepared
     assert [c[0] for c in world.persistence.checkpoints] == ["102"]  # 103's never landed
     assert world.persistence.outcomes == []
@@ -1448,8 +1583,9 @@ def test_crash_after_all_checkpoints_before_completed_converges_on_rerun():
     # same operation forward — the terminal record lands exactly once.
     world = _amended_middle_world()
     world.persistence.completed_boom = GitHubError("process death before the completed append")
-    with pytest.raises(GitHubError):
+    with pytest.raises(DeliveryError) as excinfo:
         world.sync()
+    assert excinfo.value.error_type == "github_error"
     (record,) = world.persistence.prepared
     assert [c[0] for c in world.persistence.checkpoints] == ["102", "103"]
     assert world.persistence.outcomes == []
@@ -1605,8 +1741,8 @@ def test_resume_base_cascade_restores_recorded_parent_edges():
 # ----------------------------------------------------------------- the cleanup guard
 
 
-def _race_approve(world: _World) -> Callable[[sync.SyncCascade], bool]:
-    def race(cascade: sync.SyncCascade) -> bool:
+def _race_approve(world: _World) -> Callable[[SyncResult.Cascade], bool]:
+    def race(cascade: SyncResult.Cascade) -> bool:
         world.remote["plan-103"] = "9" * 40
         return True
 
@@ -1681,7 +1817,7 @@ def test_malformed_lineage_is_invalid_input():
 def test_pr_mutation_during_approval_is_remote_drift_with_no_record():
     world = _amended_middle_world()
 
-    def approve(cascade: sync.SyncCascade) -> bool:
+    def approve(cascade: SyncResult.Cascade) -> bool:
         world.pr_entries[203] = ("plan-103", "plan-102", "CLOSED")  # a PR flips mid-approval
         return True
 
@@ -1694,7 +1830,7 @@ def test_pr_mutation_during_approval_is_remote_drift_with_no_record():
 def test_membership_mutation_during_approval_is_remote_drift_with_no_record():
     world = _amended_middle_world()
 
-    def approve(cascade: sync.SyncCascade) -> bool:
+    def approve(cascade: SyncResult.Cascade) -> bool:
         world.stack_members = [201, 202]  # the native stack is edited mid-approval
         return True
 
@@ -2049,7 +2185,7 @@ def test_cleanup_prunes_after_worktree_remove_on_every_arm():
 
 def test_dry_run_stops_at_the_approval_boundary():
     world = _amended_middle_world()
-    approvals: list[sync.SyncCascade] = []
+    approvals: list[SyncResult.Cascade] = []
     result = world.sync(dry_run=True, approve=lambda c: approvals.append(c) or True)
     assert result.dry_run is True and result.no_op is False
     assert result.operation_id is None and result.declined is False
@@ -2222,11 +2358,10 @@ def test_adopt_with_another_drifted_layer_is_still_remote_drift():
     world.assert_nothing_journaled()
 
 
-def test_adopt_with_base_is_refused_at_the_operation_boundary():
+def test_adopt_with_base_is_refused_at_the_request_boundary():
     world = _adopt_middle_world()
-    error = _sync_error(world, adopt_node="1.2", include_base=True)
-    assert error.error_type == "invalid_input"
-    assert "mutually exclusive" in str(error)
+    with pytest.raises(ValueError, match="mutually exclusive"):
+        world.sync(adopt_node="1.2", include_base=True)
     assert world.timeline == []  # refused before the lock/observations
 
 
@@ -2570,7 +2705,7 @@ def test_continue_declined_retains_a_fully_computed_manifest_then_reenters():
     assert world.worktrees_removed == [] and world.refs != {}
 
     # Re-entry lands at the approval gate: no rebase work, straight to completion.
-    seen: list[sync.SyncCascade] = []
+    seen: list[SyncResult.Cascade] = []
     result = world.continue_sync(approve=lambda c: seen.append(c) or True)
     assert result.operation_id == OP
     (cascade,) = seen
@@ -2746,7 +2881,7 @@ def test_continue_post_prepare_failure_leaves_the_operation_unresolved_without_a
 def test_continue_reobservation_drift_retains_the_manifest():
     world = _retained_world()
 
-    def approve(cascade: sync.SyncCascade) -> bool:
+    def approve(cascade: SyncResult.Cascade) -> bool:
         world.remote["plan-103"] = "9" * 40  # the world moves during the approval pause
         return True
 
@@ -2806,7 +2941,7 @@ def _abort_error(world: _World, **kwargs) -> sync.SyncError:
 def test_abort_valid_manifest_discards_the_full_residue():
     world = _retained_world()
     world.refs["refs/perk/sync/01OTHEROP/plan-999"] = "z" * 40  # a foreign op's ref survives
-    previews: list[sync.AbortPreview] = []
+    previews: list[SyncResult.AbortPreview] = []
     result = world.abort_sync(approve=lambda p: previews.append(p) or True)
     assert result.aborted is True and result.declined is False
     assert result.operation_id is None  # nothing journaled by an abort
@@ -2879,7 +3014,7 @@ def test_abort_invalid_manifest_deletes_only_the_manifest_file():
     world = _retained_world(_retained_manifest(operation_id="not-a-ulid"))
     world.refs.clear()
     world.refs["refs/perk/sync/evil/plan-102"] = C2
-    previews: list[sync.AbortPreview] = []
+    previews: list[SyncResult.AbortPreview] = []
     result = world.abort_sync(approve=lambda p: previews.append(p) or True)
     assert result.aborted is True
     assert previews[0].contained is False
@@ -2893,7 +3028,7 @@ def test_abort_invalid_manifest_deletes_only_the_manifest_file():
 def test_abort_unparseable_manifest_deletes_only_the_manifest_file():
     world = _retained_world()
     world.pending_unparseable = True
-    previews: list[sync.AbortPreview] = []
+    previews: list[SyncResult.AbortPreview] = []
     result = world.abort_sync(approve=lambda p: previews.append(p) or True)
     assert result.aborted is True
     assert previews[0].parseable is False and previews[0].operation_id is None
@@ -3006,8 +3141,9 @@ def test_continue_progress_rewrite_failure_is_typed_and_preserves_the_snapshot()
         raise OSError("read-only filesystem")
 
     world.manifest_write_override = failing_write
-    with pytest.raises(git.GitError) as excinfo:
+    with pytest.raises(DeliveryError) as excinfo:
         world.continue_sync()
+    assert excinfo.value.error_type == "git_error"
     assert "could not rewrite the continuation manifest" in str(excinfo.value)
     assert "--continue" in str(excinfo.value)
     # The previous durable snapshot is untouched and everything stays retained.
@@ -3144,7 +3280,7 @@ def test_continue_active_remote_writer_refuses_and_retains():
 
 def test_continue_writer_probe_failure_fails_closed_and_retains():
     world = _retained_world()
-    world.writer_probe.boom = sync.WriterObservationError("gh api down")
+    world.writer_probe.boom = WriterObservationError("gh api down")
     error = _continue_error(world)
     assert error.error_type == "writer_observation_unavailable"
     _retained_is_untouched(world)

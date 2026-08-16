@@ -1,9 +1,9 @@
 """Tests for ``perk objective stack sync`` (``commands/objective/stack/sync_cmd.py``).
 
-CLI-level via ``CliRunner`` over the full ``cli`` in an isolated repo, with the operation seam
-(``sync.synchronize_train``) monkeypatched — the operation itself is pinned in
-``test_delivery_sync.py``; here the envelope, confirmation discipline, resolution order, the
-remote-writer wiring, exit codes, and the stdout/stderr split are the contract.
+CLI-level via ``CliRunner`` over the full ``cli`` in an isolated repo, with the resolved
+``Delivery.sync`` seam captured — the operation itself is pinned in ``test_delivery_sync.py``;
+here the request, envelope, confirmation discipline, resolution order, exit codes, and the
+stdout/stderr split are the contract.
 """
 
 import json
@@ -18,19 +18,21 @@ from perk.backends.objective_store import ObjectiveState
 from perk.cli.cli import cli
 from perk.cli.commands.objective.stack import shared, sync_cmd
 from perk.cli.ensure import UserFacingCliError
-from perk.delivery import sync, train
-from perk.delivery.journal import JournalCorruptionError, mint_operation_id
+from perk.delivery import DeliveryError, SyncRequest, SyncResult
+from perk.delivery.journal import mint_operation_id
+from perk.delivery.writers import WriterObservationError
 from perk.github import GitHubError
 from perk.github.workflows import WorkflowRun, WorkflowRunListing, _workflow_runs_args
 from perk.run import discovery
+from perk.run.writer_probe import GhaRemoteWriterProbe
 
 _URL = "https://github.com/o/r/issues/1431"
 B1 = "1" * 40
 A1 = "a" * 40
 
 
-def _synced_layer() -> sync.SyncedLayer:
-    return sync.SyncedLayer(
+def _synced_layer() -> SyncResult.Layer:
+    return SyncResult.Layer(
         node_id="1.2",
         plan_id="1457",
         branch="plan-1457",
@@ -40,7 +42,7 @@ def _synced_layer() -> sync.SyncedLayer:
     )
 
 
-def _result(**overrides) -> sync.SyncResult:
+def _result(**overrides) -> SyncResult:
     values: dict = {
         "objective_id": "1431",
         "objective_url": _URL,
@@ -55,11 +57,11 @@ def _result(**overrides) -> sync.SyncResult:
         "affected": (_synced_layer(),),
     }
     values.update(overrides)
-    return sync.SyncResult(**values)
+    return SyncResult(**values)
 
 
-def _cascade() -> sync.SyncCascade:
-    return sync.SyncCascade(
+def _cascade() -> SyncResult.Cascade:
+    return SyncResult.Cascade(
         objective_id="1431",
         base_branch="main",
         include_base=False,
@@ -70,21 +72,23 @@ def _cascade() -> sync.SyncCascade:
 
 
 def _invoke(args, *, monkeypatch, result=None, call_approve=False):
-    """Invoke the CLI in an isolated repo with ``synchronize_train`` returning (or raising)
-    ``result``; records the call's kwargs. ``call_approve`` drives the injected approval
-    callback with a fabricated cascade (declined → the declined result)."""
+    """Invoke with a captured ``Delivery.sync`` call returning or raising ``result``."""
     calls: list[dict] = []
 
-    def fake_synchronize(repo_root, **kwargs):
-        calls.append({"repo_root": repo_root, **kwargs})
-        if call_approve and not kwargs["approve"](_cascade()):
-            return _result(declined=True, operation_id=None, affected=())
-        if isinstance(result, Exception):
-            raise result
-        assert result is not None, "synchronize_train must not be reached"
-        return result
+    class _Delivery:
+        def __init__(self, repo_root: Path) -> None:
+            self.repo_root = repo_root
 
-    monkeypatch.setattr(sync, "synchronize_train", fake_synchronize)
+        def sync(self, request: SyncRequest, *, consent=None) -> SyncResult:
+            calls.append({"repo_root": self.repo_root, "request": request, "consent": consent})
+            if call_approve and consent is not None and not consent(_cascade()):
+                return _result(declined=True, operation_id=None, affected=())
+            if isinstance(result, Exception):
+                raise result
+            assert result is not None, "Delivery.sync must not be reached"
+            return result
+
+    monkeypatch.setattr(sync_cmd, "resolve_delivery", lambda root: _Delivery(root))
     runner = CliRunner()
     with runner.isolated_filesystem() as d:
         subprocess.run(["git", "init", "-q"], cwd=d, check=True)
@@ -137,19 +141,16 @@ def test_success_envelope_pins(monkeypatch):
         }
     ]
     (call,) = calls
-    assert call["objective_id"] == "1431" and call["run_id"] == "01RUN"
-    assert call["include_base"] is False
-    assert isinstance(call["worktree_root"], Path)
-    assert call["worktree_root"].name == ".worktrees"
-    assert isinstance(call["remote_writers"], sync_cmd.GhaRemoteWriterProbe)
-    assert call["remote_writers"]._exclude_run_id is None
+    request = call["request"]
+    assert request == SyncRequest(mode="cascade", objective_id="1431", run_id="01RUN")
+    assert callable(call["consent"])
 
 
 def test_typed_failure_envelope_and_exit(monkeypatch):
     outcome, _ = _invoke(
         ["objective", "stack", "sync", "1431", "--run-id", "01RUN", "--yes", "--json"],
         monkeypatch=monkeypatch,
-        result=sync.SyncError("branch drifted", error_type="remote_drift"),
+        result=DeliveryError("branch drifted", error_type="remote_drift"),
     )
     assert outcome.exit_code == 1
     payload = json.loads(outcome.stdout)
@@ -166,7 +167,7 @@ def test_include_base_flag_is_threaded(monkeypatch):
         monkeypatch=monkeypatch,
         result=_result(base_cascaded=True),
     )
-    assert calls[0]["include_base"] is True
+    assert calls[0]["request"].include_base is True
 
 
 def test_not_a_repo_exits_2(monkeypatch):
@@ -252,6 +253,26 @@ def test_approve_callback_non_tty_refuses(monkeypatch):
 # ----------------------------------------------------------------- resolution
 
 
+def test_eager_config_failure_keeps_the_command_owned_invalid_input_envelope(monkeypatch):
+    def invalid_config(ctx):
+        raise UserFacingCliError(".perk config invalid: malformed TOML", error_type="invalid_input")
+
+    monkeypatch.setattr(sync_cmd, "require_config", invalid_config)
+    outcome, calls = _invoke(
+        ["objective", "stack", "sync", "1431", "--run-id", "01RUN", "--yes", "--json"],
+        monkeypatch=monkeypatch,
+        result=_result(),
+    )
+
+    assert outcome.exit_code == 1
+    assert json.loads(outcome.stdout) == {
+        "success": False,
+        "error_type": "invalid_input",
+        "message": ".perk config invalid: malformed TOML",
+    }
+    assert calls == []
+
+
 def test_objective_resolution_requires_an_objective(monkeypatch):
     outcome, calls = _invoke(
         ["objective", "stack", "sync", "--run-id", "01RUN", "--json"],
@@ -276,7 +297,7 @@ def test_run_id_falls_back_to_the_objective_header(monkeypatch):
         monkeypatch=monkeypatch,
         result=_result(),
     )
-    assert calls[0]["run_id"] == "01HEADERRUN"
+    assert calls[0]["request"].run_id == "01HEADERRUN"
 
 
 def test_missing_run_id_is_invalid_input(monkeypatch):
@@ -370,9 +391,7 @@ def test_writer_probe_excludes_only_the_invoking_run(monkeypatch):
         ]
 
     monkeypatch.setattr(discovery.github, "list_workflow_runs", fake_list)
-    probe = sync_cmd.GhaRemoteWriterProbe(
-        Path("/repo"), exclude_run_id=own_run, exclude_plan_id="1457"
-    )
+    probe = GhaRemoteWriterProbe(Path("/repo"), exclude_run_id=own_run, exclude_plan_id="1457")
     assert probe.active_plan_ids(["1457", "1458"]) == frozenset({"1458"})
 
 
@@ -389,9 +408,7 @@ def test_writer_probe_keeps_another_active_writer_on_the_invoking_plan(monkeypat
         ]
 
     monkeypatch.setattr(discovery.github, "list_workflow_runs", fake_list)
-    probe = sync_cmd.GhaRemoteWriterProbe(
-        Path("/repo"), exclude_run_id=own_run, exclude_plan_id="1457"
-    )
+    probe = GhaRemoteWriterProbe(Path("/repo"), exclude_run_id=own_run, exclude_plan_id="1457")
     assert probe.active_plan_ids(["1457"]) == frozenset({"1457"})
 
 
@@ -400,8 +417,8 @@ def test_writer_probe_failure_raises_the_typed_error(monkeypatch):
         raise GitHubError("api down")
 
     monkeypatch.setattr(discovery.github, "list_workflow_runs", boom)
-    probe = sync_cmd.GhaRemoteWriterProbe(Path("/repo"))
-    with pytest.raises(sync.WriterObservationError, match="api down"):
+    probe = GhaRemoteWriterProbe(Path("/repo"))
+    with pytest.raises(WriterObservationError, match="api down"):
         probe.active_plan_ids(["1457"])
 
 
@@ -422,7 +439,7 @@ def test_reconstruction_failure_maps_to_its_typed_envelope(monkeypatch):
     outcome, _ = _invoke(
         ["objective", "stack", "sync", "1431", "--run-id", "01RUN", "--yes", "--json"],
         monkeypatch=monkeypatch,
-        result=train.TrainReconstructionError("git fetch failed: boom", error_type="git_error"),
+        result=DeliveryError("git fetch failed: boom", error_type="git_error"),
     )
     assert outcome.exit_code == 1
     payload = json.loads(outcome.stdout)
@@ -437,7 +454,10 @@ def test_journal_corruption_maps_to_its_typed_envelope(monkeypatch):
     outcome, _ = _invoke(
         ["objective", "stack", "sync", "1431", "--run-id", "01RUN", "--yes", "--json"],
         monkeypatch=monkeypatch,
-        result=JournalCorruptionError("conflicting prepared events for operation 01X"),
+        result=DeliveryError(
+            "conflicting prepared events for operation 01X",
+            error_type="journal_corruption",
+        ),
     )
     assert outcome.exit_code == 1
     payload = json.loads(outcome.stdout)
@@ -469,41 +489,28 @@ def test_run_id_fallback_follows_supersession_to_the_active_objective(monkeypatc
         monkeypatch=monkeypatch,
         result=_result(),
     )
-    assert calls[0]["run_id"] == "01ACTIVERUN"
+    assert calls[0]["request"].run_id == "01ACTIVERUN"
 
 
 # ----------------------------------------------------------------- the control surface (§8.49)
 
 
 def _invoke_modes(args, *, monkeypatch, result=None, abort_result=None, continue_result=None):
-    """Invoke with ALL THREE operation seams recorded — the flag matrix must route to
-    exactly one (or none, on a refusal)."""
+    """Invoke with all three request modes recorded; flag refusals reach none."""
     calls: dict[str, list[dict]] = {"sync": [], "continue": [], "abort": []}
+    results = {"cascade": result, "continue": continue_result, "abort": abort_result}
 
-    def fake_sync(repo_root, **kwargs):
-        calls["sync"].append(kwargs)
-        if isinstance(result, Exception):
-            raise result
-        assert result is not None
-        return result
+    class _Delivery:
+        def sync(self, request: SyncRequest, *, consent=None) -> SyncResult:
+            key = "sync" if request.mode == "cascade" else request.mode
+            calls[key].append({"request": request, "consent": consent})
+            selected = results[request.mode]
+            if isinstance(selected, Exception):
+                raise selected
+            assert selected is not None
+            return selected
 
-    def fake_continue(repo_root, **kwargs):
-        calls["continue"].append(kwargs)
-        if isinstance(continue_result, Exception):
-            raise continue_result
-        assert continue_result is not None
-        return continue_result
-
-    def fake_abort(repo_root, **kwargs):
-        calls["abort"].append(kwargs)
-        if isinstance(abort_result, Exception):
-            raise abort_result
-        assert abort_result is not None
-        return abort_result
-
-    monkeypatch.setattr(sync, "synchronize_train", fake_sync)
-    monkeypatch.setattr(sync, "continue_train_sync", fake_continue)
-    monkeypatch.setattr(sync, "abort_train_sync", fake_abort)
+    monkeypatch.setattr(sync_cmd, "resolve_delivery", lambda root: _Delivery())
     runner = CliRunner()
     with runner.isolated_filesystem() as d:
         subprocess.run(["git", "init", "-q"], cwd=d, check=True)
@@ -551,7 +558,8 @@ def test_dry_run_and_adopt_flags_thread_and_ride_the_envelope(monkeypatch):
     )
     assert outcome.exit_code == 0
     (call,) = calls["sync"]
-    assert call["dry_run"] is True and call["adopt_node"] == "1.2"
+    assert call["request"].dry_run is True and call["request"].adopt_node == "1.2"
+    assert call["consent"] is None
     payload = json.loads(outcome.stdout)
     assert payload["dry_run"] is True and payload["adopted_node"] == "1.2"
 
@@ -565,7 +573,8 @@ def test_dry_run_is_allowed_non_interactive_without_yes(monkeypatch):
         result=_result(dry_run=True, operation_id=None),
     )
     assert outcome.exit_code == 0
-    assert calls["sync"][0]["dry_run"] is True
+    assert calls["sync"][0]["request"].dry_run is True
+    assert calls["sync"][0]["consent"] is None
 
 
 def test_continue_routes_without_consulting_run_id(monkeypatch):
@@ -577,8 +586,8 @@ def test_continue_routes_without_consulting_run_id(monkeypatch):
     assert outcome.exit_code == 0
     assert calls["sync"] == [] and calls["abort"] == []
     (call,) = calls["continue"]
-    assert "run_id" not in call  # the manifest's captured run identity is authoritative
-    assert isinstance(call["remote_writers"], sync_cmd.GhaRemoteWriterProbe)
+    assert call["request"] == SyncRequest(mode="continue", objective_id="1431")
+    assert callable(call["consent"])
     payload = json.loads(outcome.stdout)
     assert payload["continued"] is True and payload["success"] is True
 
@@ -592,12 +601,13 @@ def test_abort_routes_and_rides_the_envelope(monkeypatch):
     assert outcome.exit_code == 0
     assert calls["sync"] == [] and calls["continue"] == []
     (call,) = calls["abort"]
-    assert "run_id" not in call and "remote_writers" not in call  # abort journals nothing
+    assert call["request"] == SyncRequest(mode="abort", objective_id="1431")
+    assert callable(call["consent"])
     payload = json.loads(outcome.stdout)
     assert payload["aborted"] is True and payload["declined"] is False
 
 
-def _abort_preview(**overrides) -> sync.AbortPreview:
+def _abort_preview(**overrides) -> SyncResult.AbortPreview:
     values: dict = {
         "manifest_path": Path("/main/.perk/workflow/sync-continuations/01L.json"),
         "parseable": True,
@@ -607,7 +617,7 @@ def _abort_preview(**overrides) -> sync.AbortPreview:
         "worktree_path": "/wt/sync-01JOPAAAAAAAAAAAAAAAAAAAAA",
     }
     values.update(overrides)
-    return sync.AbortPreview(**values)
+    return SyncResult.AbortPreview(**values)
 
 
 def test_abort_approve_callback_arms(monkeypatch, capsys):
@@ -656,7 +666,7 @@ def test_new_sync_error_arms_pass_through_verbatim(monkeypatch):
         outcome, _ = _invoke(
             ["objective", "stack", "sync", "1431", "--run-id", "01RUN", "--yes", "--json"],
             monkeypatch=monkeypatch,
-            result=sync.SyncError("nope", error_type=error_type),
+            result=DeliveryError("nope", error_type=error_type),
         )
         assert outcome.exit_code == 1
         assert json.loads(outcome.stdout)["error_type"] == error_type

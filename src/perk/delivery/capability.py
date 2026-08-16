@@ -1,21 +1,13 @@
-"""Private capability-row formatters plus the retained sync atomic-push helper.
+"""Private capability-row formatters shared by Prepare and synchronization.
 
-Authoring Prepare owns authority invocation and ordering in :mod:`perk.delivery.facade`; this
-module owns only the stable, pure capability-row prose. The successful native-stack and every
-atomic-push row retain their honesty caveats: schema presence does not prove per-repository
-preview enrollment, and an atomic dry-run proves transport capability/authentication rather than
-branch write permission.
-
-``probe_atomic_push_urls`` remains public temporarily for the deferred sync-family migration. It
-uses the same private atomic-push formatter as authoring Prepare and preserves its existing
-real-transport behavior.
+Authoring Prepare and the sync engine own authority invocation and ordering; this module owns
+only the stable, pure capability-row prose. The successful native-stack and every atomic-push row
+retain their honesty caveats: schema presence does not prove per-repository preview enrollment,
+and an atomic dry-run proves transport capability/authentication rather than branch write
+permission.
 """
 
-from collections.abc import Callable
 from dataclasses import dataclass
-from pathlib import Path
-
-from perk.substrate import git as git_mod
 
 _PUSH_CAVEAT = "(proves server capability and authentication, not branch write permission)"
 
@@ -126,42 +118,3 @@ def _atomic_push_check(push_url: str, *, error: str | None = None) -> _Capabilit
         ok=True,
         detail=f"the no-op --atomic --dry-run push to {push_url} succeeded {_PUSH_CAVEAT}",
     )
-
-
-def _default_atomic_push(repo: Path, push_url: str, base_branch: str, base_sha: str) -> None:
-    git_mod.probe_atomic_push(repo, push_url=push_url, base_branch=base_branch, base_sha=base_sha)
-
-
-def probe_atomic_push_urls(
-    repo_root: Path,
-    *,
-    ref_branch: str,
-    ref_sha: str,
-    push_urls_probe: Callable[[Path], list[str]] = git_mod.push_urls,
-    atomic_push_probe: Callable[[Path, str, str, str], None] = _default_atomic_push,
-    resolved_push_urls: list[str] | None = None,
-) -> list[_CapabilityCheck]:
-    """Run the retained sync-owned no-op probe against every configured push URL.
-
-    ``ref_sha`` must be the observed remote head of ``ref_branch`` so each probe is a true
-    no-op. Expected Git failures become private failed rows; unexpected errors propagate.
-    """
-    if resolved_push_urls is None:
-        try:
-            urls = push_urls_probe(repo_root)
-        except git_mod.GitError as exc:
-            return [_push_urls_error_check(str(exc))]
-    else:
-        urls = resolved_push_urls
-    if not urls:
-        return [_empty_push_urls_check()]
-
-    checks: list[_CapabilityCheck] = []
-    for url in urls:
-        try:
-            atomic_push_probe(repo_root, url, ref_branch, ref_sha)
-        except git_mod.GitError as exc:
-            checks.append(_atomic_push_check(url, error=str(exc)))
-        else:
-            checks.append(_atomic_push_check(url))
-    return checks

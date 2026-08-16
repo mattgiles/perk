@@ -4,8 +4,9 @@ The gateway-touching delivery leaf `/submit` routes a stacked plan through (alon
 ``observe.py`` / ``capability.py`` / ``layer.py``, contracts.md §8.44): exact-lease branch
 publication, PR create/converge onto the expected parent, native stack create/append with
 prepared-operation idempotency, a full remote refetch, and checkpoints written only **after**
-verification. Every effectful callable is keyword-injectable with production defaults (the
-``capability.py`` pattern; tests pass fakes).
+verification. Publication-specific effects remain keyword-injectable; automatic suffix
+propagation resolves the repository-scoped ``Delivery`` façade and calls ``Delivery.sync`` with
+raw trigger context rather than accepting another callback bundle.
 
 The concurrency contract: mutations are strictly serialized in-process (sequential); the
 cross-machine serialization is the one-unresolved-operation journal gate plus the exact push

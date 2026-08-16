@@ -2,9 +2,9 @@
 
 ``Delivery`` composes three nominal aggregate authorities. ``status`` delegates its pure
 projection to :mod:`perk.delivery.train`; ``prepare`` owns authoring capability, plan identity,
-stacked-planning classification, and executable layer-start preparation. Construction remains
-assignment-only, pure derivation stays in this module, and deferred operation families stay on
-internal seams.
+stacked-planning classification, and executable layer-start preparation; ``sync`` dispatches the
+private transactional engine. Construction remains assignment-only and pure derivation stays in
+this module.
 """
 
 from abc import ABC, abstractmethod
@@ -490,7 +490,7 @@ class DeliveryPersistence(ABC):
 
 
 class DeliveryGit(ABC):
-    """Aggregate Git authority for status and Prepare observations."""
+    """Aggregate Git authority for status, Prepare, and synchronization."""
 
     @dataclass(frozen=True)
     class PushUrlsResult:
@@ -623,7 +623,7 @@ class DeliveryGit(ABC):
 
 
 class DeliveryGitHub(ABC):
-    """Aggregate status and authoring-Prepare authority for GitHub observations."""
+    """Aggregate GitHub authority for status, Prepare, and synchronization."""
 
     @dataclass(frozen=True)
     class MergeRules:
@@ -957,7 +957,7 @@ def _raw_prepare_git_error(exc: git_mod.GitError | train.TrainReconstructionErro
 
 
 class Delivery:
-    """Repository-scoped delivery status and Prepare operations."""
+    """Repository-scoped delivery status, Prepare, and synchronization operations."""
 
     def __init__(
         self,

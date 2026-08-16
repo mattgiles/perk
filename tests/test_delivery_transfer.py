@@ -54,6 +54,7 @@ from perk.delivery.train import (
     TrainReconstructionError,
     WorktreeFacts,
 )
+from perk.delivery.writers import WriterObservationError
 from perk.github.stacks import PrDeliveryFacts
 
 ROOT = Path("/repo")
@@ -422,7 +423,7 @@ class _World:
     def active_plan_ids(self, plan_ids: Sequence[str]) -> frozenset[str]:
         self.timeline.append(("writer_probe", tuple(plan_ids), self.locked))
         if self.writer_boom:
-            raise sync_mod.WriterObservationError("gh api failed")
+            raise WriterObservationError("gh api failed")
         return frozenset(p for p in plan_ids if p in self.active_writers)
 
     @contextlib.contextmanager
@@ -569,6 +570,11 @@ def _successor_nodes() -> list[objective.ObjectiveNode]:
 
 
 # ----------------------------------------------------------------- happy paths
+
+
+def test_transfer_imports_writer_error_directly_not_through_sync() -> None:
+    assert not hasattr(sync_mod, "WriterObservationError")
+    assert transfer.WriterObservationError is WriterObservationError
 
 
 def test_stacked_to_stacked_post_publication_transfers_and_verifies():
