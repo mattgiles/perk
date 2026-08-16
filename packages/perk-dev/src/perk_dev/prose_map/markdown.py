@@ -2,7 +2,7 @@
 
 import re
 from dataclasses import dataclass
-from typing import Literal
+from typing import Literal, cast
 
 import yaml
 from yaml.events import AliasEvent
@@ -168,7 +168,28 @@ class MarkdownDocument:
             )
             matches.append((key, value, alias))
         if not matches:
-            return MarkdownProblem("selector-not-found")
+            if not isinstance(frontmatter.value, dict):
+                return MarkdownProblem("selector-not-found")
+            mapping = cast(dict[object, object], frontmatter.value)
+            if "description" not in mapping:
+                return MarkdownProblem("selector-not-found")
+            effective = mapping["description"]
+            if isinstance(effective, str) and not effective.strip():
+                return MarkdownProblem("selector-not-found")
+            merge = next(
+                (
+                    key
+                    for key, _value in frontmatter.node.value
+                    if isinstance(key, ScalarNode) and key.tag == "tag:yaml.org,2002:merge"
+                ),
+                frontmatter.node,
+            )
+            line, column = self._frontmatter_location(merge)
+            return MarkdownProblem(
+                "unsupported-source-shape",
+                line=line,
+                column=column,
+            )
         if len(matches) > 1:
             key = matches[1][0]
             line, column = self._frontmatter_location(key)

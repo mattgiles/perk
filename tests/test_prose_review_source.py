@@ -208,13 +208,28 @@ def test_markdown_adapter_resolves_body_description_headings_and_batch_failures(
         "frontmatter.description",
     ]
 
-    syntax = adapter.validate(
-        "---\ndescription: [broken\n---\nbody\n",
-        ("file-body", "frontmatter.description"),
-    )
+    malformed = "---\ndescription: [broken\n---\nbody\n"
+    syntax = adapter.validate(malformed, ("file-body", "frontmatter.description"))
     assert len(syntax) == 1
     assert syntax[0].code == "syntax-error"
     assert syntax[0].selector is None
+    assert adapter.validate(malformed, ()) == syntax
+
+
+def test_markdown_adapter_rejects_valid_multidocument_frontmatter() -> None:
+    adapter = source_adapter_for(_unit("doc.md"))
+    assert adapter is not None
+    text = "---\ndescription: first\n--- # second document\ndescription: second\n---\nBody\n"
+    extraction = adapter.extract(text, "frontmatter.description")
+    assert isinstance(extraction.resolution, UnresolvedRange)
+    assert extraction.resolution.reason == "unsupported-source-shape"
+    assert extraction.before == ""
+    assert extraction.focus == text
+    assert extraction.after == ""
+    diagnostics = adapter.validate(text, ("frontmatter.description",))
+    assert len(diagnostics) == 1
+    assert diagnostics[0].code == "unsupported-source-shape"
+    assert diagnostics[0].line == 4
 
 
 def _yaml_unit(path: str = "routing.yaml") -> RoutedUnit:
@@ -300,6 +315,17 @@ def test_yaml_adapter_exhaustive_reason_mapping(
     assert extraction.before == ""
     assert extraction.focus == text
     assert extraction.after == ""
+
+
+def test_yaml_quoted_literal_merge_key_remains_a_supported_mapping_key() -> None:
+    adapter = source_adapter_for(_yaml_unit())
+    assert adapter is not None
+    text = '"<<": literal\nvalue: ok\n'
+    literal = adapter.extract(text, "<<")
+    assert literal.focus == "literal"
+    assert literal.before + literal.focus + literal.after == text
+    unrelated = adapter.extract(text, "value")
+    assert unrelated.focus == "ok"
 
 
 def test_yaml_id_sequence_duplicate_and_batch_diagnostic_order() -> None:

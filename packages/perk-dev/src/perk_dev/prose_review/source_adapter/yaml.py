@@ -67,9 +67,7 @@ def _is_string_scalar(node: Node) -> bool:
 def _first_merge(node: Node | None) -> Node | None:
     if isinstance(node, MappingNode):
         for key, value in node.value:
-            if isinstance(key, ScalarNode) and (
-                key.tag == "tag:yaml.org,2002:merge" or key.value == "<<"
-            ):
+            if isinstance(key, ScalarNode) and key.tag == "tag:yaml.org,2002:merge":
                 return key
             nested = _first_merge(value)
             if nested is not None:

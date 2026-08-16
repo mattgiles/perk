@@ -1,11 +1,13 @@
 """The Prose Review Workbench security envelope: guard, containment, header stamping."""
 
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
 from httpx import Response
 from perk_dev.prose_map.catalog import build_catalog
+from perk_dev.prose_map.models import Fragment
 from perk_dev.prose_review import web
 from perk_dev.prose_review.catalog import CatalogSnapshot
 from perk_dev.prose_review.web import create_app
@@ -29,6 +31,33 @@ INDEX_HTML = (
 @pytest.fixture(scope="module")
 def snapshot() -> CatalogSnapshot:
     return CatalogSnapshot.from_catalog(build_catalog(ROOT))
+
+
+@pytest.fixture(scope="module")
+def fallback_snapshot() -> CatalogSnapshot:
+    catalog = build_catalog(ROOT)
+    fragments = (
+        Fragment(id="unsupported-selector", label="Unsupported selector", selector="heading:*"),
+        Fragment(
+            id="unsupported-source-shape",
+            label="Unsupported source shape",
+            selector="frontmatter.description",
+        ),
+        Fragment(id="selector-not-found", label="Selector not found", selector="heading:missing"),
+        Fragment(
+            id="selector-ambiguous",
+            label="Selector ambiguous",
+            selector="frontmatter.description",
+        ),
+        Fragment(id="invalid-source", label="Invalid source", selector="file-body"),
+    )
+    units = tuple(
+        replace(unit, candidate=replace(unit.candidate, fragments=fragments))
+        if unit.candidate.id == "managed:repo-agents"
+        else unit
+        for unit in catalog.units
+    )
+    return CatalogSnapshot.from_catalog(replace(catalog, units=units))
 
 
 @pytest.fixture(scope="module")
@@ -196,31 +225,94 @@ def test_source_serves_markdown_and_yaml_fragments(
     _assert_security_headers(yaml_response)
 
 
-def test_known_fragment_drift_is_a_readable_typed_200(
-    snapshot: CatalogSnapshot, repo: Path
+@pytest.mark.parametrize(
+    ("fragment_id", "label", "text", "reason"),
+    [
+        (
+            "unsupported-selector",
+            "Unsupported selector",
+            "# Present\nReadable source\n",
+            "unsupported-selector",
+        ),
+        (
+            "unsupported-source-shape",
+            "Unsupported source shape",
+            "---\ndescription: []\n---\nReadable source\n",
+            "unsupported-source-shape",
+        ),
+        (
+            "selector-not-found",
+            "Selector not found",
+            "# Present\nReadable source\n",
+            "selector-not-found",
+        ),
+        (
+            "selector-ambiguous",
+            "Selector ambiguous",
+            "---\ndescription: first\ndescription: second\n---\nReadable source\n",
+            "selector-ambiguous",
+        ),
+        (
+            "invalid-source",
+            "Invalid source",
+            "---\ndescription: [broken\n---\nReadable source\n",
+            "invalid-source",
+        ),
+    ],
+)
+def test_known_fragment_failures_are_guarded_readable_typed_200s(
+    fallback_snapshot: CatalogSnapshot,
+    repo: Path,
+    fragment_id: str,
+    label: str,
+    text: str,
+    reason: str,
 ) -> None:
-    (repo / "AGENTS.md").write_text("# Different\nReadable source\n", encoding="utf-8")
-    response = _client(snapshot, repo).get(
+    (repo / "AGENTS.md").write_text(text, encoding="utf-8")
+    response = _client(fallback_snapshot, repo).get(
         "/api/source",
-        params={
-            "unit": "managed:repo-agents",
-            "fragment": "section:agents/developing-perk",
-        },
+        params={"unit": "managed:repo-agents", "fragment": fragment_id},
     )
     assert response.status_code == 200
     assert response.json() == {
         "unit": "managed:repo-agents",
-        "fragment": {
-            "id": "section:agents/developing-perk",
-            "label": "Developing perk",
-        },
+        "fragment": {"id": fragment_id, "label": label},
         "path": "AGENTS.md",
         "kind": "managed-prose",
         "before": "",
-        "focus": "# Different\nReadable source\n",
+        "focus": text,
         "after": "",
         "editable": False,
-        "read_only_reason": "selector-not-found",
+        "read_only_reason": reason,
+    }
+    _assert_security_headers(response)
+
+
+def test_unsupported_family_fragment_is_a_guarded_readable_typed_200(
+    snapshot: CatalogSnapshot, repo: Path
+) -> None:
+    unit = next(unit for unit in snapshot.units if unit.candidate.kind == "typescript-tool")
+    fragment = snapshot.fragments_for_unit(unit.candidate.id)[0].fragment
+    source_path = repo / unit.candidate.path
+    source_path.parent.mkdir(parents=True, exist_ok=True)
+    text = (ROOT / unit.candidate.path).read_text(encoding="utf-8")
+    source_path.write_text(text, encoding="utf-8")
+
+    response = _client(snapshot, repo).get(
+        "/api/source",
+        params={"unit": unit.candidate.id, "fragment": fragment.id},
+    )
+    assert response.status_code == 200
+    assert response.json() == {
+        "unit": unit.candidate.id,
+        "fragment": {"id": fragment.id, "label": fragment.label},
+        "path": unit.candidate.path,
+        "kind": "typescript-tool",
+        "before": "",
+        "focus": text,
+        "after": "",
+        "editable": False,
+        "read_only_reason": "unsupported-family",
     }
     _assert_security_headers(response)
 

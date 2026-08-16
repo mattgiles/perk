@@ -69,6 +69,9 @@ class MarkdownSourceAdapter(SourceAdapter):
 
     def validate(self, text: str, selectors: tuple[str, ...]) -> tuple[SourceDiagnostic, ...]:
         document = parse_markdown(text)
+        syntax_problems = document.validate(())
+        if syntax_problems:
+            return (_unresolved(syntax_problems[0], "").diagnostic,)
         diagnostics: list[SourceDiagnostic] = []
         for selector in selectors:
             result = _resolve(document, selector)

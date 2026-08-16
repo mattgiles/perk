@@ -45,6 +45,11 @@ def test_description_focus_is_the_exact_lexical_yaml_scalar(authored: str, focus
         ('description: ""', ["file-body"], "selector-not-found"),
         ("description: []", ["file-body"], "unsupported-source-shape"),
         ("- description", ["file-body"], "unsupported-source-shape"),
+        (
+            "base: &base {description: inherited}\n<<: *base",
+            ["frontmatter.description"],
+            "unsupported-source-shape",
+        ),
     ],
 )
 def test_description_discovery_and_resolution_state_table(
@@ -112,4 +117,15 @@ def test_malformed_frontmatter_short_circuits_batch_validation_and_discovery() -
     assert problems[0].reason == "invalid-source"
     assert problems[0].line is not None
     with pytest.raises(MarkdownDiscoveryError, match="invalid-source"):
+        discover_markdown_fragments(text)
+
+
+def test_valid_multidocument_frontmatter_is_a_reachable_unsupported_shape() -> None:
+    text = "---\ndescription: first\n--- # second document\ndescription: second\n---\nBody\n"
+    document = parse_markdown(text)
+    result = document.resolve("frontmatter.description")
+    assert isinstance(result, MarkdownProblem)
+    assert result.reason == "unsupported-source-shape"
+    assert result.line == 4
+    with pytest.raises(MarkdownDiscoveryError, match="unsupported-source-shape at line 4"):
         discover_markdown_fragments(text)
