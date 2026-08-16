@@ -296,7 +296,7 @@ def save_source(
     try:
         encoded = text.encode("utf-8")
     except UnicodeEncodeError:
-        return _refused("write-failed")
+        return _failure_result(repo_resolved, unit.candidate.path, load_hash)
 
     checks = _suggested_checks(adapter, mapped)
     saved_hash = hashlib.sha256(encoded).hexdigest()

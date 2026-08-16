@@ -4,7 +4,6 @@ import type {
   DirtyFileSummary,
   EditWorkspace,
   WorkspaceSource,
-  WorkspaceWriteState,
 } from "./editWorkspace.ts";
 import { type SourceTarget, sourceTargetKey } from "./selection.ts";
 
@@ -85,13 +84,6 @@ export function useAttentionFiles(): AttentionFileSummary[] {
     [workspace],
   );
   return summaries;
-}
-
-export function useWorkspaceWriteState(): WorkspaceWriteState {
-  const workspace = useWorkspace();
-  const [state, setState] = useState(() => workspace.writeState());
-  useEffect(() => workspace.subscribeGlobal(() => setState(workspace.writeState())), [workspace]);
-  return state;
 }
 
 export function useDirtyFiles(): DirtyFileSummary[] {

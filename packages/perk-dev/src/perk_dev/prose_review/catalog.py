@@ -232,7 +232,7 @@ def _capability_structure(
 
 @dataclass(frozen=True, slots=True)
 class CatalogSnapshot:
-    """A load-once, immutable view of every workbench catalog query."""
+    """One immutable generation of every workbench catalog query."""
 
     capability_tree: tuple[CapabilityNode, ...]
     units: tuple[RoutedUnit, ...]

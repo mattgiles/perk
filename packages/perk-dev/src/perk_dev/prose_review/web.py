@@ -9,8 +9,9 @@ websocket routes, so Starlette rejects any handshake, and a future node adding
 websockets must give them their own guard policy first. Pure ASGI keeps the guard
 streaming-transparent.
 
-Handlers query the ``CatalogSnapshot`` and respond with ``*Out`` models only — a
-handler may look up domain values and hand them to a ``from_domain`` constructor, but
+Handlers capture the app's current immutable catalog generation and respond with
+``*Out`` models only — a handler may look up domain values and hand them to a
+``from_domain`` constructor, but
 no domain object is ever serialized into a response body. Repository-content reads
 fall into exactly two families: built-asset reads (``index.html`` included) go through
 the contained-read helper that proves both the dist root and the candidate sit under
@@ -22,6 +23,7 @@ over that already-authorized text, not another repository-content read family.
 """
 
 import json
+import logging
 import secrets
 from collections.abc import Awaitable, Callable, MutableMapping
 from dataclasses import dataclass, replace
@@ -34,12 +36,11 @@ from fastapi.responses import HTMLResponse, Response
 from pydantic import Field
 
 from perk.boundary import StrictInputModel
-from perk_dev.prose_map.catalog import ProseMapError
 from perk_dev.prose_map.models import Audience, ProseKind, ProseRole
 from perk_dev.prose_review import comparison as comparison_module
 from perk_dev.prose_review import search as search_module
 from perk_dev.prose_review import source_adapter
-from perk_dev.prose_review.catalog import CatalogQueryError, CatalogSnapshot, load_catalog
+from perk_dev.prose_review.catalog import CatalogSnapshot, load_catalog
 from perk_dev.prose_review.dto import (
     CapabilityTreeOut,
     CatalogSummaryOut,
@@ -59,6 +60,8 @@ from perk_dev.prose_review.source_adapter import (
 )
 from perk_dev.prose_review.source_adapter.typescript import TypeScriptSourceAdapter
 from perk_dev.prose_review.source_adapter.write import CATALOG_STALE_DETAIL
+
+logger = logging.getLogger(__name__)
 
 # One fixed 404 detail per closed read-failure reason. Containment failures stay
 # indistinguishable from missing files (the no-leak posture).
@@ -251,7 +254,7 @@ def create_app(
     csrf_token: str,
     reload_catalog: Callable[[Path], CatalogSnapshot] | None = None,
 ) -> SecurityGuardMiddleware:
-    """Build the guard-wrapped workbench app over one immutable catalog snapshot.
+    """Build the guarded app over an app-scoped, swappable immutable catalog generation.
 
     ``repo_root`` is resolved once here (the source root of trust); ``selector_root``
     locates fixed helper code and dependencies separately; ``dist_dir`` is kept
@@ -382,7 +385,10 @@ def create_app(
                 try:
                     refreshed = reload_snapshot(repo_resolved)
                     replacement = _CatalogGeneration.build(refreshed)
-                except (ProseMapError, CatalogQueryError):
+                except Exception:
+                    # Replacement has committed, so every refresh failure must freeze writes even
+                    # when a parser or generation constructor missed the catalog error taxonomy.
+                    logger.exception("catalog refresh failed after source save")
                     state.writes_frozen = True
                     result = replace(
                         result,

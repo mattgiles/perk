@@ -241,10 +241,11 @@ default, with `--no-open` as the only required launch option.
 
 ## 10. Core architecture seams
 
-Framework choice is deferred, but the implementation must preserve these deep modules:
+The selected implementation stack preserves these deep modules:
 
-- **Catalog:** loads the authored graph and discovered source catalog once, validates it, and serves
-  immutable capability, relation, assembly, scenario, source, and lineage queries.
+- **Catalog:** validates the authored graph and discovered source catalog into immutable generations.
+  The app loads one generation at launch; each successful persisted edit rebuilds a complete
+  disk-backed generation and atomically swaps the current one before serving later queries.
 - **EditWorkspace:** owns canonical per-file buffers, source hashes, dirty state, diffs, conflicts,
   and unload protection. UI aliases contain only a unit id and never own text.
 - **SourceAdapter:** abstracts extraction, focused replacement, validation, and atomic save for one

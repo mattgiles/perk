@@ -3,6 +3,7 @@ import {
   CATALOG_STALE_DETAIL,
   CONFLICT_DETAIL,
   INDETERMINATE_DETAIL,
+  NOT_SENT_DETAIL,
   type SourceDiagnostic,
   type SourceRefusalReason,
   type SourceSaveResult,
@@ -37,6 +38,7 @@ export type WorkspaceEditor = Readonly<{
 export type WorkspaceSaveState =
   | { status: "idle" }
   | { status: "saving" }
+  | { status: "not-sent"; detail: string }
   | { status: "validation-failed"; diagnostics: SourceDiagnostic[] }
   | { status: "refused"; reason: SourceRefusalReason | null; detail: string }
   | { status: "conflict"; detail: string }
@@ -321,7 +323,7 @@ export class EditWorkspace {
   readonly #globalSubscribers = new Set<() => void>();
   #alive = true;
   #writeFrozenDetail: string | null = null;
-  #saveSuspended = false;
+  readonly #indeterminatePaths = new Set<string>();
   #catalogEpoch = 0;
 
   constructor(transport: WorkspaceTransport = DEFAULT_TRANSPORT) {
@@ -473,7 +475,7 @@ export class EditWorkspace {
       !supportsSourceSave(entry.lastEditedTarget) ||
       entry.saveState.status !== "idle" ||
       this.#writeFrozenDetail !== null ||
-      this.#saveSuspended
+      this.#savesSuspended()
     ) {
       return { status: "refused" };
     }
@@ -498,9 +500,9 @@ export class EditWorkspace {
       entry === undefined ||
       reviewed === null ||
       reviewed === undefined ||
-      entry.saveState.status !== "idle" ||
+      (entry.saveState.status !== "idle" && entry.saveState.status !== "not-sent") ||
       this.#writeFrozenDetail !== null ||
-      this.#saveSuspended
+      this.#savesSuspended()
     ) {
       return { status: "refused" };
     }
@@ -531,7 +533,7 @@ export class EditWorkspace {
       return { status: "stale" };
     }
     if (outcome.status === "not-sent") {
-      entry.saveState = { status: "idle" };
+      entry.saveState = { status: "not-sent", detail: NOT_SENT_DETAIL };
       this.#notifyPath(path);
       this.#notifyGlobal();
       return { status: "completed" };
@@ -552,7 +554,7 @@ export class EditWorkspace {
         priorHash: artifact.loadHash,
       };
       entry.saveState = { status: "reconciling", detail: INDETERMINATE_DETAIL };
-      this.#saveSuspended = true;
+      this.#indeterminatePaths.add(path);
       this.#notifyPath(path);
       this.#notifyGlobal();
       await this.#reconcileEntry(path, entry);
@@ -688,7 +690,7 @@ export class EditWorkspace {
   writeState(): WorkspaceWriteState {
     return {
       frozen: this.#writeFrozenDetail !== null,
-      suspended: this.#saveSuspended,
+      suspended: this.#savesSuspended(),
       detail: this.#writeFrozenDetail,
       catalogEpoch: this.#catalogEpoch,
     };
@@ -883,7 +885,7 @@ export class EditWorkspace {
       this.#adoptCanonical(entry, outcome.source.file, pending.submittedText);
       entry.saveState = { status: "reconciled-saved", detail: CATALOG_STALE_DETAIL };
       entry.indeterminate = null;
-      this.#saveSuspended = false;
+      this.#indeterminatePaths.delete(path);
       this.#freezeWrites(CATALOG_STALE_DETAIL);
     } else if (
       canonicalText === pending.priorText &&
@@ -899,11 +901,11 @@ export class EditWorkspace {
       entry.review = null;
       entry.saveState = { status: "idle" };
       entry.indeterminate = null;
-      this.#saveSuspended = false;
+      this.#indeterminatePaths.delete(path);
     } else {
       entry.saveState = { status: "conflict", detail: CONFLICT_DETAIL };
       entry.indeterminate = null;
-      this.#saveSuspended = false;
+      this.#indeterminatePaths.delete(path);
       this.#freezeWrites(CATALOG_STALE_DETAIL);
     }
     this.#notifyPath(path);
@@ -947,7 +949,10 @@ export class EditWorkspace {
 
   #freezeWrites(detail: string): void {
     this.#writeFrozenDetail = detail;
-    this.#saveSuspended = false;
+  }
+
+  #savesSuspended(): boolean {
+    return this.#indeterminatePaths.size > 0;
   }
 
   #pathLocked(entry: FileEntry): boolean {
@@ -1025,12 +1030,12 @@ export class EditWorkspace {
         supportsSourceSave(entry.lastEditedTarget) &&
         entry.saveState.status === "idle" &&
         this.#writeFrozenDetail === null &&
-        !this.#saveSuspended,
+        !this.#savesSuspended(),
       canSave:
         entry.review !== null &&
-        entry.saveState.status === "idle" &&
+        (entry.saveState.status === "idle" || entry.saveState.status === "not-sent") &&
         this.#writeFrozenDetail === null &&
-        !this.#saveSuspended,
+        !this.#savesSuspended(),
     };
   }
 

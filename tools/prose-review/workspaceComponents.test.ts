@@ -18,13 +18,15 @@ import {
   CLIPBOARD_FAILURE_DETAIL,
   CONFLICT_DETAIL,
   GENERATED_LINEAGE_DETAIL,
+  INDETERMINATE_DETAIL,
+  NOT_SENT_DETAIL,
   UNRESOLVED_RECONCILIATION_DETAIL,
   UNSUPPORTED_FAMILY_DETAIL,
 } from "./src/save.ts";
 import type { SourceSaveLoadOutcome } from "./src/saveLoad.ts";
 import type { Selection, SourceTarget, UnitSelection } from "./src/selection.ts";
 import type { ReadOnlyReason, SourceView, UnitSource } from "./src/source.ts";
-import type { SourceProjectionOutcome } from "./src/sourceLoad.ts";
+import type { SourceLoadOutcome, SourceProjectionOutcome } from "./src/sourceLoad.ts";
 import type { CapabilityTree, TreeUnit, UnitRef } from "./src/tree.ts";
 
 const { App } = (await tsImport(
@@ -681,6 +683,7 @@ test("conflict and indeterminate UI preserve Copy Edits, exact failures, and des
   }
 
   const indeterminateHarness = installDom();
+  const heldReload = deferred<SourceLoadOutcome>();
   const indeterminate = new EditWorkspace({
     load: (target) =>
       Promise.resolve({
@@ -689,7 +692,7 @@ test("conflict and indeterminate UI preserve Copy Edits, exact failures, and des
       }),
     project: () => Promise.resolve({ status: "failed" }),
     save: () => Promise.resolve({ status: "indeterminate" }),
-    reload: () => Promise.resolve({ status: "failed" }),
+    reload: () => heldReload.promise,
   });
   try {
     await indeterminateHarness.render(center(indeterminate, "edit", selection));
@@ -701,6 +704,14 @@ test("conflict and indeterminate UI preserve Copy Edits, exact failures, and des
     await indeterminateHarness.click(
       buttonByText(indeterminateHarness.container, "Save reviewed file"),
     );
+    await indeterminateHarness.settle();
+    assert.equal(
+      (indeterminateHarness.container.textContent ?? "").includes(INDETERMINATE_DETAIL),
+      true,
+    );
+    assert.equal(textarea(indeterminateHarness.container).disabled, true);
+    assert.equal(indeterminate.discard(UNIT_A.path), false);
+    heldReload.resolve({ status: "failed" });
     await indeterminateHarness.settle();
     assert.equal(
       (indeterminateHarness.container.textContent ?? "").includes(UNRESOLVED_RECONCILIATION_DETAIL),
@@ -891,6 +902,7 @@ test("validation and generated-lineage refusal are rendered without implicit ret
   const harness = installDom();
   const text = "before A after";
   const outcomes: SourceSaveLoadOutcome[] = [
+    { status: "not-sent" },
     {
       status: "loaded" as const,
       result: {
@@ -937,6 +949,9 @@ test("validation and generated-lineage refusal are rendered without implicit ret
     await harness.settle();
     await harness.input(textarea(harness.container), "edited A");
     await harness.click(buttonByText(harness.container, "Review full-file diff"));
+    await harness.click(buttonByText(harness.container, "Save reviewed file"));
+    await harness.settle();
+    assert.ok((harness.container.textContent ?? "").includes(NOT_SENT_DETAIL));
     await harness.click(buttonByText(harness.container, "Save reviewed file"));
     await harness.settle();
     assert.match(harness.container.textContent ?? "", /heading:missing missing heading/);
@@ -1066,11 +1081,15 @@ test("App drawer, confirmed discard, last-target Open, manual reversion, and unl
     assert.equal(buttonByText(harness.container, "Workspace (2)").ariaExpanded, "true");
     const drawer = harness.container.querySelector<HTMLElement>(".workspace-drawer");
     assert.ok(drawer !== null);
-    assert.match(drawer.textContent ?? "", /shared\.md · unit:a · dirty · idle · Fragment A \(a\)/);
     assert.match(
       drawer.textContent ?? "",
-      /other\.md · unit:other · dirty · idle · Other fragment \(other\)/,
+      /shared\.md · unit:a · Unsaved edits · Fragment A \(a\)/,
     );
+    assert.match(
+      drawer.textContent ?? "",
+      /other\.md · unit:other · Unsaved edits · Other fragment \(other\)/,
+    );
+    assert.doesNotMatch(drawer.textContent ?? "", /· idle/);
 
     harness.window.confirm = () => false;
     const sharedRow = [...drawer.querySelectorAll("li")].find((row) =>

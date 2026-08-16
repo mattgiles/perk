@@ -40,6 +40,8 @@ export const UNRESOLVED_RECONCILIATION_DETAIL =
   "The save result is still unknown. Copy Edits or retry reconciliation before closing the " +
   "workbench.";
 export const CLIPBOARD_FAILURE_DETAIL = "Copy Edits failed. The in-memory edits are unchanged.";
+export const NOT_SENT_DETAIL =
+  "The save request did not leave the browser. The reviewed buffer is unchanged; retry when the workbench session is available.";
 
 export type SavedSource = {
   unit: string;

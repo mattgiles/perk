@@ -214,6 +214,9 @@ function SourceLoadPresentation({
       )}
 
       {saveState.status === "saving" && <p className="save-status">Saving reviewed file…</p>}
+      {saveState.status === "not-sent" && (
+        <p className="save-result save-refused">{saveState.detail}</p>
+      )}
       {saveState.status === "validation-failed" && (
         <section className="save-result save-validation">
           <h2>Validation failed</h2>

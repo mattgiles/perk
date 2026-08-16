@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { CenterPane } from "./CenterPane.tsx";
 import { comparisonRequest, type SelectedComparison } from "./comparison.ts";
 import { type ComparisonLoadState, createComparisonLoader } from "./comparisonLoad.ts";
-import { EditWorkspace } from "./editWorkspace.ts";
+import { EditWorkspace, type WorkspaceSaveState } from "./editWorkspace.ts";
 import { InspectorPane } from "./InspectorPane.tsx";
 import { SearchBar } from "./SearchBar.tsx";
 import { INDETERMINATE_DETAIL } from "./save.ts";
@@ -27,6 +27,20 @@ type TreeLoadState =
   | { status: "loading" }
   | { status: "failed" }
   | { status: "loaded"; tree: CapabilityTree };
+
+const SAVE_STATE_LABELS: Record<WorkspaceSaveState["status"], string | null> = {
+  idle: null,
+  saving: "Saving",
+  "not-sent": "Save not sent",
+  "validation-failed": "Validation failed",
+  refused: "Save blocked",
+  conflict: "Disk conflict",
+  reconciling: "Checking save result",
+  indeterminate: "Save result unknown",
+  reloading: "Reloading from disk",
+  saved: "Saved",
+  "reconciled-saved": "Saved after reconciliation",
+};
 
 function selectedOriginKey(selection: Selection | null): string | null {
   return selection?.type === "unit" ? comparisonOriginKey(selection) : null;
@@ -60,37 +74,41 @@ function WorkspaceDrawer({
         <p>No files need attention.</p>
       ) : (
         <ul>
-          {attentionFiles.map(({ path, target, dirty, saveState, canDiscard }) => (
-            <li key={path}>
-              <span className="workspace-dirty-target">
-                <strong>{path}</strong> · {target.unit.id} · {dirty ? "dirty" : "clean"} ·{" "}
-                {saveState.status}
-                {target.fragment !== null && (
-                  <>
-                    {" "}
-                    · {target.fragment.label} ({target.fragment.id})
-                  </>
-                )}
-              </span>
-              <span className="workspace-drawer-actions">
-                <button type="button" onClick={() => onOpen(target)}>
-                  Open
-                </button>
-                {canDiscard && dirty && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      if (window.confirm(`Discard unsaved changes to ${path}?`)) {
-                        workspace.discard(path);
-                      }
-                    }}
-                  >
-                    Discard file
+          {attentionFiles.map(({ path, target, dirty, saveState, canDiscard }) => {
+            const saveStateLabel = SAVE_STATE_LABELS[saveState.status];
+            return (
+              <li key={path}>
+                <span className="workspace-dirty-target">
+                  <strong>{path}</strong> · {target.unit.id}
+                  {dirty && <> · Unsaved edits</>}
+                  {saveStateLabel !== null && <> · {saveStateLabel}</>}
+                  {target.fragment !== null && (
+                    <>
+                      {" "}
+                      · {target.fragment.label} ({target.fragment.id})
+                    </>
+                  )}
+                </span>
+                <span className="workspace-drawer-actions">
+                  <button type="button" onClick={() => onOpen(target)}>
+                    Open
                   </button>
-                )}
-              </span>
-            </li>
-          ))}
+                  {canDiscard && dirty && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (window.confirm(`Discard unsaved changes to ${path}?`)) {
+                          workspace.discard(path);
+                        }
+                      }}
+                    >
+                      Discard file
+                    </button>
+                  )}
+                </span>
+              </li>
+            );
+          })}
         </ul>
       )}
     </section>

@@ -19,9 +19,11 @@ assembly views, and executable check handoffs without revisiting this stack.
   plain uvicorn, no `[standard]` extras). perk-dev is dev-only and never published; `src/perk` is
   untouched. The bounded-deps posture: no other backend dependency is anticipated for the whole
   objective.
-- **Endpoints are sync `def`** — catalog queries are pure in-memory work over the immutable
-  `CatalogSnapshot` (`load_catalog` builds once), and the only per-request repository-content reads
-  belong to the two families below — and return `*Out` Pydantic models (`perk.boundary.OutputModel`,
+- **Endpoints are sync `def`** — catalog queries are pure in-memory work over the request's captured
+  immutable generation. `load_catalog` builds the launch generation and each successful save builds
+  one complete replacement generation; the current generation swaps atomically. The only per-request
+  repository-content reads belong to the two families below, and handlers return `*Out` Pydantic
+  models (`perk.boundary.OutputModel`,
   `from_domain` constructors). Domain objects are never serialized into a response body —
   handlers query the snapshot and hand domain values to the `from_domain` constructors; every
   body is an `*Out` model.

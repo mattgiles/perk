@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { setImmediate as tick } from "node:timers/promises";
 import { EditWorkspace, type WorkspaceTransport } from "./src/editWorkspace.ts";
-import { CATALOG_STALE_DETAIL, CONFLICT_DETAIL } from "./src/save.ts";
+import { CATALOG_STALE_DETAIL, CONFLICT_DETAIL, NOT_SENT_DETAIL } from "./src/save.ts";
 import type { SourceSaveLoadOutcome } from "./src/saveLoad.ts";
 import type { SourceTarget } from "./src/selection.ts";
 import type { NewlineStyle, ReadOnlyReason, SourceView, UnitSource } from "./src/source.ts";
@@ -12,13 +13,19 @@ const HASH = "0123456789abcdef".repeat(4);
 const UNIT_A: UnitRef = { id: "unit:a", kind: "markdown", path: "shared.md" };
 const UNIT_ALIAS: UnitRef = { id: "unit:alias", kind: "markdown", path: "shared.md" };
 const UNIT_B: UnitRef = { id: "unit:b", kind: "markdown", path: "other.md" };
+const UNIT_C: UnitRef = { id: "unit:c", kind: "markdown", path: "third.md" };
 const FRAGMENT_A = { id: "a", label: "Fragment A" };
 const FRAGMENT_B = { id: "b", label: "Fragment B" };
 const TARGET_A: SourceTarget = { unit: UNIT_A, fragment: FRAGMENT_A };
 const TARGET_ALIAS: SourceTarget = { unit: UNIT_ALIAS, fragment: FRAGMENT_B };
 const WHOLE_A: SourceTarget = { unit: UNIT_A, fragment: null };
+const WHOLE_B: SourceTarget = { unit: UNIT_B, fragment: null };
 const WHOLE_ALIAS: SourceTarget = { unit: UNIT_ALIAS, fragment: null };
 const TARGET_B: SourceTarget = { unit: UNIT_B, fragment: FRAGMENT_B };
+const TARGET_C: SourceTarget = {
+  unit: UNIT_C,
+  fragment: { id: "c", label: "Fragment C" },
+};
 
 type Deferred<T> = {
   promise: Promise<T>;
@@ -761,7 +768,10 @@ test("validation, refusal, not-sent, and refresh-failed outcomes keep exact retr
 
   assert.equal(workspace.beginSaveReview(UNIT_A.path).status, "reviewed");
   await workspace.saveReviewed(UNIT_A.path);
-  assert.equal(workspace.inspect(TARGET_A)?.saveState.status, "idle");
+  assert.deepEqual(workspace.inspect(TARGET_A)?.saveState, {
+    status: "not-sent",
+    detail: NOT_SENT_DETAIL,
+  });
   assert.equal(workspace.inspect(TARGET_A)?.canSave, true);
 
   await workspace.saveReviewed(UNIT_A.path);
@@ -908,4 +918,84 @@ test("indeterminate reconciliation distinguishes submitted, prior, third, and re
   assert.deepEqual(await retry.reconcileSave(UNIT_A.path), { status: "completed" });
   assert.equal(retry.inspect(WHOLE_A)?.saveState.status, "idle");
   assert.equal(retry.snapshot(UNIT_A.path)?.dirty, true);
+});
+
+test("concurrent indeterminate files keep global saves suspended until every reconciliation settles", async () => {
+  const texts = new Map([
+    [UNIT_A.path, "before A after"],
+    [UNIT_B.path, "before B after"],
+    [UNIT_C.path, "before C after"],
+  ]);
+  const pendingSaveA = deferred<SourceSaveLoadOutcome>();
+  const pendingSaveB = deferred<SourceSaveLoadOutcome>();
+  const pendingReloadA = deferred<SourceLoadOutcome>();
+  const pendingReloadB = deferred<SourceLoadOutcome>();
+  let secondReloadB = false;
+  const workspace = new EditWorkspace({
+    load: (target) => {
+      const text = texts.get(target.unit.path) ?? "";
+      const focus = target.fragment?.id.toUpperCase() ?? text;
+      return Promise.resolve(loadOutcome(target, text, editableView(target, text, focus)));
+    },
+    project: () => Promise.resolve({ status: "failed" }),
+    save: (target) =>
+      target.unit.path === UNIT_A.path ? pendingSaveA.promise : pendingSaveB.promise,
+    reload: (target) => {
+      if (target.unit.path === UNIT_A.path) {
+        return pendingReloadA.promise;
+      }
+      if (!secondReloadB) {
+        secondReloadB = true;
+        return pendingReloadB.promise;
+      }
+      const text = texts.get(UNIT_B.path) ?? "";
+      return Promise.resolve(loadOutcome(TARGET_B, text, editableView(TARGET_B, text, "B")));
+    },
+  });
+  await workspace.ensure(TARGET_A);
+  await workspace.ensure(TARGET_B);
+  await workspace.ensure(TARGET_C);
+  applyEdit(workspace, TARGET_A, "submitted A");
+  applyEdit(workspace, TARGET_B, "submitted B");
+  applyEdit(workspace, TARGET_C, "editable C");
+  workspace.beginSaveReview(UNIT_A.path);
+  workspace.beginSaveReview(UNIT_B.path);
+  const saveA = workspace.saveReviewed(UNIT_A.path);
+  const saveB = workspace.saveReviewed(UNIT_B.path);
+  pendingSaveA.resolve({ status: "indeterminate" });
+  pendingSaveB.resolve({ status: "indeterminate" });
+  await tick();
+
+  assert.equal(workspace.inspect(TARGET_A)?.saveState.status, "reconciling");
+  assert.equal(workspace.inspect(TARGET_B)?.saveState.status, "reconciling");
+  assert.equal(workspace.writeState().suspended, true);
+  const editorA = workspace.inspect(TARGET_A)?.editor;
+  assert.ok(editorA !== null && editorA !== undefined);
+  assert.deepEqual(
+    workspace.editFocus({ target: TARGET_A, base: editorA, nextDisplay: "blocked A" }),
+    { status: "refused" },
+  );
+  assert.equal(workspace.discard(UNIT_A.path), false);
+  assert.equal(workspace.beginSaveReview(UNIT_A.path).status, "refused");
+  assert.deepEqual(await workspace.saveReviewed(UNIT_A.path), { status: "refused" });
+  applyEdit(workspace, TARGET_C, "still editable C");
+  assert.equal(workspace.beginSaveReview(UNIT_C.path).status, "refused");
+
+  const textA = texts.get(UNIT_A.path) ?? "";
+  pendingReloadA.resolve(loadOutcome(TARGET_A, textA, editableView(TARGET_A, textA, "A")));
+  assert.deepEqual(await saveA, { status: "completed" });
+  assert.equal(workspace.inspect(WHOLE_A)?.saveState.status, "idle");
+  assert.equal(workspace.writeState().suspended, true);
+  assert.equal(workspace.beginSaveReview(UNIT_C.path).status, "refused");
+
+  pendingReloadB.resolve({ status: "failed" });
+  assert.deepEqual(await saveB, { status: "completed" });
+  assert.equal(workspace.inspect(TARGET_B)?.saveState.status, "indeterminate");
+  assert.equal(workspace.writeState().suspended, true);
+  assert.equal(workspace.snapshot(UNIT_B.path)?.currentText, "before submitted B after");
+
+  assert.deepEqual(await workspace.reconcileSave(UNIT_B.path), { status: "completed" });
+  assert.equal(workspace.inspect(WHOLE_B)?.saveState.status, "idle");
+  assert.equal(workspace.writeState().suspended, false);
+  assert.equal(workspace.beginSaveReview(UNIT_C.path).status, "reviewed");
 });

@@ -101,7 +101,14 @@ def fallback_snapshot() -> CatalogSnapshot:
         ),
     )
     units = tuple(
-        replace(unit, candidate=replace(unit.candidate, fragments=markdown_fragments))
+        replace(
+            unit,
+            candidate=replace(
+                unit.candidate,
+                selector="fallback-selector",
+                fragments=markdown_fragments,
+            ),
+        )
         if unit.candidate.id == "managed:repo-agents"
         else replace(unit, candidate=replace(unit.candidate, fragments=python_fragments))
         if unit.candidate.id == PYTHON_UNIT_ID
@@ -1145,8 +1152,18 @@ def test_save_swaps_the_complete_catalog_generation(
         "*Conventions for working", "*Generation swap conventions for working", 1
     )
     client = _client(snapshot, repo, reload_catalog=lambda _root: fallback_snapshot)
-    before = client.get("/api/catalog/tree")
-    assert "Unsupported selector" not in json.dumps(before.json())
+    tree_before = client.get("/api/catalog/tree")
+    summary_before = client.get("/api/catalog/summary").json()
+    search_before = client.get("/api/search", params={"q": "Unsupported selector"}).json()
+    inspect_before = client.get("/api/inspect", params={"unit": "managed:repo-agents"}).json()
+    source_before = client.get(
+        "/api/source",
+        params={"unit": "managed:repo-agents", "fragment": "unsupported-selector"},
+    )
+    assert "Unsupported selector" not in json.dumps(tree_before.json())
+    assert search_before["total"] == 0
+    assert inspect_before["selector"] != "fallback-selector"
+    assert source_before.status_code == 404
 
     saved = client.post(
         "/api/source/save",
@@ -1157,16 +1174,37 @@ def test_save_swaps_the_complete_catalog_generation(
             "text": text,
         },
     )
-    after = client.get("/api/catalog/tree")
+    tree_after = client.get("/api/catalog/tree")
+    summary_after = client.get("/api/catalog/summary").json()
+    search_after = client.get("/api/search", params={"q": "Unsupported selector"}).json()
+    inspect_after = client.get("/api/inspect", params={"unit": "managed:repo-agents"}).json()
+    source_after = client.get(
+        "/api/source",
+        params={"unit": "managed:repo-agents", "fragment": "unsupported-selector"},
+    )
 
     assert saved.status_code == 200
     assert saved.json()["catalog_refreshed"] is True
-    assert "Unsupported selector" in json.dumps(after.json())
+    assert "Unsupported selector" in json.dumps(tree_after.json())
+    assert summary_after["fragments"] != summary_before["fragments"]
+    assert search_after["total"] >= 1
+    assert inspect_after["selector"] == "fallback-selector"
+    assert source_after.status_code == 200
+    assert source_after.json()["view"]["read_only_reason"] == "unsupported-selector"
 
 
+@pytest.mark.parametrize(
+    "failure",
+    [
+        CatalogQueryError("fixture catalog refresh failure"),
+        RuntimeError("fixture unclassified refresh failure"),
+    ],
+)
 def test_refresh_failure_keeps_prior_reads_and_freezes_later_saves(
     snapshot: CatalogSnapshot,
     repo: Path,
+    failure: Exception,
+    caplog: pytest.LogCaptureFixture,
 ) -> None:
     target = repo / "AGENTS.md"
     target.write_bytes((ROOT / "AGENTS.md").read_bytes())
@@ -1176,7 +1214,7 @@ def test_refresh_failure_keeps_prior_reads_and_freezes_later_saves(
     )
 
     def fail_reload(_root: Path) -> CatalogSnapshot:
-        raise CatalogQueryError("fixture refresh failure")
+        raise failure
 
     client = _client(snapshot, repo, reload_catalog=fail_reload)
     tree_before = client.get("/api/catalog/tree").json()
@@ -1218,6 +1256,8 @@ def test_refresh_failure_keeps_prior_reads_and_freezes_later_saves(
         "detail": detail,
     }
     assert target.read_bytes() == text.encode()
+    assert "catalog refresh failed after source save" in caplog.text
+    assert str(failure) in caplog.text
 
 
 @pytest.mark.parametrize(
@@ -1381,6 +1421,100 @@ def test_queued_save_waits_for_refresh_and_observes_newly_frozen_state(
     )
     assert save_calls == ["managed:repo-agents"]
     assert target.read_bytes() == first_text.encode()
+
+
+def test_queued_different_path_save_uses_successfully_swapped_generation(
+    snapshot: CatalogSnapshot,
+    fallback_snapshot: CatalogSnapshot,
+    repo: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    first_target = repo / "AGENTS.md"
+    first_target.write_bytes((ROOT / "AGENTS.md").read_bytes())
+    first_original = first_target.read_bytes()
+    first_text = first_original.decode("utf-8").replace(
+        "*Conventions for working", "*Serialized generation save", 1
+    )
+    second_unit_id = "markdown:prompts/stages/address/action.md"
+    second_unit = snapshot.get_unit(second_unit_id)
+    assert second_unit is not None
+    second_target = repo / second_unit.candidate.path
+    second_target.parent.mkdir(parents=True)
+    second_target.write_bytes((ROOT / second_unit.candidate.path).read_bytes())
+    second_original = second_target.read_bytes()
+    second_text = second_original.decode("utf-8") + "\n"
+    entered_reload = threading.Event()
+    release_reload = threading.Event()
+    reload_calls = 0
+    save_calls: list[tuple[str, bool]] = []
+    real_save = web.source_adapter.save_source
+
+    def counted_save(
+        current: CatalogSnapshot,
+        root: Path,
+        unit_id: str,
+        load_hash: str,
+        text: str,
+    ) -> web.source_adapter.SourceSaveResult:
+        save_calls.append((unit_id, current is fallback_snapshot))
+        return real_save(current, root, unit_id, load_hash, text)
+
+    def deferred_success(_root: Path) -> CatalogSnapshot:
+        nonlocal reload_calls
+        reload_calls += 1
+        if reload_calls == 1:
+            entered_reload.set()
+            assert release_reload.wait(timeout=5)
+        return fallback_snapshot
+
+    monkeypatch.setattr(web.source_adapter, "save_source", counted_save)
+    client = _client(snapshot, repo, reload_catalog=deferred_success)
+    responses: dict[str, Response] = {}
+
+    def first_request() -> None:
+        responses["first"] = client.post(
+            "/api/source/save",
+            headers={web.CSRF_HEADER: TOKEN},
+            json={
+                "unit": "managed:repo-agents",
+                "load_hash": hashlib.sha256(first_original).hexdigest(),
+                "text": first_text,
+            },
+        )
+
+    def second_request() -> None:
+        responses["second"] = client.post(
+            "/api/source/save",
+            headers={web.CSRF_HEADER: TOKEN},
+            json={
+                "unit": second_unit_id,
+                "load_hash": hashlib.sha256(second_original).hexdigest(),
+                "text": second_text,
+            },
+        )
+
+    first = threading.Thread(target=first_request)
+    first.start()
+    assert entered_reload.wait(timeout=5)
+    second = threading.Thread(target=second_request)
+    second.start()
+    assert second.is_alive()
+    assert save_calls == [("managed:repo-agents", False)]
+
+    release_reload.set()
+    first.join(timeout=5)
+    second.join(timeout=5)
+    assert not first.is_alive()
+    assert not second.is_alive()
+    assert responses["first"].json()["status"] == "saved"
+    assert responses["second"].json()["status"] == "saved"
+    assert save_calls == [
+        ("managed:repo-agents", False),
+        (second_unit_id, True),
+    ]
+    assert reload_calls == 2
+    assert first_target.read_bytes() == first_text.encode()
+    assert second_target.read_bytes() == second_text.encode()
 
 
 def test_save_csrf_guard_rejects_before_mutation(snapshot: CatalogSnapshot, repo: Path) -> None:
