@@ -10,6 +10,7 @@ here the command's report/repair surface is.
 import json
 import subprocess
 from dataclasses import dataclass, field
+from pathlib import Path
 
 from click.testing import CliRunner
 
@@ -210,12 +211,21 @@ def _authed(monkeypatch) -> None:
     )
 
 
-def _wire(monkeypatch, store, trains, *, reads: dict[str, object] | None = None) -> None:
-    """Wire the doctor seams. ``reads`` maps carrier id → ``AdoptableIssue`` for the
-    kind-corruption check's presence-only read (default: every read misses → no finding);
-    an ``Exception`` value raises from the read seam instead."""
+def _wire(monkeypatch, store, trains, *, reads: dict[str, object] | None = None) -> list[Path]:
+    """Wire the doctor seams and return the repository roots used to resolve ``Delivery``.
+
+    ``reads`` maps carrier id → ``AdoptableIssue`` for the kind-corruption check's presence-only
+    read (default: every read misses → no finding); an ``Exception`` value raises from the read
+    seam instead.
+    """
+    delivery_roots: list[Path] = []
+
+    def resolve_delivery(repo_root: Path):
+        delivery_roots.append(repo_root)
+        return trains
+
     monkeypatch.setattr(resolve, "resolve_objective_store", lambda _root: store)
-    monkeypatch.setattr(doctor_cmd, "resolve_delivery", lambda _root: trains)
+    monkeypatch.setattr(doctor_cmd, "resolve_delivery", resolve_delivery)
     monkeypatch.setattr(observe, "reconstruct_repo_train", trains.reconstruct)
 
     class _FakeIssueBackend:
@@ -226,6 +236,7 @@ def _wire(monkeypatch, store, trains, *, reads: dict[str, object] | None = None)
             return value
 
     monkeypatch.setattr(resolve, "resolve_issue_backend", lambda _root: _FakeIssueBackend())
+    return delivery_roots
 
 
 def _carrier_read(carrier: str, *, both: bool = True) -> issue_backend.AdoptableIssue:
@@ -422,7 +433,7 @@ def test_fix_applies_the_cancellation_repair_and_reports_remaining(monkeypatch):
     store, before, converged = _repairable_world()
     # doctor initial, repair initial, fresh proof, post-write verify, final diagnosis.
     trains = _ScriptedTrains(before, before, before, converged, converged)
-    _wire(monkeypatch, store, trains)
+    delivery_roots = _wire(monkeypatch, store, trains)
     result = _invoke(["objective", "doctor", "42", "--fix", "--json"])
     assert result.exit_code == 0  # report-only drift remains → still a clean exit
     payload = json.loads(result.output)
@@ -456,6 +467,7 @@ def test_fix_applies_the_cancellation_repair_and_reports_remaining(monkeypatch):
     assert write["require_native_canceled"] is True
     assert trains.status_calls == ["42", "42"]
     assert trains.reconstruction_calls == ["42", "42", "42"]
+    assert len(delivery_roots) == 1
 
 
 def test_fix_dry_run_would_apply_without_writing(monkeypatch):

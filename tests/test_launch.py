@@ -8,7 +8,7 @@ from _launch_helpers import _PLAN_REF, _PLAN_REF_JSON, _PLAN_REF_MODEL, _config,
 
 from perk import __version__, plan
 from perk.cli.ensure import UserFacingCliError
-from perk.delivery import StatusResult
+from perk.delivery import DeliveryError, StatusResult
 from perk.run import launch
 from perk.run.launch import (
     _address_prompt,
@@ -1371,6 +1371,10 @@ def _stacked_train(*, ready: bool = True, next_node: str | None = "1.2"):
 def _stub_delivery(monkeypatch, result) -> None:
     class FakeDelivery:
         def status(self, request):
+            if isinstance(result, DeliveryError):
+                raise result
+            if isinstance(result, StatusResult):
+                return result
             return StatusResult(
                 objective_id=result.objective_id,
                 objective_url=result.objective_url,
@@ -1440,6 +1444,53 @@ def test_stacked_not_ready_is_a_typed_refusal_and_creates_nothing(
         )
     assert excinfo.value.error_type == "node_not_build_ready"
     assert "[x] y" in str(excinfo.value)
+    assert not (_config(clone).worktree_root / "plan-102").exists()
+
+
+def test_stacked_status_error_preserves_code_and_message(git_repo_with_remote, monkeypatch):
+    clone, _remote, _advance = git_repo_with_remote
+    _stub_delivery(monkeypatch, DeliveryError("journal unavailable", error_type="github_error"))
+    cache.write_plan_ref(clone, _stacked_ref())
+
+    with pytest.raises(UserFacingCliError) as excinfo:
+        resolve_worktree(
+            repo_root=clone,
+            config=_config(clone),
+            request=_request("implement"),
+            worktree=None,
+            materialize=True,
+        )
+
+    assert excinfo.value.error_type == "github_error"
+    assert str(excinfo.value) == "journal unavailable"
+    assert not (_config(clone).worktree_root / "plan-102").exists()
+
+
+def test_stacked_status_without_train_fails_closed(git_repo_with_remote, monkeypatch):
+    clone, _remote, _advance = git_repo_with_remote
+    _stub_delivery(
+        monkeypatch,
+        StatusResult(
+            objective_id="10",
+            objective_url="u/10",
+            redirected_from=None,
+            train=None,
+            no_train_reason="objective uses incremental delivery",
+        ),
+    )
+    cache.write_plan_ref(clone, _stacked_ref())
+
+    with pytest.raises(UserFacingCliError) as excinfo:
+        resolve_worktree(
+            repo_root=clone,
+            config=_config(clone),
+            request=_request("implement"),
+            worktree=None,
+            materialize=True,
+        )
+
+    assert excinfo.value.error_type == "invalid_train"
+    assert "has no delivery train (objective uses incremental delivery)" in str(excinfo.value)
     assert not (_config(clone).worktree_root / "plan-102").exists()
 
 

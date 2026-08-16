@@ -28,6 +28,7 @@ from perk.delivery.train import (
     TrainReconstructionError,
     WorktreeFacts,
 )
+from perk.substrate import config as config_mod
 
 _STATUS_ERROR_TYPES = {
     "objective_not_found",
@@ -341,12 +342,60 @@ def test_resolve_delivery_is_zero_io_until_status_requires_persistence(
     config.write_text('[issues]\nbackend = "linear"\nteam = "ENG"\n', encoding="utf-8")
     monkeypatch.delenv("LINEAR_API_KEY", raising=False)
 
+    resolver_calls: list[tuple[str, Path]] = []
+    config_calls: list[tuple[str, Path]] = []
+    unexpected_calls: list[str] = []
+    original_store_resolver = observe.resolve_objective_store
+    original_issue_resolver = observe.resolve_issue_backend
+    original_backend_read = config_mod.load_committed_issues_backend
+    original_team_read = config_mod.load_committed_issues_team
+
+    def resolve_store(repo_root: Path):
+        resolver_calls.append(("objective", repo_root))
+        return original_store_resolver(repo_root)
+
+    def resolve_issues(repo_root: Path):
+        resolver_calls.append(("issues", repo_root))
+        return original_issue_resolver(repo_root)
+
+    def read_backend(repo_root: Path):
+        config_calls.append(("backend", repo_root))
+        return original_backend_read(repo_root)
+
+    def read_team(repo_root: Path):
+        config_calls.append(("team", repo_root))
+        return original_team_read(repo_root)
+
+    def unexpected(name: str):
+        def fail(*_args: object, **_kwargs: object) -> None:
+            unexpected_calls.append(name)
+            raise AssertionError(f"unexpected {name} I/O")
+
+        return fail
+
+    monkeypatch.setattr(observe, "resolve_objective_store", resolve_store)
+    monkeypatch.setattr(observe, "resolve_issue_backend", resolve_issues)
+    monkeypatch.setattr(config_mod, "load_committed_issues_backend", read_backend)
+    monkeypatch.setattr(config_mod, "load_committed_issues_team", read_team)
+    monkeypatch.setattr(observe.git_mod, "detect_trunk_branch", unexpected("trunk"))
+    monkeypatch.setattr(observe.git_mod, "fetch", unexpected("fetch"))
+    monkeypatch.setattr(observe.stacks, "pr_delivery_facts", unexpected("pr_facts"))
+    monkeypatch.setattr(observe.stacks, "pr_stack", unexpected("pr_stack"))
+    monkeypatch.setattr(observe.prs, "find_pr_for_branch", unexpected("branch_pr"))
+
     service = observe.resolve_delivery(tmp_path)
     assert isinstance(service, Delivery)
+    assert resolver_calls == []
+    assert config_calls == []
+    assert unexpected_calls == []
+
     with pytest.raises(DeliveryError) as excinfo:
         service.status(StatusRequest(objective_id="ENG-1"))
     assert excinfo.value.error_type == "github_error"
     assert "LINEAR_API_KEY" in str(excinfo.value)
+    assert resolver_calls == [("objective", tmp_path)]
+    assert config_calls == [("backend", tmp_path), ("team", tmp_path)]
+    assert unexpected_calls == []
 
 
 class _ResolvedStore:
