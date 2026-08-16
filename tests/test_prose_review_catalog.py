@@ -105,6 +105,13 @@ def test_capability_tree_has_fixed_roots_and_typed_hierarchy(snapshot: CatalogSn
     assert plan_authoring.session_shapes == snapshot.session_shapes_for_capability("planning.plan")
 
 
+def test_units_for_path_is_a_linear_catalog_order_scan(snapshot: CatalogSnapshot) -> None:
+    expected = tuple(unit for unit in snapshot.units if unit.candidate.path == "AGENTS.md")
+    assert snapshot.units_for_path("AGENTS.md") == expected
+    assert snapshot.units_for_path("missing.md") == ()
+    assert "units_by_path" not in snapshot._indexes.__dataclass_fields__
+
+
 def test_routed_units_and_fragments_have_canonical_identity(snapshot: CatalogSnapshot) -> None:
     unit = snapshot.get_unit(_PLAN_REVIEW_TOOL)
     assert unit is not None

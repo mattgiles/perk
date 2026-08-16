@@ -232,7 +232,7 @@ def _capability_structure(
 
 @dataclass(frozen=True, slots=True)
 class CatalogSnapshot:
-    """A load-once, immutable view of every workbench catalog query."""
+    """One immutable generation of every workbench catalog query."""
 
     capability_tree: tuple[CapabilityNode, ...]
     units: tuple[RoutedUnit, ...]
@@ -447,6 +447,10 @@ class CatalogSnapshot:
 
     def units_for_capability(self, capability_id: str) -> tuple[RoutedUnit, ...]:
         return self._indexes.units_by_capability.get(capability_id, ())
+
+    def units_for_path(self, path: str) -> tuple[RoutedUnit, ...]:
+        """Return mapped units for ``path`` in catalog order."""
+        return tuple(unit for unit in self.units if unit.candidate.path == path)
 
     def get_unit(self, unit_id: str) -> RoutedUnit | None:
         return self._indexes.units.get(unit_id)

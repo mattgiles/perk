@@ -26,6 +26,16 @@ from perk_dev.prose_review.source_adapter.read import (
     read_whole_file,
     source_adapter_for,
 )
+from perk_dev.prose_review.source_adapter.write import (
+    SourceConflict,
+    SourceRefusalReason,
+    SourceRefused,
+    SourceSaved,
+    SourceSaveResult,
+    SourceValidationFailed,
+    SuggestedCheck,
+    save_source,
+)
 
 __all__ = [
     "CheckHintId",
@@ -37,17 +47,25 @@ __all__ = [
     "ReadOnlyReason",
     "ResolvedRange",
     "SourceAdapter",
+    "SourceConflict",
     "SourceDiagnostic",
     "SourceDiagnosticCode",
     "SourceExtraction",
     "SourceRange",
     "SourceReadError",
     "SourceReadFailure",
+    "SourceRefusalReason",
+    "SourceRefused",
+    "SourceSaveResult",
+    "SourceSaved",
+    "SourceValidationFailed",
+    "SuggestedCheck",
     "UnresolvedRange",
     "WholeFileSource",
     "project_source",
     "read_source",
     "read_unit_file",
     "read_whole_file",
+    "save_source",
     "source_adapter_for",
 ]

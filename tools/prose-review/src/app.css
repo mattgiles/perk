@@ -38,6 +38,7 @@ body {
   display: flex;
   align-items: center;
   gap: 1rem;
+  flex-wrap: wrap;
 }
 
 .app-header h1 {
@@ -365,7 +366,10 @@ body {
 .workspace-button,
 .discard-button,
 .source-readonly-explanation button,
-.workspace-drawer button {
+.workspace-drawer button,
+.save-action,
+.save-result button,
+.source-view > button {
   font: inherit;
   color: inherit;
   background: none;
@@ -434,6 +438,85 @@ body {
   border-radius: 0.25rem;
   padding: 0.75rem;
   white-space: pre-wrap;
+}
+
+.write-state-warning,
+.catalog-warning,
+.clipboard-failure,
+.save-unsupported {
+  color: #c92a2a;
+  font-weight: 600;
+}
+
+.write-state-warning {
+  flex-basis: 100%;
+  margin: 0;
+}
+
+.save-review,
+.save-result,
+.save-unsupported,
+.save-status {
+  margin-top: 1rem;
+}
+
+.save-review,
+.save-result {
+  border-top: 1px solid color-mix(in srgb, currentcolor 25%, transparent);
+  padding-top: 0.75rem;
+}
+
+.save-review h2,
+.save-result h2,
+.save-result h3 {
+  margin: 0 0 0.5rem;
+}
+
+.save-metadata {
+  display: grid;
+  gap: 0.25rem;
+  margin: 0 0 0.75rem;
+}
+
+.save-metadata div {
+  display: grid;
+  grid-template-columns: 5rem minmax(0, 1fr);
+  gap: 0.5rem;
+}
+
+.save-metadata dt {
+  font-weight: 600;
+}
+
+.save-metadata dd {
+  margin: 0;
+}
+
+.save-diff {
+  max-height: 45vh;
+  overflow: auto;
+  margin: 0 0 0.75rem;
+  padding: 0.75rem;
+  border: 1px solid color-mix(in srgb, currentcolor 25%, transparent);
+  border-radius: 0.25rem;
+  font-family: ui-monospace, monospace;
+  font-size: 0.85rem;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.save-result button + button {
+  margin-left: 0.5rem;
+}
+
+.save-result code {
+  overflow-wrap: anywhere;
+}
+
+.source-focus-editor:disabled {
+  opacity: 0.6;
+  cursor: wait;
 }
 
 .dirty-badge {

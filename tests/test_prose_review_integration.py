@@ -6,9 +6,11 @@ fixture-owned temp directory (existence is not freshness, and no two processes m
 ever write one output dir), so this suite never touches the launcher's real ``dist/``.
 """
 
+import hashlib
 import re
 import secrets
 import socket
+import stat
 import threading
 import time
 from collections.abc import Iterator
@@ -52,6 +54,8 @@ class _RunningServer:
     base_url: str
     token: str
     snapshot: CatalogSnapshot
+    repo_root: Path
+    refresh_observations: list[tuple[bytes, bytes]]
 
 
 def _csrf_token(html: str) -> str:
@@ -92,6 +96,17 @@ def server(tmp_path_factory: pytest.TempPathFactory) -> Iterator[_RunningServer]
     sock.bind(("127.0.0.1", 0))
     sock.listen(128)
     port = int(sock.getsockname()[1])
+    refresh_observations: list[tuple[bytes, bytes]] = []
+
+    def reload_after_write(root: Path) -> CatalogSnapshot:
+        refresh_observations.append(
+            (
+                (root / "AGENTS.md").read_bytes(),
+                (root / "docs/learned/clusters.yaml").read_bytes(),
+            )
+        )
+        return snapshot
+
     app = create_app(
         snapshot=snapshot,
         repo_root=trust_root,
@@ -99,6 +114,7 @@ def server(tmp_path_factory: pytest.TempPathFactory) -> Iterator[_RunningServer]
         dist_dir=dist_dir,
         allowed_host=f"127.0.0.1:{port}",
         csrf_token=token,
+        reload_catalog=reload_after_write,
     )
     # Pins the assumptions this plan refuses to trust: Server.run serves a pre-bound
     # listening socket, and skips signal-handler installation off the main thread.
@@ -123,7 +139,13 @@ def server(tmp_path_factory: pytest.TempPathFactory) -> Iterator[_RunningServer]
             pytest.fail("uvicorn did not report started within 30s")
         time.sleep(0.05)
 
-    yield _RunningServer(base_url=f"http://127.0.0.1:{port}", token=token, snapshot=snapshot)
+    yield _RunningServer(
+        base_url=f"http://127.0.0.1:{port}",
+        token=token,
+        snapshot=snapshot,
+        repo_root=trust_root,
+        refresh_observations=refresh_observations,
+    )
 
     server.should_exit = True
     thread.join(timeout=10)
@@ -347,6 +369,67 @@ def test_source_endpoint_serves_whole_and_fragment_focus_over_real_http(
     unchanged = unchanged_response.json()
     assert unchanged["file"] == whole_load["file"]
     assert unchanged["view"]["focus"] == whole["focus"]
+
+
+def test_markdown_and_yaml_save_over_real_http_refresh_after_exact_atomic_write(
+    server: _RunningServer,
+) -> None:
+    agents_path = server.repo_root / "AGENTS.md"
+    agents_path.chmod(0o6751)
+    yaml_path = server.repo_root / "docs/learned/clusters.yaml"
+    with httpx.Client(base_url=server.base_url, timeout=10) as client:
+        agents_load = client.get("/api/source", params={"unit": "managed:repo-agents"}).json()
+        agents_text = agents_load["view"]["focus"].replace(
+            "*Conventions for working", "*Real HTTP saved conventions for working", 1
+        )
+        agents_saved = client.post(
+            "/api/source/save",
+            headers={"X-Prose-Review-Csrf": server.token},
+            json={
+                "unit": "managed:repo-agents",
+                "load_hash": agents_load["file"]["load_hash"],
+                "text": agents_text,
+            },
+        )
+        yaml_load = client.get("/api/source", params={"unit": "ambient:learned-routing"}).json()
+        yaml_text = yaml_load["view"]["focus"].replace(
+            "Pi SDK/extension substrate craft", "Real HTTP extension substrate craft", 1
+        )
+        yaml_saved = client.post(
+            "/api/source/save",
+            headers={"X-Prose-Review-Csrf": server.token},
+            json={
+                "unit": "ambient:learned-routing",
+                "load_hash": yaml_load["file"]["load_hash"],
+                "text": yaml_text,
+            },
+        )
+
+    assert agents_saved.status_code == 200
+    _assert_security_headers(agents_saved)
+    agents_payload = agents_saved.json()
+    assert agents_payload["status"] == "saved"
+    assert (
+        agents_payload["source"]["file"]["load_hash"]
+        == hashlib.sha256(agents_text.encode()).hexdigest()
+    )
+    assert agents_payload["source"]["file"]["mode"] == 0o6751
+    assert agents_path.read_bytes() == agents_text.encode()
+    assert stat.S_IMODE(agents_path.stat().st_mode) == 0o6751
+
+    assert yaml_saved.status_code == 200
+    _assert_security_headers(yaml_saved)
+    yaml_payload = yaml_saved.json()
+    assert yaml_payload["status"] == "saved"
+    assert [entry["id"] for entry in yaml_payload["materialized"]] == ["ambient-index"]
+    assert [check["id"] for check in yaml_payload["checks"]] == [
+        "prose-map",
+        "learned-docs",
+    ]
+    assert yaml_path.read_bytes() == yaml_text.encode()
+    assert len(server.refresh_observations) == 2
+    assert server.refresh_observations[0][0] == agents_text.encode()
+    assert server.refresh_observations[1][1] == yaml_text.encode()
 
 
 def test_wrong_host_is_rejected_over_real_http(server: _RunningServer) -> None:

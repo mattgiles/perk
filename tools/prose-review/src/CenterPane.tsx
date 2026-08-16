@@ -1,4 +1,5 @@
 import { type Change, diffLines } from "diff";
+import { useState } from "react";
 import type { Mode } from "./App.tsx";
 import { BOUNDARY_INFO } from "./boundaries.ts";
 import {
@@ -7,6 +8,12 @@ import {
   type SelectedComparison,
 } from "./comparison.ts";
 import type { ComparisonLoadState } from "./comparisonLoad.ts";
+import {
+  CLIPBOARD_FAILURE_DETAIL,
+  type SourceDiagnostic,
+  supportsSourceSave,
+  UNSUPPORTED_FAMILY_DETAIL,
+} from "./save.ts";
 import {
   type Selection,
   type SourceTarget,
@@ -18,6 +25,18 @@ import { useWorkspace, useWorkspaceSource, type WorkspaceLoadState } from "./Wor
 import type { BoundaryKind } from "./wire.ts";
 
 export { WorkspaceProvider } from "./WorkspaceContext.tsx";
+
+function keyedDiagnostics(
+  diagnostics: SourceDiagnostic[],
+): { diagnostic: SourceDiagnostic; key: string }[] {
+  const occurrences = new Map<string, number>();
+  return diagnostics.map((diagnostic) => {
+    const identity = JSON.stringify(diagnostic);
+    const occurrence = occurrences.get(identity) ?? 0;
+    occurrences.set(identity, occurrence + 1);
+    return { diagnostic, key: `${identity}:${occurrence}` };
+  });
+}
 
 const MODES: { id: Mode; label: string }[] = [
   { id: "edit", label: "Edit" },
@@ -35,6 +54,7 @@ function SourceLoadPresentation({
   retry: () => void;
 }) {
   const workspace = useWorkspace();
+  const [clipboardFailure, setClipboardFailure] = useState<string | null>(null);
   if (state.status === "loading") {
     return <p className="pane-hint">Loading source…</p>;
   }
@@ -51,9 +71,33 @@ function SourceLoadPresentation({
   }
 
   const { source } = state;
-  const { editor, view } = source;
+  const { editor, saveState, view } = source;
   const presentation =
     view.read_only_reason === null ? null : READ_ONLY_PRESENTATION[view.read_only_reason];
+  const locked =
+    saveState.status === "saving" ||
+    saveState.status === "reconciling" ||
+    saveState.status === "indeterminate" ||
+    saveState.status === "reloading";
+  const copyEdits = async (): Promise<void> => {
+    const snapshot = workspace.snapshot(source.path);
+    if (snapshot === null) {
+      setClipboardFailure(CLIPBOARD_FAILURE_DETAIL);
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(snapshot.currentText);
+      setClipboardFailure(null);
+    } catch {
+      setClipboardFailure(CLIPBOARD_FAILURE_DETAIL);
+    }
+  };
+  const attentionControls =
+    saveState.status === "conflict" ||
+    saveState.status === "reconciling" ||
+    saveState.status === "indeterminate" ||
+    saveState.status === "reloading";
+
   return (
     <div className="source-view">
       <div className="source-header">
@@ -63,7 +107,7 @@ function SourceLoadPresentation({
           {view.editable ? "Editable range" : presentation?.badge}
         </span>
         {source.dirty && <span className="dirty-badge">Dirty</span>}
-        {source.dirty && (
+        {source.dirty && source.canDiscard && (
           <button
             type="button"
             className="discard-button"
@@ -101,6 +145,7 @@ function SourceLoadPresentation({
             className="source-focus-editor"
             aria-label={`Edit ${target.fragment?.label ?? target.unit.id}`}
             value={editor.display}
+            disabled={locked}
             spellCheck={false}
             onInput={(event) => {
               const outcome = workspace.editFocus({
@@ -120,6 +165,147 @@ function SourceLoadPresentation({
       )}
       {view.editable && view.focus.length === 0 && (
         <p className="empty-focus-hint">This mapped fragment is empty.</p>
+      )}
+
+      {source.dirty && !supportsSourceSave(target) && (
+        <p className="save-unsupported">{UNSUPPORTED_FAMILY_DETAIL}</p>
+      )}
+      {source.review === null && source.canReview && (
+        <button
+          type="button"
+          className="save-action"
+          onClick={() => workspace.beginSaveReview(source.path)}
+        >
+          Review full-file diff
+        </button>
+      )}
+      {source.review !== null && (
+        <section className="save-review" aria-label="Full-file save review">
+          <h2>Full-file save review</h2>
+          <dl className="save-metadata">
+            <div>
+              <dt>Loaded</dt>
+              <dd>
+                {source.review.loaded.bytes} bytes · {source.review.loaded.newlineStyle} · final
+                newline {source.review.loaded.finalNewline ? "yes" : "no"} · BOM{" "}
+                {source.review.loaded.bom ? "yes" : "no"}
+              </dd>
+            </div>
+            <div>
+              <dt>Current</dt>
+              <dd>
+                {source.review.current.bytes} bytes · {source.review.current.newlineStyle} · final
+                newline {source.review.current.finalNewline ? "yes" : "no"} · BOM{" "}
+                {source.review.current.bom ? "yes" : "no"}
+              </dd>
+            </div>
+          </dl>
+          <pre className="save-diff">{source.review.diff}</pre>
+          {source.canSave && (
+            <button
+              type="button"
+              className="save-action"
+              onClick={() => void workspace.saveReviewed(source.path)}
+            >
+              Save reviewed file
+            </button>
+          )}
+        </section>
+      )}
+
+      {saveState.status === "saving" && <p className="save-status">Saving reviewed file…</p>}
+      {saveState.status === "not-sent" && (
+        <p className="save-result save-refused">{saveState.detail}</p>
+      )}
+      {saveState.status === "validation-failed" && (
+        <section className="save-result save-validation">
+          <h2>Validation failed</h2>
+          <ul>
+            {keyedDiagnostics(saveState.diagnostics).map(({ diagnostic, key }) => (
+              <li key={key}>
+                <code>
+                  {diagnostic.line !== null && diagnostic.column !== null
+                    ? `${source.path}:${diagnostic.line}:${diagnostic.column}`
+                    : (diagnostic.selector ?? source.path)}
+                </code>{" "}
+                {diagnostic.message}
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+      {saveState.status === "refused" && (
+        <p className="save-result save-refused">{saveState.detail}</p>
+      )}
+      {saveState.status === "conflict" && (
+        <section className="save-result save-conflict">
+          <p>{saveState.detail}</p>
+          <button type="button" onClick={() => void copyEdits()}>
+            Copy Edits
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              if (
+                window.confirm(`Reload ${source.path} from disk and replace all in-memory edits?`)
+              ) {
+                void workspace.reloadConflict(source.path);
+              }
+            }}
+          >
+            Reload from disk
+          </button>
+        </section>
+      )}
+      {saveState.status === "reconciling" && <p>{saveState.detail}</p>}
+      {saveState.status === "reloading" && <p>Reloading canonical source…</p>}
+      {saveState.status === "indeterminate" && (
+        <section className="save-result save-indeterminate">
+          <p>{saveState.detail}</p>
+          <button type="button" onClick={() => void workspace.reconcileSave(source.path)}>
+            Retry reconciliation
+          </button>
+        </section>
+      )}
+      {attentionControls && saveState.status !== "conflict" && (
+        <button type="button" onClick={() => void copyEdits()}>
+          Copy Edits
+        </button>
+      )}
+      {clipboardFailure !== null && <p className="clipboard-failure">{clipboardFailure}</p>}
+      {saveState.status === "saved" && (
+        <section className="save-result save-success">
+          <h2>Saved</h2>
+          {saveState.result.materialized.length > 0 && (
+            <>
+              <h3>Materialization handoff</h3>
+              <ul>
+                {saveState.result.materialized.map((lineage) => (
+                  <li key={lineage.id}>
+                    <strong>{lineage.id}</strong> · {lineage.relationship}:{" "}
+                    {lineage.targets.join(", ")}
+                  </li>
+                ))}
+              </ul>
+            </>
+          )}
+          {saveState.result.checks.length > 0 && (
+            <>
+              <h3>Suggested checks</h3>
+              <ul>
+                {saveState.result.checks.map((check) => (
+                  <li key={check.id}>
+                    <code>{check.command}</code>
+                  </li>
+                ))}
+              </ul>
+            </>
+          )}
+          {saveState.result.refresh_detail !== null && <p>{saveState.result.refresh_detail}</p>}
+        </section>
+      )}
+      {saveState.status === "reconciled-saved" && (
+        <p className="save-result save-success">{saveState.detail}</p>
       )}
     </div>
   );

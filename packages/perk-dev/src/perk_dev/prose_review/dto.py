@@ -6,7 +6,7 @@ directly. Declaration order is the JSON key order, so the field order below is
 deliberate.
 """
 
-from typing import Self
+from typing import Literal, Self
 
 from pydantic import Field
 
@@ -42,10 +42,20 @@ from perk_dev.prose_review.comparison import (
 )
 from perk_dev.prose_review.search import MatchField, SearchEntryKind, SearchHit, SearchResults
 from perk_dev.prose_review.source_adapter import (
+    CheckHintId,
     FocusedSource,
     LoadedSource,
     NewlineStyle,
     ReadOnlyReason,
+    SourceConflict,
+    SourceDiagnostic,
+    SourceDiagnosticCode,
+    SourceRefusalReason,
+    SourceRefused,
+    SourceSaved,
+    SourceSaveResult,
+    SourceValidationFailed,
+    SuggestedCheck,
     WholeFileSource,
 )
 
@@ -234,6 +244,53 @@ class SourceFileOut(OutputModel):
         )
 
 
+class SavedSourceOut(OutputModel):
+    """Identity-bearing source metadata returned only after a successful save."""
+
+    unit: str
+    kind: ProseKind
+    file: SourceFileOut
+
+    @classmethod
+    def from_domain(cls, source: WholeFileSource) -> Self:
+        return cls(
+            unit=source.unit_id,
+            kind=source.kind,
+            file=SourceFileOut.from_domain(source),
+        )
+
+
+class SourceDiagnosticOut(OutputModel):
+    """One closed validation diagnostic from the selected source adapter."""
+
+    code: SourceDiagnosticCode
+    message: str
+    selector: str | None
+    line: int | None
+    column: int | None
+
+    @classmethod
+    def from_domain(cls, diagnostic: SourceDiagnostic) -> Self:
+        return cls(
+            code=diagnostic.code,
+            message=diagnostic.message,
+            selector=diagnostic.selector,
+            line=diagnostic.line,
+            column=diagnostic.column,
+        )
+
+
+class SuggestedCheckOut(OutputModel):
+    """One named post-save command handoff; it is never executed by the workbench."""
+
+    id: CheckHintId
+    command: str
+
+    @classmethod
+    def from_domain(cls, check: SuggestedCheck) -> Self:
+        return cls(id=check.id, command=check.command)
+
+
 class SourceViewOut(OutputModel):
     """One metadata-free whole-unit or fragment projection."""
 
@@ -388,6 +445,75 @@ class LineageOut(OutputModel):
             relationship=view.lineage.relationship,
             targets=view.lineage.targets,
         )
+
+
+class SourceSavedOut(OutputModel):
+    status: Literal["saved"]
+    source: SavedSourceOut
+    materialized: tuple[LineageOut, ...]
+    checks: tuple[SuggestedCheckOut, ...]
+    catalog_refreshed: bool
+    refresh_detail: str | None
+
+    @classmethod
+    def from_domain(cls, result: SourceSaved) -> Self:
+        return cls(
+            status=result.status,
+            source=SavedSourceOut.from_domain(result.source),
+            materialized=tuple(LineageOut.from_domain(view) for view in result.materialized),
+            checks=tuple(SuggestedCheckOut.from_domain(check) for check in result.checks),
+            catalog_refreshed=result.catalog_refreshed,
+            refresh_detail=result.refresh_detail,
+        )
+
+
+class SourceValidationFailedOut(OutputModel):
+    status: Literal["validation-failed"]
+    diagnostics: tuple[SourceDiagnosticOut, ...]
+
+    @classmethod
+    def from_domain(cls, result: SourceValidationFailed) -> Self:
+        return cls(
+            status=result.status,
+            diagnostics=tuple(
+                SourceDiagnosticOut.from_domain(diagnostic) for diagnostic in result.diagnostics
+            ),
+        )
+
+
+class SourceConflictOut(OutputModel):
+    status: Literal["conflict"]
+    detail: str
+
+    @classmethod
+    def from_domain(cls, result: SourceConflict) -> Self:
+        return cls(status=result.status, detail=result.detail)
+
+
+class SourceRefusedOut(OutputModel):
+    status: Literal["refused"]
+    reason: SourceRefusalReason
+    detail: str
+
+    @classmethod
+    def from_domain(cls, result: SourceRefused) -> Self:
+        return cls(status=result.status, reason=result.reason, detail=result.detail)
+
+
+type SourceSaveOut = (
+    SourceSavedOut | SourceValidationFailedOut | SourceConflictOut | SourceRefusedOut
+)
+
+
+def source_save_out(result: SourceSaveResult) -> SourceSaveOut:
+    """Map one closed save result to its tagged output boundary."""
+    if isinstance(result, SourceSaved):
+        return SourceSavedOut.from_domain(result)
+    if isinstance(result, SourceValidationFailed):
+        return SourceValidationFailedOut.from_domain(result)
+    if isinstance(result, SourceConflict):
+        return SourceConflictOut.from_domain(result)
+    return SourceRefusedOut.from_domain(result)
 
 
 class UnitInspectOut(OutputModel):

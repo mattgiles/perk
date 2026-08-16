@@ -1,8 +1,9 @@
 # Prose Review Workbench PRD
 
-**Status:** product and architecture contract for a future local-only maintainer app. The living
-map in [`prose-prompt-map.yaml`](./prose-prompt-map.yaml) is its information architecture and source
-allowlist. This document does not select a web framework or implement the app.
+**Status:** product and architecture contract for the local-only maintainer app. The living map in
+[`prose-prompt-map.yaml`](./prose-prompt-map.yaml) is its information architecture and source
+allowlist. The selected implementation stack and shipped-slice summary live in
+[`prose-review-stack.md`](./prose-review-stack.md).
 
 ## 1. Problem
 
@@ -147,15 +148,27 @@ communicated by color alone.
    editable; surrounding source context is read-only unless another mapped fragment in the same
    file is selected.
 3. Keep edits in memory across navigation and coalesce all edits to the same file in one buffer.
-4. Before save, show the exact full-file diff and run cheap syntax, template, selector, and graph
-   checks. A failure blocks save and anchors the error to the affected source when possible.
-5. Immediately before replacement, compare the on-disk hash with the load hash. A mismatch opens a
-   conflict state with Reload and Copy Edits actions; it never writes.
-6. On success, write a temporary file in the same directory, preserve mode/newline behavior, and
-   atomically replace the original. Refresh the source hash and graph-derived views.
+4. Before save, show the exact full-file diff and its byte/newline/final-newline/BOM metadata.
+   Save is enabled only for that reviewed workspace revision.
+5. The closed synchronous gate is adapter syntax validation, re-resolution of every mapped fragment
+   on the path, and containment/membership/lineage safety. A failure blocks replacement and anchors
+   the error to the affected source when possible. Template rendering, catalog rebuild, and named
+   drift checks are not pre-save work.
+6. Compare the on-disk hash with the load hash before creating a temporary file, then sample safety,
+   hash, and current mode again after preparing it. A mismatch opens a conflict state with confirmed
+   Reload and complete-file Copy Edits actions; it never overwrites the external change.
+7. On success, atomically replace the original with exact UTF-8 bytes and the latest sampled POSIX
+   mode, then rebuild and atomically swap the disk-backed catalog view. Materialization rows and
+   named checks are read-only post-save handoffs, not automatic actions.
+8. A lost response is reconciled with a cache-bypassing canonical load rather than an ordinary save
+   retry. A committed write whose catalog refresh fails remains committed, preserves prior catalog
+   reads, freezes later writes, and gives external repair/copy guidance.
 
-Discard is explicit per file. Closing or reloading with dirty buffers requires confirmation. The
-app never silently persists editor state into source files.
+The first persistence slice is deliberately limited to mapped Markdown and YAML source families;
+Python and TypeScript edits remain in-memory-only. Save and Reload lock only their file path while in
+flight. Discard is explicit per file and cannot clear conflict or indeterminate state. Closing or
+reloading with dirty buffers requires confirmation. The app never silently persists editor state
+into source files.
 
 ### Preview an assembly
 
@@ -172,11 +185,13 @@ Preview is a review aid, not a claim to reproduce the host's complete model requ
 
 ### Run targeted checks
 
-Pre-save checks are cheap and synchronous. After save, the maintainer may run checks suggested by
-the affected source adapters: `perk-dev prose-map check`, the relevant prompt-render parity test,
-targeted pytest/node tests, Ruff, ty, Biome, or TypeScript typecheck. The app streams captured output
-and records the result in the workspace drawer. It never launches the full `run_ci` gate or applies
-formatting automatically.
+Pre-save validation is limited to adapter syntax, all mapped-selector re-resolution, and
+containment/membership/lineage safety. Catalog reconstruction and named drift checks occur only after
+the atomic replacement. After save, the maintainer may run checks suggested by the affected source
+adapters: `perk-dev prose-map check`, the relevant prompt-render parity test, targeted pytest/node
+tests, Ruff, ty, Biome, or TypeScript typecheck. The app streams captured output and records the
+result in the workspace drawer. It never launches the full `run_ci` gate or applies formatting
+automatically.
 
 ## 7. Source adapters
 
@@ -213,22 +228,24 @@ erase successfully rendered siblings.
 - There are no external assets, network requests, telemetry, accounts, cookies, or authentication.
 - Requests with a non-loopback Host or unrecognized Origin are rejected. State-changing requests
   require the current process-local anti-CSRF token.
-- The repository root is fixed at launch. Every path is resolved, must remain beneath that root,
-  and must match an editable canonical unit in the current catalog snapshot. Symlink escapes fail.
+- The repository root is fixed at launch. The save request cannot carry a path or adapter. The
+  server derives the catalog path and all mapped selectors, requires the path beneath the root and
+  in the active snapshot, and refuses every root-relative symlink component.
 - Generated/materialized lineage targets and boundaries are always read-only.
 - The process inherits ordinary user permissions and never elevates them.
 - Read-only Git status/diff may annotate files. No endpoint or process adapter exposes mutating Git
   operations.
 
-The future launcher is `perk-dev prose-review`; it chooses a random loopback port and opens the
-browser by default, with `--no-open` as the only required launch option.
+The launcher is `perk-dev prose-review`; it chooses a random loopback port and opens the browser by
+default, with `--no-open` as the only required launch option.
 
 ## 10. Core architecture seams
 
-Framework choice is deferred, but the implementation must preserve these deep modules:
+The selected implementation stack preserves these deep modules:
 
-- **Catalog:** loads the authored graph and discovered source catalog once, validates it, and serves
-  immutable capability, relation, assembly, scenario, source, and lineage queries.
+- **Catalog:** validates the authored graph and discovered source catalog into immutable generations.
+  The app loads one generation at launch; each successful persisted edit rebuilds a complete
+  disk-backed generation and atomically swaps the current one before serving later queries.
 - **EditWorkspace:** owns canonical per-file buffers, source hashes, dirty state, diffs, conflicts,
   and unload protection. UI aliases contain only a unit id and never own text.
 - **SourceAdapter:** abstracts extraction, focused replacement, validation, and atomic save for one

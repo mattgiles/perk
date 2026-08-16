@@ -1,3 +1,7 @@
+import { type DocumentLike, mutationHeaders } from "./mutationRequest.ts";
+
+export type { DocumentLike } from "./mutationRequest.ts";
+
 import type { SourceTarget } from "./selection.ts";
 import { parseSourceView, parseUnitSource, type SourceView, type UnitSource } from "./source.ts";
 
@@ -19,13 +23,10 @@ export type ResponseLike = {
 
 export type FetchLike = (url: string, init?: RequestInit) => Promise<ResponseLike>;
 
-export type DocumentLike = {
-  querySelector: (selector: string) => { getAttribute: (name: string) => string | null } | null;
-};
-
 export type SourceLoadOptions = {
   fetch?: FetchLike;
   signal?: AbortSignal;
+  cache?: RequestCache;
 };
 
 export type SourceProjectionOptions = SourceLoadOptions & {
@@ -69,9 +70,11 @@ export async function loadUnitSource(
     if (target.fragment !== null) {
       params.push(`fragment=${encodeURIComponent(target.fragment.id)}`);
     }
-    const response = await fetchFn(`/api/source?${params.join("&")}`, {
-      signal: options.signal,
-    });
+    const init: RequestInit = { signal: options.signal };
+    if (options.cache !== undefined) {
+      init.cache = options.cache;
+    }
+    const response = await fetchFn(`/api/source?${params.join("&")}`, init);
     if (response.status === 404) {
       return (await refused(response)) ?? { status: "failed" };
     }
@@ -92,29 +95,21 @@ export async function loadUnitSource(
   }
 }
 
-function csrfToken(documentRoot: DocumentLike | undefined): string | null {
-  const token = documentRoot?.querySelector('meta[name="csrf-token"]')?.getAttribute("content");
-  return token !== undefined && token !== null && token.trim().length > 0 ? token : null;
-}
-
 /** POST and classify one stateless projection over browser-supplied text. Never rejects. */
 export async function projectUnitSource(
   target: SourceTarget,
   text: string,
   options: SourceProjectionOptions = {},
 ): Promise<SourceProjectionOutcome> {
-  const token = csrfToken(options.document ?? globalThis.document);
-  if (token === null) {
+  const headers = mutationHeaders(options.document ?? globalThis.document);
+  if (headers === null) {
     return { status: "failed" };
   }
   const fetchFn = options.fetch ?? fetch;
   try {
     const response = await fetchFn("/api/source/project", {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "X-Prose-Review-Csrf": token,
-      },
+      headers,
       body: JSON.stringify({
         unit: target.unit.id,
         fragment: target.fragment?.id ?? null,
