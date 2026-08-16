@@ -424,6 +424,11 @@ class DeliveryTrain:
     # The landed bottom-contiguous run (defaulted: DeliveryTrain is directly constructed
     # across many tests; 0 stays the honest "nothing landed" fact).
     landed_prefix_len: int = 0
+    # Planning presentation facts captured from the exact active ObjectiveState used by this
+    # reconstruction. They are internal projection inputs, not status-output fields. Defaults
+    # keep direct test/domain constructors source-compatible.
+    objective_title: str = ""
+    objective_nodes: tuple[ObjectiveNode, ...] = ()
 
     @property
     def blockers(self) -> tuple[TrainFinding, ...]:
@@ -1927,4 +1932,6 @@ def reconstruct_train(
             fact for fact in projected if fact.persisted_status is not NodeStatus.SKIPPED
         ),
         landed_prefix_len=landed_prefix,
+        objective_title=state.title,
+        objective_nodes=tuple(state.nodes),
     )

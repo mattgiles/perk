@@ -190,8 +190,9 @@ As Step 2, for node 1.2.
 
 A fresh `git clone` of `mattgiles/perk` (no worktrees, no local stack metadata, no dispatch
 cache), `git switch <node-branch>`, `npm ci`, gate env exported, pinned binary verified, then
-`perk implement <plan-2> -p`. Record that `prepare_stacked_layer` derived the parent (the layer-1
-branch) at the verified parent SHA from the reconstructed train (launch progress log + the clone
+`perk implement <plan-2> -p`. Record that
+`Delivery.prepare(kind="layer_start", mode="execution")` derived the parent (the layer-1 branch)
+at the verified parent SHA from the reconstructed train (launch progress log + the clone
 worktree's `layer-context.json`).
 
 ### Step 8 — publish layer 2: the stack CREATE + the enrollment proof
@@ -355,8 +356,9 @@ evidence commits since install — guard intact, no code change, no reinstall pe
   › creating worktree plan-1546 from plan-1543 @ 68c76f2fc3ee
   ```
 
-  `prepare_stacked_layer` derived the parent — the layer-1 branch at the layer-1 published head
-  SHA — purely from the reconstructed train (nothing local to consult). The clone worktree's
+  `Delivery.prepare(kind="layer_start", mode="execution")` derived the parent — the layer-1
+  branch at the layer-1 published head SHA — from one reconstructed train plus exact parent-ref
+  verification (nothing local to consult). The clone worktree's
   `layer-context.json`: `parent_branch: "plan-1543"`, `parent_sha: "68c76f2f…"`,
   `predecessor_plan_id: "1543"`, `base: "main"`.
 - **Step 8 (publish layer 2 — the stack CREATE):** the drive's warm `/submit` (first attempt hit

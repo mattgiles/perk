@@ -33,23 +33,24 @@ domain meanings; field names, APIs, and recovery algorithms remain in contracts 
 ## One deep module
 
 Stacked delivery is one deep Python package with a deliberately small repository-scoped public
-front door. Status and the authoring Prepare slice are realized:
+front door. Construction is inert; status and every preparation use the same service:
 
 ```text
-resolve_delivery(repo_root) -> Delivery                  # construction performs no I/O
+resolve_delivery(repo_root) -> Delivery                  # ZERO I/O
 Delivery.status(StatusRequest {objective_id}) -> StatusResult
 StatusResult -> exactly one of DeliveryTrain | no_train_reason
-Delivery.prepare(PrepareRequest {kind: authoring, base: str|null}) ->
-    PrepareResult {kind: authoring, base: effective-base}
+Delivery.prepare(PrepareRequest {kind, mode?, base?, objective_id?, node_id?, plan_id?})
+  -> PrepareResult {kind, base?, identity?, notice?, planning?, layer_context?, parent_sha?}
 ```
 
-`DeliveryError` bounds façade failures to the six stable status codes plus
-`capability_unsupported`. The pure `DeliveryTrain` reconstruction pipeline, private capability
-rows, and production observation adapters are implementation seams, not package-level APIs. The
-old public authoring composer/report/check surface is removed cleanly; only the sync-owned
-`probe_atomic_push_urls` helper remains temporarily. `prepare.plan_identity`,
-`prepare.layer_start`, publish, synchronize, recover, transfer, and land remain deferred vertical
-slices with their current explicit APIs; the façade does not promise placeholder methods for them.
+Prepare is a closed flat family: authoring capability; strict/best-effort plan identity; planning
+layer start; and execution layer start. Frozen nested records carry variant details and illegal
+request/result combinations fail at construction. The pure `DeliveryTrain` reconstruction,
+private capability rows, internal `LayerContext`/layer core, and production adapters are not
+package-root APIs. `DeliveryError` has fourteen declared codes; status deliberately translates
+only its six-code subset. Existing publish/synchronize/recover/transfer/land operation APIs remain
+separate mutator seams, and only the sync-owned `probe_atomic_push_urls` compatibility helper is
+retained at the root.
 
 The façade receives three nominal aggregate authorities:
 
@@ -57,9 +58,10 @@ The façade receives three nominal aggregate authorities:
    `ObjectiveStore`, `IssueBackend`, and train journal persistence. Production backend selection
    is deferred until the first persistence read, is cached only after the backend identities agree,
    and leaves no partial selection after a failed attempt.
-2. **`DeliveryGit`.** Trunk detection, fetch, ref/ancestry/worktree observation, the tolerant
-   live base-head read needed by status, and authoring Prepare's configured push-URL resolution +
-   one no-op atomic probe. Other mutation-only Git capabilities stay with their operation seams.
+2. **`DeliveryGit`.** Trunk detection, broad and exact-ref fetch, local commit resolution,
+   ref/ancestry/worktree observation, the tolerant live base-head read needed by status, and
+   authoring Prepare's configured push-URL resolution + one no-op atomic probe. Other mutation-only
+   Git capabilities stay with their operation seams.
 3. **`DeliveryGitHub`.** Stable PR facts, tolerant native-stack membership, all-state
    branch-owned PR lookup, and authoring Prepare's host stack-capability + base merge-rule facts.
    Checks and landing-readiness observations stay with their operation seams until those slices
@@ -68,19 +70,21 @@ The façade receives three nominal aggregate authorities:
 The nominal interfaces make authority ownership explicit and support small owned in-memory fakes;
 interface, real adapter, and constructor-configured fake move together. Calls that authoring
 Prepare must classify and continue return frozen nested success/error discriminants; only the real
-adapter catches expected Git/GitHub exceptions. Unexpected programming errors propagate. Another
-subgateway layer would currently be shallower than these aggregate interfaces, so none is added.
-The façade composes the pure projection by passing aggregates into narrower roles and owns
-Prepare's authority ordering itself.
+adapter catches expected Git/GitHub exceptions. Identity Prepare catches only the three expected
+persistence families at its boundary; unexpected programming errors propagate. Another subgateway
+layer would currently be shallower than these aggregate interfaces, so none is added. The façade
+composes the pure projection by passing aggregates into narrower roles and owns each Prepare
+variant's authority ordering.
 
 Construction is assignment-only: no config, credentials, subprocess, Git, or network access occurs
 until a method needs the corresponding authority. Status preserves branch-sensitive laziness: an
 incremental objective returns its successful no-train result before trunk detection, fetch, or
-GitHub observation. Authoring Prepare resolves optional trunk lazily and never touches persistence.
-The objective-create dry-run branch omits Prepare entirely, so no dry-run authority adapter exists
-and previews remain offline. Every effectful operation still reconstructs fresh state before
-deciding anything. Mutators return typed before/after projections and per-effect outcomes; command
-handlers do not infer success from log text or recreate stack rules themselves.
+GitHub observation. Authoring never touches persistence; identity performs one objective read;
+planning performs one status reconstruction; execution performs status followed by exact parent
+fetch/verification. Objective-create and stacked-planning dry runs remain offline. Every effectful
+operation still reconstructs fresh state before deciding anything. Mutators return typed
+before/after projections and per-effect outcomes; command handlers do not infer success from log
+text or recreate stack rules themselves.
 
 The GitHub seam is explicit rather than a generic stack-provider interface. Perk has no second
 implementation to abstract, and Graphite's local/cache semantics are not substitutable for
@@ -94,9 +98,11 @@ Python workers, decodes typed envelopes, and renders results through the existin
 One fact has one authority. Other surfaces may cache or corroborate it but cannot silently replace
 it. The status/Prepare façade does not invent a fourth authority: its three nominal adapters
 aggregate the existing persistence, Git, and GitHub rows below. The pure status projection decides
-from their observations; authoring Prepare orders only the Git/GitHub capability reads. The
+from their observations; each Prepare variant orders only the authority reads it owns. The
 repository path held by an adapter is composition context, not evidence; backend selection is
-cached only after objective/issue alignment succeeds.
+cached only after objective/issue alignment succeeds. Plan identity and planning presentation use
+their one captured persistence/train snapshot; execution additionally trusts only the exact
+parent ref fetched and resolved by the Git authority.
 
 | Fact | Authority | Notes |
 | --- | --- | --- |
@@ -290,8 +296,11 @@ Reconstruction itself remains a pure orchestration pipeline over injected author
 11. For two or more PRs, fetch GitHub native stack membership and order through a member PR.
 12. Classify every layer and train-wide invariant.
 
-The result is one immutable projection. Suggested layer state is orthogonal rather than a single
-lossy enum:
+The result is one immutable projection. It also captures the active objective title and exact
+node tuple for planning Prepare. Those are internal projection inputs with defaults for pure
+callers; status output intentionally omits them, so adding planning authority does not grow or
+change human/JSON status bytes. Suggested layer state is orthogonal rather than a single lossy
+enum:
 
 ```text
 intent:       skipped | unplanned | planned | canceled
@@ -320,6 +329,25 @@ and one atomic-push row per configured URL in that order. Independent failures a
 bounded refusal; push probing is skipped without a positive remote-base SHA. A successful compact
 `PrepareResult` deliberately does not expose rows or claim repository preview enrollment/write
 permission. Dry-run creation never constructs the service or calls Prepare.
+
+Plan save uses identity Prepare for one-snapshot base + `PlanIdentity` derivation. Strict mode is
+reserved for real node-linked saves; objective-only saves and dry runs are best-effort. With no
+node, policy/lineage/order are irrelevant; with a node, the pure identity rules enforce stacked
+lineage, membership, and linked predecessor before any write. Every plan-header write arm gets the
+entire identity trio, while `PlanRef` remains a routing cache containing lineage only.
+
+Real stacked planning uses planning Prepare after the initial objective read has selected policy.
+The immutable train is then the sole authority for title, URL, nodes, graph fallback, resumable
+claims, base/lineage/order, readiness, and predecessor observations. It returns a closed
+`PlanningDecision` rather than mixing expected no-action states with hard failures. The subsequent
+node-status mark is observational and non-CAS; it is not a lease or atomic claim.
+
+Fresh local and remote stacked starts independently use execution Prepare. It reconstructs status
+once, proves the exact plan is next build-ready, derives the internal layer context, exact-fetches
+the latest parent branch, and resolves that remote-tracking ref as a nonblank commit. Local
+`worktree add` and remote `checkout -b` are intentionally different gestures over the same result;
+neither caller fetches or derives a parent. Deferred publication may reuse the callback-only
+internal layer core, which has no repository/global defaults.
 
 Probe atomic-push support against the same authenticated push endpoint the mutator will use:
 
@@ -608,8 +636,8 @@ Each model operation has its own typed tool; there is no broad mutation action e
 Existing lifecycle commands remain owners of their gestures:
 
 - objective author/save chooses and creates the policy;
-- objective plan selects the next build-ready node;
-- implement creates a worktree from `LayerContext`;
+- objective plan selects the next build-ready node through planning Prepare;
+- implement creates a worktree from execution Prepare's verified context and parent SHA;
 - submit publishes a layer and may synchronize a changed published suffix;
 - address fixes one layer and invokes synchronization afterward;
 - ready changes one PR's review state;

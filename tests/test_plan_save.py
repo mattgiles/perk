@@ -9,6 +9,7 @@ from click.testing import CliRunner
 from perk import github, plan
 from perk.backends import issue_backend, objective_store, resolve
 from perk.backends.github import objectives, plans
+from perk.cli.commands.plan import save_cmd as save_cmd_mod
 from perk.cli.commands.plan.save_cmd import plan_save
 from perk.cli.context import PerkContext
 
@@ -1021,6 +1022,15 @@ def test_plan_save_unified_node_issue_path(monkeypatch, unborn_git_repo_factory)
 
     monkeypatch.setattr(resolve, "resolve_objective_store", lambda _root: _UnifyingStore())
     monkeypatch.setattr(resolve, "resolve_issue_backend", lambda _root: _Backend())
+
+    class _Delivery:
+        def prepare(self, request):
+            from perk.delivery import PrepareResult
+
+            assert request.kind == "plan_identity" and request.mode == "strict"
+            return PrepareResult(kind="plan_identity", mode="strict")
+
+    monkeypatch.setattr(save_cmd_mod, "resolve_delivery", lambda _root: _Delivery())
     runner = CliRunner()
     with runner.isolated_filesystem() as d:
         _git_init(d, unborn_git_repo_factory)
@@ -1305,6 +1315,28 @@ def test_plan_save_dry_run_omits_the_trio_when_the_objective_is_unreadable(monke
     )
     assert result.exit_code == 0, result.output
     assert json.loads(result.stdout)["plan_ref"]["delivery_lineage"] is None
+
+
+def test_plan_save_best_effort_empty_notice_keeps_exact_warning_suffix(monkeypatch):
+    from perk.delivery import PrepareResult
+
+    _authed(monkeypatch)
+    _stub_writes(monkeypatch)
+    calls = []
+
+    class _Delivery:
+        def prepare(self, request):
+            calls.append(request)
+            return PrepareResult(kind="plan_identity", mode="best_effort", notice="")
+
+    monkeypatch.setattr(save_cmd_mod, "resolve_delivery", lambda _root: _Delivery())
+    result = _run(
+        monkeypatch,
+        ["--plan-file", "plan.md", "--objective-id", "7", "--dry-run", "--json"],
+    )
+    assert result.exit_code == 0, result.output
+    assert calls[0].mode == "best_effort" and calls[0].node_id is None
+    assert "perk plan save: objective base lookup skipped (non-fatal): \n" in result.stderr
 
 
 def test_plan_save_node_linked_missing_objective_is_a_typed_refusal(monkeypatch):

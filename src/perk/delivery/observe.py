@@ -1,7 +1,7 @@
 """Production adapters for the delivery façade and deferred internal readers.
 
 :func:`resolve_delivery` is the sole public production constructor for the canonical
-:class:`perk.delivery.facade.Delivery` status and authoring-Prepare slices. Construction is
+:class:`perk.delivery.facade.Delivery` status and Prepare variants. Construction is
 assignment-only and does no configuration, credential, Git, subprocess, or network work; the
 nominal adapters resolve or observe their authorities only when an operation needs them.
 
@@ -63,6 +63,17 @@ class RepoDeliveryGit(DeliveryGit):
             raise TrainReconstructionError(
                 f"git fetch failed: {exc}", error_type="git_error"
             ) from exc
+
+    def fetch_refs(self, refs: tuple[str, ...]) -> None:
+        try:
+            git_mod.fetch_refspecs(self._repo_root, list(refs), remote=self._remote)
+        except git_mod.GitError as exc:
+            raise TrainReconstructionError(
+                f"git fetch failed for refs {refs!r}: {exc}", error_type="git_error"
+            ) from exc
+
+    def resolve_commit(self, ref: str) -> str | None:
+        return git_mod.resolve_commit(self._repo_root, ref)
 
     def remote_branch_sha(self, branch: str) -> str | None:
         try:

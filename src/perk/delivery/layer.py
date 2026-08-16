@@ -1,24 +1,22 @@
 """``LayerContext`` + the one parent-preparation path (contracts.md §8.46).
 
-The shared immutable layer-start contract both execution paths consume — local worktree
-creation (``perk.run.launch.worktree.resolve_worktree``) and remote positioning
-(``perk.run.run_worker.position_branch``): derive one frozen :class:`LayerContext` from the
-reconstructed :class:`~perk.delivery.train.DeliveryTrain`, require the layer to be the
-readiness-derived candidate, then fetch and verify the **latest** parent head
-(:func:`prepare_layer_start` — always the live remote head, never a stored checkpoint; later
-movement of the parent is a normal implementation danger, not a pinned SHA).
+The internal immutable layer-start core backs execution Prepare and deferred publication:
+derive one frozen :class:`LayerContext` from the reconstructed
+:class:`~perk.delivery.train.DeliveryTrain`, require the layer to be the readiness-derived
+candidate, then fetch and verify the **latest** parent head (:func:`prepare_layer_start` — always
+the live remote head, never a stored checkpoint; later movement of the parent is a normal
+implementation danger, not a pinned SHA).
 
-A delivery leaf touching ``perk.substrate.git`` (alongside ``observe.py`` + ``capability.py``,
-contracts.md §8.44); the probe callables are keyword-injectable (production defaults; tests
-pass fakes — the ``capability.py`` precedent). :class:`LayerContextOut` is the serialization
-boundary of the session-scoped operational record ``.perk/workflow/layer-context.json``
+The parent-preparation helper is callback-driven and has no repository/global defaults:
+execution supplies aggregate Git methods while deferred publication supplies closures over its
+injected seams. :class:`LayerContextOut` is the serialization boundary of the session-scoped
+operational record ``.perk/workflow/layer-context.json``
 (written by ``perk.state.cache.write_layer_context``) — NEVER authoritative: publication
 re-verifies live, and the durable checkpoint pair stays publication-owned.
 """
 
 from collections.abc import Callable
 from dataclasses import dataclass
-from pathlib import Path
 
 from perk.boundary import OutputModel
 from perk.delivery.train import (
@@ -228,17 +226,12 @@ def require_reviewable_layer(train: DeliveryTrain, *, plan_id: str, mutating: bo
     return target
 
 
-def _default_fetch(repo: Path, refspecs: list[str]) -> None:
-    git_mod.fetch_refspecs(repo, refspecs)
-
-
 def prepare_layer_start(
-    repo_root: Path,
     ctx: LayerContext,
     *,
-    fetch: Callable[[Path, list[str]], None] = _default_fetch,
-    remote_head: Callable[[Path, str], str | None] = git_mod.remote_branch_head,
-    resolve_commit: Callable[[Path, str], str | None] = git_mod.resolve_commit,
+    fetch: Callable[[tuple[str, ...]], None],
+    remote_head: Callable[[str], str | None],
+    resolve_commit: Callable[[str], str | None],
 ) -> PreparedLayerStart:
     """Fetch and verify the **latest** parent head the layer starts from.
 
@@ -249,8 +242,8 @@ def prepare_layer_start(
     infra failure is ``git_error``.
     """
     try:
-        fetch(repo_root, [ctx.parent_branch])
-        sha = remote_head(repo_root, ctx.parent_branch)
+        fetch((ctx.parent_branch,))
+        sha = remote_head(ctx.parent_branch)
     except git_mod.GitError as exc:
         raise LayerError(
             f"could not observe the parent branch refs/heads/{ctx.parent_branch} on origin: {exc}",
@@ -262,7 +255,7 @@ def prepare_layer_start(
             f"no such remote branch — layer {ctx.node_id} cannot start without its parent",
             error_type="parent_missing",
         )
-    resolved = resolve_commit(repo_root, sha)
+    resolved = resolve_commit(sha)
     if resolved is None:
         raise LayerError(
             f"the parent head {sha} (refs/heads/{ctx.parent_branch}) does not resolve "

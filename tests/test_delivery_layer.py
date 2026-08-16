@@ -5,8 +5,6 @@ Pure/injected: the derive/require gates run over hand-built ``DeliveryTrain`` pr
 ``capability.py`` injectable-probe precedent).
 """
 
-from pathlib import Path
-
 import pytest
 
 from perk.delivery import layer as layer_mod
@@ -250,48 +248,50 @@ class TestRequireReviewableLayer:
 
 
 class TestPrepareLayerStart:
-    def test_happy_path_fetches_exactly_the_parent_and_verifies(self, tmp_path: Path) -> None:
-        fetched: list[list[str]] = []
+    def test_happy_path_fetches_exactly_the_parent_and_verifies(self) -> None:
+        fetched: list[tuple[str, ...]] = []
         prepared = layer_mod.prepare_layer_start(
-            tmp_path,
             _ctx(),
-            fetch=lambda _repo, refspecs: fetched.append(refspecs),
-            remote_head=lambda _repo, branch: _SHA if branch == "plan-101" else None,
-            resolve_commit=lambda _repo, ref: ref,
+            fetch=fetched.append,
+            remote_head=lambda branch: _SHA if branch == "plan-101" else None,
+            resolve_commit=lambda ref: ref,
         )
-        assert fetched == [["plan-101"]]
+        assert fetched == [("plan-101",)]
         assert prepared.parent_sha == _SHA
         assert prepared.context == _ctx()
 
-    def test_absent_remote_parent_names_the_expected_ref(self, tmp_path: Path) -> None:
+    def test_absent_remote_parent_names_the_expected_ref(self) -> None:
         with pytest.raises(layer_mod.LayerError) as excinfo:
             layer_mod.prepare_layer_start(
-                tmp_path,
                 _ctx(),
-                fetch=lambda _repo, _refspecs: None,
-                remote_head=lambda _repo, _branch: None,
-                resolve_commit=lambda _repo, ref: ref,
+                fetch=lambda _refspecs: None,
+                remote_head=lambda _branch: None,
+                resolve_commit=lambda ref: ref,
             )
         assert excinfo.value.error_type == "parent_missing"
         assert "refs/heads/plan-101" in str(excinfo.value)
 
-    def test_unresolvable_head_after_fetch_is_typed(self, tmp_path: Path) -> None:
+    def test_unresolvable_head_after_fetch_is_typed(self) -> None:
         with pytest.raises(layer_mod.LayerError) as excinfo:
             layer_mod.prepare_layer_start(
-                tmp_path,
                 _ctx(),
-                fetch=lambda _repo, _refspecs: None,
-                remote_head=lambda _repo, _branch: _SHA,
-                resolve_commit=lambda _repo, _ref: None,
+                fetch=lambda _refspecs: None,
+                remote_head=lambda _branch: _SHA,
+                resolve_commit=lambda _ref: None,
             )
         assert excinfo.value.error_type == "parent_unverified"
         assert _SHA in str(excinfo.value)
 
-    def test_git_infra_failure_is_typed(self, tmp_path: Path) -> None:
-        def _boom(_repo: Path, _refspecs: list[str]) -> None:
+    def test_git_infra_failure_is_typed(self) -> None:
+        def _boom(_refspecs: tuple[str, ...]) -> None:
             raise GitError("network down")
 
         with pytest.raises(layer_mod.LayerError) as excinfo:
-            layer_mod.prepare_layer_start(tmp_path, _ctx(), fetch=_boom)
+            layer_mod.prepare_layer_start(
+                _ctx(),
+                fetch=_boom,
+                remote_head=lambda _branch: _SHA,
+                resolve_commit=lambda ref: ref,
+            )
         assert excinfo.value.error_type == "git_error"
         assert "network down" in str(excinfo.value)

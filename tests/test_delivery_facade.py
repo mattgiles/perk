@@ -27,15 +27,39 @@ from perk.delivery.train import (
     BaseHeadObservation,
     BuildReadiness,
     DeliveryTrain,
+    LayerFinalization,
+    LayerGit,
+    LayerIntent,
+    LayerMembership,
+    LayerPr,
+    LayerPublication,
+    LayerWriter,
     StackView,
+    TrainLayer,
     TrainReconstructionError,
     WorktreeFacts,
 )
+from perk.objective import NodeStatus, ObjectiveNode
 from perk.substrate import config as config_mod
 from perk.substrate import git as git_mod
 
 _DELIVERY_ERROR_TYPES = {
     "capability_unsupported",
+    "objective_not_found",
+    "invalid_delivery_policy",
+    "invalid_train",
+    "git_error",
+    "github_error",
+    "supersession_corruption",
+    "invalid_input",
+    "missing_lineage",
+    "stacked_predecessor_missing",
+    "unknown_layer",
+    "node_not_build_ready",
+    "parent_missing",
+    "parent_unverified",
+}
+_STATUS_ERROR_TYPES = {
     "objective_not_found",
     "invalid_delivery_policy",
     "invalid_train",
@@ -81,6 +105,14 @@ _RETIRED_EXPORTS = {
     "CapabilityCheck",
     "CapabilityReport",
     "preflight_stacked_authoring",
+    "LayerContext",
+    "LayerContextOut",
+    "LayerError",
+    "PreparedLayerStart",
+    "derive_layer_context",
+    "prepare_layer_start",
+    "require_ready_layer",
+    "require_reviewable_layer",
 }
 _NEW_EXPORTS = {
     "Delivery",
@@ -126,14 +158,6 @@ _RETAINED_EXPORTS = {
     "manifest_path",
     "pending_continuation",
     "write_manifest",
-    "LayerContext",
-    "LayerContextOut",
-    "LayerError",
-    "PreparedLayerStart",
-    "derive_layer_context",
-    "prepare_layer_start",
-    "require_ready_layer",
-    "require_reviewable_layer",
     "DeliveryOperationFacts",
     "LayerBodyFacts",
     "PublicationError",
@@ -178,13 +202,15 @@ def _objective(
     objective_id: str = "10",
     *,
     header: dict[str, object] | None = None,
+    title: str = "Objective",
+    nodes: tuple[ObjectiveNode, ...] = (),
 ) -> ObjectiveState:
     return ObjectiveState(
         id=objective_id,
         url=f"fake://objective/{objective_id}",
-        title="Objective",
+        title=title,
         header=dict(header or {}),
-        nodes=(),
+        nodes=nodes,
     )
 
 
@@ -218,6 +244,78 @@ def _train() -> DeliveryTrain:
     )
 
 
+def _train_layer(
+    node_id: str,
+    plan_id: str | None,
+    branch: str | None,
+    *,
+    remote_head: str | None = None,
+) -> TrainLayer:
+    return TrainLayer(
+        node_id=node_id,
+        plan_id=plan_id,
+        branch=branch,
+        pr_number=None,
+        intent=LayerIntent.PLANNED if plan_id is not None else LayerIntent.UNPLANNED,
+        publication=LayerPublication.UNPUBLISHED,
+        git=LayerGit.ABSENT,
+        pr=LayerPr.ABSENT,
+        membership=LayerMembership.NOT_APPLICABLE,
+        writer=LayerWriter.FREE,
+        finalization=LayerFinalization.NOT_MERGED,
+        parent_checkpoint_sha=None,
+        published_head_sha=None,
+        observed_remote_head_sha=remote_head,
+        observed_pr_base=None,
+        expected_pr_base=None,
+    )
+
+
+def _planning_train(
+    *,
+    nodes: tuple[ObjectiveNode, ...],
+    layers: tuple[TrainLayer, ...],
+    candidate: str | None,
+    ready: bool = True,
+    reason: str | None = None,
+    objective_id: str = "10",
+    redirected_from: str | None = None,
+) -> DeliveryTrain:
+    return DeliveryTrain(
+        objective_id=objective_id,
+        objective_url=f"fake://objective/{objective_id}",
+        delivery_lineage="lineage",
+        base="main",
+        redirected_from=redirected_from,
+        layers=layers,
+        published_prefix_len=0,
+        unresolved_operation=None,
+        findings=(),
+        build_readiness=BuildReadiness(
+            next_node_id=candidate,
+            ready=ready,
+            reason=reason,
+        ),
+        objective_title="Captured objective",
+        objective_nodes=nodes,
+    )
+
+
+class _StatusDelivery(Delivery):
+    def __init__(self, result: StatusResult, *, git: DeliveryGit | None = None) -> None:
+        super().__init__(
+            persistence=FakeDeliveryPersistence(),
+            git=git or FakeDeliveryGit(),
+            github=FakeDeliveryGitHub(),
+        )
+        self.result = result
+        self.status_calls: list[StatusRequest] = []
+
+    def status(self, request: StatusRequest) -> StatusResult:
+        self.status_calls.append(request)
+        return self.result
+
+
 def _delivery(
     persistence: DeliveryPersistence | None = None,
     git: DeliveryGit | None = None,
@@ -239,6 +337,91 @@ def test_prepare_request_and_result_validate_the_authoring_discriminator() -> No
         PrepareRequest(kind=unknown, base=None)
     with pytest.raises(ValueError, match=r"^unknown prepare kind: 'future'$"):
         PrepareResult(kind=unknown, base="main")
+
+
+def test_prepare_request_rejects_illegal_known_variant_shapes() -> None:
+    valid = (
+        PrepareRequest(kind="authoring", base=None),
+        PrepareRequest(kind="plan_identity", mode="strict", objective_id="10", node_id="1.1"),
+        PrepareRequest(kind="plan_identity", mode="best_effort", objective_id="10"),
+        PrepareRequest(kind="layer_start", mode="planning", objective_id="10"),
+        PrepareRequest(kind="layer_start", mode="execution", plan_id="101"),
+    )
+    assert tuple(request.kind for request in valid) == (
+        "authoring",
+        "plan_identity",
+        "plan_identity",
+        "layer_start",
+        "layer_start",
+    )
+    invalid = (
+        lambda: PrepareRequest(kind="authoring", base="main", mode="strict"),
+        lambda: PrepareRequest(kind="plan_identity", mode="strict", objective_id="10"),
+        lambda: PrepareRequest(
+            kind="plan_identity", mode="best_effort", objective_id="10", base="main"
+        ),
+        lambda: PrepareRequest(
+            kind="layer_start", mode="planning", objective_id="10", plan_id="101"
+        ),
+        lambda: PrepareRequest(kind="layer_start", mode="execution", plan_id="101", node_id="1.1"),
+    )
+    for build in invalid:
+        with pytest.raises(ValueError):
+            build()
+
+
+def test_prepare_result_and_nested_decision_shapes_are_pinned() -> None:
+    node = PrepareResult.PlanningNode(
+        id="1.1", description="First", status=NodeStatus.PENDING, pr=None
+    )
+    context = PrepareResult.PlanningContext(
+        position=1,
+        layer_count=2,
+        delivery_lineage="lineage",
+        base="main",
+        predecessor_node_id=None,
+        predecessor_plan_id=None,
+        parent_branch="main",
+        observed_parent_head_sha=None,
+    )
+    decision = PrepareResult.PlanningDecision(
+        kind="ready",
+        objective_id="10",
+        objective_title="Objective",
+        objective_url="u/10",
+        requested_node_id=None,
+        node=node,
+        skipped_claim_ids=(),
+        context=context,
+    )
+    assert (
+        PrepareResult(kind="layer_start", mode="planning", planning=decision).planning is decision
+    )
+    assert PrepareResult(kind="plan_identity", mode="best_effort", notice="").notice == ""
+
+    with pytest.raises(ValueError):
+        PrepareResult(kind="authoring", base=None)
+    with pytest.raises(ValueError):
+        PrepareResult(kind="plan_identity", mode="best_effort", base="main", notice="failed")
+    with pytest.raises(ValueError):
+        PrepareResult.PlanningDecision(
+            kind="ready",
+            objective_id="10",
+            objective_title="Objective",
+            objective_url="u/10",
+            requested_node_id=None,
+            node=node,
+            skipped_claim_ids=None,
+        )
+    with pytest.raises(ValueError):
+        PrepareResult.PlanningDecision(
+            kind="complete",
+            objective_id="10",
+            objective_title="Objective",
+            objective_url="u/10",
+            requested_node_id=None,
+            node=node,
+        )
 
 
 def test_prepare_explicit_base_checks_every_push_url_without_persistence() -> None:
@@ -439,6 +622,284 @@ def test_prepare_base_resolution_normalizes_only_git_errors() -> None:
     assert unexpected_info.value is unexpected
 
 
+def test_plan_identity_strict_reads_once_and_returns_base_and_full_trio() -> None:
+    nodes = (
+        ObjectiveNode(id="1.1", description="Bottom", status=NodeStatus.IN_PROGRESS, pr="#101"),
+        ObjectiveNode(
+            id="1.2",
+            description="Child",
+            status=NodeStatus.PLANNING,
+            pr=None,
+            depends_on=("1.1",),
+        ),
+    )
+    persistence = FakeDeliveryPersistence(
+        objectives={
+            "10": _objective(
+                header={
+                    "delivery": "stacked",
+                    "delivery_lineage": " lineage ",
+                    "base": " release ",
+                },
+                nodes=nodes,
+            )
+        }
+    )
+    git = FakeDeliveryGit()
+    github = FakeDeliveryGitHub()
+
+    result = _delivery(persistence, git, github).prepare(
+        PrepareRequest(
+            kind="plan_identity",
+            mode="strict",
+            objective_id="#10",
+            node_id="1.2",
+        )
+    )
+
+    assert result == PrepareResult(
+        kind="plan_identity",
+        mode="strict",
+        base="release",
+        identity=PrepareResult.PlanIdentity(
+            objective_node_id="1.2",
+            delivery_lineage="lineage",
+            predecessor_plan_id="101",
+        ),
+    )
+    assert persistence.calls == [("get_objective", "10")]
+    assert git.calls == [] and github.calls == []
+
+
+@pytest.mark.parametrize(
+    "source",
+    [ObjectiveStoreError(""), IssueBackendError("issue down"), TrainPersistenceError("mismatch")],
+)
+def test_plan_identity_best_effort_expected_read_failure_returns_exact_notice(
+    source: Exception,
+) -> None:
+    persistence = FakeDeliveryPersistence(errors={("get_objective", "10"): source})
+    result = _delivery(persistence).prepare(
+        PrepareRequest(kind="plan_identity", mode="best_effort", objective_id="10")
+    )
+    assert result == PrepareResult(kind="plan_identity", mode="best_effort", notice=str(source))
+    assert result.notice is not None
+
+
+def test_plan_identity_propagates_unexpected_read_failures() -> None:
+    failure = RuntimeError("unexpected")
+    persistence = FakeDeliveryPersistence(errors={("get_objective", "10"): failure})
+    with pytest.raises(RuntimeError) as excinfo:
+        _delivery(persistence).prepare(
+            PrepareRequest(kind="plan_identity", mode="best_effort", objective_id="10")
+        )
+    assert excinfo.value is failure
+
+
+def test_plan_identity_objective_only_returns_base_without_validating_policy() -> None:
+    persistence = FakeDeliveryPersistence(
+        objectives={"10": _objective(header={"base": " release ", "delivery": "junk"})}
+    )
+    result = _delivery(persistence).prepare(
+        PrepareRequest(kind="plan_identity", mode="best_effort", objective_id="10")
+    )
+    assert result == PrepareResult(kind="plan_identity", mode="best_effort", base="release")
+
+
+def test_plan_identity_missing_predecessor_refuses_even_best_effort() -> None:
+    nodes = (
+        ObjectiveNode(id="1.1", description="Bottom", status=NodeStatus.PENDING),
+        ObjectiveNode(id="1.2", description="Child", status=NodeStatus.PENDING),
+    )
+    persistence = FakeDeliveryPersistence(
+        objectives={
+            "10": _objective(
+                header={"delivery": "stacked", "delivery_lineage": "lineage"},
+                nodes=nodes,
+            )
+        }
+    )
+    with pytest.raises(DeliveryError) as excinfo:
+        _delivery(persistence).prepare(
+            PrepareRequest(
+                kind="plan_identity",
+                mode="best_effort",
+                objective_id="10",
+                node_id="1.2",
+            )
+        )
+    assert excinfo.value.error_type == "stacked_predecessor_missing"
+
+
+def test_planning_prepare_uses_one_status_snapshot_and_never_probes_parent() -> None:
+    nodes = (
+        ObjectiveNode(id="1.1", description="Bottom", status=NodeStatus.IN_PROGRESS, pr="#101"),
+        ObjectiveNode(
+            id="1.2", description="Captured child", status=NodeStatus.PENDING, depends_on=("1.1",)
+        ),
+    )
+    status = _planning_train(
+        nodes=nodes,
+        layers=(
+            _train_layer("1.1", "101", "plan-101", remote_head="a" * 40),
+            _train_layer("1.2", None, None),
+        ),
+        candidate="1.2",
+    )
+    git = FakeDeliveryGit()
+    service = _StatusDelivery(StatusResult("10", status.objective_url, None, status, None), git=git)
+
+    result = service.prepare(PrepareRequest(kind="layer_start", mode="planning", objective_id="10"))
+
+    decision = result.planning
+    assert decision is not None and decision.kind == "ready"
+    assert decision.objective_title == "Captured objective"
+    assert decision.node is not None and decision.node.description == "Captured child"
+    assert decision.context == PrepareResult.PlanningContext(
+        position=2,
+        layer_count=2,
+        delivery_lineage="lineage",
+        base="main",
+        predecessor_node_id="1.1",
+        predecessor_plan_id="101",
+        parent_branch="plan-101",
+        observed_parent_head_sha="a" * 40,
+    )
+    assert service.status_calls == [StatusRequest(objective_id="10")]
+    assert git.calls == []
+
+
+@pytest.mark.parametrize(
+    ("requested", "nodes", "expected"),
+    [
+        (
+            "missing",
+            (ObjectiveNode(id="1.1", description="Done", status=NodeStatus.DONE),),
+            "node_not_found",
+        ),
+        (
+            "1.1",
+            (ObjectiveNode(id="1.1", description="Done", status=NodeStatus.DONE),),
+            "terminal",
+        ),
+        (
+            "1.2",
+            (
+                ObjectiveNode(id="1.1", description="Pending", status=NodeStatus.PENDING),
+                ObjectiveNode(
+                    id="1.2",
+                    description="Blocked",
+                    status=NodeStatus.PENDING,
+                    depends_on=("1.1",),
+                ),
+            ),
+            "blocked",
+        ),
+    ],
+)
+def test_planning_graph_fallback_classifies_explicit_nodes(
+    requested: str, nodes: tuple[ObjectiveNode, ...], expected: str
+) -> None:
+    status = _planning_train(nodes=nodes, layers=(), candidate=None, ready=False, reason="done")
+    service = _StatusDelivery(StatusResult("10", status.objective_url, None, status, None))
+    result = service.prepare(
+        PrepareRequest(
+            kind="layer_start",
+            mode="planning",
+            objective_id="10",
+            node_id=requested,
+        )
+    )
+    assert result.planning is not None and result.planning.kind == expected
+
+
+def test_planning_redirect_precedes_no_train_and_normalized_id_is_not_redirect() -> None:
+    redirected = _StatusDelivery(StatusResult("11", "u/11", "10", None, "incremental delivery"))
+    with pytest.raises(DeliveryError) as excinfo:
+        redirected.prepare(PrepareRequest(kind="layer_start", mode="planning", objective_id="10"))
+    assert excinfo.value.error_type == "invalid_train"
+    assert str(excinfo.value) == (
+        "objective #10 redirected to active objective #11 during planning preparation; "
+        "rerun against #11"
+    )
+
+    nodes = (ObjectiveNode(id="1.1", description="Ready", status=NodeStatus.PENDING),)
+    status = _planning_train(
+        objective_id="7",
+        nodes=nodes,
+        layers=(_train_layer("1.1", None, None),),
+        candidate="1.1",
+    )
+    normalized = _StatusDelivery(StatusResult("7", status.objective_url, None, status, None))
+    result = normalized.prepare(
+        PrepareRequest(kind="layer_start", mode="planning", objective_id="007")
+    )
+    assert result.planning is not None and result.planning.objective_id == "7"
+
+
+def test_planning_hard_failures_cover_unknown_candidate_and_missing_parent() -> None:
+    node = ObjectiveNode(id="1.2", description="Child", status=NodeStatus.PENDING)
+    unknown = _planning_train(nodes=(node,), layers=(), candidate="1.2")
+    with pytest.raises(DeliveryError) as unknown_info:
+        _StatusDelivery(StatusResult("10", unknown.objective_url, None, unknown, None)).prepare(
+            PrepareRequest(kind="layer_start", mode="planning", objective_id="10")
+        )
+    assert unknown_info.value.error_type == "unknown_layer"
+
+    missing_parent = _planning_train(
+        nodes=(node,),
+        layers=(_train_layer("1.1", None, None), _train_layer("1.2", None, None)),
+        candidate="1.2",
+    )
+    with pytest.raises(DeliveryError) as parent_info:
+        _StatusDelivery(
+            StatusResult("10", missing_parent.objective_url, None, missing_parent, None)
+        ).prepare(PrepareRequest(kind="layer_start", mode="planning", objective_id="10"))
+    assert parent_info.value.error_type == "stacked_predecessor_missing"
+    assert str(parent_info.value) == (
+        "planning layer 1.2 has no parent branch: predecessor layer 1.1 carries no plan/branch"
+    )
+
+
+def test_execution_prepare_verifies_parent_in_exact_aggregate_order() -> None:
+    parent_sha = "a" * 40
+    nodes = (
+        ObjectiveNode(id="1.1", description="Bottom", status=NodeStatus.IN_PROGRESS, pr="#101"),
+        ObjectiveNode(id="1.2", description="Child", status=NodeStatus.PENDING, pr="#102"),
+    )
+    status = _planning_train(
+        nodes=nodes,
+        layers=(
+            _train_layer("1.1", "101", "plan-101"),
+            _train_layer("1.2", "102", "plan-102"),
+        ),
+        candidate="1.2",
+    )
+    git = FakeDeliveryGit(branches={"plan-101": parent_sha}, resolutions={parent_sha: parent_sha})
+    service = _StatusDelivery(StatusResult("10", status.objective_url, None, status, None), git=git)
+
+    result = service.prepare(
+        PrepareRequest(kind="layer_start", mode="execution", objective_id="10", plan_id="102")
+    )
+
+    assert result.layer is not None and result.layer.parent_branch == "plan-101"
+    assert result.parent_sha == parent_sha
+    assert git.calls == [
+        ("fetch_refs", "plan-101"),
+        ("remote_branch_sha", "plan-101"),
+        ("resolve_commit", parent_sha),
+    ]
+
+
+def test_execution_missing_objective_refuses_before_status() -> None:
+    status = StatusResult("10", "u/10", None, None, "incremental")
+    service = _StatusDelivery(status)
+    with pytest.raises(DeliveryError) as excinfo:
+        service.prepare(PrepareRequest(kind="layer_start", mode="execution", plan_id="102"))
+    assert excinfo.value.error_type == "invalid_train"
+    assert service.status_calls == []
+
+
 def test_nominal_abcs_and_keyword_only_delivery_construction() -> None:
     for authority in (DeliveryPersistence, DeliveryGit, DeliveryGitHub):
         incomplete = type(f"Incomplete{authority.__name__}", (authority,), {})
@@ -511,14 +972,14 @@ def test_status_returns_stacked_projection_through_aggregate_fakes() -> None:
     assert github.calls == []
 
 
-def test_delivery_error_accepts_exactly_the_seven_code_vocabulary() -> None:
+def test_delivery_error_accepts_exactly_the_fourteen_code_vocabulary() -> None:
     assert {
         DeliveryError("message", error_type=error_type).error_type
         for error_type in _DELIVERY_ERROR_TYPES
     } == _DELIVERY_ERROR_TYPES
 
 
-@pytest.mark.parametrize("error_type", sorted(_DELIVERY_ERROR_TYPES - {"capability_unsupported"}))
+@pytest.mark.parametrize("error_type", sorted(_STATUS_ERROR_TYPES))
 def test_delivery_error_vocabulary_and_train_code_passthrough(error_type: str) -> None:
     source = TrainReconstructionError("source message", error_type=error_type)
     persistence = FakeDeliveryPersistence(errors={("get_objective", "10"): source})
@@ -534,7 +995,17 @@ def test_delivery_error_rejects_unknown_code_and_unknown_train_code_propagates()
     with pytest.raises(ValueError, match="unknown delivery error type"):
         DeliveryError("bad", error_type="future_operation_error")
 
-    for error_type in ("future_operation_error", "capability_unsupported"):
+    for error_type in (
+        "future_operation_error",
+        "capability_unsupported",
+        "invalid_input",
+        "missing_lineage",
+        "stacked_predecessor_missing",
+        "unknown_layer",
+        "node_not_build_ready",
+        "parent_missing",
+        "parent_unverified",
+    ):
         source = TrainReconstructionError("future", error_type=error_type)
         persistence = FakeDeliveryPersistence(errors={("get_objective", "10"): source})
         with pytest.raises(TrainReconstructionError) as excinfo:
@@ -649,6 +1120,32 @@ def test_prepare_with_real_git_adapter_preserves_raw_remote_failure(
         "(can't verify ⇒ don't promise): ls-remote timed out"
     )
     assert "git ls-remote failed for branch" not in str(excinfo.value)
+
+
+def test_real_git_adapter_fetch_refs_translates_only_expected_git_error(
+    tmp_path: Path, monkeypatch
+) -> None:
+    expected = git_mod.GitError("fetch failed")
+
+    def fail_fetch(*_args: object, **_kwargs: object) -> None:
+        raise expected
+
+    monkeypatch.setattr(git_mod, "fetch_refspecs", fail_fetch)
+    adapter = observe.RepoDeliveryGit(tmp_path)
+    with pytest.raises(TrainReconstructionError) as excinfo:
+        adapter.fetch_refs(("plan-101",))
+    assert excinfo.value.error_type == "git_error"
+    assert excinfo.value.__cause__ is expected
+
+    unexpected = RuntimeError("unexpected")
+
+    def fail_unexpected(*_args: object, **_kwargs: object) -> None:
+        raise unexpected
+
+    monkeypatch.setattr(git_mod, "fetch_refspecs", fail_unexpected)
+    with pytest.raises(RuntimeError) as unexpected_info:
+        adapter.fetch_refs(("plan-101",))
+    assert unexpected_info.value is unexpected
 
 
 def test_prepare_with_real_git_adapter_preserves_raw_trunk_failure(
@@ -780,6 +1277,7 @@ def test_fake_defaults_copy_inputs_and_log_calls_before_return() -> None:
     persistence = FakeDeliveryPersistence(objectives=objective_seed, plans=plan_seed)
     git = FakeDeliveryGit(
         worktrees=(worktree,),
+        resolutions={"head": "a" * 40},
         push_urls=("fake://origin", "fake://mirror"),
         atomic_push_errors=atomic_errors,
     )
@@ -802,6 +1300,8 @@ def test_fake_defaults_copy_inputs_and_log_calls_before_return() -> None:
 
     assert git.trunk_branch() == "main"
     assert git.fetch() is None
+    assert git.fetch_refs(("main",)) is None
+    assert git.resolve_commit("head") == "a" * 40
     assert git.remote_branch_sha("missing") is None
     assert git.push_urls() == DeliveryGit.PushUrlsResult(urls=("fake://origin", "fake://mirror"))
     assert (
@@ -818,6 +1318,8 @@ def test_fake_defaults_copy_inputs_and_log_calls_before_return() -> None:
     assert git.calls == [
         ("trunk_branch",),
         ("fetch",),
+        ("fetch_refs", "main"),
+        ("resolve_commit", "head"),
         ("remote_branch_sha", "missing"),
         ("push_urls",),
         ("probe_atomic_push", "fake://origin", "main", "a"),
@@ -889,4 +1391,5 @@ def test_public_export_cut_is_exact() -> None:
     assert exported >= _NEW_EXPORTS
     assert _RETIRED_EXPORTS.isdisjoint(exported)
     assert exported == _NEW_EXPORTS | _RETAINED_EXPORTS
+    assert len(delivery_pkg.__all__) == 78
     assert not hasattr(delivery_pkg, "DeliveryTrain")

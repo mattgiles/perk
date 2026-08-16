@@ -12,7 +12,7 @@ from perk.backends.issue_backend import IssueBackendError
 from perk.backends.linear import agent as linear_agent
 from perk.cli.ensure import UserFacingCliError
 from perk.convergence import init as init_mod
-from perk.delivery import StatusResult
+from perk.delivery import DeliveryError, PrepareResult
 from perk.run import launch, run_report, run_worker
 from perk.run.launch import worktree as worktree_mod
 from perk.state import cache
@@ -614,59 +614,40 @@ def _stacked_ref(pr_id: str = "102") -> plan.PlanRef:
     )
 
 
-def _stacked_train(*, ready: bool = True):
-    from perk.delivery import train as train_mod
+def _prepared_start(parent_sha: str) -> PrepareResult:
+    from perk.delivery import layer as layer_mod
 
-    def layer(node_id, plan_id, branch):
-        return train_mod.TrainLayer(
-            node_id=node_id,
-            plan_id=plan_id,
-            branch=branch,
-            pr_number=None,
-            intent=train_mod.LayerIntent.PLANNED,
-            publication=train_mod.LayerPublication.UNPUBLISHED,
-            git=train_mod.LayerGit.ABSENT,
-            pr=train_mod.LayerPr.ABSENT,
-            membership=train_mod.LayerMembership.NOT_APPLICABLE,
-            writer=train_mod.LayerWriter.FREE,
-            finalization=train_mod.LayerFinalization.NOT_MERGED,
-            parent_checkpoint_sha=None,
-            published_head_sha=None,
-            observed_remote_head_sha=None,
-            observed_pr_base=None,
-            expected_pr_base=None,
-        )
-
-    return train_mod.DeliveryTrain(
+    context = layer_mod.LayerContext(
         objective_id="10",
-        objective_url="u/10",
+        node_id="1.2",
+        plan_id="102",
         delivery_lineage=_LINEAGE,
+        predecessor_plan_id="101",
         base="main",
-        redirected_from=None,
-        layers=(layer("1.1", "101", "plan-101"), layer("1.2", "102", "plan-102")),
-        published_prefix_len=0,
-        unresolved_operation=None,
-        findings=(),
-        build_readiness=train_mod.BuildReadiness(
-            next_node_id="1.2" if ready else None,
-            ready=ready,
-            reason=None if ready else "the train has blocker findings: [x] y",
-        ),
+        parent_branch="plan-101",
+        branch="plan-102",
     )
+    return PrepareResult(kind="layer_start", mode="execution", layer=context, parent_sha=parent_sha)
 
 
-def _stub_delivery(monkeypatch, result) -> None:
+def _stub_delivery(monkeypatch, result):
+    calls = []
+
     class FakeDelivery:
-        def status(self, request):
-            return StatusResult(
-                objective_id=result.objective_id,
-                objective_url=result.objective_url,
-                redirected_from=result.redirected_from,
-                train=result,
-                no_train_reason=None,
-            )
+        def __init__(self, repo_root):
+            self.repo_root = repo_root
 
-    monkeypatch.setattr(worktree_mod, "resolve_delivery", lambda _root: FakeDelivery())
+        def prepare(self, request):
+            calls.append(request)
+            if isinstance(result, DeliveryError):
+                raise result
+            if result.layer is not None:
+                gitmod.fetch_refspecs(self.repo_root, [result.layer.parent_branch])
+            return result
+
+    monkeypatch.setattr(worktree_mod, "resolve_delivery", lambda root: FakeDelivery(root))
+    monkeypatch.setattr(run_worker, "resolve_delivery", lambda root: FakeDelivery(root))
+    return calls
 
 
 def test_position_branch_existing_remote_branch_resets_to_the_remote_tip(
@@ -695,11 +676,36 @@ def test_position_branch_fresh_incremental_creates_from_origin_base(
     assert _g(clone, "rev-parse", "HEAD").strip() == main_sha
 
 
+def test_position_branch_stacked_missing_objective_has_no_reconstruction_step(
+    git_repo_with_remote, stub_position_branch, monkeypatch, capsys
+):
+    clone, _remote, _advance = git_repo_with_remote
+    ref = plan.PlanRef(
+        provider="github",
+        pr_id="102",
+        url="u/102",
+        labels=("perk:plan",),
+        delivery_lineage=_LINEAGE,
+    )
+    monkeypatch.setattr(
+        run_worker,
+        "resolve_delivery",
+        lambda *_a: pytest.fail("guard must pre-empt Prepare"),
+    )
+    with pytest.raises(UserFacingCliError) as excinfo:
+        stub_position_branch.real(clone, ref, "main")
+    assert excinfo.value.error_type == "invalid_train"
+    assert "reconstructing the delivery train" not in capsys.readouterr().err
+
+
 def test_position_branch_stacked_not_ready_is_a_typed_refusal(
     git_repo_with_remote, stub_position_branch, monkeypatch
 ):
     clone, _remote, _advance = git_repo_with_remote
-    _stub_delivery(monkeypatch, _stacked_train(ready=False))
+    _stub_delivery(
+        monkeypatch,
+        DeliveryError("not build-ready", error_type="node_not_build_ready"),
+    )
     with pytest.raises(UserFacingCliError) as excinfo:
         stub_position_branch.real(clone, _stacked_ref(), "main")
     assert excinfo.value.error_type == "node_not_build_ready"
@@ -724,7 +730,7 @@ def test_positioning_parity_stacked_local_create_vs_remote_position(
     remote_clone = local_clone.parent / "remote-clone"
     shutil.copytree(local_clone, remote_clone, symlinks=True)
 
-    _stub_delivery(monkeypatch, _stacked_train())
+    calls = _stub_delivery(monkeypatch, _prepared_start(parent_sha))
 
     # Path A — local fresh creation (the launch path).
     cache.write_plan_ref(local_clone, _stacked_ref())
@@ -761,6 +767,8 @@ def test_positioning_parity_stacked_local_create_vs_remote_position(
     assert local_record["branch"] == "plan-102"
     assert local_record["predecessor_plan_id"] == "101"
     assert local_record["delivery_lineage"] == _LINEAGE
+    assert len(calls) == 2
+    assert all(call.kind == "layer_start" and call.mode == "execution" for call in calls)
 
 
 def test_run_worker_positions_the_branch_before_the_worktree_and_the_spawn(

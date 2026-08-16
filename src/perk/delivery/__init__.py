@@ -1,9 +1,9 @@
-"""The compact public delivery façade and temporarily retained operation exports.
+"""The compact public delivery façade and retained operation exports.
 
-The canonical surface is the repository-scoped :class:`Delivery` status plus authoring-Prepare
-slices over three nominal aggregate authorities. Pure train projection, private capability rows,
-production adapters, and compatibility readers are internal modules. Existing journal,
-continuation, layer, publication, synchronization, finalization, and landing exports remain
+The canonical surface is the repository-scoped :class:`Delivery` status plus flat Prepare family
+over three nominal aggregate authorities. Pure train projection, layer context/core, private
+capability rows, production adapters, and compatibility readers are internal modules. Existing
+journal, continuation, publication, synchronization, finalization, and landing exports remain
 public while their operation families migrate; ``probe_atomic_push_urls`` is retained only for
 the deferred sync owner.
 """
@@ -75,16 +75,6 @@ from perk.delivery.landing import (
     land_train,
     squash_commit_message,
 )
-from perk.delivery.layer import (
-    LayerContext,
-    LayerContextOut,
-    LayerError,
-    PreparedLayerStart,
-    derive_layer_context,
-    prepare_layer_start,
-    require_ready_layer,
-    require_reviewable_layer,
-)
 from perk.delivery.observe import GatewayLandObservations, resolve_delivery
 from perk.delivery.persistence import (
     AppendResult,
@@ -147,9 +137,6 @@ __all__ = [
     "LandedLayer",
     "LandedPlan",
     "LayerBodyFacts",
-    "LayerContext",
-    "LayerContextOut",
-    "LayerError",
     "LearnConsumeUpdate",
     "MergeRulesView",
     "ObjectiveLandUpdate",
@@ -160,7 +147,6 @@ __all__ = [
     "PrLandView",
     "PrepareRequest",
     "PrepareResult",
-    "PreparedLayerStart",
     "PreparedRecord",
     "PublicationError",
     "PublicationResult",
@@ -180,7 +166,6 @@ __all__ = [
     "canonical_payload",
     "continuations_dir",
     "derive_claimed_prefix",
-    "derive_layer_context",
     "ensure_event_size",
     "finalize_landed_plan",
     "fold_events",
@@ -189,12 +174,9 @@ __all__ = [
     "mint_operation_id",
     "parse_journal_comment",
     "pending_continuation",
-    "prepare_layer_start",
     "probe_atomic_push_urls",
     "publish_layer",
     "render_event",
-    "require_ready_layer",
-    "require_reviewable_layer",
     "resolve_delivery",
     "resolve_train_persistence",
     "squash_commit_message",
