@@ -36,8 +36,9 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 SKILL_AMBIENT_DESCRIPTION_MAX_BYTES = 896
 
 # Gate #3, SEED/launch class: every committed template under `prompts/` that is not injected
-# context (stages/**, common/** include partials, commit-and-compact.md) — raw committed file
-# bytes. Derivation is fixed from the recorded post-diet actual, not the current scan:
+# context (stages/**, common/** include partials, the commit-and-compact template family) — raw
+# committed file bytes. Derivation is fixed from the recorded post-diet actual, not the current
+# scan:
 # 7,225 bytes (`prompts/stages/pr-review-terminal/active.md` and `foreign.md`, the node-3.3
 # post-diet maxima) * 1.25 = 9,031.25, rounded up to the next 64-byte boundary = 142 * 64 =
 # 9,088. A reset is an ordinary human-reviewed code change justified in its PR — no automatic

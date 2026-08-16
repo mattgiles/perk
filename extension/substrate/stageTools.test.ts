@@ -5,7 +5,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { type ExtensionAPI, SessionManager } from "@earendil-works/pi-coding-agent";
-import { commitAndCompactGuidance } from "../doors/commitCompact.ts";
+import { commitAndCompactContinuation, commitAndCompactGuidance } from "../doors/commitCompact.ts";
 import {
   objectiveLandGuidance,
   objectiveRecoverGuidance,
@@ -442,6 +442,14 @@ test("late registration leaks past rebuild-point filtering (the accepted supervi
 // --- the drive-coverage guard (the structural "this must not happen again") ---------------------
 
 const WORKTREE_STAGES: readonly string[] = ["implement", "submit", "address", "land", "learn"];
+const GLOBAL_COMMAND_STAGES: readonly string[] = [
+  ...WORKTREE_STAGES,
+  "objective-author",
+  "objective-save",
+  "objective-plan",
+  "plan",
+  "save",
+];
 
 /**
  * Every scoped-universe tool name a rendered guidance references (word-boundary scan against
@@ -626,16 +634,34 @@ const DRIVE_COVERAGE: readonly {
     // Registered globally, so the drive can land in any of the 10 registry stages. The guidance
     // names no scoped tool by design (plain git work) — the entry keeps future edits honest.
     drive: "commit-and-compact.md (/commit-and-compact)",
-    stages: [
-      ...WORKTREE_STAGES,
-      "objective-author",
-      "objective-save",
-      "objective-plan",
-      "plan",
-      "save",
-    ],
+    stages: GLOBAL_COMMAND_STAGES,
     text: () => commitAndCompactGuidance(),
     namesNoTools: true,
+  },
+  {
+    // Completion can dispatch from the same globally registered command in every stage. The
+    // generic arm names no scoped tool; provider-aware plan rereads are selected at runtime.
+    drive: "commit-and-compact-continuation.md (/commit-and-compact completion)",
+    stages: GLOBAL_COMMAND_STAGES,
+    text: () => commitAndCompactContinuation(null, { outcome: "clean" }),
+    namesNoTools: true,
+  },
+  {
+    // The Linear arm names its canonical read tools, so the global-stage census must prove both
+    // remain reachable wherever a provider-aware continuation can land.
+    drive: "commit-and-compact-continuation.md (Linear active plan)",
+    stages: GLOBAL_COMMAND_STAGES,
+    text: () =>
+      commitAndCompactContinuation(
+        {
+          provider: "linear",
+          pr_id: "uuid-1",
+          url: "https://linear.app/x/ENG-1",
+          labels: [],
+          objective_id: null,
+        },
+        { outcome: "read-only" },
+      ),
   },
 ];
 

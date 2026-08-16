@@ -17,6 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- `/commit-and-compact` now dispatches an automatic evidence-first continuation only after compaction succeeds: active session plans get provider-aware identity and canonical re-read guidance, generic sessions resume the current task, committed/clean/read-only outcomes remain distinct, and skipped or failed compactions never dispatch (1fc1d5b2)
 - `update_plan_header` is now **merge-only** on both backends (contracts §8.4): a GitHub issue body with no plan-header block, or a Linear issue with no plan-header attachment, refuses loudly instead of creating one (Linear's run_id-keyed creation fallback is removed) — plan-header creation is confined to `create_plan_issue`, §8.29 adoption, and the Linear node-plan unification writer. This closes the #1719 corrupting write (a header stamped onto the wrong kind of carrier by a later-lifecycle write) (3ec0a926)
 
 ### Fixed

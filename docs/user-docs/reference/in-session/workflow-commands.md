@@ -264,11 +264,16 @@ one name or comma-separated names (for example, `/ci lint,test`) for a subset. P
 
 ### `/commit-and-compact`
 
-Commit completed work, then compact. On a dirty tree, perk drives one model turn to stage only the
-completed changes and write a real commit; it never performs blanket `git add -A` or pushes. It
-compacts only after HEAD advances. Clean and read-only sessions compact immediately. If worktree
-state cannot be determined or no commit appears, compaction is skipped loudly so uncommitted work
-cannot be lost; Pi's `/compact` remains the escape hatch. No paired tool.
+Commit completed work, compact, then automatically start a continuation turn only after Pi reports
+that compaction succeeded. On a dirty tree, perk drives one model turn to stage only the completed
+changes and write a real commit; it never performs blanket `git add -A` or pushes, and compacts only
+after HEAD advances. Clean and read-only sessions compact immediately. The continuation distinguishes
+committed, already-clean, and read-only outcomes. A valid active-session plan gets provider-aware
+identity and canonical re-read guidance; sessions without that verified linkage resume the current
+task generically. Before continuing, the agent reorients from repository evidence (`git status`,
+recent log, and relevant diffs) instead of trusting the compacted summary alone. If worktree state
+cannot be determined or no commit appears, compaction is skipped loudly; a skipped or failed
+compaction never dispatches the continuation. Pi's `/compact` remains the escape hatch. No paired tool.
 
 ### `/perk-selfcheck`
 

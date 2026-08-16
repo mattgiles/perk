@@ -609,9 +609,10 @@ export default function (pi: ExtensionAPI) {
   // (The deterministic objective mechanics live in the Python plane: `perk objective …`.)
   registerObjective(pi, perkStatus);
 
-  // The warm `/commit-and-compact` utility door: drive a commit of the work so far, then
-  // compact the session once HEAD has actually advanced (clean/read-only trees compact
-  // immediately; no commit → compaction skipped, loudly). Human-only — no tool twin.
+  // The warm `/commit-and-compact` utility door: drive a commit of the work so far, compact once
+  // a successful outcome is known, then completion-gate an automatic evidence-first continuation
+  // (clean/read-only trees compact immediately; no commit → no compaction or continuation).
+  // Human-only — no tool twin.
   registerCommitAndCompact(pi, gating);
 
   // The warm `objective_save` door: the `objective_save` tool + `/objective-save` command

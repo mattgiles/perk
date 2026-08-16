@@ -212,7 +212,7 @@ routes:
     role: launch
     priority: 90
   - id: prompt-session
-    match: { paths: ["prompts/contexts/read-only.md", "prompts/common/resume-advisory.md", "prompts/commit-and-compact.md"] }
+    match: { paths: ["prompts/contexts/read-only.md", "prompts/common/resume-advisory.md", "prompts/commit-and-compact.md", "prompts/commit-and-compact-continuation.md"] }
     capability: foundation.session
     audience: shipped
     role: context

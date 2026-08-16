@@ -115,9 +115,10 @@ export function worktreeDirty(cwd: string): boolean | null {
 }
 
 /**
- * The `git log --oneline <fromSha>..HEAD` listing of commits made since `fromSha` — or every
+ * The `git log --oneline <fromSha>..HEAD` listing of commits now ahead of `fromSha` — or every
  * commit (`git log --oneline HEAD`) when `fromSha` is null (HEAD was unborn at capture time).
- * **Fail-open**: null on failure or when the range is empty.
+ * This is range evidence, not proof that this command created every listed commit. **Fail-open**:
+ * null on failure or when the range is empty.
  */
 export function commitsSince(cwd: string, fromSha: string | null): string | null {
   const range = fromSha === null ? "HEAD" : `${fromSha}..HEAD`;
