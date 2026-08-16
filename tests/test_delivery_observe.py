@@ -14,7 +14,14 @@ import pytest
 
 from perk.backends.issue_backend import PlanHeaderUpdate
 from perk.delivery import land, observe
-from perk.delivery.facade import DeliveryGit, DeliveryGitHub
+from perk.delivery._fakes import FakeDeliveryGit, FakeDeliveryPersistence
+from perk.delivery.facade import (
+    Delivery,
+    DeliveryError,
+    DeliveryGit,
+    DeliveryGitHub,
+    PublishRequest,
+)
 from perk.delivery.train import (
     BaseHeadObservation,
     PrFactsView,
@@ -291,14 +298,31 @@ class TestRepoDeliveryGit:
         self, git_repo_with_remote, monkeypatch
     ) -> None:
         clone, _remote, _advance = git_repo_with_remote
+        failure = git_mod.GitError("network down")
 
         def boom(*_args: object, **_kwargs: object) -> None:
-            raise git_mod.GitError("network down")
+            raise failure
 
         monkeypatch.setattr(git_mod, "remote_branch_head", boom)
         with pytest.raises(TrainReconstructionError) as excinfo:
             observe.RepoDeliveryGit(clone).remote_branch_sha("main")
         assert excinfo.value.error_type == "git_error"
+        assert excinfo.value.__cause__ is failure
+
+    def test_resolve_commit_failure_preserves_raw_cause(
+        self, git_repo_with_remote, monkeypatch
+    ) -> None:
+        clone, _remote, _advance = git_repo_with_remote
+        failure = git_mod.GitError("object unavailable")
+
+        def boom(*_args: object, **_kwargs: object) -> None:
+            raise failure
+
+        monkeypatch.setattr(git_mod, "resolve_commit", boom)
+        with pytest.raises(TrainReconstructionError) as excinfo:
+            observe.RepoDeliveryGit(clone).resolve_commit("HEAD")
+        assert excinfo.value.error_type == "git_error"
+        assert excinfo.value.__cause__ is failure
 
     def test_is_ancestor_arms(self, git_repo_with_remote) -> None:
         clone, _remote, advance = git_repo_with_remote
@@ -442,13 +466,16 @@ class TestRepoDeliveryGitHub:
         assert observe.RepoDeliveryGitHub(tmp_path).pr_facts(201) is None
 
     def test_pr_facts_failure_is_typed_github_error(self, tmp_path, monkeypatch) -> None:
+        failure = GitHubError("HTTP 500")
+
         def boom(**_kw: object) -> None:
-            raise GitHubError("HTTP 500")
+            raise failure
 
         monkeypatch.setattr(stacks, "pr_delivery_facts", boom)
         with pytest.raises(TrainReconstructionError) as excinfo:
             observe.RepoDeliveryGitHub(tmp_path).pr_facts(201)
         assert excinfo.value.error_type == "github_error"
+        assert excinfo.value.__cause__ is failure
 
     def test_strict_stack_returns_rich_facts_and_fails_closed(
         self, tmp_path: Path, monkeypatch
@@ -468,13 +495,16 @@ class TestRepoDeliveryGitHub:
         monkeypatch.setattr(stacks, "stack_for_pr", lambda **kwargs: None)
         assert authority.strict_stack(201) is None
 
+        failure = GitHubError("HTTP 500")
+
         def unavailable(**kwargs) -> None:
-            raise GitHubError("HTTP 500")
+            raise failure
 
         monkeypatch.setattr(stacks, "stack_for_pr", unavailable)
         with pytest.raises(TrainReconstructionError) as excinfo:
             authority.strict_stack(201)
         assert excinfo.value.error_type == "github_error"
+        assert excinfo.value.__cause__ is failure
 
     def test_active_writers_use_only_a_corroborated_exact_trigger_pair(
         self, tmp_path: Path, monkeypatch
@@ -564,13 +594,39 @@ class TestRepoDeliveryGitHub:
     def test_pr_for_branch_failure_is_typed_github_error(self, tmp_path, monkeypatch) -> None:
         # A STABLE read (§8.54): the cancellation proof must fail closed on an unobservable
         # authority — never silently read "no PR".
+        failure = GitHubError("HTTP 500")
+
         def boom(**_kw: object) -> None:
-            raise GitHubError("HTTP 500")
+            raise failure
 
         monkeypatch.setattr(prs, "find_pr_for_branch", boom)
         with pytest.raises(TrainReconstructionError) as excinfo:
             observe.RepoDeliveryGitHub(tmp_path).pr_for_branch("plan-101")
         assert excinfo.value.error_type == "github_error"
+        assert excinfo.value.__cause__ is failure
+
+    def test_publish_bridge_unwraps_the_real_branch_adapter_cause(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        failure = GitHubError("HTTP 500")
+
+        def boom(**_kw: object) -> None:
+            raise failure
+
+        monkeypatch.setattr(prs, "find_pr_for_branch", boom)
+        service = Delivery(
+            persistence=FakeDeliveryPersistence(),
+            git=FakeDeliveryGit(repo_root=tmp_path),
+            github=observe.RepoDeliveryGitHub(tmp_path),
+        )
+        with pytest.raises(DeliveryError) as excinfo:
+            service.publish(PublishRequest(kind="ready", plan_id="101", delivery="incremental"))
+        assert (excinfo.value.error_type, excinfo.value.phase, excinfo.value.origin) == (
+            "github_error",
+            "ready",
+            "github",
+        )
+        assert excinfo.value.__cause__ is failure
 
     def test_publication_github_effects_delegate_exact_arguments(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch

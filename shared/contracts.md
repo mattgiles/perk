@@ -6296,7 +6296,7 @@ Every `DeliveryError` emitted by `Delivery.publish` carries a jointly-present co
 `phase=layer|cascade|ready` and `origin=domain|git|github|delivery`; existing operations may leave
 both absent. Package-internal `PublicationError` and pure layer refusals become domain errors with
 their original code/message. Bound sync errors become `(cascade,delivery)`; bound layer status,
-persistence/journal/reconstruction failures become `delivery_error/(layer,delivery)` except
+objective-store/persistence/journal/reconstruction failures become `delivery_error/(layer,delivery)` except
 record-size, which preserves `journal_record_too_large`; raw exact-lease rejection and Git failures
 become `(layer,git)`; raw GitHub/issue failures become `(layer,github)`. Ready's pure selection and
 reviewability refusals become `(ready,domain)`; a status reconstruction cause preserves its domain

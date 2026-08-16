@@ -1,7 +1,7 @@
 """Contract tests for the compact ``perk.delivery`` status/Prepare façade."""
 
 import inspect
-from dataclasses import FrozenInstanceError
+from dataclasses import FrozenInstanceError, replace
 from pathlib import Path
 from typing import Any, Literal, cast
 
@@ -360,11 +360,17 @@ def _planning_train(
 
 
 class _StatusDelivery(Delivery):
-    def __init__(self, result: StatusResult, *, git: DeliveryGit | None = None) -> None:
+    def __init__(
+        self,
+        result: StatusResult,
+        *,
+        git: DeliveryGit | None = None,
+        github: DeliveryGitHub | None = None,
+    ) -> None:
         super().__init__(
             persistence=FakeDeliveryPersistence(),
             git=git or FakeDeliveryGit(),
-            github=FakeDeliveryGitHub(),
+            github=github or FakeDeliveryGitHub(),
         )
         self.result = result
         self.status_calls: list[StatusRequest] = []
@@ -413,6 +419,7 @@ def test_publish_request_accepts_the_complete_legal_matrix() -> None:
         lambda: PublishRequest(kind=cast("Literal['layer']", "future"), plan_id="101"),
         lambda: PublishRequest(kind="layer", plan_id=" ", dry_run=True),
         lambda: PublishRequest(kind="layer", plan_id="#", dry_run=True),
+        lambda: PublishRequest(kind="layer", plan_id="##101", dry_run=True),
         lambda: PublishRequest(kind="layer", plan_id="10#1", dry_run=True),
         lambda: PublishRequest(kind="layer", plan_id="101"),
         lambda: PublishRequest(kind="layer", plan_id="101", run_id=" "),
@@ -487,28 +494,176 @@ def test_publish_result_exact_nested_shapes_are_frozen_and_validated() -> None:
                 dry_run=False,
                 ready=PublishResult.Ready(pr=_publish_pr(), was_draft=True),
             )
-    with pytest.raises(ValueError, match="stack facts"):
-        PublishResult(
-            kind="layer",
-            plan_id="101",
-            dry_run=False,
-            layer=PublishResult.Layer(
-                pr=_publish_pr(),
-                branch="plan-101",
-                header_update=PlanHeaderUpdate(fields_updated=(), dry_run=False),
-                plan_embedded=False,
-                pr_checked=True,
-                parent_branch="main",
-                operation_id="01OP",
-                stack_number=1,
-                stack_size=None,
-                stack_position=1,
-                parent_checkpoint_sha="a",
-                published_head_sha="b",
-                resumed=False,
-                converged_noop=False,
+
+
+def _real_publish_layer() -> PublishResult.Layer:
+    layer = _real_publish_result().layer
+    assert layer is not None
+    return layer
+
+
+def _publish_sync(
+    *, operation_id: str | None = "01SYNC", no_op: bool = False, resumed: bool = True
+) -> SyncResult:
+    return SyncResult(
+        objective_id="10",
+        objective_url="fake://objective/10",
+        redirected_from=None,
+        operation_id=operation_id,
+        abandoned_operation_id=None,
+        no_op=no_op,
+        declined=False,
+        resumed=resumed,
+        base_cascaded=False,
+        base_advanced=False,
+        affected=(),
+    )
+
+
+def _cascade_publish_layer() -> PublishResult.Layer:
+    cascade = _publish_sync()
+    return replace(
+        _real_publish_layer(),
+        operation_id=cascade.operation_id,
+        resumed=cascade.resumed,
+        converged_noop=cascade.no_op,
+        cascade=cascade,
+    )
+
+
+@pytest.mark.parametrize(
+    ("build", "message"),
+    (
+        (
+            lambda: PublishResult(
+                kind=cast("Literal['layer']", "future"),
+                plan_id="101",
+                dry_run=False,
+                layer=_real_publish_layer(),
             ),
-        )
+            "unknown publish result kind",
+        ),
+        (
+            lambda: PublishResult(kind="layer", plan_id="101", dry_run=False),
+            "detail must match",
+        ),
+        (
+            lambda: PublishResult(
+                kind="ready",
+                plan_id="101",
+                dry_run=False,
+                layer=_real_publish_layer(),
+                ready=PublishResult.Ready(pr=_publish_pr(), was_draft=True),
+            ),
+            "detail must match",
+        ),
+        (
+            lambda: PublishResult(
+                kind="layer",
+                plan_id="101",
+                dry_run=False,
+                layer=replace(
+                    _real_publish_layer(), stack_number=1, stack_size=None, stack_position=1
+                ),
+            ),
+            "stack facts",
+        ),
+        (
+            lambda: PublishResult(
+                kind="layer",
+                plan_id="101",
+                dry_run=False,
+                layer=replace(
+                    _real_publish_layer(), stack_number=1, stack_size=1, stack_position=2
+                ),
+            ),
+            "position must be within",
+        ),
+        (
+            lambda: PublishResult(
+                kind="layer",
+                plan_id="101",
+                dry_run=True,
+                layer=_real_publish_layer(),
+            ),
+            "invalid dry-run layer",
+        ),
+        (
+            lambda: PublishResult(
+                kind="layer",
+                plan_id="101",
+                dry_run=False,
+                layer=replace(_real_publish_layer(), parent_checkpoint_sha=None),
+            ),
+            "invalid real layer",
+        ),
+        (
+            lambda: PublishResult(
+                kind="layer",
+                plan_id="101",
+                dry_run=False,
+                layer=replace(_real_publish_layer(), operation_id=None, converged_noop=False),
+            ),
+            "operation id must be absent exactly",
+        ),
+        (
+            lambda: PublishResult(
+                kind="layer",
+                plan_id="101",
+                dry_run=False,
+                layer=replace(_real_publish_layer(), operation_id="01OP", converged_noop=True),
+            ),
+            "operation id must be absent exactly",
+        ),
+        (
+            lambda: PublishResult(
+                kind="layer",
+                plan_id="101",
+                dry_run=False,
+                layer=replace(
+                    _cascade_publish_layer(), stack_number=1, stack_size=1, stack_position=1
+                ),
+            ),
+            "cascade publish result carries no stack triple",
+        ),
+        (
+            lambda: PublishResult(
+                kind="layer",
+                plan_id="101",
+                dry_run=False,
+                layer=replace(_cascade_publish_layer(), operation_id="01DIFFERENT"),
+            ),
+            "cascade publish fields must mirror",
+        ),
+        (
+            lambda: PublishResult(
+                kind="layer",
+                plan_id="101",
+                dry_run=False,
+                layer=replace(
+                    _real_publish_layer(),
+                    operation_id=None,
+                    resumed=False,
+                    converged_noop=False,
+                    cascade=_publish_sync(operation_id=None, no_op=False, resumed=False),
+                ),
+            ),
+            "cascade publish fields must mirror",
+        ),
+        (
+            lambda: PublishResult(
+                kind="ready",
+                plan_id="101",
+                dry_run=True,
+                ready=PublishResult.Ready(pr=_publish_pr(), was_draft=False),
+            ),
+            "invalid dry-run ready",
+        ),
+    ),
+)
+def test_publish_result_rejects_every_invalid_shape(build, message: str) -> None:
+    with pytest.raises(ValueError, match=message):
+        build()
 
 
 def test_publish_dry_runs_are_exact_and_call_no_authority() -> None:
@@ -552,6 +707,73 @@ def test_publish_dry_runs_are_exact_and_call_no_authority() -> None:
         ),
     )
     assert persistence.calls == [] and git.calls == [] and github.calls == []
+
+
+def test_stacked_ready_without_objective_is_typed_and_mutation_free() -> None:
+    github = FakeDeliveryGitHub()
+    with pytest.raises(DeliveryError) as excinfo:
+        _delivery(github=github).publish(
+            PublishRequest(kind="ready", plan_id="101", delivery="stacked")
+        )
+    assert (excinfo.value.error_type, excinfo.value.phase, excinfo.value.origin) == (
+        "not_stacked",
+        "ready",
+        "domain",
+    )
+    assert github.calls == []
+
+
+def test_stacked_ready_without_train_is_typed_and_mutation_free() -> None:
+    github = FakeDeliveryGitHub()
+    service = _StatusDelivery(
+        StatusResult(
+            objective_id="10",
+            objective_url="fake://objective/10",
+            redirected_from=None,
+            train=None,
+            no_train_reason="objective is incremental",
+        ),
+        github=github,
+    )
+    with pytest.raises(DeliveryError) as excinfo:
+        service.publish(
+            PublishRequest(kind="ready", plan_id="101", delivery="stacked", objective_id="10")
+        )
+    assert (excinfo.value.error_type, excinfo.value.phase, excinfo.value.origin) == (
+        "not_stacked",
+        "ready",
+        "domain",
+    )
+    assert github.calls == []
+
+
+def test_stacked_ready_without_staged_pr_is_typed_and_mutation_free() -> None:
+    github = FakeDeliveryGitHub()
+    train = _planning_train(
+        nodes=(),
+        layers=(_train_layer("1.1", "101", "plan-101"),),
+        candidate="1.1",
+    )
+    service = _StatusDelivery(
+        StatusResult(
+            objective_id="10",
+            objective_url="fake://objective/10",
+            redirected_from=None,
+            train=train,
+            no_train_reason=None,
+        ),
+        github=github,
+    )
+    with pytest.raises(DeliveryError) as excinfo:
+        service.publish(
+            PublishRequest(kind="ready", plan_id="101", delivery="stacked", objective_id="10")
+        )
+    assert (excinfo.value.error_type, excinfo.value.phase, excinfo.value.origin) == (
+        "no_pr",
+        "ready",
+        "domain",
+    )
+    assert github.calls == []
 
 
 @pytest.mark.parametrize("backend", ["github", "linear"])
@@ -672,6 +894,11 @@ def test_contextual_delivery_error_requires_joint_valid_metadata() -> None:
             PublishRequest(kind="layer", plan_id="101", run_id="01RUN"),
             JournalRecordTooLarge("record failed"),
             ("journal_record_too_large", "layer", "delivery"),
+        ),
+        (
+            PublishRequest(kind="layer", plan_id="101", run_id="01RUN"),
+            ObjectiveStoreError("objective failed"),
+            ("delivery_error", "layer", "delivery"),
         ),
         (
             PublishRequest(kind="ready", plan_id="101", delivery="incremental"),

@@ -17,7 +17,7 @@ no-op convergence returns without touching the journal.
 
 import contextlib
 import time
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Never, Protocol, cast
@@ -121,33 +121,6 @@ class _LayerBodyFacts:
     rows: tuple[_TrainRowFacts, ...]
 
 
-@dataclass(frozen=True)
-class _LayerResult:
-    """The verified outcome of one layer publication.
-
-    ``operation_id`` is ``None`` only on the pure no-op convergence (no journal event);
-    ``resumed`` marks a roll-forward/retry under a previously prepared operation;
-    ``converged_noop`` marks the no-op arm (nothing was written anywhere). The stack fields
-    are ``None`` for the bottom layer (no native stack applies below two layers).
-    """
-
-    pr: prs.PullRequest
-    branch: str
-    header_update: PlanHeaderUpdate
-    plan_embedded: bool
-    pr_checked: bool
-    parent_branch: str
-    operation_id: str | None
-    stack_number: int | None
-    stack_size: int | None
-    stack_position: int | None
-    parent_checkpoint_sha: str
-    published_head_sha: str
-    resumed: bool
-    converged_noop: bool
-    cascade: SyncResult | None = None
-
-
 # ----------------------------------------------------------------- injected-seam protocols
 # The gateway callables are keyword-only, so plain `Callable` cannot type them — each seam
 # gets a minimal Protocol (production defaults satisfy them; tests pass fakes).
@@ -212,184 +185,154 @@ def _raw_github_failure(exc: Exception) -> Never:
 
 
 @dataclass(frozen=True)
-class _LayerPublication:
-    """Per-request state over one façade-owned publication context."""
+class _Publication:
+    """One request's immutable state; effects stay on its aggregate context and runtime."""
 
     context: _PublishContext
     runtime: _PublishRuntime
-    request: PublishRequest
+    plan_id: str
+    run_id: str
+    trigger_run_id: str | None
     plan_state: PlanState
     plan_body: str | None
 
+
+def _compose_body(pub: _Publication, facts: _LayerBodyFacts, pr_number: int | None) -> str:
+    return _compose_stacked_pr_body(
+        issue=pub.plan_id,
+        plan_body=pub.plan_body,
+        facts=facts,
+        pr_number=pr_number,
+    )
+
+
+def _header_fields(pub: _Publication, pr_number: int) -> dict[str, object]:
+    fields: dict[str, object] = {
+        "branch": f"plan-{pub.plan_id}",
+        "pr": str(pr_number),
+        "lifecycle_stage": plan.LifecycleStage.IMPL.value,
+    }
+    if pub.trigger_run_id is not None:
+        merged = plan.merge_untrusted_str_list(
+            pub.plan_state.header.get("impl_run_ids"), pub.trigger_run_id
+        )
+        fields["impl_run_ids"] = list(merged)
+    return fields
+
+
+def _reconstruct(pub: _Publication, objective_id: str) -> TrainStatus:
+    try:
+        result = pub.context.status(StatusRequest(objective_id=objective_id))
+    except DeliveryError as exc:
+        raise DeliveryError(
+            str(exc),
+            error_type="delivery_error",
+            phase="layer",
+            origin="delivery",
+        ) from exc
+    if result.train is not None:
+        return result.train
+    return NoDeliveryTrain(
+        objective_id=result.objective_id,
+        objective_url=result.objective_url,
+        redirected_from=result.redirected_from,
+        reason=result.no_train_reason or "unknown",
+    )
+
+
+def _pr_facts(pub: _Publication, number: int) -> PrFactsView | None:
+    try:
+        return pub.context.github.pr_facts(number)
+    except TrainReconstructionError as exc:
+        _raw_github_failure(exc)
+
+
+def _stack_read(pub: _Publication, number: int) -> stacks.StackRestFacts | None:
+    try:
+        return pub.context.github.strict_stack(number)
+    except TrainReconstructionError as exc:
+        _raw_github_failure(exc)
+
+
+def _fetch(pub: _Publication, refs: tuple[str, ...]) -> None:
+    try:
+        pub.context.git.fetch_refs(refs)
+    except TrainReconstructionError as exc:
+        _raw_git_failure(exc)
+
+
+def _remote_head(pub: _Publication, branch: str) -> str | None:
+    try:
+        return pub.context.git.remote_branch_sha(branch)
+    except TrainReconstructionError as exc:
+        _raw_git_failure(exc)
+
+
+def _local_head(pub: _Publication, ref: str) -> str | None:
+    try:
+        return pub.context.git.resolve_commit(ref)
+    except TrainReconstructionError as exc:
+        _raw_git_failure(exc)
+
+
+def _pr_for_branch(pub: _Publication, branch: str) -> prs.PullRequest | None:
+    try:
+        return pub.context.github.pr_for_branch(branch)
+    except TrainReconstructionError as exc:
+        _raw_github_failure(exc)
+
+
+@dataclass(frozen=True)
+class _PublishProofAdapter:
+    """Adapt aggregate reads only to the narrow recovery-proof protocol."""
+
+    publication: _Publication
+
     @property
     def repo_root(self) -> Path:
-        return self.context.repo_root
+        return self.publication.context.repo_root
 
     @property
-    def plan_id(self) -> str:
-        return _normalize_publish_plan_id(self.request.plan_id)
+    def pr_facts(self) -> _PrFactsRead:
+        return self._pr_facts
 
     @property
-    def run_id(self) -> str:
-        if self.request.run_id is None:
-            raise ValueError("validated layer request lost run_id")
-        return self.request.run_id
+    def stack_read(self) -> _StackRead:
+        return self._stack_read
 
     @property
-    def trigger_run_id(self) -> str | None:
-        return self.request.trigger_run_id
+    def remote_head(self) -> Callable[[Path, str], str | None]:
+        return self._remote_head
 
     @property
-    def title(self) -> str:
-        return self.plan_state.title
+    def pr_for_branch(self) -> _FindPrForBranch:
+        return self._pr_for_branch
 
-    @property
-    def persistence(self) -> DeliveryPersistence:
-        return self.context.persistence
-
-    @property
-    def issues(self) -> DeliveryPersistence:
-        return self.context.persistence
-
-    def compose_body(self, facts: _LayerBodyFacts, pr_number: int | None) -> str:
-        return _compose_stacked_pr_body(
-            issue=self.plan_id,
-            plan_body=self.plan_body,
-            facts=facts,
-            pr_number=pr_number,
+    def _pr_facts(self, *, number: int, repo_root: Path) -> stacks.PrDeliveryFacts | None:
+        del repo_root
+        facts = _pr_facts(self.publication, number)
+        if facts is None:
+            return None
+        return stacks.PrDeliveryFacts(
+            number=facts.number,
+            state=facts.state,
+            is_draft=facts.is_draft,
+            base_ref=facts.base_ref,
+            head_ref=facts.head_ref,
+            head_sha=facts.head_sha,
         )
 
-    def header_fields(self, pr_number: int) -> dict[str, object]:
-        fields: dict[str, object] = {
-            "branch": f"plan-{self.plan_id}",
-            "pr": str(pr_number),
-            "lifecycle_stage": plan.LifecycleStage.IMPL.value,
-        }
-        if self.trigger_run_id is not None:
-            merged = plan.merge_untrusted_str_list(
-                self.plan_state.header.get("impl_run_ids"), self.trigger_run_id
-            )
-            fields["impl_run_ids"] = list(merged)
-        return fields
-
-    def reconstruct(self, repo_root: Path, objective_id: str) -> TrainStatus:
+    def _stack_read(self, *, number: int, repo_root: Path) -> stacks.StackRestFacts | None:
         del repo_root
-        try:
-            result = self.context.status(StatusRequest(objective_id=objective_id))
-        except DeliveryError as exc:
-            raise DeliveryError(
-                str(exc),
-                error_type="delivery_error",
-                phase="layer",
-                origin="delivery",
-            ) from exc
-        if result.train is not None:
-            return result.train
-        return NoDeliveryTrain(
-            objective_id=result.objective_id,
-            objective_url=result.objective_url,
-            redirected_from=result.redirected_from,
-            reason=result.no_train_reason or "unknown",
-        )
+        return _stack_read(self.publication, number)
 
-    def stack_probe(self, repo_root: Path) -> bool:
+    def _remote_head(self, repo_root: Path, branch: str) -> str | None:
         del repo_root
-        return self.context.github.stack_capability()
+        return _remote_head(self.publication, branch)
 
-    def pr_facts(self, *, number: int, repo_root: Path) -> PrFactsView | None:
+    def _pr_for_branch(self, *, branch: str, repo_root: Path) -> prs.PullRequest | None:
         del repo_root
-        try:
-            return self.context.github.pr_facts(number)
-        except TrainReconstructionError as exc:
-            _raw_github_failure(exc)
-
-    def stack_read(self, *, number: int, repo_root: Path) -> stacks.StackRestFacts | None:
-        del repo_root
-        try:
-            return self.context.github.strict_stack(number)
-        except TrainReconstructionError as exc:
-            _raw_github_failure(exc)
-
-    def stack_create(
-        self, *, pull_requests: Sequence[int], repo_root: Path
-    ) -> stacks.StackMutationOutcome:
-        del repo_root
-        return self.context.github.create_stack(tuple(pull_requests))
-
-    def stack_append(
-        self, *, stack_number: int, pull_requests: Sequence[int], repo_root: Path
-    ) -> stacks.StackMutationOutcome:
-        del repo_root
-        return self.context.github.append_stack(stack_number, pull_requests=tuple(pull_requests))
-
-    def create_pr(
-        self, *, head: str, base: str, title: str, body: str, repo_root: Path, draft: bool
-    ) -> prs.PullRequest:
-        del repo_root
-        return self.context.github.create_pr(
-            head=head, base=base, title=title, body=body, draft=draft
-        )
-
-    def get_pr(self, *, number: int, repo_root: Path) -> prs.PullRequest | None:
-        del repo_root
-        return self.context.github.get_pr(number)
-
-    def update_pr_body(self, *, number: int, body: str, repo_root: Path) -> prs.PrBodyUpdate:
-        del repo_root
-        return self.context.github.update_pr_body(number, body=body)
-
-    def update_pr_base(self, *, number: int, base: str, repo_root: Path) -> None:
-        del repo_root
-        self.context.github.update_pr_base(number, base=base)
-
-    def reopen_pr(self, *, number: int, repo_root: Path) -> None:
-        del repo_root
-        self.context.github.reopen_pr(number)
-
-    def validate_pr_body(self, body: str, *, pr_number: int) -> tuple[str, ...]:
-        return self.runtime.validate_pr_body(body, pr_number=pr_number)
-
-    def fetch(self, repo_root: Path, refs: list[str]) -> None:
-        del repo_root
-        try:
-            self.context.git.fetch_refs(tuple(refs))
-        except TrainReconstructionError as exc:
-            _raw_git_failure(exc)
-
-    def remote_head(self, repo_root: Path, branch: str) -> str | None:
-        del repo_root
-        try:
-            return self.context.git.remote_branch_sha(branch)
-        except TrainReconstructionError as exc:
-            _raw_git_failure(exc)
-
-    def local_head(self, repo_root: Path, ref: str) -> str | None:
-        del repo_root
-        try:
-            return self.context.git.resolve_commit(ref)
-        except TrainReconstructionError as exc:
-            _raw_git_failure(exc)
-
-    def is_ancestor(self, repo_root: Path, ancestor_sha: str, head_sha: str) -> bool:
-        del repo_root
-        return self.context.git.is_ancestor(ancestor_sha, head_sha) is True
-
-    def push(self, repo_root: Path, branch: str, *, expected_remote_sha: str | None) -> None:
-        del repo_root
-        self.context.git.push_with_exact_lease(branch, expected_remote_sha=expected_remote_sha)
-
-    def pr_for_branch(self, *, branch: str, repo_root: Path) -> prs.PullRequest | None:
-        del repo_root
-        try:
-            return self.context.github.pr_for_branch(branch)
-        except TrainReconstructionError as exc:
-            _raw_github_failure(exc)
-
-    def sleep(self, seconds: float) -> None:
-        self.runtime.sleep(seconds)
-
-    def now(self) -> str:
-        return self.runtime.now()
+        return _pr_for_branch(self.publication, branch)
 
 
 def _dispatch(
@@ -465,36 +408,19 @@ def _dispatch(
         plan_body = context.persistence.get_plan_body(issue_id=wanted)
     except IssueBackendError:
         plan_body = None
-    publication = _LayerPublication(
+    if request.run_id is None:
+        raise ValueError("validated layer request lost run_id")
+    publication = _Publication(
         context=context,
         runtime=runtime,
-        request=request,
+        plan_id=wanted,
+        run_id=request.run_id,
+        trigger_run_id=request.trigger_run_id,
         plan_state=plan_state,
         plan_body=plan_body,
     )
     result = _route(publication, objective_id.strip(), allow_resume=True)
-    return PublishResult(
-        kind="layer",
-        plan_id=wanted,
-        dry_run=False,
-        layer=PublishResult.Layer(
-            pr=result.pr,
-            branch=result.branch,
-            header_update=result.header_update,
-            plan_embedded=result.plan_embedded,
-            pr_checked=result.pr_checked,
-            parent_branch=result.parent_branch,
-            operation_id=result.operation_id,
-            stack_number=result.stack_number,
-            stack_size=result.stack_size,
-            stack_position=result.stack_position,
-            parent_checkpoint_sha=result.parent_checkpoint_sha,
-            published_head_sha=result.published_head_sha,
-            resumed=result.resumed,
-            converged_noop=result.converged_noop,
-            cascade=result.cascade,
-        ),
-    )
+    return PublishResult(kind="layer", plan_id=wanted, dry_run=False, layer=result)
 
 
 def _ready(context: _PublishContext, request: PublishRequest) -> PublishResult:
@@ -563,12 +489,12 @@ def _ready(context: _PublishContext, request: PublishRequest) -> PublishResult:
 # ----------------------------------------------------------------- routing
 
 
-def _route(pub: _LayerPublication, objective_id: str, *, allow_resume: bool) -> _LayerResult:
+def _route(pub: _Publication, objective_id: str, *, allow_resume: bool) -> PublishResult.Layer:
     """Reconstruct fresh and route: resume an unresolved PUBLISH for this plan, refuse a
     foreign unresolved operation, gate the candidate, then execute. Re-entered exactly once
     after an abandon (``allow_resume=False`` — a second unresolved hit is drift, never a
     loop)."""
-    train = pub.reconstruct(pub.repo_root, objective_id)
+    train = _reconstruct(pub, objective_id)
     if isinstance(train, NoDeliveryTrain):
         raise PublicationError(
             f"objective {train.objective_id} has no delivery train ({train.reason})",
@@ -588,7 +514,7 @@ def _route(pub: _LayerPublication, objective_id: str, *, allow_resume: bool) -> 
         # Sync owns journal routing for a lower-layer propagation: an unresolved SYNC/ADOPT
         # must resume through its kind-aware protocol before publish's fold gate can preempt it.
         return _cascade(pub, objective_id)
-    fold = pub.persistence.read_journal(train.objective_id)
+    fold = pub.context.persistence.read_journal(train.objective_id)
     if fold.unresolved:
         op = fold.unresolved[0]
         record = op.prepared.record
@@ -621,13 +547,13 @@ def _route(pub: _LayerPublication, objective_id: str, *, allow_resume: bool) -> 
     # republish routes too. The atomic-push dry-run is deliberately NOT rerun (§8.47's
     # recorded deviation): the single-ref exact-lease push fails honestly on its own; the
     # multi-ref atomic probe belongs to the suffix-sync node.
-    if index >= 1 and not pub.stack_probe(pub.repo_root):
+    if index >= 1 and not pub.context.github.stack_capability():
         raise _capability_lost()
     before_branch_sha = _observe_own_branch(pub, ctx)
     return _run_protocol(pub, train, ctx, index, before_branch_sha=before_branch_sha)
 
 
-def _cascade(pub: _LayerPublication, objective_id: str) -> _LayerResult:
+def _cascade(pub: _Publication, objective_id: str) -> PublishResult.Layer:
     """Synchronize the claimed suffix from this lower published layer."""
     try:
         result = pub.context.sync(
@@ -650,7 +576,7 @@ def _cascade(pub: _LayerPublication, objective_id: str) -> _LayerResult:
     # A trigger resume may first roll an older all-after operation forward and then discover
     # that the new trigger is already converged. Reconstruct after sync so this result never
     # falls back to the pre-roll-forward checkpoint snapshot.
-    updated = pub.reconstruct(pub.repo_root, objective_id)
+    updated = _reconstruct(pub, objective_id)
     if isinstance(updated, NoDeliveryTrain):
         raise PublicationError(
             f"objective {updated.objective_id} has no delivery train after suffix propagation "
@@ -665,7 +591,7 @@ def _cascade(pub: _LayerPublication, objective_id: str) -> _LayerResult:
             error_type="publication_drift",
         )
     try:
-        pr = pub.get_pr(number=layer.pr_number, repo_root=pub.repo_root)
+        pr = pub.context.github.get_pr(layer.pr_number)
     except GitHubError as exc:
         raise PublicationError(
             f"could not re-read PR #{layer.pr_number} after suffix propagation ({exc})",
@@ -709,10 +635,10 @@ def _cascade(pub: _LayerPublication, objective_id: str) -> _LayerResult:
         merged = plan.merge_untrusted_str_list(
             pub.plan_state.header.get("impl_run_ids"), pub.trigger_run_id
         )
-        header_update = pub.issues.update_plan_header(
+        header_update = pub.context.persistence.update_plan_header(
             issue_id=pub.plan_id, fields={"impl_run_ids": list(merged)}
         )
-    return _LayerResult(
+    return PublishResult.Layer(
         pr=pr,
         branch=ctx.branch,
         header_update=header_update,
@@ -741,7 +667,7 @@ def _layer_index(train: DeliveryTrain, plan_id: str) -> int:
     )
 
 
-def _derive_ctx(pub: _LayerPublication, train: DeliveryTrain) -> LayerContext:
+def _derive_ctx(pub: _Publication, train: DeliveryTrain) -> LayerContext:
     try:
         return derive_layer_context(train, plan_id=pub.plan_id)
     except LayerError as exc:
@@ -752,24 +678,24 @@ def _derive_ctx(pub: _LayerPublication, train: DeliveryTrain) -> LayerContext:
 
 
 def _run_protocol(
-    pub: _LayerPublication,
+    pub: _Publication,
     train: DeliveryTrain,
     ctx: LayerContext,
     index: int,
     *,
     before_branch_sha: str | None,
-) -> _LayerResult:
+) -> PublishResult.Layer:
     """Steps 5-12 under a freshly minted operation: verify the parent + candidate ancestry,
     append the prepared record (journal-first — before ANY remote mutation), push under the
     exact lease, then complete."""
     parent_sha = _prepare_parent(pub, ctx)
-    candidate = pub.local_head(pub.repo_root, ctx.branch)
+    candidate = _local_head(pub, ctx.branch)
     if candidate is None:
         raise PublicationError(
             f"local branch {ctx.branch!r} does not resolve — nothing to publish",
             error_type="git_error",
         )
-    if not pub.is_ancestor(pub.repo_root, parent_sha, candidate):
+    if pub.context.git.is_ancestor(parent_sha, candidate) is not True:
         raise PublicationError(
             f"branch {ctx.branch!r} at {candidate} does not contain the parent branch "
             f"{ctx.parent_branch!r}'s fresh head {parent_sha} — rebase onto "
@@ -783,13 +709,13 @@ def _run_protocol(
         delivery_lineage=lineage,
         objective_id=train.objective_id,
         run_id=pub.run_id,
-        created=pub.now(),
+        created=pub.runtime.now(),
         affected_plans=(pub.plan_id,),
         before=_before_payload(pub, train, index, ctx.branch, before_branch_sha),
         after=_after_payload(train, ctx, index, candidate),
     )
     try:
-        pub.persistence.append_prepared(train.objective_id, record)
+        pub.context.persistence.append_prepared(train.objective_id, record)
     except UnresolvedOperationError as exc:
         raise PublicationError(str(exc), error_type="unresolved_operation") from exc
     _push_with_lease(pub, ctx, before_branch_sha)
@@ -805,35 +731,33 @@ def _run_protocol(
     )
 
 
-def _prepare_parent(pub: _LayerPublication, ctx: LayerContext) -> str:
+def _prepare_parent(pub: _Publication, ctx: LayerContext) -> str:
     """Fetch + verify the LATEST parent head (never a stored checkpoint) via the shared
     ``prepare_layer_start`` path; typed ``LayerError``s map onto the publication vocabulary."""
     try:
         prepared = prepare_layer_start(
             ctx,
-            fetch=lambda refs: pub.fetch(pub.repo_root, list(refs)),
-            remote_head=lambda branch: pub.remote_head(pub.repo_root, branch),
-            resolve_commit=lambda ref: pub.local_head(pub.repo_root, ref),
+            fetch=lambda refs: _fetch(pub, tuple(refs)),
+            remote_head=lambda branch: _remote_head(pub, branch),
+            resolve_commit=lambda ref: _local_head(pub, ref),
         )
     except LayerError as exc:
         raise PublicationError(str(exc), error_type=exc.error_type) from exc
     return prepared.parent_sha
 
 
-def _observe_own_branch(pub: _LayerPublication, ctx: LayerContext) -> str | None:
+def _observe_own_branch(pub: _Publication, ctx: LayerContext) -> str | None:
     """The exact lease observation: the remote head of the layer's own branch (``None`` =
     the absence lease). The fetch is best-effort object localization (an absent remote branch
     makes an explicit-refspec fetch fail — that is not an observation failure)."""
     with contextlib.suppress(git_mod.GitError):
-        pub.fetch(pub.repo_root, [ctx.branch])
-    return pub.remote_head(pub.repo_root, ctx.branch)
+        _fetch(pub, (ctx.branch,))
+    return _remote_head(pub, ctx.branch)
 
 
-def _push_with_lease(
-    pub: _LayerPublication, ctx: LayerContext, expected_remote_sha: str | None
-) -> None:
+def _push_with_lease(pub: _Publication, ctx: LayerContext, expected_remote_sha: str | None) -> None:
     try:
-        pub.push(pub.repo_root, ctx.branch, expected_remote_sha=expected_remote_sha)
+        pub.context.git.push_with_exact_lease(ctx.branch, expected_remote_sha=expected_remote_sha)
     except git_mod.PushRejectedError as exc:
         raise PublicationError(
             f"the exact-lease push of {ctx.branch!r} was rejected (expected the remote at "
@@ -865,7 +789,7 @@ def _require_lineage(train: DeliveryTrain) -> str:
 
 
 def _before_payload(
-    pub: _LayerPublication,
+    pub: _Publication,
     train: DeliveryTrain,
     index: int,
     branch: str,
@@ -877,7 +801,7 @@ def _before_payload(
     layer = train.layers[index]
     pr_payload: dict[str, object] = {"number": None, "base": None, "head_sha": None, "state": None}
     if layer.pr_number is not None:
-        facts = pub.pr_facts(number=layer.pr_number, repo_root=pub.repo_root)
+        facts = _pr_facts(pub, layer.pr_number)
         pr_payload = {
             "number": layer.pr_number,
             "base": facts.base_ref if facts is not None else None,
@@ -887,9 +811,7 @@ def _before_payload(
     stack_payload: dict[str, object] = {"members": None}
     if index >= 1:
         bottom = train.layers[0].pr_number
-        observed = (
-            pub.stack_read(number=bottom, repo_root=pub.repo_root) if bottom is not None else None
-        )
+        observed = _stack_read(pub, bottom) if bottom is not None else None
         stack_payload = {"members": list(observed.member_numbers) if observed is not None else None}
     return {
         "branch": {"ref": branch, "sha": before_branch_sha},
@@ -938,7 +860,7 @@ def _prefix_pr_numbers(train: DeliveryTrain, index: int) -> list[int]:
 
 
 def _complete_publication(
-    pub: _LayerPublication,
+    pub: _Publication,
     train: DeliveryTrain,
     ctx: LayerContext,
     index: int,
@@ -948,19 +870,18 @@ def _complete_publication(
     candidate_sha: str,
     resumed: bool,
     expected_pr_number: int | None = None,
-) -> _LayerResult:
+) -> PublishResult.Layer:
     """PR create/converge → stack membership convergence → the full postcondition refetch →
     persist (identity → checkpoint pair → ``completed``). Every failure before the outcome
     append leaves the operation unresolved (roll-forward territory). ``expected_pr_number``
     is the resume arms' recorded own-PR pin: when the prepared record named a concrete PR,
     the head-selector lookup must rediscover exactly it (else ``publication_drift``)."""
     facts = _body_facts(train, ctx, index)
-    pr = pub.create_pr(
+    pr = pub.context.github.create_pr(
         head=ctx.branch,
         base=ctx.parent_branch,
-        title=pub.title,
-        body=pub.compose_body(facts, None),
-        repo_root=pub.repo_root,
+        title=pub.plan_state.title,
+        body=_compose_body(pub, facts, None),
         draft=True,
     )
     if expected_pr_number is not None and pr.number != expected_pr_number:
@@ -977,15 +898,15 @@ def _complete_publication(
             error_type="pr_already_merged",
         )
     if pr.existed and pr.state == "CLOSED":
-        pub.reopen_pr(number=pr.number, repo_root=pub.repo_root)
+        pub.context.github.reopen_pr(pr.number)
     if pr.existed and pr.base_ref and pr.base_ref != ctx.parent_branch:
         # The base converge: an existing PR (create_pr is idempotent by head, base-blind) may
         # target a stale parent. Draft state is never touched on an existing PR — draft-by-
         # default is for creation only; `/ready` stays the separate per-layer gesture.
-        pub.update_pr_base(number=pr.number, base=ctx.parent_branch, repo_root=pub.repo_root)
-    body = pub.compose_body(facts, pr.number)
-    pub.update_pr_body(number=pr.number, body=body, repo_root=pub.repo_root)
-    errors = pub.validate_pr_body(body, pr_number=pr.number)
+        pub.context.github.update_pr_base(pr.number, base=ctx.parent_branch)
+    body = _compose_body(pub, facts, pr.number)
+    pub.context.github.update_pr_body(pr.number, body=body)
+    errors = pub.runtime.validate_pr_body(body, pr_number=pr.number)
     if errors:
         raise PublicationError(
             "PR body check failed after the create-then-update pass:\n  " + "\n  ".join(errors),
@@ -999,18 +920,18 @@ def _complete_publication(
     # Persist, then complete: (a) the submit-owned identity fields; (b) the checkpoint pair
     # (one write, only after verification); (c) the terminal outcome. A crash between (a)-(c)
     # reconstructs as roll-forward — all three are merge-writes / idempotent appends.
-    header_update = pub.issues.update_plan_header(
-        issue_id=pub.plan_id, fields=pub.header_fields(pr.number)
+    header_update = pub.context.persistence.update_plan_header(
+        issue_id=pub.plan_id, fields=_header_fields(pub, pr.number)
     )
-    pub.persistence.write_checkpoints(
+    pub.context.persistence.write_checkpoints(
         pub.plan_id, parent_checkpoint_sha=parent_sha, published_head_sha=candidate_sha
     )
-    pub.persistence.append_outcome(
+    pub.context.persistence.append_outcome(
         train.objective_id,
         OutcomeRecord(
             operation_id=operation_id,
             role=EventRole.COMPLETED,
-            created=pub.now(),
+            created=pub.runtime.now(),
             observed={
                 "branch_sha": candidate_sha,
                 "pr": pr.number,
@@ -1018,7 +939,7 @@ def _complete_publication(
             },
         ),
     )
-    return _LayerResult(
+    return PublishResult.Layer(
         pr=pr,
         branch=ctx.branch,
         header_update=header_update,
@@ -1094,7 +1015,7 @@ def _compose_stacked_pr_body(
 
 
 def _converge_stack(
-    pub: _LayerPublication,
+    pub: _Publication,
     ctx: LayerContext,
     pr_number: int,
     desired: list[int],
@@ -1112,14 +1033,14 @@ def _converge_stack(
     plus the exact push lease.
     """
     for _attempt in range(_CONVERGE_ATTEMPTS):
-        facts = pub.pr_facts(number=pr_number, repo_root=pub.repo_root)
+        facts = _pr_facts(pub, pr_number)
         if (
             facts is not None
             and facts.head_sha == candidate_sha
             and facts.base_ref == ctx.parent_branch
         ):
             break
-        pub.sleep(_CONVERGE_DELAY_SECONDS)
+        pub.runtime.sleep(_CONVERGE_DELAY_SECONDS)
     else:
         raise PublicationError(
             f"PR #{pr_number} did not settle at head {candidate_sha} / base "
@@ -1128,11 +1049,11 @@ def _converge_stack(
             error_type="remote_settling_timeout",
         )
     bottom = desired[0]
-    observed = pub.stack_read(number=bottom, repo_root=pub.repo_root)
+    observed = _stack_read(pub, bottom)
     observed_members = list(observed.member_numbers) if observed is not None else None
     if observed is not None and observed_members == desired:
         return  # already converged — no mutation
-    own = pub.stack_read(number=pr_number, repo_root=pub.repo_root)
+    own = _stack_read(pub, pr_number)
     if own is not None:
         raise PublicationError(
             f"PR #{pr_number} already belongs to native stack #{own.number} "
@@ -1149,15 +1070,13 @@ def _converge_stack(
             )
 
         def mutate() -> stacks.StackMutationOutcome:
-            return pub.stack_create(pull_requests=desired, repo_root=pub.repo_root)
+            return pub.context.github.create_stack(tuple(desired))
 
     elif observed_members == desired[:-1]:
         stack_number = observed.number
 
         def mutate() -> stacks.StackMutationOutcome:
-            return pub.stack_append(
-                stack_number=stack_number, pull_requests=[pr_number], repo_root=pub.repo_root
-            )
+            return pub.context.github.append_stack(stack_number, pull_requests=(pr_number,))
 
     else:
         raise PublicationError(
@@ -1169,14 +1088,14 @@ def _converge_stack(
     # about to be issued (an already-converged membership never probes), so the resume and
     # republish routes are covered as well as the fresh one (which also checks early, before
     # any effect).
-    if not pub.stack_probe(pub.repo_root):
+    if not pub.context.github.stack_capability():
         raise _capability_lost()
     for attempt in range(2):
         outcome = mutate()
         if outcome.rate_limited and outcome.retry_after_seconds is not None:
-            pub.sleep(min(outcome.retry_after_seconds, _RETRY_AFTER_CAP_SECONDS))
+            pub.runtime.sleep(min(outcome.retry_after_seconds, _RETRY_AFTER_CAP_SECONDS))
         try:
-            refetched = pub.stack_read(number=bottom, repo_root=pub.repo_root)
+            refetched = _stack_read(pub, bottom)
         except GitHubError as exc:
             raise PublicationError(
                 f"the post-mutation stack refetch failed ({exc}) — the mutation outcome is "
@@ -1188,7 +1107,7 @@ def _converge_stack(
             return  # exact-after → success (regardless of the raw mutation status)
         if refetched_members == observed_members:
             if attempt == 0:
-                pub.sleep(_SETTLE_SECONDS)
+                pub.runtime.sleep(_SETTLE_SECONDS)
                 continue
             raise PublicationError(
                 f"the stack mutation did not take effect after one retry (observed "
@@ -1204,7 +1123,7 @@ def _converge_stack(
 
 
 def _verify_postconditions(
-    pub: _LayerPublication,
+    pub: _Publication,
     ctx: LayerContext,
     pr_number: int,
     candidate_sha: str,
@@ -1214,7 +1133,7 @@ def _verify_postconditions(
     membership. A refetch that raises is ``postcondition_unverified`` (fail closed — the
     operation stays unresolved); a mismatch is the matching drift type."""
     try:
-        head = pub.remote_head(pub.repo_root, ctx.branch)
+        head = _remote_head(pub, ctx.branch)
     except git_mod.GitError as exc:
         raise PublicationError(
             f"could not re-observe branch {ctx.branch!r} after publication ({exc})",
@@ -1227,7 +1146,7 @@ def _verify_postconditions(
             error_type="publication_drift",
         )
     try:
-        facts = pub.pr_facts(number=pr_number, repo_root=pub.repo_root)
+        facts = _pr_facts(pub, pr_number)
     except GitHubError as exc:
         raise PublicationError(
             f"could not re-observe PR #{pr_number} after publication ({exc})",
@@ -1252,7 +1171,7 @@ def _verify_postconditions(
     if desired is None:
         return None
     try:
-        observed = pub.stack_read(number=desired[0], repo_root=pub.repo_root)
+        observed = _stack_read(pub, desired[0])
     except GitHubError as exc:
         raise PublicationError(
             f"could not re-observe the native stack after publication ({exc})",
@@ -1271,7 +1190,7 @@ def _verify_postconditions(
 # ----------------------------------------------------------------- the republish/converge arm
 
 
-def _republish(pub: _LayerPublication, train: DeliveryTrain, index: int) -> _LayerResult:
+def _republish(pub: _Publication, train: DeliveryTrain, index: int) -> PublishResult.Layer:
     """The TOP published layer: verify the remote against the recorded checkpoint (invariant:
     an already-published head that moved out-of-band is ``remote_drift`` — adoption is a later
     node), then either the pure no-op convergence (no journal event) or the full protocol
@@ -1286,7 +1205,7 @@ def _republish(pub: _LayerPublication, train: DeliveryTrain, index: int) -> _Lay
             "broken stored state",
             error_type="publication_drift",
         )
-    observed = pub.remote_head(pub.repo_root, ctx.branch)
+    observed = _remote_head(pub, ctx.branch)
     if observed != checkpoint:
         raise PublicationError(
             f"branch {ctx.branch!r} observed at {observed}, but the published-head checkpoint "
@@ -1294,7 +1213,7 @@ def _republish(pub: _LayerPublication, train: DeliveryTrain, index: int) -> _Lay
             "recovery surface)",
             error_type="remote_drift",
         )
-    candidate = pub.local_head(pub.repo_root, ctx.branch)
+    candidate = _local_head(pub, ctx.branch)
     if candidate is None:
         raise PublicationError(
             f"local branch {ctx.branch!r} does not resolve — nothing to publish",
@@ -1314,17 +1233,17 @@ def _republish(pub: _LayerPublication, train: DeliveryTrain, index: int) -> _Lay
 
 
 def _noop_converged(
-    pub: _LayerPublication,
+    pub: _Publication,
     train: DeliveryTrain,
     ctx: LayerContext,
     index: int,
     pr_number: int,
     checkpoint: str,
-) -> _LayerResult | None:
+) -> PublishResult.Layer | None:
     """The pure no-op convergence check: candidate == published head AND the PR + membership
     already match desired → return the observed facts without any write; ``None`` when
     anything needs converging (the caller falls through to the full protocol)."""
-    facts = pub.pr_facts(number=pr_number, repo_root=pub.repo_root)
+    facts = _pr_facts(pub, pr_number)
     if (
         facts is None
         or facts.state != "OPEN"
@@ -1335,10 +1254,10 @@ def _noop_converged(
     observed_stack: stacks.StackRestFacts | None = None
     if index >= 1:
         desired = [*_prefix_pr_numbers(train, index), pr_number]
-        observed_stack = pub.stack_read(number=desired[0], repo_root=pub.repo_root)
+        observed_stack = _stack_read(pub, desired[0])
         if observed_stack is None or list(observed_stack.member_numbers) != desired:
             return None
-    pr = pub.get_pr(number=pr_number, repo_root=pub.repo_root)
+    pr = pub.context.github.get_pr(pr_number)
     if pr is None:
         return None
     parent_checkpoint = train.layers[index].parent_checkpoint_sha
@@ -1348,7 +1267,7 @@ def _noop_converged(
             "parent checkpoint — broken stored state",
             error_type="publication_drift",
         )
-    return _LayerResult(
+    return PublishResult.Layer(
         pr=pr,
         branch=ctx.branch,
         header_update=PlanHeaderUpdate(fields_updated=(), dry_run=False),
@@ -1370,12 +1289,12 @@ def _noop_converged(
 
 
 def _resume(
-    pub: _LayerPublication,
+    pub: _Publication,
     train: DeliveryTrain,
     index: int,
     record: PreparedRecord,
     objective_id: str,
-) -> _LayerResult:
+) -> PublishResult.Layer:
     """Same-layer resume: re-derive the expected states from the prepared record, observe
     fresh, and converge in place — roll forward from ``after``, retry from an all-``before``
     world with an unchanged candidate, abandon-with-proof + prepare fresh when the candidate
@@ -1392,12 +1311,12 @@ def _resume(
         train, branch=ctx.branch, parent_branch=ctx.parent_branch, index=index, record=record
     )
     before_sha = _payload_branch_sha(record.before)
-    observed = pub.remote_head(pub.repo_root, ctx.branch)
+    observed = _remote_head(pub, ctx.branch)
     if observed == after_sha:
         # Roll forward: the push landed; complete steps 9-12 under the same operation. The
         # recorded `"self"` member resolves through the unique PR discovered/created by head.
         parent_sha = _prepare_parent(pub, ctx)
-        if not pub.is_ancestor(pub.repo_root, parent_sha, after_sha):
+        if pub.context.git.is_ancestor(parent_sha, after_sha) is not True:
             raise PublicationError(
                 f"the pushed candidate {after_sha} no longer contains the parent branch "
                 f"{ctx.parent_branch!r}'s fresh head {parent_sha} — rebase onto "
@@ -1416,12 +1335,12 @@ def _resume(
             expected_pr_number=expected_pr_number,
         )
     if observed == before_sha:
-        _require_all_before(pub, record)
-        local = pub.local_head(pub.repo_root, ctx.branch)
+        _require_all_before(_PublishProofAdapter(pub), record)
+        local = _local_head(pub, ctx.branch)
         if local == after_sha:
             # Unchanged inputs: retry under the same operation from the push step.
             parent_sha = _prepare_parent(pub, ctx)
-            if not pub.is_ancestor(pub.repo_root, parent_sha, after_sha):
+            if pub.context.git.is_ancestor(parent_sha, after_sha) is not True:
                 raise PublicationError(
                     f"the candidate {after_sha} does not contain the parent branch "
                     f"{ctx.parent_branch!r}'s fresh head {parent_sha} — rebase onto "
@@ -1442,12 +1361,12 @@ def _resume(
             )
         # The local candidate moved: abandon with proof (every effect verified at its before
         # state), then prepare FRESH in the same invocation.
-        pub.persistence.append_outcome(
+        pub.context.persistence.append_outcome(
             train.objective_id,
             OutcomeRecord(
                 operation_id=record.operation_id,
                 role=EventRole.ABANDONED,
-                created=pub.now(),
+                created=pub.runtime.now(),
                 observed={
                     "branch": {"ref": ctx.branch, "sha": observed},
                     "pr": dict(_opt_mapping(record.before.get("pr")) or {}),

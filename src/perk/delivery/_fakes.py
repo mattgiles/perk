@@ -365,10 +365,6 @@ class FakeDeliveryGitHub(_FailureMixin, DeliveryGitHub):
         branch_prs: Mapping[str, prs.PullRequest] | None = None,
         stacks: Mapping[int, StackView] | None = None,
         strict_stacks: Mapping[int, stacks.StackRestFacts | None] | None = None,
-        body_updates: Mapping[int, prs.PrBodyUpdate] | None = None,
-        create_stack_results: Mapping[tuple[int, ...], stacks.StackMutationOutcome] | None = None,
-        append_stack_results: Mapping[tuple[int, tuple[int, ...]], stacks.StackMutationOutcome]
-        | None = None,
         active_writers: frozenset[str] = frozenset(),
         errors: Mapping[Call, Exception] | None = None,
     ) -> None:
@@ -381,9 +377,6 @@ class FakeDeliveryGitHub(_FailureMixin, DeliveryGitHub):
         self._branch_prs = dict(branch_prs or {})
         self._stacks = dict(stacks or {})
         self._strict_stacks = dict(strict_stacks or {})
-        self._body_updates = dict(body_updates or {})
-        self._create_stack_results = dict(create_stack_results or {})
-        self._append_stack_results = dict(append_stack_results or {})
         self._active_writers = frozenset(active_writers)
         self.calls: list[Call] = []
 
@@ -456,7 +449,7 @@ class FakeDeliveryGitHub(_FailureMixin, DeliveryGitHub):
         call: Call = ("update_pr_body", number, body)
         self.calls.append(call)
         self._raise_failure(call)
-        return self._body_updates.get(number, prs.PrBodyUpdate(number=number, dry_run=False))
+        return prs.PrBodyUpdate(number=number, dry_run=False)
 
     def update_pr_base(self, number: int, *, base: str) -> None:
         call: Call = ("update_pr_base", number, base)
@@ -477,10 +470,7 @@ class FakeDeliveryGitHub(_FailureMixin, DeliveryGitHub):
         call: Call = ("create_stack", pull_requests)
         self.calls.append(call)
         self._raise_failure(call)
-        result = self._create_stack_results.get(pull_requests)
-        if result is None:
-            raise AssertionError(f"no fake create-stack result configured for {pull_requests!r}")
-        return result
+        raise AssertionError(f"unexpected fake create-stack call for {pull_requests!r}")
 
     def append_stack(
         self, stack_number: int, *, pull_requests: tuple[int, ...]
@@ -488,12 +478,9 @@ class FakeDeliveryGitHub(_FailureMixin, DeliveryGitHub):
         call: Call = ("append_stack", stack_number, pull_requests)
         self.calls.append(call)
         self._raise_failure(call)
-        result = self._append_stack_results.get((stack_number, pull_requests))
-        if result is None:
-            raise AssertionError(
-                f"no fake append-stack result configured for {(stack_number, pull_requests)!r}"
-            )
-        return result
+        raise AssertionError(
+            f"unexpected fake append-stack call for {(stack_number, pull_requests)!r}"
+        )
 
     def pr_stack(self, number: int) -> StackView:
         call: Call = ("pr_stack", number)

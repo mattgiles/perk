@@ -326,7 +326,7 @@ class PrepareResult:
 
 def _normalize_publish_plan_id(plan_id: str) -> str:
     """Normalize the request's optional hash prefix and surrounding whitespace."""
-    return plan_id.strip().lstrip("#").strip()
+    return plan_id.strip().removeprefix("#").strip()
 
 
 @dataclass(frozen=True)
@@ -1319,8 +1319,13 @@ class Delivery:
                 str(exc), error_type="github_error", phase=phase, origin="github"
             ) from exc
         except ObjectiveStoreError as exc:
-            if request.kind != "ready":
-                raise
+            if request.kind == "layer":
+                raise DeliveryError(
+                    str(exc),
+                    error_type="delivery_error",
+                    phase="layer",
+                    origin="delivery",
+                ) from exc
             raise DeliveryError(
                 str(exc), error_type="github_error", phase="ready", origin="github"
             ) from exc
