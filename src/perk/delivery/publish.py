@@ -36,6 +36,7 @@ from perk.delivery.facade import (
     StatusResult,
     SyncRequest,
     SyncResult,
+    _normalize_publish_plan_id,
 )
 from perk.delivery.journal import (
     EventRole,
@@ -226,7 +227,7 @@ class _LayerPublication:
 
     @property
     def plan_id(self) -> str:
-        return self.request.plan_id.removeprefix("#")
+        return _normalize_publish_plan_id(self.request.plan_id)
 
     @property
     def run_id(self) -> str:
@@ -398,7 +399,7 @@ def _dispatch(
     runtime: _PublishRuntime,
 ) -> PublishResult:
     """Dispatch one closed Publish request before touching any authority on dry-run arms."""
-    wanted = request.plan_id.removeprefix("#")
+    wanted = _normalize_publish_plan_id(request.plan_id)
     if request.dry_run:
         if request.kind == "layer":
             return PublishResult(
@@ -497,7 +498,7 @@ def _dispatch(
 
 
 def _ready(context: _PublishContext, request: PublishRequest) -> PublishResult:
-    wanted = request.plan_id.removeprefix("#")
+    wanted = _normalize_publish_plan_id(request.plan_id)
     if request.delivery == "incremental":
         branch = f"plan-{wanted}"
         try:

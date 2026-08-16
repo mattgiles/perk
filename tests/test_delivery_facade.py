@@ -388,7 +388,7 @@ def _delivery(
 
 def test_publish_request_accepts_the_complete_legal_matrix() -> None:
     valid = (
-        PublishRequest(kind="layer", plan_id="#101", dry_run=True),
+        PublishRequest(kind="layer", plan_id=" #101 ", dry_run=True),
         PublishRequest(kind="ready", plan_id="101", dry_run=True),
         PublishRequest(kind="layer", plan_id="101", run_id="01RUN"),
         PublishRequest(kind="layer", plan_id="101", run_id="01RUN", trigger_run_id="01TRIGGER"),
@@ -412,6 +412,8 @@ def test_publish_request_accepts_the_complete_legal_matrix() -> None:
     (
         lambda: PublishRequest(kind=cast("Literal['layer']", "future"), plan_id="101"),
         lambda: PublishRequest(kind="layer", plan_id=" ", dry_run=True),
+        lambda: PublishRequest(kind="layer", plan_id="#", dry_run=True),
+        lambda: PublishRequest(kind="layer", plan_id="10#1", dry_run=True),
         lambda: PublishRequest(kind="layer", plan_id="101"),
         lambda: PublishRequest(kind="layer", plan_id="101", run_id=" "),
         lambda: PublishRequest(kind="layer", plan_id="101", run_id="01RUN", delivery="stacked"),
@@ -477,13 +479,14 @@ def test_publish_result_exact_nested_shapes_are_frozen_and_validated() -> None:
     with pytest.raises(FrozenInstanceError):
         type(result.layer).__setattr__(result.layer, "branch", "changed")
 
-    with pytest.raises(ValueError, match="canonical bare"):
-        PublishResult(
-            kind="ready",
-            plan_id="#101",
-            dry_run=False,
-            ready=PublishResult.Ready(pr=_publish_pr(), was_draft=True),
-        )
+    for invalid_plan_id in ("#101", " 101 ", "10#1"):
+        with pytest.raises(ValueError, match="canonical bare"):
+            PublishResult(
+                kind="ready",
+                plan_id=invalid_plan_id,
+                dry_run=False,
+                ready=PublishResult.Ready(pr=_publish_pr(), was_draft=True),
+            )
     with pytest.raises(ValueError, match="stack facts"):
         PublishResult(
             kind="layer",
@@ -514,7 +517,7 @@ def test_publish_dry_runs_are_exact_and_call_no_authority() -> None:
     github = FakeDeliveryGitHub()
     service = _delivery(persistence, git, github)
 
-    layer = service.publish(PublishRequest(kind="layer", plan_id="#101", dry_run=True))
+    layer = service.publish(PublishRequest(kind="layer", plan_id=" #101 ", dry_run=True))
     ready = service.publish(PublishRequest(kind="ready", plan_id="101", dry_run=True))
 
     assert layer == PublishResult(

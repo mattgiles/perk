@@ -405,9 +405,9 @@ def _compose_pr_body(
     `validate_pr_body` (the create-then-update fix for the latent issue-numbered-footer bug). The
     squash commit message is the OTHER target (plain text), set at land.
 
-    Closing-keyword invariant: the composition is fixed (exactly one `Closes #<plan>` + plan link
-    + optional stacked sections (`_compose_stacked_pr_body`) + embed + footer) and the
-    create-then-update pass **overwrites** any pre-created PR body; the
+    Closing-keyword invariant: this incremental composition is fixed (exactly one
+    `Closes #<plan>` + plan link + embed + footer), while stacked composition is owned by the
+    Publish engine. Both create-then-update passes **overwrite** any pre-created PR body; the
     land-side squash footer is equally fixed — there is no seam for extra closing keywords. A PR
     that must close an additional issue needs a **post-submit** edit on the first turn after
     `/submit` (the door terminates its own turn): read the body via `gh pr view`, insert the

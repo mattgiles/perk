@@ -324,6 +324,11 @@ class PrepareResult:
         raise ValueError("layer_start result requires planning or execution mode")
 
 
+def _normalize_publish_plan_id(plan_id: str) -> str:
+    """Normalize the request's optional hash prefix and surrounding whitespace."""
+    return plan_id.strip().lstrip("#").strip()
+
+
 @dataclass(frozen=True)
 class PublishRequest:
     """Request layer publication or the deliberate draft-to-ready gesture."""
@@ -339,8 +344,9 @@ class PublishRequest:
     def __post_init__(self) -> None:
         if self.kind not in ("layer", "ready"):
             raise ValueError(f"unknown publish kind: {self.kind!r}")
-        if not _nonblank(self.plan_id):
-            raise ValueError("publish plan_id must be nonblank")
+        normalized_plan_id = _normalize_publish_plan_id(self.plan_id)
+        if not normalized_plan_id or "#" in normalized_plan_id:
+            raise ValueError("publish plan_id must be a nonblank issue id")
         if self.dry_run:
             if any(
                 value is not None
@@ -407,7 +413,11 @@ class PublishResult:
     def __post_init__(self) -> None:
         if self.kind not in ("layer", "ready"):
             raise ValueError(f"unknown publish result kind: {self.kind!r}")
-        if not self.plan_id or not self.plan_id.strip() or self.plan_id.startswith("#"):
+        if (
+            self.plan_id != _normalize_publish_plan_id(self.plan_id)
+            or not self.plan_id
+            or "#" in self.plan_id
+        ):
             raise ValueError("publish result plan_id must be a canonical bare id")
         if (self.layer is not None) != (self.kind == "layer") or (
             (self.ready is not None) != (self.kind == "ready")
