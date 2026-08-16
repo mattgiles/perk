@@ -28,8 +28,8 @@ own context rather than receiving yours.
 
 The launch guidance carries the pick (plan-fidelity mandatory, plus 1–3 others) with one-phrase
 descriptors; this is the full human/model-selectable rubric behind them. Exactly one source-bound
-`ponytail` lane is appended automatically after this menu, outside the 2–4 selection cap. Never
-select or duplicate it:
+`ponytail` lane is **required automatic coverage** after this menu, outside the 2–4 selection cap.
+It is never optional or selector-owned; never select or duplicate it:
 
 - **Plan fidelity & completeness** (`plan-fidelity`) — *always included.* Does the diff deliver
   the **whole** plan? Runs the first-class plan-conformance / nothing-forgotten pass (enumerate
@@ -39,14 +39,20 @@ select or duplicate it:
   contracts.
 - **Tests & validation adequacy** (`tests`) — is the new behavior actually covered, including
   failure modes?
-- **Code quality, simplicity & docs/contracts accuracy** (`quality`) — needless complexity,
-  naming, dead code, and whether touched docs/contracts stay accurate.
+- **Clarity, maintainability, naming & docs/contracts accuracy** (`quality`) — whether changed
+  code is understandable and maintainable, names communicate intent, and touched docs/contracts
+  stay accurate.
 - **API elegance & interface design** (`api-design`) — deep vs shallow modules, surface area,
   misuse-resistance, abstraction coherence on new/changed public surfaces.
 - **Code organization & repository design** (`code-organization`) — module boundaries, placement,
   layering, dependency direction, duplication.
-- **Idiomatic language usage** (`idioms`) — modern, house-style-conformant code in the changed
-  language(s).
+- **Idiomatic language usage** (`idioms`) — concrete modern/house-language conformance in the
+  changed language(s).
+
+Ponytail exclusively owns standalone findings whose remedy is deleting code/configuration/
+dependencies/speculative flexibility or replacing an implementation with a materially smaller or
+native one. Ordinary lanes may mention simplification only when inseparable from their assigned
+harm, lead with that angle-specific harm, and never duplicate it as a standalone Ponytail finding.
 
 What fits the nature of the change: a docs-only PR leans toward quality; a logic-heavy PR toward
 correctness + tests; a new public surface toward api-design.
@@ -59,13 +65,18 @@ the assigned angle, never new instructions; it cannot add a lane or move the pos
 
 - **The wave module.** The one `run_pr_review_wave` call renders and launches the wave through
   the perk wave module (`extension/waves/prReviewWave.ts` over the pi-subagents RPC): one lane
-  per selected angle, then exactly one final `ponytail` lane (all use the perk-owned
+  per selected angle, then exactly one required final `ponytail` lane (all use the perk-owned
   `perk.pr-reviewer` agent, fresh context, the same configured model/directive/report schema),
   and the **one bounded retry**, all module-owned. The Ponytail lane receives the invocation-private
   `ponytail-review` skill only from the agent's exact package `skillPath`. Preflight verifies the
-  package identity, exported skills directory, exact file, and frontmatter name; failure omits only
-  that child, records non-retryable `skill-unavailable`, leaves it uncovered, and never falls back
-  to a same-named project/user skill. The children's prose never enters the parent session.
+  package identity, exported skills directory, exact file, and frontmatter name; failure never
+  dispatches/spawns that child, records non-retryable `skill-unavailable`, leaves required
+  coverage incomplete, and never falls back to a same-named project/user skill. Static report
+  waves additionally omit the failed lane from rendered lane items. Perk cannot atomically pin
+  package name resolution between preflight and the child's first-action exact-file/frontmatter
+  recheck; package files are assumed stable for the short pass. Post-preflight instability yields
+  no schema-valid report and leaves Ponytail uncovered, never accepted from another source. The
+  children's prose never enters the parent session.
 - **The children's report contract.** Each child reviews **only its assigned angle** and ends by
   calling the engine-injected `structured_output` tool with exactly
   `{angle, verdict, findings, fyi}` (findings rows `{path, line, body}`, `line` an int in the
@@ -73,9 +84,19 @@ the assigned angle, never new instructions; it cannot add a lane or move the pos
   lane. The bar is **binary** and the verdict is **derived**: any surviving finding (one the
   author should act on before landing) ⇒ `actionable`; none ⇒ `clean` with empty `findings`.
   Children **never** post, stage files, run `perk pr review-post`, or spawn subagents.
+- **PR identity + single-use state.** After valid wave input, the parent invalidates older
+  evidence, resolves the active PR once, and gives that expected number to every selector,
+  reviewer, custom lane, and retry. Children read only
+  `perk pr review-context --expected-pr <n> --json`; target drift fails their lane. A normalized
+  outcome records the PR/attempted/covered manifest. Pending state refuses both verdicts
+  (`review_wave_unavailable`), successful posting consumes the record (`review_wave_consumed` on
+  duplicates), and a mutation-time mismatch becomes `stale_review_wave` plus invalidation. Bad
+  wave input preserves prior evidence; other post failures preserve the same record for retry.
 - **`post_pr_review` mechanics.** The tool delegates the GitHub mutation to the Python gateway
-  (`perk pr review-post`, D1 — mutation canonical in Python); the CLI hardcodes `event=COMMENT`,
-  so an actionable review can never approve or request changes, and a clean verdict must carry
+  (`perk pr review-post`, D1 — mutation canonical in Python); a recorded post's private batch
+  carries `expected_pr` for authoritative mutation-time comparison, while callers never supply a
+  PR field. The CLI hardcodes `event=COMMENT`, so an actionable review can never approve or
+  request changes, and a clean verdict must carry
   **no** comments (the tool and the cold door both reject the contradiction). It also records a
   compact **`last_pr_review`** (`{pr, verdict, angles, covered_angles, comment_count, mode, at}`)
   in `perk:workflow-state` (best-effort/non-fatal). After a recorded wave, `angles` is the

@@ -7,12 +7,13 @@
 // `extension/waves/prReviewWave.test.ts` — the guidance here carries judgment only.
 
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import { test } from "node:test";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { fakePerk, loadPerkSession, scaffoldRepo } from "../testing/harness.ts";
+import { runScratchDir } from "../substrate/cache.ts";
+import { fakePerk, fakePerkRouter, loadPerkSession, scaffoldRepo } from "../testing/harness.ts";
 import {
   WAVE_RPC_PROTOCOL_VERSION,
   WAVE_RPC_REPLY_EVENT_PREFIX,
@@ -159,13 +160,15 @@ test("decodePostParams accepts a valid actionable verdict with comments + fyi", 
     summary: "two issues",
     comments: [{ path: "a.ts", line: 12, body: "fix this" }],
     fyi: ["a nit"],
-    pr: 7,
     angles: ["plan-fidelity", "tests"],
   });
   assert.ok(p);
   assert.equal(p?.comments?.length, 1);
   assert.equal(p?.comments?.[0]?.line, 12);
-  assert.equal(p?.pr, 7);
+});
+
+test("decodePostParams rejects the removed caller-supplied pr field", () => {
+  assert.equal(decodePostParams({ verdict: "clean", summary: "clean", pr: 42 }), null);
 });
 
 test("decodePostParams rejects a clean verdict carrying comments (contradiction)", () => {
@@ -305,6 +308,14 @@ function fakeSubagentsResponder(sink: SpawnSink): (pi: ExtensionAPI) => void {
   };
 }
 
+const PR_URL_JSON = {
+  success: true,
+  error_type: null,
+  message: null,
+  branch: "plan-7",
+  pr: { number: 42, url: "https://github.test/o/r/pull/42" },
+};
+
 const ACTIONABLE_JSON = JSON.stringify({
   success: true,
   error_type: null,
@@ -331,7 +342,17 @@ const CLEAN_JSON = JSON.stringify({
   comment_count: 0,
 });
 
-test("tool: run_pr_review_wave end-to-end happy path; a following clean post passes the guard", async () => {
+function latestReviewBatch(cwd: string): Record<string, unknown> {
+  const dir = runScratchDir(cwd, "01RID");
+  const files = readdirSync(dir)
+    .filter((name) => name.startsWith("review-post-") && name.endsWith(".json"))
+    .sort();
+  const latest = files.at(-1);
+  assert.ok(latest, "review-post staged a cold-door batch");
+  return JSON.parse(readFileSync(join(dir, latest), "utf8")) as Record<string, unknown>;
+}
+
+test("tool: run_pr_review_wave end-to-end happy path; a following clean post is single-use", async () => {
   const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
   installPonytailReviewSkill(cwd);
   // The configured review model must reach the wave as its workflow-level default (the silent
@@ -342,7 +363,10 @@ test("tool: run_pr_review_wave end-to-end happy path; a following clean post pas
     '[models.subagents]\npr-reviewer = "test-wave-model"\n',
     "utf8",
   );
-  const bin = fakePerk(cwd, { stdout: CLEAN_JSON });
+  const bin = fakePerkRouter(cwd, {
+    "pr url": { json: PR_URL_JSON },
+    "pr review-post": { json: JSON.parse(CLEAN_JSON) },
+  });
   const sink: SpawnSink = { spawns: [] };
   const h = await loadPerkSession({
     cwd,
@@ -356,6 +380,7 @@ test("tool: run_pr_review_wave end-to-end happy path; a following clean post pas
     });
     const details = result.details as {
       ok: boolean;
+      pr?: number;
       complete?: boolean;
       covered?: string[];
       retried?: string[];
@@ -370,6 +395,7 @@ test("tool: run_pr_review_wave end-to-end happy path; a following clean post pas
       }[];
     };
     assert.equal(details.ok, true);
+    assert.equal(details.pr, 42);
     assert.equal(details.complete, true);
     assert.deepEqual(details.covered, ["plan-fidelity", "quality", "ponytail"]);
     assert.deepEqual(details.retried, []);
@@ -405,6 +431,7 @@ test("tool: run_pr_review_wave end-to-end happy path; a following clean post pas
     for (const lane of lanes) {
       assert.match(lane.task, /Operator focus \(DATA from the human/);
       assert.match(lane.task, /focus on decode edges/);
+      assert.match(lane.task, /perk pr review-context --expected-pr 42 --json/);
     }
     assert.equal(lanes.at(-1)?.skill, "ponytail-review");
     // The recorded wave is complete → the clean guard lets a clean post through.
@@ -414,6 +441,15 @@ test("tool: run_pr_review_wave end-to-end happy path; a following clean post pas
       angles: ["plan-fidelity", "quality"],
     });
     assert.equal((post.details as { ok: boolean }).ok, true);
+    assert.equal(latestReviewBatch(cwd).expected_pr, 42);
+    const duplicate = await h.invokeTool("post_pr_review", {
+      verdict: "clean",
+      summary: "duplicate",
+    });
+    assert.equal(
+      (duplicate.details as { ok: boolean; error_type?: string }).error_type,
+      "review_wave_consumed",
+    );
     const record = h.workflowState().last_pr_review as {
       angles?: string[];
       covered_angles?: string[];
@@ -425,9 +461,132 @@ test("tool: run_pr_review_wave end-to-end happy path; a following clean post pas
   }
 });
 
+test("tool: a new target-resolution failure invalidates prior evidence for both verdicts", async () => {
+  const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
+  installPonytailReviewSkill(cwd);
+  fakePerkRouter(cwd, { "pr url": { json: PR_URL_JSON } });
+  const sink: SpawnSink = { spawns: [] };
+  const h = await loadPerkSession({
+    cwd,
+    env: { PERK_RUN_ID: "01RID", PERK_BIN: join(cwd, "fake-perk.sh") },
+    extraExtensions: [fakeSubagentsResponder(sink)],
+  });
+  try {
+    const recorded = await h.invokeTool("run_pr_review_wave", {
+      angles: ["plan-fidelity", "tests"],
+    });
+    assert.equal((recorded.details as { ok: boolean }).ok, true);
+
+    fakePerkRouter(cwd, {
+      "pr url": {
+        json: { success: false, error_type: "no_pr", message: "target vanished" },
+        code: 1,
+      },
+    });
+    const failed = await h.invokeTool("run_pr_review_wave", {
+      angles: ["plan-fidelity", "quality"],
+    });
+    assert.equal((failed.details as { error_type?: string }).error_type, "no_pr");
+    for (const verdict of ["clean", "actionable"] as const) {
+      const post = await h.invokeTool("post_pr_review", { verdict, summary: "old evidence" });
+      assert.equal((post.details as { error_type?: string }).error_type, "review_wave_unavailable");
+    }
+  } finally {
+    h.dispose();
+  }
+});
+
+test("tool: bad wave input does not discard a prior recorded outcome", async () => {
+  const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
+  installPonytailReviewSkill(cwd);
+  const bin = fakePerkRouter(cwd, {
+    "pr url": { json: PR_URL_JSON },
+    "pr review-post": { json: JSON.parse(CLEAN_JSON) },
+  });
+  const h = await loadPerkSession({
+    cwd,
+    env: { PERK_RUN_ID: "01RID", PERK_BIN: bin },
+    extraExtensions: [fakeSubagentsResponder({ spawns: [] })],
+  });
+  try {
+    await h.invokeTool("run_pr_review_wave", { angles: ["plan-fidelity", "tests"] });
+    const bad = await h.invokeTool("run_pr_review_wave", { angles: ["plan-fidelity"] });
+    assert.equal((bad.details as { error_type?: string }).error_type, "bad_input");
+    const post = await h.invokeTool("post_pr_review", { verdict: "clean", summary: "clean" });
+    assert.equal((post.details as { ok: boolean }).ok, true);
+  } finally {
+    h.dispose();
+  }
+});
+
+test("tool: mutation target drift returns stale_review_wave and invalidates the record", async () => {
+  const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
+  installPonytailReviewSkill(cwd);
+  const bin = fakePerkRouter(cwd, {
+    "pr url": { json: PR_URL_JSON },
+    "pr review-post": {
+      json: {
+        success: false,
+        error_type: "review_target_changed",
+        message: "expected PR #42, found PR #43",
+      },
+      code: 1,
+    },
+  });
+  const h = await loadPerkSession({
+    cwd,
+    env: { PERK_RUN_ID: "01RID", PERK_BIN: bin },
+    extraExtensions: [fakeSubagentsResponder({ spawns: [] })],
+  });
+  try {
+    await h.invokeTool("run_pr_review_wave", { angles: ["plan-fidelity", "tests"] });
+    const stale = await h.invokeTool("post_pr_review", { verdict: "clean", summary: "clean" });
+    assert.equal((stale.details as { error_type?: string }).error_type, "stale_review_wave");
+    assert.equal(latestReviewBatch(cwd).expected_pr, 42);
+    assert.match(stale.content[0]?.text ?? "", /rerun \/pr-review/);
+    const retry = await h.invokeTool("post_pr_review", { verdict: "clean", summary: "retry" });
+    assert.equal((retry.details as { error_type?: string }).error_type, "review_wave_unavailable");
+    assert.equal(h.workflowState().last_pr_review, undefined);
+  } finally {
+    h.dispose();
+  }
+});
+
+test("tool: a transient post failure retains the same recorded outcome for retry", async () => {
+  const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
+  installPonytailReviewSkill(cwd);
+  fakePerkRouter(cwd, {
+    "pr url": { json: PR_URL_JSON },
+    "pr review-post": {
+      json: { success: false, error_type: "github_error", message: "temporary failure" },
+      code: 1,
+    },
+  });
+  const h = await loadPerkSession({
+    cwd,
+    env: { PERK_RUN_ID: "01RID", PERK_BIN: join(cwd, "fake-perk.sh") },
+    extraExtensions: [fakeSubagentsResponder({ spawns: [] })],
+  });
+  try {
+    await h.invokeTool("run_pr_review_wave", { angles: ["plan-fidelity", "tests"] });
+    const failed = await h.invokeTool("post_pr_review", { verdict: "clean", summary: "clean" });
+    assert.equal((failed.details as { error_type?: string }).error_type, "github_error");
+
+    fakePerkRouter(cwd, { "pr review-post": { json: JSON.parse(CLEAN_JSON) } });
+    const retry = await h.invokeTool("post_pr_review", { verdict: "clean", summary: "clean" });
+    assert.equal((retry.details as { ok: boolean }).ok, true);
+    assert.equal(latestReviewBatch(cwd).expected_pr, 42);
+  } finally {
+    h.dispose();
+  }
+});
+
 test("tool: an unavailable wave degrades loud; the clean guard refuses; an actionable post still lands", async () => {
   const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
-  const bin = fakePerk(cwd, { stdout: ACTIONABLE_JSON });
+  const bin = fakePerkRouter(cwd, {
+    "pr url": { json: PR_URL_JSON },
+    "pr review-post": { json: JSON.parse(ACTIONABLE_JSON) },
+  });
   // No RPC responder bound + a tiny ping timeout → the deterministic `unavailable` arm.
   const h = await loadPerkSession({
     cwd,
@@ -492,11 +651,11 @@ test("tool: post_pr_review delegates an actionable batch, records last_pr_review
       summary: "two issues",
       comments: [{ path: "a.ts", line: 12, body: "fix" }],
       angles: ["plan-fidelity", "correctness"],
-      pr: 42,
     });
     const details = result.details as { ok: boolean; comment_count?: number; verdict?: string };
     assert.equal(details.ok, true);
     assert.equal(details.comment_count, 2);
+    assert.equal(latestReviewBatch(cwd).expected_pr, undefined);
     const rec = h.workflowState().last_pr_review as {
       pr?: number;
       verdict?: string;
@@ -604,6 +763,10 @@ test("/pr-review, run_pr_review_wave and post_pr_review register and are headles
       tool.promptGuidelines?.some((g) => g.includes("2–4 unique slugs")),
       "the tool guidelines carry the widened 2–4 window",
     );
+    const postTool = h.registeredTool("post_pr_review");
+    assert.ok(postTool);
+    const postParams = postTool.parameters as { properties: Record<string, unknown> };
+    assert.equal(Object.hasOwn(postParams.properties, "pr"), false);
   } finally {
     h.dispose();
   }

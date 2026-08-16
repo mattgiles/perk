@@ -33,9 +33,10 @@ workflow — never model-authored. **The normalization guarantees** (code, not c
   dropped, duplicates deduped in report order;
 - **plan-fidelity always runs**, always first, never displaced by selection, force, or fallback
   (its lane starts immediately, concurrent with the selector lane);
-- exactly one source-bound **`ponytail` lane runs independently** of selector output, starts
-  alongside plan-fidelity + selector, and is appended last to `selection.effective`; it is
-  reserved and cannot be selected, forced, proposed, or displaced;
+- exactly one source-bound **`ponytail` lane is required automatic coverage**, runs independently
+  of selector output, starts alongside plan-fidelity + selector, and is appended last to
+  `selection.effective`; it is reserved and cannot be omitted, selected, forced, proposed,
+  duplicated, or displaced;
 - **2–4 selectable lanes total**: at most 3 additional angles, merged forced → selector picks →
   the custom angle (which survives only if it fits under the cap); Ponytail is outside that cap;
 - **operator-forced angles are authoritative** — `force_angles` (1–3 slugs) is enforced in code,
@@ -50,14 +51,20 @@ workflow — never model-authored. **The normalization guarantees** (code, not c
 The one bounded retry is `/pr-review`'s: failed reviewer lanes retry statically over the
 already-normalized selection — the selector is never re-run. Ponytail receives the same
 `pr-reviewer` model/directive/report family via invocation-private `ponytail-review`, source-bound
-to the exact installed package skill file. Failed package/file/frontmatter preflight omits only that
-child, carries non-retryable `skill-unavailable`, and marks coverage incomplete without same-name
-fallback; ordinary failed reviewer lanes remain retryable.
+to the exact installed package skill file. Failed package/file/frontmatter preflight never
+dispatches/spawns that child, carries non-retryable `skill-unavailable`, and leaves required
+coverage incomplete without same-name fallback; ordinary failed reviewer lanes remain retryable.
+Perk cannot atomically pin package resolution between preflight and the child's first-action
+exact-file/frontmatter recheck; package files are assumed stable for the short pass. Instability
+produces no schema-valid Ponytail report and remains incomplete, never accepted from another
+source. Static retry waves additionally omit the failed lane from rendered lane items.
 
 ## Custom angles
 
 The selector may propose **at most ONE change-specific custom angle** (`custom_angle_slug` +
-`custom_angle_scope`) when the change's dominant risk is not covered by the fixed menu. This is
+`custom_angle_scope`) when the change's dominant risk is not covered by the fixed menu or the
+already-present required Ponytail lane. It never selects `quality` or proposes a custom angle
+solely for simplification/YAGNI. This is
 the one **sanctioned, structurally-constrained exception** to the
 reviewers-never-see-selector-output invariant:
 
@@ -80,7 +87,11 @@ The launch guidance carries it — translate the operator note, run the one wave
 the coverage rule, the clean/actionable line (enforced by the shared clean guard —
 `post_pr_review` refuses a clean verdict on a recorded incomplete wave with
 `incomplete_coverage`), authoritative attempted (`selection.effective`, including Ponytail) versus
-schema-valid `covered_angles` bookkeeping, and the one-post discipline are exactly `/pr-review`'s.
+schema-valid `covered_angles` bookkeeping, PR-bound children, and the one-post discipline are
+exactly `/pr-review`'s. A valid new call immediately invalidates prior evidence before target
+resolution; the normalized outcome is single-use and mutation-bound. Pending, consumed, and
+mutation-drift failures surface as `review_wave_unavailable`, `review_wave_consumed`, and
+`stale_review_wave` respectively.
 
 ## Configuring the models
 

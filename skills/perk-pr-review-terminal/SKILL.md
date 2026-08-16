@@ -56,11 +56,19 @@ lands before (or without) the comments it summarizes.
 - **The angle rubric.** `claimed-intent` is the foreign twin of plan-fidelity: PR-text claims
   checked against the diff, plus the hunt for undisclosed scope. `correctness` carries the
   foreign-code supply-chain axes (CI/workflow edits, dependency pins, install/build scripts,
-  secrets). The 2–3 angle input is followed by exactly one automatic final `ponytail` lane,
-  outside the selection cap. It uses the same model/directive/report family and invocation-private
-  exact-package `ponytail-review` skill; never select or duplicate it. Failed exact-source
-  preflight omits only that child, reports non-retryable `skill-unavailable`, leaves it uncovered,
-  and never falls back to a same-named skill.
+  secrets). The 2–3 angle input is followed by exactly one **required automatic** final
+  `ponytail` lane, outside the selection cap. It uses the same model/directive/report family and
+  invocation-private exact-package `ponytail-review` skill; never select or duplicate it.
+  Ponytail exclusively owns standalone deletion/YAGNI/materially-smaller-or-native findings;
+  ordinary lanes mention simplification only when inseparable from their assigned harm and never
+  duplicate a standalone Ponytail finding. Failed exact-source preflight never dispatches/spawns
+  that child, reports non-retryable `skill-unavailable`, and leaves required coverage incomplete
+  without falling back to a same-named skill. The child's first-action exact-source recheck closes
+  the post-preflight side honestly: package instability yields no schema-valid report and remains
+  incomplete; package files are assumed stable for the short pass.
+- **Launch truthfulness.** `start_review_wave` returns nested
+  `launch: {requested, runnable, preflightFailures}`; only `runnable` lanes were accepted for
+  spawning, while collection keeps `requested` as the coverage denominator.
 - **The reviewer model.** The configured `[models.subagents] adversarial-reviewer` model is
   resolved by `start_review_wave` at execute time — the door reads no config and the guidance
   carries no model plumbing.

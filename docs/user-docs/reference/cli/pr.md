@@ -131,17 +131,22 @@ this command directly.
 
 ### `perk pr review-context`
 
-Fetch the active plan's PR review context (read-only; each angle-specialized pr-reviewer child runs
-this). `--pr <n>` resolves an arbitrary PR by number instead, plan-ref-free (`plan_body` is null;
-a nonexistent PR is a clean `pr_not_found` error).
+Fetch PR review context (read-only). Automated active-plan selector/reviewer tasks use
+`--expected-pr <n>`: it preserves the active plan snapshot/body, resolves the plan branch's PR,
+and compares that number before fetching context. Drift fails `review_target_changed`.
+`--pr <n>` instead resolves an arbitrary PR plan-ref-free (`plan_body` is null; a nonexistent PR
+is `pr_not_found`). The two flags are mutually exclusive; values must be positive integers.
 
 ### `perk pr review-post`
 
 Submit a `/pr-review` verdict to the active plan's PR. Reads the review from the required
-`--batch` JSON file (`{verdict, summary, comments?}`); an `actionable` verdict posts an advisory
-COMMENT review, a `clean` verdict posts a single thumbs-up reaction. `--dry-run` validates without
-touching GitHub. Invoked by the warm **`post_pr_review`** tool (the parent reconciles the reviewers'
-findings and posts once) — the reviewer children no longer call it directly.
+`--batch` JSON file (`{verdict, summary, comments?, fyi?, expected_pr?}`); an `actionable` verdict
+posts an advisory COMMENT review, while a `clean` verdict posts one thumbs-up reaction. Optional
+`expected_pr` is a strict positive integer used by recorded automated waves: on a real post it is
+compared with the freshly resolved active PR before any GitHub mutation, with drift failing
+`review_target_changed`. `--dry-run` validates the full batch including that field but stays
+offline. Invoked by the warm **`post_pr_review`** tool (the parent reconciles the reviewers and
+posts once); reviewer children never call it directly.
 
 ### `perk pr review-submit`
 

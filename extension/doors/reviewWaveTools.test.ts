@@ -206,11 +206,15 @@ test("executeStartReviewWave: happy path stores the pending wave and returns the
   const details = result.details as {
     asyncId?: string;
     asyncDir?: string;
-    angles?: string[];
+    launch?: { requested: string[]; runnable: string[]; preflightFailures: unknown[] };
   };
   assert.equal(details.asyncId, "wave-async-1");
   assert.equal(details.asyncDir, "/memory/wave-async-1");
-  assert.deepEqual(details.angles, ["claimed-intent", "correctness", "ponytail"]);
+  assert.deepEqual(details.launch, {
+    requested: ["claimed-intent", "correctness", "ponytail"],
+    runnable: ["claimed-intent", "correctness", "ponytail"],
+    preflightFailures: [],
+  });
   const text = result.content[0]?.text ?? "";
   assert.match(text, /claimed-intent, correctness/);
   assert.match(text, /subagent_wait/);
@@ -586,10 +590,18 @@ test("tools: start_review_wave threads the configured model + directive; collect
       worktree: "/abs/wt",
       directive: "focus on the workflow edits",
     });
-    const startDetails = started.details as { ok: boolean; asyncId?: string; angles?: string[] };
+    const startDetails = started.details as {
+      ok: boolean;
+      asyncId?: string;
+      launch?: { requested: string[]; runnable: string[]; preflightFailures: unknown[] };
+    };
     assert.equal(startDetails.ok, true);
     assert.ok(startDetails.asyncId);
-    assert.deepEqual(startDetails.angles, ["claimed-intent", "quality", "ponytail"]);
+    assert.deepEqual(startDetails.launch, {
+      requested: ["claimed-intent", "quality", "ponytail"],
+      runnable: ["claimed-intent", "quality", "ponytail"],
+      preflightFailures: [],
+    });
     // The tool-boundary threading pins: the configured model and the directive both reached the
     // actual spawn (config → execute → startAdversarialReviewWave → adapter).
     assert.equal(sink.spawns.length, 1);
@@ -641,9 +653,25 @@ test("tools: missing exact Ponytail skill omits only that child and collects exp
       pr: 42,
       worktree: "/abs/wt",
     });
-    const startDetails = started.details as { ok: boolean; angles?: string[] };
+    const startDetails = started.details as {
+      ok: boolean;
+      launch?: {
+        requested: string[];
+        runnable: string[];
+        preflightFailures: { key: string | null; reason: string }[];
+      };
+    };
     assert.equal(startDetails.ok, true, "ordinary reviewers still launch");
-    assert.deepEqual(startDetails.angles, ["claimed-intent", "correctness", "ponytail"]);
+    assert.deepEqual(startDetails.launch?.requested, ["claimed-intent", "correctness", "ponytail"]);
+    assert.deepEqual(startDetails.launch?.runnable, ["claimed-intent", "correctness"]);
+    assert.deepEqual(
+      startDetails.launch?.preflightFailures.map((failure) => [failure.key, failure.reason]),
+      [["ponytail", "skill-unavailable"]],
+    );
+    const startText = started.content[0]?.text ?? "";
+    assert.match(startText, /workflow accepted with 2\/3 post-preflight runnable lane/);
+    assert.match(startText, /Preflight skipped: ponytail: skill-unavailable/);
+    assert.doesNotMatch(startText, /ponytail.*launched/i);
     assert.equal(sink.spawns.length, 1);
     const script = sink.spawns[0]?.workflowScript ?? "";
     assert.doesNotMatch(script, /"key":\s*"ponytail"/, "Ponytail never reaches runs.all");

@@ -123,3 +123,30 @@ def test_perk_address_sole_carried_detail():
     # The untrusted-review fence + the hand-off.
     assert "<untrusted_review>" in norm
     assert "go to `/land`" in norm
+
+
+def test_review_skills_require_and_do_not_duplicate_ponytail_coverage():
+    automated = _norm("perk-pr-review")
+    assert "`ponytail` lane is **required automatic coverage**" in automated
+    assert "Ponytail exclusively owns standalone findings" in automated
+    assert "Ordinary lanes may mention simplification only when inseparable" in automated
+
+    dynamic = _norm("perk-pr-review-dynamic")
+    assert "`ponytail` lane is required automatic coverage" in dynamic
+    assert "cannot be omitted, selected, forced, proposed, duplicated, or displaced" in dynamic
+    assert (
+        "never selects `quality` or proposes a custom angle solely for simplification/YAGNI"
+        in dynamic
+    )
+
+    for skill in ("perk-pr-review-terminal", "perk-pr-review-browser"):
+        norm = _norm(skill)
+        assert "**required automatic** final `ponytail` lane" in norm
+        assert "Ponytail exclusively owns standalone deletion/YAGNI" in norm
+        assert "ordinary lanes mention simplification only when inseparable" in norm
+
+    for skill in ("perk-plan-review-browser", "perk-objective-review-browser"):
+        norm = _norm(skill)
+        assert "**required automatic** final `ponytail` lane" in norm
+        assert "Scope owns goal boundaries plus missing/extraneous deliverables" in norm
+        assert "Ponytail exclusively owns standalone deletion/YAGNI" in norm

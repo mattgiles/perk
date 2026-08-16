@@ -53,6 +53,7 @@ import {
   PR_REVIEW_ANGLES,
   PR_REVIEW_REPORT_SCHEMA,
   type PrReviewAngle,
+  reviewTargetSuffix,
 } from "./prReviewWave.ts";
 import {
   normalizeLanes,
@@ -197,6 +198,8 @@ function isValidCustomSlug(slug: string): boolean {
 }
 
 export interface DynamicReviewScriptOptions {
+  /** The resolved active-plan PR number shared by the selector and every reviewer. */
+  pr: number;
   /** The operator's free-form focus, threaded as DATA to the selector AND every reviewer lane. */
   directive?: string;
   /** Operator-forced additional angles (embedded as a JSON constant; enforced in normalization). */
@@ -214,7 +217,11 @@ export interface DynamicReviewScriptOptions {
  * rubric), plus — as DATA — the forced angles when present and the same uniform operator-focus
  * suffix `buildPrReviewLanes` appends to reviewer lanes.
  */
-function buildSelectorTask(forceAngles: AdditionalPrReviewAngle[], suffix: string): string {
+function buildSelectorTask(
+  pr: number,
+  forceAngles: AdditionalPrReviewAngle[],
+  suffix: string,
+): string {
   const forcedNote =
     forceAngles.length === 0
       ? ""
@@ -222,9 +229,10 @@ function buildSelectorTask(forceAngles: AdditionalPrReviewAngle[], suffix: strin
           ", ",
         )} — they will run regardless of your selection; recommend complementary coverage.`;
   return (
-    "Classify the active plan's PR for dynamic review-angle coverage: fetch the review context " +
-    "yourself (`perk pr review-context --json`), classify the change profile, and select the " +
-    "review angles per your agent instructions (they own the rubric). Your final action is ONE " +
+    `Classify active-plan PR #${pr} for dynamic review-angle coverage: fetch the review context ` +
+    `yourself only with \`perk pr review-context --expected-pr ${pr} --json\`, classify the ` +
+    "change profile, and select the review angles per your agent instructions (they own the " +
+    "rubric). Your final action is ONE " +
     "structured_output call." +
     forcedNote +
     suffix
@@ -245,8 +253,8 @@ function buildSelectorTask(forceAngles: AdditionalPrReviewAngle[], suffix: strin
 export function renderDynamicReviewScript(opts: DynamicReviewScriptOptions): string {
   // Byte-identical reviewer tasks to the static flow: the map is built by the SAME lane builder
   // (vocabulary + the uniform directive suffix) over all seven angles.
-  const lanes = buildPrReviewLanes([...ALL_ANGLES], opts.directive);
-  const ponytailLane = buildPonytailReviewLane(opts.directive);
+  const lanes = buildPrReviewLanes([...ALL_ANGLES], opts.pr, opts.directive);
+  const ponytailLane = buildPonytailReviewLane(opts.pr, opts.directive);
   const tasks = Object.fromEntries([
     ...lanes.map((lane) => [lane.key, lane.task]),
     [ponytailLane.key, ponytailLane.task],
@@ -254,7 +262,7 @@ export function renderDynamicReviewScript(opts: DynamicReviewScriptOptions): str
   const suffix = directiveSuffix(opts.directive);
   const selectorItem = {
     agent: "perk.review-angle-selector",
-    task: buildSelectorTask(opts.forceAngles, suffix),
+    task: buildSelectorTask(opts.pr, opts.forceAngles, suffix),
     outputSchema: REVIEW_ANGLE_SELECTOR_SCHEMA,
     ...(opts.selectorModel !== undefined ? { model: opts.selectorModel } : {}),
     label: "angle-selector",
@@ -270,6 +278,7 @@ export function renderDynamicReviewScript(opts: DynamicReviewScriptOptions): str
     `const RESERVED = ${JSON.stringify(RESERVED_LANE_KEYS)};`,
     `const REPORT_SCHEMA = ${JSON.stringify(PR_REVIEW_REPORT_SCHEMA)};`,
     `const CUSTOM_TASK_PARTS = ${JSON.stringify([CUSTOM_TASK_PREFIX, CUSTOM_TASK_MID])};`,
+    `const TARGET_SUFFIX = ${JSON.stringify(reviewTargetSuffix(opts.pr))};`,
     `const DIRECTIVE_SUFFIX = ${JSON.stringify(suffix)};`,
     `const CUSTOM_SLUG_RE = new RegExp(${JSON.stringify(CUSTOM_SLUG_PATTERN.source)});`,
     "const reviewerParams = (angle) => ({",
@@ -284,7 +293,7 @@ export function renderDynamicReviewScript(opts: DynamicReviewScriptOptions): str
     "// (scope-definition-only framing); the per-item schema locks the report's angle echo.",
     "const customParams = (slug, scope) => ({",
     '  agent: "perk.pr-reviewer",',
-    "  task: CUSTOM_TASK_PARTS[0] + slug + CUSTOM_TASK_PARTS[1] + scope + DIRECTIVE_SUFFIX,",
+    "  task: CUSTOM_TASK_PARTS[0] + slug + CUSTOM_TASK_PARTS[1] + scope + TARGET_SUFFIX + DIRECTIVE_SUFFIX,",
     "  label: slug,",
     '  phase: "review",',
     "  outputSchema: {",
@@ -398,6 +407,8 @@ export interface DynamicSelection {
 }
 
 export interface PrReviewDynamicOptions {
+  /** The resolved active-plan PR number shared by the selector and every reviewer. */
+  pr: number;
   /** The operator's free-form focus, threaded as DATA to the selector and every reviewer lane. */
   directive?: string;
   /** Operator-forced additional angles (≤3; plan-fidelity is structural, never forced). */
@@ -572,6 +583,7 @@ async function runDynamicOnce(
   ponytailCheck: PonytailPreflight,
 ): Promise<DynamicRun> {
   const workflowScript = renderDynamicReviewScript({
+    pr: opts.pr,
     forceAngles: opts.forceAngles ?? [],
     ...(opts.directive !== undefined ? { directive: opts.directive } : {}),
     ...(opts.reviewerModel !== undefined ? { reviewerModel: opts.reviewerModel } : {}),
@@ -649,7 +661,7 @@ function outcomeOf(
  */
 export async function runPrReviewDynamicWave(
   adapter: WaveAdapter,
-  opts: PrReviewDynamicOptions = {},
+  opts: PrReviewDynamicOptions,
 ): Promise<PrReviewDynamicOutcome> {
   const preflight = opts.requiredSkillPreflight ?? preflightPonytailSkill;
   const ponytailCheck = await preflight(PONYTAIL_REVIEW_SKILL);
@@ -713,7 +725,7 @@ export async function runPrReviewDynamicWave(
   if (retryKeys.length === 0) return firstOutcome;
 
   const retryLanes: WaveLane[] = [
-    ...buildPrReviewLanes(retryAngles, opts.directive),
+    ...buildPrReviewLanes(retryAngles, opts.pr, opts.directive),
     ...(customRetry !== null
       ? [
           {
@@ -723,12 +735,13 @@ export async function runPrReviewDynamicWave(
             phase: "review",
             task:
               buildCustomLaneTask(customRetry.slug, customRetry.scope) +
+              reviewTargetSuffix(opts.pr) +
               directiveSuffix(opts.directive),
             outputSchema: customReportSchema(customRetry.slug),
           },
         ]
       : []),
-    ...(ponytailRetry ? [buildPonytailReviewLane(opts.directive)] : []),
+    ...(ponytailRetry ? [buildPonytailReviewLane(opts.pr, opts.directive)] : []),
   ];
   const staticRetry = await runReportWave(
     adapter,

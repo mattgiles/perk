@@ -25,11 +25,20 @@ end your turn; this skill is the judgment and detail layer behind it.
   true? **scope** — right-sized: neither bloated nor missing the ask? **decision-completeness** —
   are the decisions a planner needs actually settled? **risk** — what could go wrong: sequencing,
   dependencies, irreversibility? Pick what fits *this* draft; skip lenses that would produce
-  noise. The selected 2–3 lanes and optional human custom lane are followed by exactly one
-  automatic final `ponytail` lane, outside both menus/caps. It uses the same model and report family
-  plus the invocation-private exact-package core `ponytail` skill; never select or duplicate it.
-  Failed exact-source preflight omits only that child, reports non-retryable `skill-unavailable`,
-  leaves it uncovered, and never falls back to a same-named skill.
+  noise. Scope owns goal boundaries plus missing/extraneous deliverables, not standalone
+  simplification. The selected 2–3 lanes and optional human custom lane are followed by exactly
+  one **required automatic** final `ponytail` lane, outside both menus/caps. It uses the same
+  model and report family plus the invocation-private exact-package core `ponytail` skill; never
+  select or duplicate it. Ponytail exclusively owns standalone deletion/YAGNI/materially-smaller-
+  or-native findings; ordinary lanes mention simplification only when inseparable from their
+  assigned harm and never duplicate a standalone Ponytail finding. Failed exact-source preflight
+  never dispatches/spawns that child, reports non-retryable `skill-unavailable`, and leaves
+  required coverage incomplete without falling back to a same-named skill. The child's
+  first-action exact-source recheck makes post-preflight package instability produce no
+  schema-valid report; package files are assumed stable for the short pass.
+- **Launch truthfulness.** `start_draft_review_wave` returns nested
+  `launch: {requested, runnable, preflightFailures}`; only `runnable` lanes were accepted for
+  spawning, while collection keeps `requested` as the coverage denominator.
 - **The reviewer model.** The configured `[models.subagents] draft-reviewer` model is resolved
   by `start_draft_review_wave` at execute time — the door reads no config and the guidance
   carries no model plumbing.

@@ -57,8 +57,23 @@ def test_reviewer_defs_source_bind_only_the_exact_ponytail_skill_paths():
         assert runtime_path in text
         assert f"frontmatter name is `{skill_name}`" in text
         compact = " ".join(text.split())
+        assert "checking the exact package file is your **first action**" in compact
         assert "terminate without calling `structured_output`" in compact
         assert "never resolve a same-named project/user skill" in compact
+        assert "Package files are assumed stable only for the short review pass" in compact
+        assert "this recheck leaves Ponytail uncovered" in compact
+        assert "exclusive owner of standalone findings" in compact
+        assert "Ordinary lanes may mention simplification only when it is inseparable" in compact
+        assert "must lead with that angle-specific harm" in compact
+        assert "must not emit a second, standalone Ponytail finding" in compact
+
+
+def test_review_angle_selector_treats_required_ponytail_as_already_present():
+    compact = " ".join(_source_bytes("review-angle-selector").decode().split())
+    assert "exactly one required automatic Ponytail lane regardless of your selection" in compact
+    assert "Never select or duplicate Ponytail" in compact
+    assert "never solely for simplification/YAGNI" in compact
+    assert "Never propose a custom angle solely for simplification, YAGNI" in compact
 
 
 def test_committed_reviewer_mirrors_are_byte_identical():

@@ -289,23 +289,37 @@ test("runReportWave: a failed lane is incomplete under strict, complete under be
   ]);
 });
 
-test("runReportWave: an ok lane with a null report is lane-failed (no schema-valid report)", async () => {
+test("runReportWave: Ponytail preflight success without a report stays uncovered", async () => {
+  const ponytail: WaveLane = {
+    key: "ponytail",
+    agent: "perk.pr-reviewer",
+    task: "review minimally",
+    skill: "ponytail-review",
+    requiredSkill: PONYTAIL_CORE_SKILL,
+  };
   const adapter = createMemoryWaveAdapter({
     aggregate: {
       state: "complete",
       value: [
         okEntry("plan-fidelity", { verdict: "clean" }),
-        { key: "correctness", ok: true, error: null, report: null },
+        { key: "ponytail", ok: true, error: null, report: null },
       ],
     },
   });
-  const result = await runReportWave(adapter, makeSpec());
+  const result = await runReportWave(
+    adapter,
+    makeSpec({
+      lanes: [LANES[0] as WaveLane, ponytail],
+      requiredSkillPreflight: async () => ({ ok: true }),
+    }),
+  );
   assert.equal(result.complete, false);
+  assert.deepEqual(result.reports, [{ key: "plan-fidelity", report: { verdict: "clean" } }]);
   assert.deepEqual(result.failures, [
     {
-      key: "correctness",
+      key: "ponytail",
       reason: "lane-failed",
-      detail: "lane 'correctness' resolved without a schema-valid report",
+      detail: "lane 'ponytail' resolved without a schema-valid report",
     },
   ]);
 });
@@ -882,6 +896,11 @@ test("startReportWave: the ok arm settles into normalization + strict completene
   const start = await startReportWave(adapter, makeSpec());
   assert.equal(start.ok, true);
   if (!start.ok) return;
+  assert.deepEqual(start.launch, {
+    requested: ["plan-fidelity", "correctness"],
+    runnable: ["plan-fidelity", "correctness"],
+    preflightFailures: [],
+  });
   assert.equal(await settlesWithin(start.result, 30), false);
   adapter.emitCompletion({
     asyncId: start.handle.asyncId,
@@ -904,6 +923,11 @@ test("startReportWave: the launch-failure arm returns an already-settled normali
   const start = await startReportWave(createMemoryWaveAdapter({ ping: null }), makeSpec());
   assert.equal(start.ok, false);
   if (start.ok) return;
+  assert.deepEqual(start.launch, {
+    requested: ["plan-fidelity", "correctness"],
+    runnable: ["plan-fidelity", "correctness"],
+    preflightFailures: [],
+  });
   assert.deepEqual(start.result, {
     complete: false,
     reports: [],
@@ -917,6 +941,103 @@ test("startReportWave: the launch-failure arm returns an already-settled normali
     ],
     receipt: { state: "unavailable", children: [] },
   });
+});
+
+test("startReportWave: launch reports ordered partial preflight omissions truthfully", async () => {
+  const lanes: WaveLane[] = [
+    LANES[0] as WaveLane,
+    {
+      key: "ponytail",
+      agent: "perk.pr-reviewer",
+      task: "review minimally",
+      skill: "ponytail",
+      requiredSkill: PONYTAIL_CORE_SKILL,
+    },
+  ];
+  const start = await startReportWave(
+    createMemoryWaveAdapter({
+      aggregate: {
+        state: "complete",
+        value: [okEntry("plan-fidelity", { verdict: "clean" })],
+      },
+    }),
+    makeSpec({
+      lanes,
+      requiredSkillPreflight: async () => ({
+        ok: false,
+        detail: "exact Ponytail source missing",
+      }),
+    }),
+  );
+  assert.equal(start.ok, true);
+  if (!start.ok) return;
+  const failure = {
+    key: "ponytail",
+    reason: "skill-unavailable",
+    detail: "exact Ponytail source missing",
+  } as const;
+  assert.deepEqual(start.launch, {
+    requested: ["plan-fidelity", "ponytail"],
+    runnable: ["plan-fidelity"],
+    preflightFailures: [failure],
+  });
+  const result = await start.result;
+  assert.deepEqual(result.failures, [failure]);
+});
+
+test("startReportWave: all preflight-skipped returns unavailable without a synthetic wave failure", async () => {
+  const lanes: WaveLane[] = ["ponytail-first", "ponytail-second"].map((key) => ({
+    key,
+    agent: "perk.pr-reviewer",
+    task: "review minimally",
+    skill: "ponytail",
+    requiredSkill: PONYTAIL_CORE_SKILL,
+  }));
+  const adapter = createMemoryWaveAdapter({});
+  const start = await startReportWave(
+    adapter,
+    makeSpec({
+      lanes,
+      requiredSkillPreflight: async () => ({
+        ok: false,
+        detail: "exact Ponytail source missing",
+      }),
+    }),
+  );
+  assert.equal(start.ok, false);
+  if (start.ok) return;
+  const failures = lanes.map((lane) => ({
+    key: lane.key,
+    reason: "skill-unavailable" as const,
+    detail: "exact Ponytail source missing",
+  }));
+  assert.deepEqual(start.launch, {
+    requested: ["ponytail-first", "ponytail-second"],
+    runnable: [],
+    preflightFailures: failures,
+  });
+  assert.deepEqual(start.result, {
+    complete: false,
+    reports: [],
+    failures,
+    receipt: { state: "unavailable", children: [] },
+  });
+  assert.equal(adapter.calls.spawn.length, 0);
+});
+
+test("startReportWave: spawn failure retains the full runnable launch manifest", async () => {
+  const start = await startReportWave(
+    createMemoryWaveAdapter({ spawnError: "no session" }),
+    makeSpec(),
+  );
+  assert.equal(start.ok, false);
+  if (start.ok) return;
+  assert.deepEqual(start.launch, {
+    requested: ["plan-fidelity", "correctness"],
+    runnable: ["plan-fidelity", "correctness"],
+    preflightFailures: [],
+  });
+  assert.equal(start.result.failures[0]?.reason, "spawn-failed");
 });
 
 test("startReportWave: duplicate lane keys throw (programmer error preserved)", async () => {
