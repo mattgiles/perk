@@ -1,38 +1,38 @@
-"""The delivery **sync** operation — published-suffix synchronization (contracts.md §8.49).
+"""Private published-suffix synchronization engine (contracts.md §8.49).
 
-The transactional cascade `perk objective stack sync` routes through: change a published
-stacked layer (or re-anchor the whole train onto an advanced objective base) and move every
-published successor with it — candidates computed by rebase in an isolated worktree, approved
-as one rendered cascade, journaled first, then pushed as ONE atomic multi-ref operation under
-exact leases, verified, and checkpointed bottom→top. Every effectful callable is
-keyword-injectable with production defaults (the ``publish.py`` pattern; tests pass fakes).
-
-The concurrency contract mirrors publish's: mutations are strictly serialized in-process; the
-cross-machine serialization is the one-unresolved-operation journal gate plus the exact push
-leases — the remote itself arbitrates competing writers. Failures after the prepared record
-leave the operation **unresolved** (recoverable) — with one proven exception: a rejected push
-whose refetch confirms EVERY ref still at its before state is abandoned-with-proof (a
-terminal outcome; the remedy is a rerun). Refusals before the record write nothing. The one
-deliberately retained failure state is the mid-rebase conflict: the conflicted worktree stays
-in place under a continuation manifest (:mod:`perk.delivery.continuation`) and a fresh sync
-refuses until the human resumes it (:func:`continue_train_sync`, ``sync --continue``) or
-discards it (:func:`abort_train_sync`, ``sync --abort``). A machine-local advisory lock
-(:mod:`perk.delivery.oplock`) serializes the mutating entries (fresh/resume, continue, abort)
-with the recover operation; a busy lock is the typed refusal ``operation_in_progress``.
+The public operation is :meth:`perk.delivery.facade.Delivery.sync`. This module retains the
+transactional cascade, continuation, abort, and record-recovery core while all repository-bound
+persistence, Git, and GitHub behavior flows through the façade's three aggregate authorities.
+Local config, lock, continuation, path, clock, sleep, and operation-id helpers stay in the
+immutable private runtime.
 """
 
-import contextlib
 import itertools
 import time
-from collections.abc import Callable, Iterator, Mapping, Sequence
+import tomllib
+from collections.abc import Callable, Mapping, Sequence
 from contextlib import AbstractContextManager
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Protocol, cast
 
 from perk import plan
-from perk.delivery import continuation, observe, oplock
-from perk.delivery.capability import probe_atomic_push_urls
+from perk.delivery import continuation, oplock, writers
+from perk.delivery.capability import (
+    _atomic_push_check,
+    _empty_push_urls_check,
+    _push_urls_error_check,
+)
+from perk.delivery.facade import (
+    DeliveryError,
+    DeliveryGit,
+    DeliveryGitHub,
+    DeliveryPersistence,
+    StatusRequest,
+    StatusResult,
+    SyncRequest,
+    SyncResult,
+)
 from perk.delivery.journal import (
     EventRole,
     JournalFold,
@@ -41,25 +41,16 @@ from perk.delivery.journal import (
     PreparedRecord,
     mint_operation_id,
 )
-from perk.delivery.persistence import (
-    AppendResult,
-    UnresolvedOperationError,
-    resolve_train_persistence,
-)
+from perk.delivery.persistence import AppendResult, UnresolvedOperationError
 from perk.delivery.train import (
     STRUCTURAL_BLOCKER_CODES,
     DeliveryTrain,
     LayerPublication,
     LayerWriter,
-    NoDeliveryTrain,
-    TrainStatus,
+    TrainReconstructionError,
 )
-
-# Re-exported for the standing `sync.RemoteWriterProbe` / `sync.WriterObservationError`
-# references (publish/transfer/the production probe's historical import path); the seam's
-# source of truth is `perk.delivery.writers`.
-from perk.delivery.writers import RemoteWriterProbe, WriterObservationError
 from perk.github import GitHubError, stacks
+from perk.substrate import config as config_mod
 from perk.substrate import git as git_mod
 
 # The bounded PR settle poll (publish's `_converge_stack` pattern): GitHub's PR-head
@@ -69,97 +60,15 @@ _SETTLE_ATTEMPTS = 5
 _SETTLE_DELAY_SECONDS = 2.0
 
 
-class SyncError(Exception):
-    """A suffix synchronization failed or refused. ``error_type`` is the stable machine code
-    the CLI boundary maps onto its failure envelope."""
-
-    def __init__(
-        self,
-        message: str,
-        *,
-        error_type: str,  # not_stacked | unresolved_operation | sync_conflict_pending
-        # | claimed_prefix_malformed | active_writer | dirty_worktree
-        # | writer_observation_unavailable | remote_drift | pr_drift | membership_drift
-        # | stale_parent | base_unobserved | multiple_push_urls | atomic_push_unsupported
-        # | rebase_conflict | push_rejected | sync_drift | postcondition_unverified
-        # | invalid_input | adopt_blocked | no_continuation | continuation_stale
-        # | continuation_invalid | rebase_in_progress | operation_in_progress
-        # | git_error | github_error (contracts.md §8.49 declares the full bounded set;
-        # git_error/github_error are the CLI's mapping of raw infra raises)
-    ) -> None:
-        super().__init__(message)
-        self.error_type = error_type
+class SyncError(DeliveryError):
+    """The private named sync refusal retained for deferred recovery consumers."""
 
 
-@dataclass(frozen=True)
-class SyncedLayer:
-    """One affected layer's before→after movement (bottom→top order in the containers)."""
-
-    node_id: str
-    plan_id: str
-    branch: str
-    pr_number: int
-    before_sha: str
-    after_sha: str
+class SyncConfigurationError(Exception):
+    """The private runtime could not resolve the configured worktree root."""
 
 
-@dataclass(frozen=True)
-class SyncCascade:
-    """What the approval gate renders: the full ordered per-ref movement plus the base facts.
-
-    ``base_before``/``base_after`` are the bottom layer's re-anchoring (the stored parent
-    edge → the observed base head) and are ``None`` unless the cascade includes the base.
-    """
-
-    objective_id: str
-    base_branch: str
-    include_base: bool
-    base_before: str | None
-    base_after: str | None
-    layers: tuple[SyncedLayer, ...]
-
-
-@dataclass(frozen=True)
-class SyncResult:
-    """The verified outcome of one sync invocation (the §8.49 result-arm table).
-
-    Invariant: ``operation_id`` is non-null ⟺ a PREPARED record was journaled by (or resumed
-    by) this invocation — the no-op, declined, dry-run, and abort arms never journal one.
-    ``abandoned_operation_id`` names the previously unresolved operation this invocation
-    abandoned-with-proof (that abandon IS journaled, under the old id) before re-running the
-    fresh protocol — whose no-op and declined arms are therefore reachable with a null
-    ``operation_id`` and a non-null ``abandoned_operation_id``. ``base_advanced`` is the
-    status notice (the CLI's ``--base`` hint), independent of whether this run cascaded the
-    base.
-
-    Additive arms (contracts.md §8.49): ``dry_run`` marks the strictly side-effect-free
-    preview (``affected`` carries the computed cascade, nothing journaled/pushed);
-    ``adopted_node`` names the layer whose remote head this invocation adopted (or
-    previewed adopting); ``continued`` marks a continuation resume (``declined`` composes:
-    a declined continue retains everything); ``aborted`` marks a discarded continuation
-    (``aborted: False, declined: True`` is the declined-abort success). ``notes`` are
-    loud human-facing detail lines (cleanup/retirement failures) — never failures.
-    """
-
-    objective_id: str
-    objective_url: str
-    redirected_from: str | None
-    operation_id: str | None
-    abandoned_operation_id: str | None
-    no_op: bool
-    declined: bool
-    resumed: bool
-    base_cascaded: bool
-    base_advanced: bool
-    affected: tuple[SyncedLayer, ...]
-    dry_run: bool = False
-    adopted_node: str | None = None
-    continued: bool = False
-    aborted: bool = False
-    notes: tuple[str, ...] = ()
-
-
-# ----------------------------------------------------------------- injected-seam protocols
+# ----------------------------------------------------------------- internal record-recovery seams
 
 
 class SyncPersistence(Protocol):
@@ -185,34 +94,16 @@ class _StackRead(Protocol):
     def __call__(self, *, number: int, repo_root: Path) -> stacks.StackRestFacts | None: ...
 
 
-class _RebaseOnto(Protocol):
-    def __call__(self, worktree: Path, *, onto: str, upstream: str) -> git_mod.RebaseOutcome: ...
-
-
-def _default_fetch(repo: Path, refspecs: list[str]) -> None:
-    git_mod.fetch_refspecs(repo, refspecs)
-
-
-def _default_is_ancestor(repo: Path, ancestor_sha: str, head_sha: str) -> bool:
-    """Ancestry over fetched objects — **fail closed** when Git cannot answer."""
-    return git_mod.is_ancestor(repo, ancestor_sha, head_sha) is True
-
-
-def _default_atomic_push_probe(repo: Path, push_url: str, branch: str, sha: str) -> None:
-    git_mod.probe_atomic_push(repo, push_url=push_url, base_branch=branch, base_sha=sha)
-
-
-def _default_worktree_remove(repo: Path, path: Path) -> None:
-    git_mod.worktree_remove(repo, path, force=True)
-
-
-def _default_path_exists(path: Path) -> bool:
-    return path.exists()
+def _configured_worktree_root(repo_root: Path) -> Path:
+    try:
+        return config_mod.load_config(repo_root).worktree_root
+    except (config_mod.ConfigError, OSError, tomllib.TOMLDecodeError) as exc:
+        raise SyncConfigurationError(f"could not load worktree configuration: {exc}") from exc
 
 
 class SyncRecordSeams(Protocol):
     """The narrow read/persist seam bundle the SYNC/ADOPT record-recovery core consumes —
-    structurally satisfied by :class:`_Sync` and by the recover operation's bundle
+    structurally satisfied by the private context adapter and by recover's bundle
     (contracts.md §8.51 shares sync's complete resume validation + conclusion pipeline)."""
 
     @property
@@ -234,271 +125,163 @@ class SyncRecordSeams(Protocol):
 
 
 @dataclass(frozen=True)
-class _Sync:
-    """The per-invocation bundle: repo, call parameters, and every injected seam."""
+class _SyncRuntime:
+    """Private immutable local/runtime helpers that are not aggregate authorities."""
+
+    worktree_root: Callable[[Path], Path]
+    operation_lock: Callable[[Path], AbstractContextManager[None]]
+    pending_continuation: Callable[[Path, str], continuation.PendingContinuation | None]
+    write_manifest: Callable[[Path, continuation.ContinuationManifest], Path]
+    clear_manifest: Callable[[Path, str], None]
+    validate_targets: Callable[
+        [continuation.ContinuationManifest, Path], continuation.ValidatedTargets
+    ]
+    path_exists: Callable[[Path], bool]
+    mint_operation_id: Callable[[], str]
+    now: Callable[[], str]
+    sleep: Callable[[float], None]
+
+
+_DEFAULT_SYNC_RUNTIME = _SyncRuntime(
+    worktree_root=_configured_worktree_root,
+    operation_lock=oplock.stack_operation_lock,
+    pending_continuation=continuation.pending_continuation,
+    write_manifest=continuation.write_manifest,
+    clear_manifest=continuation.clear_manifest,
+    validate_targets=continuation.validated_targets,
+    path_exists=Path.exists,
+    mint_operation_id=mint_operation_id,
+    now=plan.now_iso,
+    sleep=time.sleep,
+)
+
+
+@dataclass(frozen=True)
+class _SyncContext:
+    """One façade-bound synchronization context."""
 
     repo_root: Path
-    run_id: str
-    include_base: bool
-    dry_run: bool
-    adopt_node: str | None
-    trigger_plan_id: str | None
-    approve: Callable[[SyncCascade], bool] | None
-    remote_writers: RemoteWriterProbe
-    worktree_root: Path
-    persistence: SyncPersistence
-    reconstruct: Callable[[Path, str], TrainStatus]
-    pr_facts: _PrFactsRead
-    stack_read: _StackRead
-    fetch: Callable[[Path, list[str]], None]
-    remote_head: Callable[[Path, str], str | None]
-    local_head: Callable[[Path, str], str | None]
-    is_ancestor: Callable[[Path, str, str], bool]
-    push_urls: Callable[[Path], list[str]]
-    atomic_push_probe: Callable[[Path, str, str, str], None]
-    push_atomic: Callable[[Path, list[git_mod.RefUpdate]], None]
-    update_ref: Callable[[Path, str, str], None]
-    delete_ref: Callable[[Path, str], None]
-    list_refs: Callable[[Path, str], list[str]]
-    worktree_add: Callable[[Path, Path, str], None]
-    worktree_remove: Callable[[Path, Path], None]
-    worktree_prune: Callable[[Path], None]
-    checkout_detached: Callable[[Path, str], None]
-    rebase_onto: _RebaseOnto
-    pending_read: Callable[[Path, str], continuation.PendingContinuation | None]
-    manifest_write: Callable[[Path, continuation.ContinuationManifest], Path]
-    manifest_clear: Callable[[Path, str], None]
-    path_exists: Callable[[Path], bool]
-    rebase_in_progress: Callable[[Path], bool]
-    worktree_dirty: Callable[[Path], bool]
-    sleep: Callable[[float], None]
-    now: Callable[[], str]
+    persistence: DeliveryPersistence
+    git: DeliveryGit
+    github: DeliveryGitHub
+    status: Callable[[StatusRequest], StatusResult]
+    runtime: _SyncRuntime
 
 
-def synchronize_train(
-    repo_root: Path,
+@dataclass(frozen=True)
+class _ContextRecordSeams:
+    """Bridge the aggregate context to the deferred record-recovery seam."""
+
+    context: _SyncContext
+
+    @property
+    def repo_root(self) -> Path:
+        return self.context.repo_root
+
+    @property
+    def persistence(self) -> DeliveryPersistence:
+        return self.context.persistence
+
+    def _pr_facts(self, *, number: int, repo_root: Path) -> object:
+        del repo_root
+        return self.context.github.pr_facts(number)
+
+    @property
+    def pr_facts(self) -> _PrFactsRead:
+        return cast("_PrFactsRead", self._pr_facts)
+
+    def _stack_read(self, *, number: int, repo_root: Path) -> object:
+        del repo_root
+        members = self.context.github.strict_stack_members(number)
+        if members is None:
+            return None
+        return _StackMembers(member_numbers=members)
+
+    @property
+    def stack_read(self) -> _StackRead:
+        return cast("_StackRead", self._stack_read)
+
+    def _fetch(self, repo_root: Path, refs: list[str]) -> None:
+        del repo_root
+        self.context.git.fetch_refs(tuple(refs))
+
+    @property
+    def fetch(self) -> Callable[[Path, list[str]], None]:
+        return self._fetch
+
+    def _remote_head(self, repo_root: Path, branch: str) -> str | None:
+        del repo_root
+        return self.context.git.remote_branch_sha(branch)
+
+    @property
+    def remote_head(self) -> Callable[[Path, str], str | None]:
+        return self._remote_head
+
+    @property
+    def sleep(self) -> Callable[[float], None]:
+        return self.context.runtime.sleep
+
+    @property
+    def now(self) -> Callable[[], str]:
+        return self.context.runtime.now
+
+
+@dataclass(frozen=True)
+class _StackMembers:
+    member_numbers: tuple[int, ...]
+
+
+type _Consent = Callable[[SyncResult.Cascade | SyncResult.AbortPreview], bool]
+
+
+def _dispatch(
+    context: _SyncContext,
+    request: SyncRequest,
     *,
-    objective_id: str,
-    run_id: str,
-    remote_writers: RemoteWriterProbe,
-    worktree_root: Path,
-    include_base: bool = False,
-    dry_run: bool = False,
-    adopt_node: str | None = None,
-    trigger_plan_id: str | None = None,
-    approve: Callable[[SyncCascade], bool] | None = None,
-    reconstruct: Callable[[Path, str], TrainStatus] = observe.reconstruct_repo_train,
-    persistence_factory: Callable[[Path], SyncPersistence] = resolve_train_persistence,
-    pr_facts: _PrFactsRead = stacks.pr_delivery_facts,
-    stack_read: _StackRead = stacks.stack_for_pr,
-    fetch: Callable[[Path, list[str]], None] = _default_fetch,
-    remote_head: Callable[[Path, str], str | None] = git_mod.remote_branch_head,
-    local_head: Callable[[Path, str], str | None] = git_mod.resolve_commit,
-    is_ancestor: Callable[[Path, str, str], bool] = _default_is_ancestor,
-    push_urls: Callable[[Path], list[str]] = git_mod.push_urls,
-    atomic_push_probe: Callable[[Path, str, str, str], None] = _default_atomic_push_probe,
-    push_atomic: Callable[[Path, list[git_mod.RefUpdate]], None] = git_mod.push_atomic_with_leases,
-    update_ref: Callable[[Path, str, str], None] = git_mod.update_ref,
-    delete_ref: Callable[[Path, str], None] = git_mod.delete_ref,
-    list_refs: Callable[[Path, str], list[str]] = git_mod.list_refs,
-    worktree_add: Callable[[Path, Path, str], None] = git_mod.worktree_add_detached,
-    worktree_remove: Callable[[Path, Path], None] = _default_worktree_remove,
-    worktree_prune: Callable[[Path], None] = git_mod.worktree_prune,
-    checkout_detached: Callable[[Path, str], None] = git_mod.checkout_detached,
-    rebase_onto: _RebaseOnto = git_mod.rebase_onto,
-    pending_read: Callable[
-        [Path, str], continuation.PendingContinuation | None
-    ] = continuation.pending_continuation,
-    manifest_write: Callable[
-        [Path, continuation.ContinuationManifest], Path
-    ] = continuation.write_manifest,
-    manifest_clear: Callable[[Path, str], None] = continuation.clear_manifest,
-    path_exists: Callable[[Path], bool] = _default_path_exists,
-    rebase_in_progress: Callable[[Path], bool] = git_mod.rebase_in_progress,
-    worktree_dirty: Callable[[Path], bool] = git_mod.is_dirty,
-    lock: Callable[[Path], AbstractContextManager[None]] = oplock.stack_operation_lock,
-    sleep: Callable[[float], None] = time.sleep,
-    now: Callable[[], str] = plan.now_iso,
+    consent: _Consent | None,
 ) -> SyncResult:
-    """Synchronize the published suffix of ``objective_id``'s train (the §8.49 operation).
-
-    ``approve`` is the cascade approval gate (``None`` = auto-approve); ``remote_writers`` is
-    the required fail-closed writer preflight — there is deliberately no default.
-    ``worktree_root`` hosts the disposable isolated calculation worktree
-    (``<worktree_root>/sync-<operation_id>``). ``dry_run`` stops at the approval boundary
-    (strictly side-effect-free); ``adopt_node`` adopts one layer's out-of-band remote head
-    as its new source (journal kind ADOPT). ``trigger_plan_id`` scopes automatic propagation
-    to that claimed layer's committed local head; every successor starts from its verified
-    published head. Raises :class:`SyncError` on every typed
-    refusal; infra errors (``GitError``/``GitHubError``) propagate for the CLI boundary's
-    arms, always leaving any prepared operation unresolved (recoverable).
-    """
-    if adopt_node is not None and include_base:
-        # Flag validation lives at the CLI boundary; this is the defensive assert-guard for
-        # the impossible combination reaching the operation directly.
-        raise SyncError(
-            "--adopt and --base are mutually exclusive — adopt the layer first, then rerun "
-            "with --base (sequential invocations reach the same state)",
-            error_type="invalid_input",
-        )
-    if trigger_plan_id is not None and (include_base or adopt_node is not None):
-        raise SyncError(
-            "trigger-scoped synchronization cannot compose with --base or --adopt — run "
-            "those operations sequentially",
-            error_type="invalid_input",
-        )
-    sync = _make_sync(
-        repo_root,
-        run_id=run_id,
-        include_base=include_base,
-        dry_run=dry_run,
-        adopt_node=adopt_node,
-        trigger_plan_id=trigger_plan_id,
-        approve=approve,
-        remote_writers=remote_writers,
-        worktree_root=worktree_root,
-        persistence_factory=persistence_factory,
-        reconstruct=reconstruct,
-        pr_facts=pr_facts,
-        stack_read=stack_read,
-        fetch=fetch,
-        remote_head=remote_head,
-        local_head=local_head,
-        is_ancestor=is_ancestor,
-        push_urls=push_urls,
-        atomic_push_probe=atomic_push_probe,
-        push_atomic=push_atomic,
-        update_ref=update_ref,
-        delete_ref=delete_ref,
-        list_refs=list_refs,
-        worktree_add=worktree_add,
-        worktree_remove=worktree_remove,
-        worktree_prune=worktree_prune,
-        checkout_detached=checkout_detached,
-        rebase_onto=rebase_onto,
-        pending_read=pending_read,
-        manifest_write=manifest_write,
-        manifest_clear=manifest_clear,
-        path_exists=path_exists,
-        rebase_in_progress=rebase_in_progress,
-        worktree_dirty=worktree_dirty,
-        sleep=sleep,
-        now=now,
-    )
-    with _held_operation_lock(lock, repo_root):
-        return _synchronize(sync, objective_id)
-
-
-def _make_sync(
-    repo_root: Path,
-    *,
-    run_id: str,
-    include_base: bool,
-    dry_run: bool,
-    adopt_node: str | None,
-    trigger_plan_id: str | None,
-    approve: Callable[[SyncCascade], bool] | None,
-    remote_writers: RemoteWriterProbe,
-    worktree_root: Path,
-    persistence_factory: Callable[[Path], SyncPersistence],
-    reconstruct: Callable[[Path, str], TrainStatus],
-    pr_facts: _PrFactsRead,
-    stack_read: _StackRead,
-    fetch: Callable[[Path, list[str]], None],
-    remote_head: Callable[[Path, str], str | None],
-    local_head: Callable[[Path, str], str | None],
-    is_ancestor: Callable[[Path, str, str], bool],
-    push_urls: Callable[[Path], list[str]],
-    atomic_push_probe: Callable[[Path, str, str, str], None],
-    push_atomic: Callable[[Path, list[git_mod.RefUpdate]], None],
-    update_ref: Callable[[Path, str, str], None],
-    delete_ref: Callable[[Path, str], None],
-    list_refs: Callable[[Path, str], list[str]],
-    worktree_add: Callable[[Path, Path, str], None],
-    worktree_remove: Callable[[Path, Path], None],
-    worktree_prune: Callable[[Path], None],
-    checkout_detached: Callable[[Path, str], None],
-    rebase_onto: _RebaseOnto,
-    pending_read: Callable[[Path, str], continuation.PendingContinuation | None],
-    manifest_write: Callable[[Path, continuation.ContinuationManifest], Path],
-    manifest_clear: Callable[[Path, str], None],
-    path_exists: Callable[[Path], bool],
-    rebase_in_progress: Callable[[Path], bool],
-    worktree_dirty: Callable[[Path], bool],
-    sleep: Callable[[float], None],
-    now: Callable[[], str],
-) -> _Sync:
-    """The shared per-invocation bundle construction (sync / continue / abort)."""
-    return _Sync(
-        repo_root=repo_root,
-        run_id=run_id,
-        include_base=include_base,
-        dry_run=dry_run,
-        adopt_node=adopt_node,
-        trigger_plan_id=trigger_plan_id,
-        approve=approve,
-        remote_writers=remote_writers,
-        worktree_root=worktree_root,
-        persistence=persistence_factory(repo_root),
-        reconstruct=reconstruct,
-        pr_facts=pr_facts,
-        stack_read=stack_read,
-        fetch=fetch,
-        remote_head=remote_head,
-        local_head=local_head,
-        is_ancestor=is_ancestor,
-        push_urls=push_urls,
-        atomic_push_probe=atomic_push_probe,
-        push_atomic=push_atomic,
-        update_ref=update_ref,
-        delete_ref=delete_ref,
-        list_refs=list_refs,
-        worktree_add=worktree_add,
-        worktree_remove=worktree_remove,
-        worktree_prune=worktree_prune,
-        checkout_detached=checkout_detached,
-        rebase_onto=rebase_onto,
-        pending_read=pending_read,
-        manifest_write=manifest_write,
-        manifest_clear=manifest_clear,
-        path_exists=path_exists,
-        rebase_in_progress=rebase_in_progress,
-        worktree_dirty=worktree_dirty,
-        sleep=sleep,
-        now=now,
-    )
-
-
-@contextlib.contextmanager
-def _held_operation_lock(
-    lock: Callable[[Path], AbstractContextManager[None]], repo_root: Path
-) -> Iterator[None]:
-    """Hold the machine-local operation lock for the body; a busy lock is the typed
-    ``operation_in_progress`` refusal (decision: the mutating stack operations serialize
-    per machine — status never locks)."""
+    """Dispatch one validated request while owning the operation lock exactly once."""
+    entered = False
     try:
-        with lock(repo_root):
-            yield
+        with context.runtime.operation_lock(context.repo_root):
+            entered = True
+            if request.mode == "cascade":
+                return _synchronize(context, request, consent=consent)
+            if request.mode == "continue":
+                return _continue(context, request, consent=consent)
+            return _abort(context, request, consent=consent)
     except oplock.OperationLockBusy as exc:
+        if entered:
+            raise
         raise SyncError(str(exc), error_type="operation_in_progress") from exc
 
 
-def _synchronize(sync: _Sync, objective_id: str) -> SyncResult:
-    train = sync.reconstruct(sync.repo_root, objective_id)
-    if isinstance(train, NoDeliveryTrain):
+def _status_train(context: _SyncContext, objective_id: str) -> DeliveryTrain:
+    result = context.status(StatusRequest(objective_id=objective_id))
+    if result.train is None:
         raise SyncError(
-            f"objective {train.objective_id} has no delivery train ({train.reason})",
+            f"objective {result.objective_id} has no delivery train ({result.no_train_reason})",
             error_type="not_stacked",
         )
+    return result.train
+
+
+def _synchronize(
+    context: _SyncContext,
+    request: SyncRequest,
+    *,
+    consent: _Consent | None,
+) -> SyncResult:
+    train = _status_train(context, request.objective_id)
     lineage = _require_lineage(train)
     refuse_structural_blockers(train)
-    _gate_continuation(sync, lineage)
-    fold = sync.persistence.read_journal(train.objective_id)
+    _gate_continuation(context, lineage)
+    fold = context.persistence.read_journal(train.objective_id)
     if fold.unresolved:
         op = fold.unresolved[0]
         record = op.prepared.record
         resumable = op.kind in (OperationKind.SYNC, OperationKind.ADOPT)
-        if sync.dry_run:
+        if request.dry_run:
             # A dry run never resumes — the kind-aware message names what a real sync (or
             # recover) would do with the unresolved operation.
             hint = (
@@ -512,14 +295,14 @@ def _synchronize(sync: _Sync, objective_id: str) -> SyncResult:
                 error_type="unresolved_operation",
             )
         if resumable and isinstance(record, PreparedRecord):
-            return _resume(sync, train, record)
+            return _resume(context, request, train, record, consent=consent)
         raise SyncError(
             f"operation {op.operation_id} ({op.kind.value}) is unresolved on lineage "
             f"{fold.delivery_lineage} — conclude it via `perk objective stack recover` or "
             "the owning command before synchronizing",
             error_type="unresolved_operation",
         )
-    return _fresh(sync, train, abandoned_operation_id=None)
+    return _fresh(context, request, train, consent=consent, abandoned_operation_id=None)
 
 
 # ----------------------------------------------------------------- gates + shared checks
@@ -563,11 +346,11 @@ def refuse_structural_blockers(train: DeliveryTrain) -> None:
         )
 
 
-def _gate_continuation(sync: _Sync, lineage: str) -> None:
+def _gate_continuation(context: _SyncContext, lineage: str) -> None:
     """The fail-closed conflict gate: ANY manifest for this lineage — parseable or not —
     refuses a fresh cascade over retained residue (the remedies are ``sync --continue`` /
     ``sync --abort``)."""
-    pending = sync.pending_read(sync.repo_root, lineage)
+    pending = context.runtime.pending_continuation(context.repo_root, lineage)
     if pending is None:
         return
     if pending.manifest is None:
@@ -674,7 +457,7 @@ def _expected_pr_base(claimed: Sequence[ClaimedLayer], index: int, base: str) ->
 
 
 def _check_claimed_world(
-    sync: _Sync,
+    sync: _SyncContext,
     train: DeliveryTrain,
     claimed: Sequence[ClaimedLayer],
     *,
@@ -694,7 +477,7 @@ def _check_claimed_world(
     drifted: list[tuple[ClaimedLayer, str, str | None]] = []
     for layer in claimed:
         expected_head = overrides.get(layer.branch, layer.published_head_sha)
-        observed = sync.remote_head(sync.repo_root, layer.branch)
+        observed = sync.git.remote_branch_sha(layer.branch)
         if observed != expected_head:
             drifted.append((layer, expected_head, observed))
     if drifted:
@@ -712,7 +495,7 @@ def _check_claimed_world(
     for index, layer in enumerate(claimed):
         expected_base = _expected_pr_base(claimed, index, train.base)
         expected_head = overrides.get(layer.branch, layer.published_head_sha)
-        facts = sync.pr_facts(number=layer.pr_number, repo_root=sync.repo_root)
+        facts = sync.github.pr_facts(layer.pr_number)
         if (
             facts is None
             or facts.state != "OPEN"
@@ -731,10 +514,8 @@ def _check_claimed_world(
             )
     if len(claimed) >= 2:
         desired = [layer.pr_number for layer in claimed]
-        observed_stack = sync.stack_read(number=desired[0], repo_root=sync.repo_root)
-        observed_members = (
-            list(observed_stack.member_numbers) if observed_stack is not None else None
-        )
+        observed_stack = sync.github.strict_stack_members(desired[0])
+        observed_members = list(observed_stack) if observed_stack is not None else None
         if observed_members != desired:
             raise SyncError(
                 f"the native stack carries {observed_members}, expected exactly the claimed "
@@ -744,7 +525,8 @@ def _check_claimed_world(
 
 
 def _preflight(
-    sync: _Sync,
+    sync: _SyncContext,
+    request: SyncRequest,
     train: DeliveryTrain,
     claimed: Sequence[ClaimedLayer],
     *,
@@ -757,7 +539,7 @@ def _preflight(
     _check_claimed_world(sync, train, claimed, collapse=None, when="", adopted_heads=adopted_heads)
     # Localize the verified remote objects (checkpoints == observed heads, so every refspec
     # exists): the ancestry checks and the rebase sources need them present locally.
-    sync.fetch(sync.repo_root, [layer.branch for layer in claimed])
+    sync.git.fetch_refs(tuple(layer.branch for layer in claimed))
     dirty = [layer for layer in claimed if layer.writer is LayerWriter.DIRTY]
     if dirty:
         names = ", ".join(f"{layer.node_id} ({layer.branch})" for layer in dirty)
@@ -766,10 +548,14 @@ def _preflight(
             "before synchronizing",
             error_type="dirty_worktree",
         )
-    plan_ids = [layer.plan_id for layer in claimed]
+    plan_ids = tuple(layer.plan_id for layer in claimed)
     try:
-        active = sync.remote_writers.active_plan_ids(plan_ids)
-    except WriterObservationError as exc:
+        active = sync.github.active_writer_plan_ids(
+            plan_ids,
+            trigger_plan_id=request.trigger_plan_id,
+            trigger_run_id=request.trigger_run_id,
+        )
+    except writers.WriterObservationError as exc:
         raise SyncError(
             f"could not observe the active remote writers ({exc}) — refusing to cascade "
             "under an unreadable writer preflight",
@@ -798,11 +584,13 @@ class _AdoptedLayer:
     remote_head: str
 
 
-def _resolve_adopted(sync: _Sync, claimed: Sequence[ClaimedLayer]) -> _AdoptedLayer:
+def _resolve_adopted(
+    sync: _SyncContext, claimed: Sequence[ClaimedLayer], *, adopt_node: str
+) -> _AdoptedLayer:
     """Resolve ``adopt_node`` against the claimed prefix and observe the adopted head. The
     node must name a claimed layer (``invalid_input`` otherwise); an unmoved head has
     nothing to adopt and an absent remote branch cannot be adopted (``adopt_blocked``)."""
-    node = sync.adopt_node
+    node = adopt_node
     index = next((i for i, layer in enumerate(claimed) if layer.node_id == node), None)
     if index is None:
         names = ", ".join(layer.node_id for layer in claimed) or "<none>"
@@ -812,7 +600,7 @@ def _resolve_adopted(sync: _Sync, claimed: Sequence[ClaimedLayer]) -> _AdoptedLa
             error_type="invalid_input",
         )
     layer = claimed[index]
-    observed = sync.remote_head(sync.repo_root, layer.branch)
+    observed = sync.git.remote_branch_sha(layer.branch)
     if observed is None:
         raise SyncError(
             f"branch {layer.branch!r} (layer {layer.node_id}) has no remote head — there is "
@@ -828,24 +616,31 @@ def _resolve_adopted(sync: _Sync, claimed: Sequence[ClaimedLayer]) -> _AdoptedLa
     return _AdoptedLayer(index=index, layer=layer, remote_head=observed)
 
 
-def _check_capability(sync: _Sync, *, ref_branch: str, ref_sha: str) -> None:
-    """Step 7: one receiving repository, then the no-op atomic dry-run probe pinned to the
-    bottom affected layer's branch at its verified remote head."""
-    urls = sync.push_urls(sync.repo_root)
-    if len(urls) > 1:
-        raise SyncError(
-            f"origin has {len(urls)} push URLs ({urls}) — `--atomic` is atomic within one "
-            "receiving repository; refusing to pretend distributed atomicity across mirrors",
-            error_type="multiple_push_urls",
-        )
-    checks = probe_atomic_push_urls(
-        sync.repo_root,
-        ref_branch=ref_branch,
-        ref_sha=ref_sha,
-        push_urls_probe=sync.push_urls,
-        atomic_push_probe=sync.atomic_push_probe,
-        resolved_push_urls=urls,
-    )
+def _check_capability(sync: _SyncContext, *, ref_branch: str, ref_sha: str) -> None:
+    """Step 7: one receiver and a no-op atomic probe against every configured URL."""
+    observed = sync.git.push_urls()
+    if isinstance(observed, DeliveryGit.ProbeError):
+        checks = [_push_urls_error_check(observed.message)]
+    elif not observed.urls:
+        checks = [_empty_push_urls_check()]
+    else:
+        urls = observed.urls
+        if len(urls) > 1:
+            raise SyncError(
+                f"origin has {len(urls)} push URLs ({list(urls)}) — `--atomic` is atomic "
+                "within one receiving repository; refusing to pretend distributed "
+                "atomicity across mirrors",
+                error_type="multiple_push_urls",
+            )
+        checks = []
+        for push_url in urls:
+            probe = sync.git.probe_atomic_push(
+                push_url=push_url,
+                base_branch=ref_branch,
+                base_sha=ref_sha,
+            )
+            error = probe.message if isinstance(probe, DeliveryGit.ProbeError) else None
+            checks.append(_atomic_push_check(push_url, error=error))
     failing = [check for check in checks if not check.ok]
     if failing:
         details = "; ".join(check.detail for check in failing)
@@ -855,14 +650,21 @@ def _check_capability(sync: _Sync, *, ref_branch: str, ref_sha: str) -> None:
         )
 
 
-def _fresh(sync: _Sync, train: DeliveryTrain, *, abandoned_operation_id: str | None) -> SyncResult:
+def _fresh(
+    sync: _SyncContext,
+    request: SyncRequest,
+    train: DeliveryTrain,
+    *,
+    consent: _Consent | None,
+    abandoned_operation_id: str | None,
+) -> SyncResult:
     """Steps 4-14 (the full fresh protocol). ``abandoned_operation_id`` is carried when this
     fresh preparation follows an all-``before`` resume abandon in the same invocation."""
     lineage = _require_lineage(train)
     claimed = derive_claimed_prefix(train)
     trigger_index: int | None = None
-    if sync.trigger_plan_id is not None:
-        trigger_id = sync.trigger_plan_id.removeprefix("#")
+    if request.trigger_plan_id is not None:
+        trigger_id = request.trigger_plan_id.removeprefix("#")
         trigger_index = next(
             (
                 index
@@ -879,13 +681,15 @@ def _fresh(sync: _Sync, train: DeliveryTrain, *, abandoned_operation_id: str | N
                 error_type="claimed_prefix_malformed",
             )
     adopted: _AdoptedLayer | None = None
-    if sync.adopt_node is not None:
-        adopted = _resolve_adopted(sync, claimed)
+    if request.adopt_node is not None:
+        adopted = _resolve_adopted(sync, claimed, adopt_node=request.adopt_node)
     if claimed:
         adopted_heads = {adopted.layer.branch: adopted.remote_head} if adopted is not None else None
-        _preflight(sync, train, claimed, adopted_heads=adopted_heads)
-    if adopted is not None and not sync.is_ancestor(
-        sync.repo_root, adopted.layer.parent_checkpoint_sha, adopted.remote_head
+        _preflight(sync, request, train, claimed, adopted_heads=adopted_heads)
+    if (
+        adopted is not None
+        and sync.git.is_ancestor(adopted.layer.parent_checkpoint_sha, adopted.remote_head)
+        is not True
     ):
         # The adopted head must still contain the layer's stored parent edge — an
         # out-of-band edit that rewrote ancestry cannot be transplanted onto the train.
@@ -898,7 +702,7 @@ def _fresh(sync: _Sync, train: DeliveryTrain, *, abandoned_operation_id: str | N
         )
 
     base_after: str | None = None
-    if sync.include_base:
+    if request.include_base:
         base_after = train.observed_base_head_sha
         if base_after is None:
             raise SyncError(
@@ -916,7 +720,7 @@ def _fresh(sync: _Sync, train: DeliveryTrain, *, abandoned_operation_id: str | N
     changed = [False] * len(claimed)
     if trigger_index is not None:
         layer = claimed[trigger_index]
-        head = sync.local_head(sync.repo_root, layer.branch)
+        head = sync.git.resolve_commit(layer.branch)
         if head is None:
             raise SyncError(
                 f"trigger branch {layer.branch!r} for plan #{layer.plan_id} does not resolve "
@@ -924,18 +728,19 @@ def _fresh(sync: _Sync, train: DeliveryTrain, *, abandoned_operation_id: str | N
                 error_type="git_error",
             )
         local_heads[layer.branch] = head
-        changed[trigger_index] = head != layer.published_head_sha and not sync.is_ancestor(
-            sync.repo_root, head, layer.published_head_sha
+        changed[trigger_index] = (
+            head != layer.published_head_sha
+            and sync.git.is_ancestor(head, layer.published_head_sha) is not True
         )
     else:
         for index, layer in enumerate(claimed):
-            head = sync.local_head(sync.repo_root, layer.branch)
+            head = sync.git.resolve_commit(layer.branch)
             if head is not None:
                 local_heads[layer.branch] = head
             changed[index] = (
                 head is not None
                 and head != layer.published_head_sha
-                and not sync.is_ancestor(sync.repo_root, head, layer.published_head_sha)
+                and sync.git.is_ancestor(head, layer.published_head_sha) is not True
             )
     if adopted is not None:
         if changed[adopted.index]:
@@ -949,7 +754,7 @@ def _fresh(sync: _Sync, train: DeliveryTrain, *, abandoned_operation_id: str | N
         # The adopted layer becomes a trigger whose source is the OBSERVED remote head.
         local_heads[adopted.layer.branch] = adopted.remote_head
         changed[adopted.index] = True
-    if sync.include_base:
+    if request.include_base:
         trigger = 0 if claimed else None
     elif trigger_index is not None:
         trigger = trigger_index if changed[trigger_index] else None
@@ -968,7 +773,7 @@ def _fresh(sync: _Sync, train: DeliveryTrain, *, abandoned_operation_id: str | N
             base_cascaded=False,
             base_advanced=_base_advanced(train),
             affected=(),
-            dry_run=sync.dry_run,
+            dry_run=request.dry_run,
         )
     # Every candidate SOURCE must contain its stored parent edge — the edge becomes the
     # rebase `upstream`, so an unchecked corrupt checkpoint would replay the wrong commit
@@ -978,15 +783,15 @@ def _fresh(sync: _Sync, train: DeliveryTrain, *, abandoned_operation_id: str | N
     for index, layer in enumerate(claimed):
         if changed[index]:
             head = local_heads[layer.branch]
-            if not sync.is_ancestor(sync.repo_root, layer.parent_checkpoint_sha, head):
+            if sync.git.is_ancestor(layer.parent_checkpoint_sha, head) is not True:
                 raise SyncError(
                     f"local branch {layer.branch!r} at {head} does not contain its stored "
                     f"parent checkpoint {layer.parent_checkpoint_sha} — rebase "
                     f"{layer.branch!r} onto its parent branch and rerun sync",
                     error_type="stale_parent",
                 )
-        elif not sync.is_ancestor(
-            sync.repo_root, layer.parent_checkpoint_sha, layer.published_head_sha
+        elif (
+            sync.git.is_ancestor(layer.parent_checkpoint_sha, layer.published_head_sha) is not True
         ):
             raise SyncError(
                 f"layer {layer.node_id}'s verified published head {layer.published_head_sha} "
@@ -1013,16 +818,18 @@ def _fresh(sync: _Sync, train: DeliveryTrain, *, abandoned_operation_id: str | N
     # exactly one case: the continuation manifest was durably written (the conflict arm).
     # Post-push arms never need the temp refs: an applied push holds the candidates
     # remotely; an unapplied push's resume arm abandons and recomputes fresh.
-    operation_id = mint_operation_id()
-    worktree = sync.worktree_root / f"sync-{operation_id}"
+    operation_id = sync.runtime.mint_operation_id()
+    worktree = sync.runtime.worktree_root(sync.repo_root) / f"sync-{operation_id}"
     ref_prefix = f"refs/perk/sync/{operation_id}/"
     disarmed = False
     try:
         result = _execute(
             sync,
+            request,
             train,
             claimed,
             affected,
+            consent=consent,
             local_heads=local_heads,
             changed=changed[trigger:],
             base_after=base_after,
@@ -1056,11 +863,13 @@ def _fresh(sync: _Sync, train: DeliveryTrain, *, abandoned_operation_id: str | N
 
 
 def _execute(
-    sync: _Sync,
+    sync: _SyncContext,
+    request: SyncRequest,
     train: DeliveryTrain,
     claimed: Sequence[ClaimedLayer],
     affected: Sequence[ClaimedLayer],
     *,
+    consent: _Consent | None,
     local_heads: Mapping[str, str],
     changed: Sequence[bool],
     base_after: str | None,
@@ -1078,6 +887,7 @@ def _execute(
     :class:`_DryRunStop` so the caller can clean with notes)."""
     candidates = _calculate_candidates(
         sync,
+        request,
         affected,
         local_heads=local_heads,
         changed=changed,
@@ -1091,7 +901,7 @@ def _execute(
     )
 
     layers = tuple(
-        SyncedLayer(
+        SyncResult.Layer(
             node_id=layer.node_id,
             plan_id=layer.plan_id,
             branch=layer.branch,
@@ -1101,18 +911,18 @@ def _execute(
         )
         for pos, layer in enumerate(affected)
     )
-    cascade = SyncCascade(
+    cascade = SyncResult.Cascade(
         objective_id=train.objective_id,
         base_branch=train.base,
-        include_base=sync.include_base,
-        base_before=affected[0].parent_checkpoint_sha if sync.include_base else None,
+        include_base=request.include_base,
+        base_before=affected[0].parent_checkpoint_sha if request.include_base else None,
         base_after=base_after,
         layers=layers,
     )
 
     # The dry-run boundary: everything through candidate calculation ran; nothing effectful
     # follows — no approval, no re-observation, no journal record, no push, no checkpoints.
-    if sync.dry_run:
+    if request.dry_run:
         raise _DryRunStop(
             SyncResult(
                 objective_id=train.objective_id,
@@ -1127,12 +937,12 @@ def _execute(
                 base_advanced=_base_advanced(train),
                 affected=layers,
                 dry_run=True,
-                adopted_node=sync.adopt_node,
+                adopted_node=request.adopt_node,
             )
         )
 
     # Step 9: the approval gate. Declined → the guard cleans; nothing was journaled.
-    if sync.approve is not None and not sync.approve(cascade):
+    if consent is not None and not consent(cascade):
         return SyncResult(
             objective_id=train.objective_id,
             objective_url=train.objective_url,
@@ -1169,8 +979,8 @@ def _execute(
         operation_kind=OperationKind.ADOPT if adopted is not None else OperationKind.SYNC,
         delivery_lineage=lineage,
         objective_id=train.objective_id,
-        run_id=sync.run_id,
-        created=sync.now(),
+        run_id=request.run_id or "",
+        created=sync.runtime.now(),
         affected_plans=tuple(layer.plan_id for layer in affected),
         before=_before_payload(
             sync, train, claimed, affected, base_after=base_after, observed_before=observed_before
@@ -1196,17 +1006,18 @@ def _execute(
     _push(sync, train.objective_id, operation_id, layers)
 
     # Steps 13-14.
-    _verify_postconditions(sync, train, claimed, affected, candidates)
+    record_seams = _ContextRecordSeams(sync)
+    _verify_postconditions(record_seams, train, claimed, affected, candidates)
     return _complete(
-        sync,
+        record_seams,
         train,
         layers,
         new_parents=new_parents,
         operation_id=operation_id,
         abandoned_operation_id=abandoned_operation_id,
         resumed=False,
-        base_cascaded=sync.include_base,
-        adopted_node=sync.adopt_node,
+        base_cascaded=request.include_base,
+        adopted_node=request.adopt_node,
     )
 
 
@@ -1232,17 +1043,7 @@ class _DryRunStop(Exception):
         self.result = result
 
 
-class _CleanupSeams(Protocol):
-    """The small residue-removal seam shared by sync's guard and explicit abort."""
-
-    repo_root: Path
-    list_refs: Callable[[Path, str], list[str]]
-    delete_ref: Callable[[Path, str], None]
-    worktree_remove: Callable[[Path, Path], None]
-    worktree_prune: Callable[[Path], None]
-
-
-def _cleanup(sync: _CleanupSeams, ref_prefix: str, worktree: Path) -> list[str]:
+def _cleanup(sync: _SyncContext, ref_prefix: str, worktree: Path) -> list[str]:
     """Best-effort residue removal (never raises): every temp ref under this operation's
     namespace, then the isolated worktree, then one worktree-admin prune (the rmtree
     fallback of ``worktree_remove`` leaves a stale admin entry the prune clears). EVERY
@@ -1253,22 +1054,22 @@ def _cleanup(sync: _CleanupSeams, ref_prefix: str, worktree: Path) -> list[str]:
     notes: list[str] = []
     refs: list[str] = []
     try:
-        refs = sync.list_refs(sync.repo_root, ref_prefix)
+        refs = list(sync.git.list_refs(ref_prefix))
     except (git_mod.GitError, OSError) as exc:
         notes.append(f"could not list the temp refs under {ref_prefix} ({exc})")
     for ref in refs:
         try:
-            sync.delete_ref(sync.repo_root, ref)
+            sync.git.delete_ref(ref)
         except (git_mod.GitError, OSError) as exc:
             notes.append(f"could not delete the temp ref {ref} ({exc})")
     # No existence pre-check: the remove seam itself tolerates an absent worktree (its
     # error is suppressed), which keeps the guard observable through the injected seam.
     try:
-        sync.worktree_remove(sync.repo_root, worktree)
+        sync.git.remove_worktree(worktree)
     except (git_mod.GitError, OSError) as exc:
         notes.append(f"could not remove the isolated worktree {worktree} ({exc})")
     try:
-        sync.worktree_prune(sync.repo_root)
+        sync.git.prune_worktrees()
     except (git_mod.GitError, OSError) as exc:
         notes.append(f"could not prune the worktree records ({exc})")
     if notes:
@@ -1280,7 +1081,8 @@ def _cleanup(sync: _CleanupSeams, ref_prefix: str, worktree: Path) -> list[str]:
 
 
 def _calculate_candidates(
-    sync: _Sync,
+    sync: _SyncContext,
+    request: SyncRequest,
     affected: Sequence[ClaimedLayer],
     *,
     local_heads: Mapping[str, str],
@@ -1309,7 +1111,7 @@ def _calculate_candidates(
         local_heads[layer.branch] if changed[pos] else layer.published_head_sha
         for pos, layer in enumerate(affected)
     ]
-    sync.worktree_add(sync.repo_root, worktree, sources[0])
+    sync.git.add_detached_worktree(worktree, sources[0])
     candidates: list[str] = []
     manifest_layers: list[continuation.ContinuationLayer] = []
     for pos, layer in enumerate(affected):
@@ -1323,10 +1125,10 @@ def _calculate_candidates(
         if new_parent == old_parent:
             candidate = source
         else:
-            sync.checkout_detached(worktree, source)
-            outcome = sync.rebase_onto(worktree, onto=new_parent, upstream=old_parent)
+            sync.git.checkout_detached(worktree, source)
+            outcome = sync.git.rebase_onto(worktree, onto=new_parent, upstream=old_parent)
             if isinstance(outcome, git_mod.RebaseConflict):
-                if sync.dry_run:
+                if request.dry_run:
                     # Strictly side-effect-free: NO manifest write, the guard stays armed
                     # (the conflicted worktree and temp refs are cleaned like any refusal).
                     raise SyncError(
@@ -1368,17 +1170,17 @@ def _calculate_candidates(
                     operation_id=operation_id,
                     objective_id=objective_id,
                     delivery_lineage=lineage,
-                    run_id=sync.run_id,
-                    include_base=sync.include_base,
+                    run_id=request.run_id or "",
+                    include_base=request.include_base,
                     captured_base_head=base_after,
                     layers=tuple(manifest_layers),
                     conflict_node_id=layer.node_id,
                     worktree_path=str(worktree),
-                    created=sync.now(),
-                    adopted_node=sync.adopt_node,
+                    created=sync.runtime.now(),
+                    adopted_node=request.adopt_node,
                 )
                 try:
-                    path = sync.manifest_write(sync.repo_root, manifest)
+                    path = sync.runtime.write_manifest(sync.repo_root, manifest)
                 except OSError as write_exc:
                     # The conflict happened AND retention failed (permissions/disk): the
                     # guard stays armed — residue is cleaned — and the failure stays inside
@@ -1405,7 +1207,7 @@ def _calculate_candidates(
                     )
                 )
             candidate = outcome.head_sha
-        sync.update_ref(sync.repo_root, temp_ref, candidate)
+        sync.git.update_ref(temp_ref, candidate)
         candidates.append(candidate)
         manifest_layers.append(
             continuation.ContinuationLayer(
@@ -1442,7 +1244,7 @@ def _new_parent_edges(
 
 
 def _reobserve(
-    sync: _Sync,
+    sync: _SyncContext,
     train: DeliveryTrain,
     claimed: Sequence[ClaimedLayer],
     *,
@@ -1457,7 +1259,7 @@ def _reobserve(
         sync, train, claimed, collapse="remote_drift", when=when, adopted_heads=adopted_heads
     )
     if base_after is not None:
-        observed = sync.remote_head(sync.repo_root, train.base)
+        observed = sync.git.remote_branch_sha(train.base)
         if observed != base_after:
             raise SyncError(
                 f"the objective base {train.base!r} moved to {observed or '<absent>'} while "
@@ -1468,7 +1270,7 @@ def _reobserve(
 
 
 def _before_payload(
-    sync: _Sync,
+    sync: _SyncContext,
     train: DeliveryTrain,
     claimed: Sequence[ClaimedLayer],
     affected: Sequence[ClaimedLayer],
@@ -1539,10 +1341,10 @@ def _after_payload(
 
 
 def _push(
-    sync: _Sync,
+    sync: _SyncContext,
     objective_id: str,
     operation_id: str,
-    layers: Sequence[SyncedLayer],
+    layers: Sequence[SyncResult.Layer],
 ) -> None:
     """Step 12: one atomic exact-leased multi-ref push. Refs whose candidate EQUALS their
     observed before state are excluded (decision 16): git's send-pack omits up-to-date
@@ -1564,13 +1366,13 @@ def _push(
     if not updates:
         return
     try:
-        sync.push_atomic(sync.repo_root, updates)
+        sync.git.push_atomic(tuple(updates))
     except git_mod.PushRejectedError as exc:
         try:
             observed = [
-                (layer.branch, sync.remote_head(sync.repo_root, layer.branch)) for layer in layers
+                (layer.branch, sync.git.remote_branch_sha(layer.branch)) for layer in layers
             ]
-        except git_mod.GitError as refetch_exc:
+        except (git_mod.GitError, TrainReconstructionError) as refetch_exc:
             raise SyncError(
                 f"the atomic push was rejected AND the verifying refetch failed "
                 f"({refetch_exc}) — the operation stays unresolved",
@@ -1582,7 +1384,7 @@ def _push(
                 OutcomeRecord(
                     operation_id=operation_id,
                     role=EventRole.ABANDONED,
-                    created=sync.now(),
+                    created=sync.runtime.now(),
                     observed={
                         "branches": [{"ref": branch, "sha": sha} for branch, sha in observed]
                     },
@@ -1619,7 +1421,7 @@ def _verify_postconditions(
     try:
         sync.fetch(sync.repo_root, [layer.branch for layer in affected])
         heads = [sync.remote_head(sync.repo_root, layer.branch) for layer in affected]
-    except git_mod.GitError as exc:
+    except (git_mod.GitError, TrainReconstructionError) as exc:
         raise SyncError(
             f"could not re-observe the affected branches after the push ({exc}) — the "
             "operation stays unresolved",
@@ -1649,7 +1451,7 @@ def _verify_postconditions(
     if len(desired) >= 2:
         try:
             observed_stack = sync.stack_read(number=desired[0], repo_root=sync.repo_root)
-        except GitHubError as exc:
+        except (GitHubError, TrainReconstructionError) as exc:
             raise SyncError(
                 f"could not re-observe the native stack after the push ({exc}) — the "
                 "operation stays unresolved",
@@ -1675,7 +1477,7 @@ def _settle_poll_pr(
     for attempt in range(_SETTLE_ATTEMPTS):
         try:
             facts = sync.pr_facts(number=layer.pr_number, repo_root=sync.repo_root)
-        except GitHubError as exc:
+        except (GitHubError, TrainReconstructionError) as exc:
             raise SyncError(
                 f"could not re-observe PR #{layer.pr_number} after the push ({exc}) — the "
                 "operation stays unresolved",
@@ -1706,7 +1508,7 @@ def _settle_poll_pr(
 def _complete(
     sync: SyncRecordSeams,
     train: DeliveryTrain,
-    layers: Sequence[SyncedLayer],
+    layers: Sequence[SyncResult.Layer],
     *,
     new_parents: Sequence[str],
     operation_id: str,
@@ -1744,7 +1546,7 @@ def _complete(
 def _persist_completion(
     sync: SyncRecordSeams,
     objective_id: str,
-    layers: Sequence[SyncedLayer],
+    layers: Sequence[SyncResult.Layer],
     *,
     new_parents: Sequence[str],
     operation_id: str,
@@ -1854,7 +1656,7 @@ def roll_forward_sync_record(
     train: DeliveryTrain,
     record: PreparedRecord,
     facts: SyncRecordFacts,
-) -> tuple[SyncedLayer, ...]:
+) -> tuple[SyncResult.Layer, ...]:
     """The record-driven roll-forward tail (steps 13-14 under the SAME operation): verify
     postconditions against the recorded expectations, write checkpoints bottom→top with the
     record-derived parent edges, append the ``completed`` outcome."""
@@ -1872,7 +1674,7 @@ def roll_forward_sync_record(
         else None,
     )
     layers = tuple(
-        SyncedLayer(
+        SyncResult.Layer(
             node_id=facts.matched[pos].node_id,
             plan_id=facts.matched[pos].plan_id,
             branch=entry.branch,
@@ -1919,7 +1721,14 @@ def abandon_sync_record(
 # ----------------------------------------------------------------- the resume path
 
 
-def _resume(sync: _Sync, train: DeliveryTrain, record: PreparedRecord) -> SyncResult:
+def _resume(
+    sync: _SyncContext,
+    request: SyncRequest,
+    train: DeliveryTrain,
+    record: PreparedRecord,
+    *,
+    consent: _Consent | None,
+) -> SyncResult:
     """An unresolved SYNC/ADOPT on this lineage: re-derive the expected states from the
     prepared record, corroborate the fresh reconstruction, then observe every recorded ref —
     all-at-``after`` → roll forward (steps 13-14 under the same operation); all-at-``before``
@@ -1928,13 +1737,14 @@ def _resume(sync: _Sync, train: DeliveryTrain, record: PreparedRecord) -> SyncRe
     sync's candidates live in disposable temp refs that do not survive a crash, and a
     recomputed rebase yields different SHAs); mixed/unrelated → ``sync_drift``, unresolved,
     fail closed."""
+    seams = _ContextRecordSeams(sync)
     facts = validate_sync_record(train, record)
-    observed = observe_sync_record(sync, facts)
+    observed = observe_sync_record(seams, facts)
     classification = classify_sync_observation(facts, observed)
     if classification == "all_after":
-        layers = roll_forward_sync_record(sync, train, record, facts)
-        if sync.trigger_plan_id is not None:
-            fresh = _synchronize(sync, train.objective_id)
+        layers = roll_forward_sync_record(seams, train, record, facts)
+        if request.trigger_plan_id is not None:
+            fresh = _synchronize(sync, request, consent=consent)
             note = (
                 f"concluded unresolved operation {record.operation_id} (roll-forward) "
                 "before cascading"
@@ -1955,8 +1765,9 @@ def _resume(sync: _Sync, train: DeliveryTrain, record: PreparedRecord) -> SyncRe
             adopted_node=facts.adopted_node,
         )
     if classification == "all_before":
-        abandon_sync_record(sync, train.objective_id, record, facts, observed)
-        return _fresh(sync, train, abandoned_operation_id=record.operation_id)
+        abandon_sync_record(seams, train.objective_id, record, facts, observed)
+        fresh = _synchronize(sync, request, consent=consent)
+        return replace(fresh, abandoned_operation_id=record.operation_id)
     raise SyncError(
         f"operation {record.operation_id}'s recorded refs verified in a MIXED state "
         f"({[(e.branch, sha) for sha, e in zip(observed, facts.recorded, strict=True)]}), "
@@ -2254,13 +2065,15 @@ def _seq_of_mappings(value: object) -> list[Mapping[str, object]] | None:
 # ----------------------------------------------------------------- continue (§8.49)
 
 
-def _rewrite_manifest_or_refuse(sync: _Sync, manifest: continuation.ContinuationManifest) -> Path:
+def _rewrite_manifest_or_refuse(
+    sync: _SyncContext, manifest: continuation.ContinuationManifest
+) -> Path:
     """An in-continue manifest progress rewrite, kept inside the typed boundary: a write
     failure (permissions/disk) raises ``GitError`` — the CLI maps it to ``git_error`` —
     while the PREVIOUS durable snapshot stays retained and valid (progress recomputes from
     it on the next ``--continue``)."""
     try:
-        return sync.manifest_write(sync.repo_root, manifest)
+        return sync.runtime.write_manifest(sync.repo_root, manifest)
     except OSError as exc:
         raise git_mod.GitError(
             f"could not rewrite the continuation manifest ({exc}) — the previous snapshot "
@@ -2278,12 +2091,14 @@ def _stale(message: str) -> SyncError:
 
 
 def _validated_targets_or_refuse(
-    manifest: continuation.ContinuationManifest, worktree_root: Path
+    runtime: _SyncRuntime,
+    manifest: continuation.ContinuationManifest,
+    worktree_root: Path,
 ) -> continuation.ValidatedTargets:
     """Decision 14: manifest data is never deletion authority by itself — a containment
     violation is the non-destructive typed refusal ``continuation_invalid``."""
     try:
-        return continuation.validated_targets(manifest, worktree_root)
+        return runtime.validate_targets(manifest, worktree_root)
     except continuation.ContainmentViolation as exc:
         raise SyncError(
             f"the continuation manifest failed containment validation ({exc}) — nothing was "
@@ -2343,111 +2158,20 @@ def _manifest_adopted_heads(manifest: continuation.ContinuationManifest) -> dict
     return {layer.branch: layer.before_sha}
 
 
-def continue_train_sync(
-    repo_root: Path,
+def _continue(
+    sync: _SyncContext,
+    request: SyncRequest,
     *,
-    objective_id: str,
-    remote_writers: RemoteWriterProbe,
-    worktree_root: Path,
-    approve: Callable[[SyncCascade], bool] | None = None,
-    reconstruct: Callable[[Path, str], TrainStatus] = observe.reconstruct_repo_train,
-    persistence_factory: Callable[[Path], SyncPersistence] = resolve_train_persistence,
-    pr_facts: _PrFactsRead = stacks.pr_delivery_facts,
-    stack_read: _StackRead = stacks.stack_for_pr,
-    fetch: Callable[[Path, list[str]], None] = _default_fetch,
-    remote_head: Callable[[Path, str], str | None] = git_mod.remote_branch_head,
-    local_head: Callable[[Path, str], str | None] = git_mod.resolve_commit,
-    is_ancestor: Callable[[Path, str, str], bool] = _default_is_ancestor,
-    push_urls: Callable[[Path], list[str]] = git_mod.push_urls,
-    atomic_push_probe: Callable[[Path, str, str, str], None] = _default_atomic_push_probe,
-    push_atomic: Callable[[Path, list[git_mod.RefUpdate]], None] = git_mod.push_atomic_with_leases,
-    update_ref: Callable[[Path, str, str], None] = git_mod.update_ref,
-    delete_ref: Callable[[Path, str], None] = git_mod.delete_ref,
-    list_refs: Callable[[Path, str], list[str]] = git_mod.list_refs,
-    worktree_add: Callable[[Path, Path, str], None] = git_mod.worktree_add_detached,
-    worktree_remove: Callable[[Path, Path], None] = _default_worktree_remove,
-    worktree_prune: Callable[[Path], None] = git_mod.worktree_prune,
-    checkout_detached: Callable[[Path, str], None] = git_mod.checkout_detached,
-    rebase_onto: _RebaseOnto = git_mod.rebase_onto,
-    pending_read: Callable[
-        [Path, str], continuation.PendingContinuation | None
-    ] = continuation.pending_continuation,
-    manifest_write: Callable[
-        [Path, continuation.ContinuationManifest], Path
-    ] = continuation.write_manifest,
-    manifest_clear: Callable[[Path, str], None] = continuation.clear_manifest,
-    path_exists: Callable[[Path], bool] = _default_path_exists,
-    rebase_in_progress: Callable[[Path], bool] = git_mod.rebase_in_progress,
-    worktree_dirty: Callable[[Path], bool] = git_mod.is_dirty,
-    lock: Callable[[Path], AbstractContextManager[None]] = oplock.stack_operation_lock,
-    sleep: Callable[[float], None] = time.sleep,
-    now: Callable[[], str] = plan.now_iso,
+    consent: _Consent | None,
 ) -> SyncResult:
-    """Resume a retained conflict stop (``sync --continue``, contracts.md §8.49).
-
-    The retention boundary (decision 12): everything up to and including the approval gate
-    is pre-journal — refusals and declines retain the manifest + worktree + temp refs; once
-    the prepared record is appended (under the MANIFEST's operation id and run id) the
-    manifest is retired and the journal is the sole authority. Expects the human to have
-    finished the rebase (``git rebase --continue``) in the retained worktree — perk never
-    drives conflict resolution.
-    """
-    sync = _make_sync(
-        repo_root,
-        run_id="",  # a continue journals under the MANIFEST's captured run identity
-        include_base=False,
-        dry_run=False,
-        adopt_node=None,
-        trigger_plan_id=None,
-        approve=approve,
-        remote_writers=remote_writers,
-        worktree_root=worktree_root,
-        persistence_factory=persistence_factory,
-        reconstruct=reconstruct,
-        pr_facts=pr_facts,
-        stack_read=stack_read,
-        fetch=fetch,
-        remote_head=remote_head,
-        local_head=local_head,
-        is_ancestor=is_ancestor,
-        push_urls=push_urls,
-        atomic_push_probe=atomic_push_probe,
-        push_atomic=push_atomic,
-        update_ref=update_ref,
-        delete_ref=delete_ref,
-        list_refs=list_refs,
-        worktree_add=worktree_add,
-        worktree_remove=worktree_remove,
-        worktree_prune=worktree_prune,
-        checkout_detached=checkout_detached,
-        rebase_onto=rebase_onto,
-        pending_read=pending_read,
-        manifest_write=manifest_write,
-        manifest_clear=manifest_clear,
-        path_exists=path_exists,
-        rebase_in_progress=rebase_in_progress,
-        worktree_dirty=worktree_dirty,
-        sleep=sleep,
-        now=now,
-    )
-    with _held_operation_lock(lock, repo_root):
-        return _continue(sync, objective_id)
-
-
-def _continue(sync: _Sync, objective_id: str) -> SyncResult:
     """The continue protocol (steps per contracts.md §8.49): load + containment-validate the
     manifest, resolve the resume point, revalidate against fresh authority, resume candidate
     calculation with per-candidate manifest rewrites, then the approval gate and the normal
     journal-first tail under the manifest's operation identity."""
-    train = sync.reconstruct(sync.repo_root, objective_id)
-    if isinstance(train, NoDeliveryTrain):
-        raise SyncError(
-            f"objective {train.objective_id} has no delivery train ({train.reason})",
-            error_type="not_stacked",
-        )
+    train = _status_train(sync, request.objective_id)
     lineage = _require_lineage(train)
     refuse_structural_blockers(train)
-    pending = sync.pending_read(sync.repo_root, lineage)
+    pending = sync.runtime.pending_continuation(sync.repo_root, lineage)
     if pending is None:
         raise SyncError(
             f"no continuation manifest exists for lineage {lineage} — nothing to continue",
@@ -2462,7 +2186,8 @@ def _continue(sync: _Sync, objective_id: str) -> SyncResult:
         )
     # Step 2: containment validation (decision 14) — manifest data is never deletion or
     # mutation authority by itself.
-    targets = _validated_targets_or_refuse(manifest, sync.worktree_root)
+    worktree_root = sync.runtime.worktree_root(sync.repo_root)
+    targets = _validated_targets_or_refuse(sync.runtime, manifest, worktree_root)
     if manifest.objective_id != train.objective_id or manifest.delivery_lineage != lineage:
         raise SyncError(
             f"the continuation manifest names objective {manifest.objective_id!r} / lineage "
@@ -2483,16 +2208,16 @@ def _continue(sync: _Sync, objective_id: str) -> SyncResult:
     for layer in layers_list[:completed_upto]:
         if layer.candidate_sha is None:  # unreachable by construction; fail closed
             raise _stale(f"manifest layer {layer.node_id} records no candidate")
-        if sync.local_head(sync.repo_root, layer.candidate_temp_ref) != layer.candidate_sha:
+        if sync.git.resolve_commit(layer.candidate_temp_ref) != layer.candidate_sha:
             raise _stale(
                 f"temp ref {layer.candidate_temp_ref} no longer resolves to the recorded "
                 f"candidate {layer.candidate_sha}"
             )
     pending_candidate: str | None = None
     if pending_idx is not None:
-        if not sync.path_exists(targets.worktree):
+        if not sync.runtime.path_exists(targets.worktree):
             raise _stale(f"the retained worktree {targets.worktree} no longer exists")
-        if sync.rebase_in_progress(targets.worktree):
+        if sync.git.rebase_in_progress(targets.worktree):
             raise SyncError(
                 f"the rebase in the retained worktree {targets.worktree} is still in "
                 f"progress — finish it (`git -C {targets.worktree} rebase --continue`) and "
@@ -2500,9 +2225,9 @@ def _continue(sync: _Sync, objective_id: str) -> SyncResult:
                 "resolution",
                 error_type="rebase_in_progress",
             )
-        if sync.worktree_dirty(targets.worktree):
+        if sync.git.worktree_dirty(targets.worktree):
             raise _stale(f"the rebase in {targets.worktree} finished but the worktree is dirty")
-        pending_candidate = sync.local_head(targets.worktree, "HEAD")
+        pending_candidate = sync.git.resolve_commit("HEAD", cwd=targets.worktree)
         if pending_candidate is None:
             raise _stale(f"the retained worktree {targets.worktree} has no resolvable HEAD")
         # The resolved HEAD must be a real continuation of the recorded rebase: it must
@@ -2514,7 +2239,7 @@ def _continue(sync: _Sync, objective_id: str) -> SyncResult:
             raise _stale(
                 f"manifest layer {layers_list[pending_idx].node_id} records no new parent edge"
             )
-        if not sync.is_ancestor(sync.repo_root, pending_parent, pending_candidate):
+        if sync.git.is_ancestor(pending_parent, pending_candidate) is not True:
             raise _stale(
                 f"the resolved HEAD {pending_candidate} in {targets.worktree} does not "
                 f"contain the recorded new parent {pending_parent} — the rebase was aborted "
@@ -2538,7 +2263,7 @@ def _continue(sync: _Sync, objective_id: str) -> SyncResult:
                 f"{m_layer.old_parent_edge} but the fresh stored checkpoint pair records "
                 f"{c_layer.parent_checkpoint_sha}"
             )
-        observed = sync.remote_head(sync.repo_root, m_layer.branch)
+        observed = sync.git.remote_branch_sha(m_layer.branch)
         if observed != m_layer.before_sha:
             raise _stale(
                 f"branch {m_layer.branch!r} observed at {observed or '<absent>'}, but the "
@@ -2550,16 +2275,14 @@ def _continue(sync: _Sync, objective_id: str) -> SyncResult:
             f"{train.observed_base_head_sha or '<absent>'}, but the manifest captured "
             f"{manifest.captured_base_head}"
         )
-    _preflight(sync, train, claimed, adopted_heads=adopted_heads or None)
+    _preflight(sync, request, train, claimed, adopted_heads=adopted_heads or None)
     _check_capability(sync, ref_branch=layers_list[0].branch, ref_sha=layers_list[0].before_sha)
 
     # Step 5: resume candidate calculation bottom-up from the pending layer, rewriting the
     # manifest after EVERY completed candidate (atomic write, same operation id) — a decline
     # then re-enters at the approval gate with every candidate durably recorded.
     if pending_idx is not None and pending_candidate is not None:
-        sync.update_ref(
-            sync.repo_root, layers_list[pending_idx].candidate_temp_ref, pending_candidate
-        )
+        sync.git.update_ref(layers_list[pending_idx].candidate_temp_ref, pending_candidate)
         layers_list[pending_idx] = replace(
             layers_list[pending_idx], candidate_sha=pending_candidate
         )
@@ -2575,15 +2298,17 @@ def _continue(sync: _Sync, objective_id: str) -> SyncResult:
             if new_parent == old_parent:
                 candidate = layer.source_sha
             else:
-                sync.checkout_detached(targets.worktree, layer.source_sha)
-                outcome = sync.rebase_onto(targets.worktree, onto=new_parent, upstream=old_parent)
+                sync.git.checkout_detached(targets.worktree, layer.source_sha)
+                outcome = sync.git.rebase_onto(
+                    targets.worktree, onto=new_parent, upstream=old_parent
+                )
                 if isinstance(outcome, git_mod.RebaseConflict):
                     layers_list[pos] = replace(layer, new_parent_edge=new_parent)
                     manifest = replace(
                         manifest, layers=tuple(layers_list), conflict_node_id=layer.node_id
                     )
                     try:
-                        path = sync.manifest_write(sync.repo_root, manifest)
+                        path = sync.runtime.write_manifest(sync.repo_root, manifest)
                     except OSError as write_exc:
                         # A NEW conflict was hit AND the progress rewrite failed: the
                         # previous snapshot stays durable and valid, and the worktree sits
@@ -2606,7 +2331,7 @@ def _continue(sync: _Sync, objective_id: str) -> SyncResult:
                         error_type="rebase_conflict",
                     )
                 candidate = outcome.head_sha
-            sync.update_ref(sync.repo_root, layer.candidate_temp_ref, candidate)
+            sync.git.update_ref(layer.candidate_temp_ref, candidate)
             layers_list[pos] = replace(layer, new_parent_edge=new_parent, candidate_sha=candidate)
             manifest = replace(manifest, layers=tuple(layers_list))
             _rewrite_manifest_or_refuse(sync, manifest)
@@ -2622,7 +2347,7 @@ def _continue(sync: _Sync, objective_id: str) -> SyncResult:
     # Step 6: the approval gate. Declined → retain EVERYTHING (the manifest now carries
     # every candidate; re-entry lands here again).
     synced = tuple(
-        SyncedLayer(
+        SyncResult.Layer(
             node_id=matched[pos].node_id,
             plan_id=matched[pos].plan_id,
             branch=matched[pos].branch,
@@ -2632,7 +2357,7 @@ def _continue(sync: _Sync, objective_id: str) -> SyncResult:
         )
         for pos in range(len(layers_list))
     )
-    cascade = SyncCascade(
+    cascade = SyncResult.Cascade(
         objective_id=train.objective_id,
         base_branch=train.base,
         include_base=manifest.include_base,
@@ -2640,7 +2365,7 @@ def _continue(sync: _Sync, objective_id: str) -> SyncResult:
         base_after=manifest.captured_base_head if manifest.include_base else None,
         layers=synced,
     )
-    if sync.approve is not None and not sync.approve(cascade):
+    if consent is not None and not consent(cascade):
         return SyncResult(
             objective_id=train.objective_id,
             objective_url=train.objective_url,
@@ -2679,7 +2404,7 @@ def _continue(sync: _Sync, objective_id: str) -> SyncResult:
         delivery_lineage=lineage,
         objective_id=train.objective_id,
         run_id=manifest.run_id,
-        created=sync.now(),
+        created=sync.runtime.now(),
         affected_plans=tuple(layer.plan_id for layer in layers_list),
         before=_before_payload(
             sync, train, claimed, matched, base_after=base_after, observed_before=observed_before
@@ -2698,7 +2423,7 @@ def _continue(sync: _Sync, objective_id: str) -> SyncResult:
     # a deletion failure is a loud note, never a refusal.
     notes: list[str] = []
     try:
-        sync.manifest_clear(sync.repo_root, lineage)
+        sync.runtime.clear_manifest(sync.repo_root, lineage)
     except OSError as exc:
         notes.append(
             f"could not retire the continuation manifest ({exc}) — the operation proceeds "
@@ -2706,9 +2431,10 @@ def _continue(sync: _Sync, objective_id: str) -> SyncResult:
         )
     try:
         _push(sync, train.objective_id, manifest.operation_id, synced)
-        _verify_postconditions(sync, train, claimed, matched, candidates)
+        record_seams = _ContextRecordSeams(sync)
+        _verify_postconditions(record_seams, train, claimed, matched, candidates)
         result = _complete(
-            sync,
+            record_seams,
             train,
             synced,
             new_parents=new_parents,
@@ -2731,87 +2457,15 @@ def _continue(sync: _Sync, objective_id: str) -> SyncResult:
 # ----------------------------------------------------------------- abort (§8.49)
 
 
-@dataclass(frozen=True)
-class AbortPreview:
-    """What the abort confirmation renders: the manifest identity and exactly what an
-    affirmative answer will delete (``contained`` = the full residue; otherwise only the
-    manifest file — the un-matched residue is left for recover's pattern-based sweep)."""
-
-    manifest_path: Path
-    parseable: bool
-    contained: bool
-    operation_id: str | None
-    conflict_node_id: str | None
-    worktree_path: str | None
-
-
-@dataclass(frozen=True)
-class _Abort:
-    """The focused abort dependencies — no publish/authority/candidate machinery."""
-
-    repo_root: Path
-    worktree_root: Path
-    reconstruct: Callable[[Path, str], TrainStatus]
-    delete_ref: Callable[[Path, str], None]
-    list_refs: Callable[[Path, str], list[str]]
-    worktree_remove: Callable[[Path, Path], None]
-    worktree_prune: Callable[[Path], None]
-    pending_read: Callable[[Path, str], continuation.PendingContinuation | None]
-    manifest_clear: Callable[[Path, str], None]
-
-
-def abort_train_sync(
-    repo_root: Path,
-    *,
-    objective_id: str,
-    worktree_root: Path,
-    approve: Callable[[AbortPreview], bool] | None = None,
-    reconstruct: Callable[[Path, str], TrainStatus] = observe.reconstruct_repo_train,
-    delete_ref: Callable[[Path, str], None] = git_mod.delete_ref,
-    list_refs: Callable[[Path, str], list[str]] = git_mod.list_refs,
-    worktree_remove: Callable[[Path, Path], None] = _default_worktree_remove,
-    worktree_prune: Callable[[Path], None] = git_mod.worktree_prune,
-    pending_read: Callable[
-        [Path, str], continuation.PendingContinuation | None
-    ] = continuation.pending_continuation,
-    manifest_clear: Callable[[Path, str], None] = continuation.clear_manifest,
-    lock: Callable[[Path], AbstractContextManager[None]] = oplock.stack_operation_lock,
-) -> SyncResult:
-    """Discard a retained conflict stop (``sync --abort``, contracts.md §8.49).
-
-    Confirmation-gated (the ``approve`` callback; ``None`` = auto-approve): a valid manifest
-    deletes the retained worktree, the operation's temp refs, and the manifest; an invalid
-    or unparseable one deletes ONLY the manifest file (the un-matched residue is left for
-    recover's pattern-based sweep). A declined confirmation is the success envelope
-    ``aborted: False, declined: True`` with nothing deleted. No journal writes on any arm —
-    no remote boundary was crossed.
-    """
-    abort = _Abort(
-        repo_root=repo_root,
-        worktree_root=worktree_root,
-        reconstruct=reconstruct,
-        delete_ref=delete_ref,
-        list_refs=list_refs,
-        worktree_remove=worktree_remove,
-        worktree_prune=worktree_prune,
-        pending_read=pending_read,
-        manifest_clear=manifest_clear,
-    )
-    with _held_operation_lock(lock, repo_root):
-        return _abort(abort, objective_id, approve)
-
-
 def _abort(
-    abort: _Abort, objective_id: str, approve: Callable[[AbortPreview], bool] | None
+    abort: _SyncContext,
+    request: SyncRequest,
+    *,
+    consent: _Consent | None,
 ) -> SyncResult:
-    train = abort.reconstruct(abort.repo_root, objective_id)
-    if isinstance(train, NoDeliveryTrain):
-        raise SyncError(
-            f"objective {train.objective_id} has no delivery train ({train.reason})",
-            error_type="not_stacked",
-        )
+    train = _status_train(abort, request.objective_id)
     lineage = _require_lineage(train)
-    pending = abort.pending_read(abort.repo_root, lineage)
+    pending = abort.runtime.pending_continuation(abort.repo_root, lineage)
     if pending is None:
         raise SyncError(
             f"no continuation manifest exists for lineage {lineage} — nothing to abort",
@@ -2840,13 +2494,15 @@ def _abort(
     contained = False
     if manifest is not None:
         try:
-            targets = continuation.validated_targets(manifest, abort.worktree_root)
+            targets = abort.runtime.validate_targets(
+                manifest, abort.runtime.worktree_root(abort.repo_root)
+            )
             contained = (
                 manifest.objective_id == train.objective_id and manifest.delivery_lineage == lineage
             )
         except continuation.ContainmentViolation:
             targets = None
-    preview = AbortPreview(
+    preview = SyncResult.AbortPreview(
         manifest_path=pending.path,
         parseable=manifest is not None,
         contained=contained and targets is not None,
@@ -2854,7 +2510,7 @@ def _abort(
         conflict_node_id=manifest.conflict_node_id if manifest is not None else None,
         worktree_path=manifest.worktree_path if manifest is not None else None,
     )
-    if approve is not None and not approve(preview):
+    if consent is not None and not consent(preview):
         return _result(aborted=False, declined=True)
 
     notes: list[str] = []
@@ -2880,7 +2536,7 @@ def _abort(
             "residue is left for `perk objective stack recover`'s pattern-based sweep"
         )
     try:
-        abort.manifest_clear(abort.repo_root, lineage)
+        abort.runtime.clear_manifest(abort.repo_root, lineage)
     except OSError as exc:
         cleanup_detail = f" Cleanup report: {'; '.join(notes)}." if notes else ""
         raise SyncError(

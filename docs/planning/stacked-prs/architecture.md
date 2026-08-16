@@ -41,31 +41,43 @@ Delivery.status(StatusRequest {objective_id}) -> StatusResult
 StatusResult -> exactly one of DeliveryTrain | no_train_reason
 Delivery.prepare(PrepareRequest {kind, mode?, base?, objective_id?, node_id?, plan_id?})
   -> PrepareResult {kind, base?, identity?, notice?, planning?, layer?, parent_sha?}
+Delivery.sync(SyncRequest {mode, objective_id, run_id?, include_base?, dry_run?, adopt_node?,
+                           trigger_plan_id?, trigger_run_id?}, consent=...)
+  -> SyncResult {operation/result facts; nested Layer, Cascade, AbortPreview}
 ```
 
 Prepare is a closed flat family: authoring capability; strict/best-effort plan identity; planning
 layer start; and execution layer start. Frozen nested records carry variant details and illegal
-request/result combinations fail at construction. The pure `DeliveryTrain` reconstruction,
-private capability rows, internal `LayerContext`/layer core, and production adapters are not
-package-root APIs. `DeliveryError` has fourteen declared codes; status deliberately translates
-only its six-code subset. Existing publish/synchronize/recover/transfer/land operation APIs remain
-separate mutator seams, and only the sync-owned `probe_atomic_push_urls` compatibility helper is
-retained at the root.
+request/result combinations fail at construction. `SyncRequest` is likewise a closed mode/field
+matrix; `SyncResult` deliberately remains additive operation-produced data without new combination
+guards. The pure `DeliveryTrain` reconstruction, private capability rows, internal
+`LayerContext`/layer core, synchronization engine/runtime, and production adapters are not
+package-root APIs. `DeliveryError` is the bounded status + Prepare + sync hierarchy; status still
+translates only its exact six-code subset. `SyncError` and claimed-prefix/continuation/writer/
+record-recovery vocabulary stay internal. The sync-family package-root API is exactly
+`SyncRequest` and `SyncResult`; continuation, claimed-prefix, writer-probe, atomic-probe, and old
+sync-entrypoint names are internal. The resulting package root has exactly 63 exports;
+publish/recover/transfer/land remain deferred operation seams.
 
 The façade receives three nominal aggregate authorities:
 
 1. **`DeliveryPersistence`.** A backend-aligned authority composing the existing
-   `ObjectiveStore`, `IssueBackend`, and train journal persistence. Production backend selection
-   is deferred until the first persistence read, is cached only after the backend identities agree,
-   and leaves no partial selection after a failed attempt.
-2. **`DeliveryGit`.** Trunk detection, broad and exact-ref fetch, local commit resolution,
-   ref/ancestry/worktree observation, the tolerant live base-head read needed by status, and
-   authoring Prepare's configured push-URL resolution + one no-op atomic probe. Other mutation-only
-   Git capabilities stay with their operation seams.
+   `ObjectiveStore`, `IssueBackend`, and train persistence for objective/plan/journal reads,
+   prepared/outcome appends, and checkpoint-pair writes. Production backend selection is deferred
+   until the first persistence operation, is cached only after the backend identities agree, and
+   leaves no partial selection after a failed attempt.
+2. **`DeliveryGit`.** A bound read-only repository root; trunk detection; broad/exact-ref fetch;
+   repository- or worktree-scoped commit resolution; ref/ancestry/worktree/base observation;
+   Prepare's push-URL resolution + no-op atomic probe; and sync's genuine Git operations: one
+   exact-leased atomic multi-ref push, temp-ref update/delete/list, isolated detached worktree
+   add/remove/prune, detached checkout/rebase, and retained-worktree rebase/dirty state. Existing
+   substrate Git records/results/errors are reused unchanged; config/lock/continuation/path/clock
+   helpers are not Git authority methods.
 3. **`DeliveryGitHub`.** Stable PR facts, tolerant native-stack membership, all-state
-   branch-owned PR lookup, and authoring Prepare's host stack-capability + base merge-rule facts.
-   Checks and landing-readiness observations stay with their operation seams until those slices
-   migrate.
+   branch-owned PR lookup, and authoring Prepare's host stack-capability + base merge-rule facts;
+   sync adds strict native-stack membership and active-writer observation with adapter-owned exact
+   trigger corroboration. Checks and landing-readiness observations stay with their operation seams
+   until those slices migrate.
 
 The nominal interfaces make authority ownership explicit and support small owned in-memory fakes;
 interface, real adapter, and constructor-configured fake move together. Calls that authoring
@@ -401,6 +413,14 @@ published-layer definition is load-bearing.
 
 ## Synchronization protocol
 
+Synchronization is realized behind `Delivery.sync`. The façade binds its persistence/Git/GitHub
+authorities and `Delivery.status` into the private engine context. One immutable private runtime
+owns only config, operation lock, continuation containment/manifest/path helpers, clock, sleep, and
+operation-id minting; it is not a fourth authority or public dependency seam. The `consent`
+keyword is required: callers explicitly provide a callback or deliberately pass `None` for
+automation's auto-approval policy. Every mode acquires one operation lock, and every
+reconstruction/re-entry uses the bound status call graph.
+
 ### Preflight and candidate calculation
 
 Sync's operation universe is the **checkpoint-claimed prefix** — the maximal contiguous bottom
@@ -449,18 +469,22 @@ delivery-policy conversion.
 
 ### Atomic publication
 
-Once every candidate head exists:
+Once every candidate head exists and consent is granted:
 
-1. Write the prepared operation containing every exact before/after branch SHA.
-2. Push all affected branch refs in one `--atomic` operation with one explicit
-   `--force-with-lease=<ref>:<before-sha>` per existing ref.
-3. On any rejection, assume no ref changed, refetch, and classify. Never retry individual refs.
-4. Refetch all branches and PRs, verify ancestry, heads, bases, and native composition.
+1. Re-observe every lease input, then write the prepared operation containing every exact
+   before/after branch SHA.
+2. Exclude candidate==before refs. Push the remaining set in **zero or one** `--atomic` operation
+   with one explicit `--force-with-lease=<ref>:<before-sha>` per existing ref.
+3. On any rejection, refetch and classify. Never retry individual refs.
+4. Refetch **all affected refs**, including excluded no-op refs, plus PRs; verify ancestry, heads,
+   bases, and native composition.
 5. Update every layer's checkpoint pair.
 6. Append completion.
 
 The prepared record makes a lost client response recoverable. Exact leases make competing clients
-safe without pretending the issue backend is a distributed lock.
+safe without pretending the issue backend is a distributed lock. Dry run stops before consent and
+journal/push/checkpoint/manifest effects, but candidate work can create local residue; cleanup is
+best-effort and any surviving residue is reported for orphan sweep.
 
 Advancement of the objective base ref is normal. Status reports it, and explicit sync may treat the
 new base head as the bottom layer's new parent and cascade the complete published train. Landing
@@ -596,7 +620,7 @@ The cold CLI namespace reflects the domain split:
 | Command | Module operation | Mutates |
 | --- | --- | --- |
 | `perk objective stack status` | `reconstruct` | Nothing |
-| `perk objective stack sync` | `synchronize` or `adopt` | Published branch suffix, then checkpoints |
+| `perk objective stack sync` | `Delivery.sync` cascade/continue/abort | Published branch suffix, then checkpoints; or retained local conflict state |
 | `perk objective stack recover` | `recover` | Only effects required to conclude an existing prepared operation |
 | `perk objective stack land` | `land` | GitHub stack merge, then idempotent bookkeeping |
 

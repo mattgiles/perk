@@ -1,11 +1,13 @@
 """Constructor-configured fakes for the delivery façade's aggregate authorities."""
 
 from collections.abc import Mapping
+from pathlib import Path
 
 from perk.backends.issue_backend import PlanState
 from perk.backends.objective_store import ObjectiveState
 from perk.delivery.facade import DeliveryGit, DeliveryGitHub, DeliveryPersistence
-from perk.delivery.journal import JournalFold, fold_events
+from perk.delivery.journal import EventRole, JournalFold, OutcomeRecord, PreparedRecord, fold_events
+from perk.delivery.persistence import AppendResult
 from perk.delivery.train import (
     BaseHeadObservation,
     BranchPrView,
@@ -13,8 +15,9 @@ from perk.delivery.train import (
     StackView,
     WorktreeFacts,
 )
+from perk.substrate import git as git_mod
 
-type Call = tuple[str | int, ...]
+type Call = tuple[object, ...]
 
 _DEFAULT_MERGE_RULES = DeliveryGitHub.MergeRules(squash_allowed=True, merge_queue_required=False)
 
@@ -30,7 +33,7 @@ class _FailureMixin:
 
 
 class FakeDeliveryPersistence(_FailureMixin, DeliveryPersistence):
-    """Minimum status fake for objective, plan, and journal reads."""
+    """Persistence authority fake for status, Prepare, and synchronization."""
 
     def __init__(
         self,
@@ -38,12 +41,16 @@ class FakeDeliveryPersistence(_FailureMixin, DeliveryPersistence):
         objectives: Mapping[str, ObjectiveState] | None = None,
         plans: Mapping[str, PlanState] | None = None,
         journals: Mapping[str, JournalFold] | None = None,
+        prepared_results: Mapping[str, AppendResult] | None = None,
+        outcome_results: Mapping[str, AppendResult] | None = None,
         errors: Mapping[Call, Exception] | None = None,
     ) -> None:
         super().__init__(errors)
         self._objectives = dict(objectives or {})
         self._plans = dict(plans or {})
         self._journals = dict(journals or {})
+        self._prepared_results = dict(prepared_results or {})
+        self._outcome_results = dict(outcome_results or {})
         self.calls: list[Call] = []
 
     def get_objective(self, *, objective_id: str) -> ObjectiveState | None:
@@ -70,25 +77,65 @@ class FakeDeliveryPersistence(_FailureMixin, DeliveryPersistence):
         lineage = raw_lineage if isinstance(raw_lineage, str) else None
         return fold_events((), expected_lineage=lineage)
 
+    def append_prepared(self, objective_id: str, record: PreparedRecord) -> AppendResult:
+        call: Call = ("append_prepared", objective_id, record)
+        self.calls.append(call)
+        self._raise_failure(call)
+        return self._prepared_results.get(
+            record.operation_id,
+            AppendResult(operation_id=record.operation_id, role=EventRole.PREPARED, existed=False),
+        )
+
+    def append_outcome(self, objective_id: str, record: OutcomeRecord) -> AppendResult:
+        call: Call = ("append_outcome", objective_id, record)
+        self.calls.append(call)
+        self._raise_failure(call)
+        return self._outcome_results.get(
+            record.operation_id,
+            AppendResult(operation_id=record.operation_id, role=record.role, existed=False),
+        )
+
+    def write_checkpoints(
+        self,
+        plan_id: str,
+        *,
+        parent_checkpoint_sha: str,
+        published_head_sha: str,
+    ) -> None:
+        call: Call = (
+            "write_checkpoints",
+            plan_id,
+            parent_checkpoint_sha,
+            published_head_sha,
+        )
+        self.calls.append(call)
+        self._raise_failure(call)
+
 
 class FakeDeliveryGit(_FailureMixin, DeliveryGit):
-    """Minimum status/Prepare fake for trunk and Git observations."""
+    """Git authority fake for status, Prepare, and synchronization."""
 
     def __init__(
         self,
         *,
+        repo_root: Path = Path("/repo"),
         trunk: str = "main",
         branches: Mapping[str, str] | None = None,
-        resolutions: Mapping[str, str] | None = None,
+        resolutions: Mapping[str | tuple[Path, str], str] | None = None,
         push_urls: tuple[str, ...] = ("fake://origin",),
         push_urls_error: str | None = None,
         atomic_push_errors: Mapping[str, str] | None = None,
         ancestry: Mapping[tuple[str, str], bool | None] | None = None,
         worktrees: tuple[WorktreeFacts, ...] = (),
         base_heads: Mapping[str, BaseHeadObservation] | None = None,
+        rebase_outcomes: Mapping[tuple[Path, str, str], git_mod.RebaseOutcome] | None = None,
+        dirty_worktrees: frozenset[Path] = frozenset(),
+        rebasing_worktrees: frozenset[Path] = frozenset(),
+        refs: tuple[str, ...] = (),
         errors: Mapping[Call, Exception] | None = None,
     ) -> None:
         super().__init__(errors)
+        self._repo_root = Path(repo_root)
         self._trunk = trunk
         self._branches = dict(branches or {})
         self._resolutions = dict(resolutions or {})
@@ -98,7 +145,15 @@ class FakeDeliveryGit(_FailureMixin, DeliveryGit):
         self._ancestry = dict(ancestry or {})
         self._worktrees = tuple(worktrees)
         self._base_heads = dict(base_heads or {})
+        self._rebase_outcomes = dict(rebase_outcomes or {})
+        self._dirty_worktrees = frozenset(dirty_worktrees)
+        self._rebasing_worktrees = frozenset(rebasing_worktrees)
+        self._refs = tuple(refs)
         self.calls: list[Call] = []
+
+    @property
+    def repo_root(self) -> Path:
+        return self._repo_root
 
     def trunk_branch(self) -> str:
         call: Call = ("trunk_branch",)
@@ -116,10 +171,14 @@ class FakeDeliveryGit(_FailureMixin, DeliveryGit):
         self.calls.append(call)
         self._raise_failure(call)
 
-    def resolve_commit(self, ref: str) -> str | None:
-        call: Call = ("resolve_commit", ref)
+    def resolve_commit(self, ref: str, *, cwd: Path | None = None) -> str | None:
+        call: Call = ("resolve_commit", ref) if cwd is None else ("resolve_commit", ref, cwd)
         self.calls.append(call)
         self._raise_failure(call)
+        if cwd is not None:
+            resolved = self._resolutions.get((cwd, ref))
+            if resolved is not None:
+                return resolved
         return self._resolutions.get(ref)
 
     def remote_branch_sha(self, branch: str) -> str | None:
@@ -157,6 +216,68 @@ class FakeDeliveryGit(_FailureMixin, DeliveryGit):
             return True
         return self._ancestry.get((ancestor_sha, head_sha))
 
+    def push_atomic(self, updates: tuple[git_mod.RefUpdate, ...]) -> None:
+        call: Call = ("push_atomic", updates)
+        self.calls.append(call)
+        self._raise_failure(call)
+
+    def update_ref(self, ref: str, sha: str) -> None:
+        call: Call = ("update_ref", ref, sha)
+        self.calls.append(call)
+        self._raise_failure(call)
+
+    def delete_ref(self, ref: str) -> None:
+        call: Call = ("delete_ref", ref)
+        self.calls.append(call)
+        self._raise_failure(call)
+
+    def list_refs(self, prefix: str) -> tuple[str, ...]:
+        call: Call = ("list_refs", prefix)
+        self.calls.append(call)
+        self._raise_failure(call)
+        return tuple(ref for ref in self._refs if ref.startswith(prefix))
+
+    def add_detached_worktree(self, path: Path, commit: str) -> None:
+        call: Call = ("add_detached_worktree", path, commit)
+        self.calls.append(call)
+        self._raise_failure(call)
+
+    def remove_worktree(self, path: Path) -> None:
+        call: Call = ("remove_worktree", path)
+        self.calls.append(call)
+        self._raise_failure(call)
+
+    def prune_worktrees(self) -> None:
+        call: Call = ("prune_worktrees",)
+        self.calls.append(call)
+        self._raise_failure(call)
+
+    def checkout_detached(self, worktree: Path, sha: str) -> None:
+        call: Call = ("checkout_detached", worktree, sha)
+        self.calls.append(call)
+        self._raise_failure(call)
+
+    def rebase_onto(self, worktree: Path, *, onto: str, upstream: str) -> git_mod.RebaseOutcome:
+        call: Call = ("rebase_onto", worktree, onto, upstream)
+        self.calls.append(call)
+        self._raise_failure(call)
+        outcome = self._rebase_outcomes.get((worktree, onto, upstream))
+        if outcome is None:
+            raise AssertionError(f"no fake rebase outcome configured for {call!r}")
+        return outcome
+
+    def rebase_in_progress(self, worktree: Path) -> bool:
+        call: Call = ("rebase_in_progress", worktree)
+        self.calls.append(call)
+        self._raise_failure(call)
+        return worktree in self._rebasing_worktrees
+
+    def worktree_dirty(self, worktree: Path) -> bool:
+        call: Call = ("worktree_dirty", worktree)
+        self.calls.append(call)
+        self._raise_failure(call)
+        return worktree in self._dirty_worktrees
+
     def worktree_branches(self) -> tuple[WorktreeFacts, ...]:
         call: Call = ("worktree_branches",)
         self.calls.append(call)
@@ -171,7 +292,7 @@ class FakeDeliveryGit(_FailureMixin, DeliveryGit):
 
 
 class FakeDeliveryGitHub(_FailureMixin, DeliveryGitHub):
-    """Minimum status/Prepare fake for GitHub observations."""
+    """GitHub authority fake for status, Prepare, and synchronization."""
 
     def __init__(
         self,
@@ -182,6 +303,8 @@ class FakeDeliveryGitHub(_FailureMixin, DeliveryGitHub):
         prs: Mapping[int, PrFactsView] | None = None,
         branch_prs: Mapping[str, BranchPrView] | None = None,
         stacks: Mapping[int, StackView] | None = None,
+        strict_stacks: Mapping[int, tuple[int, ...] | None] | None = None,
+        active_writers: frozenset[str] = frozenset(),
         errors: Mapping[Call, Exception] | None = None,
     ) -> None:
         super().__init__(errors)
@@ -191,6 +314,8 @@ class FakeDeliveryGitHub(_FailureMixin, DeliveryGitHub):
         self._prs = dict(prs or {})
         self._branch_prs = dict(branch_prs or {})
         self._stacks = dict(stacks or {})
+        self._strict_stacks = dict(strict_stacks or {})
+        self._active_writers = frozenset(active_writers)
         self.calls: list[Call] = []
 
     def stack_capability(self) -> bool:
@@ -210,6 +335,29 @@ class FakeDeliveryGitHub(_FailureMixin, DeliveryGitHub):
         self.calls.append(call)
         self._raise_failure(call)
         return self._prs.get(number)
+
+    def strict_stack_members(self, number: int) -> tuple[int, ...] | None:
+        call: Call = ("strict_stack_members", number)
+        self.calls.append(call)
+        self._raise_failure(call)
+        return self._strict_stacks.get(number)
+
+    def active_writer_plan_ids(
+        self,
+        plan_ids: tuple[str, ...],
+        *,
+        trigger_plan_id: str | None,
+        trigger_run_id: str | None,
+    ) -> frozenset[str]:
+        call: Call = (
+            "active_writer_plan_ids",
+            plan_ids,
+            trigger_plan_id,
+            trigger_run_id,
+        )
+        self.calls.append(call)
+        self._raise_failure(call)
+        return self._active_writers.intersection(plan_ids)
 
     def pr_for_branch(self, branch: str) -> BranchPrView | None:
         call: Call = ("pr_for_branch", branch)

@@ -1,26 +1,28 @@
 """Production adapters for the delivery façade and deferred internal readers.
 
 :func:`resolve_delivery` is the sole public production constructor for the canonical
-:class:`perk.delivery.facade.Delivery` status and Prepare variants. Construction is
+:class:`perk.delivery.facade.Delivery` status, Prepare, and sync variants. Construction is
 assignment-only and does no configuration, credential, Git, subprocess, or network work; the
 nominal adapters resolve or observe their authorities only when an operation needs them.
 
 The compatibility ``TrainReads`` / ``resolve_train_reads`` / ``reconstruct_repo_train`` seams
-remain internal while the later delivery operation families migrate. Landing observations also
+remain internal while the deferred delivery operation families migrate. Landing observations also
 remain here. Stable Git/GitHub failures become typed pure-core errors, while the preview stack
 read and landing-readiness enrichment retain their documented tolerant/fail-closed postures.
 """
 
+import os
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
 from perk.backends.issue_backend import IssueBackend, PlanState
 from perk.backends.objective_store import ObjectiveState, ObjectiveStore
 from perk.backends.resolve import resolve_issue_backend, resolve_objective_store
-from perk.delivery import land
+from perk.delivery import land, writers
 from perk.delivery.facade import Delivery, DeliveryGit, DeliveryGitHub, DeliveryPersistence
-from perk.delivery.journal import JournalFold
-from perk.delivery.persistence import TrainPersistence, TrainPersistenceError
+from perk.delivery.journal import JournalFold, OutcomeRecord, PreparedRecord
+from perk.delivery.persistence import AppendResult, TrainPersistence, TrainPersistenceError
 from perk.delivery.train import (
     BaseHeadObservation,
     BranchPrView,
@@ -48,6 +50,10 @@ class RepoDeliveryGit(DeliveryGit):
         self._repo_root = repo_root
         self._remote = remote
 
+    @property
+    def repo_root(self) -> Path:
+        return self._repo_root
+
     def trunk_branch(self) -> str:
         try:
             return git_mod.detect_trunk_branch(self._repo_root)
@@ -72,8 +78,8 @@ class RepoDeliveryGit(DeliveryGit):
                 f"git fetch failed for refs {refs!r}: {exc}", error_type="git_error"
             ) from exc
 
-    def resolve_commit(self, ref: str) -> str | None:
-        return git_mod.resolve_commit(self._repo_root, ref)
+    def resolve_commit(self, ref: str, *, cwd: Path | None = None) -> str | None:
+        return git_mod.resolve_commit(cwd or self._repo_root, ref)
 
     def remote_branch_sha(self, branch: str) -> str | None:
         try:
@@ -123,6 +129,39 @@ class RepoDeliveryGit(DeliveryGit):
             return BaseHeadObservation(sha=None, failure=str(exc))
         return BaseHeadObservation(sha=sha, failure=None)
 
+    def push_atomic(self, updates: tuple[git_mod.RefUpdate, ...]) -> None:
+        git_mod.push_atomic_with_leases(self._repo_root, list(updates))
+
+    def update_ref(self, ref: str, sha: str) -> None:
+        git_mod.update_ref(self._repo_root, ref, sha)
+
+    def delete_ref(self, ref: str) -> None:
+        git_mod.delete_ref(self._repo_root, ref)
+
+    def list_refs(self, prefix: str) -> tuple[str, ...]:
+        return tuple(git_mod.list_refs(self._repo_root, prefix))
+
+    def add_detached_worktree(self, path: Path, commit: str) -> None:
+        git_mod.worktree_add_detached(self._repo_root, path, commit)
+
+    def remove_worktree(self, path: Path) -> None:
+        git_mod.worktree_remove(self._repo_root, path, force=True)
+
+    def prune_worktrees(self) -> None:
+        git_mod.worktree_prune(self._repo_root)
+
+    def checkout_detached(self, worktree: Path, sha: str) -> None:
+        git_mod.checkout_detached(worktree, sha)
+
+    def rebase_onto(self, worktree: Path, *, onto: str, upstream: str) -> git_mod.RebaseOutcome:
+        return git_mod.rebase_onto(worktree, onto=onto, upstream=upstream)
+
+    def rebase_in_progress(self, worktree: Path) -> bool:
+        return git_mod.rebase_in_progress(worktree)
+
+    def worktree_dirty(self, worktree: Path) -> bool:
+        return git_mod.is_dirty(worktree)
+
     def worktree_branches(self) -> tuple[WorktreeFacts, ...]:
         try:
             worktrees = git_mod.worktree_list(self._repo_root)
@@ -144,6 +183,34 @@ class RepoDeliveryGit(DeliveryGit):
                 WorktreeFacts(path=str(worktree.path), branch=worktree.branch, dirty=dirty)
             )
         return tuple(facts)
+
+
+def _corroborated_remote_run_id(
+    repo_root: Path,
+    plan_id: str,
+    requested_run_id: str | None,
+    *,
+    environ: Mapping[str, str] = os.environ,
+) -> str | None:
+    """Return an invoking remote run only when local run authority proves the exact pair."""
+    if requested_run_id is None or environ.get("PERK_RUN_ID") != requested_run_id:
+        return None
+    from perk.state import cache  # noqa: PLC0415 — preserve delivery import ordering
+
+    try:
+        handoff = cache.read_handoff(repo_root, requested_run_id)
+        plan_ref = cache.read_plan_ref(repo_root)
+    except (OSError, ValueError):
+        return None
+    if (
+        handoff is None
+        or handoff.consumed is not True
+        or handoff.stage not in {"implement", "address"}
+        or plan_ref is None
+        or plan_ref.pr_id.removeprefix("#") != plan_id.removeprefix("#")
+    ):
+        return None
+    return requested_run_id
 
 
 class RepoDeliveryGitHub(DeliveryGitHub):
@@ -185,6 +252,40 @@ class RepoDeliveryGitHub(DeliveryGitHub):
             head_ref=facts.head_ref,
             head_sha=facts.head_sha,
         )
+
+    def strict_stack_members(self, number: int) -> tuple[int, ...] | None:
+        try:
+            stack = stacks.stack_for_pr(number=number, repo_root=self._repo_root)
+        except GitHubError as exc:
+            raise TrainReconstructionError(str(exc), error_type="github_error") from exc
+        return None if stack is None else tuple(stack.member_numbers)
+
+    def active_writer_plan_ids(
+        self,
+        plan_ids: tuple[str, ...],
+        *,
+        trigger_plan_id: str | None,
+        trigger_run_id: str | None,
+    ) -> frozenset[str]:
+        from perk.run import discovery  # noqa: PLC0415 — preserve delivery import ordering
+
+        excluded_run_id: str | None = None
+        excluded_plan_id: str | None = None
+        if trigger_plan_id is not None and trigger_run_id is not None:
+            excluded_run_id = _corroborated_remote_run_id(
+                self._repo_root, trigger_plan_id, trigger_run_id
+            )
+            if excluded_run_id is not None:
+                excluded_plan_id = trigger_plan_id
+        try:
+            return discovery.active_writer_plan_ids(
+                self._repo_root,
+                list(plan_ids),
+                exclude_run_id=excluded_run_id,
+                exclude_plan_id=excluded_plan_id,
+            )
+        except GitHubError as exc:
+            raise writers.WriterObservationError(str(exc)) from exc
 
     def pr_for_branch(self, branch: str) -> BranchPrView | None:
         """The all-state branch-owned PR read (§8.54's cancellation proof) — a stable read:
@@ -306,6 +407,28 @@ class RepoDeliveryPersistence(DeliveryPersistence):
     def read_journal(self, objective_id: str) -> JournalFold:
         _store, _issues, persistence = self._resolve()
         return persistence.read_journal(objective_id)
+
+    def append_prepared(self, objective_id: str, record: PreparedRecord) -> AppendResult:
+        _store, _issues, persistence = self._resolve()
+        return persistence.append_prepared(objective_id, record)
+
+    def append_outcome(self, objective_id: str, record: OutcomeRecord) -> AppendResult:
+        _store, _issues, persistence = self._resolve()
+        return persistence.append_outcome(objective_id, record)
+
+    def write_checkpoints(
+        self,
+        plan_id: str,
+        *,
+        parent_checkpoint_sha: str,
+        published_head_sha: str,
+    ) -> None:
+        _store, _issues, persistence = self._resolve()
+        persistence.write_checkpoints(
+            plan_id,
+            parent_checkpoint_sha=parent_checkpoint_sha,
+            published_head_sha=published_head_sha,
+        )
 
 
 def resolve_delivery(repo_root: Path) -> Delivery:

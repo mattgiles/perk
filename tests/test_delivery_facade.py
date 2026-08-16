@@ -1,14 +1,16 @@
 """Contract tests for the compact ``perk.delivery`` status/Prepare façade."""
 
 import inspect
+from dataclasses import FrozenInstanceError
 from pathlib import Path
-from typing import Literal, cast
+from typing import Any, Literal, cast
 
 import pytest
 
 import perk.delivery as delivery_pkg
 from perk.backends.issue_backend import IssueBackendError, PlanState
 from perk.backends.objective_store import ObjectiveState, ObjectiveStoreError
+from perk.delivery import facade as facade_mod
 from perk.delivery import observe
 from perk.delivery._fakes import FakeDeliveryGit, FakeDeliveryGitHub, FakeDeliveryPersistence
 from perk.delivery.facade import (
@@ -21,8 +23,18 @@ from perk.delivery.facade import (
     PrepareResult,
     StatusRequest,
     StatusResult,
+    SyncRequest,
+    SyncResult,
 )
-from perk.delivery.persistence import TrainPersistenceError
+from perk.delivery.journal import (
+    EventRole,
+    JournalCorruptionError,
+    JournalRecordTooLarge,
+    OperationKind,
+    OutcomeRecord,
+    PreparedRecord,
+)
+from perk.delivery.persistence import AppendResult, TrainPersistenceError
 from perk.delivery.train import (
     BaseHeadObservation,
     BuildReadiness,
@@ -39,6 +51,7 @@ from perk.delivery.train import (
     TrainReconstructionError,
     WorktreeFacts,
 )
+from perk.github import GitHubError
 from perk.objective import NodeStatus, ObjectiveNode
 from perk.substrate import config as config_mod
 from perk.substrate import git as git_mod
@@ -58,6 +71,33 @@ _DELIVERY_ERROR_TYPES = {
     "node_not_build_ready",
     "parent_missing",
     "parent_unverified",
+    "not_stacked",
+    "unresolved_operation",
+    "sync_conflict_pending",
+    "claimed_prefix_malformed",
+    "active_writer",
+    "dirty_worktree",
+    "writer_observation_unavailable",
+    "remote_drift",
+    "pr_drift",
+    "membership_drift",
+    "stale_parent",
+    "base_unobserved",
+    "multiple_push_urls",
+    "atomic_push_unsupported",
+    "rebase_conflict",
+    "push_rejected",
+    "sync_drift",
+    "postcondition_unverified",
+    "adopt_blocked",
+    "no_continuation",
+    "continuation_stale",
+    "continuation_invalid",
+    "rebase_in_progress",
+    "operation_in_progress",
+    "journal_corruption",
+    "journal_record_too_large",
+    "invalid_config",
 }
 _STATUS_ERROR_TYPES = {
     "objective_not_found",
@@ -113,6 +153,22 @@ _RETIRED_EXPORTS = {
     "prepare_layer_start",
     "require_ready_layer",
     "require_reviewable_layer",
+    "ClaimedLayer",
+    "SyncCascade",
+    "SyncError",
+    "SyncedLayer",
+    "derive_claimed_prefix",
+    "synchronize_train",
+    "probe_atomic_push_urls",
+    "ContinuationLayer",
+    "ContinuationManifest",
+    "PendingContinuation",
+    "continuations_dir",
+    "manifest_path",
+    "pending_continuation",
+    "write_manifest",
+    "RemoteWriterProbe",
+    "WriterObservationError",
 }
 _NEW_EXPORTS = {
     "Delivery",
@@ -124,6 +180,8 @@ _NEW_EXPORTS = {
     "PrepareResult",
     "StatusRequest",
     "StatusResult",
+    "SyncRequest",
+    "SyncResult",
     "resolve_delivery",
 }
 _RETAINED_EXPORTS = {
@@ -150,27 +208,12 @@ _RETAINED_EXPORTS = {
     "parse_journal_comment",
     "render_event",
     "resolve_train_persistence",
-    "probe_atomic_push_urls",
-    "ContinuationLayer",
-    "ContinuationManifest",
-    "PendingContinuation",
-    "continuations_dir",
-    "manifest_path",
-    "pending_continuation",
-    "write_manifest",
     "DeliveryOperationFacts",
     "LayerBodyFacts",
     "PublicationError",
     "PublicationResult",
     "TrainRowFacts",
     "publish_layer",
-    "ClaimedLayer",
-    "SyncCascade",
-    "SyncError",
-    "SyncResult",
-    "SyncedLayer",
-    "derive_claimed_prefix",
-    "synchronize_train",
     "LandedPlan",
     "LandFinalization",
     "LearnConsumeUpdate",
@@ -190,8 +233,6 @@ _RETAINED_EXPORTS = {
     "LandedLayer",
     "MergeRulesView",
     "PrLandView",
-    "RemoteWriterProbe",
-    "WriterObservationError",
     "assess_land_readiness",
     "land_train",
     "squash_commit_message",
@@ -326,6 +367,222 @@ def _delivery(
         git=git or FakeDeliveryGit(),
         github=github or FakeDeliveryGitHub(),
     )
+
+
+def test_sync_request_accepts_the_complete_legal_matrix() -> None:
+    valid = (
+        SyncRequest(mode="cascade", objective_id="10", run_id="01RUN"),
+        SyncRequest(mode="cascade", objective_id="10", run_id="01RUN", include_base=True),
+        SyncRequest(
+            mode="cascade", objective_id="10", run_id="01RUN", include_base=True, dry_run=True
+        ),
+        SyncRequest(
+            mode="cascade", objective_id="10", run_id="01RUN", dry_run=True, adopt_node="1.2"
+        ),
+        SyncRequest(
+            mode="cascade",
+            objective_id="10",
+            run_id="01JOURNAL",
+            dry_run=True,
+            trigger_plan_id="101",
+            trigger_run_id="01TRIGGER",
+        ),
+        SyncRequest(mode="continue", objective_id="10"),
+        SyncRequest(mode="abort", objective_id="10"),
+    )
+
+    assert tuple(request.mode for request in valid) == (
+        "cascade",
+        "cascade",
+        "cascade",
+        "cascade",
+        "cascade",
+        "continue",
+        "abort",
+    )
+
+
+@pytest.mark.parametrize(
+    "build",
+    (
+        lambda: SyncRequest(mode=cast("Literal['cascade']", "future"), objective_id="10"),
+        lambda: SyncRequest(mode="cascade", objective_id=" ", run_id="01RUN"),
+        lambda: SyncRequest(mode="cascade", objective_id="10"),
+        lambda: SyncRequest(mode="cascade", objective_id="10", run_id=" "),
+        lambda: SyncRequest(
+            mode="cascade", objective_id="10", run_id="01RUN", include_base=True, adopt_node="1"
+        ),
+        lambda: SyncRequest(
+            mode="cascade",
+            objective_id="10",
+            run_id="01RUN",
+            include_base=True,
+            trigger_plan_id="101",
+        ),
+        lambda: SyncRequest(
+            mode="cascade",
+            objective_id="10",
+            run_id="01RUN",
+            trigger_run_id="01TRIGGER",
+        ),
+        lambda: SyncRequest(mode="continue", objective_id="10", run_id="01RUN"),
+        lambda: SyncRequest(mode="continue", objective_id="10", dry_run=True),
+        lambda: SyncRequest(mode="abort", objective_id="10", adopt_node="1.2"),
+        lambda: SyncRequest(mode="abort", objective_id="10", trigger_plan_id="101"),
+    ),
+)
+def test_sync_request_rejects_every_illegal_shape(build) -> None:
+    with pytest.raises(ValueError):
+        build()
+
+
+def test_sync_result_nested_records_are_frozen_data_without_combination_guards() -> None:
+    layer = SyncResult.Layer("1.1", "101", "plan-101", 42, "a", "b")
+    cascade = SyncResult.Cascade("10", "main", False, None, None, (layer,))
+    abort = SyncResult.AbortPreview(Path("manifest.json"), True, True, "01OP", "1.1", "/wt")
+    result = SyncResult(
+        objective_id="10",
+        objective_url="fake://objective/10",
+        redirected_from=None,
+        operation_id=None,
+        abandoned_operation_id="01OLD",
+        no_op=True,
+        declined=True,
+        resumed=True,
+        base_cascaded=True,
+        base_advanced=True,
+        affected=(layer,),
+        dry_run=True,
+        adopted_node="1.1",
+        continued=True,
+        aborted=True,
+        notes=("residue",),
+    )
+
+    assert cascade.layers == (layer,)
+    assert abort.operation_id == "01OP"
+    assert result.affected == (layer,)
+    assert SyncResult.Layer.__qualname__ == "SyncResult.Layer"
+    with pytest.raises(FrozenInstanceError):
+        type(layer).__setattr__(layer, "node_id", "changed")
+
+
+def _sync_result() -> SyncResult:
+    return SyncResult(
+        objective_id="10",
+        objective_url="fake://objective/10",
+        redirected_from=None,
+        operation_id=None,
+        abandoned_operation_id=None,
+        no_op=True,
+        declined=False,
+        resumed=False,
+        base_cascaded=False,
+        base_advanced=False,
+        affected=(),
+    )
+
+
+@pytest.mark.parametrize("mode", ("cascade", "continue", "abort"))
+def test_delivery_sync_builds_one_authority_context_and_dispatches(
+    monkeypatch: pytest.MonkeyPatch, mode: str
+) -> None:
+    from perk.delivery import sync as sync_mod
+
+    persistence = FakeDeliveryPersistence()
+    git = FakeDeliveryGit(repo_root=Path("/bound-repo"))
+    github = FakeDeliveryGitHub()
+    delivery = Delivery(persistence=persistence, git=git, github=github)
+    request = (
+        SyncRequest(mode="cascade", objective_id="10", run_id="01RUN")
+        if mode == "cascade"
+        else SyncRequest(mode=cast("Literal['continue', 'abort']", mode), objective_id="10")
+    )
+
+    def consent(preview) -> bool:
+        return True
+
+    captured: list[tuple[Any, SyncRequest, object]] = []
+
+    def dispatch(context, actual_request, *, consent):
+        captured.append((context, actual_request, consent))
+        return _sync_result()
+
+    monkeypatch.setattr(sync_mod, "_dispatch", dispatch)
+
+    assert delivery.sync(request, consent=consent) == _sync_result()
+    ((context, actual_request, actual_consent),) = captured
+    assert context.repo_root == Path("/bound-repo")
+    assert context.persistence is persistence and context.git is git and context.github is github
+    assert context.status.__self__ is delivery
+    assert context.runtime is sync_mod._DEFAULT_SYNC_RUNTIME
+    assert actual_request is request and actual_consent is consent
+
+
+def test_delivery_sync_requires_an_explicit_consent_policy() -> None:
+    consent = inspect.signature(Delivery.sync).parameters["consent"]
+    assert consent.kind is inspect.Parameter.KEYWORD_ONLY
+    assert consent.default is inspect.Parameter.empty
+
+
+@pytest.mark.parametrize(
+    ("source", "error_type"),
+    (
+        (git_mod.GitError("git failed"), "git_error"),
+        (GitHubError("github failed"), "github_error"),
+        (TrainReconstructionError("bad train", error_type="invalid_train"), "invalid_train"),
+        (JournalCorruptionError("bad journal"), "journal_corruption"),
+        (JournalRecordTooLarge("10001 exceeds cap 10000"), "journal_record_too_large"),
+        (IssueBackendError("issues failed"), "github_error"),
+        (ObjectiveStoreError("objectives failed"), "github_error"),
+        (TrainPersistenceError("persistence failed"), "github_error"),
+    ),
+)
+def test_delivery_sync_maps_expected_boundary_failures(
+    monkeypatch: pytest.MonkeyPatch, source: Exception, error_type: str
+) -> None:
+    from perk.delivery import sync as sync_mod
+
+    def dispatch(context, request, *, consent):
+        raise source
+
+    monkeypatch.setattr(sync_mod, "_dispatch", dispatch)
+
+    with pytest.raises(DeliveryError) as excinfo:
+        _delivery().sync(
+            SyncRequest(mode="cascade", objective_id="10", run_id="01RUN"), consent=None
+        )
+
+    assert excinfo.value.error_type == error_type
+    assert str(excinfo.value) == str(source)
+
+
+def test_delivery_sync_maps_private_config_failure_and_propagates_unexpected(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from perk.delivery import sync as sync_mod
+
+    def invalid_config(context, request, *, consent):
+        raise sync_mod.SyncConfigurationError("could not load worktree configuration: bad")
+
+    monkeypatch.setattr(sync_mod, "_dispatch", invalid_config)
+    with pytest.raises(DeliveryError) as excinfo:
+        _delivery().sync(
+            SyncRequest(mode="cascade", objective_id="10", run_id="01RUN"), consent=None
+        )
+    assert excinfo.value.error_type == "invalid_config"
+
+    unexpected = RuntimeError("programmer bug")
+
+    def explode(context, request, *, consent):
+        raise unexpected
+
+    monkeypatch.setattr(sync_mod, "_dispatch", explode)
+    with pytest.raises(RuntimeError) as raw:
+        _delivery().sync(
+            SyncRequest(mode="cascade", objective_id="10", run_id="01RUN"), consent=None
+        )
+    assert raw.value is unexpected
 
 
 def test_prepare_request_and_result_validate_the_authoring_discriminator() -> None:
@@ -1306,7 +1563,9 @@ def test_status_returns_stacked_projection_through_aggregate_fakes() -> None:
     assert github.calls == []
 
 
-def test_delivery_error_accepts_exactly_the_fourteen_code_vocabulary() -> None:
+def test_delivery_error_accepts_exactly_the_bounded_code_vocabulary() -> None:
+    assert frozenset(_DELIVERY_ERROR_TYPES) == facade_mod._DELIVERY_ERROR_TYPES
+    assert frozenset(_STATUS_ERROR_TYPES) == facade_mod._STATUS_ERROR_TYPES
     assert {
         DeliveryError("message", error_type=error_type).error_type
         for error_type in _DELIVERY_ERROR_TYPES
@@ -1549,6 +1808,96 @@ def test_lazy_persistence_reuses_only_a_complete_successful_resolution(
     assert issues.calls == ["101"]
 
 
+def test_lazy_persistence_mutations_delegate_exactly_and_reuse_the_cached_adapter(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    store = _ResolvedStore()
+    issues = _ResolvedIssues()
+    resolved = {"store": 0, "issues": 0}
+    adapters: list[Any] = []
+
+    def store_resolver(_root: Path):
+        resolved["store"] += 1
+        return store
+
+    def issues_resolver(_root: Path):
+        resolved["issues"] += 1
+        return issues
+
+    prepared_result = AppendResult(
+        operation_id="01ARZ3NDEKTSV4RRFFQ69G5FAV", role=EventRole.PREPARED, existed=False
+    )
+    outcome_result = AppendResult(
+        operation_id="01ARZ3NDEKTSV4RRFFQ69G5FAV", role=EventRole.COMPLETED, existed=True
+    )
+
+    class _RecordingPersistence:
+        def __init__(self, actual_store, actual_issues) -> None:
+            assert actual_store is store and actual_issues is issues
+            self.calls: list[tuple[object, ...]] = []
+            adapters.append(self)
+
+        def append_prepared(self, objective_id: str, record: PreparedRecord) -> AppendResult:
+            self.calls.append(("append_prepared", objective_id, record))
+            return prepared_result
+
+        def append_outcome(self, objective_id: str, record: OutcomeRecord) -> AppendResult:
+            self.calls.append(("append_outcome", objective_id, record))
+            return outcome_result
+
+        def write_checkpoints(
+            self,
+            plan_id: str,
+            *,
+            parent_checkpoint_sha: str,
+            published_head_sha: str,
+        ) -> None:
+            self.calls.append(
+                (
+                    "write_checkpoints",
+                    plan_id,
+                    parent_checkpoint_sha,
+                    published_head_sha,
+                )
+            )
+
+    monkeypatch.setattr(observe, "resolve_objective_store", store_resolver)
+    monkeypatch.setattr(observe, "resolve_issue_backend", issues_resolver)
+    monkeypatch.setattr(observe, "TrainPersistence", _RecordingPersistence)
+    persistence = observe.RepoDeliveryPersistence(tmp_path)
+    prepared = PreparedRecord(
+        operation_id="01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        operation_kind=OperationKind.SYNC,
+        delivery_lineage="01LINEAGE",
+        objective_id="10",
+        run_id="01RUN",
+        created="2026-01-01T00:00:00Z",
+        affected_plans=("101",),
+        before={},
+        after={},
+    )
+    outcome = OutcomeRecord(
+        operation_id=prepared.operation_id,
+        role=EventRole.COMPLETED,
+        created="2026-01-01T00:01:00Z",
+        observed={},
+    )
+
+    assert persistence.append_prepared("10", prepared) == prepared_result
+    assert persistence.append_outcome("10", outcome) == outcome_result
+    persistence.write_checkpoints(
+        "101", parent_checkpoint_sha="a" * 40, published_head_sha="b" * 40
+    )
+
+    assert resolved == {"store": 1, "issues": 1}
+    assert len(adapters) == 1
+    assert adapters[0].calls == [
+        ("append_prepared", "10", prepared),
+        ("append_outcome", "10", outcome),
+        ("write_checkpoints", "101", "a" * 40, "b" * 40),
+    ]
+
+
 def test_lazy_persistence_resolver_failure_is_uncached(tmp_path: Path, monkeypatch) -> None:
     resolved = {"store": 0, "issues": 0}
 
@@ -1725,5 +2074,5 @@ def test_public_export_cut_is_exact() -> None:
     assert exported >= _NEW_EXPORTS
     assert _RETIRED_EXPORTS.isdisjoint(exported)
     assert exported == _NEW_EXPORTS | _RETAINED_EXPORTS
-    assert len(delivery_pkg.__all__) == 78
+    assert len(delivery_pkg.__all__) == 63
     assert not hasattr(delivery_pkg, "DeliveryTrain")

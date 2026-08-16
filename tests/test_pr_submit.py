@@ -13,6 +13,7 @@ from perk.backends.issue_backend import IssueBackendError, PlanHeaderUpdate
 from perk.backends.linear import agent as linear_agent
 from perk.cli.cli import cli
 from perk.cli.commands.pr import submit_cmd
+from perk.delivery import observe as delivery_observe
 from perk.state import cache
 from perk.substrate import git
 
@@ -507,14 +508,14 @@ def test_writer_self_exclusion_requires_env_handoff_and_plan_corroboration(
     cache.mark_handoff_consumed(tmp_path, run_id)
 
     assert (
-        submit_cmd._corroborated_remote_run_id(
+        delivery_observe._corroborated_remote_run_id(
             tmp_path, "7", run_id, environ={"PERK_RUN_ID": run_id}
         )
         == run_id
     )
-    assert submit_cmd._corroborated_remote_run_id(tmp_path, "7", run_id, environ={}) is None
+    assert delivery_observe._corroborated_remote_run_id(tmp_path, "7", run_id, environ={}) is None
     assert (
-        submit_cmd._corroborated_remote_run_id(
+        delivery_observe._corroborated_remote_run_id(
             tmp_path, "8", run_id, environ={"PERK_RUN_ID": run_id}
         )
         is None
@@ -528,7 +529,7 @@ def test_writer_self_exclusion_rejects_unconsumed_and_unsupported_handoffs(tmp_p
     unconsumed_run_id = "01UNCONSUMED"
     cache.write_handoff(tmp_path, unconsumed_run_id, {"stage": "address", "mode": "read-write"})
     assert (
-        submit_cmd._corroborated_remote_run_id(
+        delivery_observe._corroborated_remote_run_id(
             tmp_path,
             "7",
             unconsumed_run_id,
@@ -541,7 +542,7 @@ def test_writer_self_exclusion_rejects_unconsumed_and_unsupported_handoffs(tmp_p
     cache.write_handoff(tmp_path, unsupported_run_id, {"stage": "submit", "mode": "read-write"})
     cache.mark_handoff_consumed(tmp_path, unsupported_run_id)
     assert (
-        submit_cmd._corroborated_remote_run_id(
+        delivery_observe._corroborated_remote_run_id(
             tmp_path,
             "7",
             unsupported_run_id,
@@ -588,7 +589,7 @@ def _delivery_operation(*, no_op: bool = False):
         affected=()
         if no_op
         else (
-            delivery.SyncedLayer(
+            delivery.SyncResult.Layer(
                 node_id="1.1",
                 plan_id="7",
                 branch="plan-7",
@@ -639,6 +640,7 @@ def test_header_lineage_routes_stacked_even_with_a_stale_ref(monkeypatch):
     data = json.loads(result.output)
     assert data["delivery"] == "stacked"  # the stacked route was taken
     assert published["run_id"] == "01HDR"  # the publish delegation was reached
+    assert published["trigger_run_id"] is None  # fallback journal ids are never trigger proof
     assert calls["pushed"] is False  # never reached the incremental push
 
 
@@ -655,11 +657,6 @@ def test_stacked_submit_delegates_to_publish_layer(monkeypatch):
         return _publication_result()
 
     monkeypatch.setattr(delivery, "publish_layer", _fake_publish)
-    monkeypatch.setattr(
-        submit_cmd,
-        "_corroborated_remote_run_id",
-        lambda repo_root, plan_id, run_id: run_id,
-    )
     probes: dict[str, object] = {}
 
     def _probe(_root, *, base, branch_ref):
@@ -683,9 +680,8 @@ def test_stacked_submit_delegates_to_publish_layer(monkeypatch):
     # publish_layer received the explicit --run-id (it wins over the header run_id).
     assert captured["plan_id"] == "7" and captured["run_id"] == "01RUN_X"
     assert captured["title"] == "My Feature"
-    assert captured["worktree_root"].name == ".worktrees"
-    assert captured["remote_writers"]._exclude_run_id == "01RUN_X"
-    assert captured["remote_writers"]._exclude_plan_id == "7"
+    assert captured["trigger_run_id"] == "01RUN_X"
+    assert "worktree_root" not in captured and "remote_writers" not in captured
     # The identity fields are composed by submit (the builder), written by publish.
     header_fields = _header_builder(captured)
     assert header_fields(42) == {
@@ -815,7 +811,7 @@ def test_stacked_sync_error_maps_verbatim(monkeypatch):
     _stub_get_plan_header(monkeypatch, {"delivery_lineage": "01LINEAGE", "run_id": "01HDR"})
 
     def fail(repo_root, **kwargs):
-        raise delivery.SyncError("remote moved", error_type="remote_drift")
+        raise delivery.DeliveryError("remote moved", error_type="remote_drift")
 
     monkeypatch.setattr(delivery, "publish_layer", fail)
     result = _run_stacked(monkeypatch, ["pr", "submit", "--json"])
@@ -872,6 +868,31 @@ def test_stacked_run_id_falls_back_to_the_header(monkeypatch):
     # header run id serves the journal only.
     header_fields = _header_builder(captured)
     assert header_fields(42) == {"branch": "plan-7", "pr": "42", "lifecycle_stage": "impl"}
+
+
+def test_stacked_blank_run_id_uses_header_only_for_the_journal(monkeypatch):
+    from perk import delivery
+
+    _authed(monkeypatch)
+    _stub_gh(monkeypatch)
+    _stub_get_plan_header(monkeypatch, {"delivery_lineage": "01LINEAGE", "run_id": "01HDR"})
+    captured: dict[str, object] = {}
+
+    def _fake_publish(repo_root, **kwargs):
+        captured.update(kwargs)
+        return _publication_result()
+
+    monkeypatch.setattr(delivery, "publish_layer", _fake_publish)
+    result = _run_stacked(monkeypatch, ["pr", "submit", "--json", "--run-id", ""])
+
+    assert result.exit_code == 0, result.output
+    assert captured["run_id"] == "01HDR"
+    assert captured["trigger_run_id"] is None
+    assert _header_builder(captured)(42) == {
+        "branch": "plan-7",
+        "pr": "42",
+        "lifecycle_stage": "impl",
+    }
 
 
 def test_stacked_run_id_unresolvable_is_invalid_input(monkeypatch):
