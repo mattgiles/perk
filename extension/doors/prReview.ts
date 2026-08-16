@@ -9,10 +9,10 @@
 // pi-subagents v1 RPC (`createRpcWaveAdapter(pi.events)`). The strict completeness policy and
 // the ONE bounded retry are tested implementation inside that entrypoint. The PARENT keeps the
 // judgment: choose the angles, reconcile the typed reports (union/dedupe, derive the verdict),
-// and record ONE consolidated outcome on the PR via the `post_pr_review` tool. The clean guard
-// closes the loop mechanically: while this session's recorded wave outcome is incomplete,
-// `post_pr_review` refuses a clean verdict (`incomplete_coverage`) — incomplete coverage is
-// never a clean review.
+// and record ONE consolidated outcome on the PR via the `post_pr_review` tool. The session state
+// closes the loop mechanically: a valid new pass invalidates old evidence, a normalized outcome
+// is PR-bound and single-use, and incomplete coverage refuses a clean verdict. The Python mutation
+// rechecks the bound target before posting.
 //
 // `post_pr_review` is the mechanical half (mirror of `/address`'s internal resolve half): it
 // DELEGATES the GitHub mutation to the Python cold door (`perk pr review-post` — mutations
@@ -82,8 +82,6 @@ interface PostParams {
   summary: string;
   comments?: ReviewComment[];
   fyi?: string[];
-  /** Recorded only (into last_pr_review). */
-  pr?: number;
   /** Standalone fallback only; recorded-wave calls use the authoritative attempted manifest. */
   angles?: string[];
 }
@@ -126,12 +124,12 @@ function decodeStringArray(p: ToolParams, key: string): string[] | undefined | n
  * `decodeResolveParams`: posting a guessed/partial review is a durable GitHub mutation, so ANY
  * malformed field ⇒ null (whole-batch refusal). `verdict` must be exactly `"clean"`/`"actionable"`;
  * `summary` a non-empty string; each `comments` row strict on path/line(int)/body; `fyi`/`angles`
- * rows non-empty strings; `pr` a number. A `clean` verdict carrying `comments` ⇒ null (the cold
- * door also rejects it as `bad_batch`).
+ * rows non-empty strings. The removed caller-supplied `pr` field is refused. A `clean` verdict
+ * carrying `comments` ⇒ null (the cold door also rejects it as `bad_batch`).
  */
 export function decodePostParams(params: unknown): PostParams | null {
   const p = paramsOf(params);
-  if (p === null) return null;
+  if (p === null || Object.hasOwn(p, "pr")) return null;
   const verdict = stringParam(p, "verdict");
   if (verdict !== "clean" && verdict !== "actionable") return null;
   const summary = stringParam(p, "summary");
@@ -143,19 +141,16 @@ export function decodePostParams(params: unknown): PostParams | null {
   if (fyi === null) return null;
   const angles = decodeStringArray(p, "angles");
   if (angles === null) return null;
-  const pr = numberParam(p, "pr");
-  if (pr === null) return null;
   const result: PostParams = { verdict, summary };
   if (comments !== undefined) result.comments = comments;
   if (fyi !== undefined) result.fyi = fyi;
   if (angles !== undefined) result.angles = angles;
-  if (pr !== undefined) result.pr = pr;
   return result;
 }
 
 /** The cold door's ok-arm fields (the `review-post --json` surface). */
 export interface PostOk {
-  pr?: number;
+  pr: number;
   mode?: string;
   verdict?: string;
   comment_count?: number;
@@ -165,9 +160,11 @@ export interface PostOk {
 export type PostResult = Result<PostOk>;
 
 /** Narrow the cold door's `review-post --json` payload to the fields the tool reports. */
-function decodePostResult(payload: ColdJson): PostOk {
+function decodePostResult(payload: ColdJson): PostOk | null {
+  const pr = numberField(payload, "pr");
+  if (pr === undefined || !Number.isInteger(pr) || pr <= 0) return null;
   return {
-    pr: numberField(payload, "pr"),
+    pr,
     mode: stringField(payload, "mode"),
     verdict: stringField(payload, "verdict"),
     comment_count: numberField(payload, "comment_count"),
@@ -187,10 +184,13 @@ export async function postPrReview(
 ): Promise<PostResult> {
   const fail = failFor(ctx, "pr-review", "post_pr_review");
 
-  // The exact `perk pr review-post --batch` shape ({verdict, summary, comments?, fyi?}).
+  // A recorded wave binds the Python mutation to the PR that every child reviewed. Standalone
+  // calls intentionally omit `expected_pr` for backwards-compatible direct posting.
+  const recorded = reviewWaveState?.state === "recorded" ? reviewWaveState : null;
   const batch: Record<string, unknown> = { verdict: params.verdict, summary: params.summary };
   if (params.comments !== undefined) batch.comments = params.comments;
   if (params.fyi !== undefined) batch.fyi = params.fyi;
+  if (recorded !== null) batch.expected_pr = recorded.pr;
 
   const r = await runColdDoor<PostOk>(pi, ctx, ["pr", "review-post", "--json"], {
     label: "perk pr review-post",
@@ -202,16 +202,26 @@ export async function postPrReview(
     },
   });
 
-  if (!r.ok) return fail(r.message, r.errorType);
+  if (!r.ok) {
+    if (recorded !== null && r.errorType === "review_target_changed") {
+      reviewWaveState = { state: "pending" };
+      return fail(
+        "the active PR changed after this review wave; the recorded reports are stale — rerun " +
+          "/pr-review before posting",
+        "stale_review_wave",
+      );
+    }
+    return fail(r.message, r.errorType);
+  }
 
   const data = r.data;
   // Record the outcome (tier-3, best-effort-with-logging, idempotent, headless-safe). Strict
   // read-back via rebuild — loud-but-non-fatal, the post already succeeded.
   const standaloneAngles = params.angles ?? [];
-  const attempted = lastWave?.attempted ?? standaloneAngles;
-  const covered = lastWave?.covered ?? standaloneAngles;
+  const attempted = recorded?.attempted ?? standaloneAngles;
+  const covered = recorded?.covered ?? standaloneAngles;
   const record = {
-    pr: data.pr ?? params.pr ?? null,
+    pr: data.pr,
     verdict: params.verdict,
     angles: attempted,
     covered_angles: covered,
@@ -226,6 +236,7 @@ export async function postPrReview(
     scope: "pr-review",
     failure: "last_pr_review read-back failed",
   });
+  if (recorded !== null) reviewWaveState = { state: "consumed" };
 
   const nextStep = params.verdict === "clean" ? "/land" : "/address";
   const count = data.comment_count ?? 0;
@@ -244,10 +255,11 @@ export async function postPrReview(
 }
 
 const TOOL_GUIDELINES = [
-  "Call post_pr_review ONCE, after you have reconciled the lanes' typed per-angle reports (union + dedupe the findings) and derived the overall verdict (actionable if ANY report was actionable, else clean).",
+  "Call post_pr_review ONCE, after you have reconciled the lanes' typed per-angle reports (union + dedupe the findings) and derived the overall verdict (actionable if ANY report was actionable, else clean). A recorded outcome is single-use; after a successful post, rerun the review wave before any later post.",
   "Pass post_pr_review the unioned findings as comments[] ({path, line, body}) with each line already anchored to a line in the diff — you never see the diff, so never re-anchor; pass the reviewers' lines straight through. A clean verdict must carry no comments.",
   "Judgment stays with you (the parent): the reviewer children are read-only and report-only — they never post. post_pr_review posts the verdict-driven outcome (clean → 👍, actionable → an advisory COMMENT review) and records last_pr_review.",
   "Never call post_pr_review with a clean verdict when any effective lane (including automatic Ponytail) failed to produce a schema-valid report — incomplete coverage is never a clean review (enforced: while this session's recorded review-wave outcome is incomplete, a clean verdict is refused with error_type incomplete_coverage).",
+  "A recorded wave is PR-bound and single-use. review_wave_unavailable, review_wave_consumed, or stale_review_wave means the old reports are not postable — rerun /pr-review before posting.",
 ];
 
 const WAVE_TOOL_GUIDELINES = [
@@ -299,20 +311,38 @@ export function prReviewGuidance(directive?: string): string {
   return render("stages/pr-review.md", { directive: directive ?? "" });
 }
 
-// The clean guard's session-scoped memory: `run_pr_review_wave` (and the experimental
-// `run_pr_review_dynamic_wave`) record their outcome here, and `post_pr_review` refuses a clean
-// verdict while the recorded wave is incomplete. Module-scope so the dynamic sibling door shares
-// the SAME guard; `registerPrReview` resets it per registration (session-scoped semantics). No
-// recorded wave this session ⇒ clean passes (the tool stays usable standalone).
-let lastWave: { complete: boolean; attempted: string[]; covered: string[] } | null = null;
+// The automated-review state is session-scoped and shared with the dynamic sibling door. `null`
+// preserves standalone posting before any valid wave attempt. A decoded new pass invalidates old
+// evidence immediately (`pending`); only one `recorded` outcome can post, after which `consumed`
+// refuses duplicates until another valid pass starts.
+type ReviewWaveState =
+  | { state: "pending" }
+  | {
+      state: "recorded";
+      pr: number;
+      complete: boolean;
+      attempted: string[];
+      covered: string[];
+    }
+  | { state: "consumed" };
 
-/** Record one authoritative review-wave manifest for the shared post bookkeeping + clean guard. */
+let reviewWaveState: ReviewWaveState | null = null;
+
+/** Invalidate any older report evidence before resolving/spawning a newly decoded pass. */
+export function markReviewWavePending(): void {
+  reviewWaveState = { state: "pending" };
+}
+
+/** Record one authoritative, PR-bound review-wave manifest for post bookkeeping and guards. */
 export function recordReviewWaveOutcome(outcome: {
+  pr: number;
   complete: boolean;
   attempted: string[];
   covered: string[];
 }): void {
-  lastWave = {
+  reviewWaveState = {
+    state: "recorded",
+    pr: outcome.pr,
     complete: outcome.complete,
     attempted: [...outcome.attempted],
     covered: [...outcome.covered],
@@ -321,8 +351,8 @@ export function recordReviewWaveOutcome(outcome: {
 
 /** Register the warm pr-review door: the wave + post tools and the `/pr-review` command. */
 export function registerPrReview(pi: ExtensionAPI): void {
-  // A fresh registration is a fresh session — clear any previous session's recorded wave.
-  lastWave = null;
+  // A fresh registration is a fresh session — clear any previous session's review state.
+  reviewWaveState = null;
 
   pi.registerTool({
     name: "run_pr_review_wave",
@@ -383,6 +413,7 @@ export function registerPrReview(pi: ExtensionAPI): void {
           "bad_input",
         );
       }
+      markReviewWavePending();
       const target = await resolveActivePr(pi, ctx);
       if (!target.ok) {
         return failFor(
@@ -404,6 +435,7 @@ export function registerPrReview(pi: ExtensionAPI): void {
       });
       const attempted = [...decoded.angles, "ponytail"];
       recordReviewWaveOutcome({
+        pr: target.data.number,
         complete: outcome.complete,
         attempted,
         covered: outcome.covered,
@@ -448,8 +480,8 @@ export function registerPrReview(pi: ExtensionAPI): void {
     label: "Post PR review",
     description:
       "Post the reconciled multi-angle /pr-review outcome to the active PR (clean → 👍, actionable " +
-      "→ an advisory COMMENT review). Delegates the GitHub mutation to the perk cold door; records " +
-      "last_pr_review in workflow-state.",
+      "→ an advisory COMMENT review). A recorded wave is PR-bound and single-use. Delegates the " +
+      "GitHub mutation to the perk cold door; records last_pr_review in workflow-state.",
     promptSnippet: "Post the reconciled multi-angle review to the PR",
     promptGuidelines: TOOL_GUIDELINES,
     executionMode: "sequential",
@@ -491,7 +523,6 @@ export function registerPrReview(pi: ExtensionAPI): void {
           description: "Borderline/nit notes (in-session only — never posted to GitHub).",
           items: { type: "string" },
         },
-        pr: { type: "number", description: "Optional PR number, recorded in last_pr_review." },
         angles: {
           type: "array",
           description:
@@ -509,14 +540,38 @@ export function registerPrReview(pi: ExtensionAPI): void {
           "pr-review",
           "post_pr_review",
         )(
-          "post_pr_review needs { verdict: 'clean'|'actionable', summary, comments?, fyi?, pr?, angles? } " +
+          "post_pr_review needs { verdict: 'clean'|'actionable', summary, comments?, fyi?, angles? } " +
             "(a clean verdict must carry no comments)",
           "bad_input",
         );
       }
-      // The clean guard: incomplete coverage is never a clean review — while this session's
-      // recorded wave outcome is incomplete, a clean verdict is refused mechanically.
-      if (decoded.verdict === "clean" && lastWave !== null && !lastWave.complete) {
+      if (reviewWaveState?.state === "pending") {
+        return failFor(
+          ctx,
+          "pr-review",
+          "post_pr_review",
+        )(
+          "the latest review pass has no recorded outcome; rerun /pr-review before posting",
+          "review_wave_unavailable",
+        );
+      }
+      if (reviewWaveState?.state === "consumed") {
+        return failFor(
+          ctx,
+          "pr-review",
+          "post_pr_review",
+        )(
+          "the recorded review outcome has already been posted; rerun /pr-review before posting again",
+          "review_wave_consumed",
+        );
+      }
+      // Incomplete coverage is never a clean review. An actionable post may still record the
+      // findings plus the coverage caveat, consuming that recorded outcome on success.
+      if (
+        decoded.verdict === "clean" &&
+        reviewWaveState?.state === "recorded" &&
+        !reviewWaveState.complete
+      ) {
         return failFor(
           ctx,
           "pr-review",

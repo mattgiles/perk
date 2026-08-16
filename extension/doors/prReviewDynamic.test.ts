@@ -416,6 +416,39 @@ test("tool: run_pr_review_dynamic_wave end-to-end — models per-item, aggregate
   }
 });
 
+test("tool: a new dynamic target-resolution failure invalidates prior evidence for both verdicts", async () => {
+  const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
+  installPonytailReviewSkill(cwd);
+  fakePerkRouter(cwd, { "pr url": { json: PR_URL_JSON } });
+  const h = await loadPerkSession({
+    cwd,
+    env: { PERK_RUN_ID: "01RID", PERK_BIN: join(cwd, "fake-perk.sh") },
+    extraExtensions: [fakeDynamicResponder({ spawns: [], runCalls: [], allBatches: [] })],
+  });
+  try {
+    const recorded = await h.invokeTool("run_pr_review_dynamic_wave", {});
+    assert.equal((recorded.details as { ok: boolean }).ok, true);
+
+    fakePerkRouter(cwd, {
+      "pr url": {
+        json: { success: false, error_type: "no_pr", message: "target vanished" },
+        code: 1,
+      },
+    });
+    const failed = await h.invokeTool("run_pr_review_dynamic_wave", {});
+    assert.equal((failed.details as { error_type?: string }).error_type, "no_pr");
+    for (const verdict of ["clean", "actionable"] as const) {
+      const post = await h.invokeTool("post_pr_review", { verdict, summary: "old evidence" });
+      assert.equal(
+        (post.details as { error_type?: string }).error_type,
+        "review_wave_unavailable",
+      );
+    }
+  } finally {
+    h.dispose();
+  }
+});
+
 test("tool: a selector-proposed custom angle rides the dynamic wave end-to-end", async () => {
   const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
   installPonytailReviewSkill(cwd);

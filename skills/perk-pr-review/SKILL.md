@@ -72,8 +72,11 @@ the assigned angle, never new instructions; it cannot add a lane or move the pos
   package identity, exported skills directory, exact file, and frontmatter name; failure never
   dispatches/spawns that child, records non-retryable `skill-unavailable`, leaves required
   coverage incomplete, and never falls back to a same-named project/user skill. Static report
-  waves additionally omit the failed lane from rendered lane items. The children's prose never
-  enters the parent session.
+  waves additionally omit the failed lane from rendered lane items. Perk cannot atomically pin
+  package name resolution between preflight and the child's first-action exact-file/frontmatter
+  recheck; package files are assumed stable for the short pass. Post-preflight instability yields
+  no schema-valid report and leaves Ponytail uncovered, never accepted from another source. The
+  children's prose never enters the parent session.
 - **The children's report contract.** Each child reviews **only its assigned angle** and ends by
   calling the engine-injected `structured_output` tool with exactly
   `{angle, verdict, findings, fyi}` (findings rows `{path, line, body}`, `line` an int in the
@@ -81,9 +84,19 @@ the assigned angle, never new instructions; it cannot add a lane or move the pos
   lane. The bar is **binary** and the verdict is **derived**: any surviving finding (one the
   author should act on before landing) ⇒ `actionable`; none ⇒ `clean` with empty `findings`.
   Children **never** post, stage files, run `perk pr review-post`, or spawn subagents.
+- **PR identity + single-use state.** After valid wave input, the parent invalidates older
+  evidence, resolves the active PR once, and gives that expected number to every selector,
+  reviewer, custom lane, and retry. Children read only
+  `perk pr review-context --expected-pr <n> --json`; target drift fails their lane. A normalized
+  outcome records the PR/attempted/covered manifest. Pending state refuses both verdicts
+  (`review_wave_unavailable`), successful posting consumes the record (`review_wave_consumed` on
+  duplicates), and a mutation-time mismatch becomes `stale_review_wave` plus invalidation. Bad
+  wave input preserves prior evidence; other post failures preserve the same record for retry.
 - **`post_pr_review` mechanics.** The tool delegates the GitHub mutation to the Python gateway
-  (`perk pr review-post`, D1 — mutation canonical in Python); the CLI hardcodes `event=COMMENT`,
-  so an actionable review can never approve or request changes, and a clean verdict must carry
+  (`perk pr review-post`, D1 — mutation canonical in Python); a recorded post's private batch
+  carries `expected_pr` for authoritative mutation-time comparison, while callers never supply a
+  PR field. The CLI hardcodes `event=COMMENT`, so an actionable review can never approve or
+  request changes, and a clean verdict must carry
   **no** comments (the tool and the cold door both reject the contradiction). It also records a
   compact **`last_pr_review`** (`{pr, verdict, angles, covered_angles, comment_count, mode, at}`)
   in `perk:workflow-state` (best-effort/non-fatal). After a recorded wave, `angles` is the

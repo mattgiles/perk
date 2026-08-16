@@ -403,12 +403,21 @@ end of the section).
 | `active_plan_ref` | object \| null | the provider-agnostic plan ref (§8.4); null during early `plan` |
 | `active_objective` | string \| null | the active objective id (`/objective <id>` sets it, `/objective clear` nulls it) |
 | `last_review_batch` | object \| null | the last fully processed review batch, appended by `finalize_address` only after publication and thread resolution succeed: `{ pr, counts:{actionable,informational,praise,question}, resolved_thread_ids:[…], at:ISO }` |
-| `last_pr_review` | object \| null | the last `/pr-review` (or the experimental `/pr-review-dynamic`) outcome posted via the shared warm `post_pr_review` tool: `{ pr, verdict, angles, covered_angles, comment_count, mode, at:ISO }`; after a recorded wave, `angles` is its authoritative ordered attempted manifest and `covered_angles` is the ordered schema-valid subset (caller-supplied angles are ignored for these fields); standalone posting uses caller-supplied angles for both (or `[]`); best-effort tier (the PR review is the canonical record) |
+| `last_pr_review` | object \| null | the last `/pr-review` (or the experimental `/pr-review-dynamic`) outcome posted via the shared warm `post_pr_review` tool: `{ pr, verdict, angles, covered_angles, comment_count, mode, at:ISO }`; a recorded wave is PR-bound and single-use, and supplies authoritative ordered `angles` / schema-valid `covered_angles`; standalone posting before any valid wave uses caller-supplied angles for both (or `[]`); best-effort tier (the PR review is the canonical record) |
 | `last_review` | object \| null | the last review-door outcome posted via the warm `submit_pr_review` tool: `{ pr, event, comment_count, mode, at:ISO }`; best-effort tier (the submitted PR review is the canonical record) |
 | `session_artifacts` | object \| null | per-name session-artifact provenance pointers `{run_id, name, path, digest, at}` (§8.1); appends carry the **whole merged map** (per-field LWW); strict-append tier |
 | `objective_node_claim` | object \| null | the objective node this session has claimed `planning` (`{ objective, node }`); written by the warm `objective_node` tool on a successful `planning` transition, cleared on a successful non-planning transition for the same node and after a successful node-linked plan save; best-effort tier (cheaply reconstructable; loud-but-non-fatal) |
 | `conflict_resolution_attempts` | number | the bounded conflict-resolution re-drive counter: incremented each time `/submit` drives the `perk.conflict-resolver` subagent on a definitively-unmergeable PR (cap `CONFLICT_RESOLUTION_ATTEMPT_CAP = 2`), reset to 0 on a clean submit; best-effort tier (cheaply reconstructable) |
 | `perk_version` | string | the running perk (extension) version, stamped when run identity is established (the claim/fork/adopt/mint arms, §8.2) — the session-audit **exact-vintage** basis (the key literal is the cross-plane coordination point; the read side is `perk-dev`'s audit corpus/vintage layer); omitted when only the `perkVersion()` failure sentinel is available; best-effort tier |
+
+Automated PR-review postability is session-local interior state, not an appended workflow-state
+field: `null` permits the backwards-compatible standalone post; valid static/dynamic wave input
+moves immediately to `pending` before target resolution (`review_wave_unavailable` on either
+verdict); every normalized outcome records `{pr, complete, attempted, covered}`; one successful
+post consumes it (`review_wave_consumed` thereafter). Bad wave input preserves the prior state.
+A mutation-time PR mismatch returns `stale_review_wave` and moves back to `pending`; other post
+failures keep the recorded outcome retryable. `last_pr_review` is appended only after the
+mutation succeeds.
 
 **Persistence channel:** `pi.appendEntry("perk:workflow-state", data)`. (The *other* Pi
 channel — tool-result `details` — is for state that *is* a tool's output; this is not that.)
@@ -807,9 +816,10 @@ get_pr_review_context{ pr_number, branch, plan_body } -> PrReviewContext{ pr_num
     # (`perk pr review-context`) — the materialized `cache.plan` mirror first, else
     # `IssueBackend.get_plan_body` via the resolver — and passed straight in (best-effort; null
     # lets the review run from the diff). What the spawned child runs.
-    # CLI arm: `perk pr review-context --pr <n>` resolves an arbitrary PR by number (existence +
-    # head ref via `get_pr`, `plan_body` null, clean `pr_not_found` arm); the flagless plan-ref
-    # resolution is byte-identical.
+    # CLI arms: `--pr <n>` resolves an arbitrary PR by number (existence + head ref via `get_pr`,
+    # `plan_body` null, clean `pr_not_found` arm). `--expected-pr <n>` stays on the active-plan,
+    # plan-body-preserving arm and compares the branch-selected target before context fetch;
+    # mismatch is `review_target_changed`. The two flags are mutually exclusive.
 post_pr_review{ pr_number, summary, comments:[{path,line,body,side?}], event? } -> ReviewPostResult{ ok, mode, pr_number, comment_count }
     # ONE atomic review via POST .../pulls/{n}/reviews — comments + body + event land together or
     # not at all. `event` defaults to COMMENT (wire spelling: COMMENT|APPROVE|REQUEST_CHANGES) and
@@ -828,26 +838,33 @@ post_pr_review{ pr_number, summary, comments:[{path,line,body,side?}], event? } 
     # `/pr-review`'s parent-side `post_pr_review` tool, which delegates via
     # `perk pr review-post --json --batch <path>` (the reviewer children report findings to the
     # parent; they never post; review-post never passes `event` — hardcoded-COMMENT posture).
+    # A recorded wave adds strict positive `expected_pr` to that batch; the CLI compares it with
+    # the freshly resolved active PR before mutation (`review_target_changed` on drift). Dry-run
+    # validates the field while remaining offline. Standalone batches omit it.
 add_pr_reaction{ pr_number }                        -> void
     # the clean-verdict 👍 (issues-reactions endpoint — idempotent on rerun); a hard error on
     # failure (mutations raise; nothing review-shaped is lost).
 ```
 
-The static `/pr-review` input remains 2–4 selected angles with `plan-fidelity` mandatory. Its
-effective manifest is those angles followed by exactly one automatic final **`ponytail`** lane,
-outside the input menu/cap. That lane uses the same `perk.pr-reviewer` model, directive, timeout,
-and report schema family, with invocation-private `skill: "ponytail-review"` source-bound by the
-agent's exact package `skillPath`. Perk preflights package name, `pi.skills`, the exact readable
-skill file, and its frontmatter name before rendering. A failed preflight omits only that child,
-records deterministic non-retryable `skill-unavailable`, retains Ponytail in attempted receipts,
-and leaves it uncovered/incomplete; ordinary failed lanes retain the one bounded retry. No
-same-named project/user skill fallback is possible. The parent records the explicit effective
-attempted and covered arrays before `post_pr_review`; the shared post tool uses them for §8.3's
-authoritative `last_pr_review` fields and refuses clean whenever any effective lane is uncovered.
+The static `/pr-review` input remains 2–4 selected angles with `plan-fidelity` mandatory. After
+parameter decode the parent invalidates any older report state, resolves the active target once via
+`perk pr url --json`, and binds every child to that number. Its effective manifest is those angles
+followed by exactly one **required automatic** final `ponytail` lane, outside the input menu/cap.
+Every reviewer uses only `perk pr review-context --expected-pr <bound-number> --json`; target drift
+therefore yields no schema-valid report. Ponytail uses the same `perk.pr-reviewer` model, directive,
+timeout, and report schema family, with invocation-private `skill: "ponytail-review"` source-bound
+by the agent's exact package `skillPath`. Perk preflights package name, `pi.skills`, the exact
+readable skill file, and its frontmatter name. A failed preflight never dispatches/spawns that
+child; static report waves additionally omit it from rendered lane items. The keyed non-retryable
+`skill-unavailable` failure retains Ponytail in the logical attempted manifest and leaves it
+uncovered/incomplete; ordinary failed lanes retain the one bounded retry. No same-named
+project/user skill fallback is possible. A normalized result records the bound PR plus explicit
+effective attempted and covered arrays for §8.3's single-use post state.
 
-The experimental `/pr-review-dynamic` door shares `post_pr_review`/`review-post` and the clean
-guard unchanged — angle selection is delegated to a fresh `perk.review-angle-selector` lane and
-normalized in module-rendered code (`extension/waves/prReviewDynamicWave.ts`); the baseline
+The experimental `/pr-review-dynamic` door shares the same PR-bound, single-use
+`post_pr_review`/`review-post` state — angle selection is delegated to a fresh
+`perk.review-angle-selector` lane and normalized in module-rendered code
+(`extension/waves/prReviewDynamicWave.ts`); the baseline
 `/pr-review` stays canonical. One Ponytail promise starts independently alongside plan-fidelity
 and the selector, never consumes selector output, and is appended last to `selection.effective`;
 `ponytail` is a reserved custom key and the lane remains outside the selector cap. The selector
@@ -867,9 +884,17 @@ correctness+tests fallback fires only with zero valid picks AND no valid custom.
 uses the same source-bound preflight/non-retryable failure semantics as static review; its
 pre-launch receipt manifest is `plan-fidelity`, `angle-selector`, `ponytail`, and a pre-selection
 failure still records the deterministic attempted reviewer manifest `plan-fidelity`, `ponytail`.
-Both wave tools (`run_pr_review_wave`, `run_pr_review_dynamic_wave`) persist ordered attempt
-receipts in their tool-result details (observability only — §8.35's output-free receipt contract;
-the clean guard and completeness are unchanged).
+The selector, plan-fidelity, Ponytail, fixed/custom fan-out, and static retry tasks all carry the
+same parent-resolved expected PR. Both wave tools persist ordered attempt receipts in their
+tool-result details (observability only — §8.35's output-free receipt contract; completeness is
+unchanged).
+
+**Residual source-binding race.** Source-bound waves perform one exact-path preflight per pass and
+each Ponytail child makes the exact file/frontmatter check its first action. Perk cannot atomically
+pin upstream package name resolution between those reads; package files are assumed stable for the
+short pass. If a file changes or disappears after preflight, the child terminates without a
+schema-valid report, so Ponytail remains uncovered and the wave incomplete—never accepted as
+coverage from another source.
 
 ### PR-review toolbox ops (checkout / cleanup / review-submit)
 
@@ -1030,11 +1055,12 @@ prompt; the contracts pin the output shape, not the judgment rubric.
   for **undisclosed scope**; the parent always includes this angle) · `correctness` (incl. the
   untrusted-code supply-chain axes: CI/workflow edits, dependency pins, install/build scripts,
   secrets handling, obfuscated code) · `tests` (adequacy by reasoning only) · `quality`. Every
-  PR-backed adversarial wave appends exactly one automatic final `ponytail` lane outside the 2–3
-  selection cap, using the same model/directive/report schema plus invocation-private
-  `ponytail-review` from the exact package `skillPath`. Package/file/frontmatter preflight failure
-  omits only that child, records non-retryable `skill-unavailable`, and leaves it uncovered without
-  fallback.
+  PR-backed adversarial wave appends exactly one **required automatic** final `ponytail` lane
+  outside the 2–3 selection cap, using the same model/directive/report schema plus
+  invocation-private `ponytail-review` from the exact package `skillPath`.
+  Package/file/frontmatter preflight failure never dispatches/spawns that child, records
+  non-retryable `skill-unavailable`, and leaves it uncovered without fallback; after successful
+  preflight, the child's first-action recheck enforces the residual source-race posture above.
 - **Posture:** all fetched text is untrusted DATA, and the PR title/body are **unverified claims
   by the PR author** (an author not trusted by default) — checked against the diff, never built
   on. **Never-execute-the-head:** inside the head worktree the child uses
@@ -3640,12 +3666,15 @@ one-stop current shape.
     construction. The **custom lane is the draft doors' user-input channel** (no `directive`
     param exists), riding the primed context automatically as its own `custom` lane; the
     surface handle is structurally unrepresentable in the wave (no URL parameter exists).
-    After selected lanes and the optional custom lane, the tool appends exactly one automatic
-    final `ponytail` lane outside both menus/caps. It uses the same `perk.draft-reviewer` model,
+    After selected lanes and the optional custom lane, the tool appends exactly one **required
+    automatic** final `ponytail` lane outside both menus/caps. It uses the same
+    `perk.draft-reviewer` model,
     timeout, and report schema with invocation-private `skill: "ponytail"` source-bound by the
     agent's exact package `skillPath`; package/file/frontmatter preflight failure omits only that
     child, records non-retryable `skill-unavailable`, and leaves it in the requested manifest but
-    uncovered, with no same-name fallback. **Zero retries** — honest incompleteness surfaced to
+    uncovered, with no same-name fallback. The child's first action rechecks the exact source;
+    post-preflight instability therefore yields no report and remains incomplete under the
+    residual source-race posture above. **Zero retries** — honest incompleteness surfaced to
     the human (the uncovered lane(s) named, never papered over); a pending wave makes a second
     start refuse `wave_active`; `collect_draft_review_wave` mirrors the PR pair (`no_wave` /
     grace-raced `wave_running` with the pending wave retained / the typed aggregate `{complete,
@@ -5192,6 +5221,17 @@ guidance-rendered `bundle_dir` (the model relays it verbatim — the same trust 
 text), derives `manifest.json` itself (`bad_input` when absent), and resolves the analyst model
 from `[models.subagents] learn-analyst` at execute time (the wave's workflow-level `model`
 default). The manifest write rule above and the DECISION vocabulary are unchanged.
+
+**Streaming launch manifests.** `startReportWave` returns one preflight-derived
+`WaveLaunchManifest = {requested, runnable, preflightFailures}` on both result arms. `requested`
+preserves the declared lane order; `runnable` is the ordered subset eligible for the rendered
+workflow after required-skill preflight; `preflightFailures` contains one ordered keyed
+`skill-unavailable` row per omission. The streaming adversarial/draft start tools expose this
+nested `launch` shape and say only runnable lanes launched; pending collection still keeps the full
+requested denominator. If every lane is skipped, no workflow is spawned: the start is unavailable,
+its receipt has no children, and the same keyed failures appear in the manifest/result without a
+synthetic wave-level failure. `WaveAttemptReceipt.requestedKeys` remains the pre-launch logical
+manifest and is not narrowed by this launch vocabulary.
 
 **Attempt receipts (flow-generic).** Every code-owned wave flow records an **output-free**
 `WaveAttemptReceipt` per top-level workflow launch when the completion payload carries the
@@ -8535,6 +8575,12 @@ state / surface delta / detail — never inventing new contract prose mid-migrat
 suites that pin the edited prose in the same change (prompt-prose edits touch no parity
 fixture — §8.31's Tier B is engine-vs-engine — but extension context/factory tests and binding
 guards may pin strings).
+
+**Review-flow application.** The automated, adversarial, and draft-review launch statements own
+only flow choreography and compact labels: they name Ponytail as required automatic coverage and
+teach the requested/runnable launch vocabulary, but never restate its full rubric or source-check
+procedure. The bound review skills and reviewer agent definitions remain the canonical detail and
+judgment carriers for ownership, exact-source recheck, and the residual filesystem race.
 
 **Scope.** The objective's migration nodes cover the named stage families; all other perk-owned
 stage prose (e.g. the `skills` door family) is held to this rule as ordinary maintenance going

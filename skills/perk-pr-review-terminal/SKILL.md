@@ -63,7 +63,12 @@ lands before (or without) the comments it summarizes.
   ordinary lanes mention simplification only when inseparable from their assigned harm and never
   duplicate a standalone Ponytail finding. Failed exact-source preflight never dispatches/spawns
   that child, reports non-retryable `skill-unavailable`, and leaves required coverage incomplete
-  without falling back to a same-named skill.
+  without falling back to a same-named skill. The child's first-action exact-source recheck closes
+  the post-preflight side honestly: package instability yields no schema-valid report and remains
+  incomplete; package files are assumed stable for the short pass.
+- **Launch truthfulness.** `start_review_wave` returns nested
+  `launch: {requested, runnable, preflightFailures}`; only `runnable` lanes were accepted for
+  spawning, while collection keeps `requested` as the coverage denominator.
 - **The reviewer model.** The configured `[models.subagents] adversarial-reviewer` model is
   resolved by `start_review_wave` at execute time — the door reads no config and the guidance
   carries no model plumbing.

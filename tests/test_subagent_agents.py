@@ -60,6 +60,8 @@ def test_reviewer_defs_source_bind_only_the_exact_ponytail_skill_paths():
         assert "checking the exact package file is your **first action**" in compact
         assert "terminate without calling `structured_output`" in compact
         assert "never resolve a same-named project/user skill" in compact
+        assert "Package files are assumed stable only for the short review pass" in compact
+        assert "this recheck leaves Ponytail uncovered" in compact
         assert "exclusive owner of standalone findings" in compact
         assert "Ordinary lanes may mention simplification only when it is inseparable" in compact
         assert "must lead with that angle-specific harm" in compact

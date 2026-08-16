@@ -1,6 +1,7 @@
 """`perk pr review-post` — submit a `/pr-review` verdict to the PR.
 
-Reads a JSON review batch (`{verdict, summary, comments?, fyi?}`) from a `--batch <file>` arg
+Reads a JSON review batch (`{verdict, summary, comments?, fyi?, expected_pr?}`) from a
+`--batch <file>` arg
 (pi.exec has no stdin channel, so the spawned reviewer child writes a temp file and passes its path
 here), resolves the active plan's PR, and branches on the **verdict**:
 
@@ -44,7 +45,8 @@ from perk.substrate.output import user_output
     type=click.Path(exists=True, dir_okay=False, path_type=Path),
     help=(
         "Path to a JSON file: {verdict: 'clean'|'actionable', summary: str, "
-        "comments?: [{path, line, body}] (actionable only), fyi?: [str] (in-session only)}."
+        "comments?: [{path, line, body}] (actionable only), fyi?: [str] (in-session only), "
+        "expected_pr?: positive int}."
     ),
 )
 @click.option("--dry-run", is_flag=True, help="Validate the batch without touching GitHub.")
@@ -62,10 +64,17 @@ def review_post_pr(ctx: click.Context, *, batch_file: Path, dry_run: bool, as_js
         repo_root = require_repo(ctx)
         if not dry_run:
             require_github(ctx)
-        verdict, summary, comments, fyi = _load_batch(batch_file)
+        verdict, summary, comments, fyi, expected_pr = _load_batch(batch_file)
         # Dry-run only validates the batch — it neither requires auth nor resolves the PR (which
-        # would shell `gh`). A real post resolves the active plan's PR first.
+        # would shell `gh`). A real post resolves the active plan's PR and binds the mutation to
+        # the automated wave's expected target when one was supplied.
         pr_number = 0 if dry_run else _resolve_pr(repo_root=repo_root)
+        if not dry_run and expected_pr is not None and pr_number != expected_pr:
+            raise UserFacingCliError(
+                f"Review target changed: expected PR #{expected_pr}, found PR #{pr_number}\n"
+                "Run /pr-review again before posting.",
+                error_type="review_target_changed",
+            )
         if verdict == "clean":
             result = github.add_pr_reaction(
                 pr_number=pr_number, repo_root=repo_root, dry_run=dry_run
@@ -129,17 +138,18 @@ class ReviewCommentInput(StrictInputModel):
 
 
 class ReviewBatchInput(StrictInputModel):
-    """The strict `/pr-review` batch shape (`{verdict, summary, comments?, fyi?}`).
+    """The strict `/pr-review` batch shape.
 
     `comments`/`fyi` stay nullable so an explicit `null` is tolerated (today's behavior),
-    normalized to `[]` in conversion. `line: int` under strict rejects `bool`/`float`/`str`
-    (preserving the old `isinstance(line, bool)` guard).
+    normalized to `[]` in conversion. `line: int` and `expected_pr: int` reject
+    `bool`/`float`/`str` under strict validation.
     """
 
     verdict: Literal["clean", "actionable"]
     summary: str = Field(min_length=1)
     comments: list[ReviewCommentInput] | None = None
     fyi: list[str] | None = None
+    expected_pr: int | None = Field(default=None, gt=0)
 
     @model_validator(mode="after")
     def _clean_has_no_comments(self) -> "ReviewBatchInput":
@@ -150,8 +160,8 @@ class ReviewBatchInput(StrictInputModel):
 
 def _load_batch(
     batch_file: Path,
-) -> tuple[str, str, list[github.InlineReviewComment], list[str]]:
-    """Parse + validate the batch → ``(verdict, summary, comments, fyi)``. Raises ``bad_batch``."""
+) -> tuple[str, str, list[github.InlineReviewComment], list[str], int | None]:
+    """Parse and validate the batch, including its optional mutation-bound PR identity."""
     try:
         data = json.loads(batch_file.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
@@ -168,7 +178,7 @@ def _load_batch(
         github.InlineReviewComment(path=c.path, line=c.line, body=c.body)
         for c in (model.comments or [])
     ]
-    return model.verdict, model.summary, comments, list(model.fyi or [])
+    return model.verdict, model.summary, comments, list(model.fyi or []), model.expected_pr
 
 
 def _result_to_dict(

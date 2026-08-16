@@ -19,8 +19,11 @@ lives in [Model-facing tools](./model-tools.md).
 Run one automated wave with 2–4 selected fresh-context reviewer lanes. **Plan fidelity &
 completeness** is mandatory; the parent chooses 1–3 additional angles from correctness, tests,
 quality, API design, code organization, and idiomatic language use. Perk then appends exactly one
-automatic final `ponytail` lane outside that selection cap. It uses the same reviewer model,
-directive, and report schema family; it is not selectable and must not be duplicated. Every lane
+required automatic final `ponytail` lane outside that selection cap. It uses the same reviewer
+model, directive, and report schema family; it is not selectable and must not be duplicated.
+Ponytail exclusively owns standalone YAGNI, deletion, dependency/configuration removal, and
+materially-smaller/native-replacement findings. Ordinary lanes mention simplification only when
+inseparable from their assigned harm and never duplicate the standalone finding. Every lane
 returns an engine-validated report and never posts.
 
 The parent unions and deduplicates findings, derives one verdict, then posts once. Actionable work
@@ -29,9 +32,21 @@ wave applies one bounded retry, reports any remaining failure as incomplete, and
 `post_pr_review` refuses a clean verdict with `incomplete_coverage`. Exact Ponytail package/skill
 preflight failure is non-retryable: the child does not spawn or fall back to a same-named skill,
 and the attempted `ponytail` lane remains explicitly uncovered with `skill-unavailable` while the
-other lanes continue. Actionable findings may still post with the incomplete-coverage note. An
-optional free-form focus note follows the command and steers emphasis without removing plan
-fidelity or changing the 2–4 selected-angle limit.
+other lanes continue. Package files are expected to stay stable for the short pass; the child
+rechecks the exact file/frontmatter as its first action, so post-preflight changes produce no
+schema-valid report and remain incomplete rather than counting another source. Actionable findings
+may still post with the incomplete-coverage note. An optional free-form focus note follows the
+command and steers emphasis without removing plan fidelity or changing the 2–4 selected-angle
+limit.
+
+Before spawning, the parent resolves the active PR once. The selector and every reviewer/retry
+read context only through `perk pr review-context --expected-pr <that-number> --json`; target drift
+fails the lane. The resulting outcome is single-use and mutation-bound: starting any new valid pass
+invalidates older evidence immediately, target-resolution failure leaves posting unavailable, and
+one successful post consumes the record. Duplicate posts fail `review_wave_consumed`; pending
+passes fail `review_wave_unavailable`. At mutation time `perk pr review-post` re-resolves the PR and
+compares its private `expected_pr`; drift becomes `stale_review_wave`, invalidates the reports, and
+requires a fresh review. Other posting failures leave the same outcome retryable.
 
 Companion tools:
 
@@ -40,10 +55,11 @@ Companion tools:
   bounded retry to retryable failures, and return `{ complete, covered, retried, reports,
   failures }`. *Non-terminating.*
 - **`post_pr_review`** — post the reconciled result through `perk pr review-post` and record
-  `last_pr_review`; it enforces the incomplete-clean refusal. After a recorded wave,
-  `last_pr_review.angles` is the authoritative attempted manifest (including Ponytail), while
-  `covered_angles` contains only successful schema-valid coverage. A standalone call uses the
-  caller-supplied angles for both fields. *Non-terminating.*
+  `last_pr_review`; it enforces incomplete-clean, pending, consumed, and stale-target refusals.
+  After a recorded wave, `last_pr_review.angles` is the authoritative attempted manifest
+  (including Ponytail), while `covered_angles` contains only successful schema-valid coverage.
+  The PR comes from the cold-door result; callers never supply one. A standalone call before any
+  valid wave uses caller-supplied angles for both fields. *Non-terminating.*
 
 ### `/pr-review-dynamic`
 
@@ -109,8 +125,10 @@ install hint. Foreign review always cleans up its checkout.
 
 Companion tools:
 
-- **`start_review_wave`** / **`collect_review_wave`** — launch 2–3 selected lanes plus automatic
-  final Ponytail non-blocking and collect `{ complete, covered, reports, failures }`. Incomplete
+- **`start_review_wave`** / **`collect_review_wave`** — request 2–3 selected lanes plus required
+  automatic final Ponytail non-blocking and collect `{ complete, covered, reports, failures }`.
+  Start details return `launch: {requested, runnable, preflightFailures}`: only `runnable` lanes
+  were accepted for spawning, while collection retains `requested` as the denominator. Incomplete
   coverage is reported, never hidden. *Non-terminating.*
 - **`submit_pr_review`** — validate with `dry_run: true`, then submit comments, body, and event as
   one atomic review through `perk pr review-submit`, recording `last_review`. It rejects formal
@@ -151,12 +169,14 @@ and adds:
 Both draft doors review the exact validated artifact primed by the command. They never accept
 pasted draft text from the model. The shared companion tools are:
 
-- **`start_draft_review_wave`** / **`collect_draft_review_wave`** — run 2–3 selected non-blocking
-  `perk.draft-reviewer` lanes over the primed bytes, followed by an optional supplied custom lane
-  and exactly one automatic final source-bound Ponytail lane, and return `{ complete, covered,
-  reports, failures }`. Ponytail is outside the selected/custom menus and uses the same model/report
-  family. An exact-source failure is `skill-unavailable`, uncovered, and never falls back.
-  Coverage failures are reported with no retry. *Non-terminating.*
+- **`start_draft_review_wave`** / **`collect_draft_review_wave`** — request 2–3 selected
+  non-blocking `perk.draft-reviewer` lanes over the primed bytes, followed by an optional supplied
+  custom lane and exactly one required automatic final source-bound Ponytail lane, and return
+  `{ complete, covered, reports, failures }`. Start details use the same nested
+  `launch: {requested, runnable, preflightFailures}` truthfulness contract. Ponytail is outside the
+  selected/custom menus and uses the same model/report family. An exact-source failure is
+  `skill-unavailable`, uncovered, and never falls back. Coverage failures are reported with no
+  retry. *Non-terminating.*
 - **`push_annotations`** — deliver phrase-anchored findings to the same primed browser surface.
   *Non-terminating.*
 - **`plan_review`** — process the human decision through the normal approval/denial/save seams.

@@ -822,6 +822,35 @@ test("runner: happy path — complete, covered = the effective selection, ONE sp
   assert.equal(spawn.context, "fresh");
 });
 
+test("runner: Ponytail preflight success without a report stays uncovered after retry", async () => {
+  const adapter = createMemoryWaveAdapter({
+    aggregates: [
+      {
+        state: "complete",
+        value: dynamicValue(["plan-fidelity", "correctness"], {
+          ponytail: { ok: true, report: null },
+        }),
+      },
+      {
+        state: "complete",
+        value: [{ key: "ponytail", ok: true, error: null, report: null }],
+      },
+    ],
+  });
+  const outcome = await runPrReviewDynamicWave(adapter, { timeoutMs: 5_000 });
+  assert.equal(adapter.calls.spawn.length, 2);
+  assert.equal(outcome.complete, false);
+  assert.deepEqual(outcome.covered, ["plan-fidelity", "correctness"]);
+  assert.deepEqual(outcome.retried, ["ponytail"]);
+  assert.deepEqual(outcome.failures, [
+    {
+      key: "ponytail",
+      reason: "lane-failed",
+      detail: "lane 'ponytail' resolved without a schema-valid report",
+    },
+  ]);
+});
+
 test("runner: a malformed value shape is aggregate-unreadable — then ONE full dynamic re-run", async () => {
   const adapter = createMemoryWaveAdapter({
     aggregates: [

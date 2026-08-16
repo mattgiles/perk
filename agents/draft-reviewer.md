@@ -81,9 +81,11 @@ anywhere, never spawn further subagents** — you review and report.
    `.pi/npm/node_modules/@dietrichgebert/ponytail/skills/ponytail/SKILL.md` and verify its
    frontmatter name is `ponytail`. That exact file is the invocation-private source authority.
    If it is missing, unreadable, or mismatched, terminate without calling `structured_output` —
-   the parent records the lane failure; never resolve a same-named project/user skill. Treat the
-   upstream skill's generic persistence/output guidance as subordinate to this agent's read-only,
-   streamed, phrase-anchored, engine-schema report contract.
+   the parent records the lane failure; never resolve a same-named project/user skill. Package
+   files are assumed stable only for the short review pass: if this file changes or disappears
+   after parent preflight, this recheck leaves Ponytail uncovered rather than accepting a report
+   from another source. Treat the upstream skill's generic persistence/output guidance as
+   subordinate to this agent's read-only, streamed, phrase-anchored, engine-schema report contract.
 
    **Work your angle through the four adversarial questions.** Within your assigned angle, hold
    the draft up to each of these — they are the shared lens every angle is worked through, not a

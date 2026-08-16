@@ -1,6 +1,7 @@
 import json
 from pathlib import Path
 
+import pytest
 from click.testing import CliRunner
 
 from perk import github, plan
@@ -64,6 +65,7 @@ def test_post_success_json(monkeypatch, unborn_git_repo_factory):
                 "verdict": "actionable",
                 "summary": "needs a fix",
                 "comments": [{"path": "x.py", "line": 3, "body": "nit"}],
+                "expected_pr": 42,
             },
         )
         result = runner.invoke(cli, ["pr", "review-post", "--json", "--batch", batch])
@@ -120,12 +122,53 @@ def test_post_clean_dry_run_offline(unborn_git_repo_factory):
     with runner.isolated_filesystem() as d:
         _git_init(d, unborn_git_repo_factory)
         cache.write_plan_ref(Path(d), _REF)
-        batch = _write_batch(d, {"verdict": "clean", "summary": "clean"})
+        batch = _write_batch(d, {"verdict": "clean", "summary": "clean", "expected_pr": 42})
         result = runner.invoke(cli, ["pr", "review-post", "--dry-run", "--json", "--batch", batch])
     assert result.exit_code == 0
     data = json.loads(result.output)
     assert data["success"] is True and data["dry_run"] is True
     assert data["mode"] == "reaction" and data["verdict"] == "clean"
+
+
+def test_post_expected_pr_mismatch_fails_before_mutation(monkeypatch, unborn_git_repo_factory):
+    _authed(monkeypatch)
+    monkeypatch.setattr(github, "find_pr_for_branch", lambda **k: _open_pr())
+
+    def boom(**_k):
+        raise AssertionError("target mismatch must fail before any GitHub mutation")
+
+    monkeypatch.setattr(github, "post_pr_review", boom)
+    monkeypatch.setattr(github, "add_pr_reaction", boom)
+    runner = CliRunner()
+    with runner.isolated_filesystem() as d:
+        _git_init(d, unborn_git_repo_factory)
+        cache.write_plan_ref(Path(d), _REF)
+        batch = _write_batch(d, {"verdict": "actionable", "summary": "stale", "expected_pr": 99})
+        result = runner.invoke(cli, ["pr", "review-post", "--json", "--batch", batch])
+    assert result.exit_code == 1
+    data = json.loads(result.output)
+    assert data["error_type"] == "review_target_changed"
+    assert "expected PR #99" in data["message"]
+    assert "found PR #42" in data["message"]
+
+
+@pytest.mark.parametrize("expected_pr", [0, -1, True, 42.0, "42"])
+def test_post_bad_batch_expected_pr_must_be_strict_positive_int(
+    monkeypatch, unborn_git_repo_factory, expected_pr
+):
+    _authed(monkeypatch)
+    runner = CliRunner()
+    with runner.isolated_filesystem() as d:
+        _git_init(d, unborn_git_repo_factory)
+        cache.write_plan_ref(Path(d), _REF)
+        batch = _write_batch(
+            d, {"verdict": "clean", "summary": "clean", "expected_pr": expected_pr}
+        )
+        result = runner.invoke(cli, ["pr", "review-post", "--json", "--batch", batch])
+    assert result.exit_code == 1
+    data = json.loads(result.output)
+    assert data["error_type"] == "bad_batch"
+    assert "expected_pr" in data["message"]
 
 
 def test_post_bad_batch_not_object(monkeypatch, unborn_git_repo_factory):

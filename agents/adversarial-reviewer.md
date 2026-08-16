@@ -97,8 +97,11 @@ and report.
    frontmatter name is `ponytail-review`. That exact file is the invocation-private source
    authority. If it is missing, unreadable, or mismatched, terminate without calling
    `structured_output` — the parent records the lane failure; never resolve a same-named
-   project/user skill. Treat the upstream skill's generic output guidance as subordinate to this
-   agent's read-only, streamed, diff-anchored, verdict-free engine-schema report contract.
+   project/user skill. Package files are assumed stable only for the short review pass: if this
+   file changes or disappears after parent preflight, this recheck leaves Ponytail uncovered
+   rather than accepting a report from another source. Treat the upstream skill's generic output
+   guidance as subordinate to this agent's read-only, streamed, diff-anchored, verdict-free
+   engine-schema report contract.
 
    **Work your angle through the four adversarial questions.** Within your assigned angle, hold
    the PR up to each of these — they are the shared lens every angle is worked through, not a

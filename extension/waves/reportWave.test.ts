@@ -289,23 +289,39 @@ test("runReportWave: a failed lane is incomplete under strict, complete under be
   ]);
 });
 
-test("runReportWave: an ok lane with a null report is lane-failed (no schema-valid report)", async () => {
+test("runReportWave: Ponytail preflight success without a report stays uncovered", async () => {
+  const ponytail: WaveLane = {
+    key: "ponytail",
+    agent: "perk.pr-reviewer",
+    task: "review minimally",
+    skill: "ponytail-review",
+    requiredSkill: PONYTAIL_CORE_SKILL,
+  };
   const adapter = createMemoryWaveAdapter({
     aggregate: {
       state: "complete",
       value: [
         okEntry("plan-fidelity", { verdict: "clean" }),
-        { key: "correctness", ok: true, error: null, report: null },
+        { key: "ponytail", ok: true, error: null, report: null },
       ],
     },
   });
-  const result = await runReportWave(adapter, makeSpec());
+  const result = await runReportWave(
+    adapter,
+    makeSpec({
+      lanes: [LANES[0] as WaveLane, ponytail],
+      requiredSkillPreflight: async () => ({ ok: true }),
+    }),
+  );
   assert.equal(result.complete, false);
+  assert.deepEqual(result.reports, [
+    { key: "plan-fidelity", report: { verdict: "clean" } },
+  ]);
   assert.deepEqual(result.failures, [
     {
-      key: "correctness",
+      key: "ponytail",
       reason: "lane-failed",
-      detail: "lane 'correctness' resolved without a schema-valid report",
+      detail: "lane 'ponytail' resolved without a schema-valid report",
     },
   ]);
 });

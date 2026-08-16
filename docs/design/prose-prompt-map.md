@@ -6,7 +6,7 @@ This is the readable projection of perk's living, workflow-first prose graph. It
 ## Coverage
 
 - **205** canonical source units
-- **698** logical fragments
+- **697** logical fragments
 - **16** session shapes and **10** assemblies
 - **15** explicitly excluded candidates (policy-only; not displayed)
 - **0** validation findings
@@ -1022,7 +1022,6 @@ Automated, selector-driven, terminal, and browser PR-review families.
   - `parameters.properties.comments.items.properties.line.description` — parameters.properties.comments.items.properties.line.description (`tool:post_pr_review.parameters.properties.comments.items.properties.line.description`)
   - `parameters.properties.comments.items.properties.body.description` — parameters.properties.comments.items.properties.body.description (`tool:post_pr_review.parameters.properties.comments.items.properties.body.description`)
   - `parameters.properties.fyi.description` — parameters.properties.fyi.description (`tool:post_pr_review.parameters.properties.fyi.description`)
-  - `parameters.properties.pr.description` — parameters.properties.pr.description (`tool:post_pr_review.parameters.properties.pr.description`)
   - `parameters.properties.angles.description` — parameters.properties.angles.description (`tool:post_pr_review.parameters.properties.angles.description`)
 - `typescript-tool:push_annotations`
   - `description` — description (`tool:push_annotations.description`)

@@ -15,9 +15,9 @@
 // (enforced in the rendered normalization — forced first, cap 3 additional); free-form emphasis
 // rides `directive` as DATA (the selector task + every reviewer lane, the same uniform suffix as
 // the static flow). Reconciliation and posting are UNCHANGED: the parent reconciles the typed
-// reports and posts once via the shared `post_pr_review` — and the shared clean guard covers
-// this door too (an incomplete dynamic wave makes `post_pr_review` refuse a clean verdict with
-// `incomplete_coverage`).
+// reports and posts once via the shared `post_pr_review` — and the shared PR-bound, single-use
+// state covers this door too (including incomplete-clean, pending, consumed, and stale-target
+// refusals).
 //
 // Headless-safe: all rich UI stays behind the `report()` surface seam, exactly like `/pr-review`.
 
@@ -36,7 +36,11 @@ import {
   runPrReviewDynamicWave,
 } from "../waves/prReviewDynamicWave.ts";
 import { createRpcWaveAdapter } from "../waves/rpcAdapter.ts";
-import { recordReviewWaveOutcome, resolveActivePr } from "./prReview.ts";
+import {
+  markReviewWavePending,
+  recordReviewWaveOutcome,
+  resolveActivePr,
+} from "./prReview.ts";
 
 const DYNAMIC_WAVE_TOOL_GUIDELINES = [
   "Call run_pr_review_dynamic_wave ONCE per review pass — angle selection is DELEGATED to a fresh perk.review-angle-selector lane run concurrently with the mandatory plan-fidelity lane and one independent source-bound Ponytail lane; the tool renders and launches the whole dynamic wave itself (module-rendered normalization + fan-out) and applies the one bounded retry. Ponytail is automatic/outside the cap: never force, propose, or duplicate it; never orchestrate retries or author workflow scripts.",
@@ -169,6 +173,7 @@ export function registerPrReviewDynamic(pi: ExtensionAPI): void {
           "bad_input",
         );
       }
+      markReviewWavePending();
       const target = await resolveActivePr(pi, ctx);
       if (!target.ok) {
         return failFor(
@@ -195,6 +200,7 @@ export function registerPrReviewDynamic(pi: ExtensionAPI): void {
       // Before selector output exists, only the two deterministic reviewer keys are knowable.
       const effective = outcome.selection?.effective ?? ["plan-fidelity", "ponytail"];
       recordReviewWaveOutcome({
+        pr: target.data.number,
         complete: outcome.complete,
         attempted: effective,
         covered: outcome.covered,
