@@ -71,16 +71,16 @@ class TestRepoDeliveryGit:
         self, git_repo_with_remote, monkeypatch
     ) -> None:
         clone, _remote, _advance = git_repo_with_remote
-        seen: list[str] = []
+        seen: list[tuple[Path, str]] = []
 
-        def success(_root: Path, remote: str = "origin") -> list[str]:
-            seen.append(remote)
+        def success(root: Path, remote: str = "origin") -> list[str]:
+            seen.append((root, remote))
             return ["fake://one", "fake://two"]
 
         monkeypatch.setattr(git_mod, "push_urls", success)
         probe = observe.RepoDeliveryGit(clone, remote="upstream")
         assert probe.push_urls() == DeliveryGit.PushUrlsResult(urls=("fake://one", "fake://two"))
-        assert seen == ["upstream"]
+        assert seen == [(clone, "upstream")]
 
         def expected(*_args: object, **_kwargs: object) -> list[str]:
             raise git_mod.GitError("no remote")
@@ -92,10 +92,10 @@ class TestRepoDeliveryGit:
         self, git_repo_with_remote, monkeypatch
     ) -> None:
         clone, _remote, _advance = git_repo_with_remote
-        seen: list[tuple[str, str, str]] = []
+        seen: list[tuple[Path, str, str, str]] = []
 
-        def success(_root: Path, *, push_url: str, base_branch: str, base_sha: str) -> None:
-            seen.append((push_url, base_branch, base_sha))
+        def success(root: Path, *, push_url: str, base_branch: str, base_sha: str) -> None:
+            seen.append((root, push_url, base_branch, base_sha))
 
         monkeypatch.setattr(git_mod, "probe_atomic_push", success)
         probe = observe.RepoDeliveryGit(clone)
@@ -103,7 +103,7 @@ class TestRepoDeliveryGit:
             probe.probe_atomic_push(push_url="fake://origin", base_branch="main", base_sha="a")
             == DeliveryGit.AtomicPushResult()
         )
-        assert seen == [("fake://origin", "main", "a")]
+        assert seen == [(clone, "fake://origin", "main", "a")]
 
         def expected(*_args: object, **_kwargs: object) -> None:
             raise git_mod.GitError("atomic unsupported")
@@ -215,29 +215,41 @@ class TestRepoDeliveryGitHub:
     def test_stack_capability_passes_through_fail_closed_bool(
         self, tmp_path: Path, monkeypatch
     ) -> None:
-        monkeypatch.setattr(stacks, "stack_capability", lambda _root: False)
-        assert observe.RepoDeliveryGitHub(tmp_path).stack_capability() is False
-        monkeypatch.setattr(stacks, "stack_capability", lambda _root: True)
-        assert observe.RepoDeliveryGitHub(tmp_path).stack_capability() is True
+        roots: list[Path] = []
+        results = iter((False, True))
+
+        def stack_capability(root: Path) -> bool:
+            roots.append(root)
+            return next(results)
+
+        monkeypatch.setattr(stacks, "stack_capability", stack_capability)
+        probe = observe.RepoDeliveryGitHub(tmp_path)
+        assert probe.stack_capability() is False
+        assert probe.stack_capability() is True
+        assert roots == [tmp_path, tmp_path]
 
     def test_base_merge_rules_converts_success_and_expected_failure(
         self, tmp_path: Path, monkeypatch
     ) -> None:
-        monkeypatch.setattr(
-            stacks,
-            "base_merge_rules",
-            lambda _root, _base: stacks.MergeRules(squash_allowed=False, merge_queue_required=True),
-        )
+        seen: list[tuple[Path, str]] = []
+
+        def success(root: Path, base: str) -> stacks.MergeRules:
+            seen.append((root, base))
+            return stacks.MergeRules(squash_allowed=False, merge_queue_required=True)
+
+        monkeypatch.setattr(stacks, "base_merge_rules", success)
         probe = observe.RepoDeliveryGitHub(tmp_path)
         assert probe.base_merge_rules("develop") == DeliveryGitHub.MergeRules(
             squash_allowed=False, merge_queue_required=True
         )
 
-        def expected(*_args: object, **_kwargs: object) -> stacks.MergeRules:
+        def expected(root: Path, base: str) -> stacks.MergeRules:
+            seen.append((root, base))
             raise GitHubError("HTTP 500")
 
         monkeypatch.setattr(stacks, "base_merge_rules", expected)
         assert probe.base_merge_rules("develop") == DeliveryGitHub.ProbeError(message="HTTP 500")
+        assert seen == [(tmp_path, "develop"), (tmp_path, "develop")]
 
     def test_base_merge_rules_propagates_unexpected_error(
         self, tmp_path: Path, monkeypatch

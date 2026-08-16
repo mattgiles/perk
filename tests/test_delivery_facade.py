@@ -376,6 +376,39 @@ def test_prepare_aggregates_independent_failures_and_skips_push_without_a_sha() 
     assert git.calls == [("remote_branch_sha", "main")]
 
 
+def test_prepare_aggregates_earlier_failures_and_still_probes_every_push_url() -> None:
+    sha = "a" * 40
+    git = FakeDeliveryGit(
+        branches={"main": sha},
+        push_urls=("fake://origin", "fake://mirror", "fake://backup"),
+        atomic_push_errors={"fake://mirror": "atomic unsupported"},
+    )
+    github = FakeDeliveryGitHub(stack_capable=False, merge_rules_error="HTTP 500")
+
+    with pytest.raises(DeliveryError) as excinfo:
+        _delivery(git=git, github=github).prepare(PrepareRequest(kind="authoring", base="main"))
+
+    assert excinfo.value.error_type == "capability_unsupported"
+    assert str(excinfo.value) == (
+        "This repository cannot take a stacked delivery train against base 'main':\n"
+        "- native-stack: expected a PullRequest.stack field in the GraphQL schema; observed "
+        "none (or introspection failed) — native stacks are unavailable on this GitHub host\n"
+        "- merge-rules: could not verify the merge rules for base 'main' "
+        "(can't verify ⇒ don't promise): HTTP 500\n"
+        "- atomic-push: the no-op --atomic --dry-run push to fake://mirror failed "
+        "(proves server capability and authentication, not branch write permission): "
+        "atomic unsupported"
+    )
+    assert github.calls == [("stack_capability",), ("base_merge_rules", "main")]
+    assert git.calls == [
+        ("remote_branch_sha", "main"),
+        ("push_urls",),
+        ("probe_atomic_push", "fake://origin", "main", sha),
+        ("probe_atomic_push", "fake://mirror", "main", sha),
+        ("probe_atomic_push", "fake://backup", "main", sha),
+    ]
+
+
 def test_prepare_remote_git_error_is_a_failed_row_with_raw_detail() -> None:
     failure = TrainReconstructionError("wrapped status detail", error_type="git_error")
     git = FakeDeliveryGit(errors={("remote_branch_sha", "main"): failure})

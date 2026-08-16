@@ -830,11 +830,13 @@ def _stub_transfer(monkeypatch, calls: list):
 
 
 def test_create_stacked_supersede_routes_through_the_transfer_protocol(monkeypatch):
+    from perk.delivery import PrepareRequest
+
     # D1: a stacked SUCCESSOR choice routes the supersede through run_transfer (never the
     # plain store mutation), after the one classification read.
     _authed(monkeypatch)
     store = _DeliveryStubStore(old_header={"delivery": "stacked", "delivery_lineage": "01OLD"})
-    _stub_prepare(monkeypatch)
+    prepare = _stub_prepare(monkeypatch)
     calls: list = []
     _stub_transfer(monkeypatch, calls)
     result = _invoke_adopt(
@@ -854,6 +856,7 @@ def test_create_stacked_supersede_routes_through_the_transfer_protocol(monkeypat
         store=store,
     )
     assert result.exit_code == 0, result.output
+    assert prepare.requests == [PrepareRequest(kind="authoring", base=None)]
     assert store.get_objective_ids == ["42"]  # the D1 classification read ("#" stripped)
     assert store.supersede_kwargs is None  # the plain mutation never runs on a transfer arm
     assert len(calls) == 1
@@ -864,6 +867,49 @@ def test_create_stacked_supersede_routes_through_the_transfer_protocol(monkeypat
     assert calls[0]["stacked"] is True
     payload = json.loads(result.output)
     assert payload["objective"]["id"] == "777"
+
+
+def test_create_stacked_supersede_prepare_refusal_precedes_every_mutation(monkeypatch):
+    from perk.delivery import DeliveryError, PrepareRequest
+
+    _authed(monkeypatch)
+    store = _DeliveryStubStore(old_header={"delivery": "stacked", "delivery_lineage": "01OLD"})
+    prepare = _stub_prepare(
+        monkeypatch,
+        error=DeliveryError(
+            "This repository cannot take a stacked delivery train against base 'main'",
+            error_type="capability_unsupported",
+        ),
+    )
+    transfer_calls: list = []
+    _stub_transfer(monkeypatch, transfer_calls)
+
+    result = _invoke_adopt(
+        [
+            "objective",
+            "create",
+            "--json",
+            "--delivery",
+            "stacked",
+            "--supersedes",
+            "#42",
+            "--roadmap",
+            _two_nodes_roadmap(),
+        ],
+        body="# Successor\n\nprose",
+        monkeypatch=monkeypatch,
+        store=store,
+    )
+
+    assert result.exit_code == 1
+    assert prepare.requests == [PrepareRequest(kind="authoring", base=None)]
+    payload = json.loads(result.output)
+    assert payload["error_type"] == "capability_unsupported"
+    assert transfer_calls == []
+    assert store.get_objective_ids == []
+    assert store.create_kwargs is None
+    assert store.supersede_kwargs is None
+    assert store.created is False
 
 
 @pytest.mark.parametrize(
