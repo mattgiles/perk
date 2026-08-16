@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from typing import Literal
 
 from perk_dev.prose_map.models import RoutedUnit
-from perk_dev.prose_map.python import PythonSymbol, python_symbol_name, python_symbols
+from perk_dev.prose_map.python import PythonSymbolCandidate, python_symbol_name, python_symbols
 from perk_dev.prose_review.source_adapter.contract import (
     CheckHintId,
     RangeResolution,
@@ -176,7 +176,7 @@ def _node_end(text: str, document: _PythonDocument, node: ast.stmt) -> int | Non
 def _node_location(
     text: str,
     document: _PythonDocument,
-    node: PythonSymbol,
+    node: PythonSymbolCandidate,
 ) -> tuple[int, int] | None:
     start = _node_start(text, document, node)
     line_slice = _line_slice(text, document.line_starts, node.lineno)
@@ -189,7 +189,7 @@ def _node_location(
 def _previous_node_end(
     text: str,
     document: _PythonDocument,
-    node: PythonSymbol,
+    node: PythonSymbolCandidate,
 ) -> int | None:
     assert document.module is not None
     index = next(
@@ -241,16 +241,27 @@ def _decorated_start(
         return None
     definition_index, indentation_column = definition
     depth = 0
+    logical_line_start = True
     markers: list[tokenize.TokenInfo] = []
     for current in document.tokens[:definition_index]:
+        if current.type == token.NEWLINE:
+            logical_line_start = True
+            continue
+        if current.type in (tokenize.COMMENT, token.NL, token.INDENT, token.DEDENT):
+            continue
         if current.type != token.OP:
+            logical_line_start = False
             continue
         if current.string in ")]}":
             depth -= 1
             if depth < 0:
                 return None
-            continue
-        if current.string == "@" and depth == 0 and current.start[1] == indentation_column:
+        elif (
+            current.string == "@"
+            and logical_line_start
+            and depth == 0
+            and current.start[1] == indentation_column
+        ):
             marker_index = _token_index(
                 text,
                 document.line_starts,
@@ -261,8 +272,9 @@ def _decorated_start(
                 return None
             if marker_index >= previous_end:
                 markers.append(current)
-        if current.string in "([{":
+        elif current.string in "([{":
             depth += 1
+        logical_line_start = False
     if depth != 0 or len(markers) != len(node.decorator_list):
         return None
     first = markers[0]
@@ -272,7 +284,7 @@ def _decorated_start(
 def _source_range(
     text: str,
     document: _PythonDocument,
-    node: PythonSymbol,
+    node: PythonSymbolCandidate,
 ) -> SourceRange | None:
     end = _node_end(text, document, node)
     if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.decorator_list:

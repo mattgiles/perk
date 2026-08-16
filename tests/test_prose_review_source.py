@@ -541,14 +541,17 @@ def test_python_adapter_exact_symbol_focus_and_recomposition(
     assert isinstance(extraction.resolution, ResolvedRange)
 
 
-def test_python_adapter_decorators_start_at_physical_marker_and_ignore_matrix_operator() -> None:
+@pytest.mark.parametrize("definition", ["def target():", "async def target():"])
+def test_python_adapter_decorators_start_at_physical_marker_and_ignore_matrix_operator(
+    definition: str,
+) -> None:
     text = (
         "prefix = 1\n"
         "@(\n"
         "    decorator_factory(left @ right)\n"
         ")\n"
         "@second_decorator\n"
-        "async def target():\n"
+        f"{definition}\n"
         '    return "focused 😀"\n'
         "# trailing context\n"
     )
@@ -557,9 +560,18 @@ def test_python_adapter_decorators_start_at_physical_marker_and_ignore_matrix_op
         "    decorator_factory(left @ right)\n"
         ")\n"
         "@second_decorator\n"
-        "async def target():\n"
+        f"{definition}\n"
         '    return "focused 😀"'
     )
+
+    extraction = _python_adapter().extract(text, "symbol:target")
+    assert extraction.focus == expected
+    assert extraction.before + extraction.focus + extraction.after == text
+
+
+def test_python_adapter_ignores_matrix_operator_on_explicitly_continued_decorator() -> None:
+    text = "@left " + "\\\n" + "@ right\ndef target():\n    pass\n"
+    expected = "@left " + "\\\n" + "@ right\ndef target():\n    pass"
 
     extraction = _python_adapter().extract(text, "symbol:target")
     assert extraction.focus == expected

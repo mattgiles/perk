@@ -53,6 +53,15 @@ class IgnoredClass:
     ]
 
 
+def test_normalized_hard_keyword_name_is_not_a_supported_symbol() -> None:
+    symbols = python_symbols(ast.parse("\uff46\uff4f\uff52 = 1\n"))
+    assert len(symbols) == 1
+    assert isinstance(symbols[0], ast.Assign)
+    assert isinstance(symbols[0].targets[0], ast.Name)
+    assert symbols[0].targets[0].id == "for"
+    assert python_symbol_name(symbols[0]) is None
+
+
 def test_discovery_preserves_unicode_and_contextual_soft_keyword_symbols(tmp_path: Path) -> None:
     source = tmp_path / "src/perk/soft_keywords.py"
     source.parent.mkdir(parents=True)
@@ -63,6 +72,8 @@ def test_discovery_preserves_unicode_and_contextual_soft_keyword_symbols(tmp_pat
                 'case = "<untrusted_case> This is discovery-owned prose long enough to select."',
                 'type = "<untrusted_type> This is discovery-owned prose long enough to select."',
                 'café = "<untrusted_unicode> This is discovery-owned prose long enough to select."',
+                '\uff46\uff4f\uff52 = "<untrusted_normalized_keyword> '
+                'This prose must not become a selector."',
                 "",
             )
         ),
