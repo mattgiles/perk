@@ -6,9 +6,9 @@ skeleton — the minimal secure launcher (`perk-dev prose-review`) plus the serv
 — and now carrying the three-pane workbench shell (fragment-aware capability tree / mode bar +
 segmented source focus), the relationship inspector (consumers, consuming shapes + delivery
 siblings, concerns, lineage), and header catalog search — the inspector and search are pure
-in-memory `CatalogSnapshot` queries. Markdown and YAML read adapters now resolve exact logical
-fragments; later nodes add the Python/TypeScript families, compare/assembly views, and writers on
-this stack without revisiting it.
+in-memory `CatalogSnapshot` queries. Markdown, YAML, and Python AST read adapters now resolve exact
+logical fragments; later nodes add Python call arguments, the TypeScript family, compare/assembly
+views, and writers on this stack without revisiting it.
 
 ## HTTP layer: FastAPI + uvicorn
 
@@ -28,11 +28,19 @@ this stack without revisiting it.
   and the exclusive reader of canonical source content on the serving path (catalog *discovery*
   reads mapped sources once at load time; that is the catalog module's own contract). The package
   keeps the public facade stable while separating frozen contracts, contained reads/dispatch, and
-  the Markdown/YAML implementations. The structured-text adapters expose exact range resolution,
-  batch revalidation, and semantic check hints (`prose-map`, plus `learned-docs` for YAML); they do
-  not expose persistence or replacement hooks yet. `GET /api/source` remains the one source
-  endpoint and accepts an optional composite fragment id, returning either exact
-  context/focus/context segments or a typed, whole-file read-only fallback.
+  the Markdown/YAML/Python implementations. The Python AST adapter accepts only the currently
+  discovered `symbol:<name>` language: module-body functions, async functions, simple assignments
+  with exactly one direct name target, and direct-name annotated assignments; `<name>` must be a
+  Python identifier that is not a hard keyword (contextual soft keywords remain valid). It parses,
+  compiler-validates without execution, and tokenizes once per source operation so decorated
+  function ranges begin at their physical `@` marker and AST UTF-8 byte columns become exact
+  Unicode string indexes. Python call arguments and TypeScript remain deferred. The structured-text
+  adapters expose exact range resolution, batch revalidation, and semantic check hints
+  (`prose-map`, plus `learned-docs` for YAML); they do not expose persistence or replacement hooks
+  yet. `GET /api/source` remains the one source endpoint and accepts an optional composite fragment
+  id, returning either exact context/focus/context segments or a typed, whole-file read-only
+  fallback. Numeric ranges remain backend-internal; the DTO and frontend parse/view contract stay
+  family-neutral.
 - The FastAPI app is constructed with **`docs_url=None, redoc_url=None, openapi_url=None`**: the
   default `/docs` (Swagger UI) and `/redoc` pages load CDN-hosted assets and would violate the
   no-network-loaded-assets envelope; `/openapi.json` is locally generated but is an unused
