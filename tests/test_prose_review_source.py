@@ -1,5 +1,9 @@
 """The seeded whole-file SourceAdapter: containment, membership, text-only decode."""
 
+import ast
+import token
+import tokenize
+from collections.abc import Callable, Iterator
 from pathlib import Path
 
 import pytest
@@ -20,6 +24,8 @@ from perk_dev.prose_review.source_adapter import (
     read_whole_file,
     source_adapter_for,
 )
+from perk_dev.prose_review.source_adapter import python as python_adapter_module
+from perk_dev.prose_review.source_adapter.python import PythonSourceAdapter
 
 ROOT = Path(__file__).parents[1]
 
@@ -423,3 +429,258 @@ def test_read_source_whole_markdown_yaml_unsupported_and_unknown_fragment(
     assert unsupported.read_only_reason == "unsupported-family"
     assert unsupported.before == "" and unsupported.after == ""
     assert unsupported.focus == unsupported_path.read_text(encoding="utf-8")
+
+
+def _python_adapter() -> PythonSourceAdapter:
+    return PythonSourceAdapter()
+
+
+@pytest.mark.parametrize(
+    ("text", "selector", "focus"),
+    [
+        (
+            "# leading context\n"
+            "def target(value: str):\n"
+            "    first = value\n"
+            "    return first.upper()\n"
+            "# trailing context\n",
+            "symbol:target",
+            "def target(value: str):\n    first = value\n    return first.upper()",
+        ),
+        (
+            'before = 0\r\nasync def target():\r\n    return "line 😀"\r\nafter = 1\r\n',
+            "symbol:target",
+            'async def target():\r\n    return "line 😀"',
+        ),
+        (
+            'value = (\n    "first"\n    "second"\n)  # trailing comment\n',
+            "symbol:value",
+            'value = (\n    "first"\n    "second"\n)',
+        ),
+        (
+            'typed: tuple[str, ...] = (\n    "alpha",\n    "beta",\n)\n',
+            "symbol:typed",
+            'typed: tuple[str, ...] = (\n    "alpha",\n    "beta",\n)',
+        ),
+        (
+            'before = "😀"; café = "inside ��� and 😀"; after = 1\n',
+            "symbol:café",
+            'café = "inside ��� and 😀"',
+        ),
+        ("match = 1\n", "symbol:match", "match = 1"),
+        ("case = 1\n", "symbol:case", "case = 1"),
+        ("type = 1\n", "symbol:type", "type = 1"),
+        ('only = "whole file"', "symbol:only", 'only = "whole file"'),
+    ],
+)
+def test_python_adapter_exact_symbol_focus_and_recomposition(
+    text: str,
+    selector: str,
+    focus: str,
+) -> None:
+    extraction = _python_adapter().extract(text, selector)
+    assert extraction.focus == focus
+    assert extraction.before + extraction.focus + extraction.after == text
+    assert isinstance(extraction.resolution, ResolvedRange)
+
+
+def test_python_adapter_decorators_start_at_physical_marker_and_ignore_matrix_operator() -> None:
+    text = (
+        "prefix = 1\n"
+        "@(\n"
+        "    decorator_factory(left @ right)\n"
+        ")\n"
+        "@second_decorator\n"
+        "async def target():\n"
+        '    return "focused 😀"\n'
+        "# trailing context\n"
+    )
+    expected = (
+        "@(\n"
+        "    decorator_factory(left @ right)\n"
+        ")\n"
+        "@second_decorator\n"
+        "async def target():\n"
+        '    return "focused 😀"'
+    )
+
+    extraction = _python_adapter().extract(text, "symbol:target")
+    assert extraction.focus == expected
+    assert extraction.before + extraction.focus + extraction.after == text
+
+
+@pytest.mark.parametrize(
+    "selector",
+    [
+        "",
+        "symbol:",
+        "symbol:target.name",
+        "symbol:for",
+        " symbol:target",
+        "symbol:target ",
+        "symbol:target/extra",
+        "call-argument:target:value",
+    ],
+)
+def test_python_adapter_rejects_every_unemitted_selector_shape(selector: str) -> None:
+    result = _python_adapter().resolve_range("target = 1\n", selector)
+    assert isinstance(result, UnresolvedRange)
+    assert result.reason == "unsupported-selector"
+    assert result.diagnostic == SourceDiagnostic(
+        code="unsupported-selector",
+        message="The selector is not supported by the Python adapter.",
+        selector=selector,
+        line=None,
+        column=None,
+    )
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "class target:\n    pass\n",
+        "target, other = (1, 2)\n",
+        "target = other = 1\n",
+        "def outer():\n    def target():\n        pass\n",
+    ],
+)
+def test_python_adapter_treats_unsupported_same_name_bindings_as_not_found(text: str) -> None:
+    result = _python_adapter().resolve_range(text, "symbol:target")
+    assert isinstance(result, UnresolvedRange)
+    assert result.reason == "selector-not-found"
+    assert result.diagnostic == SourceDiagnostic(
+        code="selector-not-found",
+        message="The selector does not resolve in the current Python source.",
+        selector="symbol:target",
+        line=None,
+        column=None,
+    )
+
+
+def test_python_adapter_reports_duplicate_supported_symbols_at_second_unicode_location() -> None:
+    text = 'target = 1\nprefix = "😀"; target = 2\n'
+    result = _python_adapter().resolve_range(text, "symbol:target")
+    assert isinstance(result, UnresolvedRange)
+    assert result.reason == "selector-ambiguous"
+    assert result.diagnostic == SourceDiagnostic(
+        code="selector-ambiguous",
+        message="The selector resolves more than once in the current Python source.",
+        selector="symbol:target",
+        line=2,
+        column=text.splitlines()[1].index("target") + 1,
+    )
+
+
+@pytest.mark.parametrize("text", ["def broken(:\n", "target = 1\nreturn\n", "target = 1\nbreak\n"])
+def test_python_adapter_parse_and_compiler_failures_are_document_level(text: str) -> None:
+    adapter = _python_adapter()
+    result = adapter.resolve_range(text, "call-argument:unsupported")
+    assert isinstance(result, UnresolvedRange)
+    assert result.reason == "invalid-source"
+    assert result.diagnostic.code == "syntax-error"
+    assert result.diagnostic.message == "The Python source is not syntactically valid."
+    assert result.diagnostic.selector is None
+    assert result.diagnostic.line is not None
+    assert result.diagnostic.column is not None
+    assert adapter.validate(text, ()) == (result.diagnostic,)
+
+
+def test_python_adapter_batch_validation_parses_compiles_and_tokenizes_once(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls = {"parse": 0, "compile": 0, "tokenize": 0}
+    original_parse = python_adapter_module.ast.parse
+    original_compile = compile
+    original_generate_tokens = python_adapter_module.tokenize.generate_tokens
+
+    def counting_parse(source: str, filename: str) -> ast.Module:
+        calls["parse"] += 1
+        return original_parse(source, filename=filename)
+
+    def counting_compile(source: ast.Module, filename: str, mode: str) -> object:
+        calls["compile"] += 1
+        return original_compile(source, filename, mode)
+
+    def counting_generate_tokens(
+        readline: Callable[[], str],
+    ) -> Iterator[tokenize.TokenInfo]:
+        calls["tokenize"] += 1
+        return original_generate_tokens(readline)
+
+    monkeypatch.setattr(python_adapter_module.ast, "parse", counting_parse)
+    monkeypatch.setattr(python_adapter_module, "compile", counting_compile, raising=False)
+    monkeypatch.setattr(
+        python_adapter_module.tokenize,
+        "generate_tokens",
+        counting_generate_tokens,
+    )
+
+    diagnostics = _python_adapter().validate(
+        "target = 1\n",
+        ("symbol:missing", "bad-selector", "symbol:target", "symbol:also_missing"),
+    )
+    assert [diagnostic.code for diagnostic in diagnostics] == [
+        "selector-not-found",
+        "unsupported-selector",
+        "selector-not-found",
+    ]
+    assert [diagnostic.selector for diagnostic in diagnostics] == [
+        "symbol:missing",
+        "bad-selector",
+        "symbol:also_missing",
+    ]
+    assert calls == {"parse": 1, "compile": 1, "tokenize": 1}
+
+
+def test_python_adapter_tokenizer_failure_retains_reported_location(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fail_tokenization(
+        _readline: Callable[[], str],
+    ) -> Iterator[tokenize.TokenInfo]:
+        raise tokenize.TokenError("fixture token failure", (2, 3))
+
+    monkeypatch.setattr(python_adapter_module.tokenize, "generate_tokens", fail_tokenization)
+    diagnostics = _python_adapter().validate("target = 1\n", ("symbol:target",))
+    assert diagnostics == (
+        SourceDiagnostic(
+            code="syntax-error",
+            message="The Python source is not syntactically valid.",
+            selector=None,
+            line=2,
+            column=4,
+        ),
+    )
+
+
+def test_python_adapter_decorator_token_mismatch_fails_closed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    original_generate_tokens = python_adapter_module.tokenize.generate_tokens
+
+    def without_target_marker(
+        readline: Callable[[], str],
+    ) -> Iterator[tokenize.TokenInfo]:
+        return (
+            current
+            for current in original_generate_tokens(readline)
+            if not (current.type == token.OP and current.string == "@" and current.start == (4, 0))
+        )
+
+    monkeypatch.setattr(
+        python_adapter_module.tokenize,
+        "generate_tokens",
+        without_target_marker,
+    )
+    text = "@first\ndef previous():\n    pass\n@second\ndef target():\n    pass\n"
+    extraction = _python_adapter().extract(text, "symbol:target")
+    assert extraction.before == ""
+    assert extraction.focus == text
+    assert extraction.after == ""
+    assert isinstance(extraction.resolution, UnresolvedRange)
+    assert extraction.resolution.reason == "invalid-source"
+    assert extraction.resolution.diagnostic.selector is None
+
+
+def test_python_adapter_check_hint_is_only_prose_map() -> None:
+    assert _python_adapter().affected_check_hints(_unit("doc.py")) == ("prose-map",)
