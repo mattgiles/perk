@@ -2,13 +2,13 @@
 
 import ast
 import json
-import re
 from pathlib import Path
 
 import yaml
 from pydantic import ValidationError
 
 from perk.substrate.proc import ProcFailure, run_checked
+from perk_dev.prose_map.markdown import MarkdownDiscoveryError, discover_markdown_fragments
 from perk_dev.prose_map.models import (
     Candidate,
     DiscoveredCandidateInput,
@@ -22,8 +22,6 @@ from perk_dev.prose_map.models import (
     UnclassifiedToolFieldIssue,
 )
 
-_HEADING_RE = re.compile(r"^(#{1,6})\s+(.+?)\s*$")
-_SLUG_RE = re.compile(r"[^a-z0-9]+")
 _TYPESCRIPT_SCAN_TIMEOUT_S = 60
 _PYTHON_PROSE_MARKERS = (
     "<stacked_layer_context>",
@@ -39,55 +37,11 @@ class DiscoveryError(Exception):
     """A source catalog could not be discovered reliably."""
 
 
-def _slug(value: str) -> str:
-    return _SLUG_RE.sub("-", value.lower()).strip("-") or "section"
-
-
 def _markdown_fragments(path: Path) -> tuple[Fragment, ...]:
-    text = path.read_text(encoding="utf-8")
-    fragments: list[Fragment] = []
-    body = text
-    if text.startswith("---\n"):
-        end = text.find("\n---\n", 4)
-        if end >= 0:
-            raw_frontmatter = yaml.safe_load(text[4:end])
-            if isinstance(raw_frontmatter, dict):
-                description = raw_frontmatter.get("description")
-                if isinstance(description, str) and description.strip():
-                    fragments.append(
-                        Fragment(
-                            id="frontmatter:description",
-                            label="Discovery description",
-                            selector="frontmatter.description",
-                        )
-                    )
-            body = text[end + 5 :]
-
-    stack: list[tuple[int, str]] = []
-    seen: dict[str, int] = {}
-    for line in body.splitlines():
-        match = _HEADING_RE.match(line)
-        if match is None:
-            continue
-        level = len(match.group(1))
-        label = match.group(2).strip()
-        while stack and stack[-1][0] >= level:
-            stack.pop()
-        stack.append((level, _slug(label)))
-        base = "/".join(part for _, part in stack)
-        seen[base] = seen.get(base, 0) + 1
-        suffix = "" if seen[base] == 1 else f"~{seen[base]}"
-        fragments.append(
-            Fragment(
-                id=f"section:{base}{suffix}",
-                label=label,
-                selector=f"heading:{base}{suffix}",
-            )
-        )
-
-    if not fragments:
-        fragments.append(Fragment(id="body", label="Document body", selector="file-body"))
-    return tuple(fragments)
+    try:
+        return discover_markdown_fragments(path.read_text(encoding="utf-8"))
+    except (OSError, MarkdownDiscoveryError) as exc:
+        raise DiscoveryError(f"Markdown prose discovery could not parse {path}: {exc}") from exc
 
 
 def _markdown_candidates(root: Path) -> list[Candidate]:

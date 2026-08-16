@@ -1,12 +1,18 @@
 import { useState } from "react";
 import type { Selection } from "./App.tsx";
 import { BOUNDARY_INFO } from "./boundaries.ts";
+import {
+  fragmentTarget,
+  type SourceTarget,
+  sameSourceTarget,
+  wholeUnitTarget,
+} from "./selection.ts";
 import type {
   AssemblyLayer,
   CapabilityNode,
   CapabilityTree,
   SessionShape,
-  UnitRef,
+  TreeUnit,
 } from "./tree.ts";
 
 type SelectProps = {
@@ -14,25 +20,81 @@ type SelectProps = {
   onSelect: (selection: Selection) => void;
 };
 
-function UnitButton({
-  unit,
+function isActive(selection: Selection | null, target: SourceTarget): boolean {
+  return (
+    selection !== null && selection.type === "unit" && sameSourceTarget(selection.target, target)
+  );
+}
+
+function SourceButton({
+  target,
   display,
+  fragment,
   selection,
   onSelect,
-}: { unit: UnitRef; display: string } & SelectProps) {
-  const active = selection !== null && selection.type === "unit" && selection.unit.id === unit.id;
+}: {
+  target: SourceTarget;
+  display: string;
+  fragment: boolean;
+} & SelectProps) {
+  const active = isActive(selection, target);
   return (
     <button
       type="button"
-      className={active ? "tree-entry selected" : "tree-entry"}
-      onClick={() => onSelect({ type: "unit", unit })}
+      className={`${active ? "tree-entry selected" : "tree-entry"}${fragment ? " fragment" : ""}`}
+      onClick={() => onSelect({ type: "unit", target })}
     >
       {display}
     </button>
   );
 }
 
-// A boundary layer is select-to-explain: visible, owner-marked, and never an editor.
+function UnitBranch({
+  unit,
+  display,
+  selection,
+  onSelect,
+}: { unit: TreeUnit; display: string } & SelectProps) {
+  const [expanded, setExpanded] = useState(false);
+  return (
+    <div className="tree-unit-branch">
+      <div className="tree-unit-row">
+        <button
+          type="button"
+          className="tree-fragment-toggle"
+          aria-label={`${expanded ? "Collapse" : "Expand"} fragments for ${display}`}
+          aria-expanded={expanded}
+          onClick={() => setExpanded(!expanded)}
+        >
+          <span className="toggle-marker">{expanded ? "▾" : "▸"}</span>
+        </button>
+        <SourceButton
+          target={wholeUnitTarget(unit)}
+          display={display}
+          fragment={false}
+          selection={selection}
+          onSelect={onSelect}
+        />
+      </div>
+      {expanded && (
+        <ul className="tree-branch fragment-branch">
+          {unit.fragments.map((fragment) => (
+            <li key={fragment.id}>
+              <SourceButton
+                target={fragmentTarget(unit, fragment)}
+                display={fragment.label}
+                fragment={true}
+                selection={selection}
+                onSelect={onSelect}
+              />
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
 function BoundaryButton({ layer, selection, onSelect }: { layer: AssemblyLayer } & SelectProps) {
   if (layer.boundary === null) {
     return null;
@@ -60,7 +122,7 @@ function LayerEntry({ layer, selection, onSelect }: { layer: AssemblyLayer } & S
     <li className="tree-layer">
       <span className="layer-position">{layer.position}</span>
       {layer.unit !== null ? (
-        <UnitButton
+        <UnitBranch
           unit={layer.unit}
           display={layer.label ?? layer.unit.id}
           selection={selection}
@@ -135,7 +197,7 @@ function CapabilityEntry({
           ))}
           {node.units.map((unit) => (
             <li key={unit.id}>
-              <UnitButton unit={unit} display={unit.id} selection={selection} onSelect={onSelect} />
+              <UnitBranch unit={unit} display={unit.id} selection={selection} onSelect={onSelect} />
             </li>
           ))}
         </ul>
@@ -144,8 +206,6 @@ function CapabilityEntry({
   );
 }
 
-// The capability tree: fixed top-level order (Foundation → Extension), session shapes
-// expanding to ordered assembly layers, boundaries visible but never editable.
 export function TreePane({ tree, selection, onSelect }: { tree: CapabilityTree } & SelectProps) {
   return (
     <ul className="tree-root">

@@ -1,11 +1,13 @@
 """The Prose Review Workbench security envelope: guard, containment, header stamping."""
 
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
 from httpx import Response
 from perk_dev.prose_map.catalog import build_catalog
+from perk_dev.prose_map.models import Fragment
 from perk_dev.prose_review import web
 from perk_dev.prose_review.catalog import CatalogSnapshot
 from perk_dev.prose_review.web import create_app
@@ -29,6 +31,33 @@ INDEX_HTML = (
 @pytest.fixture(scope="module")
 def snapshot() -> CatalogSnapshot:
     return CatalogSnapshot.from_catalog(build_catalog(ROOT))
+
+
+@pytest.fixture(scope="module")
+def fallback_snapshot() -> CatalogSnapshot:
+    catalog = build_catalog(ROOT)
+    fragments = (
+        Fragment(id="unsupported-selector", label="Unsupported selector", selector="heading:*"),
+        Fragment(
+            id="unsupported-source-shape",
+            label="Unsupported source shape",
+            selector="frontmatter.description",
+        ),
+        Fragment(id="selector-not-found", label="Selector not found", selector="heading:missing"),
+        Fragment(
+            id="selector-ambiguous",
+            label="Selector ambiguous",
+            selector="frontmatter.description",
+        ),
+        Fragment(id="invalid-source", label="Invalid source", selector="file-body"),
+    )
+    units = tuple(
+        replace(unit, candidate=replace(unit.candidate, fragments=fragments))
+        if unit.candidate.id == "managed:repo-agents"
+        else unit
+        for unit in catalog.units
+    )
+    return CatalogSnapshot.from_catalog(replace(catalog, units=units))
 
 
 @pytest.fixture(scope="module")
@@ -123,7 +152,7 @@ def test_catalog_tree_serves_the_fixed_order_tree(snapshot: CatalogSnapshot, rep
     _assert_security_headers(response)
 
 
-def test_source_serves_the_on_disk_file(snapshot: CatalogSnapshot, tmp_path: Path) -> None:
+def test_source_serves_the_on_disk_whole_file(snapshot: CatalogSnapshot, tmp_path: Path) -> None:
     # The repo root of trust is the real checkout for the source read; the dist dir
     # stays a tmp fixture (the /api/source path never touches built assets).
     _populate_dist(tmp_path / "dist")
@@ -131,11 +160,160 @@ def test_source_serves_the_on_disk_file(snapshot: CatalogSnapshot, tmp_path: Pat
     response = client.get("/api/source", params={"unit": "managed:repo-agents"})
     assert response.status_code == 200
     payload = response.json()
-    assert list(payload.keys()) == ["unit", "path", "kind", "content"]
+    assert list(payload.keys()) == [
+        "unit",
+        "fragment",
+        "path",
+        "kind",
+        "before",
+        "focus",
+        "after",
+        "editable",
+        "read_only_reason",
+    ]
     assert payload["unit"] == "managed:repo-agents"
+    assert payload["fragment"] is None
     assert payload["path"] == "AGENTS.md"
     assert payload["kind"] == "managed-prose"
-    assert payload["content"] == (ROOT / "AGENTS.md").read_bytes().decode("utf-8")
+    assert payload["before"] == ""
+    assert payload["focus"] == (ROOT / "AGENTS.md").read_bytes().decode("utf-8")
+    assert payload["after"] == ""
+    assert payload["editable"] is False
+    assert payload["read_only_reason"] == "whole-unit"
+    _assert_security_headers(response)
+
+
+def test_source_serves_markdown_and_yaml_fragments(
+    snapshot: CatalogSnapshot, tmp_path: Path
+) -> None:
+    _populate_dist(tmp_path / "dist")
+    client = _client(snapshot, ROOT, dist_dir=tmp_path / "dist")
+    markdown = client.get(
+        "/api/source",
+        params={
+            "unit": "managed:repo-agents",
+            "fragment": "section:agents/developing-perk",
+        },
+    )
+    assert markdown.status_code == 200
+    markdown_payload = markdown.json()
+    assert markdown_payload["fragment"] == {
+        "id": "section:agents/developing-perk",
+        "label": "Developing perk",
+    }
+    assert markdown_payload["editable"] is True
+    assert markdown_payload["read_only_reason"] is None
+    assert markdown_payload["before"] + markdown_payload["focus"] + markdown_payload["after"] == (
+        ROOT / "AGENTS.md"
+    ).read_text(encoding="utf-8")
+    _assert_security_headers(markdown)
+
+    yaml_response = client.get(
+        "/api/source",
+        params={
+            "unit": "ambient:learned-routing",
+            "fragment": "cluster:pi-extension",
+        },
+    )
+    assert yaml_response.status_code == 200
+    yaml_payload = yaml_response.json()
+    assert yaml_payload["editable"] is True
+    assert "Pi SDK/extension substrate craft" in yaml_payload["focus"]
+    assert yaml_payload["before"] + yaml_payload["focus"] + yaml_payload["after"] == (
+        ROOT / "docs/learned/clusters.yaml"
+    ).read_text(encoding="utf-8")
+    _assert_security_headers(yaml_response)
+
+
+@pytest.mark.parametrize(
+    ("fragment_id", "label", "text", "reason"),
+    [
+        (
+            "unsupported-selector",
+            "Unsupported selector",
+            "# Present\nReadable source\n",
+            "unsupported-selector",
+        ),
+        (
+            "unsupported-source-shape",
+            "Unsupported source shape",
+            "---\ndescription: []\n---\nReadable source\n",
+            "unsupported-source-shape",
+        ),
+        (
+            "selector-not-found",
+            "Selector not found",
+            "# Present\nReadable source\n",
+            "selector-not-found",
+        ),
+        (
+            "selector-ambiguous",
+            "Selector ambiguous",
+            "---\ndescription: first\ndescription: second\n---\nReadable source\n",
+            "selector-ambiguous",
+        ),
+        (
+            "invalid-source",
+            "Invalid source",
+            "---\ndescription: [broken\n---\nReadable source\n",
+            "invalid-source",
+        ),
+    ],
+)
+def test_known_fragment_failures_are_guarded_readable_typed_200s(
+    fallback_snapshot: CatalogSnapshot,
+    repo: Path,
+    fragment_id: str,
+    label: str,
+    text: str,
+    reason: str,
+) -> None:
+    (repo / "AGENTS.md").write_text(text, encoding="utf-8")
+    response = _client(fallback_snapshot, repo).get(
+        "/api/source",
+        params={"unit": "managed:repo-agents", "fragment": fragment_id},
+    )
+    assert response.status_code == 200
+    assert response.json() == {
+        "unit": "managed:repo-agents",
+        "fragment": {"id": fragment_id, "label": label},
+        "path": "AGENTS.md",
+        "kind": "managed-prose",
+        "before": "",
+        "focus": text,
+        "after": "",
+        "editable": False,
+        "read_only_reason": reason,
+    }
+    _assert_security_headers(response)
+
+
+def test_unsupported_family_fragment_is_a_guarded_readable_typed_200(
+    snapshot: CatalogSnapshot, repo: Path
+) -> None:
+    unit = next(unit for unit in snapshot.units if unit.candidate.kind == "typescript-tool")
+    fragment = snapshot.fragments_for_unit(unit.candidate.id)[0].fragment
+    source_path = repo / unit.candidate.path
+    source_path.parent.mkdir(parents=True, exist_ok=True)
+    text = (ROOT / unit.candidate.path).read_text(encoding="utf-8")
+    source_path.write_text(text, encoding="utf-8")
+
+    response = _client(snapshot, repo).get(
+        "/api/source",
+        params={"unit": unit.candidate.id, "fragment": fragment.id},
+    )
+    assert response.status_code == 200
+    assert response.json() == {
+        "unit": unit.candidate.id,
+        "fragment": {"id": fragment.id, "label": fragment.label},
+        "path": unit.candidate.path,
+        "kind": "typescript-tool",
+        "before": "",
+        "focus": text,
+        "after": "",
+        "editable": False,
+        "read_only_reason": "unsupported-family",
+    }
     _assert_security_headers(response)
 
 
@@ -215,6 +393,18 @@ def test_source_unknown_unit_is_a_fixed_404(snapshot: CatalogSnapshot, repo: Pat
     response = _client(snapshot, repo).get("/api/source", params={"unit": "markdown:missing.md"})
     assert response.status_code == 404
     assert response.json() == {"detail": "unknown unit"}
+    _assert_security_headers(response)
+
+
+def test_source_unknown_composite_fragment_is_a_fixed_404(
+    snapshot: CatalogSnapshot, repo: Path
+) -> None:
+    response = _client(snapshot, repo).get(
+        "/api/source",
+        params={"unit": "managed:repo-agents", "fragment": "cluster:pi-extension"},
+    )
+    assert response.status_code == 404
+    assert response.json() == {"detail": "unknown fragment"}
     _assert_security_headers(response)
 
 

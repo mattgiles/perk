@@ -1,8 +1,9 @@
 import { useEffect, useState } from "react";
 import type { Mode, Selection } from "./App.tsx";
 import { BOUNDARY_INFO } from "./boundaries.ts";
+import { type SourceTarget, sourceTargetKey } from "./selection.ts";
+import { READ_ONLY_PRESENTATION } from "./source.ts";
 import { createSourceLoader, type SourceLoadState } from "./sourceLoad.ts";
-import type { UnitRef } from "./tree.ts";
 import type { BoundaryKind } from "./wire.ts";
 
 const MODES: { id: Mode; label: string }[] = [
@@ -11,18 +12,13 @@ const MODES: { id: Mode; label: string }[] = [
   { id: "assembly", label: "Assembly" },
 ];
 
-// Read-only whole-file source view, fetched on every selection change (no client
-// cache — edit buffers are a later milestone). The load pipeline — the closed state
-// machine and the latest-wins stale-response suppression — lives in sourceLoad.ts
-// (node:test-covered); one loader per mount, selected on every unit change and
-// disposed on unmount, so a late response never updates a superseded view.
-function SourceView({ unit }: { unit: UnitRef }) {
+function SourceView({ target }: { target: SourceTarget }) {
   const [state, setState] = useState<SourceLoadState>({ status: "loading" });
   const [loader] = useState(() => createSourceLoader(setState));
 
   useEffect(() => {
-    loader.select(unit.id);
-  }, [loader, unit.id]);
+    loader.select(target);
+  }, [loader, target]);
 
   useEffect(() => () => loader.dispose(), [loader]);
 
@@ -40,15 +36,41 @@ function SourceView({ unit }: { unit: UnitRef }) {
   if (state.status === "failed") {
     return <p className="pane-hint">Failed to load source.</p>;
   }
+
   const { source } = state;
+  const presentation =
+    source.read_only_reason === null ? null : READ_ONLY_PRESENTATION[source.read_only_reason];
   return (
     <div className="source-view">
       <div className="source-header">
         <span className="source-path">{source.path}</span>
         <span className="kind-badge">{source.kind}</span>
-        <span className="readonly-badge">Read-only</span>
+        <span className={source.editable ? "editable-badge" : "readonly-badge"}>
+          {source.editable ? "Editable range" : presentation?.badge}
+        </span>
       </div>
-      <pre className="source-text">{source.content}</pre>
+      {presentation !== null && (
+        <div className="source-readonly-explanation">
+          <h2>{presentation.heading}</h2>
+          <p>{presentation.explanation}</p>
+        </div>
+      )}
+      {source.editable && (
+        <div className="source-legend">
+          <span className="readonly-badge">Read-only context</span>
+          <span className="editable-badge">Editable range</span>
+        </div>
+      )}
+      <pre className="source-text">
+        <span className="source-context">{source.before}</span>
+        <span className={source.editable ? "source-focus" : "source-readonly-focus"}>
+          {source.focus}
+        </span>
+        <span className="source-context">{source.after}</span>
+      </pre>
+      {source.editable && source.focus.length === 0 && (
+        <p className="empty-focus-hint">This mapped fragment is empty.</p>
+      )}
     </div>
   );
 }
@@ -73,11 +95,9 @@ function EditMode({ selection }: { selection: Selection | null }) {
   if (selection.type === "boundary") {
     return <BoundaryExplanation boundary={selection.boundary} label={selection.label} />;
   }
-  return <SourceView unit={selection.unit} />;
+  return <SourceView key={sourceTargetKey(selection.target)} target={selection.target} />;
 }
 
-// The persistent mode bar + mode content. Mode switches never touch the selection,
-// and the placeholders are honest about unbuilt capabilities.
 export function CenterPane({
   mode,
   onModeChange,

@@ -1,15 +1,6 @@
-// The source-view load pipeline, extracted from the React component so node:test can
-// drive it with controllable fetch stubs. Two pieces: response classification (the
-// closed loading/loaded/refused/failed state machine) and the latest-wins selection
-// guard (a response arriving after a newer selection — or after dispose — is dropped,
-// so only the current selection can win).
-
+import type { SourceTarget } from "./selection.ts";
 import { parseUnitSource, type UnitSource } from "./source.ts";
 
-// The terminal states: `refused` is the endpoint's deliberate 404 (one of its three
-// fixed details); `failed` is everything else — network error, non-ok status other
-// than 404, a 404 without a string detail, invalid JSON, or a parseUnitSource
-// rejection.
 export type SourceLoadOutcome =
   | { status: "loaded"; source: UnitSource }
   | { status: "refused"; detail: string }
@@ -17,8 +8,6 @@ export type SourceLoadOutcome =
 
 export type SourceLoadState = { status: "loading" } | SourceLoadOutcome;
 
-// The minimal structural slice of Response the loader consumes, so tests can fake
-// fetch without a DOM.
 export type ResponseLike = {
   ok: boolean;
   status: number;
@@ -31,13 +20,29 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
 }
 
-/** Fetch + classify one unit's source. Never rejects: every defect maps to a state. */
+function matchesTarget(source: UnitSource, target: SourceTarget): boolean {
+  if (source.unit !== target.unit.id) {
+    return false;
+  }
+  if (source.fragment === null || target.fragment === null) {
+    return source.fragment === null && target.fragment === null;
+  }
+  return (
+    source.fragment.id === target.fragment.id && source.fragment.label === target.fragment.label
+  );
+}
+
+/** Fetch + classify one composite source target. Never rejects. */
 export async function loadUnitSource(
-  unitId: string,
+  target: SourceTarget,
   fetchFn: FetchLike,
 ): Promise<SourceLoadOutcome> {
   try {
-    const response = await fetchFn(`/api/source?unit=${encodeURIComponent(unitId)}`);
+    const params = [`unit=${encodeURIComponent(target.unit.id)}`];
+    if (target.fragment !== null) {
+      params.push(`fragment=${encodeURIComponent(target.fragment.id)}`);
+    }
+    const response = await fetchFn(`/api/source?${params.join("&")}`);
     if (response.status === 404) {
       const body: unknown = await response.json();
       if (isRecord(body) && typeof body.detail === "string") {
@@ -49,7 +54,7 @@ export async function loadUnitSource(
       return { status: "failed" };
     }
     const source = parseUnitSource(await response.json());
-    if (source === null) {
+    if (source === null || !matchesTarget(source, target)) {
       return { status: "failed" };
     }
     return { status: "loaded", source };
@@ -59,26 +64,22 @@ export async function loadUnitSource(
 }
 
 export type SourceLoader = {
-  select: (unitId: string) => void;
+  select: (target: SourceTarget) => void;
   dispose: () => void;
 };
 
-/**
- * Latest-wins source loading: each select emits `loading` then its outcome — unless a
- * newer select (or dispose) superseded it first, in which case the stale outcome is
- * dropped. Out-of-order responses therefore never overwrite the current selection.
- */
+/** Latest-wins source loading across whole-unit and fragment identities. */
 export function createSourceLoader(
   onState: (state: SourceLoadState) => void,
   fetchFn: FetchLike = fetch,
 ): SourceLoader {
   let current = 0;
   return {
-    select(unitId: string): void {
+    select(target: SourceTarget): void {
       current += 1;
       const request = current;
       onState({ status: "loading" });
-      void loadUnitSource(unitId, fetchFn).then((outcome) => {
+      void loadUnitSource(target, fetchFn).then((outcome) => {
         if (request === current) {
           onState(outcome);
         }

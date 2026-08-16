@@ -3,9 +3,9 @@ import type { Selection } from "./App.tsx";
 import { BOUNDARY_INFO } from "./boundaries.ts";
 import type { CapabilityRef, UnitInspect } from "./inspect.ts";
 import { createInspectLoader, type InspectLoadState } from "./inspectLoad.ts";
-import type { UnitRef } from "./tree.ts";
+import { type SourceTarget, wholeUnitTarget } from "./selection.ts";
 
-type SelectUnit = (unit: UnitRef) => void;
+type SelectSource = (target: SourceTarget) => void;
 
 function joinBreadcrumb(breadcrumb: CapabilityRef[]): string {
   return breadcrumb.map((capability) => capability.label).join(" / ");
@@ -13,7 +13,7 @@ function joinBreadcrumb(breadcrumb: CapabilityRef[]): string {
 
 // Every relation section is omitted when empty (no "Consumers (0)" noise); the
 // identity block always renders.
-function Relationships({ detail, onSelect }: { detail: UnitInspect; onSelect: SelectUnit }) {
+function Relationships({ detail, onSelect }: { detail: UnitInspect; onSelect: SelectSource }) {
   return (
     <>
       {detail.capability_children.length > 0 && (
@@ -83,7 +83,7 @@ function Relationships({ detail, onSelect }: { detail: UnitInspect; onSelect: Se
                       <button
                         type="button"
                         className="relation-entry"
-                        onClick={() => onSelect(member.unit)}
+                        onClick={() => onSelect(wholeUnitTarget(member.unit))}
                       >
                         {member.unit.id}
                       </button>{" "}
@@ -121,13 +121,10 @@ function Relationships({ detail, onSelect }: { detail: UnitInspect; onSelect: Se
   );
 }
 
-// The relationship inspector for a unit selection: the identity block renders
-// immediately from the selection; the relationships arrive through the latest-wins
-// loader. The component is mounted with `key={unit.id}` (see InspectorPane), so a
-// selection change remounts it: the state resets to loading before anything renders
-// (no window where the new unit's identity shows the old unit's relationships) and
-// the superseded loader is disposed on unmount, dropping its in-flight response.
-function UnitInspector({ unit, onSelect }: { unit: UnitRef; onSelect: SelectUnit }) {
+// Relationship data remains unit-scoped. The component remounts only when the unit
+// changes, so fragment changes preserve the loaded relationship state.
+function UnitInspector({ target, onSelect }: { target: SourceTarget; onSelect: SelectSource }) {
+  const { unit } = target;
   const [state, setState] = useState<InspectLoadState>({ status: "loading" });
   const [loader] = useState(() => createInspectLoader(setState));
 
@@ -147,6 +144,14 @@ function UnitInspector({ unit, onSelect }: { unit: UnitRef; onSelect: SelectUnit
           <dd>{unit.kind}</dd>
           <dt>Path</dt>
           <dd>{unit.path}</dd>
+          {target.fragment !== null && (
+            <>
+              <dt>Fragment</dt>
+              <dd>{target.fragment.id}</dd>
+              <dt>Fragment label</dt>
+              <dd>{target.fragment.label}</dd>
+            </>
+          )}
           {detail !== null && (
             <>
               <dt>Selector</dt>
@@ -182,7 +187,7 @@ export function InspectorPane({
   onSelect,
 }: {
   selection: Selection | null;
-  onSelect: SelectUnit;
+  onSelect: SelectSource;
 }) {
   if (selection === null) {
     return <p className="pane-hint">Select a unit or boundary to inspect it.</p>;
@@ -202,5 +207,7 @@ export function InspectorPane({
       </div>
     );
   }
-  return <UnitInspector key={selection.unit.id} unit={selection.unit} onSelect={onSelect} />;
+  return (
+    <UnitInspector key={selection.target.unit.id} target={selection.target} onSelect={onSelect} />
+  );
 }
