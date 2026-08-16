@@ -913,6 +913,33 @@ def test_projection_uses_modified_supplied_text_for_every_editable_family(
     _assert_security_headers(response)
 
 
+@pytest.mark.parametrize(
+    ("unit_id", "fragment_id", "text"),
+    [
+        ("managed:repo-agents", "section:agents/developing-perk", "---\ndescription: \x00\n---\n"),
+        ("ambient:learned-routing", "cluster:pi-extension", "value: \x00\n"),
+        (PYTHON_UNIT_ID, "symbol:_PREAMBLE", "_PREAMBLE = \x00\n"),
+    ],
+)
+def test_projection_normalizes_unmarked_parser_failures(
+    snapshot: CatalogSnapshot,
+    repo: Path,
+    unit_id: str,
+    fragment_id: str,
+    text: str,
+) -> None:
+    response = _client(snapshot, repo).post(
+        "/api/source/project",
+        headers={web.CSRF_HEADER: TOKEN},
+        json={"unit": unit_id, "fragment": fragment_id, "text": text},
+    )
+    assert response.status_code == 200
+    view = response.json()
+    assert view["focus"] == text
+    assert view["read_only_reason"] == "invalid-source"
+    _assert_security_headers(response)
+
+
 def test_projection_returns_readable_invalid_fallback_without_storing_text(
     fallback_snapshot: CatalogSnapshot,
     repo: Path,

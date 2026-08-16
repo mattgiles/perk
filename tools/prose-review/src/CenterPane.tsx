@@ -51,7 +51,7 @@ function SourceLoadPresentation({
   }
 
   const { source } = state;
-  const { view } = source;
+  const { editor, view } = source;
   const presentation =
     view.read_only_reason === null ? null : READ_ONLY_PRESENTATION[view.read_only_reason];
   return (
@@ -94,16 +94,23 @@ function SourceLoadPresentation({
           <span className="editable-badge">Editable range</span>
         </div>
       )}
-      {view.editable ? (
+      {view.editable && editor !== null ? (
         <div className="source-edit-regions">
           <pre className="source-text source-context">{view.before}</pre>
           <textarea
             className="source-focus-editor"
             aria-label={`Edit ${target.fragment?.label ?? target.unit.id}`}
-            value={source.focusDisplay}
+            value={editor.display}
             spellCheck={false}
             onInput={(event) => {
-              workspace.editFocus(target, source.focusDisplay, event.currentTarget.value);
+              const outcome = workspace.editFocus({
+                target,
+                base: editor,
+                nextDisplay: event.currentTarget.value,
+              });
+              if (outcome.status !== "applied") {
+                event.currentTarget.value = editor.display;
+              }
             }}
           />
           <pre className="source-text source-context">{view.after}</pre>

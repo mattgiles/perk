@@ -115,18 +115,40 @@ def test_read_unit_file_samples_mode_and_content_from_one_descriptor(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     path = tmp_path / "one.md"
-    path.write_text("one descriptor\n", encoding="utf-8")
+    original = b"one descriptor\n"
+    path.write_bytes(original)
+    path.chmod(0o751)
     seen: list[int] = []
     real_fstat = os.fstat
 
-    def observing_fstat(fd: int) -> os.stat_result:
+    def replacing_fstat(fd: int) -> os.stat_result:
         seen.append(fd)
-        return real_fstat(fd)
+        descriptor_stat = real_fstat(fd)
+        path.rename(tmp_path / "opened.md")
+        path.write_bytes(b"replacement path\n")
+        path.chmod(0o600)
+        return descriptor_stat
 
-    monkeypatch.setattr(source_read_module.os, "fstat", observing_fstat)
+    monkeypatch.setattr(source_read_module.os, "fstat", replacing_fstat)
     source = read_unit_file(tmp_path, _unit("one.md"))
-    assert source.content == b"one descriptor\n"
+    assert source.content == original
+    assert source.mode == 0o751
+    assert source.load_hash == hashlib.sha256(original).hexdigest()
     assert len(seen) == 1
+
+
+def test_read_unit_file_rejects_non_regular_descriptor_without_reading(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fifo = tmp_path / "source.md"
+    os.mkfifo(fifo)
+
+    def unexpected_read(_descriptor: int, _size: int) -> bytes:
+        raise AssertionError("non-regular descriptor was read")
+
+    monkeypatch.setattr(source_read_module.os, "read", unexpected_read)
+    assert _read_failure(tmp_path, "source.md") == "not_found"
 
 
 def test_unknown_unit_id_is_refused(snapshot: CatalogSnapshot) -> None:
@@ -296,6 +318,12 @@ def test_markdown_adapter_resolves_body_description_headings_and_batch_failures(
     assert syntax[0].selector is None
     assert adapter.validate(malformed, ()) == syntax
 
+    unmarked = adapter.extract("---\ndescription: \x00\n---\nbody\n", "frontmatter.description")
+    assert isinstance(unmarked.resolution, UnresolvedRange)
+    assert unmarked.resolution.reason == "invalid-source"
+    assert unmarked.resolution.diagnostic.line is None
+    assert unmarked.resolution.diagnostic.column is None
+
 
 def test_markdown_adapter_rejects_valid_multidocument_frontmatter() -> None:
     adapter = source_adapter_for(_unit("doc.md"))
@@ -397,6 +425,7 @@ def test_yaml_adapter_resolves_map_id_sequence_scalar_styles_and_collections() -
         ("value: ok\n", "missing", "selector-not-found", "selector-not-found"),
         ("value: one\nvalue: two\n", "value", "selector-ambiguous", "selector-ambiguous"),
         ("value: [broken\n", "value", "invalid-source", "syntax-error"),
+        ("value: \x00\n", "value", "invalid-source", "syntax-error"),
         (
             "---\nvalue: one\n---\nvalue: two\n",
             "value",

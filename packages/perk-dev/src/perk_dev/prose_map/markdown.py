@@ -266,8 +266,8 @@ def _is_string_scalar(node: Node) -> bool:
     return isinstance(node, ScalarNode) and node.tag == "tag:yaml.org,2002:str"
 
 
-def _problem_from_yaml(exc: yaml.MarkedYAMLError, *, line_offset: int) -> MarkdownProblem:
-    mark = exc.problem_mark
+def _problem_from_yaml(exc: yaml.YAMLError, *, line_offset: int) -> MarkdownProblem:
+    mark = getattr(exc, "problem_mark", None)
     return MarkdownProblem(
         "invalid-source",
         line=None if mark is None else mark.line + line_offset + 1,
@@ -288,7 +288,7 @@ def _parse_frontmatter(raw: str, raw_start: int) -> _Frontmatter:
             for event in yaml.parse(raw, Loader=yaml.SafeLoader)
             if isinstance(event, AliasEvent)
         )
-    except yaml.MarkedYAMLError as exc:
+    except yaml.YAMLError as exc:
         return _Frontmatter(
             raw=raw,
             raw_start=raw_start,
@@ -313,7 +313,7 @@ def _parse_frontmatter(raw: str, raw_start: int) -> _Frontmatter:
         )
     try:
         value = yaml.safe_load(raw)
-    except yaml.MarkedYAMLError as exc:
+    except yaml.YAMLError as exc:
         return _Frontmatter(
             raw=raw,
             raw_start=raw_start,

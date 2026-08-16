@@ -205,10 +205,12 @@ path loads, focused textarea, transient retry, native current-text diff chunks, 
 independent failure states). The packaging guard pins the diff and test libraries as exact dev-only
 dependencies while preserving the workspace's zero-runtime-dependency posture.
 
-The launcher-served **browser** leg now also covers source-native focused editing across
+The launcher-served **browser** leg covers source-native focused editing across
 Markdown/YAML/Python/TypeScript, alias/back-navigation retention, immediate workspace-backed Compare,
-temporary-invalid protected focus, transient TypeScript retry, two-file dirty/discard/Open behavior,
-and native unload confirmation without repository mutation. Shape-origin layer selection,
+two-file dirty/Open behavior, mode preservation, and repository-byte immutability. The rendered
+jsdom contract covers the temporary-invalid protected focus, stale-helper/transient TypeScript retry,
+discard cancel/confirm, exact manual reversion, and `beforeunload` listener lifecycle that headless
+browser automation cannot present as native platform dialogs. Shape-origin layer selection,
 placement-aware option refresh, graph-backed target families, boundary omission, independent pane
 scrolling, empty-target copy, mode-local reset, Assembly's honest placeholder, relationship/search,
 and Host/Origin/CSP/no-store hardening remain in the regression pass. Browser workspace state remains

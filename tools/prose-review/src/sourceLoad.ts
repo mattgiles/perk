@@ -23,6 +23,15 @@ export type DocumentLike = {
   querySelector: (selector: string) => { getAttribute: (name: string) => string | null } | null;
 };
 
+export type SourceLoadOptions = {
+  fetch?: FetchLike;
+  signal?: AbortSignal;
+};
+
+export type SourceProjectionOptions = SourceLoadOptions & {
+  document?: DocumentLike;
+};
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
 }
@@ -52,15 +61,17 @@ async function refused(
 /** GET and classify one canonical nested source load. Never rejects. */
 export async function loadUnitSource(
   target: SourceTarget,
-  fetchFn: FetchLike = fetch,
-  signal?: AbortSignal,
+  options: SourceLoadOptions = {},
 ): Promise<SourceLoadOutcome> {
+  const fetchFn = options.fetch ?? fetch;
   try {
     const params = [`unit=${encodeURIComponent(target.unit.id)}`];
     if (target.fragment !== null) {
       params.push(`fragment=${encodeURIComponent(target.fragment.id)}`);
     }
-    const response = await fetchFn(`/api/source?${params.join("&")}`, { signal });
+    const response = await fetchFn(`/api/source?${params.join("&")}`, {
+      signal: options.signal,
+    });
     if (response.status === 404) {
       return (await refused(response)) ?? { status: "failed" };
     }
@@ -90,14 +101,13 @@ function csrfToken(documentRoot: DocumentLike | undefined): string | null {
 export async function projectUnitSource(
   target: SourceTarget,
   text: string,
-  fetchFn: FetchLike = fetch,
-  signal?: AbortSignal,
-  documentRoot: DocumentLike | undefined = globalThis.document,
+  options: SourceProjectionOptions = {},
 ): Promise<SourceProjectionOutcome> {
-  const token = csrfToken(documentRoot);
+  const token = csrfToken(options.document ?? globalThis.document);
   if (token === null) {
     return { status: "failed" };
   }
+  const fetchFn = options.fetch ?? fetch;
   try {
     const response = await fetchFn("/api/source/project", {
       method: "POST",
@@ -110,7 +120,7 @@ export async function projectUnitSource(
         fragment: target.fragment?.id ?? null,
         text,
       }),
-      signal,
+      signal: options.signal,
     });
     if (response.status === 404) {
       return (await refused(response)) ?? { status: "failed" };

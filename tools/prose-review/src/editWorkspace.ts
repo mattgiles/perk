@@ -2,7 +2,6 @@ import { diffChars } from "diff";
 import { type SourceTarget, sourceTargetKey } from "./selection.ts";
 import {
   type NewlineStyle,
-  type ReadOnlyReason,
   type SourceFile,
   type SourceView,
   sourceCurrentText,
@@ -15,25 +14,28 @@ import {
 } from "./sourceLoad.ts";
 
 const encoder = new TextEncoder();
-const STABLE_READ_ONLY_REASONS: ReadonlySet<ReadOnlyReason> = new Set([
-  "whole-unit",
-  "unsupported-family",
-  "unsupported-selector",
-  "unsupported-source-shape",
-  "selector-not-found",
-  "selector-ambiguous",
-  "invalid-source",
-]);
+
+export type WorkspaceEditor = Readonly<{
+  path: string;
+  targetKey: string;
+  revision: number;
+  display: string;
+}>;
 
 export type WorkspaceSource = {
   path: string;
-  file: SourceFile;
   view: SourceView;
-  revision: number;
-  focusDisplay: string;
+  editor: WorkspaceEditor | null;
   dirty: boolean;
-  protected: boolean;
 };
+
+export type FocusEditCommand = {
+  target: SourceTarget;
+  base: WorkspaceEditor;
+  nextDisplay: string;
+};
+
+export type FocusEditOutcome = { status: "applied" } | { status: "stale" } | { status: "refused" };
 
 export type WorkspaceOutcome =
   | { status: "loaded"; source: WorkspaceSource }
@@ -207,7 +209,21 @@ function synthesizedWholeView(target: SourceTarget, text: string): SourceView {
 }
 
 function stableProjection(view: SourceView): boolean {
-  return view.read_only_reason === null || STABLE_READ_ONLY_REASONS.has(view.read_only_reason);
+  return view.read_only_reason !== "adapter-unavailable";
+}
+
+function cloneTarget(target: SourceTarget): SourceTarget {
+  return {
+    unit: { ...target.unit },
+    fragment: target.fragment === null ? null : { ...target.fragment },
+  };
+}
+
+function cloneView(view: SourceView): SourceView {
+  return {
+    ...view,
+    fragment: view.fragment === null ? null : { ...view.fragment },
+  };
 }
 
 function transportOutcome(outcome: SourceLoadOutcome | SourceProjectionOutcome): WorkspaceOutcome {
@@ -218,8 +234,8 @@ function transportOutcome(outcome: SourceLoadOutcome | SourceProjectionOutcome):
 }
 
 const DEFAULT_TRANSPORT: WorkspaceTransport = {
-  load: (target, signal) => loadUnitSource(target, fetch, signal),
-  project: (target, text, signal) => projectUnitSource(target, text, fetch, signal),
+  load: (target, signal) => loadUnitSource(target, { signal }),
+  project: (target, text, signal) => projectUnitSource(target, text, { signal }),
 };
 
 export class EditWorkspace {
@@ -227,7 +243,7 @@ export class EditWorkspace {
   readonly #files = new Map<string, FileEntry>();
   readonly #pathLoads = new Map<string, PathLoad>();
   readonly #projectionLoads = new Map<string, Promise<WorkspaceOutcome>>();
-  readonly #controllers = new Set<AbortController>();
+  readonly #controller = new AbortController();
   readonly #pathSubscribers = new Map<string, Set<() => void>>();
   readonly #globalSubscribers = new Set<() => void>();
   #alive = true;
@@ -251,19 +267,22 @@ export class EditWorkspace {
         entry,
         viewForLens(entry, entry.protectedLens),
         entry.protectedLens.focus.display,
-        true,
+        key,
       );
     }
     if (target.fragment === null) {
-      const view = synthesizedWholeView(target, entry.currentText);
-      return this.#workspaceSource(entry, view, view.focus, false);
+      return this.#workspaceSource(
+        entry,
+        synthesizedWholeView(target, entry.currentText),
+        null,
+        key,
+      );
     }
     const cached = entry.views.get(key);
     if (cached === undefined || cached.revision !== entry.revision) {
       return null;
     }
-    const focus = rawFocus(cached.view.focus);
-    return this.#workspaceSource(entry, cached.view, focus.display, false);
+    return this.#workspaceSource(entry, cached.view, rawFocus(cached.view.focus).display, key);
   }
 
   async ensure(target: SourceTarget): Promise<WorkspaceOutcome> {
@@ -282,16 +301,21 @@ export class EditWorkspace {
     return this.#ensureProjection(entry, target);
   }
 
-  editFocus(target: SourceTarget, renderedDisplay: string, nextDisplay: string): boolean {
+  editFocus(command: FocusEditCommand): FocusEditOutcome {
     if (!this.#alive) {
-      return false;
+      return { status: "refused" };
     }
+    const { target, base, nextDisplay } = command;
     const path = target.unit.path;
+    const key = sourceTargetKey(target);
     const entry = this.#files.get(path);
     if (entry === undefined) {
-      return false;
+      return { status: "refused" };
     }
-    const key = sourceTargetKey(target);
+    if (base.path !== path || base.targetKey !== key || base.revision !== entry.revision) {
+      return { status: "stale" };
+    }
+
     let start: number;
     let end: number;
     let previous: RawFocus;
@@ -306,17 +330,17 @@ export class EditWorkspace {
     } else {
       const cached = entry.views.get(key);
       if (cached === undefined || cached.revision !== entry.revision || !cached.view.editable) {
-        return false;
+        return { status: "refused" };
       }
       if (sourceCurrentText(cached.view) !== entry.currentText) {
-        return false;
+        return { status: "refused" };
       }
       start = cached.view.before.length;
       end = start + cached.view.focus.length;
       previous = rawFocus(cached.view.focus);
     }
-    if (renderedDisplay !== previous.display) {
-      return false;
+    if (base.display !== previous.display) {
+      return { status: "stale" };
     }
 
     const replacement = reconstructRawFocus(entry, previous, nextDisplay);
@@ -325,17 +349,17 @@ export class EditWorkspace {
     entry.revision += 1;
     entry.views.clear();
     entry.protectedLens = {
-      target,
+      target: cloneTarget(target),
       targetKey: key,
       revision: entry.revision,
       start,
       end: start + replacement.length,
       focus: rawFocus(replacement),
     };
-    entry.lastEditedTarget = target;
+    entry.lastEditedTarget = cloneTarget(target);
     this.#notifyPath(path);
     this.#notifyGlobal();
-    return true;
+    return { status: "applied" };
   }
 
   discard(path: string): boolean {
@@ -353,15 +377,6 @@ export class EditWorkspace {
     this.#notifyPath(path);
     this.#notifyGlobal();
     return true;
-  }
-
-  currentText(path: string): string | null {
-    return this.#files.get(path)?.currentText ?? null;
-  }
-
-  currentBytes(path: string): Uint8Array | null {
-    const entry = this.#files.get(path);
-    return entry === undefined ? null : new Uint8Array(encoder.encode(entry.currentText));
   }
 
   snapshot(path: string): CurrentFileSnapshot | null {
@@ -388,7 +403,7 @@ export class EditWorkspace {
     const summaries: DirtyFileSummary[] = [];
     for (const [path, entry] of this.#files) {
       if (entry.lastEditedTarget !== null && this.#dirty(entry)) {
-        summaries.push({ path, target: entry.lastEditedTarget });
+        summaries.push({ path, target: cloneTarget(entry.lastEditedTarget) });
       }
     }
     return summaries.sort((left, right) => left.path.localeCompare(right.path));
@@ -419,10 +434,7 @@ export class EditWorkspace {
       return;
     }
     this.#alive = false;
-    for (const controller of this.#controllers) {
-      controller.abort();
-    }
-    this.#controllers.clear();
+    this.#controller.abort();
     this.#pathLoads.clear();
     this.#projectionLoads.clear();
     this.#pathSubscribers.clear();
@@ -441,20 +453,20 @@ export class EditWorkspace {
       return this.ensure(target);
     }
 
-    const controller = new AbortController();
-    this.#controllers.add(controller);
-    const promise = this.#transport.load(target, controller.signal).then((outcome) => {
-      this.#controllers.delete(controller);
+    const promise = this.#transport.load(target, this.#controller.signal).then((outcome) => {
       if (!this.#alive) {
         return { status: "stale" } as const;
       }
       if (outcome.status !== "loaded") {
         return transportOutcome(outcome);
       }
+      if (outcome.source.file.path !== path) {
+        return { status: "failed" } as const;
+      }
       const loadText = sourceCurrentText(outcome.source.view);
       const loadBytes = encoder.encode(loadText);
       const entry: FileEntry = {
-        file: outcome.source.file,
+        file: { ...outcome.source.file },
         loadText,
         loadBytes: new Uint8Array(loadBytes),
         currentText: loadText,
@@ -463,20 +475,19 @@ export class EditWorkspace {
         protectedLens: null,
         lastEditedTarget: null,
       };
-      this.#files.set(path, entry);
-      const accepted = this.#acceptView(entry, target, 0, outcome.source.view);
-      this.#notifyPath(path);
-      this.#notifyGlobal();
-      if (!accepted) {
+      if (!this.#acceptView(entry, target, 0, outcome.source.view)) {
         return { status: "failed" } as const;
       }
+      this.#files.set(path, entry);
+      this.#notifyPath(path);
+      this.#notifyGlobal();
       return {
         status: "loaded",
         source: this.#workspaceSource(
           entry,
           outcome.source.view,
           rawFocus(outcome.source.view.focus).display,
-          false,
+          key,
         ),
       } as const;
     });
@@ -503,12 +514,9 @@ export class EditWorkspace {
       return pending;
     }
 
-    const controller = new AbortController();
-    this.#controllers.add(controller);
     const promise = this.#transport
-      .project(target, entry.currentText, controller.signal)
+      .project(target, entry.currentText, this.#controller.signal)
       .then((outcome): WorkspaceOutcome => {
-        this.#controllers.delete(controller);
         if (!this.#alive || entry.revision !== revision) {
           return { status: "stale" };
         }
@@ -525,7 +533,7 @@ export class EditWorkspace {
               entry,
               outcome.view,
               rawFocus(outcome.view.focus).display,
-              false,
+              sourceTargetKey(target),
             ),
           };
         }
@@ -556,7 +564,7 @@ export class EditWorkspace {
       return false;
     }
     if (stableProjection(view)) {
-      entry.views.set(sourceTargetKey(target), { revision, view });
+      entry.views.set(sourceTargetKey(target), { revision, view: cloneView(view) });
     }
     return true;
   }
@@ -564,17 +572,22 @@ export class EditWorkspace {
   #workspaceSource(
     entry: FileEntry,
     view: SourceView,
-    focusDisplay: string,
-    isProtected: boolean,
+    focusDisplay: string | null,
+    targetKey: string,
   ): WorkspaceSource {
     return {
       path: entry.file.path,
-      file: entry.file,
-      view,
-      revision: entry.revision,
-      focusDisplay,
+      view: cloneView(view),
+      editor:
+        view.editable && focusDisplay !== null
+          ? {
+              path: entry.file.path,
+              targetKey,
+              revision: entry.revision,
+              display: focusDisplay,
+            }
+          : null,
       dirty: this.#dirty(entry),
-      protected: isProtected,
     };
   }
 

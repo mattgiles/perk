@@ -128,6 +128,14 @@ async function loadedWorkspace(
   return workspace;
 }
 
+function applyEdit(workspace: EditWorkspace, target: SourceTarget, nextDisplay: string): void {
+  const source = workspace.inspect(target);
+  assert.ok(source?.editor !== null && source?.editor !== undefined);
+  assert.deepEqual(workspace.editFocus({ target, base: source.editor, nextDisplay }), {
+    status: "applied",
+  });
+}
+
 test("one path entry coalesces canonical loads across unit ids while paths stay independent", async () => {
   const first = deferred<SourceLoadOutcome>();
   const second = deferred<SourceLoadOutcome>();
@@ -161,6 +169,54 @@ test("one path entry coalesces canonical loads across unit ids while paths stay 
   assert.equal(workspace.snapshot("other.md")?.currentText, "other B");
 });
 
+test("canonical loads reject a mismatched response path before initializing an entry", async () => {
+  const text = "before A after";
+  let calls = 0;
+  const workspace = new EditWorkspace({
+    load: (target) => {
+      calls += 1;
+      const outcome = loadOutcome(target, text, editableView(target, text, "A"));
+      if (calls === 1 && outcome.status === "loaded") {
+        return Promise.resolve({
+          ...outcome,
+          source: { ...outcome.source, file: { ...outcome.source.file, path: "wrong.md" } },
+        });
+      }
+      return Promise.resolve(outcome);
+    },
+    project: () => Promise.resolve({ status: "failed" }),
+  });
+
+  assert.deepEqual(await workspace.ensure(TARGET_A), { status: "failed" });
+  assert.equal(workspace.snapshot("shared.md"), null);
+  assert.equal((await workspace.ensure(TARGET_A)).status, "loaded");
+  assert.equal(calls, 2);
+});
+
+test("inspection and transport values cannot mutate workspace authority", async () => {
+  const text = "before A after";
+  const outcome = loadOutcome(TARGET_A, text, editableView(TARGET_A, text, "A"), {
+    mode: 0o751,
+  });
+  const workspace = new EditWorkspace(immediateTransport(() => outcome));
+  const loaded = await workspace.ensure(TARGET_A);
+  assert.equal(loaded.status, "loaded");
+  assert.equal(outcome.status, "loaded");
+  if (loaded.status !== "loaded" || outcome.status !== "loaded") {
+    return;
+  }
+
+  outcome.source.file.mode = 0;
+  outcome.source.view.focus = "transport mutation";
+  loaded.source.view.focus = "inspection mutation";
+  assert.ok(loaded.source.view.fragment !== null);
+  loaded.source.view.fragment.id = "changed";
+
+  assert.equal(workspace.snapshot("shared.md")?.mode, 0o751);
+  assert.equal(workspace.inspect(TARGET_A)?.view.focus, "A");
+  assert.equal(workspace.inspect(TARGET_A)?.view.fragment?.id, FRAGMENT_A.id);
+});
+
 test("projection promises coalesce by path, target, and revision", async () => {
   const projection = deferred<SourceProjectionOutcome>();
   let projectCalls = 0;
@@ -180,6 +236,29 @@ test("projection promises coalesce by path, target, and revision", async () => {
   assert.equal((await first).status, "loaded");
   assert.equal((await second).status, "loaded");
   assert.equal(projectCalls, 1);
+});
+
+test("same-revision projections must reconstruct current text before caching", async () => {
+  const text = "A then B";
+  let calls = 0;
+  const workspace = new EditWorkspace({
+    load: (target) => Promise.resolve(loadOutcome(target, text, wholeView(target, text))),
+    project: (target, current) => {
+      calls += 1;
+      const projected = calls === 1 ? "wrong B" : current;
+      return Promise.resolve({
+        status: "loaded",
+        view: editableView(target, projected, "B"),
+      });
+    },
+  });
+  await workspace.ensure(WHOLE_A);
+
+  assert.deepEqual(await workspace.ensure(TARGET_ALIAS), { status: "failed" });
+  assert.equal(workspace.inspect(TARGET_ALIAS), null);
+  assert.equal((await workspace.ensure(TARGET_ALIAS)).status, "loaded");
+  assert.equal(workspace.inspect(TARGET_ALIAS)?.view.focus, "B");
+  assert.equal(calls, 2);
 });
 
 test("unsubscribing a requester never cancels a shared load needed later", async () => {
@@ -222,7 +301,7 @@ test("stale projection results never enter a newer revision cache", async () => 
   });
   await workspace.ensure(TARGET_A);
   const pending = workspace.ensure(TARGET_ALIAS);
-  assert.equal(workspace.editFocus(TARGET_A, "A", "AA"), true);
+  applyEdit(workspace, TARGET_A, "AA");
   stale.resolve({ status: "loaded", view: editableView(TARGET_ALIAS, text, "B") });
   assert.deepEqual(await pending, { status: "stale" });
   assert.equal(workspace.inspect(TARGET_ALIAS), null);
@@ -245,11 +324,15 @@ test("dispose aborts owned requests and makes late outcomes no-ops", async () =>
     notifications += 1;
   });
   const pending = workspace.ensure(TARGET_A);
+  const pendingOther = workspace.ensure(TARGET_B);
+  assert.equal(signals.length, 2);
+  assert.equal(signals[0], signals[1]);
   workspace.dispose();
   assert.equal(signals[0]?.aborted, true);
   const text = "before A after";
   load.resolve(loadOutcome(TARGET_A, text, editableView(TARGET_A, text, "A")));
   assert.deepEqual(await pending, { status: "stale" });
+  assert.deepEqual(await pendingOther, { status: "stale" });
   assert.equal(workspace.snapshot("shared.md"), null);
   assert.equal(notifications, 0);
   assert.deepEqual(await workspace.ensure(TARGET_A), { status: "failed" });
@@ -277,12 +360,11 @@ test("load text and byte snapshots preserve BOM, astral Unicode, metadata, and d
   const later = workspace.snapshot("shared.md");
   assert.ok(later !== null);
   assert.equal(new TextDecoder("utf-8", { ignoreBOM: true }).decode(later.loadBytes), text);
-  const currentBytes = workspace.currentBytes("shared.md");
-  assert.ok(currentBytes !== null);
+  const currentBytes = later.currentBytes;
   currentBytes[0] = 0;
   assert.equal(
     new TextDecoder("utf-8", { ignoreBOM: true }).decode(
-      workspace.currentBytes("shared.md") ?? new Uint8Array(),
+      workspace.snapshot("shared.md")?.currentBytes ?? new Uint8Array(),
     ),
     text,
   );
@@ -293,11 +375,11 @@ test("dirty state is byte-exact and exact visible reversion becomes clean", asyn
   const workspace = await loadedWorkspace(text, editableView(TARGET_A, text, "Focus 😀\r"), {
     newlineStyle: "mixed",
   });
-  assert.equal(workspace.editFocus(TARGET_A, "Focus 😀\n", "Changed 😀\n"), true);
+  applyEdit(workspace, TARGET_A, "Changed 😀\n");
   assert.equal(workspace.snapshot("shared.md")?.dirty, true);
   assert.equal(workspace.dirtyFiles().length, 1);
-  assert.equal(workspace.editFocus(TARGET_A, "Changed 😀\n", "Focus 😀\n"), true);
-  assert.equal(workspace.currentText("shared.md"), text);
+  applyEdit(workspace, TARGET_A, "Focus 😀\n");
+  assert.equal(workspace.snapshot("shared.md")?.currentText, text);
   assert.equal(workspace.snapshot("shared.md")?.dirty, false);
   assert.deepEqual(workspace.dirtyFiles(), []);
 });
@@ -312,7 +394,7 @@ for (const [style, terminator] of [
     const workspace = await loadedWorkspace(text, editableView(TARGET_A, text, "ab"), {
       newlineStyle: style,
     });
-    assert.equal(workspace.editFocus(TARGET_A, "ab", "a\nb"), true);
+    applyEdit(workspace, TARGET_A, "a\nb");
     assert.equal(workspace.inspect(TARGET_A)?.view.focus, `a${terminator}b`);
   });
 }
@@ -323,10 +405,7 @@ test("mixed raw boundaries survive repeated-text non-newline edits and raw lens 
   const workspace = await loadedWorkspace(text, editableView(TARGET_A, text, focus), {
     newlineStyle: "mixed",
   });
-  assert.equal(
-    workspace.editFocus(TARGET_A, "one\ntwo\nrepeat\nrepeat", "one\nTWO\nrepeat\nrepeat\nnew"),
-    true,
-  );
+  applyEdit(workspace, TARGET_A, "one\nTWO\nrepeat\nrepeat\nnew");
   assert.equal(workspace.inspect(TARGET_A)?.view.focus, "one\r\nTWO\rrepeat\nrepeat\r\nnew");
   assert.equal(workspace.inspect(TARGET_A)?.view.after, "\r\ntail");
 });
@@ -336,13 +415,13 @@ test("inserted breaks fall back from an empty mixed focus to current text, then 
   const mixed = await loadedWorkspace(mixedText, editableView(TARGET_A, mixedText, "ab"), {
     newlineStyle: "mixed",
   });
-  assert.equal(mixed.editFocus(TARGET_A, "ab", "a\nb"), true);
+  applyEdit(mixed, TARGET_A, "a\nb");
   assert.equal(mixed.inspect(TARGET_A)?.view.focus, "a\rb");
 
   const plain = await loadedWorkspace("ab", editableView(TARGET_A, "ab", "ab"), {
     newlineStyle: "none",
   });
-  assert.equal(plain.editFocus(TARGET_A, "ab", "a\nb"), true);
+  applyEdit(plain, TARGET_A, "a\nb");
   assert.equal(plain.inspect(TARGET_A)?.view.focus, "a\nb");
 });
 
@@ -365,8 +444,8 @@ test("one protected lens survives invalid syntax while every other target re-pro
   assert.equal(projectionCalls, 1);
   assert.equal(workspace.inspect(TARGET_ALIAS)?.view.focus, "B");
 
-  assert.equal(workspace.editFocus(TARGET_A, "A", "invalid {{{"), true);
-  assert.equal(workspace.inspect(TARGET_A)?.focusDisplay, "invalid {{{");
+  applyEdit(workspace, TARGET_A, "invalid {{{");
+  assert.equal(workspace.inspect(TARGET_A)?.editor?.display, "invalid {{{");
   assert.equal(workspace.inspect(TARGET_ALIAS), null);
   bProjection = {
     status: "loaded",
@@ -380,19 +459,33 @@ test("one protected lens survives invalid syntax while every other target re-pro
   assert.equal(projectionCalls, 2);
   assert.equal((await workspace.ensure(TARGET_ALIAS)).status, "loaded");
   assert.equal(projectionCalls, 2, "stable read-only projections cache for their exact revision");
-  assert.equal(workspace.inspect(TARGET_A)?.focusDisplay, "invalid {{{");
+  assert.equal(workspace.inspect(TARGET_A)?.editor?.display, "invalid {{{");
 
-  assert.equal(workspace.currentText("shared.md"), "invalid {{{ then B");
-  assert.equal(workspace.editFocus(TARGET_A, "invalid {{{", "valid A"), true);
-  const validCurrent = workspace.currentText("shared.md");
+  assert.equal(workspace.snapshot("shared.md")?.currentText, "invalid {{{ then B");
+  applyEdit(workspace, TARGET_A, "valid A");
+  const validCurrent = workspace.snapshot("shared.md")?.currentText;
   assert.equal(validCurrent, "valid A then B");
   bProjection = { status: "loaded", view: editableView(TARGET_ALIAS, validCurrent, "B") };
   assert.equal((await workspace.ensure(TARGET_ALIAS)).status, "loaded");
   assert.equal(projectionCalls, 3, "a new revision invalidates the prior stable projection");
-  assert.equal(workspace.editFocus(TARGET_ALIAS, "B", "edited B"), true);
+  applyEdit(workspace, TARGET_ALIAS, "edited B");
   assert.equal(workspace.inspect(TARGET_A), null);
-  assert.equal(workspace.inspect(TARGET_ALIAS)?.focusDisplay, "edited B");
+  assert.equal(workspace.inspect(TARGET_ALIAS)?.editor?.display, "edited B");
   assert.equal(workspace.dirtyFiles()[0]?.target.unit.id, UNIT_ALIAS.id);
+});
+
+test("revision-bound edit commands reject stale editor snapshots", async () => {
+  const text = "before A after";
+  const workspace = await loadedWorkspace(text, editableView(TARGET_A, text, "A"));
+  const initial = workspace.inspect(TARGET_A)?.editor;
+  assert.ok(initial !== null && initial !== undefined);
+
+  applyEdit(workspace, TARGET_A, "AA");
+  assert.deepEqual(
+    workspace.editFocus({ target: TARGET_A, base: initial, nextDisplay: "stale edit" }),
+    { status: "stale" },
+  );
+  assert.equal(workspace.snapshot("shared.md")?.currentText, "before AA after");
 });
 
 test("adapter-unavailable is transient, uncached, and retried only by another ensure", async () => {
@@ -430,6 +523,48 @@ test("adapter-unavailable is transient, uncached, and retried only by another en
   assert.equal(workspace.inspect(TARGET_ALIAS)?.view.editable, true);
 });
 
+test("stale helper overlap recovers the latest target only after explicit retry", async () => {
+  const held = deferred<SourceProjectionOutcome>();
+  const text = "A then B";
+  let calls = 0;
+  const workspace = new EditWorkspace({
+    load: (target) => Promise.resolve(loadOutcome(target, text, editableView(TARGET_A, text, "A"))),
+    project: (target, current) => {
+      calls += 1;
+      if (calls === 1) {
+        return held.promise;
+      }
+      if (calls === 2) {
+        return Promise.resolve({
+          status: "loaded",
+          view: readOnlyView(target, current, "adapter-unavailable"),
+        });
+      }
+      return Promise.resolve({ status: "loaded", view: editableView(target, current, "B") });
+    },
+  });
+  await workspace.ensure(TARGET_A);
+  const stale = workspace.ensure(TARGET_ALIAS);
+  applyEdit(workspace, TARGET_A, "AA");
+
+  const busy = await workspace.ensure(TARGET_ALIAS);
+  assert.equal(busy.status, "loaded");
+  assert.equal(
+    busy.status === "loaded" ? busy.source.view.read_only_reason : null,
+    "adapter-unavailable",
+  );
+  assert.equal(workspace.inspect(TARGET_ALIAS), null);
+
+  held.resolve({ status: "loaded", view: editableView(TARGET_ALIAS, text, "B") });
+  assert.deepEqual(await stale, { status: "stale" });
+  assert.equal(workspace.inspect(TARGET_ALIAS), null);
+
+  assert.equal((await workspace.ensure(TARGET_ALIAS)).status, "loaded");
+  assert.equal(workspace.inspect(TARGET_ALIAS)?.editor?.display, "B");
+  assert.equal(workspace.snapshot("shared.md")?.currentText, "AA then B");
+  assert.equal(calls, 3);
+});
+
 test("whole-unit aliases immediately expose edited current text without another load", async () => {
   const text = "before A after";
   let loads = 0;
@@ -440,7 +575,7 @@ test("whole-unit aliases immediately expose edited current text without another 
     }),
   );
   await workspace.ensure(TARGET_A);
-  assert.equal(workspace.editFocus(TARGET_A, "A", "edited A"), true);
+  applyEdit(workspace, TARGET_A, "edited A");
   const alias = await workspace.ensure(WHOLE_ALIAS);
   assert.equal(alias.status, "loaded");
   assert.equal(alias.status === "loaded" ? alias.source.view.focus : null, "before edited A after");
@@ -469,8 +604,8 @@ test("last-edited dirty summaries sort by path and discard restores only one imm
   );
   await workspace.ensure(TARGET_A);
   await workspace.ensure(TARGET_B);
-  assert.equal(workspace.editFocus(TARGET_A, "A", "edited A"), true);
-  assert.equal(workspace.editFocus(TARGET_B, "B", "edited B"), true);
+  applyEdit(workspace, TARGET_A, "edited A");
+  applyEdit(workspace, TARGET_B, "edited B");
   assert.deepEqual(
     workspace.dirtyFiles().map((summary) => [summary.path, summary.target.unit.id]),
     [
@@ -502,7 +637,7 @@ test("path and global subscribers are notified synchronously on edits and discar
   const events: string[] = [];
   const unsubscribePath = workspace.subscribePath("shared.md", () => events.push("path"));
   const unsubscribeGlobal = workspace.subscribeGlobal(() => events.push("global"));
-  assert.equal(workspace.editFocus(TARGET_A, "A", "AA"), true);
+  applyEdit(workspace, TARGET_A, "AA");
   assert.deepEqual(events, ["path", "global"]);
   events.length = 0;
   workspace.discard("shared.md");

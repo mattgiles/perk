@@ -15,6 +15,7 @@ import type { ComparisonLoadState } from "./src/comparisonLoad.ts";
 import { EditWorkspace, type WorkspaceTransport } from "./src/editWorkspace.ts";
 import type { Selection, SourceTarget, UnitSelection } from "./src/selection.ts";
 import type { ReadOnlyReason, SourceView, UnitSource } from "./src/source.ts";
+import type { SourceProjectionOutcome } from "./src/sourceLoad.ts";
 import type { CapabilityTree, TreeUnit, UnitRef } from "./src/tree.ts";
 
 const { App } = (await tsImport(
@@ -65,6 +66,19 @@ const TREE: CapabilityTree = {
     },
   ],
 };
+
+type Deferred<T> = {
+  promise: Promise<T>;
+  resolve: (value: T) => void;
+};
+
+function deferred<T>(): Deferred<T> {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((settle) => {
+    resolve = settle;
+  });
+  return { promise, resolve };
+}
 
 type RenderHarness = {
   window: JSDOM["window"];
@@ -290,7 +304,7 @@ test("focused textarea preserves raw boundaries, escaped context, aliases, Compa
 
     await harness.input(textarea(harness.container), "line1\nCHANGED\n");
     assert.equal(
-      workspace.currentText("shared.md"),
+      workspace.snapshot("shared.md")?.currentText,
       "<script>context</script>\r\nline1\r\nCHANGED\rtail <b>context</b>",
     );
     assert.match(harness.container.textContent ?? "", /Dirty/);
@@ -300,7 +314,7 @@ test("focused textarea preserves raw boundaries, escaped context, aliases, Compa
     assert.equal(alias.status, "loaded");
     assert.equal(
       alias.status === "loaded" ? alias.source.view.focus : null,
-      workspace.currentText("shared.md"),
+      workspace.snapshot("shared.md")?.currentText,
     );
     assert.equal(loads, 1, "different unit ids on one path cannot issue another canonical load");
 
@@ -356,7 +370,7 @@ test("an empty mapped focus remains a usable textarea", async () => {
     assert.equal(textarea(harness.container).value, "");
     assert.match(harness.container.textContent ?? "", /This mapped fragment is empty/);
     await harness.input(textarea(harness.container), "inserted");
-    assert.equal(workspace.currentText("shared.md"), "coninsertedtext");
+    assert.equal(workspace.snapshot("shared.md")?.currentText, "coninsertedtext");
   } finally {
     await harness.cleanup();
   }
@@ -422,6 +436,62 @@ test("protected temporary-invalid focus survives navigation and adapter retry is
       "reselection retries after the target was navigated away from",
     );
     assert.equal(textarea(harness.container).value, "B");
+  } finally {
+    await harness.cleanup();
+  }
+});
+
+test("stale helper overlap keeps the latest target unavailable until explicit retry", async () => {
+  const harness = installDom();
+  const held = deferred<SourceProjectionOutcome>();
+  const text = "A then B";
+  let projectionCalls = 0;
+  const workspace = new EditWorkspace({
+    load: (target) =>
+      Promise.resolve({
+        status: "loaded",
+        source: load(target, text, editableView(TARGET_A, text, "A")),
+      }),
+    project: (target, current) => {
+      projectionCalls += 1;
+      if (projectionCalls === 1) {
+        return held.promise;
+      }
+      if (projectionCalls === 2) {
+        return Promise.resolve({
+          status: "loaded",
+          view: readOnlyView(target, current, "adapter-unavailable"),
+        });
+      }
+      return Promise.resolve({ status: "loaded", view: editableView(target, current, "B") });
+    },
+  });
+  const selectionA: UnitSelection = { type: "unit", target: TARGET_A, placement: null };
+  const aliasSelection: UnitSelection = { type: "unit", target: TARGET_ALIAS, placement: null };
+
+  try {
+    await harness.render(center(workspace, "edit", selectionA));
+    await harness.settle();
+    await harness.render(center(workspace, "edit", aliasSelection));
+    await harness.settle();
+    assert.match(harness.container.textContent ?? "", /Loading source/);
+
+    await harness.render(center(workspace, "edit", selectionA));
+    await harness.input(textarea(harness.container), "AA");
+    await harness.render(center(workspace, "edit", aliasSelection));
+    await harness.settle();
+    assert.match(harness.container.textContent ?? "", /Adapter unavailable/);
+
+    held.resolve({ status: "loaded", view: editableView(TARGET_ALIAS, text, "B") });
+    await harness.settle();
+    assert.match(harness.container.textContent ?? "", /Adapter unavailable/);
+    assert.equal(workspace.inspect(TARGET_ALIAS), null);
+
+    await harness.click(buttonByText(harness.container, "Retry adapter"));
+    await harness.settle();
+    assert.equal(textarea(harness.container).value, "B");
+    assert.equal(workspace.snapshot("shared.md")?.currentText, "AA then B");
+    assert.equal(projectionCalls, 3);
   } finally {
     await harness.cleanup();
   }

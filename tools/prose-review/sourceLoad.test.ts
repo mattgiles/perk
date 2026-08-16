@@ -75,7 +75,7 @@ test("loadUnitSource orders and encodes GET identity and propagates AbortSignal"
     calls.push({ url, init });
     return Promise.resolve(respond(200, LOAD));
   };
-  assert.deepEqual(await loadUnitSource(TARGET, fetchFn, controller.signal), {
+  assert.deepEqual(await loadUnitSource(TARGET, { fetch: fetchFn, signal: controller.signal }), {
     status: "loaded",
     source: LOAD,
   });
@@ -88,9 +88,11 @@ test("loadUnitSource orders and encodes GET identity and propagates AbortSignal"
 
   const wholeCalls: { url: string; init: RequestInit | undefined }[] = [];
   assert.deepEqual(
-    await loadUnitSource(WHOLE_TARGET, (url, init) => {
-      wholeCalls.push({ url, init });
-      return Promise.resolve(respond(200, WHOLE_LOAD));
+    await loadUnitSource(WHOLE_TARGET, {
+      fetch: (url, init) => {
+        wholeCalls.push({ url, init });
+        return Promise.resolve(respond(200, WHOLE_LOAD));
+      },
     }),
     { status: "loaded", source: WHOLE_LOAD },
   );
@@ -107,10 +109,17 @@ test("projectUnitSource emits deterministic POST JSON and exactly one meta CSRF 
     return Promise.resolve(respond(200, VIEW));
   };
   const text = "# AGENTS\r\nBrowser 😀\rtext";
-  assert.deepEqual(await projectUnitSource(TARGET, text, fetchFn, controller.signal, META), {
-    status: "loaded",
-    view: VIEW,
-  });
+  assert.deepEqual(
+    await projectUnitSource(TARGET, text, {
+      fetch: fetchFn,
+      signal: controller.signal,
+      document: META,
+    }),
+    {
+      status: "loaded",
+      view: VIEW,
+    },
+  );
   assert.equal(calls.length, 1);
   assert.equal(calls[0]?.url, "/api/source/project");
   assert.deepEqual(calls[0]?.init, {
@@ -138,10 +147,10 @@ test("projectUnitSource refuses missing or empty CSRF metadata before fetch", as
   const empty: DocumentLike = {
     querySelector: () => ({ getAttribute: () => "   " }),
   };
-  assert.deepEqual(await projectUnitSource(TARGET, "text", fetchFn, undefined, absent), {
+  assert.deepEqual(await projectUnitSource(TARGET, "text", { fetch: fetchFn, document: absent }), {
     status: "failed",
   });
-  assert.deepEqual(await projectUnitSource(TARGET, "text", fetchFn, undefined, empty), {
+  assert.deepEqual(await projectUnitSource(TARGET, "text", { fetch: fetchFn, document: empty }), {
     status: "failed",
   });
   assert.equal(calls, 0);
@@ -157,11 +166,11 @@ test("canonical load rejects nested file and view identity mismatches", async ()
     WHOLE_LOAD,
   ];
   for (const mismatch of mismatches) {
-    assert.deepEqual(await loadUnitSource(TARGET, fetchOnce(respond(200, mismatch))), {
+    assert.deepEqual(await loadUnitSource(TARGET, { fetch: fetchOnce(respond(200, mismatch)) }), {
       status: "failed",
     });
   }
-  assert.deepEqual(await loadUnitSource(WHOLE_TARGET, fetchOnce(respond(200, LOAD))), {
+  assert.deepEqual(await loadUnitSource(WHOLE_TARGET, { fetch: fetchOnce(respond(200, LOAD)) }), {
     status: "failed",
   });
 });
@@ -175,7 +184,10 @@ test("projection rejects returned view identity mismatches", async () => {
     WHOLE_VIEW,
   ]) {
     assert.deepEqual(
-      await projectUnitSource(TARGET, "text", fetchOnce(respond(200, mismatch)), undefined, META),
+      await projectUnitSource(TARGET, "text", {
+        fetch: fetchOnce(respond(200, mismatch)),
+        document: META,
+      }),
       { status: "failed" },
     );
   }
@@ -183,17 +195,16 @@ test("projection rejects returned view identity mismatches", async () => {
 
 test("GET and POST map fixed 404 details to refused", async () => {
   assert.deepEqual(
-    await loadUnitSource(WHOLE_TARGET, fetchOnce(respond(404, { detail: "unknown unit" }))),
+    await loadUnitSource(WHOLE_TARGET, {
+      fetch: fetchOnce(respond(404, { detail: "unknown unit" })),
+    }),
     { status: "refused", detail: "unknown unit" },
   );
   assert.deepEqual(
-    await projectUnitSource(
-      TARGET,
-      "text",
-      fetchOnce(respond(404, { detail: "unknown fragment" })),
-      undefined,
-      META,
-    ),
+    await projectUnitSource(TARGET, "text", {
+      fetch: fetchOnce(respond(404, { detail: "unknown fragment" })),
+      document: META,
+    }),
     { status: "refused", detail: "unknown fragment" },
   );
 });
@@ -206,15 +217,17 @@ test("GET and POST fail non-ok, network, JSON, and parser errors", async () => {
     respond(200, { unit: UNIT.id }),
   ];
   for (const response of badResponses) {
-    assert.deepEqual(await loadUnitSource(WHOLE_TARGET, fetchOnce(response)), { status: "failed" });
+    assert.deepEqual(await loadUnitSource(WHOLE_TARGET, { fetch: fetchOnce(response) }), {
+      status: "failed",
+    });
     assert.deepEqual(
-      await projectUnitSource(TARGET, "text", fetchOnce(response), undefined, META),
+      await projectUnitSource(TARGET, "text", { fetch: fetchOnce(response), document: META }),
       { status: "failed" },
     );
   }
   const offline: FetchLike = () => Promise.reject(new TypeError("offline"));
-  assert.deepEqual(await loadUnitSource(WHOLE_TARGET, offline), { status: "failed" });
-  assert.deepEqual(await projectUnitSource(TARGET, "text", offline, undefined, META), {
+  assert.deepEqual(await loadUnitSource(WHOLE_TARGET, { fetch: offline }), { status: "failed" });
+  assert.deepEqual(await projectUnitSource(TARGET, "text", { fetch: offline, document: META }), {
     status: "failed",
   });
 });

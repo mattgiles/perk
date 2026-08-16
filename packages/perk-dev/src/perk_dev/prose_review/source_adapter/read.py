@@ -57,6 +57,21 @@ def _newline_style(content: bytes) -> NewlineStyle:
     return "mixed"
 
 
+def _read_regular_file(candidate: Path) -> tuple[bytes, int]:
+    flags = os.O_RDONLY | os.O_NONBLOCK | os.O_CLOEXEC | os.O_NOFOLLOW
+    descriptor = os.open(candidate, flags)
+    try:
+        file_stat = os.fstat(descriptor)
+        if not stat.S_ISREG(file_stat.st_mode):
+            raise SourceReadError("not_found")
+        chunks: list[bytes] = []
+        while chunk := os.read(descriptor, 1024 * 1024):
+            chunks.append(chunk)
+        return b"".join(chunks), stat.S_IMODE(file_stat.st_mode)
+    finally:
+        os.close(descriptor)
+
+
 def read_unit_file(repo_root: Path, unit: RoutedUnit) -> WholeFileSource:
     """Read a routed unit's whole source file, contained under ``repo_root``."""
     if Path(unit.candidate.path).is_absolute():
@@ -66,12 +81,7 @@ def read_unit_file(repo_root: Path, unit: RoutedUnit) -> WholeFileSource:
         candidate = (repo_resolved / unit.candidate.path).resolve()
         if not candidate.is_relative_to(repo_resolved):
             raise SourceReadError("not_found")
-        with candidate.open("rb") as stream:
-            file_stat = os.fstat(stream.fileno())
-            if not stat.S_ISREG(file_stat.st_mode):
-                raise SourceReadError("not_found")
-            raw = stream.read()
-            mode = stat.S_IMODE(file_stat.st_mode)
+        raw, mode = _read_regular_file(candidate)
     except (OSError, ValueError) as exc:
         raise SourceReadError("not_found") from exc
     try:

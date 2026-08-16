@@ -37,6 +37,11 @@ PYTHON_UNIT_ID = "python-symbol:packages/perk-dev/src/perk_dev/audit/bounding.py
 PYTHON_SOURCE_PATH = Path("packages/perk-dev/src/perk_dev/audit/bounding.py")
 TYPESCRIPT_UNIT_ID = "typescript-tool:plan_review"
 TYPESCRIPT_SOURCE_PATH = Path("extension/factories/planReview.ts")
+CSP = (
+    "default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; "
+    "img-src 'self'; font-src 'self'; base-uri 'none'; form-action 'none'; "
+    "frame-ancestors 'none'"
+)
 
 # One xdist worker: the module fixture builds the frontend and owns a live server.
 pytestmark = pytest.mark.xdist_group("prose_review_frontend")
@@ -47,6 +52,17 @@ class _RunningServer:
     base_url: str
     token: str
     snapshot: CatalogSnapshot
+
+
+def _csrf_token(html: str) -> str:
+    match = re.search(r'<meta name="csrf-token" content="([^"]+)"', html)
+    assert match is not None, html
+    return match.group(1)
+
+
+def _assert_security_headers(response: httpx.Response) -> None:
+    assert response.headers["content-security-policy"] == CSP
+    assert response.headers["cache-control"] == "no-store"
 
 
 @pytest.fixture(scope="module")
@@ -120,8 +136,9 @@ def test_served_page_carries_the_real_token_and_its_own_built_assets(
     with httpx.Client(base_url=server.base_url, timeout=10) as client:
         page = client.get("/")
         assert page.status_code == 200
-        assert server.token in page.text
+        assert _csrf_token(page.text) == server.token
         assert "__PROSE_REVIEW_CSRF__" not in page.text
+        _assert_security_headers(page)
 
         # The built page's own hashed module script is servable from the same origin.
         match = re.search(r'<script[^>]+src="(/assets/[^"]+\.js)"', page.text)
@@ -129,6 +146,7 @@ def test_served_page_carries_the_real_token_and_its_own_built_assets(
         asset = client.get(match.group(1))
         assert asset.status_code == 200
         assert asset.headers["content-type"].startswith("text/javascript")
+        _assert_security_headers(asset)
 
 
 def test_summary_endpoint_serves_the_snapshot_dto_over_real_http(
@@ -224,6 +242,8 @@ def test_source_endpoint_serves_whole_and_fragment_focus_over_real_http(
         .replace("Conventions for working", "Browser round-trip conventions for working", 1)
     )
     with httpx.Client(base_url=server.base_url, timeout=10) as client:
+        page = client.get("/")
+        token = _csrf_token(page.text)
         whole_response = client.get("/api/source", params={"unit": "managed:repo-agents"})
         markdown_response = client.get(
             "/api/source",
@@ -249,7 +269,7 @@ def test_source_endpoint_serves_whole_and_fragment_focus_over_real_http(
         )
         projection_response = client.post(
             "/api/source/project",
-            headers={"X-Prose-Review-Csrf": server.token},
+            headers={"X-Prose-Review-Csrf": token},
             json={
                 "unit": "managed:repo-agents",
                 "fragment": "section:agents/developing-perk",
@@ -317,11 +337,13 @@ def test_source_endpoint_serves_whole_and_fragment_focus_over_real_http(
     ] == (ROOT / TYPESCRIPT_SOURCE_PATH).read_text(encoding="utf-8")
 
     assert projection_response.status_code == 200
+    _assert_security_headers(projection_response)
     projection = projection_response.json()
     assert projection["editable"] is True
     assert projection["before"] + projection["focus"] + projection["after"] == projected_text
     assert "Browser round-trip conventions" in projection["focus"]
     assert unchanged_response.status_code == 200
+    _assert_security_headers(unchanged_response)
     unchanged = unchanged_response.json()
     assert unchanged["file"] == whole_load["file"]
     assert unchanged["view"]["focus"] == whole["focus"]
@@ -332,3 +354,4 @@ def test_wrong_host_is_rejected_over_real_http(server: _RunningServer) -> None:
         response = client.get("/", headers={"Host": "evil.example"})
     assert response.status_code == 403
     assert response.json() == {"detail": "forbidden host"}
+    _assert_security_headers(response)
