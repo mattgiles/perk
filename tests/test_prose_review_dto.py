@@ -22,16 +22,33 @@ from perk_dev.prose_review.dto import (
     ComparisonOptionsOut,
     ComparisonPlacementOut,
     FragmentRefOut,
+    SavedSourceOut,
     SearchOut,
     SessionShapeOut,
+    SourceConflictOut,
+    SourceDiagnosticOut,
     SourceFileOut,
+    SourceRefusedOut,
+    SourceSavedOut,
+    SourceValidationFailedOut,
     SourceViewOut,
+    SuggestedCheckOut,
     TreeUnitOut,
     UnitInspectOut,
     UnitSourceOut,
 )
 from perk_dev.prose_review.search import build_search_index, search
-from perk_dev.prose_review.source_adapter import FocusedSource, LoadedSource, WholeFileSource
+from perk_dev.prose_review.source_adapter import (
+    FocusedSource,
+    LoadedSource,
+    SourceConflict,
+    SourceDiagnostic,
+    SourceRefused,
+    SourceSaved,
+    SourceValidationFailed,
+    SuggestedCheck,
+    WholeFileSource,
+)
 
 ROOT = Path(__file__).parents[1]
 
@@ -512,3 +529,85 @@ def test_unit_source_out_has_nested_file_and_view_with_exact_field_order() -> No
     assert dumped["view"]["before"] + dumped["view"]["focus"] + dumped["view"]["after"] == content
     assert SourceFileOut.from_domain(file).model_dump(mode="json") == dumped["file"]
     assert SourceViewOut.from_domain(view).model_dump(mode="json") == dumped["view"]
+
+
+def test_save_result_dtos_have_exact_tagged_shapes_and_reuse_lineage(
+    snapshot: CatalogSnapshot,
+) -> None:
+    raw = "saved 😀\r\n".encode()
+    source = WholeFileSource(
+        unit_id="ambient:learned-routing",
+        path="docs/learned/clusters.yaml",
+        kind="ambient-routing",
+        content=raw,
+        mode=0o6751,
+        newline_style="crlf",
+        load_hash=hashlib.sha256(raw).hexdigest(),
+    )
+    lineage = snapshot.get_lineage("ambient-index")
+    assert lineage is not None
+    saved = SourceSaved(
+        status="saved",
+        source=source,
+        materialized=(lineage,),
+        checks=(
+            SuggestedCheck(id="prose-map", command="perk-dev prose-map check"),
+            SuggestedCheck(id="learned-docs", command="perk learn docs-check"),
+        ),
+        catalog_refreshed=False,
+        refresh_detail="refresh failed",
+    )
+    dumped = SourceSavedOut.from_domain(saved).model_dump(mode="json")
+    assert list(dumped) == [
+        "status",
+        "source",
+        "materialized",
+        "checks",
+        "catalog_refreshed",
+        "refresh_detail",
+    ]
+    assert list(dumped["source"]) == ["unit", "kind", "file"]
+    assert list(dumped["source"]["file"]) == ["path", "mode", "newline_style", "load_hash"]
+    assert list(dumped["materialized"][0]) == ["id", "relationship", "targets"]
+    assert [list(check) for check in dumped["checks"]] == [
+        ["id", "command"],
+        ["id", "command"],
+    ]
+    assert SavedSourceOut.from_domain(source).model_dump(mode="json") == dumped["source"]
+    assert SuggestedCheckOut.from_domain(saved.checks[0]).model_dump(mode="json") == {
+        "id": "prose-map",
+        "command": "perk-dev prose-map check",
+    }
+
+    diagnostic = SourceDiagnostic(
+        code="selector-not-found",
+        message="missing",
+        selector="heading:missing",
+        line=2,
+        column=3,
+    )
+    validation = SourceValidationFailedOut.from_domain(
+        SourceValidationFailed(status="validation-failed", diagnostics=(diagnostic,))
+    ).model_dump(mode="json")
+    assert list(validation) == ["status", "diagnostics"]
+    assert list(validation["diagnostics"][0]) == [
+        "code",
+        "message",
+        "selector",
+        "line",
+        "column",
+    ]
+    assert (
+        SourceDiagnosticOut.from_domain(diagnostic).model_dump(mode="json")
+        == validation["diagnostics"][0]
+    )
+    assert SourceConflictOut.from_domain(
+        SourceConflict(status="conflict", detail="changed")
+    ).model_dump(mode="json") == {"status": "conflict", "detail": "changed"}
+    assert SourceRefusedOut.from_domain(
+        SourceRefused(status="refused", reason="unsafe-path", detail="unsafe")
+    ).model_dump(mode="json") == {
+        "status": "refused",
+        "reason": "unsafe-path",
+        "detail": "unsafe",
+    }

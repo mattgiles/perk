@@ -207,7 +207,7 @@ function parseConcern(value: unknown): Concern | null {
   };
 }
 
-function parseLineage(value: unknown): Lineage | null {
+export function parseLineage(value: unknown): Lineage | null {
   if (
     !isRecord(value) ||
     typeof value.id !== "string" ||

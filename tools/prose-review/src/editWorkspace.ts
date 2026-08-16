@@ -1,4 +1,16 @@
 import { diffChars } from "diff";
+import {
+  CATALOG_STALE_DETAIL,
+  CONFLICT_DETAIL,
+  INDETERMINATE_DETAIL,
+  type SourceDiagnostic,
+  type SourceRefusalReason,
+  type SourceSaveResult,
+  supportsSourceSave,
+  UNRESOLVED_RECONCILIATION_DETAIL,
+} from "./save.ts";
+import { type SourceSaveLoadOutcome, saveUnitSource } from "./saveLoad.ts";
+import { createSaveReview, type SaveReview } from "./saveReview.ts";
 import { type SourceTarget, sourceTargetKey } from "./selection.ts";
 import {
   type NewlineStyle,
@@ -22,11 +34,28 @@ export type WorkspaceEditor = Readonly<{
   display: string;
 }>;
 
+export type WorkspaceSaveState =
+  | { status: "idle" }
+  | { status: "saving" }
+  | { status: "validation-failed"; diagnostics: SourceDiagnostic[] }
+  | { status: "refused"; reason: SourceRefusalReason | null; detail: string }
+  | { status: "conflict"; detail: string }
+  | { status: "reconciling"; detail: string }
+  | { status: "indeterminate"; detail: string }
+  | { status: "reloading"; detail: string }
+  | { status: "saved"; result: Extract<SourceSaveResult, { status: "saved" }> }
+  | { status: "reconciled-saved"; detail: string };
+
 export type WorkspaceSource = {
   path: string;
   view: SourceView;
   editor: WorkspaceEditor | null;
   dirty: boolean;
+  review: SaveReview | null;
+  saveState: WorkspaceSaveState;
+  canDiscard: boolean;
+  canReview: boolean;
+  canSave: boolean;
 };
 
 export type FocusEditCommand = {
@@ -48,6 +77,26 @@ export type DirtyFileSummary = {
   target: SourceTarget;
 };
 
+export type AttentionFileSummary = DirtyFileSummary & {
+  dirty: boolean;
+  saveState: WorkspaceSaveState;
+  canDiscard: boolean;
+};
+
+export type WorkspaceWriteState = {
+  frozen: boolean;
+  suspended: boolean;
+  detail: string | null;
+  catalogEpoch: number;
+};
+
+export type SaveReviewOutcome = { status: "reviewed"; review: SaveReview } | { status: "refused" };
+
+export type SaveOperationOutcome =
+  | { status: "completed" }
+  | { status: "refused" }
+  | { status: "stale" };
+
 export type CurrentFileSnapshot = {
   path: string;
   loadText: string;
@@ -68,6 +117,13 @@ export type WorkspaceTransport = {
     text: string,
     signal: AbortSignal,
   ) => Promise<SourceProjectionOutcome>;
+  save?: (
+    target: SourceTarget,
+    loadHash: string,
+    text: string,
+    signal: AbortSignal,
+  ) => Promise<SourceSaveLoadOutcome>;
+  reload?: (target: SourceTarget, signal: AbortSignal) => Promise<SourceLoadOutcome>;
 };
 
 type RawFocus = {
@@ -90,6 +146,18 @@ type ProtectedLens = {
   focus: RawFocus;
 };
 
+type ReviewedSave = {
+  artifact: SaveReview;
+  target: SourceTarget;
+};
+
+type IndeterminateSave = {
+  target: SourceTarget;
+  submittedText: string;
+  priorText: string;
+  priorHash: string;
+};
+
 type FileEntry = {
   file: SourceFile;
   loadText: string;
@@ -99,6 +167,9 @@ type FileEntry = {
   views: Map<string, CachedView>;
   protectedLens: ProtectedLens | null;
   lastEditedTarget: SourceTarget | null;
+  review: ReviewedSave | null;
+  saveState: WorkspaceSaveState;
+  indeterminate: IndeterminateSave | null;
 };
 
 type PathLoad = {
@@ -233,13 +304,15 @@ function transportOutcome(outcome: SourceLoadOutcome | SourceProjectionOutcome):
   return { status: "failed" };
 }
 
-const DEFAULT_TRANSPORT: WorkspaceTransport = {
+const DEFAULT_TRANSPORT: Required<WorkspaceTransport> = {
   load: (target, signal) => loadUnitSource(target, { signal }),
   project: (target, text, signal) => projectUnitSource(target, text, { signal }),
+  save: (target, loadHash, text, signal) => saveUnitSource(target, loadHash, text, { signal }),
+  reload: (target, signal) => loadUnitSource(target, { signal, cache: "no-store" }),
 };
 
 export class EditWorkspace {
-  readonly #transport: WorkspaceTransport;
+  readonly #transport: Required<WorkspaceTransport>;
   readonly #files = new Map<string, FileEntry>();
   readonly #pathLoads = new Map<string, PathLoad>();
   readonly #projectionLoads = new Map<string, Promise<WorkspaceOutcome>>();
@@ -247,9 +320,12 @@ export class EditWorkspace {
   readonly #pathSubscribers = new Map<string, Set<() => void>>();
   readonly #globalSubscribers = new Set<() => void>();
   #alive = true;
+  #writeFrozenDetail: string | null = null;
+  #saveSuspended = false;
+  #catalogEpoch = 0;
 
   constructor(transport: WorkspaceTransport = DEFAULT_TRANSPORT) {
-    this.#transport = transport;
+    this.#transport = { ...DEFAULT_TRANSPORT, ...transport };
   }
 
   inspect(target: SourceTarget): WorkspaceSource | null {
@@ -309,7 +385,7 @@ export class EditWorkspace {
     const path = target.unit.path;
     const key = sourceTargetKey(target);
     const entry = this.#files.get(path);
-    if (entry === undefined) {
+    if (entry === undefined || this.#pathLocked(entry)) {
       return { status: "refused" };
     }
     if (base.path !== path || base.targetKey !== key || base.revision !== entry.revision) {
@@ -357,6 +433,11 @@ export class EditWorkspace {
       focus: rawFocus(replacement),
     };
     entry.lastEditedTarget = cloneTarget(target);
+    entry.review = null;
+    if (entry.saveState.status !== "conflict") {
+      entry.saveState = { status: "idle" };
+      entry.indeterminate = null;
+    }
     this.#notifyPath(path);
     this.#notifyGlobal();
     return { status: "applied" };
@@ -367,16 +448,194 @@ export class EditWorkspace {
       return false;
     }
     const entry = this.#files.get(path);
-    if (entry === undefined) {
+    if (entry === undefined || !this.#canDiscard(entry)) {
       return false;
     }
     entry.currentText = entry.loadText;
     entry.revision += 1;
     entry.views.clear();
     entry.protectedLens = null;
+    entry.review = null;
+    entry.saveState = { status: "idle" };
+    entry.indeterminate = null;
     this.#notifyPath(path);
     this.#notifyGlobal();
     return true;
+  }
+
+  beginSaveReview(path: string): SaveReviewOutcome {
+    const entry = this.#files.get(path);
+    if (
+      !this.#alive ||
+      entry === undefined ||
+      entry.lastEditedTarget === null ||
+      !this.#dirty(entry) ||
+      !supportsSourceSave(entry.lastEditedTarget) ||
+      entry.saveState.status !== "idle" ||
+      this.#writeFrozenDetail !== null ||
+      this.#saveSuspended
+    ) {
+      return { status: "refused" };
+    }
+    const artifact = createSaveReview({
+      path,
+      unit: entry.lastEditedTarget.unit.id,
+      loadHash: entry.file.load_hash,
+      loadText: entry.loadText,
+      currentText: entry.currentText,
+      revision: entry.revision,
+    });
+    entry.review = { artifact, target: cloneTarget(entry.lastEditedTarget) };
+    this.#notifyPath(path);
+    return { status: "reviewed", review: artifact };
+  }
+
+  async saveReviewed(path: string): Promise<SaveOperationOutcome> {
+    const entry = this.#files.get(path);
+    const reviewed = entry?.review;
+    if (
+      !this.#alive ||
+      entry === undefined ||
+      reviewed === null ||
+      reviewed === undefined ||
+      entry.saveState.status !== "idle" ||
+      this.#writeFrozenDetail !== null ||
+      this.#saveSuspended
+    ) {
+      return { status: "refused" };
+    }
+    const artifact = reviewed.artifact;
+    if (
+      artifact.path !== path ||
+      artifact.unit !== reviewed.target.unit.id ||
+      artifact.loadHash !== entry.file.load_hash ||
+      artifact.revision !== entry.revision ||
+      artifact.loadText !== entry.loadText ||
+      artifact.currentText !== entry.currentText
+    ) {
+      entry.review = null;
+      this.#notifyPath(path);
+      return { status: "stale" };
+    }
+
+    entry.saveState = { status: "saving" };
+    this.#notifyPath(path);
+    this.#notifyGlobal();
+    const outcome = await this.#transport.save(
+      reviewed.target,
+      artifact.loadHash,
+      artifact.currentText,
+      this.#controller.signal,
+    );
+    if (!this.#alive || this.#files.get(path) !== entry) {
+      return { status: "stale" };
+    }
+    if (outcome.status === "not-sent") {
+      entry.saveState = { status: "idle" };
+      this.#notifyPath(path);
+      this.#notifyGlobal();
+      return { status: "completed" };
+    }
+    if (outcome.status === "rejected") {
+      entry.review = null;
+      entry.saveState = { status: "refused", reason: null, detail: outcome.detail };
+      this.#notifyPath(path);
+      this.#notifyGlobal();
+      return { status: "completed" };
+    }
+    if (outcome.status === "indeterminate") {
+      entry.review = null;
+      entry.indeterminate = {
+        target: cloneTarget(reviewed.target),
+        submittedText: artifact.currentText,
+        priorText: artifact.loadText,
+        priorHash: artifact.loadHash,
+      };
+      entry.saveState = { status: "reconciling", detail: INDETERMINATE_DETAIL };
+      this.#saveSuspended = true;
+      this.#notifyPath(path);
+      this.#notifyGlobal();
+      await this.#reconcileEntry(path, entry);
+      return this.#alive ? { status: "completed" } : { status: "stale" };
+    }
+
+    const result = outcome.result;
+    entry.review = null;
+    if (result.status === "saved") {
+      this.#adoptSaved(entry, artifact.currentText, result);
+      if (!result.catalog_refreshed) {
+        this.#freezeWrites(result.refresh_detail ?? CATALOG_STALE_DETAIL);
+      }
+    } else if (result.status === "validation-failed") {
+      entry.saveState = {
+        status: "validation-failed",
+        diagnostics: result.diagnostics.map((diagnostic) => ({ ...diagnostic })),
+      };
+    } else if (result.status === "conflict") {
+      entry.saveState = { status: "conflict", detail: result.detail };
+    } else {
+      entry.saveState = {
+        status: "refused",
+        reason: result.reason,
+        detail: result.detail,
+      };
+      if (result.reason === "catalog-stale") {
+        this.#freezeWrites(result.detail);
+      }
+    }
+    this.#notifyPath(path);
+    this.#notifyGlobal();
+    return { status: "completed" };
+  }
+
+  async reconcileSave(path: string): Promise<SaveOperationOutcome> {
+    const entry = this.#files.get(path);
+    if (
+      !this.#alive ||
+      entry === undefined ||
+      entry.saveState.status !== "indeterminate" ||
+      entry.indeterminate === null
+    ) {
+      return { status: "refused" };
+    }
+    entry.saveState = { status: "reconciling", detail: INDETERMINATE_DETAIL };
+    this.#notifyPath(path);
+    this.#notifyGlobal();
+    await this.#reconcileEntry(path, entry);
+    return this.#alive ? { status: "completed" } : { status: "stale" };
+  }
+
+  async reloadConflict(path: string): Promise<SaveOperationOutcome> {
+    const entry = this.#files.get(path);
+    if (
+      !this.#alive ||
+      entry === undefined ||
+      entry.saveState.status !== "conflict" ||
+      entry.lastEditedTarget === null
+    ) {
+      return { status: "refused" };
+    }
+    const conflictDetail = entry.saveState.detail;
+    const target = cloneTarget(entry.lastEditedTarget);
+    entry.saveState = { status: "reloading", detail: conflictDetail };
+    this.#notifyPath(path);
+    this.#notifyGlobal();
+    const outcome = await this.#transport.reload(target, this.#controller.signal);
+    if (!this.#alive || this.#files.get(path) !== entry) {
+      return { status: "stale" };
+    }
+    if (outcome.status !== "loaded" || outcome.source.file.path !== path) {
+      entry.saveState = { status: "conflict", detail: conflictDetail };
+      this.#notifyPath(path);
+      this.#notifyGlobal();
+      return { status: "completed" };
+    }
+    this.#adoptCanonical(entry, outcome.source.file, sourceCurrentText(outcome.source.view));
+    entry.saveState = { status: "idle" };
+    entry.indeterminate = null;
+    this.#notifyPath(path);
+    this.#notifyGlobal();
+    return { status: "completed" };
   }
 
   snapshot(path: string): CurrentFileSnapshot | null {
@@ -407,6 +666,32 @@ export class EditWorkspace {
       }
     }
     return summaries.sort((left, right) => left.path.localeCompare(right.path));
+  }
+
+  attentionFiles(): AttentionFileSummary[] {
+    const summaries: AttentionFileSummary[] = [];
+    for (const [path, entry] of this.#files) {
+      if (entry.lastEditedTarget === null || !this.#needsAttention(entry)) {
+        continue;
+      }
+      summaries.push({
+        path,
+        target: cloneTarget(entry.lastEditedTarget),
+        dirty: this.#dirty(entry),
+        saveState: this.#cloneSaveState(entry.saveState),
+        canDiscard: this.#canDiscard(entry),
+      });
+    }
+    return summaries.sort((left, right) => left.path.localeCompare(right.path));
+  }
+
+  writeState(): WorkspaceWriteState {
+    return {
+      frozen: this.#writeFrozenDetail !== null,
+      suspended: this.#saveSuspended,
+      detail: this.#writeFrozenDetail,
+      catalogEpoch: this.#catalogEpoch,
+    };
   }
 
   subscribePath(path: string, subscriber: () => void): () => void {
@@ -474,6 +759,9 @@ export class EditWorkspace {
         views: new Map(),
         protectedLens: null,
         lastEditedTarget: null,
+        review: null,
+        saveState: { status: "idle" },
+        indeterminate: null,
       };
       if (!this.#acceptView(entry, target, 0, outcome.source.view)) {
         return { status: "failed" } as const;
@@ -569,6 +857,146 @@ export class EditWorkspace {
     return true;
   }
 
+  async #reconcileEntry(path: string, entry: FileEntry): Promise<void> {
+    const pending = entry.indeterminate;
+    if (pending === null) {
+      return;
+    }
+    const outcome = await this.#transport.reload(pending.target, this.#controller.signal);
+    if (!this.#alive || this.#files.get(path) !== entry || entry.indeterminate !== pending) {
+      return;
+    }
+    if (
+      outcome.status !== "loaded" ||
+      outcome.source.file.path !== path ||
+      outcome.source.view.unit !== pending.target.unit.id ||
+      outcome.source.view.kind !== pending.target.unit.kind
+    ) {
+      entry.saveState = { status: "indeterminate", detail: UNRESOLVED_RECONCILIATION_DETAIL };
+      this.#notifyPath(path);
+      this.#notifyGlobal();
+      return;
+    }
+
+    const canonicalText = sourceCurrentText(outcome.source.view);
+    if (canonicalText === pending.submittedText) {
+      this.#adoptCanonical(entry, outcome.source.file, pending.submittedText);
+      entry.saveState = { status: "reconciled-saved", detail: CATALOG_STALE_DETAIL };
+      entry.indeterminate = null;
+      this.#saveSuspended = false;
+      this.#freezeWrites(CATALOG_STALE_DETAIL);
+    } else if (
+      canonicalText === pending.priorText &&
+      outcome.source.file.load_hash === pending.priorHash
+    ) {
+      entry.file = { ...outcome.source.file };
+      entry.loadText = pending.priorText;
+      entry.loadBytes = new Uint8Array(encoder.encode(pending.priorText));
+      entry.currentText = pending.submittedText;
+      entry.revision += 1;
+      entry.views.clear();
+      entry.protectedLens = null;
+      entry.review = null;
+      entry.saveState = { status: "idle" };
+      entry.indeterminate = null;
+      this.#saveSuspended = false;
+    } else {
+      entry.saveState = { status: "conflict", detail: CONFLICT_DETAIL };
+      entry.indeterminate = null;
+      this.#saveSuspended = false;
+      this.#freezeWrites(CATALOG_STALE_DETAIL);
+    }
+    this.#notifyPath(path);
+    this.#notifyGlobal();
+  }
+
+  #adoptCanonical(entry: FileEntry, file: SourceFile, text: string): void {
+    entry.file = { ...file };
+    entry.loadText = text;
+    entry.loadBytes = new Uint8Array(encoder.encode(text));
+    entry.currentText = text;
+    entry.revision += 1;
+    entry.views.clear();
+    entry.protectedLens = null;
+    entry.review = null;
+  }
+
+  #adoptSaved(
+    entry: FileEntry,
+    submittedText: string,
+    result: Extract<SourceSaveResult, { status: "saved" }>,
+  ): void {
+    this.#adoptCanonical(entry, result.source.file, submittedText);
+    if (result.catalog_refreshed) {
+      this.#catalogEpoch += 1;
+    }
+    entry.indeterminate = null;
+    entry.saveState = {
+      status: "saved",
+      result: {
+        ...result,
+        source: { ...result.source, file: { ...result.source.file } },
+        materialized: result.materialized.map((lineage) => ({
+          ...lineage,
+          targets: [...lineage.targets],
+        })),
+        checks: result.checks.map((check) => ({ ...check })),
+      },
+    };
+  }
+
+  #freezeWrites(detail: string): void {
+    this.#writeFrozenDetail = detail;
+    this.#saveSuspended = false;
+  }
+
+  #pathLocked(entry: FileEntry): boolean {
+    return (
+      entry.saveState.status === "saving" ||
+      entry.saveState.status === "reconciling" ||
+      entry.saveState.status === "indeterminate" ||
+      entry.saveState.status === "reloading"
+    );
+  }
+
+  #canDiscard(entry: FileEntry): boolean {
+    return entry.saveState.status !== "conflict" && !this.#pathLocked(entry);
+  }
+
+  #needsAttention(entry: FileEntry): boolean {
+    return (
+      this.#dirty(entry) ||
+      entry.saveState.status === "conflict" ||
+      entry.saveState.status === "reconciling" ||
+      entry.saveState.status === "indeterminate" ||
+      entry.saveState.status === "reloading"
+    );
+  }
+
+  #cloneSaveState(state: WorkspaceSaveState): WorkspaceSaveState {
+    if (state.status === "validation-failed") {
+      return {
+        status: state.status,
+        diagnostics: state.diagnostics.map((diagnostic) => ({ ...diagnostic })),
+      };
+    }
+    if (state.status === "saved") {
+      return {
+        status: state.status,
+        result: {
+          ...state.result,
+          source: { ...state.result.source, file: { ...state.result.source.file } },
+          materialized: state.result.materialized.map((lineage) => ({
+            ...lineage,
+            targets: [...lineage.targets],
+          })),
+          checks: state.result.checks.map((check) => ({ ...check })),
+        },
+      };
+    }
+    return { ...state };
+  }
+
   #workspaceSource(
     entry: FileEntry,
     view: SourceView,
@@ -588,6 +1016,21 @@ export class EditWorkspace {
             }
           : null,
       dirty: this.#dirty(entry),
+      review: entry.review?.artifact ?? null,
+      saveState: this.#cloneSaveState(entry.saveState),
+      canDiscard: this.#canDiscard(entry),
+      canReview:
+        entry.lastEditedTarget !== null &&
+        this.#dirty(entry) &&
+        supportsSourceSave(entry.lastEditedTarget) &&
+        entry.saveState.status === "idle" &&
+        this.#writeFrozenDetail === null &&
+        !this.#saveSuspended,
+      canSave:
+        entry.review !== null &&
+        entry.saveState.status === "idle" &&
+        this.#writeFrozenDetail === null &&
+        !this.#saveSuspended,
     };
   }
 

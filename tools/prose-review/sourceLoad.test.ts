@@ -101,6 +101,23 @@ test("loadUnitSource orders and encodes GET identity and propagates AbortSignal"
   ]);
 });
 
+test("canonical reconciliation loads explicitly bypass browser caches", async () => {
+  const calls: { url: string; init: RequestInit | undefined }[] = [];
+  await loadUnitSource(TARGET, {
+    fetch: (url, init) => {
+      calls.push({ url, init });
+      return Promise.resolve(respond(200, LOAD));
+    },
+    cache: "no-store",
+  });
+  assert.deepEqual(calls, [
+    {
+      url: "/api/source?unit=managed%3Arepo-agents&fragment=section%3Aagents%2Fdeveloping-perk",
+      init: { signal: undefined, cache: "no-store" },
+    },
+  ]);
+});
+
 test("projectUnitSource emits deterministic POST JSON and exactly one meta CSRF header", async () => {
   const calls: { url: string; init: RequestInit | undefined }[] = [];
   const controller = new AbortController();

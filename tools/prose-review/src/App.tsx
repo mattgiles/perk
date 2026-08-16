@@ -5,6 +5,7 @@ import { type ComparisonLoadState, createComparisonLoader } from "./comparisonLo
 import { EditWorkspace } from "./editWorkspace.ts";
 import { InspectorPane } from "./InspectorPane.tsx";
 import { SearchBar } from "./SearchBar.tsx";
+import { INDETERMINATE_DETAIL } from "./save.ts";
 import {
   canonicalSourceSelection,
   comparisonOriginKey,
@@ -13,7 +14,12 @@ import {
 } from "./selection.ts";
 import { TreePane } from "./TreePane.tsx";
 import { type CapabilityTree, parseTree } from "./tree.ts";
-import { useDirtyFiles, useWorkspace, WorkspaceProvider } from "./WorkspaceContext.tsx";
+import {
+  useAttentionFiles,
+  useDirtyFiles,
+  useWorkspace,
+  WorkspaceProvider,
+} from "./WorkspaceContext.tsx";
 
 export type Mode = "edit" | "compare" | "assembly";
 
@@ -27,10 +33,10 @@ function selectedOriginKey(selection: Selection | null): string | null {
 }
 
 function WorkspaceButton({ open, onToggle }: { open: boolean; onToggle: () => void }) {
-  const dirtyFiles = useDirtyFiles();
+  const attentionFiles = useAttentionFiles();
   return (
     <button type="button" className="workspace-button" aria-expanded={open} onClick={onToggle}>
-      Workspace ({dirtyFiles.length})
+      Workspace ({attentionFiles.length})
     </button>
   );
 }
@@ -43,21 +49,22 @@ function WorkspaceDrawer({
   onOpen: (target: SourceTarget) => void;
 }) {
   const workspace = useWorkspace();
-  const dirtyFiles = useDirtyFiles();
+  const attentionFiles = useAttentionFiles();
   if (!open) {
     return null;
   }
   return (
     <section className="workspace-drawer" aria-label="Workspace">
-      <h2>Workspace ({dirtyFiles.length})</h2>
-      {dirtyFiles.length === 0 ? (
-        <p>No unsaved files.</p>
+      <h2>Workspace ({attentionFiles.length})</h2>
+      {attentionFiles.length === 0 ? (
+        <p>No files need attention.</p>
       ) : (
         <ul>
-          {dirtyFiles.map(({ path, target }) => (
+          {attentionFiles.map(({ path, target, dirty, saveState, canDiscard }) => (
             <li key={path}>
               <span className="workspace-dirty-target">
-                <strong>{path}</strong> · {target.unit.id}
+                <strong>{path}</strong> · {target.unit.id} · {dirty ? "dirty" : "clean"} ·{" "}
+                {saveState.status}
                 {target.fragment !== null && (
                   <>
                     {" "}
@@ -69,16 +76,18 @@ function WorkspaceDrawer({
                 <button type="button" onClick={() => onOpen(target)}>
                   Open
                 </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    if (window.confirm(`Discard unsaved changes to ${path}?`)) {
-                      workspace.discard(path);
-                    }
-                  }}
-                >
-                  Discard file
-                </button>
+                {canDiscard && dirty && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (window.confirm(`Discard unsaved changes to ${path}?`)) {
+                        workspace.discard(path);
+                      }
+                    }}
+                  >
+                    Discard file
+                  </button>
+                )}
               </span>
             </li>
           ))}
@@ -109,6 +118,8 @@ function WorkspaceBeforeUnload() {
 export function App() {
   const [workspace] = useState(() => new EditWorkspace());
   const [treeState, setTreeState] = useState<TreeLoadState>({ status: "loading" });
+  const [treeWarning, setTreeWarning] = useState<string | null>(null);
+  const [writeState, setWriteState] = useState(() => workspace.writeState());
   const [mode, setMode] = useState<Mode>("edit");
   const [selection, setSelection] = useState<Selection | null>(null);
   const [comparisonState, setComparisonState] = useState<ComparisonLoadState>({
@@ -120,8 +131,15 @@ export function App() {
   const originKey = selectedOriginKey(selection);
   const request = selection?.type === "unit" ? comparisonRequest(selection) : null;
 
+  useEffect(
+    () => workspace.subscribeGlobal(() => setWriteState(workspace.writeState())),
+    [workspace],
+  );
+
+  // biome-ignore lint/correctness/useExhaustiveDependencies: catalogEpoch is the explicit refresh trigger.
   useEffect(() => {
     let cancelled = false;
+    const priorTree = treeState.status === "loaded" ? treeState : null;
     const load = async (): Promise<void> => {
       try {
         const response = await fetch("/api/catalog/tree");
@@ -134,10 +152,15 @@ export function App() {
         }
         if (!cancelled) {
           setTreeState({ status: "loaded", tree });
+          setTreeWarning(null);
         }
       } catch {
-        if (!cancelled) {
+        if (!cancelled && priorTree === null) {
           setTreeState({ status: "failed" });
+        } else if (!cancelled) {
+          setTreeWarning(
+            "Catalog refreshed, but the tree could not be reloaded. The prior tree remains available.",
+          );
         }
       }
     };
@@ -145,7 +168,7 @@ export function App() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [writeState.catalogEpoch]);
 
   // Fragment-only navigation preserves this effect because originKey is the exact
   // unit/shape/position transport identity returned by comparisonRequest.
@@ -156,7 +179,7 @@ export function App() {
     }
     setSelectedComparison(null);
     comparisonLoader.select(request);
-  }, [comparisonLoader, mode, originKey]);
+  }, [comparisonLoader, mode, originKey, writeState.catalogEpoch]);
 
   useEffect(() => () => comparisonLoader.dispose(), [comparisonLoader]);
   useEffect(() => () => workspace.dispose(), [workspace]);
@@ -186,14 +209,18 @@ export function App() {
       <div className="app">
         <header className="app-header">
           <h1>Prose Review</h1>
-          <SearchBar onSelect={selectSource} />
+          <SearchBar key={writeState.catalogEpoch} onSelect={selectSource} />
           <WorkspaceButton open={drawerOpen} onToggle={() => setDrawerOpen((open) => !open)} />
+          {(writeState.frozen || writeState.suspended) && (
+            <p className="write-state-warning">{writeState.detail ?? INDETERMINATE_DETAIL}</p>
+          )}
         </header>
         <nav className="pane tree-pane" aria-label="Capability tree">
           {treeState.status === "loading" && <p className="pane-hint">Loading catalog tree…</p>}
           {treeState.status === "failed" && (
             <p className="pane-hint">Failed to load catalog tree.</p>
           )}
+          {treeWarning !== null && <p className="catalog-warning">{treeWarning}</p>}
           {treeState.status === "loaded" && (
             <TreePane tree={treeState.tree} selection={selection} onSelect={select} />
           )}
@@ -209,6 +236,7 @@ export function App() {
         </main>
         <aside className="pane inspector-pane" aria-label="Inspector">
           <InspectorPane
+            key={writeState.catalogEpoch}
             mode={mode}
             selection={selection}
             comparisonState={comparisonState}

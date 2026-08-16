@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { EditWorkspace, type WorkspaceTransport } from "./src/editWorkspace.ts";
+import { CATALOG_STALE_DETAIL, CONFLICT_DETAIL } from "./src/save.ts";
+import type { SourceSaveLoadOutcome } from "./src/saveLoad.ts";
 import type { SourceTarget } from "./src/selection.ts";
 import type { NewlineStyle, ReadOnlyReason, SourceView, UnitSource } from "./src/source.ts";
 import type { SourceLoadOutcome, SourceProjectionOutcome } from "./src/sourceLoad.ts";
@@ -134,6 +136,33 @@ function applyEdit(workspace: EditWorkspace, target: SourceTarget, nextDisplay: 
   assert.deepEqual(workspace.editFocus({ target, base: source.editor, nextDisplay }), {
     status: "applied",
   });
+}
+
+function savedOutcome(
+  target: SourceTarget,
+  hash: string,
+  catalogRefreshed = true,
+): SourceSaveLoadOutcome {
+  return {
+    status: "loaded",
+    result: {
+      status: "saved",
+      source: {
+        unit: target.unit.id,
+        kind: target.unit.kind,
+        file: {
+          path: target.unit.path,
+          mode: 0o6751,
+          newline_style: "lf",
+          load_hash: hash,
+        },
+      },
+      materialized: [],
+      checks: [{ id: "prose-map", command: "perk-dev prose-map check" }],
+      catalog_refreshed: catalogRefreshed,
+      refresh_detail: catalogRefreshed ? null : CATALOG_STALE_DETAIL,
+    },
+  };
 }
 
 test("one path entry coalesces canonical loads across unit ids while paths stay independent", async () => {
@@ -644,4 +673,239 @@ test("path and global subscribers are notified synchronously on edits and discar
   assert.deepEqual(events, ["path", "global"]);
   unsubscribePath();
   unsubscribeGlobal();
+});
+
+test("review is revision-bound and saving locks only its path before baseline adoption", async () => {
+  const firstText = "before A after";
+  const secondText = "other B tail";
+  const pendingSave = deferred<SourceSaveLoadOutcome>();
+  const workspace = new EditWorkspace({
+    load: (target) => {
+      const text = target.unit.path === UNIT_A.path ? firstText : secondText;
+      const focus = target.unit.path === UNIT_A.path ? "A" : "B";
+      return Promise.resolve(loadOutcome(target, text, editableView(target, text, focus)));
+    },
+    project: (target, text) => {
+      const focus = target.unit.path === UNIT_A.path ? "saved A" : "edited B";
+      return Promise.resolve({ status: "loaded", view: editableView(target, text, focus) });
+    },
+    save: () => pendingSave.promise,
+  });
+  await workspace.ensure(TARGET_A);
+  await workspace.ensure(TARGET_B);
+  applyEdit(workspace, TARGET_A, "saved A");
+  applyEdit(workspace, TARGET_B, "edited B");
+
+  const reviewed = workspace.beginSaveReview(UNIT_A.path);
+  assert.equal(reviewed.status, "reviewed");
+  const pending = workspace.saveReviewed(UNIT_A.path);
+  assert.equal(workspace.inspect(TARGET_A)?.saveState.status, "saving");
+  const firstEditor = workspace.inspect(TARGET_A)?.editor;
+  assert.ok(firstEditor !== null && firstEditor !== undefined);
+  assert.deepEqual(
+    workspace.editFocus({ target: TARGET_A, base: firstEditor, nextDisplay: "blocked" }),
+    { status: "refused" },
+  );
+  assert.equal(workspace.discard(UNIT_A.path), false);
+  assert.deepEqual(await workspace.saveReviewed(UNIT_A.path), { status: "refused" });
+  applyEdit(workspace, TARGET_B, "other path remains editable");
+
+  const newHash = "f".repeat(64);
+  pendingSave.resolve(savedOutcome(TARGET_A, newHash));
+  assert.deepEqual(await pending, { status: "completed" });
+  const snapshot = workspace.snapshot(UNIT_A.path);
+  assert.equal(snapshot?.currentText, "before saved A after");
+  assert.equal(snapshot?.loadText, "before saved A after");
+  assert.equal(snapshot?.loadHash, newHash);
+  assert.equal(snapshot?.mode, 0o6751);
+  assert.equal(snapshot?.dirty, false);
+  assert.equal(workspace.inspect(WHOLE_A)?.saveState.status, "saved");
+  assert.equal(
+    workspace.snapshot(UNIT_B.path)?.currentText,
+    "other other path remains editable tail",
+  );
+});
+
+test("validation, refusal, not-sent, and refresh-failed outcomes keep exact retry rules", async () => {
+  const text = "before A after";
+  const outcomes: SourceSaveLoadOutcome[] = [
+    { status: "not-sent" },
+    {
+      status: "loaded",
+      result: {
+        status: "validation-failed",
+        diagnostics: [
+          {
+            code: "selector-not-found",
+            message: "missing",
+            selector: "heading:missing",
+            line: null,
+            column: null,
+          },
+        ],
+      },
+    },
+    {
+      status: "loaded",
+      result: { status: "refused", reason: "unsafe-path", detail: "unsafe" },
+    },
+  ];
+  const workspace = new EditWorkspace({
+    load: (target) => Promise.resolve(loadOutcome(target, text, editableView(target, text, "A"))),
+    project: (target, current) =>
+      Promise.resolve({ status: "loaded", view: editableView(target, current, "A") }),
+    save: () => Promise.resolve(outcomes.shift() ?? { status: "indeterminate" }),
+  });
+  await workspace.ensure(TARGET_A);
+  applyEdit(workspace, TARGET_A, "edited A");
+
+  assert.equal(workspace.beginSaveReview(UNIT_A.path).status, "reviewed");
+  await workspace.saveReviewed(UNIT_A.path);
+  assert.equal(workspace.inspect(TARGET_A)?.saveState.status, "idle");
+  assert.equal(workspace.inspect(TARGET_A)?.canSave, true);
+
+  await workspace.saveReviewed(UNIT_A.path);
+  const validation = workspace.inspect(TARGET_A);
+  assert.equal(validation?.saveState.status, "validation-failed");
+  assert.equal(validation?.review, null);
+  assert.equal(validation?.canReview, false);
+  applyEdit(workspace, TARGET_A, "fixed A");
+  assert.equal(workspace.inspect(TARGET_A)?.saveState.status, "idle");
+
+  assert.equal(workspace.beginSaveReview(UNIT_A.path).status, "reviewed");
+  await workspace.saveReviewed(UNIT_A.path);
+  assert.equal(workspace.inspect(TARGET_A)?.saveState.status, "refused");
+  assert.equal(workspace.inspect(TARGET_A)?.canReview, false);
+  assert.equal(workspace.discard(UNIT_A.path), true);
+  assert.equal(workspace.snapshot(UNIT_A.path)?.dirty, false);
+
+  await workspace.ensure(TARGET_A);
+  applyEdit(workspace, TARGET_A, "refresh failed A");
+  assert.equal(workspace.beginSaveReview(UNIT_A.path).status, "reviewed");
+  outcomes.push(savedOutcome(TARGET_A, "e".repeat(64), false));
+  await workspace.saveReviewed(UNIT_A.path);
+  assert.deepEqual(workspace.writeState(), {
+    frozen: true,
+    suspended: false,
+    detail: CATALOG_STALE_DETAIL,
+    catalogEpoch: 0,
+  });
+  assert.equal(workspace.inspect(WHOLE_A)?.saveState.status, "saved");
+});
+
+test("conflict persists across manual reversion and reload owns the path lock", async () => {
+  const text = "before A after";
+  const pendingReload = deferred<SourceLoadOutcome>();
+  const workspace = new EditWorkspace({
+    load: (target) => Promise.resolve(loadOutcome(target, text, editableView(target, text, "A"))),
+    project: () => Promise.resolve({ status: "failed" }),
+    save: () =>
+      Promise.resolve({
+        status: "loaded",
+        result: { status: "conflict", detail: CONFLICT_DETAIL },
+      }),
+    reload: () => pendingReload.promise,
+  });
+  await workspace.ensure(TARGET_A);
+  applyEdit(workspace, TARGET_A, "edited A");
+  workspace.beginSaveReview(UNIT_A.path);
+  await workspace.saveReviewed(UNIT_A.path);
+  assert.equal(workspace.inspect(TARGET_A)?.saveState.status, "conflict");
+  assert.equal(workspace.discard(UNIT_A.path), false);
+
+  applyEdit(workspace, TARGET_A, "A");
+  assert.equal(workspace.snapshot(UNIT_A.path)?.dirty, false);
+  assert.deepEqual(
+    workspace.attentionFiles().map((entry) => [entry.path, entry.dirty, entry.saveState.status]),
+    [[UNIT_A.path, false, "conflict"]],
+  );
+
+  const pending = workspace.reloadConflict(UNIT_A.path);
+  assert.equal(workspace.inspect(TARGET_A)?.saveState.status, "reloading");
+  assert.deepEqual(await workspace.reloadConflict(UNIT_A.path), { status: "refused" });
+  assert.equal(workspace.discard(UNIT_A.path), false);
+  const external = "before external after";
+  pendingReload.resolve(
+    loadOutcome(TARGET_A, external, editableView(TARGET_A, external, "external"), {
+      hash: "d".repeat(64),
+    }),
+  );
+  assert.deepEqual(await pending, { status: "completed" });
+  assert.equal(workspace.snapshot(UNIT_A.path)?.currentText, external);
+  assert.equal(workspace.snapshot(UNIT_A.path)?.dirty, false);
+  assert.equal(workspace.inspect(WHOLE_A)?.saveState.status, "idle");
+  assert.deepEqual(workspace.attentionFiles(), []);
+});
+
+test("indeterminate reconciliation distinguishes submitted, prior, third, and retryable failure", async () => {
+  const text = "before A after";
+
+  async function reconciled(reloadOutcome: SourceLoadOutcome): Promise<EditWorkspace> {
+    const workspace = new EditWorkspace({
+      load: (target) => Promise.resolve(loadOutcome(target, text, editableView(target, text, "A"))),
+      project: () => Promise.resolve({ status: "failed" }),
+      save: () => Promise.resolve({ status: "indeterminate" }),
+      reload: () => Promise.resolve(reloadOutcome),
+    });
+    await workspace.ensure(TARGET_A);
+    applyEdit(workspace, TARGET_A, "submitted A");
+    workspace.beginSaveReview(UNIT_A.path);
+    await workspace.saveReviewed(UNIT_A.path);
+    return workspace;
+  }
+
+  const submittedText = "before submitted A after";
+  const submitted = await reconciled(
+    loadOutcome(TARGET_A, submittedText, editableView(TARGET_A, submittedText, "submitted A"), {
+      hash: "c".repeat(64),
+    }),
+  );
+  assert.equal(submitted.snapshot(UNIT_A.path)?.dirty, false);
+  assert.equal(submitted.inspect(WHOLE_A)?.saveState.status, "reconciled-saved");
+  assert.equal(submitted.writeState().frozen, true);
+
+  const prior = await reconciled(loadOutcome(TARGET_A, text, editableView(TARGET_A, text, "A")));
+  assert.equal(prior.snapshot(UNIT_A.path)?.currentText, submittedText);
+  assert.equal(prior.snapshot(UNIT_A.path)?.dirty, true);
+  assert.deepEqual(prior.writeState(), {
+    frozen: false,
+    suspended: false,
+    detail: null,
+    catalogEpoch: 0,
+  });
+  assert.equal(prior.inspect(WHOLE_A)?.saveState.status, "idle");
+
+  const thirdText = "before third after";
+  const third = await reconciled(
+    loadOutcome(TARGET_A, thirdText, editableView(TARGET_A, thirdText, "third"), {
+      hash: "b".repeat(64),
+    }),
+  );
+  assert.equal(third.snapshot(UNIT_A.path)?.currentText, submittedText);
+  assert.equal(third.inspect(WHOLE_A)?.saveState.status, "conflict");
+  assert.equal(third.writeState().frozen, true);
+
+  let canonical: SourceLoadOutcome = { status: "failed" };
+  const retry = new EditWorkspace({
+    load: (target) => Promise.resolve(loadOutcome(target, text, editableView(target, text, "A"))),
+    project: () => Promise.resolve({ status: "failed" }),
+    save: () => Promise.resolve({ status: "indeterminate" }),
+    reload: () => Promise.resolve(canonical),
+  });
+  await retry.ensure(TARGET_A);
+  applyEdit(retry, TARGET_A, "submitted A");
+  retry.beginSaveReview(UNIT_A.path);
+  await retry.saveReviewed(UNIT_A.path);
+  assert.equal(retry.inspect(TARGET_A)?.saveState.status, "indeterminate");
+  assert.deepEqual(retry.writeState(), {
+    frozen: false,
+    suspended: true,
+    detail: null,
+    catalogEpoch: 0,
+  });
+  assert.equal(retry.discard(UNIT_A.path), false);
+  canonical = loadOutcome(TARGET_A, text, editableView(TARGET_A, text, "A"));
+  assert.deepEqual(await retry.reconcileSave(UNIT_A.path), { status: "completed" });
+  assert.equal(retry.inspect(WHOLE_A)?.saveState.status, "idle");
+  assert.equal(retry.snapshot(UNIT_A.path)?.dirty, true);
 });

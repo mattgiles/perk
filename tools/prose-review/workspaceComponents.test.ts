@@ -13,6 +13,15 @@ import type {
 } from "./src/comparison.ts";
 import type { ComparisonLoadState } from "./src/comparisonLoad.ts";
 import { EditWorkspace, type WorkspaceTransport } from "./src/editWorkspace.ts";
+import {
+  CATALOG_STALE_DETAIL,
+  CLIPBOARD_FAILURE_DETAIL,
+  CONFLICT_DETAIL,
+  GENERATED_LINEAGE_DETAIL,
+  UNRESOLVED_RECONCILIATION_DETAIL,
+  UNSUPPORTED_FAMILY_DETAIL,
+} from "./src/save.ts";
+import type { SourceSaveLoadOutcome } from "./src/saveLoad.ts";
 import type { Selection, SourceTarget, UnitSelection } from "./src/selection.ts";
 import type { ReadOnlyReason, SourceView, UnitSource } from "./src/source.ts";
 import type { SourceProjectionOutcome } from "./src/sourceLoad.ts";
@@ -43,6 +52,12 @@ const UNIT_ALIAS: TreeUnit = {
   path: "shared.md",
   fragments: [{ id: "alias", label: "Alias fragment" }],
 };
+const UNIT_PYTHON: TreeUnit = {
+  id: "unit:python",
+  kind: "python-symbol",
+  path: "sample.py",
+  fragments: [{ id: "function", label: "Function" }],
+};
 const UNIT_OTHER: TreeUnit = {
   id: "unit:other",
   kind: "markdown",
@@ -51,6 +66,10 @@ const UNIT_OTHER: TreeUnit = {
 };
 const TARGET_A: SourceTarget = { unit: UNIT_A, fragment: UNIT_A.fragments[0] ?? null };
 const TARGET_B: SourceTarget = { unit: UNIT_A, fragment: UNIT_A.fragments[1] ?? null };
+const TARGET_PYTHON: SourceTarget = {
+  unit: UNIT_PYTHON,
+  fragment: UNIT_PYTHON.fragments[0] ?? null,
+};
 const TARGET_ALIAS: SourceTarget = {
   unit: UNIT_ALIAS,
   fragment: UNIT_ALIAS.fragments[0] ?? null,
@@ -497,6 +516,444 @@ test("stale helper overlap keeps the latest target unavailable until explicit re
   }
 });
 
+test("save review renders escaped full-file diff, byte metadata, and read-only handoffs", async () => {
+  const harness = installDom();
+  const text = "\ufeffhead\r\nA\r\n";
+  let submittedText: string | null = null;
+  const workspace = new EditWorkspace({
+    load: (target) => {
+      const source = load(target, text, editableView(target, text, "A"));
+      return Promise.resolve({
+        status: "loaded",
+        source: { ...source, file: { ...source.file, newline_style: "crlf" as const } },
+      });
+    },
+    project: (target, current) =>
+      Promise.resolve({
+        status: "loaded",
+        view: editableView(target, current, "<script>changed</script>"),
+      }),
+    save: (target, _loadHash, current) => {
+      submittedText = current;
+      return Promise.resolve({
+        status: "loaded",
+        result: {
+          status: "saved",
+          source: {
+            unit: target.unit.id,
+            kind: target.unit.kind,
+            file: {
+              path: target.unit.path,
+              mode: 0o640,
+              newline_style: "crlf",
+              load_hash: "f".repeat(64),
+            },
+          },
+          materialized: [
+            {
+              id: "<script>lineage</script>",
+              relationship: "materializes-to",
+              targets: ["<b>generated.md</b>"],
+            },
+          ],
+          checks: [{ id: "prose-map", command: "<img src=x onerror=alert(1)>" }],
+          catalog_refreshed: true,
+          refresh_detail: null,
+        },
+      });
+    },
+  });
+  const selection: UnitSelection = { type: "unit", target: TARGET_A, placement: null };
+
+  try {
+    await harness.render(center(workspace, "edit", selection));
+    await harness.settle();
+    await harness.input(textarea(harness.container), "<script>first</script>");
+    await harness.click(buttonByText(harness.container, "Review full-file diff"));
+    assert.equal(harness.container.querySelectorAll("script").length, 0);
+    assert.match(harness.container.textContent ?? "", /<script>first<\/script>/);
+    assert.match(harness.container.textContent ?? "", /Loaded.*bytes.*crlf.*BOM yes/s);
+    assert.match(harness.container.textContent ?? "", /Current.*bytes.*crlf.*BOM yes/s);
+    assert.match(
+      harness.container.querySelector(".save-diff")?.textContent ?? "",
+      /--- a\/shared\.md/,
+    );
+
+    await harness.input(textarea(harness.container), "<script>changed</script>");
+    assert.equal(harness.container.querySelector(".save-review"), null);
+    await harness.click(buttonByText(harness.container, "Review full-file diff"));
+    await harness.click(buttonByText(harness.container, "Save reviewed file"));
+    await harness.settle();
+
+    assert.equal(submittedText, "\ufeffhead\r\n<script>changed</script>\r\n");
+    assert.match(harness.container.textContent ?? "", /Saved/);
+    assert.match(harness.container.textContent ?? "", /Materialization handoff/);
+    assert.match(harness.container.textContent ?? "", /<script>lineage<\/script>/);
+    assert.match(harness.container.textContent ?? "", /<b>generated\.md<\/b>/);
+    assert.equal(harness.container.querySelectorAll("script, b, img").length, 0);
+    assert.equal(workspace.snapshot("shared.md")?.mode, 0o640);
+    assert.equal(workspace.snapshot("shared.md")?.dirty, false);
+    assert.equal(workspace.writeState().catalogEpoch, 1);
+  } finally {
+    await harness.cleanup();
+  }
+});
+
+test("conflict and indeterminate UI preserve Copy Edits, exact failures, and destructive reload confirmation", async () => {
+  const harness = installDom();
+  const text = "before A after";
+  let reloadCalls = 0;
+  let copied = "";
+  let clipboardFails = true;
+  Object.defineProperty(harness.window.navigator, "clipboard", {
+    configurable: true,
+    value: {
+      writeText: (value: string) => {
+        if (clipboardFails) {
+          return Promise.reject(new Error("denied"));
+        }
+        copied = value;
+        return Promise.resolve();
+      },
+    },
+  });
+  const workspace = new EditWorkspace({
+    load: (target) =>
+      Promise.resolve({
+        status: "loaded",
+        source: load(target, text, editableView(target, text, "A")),
+      }),
+    project: (target, current) =>
+      Promise.resolve({ status: "loaded", view: editableView(target, current, "external") }),
+    save: () =>
+      Promise.resolve({
+        status: "loaded",
+        result: { status: "conflict", detail: CONFLICT_DETAIL },
+      }),
+    reload: (target) => {
+      reloadCalls += 1;
+      const external = "before external after";
+      return Promise.resolve({
+        status: "loaded",
+        source: load(target, external, editableView(target, external, "external")),
+      });
+    },
+  });
+  const selection: UnitSelection = { type: "unit", target: TARGET_A, placement: null };
+
+  try {
+    await harness.render(center(workspace, "edit", selection));
+    await harness.settle();
+    await harness.input(textarea(harness.container), "edited A");
+    await harness.click(buttonByText(harness.container, "Review full-file diff"));
+    await harness.click(buttonByText(harness.container, "Save reviewed file"));
+    await harness.settle();
+    assert.ok((harness.container.textContent ?? "").includes(CONFLICT_DETAIL));
+    assert.equal(
+      [...harness.container.querySelectorAll("button")].some(
+        (button) => button.textContent === "Discard file",
+      ),
+      false,
+    );
+    await harness.click(buttonByText(harness.container, "Copy Edits"));
+    await harness.settle();
+    assert.ok((harness.container.textContent ?? "").includes(CLIPBOARD_FAILURE_DETAIL));
+    clipboardFails = false;
+    await harness.click(buttonByText(harness.container, "Copy Edits"));
+    await harness.settle();
+    assert.equal(copied, "before edited A after");
+
+    let confirmation = "";
+    harness.window.confirm = (message) => {
+      confirmation = String(message);
+      return false;
+    };
+    await harness.click(buttonByText(harness.container, "Reload from disk"));
+    assert.equal(reloadCalls, 0);
+    assert.equal(confirmation, "Reload shared.md from disk and replace all in-memory edits?");
+    harness.window.confirm = () => true;
+    await harness.click(buttonByText(harness.container, "Reload from disk"));
+    await harness.settle();
+    assert.equal(reloadCalls, 1);
+    assert.equal(workspace.snapshot("shared.md")?.currentText, "before external after");
+  } finally {
+    await harness.cleanup();
+  }
+
+  const indeterminateHarness = installDom();
+  const indeterminate = new EditWorkspace({
+    load: (target) =>
+      Promise.resolve({
+        status: "loaded",
+        source: load(target, text, editableView(target, text, "A")),
+      }),
+    project: () => Promise.resolve({ status: "failed" }),
+    save: () => Promise.resolve({ status: "indeterminate" }),
+    reload: () => Promise.resolve({ status: "failed" }),
+  });
+  try {
+    await indeterminateHarness.render(center(indeterminate, "edit", selection));
+    await indeterminateHarness.settle();
+    await indeterminateHarness.input(textarea(indeterminateHarness.container), "uncertain A");
+    await indeterminateHarness.click(
+      buttonByText(indeterminateHarness.container, "Review full-file diff"),
+    );
+    await indeterminateHarness.click(
+      buttonByText(indeterminateHarness.container, "Save reviewed file"),
+    );
+    await indeterminateHarness.settle();
+    assert.equal(
+      (indeterminateHarness.container.textContent ?? "").includes(UNRESOLVED_RECONCILIATION_DETAIL),
+      true,
+    );
+    buttonByText(indeterminateHarness.container, "Retry reconciliation");
+    buttonByText(indeterminateHarness.container, "Copy Edits");
+  } finally {
+    await indeterminateHarness.cleanup();
+  }
+});
+
+test("successful App save refreshes catalog and inspector without replacing workspace state", async () => {
+  const harness = installDom();
+  const previousFetch = globalThis.fetch;
+  const text = "before A after";
+  let treeRequests = 0;
+  let inspectRequests = 0;
+  globalThis.fetch = async (input, init): Promise<Response> => {
+    const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+    if (url === "/api/catalog/tree") {
+      treeRequests += 1;
+      return treeRequests === 1 ? response(200, TREE) : response(500, { detail: "failed" });
+    }
+    if (url.startsWith("/api/inspect?")) {
+      inspectRequests += 1;
+      return response(404, { detail: "unknown unit" });
+    }
+    if (url.startsWith("/api/source?")) {
+      const parsed = new URL(url, "http://127.0.0.1");
+      const fragment = UNIT_A.fragments.find(
+        (candidate) => candidate.id === parsed.searchParams.get("fragment"),
+      );
+      const target: SourceTarget = { unit: UNIT_A, fragment: fragment ?? null };
+      return response(200, load(target, text, editableView(target, text, "A")));
+    }
+    if (url === "/api/source/project") {
+      const body = JSON.parse(String(init?.body)) as {
+        fragment: string | null;
+        text: string;
+      };
+      const fragment = UNIT_A.fragments.find((candidate) => candidate.id === body.fragment);
+      const target: SourceTarget = { unit: UNIT_A, fragment: fragment ?? null };
+      return response(200, editableView(target, body.text, "saved A"));
+    }
+    if (url === "/api/source/save") {
+      const body = JSON.parse(String(init?.body)) as {
+        unit: string;
+        text: string;
+      };
+      assert.equal(body.text, "before saved A after");
+      return response(200, {
+        status: "saved",
+        source: {
+          unit: body.unit,
+          kind: UNIT_A.kind,
+          file: {
+            path: UNIT_A.path,
+            mode: 0o644,
+            newline_style: "lf",
+            load_hash: "a".repeat(64),
+          },
+        },
+        materialized: [],
+        checks: [],
+        catalog_refreshed: true,
+        refresh_detail: null,
+      });
+    }
+    throw new Error(`unexpected request: ${url}`);
+  };
+
+  try {
+    await harness.render(React.createElement(App));
+    await harness.settle();
+    await harness.click(buttonByLabel(harness.container, `Expand fragments for ${UNIT_A.id}`));
+    await harness.click(buttonByText(harness.container, "Fragment A"));
+    await harness.settle();
+    await harness.input(textarea(harness.container), "saved A");
+    await harness.click(buttonByText(harness.container, "Review full-file diff"));
+    await harness.click(buttonByText(harness.container, "Save reviewed file"));
+    await harness.settle();
+    await harness.settle();
+
+    assert.equal(treeRequests, 2);
+    assert.match(harness.container.textContent ?? "", /prior tree remains available/);
+    buttonByLabel(harness.container, `Collapse fragments for ${UNIT_A.id}`);
+    assert.ok(inspectRequests >= 2, "the retained selection is re-inspected after catalog refresh");
+    assert.match(harness.container.textContent ?? "", /Saved/);
+    assert.match(harness.container.textContent ?? "", /Workspace \(0\)/);
+    assert.equal(buttonByText(harness.container, "Edit").ariaPressed, "true");
+    assert.equal(textarea(harness.container).value, "saved A");
+  } finally {
+    globalThis.fetch = previousFetch;
+    await harness.cleanup();
+  }
+});
+
+test("catalog refresh failure freezes App writes with exact recovery guidance", async () => {
+  const harness = installDom();
+  const previousFetch = globalThis.fetch;
+  const text = "before A after";
+  globalThis.fetch = async (input, init): Promise<Response> => {
+    const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+    if (url === "/api/catalog/tree") {
+      return response(200, TREE);
+    }
+    if (url.startsWith("/api/inspect?")) {
+      return response(404, { detail: "unknown unit" });
+    }
+    if (url.startsWith("/api/source?")) {
+      return response(200, load(TARGET_A, text, editableView(TARGET_A, text, "A")));
+    }
+    if (url === "/api/source/project") {
+      const body = JSON.parse(String(init?.body)) as { text: string };
+      return response(200, editableView(TARGET_A, body.text, "saved A"));
+    }
+    if (url === "/api/source/save") {
+      return response(200, {
+        status: "saved",
+        source: {
+          unit: UNIT_A.id,
+          kind: UNIT_A.kind,
+          file: {
+            path: UNIT_A.path,
+            mode: 0o644,
+            newline_style: "lf",
+            load_hash: "9".repeat(64),
+          },
+        },
+        materialized: [],
+        checks: [],
+        catalog_refreshed: false,
+        refresh_detail: CATALOG_STALE_DETAIL,
+      });
+    }
+    throw new Error(`unexpected request: ${url}`);
+  };
+
+  try {
+    await harness.render(React.createElement(App));
+    await harness.settle();
+    await harness.click(buttonByLabel(harness.container, `Expand fragments for ${UNIT_A.id}`));
+    await harness.click(buttonByText(harness.container, "Fragment A"));
+    await harness.settle();
+    await harness.input(textarea(harness.container), "saved A");
+    await harness.click(buttonByText(harness.container, "Review full-file diff"));
+    await harness.click(buttonByText(harness.container, "Save reviewed file"));
+    await harness.settle();
+
+    const warning = harness.container.querySelector(".write-state-warning");
+    assert.equal(warning?.textContent, CATALOG_STALE_DETAIL);
+    assert.ok((harness.container.textContent ?? "").includes(CATALOG_STALE_DETAIL));
+  } finally {
+    globalThis.fetch = previousFetch;
+    await harness.cleanup();
+  }
+});
+
+test("dirty unsupported source families show the exact deferred-save message", async () => {
+  const harness = installDom();
+  const text = "def function():\n    pass\n";
+  const workspace = new EditWorkspace({
+    load: (target) =>
+      Promise.resolve({
+        status: "loaded",
+        source: load(target, text, editableView(target, text, "pass")),
+      }),
+    project: () => Promise.resolve({ status: "failed" }),
+  });
+  const selection: UnitSelection = {
+    type: "unit",
+    target: TARGET_PYTHON,
+    placement: null,
+  };
+  try {
+    await harness.render(center(workspace, "edit", selection));
+    await harness.settle();
+    await harness.input(textarea(harness.container), "return None");
+    assert.ok((harness.container.textContent ?? "").includes(UNSUPPORTED_FAMILY_DETAIL));
+    assert.doesNotMatch(harness.container.textContent ?? "", /Review full-file diff/);
+  } finally {
+    await harness.cleanup();
+  }
+});
+
+test("validation and generated-lineage refusal are rendered without implicit retry", async () => {
+  const harness = installDom();
+  const text = "before A after";
+  const outcomes: SourceSaveLoadOutcome[] = [
+    {
+      status: "loaded" as const,
+      result: {
+        status: "validation-failed" as const,
+        diagnostics: [
+          {
+            code: "selector-not-found",
+            message: "missing heading",
+            selector: "heading:missing",
+            line: null,
+            column: null,
+          },
+          {
+            code: "syntax-error",
+            message: "bad token",
+            selector: null,
+            line: 4,
+            column: 7,
+          },
+        ],
+      },
+    },
+    {
+      status: "loaded" as const,
+      result: {
+        status: "refused" as const,
+        reason: "unsafe-lineage" as const,
+        detail: GENERATED_LINEAGE_DETAIL,
+      },
+    },
+  ];
+  const workspace = new EditWorkspace({
+    load: (target) =>
+      Promise.resolve({
+        status: "loaded",
+        source: load(target, text, editableView(target, text, "A")),
+      }),
+    project: () => Promise.resolve({ status: "failed" }),
+    save: () => Promise.resolve(outcomes.shift() ?? { status: "indeterminate" }),
+  });
+  const selection: UnitSelection = { type: "unit", target: TARGET_A, placement: null };
+  try {
+    await harness.render(center(workspace, "edit", selection));
+    await harness.settle();
+    await harness.input(textarea(harness.container), "edited A");
+    await harness.click(buttonByText(harness.container, "Review full-file diff"));
+    await harness.click(buttonByText(harness.container, "Save reviewed file"));
+    await harness.settle();
+    assert.match(harness.container.textContent ?? "", /heading:missing missing heading/);
+    assert.match(harness.container.textContent ?? "", /shared\.md:4:7 bad token/);
+    assert.doesNotMatch(harness.container.textContent ?? "", /Review full-file diff/);
+
+    await harness.input(textarea(harness.container), "fixed A");
+    await harness.click(buttonByText(harness.container, "Review full-file diff"));
+    await harness.click(buttonByText(harness.container, "Save reviewed file"));
+    await harness.settle();
+    assert.ok((harness.container.textContent ?? "").includes(GENERATED_LINEAGE_DETAIL));
+    assert.doesNotMatch(harness.container.textContent ?? "", /Review full-file diff/);
+  } finally {
+    await harness.cleanup();
+  }
+});
+
 test("App drawer, confirmed discard, last-target Open, manual reversion, and unload guard are file-based", async () => {
   const harness = installDom();
   const previousFetch = globalThis.fetch;
@@ -609,8 +1066,11 @@ test("App drawer, confirmed discard, last-target Open, manual reversion, and unl
     assert.equal(buttonByText(harness.container, "Workspace (2)").ariaExpanded, "true");
     const drawer = harness.container.querySelector<HTMLElement>(".workspace-drawer");
     assert.ok(drawer !== null);
-    assert.match(drawer.textContent ?? "", /shared\.md · unit:a · Fragment A \(a\)/);
-    assert.match(drawer.textContent ?? "", /other\.md · unit:other · Other fragment \(other\)/);
+    assert.match(drawer.textContent ?? "", /shared\.md · unit:a · dirty · idle · Fragment A \(a\)/);
+    assert.match(
+      drawer.textContent ?? "",
+      /other\.md · unit:other · dirty · idle · Other fragment \(other\)/,
+    );
 
     harness.window.confirm = () => false;
     const sharedRow = [...drawer.querySelectorAll("li")].find((row) =>
@@ -645,7 +1105,7 @@ test("App drawer, confirmed discard, last-target Open, manual reversion, and unl
     assert.equal(removedBeforeUnloadListeners.length, 1);
 
     await harness.click(buttonByText(harness.container, "Workspace (0)"));
-    assert.match(harness.container.textContent ?? "", /No unsaved files\./);
+    assert.match(harness.container.textContent ?? "", /No files need attention\./);
     assert.doesNotMatch(harness.container.textContent ?? "", /Save/);
   } finally {
     globalThis.fetch = previousFetch;

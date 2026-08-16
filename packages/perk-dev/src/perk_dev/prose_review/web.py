@@ -24,29 +24,41 @@ over that already-authorized text, not another repository-content read family.
 import json
 import secrets
 from collections.abc import Awaitable, Callable, MutableMapping
+from dataclasses import dataclass, replace
 from pathlib import Path, PurePosixPath
+from threading import Lock
 from typing import Any
 
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import HTMLResponse, Response
+from pydantic import Field
 
 from perk.boundary import StrictInputModel
+from perk_dev.prose_map.catalog import ProseMapError
 from perk_dev.prose_map.models import Audience, ProseKind, ProseRole
 from perk_dev.prose_review import comparison as comparison_module
 from perk_dev.prose_review import search as search_module
 from perk_dev.prose_review import source_adapter
-from perk_dev.prose_review.catalog import CatalogSnapshot
+from perk_dev.prose_review.catalog import CatalogQueryError, CatalogSnapshot, load_catalog
 from perk_dev.prose_review.dto import (
     CapabilityTreeOut,
     CatalogSummaryOut,
     ComparisonOptionsOut,
     SearchOut,
+    SourceSaveOut,
     SourceViewOut,
     UnitInspectOut,
     UnitSourceOut,
+    source_save_out,
 )
-from perk_dev.prose_review.source_adapter import SourceReadError, SourceReadFailure
+from perk_dev.prose_review.source_adapter import (
+    SourceReadError,
+    SourceReadFailure,
+    SourceRefused,
+    SourceSaved,
+)
 from perk_dev.prose_review.source_adapter.typescript import TypeScriptSourceAdapter
+from perk_dev.prose_review.source_adapter.write import CATALOG_STALE_DETAIL
 
 # One fixed 404 detail per closed read-failure reason. Containment failures stay
 # indistinguishable from missing files (the no-leak posture).
@@ -95,6 +107,38 @@ class SourceProjectionInput(StrictInputModel):
     unit: str
     fragment: str | None
     text: str
+
+
+class SourceSaveInput(StrictInputModel):
+    """The path-incapable reviewed whole-buffer save request."""
+
+    unit: str
+    load_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
+    text: str
+
+
+@dataclass(frozen=True, slots=True)
+class _CatalogGeneration:
+    snapshot: CatalogSnapshot
+    tree: CapabilityTreeOut
+    search_index: tuple[search_module.SearchEntry, ...]
+
+    @classmethod
+    def build(cls, snapshot: CatalogSnapshot) -> "_CatalogGeneration":
+        return cls(
+            snapshot=snapshot,
+            tree=CapabilityTreeOut.from_domain(snapshot),
+            search_index=search_module.build_search_index(snapshot),
+        )
+
+
+class _CatalogState:
+    """One swappable read generation plus the serialized write transaction state."""
+
+    def __init__(self, generation: _CatalogGeneration) -> None:
+        self.generation = generation
+        self.writes_frozen = False
+        self.save_mutex = Lock()
 
 
 _CONTENT_TYPES: dict[str, str] = {
@@ -205,6 +249,7 @@ def create_app(
     dist_dir: Path,
     allowed_host: str,
     csrf_token: str,
+    reload_catalog: Callable[[Path], CatalogSnapshot] | None = None,
 ) -> SecurityGuardMiddleware:
     """Build the guard-wrapped workbench app over one immutable catalog snapshot.
 
@@ -217,10 +262,8 @@ def create_app(
     """
     repo_resolved = repo_root.resolve()
     typescript_adapter = TypeScriptSourceAdapter(selector_root)
-    # The snapshot is immutable, so the tree DTO and the search index are computed
-    # exactly once.
-    tree = CapabilityTreeOut.from_domain(snapshot)
-    search_index = search_module.build_search_index(snapshot)
+    state = _CatalogState(_CatalogGeneration.build(snapshot))
+    reload_snapshot = load_catalog if reload_catalog is None else reload_catalog
     app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
 
     @app.get("/", response_class=HTMLResponse)
@@ -232,19 +275,22 @@ def create_app(
 
     @app.get("/api/catalog/summary", response_model=CatalogSummaryOut)
     def catalog_summary() -> CatalogSummaryOut:
-        return CatalogSummaryOut.from_domain(snapshot)
+        generation = state.generation
+        return CatalogSummaryOut.from_domain(generation.snapshot)
 
     @app.get("/api/catalog/tree", response_model=CapabilityTreeOut)
     def catalog_tree() -> CapabilityTreeOut:
-        return tree
+        generation = state.generation
+        return generation.tree
 
     @app.get("/api/inspect", response_model=UnitInspectOut)
     def inspect(unit: str) -> UnitInspectOut:
-        routed = snapshot.get_unit(unit)
+        generation = state.generation
+        routed = generation.snapshot.get_unit(unit)
         if routed is None:
             # The /api/source no-leak posture: one fixed detail for an unknown unit.
             raise HTTPException(status_code=404, detail="unknown unit")
-        return UnitInspectOut.from_domain(snapshot, routed)
+        return UnitInspectOut.from_domain(generation.snapshot, routed)
 
     @app.get("/api/compare", response_model=ComparisonOptionsOut)
     def compare(
@@ -252,8 +298,9 @@ def create_app(
         shape: str | None = None,
         position: int | None = None,
     ) -> ComparisonOptionsOut:
+        generation = state.generation
         options = comparison_module.comparison_options(
-            snapshot,
+            generation.snapshot,
             unit,
             shape_id=shape,
             position=position,
@@ -269,15 +316,23 @@ def create_app(
         role: ProseRole | None = None,
         kind: ProseKind | None = None,
     ) -> SearchOut:
+        generation = state.generation
         return SearchOut.from_domain(
-            search_module.search(search_index, q, audience=audience, role=role, kind=kind)
+            search_module.search(
+                generation.search_index,
+                q,
+                audience=audience,
+                role=role,
+                kind=kind,
+            )
         )
 
     @app.get("/api/source", response_model=UnitSourceOut)
     def source(unit: str, fragment: str | None = None) -> UnitSourceOut:
+        generation = state.generation
         try:
             loaded = source_adapter.read_source(
-                snapshot,
+                generation.snapshot,
                 repo_resolved,
                 unit,
                 fragment,
@@ -289,9 +344,10 @@ def create_app(
 
     @app.post("/api/source/project", response_model=SourceViewOut)
     def project_source(request: SourceProjectionInput) -> SourceViewOut:
+        generation = state.generation
         try:
             view = source_adapter.project_source(
-                snapshot,
+                generation.snapshot,
                 request.unit,
                 request.fragment,
                 request.text,
@@ -300,6 +356,42 @@ def create_app(
         except SourceReadError as exc:
             raise HTTPException(status_code=404, detail=_SOURCE_READ_DETAILS[exc.reason]) from exc
         return SourceViewOut.from_domain(view)
+
+    @app.post("/api/source/save", response_model=SourceSaveOut)
+    def save_source(request: SourceSaveInput) -> SourceSaveOut:
+        with state.save_mutex:
+            generation = state.generation
+            if state.writes_frozen:
+                return source_save_out(
+                    SourceRefused(
+                        status="refused",
+                        reason="catalog-stale",
+                        detail=CATALOG_STALE_DETAIL,
+                    )
+                )
+            if generation.snapshot.get_unit(request.unit) is None:
+                raise HTTPException(status_code=404, detail="unknown unit")
+            result = source_adapter.save_source(
+                generation.snapshot,
+                repo_resolved,
+                request.unit,
+                request.load_hash,
+                request.text,
+            )
+            if isinstance(result, SourceSaved):
+                try:
+                    refreshed = reload_snapshot(repo_resolved)
+                    replacement = _CatalogGeneration.build(refreshed)
+                except (ProseMapError, CatalogQueryError):
+                    state.writes_frozen = True
+                    result = replace(
+                        result,
+                        catalog_refreshed=False,
+                        refresh_detail=CATALOG_STALE_DETAIL,
+                    )
+                else:
+                    state.generation = replacement
+            return source_save_out(result)
 
     @app.get("/assets/{asset_path:path}")
     def asset(asset_path: str) -> Response:

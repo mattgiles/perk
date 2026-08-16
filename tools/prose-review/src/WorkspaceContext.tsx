@@ -1,5 +1,11 @@
 import { createContext, type ReactNode, useCallback, useContext, useEffect, useState } from "react";
-import type { DirtyFileSummary, EditWorkspace, WorkspaceSource } from "./editWorkspace.ts";
+import type {
+  AttentionFileSummary,
+  DirtyFileSummary,
+  EditWorkspace,
+  WorkspaceSource,
+  WorkspaceWriteState,
+} from "./editWorkspace.ts";
 import { type SourceTarget, sourceTargetKey } from "./selection.ts";
 
 export type WorkspaceLoadState =
@@ -69,6 +75,23 @@ export function useWorkspaceSource(target: SourceTarget): {
 
   const retry = useCallback(() => setRetryRevision((current) => current + 1), []);
   return { state, retry };
+}
+
+export function useAttentionFiles(): AttentionFileSummary[] {
+  const workspace = useWorkspace();
+  const [summaries, setSummaries] = useState(() => workspace.attentionFiles());
+  useEffect(
+    () => workspace.subscribeGlobal(() => setSummaries(workspace.attentionFiles())),
+    [workspace],
+  );
+  return summaries;
+}
+
+export function useWorkspaceWriteState(): WorkspaceWriteState {
+  const workspace = useWorkspace();
+  const [state, setState] = useState(() => workspace.writeState());
+  useEffect(() => workspace.subscribeGlobal(() => setState(workspace.writeState())), [workspace]);
+  return state;
 }
 
 export function useDirtyFiles(): DirtyFileSummary[] {
