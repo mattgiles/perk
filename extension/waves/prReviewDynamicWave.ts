@@ -52,8 +52,8 @@ import {
   isPrReviewAngle,
   PR_REVIEW_ANGLES,
   PR_REVIEW_REPORT_SCHEMA,
-  reviewTargetSuffix,
   type PrReviewAngle,
+  reviewTargetSuffix,
 } from "./prReviewWave.ts";
 import {
   normalizeLanes,

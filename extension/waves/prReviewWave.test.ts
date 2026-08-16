@@ -12,9 +12,9 @@ import {
   isPrReviewAngle,
   PR_REVIEW_ANGLES,
   PR_REVIEW_REPORT_SCHEMA,
-  reviewTargetSuffix,
   type PrReviewAngle,
   type PrReviewWaveOptions,
+  reviewTargetSuffix,
   runPrReviewWave as runPrReviewWaveBase,
 } from "./prReviewWave.ts";
 import type { WaveAdapter } from "./reportWave.ts";
@@ -147,10 +147,7 @@ test("runPrReviewWave keeps lane tasks bound to one expected PR when no directiv
   const spawn = adapter.calls.spawn[0];
   assert.ok(spawn);
   const items = laneItemsOf(spawn.workflowScript);
-  assert.equal(
-    items[0]?.task,
-    `${PR_REVIEW_ANGLES["plan-fidelity"]}${reviewTargetSuffix(42)}`,
-  );
+  assert.equal(items[0]?.task, `${PR_REVIEW_ANGLES["plan-fidelity"]}${reviewTargetSuffix(42)}`);
   assert.equal(items[1]?.task, `${PR_REVIEW_ANGLES.tests}${reviewTargetSuffix(42)}`);
   assert.match(items[2]?.task ?? "", /^angle: ponytail/);
   assert.equal(items[2]?.skill, "ponytail-review");

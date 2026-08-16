@@ -65,7 +65,9 @@ export async function resolveActivePr(
     label: "perk pr url",
     decode: (payload) => {
       const target = decodePrUrl(payload);
-      return target !== null && Number.isInteger(target.number) && target.number > 0 ? target : null;
+      return target !== null && Number.isInteger(target.number) && target.number > 0
+        ? target
+        : null;
     },
   });
 }
@@ -416,11 +418,7 @@ export function registerPrReview(pi: ExtensionAPI): void {
       markReviewWavePending();
       const target = await resolveActivePr(pi, ctx);
       if (!target.ok) {
-        return failFor(
-          ctx,
-          "pr-review",
-          "run_pr_review_wave",
-        )(target.message, target.errorType);
+        return failFor(ctx, "pr-review", "run_pr_review_wave")(target.message, target.errorType);
       }
       const model = subagentModel(ctx.cwd, "pr-reviewer");
       const adapter = createRpcWaveAdapter(pi.events);

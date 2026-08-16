@@ -7,18 +7,13 @@
 // `extension/waves/prReviewWave.test.ts` — the guidance here carries judgment only.
 
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import { test } from "node:test";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { runScratchDir } from "../substrate/cache.ts";
-import {
-  fakePerk,
-  fakePerkRouter,
-  loadPerkSession,
-  scaffoldRepo,
-} from "../testing/harness.ts";
+import { fakePerk, fakePerkRouter, loadPerkSession, scaffoldRepo } from "../testing/harness.ts";
 import {
   WAVE_RPC_PROTOCOL_VERSION,
   WAVE_RPC_REPLY_EVENT_PREFIX,
@@ -494,10 +489,7 @@ test("tool: a new target-resolution failure invalidates prior evidence for both 
     assert.equal((failed.details as { error_type?: string }).error_type, "no_pr");
     for (const verdict of ["clean", "actionable"] as const) {
       const post = await h.invokeTool("post_pr_review", { verdict, summary: "old evidence" });
-      assert.equal(
-        (post.details as { error_type?: string }).error_type,
-        "review_wave_unavailable",
-      );
+      assert.equal((post.details as { error_type?: string }).error_type, "review_wave_unavailable");
     }
   } finally {
     h.dispose();

@@ -123,7 +123,7 @@ test("guidance(both modes): the tool-owned streaming-wave pins", () => {
     assert.match(text, /reported honestly/, "incompleteness is surfaced, never papered over");
     assert.match(
       text,
-      /Exactly one source-bound `ponytail` lane is appended automatically and last/,
+      /Exactly one source-bound `ponytail` lane is required automatic coverage and appended last/,
     );
     assert.match(text, /outside the 2–3 selection cap/);
     assert.match(text, /MUST NOT be selected or duplicated/);

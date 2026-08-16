@@ -662,11 +662,7 @@ test("tools: missing exact Ponytail skill omits only that child and collects exp
       };
     };
     assert.equal(startDetails.ok, true, "ordinary reviewers still launch");
-    assert.deepEqual(startDetails.launch?.requested, [
-      "claimed-intent",
-      "correctness",
-      "ponytail",
-    ]);
+    assert.deepEqual(startDetails.launch?.requested, ["claimed-intent", "correctness", "ponytail"]);
     assert.deepEqual(startDetails.launch?.runnable, ["claimed-intent", "correctness"]);
     assert.deepEqual(
       startDetails.launch?.preflightFailures.map((failure) => [failure.key, failure.reason]),

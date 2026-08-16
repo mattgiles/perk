@@ -314,9 +314,7 @@ test("runReportWave: Ponytail preflight success without a report stays uncovered
     }),
   );
   assert.equal(result.complete, false);
-  assert.deepEqual(result.reports, [
-    { key: "plan-fidelity", report: { verdict: "clean" } },
-  ]);
+  assert.deepEqual(result.reports, [{ key: "plan-fidelity", report: { verdict: "clean" } }]);
   assert.deepEqual(result.failures, [
     {
       key: "ponytail",

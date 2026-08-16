@@ -16,10 +16,10 @@ import {
   customReportSchema,
   DYNAMIC_ADDITIONAL_ANGLES,
   DYNAMIC_FALLBACK_ANGLES,
-  REVIEW_ANGLE_SELECTOR_SCHEMA,
-  renderDynamicReviewScript as renderDynamicReviewScriptBase,
   type DynamicReviewScriptOptions,
   type PrReviewDynamicOptions,
+  REVIEW_ANGLE_SELECTOR_SCHEMA,
+  renderDynamicReviewScript as renderDynamicReviewScriptBase,
   runPrReviewDynamicWave as runPrReviewDynamicWaveBase,
 } from "./prReviewDynamicWave.ts";
 import {
@@ -153,9 +153,7 @@ async function execScript(script: string, config: ExecConfig = {}): Promise<Exec
   return { value, events, runCalls, allBatches };
 }
 
-function render(
-  overrides: Parameters<typeof renderDynamicReviewScript>[0] = { forceAngles: [] },
-) {
+function render(overrides: Parameters<typeof renderDynamicReviewScript>[0] = { forceAngles: [] }) {
   return renderDynamicReviewScript(overrides);
 }
 
@@ -213,10 +211,7 @@ test("renderDynamicReviewScript embeds the selector item with its own outputSche
   assert.equal(selector.params.model, "test-selector-model");
   assert.equal(selector.params.label, "angle-selector");
   assert.equal(selector.params.phase, "select");
-  assert.match(
-    String(selector.params.task),
-    /perk pr review-context --expected-pr 42 --json/,
-  );
+  assert.match(String(selector.params.task), /perk pr review-context --expected-pr 42 --json/);
 });
 
 test("renderDynamicReviewScript omits the selector model when unset (frontmatter fallback)", async () => {
@@ -238,10 +233,7 @@ test("renderDynamicReviewScript threads the reviewer model onto plan-fidelity an
   assert.equal(pf?.params.model, "test-reviewer-model");
   assert.equal(ponytail?.params.model, "test-reviewer-model");
   assert.equal(pf?.params.agent, "perk.pr-reviewer");
-  assert.equal(
-    pf?.params.task,
-    `${PR_REVIEW_ANGLES["plan-fidelity"]}${reviewTargetSuffix(42)}`,
-  );
+  assert.equal(pf?.params.task, `${PR_REVIEW_ANGLES["plan-fidelity"]}${reviewTargetSuffix(42)}`);
   assert.match(String(ponytail?.params.task), /--expected-pr 42 --json/);
   for (const item of allBatches[0] ?? []) {
     assert.equal(item.model, "test-reviewer-model");
@@ -1115,10 +1107,7 @@ test("runner: a mixed fixed+custom failure retries both in ONE static wave", asy
     items.map((item) => item.key),
     ["correctness", "cache-invalidation"],
   );
-  assert.equal(
-    items[0]?.task,
-    `${PR_REVIEW_ANGLES.correctness}${reviewTargetSuffix(42)}`,
-  );
+  assert.equal(items[0]?.task, `${PR_REVIEW_ANGLES.correctness}${reviewTargetSuffix(42)}`);
   assert.equal("outputSchema" in (items[0] ?? {}), false, "fixed lanes ride the workflow default");
   assert.deepEqual(items[1]?.outputSchema, customReportSchema(custom.slug));
   assert.equal(outcome.complete, true);

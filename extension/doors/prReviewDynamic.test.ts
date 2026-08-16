@@ -379,10 +379,7 @@ test("tool: run_pr_review_dynamic_wave end-to-end — models per-item, aggregate
     assert.equal(selector.params.model, "test-selector-model");
     assert.match(JSON.stringify(selector.params.outputSchema), /"change_profile"/);
     assert.match(selector.params.task as string, /focus on decode edges/);
-    assert.match(
-      selector.params.task as string,
-      /perk pr review-context --expected-pr 42 --json/,
-    );
+    assert.match(selector.params.task as string, /perk pr review-context --expected-pr 42 --json/);
     const pf = sink.runCalls.find((call) => call.key === "plan-fidelity");
     const ponytail = sink.runCalls.find((call) => call.key === "ponytail");
     assert.ok(pf);
@@ -439,10 +436,7 @@ test("tool: a new dynamic target-resolution failure invalidates prior evidence f
     assert.equal((failed.details as { error_type?: string }).error_type, "no_pr");
     for (const verdict of ["clean", "actionable"] as const) {
       const post = await h.invokeTool("post_pr_review", { verdict, summary: "old evidence" });
-      assert.equal(
-        (post.details as { error_type?: string }).error_type,
-        "review_wave_unavailable",
-      );
+      assert.equal((post.details as { error_type?: string }).error_type, "review_wave_unavailable");
     }
   } finally {
     h.dispose();

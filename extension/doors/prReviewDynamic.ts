@@ -36,11 +36,7 @@ import {
   runPrReviewDynamicWave,
 } from "../waves/prReviewDynamicWave.ts";
 import { createRpcWaveAdapter } from "../waves/rpcAdapter.ts";
-import {
-  markReviewWavePending,
-  recordReviewWaveOutcome,
-  resolveActivePr,
-} from "./prReview.ts";
+import { markReviewWavePending, recordReviewWaveOutcome, resolveActivePr } from "./prReview.ts";
 
 const DYNAMIC_WAVE_TOOL_GUIDELINES = [
   "Call run_pr_review_dynamic_wave ONCE per review pass — angle selection is DELEGATED to a fresh perk.review-angle-selector lane run concurrently with the mandatory plan-fidelity lane and one independent source-bound Ponytail lane; the tool renders and launches the whole dynamic wave itself (module-rendered normalization + fan-out) and applies the one bounded retry. Ponytail is automatic/outside the cap: never force, propose, or duplicate it; never orchestrate retries or author workflow scripts.",
