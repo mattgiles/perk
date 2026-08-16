@@ -340,6 +340,75 @@ test("Mechanism A dedups against a prior warm binding-context custom (idempotent
   }
 });
 
+test("Mechanism A re-injects when compaction drops the historical binding header", async () => {
+  const cwd = scaffoldRepo();
+  writeBindings(cwd, [{ trigger: "stage:save", skill: "my-skill", mode: "nudge" }]);
+  const file = plantRawSession(cwd, [
+    {
+      custom: {
+        type: "perk:workflow-state",
+        data: { run_id: "01RID", mode: "read-write", stage: "save" },
+      },
+    },
+    { assistant: `${BINDING_HEADER}\n\n${pointer("my-skill")}` },
+    { assistant: "recent work that survives compaction" },
+  ]);
+  const sessionManager = SessionManager.open(file);
+  const keptId = sessionManager.getEntries().at(-1)?.id;
+  assert.ok(keptId !== undefined);
+  sessionManager.appendCompaction("summary without the binding marker", keptId, 100);
+  const h = await loadPerkSession({
+    cwd,
+    sessionManager,
+    env: { PERK_RUN_ID: undefined },
+  });
+  try {
+    const injected = await h.emitBeforeAgentStart();
+    assert.ok(
+      injected.some(
+        (m) =>
+          m.customType === BINDING_CONTEXT_TYPE && String(m.content).includes(pointer("my-skill")),
+      ),
+      "a header outside the active compaction window must not suppress restoration",
+    );
+  } finally {
+    h.dispose();
+  }
+});
+
+test("Mechanism A keeps dedup when compaction retains the binding header", async () => {
+  const cwd = scaffoldRepo();
+  writeBindings(cwd, [{ trigger: "stage:save", skill: "my-skill", mode: "nudge" }]);
+  const file = plantRawSession(cwd, [
+    {
+      custom: {
+        type: "perk:workflow-state",
+        data: { run_id: "01RID", mode: "read-write", stage: "save" },
+      },
+    },
+    { assistant: `${BINDING_HEADER}\n\n${pointer("my-skill")}` },
+  ]);
+  const sessionManager = SessionManager.open(file);
+  const keptId = sessionManager.getEntries().at(-1)?.id;
+  assert.ok(keptId !== undefined);
+  sessionManager.appendCompaction("summary", keptId, 100);
+  const h = await loadPerkSession({
+    cwd,
+    sessionManager,
+    env: { PERK_RUN_ID: undefined },
+  });
+  try {
+    const injected = await h.emitBeforeAgentStart();
+    assert.equal(
+      injected.some((m) => m.customType === BINDING_CONTEXT_TYPE),
+      false,
+      "a retained header remains a live delivery and must not duplicate",
+    );
+  } finally {
+    h.dispose();
+  }
+});
+
 test("the context strip removes a stale binding-context custom when the stage no longer binds", async () => {
   const cwd = scaffoldRepo();
   // NO user overlay → stage:save renders nothing → a lingering binding-context is stale.

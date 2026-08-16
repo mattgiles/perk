@@ -646,6 +646,23 @@ const DRIVE_COVERAGE: readonly {
     text: () => commitAndCompactContinuation(null, { outcome: "clean" }),
     namesNoTools: true,
   },
+  {
+    // The Linear arm names its canonical read tools, so the global-stage census must prove both
+    // remain reachable wherever a provider-aware continuation can land.
+    drive: "commit-and-compact-continuation.md (Linear active plan)",
+    stages: GLOBAL_COMMAND_STAGES,
+    text: () =>
+      commitAndCompactContinuation(
+        {
+          provider: "linear",
+          pr_id: "uuid-1",
+          url: "https://linear.app/x/ENG-1",
+          labels: [],
+          objective_id: null,
+        },
+        { outcome: "read-only" },
+      ),
+  },
 ];
 
 test("drive coverage: every gate-off drive's named tools are active in every stage it can land in", () => {

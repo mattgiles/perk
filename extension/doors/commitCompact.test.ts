@@ -247,6 +247,21 @@ test("activeSessionPlanRef: malformed or empty linkage is unusable", () => {
     { provider: "github", pr_id: " ", url: "https://x/42" },
     { provider: "github", pr_id: "42", url: "" },
     { provider: 7, pr_id: "42", url: "https://x/42" },
+    { provider: "github", pr_id: "42", url: "https://x/42" },
+    {
+      provider: "github",
+      pr_id: "42",
+      url: "https://x/42",
+      labels: [7],
+      objective_id: null,
+    },
+    {
+      provider: "github",
+      pr_id: "42",
+      url: "https://x/42",
+      labels: [],
+      objective_id: 7,
+    },
   ];
   for (const active_plan_ref of malformed) {
     const ctx = workflowContext([
@@ -433,21 +448,24 @@ test("registered clean path dispatches one optionless continuation only after co
     assert.equal(seen.length, 1);
     assert.ok(seen[0]?.includes(`active plan #42 (github: ${GITHUB_REF.url})`));
     assert.ok(!seen[0]?.includes("opaque-9"));
+    assert.ok(
+      !seen[0]?.includes(BINDING_HEADER),
+      "the completion carries no command binding suffix",
+    );
     assert.deepEqual(optionsSeen, [undefined], "continuation delivery must pass no options");
   } finally {
     h.dispose();
   }
 });
 
-test("registered read-only path never dispatches when compaction rejects", async () => {
+test("registered read-only path never dispatches when compaction rejects", async (t) => {
   const runId = "01COMPACTREADONLY";
   const cwd = scaffoldRepo({ handoff: { runId, mode: "read-only", stage: "plan" } });
   const h = await loadPerkSession({ cwd, env: { PERK_RUN_ID: runId } });
   const seen = spyInjections(h);
   const deferred = deferCompaction(h);
   const errors: string[] = [];
-  const originalError = console.error;
-  console.error = (...args: unknown[]) => errors.push(args.map(String).join(" "));
+  t.mock.method(console, "error", (message: unknown) => errors.push(String(message)));
   try {
     await h.invokeCommand("commit-and-compact");
     assert.deepEqual(seen, []);
@@ -458,12 +476,11 @@ test("registered read-only path never dispatches when compaction rejects", async
     assert.ok(errors.some((line) => line.includes("compaction failed")));
     assert.ok(!errors.some((line) => line.includes("continuation dispatch failed")));
   } finally {
-    console.error = originalError;
     h.dispose();
   }
 });
 
-test("registered completion logs an immediate continuation API refusal without relabeling it", async () => {
+test("registered completion logs an immediate continuation API refusal without relabeling it", async (t) => {
   const cwd = scaffoldRepo();
   gitInit(cwd, { dirty: false });
   const h = await loadPerkSession({ cwd });
@@ -476,8 +493,7 @@ test("registered completion logs an immediate continuation API refusal without r
     throw new Error("inactive extension runtime");
   }) as (content: unknown, options?: unknown) => Promise<void>;
   const errors: string[] = [];
-  const originalError = console.error;
-  console.error = (...args: unknown[]) => errors.push(args.map(String).join(" "));
+  t.mock.method(console, "error", (message: unknown) => errors.push(String(message)));
   try {
     await h.invokeCommand("commit-and-compact");
     deferred.resolve();
@@ -486,7 +502,6 @@ test("registered completion logs an immediate continuation API refusal without r
     assert.ok(errors.some((line) => line.includes("continuation dispatch failed")));
     assert.ok(!errors.some((line) => line.includes("compaction failed")));
   } finally {
-    console.error = originalError;
     h.dispose();
   }
 });

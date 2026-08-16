@@ -14,9 +14,10 @@
 //
 // This is the SINGLE delivery path for perk's own nudges. Delivery NEVER double-delivers: the
 // cold↔warm dedup marker is `BINDING_HEADER` itself — the cold door's initial prompt and every warm
-// injection carry it, so Mechanism A injects ONLY when neither the branch NOR the submitting
-// turn's prompt already carries the header (idempotent across turns/reloads; after compaction
-// drops the original it re-delivers). The prompt scan is load-bearing on the launch turn: at
+// injection carry it, so Mechanism A injects ONLY when neither the compaction-active branch window
+// NOR the submitting turn's prompt already carries the header (idempotent across turns/reloads;
+// after compaction drops the original from model context it re-delivers). The prompt scan is
+// load-bearing on the launch turn: at
 // `before_agent_start` the just-submitted prompt is NOT yet on the branch, so the branch scan
 // alone would miss a cold seed's binding suffix and double-deliver.
 //
@@ -155,12 +156,38 @@ function stripFrontmatter(text: string): string {
 }
 
 /**
- * Whether anything on the branch already carries `BINDING_HEADER` — the cold launch's initial
- * prompt OR a prior warm injection. Serializing each entry is the robust, shape-agnostic scan: the
- * header is a distinctive literal, so a substring hit means "already delivered on this branch".
+ * The branch entries still represented directly in model context. Before any compaction that is
+ * the full branch. After compaction, Pi keeps entries from `firstKeptEntryId` onward plus anything
+ * appended later; historical entries before that cutoff remain in the append-only branch but are
+ * represented only by the summary. Compaction entries themselves are excluded because a summary
+ * quoting the header is evidence about old delivery, not a live binding delivery.
  */
+function activeBindingWindow(branch: readonly BranchEntry[]): BranchEntry[] {
+  let latestCompaction = -1;
+  for (let i = branch.length - 1; i >= 0; i--) {
+    if (branch[i]?.type === "compaction") {
+      latestCompaction = i;
+      break;
+    }
+  }
+  if (latestCompaction === -1) return [...branch];
+
+  const firstKeptEntryId = (branch[latestCompaction] as { firstKeptEntryId?: unknown })
+    .firstKeptEntryId;
+  const firstKept =
+    typeof firstKeptEntryId === "string"
+      ? branch.findIndex(
+          (entry, index) =>
+            index < latestCompaction && (entry as { id?: unknown }).id === firstKeptEntryId,
+        )
+      : -1;
+  const start = firstKept === -1 ? latestCompaction + 1 : firstKept;
+  return branch.slice(start).filter((entry) => entry.type !== "compaction");
+}
+
+/** Whether a cold prompt or warm injection still active in model context carries the marker. */
 function branchHasHeader(branch: readonly BranchEntry[]): boolean {
-  return branchCarries(branch, BINDING_HEADER);
+  return branchCarries(activeBindingWindow(branch), BINDING_HEADER);
 }
 
 /** The launched stage's `stage:<id>` render, or `null` when there is no stage / nothing matches. */
@@ -178,8 +205,8 @@ function activeStageRender(cwd: string, branch: readonly BranchEntry[]): Binding
  */
 export function registerBindingDelivery(pi: ExtensionAPI): void {
   // Mechanism A — inject the launched stage's resolved bindings as a hidden context message,
-  // but ONLY when no entry on the branch AND not the submitting turn's prompt already carries
-  // BINDING_HEADER (the cold door's initial prompt or a prior warm inject) — the cold↔warm
+  // but ONLY when no entry in the compaction-active branch window AND not the submitting turn's
+  // prompt already carries BINDING_HEADER (the cold door's initial prompt or a prior warm inject) — the cold↔warm
   // idempotency guard. The `event.prompt` scan covers the launch turn, where the just-submitted
   // prompt is not yet on the branch; a worker prompt carries no header, so Mechanism A still
   // fires there (contracts.md §8.38).

@@ -71,6 +71,10 @@ export interface CommitCompactIo {
   compact(customInstructions: string, completion: CommitCompactCompletion): void;
 }
 
+function isNonEmptyString(value: unknown): value is string {
+  return typeof value === "string" && value.trim() !== "";
+}
+
 /**
  * The command-specific active-plan resolver. Session-tier `active_plan_ref` is the only authority:
  * a checkout cache ref can select a future plan and is unrelated to this live session.
@@ -80,11 +84,35 @@ export function activeSessionPlanRef(ctx: ExtensionContext): PlanRef | null {
     const ref: unknown = rebuildWorkflowState(branchOf(ctx)).active_plan_ref;
     if (typeof ref !== "object" || ref === null) return null;
     const candidate = ref as Record<string, unknown>;
-    for (const key of ["provider", "pr_id", "url"] as const) {
-      const value = candidate[key];
-      if (typeof value !== "string" || value.trim() === "") return null;
+    if (
+      !isNonEmptyString(candidate.provider) ||
+      !isNonEmptyString(candidate.pr_id) ||
+      !isNonEmptyString(candidate.url)
+    ) {
+      return null;
     }
-    return ref as PlanRef;
+    if (
+      !Array.isArray(candidate.labels) ||
+      !candidate.labels.every((label) => typeof label === "string")
+    ) {
+      return null;
+    }
+    if (candidate.objective_id !== null && typeof candidate.objective_id !== "string") return null;
+    if (
+      candidate.base !== undefined &&
+      candidate.base !== null &&
+      typeof candidate.base !== "string"
+    ) {
+      return null;
+    }
+    return {
+      provider: candidate.provider,
+      pr_id: candidate.pr_id,
+      url: candidate.url,
+      labels: candidate.labels,
+      objective_id: candidate.objective_id,
+      ...(candidate.base !== undefined ? { base: candidate.base } : {}),
+    };
   } catch {
     return null;
   }
@@ -214,8 +242,8 @@ export function registerCommitAndCompact(pi: ExtensionAPI, gating: ToolGating): 
   registerPerkCommand(pi, "commit-and-compact", {
     description:
       "Commit the work completed so far (a driven model turn stages and writes the message), " +
-      "then compact the session. Clean or read-only sessions compact immediately; if no commit " +
-      "results, compaction is skipped.",
+      "compact, then continue automatically after compaction succeeds. Clean or read-only " +
+      "sessions compact immediately; a skipped or failed compaction never continues.",
     handler: async (_args, ctx) => {
       pending = startCommitAndCompact(ctx.cwd, gating.isActive(), ioFor(ctx));
     },
