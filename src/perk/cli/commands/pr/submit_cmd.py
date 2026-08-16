@@ -23,8 +23,7 @@ from perk.boundary import OutputModel
 from perk.cli.context import require_github, require_repo
 from perk.cli.emit import emit, fail
 from perk.cli.ensure import UserFacingCliError
-from perk.delivery.publish import DeliveryOperationFacts
-from perk.delivery.train import TrainReconstructionError
+from perk.delivery.facade import SyncResult as DeliverySyncResult
 from perk.github import GitHubError
 from perk.run import launch
 from perk.state import cache
@@ -53,7 +52,7 @@ class PrSubmitResult:
     stack_size: int | None = None
     stack_position: int | None = None
     operation_id: str | None = None
-    operation: DeliveryOperationFacts | None = None
+    operation: DeliverySyncResult | None = None
 
 
 @click.command("submit")
@@ -108,33 +107,25 @@ def submit_pr(ctx: click.Context, *, dry_run: bool, as_json: bool, run_id: str |
         )
         return
     except delivery.DeliveryError as exc:
+        if exc.phase == "cascade" and exc.origin == "delivery":
+            message = f"stacked propagation failed\n{exc}"
+        elif exc.phase == "layer" and exc.origin in {"domain", "delivery"}:
+            message = f"stacked publication failed\n{exc}"
+        elif exc.phase == "layer" and exc.origin == "git":
+            if exc.error_type == "push_rejected":
+                message = (
+                    "Push rejected — the remote branch moved unexpectedly.\n"
+                    "Fetch/rebase onto the latest origin and re-submit.\n" + str(exc)
+                )
+            else:
+                message = f"git push failed\n{exc}"
+        else:
+            message = f"PR submit failed\n{exc}"
         fail(
             ctx,
             as_json=as_json,
             error_type=exc.error_type,
-            message=f"stacked propagation failed\n{exc}",
-            extra={"dry_run": False},
-        )
-        return
-    except delivery.PublicationError as exc:
-        fail(
-            ctx,
-            as_json=as_json,
-            error_type=exc.error_type,
-            message=f"stacked publication failed\n{exc}",
-            extra={"dry_run": False},
-        )
-        return
-    except (
-        delivery.TrainPersistenceError,
-        delivery.JournalCorruptionError,
-        TrainReconstructionError,
-    ) as exc:
-        fail(
-            ctx,
-            as_json=as_json,
-            error_type="delivery_error",
-            message=f"stacked publication failed\n{exc}",
+            message=message,
             extra={"dry_run": False},
         )
         return
@@ -149,21 +140,6 @@ def submit_pr(ctx: click.Context, *, dry_run: bool, as_json: bool, run_id: str |
         return
 
     emit(as_json=as_json, payload=_result_to_dict(result), render=lambda: _render_human(result))
-
-
-_HEADER_FIELDS = ("branch", "pr", "lifecycle_stage")
-
-
-def _merge_impl_run_ids(existing: object, run_id: str) -> tuple[str, ...]:
-    """Union-merge ``run_id`` into the header's existing ``impl_run_ids`` (dedup, order-preserving).
-
-    The stored value is untrusted (read back off the issue header): only string entries are kept,
-    and ``run_id`` is appended iff absent. Anything non-list degrades to an empty base.
-    """
-    base: list[str] = []
-    if isinstance(existing, list):
-        base = [item for item in existing if isinstance(item, str)]
-    return tuple(base) if run_id in base else (*base, run_id)
 
 
 def _pr_submit_impl(*, repo_root: Path, dry_run: bool, run_id: str | None = None) -> PrSubmitResult:
@@ -186,19 +162,21 @@ def _pr_submit_impl(*, repo_root: Path, dry_run: bool, run_id: str | None = None
     issue = plan_ref.pr_id
 
     if dry_run:
+        published = delivery.resolve_delivery(repo_root).publish(
+            delivery.PublishRequest(kind="layer", plan_id=issue, dry_run=True)
+        )
+        layer = published.layer
+        if layer is None:
+            raise ValueError("layer dry-run publish returned no layer detail")
         return PrSubmitResult(
-            pr=github.PullRequest(
-                number=0, url="(dry-run)", is_draft=True, state="OPEN", existed=False
-            ),
-            branch=branch,
-            issue=issue,
-            header_update=issue_backend.PlanHeaderUpdate(
-                fields_updated=_HEADER_FIELDS, dry_run=True
-            ),
-            plan_embedded=False,
-            pr_checked=False,
+            pr=layer.pr,
+            branch=layer.branch,
+            issue=published.plan_id,
+            header_update=layer.header_update,
+            plan_embedded=layer.plan_embedded,
+            pr_checked=layer.pr_checked,
             dry_run=True,
-            base="",
+            base=layer.parent_branch,
             mergeable=None,
             conflicts=(),
         )
@@ -223,10 +201,8 @@ def _pr_submit_impl(*, repo_root: Path, dry_run: bool, run_id: str | None = None
     if stacked:
         return _stacked_submit_impl(
             repo_root=repo_root,
-            backend=backend,
             state=state,
             issue=issue,
-            branch=branch,
             run_id=run_id,
         )
     # Resolve the PR merge target / conflict-probe base: the plan's pinned base wins
@@ -289,7 +265,7 @@ def _pr_submit_impl(*, repo_root: Path, dry_run: bool, run_id: str | None = None
     # invocations (no `--run-id`) leave the field untouched. `update_plan_header` MERGES, so a
     # later resave/restamp accumulates new run ids rather than clobbering.
     if run_id:
-        merged = _merge_impl_run_ids(state.header.get("impl_run_ids"), run_id)
+        merged = plan.merge_untrusted_str_list(state.header.get("impl_run_ids"), run_id)
         fields["impl_run_ids"] = list(merged)
     header_update = backend.update_plan_header(issue_id=issue, fields=fields)
     # Mirror the opened PR into the Linear agent session. Gated inside the
@@ -319,22 +295,11 @@ def _pr_submit_impl(*, repo_root: Path, dry_run: bool, run_id: str | None = None
 def _stacked_submit_impl(
     *,
     repo_root: Path,
-    backend: issue_backend.IssueBackend,
     state: issue_backend.PlanState,
     issue: str,
-    branch: str,
     run_id: str | None,
 ) -> PrSubmitResult:
-    """The stacked route: delegate to the delivery module's publish operation (§8.47).
-
-    Submit owns the identity-field composition (``header_fields``) and the PR-body
-    composition (``compose_body``); the publish operation owns WHEN they are written
-    (identity + checkpoints only after every postcondition verified). The mergeability
-    probe targets the PR's REAL merge target — the parent branch — and its verified published
-    head SHA, so a no-op cascade cannot accidentally probe a stale local branch. The warm door's
-    conflict-resolver rebases onto the parent, and the envelope's ``base`` carries it (its meaning
-    stays "the PR merge target").
-    """
+    """Submit stacked intent through the repository-scoped Delivery façade."""
     header_run_id = state.header.get("run_id")
     resolved_run_id = run_id or (
         header_run_id.strip() if isinstance(header_run_id, str) and header_run_id.strip() else ""
@@ -352,44 +317,18 @@ def _stacked_submit_impl(
             f".perk config invalid: {exc}\nFix it, then re-run (perk doctor pinpoints the field).",
             error_type="invalid_config",
         ) from exc
-    plan_body = _safe_plan_body(issue=issue, repo_root=repo_root)
-
-    def compose_body(facts: delivery.LayerBodyFacts, pr_number: int | None) -> str:
-        return _compose_stacked_pr_body(
-            issue=issue, plan_body=plan_body, facts=facts, pr_number=pr_number
+    published = delivery.resolve_delivery(repo_root).publish(
+        delivery.PublishRequest(
+            kind="layer",
+            plan_id=issue,
+            run_id=resolved_run_id,
+            trigger_run_id=run_id,
         )
-
-    def header_fields(pr_number: int) -> dict[str, object]:
-        fields: dict[str, object] = {
-            "branch": branch,
-            "pr": str(pr_number),
-            "lifecycle_stage": plan.LifecycleStage.IMPL.value,
-        }
-        # `impl_run_ids` stamping keeps the incremental rule: only an explicit `--run-id`
-        # stamps the linkage (the header-run_id fallback serves the journal only — the
-        # plan-authoring run id must not pollute the implement-run linkage, §8.35).
-        if run_id:
-            merged = _merge_impl_run_ids(state.header.get("impl_run_ids"), run_id)
-            fields["impl_run_ids"] = list(merged)
-        return fields
-
-    result = delivery.publish_layer(
-        repo_root,
-        plan_id=issue,
-        run_id=resolved_run_id,
-        trigger_run_id=run_id,
-        title=state.title,
-        compose_body=compose_body,
-        header_fields=header_fields,
     )
-    cascade_header_update: issue_backend.PlanHeaderUpdate | None = None
-    if result.operation is not None and run_id:
-        merged = _merge_impl_run_ids(state.header.get("impl_run_ids"), run_id)
-        cascade_header_update = backend.update_plan_header(
-            issue_id=issue, fields={"impl_run_ids": list(merged)}
-        )
-    # A cascade converges an existing PR and must not emit a duplicate PR-opened mirror.
-    if result.operation is None:
+    result = published.layer
+    if result is None:
+        raise ValueError("layer publish returned no layer detail")
+    if result.cascade is None:
         linear_agent.emit_pr_opened(
             repo_root,
             pr_number=result.pr.number,
@@ -397,23 +336,19 @@ def _stacked_submit_impl(
             branch=result.branch,
             environ=os.environ,
         )
+    published_head = result.published_head_sha
+    if published_head is None:
+        raise ValueError("real layer publish returned no published head")
     mergeable, conflicts = _probe_mergeability(
-        repo_root, base=result.parent_branch, branch=result.published_head_sha
+        repo_root, base=result.parent_branch, branch=published_head
     )
-    fields_updated: tuple[str, ...]
-    if cascade_header_update is not None:
-        fields_updated = cascade_header_update.fields_updated
-    elif result.operation is not None or result.converged_noop:
-        fields_updated = ()
-    else:
-        fields_updated = tuple(header_fields(result.pr.number))
     return PrSubmitResult(
         pr=result.pr,
         branch=result.branch,
-        issue=issue,
-        header_update=issue_backend.PlanHeaderUpdate(fields_updated=fields_updated, dry_run=False),
-        plan_embedded=plan_body is not None,
-        pr_checked=True,
+        issue=published.plan_id,
+        header_update=result.header_update,
+        plan_embedded=result.plan_embedded,
+        pr_checked=result.pr_checked,
         dry_run=False,
         base=result.parent_branch,
         mergeable=mergeable,
@@ -423,46 +358,8 @@ def _stacked_submit_impl(
         stack_size=result.stack_size,
         stack_position=result.stack_position,
         operation_id=result.operation_id,
-        operation=result.operation,
+        operation=result.cascade,
     )
-
-
-def _compose_stacked_pr_body(
-    *,
-    issue: str,
-    plan_body: str | None,
-    facts: delivery.LayerBodyFacts,
-    pr_number: int | None = None,
-) -> str:
-    """The stacked PR body: the incremental composition with two extra sections between the
-    plan link and the ``<details>`` embed — a `### This layer` position line (behind one
-    informational disclaimer: the delivery train is authoritative, the body is refreshed
-    only at publication) and a `### Train context` table, one row per layer bottom→top.
-    The footer + closing keyword stay byte-compatible with ``validate_pr_body``.
-    """
-    objective = facts.objective_id.removeprefix("#")
-    this_layer = (
-        "### This layer\n\n"
-        f"> Informational — the delivery train on objective #{objective} is authoritative; "
-        "refreshed only at publication.\n\n"
-        f"Layer {facts.position} of {facts.total} (node {facts.node_id}) — targets "
-        f"`{facts.parent_branch}`; the train lands atomically into `{facts.objective_base}`."
-    )
-    rows = ["| # | node | plan | PR |", "| - | - | - | - |"]
-    for position, row in enumerate(facts.rows, start=1):
-        plan_cell = f"#{row.plan_id}" if row.plan_id is not None else "—"
-        if row.current:
-            pr_cell = f"#{pr_number} (this PR)" if pr_number is not None else "(this PR)"
-        else:
-            pr_cell = f"#{row.pr_number}" if row.pr_number is not None else "—"
-        rows.append(f"| {position} | {row.node_id} | {plan_cell} | {pr_cell} |")
-    train_context = "### Train context\n\n" + "\n".join(rows)
-    parts = [f"Closes #{issue}", f"Plan: #{issue}", this_layer, train_context]
-    if plan_body:
-        parts.append(f"<details><summary>Plan #{issue}</summary>\n\n{plan_body}\n\n</details>")
-    if pr_number is not None:
-        parts.append(f"`gh pr checkout {pr_number}`")
-    return "\n\n".join(parts) + "\n"
 
 
 def _probe_mergeability(
@@ -508,9 +405,9 @@ def _compose_pr_body(
     `validate_pr_body` (the create-then-update fix for the latent issue-numbered-footer bug). The
     squash commit message is the OTHER target (plain text), set at land.
 
-    Closing-keyword invariant: the composition is fixed (exactly one `Closes #<plan>` + plan link
-    + optional stacked sections (`_compose_stacked_pr_body`) + embed + footer) and the
-    create-then-update pass **overwrites** any pre-created PR body; the
+    Closing-keyword invariant: this incremental composition is fixed (exactly one
+    `Closes #<plan>` + plan link + embed + footer), while stacked composition is owned by the
+    Publish engine. Both create-then-update passes **overwrite** any pre-created PR body; the
     land-side squash footer is equally fixed — there is no seam for extra closing keywords. A PR
     that must close an additional issue needs a **post-submit** edit on the first turn after
     `/submit` (the door terminates its own turn): read the body via `gh pr view`, insert the
@@ -582,9 +479,9 @@ class DeliveryOperationOut(OutputModel):
     notes: tuple[str, ...]
 
     @classmethod
-    def from_domain(cls, facts: delivery.DeliveryOperationFacts) -> "DeliveryOperationOut":
+    def from_domain(cls, facts: delivery.SyncResult) -> "DeliveryOperationOut":
         return cls(
-            kind=facts.kind,
+            kind="sync",
             operation_id=facts.operation_id,
             abandoned_operation_id=facts.abandoned_operation_id,
             resumed=facts.resumed,

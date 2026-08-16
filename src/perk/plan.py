@@ -56,8 +56,21 @@ LEARN_HEADER_KEY = "learn-header"
 # carries { run_id, created, scope } in the gist issue body / project overview
 GIST_HEADER_KEY = "gist-header"
 
+
 # The valid `plan-header` field names (the staged-population schema; lifecycle.md). Used by
 # the submit-time `update_plan_header` write to reject unknown keys (LBYL on the schema).
+def merge_untrusted_str_list(existing: object, value: str) -> tuple[str, ...]:
+    """Order-preserving union of one string into an untrusted stored list.
+
+    Stored header values are untrusted: only string entries from an actual list survive;
+    ``value`` is appended exactly once.
+    """
+    base = (
+        [item for item in existing if isinstance(item, str)] if isinstance(existing, list) else []
+    )
+    return tuple(base) if value in base else (*base, value)
+
+
 PLAN_HEADER_FIELDS = frozenset(
     {
         "run_id",

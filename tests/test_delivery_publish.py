@@ -1,11 +1,12 @@
 """Hermetic fake-driven tests for the delivery publish operation (contracts.md §8.47).
 
-Every effectful seam of ``publish_layer`` is injected with an in-memory world: a scriptable
+Every effectful aggregate authority is backed by an in-memory world: a scriptable
 mini remote (branch heads, PRs, one native stack), a recording persistence fake, and a
 timeline that pins the load-bearing write ordering (prepared → push → … → identity →
 checkpoint pair → completed). OFFLINE — no git / gh / network.
 """
 
+import contextlib
 from dataclasses import replace
 from pathlib import Path
 from typing import cast
@@ -13,7 +14,21 @@ from typing import cast
 import pytest
 
 from perk.backends.issue_backend import PlanHeaderUpdate, PlanState
-from perk.delivery import DeliveryError, SyncRequest, SyncResult, publish
+from perk.delivery import (
+    Delivery,
+    DeliveryError,
+    DeliveryGit,
+    DeliveryGitHub,
+    DeliveryPersistence,
+    PublishRequest,
+    PublishResult,
+    StatusRequest,
+    StatusResult,
+    SyncRequest,
+    SyncResult,
+    publish,
+)
+from perk.delivery import sync as sync_mod
 from perk.delivery.journal import (
     EventRole,
     JournalEvent,
@@ -39,6 +54,7 @@ from perk.delivery.train import (
     LayerWriter,
     TrainFinding,
     TrainLayer,
+    TrainReconstructionError,
     UnresolvedOperationFacts,
 )
 from perk.github import GitHubError
@@ -118,6 +134,15 @@ class _FakePersistence:
         # boundary — checkpoints written, `completed` not yet durable).
         self.outcome_boom: Exception | None = None
 
+    def get_plan(self, *, issue_id: str) -> PlanState:
+        return self._world.get_plan(issue_id=issue_id)
+
+    def get_plan_body(self, *, issue_id: str) -> str | None:
+        return None
+
+    def update_plan_header(self, *, issue_id: str, fields: dict[str, object]) -> PlanHeaderUpdate:
+        return self._world.update_plan_header(issue_id=issue_id, fields=fields)
+
     def read_journal(self, objective_id: str) -> JournalFold:
         ops = {}
         for op_id, record in self.unresolved_records.items():
@@ -182,7 +207,7 @@ class _FakePersistence:
 
 
 class _World:
-    """The injectable mini remote + recorders for one ``publish_layer`` invocation."""
+    """The aggregate-backed mini remote + recorders for one Publish invocation."""
 
     def __init__(
         self,
@@ -203,6 +228,7 @@ class _World:
         self.local: dict[str, str | None] = {}
         self.ancestry: set[tuple[str, str]] = set()
         self.push_reject = False
+        self.fetch_script: list[Exception | None] = []
         self.remote_head_script: list[str | Exception | None] = []
         # GitHub state.
         self.pr_entries: dict[int, _PrEntry] = {}
@@ -236,6 +262,7 @@ class _World:
         self.sync_error: DeliveryError | None = None
         self.sync_checkpoint_updates: dict[str, tuple[str | None, str | None]] = {}
         self.sync_calls: list[dict[str, object]] = []
+        self.use_bound_sync_dispatcher = False
 
     # ---------------------------------------------------------------- train + issues
 
@@ -313,6 +340,10 @@ class _World:
 
     def _fetch(self, root: Path, refspecs: list[str]) -> None:
         self.timeline.append(("fetch", tuple(refspecs)))
+        if self.fetch_script:
+            failure = self.fetch_script.pop(0)
+            if failure is not None:
+                raise failure
 
     def _remote_head(self, root: Path, branch: str) -> str | None:
         if self.remote_head_script:
@@ -541,54 +572,139 @@ class _World:
         *,
         run_id: str = "01RUN",
         trigger_run_id: str | None = None,
-    ) -> publish.PublicationResult:
-        def _reconstruct(root: Path, objective_id: str):
-            if self.reconstruct_error is not None:
-                raise self.reconstruct_error
-            return self._reconstruct(root, objective_id)
-
+    ) -> PublishResult.Layer:
         world = self
 
-        class _Delivery:
+        class _Git:
+            @property
+            def repo_root(self) -> Path:
+                return ROOT
+
+            def fetch_refs(self, refs: tuple[str, ...]) -> None:
+                try:
+                    world._fetch(ROOT, list(refs))
+                except git.GitError as exc:
+                    raise TrainReconstructionError(str(exc), error_type="git_error") from exc
+
+            def remote_branch_sha(self, branch: str) -> str | None:
+                try:
+                    return world._remote_head(ROOT, branch)
+                except git.GitError as exc:
+                    raise TrainReconstructionError(str(exc), error_type="git_error") from exc
+
+            def resolve_commit(self, ref: str, *, cwd: Path | None = None) -> str | None:
+                try:
+                    return world._local_head(cwd or ROOT, ref)
+                except git.GitError as exc:
+                    raise TrainReconstructionError(str(exc), error_type="git_error") from exc
+
+            def is_ancestor(self, ancestor: str, head: str) -> bool:
+                return world._is_ancestor(ROOT, ancestor, head)
+
+            def push_with_exact_lease(
+                self, branch: str, *, expected_remote_sha: str | None
+            ) -> None:
+                world._push(ROOT, branch, expected_remote_sha=expected_remote_sha)
+
+        class _GitHub:
+            def stack_capability(self) -> bool:
+                return world._stack_probe(ROOT)
+
+            def pr_facts(self, number: int) -> PrDeliveryFacts | None:
+                try:
+                    return world._pr_facts(number=number, repo_root=ROOT)
+                except GitHubError as exc:
+                    raise TrainReconstructionError(str(exc), error_type="github_error") from exc
+
+            def strict_stack(self, number: int) -> StackRestFacts | None:
+                try:
+                    return world._stack_read(number=number, repo_root=ROOT)
+                except GitHubError as exc:
+                    raise TrainReconstructionError(str(exc), error_type="github_error") from exc
+
+            def create_stack(self, pull_requests: tuple[int, ...]) -> StackMutationOutcome:
+                return world._stack_create(pull_requests=pull_requests, repo_root=ROOT)
+
+            def append_stack(
+                self, stack_number: int, *, pull_requests: tuple[int, ...]
+            ) -> StackMutationOutcome:
+                return world._stack_append(
+                    stack_number=stack_number,
+                    pull_requests=pull_requests,
+                    repo_root=ROOT,
+                )
+
+            def create_pr(
+                self, *, head: str, base: str, title: str, body: str, draft: bool
+            ) -> PullRequest:
+                return world._create_pr(
+                    head=head,
+                    base=base,
+                    title=title,
+                    body=body,
+                    repo_root=ROOT,
+                    draft=draft,
+                )
+
+            def get_pr(self, number: int) -> PullRequest | None:
+                return world._get_pr(number=number, repo_root=ROOT)
+
+            def update_pr_body(self, number: int, *, body: str):
+                return world._update_pr_body(number=number, body=body, repo_root=ROOT)
+
+            def update_pr_base(self, number: int, *, base: str) -> None:
+                world._update_pr_base(number=number, base=base, repo_root=ROOT)
+
+            def reopen_pr(self, number: int) -> None:
+                world._reopen_pr(number=number, repo_root=ROOT)
+
+            def pr_for_branch(self, branch: str) -> PullRequest | None:
+                return world._pr_for_branch(branch=branch, repo_root=ROOT)
+
+        class _Delivery(Delivery):
+            def __init__(self) -> None:
+                super().__init__(
+                    persistence=cast("DeliveryPersistence", world.persistence),
+                    git=cast("DeliveryGit", _Git()),
+                    github=cast("DeliveryGitHub", _GitHub()),
+                )
+
+            def status(self, request: StatusRequest) -> StatusResult:
+                if world.reconstruct_error is not None:
+                    raise world.reconstruct_error
+                train = world._reconstruct(ROOT, request.objective_id)
+                return StatusResult(
+                    train.objective_id,
+                    train.objective_url,
+                    train.redirected_from,
+                    train,
+                    None,
+                )
+
             def sync(self, request: SyncRequest, *, consent=None) -> SyncResult:
+                if world.use_bound_sync_dispatcher:
+                    return super().sync(request, consent=consent)
                 return world._synchronize(request, consent=consent)
 
+        runtime = publish._PublishRuntime(
+            mint_operation_id=mint_operation_id,
+            now=lambda: "2026-01-01T00:00:00Z",
+            sleep=self.sleeps.append,
+            validate_pr_body=lambda body, *, pr_number: self.validate_errors,
+        )
         with pytest.MonkeyPatch.context() as monkeypatch:
-            monkeypatch.setattr(publish.observe, "resolve_delivery", lambda root: _Delivery())
-            return publish.publish_layer(
-                ROOT,
-                plan_id=plan_id,
-                run_id=run_id,
-                trigger_run_id=trigger_run_id,
-                title="T",
-                compose_body=lambda facts, pr_number: (
-                    f"body layer {facts.position}/{facts.total}"
-                    + (f"\n\n`gh pr checkout {pr_number}`" if pr_number is not None else "")
-                ),
-                header_fields=lambda pr_number: {"branch": "b", "pr": str(pr_number)},
-                reconstruct=_reconstruct,
-                persistence_factory=lambda root: self.persistence,
-                issues_factory=lambda root: self._issues(),
-                stack_probe=self._stack_probe,
-                pr_facts=self._pr_facts,
-                stack_read=self._stack_read,
-                stack_create=self._stack_create,
-                stack_append=self._stack_append,
-                create_pr=self._create_pr,
-                get_pr=self._get_pr,
-                update_pr_body=self._update_pr_body,
-                update_pr_base=self._update_pr_base,
-                reopen_pr=self._reopen_pr,
-                validate_pr_body=lambda body, *, pr_number: self.validate_errors,
-                fetch=self._fetch,
-                remote_head=self._remote_head,
-                local_head=self._local_head,
-                is_ancestor=self._is_ancestor,
-                push=self._push,
-                pr_for_branch=self._pr_for_branch,
-                sleep=self.sleeps.append,
-                now=lambda: "2026-01-01T00:00:00Z",
+            monkeypatch.setattr(publish, "_DEFAULT_PUBLISH_RUNTIME", runtime)
+            result = _Delivery().publish(
+                PublishRequest(
+                    kind="layer",
+                    plan_id=plan_id,
+                    run_id=run_id,
+                    trigger_run_id=trigger_run_id,
+                )
             )
+        if result.layer is None:
+            raise AssertionError("layer publish returned no layer detail")
+        return result.layer
 
     def events(self, kind: str) -> list[tuple]:
         return [t for t in self.timeline if t[0] == kind]
@@ -636,7 +752,7 @@ def test_bottom_layer_fresh_publish_no_stack_work():
     world = _bottom_world()
     result = world.publish("101")
     assert result.converged_noop is False and result.resumed is False
-    assert result.operation is None
+    assert result.cascade is None
     assert result.pr.number == 77 and result.parent_branch == "main"
     assert result.stack_number is None and result.stack_size is None
     assert result.parent_checkpoint_sha == MAIN and result.published_head_sha == C1
@@ -768,7 +884,7 @@ def test_unchanged_before_retry_exhausted_is_registration_failed():
         applied=False, status=None, retry_after_seconds=None, rate_limited=False, raw_detail="x"
     )
     world.mutation_script = [(ambiguous, False), (ambiguous, False)]
-    with pytest.raises(publish.PublicationError) as excinfo:
+    with pytest.raises(DeliveryError) as excinfo:
         world.publish("102")
     assert excinfo.value.error_type == "stack_registration_failed"
     assert len(world.events("stack_create")) == 2
@@ -792,7 +908,7 @@ def test_foreign_composition_is_registration_drift():
     world = _second_layer_world()
     world.stack_number = 9
     world.stack_members = [55, 99]  # a foreign member — neither desired nor the exact prefix
-    with pytest.raises(publish.PublicationError) as excinfo:
+    with pytest.raises(DeliveryError) as excinfo:
         world.publish("102")
     assert excinfo.value.error_type == "stack_registration_drift"
     assert world.events("stack_create") == [] and world.events("stack_append") == []
@@ -816,9 +932,51 @@ def test_own_pr_in_a_different_stack_is_registration_drift():
         ),
     )
     world.stack_read_script = [None, foreign]  # bottom read → None; own read → foreign stack
-    with pytest.raises(publish.PublicationError) as excinfo:
+    with pytest.raises(DeliveryError) as excinfo:
         world.publish("102")
     assert excinfo.value.error_type == "stack_registration_drift"
+
+
+def test_absent_own_branch_fetch_wrapper_unwraps_and_remains_best_effort():
+    world = _bottom_world()
+    world.fetch_script = [git.GitError("remote branch is absent"), None]
+
+    result = world.publish("101")
+
+    assert result.pr.number == 77
+    assert world.events("fetch")[:2] == [
+        ("fetch", ("plan-101",)),
+        ("fetch", ("main",)),
+    ]
+
+
+def test_parent_fetch_wrapper_unwraps_into_the_existing_domain_refusal():
+    world = _bottom_world()
+    world.fetch_script = [None, git.GitError("parent fetch offline")]
+
+    with pytest.raises(DeliveryError) as excinfo:
+        world.publish("101")
+
+    assert (excinfo.value.error_type, excinfo.value.phase, excinfo.value.origin) == (
+        "git_error",
+        "layer",
+        "domain",
+    )
+    assert "parent fetch offline" in str(excinfo.value)
+    world.assert_nothing_persisted()
+
+
+def test_pr_facts_wrapper_unwraps_for_postcondition_classification():
+    world = _bottom_world()
+    world.pr_facts_script = [GitHubError("PR refetch offline")]
+
+    with pytest.raises(DeliveryError) as excinfo:
+        world.publish("101")
+
+    assert excinfo.value.error_type == "postcondition_unverified"
+    assert "PR refetch offline" in str(excinfo.value)
+    assert world.persistence.read_journal(OBJECTIVE).unresolved
+    world.assert_nothing_persisted()
 
 
 def test_verification_refetch_raising_is_postcondition_unverified():
@@ -830,7 +988,7 @@ def test_verification_refetch_raising_is_postcondition_unverified():
         MAIN,  # prepare_layer_start: the parent head
         git.GitError("offline"),  # the postcondition refetch
     ]
-    with pytest.raises(publish.PublicationError) as excinfo:
+    with pytest.raises(DeliveryError) as excinfo:
         world.publish("101")
     assert excinfo.value.error_type == "postcondition_unverified"
     assert world.persistence.read_journal(OBJECTIVE).unresolved
@@ -866,7 +1024,7 @@ def test_post_mutation_partial_composition_is_registration_drift():
     # stack_read order: the before-payload read, the classify bottom + own reads, then the
     # post-mutation refetch — which observes a foreign/partial composition.
     world.stack_read_script = [None, None, None, _stack_rest(9, 55, 99)]
-    with pytest.raises(publish.PublicationError) as excinfo:
+    with pytest.raises(DeliveryError) as excinfo:
         world.publish("102")
     assert excinfo.value.error_type == "stack_registration_drift"
     assert len(world.events("stack_create")) == 1  # no second mutation after drift
@@ -881,7 +1039,7 @@ def test_post_mutation_unreadable_refetch_is_postcondition_unverified():
     )
     world.mutation_script = [(ambiguous, True)]
     world.stack_read_script = [None, None, None, GitHubError("boom")]
-    with pytest.raises(publish.PublicationError) as excinfo:
+    with pytest.raises(DeliveryError) as excinfo:
         world.publish("102")
     assert excinfo.value.error_type == "postcondition_unverified"
     assert len(world.events("stack_create")) == 1  # an unverifiable outcome is never re-POSTed
@@ -892,7 +1050,7 @@ def test_post_mutation_unreadable_refetch_is_postcondition_unverified():
 def test_body_validation_failure_is_postcondition_unverified_and_persists_nothing():
     world = _bottom_world()
     world.validate_errors = ("checkout footer missing",)
-    with pytest.raises(publish.PublicationError) as excinfo:
+    with pytest.raises(DeliveryError) as excinfo:
         world.publish("101")
     assert excinfo.value.error_type == "postcondition_unverified"
     assert world.persistence.read_journal(OBJECTIVE).unresolved
@@ -910,7 +1068,7 @@ def test_remote_settling_timeout_when_pr_never_reflects_the_push():
         head_sha="0" * 40,
     )
     world.pr_facts_script = [stale] * publish._CONVERGE_ATTEMPTS
-    with pytest.raises(publish.PublicationError) as excinfo:
+    with pytest.raises(DeliveryError) as excinfo:
         world.publish("102")
     assert excinfo.value.error_type == "remote_settling_timeout"
     assert world.sleeps == [publish._CONVERGE_DELAY_SECONDS] * publish._CONVERGE_ATTEMPTS
@@ -921,7 +1079,7 @@ def test_remote_settling_timeout_when_pr_never_reflects_the_push():
 def test_stale_parent_fails_before_any_journal_append():
     world = _bottom_world()
     world.ancestry.clear()  # the candidate does not contain the fresh parent head
-    with pytest.raises(publish.PublicationError) as excinfo:
+    with pytest.raises(DeliveryError) as excinfo:
         world.publish("101")
     assert excinfo.value.error_type == "stale_parent"
     assert "rebase onto" in str(excinfo.value)
@@ -932,7 +1090,7 @@ def test_stale_parent_fails_before_any_journal_append():
 def test_lease_rejection_leaves_the_operation_unresolved():
     world = _bottom_world()
     world.push_reject = True
-    with pytest.raises(publish.PublicationError) as excinfo:
+    with pytest.raises(DeliveryError) as excinfo:
         world.publish("101")
     assert excinfo.value.error_type == "push_rejected"
     # The prepared record exists and is unresolved — successor readiness blocks on it.
@@ -948,7 +1106,7 @@ def test_crash_after_identity_write_resumes_without_duplicate_mutation():
     # second stack mutation, and the durable writes land exactly once.
     world = _second_layer_world()
     world.header_boom = GitHubError("boom at identity write")
-    with pytest.raises(GitHubError):
+    with pytest.raises(DeliveryError):
         world.publish("102")
     assert len(world.events("stack_create")) == 1
     assert world.events("header") == []
@@ -971,7 +1129,7 @@ def test_crash_at_checkpoint_write_resumes_idempotently():
     # completes the same operation, and writes the pair exactly once.
     world = _second_layer_world()
     world.checkpoints_boom = GitHubError("boom at checkpoint write")
-    with pytest.raises(GitHubError):
+    with pytest.raises(DeliveryError):
         world.publish("102")
     assert len(world.events("header")) == 1  # identity landed before the crash
     assert world.persistence.checkpoints == [] and world.persistence.outcomes == []
@@ -1031,7 +1189,7 @@ def test_crash_before_the_leased_push_retries_under_the_same_operation():
     # under the SAME operation from the push step (never a duplicate prepared).
     world = _second_layer_world()
     world.push_boom = GitHubError("process death before the push")
-    with pytest.raises(GitHubError):
+    with pytest.raises(DeliveryError):
         world.publish("102")
     (record,) = world.persistence.prepared
     assert world.pushes == []  # the ref never moved
@@ -1052,7 +1210,7 @@ def test_crash_after_push_before_pr_effects_rolls_forward_the_same_operation():
     # stack mutation, no second push.
     world = _second_layer_world()
     world.create_pr_boom = GitHubError("process death before PR effects")
-    with pytest.raises(GitHubError):
+    with pytest.raises(DeliveryError):
         world.publish("102")
     (record,) = world.persistence.prepared
     assert world.pushes == [("plan-102", None)]  # the push landed (the absence lease)
@@ -1072,7 +1230,7 @@ def test_crash_after_fresh_pr_create_resumes_via_idempotent_discovery():
     # and the single stack mutation happens on the rerun.
     world = _second_layer_world()
     world.after_effect_boom["create_pr"] = GitHubError("process death after PR create")
-    with pytest.raises(GitHubError):
+    with pytest.raises(DeliveryError):
         world.publish("102")
     assert len(world.events("create_pr")) == 1  # PR 77 exists
     assert world.events("stack_create") == []
@@ -1091,7 +1249,7 @@ def test_crash_after_reopen_never_repeats_the_reopen():
     world = _bottom_world()
     world.pr_entries[70] = _PrEntry(70, "plan-101", "main", state="CLOSED")
     world.after_effect_boom["reopen"] = GitHubError("process death after reopen")
-    with pytest.raises(GitHubError):
+    with pytest.raises(DeliveryError):
         world.publish("101")
     assert world.events("reopen") == [("reopen", 70)]
     result = world.publish("101")
@@ -1107,7 +1265,7 @@ def test_crash_after_base_retarget_never_repeats_the_retarget():
     world = _bottom_world()
     world.pr_entries[70] = _PrEntry(70, "plan-101", "develop", state="OPEN")
     world.after_effect_boom["update_pr_base"] = GitHubError("process death after retarget")
-    with pytest.raises(GitHubError):
+    with pytest.raises(DeliveryError):
         world.publish("101")
     assert world.events("update_pr_base") == [("update_pr_base", 70, "main")]
     result = world.publish("101")
@@ -1123,7 +1281,7 @@ def test_crash_after_body_update_completes_stack_work_exactly_once():
     # fight the convergent design); the stack mutation still happens exactly once.
     world = _second_layer_world()
     world.after_effect_boom["update_pr_body"] = GitHubError("process death after body update")
-    with pytest.raises(GitHubError):
+    with pytest.raises(DeliveryError):
         world.publish("102")
     assert len(world.events("update_pr_body")) == 1
     assert world.events("stack_create") == []
@@ -1140,7 +1298,7 @@ def test_crash_after_stack_create_before_refetch_resumes_without_second_mutation
     # refetch. The rerun observes exact membership and skips the mutation entirely.
     world = _second_layer_world()
     world.after_effect_boom["stack_mutation"] = GitHubError("process death after stack create")
-    with pytest.raises(GitHubError):
+    with pytest.raises(DeliveryError):
         world.publish("102")
     assert len(world.events("stack_create")) == 1
     assert world.persistence.outcomes == []
@@ -1158,7 +1316,7 @@ def test_crash_after_stack_append_before_refetch_resumes_without_second_append()
     # refetch. The rerun observes the appended membership and never appends again.
     world = _kth_layer_world()
     world.after_effect_boom["stack_mutation"] = GitHubError("process death after stack append")
-    with pytest.raises(GitHubError):
+    with pytest.raises(DeliveryError):
         world.publish("103")
     assert world.events("stack_append") == [("stack_append", 9, (77,))]
     result = world.publish("103")
@@ -1174,7 +1332,7 @@ def test_crash_before_the_completed_append_converges_on_rerun():
     # same operation forward and the terminal record lands exactly once.
     world = _second_layer_world()
     world.persistence.outcome_boom = GitHubError("process death before the completed append")
-    with pytest.raises(GitHubError):
+    with pytest.raises(DeliveryError):
         world.publish("102")
     (record,) = world.persistence.prepared
     assert world.persistence.checkpoints == [("102", P1, C2)]  # landed before the death
@@ -1204,7 +1362,7 @@ def test_rerun_after_completed_is_a_converged_noop():
 def test_merged_reused_pr_refuses():
     world = _bottom_world()
     world.pr_entries[70] = _PrEntry(70, "plan-101", "main", state="MERGED")
-    with pytest.raises(publish.PublicationError) as excinfo:
+    with pytest.raises(DeliveryError) as excinfo:
         world.publish("101")
     assert excinfo.value.error_type == "pr_already_merged"
 
@@ -1247,7 +1405,7 @@ def test_foreign_unresolved_operation_refuses(kind, plans):
     )
     world = _bottom_world()
     world.persistence.unresolved_records[foreign.operation_id] = foreign
-    with pytest.raises(publish.PublicationError) as excinfo:
+    with pytest.raises(DeliveryError) as excinfo:
         world.publish("101")
     assert excinfo.value.error_type == "unresolved_operation"
 
@@ -1255,7 +1413,7 @@ def test_foreign_unresolved_operation_refuses(kind, plans):
 def test_capability_recheck_failure_at_position_two():
     world = _second_layer_world()
     world.capability = False
-    with pytest.raises(publish.PublicationError) as excinfo:
+    with pytest.raises(DeliveryError) as excinfo:
         world.publish("102")
     assert excinfo.value.error_type == "stack_capability_lost"
     assert world.persistence.prepared == []  # refused before any journal append
@@ -1267,7 +1425,7 @@ def test_missing_remote_parent_passes_through_the_layer_code():
     # remote parent surfaces as `parent_missing`, before any journal append.
     world = _bottom_world()
     world.remote["main"] = None
-    with pytest.raises(publish.PublicationError) as excinfo:
+    with pytest.raises(DeliveryError) as excinfo:
         world.publish("101")
     assert excinfo.value.error_type == "parent_missing"
     assert world.persistence.prepared == [] and world.pushes == []
@@ -1348,15 +1506,43 @@ def test_lower_claimed_layer_delegates_to_triggered_sync():
     assert (
         result.stack_number is None and result.stack_size is None and result.stack_position is None
     )
-    assert result.operation == publish.DeliveryOperationFacts(
-        kind="sync",
-        operation_id="01SYNC",
-        abandoned_operation_id=None,
-        resumed=False,
-        no_op=False,
-        affected=affected,
-        notes=("residue",),
-    )
+    assert result.cascade == world.sync_result
+
+
+def test_lower_layer_publish_enters_the_bound_sync_lock_exactly_once(monkeypatch):
+    world = _lower_published_world()
+    affected = (SyncResult.Layer("1", "101", "plan-101", 55, P1, C1),)
+    world.sync_result = _sync_result(affected=affected)
+    world.sync_checkpoint_updates["1"] = (MAIN, C1)
+    world.use_bound_sync_dispatcher = True
+    events: list[tuple[str, Path]] = []
+    active = False
+
+    @contextlib.contextmanager
+    def operation_lock(root: Path):
+        nonlocal active
+        if active:
+            raise AssertionError("the non-reentrant stack lock was entered recursively")
+        active = True
+        events.append(("enter", root))
+        try:
+            yield
+        finally:
+            events.append(("exit", root))
+            active = False
+
+    runtime = replace(sync_mod._DEFAULT_SYNC_RUNTIME, operation_lock=operation_lock)
+
+    def synchronize(context, request, *, consent):
+        return world._synchronize(request, consent=consent)
+
+    monkeypatch.setattr(sync_mod, "_DEFAULT_SYNC_RUNTIME", runtime)
+    monkeypatch.setattr(sync_mod, "_synchronize", synchronize)
+
+    result = world.publish("101", trigger_run_id="01RAW")
+
+    assert result.cascade == world.sync_result
+    assert events == [("enter", ROOT), ("exit", ROOT)]
 
 
 def test_drifted_claimed_successor_still_routes_to_cascade():
@@ -1390,7 +1576,7 @@ def test_cascade_noop_uses_fresh_post_sync_checkpoints_and_typed_operation():
     result = world.publish("101")
     assert result.converged_noop is True and result.operation_id is None
     assert result.parent_checkpoint_sha == MAIN and result.published_head_sha == C1
-    assert result.operation is not None and result.operation.no_op is True
+    assert result.cascade is not None and result.cascade.no_op is True
     assert world.reconstruct_calls == 2
 
 
@@ -1399,7 +1585,7 @@ def test_cascade_refuses_sync_result_missing_the_trigger():
     world.sync_result = _sync_result(
         affected=(SyncResult.Layer("2", "102", "plan-102", 56, P2, C2),)
     )
-    with pytest.raises(publish.PublicationError) as excinfo:
+    with pytest.raises(DeliveryError) as excinfo:
         world.publish("101")
     assert excinfo.value.error_type == "publication_drift"
     assert "did not report plan #101" in str(excinfo.value)
@@ -1411,7 +1597,7 @@ def test_cascade_refuses_checkpoint_disagreement_after_sync():
         affected=(SyncResult.Layer("1", "101", "plan-101", 55, P1, C1),)
     )
     world.sync_checkpoint_updates["1"] = (MAIN, C3)
-    with pytest.raises(publish.PublicationError) as excinfo:
+    with pytest.raises(DeliveryError) as excinfo:
         world.publish("101")
     assert excinfo.value.error_type == "publication_drift"
     assert "fresh reconstruction carries" in str(excinfo.value)
@@ -1421,19 +1607,23 @@ def test_cascade_noop_refuses_incomplete_fresh_checkpoint_pair():
     world = _lower_published_world()
     world.sync_result = _sync_result(affected=(), operation_id=None, no_op=True)
     world.sync_checkpoint_updates["1"] = (None, None)
-    with pytest.raises(publish.PublicationError) as excinfo:
+    with pytest.raises(DeliveryError) as excinfo:
         world.publish("101")
     assert excinfo.value.error_type == "publication_drift"
     assert "no complete checkpoint pair" in str(excinfo.value)
 
 
-def test_cascade_propagates_sync_error_raw():
+def test_cascade_contextualizes_the_bound_sync_error():
     world = _lower_published_world()
-    expected = DeliveryError("branch drift", error_type="remote_drift")
-    world.sync_error = expected
+    world.sync_error = DeliveryError("branch drift", error_type="remote_drift")
     with pytest.raises(DeliveryError) as excinfo:
         world.publish("101")
-    assert excinfo.value is expected
+    assert str(excinfo.value) == "branch drift"
+    assert (excinfo.value.error_type, excinfo.value.phase, excinfo.value.origin) == (
+        "remote_drift",
+        "cascade",
+        "delivery",
+    )
 
 
 def test_lower_publish_routes_sync_unresolved_through_cascade_before_fold():
@@ -1451,21 +1641,21 @@ def test_lower_publish_routes_sync_unresolved_through_cascade_before_fold():
     )
     world.persistence.unresolved_records[record.operation_id] = record
     world.sync_result = _sync_result(affected=(), operation_id=None, no_op=True)
-    assert world.publish("101").operation is not None
+    assert world.publish("101").cascade is not None
     assert len(world.sync_calls) == 1
 
 
 def test_readiness_veto_maps_to_node_not_build_ready():
     world = _bottom_world()
     world.blockers = ("checkpoint_drift",)
-    with pytest.raises(publish.PublicationError) as excinfo:
+    with pytest.raises(DeliveryError) as excinfo:
         world.publish("101")
     assert excinfo.value.error_type == "node_not_build_ready"
 
 
 def test_not_stacked_when_plan_is_not_a_layer():
     world = _bottom_world()
-    with pytest.raises(publish.PublicationError) as excinfo:
+    with pytest.raises(DeliveryError) as excinfo:
         world.publish("404")
     assert excinfo.value.error_type == "not_stacked"
 
@@ -1507,7 +1697,7 @@ def test_top_layer_republish_moves_the_checkpoints():
     world.local["plan-102"] = C2  # an amended top layer
     world.ancestry.add((P1, C2))
     result = world.publish("102")
-    assert result.converged_noop is False and result.operation is None
+    assert result.converged_noop is False and result.cascade is None
     assert world.pushes == [("plan-102", P2)]  # the checkpoint-matching lease
     assert world.persistence.checkpoints == [("102", P1, C2)]
     assert world.events("stack_create") == [] and world.events("stack_append") == []
@@ -1520,7 +1710,7 @@ def test_top_layer_pure_noop_converge_writes_nothing():
     world.local["plan-102"] = P2  # candidate == published head; everything already matches
     result = world.publish("102")
     assert result.converged_noop is True and result.operation_id is None
-    assert result.operation is None
+    assert result.cascade is None
     assert result.pr.number == 56
     assert result.stack_number == 9 and result.stack_position == 2
     assert result.parent_checkpoint_sha == P1 and result.published_head_sha == P2
@@ -1534,7 +1724,7 @@ def test_top_layer_remote_drift_refuses():
     world = _top_layer_world()
     world.remote["plan-102"] = C3  # out-of-band movement vs the checkpoint
     world.local["plan-102"] = C2
-    with pytest.raises(publish.PublicationError) as excinfo:
+    with pytest.raises(DeliveryError) as excinfo:
         world.publish("102")
     assert excinfo.value.error_type == "remote_drift"
 
@@ -1632,7 +1822,7 @@ def test_resume_refuses_a_drifted_parent_base():
     world = _second_layer_world()
     world.persistence.unresolved_records[record.operation_id] = record
     world.remote["plan-102"] = C2
-    with pytest.raises(publish.PublicationError) as excinfo:
+    with pytest.raises(DeliveryError) as excinfo:
         world.publish("102")
     assert excinfo.value.error_type == "publication_drift"
     assert world.events("stack_create") == [] and world.pushes == []
@@ -1646,7 +1836,7 @@ def test_resume_refuses_a_drifted_stack_prefix():
     world = _second_layer_world()
     world.persistence.unresolved_records[record.operation_id] = record
     world.remote["plan-102"] = C2
-    with pytest.raises(publish.PublicationError) as excinfo:
+    with pytest.raises(DeliveryError) as excinfo:
         world.publish("102")
     assert excinfo.value.error_type == "publication_drift"
     assert world.events("stack_create") == []
@@ -1658,7 +1848,7 @@ def test_resume_refuses_a_drifted_lineage():
     world = _second_layer_world()
     world.persistence.unresolved_records[record.operation_id] = record
     world.remote["plan-102"] = C2
-    with pytest.raises(publish.PublicationError) as excinfo:
+    with pytest.raises(DeliveryError) as excinfo:
         world.publish("102")
     assert excinfo.value.error_type == "publication_drift"
 
@@ -1670,7 +1860,7 @@ def test_resume_refuses_when_the_recorded_pr_pin_mismatches():
     world = _second_layer_world()
     world.persistence.unresolved_records[record.operation_id] = record
     world.remote["plan-102"] = C2
-    with pytest.raises(publish.PublicationError) as excinfo:
+    with pytest.raises(DeliveryError) as excinfo:
         world.publish("102")  # the head selector creates/discovers PR #77, not #60
     assert excinfo.value.error_type == "publication_drift"
     assert world.events("stack_create") == []
@@ -1685,7 +1875,7 @@ def test_resume_rechecks_capability_at_the_mutation_seam():
     world.persistence.unresolved_records[record.operation_id] = record
     world.remote["plan-102"] = C2
     world.capability = False
-    with pytest.raises(publish.PublicationError) as excinfo:
+    with pytest.raises(DeliveryError) as excinfo:
         world.publish("102")
     assert excinfo.value.error_type == "stack_capability_lost"
     assert world.events("stack_create") == [] and world.events("stack_append") == []
@@ -1697,7 +1887,7 @@ def test_resume_mixed_state_is_publication_drift():
     world = _second_layer_world()
     world.persistence.unresolved_records[record.operation_id] = record
     world.remote["plan-102"] = "f" * 40  # neither before nor after
-    with pytest.raises(publish.PublicationError) as excinfo:
+    with pytest.raises(DeliveryError) as excinfo:
         world.publish("102")
     assert excinfo.value.error_type == "publication_drift"
     assert world.persistence.read_journal(OBJECTIVE).unresolved
@@ -1718,6 +1908,6 @@ def test_resume_pr_moved_off_its_before_state_is_publication_drift():
     world = _second_layer_world()
     world.pr_entries[56] = _PrEntry(56, "plan-102", "main")  # base moved off "plan-101"
     world.persistence.unresolved_records[record.operation_id] = record
-    with pytest.raises(publish.PublicationError) as excinfo:
+    with pytest.raises(DeliveryError) as excinfo:
         world.publish("102")
     assert excinfo.value.error_type == "publication_drift"

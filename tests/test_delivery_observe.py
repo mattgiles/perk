@@ -1,10 +1,10 @@
 """Tests for the delivery module's production wiring leaf (``perk/delivery/observe.py``).
 
-The seam the pure-reconstruction suite deliberately fakes: ``RepoDeliveryGit`` over a real
-local git repo + bare remote (hermetic, offline) and ``RepoDeliveryGitHub`` over monkeypatched
-``perk.github.stacks`` reads — pinning both the successful conversions into the ``train.py``
-view types and the §8.44 failure-posture split (`GitError` → typed ``git_error``, stable
-``GitHubError`` → typed ``github_error``, preview ``GitHubError`` → ``available=False``).
+The seams the pure-reconstruction suite deliberately fakes: lazy aligned persistence,
+``RepoDeliveryGit`` over a real local repo + bare remote (hermetic, offline), and
+``RepoDeliveryGitHub`` over monkeypatched GitHub gateways. The tests pin exact publication
+delegation plus the status failure-posture split (`GitError` → typed ``git_error``, stable
+`GitHubError` → typed ``github_error``, preview `GitHubError` → `available=False`).
 """
 
 import subprocess
@@ -12,11 +12,18 @@ from pathlib import Path
 
 import pytest
 
+from perk.backends.issue_backend import PlanHeaderUpdate
 from perk.delivery import land, observe
-from perk.delivery.facade import DeliveryGit, DeliveryGitHub
+from perk.delivery._fakes import FakeDeliveryGit, FakeDeliveryPersistence
+from perk.delivery.facade import (
+    Delivery,
+    DeliveryError,
+    DeliveryGit,
+    DeliveryGitHub,
+    PublishRequest,
+)
 from perk.delivery.train import (
     BaseHeadObservation,
-    BranchPrView,
     PrFactsView,
     StackView,
     TrainReconstructionError,
@@ -31,6 +38,39 @@ def _g(cwd: Path, *args: str) -> str:
     return subprocess.run(
         ["git", *args], cwd=cwd, check=True, capture_output=True, text=True
     ).stdout
+
+
+# ----------------------------------------------------------------- RepoDeliveryPersistence
+
+
+class TestRepoDeliveryPersistence:
+    def test_publication_plan_body_and_header_delegate_exactly(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        calls: list[tuple[object, ...]] = []
+
+        class _Issues:
+            def get_plan_body(self, *, issue_id: str) -> str | None:
+                calls.append(("body", issue_id))
+                return "Plan body"
+
+            def update_plan_header(
+                self, *, issue_id: str, fields: dict[str, object]
+            ) -> PlanHeaderUpdate:
+                calls.append(("header", issue_id, dict(fields)))
+                return PlanHeaderUpdate(fields_updated=tuple(fields), dry_run=False)
+
+        authority = observe.RepoDeliveryPersistence(tmp_path)
+        monkeypatch.setattr(authority, "_resolve", lambda: (object(), _Issues(), object()))
+
+        assert authority.get_plan_body(issue_id="101") == "Plan body"
+        assert authority.update_plan_header(
+            issue_id="101", fields={"branch": "plan-101"}
+        ) == PlanHeaderUpdate(fields_updated=("branch",), dry_run=False)
+        assert calls == [
+            ("body", "101"),
+            ("header", "101", {"branch": "plan-101"}),
+        ]
 
 
 # ----------------------------------------------------------------- RepoDeliveryGit
@@ -135,6 +175,13 @@ class TestRepoDeliveryGit:
             lambda root, updates: calls.append(("push", root, tuple(updates))),
         )
         monkeypatch.setattr(
+            git_mod,
+            "push_with_exact_lease",
+            lambda root, branch, *, expected_remote_sha: calls.append(
+                ("lease", root, branch, expected_remote_sha)
+            ),
+        )
+        monkeypatch.setattr(
             git_mod, "update_ref", lambda root, ref, sha: calls.append(("update", root, ref, sha))
         )
         monkeypatch.setattr(
@@ -180,6 +227,7 @@ class TestRepoDeliveryGit:
         authority = observe.RepoDeliveryGit(clone)
         assert authority.repo_root == clone
         assert authority.resolve_commit("HEAD", cwd=worktree) == "c" * 40
+        authority.push_with_exact_lease("plan-1", expected_remote_sha="a")
         authority.push_atomic((update,))
         authority.update_ref("refs/perk/x", "d" * 40)
         authority.delete_ref("refs/perk/x")
@@ -194,6 +242,7 @@ class TestRepoDeliveryGit:
 
         assert calls == [
             ("resolve", worktree, "HEAD"),
+            ("lease", clone, "plan-1", "a"),
             ("push", clone, (update,)),
             ("update", clone, "refs/perk/x", "d" * 40),
             ("delete", clone, "refs/perk/x"),
@@ -213,10 +262,14 @@ class TestRepoDeliveryGit:
         clone, _remote, _advance = git_repo_with_remote
         rejected = git_mod.PushRejectedError("lease rejected")
 
-        def reject(root, updates) -> None:
+        def reject(*args: object, **kwargs: object) -> None:
             raise rejected
 
         monkeypatch.setattr(git_mod, "push_atomic_with_leases", reject)
+        monkeypatch.setattr(git_mod, "push_with_exact_lease", reject)
+        with pytest.raises(git_mod.PushRejectedError) as lease_error:
+            observe.RepoDeliveryGit(clone).push_with_exact_lease("plan-1", expected_remote_sha="a")
+        assert lease_error.value is rejected
         with pytest.raises(git_mod.PushRejectedError) as excinfo:
             observe.RepoDeliveryGit(clone).push_atomic(
                 (git_mod.RefUpdate(branch="plan-1", expected_remote_sha="a", new_sha="b"),)
@@ -245,14 +298,31 @@ class TestRepoDeliveryGit:
         self, git_repo_with_remote, monkeypatch
     ) -> None:
         clone, _remote, _advance = git_repo_with_remote
+        failure = git_mod.GitError("network down")
 
         def boom(*_args: object, **_kwargs: object) -> None:
-            raise git_mod.GitError("network down")
+            raise failure
 
         monkeypatch.setattr(git_mod, "remote_branch_head", boom)
         with pytest.raises(TrainReconstructionError) as excinfo:
             observe.RepoDeliveryGit(clone).remote_branch_sha("main")
         assert excinfo.value.error_type == "git_error"
+        assert excinfo.value.__cause__ is failure
+
+    def test_resolve_commit_failure_preserves_raw_cause(
+        self, git_repo_with_remote, monkeypatch
+    ) -> None:
+        clone, _remote, _advance = git_repo_with_remote
+        failure = git_mod.GitError("object unavailable")
+
+        def boom(*_args: object, **_kwargs: object) -> None:
+            raise failure
+
+        monkeypatch.setattr(git_mod, "resolve_commit", boom)
+        with pytest.raises(TrainReconstructionError) as excinfo:
+            observe.RepoDeliveryGit(clone).resolve_commit("HEAD")
+        assert excinfo.value.error_type == "git_error"
+        assert excinfo.value.__cause__ is failure
 
     def test_is_ancestor_arms(self, git_repo_with_remote) -> None:
         clone, _remote, advance = git_repo_with_remote
@@ -396,15 +466,18 @@ class TestRepoDeliveryGitHub:
         assert observe.RepoDeliveryGitHub(tmp_path).pr_facts(201) is None
 
     def test_pr_facts_failure_is_typed_github_error(self, tmp_path, monkeypatch) -> None:
+        failure = GitHubError("HTTP 500")
+
         def boom(**_kw: object) -> None:
-            raise GitHubError("HTTP 500")
+            raise failure
 
         monkeypatch.setattr(stacks, "pr_delivery_facts", boom)
         with pytest.raises(TrainReconstructionError) as excinfo:
             observe.RepoDeliveryGitHub(tmp_path).pr_facts(201)
         assert excinfo.value.error_type == "github_error"
+        assert excinfo.value.__cause__ is failure
 
-    def test_strict_stack_members_converts_and_fails_closed(
+    def test_strict_stack_returns_rich_facts_and_fails_closed(
         self, tmp_path: Path, monkeypatch
     ) -> None:
         observed = stacks.StackRestFacts(
@@ -417,18 +490,21 @@ class TestRepoDeliveryGitHub:
         )
         monkeypatch.setattr(stacks, "stack_for_pr", lambda **kwargs: observed)
         authority = observe.RepoDeliveryGitHub(tmp_path)
-        assert authority.strict_stack_members(201) == (201, 202)
+        assert authority.strict_stack(201) == observed
 
         monkeypatch.setattr(stacks, "stack_for_pr", lambda **kwargs: None)
-        assert authority.strict_stack_members(201) is None
+        assert authority.strict_stack(201) is None
+
+        failure = GitHubError("HTTP 500")
 
         def unavailable(**kwargs) -> None:
-            raise GitHubError("HTTP 500")
+            raise failure
 
         monkeypatch.setattr(stacks, "stack_for_pr", unavailable)
         with pytest.raises(TrainReconstructionError) as excinfo:
-            authority.strict_stack_members(201)
+            authority.strict_stack(201)
         assert excinfo.value.error_type == "github_error"
+        assert excinfo.value.__cause__ is failure
 
     def test_active_writers_use_only_a_corroborated_exact_trigger_pair(
         self, tmp_path: Path, monkeypatch
@@ -496,7 +572,7 @@ class TestRepoDeliveryGitHub:
         with pytest.raises(RuntimeError, match="bug"):
             authority.active_writer_plan_ids(("101",), trigger_plan_id=None, trigger_run_id=None)
 
-    def test_pr_for_branch_converts_to_the_view_type(self, tmp_path, monkeypatch) -> None:
+    def test_pr_for_branch_returns_the_rich_pr(self, tmp_path, monkeypatch) -> None:
         pr = prs.PullRequest(
             number=201, url="u", is_draft=False, state="MERGED", existed=True, head_ref="plan-101"
         )
@@ -508,7 +584,7 @@ class TestRepoDeliveryGitHub:
 
         monkeypatch.setattr(prs, "find_pr_for_branch", fake)
         view = observe.RepoDeliveryGitHub(tmp_path).pr_for_branch("plan-101")
-        assert view == BranchPrView(number=201, state="MERGED")
+        assert view == pr
         assert seen == ["plan-101"]
 
     def test_pr_for_branch_none_passthrough(self, tmp_path, monkeypatch) -> None:
@@ -518,13 +594,142 @@ class TestRepoDeliveryGitHub:
     def test_pr_for_branch_failure_is_typed_github_error(self, tmp_path, monkeypatch) -> None:
         # A STABLE read (§8.54): the cancellation proof must fail closed on an unobservable
         # authority — never silently read "no PR".
+        failure = GitHubError("HTTP 500")
+
         def boom(**_kw: object) -> None:
-            raise GitHubError("HTTP 500")
+            raise failure
 
         monkeypatch.setattr(prs, "find_pr_for_branch", boom)
         with pytest.raises(TrainReconstructionError) as excinfo:
             observe.RepoDeliveryGitHub(tmp_path).pr_for_branch("plan-101")
         assert excinfo.value.error_type == "github_error"
+        assert excinfo.value.__cause__ is failure
+
+    def test_publish_bridge_unwraps_the_real_branch_adapter_cause(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        failure = GitHubError("HTTP 500")
+
+        def boom(**_kw: object) -> None:
+            raise failure
+
+        monkeypatch.setattr(prs, "find_pr_for_branch", boom)
+        service = Delivery(
+            persistence=FakeDeliveryPersistence(),
+            git=FakeDeliveryGit(repo_root=tmp_path),
+            github=observe.RepoDeliveryGitHub(tmp_path),
+        )
+        with pytest.raises(DeliveryError) as excinfo:
+            service.publish(PublishRequest(kind="ready", plan_id="101", delivery="incremental"))
+        assert (excinfo.value.error_type, excinfo.value.phase, excinfo.value.origin) == (
+            "github_error",
+            "ready",
+            "github",
+        )
+        assert excinfo.value.__cause__ is failure
+
+    def test_publication_github_effects_delegate_exact_arguments(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        pr = prs.PullRequest(42, "u/42", True, "OPEN", False)
+        body_update = prs.PrBodyUpdate(number=42, dry_run=False)
+        outcome = stacks.StackMutationOutcome(
+            applied=True,
+            status=201,
+            retry_after_seconds=None,
+            rate_limited=False,
+            raw_detail="created",
+        )
+        calls: list[tuple[object, ...]] = []
+        monkeypatch.setattr(
+            prs,
+            "get_pr",
+            lambda **kwargs: calls.append(("get", kwargs)) or pr,
+        )
+        monkeypatch.setattr(
+            prs,
+            "create_pr",
+            lambda **kwargs: calls.append(("create", kwargs)) or pr,
+        )
+        monkeypatch.setattr(
+            prs,
+            "update_pr_body",
+            lambda **kwargs: calls.append(("body", kwargs)) or body_update,
+        )
+        monkeypatch.setattr(
+            prs,
+            "update_pr_base",
+            lambda **kwargs: calls.append(("base", kwargs)),
+        )
+        monkeypatch.setattr(
+            prs,
+            "reopen_pr",
+            lambda **kwargs: calls.append(("reopen", kwargs)),
+        )
+        monkeypatch.setattr(
+            prs,
+            "mark_pr_ready",
+            lambda **kwargs: calls.append(("ready", kwargs)),
+        )
+        monkeypatch.setattr(
+            stacks,
+            "create_stack",
+            lambda **kwargs: calls.append(("stack-create", kwargs)) or outcome,
+        )
+        monkeypatch.setattr(
+            stacks,
+            "append_to_stack",
+            lambda **kwargs: calls.append(("stack-append", kwargs)) or outcome,
+        )
+        authority = observe.RepoDeliveryGitHub(tmp_path)
+
+        assert authority.get_pr(42) is pr
+        assert (
+            authority.create_pr(head="plan-101", base="main", title="Plan", body="body", draft=True)
+            is pr
+        )
+        assert authority.update_pr_body(42, body="new") is body_update
+        authority.update_pr_base(42, base="develop")
+        authority.reopen_pr(42)
+        authority.mark_pr_ready(42)
+        assert authority.create_stack((41, 42)) is outcome
+        assert authority.append_stack(9, pull_requests=(42,)) is outcome
+        assert calls == [
+            ("get", {"number": 42, "repo_root": tmp_path}),
+            (
+                "create",
+                {
+                    "head": "plan-101",
+                    "base": "main",
+                    "title": "Plan",
+                    "body": "body",
+                    "repo_root": tmp_path,
+                    "draft": True,
+                },
+            ),
+            ("body", {"number": 42, "body": "new", "repo_root": tmp_path}),
+            ("base", {"number": 42, "base": "develop", "repo_root": tmp_path}),
+            ("reopen", {"number": 42, "repo_root": tmp_path}),
+            ("ready", {"number": 42, "repo_root": tmp_path}),
+            ("stack-create", {"pull_requests": (41, 42), "repo_root": tmp_path}),
+            (
+                "stack-append",
+                {"stack_number": 9, "pull_requests": (42,), "repo_root": tmp_path},
+            ),
+        ]
+
+    def test_publication_github_effect_errors_remain_raw(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        failure = GitHubError("HTTP 500")
+
+        def boom(**kwargs: object) -> None:
+            raise failure
+
+        monkeypatch.setattr(prs, "get_pr", boom)
+        with pytest.raises(GitHubError) as excinfo:
+            observe.RepoDeliveryGitHub(tmp_path).get_pr(42)
+        assert excinfo.value is failure
 
     def test_pr_stack_failure_degrades_to_unavailable(self, tmp_path, monkeypatch) -> None:
         # The preview read's tolerance lives at THIS seam too: even a raised GitHubError

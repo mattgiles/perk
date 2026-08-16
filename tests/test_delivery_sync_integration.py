@@ -50,6 +50,7 @@ from perk.delivery.train import (
     PrFactsView,
     TrainLayer,
 )
+from perk.github.stacks import StackRestEntry, StackRestFacts
 from perk.substrate import git as git_mod
 
 
@@ -111,8 +112,21 @@ class _GitHub:
         assert head is not None
         return PrFactsView(number, "OPEN", True, base, branch, head)
 
-    def strict_stack_members(self, number: int) -> tuple[int, ...] | None:
-        return (201, 202, 203) if number in self._BRANCHES else None
+    def strict_stack(self, number: int) -> StackRestFacts | None:
+        if number not in self._BRANCHES:
+            return None
+        entries = tuple(
+            StackRestEntry(
+                pr_number=pr_number,
+                state="open",
+                draft=True,
+                merged=False,
+                head_ref=branch,
+                head_sha="h" * 40,
+            )
+            for pr_number, (branch, _base) in self._BRANCHES.items()
+        )
+        return StackRestFacts(number=1, size=len(entries), entries=entries)
 
     def active_writer_plan_ids(
         self,

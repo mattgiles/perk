@@ -5,11 +5,11 @@ from pathlib import Path
 import pytest
 from click.testing import CliRunner
 
-from perk import github, plan
+from perk import delivery, github, plan
 from perk.backends.github import plans
 from perk.cli.cli import cli
-from perk.delivery import observe
 from perk.delivery import train as train_mod
+from perk.delivery._fakes import FakeDeliveryGit, FakeDeliveryGitHub, FakeDeliveryPersistence
 from perk.state import cache
 
 _REF = plan.PlanRef(
@@ -49,22 +49,52 @@ def _stub_plan(monkeypatch, header: dict[str, object] | None = None) -> None:
     )
 
 
-def _stub_pr(monkeypatch, *, is_draft: bool) -> dict[str, object]:
-    _stub_plan(monkeypatch)
-    calls: dict[str, object] = {"marked": False}
-    monkeypatch.setattr(
-        github,
-        "find_pr_for_branch",
-        lambda **k: github.PullRequest(
-            number=42, url="u/pr/42", is_draft=is_draft, state="OPEN", existed=True
-        ),
+def _bind_ready_delivery(
+    monkeypatch,
+    *,
+    branch_pr: github.PullRequest | None = None,
+    numbered_pr: github.PullRequest | None = None,
+    train: train_mod.DeliveryTrain | None = None,
+    errors: dict[tuple[object, ...], Exception] | None = None,
+) -> tuple[FakeDeliveryGitHub, list[delivery.PublishRequest]]:
+    authority = FakeDeliveryGitHub(
+        branch_prs={"plan-7": branch_pr} if branch_pr is not None else {},
+        pull_requests={42: numbered_pr} if numbered_pr is not None else {},
+        errors=errors,
     )
+    requests: list[delivery.PublishRequest] = []
 
-    def _mark(**k):
-        calls["marked"] = True
+    class _ReadyDelivery(delivery.Delivery):
+        def status(self, request: delivery.StatusRequest) -> delivery.StatusResult:
+            if train is None:
+                raise AssertionError("incremental ready unexpectedly reconstructed a train")
+            return delivery.StatusResult(
+                train.objective_id,
+                train.objective_url,
+                train.redirected_from,
+                train,
+                None,
+            )
 
-    monkeypatch.setattr(github, "mark_pr_ready", _mark)
-    return calls
+        def publish(self, request: delivery.PublishRequest) -> delivery.PublishResult:
+            requests.append(request)
+            return super().publish(request)
+
+    service = _ReadyDelivery(
+        persistence=FakeDeliveryPersistence(),
+        git=FakeDeliveryGit(),
+        github=authority,
+    )
+    monkeypatch.setattr(delivery, "resolve_delivery", lambda _root: service)
+    return authority, requests
+
+
+def _stub_pr(
+    monkeypatch, *, is_draft: bool, state: str = "OPEN"
+) -> tuple[FakeDeliveryGitHub, list[delivery.PublishRequest]]:
+    _stub_plan(monkeypatch)
+    pr = github.PullRequest(number=42, url="u/pr/42", is_draft=is_draft, state=state, existed=True)
+    return _bind_ready_delivery(monkeypatch, branch_pr=pr)
 
 
 def _run(monkeypatch, args, *, write_ref=True, ref: plan.PlanRef = _REF):
@@ -78,31 +108,68 @@ def _run(monkeypatch, args, *, write_ref=True, ref: plan.PlanRef = _REF):
 
 def test_pr_ready_marks_draft(monkeypatch):
     _authed(monkeypatch)
-    calls = _stub_pr(monkeypatch, is_draft=True)
+    authority, requests = _stub_pr(monkeypatch, is_draft=True)
     result = _run(monkeypatch, ["pr", "ready", "--json"])
     assert result.exit_code == 0
     data = json.loads(result.output)
     assert data["success"] is True and data["was_draft"] is True
-    assert calls["marked"] is True
+    assert authority.calls == [("pr_for_branch", "plan-7"), ("mark_pr_ready", 42)]
+    assert requests == [delivery.PublishRequest(kind="ready", plan_id="7", delivery="incremental")]
 
 
 def test_pr_ready_idempotent_already_ready(monkeypatch):
     _authed(monkeypatch)
-    calls = _stub_pr(monkeypatch, is_draft=False)
+    authority, requests = _stub_pr(monkeypatch, is_draft=False)
     result = _run(monkeypatch, ["pr", "ready", "--json"])
     assert result.exit_code == 0
     data = json.loads(result.output)
     assert data["success"] is True and data["was_draft"] is False
-    assert calls["marked"] is False  # already-ready never re-marks
+    assert authority.calls == [("pr_for_branch", "plan-7")]
+    assert requests == [delivery.PublishRequest(kind="ready", plan_id="7", delivery="incremental")]
+
+
+@pytest.mark.parametrize("state", ["OPEN", "CLOSED", "MERGED"])
+@pytest.mark.parametrize("is_draft", [True, False])
+def test_incremental_ready_preserves_all_state_compatibility(monkeypatch, state, is_draft):
+    _authed(monkeypatch)
+    authority, _requests = _stub_pr(monkeypatch, is_draft=is_draft, state=state)
+
+    result = _run(monkeypatch, ["pr", "ready", "--json"])
+
+    assert result.exit_code == 0, result.output
+    assert json.loads(result.output)["was_draft"] is is_draft
+    expected: list[tuple[object, ...]] = [("pr_for_branch", "plan-7")]
+    if is_draft:
+        expected.append(("mark_pr_ready", 42))
+    assert authority.calls == expected
 
 
 def test_pr_ready_no_pr_exits_1(monkeypatch):
     _authed(monkeypatch)
     _stub_plan(monkeypatch)
-    monkeypatch.setattr(github, "find_pr_for_branch", lambda **k: None)
+    authority, _requests = _bind_ready_delivery(monkeypatch)
     result = _run(monkeypatch, ["pr", "ready", "--json"])
     assert result.exit_code == 1
     assert json.loads(result.output)["error_type"] == "no_pr"
+    assert authority.calls == [("pr_for_branch", "plan-7")]
+
+
+def test_incremental_ready_gateway_failure_uses_ready_prefix(monkeypatch):
+    _authed(monkeypatch)
+    _stub_plan(monkeypatch)
+    pr = github.PullRequest(number=42, url="u/pr/42", is_draft=True, state="CLOSED", existed=True)
+    _bind_ready_delivery(
+        monkeypatch,
+        branch_pr=pr,
+        errors={("mark_pr_ready", 42): github.GitHubError("cannot mark closed PR")},
+    )
+
+    result = _run(monkeypatch, ["pr", "ready", "--json"])
+
+    assert result.exit_code == 1
+    data = json.loads(result.output)
+    assert data["error_type"] == "github_error"
+    assert data["message"] == "pr ready failed\ncannot mark closed PR"
 
 
 def _stacked_train(
@@ -157,45 +224,37 @@ def _stub_stacked(
     is_draft: bool,
     pr_exists: bool = True,
     pr_state: str = "OPEN",
-) -> dict[str, object]:
+) -> tuple[FakeDeliveryGitHub, list[delivery.PublishRequest]]:
     _stub_plan(
         monkeypatch,
         {"delivery_lineage": "01LINEAGE", "objective_id": "500"},
     )
-    calls: dict[str, object] = {"marked": False, "get_pr": None}
-    monkeypatch.setattr(observe, "reconstruct_repo_train", lambda root, objective_id: train)
-
-    def get_pr(*, number, repo_root):
-        calls["get_pr"] = number
-        if not pr_exists:
-            return None
-        return github.PullRequest(
-            number=number,
-            url=f"u/pr/{number}",
+    pr = (
+        github.PullRequest(
+            number=42,
+            url="u/pr/42",
             is_draft=is_draft,
             state=pr_state,
             existed=True,
         )
-
-    monkeypatch.setattr(github, "get_pr", get_pr)
-    monkeypatch.setattr(github, "mark_pr_ready", lambda **kwargs: calls.__setitem__("marked", True))
-    monkeypatch.setattr(
-        github,
-        "find_pr_for_branch",
-        lambda **kwargs: (_ for _ in ()).throw(AssertionError("incremental lookup used")),
+        if pr_exists
+        else None
     )
-    return calls
+    return _bind_ready_delivery(monkeypatch, numbered_pr=pr, train=train)
 
 
 def test_stacked_ready_fetches_published_pr_then_marks(monkeypatch):
     _authed(monkeypatch)
-    calls = _stub_stacked(monkeypatch, train=_stacked_train(), is_draft=True)
+    authority, requests = _stub_stacked(monkeypatch, train=_stacked_train(), is_draft=True)
     result = _run(monkeypatch, ["pr", "ready", "--json"], ref=_STACKED_REF)
     assert result.exit_code == 0, result.output
     data = json.loads(result.output)
     assert data["pr"] == {"number": 42, "url": "u/pr/42"}
     assert data["was_draft"] is True
-    assert calls == {"marked": True, "get_pr": 42}
+    assert authority.calls == [("get_pr", 42), ("mark_pr_ready", 42)]
+    assert requests == [
+        delivery.PublishRequest(kind="ready", plan_id="7", delivery="stacked", objective_id="500")
+    ]
 
 
 def test_stacked_already_ready_validates_target_but_ignores_global_vetoes(monkeypatch):
@@ -207,25 +266,27 @@ def test_stacked_already_ready_validates_target_but_ignores_global_vetoes(monkey
         message="lineage absent",
     )
     train = _stacked_train(findings=(finding,), unresolved=(operation,))
-    calls = _stub_stacked(monkeypatch, train=train, is_draft=False)
+    authority, _requests = _stub_stacked(monkeypatch, train=train, is_draft=False)
     result = _run(monkeypatch, ["pr", "ready", "--json"], ref=_STACKED_REF)
     assert result.exit_code == 0, result.output
     assert json.loads(result.output)["was_draft"] is False
-    assert calls["marked"] is False
+    assert authority.calls == [("get_pr", 42)]
 
 
 def test_stacked_ready_missing_pr_is_no_pr(monkeypatch):
     _authed(monkeypatch)
-    calls = _stub_stacked(monkeypatch, train=_stacked_train(), is_draft=True, pr_exists=False)
+    authority, _requests = _stub_stacked(
+        monkeypatch, train=_stacked_train(), is_draft=True, pr_exists=False
+    )
     result = _run(monkeypatch, ["pr", "ready", "--json"], ref=_STACKED_REF)
     assert result.exit_code == 1
     assert json.loads(result.output)["error_type"] == "no_pr"
-    assert calls["get_pr"] == 42 and calls["marked"] is False
+    assert authority.calls == [("get_pr", 42)]
 
 
 def test_stacked_ready_rejects_freshly_closed_pr(monkeypatch):
     _authed(monkeypatch)
-    calls = _stub_stacked(
+    authority, _requests = _stub_stacked(
         monkeypatch,
         train=_stacked_train(),
         is_draft=False,
@@ -234,7 +295,7 @@ def test_stacked_ready_rejects_freshly_closed_pr(monkeypatch):
     result = _run(monkeypatch, ["pr", "ready", "--json"], ref=_STACKED_REF)
     assert result.exit_code == 1
     assert json.loads(result.output)["error_type"] == "pr_not_open"
-    assert calls["get_pr"] == 42 and calls["marked"] is False
+    assert authority.calls == [("get_pr", 42)]
 
 
 def test_stacked_ready_target_drift_is_layer_not_published(monkeypatch):
@@ -250,20 +311,20 @@ def test_stacked_ready_target_drift_is_layer_not_published(monkeypatch):
         publication=train_mod.LayerPublication.PUBLICATION_DRIFT,
         findings=(finding,),
     )
-    calls = _stub_stacked(monkeypatch, train=train, is_draft=True)
+    authority, _requests = _stub_stacked(monkeypatch, train=train, is_draft=True)
     result = _run(monkeypatch, ["pr", "ready", "--json"], ref=_STACKED_REF)
     assert result.exit_code == 1
     data = json.loads(result.output)
     assert data["error_type"] == "layer_not_published"
     assert "[checkpoint_drift] expected h, observed x" in data["message"]
-    assert calls["get_pr"] == 42 and calls["marked"] is False
+    assert authority.calls == [("get_pr", 42)]
 
 
 @pytest.mark.parametrize("pr_state", ["CLOSED", "MERGED"])
 def test_stacked_ready_projected_non_open_keeps_layer_not_published(monkeypatch, pr_state):
     _authed(monkeypatch)
     train = _stacked_train(publication=train_mod.LayerPublication.PUBLICATION_DRIFT)
-    calls = _stub_stacked(
+    authority, _requests = _stub_stacked(
         monkeypatch,
         train=train,
         is_draft=False,
@@ -272,7 +333,7 @@ def test_stacked_ready_projected_non_open_keeps_layer_not_published(monkeypatch,
     result = _run(monkeypatch, ["pr", "ready", "--json"], ref=_STACKED_REF)
     assert result.exit_code == 1
     assert json.loads(result.output)["error_type"] == "layer_not_published"
-    assert calls["get_pr"] == 42 and calls["marked"] is False
+    assert authority.calls == [("get_pr", 42)]
 
 
 def test_stacked_already_ready_target_drift_is_layer_not_published(monkeypatch):
@@ -288,17 +349,17 @@ def test_stacked_already_ready_target_drift_is_layer_not_published(monkeypatch):
         publication=train_mod.LayerPublication.PUBLICATION_DRIFT,
         findings=(finding,),
     )
-    calls = _stub_stacked(monkeypatch, train=train, is_draft=False)
+    authority, _requests = _stub_stacked(monkeypatch, train=train, is_draft=False)
     result = _run(monkeypatch, ["pr", "ready", "--json"], ref=_STACKED_REF)
     assert result.exit_code == 1
     assert json.loads(result.output)["error_type"] == "layer_not_published"
-    assert calls["get_pr"] == 42 and calls["marked"] is False
+    assert authority.calls == [("get_pr", 42)]
 
 
 def test_stacked_ready_draft_refuses_unresolved_operation(monkeypatch):
     _authed(monkeypatch)
     operation = train_mod.UnresolvedOperationFacts("01OP", "sync", "t0")
-    calls = _stub_stacked(
+    authority, _requests = _stub_stacked(
         monkeypatch,
         train=_stacked_train(unresolved=(operation,)),
         is_draft=True,
@@ -306,7 +367,7 @@ def test_stacked_ready_draft_refuses_unresolved_operation(monkeypatch):
     result = _run(monkeypatch, ["pr", "ready", "--json"], ref=_STACKED_REF)
     assert result.exit_code == 1
     assert json.loads(result.output)["error_type"] == "unresolved_operation"
-    assert calls["marked"] is False
+    assert authority.calls == [("get_pr", 42)]
 
 
 def test_stacked_ready_draft_refuses_structural_blocker(monkeypatch):
@@ -316,7 +377,7 @@ def test_stacked_ready_draft_refuses_structural_blocker(monkeypatch):
         code="missing_lineage",
         message="lineage absent",
     )
-    calls = _stub_stacked(
+    authority, _requests = _stub_stacked(
         monkeypatch,
         train=_stacked_train(findings=(finding,)),
         is_draft=True,
@@ -324,15 +385,18 @@ def test_stacked_ready_draft_refuses_structural_blocker(monkeypatch):
     result = _run(monkeypatch, ["pr", "ready", "--json"], ref=_STACKED_REF)
     assert result.exit_code == 1
     assert json.loads(result.output)["error_type"] == "structural_blockers"
-    assert calls["marked"] is False
+    assert authority.calls == [("get_pr", 42)]
 
 
 def test_ready_header_lineage_wins_over_stale_ref(monkeypatch):
     _authed(monkeypatch)
-    calls = _stub_stacked(monkeypatch, train=_stacked_train(), is_draft=True)
+    authority, requests = _stub_stacked(monkeypatch, train=_stacked_train(), is_draft=True)
     result = _run(monkeypatch, ["pr", "ready", "--json"], ref=_REF)
     assert result.exit_code == 0, result.output
-    assert calls["get_pr"] == 42 and calls["marked"] is True
+    assert authority.calls == [("get_pr", 42), ("mark_pr_ready", 42)]
+    assert requests == [
+        delivery.PublishRequest(kind="ready", plan_id="7", delivery="stacked", objective_id="500")
+    ]
 
 
 # --- explicit PLAN selection (canonical, worktree-independent) -------------------------------
@@ -352,24 +416,17 @@ def test_pr_ready_explicit_plan_from_root_is_a_single_read(monkeypatch):
         )
 
     monkeypatch.setattr(plans, "get_plan", _get_plan)
-    branches: list[str] = []
+    pr = github.PullRequest(number=42, url="u/pr/42", is_draft=True, state="OPEN", existed=True)
+    authority, requests = _bind_ready_delivery(monkeypatch, branch_pr=pr)
 
-    def _find(**k):
-        branches.append(k["branch"])
-        return github.PullRequest(
-            number=42, url="u/pr/42", is_draft=True, state="OPEN", existed=True
-        )
-
-    monkeypatch.setattr(github, "find_pr_for_branch", _find)
-    marked: list[int] = []
-    monkeypatch.setattr(github, "mark_pr_ready", lambda **k: marked.append(k["number"]))
     result = _run(monkeypatch, ["pr", "ready", "7", "--json"], write_ref=False)
+
     assert result.exit_code == 0, result.output
     data = json.loads(result.stdout)
     assert data["success"] is True and data["was_draft"] is True
-    assert len(reads) == 1  # exactly ONE plan read for the incremental explicit-id path
-    assert branches == ["plan-7"]
-    assert marked == [42]
+    assert len(reads) == 1
+    assert authority.calls == [("pr_for_branch", "plan-7"), ("mark_pr_ready", 42)]
+    assert requests == [delivery.PublishRequest(kind="ready", plan_id="7", delivery="incremental")]
 
 
 def test_pr_ready_explicit_plan_beats_conflicting_root_selector(monkeypatch):
@@ -377,16 +434,8 @@ def test_pr_ready_explicit_plan_beats_conflicting_root_selector(monkeypatch):
     # gets overwritten (ready is not a launcher — it never writes the selector).
     _authed(monkeypatch)
     _stub_plan(monkeypatch)
-    branches: list[str] = []
-
-    def _find(**k):
-        branches.append(k["branch"])
-        return github.PullRequest(
-            number=42, url="u/pr/42", is_draft=False, state="OPEN", existed=True
-        )
-
-    monkeypatch.setattr(github, "find_pr_for_branch", _find)
-    monkeypatch.setattr(github, "mark_pr_ready", lambda **k: None)
+    pr = github.PullRequest(number=42, url="u/pr/42", is_draft=False, state="OPEN", existed=True)
+    authority, requests = _bind_ready_delivery(monkeypatch, branch_pr=pr)
     stale = plan.PlanRef(
         provider="github", pr_id="9", url="https://gh/o/r/issues/9", labels=("perk:plan",)
     )
@@ -396,20 +445,26 @@ def test_pr_ready_explicit_plan_beats_conflicting_root_selector(monkeypatch):
         cache.write_plan_ref(Path(d), stale)
         result = runner.invoke(cli, ["pr", "ready", "7", "--json"])
         assert result.exit_code == 0, result.output
-        assert branches == ["plan-7"]  # acted on the explicit plan, not the selector
-        assert cache.read_plan_ref(Path(d)) == stale  # the root selector is untouched
+        assert authority.calls == [("pr_for_branch", "plan-7")]
+        assert requests == [
+            delivery.PublishRequest(kind="ready", plan_id="7", delivery="incremental")
+        ]
+        assert cache.read_plan_ref(Path(d)) == stale
 
 
 def test_pr_ready_explicit_stacked_plan_from_root(monkeypatch):
     # The stacked path keeps its train-reconstruction reads unchanged; explicit selection only
     # replaces the command's own plan read.
     _authed(monkeypatch)
-    calls = _stub_stacked(monkeypatch, train=_stacked_train(), is_draft=True)
+    authority, requests = _stub_stacked(monkeypatch, train=_stacked_train(), is_draft=True)
     result = _run(monkeypatch, ["pr", "ready", "7", "--json"], write_ref=False)
     assert result.exit_code == 0, result.output
     data = json.loads(result.stdout)
     assert data["pr"] == {"number": 42, "url": "u/pr/42"}
-    assert calls == {"marked": True, "get_pr": 42}
+    assert authority.calls == [("get_pr", 42), ("mark_pr_ready", 42)]
+    assert requests == [
+        delivery.PublishRequest(kind="ready", plan_id="7", delivery="stacked", objective_id="500")
+    ]
 
 
 def test_pr_ready_explicit_plan_not_found(monkeypatch):
@@ -429,17 +484,27 @@ def test_pr_ready_explicit_plan_invalid_id_rejected_even_on_dry_run(monkeypatch)
 
 def test_pr_ready_explicit_plan_dry_run_needs_no_cache(monkeypatch):
     # A parse-valid explicit PLAN dry-runs offline without requiring a saved plan-ref.
-    result = _run(monkeypatch, ["pr", "ready", "7", "--dry-run", "--json"], write_ref=False)
+    authority, requests = _bind_ready_delivery(monkeypatch)
+
+    result = _run(monkeypatch, ["pr", "ready", "#7", "--dry-run", "--json"], write_ref=False)
+
     assert result.exit_code == 0
     data = json.loads(result.stdout)
     assert data["success"] is True and data["dry_run"] is True
+    assert requests == [delivery.PublishRequest(kind="ready", plan_id="7", dry_run=True)]
+    assert authority.calls == []
 
 
 def test_pr_ready_dry_run_offline(monkeypatch):
+    authority, requests = _bind_ready_delivery(monkeypatch)
+
     result = _run(monkeypatch, ["pr", "ready", "--dry-run", "--json"])
+
     assert result.exit_code == 0
     data = json.loads(result.output)
     assert data["success"] is True and data["dry_run"] is True
+    assert requests == [delivery.PublishRequest(kind="ready", plan_id="7", dry_run=True)]
+    assert authority.calls == []
 
 
 def test_pr_ready_not_a_repo_exits_2(monkeypatch):
@@ -458,16 +523,8 @@ def test_pr_ready_no_arg_inside_linked_worktree_reads_its_own_binding(git_repo, 
 
     _authed(monkeypatch)
     _stub_plan(monkeypatch)
-    branches: list[str] = []
-
-    def _find(**k):
-        branches.append(k["branch"])
-        return github.PullRequest(
-            number=42, url="u/pr/42", is_draft=False, state="OPEN", existed=True
-        )
-
-    monkeypatch.setattr(github, "find_pr_for_branch", _find)
-    monkeypatch.setattr(github, "mark_pr_ready", lambda **k: None)
+    pr = github.PullRequest(number=42, url="u/pr/42", is_draft=False, state="OPEN", existed=True)
+    authority, requests = _bind_ready_delivery(monkeypatch, branch_pr=pr)
     wt = git_repo / ".worktrees" / "plan-7"
     git_mod.worktree_add(git_repo, wt, branch="plan-7", create_branch=True)
     cache.write_plan_ref(wt, _REF)  # the worktree's own plan (#7)
@@ -478,4 +535,5 @@ def test_pr_ready_no_arg_inside_linked_worktree_reads_its_own_binding(git_repo, 
     ctx = PerkContext.for_test(cwd=wt, repo_root=wt)
     result = CliRunner().invoke(cli, ["pr", "ready", "--json"], obj=ctx)
     assert result.exit_code == 0, result.output
-    assert branches == ["plan-7"]  # the invocation worktree's binding, not the main selector
+    assert authority.calls == [("pr_for_branch", "plan-7")]
+    assert requests == [delivery.PublishRequest(kind="ready", plan_id="7", delivery="incremental")]

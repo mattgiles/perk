@@ -82,6 +82,11 @@ merge-writes) are allowed and never asserted to zero.
 
 ### PUBLISH (`tests/test_delivery_publish.py`; **raise**-technique except P7 — verified no exception-path durable cleanup)
 
+Every behavioral row now enters through `Delivery.publish(PublishRequest(kind="layer"))` over the
+aggregate-backed world and a scoped private runtime; only pure payload/proof helpers retain direct
+internal calls. `test_lower_layer_publish_enters_the_bound_sync_lock_exactly_once` additionally
+proves the nested bound sync dispatcher enters the non-reentrant operation lock exactly once.
+
 | Cell | Died… | Evidence |
 | --- | --- | --- |
 | P1 | after `append_prepared`, before the leased push | `test_crash_before_the_leased_push_retries_under_the_same_operation` (retry under the SAME operation) |
@@ -100,7 +105,8 @@ The publish stateful fake grew fail-once hooks at each PR-effect and stack-mutat
 (`push_boom`, `create_pr_boom`, `after_effect_boom{reopen,retarget,body}`, `outcome_boom`,
 stateful `write_checkpoints`) — it previously had none at P3a–P3d.
 
-Cross-machine variants (construct-technique, real origin):
+Cross-machine variants (construct-technique, real origin; clone B resumes through the same
+`Delivery.publish` façade):
 `tests/test_delivery_cross_machine.py::test_publish_bottom_layer_all_after_reports_then_submit_resume_completes`
 (P2/P3a-shaped death; recover's conclude-only report + the resume completing from clone B) and
 `::test_publish_non_bottom_partial_reports_mixed_then_submit_resume_converges` (P3d-shaped

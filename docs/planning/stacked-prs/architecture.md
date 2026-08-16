@@ -41,6 +41,9 @@ Delivery.status(StatusRequest {objective_id}) -> StatusResult
 StatusResult -> exactly one of DeliveryTrain | no_train_reason
 Delivery.prepare(PrepareRequest {kind, mode?, base?, objective_id?, node_id?, plan_id?})
   -> PrepareResult {kind, base?, identity?, notice?, planning?, layer?, parent_sha?}
+Delivery.publish(PublishRequest {kind, plan_id, dry_run?, delivery?, objective_id?, run_id?,
+                                 trigger_run_id?})
+  -> PublishResult {kind, canonical plan_id, dry_run, exactly one of Layer | Ready}
 Delivery.sync(SyncRequest {mode, objective_id, run_id?, include_base?, dry_run?, adopt_node?,
                            trigger_plan_id?, trigger_run_id?}, consent=...)
   -> SyncResult {operation/result facts; nested Layer, Cascade, AbortPreview}
@@ -50,34 +53,45 @@ Prepare is a closed flat family: authoring capability; strict/best-effort plan i
 layer start; and execution layer start. Frozen nested records carry variant details and illegal
 request/result combinations fail at construction. `SyncRequest` is likewise a closed mode/field
 matrix; `SyncResult` deliberately remains additive operation-produced data without new combination
-guards. The pure `DeliveryTrain` reconstruction, private capability rows, internal
-`LayerContext`/layer core, synchronization engine/runtime, and production adapters are not
-package-root APIs. `DeliveryError` is the bounded status + Prepare + sync hierarchy; status still
-translates only its exact six-code subset. `SyncError` and claimed-prefix/continuation/writer/
-record-recovery vocabulary stay internal. The sync-family package-root API is exactly
-`SyncRequest` and `SyncResult`; continuation, claimed-prefix, writer-probe, atomic-probe, and old
-sync-entrypoint names are internal. The resulting package root has exactly 63 exports;
-publish/recover/transfer/land remain deferred operation seams.
+guards. `PublishRequest` is a closed layer/ready matrix; `PublishResult` has exact nested
+`Layer`/`Ready` details and carries nested cascade facts as `SyncResult` directly. The pure
+`DeliveryTrain` reconstruction, private capability rows, internal `LayerContext`/layer core,
+publication/synchronization engines and runtimes, and production adapters are not package-root
+APIs. `DeliveryError` is the bounded status + Prepare + Publish + sync hierarchy; status still
+translates only its exact six-code subset, while every Publish error carries joint phase/origin
+metadata. Claimed-prefix/continuation/writer/record-recovery vocabulary stays internal. The
+package root adds only `PublishRequest`/`PublishResult`, removes the six old publication names, and
+has exactly 59 exports; recover/transfer/land remain separate operation seams.
 
 The façade receives three nominal aggregate authorities:
 
 1. **`DeliveryPersistence`.** A backend-aligned authority composing the existing
    `ObjectiveStore`, `IssueBackend`, and train persistence for objective/plan/journal reads,
-   prepared/outcome appends, and checkpoint-pair writes. Production backend selection is deferred
+   plan-body/header publication effects, prepared/outcome appends, and checkpoint-pair writes.
+   Production backend selection is deferred
    until the first persistence operation, is cached only after the backend identities agree, and
    leaves no partial selection after a failed attempt.
 2. **`DeliveryGit`.** A bound read-only repository root; trunk detection; broad/exact-ref fetch;
    repository- or worktree-scoped commit resolution; ref/ancestry/worktree/base observation;
-   Prepare's push-URL resolution + no-op atomic probe; and sync's genuine Git operations: one
+   publication's single-ref exact-lease push; Prepare's push-URL resolution + no-op atomic probe;
+   and sync's genuine Git operations: one
    exact-leased atomic multi-ref push, temp-ref update/delete/list, isolated detached worktree
    add/remove/prune, detached checkout/rebase, and retained-worktree rebase/dirty state. Existing
    substrate Git records/results/errors are reused unchanged; config/lock/continuation/path/clock
    helpers are not Git authority methods.
-3. **`DeliveryGitHub`.** Stable PR facts, tolerant native-stack membership, all-state
-   branch-owned PR lookup, and authoring Prepare's host stack-capability + base merge-rule facts;
-   sync adds strict native-stack membership and active-writer observation with adapter-owned exact
-   trigger corroboration. Checks and landing-readiness observations stay with their operation seams
-   until those slices migrate.
+3. **`DeliveryGitHub`.** Stable PR facts, tolerant native-stack membership, rich all-state
+   branch-owned PR lookup, strict rich stack facts, and authoring Prepare's host stack-capability +
+   base merge-rule facts; publication/ready add only distinct full-PR reads and PR/stack mutations,
+   while sync adds active-writer observation with adapter-owned exact trigger corroboration. The
+   widened branch/strict-stack endpoints are reused rather than duplicated. Checks and
+   landing-readiness observations stay with their operation seams until those slices migrate.
+
+The publication growth is exact: persistence adds `get_plan_body(*, issue_id)` and
+`update_plan_header(*, issue_id, fields)`; Git adds
+`push_with_exact_lease(branch, *, expected_remote_sha)`; GitHub widens/reuses
+`pr_for_branch(branch) -> PullRequest|null` and `strict_stack(number) -> StackRestFacts|null`, and
+adds `get_pr`, `create_pr`, `update_pr_body`, `update_pr_base`, `reopen_pr`, `mark_pr_ready`,
+`create_stack`, and `append_stack`. No parallel branch/stack lookup is introduced.
 
 The nominal interfaces make authority ownership explicit and support small owned in-memory fakes;
 interface, real adapter, and constructor-configured fake move together. Calls that authoring
@@ -93,8 +107,10 @@ until a method needs the corresponding authority. Status preserves branch-sensit
 incremental objective returns its successful no-train result before trunk detection, fetch, or
 GitHub observation. Authoring never touches persistence; identity performs one objective read;
 planning performs one status reconstruction; execution performs status followed by exact parent
-fetch/verification. Objective-create and stacked-planning dry runs remain offline. Every effectful
-operation still reconstructs fresh state before deciding anything. Mutators return typed
+fetch/verification. Publish binds the same authorities plus bound status/sync into one private
+context; its private runtime owns only clock/sleep/id/PR-body validation. Both Publish dry-run arms
+return before every authority call. Every effectful operation still reconstructs fresh state before
+deciding anything. Mutators return typed
 before/after projections and per-effect outcomes; command handlers do not infer success from log
 text or recreate stack rules themselves.
 
@@ -108,9 +124,9 @@ Python workers, decodes typed envelopes, and renders results through the existin
 ## Authorities
 
 One fact has one authority. Other surfaces may cache or corroborate it but cannot silently replace
-it. The status/Prepare façade does not invent a fourth authority: its three nominal adapters
-aggregate the existing persistence, Git, and GitHub rows below. The pure status projection decides
-from their observations; each Prepare variant orders only the authority reads it owns. The
+it. The façade does not invent a fourth authority: its three nominal adapters aggregate the
+existing persistence, Git, and GitHub rows below. The pure status projection decides from their
+observations; each Prepare/Publish variant orders only the authority reads it owns. The
 repository path held by an adapter is composition context, not evidence; backend selection is
 cached only after objective/issue alignment succeeds. Plan identity and planning presentation use
 their one captured persistence/train snapshot; execution additionally trusts only the exact
@@ -388,6 +404,13 @@ a substitute for read convergence.
 
 ## Publication protocol
 
+Publication is realized behind `Delivery.publish(PublishRequest(kind="layer", ...))`. The façade
+re-reads the current plan, owns body/header composition, and binds one aggregate context to the
+private engine. Cause-aware bridges unwrap only status-oriented Git/GitHub wrappers with the
+matching raw cause, preserving the protocol's original per-call classification; all other typed
+failures stay typed. Publication itself is lock-free. A lower claimed layer calls the same
+façade's bound `sync`, whose dispatcher owns the one non-reentrant operation-lock entry.
+
 Publication of a new layer is an idempotent convergence operation:
 
 1. Reconstruct and require that the candidate is exactly the next delivery node.
@@ -409,7 +432,17 @@ registration it refetches native membership. Per-effect journal comments are unn
 each state is remotely observable.
 
 Publication never unlocks the next layer merely because the branch push succeeded. The full
-published-layer definition is load-bearing.
+published-layer definition is load-bearing. The result returns real header/embed/body-check,
+stack/checkpoint, resume/no-op, and parent-target facts; automatic cascade carries `SyncResult`
+directly rather than copying an operation shape. Submit retains only selection/config,
+mergeability diagnostics, Linear mirroring, and presentation.
+
+Draft-to-ready is the other `Delivery.publish` kind. Selection stays in the CLI (explicit canonical
+main-root read versus invoking-checkout plan-ref read). Incremental ready intentionally preserves
+all-state branch-PR behavior: draft means attempt ready regardless of PR state; non-draft means
+idempotent success. Stacked ready reconstructs once, validates target publication before a fresh
+non-OPEN race, applies unresolved/structural mutation vetoes only to an OPEN draft, then marks it
+ready. Both dry-run kinds are exact authority-free sentinels.
 
 ## Synchronization protocol
 
@@ -619,6 +652,8 @@ The cold CLI namespace reflects the domain split:
 
 | Command | Module operation | Mutates |
 | --- | --- | --- |
+| `perk pr submit` (stacked route) | `Delivery.publish` layer | Layer branch/PR/native stack, then plan identity/checkpoints |
+| `perk pr ready` | `Delivery.publish` ready | Draft→ready when required |
 | `perk objective stack status` | `reconstruct` | Nothing |
 | `perk objective stack sync` | `Delivery.sync` cascade/continue/abort | Published branch suffix, then checkpoints; or retained local conflict state |
 | `perk objective stack recover` | `recover` | Only effects required to conclude an existing prepared operation |
@@ -626,7 +661,8 @@ The cold CLI namespace reflects the domain split:
 
 > **Status (landed vs deferred):** `stack status`, the complete `stack sync` control surface,
 > `stack recover`, and the warm `/objective-*` gestures are landed (contracts §8.49/§8.51).
-> Automatic submit/address suffix propagation is also landed (§8.52). The readiness dry-run
+> Layer publication and incremental/stacked draft→ready are landed behind `Delivery.publish`
+> (§8.47/§8.52); automatic submit/address suffix propagation is also landed. The readiness dry-run
 > (`stack land --dry-run`, contracts §8.55), the landing mutation (bare `stack land` +
 > `/objective-land`, contracts §8.56), interrupted-landing recovery (the §8.51 LAND arm:
 > handle×observation classification, automatic all-after roll-forward, confirmed abandon,

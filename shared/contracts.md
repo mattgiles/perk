@@ -6083,8 +6083,9 @@ internal pure core that rebuilds one **immutable** `DeliveryTrain` projection fr
 authorities — the objective store (policy, lineage, roadmap), plan issues (layer identity +
 checkpoints), the journal fold (§8.43), Git refs, and GitHub PR + native-stack state. The canonical
 repository-scoped APIs are `resolve_delivery(repo_root).status(StatusRequest(objective_id))`,
-one flat frozen `Delivery.prepare(PrepareRequest(...))` family, and
-`Delivery.sync(SyncRequest(...), consent=...)`. The sync keyword is required at the call
+one flat frozen `Delivery.prepare(PrepareRequest(...))` family,
+`Delivery.publish(PublishRequest(...))`, and `Delivery.sync(SyncRequest(...), consent=...)`.
+The sync keyword is required at the call
 boundary: a caller must explicitly pass a callback or deliberately pass `None` for automation's
 auto-approval policy; omission can never silently select mutation consent. `resolve_delivery`
 performs ZERO I/O. `Delivery.status` returns a `StatusResult` whose invariant is exactly one
@@ -6117,6 +6118,30 @@ constructor combination guards: its additive historically reachable arms are enf
 operation protocol, not a partial discriminator. Its frozen nested records are `Layer`, `Cascade`
 (the consent preview), and `AbortPreview`; these add no separate package-root names.
 
+`PublishRequest` is the closed flat publish/ready family:
+
+- common fields are `kind=layer|ready`, required nonblank `plan_id` (accepted with or without one
+  leading `#`), and `dry_run=false`;
+- either dry-run kind accepts only those common fields and returns before route classification or
+  any authority call;
+- a real layer requires nonblank journal `run_id`, permits one optional nonblank raw
+  `trigger_run_id`, and rejects delivery/objective fields; and
+- a real ready requires `delivery=incremental|stacked`, rejects run fields, requires no objective
+  for incremental, and permits a null stacked objective solely for the defensive `not_stacked`
+  refusal (a present objective is nonblank).
+
+`PublishResult {kind, plan_id, dry_run, layer?, ready?}` carries the canonical bare plan id and
+exactly one matching nested detail. `Ready {pr, was_draft}` preserves the gateway PR and its
+pre-mutation draft fact. `Layer` is exactly `{pr, branch, header_update, plan_embedded, pr_checked,
+parent_branch, operation_id, stack_number, stack_size, stack_position, parent_checkpoint_sha,
+published_head_sha, resumed, converged_noop, cascade}`. The stack triple is all-null or all-positive
+with position within size. A real layer has nonblank branches/checkpoints, a non-dry-run header
+update, and `pr_checked=true`; a direct result has no operation id exactly on a converged no-op. A
+cascade carries `SyncResult` directly, mirrors its operation/resume/no-op fields, and carries no
+stack triple. There is no replacement operation wrapper. The dry-run layer and ready sentinels,
+including PR number/url/draft/state/existed facts and the layer's exact synthetic header update,
+are constructor-validated; malformed combinations raise `ValueError`.
+
 The nested detail vocabulary adds no package-root exports: `PlanIdentity`; `PlanningNode`;
 `PlanningContext {position, layer_count, delivery_lineage, base, predecessor_node_id,
 predecessor_plan_id, parent_branch, observed_parent_head_sha}` (one-based position/count); and
@@ -6124,24 +6149,39 @@ predecessor_plan_id, parent_branch, observed_parent_head_sha}` (one-based positi
 reason, skipped_claim_ids, context}`. Decision `kind` is exactly `ready | build_blocked |
 in_flight | wrong_candidate | complete | node_not_found | terminal | blocked | no_actionable`;
 node/reason/skipped/context presence is shape-validated (context only on train-derived `ready`; the
-all-layers-published graph fallback may be `ready` without context).
+all-layers-published graph fallback may be `ready` without context). The package root exports
+`PublishRequest` and `PublishResult` but no publication core records/factory/error; removing
+`DeliveryOperationFacts`, `LayerBodyFacts`, `PublicationError`, `PublicationResult`,
+`TrainRowFacts`, and `publish_layer` leaves the exact 59-name `perk.delivery.__all__`.
 
 The façade composes three nominal ABC authorities, with each interface, real adapter, and owned
 constructor-configured fake moving in lockstep. `DeliveryPersistence` aggregates objective, plan,
-and journal reads plus prepared/outcome appends and checkpoint-pair writes. `DeliveryGit` exposes
-its bound `repo_root`, aggregates trunk/fetch/exact-ref-fetch/local-commit-resolution/
-ref/ancestry/worktree/base reads plus Prepare's push-URL resolution and no-op atomic probe, and owns
+and journal reads plus `get_plan_body(*, issue_id)`, `update_plan_header(*, issue_id, fields)`,
+prepared/outcome appends, and checkpoint-pair writes. `DeliveryGit` exposes its bound `repo_root`,
+aggregates trunk/fetch/exact-ref-fetch/local-commit-resolution/ref/ancestry/worktree/base reads,
+adds `push_with_exact_lease(branch, *, expected_remote_sha)`, plus Prepare's push-URL resolution and
+no-op atomic probe, and owns
 the genuine sync Git behavior: exact-leased atomic push; temp-ref update/delete/list; detached
 worktree add/remove/prune; detached checkout/rebase; retained-worktree rebase/dirty state; and
 worktree-scoped commit resolution. It reuses substrate `RefUpdate`, rebase results, `GitError`, and
-`PushRejectedError` unchanged. `DeliveryGitHub` aggregates stable PR, tolerant native-stack, and
-all-state branch-PR reads plus Prepare's host stack-capability/base merge-rule facts; sync adds only
-the strict native-stack-member read and active-writer plan observation. The production
+`PushRejectedError` unchanged. `DeliveryGitHub` aggregates stable PR and tolerant native-stack
+reads plus Prepare's host stack-capability/base merge-rule facts. Its existing branch lookup is the
+rich all-state `pr_for_branch(branch) -> PullRequest|null`; its strict read is
+`strict_stack(number) -> StackRestFacts|null`. Publication/ready add the distinct `get_pr`,
+`create_pr`, `update_pr_body`, `update_pr_base`, `reopen_pr`, `mark_pr_ready`, `create_stack`, and
+`append_stack` effects; sync adds active-writer plan observation. No duplicate branch/stack/full-PR
+endpoint exists. The production
 `RepoDeliveryPersistence`, `RepoDeliveryGit`, and
 `RepoDeliveryGitHub` adapters live in `perk/delivery/observe.py`. Persistence resolves the
 backend-aligned objective store, issue backend, and `TrainPersistence` only on its first read,
 caches them only after backend identities agree, and keeps no partial cache after a failed attempt.
 The Git and GitHub adapters likewise store only constructor data and observe on method calls.
+Publication binds these same instances plus bound `status`/`sync` into private `_PublishContext`;
+private immutable `_PublishRuntime` owns only operation-id minting, clock, sleep, and PR-body
+validation. Cause-aware bridges around the status-oriented Git/GitHub reads unwrap only a
+`TrainReconstructionError` whose direct cause is the matching raw `GitError`/`GitHubError`; every
+other typed failure stays typed and fails closed. Both Publish dry-run arms return before every
+context method, so assignment-only resolution remains offline under GitHub and Linear config.
 
 For a new authority call whose consumer must record a failure and continue independent checks, the
 aggregate ABC owns frozen nested success/error discriminants: Git `PushUrlsResult`,
@@ -6286,8 +6326,25 @@ wrapper text; a non-`git_error` reconstruction failure remains unexpected and pr
 `atomic_push_unsupported`, `rebase_conflict`, `push_rejected`, `sync_drift`,
 `postcondition_unverified`, `adopt_blocked`, `no_continuation`, `continuation_stale`,
 `continuation_invalid`, `rebase_in_progress`, `operation_in_progress`) and boundary codes
-`journal_corruption`, `journal_record_too_large`, and `invalid_config`; status's private subset
-remains exactly the six codes above. Only two reads
+`journal_corruption`, `journal_record_too_large`, and `invalid_config`. Publish/ready add only
+`delivery_error`, `stack_capability_lost`, `pr_already_merged`, `remote_settling_timeout`,
+`stack_registration_drift`, `stack_registration_failed`, `publication_drift`, `no_pr`,
+`pr_not_open`, `layer_not_published`, and `structural_blockers`; status's private subset remains
+exactly the six codes above.
+
+Every `DeliveryError` emitted by `Delivery.publish` carries a jointly-present constrained
+`phase=layer|cascade|ready` and `origin=domain|git|github|delivery`; existing operations may leave
+both absent. Package-internal `PublicationError` and pure layer refusals become domain errors with
+their original code/message. Bound sync errors become `(cascade,delivery)`; bound layer status,
+objective-store/persistence/journal/reconstruction failures become `delivery_error/(layer,delivery)` except
+record-size, which preserves `journal_record_too_large`; raw exact-lease rejection and Git failures
+become `(layer,git)`; raw GitHub/issue failures become `(layer,github)`. Ready's pure selection and
+reviewability refusals become `(ready,domain)`; a status reconstruction cause preserves its domain
+code/message, while backend/objective/persistence/journal and raw GitHub failures become
+`github_error/(ready,github)`. Unexpected exceptions are not wrapped. CLI presentation maps these
+facts back to the established submit/ready prefixes and bytes.
+
+Only two reads
 degrade: the **preview** native-stack read (membership `unknown` + information
 `stack_read_unavailable`, never a blocker — but unverifiable membership still declassifies the
 affected layers' publication to drift: the information posture governs the *finding*, not the
@@ -6523,22 +6580,29 @@ reconstruction, byte-identical behavior (the additive envelope fields serialize 
 (The §8.45 development write gate, which this route reused while stacked delivery was under
 development, is retired — the dogfood gate passed.)
 
-**The publish operation** is `perk.delivery.publish.publish_layer` (a gateway-touching
-delivery leaf; its publication-specific callables remain keyword-injectable). Automatic cascade
-has no callback bundle: publish resolves the zero-I/O `Delivery` façade internally and calls
-§8.49's `Delivery.sync`; writer observation, Git, GitHub, persistence, worktree configuration, and
-the operation lock remain behind that service/private runtime. Submit owns the identity-field composition
-(`header_fields`, a `pr_number → fields` builder
-reusing the incremental fields + `_merge_impl_run_ids`) and the PR-body composition; the
-operation owns WHEN they are written. `PreparedRecord.run_id` resolves `--run-id` → the plan
-header's `run_id`; both absent is a typed `invalid_input` refusal (a defensive arm — the
-header run id is stamped at save). The protocol, in order:
+**The publish operation** is
+`resolve_delivery(repo_root).publish(PublishRequest(kind="layer", ...))`; the private
+`perk.delivery.publish._dispatch` engine is bound to the façade's three aggregate authorities and
+bound `status`/`sync` methods. Its immutable private runtime contains only clock/sleep/id minting
+and PR-body validation. Publication acquires no stack-operation lock. Automatic cascade calls the
+same façade's bound `sync`, whose dispatcher acquires the non-reentrant lock exactly once; there is
+no resolver or callback bundle inside publish.
 
-1. **Reconstruct** the train fresh (`reconstruct_repo_train`, via the plan header's
-   `objective_id`); no train / plan not a layer → `not_stacked`.
+For a real layer, the façade re-reads the current plan, requires only presence plus nonblank
+`objective_id` (never a fresh lineage-header gate), and best-effort reads its body (`IssueBackendError`
+means no embed). That one fresh plan owns title, body truth, header merge, and route facts. The
+operation composes the exact stacked PR body and identity fields internally: canonical branch, PR
+id, lifecycle stage, and explicit-trigger-only order-preserving `impl_run_ids` merge via
+`plan.merge_untrusted_str_list`. Submit retains route selection, eager config validation,
+resolved journal/raw trigger ids, Linear emission, mergeability probing, envelope, and rendering;
+it performs no stacked body/header/operation inference. `PreparedRecord.run_id` resolves
+`--run-id` → the plan header's `run_id`; both absent is a typed `invalid_input` refusal (a defensive
+arm — the header run id is stamped at save). The protocol, in order:
+
+1. **Reconstruct** the train fresh through the bound `Delivery.status` using the plan header's
+   `objective_id`; no train / plan not a layer → `not_stacked`.
 2. **Route on the checkpoint-claimed prefix before reading the publish journal fold.** Derive it
-   through §8.49's package-internal `derive_claimed_prefix` helper (temporary until publish itself
-   migrates behind the façade). If this plan is claimed and a claimed
+   through §8.49's package-internal `derive_claimed_prefix` helper. If this plan is claimed and a claimed
    successor exists, delegate immediately to trigger-scoped synchronization (§8.52); sync owns the
    journal routing for this arm, including unresolved SYNC/ADOPT and pending continuations. Never
    route on `published_prefix_len`: operational drift may declassify a claimed successor and must
@@ -6640,7 +6704,18 @@ before) and prepare FRESH in the same invocation. Anything mixed/unrelated →
 `stack_registration_failed`, `postcondition_unverified`, `publication_drift`, `git_error`,
 `github_error` — plus the §8.46 layer codes passed through verbatim (`parent_missing`,
 `parent_unverified`, `stacked_predecessor_missing`): honest self-describing preparation
-failures, deliberately not folded into a vaguer code.
+failures, deliberately not folded into a vaguer code. It remains package-internal and is
+translated once to `(phase=layer, origin=domain)`; aggregate infrastructure and bound-status/sync
+failures follow §8.44's contextual table.
+
+**Result and caller boundary.** Direct publication returns the backend's real identity
+`PlanHeaderUpdate`; direct convergence returns an exact empty synthetic update. Cascade returns the
+bound `SyncResult` directly and performs only the explicit-trigger `impl_run_ids` merge-write (or an
+empty update without a trigger). `PublishResult.Layer` carries those facts plus embed/body-check,
+stack, checkpoint, resume/no-op, and parent-target facts. Submit's local mergeability probe targets
+the returned parent branch and published head; Linear PR-opened emission is suppressed exactly when
+`cascade` is present. JSON and human bytes remain unchanged because serialization supplies the fixed
+operation `kind="sync"` around the nested result.
 
 **Surface changes.** The github tier gains the `stack` state key; the submit stage reads
 `[cache.plan-ref, github.plan, github.objective, github.stack]` and writes
@@ -7612,12 +7687,13 @@ public set; no caller maintains a context-specific copy. Package-internal `Claim
 checkpoint-claimed-universe contract shared by publish routing, sync mutation, transfer, and
 recovery; they are no longer package-root API.
 
-**Automatic lower-layer submit.** After reconstructing, `publish_layer` derives the claimed prefix
-*before* reading publish's journal fold. A claimed plan with a claimed successor resolves the
-zero-I/O façade and delegates to `Delivery.sync(SyncRequest(mode="cascade",
-objective_id=<objective>, run_id=<resolved journal id>, trigger_plan_id=<plan>,
-trigger_run_id=<raw invoking id>), consent=None)`; the submit gesture is the consent, so there is no
-second prompt and no warm/headless split. Sync therefore owns unresolved-operation
+**Automatic lower-layer submit.** After reconstructing, the bound Publish context derives the
+claimed prefix *before* reading publish's journal fold. A claimed plan with a claimed successor
+calls the same façade instance's `sync(SyncRequest(mode="cascade", objective_id=<objective>,
+run_id=<resolved journal id>, trigger_plan_id=<plan>, trigger_run_id=<raw invoking id>),
+consent=None)`; the submit gesture is the consent, so there is no second prompt and no
+warm/headless split. Publish takes no operation lock; the nested sync dispatcher takes its ordinary
+lock exactly once, so a non-reentrant lock is never self-entered. Sync therefore owns unresolved-operation
 and pending-continuation routing for this arm. `published_prefix_len` never selects it: a successor
 declassified by PR/membership/remote drift remains checkpoint-claimed and reaches sync's typed
 preflight instead of turning a lower submit into a top republish. The automatic path never includes
@@ -7648,11 +7724,9 @@ caller id as trigger context, distinct from the separately resolved journal run 
 excludes only when inherited `PERK_RUN_ID`, a consumed implement/address handoff, and this
 worktree's active plan-ref corroborate the exact `(run_id, plan_id)` pair. Neither field excludes
 alone, an arbitrary/header-derived id excludes nothing, and every other active writer (including
-one on the same plan) still blocks. Explicit sync passes no trigger context. Cascade success returns
-frozen `DeliveryOperationFacts {kind:"sync", operation_id|null, abandoned_operation_id|null,
-resumed, no_op, affected: tuple[SyncResult.Layer,…], notes: tuple[str,…]}` on
-`PublicationResult.operation`;
-non-cascade publish/republish/converge arms keep `operation=None`. Publish reconstructs after sync
+one on the same plan) still blocks. Explicit sync passes no trigger context. Cascade success returns the exact frozen `SyncResult` in
+`PublishResult.Layer.cascade`; there is no copied operation record. Non-cascade
+publish/republish/converge arms keep `cascade=None`. Publish reconstructs after sync
 so a roll-forward-then-fresh-no-op cannot return the pre-roll-forward checkpoint snapshot. The
 target layer's PR is fetched from that fresh projection-correlated number, and its published
 checkpoint must agree with the affected after-row (or the fresh checkpoint on a sync no-op);
@@ -7707,24 +7781,31 @@ fetch feedback. `objective run` renders the additive `repair_required` action wi
 copyable owning remedy, but never auto-runs sync/recover. Dry-run remains the existing offline graph
 classification.
 
-**Stacked `/ready` consumes the train.** `require_reviewable_layer(train, plan_id, mutating)` first
-requires a known layer whose publication axis is exactly `PUBLISHED`; failure is
-`layer_not_published` with axes and findings. A mutating draft additionally requires no unresolved
-operation (`unresolved_operation`) and no train-wide structural blocker (`structural_blockers`,
-including `missing_lineage`). Operational drift on unrelated layers does not block review.
-`mutating=false` validates only target identity/publication, so an already-ready PR remains
-idempotent even when a later global veto exists.
+**`/ready` delegates selected intent to Publish.** Selection remains command policy. Explicit
+input is parse-normalized even offline and a real run uses `select_plan(main_repo_root(...))` with
+its one canonical read; the no-argument form reads the invoking checkout's `cache.plan-ref` and
+performs its existing one plan read there. The command never writes a selector. From that selected
+snapshot it derives only plan id, header-wins `delivery=stacked|incremental`, and the stacked
+objective id, then calls one `Delivery.publish(PublishRequest(kind="ready", ...))`. Dry-run passes
+only kind/id/dry-run and returns through the façade before backend/config/credential/GitHub calls.
 
-The worker keeps dry-run offline and first, then reads the plan and applies submit's header-wins
-lineage discriminator. Incremental behavior is unchanged. Stacked ready reconstructs the train,
-locates the layer, and fetches the full `PullRequest` from the projection-correlated number before
-any gate/mutation (`no_pr` on absent number/object). The validation-only target gate then preserves
-`layer_not_published` for a projection-classified merged/closed/wrong-base or otherwise drifted
-target. Only when the projection still says `PUBLISHED` does the fetched state apply: a non-OPEN PR
-(the post-reconstruction close race) refuses as `pr_not_open`; an OPEN draft enters the mutating gate
-then `mark_pr_ready`; OPEN already-ready succeeds without a write after the validation-only gate.
-`LayerError`/`TrainReconstructionError` codes pass through; backend/persistence failures map to
-`github_error`. The fetched PR supplies the unchanged output envelope's number and URL.
+Incremental ready derives canonical `plan-<id>` internally and uses the all-state
+`DeliveryGitHub.pr_for_branch`: absence is `no_pr`; any returned draft is sent to `mark_pr_ready`
+regardless of OPEN/CLOSED/MERGED and a gateway rejection remains `github_error/(ready,github)`;
+any non-draft is the idempotent already-ready result regardless of state. This intentionally
+preserves the pre-migration all-state edge rather than adding an OPEN gate.
+
+Stacked ready calls bound status once, derives the target, and fetches the full `PullRequest` from
+the projection-correlated number before any gate/mutation (`no_pr` on absent number/object).
+`require_reviewable_layer(train, plan_id, mutating=false)` first requires a known target whose
+publication axis is exactly `PUBLISHED`; failure is `layer_not_published` with axes/findings and
+therefore precedes interpretation of a fresh close race. A fetched non-OPEN PR is then
+`pr_not_open`. Only an OPEN draft enters `mutating=true`, which additionally requires no unresolved
+operation (`unresolved_operation`) and no train-wide structural blocker (`structural_blockers`,
+including `missing_lineage`), before `mark_pr_ready`. OPEN already-ready succeeds without a write
+after the validation-only gate, even when a later global veto exists. Operational drift on
+unrelated layers does not block review. Publish returns the fetched PR plus its original
+`was_draft`; contextual errors map back to the unchanged ready envelope and bytes.
 
 **Status.** Ordinary `/submit` and `/address` now converge published suffixes automatically;
 explicit sync remains the owner of base advancement, adoption, continuation/abort, preview, and

@@ -227,6 +227,13 @@ class BranchPrView:
     state: str
 
 
+class _BranchPrFacts(Protocol):
+    """Structural number/state view accepted from focused and aggregate PR observations."""
+
+    number: int
+    state: str
+
+
 @dataclass(frozen=True)
 class BaseHeadObservation:
     """The authoritative live objective-base head read (the §8.44 tolerant-degrade arm).
@@ -310,7 +317,7 @@ class GitHubProbe(Protocol):
 
     def pr_stack(self, number: int) -> StackView: ...
 
-    def pr_for_branch(self, branch: str) -> BranchPrView | None:
+    def pr_for_branch(self, branch: str) -> _BranchPrFacts | None:
         """The all-state PR lookup by head branch (``None`` = no PR in any state)."""
         ...
 

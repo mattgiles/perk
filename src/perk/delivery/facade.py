@@ -1,10 +1,10 @@
-"""The canonical repository-scoped delivery status and Prepare façade.
+"""The canonical repository-scoped delivery façade.
 
 ``Delivery`` composes three nominal aggregate authorities. ``status`` delegates its pure
 projection to :mod:`perk.delivery.train`; ``prepare`` owns authoring capability, plan identity,
-stacked-planning classification, and executable layer-start preparation; ``sync`` dispatches the
-private transactional engine. Construction remains assignment-only and pure derivation stays in
-this module.
+stacked-planning classification, and executable layer-start preparation; ``publish`` owns layer
+publication and draft-to-ready routing; ``sync`` dispatches the suffix transaction engine.
+Construction remains assignment-only and pure derivation stays in this module.
 """
 
 from abc import ABC, abstractmethod
@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Literal
 
 from perk import objective
-from perk.backends.issue_backend import IssueBackendError, PlanState
+from perk.backends.issue_backend import IssueBackendError, PlanHeaderUpdate, PlanState
 from perk.backends.objective_store import ObjectiveState, ObjectiveStoreError
 from perk.delivery import capability, train
 from perk.delivery import layer as layer_mod
@@ -26,7 +26,7 @@ from perk.delivery.journal import (
     PreparedRecord,
 )
 from perk.delivery.persistence import AppendResult, TrainPersistenceError
-from perk.github import GitHubError
+from perk.github import GitHubError, prs, stacks
 from perk.objective import NodeStatus, ObjectiveNode
 from perk.substrate import git as git_mod
 
@@ -73,6 +73,17 @@ _DELIVERY_ERROR_TYPES = frozenset(
         "journal_corruption",
         "journal_record_too_large",
         "invalid_config",
+        "delivery_error",
+        "stack_capability_lost",
+        "pr_already_merged",
+        "remote_settling_timeout",
+        "stack_registration_drift",
+        "stack_registration_failed",
+        "publication_drift",
+        "no_pr",
+        "pr_not_open",
+        "layer_not_published",
+        "structural_blockers",
     }
 )
 
@@ -92,6 +103,10 @@ _STATUS_ERROR_TYPES = frozenset(
 
 type PrepareKind = Literal["authoring", "plan_identity", "layer_start"]
 type PrepareMode = Literal["strict", "best_effort", "planning", "execution"]
+type PublishKind = Literal["layer", "ready"]
+type PublishDelivery = Literal["incremental", "stacked"]
+type DeliveryPhase = Literal["layer", "cascade", "ready"]
+type DeliveryOrigin = Literal["domain", "git", "github", "delivery"]
 type PlanningDecisionKind = Literal[
     "ready",
     "build_blocked",
@@ -309,6 +324,186 @@ class PrepareResult:
         raise ValueError("layer_start result requires planning or execution mode")
 
 
+def _normalize_publish_plan_id(plan_id: str) -> str:
+    """Normalize the request's optional hash prefix and surrounding whitespace."""
+    return plan_id.strip().removeprefix("#").strip()
+
+
+@dataclass(frozen=True)
+class PublishRequest:
+    """Request layer publication or the deliberate draft-to-ready gesture."""
+
+    kind: PublishKind
+    plan_id: str
+    dry_run: bool = False
+    delivery: PublishDelivery | None = None
+    objective_id: str | None = None
+    run_id: str | None = None
+    trigger_run_id: str | None = None
+
+    def __post_init__(self) -> None:
+        if self.kind not in ("layer", "ready"):
+            raise ValueError(f"unknown publish kind: {self.kind!r}")
+        normalized_plan_id = _normalize_publish_plan_id(self.plan_id)
+        if not normalized_plan_id or "#" in normalized_plan_id:
+            raise ValueError("publish plan_id must be a nonblank issue id")
+        if self.dry_run:
+            if any(
+                value is not None
+                for value in (
+                    self.delivery,
+                    self.objective_id,
+                    self.run_id,
+                    self.trigger_run_id,
+                )
+            ):
+                raise ValueError("dry-run publish accepts only kind, plan_id, and dry_run")
+            return
+        if self.kind == "layer":
+            if not _nonblank(self.run_id):
+                raise ValueError("layer publish requires run_id")
+            if self.trigger_run_id is not None and not _nonblank(self.trigger_run_id):
+                raise ValueError("layer publish trigger_run_id must be nonblank when present")
+            if self.delivery is not None or self.objective_id is not None:
+                raise ValueError("layer publish rejects delivery and objective_id")
+            return
+        if self.delivery not in ("incremental", "stacked"):
+            raise ValueError("ready publish requires incremental or stacked delivery")
+        if self.run_id is not None or self.trigger_run_id is not None:
+            raise ValueError("ready publish rejects run fields")
+        if self.delivery == "incremental" and self.objective_id is not None:
+            raise ValueError("incremental ready rejects objective_id")
+        if self.objective_id is not None and not _nonblank(self.objective_id):
+            raise ValueError("stacked ready objective_id must be nonblank when present")
+
+
+@dataclass(frozen=True)
+class PublishResult:
+    """The exact layer/ready result family returned by :meth:`Delivery.publish`."""
+
+    @dataclass(frozen=True)
+    class Layer:
+        pr: prs.PullRequest
+        branch: str
+        header_update: PlanHeaderUpdate
+        plan_embedded: bool
+        pr_checked: bool
+        parent_branch: str
+        operation_id: str | None
+        stack_number: int | None
+        stack_size: int | None
+        stack_position: int | None
+        parent_checkpoint_sha: str | None
+        published_head_sha: str | None
+        resumed: bool
+        converged_noop: bool
+        cascade: "SyncResult | None" = None
+
+    @dataclass(frozen=True)
+    class Ready:
+        pr: prs.PullRequest
+        was_draft: bool
+
+    kind: PublishKind
+    plan_id: str
+    dry_run: bool
+    layer: Layer | None = None
+    ready: Ready | None = None
+
+    def __post_init__(self) -> None:
+        if self.kind not in ("layer", "ready"):
+            raise ValueError(f"unknown publish result kind: {self.kind!r}")
+        if (
+            self.plan_id != _normalize_publish_plan_id(self.plan_id)
+            or not self.plan_id
+            or "#" in self.plan_id
+        ):
+            raise ValueError("publish result plan_id must be a canonical bare id")
+        if (self.layer is not None) != (self.kind == "layer") or (
+            (self.ready is not None) != (self.kind == "ready")
+        ):
+            raise ValueError("publish result detail must match kind exactly")
+        if self.layer is not None:
+            self._validate_layer(self.layer)
+        elif self.ready is not None:
+            self._validate_ready(self.ready)
+
+    def _validate_layer(self, detail: Layer) -> None:
+        triple = (detail.stack_number, detail.stack_size, detail.stack_position)
+        if any(value is not None for value in triple):
+            if not all(type(value) is int and value > 0 for value in triple):
+                raise ValueError("publish stack facts must be all positive integers or all null")
+            if (
+                detail.stack_position is not None
+                and detail.stack_size is not None
+                and detail.stack_position > detail.stack_size
+            ):
+                raise ValueError("publish stack position must be within stack size")
+        if self.dry_run:
+            expected_pr = prs.PullRequest(
+                number=0,
+                url="(dry-run)",
+                is_draft=True,
+                state="OPEN",
+                existed=False,
+            )
+            expected_update = PlanHeaderUpdate(
+                fields_updated=("branch", "pr", "lifecycle_stage"), dry_run=True
+            )
+            if (
+                detail.pr != expected_pr
+                or detail.branch != f"plan-{self.plan_id}"
+                or detail.header_update != expected_update
+                or detail.plan_embedded
+                or detail.pr_checked
+                or detail.parent_branch != ""
+                or detail.operation_id is not None
+                or any(value is not None for value in triple)
+                or detail.parent_checkpoint_sha is not None
+                or detail.published_head_sha is not None
+                or detail.resumed
+                or detail.converged_noop
+                or detail.cascade is not None
+            ):
+                raise ValueError("invalid dry-run layer publish result")
+            return
+        if (
+            not _nonblank(detail.branch)
+            or not _nonblank(detail.parent_branch)
+            or detail.header_update.dry_run
+            or not detail.pr_checked
+            or not _nonblank(detail.parent_checkpoint_sha)
+            or not _nonblank(detail.published_head_sha)
+        ):
+            raise ValueError("invalid real layer publish result")
+        if detail.cascade is None:
+            if (detail.operation_id is None) != detail.converged_noop:
+                raise ValueError("direct publish operation id must be absent exactly on no-op")
+            return
+        if any(value is not None for value in triple):
+            raise ValueError("cascade publish result carries no stack triple")
+        if (
+            detail.operation_id != detail.cascade.operation_id
+            or detail.resumed != detail.cascade.resumed
+            or detail.converged_noop != detail.cascade.no_op
+            or (detail.operation_id is None and not detail.cascade.no_op)
+        ):
+            raise ValueError("cascade publish fields must mirror the nested sync result")
+
+    def _validate_ready(self, detail: Ready) -> None:
+        if not self.dry_run:
+            return
+        expected = prs.PullRequest(
+            number=0,
+            url="(dry-run)",
+            is_draft=True,
+            state="OPEN",
+            existed=True,
+        )
+        if detail.pr != expected or not detail.was_draft:
+            raise ValueError("invalid dry-run ready publish result")
+
+
 @dataclass(frozen=True)
 class SyncRequest:
     """Request one published-suffix synchronization operation."""
@@ -439,14 +634,29 @@ class StatusResult:
 
 
 class DeliveryError(Exception):
-    """A bounded delivery-façade failure with a stable machine ``error_type``."""
+    """A bounded delivery-façade failure with stable code and optional operation context."""
 
-    def __init__(self, message: str, *, error_type: str) -> None:
+    def __init__(
+        self,
+        message: str,
+        *,
+        error_type: str,
+        phase: DeliveryPhase | None = None,
+        origin: DeliveryOrigin | None = None,
+    ) -> None:
         if error_type not in _DELIVERY_ERROR_TYPES:
             allowed = ", ".join(sorted(_DELIVERY_ERROR_TYPES))
             raise ValueError(f"unknown delivery error type {error_type!r} (allowed: {allowed})")
+        if (phase is None) != (origin is None):
+            raise ValueError("delivery error phase and origin must be jointly present or absent")
+        if phase is not None and phase not in ("layer", "cascade", "ready"):
+            raise ValueError(f"unknown delivery error phase: {phase!r}")
+        if origin is not None and origin not in ("domain", "git", "github", "delivery"):
+            raise ValueError(f"unknown delivery error origin: {origin!r}")
         super().__init__(message)
         self.error_type = error_type
+        self.phase = phase
+        self.origin = origin
 
 
 class DeliveryPersistence(ABC):
@@ -460,6 +670,16 @@ class DeliveryPersistence(ABC):
     @abstractmethod
     def get_plan(self, *, issue_id: str) -> PlanState | None:
         """Read one plan by backend-owned id."""
+        ...
+
+    @abstractmethod
+    def get_plan_body(self, *, issue_id: str) -> str | None:
+        """Read one plan's verbatim body block."""
+        ...
+
+    @abstractmethod
+    def update_plan_header(self, *, issue_id: str, fields: dict[str, object]) -> PlanHeaderUpdate:
+        """Merge publication-owned fields into one plan header."""
         ...
 
     @abstractmethod
@@ -533,6 +753,11 @@ class DeliveryGit(ABC):
     @abstractmethod
     def remote_branch_sha(self, branch: str) -> str | None:
         """Observe one remote branch head."""
+        ...
+
+    @abstractmethod
+    def push_with_exact_lease(self, branch: str, *, expected_remote_sha: str | None) -> None:
+        """Push one branch under the exact observed remote lease."""
         ...
 
     @abstractmethod
@@ -655,13 +880,57 @@ class DeliveryGitHub(ABC):
         ...
 
     @abstractmethod
-    def pr_for_branch(self, branch: str) -> train.BranchPrView | None:
+    def pr_for_branch(self, branch: str) -> prs.PullRequest | None:
         """Read an all-state PR by head branch."""
         ...
 
     @abstractmethod
-    def strict_stack_members(self, number: int) -> tuple[int, ...] | None:
-        """Read strict native-stack membership for one PR."""
+    def strict_stack(self, number: int) -> stacks.StackRestFacts | None:
+        """Read the strict native stack containing one PR."""
+        ...
+
+    @abstractmethod
+    def get_pr(self, number: int) -> prs.PullRequest | None:
+        """Read one PR by number."""
+        ...
+
+    @abstractmethod
+    def create_pr(
+        self, *, head: str, base: str, title: str, body: str, draft: bool
+    ) -> prs.PullRequest:
+        """Create or find the PR for one branch."""
+        ...
+
+    @abstractmethod
+    def update_pr_body(self, number: int, *, body: str) -> prs.PrBodyUpdate:
+        """Replace one PR body."""
+        ...
+
+    @abstractmethod
+    def update_pr_base(self, number: int, *, base: str) -> None:
+        """Retarget one PR."""
+        ...
+
+    @abstractmethod
+    def reopen_pr(self, number: int) -> None:
+        """Reopen one closed PR."""
+        ...
+
+    @abstractmethod
+    def mark_pr_ready(self, number: int) -> None:
+        """Convert one draft PR to ready-for-review."""
+        ...
+
+    @abstractmethod
+    def create_stack(self, pull_requests: tuple[int, ...]) -> stacks.StackMutationOutcome:
+        """Create a native stack with members in bottom-to-top order."""
+        ...
+
+    @abstractmethod
+    def append_stack(
+        self, stack_number: int, *, pull_requests: tuple[int, ...]
+    ) -> stacks.StackMutationOutcome:
+        """Append one suffix to an existing native stack."""
         ...
 
     @abstractmethod
@@ -957,7 +1226,7 @@ def _raw_prepare_git_error(exc: git_mod.GitError | train.TrainReconstructionErro
 
 
 class Delivery:
-    """Repository-scoped delivery status, Prepare, and synchronization operations."""
+    """Repository-scoped delivery status, Prepare, publish, and sync operations."""
 
     def __init__(
         self,
@@ -969,6 +1238,126 @@ class Delivery:
         self._persistence = persistence
         self._git = git
         self._github = github
+
+    def publish(self, request: PublishRequest) -> PublishResult:
+        """Publish one layer or open one layer's PR for review."""
+        from perk.delivery import publish as publish_mod  # noqa: PLC0415 — façade/engine cycle
+
+        context = publish_mod._PublishContext(
+            repo_root=self._git.repo_root,
+            persistence=self._persistence,
+            git=self._git,
+            github=self._github,
+            status=self.status,
+            sync=self.sync,
+        )
+        try:
+            return publish_mod._dispatch(
+                context, request, runtime=publish_mod._DEFAULT_PUBLISH_RUNTIME
+            )
+        except DeliveryError as exc:
+            if exc.phase is not None:
+                raise
+            if request.kind == "layer":
+                raise DeliveryError(
+                    str(exc),
+                    error_type="delivery_error",
+                    phase="layer",
+                    origin="delivery",
+                ) from exc
+            cause = exc.__cause__
+            if isinstance(cause, train.TrainReconstructionError):
+                raise DeliveryError(
+                    str(cause),
+                    error_type=cause.error_type,
+                    phase="ready",
+                    origin="domain",
+                ) from exc
+            if isinstance(cause, (IssueBackendError, ObjectiveStoreError, TrainPersistenceError)):
+                raise DeliveryError(
+                    str(exc),
+                    error_type="github_error",
+                    phase="ready",
+                    origin="github",
+                ) from exc
+            raise DeliveryError(
+                str(exc),
+                error_type="delivery_error",
+                phase="ready",
+                origin="delivery",
+            ) from exc
+        except publish_mod.PublicationError as exc:
+            raise DeliveryError(
+                str(exc),
+                error_type=exc.error_type,
+                phase="layer",
+                origin="domain",
+            ) from exc
+        except layer_mod.LayerError as exc:
+            if request.kind != "ready":
+                raise
+            raise DeliveryError(
+                str(exc),
+                error_type=exc.error_type,
+                phase="ready",
+                origin="domain",
+            ) from exc
+        except git_mod.PushRejectedError as exc:
+            raise DeliveryError(
+                str(exc),
+                error_type="push_rejected",
+                phase="layer",
+                origin="git",
+            ) from exc
+        except git_mod.GitError as exc:
+            raise DeliveryError(
+                str(exc), error_type="git_error", phase="layer", origin="git"
+            ) from exc
+        except (GitHubError, IssueBackendError) as exc:
+            phase: DeliveryPhase = "layer" if request.kind == "layer" else "ready"
+            raise DeliveryError(
+                str(exc), error_type="github_error", phase=phase, origin="github"
+            ) from exc
+        except ObjectiveStoreError as exc:
+            if request.kind == "layer":
+                raise DeliveryError(
+                    str(exc),
+                    error_type="delivery_error",
+                    phase="layer",
+                    origin="delivery",
+                ) from exc
+            raise DeliveryError(
+                str(exc), error_type="github_error", phase="ready", origin="github"
+            ) from exc
+        except train.TrainReconstructionError as exc:
+            if request.kind != "layer":
+                raise
+            raise DeliveryError(
+                str(exc),
+                error_type="delivery_error",
+                phase="layer",
+                origin="delivery",
+            ) from exc
+        except (TrainPersistenceError, JournalCorruptionError) as exc:
+            if request.kind == "layer":
+                raise DeliveryError(
+                    str(exc),
+                    error_type="delivery_error",
+                    phase="layer",
+                    origin="delivery",
+                ) from exc
+            raise DeliveryError(
+                str(exc), error_type="github_error", phase="ready", origin="github"
+            ) from exc
+        except JournalRecordTooLarge as exc:
+            if request.kind != "layer":
+                raise
+            raise DeliveryError(
+                str(exc),
+                error_type="journal_record_too_large",
+                phase="layer",
+                origin="delivery",
+            ) from exc
 
     def sync(self, request: SyncRequest, *, consent: _SyncConsent | None) -> SyncResult:
         """Synchronize a published suffix with an explicitly selected consent policy."""

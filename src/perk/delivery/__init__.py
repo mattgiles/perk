@@ -1,10 +1,10 @@
 """The compact public delivery façade and retained operation exports.
 
-The canonical surface is the repository-scoped :class:`Delivery` status, Prepare, and sync
-families over three nominal aggregate authorities. Pure train projection, layer context/core,
-capability rows, production adapters, synchronization internals, and compatibility readers are
-internal modules. Journal, publication, finalization, and landing exports remain public while
-their operation families migrate.
+The canonical surface is the repository-scoped :class:`Delivery` status, Prepare, publish, and
+sync families over three nominal aggregate authorities. Pure train projection, layer context/core,
+capability rows, production adapters, publication/synchronization internals, and compatibility
+readers are internal modules. Journal, finalization, and landing exports remain public while their
+operation families migrate.
 """
 
 from perk.delivery.facade import (
@@ -15,6 +15,8 @@ from perk.delivery.facade import (
     DeliveryPersistence,
     PrepareRequest,
     PrepareResult,
+    PublishRequest,
+    PublishResult,
     StatusRequest,
     StatusResult,
     SyncRequest,
@@ -75,14 +77,6 @@ from perk.delivery.persistence import (
     UnresolvedOperationError,
     resolve_train_persistence,
 )
-from perk.delivery.publish import (
-    DeliveryOperationFacts,
-    LayerBodyFacts,
-    PublicationError,
-    PublicationResult,
-    TrainRowFacts,
-    publish_layer,
-)
 
 __all__ = [
     "JOURNAL_EVENT_MAX_CHARS",
@@ -93,7 +87,6 @@ __all__ = [
     "DeliveryError",
     "DeliveryGit",
     "DeliveryGitHub",
-    "DeliveryOperationFacts",
     "DeliveryPersistence",
     "EventRole",
     "GatewayLandObservations",
@@ -114,7 +107,6 @@ __all__ = [
     "LandReadiness",
     "LandedLayer",
     "LandedPlan",
-    "LayerBodyFacts",
     "LearnConsumeUpdate",
     "MergeRulesView",
     "ObjectiveLandUpdate",
@@ -125,15 +117,14 @@ __all__ = [
     "PrepareRequest",
     "PrepareResult",
     "PreparedRecord",
-    "PublicationError",
-    "PublicationResult",
+    "PublishRequest",
+    "PublishResult",
     "StatusRequest",
     "StatusResult",
     "SyncRequest",
     "SyncResult",
     "TrainPersistence",
     "TrainPersistenceError",
-    "TrainRowFacts",
     "UnresolvedOperationError",
     "assess_land_readiness",
     "canonical_payload",
@@ -143,7 +134,6 @@ __all__ = [
     "land_train",
     "mint_operation_id",
     "parse_journal_comment",
-    "publish_layer",
     "render_event",
     "resolve_delivery",
     "resolve_train_persistence",
