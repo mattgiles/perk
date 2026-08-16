@@ -1,18 +1,14 @@
 """The compact public delivery façade and temporarily retained operation exports.
 
-The canonical read surface is the repository-scoped :class:`Delivery` status slice with three
-nominal aggregate authorities. Pure train projection, production observation adapters, and
-compatibility readers are internal modules. Existing journal, authoring, continuation, layer,
-publication, synchronization, finalization, and landing exports remain temporarily public while
-their operation families migrate onto the façade; no unimplemented operation methods are implied.
+The canonical surface is the repository-scoped :class:`Delivery` status plus authoring-Prepare
+slices over three nominal aggregate authorities. Pure train projection, private capability rows,
+production adapters, and compatibility readers are internal modules. Existing journal,
+continuation, layer, publication, synchronization, finalization, and landing exports remain
+public while their operation families migrate; ``probe_atomic_push_urls`` is retained only for
+the deferred sync owner.
 """
 
-from perk.delivery.capability import (
-    CapabilityCheck,
-    CapabilityReport,
-    preflight_stacked_authoring,
-    probe_atomic_push_urls,
-)
+from perk.delivery.capability import probe_atomic_push_urls
 from perk.delivery.continuation import (
     ContinuationLayer,
     ContinuationManifest,
@@ -28,6 +24,8 @@ from perk.delivery.facade import (
     DeliveryGit,
     DeliveryGitHub,
     DeliveryPersistence,
+    PrepareRequest,
+    PrepareResult,
     StatusRequest,
     StatusResult,
 )
@@ -119,8 +117,6 @@ __all__ = [
     "JOURNAL_EVENT_MAX_CHARS",
     "JOURNAL_SCHEMA_VERSION",
     "AppendResult",
-    "CapabilityCheck",
-    "CapabilityReport",
     "CheckView",
     "ClaimedLayer",
     "ContinuationLayer",
@@ -162,6 +158,8 @@ __all__ = [
     "OutcomeRecord",
     "PendingContinuation",
     "PrLandView",
+    "PrepareRequest",
+    "PrepareResult",
     "PreparedLayerStart",
     "PreparedRecord",
     "PublicationError",
@@ -191,7 +189,6 @@ __all__ = [
     "mint_operation_id",
     "parse_journal_comment",
     "pending_continuation",
-    "preflight_stacked_authoring",
     "prepare_layer_start",
     "probe_atomic_push_urls",
     "publish_layer",

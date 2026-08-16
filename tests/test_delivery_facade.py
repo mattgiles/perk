@@ -1,7 +1,8 @@
-"""Contract tests for the compact ``perk.delivery`` status façade."""
+"""Contract tests for the compact ``perk.delivery`` status/Prepare façade."""
 
 import inspect
 from pathlib import Path
+from typing import Literal, cast
 
 import pytest
 
@@ -16,6 +17,8 @@ from perk.delivery.facade import (
     DeliveryGit,
     DeliveryGitHub,
     DeliveryPersistence,
+    PrepareRequest,
+    PrepareResult,
     StatusRequest,
     StatusResult,
 )
@@ -29,8 +32,10 @@ from perk.delivery.train import (
     WorktreeFacts,
 )
 from perk.substrate import config as config_mod
+from perk.substrate import git as git_mod
 
-_STATUS_ERROR_TYPES = {
+_DELIVERY_ERROR_TYPES = {
+    "capability_unsupported",
     "objective_not_found",
     "invalid_delivery_policy",
     "invalid_train",
@@ -73,6 +78,9 @@ _RETIRED_EXPORTS = {
     "reconstruct_repo_train",
     "reconstruct_train",
     "resolve_train_reads",
+    "CapabilityCheck",
+    "CapabilityReport",
+    "preflight_stacked_authoring",
 }
 _NEW_EXPORTS = {
     "Delivery",
@@ -80,6 +88,8 @@ _NEW_EXPORTS = {
     "DeliveryGit",
     "DeliveryGitHub",
     "DeliveryError",
+    "PrepareRequest",
+    "PrepareResult",
     "StatusRequest",
     "StatusResult",
     "resolve_delivery",
@@ -108,9 +118,6 @@ _RETAINED_EXPORTS = {
     "parse_journal_comment",
     "render_event",
     "resolve_train_persistence",
-    "CapabilityCheck",
-    "CapabilityReport",
-    "preflight_stacked_authoring",
     "probe_atomic_push_urls",
     "ContinuationLayer",
     "ContinuationManifest",
@@ -223,6 +230,215 @@ def _delivery(
     )
 
 
+def test_prepare_request_and_result_validate_the_authoring_discriminator() -> None:
+    assert PrepareRequest(kind="authoring", base=None).base is None
+    assert PrepareResult(kind="authoring", base="main").base == "main"
+
+    unknown = cast(Literal["authoring"], "future")
+    with pytest.raises(ValueError, match=r"^unknown prepare kind: 'future'$"):
+        PrepareRequest(kind=unknown, base=None)
+    with pytest.raises(ValueError, match=r"^unknown prepare kind: 'future'$"):
+        PrepareResult(kind=unknown, base="main")
+
+
+def test_prepare_explicit_base_checks_every_push_url_without_persistence() -> None:
+    sha = "a" * 40
+    persistence = FakeDeliveryPersistence()
+    git = FakeDeliveryGit(
+        branches={"develop": sha},
+        push_urls=("fake://origin", "fake://mirror"),
+    )
+    github = FakeDeliveryGitHub()
+
+    result = _delivery(persistence, git, github).prepare(
+        PrepareRequest(kind="authoring", base="develop")
+    )
+
+    assert result == PrepareResult(kind="authoring", base="develop")
+    assert persistence.calls == []
+    assert github.calls == [("stack_capability",), ("base_merge_rules", "develop")]
+    assert git.calls == [
+        ("remote_branch_sha", "develop"),
+        ("push_urls",),
+        ("probe_atomic_push", "fake://origin", "develop", sha),
+        ("probe_atomic_push", "fake://mirror", "develop", sha),
+    ]
+
+
+def test_prepare_resolves_trunk_lazily_and_returns_the_effective_base() -> None:
+    sha = "a" * 40
+    persistence = FakeDeliveryPersistence()
+    git = FakeDeliveryGit(trunk="main", branches={"main": sha})
+    github = FakeDeliveryGitHub()
+
+    result = _delivery(persistence, git, github).prepare(
+        PrepareRequest(kind="authoring", base=None)
+    )
+
+    assert result == PrepareResult(kind="authoring", base="main")
+    assert persistence.calls == []
+    assert git.calls == [
+        ("trunk_branch",),
+        ("remote_branch_sha", "main"),
+        ("push_urls",),
+        ("probe_atomic_push", "fake://origin", "main", sha),
+    ]
+    assert github.calls == [("stack_capability",), ("base_merge_rules", "main")]
+
+
+@pytest.mark.parametrize(
+    ("git", "github", "detail"),
+    [
+        (
+            FakeDeliveryGit(branches={"main": "a" * 40}),
+            FakeDeliveryGitHub(stack_capable=False),
+            "expected a PullRequest.stack field",
+        ),
+        (
+            FakeDeliveryGit(branches={"main": "a" * 40}),
+            FakeDeliveryGitHub(
+                merge_rules=DeliveryGitHub.MergeRules(
+                    squash_allowed=False, merge_queue_required=False
+                )
+            ),
+            "observed squash merge disallowed",
+        ),
+        (
+            FakeDeliveryGit(branches={"main": "a" * 40}),
+            FakeDeliveryGitHub(
+                merge_rules=DeliveryGitHub.MergeRules(
+                    squash_allowed=True, merge_queue_required=True
+                )
+            ),
+            "merge queue required",
+        ),
+        (
+            FakeDeliveryGit(branches={"main": "a" * 40}),
+            FakeDeliveryGitHub(merge_rules_error="HTTP 500"),
+            "can't verify ⇒ don't promise): HTTP 500",
+        ),
+        (
+            FakeDeliveryGit(),
+            FakeDeliveryGitHub(),
+            "observed no such remote branch",
+        ),
+        (
+            FakeDeliveryGit(branches={"main": "a" * 40}, push_urls_error="no remote"),
+            FakeDeliveryGitHub(),
+            "could not resolve the push URLs for origin: no remote",
+        ),
+        (
+            FakeDeliveryGit(branches={"main": "a" * 40}, push_urls=()),
+            FakeDeliveryGitHub(),
+            "observed none",
+        ),
+        (
+            FakeDeliveryGit(
+                branches={"main": "a" * 40},
+                push_urls=("fake://origin", "fake://mirror"),
+                atomic_push_errors={"fake://mirror": "atomic unsupported"},
+            ),
+            FakeDeliveryGitHub(),
+            "fake://mirror failed",
+        ),
+    ],
+)
+def test_prepare_rejects_each_capability_failure_arm(
+    git: FakeDeliveryGit,
+    github: FakeDeliveryGitHub,
+    detail: str,
+) -> None:
+    with pytest.raises(DeliveryError) as excinfo:
+        _delivery(git=git, github=github).prepare(PrepareRequest(kind="authoring", base="main"))
+
+    assert excinfo.value.error_type == "capability_unsupported"
+    assert detail in str(excinfo.value)
+
+
+def test_prepare_aggregates_independent_failures_and_skips_push_without_a_sha() -> None:
+    git = FakeDeliveryGit()
+    github = FakeDeliveryGitHub(stack_capable=False, merge_rules_error="HTTP 500")
+
+    with pytest.raises(DeliveryError) as excinfo:
+        _delivery(git=git, github=github).prepare(PrepareRequest(kind="authoring", base="main"))
+
+    assert excinfo.value.error_type == "capability_unsupported"
+    assert str(excinfo.value) == (
+        "This repository cannot take a stacked delivery train against base 'main':\n"
+        "- native-stack: expected a PullRequest.stack field in the GraphQL schema; observed "
+        "none (or introspection failed) — native stacks are unavailable on this GitHub host\n"
+        "- merge-rules: could not verify the merge rules for base 'main' "
+        "(can't verify ⇒ don't promise): HTTP 500\n"
+        "- remote-base: expected refs/heads/main on origin; observed no such remote branch — "
+        "a stacked train needs a real remote base to publish against"
+    )
+    assert github.calls == [("stack_capability",), ("base_merge_rules", "main")]
+    assert git.calls == [("remote_branch_sha", "main")]
+
+
+def test_prepare_aggregates_earlier_failures_and_still_probes_every_push_url() -> None:
+    sha = "a" * 40
+    git = FakeDeliveryGit(
+        branches={"main": sha},
+        push_urls=("fake://origin", "fake://mirror", "fake://backup"),
+        atomic_push_errors={"fake://mirror": "atomic unsupported"},
+    )
+    github = FakeDeliveryGitHub(stack_capable=False, merge_rules_error="HTTP 500")
+
+    with pytest.raises(DeliveryError) as excinfo:
+        _delivery(git=git, github=github).prepare(PrepareRequest(kind="authoring", base="main"))
+
+    assert excinfo.value.error_type == "capability_unsupported"
+    assert str(excinfo.value) == (
+        "This repository cannot take a stacked delivery train against base 'main':\n"
+        "- native-stack: expected a PullRequest.stack field in the GraphQL schema; observed "
+        "none (or introspection failed) — native stacks are unavailable on this GitHub host\n"
+        "- merge-rules: could not verify the merge rules for base 'main' "
+        "(can't verify ⇒ don't promise): HTTP 500\n"
+        "- atomic-push: the no-op --atomic --dry-run push to fake://mirror failed "
+        "(proves server capability and authentication, not branch write permission): "
+        "atomic unsupported"
+    )
+    assert github.calls == [("stack_capability",), ("base_merge_rules", "main")]
+    assert git.calls == [
+        ("remote_branch_sha", "main"),
+        ("push_urls",),
+        ("probe_atomic_push", "fake://origin", "main", sha),
+        ("probe_atomic_push", "fake://mirror", "main", sha),
+        ("probe_atomic_push", "fake://backup", "main", sha),
+    ]
+
+
+def test_prepare_remote_git_error_is_a_failed_row_with_raw_detail() -> None:
+    failure = TrainReconstructionError("wrapped status detail", error_type="git_error")
+    git = FakeDeliveryGit(errors={("remote_branch_sha", "main"): failure})
+
+    with pytest.raises(DeliveryError) as excinfo:
+        _delivery(git=git).prepare(PrepareRequest(kind="authoring", base="main"))
+
+    assert excinfo.value.error_type == "capability_unsupported"
+    assert str(excinfo.value).endswith(
+        "- remote-base: could not observe refs/heads/main on origin "
+        "(can't verify ⇒ don't promise): wrapped status detail"
+    )
+    assert git.calls == [("remote_branch_sha", "main")]
+
+
+def test_prepare_base_resolution_normalizes_only_git_errors() -> None:
+    wrapped = TrainReconstructionError("injected wrapper", error_type="git_error")
+    git = FakeDeliveryGit(errors={("trunk_branch",): wrapped})
+    with pytest.raises(DeliveryError) as excinfo:
+        _delivery(git=git).prepare(PrepareRequest(kind="authoring", base=None))
+    assert excinfo.value.error_type == "git_error"
+    assert str(excinfo.value) == "injected wrapper"
+
+    unexpected = TrainReconstructionError("future", error_type="future_operation_error")
+    git = FakeDeliveryGit(errors={("trunk_branch",): unexpected})
+    with pytest.raises(TrainReconstructionError) as unexpected_info:
+        _delivery(git=git).prepare(PrepareRequest(kind="authoring", base=None))
+    assert unexpected_info.value is unexpected
+
+
 def test_nominal_abcs_and_keyword_only_delivery_construction() -> None:
     for authority in (DeliveryPersistence, DeliveryGit, DeliveryGitHub):
         incomplete = type(f"Incomplete{authority.__name__}", (authority,), {})
@@ -295,7 +511,14 @@ def test_status_returns_stacked_projection_through_aggregate_fakes() -> None:
     assert github.calls == []
 
 
-@pytest.mark.parametrize("error_type", sorted(_STATUS_ERROR_TYPES))
+def test_delivery_error_accepts_exactly_the_seven_code_vocabulary() -> None:
+    assert {
+        DeliveryError("message", error_type=error_type).error_type
+        for error_type in _DELIVERY_ERROR_TYPES
+    } == _DELIVERY_ERROR_TYPES
+
+
+@pytest.mark.parametrize("error_type", sorted(_DELIVERY_ERROR_TYPES - {"capability_unsupported"}))
 def test_delivery_error_vocabulary_and_train_code_passthrough(error_type: str) -> None:
     source = TrainReconstructionError("source message", error_type=error_type)
     persistence = FakeDeliveryPersistence(errors={("get_objective", "10"): source})
@@ -311,11 +534,12 @@ def test_delivery_error_rejects_unknown_code_and_unknown_train_code_propagates()
     with pytest.raises(ValueError, match="unknown delivery error type"):
         DeliveryError("bad", error_type="future_operation_error")
 
-    source = TrainReconstructionError("future", error_type="future_operation_error")
-    persistence = FakeDeliveryPersistence(errors={("get_objective", "10"): source})
-    with pytest.raises(TrainReconstructionError) as excinfo:
-        _delivery(persistence).status(StatusRequest(objective_id="10"))
-    assert excinfo.value is source
+    for error_type in ("future_operation_error", "capability_unsupported"):
+        source = TrainReconstructionError("future", error_type=error_type)
+        persistence = FakeDeliveryPersistence(errors={("get_objective", "10"): source})
+        with pytest.raises(TrainReconstructionError) as excinfo:
+            _delivery(persistence).status(StatusRequest(objective_id="10"))
+        assert excinfo.value is source
 
 
 @pytest.mark.parametrize(
@@ -379,6 +603,10 @@ def test_resolve_delivery_is_zero_io_until_status_requires_persistence(
     monkeypatch.setattr(config_mod, "load_committed_issues_team", read_team)
     monkeypatch.setattr(observe.git_mod, "detect_trunk_branch", unexpected("trunk"))
     monkeypatch.setattr(observe.git_mod, "fetch", unexpected("fetch"))
+    monkeypatch.setattr(observe.git_mod, "push_urls", unexpected("push_urls"))
+    monkeypatch.setattr(observe.git_mod, "probe_atomic_push", unexpected("atomic_push"))
+    monkeypatch.setattr(observe.stacks, "stack_capability", unexpected("stack_capability"))
+    monkeypatch.setattr(observe.stacks, "base_merge_rules", unexpected("merge_rules"))
     monkeypatch.setattr(observe.stacks, "pr_delivery_facts", unexpected("pr_facts"))
     monkeypatch.setattr(observe.stacks, "pr_stack", unexpected("pr_stack"))
     monkeypatch.setattr(observe.prs, "find_pr_for_branch", unexpected("branch_pr"))
@@ -396,6 +624,52 @@ def test_resolve_delivery_is_zero_io_until_status_requires_persistence(
     assert resolver_calls == [("objective", tmp_path)]
     assert config_calls == [("backend", tmp_path), ("team", tmp_path)]
     assert unexpected_calls == []
+
+
+def test_prepare_with_real_git_adapter_preserves_raw_remote_failure(
+    tmp_path: Path, monkeypatch
+) -> None:
+    def fail_remote(*_args: object, **_kwargs: object) -> str:
+        raise git_mod.GitError("ls-remote timed out")
+
+    monkeypatch.setattr(git_mod, "remote_branch_head", fail_remote)
+    service = Delivery(
+        persistence=FakeDeliveryPersistence(),
+        git=observe.RepoDeliveryGit(tmp_path),
+        github=FakeDeliveryGitHub(),
+    )
+
+    with pytest.raises(DeliveryError) as excinfo:
+        service.prepare(PrepareRequest(kind="authoring", base="main"))
+
+    assert excinfo.value.error_type == "capability_unsupported"
+    assert str(excinfo.value) == (
+        "This repository cannot take a stacked delivery train against base 'main':\n"
+        "- remote-base: could not observe refs/heads/main on origin "
+        "(can't verify ⇒ don't promise): ls-remote timed out"
+    )
+    assert "git ls-remote failed for branch" not in str(excinfo.value)
+
+
+def test_prepare_with_real_git_adapter_preserves_raw_trunk_failure(
+    tmp_path: Path, monkeypatch
+) -> None:
+    def fail_trunk(*_args: object, **_kwargs: object) -> str:
+        raise git_mod.GitError("no trunk")
+
+    monkeypatch.setattr(git_mod, "detect_trunk_branch", fail_trunk)
+    service = Delivery(
+        persistence=FakeDeliveryPersistence(),
+        git=observe.RepoDeliveryGit(tmp_path),
+        github=FakeDeliveryGitHub(),
+    )
+
+    with pytest.raises(DeliveryError) as excinfo:
+        service.prepare(PrepareRequest(kind="authoring", base=None))
+
+    assert excinfo.value.error_type == "git_error"
+    assert str(excinfo.value) == "no trunk"
+    assert "git trunk detection failed" not in str(excinfo.value)
 
 
 class _ResolvedStore:
@@ -502,11 +776,17 @@ def test_fake_defaults_copy_inputs_and_log_calls_before_return() -> None:
     objective_seed = {"10": _objective("10")}
     plan_seed = {"101": _plan("101")}
     worktree = WorktreeFacts(path="/tmp/wt", branch="plan-101", dirty=False)
+    atomic_errors = {"fake://mirror": "no atomic"}
     persistence = FakeDeliveryPersistence(objectives=objective_seed, plans=plan_seed)
-    git = FakeDeliveryGit(worktrees=(worktree,))
+    git = FakeDeliveryGit(
+        worktrees=(worktree,),
+        push_urls=("fake://origin", "fake://mirror"),
+        atomic_push_errors=atomic_errors,
+    )
     github = FakeDeliveryGitHub()
     objective_seed.clear()
     plan_seed.clear()
+    atomic_errors.clear()
 
     assert persistence.get_objective(objective_id="10") == _objective("10")
     assert persistence.get_plan(issue_id="101") == _plan("101")
@@ -523,6 +803,14 @@ def test_fake_defaults_copy_inputs_and_log_calls_before_return() -> None:
     assert git.trunk_branch() == "main"
     assert git.fetch() is None
     assert git.remote_branch_sha("missing") is None
+    assert git.push_urls() == DeliveryGit.PushUrlsResult(urls=("fake://origin", "fake://mirror"))
+    assert (
+        git.probe_atomic_push(push_url="fake://origin", base_branch="main", base_sha="a")
+        == DeliveryGit.AtomicPushResult()
+    )
+    assert git.probe_atomic_push(
+        push_url="fake://mirror", base_branch="main", base_sha="a"
+    ) == DeliveryGit.ProbeError(message="no atomic")
     assert git.is_ancestor("a", "a") is True
     assert git.is_ancestor("a", "b") is None
     assert git.worktree_branches() == (worktree,)
@@ -531,20 +819,49 @@ def test_fake_defaults_copy_inputs_and_log_calls_before_return() -> None:
         ("trunk_branch",),
         ("fetch",),
         ("remote_branch_sha", "missing"),
+        ("push_urls",),
+        ("probe_atomic_push", "fake://origin", "main", "a"),
+        ("probe_atomic_push", "fake://mirror", "main", "a"),
         ("is_ancestor", "a", "a"),
         ("is_ancestor", "a", "b"),
         ("worktree_branches",),
         ("base_head", "main"),
     ]
 
+    assert github.stack_capability() is True
+    assert github.base_merge_rules("main") == DeliveryGitHub.MergeRules(
+        squash_allowed=True, merge_queue_required=False
+    )
     assert github.pr_facts(42) is None
     assert github.pr_for_branch("plan-101") is None
     assert github.pr_stack(42) == StackView(available=True, stacked=False)
     assert github.calls == [
+        ("stack_capability",),
+        ("base_merge_rules", "main"),
         ("pr_facts", 42),
         ("pr_for_branch", "plan-101"),
         ("pr_stack", 42),
     ]
+
+
+def test_new_fake_probe_failures_are_constructor_discriminants() -> None:
+    git = FakeDeliveryGit(
+        push_urls_error="no remote",
+        atomic_push_errors={"fake://origin": "no atomic"},
+    )
+    github = FakeDeliveryGitHub(merge_rules_error="HTTP 500", stack_capable=False)
+
+    assert git.push_urls() == DeliveryGit.ProbeError(message="no remote")
+    assert git.probe_atomic_push(
+        push_url="fake://origin", base_branch="main", base_sha="a"
+    ) == DeliveryGit.ProbeError(message="no atomic")
+    assert github.stack_capability() is False
+    assert github.base_merge_rules("main") == DeliveryGitHub.ProbeError(message="HTTP 500")
+    assert git.calls == [
+        ("push_urls",),
+        ("probe_atomic_push", "fake://origin", "main", "a"),
+    ]
+    assert github.calls == [("stack_capability",), ("base_merge_rules", "main")]
 
 
 def test_fake_failure_injection_logs_before_raising() -> None:

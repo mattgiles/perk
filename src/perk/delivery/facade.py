@@ -1,22 +1,25 @@
-"""The canonical repository-scoped delivery status façade.
+"""The canonical repository-scoped delivery status and authoring-Prepare façade.
 
-``Delivery`` is the compact public interface for delivery-train status. It composes three
-nominal aggregate authorities and delegates the pure projection to :mod:`perk.delivery.train`.
-The pure core and production adapters remain internal seams while later operation families
-migrate onto this façade.
+``Delivery`` composes three nominal aggregate authorities. ``status`` delegates its pure
+projection to :mod:`perk.delivery.train`; ``prepare(kind="authoring")`` owns the ordered live
+capability observations while :mod:`perk.delivery.capability` owns their stable private rows.
+Construction remains assignment-only, and deferred operation families stay on internal seams.
 """
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
+from typing import Literal
 
 from perk.backends.issue_backend import IssueBackendError, PlanState
 from perk.backends.objective_store import ObjectiveState, ObjectiveStoreError
-from perk.delivery import train
+from perk.delivery import capability, train
 from perk.delivery.journal import JournalFold
 from perk.delivery.persistence import TrainPersistenceError
+from perk.substrate import git as git_mod
 
-_STATUS_ERROR_TYPES = frozenset(
+_DELIVERY_ERROR_TYPES = frozenset(
     {
+        "capability_unsupported",
         "objective_not_found",
         "invalid_delivery_policy",
         "invalid_train",
@@ -25,6 +28,30 @@ _STATUS_ERROR_TYPES = frozenset(
         "supersession_corruption",
     }
 )
+
+
+@dataclass(frozen=True)
+class PrepareRequest:
+    """Request the live preflight for one delivery operation family."""
+
+    kind: Literal["authoring"]
+    base: str | None
+
+    def __post_init__(self) -> None:
+        if self.kind != "authoring":
+            raise ValueError(f"unknown prepare kind: {self.kind!r}")
+
+
+@dataclass(frozen=True)
+class PrepareResult:
+    """The effective base successfully checked for authoring."""
+
+    kind: Literal["authoring"]
+    base: str
+
+    def __post_init__(self) -> None:
+        if self.kind != "authoring":
+            raise ValueError(f"unknown prepare kind: {self.kind!r}")
 
 
 @dataclass(frozen=True)
@@ -50,11 +77,11 @@ class StatusResult:
 
 
 class DeliveryError(Exception):
-    """A bounded delivery-status failure with a stable machine ``error_type``."""
+    """A bounded delivery-façade failure with a stable machine ``error_type``."""
 
     def __init__(self, message: str, *, error_type: str) -> None:
-        if error_type not in _STATUS_ERROR_TYPES:
-            allowed = ", ".join(sorted(_STATUS_ERROR_TYPES))
+        if error_type not in _DELIVERY_ERROR_TYPES:
+            allowed = ", ".join(sorted(_DELIVERY_ERROR_TYPES))
             raise ValueError(f"unknown delivery error type {error_type!r} (allowed: {allowed})")
         super().__init__(message)
         self.error_type = error_type
@@ -80,7 +107,19 @@ class DeliveryPersistence(ABC):
 
 
 class DeliveryGit(ABC):
-    """Aggregate status authority for repository Git observations."""
+    """Aggregate status and authoring-Prepare authority for repository Git observations."""
+
+    @dataclass(frozen=True)
+    class PushUrlsResult:
+        urls: tuple[str, ...]
+
+    @dataclass(frozen=True)
+    class AtomicPushResult:
+        pass
+
+    @dataclass(frozen=True)
+    class ProbeError:
+        message: str
 
     @abstractmethod
     def trunk_branch(self) -> str:
@@ -95,6 +134,22 @@ class DeliveryGit(ABC):
     @abstractmethod
     def remote_branch_sha(self, branch: str) -> str | None:
         """Observe one remote branch head."""
+        ...
+
+    @abstractmethod
+    def push_urls(self) -> PushUrlsResult | ProbeError:
+        """Resolve every configured push URL or return the expected Git failure."""
+        ...
+
+    @abstractmethod
+    def probe_atomic_push(
+        self,
+        *,
+        push_url: str,
+        base_branch: str,
+        base_sha: str,
+    ) -> AtomicPushResult | ProbeError:
+        """Run one no-op atomic push probe or return the expected Git failure."""
         ...
 
     @abstractmethod
@@ -114,7 +169,26 @@ class DeliveryGit(ABC):
 
 
 class DeliveryGitHub(ABC):
-    """Aggregate status authority for GitHub PR and native-stack observations."""
+    """Aggregate status and authoring-Prepare authority for GitHub observations."""
+
+    @dataclass(frozen=True)
+    class MergeRules:
+        squash_allowed: bool
+        merge_queue_required: bool
+
+    @dataclass(frozen=True)
+    class ProbeError:
+        message: str
+
+    @abstractmethod
+    def stack_capability(self) -> bool:
+        """Whether the host schema exposes native stacks, failing closed to ``False``."""
+        ...
+
+    @abstractmethod
+    def base_merge_rules(self, base: str) -> MergeRules | ProbeError:
+        """Read direct-merge rules for ``base`` or return the expected gateway failure."""
+        ...
 
     @abstractmethod
     def pr_facts(self, number: int) -> train.PrFactsView | None:
@@ -132,8 +206,17 @@ class DeliveryGitHub(ABC):
         ...
 
 
+def _raw_prepare_git_error(exc: git_mod.GitError | train.TrainReconstructionError) -> str:
+    """Preserve the old authoring path's raw Git detail when status adapters are reused."""
+    if isinstance(exc, train.TrainReconstructionError):
+        cause = exc.__cause__
+        if isinstance(cause, git_mod.GitError):
+            return str(cause)
+    return str(exc)
+
+
 class Delivery:
-    """Repository-scoped delivery operations, beginning with the status vertical slice."""
+    """Repository-scoped delivery status and authoring-Prepare operations."""
 
     def __init__(
         self,
@@ -145,6 +228,77 @@ class Delivery:
         self._persistence = persistence
         self._git = git
         self._github = github
+
+    def prepare(self, request: PrepareRequest) -> PrepareResult:
+        """Check authoring capability and return the effective base or one bounded refusal."""
+        effective_base = request.base
+        if effective_base is None:
+            try:
+                effective_base = self._git.trunk_branch()
+            except train.TrainReconstructionError as exc:
+                if exc.error_type != "git_error":
+                    raise
+                raise DeliveryError(_raw_prepare_git_error(exc), error_type="git_error") from exc
+            except git_mod.GitError as exc:
+                raise DeliveryError(str(exc), error_type="git_error") from exc
+
+        checks: list[capability._CapabilityCheck] = [
+            capability._native_stack_check(self._github.stack_capability())
+        ]
+
+        rules = self._github.base_merge_rules(effective_base)
+        if isinstance(rules, DeliveryGitHub.ProbeError):
+            checks.append(capability._merge_rules_check(effective_base, error=rules.message))
+        else:
+            checks.append(
+                capability._merge_rules_check(
+                    effective_base,
+                    squash_allowed=rules.squash_allowed,
+                    merge_queue_required=rules.merge_queue_required,
+                )
+            )
+
+        base_sha: str | None
+        try:
+            base_sha = self._git.remote_branch_sha(effective_base)
+        except train.TrainReconstructionError as exc:
+            if exc.error_type != "git_error":
+                raise
+            base_sha = None
+            checks.append(
+                capability._remote_base_check(effective_base, error=_raw_prepare_git_error(exc))
+            )
+        except git_mod.GitError as exc:
+            base_sha = None
+            checks.append(capability._remote_base_check(effective_base, error=str(exc)))
+        else:
+            checks.append(capability._remote_base_check(effective_base, sha=base_sha))
+
+        if base_sha is not None:
+            push_urls = self._git.push_urls()
+            if isinstance(push_urls, DeliveryGit.ProbeError):
+                checks.append(capability._push_urls_error_check(push_urls.message))
+            elif not push_urls.urls:
+                checks.append(capability._empty_push_urls_check())
+            else:
+                for push_url in push_urls.urls:
+                    probe = self._git.probe_atomic_push(
+                        push_url=push_url,
+                        base_branch=effective_base,
+                        base_sha=base_sha,
+                    )
+                    error = probe.message if isinstance(probe, DeliveryGit.ProbeError) else None
+                    checks.append(capability._atomic_push_check(push_url, error=error))
+
+        failures = tuple(check for check in checks if not check.ok)
+        if failures:
+            details = "\n".join(f"- {check.name}: {check.detail}" for check in failures)
+            raise DeliveryError(
+                f"This repository cannot take a stacked delivery train against base "
+                f"{effective_base!r}:\n{details}",
+                error_type="capability_unsupported",
+            )
+        return PrepareResult(kind="authoring", base=effective_base)
 
     def status(self, request: StatusRequest) -> StatusResult:
         """Reconstruct one delivery status and expose its train/no-train branches explicitly."""
@@ -158,7 +312,10 @@ class Delivery:
                 github=self._github,
             )
         except train.TrainReconstructionError as exc:
-            if exc.error_type not in _STATUS_ERROR_TYPES:
+            if (
+                exc.error_type == "capability_unsupported"
+                or exc.error_type not in _DELIVERY_ERROR_TYPES
+            ):
                 raise
             raise DeliveryError(str(exc), error_type=exc.error_type) from exc
         except (IssueBackendError, ObjectiveStoreError, TrainPersistenceError) as exc:

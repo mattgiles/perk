@@ -1,4 +1,4 @@
-"""Owned in-memory fakes for the delivery status façade's aggregate authorities."""
+"""Constructor-configured fakes for the delivery façade's aggregate authorities."""
 
 from collections.abc import Mapping
 
@@ -15,6 +15,8 @@ from perk.delivery.train import (
 )
 
 type Call = tuple[str | int, ...]
+
+_DEFAULT_MERGE_RULES = DeliveryGitHub.MergeRules(squash_allowed=True, merge_queue_required=False)
 
 
 class _FailureMixin:
@@ -70,13 +72,16 @@ class FakeDeliveryPersistence(_FailureMixin, DeliveryPersistence):
 
 
 class FakeDeliveryGit(_FailureMixin, DeliveryGit):
-    """Minimum status fake for trunk and Git observations."""
+    """Minimum status/Prepare fake for trunk and Git observations."""
 
     def __init__(
         self,
         *,
         trunk: str = "main",
         branches: Mapping[str, str] | None = None,
+        push_urls: tuple[str, ...] = ("fake://origin",),
+        push_urls_error: str | None = None,
+        atomic_push_errors: Mapping[str, str] | None = None,
         ancestry: Mapping[tuple[str, str], bool | None] | None = None,
         worktrees: tuple[WorktreeFacts, ...] = (),
         base_heads: Mapping[str, BaseHeadObservation] | None = None,
@@ -85,6 +90,9 @@ class FakeDeliveryGit(_FailureMixin, DeliveryGit):
         super().__init__(errors)
         self._trunk = trunk
         self._branches = dict(branches or {})
+        self._push_urls = tuple(push_urls)
+        self._push_urls_error = push_urls_error
+        self._atomic_push_errors = dict(atomic_push_errors or {})
         self._ancestry = dict(ancestry or {})
         self._worktrees = tuple(worktrees)
         self._base_heads = dict(base_heads or {})
@@ -106,6 +114,27 @@ class FakeDeliveryGit(_FailureMixin, DeliveryGit):
         self.calls.append(call)
         self._raise_failure(call)
         return self._branches.get(branch)
+
+    def push_urls(self) -> DeliveryGit.PushUrlsResult | DeliveryGit.ProbeError:
+        call: Call = ("push_urls",)
+        self.calls.append(call)
+        if self._push_urls_error is not None:
+            return DeliveryGit.ProbeError(message=self._push_urls_error)
+        return DeliveryGit.PushUrlsResult(urls=self._push_urls)
+
+    def probe_atomic_push(
+        self,
+        *,
+        push_url: str,
+        base_branch: str,
+        base_sha: str,
+    ) -> DeliveryGit.AtomicPushResult | DeliveryGit.ProbeError:
+        call: Call = ("probe_atomic_push", push_url, base_branch, base_sha)
+        self.calls.append(call)
+        error = self._atomic_push_errors.get(push_url)
+        if error is not None:
+            return DeliveryGit.ProbeError(message=error)
+        return DeliveryGit.AtomicPushResult()
 
     def is_ancestor(self, ancestor_sha: str, head_sha: str) -> bool | None:
         call: Call = ("is_ancestor", ancestor_sha, head_sha)
@@ -129,21 +158,39 @@ class FakeDeliveryGit(_FailureMixin, DeliveryGit):
 
 
 class FakeDeliveryGitHub(_FailureMixin, DeliveryGitHub):
-    """Minimum status fake for PR and native-stack observations."""
+    """Minimum status/Prepare fake for GitHub observations."""
 
     def __init__(
         self,
         *,
+        stack_capable: bool = True,
+        merge_rules: DeliveryGitHub.MergeRules = _DEFAULT_MERGE_RULES,
+        merge_rules_error: str | None = None,
         prs: Mapping[int, PrFactsView] | None = None,
         branch_prs: Mapping[str, BranchPrView] | None = None,
         stacks: Mapping[int, StackView] | None = None,
         errors: Mapping[Call, Exception] | None = None,
     ) -> None:
         super().__init__(errors)
+        self._stack_capable = stack_capable
+        self._merge_rules = merge_rules
+        self._merge_rules_error = merge_rules_error
         self._prs = dict(prs or {})
         self._branch_prs = dict(branch_prs or {})
         self._stacks = dict(stacks or {})
         self.calls: list[Call] = []
+
+    def stack_capability(self) -> bool:
+        call: Call = ("stack_capability",)
+        self.calls.append(call)
+        return self._stack_capable
+
+    def base_merge_rules(self, base: str) -> DeliveryGitHub.MergeRules | DeliveryGitHub.ProbeError:
+        call: Call = ("base_merge_rules", base)
+        self.calls.append(call)
+        if self._merge_rules_error is not None:
+            return DeliveryGitHub.ProbeError(message=self._merge_rules_error)
+        return self._merge_rules
 
     def pr_facts(self, number: int) -> PrFactsView | None:
         call: Call = ("pr_facts", number)

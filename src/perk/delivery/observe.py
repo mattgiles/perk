@@ -1,9 +1,9 @@
 """Production adapters for the delivery façade and deferred internal readers.
 
 :func:`resolve_delivery` is the sole public production constructor for the canonical
-:class:`perk.delivery.facade.Delivery` status slice. Construction is assignment-only and does
-no configuration, credential, Git, subprocess, or network work; the nominal adapters resolve
-or observe their authorities only when a status method needs them.
+:class:`perk.delivery.facade.Delivery` status and authoring-Prepare slices. Construction is
+assignment-only and does no configuration, credential, Git, subprocess, or network work; the
+nominal adapters resolve or observe their authorities only when an operation needs them.
 
 The compatibility ``TrainReads`` / ``resolve_train_reads`` / ``reconstruct_repo_train`` seams
 remain internal while the later delivery operation families migrate. Landing observations also
@@ -37,10 +37,12 @@ from perk.substrate import git as git_mod
 
 
 class RepoDeliveryGit(DeliveryGit):
-    """The production aggregate Git authority: read-only observation over
-    one repo. Failures raise the typed ``git_error`` — except local-observation gaps
-    (unavailable objects, an unreadable worktree), which degrade honestly per the seam's
-    contract."""
+    """The production aggregate Git authority over one repository.
+
+    Status failures raise typed ``git_error`` values. Prepare's continuable push observations
+    instead return frozen success/error discriminants; only expected ``GitError`` values are
+    converted.
+    """
 
     def __init__(self, repo_root: Path, *, remote: str = "origin") -> None:
         self._repo_root = repo_root
@@ -69,6 +71,31 @@ class RepoDeliveryGit(DeliveryGit):
             raise TrainReconstructionError(
                 f"git ls-remote failed for branch {branch!r}: {exc}", error_type="git_error"
             ) from exc
+
+    def push_urls(self) -> DeliveryGit.PushUrlsResult | DeliveryGit.ProbeError:
+        try:
+            urls = git_mod.push_urls(self._repo_root, remote=self._remote)
+        except git_mod.GitError as exc:
+            return DeliveryGit.ProbeError(message=str(exc))
+        return DeliveryGit.PushUrlsResult(urls=tuple(urls))
+
+    def probe_atomic_push(
+        self,
+        *,
+        push_url: str,
+        base_branch: str,
+        base_sha: str,
+    ) -> DeliveryGit.AtomicPushResult | DeliveryGit.ProbeError:
+        try:
+            git_mod.probe_atomic_push(
+                self._repo_root,
+                push_url=push_url,
+                base_branch=base_branch,
+                base_sha=base_sha,
+            )
+        except git_mod.GitError as exc:
+            return DeliveryGit.ProbeError(message=str(exc))
+        return DeliveryGit.AtomicPushResult()
 
     def is_ancestor(self, ancestor_sha: str, head_sha: str) -> bool | None:
         """Ancestry over fetched objects; ``None`` when Git cannot answer honestly."""
@@ -109,13 +136,28 @@ class RepoDeliveryGit(DeliveryGit):
 
 
 class RepoDeliveryGitHub(DeliveryGitHub):
-    """The production aggregate GitHub authority over ``perk.github.stacks``:
-    the stable PR read hard-fails as ``github_error``; the preview stack read tolerates every
-    ``GitHubError`` to ``StackView(available=False)`` (Decision: preview instability is
-    information, never a command failure)."""
+    """The production aggregate GitHub authority over ``perk.github.stacks``.
+
+    Stable status reads hard-fail as ``github_error`` and preview stack reads tolerate gateway
+    failures. Prepare receives the gateway's fail-closed stack bool and a frozen merge-rule
+    success/error discriminant so it can continue independent observations.
+    """
 
     def __init__(self, repo_root: Path) -> None:
         self._repo_root = repo_root
+
+    def stack_capability(self) -> bool:
+        return stacks.stack_capability(self._repo_root)
+
+    def base_merge_rules(self, base: str) -> DeliveryGitHub.MergeRules | DeliveryGitHub.ProbeError:
+        try:
+            rules = stacks.base_merge_rules(self._repo_root, base)
+        except GitHubError as exc:
+            return DeliveryGitHub.ProbeError(message=str(exc))
+        return DeliveryGitHub.MergeRules(
+            squash_allowed=rules.squash_allowed,
+            merge_queue_required=rules.merge_queue_required,
+        )
 
     def pr_facts(self, number: int) -> PrFactsView | None:
         try:
