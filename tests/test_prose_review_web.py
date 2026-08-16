@@ -13,6 +13,8 @@ from perk_dev.prose_map.catalog import build_catalog
 from perk_dev.prose_map.models import Fragment
 from perk_dev.prose_review import web
 from perk_dev.prose_review.catalog import CatalogSnapshot
+from perk_dev.prose_review.comparison import comparison_options
+from perk_dev.prose_review.dto import ComparisonOptionsOut
 from perk_dev.prose_review.source_adapter import typescript as typescript_adapter_module
 from perk_dev.prose_review.web import create_app
 
@@ -199,6 +201,123 @@ def test_catalog_tree_serves_the_fixed_order_tree(snapshot: CatalogSnapshot, rep
     payload = response.json()
     assert list(payload.keys()) == ["capabilities"]
     assert payload["capabilities"][0]["label"] == "Foundation"
+    _assert_security_headers(response)
+
+
+def test_compare_serves_canonical_and_placed_snapshot_projections(
+    snapshot: CatalogSnapshot,
+    repo: Path,
+) -> None:
+    client = _client(snapshot, repo)
+    canonical_response = client.get(
+        "/api/compare",
+        params={"unit": "markdown:skills/perk-plan/SKILL.md"},
+    )
+    placed_response = client.get(
+        "/api/compare",
+        params={
+            "unit": "markdown:skills/perk-plan/SKILL.md",
+            "shape": "plan.warm",
+            "position": 3,
+        },
+    )
+
+    canonical = comparison_options(snapshot, "markdown:skills/perk-plan/SKILL.md")
+    placed = comparison_options(
+        snapshot,
+        "markdown:skills/perk-plan/SKILL.md",
+        shape_id="plan.warm",
+        position=3,
+    )
+    assert canonical is not None
+    assert placed is not None
+    assert canonical_response.status_code == 200
+    assert canonical_response.json() == ComparisonOptionsOut.from_domain(canonical).model_dump(
+        mode="json"
+    )
+    assert canonical_response.json()["origin"]["shape"] is None
+    assert canonical_response.json()["origin"]["position"] is None
+    assert placed_response.status_code == 200
+    assert placed_response.json() == ComparisonOptionsOut.from_domain(placed).model_dump(
+        mode="json"
+    )
+    assert placed_response.json()["origin"]["shape"]["id"] == "plan.warm"
+    assert placed_response.json()["origin"]["assembly"] == "plan-authoring"
+    assert placed_response.json()["origin"]["position"] == 3
+    _assert_security_headers(canonical_response)
+    _assert_security_headers(placed_response)
+
+
+@pytest.mark.parametrize(
+    "params",
+    [
+        {"unit": "unknown"},
+        {"unit": "markdown:skills/perk-plan/SKILL.md", "shape": "plan.warm"},
+        {"unit": "markdown:skills/perk-plan/SKILL.md", "position": 3},
+        {
+            "unit": "markdown:skills/perk-plan/SKILL.md",
+            "shape": "plan.warm",
+            "position": 0,
+        },
+        {
+            "unit": "markdown:skills/perk-plan/SKILL.md",
+            "shape": "plan.warm",
+            "position": 1,
+        },
+        {
+            "unit": "typescript-tool:plan_review",
+            "shape": "plan.warm",
+            "position": 3,
+        },
+    ],
+)
+def test_compare_maps_every_incoherent_subject_to_one_fixed_404(
+    snapshot: CatalogSnapshot,
+    repo: Path,
+    params: dict[str, str | int],
+) -> None:
+    response = _client(snapshot, repo).get("/api/compare", params=params)
+    assert response.status_code == 404
+    assert response.json() == {"detail": "unknown comparison subject"}
+    _assert_security_headers(response)
+
+
+@pytest.mark.parametrize(
+    "params",
+    [
+        {},
+        {"unit": "markdown:skills/perk-plan/SKILL.md", "position": "not-an-integer"},
+    ],
+)
+def test_compare_keeps_fastapi_query_guard_422s(
+    snapshot: CatalogSnapshot,
+    repo: Path,
+    params: dict[str, str],
+) -> None:
+    response = _client(snapshot, repo).get("/api/compare", params=params)
+    assert response.status_code == 422
+    _assert_security_headers(response)
+
+
+def test_compare_never_invokes_source_readers_or_adapters(
+    snapshot: CatalogSnapshot,
+    repo: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def unexpected_read(*args: object, **kwargs: object) -> None:
+        raise AssertionError("comparison endpoint attempted a source read")
+
+    monkeypatch.setattr(web.source_adapter, "read_source", unexpected_read)
+    monkeypatch.setattr(
+        typescript_adapter_module.TypeScriptSourceAdapter,
+        "resolve_range",
+        unexpected_read,
+    )
+    response = _client(snapshot, repo).get(
+        "/api/compare",
+        params={"unit": "typescript-tool:plan_review"},
+    )
+    assert response.status_code == 200
     _assert_security_headers(response)
 
 

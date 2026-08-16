@@ -7,10 +7,19 @@ import pytest
 from perk_dev.prose_map.catalog import build_catalog
 from perk_dev.prose_map.models import Fragment
 from perk_dev.prose_review.catalog import CapabilityNode, CatalogSnapshot
+from perk_dev.prose_review.comparison import (
+    ComparisonChoice,
+    ComparisonGroup,
+    ComparisonOptions,
+    ComparisonPlacement,
+    comparison_options,
+)
 from perk_dev.prose_review.dto import (
     CapabilityNodeOut,
     CapabilityTreeOut,
     CatalogSummaryOut,
+    ComparisonOptionsOut,
+    ComparisonPlacementOut,
     FragmentRefOut,
     SearchOut,
     SessionShapeOut,
@@ -309,6 +318,124 @@ def test_lineage_out_shape_for_a_lineage_bearing_unit(snapshot: CatalogSnapshot)
     assert list(rule.keys()) == ["id", "relationship", "targets"]
     assert rule["relationship"] in ("generated-from", "materializes-to", "bundled-as")
     assert rule["targets"], "authored lineage rules always carry targets"
+
+
+def test_comparison_out_matches_projection_with_exact_nested_key_order(
+    snapshot: CatalogSnapshot,
+) -> None:
+    options = comparison_options(
+        snapshot,
+        "markdown:skills/perk-plan/SKILL.md",
+        shape_id="plan.warm",
+        position=3,
+    )
+    assert options is not None
+    dumped = ComparisonOptionsOut.from_domain(options).model_dump(mode="json")
+    json.dumps(dumped)
+
+    assert list(dumped) == ["origin", "groups"]
+    assert list(dumped["origin"]) == [
+        "unit",
+        "breadcrumb",
+        "shape",
+        "assembly",
+        "position",
+        "label",
+    ]
+    assert list(dumped["origin"]["unit"]) == ["id", "kind", "path"]
+    assert list(dumped["origin"]["breadcrumb"][0]) == ["id", "label"]
+    assert list(dumped["origin"]["shape"]) == ["id", "label", "delivery"]
+    assert [group["relation"] for group in dumped["groups"]] == [
+        "delivery-sibling",
+        "adjacent-layer",
+        "alias-consumer",
+        "concern-relative",
+        "capability-parent-child",
+    ]
+    assert all(list(group) == ["relation", "label", "choices"] for group in dumped["groups"])
+    assert all(group["choices"] for group in dumped["groups"])
+    for group in dumped["groups"]:
+        assert all(list(choice) == ["label", "detail", "target"] for choice in group["choices"])
+        assert all(choice["detail"] is not None for choice in group["choices"])
+
+
+def test_comparison_placement_out_supports_exactly_the_three_domain_variants(
+    snapshot: CatalogSnapshot,
+) -> None:
+    unit = snapshot.get_unit("markdown:skills/perk-plan/SKILL.md")
+    shape = snapshot.get_session_shape("plan.warm")
+    assert unit is not None
+    assert shape is not None
+    breadcrumb = snapshot.capability_breadcrumb(unit.capability)
+    placements = (
+        ComparisonPlacement(
+            unit=unit,
+            breadcrumb=breadcrumb,
+            shape=None,
+            assembly=None,
+            position=None,
+            label=unit.candidate.id,
+        ),
+        ComparisonPlacement(
+            unit=unit,
+            breadcrumb=breadcrumb,
+            shape=None,
+            assembly="unshaped-assembly",
+            position=2,
+            label="Unshaped layer",
+        ),
+        ComparisonPlacement(
+            unit=unit,
+            breadcrumb=breadcrumb,
+            shape=shape,
+            assembly="plan-authoring",
+            position=3,
+            label="Bound plan skill",
+        ),
+    )
+
+    dumped = [
+        ComparisonPlacementOut.from_domain(item).model_dump(mode="json") for item in placements
+    ]
+    assert [(item["shape"], item["assembly"], item["position"]) for item in dumped] == [
+        (None, None, None),
+        (None, "unshaped-assembly", 2),
+        (
+            {
+                "id": "plan.warm",
+                "label": "Plan authoring — warm door",
+                "delivery": "warm",
+            },
+            "plan-authoring",
+            3,
+        ),
+    ]
+
+
+def test_comparison_out_allows_an_empty_top_level_group_list(
+    snapshot: CatalogSnapshot,
+) -> None:
+    unit = snapshot.get_unit("markdown:skills/perk-plan/SKILL.md")
+    assert unit is not None
+    origin = ComparisonPlacement(
+        unit=unit,
+        breadcrumb=snapshot.capability_breadcrumb(unit.capability),
+        shape=None,
+        assembly=None,
+        position=None,
+        label=unit.candidate.id,
+    )
+    assert ComparisonOptionsOut.from_domain(ComparisonOptions(origin=origin, groups=())).model_dump(
+        mode="json"
+    ) == {
+        "origin": ComparisonPlacementOut.from_domain(origin).model_dump(mode="json"),
+        "groups": [],
+    }
+
+    with pytest.raises(ValueError, match="require a label and choices"):
+        ComparisonGroup(relation="alias-consumer", label="Alias consumers", choices=())
+    with pytest.raises(ValueError, match="require labels and details"):
+        ComparisonChoice(label="", detail="detail", target=origin)
 
 
 def test_search_out_key_order_from_real_hits(snapshot: CatalogSnapshot) -> None:

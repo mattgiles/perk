@@ -31,12 +31,14 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import HTMLResponse, Response
 
 from perk_dev.prose_map.models import Audience, ProseKind, ProseRole
+from perk_dev.prose_review import comparison as comparison_module
 from perk_dev.prose_review import search as search_module
 from perk_dev.prose_review import source_adapter
 from perk_dev.prose_review.catalog import CatalogSnapshot
 from perk_dev.prose_review.dto import (
     CapabilityTreeOut,
     CatalogSummaryOut,
+    ComparisonOptionsOut,
     SearchOut,
     UnitInspectOut,
     UnitSourceOut,
@@ -231,6 +233,22 @@ def create_app(
             # The /api/source no-leak posture: one fixed detail for an unknown unit.
             raise HTTPException(status_code=404, detail="unknown unit")
         return UnitInspectOut.from_domain(snapshot, routed)
+
+    @app.get("/api/compare", response_model=ComparisonOptionsOut)
+    def compare(
+        unit: str,
+        shape: str | None = None,
+        position: int | None = None,
+    ) -> ComparisonOptionsOut:
+        options = comparison_module.comparison_options(
+            snapshot,
+            unit,
+            shape_id=shape,
+            position=position,
+        )
+        if options is None:
+            raise HTTPException(status_code=404, detail="unknown comparison subject")
+        return ComparisonOptionsOut.from_domain(options)
 
     @app.get("/api/search", response_model=SearchOut)
     def catalog_search(

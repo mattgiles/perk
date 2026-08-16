@@ -81,6 +81,10 @@ function isReadOnlyReason(value: unknown): value is ReadOnlyReason {
   return typeof value === "string" && (READ_ONLY_REASONS as readonly string[]).includes(value);
 }
 
+export function sourceCurrentText(source: UnitSource): string {
+  return source.before + source.focus + source.after;
+}
+
 /** Structurally validate an unknown JSON payload as one source response. */
 export function parseUnitSource(value: unknown): UnitSource | null {
   if (

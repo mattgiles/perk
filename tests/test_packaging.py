@@ -328,7 +328,7 @@ def test_docs_site_publish_isolation():
     assert not any(entry.startswith("docs") for entry in root["files"]), root["files"]
 
     # The prose-review workspace shares the same dev-only isolation posture: private, zero
-    # runtime deps, exact-pinned toolchain (docs/design/prose-review-stack.md).
+    # runtime deps, exact-pinned client library and toolchain (docs/design/prose-review-stack.md).
     workbench = json.loads(
         (REPO_ROOT / "tools/prose-review/package.json").read_text(encoding="utf-8")
     )
@@ -338,6 +338,7 @@ def test_docs_site_publish_isolation():
         "@types/react": "19.2.18",
         "@types/react-dom": "19.2.4",
         "@vitejs/plugin-react": "6.0.5",
+        "diff": "8.0.4",
         "react": "19.2.8",
         "react-dom": "19.2.8",
         "vite": "8.2.1",

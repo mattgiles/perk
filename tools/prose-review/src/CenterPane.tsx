@@ -1,8 +1,15 @@
-import { useEffect, useState } from "react";
+import { type Change, diffLines } from "diff";
+import { type ReactNode, useEffect, useState } from "react";
 import type { Mode, Selection } from "./App.tsx";
 import { BOUNDARY_INFO } from "./boundaries.ts";
-import { type SourceTarget, sourceTargetKey } from "./selection.ts";
-import { READ_ONLY_PRESENTATION } from "./source.ts";
+import {
+  type ComparisonPlacement,
+  comparisonPlacementKey,
+  type SelectedComparison,
+} from "./comparison.ts";
+import type { ComparisonLoadState } from "./comparisonLoad.ts";
+import { type SourceTarget, sourceTargetKey, wholeUnitTarget } from "./selection.ts";
+import { READ_ONLY_PRESENTATION, sourceCurrentText } from "./source.ts";
 import { createSourceLoader, type SourceLoadState } from "./sourceLoad.ts";
 import type { BoundaryKind } from "./wire.ts";
 
@@ -12,7 +19,7 @@ const MODES: { id: Mode; label: string }[] = [
   { id: "assembly", label: "Assembly" },
 ];
 
-function SourceView({ target }: { target: SourceTarget }) {
+function useSourceLoad(target: SourceTarget): SourceLoadState {
   const [state, setState] = useState<SourceLoadState>({ status: "loading" });
   const [loader] = useState(() => createSourceLoader(setState));
 
@@ -21,7 +28,10 @@ function SourceView({ target }: { target: SourceTarget }) {
   }, [loader, target]);
 
   useEffect(() => () => loader.dispose(), [loader]);
+  return state;
+}
 
+function SourceLoadPresentation({ state }: { state: SourceLoadState }) {
   if (state.status === "loading") {
     return <p className="pane-hint">Loading source…</p>;
   }
@@ -75,6 +85,10 @@ function SourceView({ target }: { target: SourceTarget }) {
   );
 }
 
+function SourceView({ target }: { target: SourceTarget }) {
+  return <SourceLoadPresentation state={useSourceLoad(target)} />;
+}
+
 function BoundaryExplanation({ boundary, label }: { boundary: BoundaryKind; label: string }) {
   const info = BOUNDARY_INFO[boundary];
   return (
@@ -95,17 +109,262 @@ function EditMode({ selection }: { selection: Selection | null }) {
   if (selection.type === "boundary") {
     return <BoundaryExplanation boundary={selection.boundary} label={selection.label} />;
   }
+  if (selection.type === "shape") {
+    return (
+      <p className="pane-hint">
+        This shape has no singular source. Select one of its source-bearing layers to view it.
+      </p>
+    );
+  }
   return <SourceView key={sourceTargetKey(selection.target)} target={selection.target} />;
+}
+
+function ComparisonHeader({ placement }: { placement: ComparisonPlacement }) {
+  return (
+    <div className="comparison-header">
+      <h3>{placement.label}</h3>
+      <p className="comparison-breadcrumb">
+        {placement.breadcrumb.map((capability) => capability.label).join(" / ")}
+      </p>
+      {placement.shape !== null && (
+        <p>
+          {placement.shape.label} <span className="delivery-badge">{placement.shape.delivery}</span>
+        </p>
+      )}
+      {placement.assembly !== null && (
+        <p>
+          {placement.assembly} #{placement.position} · {placement.label}
+        </p>
+      )}
+      <p className="source-path">{placement.unit.path}</p>
+      <p>
+        <span className="kind-badge">{placement.unit.kind}</span>
+      </p>
+    </div>
+  );
+}
+
+function DiffChunks({ chunks, side }: { chunks: Change[]; side: "left" | "right" }) {
+  let offset = 0;
+  return (
+    <pre className="comparison-source-text">
+      {chunks.map((chunk) => {
+        offset += chunk.value.length;
+        if ((side === "left" && chunk.added) || (side === "right" && chunk.removed)) {
+          return null;
+        }
+        const changed = side === "left" ? chunk.removed : chunk.added;
+        return (
+          <span
+            key={`${offset}:${chunk.added}:${chunk.removed}`}
+            className={
+              changed
+                ? `comparison-${side === "left" ? "removed" : "added"}`
+                : "comparison-unchanged"
+            }
+          >
+            {chunk.value}
+          </span>
+        );
+      })}
+    </pre>
+  );
+}
+
+function ComparisonSourcePane({
+  placement,
+  state,
+  chunks,
+  side,
+}: {
+  placement: ComparisonPlacement;
+  state: SourceLoadState;
+  chunks: Change[] | null;
+  side: "left" | "right";
+}) {
+  return (
+    <section className="comparison-pane">
+      <ComparisonHeader placement={placement} />
+      {state.status === "loading" && <p className="pane-hint">Loading source…</p>}
+      {state.status === "refused" && (
+        <div className="source-refused">
+          <h3>Source unavailable</h3>
+          <p>{state.detail}</p>
+        </div>
+      )}
+      {state.status === "failed" && <p className="pane-hint">Failed to load source.</p>}
+      {state.status === "loaded" && chunks === null && (
+        <p className="pane-hint">Source loaded; waiting for the other side…</p>
+      )}
+      {state.status === "loaded" && chunks !== null && <DiffChunks chunks={chunks} side={side} />}
+    </section>
+  );
+}
+
+function ComparisonPanes({
+  origin,
+  target,
+  left,
+  right,
+}: {
+  origin: ComparisonPlacement;
+  target: ComparisonPlacement;
+  left: SourceLoadState;
+  right: SourceLoadState;
+}) {
+  const chunks =
+    left.status === "loaded" && right.status === "loaded"
+      ? diffLines(sourceCurrentText(left.source), sourceCurrentText(right.source))
+      : null;
+  const identical = chunks?.every((chunk) => !chunk.added && !chunk.removed) === true;
+  return (
+    <div className="comparison-result">
+      <div className="comparison-legend">
+        <span className="comparison-removed-badge">Removed from origin</span>
+        <span className="comparison-added-badge">Added in target</span>
+        {identical && <span>No differences in current content.</span>}
+      </div>
+      <div className="comparison-grid">
+        <ComparisonSourcePane placement={origin} state={left} chunks={chunks} side="left" />
+        <ComparisonSourcePane placement={target} state={right} chunks={chunks} side="right" />
+      </div>
+    </div>
+  );
+}
+
+function SourceState({
+  unit,
+  children,
+}: {
+  unit: ComparisonPlacement["unit"];
+  children: (state: SourceLoadState) => ReactNode;
+}) {
+  const [target] = useState(() => wholeUnitTarget(unit));
+  return children(useSourceLoad(target));
+}
+
+function SharedComparisonSources({
+  origin,
+  target,
+}: {
+  origin: ComparisonPlacement;
+  target: ComparisonPlacement;
+}) {
+  return (
+    <SourceState
+      key={`shared:${comparisonPlacementKey(origin)}:${comparisonPlacementKey(target)}`}
+      unit={origin.unit}
+    >
+      {(state) => <ComparisonPanes origin={origin} target={target} left={state} right={state} />}
+    </SourceState>
+  );
+}
+
+function DistinctComparisonSources({
+  origin,
+  target,
+}: {
+  origin: ComparisonPlacement;
+  target: ComparisonPlacement;
+}) {
+  return (
+    <SourceState key={`left:${comparisonPlacementKey(origin)}`} unit={origin.unit}>
+      {(left) => (
+        <SourceState key={`right:${comparisonPlacementKey(target)}`} unit={target.unit}>
+          {(right) => <ComparisonPanes origin={origin} target={target} left={left} right={right} />}
+        </SourceState>
+      )}
+    </SourceState>
+  );
+}
+
+function SelectedComparisonPair({
+  origin,
+  selected,
+}: {
+  origin: ComparisonPlacement;
+  selected: SelectedComparison;
+}) {
+  const target = selected.choice.target;
+  const pairKey = JSON.stringify([
+    comparisonPlacementKey(origin),
+    selected.relation,
+    comparisonPlacementKey(target),
+  ]);
+  if (origin.unit.id === target.unit.id) {
+    return <SharedComparisonSources key={pairKey} origin={origin} target={target} />;
+  }
+  return <DistinctComparisonSources key={pairKey} origin={origin} target={target} />;
+}
+
+function CompareMode({
+  selection,
+  state,
+  selected,
+}: {
+  selection: Selection | null;
+  state: ComparisonLoadState;
+  selected: SelectedComparison | null;
+}) {
+  if (selection === null) {
+    return <p className="pane-hint">Select a unit to compare its whole source.</p>;
+  }
+  if (selection.type === "boundary") {
+    return <p className="pane-hint">Boundaries are not comparison subjects.</p>;
+  }
+  if (selection.type === "shape") {
+    return (
+      <p className="pane-hint">
+        Choose a source-bearing assembly layer in the inspector to start comparing this shape.
+      </p>
+    );
+  }
+  if (state.status === "idle" || state.status === "loading") {
+    return <p className="pane-hint">Loading comparison options…</p>;
+  }
+  if (state.status === "refused") {
+    return <p className="pane-hint">Comparison unavailable: {state.detail}</p>;
+  }
+  if (state.status === "failed") {
+    return <p className="pane-hint">Failed to load comparison options.</p>;
+  }
+  if (state.options.groups.length === 0) {
+    return <p className="pane-hint">No graph-backed comparison targets for this unit.</p>;
+  }
+  if (selected === null) {
+    return (
+      <div className="comparison-guidance">
+        <h2>{state.options.origin.label}</h2>
+        <p>Choose a graph-backed comparison target in the inspector.</p>
+      </div>
+    );
+  }
+  return <SelectedComparisonPair origin={state.options.origin} selected={selected} />;
+}
+
+function AssemblyMode({ selection }: { selection: Selection | null }) {
+  if (selection?.type === "shape") {
+    return <p className="pane-hint">Assembly mode does not render a shape preview yet.</p>;
+  }
+  return (
+    <p className="pane-hint">
+      Assembly mode is not built yet: assembly preview is a later capability.
+    </p>
+  );
 }
 
 export function CenterPane({
   mode,
   onModeChange,
   selection,
+  comparisonState,
+  selectedComparison,
 }: {
   mode: Mode;
   onModeChange: (mode: Mode) => void;
   selection: Selection | null;
+  comparisonState: ComparisonLoadState;
+  selectedComparison: SelectedComparison | null;
 }) {
   return (
     <div className="center-content">
@@ -122,17 +381,17 @@ export function CenterPane({
           </button>
         ))}
       </div>
-      {mode === "edit" && <EditMode selection={selection} />}
-      {mode === "compare" && (
-        <p className="pane-hint">
-          Compare mode is not built yet: graph-backed comparison panes are a later capability.
-        </p>
-      )}
-      {mode === "assembly" && (
-        <p className="pane-hint">
-          Assembly mode is not built yet: assembly preview is a later capability.
-        </p>
-      )}
+      <div className="center-mode-body">
+        {mode === "edit" && <EditMode selection={selection} />}
+        {mode === "compare" && (
+          <CompareMode
+            selection={selection}
+            state={comparisonState}
+            selected={selectedComparison}
+          />
+        )}
+        {mode === "assembly" && <AssemblyMode selection={selection} />}
+      </div>
     </div>
   );
 }

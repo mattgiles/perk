@@ -326,9 +326,9 @@ test("startDraftReviewWave: failed Ponytail preflight omits only that child and 
   ]);
   assert.equal(adapter.calls.spawn.length, 1, "zero-retry wave launches once");
   const script = adapter.calls.spawn[0]?.workflowScript ?? "";
-  assert.doesNotMatch(script, /\"key\":\s*\"ponytail\"/, "the unavailable child never spawns");
-  assert.match(script, /\"key\":\s*\"grounding\"/);
-  assert.match(script, /\"key\":\s*\"scope\"/);
+  assert.doesNotMatch(script, /"key":\s*"ponytail"/, "the unavailable child never spawns");
+  assert.match(script, /"key":\s*"grounding"/);
+  assert.match(script, /"key":\s*"scope"/);
 });
 
 test("startDraftReviewWave: strict completeness — a failed lane leaves the wave incomplete (zero retries)", async () => {

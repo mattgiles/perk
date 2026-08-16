@@ -1,11 +1,14 @@
 import { useEffect, useState } from "react";
-import type { Selection } from "./App.tsx";
+import type { Mode, Selection } from "./App.tsx";
 import { BOUNDARY_INFO } from "./boundaries.ts";
+import { comparisonChoiceKey, type SelectedComparison } from "./comparison.ts";
+import type { ComparisonLoadState } from "./comparisonLoad.ts";
 import type { CapabilityRef, UnitInspect } from "./inspect.ts";
 import { createInspectLoader, type InspectLoadState } from "./inspectLoad.ts";
-import { type SourceTarget, wholeUnitTarget } from "./selection.ts";
+import { placedShapeLayerSelection, type SourceTarget, wholeUnitTarget } from "./selection.ts";
 
 type SelectSource = (target: SourceTarget) => void;
+type SelectSelection = (selection: Selection) => void;
 
 function joinBreadcrumb(breadcrumb: CapabilityRef[]): string {
   return breadcrumb.map((capability) => capability.label).join(" / ");
@@ -121,9 +124,77 @@ function Relationships({ detail, onSelect }: { detail: UnitInspect; onSelect: Se
   );
 }
 
+function ComparisonPicker({
+  state,
+  selected,
+  onSelect,
+}: {
+  state: ComparisonLoadState;
+  selected: SelectedComparison | null;
+  onSelect: (selection: SelectedComparison) => void;
+}) {
+  if (state.status === "idle" || state.status === "loading") {
+    return <p className="pane-hint">Loading comparison options…</p>;
+  }
+  if (state.status === "refused") {
+    return <p className="pane-hint">Comparison unavailable: {state.detail}</p>;
+  }
+  if (state.status === "failed") {
+    return <p className="pane-hint">Failed to load comparison options.</p>;
+  }
+  if (state.options.groups.length === 0) {
+    return <p className="pane-hint">No graph-backed comparison targets for this unit.</p>;
+  }
+  return (
+    <section className="inspector-section comparison-picker">
+      <h3>Compare with</h3>
+      {state.options.groups.map((group) => (
+        <div key={group.relation} className="inspector-block">
+          <h4>{group.label}</h4>
+          <ul className="inspector-list">
+            {group.choices.map((choice) => {
+              const candidate = { relation: group.relation, choice };
+              const key = comparisonChoiceKey(group.relation, choice);
+              const active =
+                selected !== null &&
+                comparisonChoiceKey(selected.relation, selected.choice) === key;
+              return (
+                <li key={key}>
+                  <button
+                    type="button"
+                    className={active ? "relation-entry selected" : "relation-entry"}
+                    onClick={() => onSelect(candidate)}
+                  >
+                    {choice.label}
+                  </button>
+                  <span className="relation-note">{choice.detail}</span>
+                </li>
+              );
+            })}
+          </ul>
+        </div>
+      ))}
+    </section>
+  );
+}
+
 // Relationship data remains unit-scoped. The component remounts only when the unit
 // changes, so fragment changes preserve the loaded relationship state.
-function UnitInspector({ target, onSelect }: { target: SourceTarget; onSelect: SelectSource }) {
+function UnitInspector({
+  target,
+  mode,
+  comparisonState,
+  selectedComparison,
+  onComparisonSelect,
+  onSelect,
+}: {
+  target: SourceTarget;
+  mode: Mode;
+  comparisonState: ComparisonLoadState;
+  selectedComparison: SelectedComparison | null;
+  onComparisonSelect: (selection: SelectedComparison) => void;
+  onSelect: SelectSource;
+}) {
   const { unit } = target;
   const [state, setState] = useState<InspectLoadState>({ status: "loading" });
   const [loader] = useState(() => createInspectLoader(setState));
@@ -170,6 +241,13 @@ function UnitInspector({ target, onSelect }: { target: SourceTarget; onSelect: S
           </>
         )}
       </div>
+      {mode === "compare" && (
+        <ComparisonPicker
+          state={comparisonState}
+          selected={selectedComparison}
+          onSelect={onComparisonSelect}
+        />
+      )}
       {state.status === "loading" && <p className="pane-hint">Loading relationships…</p>}
       {state.status === "refused" && (
         <p className="pane-hint">Relationships unavailable: {state.detail}</p>
@@ -183,10 +261,20 @@ function UnitInspector({ target, onSelect }: { target: SourceTarget; onSelect: S
 // The inspector pane: the identity block plus the relationship sections for a unit
 // selection; a boundary selection keeps its owner/explanation block (no fetch).
 export function InspectorPane({
+  mode,
   selection,
+  comparisonState,
+  selectedComparison,
+  onComparisonSelect,
+  onSelection,
   onSelect,
 }: {
+  mode: Mode;
   selection: Selection | null;
+  comparisonState: ComparisonLoadState;
+  selectedComparison: SelectedComparison | null;
+  onComparisonSelect: (selection: SelectedComparison) => void;
+  onSelection: SelectSelection;
   onSelect: SelectSource;
 }) {
   if (selection === null) {
@@ -207,7 +295,63 @@ export function InspectorPane({
       </div>
     );
   }
+  if (selection.type === "shape") {
+    const layers = selection.shape.layers.filter((layer) => layer.unit !== null);
+    return (
+      <div>
+        <div className="identity-block">
+          <h2>{selection.shape.label}</h2>
+          <p className="badge-row">
+            <span className="delivery-badge">{selection.shape.delivery}</span>
+          </p>
+          <p className="inspector-breadcrumb">{joinBreadcrumb(selection.breadcrumb)}</p>
+        </div>
+        {mode === "compare" ? (
+          <section className="inspector-section">
+            <h3>Choose an origin layer</h3>
+            <ol className="inspector-list">
+              {layers.map((layer) => {
+                const unit = layer.unit;
+                if (unit === null) {
+                  return null;
+                }
+                return (
+                  <li key={layer.position}>
+                    <button
+                      type="button"
+                      className="relation-entry"
+                      onClick={() =>
+                        onSelection(
+                          placedShapeLayerSelection(selection.shape, layer.position, unit),
+                        )
+                      }
+                    >
+                      #{layer.position} · {layer.label ?? unit.id}
+                    </button>
+                  </li>
+                );
+              })}
+            </ol>
+          </section>
+        ) : (
+          <p className="pane-hint">
+            {mode === "edit"
+              ? "This shape has no singular source. Select a source-bearing assembly layer."
+              : "Assembly mode does not render a shape preview yet."}
+          </p>
+        )}
+      </div>
+    );
+  }
   return (
-    <UnitInspector key={selection.target.unit.id} target={selection.target} onSelect={onSelect} />
+    <UnitInspector
+      key={selection.target.unit.id}
+      target={selection.target}
+      mode={mode}
+      comparisonState={comparisonState}
+      selectedComparison={selectedComparison}
+      onComparisonSelect={onComparisonSelect}
+      onSelect={onSelect}
+    />
   );
 }

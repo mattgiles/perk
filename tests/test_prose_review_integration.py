@@ -21,9 +21,11 @@ import uvicorn
 from perk_dev.prose_map.catalog import build_catalog
 from perk_dev.prose_review.catalog import CatalogSnapshot
 from perk_dev.prose_review.cli import build_frontend
+from perk_dev.prose_review.comparison import comparison_options
 from perk_dev.prose_review.dto import (
     CapabilityTreeOut,
     CatalogSummaryOut,
+    ComparisonOptionsOut,
     SearchOut,
     UnitInspectOut,
 )
@@ -172,6 +174,43 @@ def test_search_endpoint_serves_the_snapshot_dto_over_real_http(
     assert response.json() == SearchOut.from_domain(search(index, "plan_review")).model_dump(
         mode="json"
     )
+
+
+def test_compare_endpoint_round_trips_and_targets_the_unchanged_source_path(
+    server: _RunningServer,
+) -> None:
+    options = comparison_options(
+        server.snapshot,
+        TYPESCRIPT_UNIT_ID,
+        shape_id="plan.warm",
+        position=5,
+    )
+    assert options is not None
+    sibling = options.groups[0].choices[0]
+
+    with httpx.Client(base_url=server.base_url, timeout=10) as client:
+        response = client.get(
+            "/api/compare",
+            params={
+                "unit": TYPESCRIPT_UNIT_ID,
+                "shape": "plan.warm",
+                "position": 5,
+            },
+        )
+        source_response = client.get(
+            "/api/source",
+            params={"unit": sibling.target.unit.candidate.id},
+        )
+
+    assert response.status_code == 200
+    assert response.json() == ComparisonOptionsOut.from_domain(options).model_dump(mode="json")
+    assert source_response.status_code == 200
+    source = source_response.json()
+    assert source["unit"] == sibling.target.unit.candidate.id
+    assert source["fragment"] is None
+    assert source["before"] + source["focus"] + source["after"] == (
+        ROOT / TYPESCRIPT_SOURCE_PATH
+    ).read_text(encoding="utf-8")
 
 
 def test_source_endpoint_serves_whole_and_fragment_focus_over_real_http(
