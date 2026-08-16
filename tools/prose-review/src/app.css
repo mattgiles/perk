@@ -22,11 +22,12 @@ body {
 /* Header row over three independently scrollable columns. */
 .app {
   display: grid;
-  grid-template-rows: auto 1fr;
+  grid-template-rows: auto minmax(0, 1fr) auto;
   grid-template-columns: minmax(16rem, 22rem) minmax(0, 1fr) minmax(16rem, 24rem);
   grid-template-areas:
     "header header header"
-    "tree center inspector";
+    "tree center inspector"
+    "drawer drawer drawer";
   height: 100vh;
 }
 
@@ -361,6 +362,23 @@ body {
   overflow-wrap: anywhere;
 }
 
+.workspace-button,
+.discard-button,
+.source-readonly-explanation button,
+.workspace-drawer button {
+  font: inherit;
+  color: inherit;
+  background: none;
+  border: 1px solid color-mix(in srgb, currentcolor 35%, transparent);
+  border-radius: 0.25rem;
+  padding: 0.2rem 0.65rem;
+  cursor: pointer;
+}
+
+.workspace-button {
+  white-space: nowrap;
+}
+
 .source-readonly-explanation h2 {
   margin: 0 0 0.25rem;
   font-size: 1rem;
@@ -398,9 +416,30 @@ body {
   opacity: 0.55;
 }
 
-.source-focus {
-  background: color-mix(in srgb, #2f9e44 18%, transparent);
-  box-shadow: 0 0 0 0.15rem color-mix(in srgb, #2f9e44 35%, transparent);
+.source-edit-regions {
+  display: grid;
+  gap: 0.35rem;
+}
+
+.source-focus-editor {
+  width: 100%;
+  min-height: 6rem;
+  resize: vertical;
+  font-family: ui-monospace, monospace;
+  font-size: 0.85rem;
+  line-height: 1.45;
+  color: inherit;
+  background: color-mix(in srgb, #2f9e44 12%, Canvas);
+  border: 1px solid color-mix(in srgb, #2f9e44 65%, currentcolor);
+  border-radius: 0.25rem;
+  padding: 0.75rem;
+  white-space: pre-wrap;
+}
+
+.dirty-badge {
+  font-size: 0.8rem;
+  font-weight: 700;
+  color: #c92a2a;
 }
 
 .source-readonly-focus {
@@ -495,6 +534,46 @@ body {
 
 .comparison-added {
   background: color-mix(in srgb, #2f9e44 20%, transparent);
+}
+
+.workspace-drawer {
+  grid-area: drawer;
+  border-top: 1px solid color-mix(in srgb, currentcolor 25%, transparent);
+  background: Canvas;
+  padding: 0.65rem 1rem;
+  max-height: 35vh;
+  overflow: auto;
+}
+
+.workspace-drawer h2,
+.workspace-drawer p {
+  margin: 0;
+}
+
+.workspace-drawer ul {
+  list-style: none;
+  margin: 0.5rem 0 0;
+  padding: 0;
+  display: grid;
+  gap: 0.4rem;
+}
+
+.workspace-drawer li {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.workspace-dirty-target {
+  font-family: ui-monospace, monospace;
+  overflow-wrap: anywhere;
+}
+
+.workspace-drawer-actions {
+  display: flex;
+  gap: 0.4rem;
+  flex: none;
 }
 
 .source-refused h2,

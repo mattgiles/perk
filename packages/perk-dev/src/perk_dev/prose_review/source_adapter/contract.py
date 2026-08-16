@@ -6,6 +6,7 @@ from typing import Literal
 
 from perk_dev.prose_map.models import Fragment, ProseKind, RoutedUnit
 
+type NewlineStyle = Literal["none", "lf", "crlf", "cr", "mixed"]
 type RangeFailure = Literal[
     "unsupported-selector",
     "unsupported-source-shape",
@@ -93,20 +94,35 @@ class SourceExtraction:
 
 @dataclass(frozen=True, slots=True)
 class WholeFileSource:
-    """One canonical unit's whole source file, decoded as text."""
+    """One canonical loaded-file snapshot with untouched byte authority."""
 
     unit_id: str
     path: str
     kind: ProseKind
-    text: str
+    content: bytes
+    mode: int
+    newline_style: NewlineStyle
+    load_hash: str
+
+    def __post_init__(self) -> None:
+        if self.mode < 0 or self.mode > 0o7777:
+            raise ValueError("source mode must contain only POSIX permission bits")
+        if len(self.load_hash) != 64 or any(
+            character not in "0123456789abcdef" for character in self.load_hash
+        ):
+            raise ValueError("source load hash must be lowercase SHA-256 hex")
+
+    @property
+    def text(self) -> str:
+        """Strictly decode the immutable canonical bytes."""
+        return self.content.decode("utf-8")
 
 
 @dataclass(frozen=True, slots=True)
 class FocusedSource:
-    """One whole-unit or fragment-focused source read."""
+    """One whole-unit or fragment projection over supplied text."""
 
     unit_id: str
-    path: str
     kind: ProseKind
     fragment: Fragment | None
     before: str
@@ -121,6 +137,20 @@ class FocusedSource:
                 raise ValueError("editable source requires a fragment and no read-only reason")
         elif self.read_only_reason is None:
             raise ValueError("non-editable source requires a read-only reason")
+
+
+@dataclass(frozen=True, slots=True)
+class LoadedSource:
+    """One canonical file load paired with its requested source projection."""
+
+    file: WholeFileSource
+    view: FocusedSource
+
+    def __post_init__(self) -> None:
+        if self.file.unit_id != self.view.unit_id or self.file.kind != self.view.kind:
+            raise ValueError("loaded source file and view identities must match")
+        if self.view.before + self.view.focus + self.view.after != self.file.text:
+            raise ValueError("loaded source view must reconstruct the canonical file")
 
 
 class SourceAdapter(ABC):

@@ -3,6 +3,8 @@
 from perk_dev.prose_review.source_adapter.contract import (
     CheckHintId,
     FocusedSource,
+    LoadedSource,
+    NewlineStyle,
     RangeFailure,
     RangeResolution,
     ReadOnlyReason,
@@ -18,6 +20,7 @@ from perk_dev.prose_review.source_adapter.contract import (
 )
 from perk_dev.prose_review.source_adapter.read import (
     SourceReadError,
+    project_source,
     read_source,
     read_unit_file,
     read_whole_file,
@@ -27,6 +30,8 @@ from perk_dev.prose_review.source_adapter.read import (
 __all__ = [
     "CheckHintId",
     "FocusedSource",
+    "LoadedSource",
+    "NewlineStyle",
     "RangeFailure",
     "RangeResolution",
     "ReadOnlyReason",
@@ -40,6 +45,7 @@ __all__ = [
     "SourceReadFailure",
     "UnresolvedRange",
     "WholeFileSource",
+    "project_source",
     "read_source",
     "read_unit_file",
     "read_whole_file",

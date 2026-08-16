@@ -12,6 +12,7 @@ import type {
   SelectedComparison,
 } from "./src/comparison.ts";
 import type { ComparisonLoadState } from "./src/comparisonLoad.ts";
+import { EditWorkspace } from "./src/editWorkspace.ts";
 import type { UnitSelection } from "./src/selection.ts";
 import type { UnitSource } from "./src/source.ts";
 import type { CapabilityTree, SessionShape, TreeUnit, UnitRef } from "./src/tree.ts";
@@ -20,7 +21,7 @@ const { App } = (await tsImport(
   "./src/App.tsx",
   import.meta.url,
 )) as typeof import("./src/App.tsx");
-const { CenterPane } = (await tsImport(
+const { CenterPane, WorkspaceProvider } = (await tsImport(
   "./src/CenterPane.tsx",
   import.meta.url,
 )) as typeof import("./src/CenterPane.tsx");
@@ -112,15 +113,22 @@ function wireOptions(shape: SessionShape | null = null): Record<string, unknown>
 
 function source(unit: UnitRef, focus: string): UnitSource {
   return {
-    unit: unit.id,
-    fragment: null,
-    path: unit.path,
-    kind: unit.kind,
-    before: "",
-    focus,
-    after: "",
-    editable: false,
-    read_only_reason: "whole-unit",
+    file: {
+      path: unit.path,
+      mode: 0o644,
+      newline_style: "lf",
+      load_hash: "0123456789abcdef".repeat(4),
+    },
+    view: {
+      unit: unit.id,
+      fragment: null,
+      kind: unit.kind,
+      before: "",
+      focus,
+      after: "",
+      editable: false,
+      read_only_reason: "whole-unit",
+    },
   };
 }
 
@@ -395,23 +403,29 @@ function loadedComparison(
 }
 
 function centerElement(
+  workspace: EditWorkspace,
   selection: UnitSelection,
   state: ComparisonLoadState,
   selected: SelectedComparison,
 ): React.ReactNode {
-  return React.createElement(CenterPane, {
-    mode: "compare",
-    onModeChange: () => undefined,
-    selection,
-    comparisonState: state,
-    selectedComparison: selected,
-  });
+  return React.createElement(
+    WorkspaceProvider,
+    { workspace },
+    React.createElement(CenterPane, {
+      mode: "compare",
+      onModeChange: () => undefined,
+      selection,
+      comparisonState: state,
+      selectedComparison: selected,
+    }),
+  );
 }
 
 test("CenterPane shares equal-unit source and renders native line chunks for distinct units", async () => {
   const harness = installDom();
   const previousFetch = globalThis.fetch;
   const sourceUrls: string[] = [];
+  const workspace = new EditWorkspace();
   let sources = new Map([
     [UNIT_A.id, source(UNIT_A, "same\n")],
     [UNIT_B.id, source(UNIT_B, "same\n")],
@@ -438,7 +452,7 @@ test("CenterPane shares equal-unit source and renders native line chunks for dis
       target: placement(UNIT_A, "shape"),
     };
     const same = loadedComparison(placement(UNIT_A), sameChoice);
-    await harness.render(centerElement(selection, same.state, same.selected));
+    await harness.render(centerElement(workspace, selection, same.state, same.selected));
     assert.deepEqual(sourceUrls, ["/api/source?unit=unit%3Aa"]);
     assert.equal(harness.container.querySelectorAll(".comparison-pane").length, 2);
     assert.equal(harness.container.querySelectorAll(".comparison-header").length, 2);
@@ -457,13 +471,13 @@ test("CenterPane shares equal-unit source and renders native line chunks for dis
       target: placement(UNIT_B),
     };
     const distinct = loadedComparison(placement(UNIT_A), distinctChoice);
-    await harness.render(centerElement(selection, distinct.state, distinct.selected));
-    assert.deepEqual(sourceUrls.sort(), ["/api/source?unit=unit%3Aa", "/api/source?unit=unit%3Ab"]);
+    await harness.render(centerElement(workspace, selection, distinct.state, distinct.selected));
+    assert.deepEqual(sourceUrls, ["/api/source?unit=unit%3Ab"]);
+    assert.equal(harness.container.querySelector(".comparison-removed")?.textContent, "same\n");
     assert.equal(
-      harness.container.querySelector(".comparison-removed")?.textContent,
-      "left only\n",
+      harness.container.querySelector(".comparison-added")?.textContent,
+      "before\nright only\n",
     );
-    assert.equal(harness.container.querySelector(".comparison-added")?.textContent, "right only\n");
     const headers = [...harness.container.querySelectorAll(".comparison-header")].map(
       normalizedText,
     );
@@ -479,6 +493,7 @@ test("CenterPane preserves independent source failure states", async () => {
   const harness = installDom();
   const previousFetch = globalThis.fetch;
   const sourceUrls: string[] = [];
+  const workspace = new EditWorkspace();
   globalThis.fetch = async (input): Promise<Response> => {
     const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
     sourceUrls.push(url);
@@ -500,7 +515,7 @@ test("CenterPane preserves independent source failure states", async () => {
   const compared = loadedComparison(placement(UNIT_A), choice);
 
   try {
-    await harness.render(centerElement(selection, compared.state, compared.selected));
+    await harness.render(centerElement(workspace, selection, compared.state, compared.selected));
     assert.equal(sourceUrls.length, 2);
     const panes = harness.container.querySelectorAll(".comparison-pane");
     assert.equal(panes.length, 2);

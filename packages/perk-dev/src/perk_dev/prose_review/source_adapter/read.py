@@ -6,12 +6,17 @@ immutable snapshot; built frontend assets belong to the separate contained-read
 family in ``prose_review.web``.
 """
 
+import hashlib
+import os
+import stat
 from pathlib import Path
 
 from perk_dev.prose_map.models import Fragment, RoutedUnit
 from perk_dev.prose_review.catalog import CatalogSnapshot
 from perk_dev.prose_review.source_adapter.contract import (
     FocusedSource,
+    LoadedSource,
+    NewlineStyle,
     ReadOnlyReason,
     SourceAdapter,
     SourceReadFailure,
@@ -37,6 +42,36 @@ _PYTHON_ADAPTER = PythonSourceAdapter()
 _YAML_ADAPTER = YamlSourceAdapter()
 
 
+def _newline_style(content: bytes) -> NewlineStyle:
+    without_crlf = content.replace(b"\r\n", b"")
+    present = (
+        ("crlf" if b"\r\n" in content else None),
+        ("lf" if b"\n" in without_crlf else None),
+        ("cr" if b"\r" in without_crlf else None),
+    )
+    styles = tuple(style for style in present if style is not None)
+    if not styles:
+        return "none"
+    if len(styles) == 1:
+        return styles[0]
+    return "mixed"
+
+
+def _read_regular_file(candidate: Path) -> tuple[bytes, int]:
+    flags = os.O_RDONLY | os.O_NONBLOCK | os.O_CLOEXEC | os.O_NOFOLLOW
+    descriptor = os.open(candidate, flags)
+    try:
+        file_stat = os.fstat(descriptor)
+        if not stat.S_ISREG(file_stat.st_mode):
+            raise SourceReadError("not_found")
+        chunks: list[bytes] = []
+        while chunk := os.read(descriptor, 1024 * 1024):
+            chunks.append(chunk)
+        return b"".join(chunks), stat.S_IMODE(file_stat.st_mode)
+    finally:
+        os.close(descriptor)
+
+
 def read_unit_file(repo_root: Path, unit: RoutedUnit) -> WholeFileSource:
     """Read a routed unit's whole source file, contained under ``repo_root``."""
     if Path(unit.candidate.path).is_absolute():
@@ -46,20 +81,21 @@ def read_unit_file(repo_root: Path, unit: RoutedUnit) -> WholeFileSource:
         candidate = (repo_resolved / unit.candidate.path).resolve()
         if not candidate.is_relative_to(repo_resolved):
             raise SourceReadError("not_found")
-        if not candidate.is_file():
-            raise SourceReadError("not_found")
-        raw = candidate.read_bytes()
+        raw, mode = _read_regular_file(candidate)
     except (OSError, ValueError) as exc:
         raise SourceReadError("not_found") from exc
     try:
-        text = raw.decode("utf-8")
+        raw.decode("utf-8")
     except UnicodeDecodeError as exc:
         raise SourceReadError("not_text") from exc
     return WholeFileSource(
         unit_id=unit.candidate.id,
         path=unit.candidate.path,
         kind=unit.candidate.kind,
-        text=text,
+        content=raw,
+        mode=mode,
+        newline_style=_newline_style(raw),
+        load_hash=hashlib.sha256(raw).hexdigest(),
     )
 
 
@@ -93,21 +129,65 @@ def source_adapter_for(
 
 
 def _read_only(
-    whole: WholeFileSource,
+    unit: RoutedUnit,
+    text: str,
     *,
     fragment: Fragment | None,
     reason: ReadOnlyReason,
 ) -> FocusedSource:
     return FocusedSource(
-        unit_id=whole.unit_id,
-        path=whole.path,
-        kind=whole.kind,
+        unit_id=unit.candidate.id,
+        kind=unit.candidate.kind,
         fragment=fragment,
         before="",
-        focus=whole.text,
+        focus=text,
         after="",
         editable=False,
         read_only_reason=reason,
+    )
+
+
+def project_source(
+    snapshot: CatalogSnapshot,
+    unit_id: str,
+    fragment_id: str | None,
+    text: str,
+    *,
+    typescript_adapter: SourceAdapter | None = None,
+) -> FocusedSource:
+    """Project one catalog target over supplied text without a canonical read."""
+    unit = snapshot.get_unit(unit_id)
+    if unit is None:
+        raise SourceReadError("unknown_unit")
+    routed_fragment = None
+    if fragment_id is not None:
+        routed_fragment = snapshot.get_fragment(unit_id, fragment_id)
+        if routed_fragment is None:
+            raise SourceReadError("unknown_fragment")
+    if routed_fragment is None:
+        return _read_only(unit, text, fragment=None, reason="whole-unit")
+
+    fragment = routed_fragment.fragment
+    adapter = source_adapter_for(unit, typescript_adapter=typescript_adapter)
+    if adapter is None:
+        return _read_only(unit, text, fragment=fragment, reason="unsupported-family")
+    try:
+        extraction = adapter.extract(text, fragment.selector)
+    except TypeScriptAdapterUnavailable:
+        if adapter is not typescript_adapter:
+            raise
+        return _read_only(unit, text, fragment=fragment, reason="adapter-unavailable")
+    if isinstance(extraction.resolution, UnresolvedRange):
+        return _read_only(unit, text, fragment=fragment, reason=extraction.resolution.reason)
+    return FocusedSource(
+        unit_id=unit.candidate.id,
+        kind=unit.candidate.kind,
+        fragment=fragment,
+        before=extraction.before,
+        focus=extraction.focus,
+        after=extraction.after,
+        editable=True,
+        read_only_reason=None,
     )
 
 
@@ -118,41 +198,19 @@ def read_source(
     fragment_id: str | None = None,
     *,
     typescript_adapter: SourceAdapter | None = None,
-) -> FocusedSource:
-    """Read one whole unit or exact composite fragment target."""
+) -> LoadedSource:
+    """Load one canonical file and project the requested target over its text."""
     unit = snapshot.get_unit(unit_id)
     if unit is None:
         raise SourceReadError("unknown_unit")
-    routed_fragment = None
-    if fragment_id is not None:
-        routed_fragment = snapshot.get_fragment(unit_id, fragment_id)
-        if routed_fragment is None:
-            raise SourceReadError("unknown_fragment")
-
+    if fragment_id is not None and snapshot.get_fragment(unit_id, fragment_id) is None:
+        raise SourceReadError("unknown_fragment")
     whole = read_unit_file(repo_root, unit)
-    if routed_fragment is None:
-        return _read_only(whole, fragment=None, reason="whole-unit")
-
-    fragment = routed_fragment.fragment
-    adapter = source_adapter_for(unit, typescript_adapter=typescript_adapter)
-    if adapter is None:
-        return _read_only(whole, fragment=fragment, reason="unsupported-family")
-    try:
-        extraction = adapter.extract(whole.text, fragment.selector)
-    except TypeScriptAdapterUnavailable:
-        if adapter is not typescript_adapter:
-            raise
-        return _read_only(whole, fragment=fragment, reason="adapter-unavailable")
-    if isinstance(extraction.resolution, UnresolvedRange):
-        return _read_only(whole, fragment=fragment, reason=extraction.resolution.reason)
-    return FocusedSource(
-        unit_id=whole.unit_id,
-        path=whole.path,
-        kind=whole.kind,
-        fragment=fragment,
-        before=extraction.before,
-        focus=extraction.focus,
-        after=extraction.after,
-        editable=True,
-        read_only_reason=None,
+    view = project_source(
+        snapshot,
+        unit_id,
+        fragment_id,
+        whole.text,
+        typescript_adapter=typescript_adapter,
     )
+    return LoadedSource(file=whole, view=view)

@@ -1,6 +1,9 @@
 import { type FragmentRef, parseFragmentRef } from "./selection.ts";
 import { isProseKind, type ProseKind } from "./wire.ts";
 
+export const NEWLINE_STYLES = ["none", "lf", "crlf", "cr", "mixed"] as const;
+export type NewlineStyle = (typeof NEWLINE_STYLES)[number];
+
 export const READ_ONLY_REASONS = [
   "whole-unit",
   "unsupported-family",
@@ -61,10 +64,16 @@ export const READ_ONLY_PRESENTATION = {
   { badge: string; heading: string; explanation: string }
 >;
 
-export type UnitSource = {
+export type SourceFile = {
+  path: string;
+  mode: number;
+  newline_style: NewlineStyle;
+  load_hash: string;
+};
+
+export type SourceView = {
   unit: string;
   fragment: FragmentRef | null;
-  path: string;
   kind: ProseKind;
   before: string;
   focus: string;
@@ -73,24 +82,54 @@ export type UnitSource = {
   read_only_reason: ReadOnlyReason | null;
 };
 
+export type UnitSource = {
+  file: SourceFile;
+  view: SourceView;
+};
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
+}
+
+function isNewlineStyle(value: unknown): value is NewlineStyle {
+  return typeof value === "string" && (NEWLINE_STYLES as readonly string[]).includes(value);
 }
 
 function isReadOnlyReason(value: unknown): value is ReadOnlyReason {
   return typeof value === "string" && (READ_ONLY_REASONS as readonly string[]).includes(value);
 }
 
-export function sourceCurrentText(source: UnitSource): string {
+export function sourceCurrentText(source: SourceView): string {
   return source.before + source.focus + source.after;
 }
 
-/** Structurally validate an unknown JSON payload as one source response. */
-export function parseUnitSource(value: unknown): UnitSource | null {
+/** Structurally validate immutable canonical-file metadata. */
+export function parseSourceFile(value: unknown): SourceFile | null {
+  if (
+    !isRecord(value) ||
+    typeof value.path !== "string" ||
+    !Number.isInteger(value.mode) ||
+    (value.mode as number) < 0 ||
+    (value.mode as number) > 0o7777 ||
+    !isNewlineStyle(value.newline_style) ||
+    typeof value.load_hash !== "string" ||
+    !/^[0-9a-f]{64}$/.test(value.load_hash)
+  ) {
+    return null;
+  }
+  return {
+    path: value.path,
+    mode: value.mode as number,
+    newline_style: value.newline_style,
+    load_hash: value.load_hash,
+  };
+}
+
+/** Structurally validate one metadata-free source projection. */
+export function parseSourceView(value: unknown): SourceView | null {
   if (
     !isRecord(value) ||
     typeof value.unit !== "string" ||
-    typeof value.path !== "string" ||
     !isProseKind(value.kind) ||
     typeof value.before !== "string" ||
     typeof value.focus !== "string" ||
@@ -113,7 +152,6 @@ export function parseUnitSource(value: unknown): UnitSource | null {
   return {
     unit: value.unit,
     fragment,
-    path: value.path,
     kind: value.kind,
     before: value.before,
     focus: value.focus,
@@ -121,4 +159,17 @@ export function parseUnitSource(value: unknown): UnitSource | null {
     editable: value.editable,
     read_only_reason: reason,
   };
+}
+
+/** Structurally validate one nested canonical load response. */
+export function parseUnitSource(value: unknown): UnitSource | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+  const file = parseSourceFile(value.file);
+  const view = parseSourceView(value.view);
+  if (file === null || view === null) {
+    return null;
+  }
+  return { file, view };
 }

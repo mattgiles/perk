@@ -91,8 +91,8 @@ def _parse(text: str) -> _YamlDocument:
             ),
             None,
         )
-    except yaml.MarkedYAMLError as exc:
-        mark = exc.problem_mark
+    except yaml.YAMLError as exc:
+        mark = getattr(exc, "problem_mark", None)
         return _YamlDocument(
             node=None,
             syntax_problem=_YamlProblem(
