@@ -3,11 +3,12 @@
 **Status:** binding stack selection for Objective #1764 (the Prose Review Workbench; PRD:
 [prose-review-app-prd.md](./prose-review-app-prd.md)). Selected and shipped with the walking
 skeleton — the minimal secure launcher (`perk-dev prose-review`) plus the served round-trip proof
-— and now carrying the three-pane workbench shell (capability tree / mode bar + read-only source
-view, served through the seeded whole-file SourceAdapter), the relationship inspector (consumers,
-consuming shapes + delivery siblings, concerns, lineage), and header catalog search — the
-inspector and search are pure in-memory `CatalogSnapshot` queries. Later nodes build
-fragment-level adapters, compare/assembly views, and writers on this stack without revisiting it.
+— and now carrying the three-pane workbench shell (fragment-aware capability tree / mode bar +
+segmented source focus), the relationship inspector (consumers, consuming shapes + delivery
+siblings, concerns, lineage), and header catalog search — the inspector and search are pure
+in-memory `CatalogSnapshot` queries. Markdown and YAML read adapters now resolve exact logical
+fragments; later nodes add the Python/TypeScript families, compare/assembly views, and writers on
+this stack without revisiting it.
 
 ## HTTP layer: FastAPI + uvicorn
 
@@ -22,10 +23,16 @@ fragment-level adapters, compare/assembly views, and writers on this stack witho
   handlers query the snapshot and hand domain values to the `from_domain` constructors; every
   body is an `*Out` model.
 - **Exactly two file-read families.** Built-asset reads (`index.html` included) go through
-  `web.read_contained`; canonical-source reads go through the SourceAdapter
+  `web.read_contained`; canonical-source reads go through the SourceAdapter package
   (`perk_dev.prose_review.source_adapter`) — root-bound, catalog-membership-checked, text-only,
   and the exclusive reader of canonical source content on the serving path (catalog *discovery*
-  reads mapped sources once at load time; that is the catalog module's own contract).
+  reads mapped sources once at load time; that is the catalog module's own contract). The package
+  keeps the public facade stable while separating frozen contracts, contained reads/dispatch, and
+  the Markdown/YAML implementations. The structured-text adapters expose exact range resolution,
+  batch revalidation, and semantic check hints (`prose-map`, plus `learned-docs` for YAML); they do
+  not expose persistence or replacement hooks yet. `GET /api/source` remains the one source
+  endpoint and accepts an optional composite fragment id, returning either exact
+  context/focus/context segments or a typed, whole-file read-only fallback.
 - The FastAPI app is constructed with **`docs_url=None, redoc_url=None, openapi_url=None`**: the
   default `/docs` (Swagger UI) and `/redoc` pages load CDN-hosted assets and would violate the
   no-network-loaded-assets envelope; `/openapi.json` is locally generated but is an unused
@@ -90,7 +97,9 @@ file-read family** was added; `parseUnitInspect` / `parseSearch` join the typed 
 The proof structure is unchanged: **server-integration** tests (real Vite build, real uvicorn on a
 pre-bound socket, real `*Out` DTOs) plus node:test coverage of each frontend parse boundary (local
 wire-shape mirrors; OpenAPI schema generation and runtime schema-validation libraries are out of
-scope). The **browser** leg (the shell renders the tree, sources, and boundary explanations; the
-header search navigates to units; the inspector renders the relationship sections) is a manual
-acceptance step; the automated browser-level hostile-payload pass across all panes is a later
-node's deliverable by the objective's design.
+scope). The **browser** leg (the shell expands fragment branches, preserves composite selection across
+aliases and search, renders exact context/focus/context segments, and keeps the unit-scoped
+relationship inspector stable while fragment identity changes) is a manual acceptance step.
+Boundary explanations and the existing relationship/search surfaces remain part of that proof; the
+automated browser-level hostile-payload pass across all panes is a later node's deliverable by the
+objective's design.

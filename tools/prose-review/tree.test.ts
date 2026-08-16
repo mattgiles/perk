@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { type AssemblyLayer, type CapabilityTree, parseTree } from "./src/tree.ts";
+import { type AssemblyLayer, type CapabilityTree, parseTree, parseUnitRef } from "./src/tree.ts";
 
 const UNIT_LAYER: AssemblyLayer = {
   position: 2,
@@ -10,6 +10,7 @@ const UNIT_LAYER: AssemblyLayer = {
     id: "markdown:skills/perk-plan/SKILL.md",
     kind: "markdown",
     path: "skills/perk-plan/SKILL.md",
+    fragments: [{ id: "body", label: "Document body" }],
   },
   boundary: null,
 };
@@ -27,7 +28,17 @@ const WIRE: CapabilityTree = {
     {
       id: "planning",
       label: "Planning",
-      units: [{ id: "markdown:docs/plan.md", kind: "markdown", path: "docs/plan.md" }],
+      units: [
+        {
+          id: "markdown:docs/plan.md",
+          kind: "markdown",
+          path: "docs/plan.md",
+          fragments: [
+            { id: "section:one", label: "One" },
+            { id: "section:two", label: "Two" },
+          ],
+        },
+      ],
       session_shapes: [],
       children: [
         {
@@ -106,13 +117,68 @@ test("parseTree rejects ill-typed node fields", () => {
   assert.equal(parseTree({ capabilities: [{ ...node, children: [null] }] }), null);
 });
 
+test("parseTree retains fragment arrays for direct and assembly units", () => {
+  const parsed = parseTree(WIRE);
+  assert.ok(parsed !== null);
+  assert.deepEqual(parsed.capabilities[0]?.units[0]?.fragments, [
+    { id: "section:one", label: "One" },
+    { id: "section:two", label: "Two" },
+  ]);
+  assert.deepEqual(
+    parsed.capabilities[0]?.children[0]?.session_shapes[0]?.layers[1]?.unit?.fragments,
+    [{ id: "body", label: "Document body" }],
+  );
+});
+
+test("parseTree rejects malformed or missing fragment arrays", () => {
+  assert.equal(
+    parseTree({
+      capabilities: [
+        {
+          ...WIRE.capabilities[0],
+          units: [{ id: "u", kind: "markdown", path: "p" }],
+          children: [],
+        },
+      ],
+    }),
+    null,
+  );
+  assert.equal(
+    parseTree({
+      capabilities: [
+        {
+          ...WIRE.capabilities[0],
+          units: [
+            {
+              id: "u",
+              kind: "markdown",
+              path: "p",
+              fragments: [{ id: "body" }],
+            },
+          ],
+          children: [],
+        },
+      ],
+    }),
+    null,
+  );
+});
+
+test("parseUnitRef keeps the compact search/inspect shape unchanged", () => {
+  assert.deepEqual(parseUnitRef({ id: "u", kind: "markdown", path: "p" }), {
+    id: "u",
+    kind: "markdown",
+    path: "p",
+  });
+});
+
 test("parseTree rejects an unknown unit kind", () => {
   assert.equal(
     parseTree({
       capabilities: [
         {
           ...WIRE.capabilities[0],
-          units: [{ id: "u", kind: "latin", path: "p" }],
+          units: [{ id: "u", kind: "latin", path: "p", fragments: [] }],
           children: [],
         },
       ],

@@ -6,6 +6,7 @@
 // invariant, enforced at parse even though the wire types are nullable). Any defect
 // rejects the whole payload with null.
 
+import { type FragmentRef, parseFragmentRef } from "./selection.ts";
 import {
   type BoundaryKind,
   type DeliveryMode,
@@ -21,11 +22,15 @@ export type UnitRef = {
   path: string;
 };
 
+export type TreeUnit = UnitRef & {
+  fragments: FragmentRef[];
+};
+
 export type AssemblyLayer = {
   position: number;
   optional: boolean;
   label: string | null;
-  unit: UnitRef | null;
+  unit: TreeUnit | null;
   boundary: BoundaryKind | null;
 };
 
@@ -39,7 +44,7 @@ export type SessionShape = {
 export type CapabilityNode = {
   id: string;
   label: string;
-  units: UnitRef[];
+  units: TreeUnit[];
   session_shapes: SessionShape[];
   children: CapabilityNode[];
 };
@@ -67,7 +72,7 @@ function parseArray<T>(value: unknown, parseEntry: (entry: unknown) => T | null)
   return entries;
 }
 
-/** Parse one unit reference (shared by the inspect/search parse boundaries). */
+/** Parse one compact unit reference (shared by inspect/search boundaries). */
 export function parseUnitRef(value: unknown): UnitRef | null {
   if (
     !isRecord(value) ||
@@ -78,6 +83,18 @@ export function parseUnitRef(value: unknown): UnitRef | null {
     return null;
   }
   return { id: value.id, kind: value.kind, path: value.path };
+}
+
+function parseTreeUnit(value: unknown): TreeUnit | null {
+  const unit = parseUnitRef(value);
+  if (unit === null || !isRecord(value)) {
+    return null;
+  }
+  const fragments = parseArray(value.fragments, parseFragmentRef);
+  if (fragments === null) {
+    return null;
+  }
+  return { ...unit, fragments };
 }
 
 function parseLayer(value: unknown): AssemblyLayer | null {
@@ -94,7 +111,7 @@ function parseLayer(value: unknown): AssemblyLayer | null {
   if (label !== null && typeof label !== "string") {
     return null;
   }
-  const unit = value.unit === null ? null : parseUnitRef(value.unit);
+  const unit = value.unit === null ? null : parseTreeUnit(value.unit);
   if (value.unit !== null && unit === null) {
     return null;
   }
@@ -129,7 +146,7 @@ function parseNode(value: unknown): CapabilityNode | null {
   if (!isRecord(value) || typeof value.id !== "string" || typeof value.label !== "string") {
     return null;
   }
-  const units = parseArray(value.units, parseUnitRef);
+  const units = parseArray(value.units, parseTreeUnit);
   const sessionShapes = parseArray(value.session_shapes, parseShape);
   const children = parseArray(value.children, parseNode);
   if (units === null || sessionShapes === null || children === null) {

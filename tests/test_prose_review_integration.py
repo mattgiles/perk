@@ -50,10 +50,13 @@ def server(tmp_path_factory: pytest.TempPathFactory) -> Iterator[_RunningServer]
     build_frontend(ROOT, out_dir=dist_dir)
     assert (dist_dir / "index.html").is_file()
 
-    # One real candidate's bytes, copied to its catalog-relative path under the trust
-    # root, so the source read stays within this fixture's trust-root arrangement
-    # (pointing repo_root at the checkout would break the asset-containment tests).
+    # Real Markdown and YAML candidates copied to their catalog-relative paths under
+    # the fixture trust root. Pointing repo_root at the checkout would break the
+    # asset-containment proof above.
     (trust_root / "AGENTS.md").write_bytes((ROOT / "AGENTS.md").read_bytes())
+    clusters = trust_root / "docs/learned/clusters.yaml"
+    clusters.parent.mkdir(parents=True)
+    clusters.write_bytes((ROOT / "docs/learned/clusters.yaml").read_bytes())
 
     snapshot = CatalogSnapshot.from_catalog(build_catalog(ROOT))
     token = secrets.token_urlsafe(32)
@@ -160,15 +163,44 @@ def test_search_endpoint_serves_the_snapshot_dto_over_real_http(
     )
 
 
-def test_source_endpoint_serves_the_trust_root_copy_over_real_http(
+def test_source_endpoint_serves_whole_and_fragment_focus_over_real_http(
     server: _RunningServer,
 ) -> None:
     with httpx.Client(base_url=server.base_url, timeout=10) as client:
-        response = client.get("/api/source", params={"unit": "managed:repo-agents"})
-    assert response.status_code == 200
-    payload = response.json()
-    assert payload["unit"] == "managed:repo-agents"
-    assert payload["content"] == (ROOT / "AGENTS.md").read_bytes().decode("utf-8")
+        whole_response = client.get("/api/source", params={"unit": "managed:repo-agents"})
+        markdown_response = client.get(
+            "/api/source",
+            params={
+                "unit": "managed:repo-agents",
+                "fragment": "section:agents/developing-perk",
+            },
+        )
+        yaml_response = client.get(
+            "/api/source",
+            params={
+                "unit": "ambient:learned-routing",
+                "fragment": "cluster:pi-extension",
+            },
+        )
+
+    assert whole_response.status_code == 200
+    whole = whole_response.json()
+    assert whole["unit"] == "managed:repo-agents"
+    assert whole["fragment"] is None
+    assert whole["focus"] == (ROOT / "AGENTS.md").read_bytes().decode("utf-8")
+    assert whole["read_only_reason"] == "whole-unit"
+
+    assert markdown_response.status_code == 200
+    markdown = markdown_response.json()
+    assert markdown["fragment"]["id"] == "section:agents/developing-perk"
+    assert markdown["editable"] is True
+    assert markdown["before"] + markdown["focus"] + markdown["after"] == whole["focus"]
+
+    assert yaml_response.status_code == 200
+    yaml_source = yaml_response.json()
+    assert yaml_source["fragment"]["id"] == "cluster:pi-extension"
+    assert yaml_source["editable"] is True
+    assert "Pi SDK/extension substrate craft" in yaml_source["focus"]
 
 
 def test_wrong_host_is_rejected_over_real_http(server: _RunningServer) -> None:

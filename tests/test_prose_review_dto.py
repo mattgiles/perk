@@ -5,18 +5,21 @@ from pathlib import Path
 
 import pytest
 from perk_dev.prose_map.catalog import build_catalog
+from perk_dev.prose_map.models import Fragment
 from perk_dev.prose_review.catalog import CapabilityNode, CatalogSnapshot
 from perk_dev.prose_review.dto import (
     CapabilityNodeOut,
     CapabilityTreeOut,
     CatalogSummaryOut,
+    FragmentRefOut,
     SearchOut,
     SessionShapeOut,
+    TreeUnitOut,
     UnitInspectOut,
     UnitSourceOut,
 )
 from perk_dev.prose_review.search import build_search_index, search
-from perk_dev.prose_review.source_adapter import WholeFileSource
+from perk_dev.prose_review.source_adapter import FocusedSource
 
 ROOT = Path(__file__).parents[1]
 
@@ -179,6 +182,26 @@ def test_shape_and_layer_key_order_matches_declaration(tree: CapabilityTreeOut) 
         "unit",
         "boundary",
     ]
+    unit_layer = next(layer for layer in dumped["layers"] if layer["unit"] is not None)
+    assert list(unit_layer["unit"].keys()) == ["id", "kind", "path", "fragments"]
+    assert all(
+        list(fragment.keys()) == ["id", "label"] for fragment in unit_layer["unit"]["fragments"]
+    )
+
+
+def test_tree_unit_fragments_match_snapshot_order(snapshot: CatalogSnapshot) -> None:
+    unit = snapshot.get_unit("managed:repo-agents")
+    assert unit is not None
+    out = TreeUnitOut.from_domain(unit)
+    assert [(fragment.id, fragment.label) for fragment in out.fragments] == [
+        (routed.fragment.id, routed.fragment.label)
+        for routed in snapshot.fragments_for_unit(unit.candidate.id)
+    ]
+    fragment = unit.candidate.fragments[0]
+    assert FragmentRefOut.from_domain(fragment).model_dump(mode="json") == {
+        "id": fragment.id,
+        "label": fragment.label,
+    }
 
 
 @pytest.fixture(scope="module")
@@ -303,18 +326,38 @@ def test_search_out_key_order_from_real_hits(snapshot: CatalogSnapshot) -> None:
     assert list(unit_result["unit"].keys()) == ["id", "kind", "path"]
 
 
-def test_unit_source_out_field_order() -> None:
-    source = WholeFileSource(
+def test_unit_source_out_field_order_and_fragment_shape() -> None:
+    source = FocusedSource(
         unit_id="markdown:AGENTS.md",
         path="AGENTS.md",
         kind="markdown",
-        text="content\n",
+        fragment=Fragment(id="body", label="Document body", selector="file-body"),
+        before="context\n",
+        focus="content 😀\n",
+        after="tail\n",
+        editable=True,
+        read_only_reason=None,
     )
     dumped = UnitSourceOut.from_domain(source).model_dump(mode="json")
-    assert list(dumped.keys()) == ["unit", "path", "kind", "content"]
+    assert list(dumped.keys()) == [
+        "unit",
+        "fragment",
+        "path",
+        "kind",
+        "before",
+        "focus",
+        "after",
+        "editable",
+        "read_only_reason",
+    ]
     assert dumped == {
         "unit": "markdown:AGENTS.md",
+        "fragment": {"id": "body", "label": "Document body"},
         "path": "AGENTS.md",
         "kind": "markdown",
-        "content": "content\n",
+        "before": "context\n",
+        "focus": "content 😀\n",
+        "after": "tail\n",
+        "editable": True,
+        "read_only_reason": None,
     }

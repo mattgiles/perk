@@ -123,7 +123,7 @@ def test_catalog_tree_serves_the_fixed_order_tree(snapshot: CatalogSnapshot, rep
     _assert_security_headers(response)
 
 
-def test_source_serves_the_on_disk_file(snapshot: CatalogSnapshot, tmp_path: Path) -> None:
+def test_source_serves_the_on_disk_whole_file(snapshot: CatalogSnapshot, tmp_path: Path) -> None:
     # The repo root of trust is the real checkout for the source read; the dist dir
     # stays a tmp fixture (the /api/source path never touches built assets).
     _populate_dist(tmp_path / "dist")
@@ -131,11 +131,97 @@ def test_source_serves_the_on_disk_file(snapshot: CatalogSnapshot, tmp_path: Pat
     response = client.get("/api/source", params={"unit": "managed:repo-agents"})
     assert response.status_code == 200
     payload = response.json()
-    assert list(payload.keys()) == ["unit", "path", "kind", "content"]
+    assert list(payload.keys()) == [
+        "unit",
+        "fragment",
+        "path",
+        "kind",
+        "before",
+        "focus",
+        "after",
+        "editable",
+        "read_only_reason",
+    ]
     assert payload["unit"] == "managed:repo-agents"
+    assert payload["fragment"] is None
     assert payload["path"] == "AGENTS.md"
     assert payload["kind"] == "managed-prose"
-    assert payload["content"] == (ROOT / "AGENTS.md").read_bytes().decode("utf-8")
+    assert payload["before"] == ""
+    assert payload["focus"] == (ROOT / "AGENTS.md").read_bytes().decode("utf-8")
+    assert payload["after"] == ""
+    assert payload["editable"] is False
+    assert payload["read_only_reason"] == "whole-unit"
+    _assert_security_headers(response)
+
+
+def test_source_serves_markdown_and_yaml_fragments(
+    snapshot: CatalogSnapshot, tmp_path: Path
+) -> None:
+    _populate_dist(tmp_path / "dist")
+    client = _client(snapshot, ROOT, dist_dir=tmp_path / "dist")
+    markdown = client.get(
+        "/api/source",
+        params={
+            "unit": "managed:repo-agents",
+            "fragment": "section:agents/developing-perk",
+        },
+    )
+    assert markdown.status_code == 200
+    markdown_payload = markdown.json()
+    assert markdown_payload["fragment"] == {
+        "id": "section:agents/developing-perk",
+        "label": "Developing perk",
+    }
+    assert markdown_payload["editable"] is True
+    assert markdown_payload["read_only_reason"] is None
+    assert markdown_payload["before"] + markdown_payload["focus"] + markdown_payload["after"] == (
+        ROOT / "AGENTS.md"
+    ).read_text(encoding="utf-8")
+    _assert_security_headers(markdown)
+
+    yaml_response = client.get(
+        "/api/source",
+        params={
+            "unit": "ambient:learned-routing",
+            "fragment": "cluster:pi-extension",
+        },
+    )
+    assert yaml_response.status_code == 200
+    yaml_payload = yaml_response.json()
+    assert yaml_payload["editable"] is True
+    assert "Pi SDK/extension substrate craft" in yaml_payload["focus"]
+    assert yaml_payload["before"] + yaml_payload["focus"] + yaml_payload["after"] == (
+        ROOT / "docs/learned/clusters.yaml"
+    ).read_text(encoding="utf-8")
+    _assert_security_headers(yaml_response)
+
+
+def test_known_fragment_drift_is_a_readable_typed_200(
+    snapshot: CatalogSnapshot, repo: Path
+) -> None:
+    (repo / "AGENTS.md").write_text("# Different\nReadable source\n", encoding="utf-8")
+    response = _client(snapshot, repo).get(
+        "/api/source",
+        params={
+            "unit": "managed:repo-agents",
+            "fragment": "section:agents/developing-perk",
+        },
+    )
+    assert response.status_code == 200
+    assert response.json() == {
+        "unit": "managed:repo-agents",
+        "fragment": {
+            "id": "section:agents/developing-perk",
+            "label": "Developing perk",
+        },
+        "path": "AGENTS.md",
+        "kind": "managed-prose",
+        "before": "",
+        "focus": "# Different\nReadable source\n",
+        "after": "",
+        "editable": False,
+        "read_only_reason": "selector-not-found",
+    }
     _assert_security_headers(response)
 
 
@@ -215,6 +301,18 @@ def test_source_unknown_unit_is_a_fixed_404(snapshot: CatalogSnapshot, repo: Pat
     response = _client(snapshot, repo).get("/api/source", params={"unit": "markdown:missing.md"})
     assert response.status_code == 404
     assert response.json() == {"detail": "unknown unit"}
+    _assert_security_headers(response)
+
+
+def test_source_unknown_composite_fragment_is_a_fixed_404(
+    snapshot: CatalogSnapshot, repo: Path
+) -> None:
+    response = _client(snapshot, repo).get(
+        "/api/source",
+        params={"unit": "managed:repo-agents", "fragment": "cluster:pi-extension"},
+    )
+    assert response.status_code == 404
+    assert response.json() == {"detail": "unknown fragment"}
     _assert_security_headers(response)
 
 

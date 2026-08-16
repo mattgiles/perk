@@ -46,6 +46,7 @@ from perk_dev.prose_review.source_adapter import SourceReadError, SourceReadFail
 # indistinguishable from missing files (the no-leak posture).
 _SOURCE_READ_DETAILS: dict[SourceReadFailure, str] = {
     "unknown_unit": "unknown unit",
+    "unknown_fragment": "unknown fragment",
     "not_found": "source not found",
     "not_text": "source is not utf-8 text",
 }
@@ -238,12 +239,12 @@ def create_app(
         )
 
     @app.get("/api/source", response_model=UnitSourceOut)
-    def source(unit: str) -> UnitSourceOut:
+    def source(unit: str, fragment: str | None = None) -> UnitSourceOut:
         try:
-            whole = source_adapter.read_whole_file(snapshot, repo_resolved, unit)
+            focused = source_adapter.read_source(snapshot, repo_resolved, unit, fragment)
         except SourceReadError as exc:
             raise HTTPException(status_code=404, detail=_SOURCE_READ_DETAILS[exc.reason]) from exc
-        return UnitSourceOut.from_domain(whole)
+        return UnitSourceOut.from_domain(focused)
 
     @app.get("/assets/{asset_path:path}")
     def asset(asset_path: str) -> Response:

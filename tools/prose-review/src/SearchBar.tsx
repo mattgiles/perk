@@ -8,7 +8,7 @@ import {
   type PanelState,
   panelHint,
 } from "./searchPanel.ts";
-import type { UnitRef } from "./tree.ts";
+import { type SourceTarget, searchResultTarget } from "./selection.ts";
 import {
   AUDIENCES,
   type Audience,
@@ -22,15 +22,14 @@ function joinBreadcrumb(breadcrumb: CapabilityRef[]): string {
   return breadcrumb.map((capability) => capability.label).join(" / ");
 }
 
-// A unit-backed row (unit, fragment, concern) navigates to its canonical unit; a
-// capability/session-shape row is informational — the tree remains the capability
-// navigation surface.
+// Unit and concern rows navigate to the whole unit; fragment rows preserve their
+// exact composite identity. Capability/session-shape rows remain informational.
 function ResultRow({
   result,
   onChoose,
 }: {
   result: SearchResult;
-  onChoose: (unit: UnitRef) => void;
+  onChoose: (target: SourceTarget) => void;
 }) {
   const content = (
     <>
@@ -47,12 +46,12 @@ function ResultRow({
       )}
     </>
   );
-  const unit = result.unit;
-  if (unit === null) {
+  const target = searchResultTarget(result);
+  if (target === null) {
     return <span className="search-result">{content}</span>;
   }
   return (
-    <button type="button" className="search-result selectable" onClick={() => onChoose(unit)}>
+    <button type="button" className="search-result selectable" onClick={() => onChoose(target)}>
       {content}
     </button>
   );
@@ -64,7 +63,7 @@ function ResultRow({
 // panel copy — lives in searchPanel.ts (node:test-covered); this component only
 // renders its states. No debounce — the catalog is small and in-memory; latest-wins
 // in the loader suppresses stale responses.
-export function SearchBar({ onSelect }: { onSelect: (unit: UnitRef) => void }) {
+export function SearchBar({ onSelect }: { onSelect: (target: SourceTarget) => void }) {
   const [query, setQuery] = useState("");
   const [filters, setFilters] = useState<Filters>(NO_FILTERS);
   const [panel, setPanel] = useState<PanelState>({ status: "idle" });
@@ -78,8 +77,8 @@ export function SearchBar({ onSelect }: { onSelect: (unit: UnitRef) => void }) {
     controller.refresh(nextQuery, nextFilters);
   }
 
-  function choose(unit: UnitRef): void {
-    onSelect(unit);
+  function choose(target: SourceTarget): void {
+    onSelect(target);
     controller.close();
   }
 

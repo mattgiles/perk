@@ -2,16 +2,17 @@ import { useEffect, useState } from "react";
 import { CenterPane } from "./CenterPane.tsx";
 import { InspectorPane } from "./InspectorPane.tsx";
 import { SearchBar } from "./SearchBar.tsx";
+import type { SourceTarget } from "./selection.ts";
 import { TreePane } from "./TreePane.tsx";
-import { type CapabilityTree, parseTree, type UnitRef } from "./tree.ts";
+import { type CapabilityTree, parseTree } from "./tree.ts";
 import type { BoundaryKind } from "./wire.ts";
 
 export type Mode = "edit" | "compare" | "assembly";
 
-// A selection is a canonical unit or a boundary layer (select-to-explain). Boundary
-// selections carry the layer's display label so the panes can echo the authored name.
+// A selection is a composite source target or a boundary layer (select-to-explain).
+// Boundary selections carry the display label so panes can echo the authored name.
 export type Selection =
-  | { type: "unit"; unit: UnitRef }
+  | { type: "unit"; target: SourceTarget }
   | { type: "boundary"; boundary: BoundaryKind; label: string };
 
 type TreeLoadState =
@@ -58,13 +59,13 @@ export function App() {
 
   // Search and concern-member navigation only ever change `selection` — never
   // `mode` (the shell invariant).
-  const selectUnit = (unit: UnitRef): void => setSelection({ type: "unit", unit });
+  const selectSource = (target: SourceTarget): void => setSelection({ type: "unit", target });
 
   return (
     <div className="app">
       <header className="app-header">
         <h1>Prose Review</h1>
-        <SearchBar onSelect={selectUnit} />
+        <SearchBar onSelect={selectSource} />
       </header>
       <nav className="pane tree-pane" aria-label="Capability tree">
         {treeState.status === "loading" && <p className="pane-hint">Loading catalog tree…</p>}
@@ -77,7 +78,7 @@ export function App() {
         <CenterPane mode={mode} onModeChange={setMode} selection={selection} />
       </main>
       <aside className="pane inspector-pane" aria-label="Inspector">
-        <InspectorPane selection={selection} onSelect={selectUnit} />
+        <InspectorPane selection={selection} onSelect={selectSource} />
       </aside>
     </div>
   );

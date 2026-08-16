@@ -14,6 +14,7 @@ from perk_dev.prose_map.models import (
     BoundaryKind,
     Capability,
     DeliveryMode,
+    Fragment,
     ProseKind,
     ProseRole,
     RoutedUnit,
@@ -31,7 +32,7 @@ from perk_dev.prose_review.catalog import (
     UnitAlias,
 )
 from perk_dev.prose_review.search import MatchField, SearchEntryKind, SearchHit, SearchResults
-from perk_dev.prose_review.source_adapter import WholeFileSource
+from perk_dev.prose_review.source_adapter import FocusedSource, ReadOnlyReason
 
 
 class CapabilityOut(OutputModel):
@@ -85,13 +86,44 @@ class UnitRefOut(OutputModel):
         return cls(id=unit.candidate.id, kind=unit.candidate.kind, path=unit.candidate.path)
 
 
+class FragmentRefOut(OutputModel):
+    """One logical fragment reference nested under its owning tree unit."""
+
+    id: str
+    label: str
+
+    @classmethod
+    def from_domain(cls, fragment: Fragment) -> Self:
+        return cls(id=fragment.id, label=fragment.label)
+
+
+class TreeUnitOut(OutputModel):
+    """One tree unit with its authored logical fragments in catalog order."""
+
+    id: str
+    kind: ProseKind
+    path: str
+    fragments: tuple[FragmentRefOut, ...]
+
+    @classmethod
+    def from_domain(cls, unit: RoutedUnit) -> Self:
+        return cls(
+            id=unit.candidate.id,
+            kind=unit.candidate.kind,
+            path=unit.candidate.path,
+            fragments=tuple(
+                FragmentRefOut.from_domain(fragment) for fragment in unit.candidate.fragments
+            ),
+        )
+
+
 class AssemblyLayerOut(OutputModel):
     """One ordered assembly layer: a routed unit or an ownership boundary."""
 
     position: int
     optional: bool
     label: str | None
-    unit: UnitRefOut | None
+    unit: TreeUnitOut | None
     boundary: BoundaryKind | None
 
     @classmethod
@@ -100,7 +132,7 @@ class AssemblyLayerOut(OutputModel):
             position=layer.position,
             optional=layer.layer.optional,
             label=layer.layer.label,
-            unit=None if layer.unit is None else UnitRefOut.from_domain(layer.unit),
+            unit=None if layer.unit is None else TreeUnitOut.from_domain(layer.unit),
             boundary=layer.layer.boundary,
         )
 
@@ -133,7 +165,7 @@ class CapabilityNodeOut(OutputModel):
 
     id: str
     label: str
-    units: tuple[UnitRefOut, ...]
+    units: tuple[TreeUnitOut, ...]
     session_shapes: tuple[SessionShapeOut, ...]
     children: tuple["CapabilityNodeOut", ...]
 
@@ -142,7 +174,7 @@ class CapabilityNodeOut(OutputModel):
         return cls(
             id=node.capability.id,
             label=node.capability.label,
-            units=tuple(UnitRefOut.from_domain(unit) for unit in node.units),
+            units=tuple(TreeUnitOut.from_domain(unit) for unit in node.units),
             session_shapes=tuple(
                 SessionShapeOut.from_domain(snapshot, shape) for shape in node.session_shapes
             ),
@@ -170,16 +202,33 @@ class CapabilityTreeOut(OutputModel):
 
 
 class UnitSourceOut(OutputModel):
-    """One unit's whole source file as served over the wire."""
+    """One whole-unit or fragment-focused source read as served over the wire."""
 
     unit: str
+    fragment: FragmentRefOut | None
     path: str
     kind: ProseKind
-    content: str
+    before: str
+    focus: str
+    after: str
+    editable: bool
+    read_only_reason: ReadOnlyReason | None
 
     @classmethod
-    def from_domain(cls, source: WholeFileSource) -> Self:
-        return cls(unit=source.unit_id, path=source.path, kind=source.kind, content=source.text)
+    def from_domain(cls, source: FocusedSource) -> Self:
+        return cls(
+            unit=source.unit_id,
+            fragment=(
+                None if source.fragment is None else FragmentRefOut.from_domain(source.fragment)
+            ),
+            path=source.path,
+            kind=source.kind,
+            before=source.before,
+            focus=source.focus,
+            after=source.after,
+            editable=source.editable,
+            read_only_reason=source.read_only_reason,
+        )
 
 
 class ShapeRefOut(OutputModel):
