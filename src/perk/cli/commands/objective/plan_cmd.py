@@ -246,6 +246,9 @@ def plan_objective(
                 error_type="objective_required",
             )
         number = parse_objective_id(number)
+        requested_node_id = node_id.strip() if node_id is not None else None
+        if requested_node_id == "":
+            raise UserFacingCliError("--node must not be blank.", error_type="invalid_input")
         if not dry_run:
             require_github(ctx)
 
@@ -282,7 +285,7 @@ def plan_objective(
                             kind="layer_start",
                             mode="planning",
                             objective_id=number,
-                            node_id=node_id,
+                            node_id=requested_node_id,
                         )
                     )
                 except DeliveryError as exc:
@@ -304,10 +307,10 @@ def plan_objective(
                 # path. A real stacked launch consumes no pre-Prepare title/node/graph fact.
                 graph = objective.build_graph(list(state.nodes))
                 plannable = {n.id: n for n in graph.plannable_nodes()}
-                if node_id is not None:
-                    node = plannable.get(node_id)
+                if requested_node_id is not None:
+                    node = plannable.get(requested_node_id)
                     if node is None:
-                        raise _node_not_plannable_error(graph, number, node_id)
+                        raise _node_not_plannable_error(graph, number, requested_node_id)
                 else:
                     sel = graph.classify_for_planning()
                     if sel.kind == "plannable":

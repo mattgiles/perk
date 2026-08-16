@@ -40,7 +40,7 @@ resolve_delivery(repo_root) -> Delivery                  # ZERO I/O
 Delivery.status(StatusRequest {objective_id}) -> StatusResult
 StatusResult -> exactly one of DeliveryTrain | no_train_reason
 Delivery.prepare(PrepareRequest {kind, mode?, base?, objective_id?, node_id?, plan_id?})
-  -> PrepareResult {kind, base?, identity?, notice?, planning?, layer_context?, parent_sha?}
+  -> PrepareResult {kind, base?, identity?, notice?, planning?, layer?, parent_sha?}
 ```
 
 Prepare is a closed flat family: authoring capability; strict/best-effort plan identity; planning

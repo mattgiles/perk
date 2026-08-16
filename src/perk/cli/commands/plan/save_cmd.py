@@ -327,6 +327,17 @@ def _plan_save_impl(
     dry_run: bool,
 ) -> PlanSaveResult:
     """Pure-ish logic (no Click). Composes the header/body and performs the GitHub write."""
+    if objective_id is not None:
+        objective_id = objective_id.strip()
+        if not objective_id:
+            raise UserFacingCliError(
+                "--objective-id must not be blank.", error_type="invalid_input"
+            )
+    if node_id is not None:
+        node_id = node_id.strip()
+        if not node_id:
+            raise UserFacingCliError("--node-id must not be blank.", error_type="invalid_input")
+
     # In-place adoption is NOT objective-linked: the node-unification path is the in-place
     # writer for objective nodes — refuse to mix two in-place semantics.
     if adopt_from is not None:

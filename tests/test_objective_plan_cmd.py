@@ -57,6 +57,27 @@ def _stub_launch(monkeypatch, sink: dict) -> None:
     )
 
 
+def test_blank_node_is_typed_invalid_input_before_authority_access(
+    monkeypatch, unborn_git_repo_factory
+):
+    monkeypatch.setattr(
+        objectives,
+        "get_objective",
+        lambda **_kwargs: pytest.fail("blank node must fail before objective lookup"),
+    )
+    runner = CliRunner()
+    with runner.isolated_filesystem() as d:
+        _git_init(d, unborn_git_repo_factory)
+        result = runner.invoke(cli, ["objective", "plan", "7", "--node", "  ", "--json"])
+
+    assert result.exit_code == 1
+    assert json.loads(result.stdout) == {
+        "success": False,
+        "error_type": "invalid_input",
+        "message": "--node must not be blank.",
+    }
+
+
 def test_sync_main_default_on_and_no_sync_opts_out(monkeypatch, unborn_git_repo_factory):
     _authed(monkeypatch)
     monkeypatch.setattr(objectives, "get_objective", lambda **k: _state())
@@ -818,8 +839,10 @@ def test_stacked_build_blocked_is_a_typed_refusal(monkeypatch, unborn_git_repo_f
         assert result.exit_code == 1
         payload = json.loads(result.stdout)
     assert payload["error_type"] == "node_not_build_ready"
-    assert "[x] y" in payload["message"]
-    assert "perk objective stack status 7" in payload["message"]
+    assert payload["message"] == (
+        "Objective #7 is not build-ready: the train has blocker findings: [x] y\n"
+        "Inspect the train: perk objective stack status 7"
+    )
 
 
 def test_stacked_explicit_node_must_match_the_ready_candidate(monkeypatch, unborn_git_repo_factory):
@@ -837,7 +860,11 @@ def test_stacked_explicit_node_must_match_the_ready_candidate(monkeypatch, unbor
         payload = json.loads(result.stdout)
     assert calls[0].node_id == "1.3"
     assert payload["error_type"] == "node_not_build_ready"
-    assert "1.2" in payload["message"]
+    assert payload["message"] == (
+        "Node 1.3 is not the build-ready layer — the next build-ready node is 1.2 "
+        "(stacked planning follows the delivery order).\n"
+        "Inspect the train: perk objective stack status 7"
+    )
 
 
 def test_stacked_in_flight_keeps_the_incremental_message_shape(
@@ -858,17 +885,24 @@ def test_stacked_in_flight_keeps_the_incremental_message_shape(
         assert result.exit_code == 1
         payload = json.loads(result.stdout)
     assert payload["error_type"] == "objective_in_flight"
-    assert "node 1.2 has a plan in flight" in payload["message"]
+    assert payload["message"] == (
+        "No new node to plan: node 1.2 has a plan in flight (pr #55, status in_progress). "
+        "Implement it (`perk implement #55` when set), or reset it to re-plan."
+    )
 
 
 @pytest.mark.parametrize(
     ("decision", "error_type", "message"),
     [
-        (_decision("complete"), "no_actionable_node", "Objective #7 is complete"),
+        (
+            _decision("complete"),
+            "no_actionable_node",
+            "Objective #7 is complete — every node is done or skipped. Nothing to plan.",
+        ),
         (
             _decision("node_not_found", requested="9.9"),
             "no_actionable_node",
-            "Node '9.9' not found",
+            "Node '9.9' not found on objective #7.",
         ),
         (
             _decision(
@@ -877,7 +911,7 @@ def test_stacked_in_flight_keeps_the_incremental_message_shape(
                 requested="1.1",
             ),
             "no_actionable_node",
-            "Node 1.1 is already done",
+            "Node 1.1 is already done.",
         ),
         (
             _decision(
@@ -888,12 +922,13 @@ def test_stacked_in_flight_keeps_the_incremental_message_shape(
                 requested="1.2",
             ),
             "no_actionable_node",
-            "blocked by an unfinished dependency",
+            "Node 1.2 is blocked by an unfinished dependency.",
         ),
         (
             _decision("no_actionable"),
             "no_actionable_node",
-            "No actionable node on objective #7",
+            "No actionable node on objective #7: every remaining node is blocked by an "
+            "unfinished dependency (or explicitly blocked).",
         ),
     ],
 )
@@ -904,7 +939,7 @@ def test_planning_decision_refusal_mapping_is_exact(decision, error_type, messag
     with pytest.raises(UserFacingCliError) as excinfo:
         _planning_node_choice(decision, "7")
     assert excinfo.value.error_type == error_type
-    assert message in str(excinfo.value)
+    assert str(excinfo.value) == message
 
 
 def test_stacked_dry_run_skips_prepare_and_reports_unchecked(monkeypatch, unborn_git_repo_factory):

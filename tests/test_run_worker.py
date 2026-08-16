@@ -12,7 +12,7 @@ from perk.backends.issue_backend import IssueBackendError
 from perk.backends.linear import agent as linear_agent
 from perk.cli.ensure import UserFacingCliError
 from perk.convergence import init as init_mod
-from perk.delivery import DeliveryError, PrepareResult
+from perk.delivery import DeliveryError, PrepareRequest, PrepareResult
 from perk.run import launch, run_report, run_worker
 from perk.run.launch import worktree as worktree_mod
 from perk.state import cache
@@ -712,7 +712,7 @@ def test_position_branch_stacked_not_ready_is_a_typed_refusal(
 
 
 def test_positioning_parity_stacked_local_create_vs_remote_position(
-    git_repo_with_remote, stub_position_branch, monkeypatch
+    git_repo_with_remote, stub_position_branch, monkeypatch, capsys
 ):
     """The §8.46 parity proof: from two clones of ONE bare remote — no pre-existing worktrees,
     no local stack metadata — local fresh creation (`resolve_worktree`) and remote positioning
@@ -742,6 +742,11 @@ def test_positioning_parity_stacked_local_create_vs_remote_position(
         worktree=None,
         materialize=True,
     )
+    local_progress = [
+        line
+        for line in capsys.readouterr().err.splitlines()
+        if "reconstructing the delivery train" in line or "layer 1.2 starts from plan-101" in line
+    ]
     local_head = _g(resolved.path, "rev-parse", "HEAD").strip()
     assert resolved.disposition == "create-fresh"
     assert resolved.base == parent_sha
@@ -749,6 +754,11 @@ def test_positioning_parity_stacked_local_create_vs_remote_position(
 
     # Path B — remote positioning (the run-worker path; the checkout IS the worktree).
     stub_position_branch.real(remote_clone, _stacked_ref(), "main")
+    remote_progress = [
+        line
+        for line in capsys.readouterr().err.splitlines()
+        if "reconstructing the delivery train" in line or "layer 1.2 starts from plan-101" in line
+    ]
     remote_head = _g(remote_clone, "rev-parse", "HEAD").strip()
     assert _g(remote_clone, "rev-parse", "--abbrev-ref", "HEAD").strip() == "plan-102"
 
@@ -767,8 +777,19 @@ def test_positioning_parity_stacked_local_create_vs_remote_position(
     assert local_record["branch"] == "plan-102"
     assert local_record["predecessor_plan_id"] == "101"
     assert local_record["delivery_lineage"] == _LINEAGE
-    assert len(calls) == 2
-    assert all(call.kind == "layer_start" and call.mode == "execution" for call in calls)
+    expected_request = PrepareRequest(
+        kind="layer_start",
+        mode="execution",
+        objective_id="10",
+        plan_id="102",
+    )
+    assert calls == [expected_request, expected_request]
+    expected_progress = [
+        "  \u203a reconstructing the delivery train",
+        f"  ✓ layer 1.2 starts from plan-101 @ {parent_sha[:12]}",
+    ]
+    assert local_progress == expected_progress
+    assert remote_progress == expected_progress
 
 
 def test_run_worker_positions_the_branch_before_the_worktree_and_the_spawn(

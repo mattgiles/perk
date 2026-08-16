@@ -84,6 +84,31 @@ def _run(monkeypatch, args, *, write_plan=True):
         return runner.invoke(plan_save, args, obj=PerkContext(cwd=Path(d)))
 
 
+@pytest.mark.parametrize(
+    ("flag", "value", "message"),
+    (
+        ("--objective-id", "", "--objective-id must not be blank."),
+        ("--node-id", "  ", "--node-id must not be blank."),
+    ),
+)
+def test_plan_save_blank_objective_link_is_typed_invalid_input(monkeypatch, flag, value, message):
+    _authed(monkeypatch)
+    monkeypatch.setattr(
+        resolve,
+        "resolve_issue_backend",
+        lambda _root: pytest.fail("blank link must fail before backend resolution"),
+    )
+    result = _run(
+        monkeypatch,
+        ["--plan-file", "plan.md", flag, value, "--json"],
+    )
+
+    assert result.exit_code == 1
+    payload = json.loads(result.stdout)
+    assert payload["error_type"] == "invalid_input"
+    assert payload["message"] == message
+
+
 def test_plan_save_success(monkeypatch):
     _authed(monkeypatch)
     calls = _stub_writes(monkeypatch)

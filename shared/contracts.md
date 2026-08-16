@@ -6350,7 +6350,7 @@ treats absence silently; unexpected exceptions propagate. The independently opti
 objective base and nested `PlanIdentity` come from the same snapshot. A no-node request returns
 the base without policy/lineage/order validation. A node request applies the existing pure policy:
 incremental has no identity; stacked requires a nonblank lineage, target membership, and a linked
-predecessor for non-bottom layers (`missing_lineage`, `unknown_layer`, or
+predecessor for non-bottom layers (`missing_lineage`, `invalid_input`, or
 `stacked_predecessor_missing` before any write). Every initial/re-save/unification arm receives all
 three identity fields. `PlanRef` persists only lineage, and the publication-owned checkpoint pair
 stays unwritten. Dry-run output prints a best-effort notice when one exists and omits identity.
@@ -6367,16 +6367,18 @@ base, parent_branch, branch}` and pure `derive_layer_context`/`require_ready_lay
 `perk.delivery.layer`, but none is exported from `perk.delivery`. Both launch paths independently
 call `Delivery.prepare(PrepareRequest(kind="layer_start", mode="execution", plan_id,
 objective_id?))`; there is no launch wrapper. It refuses a missing objective id before lookup,
-performs one status reconstruction, rejects redirect/no-train, locates the plan layer, proves it
-is build-ready, then derives the context. The bottom layer uses objective base; a child requires
-predecessor identity/plan/branch.
+performs one status reconstruction, rejects no-train, locates the plan layer, proves it is
+build-ready, then derives the context. Execution does not inspect `redirected_from`; the freshly
+reconstructed active train remains authoritative. The bottom layer uses objective base; a child
+requires predecessor identity/plan/branch.
 
-Prepare next calls `DeliveryGit.fetch_refs` once for the exact parent refspec and
-`resolve_commit("refs/remotes/origin/<parent>")` once. An absent fetched ref/commit is
-`parent_missing`; fetch/verification exceptions are `parent_unverified`; a blank resolved SHA is
-also `parent_unverified`. No fallback is permitted: the result's `parent_sha` is the verified
-latest remote head, never a stored checkpoint. Deferred publication still calls callback-only
-`prepare_layer_start` internally; that core has no repository/global defaults.
+Prepare next calls `DeliveryGit.fetch_refs` once for the exact parent branch,
+`remote_branch_sha(parent_branch)` once, then `resolve_commit(observed_sha)` once. A fetch or remote
+observation failure is `git_error`; an absent remote branch is `parent_missing`; an observed SHA
+that does not resolve locally is `parent_unverified`. No fallback is permitted: the result's
+nonblank `parent_sha` is the verified latest remote head, never a stored checkpoint. Deferred
+publication still calls callback-only `prepare_layer_start` internally; that core has no
+repository/global defaults.
 
 **Local and remote creation consume the same result.** Local `resolve_worktree` runs execution
 Prepare immediately before `git worktree add … <parent_sha>`; remote `position_branch` runs it

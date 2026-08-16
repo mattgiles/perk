@@ -706,6 +706,84 @@ def test_plan_identity_objective_only_returns_base_without_validating_policy() -
     assert result == PrepareResult(kind="plan_identity", mode="best_effort", base="release")
 
 
+@pytest.mark.parametrize(
+    ("header", "nodes", "node_id", "strict_error"),
+    (
+        (
+            {"delivery": "junk", "base": " release "},
+            (ObjectiveNode(id="1.1", description="Layer", status=NodeStatus.PENDING),),
+            "1.1",
+            "invalid_delivery_policy",
+        ),
+        (
+            {"delivery": "stacked", "base": " release "},
+            (ObjectiveNode(id="1.1", description="Layer", status=NodeStatus.PENDING),),
+            "1.1",
+            "missing_lineage",
+        ),
+        (
+            {"delivery": "stacked", "delivery_lineage": "lineage", "base": " release "},
+            (
+                ObjectiveNode(
+                    id="1.1",
+                    description="First",
+                    status=NodeStatus.PENDING,
+                    depends_on=("1.2",),
+                ),
+                ObjectiveNode(
+                    id="1.2",
+                    description="Second",
+                    status=NodeStatus.PENDING,
+                    depends_on=("1.1",),
+                ),
+            ),
+            "1.1",
+            "invalid_train",
+        ),
+        (
+            {"delivery": "stacked", "delivery_lineage": "lineage", "base": " release "},
+            (ObjectiveNode(id="1.1", description="Layer", status=NodeStatus.PENDING),),
+            "missing",
+            "invalid_input",
+        ),
+        (
+            {"delivery": "stacked", "delivery_lineage": "lineage", "base": " release "},
+            (ObjectiveNode(id="1.1", description="Skipped", status=NodeStatus.SKIPPED),),
+            "1.1",
+            "invalid_input",
+        ),
+    ),
+)
+def test_plan_identity_strict_refuses_while_best_effort_retains_base(
+    header: dict[str, object],
+    nodes: tuple[ObjectiveNode, ...],
+    node_id: str,
+    strict_error: str,
+) -> None:
+    persistence = FakeDeliveryPersistence(objectives={"10": _objective(header=header, nodes=nodes)})
+    service = _delivery(persistence)
+
+    with pytest.raises(DeliveryError) as excinfo:
+        service.prepare(
+            PrepareRequest(
+                kind="plan_identity",
+                mode="strict",
+                objective_id="10",
+                node_id=node_id,
+            )
+        )
+    assert excinfo.value.error_type == strict_error
+
+    assert service.prepare(
+        PrepareRequest(
+            kind="plan_identity",
+            mode="best_effort",
+            objective_id="10",
+            node_id=node_id,
+        )
+    ) == PrepareResult(kind="plan_identity", mode="best_effort", base="release")
+
+
 def test_plan_identity_missing_predecessor_refuses_even_best_effort() -> None:
     nodes = (
         ObjectiveNode(id="1.1", description="Bottom", status=NodeStatus.PENDING),
@@ -767,6 +845,146 @@ def test_planning_prepare_uses_one_status_snapshot_and_never_probes_parent() -> 
     )
     assert service.status_calls == [StatusRequest(objective_id="10")]
     assert git.calls == []
+
+
+def test_planning_candidate_readiness_and_roadmap_membership_vetoes() -> None:
+    node = ObjectiveNode(id="1.1", description="Candidate", status=NodeStatus.PENDING)
+    blocked = _planning_train(
+        nodes=(node,),
+        layers=(_train_layer("1.1", None, None),),
+        candidate="1.1",
+        ready=False,
+        reason="[prefix_gap] child published before parent",
+    )
+    blocked_result = _StatusDelivery(
+        StatusResult("10", blocked.objective_url, None, blocked, None)
+    ).prepare(PrepareRequest(kind="layer_start", mode="planning", objective_id="10"))
+    assert blocked_result.planning == PrepareResult.PlanningDecision(
+        kind="build_blocked",
+        objective_id="10",
+        objective_title="Captured objective",
+        objective_url="fake://objective/10",
+        requested_node_id=None,
+        reason="[prefix_gap] child published before parent",
+    )
+
+    missing = _planning_train(
+        nodes=(),
+        layers=(_train_layer("1.1", None, None),),
+        candidate="1.1",
+    )
+    missing_result = _StatusDelivery(
+        StatusResult("10", missing.objective_url, None, missing, None)
+    ).prepare(PrepareRequest(kind="layer_start", mode="planning", objective_id="10"))
+    assert missing_result.planning is not None
+    assert missing_result.planning.kind == "build_blocked"
+    assert missing_result.planning.reason == "the readiness candidate 1.1 is not on the roadmap"
+
+
+@pytest.mark.parametrize(
+    ("status", "pr", "requested", "expected"),
+    (
+        (NodeStatus.PLANNING, None, None, "ready"),
+        (NodeStatus.PENDING, None, "other", "wrong_candidate"),
+        (NodeStatus.IN_PROGRESS, "#101", "other", "in_flight"),
+        (NodeStatus.PLANNING, "#101", "other", "in_flight"),
+        (NodeStatus.DONE, "#101", None, "build_blocked"),
+    ),
+)
+def test_planning_candidate_status_matrix(
+    status: NodeStatus,
+    pr: str | None,
+    requested: str | None,
+    expected: str,
+) -> None:
+    node = ObjectiveNode(id="1.1", description="Candidate", status=status, pr=pr)
+    train = _planning_train(
+        nodes=(node,),
+        layers=(_train_layer("1.1", "101" if pr else None, "plan-101" if pr else None),),
+        candidate="1.1",
+    )
+    result = _StatusDelivery(StatusResult("10", train.objective_url, None, train, None)).prepare(
+        PrepareRequest(
+            kind="layer_start",
+            mode="planning",
+            objective_id="10",
+            node_id=requested,
+        )
+    )
+
+    assert result.planning is not None and result.planning.kind == expected
+    if expected == "wrong_candidate":
+        assert result.planning.requested_node_id == "other"
+        assert result.planning.node is not None and result.planning.node.id == "1.1"
+    if expected == "in_flight":
+        assert result.planning.node is not None and result.planning.node.status is status
+    if expected == "build_blocked":
+        assert result.planning.reason == (
+            f"the next build-ready layer 1.1 is {status.value} — not plannable in that status"
+        )
+
+
+def test_planning_ready_decision_carries_other_resumable_claims() -> None:
+    nodes = (
+        ObjectiveNode(id="1.1", description="Candidate", status=NodeStatus.PENDING, depends_on=()),
+        ObjectiveNode(
+            id="1.2", description="Claim", status=NodeStatus.PLANNING, pr=None, depends_on=()
+        ),
+    )
+    train = _planning_train(
+        nodes=nodes,
+        layers=(
+            _train_layer("1.1", None, None),
+            _train_layer("1.2", None, None),
+        ),
+        candidate="1.1",
+    )
+    result = _StatusDelivery(StatusResult("10", train.objective_url, None, train, None)).prepare(
+        PrepareRequest(kind="layer_start", mode="planning", objective_id="10")
+    )
+
+    assert result.planning is not None and result.planning.kind == "ready"
+    assert result.planning.skipped_claim_ids == ("1.2",)
+
+
+@pytest.mark.parametrize(
+    ("nodes", "expected"),
+    (
+        (
+            (ObjectiveNode(id="1.1", description="Ready", status=NodeStatus.PENDING),),
+            "ready",
+        ),
+        (
+            (
+                ObjectiveNode(
+                    id="1.1", description="In flight", status=NodeStatus.IN_PROGRESS, pr="#101"
+                ),
+            ),
+            "in_flight",
+        ),
+        (
+            (ObjectiveNode(id="1.1", description="Done", status=NodeStatus.DONE),),
+            "complete",
+        ),
+        (
+            (ObjectiveNode(id="1.1", description="Blocked", status=NodeStatus.BLOCKED),),
+            "no_actionable",
+        ),
+    ),
+)
+def test_planning_graph_fallback_classifies_automatic_selection(
+    nodes: tuple[ObjectiveNode, ...], expected: str
+) -> None:
+    train = _planning_train(nodes=nodes, layers=(), candidate=None, ready=False, reason="done")
+    result = _StatusDelivery(StatusResult("10", train.objective_url, None, train, None)).prepare(
+        PrepareRequest(kind="layer_start", mode="planning", objective_id="10")
+    )
+
+    assert result.planning is not None and result.planning.kind == expected
+    if expected in {"ready", "in_flight"}:
+        assert result.planning.node is not None and result.planning.node.id == "1.1"
+    if expected == "ready":
+        assert result.planning.context is None
 
 
 @pytest.mark.parametrize(
@@ -889,6 +1107,122 @@ def test_execution_prepare_verifies_parent_in_exact_aggregate_order() -> None:
         ("remote_branch_sha", "plan-101"),
         ("resolve_commit", parent_sha),
     ]
+
+
+def test_execution_no_train_is_a_bounded_invalid_train_refusal() -> None:
+    service = _StatusDelivery(StatusResult("10", "u/10", None, None, "incremental delivery"))
+
+    with pytest.raises(DeliveryError) as excinfo:
+        service.prepare(
+            PrepareRequest(
+                kind="layer_start",
+                mode="execution",
+                objective_id="10",
+                plan_id="101",
+            )
+        )
+
+    assert excinfo.value.error_type == "invalid_train"
+    assert str(excinfo.value) == (
+        "plan #101 carries delivery_lineage but objective #10 has no delivery train "
+        "(incremental delivery)."
+    )
+
+
+@pytest.mark.parametrize(
+    ("plan_id", "ready", "git", "error_type", "message"),
+    (
+        (
+            "999",
+            True,
+            FakeDeliveryGit(),
+            "unknown_layer",
+            "plan #999 is not a layer of objective 10's delivery train",
+        ),
+        (
+            "101",
+            False,
+            FakeDeliveryGit(),
+            "node_not_build_ready",
+            "layer 1.1 (plan #101) is not build-ready: blocked by drift",
+        ),
+        (
+            "101",
+            True,
+            FakeDeliveryGit(),
+            "parent_missing",
+            "expected the parent branch refs/heads/main on origin; observed no such remote "
+            "branch — layer 1.1 cannot start without its parent",
+        ),
+        (
+            "101",
+            True,
+            FakeDeliveryGit(branches={"main": "a" * 40}),
+            "parent_unverified",
+            f"the parent head {'a' * 40} (refs/heads/main) does not resolve locally after the "
+            "fetch — cannot verify the layer start commit",
+        ),
+    ),
+)
+def test_execution_translates_layer_and_parent_refusals(
+    plan_id: str,
+    ready: bool,
+    git: FakeDeliveryGit,
+    error_type: str,
+    message: str,
+) -> None:
+    node = ObjectiveNode(id="1.1", description="Layer", status=NodeStatus.PENDING, pr="#101")
+    train = _planning_train(
+        nodes=(node,),
+        layers=(_train_layer("1.1", "101", "plan-101"),),
+        candidate="1.1",
+        ready=ready,
+        reason=None if ready else "blocked by drift",
+    )
+    service = _StatusDelivery(StatusResult("10", train.objective_url, None, train, None), git=git)
+
+    with pytest.raises(DeliveryError) as excinfo:
+        service.prepare(
+            PrepareRequest(
+                kind="layer_start",
+                mode="execution",
+                objective_id="10",
+                plan_id=plan_id,
+            )
+        )
+
+    assert excinfo.value.error_type == error_type
+    assert str(excinfo.value) == message
+
+
+def test_execution_normalizes_aggregate_git_failure() -> None:
+    failure = TrainReconstructionError(
+        "git fetch failed for refs ('main',): offline", error_type="git_error"
+    )
+    git = FakeDeliveryGit(errors={("fetch_refs", "main"): failure})
+    node = ObjectiveNode(id="1.1", description="Layer", status=NodeStatus.PENDING, pr="#101")
+    train = _planning_train(
+        nodes=(node,),
+        layers=(_train_layer("1.1", "101", "plan-101"),),
+        candidate="1.1",
+    )
+    service = _StatusDelivery(StatusResult("10", train.objective_url, None, train, None), git=git)
+
+    with pytest.raises(DeliveryError) as excinfo:
+        service.prepare(
+            PrepareRequest(
+                kind="layer_start",
+                mode="execution",
+                objective_id="10",
+                plan_id="101",
+            )
+        )
+
+    assert excinfo.value.error_type == "git_error"
+    assert str(excinfo.value) == (
+        "could not observe the parent branch refs/heads/main on origin: "
+        "git fetch failed for refs ('main',): offline"
+    )
 
 
 def test_execution_missing_objective_refuses_before_status() -> None:
