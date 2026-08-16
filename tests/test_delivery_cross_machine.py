@@ -10,7 +10,7 @@ ever receives that machine's own clone root — B structurally cannot read A's t
 
 Machine A's "death" is post-crash durable-state construction (the technique rule): A's
 surviving effects are applied for real (real pushes from clone A, journal records in the
-shared world), then machine B's PUBLIC surfaces (``recover_operations``, ``publish_layer``)
+shared world), then machine B's PUBLIC surfaces (``recover_operations``, ``Delivery.publish``)
 conclude the operation from the durable authorities alone — the same posture as the remote
 runner's fresh checkout. Arms: SYNC all-after roll-forward, SYNC all-before
 abandon-with-proof, PUBLISH bottom-layer all-after (report + submit-resume completion),
@@ -25,13 +25,26 @@ import contextlib
 import subprocess
 from collections.abc import Callable, Iterator
 from pathlib import Path
+from typing import cast
 
 import pytest
 
 from perk import objective
 from perk.backends.issue_backend import PlanHeaderUpdate, PlanState
 from perk.backends.objective_store import ObjectiveRef, ObjectiveState
-from perk.delivery import continuation, publish, recover
+from perk.delivery import (
+    Delivery,
+    DeliveryGit,
+    DeliveryGitHub,
+    DeliveryPersistence,
+    PublishRequest,
+    PublishResult,
+    StatusRequest,
+    StatusResult,
+    continuation,
+    publish,
+    recover,
+)
 from perk.delivery import transfer as transfer_mod
 from perk.delivery.finalize import (
     LandFinalization,
@@ -590,37 +603,147 @@ class _Machine:
             now=lambda: NOW,
         )
 
-    def publish(self, plan_id: str, *, run_id: str = "01RUNB") -> publish.PublicationResult:
-        return publish.publish_layer(
-            self.root,
-            plan_id=plan_id,
-            run_id=run_id,
-            title="T",
-            compose_body=lambda facts, pr_number: f"body layer {facts.position}/{facts.total}",
-            header_fields=lambda pr_number: {"branch": "b", "pr": str(pr_number)},
-            reconstruct=self._reconstruct,
-            persistence_factory=lambda root: self.shared.persistence,
-            issues_factory=lambda root: self.shared,
-            stack_probe=lambda root: True,
-            pr_facts=self._pr_facts,
-            stack_read=self._stack_read,
-            stack_create=self._stack_create,
-            stack_append=self._stack_append,
-            create_pr=self._create_pr,
-            get_pr=self._get_pr,
-            update_pr_body=self._update_pr_body,
-            update_pr_base=self._update_pr_base,
-            reopen_pr=self._reopen_pr,
-            validate_pr_body=lambda body, *, pr_number: (),
-            fetch=self._fetch,
-            remote_head=self._remote_head,
-            local_head=self._local_head,
-            is_ancestor=self._is_ancestor,
-            push=self._push,
-            pr_for_branch=self._pr_for_branch,
-            sleep=lambda s: None,
+    def publish(self, plan_id: str, *, run_id: str = "01RUNB") -> PublishResult.Layer:
+        machine = self
+
+        class _Persistence:
+            def get_plan(self, *, issue_id: str) -> PlanState | None:
+                return machine.shared.get_plan(issue_id=issue_id)
+
+            def get_plan_body(self, *, issue_id: str) -> str | None:
+                del issue_id
+                return None
+
+            def update_plan_header(
+                self, *, issue_id: str, fields: dict[str, object]
+            ) -> PlanHeaderUpdate:
+                return machine.shared.update_plan_header(issue_id=issue_id, fields=fields)
+
+            def read_journal(self, objective_id: str) -> JournalFold:
+                return machine.shared.persistence.read_journal(objective_id)
+
+            def append_prepared(self, objective_id: str, record: PreparedRecord) -> AppendResult:
+                return machine.shared.persistence.append_prepared(objective_id, record)
+
+            def append_outcome(self, objective_id: str, record: OutcomeRecord) -> AppendResult:
+                return machine.shared.persistence.append_outcome(objective_id, record)
+
+            def write_checkpoints(
+                self,
+                plan_id: str,
+                *,
+                parent_checkpoint_sha: str,
+                published_head_sha: str,
+            ) -> None:
+                machine.shared.persistence.write_checkpoints(
+                    plan_id,
+                    parent_checkpoint_sha=parent_checkpoint_sha,
+                    published_head_sha=published_head_sha,
+                )
+
+        class _Git:
+            @property
+            def repo_root(self) -> Path:
+                return machine.root
+
+            def fetch_refs(self, refs: tuple[str, ...]) -> None:
+                machine._fetch(machine.root, list(refs))
+
+            def remote_branch_sha(self, branch: str) -> str | None:
+                return machine._remote_head(machine.root, branch)
+
+            def resolve_commit(self, ref: str, *, cwd: Path | None = None) -> str | None:
+                return machine._local_head(cwd or machine.root, ref)
+
+            def is_ancestor(self, ancestor_sha: str, head_sha: str) -> bool:
+                return machine._is_ancestor(machine.root, ancestor_sha, head_sha)
+
+            def push_with_exact_lease(
+                self, branch: str, *, expected_remote_sha: str | None
+            ) -> None:
+                machine._push(machine.root, branch, expected_remote_sha=expected_remote_sha)
+
+        class _GitHub:
+            def stack_capability(self) -> bool:
+                return True
+
+            def pr_facts(self, number: int) -> PrDeliveryFacts | None:
+                return machine._pr_facts(number=number, repo_root=machine.root)
+
+            def strict_stack(self, number: int) -> StackRestFacts | None:
+                return machine._stack_read(number=number, repo_root=machine.root)
+
+            def create_stack(self, pull_requests: tuple[int, ...]) -> StackMutationOutcome:
+                return machine._stack_create(pull_requests=pull_requests, repo_root=machine.root)
+
+            def append_stack(
+                self, stack_number: int, *, pull_requests: tuple[int, ...]
+            ) -> StackMutationOutcome:
+                return machine._stack_append(
+                    stack_number=stack_number,
+                    pull_requests=pull_requests,
+                    repo_root=machine.root,
+                )
+
+            def create_pr(
+                self, *, head: str, base: str, title: str, body: str, draft: bool
+            ) -> PullRequest:
+                return machine._create_pr(
+                    head=head,
+                    base=base,
+                    title=title,
+                    body=body,
+                    repo_root=machine.root,
+                    draft=draft,
+                )
+
+            def get_pr(self, number: int) -> PullRequest | None:
+                return machine._get_pr(number=number, repo_root=machine.root)
+
+            def update_pr_body(self, number: int, *, body: str):
+                return machine._update_pr_body(number=number, body=body, repo_root=machine.root)
+
+            def update_pr_base(self, number: int, *, base: str) -> None:
+                machine._update_pr_base(number=number, base=base, repo_root=machine.root)
+
+            def reopen_pr(self, number: int) -> None:
+                machine._reopen_pr(number=number, repo_root=machine.root)
+
+            def pr_for_branch(self, branch: str) -> PullRequest | None:
+                return machine._pr_for_branch(branch=branch, repo_root=machine.root)
+
+        class _Delivery(Delivery):
+            def __init__(self) -> None:
+                super().__init__(
+                    persistence=cast("DeliveryPersistence", _Persistence()),
+                    git=cast("DeliveryGit", _Git()),
+                    github=cast("DeliveryGitHub", _GitHub()),
+                )
+
+            def status(self, request: StatusRequest) -> StatusResult:
+                train = machine._reconstruct(machine.root, request.objective_id)
+                return StatusResult(
+                    train.objective_id,
+                    train.objective_url,
+                    train.redirected_from,
+                    train,
+                    None,
+                )
+
+        runtime = publish._PublishRuntime(
+            mint_operation_id=mint_operation_id,
             now=lambda: NOW,
+            sleep=lambda _seconds: None,
+            validate_pr_body=lambda body, *, pr_number: (),
         )
+        with pytest.MonkeyPatch.context() as monkeypatch:
+            monkeypatch.setattr(publish, "_DEFAULT_PUBLISH_RUNTIME", runtime)
+            result = _Delivery().publish(
+                PublishRequest(kind="layer", plan_id=plan_id, run_id=run_id)
+            )
+        if result.layer is None:
+            raise AssertionError("layer publish returned no layer detail")
+        return result.layer
 
     def _update_pr_body(self, *, number, body, repo_root):
         from perk.github.prs import PrBodyUpdate
@@ -853,7 +976,7 @@ def _publish_record(
 def test_publish_bottom_layer_all_after_reports_then_submit_resume_completes(tmp_path):
     # Machine A died after the branch push + PR create on a BOTTOM layer (its `after` has
     # no stack membership — a true all-after). Machine B's recover REPORTS the owning
-    # /submit resume (conclude-only posture, never a roll-forward); `publish_layer` with
+    # /submit resume (conclude-only posture, never a roll-forward); `Delivery.publish` with
     # resume from B then completes the RECORDED operation: identity + checkpoints +
     # completed from B, no duplicate non-idempotent effect (no second PR, no push).
     origin, machine_a, machine_b, shared, shas = _two_machines(tmp_path)
@@ -909,7 +1032,7 @@ def test_publish_non_bottom_partial_reports_mixed_then_submit_resume_converges(t
     # Machine A died after the second layer's PR create but BEFORE the stack mutation. The
     # classification is layer-position-dependent: a non-bottom `after` includes stack
     # membership, so machine B's recover honestly reports MIXED (report-only, fail closed).
-    # `publish_layer`'s own resume from B then rolls forward under the recorded operation
+    # `Delivery.publish`'s own resume from B then rolls forward under the recorded operation
     # and completes the stack convergence — the cross-machine stack registration.
     origin, machine_a, machine_b, shared, shas = _two_machines(tmp_path)
     shared.layer_specs = [

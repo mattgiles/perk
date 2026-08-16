@@ -1,20 +1,22 @@
 """Constructor-configured fakes for the delivery façade's aggregate authorities."""
 
 from collections.abc import Mapping
+from copy import deepcopy
+from dataclasses import replace
 from pathlib import Path
 
-from perk.backends.issue_backend import PlanState
+from perk.backends.issue_backend import PlanHeaderUpdate, PlanState
 from perk.backends.objective_store import ObjectiveState
 from perk.delivery.facade import DeliveryGit, DeliveryGitHub, DeliveryPersistence
 from perk.delivery.journal import EventRole, JournalFold, OutcomeRecord, PreparedRecord, fold_events
 from perk.delivery.persistence import AppendResult
 from perk.delivery.train import (
     BaseHeadObservation,
-    BranchPrView,
     PrFactsView,
     StackView,
     WorktreeFacts,
 )
+from perk.github import prs, stacks
 from perk.substrate import git as git_mod
 
 type Call = tuple[object, ...]
@@ -22,12 +24,27 @@ type Call = tuple[object, ...]
 _DEFAULT_MERGE_RULES = DeliveryGitHub.MergeRules(squash_allowed=True, merge_queue_required=False)
 
 
+def _call_value(value: object) -> object:
+    """Freeze JSON-like mutation inputs so call records remain deterministic mapping keys."""
+    if isinstance(value, dict):
+        return tuple((key, _call_value(item)) for key, item in value.items())
+    if isinstance(value, (list, tuple)):
+        return tuple(_call_value(item) for item in value)
+    return value
+
+
 class _FailureMixin:
     def __init__(self, errors: Mapping[Call, Exception] | None) -> None:
         self._errors = dict(errors or {})
 
     def _raise_failure(self, call: Call) -> None:
-        failure = self._errors.get(call)
+        try:
+            failure = self._errors.get(call)
+        except TypeError:
+            failure = next(
+                (candidate for key, candidate in self._errors.items() if key == call),
+                None,
+            )
         if failure is not None:
             raise failure
 
@@ -40,17 +57,27 @@ class FakeDeliveryPersistence(_FailureMixin, DeliveryPersistence):
         *,
         objectives: Mapping[str, ObjectiveState] | None = None,
         plans: Mapping[str, PlanState] | None = None,
+        plan_bodies: Mapping[str, str | None] | None = None,
         journals: Mapping[str, JournalFold] | None = None,
         prepared_results: Mapping[str, AppendResult] | None = None,
         outcome_results: Mapping[str, AppendResult] | None = None,
+        header_results: Mapping[str, PlanHeaderUpdate] | None = None,
         errors: Mapping[Call, Exception] | None = None,
     ) -> None:
         super().__init__(errors)
-        self._objectives = dict(objectives or {})
-        self._plans = dict(plans or {})
+        self._objectives = {
+            key: replace(value, header=deepcopy(value.header))
+            for key, value in (objectives or {}).items()
+        }
+        self._plans = {
+            key: replace(value, header=deepcopy(value.header))
+            for key, value in (plans or {}).items()
+        }
+        self._plan_bodies = dict(plan_bodies or {})
         self._journals = dict(journals or {})
         self._prepared_results = dict(prepared_results or {})
         self._outcome_results = dict(outcome_results or {})
+        self._header_results = dict(header_results or {})
         self.calls: list[Call] = []
 
     def get_objective(self, *, objective_id: str) -> ObjectiveState | None:
@@ -64,6 +91,31 @@ class FakeDeliveryPersistence(_FailureMixin, DeliveryPersistence):
         self.calls.append(call)
         self._raise_failure(call)
         return self._plans.get(issue_id)
+
+    def get_plan_body(self, *, issue_id: str) -> str | None:
+        call: Call = ("get_plan_body", issue_id)
+        self.calls.append(call)
+        self._raise_failure(call)
+        return self._plan_bodies.get(issue_id)
+
+    def update_plan_header(self, *, issue_id: str, fields: dict[str, object]) -> PlanHeaderUpdate:
+        copied = deepcopy(fields)
+        call: Call = (
+            "update_plan_header",
+            issue_id,
+            tuple((key, _call_value(value)) for key, value in copied.items()),
+        )
+        self.calls.append(call)
+        self._raise_failure(call)
+        state = self._plans.get(issue_id)
+        if state is not None:
+            merged = deepcopy(state.header)
+            merged.update(copied)
+            self._plans[issue_id] = replace(state, header=merged)
+        return self._header_results.get(
+            issue_id,
+            PlanHeaderUpdate(fields_updated=tuple(copied), dry_run=False),
+        )
 
     def read_journal(self, objective_id: str) -> JournalFold:
         call: Call = ("read_journal", objective_id)
@@ -187,6 +239,14 @@ class FakeDeliveryGit(_FailureMixin, DeliveryGit):
         self._raise_failure(call)
         return self._branches.get(branch)
 
+    def push_with_exact_lease(self, branch: str, *, expected_remote_sha: str | None) -> None:
+        call: Call = ("push_with_exact_lease", branch, expected_remote_sha)
+        self.calls.append(call)
+        self._raise_failure(call)
+        local = self._resolutions.get(branch)
+        if local is not None:
+            self._branches[branch] = local
+
     def push_urls(self) -> DeliveryGit.PushUrlsResult | DeliveryGit.ProbeError:
         call: Call = ("push_urls",)
         self.calls.append(call)
@@ -301,9 +361,14 @@ class FakeDeliveryGitHub(_FailureMixin, DeliveryGitHub):
         merge_rules: DeliveryGitHub.MergeRules = _DEFAULT_MERGE_RULES,
         merge_rules_error: str | None = None,
         prs: Mapping[int, PrFactsView] | None = None,
-        branch_prs: Mapping[str, BranchPrView] | None = None,
+        pull_requests: Mapping[int, prs.PullRequest] | None = None,
+        branch_prs: Mapping[str, prs.PullRequest] | None = None,
         stacks: Mapping[int, StackView] | None = None,
-        strict_stacks: Mapping[int, tuple[int, ...] | None] | None = None,
+        strict_stacks: Mapping[int, stacks.StackRestFacts | None] | None = None,
+        body_updates: Mapping[int, prs.PrBodyUpdate] | None = None,
+        create_stack_results: Mapping[tuple[int, ...], stacks.StackMutationOutcome] | None = None,
+        append_stack_results: Mapping[tuple[int, tuple[int, ...]], stacks.StackMutationOutcome]
+        | None = None,
         active_writers: frozenset[str] = frozenset(),
         errors: Mapping[Call, Exception] | None = None,
     ) -> None:
@@ -312,9 +377,13 @@ class FakeDeliveryGitHub(_FailureMixin, DeliveryGitHub):
         self._merge_rules = merge_rules
         self._merge_rules_error = merge_rules_error
         self._prs = dict(prs or {})
+        self._pull_requests = dict(pull_requests or {})
         self._branch_prs = dict(branch_prs or {})
         self._stacks = dict(stacks or {})
         self._strict_stacks = dict(strict_stacks or {})
+        self._body_updates = dict(body_updates or {})
+        self._create_stack_results = dict(create_stack_results or {})
+        self._append_stack_results = dict(append_stack_results or {})
         self._active_writers = frozenset(active_writers)
         self.calls: list[Call] = []
 
@@ -336,8 +405,8 @@ class FakeDeliveryGitHub(_FailureMixin, DeliveryGitHub):
         self._raise_failure(call)
         return self._prs.get(number)
 
-    def strict_stack_members(self, number: int) -> tuple[int, ...] | None:
-        call: Call = ("strict_stack_members", number)
+    def strict_stack(self, number: int) -> stacks.StackRestFacts | None:
+        call: Call = ("strict_stack", number)
         self.calls.append(call)
         self._raise_failure(call)
         return self._strict_stacks.get(number)
@@ -359,11 +428,72 @@ class FakeDeliveryGitHub(_FailureMixin, DeliveryGitHub):
         self._raise_failure(call)
         return self._active_writers.intersection(plan_ids)
 
-    def pr_for_branch(self, branch: str) -> BranchPrView | None:
+    def pr_for_branch(self, branch: str) -> prs.PullRequest | None:
         call: Call = ("pr_for_branch", branch)
         self.calls.append(call)
         self._raise_failure(call)
         return self._branch_prs.get(branch)
+
+    def get_pr(self, number: int) -> prs.PullRequest | None:
+        call: Call = ("get_pr", number)
+        self.calls.append(call)
+        self._raise_failure(call)
+        return self._pull_requests.get(number)
+
+    def create_pr(
+        self, *, head: str, base: str, title: str, body: str, draft: bool
+    ) -> prs.PullRequest:
+        call: Call = ("create_pr", head, base, title, body, draft)
+        self.calls.append(call)
+        self._raise_failure(call)
+        result = self._branch_prs.get(head)
+        if result is None:
+            raise AssertionError(f"no fake PR configured for branch {head!r}")
+        self._pull_requests[result.number] = result
+        return result
+
+    def update_pr_body(self, number: int, *, body: str) -> prs.PrBodyUpdate:
+        call: Call = ("update_pr_body", number, body)
+        self.calls.append(call)
+        self._raise_failure(call)
+        return self._body_updates.get(number, prs.PrBodyUpdate(number=number, dry_run=False))
+
+    def update_pr_base(self, number: int, *, base: str) -> None:
+        call: Call = ("update_pr_base", number, base)
+        self.calls.append(call)
+        self._raise_failure(call)
+
+    def reopen_pr(self, number: int) -> None:
+        call: Call = ("reopen_pr", number)
+        self.calls.append(call)
+        self._raise_failure(call)
+
+    def mark_pr_ready(self, number: int) -> None:
+        call: Call = ("mark_pr_ready", number)
+        self.calls.append(call)
+        self._raise_failure(call)
+
+    def create_stack(self, pull_requests: tuple[int, ...]) -> stacks.StackMutationOutcome:
+        call: Call = ("create_stack", pull_requests)
+        self.calls.append(call)
+        self._raise_failure(call)
+        result = self._create_stack_results.get(pull_requests)
+        if result is None:
+            raise AssertionError(f"no fake create-stack result configured for {pull_requests!r}")
+        return result
+
+    def append_stack(
+        self, stack_number: int, *, pull_requests: tuple[int, ...]
+    ) -> stacks.StackMutationOutcome:
+        call: Call = ("append_stack", stack_number, pull_requests)
+        self.calls.append(call)
+        self._raise_failure(call)
+        result = self._append_stack_results.get((stack_number, pull_requests))
+        if result is None:
+            raise AssertionError(
+                f"no fake append-stack result configured for {(stack_number, pull_requests)!r}"
+            )
+        return result
 
     def pr_stack(self, number: int) -> StackView:
         call: Call = ("pr_stack", number)

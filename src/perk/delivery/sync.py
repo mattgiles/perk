@@ -192,10 +192,10 @@ class _ContextRecordSeams:
 
     def _stack_read(self, *, number: int, repo_root: Path) -> object:
         del repo_root
-        members = self.context.github.strict_stack_members(number)
-        if members is None:
+        stack = self.context.github.strict_stack(number)
+        if stack is None:
             return None
-        return _StackMembers(member_numbers=members)
+        return _StackMembers(member_numbers=stack.member_numbers)
 
     @property
     def stack_read(self) -> _StackRead:
@@ -514,8 +514,10 @@ def _check_claimed_world(
             )
     if len(claimed) >= 2:
         desired = [layer.pr_number for layer in claimed]
-        observed_stack = sync.github.strict_stack_members(desired[0])
-        observed_members = list(observed_stack) if observed_stack is not None else None
+        observed_stack = sync.github.strict_stack(desired[0])
+        observed_members = (
+            list(observed_stack.member_numbers) if observed_stack is not None else None
+        )
         if observed_members != desired:
             raise SyncError(
                 f"the native stack carries {observed_members}, expected exactly the claimed "

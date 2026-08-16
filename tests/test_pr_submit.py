@@ -2,18 +2,18 @@ import json
 import subprocess
 from dataclasses import replace
 from pathlib import Path
-from typing import Any
 
 import pytest
 from click.testing import CliRunner
 
-from perk import github, plan
+from perk import delivery, github, plan
 from perk.backends.github import plans
 from perk.backends.issue_backend import IssueBackendError, PlanHeaderUpdate
 from perk.backends.linear import agent as linear_agent
 from perk.cli.cli import cli
 from perk.cli.commands.pr import submit_cmd
 from perk.delivery import observe as delivery_observe
+from perk.delivery import publish as delivery_publish
 from perk.state import cache
 from perk.substrate import git
 
@@ -492,9 +492,9 @@ def test_no_run_id_leaves_impl_run_ids_untouched(monkeypatch):
 def test_merge_impl_run_ids_ignores_non_string_and_non_list():
     # The stored value is untrusted (read off the issue header): keep only string entries, and
     # degrade a non-list base to empty.
-    assert submit_cmd._merge_impl_run_ids(["a", 3, "b"], "c") == ("a", "b", "c")
-    assert submit_cmd._merge_impl_run_ids(None, "c") == ("c",)
-    assert submit_cmd._merge_impl_run_ids("not-a-list", "c") == ("c",)
+    assert plan.merge_untrusted_str_list(["a", 3, "b"], "c") == ("a", "b", "c")
+    assert plan.merge_untrusted_str_list(None, "c") == ("c",)
+    assert plan.merge_untrusted_str_list("not-a-list", "c") == ("c",)
 
 
 @pytest.mark.parametrize("stage", ["implement", "address"])
@@ -557,35 +557,18 @@ def test_writer_self_exclusion_rejects_unconsumed_and_unsupported_handoffs(tmp_p
 _STACKED_REF = {**_REF, "delivery_lineage": "01LINEAGE"}
 
 
-def _publication_result(*, operation=None, converged_noop: bool = False):
-    from perk import delivery
-
-    cascade = operation is not None
-    return delivery.PublicationResult(
-        pr=github.PullRequest(number=42, url="u/pr/42", is_draft=True, state="OPEN", existed=False),
-        branch="plan-7",
-        parent_branch="plan-6",
-        operation_id=operation.operation_id if cascade else "01OP",
-        stack_number=None if cascade else 9,
-        stack_size=None if cascade else 2,
-        stack_position=None if cascade else 2,
-        parent_checkpoint_sha="p" * 40,
-        published_head_sha="h" * 40,
-        resumed=False,
-        converged_noop=converged_noop,
-        operation=operation,
-    )
-
-
-def _delivery_operation(*, no_op: bool = False):
-    from perk import delivery
-
-    return delivery.DeliveryOperationFacts(
-        kind="sync",
+def _sync_result(*, no_op: bool = False) -> delivery.SyncResult:
+    return delivery.SyncResult(
+        objective_id="500",
+        objective_url="u/objective/500",
+        redirected_from=None,
         operation_id=None if no_op else "01SYNC",
         abandoned_operation_id=None,
-        resumed=False,
         no_op=no_op,
+        declined=False,
+        resumed=False,
+        base_cascaded=False,
+        base_advanced=False,
         affected=()
         if no_op
         else (
@@ -602,12 +585,51 @@ def _delivery_operation(*, no_op: bool = False):
     )
 
 
-def _header_builder(captured: dict[str, Any]):
-    """The captured `header_fields` builder, typed for the type checker."""
-    from collections.abc import Callable
-    from typing import cast
+def _publication_result(
+    *,
+    cascade: delivery.SyncResult | None = None,
+    fields_updated: tuple[str, ...] = ("branch", "pr", "lifecycle_stage"),
+    converged_noop: bool = False,
+) -> delivery.PublishResult:
+    layer = delivery.PublishResult.Layer(
+        pr=github.PullRequest(number=42, url="u/pr/42", is_draft=True, state="OPEN", existed=False),
+        branch="plan-7",
+        header_update=PlanHeaderUpdate(fields_updated=fields_updated, dry_run=False),
+        plan_embedded=True,
+        pr_checked=True,
+        parent_branch="plan-6",
+        operation_id=(
+            cascade.operation_id if cascade is not None else None if converged_noop else "01OP"
+        ),
+        stack_number=None if cascade is not None else 9,
+        stack_size=None if cascade is not None else 2,
+        stack_position=None if cascade is not None else 2,
+        parent_checkpoint_sha="p" * 40,
+        published_head_sha="h" * 40,
+        resumed=cascade.resumed if cascade is not None else False,
+        converged_noop=cascade.no_op if cascade is not None else converged_noop,
+        cascade=cascade,
+    )
+    return delivery.PublishResult(kind="layer", plan_id="7", dry_run=False, layer=layer)
 
-    return cast("Callable[[int], dict[str, object]]", captured["header_fields"])
+
+def _stub_delivery_publish(
+    monkeypatch,
+    *,
+    result: delivery.PublishResult | None = None,
+    error: Exception | None = None,
+) -> list[delivery.PublishRequest]:
+    requests: list[delivery.PublishRequest] = []
+
+    class _Delivery:
+        def publish(self, request: delivery.PublishRequest) -> delivery.PublishResult:
+            requests.append(request)
+            if error is not None:
+                raise error
+            return result or _publication_result()
+
+    monkeypatch.setattr(delivery, "resolve_delivery", lambda _root: _Delivery())
+    return requests
 
 
 def _run_stacked(monkeypatch, args, *, ref=None):
@@ -621,42 +643,29 @@ def _run_stacked(monkeypatch, args, *, ref=None):
 
 
 def test_header_lineage_routes_stacked_even_with_a_stale_ref(monkeypatch):
-    from perk import delivery
-
     # The ref carries no lineage (stale), but the plan header does — header wins: the submit
     # routes to the stacked publish delegation, never silently incremental.
     _authed(monkeypatch)
     calls = _stub_gh(monkeypatch)
     _stub_get_plan_header(monkeypatch, {"delivery_lineage": "01LINEAGE", "run_id": "01HDR"})
-    published: dict[str, object] = {}
+    requests = _stub_delivery_publish(monkeypatch)
 
-    def _fake_publish(repo_root, **kwargs):
-        published.update(kwargs)
-        return _publication_result()
-
-    monkeypatch.setattr(delivery, "publish_layer", _fake_publish)
     result = _run(monkeypatch, ["pr", "submit", "--json"])  # the plain, lineage-less _REF
+
     assert result.exit_code == 0, result.output
     data = json.loads(result.output)
-    assert data["delivery"] == "stacked"  # the stacked route was taken
-    assert published["run_id"] == "01HDR"  # the publish delegation was reached
-    assert published["trigger_run_id"] is None  # fallback journal ids are never trigger proof
-    assert calls["pushed"] is False  # never reached the incremental push
+    assert data["delivery"] == "stacked"
+    assert requests == [
+        delivery.PublishRequest(kind="layer", plan_id="7", run_id="01HDR", trigger_run_id=None)
+    ]
+    assert calls["pushed"] is False
 
 
-def test_stacked_submit_delegates_to_publish_layer(monkeypatch):
-    from perk import delivery
-
+def test_stacked_submit_delegates_to_delivery_publish(monkeypatch):
     _authed(monkeypatch)
     calls = _stub_gh(monkeypatch)
     _stub_get_plan_header(monkeypatch, {"delivery_lineage": "01LINEAGE", "run_id": "01HDR"})
-    captured: dict[str, Any] = {}
-
-    def _fake_publish(repo_root, **kwargs):
-        captured.update(kwargs)
-        return _publication_result()
-
-    monkeypatch.setattr(delivery, "publish_layer", _fake_publish)
+    requests = _stub_delivery_publish(monkeypatch)
     probes: dict[str, object] = {}
 
     def _probe(_root, *, base, branch_ref):
@@ -666,37 +675,25 @@ def test_stacked_submit_delegates_to_publish_layer(monkeypatch):
 
     monkeypatch.setattr(git, "detect_merge_conflicts", _probe)
     result = _run_stacked(monkeypatch, ["pr", "submit", "--json", "--run-id", "01RUN_X"])
+
     assert result.exit_code == 0, result.output
     data = json.loads(result.stdout)
     assert data["success"] is True
-    # The additive stacked envelope fields.
     assert data["delivery"] == "stacked"
     assert data["stack"] == {"number": 9, "size": 2, "position": 2}
     assert data["operation_id"] == "01OP"
-    # `base` carries the PR's REAL merge target — the parent branch — and the mergeability
-    # probe targets it (the conflict-resolver rebases onto the parent).
     assert data["base"] == "plan-6"
-    assert probes["base"] == "plan-6" and probes["branch_ref"] == "h" * 40
-    # publish_layer received the explicit --run-id (it wins over the header run_id).
-    assert captured["plan_id"] == "7" and captured["run_id"] == "01RUN_X"
-    assert captured["title"] == "My Feature"
-    assert captured["trigger_run_id"] == "01RUN_X"
-    assert "worktree_root" not in captured and "remote_writers" not in captured
-    # The identity fields are composed by submit (the builder), written by publish.
-    header_fields = _header_builder(captured)
-    assert header_fields(42) == {
-        "branch": "plan-7",
-        "pr": "42",
-        "lifecycle_stage": "impl",
-        "impl_run_ids": ["01RUN_X"],
-    }
-    # The stacked route never runs the incremental push/header path.
+    assert probes == {"base": "plan-6", "branch_ref": "h" * 40}
+    assert requests == [
+        delivery.PublishRequest(
+            kind="layer", plan_id="7", run_id="01RUN_X", trigger_run_id="01RUN_X"
+        )
+    ]
+    assert data["plan_header"]["fields_updated"] == ["branch", "pr", "lifecycle_stage"]
     assert calls["pushed"] is False and calls["header"] is None
 
 
 def test_stacked_cascade_envelope_bookkeeping_and_human_render(monkeypatch):
-    from perk import delivery
-
     _authed(monkeypatch)
     calls = _stub_gh(monkeypatch)
     _stub_get_plan_header(
@@ -707,11 +704,10 @@ def test_stacked_cascade_envelope_bookkeeping_and_human_render(monkeypatch):
             "impl_run_ids": ["01OLD"],
         },
     )
-    operation = _delivery_operation()
-    monkeypatch.setattr(
-        delivery,
-        "publish_layer",
-        lambda repo_root, **kwargs: _publication_result(operation=operation),
+    cascade = _sync_result()
+    requests = _stub_delivery_publish(
+        monkeypatch,
+        result=_publication_result(cascade=cascade, fields_updated=("impl_run_ids",)),
     )
     emitted: list[dict] = []
     monkeypatch.setattr(
@@ -742,22 +738,24 @@ def test_stacked_cascade_envelope_bookkeeping_and_human_render(monkeypatch):
         ],
         "notes": ["concluded old operation"],
     }
-    assert calls["header"] == {"impl_run_ids": ["01OLD", "01RUN_X"]}
+    assert requests == [
+        delivery.PublishRequest(
+            kind="layer", plan_id="7", run_id="01RUN_X", trigger_run_id="01RUN_X"
+        )
+    ]
+    assert calls["header"] is None
     assert data["plan_header"]["fields_updated"] == ["impl_run_ids"]
     assert emitted == []
 
 
 def test_stacked_cascade_without_explicit_run_id_skips_header_stamp(monkeypatch):
-    from perk import delivery
-
     _authed(monkeypatch)
     calls = _stub_gh(monkeypatch)
     _stub_get_plan_header(monkeypatch, {"delivery_lineage": "01LINEAGE", "run_id": "01HDR"})
-    operation = _delivery_operation(no_op=True)
-    monkeypatch.setattr(
-        delivery,
-        "publish_layer",
-        lambda repo_root, **kwargs: _publication_result(operation=operation, converged_noop=True),
+    cascade = _sync_result(no_op=True)
+    requests = _stub_delivery_publish(
+        monkeypatch,
+        result=_publication_result(cascade=cascade, fields_updated=(), converged_noop=True),
     )
     probed: dict[str, str] = {}
 
@@ -767,16 +765,20 @@ def test_stacked_cascade_without_explicit_run_id_skips_header_stamp(monkeypatch)
 
     monkeypatch.setattr(submit_cmd, "_probe_mergeability", _probe)
     result = _run_stacked(monkeypatch, ["pr", "submit", "--json"])
+
     assert result.exit_code == 0, result.output
     data = json.loads(result.stdout)
     assert data["operation"]["no_op"] is True and data["operation_id"] is None
     assert data["plan_header"]["fields_updated"] == []
+    assert requests == [
+        delivery.PublishRequest(kind="layer", plan_id="7", run_id="01HDR", trigger_run_id=None)
+    ]
     assert calls["header"] is None
     assert probed == {"base": "plan-6", "branch": "h" * 40}
 
 
 def test_stacked_cascade_human_render(capsys):
-    operation = _delivery_operation()
+    operation = _sync_result()
     result = submit_cmd.PrSubmitResult(
         pr=github.PullRequest(number=42, url="u/pr/42", is_draft=True, state="OPEN", existed=True),
         branch="plan-7",
@@ -797,23 +799,24 @@ def test_stacked_cascade_human_render(capsys):
     assert f"{'a' * 40} → {'b' * 40}" in rendered
     assert "note: concluded old operation" in rendered
 
-    submit_cmd._render_human(
-        replace(result, operation_id=None, operation=_delivery_operation(no_op=True))
-    )
+    submit_cmd._render_human(replace(result, operation_id=None, operation=_sync_result(no_op=True)))
     assert "suffix already in sync" in capsys.readouterr().err
 
 
 def test_stacked_sync_error_maps_verbatim(monkeypatch):
-    from perk import delivery
-
     _authed(monkeypatch)
     _stub_gh(monkeypatch)
     _stub_get_plan_header(monkeypatch, {"delivery_lineage": "01LINEAGE", "run_id": "01HDR"})
+    _stub_delivery_publish(
+        monkeypatch,
+        error=delivery.DeliveryError(
+            "remote moved",
+            error_type="remote_drift",
+            phase="cascade",
+            origin="delivery",
+        ),
+    )
 
-    def fail(repo_root, **kwargs):
-        raise delivery.DeliveryError("remote moved", error_type="remote_drift")
-
-    monkeypatch.setattr(delivery, "publish_layer", fail)
     result = _run_stacked(monkeypatch, ["pr", "submit", "--json"])
     assert result.exit_code == 1
     data = json.loads(result.output)
@@ -849,50 +852,31 @@ def test_incremental_submit_does_not_load_config(monkeypatch):
 
 
 def test_stacked_run_id_falls_back_to_the_header(monkeypatch):
-    from perk import delivery
-
     _authed(monkeypatch)
     _stub_gh(monkeypatch)
     _stub_get_plan_header(monkeypatch, {"delivery_lineage": "01LINEAGE", "run_id": "01HDR"})
-    captured: dict[str, object] = {}
+    requests = _stub_delivery_publish(monkeypatch)
 
-    def _fake_publish(repo_root, **kwargs):
-        captured.update(kwargs)
-        return _publication_result()
-
-    monkeypatch.setattr(delivery, "publish_layer", _fake_publish)
     result = _run_stacked(monkeypatch, ["pr", "submit", "--json"])  # no --run-id
+
     assert result.exit_code == 0, result.output
-    assert captured["run_id"] == "01HDR"
-    # Without an explicit --run-id the impl_run_ids linkage stays untouched (§8.35): the
-    # header run id serves the journal only.
-    header_fields = _header_builder(captured)
-    assert header_fields(42) == {"branch": "plan-7", "pr": "42", "lifecycle_stage": "impl"}
+    assert requests == [
+        delivery.PublishRequest(kind="layer", plan_id="7", run_id="01HDR", trigger_run_id=None)
+    ]
 
 
 def test_stacked_blank_run_id_uses_header_only_for_the_journal(monkeypatch):
-    from perk import delivery
-
     _authed(monkeypatch)
     _stub_gh(monkeypatch)
     _stub_get_plan_header(monkeypatch, {"delivery_lineage": "01LINEAGE", "run_id": "01HDR"})
-    captured: dict[str, object] = {}
+    requests = _stub_delivery_publish(monkeypatch)
 
-    def _fake_publish(repo_root, **kwargs):
-        captured.update(kwargs)
-        return _publication_result()
-
-    monkeypatch.setattr(delivery, "publish_layer", _fake_publish)
     result = _run_stacked(monkeypatch, ["pr", "submit", "--json", "--run-id", ""])
 
     assert result.exit_code == 0, result.output
-    assert captured["run_id"] == "01HDR"
-    assert captured["trigger_run_id"] is None
-    assert _header_builder(captured)(42) == {
-        "branch": "plan-7",
-        "pr": "42",
-        "lifecycle_stage": "impl",
-    }
+    assert requests == [
+        delivery.PublishRequest(kind="layer", plan_id="7", run_id="01HDR", trigger_run_id=None)
+    ]
 
 
 def test_stacked_run_id_unresolvable_is_invalid_input(monkeypatch):
@@ -905,16 +889,19 @@ def test_stacked_run_id_unresolvable_is_invalid_input(monkeypatch):
 
 
 def test_stacked_publication_error_maps_to_its_error_type(monkeypatch):
-    from perk import delivery
-
     _authed(monkeypatch)
     _stub_gh(monkeypatch)
     _stub_get_plan_header(monkeypatch, {"delivery_lineage": "01LINEAGE", "run_id": "01HDR"})
+    _stub_delivery_publish(
+        monkeypatch,
+        error=delivery.DeliveryError(
+            "rebase onto plan-6",
+            error_type="stale_parent",
+            phase="layer",
+            origin="domain",
+        ),
+    )
 
-    def _fail(repo_root, **kwargs):
-        raise delivery.PublicationError("rebase onto plan-6", error_type="stale_parent")
-
-    monkeypatch.setattr(delivery, "publish_layer", _fail)
     result = _run_stacked(monkeypatch, ["pr", "submit", "--json"])
     assert result.exit_code == 1
     data = json.loads(result.output)
@@ -923,20 +910,68 @@ def test_stacked_publication_error_maps_to_its_error_type(monkeypatch):
 
 
 def test_stacked_infra_reconstruction_error_is_delivery_error(monkeypatch):
-    from perk import delivery
-    from perk.delivery.train import TrainReconstructionError
-
     _authed(monkeypatch)
     _stub_gh(monkeypatch)
     _stub_get_plan_header(monkeypatch, {"delivery_lineage": "01LINEAGE", "run_id": "01HDR"})
+    _stub_delivery_publish(
+        monkeypatch,
+        error=delivery.DeliveryError(
+            "no order",
+            error_type="delivery_error",
+            phase="layer",
+            origin="delivery",
+        ),
+    )
 
-    def _fail(repo_root, **kwargs):
-        raise TrainReconstructionError("no order", error_type="invalid_train")
-
-    monkeypatch.setattr(delivery, "publish_layer", _fail)
     result = _run_stacked(monkeypatch, ["pr", "submit", "--json"])
     assert result.exit_code == 1
     assert json.loads(result.output)["error_type"] == "delivery_error"
+
+
+@pytest.mark.parametrize(
+    ("error", "prefix"),
+    (
+        (
+            delivery.DeliveryError(
+                "GitHub unavailable",
+                error_type="github_error",
+                phase="layer",
+                origin="github",
+            ),
+            "PR submit failed\nGitHub unavailable",
+        ),
+        (
+            delivery.DeliveryError(
+                "push failed",
+                error_type="git_error",
+                phase="layer",
+                origin="git",
+            ),
+            "git push failed\npush failed",
+        ),
+        (
+            delivery.DeliveryError(
+                "lease mismatch",
+                error_type="push_rejected",
+                phase="layer",
+                origin="git",
+            ),
+            "Push rejected — the remote branch moved unexpectedly.",
+        ),
+    ),
+)
+def test_stacked_contextual_infrastructure_errors_keep_submit_prefixes(monkeypatch, error, prefix):
+    _authed(monkeypatch)
+    _stub_gh(monkeypatch)
+    _stub_get_plan_header(monkeypatch, {"delivery_lineage": "01LINEAGE", "run_id": "01HDR"})
+    _stub_delivery_publish(monkeypatch, error=error)
+
+    result = _run_stacked(monkeypatch, ["pr", "submit", "--json"])
+
+    assert result.exit_code == 1
+    data = json.loads(result.output)
+    assert data["error_type"] == error.error_type
+    assert data["message"].startswith(prefix)
 
 
 def test_stacked_dry_run_stays_offline_and_byte_identical(monkeypatch):
@@ -959,10 +994,8 @@ def test_incremental_envelope_serializes_stacked_fields_as_null(monkeypatch):
     assert data["operation_id"] is None
 
 
-def test_compose_stacked_pr_body_sections_and_footer(monkeypatch):
-    from perk import delivery
-
-    facts = delivery.LayerBodyFacts(
+def test_compose_stacked_pr_body_sections_and_footer():
+    facts = delivery_publish._LayerBodyFacts(
         node_id="2.2",
         position=2,
         total=3,
@@ -970,12 +1003,18 @@ def test_compose_stacked_pr_body_sections_and_footer(monkeypatch):
         objective_base="main",
         objective_id="500",
         rows=(
-            delivery.TrainRowFacts(node_id="2.1", plan_id="6", pr_number=41, current=False),
-            delivery.TrainRowFacts(node_id="2.2", plan_id="7", pr_number=None, current=True),
-            delivery.TrainRowFacts(node_id="2.3", plan_id=None, pr_number=None, current=False),
+            delivery_publish._TrainRowFacts(
+                node_id="2.1", plan_id="6", pr_number=41, current=False
+            ),
+            delivery_publish._TrainRowFacts(
+                node_id="2.2", plan_id="7", pr_number=None, current=True
+            ),
+            delivery_publish._TrainRowFacts(
+                node_id="2.3", plan_id=None, pr_number=None, current=False
+            ),
         ),
     )
-    body = submit_cmd._compose_stacked_pr_body(
+    body = delivery_publish._compose_stacked_pr_body(
         issue="7", plan_body="# My Plan", facts=facts, pr_number=42
     )
     # The disclaimer + position line.
@@ -994,7 +1033,7 @@ def test_compose_stacked_pr_body_sections_and_footer(monkeypatch):
     assert "`gh pr checkout 42`" in body
     assert github.validate_pr_body(body, pr_number=42) == ()
     # The first (pre-create) pass has no footer yet but still marks the current row.
-    first_pass = submit_cmd._compose_stacked_pr_body(
+    first_pass = delivery_publish._compose_stacked_pr_body(
         issue="7", plan_body=None, facts=facts, pr_number=None
     )
     assert "| 2 | 2.2 | #7 | (this PR) |" in first_pass

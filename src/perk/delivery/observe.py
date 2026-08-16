@@ -16,7 +16,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
-from perk.backends.issue_backend import IssueBackend, PlanState
+from perk.backends.issue_backend import IssueBackend, PlanHeaderUpdate, PlanState
 from perk.backends.objective_store import ObjectiveState, ObjectiveStore
 from perk.backends.resolve import resolve_issue_backend, resolve_objective_store
 from perk.delivery import land, writers
@@ -25,7 +25,6 @@ from perk.delivery.journal import JournalFold, OutcomeRecord, PreparedRecord
 from perk.delivery.persistence import AppendResult, TrainPersistence, TrainPersistenceError
 from perk.delivery.train import (
     BaseHeadObservation,
-    BranchPrView,
     PrFactsView,
     StackEntryView,
     StackView,
@@ -79,7 +78,12 @@ class RepoDeliveryGit(DeliveryGit):
             ) from exc
 
     def resolve_commit(self, ref: str, *, cwd: Path | None = None) -> str | None:
-        return git_mod.resolve_commit(cwd or self._repo_root, ref)
+        try:
+            return git_mod.resolve_commit(cwd or self._repo_root, ref)
+        except git_mod.GitError as exc:
+            raise TrainReconstructionError(
+                f"git resolve failed for ref {ref!r}: {exc}", error_type="git_error"
+            ) from exc
 
     def remote_branch_sha(self, branch: str) -> str | None:
         try:
@@ -88,6 +92,11 @@ class RepoDeliveryGit(DeliveryGit):
             raise TrainReconstructionError(
                 f"git ls-remote failed for branch {branch!r}: {exc}", error_type="git_error"
             ) from exc
+
+    def push_with_exact_lease(self, branch: str, *, expected_remote_sha: str | None) -> None:
+        git_mod.push_with_exact_lease(
+            self._repo_root, branch, expected_remote_sha=expected_remote_sha
+        )
 
     def push_urls(self) -> DeliveryGit.PushUrlsResult | DeliveryGit.ProbeError:
         try:
@@ -253,12 +262,11 @@ class RepoDeliveryGitHub(DeliveryGitHub):
             head_sha=facts.head_sha,
         )
 
-    def strict_stack_members(self, number: int) -> tuple[int, ...] | None:
+    def strict_stack(self, number: int) -> stacks.StackRestFacts | None:
         try:
-            stack = stacks.stack_for_pr(number=number, repo_root=self._repo_root)
+            return stacks.stack_for_pr(number=number, repo_root=self._repo_root)
         except GitHubError as exc:
             raise TrainReconstructionError(str(exc), error_type="github_error") from exc
-        return None if stack is None else tuple(stack.member_numbers)
 
     def active_writer_plan_ids(
         self,
@@ -287,17 +295,56 @@ class RepoDeliveryGitHub(DeliveryGitHub):
         except GitHubError as exc:
             raise writers.WriterObservationError(str(exc)) from exc
 
-    def pr_for_branch(self, branch: str) -> BranchPrView | None:
-        """The all-state branch-owned PR read (§8.54's cancellation proof) — a stable read:
-        failures raise the typed ``github_error`` (an unobservable authority fails the
-        cancellation proof closed, never silently reads as absent)."""
+    def pr_for_branch(self, branch: str) -> prs.PullRequest | None:
+        """Read the all-state branch-owned PR through the stable status posture.
+
+        Failures raise the typed ``github_error``; publication bridges unwrap only its raw
+        GitHub cause where the mutation protocol requires the original gateway classification.
+        """
         try:
             pr = prs.find_pr_for_branch(branch=branch, repo_root=self._repo_root)
         except GitHubError as exc:
             raise TrainReconstructionError(str(exc), error_type="github_error") from exc
-        if pr is None:
-            return None
-        return BranchPrView(number=pr.number, state=pr.state)
+        return pr
+
+    def get_pr(self, number: int) -> prs.PullRequest | None:
+        return prs.get_pr(number=number, repo_root=self._repo_root)
+
+    def create_pr(
+        self, *, head: str, base: str, title: str, body: str, draft: bool
+    ) -> prs.PullRequest:
+        return prs.create_pr(
+            head=head,
+            base=base,
+            title=title,
+            body=body,
+            repo_root=self._repo_root,
+            draft=draft,
+        )
+
+    def update_pr_body(self, number: int, *, body: str) -> prs.PrBodyUpdate:
+        return prs.update_pr_body(number=number, body=body, repo_root=self._repo_root)
+
+    def update_pr_base(self, number: int, *, base: str) -> None:
+        prs.update_pr_base(number=number, base=base, repo_root=self._repo_root)
+
+    def reopen_pr(self, number: int) -> None:
+        prs.reopen_pr(number=number, repo_root=self._repo_root)
+
+    def mark_pr_ready(self, number: int) -> None:
+        prs.mark_pr_ready(number=number, repo_root=self._repo_root)
+
+    def create_stack(self, pull_requests: tuple[int, ...]) -> stacks.StackMutationOutcome:
+        return stacks.create_stack(pull_requests=pull_requests, repo_root=self._repo_root)
+
+    def append_stack(
+        self, stack_number: int, *, pull_requests: tuple[int, ...]
+    ) -> stacks.StackMutationOutcome:
+        return stacks.append_to_stack(
+            stack_number=stack_number,
+            pull_requests=pull_requests,
+            repo_root=self._repo_root,
+        )
 
     def pr_stack(self, number: int) -> StackView:
         try:
@@ -403,6 +450,14 @@ class RepoDeliveryPersistence(DeliveryPersistence):
     def get_plan(self, *, issue_id: str) -> PlanState | None:
         _store, issues, _persistence = self._resolve()
         return issues.get_plan(issue_id=issue_id)
+
+    def get_plan_body(self, *, issue_id: str) -> str | None:
+        _store, issues, _persistence = self._resolve()
+        return issues.get_plan_body(issue_id=issue_id)
+
+    def update_plan_header(self, *, issue_id: str, fields: dict[str, object]) -> PlanHeaderUpdate:
+        _store, issues, _persistence = self._resolve()
+        return issues.update_plan_header(issue_id=issue_id, fields=fields)
 
     def read_journal(self, objective_id: str) -> JournalFold:
         _store, _issues, persistence = self._resolve()

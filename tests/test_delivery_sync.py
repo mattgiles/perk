@@ -298,9 +298,8 @@ class _WorldGitHub:
             head_sha=facts.head_sha,
         )
 
-    def strict_stack_members(self, number: int) -> tuple[int, ...] | None:
-        observed = self._world._stack_read(number=number, repo_root=ROOT)
-        return None if observed is None else observed.member_numbers
+    def strict_stack(self, number: int) -> StackRestFacts | None:
+        return self._world._stack_read(number=number, repo_root=ROOT)
 
     def active_writer_plan_ids(
         self,

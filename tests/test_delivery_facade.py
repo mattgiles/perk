@@ -8,10 +8,11 @@ from typing import Any, Literal, cast
 import pytest
 
 import perk.delivery as delivery_pkg
-from perk.backends.issue_backend import IssueBackendError, PlanState
+from perk.backends.issue_backend import IssueBackendError, PlanHeaderUpdate, PlanState
 from perk.backends.objective_store import ObjectiveState, ObjectiveStoreError
 from perk.delivery import facade as facade_mod
 from perk.delivery import observe
+from perk.delivery import publish as publish_mod
 from perk.delivery._fakes import FakeDeliveryGit, FakeDeliveryGitHub, FakeDeliveryPersistence
 from perk.delivery.facade import (
     Delivery,
@@ -21,6 +22,8 @@ from perk.delivery.facade import (
     DeliveryPersistence,
     PrepareRequest,
     PrepareResult,
+    PublishRequest,
+    PublishResult,
     StatusRequest,
     StatusResult,
     SyncRequest,
@@ -34,6 +37,7 @@ from perk.delivery.journal import (
     OutcomeRecord,
     PreparedRecord,
 )
+from perk.delivery.layer import LayerError
 from perk.delivery.persistence import AppendResult, TrainPersistenceError
 from perk.delivery.train import (
     BaseHeadObservation,
@@ -51,7 +55,7 @@ from perk.delivery.train import (
     TrainReconstructionError,
     WorktreeFacts,
 )
-from perk.github import GitHubError
+from perk.github import GitHubError, prs, stacks
 from perk.objective import NodeStatus, ObjectiveNode
 from perk.substrate import config as config_mod
 from perk.substrate import git as git_mod
@@ -98,6 +102,17 @@ _DELIVERY_ERROR_TYPES = {
     "journal_corruption",
     "journal_record_too_large",
     "invalid_config",
+    "delivery_error",
+    "stack_capability_lost",
+    "pr_already_merged",
+    "remote_settling_timeout",
+    "stack_registration_drift",
+    "stack_registration_failed",
+    "publication_drift",
+    "no_pr",
+    "pr_not_open",
+    "layer_not_published",
+    "structural_blockers",
 }
 _STATUS_ERROR_TYPES = {
     "objective_not_found",
@@ -108,6 +123,12 @@ _STATUS_ERROR_TYPES = {
     "supersession_corruption",
 }
 _RETIRED_EXPORTS = {
+    "DeliveryOperationFacts",
+    "LayerBodyFacts",
+    "PublicationError",
+    "PublicationResult",
+    "TrainRowFacts",
+    "publish_layer",
     "NO_TRAIN_INCREMENTAL_REASON",
     "STRUCTURAL_BLOCKER_CODES",
     "BaseHeadObservation",
@@ -180,6 +201,8 @@ _NEW_EXPORTS = {
     "PrepareResult",
     "StatusRequest",
     "StatusResult",
+    "PublishRequest",
+    "PublishResult",
     "SyncRequest",
     "SyncResult",
     "resolve_delivery",
@@ -208,12 +231,6 @@ _RETAINED_EXPORTS = {
     "parse_journal_comment",
     "render_event",
     "resolve_train_persistence",
-    "DeliveryOperationFacts",
-    "LayerBodyFacts",
-    "PublicationError",
-    "PublicationResult",
-    "TrainRowFacts",
-    "publish_layer",
     "LandedPlan",
     "LandFinalization",
     "LearnConsumeUpdate",
@@ -367,6 +384,417 @@ def _delivery(
         git=git or FakeDeliveryGit(),
         github=github or FakeDeliveryGitHub(),
     )
+
+
+def test_publish_request_accepts_the_complete_legal_matrix() -> None:
+    valid = (
+        PublishRequest(kind="layer", plan_id="#101", dry_run=True),
+        PublishRequest(kind="ready", plan_id="101", dry_run=True),
+        PublishRequest(kind="layer", plan_id="101", run_id="01RUN"),
+        PublishRequest(kind="layer", plan_id="101", run_id="01RUN", trigger_run_id="01TRIGGER"),
+        PublishRequest(kind="ready", plan_id="101", delivery="incremental"),
+        PublishRequest(kind="ready", plan_id="101", delivery="stacked"),
+        PublishRequest(kind="ready", plan_id="101", delivery="stacked", objective_id="500"),
+    )
+    assert tuple(request.kind for request in valid) == (
+        "layer",
+        "ready",
+        "layer",
+        "layer",
+        "ready",
+        "ready",
+        "ready",
+    )
+
+
+@pytest.mark.parametrize(
+    "build",
+    (
+        lambda: PublishRequest(kind=cast("Literal['layer']", "future"), plan_id="101"),
+        lambda: PublishRequest(kind="layer", plan_id=" ", dry_run=True),
+        lambda: PublishRequest(kind="layer", plan_id="101"),
+        lambda: PublishRequest(kind="layer", plan_id="101", run_id=" "),
+        lambda: PublishRequest(kind="layer", plan_id="101", run_id="01RUN", delivery="stacked"),
+        lambda: PublishRequest(kind="layer", plan_id="101", run_id="01RUN", objective_id="500"),
+        lambda: PublishRequest(kind="layer", plan_id="101", dry_run=True, run_id="01RUN"),
+        lambda: PublishRequest(kind="ready", plan_id="101"),
+        lambda: PublishRequest(
+            kind="ready", plan_id="101", delivery="incremental", objective_id="500"
+        ),
+        lambda: PublishRequest(kind="ready", plan_id="101", delivery="stacked", objective_id=" "),
+        lambda: PublishRequest(kind="ready", plan_id="101", delivery="stacked", run_id="01RUN"),
+    ),
+)
+def test_publish_request_rejects_every_illegal_shape(build) -> None:
+    with pytest.raises(ValueError):
+        build()
+
+
+def _publish_pr(*, existed: bool = True) -> prs.PullRequest:
+    return prs.PullRequest(
+        number=42,
+        url="u/42",
+        is_draft=True,
+        state="OPEN",
+        existed=existed,
+        base_ref="main",
+        head_ref="plan-101",
+    )
+
+
+def _real_publish_result(*, cascade: SyncResult | None = None) -> PublishResult:
+    no_op = cascade.no_op if cascade is not None else False
+    operation_id = cascade.operation_id if cascade is not None else "01OP"
+    return PublishResult(
+        kind="layer",
+        plan_id="101",
+        dry_run=False,
+        layer=PublishResult.Layer(
+            pr=_publish_pr(),
+            branch="plan-101",
+            header_update=PlanHeaderUpdate(
+                fields_updated=("branch", "pr", "lifecycle_stage"), dry_run=False
+            ),
+            plan_embedded=True,
+            pr_checked=True,
+            parent_branch="main",
+            operation_id=operation_id,
+            stack_number=None,
+            stack_size=None,
+            stack_position=None,
+            parent_checkpoint_sha="a" * 40,
+            published_head_sha="b" * 40,
+            resumed=cascade.resumed if cascade is not None else False,
+            converged_noop=no_op,
+            cascade=cascade,
+        ),
+    )
+
+
+def test_publish_result_exact_nested_shapes_are_frozen_and_validated() -> None:
+    result = _real_publish_result()
+    assert result.layer is not None and result.layer.pr.number == 42
+    with pytest.raises(FrozenInstanceError):
+        type(result.layer).__setattr__(result.layer, "branch", "changed")
+
+    with pytest.raises(ValueError, match="canonical bare"):
+        PublishResult(
+            kind="ready",
+            plan_id="#101",
+            dry_run=False,
+            ready=PublishResult.Ready(pr=_publish_pr(), was_draft=True),
+        )
+    with pytest.raises(ValueError, match="stack facts"):
+        PublishResult(
+            kind="layer",
+            plan_id="101",
+            dry_run=False,
+            layer=PublishResult.Layer(
+                pr=_publish_pr(),
+                branch="plan-101",
+                header_update=PlanHeaderUpdate(fields_updated=(), dry_run=False),
+                plan_embedded=False,
+                pr_checked=True,
+                parent_branch="main",
+                operation_id="01OP",
+                stack_number=1,
+                stack_size=None,
+                stack_position=1,
+                parent_checkpoint_sha="a",
+                published_head_sha="b",
+                resumed=False,
+                converged_noop=False,
+            ),
+        )
+
+
+def test_publish_dry_runs_are_exact_and_call_no_authority() -> None:
+    persistence = FakeDeliveryPersistence()
+    git = FakeDeliveryGit()
+    github = FakeDeliveryGitHub()
+    service = _delivery(persistence, git, github)
+
+    layer = service.publish(PublishRequest(kind="layer", plan_id="#101", dry_run=True))
+    ready = service.publish(PublishRequest(kind="ready", plan_id="101", dry_run=True))
+
+    assert layer == PublishResult(
+        kind="layer",
+        plan_id="101",
+        dry_run=True,
+        layer=PublishResult.Layer(
+            pr=prs.PullRequest(0, "(dry-run)", True, "OPEN", False),
+            branch="plan-101",
+            header_update=PlanHeaderUpdate(
+                fields_updated=("branch", "pr", "lifecycle_stage"), dry_run=True
+            ),
+            plan_embedded=False,
+            pr_checked=False,
+            parent_branch="",
+            operation_id=None,
+            stack_number=None,
+            stack_size=None,
+            stack_position=None,
+            parent_checkpoint_sha=None,
+            published_head_sha=None,
+            resumed=False,
+            converged_noop=False,
+        ),
+    )
+    assert ready == PublishResult(
+        kind="ready",
+        plan_id="101",
+        dry_run=True,
+        ready=PublishResult.Ready(
+            pr=prs.PullRequest(0, "(dry-run)", True, "OPEN", True), was_draft=True
+        ),
+    )
+    assert persistence.calls == [] and git.calls == [] and github.calls == []
+
+
+@pytest.mark.parametrize("backend", ["github", "linear"])
+def test_resolved_publish_dry_runs_ignore_committed_backend_and_credentials(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, backend: str
+) -> None:
+    config = tmp_path / ".perk" / "config.toml"
+    config.parent.mkdir()
+    team = '\nteam = "ENG"' if backend == "linear" else ""
+    config.write_text(f'[issues]\nbackend = "{backend}"{team}\n', encoding="utf-8")
+    monkeypatch.delenv("LINEAR_API_KEY", raising=False)
+    calls: list[str] = []
+
+    def unexpected(name: str):
+        def fail(*_args: object, **_kwargs: object) -> None:
+            calls.append(name)
+            raise AssertionError(f"dry-run reached {name}")
+
+        return fail
+
+    monkeypatch.setattr(observe, "resolve_objective_store", unexpected("objective resolver"))
+    monkeypatch.setattr(observe, "resolve_issue_backend", unexpected("issue resolver"))
+    monkeypatch.setattr(config_mod, "load_committed_issues_backend", unexpected("backend config"))
+    monkeypatch.setattr(observe.git_mod, "fetch_refspecs", unexpected("git fetch"))
+    monkeypatch.setattr(observe.prs, "find_pr_for_branch", unexpected("GitHub PR read"))
+
+    service = observe.resolve_delivery(tmp_path)
+    service.publish(PublishRequest(kind="layer", plan_id="#101", dry_run=True))
+    service.publish(PublishRequest(kind="ready", plan_id="101", dry_run=True))
+
+    assert calls == []
+
+
+def test_delivery_publish_builds_one_bound_context_and_dispatches(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from perk.delivery import publish as publish_mod
+
+    persistence = FakeDeliveryPersistence()
+    git = FakeDeliveryGit(repo_root=Path("/bound-repo"))
+    github = FakeDeliveryGitHub()
+    service = Delivery(persistence=persistence, git=git, github=github)
+    request = PublishRequest(kind="layer", plan_id="101", run_id="01RUN")
+    expected = _real_publish_result()
+    captured: list[tuple[Any, PublishRequest, object]] = []
+
+    def dispatch(context, actual_request, *, runtime):
+        captured.append((context, actual_request, runtime))
+        return expected
+
+    monkeypatch.setattr(publish_mod, "_dispatch", dispatch)
+    assert service.publish(request) is expected
+    ((context, actual_request, runtime),) = captured
+    assert context.repo_root == Path("/bound-repo")
+    assert context.persistence is persistence and context.git is git and context.github is github
+    assert context.status.__self__ is service and context.sync.__self__ is service
+    assert actual_request is request and runtime is publish_mod._DEFAULT_PUBLISH_RUNTIME
+
+
+def test_contextual_delivery_error_requires_joint_valid_metadata() -> None:
+    contextual = DeliveryError(
+        "failed", error_type="delivery_error", phase="layer", origin="delivery"
+    )
+    assert (contextual.phase, contextual.origin) == ("layer", "delivery")
+    with pytest.raises(ValueError, match="jointly present"):
+        DeliveryError("failed", error_type="delivery_error", phase="layer")
+
+
+@pytest.mark.parametrize(
+    ("publish_request", "source", "expected"),
+    (
+        (
+            PublishRequest(kind="layer", plan_id="101", run_id="01RUN"),
+            publish_mod.PublicationError("domain failed", error_type="publication_drift"),
+            ("publication_drift", "layer", "domain"),
+        ),
+        (
+            PublishRequest(kind="layer", plan_id="101", run_id="01RUN"),
+            DeliveryError("status failed", error_type="invalid_train"),
+            ("delivery_error", "layer", "delivery"),
+        ),
+        (
+            PublishRequest(kind="layer", plan_id="101", run_id="01RUN"),
+            git_mod.PushRejectedError("push rejected"),
+            ("push_rejected", "layer", "git"),
+        ),
+        (
+            PublishRequest(kind="layer", plan_id="101", run_id="01RUN"),
+            git_mod.GitError("git failed"),
+            ("git_error", "layer", "git"),
+        ),
+        (
+            PublishRequest(kind="layer", plan_id="101", run_id="01RUN"),
+            GitHubError("github failed"),
+            ("github_error", "layer", "github"),
+        ),
+        (
+            PublishRequest(kind="layer", plan_id="101", run_id="01RUN"),
+            IssueBackendError("issues failed"),
+            ("github_error", "layer", "github"),
+        ),
+        (
+            PublishRequest(kind="layer", plan_id="101", run_id="01RUN"),
+            TrainPersistenceError("persistence failed"),
+            ("delivery_error", "layer", "delivery"),
+        ),
+        (
+            PublishRequest(kind="layer", plan_id="101", run_id="01RUN"),
+            JournalCorruptionError("journal failed"),
+            ("delivery_error", "layer", "delivery"),
+        ),
+        (
+            PublishRequest(kind="layer", plan_id="101", run_id="01RUN"),
+            TrainReconstructionError("train failed", error_type="invalid_train"),
+            ("delivery_error", "layer", "delivery"),
+        ),
+        (
+            PublishRequest(kind="layer", plan_id="101", run_id="01RUN"),
+            JournalRecordTooLarge("record failed"),
+            ("journal_record_too_large", "layer", "delivery"),
+        ),
+        (
+            PublishRequest(kind="ready", plan_id="101", delivery="incremental"),
+            LayerError("no PR", error_type="no_pr"),
+            ("no_pr", "ready", "domain"),
+        ),
+        (
+            PublishRequest(kind="ready", plan_id="101", delivery="incremental"),
+            GitHubError("github failed"),
+            ("github_error", "ready", "github"),
+        ),
+        (
+            PublishRequest(kind="ready", plan_id="101", delivery="incremental"),
+            IssueBackendError("issues failed"),
+            ("github_error", "ready", "github"),
+        ),
+        (
+            PublishRequest(kind="ready", plan_id="101", delivery="incremental"),
+            ObjectiveStoreError("objective failed"),
+            ("github_error", "ready", "github"),
+        ),
+        (
+            PublishRequest(kind="ready", plan_id="101", delivery="incremental"),
+            TrainPersistenceError("persistence failed"),
+            ("github_error", "ready", "github"),
+        ),
+        (
+            PublishRequest(kind="ready", plan_id="101", delivery="incremental"),
+            JournalCorruptionError("journal failed"),
+            ("github_error", "ready", "github"),
+        ),
+    ),
+)
+def test_delivery_publish_maps_declared_infrastructure_boundaries(
+    monkeypatch: pytest.MonkeyPatch,
+    publish_request: PublishRequest,
+    source: Exception,
+    expected: tuple[str, str, str],
+) -> None:
+    from perk.delivery import publish as publish_mod
+
+    def dispatch(context, actual_request, *, runtime):
+        raise source
+
+    monkeypatch.setattr(publish_mod, "_dispatch", dispatch)
+    with pytest.raises(DeliveryError) as excinfo:
+        _delivery().publish(publish_request)
+    assert (excinfo.value.error_type, excinfo.value.phase, excinfo.value.origin) == expected
+    assert str(excinfo.value) == str(source)
+
+
+@pytest.mark.parametrize(
+    ("cause", "expected", "message"),
+    (
+        (
+            TrainReconstructionError("train cause", error_type="invalid_train"),
+            ("invalid_train", "ready", "domain"),
+            "train cause",
+        ),
+        (
+            IssueBackendError("issue cause"),
+            ("github_error", "ready", "github"),
+            "status wrapper",
+        ),
+        (
+            ObjectiveStoreError("objective cause"),
+            ("github_error", "ready", "github"),
+            "status wrapper",
+        ),
+        (
+            TrainPersistenceError("persistence cause"),
+            ("github_error", "ready", "github"),
+            "status wrapper",
+        ),
+    ),
+)
+def test_delivery_publish_maps_ready_status_error_causes(
+    monkeypatch: pytest.MonkeyPatch,
+    cause: Exception,
+    expected: tuple[str, str, str],
+    message: str,
+) -> None:
+    try:
+        raise cause
+    except Exception as caught:
+        try:
+            raise DeliveryError("status wrapper", error_type="github_error") from caught
+        except DeliveryError as wrapped:
+            source = wrapped
+
+    def dispatch(context, request, *, runtime):
+        raise source
+
+    monkeypatch.setattr(publish_mod, "_dispatch", dispatch)
+    with pytest.raises(DeliveryError) as excinfo:
+        _delivery().publish(PublishRequest(kind="ready", plan_id="101", delivery="stacked"))
+    assert (excinfo.value.error_type, excinfo.value.phase, excinfo.value.origin) == expected
+    assert str(excinfo.value) == message
+
+
+def test_delivery_publish_preserves_contextual_errors_and_propagates_programmer_bugs(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from perk.delivery import publish as publish_mod
+
+    contextual = DeliveryError(
+        "cascade failed", error_type="remote_drift", phase="cascade", origin="delivery"
+    )
+
+    def contextual_failure(context, request, *, runtime):
+        raise contextual
+
+    monkeypatch.setattr(publish_mod, "_dispatch", contextual_failure)
+    with pytest.raises(DeliveryError) as excinfo:
+        _delivery().publish(PublishRequest(kind="layer", plan_id="101", run_id="01RUN"))
+    assert excinfo.value is contextual
+
+    unexpected = RuntimeError("programmer bug")
+
+    def explode(context, request, *, runtime):
+        raise unexpected
+
+    monkeypatch.setattr(publish_mod, "_dispatch", explode)
+    with pytest.raises(RuntimeError) as raw:
+        _delivery().publish(PublishRequest(kind="ready", plan_id="101", delivery="stacked"))
+    assert raw.value is unexpected
 
 
 def test_sync_request_accepts_the_complete_legal_matrix() -> None:
@@ -1775,11 +2203,21 @@ class _ResolvedStore:
 class _ResolvedIssues:
     def __init__(self, backend_id: str = "github") -> None:
         self.backend_id = backend_id
-        self.calls: list[str] = []
+        self.calls: list[tuple[object, ...]] = []
 
     def get_plan(self, *, issue_id: str) -> PlanState | None:
-        self.calls.append(issue_id)
+        self.calls.append(("get_plan", issue_id))
         return _plan(issue_id)
+
+    def get_plan_body(self, *, issue_id: str) -> str | None:
+        self.calls.append(("get_plan_body", issue_id))
+        return f"body {issue_id}"
+
+    def update_plan_header(
+        self, *, issue_id: str, fields: dict[str, object], dry_run: bool = False
+    ) -> PlanHeaderUpdate:
+        self.calls.append(("update_plan_header", issue_id, dict(fields), dry_run))
+        return PlanHeaderUpdate(fields_updated=tuple(fields), dry_run=dry_run)
 
 
 def test_lazy_persistence_reuses_only_a_complete_successful_resolution(
@@ -1803,9 +2241,17 @@ def test_lazy_persistence_reuses_only_a_complete_successful_resolution(
 
     assert persistence.get_objective(objective_id="10") == _objective("10")
     assert persistence.get_plan(issue_id="101") == _plan("101")
+    assert persistence.get_plan_body(issue_id="101") == "body 101"
+    assert persistence.update_plan_header(
+        issue_id="101", fields={"branch": "plan-101"}
+    ) == PlanHeaderUpdate(fields_updated=("branch",), dry_run=False)
     assert resolved == {"store": 1, "issues": 1}
     assert store.calls == ["10"]
-    assert issues.calls == ["101"]
+    assert issues.calls == [
+        ("get_plan", "101"),
+        ("get_plan_body", "101"),
+        ("update_plan_header", "101", {"branch": "plan-101"}, False),
+    ]
 
 
 def test_lazy_persistence_mutations_delegate_exactly_and_reuse_the_cached_adapter(
@@ -1957,25 +2403,53 @@ def test_fake_defaults_copy_inputs_and_log_calls_before_return() -> None:
     plan_seed = {"101": _plan("101")}
     worktree = WorktreeFacts(path="/tmp/wt", branch="plan-101", dirty=False)
     atomic_errors = {"fake://mirror": "no atomic"}
-    persistence = FakeDeliveryPersistence(objectives=objective_seed, plans=plan_seed)
+    body_seed = {"101": "Plan body"}
+    persistence = FakeDeliveryPersistence(
+        objectives=objective_seed, plans=plan_seed, plan_bodies=body_seed
+    )
     git = FakeDeliveryGit(
         worktrees=(worktree,),
-        resolutions={"head": "a" * 40},
+        resolutions={"head": "a" * 40, "plan-101": "b" * 40},
         push_urls=("fake://origin", "fake://mirror"),
         atomic_push_errors=atomic_errors,
     )
-    github = FakeDeliveryGitHub()
+    rich_pr = _publish_pr()
+    strict_stack = stacks.StackRestFacts(
+        number=9,
+        size=1,
+        entries=(stacks.StackRestEntry(42, "open", True, False, "plan-101", "b" * 40),),
+    )
+    github = FakeDeliveryGitHub(
+        pull_requests={42: rich_pr},
+        branch_prs={"plan-101": rich_pr},
+        strict_stacks={42: strict_stack},
+    )
     objective_seed.clear()
     plan_seed.clear()
+    body_seed.clear()
     atomic_errors.clear()
 
     assert persistence.get_objective(objective_id="10") == _objective("10")
     assert persistence.get_plan(issue_id="101") == _plan("101")
+    assert persistence.get_plan_body(issue_id="101") == "Plan body"
+    assert persistence.update_plan_header(
+        issue_id="101", fields={"branch": "plan-101", "impl_run_ids": ["01RUN"]}
+    ) == PlanHeaderUpdate(fields_updated=("branch", "impl_run_ids"), dry_run=False)
+    updated_plan = persistence.get_plan(issue_id="101")
+    assert updated_plan is not None
+    assert updated_plan.header["impl_run_ids"] == ["01RUN"]
     fold = persistence.read_journal("10")
     assert fold.delivery_lineage is None
     assert persistence.get_objective(objective_id="missing") is None
     assert persistence.calls == [
         ("get_objective", "10"),
+        ("get_plan", "101"),
+        ("get_plan_body", "101"),
+        (
+            "update_plan_header",
+            "101",
+            (("branch", "plan-101"), ("impl_run_ids", ("01RUN",))),
+        ),
         ("get_plan", "101"),
         ("read_journal", "10"),
         ("get_objective", "missing"),
@@ -1986,6 +2460,8 @@ def test_fake_defaults_copy_inputs_and_log_calls_before_return() -> None:
     assert git.fetch_refs(("main",)) is None
     assert git.resolve_commit("head") == "a" * 40
     assert git.remote_branch_sha("missing") is None
+    git.push_with_exact_lease("plan-101", expected_remote_sha=None)
+    assert git.remote_branch_sha("plan-101") == "b" * 40
     assert git.push_urls() == DeliveryGit.PushUrlsResult(urls=("fake://origin", "fake://mirror"))
     assert (
         git.probe_atomic_push(push_url="fake://origin", base_branch="main", base_sha="a")
@@ -2004,6 +2480,8 @@ def test_fake_defaults_copy_inputs_and_log_calls_before_return() -> None:
         ("fetch_refs", "main"),
         ("resolve_commit", "head"),
         ("remote_branch_sha", "missing"),
+        ("push_with_exact_lease", "plan-101", None),
+        ("remote_branch_sha", "plan-101"),
         ("push_urls",),
         ("probe_atomic_push", "fake://origin", "main", "a"),
         ("probe_atomic_push", "fake://mirror", "main", "a"),
@@ -2018,13 +2496,17 @@ def test_fake_defaults_copy_inputs_and_log_calls_before_return() -> None:
         squash_allowed=True, merge_queue_required=False
     )
     assert github.pr_facts(42) is None
-    assert github.pr_for_branch("plan-101") is None
+    assert github.pr_for_branch("plan-101") == rich_pr
+    assert github.strict_stack(42) == strict_stack
+    assert github.get_pr(42) == rich_pr
     assert github.pr_stack(42) == StackView(available=True, stacked=False)
     assert github.calls == [
         ("stack_capability",),
         ("base_merge_rules", "main"),
         ("pr_facts", 42),
         ("pr_for_branch", "plan-101"),
+        ("strict_stack", 42),
+        ("get_pr", 42),
         ("pr_stack", 42),
     ]
 
@@ -2074,5 +2556,14 @@ def test_public_export_cut_is_exact() -> None:
     assert exported >= _NEW_EXPORTS
     assert _RETIRED_EXPORTS.isdisjoint(exported)
     assert exported == _NEW_EXPORTS | _RETAINED_EXPORTS
-    assert len(delivery_pkg.__all__) == 63
+    assert len(delivery_pkg.__all__) == 59
     assert not hasattr(delivery_pkg, "DeliveryTrain")
+    for retired in {
+        "DeliveryOperationFacts",
+        "LayerBodyFacts",
+        "PublicationError",
+        "PublicationResult",
+        "TrainRowFacts",
+        "publish_layer",
+    }:
+        assert not hasattr(delivery_pkg, retired)
