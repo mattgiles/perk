@@ -5,8 +5,8 @@ This is the readable projection of perk's living, workflow-first prose graph. It
 
 ## Coverage
 
-- **203** canonical source units
-- **696** logical fragments
+- **205** canonical source units
+- **698** logical fragments
 - **16** session shapes and **10** assemblies
 - **15** explicitly excluded candidates (policy-only; not displayed)
 - **0** validation findings
@@ -63,6 +63,7 @@ Read-only posture, continuation, compaction, and shared lifecycle guidance.
 
 | Unit | Role | Audience | Canonical source | Consumed by |
 | --- | --- | --- | --- | --- |
+| `markdown:prompts/commit-and-compact-continuation.md` | `context` | `shipped` | [`prompts/commit-and-compact-continuation.md`](../../prompts/commit-and-compact-continuation.md) · `file` | — |
 | `markdown:prompts/commit-and-compact.md` | `context` | `shipped` | [`prompts/commit-and-compact.md`](../../prompts/commit-and-compact.md) · `file` | — |
 | `markdown:prompts/common/resume-advisory.md` | `context` | `shipped` | [`prompts/common/resume-advisory.md`](../../prompts/common/resume-advisory.md) · `file` | — |
 | `markdown:prompts/contexts/read-only.md` | `context` | `shipped` | [`prompts/contexts/read-only.md`](../../prompts/contexts/read-only.md) · `file` | — |
@@ -72,6 +73,7 @@ Read-only posture, continuation, compaction, and shared lifecycle guidance.
 | `python-symbol:src/perk/backends/engagement.py:render_objective_engagement` | `context` | `shipped` | [`src/perk/backends/engagement.py`](../../src/perk/backends/engagement.py) · `symbol:render_objective_engagement` | — |
 | `python-symbol:src/perk/backends/engagement.py:render_plan_engagement` | `context` | `shipped` | [`src/perk/backends/engagement.py`](../../src/perk/backends/engagement.py) · `symbol:render_plan_engagement` | — |
 | `typescript-model-call:extension/doors/commitCompact.ts:module:sendUserMessage:0` | `context` | `shipped` | [`extension/doors/commitCompact.ts`](../../extension/doors/commitCompact.ts) · `symbol:module/call:sendUserMessage/0` | — |
+| `typescript-model-call:extension/doors/commitCompact.ts:module:sendUserMessage:1` | `context` | `shipped` | [`extension/doors/commitCompact.ts`](../../extension/doors/commitCompact.ts) · `symbol:module/call:sendUserMessage/1` | — |
 | `typescript-model-call:extension/doors/lifecycleGates.ts:module:sendUserMessage:0` | `context` | `shipped` | [`extension/doors/lifecycleGates.ts`](../../extension/doors/lifecycleGates.ts) · `symbol:module/call:sendUserMessage/0` | — |
 | `typescript-model-call:extension/substrate/bindingDelivery.ts:module:before-agent-start:0` | `context` | `shipped` | [`extension/substrate/bindingDelivery.ts`](../../extension/substrate/bindingDelivery.ts) · `symbol:module/event:before_agent_start/0` | — |
 | `typescript-model-call:extension/substrate/toolGating.ts:module:before-agent-start:0` | `context` | `shipped` | [`extension/substrate/toolGating.ts`](../../extension/substrate/toolGating.ts) · `symbol:module/event:before_agent_start/0` | — |
@@ -79,6 +81,8 @@ Read-only posture, continuation, compaction, and shared lifecycle guidance.
 <details>
 <summary>Logical fragments</summary>
 
+- `markdown:prompts/commit-and-compact-continuation.md`
+  - `body` — Document body (`file-body`)
 - `markdown:prompts/commit-and-compact.md`
   - `body` — Document body (`file-body`)
 - `markdown:prompts/common/resume-advisory.md`
@@ -97,6 +101,8 @@ Read-only posture, continuation, compaction, and shared lifecycle guidance.
   - `symbol:render_plan_engagement` — Render plan engagement (`symbol:render_plan_engagement`)
 - `typescript-model-call:extension/doors/commitCompact.ts:module:sendUserMessage:0`
   - `argument:0` — sendUserMessage model-facing argument (`symbol:module/call:sendUserMessage/0/argument:0`)
+- `typescript-model-call:extension/doors/commitCompact.ts:module:sendUserMessage:1`
+  - `argument:0` — sendUserMessage model-facing argument (`symbol:module/call:sendUserMessage/1/argument:0`)
 - `typescript-model-call:extension/doors/lifecycleGates.ts:module:sendUserMessage:0`
   - `argument:0` — sendUserMessage model-facing argument (`symbol:module/call:sendUserMessage/0/argument:0`)
 - `typescript-model-call:extension/substrate/bindingDelivery.ts:module:before-agent-start:0`

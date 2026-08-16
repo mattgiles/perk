@@ -793,11 +793,15 @@ export async function loadPerkSession(opts: {
  * Spy on the live session's `sendUserMessage` (the delegate behind `pi.sendUserMessage`) — the
  * keyless offline session can't run an injected turn, so capture the injection instead.
  */
-export function spyInjections(h: PerkSession): string[] {
+export function spyInjections(h: PerkSession, optionsSeen?: unknown[]): string[] {
   const injected: string[] = [];
-  (h.session as unknown as { sendUserMessage: (c: unknown) => Promise<void> }).sendUserMessage =
-    async (c) => {
-      injected.push(typeof c === "string" ? c : JSON.stringify(c));
-    };
+  (
+    h.session as unknown as {
+      sendUserMessage: (c: unknown, options?: unknown) => Promise<void>;
+    }
+  ).sendUserMessage = async (c, options) => {
+    injected.push(typeof c === "string" ? c : JSON.stringify(c));
+    optionsSeen?.push(options);
+  };
   return injected;
 }

@@ -14,11 +14,14 @@
 
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { bindingSuffix } from "../substrate/bindingDelivery.ts";
+import type { PlanRef } from "../substrate/cache.ts";
 import { registerPerkCommand } from "../substrate/command.ts";
 import { commitsSince, headSha, worktreeDirty } from "../substrate/git.ts";
 import { render } from "../substrate/prompts.ts";
 import type { ToolGating } from "../substrate/toolGating.ts";
+import { branchOf, rebuildWorkflowState } from "../substrate/workflowState.ts";
 import { report, type Severity } from "../surfaces/report.ts";
+import { planReadInstruction } from "./lifecycleGates.ts";
 
 /** The driven-commit guidance (pure + exported for offline tests and the drive-coverage guard). */
 export function commitAndCompactGuidance(): string {
@@ -56,12 +59,58 @@ export interface PendingCompact {
   headBefore: string | null;
 }
 
+export type CommitCompactCompletion =
+  | { outcome: "committed"; commits: string | null }
+  | { outcome: "clean" }
+  | { outcome: "read-only" };
+
 /** The door's side-effect surface — `ExtensionContext`-backed in wiring, recorder fakes in tests. */
 export interface CommitCompactIo {
   report(severity: Severity, message: string): void;
-  /** Inject the driving user message (wiring appends the skill-binding suffix). */
   send(guidance: string): void;
-  compact(customInstructions: string): void;
+  compact(customInstructions: string, completion: CommitCompactCompletion): void;
+}
+
+/**
+ * The command-specific active-plan resolver. Session-tier `active_plan_ref` is the only authority:
+ * a checkout cache ref can select a future plan and is unrelated to this live session.
+ */
+export function activeSessionPlanRef(ctx: ExtensionContext): PlanRef | null {
+  try {
+    const ref: unknown = rebuildWorkflowState(branchOf(ctx)).active_plan_ref;
+    if (typeof ref !== "object" || ref === null) return null;
+    const candidate = ref as Record<string, unknown>;
+    for (const key of ["provider", "pr_id", "url"] as const) {
+      const value = candidate[key];
+      if (typeof value !== "string" || value.trim() === "") return null;
+    }
+    return ref as PlanRef;
+  } catch {
+    return null;
+  }
+}
+
+/** Render the completion-gated turn that reorients the resumed agent from repository evidence. */
+export function commitAndCompactContinuation(
+  planRef: PlanRef | null,
+  completion: CommitCompactCompletion,
+): string {
+  const provider = planRef?.provider ?? "";
+  const planId = planRef?.pr_id ?? "";
+  const planUrl = planRef?.url ?? "";
+  const readCmd =
+    planRef === null ? "" : planReadInstruction(planRef.provider, planRef.pr_id, planRef.url);
+  return render("commit-and-compact-continuation.md", {
+    provider,
+    plan_id: planId,
+    plan_url: planUrl,
+    read_cmd: readCmd,
+    is_github: provider === "github" ? "x" : "",
+    committed: completion.outcome === "committed" ? "x" : "",
+    clean: completion.outcome === "clean" ? "x" : "",
+    read_only: completion.outcome === "read-only" ? "x" : "",
+    commits: completion.outcome === "committed" ? (completion.commits ?? "") : "",
+  });
 }
 
 /**
@@ -75,7 +124,7 @@ export function startCommitAndCompact(
 ): PendingCompact | null {
   if (gateActive) {
     io.report("info", "read-only session — nothing to commit; compacting…");
-    io.compact(DIRECT_COMPACT_INSTRUCTIONS);
+    io.compact(DIRECT_COMPACT_INSTRUCTIONS, { outcome: "read-only" });
     return null;
   }
   const dirty = worktreeDirty(cwd);
@@ -89,7 +138,7 @@ export function startCommitAndCompact(
   }
   if (!dirty) {
     io.report("info", "worktree clean — nothing to commit; compacting…");
-    io.compact(DIRECT_COMPACT_INSTRUCTIONS);
+    io.compact(DIRECT_COMPACT_INSTRUCTIONS, { outcome: "clean" });
     return null;
   }
   io.report("info", "driving a commit of the work completed so far…");
@@ -112,7 +161,8 @@ export function settleCommitAndCompact(pending: PendingCompact, io: CommitCompac
     return;
   }
   io.report("info", "committed — compacting the session…");
-  io.compact(compactInstructions(commitsSince(pending.cwd, pending.headBefore)));
+  const commits = commitsSince(pending.cwd, pending.headBefore);
+  io.compact(compactInstructions(commits), { outcome: "committed", commits });
 }
 
 /** Register the `/commit-and-compact` command + its one-shot `agent_settled` consumer. */
@@ -128,11 +178,21 @@ export function registerCommitAndCompact(pi: ExtensionAPI, gating: ToolGating): 
       // already carries the headless stderr fallback.
       pi.sendUserMessage(guidance + bindingSuffix(ctx.cwd, "command:commit-and-compact"));
     },
-    compact: (customInstructions) => {
-      // No onComplete: pi's own UI signals compaction, and callbacks must not touch a possibly-
-      // stale ctx after session replacement (the documented compaction race).
+    compact: (customInstructions, completion) => {
+      // Render while the command/event context is current. Manual compaction stays in the same
+      // AgentSession + extension runner, so onComplete may use captured `pi`; it must not read
+      // `ctx` or recompute session/filesystem state after compaction.
+      const continuation = commitAndCompactContinuation(activeSessionPlanRef(ctx), completion);
       ctx.compact({
         customInstructions,
+        onComplete: () => {
+          try {
+            // Optionless on purpose: resume immediately under the active stage's own bindings.
+            pi.sendUserMessage(continuation);
+          } catch (error) {
+            console.error(`perk: commit-and-compact — continuation dispatch failed — ${error}`);
+          }
+        },
         onError: (error) => {
           console.error(`perk: commit-and-compact — compaction failed — ${error}`);
         },
