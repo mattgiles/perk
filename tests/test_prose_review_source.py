@@ -1239,5 +1239,31 @@ def test_typescript_adapter_is_fail_fast_under_overlap_and_recovers(
     assert calls == 2
 
 
+def test_every_real_typescript_fragment_is_batch_covered_through_the_python_adapter(
+    snapshot: CatalogSnapshot,
+) -> None:
+    selectors_by_path: dict[str, list[str]] = {}
+    total = 0
+    for unit in snapshot.units:
+        if unit.candidate.kind not in (
+            "typescript-tool",
+            "typescript-model-call",
+            "typescript-symbol",
+        ):
+            continue
+        selectors = selectors_by_path.setdefault(unit.candidate.path, [])
+        for routed_fragment in snapshot.fragments_for_unit(unit.candidate.id):
+            selectors.append(routed_fragment.fragment.selector)
+            total += 1
+
+    assert total == 276
+    adapter = _typescript_adapter()
+    for relative, selectors in selectors_by_path.items():
+        text = (ROOT / relative).read_text(encoding="utf-8")
+        diagnostics = adapter.validate(text, tuple(selectors))
+        assert all(item.code == "unsupported-source-shape" for item in diagnostics), relative
+        assert all(item.selector in selectors for item in diagnostics), relative
+
+
 def test_typescript_adapter_check_hint_is_only_prose_map() -> None:
     assert _typescript_adapter().affected_check_hints(_python_unit("module.ts")) == ("prose-map",)

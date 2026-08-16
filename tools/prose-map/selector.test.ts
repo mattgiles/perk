@@ -3,8 +3,8 @@ import { execFile } from "node:child_process";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { promisify } from "node:util";
 import test from "node:test";
+import { promisify } from "node:util";
 import ts from "typescript";
 
 import { scanRepository } from "./catalog.ts";
@@ -34,6 +34,10 @@ function focus(source: string, selector: string): string {
   assert.ok(resolved);
   assert.equal(resolved.status, "resolved");
   return [...source].slice(resolved.start, resolved.end).join("");
+}
+
+function interpolation(name: string): string {
+  return `$` + `{${name}}`;
 }
 
 async function withRequest(
@@ -255,7 +259,7 @@ pi.registerTool({
   assert.equal(focus(source, "tool:demo.description"), '"direct"');
   assert.equal(
     focus(source, "tool:demo.parameters.properties.focus.description"),
-    "`nested ${value}`",
+    "`nested " + interpolation("value") + "`",
   );
   for (const selector of ["tool:demo.promptSnippet", "tool:demo.promptGuidelines"]) {
     const unsupported = result(source, selector);
@@ -364,7 +368,10 @@ function owner() {
 }`;
   assert.equal(focus(source, "symbol:owner/call:complete/0/argument:0"), '"quoted"');
   assert.equal(focus(source, "symbol:owner/call:complete/1/argument:0"), "`plain`");
-  assert.equal(focus(source, "symbol:owner/call:complete/2/argument:0"), "`hello ${name}`");
+  assert.equal(
+    focus(source, "symbol:owner/call:complete/2/argument:0"),
+    "`hello " + interpolation("name") + "`",
+  );
   assert.equal(
     focus(source, "symbol:owner/call:complete/3/argument:0"),
     '(("prefix " + dynamic()) as string)!',
@@ -409,12 +416,16 @@ test("fallback grammar separates unsupported selectors from stale supported sele
 });
 
 test("ranges and locations normalize UTF-16 to Unicode code points", () => {
-  const source = 'const prefix = "😀"; pi.sendUserMessage(`inside ��� ${value}`);\n';
+  const source =
+    'const prefix = "😀"; pi.sendUserMessage(`inside ��� ' + interpolation("value") + "`);\n";
   const selector = "symbol:module/call:sendUserMessage/0/argument:0";
   const resolved = result(source, selector);
   assert.ok(resolved);
   assert.equal(resolved.status, "resolved");
-  assert.equal([...source].slice(resolved.start, resolved.end).join(""), "`inside ��� ${value}`");
+  assert.equal(
+    [...source].slice(resolved.start, resolved.end).join(""),
+    "`inside ��� " + interpolation("value") + "`",
+  );
   assert.equal(resolved.start, [...source.slice(0, source.indexOf("`inside"))].length);
 
   const invalid = resolveSelectors('const prefix = "😀";\r\nconst broken = ;\n', []);

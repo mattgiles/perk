@@ -57,6 +57,7 @@ export function validateToolFieldPolicies(
 validateToolFieldPolicies();
 
 export interface SelectorSite {
+  /** Parent-linked helper identity plus the parentless Program-discovery identity. */
   selector: string;
   catalogSelector: string;
   location: ts.Node;
