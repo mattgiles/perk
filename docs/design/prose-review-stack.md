@@ -29,8 +29,9 @@ views, and writers on this stack without revisiting it.
   reads mapped sources once at load time; that is the catalog module's own contract). The package
   keeps the public facade stable while separating frozen contracts, contained reads/dispatch, and
   the Markdown/YAML/Python implementations. The Python AST adapter accepts only the currently
-  discovered `symbol:<name>` language: module-body functions, async functions, simple assignments
-  with exactly one direct name target, and direct-name annotated assignments; `<name>` must be a
+  discovered `symbol:<name>` language: module-body functions, async functions, assignments with
+  exactly one direct `ast.Name` among their targets, and annotated assignments whose target is a
+  direct `ast.Name`; `<name>` must be a
   Python identifier that is not a hard keyword (contextual soft keywords remain valid). It parses,
   compiler-validates without execution, and tokenizes once per source operation so decorated
   function ranges begin at their physical `@` marker and AST UTF-8 byte columns become exact
