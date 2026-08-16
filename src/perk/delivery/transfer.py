@@ -61,6 +61,7 @@ from perk.delivery.train import (
     TrainStatus,
     WorktreeFacts,
 )
+from perk.delivery.writers import RemoteWriterProbe, WriterObservationError
 from perk.github import stacks
 from perk.substrate import git as git_mod
 
@@ -534,7 +535,7 @@ class _Transfer:
     """The full fresh-pass bundle: the roll-forward seams plus the D13 preflight probes."""
 
     seams: TransferSeams
-    remote_writers: sync.RemoteWriterProbe
+    remote_writers: RemoteWriterProbe
     pr_facts: _PrFactsRead
     worktree_branches: Callable[[Path], tuple[WorktreeFacts, ...]]
     trunk: Callable[[Path], str]
@@ -600,7 +601,7 @@ def run_transfer(
     roadmap_nodes: Sequence[objective.ObjectiveNode],
     carry_map: Mapping[str, str],
     stacked: bool,
-    remote_writers: sync.RemoteWriterProbe,
+    remote_writers: RemoteWriterProbe,
     store_factory: Callable[[Path], TransferStore] = resolve_objective_store,
     issues_factory: Callable[[Path], TransferIssues] = resolve_issue_backend,
     persistence_factory: Callable[[Path], TransferPersistence] = resolve_train_persistence,
@@ -1303,7 +1304,7 @@ def _probe_remote_writers(transfer: _Transfer, probe_ids: Sequence[str]) -> None
         return
     try:
         active = transfer.remote_writers.active_plan_ids(list(probe_ids))
-    except sync.WriterObservationError as exc:
+    except WriterObservationError as exc:
         raise TransferError(
             f"could not observe the active remote writers ({exc}) — refusing to transfer "
             "under an unreadable writer preflight",

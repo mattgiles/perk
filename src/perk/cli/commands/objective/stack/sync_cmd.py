@@ -20,12 +20,7 @@ from perk.cli.commands.objective.stack.status_cmd import ObjectiveOut
 from perk.cli.context import require_config, require_repo
 from perk.cli.emit import emit, fail
 from perk.cli.ensure import UserFacingCliError
-from perk.delivery import sync, train
-from perk.delivery.journal import JournalCorruptionError
-from perk.delivery.persistence import TrainPersistenceError
-from perk.github import GitHubError
-from perk.run.writer_probe import GhaRemoteWriterProbe
-from perk.substrate import git
+from perk.delivery import DeliveryError, SyncRequest, SyncResult, resolve_delivery
 from perk.substrate.output import user_output
 
 # --- the ``--json`` envelope (OutputModel family; declaration order load-bearing) ---
@@ -40,7 +35,7 @@ class SyncedLayerOut(OutputModel):
     after_sha: str
 
     @classmethod
-    def from_domain(cls, layer: sync.SyncedLayer) -> "SyncedLayerOut":
+    def from_domain(cls, layer: SyncResult.Layer) -> "SyncedLayerOut":
         return cls(
             node_id=layer.node_id,
             plan_id=layer.plan_id,
@@ -73,7 +68,7 @@ class ObjectiveStackSyncOut(OutputModel):
     aborted: bool
 
     @classmethod
-    def from_domain(cls, result: sync.SyncResult) -> "ObjectiveStackSyncOut":
+    def from_domain(cls, result: SyncResult) -> "ObjectiveStackSyncOut":
         return cls(
             success=True,
             objective=ObjectiveOut(
@@ -100,7 +95,7 @@ class ObjectiveStackSyncOut(OutputModel):
 # --- confirmation + rendering (stderr only; interactive --json never contaminates stdout) ---
 
 
-def _render_cascade(cascade: sync.SyncCascade) -> None:
+def _render_cascade(cascade: SyncResult.Cascade) -> None:
     user_output(
         f"Objective #{cascade.objective_id}: synchronize {len(cascade.layers)} published layer(s)"
     )
@@ -121,7 +116,7 @@ def _make_approve(*, yes: bool):
     never a hang, never a silent push.
     """
 
-    def approve(cascade: sync.SyncCascade) -> bool:
+    def approve(cascade: SyncResult.Cascade) -> bool:
         _render_cascade(cascade)
         if yes:
             return True
@@ -142,7 +137,7 @@ def _make_abort_approve(*, yes: bool):
     confirm on stderr (the ``_make_approve`` discipline: ``--yes`` auto-approves,
     non-interactive without ``--yes`` is the typed ``confirmation_required`` refusal)."""
 
-    def approve(preview: sync.AbortPreview) -> bool:
+    def approve(preview: SyncResult.AbortPreview) -> bool:
         if not preview.parseable:
             user_output(f"Discard the UNPARSEABLE continuation manifest {preview.manifest_path}")
             user_output("  (any retained residue is left for `perk objective stack recover`)")
@@ -172,7 +167,7 @@ def _make_abort_approve(*, yes: bool):
     return approve
 
 
-def _render_result(result: sync.SyncResult, *, mode: str) -> None:
+def _render_result(result: SyncResult, *, mode: str) -> None:
     for note in result.notes:
         user_output(click.style(f"note: {note}", dim=True))
     if result.aborted:
@@ -326,54 +321,33 @@ def sync_stack(
             abort=abort,
         )
         repo_root = require_repo(ctx)
-        config = require_config(ctx)
+        require_config(ctx)
         objective_id = resolve_objective_id(repo_root, objective)
+        delivery = resolve_delivery(repo_root)
         if mode == "continue":
             # --run-id is deliberately not consulted: a continue journals under the
             # MANIFEST's captured run identity.
-            result = sync.continue_train_sync(
-                repo_root,
-                objective_id=objective_id,
-                approve=_make_approve(yes=yes),
-                remote_writers=GhaRemoteWriterProbe(repo_root),
-                worktree_root=config.worktree_root,
-            )
+            request = SyncRequest(mode="continue", objective_id=objective_id)
+            consent = _make_approve(yes=yes)
         elif mode == "abort":
-            result = sync.abort_train_sync(
-                repo_root,
-                objective_id=objective_id,
-                approve=_make_abort_approve(yes=yes),
-                worktree_root=config.worktree_root,
-            )
+            request = SyncRequest(mode="abort", objective_id=objective_id)
+            consent = _make_abort_approve(yes=yes)
         else:
             resolved_run_id = resolve_run_id(repo_root, objective_id, run_id)
-            result = sync.synchronize_train(
-                repo_root,
+            request = SyncRequest(
+                mode="cascade",
                 objective_id=objective_id,
                 run_id=resolved_run_id,
                 include_base=include_base,
                 dry_run=dry_run,
                 adopt_node=adopt,
-                approve=_make_approve(yes=yes),
-                remote_writers=GhaRemoteWriterProbe(repo_root),
-                worktree_root=config.worktree_root,
             )
-    except sync.SyncError as exc:
+            consent = None if dry_run else _make_approve(yes=yes)
+        result = delivery.sync(request, consent=consent)
+    except DeliveryError as exc:
         fail(ctx, as_json=as_json, error_type=exc.error_type, message=str(exc))
         return
-    except train.TrainReconstructionError as exc:
-        # The reconstruction seam's bounded vocabulary passes through verbatim (the
-        # stack-status convention): objective_not_found | invalid_delivery_policy |
-        # invalid_train | git_error | github_error | supersession_corruption.
-        fail(ctx, as_json=as_json, error_type=exc.error_type, message=str(exc))
-        return
-    except JournalCorruptionError as exc:
-        fail(ctx, as_json=as_json, error_type="journal_corruption", message=str(exc))
-        return
-    except git.GitError as exc:
-        fail(ctx, as_json=as_json, error_type="git_error", message=str(exc))
-        return
-    except (IssueBackendError, ObjectiveStoreError, TrainPersistenceError, GitHubError) as exc:
+    except (IssueBackendError, ObjectiveStoreError) as exc:
         fail(ctx, as_json=as_json, error_type="github_error", message=str(exc))
         return
     except UserFacingCliError as exc:

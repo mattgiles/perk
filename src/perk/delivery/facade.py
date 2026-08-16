@@ -8,7 +8,9 @@ internal seams.
 """
 
 from abc import ABC, abstractmethod
+from collections.abc import Callable
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Literal
 
 from perk import objective
@@ -16,8 +18,15 @@ from perk.backends.issue_backend import IssueBackendError, PlanState
 from perk.backends.objective_store import ObjectiveState, ObjectiveStoreError
 from perk.delivery import capability, train
 from perk.delivery import layer as layer_mod
-from perk.delivery.journal import JournalFold
-from perk.delivery.persistence import TrainPersistenceError
+from perk.delivery.journal import (
+    JournalCorruptionError,
+    JournalFold,
+    JournalRecordTooLarge,
+    OutcomeRecord,
+    PreparedRecord,
+)
+from perk.delivery.persistence import AppendResult, TrainPersistenceError
+from perk.github import GitHubError
 from perk.objective import NodeStatus, ObjectiveNode
 from perk.substrate import git as git_mod
 
@@ -37,6 +46,33 @@ _DELIVERY_ERROR_TYPES = frozenset(
         "node_not_build_ready",
         "parent_missing",
         "parent_unverified",
+        "not_stacked",
+        "unresolved_operation",
+        "sync_conflict_pending",
+        "claimed_prefix_malformed",
+        "active_writer",
+        "dirty_worktree",
+        "writer_observation_unavailable",
+        "remote_drift",
+        "pr_drift",
+        "membership_drift",
+        "stale_parent",
+        "base_unobserved",
+        "multiple_push_urls",
+        "atomic_push_unsupported",
+        "rebase_conflict",
+        "push_rejected",
+        "sync_drift",
+        "postcondition_unverified",
+        "adopt_blocked",
+        "no_continuation",
+        "continuation_stale",
+        "continuation_invalid",
+        "rebase_in_progress",
+        "operation_in_progress",
+        "journal_corruption",
+        "journal_record_too_large",
+        "invalid_config",
     }
 )
 
@@ -274,6 +310,113 @@ class PrepareResult:
 
 
 @dataclass(frozen=True)
+class SyncRequest:
+    """Request one published-suffix synchronization operation."""
+
+    mode: Literal["cascade", "continue", "abort"]
+    objective_id: str
+    run_id: str | None = None
+    include_base: bool = False
+    dry_run: bool = False
+    adopt_node: str | None = None
+    trigger_plan_id: str | None = None
+    trigger_run_id: str | None = None
+
+    def __post_init__(self) -> None:
+        if self.mode not in ("cascade", "continue", "abort"):
+            raise ValueError(f"unknown sync mode: {self.mode!r}")
+        if not _nonblank(self.objective_id):
+            raise ValueError("sync objective_id must be nonblank")
+        for name, value in (
+            ("run_id", self.run_id),
+            ("adopt_node", self.adopt_node),
+            ("trigger_plan_id", self.trigger_plan_id),
+            ("trigger_run_id", self.trigger_run_id),
+        ):
+            if value is not None and not _nonblank(value):
+                raise ValueError(f"sync {name} must be nonblank when present")
+        if self.mode == "cascade":
+            if self.run_id is None:
+                raise ValueError("cascade sync requires run_id")
+            if self.include_base and self.adopt_node is not None:
+                raise ValueError(
+                    "--adopt and --base are mutually exclusive — adopt the layer first, then "
+                    "rerun with --base (sequential invocations reach the same state)"
+                )
+            if self.trigger_plan_id is not None and (
+                self.include_base or self.adopt_node is not None
+            ):
+                raise ValueError(
+                    "trigger-scoped synchronization cannot compose with --base or --adopt — "
+                    "run those operations sequentially"
+                )
+            if self.trigger_run_id is not None and self.trigger_plan_id is None:
+                raise ValueError("sync trigger_run_id requires trigger_plan_id")
+            return
+        if (
+            self.run_id is not None
+            or self.include_base
+            or self.dry_run
+            or self.adopt_node is not None
+            or self.trigger_plan_id is not None
+            or self.trigger_run_id is not None
+        ):
+            raise ValueError(f"{self.mode} sync accepts only objective_id")
+
+
+@dataclass(frozen=True)
+class SyncResult:
+    """The flat result family for cascade, continue, and abort operations."""
+
+    @dataclass(frozen=True)
+    class Layer:
+        node_id: str
+        plan_id: str
+        branch: str
+        pr_number: int
+        before_sha: str
+        after_sha: str
+
+    @dataclass(frozen=True)
+    class Cascade:
+        objective_id: str
+        base_branch: str
+        include_base: bool
+        base_before: str | None
+        base_after: str | None
+        layers: tuple["SyncResult.Layer", ...]
+
+    @dataclass(frozen=True)
+    class AbortPreview:
+        manifest_path: Path
+        parseable: bool
+        contained: bool
+        operation_id: str | None
+        conflict_node_id: str | None
+        worktree_path: str | None
+
+    objective_id: str
+    objective_url: str
+    redirected_from: str | None
+    operation_id: str | None
+    abandoned_operation_id: str | None
+    no_op: bool
+    declined: bool
+    resumed: bool
+    base_cascaded: bool
+    base_advanced: bool
+    affected: tuple[Layer, ...]
+    dry_run: bool = False
+    adopted_node: str | None = None
+    continued: bool = False
+    aborted: bool = False
+    notes: tuple[str, ...] = ()
+
+
+type _SyncConsent = Callable[[SyncResult.Cascade | SyncResult.AbortPreview], bool]
+
+
+@dataclass(frozen=True)
 class StatusRequest:
     """Request one objective's current delivery status."""
 
@@ -324,6 +467,27 @@ class DeliveryPersistence(ABC):
         """Read the succession-folded delivery journal."""
         ...
 
+    @abstractmethod
+    def append_prepared(self, objective_id: str, record: PreparedRecord) -> AppendResult:
+        """Append one prepared operation record through the aligned persistence."""
+        ...
+
+    @abstractmethod
+    def append_outcome(self, objective_id: str, record: OutcomeRecord) -> AppendResult:
+        """Append one terminal operation outcome through the aligned persistence."""
+        ...
+
+    @abstractmethod
+    def write_checkpoints(
+        self,
+        plan_id: str,
+        *,
+        parent_checkpoint_sha: str,
+        published_head_sha: str,
+    ) -> None:
+        """Write one layer's verified checkpoint pair atomically."""
+        ...
+
 
 class DeliveryGit(ABC):
     """Aggregate Git authority for status and Prepare observations."""
@@ -339,6 +503,12 @@ class DeliveryGit(ABC):
     @dataclass(frozen=True)
     class ProbeError:
         message: str
+
+    @property
+    @abstractmethod
+    def repo_root(self) -> Path:
+        """The repository root this authority is bound to; zero-I/O."""
+        ...
 
     @abstractmethod
     def trunk_branch(self) -> str:
@@ -356,8 +526,8 @@ class DeliveryGit(ABC):
         ...
 
     @abstractmethod
-    def resolve_commit(self, ref: str) -> str | None:
-        """Resolve a ref to a full local commit SHA."""
+    def resolve_commit(self, ref: str, *, cwd: Path | None = None) -> str | None:
+        """Resolve a ref in the bound repository or an explicitly retained worktree."""
         ...
 
     @abstractmethod
@@ -396,6 +566,61 @@ class DeliveryGit(ABC):
         """Observe the authoritative live base head tolerantly."""
         ...
 
+    @abstractmethod
+    def push_atomic(self, updates: tuple[git_mod.RefUpdate, ...]) -> None:
+        """Push one non-empty exact-leased multi-ref update atomically."""
+        ...
+
+    @abstractmethod
+    def update_ref(self, ref: str, sha: str) -> None:
+        """Create or replace one local ref."""
+        ...
+
+    @abstractmethod
+    def delete_ref(self, ref: str) -> None:
+        """Delete one local ref."""
+        ...
+
+    @abstractmethod
+    def list_refs(self, prefix: str) -> tuple[str, ...]:
+        """List local refs under a prefix."""
+        ...
+
+    @abstractmethod
+    def add_detached_worktree(self, path: Path, commit: str) -> None:
+        """Create a detached isolated worktree."""
+        ...
+
+    @abstractmethod
+    def remove_worktree(self, path: Path) -> None:
+        """Force-remove one isolated worktree."""
+        ...
+
+    @abstractmethod
+    def prune_worktrees(self) -> None:
+        """Prune stale worktree administration entries."""
+        ...
+
+    @abstractmethod
+    def checkout_detached(self, worktree: Path, sha: str) -> None:
+        """Checkout one commit detached in an isolated worktree."""
+        ...
+
+    @abstractmethod
+    def rebase_onto(self, worktree: Path, *, onto: str, upstream: str) -> git_mod.RebaseOutcome:
+        """Transplant the current detached range onto a new parent."""
+        ...
+
+    @abstractmethod
+    def rebase_in_progress(self, worktree: Path) -> bool:
+        """Whether a retained worktree has an unfinished rebase."""
+        ...
+
+    @abstractmethod
+    def worktree_dirty(self, worktree: Path) -> bool:
+        """Whether a retained worktree carries uncommitted changes."""
+        ...
+
 
 class DeliveryGitHub(ABC):
     """Aggregate status and authoring-Prepare authority for GitHub observations."""
@@ -432,6 +657,22 @@ class DeliveryGitHub(ABC):
     @abstractmethod
     def pr_for_branch(self, branch: str) -> train.BranchPrView | None:
         """Read an all-state PR by head branch."""
+        ...
+
+    @abstractmethod
+    def strict_stack_members(self, number: int) -> tuple[int, ...] | None:
+        """Read strict native-stack membership for one PR."""
+        ...
+
+    @abstractmethod
+    def active_writer_plan_ids(
+        self,
+        plan_ids: tuple[str, ...],
+        *,
+        trigger_plan_id: str | None,
+        trigger_run_id: str | None,
+    ) -> frozenset[str]:
+        """Observe active remote writers with optional corroborated self-exclusion."""
         ...
 
 
@@ -728,6 +969,38 @@ class Delivery:
         self._persistence = persistence
         self._git = git
         self._github = github
+
+    def sync(self, request: SyncRequest, *, consent: _SyncConsent | None = None) -> SyncResult:
+        """Synchronize a published suffix through the private transactional engine."""
+        from perk.delivery import sync as sync_mod  # noqa: PLC0415 — avoids facade↔engine cycle
+
+        context = sync_mod._SyncContext(
+            repo_root=self._git.repo_root,
+            persistence=self._persistence,
+            git=self._git,
+            github=self._github,
+            status=self.status,
+            runtime=sync_mod._DEFAULT_SYNC_RUNTIME,
+        )
+        try:
+            return sync_mod._dispatch(context, request, consent=consent)
+        except DeliveryError:
+            raise
+        except git_mod.GitError as exc:
+            raise DeliveryError(str(exc), error_type="git_error") from exc
+        except GitHubError as exc:
+            raise DeliveryError(str(exc), error_type="github_error") from exc
+        except train.TrainReconstructionError as exc:
+            code = exc.error_type if exc.error_type in _DELIVERY_ERROR_TYPES else "github_error"
+            raise DeliveryError(str(exc), error_type=code) from exc
+        except JournalCorruptionError as exc:
+            raise DeliveryError(str(exc), error_type="journal_corruption") from exc
+        except JournalRecordTooLarge as exc:
+            raise DeliveryError(str(exc), error_type="journal_record_too_large") from exc
+        except sync_mod.SyncConfigurationError as exc:
+            raise DeliveryError(str(exc), error_type="invalid_config") from exc
+        except (IssueBackendError, ObjectiveStoreError, TrainPersistenceError) as exc:
+            raise DeliveryError(str(exc), error_type="github_error") from exc
 
     def prepare(self, request: PrepareRequest) -> PrepareResult:
         """Prepare one operation family or return one bounded refusal."""

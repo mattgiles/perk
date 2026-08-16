@@ -26,6 +26,7 @@ from perk.backends.issue_backend import PlanHeaderUpdate, PlanState
 from perk.backends.resolve import resolve_issue_backend
 from perk.delivery import observe
 from perk.delivery import sync as sync_mod
+from perk.delivery.facade import SyncRequest, SyncResult
 from perk.delivery.journal import (
     EventRole,
     JournalFold,
@@ -114,7 +115,7 @@ class DeliveryOperationFacts:
     abandoned_operation_id: str | None
     resumed: bool
     no_op: bool
-    affected: tuple[sync_mod.SyncedLayer, ...]
+    affected: tuple[SyncResult.Layer, ...]
     notes: tuple[str, ...]
 
 
@@ -241,12 +242,10 @@ class _Publish:
     repo_root: Path
     plan_id: str  # bare (no leading '#')
     run_id: str
+    trigger_run_id: str | None
     title: str
     compose_body: Callable[[LayerBodyFacts, int | None], str]
     header_fields: Callable[[int], dict[str, object]]
-    remote_writers: sync_mod.RemoteWriterProbe
-    worktree_root: Path
-    synchronize: Callable[..., sync_mod.SyncResult]
     persistence: PublishPersistence
     issues: PublishIssues
     reconstruct: Callable[[Path, str], TrainStatus]
@@ -279,9 +278,7 @@ def publish_layer(
     title: str,
     compose_body: Callable[[LayerBodyFacts, int | None], str],
     header_fields: Callable[[int], dict[str, object]],
-    remote_writers: sync_mod.RemoteWriterProbe,
-    worktree_root: Path,
-    synchronize: Callable[..., sync_mod.SyncResult] = sync_mod.synchronize_train,
+    trigger_run_id: str | None = None,
     reconstruct: Callable[[Path, str], TrainStatus] = observe.reconstruct_repo_train,
     persistence_factory: Callable[[Path], PublishPersistence] = resolve_train_persistence,
     issues_factory: Callable[[Path], PublishIssues] = resolve_issue_backend,
@@ -311,8 +308,9 @@ def publish_layer(
     ``pr_number → fields`` builder) and the PR-body composition (``compose_body``); this
     operation owns WHEN they are written — identity + the checkpoint pair land only after
     every postcondition verified, immediately before the ``completed`` outcome. Raises
-    :class:`PublicationError` on publish-protocol refusals and :class:`sync_mod.SyncError` on
-    automatic-cascade refusals; infra errors (``GitHubError`` / ``GitError``) propagate for the
+    :class:`PublicationError` on publish-protocol refusals and
+    :class:`perk.delivery.facade.DeliveryError` on automatic-cascade refusals; infra errors
+    (``GitHubError`` / ``GitError``) propagate for the
     submit boundary's existing arms, always leaving any
     prepared operation unresolved (recoverable).
     """
@@ -334,12 +332,10 @@ def publish_layer(
         repo_root=repo_root,
         plan_id=wanted,
         run_id=run_id,
+        trigger_run_id=trigger_run_id,
         title=title,
         compose_body=compose_body,
         header_fields=header_fields,
-        remote_writers=remote_writers,
-        worktree_root=worktree_root,
-        synchronize=synchronize,
         persistence=persistence_factory(repo_root),
         issues=issues,
         reconstruct=reconstruct,
@@ -435,14 +431,16 @@ def _route(pub: _Publish, objective_id: str, *, allow_resume: bool) -> Publicati
 
 def _cascade(pub: _Publish, objective_id: str) -> PublicationResult:
     """Synchronize the claimed suffix from this lower published layer."""
-    result = pub.synchronize(
-        pub.repo_root,
-        objective_id=objective_id,
-        run_id=pub.run_id,
-        remote_writers=pub.remote_writers,
-        worktree_root=pub.worktree_root,
-        trigger_plan_id=pub.plan_id,
-        approve=None,
+    delivery = observe.resolve_delivery(pub.repo_root)
+    result = delivery.sync(
+        SyncRequest(
+            mode="cascade",
+            objective_id=objective_id,
+            run_id=pub.run_id,
+            trigger_plan_id=pub.plan_id,
+            trigger_run_id=pub.trigger_run_id,
+        ),
+        consent=None,
     )
     # A trigger resume may first roll an older all-after operation forward and then discover
     # that the new trigger is already converged. Reconstruct after sync so this result never

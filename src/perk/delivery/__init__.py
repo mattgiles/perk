@@ -8,16 +8,6 @@ public while their operation families migrate; ``probe_atomic_push_urls`` is ret
 the deferred sync owner.
 """
 
-from perk.delivery.capability import probe_atomic_push_urls
-from perk.delivery.continuation import (
-    ContinuationLayer,
-    ContinuationManifest,
-    PendingContinuation,
-    continuations_dir,
-    manifest_path,
-    pending_continuation,
-    write_manifest,
-)
 from perk.delivery.facade import (
     Delivery,
     DeliveryError,
@@ -28,6 +18,8 @@ from perk.delivery.facade import (
     PrepareResult,
     StatusRequest,
     StatusResult,
+    SyncRequest,
+    SyncResult,
 )
 from perk.delivery.finalize import (
     LandedPlan,
@@ -92,25 +84,12 @@ from perk.delivery.publish import (
     TrainRowFacts,
     publish_layer,
 )
-from perk.delivery.sync import (
-    ClaimedLayer,
-    SyncCascade,
-    SyncedLayer,
-    SyncError,
-    SyncResult,
-    derive_claimed_prefix,
-    synchronize_train,
-)
-from perk.delivery.writers import RemoteWriterProbe, WriterObservationError
 
 __all__ = [
     "JOURNAL_EVENT_MAX_CHARS",
     "JOURNAL_SCHEMA_VERSION",
     "AppendResult",
     "CheckView",
-    "ClaimedLayer",
-    "ContinuationLayer",
-    "ContinuationManifest",
     "Delivery",
     "DeliveryError",
     "DeliveryGit",
@@ -143,43 +122,31 @@ __all__ = [
     "OperationKind",
     "OperationState",
     "OutcomeRecord",
-    "PendingContinuation",
     "PrLandView",
     "PrepareRequest",
     "PrepareResult",
     "PreparedRecord",
     "PublicationError",
     "PublicationResult",
-    "RemoteWriterProbe",
     "StatusRequest",
     "StatusResult",
-    "SyncCascade",
-    "SyncError",
+    "SyncRequest",
     "SyncResult",
-    "SyncedLayer",
     "TrainPersistence",
     "TrainPersistenceError",
     "TrainRowFacts",
     "UnresolvedOperationError",
-    "WriterObservationError",
     "assess_land_readiness",
     "canonical_payload",
-    "continuations_dir",
-    "derive_claimed_prefix",
     "ensure_event_size",
     "finalize_landed_plan",
     "fold_events",
     "land_train",
-    "manifest_path",
     "mint_operation_id",
     "parse_journal_comment",
-    "pending_continuation",
-    "probe_atomic_push_urls",
     "publish_layer",
     "render_event",
     "resolve_delivery",
     "resolve_train_persistence",
     "squash_commit_message",
-    "synchronize_train",
-    "write_manifest",
 ]
