@@ -89,10 +89,11 @@ revisiting it.
 ## Frontend: Vite + React + TypeScript
 
 - A dedicated npm workspace **`tools/prose-review/`** (the `docs/site` workspace precedent), all
-  devDependencies exact-pinned: `react@19.2.8`, `react-dom@19.2.8`, `@types/react@19.2.18`,
-  `@types/react-dom@19.2.4`, `vite@8.2.1`, `@vitejs/plugin-react@6.0.5`, and `diff@8.0.4`
-  (TypeScript hoists from the root install). The workspace has no runtime `dependencies` key:
-  every client and tool pin is dev-only because the built workbench is never published.
+  devDependencies exact-pinned: React + type declarations, Vite + its React plugin, `diff@8.0.4`,
+  and the jsdom/tsx component-test harness (`jsdom@29.1.1`, `@types/jsdom@27.0.0`,
+  `tsx@4.23.12`; TypeScript hoists from the root install). The workspace has no runtime
+  `dependencies` key: every client and tool pin is dev-only because the built workbench is never
+  published.
 - `vite build` emits `tools/prose-review/dist/` (gitignored). The Python backend serves the built
   assets — **single origin, no network-loaded assets, no dev-server proxying**. Vite's build emits
   only external `<script type="module">`/stylesheet tags (no inline scripts), so
@@ -160,9 +161,12 @@ adds response-origin matching plus endpoint-specific latest-wins/clear/dispose i
 The proof structure remains **server integration** (real Vite build, real uvicorn on a pre-bound
 socket, real `*Out` DTOs, a comparison target followed through the unchanged source endpoint, and a
 real TypeScript fragment resolved through the separate helper checkout root) plus node:test coverage
-of every frontend parse/loader boundary and existing source-loader lifecycle. The packaging guard
-pins `diff` as an exact dev-only dependency while preserving the workspace's zero-runtime-dependency
-posture.
+of every frontend parse/loader boundary and existing source-loader lifecycle. A jsdom harness loads
+TSX through the exact-pinned `tsx` API to exercise the rendered App coordinator (fragment
+preservation, placement invalidation, stale outcomes, mode reset, and duplicate-choice occurrence
+identity) and CenterPane (one-versus-two source loads, native diff chunks, headers, and independent
+failure states). The packaging guard pins the diff and test libraries as exact dev-only dependencies
+while preserving the workspace's zero-runtime-dependency posture.
 
 The launcher-served **browser** leg covers shape-origin layer selection, placement-aware option
 refresh with fragment-only preservation, the five graph-backed target families and boundary

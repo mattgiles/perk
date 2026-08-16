@@ -5,13 +5,13 @@ import {
   type ComparisonChoice,
   type ComparisonOptions,
   type ComparisonPlacement,
-  comparisonChoiceKey,
   comparisonOptionsMatchRequest,
   comparisonPlacementKey,
   parseComparisonOptions,
 } from "./src/comparison.ts";
 
 const CANONICAL: ComparisonPlacement = {
+  provenance: "canonical",
   unit: { id: "unit:a", kind: "markdown", path: "a.md" },
   breadcrumb: [{ id: "planning", label: "Planning" }],
   shape: null,
@@ -21,6 +21,7 @@ const CANONICAL: ComparisonPlacement = {
 };
 
 const UNSHAPED: ComparisonPlacement = {
+  provenance: "assembly",
   unit: { id: "unit:b", kind: "managed-prose", path: "map.yaml" },
   breadcrumb: [{ id: "delivery", label: "Delivery" }],
   shape: null,
@@ -30,6 +31,7 @@ const UNSHAPED: ComparisonPlacement = {
 };
 
 const SHAPED: ComparisonPlacement = {
+  provenance: "shape",
   unit: { id: "unit:a", kind: "markdown", path: "a.md" },
   breadcrumb: [
     { id: "planning", label: "Planning" },
@@ -188,26 +190,14 @@ test("request matching distinguishes canonical and exact placed origins", () => 
   );
 });
 
-test("placement and choice keys use relation identity without display copy", () => {
+test("placement keys retain exact source provenance", () => {
   assert.equal(
     comparisonPlacementKey(SHAPED),
     JSON.stringify(["unit:a", "plan.warm", "plan-authoring", 3]),
   );
   assert.equal(
-    comparisonChoiceKey("delivery-sibling", CHOICE),
-    JSON.stringify([
-      "delivery-sibling",
-      CHOICE.label,
-      CHOICE.detail,
-      comparisonPlacementKey(SHAPED),
-    ]),
+    comparisonPlacementKey(UNSHAPED),
+    JSON.stringify(["unit:b", null, "implementation", 2]),
   );
-  assert.notEqual(
-    comparisonChoiceKey("delivery-sibling", { ...CHOICE, label: "Changed" }),
-    comparisonChoiceKey("delivery-sibling", CHOICE),
-  );
-  assert.notEqual(
-    comparisonChoiceKey("alias-consumer", CHOICE),
-    comparisonChoiceKey("delivery-sibling", CHOICE),
-  );
+  assert.equal(comparisonPlacementKey(CANONICAL), JSON.stringify(["unit:a", null, null, null]));
 });

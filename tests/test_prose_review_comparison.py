@@ -5,7 +5,15 @@ from pathlib import Path
 
 import pytest
 from perk_dev.prose_map.catalog import build_catalog
-from perk_dev.prose_map.models import Catalog
+from perk_dev.prose_map.models import (
+    Candidate,
+    Capability,
+    Catalog,
+    Concern,
+    ConcernRelation,
+    ProseMap,
+    RoutedUnit,
+)
 from perk_dev.prose_review.catalog import CatalogSnapshot
 from perk_dev.prose_review.comparison import (
     ComparisonGroup,
@@ -200,20 +208,174 @@ def test_capability_projection_is_parent_first_preorder_and_canonical_only(
     assert _PLAN_SKILL not in [choice.target.unit.candidate.id for choice in choices]
 
 
-def test_each_relation_uses_its_declared_deduplication_identity(
-    snapshot: CatalogSnapshot,
+def test_placement_relations_collapse_exact_duplicate_producers_to_the_first(
+    repository_catalog: Catalog,
 ) -> None:
-    options = _options(snapshot, _PLAN_SKILL)
-    for group in options.groups:
-        if group.relation in ("delivery-sibling", "alias-consumer"):
-            keys = [choice.target.locator() for choice in group.choices]
-        elif group.relation == "adjacent-layer":
-            keys = [(choice.detail, choice.target.locator()) for choice in group.choices]
-        elif group.relation == "concern-relative":
-            keys = [(choice.detail.split(" · ", 1)[0], choice.label) for choice in group.choices]
-        else:
-            keys = [(choice.detail, choice.label) for choice in group.choices]
-        assert len(keys) == len(set(keys))
+    cold = next(
+        shape for shape in repository_catalog.graph.session_shapes if shape.id == "plan.cold"
+    )
+    duplicate_cold = replace(cold, label="Duplicate cold must lose")
+    graph = replace(
+        repository_catalog.graph,
+        session_shapes=(*repository_catalog.graph.session_shapes, duplicate_cold),
+    )
+    collision_snapshot = CatalogSnapshot.from_catalog(replace(repository_catalog, graph=graph))
+
+    placed = _options(collision_snapshot, _PLAN_SKILL, shape_id="plan.warm", position=3)
+    delivery = _group(placed, "delivery-sibling").choices
+    assert [(choice.label, choice.target.locator()) for choice in delivery] == [
+        (
+            "Plan authoring — cold door",
+            (_PLAN_SKILL, "plan.cold", "plan-authoring", 3),
+        )
+    ]
+
+    aliases = _group(_options(collision_snapshot, _PLAN_SKILL), "alias-consumer").choices
+    assert [(choice.detail, choice.target.locator()) for choice in aliases] == [
+        (
+            "Plan authoring — cold door · plan-authoring #3 · Bound plan skill",
+            (_PLAN_SKILL, "plan.cold", "plan-authoring", 3),
+        ),
+        (
+            "Plan authoring — warm door · plan-authoring #3 · Bound plan skill",
+            (_PLAN_SKILL, "plan.warm", "plan-authoring", 3),
+        ),
+    ]
+
+
+def test_adjacency_keeps_distinct_origins_and_directions_in_authored_order(
+    repository_catalog: Catalog,
+) -> None:
+    cold = next(
+        shape for shape in repository_catalog.graph.session_shapes if shape.id == "plan.cold"
+    )
+    graph = replace(
+        repository_catalog.graph,
+        session_shapes=(
+            *repository_catalog.graph.session_shapes,
+            replace(cold, label="Duplicate cold must lose"),
+        ),
+    )
+    collision_snapshot = CatalogSnapshot.from_catalog(replace(repository_catalog, graph=graph))
+
+    adjacency = _group(
+        _options(collision_snapshot, _PLAN_SKILL),
+        "adjacent-layer",
+    ).choices
+    assert [(choice.label, choice.target.locator()) for choice in adjacency] == [
+        (
+            "Previous layer · Plan-authoring flow",
+            (_PLAN_CONTEXT, "plan.cold", "plan-authoring", 2),
+        ),
+        (
+            "Next layer · Working draft contract",
+            (_PLAN_DRAFT, "plan.cold", "plan-authoring", 4),
+        ),
+        (
+            "Previous layer · Plan-authoring flow",
+            (_PLAN_CONTEXT, "plan.warm", "plan-authoring", 2),
+        ),
+        (
+            "Next layer · Working draft contract",
+            (_PLAN_DRAFT, "plan.warm", "plan-authoring", 4),
+        ),
+    ]
+    assert all("Duplicate cold must lose" not in choice.detail for choice in adjacency)
+
+
+def test_concern_deduplication_uses_concern_id_and_keeps_first_member_copy(
+    repository_catalog: Catalog,
+) -> None:
+    first = Concern(
+        id="collision-first",
+        label="Shared concern label",
+        summary="First collision witness.",
+        canonical_unit=_PLAN_SKILL,
+        related=(
+            ConcernRelation(unit=_PLAN_REVIEW, relation="first standing"),
+            ConcernRelation(unit=_PLAN_REVIEW, relation="duplicate must lose"),
+        ),
+    )
+    second = replace(first, id="collision-second", summary="Second collision witness.")
+    graph = replace(repository_catalog.graph, concerns=(first, second))
+    collision_snapshot = CatalogSnapshot.from_catalog(replace(repository_catalog, graph=graph))
+
+    concerns = _group(
+        _options(collision_snapshot, _PLAN_SKILL),
+        "concern-relative",
+    ).choices
+    assert [(choice.label, choice.detail, choice.target.locator()) for choice in concerns] == [
+        (
+            _PLAN_REVIEW,
+            "Shared concern label · first standing",
+            (_PLAN_REVIEW, None, None, None),
+        ),
+        (
+            _PLAN_REVIEW,
+            "Shared concern label · first standing",
+            (_PLAN_REVIEW, None, None, None),
+        ),
+    ]
+
+
+def _synthetic_unit(unit_id: str, capability: str) -> RoutedUnit:
+    return RoutedUnit(
+        candidate=Candidate(
+            id=unit_id,
+            kind="markdown",
+            path=f"{unit_id}.md",
+            selector="whole-file",
+            fragments=(),
+        ),
+        capability=capability,
+        audience="shipped",
+        role="context",
+    )
+
+
+def test_capability_deduplication_keeps_relationship_and_anchor_dimensions() -> None:
+    target_id = "unit:target"
+    target = _synthetic_unit(target_id, "root")
+    origin = _synthetic_unit("unit:origin", "origin")
+    target_in_child = replace(target, capability="child")
+    graph = ProseMap(
+        capabilities=(
+            Capability(id="root", label="Root", summary="Root capability.", parent=None),
+            Capability(id="origin", label="Origin", summary="Origin capability.", parent="root"),
+            Capability(id="child", label="Child", summary="Child capability.", parent="origin"),
+        ),
+        routes=(),
+        exclusions=(),
+        session_shapes=(),
+        assemblies=(),
+        scenarios=(),
+        concerns=(),
+        lineage=(),
+    )
+    catalog = Catalog(
+        graph=graph,
+        units=(target, origin, target_in_child),
+        excluded=(),
+        findings=(),
+        governed_tools=(),
+    )
+    collision_snapshot = CatalogSnapshot.from_catalog(catalog)
+
+    capability = _group(
+        _options(collision_snapshot, origin.candidate.id),
+        "capability-parent-child",
+    ).choices
+    assert [
+        (
+            choice.label,
+            choice.detail,
+            tuple(item.id for item in choice.target.breadcrumb),
+        )
+        for choice in capability
+    ] == [
+        (target_id, "Parent capability · Root", ("root",)),
+        (target_id, "Child capability · Child", ("root", "origin", "child")),
+    ]
 
 
 def test_minimal_snapshot_can_return_a_successful_empty_option_set(

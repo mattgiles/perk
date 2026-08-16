@@ -335,12 +335,15 @@ def test_docs_site_publish_isolation():
     assert workbench["private"] is True
     assert "dependencies" not in workbench, workbench.get("dependencies")
     assert workbench["devDependencies"] == {
+        "@types/jsdom": "27.0.0",
         "@types/react": "19.2.18",
         "@types/react-dom": "19.2.4",
         "@vitejs/plugin-react": "6.0.5",
         "diff": "8.0.4",
+        "jsdom": "29.1.1",
         "react": "19.2.8",
         "react-dom": "19.2.8",
+        "tsx": "4.23.12",
         "vite": "8.2.1",
     }
     assert not any(entry.startswith("tools") for entry in root["files"]), root["files"]

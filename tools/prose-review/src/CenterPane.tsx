@@ -1,6 +1,6 @@
 import { type Change, diffLines } from "diff";
-import { type ReactNode, useEffect, useState } from "react";
-import type { Mode, Selection } from "./App.tsx";
+import { useEffect, useState } from "react";
+import type { Mode } from "./App.tsx";
 import { BOUNDARY_INFO } from "./boundaries.ts";
 import {
   type ComparisonPlacement,
@@ -8,7 +8,12 @@ import {
   type SelectedComparison,
 } from "./comparison.ts";
 import type { ComparisonLoadState } from "./comparisonLoad.ts";
-import { type SourceTarget, sourceTargetKey, wholeUnitTarget } from "./selection.ts";
+import {
+  type Selection,
+  type SourceTarget,
+  sourceTargetKey,
+  wholeUnitTarget,
+} from "./selection.ts";
 import { READ_ONLY_PRESENTATION, sourceCurrentText } from "./source.ts";
 import { createSourceLoader, type SourceLoadState } from "./sourceLoad.ts";
 import type { BoundaryKind } from "./wire.ts";
@@ -232,15 +237,9 @@ function ComparisonPanes({
   );
 }
 
-function SourceState({
-  unit,
-  children,
-}: {
-  unit: ComparisonPlacement["unit"];
-  children: (state: SourceLoadState) => ReactNode;
-}) {
+function useWholeUnitSource(unit: ComparisonPlacement["unit"]): SourceLoadState {
   const [target] = useState(() => wholeUnitTarget(unit));
-  return children(useSourceLoad(target));
+  return useSourceLoad(target);
 }
 
 function SharedComparisonSources({
@@ -250,14 +249,8 @@ function SharedComparisonSources({
   origin: ComparisonPlacement;
   target: ComparisonPlacement;
 }) {
-  return (
-    <SourceState
-      key={`shared:${comparisonPlacementKey(origin)}:${comparisonPlacementKey(target)}`}
-      unit={origin.unit}
-    >
-      {(state) => <ComparisonPanes origin={origin} target={target} left={state} right={state} />}
-    </SourceState>
-  );
+  const state = useWholeUnitSource(origin.unit);
+  return <ComparisonPanes origin={origin} target={target} left={state} right={state} />;
 }
 
 function DistinctComparisonSources({
@@ -267,15 +260,9 @@ function DistinctComparisonSources({
   origin: ComparisonPlacement;
   target: ComparisonPlacement;
 }) {
-  return (
-    <SourceState key={`left:${comparisonPlacementKey(origin)}`} unit={origin.unit}>
-      {(left) => (
-        <SourceState key={`right:${comparisonPlacementKey(target)}`} unit={target.unit}>
-          {(right) => <ComparisonPanes origin={origin} target={target} left={left} right={right} />}
-        </SourceState>
-      )}
-    </SourceState>
-  );
+  const left = useWholeUnitSource(origin.unit);
+  const right = useWholeUnitSource(target.unit);
+  return <ComparisonPanes origin={origin} target={target} left={left} right={right} />;
 }
 
 function SelectedComparisonPair({

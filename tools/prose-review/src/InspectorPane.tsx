@@ -1,11 +1,16 @@
 import { useEffect, useState } from "react";
-import type { Mode, Selection } from "./App.tsx";
+import type { Mode } from "./App.tsx";
 import { BOUNDARY_INFO } from "./boundaries.ts";
-import { comparisonChoiceKey, type SelectedComparison } from "./comparison.ts";
+import type { SelectedComparison } from "./comparison.ts";
 import type { ComparisonLoadState } from "./comparisonLoad.ts";
 import type { CapabilityRef, UnitInspect } from "./inspect.ts";
 import { createInspectLoader, type InspectLoadState } from "./inspectLoad.ts";
-import { placedShapeLayerSelection, type SourceTarget, wholeUnitTarget } from "./selection.ts";
+import {
+  placedShapeLayerSelection,
+  type Selection,
+  type SourceTarget,
+  wholeUnitTarget,
+} from "./selection.ts";
 
 type SelectSource = (target: SourceTarget) => void;
 type SelectSelection = (selection: Selection) => void;
@@ -152,14 +157,13 @@ function ComparisonPicker({
         <div key={group.relation} className="inspector-block">
           <h4>{group.label}</h4>
           <ul className="inspector-list">
-            {group.choices.map((choice) => {
-              const candidate = { relation: group.relation, choice };
-              const key = comparisonChoiceKey(group.relation, choice);
+            {group.choices.map((choice, choiceIndex) => {
+              const candidate = { relation: group.relation, choiceIndex, choice };
+              const occurrence = `${group.relation}:${choiceIndex}`;
               const active =
-                selected !== null &&
-                comparisonChoiceKey(selected.relation, selected.choice) === key;
+                selected?.relation === group.relation && selected.choiceIndex === choiceIndex;
               return (
-                <li key={key}>
+                <li key={occurrence}>
                   <button
                     type="button"
                     className={active ? "relation-entry selected" : "relation-entry"}

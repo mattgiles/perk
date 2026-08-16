@@ -1,11 +1,11 @@
 import { useState } from "react";
-import type { Selection } from "./App.tsx";
 import { BOUNDARY_INFO } from "./boundaries.ts";
 import {
   canonicalFragmentSelection,
   canonicalUnitSelection,
   placedFragmentSelection,
   placedShapeLayerSelection,
+  type Selection,
   shapeSelection,
   sourceSelectionKey,
   type UnitSelection,

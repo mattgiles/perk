@@ -13,14 +13,31 @@ export const COMPARISON_RELATIONS = [
 
 export type ComparisonRelation = (typeof COMPARISON_RELATIONS)[number];
 
-export type ComparisonPlacement = {
+type ComparisonPlacementBase = {
   unit: UnitRef;
   breadcrumb: CapabilityRef[];
-  shape: ShapeRef | null;
-  assembly: string | null;
-  position: number | null;
   label: string;
 };
+
+export type ComparisonPlacement =
+  | (ComparisonPlacementBase & {
+      provenance: "canonical";
+      shape: null;
+      assembly: null;
+      position: null;
+    })
+  | (ComparisonPlacementBase & {
+      provenance: "assembly";
+      shape: null;
+      assembly: string;
+      position: number;
+    })
+  | (ComparisonPlacementBase & {
+      provenance: "shape";
+      shape: ShapeRef;
+      assembly: string;
+      position: number;
+    });
 
 export type ComparisonChoice = {
   label: string;
@@ -41,6 +58,7 @@ export type ComparisonOptions = {
 
 export type SelectedComparison = {
   relation: ComparisonRelation;
+  choiceIndex: number;
   choice: ComparisonChoice;
 };
 
@@ -114,12 +132,17 @@ function parsePlacement(value: unknown): ComparisonPlacement | null {
   ) {
     return null;
   }
-  const canonical = shape === null && assembly === null && position === null;
-  const assemblyPlacement = assembly !== null && position !== null;
-  if (!canonical && !assemblyPlacement) {
+  const common = { unit, breadcrumb, label: value.label };
+  if (shape === null && assembly === null && position === null) {
+    return { ...common, provenance: "canonical", shape: null, assembly: null, position: null };
+  }
+  if (assembly === null || position === null) {
     return null;
   }
-  return { unit, breadcrumb, shape, assembly, position, label: value.label };
+  if (shape === null) {
+    return { ...common, provenance: "assembly", shape: null, assembly, position };
+  }
+  return { ...common, provenance: "shape", shape, assembly, position };
 }
 
 function isComparisonRelation(value: unknown): value is ComparisonRelation {
@@ -195,17 +218,5 @@ export function comparisonPlacementKey(placement: ComparisonPlacement): string {
     placement.shape?.id ?? null,
     placement.assembly,
     placement.position,
-  ]);
-}
-
-export function comparisonChoiceKey(
-  relation: ComparisonRelation,
-  choice: ComparisonChoice,
-): string {
-  return JSON.stringify([
-    relation,
-    choice.label,
-    choice.detail,
-    comparisonPlacementKey(choice.target),
   ]);
 }

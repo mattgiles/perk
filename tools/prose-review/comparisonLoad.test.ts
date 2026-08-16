@@ -3,6 +3,7 @@ import test from "node:test";
 import { setImmediate as tick } from "node:timers/promises";
 import {
   type ComparisonOptions,
+  type ComparisonPlacement,
   type ComparisonRequest,
   comparisonRequest,
 } from "./src/comparison.ts";
@@ -25,17 +26,29 @@ const WARM: SessionShape = {
 const COLD: SessionShape = { ...WARM, id: "plan.cold", label: "Plan cold", delivery: "cold" };
 
 function options(shape: SessionShape | null = null): ComparisonOptions {
-  return {
-    origin: {
-      unit: UNIT,
-      breadcrumb: [{ id: "planning", label: "Planning" }],
-      shape: shape === null ? null : { id: shape.id, label: shape.label, delivery: shape.delivery },
-      assembly: shape === null ? null : "plan-authoring",
-      position: shape === null ? null : 3,
-      label: shape === null ? UNIT.id : "Bound plan skill",
-    },
-    groups: [],
+  const common = {
+    unit: UNIT,
+    breadcrumb: [{ id: "planning", label: "Planning" }],
   };
+  const origin: ComparisonPlacement =
+    shape === null
+      ? {
+          ...common,
+          provenance: "canonical",
+          shape: null,
+          assembly: null,
+          position: null,
+          label: UNIT.id,
+        }
+      : {
+          ...common,
+          provenance: "shape",
+          shape: { id: shape.id, label: shape.label, delivery: shape.delivery },
+          assembly: "plan-authoring",
+          position: 3,
+          label: "Bound plan skill",
+        };
+  return { origin, groups: [] };
 }
 
 function respond(status: number, body: unknown): ResponseLike {

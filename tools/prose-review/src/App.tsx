@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { CenterPane } from "./CenterPane.tsx";
-import type { ComparisonRequest, SelectedComparison } from "./comparison.ts";
+import { comparisonRequest, type SelectedComparison } from "./comparison.ts";
 import { type ComparisonLoadState, createComparisonLoader } from "./comparisonLoad.ts";
 import { InspectorPane } from "./InspectorPane.tsx";
 import { SearchBar } from "./SearchBar.tsx";
@@ -14,7 +14,6 @@ import { TreePane } from "./TreePane.tsx";
 import { type CapabilityTree, parseTree } from "./tree.ts";
 
 export type Mode = "edit" | "compare" | "assembly";
-export type { Selection } from "./selection.ts";
 
 type TreeLoadState =
   | { status: "loading" }
@@ -37,11 +36,7 @@ export function App() {
   const [selectedComparison, setSelectedComparison] = useState<SelectedComparison | null>(null);
   const [comparisonLoader] = useState(() => createComparisonLoader(setComparisonState));
   const originKey = selectedOriginKey(selection);
-  const selectedUnitId = selection?.type === "unit" ? selection.target.unit.id : null;
-  const selectedShapeId =
-    selection?.type === "unit" ? (selection.placement?.shape.id ?? null) : null;
-  const selectedPosition =
-    selection?.type === "unit" ? (selection.placement?.position ?? null) : null;
+  const request = selection?.type === "unit" ? comparisonRequest(selection) : null;
 
   useEffect(() => {
     let cancelled = false;
@@ -70,17 +65,16 @@ export function App() {
     };
   }, []);
 
+  // Fragment-only navigation preserves this effect because originKey is the exact
+  // unit/shape/position transport identity returned by comparisonRequest.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: request and originKey are equivalent.
   useEffect(() => {
-    if (mode !== "compare" || selectedUnitId === null) {
+    if (mode !== "compare" || request === null) {
       return;
     }
-    const request: ComparisonRequest =
-      selectedShapeId === null || selectedPosition === null
-        ? { unit: selectedUnitId, shape: null, position: null }
-        : { unit: selectedUnitId, shape: selectedShapeId, position: selectedPosition };
     setSelectedComparison(null);
     comparisonLoader.select(request);
-  }, [comparisonLoader, mode, selectedPosition, selectedShapeId, selectedUnitId]);
+  }, [comparisonLoader, mode, originKey]);
 
   useEffect(() => () => comparisonLoader.dispose(), [comparisonLoader]);
 
