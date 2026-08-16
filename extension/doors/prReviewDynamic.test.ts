@@ -14,7 +14,7 @@ import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import { test } from "node:test";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { fakePerk, loadPerkSession, scaffoldRepo } from "../testing/harness.ts";
+import { fakePerkRouter, loadPerkSession, scaffoldRepo } from "../testing/harness.ts";
 import {
   WAVE_RPC_PROTOCOL_VERSION,
   WAVE_RPC_REPLY_EVENT_PREFIX,
@@ -270,6 +270,14 @@ function fakeDynamicResponder(
   };
 }
 
+const PR_URL_JSON = {
+  success: true,
+  error_type: null,
+  message: null,
+  branch: "plan-7",
+  pr: { number: 42, url: "https://github.test/o/r/pull/42" },
+};
+
 const CLEAN_JSON = JSON.stringify({
   success: true,
   error_type: null,
@@ -293,7 +301,10 @@ test("tool: run_pr_review_dynamic_wave end-to-end — models per-item, aggregate
     '[models.subagents]\npr-reviewer = "test-wave-model"\nreview-angle-selector = "test-selector-model"\n',
     "utf8",
   );
-  const bin = fakePerk(cwd, { stdout: CLEAN_JSON });
+  const bin = fakePerkRouter(cwd, {
+    "pr url": { json: PR_URL_JSON },
+    "pr review-post": { json: JSON.parse(CLEAN_JSON) },
+  });
   const sink: DynamicSink = { spawns: [], runCalls: [], allBatches: [] };
   const h = await loadPerkSession({
     cwd,
@@ -306,6 +317,7 @@ test("tool: run_pr_review_dynamic_wave end-to-end — models per-item, aggregate
     });
     const details = result.details as {
       ok: boolean;
+      pr?: number;
       complete?: boolean;
       covered?: string[];
       retried?: string[];
@@ -326,6 +338,7 @@ test("tool: run_pr_review_dynamic_wave end-to-end — models per-item, aggregate
       }[];
     };
     assert.equal(details.ok, true);
+    assert.equal(details.pr, 42);
     assert.equal(details.complete, true);
     assert.deepEqual(details.covered, ["plan-fidelity", "quality", "ponytail"]);
     assert.deepEqual(details.retried, []);
@@ -366,17 +379,24 @@ test("tool: run_pr_review_dynamic_wave end-to-end — models per-item, aggregate
     assert.equal(selector.params.model, "test-selector-model");
     assert.match(JSON.stringify(selector.params.outputSchema), /"change_profile"/);
     assert.match(selector.params.task as string, /focus on decode edges/);
+    assert.match(
+      selector.params.task as string,
+      /perk pr review-context --expected-pr 42 --json/,
+    );
     const pf = sink.runCalls.find((call) => call.key === "plan-fidelity");
     const ponytail = sink.runCalls.find((call) => call.key === "ponytail");
     assert.ok(pf);
     assert.ok(ponytail);
     assert.equal(pf.params.model, "test-wave-model");
     assert.match(pf.params.task as string, /focus on decode edges/);
+    assert.match(pf.params.task as string, /--expected-pr 42 --json/);
     assert.equal(ponytail.params.skill, "ponytail-review");
+    assert.match(ponytail.params.task as string, /--expected-pr 42 --json/);
     assert.equal(ponytail.params.model, "test-wave-model");
     for (const item of sink.allBatches[0] ?? []) {
       assert.equal(item.model, "test-wave-model");
       assert.match(item.task as string, /focus on decode edges/);
+      assert.match(item.task as string, /--expected-pr 42 --json/);
     }
     // The recorded wave is complete → the SHARED clean guard lets a clean post through.
     const post = await h.invokeTool("post_pr_review", {
@@ -399,7 +419,10 @@ test("tool: run_pr_review_dynamic_wave end-to-end — models per-item, aggregate
 test("tool: a selector-proposed custom angle rides the dynamic wave end-to-end", async () => {
   const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
   installPonytailReviewSkill(cwd);
-  const bin = fakePerk(cwd, { stdout: CLEAN_JSON });
+  const bin = fakePerkRouter(cwd, {
+    "pr url": { json: PR_URL_JSON },
+    "pr review-post": { json: JSON.parse(CLEAN_JSON) },
+  });
   const sink: DynamicSink = { spawns: [], runCalls: [], allBatches: [] };
   const h = await loadPerkSession({
     cwd,
@@ -442,6 +465,7 @@ test("tool: a selector-proposed custom angle rides the dynamic wave end-to-end",
     assert.ok(item);
     assert.match(item.task as string, /review ONLY this change-specific scope/);
     assert.match(item.task as string, /staleness of the new memoization layer/);
+    assert.match(item.task as string, /--expected-pr 42 --json/);
     assert.match(JSON.stringify(item.outputSchema), /"cache-invalidation"/);
     // The terse selection line names the custom slug (the scope stays in the JSON aggregate).
     const text = result.content[0]?.text ?? "";
@@ -456,7 +480,10 @@ test("tool: a selector-proposed custom angle rides the dynamic wave end-to-end",
 
 test("tool: an unavailable dynamic wave degrades loud; the SHARED clean guard refuses a clean post", async () => {
   const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
-  const bin = fakePerk(cwd, { stdout: CLEAN_JSON });
+  const bin = fakePerkRouter(cwd, {
+    "pr url": { json: PR_URL_JSON },
+    "pr review-post": { json: JSON.parse(CLEAN_JSON) },
+  });
   // No RPC responder bound + a tiny ping timeout → the deterministic `unavailable` arm.
   const h = await loadPerkSession({
     cwd,

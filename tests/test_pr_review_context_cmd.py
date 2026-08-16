@@ -1,5 +1,6 @@
 import json
 import subprocess
+from dataclasses import replace
 from pathlib import Path
 
 from click.testing import CliRunner
@@ -186,6 +187,66 @@ def test_context_flagless_never_calls_get_pr(monkeypatch):
         result = runner.invoke(cli, ["pr", "review-context", "--json"])
     assert result.exit_code == 0
     assert json.loads(result.output)["success"] is True
+
+
+def test_context_expected_pr_preserves_active_plan_context(monkeypatch):
+    monkeypatch.setattr(github, "find_pr_for_branch", lambda **k: _open_pr())
+    seen: dict[str, object] = {}
+
+    def _capture(**kwargs):
+        seen.update(kwargs)
+        return replace(_context(), plan_body=kwargs["plan_body"])
+
+    monkeypatch.setattr(github, "get_pr_review_context", _capture)
+    runner = CliRunner()
+    with runner.isolated_filesystem() as d:
+        _git_init(d)
+        cache.write_plan_ref(Path(d), plan.PlanRefModel.model_validate(_REF).to_domain())
+        cache.plan_body_path(Path(d)).write_text("# Snapshot plan\n", encoding="utf-8")
+        result = runner.invoke(cli, ["pr", "review-context", "--expected-pr", "42", "--json"])
+    assert result.exit_code == 0
+    data = json.loads(result.output)
+    assert data["pr"] == 42
+    assert data["plan_body"] == "# Snapshot plan"
+    assert seen["plan_body"] == "# Snapshot plan"
+
+
+def test_context_expected_pr_mismatch_fails_before_context_fetch(monkeypatch):
+    monkeypatch.setattr(github, "find_pr_for_branch", lambda **k: _open_pr())
+
+    def _no_fetch(**_kwargs):
+        raise AssertionError("mismatch must fail before fetching review context")
+
+    monkeypatch.setattr(github, "get_pr_review_context", _no_fetch)
+    runner = CliRunner()
+    with runner.isolated_filesystem() as d:
+        _git_init(d)
+        cache.write_plan_ref(Path(d), plan.PlanRefModel.model_validate(_REF).to_domain())
+        result = runner.invoke(cli, ["pr", "review-context", "--expected-pr", "99", "--json"])
+    assert result.exit_code == 1
+    data = json.loads(result.output)
+    assert data["error_type"] == "review_target_changed"
+    assert "expected PR #99" in data["message"]
+    assert "PR #42" in data["message"]
+
+
+def test_context_expected_pr_rejects_non_positive_and_mutual_exclusion(monkeypatch):
+    def _no_resolution(**_kwargs):
+        raise AssertionError("invalid input must fail before PR resolution")
+
+    monkeypatch.setattr(github, "find_pr_for_branch", _no_resolution)
+    monkeypatch.setattr(github, "get_pr", _no_resolution)
+    runner = CliRunner()
+    for args in (
+        ["--expected-pr", "0"],
+        ["--expected-pr", "-1"],
+        ["--pr", "42", "--expected-pr", "42"],
+    ):
+        with runner.isolated_filesystem() as d:
+            _git_init(d)
+            result = runner.invoke(cli, ["pr", "review-context", *args, "--json"])
+        assert result.exit_code == 1
+        assert json.loads(result.output)["error_type"] == "invalid_input"
 
 
 def test_resolve_plan_body_prefers_cache_mirror(monkeypatch, tmp_path):

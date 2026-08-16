@@ -30,7 +30,13 @@
 
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { bindingSuffix } from "../substrate/bindingDelivery.ts";
-import { type ColdJson, numberField, runColdDoor, stringField } from "../substrate/coldDoor.ts";
+import {
+  type ColdDoorResult,
+  type ColdJson,
+  numberField,
+  runColdDoor,
+  stringField,
+} from "../substrate/coldDoor.ts";
 import { registerPerkCommand } from "../substrate/command.ts";
 import { subagentModel } from "../substrate/config.ts";
 import { render } from "../substrate/prompts.ts";
@@ -48,6 +54,21 @@ import { report } from "../surfaces/report.ts";
 import { preflightPonytailSkill } from "../waves/ponytail.ts";
 import { isPrReviewAngle, type PrReviewAngle, runPrReviewWave } from "../waves/prReviewWave.ts";
 import { createRpcWaveAdapter } from "../waves/rpcAdapter.ts";
+import { decodePrUrl } from "./plannotatorHandoff.ts";
+
+/** Resolve and pin the active plan's PR before an automated review wave spawns. */
+export async function resolveActivePr(
+  pi: ExtensionAPI,
+  ctx: ExtensionContext,
+): Promise<ColdDoorResult<{ number: number; url: string }>> {
+  return await runColdDoor(pi, ctx, ["pr", "url", "--json"], {
+    label: "perk pr url",
+    decode: (payload) => {
+      const target = decodePrUrl(payload);
+      return target !== null && Number.isInteger(target.number) && target.number > 0 ? target : null;
+    },
+  });
+}
 
 /** One reconciled inline finding (the exact `review-post --batch` `comments[]` row). */
 interface ReviewComment {
@@ -362,10 +383,19 @@ export function registerPrReview(pi: ExtensionAPI): void {
           "bad_input",
         );
       }
+      const target = await resolveActivePr(pi, ctx);
+      if (!target.ok) {
+        return failFor(
+          ctx,
+          "pr-review",
+          "run_pr_review_wave",
+        )(target.message, target.errorType);
+      }
       const model = subagentModel(ctx.cwd, "pr-reviewer");
       const adapter = createRpcWaveAdapter(pi.events);
       // Cancellation normalizes into the outcome (`cancelled`, no retry) — never a throw.
       const outcome = await runPrReviewWave(adapter, {
+        pr: target.data.number,
         angles: decoded.angles,
         ...(decoded.directive !== undefined ? { directive: decoded.directive } : {}),
         ...(model !== undefined ? { model } : {}),
@@ -397,6 +427,7 @@ export function registerPrReview(pi: ExtensionAPI): void {
         (outcome.retried.length > 0 ? `; retried: ${outcome.retried.join(", ")}` : "") +
         ".";
       const aggregate = {
+        pr: target.data.number,
         complete: outcome.complete,
         covered: outcome.covered,
         retried: outcome.retried,

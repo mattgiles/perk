@@ -51,7 +51,8 @@ export const PR_REVIEW_ANGLES: Readonly<Record<PrReviewAngle, string>> = {
   correctness:
     "angle: correctness — review ONLY correctness & regressions (security, edge cases, error paths).",
   tests: "angle: tests — review ONLY tests & validation adequacy.",
-  quality: "angle: quality — review ONLY code quality, simplicity & docs/contracts accuracy.",
+  quality:
+    "angle: quality — review ONLY clarity, maintainability, naming & touched docs/contracts accuracy.",
   "api-design":
     "angle: api-design — review ONLY API & interface design elegance (deep vs shallow modules, surface area, misuse-resistance, abstraction coherence).",
   "code-organization":
@@ -130,6 +131,8 @@ type EffectivePrReviewAngle = PrReviewAngle | "ponytail";
 type RequiredSkillPreflight = NonNullable<WaveSpec["requiredSkillPreflight"]>;
 
 export interface PrReviewWaveOptions {
+  /** The resolved active-plan PR number shared by every lane in this pass. */
+  pr: number;
   /** The selected angles — invalid slugs are unrepresentable post-decode (typed union). */
   angles: PrReviewAngle[];
   /** The operator's free-form focus, appended to EVERY lane task as one uniform DATA suffix. */
@@ -180,13 +183,25 @@ export function directiveSuffix(directive?: string): string {
         `emphasis within your assigned angle only): ${directive}`;
 }
 
+/** Bind a reviewer task to the one parent-resolved active PR for this pass. */
+export function reviewTargetSuffix(pr: number): string {
+  return (
+    `\n\nReview target: PR #${pr}. Fetch context only with ` +
+    `\`perk pr review-context --expected-pr ${pr} --json\`.`
+  );
+}
+
 /**
  * Build the reviewer lanes for a selection: key = label = slug, the fixed agent/phase, the
  * vocabulary task. Exported so the dynamic-review sibling's lane-level retry builds
  * byte-identical reviewer lanes.
  */
-export function buildPrReviewLanes(angles: PrReviewAngle[], directive?: string): WaveLane[] {
-  const suffix = directiveSuffix(directive);
+export function buildPrReviewLanes(
+  angles: PrReviewAngle[],
+  pr: number,
+  directive?: string,
+): WaveLane[] {
+  const suffix = reviewTargetSuffix(pr) + directiveSuffix(directive);
   return angles.map((angle) => ({
     key: angle,
     label: angle,
@@ -196,14 +211,15 @@ export function buildPrReviewLanes(angles: PrReviewAngle[], directive?: string):
   }));
 }
 
-export function buildPonytailReviewLane(directive?: string): WaveLane {
+export function buildPonytailReviewLane(pr: number, directive?: string): WaveLane {
   return {
     key: "ponytail",
     label: "ponytail",
     agent: "perk.pr-reviewer",
     phase: "review",
     task:
-      "angle: ponytail — review ONLY over-engineering, deletion opportunities & YAGNI." +
+      "angle: ponytail — exclusively review standalone YAGNI, deletion, dead flexibility, dependencies/configuration to remove, and materially smaller/native replacements." +
+      reviewTargetSuffix(pr) +
       directiveSuffix(directive),
     skill: "ponytail-review",
     requiredSkill: PONYTAIL_REVIEW_SKILL,
@@ -212,12 +228,13 @@ export function buildPonytailReviewLane(directive?: string): WaveLane {
 
 function buildEffectivePrReviewLanes(
   angles: EffectivePrReviewAngle[],
+  pr: number,
   directive?: string,
 ): WaveLane[] {
-  const suffix = directiveSuffix(directive);
+  const suffix = reviewTargetSuffix(pr) + directiveSuffix(directive);
   return angles.map((angle) =>
     angle === "ponytail"
-      ? buildPonytailReviewLane(directive)
+      ? buildPonytailReviewLane(pr, directive)
       : {
           key: angle,
           label: angle,
@@ -321,7 +338,11 @@ export async function runPrReviewWave(
   };
   const first: WaveResult = await runReportWave(
     adapter,
-    buildSpec(buildEffectivePrReviewLanes(angles, opts.directive), opts, requiredSkillPreflight),
+    buildSpec(
+      buildEffectivePrReviewLanes(angles, opts.pr, opts.directive),
+      opts,
+      requiredSkillPreflight,
+    ),
     opts.signal,
   );
   // The first attempt's receipt is preserved VERBATIM even when a retry runs — ordered
@@ -338,7 +359,11 @@ export async function runPrReviewWave(
 
   const second = await runReportWave(
     adapter,
-    buildSpec(buildEffectivePrReviewLanes(retried, opts.directive), opts, requiredSkillPreflight),
+    buildSpec(
+      buildEffectivePrReviewLanes(retried, opts.pr, opts.directive),
+      opts,
+      requiredSkillPreflight,
+    ),
     opts.signal,
   );
   attempts.push(toAttemptReceipt("pr-review", 2, retried, second.receipt));

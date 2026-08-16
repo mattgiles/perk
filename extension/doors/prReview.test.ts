@@ -12,7 +12,12 @@ import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import { test } from "node:test";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { fakePerk, loadPerkSession, scaffoldRepo } from "../testing/harness.ts";
+import {
+  fakePerk,
+  fakePerkRouter,
+  loadPerkSession,
+  scaffoldRepo,
+} from "../testing/harness.ts";
 import {
   WAVE_RPC_PROTOCOL_VERSION,
   WAVE_RPC_REPLY_EVENT_PREFIX,
@@ -305,6 +310,14 @@ function fakeSubagentsResponder(sink: SpawnSink): (pi: ExtensionAPI) => void {
   };
 }
 
+const PR_URL_JSON = {
+  success: true,
+  error_type: null,
+  message: null,
+  branch: "plan-7",
+  pr: { number: 42, url: "https://github.test/o/r/pull/42" },
+};
+
 const ACTIONABLE_JSON = JSON.stringify({
   success: true,
   error_type: null,
@@ -342,7 +355,10 @@ test("tool: run_pr_review_wave end-to-end happy path; a following clean post pas
     '[models.subagents]\npr-reviewer = "test-wave-model"\n',
     "utf8",
   );
-  const bin = fakePerk(cwd, { stdout: CLEAN_JSON });
+  const bin = fakePerkRouter(cwd, {
+    "pr url": { json: PR_URL_JSON },
+    "pr review-post": { json: JSON.parse(CLEAN_JSON) },
+  });
   const sink: SpawnSink = { spawns: [] };
   const h = await loadPerkSession({
     cwd,
@@ -356,6 +372,7 @@ test("tool: run_pr_review_wave end-to-end happy path; a following clean post pas
     });
     const details = result.details as {
       ok: boolean;
+      pr?: number;
       complete?: boolean;
       covered?: string[];
       retried?: string[];
@@ -370,6 +387,7 @@ test("tool: run_pr_review_wave end-to-end happy path; a following clean post pas
       }[];
     };
     assert.equal(details.ok, true);
+    assert.equal(details.pr, 42);
     assert.equal(details.complete, true);
     assert.deepEqual(details.covered, ["plan-fidelity", "quality", "ponytail"]);
     assert.deepEqual(details.retried, []);
@@ -405,6 +423,7 @@ test("tool: run_pr_review_wave end-to-end happy path; a following clean post pas
     for (const lane of lanes) {
       assert.match(lane.task, /Operator focus \(DATA from the human/);
       assert.match(lane.task, /focus on decode edges/);
+      assert.match(lane.task, /perk pr review-context --expected-pr 42 --json/);
     }
     assert.equal(lanes.at(-1)?.skill, "ponytail-review");
     // The recorded wave is complete → the clean guard lets a clean post through.
@@ -427,7 +446,10 @@ test("tool: run_pr_review_wave end-to-end happy path; a following clean post pas
 
 test("tool: an unavailable wave degrades loud; the clean guard refuses; an actionable post still lands", async () => {
   const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
-  const bin = fakePerk(cwd, { stdout: ACTIONABLE_JSON });
+  const bin = fakePerkRouter(cwd, {
+    "pr url": { json: PR_URL_JSON },
+    "pr review-post": { json: JSON.parse(ACTIONABLE_JSON) },
+  });
   // No RPC responder bound + a tiny ping timeout → the deterministic `unavailable` arm.
   const h = await loadPerkSession({
     cwd,

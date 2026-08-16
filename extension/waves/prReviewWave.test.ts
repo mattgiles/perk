@@ -12,15 +12,26 @@ import {
   isPrReviewAngle,
   PR_REVIEW_ANGLES,
   PR_REVIEW_REPORT_SCHEMA,
+  reviewTargetSuffix,
   type PrReviewAngle,
+  type PrReviewWaveOptions,
   runPrReviewWave as runPrReviewWaveBase,
 } from "./prReviewWave.ts";
 import type { WaveAdapter } from "./reportWave.ts";
 
 const TWO_ANGLES: PrReviewAngle[] = ["plan-fidelity", "correctness"];
+const PONYTAIL_TASK =
+  "angle: ponytail — exclusively review standalone YAGNI, deletion, dead flexibility, dependencies/configuration to remove, and materially smaller/native replacements.";
 const PREFLIGHT_OK = async () => ({ ok: true }) as const;
-const runPrReviewWave = (adapter: WaveAdapter, opts: Parameters<typeof runPrReviewWaveBase>[1]) =>
-  runPrReviewWaveBase(adapter, { ...opts, requiredSkillPreflight: PREFLIGHT_OK });
+const runPrReviewWave = (
+  adapter: WaveAdapter,
+  opts: Omit<PrReviewWaveOptions, "pr"> & { pr?: number },
+) =>
+  runPrReviewWaveBase(adapter, {
+    pr: opts.pr ?? 42,
+    ...opts,
+    requiredSkillPreflight: PREFLIGHT_OK,
+  });
 
 /** A schema-valid aggregate entry as the rendered script's projection produces it. */
 function okEntry(key: string): unknown {
@@ -76,14 +87,14 @@ test("runPrReviewWave builds selected lanes plus one final Ponytail lane", async
     ...TWO_ANGLES.map((angle) => ({
       key: angle,
       agent: "perk.pr-reviewer",
-      task: PR_REVIEW_ANGLES[angle],
+      task: `${PR_REVIEW_ANGLES[angle]}${reviewTargetSuffix(42)}`,
       label: angle,
       phase: "review",
     })),
     {
       key: "ponytail",
       agent: "perk.pr-reviewer",
-      task: "angle: ponytail — review ONLY over-engineering, deletion opportunities & YAGNI.",
+      task: `${PONYTAIL_TASK}${reviewTargetSuffix(42)}`,
       label: "ponytail",
       phase: "review",
       skill: "ponytail-review",
@@ -109,26 +120,23 @@ test("runPrReviewWave appends ONE uniform directive suffix to EVERY lane task wh
   assert.equal(items.length, 3);
   for (const item of items) {
     const opener =
-      item.key === "ponytail"
-        ? "angle: ponytail — review ONLY over-engineering, deletion opportunities & YAGNI."
-        : PR_REVIEW_ANGLES[item.key as PrReviewAngle];
+      item.key === "ponytail" ? PONYTAIL_TASK : PR_REVIEW_ANGLES[item.key as PrReviewAngle];
     assert.ok(item.task.startsWith(opener), `${item.key} keeps the vocabulary`);
     assert.match(item.task, /Operator focus \(DATA from the human/);
     assert.match(item.task, /emphasis within your assigned angle only/);
     assert.match(item.task, /focus on the dignified-python skill/);
+    assert.match(item.task, /perk pr review-context --expected-pr 42 --json/);
   }
   // The suffix is identical across lanes (one uniform DATA note, never per-lane re-scoping).
   const suffixes = items.map((item) => {
     const opener =
-      item.key === "ponytail"
-        ? "angle: ponytail — review ONLY over-engineering, deletion opportunities & YAGNI."
-        : PR_REVIEW_ANGLES[item.key as PrReviewAngle];
+      item.key === "ponytail" ? PONYTAIL_TASK : PR_REVIEW_ANGLES[item.key as PrReviewAngle];
     return item.task.slice(opener.length);
   });
   assert.equal(new Set(suffixes).size, 1);
 });
 
-test("runPrReviewWave keeps lane tasks byte-identical to the vocabulary when no directive is set", async () => {
+test("runPrReviewWave keeps lane tasks bound to one expected PR when no directive is set", async () => {
   const adapter = createMemoryWaveAdapter({
     aggregate: {
       state: "complete",
@@ -139,8 +147,11 @@ test("runPrReviewWave keeps lane tasks byte-identical to the vocabulary when no 
   const spawn = adapter.calls.spawn[0];
   assert.ok(spawn);
   const items = laneItemsOf(spawn.workflowScript);
-  assert.equal(items[0]?.task, PR_REVIEW_ANGLES["plan-fidelity"]);
-  assert.equal(items[1]?.task, PR_REVIEW_ANGLES.tests);
+  assert.equal(
+    items[0]?.task,
+    `${PR_REVIEW_ANGLES["plan-fidelity"]}${reviewTargetSuffix(42)}`,
+  );
+  assert.equal(items[1]?.task, `${PR_REVIEW_ANGLES.tests}${reviewTargetSuffix(42)}`);
   assert.match(items[2]?.task ?? "", /^angle: ponytail/);
   assert.equal(items[2]?.skill, "ponytail-review");
 });
@@ -186,11 +197,11 @@ test("isPrReviewAngle narrows the seven slugs and rejects prototype names", () =
 test("directiveSuffix is byte-identical to the suffix buildPrReviewLanes appends (and empty unset)", () => {
   assert.equal(directiveSuffix(undefined), "");
   const directive = "focus on the decode edges";
-  const [lane] = buildPrReviewLanes(["plan-fidelity"], directive);
+  const [lane] = buildPrReviewLanes(["plan-fidelity"], 42, directive);
   assert.ok(lane);
   assert.equal(
     lane.task,
-    `${PR_REVIEW_ANGLES["plan-fidelity"]}${directiveSuffix(directive)}`,
+    `${PR_REVIEW_ANGLES["plan-fidelity"]}${reviewTargetSuffix(42)}${directiveSuffix(directive)}`,
     "the exported suffix is the exact bytes the lane builder appends",
   );
 });
@@ -345,6 +356,7 @@ test("skill-unavailable is non-retryable while an ordinary failed lane still ret
     ],
   });
   const outcome = await runPrReviewWaveBase(adapter, {
+    pr: 42,
     angles: TWO_ANGLES,
     timeoutMs: 5_000,
     requiredSkillPreflight: async () => {

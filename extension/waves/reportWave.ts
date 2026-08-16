@@ -123,6 +123,16 @@ export interface WaveResult {
   receipt: WaveScriptReceipt;
 }
 
+/** The truthful preflight partition reported by every streaming report-wave start. */
+export type WaveLaunchManifest = {
+  /** The complete logical lane manifest, in `spec.lanes` order. */
+  requested: string[];
+  /** The ordered subset rendered into the static workflow after required-skill preflight. */
+  runnable: string[];
+  /** One ordered keyed `skill-unavailable` failure per preflight-omitted lane. */
+  preflightFailures: WaveFailure[];
+};
+
 // -------------------------------------------------------------------- the attempt receipts
 
 /**
@@ -685,8 +695,13 @@ function enrichReceipt(receipt: WaveScriptReceipt, lanes: WaveLane[]): WaveScrip
  * to await, nothing left running.
  */
 export type ReportWaveStart =
-  | { ok: true; handle: WaveRunHandle; result: Promise<WaveResult> }
-  | { ok: false; result: WaveResult };
+  | {
+      ok: true;
+      handle: WaveRunHandle;
+      result: Promise<WaveResult>;
+      launch: WaveLaunchManifest;
+    }
+  | { ok: false; result: WaveResult; launch: WaveLaunchManifest };
 
 /**
  * Settle one script outcome into the lane-level `WaveResult`: receipt enrichment, the
@@ -753,6 +768,12 @@ export async function startReportWave(
     }
   }
 
+  const launch: WaveLaunchManifest = {
+    requested: spec.lanes.map((lane) => lane.key),
+    runnable: runnable.map((lane) => lane.key),
+    preflightFailures: [...skillFailures],
+  };
+
   const settleWithSkillFailures = (result: WaveResult): WaveResult => {
     if (skillFailures.length === 0) return result;
     const failures = [...result.failures, ...skillFailures];
@@ -768,6 +789,7 @@ export async function startReportWave(
     return {
       ok: false,
       result: settleWithSkillFailures({ complete: false, reports: [], failures: [], receipt }),
+      launch,
     };
   }
 
@@ -795,6 +817,7 @@ export async function startReportWave(
           runnableSpec,
         ),
       ),
+      launch,
     };
   }
   return {
@@ -803,6 +826,7 @@ export async function startReportWave(
     result: start.result.then((run) =>
       settleWithSkillFailures(settleReportWave(run, runnableSpec)),
     ),
+    launch,
   };
 }
 

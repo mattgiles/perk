@@ -1,8 +1,9 @@
 """`perk pr review-context` — the read-only PR-review context fetch.
 
 Flagless, resolves the active plan's PR (from the local `cache.plan-ref`, exactly as `pr feedback`
-does); with `--pr <n>`, resolves an arbitrary PR by number, plan-ref-free (the review doors'
-foreign-PR mode — no plan exists, so `plan_body` is null). Either way it gathers everything a
+does); `--expected-pr <n>` keeps that active-plan path but fails if the branch-selected PR changed;
+with `--pr <n>`, resolves an arbitrary PR by number, plan-ref-free (the review doors' foreign-PR
+mode — no plan exists, so `plan_body` is null). Either way it gathers everything a
 fresh-context reviewer child needs (the diff, the PR title/body, and the plan body when one
 exists) and emits `--json`. Read-only — no GitHub mutation; the verbose payload is consumed by
 the spawned reviewer child so it never transits the parent session.
@@ -43,19 +44,31 @@ class PrReviewContextResult:
     default=None,
     help="Resolve an arbitrary PR by number (plan-ref-free; plan_body is null).",
 )
+@click.option(
+    "--expected-pr",
+    type=int,
+    default=None,
+    help="Require the active plan branch to still select this positive PR number.",
+)
 @click.option("--json", "as_json", is_flag=True, help="Emit a machine-readable report to stdout.")
 @click.pass_context
-def review_context_pr(ctx: click.Context, *, pr_number: int | None, as_json: bool) -> None:
+def review_context_pr(
+    ctx: click.Context,
+    *,
+    pr_number: int | None,
+    expected_pr: int | None,
+    as_json: bool,
+) -> None:
     """Fetch a PR's review context (read-only; a fresh-context reviewer child runs this).
 
     \b
-    Flagless: the active plan's PR — run from inside the plan's worktree
-    (it reads the local cache.plan-ref). With --pr N: an arbitrary PR by
-    number, plan-ref-free (plan_body is null).
+    Flagless (or --expected-pr N): the active plan's PR — run from inside
+    the plan's worktree (it reads the local cache.plan-ref). With --pr N:
+    an arbitrary PR by number, plan-ref-free (plan_body is null).
     """
     try:
         repo_root = require_repo(ctx)
-        result = _impl(repo_root=repo_root, pr_number=pr_number)
+        result = _impl(repo_root=repo_root, pr_number=pr_number, expected_pr=expected_pr)
     except GitHubError as exc:
         fail(
             ctx,
@@ -76,7 +89,17 @@ def review_context_pr(ctx: click.Context, *, pr_number: int | None, as_json: boo
     emit(as_json=as_json, payload=_result_to_dict(result), render=lambda: _render_human(result))
 
 
-def _impl(*, repo_root: Path, pr_number: int | None) -> PrReviewContextResult:
+def _impl(
+    *, repo_root: Path, pr_number: int | None, expected_pr: int | None
+) -> PrReviewContextResult:
+    if pr_number is not None and expected_pr is not None:
+        raise UserFacingCliError(
+            "--pr and --expected-pr are mutually exclusive", error_type="invalid_input"
+        )
+    if expected_pr is not None and expected_pr <= 0:
+        raise UserFacingCliError(
+            "--expected-pr must be a positive integer", error_type="invalid_input"
+        )
     if pr_number is not None:
         return _foreign_pr_context(repo_root=repo_root, pr_number=pr_number)
     plan_ref = cache.read_plan_ref(repo_root)
@@ -90,6 +113,12 @@ def _impl(*, repo_root: Path, pr_number: int | None) -> PrReviewContextResult:
     if pr is None:
         raise UserFacingCliError(
             f"No PR found for branch {branch!r}\nRun /submit first.", error_type="no_pr"
+        )
+    if expected_pr is not None and pr.number != expected_pr:
+        raise UserFacingCliError(
+            f"Review target changed: expected PR #{expected_pr}, but branch {branch!r} now selects "
+            f"PR #{pr.number}\nRerun the review wave against the current PR.",
+            error_type="review_target_changed",
         )
     context = github.get_pr_review_context(
         pr_number=pr.number,

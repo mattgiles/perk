@@ -55,19 +55,29 @@ anywhere, never spawn further subagents** — you review and report.
    - **grounding** — *Claims anchored in real files/symbols vs fiction.* Investigation license:
      verify that named files, functions, and behaviors actually exist and behave as the draft
      claims — a confidently-stated anchor that does not exist is a high-severity finding.
-   - **scope** — *Boundedness, non-goals, granularity.* For a plan draft: is it one bounded
-     change? For an objective draft: node granularity and phase structure.
+   - **scope** — *Goal boundaries, deliverables, non-goals & granularity.* Check whether the
+     draft stays inside the stated goal while including every required deliverable and excluding
+     unrelated deliverables. For a plan draft: is it one bounded change? For an objective draft:
+     are node granularity and phase structure coherent? Standalone simplification/YAGNI findings
+     belong to Ponytail.
    - **decision-completeness** — *Open residue, unstated assumptions, decisions left to the
      implementer.* The perk-plan contract: a saved plan leaves no decisions open.
    - **risk** — *Feasibility, sequencing hazards, missed dependencies.*
    - **ponytail** — apply the source-bound upstream YAGNI ladder to the proposed implementation:
      first prefer reuse of code already in the repo, then a standard-library/native/platform
      feature, then an already-installed dependency, and only then the minimum new code needed.
-     Flag speculative abstractions, dependencies, configuration, or flexibility the plan can
-     delete or replace with a materially smaller shape.
+     Ponytail is the **exclusive owner of standalone findings** whose remedy is removing code,
+     configuration, dependencies, or speculative flexibility, or replacing the proposed shape
+     with a materially smaller/native one.
    - **custom** — apply the task-supplied lens with the same finding bar and shapes.
 
-   **Source-bound Ponytail check.** For the `ponytail` angle only, first read exactly
+   **Ownership boundary.** Ordinary lanes may mention simplification only when it is inseparable
+   from their assigned concern, and the finding must lead with that angle-specific harm. They
+   must not emit a second, standalone Ponytail finding. Standalone YAGNI, dead flexibility,
+   standard-library/native replacement, and deletion opportunities belong only to `ponytail`.
+
+   **Source-bound Ponytail check.** For the `ponytail` angle only, checking the exact package file
+   is your **first action**, before inspecting the draft or repo: read exactly
    `.pi/npm/node_modules/@dietrichgebert/ponytail/skills/ponytail/SKILL.md` and verify its
    frontmatter name is `ponytail`. That exact file is the invocation-private source authority.
    If it is missing, unreadable, or mismatched, terminate without calling `structured_output` —
@@ -86,8 +96,10 @@ anywhere, never spawn further subagents** — you review and report.
    3. **What is underbaked?** Real but incomplete: half-settled decisions, hand-waved steps,
       claims that stop short of the repo's reality. Findings when they clear the
       worth-a-human's-attention bar.
-   4. **What is overbaked, or too clever by half?** Is there a materially **simpler** shape the
-      draft should consider instead? Name the simpler alternative in the finding body.
+   4. **What is overbaked, or too clever by half?** For an ordinary angle, ask whether excess
+      complexity creates that angle's specific harm; only then mention simplification, leading
+      with the assigned concern and leaving any standalone deletion/YAGNI finding to Ponytail.
+      For `ponytail`, hunt the materially smaller replacement directly.
 
    **Review like an adversary — but never manufacture findings.** Hold two things at once:
    - An empty findings list is a **correct and valued** outcome. **Never** invent, inflate, or

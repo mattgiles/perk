@@ -177,9 +177,17 @@ test("executeStartDraftReviewWave: happy path stores the pending wave; the wave 
   });
   const result = await executeStartDraftReviewWave(adapter, target, { angles: TWO_ANGLES });
   assert.equal(result.details.ok, true);
-  const details = result.details as { asyncId?: string; asyncDir?: string; lanes?: string[] };
+  const details = result.details as {
+    asyncId?: string;
+    asyncDir?: string;
+    launch?: { requested: string[]; runnable: string[]; preflightFailures: unknown[] };
+  };
   assert.equal(details.asyncId, "wave-async-1");
-  assert.deepEqual(details.lanes, ["grounding", "risk", "ponytail"]);
+  assert.deepEqual(details.launch, {
+    requested: ["grounding", "risk", "ponytail"],
+    runnable: ["grounding", "risk", "ponytail"],
+    preflightFailures: [],
+  });
   const text = result.content[0]?.text ?? "";
   assert.match(text, /grounding, risk/);
   assert.match(text, /subagent_wait/);
@@ -213,12 +221,18 @@ test("executeStartDraftReviewWave: a primed custom lane rides the launch and the
   });
   const result = await executeStartDraftReviewWave(adapter, target, { angles: TWO_ANGLES });
   assert.equal(result.details.ok, true);
-  assert.deepEqual((result.details as { lanes?: string[] }).lanes, [
-    "grounding",
-    "risk",
-    "custom",
-    "ponytail",
-  ]);
+  assert.deepEqual(
+    (
+      result.details as {
+        launch?: { requested: string[]; runnable: string[]; preflightFailures: unknown[] };
+      }
+    ).launch,
+    {
+      requested: ["grounding", "risk", "custom", "ponytail"],
+      runnable: ["grounding", "risk", "custom", "ponytail"],
+      preflightFailures: [],
+    },
+  );
   assert.match(
     result.content[0]?.text ?? "",
     /grounding, risk, custom, ponytail/,
@@ -451,7 +465,11 @@ test("registerDraftReviewWaveTools registers exactly the two tools and resets st
     /subagent_wait\(\{timeoutMs: 30000\}\)/,
   );
   assert.match((startDef.promptGuidelines ?? []).join("\n"), /untrusted DATA/);
-  assert.match((startDef.promptGuidelines ?? []).join("\n"), /Ponytail lane run automatically/);
+  assert.match(
+    (startDef.promptGuidelines ?? []).join("\n"),
+    /required automatic final source-bound Ponytail lane/,
+  );
+  assert.match((startDef.promptGuidelines ?? []).join("\n"), /launch\.requested/);
   assert.match((collectDef.promptGuidelines ?? []).join("\n"), /untrusted DATA/);
   assert.match((collectDef.promptGuidelines ?? []).join("\n"), /honestly/);
 });
@@ -621,10 +639,18 @@ test("tools: start_draft_review_wave threads the configured model over the prime
     const started = await h.invokeTool("start_draft_review_wave", {
       angles: ["grounding", "scope"],
     });
-    const startDetails = started.details as { ok: boolean; asyncId?: string; lanes?: string[] };
+    const startDetails = started.details as {
+      ok: boolean;
+      asyncId?: string;
+      launch?: { requested: string[]; runnable: string[]; preflightFailures: unknown[] };
+    };
     assert.equal(startDetails.ok, true);
     assert.ok(startDetails.asyncId);
-    assert.deepEqual(startDetails.lanes, ["grounding", "scope", "custom", "ponytail"]);
+    assert.deepEqual(startDetails.launch, {
+      requested: ["grounding", "scope", "custom", "ponytail"],
+      runnable: ["grounding", "scope", "custom", "ponytail"],
+      preflightFailures: [],
+    });
     // The tool-boundary threading pins: the configured model and the primed draft/custom both
     // reached the actual spawn (config → execute → startDraftReviewWave → adapter).
     assert.equal(sink.spawns.length, 1);
@@ -677,9 +703,25 @@ test("tools: missing exact Ponytail core skill omits only that child and collect
     const started = await h.invokeTool("start_draft_review_wave", {
       angles: ["grounding", "scope"],
     });
-    const startDetails = started.details as { ok: boolean; lanes?: string[] };
+    const startDetails = started.details as {
+      ok: boolean;
+      launch?: {
+        requested: string[];
+        runnable: string[];
+        preflightFailures: { key: string | null; reason: string }[];
+      };
+    };
     assert.equal(startDetails.ok, true, "ordinary reviewers still launch");
-    assert.deepEqual(startDetails.lanes, ["grounding", "scope", "ponytail"]);
+    assert.deepEqual(startDetails.launch?.requested, ["grounding", "scope", "ponytail"]);
+    assert.deepEqual(startDetails.launch?.runnable, ["grounding", "scope"]);
+    assert.deepEqual(
+      startDetails.launch?.preflightFailures.map((failure) => [failure.key, failure.reason]),
+      [["ponytail", "skill-unavailable"]],
+    );
+    const startText = started.content[0]?.text ?? "";
+    assert.match(startText, /workflow accepted with 2\/3 post-preflight runnable lane/);
+    assert.match(startText, /Preflight skipped: ponytail: skill-unavailable/);
+    assert.doesNotMatch(startText, /ponytail.*launched/i);
     assert.equal(sink.spawns.length, 1);
     const script = sink.spawns[0]?.workflowScript ?? "";
     assert.doesNotMatch(script, /"key":\s*"ponytail"/, "Ponytail never reaches runs.all");

@@ -36,7 +36,7 @@ import {
   runPrReviewDynamicWave,
 } from "../waves/prReviewDynamicWave.ts";
 import { createRpcWaveAdapter } from "../waves/rpcAdapter.ts";
-import { recordReviewWaveOutcome } from "./prReview.ts";
+import { recordReviewWaveOutcome, resolveActivePr } from "./prReview.ts";
 
 const DYNAMIC_WAVE_TOOL_GUIDELINES = [
   "Call run_pr_review_dynamic_wave ONCE per review pass — angle selection is DELEGATED to a fresh perk.review-angle-selector lane run concurrently with the mandatory plan-fidelity lane and one independent source-bound Ponytail lane; the tool renders and launches the whole dynamic wave itself (module-rendered normalization + fan-out) and applies the one bounded retry. Ponytail is automatic/outside the cap: never force, propose, or duplicate it; never orchestrate retries or author workflow scripts.",
@@ -169,12 +169,21 @@ export function registerPrReviewDynamic(pi: ExtensionAPI): void {
           "bad_input",
         );
       }
+      const target = await resolveActivePr(pi, ctx);
+      if (!target.ok) {
+        return failFor(
+          ctx,
+          "pr-review-dynamic",
+          "run_pr_review_dynamic_wave",
+        )(target.message, target.errorType);
+      }
       const subagents = loadPerkConfig(ctx.cwd).subagents;
       const reviewerModel = subagents["pr-reviewer"];
       const selectorModel = subagents["review-angle-selector"];
       const adapter = createRpcWaveAdapter(pi.events);
       // Cancellation normalizes into the outcome (`cancelled`, no retry) — never a throw.
       const outcome = await runPrReviewDynamicWave(adapter, {
+        pr: target.data.number,
         ...(decoded.directive !== undefined ? { directive: decoded.directive } : {}),
         ...(decoded.forceAngles !== undefined ? { forceAngles: decoded.forceAngles } : {}),
         ...(reviewerModel !== undefined ? { reviewerModel } : {}),
@@ -219,6 +228,7 @@ export function registerPrReviewDynamic(pi: ExtensionAPI): void {
               outcome.selection.custom !== null ? `, custom=${outcome.selection.custom.slug}` : ""
             }.`;
       const aggregate = {
+        pr: target.data.number,
         complete: outcome.complete,
         covered: outcome.covered,
         retried: outcome.retried,

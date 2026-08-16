@@ -76,15 +76,23 @@ and report.
    - **tests** — *Tests & validation adequacy.* Is the **new behavior** actually covered,
      including its failure modes? Missing coverage for a real risk is a finding. Reason about
      tests only — never execute them (rule 3 stands).
-   - **quality** — *Code quality, simplicity & docs accuracy.* Needless complexity, unclear
-     naming, dead code; and whether docs the change touches stay accurate.
+   - **quality** — *Clarity, maintainability, naming & docs accuracy.* Review whether changed
+     code is understandable and maintainable, names communicate intent, and touched docs stay
+     accurate. Standalone simplification/deletion findings belong to Ponytail.
    - **ponytail** — *Over-engineering and deletion opportunities.* Apply the source-bound
-     `ponytail-review` lens: find reinvented standard-library/native capability, unnecessary
-     dependencies, speculative abstractions or configuration, dead flexibility, and logic that
-     can be materially shorter without losing required behavior. State what to cut and the
-     smaller replacement, using the same severity/confidence and human-attention bar.
+     `ponytail-review` lens. Ponytail is the **exclusive owner of standalone findings** whose
+     remedy is removing code, configuration, dependencies, or speculative flexibility, or
+     replacing an implementation with a materially smaller standard-library/native shape. State
+     what to cut and the smaller replacement, using the same severity/confidence and
+     human-attention bar.
 
-   **Source-bound Ponytail check.** For the `ponytail` angle only, first read exactly
+   **Ownership boundary.** Ordinary lanes may mention simplification only when it is inseparable
+   from their assigned concern, and the finding must lead with that angle-specific harm. They
+   must not emit a second, standalone Ponytail finding. Standalone YAGNI, dead flexibility,
+   standard-library/native replacement, and deletion opportunities belong only to `ponytail`.
+
+   **Source-bound Ponytail check.** For the `ponytail` angle only, checking the exact package file
+   is your **first action**, before fetching review context or inspecting anything else: read
    `.pi/npm/node_modules/@dietrichgebert/ponytail/skills/ponytail-review/SKILL.md` and verify its
    frontmatter name is `ponytail-review`. That exact file is the invocation-private source
    authority. If it is missing, unreadable, or mismatched, terminate without calling
@@ -103,9 +111,10 @@ and report.
    3. **What is underbaked?** Real but incomplete: half-handled edge cases, missing failure-mode
       coverage, docs or tests that stop short. Findings when they clear the
       worth-a-human's-attention bar.
-   4. **What is overbaked, or too clever by half?** Is there an elegant, **simpler** approach
-      that should be considered instead? Needless complexity or indirection where a materially
-      simpler design exists is a finding — name the simpler alternative in the finding body.
+   4. **What is overbaked, or too clever by half?** For an ordinary angle, ask whether excess
+      complexity creates that angle's specific harm; only then mention simplification, leading
+      with the assigned concern and leaving any standalone deletion/YAGNI finding to Ponytail.
+      For `ponytail`, hunt the materially smaller replacement directly.
 
    **Review like an adversary — but never manufacture findings.** Hold two things at once:
    - An empty findings list is a **correct and valued** outcome. **Never** invent, inflate, or
