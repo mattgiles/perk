@@ -4,6 +4,7 @@ import {
   parseUnitSource,
   READ_ONLY_PRESENTATION,
   READ_ONLY_REASONS,
+  sourceCurrentText,
   type UnitSource,
 } from "./src/source.ts";
 
@@ -36,6 +37,21 @@ test("parseUnitSource accepts editable, whole-unit, empty, and non-BMP segments"
   assert.deepEqual(parseUnitSource(WHOLE), WHOLE);
   const empty = { ...EDITABLE, before: "😀", focus: "", after: "tail" };
   assert.deepEqual(parseUnitSource(empty), empty);
+});
+
+test("sourceCurrentText reconstructs supplied Unicode and newline styles exactly", () => {
+  assert.equal(
+    sourceCurrentText({ ...EDITABLE, before: "α\r\n", focus: "😀\r\n", after: "omega" }),
+    "α\r\n😀\r\nomega",
+  );
+  assert.equal(
+    sourceCurrentText({ ...EDITABLE, before: "one\n", focus: "two\n", after: "three\n" }),
+    "one\ntwo\nthree\n",
+  );
+  assert.equal(
+    sourceCurrentText({ ...WHOLE, focus: "no terminal newline" }),
+    "no terminal newline",
+  );
 });
 
 const KEYS = [

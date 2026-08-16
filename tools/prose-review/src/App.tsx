@@ -1,32 +1,42 @@
 import { useEffect, useState } from "react";
 import { CenterPane } from "./CenterPane.tsx";
+import { comparisonRequest, type SelectedComparison } from "./comparison.ts";
+import { type ComparisonLoadState, createComparisonLoader } from "./comparisonLoad.ts";
 import { InspectorPane } from "./InspectorPane.tsx";
 import { SearchBar } from "./SearchBar.tsx";
-import type { SourceTarget } from "./selection.ts";
+import {
+  canonicalSourceSelection,
+  comparisonOriginKey,
+  type Selection,
+  type SourceTarget,
+} from "./selection.ts";
 import { TreePane } from "./TreePane.tsx";
 import { type CapabilityTree, parseTree } from "./tree.ts";
-import type { BoundaryKind } from "./wire.ts";
 
 export type Mode = "edit" | "compare" | "assembly";
-
-// A selection is a composite source target or a boundary layer (select-to-explain).
-// Boundary selections carry the display label so panes can echo the authored name.
-export type Selection =
-  | { type: "unit"; target: SourceTarget }
-  | { type: "boundary"; boundary: BoundaryKind; label: string };
 
 type TreeLoadState =
   | { status: "loading" }
   | { status: "failed" }
   | { status: "loaded"; tree: CapabilityTree };
 
-// The three-pane workbench shell. Two independent pieces of UI state:
-// `mode` (the persistent center-pane mode) and `selection` (the tree selection) —
-// navigation never touches `mode`, and mode switches never touch `selection`.
+function selectedOriginKey(selection: Selection | null): string | null {
+  return selection?.type === "unit" ? comparisonOriginKey(selection) : null;
+}
+
+// The three-pane workbench shell. Global mode/selection remain independent; the
+// comparison options and selected target exist only while Compare is active.
 export function App() {
   const [treeState, setTreeState] = useState<TreeLoadState>({ status: "loading" });
   const [mode, setMode] = useState<Mode>("edit");
   const [selection, setSelection] = useState<Selection | null>(null);
+  const [comparisonState, setComparisonState] = useState<ComparisonLoadState>({
+    status: "idle",
+  });
+  const [selectedComparison, setSelectedComparison] = useState<SelectedComparison | null>(null);
+  const [comparisonLoader] = useState(() => createComparisonLoader(setComparisonState));
+  const originKey = selectedOriginKey(selection);
+  const request = selection?.type === "unit" ? comparisonRequest(selection) : null;
 
   useEffect(() => {
     let cancelled = false;
@@ -44,8 +54,6 @@ export function App() {
           setTreeState({ status: "loaded", tree });
         }
       } catch {
-        // One fixed failure message for every arm: non-ok, network, JSON parse,
-        // and a parseTree rejection.
         if (!cancelled) {
           setTreeState({ status: "failed" });
         }
@@ -57,9 +65,38 @@ export function App() {
     };
   }, []);
 
-  // Search and concern-member navigation only ever change `selection` — never
-  // `mode` (the shell invariant).
-  const selectSource = (target: SourceTarget): void => setSelection({ type: "unit", target });
+  // Fragment-only navigation preserves this effect because originKey is the exact
+  // unit/shape/position transport identity returned by comparisonRequest.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: request and originKey are equivalent.
+  useEffect(() => {
+    if (mode !== "compare" || request === null) {
+      return;
+    }
+    setSelectedComparison(null);
+    comparisonLoader.select(request);
+  }, [comparisonLoader, mode, originKey]);
+
+  useEffect(() => () => comparisonLoader.dispose(), [comparisonLoader]);
+
+  const select = (next: Selection): void => {
+    if (mode === "compare" && selectedOriginKey(next) !== originKey) {
+      comparisonLoader.clear();
+      setSelectedComparison(null);
+    }
+    setSelection(next);
+  };
+
+  // Search and concern-member navigation create canonical selections and never
+  // change the persistent center-pane mode.
+  const selectSource = (target: SourceTarget): void => select(canonicalSourceSelection(target));
+
+  const changeMode = (next: Mode): void => {
+    if (mode === "compare" && next !== "compare") {
+      comparisonLoader.clear();
+      setSelectedComparison(null);
+    }
+    setMode(next);
+  };
 
   return (
     <div className="app">
@@ -71,14 +108,28 @@ export function App() {
         {treeState.status === "loading" && <p className="pane-hint">Loading catalog tree…</p>}
         {treeState.status === "failed" && <p className="pane-hint">Failed to load catalog tree.</p>}
         {treeState.status === "loaded" && (
-          <TreePane tree={treeState.tree} selection={selection} onSelect={setSelection} />
+          <TreePane tree={treeState.tree} selection={selection} onSelect={select} />
         )}
       </nav>
       <main className="pane center-pane">
-        <CenterPane mode={mode} onModeChange={setMode} selection={selection} />
+        <CenterPane
+          mode={mode}
+          onModeChange={changeMode}
+          selection={selection}
+          comparisonState={comparisonState}
+          selectedComparison={selectedComparison}
+        />
       </main>
       <aside className="pane inspector-pane" aria-label="Inspector">
-        <InspectorPane selection={selection} onSelect={selectSource} />
+        <InspectorPane
+          mode={mode}
+          selection={selection}
+          comparisonState={comparisonState}
+          selectedComparison={selectedComparison}
+          onComparisonSelect={setSelectedComparison}
+          onSelection={select}
+          onSelect={selectSource}
+        />
       </aside>
     </div>
   );

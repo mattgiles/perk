@@ -31,6 +31,13 @@ from perk_dev.prose_review.catalog import (
     LineageView,
     UnitAlias,
 )
+from perk_dev.prose_review.comparison import (
+    ComparisonChoice,
+    ComparisonGroup,
+    ComparisonOptions,
+    ComparisonPlacement,
+    ComparisonRelation,
+)
 from perk_dev.prose_review.search import MatchField, SearchEntryKind, SearchHit, SearchResults
 from perk_dev.prose_review.source_adapter import FocusedSource, ReadOnlyReason
 
@@ -399,6 +406,76 @@ class UnitInspectOut(OutputModel):
             lineage=tuple(
                 LineageOut.from_domain(view) for view in snapshot.lineage_for_unit(unit_id)
             ),
+        )
+
+
+class ComparisonPlacementOut(OutputModel):
+    """One whole-unit source identity plus its comparison relation context."""
+
+    unit: UnitRefOut
+    breadcrumb: tuple[CapabilityOut, ...]
+    shape: ShapeRefOut | None
+    assembly: str | None
+    position: int | None
+    label: str
+
+    @classmethod
+    def from_domain(cls, placement: ComparisonPlacement) -> Self:
+        return cls(
+            unit=UnitRefOut.from_domain(placement.unit),
+            breadcrumb=tuple(
+                CapabilityOut.from_domain(capability) for capability in placement.breadcrumb
+            ),
+            shape=(None if placement.shape is None else ShapeRefOut.from_domain(placement.shape)),
+            assembly=placement.assembly,
+            position=placement.position,
+            label=placement.label,
+        )
+
+
+class ComparisonChoiceOut(OutputModel):
+    """One server-labeled whole-unit comparison target."""
+
+    label: str
+    detail: str
+    target: ComparisonPlacementOut
+
+    @classmethod
+    def from_domain(cls, choice: ComparisonChoice) -> Self:
+        return cls(
+            label=choice.label,
+            detail=choice.detail,
+            target=ComparisonPlacementOut.from_domain(choice.target),
+        )
+
+
+class ComparisonGroupOut(OutputModel):
+    """One non-empty graph relation family in fixed response order."""
+
+    relation: ComparisonRelation
+    label: str
+    choices: tuple[ComparisonChoiceOut, ...]
+
+    @classmethod
+    def from_domain(cls, group: ComparisonGroup) -> Self:
+        return cls(
+            relation=group.relation,
+            label=group.label,
+            choices=tuple(ComparisonChoiceOut.from_domain(choice) for choice in group.choices),
+        )
+
+
+class ComparisonOptionsOut(OutputModel):
+    """The authoritative comparison origin and its ordered relation groups."""
+
+    origin: ComparisonPlacementOut
+    groups: tuple[ComparisonGroupOut, ...]
+
+    @classmethod
+    def from_domain(cls, options: ComparisonOptions) -> Self:
+        return cls(
+            origin=ComparisonPlacementOut.from_domain(options.origin),
+            groups=tuple(ComparisonGroupOut.from_domain(group) for group in options.groups),
         )
 
 

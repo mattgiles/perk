@@ -1,11 +1,14 @@
 import { useState } from "react";
-import type { Selection } from "./App.tsx";
 import { BOUNDARY_INFO } from "./boundaries.ts";
 import {
-  fragmentTarget,
-  type SourceTarget,
-  sameSourceTarget,
-  wholeUnitTarget,
+  canonicalFragmentSelection,
+  canonicalUnitSelection,
+  placedFragmentSelection,
+  placedShapeLayerSelection,
+  type Selection,
+  shapeSelection,
+  sourceSelectionKey,
+  type UnitSelection,
 } from "./selection.ts";
 import type {
   AssemblyLayer,
@@ -20,29 +23,38 @@ type SelectProps = {
   onSelect: (selection: Selection) => void;
 };
 
-function isActive(selection: Selection | null, target: SourceTarget): boolean {
+type Breadcrumb = Pick<CapabilityNode, "id" | "label">[];
+
+type Placement = {
+  shape: SessionShape;
+  position: number;
+};
+
+function isUnitActive(selection: Selection | null, candidate: UnitSelection): boolean {
   return (
-    selection !== null && selection.type === "unit" && sameSourceTarget(selection.target, target)
+    selection !== null &&
+    selection.type === "unit" &&
+    sourceSelectionKey(selection) === sourceSelectionKey(candidate)
   );
 }
 
 function SourceButton({
-  target,
+  candidate,
   display,
   fragment,
   selection,
   onSelect,
 }: {
-  target: SourceTarget;
+  candidate: UnitSelection;
   display: string;
   fragment: boolean;
 } & SelectProps) {
-  const active = isActive(selection, target);
+  const active = isUnitActive(selection, candidate);
   return (
     <button
       type="button"
       className={`${active ? "tree-entry selected" : "tree-entry"}${fragment ? " fragment" : ""}`}
-      onClick={() => onSelect({ type: "unit", target })}
+      onClick={() => onSelect(candidate)}
     >
       {display}
     </button>
@@ -52,10 +64,15 @@ function SourceButton({
 function UnitBranch({
   unit,
   display,
+  placement,
   selection,
   onSelect,
-}: { unit: TreeUnit; display: string } & SelectProps) {
+}: { unit: TreeUnit; display: string; placement: Placement | null } & SelectProps) {
   const [expanded, setExpanded] = useState(false);
+  const unitSelection =
+    placement === null
+      ? canonicalUnitSelection(unit)
+      : placedShapeLayerSelection(placement.shape, placement.position, unit);
   return (
     <div className="tree-unit-branch">
       <div className="tree-unit-row">
@@ -69,7 +86,7 @@ function UnitBranch({
           <span className="toggle-marker">{expanded ? "▾" : "▸"}</span>
         </button>
         <SourceButton
-          target={wholeUnitTarget(unit)}
+          candidate={unitSelection}
           display={display}
           fragment={false}
           selection={selection}
@@ -81,7 +98,11 @@ function UnitBranch({
           {unit.fragments.map((fragment) => (
             <li key={fragment.id}>
               <SourceButton
-                target={fragmentTarget(unit, fragment)}
+                candidate={
+                  placement === null
+                    ? canonicalFragmentSelection(unit, fragment)
+                    : placedFragmentSelection(placement.shape, placement.position, unit, fragment)
+                }
                 display={fragment.label}
                 fragment={true}
                 selection={selection}
@@ -117,7 +138,12 @@ function BoundaryButton({ layer, selection, onSelect }: { layer: AssemblyLayer }
   );
 }
 
-function LayerEntry({ layer, selection, onSelect }: { layer: AssemblyLayer } & SelectProps) {
+function LayerEntry({
+  layer,
+  shape,
+  selection,
+  onSelect,
+}: { layer: AssemblyLayer; shape: SessionShape } & SelectProps) {
   return (
     <li className="tree-layer">
       <span className="layer-position">{layer.position}</span>
@@ -125,6 +151,7 @@ function LayerEntry({ layer, selection, onSelect }: { layer: AssemblyLayer } & S
         <UnitBranch
           unit={layer.unit}
           display={layer.label ?? layer.unit.id}
+          placement={{ shape, position: layer.position }}
           selection={selection}
           onSelect={onSelect}
         />
@@ -135,25 +162,42 @@ function LayerEntry({ layer, selection, onSelect }: { layer: AssemblyLayer } & S
   );
 }
 
-function ShapeEntry({ shape, selection, onSelect }: { shape: SessionShape } & SelectProps) {
+function ShapeEntry({
+  shape,
+  breadcrumb,
+  selection,
+  onSelect,
+}: { shape: SessionShape; breadcrumb: Breadcrumb } & SelectProps) {
   const [expanded, setExpanded] = useState(false);
+  const active =
+    selection !== null && selection.type === "shape" && selection.shape.id === shape.id;
   return (
     <li>
-      <button
-        type="button"
-        className="tree-toggle"
-        aria-expanded={expanded}
-        onClick={() => setExpanded(!expanded)}
-      >
-        <span className="toggle-marker">{expanded ? "▾" : "▸"}</span> {shape.label}{" "}
-        <span className="delivery-badge">{shape.delivery}</span>
-      </button>
+      <div className="tree-shape-row">
+        <button
+          type="button"
+          className="tree-fragment-toggle"
+          aria-label={`${expanded ? "Collapse" : "Expand"} layers for ${shape.label}`}
+          aria-expanded={expanded}
+          onClick={() => setExpanded(!expanded)}
+        >
+          <span className="toggle-marker">{expanded ? "▾" : "▸"}</span>
+        </button>
+        <button
+          type="button"
+          className={active ? "tree-entry selected" : "tree-entry"}
+          onClick={() => onSelect(shapeSelection(shape, breadcrumb))}
+        >
+          {shape.label} <span className="delivery-badge">{shape.delivery}</span>
+        </button>
+      </div>
       {expanded && (
         <ol className="tree-branch">
           {shape.layers.map((layer) => (
             <LayerEntry
               key={layer.position}
               layer={layer}
+              shape={shape}
               selection={selection}
               onSelect={onSelect}
             />
@@ -166,11 +210,17 @@ function ShapeEntry({ shape, selection, onSelect }: { shape: SessionShape } & Se
 
 function CapabilityEntry({
   node,
+  breadcrumb,
   defaultExpanded,
   selection,
   onSelect,
-}: { node: CapabilityNode; defaultExpanded: boolean } & SelectProps) {
+}: {
+  node: CapabilityNode;
+  breadcrumb: Breadcrumb;
+  defaultExpanded: boolean;
+} & SelectProps) {
   const [expanded, setExpanded] = useState(defaultExpanded);
+  const authoredBreadcrumb = [...breadcrumb, { id: node.id, label: node.label }];
   return (
     <li>
       <button
@@ -187,17 +237,30 @@ function CapabilityEntry({
             <CapabilityEntry
               key={child.id}
               node={child}
+              breadcrumb={authoredBreadcrumb}
               defaultExpanded={false}
               selection={selection}
               onSelect={onSelect}
             />
           ))}
           {node.session_shapes.map((shape) => (
-            <ShapeEntry key={shape.id} shape={shape} selection={selection} onSelect={onSelect} />
+            <ShapeEntry
+              key={shape.id}
+              shape={shape}
+              breadcrumb={authoredBreadcrumb}
+              selection={selection}
+              onSelect={onSelect}
+            />
           ))}
           {node.units.map((unit) => (
             <li key={unit.id}>
-              <UnitBranch unit={unit} display={unit.id} selection={selection} onSelect={onSelect} />
+              <UnitBranch
+                unit={unit}
+                display={unit.id}
+                placement={null}
+                selection={selection}
+                onSelect={onSelect}
+              />
             </li>
           ))}
         </ul>
@@ -213,6 +276,7 @@ export function TreePane({ tree, selection, onSelect }: { tree: CapabilityTree }
         <CapabilityEntry
           key={node.id}
           node={node}
+          breadcrumb={[]}
           defaultExpanded={true}
           selection={selection}
           onSelect={onSelect}

@@ -182,6 +182,8 @@ body {
 
 .center-pane {
   grid-area: center;
+  overflow: hidden;
+  padding: 0;
 }
 
 .inspector-pane {
@@ -249,7 +251,8 @@ body {
   min-width: 0;
 }
 
-.tree-unit-row {
+.tree-unit-row,
+.tree-shape-row {
   display: flex;
   align-items: baseline;
 }
@@ -264,7 +267,8 @@ body {
   cursor: pointer;
 }
 
-.tree-unit-row .tree-entry {
+.tree-unit-row .tree-entry,
+.tree-shape-row .tree-entry {
   flex: 1;
 }
 
@@ -306,10 +310,27 @@ body {
 
 /* ── Center pane ───────────────────────────────────────────────────────── */
 
+.center-content {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+
 .mode-bar {
   display: flex;
+  flex: none;
   gap: 0.5rem;
-  margin-bottom: 0.75rem;
+  margin: 0;
+  padding: 0.75rem 1rem;
+  border-bottom: 1px solid color-mix(in srgb, currentcolor 25%, transparent);
+}
+
+.center-mode-body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 0.75rem 1rem;
 }
 
 .mode-button {
@@ -390,6 +411,90 @@ body {
   margin: 0.5rem 0 0;
   font-style: italic;
   opacity: 0.8;
+}
+
+.comparison-result {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+
+.comparison-legend {
+  display: flex;
+  flex: none;
+  gap: 0.75rem;
+  align-items: baseline;
+  margin-bottom: 0.5rem;
+  font-size: 0.85rem;
+}
+
+.comparison-removed-badge,
+.comparison-added-badge {
+  padding: 0.05rem 0.4rem;
+  border: 1px solid color-mix(in srgb, currentcolor 35%, transparent);
+  border-radius: 0.6rem;
+}
+
+.comparison-removed-badge {
+  background: color-mix(in srgb, #c92a2a 16%, transparent);
+}
+
+.comparison-added-badge {
+  background: color-mix(in srgb, #2f9e44 16%, transparent);
+}
+
+.comparison-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.75rem;
+  flex: 1;
+  min-height: 0;
+}
+
+.comparison-pane {
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+  padding: 0.75rem;
+  border: 1px solid color-mix(in srgb, currentcolor 25%, transparent);
+  border-radius: 0.25rem;
+}
+
+.comparison-header {
+  padding-bottom: 0.5rem;
+  border-bottom: 1px solid color-mix(in srgb, currentcolor 20%, transparent);
+}
+
+.comparison-header h3,
+.comparison-header p {
+  margin: 0 0 0.35rem;
+  overflow-wrap: anywhere;
+}
+
+.comparison-breadcrumb {
+  opacity: 0.75;
+}
+
+.comparison-source-text {
+  margin: 0.75rem 0 0;
+  font-family: ui-monospace, monospace;
+  font-size: 0.85rem;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.comparison-unchanged {
+  opacity: 0.72;
+}
+
+.comparison-removed {
+  background: color-mix(in srgb, #c92a2a 20%, transparent);
+}
+
+.comparison-added {
+  background: color-mix(in srgb, #2f9e44 20%, transparent);
 }
 
 .source-refused h2,
@@ -515,9 +620,19 @@ body {
   background: color-mix(in srgb, currentcolor 10%, transparent);
 }
 
+.relation-entry.selected {
+  background: color-mix(in srgb, currentcolor 18%, transparent);
+  font-weight: 600;
+}
+
 .relation-note {
   opacity: 0.75;
   font-size: 0.85rem;
+}
+
+.comparison-picker .relation-note {
+  display: block;
+  margin: 0.15rem 0 0 0.25rem;
 }
 
 .lineage-target {

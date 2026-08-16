@@ -682,9 +682,9 @@ test("tools: missing exact Ponytail core skill omits only that child and collect
     assert.deepEqual(startDetails.lanes, ["grounding", "scope", "ponytail"]);
     assert.equal(sink.spawns.length, 1);
     const script = sink.spawns[0]?.workflowScript ?? "";
-    assert.doesNotMatch(script, /\"key\":\s*\"ponytail\"/, "Ponytail never reaches runs.all");
-    assert.match(script, /\"key\":\s*\"grounding\"/);
-    assert.match(script, /\"key\":\s*\"scope\"/);
+    assert.doesNotMatch(script, /"key":\s*"ponytail"/, "Ponytail never reaches runs.all");
+    assert.match(script, /"key":\s*"grounding"/);
+    assert.match(script, /"key":\s*"scope"/);
 
     const collected = await h.invokeTool("collect_draft_review_wave", {});
     const details = collected.details as {

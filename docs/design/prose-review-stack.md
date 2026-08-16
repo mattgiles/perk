@@ -5,10 +5,11 @@
 skeleton — the minimal secure launcher (`perk-dev prose-review`) plus the served round-trip proof
 — and now carrying the three-pane workbench shell (fragment-aware capability tree / mode bar +
 segmented source focus), the relationship inspector (consumers, consuming shapes + delivery
-siblings, concerns, lineage), and header catalog search — the inspector and search are pure
-in-memory `CatalogSnapshot` queries. Markdown, YAML, Python AST, and TypeScript compiler-API read
-adapters now resolve exact logical fragments; later nodes add Python call arguments,
-compare/assembly views, and writers on this stack without revisiting it.
+siblings, concerns, lineage), header catalog search, and snapshot-backed whole-unit Compare mode.
+The inspector, search, and comparison-option projection are pure in-memory `CatalogSnapshot`
+queries. Markdown, YAML, Python AST, and TypeScript compiler-API read adapters resolve exact logical
+fragments; later nodes add Python call arguments, assembly views, and writers on this stack without
+revisiting it.
 
 ## HTTP layer: FastAPI + uvicorn
 
@@ -22,6 +23,14 @@ compare/assembly views, and writers on this stack without revisiting it.
   `from_domain` constructors). Domain objects are never serialized into a response body —
   handlers query the snapshot and hand domain values to the `from_domain` constructors; every
   body is an `*Out` model.
+- **Comparison options are a pure snapshot projection.** `GET /api/compare` accepts a canonical
+  unit and an optional coherent shape/one-based-position pair, then projects exactly five relation
+  families in fixed order: delivery siblings, adjacent authored assembly layers, alias consumers,
+  concern relatives, and capability parent/child hierarchy. The first three preserve authoritative
+  assembly/shape placement; concern and capability targets are canonical. Capability relations walk
+  the canonical routed unit's immediate parent then immediate children, with deterministic preorder
+  subtree traversal, and never treat shape-expanded assembly layers as reassigned to the shape's
+  capability. The endpoint reads no source and adds no graph fields or repository-content path.
 - **Exactly two repository-content read families.** Built-asset reads (`index.html` included) go
   through `web.read_contained`; canonical-source reads go through the SourceAdapter package
   (`perk_dev.prose_review.source_adapter`) — root-bound, catalog-membership-checked, text-only,
@@ -80,13 +89,28 @@ compare/assembly views, and writers on this stack without revisiting it.
 ## Frontend: Vite + React + TypeScript
 
 - A dedicated npm workspace **`tools/prose-review/`** (the `docs/site` workspace precedent), all
-  devDependencies exact-pinned: `react@19.2.8`, `react-dom@19.2.8`, `@types/react@19.2.18`,
-  `@types/react-dom@19.2.4`, `vite@8.2.1`, `@vitejs/plugin-react@6.0.5` (TypeScript hoists from
-  the root install). Dev-only, never published.
+  devDependencies exact-pinned: React + type declarations, Vite + its React plugin, `diff@8.0.4`,
+  and the jsdom/tsx component-test harness (`jsdom@29.1.1`, `@types/jsdom@27.0.0`,
+  `tsx@4.23.12`; TypeScript hoists from the root install). The workspace has no runtime
+  `dependencies` key: every client and tool pin is dev-only because the built workbench is never
+  published.
 - `vite build` emits `tools/prose-review/dist/` (gitignored). The Python backend serves the built
   assets — **single origin, no network-loaded assets, no dev-server proxying**. Vite's build emits
   only external `<script type="module">`/stylesheet tags (no inline scripts), so
   `script-src 'self'` holds.
+- **Placement and source identity stay separate.** Tree selection carries optional shape/layer
+  provenance, while `/api/source` loader identity remains canonical unit plus optional fragment.
+  Compare invalidation uses whole-unit unit/shape/position identity and ignores fragment-only
+  navigation. The inspector chooses only server-projected targets; selecting one does not mutate the
+  global mode or tree selection. Compare derives two whole-unit `/api/source` targets: equal unit ids
+  share one existing source loader and the exact same loaded object across both panes, while distinct
+  ids use two independent existing loaders. `/api/source` and its read path are unchanged.
+- **Current text is diff input, not relation state.** The browser reconstructs each supplied source
+  exactly as `before + focus + after`, calls `diffLines` directly, and renders its native typed
+  chunks. It introduces no copied segment model, server-side diff, source cache, or comparison-specific
+  source coordinator. The same seam is ready for the workspace-owned unsaved content that replaces
+  fresh disk loads later: relation semantics and pane rendering do not change when current text comes
+  from buffers.
 - **Frontend dev loop (one `dist/` writer at a time):** launch the server once
   (`perk-dev prose-review` rebuilds on launch), then start the **build watcher**
   (`npm run dev --workspace tools/prose-review` = `vite build --watch`, not a dev server) and
@@ -129,17 +153,25 @@ the served page is now the three-pane workbench shell, which fetches `/api/catal
 `/api/source` through their typed parse boundaries (`parseTree` / `parseUnitSource`, with the
 closed wire vocabulary in `tools/prose-review/src/wire.ts`). `/api/catalog/summary` still serves
 its original contract; `parseSummary` remains its typed local mirror, now exercised by tests only.
-The relationship inspector and catalog search added `/api/inspect` and `/api/search` — both pure
-in-memory snapshot queries (the search index is built once in `create_app`), so **no third
-file-read family** was added; `parseUnitInspect` / `parseSearch` join the typed parse boundaries
-(same reject-unknown posture, node:test-covered).
-The proof structure is unchanged: **server-integration** tests (real Vite build, real uvicorn on a
-pre-bound socket, real `*Out` DTOs, and a real TypeScript fragment resolved through the separate
-helper checkout root) plus node:test coverage of each frontend parse boundary (local wire-shape
-mirrors; OpenAPI schema generation and runtime schema-validation libraries are out of scope). The
-**browser** leg (the shell expands fragment branches, preserves composite selection across
-aliases and search, renders exact context/focus/context segments, and keeps the unit-scoped
-relationship inspector stable while fragment identity changes) is a manual acceptance step.
-Boundary explanations and the existing relationship/search surfaces remain part of that proof; the
-automated browser-level hostile-payload pass across all panes is a later node's deliverable by the
-objective's design.
+The relationship inspector, catalog search, and comparison projection added `/api/inspect`,
+`/api/search`, and `/api/compare` — all pure in-memory snapshot queries (the search index is built
+once in `create_app`), so **no third file-read family** was added. `parseUnitInspect`, `parseSearch`,
+and `parseComparisonOptions` are typed reject-unknown boundaries; the comparison options loader
+adds response-origin matching plus endpoint-specific latest-wins/clear/dispose invalidation.
+The proof structure remains **server integration** (real Vite build, real uvicorn on a pre-bound
+socket, real `*Out` DTOs, a comparison target followed through the unchanged source endpoint, and a
+real TypeScript fragment resolved through the separate helper checkout root) plus node:test coverage
+of every frontend parse/loader boundary and existing source-loader lifecycle. A jsdom harness loads
+TSX through the exact-pinned `tsx` API to exercise the rendered App coordinator (fragment
+preservation, placement invalidation, stale outcomes, mode reset, and duplicate-choice occurrence
+identity) and CenterPane (one-versus-two source loads, native diff chunks, headers, and independent
+failure states). The packaging guard pins the diff and test libraries as exact dev-only dependencies
+while preserving the workspace's zero-runtime-dependency posture.
+
+The launcher-served **browser** leg covers shape-origin layer selection, placement-aware option
+refresh with fragment-only preservation, the five graph-backed target families and boundary
+omission, same-unit one-request/no-difference rendering, distinct-unit native line chunks across the
+Markdown/YAML/Python/TypeScript families, independent pane scrolling, empty-target copy, mode-local
+reset, and regression checks for Edit/Assembly/navigation plus Host/Origin/CSP/no-store hardening.
+Boundary explanations and the relationship/search surfaces remain part of that proof; the automated
+browser-level hostile-payload pass across all panes is a later deliverable by the objective's design.

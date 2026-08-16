@@ -646,9 +646,9 @@ test("tools: missing exact Ponytail skill omits only that child and collects exp
     assert.deepEqual(startDetails.angles, ["claimed-intent", "correctness", "ponytail"]);
     assert.equal(sink.spawns.length, 1);
     const script = sink.spawns[0]?.workflowScript ?? "";
-    assert.doesNotMatch(script, /\"key\":\s*\"ponytail\"/, "Ponytail never reaches runs.all");
-    assert.match(script, /\"key\":\s*\"claimed-intent\"/);
-    assert.match(script, /\"key\":\s*\"correctness\"/);
+    assert.doesNotMatch(script, /"key":\s*"ponytail"/, "Ponytail never reaches runs.all");
+    assert.match(script, /"key":\s*"claimed-intent"/);
+    assert.match(script, /"key":\s*"correctness"/);
 
     const collected = await h.invokeTool("collect_review_wave", {});
     const details = collected.details as {

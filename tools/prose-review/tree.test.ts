@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { placedShapeLayerSelection, shapeSelection, sourceSelectionKey } from "./src/selection.ts";
 import { type AssemblyLayer, type CapabilityTree, parseTree, parseUnitRef } from "./src/tree.ts";
 
 const UNIT_LAYER: AssemblyLayer = {
@@ -127,6 +128,28 @@ test("parseTree retains fragment arrays for direct and assembly units", () => {
   assert.deepEqual(
     parsed.capabilities[0]?.children[0]?.session_shapes[0]?.layers[1]?.unit?.fragments,
     [{ id: "body", label: "Document body" }],
+  );
+});
+
+test("parsed shape data supplies authored breadcrumb and placed selections", () => {
+  const parsed = parseTree(WIRE);
+  assert.ok(parsed !== null);
+  const planning = parsed.capabilities[0];
+  const plan = planning?.children[0];
+  const shape = plan?.session_shapes[0];
+  const layer = shape?.layers[1];
+  assert.ok(planning !== undefined);
+  assert.ok(plan !== undefined);
+  assert.ok(shape !== undefined);
+  assert.ok(layer?.unit !== null && layer?.unit !== undefined);
+  const breadcrumb = [
+    { id: planning.id, label: planning.label },
+    { id: plan.id, label: plan.label },
+  ];
+  assert.deepEqual(shapeSelection(shape, breadcrumb).breadcrumb, breadcrumb);
+  assert.equal(
+    sourceSelectionKey(placedShapeLayerSelection(shape, layer.position, layer.unit)),
+    JSON.stringify([JSON.stringify([layer.unit.id, null, null]), "plan.warm", 2]),
   );
 });
 
