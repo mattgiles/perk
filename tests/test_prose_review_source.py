@@ -943,6 +943,33 @@ def test_typescript_adapter_real_helper_resolves_and_recomposes_representative_s
     assert call.before + call.focus + call.after == text
     assert isinstance(call.resolution, ResolvedRange)
 
+    extended_text = """
+function owner() {
+  completeStructured({ system: "structured system" });
+  pi.on("before_agent_start", () => "event handler");
+  return { workflowScript: "workflow body" };
+}
+"""
+    for selector, expected in (
+        ("symbol:owner/call:completeStructured/system", '"structured system"'),
+        ("symbol:owner/event:before_agent_start/0/handler", '() => "event handler"'),
+        ("symbol:owner/property:workflowScript/0", '"workflow body"'),
+    ):
+        extraction = adapter.extract(extended_text, selector)
+        assert extraction.focus == expected
+        assert extraction.before + extraction.focus + extraction.after == extended_text
+        assert isinstance(extraction.resolution, ResolvedRange)
+
+    invalid_prefix = 'const prefix = "😀"; '
+    invalid = adapter.resolve_range(
+        f"{invalid_prefix}const broken = ;",
+        "symbol:module/call:complete/0/argument:0",
+    )
+    assert isinstance(invalid, UnresolvedRange)
+    assert invalid.reason == "invalid-source"
+    assert invalid.diagnostic.line == 1
+    assert invalid.diagnostic.column == len(invalid_prefix) + 16
+
     unsupported = adapter.extract(text, "tool:demo.promptSnippet")
     assert isinstance(unsupported.resolution, UnresolvedRange)
     assert unsupported.resolution.reason == "unsupported-source-shape"
@@ -1260,9 +1287,22 @@ def test_every_real_typescript_fragment_is_batch_covered_through_the_python_adap
     adapter = _typescript_adapter()
     for relative, selectors in selectors_by_path.items():
         text = (ROOT / relative).read_text(encoding="utf-8")
-        diagnostics = adapter.validate(text, tuple(selectors))
-        assert all(item.code == "unsupported-source-shape" for item in diagnostics), relative
-        assert all(item.selector in selectors for item in diagnostics), relative
+        response = adapter._invoke(text, tuple(selectors))
+        assert isinstance(response, tuple), relative
+        assert len(response) == len(selectors), relative
+        for expected, current in zip(selectors, response, strict=True):
+            assert current.selector == expected, relative
+            if isinstance(current, typescript_adapter_module._HelperResolved):
+                source_range = current.source_range
+                assert 0 <= source_range.start < source_range.end <= len(text), relative
+                before = text[: source_range.start]
+                focus = text[source_range.start : source_range.end]
+                after = text[source_range.end :]
+                assert focus
+                assert before + focus + after == text, relative
+            else:
+                assert isinstance(current, typescript_adapter_module._HelperUnresolved)
+                assert current.reason == "unsupported-source-shape", relative
 
 
 def test_typescript_adapter_check_hint_is_only_prose_map() -> None:

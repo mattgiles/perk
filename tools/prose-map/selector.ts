@@ -798,17 +798,21 @@ export function resolveSelectors(source: string, selectors: readonly string[]): 
   }
 
   const enumeration = enumerateSelectorSites(sourceFile);
-  const bySelector = new Map<string, SelectorSite[]>();
+  const catalogSites = new Map<string, SelectorSite[]>();
+  const helperSites = new Map<string, SelectorSite[]>();
   for (const site of enumeration.sites) {
-    for (const selector of new Set([site.selector, site.catalogSelector])) {
-      const matches = bySelector.get(selector) ?? [];
-      matches.push(site);
-      bySelector.set(selector, matches);
-    }
+    const catalogMatches = catalogSites.get(site.catalogSelector) ?? [];
+    catalogMatches.push(site);
+    catalogSites.set(site.catalogSelector, catalogMatches);
+
+    const helperMatches = helperSites.get(site.selector) ?? [];
+    helperMatches.push(site);
+    helperSites.set(site.selector, helperMatches);
   }
 
   const results = selectors.map((selector): SelectorResult => {
-    const exact = bySelector.get(selector);
+    // Raw discovery identities take precedence when a parent-linked helper alias has the same text.
+    const exact = catalogSites.get(selector) ?? helperSites.get(selector);
     if (exact !== undefined) {
       return resolveExactSite(source, sourceFile, selector, exact);
     }

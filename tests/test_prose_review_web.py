@@ -544,6 +544,42 @@ def test_typescript_fragment_is_a_guarded_editable_typed_200(
     _assert_security_headers(response)
 
 
+def test_typescript_enclosing_symbol_fragment_is_editable_through_source_endpoint(
+    snapshot: CatalogSnapshot,
+    repo: Path,
+) -> None:
+    unit = snapshot.get_unit(
+        "typescript-model-call:extension/adapters/planAdapterPlannotator.ts:module:before-agent-start:0"
+    )
+    assert unit is not None
+    fragment = snapshot.get_fragment(unit.candidate.id, "handler")
+    assert fragment is not None
+    assert fragment.fragment.selector == "symbol:module/event:before_agent_start/0/handler"
+    source_path = repo / unit.candidate.path
+    source_path.parent.mkdir(parents=True, exist_ok=True)
+    text = (ROOT / unit.candidate.path).read_text(encoding="utf-8")
+    source_path.write_text(text, encoding="utf-8")
+
+    response = _client(snapshot, repo).get(
+        "/api/source",
+        params={"unit": unit.candidate.id, "fragment": fragment.fragment.id},
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["unit"] == unit.candidate.id
+    assert payload["fragment"] == {
+        "id": fragment.fragment.id,
+        "label": fragment.fragment.label,
+    }
+    assert payload["path"] == unit.candidate.path
+    assert payload["kind"] == "typescript-model-call"
+    assert payload["editable"] is True
+    assert payload["read_only_reason"] is None
+    assert payload["focus"]
+    assert payload["before"] + payload["focus"] + payload["after"] == text
+    _assert_security_headers(response)
+
+
 @pytest.mark.parametrize("failure", ["spawn", "timeout", "exit", "protocol"])
 def test_typescript_helper_failure_is_a_guarded_adapter_unavailable_200(
     snapshot: CatalogSnapshot,

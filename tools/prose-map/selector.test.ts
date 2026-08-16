@@ -1,9 +1,10 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
+import { pathToFileURL } from "node:url";
 import { promisify } from "node:util";
 import ts from "typescript";
 
@@ -37,21 +38,35 @@ function focus(source: string, selector: string): string {
 }
 
 function interpolation(name: string): string {
-  return `$` + `{${name}}`;
+  return ["$", "{", name, "}"].join("");
 }
 
-async function withRequest(
-  request: unknown,
-  invoke: (requestPath: string) => Promise<void>,
+async function withRawRequest(
+  contents: string,
+  invoke: (requestPath: string, directory: string) => Promise<void>,
 ): Promise<void> {
   const directory = await mkdtemp(path.join(tmpdir(), "perk-selector-test-"));
   try {
     const requestPath = path.join(directory, "request.json");
-    await writeFile(requestPath, JSON.stringify(request), "utf-8");
-    await invoke(requestPath);
+    await writeFile(requestPath, contents, "utf-8");
+    await invoke(requestPath, directory);
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
+}
+
+async function withRequest(
+  request: unknown,
+  invoke: (requestPath: string, directory: string) => Promise<void>,
+): Promise<void> {
+  await withRawRequest(JSON.stringify(request), invoke);
+}
+
+function assertCliFailure(error: unknown, code = 1): boolean {
+  assert.equal((error as { code?: unknown }).code, code);
+  assert.notEqual(String((error as { stderr?: unknown }).stderr).trim(), "");
+  assert.equal(String((error as { stdout?: unknown }).stdout), "");
+  return true;
 }
 
 test("CLI accepts one strict temp request and emits one newline-terminated JSON response", async () => {
@@ -87,7 +102,7 @@ test("CLI rejects usage, malformed JSON, wrong versions, types, and unknown keys
   await assert.rejects(
     execFileAsync(process.execPath, [SELECTOR_SCRIPT], { cwd: ROOT }),
     (error: unknown) => {
-      assert.equal((error as { code?: unknown }).code, 2);
+      assertCliFailure(error, 2);
       assert.match(
         String((error as { stderr?: unknown }).stderr),
         /usage: node tools\/prose-map\/selector\.ts <request-json-path>/,
@@ -95,6 +110,13 @@ test("CLI rejects usage, malformed JSON, wrong versions, types, and unknown keys
       return true;
     },
   );
+
+  await withRawRequest('{"version": 1,', async (requestPath) => {
+    await assert.rejects(
+      execFileAsync(process.execPath, [SELECTOR_SCRIPT, requestPath], { cwd: ROOT }),
+      assertCliFailure,
+    );
+  });
 
   const invalidRequests: unknown[] = [
     { version: 2, source: "", selectors: [] },
@@ -107,15 +129,54 @@ test("CLI rejects usage, malformed JSON, wrong versions, types, and unknown keys
     await withRequest(request, async (requestPath) => {
       await assert.rejects(
         execFileAsync(process.execPath, [SELECTOR_SCRIPT, requestPath], { cwd: ROOT }),
-        (error: unknown) => {
-          assert.equal((error as { code?: unknown }).code, 1);
-          assert.notEqual(String((error as { stderr?: unknown }).stderr).trim(), "");
-          assert.equal(String((error as { stdout?: unknown }).stdout), "");
-          return true;
-        },
+        assertCliFailure,
       );
     });
   }
+
+  const missingPath = path.join(tmpdir(), `perk-selector-missing-${process.pid}.json`);
+  await assert.rejects(
+    execFileAsync(process.execPath, [SELECTOR_SCRIPT, missingPath], { cwd: ROOT }),
+    assertCliFailure,
+  );
+});
+
+test("CLI contains unexpected helper failures on stderr", async () => {
+  await withRequest(
+    { version: 1, source: "const value = 1;", selectors: [] },
+    async (requestPath, directory) => {
+      const implementation = await readFile(SELECTOR_SCRIPT, "utf-8");
+      const typescriptUrl = pathToFileURL(
+        path.join(ROOT, "node_modules/typescript/lib/typescript.js"),
+      );
+      const injected = implementation
+        .replace(
+          'import ts from "typescript";',
+          `import ts from ${JSON.stringify(typescriptUrl.href)};`,
+        )
+        .replace(
+          "  const diagnostics = parseDiagnosticsFor(sourceFile);",
+          '  throw new Error("forced internal selector failure");\n  const diagnostics = parseDiagnosticsFor(sourceFile);',
+        );
+      assert.notEqual(injected, implementation);
+      const injectedScript = path.join(directory, "selector-internal-failure.ts");
+      await writeFile(injectedScript, injected, "utf-8");
+
+      await assert.rejects(
+        execFileAsync(process.execPath, [await realpath(injectedScript), requestPath], {
+          cwd: ROOT,
+        }),
+        (error: unknown) => {
+          assertCliFailure(error);
+          assert.match(
+            String((error as { stderr?: unknown }).stderr),
+            /forced internal selector failure/,
+          );
+          return true;
+        },
+      );
+    },
+  );
 });
 
 test("empty selector batches still report the first parser diagnostic", () => {
@@ -259,7 +320,7 @@ pi.registerTool({
   assert.equal(focus(source, "tool:demo.description"), '"direct"');
   assert.equal(
     focus(source, "tool:demo.parameters.properties.focus.description"),
-    "`nested " + interpolation("value") + "`",
+    ["`nested ", interpolation("value"), "`"].join(""),
   );
   for (const selector of ["tool:demo.promptSnippet", "tool:demo.promptGuidelines"]) {
     const unsupported = result(source, selector);
@@ -291,6 +352,38 @@ function other() { pi.sendUserMessage("other"); }`;
   assert.ok(leadingZero);
   assert.equal(leadingZero.status, "unresolved");
   assert.equal(leadingZero.reason, "unsupported-selector");
+});
+
+test("catalog ordinals take precedence over colliding owner-local module aliases", () => {
+  const source = `
+function nested() {
+  client.complete("nested call");
+  pi.on("before_agent_start", () => "nested event");
+  return { workflowScript: "nested workflow" };
+}
+client.complete("module call");
+pi.on("before_agent_start", () => "module event");
+const workflow = { workflowScript: "module workflow" };`;
+
+  const expectations = [
+    ["symbol:module/call:complete/0/argument:0", '"nested call"'],
+    ["symbol:module/call:complete/1/argument:0", '"module call"'],
+    ["symbol:module/event:before_agent_start/0/handler", '() => "nested event"'],
+    ["symbol:module/event:before_agent_start/1/handler", '() => "module event"'],
+    ["symbol:module/property:workflowScript/0", '"nested workflow"'],
+    ["symbol:module/property:workflowScript/1", '"module workflow"'],
+  ] as const;
+  for (const [selector, expected] of expectations) {
+    assert.equal(focus(source, selector), expected);
+  }
+
+  for (const [selector, expected] of [
+    ["symbol:nested/call:complete/0/argument:0", '"nested call"'],
+    ["symbol:nested/event:before_agent_start/0/handler", '() => "nested event"'],
+    ["symbol:nested/property:workflowScript/0", '"nested workflow"'],
+  ] as const) {
+    assert.equal(focus(source, selector), expected);
+  }
 });
 
 test("delimiter-bearing owners resolve by exact identity before fallback parsing", () => {
@@ -353,6 +446,23 @@ function install() {
   assert.equal(focus(source, "symbol:install/property:workflowScript/0"), '"run workflow"');
 });
 
+test("focused expression ranges exclude surrounding comments and trivia", () => {
+  const source = `
+pi.registerTool({
+  name: "demo",
+  description: /* tool leading */ ("tool") /* tool trailing */,
+});
+function owner() {
+  client.complete( /* call leading */ ("call") /* call trailing */ );
+  return {
+    workflowScript: /* property leading */ ("workflow") /* property trailing */,
+  };
+}`;
+  assert.equal(focus(source, "tool:demo.description"), '("tool")');
+  assert.equal(focus(source, "symbol:owner/call:complete/0/argument:0"), '("call")');
+  assert.equal(focus(source, "symbol:owner/property:workflowScript/0"), '("workflow")');
+});
+
 test("direct prose accepts literals, templates, plus builders, and transparent wrappers only", () => {
   const source = `
 function owner() {
@@ -370,7 +480,7 @@ function owner() {
   assert.equal(focus(source, "symbol:owner/call:complete/1/argument:0"), "`plain`");
   assert.equal(
     focus(source, "symbol:owner/call:complete/2/argument:0"),
-    "`hello " + interpolation("name") + "`",
+    ["`hello ", interpolation("name"), "`"].join(""),
   );
   assert.equal(
     focus(source, "symbol:owner/call:complete/3/argument:0"),
@@ -416,20 +526,36 @@ test("fallback grammar separates unsupported selectors from stale supported sele
 });
 
 test("ranges and locations normalize UTF-16 to Unicode code points", () => {
-  const source =
-    'const prefix = "😀"; pi.sendUserMessage(`inside ��� ' + interpolation("value") + "`);\n";
+  const source = [
+    'const prefix = "😀"; pi.sendUserMessage(`inside ��� ',
+    interpolation("value"),
+    "`);\n",
+  ].join("");
   const selector = "symbol:module/call:sendUserMessage/0/argument:0";
   const resolved = result(source, selector);
   assert.ok(resolved);
   assert.equal(resolved.status, "resolved");
   assert.equal(
     [...source].slice(resolved.start, resolved.end).join(""),
-    "`inside ��� " + interpolation("value") + "`",
+    ["`inside ��� ", interpolation("value"), "`"].join(""),
   );
   assert.equal(resolved.start, [...source.slice(0, source.indexOf("`inside"))].length);
 
   const invalid = resolveSelectors('const prefix = "😀";\r\nconst broken = ;\n', []);
   assert.deepEqual(invalid, { version: 1, status: "invalid-source", line: 2, column: 16 });
+
+  const sameLinePrefix = 'const prefix = "😀"; ';
+  const sameLine = resolveSelectors(`${sameLinePrefix}const broken = ;`, []);
+  assert.deepEqual(sameLine, {
+    version: 1,
+    status: "invalid-source",
+    line: 1,
+    column: [...sameLinePrefix].length + 16,
+  });
+  assert.notEqual(
+    sameLine.status === "invalid-source" ? sameLine.column : null,
+    sameLinePrefix.length + 16,
+  );
 });
 
 test("diagnostic locations honor every TypeScript line break and EOF insertion", () => {

@@ -17,8 +17,8 @@ compare/assembly views, and writers on this stack without revisiting it.
   untouched. The bounded-deps posture: no other backend dependency is anticipated for the whole
   objective.
 - **Endpoints are sync `def`** — catalog queries are pure in-memory work over the immutable
-  `CatalogSnapshot` (`load_catalog` builds once), and the only per-request filesystem work is the
-  two read families below — and return `*Out` Pydantic models (`perk.boundary.OutputModel`,
+  `CatalogSnapshot` (`load_catalog` builds once), and the only per-request repository-content reads
+  belong to the two families below — and return `*Out` Pydantic models (`perk.boundary.OutputModel`,
   `from_domain` constructors). Domain objects are never serialized into a response body —
   handlers query the snapshot and hand domain values to the `from_domain` constructors; every
   body is an `*Out` model.
@@ -39,7 +39,8 @@ compare/assembly views, and writers on this stack without revisiting it.
   owns static property handling, registered-tool field traversal/policy, enclosing owners,
   depth-first ordinals, event/workflow/`completeStructured` sites, and raw selector identity;
   `catalog.ts` maps those shared records into the unchanged discovery DTO while the helper groups
-  every exact raw site and treats collisions as ambiguity. The helper parses supplied text exactly
+  every exact raw site and treats collisions as ambiguity. Raw discovery identities take precedence
+  over parent-linked helper aliases when their text collides. The helper parses supplied text exactly
   once with `createSourceFile(..., ES2022, ..., ScriptKind.TS)`, isolates and shape-checks the pinned
   TypeScript 6.0.3 runtime `parseDiagnostics` seam, and never creates a `Program`, resolves imports,
   reads libraries/repository source, type-checks, or executes code. A helper-only bare
