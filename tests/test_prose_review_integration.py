@@ -31,6 +31,8 @@ from perk_dev.prose_review.search import build_search_index, search
 from perk_dev.prose_review.web import create_app
 
 ROOT = Path(__file__).parents[1]
+PYTHON_UNIT_ID = "python-symbol:packages/perk-dev/src/perk_dev/audit/bounding.py:_PREAMBLE"
+PYTHON_SOURCE_PATH = Path("packages/perk-dev/src/perk_dev/audit/bounding.py")
 
 # One xdist worker: the module fixture builds the frontend and owns a live server.
 pytestmark = pytest.mark.xdist_group("prose_review_frontend")
@@ -50,13 +52,16 @@ def server(tmp_path_factory: pytest.TempPathFactory) -> Iterator[_RunningServer]
     build_frontend(ROOT, out_dir=dist_dir)
     assert (dist_dir / "index.html").is_file()
 
-    # Real Markdown and YAML candidates copied to their catalog-relative paths under
-    # the fixture trust root. Pointing repo_root at the checkout would break the
-    # asset-containment proof above.
+    # Real Markdown, YAML, and Python candidates copied to their catalog-relative
+    # paths under the fixture trust root. Pointing repo_root at the checkout would
+    # break the asset-containment proof above.
     (trust_root / "AGENTS.md").write_bytes((ROOT / "AGENTS.md").read_bytes())
     clusters = trust_root / "docs/learned/clusters.yaml"
     clusters.parent.mkdir(parents=True)
     clusters.write_bytes((ROOT / "docs/learned/clusters.yaml").read_bytes())
+    python_source = trust_root / PYTHON_SOURCE_PATH
+    python_source.parent.mkdir(parents=True)
+    python_source.write_bytes((ROOT / PYTHON_SOURCE_PATH).read_bytes())
 
     snapshot = CatalogSnapshot.from_catalog(build_catalog(ROOT))
     token = secrets.token_urlsafe(32)
@@ -182,6 +187,10 @@ def test_source_endpoint_serves_whole_and_fragment_focus_over_real_http(
                 "fragment": "cluster:pi-extension",
             },
         )
+        python_response = client.get(
+            "/api/source",
+            params={"unit": PYTHON_UNIT_ID, "fragment": "symbol:_PREAMBLE"},
+        )
 
     assert whole_response.status_code == 200
     whole = whole_response.json()
@@ -201,6 +210,28 @@ def test_source_endpoint_serves_whole_and_fragment_focus_over_real_http(
     assert yaml_source["fragment"]["id"] == "cluster:pi-extension"
     assert yaml_source["editable"] is True
     assert "Pi SDK/extension substrate craft" in yaml_source["focus"]
+
+    assert python_response.status_code == 200
+    python_source = python_response.json()
+    assert list(python_source) == [
+        "unit",
+        "fragment",
+        "path",
+        "kind",
+        "before",
+        "focus",
+        "after",
+        "editable",
+        "read_only_reason",
+    ]
+    assert python_source["unit"] == PYTHON_UNIT_ID
+    assert python_source["fragment"]["id"] == "symbol:_PREAMBLE"
+    assert python_source["kind"] == "python-symbol"
+    assert python_source["editable"] is True
+    assert python_source["read_only_reason"] is None
+    assert python_source["before"] + python_source["focus"] + python_source["after"] == (
+        ROOT / PYTHON_SOURCE_PATH
+    ).read_text(encoding="utf-8")
 
 
 def test_wrong_host_is_rejected_over_real_http(server: _RunningServer) -> None:
