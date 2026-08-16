@@ -4,12 +4,8 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
 
-import {
-  scanRepository,
-  TOOL_FIELD_POLICIES,
-  type TypeScriptCatalog,
-  validateToolFieldPolicies,
-} from "./catalog.ts";
+import { scanRepository, type TypeScriptCatalog } from "./catalog.ts";
+import { TOOL_FIELD_POLICIES, validateToolFieldPolicies } from "./selector.ts";
 
 async function scanFixture(source: string): Promise<TypeScriptCatalog> {
   const root = await mkdtemp(path.join(tmpdir(), "perk-prose-map-"));
