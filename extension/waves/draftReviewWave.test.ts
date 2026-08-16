@@ -21,6 +21,8 @@ import { createMemoryWaveAdapter } from "./memoryAdapter.ts";
 
 const TWO_ANGLES: DraftReviewAngle[] = ["grounding", "scope"];
 const PREFLIGHT_OK = async () => ({ ok: true }) as const;
+const PREFLIGHT_UNAVAILABLE = async () =>
+  ({ ok: false, detail: "exact Ponytail core skill is unavailable" }) as const;
 
 /** A schema-valid aggregate entry as the rendered script's projection produces it. */
 function okEntry(key: string): unknown {
@@ -292,6 +294,41 @@ test("startDraftReviewWave: spawn params pin the module contract, the schema, an
   assert.equal(spawn.timeoutMs, 1_234);
   // Every lane rides the perk.draft-reviewer agent (the rendered script names it).
   assert.match(spawn.workflowScript, /perk\.draft-reviewer/);
+});
+
+test("startDraftReviewWave: failed Ponytail preflight omits only that child and stays incomplete without retry", async () => {
+  const adapter = createMemoryWaveAdapter({
+    aggregate: {
+      state: "complete",
+      value: [okEntry("grounding"), okEntry("scope")],
+    },
+  });
+  const start = await startDraftReviewWave(adapter, {
+    angles: TWO_ANGLES,
+    draftType: "plan",
+    draft: "# The draft",
+    requiredSkillPreflight: PREFLIGHT_UNAVAILABLE,
+  });
+  assert.equal(start.ok, true, "ordinary lanes still launch");
+  if (!start.ok) return;
+  const result = await start.result;
+  assert.equal(result.complete, false);
+  assert.deepEqual(
+    result.reports.map((report) => report.key),
+    ["grounding", "scope"],
+  );
+  assert.deepEqual(result.failures, [
+    {
+      key: "ponytail",
+      reason: "skill-unavailable",
+      detail: "exact Ponytail core skill is unavailable",
+    },
+  ]);
+  assert.equal(adapter.calls.spawn.length, 1, "zero-retry wave launches once");
+  const script = adapter.calls.spawn[0]?.workflowScript ?? "";
+  assert.doesNotMatch(script, /\"key\":\s*\"ponytail\"/, "the unavailable child never spawns");
+  assert.match(script, /\"key\":\s*\"grounding\"/);
+  assert.match(script, /\"key\":\s*\"scope\"/);
 });
 
 test("startDraftReviewWave: strict completeness — a failed lane leaves the wave incomplete (zero retries)", async () => {

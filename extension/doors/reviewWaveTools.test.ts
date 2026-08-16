@@ -627,6 +627,55 @@ test("tools: start_review_wave threads the configured model + directive; collect
   }
 });
 
+test("tools: missing exact Ponytail skill omits only that child and collects explicit incomplete coverage", async () => {
+  const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
+  const sink: SpawnSink = { spawns: [] };
+  const h = await loadPerkSession({
+    cwd,
+    env: { PERK_RUN_ID: "01RID" },
+    extraExtensions: [fakeSubagentsResponder(sink)],
+  });
+  try {
+    const started = await h.invokeTool("start_review_wave", {
+      angles: ["claimed-intent", "correctness"],
+      pr: 42,
+      worktree: "/abs/wt",
+    });
+    const startDetails = started.details as { ok: boolean; angles?: string[] };
+    assert.equal(startDetails.ok, true, "ordinary reviewers still launch");
+    assert.deepEqual(startDetails.angles, ["claimed-intent", "correctness", "ponytail"]);
+    assert.equal(sink.spawns.length, 1);
+    const script = sink.spawns[0]?.workflowScript ?? "";
+    assert.doesNotMatch(script, /\"key\":\s*\"ponytail\"/, "Ponytail never reaches runs.all");
+    assert.match(script, /\"key\":\s*\"claimed-intent\"/);
+    assert.match(script, /\"key\":\s*\"correctness\"/);
+
+    const collected = await h.invokeTool("collect_review_wave", {});
+    const details = collected.details as {
+      ok: boolean;
+      complete?: boolean;
+      covered?: string[];
+      failures?: { key: string | null; reason: string }[];
+      attempts?: { requestedKeys: string[] }[];
+    };
+    assert.equal(details.ok, true);
+    assert.equal(details.complete, false);
+    assert.deepEqual(details.covered, ["claimed-intent", "correctness"]);
+    assert.deepEqual(
+      details.failures?.map((failure) => [failure.key, failure.reason]),
+      [["ponytail", "skill-unavailable"]],
+    );
+    assert.deepEqual(details.attempts?.[0]?.requestedKeys, [
+      "claimed-intent",
+      "correctness",
+      "ponytail",
+    ]);
+    assert.match(collected.content[0]?.text ?? "", /INCOMPLETE: covered 2\/3 angle\(s\)/);
+  } finally {
+    h.dispose();
+  }
+});
+
 test("tools: start_review_wave ignores an already-aborted per-call signal (the wave outlives the call)", async () => {
   const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
   installPonytailReviewSkill(cwd);

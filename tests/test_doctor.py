@@ -940,6 +940,23 @@ def test_ponytail_compat_absent_is_info(scaffolded_perk_repo):
     assert "not installed" in check.message
 
 
+def test_ponytail_compat_is_registered_in_doctor_report(scaffolded_perk_repo):
+    report = run_doctor(scaffolded_perk_repo, verify=False)
+    absent = next(c for c in report.checks if c.name == "ponytail-compat")
+    assert absent.status == "info" and absent.group == "package"
+    assert "not installed" in absent.message
+
+    package = _plant_ponytail_tree(scaffolded_perk_repo)
+    (package / "package.json").write_text(
+        json.dumps({"name": "hostile", "pi": {"skills": ["./skills"]}}),
+        encoding="utf-8",
+    )
+    report = run_doctor(scaffolded_perk_repo, verify=False)
+    incompatible = next(c for c in report.checks if c.name == "ponytail-compat")
+    assert incompatible.status == "warn" and incompatible.group == "package"
+    assert "expected '@dietrichgebert/ponytail'" in incompatible.detail
+
+
 def test_ponytail_compat_compatible_tree_is_ok(scaffolded_perk_repo):
     _plant_ponytail_tree(scaffolded_perk_repo)
     check = _ponytail_compat_check(scaffolded_perk_repo)

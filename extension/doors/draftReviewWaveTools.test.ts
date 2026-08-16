@@ -664,6 +664,51 @@ test("tools: start_draft_review_wave threads the configured model over the prime
   }
 });
 
+test("tools: missing exact Ponytail core skill omits only that child and collects explicit incomplete coverage", async () => {
+  const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
+  const sink: SpawnSink = { spawns: [] };
+  const h = await loadPerkSession({
+    cwd,
+    env: { PERK_RUN_ID: "01RID" },
+    extraExtensions: [fakeSubagentsResponder(sink)],
+  });
+  try {
+    primeDraftReviewContext({ draftType: "plan", draft: "# The draft\n" });
+    const started = await h.invokeTool("start_draft_review_wave", {
+      angles: ["grounding", "scope"],
+    });
+    const startDetails = started.details as { ok: boolean; lanes?: string[] };
+    assert.equal(startDetails.ok, true, "ordinary reviewers still launch");
+    assert.deepEqual(startDetails.lanes, ["grounding", "scope", "ponytail"]);
+    assert.equal(sink.spawns.length, 1);
+    const script = sink.spawns[0]?.workflowScript ?? "";
+    assert.doesNotMatch(script, /\"key\":\s*\"ponytail\"/, "Ponytail never reaches runs.all");
+    assert.match(script, /\"key\":\s*\"grounding\"/);
+    assert.match(script, /\"key\":\s*\"scope\"/);
+
+    const collected = await h.invokeTool("collect_draft_review_wave", {});
+    const details = collected.details as {
+      ok: boolean;
+      complete?: boolean;
+      covered?: string[];
+      failures?: { key: string | null; reason: string }[];
+      attempts?: { requestedKeys: string[] }[];
+    };
+    assert.equal(details.ok, true);
+    assert.equal(details.complete, false);
+    assert.deepEqual(details.covered, ["grounding", "scope"]);
+    assert.deepEqual(
+      details.failures?.map((failure) => [failure.key, failure.reason]),
+      [["ponytail", "skill-unavailable"]],
+    );
+    assert.deepEqual(details.attempts?.[0]?.requestedKeys, ["grounding", "scope", "ponytail"]);
+    assert.match(collected.content[0]?.text ?? "", /INCOMPLETE: covered 2\/3 lane\(s\)/);
+  } finally {
+    clearDraftReviewContext();
+    h.dispose();
+  }
+});
+
 test("tools: start_draft_review_wave ignores an already-aborted per-call signal (the wave outlives the call)", async () => {
   const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
   installPonytailCoreSkill(cwd);

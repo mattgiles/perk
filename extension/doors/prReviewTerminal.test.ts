@@ -115,6 +115,7 @@ test("guidance(local): surface-only — no reviewers, no posting, the notes read
   assert.doesNotMatch(text, /async: true/);
   assert.doesNotMatch(text, /wait\(\{ timeoutMs/);
   assert.match(text, /NO reviewers were spawned/);
+  assert.match(text, /including no automatic Ponytail lane/);
   assert.match(text, /NOTHING posts to GitHub/);
   assert.ok(text.includes("cd /repo/.worktrees/plan-148 && hunk diff 0f8a1b2c3d4e --agent-notes"));
   assert.match(text, /hunk session comment list --repo \/repo\/\.worktrees\/plan-148 --type user/);
@@ -162,6 +163,11 @@ test("guidance(foreign+active): the tool-owned streaming-loop pins (hunk mechani
     );
     assert.match(text, /never receive the surface handle/, "children get no hunk session details");
     assert.match(text, /reported honestly/, "incompleteness is surfaced, never papered over");
+    assert.match(text, /Exactly one source-bound `ponytail` lane is appended automatically and last/);
+    assert.match(text, /outside the 2–3 selection cap/);
+    assert.match(text, /MUST NOT be selected or duplicated/);
+    assert.match(text, /does not spawn or fall back/);
+    assert.match(text, /`skill-unavailable`/);
     // The retired model-authored mechanics are gone.
     for (const gone of [/workflowScript/, /runs\.all/, /status\.json/, /subagent\(\{\s*action/]) {
       assert.doesNotMatch(text, gone, `retired mechanics must not appear: ${gone}`);

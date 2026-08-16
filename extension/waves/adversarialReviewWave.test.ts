@@ -21,6 +21,8 @@ import { createMemoryWaveAdapter } from "./memoryAdapter.ts";
 
 const TWO_ANGLES: AdversarialReviewAngle[] = ["claimed-intent", "correctness"];
 const PREFLIGHT_OK = async () => ({ ok: true }) as const;
+const PREFLIGHT_UNAVAILABLE = async () =>
+  ({ ok: false, detail: "exact Ponytail review skill is unavailable" }) as const;
 
 /** A schema-valid aggregate entry as the rendered script's projection produces it. */
 function okEntry(key: string): unknown {
@@ -238,6 +240,41 @@ test("startAdversarialReviewWave: spawn params pin the module contract, the sche
   assert.equal(spawn.outputSchema, ADVERSARIAL_REVIEW_REPORT_SCHEMA);
   assert.equal(spawn.model, "anthropic/claude-opus-4");
   assert.equal(spawn.timeoutMs, 1_234);
+});
+
+test("startAdversarialReviewWave: failed Ponytail preflight omits only that child and stays incomplete without retry", async () => {
+  const adapter = createMemoryWaveAdapter({
+    aggregate: {
+      state: "complete",
+      value: [okEntry("claimed-intent"), okEntry("correctness")],
+    },
+  });
+  const start = await startAdversarialReviewWave(adapter, {
+    angles: TWO_ANGLES,
+    pr: 42,
+    worktree: "/abs/wt",
+    requiredSkillPreflight: PREFLIGHT_UNAVAILABLE,
+  });
+  assert.equal(start.ok, true, "ordinary lanes still launch");
+  if (!start.ok) return;
+  const result = await start.result;
+  assert.equal(result.complete, false);
+  assert.deepEqual(
+    result.reports.map((report) => report.key),
+    ["claimed-intent", "correctness"],
+  );
+  assert.deepEqual(result.failures, [
+    {
+      key: "ponytail",
+      reason: "skill-unavailable",
+      detail: "exact Ponytail review skill is unavailable",
+    },
+  ]);
+  assert.equal(adapter.calls.spawn.length, 1, "zero-retry wave launches once");
+  const script = adapter.calls.spawn[0]?.workflowScript ?? "";
+  assert.doesNotMatch(script, /\"key\":\s*\"ponytail\"/, "the unavailable child never spawns");
+  assert.match(script, /\"key\":\s*\"claimed-intent\"/);
+  assert.match(script, /\"key\":\s*\"correctness\"/);
 });
 
 test("startAdversarialReviewWave: strict completeness — a failed lane leaves the wave incomplete (zero retries)", async () => {

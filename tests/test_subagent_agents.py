@@ -31,16 +31,34 @@ def test_fresh_delivery_writes_all_defs_byte_identical(tmp_path):
 def test_reviewer_defs_source_bind_only_the_exact_ponytail_skill_paths():
     package_skills = "../../npm/node_modules/@dietrichgebert/ponytail/skills"
     expected = {
-        "draft-reviewer": f"{package_skills}/ponytail/SKILL.md",
-        "pr-reviewer": f"{package_skills}/ponytail-review/SKILL.md",
-        "adversarial-reviewer": f"{package_skills}/ponytail-review/SKILL.md",
+        "draft-reviewer": (
+            f"{package_skills}/ponytail/SKILL.md",
+            ".pi/npm/node_modules/@dietrichgebert/ponytail/skills/ponytail/SKILL.md",
+            "ponytail",
+        ),
+        "pr-reviewer": (
+            f"{package_skills}/ponytail-review/SKILL.md",
+            ".pi/npm/node_modules/@dietrichgebert/ponytail/skills/ponytail-review/SKILL.md",
+            "ponytail-review",
+        ),
+        "adversarial-reviewer": (
+            f"{package_skills}/ponytail-review/SKILL.md",
+            ".pi/npm/node_modules/@dietrichgebert/ponytail/skills/ponytail-review/SKILL.md",
+            "ponytail-review",
+        ),
     }
-    for name, skill_path in expected.items():
+    for name, (skill_path, runtime_path, skill_name) in expected.items():
         text = _source_bytes(name).decode()
         frontmatter = yaml.safe_load(text.split("---", 2)[1])
         assert frontmatter["inheritSkills"] is False
         assert frontmatter["skillPath"] == [skill_path]
         assert "skills" not in frontmatter
+        assert "**Source-bound Ponytail check.**" in text
+        assert runtime_path in text
+        assert f"frontmatter name is `{skill_name}`" in text
+        compact = " ".join(text.split())
+        assert "terminate without calling `structured_output`" in compact
+        assert "never resolve a same-named project/user skill" in compact
 
 
 def test_committed_reviewer_mirrors_are_byte_identical():
