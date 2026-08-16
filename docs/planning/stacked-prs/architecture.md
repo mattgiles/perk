@@ -416,8 +416,10 @@ published-layer definition is load-bearing.
 Synchronization is realized behind `Delivery.sync`. The façade binds its persistence/Git/GitHub
 authorities and `Delivery.status` into the private engine context. One immutable private runtime
 owns only config, operation lock, continuation containment/manifest/path helpers, clock, sleep, and
-operation-id minting; it is not a fourth authority or public dependency seam. Every mode acquires
-one operation lock, and every reconstruction/re-entry uses the bound status call graph.
+operation-id minting; it is not a fourth authority or public dependency seam. The `consent`
+keyword is required: callers explicitly provide a callback or deliberately pass `None` for
+automation's auto-approval policy. Every mode acquires one operation lock, and every
+reconstruction/re-entry uses the bound status call graph.
 
 ### Preflight and candidate calculation
 

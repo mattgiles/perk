@@ -528,6 +528,7 @@ def test_flag_matrix_refusals(monkeypatch):
         ["--abort", "--dry-run"],
         ["--abort", "--adopt", "1.2"],
         ["--adopt", "1.2", "--base"],
+        ["--adopt", ""],
     ]
     for extra in bad:
         outcome, calls = _invoke_modes(

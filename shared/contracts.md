@@ -6041,8 +6041,11 @@ authorities — the objective store (policy, lineage, roadmap), plan issues (lay
 checkpoints), the journal fold (§8.43), Git refs, and GitHub PR + native-stack state. The canonical
 repository-scoped APIs are `resolve_delivery(repo_root).status(StatusRequest(objective_id))`,
 one flat frozen `Delivery.prepare(PrepareRequest(...))` family, and
-`Delivery.sync(SyncRequest(...), consent=...)`. `resolve_delivery` performs ZERO I/O.
-`Delivery.status` returns a `StatusResult` whose invariant is exactly one non-null branch:
+`Delivery.sync(SyncRequest(...), consent=...)`. The sync keyword is required at the call
+boundary: a caller must explicitly pass a callback or deliberately pass `None` for automation's
+auto-approval policy; omission can never silently select mutation consent. `resolve_delivery`
+performs ZERO I/O. `Delivery.status` returns a `StatusResult` whose invariant is exactly one
+non-null branch:
 `train` OR the successful incremental `no_train_reason`, alongside `objective_id`, `objective_url`,
 and `redirected_from`.
 

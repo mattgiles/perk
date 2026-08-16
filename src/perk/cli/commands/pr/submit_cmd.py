@@ -174,6 +174,8 @@ def _pr_submit_impl(*, repo_root: Path, dry_run: bool, run_id: str | None = None
     A stacked plan (delivery-lineage discriminator) routes to `_stacked_submit_impl`
     (contracts.md §8.47); the incremental path below is untouched.
     """
+    if run_id is not None and not run_id.strip():
+        run_id = None
     plan_ref = cache.read_plan_ref(repo_root)
     if plan_ref is None:
         raise UserFacingCliError(

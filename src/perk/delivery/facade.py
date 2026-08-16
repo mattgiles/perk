@@ -970,8 +970,8 @@ class Delivery:
         self._git = git
         self._github = github
 
-    def sync(self, request: SyncRequest, *, consent: _SyncConsent | None = None) -> SyncResult:
-        """Synchronize a published suffix through the private transactional engine."""
+    def sync(self, request: SyncRequest, *, consent: _SyncConsent | None) -> SyncResult:
+        """Synchronize a published suffix with an explicitly selected consent policy."""
         from perk.delivery import sync as sync_mod  # noqa: PLC0415 — avoids facade↔engine cycle
 
         context = sync_mod._SyncContext(

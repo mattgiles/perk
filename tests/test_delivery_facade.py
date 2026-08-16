@@ -26,8 +26,15 @@ from perk.delivery.facade import (
     SyncRequest,
     SyncResult,
 )
-from perk.delivery.journal import JournalCorruptionError, JournalRecordTooLarge
-from perk.delivery.persistence import TrainPersistenceError
+from perk.delivery.journal import (
+    EventRole,
+    JournalCorruptionError,
+    JournalRecordTooLarge,
+    OperationKind,
+    OutcomeRecord,
+    PreparedRecord,
+)
+from perk.delivery.persistence import AppendResult, TrainPersistenceError
 from perk.delivery.train import (
     BaseHeadObservation,
     BuildReadiness,
@@ -367,6 +374,9 @@ def test_sync_request_accepts_the_complete_legal_matrix() -> None:
         SyncRequest(mode="cascade", objective_id="10", run_id="01RUN"),
         SyncRequest(mode="cascade", objective_id="10", run_id="01RUN", include_base=True),
         SyncRequest(
+            mode="cascade", objective_id="10", run_id="01RUN", include_base=True, dry_run=True
+        ),
+        SyncRequest(
             mode="cascade", objective_id="10", run_id="01RUN", dry_run=True, adopt_node="1.2"
         ),
         SyncRequest(
@@ -382,6 +392,7 @@ def test_sync_request_accepts_the_complete_legal_matrix() -> None:
     )
 
     assert tuple(request.mode for request in valid) == (
+        "cascade",
         "cascade",
         "cascade",
         "cascade",
@@ -508,6 +519,12 @@ def test_delivery_sync_builds_one_authority_context_and_dispatches(
     assert actual_request is request and actual_consent is consent
 
 
+def test_delivery_sync_requires_an_explicit_consent_policy() -> None:
+    consent = inspect.signature(Delivery.sync).parameters["consent"]
+    assert consent.kind is inspect.Parameter.KEYWORD_ONLY
+    assert consent.default is inspect.Parameter.empty
+
+
 @pytest.mark.parametrize(
     ("source", "error_type"),
     (
@@ -532,7 +549,9 @@ def test_delivery_sync_maps_expected_boundary_failures(
     monkeypatch.setattr(sync_mod, "_dispatch", dispatch)
 
     with pytest.raises(DeliveryError) as excinfo:
-        _delivery().sync(SyncRequest(mode="cascade", objective_id="10", run_id="01RUN"))
+        _delivery().sync(
+            SyncRequest(mode="cascade", objective_id="10", run_id="01RUN"), consent=None
+        )
 
     assert excinfo.value.error_type == error_type
     assert str(excinfo.value) == str(source)
@@ -548,7 +567,9 @@ def test_delivery_sync_maps_private_config_failure_and_propagates_unexpected(
 
     monkeypatch.setattr(sync_mod, "_dispatch", invalid_config)
     with pytest.raises(DeliveryError) as excinfo:
-        _delivery().sync(SyncRequest(mode="cascade", objective_id="10", run_id="01RUN"))
+        _delivery().sync(
+            SyncRequest(mode="cascade", objective_id="10", run_id="01RUN"), consent=None
+        )
     assert excinfo.value.error_type == "invalid_config"
 
     unexpected = RuntimeError("programmer bug")
@@ -558,7 +579,9 @@ def test_delivery_sync_maps_private_config_failure_and_propagates_unexpected(
 
     monkeypatch.setattr(sync_mod, "_dispatch", explode)
     with pytest.raises(RuntimeError) as raw:
-        _delivery().sync(SyncRequest(mode="cascade", objective_id="10", run_id="01RUN"))
+        _delivery().sync(
+            SyncRequest(mode="cascade", objective_id="10", run_id="01RUN"), consent=None
+        )
     assert raw.value is unexpected
 
 
@@ -1783,6 +1806,96 @@ def test_lazy_persistence_reuses_only_a_complete_successful_resolution(
     assert resolved == {"store": 1, "issues": 1}
     assert store.calls == ["10"]
     assert issues.calls == ["101"]
+
+
+def test_lazy_persistence_mutations_delegate_exactly_and_reuse_the_cached_adapter(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    store = _ResolvedStore()
+    issues = _ResolvedIssues()
+    resolved = {"store": 0, "issues": 0}
+    adapters: list[Any] = []
+
+    def store_resolver(_root: Path):
+        resolved["store"] += 1
+        return store
+
+    def issues_resolver(_root: Path):
+        resolved["issues"] += 1
+        return issues
+
+    prepared_result = AppendResult(
+        operation_id="01ARZ3NDEKTSV4RRFFQ69G5FAV", role=EventRole.PREPARED, existed=False
+    )
+    outcome_result = AppendResult(
+        operation_id="01ARZ3NDEKTSV4RRFFQ69G5FAV", role=EventRole.COMPLETED, existed=True
+    )
+
+    class _RecordingPersistence:
+        def __init__(self, actual_store, actual_issues) -> None:
+            assert actual_store is store and actual_issues is issues
+            self.calls: list[tuple[object, ...]] = []
+            adapters.append(self)
+
+        def append_prepared(self, objective_id: str, record: PreparedRecord) -> AppendResult:
+            self.calls.append(("append_prepared", objective_id, record))
+            return prepared_result
+
+        def append_outcome(self, objective_id: str, record: OutcomeRecord) -> AppendResult:
+            self.calls.append(("append_outcome", objective_id, record))
+            return outcome_result
+
+        def write_checkpoints(
+            self,
+            plan_id: str,
+            *,
+            parent_checkpoint_sha: str,
+            published_head_sha: str,
+        ) -> None:
+            self.calls.append(
+                (
+                    "write_checkpoints",
+                    plan_id,
+                    parent_checkpoint_sha,
+                    published_head_sha,
+                )
+            )
+
+    monkeypatch.setattr(observe, "resolve_objective_store", store_resolver)
+    monkeypatch.setattr(observe, "resolve_issue_backend", issues_resolver)
+    monkeypatch.setattr(observe, "TrainPersistence", _RecordingPersistence)
+    persistence = observe.RepoDeliveryPersistence(tmp_path)
+    prepared = PreparedRecord(
+        operation_id="01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        operation_kind=OperationKind.SYNC,
+        delivery_lineage="01LINEAGE",
+        objective_id="10",
+        run_id="01RUN",
+        created="2026-01-01T00:00:00Z",
+        affected_plans=("101",),
+        before={},
+        after={},
+    )
+    outcome = OutcomeRecord(
+        operation_id=prepared.operation_id,
+        role=EventRole.COMPLETED,
+        created="2026-01-01T00:01:00Z",
+        observed={},
+    )
+
+    assert persistence.append_prepared("10", prepared) == prepared_result
+    assert persistence.append_outcome("10", outcome) == outcome_result
+    persistence.write_checkpoints(
+        "101", parent_checkpoint_sha="a" * 40, published_head_sha="b" * 40
+    )
+
+    assert resolved == {"store": 1, "issues": 1}
+    assert len(adapters) == 1
+    assert adapters[0].calls == [
+        ("append_prepared", "10", prepared),
+        ("append_outcome", "10", outcome),
+        ("write_checkpoints", "101", "a" * 40, "b" * 40),
+    ]
 
 
 def test_lazy_persistence_resolver_failure_is_uncached(tmp_path: Path, monkeypatch) -> None:

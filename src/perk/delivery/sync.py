@@ -1421,7 +1421,7 @@ def _verify_postconditions(
     try:
         sync.fetch(sync.repo_root, [layer.branch for layer in affected])
         heads = [sync.remote_head(sync.repo_root, layer.branch) for layer in affected]
-    except git_mod.GitError as exc:
+    except (git_mod.GitError, TrainReconstructionError) as exc:
         raise SyncError(
             f"could not re-observe the affected branches after the push ({exc}) — the "
             "operation stays unresolved",
@@ -1451,7 +1451,7 @@ def _verify_postconditions(
     if len(desired) >= 2:
         try:
             observed_stack = sync.stack_read(number=desired[0], repo_root=sync.repo_root)
-        except GitHubError as exc:
+        except (GitHubError, TrainReconstructionError) as exc:
             raise SyncError(
                 f"could not re-observe the native stack after the push ({exc}) — the "
                 "operation stays unresolved",
@@ -1477,7 +1477,7 @@ def _settle_poll_pr(
     for attempt in range(_SETTLE_ATTEMPTS):
         try:
             facts = sync.pr_facts(number=layer.pr_number, repo_root=sync.repo_root)
-        except GitHubError as exc:
+        except (GitHubError, TrainReconstructionError) as exc:
             raise SyncError(
                 f"could not re-observe PR #{layer.pr_number} after the push ({exc}) — the "
                 "operation stays unresolved",

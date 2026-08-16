@@ -222,7 +222,9 @@ def test_amended_bottom_layer_cascades_with_exact_transplants(tmp_path):
     delivery = _IntegrationDelivery(work, recorder, train)
     with pytest.MonkeyPatch.context() as monkeypatch:
         monkeypatch.setattr(sync, "_DEFAULT_SYNC_RUNTIME", _runtime(work / ".worktrees"))
-        result = delivery.sync(SyncRequest(mode="cascade", objective_id="500", run_id="01RUN"))
+        result = delivery.sync(
+            SyncRequest(mode="cascade", objective_id="500", run_id="01RUN"), consent=None
+        )
 
     # The whole claimed prefix cascaded from the amended bottom layer.
     assert [s.plan_id for s in result.affected] == ["101", "102", "103"]
@@ -309,7 +311,9 @@ def test_conflicted_cascade_resolves_through_the_real_continue_arc(tmp_path):
     with pytest.MonkeyPatch.context() as monkeypatch:
         monkeypatch.setattr(sync, "_DEFAULT_SYNC_RUNTIME", _runtime(work / ".worktrees"))
         with pytest.raises(sync.SyncError) as excinfo:
-            delivery.sync(SyncRequest(mode="cascade", objective_id="500", run_id="01RUN"))
+            delivery.sync(
+                SyncRequest(mode="cascade", objective_id="500", run_id="01RUN"), consent=None
+            )
     assert excinfo.value.error_type == "rebase_conflict"
     assert recorder.prepared == []  # pre-journal: nothing appended at the stop
 
@@ -338,7 +342,7 @@ def test_conflicted_cascade_resolves_through_the_real_continue_arc(tmp_path):
 
     with pytest.MonkeyPatch.context() as monkeypatch:
         monkeypatch.setattr(sync, "_DEFAULT_SYNC_RUNTIME", _runtime(work / ".worktrees"))
-        result = delivery.sync(SyncRequest(mode="continue", objective_id="500"))
+        result = delivery.sync(SyncRequest(mode="continue", objective_id="500"), consent=None)
     assert result.continued is True and result.operation_id == manifest.operation_id
     record = recorder.prepared[0]
     assert record.operation_id == manifest.operation_id and record.run_id == "01RUN"

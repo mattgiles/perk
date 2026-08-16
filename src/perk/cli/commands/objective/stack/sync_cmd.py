@@ -229,6 +229,8 @@ def _validate_flag_matrix(
     ``--continue``/``--abort`` are mutually exclusive with each other and with every
     cascade flag; ``--adopt`` + ``--base`` is refused; ``--adopt`` + ``--dry-run`` and
     ``--base`` + ``--dry-run`` compose. Returns the routing mode."""
+    if adopt is not None and not adopt.strip():
+        raise UserFacingCliError("--adopt requires a nonblank node id.", error_type="invalid_input")
     if continue_ and abort:
         raise UserFacingCliError(
             "--continue and --abort are mutually exclusive.", error_type="invalid_input"

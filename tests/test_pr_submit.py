@@ -870,6 +870,31 @@ def test_stacked_run_id_falls_back_to_the_header(monkeypatch):
     assert header_fields(42) == {"branch": "plan-7", "pr": "42", "lifecycle_stage": "impl"}
 
 
+def test_stacked_blank_run_id_uses_header_only_for_the_journal(monkeypatch):
+    from perk import delivery
+
+    _authed(monkeypatch)
+    _stub_gh(monkeypatch)
+    _stub_get_plan_header(monkeypatch, {"delivery_lineage": "01LINEAGE", "run_id": "01HDR"})
+    captured: dict[str, object] = {}
+
+    def _fake_publish(repo_root, **kwargs):
+        captured.update(kwargs)
+        return _publication_result()
+
+    monkeypatch.setattr(delivery, "publish_layer", _fake_publish)
+    result = _run_stacked(monkeypatch, ["pr", "submit", "--json", "--run-id", ""])
+
+    assert result.exit_code == 0, result.output
+    assert captured["run_id"] == "01HDR"
+    assert captured["trigger_run_id"] is None
+    assert _header_builder(captured)(42) == {
+        "branch": "plan-7",
+        "pr": "42",
+        "lifecycle_stage": "impl",
+    }
+
+
 def test_stacked_run_id_unresolvable_is_invalid_input(monkeypatch):
     _authed(monkeypatch)
     _stub_gh(monkeypatch)

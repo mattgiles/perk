@@ -56,10 +56,12 @@ from perk.delivery.train import (
     PrFactsView,
     TrainFinding,
     TrainLayer,
+    TrainReconstructionError,
 )
 from perk.delivery.writers import WriterObservationError
 from perk.github import GitHubError
 from perk.github.stacks import PrDeliveryFacts, StackRestEntry, StackRestFacts
+from perk.substrate import config as config_mod
 from perk.substrate import git
 
 ROOT = Path("/repo")
@@ -375,6 +377,7 @@ class _World:
         self.pr_entries: dict[int, tuple[str, str, str]] = {}
         self.pr_facts_script: list[PrDeliveryFacts | Exception | None] = []
         self.stack_members: list[int] | None = None
+        self.stack_read_boom: Exception | None = None
         # Residue state.
         self.refs: dict[str, str] = {}
         self.worktrees_added: list[tuple[Path, str]] = []
@@ -559,6 +562,8 @@ class _World:
 
     def _stack_read(self, *, number: int, repo_root: Path) -> StackRestFacts | None:
         self.timeline.append(("stack_read", number))
+        if self.stack_read_boom is not None:
+            raise self.stack_read_boom
         if self.stack_members is None or number not in self.stack_members:
             return None
         entries = tuple(
@@ -722,6 +727,33 @@ def _sync_error(world: _World, **kwargs) -> sync.SyncError:
     return excinfo.value
 
 
+def test_default_worktree_configuration_failure_is_a_public_invalid_config(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    world = _amended_middle_world()
+    runtime = dataclasses_replace(world._runtime(), worktree_root=sync._configured_worktree_root)
+
+    def invalid_config(repo_root: Path) -> None:
+        raise config_mod.ConfigError("bad worktree root")
+
+    monkeypatch.setattr(config_mod, "load_config", invalid_config)
+    monkeypatch.setattr(sync, "_DEFAULT_SYNC_RUNTIME", runtime)
+
+    with pytest.raises(DeliveryError) as excinfo:
+        _WorldDelivery(world).sync(
+            SyncRequest(mode="cascade", objective_id=OBJECTIVE, run_id="01RUN"),
+            consent=None,
+        )
+
+    assert excinfo.value.error_type == "invalid_config"
+    assert "could not load worktree configuration: bad worktree root" in str(excinfo.value)
+    world.assert_nothing_journaled()
+    assert world.events("push_atomic") == []
+    assert world.events("update_ref") == []
+    assert world.worktrees_added == []
+    assert world.manifests == {}
+
+
 # ----------------------------------------------------------------- the fresh cascade
 
 
@@ -829,6 +861,35 @@ def test_base_cascade_parent_edge_arithmetic():
     record = world.persistence.prepared[0]
     assert record.before["base"] == {"branch": "main", "sha": NEWBASE}
     assert record.after["base_parent"] == NEWBASE
+    world.assert_guard_cleaned()
+
+
+def test_base_dry_run_previews_movement_without_consent_or_mutation():
+    world = _three_layer_world()
+    world.base_head = NEWBASE
+    world.remote["main"] = NEWBASE
+    remote_before = dict(world.remote)
+    approvals: list[SyncResult.Cascade] = []
+    r1 = _reb(P1, NEWBASE)
+    r2 = _reb(P2, r1)
+    r3 = _reb(P3, r2)
+
+    result = world.sync(
+        include_base=True,
+        dry_run=True,
+        approve=lambda cascade: approvals.append(cascade) or True,
+    )
+
+    assert result.dry_run is True and result.base_cascaded is False
+    assert [(layer.before_sha, layer.after_sha) for layer in result.affected] == [
+        (P1, r1),
+        (P2, r2),
+        (P3, r3),
+    ]
+    assert approvals == []
+    world.assert_nothing_journaled()
+    assert world.remote == remote_before
+    assert world.events("push_atomic") == []
     world.assert_guard_cleaned()
 
 
@@ -1348,6 +1409,18 @@ def test_unreadable_branch_refetch_is_postcondition_unverified():
     assert error.error_type == "postcondition_unverified"
 
 
+def test_adapter_wrapped_branch_refetch_is_postcondition_unverified():
+    world = _amended_middle_world()
+    wrapped = TrainReconstructionError("net down", error_type="git_error")
+    world.on_push = lambda: setattr(world, "fetch_boom", wrapped)
+
+    error = _sync_error(world)
+
+    assert error.error_type == "postcondition_unverified"
+    assert world.persistence.checkpoints == []
+    assert world.persistence.unresolved_records
+
+
 def test_pr_settle_poll_converges_on_a_stale_then_current_read():
     world = _amended_middle_world()
     stale = PrDeliveryFacts(
@@ -1388,12 +1461,36 @@ def test_unreadable_pr_read_is_postcondition_unverified():
     assert error.error_type == "postcondition_unverified"
 
 
+def test_adapter_wrapped_pr_read_is_postcondition_unverified():
+    world = _amended_middle_world()
+    wrapped = TrainReconstructionError("API down", error_type="github_error")
+    world.on_push = lambda: world.pr_facts_script.append(wrapped)
+
+    error = _sync_error(world)
+
+    assert error.error_type == "postcondition_unverified"
+    assert world.persistence.checkpoints == []
+    assert world.persistence.unresolved_records
+
+
 def test_membership_no_longer_exact_after_push_is_membership_drift():
     world = _amended_middle_world()
     world.on_push = lambda: setattr(world, "stack_members", [201, 202])
     error = _sync_error(world)
     assert error.error_type == "membership_drift"
     assert world.persistence.checkpoints == []
+
+
+def test_adapter_wrapped_membership_read_is_postcondition_unverified():
+    world = _amended_middle_world()
+    wrapped = TrainReconstructionError("API down", error_type="github_error")
+    world.on_push = lambda: setattr(world, "stack_read_boom", wrapped)
+
+    error = _sync_error(world)
+
+    assert error.error_type == "postcondition_unverified"
+    assert world.persistence.checkpoints == []
+    assert world.persistence.unresolved_records
 
 
 # ----------------------------------------------------------------- the resume matrix
