@@ -1,5 +1,4 @@
 import { type Change, diffLines } from "diff";
-import { useEffect, useState } from "react";
 import type { Mode } from "./App.tsx";
 import { BOUNDARY_INFO } from "./boundaries.ts";
 import {
@@ -15,8 +14,10 @@ import {
   wholeUnitTarget,
 } from "./selection.ts";
 import { READ_ONLY_PRESENTATION, sourceCurrentText } from "./source.ts";
-import { createSourceLoader, type SourceLoadState } from "./sourceLoad.ts";
+import { useWorkspace, useWorkspaceSource, type WorkspaceLoadState } from "./WorkspaceContext.tsx";
 import type { BoundaryKind } from "./wire.ts";
+
+export { WorkspaceProvider } from "./WorkspaceContext.tsx";
 
 const MODES: { id: Mode; label: string }[] = [
   { id: "edit", label: "Edit" },
@@ -24,19 +25,16 @@ const MODES: { id: Mode; label: string }[] = [
   { id: "assembly", label: "Assembly" },
 ];
 
-function useSourceLoad(target: SourceTarget): SourceLoadState {
-  const [state, setState] = useState<SourceLoadState>({ status: "loading" });
-  const [loader] = useState(() => createSourceLoader(setState));
-
-  useEffect(() => {
-    loader.select(target);
-  }, [loader, target]);
-
-  useEffect(() => () => loader.dispose(), [loader]);
-  return state;
-}
-
-function SourceLoadPresentation({ state }: { state: SourceLoadState }) {
+function SourceLoadPresentation({
+  target,
+  state,
+  retry,
+}: {
+  target: SourceTarget;
+  state: WorkspaceLoadState;
+  retry: () => void;
+}) {
+  const workspace = useWorkspace();
   if (state.status === "loading") {
     return <p className="pane-hint">Loading source…</p>;
   }
@@ -53,37 +51,67 @@ function SourceLoadPresentation({ state }: { state: SourceLoadState }) {
   }
 
   const { source } = state;
+  const { view } = source;
   const presentation =
-    source.read_only_reason === null ? null : READ_ONLY_PRESENTATION[source.read_only_reason];
+    view.read_only_reason === null ? null : READ_ONLY_PRESENTATION[view.read_only_reason];
   return (
     <div className="source-view">
       <div className="source-header">
         <span className="source-path">{source.path}</span>
-        <span className="kind-badge">{source.kind}</span>
-        <span className={source.editable ? "editable-badge" : "readonly-badge"}>
-          {source.editable ? "Editable range" : presentation?.badge}
+        <span className="kind-badge">{view.kind}</span>
+        <span className={view.editable ? "editable-badge" : "readonly-badge"}>
+          {view.editable ? "Editable range" : presentation?.badge}
         </span>
+        {source.dirty && <span className="dirty-badge">Dirty</span>}
+        {source.dirty && (
+          <button
+            type="button"
+            className="discard-button"
+            onClick={() => {
+              if (window.confirm(`Discard unsaved changes to ${source.path}?`)) {
+                workspace.discard(source.path);
+              }
+            }}
+          >
+            Discard file
+          </button>
+        )}
       </div>
       {presentation !== null && (
         <div className="source-readonly-explanation">
           <h2>{presentation.heading}</h2>
           <p>{presentation.explanation}</p>
+          {view.read_only_reason === "adapter-unavailable" && (
+            <button type="button" onClick={retry}>
+              Retry adapter
+            </button>
+          )}
         </div>
       )}
-      {source.editable && (
+      {view.editable && (
         <div className="source-legend">
           <span className="readonly-badge">Read-only context</span>
           <span className="editable-badge">Editable range</span>
         </div>
       )}
-      <pre className="source-text">
-        <span className="source-context">{source.before}</span>
-        <span className={source.editable ? "source-focus" : "source-readonly-focus"}>
-          {source.focus}
-        </span>
-        <span className="source-context">{source.after}</span>
-      </pre>
-      {source.editable && source.focus.length === 0 && (
+      {view.editable ? (
+        <div className="source-edit-regions">
+          <pre className="source-text source-context">{view.before}</pre>
+          <textarea
+            className="source-focus-editor"
+            aria-label={`Edit ${target.fragment?.label ?? target.unit.id}`}
+            value={source.focusDisplay}
+            spellCheck={false}
+            onInput={(event) => {
+              workspace.editFocus(target, source.focusDisplay, event.currentTarget.value);
+            }}
+          />
+          <pre className="source-text source-context">{view.after}</pre>
+        </div>
+      ) : (
+        <pre className="source-text source-readonly-focus">{view.focus}</pre>
+      )}
+      {view.editable && view.focus.length === 0 && (
         <p className="empty-focus-hint">This mapped fragment is empty.</p>
       )}
     </div>
@@ -91,7 +119,8 @@ function SourceLoadPresentation({ state }: { state: SourceLoadState }) {
 }
 
 function SourceView({ target }: { target: SourceTarget }) {
-  return <SourceLoadPresentation state={useSourceLoad(target)} />;
+  const { state, retry } = useWorkspaceSource(target);
+  return <SourceLoadPresentation target={target} state={state} retry={retry} />;
 }
 
 function BoundaryExplanation({ boundary, label }: { boundary: BoundaryKind; label: string }) {
@@ -183,7 +212,7 @@ function ComparisonSourcePane({
   side,
 }: {
   placement: ComparisonPlacement;
-  state: SourceLoadState;
+  state: WorkspaceLoadState;
   chunks: Change[] | null;
   side: "left" | "right";
 }) {
@@ -214,12 +243,12 @@ function ComparisonPanes({
 }: {
   origin: ComparisonPlacement;
   target: ComparisonPlacement;
-  left: SourceLoadState;
-  right: SourceLoadState;
+  left: WorkspaceLoadState;
+  right: WorkspaceLoadState;
 }) {
   const chunks =
     left.status === "loaded" && right.status === "loaded"
-      ? diffLines(sourceCurrentText(left.source), sourceCurrentText(right.source))
+      ? diffLines(sourceCurrentText(left.source.view), sourceCurrentText(right.source.view))
       : null;
   const identical = chunks?.every((chunk) => !chunk.added && !chunk.removed) === true;
   return (
@@ -237,9 +266,8 @@ function ComparisonPanes({
   );
 }
 
-function useWholeUnitSource(unit: ComparisonPlacement["unit"]): SourceLoadState {
-  const [target] = useState(() => wholeUnitTarget(unit));
-  return useSourceLoad(target);
+function useWholeUnitSource(unit: ComparisonPlacement["unit"]): WorkspaceLoadState {
+  return useWorkspaceSource(wholeUnitTarget(unit)).state;
 }
 
 function SharedComparisonSources({
@@ -278,7 +306,7 @@ function SelectedComparisonPair({
     selected.relation,
     comparisonPlacementKey(target),
   ]);
-  if (origin.unit.id === target.unit.id) {
+  if (origin.unit.path === target.unit.path) {
     return <SharedComparisonSources key={pairKey} origin={origin} target={target} />;
   }
   return <DistinctComparisonSources key={pairKey} origin={origin} target={target} />;

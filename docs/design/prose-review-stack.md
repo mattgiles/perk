@@ -4,12 +4,13 @@
 [prose-review-app-prd.md](./prose-review-app-prd.md)). Selected and shipped with the walking
 skeleton — the minimal secure launcher (`perk-dev prose-review`) plus the served round-trip proof
 — and now carrying the three-pane workbench shell (fragment-aware capability tree / mode bar +
-segmented source focus), the relationship inspector (consumers, consuming shapes + delivery
-siblings, concerns, lineage), header catalog search, and snapshot-backed whole-unit Compare mode.
-The inspector, search, and comparison-option projection are pure in-memory `CatalogSnapshot`
-queries. Markdown, YAML, Python AST, and TypeScript compiler-API read adapters resolve exact logical
-fragments; later nodes add Python call arguments, assembly views, and writers on this stack without
-revisiting it.
+focused in-memory editing), the relationship inspector (consumers, consuming shapes + delivery
+siblings, concerns, lineage), header catalog search, workspace-backed whole-unit Compare mode, and
+one browser-authoritative unsaved workspace. The inspector, search, and comparison-option projection
+are pure in-memory `CatalogSnapshot` queries. Markdown, YAML, Python AST, and TypeScript compiler-API
+adapters resolve exact logical fragments over either the canonical load text or browser-supplied
+current text; later nodes add Python call arguments, assembly views, persistence, and validation on
+this stack without revisiting it.
 
 ## HTTP layer: FastAPI + uvicorn
 
@@ -43,7 +44,10 @@ revisiting it.
   temporary request, invokes `node tools/prose-map/selector.ts <request-json-path>` through
   `perk.substrate.proc.run_checked`, and removes the directory on every outcome. That temporary
   snapshot is controlled subprocess IPC over already-authorized text — generated solely by the
-  adapter and never request-selected — not a third repository-content path.
+  adapter and never request-selected — not a third repository-content path. `POST
+  /api/source/project` selects a fixed adapter only through catalog unit/fragment identity and
+  projects browser-supplied text without calling any canonical source reader; TypeScript projection
+  deliberately retains that same private temporary-request/helper IPC.
 - **TypeScript selector resolution has one shared AST authority.** `tools/prose-map/selector.ts`
   owns static property handling, registered-tool field traversal/policy, enclosing owners,
   depth-first ordinals, event/workflow/`completeStructured` sites, and raw selector identity;
@@ -66,8 +70,9 @@ revisiting it.
   order/identity, reason/location pairings, and all TypeScript line-break forms before slicing the
   same text. A five-second helper timeout plus one app-scoped non-blocking `BoundedSemaphore` allows
   at most one helper process and no waiting queue; busy, spawn, timeout, exit, temp-file, and protocol
-  failures return the typed whole-file `adapter-unavailable` presentation. TypeScript replacement
-  and buffer-native write revalidation remain deferred to Node 3.4.
+  failures return the typed whole-file `adapter-unavailable` presentation. The browser treats that
+  reason as transient and non-cacheable, with retry only through the explicit control or target
+  reselection. TypeScript replacement validation remains deferred.
 - The Python AST adapter accepts only the currently discovered `symbol:<name>` language:
   module-body functions, async functions, assignments with exactly one direct `ast.Name` among
   their targets, and annotated assignments whose target is a direct `ast.Name`; `<name>` must be a
@@ -77,10 +82,17 @@ revisiting it.
   Unicode string indexes. Python call arguments remain deferred. The structured-text adapters
   expose exact range resolution, batch revalidation, and semantic check hints (`prose-map`, plus
   `learned-docs` for YAML); they do not expose persistence or replacement hooks yet.
-  `GET /api/source` remains the one source endpoint and accepts an optional composite fragment id,
-  returning either exact context/focus/context segments or a typed, whole-file read-only fallback.
-  Numeric ranges remain backend-internal; the DTO and frontend parse/view contract stay
-  family-neutral.
+  `GET /api/source` is the only canonical source-load endpoint and accepts an optional composite
+  fragment id. Its nested response separates immutable file metadata (`path`, `stat.S_IMODE` mode,
+  exact newline classification, SHA-256 load hash) from the metadata-free focused view; the exact
+  loaded text is still only `before + focus + after`. The canonical reader resolves containment,
+  opens the resolved candidate once, and samples regular-file status, permission bits, and bytes
+  from that one descriptor before strict UTF-8 decoding. `POST /api/source/project` accepts the
+  strict exact body `{unit, fragment, text}`, stores nothing, and returns only a focused view over
+  supplied text. Unknown catalog identities retain the fixed no-leak 404s, while malformed or extra
+  request fields stay at the guard-stamped 422 boundary. Numeric ranges remain backend-internal; the
+  DTO and frontend parse/view contracts stay family-neutral and additive toward unknown response
+  fields.
 - The FastAPI app is constructed with **`docs_url=None, redoc_url=None, openapi_url=None`**: the
   default `/docs` (Swagger UI) and `/redoc` pages load CDN-hosted assets and would violate the
   no-network-loaded-assets envelope; `/openapi.json` is locally generated but is an unused
@@ -99,18 +111,41 @@ revisiting it.
   only external `<script type="module">`/stylesheet tags (no inline scripts), so
   `script-src 'self'` holds.
 - **Placement and source identity stay separate.** Tree selection carries optional shape/layer
-  provenance, while `/api/source` loader identity remains canonical unit plus optional fragment.
-  Compare invalidation uses whole-unit unit/shape/position identity and ignores fragment-only
-  navigation. The inspector chooses only server-projected targets; selecting one does not mutate the
-  global mode or tree selection. Compare derives two whole-unit `/api/source` targets: equal unit ids
-  share one existing source loader and the exact same loaded object across both panes, while distinct
-  ids use two independent existing loaders. `/api/source` and its read path are unchanged.
-- **Current text is diff input, not relation state.** The browser reconstructs each supplied source
-  exactly as `before + focus + after`, calls `diffLines` directly, and renders its native typed
-  chunks. It introduces no copied segment model, server-side diff, source cache, or comparison-specific
-  source coordinator. The same seam is ready for the workspace-owned unsaved content that replaces
-  fresh disk loads later: relation semantics and pane rendering do not change when current text comes
-  from buffers.
+  provenance, while source target identity remains canonical unit plus optional fragment. Compare
+  invalidation uses whole-unit unit/shape/position identity and ignores fragment-only navigation.
+  The inspector chooses only server-projected targets; selecting one does not mutate the global mode
+  or tree selection. File identity is instead the catalog-authored root-relative path: aliases,
+  fragments, placements, search hits, concern links, and even different unit ids naming one path
+  share one browser buffer.
+- **`EditWorkspace` is the browser authority.** One framework-independent workspace lives for the
+  App lifetime. Each path entry retains immutable load text/UTF-8 bytes, mode, newline style, and
+  load hash alongside one mutable string-native current text and browser-local revision. UTF-8
+  encoding is used for defensive byte snapshots and exact dirty comparison, never as a second
+  mutable authority. No workspace text exists in Python globals, browser persistence, cookies, or a
+  service worker; no Save surface or repository write exists yet.
+- **Focused editing preserves source-native boundaries.** Editable views render escaped `before`
+  and `after` in separate read-only regions and only the LF-normalized focus in a controlled
+  textarea. A display-to-raw boundary map plus character diff preserves each unchanged CRLF, lone CR,
+  and LF terminator; inserted breaks use the loaded uniform style, then the first focus/current
+  terminator, then LF. One edited target lens per path is protected across temporary invalidity.
+  Every other target is document-wide invalidated and must re-project against the current whole
+  text before becoming editable; editing a different successfully projected target replaces the
+  protected lens without losing prior bytes.
+- **The workspace owns keyed requests and Compare text.** Canonical loads coalesce by path;
+  projections coalesce by path/target/revision. Consumers subscribe by path and never cancel a
+  shared request when switching or unmounting. Cache acceptance requires a live workspace, the
+  captured revision, exact response identity, and full-text reconstruction; disposal aborts all
+  workspace-owned requests. Stable read-only results cache only at their revision, while
+  `adapter-unavailable` is returned only to current awaiters and never cached. Compare synthesizes
+  whole-unit views from current workspace text, including across different unit ids on one path,
+  then calls `diffLines` directly; relation/options state remains snapshot-backed and unchanged.
+- **Dirty/discard/unload are byte exact.** Dirty count is the number of paths whose encoded current
+  text differs from immutable load bytes. Exact manual reversion becomes clean. Per-file confirmed
+  discard restores load text without rereading disk or replacing metadata, invalidates views, and
+  leaves other files untouched. The global drawer is path-sorted and navigates to each file's last
+  edited target without changing center mode. A native `beforeunload` guard exists only while at
+  least one file is dirty. There is no custom unload text, background persistence, diff, validation
+  gate, conflict check, Reload/Copy Edits action, or Save promise.
 - **Frontend dev loop (one `dist/` writer at a time):** launch the server once
   (`perk-dev prose-review` rebuilds on launch), then start the **build watcher**
   (`npm run dev --workspace tools/prose-review` = `vite build --watch`, not a dev server) and
@@ -140,8 +175,8 @@ CheckRunner.
 |---|---|---|
 | Loopback origin only: exactly `127.0.0.1:<port>` | The launcher binds `127.0.0.1:0`; the guard requires the `Host` header to byte-equal the one printed origin (`localhost` spellings, foreign hosts, missing port all 403) | `test_prose_review_web.py::test_host_rejection` (×3); `test_prose_review_integration.py::test_wrong_host_is_rejected_over_real_http` |
 | Origin exact-match | An `Origin` header, when present, must equal `http://127.0.0.1:<port>` exactly, else 403 | `test_origin_exact_match_passes_and_foreign_origin_is_rejected` |
-| CSRF token on every non-GET/HEAD request | Meta-tag injection: `index.html`'s `__PROSE_REVIEW_CSRF__` placeholder is replaced at serve time with the process token (`secrets.token_urlsafe(32)`); the guard requires **exactly one** `X-Prose-Review-Csrf` header `secrets.compare_digest`-matching it (zero/duplicate/wrong → 403) | `test_csrf_all_four_arms` (403 ×3 + the pass-through 405 proof) |
-| Repo-rooted read containment | Every **repository-content** read belongs to one of two families. Built-asset reads (`index.html` included) go through the contained-read helper: re-resolve the dist root, require it under the resolved repo root, resolve the candidate, require it under the dist root and a regular file — an escaping `dist/` symlink cannot launder outside targets in. Canonical-source reads go through the SourceAdapter (`perk_dev.prose_review.source_adapter`): lexical absolute-path rejection, resolved containment under the repo root, catalog membership, strict UTF-8 text only — serving-path-exclusive. The adapter-owned random TypeScript request is controlled IPC containing only that already-authorized snapshot; its generated path, fixed helper root, and unconditional cleanup are separately pinned. | traversal, child-symlink, `assets/`-dir-symlink, `dist`-root-symlink, and `index.html`-symlink tests in `test_prose_review_web.py`; traversal/absolute/symlink/NUL/non-text plus TypeScript temp-snapshot/cleanup/root-separation arms in `test_prose_review_source.py` |
+| CSRF token on every non-GET/HEAD request | Meta-tag injection: `index.html`'s `__PROSE_REVIEW_CSRF__` placeholder is replaced at serve time with the process token (`secrets.token_urlsafe(32)`); the guard requires **exactly one** `X-Prose-Review-Csrf` header `secrets.compare_digest`-matching it (zero/duplicate/wrong → 403). The source transport reads that meta value once per projection request and refuses missing/empty metadata locally. | `test_csrf_all_four_arms`; `test_projection_csrf_and_origin_guard_all_arms`; `sourceLoad.test.ts` |
+| Repo-rooted read containment | Every **repository-content** read belongs to one of two families. Built-asset reads (`index.html` included) go through the contained-read helper: re-resolve the dist root, require it under the resolved repo root, resolve the candidate, require it under the dist root and a regular file — an escaping `dist/` symlink cannot launder outside targets in. Canonical-source reads go through the SourceAdapter (`perk_dev.prose_review.source_adapter`): lexical absolute-path rejection, resolved containment under the repo root, catalog membership, one descriptor for regular-file/mode/byte sampling, and strict UTF-8 — serving-path-exclusive. Supplied-text projection never calls that reader. The adapter-owned random TypeScript request is controlled IPC containing only that already-authorized snapshot; its generated path, fixed helper root, and unconditional cleanup are separately pinned. | traversal, child-symlink, `assets/`-dir-symlink, `dist`-root-symlink, and `index.html`-symlink tests in `test_prose_review_web.py`; traversal/absolute/symlink/NUL/non-text, same-descriptor metadata, canonical-read exclusion, and TypeScript temp-snapshot/cleanup/root-separation arms in `test_prose_review_source.py` |
 | Text-only rendering (this node's slice) | React JSX text interpolation (escaped by default) + a node:test source scan banning HTML sinks (`innerHTML`, `outerHTML`, `insertAdjacentHTML`, `dangerouslySetInnerHTML`, `document.write`) + the CSP as backstop | `tools/prose-review/dom-sinks.test.ts` (with a vacuousness self-check) |
 | CSP + hardening headers on **every** HTTP response | `Content-Security-Policy: default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self'; font-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'` plus `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer`, `Cache-Control: no-store` — stamped by the guard on rejections, 404s, and framework-generated 500s alike | header assertions on every response shape, incl. `test_unhandled_exception_response_is_still_header_stamped` (pins the outermost placement) |
 | No framework doc surfaces | `docs_url=None, redoc_url=None, openapi_url=None` | `test_framework_doc_surfaces_are_disabled` (×3) |
@@ -156,22 +191,25 @@ its original contract; `parseSummary` remains its typed local mirror, now exerci
 The relationship inspector, catalog search, and comparison projection added `/api/inspect`,
 `/api/search`, and `/api/compare` — all pure in-memory snapshot queries (the search index is built
 once in `create_app`), so **no third file-read family** was added. `parseUnitInspect`, `parseSearch`,
-and `parseComparisonOptions` are typed reject-unknown boundaries; the comparison options loader
-adds response-origin matching plus endpoint-specific latest-wins/clear/dispose invalidation.
+`parseComparisonOptions`, and the nested source parsers structurally require known fields and closed
+vocabularies while tolerating additive unknown response keys. The comparison options loader adds
+response-origin matching plus endpoint-specific latest-wins/clear/dispose invalidation.
 The proof structure remains **server integration** (real Vite build, real uvicorn on a pre-bound
-socket, real `*Out` DTOs, a comparison target followed through the unchanged source endpoint, and a
-real TypeScript fragment resolved through the separate helper checkout root) plus node:test coverage
-of every frontend parse/loader boundary and existing source-loader lifecycle. A jsdom harness loads
-TSX through the exact-pinned `tsx` API to exercise the rendered App coordinator (fragment
-preservation, placement invalidation, stale outcomes, mode reset, and duplicate-choice occurrence
-identity) and CenterPane (one-versus-two source loads, native diff chunks, headers, and independent
-failure states). The packaging guard pins the diff and test libraries as exact dev-only dependencies
-while preserving the workspace's zero-runtime-dependency posture.
+socket, real nested `*Out` DTOs, a CSRF-authenticated supplied-text projection with unchanged disk
+load afterward, and a real TypeScript fragment resolved through the separate helper checkout root)
+plus node:test coverage of every frontend parse/transport boundary and the pure workspace state
+machine. A jsdom harness loads TSX through the exact-pinned `tsx` API to exercise the rendered App
+coordinator (fragment preservation, placement invalidation, stale outcomes, mode reset, duplicate
+choice occurrence identity, dirty drawer, discard, and unload lifecycle) and CenterPane (shared
+path loads, focused textarea, transient retry, native current-text diff chunks, headers, and
+independent failure states). The packaging guard pins the diff and test libraries as exact dev-only
+dependencies while preserving the workspace's zero-runtime-dependency posture.
 
-The launcher-served **browser** leg covers shape-origin layer selection, placement-aware option
-refresh with fragment-only preservation, the five graph-backed target families and boundary
-omission, same-unit one-request/no-difference rendering, distinct-unit native line chunks across the
-Markdown/YAML/Python/TypeScript families, independent pane scrolling, empty-target copy, mode-local
-reset, and regression checks for Edit/Assembly/navigation plus Host/Origin/CSP/no-store hardening.
-Boundary explanations and the relationship/search surfaces remain part of that proof; the automated
-browser-level hostile-payload pass across all panes is a later deliverable by the objective's design.
+The launcher-served **browser** leg now also covers source-native focused editing across
+Markdown/YAML/Python/TypeScript, alias/back-navigation retention, immediate workspace-backed Compare,
+temporary-invalid protected focus, transient TypeScript retry, two-file dirty/discard/Open behavior,
+and native unload confirmation without repository mutation. Shape-origin layer selection,
+placement-aware option refresh, graph-backed target families, boundary omission, independent pane
+scrolling, empty-target copy, mode-local reset, Assembly's honest placeholder, relationship/search,
+and Host/Origin/CSP/no-store hardening remain in the regression pass. Browser workspace state remains
+strictly in-memory until the persistence node.
