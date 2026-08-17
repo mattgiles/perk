@@ -1,7 +1,8 @@
 """The compact public delivery façade and retained operation exports.
 
 The canonical surface is the repository-scoped :class:`Delivery` status, Prepare, Transfer,
-publish, sync, and Recover families over three nominal aggregate authorities. Pure train
+publish, sync, and Recover families (operation conclusion plus the cancellation-metadata
+repair) over three nominal aggregate authorities. Pure train
 projection, layer context/core, capability rows, production adapters,
 transfer/publication/synchronization/recovery internals, and compatibility readers are internal
 modules. Journal, finalization, and landing exports remain public while their operation families

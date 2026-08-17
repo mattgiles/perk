@@ -7466,17 +7466,49 @@ exits 2.
 
 ## §8.51 · Stack recovery (`perk objective stack recover`) + the warm stack surface
 
-**The operation** is `Delivery.recover(RecoverRequest(...), consent=...)` — **conclude-only**
-recovery behind the repository-scoped delivery façade. The closed request family currently has
-exactly one `kind`, `operation_conclusion`, with `{objective_id, action, dry_run, operation_id}`;
-`action ∈ {report, abandon, accept_prefix}` replaces the old pair of service booleans. A supplied
-operation id is carried verbatim (including `""`) so target selection remains the authority and
-returns `operation_not_found` for a nonmatch. The frozen `RecoverResult` owns nested
-`Operation`, `MergedPrefix`, `RemainderPr`, `LandedLayer`, `SweepFailure`, `AbandonPreview`, and
-`AcceptPrefixPreview` records and adds the un-serialized `kind` discriminator; its
-`reconcile_evidence` annotation is deferred/type-only to avoid a façade↔landing import cycle.
+**The operation** is `Delivery.recover(RecoverRequest(...), consent=...)` behind the
+repository-scoped delivery façade. The closed request family is a strict TWO-kind
+discriminator: `operation_conclusion` (conclude-only recovery) and `cancellation_metadata`
+(the §8.54 metadata repair), each with the flat fields `{objective_id, action, dry_run,
+operation_id}`. For `operation_conclusion`, `action ∈ {report, abandon, accept_prefix}`
+replaces the old pair of service booleans, and a supplied operation id is carried verbatim
+(including `""`) so target selection remains the authority and returns `operation_not_found`
+for a nonmatch. `cancellation_metadata` accepts only a nonblank `objective_id` plus optional
+`dry_run`: an acting action or ANY operation id (even `""`) is rejected at construction, and
+a non-`None` consent callback is rejected with `ValueError` before dispatch or authority
+access — the variant has no operation target, no generic action verb, and no confirmation
+boundary.
 
-The operation classifies every unresolved stack operation against fresh authority, concludes the
+The frozen `RecoverResult` is the matching strict wrapper: `kind` plus exactly the one
+detail matching it (`operation_conclusion: OperationConclusion | None`,
+`cancellation_metadata: CancellationMetadata | None` — one kind↔detail constructor guard,
+no forwarding properties, no cross-variant "must stay empty" matrix). Nested
+`OperationConclusion` carries the complete operation report (`objective_id, objective_url,
+redirected_from, dry_run, selection_required, operations, swept_worktrees, swept_refs,
+sweep_failures, sweep_skipped, landed_layers, objective_closed, reconcile_evidence, notes`)
+over the existing nested `Operation`, `MergedPrefix`, `RemainderPr`, `LandedLayer`,
+`SweepFailure`, `AbandonPreview`, and `AcceptPrefixPreview` records, with additive
+operation-produced combinations and no new guards; its `reconcile_evidence` annotation stays
+deferred/type-only to avoid a façade↔landing import cycle. Nested `CancellationMetadata`
+carries `{objective_id, actions, failed, aborted, dry_run, unavailable}` over
+`CancellationAction{code, node_id, outcome, error}` — the §8.54 repair pass without exposing
+the internal diagnostics vocabulary (`failed` stays separate from `actions`).
+
+**The `cancellation_metadata` lifecycle** is pinned against operation-conclusion
+**machinery**: dispatched before worktree-root/config resolution and before the operation
+lock, it resolves no worktree config, takes no stack-operation lock, appends no journal
+event and writes no checkpoint, classifies/concludes no operation, asks for no consent, runs
+no finalization/convergence/close, and sweeps no residue. Read-only train reconstruction is
+explicitly retained and required — it IS the repair's fresh safety proof, and it inherently
+reads the journal fold, runs `git fetch`, and observes branches/PRs/stack membership through
+the façade's reconstruction bridge; the only mutation is the conditional attachment write
+through the §8.54 writer capability. A backend whose persistence authority answers no writer
+is a successful empty pass before any reconstruction. `perk objective stack recover` remains
+an operation-conclusion-only command — the repair's sole production caller is doctor's
+`--fix` (§8.54).
+
+The operation-conclusion variant classifies every unresolved stack operation against fresh
+authority, concludes the
 one selected target (deterministic roll-forward, a consented abandon-with-proof, or a consented
 accept-prefix breach), runs the LAND finalization-convergence pass, then sweeps orphaned
 machine-local sync residue. `consent` receives either preview type; `None` auto-approves an
@@ -7494,7 +7526,8 @@ journal/objective/plan/ref/PR/stack effect reuses an existing authority method. 
 aggregate adapters are package-internal; no repo path, config, backend, lock, clock, factory, or
 probe callback crosses `RecoverRequest`. Config resolves before one lock acquisition, and that
 single non-reentrant lock stays held through classification, consent, from-scratch
-reclassification, conclusion/convergence, result metadata reads, and the final sweep.
+reclassification, conclusion/convergence, result metadata reads, and the final sweep (the
+cancellation variant branches away before both, above).
 
 **The phased protocol.** (0) **Fold-first TRANSFER routing (§8.53)**: read the REQUESTED
 objective's succession journal before any train gate — a sole unresolved TRANSFER dispatches
@@ -7745,7 +7778,8 @@ objective_closed, reconcile_evidence|null (§8.56's shape), notes[]}` with `clas
 {reported, rolled_forward,
 abandoned, accepted_prefix, declined}`; the LAND fields are trailing additive growth
 (`merged_layers`/`remainder` are the external-prefix structured preview, dry-run included —
-empty on other rows); the DTO deliberately ignores `RecoverResult.kind`; under `dry_run` the swept
+empty on other rows); the DTO serializes the unwrapped `OperationConclusion` detail — the
+wrapper discriminator never reaches the envelope; under `dry_run` the swept
 lists carry the WOULD-BE targets. The human
 render prints the landed rows, the close line, and the copyable `/objective-reconcile <id>`
 hint on close-with-evidence. Exit
@@ -8215,6 +8249,17 @@ Protocol (declared in `diagnostics.py`, implemented only by `LinearProjectObject
 `write_node_cancellation_status`) is the ONE narrow train repair: a conditional, ATTACHMENT-ONLY
 compare-and-write (`expected_status`/`new_status`, `require_native_canceled: bool|None`,
 `require_no_raw_publish_claims`, `dry_run`) returning `APPLIED | ALREADY_CONVERGED | STALE`.
+Production ownership lives behind `Delivery.recover(RecoverRequest(kind=
+"cancellation_metadata", objective_id, dry_run))` (§8.51): the persistence authority exposes
+the writer through the optional capability `DeliveryPersistence.
+native_cancellation_metadata_writer()` — a concrete default-`None` method (the
+unsupported-backend posture) with a quoted type-only annotation, overridden only by the lazy
+production adapter (which returns the resolved objective store exactly when it structurally
+satisfies the Protocol, through its one aligned resolution, with no extra objective read and
+failed-resolution non-caching) and the owned fake. `None` is a successful empty pass before
+any reconstruction; only the Recover engine consumes the Protocol and
+`repair_projected_cancellations` in production — the Protocol is never a package-root export
+or a fourth aggregate authority.
 The writer performs a FRESH state-bearing read at the effect boundary, compares the attachment
 status, requires native canceled for the forward write, rechecks raw PR/checkpoint claims, and
 upserts ONLY the `objective-node` attachment — never the generic status update, never a
@@ -8234,15 +8279,27 @@ conditional validation with no write/compensation. This is not distributed atomi
 prevents stale snapshots from writing and compensates observed drift. Doctor never repairs plan
 identity, checkpoints, journal history, branches, PRs, or native stack membership.
 
-**The two-part doctor.** Report diagnosis is a migrated façade consumer. One zero-I/O `Delivery`
-is constructed per command and reused for initial diagnosis, post-manifest re-diagnosis, and the
+**The two-part doctor.** Both report diagnosis and the train repair are façade consumers. One
+zero-I/O `Delivery`
+is constructed per command and reused for initial diagnosis, post-manifest re-diagnosis, the
+cancellation Recover pass, and the
 final remaining-findings read. Each diagnosis calls
 `Delivery.status(StatusRequest(objective_id=active_id))`; its bounded `DeliveryError` becomes the
 modeled `unavailable` state with the same error type/message, so a routine plan/journal/store
-outage is never an escape. The cancellation repair's effect-boundary proof remains an internal
-raw-projection callback because the repair algorithm consumes `DeliveryTrain` directly and must
-normalize expected authority exceptions to `TrainReconstructionError`; it does not reintroduce a
-public read API.
+outage is never an escape. The cancellation repair's effect-boundary proof lives inside the
+Recover engine: a private reconstruction closure over the façade's cause-aware bridge, pinned
+to the request objective on every call, normalizing expected
+issue/objective/train-persistence read failures to
+`TrainReconstructionError(error_type="github_error")` so the repair core answers its modeled
+unavailable arm; no public read API is reintroduced. Doctor itself is a thin request/result
+mapper: for a currently stacked diagnosis it constructs exactly
+`RecoverRequest(kind="cancellation_metadata", objective_id=active_id, dry_run=dry_run)`,
+calls the shared `Delivery.recover` once with no consent, and maps the strict
+`CancellationMetadata` detail into `_TrainFixOut`; a bounded `DeliveryError` raised before a
+modeled detail exists (e.g. lazy persistence capability resolution failed) is treated as an
+unavailable/aborted repair pass — the final diagnosis still runs and the assembled report
+keeps `success: true` with the exit-1 posture. Current incremental/unavailable diagnoses
+short-circuit before any Recover call, exactly as before.
 
 `perk objective doctor` resolves the requested objective through `train.resolve_active_objective`
 ONCE — manifest detection/repair and train reconstruction/repair all target the ACTIVE id

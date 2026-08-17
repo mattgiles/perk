@@ -16,8 +16,10 @@ not a parallel drift engine. Two responsibilities:
   through the :class:`NativeCancellationMetadataWriter` seam, post-write verification through
   another reconstruction, and compensation (attachment rollback) + loud abort on observed
   post-write drift. This does not claim distributed atomicity; it prevents stale snapshots
-  from writing and compensates observed drift. Doctor NEVER repairs plan identity,
-  checkpoints, journal history, branches, PRs, or native stack membership.
+  from writing and compensates observed drift. In production only ``Delivery.recover``'s
+  cancellation-metadata variant invokes it (doctor's ``--fix`` drives that request); it NEVER
+  repairs plan identity, checkpoints, journal history, branches, PRs, or native stack
+  membership.
 
 Import direction stays legal: this module depends on the pure train projection and the
 backend-neutral :mod:`perk.backends.objective_store` vocabulary only; the concrete writer

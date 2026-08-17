@@ -50,9 +50,9 @@ Delivery.publish(PublishRequest {kind, plan_id, dry_run?, delivery?, objective_i
 Delivery.sync(SyncRequest {mode, objective_id, run_id?, include_base?, dry_run?, adopt_node?,
                            trigger_plan_id?, trigger_run_id?}, consent=...)
   -> SyncResult {operation/result facts; nested Layer, Cascade, AbortPreview}
-Delivery.recover(RecoverRequest {kind=operation_conclusion, objective_id, action?, dry_run?,
-                                 operation_id?}, consent=...)
-  -> RecoverResult {operation-conclusion report; nested rows and consent previews}
+Delivery.recover(RecoverRequest {kind=operation_conclusion|cancellation_metadata,
+                                 objective_id, action?, dry_run?, operation_id?}, consent=...)
+  -> RecoverResult {kind; exactly one of OperationConclusion | CancellationMetadata}
 ```
 
 Prepare is a closed flat family: authoring capability; replan facts from one objective snapshot;
@@ -71,9 +71,15 @@ status still translates only its exact six-code subset, while every Publish erro
 phase/origin metadata. Claimed-prefix/continuation/writer/record-recovery vocabulary stays
 internal. The package root additionally exports `RecoverRequest`/`RecoverResult` and has exactly
 63 exports; the recovery context/runtime/adapters remain internal, and there is no
-`recover_operations` or `RecoverError` compatibility path. `RecoverResult` owns its frozen nested
-details and keeps landing evidence deferred/type-only so importing the package does not create a
-façade↔landing cycle. Landing mutation remains a separate operation seam.
+`recover_operations` or `RecoverError` compatibility path. `RecoverRequest` is a strict
+two-kind family — `operation_conclusion` plus the `cancellation_metadata` repair variant
+(report-only action, no operation target, no consent) — and `RecoverResult` is the matching
+strict wrapper: one kind↔detail guard over nested `OperationConclusion` (the complete
+operation report and consent previews) and `CancellationMetadata` (per-candidate
+`CancellationAction` rows, the separate failed action, aborted/dry-run/unavailable facts),
+with no forwarding properties. Landing evidence stays deferred/type-only so importing the
+package does not create a façade↔landing cycle. Landing mutation remains a separate operation
+seam.
 
 The façade receives three nominal aggregate authorities:
 
@@ -110,7 +116,11 @@ The aggregate growth is exact: publication adds persistence `get_plan_body(*, is
 `pr_for_branch(branch) -> PullRequest|null` and `strict_stack(number) -> StackRestFacts|null`, and
 adds `get_pr`, `create_pr`, `update_pr_body`, `update_pr_base`, `reopen_pr`, `mark_pr_ready`,
 `create_stack`, and `append_stack`. Recovery adds exactly persistence `close_objective`, Git
-`worktree_admin_paths`, and GitHub `merge_async_probe` / `merged_evidence`; no parallel
+`worktree_admin_paths`, and GitHub `merge_async_probe` / `merged_evidence`; the
+cancellation-metadata variant adds only the optional persistence capability
+`native_cancellation_metadata_writer()` — a concrete default-`None` method overridden by the
+lazy production adapter (returning the resolved store exactly when it structurally satisfies
+the package-internal writer Protocol) and the owned fake. No parallel
 branch/stack/objective authority is introduced.
 
 The nominal interfaces make authority ownership explicit and support small owned in-memory fakes;
@@ -710,8 +720,12 @@ The cold CLI namespace reflects the domain split:
 > ordered-journal-evidence objective reconciliation drive are all landed. The broader landing
 > mutation/finalization machinery is still a direct operation seam awaiting its own façade
 > migration; recover keeps only a private runtime callback to the shared per-layer finalizer.
-> Cancellation-metadata diagnosis/repair is likewise a separate doctor/recover variant, not a
-> placeholder in the operation-conclusion request family.
+> Cancellation-metadata repair is landed as the second Recover variant
+> (`kind="cancellation_metadata"`): dispatched before worktree config and the operation lock,
+> isolated from every operation-conclusion mechanism (no journal mutation, classification,
+> consent, finalization, close, or sweep) while retaining read-only train reconstruction as
+> its fresh safety proof; `perk objective doctor --fix` is now a thin request/result mapper
+> over it, and `perk objective stack recover` remains operation-conclusion-only.
 >
 > **Live-proof addendum (2026-08-13):** the dogfood gate **PASSED**: real GitHub merge-async
 > atomically merged a 3-layer train, the land worker was deliberately SIGKILLed after its
