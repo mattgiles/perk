@@ -2012,24 +2012,6 @@ def _recover_result() -> RecoverResult:
     )
 
 
-def _cancellation_detail(
-    *,
-    actions: tuple[RecoverResult.CancellationAction, ...] = (),
-    failed: RecoverResult.CancellationAction | None = None,
-    aborted: bool = False,
-    dry_run: bool = False,
-    unavailable: str | None = None,
-) -> RecoverResult.CancellationMetadata:
-    return RecoverResult.CancellationMetadata(
-        objective_id="10",
-        actions=actions,
-        failed=failed,
-        aborted=aborted,
-        dry_run=dry_run,
-        unavailable=unavailable,
-    )
-
-
 def test_recover_result_nested_records_are_frozen_without_combination_guards() -> None:
     merged = RecoverResult.MergedPrefix("1.1", 42, "a" * 40)
     remainder = RecoverResult.RemainderPr(43, "OPEN", "b" * 40)
@@ -2080,7 +2062,14 @@ def test_recover_result_is_a_strict_two_variant_wrapper() -> None:
     action = RecoverResult.CancellationAction(
         code="canceled_unpublished_projected", node_id="1.3", outcome="applied"
     )
-    detail = _cancellation_detail(actions=(action,))
+    detail = RecoverResult.CancellationMetadata(
+        objective_id="10",
+        actions=(action,),
+        failed=None,
+        aborted=False,
+        dry_run=False,
+        unavailable=None,
+    )
     cancellation = RecoverResult(kind="cancellation_metadata", cancellation_metadata=detail)
 
     assert cancellation.cancellation_metadata is detail

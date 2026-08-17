@@ -129,20 +129,14 @@ class _ScriptedTrains:
     def __init__(self, *steps: object, recover_results: list[object] | None = None) -> None:
         self._steps = list(steps)
         self._recover_results = list(recover_results or [])
-        self.calls: list[str] = []
         self.status_calls: list[str] = []
         self.recover_calls: list[dict[str, object]] = []
 
-    def _next(self, objective_id: str):
-        self.calls.append(objective_id)
+    def status(self, request):
+        self.status_calls.append(request.objective_id)
         step = self._steps.pop(0) if len(self._steps) > 1 else self._steps[0]
         if isinstance(step, Exception):
             raise step
-        return step
-
-    def status(self, request):
-        self.status_calls.append(request.objective_id)
-        step = self._next(request.objective_id)
         if isinstance(step, NoDeliveryTrain):
             return StatusResult(
                 objective_id=step.objective_id,
@@ -151,6 +145,7 @@ class _ScriptedTrains:
                 train=None,
                 no_train_reason=step.reason,
             )
+        assert isinstance(step, DeliveryTrain)
         return StatusResult(
             objective_id=step.objective_id,
             objective_url=step.objective_url,
@@ -370,7 +365,7 @@ def test_superseded_id_targets_the_active_successor(monkeypatch):
     assert payload["train"]["objective_id"] == "43"
     assert payload["train"]["redirected_from"] == "42"
     # Every read targeted the ACTIVE successor — both report parts.
-    assert trains.calls == ["43"]
+    assert trains.status_calls == ["43"]
     assert store.detect_calls == ["43"]
 
 
@@ -401,7 +396,7 @@ def test_superseded_id_fix_repairs_only_against_the_successor(monkeypatch):
     assert store.repair_calls == [{"objective_id": "43", "dry_run": False}]
     (call,) = trains.recover_calls
     assert call["request"] == RecoverRequest(kind="cancellation_metadata", objective_id="43")
-    assert set(trains.calls) == {"43"}
+    assert set(trains.status_calls) == {"43"}
 
 
 def test_not_a_repo_is_the_fail_envelope_exit_2(monkeypatch):
@@ -733,7 +728,8 @@ def test_manifest_repair_with_applied_changes_rediagnoses_before_train_actions(m
     # The stale pre-repair candidate never reached Recover: the fresh post-manifest
     # diagnosis (incremental) short-circuits the train action.
     assert trains.recover_calls == []
-    assert trains.calls == ["42", "42"]  # initial diagnosis + the post-manifest re-diagnosis
+    # Initial diagnosis + the post-manifest re-diagnosis.
+    assert trains.status_calls == ["42", "42"]
 
 
 def test_manifest_applied_writes_precede_exactly_one_recover_call(monkeypatch):
@@ -760,7 +756,7 @@ def test_manifest_applied_writes_precede_exactly_one_recover_call(monkeypatch):
     assert result.exit_code == 0
     fix = json.loads(result.output)["train_fix"]
     assert fix["state"] == "completed" and [a["outcome"] for a in fix["applied"]] == ["applied"]
-    assert trains.calls == ["42", "42", "42"]
+    assert trains.status_calls == ["42", "42", "42"]
     (call,) = trains.recover_calls
     assert call["request"] == RecoverRequest(kind="cancellation_metadata", objective_id="42")
 

@@ -209,17 +209,6 @@ def _make_consent(*, yes: bool):
     return consent
 
 
-def _require_operation_conclusion(
-    result: RecoverResult,
-) -> RecoverResult.OperationConclusion:
-    """The one narrowing point: an operation_conclusion request always carries its detail
-    (the strict wrapper's kind↔detail guard)."""
-    conclusion = result.operation_conclusion
-    if conclusion is None:
-        raise AssertionError("operation_conclusion recover returned no operation detail")
-    return conclusion
-
-
 def _render_result(result: RecoverResult.OperationConclusion) -> None:
     if result.dry_run:
         user_output("dry run: nothing was concluded, journaled, or swept")
@@ -353,9 +342,12 @@ def recover_stack(
             dry_run=dry_run,
             operation_id=operation_id,
         )
-        result = _require_operation_conclusion(
-            resolve_delivery(repo_root).recover(request, consent=_make_consent(yes=yes))
-        )
+        wrapped = resolve_delivery(repo_root).recover(request, consent=_make_consent(yes=yes))
+        # An operation_conclusion request always carries its detail (the strict wrapper's
+        # kind↔detail guard).
+        result = wrapped.operation_conclusion
+        if result is None:
+            raise AssertionError("operation_conclusion recover returned no operation detail")
     except DeliveryError as exc:
         fail(ctx, as_json=as_json, error_type=exc.error_type, message=str(exc))
         return
