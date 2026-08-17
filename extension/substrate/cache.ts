@@ -165,22 +165,31 @@ function assertSafeRunId(runId: string): void {
  * Ensure one checkout-owned path component is a real directory, never a static redirect.
  * Check-before-create races against a same-UID process are intentionally out of scope.
  */
-function ensureUnredirectedDirectory(path: string): void {
+function ensureUnredirectedDirectory(
+  path: string,
+  opts: { createMode: number; rejectGroupWorldWrite: boolean },
+): void {
+  let stat: ReturnType<typeof lstatSync>;
   try {
-    const stat = lstatSync(path);
-    if (stat.isSymbolicLink()) throw new Error(`refusing a symlinked run-scratch path: ${path}`);
-    if (!stat.isDirectory()) throw new Error(`refusing a non-directory run-scratch path: ${path}`);
-    return;
+    stat = lstatSync(path);
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    mkdirSync(path, { mode: opts.createMode });
+    stat = lstatSync(path);
   }
-  mkdirSync(path);
+  if (stat.isSymbolicLink()) throw new Error(`refusing a symlinked run-scratch path: ${path}`);
+  if (!stat.isDirectory()) throw new Error(`refusing a non-directory run-scratch path: ${path}`);
+  if (opts.rejectGroupWorldWrite && (stat.mode & 0o022) !== 0) {
+    throw new Error(`refusing a group/world-writable run-scratch path: ${path}`);
+  }
 }
 
 /**
  * Establish a run root beneath this checkout without following redirected checkout content.
  * Symlinks above `cwd` remain legal; every existing component from `.perk` through the run root
- * must be a real directory. Run-id validation happens before the first filesystem write.
+ * must be a real directory without group/world write permission, and missing components are
+ * created no broader than 0755 even under a permissive umask. Run-id validation happens before
+ * the first filesystem write.
  */
 export function ensureRunScratch(cwd: string, runId: string): string {
   assertSafeRunId(runId);
@@ -192,7 +201,12 @@ export function ensureRunScratch(cwd: string, runId: string): string {
     join(scratchDir(cwd), "runs"),
     dir,
   ];
-  for (const component of components) ensureUnredirectedDirectory(component);
+  for (const component of components) {
+    ensureUnredirectedDirectory(component, {
+      createMode: 0o755,
+      rejectGroupWorldWrite: true,
+    });
+  }
 
   const expected = join(realpathSync(cwd), relative(cwd, dir));
   if (realpathSync(dir) !== expected) {
@@ -202,13 +216,17 @@ export function ensureRunScratch(cwd: string, runId: string): string {
 }
 
 /**
- * Create/re-apply the private run-owned agent directory. The mode protects against other OS users;
- * it is not a sandbox from another process running as the same user.
+ * Create the private run-owned agent directory as 0700 from the outset, then re-apply that mode on
+ * reuse. The mode protects against other OS users; it is not a sandbox from another process running
+ * as the same user.
  */
 export function ensureAgentScratch(cwd: string, runId: string): string {
   const runDir = ensureRunScratch(cwd, runId);
   const dir = agentScratchDir(cwd, runId);
-  ensureUnredirectedDirectory(dir);
+  ensureUnredirectedDirectory(dir, {
+    createMode: 0o700,
+    rejectGroupWorldWrite: false,
+  });
   const expected = join(realpathSync(runDir), "agent");
   if (realpathSync(dir) !== expected) {
     throw new Error(`refusing a redirected agent scratch dir: ${dir}`);

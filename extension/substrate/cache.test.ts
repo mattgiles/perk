@@ -185,6 +185,36 @@ test("ensureRunScratch rejects symlinks and non-directories from .perk through t
   }
 });
 
+test("ensureRunScratch rejects group/world-writable checkout-owned ancestors", () => {
+  const components = [
+    [".perk"],
+    [".perk", "workflow"],
+    [".perk", "workflow", "scratch"],
+    [".perk", "workflow", "scratch", "runs"],
+    [".perk", "workflow", "scratch", "runs", "RID"],
+  ];
+  for (const segments of components) {
+    const cwd = tmp();
+    ensureRunScratch(cwd, "RID");
+    const unsafe = join(cwd, ...segments);
+    chmodSync(unsafe, 0o777);
+    assert.throws(() => ensureRunScratch(cwd, "RID"), /group\/world-writable run-scratch path/);
+  }
+});
+
+test("ensureRunScratch and ensureAgentScratch create safe modes under a permissive umask", () => {
+  const previousUmask = process.umask(0);
+  try {
+    const cwd = tmp();
+    const runDir = ensureRunScratch(cwd, "RID");
+    const agentDir = ensureAgentScratch(cwd, "RID");
+    assert.equal(statSync(runDir).mode & 0o022, 0, "run root permits group/world writes");
+    assert.equal(statSync(agentDir).mode & 0o777, 0o700);
+  } finally {
+    process.umask(previousUmask);
+  }
+});
+
 test("ensureRunScratch permits a symlink above the checkout root", () => {
   const root = tmp();
   const checkout = join(root, "checkout");

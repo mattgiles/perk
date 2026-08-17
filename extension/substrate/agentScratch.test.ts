@@ -214,6 +214,44 @@ test("compaction re-injects a dropped block but deduplicates a retained block", 
   }
 });
 
+test("quoted compaction prose may retain an old path but is not live scratch guidance", async () => {
+  const cwd = scaffoldRepo();
+  const parent = renderAgentScratchBlock(cwd, "PARENT");
+  const child = renderAgentScratchBlock(cwd, "PARENT.1");
+  const quotedSummary = `Earlier context included:\n${parent.content}`;
+  const manager = SessionManager.inMemory(cwd);
+  const stateId = manager.appendCustomEntry("perk:workflow-state", {
+    run_id: "PARENT.1",
+    mode: "read-write",
+  });
+  manager.appendCompaction(quotedSummary, stateId, 100);
+  const h = await loadPerkSession({
+    cwd,
+    sessionManager: manager,
+    env: { PERK_RUN_ID: undefined },
+  });
+  try {
+    const injected = await h.emitBeforeAgentStart();
+    assert.deepEqual(
+      scratchMessages(injected).map((message) => message.content),
+      [child.content],
+      "quoted summary prose does not deduplicate the current direct block",
+    );
+
+    const surviving = await h.emitContext([
+      { role: "compactionSummary", content: quotedSummary },
+      { customType: AGENT_SCRATCH_CONTEXT_TYPE, content: parent.content },
+      { customType: AGENT_SCRATCH_CONTEXT_TYPE, content: child.content },
+    ]);
+    assert.deepEqual(surviving, [
+      { role: "compactionSummary", content: quotedSummary },
+      { customType: AGENT_SCRATCH_CONTEXT_TYPE, content: child.content },
+    ]);
+  } finally {
+    h.dispose();
+  }
+});
+
 test("read-only/report-only contexts strip guidance; a gate exit and unknown child enable it", async () => {
   const cwd = scaffoldRepo();
   const block = renderAgentScratchBlock(cwd, "RID");

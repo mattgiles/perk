@@ -3,7 +3,8 @@
 // This module is guidance, not enforcement: it registers no tool and changes no process-global
 // temp environment. Eligible write-capable model turns receive the repository-relative current-run
 // path after the confined directory has been established. The context filter removes inherited or
-// stale blocks so a fork/adopt child never sees its parent's path.
+// stale direct scratch custom blocks. A compaction summary may quote old prose/path text; that is
+// not a live guidance delivery or authoritative provenance, and is deliberately left intact.
 
 import { relative, sep } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
@@ -129,7 +130,7 @@ function branchHasBlock(branch: readonly BranchEntry[], block: AgentScratchBlock
   );
 }
 
-/** Register the universal eligible-turn delivery and stale/inherited context hygiene. */
+/** Register eligible-turn delivery and direct scratch-custom context hygiene. */
 export function registerAgentScratch(
   pi: ExtensionAPI,
   provisioner: AgentScratchProvisioner = createAgentScratchProvisioner(),

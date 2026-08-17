@@ -122,6 +122,7 @@ type OverlayRuntime = {
 type SideSessionRuntime = {
   session: AgentSession;
   modelKey: string;
+  agentScratchContent: string | null;
   unsubscribe: () => void;
 };
 
@@ -172,38 +173,16 @@ export function liveModelRuntime(
  * live session's model runtime (`liveModelRuntime`). Throws when no model is selected — callers
  * gate on `ctx.model` first.
  */
-export function btwAppendSystemPrompt(
-  ctx: ExtensionContext,
-  opts: {
-    tools: string[];
-    appendSystemPrompt?: string[];
-    agentScratch?: AgentScratchProvisioner;
-  },
-): string[] {
-  const appendSystemPrompt = [...(opts.appendSystemPrompt ?? [BTW_SYSTEM_PROMPT])];
-  const readWriteTools = sideSessionTools(false);
-  const isReadWrite =
-    opts.tools.length === readWriteTools.length &&
-    readWriteTools.every((tool) => opts.tools.includes(tool));
-  if (isReadWrite) {
-    const block = (opts.agentScratch ?? createAgentScratchProvisioner()).resolve(ctx);
-    if (block !== null) appendSystemPrompt.push(block.content);
-  }
-  return appendSystemPrompt;
-}
-
 export async function createBtwAgentSession(
   ctx: ExtensionContext,
   opts: {
     thinkingLevel: SessionThinkingLevel;
     tools: string[];
     appendSystemPrompt?: string[];
-    agentScratch?: AgentScratchProvisioner;
   },
 ): Promise<AgentSession> {
   const model = ctx.model;
   if (!model) throw new Error("No active model selected.");
-  const appendSystemPrompt = btwAppendSystemPrompt(ctx, opts);
 
   const { session } = await createAgentSession({
     sessionManager: SessionManager.inMemory(),
@@ -211,7 +190,7 @@ export async function createBtwAgentSession(
     modelRuntime: liveModelRuntime(ctx),
     thinkingLevel: opts.thinkingLevel,
     tools: opts.tools,
-    resourceLoader: createBtwResourceLoader(ctx, appendSystemPrompt),
+    resourceLoader: createBtwResourceLoader(ctx, opts.appendSystemPrompt),
   });
   return session;
 }
@@ -634,6 +613,7 @@ export function registerBtw(
 
   async function createSideSession(
     ctx: ExtensionCommandContext,
+    agentScratchContent: string | null,
   ): Promise<SideSessionRuntime | null> {
     if (!ctx.model) {
       return null;
@@ -642,11 +622,13 @@ export function registerBtw(
     // perk gate-mirror: read-only ⇒ ["read"] only (a foreign session's bash can't be sandboxed
     // by perk's isReadOnlyBashCommand); read-write ⇒ the full set. The session rides the LIVE
     // runtime (`createBtwAgentSession` → `liveModelRuntime`) so auth dispatch matches the main
-    // session exactly.
+    // session exactly. Scratch posture comes from this same gate rather than reverse-engineering
+    // it from a tool array.
     const session = await createBtwAgentSession(ctx, {
       thinkingLevel: pi.getThinkingLevel() as SessionThinkingLevel,
       tools: sideSessionTools(gating.isActive()),
-      agentScratch,
+      appendSystemPrompt:
+        agentScratchContent === null ? undefined : [BTW_SYSTEM_PROMPT, agentScratchContent],
     });
 
     const seedMessages = buildSeedMessages(ctx, thread);
@@ -714,6 +696,7 @@ export function registerBtw(
     return {
       session,
       modelKey: getModelKey(ctx),
+      agentScratchContent,
       unsubscribe,
     };
   }
@@ -725,13 +708,23 @@ export function registerBtw(
       return null;
     }
 
+    // This runs before every side-model prompt. A successful resolve repairs deletion
+    // idempotently; a transition between unavailable and available scratch recreates the cached
+    // session so its immutable resource-loader prompt matches the current turn.
+    const agentScratchContent = gating.isActive()
+      ? null
+      : (agentScratch.resolve(ctx)?.content ?? null);
     const expectedModelKey = getModelKey(ctx);
-    if (activeSideSession && activeSideSession.modelKey === expectedModelKey) {
+    if (
+      activeSideSession &&
+      activeSideSession.modelKey === expectedModelKey &&
+      activeSideSession.agentScratchContent === agentScratchContent
+    ) {
       return activeSideSession;
     }
 
     await disposeSideSession();
-    activeSideSession = await createSideSession(ctx);
+    activeSideSession = await createSideSession(ctx, agentScratchContent);
     return activeSideSession;
   }
 

@@ -178,12 +178,14 @@ The local cache tier — written and read by **both** the CLI (exterior) and the
   boundary (`extension/substrate/cache.ts::ensureRunScratch`): before any write, `run_id` must be
   one non-empty path segment (not `.`/`..`, with no `/`, `\\`, or NUL); every existing component
   from the checkout's `.perk` child through the run root must be a real directory, never a symlink
-  or non-directory; missing components are materialized in order; and the run root's realpath must
-  equal the expected descendant of `realpath(cwd)` (a symlink above `cwd` remains legal). All
-  interior run-root writers use that boundary. `ensureAgentScratch` then applies the same
-  symlink/non-directory and resolved-containment checks to `agent/`, creates it idempotently, and
-  creates/re-applies POSIX mode `0700`. This is static redirected-path protection and privacy from
-  other OS users, not a defense against a concurrent process running as the same user.
+  or non-directory, and must have no group/world write bit; missing components are materialized in
+  order with an explicit maximum mode `0755` even under a permissive umask; and the run root's
+  realpath must equal the expected descendant of `realpath(cwd)` (a symlink above `cwd` remains
+  legal). All interior run-root writers use that boundary. `ensureAgentScratch` then applies the
+  same symlink/non-directory and resolved-containment checks to `agent/`, creates it as POSIX mode
+  `0700` from the outset, and re-applies `0700` on reuse. This is static redirected-path protection
+  and privacy from other OS users, not a defense against a concurrent process running as the same
+  user.
 
   The extension provisions the directory before every eligible model turn and injects one hidden
   `customType: "perk:agent-scratch"` block naming the repository-relative current-run path. A
@@ -195,14 +197,22 @@ The local cache tier — written and read by **both** the CLI (exterior) and the
   remain eligible; absent generic foreign-agent metadata, inherited parent mode is the fallback.
   Directory repair happens before prompt deduplication. The exact run-id/path-derived block is
   deduplicated only inside the active post-compaction context window; context filtering keeps one
-  exact current-run copy and strips inherited/stale copies (or all copies while ineligible), so a
-  fork/adopt child cannot inherit its parent's path and a compacted-away block is re-injected.
+  exact current-run **scratch custom block** and strips direct inherited/stale scratch custom blocks
+  (or all direct copies while ineligible), so a compacted-away block is re-injected. Compaction
+  summary prose is not a scratch custom block and may quote an older marker/path; it is deliberately
+  not redacted and is neither a live guidance delivery nor authoritative provenance. Only the
+  current-run direct block counts as live scratch guidance, and durable decisions still re-read the
+  canonical repository/backend source.
   Because this is a universal pre-turn side effect that can become eligible after an in-session
   read-only gate exit, every registry stage declares the existing `cache.scratch` key in `writes`.
 
-  A write-capable `/btw` side session receives the same rendered block once through its appended
-  system prompt after scratch custom messages are removed from its seed. Its read-only side-session
-  shape and tool-less summary shape receive none. Direct SDK read-only sessions remain unguided:
+  A write-capable `/btw` side session receives the same rendered block once in its effective
+  appended system prompt after scratch custom messages are removed from its seed. Provisioning is
+  rechecked before every side-model prompt: deletion is repaired while reusing the session, and a
+  transition between unavailable and available scratch recreates the cached session so its
+  immutable prompt matches the current turn. The same gate that selects its tools excludes the
+  block from the read-only side-session shape; the tool-less summary shape also receives none.
+  Direct SDK read-only sessions remain unguided:
   they load with `noExtensions: true` and the bounded `read`/`grep`/`find`/`ls` tool set. With no
   settled run id the resolver is silent; an unsafe id or filesystem/permission failure injects no
   path, warns through the report seam, and continues the turn. A failure is retried on later

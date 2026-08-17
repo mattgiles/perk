@@ -3,7 +3,14 @@
 // network). Each case has a pure-function twin in workflowState.test.ts; here we prove the wiring.
 
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
@@ -154,6 +161,33 @@ test("fork: an inherited pi_session_id derives a child run_id", async () => {
   }
 });
 
+test("fork: a refused child scratch redirect warns but still settles derived identity", async () => {
+  const cwd = scaffoldRepo();
+  const childRun = "01RID.1";
+  const outside = join(cwd, "fork-redirect-target");
+  mkdirSync(outside);
+  mkdirSync(join(runScratchDir(cwd, childRun), ".."), { recursive: true });
+  symlinkSync(outside, runScratchDir(cwd, childRun), "dir");
+  const file = plantSession(cwd, [
+    { run_id: "01RID", pi_session_id: "OTHER-SESSION", mode: "read-write" },
+  ]);
+
+  const h = await loadPerkSession({ cwd, sessionManager: SessionManager.open(file) });
+  try {
+    assert.equal(h.workflowState().run_id, childRun);
+    assert.equal(h.workflowState().predecessor, "01RID");
+    assert.ok(
+      h.notifyEvents.some((event) =>
+        event.message.includes(`could not create fork run root for ${childRun}`),
+      ),
+      "scratch refusal was not reported",
+    );
+    assert.deepEqual(readdirSync(outside), [], "fork startup followed the child redirect");
+  } finally {
+    h.dispose();
+  }
+});
+
 test("implement session_start records the implementation/main session pointer", async () => {
   // A cold-claimed implement run self-keys its current session file into implementation.main.
   const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write", stage: "implement" } });
@@ -252,6 +286,43 @@ test("env-child: a consumed handoff makes an env-inherited session adopt, not re
     // The handoff still records the TRUE claimer (never re-consumed).
     const handoff = JSON.parse(readFileSync(handoffPath(cwd, "01RID"), "utf8"));
     assert.equal(handoff.pi_session_id, "parent.jsonl");
+  } finally {
+    h.dispose();
+  }
+});
+
+test("env-child: a refused adopted scratch redirect warns but still settles identity", async () => {
+  const cwd = scaffoldRepo({
+    handoff: {
+      runId: "01RID",
+      mode: "read-write",
+      stage: "implement",
+      consumed: true,
+      piSessionId: "parent.jsonl",
+    },
+  });
+  const childRun = "01RID.1";
+  const outside = join(cwd, "adopt-redirect-target");
+  mkdirSync(outside);
+  mkdirSync(join(runScratchDir(cwd, childRun), ".."), { recursive: true });
+  symlinkSync(outside, runScratchDir(cwd, childRun), "dir");
+  const file = plantSession(cwd, [], { fileName: "child.jsonl" });
+
+  const h = await loadPerkSession({
+    cwd,
+    env: { PERK_RUN_ID: "01RID" },
+    sessionManager: SessionManager.open(file),
+  });
+  try {
+    assert.equal(h.workflowState().run_id, childRun);
+    assert.equal(h.workflowState().predecessor, "01RID");
+    assert.ok(
+      h.notifyEvents.some((event) =>
+        event.message.includes(`could not create adopted run root for ${childRun}`),
+      ),
+      "scratch refusal was not reported",
+    );
+    assert.deepEqual(readdirSync(outside), [], "adopt startup followed the child redirect");
   } finally {
     h.dispose();
   }

@@ -53,11 +53,13 @@ block. Neither do perk's report-only children: `perk.adversarial-reviewer`, `per
 `perk.harvest-analyst`, `perk.learn-analyst`, `perk.objective-explorer`, `perk.pr-reviewer`,
 `perk.review-angle-selector`, and `perk.review-classifier`. Main write-capable sessions, the
 write-capable `perk.conflict-resolver`, remote workers, and unknown/custom children remain eligible.
-A read-write `/btw` side session gets the same current-run guidance; its read-only and summary
-shapes do not. Direct SDK-created read-only children remain unguided.
+A read-write `/btw` side session gets the same current-run guidance and rechecks provisioning
+before every side-model prompt; its read-only and summary shapes do not. Direct SDK-created
+read-only children remain unguided.
 
-The `agent/` directory is created or repaired idempotently with POSIX mode `0700`. Existing
-symlinks or non-directories in the checkout-owned run path are refused, and resolved containment
+The `agent/` directory is created as POSIX mode `0700` from the outset and repaired idempotently.
+Existing symlinks, non-directories, or group/world-writable ancestors in the checkout-owned run
+path are refused; missing ancestors are created no broader than `0755`, and resolved containment
 beneath the active checkout is verified. On an unsafe run id, filesystem error, or permission
 failure, perk reports a warning, injects no path, and lets the model turn continue; later eligible
 turns retry. The permission protects against other OS users, not another process running as the
@@ -65,7 +67,9 @@ same user.
 
 Agent scratch is **disposable and non-authoritative**. It has no provenance pointer or digest, and
 a durable decision must re-read the canonical repository or backend source rather than trust a
-scratch copy. GitHub Actions diagnostics retain the rest of the hidden `.perk` run directory but
+scratch copy. Direct hidden scratch blocks are corrected across fork and compaction, but a
+compaction summary may still quote an older path as ordinary prose; that quote is not live guidance
+or provenance. GitHub Actions diagnostics retain the rest of the hidden `.perk` run directory but
 explicitly exclude `agent/**`, so these files are not uploaded as remote run artifacts. They persist
 across reload/resume locally and are removed only with the enclosing run by the normal
 `perk state prune` policy; there is no session-exit cleanup.
