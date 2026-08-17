@@ -2156,6 +2156,53 @@ def test_recover_resolves_config_before_one_lock_held_through_consent_and_core(
     assert events == ["config-error"]
 
 
+def test_recover_preserves_operation_lock_busy_raised_after_lock_entry(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from contextlib import contextmanager
+
+    from perk.delivery import oplock
+    from perk.delivery import recover as recover_mod
+
+    entered = False
+    failure = oplock.OperationLockBusy("operation body reported lock contention")
+
+    @contextmanager
+    def operation_lock(repo_root: Path):
+        nonlocal entered
+        assert repo_root == Path("/bound-repo")
+        entered = True
+        try:
+            yield
+        finally:
+            entered = False
+
+    def core(context, seams, request, *, worktree_root, consent):
+        assert entered is True
+        raise failure
+
+    monkeypatch.setattr(
+        recover_mod,
+        "_DEFAULT_RECOVER_RUNTIME",
+        replace(
+            recover_mod._DEFAULT_RECOVER_RUNTIME,
+            worktree_root=lambda repo_root: Path("/worktrees"),
+            operation_lock=operation_lock,
+        ),
+    )
+    monkeypatch.setattr(recover_mod, "_recover", core)
+    delivery = Delivery(
+        persistence=FakeDeliveryPersistence(),
+        git=FakeDeliveryGit(repo_root=Path("/bound-repo")),
+        github=FakeDeliveryGitHub(),
+    )
+
+    with pytest.raises(oplock.OperationLockBusy) as excinfo:
+        delivery.recover(RecoverRequest(kind="operation_conclusion", objective_id="10"))
+    assert excinfo.value is failure
+    assert entered is False
+
+
 @pytest.mark.parametrize(
     ("source", "error_type"),
     (

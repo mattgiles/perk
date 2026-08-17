@@ -181,6 +181,10 @@ def test_blank_operation_reaches_service_and_returns_typed_not_found(monkeypatch
 
 
 def test_dry_run_with_abandon_is_invalid_input(monkeypatch):
+    def forbidden_config(_ctx):
+        raise AssertionError("flag validation must precede config validation")
+
+    monkeypatch.setattr(recover_cmd, "require_config", forbidden_config)
     outcome, calls = _invoke(
         ["objective", "stack", "recover", "1431", "--dry-run", "--abandon", "--json"],
         monkeypatch=monkeypatch,
@@ -188,6 +192,28 @@ def test_dry_run_with_abandon_is_invalid_input(monkeypatch):
     assert outcome.exit_code == 1
     assert json.loads(outcome.stdout)["error_type"] == "invalid_input"
     assert calls == []  # refused before any observation
+
+
+def test_eager_config_failure_precedes_objective_and_delivery_resolution(monkeypatch):
+    def invalid_config(_ctx):
+        raise UserFacingCliError(
+            "malformed config: worktree.root must be a string",
+            error_type="invalid_input",
+        )
+
+    monkeypatch.setattr(recover_cmd, "require_config", invalid_config)
+    outcome, calls = _invoke(
+        ["objective", "stack", "recover", "1431", "--json"],
+        monkeypatch=monkeypatch,
+    )
+
+    assert outcome.exit_code == 1
+    assert json.loads(outcome.stdout) == {
+        "success": False,
+        "error_type": "invalid_input",
+        "message": "malformed config: worktree.root must be a string",
+    }
+    assert calls == []
 
 
 def test_no_run_id_flag_exists():
