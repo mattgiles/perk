@@ -32,7 +32,8 @@ The local cache tier — written and read by **both** the CLI (exterior) and the
 ├── plan.md                 # cache.plan: the per-worktree plan snapshot for review fidelity (Python-only; transient)
 ├── plan-ref.json           # cache.plan-ref: the active plan->branch ref pointer (local mirror)
 ├── scratch/runs/<run_id>/  # per-run inter-process workflow files (diffs, generated bodies)
-│   └── data/               # the session data dir (Node 1.2): run-scoped session artifacts
+│   ├── agent/              # disposable, non-authoritative model intermediates (mode 0700)
+│   └── data/               # pointer-validated run-scoped session artifacts
 ├── handoff/<run_id>.json   # pre-session CLI->extension cold-door state (claimed on session_start)
 ├── agent-session.json      # cache.agent-session: the Linear AgentSession pointer (§8.22)
 ├── hunk-watch/             # the watch-feedback bridge (§8.58): worktree-local, disposable
@@ -172,6 +173,61 @@ The local cache tier — written and read by **both** the CLI (exterior) and the
   dir persist through the LWW rebuild. Consumers fail open to their fallback when validation
   refuses (the reader returns `null`; mismatched-run_id refusals are silent by design, broken
   promises — missing file, digest mismatch — warn on stderr).
+- **Agent scratch.** `.perk/workflow/scratch/runs/<run_id>/agent/` is the run-owned directory for
+  disposable command/model intermediates. Interior run-directory creation shares one hardened
+  boundary (`extension/substrate/cache.ts::ensureRunScratch`): before any write, `run_id` must be
+  one non-empty path segment (not `.`/`..`, with no `/`, `\\`, or NUL); every existing component
+  from the checkout's `.perk` child through the run root must be a real directory, never a symlink
+  or non-directory, and must have no group/world write bit; missing components are materialized in
+  order with an explicit maximum mode `0755` even under a permissive umask; and the run root's
+  realpath must equal the expected descendant of `realpath(cwd)` (a symlink above `cwd` remains
+  legal). All interior run-root writers use that boundary. `ensureAgentScratch` then applies the
+  same symlink/non-directory and resolved-containment checks to `agent/`, creates it as POSIX mode
+  `0700` from the outset, and re-applies `0700` on reuse. This is static redirected-path protection
+  and privacy from other OS users, not a defense against a concurrent process running as the same
+  user.
+
+  The extension provisions the directory before every eligible model turn and injects one hidden
+  `customType: "perk:agent-scratch"` block naming the repository-relative current-run path. A
+  context is eligible unless branch-LWW workflow mode is explicitly `read-only` or
+  `PI_SUBAGENT_CHILD_AGENT` names one of perk's report-only children (`perk.adversarial-reviewer`,
+  `perk.draft-reviewer`, `perk.harvest-analyst`, `perk.learn-analyst`,
+  `perk.objective-explorer`, `perk.pr-reviewer`, `perk.review-angle-selector`,
+  `perk.review-classifier`). Main sessions, `perk.conflict-resolver`, and unknown/custom children
+  remain eligible; absent generic foreign-agent metadata, inherited parent mode is the fallback.
+  Directory repair happens before prompt deduplication. The exact run-id/path-derived block is
+  deduplicated only inside the active post-compaction context window; context filtering keeps one
+  exact current-run **scratch custom block** and strips direct inherited/stale scratch custom blocks
+  (or all direct copies while ineligible), so a compacted-away block is re-injected. Compaction
+  summary prose is not a scratch custom block and may quote an older marker/path; it is deliberately
+  not redacted and is neither a live guidance delivery nor authoritative provenance. Only the
+  current-run direct block counts as live scratch guidance, and durable decisions still re-read the
+  canonical repository/backend source.
+  Because this is a universal pre-turn side effect that can become eligible after an in-session
+  read-only gate exit, every registry stage declares the existing `cache.scratch` key in `writes`.
+
+  A write-capable `/btw` side session receives the same rendered block once in its effective
+  appended system prompt after scratch custom messages are removed from its seed. Provisioning is
+  rechecked before every side-model prompt: deletion is repaired while reusing the session, and a
+  transition between unavailable and available scratch recreates the cached session so its
+  immutable prompt matches the current turn. The same gate that selects its tools excludes the
+  block from the read-only side-session shape; the tool-less summary shape also receives none.
+  Direct SDK read-only sessions remain unguided:
+  they load with `noExtensions: true` and the bounded `read`/`grep`/`find`/`ls` tool set. With no
+  settled run id the resolver is silent; an unsafe id or filesystem/permission failure injects no
+  path, warns through the report seam, and continues the turn. A failure is retried on later
+  eligible turns, with duplicate warnings suppressed per run within one extension activation and
+  suppression cleared after a successful retry. Fork/adopt run-root setup likewise reports and
+  continues after settling the derived workflow identity, without an unsafe fallback write.
+
+  The guidance asks agents to use descriptive non-colliding names instead of shared `/tmp` and to
+  re-read canonical repository/backend sources before durable decisions. Agent scratch is never
+  canonical evidence: it has no filename policy, atomic per-file writer, manifest, digest, or
+  `session_artifacts` pointer. Remote run diagnostics explicitly include hidden `.perk` files but
+  exclude the matching `agent/**` subtree from `actions/upload-artifact`; local cleanup remains the
+  enclosing run directory's existing `perk state prune` policy (no exit-time deletion). Non-goals:
+  no model-facing scratch writer, `PERK_SCRATCH_DIR`, `TMPDIR`, FFF/search change, shell/path
+  enforcement, OS sandbox, provenance protocol, or session-exit cleanup.
 - **Atomic workflow writes + corruption posture.** Every `.perk/workflow/` file write on both
   planes goes through the per-plane atomic-write seam — `perk/state/cache.py::atomic_write_text`
   (exterior) / `extension/substrate/cache.ts::atomicWriteFileSync` (interior): a temp file in the
@@ -2729,12 +2785,14 @@ so `init` writes them and `doctor` verifies/repairs them through the one shared 
   **`gh auth setup-git`** before invoking
   `perk run-worker` — it installs `gh` as git's https credential helper using the step's
   `GH_TOKEN` (= `PERK_GH_PAT`), so the skills CLI's sync during positioning (step 4 below) can
-  clone private skill sources. A final **`Upload run diagnostics`** step (`actions/upload-artifact@v4`) uploads
-  `.perk/workflow/scratch/runs/<run_id>/` — the §8.12 durable run-event stream (`events.ndjson`
-  and friends), which is otherwise written into the runner's checkout and lost at teardown — as
-  artifact `perk-run-<run_id>` for **every real run, pass or fail**
-  (`if: always() && inputs.smoke != 'true'`, `if-no-files-found: ignore`; smoke runs write nothing
-  and upload nothing). An opt-out repo variable `PERK_ENABLED=false` disables the job without
+  clone private skill sources. A final **`Upload run diagnostics`** step (`actions/upload-artifact@v4`)
+  uploads `.perk/workflow/scratch/runs/<run_id>/` — the §8.12 durable run-event stream
+  (`events.ndjson` and friends), which is otherwise written into the runner's checkout and lost at
+  teardown — as artifact `perk-run-<run_id>` for **every real run, pass or fail**. The upload sets
+  `include-hidden-files: true` so the hidden `.perk` tree is actually retained, and its multiline
+  path excludes `!.perk/workflow/scratch/runs/<run_id>/agent/**` so model-authored agent scratch is
+  never retained remotely (`if: always() && inputs.smoke != 'true'`, `if-no-files-found: ignore`;
+  smoke runs write nothing and upload nothing). An opt-out repo variable `PERK_ENABLED=false` disables the job without
   removing the file. **Auth model:** checkout + push use the `PERK_GH_PAT` PAT, **not** `github.token` — a
   PAT-pushed commit triggers downstream CI (the implement drive commits + `submit` pushes);
   `GITHUB_TOKEN`-pushed commits do not. This is a stated decision Node 2.4 inherited (the

@@ -13,9 +13,9 @@
 // wedge the save/launch/drive it rides on. Node builtins + cache.ts + git.ts only (loads under
 // `node --test`).
 
-import { existsSync, mkdirSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { basename, join } from "node:path";
-import { atomicWriteFileSync, runScratchDir } from "./cache.ts";
+import { atomicWriteFileSync, ensureRunScratch, runScratchDir } from "./cache.ts";
 import { mainCheckoutRoot } from "./git.ts";
 
 export const SESSION_POINTERS_FILE = "session-pointers.json";
@@ -119,8 +119,7 @@ export function recordSessionPointer(
     // The run id is authoritative — a record read from disk keeps its own; a fresh one is minted
     // with `runId`. (A mismatched on-disk run_id is left as-is; self-keying guarantees a match.)
     record[klass][site] = pointer;
-    const dir = runScratchDir(root, runId);
-    mkdirSync(dir, { recursive: true });
+    ensureRunScratch(root, runId);
     atomicWriteFileSync(sessionPointersPath(root, runId), serialize(record));
     return true;
   } catch (error) {

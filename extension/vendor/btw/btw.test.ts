@@ -6,10 +6,14 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { type AssistantMessage, fauxAssistantMessage, fauxText } from "@earendil-works/pi-ai";
-import { ModelRegistry } from "@earendil-works/pi-coding-agent";
+import { ModelRegistry, SessionManager } from "@earendil-works/pi-coding-agent";
 import { visibleWidth } from "@earendil-works/pi-tui";
+import {
+  AGENT_SCRATCH_CONTEXT_TYPE,
+  renderAgentScratchBlock,
+} from "../../substrate/agentScratch.ts";
 import { fauxModelRuntime, loadPerkSession, scaffoldRepo } from "../../testing/harness.ts";
-import { createBtwAgentSession, liveModelRuntime } from "./btw.ts";
+import { buildSeedMessages, createBtwAgentSession, liveModelRuntime, registerBtw } from "./btw.ts";
 import {
   extractEventAssistantText,
   extractText,
@@ -169,7 +173,29 @@ test("binding the perk extension registers /btw and does not throw on session_st
   }
 });
 
-// --- the live-runtime session construction (pi 0.84: modelRuntime rides session creation) --------
+// --- run-owned scratch delivery + live-runtime session construction -----------------------------
+
+test("btw seed filtering removes every main-session scratch custom before side-session seeding", () => {
+  const manager = SessionManager.inMemory("/repo");
+  const block = renderAgentScratchBlock("/repo", "RID");
+  manager.appendCustomMessageEntry(AGENT_SCRATCH_CONTEXT_TYPE, block.content, false);
+  manager.appendCustomMessageEntry("test:keep", "keep me", false);
+  const seed = buildSeedMessages(
+    { sessionManager: manager } as unknown as Parameters<typeof buildSeedMessages>[0],
+    [],
+  );
+  assert.equal(
+    seed.some(
+      (message) => (message as { customType?: string }).customType === AGENT_SCRATCH_CONTEXT_TYPE,
+    ),
+    false,
+  );
+  assert.equal(
+    seed.some((message) => (message as { customType?: string }).customType === "test:keep"),
+    true,
+    "non-scratch seed context survives",
+  );
+});
 
 /** A minimal ExtensionContext slice for `createBtwAgentSession` (model + facade + system prompt). */
 function fakeBtwCtx(reg: {
@@ -182,6 +208,89 @@ function fakeBtwCtx(reg: {
     getSystemPrompt: () => "You are the main session.\nCurrent date: 2026-01-01",
   } as unknown as Parameters<typeof createBtwAgentSession>[0];
 }
+
+test("createBtwAgentSession wires one scratch block into the effective side prompt", async () => {
+  const reg = await fauxModelRuntime();
+  const block = renderAgentScratchBlock("/repo", "RID");
+  const session = await createBtwAgentSession(fakeBtwCtx(reg), {
+    thinkingLevel: "off",
+    tools: sideSessionTools(false),
+    appendSystemPrompt: ["Read-write BTW side session.", block.content],
+  });
+  try {
+    assert.equal(session.systemPrompt.split(block.marker).length - 1, 1);
+    assert.match(session.systemPrompt, /Read-write BTW side session\./);
+  } finally {
+    session.dispose();
+  }
+});
+
+test("read-write btw resolves scratch before every prompt and retries availability changes", async () => {
+  const reg = await fauxModelRuntime();
+  reg.setResponses([
+    fauxAssistantMessage([fauxText("first")], { stopReason: "stop" }),
+    fauxAssistantMessage([fauxText("second")], { stopReason: "stop" }),
+    fauxAssistantMessage([fauxText("third")], { stopReason: "stop" }),
+    fauxAssistantMessage([fauxText("read only")], { stopReason: "stop" }),
+  ]);
+  const block = renderAgentScratchBlock("/repo", "RID");
+  let available = false;
+  let directoryPresent = false;
+  let resolutions = 0;
+  const agentScratch = {
+    resolve: () => {
+      resolutions += 1;
+      if (!available) return null;
+      directoryPresent = true;
+      return block;
+    },
+  };
+  let readOnly = false;
+  let handler:
+    | ((args: string, ctx: Parameters<typeof createBtwAgentSession>[0]) => Promise<void>)
+    | undefined;
+  const pi = {
+    appendEntry: () => {},
+    getThinkingLevel: () => "off",
+    on: () => {},
+    registerCommand: (
+      _name: string,
+      command: {
+        handler: (args: string, ctx: Parameters<typeof createBtwAgentSession>[0]) => Promise<void>;
+      },
+    ) => {
+      handler = command.handler;
+    },
+  } as unknown as Parameters<typeof registerBtw>[0];
+  registerBtw(pi, { isActive: () => readOnly } as Parameters<typeof registerBtw>[1], agentScratch);
+  assert.ok(handler);
+  const ctx = {
+    ...fakeBtwCtx(reg),
+    hasUI: false,
+    isIdle: () => true,
+    sessionManager: SessionManager.inMemory("/repo"),
+    ui: {},
+    waitForIdle: async () => {},
+  } as unknown as Parameters<typeof createBtwAgentSession>[0];
+
+  await handler("first question", ctx);
+  assert.equal(resolutions, 1);
+  assert.equal(directoryPresent, false, "failed provisioning remains unguided");
+
+  available = true;
+  await handler("second question", ctx);
+  assert.equal(resolutions, 2, "a later turn retries provisioning");
+  assert.equal(directoryPresent, true);
+
+  directoryPresent = false;
+  await handler("third question", ctx);
+  assert.equal(resolutions, 3, "a cached side session still repairs scratch before its next turn");
+  assert.equal(directoryPresent, true);
+
+  readOnly = true;
+  await handler("read-only question", ctx);
+  assert.equal(resolutions, 3, "read-only side turns never resolve scratch");
+});
 
 test("liveModelRuntime recovers the live runtime from the real ModelRegistry facade", async () => {
   // Pins the (compile-time-)private `runtime` field the probe depends on: if pi renames it,

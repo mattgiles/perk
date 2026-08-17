@@ -72,9 +72,9 @@ def test_workflow_has_no_shell_branch_positioning():
     assert '--base "${{ inputs.base }}"' in wa.PERK_RUN_WORKFLOW
 
 
-def test_upload_step_preserves_the_run_event_stream():
-    # The §8.12 events stream is written into the runner's checkout; without an upload it dies
-    # with the runner. The upload step preserves scratch/runs/<run_id>/ for every real run.
+def test_upload_step_preserves_diagnostics_but_excludes_agent_scratch():
+    # Hidden `.perk` diagnostics survive runner teardown, but disposable model-authored scratch
+    # is an explicit negative glob and must never enter the remote artifact.
     doc = yaml.safe_load(wa.PERK_RUN_WORKFLOW)
     steps = doc["jobs"]["drive"]["steps"]
     upload = next(s for s in steps if s.get("name") == "Upload run diagnostics")
@@ -82,7 +82,11 @@ def test_upload_step_preserves_the_run_event_stream():
     assert upload["uses"] == "actions/upload-artifact@v4"
     assert upload["if"] == "${{ always() && inputs.smoke != 'true' }}"
     assert upload["with"]["name"] == "perk-run-${{ inputs.run_id }}"
-    assert upload["with"]["path"] == ".perk/workflow/scratch/runs/${{ inputs.run_id }}/"
+    assert upload["with"]["path"].splitlines() == [
+        ".perk/workflow/scratch/runs/${{ inputs.run_id }}/",
+        "!.perk/workflow/scratch/runs/${{ inputs.run_id }}/agent/**",
+    ]
+    assert upload["with"]["include-hidden-files"] is True
     assert upload["with"]["if-no-files-found"] == "ignore"
 
 

@@ -1,20 +1,27 @@
 import assert from "node:assert/strict";
 import {
+  chmodSync,
   closeSync,
+  existsSync,
   mkdirSync,
   mkdtempSync,
   openSync,
   readdirSync,
   readFileSync,
   readSync,
+  statSync,
+  symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import {
+  agentScratchDir,
   atomicWriteFileSync,
   clearMarker,
+  ensureAgentScratch,
+  ensureRunScratch,
   handoffPath,
   hasMarker,
   hunkConsumerLockDir,
@@ -27,6 +34,7 @@ import {
   planRefPath,
   readHandoff,
   readPlanRef,
+  runScratchDir,
   setMarker,
   workflowDir,
   writePlanRef,
@@ -133,6 +141,110 @@ test("hunk-watch: the §8.58 path family hangs off workflowDir", () => {
   assert.equal(hunkDeliveredPath(dir), join(hunkWatchDir(dir), "delivered.ndjson"));
   assert.equal(hunkConsumerLockDir(dir), join(hunkWatchDir(dir), "consumer.lock"));
   assert.equal(hunkLeasePath(dir), join(hunkConsumerLockDir(dir), "lease.json"));
+});
+
+test("ensureRunScratch accepts ordinary, legacy, and dotted-fork ids idempotently", () => {
+  const cwd = tmp();
+  for (const runId of ["01JABCDEF", "cold-door-1700000000000", "01JABCDEF.2"]) {
+    const expected = runScratchDir(cwd, runId);
+    assert.equal(ensureRunScratch(cwd, runId), expected);
+    assert.equal(ensureRunScratch(cwd, runId), expected);
+    assert.ok(statSync(expected).isDirectory());
+  }
+});
+
+test("ensureRunScratch validates a single safe segment before any write", () => {
+  for (const runId of ["", ".", "..", "../escape", "nested/run", "nested\\run", "nul\0id"]) {
+    const cwd = tmp();
+    assert.throws(() => ensureRunScratch(cwd, runId), /unsafe run id/);
+    assert.deepEqual(readdirSync(cwd), [], `unsafe ${JSON.stringify(runId)} wrote to disk`);
+  }
+});
+
+test("ensureRunScratch rejects symlinks and non-directories from .perk through the run root", () => {
+  const components = [
+    [".perk"],
+    [".perk", "workflow"],
+    [".perk", "workflow", "scratch"],
+    [".perk", "workflow", "scratch", "runs"],
+    [".perk", "workflow", "scratch", "runs", "RID"],
+  ];
+  for (const [index, segments] of components.entries()) {
+    const symlinkCwd = tmp();
+    const symlinkTarget = join(symlinkCwd, ...segments);
+    mkdirSync(join(symlinkTarget, ".."), { recursive: true });
+    const outside = tmp();
+    symlinkSync(outside, symlinkTarget, "dir");
+    assert.throws(() => ensureRunScratch(symlinkCwd, "RID"), /symlinked run-scratch path/);
+
+    const fileCwd = tmp();
+    const fileTarget = join(fileCwd, ...segments);
+    mkdirSync(join(fileTarget, ".."), { recursive: true });
+    writeFileSync(fileTarget, `blocker-${index}`);
+    assert.throws(() => ensureRunScratch(fileCwd, "RID"), /non-directory run-scratch path/);
+  }
+});
+
+test("ensureRunScratch rejects group/world-writable checkout-owned ancestors", () => {
+  const components = [
+    [".perk"],
+    [".perk", "workflow"],
+    [".perk", "workflow", "scratch"],
+    [".perk", "workflow", "scratch", "runs"],
+    [".perk", "workflow", "scratch", "runs", "RID"],
+  ];
+  for (const segments of components) {
+    const cwd = tmp();
+    ensureRunScratch(cwd, "RID");
+    const unsafe = join(cwd, ...segments);
+    chmodSync(unsafe, 0o777);
+    assert.throws(() => ensureRunScratch(cwd, "RID"), /group\/world-writable run-scratch path/);
+  }
+});
+
+test("ensureRunScratch and ensureAgentScratch create safe modes under a permissive umask", () => {
+  const previousUmask = process.umask(0);
+  try {
+    const cwd = tmp();
+    const runDir = ensureRunScratch(cwd, "RID");
+    const agentDir = ensureAgentScratch(cwd, "RID");
+    assert.equal(statSync(runDir).mode & 0o022, 0, "run root permits group/world writes");
+    assert.equal(statSync(agentDir).mode & 0o777, 0o700);
+  } finally {
+    process.umask(previousUmask);
+  }
+});
+
+test("ensureRunScratch permits a symlink above the checkout root", () => {
+  const root = tmp();
+  const checkout = join(root, "checkout");
+  const alias = join(root, "checkout-link");
+  mkdirSync(checkout);
+  symlinkSync(checkout, alias, "dir");
+  assert.equal(ensureRunScratch(alias, "RID"), runScratchDir(alias, "RID"));
+  assert.ok(statSync(runScratchDir(checkout, "RID")).isDirectory());
+});
+
+test("ensureAgentScratch creates and reapplies 0700, refusing redirects and files", () => {
+  const cwd = tmp();
+  const expected = agentScratchDir(cwd, "RID");
+  assert.equal(ensureAgentScratch(cwd, "RID"), expected);
+  assert.equal(statSync(expected).mode & 0o777, 0o700);
+  chmodSync(expected, 0o755);
+  assert.equal(ensureAgentScratch(cwd, "RID"), expected);
+  assert.equal(statSync(expected).mode & 0o777, 0o700);
+
+  const symlinkCwd = tmp();
+  ensureRunScratch(symlinkCwd, "RID");
+  const outside = tmp();
+  symlinkSync(outside, agentScratchDir(symlinkCwd, "RID"), "dir");
+  assert.throws(() => ensureAgentScratch(symlinkCwd, "RID"), /symlinked run-scratch path/);
+
+  const fileCwd = tmp();
+  ensureRunScratch(fileCwd, "RID");
+  writeFileSync(agentScratchDir(fileCwd, "RID"), "blocker");
+  assert.throws(() => ensureAgentScratch(fileCwd, "RID"), /non-directory run-scratch path/);
+  assert.equal(existsSync(agentScratchDir(fileCwd, "RID")), true);
 });
 
 test("markers: set / has / clear (idempotent)", () => {

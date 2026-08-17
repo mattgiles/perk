@@ -78,7 +78,7 @@ stages:
     command: gist author      # dedicated seeded cold door (perk gist author)
     requires: []                       # nothing exists yet — this stage CREATES the gist
     reads: []
-    writes: [session.workflow-state, cache.session-data]   # the read-only `mode` append; gist_draft writes the gist-draft artifact + its session_artifacts pointer
+    writes: [session.workflow-state, cache.session-data, cache.scratch]   # the read-only `mode` append; gist_draft writes the gist-draft artifact + its session_artifacts pointer; eligible turns may provision agent scratch
     predecessors: []                   # an initial of the disconnected gist component
     successors: [gist-save]
 
@@ -91,7 +91,7 @@ stages:
     command: gist save        # the gist_save terminating tool + /gist-save command
     requires: []
     reads: []
-    writes: [github.gist, session.workflow-state]  # create the gist issue/project
+    writes: [github.gist, session.workflow-state, cache.scratch]  # create the gist issue/project; eligible turns may provision agent scratch
     predecessors: [gist-author]
     successors: []            # a terminal — consumption happens via the adoption doors, not edges
 
@@ -104,7 +104,7 @@ stages:
     command: objective author  # P3.T2: dedicated seeded cold door (perk objective author)
     requires: []                       # nothing exists yet — this stage CREATES the objective
     reads: []
-    writes: [session.workflow-state, cache.session-data]   # the read-only `mode` append (the gate toggle); #352 Node 2.1: objective_draft writes the objective-draft artifact + its session_artifacts pointer
+    writes: [session.workflow-state, cache.session-data, cache.scratch]   # the read-only `mode` append (the gate toggle); #352 Node 2.1: objective_draft writes the objective-draft artifact + its session_artifacts pointer; eligible turns may provision agent scratch
     predecessors: []                   # the new single initial (authoring precedes everything)
     successors: [objective-save]
 
@@ -117,7 +117,7 @@ stages:
     command: objective save   # P3.T2: the objective_save terminating tool + /objective-save command
     requires: []
     reads: []
-    writes: [github.objective, session.workflow-state]  # create the objective issue; link active_objective
+    writes: [github.objective, session.workflow-state, cache.scratch]  # create the objective issue; link active_objective; eligible turns may provision agent scratch
     predecessors: [objective-author]
     successors: [objective-plan]
 
@@ -130,7 +130,7 @@ stages:
     command: objective plan   # P2.T10: dedicated cold door (perk objective plan) + /objective-plan
     requires: [github.objective]                        # an objective issue must exist
     reads: [github.objective]                           # roadmap nodes + next-node selection
-    writes: [github.objective, session.workflow-state, cache.session-data]  # mark node planning; set active_objective; #339 Node 2.1: plan_draft writes the working-plan artifact + its session_artifacts pointer
+    writes: [github.objective, session.workflow-state, cache.session-data, cache.scratch]  # mark node planning; set active_objective; #339 Node 2.1: plan_draft writes the working-plan artifact + its session_artifacts pointer; eligible turns may provision agent scratch
     predecessors: [objective-save]                      # P3.T2: objective-save now precedes planning
     successors: [plan]
 
@@ -143,7 +143,7 @@ stages:
     command: plan             # slash = /plan (perk-owned P2.T2a; toggles the read-only tool gate)
     requires: []
     reads: []
-    writes: [session.workflow-state, cache.session-data]  # P2.T2a: /plan enter/exit appends `mode`; #339 Node 2.1: plan_draft writes the working-plan artifact + its session_artifacts pointer
+    writes: [session.workflow-state, cache.session-data, cache.scratch]  # P2.T2a: /plan enter/exit appends `mode`; #339 Node 2.1: plan_draft writes the working-plan artifact + its session_artifacts pointer; eligible turns may provision agent scratch
     predecessors: [objective-plan]    # P2.T10: objective-plan is the new single initial
     successors: [save]
 
@@ -156,7 +156,7 @@ stages:
     command: plan save        # cold: the merged `perk plan save` door (Node 3.2); warm twin: the plan_save tool + /plan-save command
     requires: []
     reads: []
-    writes: [github.plan, cache.plan-ref, session.workflow-state]  # T2a: plan issue; T2b: plan-ref pointer; T3: warm door appends active_plan_ref
+    writes: [github.plan, cache.plan-ref, session.workflow-state, cache.scratch]  # T2a: plan issue; T2b: plan-ref pointer; T3: warm door appends active_plan_ref; eligible turns may provision agent scratch
     predecessors: [plan]
     successors: [implement]
 
@@ -169,7 +169,7 @@ stages:
     command: implement
     requires: [cache.plan-ref]   # T4: cold door derives plan-<pr_id> from the active ref
     reads: [cache.plan-ref]      # T4: positions the worktree from the ref (agent reads github.plan)
-    writes: [session.workflow-state]  # T4: the worktree session links active_plan_ref on session_start
+    writes: [session.workflow-state, cache.scratch]  # T4: the worktree session links active_plan_ref on session_start; eligible turns may provision agent scratch
     predecessors: [save]
     successors: [submit]
 
@@ -185,7 +185,7 @@ stages:
     # journal fold) and the native stack, and writes the journal (objective comments), the
     # checkpoint pair (plan header), and the stack registration. Incremental touches neither.
     reads: [cache.plan-ref, github.plan, github.objective, github.stack]
-    writes: [github.pr, github.plan, github.objective, github.stack]
+    writes: [github.pr, github.plan, github.objective, github.stack, cache.scratch]
     predecessors: [implement]
     successors: [address]
 
@@ -200,7 +200,7 @@ stages:
     # submit before resolving. The stacked route owns the objective journal + native stack.
     requires: [github.pr]                                          # the PR whose feedback we address
     reads: [cache.plan-ref, github.plan, github.pr, github.review-threads, github.comments, github.objective, github.stack]
-    writes: [github.review-threads, github.comments, github.pr, github.plan, github.objective, github.stack, session.workflow-state]
+    writes: [github.review-threads, github.comments, github.pr, github.plan, github.objective, github.stack, session.workflow-state, cache.scratch]
     predecessors: [submit]
     successors: [land]
 
@@ -213,7 +213,7 @@ stages:
     command: pr land
     requires: [github.pr]                    # T5b: the PR to merge must exist
     reads: [cache.plan-ref, github.pr, github.objective]   # T5b ref->branch->PR; T11a node lookup
-    writes: [github.pr, cache.markers, github.objective, github.plan]   # T5b merge+marker; T11a mechanical node-done; §8.36 learn_state header stamp
+    writes: [github.pr, cache.markers, github.objective, github.plan, cache.scratch]   # T5b merge+marker; T11a mechanical node-done; §8.36 learn_state header stamp; eligible turns may provision agent scratch
     predecessors: [address]
     successors: [learn]
 
@@ -234,7 +234,7 @@ stages:
     # keys (no new gateway op) — the existing learn tool / learn capture worker still persist.
     requires: [cache.markers]                # pending-learn gates the worktree
     reads: [cache.markers, cache.plan-ref]   # was it set? + the plan ref -> issue number/run_id
-    writes: [cache.markers, github.learn, github.comments, github.plan]  # clear marker; create learn issue + back-link; §8.36 learn_state header stamp
+    writes: [cache.markers, github.learn, github.comments, github.plan, cache.scratch]  # clear marker; create learn issue + back-link; §8.36 learn_state header stamp; eligible turns may provision agent scratch
     predecessors: [land]
     successors: []
 

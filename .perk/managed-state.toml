@@ -30,7 +30,7 @@ hash = "sha256:2985be8b28d3ade858e8d8fb4bc22f565b1bf6020dff982dce141f7721b9999c"
 path = ".github/workflows/perk-run.yml"
 kind = "file"
 version = "3.0.0"
-hash = "sha256:4170039cf86be25086f62a80e99abf8313df88a2c4075c310af6efd09459ea1e"
+hash = "sha256:0406c7c1a9bbbf39426d6d93020bf6f4baaac08e84fda322cfecb847c4bd4c28"
 
 [managed.artifacts.settings-wiring]
 path = ".pi/settings.json"

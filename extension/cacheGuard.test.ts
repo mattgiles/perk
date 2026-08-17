@@ -1,8 +1,9 @@
 // Scratch-path construction regression guard (contracts.md §8.1).
 // Production extension code may build the `scratch`/`runs` path segments only inside the
 // cache seam (substrate/cache.ts); everything else goes through its helpers (`scratchDir`,
-// `runScratchDir`, `sessionDataDir`, `ensureRunScratch`, `listRunIds`) or the ctx-level
-// session-data seam (sessionData.ts). This source-scan test fails CI on drift. The Python twin
+// `runScratchDir`, `agentScratchDir`, `sessionDataDir`, `ensureRunScratch`,
+// `ensureAgentScratch`, `listRunIds`) or the ctx-level session-data seam (sessionData.ts). This
+// source-scan test fails CI on drift. The Python twin
 // is tests/test_cache_guard.py.
 
 import assert from "node:assert/strict";
@@ -84,7 +85,7 @@ test("scratch/runs path segments are built only inside the cache seam (substrate
     violations,
     [],
     "manual scratch/runs path construction outside substrate/cache.ts — go through the cache seam " +
-      "(scratchDir/runScratchDir/sessionDataDir) or the sessionData.ts ctx seam:\n" +
+      "(scratchDir/runScratchDir/agentScratchDir/sessionDataDir) or an ensure/ctx seam:\n" +
       violations.join("\n"),
   );
 });

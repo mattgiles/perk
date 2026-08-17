@@ -30,7 +30,7 @@ import {
   SessionManager,
   SettingsManager,
 } from "@earendil-works/pi-coding-agent";
-import { atomicWriteFileSync, runScratchDir, scratchDir } from "../substrate/cache.ts";
+import { atomicWriteFileSync, ensureRunScratch, scratchDir } from "../substrate/cache.ts";
 
 /**
  * The SDK-level read-only allowlist (no `bash`; stricter than the in-session READ_ONLY_TOOLS).
@@ -212,8 +212,7 @@ async function defaultRunTask(
 /** Resolve the scratch file path for a child's full output (run-scoped when a runId is given). */
 function resolveScratchPath(cwd: string, runId?: string, step?: string): string {
   if (runId) {
-    const dir = runScratchDir(cwd, runId);
-    mkdirSync(dir, { recursive: true });
+    const dir = ensureRunScratch(cwd, runId);
     return join(dir, `${step ?? "child"}.md`);
   }
   const base = scratchDir(cwd);

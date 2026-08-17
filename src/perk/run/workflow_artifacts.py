@@ -145,15 +145,18 @@ jobs:
             --plan "${{ inputs.plan }}" \\
             --base "${{ inputs.base }}"
 
-      # Preserve the granular §8.12 run-event stream (events.ndjson + friends) past runner
-      # teardown — the step logs carry stdout/stderr, but the per-turn stream is what a
-      # mid-flight failure needs. Skipped for smoke runs (nothing is written).
+      # Preserve perk-owned diagnostics past runner teardown while excluding disposable,
+      # model-authored agent scratch. Hidden-file inclusion is explicit because the run root
+      # lives beneath `.perk`; the negative pattern is the remote-retention boundary.
       - name: Upload run diagnostics
         if: ${{ always() && inputs.smoke != 'true' }}
         uses: actions/upload-artifact@v4
         with:
           name: perk-run-${{ inputs.run_id }}
-          path: .perk/workflow/scratch/runs/${{ inputs.run_id }}/
+          path: |
+            .perk/workflow/scratch/runs/${{ inputs.run_id }}/
+            !.perk/workflow/scratch/runs/${{ inputs.run_id }}/agent/**
+          include-hidden-files: true
           if-no-files-found: ignore
 """
 

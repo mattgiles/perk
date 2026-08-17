@@ -103,17 +103,17 @@ def test_two_component_topology():
     assert gist_auth.mode == "read-only" and gist_auth.worktree == "none"
     assert gist_auth.doors == {"warm": True, "cold_local": True, "cold_remote": False}
     # gist_draft writes the gist-draft artifact during gist-author.
-    assert gist_auth.writes == ["session.workflow-state", "cache.session-data"]
+    assert gist_auth.writes == ["session.workflow-state", "cache.session-data", "cache.scratch"]
     assert gist_save.mode == "read-write" and gist_save.worktree == "none"
-    assert gist_save.writes == ["github.gist", "session.workflow-state"]
+    assert gist_save.writes == ["github.gist", "session.workflow-state", "cache.scratch"]
     # Mode / worktree / doors / I/O as built.
     assert auth.mode == "read-only" and auth.worktree == "none"
     assert auth.doors == {"warm": True, "cold_local": True, "cold_remote": False}
     assert auth.requires == [] and auth.reads == []
     # objective_draft adds cache.session-data to the authoring stage's writes.
-    assert auth.writes == ["session.workflow-state", "cache.session-data"]
+    assert auth.writes == ["session.workflow-state", "cache.session-data", "cache.scratch"]
     assert save.mode == "read-write" and save.worktree == "none"
-    assert save.writes == ["github.objective", "session.workflow-state"]
+    assert save.writes == ["github.objective", "session.workflow-state", "cache.scratch"]
 
 
 def test_address_is_linear_between_submit_and_land():
@@ -146,12 +146,13 @@ def test_stage_io_contract():
         "github.plan",
         "cache.plan-ref",
         "session.workflow-state",
+        "cache.scratch",
     ]
 
     implement = by_id["implement"]
     assert implement.requires == ["cache.plan-ref"]
     assert implement.reads == ["cache.plan-ref"]
-    assert implement.writes == ["session.workflow-state"]
+    assert implement.writes == ["session.workflow-state", "cache.scratch"]
     assert implement.doors["warm"] is False
 
     submit = by_id["submit"]
@@ -159,7 +160,13 @@ def test_stage_io_contract():
     # The stacked publication route (§8.47): the objective (train + journal) and the native
     # stack join submit's I/O; the incremental route touches neither.
     assert submit.reads == ["cache.plan-ref", "github.plan", "github.objective", "github.stack"]
-    assert submit.writes == ["github.pr", "github.plan", "github.objective", "github.stack"]
+    assert submit.writes == [
+        "github.pr",
+        "github.plan",
+        "github.objective",
+        "github.stack",
+        "cache.scratch",
+    ]
 
     address = by_id["address"]
     # finalize_address publishes through submit before resolving threads, so the address stage
@@ -181,7 +188,10 @@ def test_stage_io_contract():
         "github.objective",
         "github.stack",
         "session.workflow-state",
+        "cache.scratch",
     ]
+
+    assert all("cache.scratch" in stage.writes for stage in registry.stages)
 
     learn = by_id["learn"]
     # `github.plan` on both learn + land: the §8.36 canonical learn_state header stamp.

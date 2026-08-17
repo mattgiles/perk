@@ -56,6 +56,11 @@ type OverlayHandleLike = {
   isFocused(): boolean;
 };
 
+import {
+  AGENT_SCRATCH_CONTEXT_TYPE,
+  type AgentScratchProvisioner,
+  createAgentScratchProvisioner,
+} from "../../substrate/agentScratch.ts";
 import type { ToolGating } from "../../substrate/toolGating.ts";
 import { report } from "../../surfaces/report.ts";
 import {
@@ -117,6 +122,7 @@ type OverlayRuntime = {
 type SideSessionRuntime = {
   session: AgentSession;
   modelKey: string;
+  agentScratchContent: string | null;
   unsubscribe: () => void;
 };
 
@@ -177,6 +183,7 @@ export async function createBtwAgentSession(
 ): Promise<AgentSession> {
   const model = ctx.model;
   if (!model) throw new Error("No active model selected.");
+
   const { session } = await createAgentSession({
     sessionManager: SessionManager.inMemory(),
     model,
@@ -188,7 +195,7 @@ export async function createBtwAgentSession(
   return session;
 }
 
-function buildSeedMessages(ctx: ExtensionContext, thread: BtwDetails[]): Message[] {
+export function buildSeedMessages(ctx: ExtensionContext, thread: BtwDetails[]): Message[] {
   const seed: Message[] = [];
 
   try {
@@ -196,7 +203,13 @@ function buildSeedMessages(ctx: ExtensionContext, thread: BtwDetails[]): Message
       ctx.sessionManager.getEntries(),
       ctx.sessionManager.getLeafId(),
     ).messages;
-    seed.push(...(contextMessages.filter((message) => "role" in message) as Message[]));
+    seed.push(
+      ...(contextMessages.filter(
+        (message) =>
+          (message as { customType?: string }).customType !== AGENT_SCRATCH_CONTEXT_TYPE &&
+          "role" in message,
+      ) as Message[]),
+    );
   } catch {
     // Ignore context seed failures and continue with an empty side thread.
   }
@@ -357,7 +370,11 @@ class BtwOverlay extends Container implements Focusable {
   }
 }
 
-export function registerBtw(pi: ExtensionAPI, gating: ToolGating): void {
+export function registerBtw(
+  pi: ExtensionAPI,
+  gating: ToolGating,
+  agentScratch: AgentScratchProvisioner = createAgentScratchProvisioner(),
+): void {
   // Transcript markers for the btw thread entries (audit §2.3): renderer bodies in surfaces.ts,
   // registration = wiring, feature-detect inside the seam (pre-0.80.4 hosts stay inert).
   registerTranscriptRenderer(pi, BTW_ENTRY_TYPE, btwThreadEntryRenderer);
@@ -596,6 +613,7 @@ export function registerBtw(pi: ExtensionAPI, gating: ToolGating): void {
 
   async function createSideSession(
     ctx: ExtensionCommandContext,
+    agentScratchContent: string | null,
   ): Promise<SideSessionRuntime | null> {
     if (!ctx.model) {
       return null;
@@ -604,10 +622,13 @@ export function registerBtw(pi: ExtensionAPI, gating: ToolGating): void {
     // perk gate-mirror: read-only ⇒ ["read"] only (a foreign session's bash can't be sandboxed
     // by perk's isReadOnlyBashCommand); read-write ⇒ the full set. The session rides the LIVE
     // runtime (`createBtwAgentSession` → `liveModelRuntime`) so auth dispatch matches the main
-    // session exactly.
+    // session exactly. Scratch posture comes from this same gate rather than reverse-engineering
+    // it from a tool array.
     const session = await createBtwAgentSession(ctx, {
       thinkingLevel: pi.getThinkingLevel() as SessionThinkingLevel,
       tools: sideSessionTools(gating.isActive()),
+      appendSystemPrompt:
+        agentScratchContent === null ? undefined : [BTW_SYSTEM_PROMPT, agentScratchContent],
     });
 
     const seedMessages = buildSeedMessages(ctx, thread);
@@ -675,6 +696,7 @@ export function registerBtw(pi: ExtensionAPI, gating: ToolGating): void {
     return {
       session,
       modelKey: getModelKey(ctx),
+      agentScratchContent,
       unsubscribe,
     };
   }
@@ -686,13 +708,23 @@ export function registerBtw(pi: ExtensionAPI, gating: ToolGating): void {
       return null;
     }
 
+    // This runs before every side-model prompt. A successful resolve repairs deletion
+    // idempotently; a transition between unavailable and available scratch recreates the cached
+    // session so its immutable resource-loader prompt matches the current turn.
+    const agentScratchContent = gating.isActive()
+      ? null
+      : (agentScratch.resolve(ctx)?.content ?? null);
     const expectedModelKey = getModelKey(ctx);
-    if (activeSideSession && activeSideSession.modelKey === expectedModelKey) {
+    if (
+      activeSideSession &&
+      activeSideSession.modelKey === expectedModelKey &&
+      activeSideSession.agentScratchContent === agentScratchContent
+    ) {
       return activeSideSession;
     }
 
     await disposeSideSession();
-    activeSideSession = await createSideSession(ctx);
+    activeSideSession = await createSideSession(ctx, agentScratchContent);
     return activeSideSession;
   }
 

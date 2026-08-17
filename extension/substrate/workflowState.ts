@@ -80,6 +80,8 @@ export interface BranchEntry {
   type: string;
   customType?: string;
   data?: Record<string, unknown>;
+  /** Present on Pi custom_message entries (hidden model-context messages). */
+  content?: unknown;
 }
 
 /** The minimal read-only session surface the branch accessor needs. */
@@ -107,6 +109,35 @@ export function branchOf(source: BranchSource): BranchEntry[] {
  */
 export function branchCarries(branch: readonly BranchEntry[], needle: string): boolean {
   return branch.some((entry) => JSON.stringify(entry).includes(needle));
+}
+
+/**
+ * The branch entries still represented directly in model context. Before compaction that is the
+ * full branch. After compaction, Pi keeps entries from `firstKeptEntryId` onward plus anything
+ * appended later; historical entries before that cutoff survive only through the summary.
+ * Compaction entries are excluded because text quoted by a summary is not a live custom block.
+ */
+export function activeContextWindow(branch: readonly BranchEntry[]): BranchEntry[] {
+  let latestCompaction = -1;
+  for (let i = branch.length - 1; i >= 0; i--) {
+    if (branch[i]?.type === "compaction") {
+      latestCompaction = i;
+      break;
+    }
+  }
+  if (latestCompaction === -1) return [...branch];
+
+  const firstKeptEntryId = (branch[latestCompaction] as { firstKeptEntryId?: unknown })
+    .firstKeptEntryId;
+  const firstKept =
+    typeof firstKeptEntryId === "string"
+      ? branch.findIndex(
+          (entry, index) =>
+            index < latestCompaction && (entry as { id?: unknown }).id === firstKeptEntryId,
+        )
+      : -1;
+  const start = firstKept === -1 ? latestCompaction + 1 : firstKept;
+  return branch.slice(start).filter((entry) => entry.type !== "compaction");
 }
 
 /**

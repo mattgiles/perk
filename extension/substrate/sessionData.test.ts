@@ -6,6 +6,7 @@ import {
   mkdtempSync,
   readdirSync,
   rmSync,
+  symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -137,6 +138,39 @@ for (const [label, branch] of [
     }
   });
 }
+
+test("unsafe run ids are refused through the session-data write seam before any write", () => {
+  const cwd = tempCwd();
+  try {
+    const ctx = fakeCtx(cwd, [runIdEntry("../escape")]);
+    const warnings = captureStderr(() => {
+      assert.equal(ensureSessionDataDir(ctx), null);
+      assert.equal(writeSessionData(ctx, "draft.md", "x"), null);
+    });
+    assert.ok(warnings.some((line) => line.includes("unsafe run id")));
+    assert.deepEqual(readdirSync(cwd), [], "traversal-bearing identity wrote checkout content");
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+test("a symlinked checkout cache is refused through the session-data write seam", () => {
+  const cwd = tempCwd();
+  const outside = tempCwd();
+  try {
+    symlinkSync(outside, join(cwd, ".perk"), "dir");
+    const ctx = fakeCtx(cwd, [runIdEntry("RID")]);
+    const warnings = captureStderr(() => {
+      assert.equal(ensureSessionDataDir(ctx), null);
+      assert.equal(writeSessionData(ctx, "draft.md", "x"), null);
+    });
+    assert.ok(warnings.some((line) => line.includes("symlinked run-scratch path")));
+    assert.deepEqual(readdirSync(outside), [], "session-data followed the cache redirect");
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+    rmSync(outside, { recursive: true, force: true });
+  }
+});
 
 test("a throwing getBranch degrades to null (no stamp fallback, unlike coldDoor.activeRunId)", () => {
   const cwd = tempCwd();
