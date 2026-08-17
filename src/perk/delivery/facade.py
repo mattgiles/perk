@@ -1,10 +1,11 @@
 """The canonical repository-scoped delivery façade.
 
 ``Delivery`` composes three nominal aggregate authorities. ``status`` delegates its pure
-projection to :mod:`perk.delivery.train`; ``prepare`` owns authoring capability, plan identity,
-stacked-planning classification, and executable layer-start preparation; ``publish`` owns layer
-publication and draft-to-ready routing; ``sync`` dispatches the suffix transaction engine.
-Construction remains assignment-only and pure derivation stays in this module.
+projection to :mod:`perk.delivery.train`; ``prepare`` owns authoring capability, replan facts,
+plan identity, stacked-planning classification, and executable layer-start preparation;
+``transfer`` owns replan routing and mutation; ``publish`` owns layer publication and
+draft-to-ready routing; ``sync`` dispatches the suffix transaction engine. Construction remains
+assignment-only and pure derivation stays in this module.
 """
 
 from abc import ABC, abstractmethod
@@ -832,7 +833,7 @@ class DeliveryPersistence(ABC):
 
 
 class DeliveryGit(ABC):
-    """Aggregate Git authority for status, Prepare, and synchronization."""
+    """Aggregate Git authority for status, Prepare, Transfer, and synchronization."""
 
     @dataclass(frozen=True)
     class PushUrlsResult:
@@ -970,7 +971,7 @@ class DeliveryGit(ABC):
 
 
 class DeliveryGitHub(ABC):
-    """Aggregate GitHub authority for status, Prepare, and synchronization."""
+    """Aggregate GitHub authority for status, Prepare, Transfer, and synchronization."""
 
     @dataclass(frozen=True)
     class MergeRules:
@@ -1348,7 +1349,7 @@ def _raw_prepare_git_error(exc: git_mod.GitError | train.TrainReconstructionErro
 
 
 class Delivery:
-    """Repository-scoped delivery status, Prepare, publish, and sync operations."""
+    """Repository-scoped delivery status, Prepare, transfer, publish, and sync operations."""
 
     def __init__(
         self,
@@ -1638,6 +1639,8 @@ class Delivery:
             fold = self._persistence.read_journal(bare)
         except JournalCorruptionError as exc:
             raise DeliveryError(str(exc), error_type="journal_corruption") from exc
+        except (IssueBackendError, ObjectiveStoreError, TrainPersistenceError) as exc:
+            raise DeliveryError(str(exc), error_type="github_error") from exc
         if fold.unresolved:
             op = fold.unresolved[0]
             if op.kind is OperationKind.TRANSFER:

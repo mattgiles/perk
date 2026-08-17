@@ -1049,6 +1049,71 @@ def test_create_supersede_classification_not_found_fails_closed(monkeypatch):
     assert store.supersede_kwargs is None and store.created is False
 
 
+def test_create_hash_only_supersedes_reaches_authoritative_not_found(monkeypatch):
+    _authed(monkeypatch)
+
+    class _MissingEmptyStore(_AdoptStubStore):
+        def get_objective(self, **kwargs):
+            if kwargs["objective_id"] == "":
+                return None
+            return super().get_objective(**kwargs)
+
+    result = _invoke_adopt(
+        [
+            "objective",
+            "create",
+            "--json",
+            "--supersedes",
+            "#",
+            "--roadmap",
+            json.dumps([{"id": "1.1", "description": "work"}]),
+        ],
+        body="# Successor\n\nprose",
+        monkeypatch=monkeypatch,
+        store=_MissingEmptyStore(),
+    )
+
+    assert result.exit_code == 1
+    payload = json.loads(result.output)
+    assert payload["error_type"] == "objective_not_found"
+    assert payload["message"] == "Objective  not found"
+
+
+def test_create_supersede_whitespace_scalars_keep_existing_cli_resolution(monkeypatch):
+    _authed(monkeypatch)
+    monkeypatch.setenv("PERK_RUN_ID", "01ENV")
+    store = _AdoptStubStore()
+    calls: list = []
+    _stub_transfer(monkeypatch, calls)
+
+    result = _invoke_adopt(
+        [
+            "objective",
+            "create",
+            "--json",
+            "--supersedes",
+            "42",
+            "--title",
+            " ",
+            "--run-id",
+            " ",
+            "--base",
+            " ",
+            "--roadmap",
+            json.dumps([{"id": "1.1", "description": "work"}]),
+        ],
+        body="# Derived title\n\nprose",
+        monkeypatch=monkeypatch,
+        store=store,
+    )
+
+    assert result.exit_code == 0, result.output
+    assert len(calls) == 1
+    assert calls[0].title == " "
+    assert calls[0].run_id == " "
+    assert calls[0].base == " "
+
+
 def test_create_supersede_classification_junk_policy_fails_closed(monkeypatch):
     # A junk `delivery` value never silently classifies as incremental (the fail-open trap).
     _authed(monkeypatch)
@@ -1106,6 +1171,78 @@ def test_create_supersede_transfer_refusal_maps_the_typed_error(monkeypatch):
     assert result.exit_code == 1
     payload = json.loads(result.output)
     assert payload["error_type"] == "prefix_mismatch" and "prefix broken" in payload["message"]
+
+
+@pytest.mark.parametrize("as_json", (True, False))
+def test_transfer_repo_git_failure_reaches_stable_cli_envelopes(monkeypatch, as_json):
+    from perk.backends.objective_store import ObjectiveState
+    from perk.delivery import Delivery, PrepareResult
+    from perk.delivery._fakes import FakeDeliveryGitHub, FakeDeliveryPersistence
+    from perk.delivery.observe import RepoDeliveryGit
+    from perk.substrate import git as git_mod
+
+    _authed(monkeypatch)
+    persistence = FakeDeliveryPersistence(
+        objectives={
+            "42": ObjectiveState(
+                id="42",
+                url="u/42",
+                title="Old",
+                header={},
+                nodes=(),
+            )
+        }
+    )
+
+    def fail_worktree_read(*_args, **_kwargs):
+        raise git_mod.GitError("adapter worktrees unavailable")
+
+    monkeypatch.setattr(git_mod, "worktree_list", fail_worktree_read)
+
+    def resolve_service(repo_root):
+        bound = Delivery(
+            persistence=persistence,
+            git=RepoDeliveryGit(repo_root),
+            github=FakeDeliveryGitHub(),
+        )
+
+        class _Service:
+            def prepare(self, request):
+                assert request.kind == "authoring"
+                return PrepareResult(kind="authoring", base="main")
+
+            def transfer(self, request):
+                return bound.transfer(request)
+
+        return _Service()
+
+    monkeypatch.setattr(create_cmd, "resolve_delivery", resolve_service)
+    args = [
+        "objective",
+        "create",
+        "--supersedes",
+        "42",
+        "--delivery",
+        "stacked",
+        "--roadmap",
+        _two_nodes_roadmap(),
+    ]
+    if as_json:
+        args.append("--json")
+    result = _invoke_adopt(
+        args,
+        body="# Successor\n\nprose",
+        monkeypatch=monkeypatch,
+        store=_AdoptStubStore(),
+    )
+
+    assert result.exit_code == 1
+    if as_json:
+        payload = json.loads(result.output)
+        assert payload["error_type"] == "git_error"
+        assert payload["message"] == "git worktree list failed: adapter worktrees unavailable"
+    else:
+        assert result.output == "Error: git worktree list failed: adapter worktrees unavailable\n"
 
 
 def test_create_stacked_dry_run_skips_probes_and_gate_but_validates_bounds(monkeypatch):

@@ -34,8 +34,10 @@ from perk.delivery.facade import (
 from perk.delivery.journal import (
     EventRole,
     JournalCorruptionError,
+    JournalFold,
     JournalRecordTooLarge,
     OperationKind,
+    OperationState,
     OutcomeRecord,
     PreparedRecord,
 )
@@ -45,6 +47,7 @@ from perk.delivery.train import (
     BaseHeadObservation,
     BuildReadiness,
     DeliveryTrain,
+    FindingKind,
     LayerFinalization,
     LayerGit,
     LayerIntent,
@@ -53,6 +56,7 @@ from perk.delivery.train import (
     LayerPublication,
     LayerWriter,
     StackView,
+    TrainFinding,
     TrainLayer,
     TrainReconstructionError,
     WorktreeFacts,
@@ -465,6 +469,85 @@ def test_transfer_intent_validation_precedes_lock_and_all_authorities() -> None:
     assert persistence.calls == [] and git.calls == [] and github.calls == []
 
 
+@pytest.mark.parametrize(
+    ("mutate", "error_type"),
+    (
+        (lambda request: replace(request, delivery=cast(Any, "future")), "invalid_input"),
+        (
+            lambda request: replace(
+                request,
+                roadmap_nodes=(
+                    ObjectiveNode("1.1", "one", NodeStatus.PENDING),
+                    ObjectiveNode("1.1", "duplicate", NodeStatus.PENDING),
+                ),
+            ),
+            "invalid_roadmap",
+        ),
+        (
+            lambda request: replace(
+                request,
+                roadmap_nodes=(
+                    ObjectiveNode(
+                        "1.1", "unknown dependency", NodeStatus.PENDING, depends_on=("9.9",)
+                    ),
+                ),
+            ),
+            "invalid_roadmap",
+        ),
+        (
+            lambda request: replace(
+                request,
+                roadmap_nodes=(
+                    ObjectiveNode("1.1", "one", NodeStatus.PENDING, depends_on=("1.2",)),
+                    ObjectiveNode("1.2", "two", NodeStatus.PENDING, depends_on=("1.1",)),
+                ),
+            ),
+            "invalid_roadmap",
+        ),
+        (
+            lambda request: replace(
+                request,
+                carry_map=(("1.1", "ENG-1"), ("1.1", "ENG-1")),
+            ),
+            "invalid_roadmap",
+        ),
+        (
+            lambda request: replace(request, carry_map=((" ", "ENG-1"),)),
+            "invalid_roadmap",
+        ),
+        (
+            lambda request: replace(request, carry_map=cast(Any, ((7, "ENG-1"),))),
+            "invalid_roadmap",
+        ),
+        (
+            lambda request: replace(request, carry_map=(("9.9", "ENG-1"),)),
+            "invalid_roadmap",
+        ),
+        (
+            lambda request: replace(request, carry_map=(("1.1", " "),)),
+            "invalid_roadmap",
+        ),
+        (
+            lambda request: replace(
+                request,
+                carry_map=cast(Any, (("1.1", 7),)),
+            ),
+            "invalid_roadmap",
+        ),
+    ),
+)
+def test_transfer_intent_recoverability_matrix_fails_before_io(mutate, error_type: str) -> None:
+    persistence = FakeDeliveryPersistence()
+    git = FakeDeliveryGit()
+    github = FakeDeliveryGitHub()
+
+    with pytest.raises(DeliveryError) as excinfo:
+        _delivery(persistence, git, github).transfer(mutate(_transfer_request()))
+
+    assert excinfo.value.error_type == error_type
+    assert persistence.calls == [] and git.calls == [] and github.calls == []
+
+
 def test_plain_incremental_transfer_is_locked_and_uses_raw_carries(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -499,6 +582,68 @@ def test_plain_incremental_transfer_is_locked_and_uses_raw_carries(
     carries = cast(tuple[tuple[str, str], ...], supersede[8])
     assert ("1.1", "ENG-1") in carries
     assert supersede[-2:] == (True, False)
+
+
+@pytest.mark.parametrize(
+    ("predecessor_delivery", "successor_delivery", "uses_transfer_core"),
+    (
+        ("incremental", "incremental", False),
+        ("incremental", "stacked", True),
+        ("stacked", "incremental", True),
+        ("stacked", "stacked", True),
+    ),
+)
+def test_transfer_facade_routes_all_policy_pairs(
+    monkeypatch: pytest.MonkeyPatch,
+    predecessor_delivery: str,
+    successor_delivery: str,
+    uses_transfer_core: bool,
+) -> None:
+    from contextlib import nullcontext
+
+    from perk.backends.objective_store import ObjectiveRef
+    from perk.delivery import transfer as transfer_mod
+
+    header: dict[str, object] = (
+        {}
+        if predecessor_delivery == "incremental"
+        else {"delivery": "stacked", "delivery_lineage": "lineage"}
+    )
+    successor = ObjectiveRef(id="11", url="u/11", existed=False)
+    persistence = FakeDeliveryPersistence(
+        objectives={"10": _objective(header=header)},
+        successors_by_run={"01RUN": successor},
+        preserve_transfer_carries=True,
+    )
+    routed: list[tuple[object, ...]] = []
+
+    def run_core(fresh, request, **kwargs):
+        routed.append((fresh, request, kwargs["predecessor_policy"]))
+        return TransferResult(
+            predecessor_id="10",
+            successor=successor,
+            operation_id="01ARZ3NDEKTSV4RRFFQ69G5FAV",
+            abandoned_operation_id=None,
+            rolled_forward=False,
+            journaled=predecessor_delivery == "stacked",
+        )
+
+    runtime = replace(
+        transfer_mod._DEFAULT_TRANSFER_RUNTIME,
+        operation_lock=lambda _root: nullcontext(),
+    )
+    monkeypatch.setattr(transfer_mod, "_DEFAULT_TRANSFER_RUNTIME", runtime)
+    monkeypatch.setattr(transfer_mod, "_run", run_core)
+
+    result = _delivery(persistence).transfer(
+        _transfer_request(delivery=cast(Any, successor_delivery))
+    )
+
+    assert result.successor is successor
+    assert bool(routed) is uses_transfer_core
+    assert persistence.calls.count(("get_objective", "10")) == 1
+    normalized = [call for call in persistence.calls if call[0] == "normalize_transfer_carry_map"]
+    assert bool(normalized) is uses_transfer_core
 
 
 @pytest.mark.parametrize(
@@ -574,11 +719,11 @@ def test_transfer_lock_serializes_d1_and_second_contender_observes_finalized_pre
     from contextlib import contextmanager
 
     from perk.backends.objective_store import ObjectiveRef
+    from perk.delivery import oplock
     from perk.delivery import transfer as transfer_mod
 
     first_entered = threading.Event()
     release_first = threading.Event()
-    second_started = threading.Event()
     operation_lock = threading.Lock()
     first_successor = ObjectiveRef(id="11", url="u/11", existed=False)
 
@@ -610,8 +755,12 @@ def test_transfer_lock_serializes_d1_and_second_contender_observes_finalized_pre
 
     @contextmanager
     def held(_root: Path):
-        with operation_lock:
+        if not operation_lock.acquire(blocking=False):
+            raise oplock.OperationLockBusy("another stack operation is in progress")
+        try:
             yield
+        finally:
+            operation_lock.release()
 
     persistence = _ContendedPersistence()
     runtime = replace(transfer_mod._DEFAULT_TRANSFER_RUNTIME, operation_lock=held)
@@ -619,28 +768,25 @@ def test_transfer_lock_serializes_d1_and_second_contender_observes_finalized_pre
     service = _delivery(persistence)
     results: dict[str, object] = {}
 
-    def invoke(name: str, run_id: str) -> None:
-        if name == "second":
-            second_started.set()
-        try:
-            results[name] = service.transfer(replace(_transfer_request(), run_id=run_id))
-        except Exception as exc:
-            results[name] = exc
+    def invoke_first() -> None:
+        results["first"] = service.transfer(replace(_transfer_request(), run_id="01FIRST"))
 
-    first = threading.Thread(target=invoke, args=("first", "01FIRST"))
-    second = threading.Thread(target=invoke, args=("second", "01SECOND"))
+    first = threading.Thread(target=invoke_first)
     first.start()
     assert first_entered.wait(timeout=5)
-    second.start()
-    assert second_started.wait(timeout=5)
+
+    with pytest.raises(DeliveryError) as busy:
+        service.transfer(replace(_transfer_request(), run_id="01SECOND"))
+    assert busy.value.error_type == "operation_in_progress"
     assert persistence.observed_superseded_by == [None]
+
     release_first.set()
     first.join(timeout=5)
-    second.join(timeout=5)
-
     assert isinstance(results["first"], TransferResult)
-    assert isinstance(results["second"], DeliveryError)
-    assert results["second"].error_type == "objective_not_open"
+
+    with pytest.raises(DeliveryError) as finalized:
+        service.transfer(replace(_transfer_request(), run_id="01SECOND"))
+    assert finalized.value.error_type == "objective_not_open"
     assert persistence.observed_superseded_by == [None, "11"]
 
 
@@ -731,6 +877,140 @@ def test_replan_prepare_refuses_missing_closed_superseded_and_junk_policy(
     with pytest.raises(DeliveryError) as excinfo:
         _delivery(persistence).prepare(PrepareRequest(kind="replan", objective_id="10"))
     assert excinfo.value.error_type == error_type
+
+
+@pytest.mark.parametrize(
+    ("kind", "error_type", "message_fragment"),
+    (
+        (OperationKind.TRANSFER, "transfer_incomplete", "interrupted replan transfer"),
+        (OperationKind.SYNC, "unresolved_operation", "(sync) is unresolved"),
+    ),
+)
+def test_replan_prepare_refuses_unresolved_journal_operations(
+    kind: OperationKind,
+    error_type: str,
+    message_fragment: str,
+) -> None:
+    operation = OperationState(
+        operation_id="01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        kind=kind,
+        prepared=cast(Any, object()),
+        accepted=None,
+        outcome=None,
+    )
+    persistence = FakeDeliveryPersistence(
+        objectives={
+            "10": _objective(header={"delivery": "stacked", "delivery_lineage": "lineage"})
+        },
+        journals={
+            "10": JournalFold(
+                events=(),
+                operations={operation.operation_id: operation},
+                unresolved=(operation,),
+                delivery_lineage="lineage",
+            )
+        },
+    )
+
+    with pytest.raises(DeliveryError) as excinfo:
+        _delivery(persistence).prepare(PrepareRequest(kind="replan", objective_id="10"))
+
+    assert excinfo.value.error_type == error_type
+    assert message_fragment in str(excinfo.value)
+    assert persistence.calls == [("get_objective", "10"), ("read_journal", "10")]
+
+
+@pytest.mark.parametrize(
+    ("train_mutation", "error_type"),
+    (
+        (
+            lambda status: replace(
+                status,
+                findings=(
+                    TrainFinding(
+                        FindingKind.BLOCKER,
+                        "wrong_owner",
+                        "plan ownership does not match",
+                    ),
+                ),
+            ),
+            "claimed_prefix_malformed",
+        ),
+        (
+            lambda status: replace(
+                status,
+                layers=(replace(status.layers[0], parent_checkpoint_sha="a" * 40),),
+            ),
+            "claimed_prefix_malformed",
+        ),
+    ),
+)
+def test_replan_prepare_preserves_structural_and_prefix_refusals(
+    train_mutation,
+    error_type: str,
+) -> None:
+    nodes = (ObjectiveNode("1.1", "work", NodeStatus.IN_PROGRESS, pr="#101"),)
+    status = _planning_train(
+        nodes=nodes,
+        layers=(replace(_train_layer("1.1", "101", "plan-101"), pr_number=42),),
+        candidate=None,
+    )
+    status = train_mutation(status)
+    persistence = FakeDeliveryPersistence(
+        objectives={
+            "10": _objective(
+                header={"delivery": "stacked", "delivery_lineage": "lineage"},
+                nodes=nodes,
+            )
+        }
+    )
+    service = _StatusDelivery(
+        StatusResult("10", "fake://objective/10", None, status, None),
+        persistence=persistence,
+    )
+
+    with pytest.raises(DeliveryError) as excinfo:
+        service.prepare(PrepareRequest(kind="replan", objective_id="10"))
+
+    assert excinfo.value.error_type == error_type
+
+
+def test_replan_prepare_translates_journal_persistence_failures() -> None:
+    failure = TrainPersistenceError("journal unavailable")
+    persistence = FakeDeliveryPersistence(
+        objectives={
+            "10": _objective(header={"delivery": "stacked", "delivery_lineage": "lineage"})
+        },
+        errors={("read_journal", "10"): failure},
+    )
+
+    with pytest.raises(DeliveryError) as excinfo:
+        _delivery(persistence).prepare(PrepareRequest(kind="replan", objective_id="10"))
+
+    assert excinfo.value.error_type == "github_error"
+    assert str(excinfo.value) == "journal unavailable"
+
+
+def test_replan_prepare_maps_journal_corruption_and_missing_train() -> None:
+    state = _objective(header={"delivery": "stacked", "delivery_lineage": "lineage"})
+    corrupt = FakeDeliveryPersistence(
+        objectives={"10": state},
+        errors={("read_journal", "10"): JournalCorruptionError("bad event")},
+    )
+    with pytest.raises(DeliveryError) as corruption:
+        _delivery(corrupt).prepare(PrepareRequest(kind="replan", objective_id="10"))
+    assert corruption.value.error_type == "journal_corruption"
+    assert str(corruption.value) == "bad event"
+
+    persistence = FakeDeliveryPersistence(objectives={"10": state})
+    service = _StatusDelivery(
+        StatusResult("10", "fake://objective/10", None, None, "missing train"),
+        persistence=persistence,
+    )
+    with pytest.raises(DeliveryError) as missing:
+        service.prepare(PrepareRequest(kind="replan", objective_id="10"))
+    assert missing.value.error_type == "invalid_train"
+    assert "classified stacked but reconstructs no delivery train" in str(missing.value)
 
 
 def test_publish_request_accepts_the_complete_legal_matrix() -> None:
@@ -1598,6 +1878,7 @@ def test_prepare_request_and_result_validate_the_authoring_discriminator() -> No
 def test_prepare_request_rejects_illegal_known_variant_shapes() -> None:
     valid = (
         PrepareRequest(kind="authoring", base=None),
+        PrepareRequest(kind="replan", objective_id="10"),
         PrepareRequest(kind="plan_identity", mode="strict", objective_id="10", node_id="1.1"),
         PrepareRequest(kind="plan_identity", mode="best_effort", objective_id="10"),
         PrepareRequest(kind="layer_start", mode="planning", objective_id="10"),
@@ -1605,6 +1886,7 @@ def test_prepare_request_rejects_illegal_known_variant_shapes() -> None:
     )
     assert tuple(request.kind for request in valid) == (
         "authoring",
+        "replan",
         "plan_identity",
         "plan_identity",
         "layer_start",
@@ -1612,6 +1894,8 @@ def test_prepare_request_rejects_illegal_known_variant_shapes() -> None:
     )
     invalid = (
         lambda: PrepareRequest(kind="authoring", base="main", mode="strict"),
+        lambda: PrepareRequest(kind="replan", objective_id=" "),
+        lambda: PrepareRequest(kind="replan", objective_id="10", base="main"),
         lambda: PrepareRequest(kind="plan_identity", mode="strict", objective_id="10"),
         lambda: PrepareRequest(
             kind="plan_identity", mode="best_effort", objective_id="10", base="main"
@@ -1654,9 +1938,25 @@ def test_prepare_result_and_nested_decision_shapes_are_pinned() -> None:
         PrepareResult(kind="layer_start", mode="planning", planning=decision).planning is decision
     )
     assert PrepareResult(kind="plan_identity", mode="best_effort", notice="").notice == ""
+    replan = PrepareResult.ReplanContext(
+        objective_id="10",
+        objective_url="u/10",
+        objective_title="Objective",
+        nodes=(ObjectiveNode("1.1", "work", NodeStatus.PENDING),),
+        delivery="incremental",
+        base=None,
+        delivery_lineage=None,
+        claimed=(),
+        open_pr_plans=(),
+    )
+    assert PrepareResult(kind="replan", replan=replan).replan is replan
 
     with pytest.raises(ValueError):
         PrepareResult(kind="authoring", base=None)
+    with pytest.raises(ValueError):
+        PrepareResult(kind="replan")
+    with pytest.raises(ValueError):
+        PrepareResult(kind="authoring", base="main", replan=replan)
     with pytest.raises(ValueError):
         PrepareResult(kind="plan_identity", mode="best_effort", base="main", notice="failed")
     with pytest.raises(ValueError):

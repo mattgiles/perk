@@ -1,10 +1,10 @@
 """The Linear partial-transfer interruption lane (contracts.md §8.53 over §8.43's carrier).
 
-Composes ``transfer.run_transfer`` / ``recover.recover_operations`` over the REAL
+Composes ``Delivery.transfer`` / ``recover.recover_operations`` over the REAL
 ``LinearProjectObjectiveStore`` + ``LinearIssueBackend`` + ``TrainPersistence`` driven by the
 stateful ``FakeLinearWorkspace``, with fail-once injection at **GraphQL-mutation granularity**
 (the store-internal write granularity). A raise from the client IS the faithful death
-simulation here: ``run_transfer`` performs no exception-path cleanup — every window's raise
+simulation here: ``Delivery.transfer`` performs no exception-path cleanup — every window's raise
 leaves exactly the durable workspace + journal state a killed process would.
 
 The four interruption windows: pre-sentinel (die after Project creation, before the sentinel

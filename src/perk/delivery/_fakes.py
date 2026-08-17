@@ -51,7 +51,7 @@ class _FailureMixin:
 
 
 class FakeDeliveryPersistence(_FailureMixin, DeliveryPersistence):
-    """Persistence authority fake for status, Prepare, and synchronization."""
+    """Persistence authority fake for status, Prepare, Transfer, and synchronization."""
 
     def __init__(
         self,
@@ -227,7 +227,7 @@ class FakeDeliveryPersistence(_FailureMixin, DeliveryPersistence):
 
 
 class FakeDeliveryGit(_FailureMixin, DeliveryGit):
-    """Git authority fake for status, Prepare, and synchronization."""
+    """Git authority fake for status, Prepare, Transfer, and synchronization."""
 
     def __init__(
         self,
@@ -414,7 +414,7 @@ class FakeDeliveryGit(_FailureMixin, DeliveryGit):
 
 
 class FakeDeliveryGitHub(_FailureMixin, DeliveryGitHub):
-    """GitHub authority fake for status, Prepare, and synchronization."""
+    """GitHub authority fake for status, Prepare, Transfer, and synchronization."""
 
     def __init__(
         self,

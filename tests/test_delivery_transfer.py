@@ -104,7 +104,7 @@ class _Objective:
 
 @dataclass
 class _World:
-    """The injectable stateful world for one or more `run_transfer` invocations."""
+    """The injectable stateful world for one or more ``Delivery.transfer`` invocations."""
 
     objectives: dict[str, _Objective] = field(default_factory=dict)
     plans: dict[str, dict[str, object]] = field(default_factory=dict)

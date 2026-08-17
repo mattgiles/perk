@@ -1,9 +1,10 @@
 """``TrainPersistence`` — the backend-aligned train-persistence adapter (contracts.md §8.43).
 
 The one coherent persistence view over a delivery train's durable logical state: the operation
-journal (read via succession folding, written via the gated read-back append) plus the typed
-writers for the rest of the stored train state (the checkpoint pair, plan ownership, layer
-identity, the objective lineage stamp). Composes the selected :class:`ObjectiveStore` and
+journal (read via succession folding, written via the gated read-back append) plus the reusable
+typed writers for the checkpoint pair and objective lineage stamp. Transfer-specific ownership,
+identity, and clearing groups use its private issue seam's generic header merge-write. Composes
+the selected :class:`ObjectiveStore` and
 :class:`IssueBackend` — one committed ``[issues]`` selection drives both, so the journal carrier
 and the comment ops are always backend-aligned.
 

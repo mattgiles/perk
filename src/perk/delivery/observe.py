@@ -1,9 +1,10 @@
 """Production adapters for the delivery façade and deferred internal readers.
 
 :func:`resolve_delivery` is the sole public production constructor for the canonical
-:class:`perk.delivery.facade.Delivery` status, Prepare, and sync variants. Construction is
-assignment-only and does no configuration, credential, Git, subprocess, or network work; the
-nominal adapters resolve or observe their authorities only when an operation needs them.
+:class:`perk.delivery.facade.Delivery` status, Prepare, Transfer, Publish, and sync variants.
+Construction is assignment-only and does no configuration, credential, Git, subprocess, or
+network work; the nominal adapters resolve or observe their authorities only when an operation
+needs them.
 
 The compatibility ``TrainReads`` / ``resolve_train_reads`` / ``reconstruct_repo_train`` seams
 remain internal while the deferred delivery operation families migrate. Landing observations also

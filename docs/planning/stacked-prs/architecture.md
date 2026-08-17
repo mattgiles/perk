@@ -40,7 +40,10 @@ resolve_delivery(repo_root) -> Delivery                  # ZERO I/O
 Delivery.status(StatusRequest {objective_id}) -> StatusResult
 StatusResult -> exactly one of DeliveryTrain | no_train_reason
 Delivery.prepare(PrepareRequest {kind, mode?, base?, objective_id?, node_id?, plan_id?})
-  -> PrepareResult {kind, base?, identity?, notice?, planning?, layer?, parent_sha?}
+  -> PrepareResult {kind, base?, identity?, notice?, planning?, layer?, parent_sha?, replan?}
+Delivery.transfer(TransferRequest {predecessor_id, run_id, title, prose, base?, roadmap_nodes,
+                                   carry_map, delivery})
+  -> TransferResult {predecessor_id, successor, operation facts}
 Delivery.publish(PublishRequest {kind, plan_id, dry_run?, delivery?, objective_id?, run_id?,
                                  trigger_run_id?})
   -> PublishResult {kind, canonical plan_id, dry_run, exactly one of Layer | Ready}
@@ -49,25 +52,29 @@ Delivery.sync(SyncRequest {mode, objective_id, run_id?, include_base?, dry_run?,
   -> SyncResult {operation/result facts; nested Layer, Cascade, AbortPreview}
 ```
 
-Prepare is a closed flat family: authoring capability; strict/best-effort plan identity; planning
-layer start; and execution layer start. Frozen nested records carry variant details and illegal
-request/result combinations fail at construction. `SyncRequest` is likewise a closed mode/field
+Prepare is a closed flat family: authoring capability; replan facts from one objective snapshot;
+strict/best-effort plan identity; planning layer start; and execution layer start. Frozen nested
+records carry variant details and illegal request/result combinations fail at construction.
+`TransferRequest` is frozen intent only; Transfer validates recoverability before I/O and owns the
+single under-lock predecessor read, route, aggregate authority binding, and bounded errors.
+`SyncRequest` is likewise a closed mode/field
 matrix; `SyncResult` deliberately remains additive operation-produced data without new combination
 guards. `PublishRequest` is a closed layer/ready matrix; `PublishResult` has exact nested
 `Layer`/`Ready` details and carries nested cascade facts as `SyncResult` directly. The pure
 `DeliveryTrain` reconstruction, private capability rows, internal `LayerContext`/layer core,
 publication/synchronization engines and runtimes, and production adapters are not package-root
-APIs. `DeliveryError` is the bounded status + Prepare + Publish + sync hierarchy; status still
-translates only its exact six-code subset, while every Publish error carries joint phase/origin
-metadata. Claimed-prefix/continuation/writer/record-recovery vocabulary stays internal. The
-package root adds only `PublishRequest`/`PublishResult`, removes the six old publication names, and
-has exactly 59 exports; recover/transfer/land remain separate operation seams.
+APIs. `DeliveryError` is the bounded status + Prepare + Transfer + Publish + sync hierarchy;
+status still translates only its exact six-code subset, while every Publish error carries joint
+phase/origin metadata. Claimed-prefix/continuation/writer/record-recovery vocabulary stays
+internal. The package root additionally exports `TransferRequest`/`TransferResult` and has exactly
+61 exports; the transfer core/runtime/error and recover/land remain separate internal seams.
 
 The façade receives three nominal aggregate authorities:
 
 1. **`DeliveryPersistence`.** A backend-aligned authority composing the existing
    `ObjectiveStore`, `IssueBackend`, and train persistence for objective/plan/journal reads,
-   plan-body/header publication effects, prepared/outcome appends, and checkpoint-pair writes.
+   plan-body/header effects, prepared/outcome appends, checkpoint-pair writes, transfer carry
+   normalization, successor lookup/creation, and supersession finalization.
    Production backend selection is deferred
    until the first persistence operation, is cached only after the backend identities agree, and
    leaves no partial selection after a failed attempt.
@@ -86,8 +93,9 @@ The façade receives three nominal aggregate authorities:
    widened branch/strict-stack endpoints are reused rather than duplicated. Checks and
    landing-readiness observations stay with their operation seams until those slices migrate.
 
-The publication growth is exact: persistence adds `get_plan_body(*, issue_id)` and
-`update_plan_header(*, issue_id, fields)`; Git adds
+The aggregate growth is exact: publication adds persistence `get_plan_body(*, issue_id)` and
+`update_plan_header(*, issue_id, fields)`; Transfer adds carry normalization,
+`find_objective`, `supersede_objective`, and `finalize_supersession`; Git adds
 `push_with_exact_lease(branch, *, expected_remote_sha)`; GitHub widens/reuses
 `pr_for_branch(branch) -> PullRequest|null` and `strict_stack(number) -> StackRestFacts|null`, and
 adds `get_pr`, `create_pr`, `update_pr_body`, `update_pr_base`, `reopen_pr`, `mark_pr_ready`,
@@ -107,8 +115,11 @@ until a method needs the corresponding authority. Status preserves branch-sensit
 incremental objective returns its successful no-train result before trunk detection, fetch, or
 GitHub observation. Authoring never touches persistence; identity performs one objective read;
 planning performs one status reconstruction; execution performs status followed by exact parent
-fetch/verification. Publish binds the same authorities plus bound status/sync into one private
-context; its private runtime owns only clock/sleep/id/PR-body validation. Both Publish dry-run arms
+fetch/verification; replan performs one objective read and, only for stacked delivery, a journal
+read plus bound status classification. Transfer binds the same aggregates into the retained
+private recovery seams and a fresh-only aggregate carrier; its runtime owns only lock/id/clock.
+Publish binds the same authorities plus bound status/sync into one private context; its private
+runtime owns only clock/sleep/id/PR-body validation. Both Publish dry-run arms
 return before every authority call. Every effectful operation still reconstructs fresh state before
 deciding anything. Mutators return typed
 before/after projections and per-effect outcomes; command handlers do not infer success from log
@@ -537,8 +548,13 @@ unexplained changed layers.
 
 ## Replan transfer protocol
 
-Replan is a cross-object transaction without a shared backend transaction primitive, so it uses
-convergence:
+Replan is a cross-object transaction without a shared backend transaction primitive. The
+authoring door first asks `Delivery.prepare(kind=replan)` for one objective snapshot and, for a
+stacked predecessor, its journal-gated claimed/open-PR constraints; the command does not
+reconstruct or classify delivery itself. The approved save submits one immutable Transfer intent.
+Delivery validates its shape before I/O, takes the shared operation lock, performs exactly one
+predecessor read/classification, and keeps the lock through plain supersession or the convergence
+route:
 
 1. Reconstruct the old train and establish its exact published prefix.
 2. Validate the proposed successor: before publication any policy is valid; afterward it must
@@ -548,20 +564,27 @@ convergence:
    names the old objective and exact prefix.
 5. Move or update unfinished node ownership using backend-native operations, preserving plan and
    node-issue identity where Linear supports it.
-6. Update each published plan's `objective_id` and `objective_node_id` to its successor owner.
+6. Update each published plan through generic grouped header writes: ownership together, stacked
+   lineage/predecessor together, or all four stacked fields cleared together.
 7. Reconstruct the successor and verify the entire prefix plus unpublished suffix.
 8. Stamp the bidirectional supersession relationship and close the old objective last.
 9. Complete the transfer operation on the predecessor carrier.
 
 A retry searches for the already-created successor and manifest rather than minting another one.
-The old objective stays open on an incomplete transfer so the train never disappears behind a
-prematurely closed source.
+The old objective stays open on an incomplete journaled transfer so the train never disappears
+behind a prematurely closed source. Recovery continues to use the private `TransferSeams`
+roll-forward core; fresh callers reach it only through `Delivery.transfer`, whose cause-aware
+status bridge preserves domain versus Git/GitHub/store failure classification.
 
 Before first publication, carried plan identities survive a policy change. Replan atomically
 rewrites or clears their lineage, predecessor, and checkpoint metadata but never rewrites a local
 branch. Clean unpublished commits catch up through the next implement/submit preparation. Any
 dirty worktree or active writer blocks conversion. An existing remote PR already makes the layer
-published, so this conversion path no longer applies.
+published, so this conversion path no longer applies. The non-journaled incremental-to-stacked
+route remains only rerun-convergent by construction. Real Linear death after a carried node MOVE
+but before ownership/finalization is not proven: without a durable intent record, a later run cannot
+safely bind that partial state to the preflighted request. That recovery algorithm requires a
+separate behavior design rather than inference in this interface migration.
 
 ## Landing protocol
 

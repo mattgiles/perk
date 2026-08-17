@@ -14,8 +14,9 @@ launch (exactly like ``plan replan`` borrows ``plan`` and ``objective author --f
 ``supersedes=<OLD>`` in the run **handoff**. The in-session flow is the review-first path
 (``objective_draft → plan_review``; an APPROVED review auto-saves via the
 ``objectiveApprovalSave`` seam — ``objective_save``/``/objective-save`` stay the manual
-failsafe); the only storage change is the ``supersede_objective`` store method that
-``objective create --supersedes`` dispatches to.
+failsafe). The door obtains one-snapshot delivery constraints through replan Prepare; the
+approved save submits one Transfer request and leaves classification/routing/mutation behind the
+Delivery façade.
 
 Supervisor surface: ``--json`` → stdout, human text → stderr, stable exits (``0`` ok ·
 ``1`` op-failure/refusal · ``2`` not-a-repo). The judgment lives in the ``perk-objective-replan``

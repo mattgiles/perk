@@ -19,11 +19,12 @@ predecessor stores no lineage, so the append gate structurally refuses; toleranc
 by-construction — convergent creation + idempotent writes + close-last), whose cross-session
 abandonment is deliberately not journal-discoverable (a flagged residual).
 
-Locking mirrors sync's lock-first shape (D15): :func:`run_transfer` acquires
-``oplock.stack_operation_lock`` before the journal fold, planning, and probes, holding it
-through prepare → create → stamp → verify → finalize → complete; :func:`roll_forward_transfer`
-is the lock-assumed inner core recover calls while already holding the same lock. Import
-direction stays §8.44's: delivery imports the backend contracts + gateway one-directionally.
+Locking mirrors sync's lock-first shape (D15): ``Delivery.transfer`` acquires
+``oplock.stack_operation_lock`` before its single predecessor read, routing, journal fold,
+planning, and probes, holding it through prepare → create → stamp → verify → finalize →
+complete. :func:`roll_forward_transfer` is the lock-assumed inner core recover calls while
+already holding the same lock. Import direction stays §8.44's: delivery imports the backend
+contracts + gateway one-directionally.
 """
 
 import contextlib
@@ -86,8 +87,8 @@ class TransferError(DeliveryError):
         # | claimed_prefix_malformed | operation_in_progress | objective_not_found
         # | objective_not_open | invalid_delivery_policy | invalid_roadmap
         # | supersede_unsupported | invalid_input (contracts.md §8.53 declares the bounded
-        # set; infra raises — GitError/GitHubError/store errors — propagate for the CLI's
-        # own mapping, always leaving any prepared operation unresolved)
+        # set; the façade translates expected infrastructure failures once, always leaving
+        # any prepared operation unresolved)
     ) -> None:
         super().__init__(message, error_type=error_type)
 
@@ -281,9 +282,11 @@ def _validate_roadmap_and_carries(
     carry_keys = [node_id for node_id, _plan_id in carry_items]
     if len(carry_keys) != len(set(carry_keys)):
         raise ValueError(f"carry_map repeats successor node ids: {carry_keys!r}")
-    blank_keys = [node_id for node_id in carry_keys if not node_id.strip()]
+    blank_keys = [
+        node_id for node_id in carry_keys if not isinstance(node_id, str) or not node_id.strip()
+    ]
     if blank_keys:
-        raise ValueError("carry_map has blank successor node ids")
+        raise ValueError("carry_map has invalid or blank successor node ids")
     unknown = sorted(set(carry_keys) - known)
     if unknown:
         raise ValueError(f"carry_map names unknown successor nodes {unknown!r}")
@@ -538,7 +541,7 @@ class TransferPersistence(Protocol):
 class TransferSeams:
     """The roll-forward core's seam bundle — everything create→stamp→verify→finalize→complete
     needs. Recover composes one of these (already holding the operation lock) to conclude an
-    unresolved TRANSFER; :func:`run_transfer` wraps it with the fresh-pass preflight seams."""
+    unresolved TRANSFER; ``Delivery.transfer`` wraps it with fresh-pass aggregate authorities."""
 
     repo_root: Path
     store: TransferStore
