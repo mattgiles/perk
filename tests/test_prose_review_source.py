@@ -938,6 +938,23 @@ def test_python_adapter_parse_and_compiler_failures_are_document_level(text: str
     assert adapter.validate(text, ()) == (result.diagnostic,)
 
 
+def test_python_adapter_lone_surrogate_is_document_level_invalid_source() -> None:
+    adapter = _python_adapter()
+
+    result = adapter.resolve_range("target = '\ud800'\n", "symbol:target")
+
+    assert isinstance(result, UnresolvedRange)
+    assert result.reason == "invalid-source"
+    assert result.diagnostic == SourceDiagnostic(
+        code="syntax-error",
+        message="The Python source is not syntactically valid.",
+        selector=None,
+        line=None,
+        column=None,
+    )
+    assert adapter.validate("target = '\ud800'\n", ("symbol:target",)) == (result.diagnostic,)
+
+
 def test_python_adapter_batch_validation_parses_compiles_and_tokenizes_once(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

@@ -164,11 +164,12 @@ communicated by color alone.
    retry. A committed write whose catalog refresh fails remains committed, preserves prior catalog
    reads, freezes later writes, and gives external repair/copy guidance.
 
-The first persistence slice is deliberately limited to mapped Markdown and YAML source families;
-Python and TypeScript edits remain in-memory-only. Save and Reload lock only their file path while in
-flight. Discard is explicit per file and cannot clear conflict or indeterminate state. Closing or
-reloading with dirty buffers requires confirmation. The app never silently persists editor state
-into source files.
+Persistence admits mapped Markdown and YAML source families plus catalog-mapped `.py` named-symbol
+and Python-backed managed-prose units. Python call-argument selectors remain unsupported, and
+TypeScript edits remain in-memory-only. Save and Reload lock only their file path while in flight.
+Discard is explicit per file and cannot clear conflict or indeterminate state. Closing or reloading
+with dirty buffers requires confirmation. The app never silently persists editor state into source
+files.
 
 ### Preview an assembly
 

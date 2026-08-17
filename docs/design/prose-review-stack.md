@@ -6,12 +6,13 @@ skeleton — the minimal secure launcher (`perk-dev prose-review`) plus the serv
 — and now carrying the three-pane workbench shell (fragment-aware capability tree / mode bar +
 focused in-memory editing), the relationship inspector (consumers, consuming shapes + delivery
 siblings, concerns, lineage), header catalog search, workspace-backed whole-unit Compare mode, and
-one browser-authoritative workspace with safe Markdown/YAML persistence. The inspector, search, and
-comparison-option projection are pure in-memory `CatalogSnapshot` queries. Markdown, YAML, Python
-AST, and TypeScript compiler-API adapters resolve exact logical fragments over either the canonical
-load text or browser-supplied current text; Markdown/YAML now share one whole-buffer validation and
-atomic-save pipeline, while later nodes add Python call arguments, Python/TypeScript persistence,
-assembly views, and executable check handoffs without revisiting this stack.
+one browser-authoritative workspace with safe Markdown/YAML and catalog-mapped Python persistence.
+The inspector, search, and comparison-option projection are pure in-memory `CatalogSnapshot`
+queries. Markdown, YAML, Python AST, and TypeScript compiler-API adapters resolve exact logical
+fragments over either the canonical load text or browser-supplied current text; Markdown, YAML, and
+admitted Python-backed paths share one whole-buffer validation and atomic-save pipeline, while later
+slices add Python call arguments, TypeScript persistence, assembly views, and executable check
+handoffs without revisiting this stack.
 
 ## HTTP layer: FastAPI + uvicorn
 
@@ -43,7 +44,7 @@ assembly views, and executable check handoffs without revisiting this stack.
   keeps the public facade stable while separating frozen contracts, contained reads/dispatch, and
   the Markdown/YAML/Python/TypeScript implementations. The TypeScript adapter's selector helper is
   fixed under an explicit helper checkout root, separate from the canonical-source trust root.
-  Python writes the exact already-authorized text and ordered selectors to a random private
+  TypeScript writes the exact already-authorized text and ordered selectors to a random private
   temporary request, invokes `node tools/prose-map/selector.ts <request-json-path>` through
   `perk.substrate.proc.run_checked`, and removes the directory on every outcome. That temporary
   snapshot is controlled subprocess IPC over already-authorized text — generated solely by the
@@ -82,10 +83,14 @@ assembly views, and executable check handoffs without revisiting this stack.
   Python identifier that is not a hard keyword (contextual soft keywords remain valid). It parses,
   compiler-validates without execution, and tokenizes once per source operation so decorated
   function ranges begin at their physical `@` marker and AST UTF-8 byte columns become exact
-  Unicode string indexes. Python call arguments remain deferred. The structured-text adapters expose
-  exact range resolution, batch revalidation, and semantic check hints (`prose-map`, plus
-  `learned-docs` for YAML). Markdown and YAML participate in the shared whole-buffer persistence
-  pipeline; Python and TypeScript persistence remains deferred.
+  Unicode string indexes. For admitted `.py` `python-symbol` and `managed-prose` saves, batch
+  validation reuses that single parse/compiler/tokenizer pass and re-resolves every mapped
+  `symbol:<name>` selector against the reviewed complete buffer before the common replacement tail.
+  The validation-only code object is discarded: repository Python is never imported, evaluated, or
+  executed. Python call arguments remain unsupported. The structured-text adapters expose exact
+  range resolution, batch revalidation, and semantic check hints (`prose-map`, plus `learned-docs`
+  for YAML). Markdown, YAML, and catalog-mapped Python participate in the shared whole-buffer
+  persistence pipeline; TypeScript persistence remains deferred.
   `GET /api/source` is the only canonical source-load endpoint and accepts an optional composite
   fragment id. Its nested response separates immutable file metadata (`path`, `stat.S_IMODE` mode,
   exact newline classification, SHA-256 load hash) from the metadata-free focused view; the exact
@@ -107,10 +112,13 @@ assembly views, and executable check handoffs without revisiting this stack.
   successful write in place, retains the prior read generation, and freezes later writes. The closed
   pre-save gate is adapter syntax, every mapped selector on the path, and
   containment/membership/lineage safety—never catalog rebuild, template rendering, subprocess checks,
-  or command execution.
+  or command execution. Python discovery-marker membership is observed only by the post-commit
+  catalog rebuild. A valid save that removes the marker remains committed; a resulting rebuild
+  failure retains the prior read generation and enters the same frozen-write recovery state.
 - **The write helper is stricter than canonical reads.** It admits only mapped `.md`
-  Markdown/managed-prose and `.yaml`/`.yml` ambient-routing paths, refuses generated sources and every
-  root-relative symlink component, and never interprets lineage targets as paths. An early target
+  Markdown/managed-prose, `.yaml`/`.yml` ambient-routing, and `.py` Python-symbol/managed-prose paths;
+  TypeScript remains unsupported. It refuses generated sources and every root-relative symlink
+  component, and never interprets lineage targets as paths. An early target
   sample rejects an existing hash mismatch before temp creation. Exact UTF-8 bytes are then written
   to a unique same-directory temp; a second no-follow safety/hash/mode sample occurs after preparation,
   the latest mode is applied after writing, and `os.replace` follows without intervening rebuild or
@@ -207,7 +215,7 @@ CheckRunner.
 | Origin exact-match | An `Origin` header, when present, must equal `http://127.0.0.1:<port>` exactly, else 403 | `test_origin_exact_match_passes_and_foreign_origin_is_rejected` |
 | CSRF token on every non-GET/HEAD request | Meta-tag injection: `index.html`'s `__PROSE_REVIEW_CSRF__` placeholder is replaced at serve time with the process token (`secrets.token_urlsafe(32)`); the guard requires **exactly one** `X-Prose-Review-Csrf` header `secrets.compare_digest`-matching it (zero/duplicate/wrong → 403). Projection and save share one mutation-header helper and refuse missing/empty metadata locally. | `test_csrf_all_four_arms`; projection/save security arms in `test_prose_review_web.py`; `sourceLoad.test.ts`; `saveLoad.test.ts` |
 | Repo-rooted read containment | Every **repository-content** read belongs to one of two families. Built-asset reads (`index.html` included) go through the contained-read helper: re-resolve the dist root, require it under the resolved repo root, resolve the candidate, require it under the dist root and a regular file — an escaping `dist/` symlink cannot launder outside targets in. Canonical-source reads go through the SourceAdapter (`perk_dev.prose_review.source_adapter`): lexical absolute-path rejection, resolved containment under the repo root, catalog membership, one descriptor for regular-file/mode/byte sampling, and strict UTF-8 — serving-path-exclusive. Supplied-text projection never calls that reader. The adapter-owned random TypeScript request is controlled IPC containing only that already-authorized snapshot; its generated path, fixed helper root, and unconditional cleanup are separately pinned. | traversal, child-symlink, `assets/`-dir-symlink, `dist`-root-symlink, and `index.html`-symlink tests in `test_prose_review_web.py`; traversal/absolute/symlink/NUL/non-text, same-descriptor metadata, canonical-read exclusion, and TypeScript temp-snapshot/cleanup/root-separation arms in `test_prose_review_source.py` |
-| Repo-rooted conditional write containment | Save accepts no caller path/selector/adapter/mode. The active catalog derives one closed Markdown/YAML family and every selector on its path; generated sources, unmapped/mixed families, absolute/traversal/nonregular paths, and every symlink component refuse. Early and post-temp no-follow samples enforce the load hash; only a late-matching same-directory temp reaches `os.replace`. | direct admission, validation, lineage, traversal/symlink, early/late conflict, exact-byte/mode, atomicity, and failure-cleanup arms in `test_prose_review_save.py`; strict HTTP and real-uvicorn save arms in `test_prose_review_web.py` / `test_prose_review_integration.py` |
+| Repo-rooted conditional write containment | Save accepts no caller path/selector/adapter/mode. The active catalog derives one closed Markdown, YAML, or Python family and every selector on its path; generated sources, unmapped/mixed families, absolute/traversal/nonregular paths, and every symlink component refuse. Python validation parses, compiler-validates without execution, tokenizes, and re-resolves every mapped named-symbol selector before mutation. Early and post-temp no-follow samples enforce the load hash; only a late-matching same-directory temp reaches `os.replace`. | direct admission, Python non-execution/validation, lineage, traversal/symlink, early/late conflict, exact-byte/mode, atomicity, and failure-cleanup arms in `test_prose_review_save.py`; production catalog-refresh and strict HTTP arms in `test_prose_review_web.py`; real-uvicorn save arms in `test_prose_review_integration.py` |
 | Text-only rendering (this node's slice) | React JSX text interpolation (escaped by default) + a node:test source scan banning HTML sinks (`innerHTML`, `outerHTML`, `insertAdjacentHTML`, `dangerouslySetInnerHTML`, `document.write`) + the CSP as backstop | `tools/prose-review/dom-sinks.test.ts` (with a vacuousness self-check) |
 | CSP + hardening headers on **every** HTTP response | `Content-Security-Policy: default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self'; font-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'` plus `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer`, `Cache-Control: no-store` — stamped by the guard on rejections, 404s, and framework-generated 500s alike | header assertions on every response shape, incl. `test_unhandled_exception_response_is_still_header_stamped` (pins the outermost placement) |
 | No framework doc surfaces | `docs_url=None, redoc_url=None, openapi_url=None` | `test_framework_doc_surfaces_are_disabled` (×3) |
@@ -227,11 +235,13 @@ vocabularies while tolerating additive unknown response keys. The comparison opt
 response-origin matching plus endpoint-specific latest-wins/clear/dispose invalidation.
 The proof structure remains **server integration** (real Vite build, real uvicorn on a pre-bound
 socket, real nested `*Out` DTOs, a CSRF-authenticated supplied-text projection with unchanged disk
-load afterward, an exact-byte/mode/hash Markdown/YAML save followed by refreshed reads, and a real
-TypeScript fragment resolved through the separate helper checkout root)
-plus node:test coverage of every frontend parse/transport boundary and the pure workspace state
-machine. A jsdom harness loads TSX through the exact-pinned `tsx` API to exercise the rendered App
-coordinator (fragment preservation, placement invalidation, stale outcomes, mode reset, duplicate
+load afterward, exact-byte/mode/hash Markdown, YAML, and focused Python saves followed by catalog
+refresh observations, and a real TypeScript fragment resolved through the separate helper checkout
+root). Separate
+production-reload coverage rebuilds a disposable real catalog after marker-preserving Python saves
+and pins marker-removing saves to the committed-but-stale write freeze. Frontend proof remains
+node:test coverage of every parse/transport boundary and the pure workspace state machine. A jsdom
+harness loads TSX through the exact-pinned `tsx` API to exercise the rendered App coordinator (fragment preservation, placement invalidation, stale outcomes, mode reset, duplicate
 choice occurrence identity, attention drawer, discard, unload lifecycle, catalog-epoch refresh, and
 write freeze) and CenterPane (shared path loads, focused textarea, transient retry, native
 current-text diff chunks, frozen save review, diagnostics, conflict/reconciliation, and escaped
@@ -240,8 +250,10 @@ dependencies while preserving the workspace's zero-runtime-dependency posture.
 
 The launcher-served **browser** leg covers source-native focused editing across
 Markdown/YAML/Python/TypeScript, alias/back-navigation retention, immediate workspace-backed Compare,
-two-file dirty/Open behavior, mode preservation, and explicit reviewed Markdown/YAML persistence.
-Python/TypeScript remain in-memory-only. The rendered jsdom contract covers temporary-invalid focus,
+two-file dirty/Open behavior, mode preservation, and explicit reviewed Markdown/YAML/Python
+persistence. Mapped Python named symbols use the shared full-file review/save controls, and
+Python-backed managed prose preserves its read-only materialization handoff; TypeScript remains
+in-memory-only. The rendered jsdom contract covers temporary-invalid focus,
 stale-helper/transient retry, discard cancel/confirm, exact manual reversion, `beforeunload`, frozen
 full-file diff metadata, hostile-text escaping, conflict Copy/Reload, indeterminate reconciliation,
 catalog refresh/invalidation, and refresh-failure freeze. Shape-origin layer selection,

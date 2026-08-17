@@ -140,15 +140,17 @@ test("parseSourceSaveResult rejects malformed and incoherent combinations", () =
   }
 });
 
-test("supportsSourceSave admits only mapped Markdown and YAML presentation families", () => {
+test("supportsSourceSave admits only mapped Markdown, YAML, and Python families", () => {
   const targets: [UnitRef, boolean][] = [
     [UNIT, true],
     [{ id: "markdown:doc", kind: "markdown", path: "doc.MD" }, true],
     [{ id: "ambient:x", kind: "ambient-routing", path: "clusters.yaml" }, true],
     [{ id: "ambient:x", kind: "ambient-routing", path: "clusters.yml" }, true],
-    [{ id: "python:x", kind: "python-symbol", path: "module.py" }, false],
+    [{ id: "python:x", kind: "python-symbol", path: "module.PY" }, true],
+    [{ id: "managed:x", kind: "managed-prose", path: "module.py" }, true],
     [{ id: "typescript:x", kind: "typescript-symbol", path: "module.ts" }, false],
-    [{ id: "managed:x", kind: "managed-prose", path: "module.py" }, false],
+    [{ id: "python:x", kind: "python-symbol", path: "module.md" }, false],
+    [{ id: "managed:x", kind: "managed-prose", path: "module.ts" }, false],
     [{ id: "markdown:x", kind: "markdown", path: "module.yaml" }, false],
   ];
   for (const [unit, expected] of targets) {

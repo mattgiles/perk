@@ -193,6 +193,12 @@ export function supportsSourceSave(target: SourceTarget): boolean {
   ) {
     return true;
   }
+  if (
+    (target.unit.kind === "python-symbol" || target.unit.kind === "managed-prose") &&
+    path.endsWith(".py")
+  ) {
+    return true;
+  }
   return (
     target.unit.kind === "ambient-routing" && (path.endsWith(".yaml") || path.endsWith(".yml"))
   );
