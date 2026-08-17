@@ -55,8 +55,10 @@ from perk_dev.prose_review.source_adapter import (
     read_unit_file,
     source_adapter_for,
 )
-from perk_dev.prose_review.source_adapter.contract import SourceAdapter
-from perk_dev.prose_review.source_adapter.typescript import TypeScriptAdapterUnavailable
+from perk_dev.prose_review.source_adapter.typescript import (
+    TypeScriptAdapterUnavailable,
+    TypeScriptSourceAdapter,
+)
 
 type BoundaryOwner = Literal["pi", "user", "runtime", "borrowed-package"]
 type LayerPresence = Literal["always", "varies"]
@@ -232,12 +234,15 @@ class AssemblyRenderer:
     """App-lifetime assembly preview composer over an explicit per-call snapshot.
 
     Captures only the resolved source root and the already-created app-scoped TypeScript
-    SourceAdapter (its helper slot stays a real cross-operation resource bound). The
-    renderer accepts no session-shape id, request-selected read path, selector, fragment
-    list, adapter, helper root, scenario variable override, or executable callback.
+    SourceAdapter (its helper slot stays a real cross-operation resource bound; the
+    concrete type also owns the ``TypeScriptAdapterUnavailable`` contract this renderer
+    maps to the typed ``adapter-unavailable`` failure — a broader adapter here could
+    misreport a wiring error as a content failure). The renderer accepts no session-shape
+    id, request-selected read path, selector, fragment list, adapter, helper root,
+    scenario variable override, or executable callback.
     """
 
-    def __init__(self, repo_root: Path, typescript_adapter: SourceAdapter) -> None:
+    def __init__(self, repo_root: Path, typescript_adapter: TypeScriptSourceAdapter) -> None:
         self._repo_root = repo_root.resolve()
         self._typescript_adapter = typescript_adapter
 
