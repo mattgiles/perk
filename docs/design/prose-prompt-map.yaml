@@ -449,6 +449,12 @@ routes:
     audience: shipped
     role: control-guidance
     priority: 80
+  - id: ts-agent-scratch
+    match: { paths: ["extension/substrate/agentScratch.ts"] }
+    capability: foundation.tools
+    audience: shipped
+    role: context
+    priority: 100
   - id: ts-session
     match: { paths: ["extension/doors/commitCompact.ts", "extension/doors/lifecycleGates.ts", "extension/substrate/bindingDelivery.ts", "extension/substrate/toolGating.ts"] }
     capability: foundation.session

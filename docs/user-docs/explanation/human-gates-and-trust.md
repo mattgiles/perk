@@ -84,6 +84,13 @@ you need strong isolation — untrusted repositories, unmonitored autonomous wor
 not run by hand — that isolation belongs to the operating system: a container, a VM, or a
 policy sandbox, provisioned with the minimum files and credentials the work needs.
 
+Run-scoped **agent scratch** reduces accidental reuse of shared temporary files: an eligible
+write-capable session is guided to a private-mode directory under its current perk run. That is
+organization and cross-user privacy, not containment. Another process running as the same user can
+still read those files, and the model's shell access is not sandboxed or forced to stay inside the
+directory. Scratch content is disposable, non-authoritative, and excluded from retained remote run
+diagnostics; it does not become safer evidence merely because it is run-scoped.
+
 The useful contrast inside perk itself is foreign-PR review: reviewing a pull request perk did
 not author uses a detached, read-only checkout, and nothing from the foreign branch is ever
 executed. That is the safe posture for untrusted code — reading without running — and it is the

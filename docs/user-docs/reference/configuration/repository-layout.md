@@ -25,6 +25,7 @@ perk-owned: it is Pi's directory with a perk-managed slice.
 | `.perk/config.toml` | maintainer / perk (the init marker) | committed | yes |
 | `.perk/local.toml` | user | gitignored | no |
 | `.perk/workflow/` | perk | gitignored (runtime cache) | no |
+| `.perk/workflow/scratch/runs/<run_id>/agent/` | perk creates; the active agent may use | run-owned disposable scratch | no |
 | `.perk/skills/<name>/SKILL.md` | maintainer / perk | committed | yes |
 | `.perk/required-perk-version` | perk-generated (`perk init` / `doctor --fix`) | committed | yes |
 | `.perk/managed-state.toml` | perk-generated (`perk init` / `doctor --fix`) | committed | yes |
@@ -37,6 +38,37 @@ perk-owned: it is Pi's directory with a perk-managed slice.
 | `.agents/skills/`, `.agents/cache/` | skills CLI (runtime) | gitignored | no |
 | `.worktrees/` | perk (worktrees) | gitignored | no |
 | `.pi-subagents/` | pi-subagents (borrowed engine, runtime) | gitignored | no |
+
+### Agent scratch
+
+For each eligible write-capable model turn, perk creates
+`.perk/workflow/scratch/runs/<run_id>/agent/` before model work and supplies that exact
+repository-relative path in a hidden guidance block. The guidance asks the agent to put disposable
+command/model intermediates there instead of shared `/tmp`, using descriptive non-colliding names.
+It is guidance only: perk adds no scratch-writing tool, does not set `PERK_SCRATCH_DIR` or `TMPDIR`,
+and does not intercept shell, read, or search paths.
+
+Eligibility follows the current session posture. An explicitly read-only workflow receives no
+block. Neither do perk's report-only children: `perk.adversarial-reviewer`, `perk.draft-reviewer`,
+`perk.harvest-analyst`, `perk.learn-analyst`, `perk.objective-explorer`, `perk.pr-reviewer`,
+`perk.review-angle-selector`, and `perk.review-classifier`. Main write-capable sessions, the
+write-capable `perk.conflict-resolver`, remote workers, and unknown/custom children remain eligible.
+A read-write `/btw` side session gets the same current-run guidance; its read-only and summary
+shapes do not. Direct SDK-created read-only children remain unguided.
+
+The `agent/` directory is created or repaired idempotently with POSIX mode `0700`. Existing
+symlinks or non-directories in the checkout-owned run path are refused, and resolved containment
+beneath the active checkout is verified. On an unsafe run id, filesystem error, or permission
+failure, perk reports a warning, injects no path, and lets the model turn continue; later eligible
+turns retry. The permission protects against other OS users, not another process running as the
+same user.
+
+Agent scratch is **disposable and non-authoritative**. It has no provenance pointer or digest, and
+a durable decision must re-read the canonical repository or backend source rather than trust a
+scratch copy. GitHub Actions diagnostics retain the rest of the hidden `.perk` run directory but
+explicitly exclude `agent/**`, so these files are not uploaded as remote run artifacts. They persist
+across reload/resume locally and are removed only with the enclosing run by the normal
+`perk state prune` policy; there is no session-exit cleanup.
 
 **One perk-owned path lives *outside* the repo.** `~/.perk/last-seen-version` is the user-level,
 machine-local store behind the one-line post-upgrade notice (see

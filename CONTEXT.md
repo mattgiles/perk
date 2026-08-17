@@ -38,6 +38,11 @@ _Avoid_: full prompt, transcript, concatenated string
 A recurring behavioral instruction with one canonical carrier and explicitly related prose units.
 _Avoid_: duplicated phrase, tag, topic
 
+**Agent scratch**:
+A run-owned, disposable directory for non-authoritative command and model intermediate files,
+distinct from pointer-validated session data and host-global temporary space.
+_Avoid_: session data, evidence store, temp directory
+
 ### Objective delivery
 
 **Incremental delivery**:
