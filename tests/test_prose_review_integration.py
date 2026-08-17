@@ -7,6 +7,7 @@ ever write one output dir), so this suite never touches the launcher's real ``di
 """
 
 import hashlib
+import json
 import re
 import secrets
 import socket
@@ -39,6 +40,11 @@ PYTHON_UNIT_ID = "python-symbol:packages/perk-dev/src/perk_dev/audit/bounding.py
 PYTHON_SOURCE_PATH = Path("packages/perk-dev/src/perk_dev/audit/bounding.py")
 TYPESCRIPT_UNIT_ID = "typescript-tool:plan_review"
 TYPESCRIPT_SOURCE_PATH = Path("extension/factories/planReview.ts")
+# The complete plan-authoring assembly needs these additional canonical files under the
+# fixture trust root (planReview.ts is already copied above for the source round trips).
+PLAN_CONTEXT_PATH = Path("prompts/contexts/plan-authoring.md")
+PLAN_SKILL_PATH = Path("skills/perk-plan/SKILL.md")
+PLAN_DRAFT_PATH = Path("extension/factories/planDraft.ts")
 CSP = (
     "default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; "
     "img-src 'self'; font-src 'self'; base-uri 'none'; form-action 'none'; "
@@ -89,6 +95,10 @@ def server(tmp_path_factory: pytest.TempPathFactory) -> Iterator[_RunningServer]
     typescript_source = trust_root / TYPESCRIPT_SOURCE_PATH
     typescript_source.parent.mkdir(parents=True)
     typescript_source.write_bytes((ROOT / TYPESCRIPT_SOURCE_PATH).read_bytes())
+    for relative in (PLAN_CONTEXT_PATH, PLAN_SKILL_PATH, PLAN_DRAFT_PATH):
+        target = trust_root / relative
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes((ROOT / relative).read_bytes())
 
     snapshot = CatalogSnapshot.from_catalog(build_catalog(ROOT))
     token = secrets.token_urlsafe(32)
@@ -521,3 +531,156 @@ def test_wrong_host_is_rejected_over_real_http(server: _RunningServer) -> None:
     assert response.status_code == 403
     assert response.json() == {"detail": "forbidden host"}
     _assert_security_headers(response)
+
+
+def test_assembly_options_serves_full_scenario_fixtures_over_real_http(
+    server: _RunningServer,
+) -> None:
+    from perk_dev.prose_review.dto import AssemblyOptionsOut
+
+    view = server.snapshot.get_assembly("plan-authoring")
+    assert view is not None
+    with httpx.Client(base_url=server.base_url, timeout=10) as client:
+        response = client.get("/api/assembly/options", params={"assembly": "plan-authoring"})
+        unknown = client.get("/api/assembly/options", params={"assembly": "missing"})
+    assert response.status_code == 200
+    _assert_security_headers(response)
+    payload = response.json()
+    assert payload == AssemblyOptionsOut.from_domain(view).model_dump(mode="json")
+    assert [scenario["id"] for scenario in payload["scenarios"]] == [
+        "plan-github-warm",
+        "plan-linear-cold",
+    ]
+    assert payload["scenarios"][0]["variables"] == {
+        "marker": "[PLAN AUTHORING]",
+        "provider": "github",
+    }
+    assert unknown.status_code == 404
+    assert unknown.json() == {"detail": "unknown assembly"}
+    _assert_security_headers(unknown)
+
+
+def test_guarded_assembly_render_round_trips_workspace_buffers_over_real_http(
+    server: _RunningServer,
+) -> None:
+    prompt_buffer = (
+        '{% if provider == "github" %}github arm{% else %}linear arm{% endif %} for {{ marker }}\n'
+    )
+    typescript_buffer = (
+        (ROOT / TYPESCRIPT_SOURCE_PATH)
+        .read_text(encoding="utf-8")
+        .replace("Present the plan", "Present the unsaved buffer plan", 1)
+    )
+    review_unit = server.snapshot.get_unit(TYPESCRIPT_UNIT_ID)
+    assert review_unit is not None
+    disk_before = {
+        relative: (server.repo_root / relative).read_bytes()
+        for relative in (
+            PLAN_CONTEXT_PATH,
+            PLAN_SKILL_PATH,
+            PLAN_DRAFT_PATH,
+            TYPESCRIPT_SOURCE_PATH,
+        )
+    }
+    body = {
+        "assembly": "plan-authoring",
+        "scenario": "plan-github-warm",
+        "presentation": {"include_ambient": None, "include_tools": None},
+        "buffers": [
+            {"path": PLAN_CONTEXT_PATH.as_posix(), "text": prompt_buffer},
+            {"path": TYPESCRIPT_SOURCE_PATH.as_posix(), "text": typescript_buffer},
+        ],
+    }
+    with httpx.Client(base_url=server.base_url, timeout=30) as client:
+        token = _csrf_token(client.get("/").text)
+        rendered = client.post(
+            "/api/assembly/render",
+            headers={"X-Prose-Review-Csrf": token},
+            json=body,
+        )
+        overridden = client.post(
+            "/api/assembly/render",
+            headers={"X-Prose-Review-Csrf": token},
+            json={**body, "presentation": {"include_ambient": None, "include_tools": False}},
+        )
+
+    assert rendered.status_code == 200
+    _assert_security_headers(rendered)
+    payload = rendered.json()
+    assert list(payload.keys()) == ["assembly", "scenario", "presentation", "layers"]
+    assert payload["assembly"] == "plan-authoring"
+    assert payload["scenario"]["id"] == "plan-github-warm"
+    assert payload["presentation"] == {"include_ambient": True, "include_tools": True}
+
+    # All authored layers/boundaries remain in authored order.
+    assert [layer["presentation"]["position"] for layer in payload["layers"]] == [1, 2, 3, 4, 5, 6]
+    assert [layer["type"] for layer in payload["layers"]] == [
+        "boundary",
+        "owned",
+        "owned",
+        "failure",
+        "owned",
+        "boundary",
+    ]
+    assert (payload["layers"][0]["boundary"], payload["layers"][0]["owner"]) == ("pi-system", "pi")
+    assert (payload["layers"][5]["boundary"], payload["layers"][5]["owner"]) == (
+        "user-content",
+        "user",
+    )
+
+    # The unsaved prompt buffer chose the github conditional arm through the gate.
+    prompt_layer = payload["layers"][1]
+    assert prompt_layer["content_kind"] == "rendered-template"
+    assert prompt_layer["parts"][0]["text"] == "github arm for [PLAN AUTHORING]\n"
+
+    skill_layer = payload["layers"][2]
+    assert skill_layer["content_kind"] == "raw-source"
+    assert skill_layer["parts"][0]["text"] == disk_before[PLAN_SKILL_PATH].decode("utf-8")
+
+    # The TypeScript current buffer produced exact ordered fragment parts.
+    review_layer = payload["layers"][4]
+    assert review_layer["content_kind"] == "source-fragments"
+    assert [part["fragment"]["id"] for part in review_layer["parts"]] == [
+        fragment.id for fragment in review_unit.candidate.fragments
+    ]
+    assert len(review_layer["parts"]) == 8
+    assert "Present the unsaved buffer plan" in review_layer["parts"][0]["text"]
+    for part in review_layer["parts"]:
+        assert part["text"]
+        assert part["text"] in typescript_buffer
+
+    # Fixture disk bytes are unchanged by the buffered render.
+    for relative, before in disk_before.items():
+        assert (server.repo_root / relative).read_bytes() == before
+
+    # Overriding tools off echoes in the resolved presentation without changing layers.
+    assert overridden.status_code == 200
+    _assert_security_headers(overridden)
+    assert overridden.json()["presentation"] == {"include_ambient": True, "include_tools": False}
+    assert overridden.json()["layers"] == payload["layers"]
+
+
+def test_assembly_render_rejects_an_unpaired_surrogate_buffer_over_real_http(
+    server: _RunningServer,
+) -> None:
+    body = json.dumps(
+        {
+            "assembly": "plan-authoring",
+            "scenario": "plan-github-warm",
+            "presentation": {"include_ambient": None, "include_tools": None},
+            "buffers": [{"path": "AGENTS.md", "text": "hostile \ud800 escape"}],
+        }
+    )
+    with httpx.Client(base_url=server.base_url, timeout=10) as client:
+        token = _csrf_token(client.get("/").text)
+        response = client.post(
+            "/api/assembly/render",
+            headers={
+                "X-Prose-Review-Csrf": token,
+                "Content-Type": "application/json",
+            },
+            content=body,
+        )
+    assert response.status_code == 422
+    _assert_security_headers(response)
+    assert "\ud800" not in response.text
