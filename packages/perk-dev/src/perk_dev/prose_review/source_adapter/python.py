@@ -96,6 +96,13 @@ def _parse(text: str) -> _PythonDocument:
             line_starts=starts,
             syntax_problem=_syntax_error_problem(exc),
         )
+    except UnicodeEncodeError:
+        return _PythonDocument(
+            module=None,
+            tokens=(),
+            line_starts=starts,
+            syntax_problem=_PythonProblem(reason="invalid-source"),
+        )
     try:
         tokens = tuple(tokenize.generate_tokens(io.StringIO(text).readline))
     except tokenize.TokenError as exc:

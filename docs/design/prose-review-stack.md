@@ -235,8 +235,9 @@ vocabularies while tolerating additive unknown response keys. The comparison opt
 response-origin matching plus endpoint-specific latest-wins/clear/dispose invalidation.
 The proof structure remains **server integration** (real Vite build, real uvicorn on a pre-bound
 socket, real nested `*Out` DTOs, a CSRF-authenticated supplied-text projection with unchanged disk
-load afterward, exact-byte/mode/hash Markdown, YAML, and focused Python saves followed by refreshed
-reads, and a real TypeScript fragment resolved through the separate helper checkout root). Separate
+load afterward, exact-byte/mode/hash Markdown, YAML, and focused Python saves followed by catalog
+refresh observations, and a real TypeScript fragment resolved through the separate helper checkout
+root). Separate
 production-reload coverage rebuilds a disposable real catalog after marker-preserving Python saves
 and pins marker-removing saves to the committed-but-stale write freeze. Frontend proof remains
 node:test coverage of every parse/transport boundary and the pure workspace state machine. A jsdom

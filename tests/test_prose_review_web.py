@@ -1488,6 +1488,46 @@ def test_save_unknown_unit_is_fixed_404_and_python_save_is_guarded_success(
     _assert_security_headers(python)
 
 
+def test_python_save_lone_surrogate_is_tagged_failure_without_mutation(
+    snapshot: CatalogSnapshot,
+    repo: Path,
+) -> None:
+    unit = snapshot.get_unit(PYTHON_UNIT_ID)
+    assert unit is not None
+    target = repo / unit.candidate.path
+    target.parent.mkdir(parents=True)
+    target.write_bytes((ROOT / unit.candidate.path).read_bytes())
+    original = target.read_bytes()
+
+    response = _client(snapshot, repo, reload_catalog=lambda _root: snapshot).post(
+        "/api/source/save",
+        headers={web.CSRF_HEADER: TOKEN, "Content-Type": "application/json"},
+        content=json.dumps(
+            {
+                "unit": PYTHON_UNIT_ID,
+                "load_hash": hashlib.sha256(original).hexdigest(),
+                "text": "_PREAMBLE = '\ud800'\n",
+            }
+        ),
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "status": "validation-failed",
+        "diagnostics": [
+            {
+                "code": "syntax-error",
+                "message": "The Python source is not syntactically valid.",
+                "selector": None,
+                "line": None,
+                "column": None,
+            }
+        ],
+    }
+    assert target.read_bytes() == original
+    _assert_security_headers(response)
+
+
 def test_queued_save_waits_for_refresh_and_observes_newly_frozen_state(
     snapshot: CatalogSnapshot,
     repo: Path,
