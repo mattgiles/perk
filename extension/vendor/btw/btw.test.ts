@@ -6,10 +6,19 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { type AssistantMessage, fauxAssistantMessage, fauxText } from "@earendil-works/pi-ai";
-import { ModelRegistry } from "@earendil-works/pi-coding-agent";
+import { ModelRegistry, SessionManager } from "@earendil-works/pi-coding-agent";
 import { visibleWidth } from "@earendil-works/pi-tui";
+import {
+  AGENT_SCRATCH_CONTEXT_TYPE,
+  renderAgentScratchBlock,
+} from "../../substrate/agentScratch.ts";
 import { fauxModelRuntime, loadPerkSession, scaffoldRepo } from "../../testing/harness.ts";
-import { createBtwAgentSession, liveModelRuntime } from "./btw.ts";
+import {
+  btwAppendSystemPrompt,
+  buildSeedMessages,
+  createBtwAgentSession,
+  liveModelRuntime,
+} from "./btw.ts";
 import {
   extractEventAssistantText,
   extractText,
@@ -169,7 +178,61 @@ test("binding the perk extension registers /btw and does not throw on session_st
   }
 });
 
-// --- the live-runtime session construction (pi 0.84: modelRuntime rides session creation) --------
+// --- run-owned scratch delivery + live-runtime session construction -----------------------------
+
+test("btw delivers one shared scratch block only to the read-write side session", () => {
+  const block = renderAgentScratchBlock("/repo", "RID");
+  let resolutions = 0;
+  const agentScratch = {
+    resolve: () => {
+      resolutions += 1;
+      return block;
+    },
+  };
+  const ctx = {} as Parameters<typeof btwAppendSystemPrompt>[0];
+
+  const readWrite = btwAppendSystemPrompt(ctx, {
+    tools: sideSessionTools(false),
+    agentScratch,
+  });
+  assert.equal(readWrite.filter((part) => part === block.content).length, 1);
+  assert.equal(resolutions, 1);
+
+  const readOnly = btwAppendSystemPrompt(ctx, {
+    tools: sideSessionTools(true),
+    agentScratch,
+  });
+  assert.equal(readOnly.includes(block.content), false);
+  const summary = btwAppendSystemPrompt(ctx, {
+    tools: [],
+    appendSystemPrompt: ["summary only"],
+    agentScratch,
+  });
+  assert.deepEqual(summary, ["summary only"]);
+  assert.equal(resolutions, 1, "read-only and tool-less sessions never resolve scratch");
+});
+
+test("btw seed filtering removes every main-session scratch custom before side-session seeding", () => {
+  const manager = SessionManager.inMemory("/repo");
+  const block = renderAgentScratchBlock("/repo", "RID");
+  manager.appendCustomMessageEntry(AGENT_SCRATCH_CONTEXT_TYPE, block.content, false);
+  manager.appendCustomMessageEntry("test:keep", "keep me", false);
+  const seed = buildSeedMessages(
+    { sessionManager: manager } as unknown as Parameters<typeof buildSeedMessages>[0],
+    [],
+  );
+  assert.equal(
+    seed.some(
+      (message) => (message as { customType?: string }).customType === AGENT_SCRATCH_CONTEXT_TYPE,
+    ),
+    false,
+  );
+  assert.equal(
+    seed.some((message) => (message as { customType?: string }).customType === "test:keep"),
+    true,
+    "non-scratch seed context survives",
+  );
+});
 
 /** A minimal ExtensionContext slice for `createBtwAgentSession` (model + facade + system prompt). */
 function fakeBtwCtx(reg: {

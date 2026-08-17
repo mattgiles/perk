@@ -46,6 +46,7 @@ import { registerPlanMode } from "./factories/planMode.ts";
 import { registerPlanReview } from "./factories/planReview.ts";
 import { registerPlanSave } from "./factories/planSave.ts";
 import { createHunkFeedbackReceiver } from "./hunkFeedback/receiver.ts";
+import { createAgentScratchProvisioner, registerAgentScratch } from "./substrate/agentScratch.ts";
 import { registerBindingDelivery } from "./substrate/bindingDelivery.ts";
 import {
   atomicWriteFileSync,
@@ -124,12 +125,18 @@ export default function (pi: ExtensionAPI) {
   // both session_start AND session_tree below. enter/exit are the surface the gated stages consume.
   const gating = registerToolGating(pi);
 
+  // Run-owned disposable scratch guidance for every eligible write-capable model turn. One
+  // activation-scoped provisioner shares retry/warning suppression with the isolated /btw side
+  // session; no model tool or process-global temp environment is introduced.
+  const agentScratch = createAgentScratchProvisioner();
+  registerAgentScratch(pi, agentScratch);
+
   // Vendored `btw`: a `/btw` human-only side-chat popover backed by an isolated in-memory
   // AgentSession. Takes `gating` for the gate-mirror — its side-session toolset + cache key follow
   // perk's read-only gate (`sideSessionTools`), so the isolated session never bypasses the read-only
   // guarantee. Its `ctx.ui.custom` overlay is the ONE sanctioned charter exception (§6 D6): human-
   // invoked only, `hasUI`-gated, no model tool, not a stage/door — never machine-reachable.
-  registerBtw(pi, gating);
+  registerBtw(pi, gating, agentScratch);
 
   // Vendored `whimsical`: flavors pi's default working-message label with a random phrase per
   // turn, via the headless-no-op `setWorkingMessage` surfaces seam. Always on, no config toggle.

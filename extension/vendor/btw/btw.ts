@@ -56,6 +56,11 @@ type OverlayHandleLike = {
   isFocused(): boolean;
 };
 
+import {
+  AGENT_SCRATCH_CONTEXT_TYPE,
+  type AgentScratchProvisioner,
+  createAgentScratchProvisioner,
+} from "../../substrate/agentScratch.ts";
 import type { ToolGating } from "../../substrate/toolGating.ts";
 import { report } from "../../surfaces/report.ts";
 import {
@@ -167,28 +172,51 @@ export function liveModelRuntime(
  * live session's model runtime (`liveModelRuntime`). Throws when no model is selected — callers
  * gate on `ctx.model` first.
  */
+export function btwAppendSystemPrompt(
+  ctx: ExtensionContext,
+  opts: {
+    tools: string[];
+    appendSystemPrompt?: string[];
+    agentScratch?: AgentScratchProvisioner;
+  },
+): string[] {
+  const appendSystemPrompt = [...(opts.appendSystemPrompt ?? [BTW_SYSTEM_PROMPT])];
+  const readWriteTools = sideSessionTools(false);
+  const isReadWrite =
+    opts.tools.length === readWriteTools.length &&
+    readWriteTools.every((tool) => opts.tools.includes(tool));
+  if (isReadWrite) {
+    const block = (opts.agentScratch ?? createAgentScratchProvisioner()).resolve(ctx);
+    if (block !== null) appendSystemPrompt.push(block.content);
+  }
+  return appendSystemPrompt;
+}
+
 export async function createBtwAgentSession(
   ctx: ExtensionContext,
   opts: {
     thinkingLevel: SessionThinkingLevel;
     tools: string[];
     appendSystemPrompt?: string[];
+    agentScratch?: AgentScratchProvisioner;
   },
 ): Promise<AgentSession> {
   const model = ctx.model;
   if (!model) throw new Error("No active model selected.");
+  const appendSystemPrompt = btwAppendSystemPrompt(ctx, opts);
+
   const { session } = await createAgentSession({
     sessionManager: SessionManager.inMemory(),
     model,
     modelRuntime: liveModelRuntime(ctx),
     thinkingLevel: opts.thinkingLevel,
     tools: opts.tools,
-    resourceLoader: createBtwResourceLoader(ctx, opts.appendSystemPrompt),
+    resourceLoader: createBtwResourceLoader(ctx, appendSystemPrompt),
   });
   return session;
 }
 
-function buildSeedMessages(ctx: ExtensionContext, thread: BtwDetails[]): Message[] {
+export function buildSeedMessages(ctx: ExtensionContext, thread: BtwDetails[]): Message[] {
   const seed: Message[] = [];
 
   try {
@@ -196,7 +224,13 @@ function buildSeedMessages(ctx: ExtensionContext, thread: BtwDetails[]): Message
       ctx.sessionManager.getEntries(),
       ctx.sessionManager.getLeafId(),
     ).messages;
-    seed.push(...(contextMessages.filter((message) => "role" in message) as Message[]));
+    seed.push(
+      ...(contextMessages.filter(
+        (message) =>
+          (message as { customType?: string }).customType !== AGENT_SCRATCH_CONTEXT_TYPE &&
+          "role" in message,
+      ) as Message[]),
+    );
   } catch {
     // Ignore context seed failures and continue with an empty side thread.
   }
@@ -357,7 +391,11 @@ class BtwOverlay extends Container implements Focusable {
   }
 }
 
-export function registerBtw(pi: ExtensionAPI, gating: ToolGating): void {
+export function registerBtw(
+  pi: ExtensionAPI,
+  gating: ToolGating,
+  agentScratch: AgentScratchProvisioner = createAgentScratchProvisioner(),
+): void {
   // Transcript markers for the btw thread entries (audit §2.3): renderer bodies in surfaces.ts,
   // registration = wiring, feature-detect inside the seam (pre-0.80.4 hosts stay inert).
   registerTranscriptRenderer(pi, BTW_ENTRY_TYPE, btwThreadEntryRenderer);
@@ -608,6 +646,7 @@ export function registerBtw(pi: ExtensionAPI, gating: ToolGating): void {
     const session = await createBtwAgentSession(ctx, {
       thinkingLevel: pi.getThinkingLevel() as SessionThinkingLevel,
       tools: sideSessionTools(gating.isActive()),
+      agentScratch,
     });
 
     const seedMessages = buildSeedMessages(ctx, thread);

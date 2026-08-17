@@ -12,6 +12,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { getModel } from "@earendil-works/pi-ai/compat";
 import type { AgentSession } from "@earendil-works/pi-coding-agent";
+import { AGENT_SCRATCH_CONTEXT_TYPE } from "../substrate/agentScratch.ts";
 import {
   type ChildHandoff,
   capForModel,
@@ -130,6 +131,14 @@ test("createReadOnlySession: active tools ⊆ SDK_READ_ONLY_TOOLS (structural, o
     for (const banned of ["edit", "write", "bash"]) {
       assert.ok(!active.includes(banned), `${banned} must not be active`);
     }
+    assert.equal(
+      session.state.messages.some(
+        (message) => (message as { customType?: string }).customType === AGENT_SCRATCH_CONTEXT_TYPE,
+      ),
+      false,
+      "the noExtensions SDK child receives no agent-scratch guidance",
+    );
+    assert.deepEqual(session.extensionRunner.getRegisteredCommands(), []);
   } finally {
     session?.dispose();
     for (const [k, v] of saved) {

@@ -9,7 +9,7 @@
 // (§8.11). Test-only: no worker/Python/contract change.
 
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
 import {
@@ -19,7 +19,7 @@ import {
   fauxToolCall,
   type Model,
 } from "@earendil-works/pi-ai";
-import { type PlanRef, runEventsPath } from "../substrate/cache.ts";
+import { agentScratchDir, type PlanRef, runEventsPath } from "../substrate/cache.ts";
 import { fakePerkRouter, fauxModelRuntime, scaffoldWorkerWorktree } from "../testing/harness.ts";
 import { type DriveStage, driveStage, type RunEvent } from "./worker.ts";
 
@@ -138,7 +138,7 @@ const implementHappyResponses = () => [
 ];
 
 test("e2e: implement HAPPY — faux model calls submit → completed/submit_tool + full event stream", async () => {
-  const { outcome, events } = await runDrive({
+  const { outcome, events, cwd, runId } = await runDrive({
     stage: "implement",
     routes: implementHappyRoutes,
     responses: implementHappyResponses(),
@@ -148,6 +148,11 @@ test("e2e: implement HAPPY — faux model calls submit → completed/submit_tool
   assert.equal(outcome.terminal_signal, "submit_tool");
   assert.deepEqual(outcome.pr, { number: 42, url: "https://github.com/x/pull/42" });
   assert.equal(outcome.error, null);
+  assert.equal(
+    existsSync(agentScratchDir(cwd, runId)),
+    true,
+    "the production extension path provisioned agent scratch for the faux model turn",
+  );
 
   const kinds = events.map((e) => e.kind);
   assert.equal(kinds[0], "run_started");
