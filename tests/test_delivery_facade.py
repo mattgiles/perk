@@ -24,6 +24,8 @@ from perk.delivery.facade import (
     PrepareResult,
     PublishRequest,
     PublishResult,
+    RecoverRequest,
+    RecoverResult,
     StatusRequest,
     StatusResult,
     SyncRequest,
@@ -105,6 +107,11 @@ _DELIVERY_ERROR_TYPES = {
     "continuation_invalid",
     "rebase_in_progress",
     "operation_in_progress",
+    "operation_ambiguous",
+    "operation_not_found",
+    "abandon_blocked",
+    "accept_blocked",
+    "unsupported_operation_kind",
     "journal_corruption",
     "journal_record_too_large",
     "invalid_config",
@@ -207,6 +214,15 @@ _RETIRED_EXPORTS = {
     "write_manifest",
     "RemoteWriterProbe",
     "WriterObservationError",
+    "RecoverError",
+    "recover_operations",
+    "MergedPrefixRow",
+    "RemainderPrRow",
+    "LandedLayerRow",
+    "OperationRow",
+    "SweepFailure",
+    "AbandonPreview",
+    "AcceptPrefixPreview",
 }
 _NEW_EXPORTS = {
     "Delivery",
@@ -220,6 +236,8 @@ _NEW_EXPORTS = {
     "StatusResult",
     "PublishRequest",
     "PublishResult",
+    "RecoverRequest",
+    "RecoverResult",
     "SyncRequest",
     "SyncResult",
     "TransferRequest",
@@ -1915,6 +1933,292 @@ def test_delivery_sync_maps_private_config_failure_and_propagates_unexpected(
     assert raw.value is unexpected
 
 
+def test_recover_request_accepts_the_complete_closed_matrix() -> None:
+    valid = (
+        RecoverRequest(kind="operation_conclusion", objective_id="10"),
+        RecoverRequest(kind="operation_conclusion", objective_id="10", dry_run=True),
+        RecoverRequest(kind="operation_conclusion", objective_id="10", action="abandon"),
+        RecoverRequest(kind="operation_conclusion", objective_id="10", action="accept_prefix"),
+        RecoverRequest(kind="operation_conclusion", objective_id="10", operation_id=""),
+    )
+
+    assert tuple(request.action for request in valid) == (
+        "report",
+        "report",
+        "abandon",
+        "accept_prefix",
+        "report",
+    )
+    assert valid[-1].operation_id == ""
+
+
+@pytest.mark.parametrize(
+    "build",
+    (
+        lambda: RecoverRequest(
+            kind=cast("Literal['operation_conclusion']", "future"), objective_id="10"
+        ),
+        lambda: RecoverRequest(
+            kind="operation_conclusion",
+            objective_id="10",
+            action=cast("Literal['report']", "future"),
+        ),
+        lambda: RecoverRequest(kind="operation_conclusion", objective_id=" "),
+        lambda: RecoverRequest(
+            kind="operation_conclusion", objective_id="10", action="abandon", dry_run=True
+        ),
+        lambda: RecoverRequest(
+            kind="operation_conclusion",
+            objective_id="10",
+            action="accept_prefix",
+            dry_run=True,
+        ),
+    ),
+)
+def test_recover_request_rejects_every_illegal_shape(build) -> None:
+    with pytest.raises(ValueError):
+        build()
+
+
+def _recover_result() -> RecoverResult:
+    return RecoverResult(
+        kind="operation_conclusion",
+        objective_id="10",
+        objective_url="fake://objective/10",
+        redirected_from=None,
+        dry_run=False,
+        selection_required=False,
+        operations=(),
+        swept_worktrees=(),
+        swept_refs=(),
+        sweep_failures=(),
+        sweep_skipped=None,
+    )
+
+
+def test_recover_result_nested_records_are_frozen_without_combination_guards() -> None:
+    merged = RecoverResult.MergedPrefix("1.1", 42, "a" * 40)
+    remainder = RecoverResult.RemainderPr(43, "OPEN", "b" * 40)
+    landed = RecoverResult.LandedLayer("1.1", "101", 42, "a" * 40, "b", "c", None)
+    operation = RecoverResult.Operation(
+        "01OP",
+        "land",
+        "2026-01-01T00:00:00Z",
+        "mixed",
+        "accepted_prefix",
+        "intentionally additive",
+        (merged,),
+        (remainder,),
+    )
+    failure = RecoverResult.SweepFailure("ref", "failed")
+    abandon = RecoverResult.AbandonPreview("01OP", "sync", "created", "detail")
+    accept = RecoverResult.AcceptPrefixPreview("01OP", "created", (merged,), (remainder,), "d")
+    result = RecoverResult(
+        kind="operation_conclusion",
+        objective_id="10",
+        objective_url="u",
+        redirected_from="9",
+        dry_run=True,
+        selection_required=True,
+        operations=(operation,),
+        swept_worktrees=("wt",),
+        swept_refs=("ref",),
+        sweep_failures=(failure,),
+        sweep_skipped="skip",
+        landed_layers=(landed,),
+        objective_closed=True,
+        notes=("note",),
+    )
+
+    assert result.operations == (operation,)
+    assert accept.merged_layers == (merged,) and abandon.kind == "sync"
+    assert RecoverResult.Operation.__qualname__ == "RecoverResult.Operation"
+    with pytest.raises(FrozenInstanceError):
+        type(operation).__setattr__(operation, "action", "reported")
+
+
+def test_delivery_recover_binds_the_same_authorities_and_one_consent(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from perk.delivery import recover as recover_mod
+
+    persistence = FakeDeliveryPersistence()
+    git = FakeDeliveryGit(repo_root=Path("/bound-repo"))
+    github = FakeDeliveryGitHub()
+    delivery = Delivery(persistence=persistence, git=git, github=github)
+    request = RecoverRequest(kind="operation_conclusion", objective_id="10")
+    captured: list[tuple[Any, RecoverRequest, object]] = []
+
+    def consent(preview) -> bool:
+        return True
+
+    def dispatch(context, actual_request, *, consent):
+        captured.append((context, actual_request, consent))
+        return _recover_result()
+
+    monkeypatch.setattr(recover_mod, "_dispatch", dispatch)
+
+    assert delivery.recover(request, consent=consent) == _recover_result()
+    ((context, actual_request, actual_consent),) = captured
+    assert context.repo_root == Path("/bound-repo")
+    assert context.persistence is persistence and context.git is git and context.github is github
+    assert context.reconstruct.__self__ is delivery
+    assert context.runtime is recover_mod._DEFAULT_RECOVER_RUNTIME
+    assert actual_request is request and actual_consent is consent
+
+    captured.clear()
+    assert delivery.recover(request) == _recover_result()
+    assert captured[0][2] is None
+    parameter = inspect.signature(Delivery.recover).parameters["consent"]
+    assert parameter.kind is inspect.Parameter.KEYWORD_ONLY and parameter.default is None
+
+
+def test_recover_resolves_config_before_one_lock_held_through_consent_and_core(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from contextlib import contextmanager
+
+    from perk.delivery import recover as recover_mod
+    from perk.delivery import sync as sync_mod
+
+    events: list[str] = []
+    held = False
+
+    def worktree_root(repo_root: Path) -> Path:
+        assert repo_root == Path("/bound-repo") and held is False
+        events.append("config")
+        return Path("/worktrees")
+
+    @contextmanager
+    def operation_lock(repo_root: Path):
+        nonlocal held
+        assert repo_root == Path("/bound-repo") and held is False
+        held = True
+        events.append("lock-enter")
+        try:
+            yield
+        finally:
+            events.append("lock-exit")
+            held = False
+
+    def core(context, seams, request, *, worktree_root, consent):
+        assert held is True and worktree_root == Path("/worktrees")
+        assert seams.context is context
+        events.append("core")
+        assert consent is not None
+        assert consent(
+            RecoverResult.AbandonPreview("01OP", "sync", "2026-01-01T00:00:00Z", "proof")
+        )
+        events.append("sweep")
+        return _recover_result()
+
+    def consent(preview: RecoverResult.AbandonPreview | RecoverResult.AcceptPrefixPreview) -> bool:
+        assert held is True and isinstance(preview, RecoverResult.AbandonPreview)
+        events.append("consent")
+        return True
+
+    runtime = replace(
+        recover_mod._DEFAULT_RECOVER_RUNTIME,
+        worktree_root=worktree_root,
+        operation_lock=operation_lock,
+    )
+    monkeypatch.setattr(recover_mod, "_DEFAULT_RECOVER_RUNTIME", runtime)
+    monkeypatch.setattr(recover_mod, "_recover", core)
+    delivery = Delivery(
+        persistence=FakeDeliveryPersistence(),
+        git=FakeDeliveryGit(repo_root=Path("/bound-repo")),
+        github=FakeDeliveryGitHub(),
+    )
+
+    assert (
+        delivery.recover(
+            RecoverRequest(kind="operation_conclusion", objective_id="10", action="abandon"),
+            consent=consent,
+        )
+        == _recover_result()
+    )
+    assert events == ["config", "lock-enter", "core", "consent", "sweep", "lock-exit"]
+
+    events.clear()
+
+    def bad_config(repo_root: Path) -> Path:
+        events.append("config-error")
+        raise sync_mod.SyncConfigurationError("bad worktree config")
+
+    monkeypatch.setattr(
+        recover_mod,
+        "_DEFAULT_RECOVER_RUNTIME",
+        replace(runtime, worktree_root=bad_config),
+    )
+    with pytest.raises(DeliveryError) as excinfo:
+        delivery.recover(RecoverRequest(kind="operation_conclusion", objective_id="10"))
+    assert excinfo.value.error_type == "invalid_config"
+    assert events == ["config-error"]
+
+
+@pytest.mark.parametrize(
+    ("source", "error_type"),
+    (
+        (git_mod.GitError("git failed"), "git_error"),
+        (GitHubError("github failed"), "github_error"),
+        (TrainReconstructionError("bad train", error_type="invalid_train"), "invalid_train"),
+        (JournalCorruptionError("bad journal"), "journal_corruption"),
+        (JournalRecordTooLarge("10001 exceeds cap 10000"), "journal_record_too_large"),
+        (IssueBackendError("issues failed"), "github_error"),
+        (ObjectiveStoreError("objectives failed"), "github_error"),
+        (TrainPersistenceError("persistence failed"), "github_error"),
+    ),
+)
+def test_delivery_recover_maps_expected_boundary_failures(
+    monkeypatch: pytest.MonkeyPatch, source: Exception, error_type: str
+) -> None:
+    from perk.delivery import recover as recover_mod
+
+    def dispatch(context, request, *, consent):
+        raise source
+
+    monkeypatch.setattr(recover_mod, "_dispatch", dispatch)
+    with pytest.raises(DeliveryError) as excinfo:
+        _delivery().recover(RecoverRequest(kind="operation_conclusion", objective_id="10"))
+    assert excinfo.value.error_type == error_type
+    assert str(excinfo.value) == str(source)
+
+
+def test_delivery_recover_preserves_delivery_errors_and_maps_config_only(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from perk.delivery import recover as recover_mod
+    from perk.delivery import sync as sync_mod
+
+    existing = DeliveryError("blocked", error_type="accept_blocked")
+
+    def blocked(context, request, *, consent):
+        raise existing
+
+    monkeypatch.setattr(recover_mod, "_dispatch", blocked)
+    with pytest.raises(DeliveryError) as excinfo:
+        _delivery().recover(RecoverRequest(kind="operation_conclusion", objective_id="10"))
+    assert excinfo.value is existing
+
+    def invalid_config(context, request, *, consent):
+        raise sync_mod.SyncConfigurationError("bad worktree config")
+
+    monkeypatch.setattr(recover_mod, "_dispatch", invalid_config)
+    with pytest.raises(DeliveryError) as config_error:
+        _delivery().recover(RecoverRequest(kind="operation_conclusion", objective_id="10"))
+    assert config_error.value.error_type == "invalid_config"
+
+    unexpected = OSError("unclassified filesystem failure")
+
+    def explode(context, request, *, consent):
+        raise unexpected
+
+    monkeypatch.setattr(recover_mod, "_dispatch", explode)
+    with pytest.raises(OSError) as raw:
+        _delivery().recover(RecoverRequest(kind="operation_conclusion", objective_id="10"))
+    assert raw.value is unexpected
+
+
 def test_prepare_request_and_result_validate_the_authoring_discriminator() -> None:
     assert PrepareRequest(kind="authoring", base=None).base is None
     assert PrepareResult(kind="authoring", base="main").base == "main"
@@ -3185,11 +3489,15 @@ def test_prepare_with_real_git_adapter_preserves_raw_trunk_failure(
 class _ResolvedStore:
     def __init__(self, backend_id: str = "github") -> None:
         self.backend_id = backend_id
-        self.calls: list[str] = []
+        self.calls: list[object] = []
 
     def get_objective(self, *, objective_id: str) -> ObjectiveState | None:
         self.calls.append(objective_id)
         return _objective(objective_id)
+
+    def close_objective(self, *, objective_id: str, dry_run: bool = False) -> bool:
+        self.calls.append(("close_objective", objective_id, dry_run))
+        return True
 
 
 class _ResolvedIssues:
@@ -3232,13 +3540,14 @@ def test_lazy_persistence_reuses_only_a_complete_successful_resolution(
     persistence = observe.RepoDeliveryPersistence(tmp_path)
 
     assert persistence.get_objective(objective_id="10") == _objective("10")
+    assert persistence.close_objective(objective_id="10", dry_run=True) is True
     assert persistence.get_plan(issue_id="101") == _plan("101")
     assert persistence.get_plan_body(issue_id="101") == "body 101"
     assert persistence.update_plan_header(
         issue_id="101", fields={"branch": "plan-101"}
     ) == PlanHeaderUpdate(fields_updated=("branch",), dry_run=False)
     assert resolved == {"store": 1, "issues": 1}
-    assert store.calls == ["10"]
+    assert store.calls == ["10", ("close_objective", "10", True)]
     assert issues.calls == [
         ("get_plan", "101"),
         ("get_plan_body", "101"),
@@ -3399,8 +3708,10 @@ def test_fake_defaults_copy_inputs_and_log_calls_before_return() -> None:
     persistence = FakeDeliveryPersistence(
         objectives=objective_seed, plans=plan_seed, plan_bodies=body_seed
     )
+    admin_path = Path("/tmp/stale-wt")
     git = FakeDeliveryGit(
         worktrees=(worktree,),
+        worktree_admin_paths=(admin_path,),
         resolutions={"head": "a" * 40, "plan-101": "b" * 40},
         push_urls=("fake://origin", "fake://mirror"),
         atomic_push_errors=atomic_errors,
@@ -3411,10 +3722,21 @@ def test_fake_defaults_copy_inputs_and_log_calls_before_return() -> None:
         size=1,
         entries=(stacks.StackRestEntry(42, "open", True, False, "plan-101", "b" * 40),),
     )
+    merge_probe = stacks.MergeAsyncProbe(state="merged", sha="d" * 40, message="merged")
+    merged_evidence = stacks.PrMergedEvidence(
+        number=42,
+        state="MERGED",
+        base_ref="main",
+        head_ref="plan-101",
+        head_sha="b" * 40,
+        merge_commit_sha="d" * 40,
+    )
     github = FakeDeliveryGitHub(
         pull_requests={42: rich_pr},
         branch_prs={"plan-101": rich_pr},
         strict_stacks={42: strict_stack},
+        merge_probes={(42, "01HANDLE"): merge_probe},
+        merged_evidence={42: merged_evidence},
     )
     objective_seed.clear()
     plan_seed.clear()
@@ -3433,6 +3755,9 @@ def test_fake_defaults_copy_inputs_and_log_calls_before_return() -> None:
     fold = persistence.read_journal("10")
     assert fold.delivery_lineage is None
     assert persistence.get_objective(objective_id="missing") is None
+    assert persistence.close_objective(objective_id="10") is True
+    closed = persistence.get_objective(objective_id="10")
+    assert closed is not None and closed.state == "closed"
     assert persistence.calls == [
         ("get_objective", "10"),
         ("get_plan", "101"),
@@ -3445,6 +3770,8 @@ def test_fake_defaults_copy_inputs_and_log_calls_before_return() -> None:
         ("get_plan", "101"),
         ("read_journal", "10"),
         ("get_objective", "missing"),
+        ("close_objective", "10", False),
+        ("get_objective", "10"),
     ]
 
     assert git.trunk_branch() == "main"
@@ -3465,6 +3792,7 @@ def test_fake_defaults_copy_inputs_and_log_calls_before_return() -> None:
     assert git.is_ancestor("a", "a") is True
     assert git.is_ancestor("a", "b") is None
     assert git.worktree_branches() == (worktree,)
+    assert git.worktree_admin_paths() == (admin_path,)
     assert git.base_head("main") == BaseHeadObservation(sha=None, failure=None)
     assert git.calls == [
         ("trunk_branch",),
@@ -3480,6 +3808,7 @@ def test_fake_defaults_copy_inputs_and_log_calls_before_return() -> None:
         ("is_ancestor", "a", "a"),
         ("is_ancestor", "a", "b"),
         ("worktree_branches",),
+        ("worktree_admin_paths",),
         ("base_head", "main"),
     ]
 
@@ -3490,6 +3819,8 @@ def test_fake_defaults_copy_inputs_and_log_calls_before_return() -> None:
     assert github.pr_facts(42) is None
     assert github.pr_for_branch("plan-101") == rich_pr
     assert github.strict_stack(42) == strict_stack
+    assert github.merge_async_probe(42, uuid="01HANDLE") is merge_probe
+    assert github.merged_evidence(42) is merged_evidence
     assert github.get_pr(42) == rich_pr
     assert github.pr_stack(42) == StackView(available=True, stacked=False)
     assert github.calls == [
@@ -3498,6 +3829,8 @@ def test_fake_defaults_copy_inputs_and_log_calls_before_return() -> None:
         ("pr_facts", 42),
         ("pr_for_branch", "plan-101"),
         ("strict_stack", 42),
+        ("merge_async_probe", 42, "01HANDLE"),
+        ("merged_evidence", 42),
         ("get_pr", 42),
         ("pr_stack", 42),
     ]
@@ -3525,9 +3858,17 @@ def test_new_fake_probe_failures_are_constructor_discriminants() -> None:
 
 def test_fake_failure_injection_logs_before_raising() -> None:
     failure = RuntimeError("injected")
-    persistence = FakeDeliveryPersistence(errors={("get_plan", "101"): failure})
-    git = FakeDeliveryGit(errors={("fetch",): failure})
-    github = FakeDeliveryGitHub(errors={("pr_stack", 42): failure})
+    persistence = FakeDeliveryPersistence(
+        errors={("get_plan", "101"): failure, ("close_objective", "10", False): failure}
+    )
+    git = FakeDeliveryGit(errors={("fetch",): failure, ("worktree_admin_paths",): failure})
+    github = FakeDeliveryGitHub(
+        errors={
+            ("pr_stack", 42): failure,
+            ("merge_async_probe", 42, "01HANDLE"): failure,
+            ("merged_evidence", 42): failure,
+        }
+    )
 
     with pytest.raises(RuntimeError) as persistence_error:
         persistence.get_plan(issue_id="101")
@@ -3535,12 +3876,28 @@ def test_fake_failure_injection_logs_before_raising() -> None:
         git.fetch()
     with pytest.raises(RuntimeError) as github_error:
         github.pr_stack(42)
+    with pytest.raises(RuntimeError) as close_error:
+        persistence.close_objective(objective_id="10")
+    with pytest.raises(RuntimeError) as admin_error:
+        git.worktree_admin_paths()
+    with pytest.raises(RuntimeError) as probe_error:
+        github.merge_async_probe(42, uuid="01HANDLE")
+    with pytest.raises(RuntimeError) as evidence_error:
+        github.merged_evidence(42)
     assert persistence_error.value is failure
     assert git_error.value is failure
     assert github_error.value is failure
-    assert persistence.calls == [("get_plan", "101")]
-    assert git.calls == [("fetch",)]
-    assert github.calls == [("pr_stack", 42)]
+    assert close_error.value is failure
+    assert admin_error.value is failure
+    assert probe_error.value is failure
+    assert evidence_error.value is failure
+    assert persistence.calls == [("get_plan", "101"), ("close_objective", "10", False)]
+    assert git.calls == [("fetch",), ("worktree_admin_paths",)]
+    assert github.calls == [
+        ("pr_stack", 42),
+        ("merge_async_probe", 42, "01HANDLE"),
+        ("merged_evidence", 42),
+    ]
 
 
 def test_public_export_cut_is_exact() -> None:
@@ -3548,7 +3905,7 @@ def test_public_export_cut_is_exact() -> None:
     assert exported >= _NEW_EXPORTS
     assert _RETIRED_EXPORTS.isdisjoint(exported)
     assert exported == _NEW_EXPORTS | _RETAINED_EXPORTS
-    assert len(delivery_pkg.__all__) == 61
+    assert len(delivery_pkg.__all__) == 63
     assert not hasattr(delivery_pkg, "DeliveryTrain")
     for retired in {
         "DeliveryOperationFacts",
@@ -3557,5 +3914,19 @@ def test_public_export_cut_is_exact() -> None:
         "PublicationResult",
         "TrainRowFacts",
         "publish_layer",
+        "RecoverError",
+        "recover_operations",
+        "MergedPrefixRow",
+        "RemainderPrRow",
+        "LandedLayerRow",
+        "OperationRow",
+        "SweepFailure",
+        "AbandonPreview",
+        "AcceptPrefixPreview",
     }:
         assert not hasattr(delivery_pkg, retired)
+
+    from perk.delivery import recover as recover_mod
+
+    assert not hasattr(recover_mod, "RecoverError")
+    assert not hasattr(recover_mod, "recover_operations")

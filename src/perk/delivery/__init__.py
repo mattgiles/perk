@@ -1,10 +1,11 @@
 """The compact public delivery façade and retained operation exports.
 
 The canonical surface is the repository-scoped :class:`Delivery` status, Prepare, Transfer,
-publish, and sync families over three nominal aggregate authorities. Pure train projection, layer
-context/core, capability rows, production adapters, transfer/publication/synchronization
-internals, and compatibility readers are internal modules. Journal, finalization, and landing
-exports remain public while their operation families migrate.
+publish, sync, and Recover families over three nominal aggregate authorities. Pure train
+projection, layer context/core, capability rows, production adapters,
+transfer/publication/synchronization/recovery internals, and compatibility readers are internal
+modules. Journal, finalization, and landing exports remain public while their operation families
+migrate.
 """
 
 from perk.delivery.facade import (
@@ -17,6 +18,8 @@ from perk.delivery.facade import (
     PrepareResult,
     PublishRequest,
     PublishResult,
+    RecoverRequest,
+    RecoverResult,
     StatusRequest,
     StatusResult,
     SyncRequest,
@@ -121,6 +124,8 @@ __all__ = [
     "PreparedRecord",
     "PublishRequest",
     "PublishResult",
+    "RecoverRequest",
+    "RecoverResult",
     "StatusRequest",
     "StatusResult",
     "SyncRequest",

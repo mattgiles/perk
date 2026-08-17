@@ -33,7 +33,7 @@ from typing import Literal, Protocol
 
 from perk import objective, plan
 from perk.backends import resolve
-from perk.backends.issue_backend import IssueBackendError, PlanState
+from perk.backends.issue_backend import IssueBackendError
 from perk.backends.objective_store import ObjectiveState, ObjectiveStoreError
 from perk.delivery import land, land_records, observe, oplock
 from perk.delivery.finalize import LandedPlan, LandFinalization, finalize_landed_plan
@@ -52,7 +52,13 @@ from perk.delivery.persistence import (
     TrainPersistenceError,
     resolve_train_persistence,
 )
-from perk.delivery.train import DeliveryTrain, LayerPublication, NoDeliveryTrain, TrainStatus
+from perk.delivery.train import (
+    DeliveryTrain,
+    LayerPublication,
+    NoDeliveryTrain,
+    PlanReader,
+    TrainStatus,
+)
 from perk.delivery.writers import RemoteWriterProbe
 from perk.github import GitHubError, stacks
 
@@ -226,14 +232,10 @@ class LandPersistence(Protocol):
     def read_journal(self, objective_id: str) -> JournalFold: ...
 
 
-class LandIssueReads(Protocol):
-    """The narrow issue-backend surface landing needs (structurally satisfied by every
-    :class:`~perk.backends.issue_backend.IssueBackend`): the load-bearing pre-merge plan
-    read plus the backend identity the squash footer branches on."""
+class LandIssueReads(PlanReader, Protocol):
+    """Landing's plan reader plus backend identity for singleton squash text."""
 
     backend_id: str
-
-    def get_plan(self, *, issue_id: str) -> PlanState | None: ...
 
 
 class LandObjectiveStore(Protocol):
@@ -1288,7 +1290,7 @@ class LandConcludeSeams(LandProofSeams, Protocol):
     @property
     def persistence(self) -> LandPersistence: ...
     @property
-    def issues(self) -> LandIssueReads: ...
+    def issues(self) -> PlanReader: ...
     @property
     def store(self) -> LandObjectiveStore: ...
     @property

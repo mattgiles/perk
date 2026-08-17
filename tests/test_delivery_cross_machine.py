@@ -10,7 +10,7 @@ ever receives that machine's own clone root — B structurally cannot read A's t
 
 Machine A's "death" is post-crash durable-state construction (the technique rule): A's
 surviving effects are applied for real (real pushes from clone A, journal records in the
-shared world), then machine B's PUBLIC surfaces (``recover_operations``, ``Delivery.publish``)
+shared world), then machine B's PUBLIC surfaces (``Delivery.recover``, ``Delivery.publish``)
 conclude the operation from the durable authorities alone — the same posture as the remote
 runner's fresh checkout. Arms: SYNC all-after roll-forward, SYNC all-before
 abandon-with-proof, PUBLISH bottom-layer all-after (report + submit-resume completion),
@@ -40,13 +40,15 @@ from perk.delivery import (
     DeliveryPersistence,
     PublishRequest,
     PublishResult,
+    RecoverRequest,
+    RecoverResult,
     StatusRequest,
     StatusResult,
     continuation,
     publish,
     recover,
 )
-from perk.delivery import transfer as transfer_mod
+from perk.delivery._fakes import FakeDeliveryGit, FakeDeliveryGitHub
 from perk.delivery.finalize import (
     LandFinalization,
     LearnConsumeUpdate,
@@ -74,13 +76,13 @@ from perk.delivery.train import (
     LayerPr,
     LayerPublication,
     LayerWriter,
+    PrFactsView,
     TrainLayer,
     UnresolvedOperationFacts,
 )
 from perk.github.prs import PullRequest
 from perk.github.stacks import (
     MergeAsyncProbe,
-    PrDeliveryFacts,
     PrMergedEvidence,
     StackMutationOutcome,
     StackRestEntry,
@@ -111,7 +113,7 @@ def _commit(repo: Path, name: str) -> str:
 # ----------------------------------------------------------------- the shared authorities
 
 
-class _SharedPersistence:
+class _SharedPersistence(DeliveryPersistence):
     """The shared durable journal (the backend authority both machines' seams compose)."""
 
     def __init__(self) -> None:
@@ -122,6 +124,42 @@ class _SharedPersistence:
         self.outcomes: list[OutcomeRecord] = []
         self.checkpoints: list[tuple[str, str, str]] = []
         self.world: _SharedWorld | None = None
+
+    def _require_world(self) -> "_SharedWorld":
+        if self.world is None:
+            raise AssertionError("shared persistence is not attached")
+        return self.world
+
+    def get_objective(self, *, objective_id: str) -> ObjectiveState | None:
+        return self._require_world().get_objective(objective_id=objective_id)
+
+    def close_objective(self, *, objective_id: str, dry_run: bool = False) -> bool:
+        return self._require_world().close_objective(objective_id=objective_id, dry_run=dry_run)
+
+    def get_plan(self, *, issue_id: str) -> PlanState | None:
+        return self._require_world().get_plan(issue_id=issue_id)
+
+    def get_plan_body(self, *, issue_id: str) -> str | None:
+        return None
+
+    def update_plan_header(self, *, issue_id: str, fields: dict[str, object]) -> PlanHeaderUpdate:
+        return self._require_world().update_plan_header(issue_id=issue_id, fields=fields)
+
+    def normalize_transfer_carry_map(
+        self, carry_map: tuple[tuple[str, str], ...]
+    ) -> dict[str, str]:
+        return {}
+
+    def find_objective(self, *, run_id: str) -> ObjectiveRef | None:
+        return self._require_world().find_objective(run_id=run_id)
+
+    def supersede_objective(self, **kwargs) -> ObjectiveRef | None:
+        return self._require_world().supersede_objective(**kwargs)
+
+    def finalize_supersession(self, *, old_objective_id: str, new_objective_id: str) -> bool:
+        return self._require_world().finalize_supersession(
+            old_objective_id=old_objective_id, new_objective_id=new_objective_id
+        )
 
     def _event(self, record, role: EventRole, comment_id: str) -> JournalEvent:
         return JournalEvent(
@@ -429,14 +467,14 @@ class _Machine:
             observed_base_head_sha=self.shared.main_sha,
         )
 
-    def _pr_facts(self, *, number: int, repo_root: Path) -> PrDeliveryFacts | None:
+    def _pr_facts(self, *, number: int, repo_root: Path) -> PrFactsView | None:
         entry = self.shared.pr_entries.get(number)
         if entry is None:
             return None
         branch, base, state = entry
         # The PR head mirrors the branch's REAL origin head (observed via THIS clone).
         head = git_mod.remote_branch_head(self._own(repo_root), branch)
-        return PrDeliveryFacts(
+        return PrFactsView(
             number=number,
             state=state,
             is_draft=True,
@@ -565,51 +603,96 @@ class _Machine:
     def _lock(self, root: Path) -> Iterator[None]:
         yield
 
-    def _transfer_seams(self, root: Path) -> transfer_mod.TransferSeams:
-        return transfer_mod.TransferSeams(
-            repo_root=root,
-            store=self.shared,
-            issues=self.shared,
-            persistence=self.shared.persistence,
-            reconstruct=self._reconstruct,
-            now=lambda: NOW,
-        )
-
     def recover(
         self,
         *,
         abandon: bool = False,
-        approve: Callable[[recover.AbandonPreview], bool] | None = None,
-    ) -> recover.RecoverResult:
-        return recover.recover_operations(
-            self.root,
-            objective_id=OBJECTIVE,
-            worktree_root=self.root / ".wt",
-            abandon=abandon,
-            approve=approve,
-            reconstruct=self._reconstruct,
-            persistence_factory=lambda root: self.shared.persistence,
-            transfer_seams_factory=self._transfer_seams,
-            pr_facts=self._pr_facts,
-            stack_read=self._stack_read,
-            pr_for_branch=self._pr_for_branch,
-            merge_probe=self._merge_probe,
-            merged_evidence=self._merged_evidence,
-            finalize=self._finalize,
-            issues_factory=lambda root: self.shared,
-            store_factory=lambda root: self.shared,
-            fetch=self._fetch,
-            remote_head=self._remote_head,
-            list_refs=lambda root, prefix: [],
-            worktree_remove=lambda root, path: None,
-            worktree_prune=lambda root: None,
+        approve: Callable[[RecoverResult.AbandonPreview], bool] | None = None,
+    ) -> RecoverResult:
+        machine = self
+
+        class _Git(FakeDeliveryGit):
+            def __init__(self) -> None:
+                super().__init__(repo_root=machine.root)
+
+            def fetch_refs(self, refs: tuple[str, ...]) -> None:
+                machine._fetch(machine.root, list(refs))
+
+            def remote_branch_sha(self, branch: str) -> str | None:
+                return machine._remote_head(machine.root, branch)
+
+            def list_refs(self, prefix: str) -> tuple[str, ...]:
+                return ()
+
+            def worktree_admin_paths(self) -> tuple[Path, ...]:
+                return ()
+
+        class _GitHub(FakeDeliveryGitHub):
+            def pr_facts(self, number: int) -> PrFactsView | None:
+                return machine._pr_facts(number=number, repo_root=machine.root)
+
+            def strict_stack(self, number: int) -> StackRestFacts | None:
+                return machine._stack_read(number=number, repo_root=machine.root)
+
+            def pr_for_branch(self, branch: str) -> PullRequest | None:
+                return machine._pr_for_branch(branch=branch, repo_root=machine.root)
+
+            def merge_async_probe(self, number: int, *, uuid: str) -> MergeAsyncProbe:
+                return machine._merge_probe(number=number, uuid=uuid, repo_root=machine.root)
+
+            def merged_evidence(self, number: int) -> PrMergedEvidence | None:
+                return machine._merged_evidence(number=number, repo_root=machine.root)
+
+        class _Delivery(Delivery):
+            def __init__(self) -> None:
+                super().__init__(
+                    persistence=machine.shared.persistence,
+                    git=_Git(),
+                    github=_GitHub(),
+                )
+
+            def status(self, request: StatusRequest) -> StatusResult:
+                train = machine._reconstruct(machine.root, request.objective_id)
+                return StatusResult(
+                    train.objective_id,
+                    train.objective_url,
+                    train.redirected_from,
+                    train,
+                    None,
+                )
+
+        runtime = replace(
+            recover._DEFAULT_RECOVER_RUNTIME,
+            worktree_root=lambda root: machine.root / ".wt",
+            operation_lock=self._lock,
             iter_manifests=lambda root: continuation.ManifestScan(manifests=(), unparseable=()),
             worktree_dirs=lambda root: [],
-            worktree_admin_dirs=lambda root: [],
-            lock=self._lock,
-            sleep=lambda s: None,
+            finalize=self._finalize,
+            sleep=lambda seconds: None,
             now=lambda: NOW,
         )
+        request = RecoverRequest(
+            kind="operation_conclusion",
+            objective_id=OBJECTIVE,
+            action="abandon" if abandon else "report",
+        )
+        consent_callback: (
+            Callable[[RecoverResult.AbandonPreview | RecoverResult.AcceptPrefixPreview], bool]
+            | None
+        ) = None
+        if approve is not None:
+
+            def consent(
+                preview: RecoverResult.AbandonPreview | RecoverResult.AcceptPrefixPreview,
+            ) -> bool:
+                assert isinstance(preview, RecoverResult.AbandonPreview)
+                return approve(preview)
+
+            consent_callback = consent
+
+        with pytest.MonkeyPatch.context() as monkeypatch:
+            monkeypatch.setattr(recover, "_DEFAULT_RECOVER_RUNTIME", runtime)
+            return _Delivery().recover(request, consent=consent_callback)
 
     def publish(self, plan_id: str, *, run_id: str = "01RUNB") -> PublishResult.Layer:
         machine = self
@@ -675,7 +758,7 @@ class _Machine:
             def stack_capability(self) -> bool:
                 return True
 
-            def pr_facts(self, number: int) -> PrDeliveryFacts | None:
+            def pr_facts(self, number: int) -> PrFactsView | None:
                 return machine._pr_facts(number=number, repo_root=machine.root)
 
             def strict_stack(self, number: int) -> StackRestFacts | None:
@@ -921,9 +1004,9 @@ def test_sync_all_before_abandons_with_proof_from_a_fresh_clone(tmp_path):
     record = _sync_record(shas, c2=c2, r3=r3)
     shared.persistence.unresolved_records[record.operation_id] = record
 
-    previews: list[recover.AbandonPreview] = []
+    previews: list[RecoverResult.AbandonPreview] = []
 
-    def approve(preview: recover.AbandonPreview) -> bool:
+    def approve(preview: RecoverResult.AbandonPreview) -> bool:
         previews.append(preview)
         return True
 

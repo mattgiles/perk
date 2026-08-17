@@ -1,7 +1,8 @@
 """Production adapters for the delivery façade and deferred internal readers.
 
 :func:`resolve_delivery` is the sole public production constructor for the canonical
-:class:`perk.delivery.facade.Delivery` status, Prepare, Transfer, Publish, and sync variants.
+:class:`perk.delivery.facade.Delivery` status, Prepare, Transfer, Publish, sync, and Recover
+variants.
 Construction is assignment-only and does no configuration, credential, Git, subprocess, or
 network work; the nominal adapters resolve or observe their authorities only when an operation
 needs them.
@@ -177,6 +178,9 @@ class RepoDeliveryGit(DeliveryGit):
     def worktree_dirty(self, worktree: Path) -> bool:
         return git_mod.is_dirty(worktree)
 
+    def worktree_admin_paths(self) -> tuple[Path, ...]:
+        return tuple(worktree.path for worktree in git_mod.worktree_list(self._repo_root))
+
     def worktree_branches(self) -> tuple[WorktreeFacts, ...]:
         try:
             worktrees = git_mod.worktree_list(self._repo_root)
@@ -273,6 +277,12 @@ class RepoDeliveryGitHub(DeliveryGitHub):
             return stacks.stack_for_pr(number=number, repo_root=self._repo_root)
         except GitHubError as exc:
             raise TrainReconstructionError(str(exc), error_type="github_error") from exc
+
+    def merge_async_probe(self, number: int, *, uuid: str) -> stacks.MergeAsyncProbe:
+        return stacks.merge_async_probe(number=number, uuid=uuid, repo_root=self._repo_root)
+
+    def merged_evidence(self, number: int) -> stacks.PrMergedEvidence | None:
+        return stacks.pr_merged_evidence(number=number, repo_root=self._repo_root)
 
     def active_writer_plan_ids(
         self,
@@ -452,6 +462,10 @@ class RepoDeliveryPersistence(DeliveryPersistence):
     def get_objective(self, *, objective_id: str) -> ObjectiveState | None:
         store, _issues, _persistence = self._resolve()
         return store.get_objective(objective_id=objective_id)
+
+    def close_objective(self, *, objective_id: str, dry_run: bool = False) -> bool:
+        store, _issues, _persistence = self._resolve()
+        return store.close_objective(objective_id=objective_id, dry_run=dry_run)
 
     def get_plan(self, *, issue_id: str) -> PlanState | None:
         _store, issues, _persistence = self._resolve()

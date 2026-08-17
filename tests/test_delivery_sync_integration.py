@@ -21,6 +21,7 @@ from perk.delivery import (
     Delivery,
     DeliveryGitHub,
     DeliveryPersistence,
+    RecoverRequest,
     StatusRequest,
     StatusResult,
     SyncRequest,
@@ -29,6 +30,7 @@ from perk.delivery import (
     recover,
     sync,
 )
+from perk.delivery._fakes import FakeDeliveryPersistence
 from perk.delivery.journal import (
     EventRole,
     JournalFold,
@@ -139,7 +141,7 @@ class _GitHub:
 
 
 class _IntegrationDelivery(Delivery):
-    def __init__(self, repo_root: Path, recorder: _Recorder, train: DeliveryTrain) -> None:
+    def __init__(self, repo_root: Path, recorder: object, train: DeliveryTrain) -> None:
         self._train = train
         super().__init__(
             persistence=cast("DeliveryPersistence", recorder),
@@ -437,15 +439,16 @@ def test_orphan_sweep_removes_real_residue_and_prunes(git_repo):
         build_readiness=BuildReadiness(next_node_id=None, ready=False, reason="x"),
         observed_base_head_sha=head,
     )
-    recorder = _Recorder()
-    result = recover.recover_operations(
-        work,
-        objective_id="500",
-        worktree_root=worktree_root,
-        reconstruct=lambda root, oid: train,
-        persistence_factory=lambda root: recorder,
+    persistence = FakeDeliveryPersistence()
+    delivery = _IntegrationDelivery(work, persistence, train)
+    runtime = replace(
+        recover._DEFAULT_RECOVER_RUNTIME,
+        worktree_root=lambda repo_root: worktree_root,
         sleep=lambda seconds: None,
     )
+    with pytest.MonkeyPatch.context() as monkeypatch:
+        monkeypatch.setattr(recover, "_DEFAULT_RECOVER_RUNTIME", runtime)
+        result = delivery.recover(RecoverRequest(kind="operation_conclusion", objective_id="500"))
     assert result.operations == () and result.sweep_failures == ()
     # The on-disk orphan is removed directly; the stale admin entry (directory gone) is
     # classified too and collected by the trailing prune — BOTH ride swept_worktrees.

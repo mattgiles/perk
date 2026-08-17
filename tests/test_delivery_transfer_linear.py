@@ -1,6 +1,6 @@
 """The Linear partial-transfer interruption lane (contracts.md §8.53 over §8.43's carrier).
 
-Composes ``Delivery.transfer`` / ``recover.recover_operations`` over the REAL
+Composes ``Delivery.transfer`` / ``Delivery.recover`` over the REAL
 ``LinearProjectObjectiveStore`` + ``LinearIssueBackend`` + ``TrainPersistence`` driven by the
 stateful ``FakeLinearWorkspace``, with fail-once injection at **GraphQL-mutation granularity**
 (the store-internal write granularity). A raise from the client IS the faithful death
@@ -18,6 +18,7 @@ node ids onto predecessor node-issue identifiers.
 
 import contextlib
 from collections.abc import Callable, Iterator
+from dataclasses import replace
 from pathlib import Path
 from typing import cast
 
@@ -33,6 +34,8 @@ from perk.delivery import (
     DeliveryGit,
     DeliveryGitHub,
     DeliveryPersistence,
+    RecoverRequest,
+    RecoverResult,
     StatusRequest,
     StatusResult,
     TransferRequest,
@@ -261,6 +264,9 @@ class _Lane:
     def get_objective(self, *, objective_id: str):
         return self.store.get_objective(objective_id=objective_id)
 
+    def close_objective(self, *, objective_id: str, dry_run: bool = False) -> bool:
+        return self.store.close_objective(objective_id=objective_id, dry_run=dry_run)
+
     def normalize_transfer_carry_map(
         self, carry_map: tuple[tuple[str, str], ...]
     ) -> dict[str, str]:
@@ -280,6 +286,9 @@ class _Lane:
     def get_plan(self, *, issue_id: str):
         return self.issues.get_plan(issue_id=issue_id)
 
+    def get_plan_body(self, *, issue_id: str) -> str | None:
+        return self.issues.get_plan_body(issue_id=issue_id)
+
     def update_plan_header(self, *, issue_id: str, fields: dict[str, object]):
         return self.issues.update_plan_header(issue_id=issue_id, fields=fields)
 
@@ -291,6 +300,31 @@ class _Lane:
 
     def append_outcome(self, objective_id: str, record):
         return self.persistence.append_outcome(objective_id, record)
+
+    def write_checkpoints(
+        self,
+        plan_id: str,
+        *,
+        parent_checkpoint_sha: str,
+        published_head_sha: str,
+    ) -> None:
+        self.persistence.write_checkpoints(
+            plan_id,
+            parent_checkpoint_sha=parent_checkpoint_sha,
+            published_head_sha=published_head_sha,
+        )
+
+    def list_refs(self, prefix: str) -> tuple[str, ...]:
+        return ()
+
+    def worktree_admin_paths(self) -> tuple[Path, ...]:
+        return ()
+
+    def remove_worktree(self, path: Path) -> None:
+        raise AssertionError(f"unexpected worktree removal: {path}")
+
+    def prune_worktrees(self) -> None:
+        return None
 
     # ------------------------------------------------------------- driving
 
@@ -331,30 +365,19 @@ class _Lane:
         finally:
             transfer._DEFAULT_TRANSFER_RUNTIME = previous_runtime
 
-    def recover(self) -> recover.RecoverResult:
-        return recover.recover_operations(
-            ROOT,
-            objective_id=self.pred_id,
-            worktree_root=WT_ROOT,
-            persistence_factory=lambda root: self.persistence,
-            transfer_seams_factory=lambda root: transfer.TransferSeams(
-                repo_root=root,
-                store=self.store,
-                issues=self.issues,
-                persistence=self.persistence,
-                reconstruct=self._reconstruct,
-                now=lambda: NOW,
-            ),
-            issues_factory=lambda root: self.issues,
-            store_factory=lambda root: self.store,
-            list_refs=lambda root, prefix: [],
-            worktree_prune=lambda root: None,
+    def recover(self) -> RecoverResult:
+        runtime = replace(
+            recover._DEFAULT_RECOVER_RUNTIME,
+            worktree_root=lambda root: WT_ROOT,
+            operation_lock=self._lock,
             iter_manifests=lambda root: continuation.ManifestScan(manifests=(), unparseable=()),
             worktree_dirs=lambda root: [],
-            worktree_admin_dirs=lambda root: [],
-            lock=self._lock,
             now=lambda: NOW,
         )
+        request = RecoverRequest(kind="operation_conclusion", objective_id=self.pred_id)
+        with pytest.MonkeyPatch.context() as monkeypatch:
+            monkeypatch.setattr(recover, "_DEFAULT_RECOVER_RUNTIME", runtime)
+            return _LaneDelivery(self).recover(request)
 
     # ------------------------------------------------------------- assertion helpers
 

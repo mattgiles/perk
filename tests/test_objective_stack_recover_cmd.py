@@ -1,7 +1,7 @@
 """Tests for ``perk objective stack recover`` (``commands/objective/stack/recover_cmd.py``).
 
 CLI-level via ``CliRunner`` over the full ``cli`` in an isolated repo, with the operation
-seam (``recover.recover_operations``) monkeypatched — the operation itself is pinned in
+façade (``Delivery.recover``) monkeypatched — the operation itself is pinned in
 ``test_delivery_recover.py``; here the envelope, flag matrix, confirmation discipline,
 resolution parity, exit codes, and the stdout/stderr split are the contract.
 """
@@ -17,15 +17,13 @@ from perk import plan
 from perk.cli.cli import cli
 from perk.cli.commands.objective.stack import recover_cmd
 from perk.cli.ensure import UserFacingCliError
-from perk.delivery import landing, recover, sync, train
-from perk.github import GitHubError
+from perk.delivery import DeliveryError, RecoverRequest, RecoverResult, landing
 from perk.state import cache
-from perk.substrate import git
 
 _URL = "https://github.com/o/r/issues/1431"
 
 
-def _row(**overrides) -> recover.OperationRow:
+def _row(**overrides) -> RecoverResult.Operation:
     values: dict = {
         "operation_id": "01JOPAAAAAAAAAAAAAAAAAAAAA",
         "kind": "sync",
@@ -35,11 +33,12 @@ def _row(**overrides) -> recover.OperationRow:
         "detail": "every recorded ref verified at its prepared after state",
     }
     values.update(overrides)
-    return recover.OperationRow(**values)
+    return RecoverResult.Operation(**values)
 
 
-def _result(**overrides) -> recover.RecoverResult:
+def _result(**overrides) -> RecoverResult:
     values: dict = {
+        "kind": "operation_conclusion",
         "objective_id": "1431",
         "objective_url": _URL,
         "redirected_from": None,
@@ -52,22 +51,29 @@ def _result(**overrides) -> recover.RecoverResult:
         "sweep_skipped": None,
     }
     values.update(overrides)
-    return recover.RecoverResult(**values)
+    return RecoverResult(**values)
 
 
 def _invoke(args, *, monkeypatch, result=None):
-    """Invoke the CLI in an isolated repo with ``recover_operations`` returning (or
-    raising) ``result``; records the call's kwargs."""
+    """Invoke the CLI with one recording delivery façade."""
     calls: list[dict] = []
+    resolved: dict[str, object] = {}
 
-    def fake_recover(repo_root, **kwargs):
-        calls.append({"repo_root": repo_root, **kwargs})
-        if isinstance(result, Exception):
-            raise result
-        assert result is not None, "recover_operations must not be reached"
-        return result
+    class _Service:
+        def recover(self, request: RecoverRequest, *, consent):
+            calls.append(
+                {"repo_root": resolved["repo_root"], "request": request, "consent": consent}
+            )
+            if isinstance(result, Exception):
+                raise result
+            assert result is not None, "Delivery.recover must not be reached"
+            return result
 
-    monkeypatch.setattr(recover, "recover_operations", fake_recover)
+    def resolve(repo_root):
+        resolved["repo_root"] = repo_root
+        return _Service()
+
+    monkeypatch.setattr(recover_cmd, "resolve_delivery", resolve)
     runner = CliRunner()
     with runner.isolated_filesystem() as d:
         subprocess.run(["git", "init", "-q"], cwd=d, check=True)
@@ -85,7 +91,9 @@ def test_success_envelope_pins(monkeypatch):
         result=_result(
             swept_worktrees=("/wt/sync-01X",),
             swept_refs=("refs/perk/sync/01X/plan-1457",),
-            sweep_failures=(recover.SweepFailure(target="refs/perk/sync/01Y/x", error="boom"),),
+            sweep_failures=(
+                RecoverResult.SweepFailure(target="refs/perk/sync/01Y/x", error="boom"),
+            ),
         ),
     )
     assert outcome.exit_code == 0
@@ -127,15 +135,10 @@ def test_success_envelope_pins(monkeypatch):
     assert payload["swept_refs"] == ["refs/perk/sync/01X/plan-1457"]
     assert payload["sweep_failures"] == [{"target": "refs/perk/sync/01Y/x", "error": "boom"}]
     assert payload["sweep_skipped"] is None
-    # The operation wiring: flags default off, the approve callback is threaded, and no
-    # run identity exists on this surface at all.
     (call,) = calls
-    assert call["objective_id"] == "1431"
-    assert call["dry_run"] is False and call["abandon"] is False
-    assert call["accept_prefix"] is False and callable(call["accept_approve"])
-    assert call["operation_id"] is None and callable(call["approve"])
-    assert "run_id" not in call
-    assert call["worktree_root"].name == ".worktrees"
+    assert call["request"] == RecoverRequest(kind="operation_conclusion", objective_id="1431")
+    assert callable(call["consent"])
+    assert "run_id" not in call and "worktree_root" not in call
 
 
 def test_flags_thread_through(monkeypatch):
@@ -155,8 +158,26 @@ def test_flags_thread_through(monkeypatch):
         result=_result(operations=(_row(classification="all_before", action="abandoned"),)),
     )
     (call,) = calls
-    assert call["operation_id"] == "01JOPAAAAAAAAAAAAAAAAAAAAA"
-    assert call["abandon"] is True
+    assert call["request"] == RecoverRequest(
+        kind="operation_conclusion",
+        objective_id="1431",
+        action="abandon",
+        operation_id="01JOPAAAAAAAAAAAAAAAAAAAAA",
+    )
+    assert callable(call["consent"])
+
+
+def test_blank_operation_reaches_service_and_returns_typed_not_found(monkeypatch):
+    outcome, calls = _invoke(
+        ["objective", "stack", "recover", "1431", "--operation", "", "--json"],
+        monkeypatch=monkeypatch,
+        result=DeliveryError("operation  is not unresolved", error_type="operation_not_found"),
+    )
+
+    assert outcome.exit_code == 1
+    assert json.loads(outcome.stdout)["error_type"] == "operation_not_found"
+    assert calls[0]["request"].operation_id == ""
+    assert "Traceback" not in outcome.output
 
 
 def test_dry_run_with_abandon_is_invalid_input(monkeypatch):
@@ -190,7 +211,7 @@ def test_typed_refusals_exit_one_verbatim(monkeypatch):
         outcome, _ = _invoke(
             ["objective", "stack", "recover", "1431", "--json"],
             monkeypatch=monkeypatch,
-            result=recover.RecoverError("nope", error_type=error_type),
+            result=DeliveryError("nope", error_type=error_type),
         )
         assert outcome.exit_code == 1, error_type
         assert json.loads(outcome.stdout)["error_type"] == error_type
@@ -201,7 +222,7 @@ def test_roll_forward_sync_errors_pass_through(monkeypatch):
     outcome, _ = _invoke(
         ["objective", "stack", "recover", "1431", "--json"],
         monkeypatch=monkeypatch,
-        result=sync.SyncError("drifted", error_type="sync_drift"),
+        result=DeliveryError("drifted", error_type="sync_drift"),
     )
     assert outcome.exit_code == 1
     assert json.loads(outcome.stdout)["error_type"] == "sync_drift"
@@ -210,8 +231,11 @@ def test_roll_forward_sync_errors_pass_through(monkeypatch):
 @pytest.mark.parametrize(
     ("failure", "error_type"),
     [
-        (git.GitError("authority fetch unavailable"), "git_error"),
-        (GitHubError("authority PR read unavailable"), "github_error"),
+        (DeliveryError("authority fetch unavailable", error_type="git_error"), "git_error"),
+        (
+            DeliveryError("authority PR read unavailable", error_type="github_error"),
+            "github_error",
+        ),
     ],
 )
 def test_classification_authority_read_failure_maps_to_the_typed_cli_error(
@@ -232,7 +256,7 @@ def test_reconstruction_failure_maps_verbatim(monkeypatch):
     outcome, _ = _invoke(
         ["objective", "stack", "recover", "1431", "--json"],
         monkeypatch=monkeypatch,
-        result=train.TrainReconstructionError("gone", error_type="objective_not_found"),
+        result=DeliveryError("gone", error_type="objective_not_found"),
     )
     assert outcome.exit_code == 1
     assert json.loads(outcome.stdout)["error_type"] == "objective_not_found"
@@ -275,7 +299,7 @@ def test_plan_ref_inference(monkeypatch):
     _, calls = _invoke(
         ["objective", "stack", "recover", "--json"], monkeypatch=monkeypatch, result=_result()
     )
-    assert calls[0]["objective_id"] == "1431"
+    assert calls[0]["request"].objective_id == "1431"
 
 
 # ----------------------------------------------------------------- confirmation discipline
@@ -289,8 +313,8 @@ class _FakeStdin:
         return self._tty
 
 
-def _preview() -> recover.AbandonPreview:
-    return recover.AbandonPreview(
+def _preview() -> RecoverResult.AbandonPreview:
+    return RecoverResult.AbandonPreview(
         operation_id="01JOPAAAAAAAAAAAAAAAAAAAAA",
         kind="sync",
         prepared_created="2026-01-01T00:00:00Z",
@@ -298,16 +322,16 @@ def _preview() -> recover.AbandonPreview:
     )
 
 
-def test_abandon_approve_callback_arms(monkeypatch, capsys):
+def test_abandon_consent_callback_arms(monkeypatch, capsys):
     # --yes: renders exactly what it approved.
-    approve = recover_cmd._make_approve(yes=True)
+    approve = recover_cmd._make_consent(yes=True)
     assert approve(_preview()) is True
     err = capsys.readouterr().err
     assert "01JOPAAAAAAAAAAAAAAAAAAAAA" in err and "prepared before state" in err
 
     # Non-interactive without --yes: the typed refusal, before any prompt.
     monkeypatch.setattr(click, "get_text_stream", lambda name: _FakeStdin(tty=False))
-    approve = recover_cmd._make_approve(yes=False)
+    approve = recover_cmd._make_consent(yes=False)
     with pytest.raises(UserFacingCliError) as excinfo:
         approve(_preview())
     assert excinfo.value.error_type == "confirmation_required"
@@ -318,18 +342,20 @@ def test_abandon_approve_callback_arms(monkeypatch, capsys):
     monkeypatch.setattr(
         click, "confirm", lambda text, err=False: confirms.append((text, err)) or False
     )
-    approve = recover_cmd._make_approve(yes=False)
+    approve = recover_cmd._make_consent(yes=False)
     assert approve(_preview()) is False
     assert confirms == [("Abandon it?", True)]
 
 
 def test_json_stdout_purity_with_stderr_confirmation(monkeypatch):
-    # The approve render goes to stderr even under --json — stdout stays the pure payload.
-    def fake_recover(repo_root, **kwargs):
-        assert kwargs["approve"](_preview()) is True
-        return _result(operations=(_row(classification="all_before", action="abandoned"),))
+    # The consent render goes to stderr even under --json — stdout stays the pure payload.
+    class _Service:
+        def recover(self, request: RecoverRequest, *, consent):
+            assert request.action == "abandon"
+            assert consent(_preview()) is True
+            return _result(operations=(_row(classification="all_before", action="abandoned"),))
 
-    monkeypatch.setattr(recover, "recover_operations", fake_recover)
+    monkeypatch.setattr(recover_cmd, "resolve_delivery", lambda repo_root: _Service())
     runner = CliRunner()
     with runner.isolated_filesystem() as d:
         subprocess.run(["git", "init", "-q"], cwd=d, check=True)
@@ -380,14 +406,14 @@ def test_human_dry_run_and_skipped_sweep_renders(monkeypatch):
 # ----------------------------------------------------------------- the LAND surface (§8.51)
 
 
-def _accept_preview() -> recover.AcceptPrefixPreview:
-    return recover.AcceptPrefixPreview(
+def _accept_preview() -> RecoverResult.AcceptPrefixPreview:
+    return RecoverResult.AcceptPrefixPreview(
         operation_id="01JOPAAAAAAAAAAAAAAAAAAAAA",
         prepared_created="2026-01-01T00:00:00Z",
         merged_layers=(
-            recover.MergedPrefixRow(node_id="1.1", pr_number=201, merge_commit_sha="d" * 40),
+            RecoverResult.MergedPrefix(node_id="1.1", pr_number=201, merge_commit_sha="d" * 40),
         ),
-        remainder=(recover.RemainderPrRow(pr_number=202, state="OPEN", head_sha="b" * 40),),
+        remainder=(RecoverResult.RemainderPr(pr_number=202, state="OPEN", head_sha="b" * 40),),
         detail="an externally merged contiguous prefix",
     )
 
@@ -401,7 +427,8 @@ def test_accept_prefix_threads_through(monkeypatch):
         ),
     )
     (call,) = calls
-    assert call["accept_prefix"] is True and call["abandon"] is False
+    assert call["request"].action == "accept_prefix"
+    assert callable(call["consent"])
 
 
 def test_accept_prefix_flag_matrix_refusals(monkeypatch):
@@ -422,9 +449,9 @@ def test_accept_prefix_flag_matrix_refusals(monkeypatch):
     assert calls == []
 
 
-def test_accept_approve_callback_arms(monkeypatch, capsys):
+def test_accept_consent_callback_arms(monkeypatch, capsys):
     # --yes: renders exactly what it accepts (merged prefix + remainder proof).
-    approve = recover_cmd._make_accept_approve(yes=True)
+    approve = recover_cmd._make_consent(yes=True)
     assert approve(_accept_preview()) is True
     err = capsys.readouterr().err
     assert "degraded-atomicity breach" in err
@@ -432,7 +459,7 @@ def test_accept_approve_callback_arms(monkeypatch, capsys):
 
     # Non-interactive without --yes: the typed refusal, before any prompt.
     monkeypatch.setattr(click, "get_text_stream", lambda name: _FakeStdin(tty=False))
-    approve = recover_cmd._make_accept_approve(yes=False)
+    approve = recover_cmd._make_consent(yes=False)
     with pytest.raises(UserFacingCliError) as excinfo:
         approve(_accept_preview())
     assert excinfo.value.error_type == "confirmation_required"
@@ -443,7 +470,7 @@ def test_accept_approve_callback_arms(monkeypatch, capsys):
     monkeypatch.setattr(
         click, "confirm", lambda text, err=False: confirms.append((text, err)) or False
     )
-    approve = recover_cmd._make_accept_approve(yes=False)
+    approve = recover_cmd._make_consent(yes=False)
     assert approve(_accept_preview()) is False
     assert confirms == [("Accept it?", True)]
 
@@ -474,17 +501,17 @@ def test_land_envelope_fields_serialize(monkeypatch):
                     classification="external_prefix",
                     action="reported",
                     merged_layers=(
-                        recover.MergedPrefixRow(
+                        RecoverResult.MergedPrefix(
                             node_id="1.1", pr_number=201, merge_commit_sha="d" * 40
                         ),
                     ),
                     remainder=(
-                        recover.RemainderPrRow(pr_number=202, state="OPEN", head_sha="b" * 40),
+                        RecoverResult.RemainderPr(pr_number=202, state="OPEN", head_sha="b" * 40),
                     ),
                 ),
             ),
             landed_layers=(
-                recover.LandedLayerRow(
+                RecoverResult.LandedLayer(
                     node_id="1.1",
                     plan_id="101",
                     pr_number=201,
@@ -557,7 +584,7 @@ def test_human_render_landed_layers_close_and_evidence(monkeypatch):
         result=_result(
             operations=(_row(kind="land", action="rolled_forward"),),
             landed_layers=(
-                recover.LandedLayerRow(
+                RecoverResult.LandedLayer(
                     node_id="1.1",
                     plan_id="101",
                     pr_number=201,
@@ -566,7 +593,7 @@ def test_human_render_landed_layers_close_and_evidence(monkeypatch):
                     head_sha="b" * 40,
                     finalized=False,
                 ),
-                recover.LandedLayerRow(
+                RecoverResult.LandedLayer(
                     node_id="1.2",
                     plan_id="102",
                     pr_number=202,
