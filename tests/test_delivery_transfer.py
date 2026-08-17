@@ -22,7 +22,18 @@ import pytest
 from perk import objective
 from perk.backends.issue_backend import PlanState
 from perk.backends.objective_store import ObjectiveRef, ObjectiveState
-from perk.delivery import oplock, transfer
+from perk.delivery import (
+    Delivery,
+    DeliveryError,
+    DeliveryGit,
+    DeliveryGitHub,
+    DeliveryPersistence,
+    StatusRequest,
+    StatusResult,
+    TransferRequest,
+    oplock,
+    transfer,
+)
 from perk.delivery import sync as sync_mod
 from perk.delivery.journal import (
     EventRole,
@@ -93,7 +104,7 @@ class _Objective:
 
 @dataclass
 class _World:
-    """The injectable stateful world for one or more `run_transfer` invocations."""
+    """The injectable stateful world for one or more ``Delivery.transfer`` invocations."""
 
     objectives: dict[str, _Objective] = field(default_factory=dict)
     plans: dict[str, dict[str, object]] = field(default_factory=dict)
@@ -129,7 +140,14 @@ class _World:
             title=obj.title,
             header=dict(obj.header),
             nodes=tuple(obj.nodes),
+            state="closed" if obj.closed else "open",
         )
+
+    def normalize_transfer_carry_map(
+        self, carry_map: tuple[tuple[str, str], ...]
+    ) -> dict[str, str]:
+        self.timeline.append(("normalize_carries", carry_map, self.locked))
+        return dict(carry_map)
 
     def find_objective(self, *, run_id: str) -> ObjectiveRef | None:
         self.timeline.append(("find_objective", run_id, self.locked))
@@ -169,6 +187,10 @@ class _World:
             url=f"u/{oid}", title=kwargs["title"], header=header, nodes=nodes
         )
         self._maybe_boom("supersede_return")  # created, then crashed before returning
+        if kwargs.get("close_predecessor", True):
+            self.finalize_supersession(
+                old_objective_id=kwargs["old_objective_id"], new_objective_id=oid
+            )
         return ObjectiveRef(id=oid, url=f"u/{oid}", existed=False)
 
     def finalize_supersession(self, *, old_objective_id: str, new_objective_id: str) -> bool:
@@ -191,6 +213,39 @@ class _World:
         return PlanState(
             id=issue_id, url="u/p", title="plan", header=dict(header), pr=None, state="OPEN"
         )
+
+    def update_plan_header(self, *, issue_id: str, fields: dict[str, object]) -> object:
+        header = self.plans[issue_id]
+        if set(fields) == {"objective_id", "objective_node_id"}:
+            self.timeline.append(
+                ("ownership", issue_id, fields["objective_id"], fields["objective_node_id"])
+            )
+            header.update(fields)
+            self._maybe_boom("ownership")
+            return None
+        if set(fields) == {"delivery_lineage", "predecessor_plan_id"}:
+            self.timeline.append(
+                (
+                    "identity",
+                    issue_id,
+                    fields["delivery_lineage"],
+                    fields["predecessor_plan_id"],
+                )
+            )
+            header.update(fields)
+            self._maybe_boom("identity")
+            return None
+        if set(fields) == {
+            "delivery_lineage",
+            "predecessor_plan_id",
+            "parent_checkpoint_sha",
+            "published_head_sha",
+        }:
+            self.timeline.append(("clear", issue_id))
+            header.update(fields)
+            self._maybe_boom("clear")
+            return None
+        raise AssertionError(f"unexpected grouped header write: {fields!r}")
 
     # ------------------------------------------------------------- persistence
 
@@ -248,36 +303,6 @@ class _World:
         self.timeline.append(("outcome", record.role.value, record.operation_id))
         self.outcomes.append(record)
         return None
-
-    def transfer_plan_ownership(
-        self, plan_id: str, *, objective_id: str, objective_node_id: str
-    ) -> None:
-        self.timeline.append(("ownership", plan_id, objective_id, objective_node_id))
-        header = self.plans[plan_id]
-        header["objective_id"] = objective_id
-        header["objective_node_id"] = objective_node_id
-        self._maybe_boom("ownership")
-
-    def stamp_layer_identity(
-        self, plan_id: str, *, delivery_lineage: str, predecessor_plan_id: str | None
-    ) -> None:
-        self.timeline.append(("identity", plan_id, delivery_lineage, predecessor_plan_id))
-        header = self.plans[plan_id]
-        header["delivery_lineage"] = delivery_lineage
-        header["predecessor_plan_id"] = predecessor_plan_id
-        self._maybe_boom("identity")
-
-    def clear_delivery_metadata(self, plan_id: str) -> None:
-        self.timeline.append(("clear", plan_id))
-        header = self.plans[plan_id]
-        for key in (
-            "delivery_lineage",
-            "predecessor_plan_id",
-            "parent_checkpoint_sha",
-            "published_head_sha",
-        ):
-            header[key] = None
-        self._maybe_boom("clear")
 
     # ------------------------------------------------------------- observation seams
 
@@ -399,7 +424,7 @@ class _World:
             observed_base_head_sha="m" * 40,
         )
 
-    def pr_facts(self, *, number: int, repo_root: Path) -> PrDeliveryFacts | None:
+    def pr_facts(self, number: int) -> PrDeliveryFacts | None:
         self.timeline.append(("pr_facts", number, self.locked))
         state = self.pr_state.get(number)
         if state is None:
@@ -413,14 +438,29 @@ class _World:
             head_sha="9" * 40,
         )
 
-    def worktree_branches(self, root: Path) -> tuple[WorktreeFacts, ...]:
+    @property
+    def repo_root(self) -> Path:
+        return ROOT
+
+    def trunk_branch(self) -> str:
+        self.timeline.append(("trunk", self.locked))
+        return "main"
+
+    def worktree_branches(self) -> tuple[WorktreeFacts, ...]:
         self.timeline.append(("worktrees", self.locked))
         return tuple(
             WorktreeFacts(path=f"/wt/{b}", branch=b, dirty=b in self.dirty_branches)
             for b in self.worktree_branch_names
         )
 
-    def active_plan_ids(self, plan_ids: Sequence[str]) -> frozenset[str]:
+    def active_writer_plan_ids(
+        self,
+        plan_ids: tuple[str, ...],
+        *,
+        trigger_plan_id: str | None,
+        trigger_run_id: str | None,
+    ) -> frozenset[str]:
+        assert trigger_plan_id is None and trigger_run_id is None
         self.timeline.append(("writer_probe", tuple(plan_ids), self.locked))
         if self.writer_boom:
             raise WriterObservationError("gh api failed")
@@ -449,38 +489,32 @@ class _World:
         stacked: bool = True,
         reconstruct=None,
     ) -> transfer.TransferResult:
-        predecessor_state = self.get_objective(objective_id=predecessor)
-        if predecessor_state is None:
-            raise transfer.TransferError(
-                f"objective {predecessor} not found", error_type="objective_not_found"
-            )
-        try:
-            predecessor_policy = objective.delivery_policy(predecessor_state.header)
-        except ValueError as exc:
-            raise transfer.TransferError(str(exc), error_type="invalid_delivery_policy") from exc
-        return transfer.run_transfer(
-            ROOT,
-            predecessor=predecessor_state,
-            predecessor_policy=predecessor_policy,
-            predecessor_id=predecessor,
-            run_id=run_id,
-            title="Successor",
-            prose="successor prose",
-            base=base,
-            roadmap_nodes=list(nodes),
-            carry_map=carry_map or {},
-            stacked=stacked,
-            remote_writers=self,
-            store_factory=lambda root: self,
-            issues_factory=lambda root: self,
-            persistence_factory=lambda root: self,
+        service = _WorldDelivery(
+            self,
             reconstruct=reconstruct if reconstruct is not None else self.reconstruct,
-            pr_facts=self.pr_facts,
-            worktree_branches=self.worktree_branches,
-            trunk=lambda root: "main",
-            lock=self._lock,
+        )
+        runtime = transfer._TransferRuntime(
+            operation_lock=self._lock,
+            mint_operation_id=mint_operation_id,
             now=lambda: NOW,
         )
+        previous_runtime = transfer._DEFAULT_TRANSFER_RUNTIME
+        transfer._DEFAULT_TRANSFER_RUNTIME = runtime
+        try:
+            return service.transfer(
+                TransferRequest(
+                    predecessor_id=predecessor,
+                    run_id=run_id,
+                    title="Successor",
+                    prose="successor prose",
+                    base=base,
+                    roadmap_nodes=tuple(nodes),
+                    carry_map=tuple((carry_map or {}).items()),
+                    delivery="stacked" if stacked else "incremental",
+                )
+            )
+        finally:
+            transfer._DEFAULT_TRANSFER_RUNTIME = previous_runtime
 
     def events(self, kind: str) -> list[tuple]:
         return [t for t in self.timeline if t[0] == kind]
@@ -490,6 +524,34 @@ class _World:
         assert self.prepared == [] and self.outcomes == []
         for kind in ("ownership", "identity", "clear", "finalize"):
             assert self.events(kind) == [], kind
+
+
+class _WorldDelivery(Delivery):
+    def __init__(self, world: _World, *, reconstruct) -> None:
+        super().__init__(
+            persistence=cast(DeliveryPersistence, world),
+            git=cast(DeliveryGit, world),
+            github=cast(DeliveryGitHub, world),
+        )
+        self._world_reconstruct = reconstruct
+
+    def status(self, request: StatusRequest) -> StatusResult:
+        status = self._world_reconstruct(ROOT, request.objective_id)
+        if isinstance(status, DeliveryTrain):
+            return StatusResult(
+                objective_id=status.objective_id,
+                objective_url=status.objective_url,
+                redirected_from=status.redirected_from,
+                train=status,
+                no_train_reason=None,
+            )
+        return StatusResult(
+            objective_id=status.objective_id,
+            objective_url=status.objective_url,
+            redirected_from=status.redirected_from,
+            train=None,
+            no_train_reason=status.reason,
+        )
 
 
 def _error(world: _World, nodes, **kwargs) -> transfer.TransferError:
@@ -972,10 +1034,30 @@ def test_junk_delivery_policy_fails_closed():
     assert error.error_type == "invalid_delivery_policy"
 
 
-def test_incremental_to_incremental_never_routes_here():
+def test_incremental_to_incremental_uses_the_plain_locked_route():
     world = _incremental_world()
-    error = _error(world, [_node("9.1", pr="#101")], stacked=False)
-    assert error.error_type == "invalid_input"
+    result = world.run([_node("9.1", pr="#101")], stacked=False)
+    assert result.operation_id is None
+    assert result.journaled is False
+    assert world.events("fold") == []
+    assert world.events("reconstruct") == []
+    assert world.events("normalize_carries") == []
+    assert world.supersede_calls[0]["close_predecessor"] is True
+
+
+def test_incremental_to_incremental_same_run_replay_returns_the_one_successor() -> None:
+    world = _incremental_world()
+    nodes = [_node("9.1", pr="#101")]
+
+    first = world.run(nodes, stacked=False)
+    second = world.run(nodes, stacked=False)
+
+    assert first.rolled_forward is False
+    assert second.rolled_forward is True
+    assert second.successor.id == first.successor.id
+    assert len(world.objectives) == 2
+    assert len(world.supersede_calls) == 1
+    assert world.events("finalize") == [("finalize", PRED, first.successor.id)]
 
 
 def test_structural_blockers_on_the_predecessor_refuse():
@@ -1088,8 +1170,9 @@ def test_unresolved_corrupt_transfer_manifest_fails_closed_at_the_save():
             after={"junk": True},
         )
     )
-    with pytest.raises(JournalCorruptionError):
+    with pytest.raises(DeliveryError) as excinfo:
         world.run(_successor_nodes())
+    assert excinfo.value.error_type == "journal_corruption"
     assert world.supersede_calls == []
 
 
@@ -1227,7 +1310,7 @@ def test_infra_failure_during_verification_propagates_and_stays_unresolved():
             raise TrainReconstructionError("git worktree list failed", error_type="git_error")
         return original(root, objective_id)
 
-    with pytest.raises(TrainReconstructionError) as excinfo:
+    with pytest.raises(DeliveryError) as excinfo:
         world.run(_successor_nodes(), reconstruct=flaky)
     assert excinfo.value.error_type == "git_error"
     assert world.events("finalize") == [] and world.outcomes == []

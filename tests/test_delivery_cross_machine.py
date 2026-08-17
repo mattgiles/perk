@@ -24,6 +24,7 @@ its classification/roll-forward arms are pinned in ``tests/test_delivery_recover
 import contextlib
 import subprocess
 from collections.abc import Callable, Iterator
+from dataclasses import replace
 from pathlib import Path
 from typing import cast
 
@@ -184,24 +185,6 @@ class _SharedPersistence:
         assert self.world is not None
         self.world.checkpoint_state[plan_id] = (parent_checkpoint_sha, published_head_sha)
 
-    # The transfer arm's typed writers.
-
-    def transfer_plan_ownership(
-        self, plan_id: str, *, objective_id: str, objective_node_id: str
-    ) -> None:
-        assert self.world is not None
-        self.world.ownership.append((plan_id, objective_id, objective_node_id))
-
-    def stamp_layer_identity(
-        self, plan_id: str, *, delivery_lineage: str, predecessor_plan_id: str | None
-    ) -> None:
-        assert self.world is not None
-        self.world.identity.append((plan_id, delivery_lineage, predecessor_plan_id))
-
-    def clear_delivery_metadata(self, plan_id: str) -> None:
-        assert self.world is not None
-        self.world.cleared.append(plan_id)
-
 
 class _SharedWorld:
     """The shared stateful backend world: plan headers, PRs, one native stack, objectives —
@@ -257,6 +240,31 @@ class _SharedWorld:
         self, *, issue_id: str, fields: dict[str, object], dry_run: bool = False
     ) -> PlanHeaderUpdate:
         self.header_writes.append((issue_id, dict(fields)))
+        if set(fields) == {"objective_id", "objective_node_id"}:
+            self.ownership.append(
+                (issue_id, str(fields["objective_id"]), str(fields["objective_node_id"]))
+            )
+        elif set(fields) == {"delivery_lineage", "predecessor_plan_id"}:
+            predecessor = fields["predecessor_plan_id"]
+            self.identity.append(
+                (
+                    issue_id,
+                    str(fields["delivery_lineage"]),
+                    str(predecessor) if predecessor is not None else None,
+                )
+            )
+        elif set(fields) == {
+            "delivery_lineage",
+            "predecessor_plan_id",
+            "parent_checkpoint_sha",
+            "published_head_sha",
+        }:
+            self.cleared.append(issue_id)
+        state = self.plans.get(issue_id)
+        if state is not None:
+            header = dict(state.header)
+            header.update(fields)
+            self.plans[issue_id] = replace(state, header=header)
         pr_value = fields.get("pr")
         if isinstance(pr_value, str) and pr_value.isdigit():
             for spec in self.layer_specs:

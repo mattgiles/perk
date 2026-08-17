@@ -11,6 +11,7 @@ from perk.backends.github import objectives, plans
 from perk.cli.cli import cli
 from perk.cli.commands.objective import create_cmd
 
+_REAL_RESOLVE_DELIVERY = create_cmd.resolve_delivery
 N = objective.NodeStatus
 
 
@@ -310,6 +311,9 @@ def _invoke_adopt(args, *, body, monkeypatch, store, write_handoff=None, config=
     from perk.state import cache
 
     monkeypatch.setattr(resolve, "resolve_objective_store", lambda _root: store)
+    if create_cmd.resolve_delivery is _REAL_RESOLVE_DELIVERY:
+        service = _PrepareStub()
+        monkeypatch.setattr(create_cmd, "resolve_delivery", lambda _root: service)
     runner = CliRunner()
     with runner.isolated_filesystem() as d:
         _git_init(d)
@@ -431,6 +435,7 @@ def test_create_adopt_from_dry_run_composes_without_adopting(monkeypatch):
 def test_create_supersedes_routes_to_writer(monkeypatch):
     _authed(monkeypatch)
     store = _AdoptStubStore()
+    service = _stub_prepare(monkeypatch)
     roadmap = json.dumps(
         [
             {"id": "1.1", "description": "carried", "adopt_issue": "ENG-2"},
@@ -444,15 +449,17 @@ def test_create_supersedes_routes_to_writer(monkeypatch):
         store=store,
     )
     assert result.exit_code == 0, result.output
-    assert store.supersede_kwargs is not None and store.created is False
-    assert store.supersede_kwargs["old_objective_id"] == "42"  # `#` stripped
-    assert store.supersede_kwargs["carry_map"] == {"1.1": "ENG-2"}
-    assert [n.id for n in store.supersede_kwargs["roadmap_nodes"]] == ["1.1", "1.2"]
+    assert store.supersede_kwargs is None and store.created is False
+    (request,) = service.transfer_requests
+    assert request.predecessor_id == "42"  # `#` stripped
+    assert request.carry_map == (("1.1", "ENG-2"),)
+    assert [node.id for node in request.roadmap_nodes] == ["1.1", "1.2"]
 
 
 def test_create_supersedes_handoff_recovery(monkeypatch):
     _authed(monkeypatch)
     store = _AdoptStubStore()
+    service = _stub_prepare(monkeypatch)
     roadmap = json.dumps([{"id": "1.1", "description": "x"}])
     result = _invoke_adopt(
         ["objective", "create", "--json", "--run-id", "RID9", "--roadmap", roadmap],
@@ -462,13 +469,13 @@ def test_create_supersedes_handoff_recovery(monkeypatch):
         write_handoff=("RID9", {"supersedes": "55"}),
     )
     assert result.exit_code == 0, result.output
-    assert store.supersede_kwargs is not None
-    assert store.supersede_kwargs["old_objective_id"] == "55"  # recovered from the handoff
+    assert service.transfer_requests[0].predecessor_id == "55"  # recovered from the handoff
 
 
 def test_create_explicit_supersedes_wins_over_handoff(monkeypatch):
     _authed(monkeypatch)
     store = _AdoptStubStore()
+    service = _stub_prepare(monkeypatch)
     roadmap = json.dumps([{"id": "1.1", "description": "x"}])
     result = _invoke_adopt(
         [
@@ -488,13 +495,21 @@ def test_create_explicit_supersedes_wins_over_handoff(monkeypatch):
         write_handoff=("RID9", {"supersedes": "handoff-9"}),
     )
     assert result.exit_code == 0, result.output
-    assert store.supersede_kwargs is not None
-    assert store.supersede_kwargs["old_objective_id"] == "explicit-9"
+    assert service.transfer_requests[0].predecessor_id == "explicit-9"
 
 
 def test_create_supersede_unsupported(monkeypatch):
+    from perk.delivery import DeliveryError
+
     _authed(monkeypatch)
-    store = _AdoptStubStore(supersede_returns_none=True)
+    store = _AdoptStubStore()
+    _stub_prepare(
+        monkeypatch,
+        transfer_error=DeliveryError(
+            "The configured objective backend does not support replan",
+            error_type="supersede_unsupported",
+        ),
+    )
     roadmap = json.dumps([{"id": "1.1", "description": "x"}])
     result = _invoke_adopt(
         ["objective", "create", "--json", "--supersedes", "42", "--roadmap", roadmap],
@@ -584,9 +599,14 @@ class _DeliveryStubStore(_AdoptStubStore):
 
 
 class _PrepareStub:
-    def __init__(self, *, error=None) -> None:
+    """Configurable Delivery spy for command request→invoke→render tests."""
+
+    def __init__(self, *, error=None, transfer_error=None, transfer_result=None) -> None:
         self.error = error
+        self.transfer_error = transfer_error
+        self.transfer_result = transfer_result
         self.requests = []
+        self.transfer_requests = []
 
     def prepare(self, request):
         from perk.delivery import PrepareResult
@@ -596,9 +616,38 @@ class _PrepareStub:
             raise self.error
         return PrepareResult(kind="authoring", base=request.base or "main")
 
+    def transfer(self, request):
+        from perk.backends.objective_store import ObjectiveRef
+        from perk.delivery import TransferResult
 
-def _stub_prepare(monkeypatch, *, error=None, resolver_calls: list | None = None):
-    service = _PrepareStub(error=error)
+        self.transfer_requests.append(request)
+        if self.transfer_error is not None:
+            raise self.transfer_error
+        if self.transfer_result is not None:
+            return self.transfer_result
+        return TransferResult(
+            predecessor_id=request.predecessor_id,
+            successor=ObjectiveRef(id="777", url="u/777", existed=False),
+            operation_id=None,
+            abandoned_operation_id=None,
+            rolled_forward=False,
+            journaled=False,
+        )
+
+
+def _stub_prepare(
+    monkeypatch,
+    *,
+    error=None,
+    transfer_error=None,
+    transfer_result=None,
+    resolver_calls: list | None = None,
+):
+    service = _PrepareStub(
+        error=error,
+        transfer_error=transfer_error,
+        transfer_result=transfer_result,
+    )
 
     def _resolve(repo_root):
         if resolver_calls is not None:
@@ -810,35 +859,13 @@ def test_create_stacked_passes_stored_base_intent_to_prepare(
     assert store.create_kwargs["base"] == expected_base
 
 
-def _stub_transfer(monkeypatch, calls: list):
-    """Capture `transfer.run_transfer` at create_cmd's late-bound module attribute."""
-    from perk.backends import objective_store
-    from perk.delivery import transfer
-
-    def _run_transfer(repo_root, **kwargs):
-        calls.append(kwargs)
-        return transfer.TransferResult(
-            predecessor_id=kwargs["predecessor_id"],
-            successor=objective_store.ObjectiveRef(id="777", url="u/777", existed=False),
-            operation_id=None,
-            abandoned_operation_id=None,
-            rolled_forward=False,
-            journaled=True,
-        )
-
-    monkeypatch.setattr(transfer, "run_transfer", _run_transfer)
-
-
 def test_create_stacked_supersede_routes_through_the_transfer_protocol(monkeypatch):
     from perk.delivery import PrepareRequest
 
-    # D1: a stacked SUCCESSOR choice routes the supersede through run_transfer (never the
-    # plain store mutation), after the one classification read.
+    # A stacked successor submits one façade Transfer request after Prepare.
     _authed(monkeypatch)
     store = _DeliveryStubStore(old_header={"delivery": "stacked", "delivery_lineage": "01OLD"})
     prepare = _stub_prepare(monkeypatch)
-    calls: list = []
-    _stub_transfer(monkeypatch, calls)
     result = _invoke_adopt(
         [
             "objective",
@@ -857,14 +884,11 @@ def test_create_stacked_supersede_routes_through_the_transfer_protocol(monkeypat
     )
     assert result.exit_code == 0, result.output
     assert prepare.requests == [PrepareRequest(kind="authoring", base=None)]
-    assert store.get_objective_ids == ["42"]  # the D1 classification read ("#" stripped)
-    assert store.supersede_kwargs is None  # the plain mutation never runs on a transfer arm
-    assert len(calls) == 1
-    assert calls[0]["predecessor_id"] == "42"
-    assert calls[0]["predecessor"].id == "42"
-    assert calls[0]["predecessor_policy"] is objective.DeliveryPolicy.STACKED
-    assert calls[0]["store_factory"](Path("unused")) is store
-    assert calls[0]["stacked"] is True
+    assert store.get_objective_ids == []
+    assert store.supersede_kwargs is None
+    assert len(prepare.transfer_requests) == 1
+    assert prepare.transfer_requests[0].predecessor_id == "42"
+    assert prepare.transfer_requests[0].delivery == "stacked"
     payload = json.loads(result.output)
     assert payload["objective"]["id"] == "777"
 
@@ -881,9 +905,6 @@ def test_create_stacked_supersede_prepare_refusal_precedes_every_mutation(monkey
             error_type="capability_unsupported",
         ),
     )
-    transfer_calls: list = []
-    _stub_transfer(monkeypatch, transfer_calls)
-
     result = _invoke_adopt(
         [
             "objective",
@@ -905,28 +926,18 @@ def test_create_stacked_supersede_prepare_refusal_precedes_every_mutation(monkey
     assert prepare.requests == [PrepareRequest(kind="authoring", base=None)]
     payload = json.loads(result.output)
     assert payload["error_type"] == "capability_unsupported"
-    assert transfer_calls == []
+    assert prepare.transfer_requests == []
     assert store.get_objective_ids == []
     assert store.create_kwargs is None
     assert store.supersede_kwargs is None
     assert store.created is False
 
 
-@pytest.mark.parametrize(
-    ("backend_id", "expected"),
-    [
-        ("github", {}),
-        ("linear", {"1.1": "ENG-1", "1.2": "ENG-2"}),
-    ],
-)
-def test_transfer_carry_identity_matches_backend_contract(monkeypatch, backend_id, expected):
-    # GitHub ignores adopt_issue and carries plans by each node's `pr` backlink; Linear moves
-    # the existing node-issues named by adopt_issue.
+@pytest.mark.parametrize("backend_id", ["github", "linear"])
+def test_transfer_submits_raw_carry_identity_for_delivery_to_normalize(monkeypatch, backend_id):
     _authed(monkeypatch)
     store = _DeliveryStubStore(old_header={"delivery": "stacked", "delivery_lineage": "01OLD"})
-    _stub_prepare(monkeypatch)
-    calls: list = []
-    _stub_transfer(monkeypatch, calls)
+    service = _stub_prepare(monkeypatch)
     monkeypatch.setattr(resolve, "resolve_objective_store_id", lambda _root: backend_id)
     roadmap = json.dumps(
         [
@@ -951,7 +962,10 @@ def test_transfer_carry_identity_matches_backend_contract(monkeypatch, backend_i
         store=store,
     )
     assert result.exit_code == 0, result.output
-    assert calls[0]["carry_map"] == expected
+    assert service.transfer_requests[0].carry_map == (
+        ("1.1", "ENG-1"),
+        ("1.2", "ENG-2"),
+    )
 
 
 def test_create_stacked_predecessor_routes_even_for_incremental_successor(monkeypatch):
@@ -959,8 +973,7 @@ def test_create_stacked_predecessor_routes_even_for_incremental_successor(monkey
     # successor's (incremental) choice.
     _authed(monkeypatch)
     store = _DeliveryStubStore(old_header={"delivery": "stacked", "delivery_lineage": "01OLD"})
-    calls: list = []
-    _stub_transfer(monkeypatch, calls)
+    service = _stub_prepare(monkeypatch)
     result = _invoke_adopt(
         ["objective", "create", "--json", "--supersedes", "42", "--roadmap", _two_nodes_roadmap()],
         body="# Successor\n\nprose",
@@ -969,17 +982,19 @@ def test_create_stacked_predecessor_routes_even_for_incremental_successor(monkey
     )
     assert result.exit_code == 0, result.output
     assert store.supersede_kwargs is None
-    assert len(calls) == 1
-    assert calls[0]["stacked"] is False
+    assert len(service.transfer_requests) == 1
+    assert service.transfer_requests[0].delivery == "incremental"
 
 
 def test_create_supersede_classification_not_found_fails_closed(monkeypatch):
-    class _NotFoundStore(_DeliveryStubStore):
-        def get_objective(self, **kwargs):
-            return None
+    from perk.delivery import DeliveryError
 
     _authed(monkeypatch)
-    store = _NotFoundStore()
+    store = _DeliveryStubStore()
+    _stub_prepare(
+        monkeypatch,
+        transfer_error=DeliveryError("Objective 42 not found", error_type="objective_not_found"),
+    )
     result = _invoke_adopt(
         ["objective", "create", "--json", "--supersedes", "42", "--roadmap", _two_nodes_roadmap()],
         body="# Successor\n\nprose",
@@ -992,10 +1007,83 @@ def test_create_supersede_classification_not_found_fails_closed(monkeypatch):
     assert store.supersede_kwargs is None and store.created is False
 
 
-def test_create_supersede_classification_junk_policy_fails_closed(monkeypatch):
-    # A junk `delivery` value never silently classifies as incremental (the fail-open trap).
+def test_create_hash_only_supersedes_reaches_authoritative_not_found(monkeypatch):
+    from perk.delivery import DeliveryError
+
     _authed(monkeypatch)
-    store = _DeliveryStubStore(old_header={"delivery": "bogus"})
+    service = _stub_prepare(
+        monkeypatch,
+        transfer_error=DeliveryError("Objective  not found", error_type="objective_not_found"),
+    )
+
+    result = _invoke_adopt(
+        [
+            "objective",
+            "create",
+            "--json",
+            "--supersedes",
+            "#",
+            "--roadmap",
+            json.dumps([{"id": "1.1", "description": "work"}]),
+        ],
+        body="# Successor\n\nprose",
+        monkeypatch=monkeypatch,
+        store=_AdoptStubStore(),
+    )
+
+    assert result.exit_code == 1
+    payload = json.loads(result.output)
+    assert payload["error_type"] == "objective_not_found"
+    assert payload["message"] == "Objective  not found"
+    assert service.transfer_requests[0].predecessor_id == ""
+
+
+def test_create_supersede_whitespace_scalars_keep_existing_cli_resolution(monkeypatch):
+    _authed(monkeypatch)
+    monkeypatch.setenv("PERK_RUN_ID", "01ENV")
+    store = _AdoptStubStore()
+    service = _stub_prepare(monkeypatch)
+
+    result = _invoke_adopt(
+        [
+            "objective",
+            "create",
+            "--json",
+            "--supersedes",
+            "42",
+            "--title",
+            " ",
+            "--run-id",
+            " ",
+            "--base",
+            " ",
+            "--roadmap",
+            json.dumps([{"id": "1.1", "description": "work"}]),
+        ],
+        body="# Derived title\n\nprose",
+        monkeypatch=monkeypatch,
+        store=store,
+    )
+
+    assert result.exit_code == 0, result.output
+    assert len(service.transfer_requests) == 1
+    assert service.transfer_requests[0].title == " "
+    assert service.transfer_requests[0].run_id == " "
+    assert service.transfer_requests[0].base == " "
+
+
+def test_create_supersede_classification_junk_policy_fails_closed(monkeypatch):
+    from perk.delivery import DeliveryError
+
+    _authed(monkeypatch)
+    store = _DeliveryStubStore()
+    _stub_prepare(
+        monkeypatch,
+        transfer_error=DeliveryError(
+            "unknown objective delivery policy: 'bogus'",
+            error_type="invalid_delivery_policy",
+        ),
+    )
     result = _invoke_adopt(
         ["objective", "create", "--json", "--supersedes", "42", "--roadmap", _two_nodes_roadmap()],
         body="# Successor\n\nprose",
@@ -1009,14 +1097,17 @@ def test_create_supersede_classification_junk_policy_fails_closed(monkeypatch):
 
 
 def test_create_supersede_classification_infra_failure_fails_the_save(monkeypatch):
-    from perk.backends import objective_store
-
-    class _BoomStore(_DeliveryStubStore):
-        def get_objective(self, **kwargs):
-            raise objective_store.ObjectiveStoreError("read timed out")
+    from perk.delivery import DeliveryError
 
     _authed(monkeypatch)
-    store = _BoomStore()
+    store = _DeliveryStubStore()
+    _stub_prepare(
+        monkeypatch,
+        transfer_error=DeliveryError(
+            "objective create failed\nread timed out",
+            error_type="github_error",
+        ),
+    )
     result = _invoke_adopt(
         ["objective", "create", "--json", "--supersedes", "42", "--roadmap", _two_nodes_roadmap()],
         body="# Successor\n\nprose",
@@ -1030,15 +1121,14 @@ def test_create_supersede_classification_infra_failure_fails_the_save(monkeypatc
 
 
 def test_create_supersede_transfer_refusal_maps_the_typed_error(monkeypatch):
-    from perk.delivery import transfer
+    from perk.delivery import DeliveryError
 
     _authed(monkeypatch)
     store = _DeliveryStubStore(old_header={"delivery": "stacked", "delivery_lineage": "01OLD"})
-
-    def _refuse(repo_root, **kwargs):
-        raise transfer.TransferError("prefix broken", error_type="prefix_mismatch")
-
-    monkeypatch.setattr(transfer, "run_transfer", _refuse)
+    _stub_prepare(
+        monkeypatch,
+        transfer_error=DeliveryError("prefix broken", error_type="prefix_mismatch"),
+    )
     result = _invoke_adopt(
         ["objective", "create", "--json", "--supersedes", "42", "--roadmap", _two_nodes_roadmap()],
         body="# Successor\n\nprose",
@@ -1048,6 +1138,78 @@ def test_create_supersede_transfer_refusal_maps_the_typed_error(monkeypatch):
     assert result.exit_code == 1
     payload = json.loads(result.output)
     assert payload["error_type"] == "prefix_mismatch" and "prefix broken" in payload["message"]
+
+
+@pytest.mark.parametrize("as_json", (True, False))
+def test_transfer_repo_git_failure_reaches_stable_cli_envelopes(monkeypatch, as_json):
+    from perk.backends.objective_store import ObjectiveState
+    from perk.delivery import Delivery, PrepareResult
+    from perk.delivery._fakes import FakeDeliveryGitHub, FakeDeliveryPersistence
+    from perk.delivery.observe import RepoDeliveryGit
+    from perk.substrate import git as git_mod
+
+    _authed(monkeypatch)
+    persistence = FakeDeliveryPersistence(
+        objectives={
+            "42": ObjectiveState(
+                id="42",
+                url="u/42",
+                title="Old",
+                header={},
+                nodes=(),
+            )
+        }
+    )
+
+    def fail_worktree_read(*_args, **_kwargs):
+        raise git_mod.GitError("adapter worktrees unavailable")
+
+    monkeypatch.setattr(git_mod, "worktree_list", fail_worktree_read)
+
+    def resolve_service(repo_root):
+        bound = Delivery(
+            persistence=persistence,
+            git=RepoDeliveryGit(repo_root),
+            github=FakeDeliveryGitHub(),
+        )
+
+        class _Service:
+            def prepare(self, request):
+                assert request.kind == "authoring"
+                return PrepareResult(kind="authoring", base="main")
+
+            def transfer(self, request):
+                return bound.transfer(request)
+
+        return _Service()
+
+    monkeypatch.setattr(create_cmd, "resolve_delivery", resolve_service)
+    args = [
+        "objective",
+        "create",
+        "--supersedes",
+        "42",
+        "--delivery",
+        "stacked",
+        "--roadmap",
+        _two_nodes_roadmap(),
+    ]
+    if as_json:
+        args.append("--json")
+    result = _invoke_adopt(
+        args,
+        body="# Successor\n\nprose",
+        monkeypatch=monkeypatch,
+        store=_AdoptStubStore(),
+    )
+
+    assert result.exit_code == 1
+    if as_json:
+        payload = json.loads(result.output)
+        assert payload["error_type"] == "git_error"
+        assert payload["message"] == "git worktree list failed: adapter worktrees unavailable"
+    else:
+        assert result.output == "Error: git worktree list failed: adapter worktrees unavailable\n"
 
 
 def test_create_stacked_dry_run_skips_probes_and_gate_but_validates_bounds(monkeypatch):

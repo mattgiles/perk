@@ -1,9 +1,10 @@
 """``TrainPersistence`` — the backend-aligned train-persistence adapter (contracts.md §8.43).
 
 The one coherent persistence view over a delivery train's durable logical state: the operation
-journal (read via succession folding, written via the gated read-back append) plus the typed
-writers for the rest of the stored train state (the checkpoint pair, plan ownership, layer
-identity, the objective lineage stamp). Composes the selected :class:`ObjectiveStore` and
+journal (read via succession folding, written via the gated read-back append) plus the reusable
+typed writers for the checkpoint pair and objective lineage stamp. Transfer-specific ownership,
+identity, and clearing groups use its private issue seam's generic header merge-write. Composes
+the selected :class:`ObjectiveStore` and
 :class:`IssueBackend` — one committed ``[issues]`` selection drives both, so the journal carrier
 and the comment ops are always backend-aligned.
 
@@ -378,45 +379,6 @@ class TrainPersistence:
             fields={
                 "parent_checkpoint_sha": parent_checkpoint_sha,
                 "published_head_sha": published_head_sha,
-            },
-        )
-
-    def transfer_plan_ownership(
-        self, plan_id: str, *, objective_id: str, objective_node_id: str
-    ) -> None:
-        """Transfer a plan's objective/node ownership in one write (the replan-transfer
-        write)."""
-        self._issues.update_plan_header(
-            issue_id=plan_id,
-            fields={"objective_id": objective_id, "objective_node_id": objective_node_id},
-        )
-
-    def stamp_layer_identity(
-        self, plan_id: str, *, delivery_lineage: str, predecessor_plan_id: str | None
-    ) -> None:
-        """Stamp a layer's train identity in one write. An explicit ``None`` predecessor is
-        contract-legal for the bottom layer (absent ≡ null at the read boundary)."""
-        self._issues.update_plan_header(
-            issue_id=plan_id,
-            fields={
-                "delivery_lineage": delivery_lineage,
-                "predecessor_plan_id": predecessor_plan_id,
-            },
-        )
-
-    def clear_delivery_metadata(self, plan_id: str) -> None:
-        """Clear a plan's four stacked delivery fields in ONE ``update_plan_header`` write —
-        the stacked→incremental replan-transfer write (contracts.md §8.53). Present-key-with-
-        ``None`` is an explicit null on both backends, and absent ≡ null at the read boundary
-        (§8.42), so writing ``None`` IS clearing. ``objective_node_id`` deliberately stays with
-        :meth:`transfer_plan_ownership` (ownership is transferred, never cleared)."""
-        self._issues.update_plan_header(
-            issue_id=plan_id,
-            fields={
-                "delivery_lineage": None,
-                "predecessor_plan_id": None,
-                "parent_checkpoint_sha": None,
-                "published_head_sha": None,
             },
         )
 

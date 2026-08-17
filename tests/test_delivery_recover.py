@@ -189,21 +189,6 @@ class _FakePersistence:
         self._world.timeline.append(("checkpoints", plan_id))
         self.checkpoints.append((plan_id, parent_checkpoint_sha, published_head_sha))
 
-    # The transfer arm's typed writers (recorded; unused by the no-carry scenarios here).
-
-    def transfer_plan_ownership(
-        self, plan_id: str, *, objective_id: str, objective_node_id: str
-    ) -> None:
-        self._world.timeline.append(("ownership", plan_id, objective_id, objective_node_id))
-
-    def stamp_layer_identity(
-        self, plan_id: str, *, delivery_lineage: str, predecessor_plan_id: str | None
-    ) -> None:
-        self._world.timeline.append(("identity", plan_id, delivery_lineage, predecessor_plan_id))
-
-    def clear_delivery_metadata(self, plan_id: str) -> None:
-        self._world.timeline.append(("clear", plan_id))
-
 
 class _World:
     """The injectable mini remote + residue + recorders for one recover invocation."""
@@ -453,6 +438,9 @@ class _World:
                 state="closed",
             )
         return True
+
+    def update_plan_header(self, *, issue_id: str, fields: dict[str, object]) -> None:
+        self.timeline.append(("plan_header", issue_id, dict(fields)))
 
     def _transfer_seams(self, root: Path) -> transfer_mod.TransferSeams:
         return transfer_mod.TransferSeams(

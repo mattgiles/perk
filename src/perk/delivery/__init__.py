@@ -1,10 +1,10 @@
 """The compact public delivery façade and retained operation exports.
 
-The canonical surface is the repository-scoped :class:`Delivery` status, Prepare, publish, and
-sync families over three nominal aggregate authorities. Pure train projection, layer context/core,
-capability rows, production adapters, publication/synchronization internals, and compatibility
-readers are internal modules. Journal, finalization, and landing exports remain public while their
-operation families migrate.
+The canonical surface is the repository-scoped :class:`Delivery` status, Prepare, Transfer,
+publish, and sync families over three nominal aggregate authorities. Pure train projection, layer
+context/core, capability rows, production adapters, transfer/publication/synchronization
+internals, and compatibility readers are internal modules. Journal, finalization, and landing
+exports remain public while their operation families migrate.
 """
 
 from perk.delivery.facade import (
@@ -21,6 +21,8 @@ from perk.delivery.facade import (
     StatusResult,
     SyncRequest,
     SyncResult,
+    TransferRequest,
+    TransferResult,
 )
 from perk.delivery.finalize import (
     LandedPlan,
@@ -125,6 +127,8 @@ __all__ = [
     "SyncResult",
     "TrainPersistence",
     "TrainPersistenceError",
+    "TransferRequest",
+    "TransferResult",
     "UnresolvedOperationError",
     "assess_land_readiness",
     "canonical_payload",

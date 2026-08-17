@@ -14,15 +14,15 @@ launch (exactly like ``plan replan`` borrows ``plan`` and ``objective author --f
 ``supersedes=<OLD>`` in the run **handoff**. The in-session flow is the review-first path
 (``objective_draft → plan_review``; an APPROVED review auto-saves via the
 ``objectiveApprovalSave`` seam — ``objective_save``/``/objective-save`` stay the manual
-failsafe); the only storage change is the ``supersede_objective`` store method that
-``objective create --supersedes`` dispatches to.
+failsafe). The door obtains one-snapshot delivery constraints through replan Prepare; the
+approved save submits one Transfer request and leaves classification/routing/mutation behind the
+Delivery façade.
 
 Supervisor surface: ``--json`` → stdout, human text → stderr, stable exits (``0`` ok ·
 ``1`` op-failure/refusal · ``2`` not-a-repo). The judgment lives in the ``perk-objective-replan``
 skill.
 """
 
-from dataclasses import dataclass
 from pathlib import Path
 
 import click
@@ -35,11 +35,12 @@ from perk.cli.commands.objective.shared import parse_objective_id
 from perk.cli.commands.seeded_door import SeededLaunch, run_seeded_door, seeded_door_options
 from perk.cli.context import require_github
 from perk.cli.ensure import UserFacingCliError
-from perk.delivery import observe
-from perk.delivery import sync as sync_mod
-from perk.delivery.journal import JournalCorruptionError, OperationKind
-from perk.delivery.persistence import TrainPersistenceError, resolve_train_persistence
-from perk.delivery.train import LayerPr, NoDeliveryTrain, TrainReconstructionError
+from perk.delivery import (
+    DeliveryError,
+    PrepareRequest,
+    PrepareResult,
+    resolve_delivery,
+)
 from perk.github import GitHubError
 from perk.prompts import render
 from perk.run import launch
@@ -67,77 +68,7 @@ def _scratch_path(repo_root: Path, objective_id: str) -> Path:
     return cache.scratch_dir(repo_root) / f"objective-replan-{safe}.md"
 
 
-@dataclass(frozen=True)
-class _StackedFacts:
-    """The stacked predecessor's transfer-relevant observation (train-derived), rendered
-    into the scratch so the authoring session knows the §8.53 carry obligations up front."""
-
-    lineage: str
-    base: str
-    claimed: tuple[sync_mod.ClaimedLayer, ...]
-    open_pr_plans: tuple[tuple[str, int], ...]  # (plan_id, pr_number), delivery order
-
-    @property
-    def published(self) -> bool:
-        return bool(self.claimed)
-
-
-def _gather_stacked_facts(repo_root: Path, objective_id: str) -> _StackedFacts:
-    """Observe a STACKED predecessor for the replan door: refuse on any unresolved journal
-    operation (an interrupted TRANSFER routes to `stack recover`; other kinds to their owning
-    resume), then reconstruct the train, refuse structural identity/topology blockers, and
-    derive the claimed prefix (§8.53's D2 published definition). Fail-closed throughout —
-    authoring against a predecessor the save would refuse wastes the whole session."""
-    try:
-        fold = resolve_train_persistence(repo_root).read_journal(objective_id)
-    except JournalCorruptionError as exc:
-        raise UserFacingCliError(str(exc), error_type="journal_corruption") from exc
-    if fold.unresolved:
-        op = fold.unresolved[0]
-        if op.kind is OperationKind.TRANSFER:
-            raise UserFacingCliError(
-                f"An interrupted replan transfer (operation {op.operation_id}) is unresolved "
-                f"on objective {objective_id} — conclude it with "
-                f"`perk objective stack recover {objective_id}` before replanning.",
-                error_type="transfer_incomplete",
-            )
-        raise UserFacingCliError(
-            f"Operation {op.operation_id} ({op.kind.value}) is unresolved on objective "
-            f"{objective_id} — conclude it via `perk objective stack recover {objective_id}` "
-            "or the owning command before replanning.",
-            error_type="unresolved_operation",
-        )
-    try:
-        train = observe.reconstruct_repo_train(repo_root, objective_id)
-    except TrainReconstructionError as exc:
-        raise UserFacingCliError(str(exc), error_type=exc.error_type) from exc
-    if isinstance(train, NoDeliveryTrain):
-        raise UserFacingCliError(
-            f"Objective {objective_id} classified stacked but reconstructs no delivery train "
-            f"({train.reason}) — broken stored state; repair before replanning.",
-            error_type="invalid_train",
-        )
-    try:
-        sync_mod.refuse_structural_blockers(train)
-        claimed = sync_mod.derive_claimed_prefix(train)
-    except sync_mod.SyncError as exc:
-        raise UserFacingCliError(str(exc), error_type=exc.error_type) from exc
-    open_pr_plans = tuple(
-        (layer.plan_id, layer.pr_number)
-        for layer in train.layers
-        if layer.plan_id is not None
-        and layer.pr_number is not None
-        and layer.pr in (LayerPr.DRAFT, LayerPr.READY, LayerPr.WRONG_BASE)
-    )
-    return _StackedFacts(
-        lineage=train.delivery_lineage or "",
-        base=train.base,
-        claimed=claimed,
-        open_pr_plans=open_pr_plans,
-    )
-
-
-def _render_stacked_facts(facts: _StackedFacts, *, is_linear: bool) -> str:
+def _render_stacked_facts(facts: PrepareResult.ReplanContext, *, is_linear: bool) -> str:
     """The scratch's `<stacked_delivery_facts>` block: the claimed-prefix carry obligation
     (exact order), the mandatory-carry open-PR plans (D5), and the immutability facts — all
     stated as constraints the save ENFORCES, so the author designs within them."""
@@ -150,7 +81,7 @@ def _render_stacked_facts(facts: _StackedFacts, *, is_linear: bool) -> str:
         "<stacked_delivery_facts>",
         "delivery: stacked",
         f"base: {facts.base}",
-        f"train lineage: {facts.lineage} (carries to the successor automatically)",
+        f"train lineage: {facts.delivery_lineage or ''} (carries to the successor automatically)",
         f"published layers (checkpoint-claimed): {len(facts.claimed)}",
     ]
     if facts.claimed:
@@ -320,44 +251,17 @@ def replan_objective(
         # to stderr, leaving the `--json` stdout payload byte-unchanged. The refusal raises escape
         # the step (dangling + the error text below).
         with io_step(f"looking up objective #{objective_id}") as s:
-            state = store.get_objective(objective_id=objective_id)
-            if state is None:
-                raise UserFacingCliError(
-                    f"Objective {objective_id} not found", error_type="objective_not_found"
-                )
-            # Refuse an already-superseded objective (lineage stamp present).
-            if state.header.get("superseded_by"):
-                raise UserFacingCliError(
-                    f"Objective {objective_id} is already superseded by "
-                    f"{state.header.get('superseded_by')}; replan its successor instead.",
-                    error_type="objective_not_open",
-                )
-            # GitHub-only OPEN refusal (Linear projects have no OPEN/CLOSED): reuse the issue tier's
-            # read_issue.state (mirrors `objective author --from`).
-            if store.backend_id == resolve.GITHUB_BACKEND_ID:
-                issue_read = resolve.resolve_issue_backend(repo_root).read_issue(
-                    issue_id=objective_id
-                )
-                if issue_read is not None and issue_read.state != "OPEN":
-                    raise UserFacingCliError(
-                        f"Objective {objective_id} is not open (state="
-                        f"{issue_read.state or 'unknown'}); replan re-authors an OPEN objective. "
-                        "Create a fresh objective instead.",
-                        error_type="objective_not_open",
-                    )
-
-            unfinished = [n for n in state.nodes if n.status in _UNFINISHED]
-
-            # The §8.53 door posture: classify the predecessor's delivery policy fail-closed
-            # (junk never silently reads incremental), and observe a STACKED predecessor's
-            # transfer obligations up front — refusing here beats a doomed authoring session.
             try:
-                policy = objective.delivery_policy(state.header)
-            except ValueError as exc:
-                raise UserFacingCliError(str(exc), error_type="invalid_delivery_policy") from exc
-            stacked_facts: _StackedFacts | None = None
-            if policy is objective.DeliveryPolicy.STACKED:
-                stacked_facts = _gather_stacked_facts(repo_root, objective_id)
+                prepared = resolve_delivery(repo_root).prepare(
+                    PrepareRequest(kind="replan", objective_id=objective_id)
+                )
+            except DeliveryError as exc:
+                raise UserFacingCliError(str(exc), error_type=exc.error_type) from exc
+            facts = prepared.replan
+            if facts is None:
+                raise RuntimeError("replan Prepare returned no replan context")
+            unfinished = [n for n in facts.nodes if n.status in _UNFINISHED]
+            stacked_facts = facts if facts.delivery == "stacked" else None
 
             # Read objective + node-issue engagement, fail-soft: a backend hiccup must never
             # break the replan launch. Empty/None on no engagement → the scratch + seed are
@@ -384,13 +288,13 @@ def replan_objective(
             # The objective prose is the Reconcilable body; fall back to the title when no prose
             # split is available (GitHub objectives store prose in the body comment, not
             # get_objective).
-            prose = _objective_prose(store, objective_id) or state.title
+            prose = _objective_prose(store, objective_id) or facts.objective_title
             cache.atomic_write_text(
                 scratch_path,
                 _render_existing_objective(
                     objective_id,
-                    state.title,
-                    state.url,
+                    facts.objective_title,
+                    facts.objective_url,
                     prose,
                     unfinished,
                     is_linear=is_linear,
@@ -407,7 +311,7 @@ def replan_objective(
         seed = _seed_prompt(
             scratch_path,
             objective_id,
-            state.url,
+            facts.objective_url,
             is_linear=is_linear,
             has_engagement=engagement_block is not None,
             is_stacked=stacked_facts is not None,
@@ -446,7 +350,7 @@ def replan_objective(
         as_json=as_json,
         no_sync=no_sync,
         pi_args=pi_args,
-        backend_errors=(ObjectiveStoreError, TrainPersistenceError, GitHubError),
+        backend_errors=(ObjectiveStoreError, GitHubError),
         gather=gather,
     )
 
