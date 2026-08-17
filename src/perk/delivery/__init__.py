@@ -21,6 +21,8 @@ from perk.delivery.facade import (
     StatusResult,
     SyncRequest,
     SyncResult,
+    TransferRequest,
+    TransferResult,
 )
 from perk.delivery.finalize import (
     LandedPlan,
@@ -125,6 +127,8 @@ __all__ = [
     "SyncResult",
     "TrainPersistence",
     "TrainPersistenceError",
+    "TransferRequest",
+    "TransferResult",
     "UnresolvedOperationError",
     "assess_land_readiness",
     "canonical_payload",

@@ -15,13 +15,14 @@ from typing import Literal
 
 from perk import objective
 from perk.backends.issue_backend import IssueBackendError, PlanHeaderUpdate, PlanState
-from perk.backends.objective_store import ObjectiveState, ObjectiveStoreError
+from perk.backends.objective_store import ObjectiveRef, ObjectiveState, ObjectiveStoreError
 from perk.delivery import capability, train
 from perk.delivery import layer as layer_mod
 from perk.delivery.journal import (
     JournalCorruptionError,
     JournalFold,
     JournalRecordTooLarge,
+    OperationKind,
     OutcomeRecord,
     PreparedRecord,
 )
@@ -84,6 +85,17 @@ _DELIVERY_ERROR_TYPES = frozenset(
         "pr_not_open",
         "layer_not_published",
         "structural_blockers",
+        "policy_immutable",
+        "base_immutable",
+        "prefix_mismatch",
+        "dropped_open_pr",
+        "pr_exists",
+        "transfer_incomplete",
+        "transfer_unverified",
+        "transfer_manifest_oversize",
+        "objective_not_open",
+        "invalid_roadmap",
+        "supersede_unsupported",
     }
 )
 
@@ -101,7 +113,7 @@ _STATUS_ERROR_TYPES = frozenset(
 )
 
 
-type PrepareKind = Literal["authoring", "plan_identity", "layer_start"]
+type PrepareKind = Literal["authoring", "plan_identity", "layer_start", "replan"]
 type PrepareMode = Literal["strict", "best_effort", "planning", "execution"]
 type PublishKind = Literal["layer", "ready"]
 type PublishDelivery = Literal["incremental", "stacked"]
@@ -136,8 +148,14 @@ class PrepareRequest:
     plan_id: str | None = None
 
     def __post_init__(self) -> None:
-        if self.kind not in ("authoring", "plan_identity", "layer_start"):
+        if self.kind not in ("authoring", "plan_identity", "layer_start", "replan"):
             raise ValueError(f"unknown prepare kind: {self.kind!r}")
+        if self.kind == "replan":
+            if not _nonblank(self.objective_id) or any(
+                value is not None for value in (self.base, self.mode, self.node_id, self.plan_id)
+            ):
+                raise ValueError("replan prepare accepts only a nonblank objective_id")
+            return
         if self.kind == "authoring":
             if any(
                 value is not None
@@ -193,6 +211,29 @@ class PrepareResult:
                 raise ValueError("plan identity fields must be nonblank")
             if self.predecessor_plan_id is not None and not _nonblank(self.predecessor_plan_id):
                 raise ValueError("predecessor_plan_id must be nonblank when present")
+
+    @dataclass(frozen=True)
+    class ReplanClaim:
+        node_id: str
+        plan_id: str
+        branch: str
+        pr_number: int
+
+    @dataclass(frozen=True)
+    class ReplanContext:
+        objective_id: str
+        objective_url: str
+        objective_title: str
+        nodes: tuple[ObjectiveNode, ...]
+        delivery: Literal["incremental", "stacked"]
+        base: str | None
+        delivery_lineage: str | None
+        claimed: tuple["PrepareResult.ReplanClaim", ...]
+        open_pr_plans: tuple[tuple[str, int], ...]
+
+        @property
+        def published(self) -> bool:
+            return bool(self.claimed)
 
     @dataclass(frozen=True)
     class PlanningNode:
@@ -270,10 +311,28 @@ class PrepareResult:
     layer: layer_mod.LayerContext | None = None
     parent_sha: str | None = None
     notice: str | None = None
+    replan: ReplanContext | None = None
 
     def __post_init__(self) -> None:
-        if self.kind not in ("authoring", "plan_identity", "layer_start"):
+        if self.kind not in ("authoring", "plan_identity", "layer_start", "replan"):
             raise ValueError(f"unknown prepare kind: {self.kind!r}")
+        if self.kind == "replan":
+            if self.replan is None or any(
+                value is not None
+                for value in (
+                    self.mode,
+                    self.base,
+                    self.identity,
+                    self.planning,
+                    self.layer,
+                    self.parent_sha,
+                    self.notice,
+                )
+            ):
+                raise ValueError("invalid replan prepare result")
+            return
+        if self.replan is not None:
+            raise ValueError("replan context exists only for replan prepare")
         if self.kind == "authoring":
             if (
                 self.mode is not None
@@ -322,6 +381,32 @@ class PrepareResult:
                 raise ValueError("invalid execution layer_start result")
             return
         raise ValueError("layer_start result requires planning or execution mode")
+
+
+@dataclass(frozen=True)
+class TransferRequest:
+    """Immutable successor intent for an objective replan transfer."""
+
+    predecessor_id: str
+    run_id: str
+    title: str
+    prose: str
+    base: str | None
+    roadmap_nodes: tuple[objective.ObjectiveNode, ...]
+    carry_map: tuple[tuple[str, str], ...]
+    delivery: Literal["incremental", "stacked"]
+
+
+@dataclass(frozen=True)
+class TransferResult:
+    """The outcome of one :meth:`Delivery.transfer` invocation."""
+
+    predecessor_id: str
+    successor: ObjectiveRef
+    operation_id: str | None
+    abandoned_operation_id: str | None
+    rolled_forward: bool
+    journaled: bool
 
 
 def _normalize_publish_plan_id(plan_id: str) -> str:
@@ -695,6 +780,43 @@ class DeliveryPersistence(ABC):
     @abstractmethod
     def append_outcome(self, objective_id: str, record: OutcomeRecord) -> AppendResult:
         """Append one terminal operation outcome through the aligned persistence."""
+        ...
+
+    @abstractmethod
+    def normalize_transfer_carry_map(
+        self, carry_map: tuple[tuple[str, str], ...]
+    ) -> dict[str, str]:
+        """Normalize raw transfer carries for the selected objective backend."""
+        ...
+
+    @abstractmethod
+    def find_objective(self, *, run_id: str) -> ObjectiveRef | None:
+        """Find one objective by its idempotence run id."""
+        ...
+
+    @abstractmethod
+    def supersede_objective(
+        self,
+        *,
+        old_objective_id: str,
+        title: str,
+        prose: str,
+        run_id: str,
+        status: str = "active",
+        base: str | None = None,
+        roadmap_nodes: list[objective.ObjectiveNode],
+        carry_map: dict[str, str],
+        delivery: objective.DeliveryPolicy | None = None,
+        delivery_lineage: str | None = None,
+        close_predecessor: bool = True,
+        dry_run: bool = False,
+    ) -> ObjectiveRef | None:
+        """Create or find the successor objective for one supersession."""
+        ...
+
+    @abstractmethod
+    def finalize_supersession(self, *, old_objective_id: str, new_objective_id: str) -> bool:
+        """Finalize and close one converged predecessor/successor pair."""
         ...
 
     @abstractmethod
@@ -1239,6 +1361,66 @@ class Delivery:
         self._git = git
         self._github = github
 
+    def transfer(self, request: TransferRequest) -> TransferResult:
+        """Transfer one objective replan intent behind the aggregate authorities."""
+        from perk.delivery import transfer as transfer_mod  # noqa: PLC0415 — façade/engine cycle
+
+        def reconstruct(_repo_root: Path, objective_id: str) -> train.TrainStatus:
+            try:
+                result = self.status(StatusRequest(objective_id=objective_id))
+            except DeliveryError as exc:
+                cause = exc.__cause__
+                if isinstance(
+                    cause,
+                    (
+                        train.TrainReconstructionError,
+                        ObjectiveStoreError,
+                        IssueBackendError,
+                        TrainPersistenceError,
+                    ),
+                ):
+                    raise cause from exc
+                raise
+            if result.train is not None:
+                return result.train
+            return train.NoDeliveryTrain(
+                objective_id=result.objective_id,
+                objective_url=result.objective_url,
+                redirected_from=result.redirected_from,
+                reason=result.no_train_reason or "no delivery train",
+            )
+
+        runtime = transfer_mod._DEFAULT_TRANSFER_RUNTIME
+        seams = transfer_mod.TransferSeams(
+            repo_root=self._git.repo_root,
+            store=self._persistence,
+            issues=self._persistence,
+            persistence=self._persistence,
+            reconstruct=reconstruct,
+            now=runtime.now,
+        )
+        fresh = transfer_mod._FreshTransfer(
+            seams=seams,
+            git=self._git,
+            github=self._github,
+        )
+        try:
+            return transfer_mod._dispatch(fresh, request, runtime=runtime)
+        except DeliveryError:
+            raise
+        except train.TrainReconstructionError as exc:
+            raise DeliveryError(str(exc), error_type=exc.error_type) from exc
+        except JournalCorruptionError as exc:
+            raise DeliveryError(str(exc), error_type="journal_corruption") from exc
+        except git_mod.GitError as exc:
+            raise DeliveryError(str(exc), error_type="git_error") from exc
+        except (GitHubError, IssueBackendError, TrainPersistenceError) as exc:
+            raise DeliveryError(str(exc), error_type="github_error") from exc
+        except ObjectiveStoreError as exc:
+            raise DeliveryError(
+                f"objective create failed\n{exc}", error_type="github_error"
+            ) from exc
+
     def publish(self, request: PublishRequest) -> PublishResult:
         """Publish one layer or open one layer's PR for review."""
         from perk.delivery import publish as publish_mod  # noqa: PLC0415 — façade/engine cycle
@@ -1395,11 +1577,123 @@ class Delivery:
         """Prepare one operation family or return one bounded refusal."""
         if request.kind == "authoring":
             return self._prepare_authoring(request)
+        if request.kind == "replan":
+            return self._prepare_replan(request)
         if request.kind == "plan_identity":
             return self._prepare_plan_identity(request)
         if request.mode == "planning":
             return self._prepare_planning(request)
         return self._prepare_execution(request)
+
+    def _prepare_replan(self, request: PrepareRequest) -> PrepareResult:
+        from perk.delivery import sync as sync_mod  # noqa: PLC0415 — façade/engine cycle
+
+        objective_id = request.objective_id
+        if objective_id is None:
+            raise ValueError("validated replan request lost objective_id")
+        bare = objective_id.strip().lstrip("#").strip()
+        try:
+            state = self._persistence.get_objective(objective_id=bare)
+        except (ObjectiveStoreError, IssueBackendError, TrainPersistenceError) as exc:
+            raise DeliveryError(str(exc), error_type="github_error") from exc
+        if state is None:
+            raise DeliveryError(f"Objective {bare} not found", error_type="objective_not_found")
+        superseded_by = state.header.get("superseded_by")
+        if superseded_by:
+            raise DeliveryError(
+                f"Objective {bare} is already superseded by {superseded_by}; "
+                "replan its successor instead.",
+                error_type="objective_not_open",
+            )
+        if state.state != "open":
+            raise DeliveryError(
+                f"Objective {bare} is not open (state={state.state}); replan re-authors an "
+                "OPEN objective. Create a fresh objective instead.",
+                error_type="objective_not_open",
+            )
+        try:
+            policy = objective.delivery_policy(state.header)
+        except ValueError as exc:
+            raise DeliveryError(str(exc), error_type="invalid_delivery_policy") from exc
+
+        raw_base = state.header.get("base")
+        base = raw_base if isinstance(raw_base, str) and raw_base else None
+        raw_lineage = state.header.get("delivery_lineage")
+        lineage = raw_lineage if isinstance(raw_lineage, str) and raw_lineage else None
+        if policy is objective.DeliveryPolicy.INCREMENTAL:
+            context = PrepareResult.ReplanContext(
+                objective_id=state.id,
+                objective_url=state.url,
+                objective_title=state.title,
+                nodes=state.nodes,
+                delivery="incremental",
+                base=base,
+                delivery_lineage=lineage,
+                claimed=(),
+                open_pr_plans=(),
+            )
+            return PrepareResult(kind="replan", replan=context)
+
+        try:
+            fold = self._persistence.read_journal(bare)
+        except JournalCorruptionError as exc:
+            raise DeliveryError(str(exc), error_type="journal_corruption") from exc
+        if fold.unresolved:
+            op = fold.unresolved[0]
+            if op.kind is OperationKind.TRANSFER:
+                raise DeliveryError(
+                    f"An interrupted replan transfer (operation {op.operation_id}) is "
+                    f"unresolved on objective {bare} — conclude it with "
+                    f"`perk objective stack recover {bare}` before replanning.",
+                    error_type="transfer_incomplete",
+                )
+            raise DeliveryError(
+                f"Operation {op.operation_id} ({op.kind.value}) is unresolved on objective "
+                f"{bare} — conclude it via `perk objective stack recover {bare}` or the "
+                "owning command before replanning.",
+                error_type="unresolved_operation",
+            )
+
+        status_result = self.status(StatusRequest(objective_id=bare))
+        status = status_result.train
+        if status is None:
+            raise DeliveryError(
+                f"Objective {bare} classified stacked but reconstructs no delivery train "
+                f"({status_result.no_train_reason}) — broken stored state; repair before "
+                "replanning.",
+                error_type="invalid_train",
+            )
+        try:
+            sync_mod.refuse_structural_blockers(status)
+            claimed = sync_mod.derive_claimed_prefix(status)
+        except sync_mod.SyncError as exc:
+            raise DeliveryError(str(exc), error_type=exc.error_type) from exc
+        context = PrepareResult.ReplanContext(
+            objective_id=state.id,
+            objective_url=state.url,
+            objective_title=state.title,
+            nodes=state.nodes,
+            delivery="stacked",
+            base=status.base,
+            delivery_lineage=status.delivery_lineage,
+            claimed=tuple(
+                PrepareResult.ReplanClaim(
+                    node_id=layer.node_id,
+                    plan_id=layer.plan_id,
+                    branch=layer.branch,
+                    pr_number=layer.pr_number,
+                )
+                for layer in claimed
+            ),
+            open_pr_plans=tuple(
+                (layer.plan_id, layer.pr_number)
+                for layer in status.layers
+                if layer.plan_id is not None
+                and layer.pr_number is not None
+                and layer.pr in (train.LayerPr.DRAFT, train.LayerPr.READY, train.LayerPr.WRONG_BASE)
+            ),
+        )
+        return PrepareResult(kind="replan", replan=context)
 
     def _prepare_authoring(self, request: PrepareRequest) -> PrepareResult:
         effective_base = request.base

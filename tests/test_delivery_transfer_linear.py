@@ -25,11 +25,21 @@ import pytest
 from _linear_fakes import FakeLinearWorkspace
 
 from perk import objective
-from perk.backends.issue_backend import IssueBackendError
 from perk.backends.linear import LinearIssueBackend, LinearProjectObjectiveStore
 from perk.backends.linear.client import LinearGraphQLError
-from perk.backends.objective_store import ObjectiveStoreError
-from perk.delivery import continuation, recover, transfer
+from perk.delivery import (
+    Delivery,
+    DeliveryError,
+    DeliveryGit,
+    DeliveryGitHub,
+    DeliveryPersistence,
+    StatusRequest,
+    StatusResult,
+    TransferRequest,
+    continuation,
+    recover,
+    transfer,
+)
 from perk.delivery.journal import EventRole
 from perk.delivery.persistence import TrainPersistence
 from perk.delivery.train import (
@@ -45,6 +55,7 @@ from perk.delivery.train import (
     NoDeliveryTrain,
     TrainLayer,
     TrainReconstructionError,
+    WorktreeFacts,
 )
 
 ROOT = Path("/repo")
@@ -116,11 +127,6 @@ class _InjectingWorkspace(FakeLinearWorkspace):
                 "injected transport failure (the write never landed)", codes=()
             )
         return super().request(query, variables)
-
-
-class _Writers:
-    def active_plan_ids(self, plan_ids) -> frozenset[str]:
-        return frozenset()
 
 
 class _Lane:
@@ -228,6 +234,64 @@ class _Lane:
             observed_base_head_sha="m" * 40,
         )
 
+    # ------------------------------------------------------------- façade authorities
+
+    @property
+    def repo_root(self) -> Path:
+        return ROOT
+
+    def trunk_branch(self) -> str:
+        return "main"
+
+    def worktree_branches(self) -> tuple[WorktreeFacts, ...]:
+        return ()
+
+    def pr_facts(self, number: int) -> None:
+        return None
+
+    def active_writer_plan_ids(
+        self,
+        plan_ids: tuple[str, ...],
+        *,
+        trigger_plan_id: str | None,
+        trigger_run_id: str | None,
+    ) -> frozenset[str]:
+        return frozenset()
+
+    def get_objective(self, *, objective_id: str):
+        return self.store.get_objective(objective_id=objective_id)
+
+    def normalize_transfer_carry_map(
+        self, carry_map: tuple[tuple[str, str], ...]
+    ) -> dict[str, str]:
+        return dict(carry_map)
+
+    def find_objective(self, *, run_id: str):
+        return self.store.find_objective(run_id=run_id)
+
+    def supersede_objective(self, **kwargs):
+        return self.store.supersede_objective(**kwargs)
+
+    def finalize_supersession(self, *, old_objective_id: str, new_objective_id: str) -> bool:
+        return self.store.finalize_supersession(
+            old_objective_id=old_objective_id, new_objective_id=new_objective_id
+        )
+
+    def get_plan(self, *, issue_id: str):
+        return self.issues.get_plan(issue_id=issue_id)
+
+    def update_plan_header(self, *, issue_id: str, fields: dict[str, object]):
+        return self.issues.update_plan_header(issue_id=issue_id, fields=fields)
+
+    def read_journal(self, objective_id: str):
+        return self.persistence.read_journal(objective_id)
+
+    def append_prepared(self, objective_id: str, record):
+        return self.persistence.append_prepared(objective_id, record)
+
+    def append_outcome(self, objective_id: str, record):
+        return self.persistence.append_outcome(objective_id, record)
+
     # ------------------------------------------------------------- driving
 
     @contextlib.contextmanager
@@ -243,32 +307,29 @@ class _Lane:
         ]
 
     def run(self, *, run_id: str = NEW_RUN) -> transfer.TransferResult:
-        state = self.store.get_objective(objective_id=self.pred_id)
-        assert state is not None
-        policy = objective.delivery_policy(state.header)
-        return transfer.run_transfer(
-            ROOT,
-            predecessor=state,
-            predecessor_policy=policy,
-            predecessor_id=self.pred_id,
-            run_id=run_id,
-            title="Successor",
-            prose="successor prose",
-            base=None,
-            roadmap_nodes=self._successor_nodes(),
-            carry_map={"9.1": NODE_A, "9.3": NODE_B},
-            stacked=True,
-            remote_writers=_Writers(),
-            store_factory=lambda root: self.store,
-            issues_factory=lambda root: self.issues,
-            persistence_factory=lambda root: self.persistence,
-            reconstruct=self._reconstruct,
-            pr_facts=lambda **kwargs: None,
-            worktree_branches=lambda root: (),
-            trunk=lambda root: "main",
-            lock=self._lock,
+        service = _LaneDelivery(self)
+        runtime = transfer._TransferRuntime(
+            operation_lock=self._lock,
+            mint_operation_id=transfer.mint_operation_id,
             now=lambda: NOW,
         )
+        previous_runtime = transfer._DEFAULT_TRANSFER_RUNTIME
+        transfer._DEFAULT_TRANSFER_RUNTIME = runtime
+        try:
+            return service.transfer(
+                TransferRequest(
+                    predecessor_id=self.pred_id,
+                    run_id=run_id,
+                    title="Successor",
+                    prose="successor prose",
+                    base=None,
+                    roadmap_nodes=tuple(self._successor_nodes()),
+                    carry_map=(("9.1", NODE_A), ("9.3", NODE_B)),
+                    delivery="stacked",
+                )
+            )
+        finally:
+            transfer._DEFAULT_TRANSFER_RUNTIME = previous_runtime
 
     def recover(self) -> recover.RecoverResult:
         return recover.recover_operations(
@@ -353,6 +414,34 @@ class _Lane:
         )
 
 
+class _LaneDelivery(Delivery):
+    def __init__(self, lane: _Lane) -> None:
+        super().__init__(
+            persistence=cast(DeliveryPersistence, lane),
+            git=cast(DeliveryGit, lane),
+            github=cast(DeliveryGitHub, lane),
+        )
+        self._lane = lane
+
+    def status(self, request: StatusRequest) -> StatusResult:
+        status = self._lane._reconstruct(ROOT, request.objective_id)
+        if isinstance(status, DeliveryTrain):
+            return StatusResult(
+                objective_id=status.objective_id,
+                objective_url=status.objective_url,
+                redirected_from=status.redirected_from,
+                train=status,
+                no_train_reason=None,
+            )
+        return StatusResult(
+            objective_id=status.objective_id,
+            objective_url=status.objective_url,
+            redirected_from=status.redirected_from,
+            train=None,
+            no_train_reason=status.reason,
+        )
+
+
 def _lane() -> _Lane:
     lane = _Lane()
     lane.seed()
@@ -383,8 +472,9 @@ def test_pre_sentinel_death_leaves_an_inert_project_and_the_rerun_stays_safe() -
     # never adopted.
     lane = _lane()
     lane.ws.arm(lambda query, variables: "issueCreate(" in query)
-    with pytest.raises(ObjectiveStoreError, match="injected transport failure"):
+    with pytest.raises(DeliveryError, match="injected transport failure") as excinfo:
         lane.run()
+    assert excinfo.value.error_type == "github_error"
     # Post-crash durable state: the prepared record is journaled; the orphan project exists
     # but carries no sentinel — no predecessor-touching write happened.
     assert len(lane.journal_comments()) == 1
@@ -430,8 +520,9 @@ def test_partial_ownership_death_rolls_forward_via_recover_without_duplicates() 
     lane.ws.arm(_nth(_attachment_url_contains("/plan/"), 2))
     # The ownership write dies on the ISSUE-backend seam (no store translation) — the raw
     # IssueBackendError propagates, leaving the prepared operation unresolved.
-    with pytest.raises(IssueBackendError, match="injected transport failure"):
+    with pytest.raises(DeliveryError, match="injected transport failure") as excinfo:
         lane.run()
+    assert excinfo.value.error_type == "github_error"
     # Post-crash: NODE_A carries successor ownership; NODE_B still the predecessor's.
     found = lane.store.find_objective(run_id=NEW_RUN)
     assert found is not None
@@ -458,8 +549,9 @@ def test_interrupted_fresh_node_attachment_is_resumed_by_the_found_arm() -> None
     # Objective-node attachmentCreates during the run: 9.1's carried re-stamp (1), 9.2's
     # fresh attach (2) — die BEFORE the fresh node's attachment lands.
     lane.ws.arm(_nth(_attachment_url_contains("/node/"), 2))
-    with pytest.raises(ObjectiveStoreError, match="injected transport failure"):
+    with pytest.raises(DeliveryError, match="injected transport failure") as excinfo:
         lane.run()
+    assert excinfo.value.error_type == "github_error"
     found = lane.store.find_objective(run_id=NEW_RUN)
     assert found is not None
     fresh_title = objective.node_issue_title(

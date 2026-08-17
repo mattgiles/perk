@@ -16,9 +16,14 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
+from perk import objective
 from perk.backends.issue_backend import IssueBackend, PlanHeaderUpdate, PlanState
-from perk.backends.objective_store import ObjectiveState, ObjectiveStore
-from perk.backends.resolve import resolve_issue_backend, resolve_objective_store
+from perk.backends.objective_store import ObjectiveRef, ObjectiveState, ObjectiveStore
+from perk.backends.resolve import (
+    GITHUB_BACKEND_ID,
+    resolve_issue_backend,
+    resolve_objective_store,
+)
 from perk.delivery import land, writers
 from perk.delivery.facade import Delivery, DeliveryGit, DeliveryGitHub, DeliveryPersistence
 from perk.delivery.journal import JournalFold, OutcomeRecord, PreparedRecord
@@ -458,6 +463,57 @@ class RepoDeliveryPersistence(DeliveryPersistence):
     def update_plan_header(self, *, issue_id: str, fields: dict[str, object]) -> PlanHeaderUpdate:
         _store, issues, _persistence = self._resolve()
         return issues.update_plan_header(issue_id=issue_id, fields=fields)
+
+    def normalize_transfer_carry_map(
+        self, carry_map: tuple[tuple[str, str], ...]
+    ) -> dict[str, str]:
+        store, _issues, _persistence = self._resolve()
+        if store.backend_id == GITHUB_BACKEND_ID:
+            return {}
+        return dict(carry_map)
+
+    def find_objective(self, *, run_id: str) -> ObjectiveRef | None:
+        store, _issues, _persistence = self._resolve()
+        return store.find_objective(run_id=run_id)
+
+    def supersede_objective(
+        self,
+        *,
+        old_objective_id: str,
+        title: str,
+        prose: str,
+        run_id: str,
+        status: str = "active",
+        base: str | None = None,
+        roadmap_nodes: list[objective.ObjectiveNode],
+        carry_map: dict[str, str],
+        delivery: objective.DeliveryPolicy | None = None,
+        delivery_lineage: str | None = None,
+        close_predecessor: bool = True,
+        dry_run: bool = False,
+    ) -> ObjectiveRef | None:
+        store, _issues, _persistence = self._resolve()
+        return store.supersede_objective(
+            old_objective_id=old_objective_id,
+            title=title,
+            prose=prose,
+            run_id=run_id,
+            status=status,
+            base=base,
+            roadmap_nodes=roadmap_nodes,
+            carry_map=carry_map,
+            delivery=delivery,
+            delivery_lineage=delivery_lineage,
+            close_predecessor=close_predecessor,
+            dry_run=dry_run,
+        )
+
+    def finalize_supersession(self, *, old_objective_id: str, new_objective_id: str) -> bool:
+        store, _issues, _persistence = self._resolve()
+        return store.finalize_supersession(
+            old_objective_id=old_objective_id,
+            new_objective_id=new_objective_id,
+        )
 
     def read_journal(self, objective_id: str) -> JournalFold:
         _store, _issues, persistence = self._resolve()

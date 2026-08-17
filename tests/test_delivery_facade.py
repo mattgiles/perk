@@ -28,6 +28,8 @@ from perk.delivery.facade import (
     StatusResult,
     SyncRequest,
     SyncResult,
+    TransferRequest,
+    TransferResult,
 )
 from perk.delivery.journal import (
     EventRole,
@@ -113,6 +115,17 @@ _DELIVERY_ERROR_TYPES = {
     "pr_not_open",
     "layer_not_published",
     "structural_blockers",
+    "policy_immutable",
+    "base_immutable",
+    "prefix_mismatch",
+    "dropped_open_pr",
+    "pr_exists",
+    "transfer_incomplete",
+    "transfer_unverified",
+    "transfer_manifest_oversize",
+    "objective_not_open",
+    "invalid_roadmap",
+    "supersede_unsupported",
 }
 _STATUS_ERROR_TYPES = {
     "objective_not_found",
@@ -205,6 +218,8 @@ _NEW_EXPORTS = {
     "PublishResult",
     "SyncRequest",
     "SyncResult",
+    "TransferRequest",
+    "TransferResult",
     "resolve_delivery",
 }
 _RETAINED_EXPORTS = {
@@ -364,11 +379,12 @@ class _StatusDelivery(Delivery):
         self,
         result: StatusResult,
         *,
+        persistence: DeliveryPersistence | None = None,
         git: DeliveryGit | None = None,
         github: DeliveryGitHub | None = None,
     ) -> None:
         super().__init__(
-            persistence=FakeDeliveryPersistence(),
+            persistence=persistence or FakeDeliveryPersistence(),
             git=git or FakeDeliveryGit(),
             github=github or FakeDeliveryGitHub(),
         )
@@ -390,6 +406,331 @@ def _delivery(
         git=git or FakeDeliveryGit(),
         github=github or FakeDeliveryGitHub(),
     )
+
+
+def _transfer_request(
+    *,
+    delivery: Literal["incremental", "stacked"] = "incremental",
+    roadmap_nodes: tuple[ObjectiveNode, ...] | None = None,
+    carry_map: tuple[tuple[str, str], ...] = (),
+) -> TransferRequest:
+    return TransferRequest(
+        predecessor_id="10",
+        run_id="01RUN",
+        title="Successor",
+        prose="prose",
+        base=None,
+        roadmap_nodes=roadmap_nodes
+        or (ObjectiveNode("1.1", "work", NodeStatus.PENDING, pr="#101"),),
+        carry_map=carry_map,
+        delivery=delivery,
+    )
+
+
+def test_transfer_values_are_frozen_intent_without_constructor_normalization() -> None:
+    request = TransferRequest(
+        predecessor_id=" #10 ",
+        run_id=" ",
+        title=" ",
+        prose="prose",
+        base=" ",
+        roadmap_nodes=(),
+        carry_map=((" ", " "),),
+        delivery="incremental",
+    )
+    result = TransferResult(
+        predecessor_id="10",
+        successor=facade_mod.ObjectiveRef(id="11", url="u/11", existed=False),
+        operation_id=None,
+        abandoned_operation_id=None,
+        rolled_forward=False,
+        journaled=False,
+    )
+    assert request.predecessor_id == " #10 " and result.operation_id is None
+    with pytest.raises(FrozenInstanceError):
+        type(request).__setattr__(request, "title", "changed")
+
+
+def test_transfer_intent_validation_precedes_lock_and_all_authorities() -> None:
+    persistence = FakeDeliveryPersistence()
+    git = FakeDeliveryGit()
+    github = FakeDeliveryGitHub()
+    request = _transfer_request(roadmap_nodes=())
+    request = replace(request, roadmap_nodes=())
+
+    with pytest.raises(DeliveryError) as excinfo:
+        _delivery(persistence, git, github).transfer(request)
+
+    assert excinfo.value.error_type == "invalid_roadmap"
+    assert persistence.calls == [] and git.calls == [] and github.calls == []
+
+
+def test_plain_incremental_transfer_is_locked_and_uses_raw_carries(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from contextlib import nullcontext
+
+    from perk.backends.objective_store import ObjectiveRef
+    from perk.delivery import transfer as transfer_mod
+
+    predecessor = _objective(header={})
+    successor = ObjectiveRef(id="11", url="u/11", existed=False)
+    persistence = FakeDeliveryPersistence(
+        objectives={"10": predecessor},
+        successors_by_run={"01RUN": successor},
+        preserve_transfer_carries=True,
+    )
+    runtime = replace(
+        transfer_mod._DEFAULT_TRANSFER_RUNTIME,
+        operation_lock=lambda _root: nullcontext(),
+    )
+    monkeypatch.setattr(transfer_mod, "_DEFAULT_TRANSFER_RUNTIME", runtime)
+    request = _transfer_request(carry_map=(("1.1", "ENG-1"),))
+
+    result = _delivery(persistence).transfer(request)
+
+    assert result.successor is successor and result.operation_id is None
+    assert persistence.calls[0] == ("get_objective", "10")
+    assert all(
+        call[0] not in {"read_journal", "normalize_transfer_carry_map"}
+        for call in persistence.calls
+    )
+    supersede = next(call for call in persistence.calls if call[0] == "supersede_objective")
+    carries = cast(tuple[tuple[str, str], ...], supersede[8])
+    assert ("1.1", "ENG-1") in carries
+    assert supersede[-2:] == (True, False)
+
+
+@pytest.mark.parametrize(
+    ("source", "expected_type", "expected_message"),
+    (
+        (
+            TrainReconstructionError("domain reconstruction", error_type="invalid_train"),
+            "invalid_train",
+            "domain reconstruction",
+        ),
+        (
+            TrainReconstructionError("git infrastructure", error_type="git_error"),
+            "git_error",
+            "git infrastructure",
+        ),
+        (
+            ObjectiveStoreError("objective unavailable"),
+            "github_error",
+            "objective create failed\nobjective unavailable",
+        ),
+    ),
+)
+def test_transfer_status_bridge_restores_declared_causes(
+    monkeypatch: pytest.MonkeyPatch,
+    source: Exception,
+    expected_type: str,
+    expected_message: str,
+) -> None:
+    from contextlib import nullcontext
+
+    from perk.delivery import transfer as transfer_mod
+
+    class _CauseStatusDelivery(Delivery):
+        def status(self, request: StatusRequest) -> StatusResult:
+            del request
+            try:
+                raise source
+            except Exception as cause:
+                raise DeliveryError("status wrapper", error_type="github_error") from cause
+
+    predecessor = _objective(
+        header={"delivery": "stacked", "delivery_lineage": "lineage"},
+        nodes=(ObjectiveNode("1.1", "work", NodeStatus.PENDING),),
+    )
+    persistence = FakeDeliveryPersistence(objectives={"10": predecessor})
+    runtime = replace(
+        transfer_mod._DEFAULT_TRANSFER_RUNTIME,
+        operation_lock=lambda _root: nullcontext(),
+    )
+    monkeypatch.setattr(transfer_mod, "_DEFAULT_TRANSFER_RUNTIME", runtime)
+    service = _CauseStatusDelivery(
+        persistence=persistence,
+        git=FakeDeliveryGit(),
+        github=FakeDeliveryGitHub(),
+    )
+
+    with pytest.raises(DeliveryError) as excinfo:
+        service.transfer(
+            _transfer_request(
+                delivery="stacked",
+                roadmap_nodes=(ObjectiveNode("1.1", "work", NodeStatus.PENDING),),
+            )
+        )
+
+    assert excinfo.value.error_type == expected_type
+    assert str(excinfo.value) == expected_message
+
+
+def test_transfer_lock_serializes_d1_and_second_contender_observes_finalized_predecessor(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import threading
+    from contextlib import contextmanager
+
+    from perk.backends.objective_store import ObjectiveRef
+    from perk.delivery import transfer as transfer_mod
+
+    first_entered = threading.Event()
+    release_first = threading.Event()
+    second_started = threading.Event()
+    operation_lock = threading.Lock()
+    first_successor = ObjectiveRef(id="11", url="u/11", existed=False)
+
+    class _ContendedPersistence(FakeDeliveryPersistence):
+        def __init__(self) -> None:
+            super().__init__(
+                objectives={"10": _objective()},
+                successors_by_run={"01FIRST": first_successor},
+            )
+            self.observed_superseded_by: list[object] = []
+
+        def get_objective(self, *, objective_id: str) -> ObjectiveState | None:
+            state = super().get_objective(objective_id=objective_id)
+            self.observed_superseded_by.append(
+                state.header.get("superseded_by") if state is not None else None
+            )
+            return state
+
+        def supersede_objective(self, **kwargs) -> ObjectiveRef | None:
+            if kwargs["run_id"] != "01FIRST":
+                raise AssertionError("the second contender must refuse before mutation")
+            first_entered.set()
+            assert release_first.wait(timeout=5)
+            state = self._objectives["10"]
+            header = dict(state.header)
+            header["superseded_by"] = first_successor.id
+            self._objectives["10"] = replace(state, header=header, state="closed")
+            return first_successor
+
+    @contextmanager
+    def held(_root: Path):
+        with operation_lock:
+            yield
+
+    persistence = _ContendedPersistence()
+    runtime = replace(transfer_mod._DEFAULT_TRANSFER_RUNTIME, operation_lock=held)
+    monkeypatch.setattr(transfer_mod, "_DEFAULT_TRANSFER_RUNTIME", runtime)
+    service = _delivery(persistence)
+    results: dict[str, object] = {}
+
+    def invoke(name: str, run_id: str) -> None:
+        if name == "second":
+            second_started.set()
+        try:
+            results[name] = service.transfer(replace(_transfer_request(), run_id=run_id))
+        except Exception as exc:
+            results[name] = exc
+
+    first = threading.Thread(target=invoke, args=("first", "01FIRST"))
+    second = threading.Thread(target=invoke, args=("second", "01SECOND"))
+    first.start()
+    assert first_entered.wait(timeout=5)
+    second.start()
+    assert second_started.wait(timeout=5)
+    assert persistence.observed_superseded_by == [None]
+    release_first.set()
+    first.join(timeout=5)
+    second.join(timeout=5)
+
+    assert isinstance(results["first"], TransferResult)
+    assert isinstance(results["second"], DeliveryError)
+    assert results["second"].error_type == "objective_not_open"
+    assert persistence.observed_superseded_by == [None, "11"]
+
+
+def test_replan_prepare_incremental_projects_one_objective_snapshot() -> None:
+    nodes = (ObjectiveNode("1.1", "work", NodeStatus.PENDING),)
+    persistence = FakeDeliveryPersistence(
+        objectives={"10": _objective(header={"base": "main"}, nodes=nodes)}
+    )
+
+    result = _delivery(persistence).prepare(PrepareRequest(kind="replan", objective_id="10"))
+
+    assert result.replan == PrepareResult.ReplanContext(
+        objective_id="10",
+        objective_url="fake://objective/10",
+        objective_title="Objective",
+        nodes=nodes,
+        delivery="incremental",
+        base="main",
+        delivery_lineage=None,
+        claimed=(),
+        open_pr_plans=(),
+    )
+    assert persistence.calls == [("get_objective", "10")]
+
+
+def test_replan_prepare_stacked_projects_claims_and_open_prs_from_bound_status() -> None:
+    nodes = (ObjectiveNode("1.1", "work", NodeStatus.IN_PROGRESS, pr="#101"),)
+    persistence = FakeDeliveryPersistence(
+        objectives={
+            "10": _objective(
+                header={"delivery": "stacked", "delivery_lineage": "lineage"},
+                nodes=nodes,
+            )
+        }
+    )
+    layer = replace(
+        _train_layer("1.1", "101", "plan-101"),
+        pr_number=42,
+        pr=LayerPr.READY,
+        parent_checkpoint_sha="a" * 40,
+        published_head_sha="b" * 40,
+    )
+    status = _planning_train(nodes=nodes, layers=(layer,), candidate=None)
+    service = _StatusDelivery(
+        StatusResult(
+            objective_id="10",
+            objective_url="fake://objective/10",
+            redirected_from=None,
+            train=status,
+            no_train_reason=None,
+        ),
+        persistence=persistence,
+    )
+
+    result = service.prepare(PrepareRequest(kind="replan", objective_id="10"))
+
+    assert result.replan is not None
+    assert result.replan.claimed == (PrepareResult.ReplanClaim("1.1", "101", "plan-101", 42),)
+    assert result.replan.open_pr_plans == (("101", 42),)
+    assert service.status_calls == [StatusRequest(objective_id="10")]
+    assert persistence.calls == [("get_objective", "10"), ("read_journal", "10")]
+
+
+@pytest.mark.parametrize(
+    ("state", "header", "error_type"),
+    (
+        (None, {}, "objective_not_found"),
+        (
+            _objective(
+                header={},
+                nodes=(),
+            ),
+            {"state": "closed"},
+            "objective_not_open",
+        ),
+        (_objective(header={"superseded_by": "11"}), {}, "objective_not_open"),
+        (_objective(header={"delivery": "bogus"}), {}, "invalid_delivery_policy"),
+    ),
+)
+def test_replan_prepare_refuses_missing_closed_superseded_and_junk_policy(
+    state: ObjectiveState | None,
+    header: dict[str, str],
+    error_type: str,
+) -> None:
+    if state is not None and header.get("state") == "closed":
+        state = replace(state, state="closed")
+    persistence = FakeDeliveryPersistence(objectives={"10": state} if state is not None else {})
+    with pytest.raises(DeliveryError) as excinfo:
+        _delivery(persistence).prepare(PrepareRequest(kind="replan", objective_id="10"))
+    assert excinfo.value.error_type == error_type
 
 
 def test_publish_request_accepts_the_complete_legal_matrix() -> None:
@@ -2399,6 +2740,76 @@ def test_real_git_adapter_fetch_refs_translates_only_expected_git_error(
     assert unexpected_info.value is unexpected
 
 
+@pytest.mark.parametrize("seam", ("trunk", "worktrees", "pr_facts"))
+def test_transfer_real_aggregate_failures_keep_stable_delivery_errors(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    seam: str,
+) -> None:
+    from contextlib import nullcontext
+
+    from perk.delivery import transfer as transfer_mod
+
+    node = ObjectiveNode("1.1", "work", NodeStatus.PENDING)
+    plans: dict[str, PlanState] = {}
+    git: DeliveryGit = FakeDeliveryGit()
+    github: DeliveryGitHub = FakeDeliveryGitHub()
+    expected_type = "git_error"
+    expected_message = "adapter failed"
+
+    if seam == "trunk":
+
+        def fail_trunk(*_args: object, **_kwargs: object) -> str:
+            raise git_mod.GitError(expected_message)
+
+        monkeypatch.setattr(git_mod, "detect_trunk_branch", fail_trunk)
+        monkeypatch.setattr(git_mod, "worktree_list", lambda _root: [])
+        git = observe.RepoDeliveryGit(tmp_path)
+    elif seam == "worktrees":
+        node = replace(node, pr="#101")
+        plans["101"] = replace(
+            _plan("101"),
+            header={"branch": "plan-101", "objective_id": "10"},
+        )
+
+        def fail_worktrees(*_args: object, **_kwargs: object) -> object:
+            raise git_mod.GitError(expected_message)
+
+        monkeypatch.setattr(git_mod, "worktree_list", fail_worktrees)
+        git = observe.RepoDeliveryGit(tmp_path)
+    else:
+        node = replace(node, pr="#101")
+        plans["101"] = replace(
+            _plan("101"),
+            header={"branch": "plan-101", "objective_id": "10", "pr": "#42"},
+        )
+        expected_type = "github_error"
+
+        def fail_pr_facts(*_args: object, **_kwargs: object) -> object:
+            raise GitHubError(expected_message)
+
+        monkeypatch.setattr(observe.stacks, "pr_delivery_facts", fail_pr_facts)
+        github = observe.RepoDeliveryGitHub(tmp_path)
+
+    persistence = FakeDeliveryPersistence(
+        objectives={"10": _objective(nodes=(node,))},
+        plans=plans,
+    )
+    runtime = replace(
+        transfer_mod._DEFAULT_TRANSFER_RUNTIME,
+        operation_lock=lambda _root: nullcontext(),
+    )
+    monkeypatch.setattr(transfer_mod, "_DEFAULT_TRANSFER_RUNTIME", runtime)
+
+    with pytest.raises(DeliveryError) as excinfo:
+        _delivery(persistence, git, github).transfer(
+            _transfer_request(delivery="stacked", roadmap_nodes=(node,))
+        )
+
+    assert excinfo.value.error_type == expected_type
+    assert str(excinfo.value).endswith(expected_message)
+
+
 def test_prepare_with_real_git_adapter_preserves_raw_trunk_failure(
     tmp_path: Path, monkeypatch
 ) -> None:
@@ -2786,7 +3197,7 @@ def test_public_export_cut_is_exact() -> None:
     assert exported >= _NEW_EXPORTS
     assert _RETIRED_EXPORTS.isdisjoint(exported)
     assert exported == _NEW_EXPORTS | _RETAINED_EXPORTS
-    assert len(delivery_pkg.__all__) == 59
+    assert len(delivery_pkg.__all__) == 61
     assert not hasattr(delivery_pkg, "DeliveryTrain")
     for retired in {
         "DeliveryOperationFacts",

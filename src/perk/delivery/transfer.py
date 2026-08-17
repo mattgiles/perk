@@ -29,9 +29,9 @@ direction stays §8.44's: delivery imports the backend contracts + gateway one-d
 import contextlib
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from contextlib import AbstractContextManager
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import Annotated, Literal, Protocol
+from typing import Annotated, Literal, Protocol, cast
 
 from pydantic import BeforeValidator
 
@@ -41,6 +41,14 @@ from perk.backends.objective_store import ObjectiveRef, ObjectiveState
 from perk.backends.resolve import resolve_issue_backend, resolve_objective_store
 from perk.boundary import StrictInputModel, StrTuple, translate_validation_errors
 from perk.delivery import observe, oplock, sync
+from perk.delivery.facade import (
+    DeliveryError,
+    DeliveryGit,
+    DeliveryGitHub,
+    DeliveryPersistence,
+    TransferRequest,
+    TransferResult,
+)
 from perk.delivery.journal import (
     EventRole,
     JournalCorruptionError,
@@ -59,14 +67,11 @@ from perk.delivery.train import (
     NoDeliveryTrain,
     TrainReconstructionError,
     TrainStatus,
-    WorktreeFacts,
 )
-from perk.delivery.writers import RemoteWriterProbe, WriterObservationError
-from perk.github import stacks
-from perk.substrate import git as git_mod
+from perk.delivery.writers import WriterObservationError
 
 
-class TransferError(Exception):
+class TransferError(DeliveryError):
     """A replan transfer failed or refused. ``error_type`` is the stable machine code the CLI
     boundary maps onto its failure envelope."""
 
@@ -84,8 +89,7 @@ class TransferError(Exception):
         # set; infra raises — GitError/GitHubError/store errors — propagate for the CLI's
         # own mapping, always leaving any prepared operation unresolved)
     ) -> None:
-        super().__init__(message)
-        self.error_type = error_type
+        super().__init__(message, error_type=error_type)
 
 
 def _bare(identifier: str) -> str:
@@ -257,6 +261,59 @@ class _TransferAfterModel(StrictInputModel):
         )
 
 
+def _validate_roadmap_and_carries(
+    roadmap_nodes: Sequence[objective.ObjectiveNode],
+    carry_items: Sequence[tuple[str, str]],
+) -> None:
+    """Validate the graph/carry shape shared by fresh intent and strict journal recovery."""
+    if not roadmap_nodes:
+        raise ValueError("successor roadmap is empty")
+    node_ids = [node.id for node in roadmap_nodes]
+    if len(node_ids) != len(set(node_ids)):
+        raise ValueError(f"successor roadmap carries duplicate node ids: {node_ids!r}")
+    known = set(node_ids)
+    for node in roadmap_nodes:
+        for dependency in node.depends_on or ():
+            if dependency not in known:
+                raise ValueError(f"node {node.id!r} depends on unknown roadmap node {dependency!r}")
+    objective.delivery_order(list(roadmap_nodes))
+
+    carry_keys = [node_id for node_id, _plan_id in carry_items]
+    if len(carry_keys) != len(set(carry_keys)):
+        raise ValueError(f"carry_map repeats successor node ids: {carry_keys!r}")
+    blank_keys = [node_id for node_id in carry_keys if not node_id.strip()]
+    if blank_keys:
+        raise ValueError("carry_map has blank successor node ids")
+    unknown = sorted(set(carry_keys) - known)
+    if unknown:
+        raise ValueError(f"carry_map names unknown successor nodes {unknown!r}")
+    invalid = sorted(
+        node_id
+        for node_id, plan_id in carry_items
+        if not isinstance(plan_id, str) or not plan_id.strip()
+    )
+    if invalid:
+        raise ValueError(f"carry_map has blank plan identities for nodes {invalid!r}")
+
+
+def _validate_transfer_intent(request: TransferRequest) -> None:
+    """Pure recoverability checks performed before the operation lock or any authority call."""
+    if request.delivery not in (
+        objective.DeliveryPolicy.INCREMENTAL.value,
+        objective.DeliveryPolicy.STACKED.value,
+    ):
+        raise TransferError(
+            f"unknown transfer delivery policy: {request.delivery!r}",
+            error_type="invalid_input",
+        )
+    try:
+        _validate_roadmap_and_carries(request.roadmap_nodes, request.carry_map)
+    except ValueError as exc:
+        raise TransferError(
+            f"Invalid objective roadmap: {exc}", error_type="invalid_roadmap"
+        ) from exc
+
+
 def decode_transfer_record(record: PreparedRecord) -> TransferManifest:
     """Strict-decode and cross-check a TRANSFER prepared record's manifest.
 
@@ -317,19 +374,10 @@ def _validate_transfer_record(
             f"{after.delivery_lineage!r}"
         )
 
-    node_ids = [node.id for node in after.roadmap_nodes]
-    if len(node_ids) != len(set(node_ids)):
-        raise ValueError(f"successor roadmap carries duplicate node ids: {node_ids!r}")
-    unknown_carry_nodes = sorted(set(after.carry_map) - set(node_ids))
-    if unknown_carry_nodes:
-        raise ValueError(f"carry_map names unknown successor nodes {unknown_carry_nodes!r}")
-    invalid_carries = sorted(
-        node_id
-        for node_id, plan_id in after.carry_map.items()
-        if not isinstance(plan_id, str) or not plan_id.strip()
+    _validate_roadmap_and_carries(
+        after.roadmap_nodes,
+        tuple(after.carry_map.items()),
     )
-    if invalid_carries:
-        raise ValueError(f"carry_map has blank plan identities for nodes {invalid_carries!r}")
     for node_model in after_model.roadmap_nodes:
         expected = after.carry_map.get(node_model.id)
         if node_model.adopt_issue != expected:
@@ -469,34 +517,21 @@ class TransferStore(Protocol):
 
 
 class TransferIssues(Protocol):
-    """The narrow issue-backend surface (the carried-plan header reads)."""
+    """The narrow issue-backend surface for carried-plan reads and grouped writes."""
 
     def get_plan(self, *, issue_id: str) -> PlanState | None: ...
 
+    def update_plan_header(self, *, issue_id: str, fields: dict[str, object]) -> object: ...
+
 
 class TransferPersistence(Protocol):
-    """The narrow train-persistence surface (journal + typed writers; structurally satisfied
-    by :func:`resolve_train_persistence`'s adapter)."""
+    """The narrow train-persistence surface used by fresh and recovery transfer paths."""
 
     def read_journal(self, objective_id: str) -> JournalFold: ...
 
     def append_prepared(self, objective_id: str, record: PreparedRecord) -> AppendResult: ...
 
     def append_outcome(self, objective_id: str, record: OutcomeRecord) -> AppendResult: ...
-
-    def transfer_plan_ownership(
-        self, plan_id: str, *, objective_id: str, objective_node_id: str
-    ) -> None: ...
-
-    def stamp_layer_identity(
-        self, plan_id: str, *, delivery_lineage: str, predecessor_plan_id: str | None
-    ) -> None: ...
-
-    def clear_delivery_metadata(self, plan_id: str) -> None: ...
-
-
-class _PrFactsRead(Protocol):
-    def __call__(self, *, number: int, repo_root: Path) -> stacks.PrDeliveryFacts | None: ...
 
 
 @dataclass(frozen=True)
@@ -531,46 +566,28 @@ def resolve_transfer_seams(
 
 
 @dataclass(frozen=True)
-class _Transfer:
-    """The full fresh-pass bundle: the roll-forward seams plus the D13 preflight probes."""
+class _FreshTransfer:
+    """Fresh-pass authorities around the shared roll-forward seams."""
 
     seams: TransferSeams
-    remote_writers: RemoteWriterProbe
-    pr_facts: _PrFactsRead
-    worktree_branches: Callable[[Path], tuple[WorktreeFacts, ...]]
-    trunk: Callable[[Path], str]
+    git: DeliveryGit
+    github: DeliveryGitHub
 
 
 @dataclass(frozen=True)
-class TransferResult:
-    """The outcome of one :func:`run_transfer` invocation.
+class _TransferRuntime:
+    """Private effectful transfer runtime and deterministic test replacement point."""
 
-    ``operation_id`` is non-null ⟺ a TRANSFER record was journaled by (or rolled forward by)
-    this invocation (the non-journaled incremental→stacked arm carries ``None``).
-    ``abandoned_operation_id`` names the previously unresolved operation this invocation
-    abandoned-with-proof before running the fresh protocol. ``rolled_forward`` marks the
-    same-run rerun that completed an interrupted transfer from its recorded manifest.
-    """
-
-    predecessor_id: str
-    successor: ObjectiveRef
-    operation_id: str | None
-    abandoned_operation_id: str | None
-    rolled_forward: bool
-    journaled: bool
+    operation_lock: Callable[[Path], AbstractContextManager[None]]
+    mint_operation_id: Callable[[], str]
+    now: Callable[[], str]
 
 
-@dataclass(frozen=True)
-class TransferRequest:
-    """The successor authoring intent the save carries into planning."""
-
-    predecessor_id: str
-    title: str
-    prose: str
-    base: str | None
-    roadmap_nodes: tuple[objective.ObjectiveNode, ...]
-    carry_map: Mapping[str, str]
-    stacked: bool
+_DEFAULT_TRANSFER_RUNTIME = _TransferRuntime(
+    operation_lock=oplock.stack_operation_lock,
+    mint_operation_id=mint_operation_id,
+    now=plan.now_iso,
+)
 
 
 @dataclass(frozen=True)
@@ -581,81 +598,108 @@ class TransferPlan:
     journaled: bool
 
 
-def _default_worktree_branches(repo_root: Path) -> tuple[WorktreeFacts, ...]:
-    return observe.RepoDeliveryGit(repo_root).worktree_branches()
+# ----------------------------------------------------------------- the façade-owned fresh entry
 
 
-# ----------------------------------------------------------------- the public entry (D15)
-
-
-def run_transfer(
-    repo_root: Path,
+def _dispatch(
+    transfer: _FreshTransfer,
+    request: TransferRequest,
     *,
-    predecessor: ObjectiveState,
-    predecessor_policy: objective.DeliveryPolicy,
-    predecessor_id: str,
-    run_id: str,
-    title: str,
-    prose: str,
-    base: str | None,
-    roadmap_nodes: Sequence[objective.ObjectiveNode],
-    carry_map: Mapping[str, str],
-    stacked: bool,
-    remote_writers: RemoteWriterProbe,
-    store_factory: Callable[[Path], TransferStore] = resolve_objective_store,
-    issues_factory: Callable[[Path], TransferIssues] = resolve_issue_backend,
-    persistence_factory: Callable[[Path], TransferPersistence] = resolve_train_persistence,
-    reconstruct: Callable[[Path, str], TrainStatus] = observe.reconstruct_repo_train,
-    pr_facts: _PrFactsRead = stacks.pr_delivery_facts,
-    worktree_branches: Callable[[Path], tuple[WorktreeFacts, ...]] = _default_worktree_branches,
-    trunk: Callable[[Path], str] = git_mod.detect_trunk_branch,
-    lock: Callable[[Path], AbstractContextManager[None]] = oplock.stack_operation_lock,
-    now: Callable[[], str] = plan.now_iso,
+    runtime: _TransferRuntime,
 ) -> TransferResult:
-    """Run the replan transfer protocol for a superseding save (contracts.md §8.53).
+    """Validate intent, lock, perform D1 once, and complete the selected transfer route."""
+    _validate_transfer_intent(request)
+    predecessor_id = request.predecessor_id.strip().lstrip("#").strip()
+    canonical = replace(request, predecessor_id=predecessor_id)
+    with _held_lock(runtime.operation_lock, transfer.seams.repo_root):
+        predecessor = transfer.seams.store.get_objective(objective_id=predecessor_id)
+        if predecessor is None:
+            raise TransferError(
+                f"Objective {predecessor_id} not found", error_type="objective_not_found"
+            )
+        try:
+            predecessor_policy = objective.delivery_policy(predecessor.header)
+        except ValueError as exc:
+            raise TransferError(str(exc), error_type="invalid_delivery_policy") from exc
 
-    The save boundary supplies the predecessor state + policy from D1's sole fail-closed
-    classification read. Lock-first (D15): the machine-local operation lock is acquired before
-    the journal fold, the D11 rerun routing, the D13/D3-D6 planning + probes, and held through
-    prepare → create → stamp → verify → finalize → complete. ``stacked`` is the successor's
-    reviewed delivery choice; ``base`` is the save's resolved base intent (post-publication the
-    successor stores the predecessor's stored base verbatim instead — D3). Raises
-    :class:`TransferError` on
-    every typed refusal; infra errors propagate for the CLI boundary, always leaving any
-    prepared operation unresolved (recoverable via ``perk objective stack recover``).
-    """
-    seams = TransferSeams(
-        repo_root=repo_root,
-        store=store_factory(repo_root),
-        issues=issues_factory(repo_root),
-        persistence=persistence_factory(repo_root),
-        reconstruct=reconstruct,
-        now=now,
-    )
-    transfer = _Transfer(
-        seams=seams,
-        remote_writers=remote_writers,
-        pr_facts=pr_facts,
-        worktree_branches=worktree_branches,
-        trunk=trunk,
-    )
-    request = TransferRequest(
-        predecessor_id=_bare(predecessor_id.strip()),
-        title=title,
-        prose=prose,
-        base=base,
-        roadmap_nodes=tuple(roadmap_nodes),
-        carry_map=dict(carry_map),
-        stacked=stacked,
-    )
-    with _held_lock(lock, repo_root):
+        if (
+            predecessor_policy is objective.DeliveryPolicy.INCREMENTAL
+            and canonical.delivery == objective.DeliveryPolicy.INCREMENTAL.value
+        ):
+            return _supersede_incremental(
+                transfer.seams,
+                canonical,
+                predecessor=predecessor,
+            )
+
+        persistence = cast(DeliveryPersistence, transfer.seams.store)
+        normalized = persistence.normalize_transfer_carry_map(canonical.carry_map)
+        normalized_request = replace(canonical, carry_map=tuple(normalized.items()))
         return _run(
             transfer,
-            request,
+            normalized_request,
             predecessor=predecessor,
             predecessor_policy=predecessor_policy,
-            run_id=run_id,
+            run_id=canonical.run_id,
+            mint_operation_id=runtime.mint_operation_id,
         )
+
+
+def _supersede_incremental(
+    seams: TransferSeams,
+    request: TransferRequest,
+    *,
+    predecessor: ObjectiveState,
+) -> TransferResult:
+    superseded_by = predecessor.header.get("superseded_by")
+    if superseded_by:
+        found = seams.store.find_objective(run_id=request.run_id)
+        if found is not None and _bare(str(superseded_by)) == _bare(found.id):
+            return TransferResult(
+                predecessor_id=request.predecessor_id,
+                successor=found,
+                operation_id=None,
+                abandoned_operation_id=None,
+                rolled_forward=True,
+                journaled=False,
+            )
+        raise TransferError(
+            f"objective {request.predecessor_id} is already superseded by {superseded_by!r} — "
+            "replan its successor instead",
+            error_type="objective_not_open",
+        )
+    if predecessor.state != "open":
+        raise TransferError(
+            f"Objective {request.predecessor_id} is not open (state={predecessor.state}); "
+            "replan re-authors an OPEN objective. Create a fresh objective instead.",
+            error_type="objective_not_open",
+        )
+    successor = seams.store.supersede_objective(
+        old_objective_id=request.predecessor_id,
+        title=request.title,
+        prose=request.prose,
+        run_id=request.run_id,
+        base=request.base,
+        roadmap_nodes=list(request.roadmap_nodes),
+        carry_map=dict(request.carry_map),
+        delivery=None,
+        delivery_lineage=None,
+        close_predecessor=True,
+    )
+    if successor is None:
+        raise TransferError(
+            f"The configured objective backend does not support replan (superseding "
+            f"{request.predecessor_id!r}); author a fresh objective instead.",
+            error_type="supersede_unsupported",
+        )
+    return TransferResult(
+        predecessor_id=request.predecessor_id,
+        successor=successor,
+        operation_id=None,
+        abandoned_operation_id=None,
+        rolled_forward=False,
+        journaled=False,
+    )
 
 
 @contextlib.contextmanager
@@ -670,12 +714,13 @@ def _held_lock(
 
 
 def _run(
-    transfer: _Transfer,
+    transfer: _FreshTransfer,
     request: TransferRequest,
     *,
     predecessor: ObjectiveState,
     predecessor_policy: objective.DeliveryPolicy,
     run_id: str,
+    mint_operation_id: Callable[[], str],
 ) -> TransferResult:
     seams = transfer.seams
     if _bare(predecessor.id) != request.predecessor_id:
@@ -684,13 +729,6 @@ def _run(
             f"{request.predecessor_id!r}",
             error_type="invalid_input",
         )
-    if predecessor_policy is objective.DeliveryPolicy.INCREMENTAL and not request.stacked:
-        raise TransferError(
-            "incremental→incremental supersession never routes through the transfer protocol "
-            "(the plain §8.32 store mutation owns it)",
-            error_type="invalid_input",
-        )
-
     abandoned_operation_id: str | None = None
     if predecessor_policy is objective.DeliveryPolicy.STACKED:
         lineage = _require_predecessor_lineage(predecessor)
@@ -726,6 +764,12 @@ def _run(
         raise TransferError(
             f"objective {request.predecessor_id} is already superseded by {superseded_by!r} — "
             "replan its successor instead",
+            error_type="objective_not_open",
+        )
+    if predecessor.state != "open":
+        raise TransferError(
+            f"Objective {request.predecessor_id} is not open (state={predecessor.state}); "
+            "replan re-authors an OPEN objective. Create a fresh objective instead.",
             error_type="objective_not_open",
         )
 
@@ -794,7 +838,7 @@ def _require_predecessor_lineage(predecessor: ObjectiveState) -> str:
 
 
 def _route_unresolved(
-    transfer: _Transfer,
+    transfer: _FreshTransfer,
     request: TransferRequest,
     fold: JournalFold,
     *,
@@ -911,7 +955,7 @@ def corroborate_successor(
 
 
 def plan_transfer(
-    transfer: _Transfer,
+    transfer: _FreshTransfer,
     request: TransferRequest,
     *,
     predecessor: ObjectiveState,
@@ -922,11 +966,7 @@ def plan_transfer(
     predecessor; direct reads for an incremental one), enforce D3-D6, and freeze the transfer
     manifest. Every refusal is typed with exact expected-vs-observed detail; nothing has been
     written when it raises."""
-    successor_policy = (
-        objective.DeliveryPolicy.STACKED
-        if request.stacked
-        else objective.DeliveryPolicy.INCREMENTAL
-    )
+    successor_policy = objective.DeliveryPolicy(request.delivery)
     try:
         projection = _request_projection(request)
     except ValueError as exc:
@@ -965,13 +1005,13 @@ def _request_projection(request: TransferRequest) -> tuple[tuple[str, str | None
     order = objective.delivery_order(list(request.roadmap_nodes))
     projection: list[tuple[str, str | None]] = []
     for node in order:
-        identity = request.carry_map.get(node.id) or node.pr
+        identity = dict(request.carry_map).get(node.id) or node.pr
         projection.append((node.id, _bare(identity) if identity else None))
     return tuple(projection)
 
 
 def _plan_from_stacked(
-    transfer: _Transfer,
+    transfer: _FreshTransfer,
     request: TransferRequest,
     *,
     predecessor: ObjectiveState,
@@ -1025,7 +1065,7 @@ def _plan_from_stacked(
         predecessor_effective = (
             stored_base if isinstance(stored_base, str) and stored_base else train.base
         )
-        successor_effective = request.base or transfer.trunk(seams.repo_root)
+        successor_effective = request.base or transfer.git.trunk_branch()
         if successor_effective != predecessor_effective:
             raise TransferError(
                 f"the published train is anchored on base {predecessor_effective!r} — a "
@@ -1127,7 +1167,7 @@ def _plan_from_stacked(
 
 
 def _plan_from_incremental(
-    transfer: _Transfer,
+    transfer: _FreshTransfer,
     request: TransferRequest,
     *,
     predecessor: ObjectiveState,
@@ -1191,7 +1231,7 @@ def _plan_from_incremental(
                 "the conversion cannot prove that no PR exists",
                 error_type="pr_exists",
             )
-        facts = transfer.pr_facts(number=pr_number, repo_root=seams.repo_root)
+        facts = transfer.github.pr_facts(pr_number)
         if facts is not None and facts.state == "OPEN":
             open_pr[plan_id] = pr_number
 
@@ -1220,7 +1260,7 @@ def _plan_from_incremental(
     }
     dirty = [
         facts
-        for facts in transfer.worktree_branches(seams.repo_root)
+        for facts in transfer.git.worktree_branches()
         if facts.dirty and facts.branch in affected_branches
     ]
     if dirty:
@@ -1241,7 +1281,7 @@ def _plan_from_incremental(
         base=(
             stored_base
             if isinstance(stored_base, str) and stored_base
-            else transfer.trunk(seams.repo_root)
+            else transfer.git.trunk_branch()
         ),
         delivery=objective.DeliveryPolicy.INCREMENTAL.value,
         delivery_lineage=None,
@@ -1296,14 +1336,16 @@ def _incremental_lineage(seams: TransferSeams, predecessor: ObjectiveState, *, r
     return objective.mint_delivery_lineage()
 
 
-def _probe_remote_writers(transfer: _Transfer, probe_ids: Sequence[str]) -> None:
+def _probe_remote_writers(transfer: _FreshTransfer, probe_ids: Sequence[str]) -> None:
     """Sync's writer posture verbatim (D6): positively observed writers refuse
     (``active_writer``); an unreadable observation refuses fail-closed
     (``writer_observation_unavailable``) — never \"no writers\"."""
     if not probe_ids:
         return
     try:
-        active = transfer.remote_writers.active_plan_ids(list(probe_ids))
+        active = transfer.github.active_writer_plan_ids(
+            tuple(probe_ids), trigger_plan_id=None, trigger_run_id=None
+        )
     except WriterObservationError as exc:
         raise TransferError(
             f"could not observe the active remote writers ({exc}) — refusing to transfer "
@@ -1468,8 +1510,9 @@ def _apply_ownership(
     owner = _header_value(header, "objective_id")
     node_link = _header_value(header, "objective_node_id")
     if owner is None or _bare(owner) != _bare(successor_id) or node_link != write.node_id:
-        seams.persistence.transfer_plan_ownership(
-            write.plan_id, objective_id=successor_id, objective_node_id=write.node_id
+        seams.issues.update_plan_header(
+            issue_id=write.plan_id,
+            fields={"objective_id": successor_id, "objective_node_id": write.node_id},
         )
     if write.kind == "stacked_unpublished":
         lineage = after.delivery_lineage
@@ -1484,10 +1527,12 @@ def _apply_ownership(
         if stored_lineage != lineage or (
             (stored_predecessor and _bare(stored_predecessor)) or None
         ) != ((expected_predecessor and _bare(expected_predecessor)) or None):
-            seams.persistence.stamp_layer_identity(
-                write.plan_id,
-                delivery_lineage=lineage,
-                predecessor_plan_id=expected_predecessor,
+            seams.issues.update_plan_header(
+                issue_id=write.plan_id,
+                fields={
+                    "delivery_lineage": lineage,
+                    "predecessor_plan_id": expected_predecessor,
+                },
             )
     elif write.kind == "incremental":
         stacked_fields = (
@@ -1497,7 +1542,15 @@ def _apply_ownership(
             _header_value(header, "published_head_sha"),
         )
         if any(value is not None for value in stacked_fields):
-            seams.persistence.clear_delivery_metadata(write.plan_id)
+            seams.issues.update_plan_header(
+                issue_id=write.plan_id,
+                fields={
+                    "delivery_lineage": None,
+                    "predecessor_plan_id": None,
+                    "parent_checkpoint_sha": None,
+                    "published_head_sha": None,
+                },
+            )
 
 
 # ----------------------------------------------------------------- verification (D12)

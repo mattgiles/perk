@@ -5,8 +5,9 @@ from copy import deepcopy
 from dataclasses import replace
 from pathlib import Path
 
+from perk import objective
 from perk.backends.issue_backend import PlanHeaderUpdate, PlanState
-from perk.backends.objective_store import ObjectiveState
+from perk.backends.objective_store import ObjectiveRef, ObjectiveState
 from perk.delivery.facade import DeliveryGit, DeliveryGitHub, DeliveryPersistence
 from perk.delivery.journal import EventRole, JournalFold, OutcomeRecord, PreparedRecord, fold_events
 from perk.delivery.persistence import AppendResult
@@ -62,6 +63,9 @@ class FakeDeliveryPersistence(_FailureMixin, DeliveryPersistence):
         prepared_results: Mapping[str, AppendResult] | None = None,
         outcome_results: Mapping[str, AppendResult] | None = None,
         header_results: Mapping[str, PlanHeaderUpdate] | None = None,
+        successors_by_run: Mapping[str, ObjectiveRef] | None = None,
+        preserve_transfer_carries: bool = False,
+        finalize_result: bool = True,
         errors: Mapping[Call, Exception] | None = None,
     ) -> None:
         super().__init__(errors)
@@ -78,6 +82,9 @@ class FakeDeliveryPersistence(_FailureMixin, DeliveryPersistence):
         self._prepared_results = dict(prepared_results or {})
         self._outcome_results = dict(outcome_results or {})
         self._header_results = dict(header_results or {})
+        self._successors_by_run = dict(successors_by_run or {})
+        self._preserve_transfer_carries = preserve_transfer_carries
+        self._finalize_result = finalize_result
         self.calls: list[Call] = []
 
     def get_objective(self, *, objective_id: str) -> ObjectiveState | None:
@@ -116,6 +123,61 @@ class FakeDeliveryPersistence(_FailureMixin, DeliveryPersistence):
             issue_id,
             PlanHeaderUpdate(fields_updated=tuple(copied), dry_run=False),
         )
+
+    def normalize_transfer_carry_map(
+        self, carry_map: tuple[tuple[str, str], ...]
+    ) -> dict[str, str]:
+        call: Call = ("normalize_transfer_carry_map", carry_map)
+        self.calls.append(call)
+        self._raise_failure(call)
+        return dict(carry_map) if self._preserve_transfer_carries else {}
+
+    def find_objective(self, *, run_id: str) -> ObjectiveRef | None:
+        call: Call = ("find_objective", run_id)
+        self.calls.append(call)
+        self._raise_failure(call)
+        return self._successors_by_run.get(run_id)
+
+    def supersede_objective(
+        self,
+        *,
+        old_objective_id: str,
+        title: str,
+        prose: str,
+        run_id: str,
+        status: str = "active",
+        base: str | None = None,
+        roadmap_nodes: list[objective.ObjectiveNode],
+        carry_map: dict[str, str],
+        delivery: objective.DeliveryPolicy | None = None,
+        delivery_lineage: str | None = None,
+        close_predecessor: bool = True,
+        dry_run: bool = False,
+    ) -> ObjectiveRef | None:
+        call: Call = (
+            "supersede_objective",
+            old_objective_id,
+            title,
+            prose,
+            run_id,
+            status,
+            base,
+            _call_value(roadmap_nodes),
+            _call_value(carry_map),
+            delivery,
+            delivery_lineage,
+            close_predecessor,
+            dry_run,
+        )
+        self.calls.append(call)
+        self._raise_failure(call)
+        return self._successors_by_run.get(run_id)
+
+    def finalize_supersession(self, *, old_objective_id: str, new_objective_id: str) -> bool:
+        call: Call = ("finalize_supersession", old_objective_id, new_objective_id)
+        self.calls.append(call)
+        self._raise_failure(call)
+        return self._finalize_result
 
     def read_journal(self, objective_id: str) -> JournalFold:
         call: Call = ("read_journal", objective_id)

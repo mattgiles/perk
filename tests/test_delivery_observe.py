@@ -12,7 +12,9 @@ from pathlib import Path
 
 import pytest
 
+from perk import objective
 from perk.backends.issue_backend import PlanHeaderUpdate
+from perk.backends.objective_store import ObjectiveRef
 from perk.delivery import land, observe
 from perk.delivery._fakes import FakeDeliveryGit, FakeDeliveryPersistence
 from perk.delivery.facade import (
@@ -71,6 +73,61 @@ class TestRepoDeliveryPersistence:
             ("body", "101"),
             ("header", "101", {"branch": "plan-101"}),
         ]
+
+    @pytest.mark.parametrize(
+        ("backend_id", "expected_carries"),
+        (("github", {}), ("linear", {"1.1": "ENG-1"})),
+    )
+    def test_transfer_store_delegations_and_carry_normalization(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        backend_id: str,
+        expected_carries: dict[str, str],
+    ) -> None:
+        successor = ObjectiveRef(id="11", url="u/11", existed=False)
+        calls: list[tuple[object, ...]] = []
+
+        class _Store:
+            def __init__(self) -> None:
+                self.backend_id = backend_id
+
+            def find_objective(self, *, run_id: str) -> ObjectiveRef | None:
+                calls.append(("find", run_id))
+                return successor
+
+            def supersede_objective(self, **kwargs) -> ObjectiveRef | None:
+                calls.append(("supersede", kwargs))
+                return successor
+
+            def finalize_supersession(
+                self, *, old_objective_id: str, new_objective_id: str
+            ) -> bool:
+                calls.append(("finalize", old_objective_id, new_objective_id))
+                return True
+
+        store = _Store()
+        authority = observe.RepoDeliveryPersistence(tmp_path)
+        monkeypatch.setattr(authority, "_resolve", lambda: (store, object(), object()))
+        carries = (("1.1", "ENG-1"),)
+
+        assert authority.normalize_transfer_carry_map(carries) == expected_carries
+        assert authority.find_objective(run_id="01RUN") is successor
+        assert (
+            authority.supersede_objective(
+                old_objective_id="10",
+                title="Successor",
+                prose="prose",
+                run_id="01RUN",
+                roadmap_nodes=[
+                    objective.ObjectiveNode("1.1", "work", objective.NodeStatus.PENDING)
+                ],
+                carry_map=expected_carries,
+            )
+            is successor
+        )
+        assert authority.finalize_supersession(old_objective_id="10", new_objective_id="11")
+        assert [call[0] for call in calls] == ["find", "supersede", "finalize"]
 
 
 # ----------------------------------------------------------------- RepoDeliveryGit

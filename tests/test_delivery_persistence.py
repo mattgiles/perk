@@ -539,39 +539,7 @@ class TestTypedWriters:
             ("201", {"parent_checkpoint_sha": "a" * 40, "published_head_sha": "b" * 40})
         ]
 
-    def test_transfer_plan_ownership_is_one_write(self) -> None:
-        persistence, _, issues = _make()
-        persistence.transfer_plan_ownership("201", objective_id="300", objective_node_id="1.2")
-        assert issues.plan_header_writes == [
-            ("201", {"objective_id": "300", "objective_node_id": "1.2"})
-        ]
-
-    def test_stamp_layer_identity_allows_null_predecessor(self) -> None:
-        persistence, _, issues = _make()
-        persistence.stamp_layer_identity("201", delivery_lineage=_LINEAGE, predecessor_plan_id=None)
-        assert issues.plan_header_writes == [
-            ("201", {"delivery_lineage": _LINEAGE, "predecessor_plan_id": None})
-        ]
-
     def test_write_delivery_lineage_hits_objective_header(self) -> None:
         persistence, store, _ = _make()
         persistence.write_delivery_lineage("100", _LINEAGE)
         assert store.header_writes == [("100", {"delivery_lineage": _LINEAGE})]
-
-    def test_clear_delivery_metadata_writes_all_four_nulls_together(self) -> None:
-        # The stacked→incremental transfer write (§8.53): the four stacked fields go to
-        # explicit None in ONE update_plan_header write; objective_node_id is NOT touched
-        # (ownership stays with transfer_plan_ownership).
-        persistence, _, issues = _make()
-        persistence.clear_delivery_metadata("201")
-        assert issues.plan_header_writes == [
-            (
-                "201",
-                {
-                    "delivery_lineage": None,
-                    "predecessor_plan_id": None,
-                    "parent_checkpoint_sha": None,
-                    "published_head_sha": None,
-                },
-            )
-        ]
