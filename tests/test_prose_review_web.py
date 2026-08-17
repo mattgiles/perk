@@ -882,6 +882,98 @@ def test_overlapping_typescript_requests_use_one_helper_and_recover(
     _assert_security_headers(recovered)
 
 
+def test_typescript_read_and_save_share_one_app_scoped_helper_slot(
+    snapshot: CatalogSnapshot,
+    repo: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    unit = snapshot.get_unit(TYPESCRIPT_UNIT_ID)
+    assert unit is not None
+    target = repo / unit.candidate.path
+    target.parent.mkdir(parents=True, exist_ok=True)
+    original = (ROOT / unit.candidate.path).read_bytes()
+    target.write_bytes(original)
+    entered = threading.Event()
+    release = threading.Event()
+    calls = 0
+
+    def blocked(
+        argv: Sequence[str],
+        *,
+        cwd: Path | None = None,
+        timeout: int,
+        env_overlay: Mapping[str, str] | None = None,
+    ) -> str:
+        del cwd, timeout, env_overlay
+        nonlocal calls
+        calls += 1
+        if calls != 1:
+            raise AssertionError("overlapping save spawned a second TypeScript helper")
+        request = json.loads(Path(argv[2]).read_text(encoding="utf-8"))
+        selector = request["selectors"][0]
+        entered.set()
+        assert release.wait(timeout=5)
+        return json.dumps(
+            {
+                "version": 1,
+                "status": "ok",
+                "results": [
+                    {
+                        "selector": selector,
+                        "status": "resolved",
+                        "start": 0,
+                        "end": 1,
+                    }
+                ],
+            }
+        )
+
+    monkeypatch.setattr(typescript_adapter_module, "run_checked", blocked)
+    client = _client(snapshot, repo)
+    read_responses: list[Response] = []
+
+    def request_read() -> None:
+        read_responses.append(
+            client.get(
+                "/api/source",
+                params={"unit": TYPESCRIPT_UNIT_ID, "fragment": "description"},
+            )
+        )
+
+    thread = threading.Thread(target=request_read)
+    thread.start()
+    assert entered.wait(timeout=5)
+    try:
+        saved = client.post(
+            "/api/source/save",
+            headers={web.CSRF_HEADER: TOKEN},
+            json={
+                "unit": TYPESCRIPT_UNIT_ID,
+                "load_hash": hashlib.sha256(original).hexdigest(),
+                "text": original.decode("utf-8"),
+            },
+        )
+    finally:
+        release.set()
+        thread.join(timeout=5)
+
+    assert not thread.is_alive()
+    assert len(read_responses) == 1
+    assert read_responses[0].status_code == 200
+    assert read_responses[0].json()["view"]["editable"] is True
+    assert saved.status_code == 200
+    assert saved.json() == {
+        "status": "refused",
+        "reason": "write-failed",
+        "detail": "The source could not be saved safely.",
+    }
+    assert calls == 1
+    assert target.read_bytes() == original
+    assert [path for path in target.parent.iterdir() if path.name.endswith(".tmp")] == []
+    _assert_security_headers(read_responses[0])
+    _assert_security_headers(saved)
+
+
 @pytest.mark.parametrize(
     ("unit_id", "fragment_id", "text", "marker"),
     [
