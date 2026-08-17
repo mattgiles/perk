@@ -7,7 +7,6 @@ the fresh-run-id + `supersedes` handoff threading, and the refusals.
 
 import json
 from pathlib import Path
-from typing import cast
 
 from click.testing import CliRunner
 
@@ -36,26 +35,12 @@ def _node(node_id: str, status: objective.NodeStatus, pr: str | None = None):
     return objective.ObjectiveNode(id=node_id, description=f"node {node_id}", status=status, pr=pr)
 
 
-class _IssueRead:
-    def __init__(self, state: str = "OPEN") -> None:
-        self.state = state
-
-
-class _FakeIssueBackend:
-    def __init__(self, state: str = "OPEN") -> None:
-        self._state = state
-
-    def read_issue(self, *, issue_id: str):
-        return _IssueRead(self._state)
-
-
 class _FakeStore:
     backend_id = "github"
 
     def __init__(self, *, state: ObjectiveState | None, raise_engagement: bool = False) -> None:
         self._state = state
         self._raise_engagement = raise_engagement
-        self.prepare_requests = []
 
     def get_objective(self, *, objective_id: str):
         return self._state
@@ -94,59 +79,54 @@ def _state(nodes, *, header=None) -> ObjectiveState:
 
 
 class _PrepareService:
-    def __init__(self, store: _FakeStore, *, issue_state: str) -> None:
-        self.store = store
-        self.issue_state = issue_state
-        self.result: PrepareResult | None = None
-        self.error: DeliveryError | None = None
+    """Dumb Delivery spy returning the configured façade result or error."""
+
+    def __init__(
+        self,
+        *,
+        result: PrepareResult | None = None,
+        error: DeliveryError | None = None,
+    ) -> None:
+        self.result = result
+        self.error = error
+        self.requests: list[PrepareRequest] = []
 
     def prepare(self, request: PrepareRequest) -> PrepareResult:
-        self.store.prepare_requests.append(request)
+        self.requests.append(request)
         if self.error is not None:
             raise self.error
-        if self.result is not None:
-            return self.result
-        state = self.store._state
-        if state is None:
-            raise DeliveryError("Objective 42 not found", error_type="objective_not_found")
-        if state.header.get("superseded_by"):
-            raise DeliveryError(
-                f"Objective 42 is already superseded by {state.header['superseded_by']}; "
-                "replan its successor instead.",
-                error_type="objective_not_open",
-            )
-        if self.issue_state != "OPEN" or state.state != "open":
-            raise DeliveryError(
-                "Objective 42 is not open (state=closed); replan re-authors an OPEN "
-                "objective. Create a fresh objective instead.",
-                error_type="objective_not_open",
-            )
-        try:
-            policy = objective.delivery_policy(state.header)
-        except ValueError as exc:
-            raise DeliveryError(str(exc), error_type="invalid_delivery_policy") from exc
-        raw_base = state.header.get("base")
-        base = raw_base if isinstance(raw_base, str) else None
-        raw_lineage = state.header.get("delivery_lineage")
-        lineage = raw_lineage if isinstance(raw_lineage, str) else None
-        context = PrepareResult.ReplanContext(
-            objective_id=state.id,
-            objective_url=state.url,
-            objective_title=state.title,
-            nodes=state.nodes,
-            delivery=policy.value,
-            base=base,
-            delivery_lineage=lineage,
-            claimed=(),
-            open_pr_plans=(),
-        )
-        return PrepareResult(kind="replan", replan=context)
+        assert self.result is not None
+        return self.result
 
 
-def _patch(monkeypatch, store, *, issue_state: str = "OPEN") -> _PrepareService:
+def _replan_result(state: ObjectiveState) -> PrepareResult:
+    context = PrepareResult.ReplanContext(
+        objective_id=state.id,
+        objective_url=state.url,
+        objective_title=state.title,
+        nodes=state.nodes,
+        delivery="incremental",
+        base=None,
+        delivery_lineage=None,
+        claimed=(),
+        open_pr_plans=(),
+    )
+    return PrepareResult(kind="replan", replan=context)
+
+
+def _patch(
+    monkeypatch,
+    store: _FakeStore,
+    *,
+    result: PrepareResult | None = None,
+    error: DeliveryError | None = None,
+) -> _PrepareService:
     _authed(monkeypatch)
     monkeypatch.setattr(resolve, "resolve_objective_store", lambda _root: store)
-    service = _PrepareService(store, issue_state=issue_state)
+    if result is None and error is None:
+        assert store._state is not None
+        result = _replan_result(store._state)
+    service = _PrepareService(result=result, error=error)
     monkeypatch.setattr(replan_cmd, "resolve_delivery", lambda _root: service)
     return service
 
@@ -175,7 +155,7 @@ _UNFINISHED_NODES = [
 
 def test_dry_run_json_materializes_and_does_not_launch(monkeypatch, unborn_git_repo_factory):
     store = _FakeStore(state=_state(_UNFINISHED_NODES))
-    _patch(monkeypatch, store)
+    service = _patch(monkeypatch, store)
 
     def boom_launch(**k):
         raise AssertionError("--dry-run must not launch")
@@ -200,7 +180,7 @@ def test_dry_run_json_materializes_and_does_not_launch(monkeypatch, unborn_git_r
         assert "node 1.1" not in text  # done node excluded
         # The lookup runs on the dry-run path too, so the wait IS narrated (to stderr).
         assert "looking up objective #42" in result.stderr
-        assert store.prepare_requests == [PrepareRequest(kind="replan", objective_id="42")]
+        assert service.requests == [PrepareRequest(kind="replan", objective_id="42")]
 
 
 def test_real_launch_threads_supersedes_handoff_and_fresh_run_id(
@@ -278,7 +258,11 @@ def test_strips_hash_prefix(monkeypatch, unborn_git_repo_factory):
 
 def test_refuses_not_found(monkeypatch, unborn_git_repo_factory):
     store = _FakeStore(state=None)
-    _patch(monkeypatch, store)
+    _patch(
+        monkeypatch,
+        store,
+        error=DeliveryError("Objective 42 not found", error_type="objective_not_found"),
+    )
     runner = CliRunner()
     with runner.isolated_filesystem() as d:
         _git_init(d, unborn_git_repo_factory)
@@ -292,7 +276,14 @@ def test_refuses_already_superseded(monkeypatch, unborn_git_repo_factory):
     store = _FakeStore(
         state=_state(_UNFINISHED_NODES, header={"run_id": "01OLD", "superseded_by": "99"})
     )
-    _patch(monkeypatch, store)
+    _patch(
+        monkeypatch,
+        store,
+        error=DeliveryError(
+            "Objective 42 is already superseded by 99; replan its successor instead.",
+            error_type="objective_not_open",
+        ),
+    )
     runner = CliRunner()
     with runner.isolated_filesystem() as d:
         _git_init(d, unborn_git_repo_factory)
@@ -303,7 +294,14 @@ def test_refuses_already_superseded(monkeypatch, unborn_git_repo_factory):
 
 def test_refuses_non_open_github_objective(monkeypatch, unborn_git_repo_factory):
     store = _FakeStore(state=_state(_UNFINISHED_NODES))
-    _patch(monkeypatch, store, issue_state="CLOSED")
+    _patch(
+        monkeypatch,
+        store,
+        error=DeliveryError(
+            "Objective 42 is not open (state=closed)",
+            error_type="objective_not_open",
+        ),
+    )
     runner = CliRunner()
     with runner.isolated_filesystem() as d:
         _git_init(d, unborn_git_repo_factory)
@@ -345,8 +343,8 @@ def _stacked_state(nodes) -> ObjectiveState:
     )
 
 
-def _patch_stacked(
-    monkeypatch,
+def _configure_stacked(
+    service: _PrepareService,
     store: _FakeStore,
     *,
     unresolved=(),
@@ -355,7 +353,6 @@ def _patch_stacked(
     blockers=(),
 ) -> None:
     """Configure the one replan Prepare result/error consumed by the command."""
-    service = cast(_PrepareService, replan_cmd.resolve_delivery(Path("unused")))
     if unresolved:
         op = unresolved[0]
         if op.kind.value == "transfer":
@@ -432,9 +429,9 @@ def test_stacked_published_scratch_carries_prefix_open_prs_and_immutability(
 ):
     nodes = [_node("1.1", objective.NodeStatus.IN_PROGRESS, pr="#12")]
     store = _FakeStore(state=_stacked_state(nodes))
-    _patch(monkeypatch, store)
-    _patch_stacked(
-        monkeypatch,
+    service = _patch(monkeypatch, store)
+    _configure_stacked(
+        service,
         store,
         claimed=(_claimed_layer("1.1", "12", 34),),
         open_layers=(_open_layer("12", 34), _open_layer("14", 36)),
@@ -467,8 +464,8 @@ def test_stacked_published_scratch_carries_prefix_open_prs_and_immutability(
 def test_stacked_prepublication_keeps_the_delivery_reask(monkeypatch, unborn_git_repo_factory):
     nodes = [_node("1.1", objective.NodeStatus.PENDING, pr="#12")]
     store = _FakeStore(state=_stacked_state(nodes))
-    _patch(monkeypatch, store)
-    _patch_stacked(monkeypatch, store, claimed=(), open_layers=(_open_layer("12", 34),))
+    service = _patch(monkeypatch, store)
+    _configure_stacked(service, store, claimed=(), open_layers=(_open_layer("12", 34),))
     launched: dict = {}
     _stub_launch(monkeypatch, launched)
     runner = CliRunner()
@@ -491,12 +488,12 @@ def test_stacked_door_refuses_structurally_blocked_train_without_launching(
     from types import SimpleNamespace
 
     store = _FakeStore(state=_stacked_state([_node("1.1", objective.NodeStatus.PENDING)]))
-    _patch(monkeypatch, store)
+    service = _patch(monkeypatch, store)
     blocker = SimpleNamespace(
         code="wrong_owner",
         message="plan 12 belongs to objective 99, expected 42",
     )
-    _patch_stacked(monkeypatch, store, blockers=(blocker,))
+    _configure_stacked(service, store, blockers=(blocker,))
     launched: dict = {}
     _stub_launch(monkeypatch, launched)
     runner = CliRunner()
@@ -516,9 +513,9 @@ def test_stacked_door_refuses_unresolved_transfer(monkeypatch, unborn_git_repo_f
     from perk.delivery.journal import OperationKind
 
     store = _FakeStore(state=_stacked_state([_node("1.1", objective.NodeStatus.PENDING)]))
-    _patch(monkeypatch, store)
+    service = _patch(monkeypatch, store)
     op = SimpleNamespace(kind=OperationKind.TRANSFER, operation_id="01OPTRANSFER")
-    _patch_stacked(monkeypatch, store, unresolved=(op,))
+    _configure_stacked(service, store, unresolved=(op,))
     runner = CliRunner()
     with runner.isolated_filesystem() as d:
         _git_init(d, unborn_git_repo_factory)
@@ -535,9 +532,9 @@ def test_stacked_door_refuses_other_unresolved_operation(monkeypatch, unborn_git
     from perk.delivery.journal import OperationKind
 
     store = _FakeStore(state=_stacked_state([_node("1.1", objective.NodeStatus.PENDING)]))
-    _patch(monkeypatch, store)
+    service = _patch(monkeypatch, store)
     op = SimpleNamespace(kind=OperationKind.PUBLISH, operation_id="01OPPUBLISH")
-    _patch_stacked(monkeypatch, store, unresolved=(op,))
+    _configure_stacked(service, store, unresolved=(op,))
     runner = CliRunner()
     with runner.isolated_filesystem() as d:
         _git_init(d, unborn_git_repo_factory)
@@ -552,7 +549,14 @@ def test_junk_delivery_policy_refuses_fail_closed(monkeypatch, unborn_git_repo_f
     store = _FakeStore(
         state=_state([_node("1.1", objective.NodeStatus.PENDING)], header={"delivery": "bogus"})
     )
-    _patch(monkeypatch, store)
+    _patch(
+        monkeypatch,
+        store,
+        error=DeliveryError(
+            "unknown objective delivery policy: 'bogus'",
+            error_type="invalid_delivery_policy",
+        ),
+    )
     runner = CliRunner()
     with runner.isolated_filesystem() as d:
         _git_init(d, unborn_git_repo_factory)

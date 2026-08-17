@@ -1348,6 +1348,22 @@ def _raw_prepare_git_error(exc: git_mod.GitError | train.TrainReconstructionErro
     return str(exc)
 
 
+@dataclass(frozen=True)
+class _SnapshotObjectiveReader:
+    """Serve the captured replan objective while delegating any unexpected identity read."""
+
+    objective_id: str
+    state: ObjectiveState
+    fallback: DeliveryPersistence
+
+    def get_objective(self, *, objective_id: str) -> ObjectiveState | None:
+        requested = objective_id.strip().lstrip("#").strip()
+        captured_ids = {self.objective_id, self.state.id.strip().lstrip("#").strip()}
+        if requested in captured_ids:
+            return self.state
+        return self.fallback.get_objective(objective_id=objective_id)
+
+
 class Delivery:
     """Repository-scoped delivery status, Prepare, transfer, publish, and sync operations."""
 
@@ -1404,6 +1420,7 @@ class Delivery:
             seams=seams,
             git=self._git,
             github=self._github,
+            normalize_transfer_carry_map=self._persistence.normalize_transfer_carry_map,
         )
         try:
             return transfer_mod._dispatch(fresh, request, runtime=runtime)
@@ -1657,7 +1674,10 @@ class Delivery:
                 error_type="unresolved_operation",
             )
 
-        status_result = self.status(StatusRequest(objective_id=bare))
+        status_result = self._status_with_store(
+            StatusRequest(objective_id=bare),
+            store=_SnapshotObjectiveReader(bare, state, self._persistence),
+        )
         status = status_result.train
         if status is None:
             raise DeliveryError(
@@ -1892,10 +1912,19 @@ class Delivery:
 
     def status(self, request: StatusRequest) -> StatusResult:
         """Reconstruct one delivery status and expose its train/no-train branches explicitly."""
+        return self._status_with_store(request, store=self._persistence)
+
+    def _status_with_store(
+        self,
+        request: StatusRequest,
+        *,
+        store: train.ObjectiveReader,
+    ) -> StatusResult:
+        """Run the shared status boundary with an explicit objective-read authority."""
         try:
             status = train.reconstruct_train(
                 request.objective_id,
-                store=self._persistence,
+                store=store,
                 issues=self._persistence,
                 persistence=self._persistence,
                 git=self._git,

@@ -7870,8 +7870,9 @@ transfer never engages).
 **The protocol** (the lock is acquired before D1, journal fold, planning, and probes, and held
 through completion): fold → rerun routing → plan → **prepare → create → stamp → verify → finalize
 → complete**. Fresh dispatch is private `perk/delivery/transfer.py` machinery reached only through
-`Delivery.transfer`; its `_FreshTransfer` carries `TransferSeams` plus the aggregate Git/GitHub
-authorities, and `_TransferRuntime` is the whole private clock/id/lock test seam. There is no
+`Delivery.transfer`; its `_FreshTransfer` carries `TransferSeams`, aggregate Git/GitHub
+authorities, and the explicitly typed carry-normalization callable required only by fresh
+dispatch. `_TransferRuntime` is the whole private clock/id/lock test seam. There is no
 `run_transfer` compatibility entrypoint. `roll_forward_transfer(seams, record)` remains the
 lock-ASSUMED conclusion core shared by same-run rerun and recover's all-after arm.
 

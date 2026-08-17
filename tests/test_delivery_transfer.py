@@ -187,6 +187,10 @@ class _World:
             url=f"u/{oid}", title=kwargs["title"], header=header, nodes=nodes
         )
         self._maybe_boom("supersede_return")  # created, then crashed before returning
+        if kwargs.get("close_predecessor", True):
+            self.finalize_supersession(
+                old_objective_id=kwargs["old_objective_id"], new_objective_id=oid
+            )
         return ObjectiveRef(id=oid, url=f"u/{oid}", existed=False)
 
     def finalize_supersession(self, *, old_objective_id: str, new_objective_id: str) -> bool:
@@ -1039,6 +1043,21 @@ def test_incremental_to_incremental_uses_the_plain_locked_route():
     assert world.events("reconstruct") == []
     assert world.events("normalize_carries") == []
     assert world.supersede_calls[0]["close_predecessor"] is True
+
+
+def test_incremental_to_incremental_same_run_replay_returns_the_one_successor() -> None:
+    world = _incremental_world()
+    nodes = [_node("9.1", pr="#101")]
+
+    first = world.run(nodes, stacked=False)
+    second = world.run(nodes, stacked=False)
+
+    assert first.rolled_forward is False
+    assert second.rolled_forward is True
+    assert second.successor.id == first.successor.id
+    assert len(world.objectives) == 2
+    assert len(world.supersede_calls) == 1
+    assert world.events("finalize") == [("finalize", PRED, first.successor.id)]
 
 
 def test_structural_blockers_on_the_predecessor_refuse():

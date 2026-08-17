@@ -32,7 +32,7 @@ from collections.abc import Callable, Iterator, Mapping, Sequence
 from contextlib import AbstractContextManager
 from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import Annotated, Literal, Protocol, cast
+from typing import Annotated, Literal, Protocol
 
 from pydantic import BeforeValidator
 
@@ -46,7 +46,6 @@ from perk.delivery.facade import (
     DeliveryError,
     DeliveryGit,
     DeliveryGitHub,
-    DeliveryPersistence,
     TransferRequest,
     TransferResult,
 )
@@ -575,6 +574,7 @@ class _FreshTransfer:
     seams: TransferSeams
     git: DeliveryGit
     github: DeliveryGitHub
+    normalize_transfer_carry_map: Callable[[tuple[tuple[str, str], ...]], dict[str, str]]
 
 
 @dataclass(frozen=True)
@@ -635,15 +635,13 @@ def _dispatch(
                 predecessor=predecessor,
             )
 
-        persistence = cast(DeliveryPersistence, transfer.seams.store)
-        normalized = persistence.normalize_transfer_carry_map(canonical.carry_map)
+        normalized = transfer.normalize_transfer_carry_map(canonical.carry_map)
         normalized_request = replace(canonical, carry_map=tuple(normalized.items()))
         return _run(
             transfer,
             normalized_request,
             predecessor=predecessor,
             predecessor_policy=predecessor_policy,
-            run_id=canonical.run_id,
             mint_operation_id=runtime.mint_operation_id,
         )
 
@@ -722,7 +720,6 @@ def _run(
     *,
     predecessor: ObjectiveState,
     predecessor_policy: objective.DeliveryPolicy,
-    run_id: str,
     mint_operation_id: Callable[[], str],
 ) -> TransferResult:
     seams = transfer.seams
@@ -737,7 +734,7 @@ def _run(
         lineage = _require_predecessor_lineage(predecessor)
         # D11 rerun routing: fold the predecessor journal FIRST (under the lock).
         fold = seams.persistence.read_journal(request.predecessor_id)
-        routed = _route_unresolved(transfer, request, fold, run_id=run_id, lineage=lineage)
+        routed = _route_unresolved(transfer, request, fold, lineage=lineage)
         if isinstance(routed, TransferResult):
             return routed
         abandoned_operation_id = routed
@@ -751,7 +748,7 @@ def _run(
     # a genuinely superseded predecessor.
     superseded_by = predecessor.header.get("superseded_by")
     if superseded_by:
-        found = seams.store.find_objective(run_id=run_id)
+        found = seams.store.find_objective(run_id=request.run_id)
         if found is not None and _bare(str(superseded_by)) == _bare(found.id):
             seams.store.finalize_supersession(
                 old_objective_id=request.predecessor_id, new_objective_id=found.id
@@ -781,7 +778,6 @@ def _run(
         request,
         predecessor=predecessor,
         predecessor_policy=predecessor_policy,
-        run_id=run_id,
     )
     operation_id: str | None = None
     record: PreparedRecord | None = None
@@ -792,7 +788,7 @@ def _run(
             operation_kind=OperationKind.TRANSFER,
             delivery_lineage=manifest.before.delivery_lineage or "",
             objective_id=request.predecessor_id,
-            run_id=run_id,
+            run_id=request.run_id,
             created=seams.now(),
             affected_plans=tuple(
                 plan_id for _, plan_id in manifest_projection(manifest.after) if plan_id
@@ -812,7 +808,7 @@ def _run(
     successor = _execute(
         seams,
         transfer_plan.manifest,
-        run_id=run_id,
+        run_id=request.run_id,
         operation_id=operation_id,
         journaled=transfer_plan.journaled,
     )
@@ -845,7 +841,6 @@ def _route_unresolved(
     request: TransferRequest,
     fold: JournalFold,
     *,
-    run_id: str,
     lineage: str,
 ) -> TransferResult | str | None:
     """The D11 rerun routing over the predecessor fold. Returns a completed
@@ -867,7 +862,7 @@ def _route_unresolved(
     found = transfer.seams.store.find_objective(run_id=record.run_id)
     if found is not None:
         corroborate_successor(transfer.seams.store, found, manifest, record)
-        if record.run_id == run_id:
+        if record.run_id == request.run_id:
             # The same run re-invoked: roll forward to completion from the RECORDED manifest
             # (never live re-derivation while unresolved).
             successor = _execute(
@@ -963,7 +958,6 @@ def plan_transfer(
     *,
     predecessor: ObjectiveState,
     predecessor_policy: objective.DeliveryPolicy,
-    run_id: str,
 ) -> TransferPlan:
     """The D13-split preflight: observe the predecessor (train reconstruction for a stacked
     predecessor; direct reads for an incremental one), enforce D3-D6, and freeze the transfer
@@ -998,7 +992,6 @@ def plan_transfer(
         request,
         predecessor=predecessor,
         projection=projection,
-        run_id=run_id,
     )
 
 
@@ -1175,7 +1168,6 @@ def _plan_from_incremental(
     *,
     predecessor: ObjectiveState,
     projection: tuple[tuple[str, str | None], ...],
-    run_id: str,
 ) -> TransferPlan:
     """The incremental-predecessor (→ stacked successor) preflight: a direct observation path
     — the train abstraction only exists for stacked policy. The claimed prefix is trivially
@@ -1277,7 +1269,7 @@ def _plan_from_incremental(
         )
     _probe_remote_writers(transfer, probe_ids)
 
-    lineage = _incremental_lineage(transfer.seams, predecessor, run_id=run_id)
+    lineage = _incremental_lineage(transfer.seams, predecessor, run_id=request.run_id)
     stored_base = predecessor.header.get("base")
     before = TransferBefore(
         predecessor_objective_id=request.predecessor_id,

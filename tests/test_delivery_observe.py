@@ -110,6 +110,7 @@ class TestRepoDeliveryPersistence:
         authority = observe.RepoDeliveryPersistence(tmp_path)
         monkeypatch.setattr(authority, "_resolve", lambda: (store, object(), object()))
         carries = (("1.1", "ENG-1"),)
+        nodes = [objective.ObjectiveNode("1.1", "work", objective.NodeStatus.PENDING)]
 
         assert authority.normalize_transfer_carry_map(carries) == expected_carries
         assert authority.find_objective(run_id="01RUN") is successor
@@ -119,15 +120,39 @@ class TestRepoDeliveryPersistence:
                 title="Successor",
                 prose="prose",
                 run_id="01RUN",
-                roadmap_nodes=[
-                    objective.ObjectiveNode("1.1", "work", objective.NodeStatus.PENDING)
-                ],
+                status="paused",
+                base="develop",
+                roadmap_nodes=nodes,
                 carry_map=expected_carries,
+                delivery=objective.DeliveryPolicy.STACKED,
+                delivery_lineage="01LINEAGE",
+                close_predecessor=False,
+                dry_run=True,
             )
             is successor
         )
         assert authority.finalize_supersession(old_objective_id="10", new_objective_id="11")
-        assert [call[0] for call in calls] == ["find", "supersede", "finalize"]
+        assert calls == [
+            ("find", "01RUN"),
+            (
+                "supersede",
+                {
+                    "old_objective_id": "10",
+                    "title": "Successor",
+                    "prose": "prose",
+                    "run_id": "01RUN",
+                    "status": "paused",
+                    "base": "develop",
+                    "roadmap_nodes": nodes,
+                    "carry_map": expected_carries,
+                    "delivery": objective.DeliveryPolicy.STACKED,
+                    "delivery_lineage": "01LINEAGE",
+                    "close_predecessor": False,
+                    "dry_run": True,
+                },
+            ),
+            ("finalize", "10", "11"),
+        ]
 
 
 # ----------------------------------------------------------------- RepoDeliveryGit

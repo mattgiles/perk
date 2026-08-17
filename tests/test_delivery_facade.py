@@ -399,6 +399,16 @@ class _StatusDelivery(Delivery):
         self.status_calls.append(request)
         return self.result
 
+    def _status_with_store(
+        self,
+        request: StatusRequest,
+        *,
+        store,
+    ) -> StatusResult:
+        del store
+        self.status_calls.append(request)
+        return self.result
+
 
 def _delivery(
     persistence: DeliveryPersistence | None = None,
@@ -455,7 +465,20 @@ def test_transfer_values_are_frozen_intent_without_constructor_normalization() -
         type(request).__setattr__(request, "title", "changed")
 
 
-def test_transfer_intent_validation_precedes_lock_and_all_authorities() -> None:
+def _forbid_transfer_lock(monkeypatch: pytest.MonkeyPatch) -> None:
+    from perk.delivery import transfer as transfer_mod
+
+    def forbidden(_root: Path):
+        raise AssertionError("invalid transfer intent reached the operation lock")
+
+    runtime = replace(transfer_mod._DEFAULT_TRANSFER_RUNTIME, operation_lock=forbidden)
+    monkeypatch.setattr(transfer_mod, "_DEFAULT_TRANSFER_RUNTIME", runtime)
+
+
+def test_transfer_intent_validation_precedes_lock_and_all_authorities(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _forbid_transfer_lock(monkeypatch)
     persistence = FakeDeliveryPersistence()
     git = FakeDeliveryGit()
     github = FakeDeliveryGitHub()
@@ -536,7 +559,12 @@ def test_transfer_intent_validation_precedes_lock_and_all_authorities() -> None:
         ),
     ),
 )
-def test_transfer_intent_recoverability_matrix_fails_before_io(mutate, error_type: str) -> None:
+def test_transfer_intent_recoverability_matrix_fails_before_io(
+    monkeypatch: pytest.MonkeyPatch,
+    mutate,
+    error_type: str,
+) -> None:
+    _forbid_transfer_lock(monkeypatch)
     persistence = FakeDeliveryPersistence()
     git = FakeDeliveryGit()
     github = FakeDeliveryGitHub()
@@ -848,6 +876,29 @@ def test_replan_prepare_stacked_projects_claims_and_open_prs_from_bound_status()
     assert result.replan.open_pr_plans == (("101", 42),)
     assert service.status_calls == [StatusRequest(objective_id="10")]
     assert persistence.calls == [("get_objective", "10"), ("read_journal", "10")]
+
+
+def test_replan_prepare_stacked_production_status_reuses_the_objective_snapshot() -> None:
+    persistence = FakeDeliveryPersistence(
+        objectives={"10": _objective(header={"delivery": "stacked", "delivery_lineage": "lineage"})}
+    )
+    git = FakeDeliveryGit(base_heads={"main": BaseHeadObservation(sha="a" * 40)})
+
+    result = _delivery(persistence, git).prepare(PrepareRequest(kind="replan", objective_id="10"))
+
+    assert result.replan is not None and result.replan.delivery == "stacked"
+    assert persistence.calls.count(("get_objective", "10")) == 1
+    assert persistence.calls == [
+        ("get_objective", "10"),
+        ("read_journal", "10"),
+        ("read_journal", "10"),
+    ]
+    assert git.calls == [
+        ("fetch",),
+        ("trunk_branch",),
+        ("worktree_branches",),
+        ("base_head", "main"),
+    ]
 
 
 @pytest.mark.parametrize(
