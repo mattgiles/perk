@@ -50,6 +50,9 @@ Delivery.publish(PublishRequest {kind, plan_id, dry_run?, delivery?, objective_i
 Delivery.sync(SyncRequest {mode, objective_id, run_id?, include_base?, dry_run?, adopt_node?,
                            trigger_plan_id?, trigger_run_id?}, consent=...)
   -> SyncResult {operation/result facts; nested Layer, Cascade, AbortPreview}
+Delivery.recover(RecoverRequest {kind=operation_conclusion, objective_id, action?, dry_run?,
+                                 operation_id?}, consent=...)
+  -> RecoverResult {operation-conclusion report; nested rows and consent previews}
 ```
 
 Prepare is a closed flat family: authoring capability; replan facts from one objective snapshot;
@@ -63,18 +66,22 @@ guards. `PublishRequest` is a closed layer/ready matrix; `PublishResult` has exa
 `Layer`/`Ready` details and carries nested cascade facts as `SyncResult` directly. The pure
 `DeliveryTrain` reconstruction, private capability rows, internal `LayerContext`/layer core,
 publication/synchronization engines and runtimes, and production adapters are not package-root
-APIs. `DeliveryError` is the bounded status + Prepare + Transfer + Publish + sync hierarchy;
+APIs. `DeliveryError` is the bounded status + Prepare + Transfer + Publish + sync + Recover hierarchy;
 status still translates only its exact six-code subset, while every Publish error carries joint
 phase/origin metadata. Claimed-prefix/continuation/writer/record-recovery vocabulary stays
-internal. The package root additionally exports `TransferRequest`/`TransferResult` and has exactly
-61 exports; the transfer core/runtime/error and recover/land remain separate internal seams.
+internal. The package root additionally exports `RecoverRequest`/`RecoverResult` and has exactly
+63 exports; the recovery context/runtime/adapters remain internal, and there is no
+`recover_operations` or `RecoverError` compatibility path. `RecoverResult` owns its frozen nested
+details and keeps landing evidence deferred/type-only so importing the package does not create a
+façade↔landing cycle. Landing mutation remains a separate operation seam.
 
 The façade receives three nominal aggregate authorities:
 
 1. **`DeliveryPersistence`.** A backend-aligned authority composing the existing
    `ObjectiveStore`, `IssueBackend`, and train persistence for objective/plan/journal reads,
    plan-body/header effects, prepared/outcome appends, checkpoint-pair writes, transfer carry
-   normalization, successor lookup/creation, and supersession finalization.
+   normalization, successor lookup/creation, supersession finalization, and state-aware objective
+   close for recovery convergence.
    Production backend selection is deferred
    until the first persistence operation, is cached only after the backend identities agree, and
    leaves no partial selection after a failed attempt.
@@ -83,15 +90,18 @@ The façade receives three nominal aggregate authorities:
    publication's single-ref exact-lease push; Prepare's push-URL resolution + no-op atomic probe;
    and sync's genuine Git operations: one
    exact-leased atomic multi-ref push, temp-ref update/delete/list, isolated detached worktree
-   add/remove/prune, detached checkout/rebase, and retained-worktree rebase/dirty state. Existing
+   add/remove/prune, detached checkout/rebase, retained-worktree rebase/dirty state, and recovery's
+   complete worktree-admin path inventory (including stale entries). Existing
    substrate Git records/results/errors are reused unchanged; config/lock/continuation/path/clock
    helpers are not Git authority methods.
 3. **`DeliveryGitHub`.** Stable PR facts, tolerant native-stack membership, rich all-state
    branch-owned PR lookup, strict rich stack facts, and authoring Prepare's host stack-capability +
    base merge-rule facts; publication/ready add only distinct full-PR reads and PR/stack mutations,
    while sync adds active-writer observation with adapter-owned exact trigger corroboration. The
-   widened branch/strict-stack endpoints are reused rather than duplicated. Checks and
-   landing-readiness observations stay with their operation seams until those slices migrate.
+   widened branch/strict-stack endpoints are reused rather than duplicated. Recovery additionally
+   uses the total async merge-handle probe and strict merged-evidence read through this same
+   aggregate. Checks and landing-readiness observations stay with their operation seams until those
+   slices migrate.
 
 The aggregate growth is exact: publication adds persistence `get_plan_body(*, issue_id)` and
 `update_plan_header(*, issue_id, fields)`; Transfer adds carry normalization,
@@ -99,7 +109,9 @@ The aggregate growth is exact: publication adds persistence `get_plan_body(*, is
 `push_with_exact_lease(branch, *, expected_remote_sha)`; GitHub widens/reuses
 `pr_for_branch(branch) -> PullRequest|null` and `strict_stack(number) -> StackRestFacts|null`, and
 adds `get_pr`, `create_pr`, `update_pr_body`, `update_pr_base`, `reopen_pr`, `mark_pr_ready`,
-`create_stack`, and `append_stack`. No parallel branch/stack lookup is introduced.
+`create_stack`, and `append_stack`. Recovery adds exactly persistence `close_objective`, Git
+`worktree_admin_paths`, and GitHub `merge_async_probe` / `merged_evidence`; no parallel
+branch/stack/objective authority is introduced.
 
 The nominal interfaces make authority ownership explicit and support small owned in-memory fakes;
 interface, real adapter, and constructor-configured fake move together. Calls that authoring
@@ -118,8 +130,13 @@ planning performs one status reconstruction; execution performs status followed 
 fetch/verification; replan performs one objective read and, only for stacked delivery, a journal
 read plus bound status classification. Transfer binds the same aggregates into the retained
 private recovery seams and a fresh-only aggregate carrier; its runtime owns only lock/id/clock.
-Publish binds the same authorities plus bound status/sync into one private context; its private
-runtime owns only clock/sleep/id/PR-body validation. Both Publish dry-run arms
+Recover binds those same aggregates plus the façade's cause-aware status bridge into one private
+context. Its private runtime contains only worktree-root resolution, one shared lock, local
+manifest/directory enumeration, the temporarily retained per-layer finalizer, sleep, and clock;
+config resolves before the lock, which is then held through consent, reclassification,
+convergence, metadata reads, and the final sweep. Publish binds the same authorities plus bound
+status/sync into one private context; its private runtime owns only
+clock/sleep/id/PR-body validation. Both Publish dry-run arms
 return before every authority call. Every effectful operation still reconstructs fresh state before
 deciding anything. Mutators return typed
 before/after projections and per-effect outcomes; command handlers do not infer success from log
@@ -677,9 +694,9 @@ The cold CLI namespace reflects the domain split:
 | --- | --- | --- |
 | `perk pr submit` (stacked route) | `Delivery.publish` layer | Layer branch/PR/native stack, then plan identity/checkpoints |
 | `perk pr ready` | `Delivery.publish` ready | Draft→ready when required |
-| `perk objective stack status` | `reconstruct` | Nothing |
+| `perk objective stack status` | `Delivery.status` + internal read-only orphan observation | Nothing |
 | `perk objective stack sync` | `Delivery.sync` cascade/continue/abort | Published branch suffix, then checkpoints; or retained local conflict state |
-| `perk objective stack recover` | `recover` | Only effects required to conclude an existing prepared operation |
+| `perk objective stack recover` | `Delivery.recover` operation conclusion | Only effects required to conclude an existing prepared operation |
 | `perk objective stack land` | `land` | GitHub stack merge, then idempotent bookkeeping |
 
 > **Status (landed vs deferred):** `stack status`, the complete `stack sync` control surface,
@@ -690,7 +707,11 @@ The cold CLI namespace reflects the domain split:
 > `/objective-land`, contracts §8.56), interrupted-landing recovery (the §8.51 LAND arm:
 > handle×observation classification, automatic all-after roll-forward, confirmed abandon,
 > the `--accept-prefix` breach, and the finalization-convergence pass), and the
-> ordered-journal-evidence objective reconciliation drive are all landed.
+> ordered-journal-evidence objective reconciliation drive are all landed. The broader landing
+> mutation/finalization machinery is still a direct operation seam awaiting its own façade
+> migration; recover keeps only a private runtime callback to the shared per-layer finalizer.
+> Cancellation-metadata diagnosis/repair is likewise a separate doctor/recover variant, not a
+> placeholder in the operation-conclusion request family.
 >
 > **Live-proof addendum (2026-08-13):** the dogfood gate **PASSED**: real GitHub merge-async
 > atomically merged a 3-layer train, the land worker was deliberately SIGKILLed after its
@@ -703,7 +724,13 @@ An explicit objective argument wins; otherwise only the active plan/worktree may
 does not search and guess among open objectives. Status is confirmation-free. Adopt, abandonment,
 and landing confirm interactively or require `--yes` headlessly; deterministic roll-forward
 recovery does not ask twice. When several unresolved operations are detected, recovery requires an
-explicit operation ID.
+explicit operation ID. `RecoverRequest.action` is one closed service choice even though the CLI
+retains its existing booleans; one union consent callback renders either action preview, and a
+positive answer is followed by from-scratch classification. Fold-first TRANSFER rejects the
+LAND-only accept-prefix choice before observation/effects. All fallible result metadata reads
+precede cleanup so the manifest-protected orphan sweep is the final authority/effect phase.
+Detailed stack status deliberately keeps its direct package-internal `observe_orphans` read: it is
+fail-honest, lock-free, and cannot mutate or become a second recover request variant.
 
 Warm human commands remain gesture-oriented rather than mirroring the cold subgroup mechanically:
 

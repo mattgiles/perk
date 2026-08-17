@@ -4,15 +4,19 @@
 projection to :mod:`perk.delivery.train`; ``prepare`` owns authoring capability, replan facts,
 plan identity, stacked-planning classification, and executable layer-start preparation;
 ``transfer`` owns replan routing and mutation; ``publish`` owns layer publication and
-draft-to-ready routing; ``sync`` dispatches the suffix transaction engine. Construction remains
-assignment-only and pure derivation stays in this module.
+draft-to-ready routing; ``sync`` dispatches the suffix transaction engine; and ``recover`` owns
+operation conclusion. Construction remains assignment-only and pure derivation stays in this
+module.
 """
 
 from abc import ABC, abstractmethod
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
+
+if TYPE_CHECKING:
+    from perk.delivery.landing import LandEvidence
 
 from perk import objective
 from perk.backends.issue_backend import IssueBackendError, PlanHeaderUpdate, PlanState
@@ -72,6 +76,11 @@ _DELIVERY_ERROR_TYPES = frozenset(
         "continuation_invalid",
         "rebase_in_progress",
         "operation_in_progress",
+        "operation_ambiguous",
+        "operation_not_found",
+        "abandon_blocked",
+        "accept_blocked",
+        "unsupported_operation_kind",
         "journal_corruption",
         "journal_record_too_large",
         "invalid_config",
@@ -118,6 +127,8 @@ type PrepareKind = Literal["authoring", "plan_identity", "layer_start", "replan"
 type PrepareMode = Literal["strict", "best_effort", "planning", "execution"]
 type PublishKind = Literal["layer", "ready"]
 type PublishDelivery = Literal["incremental", "stacked"]
+type RecoverKind = Literal["operation_conclusion"]
+type RecoverAction = Literal["report", "abandon", "accept_prefix"]
 type DeliveryPhase = Literal["layer", "cascade", "ready"]
 type DeliveryOrigin = Literal["domain", "git", "github", "delivery"]
 type PlanningDecisionKind = Literal[
@@ -698,6 +709,106 @@ type _SyncConsent = Callable[[SyncResult.Cascade | SyncResult.AbortPreview], boo
 
 
 @dataclass(frozen=True)
+class RecoverRequest:
+    """Request conclusion of one objective's interrupted delivery operation."""
+
+    kind: RecoverKind
+    objective_id: str
+    action: RecoverAction = "report"
+    dry_run: bool = False
+    operation_id: str | None = None
+
+    def __post_init__(self) -> None:
+        if self.kind != "operation_conclusion":
+            raise ValueError(f"unknown recover kind: {self.kind!r}")
+        if self.action not in ("report", "abandon", "accept_prefix"):
+            raise ValueError(f"unknown recover action: {self.action!r}")
+        if not _nonblank(self.objective_id):
+            raise ValueError("recover objective_id must be nonblank")
+        if self.dry_run and self.action != "report":
+            raise ValueError("dry-run recover cannot request an acting conclusion")
+
+
+@dataclass(frozen=True)
+class RecoverResult:
+    """The operation-conclusion report returned by :meth:`Delivery.recover`."""
+
+    @dataclass(frozen=True)
+    class MergedPrefix:
+        node_id: str
+        pr_number: int
+        merge_commit_sha: str
+
+    @dataclass(frozen=True)
+    class RemainderPr:
+        pr_number: int
+        state: str
+        head_sha: str
+
+    @dataclass(frozen=True)
+    class LandedLayer:
+        node_id: str
+        plan_id: str
+        pr_number: int
+        merge_commit_sha: str
+        base_sha: str
+        head_sha: str
+        finalized: bool | None
+
+    @dataclass(frozen=True)
+    class Operation:
+        operation_id: str
+        kind: str
+        prepared_created: str
+        classification: str
+        action: str
+        detail: str
+        merged_layers: tuple["RecoverResult.MergedPrefix", ...] = ()
+        remainder: tuple["RecoverResult.RemainderPr", ...] = ()
+
+    @dataclass(frozen=True)
+    class SweepFailure:
+        target: str
+        error: str
+
+    @dataclass(frozen=True)
+    class AbandonPreview:
+        operation_id: str
+        kind: str
+        prepared_created: str
+        detail: str
+
+    @dataclass(frozen=True)
+    class AcceptPrefixPreview:
+        operation_id: str
+        prepared_created: str
+        merged_layers: tuple["RecoverResult.MergedPrefix", ...]
+        remainder: tuple["RecoverResult.RemainderPr", ...]
+        detail: str
+
+    kind: RecoverKind
+    objective_id: str
+    objective_url: str
+    redirected_from: str | None
+    dry_run: bool
+    selection_required: bool
+    operations: tuple[Operation, ...]
+    swept_worktrees: tuple[str, ...]
+    swept_refs: tuple[str, ...]
+    sweep_failures: tuple[SweepFailure, ...]
+    sweep_skipped: str | None
+    landed_layers: tuple[LandedLayer, ...] = ()
+    objective_closed: bool = False
+    reconcile_evidence: "LandEvidence | None" = None
+    notes: tuple[str, ...] = ()
+
+
+type _RecoverConsent = Callable[
+    [RecoverResult.AbandonPreview | RecoverResult.AcceptPrefixPreview], bool
+]
+
+
+@dataclass(frozen=True)
 class StatusRequest:
     """Request one objective's current delivery status."""
 
@@ -751,6 +862,11 @@ class DeliveryPersistence(ABC):
     @abstractmethod
     def get_objective(self, *, objective_id: str) -> ObjectiveState | None:
         """Read one objective by backend-owned id."""
+        ...
+
+    @abstractmethod
+    def close_objective(self, *, objective_id: str, dry_run: bool = False) -> bool:
+        """Close one completed aggregate objective."""
         ...
 
     @abstractmethod
@@ -910,6 +1026,11 @@ class DeliveryGit(ABC):
         ...
 
     @abstractmethod
+    def worktree_admin_paths(self) -> tuple[Path, ...]:
+        """Return every path in Git's worktree administration inventory."""
+        ...
+
+    @abstractmethod
     def base_head(self, branch: str) -> train.BaseHeadObservation:
         """Observe the authoritative live base head tolerantly."""
         ...
@@ -1010,6 +1131,16 @@ class DeliveryGitHub(ABC):
     @abstractmethod
     def strict_stack(self, number: int) -> stacks.StackRestFacts | None:
         """Read the strict native stack containing one PR."""
+        ...
+
+    @abstractmethod
+    def merge_async_probe(self, number: int, *, uuid: str) -> stacks.MergeAsyncProbe:
+        """Probe one recorded asynchronous merge handle."""
+        ...
+
+    @abstractmethod
+    def merged_evidence(self, number: int) -> stacks.PrMergedEvidence | None:
+        """Read strict post-merge evidence for one PR."""
         ...
 
     @abstractmethod
@@ -1365,7 +1496,7 @@ class _SnapshotObjectiveReader:
 
 
 class Delivery:
-    """Repository-scoped delivery status, Prepare, transfer, publish, and sync operations."""
+    """Repository-scoped delivery operations over three aggregate authorities."""
 
     def __init__(
         self,
@@ -1378,34 +1509,35 @@ class Delivery:
         self._git = git
         self._github = github
 
+    def _reconstruct_train_status(self, _repo_root: Path, objective_id: str) -> train.TrainStatus:
+        """Recover the original reconstruction cause where transfer/recover need it."""
+        try:
+            result = self.status(StatusRequest(objective_id=objective_id))
+        except DeliveryError as exc:
+            cause = exc.__cause__
+            if isinstance(
+                cause,
+                (
+                    train.TrainReconstructionError,
+                    ObjectiveStoreError,
+                    IssueBackendError,
+                    TrainPersistenceError,
+                ),
+            ):
+                raise cause from exc
+            raise
+        if result.train is not None:
+            return result.train
+        return train.NoDeliveryTrain(
+            objective_id=result.objective_id,
+            objective_url=result.objective_url,
+            redirected_from=result.redirected_from,
+            reason=result.no_train_reason or "no delivery train",
+        )
+
     def transfer(self, request: TransferRequest) -> TransferResult:
         """Transfer one objective replan intent behind the aggregate authorities."""
         from perk.delivery import transfer as transfer_mod  # noqa: PLC0415 — façade/engine cycle
-
-        def reconstruct(_repo_root: Path, objective_id: str) -> train.TrainStatus:
-            try:
-                result = self.status(StatusRequest(objective_id=objective_id))
-            except DeliveryError as exc:
-                cause = exc.__cause__
-                if isinstance(
-                    cause,
-                    (
-                        train.TrainReconstructionError,
-                        ObjectiveStoreError,
-                        IssueBackendError,
-                        TrainPersistenceError,
-                    ),
-                ):
-                    raise cause from exc
-                raise
-            if result.train is not None:
-                return result.train
-            return train.NoDeliveryTrain(
-                objective_id=result.objective_id,
-                objective_url=result.objective_url,
-                redirected_from=result.redirected_from,
-                reason=result.no_train_reason or "no delivery train",
-            )
 
         runtime = transfer_mod._DEFAULT_TRANSFER_RUNTIME
         seams = transfer_mod.TransferSeams(
@@ -1413,7 +1545,7 @@ class Delivery:
             store=self._persistence,
             issues=self._persistence,
             persistence=self._persistence,
-            reconstruct=reconstruct,
+            reconstruct=self._reconstruct_train_status,
             now=runtime.now,
         )
         fresh = transfer_mod._FreshTransfer(
@@ -1438,6 +1570,42 @@ class Delivery:
             raise DeliveryError(
                 f"objective create failed\n{exc}", error_type="github_error"
             ) from exc
+
+    def recover(
+        self,
+        request: RecoverRequest,
+        *,
+        consent: _RecoverConsent | None = None,
+    ) -> RecoverResult:
+        """Conclude interrupted operations through the aggregate delivery authorities."""
+        from perk.delivery import recover as recover_mod  # noqa: PLC0415 — façade/engine cycle
+        from perk.delivery import sync as sync_mod  # noqa: PLC0415 — shared runtime error
+
+        context = recover_mod._RecoverContext(
+            repo_root=self._git.repo_root,
+            persistence=self._persistence,
+            git=self._git,
+            github=self._github,
+            reconstruct=self._reconstruct_train_status,
+            runtime=recover_mod._DEFAULT_RECOVER_RUNTIME,
+        )
+        try:
+            return recover_mod._dispatch(context, request, consent=consent)
+        except DeliveryError:
+            raise
+        except train.TrainReconstructionError as exc:
+            code = exc.error_type if exc.error_type in _DELIVERY_ERROR_TYPES else "github_error"
+            raise DeliveryError(str(exc), error_type=code) from exc
+        except JournalCorruptionError as exc:
+            raise DeliveryError(str(exc), error_type="journal_corruption") from exc
+        except JournalRecordTooLarge as exc:
+            raise DeliveryError(str(exc), error_type="journal_record_too_large") from exc
+        except git_mod.GitError as exc:
+            raise DeliveryError(str(exc), error_type="git_error") from exc
+        except sync_mod.SyncConfigurationError as exc:
+            raise DeliveryError(str(exc), error_type="invalid_config") from exc
+        except (GitHubError, IssueBackendError, ObjectiveStoreError, TrainPersistenceError) as exc:
+            raise DeliveryError(str(exc), error_type="github_error") from exc
 
     def publish(self, request: PublishRequest) -> PublishResult:
         """Publish one layer or open one layer's PR for review."""

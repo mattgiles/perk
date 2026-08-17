@@ -6490,7 +6490,10 @@ reports no pending continuation, and an unparseable manifest file reports a
 than being hidden; (b) the orphaned-sync-residue observation through recover's shared
 classifier (§8.51), **fail-honest**: a Config-load or git/fs read failure — and the
 classifier's own unparseable-manifest skip — reports `observed: false` plus the reason;
-`observed: true` with empty lists means *genuinely clean*. The reported worktrees include
+`observed: true` with empty lists means *genuinely clean*. This status-only path calls the
+package-internal read-only `recover.observe_orphans` classifier directly; it is deliberately not a
+second `RecoverRequest` variant, takes no operation lock, and performs no cleanup. The reported
+worktrees include
 the stale worktree-admin entries (directory gone, inventory record left) beside the on-disk
 ones — both are would-be sweep targets. An unobserved state is never
 serialized as clean empty lists (the Config load is tolerant only in that it degrades the
@@ -7463,13 +7466,35 @@ exits 2.
 
 ## §8.51 · Stack recovery (`perk objective stack recover`) + the warm stack surface
 
-**The operation** is `perk.delivery.recover.recover_operations` — **conclude-only** recovery:
-classify every unresolved stack operation against fresh authority, conclude the one selected
-target (deterministic roll-forward, a confirmed abandon-with-proof, or a confirmed
-accept-prefix breach), run the LAND finalization-convergence pass, then sweep orphaned
-machine-local sync residue. Retry is never recover's verb — the report's detail names the
-owning command (`stack sync`, `/submit`, `stack land`). Runs under the shared operation lock (§8.49);
-`--dry-run` reports everything and mutates nothing.
+**The operation** is `Delivery.recover(RecoverRequest(...), consent=...)` — **conclude-only**
+recovery behind the repository-scoped delivery façade. The closed request family currently has
+exactly one `kind`, `operation_conclusion`, with `{objective_id, action, dry_run, operation_id}`;
+`action ∈ {report, abandon, accept_prefix}` replaces the old pair of service booleans. A supplied
+operation id is carried verbatim (including `""`) so target selection remains the authority and
+returns `operation_not_found` for a nonmatch. The frozen `RecoverResult` owns nested
+`Operation`, `MergedPrefix`, `RemainderPr`, `LandedLayer`, `SweepFailure`, `AbandonPreview`, and
+`AcceptPrefixPreview` records and adds the un-serialized `kind` discriminator; its
+`reconcile_evidence` annotation is deferred/type-only to avoid a façade↔landing import cycle.
+
+The operation classifies every unresolved stack operation against fresh authority, concludes the
+one selected target (deterministic roll-forward, a consented abandon-with-proof, or a consented
+accept-prefix breach), runs the LAND finalization-convergence pass, then sweeps orphaned
+machine-local sync residue. `consent` receives either preview type; `None` auto-approves an
+explicitly requested library action, while the cold command always supplies its
+interactive/headless callback. Retry is never recover's verb — the report's detail names the owning command (`stack
+sync`, `/submit`, `stack land`). Runs under the shared operation lock (§8.49); `--dry-run` reports
+everything and mutates nothing.
+
+The private engine receives one `_RecoverContext` bound to the same three aggregate authorities as
+all other façade operations plus `_RecoverRuntime` for worktree-root loading (the existing sync
+config helper), lock, continuation/on-disk enumeration, per-layer finalization, sleep, and clock.
+The aggregate growth is exact: persistence adds `close_objective`; Git adds
+`worktree_admin_paths`; GitHub adds `merge_async_probe` and `merged_evidence`. Every other
+journal/objective/plan/ref/PR/stack effect reuses an existing authority method. Runtime and
+aggregate adapters are package-internal; no repo path, config, backend, lock, clock, factory, or
+probe callback crosses `RecoverRequest`. Config resolves before one lock acquisition, and that
+single non-reentrant lock stays held through classification, consent, from-scratch
+reclassification, conclusion/convergence, result metadata reads, and the final sweep.
 
 **The phased protocol.** (0) **Fold-first TRANSFER routing (§8.53)**: read the REQUESTED
 objective's succession journal before any train gate — a sole unresolved TRANSFER dispatches
@@ -7482,10 +7507,16 @@ recorded manifest + the `run_id` successor lookup: successor found + corroborate
 supersedes/lineage corroboration) → `all_after`, rolled forward automatically through
 `transfer.roll_forward_transfer` under the same held lock; absent → `all_before`, abandonable
 with the `successor_absent` proof under `--abandon` (confirmed + re-classified); an
-undecodable manifest or a corroboration mismatch → a report-only `mixed` row. Hints name the
+undecodable manifest or a corroboration mismatch → a report-only `mixed` row. `accept_prefix` is
+LAND-only: fold-first TRANSFER rejects it as `accept_blocked` before successor classification,
+mutation, finalization, or sweep, including the otherwise-automatic all-after arm. Hints name the
 predecessor id (the documented recovery entry for an interrupted transfer is
-`recover <predecessor-id>`); the transfer seams ride an injectable factory
-(`transfer_seams_factory`); `TransferError` passes through the CLI under §8.53's vocabulary.
+`recover <predecessor-id>`). Recovery binds `TransferSeams` from the same aggregate persistence
+authority plus the façade's cause-aware reconstruction bridge; `TransferError` remains a
+package-internal `DeliveryError` subtype and passes through unchanged. After the selected TRANSFER
+report/conclusion, the result objective URL/state is read before `_sweep`; a typed metadata-read
+failure therefore leaves every orphan untouched and cleanup is truly the final authority/effect
+phase.
 (0b) **Fold-first sole-PUBLISH routing (§8.54)**: when the ACTIVE train's fold — read after
 reconstruction (which follows supersession forward), the SAME snapshot the classifier
 consumes; the requested fold walks predecessors only, so a successor-recorded PUBLISH is
@@ -7652,7 +7683,7 @@ still classified), except under `--abandon`/`--accept-prefix`, where acting ambi
 LAND rolls forward automatically through `landing.roll_forward_land` (above); `all_after`
 PUBLISH reports (its roll-forward already lives in `/submit`'s own resume — the report says
 so). `--abandon` requires `all_before` (else `abandon_blocked`), renders the
-`AbandonPreview` through the `approve` callback, and **re-classifies after confirmation**
+`AbandonPreview` through the union `consent` callback, and **re-classifies after confirmation**
 (the human may pause arbitrarily long on the prompt; a post-confirmation observation change
 is `abandon_blocked`, nothing journaled) before appending the `abandoned` outcome (observed
 = the all-before proof; for LAND, reason `recovered_before_state` + the reobserved rows).
@@ -7680,12 +7711,14 @@ are collected as explicit
 `sweep_failures: [{target, error}]`, never silent, never aborting the remaining sweep.
 Typed refusals never sweep (the sweep runs only after a successful conclude/report phase).
 
-**Errors.** `RecoverError.error_type` ∈ {`operation_ambiguous`, `operation_not_found`,
-`abandon_blocked`, `accept_blocked`, `unsupported_operation_kind`, `operation_in_progress`,
-`not_stacked`,
-`invalid_input`}; the roll-forward tail raises §8.49's own arms (`sync_drift`, `pr_drift`,
-`postcondition_unverified`, …) which pass through verbatim; infra and reconstruction errors
-map at the CLI boundary exactly as sync's.
+**Errors.** Recovery uses the single bounded `DeliveryError`; its recovery-specific additions are
+`operation_ambiguous`, `operation_not_found`, `abandon_blocked`, `accept_blocked`, and
+`unsupported_operation_kind`, while it reuses `operation_in_progress`, `not_stacked`,
+`invalid_input`, the sync/transfer tail codes, and journal/config/infra codes already in the façade
+vocabulary. Existing `DeliveryError`s pass unchanged. The façade boundary translates allowed
+reconstruction codes, journal corruption/oversize, raw Git, GitHub/backend/persistence, and sync
+config failures; unexpected programming/filesystem exceptions propagate. The cold worker catches
+that one error family without changing code/message.
 
 **The cold worker.** `perk objective stack recover [OBJECTIVE] [--dry-run]
 [--operation ULID] [--abandon] [--accept-prefix] [--yes] [--json]`
@@ -7694,7 +7727,11 @@ conclude-only recovery needs no run identity. `--dry-run` × `--abandon`/`--acce
 and `--abandon` × `--accept-prefix` are `invalid_input`
 (preview first, then act; one conclusion per invocation). Both confirmations follow sync's
 discipline (stderr
-render, `--yes` auto-approve, non-interactive without `--yes` → `confirmation_required`).
+render, `--yes` auto-approve, non-interactive without `--yes` → `confirmation_required`). After
+flag-first validation and the retained eager validation-only config read, the command resolves one
+Delivery, maps the booleans to one closed action, constructs one `RecoverRequest`, calls
+`Delivery.recover` once with the union consent callback, and renders the existing DTO. It catches
+one `DeliveryError`; no low-level recovery/Git/GitHub/backend error ladder remains.
 Envelope `ObjectiveStackRecoverOut` (snapshotted at
 `shared/schemas/outputs/objective-stack-recover.schema.json`), declaration order pinned:
 `{success, objective{id,url,redirected_from}, dry_run, selection_required, operations:
@@ -7708,7 +7745,8 @@ objective_closed, reconcile_evidence|null (§8.56's shape), notes[]}` with `clas
 {reported, rolled_forward,
 abandoned, accepted_prefix, declined}`; the LAND fields are trailing additive growth
 (`merged_layers`/`remainder` are the external-prefix structured preview, dry-run included —
-empty on other rows); under `dry_run` the swept lists carry the WOULD-BE targets. The human
+empty on other rows); the DTO deliberately ignores `RecoverResult.kind`; under `dry_run` the swept
+lists carry the WOULD-BE targets. The human
 render prints the landed rows, the close line, and the copyable `/objective-reconcile <id>`
 hint on close-with-evidence. Exit
 discipline: 0 = successful classification/report/no-op/actions (including declined and
@@ -8041,8 +8079,11 @@ stamped by THIS run's successor re-finalizes idempotently and returns success (t
 interrupted-finalize tail and the idempotent re-save); any other stamp → `objective_not_open`.
 The incremental→stacked arm's lineage resolution is likewise rerun-convergent: a same-run
 successor's stored lineage wins over copy-or-mint (a fresh mint mid-convergence would fork the
-train identity). `perk objective stack recover` owns cross-session conclusion (§8.51's TRANSFER
-arm).
+train identity). `perk objective stack recover` owns cross-session conclusion through
+`Delivery.recover(RecoverRequest(kind="operation_conclusion", ...))` (§8.51's TRANSFER arm).
+That arm binds `TransferSeams` directly from the façade's aggregate persistence and cause-aware
+status bridge—never from a caller factory—and rejects the LAND-only `accept_prefix` action before
+successor observation or any effect.
 
 **The door posture** (`objective replan`, §8.32). The door calls
 `Delivery.prepare(PrepareRequest(kind="replan", objective_id=...))` once. Prepare reads the
@@ -8488,7 +8529,13 @@ guessed success); `merge_async_result` / `pr_merged_evidence` (per-PR
 `state + baseRefName + headRefName + headRefOid + mergeCommit.oid` — the identity fields
 the verification corroborates; a zero-exit reply carrying an explicitly-null PR node is the
 ordinary lookup miss, `None`) are **strict** (they decide whether a journal outcome may be
-appended — junk raises, never degrades).
+appended — junk raises, never degrades). Operation-conclusion recovery reaches the total handle
+probe and strict merged evidence through the aggregate `DeliveryGitHub.merge_async_probe` and
+`DeliveryGitHub.merged_evidence` methods; objective close likewise uses
+`DeliveryPersistence.close_objective`. Recovery binds LAND issue reads only to the existing
+`train.PlanReader` shape, while provider `backend_id` remains landing-mutation-only. Its temporarily
+retained per-layer `finalize_landed_plan(close_objective_on_complete=False)` call is private
+`_RecoverRuntime` machinery, not a fourth public authority or request field.
 
 **The protocol, in order.** (1) The operation lock. (2) Reconstruct
 (`observe.resolve_train_reads` + `reconstruct_train`); `NoDeliveryTrain` or a null

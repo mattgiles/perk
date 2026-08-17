@@ -1,6 +1,6 @@
 """``perk objective stack recover`` — the conclude-only recovery worker (contracts.md §8.51).
 
-The cold surface over ``perk.delivery.recover.recover_operations``: classify every
+The cold surface over ``Delivery.recover``: classify every
 unresolved stack operation, conclude the one selected target (automatic
 SYNC/ADOPT/TRANSFER/LAND all-after roll-forward; confirmed ``--abandon`` with proof;
 confirmed ``--accept-prefix`` recording an externally merged LAND prefix as a breach), run
@@ -14,8 +14,6 @@ not-a-repo.
 
 import click
 
-from perk.backends.issue_backend import IssueBackendError
-from perk.backends.objective_store import ObjectiveStoreError
 from perk.boundary import OutputModel
 from perk.cli.commands.objective.stack.land_cmd import ReconcileEvidenceOut
 from perk.cli.commands.objective.stack.shared import resolve_objective_id
@@ -23,11 +21,7 @@ from perk.cli.commands.objective.stack.status_cmd import ObjectiveOut
 from perk.cli.context import require_config, require_repo
 from perk.cli.emit import emit, fail
 from perk.cli.ensure import UserFacingCliError
-from perk.delivery import recover, sync, train, transfer
-from perk.delivery.journal import JournalCorruptionError
-from perk.delivery.persistence import TrainPersistenceError
-from perk.github import GitHubError
-from perk.substrate import git
+from perk.delivery import DeliveryError, RecoverRequest, RecoverResult, resolve_delivery
 from perk.substrate.output import user_output
 
 # --- the ``--json`` envelope (OutputModel family; declaration order load-bearing) ---
@@ -63,7 +57,7 @@ class RecoverOperationOut(OutputModel):
     remainder: tuple[RemainderPrOut, ...] = ()
 
     @classmethod
-    def from_domain(cls, row: recover.OperationRow) -> "RecoverOperationOut":
+    def from_domain(cls, row: RecoverResult.Operation) -> "RecoverOperationOut":
         return cls(
             operation_id=row.operation_id,
             kind=row.kind,
@@ -97,7 +91,7 @@ class RecoverLandedLayerOut(OutputModel):
     finalized: bool | None
 
     @classmethod
-    def from_domain(cls, row: recover.LandedLayerRow) -> "RecoverLandedLayerOut":
+    def from_domain(cls, row: RecoverResult.LandedLayer) -> "RecoverLandedLayerOut":
         return cls(
             node_id=row.node_id,
             plan_id=row.plan_id,
@@ -134,7 +128,7 @@ class ObjectiveStackRecoverOut(OutputModel):
     notes: tuple[str, ...] = ()
 
     @classmethod
-    def from_domain(cls, result: recover.RecoverResult) -> "ObjectiveStackRecoverOut":
+    def from_domain(cls, result: RecoverResult) -> "ObjectiveStackRecoverOut":
         return cls(
             success=True,
             objective=ObjectiveOut(
@@ -166,38 +160,29 @@ class ObjectiveStackRecoverOut(OutputModel):
 # --- confirmation + rendering (stderr only; --json never contaminates stdout) ---
 
 
-def _make_approve(*, yes: bool):
-    """The abandon confirmation (the sync command's discipline): render exactly what an
-    affirmative answer abandons, ``--yes`` auto-approves, non-interactive without ``--yes``
-    is the typed ``confirmation_required`` refusal — never a hang, never a silent journal
-    write."""
+def _make_consent(*, yes: bool):
+    """Render either conclusion preview with the existing confirmation discipline."""
 
-    def approve(preview: recover.AbandonPreview) -> bool:
-        user_output(
-            f"Abandon operation {preview.operation_id} ({preview.kind}, prepared "
-            f"{preview.prepared_created})?"
-        )
-        user_output(f"  {preview.detail}")
-        if yes:
-            return True
-        stdin = click.get_text_stream("stdin")
-        if not stdin.isatty():
-            raise UserFacingCliError(
-                "Abandoning an unresolved operation needs confirmation — rerun "
-                "interactively or pass --yes.",
-                error_type="confirmation_required",
+    def consent(
+        preview: RecoverResult.AbandonPreview | RecoverResult.AcceptPrefixPreview,
+    ) -> bool:
+        if isinstance(preview, RecoverResult.AbandonPreview):
+            user_output(
+                f"Abandon operation {preview.operation_id} ({preview.kind}, prepared "
+                f"{preview.prepared_created})?"
             )
-        return click.confirm("Abandon it?", err=True)
+            user_output(f"  {preview.detail}")
+            if yes:
+                return True
+            stdin = click.get_text_stream("stdin")
+            if not stdin.isatty():
+                raise UserFacingCliError(
+                    "Abandoning an unresolved operation needs confirmation — rerun "
+                    "interactively or pass --yes.",
+                    error_type="confirmation_required",
+                )
+            return click.confirm("Abandon it?", err=True)
 
-    return approve
-
-
-def _make_accept_approve(*, yes: bool):
-    """The accept-prefix confirmation: render exactly what an affirmative answer records —
-    the merged prefix (the breach) and the remainder proof — with the same ``--yes`` /
-    non-interactive discipline as the abandon gate."""
-
-    def approve(preview: recover.AcceptPrefixPreview) -> bool:
         user_output(
             f"Accept the externally merged prefix of operation {preview.operation_id} "
             f"(land, prepared {preview.prepared_created}) as a recorded degraded-atomicity "
@@ -221,10 +206,10 @@ def _make_accept_approve(*, yes: bool):
             )
         return click.confirm("Accept it?", err=True)
 
-    return approve
+    return consent
 
 
-def _render_result(result: recover.RecoverResult) -> None:
+def _render_result(result: RecoverResult) -> None:
     if result.dry_run:
         user_output("dry run: nothing was concluded, journaled, or swept")
     if not result.operations:
@@ -347,36 +332,19 @@ def recover_stack(
         return
     try:
         repo_root = require_repo(ctx)
-        config = require_config(ctx)
+        require_config(ctx)
         objective_id = resolve_objective_id(repo_root, objective)
-        result = recover.recover_operations(
-            repo_root,
+        action = "accept_prefix" if accept_prefix else "abandon" if abandon else "report"
+        request = RecoverRequest(
+            kind="operation_conclusion",
             objective_id=objective_id,
-            worktree_root=config.worktree_root,
+            action=action,
             dry_run=dry_run,
-            abandon=abandon,
-            accept_prefix=accept_prefix,
             operation_id=operation_id,
-            approve=_make_approve(yes=yes),
-            accept_approve=_make_accept_approve(yes=yes),
         )
-    except (recover.RecoverError, sync.SyncError, transfer.TransferError) as exc:
-        # RecoverError is §8.51's vocabulary; the roll-forward tail's SyncError arms
-        # (sync_drift / pr_drift / postcondition_unverified / …) pass through under §8.49's,
-        # and the TRANSFER arm's TransferError arms under §8.53's.
+        result = resolve_delivery(repo_root).recover(request, consent=_make_consent(yes=yes))
+    except DeliveryError as exc:
         fail(ctx, as_json=as_json, error_type=exc.error_type, message=str(exc))
-        return
-    except train.TrainReconstructionError as exc:
-        fail(ctx, as_json=as_json, error_type=exc.error_type, message=str(exc))
-        return
-    except JournalCorruptionError as exc:
-        fail(ctx, as_json=as_json, error_type="journal_corruption", message=str(exc))
-        return
-    except git.GitError as exc:
-        fail(ctx, as_json=as_json, error_type="git_error", message=str(exc))
-        return
-    except (IssueBackendError, ObjectiveStoreError, TrainPersistenceError, GitHubError) as exc:
-        fail(ctx, as_json=as_json, error_type="github_error", message=str(exc))
         return
     except UserFacingCliError as exc:
         fail(

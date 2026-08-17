@@ -1,4 +1,9 @@
-"""Constructor-configured fakes for the delivery façade's aggregate authorities."""
+"""Constructor-configured fakes for the delivery façade's aggregate authorities.
+
+The fakes implement every nominal persistence, Git, and GitHub capability used by status and the
+mutation families, including operation conclusion. Calls are recorded and failures are keyed by
+call shape so boundary and ordering tests use the same three-authority contract as production.
+"""
 
 from collections.abc import Mapping
 from copy import deepcopy
@@ -66,6 +71,7 @@ class FakeDeliveryPersistence(_FailureMixin, DeliveryPersistence):
         successors_by_run: Mapping[str, ObjectiveRef] | None = None,
         preserve_transfer_carries: bool = False,
         finalize_result: bool = True,
+        close_result: bool = True,
         errors: Mapping[Call, Exception] | None = None,
     ) -> None:
         super().__init__(errors)
@@ -85,6 +91,7 @@ class FakeDeliveryPersistence(_FailureMixin, DeliveryPersistence):
         self._successors_by_run = dict(successors_by_run or {})
         self._preserve_transfer_carries = preserve_transfer_carries
         self._finalize_result = finalize_result
+        self._close_result = close_result
         self.calls: list[Call] = []
 
     def get_objective(self, *, objective_id: str) -> ObjectiveState | None:
@@ -92,6 +99,16 @@ class FakeDeliveryPersistence(_FailureMixin, DeliveryPersistence):
         self.calls.append(call)
         self._raise_failure(call)
         return self._objectives.get(objective_id)
+
+    def close_objective(self, *, objective_id: str, dry_run: bool = False) -> bool:
+        call: Call = ("close_objective", objective_id, dry_run)
+        self.calls.append(call)
+        self._raise_failure(call)
+        if self._close_result and not dry_run:
+            state = self._objectives.get(objective_id)
+            if state is not None:
+                self._objectives[objective_id] = replace(state, state="closed")
+        return self._close_result
 
     def get_plan(self, *, issue_id: str) -> PlanState | None:
         call: Call = ("get_plan", issue_id)
@@ -241,6 +258,7 @@ class FakeDeliveryGit(_FailureMixin, DeliveryGit):
         atomic_push_errors: Mapping[str, str] | None = None,
         ancestry: Mapping[tuple[str, str], bool | None] | None = None,
         worktrees: tuple[WorktreeFacts, ...] = (),
+        worktree_admin_paths: tuple[Path, ...] = (),
         base_heads: Mapping[str, BaseHeadObservation] | None = None,
         rebase_outcomes: Mapping[tuple[Path, str, str], git_mod.RebaseOutcome] | None = None,
         dirty_worktrees: frozenset[Path] = frozenset(),
@@ -258,6 +276,7 @@ class FakeDeliveryGit(_FailureMixin, DeliveryGit):
         self._atomic_push_errors = dict(atomic_push_errors or {})
         self._ancestry = dict(ancestry or {})
         self._worktrees = tuple(worktrees)
+        self._worktree_admin_paths = tuple(worktree_admin_paths)
         self._base_heads = dict(base_heads or {})
         self._rebase_outcomes = dict(rebase_outcomes or {})
         self._dirty_worktrees = frozenset(dirty_worktrees)
@@ -406,6 +425,12 @@ class FakeDeliveryGit(_FailureMixin, DeliveryGit):
         self._raise_failure(call)
         return self._worktrees
 
+    def worktree_admin_paths(self) -> tuple[Path, ...]:
+        call: Call = ("worktree_admin_paths",)
+        self.calls.append(call)
+        self._raise_failure(call)
+        return self._worktree_admin_paths
+
     def base_head(self, branch: str) -> BaseHeadObservation:
         call: Call = ("base_head", branch)
         self.calls.append(call)
@@ -427,6 +452,8 @@ class FakeDeliveryGitHub(_FailureMixin, DeliveryGitHub):
         branch_prs: Mapping[str, prs.PullRequest] | None = None,
         stacks: Mapping[int, StackView] | None = None,
         strict_stacks: Mapping[int, stacks.StackRestFacts | None] | None = None,
+        merge_probes: Mapping[tuple[int, str], stacks.MergeAsyncProbe] | None = None,
+        merged_evidence: Mapping[int, stacks.PrMergedEvidence | None] | None = None,
         active_writers: frozenset[str] = frozenset(),
         errors: Mapping[Call, Exception] | None = None,
     ) -> None:
@@ -439,6 +466,8 @@ class FakeDeliveryGitHub(_FailureMixin, DeliveryGitHub):
         self._branch_prs = dict(branch_prs or {})
         self._stacks = dict(stacks or {})
         self._strict_stacks = dict(strict_stacks or {})
+        self._merge_probes = dict(merge_probes or {})
+        self._merged_evidence = dict(merged_evidence or {})
         self._active_writers = frozenset(active_writers)
         self.calls: list[Call] = []
 
@@ -465,6 +494,21 @@ class FakeDeliveryGitHub(_FailureMixin, DeliveryGitHub):
         self.calls.append(call)
         self._raise_failure(call)
         return self._strict_stacks.get(number)
+
+    def merge_async_probe(self, number: int, *, uuid: str) -> stacks.MergeAsyncProbe:
+        call: Call = ("merge_async_probe", number, uuid)
+        self.calls.append(call)
+        self._raise_failure(call)
+        return self._merge_probes.get(
+            (number, uuid),
+            stacks.MergeAsyncProbe(state="unreadable", sha=None, message="unscripted"),
+        )
+
+    def merged_evidence(self, number: int) -> stacks.PrMergedEvidence | None:
+        call: Call = ("merged_evidence", number)
+        self.calls.append(call)
+        self._raise_failure(call)
+        return self._merged_evidence.get(number)
 
     def active_writer_plan_ids(
         self,

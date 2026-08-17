@@ -14,11 +14,22 @@ from pathlib import Path
 import pytest
 
 from perk import objective
-from perk.backends.issue_backend import PlanState
+from perk.backends.issue_backend import PlanHeaderUpdate, PlanState
 from perk.backends.objective_store import ObjectiveRef, ObjectiveState, ObjectiveStoreError
-from perk.delivery import continuation, oplock, recover
+from perk.delivery import (
+    Delivery,
+    DeliveryError,
+    DeliveryPersistence,
+    RecoverRequest,
+    RecoverResult,
+    StatusRequest,
+    StatusResult,
+    continuation,
+    oplock,
+    recover,
+)
 from perk.delivery import sync as sync_mod
-from perk.delivery import transfer as transfer_mod
+from perk.delivery._fakes import FakeDeliveryGit, FakeDeliveryGitHub
 from perk.delivery.finalize import LandFinalization, LearnConsumeUpdate, ObjectiveLandUpdate
 from perk.delivery.journal import (
     EventRole,
@@ -44,6 +55,7 @@ from perk.delivery.train import (
     LayerPublication,
     LayerWriter,
     NoDeliveryTrain,
+    PrFactsView,
     TrainFinding,
     TrainLayer,
 )
@@ -52,7 +64,6 @@ from perk.github.prs import PullRequest
 from perk.github.stacks import (
     MergeAsyncProbe,
     MergeAsyncProbeState,
-    PrDeliveryFacts,
     PrMergedEvidence,
     StackRestEntry,
     StackRestFacts,
@@ -101,7 +112,7 @@ def _layer(
     )
 
 
-class _FakePersistence:
+class _FakePersistence(DeliveryPersistence):
     def __init__(self, world: "_World", unresolved: list[PreparedRecord]) -> None:
         self._world = world
         self.unresolved_records: dict[str, PreparedRecord] = {r.operation_id: r for r in unresolved}
@@ -119,6 +130,37 @@ class _FakePersistence:
         # Ids whose fold reads EMPTY — models a predecessor whose journal walk (predecessors
         # only) cannot see a successor-recorded operation.
         self.empty_fold_ids: set[str] = set()
+
+    def get_objective(self, *, objective_id: str) -> ObjectiveState | None:
+        return self._world.get_objective(objective_id=objective_id)
+
+    def close_objective(self, *, objective_id: str, dry_run: bool = False) -> bool:
+        return self._world.close_objective(objective_id=objective_id, dry_run=dry_run)
+
+    def get_plan(self, *, issue_id: str) -> PlanState | None:
+        return self._world.get_plan(issue_id=issue_id)
+
+    def get_plan_body(self, *, issue_id: str) -> str | None:
+        return None
+
+    def update_plan_header(self, *, issue_id: str, fields: dict[str, object]) -> PlanHeaderUpdate:
+        return self._world.update_plan_header(issue_id=issue_id, fields=fields)
+
+    def normalize_transfer_carry_map(
+        self, carry_map: tuple[tuple[str, str], ...]
+    ) -> dict[str, str]:
+        return {} if self._world.backend_id == "github" else dict(carry_map)
+
+    def find_objective(self, *, run_id: str) -> ObjectiveRef | None:
+        return self._world.find_objective(run_id=run_id)
+
+    def supersede_objective(self, **kwargs) -> ObjectiveRef | None:
+        return self._world.supersede_objective(**kwargs)
+
+    def finalize_supersession(self, *, old_objective_id: str, new_objective_id: str) -> bool:
+        return self._world.finalize_supersession(
+            old_objective_id=old_objective_id, new_objective_id=new_objective_id
+        )
 
     def _event(self, record, role: EventRole, comment_id: str) -> JournalEvent:
         return JournalEvent(
@@ -188,6 +230,82 @@ class _FakePersistence:
     ) -> None:
         self._world.timeline.append(("checkpoints", plan_id))
         self.checkpoints.append((plan_id, parent_checkpoint_sha, published_head_sha))
+
+
+class _WorldGit(FakeDeliveryGit):
+    def __init__(self, world: "_World") -> None:
+        super().__init__(repo_root=ROOT)
+        self._world = world
+
+    def fetch_refs(self, refs: tuple[str, ...]) -> None:
+        self._world._fetch(ROOT, list(refs))
+
+    def remote_branch_sha(self, branch: str) -> str | None:
+        return self._world._remote_head(ROOT, branch)
+
+    def list_refs(self, prefix: str) -> tuple[str, ...]:
+        return tuple(self._world._list_refs(ROOT, prefix))
+
+    def delete_ref(self, ref: str) -> None:
+        self._world._delete_ref(ROOT, ref)
+
+    def remove_worktree(self, path: Path) -> None:
+        self._world._worktree_remove(ROOT, path)
+
+    def prune_worktrees(self) -> None:
+        self._world._worktree_prune(ROOT)
+
+    def worktree_admin_paths(self) -> tuple[Path, ...]:
+        return tuple(self._world._worktree_admin_dirs(ROOT))
+
+
+class _WorldGitHub(FakeDeliveryGitHub):
+    def __init__(self, world: "_World") -> None:
+        super().__init__()
+        self._world = world
+
+    def pr_facts(self, number: int) -> PrFactsView | None:
+        return self._world._pr_facts(number=number, repo_root=ROOT)
+
+    def strict_stack(self, number: int) -> StackRestFacts | None:
+        return self._world._stack_read(number=number, repo_root=ROOT)
+
+    def pr_for_branch(self, branch: str) -> PullRequest | None:
+        return self._world._pr_for_branch(branch=branch, repo_root=ROOT)
+
+    def merge_async_probe(self, number: int, *, uuid: str) -> MergeAsyncProbe:
+        return self._world._merge_probe(number=number, uuid=uuid, repo_root=ROOT)
+
+    def merged_evidence(self, number: int) -> PrMergedEvidence | None:
+        return self._world._merged_evidence(number=number, repo_root=ROOT)
+
+
+class _WorldDelivery(Delivery):
+    def __init__(self, world: "_World") -> None:
+        self._world = world
+        super().__init__(
+            persistence=world.persistence,
+            git=_WorldGit(world),
+            github=_WorldGitHub(world),
+        )
+
+    def status(self, request: StatusRequest) -> StatusResult:
+        status = self._world._reconstruct(ROOT, request.objective_id)
+        if isinstance(status, DeliveryTrain):
+            return StatusResult(
+                objective_id=status.objective_id,
+                objective_url=status.objective_url,
+                redirected_from=status.redirected_from,
+                train=status,
+                no_train_reason=None,
+            )
+        return StatusResult(
+            objective_id=status.objective_id,
+            objective_url=status.objective_url,
+            redirected_from=status.redirected_from,
+            train=None,
+            no_train_reason=status.reason,
+        )
 
 
 class _World:
@@ -278,14 +396,14 @@ class _World:
             raise exc
         return self.remote.get(branch)
 
-    def _pr_facts(self, *, number: int, repo_root: Path) -> PrDeliveryFacts | None:
+    def _pr_facts(self, *, number: int, repo_root: Path) -> PrFactsView | None:
         if exc := self.read_boom.get("pr_facts"):
             raise exc
         entry = self.pr_entries.get(number)
         if entry is None:
             return None
         branch, base, state = entry
-        return PrDeliveryFacts(
+        return PrFactsView(
             number=number,
             state=state,
             is_draft=True,
@@ -439,18 +557,9 @@ class _World:
             )
         return True
 
-    def update_plan_header(self, *, issue_id: str, fields: dict[str, object]) -> None:
+    def update_plan_header(self, *, issue_id: str, fields: dict[str, object]) -> PlanHeaderUpdate:
         self.timeline.append(("plan_header", issue_id, dict(fields)))
-
-    def _transfer_seams(self, root: Path) -> transfer_mod.TransferSeams:
-        return transfer_mod.TransferSeams(
-            repo_root=root,
-            store=self,
-            issues=self,
-            persistence=self.persistence,
-            reconstruct=self._reconstruct,
-            now=lambda: "2026-02-02T00:00:00Z",
-        )
+        return PlanHeaderUpdate(fields_updated=tuple(fields), dry_run=False)
 
     # ------------------------------------------------------------- driving
 
@@ -461,44 +570,50 @@ class _World:
         abandon: bool = False,
         accept_prefix: bool = False,
         operation: str | None = None,
-        approve: Callable[[recover.AbandonPreview], bool] | None = None,
-        accept_approve: Callable[[recover.AcceptPrefixPreview], bool] | None = None,
+        approve: Callable[[RecoverResult.AbandonPreview], bool] | None = None,
+        accept_approve: Callable[[RecoverResult.AcceptPrefixPreview], bool] | None = None,
         objective_id: str = OBJECTIVE,
-    ) -> recover.RecoverResult:
-        return recover.recover_operations(
-            ROOT,
+    ) -> RecoverResult:
+        if abandon and accept_prefix:
+            raise ValueError("recover action must be one closed choice")
+        action = "accept_prefix" if accept_prefix else "abandon" if abandon else "report"
+        request = RecoverRequest(
+            kind="operation_conclusion",
             objective_id=objective_id,
-            worktree_root=WT_ROOT,
+            action=action,
             dry_run=dry_run,
-            abandon=abandon,
-            accept_prefix=accept_prefix,
             operation_id=operation,
-            approve=approve,
-            accept_approve=accept_approve,
-            reconstruct=self._reconstruct,
-            persistence_factory=lambda root: self.persistence,
-            transfer_seams_factory=self._transfer_seams,
-            pr_facts=self._pr_facts,
-            stack_read=self._stack_read,
-            merge_probe=self._merge_probe,
-            merged_evidence=self._merged_evidence,
-            finalize=self._finalize,
-            issues_factory=lambda root: self,
-            store_factory=lambda root: self,
-            fetch=self._fetch,
-            remote_head=self._remote_head,
-            pr_for_branch=self._pr_for_branch,
-            list_refs=self._list_refs,
-            delete_ref=self._delete_ref,
-            worktree_remove=self._worktree_remove,
-            worktree_prune=self._worktree_prune,
+        )
+        runtime = replace(
+            recover._DEFAULT_RECOVER_RUNTIME,
+            worktree_root=lambda root: WT_ROOT,
+            operation_lock=self._lock,
             iter_manifests=self._iter_manifests,
             worktree_dirs=self._worktree_dirs,
-            worktree_admin_dirs=self._worktree_admin_dirs,
-            lock=self._lock,
+            finalize=self._finalize,
             sleep=self.sleeps.append,
             now=lambda: "2026-02-02T00:00:00Z",
         )
+        selected_consent = accept_approve if action == "accept_prefix" else approve
+        consent_callback: (
+            Callable[[RecoverResult.AbandonPreview | RecoverResult.AcceptPrefixPreview], bool]
+            | None
+        ) = None
+        if selected_consent is not None:
+
+            def consent(
+                preview: RecoverResult.AbandonPreview | RecoverResult.AcceptPrefixPreview,
+            ) -> bool:
+                if isinstance(preview, RecoverResult.AcceptPrefixPreview):
+                    assert accept_approve is not None
+                    return accept_approve(preview)
+                assert approve is not None
+                return approve(preview)
+
+            consent_callback = consent
+        with pytest.MonkeyPatch.context() as monkeypatch:
+            monkeypatch.setattr(recover, "_DEFAULT_RECOVER_RUNTIME", runtime)
+            return _WorldDelivery(self).recover(request, consent=consent_callback)
 
     def events(self, kind: str) -> list[tuple]:
         return [t for t in self.timeline if t[0] == kind]
@@ -601,8 +716,8 @@ def _foreign_record(kind: OperationKind) -> PreparedRecord:
     )
 
 
-def _recover_error(world: _World, **kwargs) -> recover.RecoverError:
-    with pytest.raises(recover.RecoverError) as excinfo:
+def _recover_error(world: _World, **kwargs) -> DeliveryError:
+    with pytest.raises(DeliveryError) as excinfo:
         world.recover(**kwargs)
     return excinfo.value
 
@@ -823,6 +938,15 @@ def test_unknown_operation_is_operation_not_found():
     world.assert_nothing_journaled()
 
 
+def test_blank_operation_is_operation_not_found():
+    record = _sync_record()
+    world = _three_layer_world([record])
+    error = _recover_error(world, operation="")
+    assert error.error_type == "operation_not_found"
+    assert record.operation_id in str(error)
+    world.assert_nothing_journaled()
+
+
 def test_abandon_with_several_unresolved_is_operation_ambiguous():
     first = _sync_record()
     second = _publish_record()
@@ -845,7 +969,7 @@ def test_abandon_with_nothing_unresolved_is_operation_not_found():
 def test_abandon_all_before_journals_the_post_confirmation_proof():
     record = _sync_record()
     world = _three_layer_world([record])
-    previews: list[recover.AbandonPreview] = []
+    previews: list[RecoverResult.AbandonPreview] = []
     result = world.recover(abandon=True, approve=lambda p: previews.append(p) or True)
     (row,) = result.operations
     assert row.action == "abandoned"
@@ -859,13 +983,23 @@ def test_abandon_all_before_journals_the_post_confirmation_proof():
     assert world.persistence.checkpoints == []
 
 
+def test_none_consent_auto_approves_an_explicit_abandon_action():
+    record = _sync_record()
+    world = _three_layer_world([record])
+
+    result = world.recover(abandon=True)
+
+    assert result.operations[0].action == "abandoned"
+    assert [outcome.role for outcome in world.persistence.outcomes] == [EventRole.ABANDONED]
+
+
 def test_abandon_reclassifies_after_confirmation():
     # The world moves during the confirmation pause: the pre-confirmation all-before is
     # stale, the re-classification refuses, and NOTHING is journaled (decision 18).
     record = _sync_record()
     world = _three_layer_world([record])
 
-    def approve(preview: recover.AbandonPreview) -> bool:
+    def approve(preview: RecoverResult.AbandonPreview) -> bool:
         world.remote["plan-103"] = "9" * 40
         return True
 
@@ -945,11 +1079,11 @@ def test_dry_run_reports_would_be_actions_and_sweeps_nothing():
     assert world.refs != {} and world.worktree_names != []
 
 
-def test_dry_run_with_abandon_is_invalid_input():
+def test_dry_run_with_abandon_is_rejected_by_the_request():
     world = _three_layer_world([_sync_record()])
-    error = _recover_error(world, dry_run=True, abandon=True)
-    assert error.error_type == "invalid_input"
-    assert world.timeline == []  # refused before any observation
+    with pytest.raises(ValueError, match="dry-run recover"):
+        world.recover(dry_run=True, abandon=True)
+    assert world.timeline == []
 
 
 # ----------------------------------------------------------------- the orphan sweep
@@ -1095,9 +1229,15 @@ def test_classification_read_failure_prevents_every_conclusion_and_sweep(seam):
     world.refs[f"refs/perk/sync/{orphan}/plan-102"] = C2
     world.worktree_names.append(f"sync-{orphan}")
 
-    expected_error = sync_mod.SyncError if seam == "fetch" else type(failure)
-    with pytest.raises(expected_error, match=f"{seam} unavailable"):
+    with pytest.raises(DeliveryError, match=f"{seam} unavailable") as excinfo:
         world.recover()
+    expected_code = {
+        "fetch": "postcondition_unverified",
+        "remote_head": "git_error",
+        "pr_facts": "github_error",
+        "stack_read": "github_error",
+    }[seam]
+    assert excinfo.value.error_type == expected_code
 
     world.assert_nothing_journaled()
     assert world.events("delete_ref") == []
@@ -1596,7 +1736,7 @@ def test_transfer_all_before_reported_with_the_abandon_hint():
 def test_transfer_all_before_abandons_with_proof_confirmed():
     record = _transfer_record()
     world = _seed_transfer_world(record, successor=False)
-    previews: list[recover.AbandonPreview] = []
+    previews: list[RecoverResult.AbandonPreview] = []
     result = world.recover(abandon=True, approve=lambda p: previews.append(p) or True)
     (row,) = result.operations
     assert row.action == "abandoned"
@@ -1617,7 +1757,7 @@ def test_transfer_abandon_reclassifies_after_confirmation():
     record = _transfer_record()
     world = _seed_transfer_world(record, successor=False)
 
-    def approve(preview: recover.AbandonPreview) -> bool:
+    def approve(preview: RecoverResult.AbandonPreview) -> bool:
         world.objectives_by_run[record.run_id] = ObjectiveRef(id="600", url="u/600", existed=True)
         world.objectives["600"] = ObjectiveState(
             id="600",
@@ -1688,6 +1828,45 @@ def test_transfer_operation_flag_must_name_the_sole_unresolved():
     error = _recover_error(world, operation="01SOMEOTHEROP")
     assert error.error_type == "operation_not_found"
     assert record.operation_id in str(error)
+
+
+@pytest.mark.parametrize("successor", [False, True])
+def test_transfer_rejects_accept_prefix_before_classification_or_sweep(successor: bool):
+    record = _transfer_record()
+    world = _seed_transfer_world(record, successor=successor)
+    orphan = mint_operation_id()
+    ref = f"refs/perk/sync/{orphan}/plan-102"
+    worktree = f"sync-{orphan}"
+    world.refs[ref] = C2
+    world.worktree_names.append(worktree)
+
+    error = _recover_error(world, accept_prefix=True, accept_approve=lambda preview: True)
+
+    assert error.error_type == "accept_blocked"
+    assert "transfer" in str(error)
+    assert world.events("find_objective") == []
+    assert world.persistence.outcomes == [] and world.supersede_calls == []
+    assert ref in world.refs and worktree in world.worktree_names
+    assert world.events("delete_ref") == [] and world.events("worktree_remove") == []
+
+
+def test_transfer_result_metadata_failure_precedes_and_suppresses_sweep():
+    record = _transfer_record()
+    world = _seed_transfer_world(record, successor=False)
+    orphan = mint_operation_id()
+    ref = f"refs/perk/sync/{orphan}/plan-102"
+    worktree = f"sync-{orphan}"
+    world.refs[ref] = C2
+    world.worktree_names.append(worktree)
+    world.objective_read_boom_at = (1, ObjectiveStoreError("result state unavailable"))
+
+    error = _recover_error(world)
+
+    assert error.error_type == "github_error"
+    assert "result state unavailable" in str(error)
+    assert ref in world.refs and worktree in world.worktree_names
+    assert world.events("delete_ref") == [] and world.events("worktree_remove") == []
+    assert world.events("worktree_prune") == []
 
 
 # ----------------------------------------------------------------- the LAND arm (§8.51)
@@ -1958,11 +2137,11 @@ def test_terminal_probe_prefix_classifies_external_prefix(terminal):
     assert "--accept-prefix" in row.detail
     # The structured preview rides the reported row (dry-run included — r22).
     assert row.merged_layers == (
-        recover.MergedPrefixRow(node_id="1.1", pr_number=201, merge_commit_sha=M1),
+        RecoverResult.MergedPrefix(node_id="1.1", pr_number=201, merge_commit_sha=M1),
     )
     assert row.remainder == (
-        recover.RemainderPrRow(pr_number=202, state="OPEN", head_sha=P2),
-        recover.RemainderPrRow(pr_number=203, state="OPEN", head_sha=P3),
+        RecoverResult.RemainderPr(pr_number=202, state="OPEN", head_sha=P2),
+        RecoverResult.RemainderPr(pr_number=203, state="OPEN", head_sha=P3),
     )
     world.assert_nothing_journaled()
 
@@ -2443,7 +2622,7 @@ def test_land_abandon_journals_recovered_before_state_with_proof():
     _accepted(world, record)
     world.probe_results = [_probe("expired"), _probe("expired")]  # classify + re-classify
     _all_before(world)
-    previews: list[recover.AbandonPreview] = []
+    previews: list[RecoverResult.AbandonPreview] = []
     result = world.recover(abandon=True, approve=lambda p: previews.append(p) or True)
     (row,) = result.operations
     assert row.action == "abandoned"
@@ -2464,7 +2643,7 @@ def test_land_abandon_reclassifies_after_confirmation():
     world = _land_world(record)
     _all_before(world)
 
-    def approve(preview: recover.AbandonPreview) -> bool:
+    def approve(preview: RecoverResult.AbandonPreview) -> bool:
         _prefix_one(world)  # the world moves during the pause
         return True
 
@@ -2493,13 +2672,13 @@ def test_accept_prefix_journals_the_breach_and_finalizes_the_prefix_only():
             objective.ObjectiveNode(id="1.3", description="c", status=in_progress, pr="#103"),
         ),
     )
-    previews: list[recover.AcceptPrefixPreview] = []
+    previews: list[RecoverResult.AcceptPrefixPreview] = []
     result = world.recover(accept_prefix=True, accept_approve=lambda p: previews.append(p) or True)
     (row,) = result.operations
     assert row.classification == "external_prefix" and row.action == "accepted_prefix"
     (preview,) = previews
     assert preview.merged_layers == (
-        recover.MergedPrefixRow(node_id="1.1", pr_number=201, merge_commit_sha=M1),
+        RecoverResult.MergedPrefix(node_id="1.1", pr_number=201, merge_commit_sha=M1),
     )
     (outcome,) = world.persistence.outcomes
     assert outcome.role is EventRole.COMPLETED
@@ -2524,7 +2703,7 @@ def test_accept_prefix_membership_change_after_confirmation_is_accept_blocked():
     world = _land_world(record)
     _prefix_one(world)
 
-    def approve(preview: recover.AcceptPrefixPreview) -> bool:
+    def approve(preview: RecoverResult.AcceptPrefixPreview) -> bool:
         # PR 202 merges externally during the pause: the prefix membership changes.
         world.pr_merged[202] = _merged_ev(
             202, head=P2, merge=M2, base="plan-101", branch="plan-102"
@@ -2557,12 +2736,12 @@ def test_accept_prefix_declined_journals_nothing():
     world.assert_nothing_journaled()
 
 
-def test_accept_prefix_flag_matrix_is_invalid_input():
+def test_request_action_matrix_rejects_unrepresentable_flag_combinations():
     world = _land_world(_land_record())
-    error = _recover_error(world, accept_prefix=True, abandon=True)
-    assert error.error_type == "invalid_input"
-    error = _recover_error(world, accept_prefix=True, dry_run=True)
-    assert error.error_type == "invalid_input"
+    with pytest.raises(ValueError, match="one closed choice"):
+        world.recover(accept_prefix=True, abandon=True)
+    with pytest.raises(ValueError, match="dry-run recover"):
+        world.recover(accept_prefix=True, dry_run=True)
 
 
 # --- the finalization-convergence pass (§8.51) --------------------------------------------

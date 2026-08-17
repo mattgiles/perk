@@ -50,6 +50,12 @@ once every node is terminal and attaching the fresh-fold ``reconcile_evidence``.
 already-closed, journal-complete objective re-emits that evidence with a loud note (the
 death-after-close repair — at-least-once; the reconcile pass is idempotent).
 
+The sole service entry is :meth:`perk.delivery.facade.Delivery.recover`. Its private immutable
+context binds the three aggregate authorities plus the façade's train reconstruction bridge; its
+private runtime carries only config/path enumeration, the lock, the temporarily retained
+per-layer finalizer, sleep, and clock. No backend resolver, dependency factory, or low-level
+recovery entrypoint is public.
+
 Any ACTION (roll-forward or abandon) applies to exactly ONE target — the sole unresolved
 operation, else ``--operation``; non-target rows stay reported. The abandon confirmation is
 a race boundary: after an affirmative answer the target is RE-classified from scratch and
@@ -62,20 +68,27 @@ quiescence is an operator responsibility when abandoning: a still-live remote ow
 residual push is detected as drift by the next preflight, never prevented here.
 """
 
-import contextlib
 import re
 import time
-from collections.abc import Callable, Iterator
+from collections.abc import Callable
 from contextlib import AbstractContextManager
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import cast
 
 from perk import objective, plan
-from perk.backends import resolve
 from perk.backends.objective_store import ObjectiveStoreError
-from perk.delivery import continuation, land_records, landing, observe, oplock, publish
+from perk.delivery import continuation, land_records, landing, oplock, publish
 from perk.delivery import sync as sync_mod
 from perk.delivery import transfer as transfer_mod
+from perk.delivery.facade import (
+    DeliveryError,
+    DeliveryGit,
+    DeliveryGitHub,
+    DeliveryPersistence,
+    RecoverRequest,
+    RecoverResult,
+)
 from perk.delivery.finalize import finalize_landed_plan
 from perk.delivery.journal import (
     EventRole,
@@ -86,145 +99,15 @@ from perk.delivery.journal import (
     OutcomeRecord,
     PreparedRecord,
 )
-from perk.delivery.persistence import resolve_train_persistence
 from perk.delivery.train import (
     DeliveryTrain,
     NoDeliveryTrain,
+    PlanReader,
     TrainLayer,
     TrainStatus,
 )
-from perk.github import GitHubError, prs, stacks
+from perk.github import GitHubError
 from perk.substrate import git as git_mod
-
-
-class RecoverError(Exception):
-    """A recovery failed or refused. ``error_type`` is the stable machine code the CLI
-    boundary maps onto its failure envelope."""
-
-    def __init__(
-        self,
-        message: str,
-        *,
-        error_type: str,  # not_stacked | invalid_input | operation_not_found
-        # | operation_ambiguous | abandon_blocked | accept_blocked
-        # | unsupported_operation_kind
-        # | operation_in_progress | git_error | github_error (contracts.md §8.51;
-        # git_error/github_error are the CLI's mapping of raw infra raises, and the
-        # roll-forward tail's SyncError arms pass through under the §8.49 vocabulary)
-    ) -> None:
-        super().__init__(message)
-        self.error_type = error_type
-
-
-# ----------------------------------------------------------------- result shapes
-
-
-@dataclass(frozen=True)
-class MergedPrefixRow:
-    """One externally merged prefix layer (the structured ``external_prefix`` preview)."""
-
-    node_id: str
-    pr_number: int
-    merge_commit_sha: str
-
-
-@dataclass(frozen=True)
-class RemainderPrRow:
-    """One remainder PR observed OPEN at its recorded head (the acceptance proof)."""
-
-    pr_number: int
-    state: str
-    head_sha: str
-
-
-@dataclass(frozen=True)
-class LandedLayerRow:
-    """One landed layer this invocation acted on (a conclusion's finalize or the
-    convergence pass). ``finalized`` is ``None`` for a dry-run would-act row (not
-    attempted — distinguishable from an attempted-and-failed ``False``)."""
-
-    node_id: str
-    plan_id: str
-    pr_number: int
-    merge_commit_sha: str
-    base_sha: str
-    head_sha: str
-    finalized: bool | None
-
-
-@dataclass(frozen=True)
-class OperationRow:
-    """One unresolved operation's classification + what this invocation did about it.
-    ``merged_layers``/``remainder`` are the ``external_prefix`` rows' structured preview
-    (dry-run included — the warm flow previews via ``dry_run: true``); empty elsewhere."""
-
-    operation_id: str
-    kind: str  # publish | sync | adopt | transfer | land
-    prepared_created: str
-    classification: str  # all_before | all_after | external_prefix | in_flight | mixed
-    # | unsupported
-    action: str  # reported | rolled_forward | abandoned | accepted_prefix | declined
-    detail: str
-    merged_layers: tuple[MergedPrefixRow, ...] = ()
-    remainder: tuple[RemainderPrRow, ...] = ()
-
-
-@dataclass(frozen=True)
-class SweepFailure:
-    """One sweep target that could not be removed — recorded loudly, never a failure."""
-
-    target: str
-    error: str
-
-
-@dataclass(frozen=True)
-class AbandonPreview:
-    """What the abandon confirmation renders: the target's identity and the all-before
-    proof the affirmative answer will journal against."""
-
-    operation_id: str
-    kind: str
-    prepared_created: str
-    detail: str
-
-
-@dataclass(frozen=True)
-class AcceptPrefixPreview:
-    """What the accept-prefix confirmation renders: the operation identity, the merged
-    prefix an affirmative answer records as the breach (and finalizes), and the remainder
-    proof rows."""
-
-    operation_id: str
-    prepared_created: str
-    merged_layers: tuple[MergedPrefixRow, ...]
-    remainder: tuple[RemainderPrRow, ...]
-    detail: str
-
-
-@dataclass(frozen=True)
-class RecoverResult:
-    """The outcome of one recover invocation (the §8.51 envelope). Under ``dry_run`` the
-    swept lists carry the WOULD-BE sweep targets (nothing was deleted), every row's action
-    stays ``reported``, and ``landed_layers`` rows carry ``finalized: None``.
-    ``objective_closed`` reports a REAL close transition; ``reconcile_evidence`` (assembled
-    fresh from the journal fold) rides a close AND the already-closed journal-complete
-    re-emission (the death-after-close repair — ``objective_closed`` stays honest)."""
-
-    objective_id: str
-    objective_url: str
-    redirected_from: str | None
-    dry_run: bool
-    selection_required: bool
-    operations: tuple[OperationRow, ...]
-    swept_worktrees: tuple[str, ...]
-    swept_refs: tuple[str, ...]
-    sweep_failures: tuple[SweepFailure, ...]
-    sweep_skipped: str | None
-    landed_layers: tuple[LandedLayerRow, ...] = ()
-    objective_closed: bool = False
-    reconcile_evidence: landing.LandEvidence | None = None
-    notes: tuple[str, ...] = ()
-
 
 # ----------------------------------------------------------------- orphan classification
 
@@ -329,158 +212,162 @@ def _ref_operation_id(ref: str) -> str | None:
     return segment if _ULID_RE.fullmatch(segment) else None
 
 
-# ----------------------------------------------------------------- the bundle + entry
-
-
-def _default_fetch(repo: Path, refspecs: list[str]) -> None:
-    git_mod.fetch_refspecs(repo, refspecs)
-
-
-def _default_worktree_remove(repo: Path, path: Path) -> None:
-    git_mod.worktree_remove(repo, path, force=True)
+# ----------------------------------------------------------------- façade binding + runtime
 
 
 @dataclass(frozen=True)
-class _Recover:
-    """The per-invocation bundle. Structurally satisfies :class:`sync.SyncRecordSeams`
-    (the SYNC/ADOPT recovery core), :class:`publish.PublishProofSeams` (the PUBLISH
-    proof), and :class:`landing.LandProofSeams`/:class:`landing.LandConcludeSeams` (the
-    LAND proof + conclusions), and composes transfer's roll-forward seams for the
-    fold-first TRANSFER arm. The kind-specific decoders consume only their owned
-    observation seams."""
+class _RecoverRuntime:
+    """Private immutable helpers that are not delivery authorities."""
 
-    repo_root: Path
-    dry_run: bool
-    abandon: bool
-    accept_prefix: bool
-    operation_id: str | None
-    approve: Callable[[AbandonPreview], bool] | None
-    accept_approve: Callable[[AcceptPrefixPreview], bool] | None
-    worktree_root: Path
-    persistence: sync_mod.SyncPersistence
-    transfer_seams_factory: Callable[[Path], transfer_mod.TransferSeams]
-    reconstruct: Callable[[Path, str], TrainStatus]
-    pr_facts: Callable[..., object]
-    stack_read: Callable[..., object]
-    pr_for_branch: Callable[..., object]
-    merge_probe: landing._ProbeAsync
-    merged_evidence: landing._MergedEvidence
-    finalize: landing._Finalize
-    issues: landing.LandIssueReads
-    store: landing.LandObjectiveStore
-    fetch: Callable[[Path, list[str]], None]
-    remote_head: Callable[[Path, str], str | None]
-    list_refs: Callable[[Path, str], list[str]]
-    delete_ref: Callable[[Path, str], None]
-    worktree_remove: Callable[[Path, Path], None]
-    worktree_prune: Callable[[Path], None]
+    worktree_root: Callable[[Path], Path]
+    operation_lock: Callable[[Path], AbstractContextManager[None]]
     iter_manifests: Callable[[Path], continuation.ManifestScan]
     worktree_dirs: Callable[[Path], list[Path]]
-    worktree_admin_dirs: Callable[[Path], list[Path]]
+    finalize: landing._Finalize
     sleep: Callable[[float], None]
     now: Callable[[], str]
 
 
-def recover_operations(
-    repo_root: Path,
+_DEFAULT_RECOVER_RUNTIME = _RecoverRuntime(
+    worktree_root=sync_mod._configured_worktree_root,
+    operation_lock=oplock.stack_operation_lock,
+    iter_manifests=continuation.iter_manifests,
+    worktree_dirs=_default_worktree_dirs,
+    finalize=finalize_landed_plan,
+    sleep=time.sleep,
+    now=plan.now_iso,
+)
+
+
+@dataclass(frozen=True)
+class _RecoverContext:
+    """One façade-bound operation-conclusion context."""
+
+    repo_root: Path
+    persistence: DeliveryPersistence
+    git: DeliveryGit
+    github: DeliveryGitHub
+    reconstruct: Callable[[Path, str], TrainStatus]
+    runtime: _RecoverRuntime
+
+
+@dataclass(frozen=True)
+class _RecoverRecordSeams:
+    """Adapt aggregate authorities to the existing kind-specific record protocols."""
+
+    context: _RecoverContext
+
+    @property
+    def repo_root(self) -> Path:
+        return self.context.repo_root
+
+    @property
+    def persistence(self) -> DeliveryPersistence:
+        return self.context.persistence
+
+    @property
+    def issues(self) -> PlanReader:
+        return self.context.persistence
+
+    @property
+    def store(self) -> landing.LandObjectiveStore:
+        return self.context.persistence
+
+    def _pr_facts(self, *, number: int, repo_root: Path) -> object:
+        del repo_root
+        return self.context.github.pr_facts(number)
+
+    @property
+    def pr_facts(self) -> sync_mod._PrFactsRead:
+        return cast("sync_mod._PrFactsRead", self._pr_facts)
+
+    def _stack_read(self, *, number: int, repo_root: Path) -> object:
+        del repo_root
+        return self.context.github.strict_stack(number)
+
+    @property
+    def stack_read(self) -> sync_mod._StackRead:
+        return cast("sync_mod._StackRead", self._stack_read)
+
+    def _pr_for_branch(self, *, branch: str, repo_root: Path) -> object:
+        del repo_root
+        return self.context.github.pr_for_branch(branch)
+
+    @property
+    def pr_for_branch(self) -> publish._FindPrForBranch:
+        return cast("publish._FindPrForBranch", self._pr_for_branch)
+
+    def _merge_probe(self, *, number: int, uuid: str, repo_root: Path) -> object:
+        del repo_root
+        return self.context.github.merge_async_probe(number, uuid=uuid)
+
+    @property
+    def merge_probe(self) -> landing._ProbeAsync:
+        return cast("landing._ProbeAsync", self._merge_probe)
+
+    def _merged_evidence(self, *, number: int, repo_root: Path) -> object:
+        del repo_root
+        return self.context.github.merged_evidence(number)
+
+    @property
+    def merged_evidence(self) -> landing._MergedEvidence:
+        return cast("landing._MergedEvidence", self._merged_evidence)
+
+    def _fetch(self, repo_root: Path, refs: list[str]) -> None:
+        del repo_root
+        self.context.git.fetch_refs(tuple(refs))
+
+    @property
+    def fetch(self) -> Callable[[Path, list[str]], None]:
+        return self._fetch
+
+    def _remote_head(self, repo_root: Path, branch: str) -> str | None:
+        del repo_root
+        return self.context.git.remote_branch_sha(branch)
+
+    @property
+    def remote_head(self) -> Callable[[Path, str], str | None]:
+        return self._remote_head
+
+    @property
+    def finalize(self) -> landing._Finalize:
+        return self.context.runtime.finalize
+
+    @property
+    def sleep(self) -> Callable[[float], None]:
+        return self.context.runtime.sleep
+
+    @property
+    def now(self) -> Callable[[], str]:
+        return self.context.runtime.now
+
+
+type _Consent = Callable[[RecoverResult.AbandonPreview | RecoverResult.AcceptPrefixPreview], bool]
+
+
+def _dispatch(
+    context: _RecoverContext,
+    request: RecoverRequest,
     *,
-    objective_id: str,
-    worktree_root: Path,
-    dry_run: bool = False,
-    abandon: bool = False,
-    accept_prefix: bool = False,
-    operation_id: str | None = None,
-    approve: Callable[[AbandonPreview], bool] | None = None,
-    accept_approve: Callable[[AcceptPrefixPreview], bool] | None = None,
-    reconstruct: Callable[[Path, str], TrainStatus] = observe.reconstruct_repo_train,
-    persistence_factory: Callable[[Path], sync_mod.SyncPersistence] = resolve_train_persistence,
-    transfer_seams_factory: Callable[
-        [Path], transfer_mod.TransferSeams
-    ] = transfer_mod.resolve_transfer_seams,
-    pr_facts: Callable[..., object] = stacks.pr_delivery_facts,
-    stack_read: Callable[..., object] = stacks.stack_for_pr,
-    pr_for_branch: Callable[..., object] = prs.find_pr_for_branch,
-    merge_probe: landing._ProbeAsync = stacks.merge_async_probe,
-    merged_evidence: landing._MergedEvidence = stacks.pr_merged_evidence,
-    finalize: landing._Finalize = finalize_landed_plan,
-    issues_factory: Callable[[Path], landing.LandIssueReads] = resolve.resolve_issue_backend,
-    store_factory: Callable[[Path], landing.LandObjectiveStore] = resolve.resolve_objective_store,
-    fetch: Callable[[Path, list[str]], None] = _default_fetch,
-    remote_head: Callable[[Path, str], str | None] = git_mod.remote_branch_head,
-    list_refs: Callable[[Path, str], list[str]] = git_mod.list_refs,
-    delete_ref: Callable[[Path, str], None] = git_mod.delete_ref,
-    worktree_remove: Callable[[Path, Path], None] = _default_worktree_remove,
-    worktree_prune: Callable[[Path], None] = git_mod.worktree_prune,
-    iter_manifests: Callable[[Path], continuation.ManifestScan] = continuation.iter_manifests,
-    worktree_dirs: Callable[[Path], list[Path]] = _default_worktree_dirs,
-    worktree_admin_dirs: Callable[[Path], list[Path]] = _default_worktree_admin_dirs,
-    lock: Callable[[Path], AbstractContextManager[None]] = oplock.stack_operation_lock,
-    sleep: Callable[[float], None] = time.sleep,
-    now: Callable[[], str] = plan.now_iso,
+    consent: _Consent | None,
 ) -> RecoverResult:
-    """Classify every unresolved operation, conclude the one selected target (automatic
-    all-after roll-forward for SYNC/ADOPT/TRANSFER/LAND, confirmed abandon-with-proof under
-    ``--abandon``, the confirmed breach acceptance under ``--accept-prefix``), run the
-    finalization-convergence pass, then sweep the orphaned residue. ``--dry-run`` reports
-    everything and mutates nothing. No ``run_id``: conclude-only recovery needs no new run
-    identity."""
-    if dry_run and (abandon or accept_prefix):
-        # Flag validation lives at the CLI boundary; this is the defensive assert-guard.
-        raise RecoverError(
-            "--dry-run is mutually exclusive with --abandon/--accept-prefix — preview "
-            "first, then conclude",
-            error_type="invalid_input",
-        )
-    if abandon and accept_prefix:
-        raise RecoverError(
-            "--abandon and --accept-prefix are mutually exclusive — one conclusion per invocation",
-            error_type="invalid_input",
-        )
-    rec = _Recover(
-        repo_root=repo_root,
-        dry_run=dry_run,
-        abandon=abandon,
-        accept_prefix=accept_prefix,
-        operation_id=operation_id,
-        approve=approve,
-        accept_approve=accept_approve,
-        worktree_root=worktree_root,
-        persistence=persistence_factory(repo_root),
-        transfer_seams_factory=transfer_seams_factory,
-        reconstruct=reconstruct,
-        pr_facts=pr_facts,
-        stack_read=stack_read,
-        pr_for_branch=pr_for_branch,
-        merge_probe=merge_probe,
-        merged_evidence=merged_evidence,
-        finalize=finalize,
-        issues=issues_factory(repo_root),
-        store=store_factory(repo_root),
-        fetch=fetch,
-        remote_head=remote_head,
-        list_refs=list_refs,
-        delete_ref=delete_ref,
-        worktree_remove=worktree_remove,
-        worktree_prune=worktree_prune,
-        iter_manifests=iter_manifests,
-        worktree_dirs=worktree_dirs,
-        worktree_admin_dirs=worktree_admin_dirs,
-        sleep=sleep,
-        now=now,
-    )
-    with _held_lock(lock, repo_root):
-        return _recover(rec, objective_id)
-
-
-@contextlib.contextmanager
-def _held_lock(
-    lock: Callable[[Path], AbstractContextManager[None]], repo_root: Path
-) -> Iterator[None]:
+    """Resolve local configuration, then hold the one operation lock through the sweep."""
+    worktree_root = context.runtime.worktree_root(context.repo_root)
+    entered = False
     try:
-        with lock(repo_root):
-            yield
+        with context.runtime.operation_lock(context.repo_root):
+            entered = True
+            return _recover(
+                context,
+                _RecoverRecordSeams(context),
+                request,
+                worktree_root=worktree_root,
+                consent=consent,
+            )
     except oplock.OperationLockBusy as exc:
-        raise RecoverError(str(exc), error_type="operation_in_progress") from exc
+        if entered:
+            raise
+        raise DeliveryError(str(exc), error_type="operation_in_progress") from exc
 
 
 # ----------------------------------------------------------------- classification
@@ -507,7 +394,7 @@ class _LandEffects:
     """The invocation-level LAND effects accumulator (conclusions + the convergence pass):
     landed rows, the real close transition, the fresh reconcile evidence, loud notes."""
 
-    landed_layers: list[LandedLayerRow] = field(default_factory=list)
+    landed_layers: list[RecoverResult.LandedLayer] = field(default_factory=list)
     objective_closed: bool = False
     reconcile_evidence: landing.LandEvidence | None = None
     notes: list[str] = field(default_factory=list)
@@ -520,8 +407,8 @@ class _LandEffects:
         self.notes.extend(conclusion.notes)
 
 
-def _landed_row(layer: landing.LandedLayer) -> LandedLayerRow:
-    return LandedLayerRow(
+def _landed_row(layer: landing.LandedLayer) -> RecoverResult.LandedLayer:
+    return RecoverResult.LandedLayer(
         node_id=layer.node_id,
         plan_id=layer.plan_id,
         pr_number=layer.pr_number,
@@ -532,7 +419,7 @@ def _landed_row(layer: landing.LandedLayer) -> LandedLayerRow:
     )
 
 
-def _classify(rec: _Recover, train: DeliveryTrain, op: OperationState) -> _Classified:
+def _classify(seams: _RecoverRecordSeams, train: DeliveryTrain, op: OperationState) -> _Classified:
     """Phase 2, per kind (decision: no unified record decoder). A SYNC/ADOPT corroboration
     failure classifies ``mixed`` (fail closed, reported); infra read failures propagate —
     recover fails whole rather than mis-classifying."""
@@ -544,7 +431,7 @@ def _classify(rec: _Recover, train: DeliveryTrain, op: OperationState) -> _Class
             facts = sync_mod.validate_sync_record(train, record)
         except sync_mod.SyncError as exc:
             return _Classified(op, "mixed", f"corroboration against fresh authority failed: {exc}")
-        observed = sync_mod.observe_sync_record(rec, facts)
+        observed = sync_mod.observe_sync_record(seams, facts)
         classification = sync_mod.classify_sync_observation(facts, observed)
         pairs = [(entry.branch, sha) for sha, entry in zip(observed, facts.recorded, strict=True)]
         detail = {
@@ -554,10 +441,10 @@ def _classify(rec: _Recover, train: DeliveryTrain, op: OperationState) -> _Class
         }[classification]
         return _Classified(op, classification, detail, sync_facts=facts, sync_observed=observed)
     if op.kind is OperationKind.PUBLISH:
-        proof = publish.classify_publish_record(rec, train, record)
+        proof = publish.classify_publish_record(seams, train, record)
         return _Classified(op, proof.classification, proof.detail, publish_proof=proof)
     if op.kind is OperationKind.LAND:
-        land_proof = landing.classify_land_record(rec, train, op)
+        land_proof = landing.classify_land_record(seams, train, op)
         return _Classified(op, land_proof.classification, land_proof.detail, land_proof=land_proof)
     # The impossible-by-construction fallback for a TRANSFER sharing a fold with other
     # unresolved operations (a sole-unresolved TRANSFER dispatched to the transfer arm
@@ -572,99 +459,92 @@ def _classify(rec: _Recover, train: DeliveryTrain, op: OperationState) -> _Class
 # ----------------------------------------------------------------- the protocol
 
 
-def _recover(rec: _Recover, objective_id: str) -> RecoverResult:
-    # §8.51 fold-first: read the REQUESTED objective's succession journal before any train
-    # gate. An unresolved TRANSFER must dispatch before the `not_stacked` rejection and the
-    # structural-blocker gate — a mid-transfer predecessor necessarily shows intentional
-    # `wrong_owner`/`node_link_mismatch` blockers, and a finalized-but-uncompleted
-    # stacked→incremental transfer has no train at all. Both gates stay in force for
-    # PUBLISH/SYNC/ADOPT (the reconstruction below re-folds for those).
-    fold = rec.persistence.read_journal(objective_id)
+def _recover(
+    context: _RecoverContext,
+    seams: _RecoverRecordSeams,
+    request: RecoverRequest,
+    *,
+    worktree_root: Path,
+    consent: _Consent | None,
+) -> RecoverResult:
+    # Fold the requested objective before any train gate: an unresolved TRANSFER owns a
+    # deliberately inconsistent predecessor projection and must route first.
+    fold = context.persistence.read_journal(request.objective_id)
     if len(fold.unresolved) == 1 and fold.unresolved[0].kind is OperationKind.TRANSFER:
-        # The one-unresolved-per-lineage fold gate makes an unresolved TRANSFER the sole
-        # unresolved operation; a fold that violates that (multiple unresolved) is an
-        # impossible-by-construction state that falls through to the report-only flow.
-        return _recover_transfer(rec, objective_id, fold.unresolved[0])
-    train = rec.reconstruct(rec.repo_root, objective_id)
-    if isinstance(train, NoDeliveryTrain):
-        raise RecoverError(
-            f"objective {train.objective_id} has no delivery train ({train.reason})",
+        return _recover_transfer(
+            context,
+            request,
+            request.objective_id,
+            fold.unresolved[0],
+            worktree_root=worktree_root,
+            consent=consent,
+        )
+    status = context.reconstruct(context.repo_root, request.objective_id)
+    if isinstance(status, NoDeliveryTrain):
+        raise DeliveryError(
+            f"objective {status.objective_id} has no delivery train ({status.reason})",
             error_type="not_stacked",
         )
-    # §8.54 fold-first sole-PUBLISH routing: a REAL unresolved PUBLISH can itself produce
-    # structural cancellation/remote/checkpoint findings (`publish_outcome_pending` rides with
-    # `canceled_remote_work`/`checkpoint_prefix_gap`/…), so the generic structural gate would
-    # dead-end exactly the operation recover exists to conclude. The bypass is derived from
-    # the ACTIVE train's fold — the SAME snapshot classified below (the requested fold above
-    # walks predecessors only, so a successor-recorded PUBLISH is invisible to it and
-    # `recover OLD` would gate on exactly the crash-window findings this route bypasses).
-    # When that fold's SOLE unresolved operation is PUBLISH, the existing PUBLISH
-    # classifier/conclusion machinery runs WITHOUT the generic gate —
-    # `classify_publish_record`'s `_validate_resume_context` plus the exact before/after
-    # branch/PR/stack proof stays the safety gate, so the bypass never authorizes
-    # checkpoint/identity mutation. Other kinds and multi-unresolved states keep today's
-    # gates.
-    fold = rec.persistence.read_journal(train.objective_id)
+
+    fold = context.persistence.read_journal(status.objective_id)
     sole_publish = len(fold.unresolved) == 1 and fold.unresolved[0].kind is OperationKind.PUBLISH
     if not sole_publish:
-        # Sync's fail-closed structural gate (§8.49 step 4) applies here too: a mis-linked
-        # layer (wrong_owner / wrong_lineage / node_link_mismatch …) can still corroborate on
-        # branch/checkpoint fields, and a roll-forward would checkpoint into the wrong plan.
-        # The typed SyncError (claimed_prefix_malformed) passes through the CLI verbatim.
-        sync_mod.refuse_structural_blockers(train)
+        sync_mod.refuse_structural_blockers(status)
 
-    # Phase 2: classify EVERY unresolved operation (display never mutates).
-    classified = [_classify(rec, train, op) for op in fold.unresolved]
-
-    # Phase 3: target selection (decision 19) — any action applies to exactly one target.
+    classified = [_classify(seams, status, op) for op in fold.unresolved]
     ids = [entry.op.operation_id for entry in classified]
     target_id: str | None = None
     selection_required = False
-    acting = rec.abandon or rec.accept_prefix
-    if rec.operation_id is not None:
-        if rec.operation_id not in ids:
+    acting = request.action != "report"
+    if request.operation_id is not None:
+        if request.operation_id not in ids:
             listed = ", ".join(ids) or "<none>"
-            raise RecoverError(
-                f"operation {rec.operation_id} is not unresolved on this train — "
+            raise DeliveryError(
+                f"operation {request.operation_id} is not unresolved on this train — "
                 f"unresolved: {listed}",
                 error_type="operation_not_found",
             )
-        target_id = rec.operation_id
+        target_id = request.operation_id
     elif len(classified) == 1:
         target_id = ids[0]
     elif len(classified) > 1:
         if acting:
-            raise RecoverError(
+            raise DeliveryError(
                 f"several operations are unresolved ({', '.join(ids)}) — name the action "
                 "target with --operation",
                 error_type="operation_ambiguous",
             )
         selection_required = True
     elif acting:
-        raise RecoverError(
+        raise DeliveryError(
             "no unresolved operation exists — nothing to conclude",
             error_type="operation_not_found",
         )
 
-    # Phase 4: the action phase (rows are built either way; dry-run never acts).
     effects = _LandEffects()
     rows = [
-        _conclude(rec, train, entry, is_target=entry.op.operation_id == target_id, effects=effects)
+        _conclude(
+            seams,
+            request,
+            status,
+            entry,
+            is_target=entry.op.operation_id == target_id,
+            effects=effects,
+            consent=consent,
+        )
         for entry in classified
     ]
+    _converge_finalization(seams, request, status, effects)
 
-    # Phase 4b: the finalization-convergence pass (train-backed path only; runs even with
-    # zero unresolved operations; dry-run reports would-be actions and mutates nothing).
-    _converge_finalization(rec, train, effects)
-
-    # Phase 5: the orphan sweep — reached only on a success path (every refusal raised).
-    swept_worktrees, swept_refs, failures, skipped = _sweep(rec)
-
+    swept_worktrees, swept_refs, failures, skipped = _sweep(
+        context, request, worktree_root=worktree_root
+    )
     return RecoverResult(
-        objective_id=train.objective_id,
-        objective_url=train.objective_url,
-        redirected_from=train.redirected_from,
-        dry_run=rec.dry_run,
+        kind=request.kind,
+        objective_id=status.objective_id,
+        objective_url=status.objective_url,
+        redirected_from=status.redirected_from,
+        dry_run=request.dry_run,
         selection_required=selection_required,
         operations=tuple(rows),
         swept_worktrees=swept_worktrees,
@@ -681,26 +561,56 @@ def _recover(rec: _Recover, objective_id: str) -> RecoverResult:
 # ----------------------------------------------------------------- the TRANSFER arm (§8.53)
 
 
-def _recover_transfer(rec: _Recover, objective_id: str, op: OperationState) -> RecoverResult:
-    """Conclude the sole unresolved TRANSFER: classify against fresh authority (manifest
-    decode + run_id successor lookup + corroboration), then roll forward / confirmed-abandon
-    / report — all under the already-held operation lock. The orphan sweep still runs last."""
-    if rec.operation_id is not None and rec.operation_id != op.operation_id:
-        raise RecoverError(
-            f"operation {rec.operation_id} is not unresolved on this objective — unresolved: "
+def _recover_transfer(
+    context: _RecoverContext,
+    request: RecoverRequest,
+    objective_id: str,
+    op: OperationState,
+    *,
+    worktree_root: Path,
+    consent: _Consent | None,
+) -> RecoverResult:
+    """Conclude the fold-first TRANSFER while keeping the orphan sweep last."""
+    if request.operation_id is not None and request.operation_id != op.operation_id:
+        raise DeliveryError(
+            f"operation {request.operation_id} is not unresolved on this objective — unresolved: "
             f"{op.operation_id}",
             error_type="operation_not_found",
         )
-    seams = rec.transfer_seams_factory(rec.repo_root)
+    if request.action == "accept_prefix":
+        raise DeliveryError(
+            f"--accept-prefix requires an external_prefix LAND classification — operation "
+            f"{op.operation_id} is transfer; nothing was journaled",
+            error_type="accept_blocked",
+        )
+    seams = transfer_mod.TransferSeams(
+        repo_root=context.repo_root,
+        store=context.persistence,
+        issues=context.persistence,
+        persistence=context.persistence,
+        reconstruct=context.reconstruct,
+        now=context.runtime.now,
+    )
     entry = _classify_transfer(seams, op)
-    row = _conclude_transfer(rec, seams, objective_id, entry)
-    swept_worktrees, swept_refs, failures, skipped = _sweep(rec)
-    state = seams.store.get_objective(objective_id=objective_id)
+    row = _conclude_transfer(
+        context,
+        request,
+        seams,
+        objective_id,
+        entry,
+        consent=consent,
+    )
+    state = context.persistence.get_objective(objective_id=objective_id)
+    objective_url = state.url if state is not None else ""
+    swept_worktrees, swept_refs, failures, skipped = _sweep(
+        context, request, worktree_root=worktree_root
+    )
     return RecoverResult(
+        kind=request.kind,
         objective_id=objective_id,
-        objective_url=state.url if state is not None else "",
+        objective_url=objective_url,
         redirected_from=None,
-        dry_run=rec.dry_run,
+        dry_run=request.dry_run,
         selection_required=False,
         operations=(row,),
         swept_worktrees=swept_worktrees,
@@ -746,21 +656,25 @@ def _classify_transfer(seams: transfer_mod.TransferSeams, op: OperationState) ->
 
 
 def _conclude_transfer(
-    rec: _Recover, seams: transfer_mod.TransferSeams, objective_id: str, entry: _Classified
-) -> OperationRow:
-    """The TRANSFER action phase: automatic all-after roll-forward through transfer's
-    lock-assumed core, the confirmed abandon arm under ``--abandon``, else a reported row
-    with the routing hint."""
+    context: _RecoverContext,
+    request: RecoverRequest,
+    seams: transfer_mod.TransferSeams,
+    objective_id: str,
+    entry: _Classified,
+    *,
+    consent: _Consent | None,
+) -> RecoverResult.Operation:
+    """Apply the selected TRANSFER conclusion through the lock-assumed core."""
     op = entry.op
     action = "reported"
     detail = entry.detail
-    if rec.abandon:
-        action, outcome = _abandon_transfer(rec, seams, objective_id, entry)
+    if request.action == "abandon":
+        action, outcome = _abandon_transfer(context, seams, objective_id, entry, consent=consent)
         detail = f"{entry.detail} — {outcome}"
     elif (
         entry.classification == "all_after"
         and entry.transfer_record is not None
-        and not rec.dry_run
+        and not request.dry_run
     ):
         successor = transfer_mod.roll_forward_transfer(seams, record=entry.transfer_record)
         action = "rolled_forward"
@@ -770,8 +684,8 @@ def _conclude_transfer(
             "journaled)"
         )
     else:
-        detail = f"{entry.detail} — {_transfer_hint(rec, entry)}"
-    return OperationRow(
+        detail = f"{entry.detail} — {_transfer_hint(request, entry)}"
+    return RecoverResult.Operation(
         operation_id=op.operation_id,
         kind=op.kind.value,
         prepared_created=op.prepared.record.created,
@@ -781,12 +695,10 @@ def _conclude_transfer(
     )
 
 
-def _transfer_hint(rec: _Recover, entry: _Classified) -> str:
-    """The reported TRANSFER row's routing hint (hints name the predecessor id — the
-    documented recovery entry for an interrupted transfer)."""
+def _transfer_hint(request: RecoverRequest, entry: _Classified) -> str:
     predecessor = entry.transfer_record.objective_id if entry.transfer_record is not None else "?"
     if entry.classification == "all_after":
-        if rec.dry_run:
+        if request.dry_run:
             return "a real recover would roll this forward automatically"
         return f"rerun `perk objective stack recover {predecessor}` to roll it forward"
     if entry.classification == "all_before":
@@ -798,43 +710,45 @@ def _transfer_hint(rec: _Recover, entry: _Classified) -> str:
 
 
 def _abandon_transfer(
-    rec: _Recover, seams: transfer_mod.TransferSeams, objective_id: str, entry: _Classified
+    context: _RecoverContext,
+    seams: transfer_mod.TransferSeams,
+    objective_id: str,
+    entry: _Classified,
+    *,
+    consent: _Consent | None,
 ) -> tuple[str, str]:
-    """The confirmed TRANSFER abandon arm: an all-before classification gate, the approve
-    callback, then the from-scratch RE-classification (the approval pause is a race boundary)
-    whose post-confirmation observation is the journaled proof."""
     op = entry.op
     if entry.classification != "all_before":
-        raise RecoverError(
+        raise DeliveryError(
             f"--abandon requires every recorded effect verified at its before state — "
             f"operation {op.operation_id} classified {entry.classification}; nothing was "
             "journaled",
             error_type="abandon_blocked",
         )
-    preview = AbandonPreview(
+    preview = RecoverResult.AbandonPreview(
         operation_id=op.operation_id,
         kind=op.kind.value,
         prepared_created=op.prepared.record.created,
         detail=entry.detail,
     )
-    if rec.approve is not None and not rec.approve(preview):
+    if consent is not None and not consent(preview):
         return ("declined", "the abandon confirmation was declined; the journal is untouched")
     fresh = _classify_transfer(seams, op)
     if fresh.classification != "all_before":
-        raise RecoverError(
+        raise DeliveryError(
             f"the world moved while the confirmation was pending: operation "
             f"{op.operation_id} re-classified {fresh.classification} — nothing was "
             "journaled; rerun recover",
             error_type="abandon_blocked",
         )
     record = fresh.transfer_record
-    assert record is not None  # guaranteed: an all_before classification decoded it
-    rec.persistence.append_outcome(
+    assert record is not None
+    context.persistence.append_outcome(
         objective_id,
         OutcomeRecord(
             operation_id=op.operation_id,
             role=EventRole.ABANDONED,
-            created=rec.now(),
+            created=context.runtime.now(),
             observed=transfer_mod.transfer_abandon_observation(record),
         ),
     )
@@ -842,36 +756,36 @@ def _abandon_transfer(
 
 
 def _conclude(
-    rec: _Recover,
+    seams: _RecoverRecordSeams,
+    request: RecoverRequest,
     train: DeliveryTrain,
     entry: _Classified,
     *,
     is_target: bool,
     effects: _LandEffects,
-) -> OperationRow:
-    """One train-backed row's action: confirmed/re-classified abandon (or accept-prefix),
-    or automatic record-driven all-after roll-forward for the target; everything else is
-    reported with a routing hint. A sole TRANSFER takes the earlier fold-first arm."""
+    consent: _Consent | None,
+) -> RecoverResult.Operation:
+    """Apply one train-backed conclusion or return its report row."""
     op = entry.op
     resumable = op.kind in (OperationKind.SYNC, OperationKind.ADOPT)
     action = "reported"
     detail = entry.detail
-    if rec.accept_prefix and is_target:
-        action, outcome = _accept_prefix(rec, train, entry, effects)
+    if request.action == "accept_prefix" and is_target:
+        action, outcome = _accept_prefix(seams, train, entry, effects, consent=consent)
         detail = f"{entry.detail} — {outcome}"
-    elif rec.abandon and is_target:
-        action, outcome = _abandon(rec, train, entry)
+    elif request.action == "abandon" and is_target:
+        action, outcome = _abandon(seams, train, entry, consent=consent)
         detail = f"{entry.detail} — {outcome}"
     elif (
         is_target
         and resumable
         and entry.classification == "all_after"
         and entry.sync_facts is not None
-        and not rec.dry_run
+        and not request.dry_run
     ):
         record = op.prepared.record
-        assert isinstance(record, PreparedRecord)  # guaranteed by the classification
-        layers = sync_mod.roll_forward_sync_record(rec, train, record, entry.sync_facts)
+        assert isinstance(record, PreparedRecord)
+        layers = sync_mod.roll_forward_sync_record(seams, train, record, entry.sync_facts)
         action = "rolled_forward"
         moved = ", ".join(f"{layer.branch}@{layer.after_sha}" for layer in layers)
         detail = (
@@ -883,9 +797,9 @@ def _conclude(
         and op.kind is OperationKind.LAND
         and entry.classification == "all_after"
         and entry.land_proof is not None
-        and not rec.dry_run
+        and not request.dry_run
     ):
-        conclusion = landing.roll_forward_land(rec, train, op, entry.land_proof)
+        conclusion = landing.roll_forward_land(seams, train, op, entry.land_proof)
         effects.merge_conclusion(conclusion)
         action = "rolled_forward"
         detail = (
@@ -893,9 +807,9 @@ def _conclude(
             f"journaled; {len(conclusion.landed_layers)} layer(s) finalized bottom→top)"
         )
     else:
-        detail = f"{entry.detail} — {_hint(rec, entry, is_target=is_target)}"
+        detail = f"{entry.detail} — {_hint(request, entry, is_target=is_target)}"
     merged_rows, remainder_rows = _prefix_preview_rows(entry)
-    return OperationRow(
+    return RecoverResult.Operation(
         operation_id=op.operation_id,
         kind=op.kind.value,
         prepared_created=op.prepared.record.created,
@@ -909,7 +823,10 @@ def _conclude(
 
 def _prefix_preview_rows(
     entry: _Classified,
-) -> tuple[tuple[MergedPrefixRow, ...], tuple[RemainderPrRow, ...]]:
+) -> tuple[
+    tuple[RecoverResult.MergedPrefix, ...],
+    tuple[RecoverResult.RemainderPr, ...],
+]:
     """The ``external_prefix`` rows' structured preview fields (dry-run included — the warm
     flow previews via ``dry_run: true``, presents, then confirms); empty on every other
     row."""
@@ -917,7 +834,7 @@ def _prefix_preview_rows(
         return ((), ())
     return (
         tuple(
-            MergedPrefixRow(
+            RecoverResult.MergedPrefix(
                 node_id=row.node_id,
                 pr_number=row.pr_number,
                 merge_commit_sha=row.merge_commit_sha,
@@ -925,45 +842,48 @@ def _prefix_preview_rows(
             for row in entry.land_proof.merged_prefix
         ),
         tuple(
-            RemainderPrRow(pr_number=row.pr_number, state=row.state, head_sha=row.head_sha)
+            RecoverResult.RemainderPr(
+                pr_number=row.pr_number, state=row.state, head_sha=row.head_sha
+            )
             for row in entry.land_proof.remainder
         ),
     )
 
 
 def _accept_prefix(
-    rec: _Recover, train: DeliveryTrain, entry: _Classified, effects: _LandEffects
+    seams: _RecoverRecordSeams,
+    train: DeliveryTrain,
+    entry: _Classified,
+    effects: _LandEffects,
+    *,
+    consent: _Consent | None,
 ) -> tuple[str, str]:
-    """The confirmed ``--accept-prefix`` arm: an external_prefix classification gate, the
-    ``AcceptPrefixPreview`` through the accept-approve callback, then the from-scratch
-    RE-classification (the approval pause is a race boundary — fresh probe + observation)
-    whose corroborated prefix is what gets journaled as the breach. A changed classification
-    or changed merged-prefix membership refuses with nothing journaled."""
+    """Confirm, then reclassify and record one external LAND prefix."""
     op = entry.op
     if (
         op.kind is not OperationKind.LAND
         or entry.classification != "external_prefix"
         or entry.land_proof is None
     ):
-        raise RecoverError(
+        raise DeliveryError(
             f"--accept-prefix requires an external_prefix LAND classification — operation "
             f"{op.operation_id} is {op.kind.value} and classified {entry.classification}; "
             "nothing was journaled",
             error_type="accept_blocked",
         )
     merged_rows, remainder_rows = _prefix_preview_rows(entry)
-    preview = AcceptPrefixPreview(
+    preview = RecoverResult.AcceptPrefixPreview(
         operation_id=op.operation_id,
         prepared_created=op.prepared.record.created,
         merged_layers=merged_rows,
         remainder=remainder_rows,
         detail=entry.detail,
     )
-    if rec.accept_approve is not None and not rec.accept_approve(preview):
+    if consent is not None and not consent(preview):
         return ("declined", "the accept-prefix confirmation was declined; the journal is untouched")
-    fresh = _classify(rec, train, op)
+    fresh = _classify(seams, train, op)
     if fresh.classification != "external_prefix" or fresh.land_proof is None:
-        raise RecoverError(
+        raise DeliveryError(
             f"the world moved while the confirmation was pending: operation "
             f"{op.operation_id} re-classified {fresh.classification} — nothing was "
             "journaled; rerun recover",
@@ -972,13 +892,13 @@ def _accept_prefix(
     confirmed = {row.pr_number for row in entry.land_proof.merged_prefix}
     reobserved = {row.pr_number for row in fresh.land_proof.merged_prefix}
     if confirmed != reobserved:
-        raise RecoverError(
+        raise DeliveryError(
             f"the merged-prefix membership changed while the confirmation was pending "
             f"(confirmed PRs {sorted(confirmed)}, re-observed {sorted(reobserved)}) — "
             "nothing was journaled; rerun recover",
             error_type="accept_blocked",
         )
-    conclusion = landing.accept_external_prefix(rec, train, op, fresh.land_proof)
+    conclusion = landing.accept_external_prefix(seams, train, op, fresh.land_proof)
     effects.merge_conclusion(conclusion)
     return (
         "accepted_prefix",
@@ -990,13 +910,13 @@ def _accept_prefix(
     )
 
 
-def _hint(rec: _Recover, entry: _Classified, *, is_target: bool) -> str:
+def _hint(request: RecoverRequest, entry: _Classified, *, is_target: bool) -> str:
     """The reported row's routing hint — retry is never recover's verb, so every hint names
     the owning surface."""
     op = entry.op
     if op.kind in (OperationKind.SYNC, OperationKind.ADOPT):
         if entry.classification == "all_after":
-            if is_target and rec.dry_run:
+            if is_target and request.dry_run:
                 return "a real recover would roll this forward automatically"
             return f"rerun with `--operation {op.operation_id}` to roll it forward"
         if entry.classification == "all_before":
@@ -1017,7 +937,7 @@ def _hint(rec: _Recover, entry: _Classified, *, is_target: bool) -> str:
         return "mixed state — refusing to guess; reconcile the branch/PR/stack and rerun"
     if op.kind is OperationKind.LAND:
         if entry.classification == "all_after":
-            if is_target and rec.dry_run:
+            if is_target and request.dry_run:
                 return "a real recover would roll this forward automatically"
             return f"rerun with `--operation {op.operation_id}` to roll it forward"
         if entry.classification == "all_before":
@@ -1047,68 +967,72 @@ def _prepared(op: OperationState) -> PreparedRecord | None:
     return record if isinstance(record, PreparedRecord) else None
 
 
-def _abandon(rec: _Recover, train: DeliveryTrain, entry: _Classified) -> tuple[str, str]:
-    """The confirmed abandon arm: kind + classification gates, the approve callback, then
-    the from-scratch RE-classification (decision 18 — the approval pause is a race
-    boundary) whose post-confirmation observation is the journaled proof."""
+def _abandon(
+    seams: _RecoverRecordSeams,
+    train: DeliveryTrain,
+    entry: _Classified,
+    *,
+    consent: _Consent | None,
+) -> tuple[str, str]:
+    """Confirm, then reclassify and abandon one all-before operation."""
     op = entry.op
     if op.kind is OperationKind.TRANSFER:
-        raise RecoverError(
+        raise DeliveryError(
             f"operation {op.operation_id} is {op.kind.value} — abandoning it is not "
             "supported here (report-only); conclude it via the owning surface",
             error_type="unsupported_operation_kind",
         )
     if entry.classification != "all_before":
-        raise RecoverError(
+        raise DeliveryError(
             f"--abandon requires every recorded effect verified at its before state — "
             f"operation {op.operation_id} classified {entry.classification}; nothing was "
             "journaled",
             error_type="abandon_blocked",
         )
-    preview = AbandonPreview(
+    preview = RecoverResult.AbandonPreview(
         operation_id=op.operation_id,
         kind=op.kind.value,
         prepared_created=op.prepared.record.created,
         detail=entry.detail,
     )
-    if rec.approve is not None and not rec.approve(preview):
+    if consent is not None and not consent(preview):
         return ("declined", "the abandon confirmation was declined; the journal is untouched")
-    fresh = _classify(rec, train, op)
+    fresh = _classify(seams, train, op)
     if fresh.classification != "all_before":
-        raise RecoverError(
+        raise DeliveryError(
             f"the world moved while the confirmation was pending: operation "
             f"{op.operation_id} re-classified {fresh.classification} — nothing was "
             "journaled; rerun recover",
             error_type="abandon_blocked",
         )
     record = _prepared(op)
-    assert record is not None  # guaranteed: an all_before classification decoded it
+    assert record is not None
     if op.kind is OperationKind.PUBLISH:
         assert fresh.publish_proof is not None
-        rec.persistence.append_outcome(
+        seams.persistence.append_outcome(
             train.objective_id,
             OutcomeRecord(
                 operation_id=op.operation_id,
                 role=EventRole.ABANDONED,
-                created=rec.now(),
+                created=seams.now(),
                 observed=publish.publish_abandon_observation(record, fresh.publish_proof),
             ),
         )
     elif op.kind is OperationKind.LAND:
         assert fresh.land_proof is not None
-        rec.persistence.append_outcome(
+        seams.persistence.append_outcome(
             train.objective_id,
             OutcomeRecord(
                 operation_id=op.operation_id,
                 role=EventRole.ABANDONED,
-                created=rec.now(),
+                created=seams.now(),
                 observed=landing.land_abandon_observation(fresh.land_proof, detail=fresh.detail),
             ),
         )
     else:
         assert fresh.sync_facts is not None and fresh.sync_observed is not None
         sync_mod.abandon_sync_record(
-            rec, train.objective_id, record, fresh.sync_facts, fresh.sync_observed
+            seams, train.objective_id, record, fresh.sync_facts, fresh.sync_observed
         )
     return ("abandoned", "abandoned with the post-confirmation all-before observation as proof")
 
@@ -1116,7 +1040,12 @@ def _abandon(rec: _Recover, train: DeliveryTrain, entry: _Classified) -> tuple[s
 # ----------------------------------------------------------------- the convergence pass (§8.51)
 
 
-def _converge_finalization(rec: _Recover, train: DeliveryTrain, effects: _LandEffects) -> None:
+def _converge_finalization(
+    seams: _RecoverRecordSeams,
+    request: RecoverRequest,
+    train: DeliveryTrain,
+    effects: _LandEffects,
+) -> None:
     """The finalization-convergence pass (contracts.md §8.51): GitHub merge completion and
     backend finalization are distinct axes, so recovery re-runs the idempotent
     ``finalize_landed_plan`` for EVERY journal-covered, freshly corroborated merged layer —
@@ -1145,7 +1074,7 @@ def _converge_finalization(rec: _Recover, train: DeliveryTrain, effects: _LandEf
     drive suppressed by process death between the close and the evidence step stays
     recoverable here (at-least-once by design; the reconcile pass is idempotent)."""
     try:
-        fold = rec.persistence.read_journal(train.objective_id)
+        fold = seams.persistence.read_journal(train.objective_id)
     except JournalCorruptionError as exc:
         effects.notes.append(
             f"finalization convergence skipped: the journal fold is unreadable ({exc})"
@@ -1158,13 +1087,13 @@ def _converge_finalization(rec: _Recover, train: DeliveryTrain, effects: _LandEf
         if plan_id is None or plan_id in concluded or layer.pr_number is None:
             continue
         proof = _corroborate_covered_layer(
-            rec, train, layer, recorded_head, recorded_merge, effects.notes
+            seams, train, layer, recorded_head, recorded_merge, effects.notes
         )
         if proof is None:
             continue
-        if rec.dry_run:
+        if request.dry_run:
             effects.landed_layers.append(
-                LandedLayerRow(
+                RecoverResult.LandedLayer(
                     node_id=layer.node_id,
                     plan_id=plan_id,
                     pr_number=layer.pr_number,
@@ -1175,9 +1104,9 @@ def _converge_finalization(rec: _Recover, train: DeliveryTrain, effects: _LandEf
                 )
             )
             continue
-        landed = landing.finalize_proof_layers(rec, train.objective_id, (proof,), effects.notes)
+        landed = landing.finalize_proof_layers(seams, train.objective_id, (proof,), effects.notes)
         effects.landed_layers.extend(_landed_row(row) for row in landed)
-    if rec.dry_run:
+    if request.dry_run:
         return
     unresolved_land = [op for op in fold.unresolved if op.kind is OperationKind.LAND]
     if unresolved_land:
@@ -1188,10 +1117,10 @@ def _converge_finalization(rec: _Recover, train: DeliveryTrain, effects: _LandEf
             "reconcile evidence"
         )
         return
-    closed = landing.state_aware_close(rec.store, train.objective_id, effects.notes)
+    closed = landing.state_aware_close(seams.store, train.objective_id, effects.notes)
     if closed:
         effects.objective_closed = True
-    elif not _closed_and_complete(rec, train.objective_id, effects.notes):
+    elif not _closed_and_complete(seams, train.objective_id, effects.notes):
         return
     if effects.reconcile_evidence is None:
         evidence = landing.assemble_land_evidence(fold)
@@ -1210,7 +1139,7 @@ def _converge_finalization(rec: _Recover, train: DeliveryTrain, effects: _LandEf
             )
 
 
-def _closed_and_complete(rec: _Recover, objective_id: str, notes: list[str]) -> bool:
+def _closed_and_complete(seams: _RecoverRecordSeams, objective_id: str, notes: list[str]) -> bool:
     """Whether the objective reads CLOSED with every node terminal — the death-after-close
     crash signature the evidence re-emission repairs. The fresh fetch corroborates the
     CURRENT state, never this invocation's earlier reads. An OPEN/partial state answers
@@ -1219,7 +1148,7 @@ def _closed_and_complete(rec: _Recover, objective_id: str, notes: list[str]) -> 
     defeat the crash repair (the operator reruns recover instead of trusting a clean
     no-evidence exit)."""
     try:
-        state = rec.store.get_objective(objective_id=objective_id)
+        state = seams.store.get_objective(objective_id=objective_id)
     except ObjectiveStoreError as exc:
         notes.append(
             "reconcile-evidence re-emission skipped: the fresh objective corroboration "
@@ -1274,7 +1203,7 @@ def _journal_covered_layers(
 
 
 def _corroborate_covered_layer(
-    rec: _Recover,
+    seams: _RecoverRecordSeams,
     train: DeliveryTrain,
     layer: TrainLayer,
     recorded_head: str,
@@ -1286,7 +1215,7 @@ def _corroborate_covered_layer(
     base. Any mismatch or read failure is a loud note + skip (never a guess)."""
     assert layer.plan_id is not None and layer.pr_number is not None  # caller-filtered
     try:
-        evidence = rec.merged_evidence(number=layer.pr_number, repo_root=rec.repo_root)
+        evidence = seams.merged_evidence(number=layer.pr_number, repo_root=seams.repo_root)
     except GitHubError as exc:
         notes.append(
             f"finalization convergence skipped layer {layer.node_id}: could not read "
@@ -1329,23 +1258,37 @@ def _corroborate_covered_layer(
 
 
 def _sweep(
-    rec: _Recover,
-) -> tuple[tuple[str, ...], tuple[str, ...], tuple[SweepFailure, ...], str | None]:
-    """Phase 5 (decision 7): classify, then — unless dry-run or the unparseable-manifest
-    fail-safe fired — attempt every target (refs, then worktrees, then ONE prune), with
-    per-item failures recorded loudly. Under dry-run the classified targets ride the result
-    as the would-be sweep (nothing deleted)."""
+    context: _RecoverContext,
+    request: RecoverRequest,
+    *,
+    worktree_root: Path,
+) -> tuple[
+    tuple[str, ...],
+    tuple[str, ...],
+    tuple[RecoverResult.SweepFailure, ...],
+    str | None,
+]:
+    """Classify residue, then delete refs, worktrees, and finally prune once."""
+
+    def list_refs(repo_root: Path, prefix: str) -> list[str]:
+        del repo_root
+        return list(context.git.list_refs(prefix))
+
+    def worktree_admin_dirs(repo_root: Path) -> list[Path]:
+        del repo_root
+        return list(context.git.worktree_admin_paths())
+
     scan = observe_orphans(
-        rec.repo_root,
-        worktree_root=rec.worktree_root,
-        iter_manifests=rec.iter_manifests,
-        list_refs=rec.list_refs,
-        worktree_dirs=rec.worktree_dirs,
-        worktree_admin_dirs=rec.worktree_admin_dirs,
+        context.repo_root,
+        worktree_root=worktree_root,
+        iter_manifests=context.runtime.iter_manifests,
+        list_refs=list_refs,
+        worktree_dirs=context.runtime.worktree_dirs,
+        worktree_admin_dirs=worktree_admin_dirs,
     )
     if scan.skipped is not None:
         return ((), (), (), scan.skipped)
-    if rec.dry_run:
+    if request.dry_run:
         return (
             tuple(str(path) for path in (*scan.worktrees, *scan.stale_admin)),
             scan.refs,
@@ -1354,28 +1297,26 @@ def _sweep(
         )
     swept_refs: list[str] = []
     swept_worktrees: list[str] = []
-    failures: list[SweepFailure] = []
+    failures: list[RecoverResult.SweepFailure] = []
     for ref in scan.refs:
         try:
-            rec.delete_ref(rec.repo_root, ref)
+            context.git.delete_ref(ref)
             swept_refs.append(ref)
         except (git_mod.GitError, OSError) as exc:
-            failures.append(SweepFailure(target=ref, error=str(exc)))
+            failures.append(RecoverResult.SweepFailure(target=ref, error=str(exc)))
     for path in scan.worktrees:
         try:
-            rec.worktree_remove(rec.repo_root, path)
+            context.git.remove_worktree(path)
             swept_worktrees.append(str(path))
         except (git_mod.GitError, OSError) as exc:
-            failures.append(SweepFailure(target=str(path), error=str(exc)))
+            failures.append(RecoverResult.SweepFailure(target=str(path), error=str(exc)))
     try:
-        # One unconditional prune: clears the stale worktree-admin entries (directories
-        # already gone) the scan classified, plus any admin records the removals left.
-        rec.worktree_prune(rec.repo_root)
+        context.git.prune_worktrees()
         swept_worktrees.extend(str(path) for path in scan.stale_admin)
     except (git_mod.GitError, OSError) as exc:
-        failures.append(SweepFailure(target="worktree-prune", error=str(exc)))
+        failures.append(RecoverResult.SweepFailure(target="worktree-prune", error=str(exc)))
         failures.extend(
-            SweepFailure(target=str(path), error="the worktree-admin prune failed")
+            RecoverResult.SweepFailure(target=str(path), error="the worktree-admin prune failed")
             for path in scan.stale_admin
         )
     return (tuple(swept_worktrees), tuple(swept_refs), tuple(failures), None)

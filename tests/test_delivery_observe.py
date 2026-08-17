@@ -154,6 +154,22 @@ class TestRepoDeliveryPersistence:
             ("finalize", "10", "11"),
         ]
 
+    def test_close_objective_delegates_exactly(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        calls: list[tuple[str, str, bool]] = []
+
+        class _Store:
+            def close_objective(self, *, objective_id: str, dry_run: bool = False) -> bool:
+                calls.append(("close", objective_id, dry_run))
+                return True
+
+        authority = observe.RepoDeliveryPersistence(tmp_path)
+        monkeypatch.setattr(authority, "_resolve", lambda: (_Store(), object(), object()))
+
+        assert authority.close_objective(objective_id="1431", dry_run=True) is True
+        assert calls == [("close", "1431", True)]
+
 
 # ----------------------------------------------------------------- RepoDeliveryGit
 
@@ -305,9 +321,18 @@ class TestRepoDeliveryGit:
         monkeypatch.setattr(
             git_mod, "is_dirty", lambda path: calls.append(("dirty", path)) or False
         )
+        monkeypatch.setattr(
+            git_mod,
+            "worktree_list",
+            lambda root: (
+                calls.append(("worktrees", root))
+                or [git_mod.Worktree(path=worktree, branch=None, head=None)]
+            ),
+        )
 
         authority = observe.RepoDeliveryGit(clone)
         assert authority.repo_root == clone
+        assert authority.worktree_admin_paths() == (worktree,)
         assert authority.resolve_commit("HEAD", cwd=worktree) == "c" * 40
         authority.push_with_exact_lease("plan-1", expected_remote_sha="a")
         authority.push_atomic((update,))
@@ -323,6 +348,7 @@ class TestRepoDeliveryGit:
         assert authority.worktree_dirty(worktree) is False
 
         assert calls == [
+            ("worktrees", clone),
             ("resolve", worktree, "HEAD"),
             ("lease", clone, "plan-1", "a"),
             ("push", clone, (update,)),
@@ -798,6 +824,45 @@ class TestRepoDeliveryGitHub:
                 "stack-append",
                 {"stack_number": 9, "pull_requests": (42,), "repo_root": tmp_path},
             ),
+        ]
+
+    def test_recovery_github_reads_delegate_exactly(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        probe = stacks.MergeAsyncProbe(state="merged", sha="d" * 40, message="merged")
+        evidence = stacks.PrMergedEvidence(
+            number=42,
+            state="MERGED",
+            base_ref="main",
+            head_ref="plan-42",
+            head_sha="b" * 40,
+            merge_commit_sha="d" * 40,
+        )
+        calls: list[tuple[str, dict[str, object]]] = []
+        monkeypatch.setattr(
+            stacks,
+            "merge_async_probe",
+            lambda **kwargs: calls.append(("probe", kwargs)) or probe,
+        )
+        monkeypatch.setattr(
+            stacks,
+            "pr_merged_evidence",
+            lambda **kwargs: calls.append(("evidence", kwargs)) or evidence,
+        )
+        authority = observe.RepoDeliveryGitHub(tmp_path)
+
+        assert authority.merge_async_probe(42, uuid="01OP") is probe
+        assert authority.merged_evidence(42) is evidence
+        assert calls == [
+            (
+                "probe",
+                {
+                    "number": 42,
+                    "uuid": "01OP",
+                    "repo_root": tmp_path,
+                },
+            ),
+            ("evidence", {"number": 42, "repo_root": tmp_path}),
         ]
 
     def test_publication_github_effect_errors_remain_raw(
