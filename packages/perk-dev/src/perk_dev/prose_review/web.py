@@ -380,6 +380,7 @@ def create_app(
                 request.unit,
                 request.load_hash,
                 request.text,
+                typescript_adapter=typescript_adapter,
             )
             if isinstance(result, SourceSaved):
                 try:

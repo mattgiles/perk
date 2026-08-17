@@ -19,6 +19,7 @@ from perk_dev.prose_review.catalog import CatalogQueryError, CatalogSnapshot, lo
 from perk_dev.prose_review.comparison import comparison_options
 from perk_dev.prose_review.dto import ComparisonOptionsOut
 from perk_dev.prose_review.source_adapter import typescript as typescript_adapter_module
+from perk_dev.prose_review.source_adapter.contract import SourceAdapter
 from perk_dev.prose_review.source_adapter.write import CATALOG_STALE_DETAIL
 from perk_dev.prose_review.web import create_app
 
@@ -34,6 +35,7 @@ CSP = (
     "frame-ancestors 'none'"
 )
 PYTHON_UNIT_ID = "python-symbol:packages/perk-dev/src/perk_dev/audit/bounding.py:_PREAMBLE"
+TYPESCRIPT_UNIT_ID = "typescript-tool:plan_review"
 
 INDEX_HTML = (
     "<!doctype html><html><head>"
@@ -1169,6 +1171,108 @@ def test_save_success_derives_authority_and_refreshes_after_replacement(
     _assert_security_headers(response)
 
 
+def test_typescript_save_is_guarded_exact_and_refreshes_after_replacement(
+    snapshot: CatalogSnapshot,
+    repo: Path,
+) -> None:
+    unit = snapshot.get_unit(TYPESCRIPT_UNIT_ID)
+    assert unit is not None
+    target = repo / unit.candidate.path
+    target.parent.mkdir(parents=True)
+    target.write_bytes((ROOT / unit.candidate.path).read_bytes())
+    target.chmod(0o754)
+    original = target.read_bytes()
+    text = original.decode("utf-8").replace(
+        "Present the plan", "Present the guarded TypeScript plan", 1
+    )
+    reload_observations: list[bytes] = []
+
+    def reload_after_write(root: Path) -> CatalogSnapshot:
+        reload_observations.append((root / unit.candidate.path).read_bytes())
+        return snapshot
+
+    response = _client(snapshot, repo, reload_catalog=reload_after_write).post(
+        "/api/source/save",
+        headers={web.CSRF_HEADER: TOKEN},
+        json={
+            "unit": TYPESCRIPT_UNIT_ID,
+            "load_hash": hashlib.sha256(original).hexdigest(),
+            "text": text,
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] == "saved"
+    assert payload["source"] == {
+        "unit": TYPESCRIPT_UNIT_ID,
+        "kind": "typescript-tool",
+        "file": {
+            "path": unit.candidate.path,
+            "mode": 0o754,
+            "newline_style": "lf",
+            "load_hash": hashlib.sha256(text.encode("utf-8")).hexdigest(),
+        },
+    }
+    assert payload["materialized"] == []
+    assert payload["checks"] == [{"id": "prose-map", "command": "perk-dev prose-map check"}]
+    assert payload["catalog_refreshed"] is True
+    assert payload["refresh_detail"] is None
+    assert target.read_bytes() == text.encode("utf-8")
+    assert stat.S_IMODE(target.stat().st_mode) == 0o754
+    assert reload_observations == [text.encode("utf-8")]
+    _assert_security_headers(response)
+
+
+@pytest.mark.parametrize("external_change", [False, True])
+def test_typescript_helper_failure_is_guarded_and_resampled(
+    external_change: bool,
+    snapshot: CatalogSnapshot,
+    repo: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    unit = snapshot.get_unit(TYPESCRIPT_UNIT_ID)
+    assert unit is not None
+    target = repo / unit.candidate.path
+    target.parent.mkdir(parents=True)
+    target.write_bytes((ROOT / unit.candidate.path).read_bytes())
+    original = target.read_bytes()
+    external = original.replace(b"Plan review", b"Externally changed review", 1)
+
+    def unavailable(*_args: object, **_kwargs: object) -> str:
+        if external_change:
+            target.write_bytes(external)
+        raise ProcFailure("spawn", ("node",), cause_text="fixture helper unavailable")
+
+    monkeypatch.setattr(typescript_adapter_module, "run_checked", unavailable)
+    response = _client(snapshot, repo, raise_server_exceptions=False).post(
+        "/api/source/save",
+        headers={web.CSRF_HEADER: TOKEN},
+        json={
+            "unit": TYPESCRIPT_UNIT_ID,
+            "load_hash": hashlib.sha256(original).hexdigest(),
+            "text": original.decode("utf-8"),
+        },
+    )
+
+    assert response.status_code == 200
+    if external_change:
+        assert response.json() == {
+            "status": "conflict",
+            "detail": "Source changed on disk. The workbench did not overwrite it.",
+        }
+        assert target.read_bytes() == external
+    else:
+        assert response.json() == {
+            "status": "refused",
+            "reason": "write-failed",
+            "detail": "The source could not be saved safely.",
+        }
+        assert target.read_bytes() == original
+    assert [path for path in target.parent.iterdir() if path.name.endswith(".tmp")] == []
+    _assert_security_headers(response)
+
+
 def test_save_swaps_the_complete_catalog_generation(
     snapshot: CatalogSnapshot,
     fallback_snapshot: CatalogSnapshot,
@@ -1270,6 +1374,69 @@ def test_python_save_with_discovery_marker_rebuilds_the_production_catalog(
     assert second.json()["status"] == "saved"
     assert second.json()["catalog_refreshed"] is True
     assert target.read_bytes() == second_text.encode("utf-8")
+
+
+def test_typescript_save_rebuilds_production_catalog_and_keeps_later_save_enabled(
+    tmp_path: Path,
+) -> None:
+    repo_root = _copy_catalog_root(tmp_path)
+    initial = load_catalog(repo_root)
+    unit = initial.get_unit(TYPESCRIPT_UNIT_ID)
+    assert unit is not None
+    target = repo_root / unit.candidate.path
+    original = target.read_bytes()
+    text = original.decode("utf-8").replace(
+        "Present the plan", "Present the production TypeScript plan", 1
+    )
+    client = _client(initial, repo_root)
+
+    first = client.post(
+        "/api/source/save",
+        headers={web.CSRF_HEADER: TOKEN},
+        json={
+            "unit": TYPESCRIPT_UNIT_ID,
+            "load_hash": hashlib.sha256(original).hexdigest(),
+            "text": text,
+        },
+    )
+    inspected = client.get("/api/inspect", params={"unit": TYPESCRIPT_UNIT_ID})
+    loaded = client.get(
+        "/api/source",
+        params={"unit": TYPESCRIPT_UNIT_ID, "fragment": "description"},
+    )
+    second_text = text.replace(
+        "Present the production TypeScript plan",
+        "Present the second production TypeScript plan",
+        1,
+    )
+    second = client.post(
+        "/api/source/save",
+        headers={web.CSRF_HEADER: TOKEN},
+        json={
+            "unit": TYPESCRIPT_UNIT_ID,
+            "load_hash": hashlib.sha256(text.encode("utf-8")).hexdigest(),
+            "text": second_text,
+        },
+    )
+
+    assert first.status_code == 200
+    assert first.json()["status"] == "saved"
+    assert first.json()["catalog_refreshed"] is True
+    assert first.json()["refresh_detail"] is None
+    assert inspected.status_code == 200
+    assert inspected.json()["id"] == TYPESCRIPT_UNIT_ID
+    assert loaded.status_code == 200
+    view = loaded.json()["view"]
+    assert view["before"] + view["focus"] + view["after"] == text
+    assert "production TypeScript plan" in view["focus"]
+    assert second.status_code == 200
+    assert second.json()["status"] == "saved"
+    assert second.json()["catalog_refreshed"] is True
+    assert target.read_bytes() == second_text.encode("utf-8")
+    _assert_security_headers(first)
+    _assert_security_headers(inspected)
+    _assert_security_headers(loaded)
+    _assert_security_headers(second)
 
 
 def test_python_save_without_discovery_marker_commits_then_freezes_production_catalog(
@@ -1550,9 +1717,18 @@ def test_queued_save_waits_for_refresh_and_observes_newly_frozen_state(
         unit_id: str,
         load_hash: str,
         text: str,
+        *,
+        typescript_adapter: SourceAdapter | None = None,
     ) -> web.source_adapter.SourceSaveResult:
         save_calls.append(unit_id)
-        return real_save(current, root, unit_id, load_hash, text)
+        return real_save(
+            current,
+            root,
+            unit_id,
+            load_hash,
+            text,
+            typescript_adapter=typescript_adapter,
+        )
 
     def deferred_failure(_root: Path) -> CatalogSnapshot:
         entered_reload.set()
@@ -1648,9 +1824,18 @@ def test_queued_different_path_save_uses_successfully_swapped_generation(
         unit_id: str,
         load_hash: str,
         text: str,
+        *,
+        typescript_adapter: SourceAdapter | None = None,
     ) -> web.source_adapter.SourceSaveResult:
         save_calls.append((unit_id, current is fallback_snapshot))
-        return real_save(current, root, unit_id, load_hash, text)
+        return real_save(
+            current,
+            root,
+            unit_id,
+            load_hash,
+            text,
+            typescript_adapter=typescript_adapter,
+        )
 
     def deferred_success(_root: Path) -> CatalogSnapshot:
         nonlocal reload_calls

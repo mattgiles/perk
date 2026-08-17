@@ -7,7 +7,6 @@ import {
   type SourceDiagnostic,
   type SourceRefusalReason,
   type SourceSaveResult,
-  supportsSourceSave,
   UNRESOLVED_RECONCILIATION_DETAIL,
 } from "./save.ts";
 import { type SourceSaveLoadOutcome, saveUnitSource } from "./saveLoad.ts";
@@ -472,7 +471,6 @@ export class EditWorkspace {
       entry === undefined ||
       entry.lastEditedTarget === null ||
       !this.#dirty(entry) ||
-      !supportsSourceSave(entry.lastEditedTarget) ||
       entry.saveState.status !== "idle" ||
       this.#writeFrozenDetail !== null ||
       this.#savesSuspended()
@@ -500,7 +498,7 @@ export class EditWorkspace {
       entry === undefined ||
       reviewed === null ||
       reviewed === undefined ||
-      (entry.saveState.status !== "idle" && entry.saveState.status !== "not-sent") ||
+      !this.#canDispatchReviewedSave(entry) ||
       this.#writeFrozenDetail !== null ||
       this.#savesSuspended()
     ) {
@@ -562,7 +560,9 @@ export class EditWorkspace {
     }
 
     const result = outcome.result;
-    entry.review = null;
+    if (result.status !== "refused" || result.reason !== "write-failed") {
+      entry.review = null;
+    }
     if (result.status === "saved") {
       this.#adoptSaved(entry, artifact.currentText, result);
       if (!result.catalog_refreshed) {
@@ -968,6 +968,14 @@ export class EditWorkspace {
     return entry.saveState.status !== "conflict" && !this.#pathLocked(entry);
   }
 
+  #canDispatchReviewedSave(entry: FileEntry): boolean {
+    return (
+      entry.saveState.status === "idle" ||
+      entry.saveState.status === "not-sent" ||
+      (entry.saveState.status === "refused" && entry.saveState.reason === "write-failed")
+    );
+  }
+
   #needsAttention(entry: FileEntry): boolean {
     return (
       this.#dirty(entry) ||
@@ -1021,19 +1029,20 @@ export class EditWorkspace {
             }
           : null,
       dirty: this.#dirty(entry),
-      review: entry.review?.artifact ?? null,
+      review: view.editable ? (entry.review?.artifact ?? null) : null,
       saveState: this.#cloneSaveState(entry.saveState),
       canDiscard: this.#canDiscard(entry),
       canReview:
+        view.editable &&
         entry.lastEditedTarget !== null &&
         this.#dirty(entry) &&
-        supportsSourceSave(entry.lastEditedTarget) &&
         entry.saveState.status === "idle" &&
         this.#writeFrozenDetail === null &&
         !this.#savesSuspended(),
       canSave:
+        view.editable &&
         entry.review !== null &&
-        (entry.saveState.status === "idle" || entry.saveState.status === "not-sent") &&
+        this.#canDispatchReviewedSave(entry) &&
         this.#writeFrozenDetail === null &&
         !this.#savesSuspended(),
     };

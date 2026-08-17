@@ -8,12 +8,7 @@ import {
   type SelectedComparison,
 } from "./comparison.ts";
 import type { ComparisonLoadState } from "./comparisonLoad.ts";
-import {
-  CLIPBOARD_FAILURE_DETAIL,
-  type SourceDiagnostic,
-  supportsSourceSave,
-  UNSUPPORTED_FAMILY_DETAIL,
-} from "./save.ts";
+import { CLIPBOARD_FAILURE_DETAIL, type SourceDiagnostic } from "./save.ts";
 import {
   type Selection,
   type SourceTarget,
@@ -167,9 +162,6 @@ function SourceLoadPresentation({
         <p className="empty-focus-hint">This mapped fragment is empty.</p>
       )}
 
-      {source.dirty && !supportsSourceSave(target) && (
-        <p className="save-unsupported">{UNSUPPORTED_FAMILY_DETAIL}</p>
-      )}
       {source.review === null && source.canReview && (
         <button
           type="button"

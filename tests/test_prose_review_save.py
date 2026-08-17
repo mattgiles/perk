@@ -26,6 +26,10 @@ from perk_dev.prose_review.source_adapter.contract import (
     SourceDiagnostic,
     SourceRange,
 )
+from perk_dev.prose_review.source_adapter.typescript import (
+    TypeScriptAdapterUnavailable,
+    TypeScriptSourceAdapter,
+)
 
 ROOT = Path(__file__).parents[1]
 _REAL_FDOPEN = os.fdopen
@@ -334,6 +338,104 @@ def test_python_save_missing_mapped_symbol_is_validation_failure_without_mutatio
     assert [path for path in target.parent.iterdir() if path.name.endswith(".tmp")] == []
 
 
+def test_typescript_tool_save_writes_exact_complete_buffer_through_fixed_helper(
+    snapshot: CatalogSnapshot,
+    tmp_path: Path,
+) -> None:
+    unit_id = "typescript-tool:plan_review"
+    unit = snapshot.get_unit(unit_id)
+    assert unit is not None
+    target = _copy(unit.candidate.path, tmp_path)
+    target.chmod(0o754)
+    original = target.read_bytes()
+    original_text = original.decode("utf-8")
+    old_expression = (
+        '"Present the plan to the configured review surface — the Plannotator browser UI when "'
+    )
+    new_expression = (
+        '"Present the reviewed plan to the configured review surface — the Plannotator browser '
+        'UI when "'
+    )
+    assert original_text.count(old_expression) == 1
+    text = original_text.replace(old_expression, new_expression, 1)
+    edit_start = original_text.index(old_expression)
+    edit_end = edit_start + len(old_expression)
+    assert text[:edit_start] == original_text[:edit_start]
+    assert text[edit_start + len(new_expression) :] == original_text[edit_end:]
+
+    result = save_source(
+        snapshot,
+        tmp_path,
+        unit_id,
+        hashlib.sha256(original).hexdigest(),
+        text,
+        typescript_adapter=TypeScriptSourceAdapter(ROOT),
+    )
+
+    assert isinstance(result, SourceSaved)
+    assert result.source.content == text.encode("utf-8")
+    assert result.source.load_hash == hashlib.sha256(text.encode("utf-8")).hexdigest()
+    assert result.source.newline_style == "lf"
+    assert result.source.mode == 0o754
+    assert target.read_bytes() == text.encode("utf-8")
+    assert stat.S_IMODE(target.stat().st_mode) == 0o754
+    assert result.materialized == ()
+    assert [(check.id, check.command) for check in result.checks] == [
+        ("prose-map", "perk-dev prose-map check")
+    ]
+    assert [path for path in target.parent.iterdir() if path.name.endswith(".tmp")] == []
+
+
+@pytest.mark.parametrize("external_change", [False, True])
+def test_typescript_helper_unavailable_resamples_without_preparing_replacement(
+    external_change: bool,
+    snapshot: CatalogSnapshot,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    unit_id = "typescript-tool:plan_review"
+    unit = snapshot.get_unit(unit_id)
+    assert unit is not None
+    target = _copy(unit.candidate.path, tmp_path)
+    original = target.read_bytes()
+    external = original.replace(b"Plan review", b"Externally changed review", 1)
+
+    class UnavailableAdapter(_SpyAdapter):
+        def validate(
+            self,
+            text: str,
+            selectors: tuple[str, ...],
+        ) -> tuple[SourceDiagnostic, ...]:
+            self.validated.append((text, selectors))
+            if external_change:
+                target.write_bytes(external)
+            raise TypeScriptAdapterUnavailable("helper failed")
+
+    def unexpected_temp(*_args: object, **_kwargs: object) -> tuple[int, str]:
+        raise AssertionError("helper failure created a source temp")
+
+    adapter = UnavailableAdapter()
+    monkeypatch.setattr(write_module.tempfile, "mkstemp", unexpected_temp)
+    result = save_source(
+        snapshot,
+        tmp_path,
+        unit_id,
+        hashlib.sha256(original).hexdigest(),
+        original.decode("utf-8"),
+        typescript_adapter=adapter,
+    )
+
+    assert len(adapter.validated) == 1
+    if external_change:
+        assert isinstance(result, SourceConflict)
+        assert target.read_bytes() == external
+    else:
+        assert isinstance(result, SourceRefused)
+        assert result.reason == "write-failed"
+        assert target.read_bytes() == original
+    assert [path for path in target.parent.iterdir() if path.name.endswith(".tmp")] == []
+
+
 def test_every_symlink_component_is_refused(snapshot: CatalogSnapshot, tmp_path: Path) -> None:
     target = tmp_path / "actual.md"
     target.write_bytes((ROOT / "AGENTS.md").read_bytes())
@@ -411,64 +513,87 @@ def test_late_conflict_after_temp_preparation_cleans_temp_without_replacement(
 
 
 @pytest.mark.parametrize(
-    ("kind", "path", "supported"),
+    ("kind", "path", "inject_typescript", "supported"),
     [
-        ("markdown", "doc.md", True),
-        ("managed-prose", "doc.md", True),
-        ("ambient-routing", "routing.yaml", True),
-        ("ambient-routing", "routing.yml", True),
-        ("python-symbol", "module.py", True),
-        ("managed-prose", "module.PY", True),
-        ("typescript-symbol", "module.ts", False),
-        ("markdown", "doc.txt", False),
-        ("ambient-routing", "routing.md", False),
+        ("markdown", "doc.md", False, True),
+        ("managed-prose", "doc.md", False, True),
+        ("ambient-routing", "routing.yaml", False, True),
+        ("ambient-routing", "routing.yml", False, True),
+        ("python-symbol", "module.py", False, True),
+        ("managed-prose", "module.PY", False, True),
+        ("typescript-tool", "module.ts", True, True),
+        ("typescript-model-call", "module.ts", True, True),
+        ("typescript-symbol", "module.ts", True, True),
+        ("typescript-symbol", "module.ts", False, False),
+        ("markdown", "doc.txt", False, False),
+        ("ambient-routing", "routing.md", False, False),
+        ("typescript-tool", "module.js", True, False),
     ],
 )
-def test_closed_family_admission(
+def test_shared_adapter_dispatch_is_save_admission(
     kind: ProseKind,
     path: str,
+    inject_typescript: bool,
     supported: bool,
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     unit = _unit("unit:admission", kind, path)
-    adapter = _SpyAdapter()
-    monkeypatch.setattr(write_module, "source_adapter_for", lambda _unit: adapter)
-    target = tmp_path / path
-    target.parent.mkdir(parents=True, exist_ok=True)
-    target.write_bytes(b"before")
+    typescript_adapter = _SpyAdapter() if inject_typescript else None
 
-    result = save_source(
+    dispatch = write_module._mapped_write_set(
         _snapshot((unit,)),
-        tmp_path,
-        unit.candidate.id,
-        hashlib.sha256(b"before").hexdigest(),
-        "after",
+        unit,
+        typescript_adapter=typescript_adapter,
     )
 
-    if supported:
-        assert isinstance(result, SourceSaved)
-        assert target.read_bytes() == b"after"
-    else:
-        assert isinstance(result, SourceRefused)
-        assert result.reason == "unsupported-family"
-        assert target.read_bytes() == b"before"
+    assert (dispatch is not None) is supported
+    if dispatch is not None:
+        mapped, adapter = dispatch
+        assert mapped == (unit,)
+        if inject_typescript:
+            assert adapter is typescript_adapter
 
 
-def test_mixed_family_and_missing_adapter_refuse_before_mutation(
+def test_adapter_identity_missing_adapter_and_unmapped_request_refuse_before_mutation(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    markdown = _unit("unit:markdown", "markdown", "shared.md")
-    python = _unit("unit:python", "python-symbol", "shared.md")
+    first = _unit("unit:first", "markdown", "shared.md")
+    second = _unit("unit:second", "markdown", "shared.md")
     target = tmp_path / "shared.md"
     target.write_bytes(b"before")
     original_hash = hashlib.sha256(b"before").hexdigest()
+    shared = _SpyAdapter()
+    other = _SpyAdapter()
+    adapters: dict[str, SourceAdapter | None] = {
+        first.candidate.id: shared,
+        second.candidate.id: shared,
+    }
 
-    mixed = save_source(
-        _snapshot((markdown, python)),
+    def dispatch(
+        unit: RoutedUnit,
+        *,
+        typescript_adapter: SourceAdapter | None = None,
+    ) -> SourceAdapter | None:
+        assert typescript_adapter is None
+        return adapters[unit.candidate.id]
+
+    monkeypatch.setattr(write_module, "source_adapter_for", dispatch)
+    saved = save_source(
+        _snapshot((first, second)),
         tmp_path,
-        markdown.candidate.id,
+        first.candidate.id,
+        original_hash,
+        "after",
+    )
+    assert isinstance(saved, SourceSaved)
+    assert target.read_bytes() == b"after"
+
+    target.write_bytes(b"before")
+    adapters[second.candidate.id] = other
+    mixed = save_source(
+        _snapshot((first, second)),
+        tmp_path,
+        first.candidate.id,
         original_hash,
         "after",
     )
@@ -476,11 +601,11 @@ def test_mixed_family_and_missing_adapter_refuse_before_mutation(
     assert mixed.reason == "unsupported-family"
     assert target.read_bytes() == b"before"
 
-    monkeypatch.setattr(write_module, "source_adapter_for", lambda _unit: None)
+    adapters[first.candidate.id] = None
     missing = save_source(
-        _snapshot((markdown,)),
+        _snapshot((first,)),
         tmp_path,
-        markdown.candidate.id,
+        first.candidate.id,
         original_hash,
         "after",
     )
@@ -489,7 +614,7 @@ def test_mixed_family_and_missing_adapter_refuse_before_mutation(
     assert target.read_bytes() == b"before"
 
     unmapped = save_source(
-        _snapshot((markdown,)),
+        _snapshot((first,)),
         tmp_path,
         "unit:missing",
         original_hash,
@@ -514,7 +639,11 @@ def test_validation_receives_every_mapped_selector_in_catalog_order(
         column=3,
     )
     adapter = _SpyAdapter((diagnostic,))
-    monkeypatch.setattr(write_module, "source_adapter_for", lambda _unit: adapter)
+    monkeypatch.setattr(
+        write_module,
+        "source_adapter_for",
+        lambda _unit, **_kwargs: adapter,
+    )
     target = tmp_path / "shared.md"
     target.write_bytes(b"before")
 
@@ -595,7 +724,11 @@ def test_generated_lineage_refuses_and_materialization_is_ordered_deduplicated(
         sources=(unit,),
     )
     adapter = _SpyAdapter()
-    monkeypatch.setattr(write_module, "source_adapter_for", lambda _unit: adapter)
+    monkeypatch.setattr(
+        write_module,
+        "source_adapter_for",
+        lambda _unit, **_kwargs: adapter,
+    )
     saved = save_source(
         _snapshot(
             (unit,),
@@ -632,7 +765,11 @@ def test_exact_utf8_bom_empty_and_newline_bytes(
 ) -> None:
     unit = _unit("unit:bytes", "markdown", "bytes.md")
     adapter = _SpyAdapter()
-    monkeypatch.setattr(write_module, "source_adapter_for", lambda _unit: adapter)
+    monkeypatch.setattr(
+        write_module,
+        "source_adapter_for",
+        lambda _unit, **_kwargs: adapter,
+    )
     target = tmp_path / "bytes.md"
     target.write_bytes(b"before")
 
@@ -669,7 +806,11 @@ def test_lexical_nonregular_and_parent_path_refusals(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     unit = _unit("unit:path", "markdown", path)
-    monkeypatch.setattr(write_module, "source_adapter_for", lambda _unit: _SpyAdapter())
+    monkeypatch.setattr(
+        write_module,
+        "source_adapter_for",
+        lambda _unit, **_kwargs: _SpyAdapter(),
+    )
     if setup == "file-parent":
         (tmp_path / "parent").write_bytes(b"not a directory")
     elif setup == "directory-final":
@@ -700,7 +841,11 @@ def test_non_utf8_target_refuses_without_mutation(
     unit = _unit("unit:binary", "markdown", "binary.md")
     target = tmp_path / "binary.md"
     target.write_bytes(b"\xff\xfe")
-    monkeypatch.setattr(write_module, "source_adapter_for", lambda _unit: _SpyAdapter())
+    monkeypatch.setattr(
+        write_module,
+        "source_adapter_for",
+        lambda _unit, **_kwargs: _SpyAdapter(),
+    )
 
     result = save_source(
         _snapshot((unit,)),
@@ -722,7 +867,11 @@ def test_target_becoming_symlink_during_late_sample_refuses_and_cleans_temp(
 ) -> None:
     unit = _unit("unit:late-path", "markdown", "late.md")
     adapter = _SpyAdapter()
-    monkeypatch.setattr(write_module, "source_adapter_for", lambda _unit: adapter)
+    monkeypatch.setattr(
+        write_module,
+        "source_adapter_for",
+        lambda _unit, **_kwargs: adapter,
+    )
     target = tmp_path / "late.md"
     external = tmp_path / "external.md"
     target.write_bytes(b"before")
@@ -763,7 +912,11 @@ def test_encoding_failure_rechecks_target_and_reports_concurrent_change(
         target.write_bytes(b"external")
 
     adapter.on_validate = mutate_target
-    monkeypatch.setattr(write_module, "source_adapter_for", lambda _unit: adapter)
+    monkeypatch.setattr(
+        write_module,
+        "source_adapter_for",
+        lambda _unit, **_kwargs: adapter,
+    )
 
     result = save_source(
         _snapshot((unit,)),
@@ -812,7 +965,11 @@ def test_pre_replace_failures_preserve_target_and_clean_temp(
     target = tmp_path / "failure.md"
     target.write_bytes(b"before")
     adapter = _SpyAdapter()
-    monkeypatch.setattr(write_module, "source_adapter_for", lambda _unit: adapter)
+    monkeypatch.setattr(
+        write_module,
+        "source_adapter_for",
+        lambda _unit, **_kwargs: adapter,
+    )
     created_descriptors: list[int] = []
     real_mkstemp = write_module.tempfile.mkstemp
 
@@ -896,7 +1053,11 @@ def test_failure_classifier_reports_external_change_as_conflict(
     target = tmp_path / "failure-race.md"
     target.write_bytes(b"before")
     adapter = _SpyAdapter()
-    monkeypatch.setattr(write_module, "source_adapter_for", lambda _unit: adapter)
+    monkeypatch.setattr(
+        write_module,
+        "source_adapter_for",
+        lambda _unit, **_kwargs: adapter,
+    )
 
     def change_then_fail(_source: Path, _target: Path) -> None:
         target.write_bytes(b"external")

@@ -164,12 +164,18 @@ communicated by color alone.
    retry. A committed write whose catalog refresh fails remains committed, preserves prior catalog
    reads, freezes later writes, and gives external repair/copy guidance.
 
-Persistence admits mapped Markdown and YAML source families plus catalog-mapped `.py` named-symbol
-and Python-backed managed-prose units. Python call-argument selectors remain unsupported, and
-TypeScript edits remain in-memory-only. Save and Reload lock only their file path while in flight.
-Discard is explicit per file and cannot clear conflict or indeterminate state. Closing or reloading
-with dirty buffers requires confirmation. The app never silently persists editor state into source
-files.
+Persistence admits mapped Markdown and YAML source families, catalog-mapped `.py` named-symbol and
+Python-backed managed-prose units, and catalog-mapped `.ts` `typescript-tool`,
+`typescript-model-call`, and `typescript-symbol` units. TypeScript replacement validates the
+reviewed complete buffer against every selector mapped to the path through the fixed compiler
+helper; any unresolved selector blocks replacement. Unsupported and indirect TypeScript
+expressions remain readable and explicitly non-editable. Review and save controls follow the
+current presentation, while the path-owned buffer and frozen review survive navigation back to an
+editable fragment. A helper or write failure classified against an unchanged baseline retains that
+exact review for explicit same-buffer retry; conflict and indeterminate outcomes keep their existing
+recovery paths. Save and Reload lock only their file path while in flight. Discard is explicit per
+file and cannot clear conflict or indeterminate state. Closing or reloading with dirty buffers
+requires confirmation. The app never silently persists editor state into source files.
 
 ### Preview an assembly
 

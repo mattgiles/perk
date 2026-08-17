@@ -803,6 +803,59 @@ test("validation, refusal, not-sent, and refresh-failed outcomes keep exact retr
   assert.equal(workspace.inspect(WHOLE_A)?.saveState.status, "saved");
 });
 
+test("determinate write failure preserves the frozen review for exact same-buffer retry", async () => {
+  const text = "before A after";
+  const requests: Array<{ target: SourceTarget; loadHash: string; text: string }> = [];
+  const outcomes: SourceSaveLoadOutcome[] = [
+    {
+      status: "loaded",
+      result: {
+        status: "refused",
+        reason: "write-failed",
+        detail: "The source could not be saved safely.",
+      },
+    },
+    savedOutcome(TARGET_A, "d".repeat(64)),
+  ];
+  const workspace = new EditWorkspace({
+    load: (target) => Promise.resolve(loadOutcome(target, text, editableView(target, text, "A"))),
+    project: (target, current) =>
+      Promise.resolve({ status: "loaded", view: editableView(target, current, "edited A") }),
+    save: (target, loadHash, current) => {
+      requests.push({ target, loadHash, text: current });
+      return Promise.resolve(outcomes.shift() ?? { status: "indeterminate" });
+    },
+  });
+  await workspace.ensure(TARGET_A);
+  applyEdit(workspace, TARGET_A, "edited A");
+
+  const reviewed = workspace.beginSaveReview(UNIT_A.path);
+  assert.equal(reviewed.status, "reviewed");
+  assert.equal(
+    reviewed.status === "reviewed" ? reviewed.review.currentText : null,
+    "before edited A after",
+  );
+  await workspace.saveReviewed(UNIT_A.path);
+
+  const failed = workspace.inspect(TARGET_A);
+  assert.deepEqual(failed?.saveState, {
+    status: "refused",
+    reason: "write-failed",
+    detail: "The source could not be saved safely.",
+  });
+  assert.deepEqual(failed?.review, reviewed.status === "reviewed" ? reviewed.review : null);
+  assert.equal(failed?.canSave, true);
+  assert.equal(failed?.canReview, false);
+
+  await workspace.saveReviewed(UNIT_A.path);
+
+  assert.equal(requests.length, 2);
+  assert.deepEqual(requests[1], requests[0]);
+  assert.equal(workspace.inspect(WHOLE_A)?.saveState.status, "saved");
+  assert.equal(workspace.inspect(WHOLE_A)?.review, null);
+  assert.equal(workspace.snapshot(UNIT_A.path)?.dirty, false);
+});
+
 test("conflict persists across manual reversion and reload owns the path lock", async () => {
   const text = "before A after";
   const pendingReload = deferred<SourceLoadOutcome>();
