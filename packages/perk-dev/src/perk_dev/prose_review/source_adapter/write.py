@@ -1,4 +1,4 @@
-"""Safe whole-buffer persistence for catalog-mapped Markdown and YAML sources."""
+"""Safe whole-buffer persistence for admitted catalog-mapped source families."""
 
 import hashlib
 import os
@@ -27,7 +27,7 @@ type SourceRefusalReason = Literal[
     "write-failed",
     "catalog-stale",
 ]
-type WriteFamily = Literal["markdown", "yaml"]
+type WriteFamily = Literal["markdown", "yaml", "python"]
 
 CONFLICT_DETAIL = "Source changed on disk. The workbench did not overwrite it."
 CATALOG_STALE_DETAIL = (
@@ -122,6 +122,8 @@ def _write_family(unit: RoutedUnit) -> WriteFamily | None:
         return "markdown"
     if unit.candidate.kind == "ambient-routing" and suffix in (".yaml", ".yml"):
         return "yaml"
+    if unit.candidate.kind in ("python-symbol", "managed-prose") and suffix == ".py":
+        return "python"
     return None
 
 

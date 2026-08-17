@@ -55,7 +55,7 @@ class _RunningServer:
     token: str
     snapshot: CatalogSnapshot
     repo_root: Path
-    refresh_observations: list[tuple[bytes, bytes]]
+    refresh_observations: list[tuple[bytes, bytes, bytes]]
 
 
 def _csrf_token(html: str) -> str:
@@ -96,13 +96,14 @@ def server(tmp_path_factory: pytest.TempPathFactory) -> Iterator[_RunningServer]
     sock.bind(("127.0.0.1", 0))
     sock.listen(128)
     port = int(sock.getsockname()[1])
-    refresh_observations: list[tuple[bytes, bytes]] = []
+    refresh_observations: list[tuple[bytes, bytes, bytes]] = []
 
     def reload_after_write(root: Path) -> CatalogSnapshot:
         refresh_observations.append(
             (
                 (root / "AGENTS.md").read_bytes(),
                 (root / "docs/learned/clusters.yaml").read_bytes(),
+                (root / PYTHON_SOURCE_PATH).read_bytes(),
             )
         )
         return snapshot
@@ -371,12 +372,14 @@ def test_source_endpoint_serves_whole_and_fragment_focus_over_real_http(
     assert unchanged["view"]["focus"] == whole["focus"]
 
 
-def test_markdown_and_yaml_save_over_real_http_refresh_after_exact_atomic_write(
+def test_markdown_yaml_and_python_save_over_real_http_use_exact_atomic_write(
     server: _RunningServer,
 ) -> None:
     agents_path = server.repo_root / "AGENTS.md"
     agents_path.chmod(0o6751)
     yaml_path = server.repo_root / "docs/learned/clusters.yaml"
+    python_path = server.repo_root / PYTHON_SOURCE_PATH
+    python_path.chmod(0o764)
     with httpx.Client(base_url=server.base_url, timeout=10) as client:
         agents_load = client.get("/api/source", params={"unit": "managed:repo-agents"}).json()
         agents_text = agents_load["view"]["focus"].replace(
@@ -404,6 +407,22 @@ def test_markdown_and_yaml_save_over_real_http_refresh_after_exact_atomic_write(
                 "text": yaml_text,
             },
         )
+        python_load = client.get(
+            "/api/source",
+            params={"unit": PYTHON_UNIT_ID, "fragment": "symbol:_PREAMBLE"},
+        ).json()
+        python_view = python_load["view"]
+        python_focus = python_view["focus"].replace("bounded slice", "real HTTP bounded slice", 1)
+        python_text = python_view["before"] + python_focus + python_view["after"]
+        python_saved = client.post(
+            "/api/source/save",
+            headers={"X-Prose-Review-Csrf": server.token},
+            json={
+                "unit": PYTHON_UNIT_ID,
+                "load_hash": python_load["file"]["load_hash"],
+                "text": python_text,
+            },
+        )
 
     assert agents_saved.status_code == 200
     _assert_security_headers(agents_saved)
@@ -427,9 +446,24 @@ def test_markdown_and_yaml_save_over_real_http_refresh_after_exact_atomic_write(
         "learned-docs",
     ]
     assert yaml_path.read_bytes() == yaml_text.encode()
-    assert len(server.refresh_observations) == 2
+
+    assert python_saved.status_code == 200
+    _assert_security_headers(python_saved)
+    python_payload = python_saved.json()
+    assert python_payload["status"] == "saved"
+    assert (
+        python_payload["source"]["file"]["load_hash"]
+        == hashlib.sha256(python_text.encode("utf-8")).hexdigest()
+    )
+    assert python_payload["source"]["file"]["mode"] == 0o764
+    assert [check["id"] for check in python_payload["checks"]] == ["prose-map"]
+    assert python_path.read_bytes() == python_text.encode("utf-8")
+    assert stat.S_IMODE(python_path.stat().st_mode) == 0o764
+
+    assert len(server.refresh_observations) == 3
     assert server.refresh_observations[0][0] == agents_text.encode()
     assert server.refresh_observations[1][1] == yaml_text.encode()
+    assert server.refresh_observations[2][2] == python_text.encode("utf-8")
 
 
 def test_wrong_host_is_rejected_over_real_http(server: _RunningServer) -> None:

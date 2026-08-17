@@ -871,7 +871,7 @@ test("catalog refresh failure freezes App writes with exact recovery guidance", 
   }
 });
 
-test("dirty unsupported source families show the exact deferred-save message", async () => {
+test("dirty Python sources expose the shared full-file review affordance", async () => {
   const harness = installDom();
   const text = "def function():\n    pass\n";
   const workspace = new EditWorkspace({
@@ -891,8 +891,8 @@ test("dirty unsupported source families show the exact deferred-save message", a
     await harness.render(center(workspace, "edit", selection));
     await harness.settle();
     await harness.input(textarea(harness.container), "return None");
-    assert.ok((harness.container.textContent ?? "").includes(UNSUPPORTED_FAMILY_DETAIL));
-    assert.doesNotMatch(harness.container.textContent ?? "", /Review full-file diff/);
+    assert.equal((harness.container.textContent ?? "").includes(UNSUPPORTED_FAMILY_DETAIL), false);
+    assert.match(harness.container.textContent ?? "", /Review full-file diff/);
   } finally {
     await harness.cleanup();
   }
