@@ -18,6 +18,7 @@ from perk_dev.prose_review.source_adapter.contract import (
     WholeFileSource,
 )
 from perk_dev.prose_review.source_adapter.read import _newline_style, source_adapter_for
+from perk_dev.prose_review.source_adapter.typescript import TypeScriptAdapterUnavailable
 
 type SourceRefusalReason = Literal[
     "unsupported-family",
@@ -27,8 +28,6 @@ type SourceRefusalReason = Literal[
     "write-failed",
     "catalog-stale",
 ]
-type WriteFamily = Literal["markdown", "yaml", "python"]
-
 CONFLICT_DETAIL = "Source changed on disk. The workbench did not overwrite it."
 CATALOG_STALE_DETAIL = (
     "The file was saved, but the catalog could not be refreshed. Further saves are disabled. "
@@ -116,30 +115,22 @@ def _conflict() -> SourceConflict:
     return SourceConflict(status="conflict", detail=CONFLICT_DETAIL)
 
 
-def _write_family(unit: RoutedUnit) -> WriteFamily | None:
-    suffix = Path(unit.candidate.path).suffix.lower()
-    if unit.candidate.kind in ("markdown", "managed-prose") and suffix == ".md":
-        return "markdown"
-    if unit.candidate.kind == "ambient-routing" and suffix in (".yaml", ".yml"):
-        return "yaml"
-    if unit.candidate.kind in ("python-symbol", "managed-prose") and suffix == ".py":
-        return "python"
-    return None
-
-
 def _mapped_write_set(
-    snapshot: CatalogSnapshot, requested: RoutedUnit
+    snapshot: CatalogSnapshot,
+    requested: RoutedUnit,
+    *,
+    typescript_adapter: SourceAdapter | None = None,
 ) -> tuple[tuple[RoutedUnit, ...], SourceAdapter] | None:
     mapped = snapshot.units_for_path(requested.candidate.path)
     if not mapped or requested not in mapped:
         return None
-    families = tuple(_write_family(unit) for unit in mapped)
-    if families[0] is None or any(family != families[0] for family in families):
+    adapters = tuple(
+        source_adapter_for(unit, typescript_adapter=typescript_adapter) for unit in mapped
+    )
+    shared = adapters[0]
+    if shared is None or any(adapter is not shared for adapter in adapters):
         return None
-    adapter = source_adapter_for(requested)
-    if adapter is None:
-        return None
-    return mapped, adapter
+    return mapped, shared
 
 
 def _catalog_path(repo_resolved: Path, relative_text: str) -> Path:
@@ -263,12 +254,18 @@ def save_source(
     unit_id: str,
     load_hash: str,
     text: str,
+    *,
+    typescript_adapter: SourceAdapter | None = None,
 ) -> SourceSaveResult:
     """Conditionally replace one admitted catalog source with the reviewed full buffer."""
     unit = snapshot.get_unit(unit_id)
     if unit is None:
         return _refused("unsupported-family")
-    dispatch = _mapped_write_set(snapshot, unit)
+    dispatch = _mapped_write_set(
+        snapshot,
+        unit,
+        typescript_adapter=typescript_adapter,
+    )
     if dispatch is None:
         return _refused("unsupported-family")
     mapped, adapter = dispatch
@@ -292,7 +289,10 @@ def save_source(
     if early.load_hash != load_hash:
         return _conflict()
 
-    diagnostics = adapter.validate(text, _selectors(mapped))
+    try:
+        diagnostics = adapter.validate(text, _selectors(mapped))
+    except TypeScriptAdapterUnavailable:
+        return _failure_result(repo_resolved, unit.candidate.path, load_hash)
     if diagnostics:
         return SourceValidationFailed(status="validation-failed", diagnostics=diagnostics)
     try:

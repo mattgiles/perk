@@ -1,12 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import {
-  CATALOG_STALE_DETAIL,
-  CONFLICT_DETAIL,
-  parseSourceSaveResult,
-  supportsSourceSave,
-  UNSUPPORTED_FAMILY_DETAIL,
-} from "./src/save.ts";
+import { CATALOG_STALE_DETAIL, CONFLICT_DETAIL, parseSourceSaveResult } from "./src/save.ts";
 import { createSaveReview } from "./src/saveReview.ts";
 import type { UnitRef } from "./src/tree.ts";
 
@@ -96,9 +90,13 @@ test("parseSourceSaveResult accepts every tagged domain outcome", () => {
     parseSourceSaveResult({
       status: "refused",
       reason: "unsupported-family",
-      detail: UNSUPPORTED_FAMILY_DETAIL,
+      detail: "Save support has not landed for this source family.",
     }),
-    { status: "refused", reason: "unsupported-family", detail: UNSUPPORTED_FAMILY_DETAIL },
+    {
+      status: "refused",
+      reason: "unsupported-family",
+      detail: "Save support has not landed for this source family.",
+    },
   );
 });
 
@@ -137,24 +135,6 @@ test("parseSourceSaveResult rejects malformed and incoherent combinations", () =
   ];
   for (const value of malformed) {
     assert.equal(parseSourceSaveResult(value), null);
-  }
-});
-
-test("supportsSourceSave admits only mapped Markdown, YAML, and Python families", () => {
-  const targets: [UnitRef, boolean][] = [
-    [UNIT, true],
-    [{ id: "markdown:doc", kind: "markdown", path: "doc.MD" }, true],
-    [{ id: "ambient:x", kind: "ambient-routing", path: "clusters.yaml" }, true],
-    [{ id: "ambient:x", kind: "ambient-routing", path: "clusters.yml" }, true],
-    [{ id: "python:x", kind: "python-symbol", path: "module.PY" }, true],
-    [{ id: "managed:x", kind: "managed-prose", path: "module.py" }, true],
-    [{ id: "typescript:x", kind: "typescript-symbol", path: "module.ts" }, false],
-    [{ id: "python:x", kind: "python-symbol", path: "module.md" }, false],
-    [{ id: "managed:x", kind: "managed-prose", path: "module.ts" }, false],
-    [{ id: "markdown:x", kind: "markdown", path: "module.yaml" }, false],
-  ];
-  for (const [unit, expected] of targets) {
-    assert.equal(supportsSourceSave({ unit, fragment: null }), expected);
   }
 });
 

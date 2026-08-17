@@ -1,5 +1,4 @@
 import { type Lineage, parseLineage } from "./inspect.ts";
-import type { SourceTarget } from "./selection.ts";
 import { parseSourceFile, type SourceFile } from "./source.ts";
 import { isProseKind, type ProseKind } from "./wire.ts";
 
@@ -25,7 +24,6 @@ export type SourceRefusalReason = (typeof SOURCE_REFUSAL_REASONS)[number];
 export const SUGGESTED_CHECK_IDS = ["prose-map", "learned-docs"] as const;
 export type SuggestedCheckId = (typeof SUGGESTED_CHECK_IDS)[number];
 
-export const UNSUPPORTED_FAMILY_DETAIL = "Save support has not landed for this source family.";
 export const GENERATED_LINEAGE_DETAIL =
   "Generated source files cannot be saved from the workbench.";
 export const CONFLICT_DETAIL = "Source changed on disk. The workbench did not overwrite it.";
@@ -183,23 +181,4 @@ export function parseSourceSaveResult(value: unknown): SourceSaveResult | null {
       : null;
   }
   return null;
-}
-
-export function supportsSourceSave(target: SourceTarget): boolean {
-  const path = target.unit.path.toLowerCase();
-  if (
-    (target.unit.kind === "markdown" || target.unit.kind === "managed-prose") &&
-    path.endsWith(".md")
-  ) {
-    return true;
-  }
-  if (
-    (target.unit.kind === "python-symbol" || target.unit.kind === "managed-prose") &&
-    path.endsWith(".py")
-  ) {
-    return true;
-  }
-  return (
-    target.unit.kind === "ambient-routing" && (path.endsWith(".yaml") || path.endsWith(".yml"))
-  );
 }

@@ -21,7 +21,6 @@ import {
   INDETERMINATE_DETAIL,
   NOT_SENT_DETAIL,
   UNRESOLVED_RECONCILIATION_DETAIL,
-  UNSUPPORTED_FAMILY_DETAIL,
 } from "./src/save.ts";
 import type { SourceSaveLoadOutcome } from "./src/saveLoad.ts";
 import type { Selection, SourceTarget, UnitSelection } from "./src/selection.ts";
@@ -60,6 +59,15 @@ const UNIT_PYTHON: TreeUnit = {
   path: "sample.py",
   fragments: [{ id: "function", label: "Function" }],
 };
+const UNIT_TYPESCRIPT: TreeUnit = {
+  id: "typescript-tool:mixed",
+  kind: "typescript-tool",
+  path: "mixed.ts",
+  fragments: [
+    { id: "description", label: "Description" },
+    { id: "indirect", label: "Indirect expression" },
+  ],
+};
 const UNIT_OTHER: TreeUnit = {
   id: "unit:other",
   kind: "markdown",
@@ -75,6 +83,14 @@ const TARGET_PYTHON: SourceTarget = {
 const TARGET_ALIAS: SourceTarget = {
   unit: UNIT_ALIAS,
   fragment: UNIT_ALIAS.fragments[0] ?? null,
+};
+const TARGET_TYPESCRIPT_DIRECT: SourceTarget = {
+  unit: UNIT_TYPESCRIPT,
+  fragment: UNIT_TYPESCRIPT.fragments[0] ?? null,
+};
+const TARGET_TYPESCRIPT_INDIRECT: SourceTarget = {
+  unit: UNIT_TYPESCRIPT,
+  fragment: UNIT_TYPESCRIPT.fragments[1] ?? null,
 };
 const TREE: CapabilityTree = {
   capabilities: [
@@ -891,8 +907,69 @@ test("dirty Python sources expose the shared full-file review affordance", async
     await harness.render(center(workspace, "edit", selection));
     await harness.settle();
     await harness.input(textarea(harness.container), "return None");
-    assert.equal((harness.container.textContent ?? "").includes(UNSUPPORTED_FAMILY_DETAIL), false);
     assert.match(harness.container.textContent ?? "", /Review full-file diff/);
+  } finally {
+    await harness.cleanup();
+  }
+});
+
+test("TypeScript review controls follow the current direct or indirect presentation", async () => {
+  const harness = installDom();
+  const text = 'const tool = { description: "direct", prompt: indirect };\n';
+  const workspace = new EditWorkspace({
+    load: (target) =>
+      Promise.resolve({
+        status: "loaded",
+        source: load(target, text, editableView(target, text, "direct")),
+      }),
+    project: (target, current) =>
+      Promise.resolve({
+        status: "loaded",
+        view:
+          target.fragment?.id === "indirect"
+            ? readOnlyView(target, current, "unsupported-source-shape")
+            : editableView(target, current, "reviewed direct"),
+      }),
+  });
+  const directSelection: UnitSelection = {
+    type: "unit",
+    target: TARGET_TYPESCRIPT_DIRECT,
+    placement: null,
+  };
+  const indirectSelection: UnitSelection = {
+    type: "unit",
+    target: TARGET_TYPESCRIPT_INDIRECT,
+    placement: null,
+  };
+
+  try {
+    await harness.render(center(workspace, "edit", directSelection));
+    await harness.settle();
+    await harness.input(textarea(harness.container), "reviewed direct");
+    await harness.click(buttonByText(harness.container, "Review full-file diff"));
+    assert.ok(harness.container.querySelector(".save-review") !== null);
+    buttonByText(harness.container, "Save reviewed file");
+
+    await harness.render(center(workspace, "edit", indirectSelection));
+    await harness.settle();
+    assert.match(harness.container.textContent ?? "", /Unsupported source shape/);
+    assert.equal(harness.container.querySelector("textarea"), null);
+    assert.equal(harness.container.querySelector(".save-review"), null);
+    assert.equal(
+      [...harness.container.querySelectorAll("button")].some((button) =>
+        /Review full-file diff|Save reviewed file/.test(button.textContent ?? ""),
+      ),
+      false,
+    );
+    const indirect = workspace.inspect(TARGET_TYPESCRIPT_INDIRECT);
+    assert.equal(indirect?.review, null);
+    assert.equal(indirect?.canReview, false);
+    assert.equal(indirect?.canSave, false);
+
+    await harness.render(center(workspace, "edit", directSelection));
+    assert.equal(textarea(harness.container).value, "reviewed direct");
+    assert.ok(harness.container.querySelector(".save-review") !== null);
+    buttonByText(harness.container, "Save reviewed file");
   } finally {
     await harness.cleanup();
   }

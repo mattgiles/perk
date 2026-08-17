@@ -55,7 +55,7 @@ class _RunningServer:
     token: str
     snapshot: CatalogSnapshot
     repo_root: Path
-    refresh_observations: list[tuple[bytes, bytes, bytes]]
+    refresh_observations: list[tuple[bytes, bytes, bytes, bytes]]
 
 
 def _csrf_token(html: str) -> str:
@@ -76,7 +76,7 @@ def server(tmp_path_factory: pytest.TempPathFactory) -> Iterator[_RunningServer]
     build_frontend(ROOT, out_dir=dist_dir)
     assert (dist_dir / "index.html").is_file()
 
-    # Real Markdown, YAML, and Python candidates copied to their catalog-relative
+    # Real Markdown, YAML, Python, and TypeScript candidates copied to their catalog-relative
     # paths under the fixture trust root. Pointing repo_root at the checkout would
     # break the asset-containment proof above.
     (trust_root / "AGENTS.md").write_bytes((ROOT / "AGENTS.md").read_bytes())
@@ -96,7 +96,7 @@ def server(tmp_path_factory: pytest.TempPathFactory) -> Iterator[_RunningServer]
     sock.bind(("127.0.0.1", 0))
     sock.listen(128)
     port = int(sock.getsockname()[1])
-    refresh_observations: list[tuple[bytes, bytes, bytes]] = []
+    refresh_observations: list[tuple[bytes, bytes, bytes, bytes]] = []
 
     def reload_after_write(root: Path) -> CatalogSnapshot:
         refresh_observations.append(
@@ -104,6 +104,7 @@ def server(tmp_path_factory: pytest.TempPathFactory) -> Iterator[_RunningServer]
                 (root / "AGENTS.md").read_bytes(),
                 (root / "docs/learned/clusters.yaml").read_bytes(),
                 (root / PYTHON_SOURCE_PATH).read_bytes(),
+                (root / TYPESCRIPT_SOURCE_PATH).read_bytes(),
             )
         )
         return snapshot
@@ -372,7 +373,7 @@ def test_source_endpoint_serves_whole_and_fragment_focus_over_real_http(
     assert unchanged["view"]["focus"] == whole["focus"]
 
 
-def test_markdown_yaml_and_python_save_over_real_http_use_exact_atomic_write(
+def test_all_editable_families_save_over_real_http_with_exact_atomic_write(
     server: _RunningServer,
 ) -> None:
     agents_path = server.repo_root / "AGENTS.md"
@@ -380,6 +381,8 @@ def test_markdown_yaml_and_python_save_over_real_http_use_exact_atomic_write(
     yaml_path = server.repo_root / "docs/learned/clusters.yaml"
     python_path = server.repo_root / PYTHON_SOURCE_PATH
     python_path.chmod(0o764)
+    typescript_path = server.repo_root / TYPESCRIPT_SOURCE_PATH
+    typescript_path.chmod(0o754)
     with httpx.Client(base_url=server.base_url, timeout=10) as client:
         agents_load = client.get("/api/source", params={"unit": "managed:repo-agents"}).json()
         agents_text = agents_load["view"]["focus"].replace(
@@ -423,6 +426,27 @@ def test_markdown_yaml_and_python_save_over_real_http_use_exact_atomic_write(
                 "text": python_text,
             },
         )
+        typescript_load = client.get(
+            "/api/source",
+            params={"unit": TYPESCRIPT_UNIT_ID, "fragment": "description"},
+        ).json()
+        typescript_view = typescript_load["view"]
+        typescript_focus = typescript_view["focus"].replace(
+            "Present the plan",
+            "Present the real HTTP TypeScript plan",
+            1,
+        )
+        assert typescript_focus != typescript_view["focus"]
+        typescript_text = typescript_view["before"] + typescript_focus + typescript_view["after"]
+        typescript_saved = client.post(
+            "/api/source/save",
+            headers={"X-Prose-Review-Csrf": server.token},
+            json={
+                "unit": TYPESCRIPT_UNIT_ID,
+                "load_hash": typescript_load["file"]["load_hash"],
+                "text": typescript_text,
+            },
+        )
 
     assert agents_saved.status_code == 200
     _assert_security_headers(agents_saved)
@@ -460,10 +484,35 @@ def test_markdown_yaml_and_python_save_over_real_http_use_exact_atomic_write(
     assert python_path.read_bytes() == python_text.encode("utf-8")
     assert stat.S_IMODE(python_path.stat().st_mode) == 0o764
 
-    assert len(server.refresh_observations) == 3
+    assert typescript_saved.status_code == 200
+    _assert_security_headers(typescript_saved)
+    typescript_payload = typescript_saved.json()
+    assert typescript_payload["status"] == "saved"
+    assert (
+        typescript_payload["source"]["file"]["load_hash"]
+        == hashlib.sha256(typescript_text.encode("utf-8")).hexdigest()
+    )
+    assert typescript_payload["source"]["file"]["mode"] == 0o754
+    assert [check["id"] for check in typescript_payload["checks"]] == ["prose-map"]
+    persisted_typescript = typescript_path.read_text(encoding="utf-8")
+    assert persisted_typescript == typescript_text
+    assert persisted_typescript.startswith(typescript_view["before"])
+    assert persisted_typescript.endswith(typescript_view["after"])
+    focus_start = len(typescript_view["before"])
+    assert (
+        persisted_typescript[focus_start : focus_start + len(typescript_focus)] == typescript_focus
+    )
+    assert stat.S_IMODE(typescript_path.stat().st_mode) == 0o754
+
+    assert len(server.refresh_observations) == 4
     assert server.refresh_observations[0][0] == agents_text.encode()
     assert server.refresh_observations[1][1] == yaml_text.encode()
     assert server.refresh_observations[2][2] == python_text.encode("utf-8")
+    assert all(
+        observation[3] == (ROOT / TYPESCRIPT_SOURCE_PATH).read_bytes()
+        for observation in server.refresh_observations[:3]
+    )
+    assert server.refresh_observations[3][3] == typescript_text.encode("utf-8")
 
 
 def test_wrong_host_is_rejected_over_real_http(server: _RunningServer) -> None:
