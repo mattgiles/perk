@@ -13,7 +13,7 @@ import pytest
 from fastapi.testclient import TestClient
 from httpx import Response
 from perk_dev.prose_map.catalog import build_catalog
-from perk_dev.prose_map.models import Fragment
+from perk_dev.prose_map.models import Fragment, RoutedUnit
 from perk_dev.prose_review import web
 from perk_dev.prose_review.catalog import CatalogQueryError, CatalogSnapshot, load_catalog
 from perk_dev.prose_review.comparison import comparison_options
@@ -2800,7 +2800,7 @@ def test_render_starting_first_blocks_a_save_until_its_response_is_composed(
     real_read = assembly_module.read_unit_file
     gated = True
 
-    def gated_read(repo_root: Path, unit: object) -> object:
+    def gated_read(repo_root: Path, unit: RoutedUnit) -> object:
         if gated:
             entered_read.set()
             assert release_read.wait(timeout=5)

@@ -18,7 +18,9 @@ from perk_dev.prose_review.assembly import (
     AssemblyLayerProblem,
     AssemblyRenderer,
     FailedAssemblyLayer,
+    LayerPresence,
     LayerPresentation,
+    PresentationControl,
     PresentationOverrides,
     RenderedAssembly,
     RenderedBoundaryLayer,
@@ -639,16 +641,16 @@ def _assembly_presentation(
     position: int = 1,
     *,
     label: str | None = "Layer",
-    presence: str = "always",
+    presence: LayerPresence = "always",
     presence_label: str | None = None,
-    visibility_control: str | None = None,
+    visibility_control: PresentationControl | None = None,
 ) -> LayerPresentation:
     return LayerPresentation(
         position=position,
         label=label,
-        presence=presence,  # type: ignore[arg-type]
+        presence=presence,
         presence_label=presence_label,
-        visibility_control=visibility_control,  # type: ignore[arg-type]
+        visibility_control=visibility_control,
     )
 
 
