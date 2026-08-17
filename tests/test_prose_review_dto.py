@@ -6,7 +6,26 @@ from pathlib import Path
 
 import pytest
 from perk_dev.prose_map.catalog import build_catalog
-from perk_dev.prose_map.models import Fragment
+from perk_dev.prose_map.models import (
+    Assembly,
+    AssemblyLayer,
+    Candidate,
+    Fragment,
+    RoutedUnit,
+    Scenario,
+)
+from perk_dev.prose_review.assembly import (
+    AssemblyLayerProblem,
+    AssemblyRenderer,
+    FailedAssemblyLayer,
+    LayerPresentation,
+    PresentationOverrides,
+    RenderedAssembly,
+    RenderedBoundaryLayer,
+    RenderedContentPart,
+    RenderedOwnedLayer,
+    ResolvedPresentation,
+)
 from perk_dev.prose_review.catalog import CapabilityNode, CatalogSnapshot
 from perk_dev.prose_review.comparison import (
     ComparisonChoice,
@@ -16,6 +35,8 @@ from perk_dev.prose_review.comparison import (
     comparison_options,
 )
 from perk_dev.prose_review.dto import (
+    AssemblyOptionsOut,
+    AssemblyRenderOut,
     CapabilityNodeOut,
     CapabilityTreeOut,
     CatalogSummaryOut,
@@ -49,6 +70,7 @@ from perk_dev.prose_review.source_adapter import (
     SuggestedCheck,
     WholeFileSource,
 )
+from perk_dev.prose_review.source_adapter.typescript import TypeScriptSourceAdapter
 
 ROOT = Path(__file__).parents[1]
 
@@ -611,3 +633,229 @@ def test_save_result_dtos_have_exact_tagged_shapes_and_reuse_lineage(
         "reason": "unsafe-path",
         "detail": "unsafe",
     }
+
+
+def _assembly_presentation(
+    position: int = 1,
+    *,
+    label: str | None = "Layer",
+    presence: str = "always",
+    presence_label: str | None = None,
+    visibility_control: str | None = None,
+) -> LayerPresentation:
+    return LayerPresentation(
+        position=position,
+        label=label,
+        presence=presence,  # type: ignore[arg-type]
+        presence_label=presence_label,
+        visibility_control=visibility_control,  # type: ignore[arg-type]
+    )
+
+
+def _assembly_unit() -> RoutedUnit:
+    return RoutedUnit(
+        candidate=Candidate(
+            id="typescript-tool:demo",
+            kind="typescript-tool",
+            path="ext/demo.ts",
+            selector="tool:demo",
+            fragments=(),
+        ),
+        capability="cap",
+        audience="both",
+        role="tool-contract",
+    )
+
+
+def test_assembly_options_out_serves_full_scenarios_with_object_shaped_variables(
+    snapshot: CatalogSnapshot,
+) -> None:
+    view = snapshot.get_assembly("plan-authoring")
+    assert view is not None
+    options = AssemblyOptionsOut.from_domain(view)
+    dumped = options.model_dump(mode="json")
+    json.dumps(dumped)  # must not raise
+    assert list(dumped.keys()) == ["assembly", "scenarios"]
+    assert dumped["assembly"] == "plan-authoring"
+    assert [scenario["id"] for scenario in dumped["scenarios"]] == [
+        scenario.id for scenario in view.scenarios
+    ]
+    first = dumped["scenarios"][0]
+    assert list(first.keys()) == [
+        "id",
+        "label",
+        "variables",
+        "include_ambient",
+        "include_tools",
+    ]
+    domain_first = view.scenarios[0]
+    # A JSON object inserted from the domain's sorted pairs, not an array of pairs.
+    assert isinstance(first["variables"], dict)
+    assert first["variables"] == dict(domain_first.variables)
+    assert list(first["variables"].keys()) == sorted(first["variables"].keys())
+    assert first["label"] == domain_first.label
+    assert first["include_ambient"] is domain_first.include_ambient
+    assert first["include_tools"] is domain_first.include_tools
+
+
+def test_assembly_render_out_pins_the_exact_nested_schema_and_discriminants() -> None:
+    unit = _assembly_unit()
+    fragment = Fragment(id="description", label="Description", selector="tool:demo.description")
+    scenario = Scenario(
+        id="scenario",
+        assembly="demo",
+        label="Demo scenario",
+        variables=(("marker", "[X]"), ("provider", "github")),
+        include_ambient=True,
+        include_tools=True,
+    )
+    rendered = RenderedAssembly(
+        assembly=Assembly(
+            id="demo",
+            layers=(
+                AssemblyLayer(unit=None, boundary="pi-system", label="Pi", optional=False),
+                AssemblyLayer(unit=unit.candidate.id, boundary=None, label="Tool", optional=True),
+                AssemblyLayer(
+                    unit=unit.candidate.id, boundary=None, label="Broken", optional=False
+                ),
+            ),
+        ),
+        scenario=scenario,
+        presentation=ResolvedPresentation(include_ambient=True, include_tools=False),
+        layers=(
+            RenderedBoundaryLayer(
+                presentation=_assembly_presentation(1, label="Pi"),
+                boundary="pi-system",
+                owner="pi",
+            ),
+            RenderedOwnedLayer(
+                presentation=_assembly_presentation(
+                    2,
+                    label="Tool",
+                    presence="varies",
+                    presence_label="Presence varies by session shape or runtime.",
+                    visibility_control="tools",
+                ),
+                unit=unit,
+                content_kind="source-fragments",
+                parts=(
+                    RenderedContentPart(fragment=fragment, text='"first"'),
+                    RenderedContentPart(fragment=None, text="whole text"),
+                ),
+            ),
+            FailedAssemblyLayer(
+                presentation=_assembly_presentation(3, label="Broken"),
+                unit=unit,
+                problems=(
+                    AssemblyLayerProblem(
+                        fragment=fragment,
+                        reason="selector-not-found",
+                        detail="A catalog fragment no longer resolves in the current source.",
+                    ),
+                    AssemblyLayerProblem(
+                        fragment=None,
+                        reason="invalid-source",
+                        detail="The current source is not syntactically valid for its adapter.",
+                    ),
+                ),
+            ),
+        ),
+    )
+
+    out = AssemblyRenderOut.from_domain(rendered)
+    dumped = out.model_dump(mode="json")
+    json.dumps(dumped)  # must not raise
+    assert list(dumped.keys()) == ["assembly", "scenario", "presentation", "layers"]
+    assert dumped["assembly"] == "demo"
+    assert list(dumped["scenario"].keys()) == [
+        "id",
+        "label",
+        "variables",
+        "include_ambient",
+        "include_tools",
+    ]
+    assert dumped["scenario"]["variables"] == {"marker": "[X]", "provider": "github"}
+    assert dumped["presentation"] == {"include_ambient": True, "include_tools": False}
+
+    boundary, owned, failure = dumped["layers"]
+    assert list(boundary.keys()) == ["type", "presentation", "boundary", "owner"]
+    assert boundary["type"] == "boundary"
+    assert boundary["boundary"] == "pi-system"
+    assert boundary["owner"] == "pi"
+    assert list(boundary["presentation"].keys()) == [
+        "position",
+        "label",
+        "presence",
+        "presence_label",
+        "visibility_control",
+    ]
+    assert boundary["presentation"] == {
+        "position": 1,
+        "label": "Pi",
+        "presence": "always",
+        "presence_label": None,
+        "visibility_control": None,
+    }
+
+    assert list(owned.keys()) == ["type", "presentation", "unit", "content_kind", "parts"]
+    assert owned["type"] == "owned"
+    assert owned["content_kind"] == "source-fragments"
+    assert owned["unit"] == {
+        "id": "typescript-tool:demo",
+        "kind": "typescript-tool",
+        "path": "ext/demo.ts",
+    }
+    assert owned["presentation"]["presence"] == "varies"
+    assert owned["presentation"]["presence_label"] == (
+        "Presence varies by session shape or runtime."
+    )
+    assert owned["presentation"]["visibility_control"] == "tools"
+    assert [list(part.keys()) for part in owned["parts"]] == [
+        ["fragment", "text"],
+        ["fragment", "text"],
+    ]
+    # Fragment provenance is nullable and carries only id/label — never the selector.
+    assert owned["parts"][0]["fragment"] == {"id": "description", "label": "Description"}
+    assert owned["parts"][0]["text"] == '"first"'
+    assert owned["parts"][1]["fragment"] is None
+
+    assert list(failure.keys()) == ["type", "presentation", "unit", "problems"]
+    assert failure["type"] == "failure"
+    assert [list(problem.keys()) for problem in failure["problems"]] == [
+        ["fragment", "reason", "detail"],
+        ["fragment", "reason", "detail"],
+    ]
+    assert failure["problems"][0] == {
+        "fragment": {"id": "description", "label": "Description"},
+        "reason": "selector-not-found",
+        "detail": "A catalog fragment no longer resolves in the current source.",
+    }
+    assert failure["problems"][1]["fragment"] is None
+    assert failure["problems"][1]["reason"] == "invalid-source"
+
+    flattened = json.dumps(dumped)
+    assert '"selector"' not in flattened  # no internal selector/range/resolution leaks
+    assert '"source_range"' not in flattened
+    assert '"resolution"' not in flattened
+    assert "tool:demo" not in flattened.replace("typescript-tool:demo", "")
+
+
+def test_assembly_render_out_from_real_render_is_json_serializable(
+    snapshot: CatalogSnapshot,
+) -> None:
+    renderer = AssemblyRenderer(ROOT, TypeScriptSourceAdapter(ROOT))
+    rendered = renderer.render(
+        snapshot,
+        assembly_id="learn",
+        scenario_id="learn-landed",
+        presentation=PresentationOverrides(include_ambient=None, include_tools=None),
+        workspace_buffers=(),
+    )
+    dumped = AssemblyRenderOut.from_domain(rendered).model_dump(mode="json")
+    json.dumps(dumped)  # must not raise
+    assert dumped["assembly"] == "learn"
+    assert dumped["scenario"]["id"] == "learn-landed"
+    assert {layer["type"] for layer in dumped["layers"]} <= {"owned", "boundary", "failure"}
+    assert [layer["presentation"]["position"] for layer in dumped["layers"]] == list(
+        range(1, len(dumped["layers"]) + 1)
+    )
