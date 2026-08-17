@@ -26,7 +26,7 @@ from perk.backends.resolve import (
     resolve_issue_backend,
     resolve_objective_store,
 )
-from perk.delivery import land, writers
+from perk.delivery import diagnostics, land, writers
 from perk.delivery.facade import Delivery, DeliveryGit, DeliveryGitHub, DeliveryPersistence
 from perk.delivery.journal import JournalFold, OutcomeRecord, PreparedRecord
 from perk.delivery.persistence import AppendResult, TrainPersistence, TrainPersistenceError
@@ -555,6 +555,18 @@ class RepoDeliveryPersistence(DeliveryPersistence):
             parent_checkpoint_sha=parent_checkpoint_sha,
             published_head_sha=published_head_sha,
         )
+
+    def native_cancellation_metadata_writer(
+        self,
+    ) -> diagnostics.NativeCancellationMetadataWriter | None:
+        """Return the resolved objective store only when it structurally offers the §8.54
+        conditional cancellation writer (the runtime-checkable Protocol); ``None``
+        otherwise. One lazy aligned resolution — no extra objective read, and a failed
+        resolution stays uncached like every other persistence operation."""
+        store, _issues, _persistence = self._resolve()
+        if isinstance(store, diagnostics.NativeCancellationMetadataWriter):
+            return store
+        return None
 
 
 def resolve_delivery(repo_root: Path) -> Delivery:

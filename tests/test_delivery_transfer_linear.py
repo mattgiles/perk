@@ -365,7 +365,7 @@ class _Lane:
         finally:
             transfer._DEFAULT_TRANSFER_RUNTIME = previous_runtime
 
-    def recover(self) -> RecoverResult:
+    def recover(self) -> RecoverResult.OperationConclusion:
         runtime = replace(
             recover._DEFAULT_RECOVER_RUNTIME,
             worktree_root=lambda root: WT_ROOT,
@@ -377,7 +377,10 @@ class _Lane:
         request = RecoverRequest(kind="operation_conclusion", objective_id=self.pred_id)
         with pytest.MonkeyPatch.context() as monkeypatch:
             monkeypatch.setattr(recover, "_DEFAULT_RECOVER_RUNTIME", runtime)
-            return _LaneDelivery(self).recover(request)
+            result = _LaneDelivery(self).recover(request)
+        conclusion = result.operation_conclusion
+        assert conclusion is not None
+        return conclusion
 
     # ------------------------------------------------------------- assertion helpers
 

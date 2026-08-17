@@ -608,7 +608,7 @@ class _Machine:
         *,
         abandon: bool = False,
         approve: Callable[[RecoverResult.AbandonPreview], bool] | None = None,
-    ) -> RecoverResult:
+    ) -> RecoverResult.OperationConclusion:
         machine = self
 
         class _Git(FakeDeliveryGit):
@@ -692,7 +692,10 @@ class _Machine:
 
         with pytest.MonkeyPatch.context() as monkeypatch:
             monkeypatch.setattr(recover, "_DEFAULT_RECOVER_RUNTIME", runtime)
-            return _Delivery().recover(request, consent=consent_callback)
+            result = _Delivery().recover(request, consent=consent_callback)
+        conclusion = result.operation_conclusion
+        assert conclusion is not None
+        return conclusion
 
     def publish(self, plan_id: str, *, run_id: str = "01RUNB") -> PublishResult.Layer:
         machine = self

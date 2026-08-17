@@ -16,11 +16,12 @@ Both parts target ONE active objective: the requested id resolves forward throug
 preserves the requested id); a predecessor is never mutated by ``doctor OLD --fix``.
 
 ``--fix`` applies the safe manifest repairs first (existing behavior), then exactly ONE narrow
-train repair — persisting a safely-projected native cancellation into the node attachment via
-the conditional ``NativeCancellationMetadataWriter`` (fresh proof immediately before each
-compare-and-write, post-write verification, compensation on drift). It never repairs plan
-identity, checkpoints, journal history, branches, PRs, or native stack membership. ``--dry-run``
-plans both repair batches without any write.
+train repair — a single ``Delivery.recover(RecoverRequest(kind="cancellation_metadata", ...))``
+call persisting every safely-projected native cancellation into its node attachment (the
+façade-owned repair: fresh proof immediately before each compare-and-write, post-write
+verification, compensation on drift; an unsupported backend answers an empty completed pass).
+Doctor never repairs plan identity, checkpoints, journal history, branches, PRs, or native
+stack membership. ``--dry-run`` plans both repair batches without any write.
 
 Supervisor surface: ``--json`` → stdout, human → stderr; exit ``0`` clean report / ``1``
 op-failure, an aborted repair, or an unavailable train / ``2`` not-a-repo. An assembled report
@@ -51,14 +52,14 @@ from perk.cli.ensure import UserFacingCliError
 from perk.delivery import (
     Delivery,
     DeliveryError,
+    RecoverRequest,
+    RecoverResult,
     StatusRequest,
     diagnostics,
-    observe,
     resolve_delivery,
 )
 from perk.delivery import train as train_mod
-from perk.delivery.persistence import TrainPersistenceError
-from perk.delivery.train import TrainReconstructionError, TrainStatus
+from perk.delivery.train import TrainReconstructionError
 from perk.substrate.output import machine_output, user_output
 
 # ----------------------------------------------------------------- output models
@@ -120,17 +121,6 @@ def _finding_out(
     )
 
 
-def _reconstruct_normalized(repo_root: Path, active_id: str) -> TrainStatus:
-    """One reconstruction with every EXPECTED authority-read failure normalized onto the
-    typed ``TrainReconstructionError`` (the same backend-read translation the stack-status
-    boundary applies) — a routine plan/journal/store outage becomes the modeled
-    ``unavailable`` diagnosis (or the repair pass's unavailable arm), never an escape."""
-    try:
-        return observe.reconstruct_repo_train(repo_root, active_id)
-    except (IssueBackendError, ObjectiveStoreError, TrainPersistenceError) as exc:
-        raise TrainReconstructionError(str(exc), error_type="github_error") from exc
-
-
 def _diagnose_train(
     delivery: Delivery, active_id: str, *, redirected_from: str | None
 ) -> _TrainDiagnosisOut:
@@ -177,25 +167,23 @@ def _diagnose_train(
     )
 
 
-def _action_out(action: diagnostics.CancellationRepairAction) -> _TrainRepairActionOut:
+def _action_out(action: RecoverResult.CancellationAction) -> _TrainRepairActionOut:
     return _TrainRepairActionOut(
         code=action.code, node_id=action.node_id, outcome=action.outcome, error=action.error
     )
 
 
 def _run_train_fix(
-    repo_root: Path,
     active_id: str,
-    store: ObjectiveStore,
     delivery: Delivery,
     *,
     current: _TrainDiagnosisOut,
     redirected_from: str | None,
     dry_run: bool,
 ) -> _TrainFixOut:
-    """The train side of ``--fix``: the per-candidate conditional cancellation repair (only a
-    store satisfying the writer seam can carry candidates), then the FINAL diagnosis in
-    ``remaining``."""
+    """The train side of ``--fix``: one ``Delivery.recover`` cancellation-metadata pass for a
+    currently stacked diagnosis (an unsupported backend answers an empty completed pass),
+    then the FINAL diagnosis in ``remaining``."""
     if current.state == "unavailable":
         return _TrainFixOut(
             state="unavailable",
@@ -217,30 +205,37 @@ def _run_train_fix(
             aborted=False,
             dry_run=dry_run,
         )
-    if isinstance(store, diagnostics.NativeCancellationMetadataWriter):
-        result = diagnostics.repair_projected_cancellations(
-            active_id,
-            writer=store,
-            reconstruct=lambda: _reconstruct_normalized(repo_root, active_id),
-            dry_run=dry_run,
+    applied: tuple[_TrainRepairActionOut, ...] = ()
+    skipped: tuple[_TrainRepairActionOut, ...] = ()
+    failed: _TrainRepairActionOut | None = None
+    repair_aborted = False
+    unavailable: str | None = None
+    try:
+        result = delivery.recover(
+            RecoverRequest(kind="cancellation_metadata", objective_id=active_id, dry_run=dry_run)
         )
+    except DeliveryError as exc:
+        # A bounded failure before any modeled repair pass exists (e.g. lazy persistence
+        # capability resolution failed) — the unavailable/aborted posture; the final
+        # diagnosis still runs and the assembled report stays success=true (exit 1).
+        repair_aborted = True
+        unavailable = str(exc)
     else:
-        # Only the Linear project store observes native cancellations, so a non-writer store
-        # can never carry a repairable candidate — an empty completed pass.
-        result = diagnostics.CancellationRepairResult(
-            actions=(), failed=None, aborted=False, dry_run=dry_run
+        detail = result.cancellation_metadata
+        assert detail is not None  # the strict wrapper guarantees the requested detail
+        applied = tuple(
+            _action_out(a) for a in detail.actions if a.outcome in ("applied", "would_apply")
         )
+        skipped = tuple(_action_out(a) for a in detail.actions if a.outcome == "skipped")
+        failed = _action_out(detail.failed) if detail.failed is not None else None
+        repair_aborted = detail.aborted
+        unavailable = detail.unavailable
     final = _diagnose_train(delivery, active_id, redirected_from=redirected_from)
     remaining = final.blockers + final.information
-    applied = tuple(
-        _action_out(a) for a in result.actions if a.outcome in ("applied", "would_apply")
-    )
-    skipped = tuple(_action_out(a) for a in result.actions if a.outcome == "skipped")
-    failed = _action_out(result.failed) if result.failed is not None else None
-    if result.unavailable is not None or final.state == "unavailable":
+    if unavailable is not None or final.state == "unavailable":
         state = "unavailable"
         aborted = True
-    elif result.aborted:
+    elif repair_aborted:
         state = "aborted"
         aborted = True
     else:
@@ -472,9 +467,7 @@ def doctor_objective(
                 # The manifest changed — re-diagnose before any train action.
                 current = _diagnose_train(delivery, active_id, redirected_from=redirected_from)
             train_fix = _run_train_fix(
-                repo_root,
                 active_id,
-                store,
                 delivery,
                 current=current,
                 redirected_from=redirected_from,

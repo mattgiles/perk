@@ -2,9 +2,12 @@
 exact DeliveryTrain diagnosis, the train-repair state machine, the single active-objective
 resolution (superseded-id redirect), and the exit-code table.
 
-The store, façade-backed report diagnosis, and retained repair-proof reconstruction are faked
-at their explicit seams. The projection's own behavior is pinned in test_delivery_train.py;
-here the command's report/repair surface is.
+The store and the façade (report diagnosis + the cancellation-metadata Recover pass) are
+faked at their explicit seams: the scripted double captures each exact
+``RecoverRequest(kind="cancellation_metadata", ...)`` and answers strict cancellation
+details. The projection's own behavior is pinned in test_delivery_train.py, and the repair
+engine's safety matrix in test_delivery_diagnostics.py / test_delivery_facade.py; here the
+command's report/repair surface is.
 """
 
 import json
@@ -16,10 +19,9 @@ from click.testing import CliRunner
 
 from perk import github, objective
 from perk.backends import issue_backend, objective_store, resolve
-from perk.backends.objective_store import CancellationRepairOutcome
 from perk.cli.cli import cli
 from perk.cli.commands.objective import doctor_cmd
-from perk.delivery import DeliveryError, StatusResult, observe
+from perk.delivery import DeliveryError, RecoverRequest, RecoverResult, StatusResult
 from perk.delivery.train import (
     BuildReadiness,
     DeliveryTrain,
@@ -92,43 +94,6 @@ class _FakeStore:
         )
 
 
-@dataclass
-class _FakeWriterStore(_FakeStore):
-    """A Linear-project-shaped store: also satisfies the NativeCancellationMetadataWriter
-    Protocol (structurally)."""
-
-    backend_id = "linear"
-    write_outcomes: list[object] = field(default_factory=list)
-    writes: list[dict[str, object]] = field(default_factory=list)
-
-    def write_node_cancellation_status(
-        self,
-        *,
-        objective_id: str,
-        node_id: str,
-        expected_status: NodeStatus,
-        new_status: NodeStatus,
-        require_native_canceled: bool | None,
-        require_no_raw_publish_claims: bool,
-        dry_run: bool = False,
-    ) -> CancellationRepairOutcome:
-        self.writes.append(
-            {
-                "objective_id": objective_id,
-                "node_id": node_id,
-                "expected_status": expected_status,
-                "new_status": new_status,
-                "require_native_canceled": require_native_canceled,
-                "dry_run": dry_run,
-            }
-        )
-        if not self.write_outcomes:
-            return CancellationRepairOutcome.APPLIED
-        value = self.write_outcomes.pop(0)
-        assert isinstance(value, CancellationRepairOutcome)
-        return value
-
-
 def _train(
     *,
     objective_id: str = "42",
@@ -153,18 +118,20 @@ def _train(
 
 
 class _ScriptedTrains:
-    """Two explicit scripted seams over one ordered scenario.
+    """The scripted Delivery double: two explicit façade seams over one scenario.
 
     ``status`` returns the façade's ``StatusResult``/``DeliveryError`` contract for report
-    diagnosis; ``reconstruct`` returns the retained internal train status for cancellation
-    proof reads. The shared step queue preserves effect-boundary ordering assertions.
+    diagnosis; ``recover`` captures each exact cancellation ``RecoverRequest`` and answers
+    (or raises) the next scripted strict ``RecoverResult`` — the repair engine itself is
+    pinned in the façade/diagnostics suites, never re-run here.
     """
 
-    def __init__(self, *steps: object) -> None:
+    def __init__(self, *steps: object, recover_results: list[object] | None = None) -> None:
         self._steps = list(steps)
+        self._recover_results = list(recover_results or [])
         self.calls: list[str] = []
         self.status_calls: list[str] = []
-        self.reconstruction_calls: list[str] = []
+        self.recover_calls: list[dict[str, object]] = []
 
     def _next(self, objective_id: str):
         self.calls.append(objective_id)
@@ -192,9 +159,44 @@ class _ScriptedTrains:
             no_train_reason=None,
         )
 
-    def reconstruct(self, repo_root, objective_id: str):
-        self.reconstruction_calls.append(objective_id)
-        return self._next(objective_id)
+    def recover(self, request: RecoverRequest, *, consent=None) -> RecoverResult:
+        self.recover_calls.append({"request": request, "consent": consent})
+        assert self._recover_results, "unexpected Delivery.recover call"
+        step = self._recover_results.pop(0)
+        if isinstance(step, Exception):
+            raise step
+        assert isinstance(step, RecoverResult)
+        return step
+
+
+def _cancellation_result(
+    *,
+    objective_id: str = "42",
+    actions: tuple[RecoverResult.CancellationAction, ...] = (),
+    failed: RecoverResult.CancellationAction | None = None,
+    aborted: bool = False,
+    dry_run: bool = False,
+    unavailable: str | None = None,
+) -> RecoverResult:
+    return RecoverResult(
+        kind="cancellation_metadata",
+        cancellation_metadata=RecoverResult.CancellationMetadata(
+            objective_id=objective_id,
+            actions=actions,
+            failed=failed,
+            aborted=aborted,
+            dry_run=dry_run,
+            unavailable=unavailable,
+        ),
+    )
+
+
+def _cancellation_action(
+    node_id: str = "1.3", *, outcome: str = "applied", error: str | None = None
+) -> RecoverResult.CancellationAction:
+    return RecoverResult.CancellationAction(
+        code="canceled_unpublished_projected", node_id=node_id, outcome=outcome, error=error
+    )
 
 
 def _invoke(args, *, git: bool = True):
@@ -226,7 +228,6 @@ def _wire(monkeypatch, store, trains, *, reads: dict[str, object] | None = None)
 
     monkeypatch.setattr(resolve, "resolve_objective_store", lambda _root: store)
     monkeypatch.setattr(doctor_cmd, "resolve_delivery", resolve_delivery)
-    monkeypatch.setattr(observe, "reconstruct_repo_train", trains.reconstruct)
 
     class _FakeIssueBackend:
         def read_issue(self, *, issue_id: str):
@@ -373,9 +374,9 @@ def test_superseded_id_targets_the_active_successor(monkeypatch):
     assert store.detect_calls == ["43"]
 
 
-def test_superseded_id_fix_writes_only_against_the_successor(monkeypatch):
+def test_superseded_id_fix_repairs_only_against_the_successor(monkeypatch):
     # `doctor OLD --fix` never mutates the predecessor: the manifest repair and the
-    # conditional cancellation write both name the active successor.
+    # cancellation Recover request both name the active successor.
     _authed(monkeypatch)
     c13 = ProjectedCancellation(node_id="1.3", persisted_status=NodeStatus.PENDING)
     before = _train(objective_id="43", projected=(c13,), repairable=(c13,))
@@ -384,16 +385,22 @@ def test_superseded_id_fix_writes_only_against_the_successor(monkeypatch):
         projected=(ProjectedCancellation(node_id="1.3", persisted_status=NodeStatus.SKIPPED),),
         repairable=(),
     )
-    store = _FakeWriterStore(
+    store = _FakeStore(
         objectives={"42": _state("42", {"superseded_by": "#43"}), "43": _state("43")}
     )
-    trains = _ScriptedTrains(before, before, before, converged, converged)
+    trains = _ScriptedTrains(
+        before,
+        converged,
+        recover_results=[
+            _cancellation_result(objective_id="43", actions=(_cancellation_action(),))
+        ],
+    )
     _wire(monkeypatch, store, trains)
     result = _invoke(["objective", "doctor", "42", "--fix", "--json"])
     assert result.exit_code == 0
     assert store.repair_calls == [{"objective_id": "43", "dry_run": False}]
-    (write,) = store.writes
-    assert write["objective_id"] == "43"
+    (call,) = trains.recover_calls
+    assert call["request"] == RecoverRequest(kind="cancellation_metadata", objective_id="43")
     assert set(trains.calls) == {"43"}
 
 
@@ -416,7 +423,7 @@ def test_active_resolution_failure_is_the_fail_envelope_exit_1(monkeypatch):
 # ----------------------------------------------------------------- fix
 
 
-def _repairable_world() -> tuple[_FakeWriterStore, DeliveryTrain, DeliveryTrain]:
+def _repairable_world() -> tuple[_FakeStore, DeliveryTrain, DeliveryTrain]:
     c13 = ProjectedCancellation(node_id="1.3", persisted_status=NodeStatus.PENDING)
     before = _train(findings=(_BLOCKER, _CANCEL_INFO), projected=(c13,), repairable=(c13,))
     converged = _train(
@@ -424,15 +431,19 @@ def _repairable_world() -> tuple[_FakeWriterStore, DeliveryTrain, DeliveryTrain]
         projected=(ProjectedCancellation(node_id="1.3", persisted_status=NodeStatus.SKIPPED),),
         repairable=(),
     )
-    store = _FakeWriterStore(objectives={"42": _state("42")})
+    store = _FakeStore(objectives={"42": _state("42")})
     return store, before, converged
 
 
 def test_fix_applies_the_cancellation_repair_and_reports_remaining(monkeypatch):
     _authed(monkeypatch)
     store, before, converged = _repairable_world()
-    # doctor initial, repair initial, fresh proof, post-write verify, final diagnosis.
-    trains = _ScriptedTrains(before, before, before, converged, converged)
+    # doctor initial diagnosis, then the final diagnosis after the recover pass.
+    trains = _ScriptedTrains(
+        before,
+        converged,
+        recover_results=[_cancellation_result(actions=(_cancellation_action(),))],
+    )
     delivery_roots = _wire(monkeypatch, store, trains)
     result = _invoke(["objective", "doctor", "42", "--fix", "--json"])
     assert result.exit_code == 0  # report-only drift remains → still a clean exit
@@ -459,42 +470,61 @@ def test_fix_applies_the_cancellation_repair_and_reports_remaining(monkeypatch):
     assert fix["failed"] is None and fix["skipped"] == []
     # The final diagnosis rides `remaining` (the report-only blocker survives).
     assert [f["code"] for f in fix["remaining"]] == ["checkpoint_drift"]
-    # The conditional write targeted the active objective with the fresh-proof predicates.
-    (write,) = store.writes
-    assert write["objective_id"] == "42" and write["node_id"] == "1.3"
-    assert write["expected_status"] is NodeStatus.PENDING
-    assert write["new_status"] is NodeStatus.SKIPPED
-    assert write["require_native_canceled"] is True
+    # Exactly ONE cancellation Recover call, the exact request, no consent — the shared
+    # Delivery resolved once for the whole command.
+    (call,) = trains.recover_calls
+    assert call["request"] == RecoverRequest(
+        kind="cancellation_metadata", objective_id="42", dry_run=False
+    )
+    assert call["consent"] is None
     assert trains.status_calls == ["42", "42"]
-    assert trains.reconstruction_calls == ["42", "42", "42"]
     assert len(delivery_roots) == 1
 
 
 def test_fix_dry_run_would_apply_without_writing(monkeypatch):
     store, before, _converged = _repairable_world()
-    trains = _ScriptedTrains(before)
+    trains = _ScriptedTrains(
+        before,
+        recover_results=[
+            _cancellation_result(
+                actions=(_cancellation_action(outcome="would_apply"),), dry_run=True
+            )
+        ],
+    )
     _wire(monkeypatch, store, trains)
     result = _invoke(["objective", "doctor", "42", "--fix", "--dry-run", "--json"])
     assert result.exit_code == 0
     fix = json.loads(result.output)["train_fix"]
     assert fix["state"] == "completed" and fix["dry_run"] is True
     assert [a["outcome"] for a in fix["applied"]] == ["would_apply"]
-    (write,) = store.writes
-    assert write["dry_run"] is True
+    # The dry-run flag rides the one Recover request — no write happens anywhere.
+    (call,) = trains.recover_calls
+    assert call["request"] == RecoverRequest(
+        kind="cancellation_metadata", objective_id="42", dry_run=True
+    )
 
 
 def test_fix_write_verification_failure_is_an_aborted_train_fix(monkeypatch):
+    # The engine's post-write-drift compensation is pinned in test_delivery_diagnostics.py;
+    # here the aborted detail's output-level regression: failed action + exit 1.
     _authed(monkeypatch)
     store, before, _converged = _repairable_world()
-    store.write_outcomes.extend(
-        [
-            CancellationRepairOutcome.APPLIED,  # forward write
-            CancellationRepairOutcome.APPLIED,  # compensation rollback
-            CancellationRepairOutcome.ALREADY_CONVERGED,  # rollback verification read
-        ]
-    )
     drifted = _train(findings=(_BLOCKER,))  # the node vanished from the projection facts
-    trains = _ScriptedTrains(before, before, before, drifted)
+    trains = _ScriptedTrains(
+        before,
+        drifted,
+        recover_results=[
+            _cancellation_result(
+                failed=_cancellation_action(
+                    outcome="failed",
+                    error="post-write drift: node 1.3 is no longer a safely projected "
+                    "native cancellation; compensated: the attachment was rolled back to "
+                    "pending (verified)",
+                ),
+                aborted=True,
+            )
+        ],
+    )
     _wire(monkeypatch, store, trains)
     result = _invoke(["objective", "doctor", "42", "--fix", "--json"])
     assert result.exit_code == 1
@@ -504,20 +534,12 @@ def test_fix_write_verification_failure_is_an_aborted_train_fix(monkeypatch):
     assert fix["state"] == "aborted" and fix["aborted"] is True
     assert fix["failed"]["outcome"] == "failed"
     assert "post-write drift" in fix["failed"]["error"]
-    # Forward write + compensation rollback + the rollback-verification read all hit the
-    # writer seam.
-    assert [w["new_status"] for w in store.writes] == [
-        NodeStatus.SKIPPED,
-        NodeStatus.PENDING,
-        NodeStatus.PENDING,
-    ]
-    assert store.writes[1]["require_native_canceled"] is None
-    assert store.writes[2]["dry_run"] is True
+    assert fix["applied"] == [] and fix["skipped"] == []
 
 
 def test_fix_current_train_unavailable_is_the_unavailable_state(monkeypatch):
     _authed(monkeypatch)
-    store = _FakeWriterStore(objectives={"42": _state("42")})
+    store = _FakeStore(objectives={"42": _state("42")})
     trains = _ScriptedTrains(DeliveryError("gone", error_type="github_error"))
     _wire(monkeypatch, store, trains)
     result = _invoke(["objective", "doctor", "42", "--fix", "--json"])
@@ -525,7 +547,8 @@ def test_fix_current_train_unavailable_is_the_unavailable_state(monkeypatch):
     fix = json.loads(result.output)["train_fix"]
     assert fix["state"] == "unavailable" and fix["aborted"] is True
     assert fix["failed"] is None and fix["remaining"] == []
-    assert store.writes == []
+    # A currently unavailable diagnosis never invokes Recover.
+    assert trains.recover_calls == []
 
 
 def test_fix_manifest_abort_skips_every_train_action(monkeypatch):
@@ -545,12 +568,12 @@ def test_fix_manifest_abort_skips_every_train_action(monkeypatch):
     fix = json.loads(result.output)["train_fix"]
     assert fix["state"] == "skipped_manifest_abort" and fix["aborted"] is True
     assert fix["failed"] is None and fix["applied"] == []
-    # The initial diagnosis remains (as `remaining`); no train write ran.
+    # The initial diagnosis remains (as `remaining`); no cancellation Recover call ran.
     assert [f["code"] for f in fix["remaining"]] == [
         "checkpoint_drift",
         "canceled_unpublished_projected",
     ]
-    assert store.writes == []
+    assert trains.recover_calls == []
 
 
 def test_fix_manifest_action_serialization_preserves_the_conditional_error_key(monkeypatch):
@@ -581,43 +604,53 @@ def test_fix_manifest_action_serialization_preserves_the_conditional_error_key(m
 
 
 def test_fix_semantic_blockers_are_never_repaired(monkeypatch):
-    # A train with only nonrepairable blockers: --fix runs an empty completed pass — the
-    # writer is never called for identity/topology/status conflicts.
+    # A train with only nonrepairable blockers: the recover pass finds no candidate and the
+    # blockers survive untouched in `remaining` (identity/topology conflicts are never a
+    # doctor write — the engine's candidate discipline is pinned in the diagnostics suite).
     _authed(monkeypatch)
-    store = _FakeWriterStore(objectives={"42": _state("42")})
+    store = _FakeStore(objectives={"42": _state("42")})
     blocked = _train(
         findings=(
             TrainFinding(kind=FindingKind.BLOCKER, code="canceled_published_layer", message="m"),
             TrainFinding(kind=FindingKind.BLOCKER, code="wrong_owner", message="m"),
         )
     )
-    trains = _ScriptedTrains(blocked)
+    trains = _ScriptedTrains(blocked, recover_results=[_cancellation_result()])
     _wire(monkeypatch, store, trains)
     result = _invoke(["objective", "doctor", "42", "--fix", "--json"])
     assert result.exit_code == 0
     fix = json.loads(result.output)["train_fix"]
     assert fix["state"] == "completed"
     assert fix["applied"] == [] and fix["skipped"] == []
-    assert store.writes == []
+    assert [f["code"] for f in fix["remaining"]] == [
+        "canceled_published_layer",
+        "wrong_owner",
+    ]
+    assert len(trains.recover_calls) == 1
 
 
-def test_fix_on_a_non_writer_store_never_attempts_a_write(monkeypatch):
-    # A GitHub-shaped store (no writer seam): even a train claiming repairable candidates
-    # (impossible in production — no provenance) runs an empty completed pass.
+def test_fix_on_a_non_writer_store_is_an_empty_completed_pass(monkeypatch):
+    # A GitHub-shaped backend has no cancellation writer: the façade's unsupported arm
+    # answers the empty successful detail (pinned in test_delivery_facade.py) and doctor
+    # renders it as a completed empty pass — one Recover call still happens.
     _authed(monkeypatch)
     c13 = ProjectedCancellation(node_id="1.3", persisted_status=NodeStatus.PENDING)
     store = _FakeStore(objectives={"42": _state("42")})
-    trains = _ScriptedTrains(_train(projected=(c13,), repairable=(c13,)))
+    trains = _ScriptedTrains(
+        _train(projected=(c13,), repairable=(c13,)),
+        recover_results=[_cancellation_result()],
+    )
     _wire(monkeypatch, store, trains)
     result = _invoke(["objective", "doctor", "42", "--fix", "--json"])
     assert result.exit_code == 0
     fix = json.loads(result.output)["train_fix"]
     assert fix["state"] == "completed" and fix["applied"] == []
+    assert len(trains.recover_calls) == 1
 
 
 def test_fix_incremental_is_an_empty_completed_pass(monkeypatch):
     _authed(monkeypatch)
-    store = _FakeWriterStore(objectives={"42": _state("42")})
+    store = _FakeStore(objectives={"42": _state("42")})
     trains = _ScriptedTrains(
         NoDeliveryTrain(objective_id="42", objective_url="u", redirected_from=None, reason="inc")
     )
@@ -626,18 +659,19 @@ def test_fix_incremental_is_an_empty_completed_pass(monkeypatch):
     assert result.exit_code == 0
     fix = json.loads(result.output)["train_fix"]
     assert fix["state"] == "completed" and fix["remaining"] == []
+    # A current incremental diagnosis short-circuits before any Recover call.
+    assert trains.recover_calls == []
 
 
 def test_fix_idempotent_rerun_after_success_is_clean(monkeypatch):
     _authed(monkeypatch)
     store, _before, converged = _repairable_world()
-    trains = _ScriptedTrains(converged)
+    trains = _ScriptedTrains(converged, recover_results=[_cancellation_result()])
     _wire(monkeypatch, store, trains)
     result = _invoke(["objective", "doctor", "42", "--fix", "--json"])
     assert result.exit_code == 0
     fix = json.loads(result.output)["train_fix"]
-    assert fix["state"] == "completed" and fix["applied"] == []
-    assert store.writes == []  # nothing repairable remains
+    assert fix["state"] == "completed" and fix["applied"] == []  # nothing repairable remains
 
 
 def test_fix_manifest_and_train_reports_are_both_present_for_linear(monkeypatch):
@@ -656,7 +690,11 @@ def test_fix_manifest_and_train_reports_are_both_present_for_linear(monkeypatch)
             ),
         )
     )
-    trains = _ScriptedTrains(before, before, before, converged, converged)
+    trains = _ScriptedTrains(
+        before,
+        converged,
+        recover_results=[_cancellation_result(actions=(_cancellation_action(),))],
+    )
     _wire(monkeypatch, store, trains)
     result = _invoke(["objective", "doctor", "42", "--fix", "--json"])
     payload = json.loads(result.output)
@@ -674,7 +712,7 @@ def test_manifest_repair_with_applied_changes_rediagnoses_before_train_actions(m
     _authed(monkeypatch)
     c13 = ProjectedCancellation(node_id="1.3", persisted_status=NodeStatus.PENDING)
     before = _train(findings=(_CANCEL_INFO,), projected=(c13,), repairable=(c13,))
-    store = _FakeWriterStore(objectives={"42": _state("42")})
+    store = _FakeStore(objectives={"42": _state("42")})
     store.repair = objective_store.RepairResult(
         applied=(objective_store.RepairAction(code=DriftCode.MISSING_NODE_ISSUE, node_id="1.1"),),
         failed=None,
@@ -692,8 +730,63 @@ def test_manifest_repair_with_applied_changes_rediagnoses_before_train_actions(m
     payload = json.loads(result.output)
     fix = payload["train_fix"]
     assert fix["state"] == "completed" and fix["applied"] == [] and fix["skipped"] == []
-    assert store.writes == []  # the stale pre-repair candidate was never written
+    # The stale pre-repair candidate never reached Recover: the fresh post-manifest
+    # diagnosis (incremental) short-circuits the train action.
+    assert trains.recover_calls == []
     assert trains.calls == ["42", "42"]  # initial diagnosis + the post-manifest re-diagnosis
+
+
+def test_manifest_applied_writes_precede_exactly_one_recover_call(monkeypatch):
+    # When the manifest repair APPLIED real writes and the fresh diagnosis is still stacked,
+    # exactly ONE cancellation Recover call follows the post-manifest re-diagnosis.
+    _authed(monkeypatch)
+    store, before, converged = _repairable_world()
+    store.repair = objective_store.RepairResult(
+        applied=(objective_store.RepairAction(code=DriftCode.MISSING_NODE_ISSUE, node_id="1.1"),),
+        failed=None,
+        remaining=(),
+        aborted=False,
+        dry_run=False,
+    )
+    # initial diagnosis, post-manifest re-diagnosis, final diagnosis.
+    trains = _ScriptedTrains(
+        before,
+        before,
+        converged,
+        recover_results=[_cancellation_result(actions=(_cancellation_action(),))],
+    )
+    _wire(monkeypatch, store, trains)
+    result = _invoke(["objective", "doctor", "42", "--fix", "--json"])
+    assert result.exit_code == 0
+    fix = json.loads(result.output)["train_fix"]
+    assert fix["state"] == "completed" and [a["outcome"] for a in fix["applied"]] == ["applied"]
+    assert trains.calls == ["42", "42", "42"]
+    (call,) = trains.recover_calls
+    assert call["request"] == RecoverRequest(kind="cancellation_metadata", objective_id="42")
+
+
+def test_fix_recover_delivery_error_is_an_unavailable_aborted_pass(monkeypatch):
+    # A bounded façade failure before any modeled repair pass (e.g. lazy capability
+    # resolution failed) keeps the assembled success=true report: the train fix reads
+    # unavailable/aborted, the final diagnosis still runs, and the exit conveys the abort.
+    _authed(monkeypatch)
+    store, before, converged = _repairable_world()
+    trains = _ScriptedTrains(
+        before,
+        converged,
+        recover_results=[DeliveryError("backend resolution failed", error_type="github_error")],
+    )
+    _wire(monkeypatch, store, trains)
+    result = _invoke(["objective", "doctor", "42", "--fix", "--json"])
+    assert result.exit_code == 1
+    payload = json.loads(result.output)
+    assert payload["success"] is True
+    fix = payload["train_fix"]
+    assert fix["state"] == "unavailable" and fix["aborted"] is True
+    assert fix["applied"] == [] and fix["failed"] is None
+    # The final diagnosis still rides `remaining`.
+    assert [f["code"] for f in fix["remaining"]] == ["checkpoint_drift"]
+    assert trains.status_calls == ["42", "42"]
 
 
 # ------------------------------------------- the both-headers corruption signature
@@ -918,22 +1011,28 @@ def test_human_render_redirect_names_both_ids(monkeypatch):
 def test_human_render_train_fix_summary_and_failure(monkeypatch):
     _authed(monkeypatch)
     store, before, converged = _repairable_world()
-    trains = _ScriptedTrains(before, before, before, converged, converged)
+    trains = _ScriptedTrains(
+        before,
+        converged,
+        recover_results=[_cancellation_result(actions=(_cancellation_action(),))],
+    )
     _wire(monkeypatch, store, trains)
     result = _invoke(["objective", "doctor", "42", "--fix"])
     assert result.exit_code == 0
     assert "train fix (completed): applied 1 repair(s), 0 skipped" in result.output
 
     store2, before2, _converged2 = _repairable_world()
-    store2.write_outcomes.extend(
-        [
-            CancellationRepairOutcome.APPLIED,
-            CancellationRepairOutcome.APPLIED,
-            CancellationRepairOutcome.ALREADY_CONVERGED,
-        ]
-    )
     drifted = _train(findings=(_BLOCKER,))
-    trains2 = _ScriptedTrains(before2, before2, before2, drifted)
+    trains2 = _ScriptedTrains(
+        before2,
+        drifted,
+        recover_results=[
+            _cancellation_result(
+                failed=_cancellation_action(outcome="failed", error="post-write drift"),
+                aborted=True,
+            )
+        ],
+    )
     _wire(monkeypatch, store2, trains2)
     result2 = _invoke(["objective", "doctor", "42", "--fix"])
     assert result2.exit_code == 1

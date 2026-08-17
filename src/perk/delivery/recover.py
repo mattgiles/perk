@@ -1,4 +1,10 @@
-"""The delivery **recover** operation — conclude-only recovery (contracts.md §8.51).
+"""The delivery **recover** operation — the two Recover variants (contracts.md §8.51/§8.54).
+
+``kind="operation_conclusion"`` is conclude-only recovery; ``kind="cancellation_metadata"``
+is the isolated §8.54 metadata repair (:func:`_repair_cancellation_metadata` — no
+operation-conclusion machinery: no worktree config, no stack-operation lock, no journal
+mutation, no classification/consent/finalization/close, no orphan sweep; its read-only train
+reconstructions ARE the repair's fresh safety proof).
 
 `perk objective stack recover` concludes unresolved stack operations and sweeps orphaned
 machine-local sync residue; it NEVER retries — retry always routes to the owning command
@@ -77,8 +83,9 @@ from pathlib import Path
 from typing import cast
 
 from perk import objective, plan
+from perk.backends.issue_backend import IssueBackendError
 from perk.backends.objective_store import ObjectiveStoreError
-from perk.delivery import continuation, land_records, landing, oplock, publish
+from perk.delivery import continuation, diagnostics, land_records, landing, oplock, publish
 from perk.delivery import sync as sync_mod
 from perk.delivery import transfer as transfer_mod
 from perk.delivery.facade import (
@@ -99,11 +106,13 @@ from perk.delivery.journal import (
     OutcomeRecord,
     PreparedRecord,
 )
+from perk.delivery.persistence import TrainPersistenceError
 from perk.delivery.train import (
     DeliveryTrain,
     NoDeliveryTrain,
     PlanReader,
     TrainLayer,
+    TrainReconstructionError,
     TrainStatus,
 )
 from perk.github import GitHubError
@@ -351,7 +360,11 @@ def _dispatch(
     *,
     consent: _Consent | None,
 ) -> RecoverResult:
-    """Resolve local configuration, then hold the one operation lock through the sweep."""
+    """Route the request's variant: the cancellation repair returns before worktree-root
+    resolution and the operation lock; operation conclusion resolves configuration, then
+    holds the one operation lock through the sweep."""
+    if request.kind == "cancellation_metadata":
+        return _repair_cancellation_metadata(context, request)
     worktree_root = context.runtime.worktree_root(context.repo_root)
     entered = False
     try:
@@ -368,6 +381,77 @@ def _dispatch(
         if entered:
             raise
         raise DeliveryError(str(exc), error_type="operation_in_progress") from exc
+
+
+# ----------------------------------------------------------------- cancellation metadata (§8.54)
+
+
+def _cancellation_action(
+    action: diagnostics.CancellationRepairAction,
+) -> RecoverResult.CancellationAction:
+    return RecoverResult.CancellationAction(
+        code=action.code,
+        node_id=action.node_id,
+        outcome=action.outcome,
+        error=action.error,
+    )
+
+
+def _repair_cancellation_metadata(
+    context: _RecoverContext, request: RecoverRequest
+) -> RecoverResult:
+    """The §8.54 cancellation-metadata repair, isolated from operation-conclusion
+    machinery: no worktree-root/config resolution, no stack-operation lock, no journal
+    mutation (no ``append_prepared``/``append_outcome``/``write_checkpoints``), no
+    classification/conclusion, no consent, no finalization/convergence/close, and no orphan
+    sweep. Read-only train reconstruction is explicitly required — it IS the repair's fresh
+    safety proof, inherently reading the journal fold, fetching, and observing
+    branches/PRs/stack membership through the bound reconstruction bridge.
+
+    A backend without the conditional writer is a successful empty pass BEFORE any
+    reconstruction (only the Linear project store observes native cancellations, so a
+    non-writer store can never carry a repairable candidate). With a writer, the proven
+    diagnostics core runs exactly once; expected issue/objective/train-persistence read
+    failures normalize onto the typed ``TrainReconstructionError`` so the core answers its
+    modeled ``unavailable`` arm instead of leaking a new exception path.
+    """
+    writer = context.persistence.native_cancellation_metadata_writer()
+    if writer is None:
+        return RecoverResult(
+            kind="cancellation_metadata",
+            cancellation_metadata=RecoverResult.CancellationMetadata(
+                objective_id=request.objective_id,
+                actions=(),
+                failed=None,
+                aborted=False,
+                dry_run=request.dry_run,
+                unavailable=None,
+            ),
+        )
+
+    def reconstruct() -> TrainStatus:
+        try:
+            return context.reconstruct(context.repo_root, request.objective_id)
+        except (IssueBackendError, ObjectiveStoreError, TrainPersistenceError) as exc:
+            raise TrainReconstructionError(str(exc), error_type="github_error") from exc
+
+    result = diagnostics.repair_projected_cancellations(
+        request.objective_id,
+        writer=writer,
+        reconstruct=reconstruct,
+        dry_run=request.dry_run,
+    )
+    return RecoverResult(
+        kind="cancellation_metadata",
+        cancellation_metadata=RecoverResult.CancellationMetadata(
+            objective_id=request.objective_id,
+            actions=tuple(_cancellation_action(action) for action in result.actions),
+            failed=None if result.failed is None else _cancellation_action(result.failed),
+            aborted=result.aborted,
+            dry_run=result.dry_run,
+            unavailable=result.unavailable,
+        ),
+    )
 
 
 # ----------------------------------------------------------------- classification
@@ -541,20 +625,22 @@ def _recover(
     )
     return RecoverResult(
         kind=request.kind,
-        objective_id=status.objective_id,
-        objective_url=status.objective_url,
-        redirected_from=status.redirected_from,
-        dry_run=request.dry_run,
-        selection_required=selection_required,
-        operations=tuple(rows),
-        swept_worktrees=swept_worktrees,
-        swept_refs=swept_refs,
-        sweep_failures=failures,
-        sweep_skipped=skipped,
-        landed_layers=tuple(effects.landed_layers),
-        objective_closed=effects.objective_closed,
-        reconcile_evidence=effects.reconcile_evidence,
-        notes=tuple(effects.notes),
+        operation_conclusion=RecoverResult.OperationConclusion(
+            objective_id=status.objective_id,
+            objective_url=status.objective_url,
+            redirected_from=status.redirected_from,
+            dry_run=request.dry_run,
+            selection_required=selection_required,
+            operations=tuple(rows),
+            swept_worktrees=swept_worktrees,
+            swept_refs=swept_refs,
+            sweep_failures=failures,
+            sweep_skipped=skipped,
+            landed_layers=tuple(effects.landed_layers),
+            objective_closed=effects.objective_closed,
+            reconcile_evidence=effects.reconcile_evidence,
+            notes=tuple(effects.notes),
+        ),
     )
 
 
@@ -607,16 +693,18 @@ def _recover_transfer(
     )
     return RecoverResult(
         kind=request.kind,
-        objective_id=objective_id,
-        objective_url=objective_url,
-        redirected_from=None,
-        dry_run=request.dry_run,
-        selection_required=False,
-        operations=(row,),
-        swept_worktrees=swept_worktrees,
-        swept_refs=swept_refs,
-        sweep_failures=failures,
-        sweep_skipped=skipped,
+        operation_conclusion=RecoverResult.OperationConclusion(
+            objective_id=objective_id,
+            objective_url=objective_url,
+            redirected_from=None,
+            dry_run=request.dry_run,
+            selection_required=False,
+            operations=(row,),
+            swept_worktrees=swept_worktrees,
+            swept_refs=swept_refs,
+            sweep_failures=failures,
+            sweep_skipped=skipped,
+        ),
     )
 
 

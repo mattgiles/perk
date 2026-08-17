@@ -573,7 +573,7 @@ class _World:
         approve: Callable[[RecoverResult.AbandonPreview], bool] | None = None,
         accept_approve: Callable[[RecoverResult.AcceptPrefixPreview], bool] | None = None,
         objective_id: str = OBJECTIVE,
-    ) -> RecoverResult:
+    ) -> RecoverResult.OperationConclusion:
         if abandon and accept_prefix:
             raise ValueError("recover action must be one closed choice")
         action = "accept_prefix" if accept_prefix else "abandon" if abandon else "report"
@@ -613,7 +613,11 @@ class _World:
             consent_callback = consent
         with pytest.MonkeyPatch.context() as monkeypatch:
             monkeypatch.setattr(recover, "_DEFAULT_RECOVER_RUNTIME", runtime)
-            return _WorldDelivery(self).recover(request, consent=consent_callback)
+            result = _WorldDelivery(self).recover(request, consent=consent_callback)
+        assert result.kind == "operation_conclusion"
+        conclusion = result.operation_conclusion
+        assert conclusion is not None and result.cancellation_metadata is None
+        return conclusion
 
     def events(self, kind: str) -> list[tuple]:
         return [t for t in self.timeline if t[0] == kind]

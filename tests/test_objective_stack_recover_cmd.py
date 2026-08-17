@@ -37,8 +37,8 @@ def _row(**overrides) -> RecoverResult.Operation:
 
 
 def _result(**overrides) -> RecoverResult:
+    """Build the strict wrapper the façade returns; overrides target the operation detail."""
     values: dict = {
-        "kind": "operation_conclusion",
         "objective_id": "1431",
         "objective_url": _URL,
         "redirected_from": None,
@@ -51,7 +51,10 @@ def _result(**overrides) -> RecoverResult:
         "sweep_skipped": None,
     }
     values.update(overrides)
-    return RecoverResult(**values)
+    return RecoverResult(
+        kind="operation_conclusion",
+        operation_conclusion=RecoverResult.OperationConclusion(**values),
+    )
 
 
 def _invoke(args, *, monkeypatch, result=None):
