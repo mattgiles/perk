@@ -18,6 +18,7 @@ from perk_dev.prose_review.source_adapter.contract import (
     ResolvedRange,
     SourceAdapter,
     SourceDiagnostic,
+    SourceExtraction,
     SourceRange,
     UnresolvedRange,
 )
@@ -252,18 +253,43 @@ class TypeScriptSourceAdapter(SourceAdapter):
         finally:
             self._slot.release()
 
-    def resolve_range(self, text: str, selector: str) -> RangeResolution:
-        response = self._invoke(text, (selector,))
+    def _resolve_many(
+        self,
+        text: str,
+        selectors: tuple[str, ...],
+    ) -> tuple[RangeResolution, ...]:
+        """Invoke the helper exactly once and map its ordered results to resolutions.
+
+        A helper-level invalid-source response fans out to one document-level
+        unresolved resolution per selector without reparsing;
+        :class:`TypeScriptAdapterUnavailable` still escapes as the operational
+        typed exception.
+        """
+        response = self._invoke(text, selectors)
         if isinstance(response, _HelperInvalidSource):
-            return UnresolvedRange(
-                status="unresolved",
-                reason="invalid-source",
-                diagnostic=_syntax_diagnostic(response.line, response.column),
+            return tuple(
+                UnresolvedRange(
+                    status="unresolved",
+                    reason="invalid-source",
+                    diagnostic=_syntax_diagnostic(response.line, response.column),
+                )
+                for _ in selectors
             )
-        result = response[0]
-        if isinstance(result, _HelperResolved):
-            return ResolvedRange(status="resolved", source_range=result.source_range)
-        return _unresolved(result)
+        return tuple(
+            ResolvedRange(status="resolved", source_range=result.source_range)
+            if isinstance(result, _HelperResolved)
+            else _unresolved(result)
+            for result in response
+        )
+
+    def resolve_range(self, text: str, selector: str) -> RangeResolution:
+        return self._resolve_many(text, (selector,))[0]
+
+    def extract_many(self, text: str, selectors: tuple[str, ...]) -> tuple[SourceExtraction, ...]:
+        return tuple(
+            self._to_extraction(text, resolution)
+            for resolution in self._resolve_many(text, selectors)
+        )
 
     def validate(self, text: str, selectors: tuple[str, ...]) -> tuple[SourceDiagnostic, ...]:
         response = self._invoke(text, selectors)

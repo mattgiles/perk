@@ -1526,3 +1526,202 @@ def test_every_real_typescript_fragment_is_batch_covered_through_the_python_adap
 
 def test_typescript_adapter_check_hint_is_only_prose_map() -> None:
     assert _typescript_adapter().affected_check_hints(_python_unit("module.ts")) == ("prose-map",)
+
+
+def test_default_extract_many_matches_repeated_extract_cardinality_order_and_fallback() -> None:
+    adapter = source_adapter_for(_unit("doc.md"))
+    assert adapter is not None
+    text = "# One\nbody\n## Two\nnested\n"
+    selectors = ("heading:one", "heading:missing", "heading:one/two", "heading:*")
+    batch = adapter.extract_many(text, selectors)
+    assert len(batch) == len(selectors)
+    assert batch == tuple(adapter.extract(text, selector) for selector in selectors)
+    assert batch[0].focus == "body\n"
+    assert isinstance(batch[1].resolution, UnresolvedRange)
+    assert batch[1].focus == text
+    assert adapter.extract_many(text, ()) == ()
+
+
+def test_python_adapter_extract_many_parses_once_and_orders_independent_results(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls = {"parse": 0, "compile": 0, "tokenize": 0}
+    original_parse = python_adapter_module.ast.parse
+    original_compile = compile
+    original_generate_tokens = python_adapter_module.tokenize.generate_tokens
+
+    def counting_parse(source: str, filename: str) -> ast.Module:
+        calls["parse"] += 1
+        return original_parse(source, filename=filename)
+
+    def counting_compile(source: ast.Module, filename: str, mode: str) -> object:
+        calls["compile"] += 1
+        return original_compile(source, filename, mode)
+
+    def counting_generate_tokens(
+        readline: Callable[[], str],
+    ) -> Iterator[tokenize.TokenInfo]:
+        calls["tokenize"] += 1
+        return original_generate_tokens(readline)
+
+    monkeypatch.setattr(python_adapter_module.ast, "parse", counting_parse)
+    monkeypatch.setattr(python_adapter_module, "compile", counting_compile, raising=False)
+    monkeypatch.setattr(
+        python_adapter_module.tokenize,
+        "generate_tokens",
+        counting_generate_tokens,
+    )
+
+    # Top-level call + raising body: compiling never executes, so no AssertionError fires.
+    text = 'target = 1\n\n\ndef other():\n    raise AssertionError("executed")\n\n\nother()\n'
+    selectors = ("symbol:other", "symbol:missing", "bad-selector", "symbol:target")
+    batch = _python_adapter().extract_many(text, selectors)
+
+    assert calls == {"parse": 1, "compile": 1, "tokenize": 1}
+    assert len(batch) == len(selectors)
+    assert batch[0].focus == 'def other():\n    raise AssertionError("executed")'
+    assert batch[0].before + batch[0].focus + batch[0].after == text
+    assert isinstance(batch[1].resolution, UnresolvedRange)
+    assert batch[1].resolution.reason == "selector-not-found"
+    assert batch[1].focus == text
+    assert isinstance(batch[2].resolution, UnresolvedRange)
+    assert batch[2].resolution.reason == "unsupported-selector"
+    assert batch[3].focus == "target = 1"
+
+
+def test_python_adapter_one_item_resolve_range_rides_the_batch_seam() -> None:
+    adapter = _python_adapter()
+    text = "target = 1\nother = 2\n"
+    resolution = adapter.resolve_range(text, "symbol:target")
+    assert resolution == adapter._resolve_many(text, ("symbol:target",))[0]
+    assert adapter.extract_many(text, ("symbol:target",)) == (
+        adapter.extract(text, "symbol:target"),
+    )
+
+
+def test_python_adapter_extract_many_collapses_invalid_source_per_selector() -> None:
+    text = "target = 1\ndef broken(:\n"
+    batch = _python_adapter().extract_many(text, ("symbol:target", "symbol:other"))
+    assert len(batch) == 2
+    for extraction in batch:
+        assert isinstance(extraction.resolution, UnresolvedRange)
+        assert extraction.resolution.reason == "invalid-source"
+        assert extraction.before == ""
+        assert extraction.focus == text
+        assert extraction.after == ""
+
+
+def test_typescript_adapter_extract_many_uses_one_helper_and_orders_results(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    text = 'const value = "exact";\nconst other = "second";\n'
+    selectors = ("symbol:value", "tool:demo.missing", "symbol:other")
+    calls = 0
+    observed_selectors: list[list[str]] = []
+
+    def fake_run_checked(
+        argv: Sequence[str],
+        *,
+        cwd: Path | None = None,
+        timeout: int,
+        env_overlay: Mapping[str, str] | None = None,
+    ) -> str:
+        del cwd, timeout, env_overlay
+        nonlocal calls
+        calls += 1
+        request = json.loads(Path(argv[2]).read_text(encoding="utf-8"))
+        observed_selectors.append(request["selectors"])
+        return _ok_response(
+            _resolved_result(selectors[0], 6, 21),
+            {
+                "selector": selectors[1],
+                "status": "unresolved",
+                "reason": "selector-not-found",
+                "line": None,
+                "column": None,
+            },
+            _resolved_result(selectors[2], 29, 44),
+        )
+
+    monkeypatch.setattr(typescript_adapter_module, "run_checked", fake_run_checked)
+    batch = _typescript_adapter().extract_many(text, selectors)
+
+    assert calls == 1
+    assert observed_selectors == [list(selectors)]
+    assert len(batch) == len(selectors)
+    assert batch[0].focus == text[6:21]
+    assert batch[0].before + batch[0].focus + batch[0].after == text
+    assert isinstance(batch[1].resolution, UnresolvedRange)
+    assert batch[1].resolution.reason == "selector-not-found"
+    assert batch[1].focus == text
+    assert batch[2].focus == text[29:44]
+
+
+def test_typescript_adapter_extract_many_document_invalid_response_fans_out(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls = 0
+
+    def invalid_source(
+        _argv: Sequence[str],
+        *,
+        cwd: Path | None = None,
+        timeout: int,
+        env_overlay: Mapping[str, str] | None = None,
+    ) -> str:
+        del cwd, timeout, env_overlay
+        nonlocal calls
+        calls += 1
+        return json.dumps({"version": 1, "status": "invalid-source", "line": 1, "column": 2})
+
+    monkeypatch.setattr(typescript_adapter_module, "run_checked", invalid_source)
+    text = "const broken = ;"
+    batch = _typescript_adapter().extract_many(text, ("symbol:a", "symbol:b"))
+
+    assert calls == 1
+    assert len(batch) == 2
+    for extraction in batch:
+        assert isinstance(extraction.resolution, UnresolvedRange)
+        assert extraction.resolution.reason == "invalid-source"
+        assert extraction.resolution.diagnostic.code == "syntax-error"
+        assert extraction.focus == text
+
+
+def test_typescript_adapter_extract_many_raises_one_operational_unavailability(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls = 0
+
+    def fail(
+        _argv: Sequence[str],
+        *,
+        cwd: Path | None = None,
+        timeout: int,
+        env_overlay: Mapping[str, str] | None = None,
+    ) -> str:
+        del cwd, timeout, env_overlay
+        nonlocal calls
+        calls += 1
+        raise ProcFailure("timeout", ("node",))
+
+    monkeypatch.setattr(typescript_adapter_module, "run_checked", fail)
+    adapter = _typescript_adapter()
+    with pytest.raises(TypeScriptAdapterUnavailable):
+        adapter.extract_many("x", ("symbol:a", "symbol:b"))
+    assert calls == 1
+
+
+def test_typescript_adapter_one_item_resolve_range_rides_the_batch_seam(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        typescript_adapter_module,
+        "run_checked",
+        lambda *_args, **_kwargs: _ok_response(_resolved_result("selected", 0, 1)),
+    )
+    adapter = _typescript_adapter()
+    assert adapter.resolve_range("xy", "selected") == ResolvedRange(
+        status="resolved",
+        source_range=SourceRange(start=0, end=1),
+    )
+    assert adapter.extract_many("xy", ("selected",)) == (adapter.extract("xy", "selected"),)

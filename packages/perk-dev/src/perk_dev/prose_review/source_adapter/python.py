@@ -17,6 +17,7 @@ from perk_dev.prose_review.source_adapter.contract import (
     SourceAdapter,
     SourceDiagnostic,
     SourceDiagnosticCode,
+    SourceExtraction,
     SourceRange,
     UnresolvedRange,
 )
@@ -355,11 +356,30 @@ def _unresolved(problem: _PythonProblem, selector: str) -> UnresolvedRange:
 class PythonSourceAdapter(SourceAdapter):
     """Exact named-symbol resolver for discovery-supported Python module nodes."""
 
+    def _resolve_many(
+        self,
+        text: str,
+        selectors: tuple[str, ...],
+    ) -> tuple[RangeResolution, ...]:
+        """Parse/compiler-validate/tokenize once, then resolve every selector in order."""
+        document = _parse(text)
+        resolutions: list[RangeResolution] = []
+        for selector in selectors:
+            result = _resolve(document, text, selector)
+            if isinstance(result, SourceRange):
+                resolutions.append(ResolvedRange(status="resolved", source_range=result))
+            else:
+                resolutions.append(_unresolved(result, selector))
+        return tuple(resolutions)
+
     def resolve_range(self, text: str, selector: str) -> RangeResolution:
-        result = _resolve(_parse(text), text, selector)
-        if isinstance(result, SourceRange):
-            return ResolvedRange(status="resolved", source_range=result)
-        return _unresolved(result, selector)
+        return self._resolve_many(text, (selector,))[0]
+
+    def extract_many(self, text: str, selectors: tuple[str, ...]) -> tuple[SourceExtraction, ...]:
+        return tuple(
+            self._to_extraction(text, resolution)
+            for resolution in self._resolve_many(text, selectors)
+        )
 
     def validate(self, text: str, selectors: tuple[str, ...]) -> tuple[SourceDiagnostic, ...]:
         document = _parse(text)
