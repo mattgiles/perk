@@ -569,7 +569,7 @@ test("diagnostic locations honor every TypeScript line break and EOF insertion",
 
 test("real discovery output stays resolver-covered and all resolved ranges recompose", async () => {
   const catalog = scanRepository(ROOT);
-  assert.equal(catalog.candidates.length, 95);
+  assert.equal(catalog.candidates.length, 96);
   const byPath = new Map<string, string[]>();
   for (const candidate of catalog.candidates) {
     for (const fragment of candidate.fragments) {

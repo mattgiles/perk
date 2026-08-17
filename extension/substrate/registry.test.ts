@@ -32,6 +32,6 @@ test("stageConsumesPlanRef: root planning stages and unknown ids do not consume 
 test("every stage admits the universal eligible-turn cache.scratch side effect", () => {
   const registry = loadRegistry();
   for (const stage of registry.stages) {
-    assert.ok(stage.writes.includes("cache.scratch"), `${stage.id} omits cache.scratch`);
+    assert.ok(stage.writes?.includes("cache.scratch"), `${stage.id} omits cache.scratch`);
   }
 });
