@@ -2281,3 +2281,670 @@ def test_unhandled_exception_response_is_still_header_stamped(
     response = client.get("/api/catalog/summary")
     assert response.status_code == 500
     _assert_security_headers(response)
+
+
+GIST_SKILL_UNIT_ID = "markdown:skills/perk-gist-author/SKILL.md"
+GIST_SKILL_PATH = "skills/perk-gist-author/SKILL.md"
+GIST_FILES = (
+    "prompts/stages/gist-author/seed.md",
+    "prompts/contexts/gist-authoring.md",
+    GIST_SKILL_PATH,
+)
+PLAN_AUTHORING_FILES = (
+    "prompts/contexts/plan-authoring.md",
+    "skills/perk-plan/SKILL.md",
+    "extension/factories/planDraft.ts",
+    "extension/factories/planReview.ts",
+)
+
+
+def _populate_sources(repo: Path, files: tuple[str, ...]) -> None:
+    for relative in files:
+        target = repo / relative
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes((ROOT / relative).read_bytes())
+
+
+def _render_body(
+    assembly: str = "gist-authoring",
+    scenario: str = "gist-new",
+    *,
+    include_ambient: bool | None = None,
+    include_tools: bool | None = None,
+    buffers: list[dict[str, str]] | None = None,
+) -> dict[str, object]:
+    return {
+        "assembly": assembly,
+        "scenario": scenario,
+        "presentation": {"include_ambient": include_ambient, "include_tools": include_tools},
+        "buffers": [] if buffers is None else buffers,
+    }
+
+
+def test_assembly_options_serves_the_full_ordered_scenario_fixtures(
+    snapshot: CatalogSnapshot, repo: Path
+) -> None:
+    from perk_dev.prose_review.dto import AssemblyOptionsOut
+
+    response = _client(snapshot, repo).get(
+        "/api/assembly/options", params={"assembly": "plan-authoring"}
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    view = snapshot.get_assembly("plan-authoring")
+    assert view is not None
+    assert payload == AssemblyOptionsOut.from_domain(view).model_dump(mode="json")
+    assert list(payload.keys()) == ["assembly", "scenarios"]
+    assert [scenario["id"] for scenario in payload["scenarios"]] == [
+        "plan-github-warm",
+        "plan-linear-cold",
+    ]
+    assert payload["scenarios"][0]["variables"] == {
+        "marker": "[PLAN AUTHORING]",
+        "provider": "github",
+    }
+    _assert_security_headers(response)
+
+
+def test_assembly_options_unknown_assembly_is_a_fixed_404_and_missing_param_a_422(
+    snapshot: CatalogSnapshot, repo: Path
+) -> None:
+    client = _client(snapshot, repo)
+    unknown = client.get("/api/assembly/options", params={"assembly": "missing"})
+    assert unknown.status_code == 404
+    assert unknown.json() == {"detail": "unknown assembly"}
+    _assert_security_headers(unknown)
+    missing = client.get("/api/assembly/options")
+    assert missing.status_code == 422
+    _assert_security_headers(missing)
+
+
+def test_assembly_render_succeeds_with_required_empty_buffers(
+    snapshot: CatalogSnapshot, repo: Path
+) -> None:
+    _populate_sources(repo, GIST_FILES)
+    response = _client(snapshot, repo).post(
+        "/api/assembly/render",
+        headers={web.CSRF_HEADER: TOKEN},
+        json=_render_body(),
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    assert list(payload.keys()) == ["assembly", "scenario", "presentation", "layers"]
+    assert payload["assembly"] == "gist-authoring"
+    assert payload["scenario"]["id"] == "gist-new"
+    assert payload["presentation"] == {"include_ambient": True, "include_tools": True}
+    assert [layer["type"] for layer in payload["layers"]] == [
+        "boundary",
+        "owned",
+        "owned",
+        "owned",
+        "boundary",
+    ]
+    assert [layer["presentation"]["position"] for layer in payload["layers"]] == [1, 2, 3, 4, 5]
+    assert (payload["layers"][0]["boundary"], payload["layers"][0]["owner"]) == ("pi-system", "pi")
+    assert (payload["layers"][4]["boundary"], payload["layers"][4]["owner"]) == (
+        "user-content",
+        "user",
+    )
+    assert payload["layers"][1]["content_kind"] == "rendered-template"
+    assert payload["layers"][2]["content_kind"] == "rendered-template"
+    assert "[GIST AUTHORING]" in payload["layers"][2]["parts"][0]["text"]
+    assert payload["layers"][3]["content_kind"] == "raw-source"
+    assert payload["layers"][3]["parts"][0]["text"] == (ROOT / GIST_SKILL_PATH).read_text(
+        encoding="utf-8"
+    )
+    _assert_security_headers(response)
+
+
+def test_assembly_render_workspace_text_wins_while_disk_stays_unchanged(
+    snapshot: CatalogSnapshot, repo: Path
+) -> None:
+    _populate_sources(repo, GIST_FILES)
+    prompt_buffer = '{% if marker == "[GIST AUTHORING]" %}chosen arm{% else %}other{% endif %}'
+    skill_buffer = "# Edited skill from the browser workspace\n"
+    disk_before = (repo / GIST_SKILL_PATH).read_bytes()
+    response = _client(snapshot, repo).post(
+        "/api/assembly/render",
+        headers={web.CSRF_HEADER: TOKEN},
+        json=_render_body(
+            buffers=[
+                {"path": "prompts/contexts/gist-authoring.md", "text": prompt_buffer},
+                {"path": GIST_SKILL_PATH, "text": skill_buffer},
+            ]
+        ),
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["layers"][2]["parts"][0]["text"] == "chosen arm"
+    assert payload["layers"][3]["parts"][0]["text"] == skill_buffer
+    assert (repo / GIST_SKILL_PATH).read_bytes() == disk_before
+    _assert_security_headers(response)
+
+
+def test_assembly_render_presentation_overrides_echo_without_changing_layers(
+    snapshot: CatalogSnapshot, repo: Path
+) -> None:
+    _populate_sources(repo, GIST_FILES)
+    client = _client(snapshot, repo)
+    defaults = client.post(
+        "/api/assembly/render",
+        headers={web.CSRF_HEADER: TOKEN},
+        json=_render_body(),
+    )
+    overridden = client.post(
+        "/api/assembly/render",
+        headers={web.CSRF_HEADER: TOKEN},
+        json=_render_body(include_ambient=False, include_tools=False),
+    )
+    assert defaults.status_code == 200
+    assert overridden.status_code == 200
+    assert defaults.json()["presentation"] == {"include_ambient": True, "include_tools": True}
+    assert overridden.json()["presentation"] == {"include_ambient": False, "include_tools": False}
+    assert overridden.json()["layers"] == defaults.json()["layers"]
+
+
+def test_assembly_render_returns_typed_layer_failures_with_ordered_siblings(
+    snapshot: CatalogSnapshot, repo: Path
+) -> None:
+    _populate_sources(repo, PLAN_AUTHORING_FILES)
+    response = _client(snapshot, repo).post(
+        "/api/assembly/render",
+        headers={web.CSRF_HEADER: TOKEN},
+        json=_render_body("plan-authoring", "plan-github-warm"),
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    # plan_draft's promptGuidelines is indirect in the current source: a typed failure
+    # layer in place, every sibling (including the eight-part review tool) preserved.
+    assert [layer["type"] for layer in payload["layers"]] == [
+        "boundary",
+        "owned",
+        "owned",
+        "failure",
+        "owned",
+        "boundary",
+    ]
+    failure = payload["layers"][3]
+    assert failure["unit"]["id"] == "typescript-tool:plan_draft"
+    assert failure["problems"] == [
+        {
+            "fragment": {"id": "promptGuidelines", "label": "promptGuidelines"},
+            "reason": "unsupported-source-shape",
+            "detail": (
+                "A catalog fragment resolves to a source shape that cannot be extracted safely."
+            ),
+        }
+    ]
+    review = payload["layers"][4]
+    assert review["content_kind"] == "source-fragments"
+    assert len(review["parts"]) == 8
+    assert review["presentation"]["presence"] == "varies"
+    assert review["presentation"]["presence_label"] == (
+        "Presence varies by session shape or runtime."
+    )
+    assert review["presentation"]["visibility_control"] == "tools"
+    _assert_security_headers(response)
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        {},
+        {
+            "scenario": "gist-new",
+            "presentation": {"include_ambient": None, "include_tools": None},
+            "buffers": [],
+        },
+        {
+            "assembly": "gist-authoring",
+            "presentation": {"include_ambient": None, "include_tools": None},
+            "buffers": [],
+        },
+        {"assembly": "gist-authoring", "scenario": "gist-new", "buffers": []},
+        {
+            "assembly": "gist-authoring",
+            "scenario": "gist-new",
+            "presentation": {"include_ambient": None, "include_tools": None},
+        },
+        {
+            "assembly": "",
+            "scenario": "gist-new",
+            "presentation": {"include_ambient": None, "include_tools": None},
+            "buffers": [],
+        },
+        {
+            "assembly": "gist-authoring",
+            "scenario": "gist-new",
+            "presentation": {"include_ambient": None},
+            "buffers": [],
+        },
+        {
+            "assembly": "gist-authoring",
+            "scenario": "gist-new",
+            "presentation": {"include_ambient": None, "include_tools": "yes"},
+            "buffers": [],
+        },
+        {
+            "assembly": "gist-authoring",
+            "scenario": "gist-new",
+            "presentation": {"include_ambient": None, "include_tools": None, "extra": True},
+            "buffers": [],
+        },
+        {
+            "assembly": "gist-authoring",
+            "scenario": "gist-new",
+            "presentation": {"include_ambient": None, "include_tools": None},
+            "buffers": [{"path": "", "text": "x"}],
+        },
+        {
+            "assembly": "gist-authoring",
+            "scenario": "gist-new",
+            "presentation": {"include_ambient": None, "include_tools": None},
+            "buffers": [{"path": "AGENTS.md"}],
+        },
+        {
+            "assembly": "gist-authoring",
+            "scenario": "gist-new",
+            "presentation": {"include_ambient": None, "include_tools": None},
+            "buffers": [{"path": "AGENTS.md", "text": "x", "unit": "u"}],
+        },
+        {
+            "assembly": "gist-authoring",
+            "scenario": "gist-new",
+            "presentation": {"include_ambient": None, "include_tools": None},
+            "buffers": [{"path": "AGENTS.md", "text": 1}],
+        },
+        {
+            "assembly": "gist-authoring",
+            "scenario": "gist-new",
+            "presentation": {"include_ambient": None, "include_tools": None},
+            "buffers": [],
+            "shape": "gist.new",
+        },
+    ],
+)
+def test_assembly_render_strict_input_rejects_missing_extra_and_wrong_typed_fields(
+    snapshot: CatalogSnapshot,
+    repo: Path,
+    body: object,
+) -> None:
+    response = _client(snapshot, repo).post(
+        "/api/assembly/render",
+        headers={web.CSRF_HEADER: TOKEN},
+        json=body,
+    )
+    assert response.status_code == 422
+    _assert_security_headers(response)
+
+
+@pytest.mark.parametrize("field", ["path", "text"])
+def test_assembly_render_rejects_unpaired_surrogates_before_any_handler_logic(
+    snapshot: CatalogSnapshot,
+    repo: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    field: str,
+) -> None:
+    from perk_dev.prose_review import assembly as assembly_module
+
+    def unexpected(*_args: object, **_kwargs: object) -> None:
+        raise AssertionError("a surrogate-carrying request reached handler logic")
+
+    monkeypatch.setattr(assembly_module, "read_unit_file", unexpected)
+    monkeypatch.setattr(typescript_adapter_module, "run_checked", unexpected)
+    record = {"path": "AGENTS.md", "text": "clean"}
+    record[field] = record[field] + "\ud800"
+    response = _client(snapshot, repo).post(
+        "/api/assembly/render",
+        headers={web.CSRF_HEADER: TOKEN, "Content-Type": "application/json"},
+        content=json.dumps(_render_body(buffers=[record])),
+    )
+    assert response.status_code == 422
+    _assert_security_headers(response)
+
+
+@pytest.mark.parametrize(
+    ("body", "status_code", "detail"),
+    [
+        (_render_body("missing", "gist-new"), 404, "unknown assembly render subject"),
+        (_render_body("gist-authoring", "missing"), 404, "unknown assembly render subject"),
+        (
+            _render_body("gist-authoring", "plan-github-warm"),
+            404,
+            "unknown assembly render subject",
+        ),
+        (
+            _render_body(
+                buffers=[
+                    {"path": "AGENTS.md", "text": "a"},
+                    {"path": "AGENTS.md", "text": "b"},
+                ]
+            ),
+            422,
+            "invalid workspace buffers",
+        ),
+        (
+            _render_body(buffers=[{"path": "not/in/catalog.md", "text": "x"}]),
+            422,
+            "invalid workspace buffers",
+        ),
+    ],
+)
+def test_assembly_render_request_wide_failures_run_no_reader_or_helper(
+    snapshot: CatalogSnapshot,
+    repo: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    body: dict[str, object],
+    status_code: int,
+    detail: str,
+) -> None:
+    from perk_dev.prose_review import assembly as assembly_module
+
+    def unexpected(*_args: object, **_kwargs: object) -> None:
+        raise AssertionError("a request-wide render failure touched source or helper")
+
+    monkeypatch.setattr(assembly_module, "read_unit_file", unexpected)
+    monkeypatch.setattr(typescript_adapter_module, "run_checked", unexpected)
+    response = _client(snapshot, repo).post(
+        "/api/assembly/render",
+        headers={web.CSRF_HEADER: TOKEN},
+        json=body,
+    )
+    assert response.status_code == status_code
+    assert response.json() == {"detail": detail}
+    _assert_security_headers(response)
+
+
+def test_assembly_render_csrf_origin_and_host_guards_all_arms(
+    snapshot: CatalogSnapshot, repo: Path
+) -> None:
+    _populate_sources(repo, GIST_FILES)
+    client = _client(snapshot, repo)
+    body = _render_body()
+    missing = client.post("/api/assembly/render", json=body)
+    wrong = client.post("/api/assembly/render", headers={web.CSRF_HEADER: "wrong"}, json=body)
+    foreign_origin = client.post(
+        "/api/assembly/render",
+        headers={web.CSRF_HEADER: TOKEN, "Origin": "http://evil.example"},
+        json=body,
+    )
+    foreign_host = client.post(
+        "/api/assembly/render",
+        headers={web.CSRF_HEADER: TOKEN, "Host": "evil.example:5"},
+        json=body,
+    )
+    passed = client.post(
+        "/api/assembly/render",
+        headers={web.CSRF_HEADER: TOKEN, "Origin": f"http://{ALLOWED_HOST}"},
+        json=body,
+    )
+    assert missing.status_code == 403
+    assert wrong.status_code == 403
+    assert foreign_origin.status_code == 403
+    assert foreign_host.status_code == 403
+    assert passed.status_code == 200
+    for response in (missing, wrong, foreign_origin, foreign_host, passed):
+        _assert_security_headers(response)
+
+
+def test_busy_helper_slot_from_an_unlocked_projection_is_a_typed_render_failure(
+    snapshot: CatalogSnapshot,
+    repo: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _populate_sources(repo, PLAN_AUTHORING_FILES)
+    entered = threading.Event()
+    release = threading.Event()
+    calls = 0
+
+    def blocked(
+        argv: Sequence[str],
+        *,
+        cwd: Path | None = None,
+        timeout: int,
+        env_overlay: Mapping[str, str] | None = None,
+    ) -> str:
+        del cwd, timeout, env_overlay
+        nonlocal calls
+        calls += 1
+        request = json.loads(Path(argv[2]).read_text(encoding="utf-8"))
+        if calls == 1:
+            entered.set()
+            assert release.wait(timeout=5)
+        return json.dumps(
+            {
+                "version": 1,
+                "status": "ok",
+                "results": [
+                    {"selector": selector, "status": "resolved", "start": 0, "end": 1}
+                    for selector in request["selectors"]
+                ],
+            }
+        )
+
+    monkeypatch.setattr(typescript_adapter_module, "run_checked", blocked)
+    client = _client(snapshot, repo)
+    projection_responses: list[Response] = []
+    text = (ROOT / "extension/factories/planReview.ts").read_text(encoding="utf-8")
+
+    def project() -> None:
+        projection_responses.append(
+            client.post(
+                "/api/source/project",
+                headers={web.CSRF_HEADER: TOKEN},
+                json={"unit": TYPESCRIPT_UNIT_ID, "fragment": "description", "text": text},
+            )
+        )
+
+    thread = threading.Thread(target=project)
+    thread.start()
+    assert entered.wait(timeout=5)
+    render = client.post(
+        "/api/assembly/render",
+        headers={web.CSRF_HEADER: TOKEN},
+        json=_render_body("plan-authoring", "plan-github-warm"),
+    )
+    assert render.status_code == 200
+    layers = render.json()["layers"]
+    # Both TypeScript layers observed the busy slot without starting a second helper.
+    for index in (3, 4):
+        assert layers[index]["type"] == "failure"
+        assert layers[index]["problems"] == [
+            {
+                "fragment": None,
+                "reason": "adapter-unavailable",
+                "detail": "The source adapter could not run safely.",
+            }
+        ]
+    assert layers[1]["type"] == "owned"
+    assert layers[2]["type"] == "owned"
+    assert calls == 1
+    _assert_security_headers(render)
+
+    release.set()
+    thread.join(timeout=5)
+    assert not thread.is_alive()
+    assert len(projection_responses) == 1
+    assert projection_responses[0].status_code == 200
+
+    recovered = client.post(
+        "/api/assembly/render",
+        headers={web.CSRF_HEADER: TOKEN},
+        json=_render_body("plan-authoring", "plan-github-warm"),
+    )
+    assert recovered.status_code == 200
+    recovered_layers = recovered.json()["layers"]
+    assert [layer["type"] for layer in recovered_layers] == [
+        "boundary",
+        "owned",
+        "owned",
+        "owned",
+        "owned",
+        "boundary",
+    ]
+    assert calls == 3  # one helper batch per TypeScript layer, after release
+
+
+def test_render_starting_first_blocks_a_save_until_its_response_is_composed(
+    snapshot: CatalogSnapshot,
+    repo: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from perk_dev.prose_review import assembly as assembly_module
+
+    _populate_sources(repo, GIST_FILES)
+    original = (repo / GIST_SKILL_PATH).read_bytes()
+    replacement = original.decode("utf-8") + "\nsaved-after-render\n"
+    entered_read = threading.Event()
+    release_read = threading.Event()
+    real_read = assembly_module.read_unit_file
+    gated = True
+
+    def gated_read(repo_root: Path, unit: object) -> object:
+        if gated:
+            entered_read.set()
+            assert release_read.wait(timeout=5)
+        return real_read(repo_root, unit)
+
+    monkeypatch.setattr(assembly_module, "read_unit_file", gated_read)
+    client = _client(snapshot, repo, reload_catalog=lambda _root: snapshot)
+    responses: dict[str, Response] = {}
+
+    def render() -> None:
+        responses["render"] = client.post(
+            "/api/assembly/render",
+            headers={web.CSRF_HEADER: TOKEN},
+            json=_render_body(),
+        )
+
+    def save() -> None:
+        responses["save"] = client.post(
+            "/api/source/save",
+            headers={web.CSRF_HEADER: TOKEN},
+            json={
+                "unit": GIST_SKILL_UNIT_ID,
+                "load_hash": hashlib.sha256(original).hexdigest(),
+                "text": replacement,
+            },
+        )
+
+    render_thread = threading.Thread(target=render)
+    render_thread.start()
+    assert entered_read.wait(timeout=5)
+    save_thread = threading.Thread(target=save)
+    save_thread.start()
+    save_thread.join(timeout=0.4)
+    assert save_thread.is_alive(), "the save must block behind the in-flight render"
+    assert (repo / GIST_SKILL_PATH).read_bytes() == original
+
+    gated = False
+    release_read.set()
+    render_thread.join(timeout=10)
+    save_thread.join(timeout=10)
+    assert not render_thread.is_alive()
+    assert not save_thread.is_alive()
+    # The render composed from one pre-save source interval; the save applied after.
+    rendered_skill = responses["render"].json()["layers"][3]
+    assert rendered_skill["parts"][0]["text"] == original.decode("utf-8")
+    assert responses["save"].json()["status"] == "saved"
+    assert (repo / GIST_SKILL_PATH).read_bytes() == replacement.encode("utf-8")
+
+
+def test_save_starting_first_blocks_a_render_until_the_new_generation_is_installed(
+    snapshot: CatalogSnapshot,
+    repo: Path,
+) -> None:
+    _populate_sources(repo, GIST_FILES)
+    original = (repo / GIST_SKILL_PATH).read_bytes()
+    replacement = original.decode("utf-8") + "\nsaved-before-render\n"
+    entered_reload = threading.Event()
+    release_reload = threading.Event()
+
+    def deferred_reload(_root: Path) -> CatalogSnapshot:
+        entered_reload.set()
+        assert release_reload.wait(timeout=5)
+        return snapshot
+
+    client = _client(snapshot, repo, reload_catalog=deferred_reload)
+    responses: dict[str, Response] = {}
+
+    def save() -> None:
+        responses["save"] = client.post(
+            "/api/source/save",
+            headers={web.CSRF_HEADER: TOKEN},
+            json={
+                "unit": GIST_SKILL_UNIT_ID,
+                "load_hash": hashlib.sha256(original).hexdigest(),
+                "text": replacement,
+            },
+        )
+
+    def render() -> None:
+        responses["render"] = client.post(
+            "/api/assembly/render",
+            headers={web.CSRF_HEADER: TOKEN},
+            json=_render_body(),
+        )
+
+    save_thread = threading.Thread(target=save)
+    save_thread.start()
+    assert entered_reload.wait(timeout=5)
+    render_thread = threading.Thread(target=render)
+    render_thread.start()
+    render_thread.join(timeout=0.4)
+    assert render_thread.is_alive(), "the render must block behind the committing save"
+
+    release_reload.set()
+    save_thread.join(timeout=10)
+    render_thread.join(timeout=10)
+    assert not save_thread.is_alive()
+    assert not render_thread.is_alive()
+    assert responses["save"].json()["status"] == "saved"
+    # The queued render observed only the refreshed generation's new bytes.
+    rendered_skill = responses["render"].json()["layers"][3]
+    assert rendered_skill["parts"][0]["text"] == replacement
+
+
+def test_render_after_a_freezing_save_is_a_fixed_409_without_source_or_helper_work(
+    snapshot: CatalogSnapshot,
+    repo: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from perk_dev.prose_review import assembly as assembly_module
+
+    _populate_sources(repo, GIST_FILES)
+    target = repo / "AGENTS.md"
+    target.write_bytes((ROOT / "AGENTS.md").read_bytes())
+    original = target.read_bytes()
+
+    def fail_reload(_root: Path) -> CatalogSnapshot:
+        raise CatalogQueryError("fixture refresh failure")
+
+    client = _client(snapshot, repo, reload_catalog=fail_reload)
+    saved = client.post(
+        "/api/source/save",
+        headers={web.CSRF_HEADER: TOKEN},
+        json={
+            "unit": "managed:repo-agents",
+            "load_hash": hashlib.sha256(original).hexdigest(),
+            "text": original.decode("utf-8").replace(
+                "*Conventions for working", "*Frozen render conventions for working", 1
+            ),
+        },
+    )
+    assert saved.status_code == 200
+    assert saved.json()["catalog_refreshed"] is False
+
+    def unexpected(*_args: object, **_kwargs: object) -> None:
+        raise AssertionError("a frozen-catalog render touched source or helper")
+
+    monkeypatch.setattr(assembly_module, "read_unit_file", unexpected)
+    monkeypatch.setattr(typescript_adapter_module, "run_checked", unexpected)
+    response = client.post(
+        "/api/assembly/render",
+        headers={web.CSRF_HEADER: TOKEN},
+        json=_render_body(),
+    )
+    assert response.status_code == 409
+    assert response.json() == {"detail": "catalog stale"}
+    _assert_security_headers(response)

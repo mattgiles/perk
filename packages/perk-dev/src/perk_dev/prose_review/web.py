@@ -31,17 +31,27 @@ from pathlib import Path, PurePosixPath
 from threading import Lock
 from typing import Any
 
-from fastapi import FastAPI, HTTPException
-from fastapi.responses import HTMLResponse, Response
-from pydantic import Field
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import HTMLResponse, JSONResponse, Response
+from pydantic import Field, field_validator
 
 from perk.boundary import StrictInputModel
 from perk_dev.prose_map.models import Audience, ProseKind, ProseRole
 from perk_dev.prose_review import comparison as comparison_module
 from perk_dev.prose_review import search as search_module
 from perk_dev.prose_review import source_adapter
+from perk_dev.prose_review.assembly import (
+    AssemblyRenderer,
+    AssemblyRenderError,
+    AssemblyRenderErrorReason,
+    PresentationOverrides,
+    WorkspaceBuffer,
+)
 from perk_dev.prose_review.catalog import CatalogSnapshot, load_catalog
 from perk_dev.prose_review.dto import (
+    AssemblyOptionsOut,
+    AssemblyRenderOut,
     CapabilityTreeOut,
     CatalogSummaryOut,
     ComparisonOptionsOut,
@@ -70,6 +80,17 @@ _SOURCE_READ_DETAILS: dict[SourceReadFailure, str] = {
     "unknown_fragment": "unknown fragment",
     "not_found": "source not found",
     "not_text": "source is not utf-8 text",
+}
+
+# Fixed status/detail per closed request-wide render failure: selection failures share one
+# no-leak 404, workspace-record failures share one 422. These happen before any source work
+# and never masquerade as a layer result.
+_ASSEMBLY_RENDER_ERROR_RESPONSES: dict[AssemblyRenderErrorReason, tuple[int, str]] = {
+    "unknown-assembly": (404, "unknown assembly render subject"),
+    "unknown-scenario": (404, "unknown assembly render subject"),
+    "scenario-assembly-mismatch": (404, "unknown assembly render subject"),
+    "duplicate-workspace-path": (422, "invalid workspace buffers"),
+    "unknown-workspace-path": (422, "invalid workspace buffers"),
 }
 
 # The ASGI vocabulary (identical to the spec's shapes) — local aliases so this module
@@ -120,6 +141,42 @@ class SourceSaveInput(StrictInputModel):
     text: str
 
 
+class AssemblyPresentationInput(StrictInputModel):
+    """Required-key nullable presentation overrides (null = the scenario default)."""
+
+    include_ambient: bool | None
+    include_tools: bool | None
+
+
+class AssemblyWorkspaceBufferInput(StrictInputModel):
+    """One path-keyed browser workspace buffer (structural validation only)."""
+
+    path: str = Field(min_length=1)
+    text: str
+
+    @field_validator("path", "text")
+    @classmethod
+    def _require_unicode_scalars(cls, value: str) -> str:
+        # The one Unicode-scalar boundary rule: an unpaired surrogate delivered as a JSON
+        # escape must 422 here, before any handler logic — canonical reads are already
+        # strict UTF-8 and scenario variables are authored catalog strings, so every
+        # accepted render's response text stays UTF-8-serializable.
+        try:
+            value.encode("utf-8")
+        except UnicodeEncodeError as exc:
+            raise ValueError("workspace text must be UTF-8-encodable Unicode scalars") from exc
+        return value
+
+
+class AssemblyRenderInput(StrictInputModel):
+    """The exact strict assembly render request body."""
+
+    assembly: str = Field(min_length=1)
+    scenario: str = Field(min_length=1)
+    presentation: AssemblyPresentationInput
+    buffers: list[AssemblyWorkspaceBufferInput]
+
+
 @dataclass(frozen=True, slots=True)
 class _CatalogGeneration:
     snapshot: CatalogSnapshot
@@ -136,12 +193,18 @@ class _CatalogGeneration:
 
 
 class _CatalogState:
-    """One swappable read generation plus the serialized write transaction state."""
+    """One swappable read generation plus the serialized source-transaction state.
+
+    ``source_transaction_mutex`` linearizes every save AND every assembly render:
+    a save atomically replaces source before the catalog reload/generation swap, so
+    an unserialized render could pair an old snapshot with replaced bytes. Ordinary
+    read/projection endpoints still capture ``generation`` without the mutex.
+    """
 
     def __init__(self, generation: _CatalogGeneration) -> None:
         self.generation = generation
         self.writes_frozen = False
-        self.save_mutex = Lock()
+        self.source_transaction_mutex = Lock()
 
 
 _CONTENT_TYPES: dict[str, str] = {
@@ -265,9 +328,27 @@ def create_app(
     """
     repo_resolved = repo_root.resolve()
     typescript_adapter = TypeScriptSourceAdapter(selector_root)
+    # The renderer reuses the one app-scoped TypeScript adapter so its helper slot stays
+    # a real cross-operation resource bound (never a render-only helper instance).
+    renderer = AssemblyRenderer(repo_resolved, typescript_adapter)
     state = _CatalogState(_CatalogGeneration.build(snapshot))
     reload_snapshot = load_catalog if reload_catalog is None else reload_catalog
     app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
+
+    @app.exception_handler(RequestValidationError)
+    async def request_validation_handler(
+        _request: Request,
+        exc: RequestValidationError,
+    ) -> JSONResponse:
+        # The framework 422 without the default raw-input echo: request text is
+        # untrusted and may carry unpaired surrogates (delivered as JSON escapes) that
+        # Starlette's UTF-8 JSON encoding cannot serialize — echoing it back would turn
+        # a strict rejection into a 500. loc/msg/type keep the 422 diagnosable.
+        errors = [
+            {key: value for key, value in error.items() if key not in ("input", "ctx")}
+            for error in exc.errors()
+        ]
+        return JSONResponse(status_code=422, content={"detail": errors})
 
     @app.get("/", response_class=HTMLResponse)
     def index() -> HTMLResponse:
@@ -360,9 +441,49 @@ def create_app(
             raise HTTPException(status_code=404, detail=_SOURCE_READ_DETAILS[exc.reason]) from exc
         return SourceViewOut.from_domain(view)
 
+    @app.get("/api/assembly/options", response_model=AssemblyOptionsOut)
+    def assembly_options(assembly: str) -> AssemblyOptionsOut:
+        generation = state.generation
+        view = generation.snapshot.get_assembly(assembly)
+        if view is None:
+            raise HTTPException(status_code=404, detail="unknown assembly")
+        return AssemblyOptionsOut.from_domain(view)
+
+    @app.post("/api/assembly/render", response_model=AssemblyRenderOut)
+    def assembly_render(request: AssemblyRenderInput) -> AssemblyRenderOut:
+        overrides = PresentationOverrides(
+            include_ambient=request.presentation.include_ambient,
+            include_tools=request.presentation.include_tools,
+        )
+        buffers = tuple(
+            WorkspaceBuffer(path=record.path, text=record.text) for record in request.buffers
+        )
+        # The whole render is one source transaction relative to Workbench saves: the
+        # captured generation and every canonical read/gate/prompt render/extraction —
+        # through response conversion — happen under the mutex, so one graph generation
+        # and source-byte interval back every successful response.
+        with state.source_transaction_mutex:
+            if state.writes_frozen:
+                # The old generation must never be combined with source bytes left by a
+                # save whose refresh failed: refuse before any source read.
+                raise HTTPException(status_code=409, detail="catalog stale")
+            generation = state.generation
+            try:
+                rendered = renderer.render(
+                    generation.snapshot,
+                    assembly_id=request.assembly,
+                    scenario_id=request.scenario,
+                    presentation=overrides,
+                    workspace_buffers=buffers,
+                )
+            except AssemblyRenderError as exc:
+                status_code, detail = _ASSEMBLY_RENDER_ERROR_RESPONSES[exc.reason]
+                raise HTTPException(status_code=status_code, detail=detail) from exc
+            return AssemblyRenderOut.from_domain(rendered)
+
     @app.post("/api/source/save", response_model=SourceSaveOut)
     def save_source(request: SourceSaveInput) -> SourceSaveOut:
-        with state.save_mutex:
+        with state.source_transaction_mutex:
             generation = state.generation
             if state.writes_frozen:
                 return source_save_out(
