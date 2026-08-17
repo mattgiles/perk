@@ -267,8 +267,20 @@ export default function (pi: ExtensionAPI) {
         }
       }
     } else if (decision.action === "fork") {
-      // Inherited a run_id from a different session file → isolate the child's scratch.
-      ensureRunScratch(ctx.cwd, decision.childRunId);
+      // Inherited a run_id from a different session file → isolate the child's scratch. A static
+      // redirect or filesystem failure is loud but does not prevent the derived workflow identity
+      // from settling; later eligible turns retry through the agent-scratch resolver.
+      try {
+        ensureRunScratch(ctx.cwd, decision.childRunId);
+      } catch (error) {
+        report(
+          ctx,
+          "run scratch",
+          "warning",
+          `could not create fork run root for ${decision.childRunId}: ${String(error)}`,
+          { alsoLog: true },
+        );
+      }
       const data: WorkflowState = {
         run_id: decision.childRunId,
         pi_session_id: currentSessionId ?? undefined,
@@ -285,7 +297,17 @@ export default function (pi: ExtensionAPI) {
       // the launched session: never re-consume the handoff (its pi_session_id keeps the true
       // claimer), no `stage` (no stage impersonation / stage-binding injection), and no
       // implementation/main pointer capture (resolveRunStage stays null for adopt).
-      ensureRunScratch(ctx.cwd, decision.childRunId);
+      try {
+        ensureRunScratch(ctx.cwd, decision.childRunId);
+      } catch (error) {
+        report(
+          ctx,
+          "run scratch",
+          "warning",
+          `could not create adopted run root for ${decision.childRunId}: ${String(error)}`,
+          { alsoLog: true },
+        );
+      }
       const data: WorkflowState = {
         run_id: decision.childRunId,
         pi_session_id: currentSessionId ?? undefined,

@@ -36,7 +36,7 @@ import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { join, relative } from "node:path";
 import type { ReportTarget } from "../surfaces/report.ts";
-import { atomicWriteFileSync, sessionDataDir } from "./cache.ts";
+import { atomicWriteFileSync, ensureRunScratch, sessionDataDir } from "./cache.ts";
 import {
   appendWorkflowState,
   type BranchSource,
@@ -72,11 +72,13 @@ export function activeSessionDataDir(ctx: SessionDataCtx): string | null {
   return sessionDataDir(ctx.cwd, runId);
 }
 
-/** Ensure (mkdir -p) the current session's data dir; `null` + a warning on failure. */
+/** Ensure the validated run root, then its data dir; `null` + a warning on failure. */
 export function ensureSessionDataDir(ctx: SessionDataCtx): string | null {
-  const dir = activeSessionDataDir(ctx);
-  if (dir === null) return null;
+  const runId = activeSessionRunId(ctx);
+  if (runId === null) return null;
+  const dir = sessionDataDir(ctx.cwd, runId);
   try {
+    ensureRunScratch(ctx.cwd, runId);
     mkdirSync(dir, { recursive: true });
   } catch (error) {
     console.error(`perk: warning: could not create session data dir ${dir}: ${error}`);

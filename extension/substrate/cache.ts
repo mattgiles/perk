@@ -23,15 +23,18 @@
 
 import { randomBytes } from "node:crypto";
 import {
+  chmodSync,
   existsSync,
+  lstatSync,
   mkdirSync,
   readdirSync,
   readFileSync,
+  realpathSync,
   renameSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
-import { join } from "node:path";
+import { join, relative } from "node:path";
 
 /**
  * Atomically replace `path` with `content` (the interior atomic-write seam).
@@ -129,6 +132,11 @@ export function runScratchDir(cwd: string, runId: string): string {
   return join(scratchDir(cwd), "runs", runId);
 }
 
+/** The run-owned directory for disposable, non-authoritative model intermediates. */
+export function agentScratchDir(cwd: string, runId: string): string {
+  return join(runScratchDir(cwd, runId), "agent");
+}
+
 /**
  * The session data dir for a run — a dedicated `data/` subdir so
  * run-scoped session artifacts never overlap perk machine records (dispatch.json,
@@ -139,9 +147,73 @@ export function sessionDataDir(cwd: string, runId: string): string {
   return join(runScratchDir(cwd, runId), "data");
 }
 
+/** Reject run ids that could select anything except one child of the shared runs directory. */
+function assertSafeRunId(runId: string): void {
+  if (
+    runId.length === 0 ||
+    runId === "." ||
+    runId === ".." ||
+    runId.includes("/") ||
+    runId.includes("\\") ||
+    runId.includes("\0")
+  ) {
+    throw new Error(`refusing unsafe run id ${JSON.stringify(runId)}`);
+  }
+}
+
+/**
+ * Ensure one checkout-owned path component is a real directory, never a static redirect.
+ * Check-before-create races against a same-UID process are intentionally out of scope.
+ */
+function ensureUnredirectedDirectory(path: string): void {
+  try {
+    const stat = lstatSync(path);
+    if (stat.isSymbolicLink()) throw new Error(`refusing a symlinked run-scratch path: ${path}`);
+    if (!stat.isDirectory()) throw new Error(`refusing a non-directory run-scratch path: ${path}`);
+    return;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+  }
+  mkdirSync(path);
+}
+
+/**
+ * Establish a run root beneath this checkout without following redirected checkout content.
+ * Symlinks above `cwd` remain legal; every existing component from `.perk` through the run root
+ * must be a real directory. Run-id validation happens before the first filesystem write.
+ */
 export function ensureRunScratch(cwd: string, runId: string): string {
+  assertSafeRunId(runId);
   const dir = runScratchDir(cwd, runId);
-  mkdirSync(dir, { recursive: true });
+  const components = [
+    join(cwd, ".perk"),
+    join(cwd, ".perk", "workflow"),
+    scratchDir(cwd),
+    join(scratchDir(cwd), "runs"),
+    dir,
+  ];
+  for (const component of components) ensureUnredirectedDirectory(component);
+
+  const expected = join(realpathSync(cwd), relative(cwd, dir));
+  if (realpathSync(dir) !== expected) {
+    throw new Error(`refusing a redirected run-scratch dir: ${dir}`);
+  }
+  return dir;
+}
+
+/**
+ * Create/re-apply the private run-owned agent directory. The mode protects against other OS users;
+ * it is not a sandbox from another process running as the same user.
+ */
+export function ensureAgentScratch(cwd: string, runId: string): string {
+  const runDir = ensureRunScratch(cwd, runId);
+  const dir = agentScratchDir(cwd, runId);
+  ensureUnredirectedDirectory(dir);
+  const expected = join(realpathSync(runDir), "agent");
+  if (realpathSync(dir) !== expected) {
+    throw new Error(`refusing a redirected agent scratch dir: ${dir}`);
+  }
+  chmodSync(dir, 0o700);
   return dir;
 }
 
