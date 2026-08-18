@@ -1,12 +1,19 @@
+"""CLI-layer tests for the migrated `perk pr land` thin mapper over ``Delivery.land``.
+
+The merge/ready/refusal-ordering matrix lives at the façade/engine layer
+(`tests/test_delivery_facade.py`); the finalization bookkeeping matrix stays in
+`tests/test_delivery_finalize.py`. This file pins the mapper: the exact reconstructed
+``LandRequest``, the caller-owned marker + Linear emission, the byte-stable envelopes, and the
+``DeliveryError`` → exit-1 mapping.
+"""
+
 import json
 import subprocess
 from pathlib import Path
 
 from click.testing import CliRunner
 
-from perk import github, objective, plan
-from perk.backends import objective_store, resolve
-from perk.backends.github import plans
+from perk import delivery, github, plan
 from perk.backends.issue_backend import IssueBackendError
 from perk.backends.linear import agent as linear_agent
 from perk.cli.cli import cli
@@ -17,7 +24,7 @@ from perk.cli.commands.pr.land_cmd import (
     _render_human,
     _result_to_dict,
 )
-from perk.delivery import LearnConsumeUpdate, ObjectiveLandUpdate
+from perk.delivery._fakes import FakeDeliveryGit, FakeDeliveryGitHub, FakeDeliveryPersistence
 from perk.state import cache
 
 _REF = {
@@ -44,55 +51,54 @@ def _authed(monkeypatch) -> None:
     )
 
 
-def _stub_land(
+def _merged_detail(**over: object) -> delivery.LandResult.Plan:
+    fields: dict[str, object] = {
+        "dry_run": False,
+        "pr": delivery.LandResult.MergedPr(number=42, state="MERGED"),
+        "objective": delivery.LandResult.ObjectiveUpdate(None, (), "no_objective_link"),
+        "learn": delivery.LandResult.LearnUpdate((), "no_consumed_learn"),
+        "plan_issue_closed": False,
+        "learn_state": "pending",
+    }
+    fields.update(over)
+    return delivery.LandResult.Plan(**fields)  # type: ignore[arg-type]
+
+
+def _dry_run_detail() -> delivery.LandResult.Plan:
+    return delivery.LandResult.Plan(
+        dry_run=True,
+        pr=delivery.LandResult.MergedPr(number=0, state="OPEN"),
+        objective=delivery.LandResult.ObjectiveUpdate(None, (), "dry_run"),
+        learn=delivery.LandResult.LearnUpdate((), "dry_run"),
+    )
+
+
+def _bind_land_delivery(
     monkeypatch,
     *,
-    draft: bool,
-    merged: bool = False,
-    title: str = "My Feature",
-    base_ref: str = "",
-    header: dict | None = None,
-) -> dict[str, object]:
-    stamps: list[dict] = []
-    calls: dict[str, object] = {
-        "readied": False,
-        "merged": False,
-        "commit_message": None,
-        "header_stamps": stamps,
-    }
-    state = "MERGED" if merged else "OPEN"
-    monkeypatch.setattr(
-        github,
-        "find_pr_for_branch",
-        lambda **k: github.PullRequest(
-            number=42, url="u/pr/42", is_draft=draft, state=state, existed=True, base_ref=base_ref
-        ),
+    detail: delivery.LandResult.Plan | None = None,
+    error: Exception | None = None,
+) -> list[delivery.LandRequest]:
+    """Bind a scripted Delivery subclass (the migrated-command convention)."""
+    requests: list[delivery.LandRequest] = []
+
+    class _LandDelivery(delivery.Delivery):
+        def land(self, request: delivery.LandRequest) -> delivery.LandResult:
+            requests.append(request)
+            if error is not None:
+                raise error
+            scripted = detail
+            if scripted is None:
+                scripted = _dry_run_detail() if request.dry_run else _merged_detail()
+            return delivery.LandResult(kind="plan", plan=scripted)
+
+    service = _LandDelivery(
+        persistence=FakeDeliveryPersistence(),
+        git=FakeDeliveryGit(),
+        github=FakeDeliveryGitHub(),
     )
-    monkeypatch.setattr(
-        plans,
-        "get_plan",
-        lambda **k: plans.PlanState(number=7, url="u/7", title=title, header=header or {}, pr=None),
-    )
-
-    def _update_header(**k):
-        stamps.append(k["fields"])
-        return plans.PlanHeaderUpdate(fields_updated=tuple(k["fields"]), dry_run=False)
-
-    monkeypatch.setattr(plans, "update_plan_header", _update_header)
-
-    def _ready(**k):
-        calls["readied"] = True
-
-    def _merge(**k):
-        calls["merged"] = True
-        calls["commit_message"] = k.get("commit_message")
-        return github.PullRequest(
-            number=42, url="u/pr/42", is_draft=False, state="MERGED", existed=True
-        )
-
-    monkeypatch.setattr(github, "mark_pr_ready", _ready)
-    monkeypatch.setattr(github, "merge_pr", _merge)
-    return calls
+    monkeypatch.setattr(delivery, "resolve_delivery", lambda _root: service)
+    return requests
 
 
 def _run(args, *, write_ref=True):
@@ -105,6 +111,9 @@ def _run(args, *, write_ref=True):
 
 
 def test_dry_run_is_offline_and_sets_no_marker(unborn_git_repo_factory):
+    # Deliberately UNSTUBBED: the real resolve_delivery + façade dry-run early return must be
+    # fully offline (no gh, no backend/config/credential reads) — anything network-bound would
+    # crash here, not pass.
     runner = CliRunner()
     with runner.isolated_filesystem() as d:
         _git_init(d, unborn_git_repo_factory)
@@ -116,6 +125,15 @@ def test_dry_run_is_offline_and_sets_no_marker(unborn_git_repo_factory):
         assert data["branch"] == "plan-7" and data["pending_learn"] is False
         assert data["issue"] == "7"  # opaque string id (contracts §8.21)
         assert not cache.has_marker(Path(d), cache.PENDING_LEARN)
+
+
+def test_dry_run_request_rides_the_scripted_service(monkeypatch):
+    requests = _bind_land_delivery(monkeypatch)
+    result = _run(["pr", "land", "--dry-run", "--json"])
+    assert result.exit_code == 0
+    assert requests == [
+        delivery.LandRequest(kind="plan", plan_id="7", branch="plan-7", dry_run=True)
+    ]
 
 
 def test_no_plan_ref_exits_1():
@@ -132,267 +150,165 @@ def test_not_a_repo_exits_2():
     assert json.loads(result.output)["error_type"] == "not_a_repo"
 
 
-def test_real_land_draft_marks_ready_merges_and_sets_marker(monkeypatch, unborn_git_repo_factory):
+def test_real_land_builds_the_exact_request_and_sets_marker(monkeypatch, unborn_git_repo_factory):
     _authed(monkeypatch)
+    requests = _bind_land_delivery(monkeypatch)
     runner = CliRunner()
     with runner.isolated_filesystem() as d:
         _git_init(d, unborn_git_repo_factory)
-        cache.write_plan_ref(Path(d), _ref())
-        calls = _stub_land(monkeypatch, draft=True)
+        cache.write_plan_ref(Path(d), _ref(objective_id="5", base="develop", delivery_lineage=None))
         result = runner.invoke(cli, ["pr", "land", "--json"])
         assert result.exit_code == 0
         data = json.loads(result.output)
-        assert data["pr"]["state"] == "MERGED" and data["pending_learn"] is True
-        assert calls["readied"] is True and calls["merged"] is True
-        # The squash commit is plain `title + Closes #N` (no HTML leaks into git log).
-        assert calls["commit_message"] == "My Feature\n\nCloses #7"
+        assert data["pr"] == {"number": 42, "state": "MERGED"}
+        assert data["pending_learn"] is True
         assert cache.has_marker(Path(d), cache.PENDING_LEARN)
+    assert requests == [
+        delivery.LandRequest(
+            kind="plan",
+            plan_id="7",
+            branch="plan-7",
+            objective_id="5",
+            consumed_learn=(),
+            delivery_lineage=None,
+            dry_run=False,
+        )
+    ]
 
 
-def test_real_land_empty_title_falls_back_to_closes(monkeypatch, unborn_git_repo_factory):
+def test_learn_docs_plan_is_exempt_from_the_marker(monkeypatch, unborn_git_repo_factory):
+    # A learn-docs consolidation plan (non-empty consumed_learn) is exempt from the land→learn
+    # cycle: no marker, `pending_learn: false` in the envelope.
     _authed(monkeypatch)
+    requests = _bind_land_delivery(
+        monkeypatch,
+        detail=_merged_detail(
+            learn=delivery.LandResult.LearnUpdate(("45",), None), learn_state="skipped"
+        ),
+    )
+    runner = CliRunner()
+    with runner.isolated_filesystem() as d:
+        _git_init(d, unborn_git_repo_factory)
+        cache.write_plan_ref(Path(d), _ref(consumed_learn=["45"]))
+        result = runner.invoke(cli, ["pr", "land", "--json"])
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        assert data["pending_learn"] is False
+        assert data["learn_state"] == "skipped"
+        assert data["learn"] == {"closed": ["45"], "skipped_reason": None}
+        assert not cache.has_marker(Path(d), cache.PENDING_LEARN)
+    assert requests[0].consumed_learn == ("45",)
+
+
+def test_real_land_carries_the_cached_lineage_verbatim(monkeypatch, unborn_git_repo_factory):
+    # The mapper never interprets the lineage — the façade owns the refusal; the request
+    # carries the cached ref's value verbatim.
+    _authed(monkeypatch)
+    refusal = delivery.DeliveryError(
+        "plan #7 carries stacked delivery lineage — stacked layers land only as one "
+        "atomic train, never individually\n"
+        "Landing one layer merges into its parent branch and tears the train. "
+        "Inspect the train with: perk objective stack status",
+        error_type="stacked_plan",
+        phase="land",
+        origin="domain",
+    )
+    requests = _bind_land_delivery(monkeypatch, error=refusal)
+    runner = CliRunner()
+    with runner.isolated_filesystem() as d:
+        _git_init(d, unborn_git_repo_factory)
+        cache.write_plan_ref(Path(d), _ref(delivery_lineage="dlv-1"))
+        result = runner.invoke(cli, ["pr", "land", "--json"])
+        assert result.exit_code == 1
+        data = json.loads(result.output)
+        assert data["error_type"] == "stacked_plan"
+        # Domain refusals render bare — byte-identical to the pre-migration refusal.
+        assert data["message"] == str(refusal)
+        assert not cache.has_marker(Path(d), cache.PENDING_LEARN)
+    assert requests[0].delivery_lineage == "dlv-1"
+
+
+def test_domain_refusals_render_bare(monkeypatch, unborn_git_repo_factory):
+    _authed(monkeypatch)
+    for error_type, message in (
+        ("plan_not_found", "Plan issue #7 not found"),
+        ("no_pr", "No PR found for branch 'plan-7'\nRun /submit first."),
+    ):
+        _bind_land_delivery(
+            monkeypatch,
+            error=delivery.DeliveryError(
+                message, error_type=error_type, phase="land", origin="domain"
+            ),
+        )
+        runner = CliRunner()
+        with runner.isolated_filesystem() as d:
+            _git_init(d, unborn_git_repo_factory)
+            cache.write_plan_ref(Path(d), _ref())
+            result = runner.invoke(cli, ["pr", "land", "--json"])
+            assert result.exit_code == 1
+            data = json.loads(result.output)
+            assert data["error_type"] == error_type
+            assert data["message"] == message
+            assert data["dry_run"] is False
+
+
+def test_infra_failure_keeps_the_pr_land_failed_prefix(monkeypatch, unborn_git_repo_factory):
+    _authed(monkeypatch)
+    _bind_land_delivery(
+        monkeypatch,
+        error=delivery.DeliveryError(
+            "gh exploded", error_type="github_error", phase="land", origin="github"
+        ),
+    )
     runner = CliRunner()
     with runner.isolated_filesystem() as d:
         _git_init(d, unborn_git_repo_factory)
         cache.write_plan_ref(Path(d), _ref())
-        calls = _stub_land(monkeypatch, draft=False, title="")
         result = runner.invoke(cli, ["pr", "land", "--json"])
-        assert result.exit_code == 0
-        assert calls["commit_message"] == "Closes #7"
+        assert result.exit_code == 1
+        data = json.loads(result.output)
+        assert data["error_type"] == "github_error"
+        assert data["message"] == "PR land failed\ngh exploded"
+        assert not cache.has_marker(Path(d), cache.PENDING_LEARN)
 
 
-def test_real_land_ready_pr_skips_mark_ready(monkeypatch, unborn_git_repo_factory):
+def test_json_envelope_passes_the_facade_detail_through(monkeypatch, unborn_git_repo_factory):
     _authed(monkeypatch)
-    runner = CliRunner()
-    with runner.isolated_filesystem() as d:
-        _git_init(d, unborn_git_repo_factory)
-        cache.write_plan_ref(Path(d), _ref())
-        calls = _stub_land(monkeypatch, draft=False)
-        result = runner.invoke(cli, ["pr", "land", "--json"])
-        assert result.exit_code == 0
-        assert calls["readied"] is False and calls["merged"] is True
-
-
-def test_real_land_already_merged_is_idempotent(monkeypatch, unborn_git_repo_factory):
-    _authed(monkeypatch)
-    runner = CliRunner()
-    with runner.isolated_filesystem() as d:
-        _git_init(d, unborn_git_repo_factory)
-        cache.write_plan_ref(Path(d), _ref())
-        calls = _stub_land(monkeypatch, draft=False, merged=True)
-        result = runner.invoke(cli, ["pr", "land", "--json"])
-        assert result.exit_code == 0
-        # already MERGED -> no mark-ready, no merge call, but the marker is still set
-        assert calls["readied"] is False and calls["merged"] is False
-        assert json.loads(result.output)["pending_learn"] is True
-        assert cache.has_marker(Path(d), cache.PENDING_LEARN)
-
-
-def test_real_land_objective_linked_marks_node_and_reports(monkeypatch, unborn_git_repo_factory):
-    """The CLI→seam objective handoff: an objective-linked ref reaches the finalize seam, the
-    backlinked node is marked done, and the JSON payload + landed summary reflect it."""
-    _authed(monkeypatch)
-    marked: list[str] = []
-
-    class _Store:
-        backend_id = "github"
-
-        def get_objective(self, *, objective_id):
-            return objective_store.ObjectiveState(
-                id=objective_id,
-                url="u",
-                title="O",
-                header={},
-                nodes=(
-                    objective.ObjectiveNode(
-                        id="1.1", description="n", status=objective.NodeStatus.PENDING, pr="#7"
-                    ),
-                    objective.ObjectiveNode(
-                        id="1.2", description="n", status=objective.NodeStatus.PENDING, pr="#9"
-                    ),
-                ),
-            )
-
-        def update_objective_node(self, **k):
-            assert k["status"] is objective.NodeStatus.DONE
-            marked.append(k["node_id"])
-            return objective_store.ObjectiveNodeUpdate(
-                objective_id=str(k["objective_id"]),
-                node_id=k["node_id"],
-                comment_updated=False,
-                dry_run=False,
-            )
-
-        def post_status_update(self, *, objective_id, body, dry_run=False):
-            return True
-
-    monkeypatch.setattr(resolve, "resolve_objective_store", lambda _root: _Store())
-    emitted: list[dict] = []
-    monkeypatch.setattr(
-        land_cmd.linear_agent, "emit_landed", lambda _root, **kw: emitted.append(kw)
+    _bind_land_delivery(
+        monkeypatch,
+        detail=_merged_detail(
+            objective=delivery.LandResult.ObjectiveUpdate("5", ("1.1",), None, closed=False),
+            plan_issue_closed=True,
+        ),
     )
     runner = CliRunner()
     with runner.isolated_filesystem() as d:
         _git_init(d, unborn_git_repo_factory)
         cache.write_plan_ref(Path(d), _ref(objective_id="5"))
-        _stub_land(monkeypatch, draft=False)
         result = runner.invoke(cli, ["pr", "land", "--json"])
         assert result.exit_code == 0
         data = json.loads(result.output)
-        # The seam received the ref's objective link and marked the backlinked node…
-        assert marked == ["1.1"]
-        # …the result payload carries the returned objective update…
         assert data["objective"] == {
             "id": "5",
             "nodes_marked": ["1.1"],
             "skipped_reason": None,
             "closed": False,
         }
-        # …and the landed summary wires it into the agent-session emission.
-        assert emitted[0]["summary"] == "Objective #5: marked node(s) 1.1 done."
-
-
-# --- the stacked-lineage refusal (fail-closed, before any mutation) ---------------------
-
-
-def test_land_refuses_stacked_local_ref(monkeypatch, unborn_git_repo_factory):
-    """A cached ref carrying delivery_lineage refuses before mark-ready/merge — stacked layers
-    land only as one atomic train, never individually."""
-    _authed(monkeypatch)
-    runner = CliRunner()
-    with runner.isolated_filesystem() as d:
-        _git_init(d, unborn_git_repo_factory)
-        cache.write_plan_ref(Path(d), _ref(delivery_lineage="dlv-1"))
-        calls = _stub_land(monkeypatch, draft=True)
-        result = runner.invoke(cli, ["pr", "land", "--json"])
-        assert result.exit_code == 1
-        assert json.loads(result.output)["error_type"] == "stacked_plan"
-        assert calls["readied"] is False and calls["merged"] is False
-        assert not cache.has_marker(Path(d), cache.PENDING_LEARN)
-
-
-def test_land_refuses_stacked_header_only(monkeypatch, unborn_git_repo_factory):
-    """Header wins: a stale cached ref without the lineage still refuses once the plan header
-    shows it — refused after the pre-merge read, before any mutation."""
-    _authed(monkeypatch)
-    runner = CliRunner()
-    with runner.isolated_filesystem() as d:
-        _git_init(d, unborn_git_repo_factory)
-        cache.write_plan_ref(Path(d), _ref())
-        calls = _stub_land(monkeypatch, draft=True, header={"delivery_lineage": "dlv-x"})
-        result = runner.invoke(cli, ["pr", "land", "--json"])
-        assert result.exit_code == 1
-        assert json.loads(result.output)["error_type"] == "stacked_plan"
-        assert calls["readied"] is False and calls["merged"] is False
-        assert not cache.has_marker(Path(d), cache.PENDING_LEARN)
-
-
-def test_land_header_lineage_whitespace_not_stacked(monkeypatch, unborn_git_repo_factory):
-    """The isinstance/strip guard: a whitespace-only header lineage is not stacked — lands."""
-    _authed(monkeypatch)
-    runner = CliRunner()
-    with runner.isolated_filesystem() as d:
-        _git_init(d, unborn_git_repo_factory)
-        cache.write_plan_ref(Path(d), _ref())
-        calls = _stub_land(monkeypatch, draft=False, header={"delivery_lineage": "  "})
-        result = runner.invoke(cli, ["pr", "land", "--json"])
-        assert result.exit_code == 0
-        assert calls["merged"] is True
-
-
-def test_land_plan_not_found_pre_merge(monkeypatch, unborn_git_repo_factory):
-    """The hoisted pre-merge plan read is load-bearing: a vanished plan issue fails the land
-    before any mutation (submit/ready's exact posture)."""
-    _authed(monkeypatch)
-    runner = CliRunner()
-    with runner.isolated_filesystem() as d:
-        _git_init(d, unborn_git_repo_factory)
-        cache.write_plan_ref(Path(d), _ref())
-        calls = _stub_land(monkeypatch, draft=True)
-        monkeypatch.setattr(plans, "get_plan", lambda **k: None)
-        result = runner.invoke(cli, ["pr", "land", "--json"])
-        assert result.exit_code == 1
-        assert json.loads(result.output)["error_type"] == "plan_not_found"
-        assert calls["readied"] is False and calls["merged"] is False
-
-
-def test_dry_run_refuses_stacked_local_ref(unborn_git_repo_factory):
-    """--dry-run refuses on the cached ref too (its would-merge preview would be a lie) while
-    staying fully offline — no github stubs: anything network-bound would crash, not refuse."""
-    runner = CliRunner()
-    with runner.isolated_filesystem() as d:
-        _git_init(d, unborn_git_repo_factory)
-        cache.write_plan_ref(Path(d), _ref(delivery_lineage="dlv-1"))
-        result = runner.invoke(cli, ["pr", "land", "--dry-run", "--json"])
-        assert result.exit_code == 1
-        assert json.loads(result.output)["error_type"] == "stacked_plan"
-
-
-# --- explicit plan-issue close on a non-default-base github land -----------------------
-
-
-def test_real_land_non_default_base_closes_plan_issue(monkeypatch, unborn_git_repo_factory):
-    """A github PR merged into a non-default base never autocloses, so perk closes explicitly."""
-    _authed(monkeypatch)
-    monkeypatch.setattr(github, "default_branch", lambda repo_root: "main")
-    closed: list[int] = []
-    monkeypatch.setattr(plans, "close_issue", lambda **k: closed.append(k["number"]) or True)
-    runner = CliRunner()
-    with runner.isolated_filesystem() as d:
-        _git_init(d, unborn_git_repo_factory)
-        cache.write_plan_ref(Path(d), _ref())
-        _stub_land(monkeypatch, draft=False, base_ref="release")
-        result = runner.invoke(cli, ["pr", "land", "--json"])
-        assert result.exit_code == 0
-        assert json.loads(result.output)["plan_issue_closed"] is True
-        assert closed == [7]
-
-
-def test_real_land_default_base_keeps_autoclose(monkeypatch, unborn_git_repo_factory):
-    """A github PR merged into the default base relies on GitHub autoclose — no explicit close."""
-    _authed(monkeypatch)
-    monkeypatch.setattr(github, "default_branch", lambda repo_root: "main")
-
-    def _boom(**k):
-        raise AssertionError("close_issue must not be called on a default-base land")
-
-    monkeypatch.setattr(plans, "close_issue", _boom)
-    runner = CliRunner()
-    with runner.isolated_filesystem() as d:
-        _git_init(d, unborn_git_repo_factory)
-        cache.write_plan_ref(Path(d), _ref())
-        _stub_land(monkeypatch, draft=False, base_ref="main")
-        result = runner.invoke(cli, ["pr", "land", "--json"])
-        assert result.exit_code == 0
-        assert json.loads(result.output)["plan_issue_closed"] is False
-
-
-def test_real_land_unknown_base_is_fail_open(monkeypatch, unborn_git_repo_factory):
-    """An undeterminable base short-circuits WITHOUT calling default_branch (rely on autoclose)."""
-    _authed(monkeypatch)
-
-    def _no_default(repo_root):
-        raise AssertionError("default_branch must not be called when the base is unknown")
-
-    monkeypatch.setattr(github, "default_branch", _no_default)
-    runner = CliRunner()
-    with runner.isolated_filesystem() as d:
-        _git_init(d, unborn_git_repo_factory)
-        cache.write_plan_ref(Path(d), _ref())
-        _stub_land(monkeypatch, draft=False, base_ref="")
-        result = runner.invoke(cli, ["pr", "land", "--json"])
-        assert result.exit_code == 0
-        assert json.loads(result.output)["plan_issue_closed"] is False
+        assert data["plan_issue_closed"] is True
+        assert data["learn_state"] == "pending"
 
 
 # --- the caller-owned Linear agent "landed" activity emission ---------------------------
 
 
 def test_real_land_calls_linear_agent_landed(monkeypatch):
-    """The land hook fires after the merge + learn consume, with the PR number and the
-    objective-node summary (the emitter itself gates on the stamped provider + token)."""
+    """The land hook fires after the façade call, with the PR number and the objective-node
+    summary (the emitter itself gates on the stamped provider + token)."""
     _authed(monkeypatch)
-    _stub_land(monkeypatch, draft=True)
+    _bind_land_delivery(
+        monkeypatch,
+        detail=_merged_detail(objective=delivery.LandResult.ObjectiveUpdate("5", ("1.1",), None)),
+    )
     emitted: list[dict] = []
     monkeypatch.setattr(
         land_cmd.linear_agent, "emit_landed", lambda _root, **kw: emitted.append(kw)
@@ -401,10 +317,11 @@ def test_real_land_calls_linear_agent_landed(monkeypatch):
     assert result.exit_code == 0
     assert len(emitted) == 1
     assert emitted[0]["pr_number"] == 42
-    assert emitted[0]["summary"] == ""  # no objective link on _REF
+    assert emitted[0]["summary"] == "Objective #5: marked node(s) 1.1 done."
 
 
 def test_dry_run_land_never_calls_linear_agent(monkeypatch):
+    _bind_land_delivery(monkeypatch)
     emitted: list[dict] = []
     monkeypatch.setattr(
         land_cmd.linear_agent, "emit_landed", lambda _root, **kw: emitted.append(kw)
@@ -418,7 +335,7 @@ def test_linear_agent_failure_leaves_land_payload_byte_identical(monkeypatch):
     """Fail-soft: a broken emitter substrate (gate forced open) never changes the --json payload
     or exit code."""
     _authed(monkeypatch)
-    _stub_land(monkeypatch, draft=True)
+    _bind_land_delivery(monkeypatch)
     baseline = _run(["pr", "land", "--json"])
     assert baseline.exit_code == 0
 
@@ -440,26 +357,26 @@ def test_linear_agent_failure_leaves_land_payload_byte_identical(monkeypatch):
 
 
 def test_landed_summary_lines():
-    assert _landed_summary(ObjectiveLandUpdate(None, (), "no_objective_link")) == ""
+    assert _landed_summary(delivery.LandResult.ObjectiveUpdate(None, (), "no_objective_link")) == ""
     assert (
-        _landed_summary(ObjectiveLandUpdate("9", ("2.1",), None))
+        _landed_summary(delivery.LandResult.ObjectiveUpdate("9", ("2.1",), None))
         == "Objective #9: marked node(s) 2.1 done."
     )
     assert (
-        _landed_summary(ObjectiveLandUpdate("9", ("2.1", "2.2"), None, closed=True))
+        _landed_summary(delivery.LandResult.ObjectiveUpdate("9", ("2.1", "2.2"), None, closed=True))
         == "Objective #9: marked node(s) 2.1, 2.2 done. Objective complete — closed."
     )
 
 
 def test_result_to_dict_carries_objective():
     result = PrLandResult(
-        pr=github.PullRequest(number=42, url="u", is_draft=False, state="MERGED", existed=True),
+        pr=delivery.LandResult.MergedPr(number=42, state="MERGED"),
         branch="plan-7",
         issue="7",
         pending_learn=True,
         dry_run=False,
-        objective=ObjectiveLandUpdate("5", ("1.1",), None),
-        learn=LearnConsumeUpdate(("45", "50"), None),
+        objective=delivery.LandResult.ObjectiveUpdate("5", ("1.1",), None),
+        learn=delivery.LandResult.LearnUpdate(("45", "50"), None),
     )
     data = _result_to_dict(result)
     # Opaque string ids at the machine boundary (contracts §8.21).
@@ -474,21 +391,24 @@ def test_result_to_dict_carries_objective():
     assert data["learn"] == {"closed": ["45", "50"], "skipped_reason": None}
 
 
-def _land_result(learn: LearnConsumeUpdate) -> PrLandResult:
+def _land_result(
+    learn: delivery.LandResult.LearnUpdate, *, learn_state: str | None = "pending"
+) -> PrLandResult:
     return PrLandResult(
-        pr=github.PullRequest(number=42, url="u", is_draft=False, state="MERGED", existed=True),
+        pr=delivery.LandResult.MergedPr(number=42, state="MERGED"),
         branch="plan-7",
         issue="7",
         pending_learn=True,
         dry_run=False,
-        objective=ObjectiveLandUpdate(None, (), "no_objective_link"),
+        objective=delivery.LandResult.ObjectiveUpdate(None, (), "no_objective_link"),
         learn=learn,
+        learn_state=learn_state,
     )
 
 
 def test_render_human_surfaces_non_benign_learn_skip(capsys):
     # A non-benign skip (a partial `failed: …`) is surfaced, not silent.
-    _render_human(_land_result(LearnConsumeUpdate(("45",), "failed: #50")))
+    _render_human(_land_result(delivery.LandResult.LearnUpdate(("45",), "failed: #50")))
     out = capsys.readouterr().err
     assert "consolidated learn issue(s) #45" in out
     assert "learn consume incomplete: failed: #50" in out
@@ -496,9 +416,37 @@ def test_render_human_surfaces_non_benign_learn_skip(capsys):
 
 def test_render_human_quiet_on_benign_learn_skip(capsys):
     # `no_consumed_learn` is the ordinary non-factory case — stay quiet.
-    _render_human(_land_result(LearnConsumeUpdate((), "no_consumed_learn")))
+    _render_human(_land_result(delivery.LandResult.LearnUpdate((), "no_consumed_learn")))
     out = capsys.readouterr().err
     assert "learn consume incomplete" not in out
+
+
+def test_render_human_warns_on_a_failed_learn_state_stamp(capsys):
+    _render_human(
+        _land_result(delivery.LandResult.LearnUpdate((), "no_consumed_learn"), learn_state=None)
+    )
+    out = capsys.readouterr().err
+    assert "learn-state stamp failed" in out
+
+
+def test_render_human_reports_close_and_objective_lines(capsys):
+    result = PrLandResult(
+        pr=delivery.LandResult.MergedPr(number=42, state="MERGED"),
+        branch="plan-7",
+        issue="7",
+        pending_learn=True,
+        dry_run=False,
+        objective=delivery.LandResult.ObjectiveUpdate("5", ("1.1", "1.2"), None, closed=True),
+        learn=delivery.LandResult.LearnUpdate((), "no_consumed_learn"),
+        plan_issue_closed=True,
+        learn_state="pending",
+    )
+    _render_human(result)
+    out = capsys.readouterr().err
+    assert "plan issue closed explicitly" in out
+    assert "objective #5: marked node(s) 1.1, 1.2 done" in out
+    assert "objective #5 complete — closed" in out
+    assert "learn_state=pending" in out
 
 
 def test_dry_run_learn_is_inert(unborn_git_repo_factory):
@@ -526,102 +474,3 @@ def test_dry_run_objective_is_inert(unborn_git_repo_factory):
             "skipped_reason": "dry_run",
             "closed": False,
         }
-
-
-# --- the canonical learn_state stamp on land (§8.36) -----------------------------------------
-
-
-def test_real_land_stamps_learn_state_pending(monkeypatch, unborn_git_repo_factory):
-    _authed(monkeypatch)
-    runner = CliRunner()
-    with runner.isolated_filesystem() as d:
-        _git_init(d, unborn_git_repo_factory)
-        cache.write_plan_ref(Path(d), _ref())
-        calls = _stub_land(monkeypatch, draft=False)
-        result = runner.invoke(cli, ["pr", "land", "--json"])
-        assert result.exit_code == 0
-        assert json.loads(result.output)["learn_state"] == "pending"
-        assert calls["header_stamps"] == [{"learn_state": "pending"}]
-
-
-def test_real_land_stamps_skipped_for_consumed_learn_plan(monkeypatch, unborn_git_repo_factory):
-    # A learn-docs consolidation plan deliberately skips its learn pass — stamped `skipped`
-    # at land so it never reads forever-pending. It is exempt from the land→learn cycle:
-    # no pending-learn marker, and the envelope reports `pending_learn: false`.
-    _authed(monkeypatch)
-    monkeypatch.setattr(plans, "close_and_label_consolidated", lambda **k: True)
-    runner = CliRunner()
-    with runner.isolated_filesystem() as d:
-        _git_init(d, unborn_git_repo_factory)
-        cache.write_plan_ref(Path(d), _ref(consumed_learn=["45"]))
-        calls = _stub_land(monkeypatch, draft=False)
-        result = runner.invoke(cli, ["pr", "land", "--json"])
-        assert result.exit_code == 0
-        data = json.loads(result.output)
-        assert data["learn_state"] == "skipped"
-        assert data["pending_learn"] is False
-        assert not cache.has_marker(Path(d), cache.PENDING_LEARN)
-        assert calls["header_stamps"] == [{"learn_state": "skipped"}]
-
-
-def test_real_land_never_downgrades_captured(monkeypatch, unborn_git_repo_factory):
-    # The never-downgrade guard: an idempotent re-land after /learn keeps `captured` (no write)
-    # and the envelope reports the effective state.
-    _authed(monkeypatch)
-    runner = CliRunner()
-    with runner.isolated_filesystem() as d:
-        _git_init(d, unborn_git_repo_factory)
-        cache.write_plan_ref(Path(d), _ref())
-        calls = _stub_land(
-            monkeypatch, draft=False, merged=True, header={"learn_state": "captured"}
-        )
-        result = runner.invoke(cli, ["pr", "land", "--json"])
-        assert result.exit_code == 0
-        assert json.loads(result.output)["learn_state"] == "captured"
-        assert calls["header_stamps"] == []  # no write on the guard arm
-
-
-def test_real_land_stamp_failure_is_fail_open(monkeypatch, unborn_git_repo_factory):
-    _authed(monkeypatch)
-    runner = CliRunner()
-    with runner.isolated_filesystem() as d:
-        _git_init(d, unborn_git_repo_factory)
-        cache.write_plan_ref(Path(d), _ref())
-        _stub_land(monkeypatch, draft=False)
-
-        def _boom(**k):
-            raise github.GitHubError("gh exploded")
-
-        monkeypatch.setattr(plans, "update_plan_header", _boom)
-        result = runner.invoke(cli, ["pr", "land", "--json"])
-        assert result.exit_code == 0  # the stamp never blocks landing
-        assert json.loads(result.stdout)["learn_state"] is None
-        assert "learn-state stamp skipped (non-fatal)" in result.stderr
-
-
-def test_dry_run_stamps_no_learn_state(monkeypatch):
-    def _boom(**k):
-        raise AssertionError("dry run must not stamp the header")
-
-    monkeypatch.setattr(plans, "update_plan_header", _boom)
-    result = _run(["pr", "land", "--dry-run", "--json"])
-    assert result.exit_code == 0
-    assert json.loads(result.output)["learn_state"] is None
-
-
-def test_real_land_no_pr_exits_1(monkeypatch, unborn_git_repo_factory):
-    _authed(monkeypatch)
-    runner = CliRunner()
-    with runner.isolated_filesystem() as d:
-        _git_init(d, unborn_git_repo_factory)
-        cache.write_plan_ref(Path(d), _ref())
-        # The hoisted plan read now precedes PR discovery — stub it so the miss is the PR's.
-        monkeypatch.setattr(
-            plans,
-            "get_plan",
-            lambda **k: plans.PlanState(number=7, url="u/7", title="T", header={}, pr=None),
-        )
-        monkeypatch.setattr(github, "find_pr_for_branch", lambda **k: None)
-        result = runner.invoke(cli, ["pr", "land", "--json"])
-        assert result.exit_code == 1
-        assert json.loads(result.output)["error_type"] == "no_pr"

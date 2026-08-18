@@ -350,6 +350,11 @@ class RepoDeliveryGitHub(DeliveryGitHub):
     def mark_pr_ready(self, number: int) -> None:
         prs.mark_pr_ready(number=number, repo_root=self._repo_root)
 
+    def merge_pr(self, number: int, *, commit_message: str) -> prs.PullRequest:
+        """The direct idempotent squash merge; a raw ``GitHubError`` propagates like
+        :meth:`mark_pr_ready` (translated once at the façade boundary)."""
+        return prs.merge_pr(number=number, repo_root=self._repo_root, commit_message=commit_message)
+
     def create_stack(self, pull_requests: tuple[int, ...]) -> stacks.StackMutationOutcome:
         return stacks.create_stack(pull_requests=pull_requests, repo_root=self._repo_root)
 
@@ -470,6 +475,12 @@ class RepoDeliveryPersistence(DeliveryPersistence):
     def get_plan(self, *, issue_id: str) -> PlanState | None:
         _store, issues, _persistence = self._resolve()
         return issues.get_plan(issue_id=issue_id)
+
+    def backend_id(self) -> str:
+        """The aligned issue-backend identity over the one lazy shared resolution (a failed
+        resolution stays uncached like every other persistence operation)."""
+        _store, issues, _persistence = self._resolve()
+        return issues.backend_id
 
     def get_plan_body(self, *, issue_id: str) -> str | None:
         _store, issues, _persistence = self._resolve()

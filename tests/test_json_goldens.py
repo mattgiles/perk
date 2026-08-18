@@ -234,18 +234,18 @@ def _pr_ready_result():
 
 def _pr_land_result():
     from perk.cli.commands.pr.land_cmd import PrLandResult
-    from perk.delivery import LearnConsumeUpdate, ObjectiveLandUpdate
+    from perk.delivery import LandResult
 
     return PrLandResult(
-        pr=_pull_request(),
+        pr=LandResult.MergedPr(number=42, state="OPEN"),
         branch="plan-42",
         issue="42",
         pending_learn=True,
         dry_run=False,
-        objective=ObjectiveLandUpdate(
+        objective=LandResult.ObjectiveUpdate(
             objective="63", nodes_marked=("1.1", "1.2"), skipped_reason=None, closed=True
         ),
-        learn=LearnConsumeUpdate(closed=("45",), skipped_reason=None),
+        learn=LandResult.LearnUpdate(closed=("45",), skipped_reason=None),
         plan_issue_closed=True,
         learn_state="pending",
     )

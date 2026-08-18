@@ -769,24 +769,44 @@ merge_pr{ number, commit_message? }                 -> PullRequest (state MERGED
 - **`Closes #<issue>`** rides in the PR body so the squash-merge closes the plan issue;
   `commit_message` repeats it belt-and-suspenders. Post-merge state is **derived from PR**, never
   stored (Q8).
-- **Stacked lineage refuses before any mutation.** `perk pr land` (and the delegating `/land`)
-  applies the §8.47 routing discriminator — stacked ⟺ the cache plan-ref carries
-  `delivery_lineage` OR the fetched plan header does (**header wins**: a stale cached ref must
-  not silently land a stacked layer) — and refuses fail-closed (`stacked_plan`) before
-  mark-ready/merge: stacked layers land only as one atomic train, never individually.
-  `--dry-run` refuses on the cached ref only (dry-run stays fully offline by contract; the real
-  run enforces the header half).
-- **The pre-merge plan read is load-bearing.** Land fetches the plan (`get_plan`) right after
-  the dry-run early-return, before any mutation: a missing plan fails as `plan_not_found`
-  (submit/ready's exact posture), the header feeds the stacked discriminator, and the squash
-  title rides the same read.
+- **`perk pr land` is a thin mapper over `Delivery.land`.** The command reconstructs the cached
+  plan-ref into one `LandRequest(kind="plan", plan_id, branch, objective_id, consumed_learn,
+  delivery_lineage, dry_run)` and makes exactly one
+  `resolve_delivery(repo_root).land(request)` call; the façade (engine:
+  `perk.delivery.land_plan`) owns refusal ordering, the mutation protocol, and the
+  finalization dispatch, and returns the strict kind↔detail `LandResult` (nested
+  `MergedPr`/`ObjectiveUpdate`/`LearnUpdate`/`Plan` records — the `--json` envelope maps them
+  field-for-field, byte-unchanged). Façade failures are the bounded `DeliveryError` vocabulary
+  with `phase="land"`: domain refusals (`stacked_plan`, `plan_not_found`, `no_pr`) carry
+  `origin="domain"` and render **bare**; infra failures translate to
+  `github_error`/`git_error` with `origin="github"`/`"git"` and keep the CLI's
+  `PR land failed\n<detail>` prefix.
+- **Stacked lineage refuses before any mutation.** `Delivery.land` applies the §8.47 routing
+  discriminator — stacked ⟺ the request carries the cached ref's `delivery_lineage` OR the
+  fetched plan header does (**header wins**: a stale cached ref must not silently land a stacked
+  layer) — and refuses fail-closed (`stacked_plan`) before mark-ready/merge: stacked layers land
+  only as one atomic train, never individually. The cached half refuses **before** the dry-run
+  early return (`--dry-run` stays fully offline by contract — zero authority access before the
+  early return, pinned for GitHub and Linear configuration; the real run enforces the header
+  half).
+- **The pre-merge plan read is load-bearing.** Land reads the plan
+  (`DeliveryPersistence.get_plan`) right after the dry-run early-return, before any mutation: a
+  missing plan fails as `plan_not_found` (submit/ready's exact posture), the header feeds the
+  stacked discriminator, and the squash title/url ride the same read.
 - **Deepened squash commit message.** Land passes `merge_pr(commit_message=)` = plain
-  `"<plan title>\n\nCloses #<issue>"` (the title from the hoisted pre-merge plan read, fallback
-  `Closes #<issue>` on an empty title). Plain text only — the second of the **two PR targets**
-  (the GitHub HTML body is the other); HTML never leaks into `git log`.
-- **Post-merge finalization is a reusable delivery seam.** The four durable bookkeeping effects
-  (learn-state stamp §8.36 → explicit plan-issue close → objective reconciliation → learn-issue
-  consume) live in `perk.delivery.finalize.finalize_landed_plan` — **reconstructed inputs only**
+  `"<plan title>\n\n<footer>"` composed façade-side from the **authoritative** `PlanState`
+  title/url + the persistence backend identity (`DeliveryPersistence.backend_id`): GitHub keeps
+  the `Closes #<issue>` footer, non-github backends the `Plan: <id> — <url>` line (fallback to
+  the bare footer on an empty title; one shared implementation with the stacked singleton —
+  `landing.squash_commit_message`). The PR's real `base_ref` is captured **before** the merge
+  (the synthetic merged `PullRequest` carries none; an idempotent re-land still sees it). Plain
+  text only — the second of the **two PR targets** (the GitHub HTML body is the other); HTML
+  never leaks into `git log`.
+- **Post-merge finalization is a package-internal delivery seam.** The four durable bookkeeping
+  effects (learn-state stamp §8.36 → explicit plan-issue close → objective reconciliation →
+  learn-issue consume) live in `perk.delivery.finalize.finalize_landed_plan` — **no public
+  export**; `Delivery.land` binds it through its private land runtime, and stacked
+  landing/recovery keep their module-path bindings. **Reconstructed inputs only**
   (a narrow `LandedPlan` + the captured `pr_base` merge evidence), never the worktree cache, and
   **convergent-final-state idempotency** over the four effects (never-downgrade stamp,
   terminal-node skip, backend-idempotent re-closes; sub-steps may re-issue idempotent backend
@@ -795,7 +815,9 @@ merge_pr{ number, commit_message? }                 -> PullRequest (state MERGED
   never calls `close_objective` — the aggregate objective close is that caller's obligation after
   every layer verifies; incremental land keeps the default. Activity reporting (the Linear agent
   "landed" emission) is worktree-session-scoped and **caller-owned** — it stays in `land_cmd.py`,
-  outside the seam; the pending-learn marker (worktree-cache state) likewise stays in the caller.
+  outside the façade; the pending-learn marker (worktree-cache state) likewise stays in the
+  caller (written after the façade call — the durable §8.36 stamp is the authority; the marker
+  is the local retry signal).
 
 ### Learn ops
 
@@ -1515,8 +1537,8 @@ resolution fallback (and the `worktree wipe` guard).
 
 The objective tier's full storage contract lives in **§8.24** (the `ObjectiveStore` seam); the
 mechanics live in `src/perk/objective/` + `src/perk/backends/github/objectives.py`, the land-path
-handlers in `src/perk/cli/commands/pr/land_cmd.py` + `src/perk/delivery/finalize.py`. The
-gateway-level facts:
+handlers in `src/perk/cli/commands/pr/land_cmd.py` (via `Delivery.land`) + the package-internal
+`src/perk/delivery/finalize.py`. The gateway-level facts:
 
 - **Storage blocks (perk-namespaced, schema 1).** An objective is an issue + first comment:
   `objective-header` (issue body — compact, queryable: `{ run_id, created, objective_comment_id,

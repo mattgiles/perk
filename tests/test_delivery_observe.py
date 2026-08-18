@@ -236,6 +236,56 @@ class TestRepoDeliveryPersistence:
 
         assert authority.native_cancellation_metadata_writer() is None
 
+    def test_backend_id_is_the_issue_backend_identity_over_one_lazy_resolution(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # ONE lazy aligned resolution shared with get_plan; the identity is the ISSUE
+        # backend's (the aligned pair agrees by construction).
+        resolved = {"store": 0, "issues": 0}
+
+        class _Store:
+            backend_id = "linear"
+
+        class _Issues:
+            backend_id = "linear"
+
+            def get_plan(self, *, issue_id: str):
+                return None
+
+        def store_resolver(_root: Path):
+            resolved["store"] += 1
+            return _Store()
+
+        def issues_resolver(_root: Path):
+            resolved["issues"] += 1
+            return _Issues()
+
+        monkeypatch.setattr(observe, "resolve_objective_store", store_resolver)
+        monkeypatch.setattr(observe, "resolve_issue_backend", issues_resolver)
+        authority = observe.RepoDeliveryPersistence(tmp_path)
+
+        assert authority.backend_id() == "linear"
+        assert authority.get_plan(issue_id="101") is None
+        assert authority.backend_id() == "linear"
+        assert resolved == {"store": 1, "issues": 1}
+
+    def test_backend_id_resolution_failure_is_uncached(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        resolved = {"store": 0}
+
+        def store_resolver(_root: Path):
+            resolved["store"] += 1
+            raise ObjectiveStoreError("resolver failed")
+
+        monkeypatch.setattr(observe, "resolve_objective_store", store_resolver)
+        authority = observe.RepoDeliveryPersistence(tmp_path)
+
+        for _ in range(2):
+            with pytest.raises(ObjectiveStoreError, match="resolver failed"):
+                authority.backend_id()
+        assert resolved == {"store": 2}
+
     def test_cancellation_writer_capability_failure_is_uncached(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
@@ -862,6 +912,12 @@ class TestRepoDeliveryGitHub:
             "mark_pr_ready",
             lambda **kwargs: calls.append(("ready", kwargs)),
         )
+        merged = prs.PullRequest(42, "", False, "MERGED", True)
+        monkeypatch.setattr(
+            prs,
+            "merge_pr",
+            lambda **kwargs: calls.append(("merge", kwargs)) or merged,
+        )
         monkeypatch.setattr(
             stacks,
             "create_stack",
@@ -883,6 +939,7 @@ class TestRepoDeliveryGitHub:
         authority.update_pr_base(42, base="develop")
         authority.reopen_pr(42)
         authority.mark_pr_ready(42)
+        assert authority.merge_pr(42, commit_message="Title\n\nCloses #7") is merged
         assert authority.create_stack((41, 42)) is outcome
         assert authority.append_stack(9, pull_requests=(42,)) is outcome
         assert calls == [
@@ -902,6 +959,14 @@ class TestRepoDeliveryGitHub:
             ("base", {"number": 42, "base": "develop", "repo_root": tmp_path}),
             ("reopen", {"number": 42, "repo_root": tmp_path}),
             ("ready", {"number": 42, "repo_root": tmp_path}),
+            (
+                "merge",
+                {
+                    "number": 42,
+                    "repo_root": tmp_path,
+                    "commit_message": "Title\n\nCloses #7",
+                },
+            ),
             ("stack-create", {"pull_requests": (41, 42), "repo_root": tmp_path}),
             (
                 "stack-append",
@@ -959,6 +1024,21 @@ class TestRepoDeliveryGitHub:
         monkeypatch.setattr(prs, "get_pr", boom)
         with pytest.raises(GitHubError) as excinfo:
             observe.RepoDeliveryGitHub(tmp_path).get_pr(42)
+        assert excinfo.value is failure
+
+    def test_merge_pr_errors_remain_raw(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # Like mark_pr_ready: the raw GitHubError propagates and is translated once at the
+        # façade boundary.
+        failure = GitHubError("merge blocked")
+
+        def boom(**kwargs: object) -> None:
+            raise failure
+
+        monkeypatch.setattr(prs, "merge_pr", boom)
+        with pytest.raises(GitHubError) as excinfo:
+            observe.RepoDeliveryGitHub(tmp_path).merge_pr(42, commit_message="m")
         assert excinfo.value is failure
 
     def test_pr_stack_failure_degrades_to_unavailable(self, tmp_path, monkeypatch) -> None:

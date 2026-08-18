@@ -209,8 +209,9 @@ def squash_commit_message(*, issue: str, url: str, backend_id: str, title: str) 
     ``Plan: <id> — <url>`` reference line — NO commit magic words (Linear's commit-linking
     needs a non-assumable extra webhook; perk closes the plan issue explicitly at land
     instead). Plain text only, so no HTML leaks into ``git log``; an empty title falls back
-    to the bare footer. Shared by the incremental ``perk pr land`` and the stacked
-    singleton's direct squash (one implementation, no drift).
+    to the bare footer. Shared by the incremental land engine
+    (:mod:`perk.delivery.land_plan`) and the stacked singleton's direct squash (one
+    implementation, no drift) — module-path consumers only; no root export.
     """
     footer = f"Closes #{issue}" if backend_id == "github" else f"Plan: {issue} — {url}"
     cleaned = title.strip()

@@ -142,6 +142,9 @@ class _SharedPersistence(DeliveryPersistence):
     def get_plan_body(self, *, issue_id: str) -> str | None:
         return None
 
+    def backend_id(self) -> str:
+        return "github"
+
     def update_plan_header(self, *, issue_id: str, fields: dict[str, object]) -> PlanHeaderUpdate:
         return self._require_world().update_plan_header(issue_id=issue_id, fields=fields)
 

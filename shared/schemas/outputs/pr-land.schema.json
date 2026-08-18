@@ -2,7 +2,7 @@
   "$defs": {
     "LandPrOut": {
       "additionalProperties": false,
-      "description": "The serialization boundary of the picked :class:`github.PullRequest` subset\n(field order load-bearing).",
+      "description": "The serialization boundary of :class:`delivery.LandResult.MergedPr`\n(field order load-bearing).",
       "properties": {
         "number": {
           "title": "Number",
@@ -22,7 +22,7 @@
     },
     "LearnConsumeOut": {
       "additionalProperties": false,
-      "description": "The serialization boundary of :class:`LearnConsumeUpdate` (field order load-bearing).",
+      "description": "The serialization boundary of :class:`delivery.LandResult.LearnUpdate`\n(field order load-bearing).",
       "properties": {
         "closed": {
           "items": {
@@ -52,7 +52,7 @@
     },
     "ObjectiveLandOut": {
       "additionalProperties": false,
-      "description": "The serialization boundary of :class:`ObjectiveLandUpdate` (field order load-bearing).\n\n``id`` maps from the domain ``objective`` field (the linked objective id).",
+      "description": "The serialization boundary of :class:`delivery.LandResult.ObjectiveUpdate`\n(field order load-bearing).\n\n``id`` maps from the domain ``objective`` field (the linked objective id).",
       "properties": {
         "id": {
           "anyOf": [

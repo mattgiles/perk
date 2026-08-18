@@ -1,12 +1,13 @@
 """The compact public delivery façade and retained operation exports.
 
 The canonical surface is the repository-scoped :class:`Delivery` status, Prepare, Transfer,
-publish, sync, and Recover families (operation conclusion plus the cancellation-metadata
-repair) over three nominal aggregate authorities. Pure train
+publish, sync, Recover (operation conclusion plus the cancellation-metadata repair), and Land
+(the incremental plan variant) families over three nominal aggregate authorities. Pure train
 projection, layer context/core, capability rows, production adapters,
-transfer/publication/synchronization/recovery internals, and compatibility readers are internal
-modules. Journal, finalization, and landing exports remain public while their operation families
-migrate.
+transfer/publication/synchronization/recovery/land internals, and compatibility readers are
+internal modules — post-merge finalization is package-internal (bound through the land
+runtime). Journal and landing/readiness exports remain public only while the atomic
+objective-landing operation completes its migration.
 """
 
 from perk.delivery.facade import (
@@ -15,6 +16,8 @@ from perk.delivery.facade import (
     DeliveryGit,
     DeliveryGitHub,
     DeliveryPersistence,
+    LandRequest,
+    LandResult,
     PrepareRequest,
     PrepareResult,
     PublishRequest,
@@ -27,13 +30,6 @@ from perk.delivery.facade import (
     SyncResult,
     TransferRequest,
     TransferResult,
-)
-from perk.delivery.finalize import (
-    LandedPlan,
-    LandFinalization,
-    LearnConsumeUpdate,
-    ObjectiveLandUpdate,
-    finalize_landed_plan,
 )
 from perk.delivery.journal import (
     JOURNAL_EVENT_MAX_CHARS,
@@ -72,7 +68,6 @@ from perk.delivery.landing import (
     LandError,
     LandOutcome,
     land_train,
-    squash_commit_message,
 )
 from perk.delivery.observe import GatewayLandObservations, resolve_delivery
 from perk.delivery.persistence import (
@@ -103,7 +98,6 @@ __all__ = [
     "JournalRecordTooLarge",
     "LandDisposition",
     "LandError",
-    "LandFinalization",
     "LandLayerReadiness",
     "LandObservationError",
     "LandObservations",
@@ -111,11 +105,10 @@ __all__ = [
     "LandPlan",
     "LandPlanLayer",
     "LandReadiness",
+    "LandRequest",
+    "LandResult",
     "LandedLayer",
-    "LandedPlan",
-    "LearnConsumeUpdate",
     "MergeRulesView",
-    "ObjectiveLandUpdate",
     "OperationKind",
     "OperationState",
     "OutcomeRecord",
@@ -139,7 +132,6 @@ __all__ = [
     "assess_land_readiness",
     "canonical_payload",
     "ensure_event_size",
-    "finalize_landed_plan",
     "fold_events",
     "land_train",
     "mint_operation_id",
@@ -147,5 +139,4 @@ __all__ = [
     "render_event",
     "resolve_delivery",
     "resolve_train_persistence",
-    "squash_commit_message",
 ]

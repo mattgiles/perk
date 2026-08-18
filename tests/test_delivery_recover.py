@@ -143,6 +143,9 @@ class _FakePersistence(DeliveryPersistence):
     def get_plan_body(self, *, issue_id: str) -> str | None:
         return None
 
+    def backend_id(self) -> str:
+        return self._world.backend_id
+
     def update_plan_header(self, *, issue_id: str, fields: dict[str, object]) -> PlanHeaderUpdate:
         return self._world.update_plan_header(issue_id=issue_id, fields=fields)
 

@@ -20,6 +20,8 @@ from perk.delivery.facade import (
     DeliveryGit,
     DeliveryGitHub,
     DeliveryPersistence,
+    LandRequest,
+    LandResult,
     PrepareRequest,
     PrepareResult,
     PublishRequest,
@@ -137,6 +139,8 @@ _DELIVERY_ERROR_TYPES = {
     "objective_not_open",
     "invalid_roadmap",
     "supersede_unsupported",
+    "stacked_plan",
+    "plan_not_found",
 }
 _STATUS_ERROR_TYPES = {
     "objective_not_found",
@@ -223,6 +227,12 @@ _RETIRED_EXPORTS = {
     "SweepFailure",
     "AbandonPreview",
     "AcceptPrefixPreview",
+    "LandedPlan",
+    "LandFinalization",
+    "LearnConsumeUpdate",
+    "ObjectiveLandUpdate",
+    "finalize_landed_plan",
+    "squash_commit_message",
 }
 _NEW_EXPORTS = {
     "Delivery",
@@ -242,6 +252,8 @@ _NEW_EXPORTS = {
     "SyncResult",
     "TransferRequest",
     "TransferResult",
+    "LandRequest",
+    "LandResult",
     "resolve_delivery",
 }
 _RETAINED_EXPORTS = {
@@ -268,11 +280,6 @@ _RETAINED_EXPORTS = {
     "parse_journal_comment",
     "render_event",
     "resolve_train_persistence",
-    "LandedPlan",
-    "LandFinalization",
-    "LearnConsumeUpdate",
-    "ObjectiveLandUpdate",
-    "finalize_landed_plan",
     "CheckView",
     "GatewayLandObservations",
     "LandDisposition",
@@ -289,7 +296,6 @@ _RETAINED_EXPORTS = {
     "PrLandView",
     "assess_land_readiness",
     "land_train",
-    "squash_commit_message",
 }
 
 
@@ -1489,10 +1495,12 @@ def test_resolved_publish_dry_runs_ignore_committed_backend_and_credentials(
     monkeypatch.setattr(config_mod, "load_committed_issues_backend", unexpected("backend config"))
     monkeypatch.setattr(observe.git_mod, "fetch_refspecs", unexpected("git fetch"))
     monkeypatch.setattr(observe.prs, "find_pr_for_branch", unexpected("GitHub PR read"))
+    monkeypatch.setattr(observe.prs, "merge_pr", unexpected("GitHub merge"))
 
     service = observe.resolve_delivery(tmp_path)
     service.publish(PublishRequest(kind="layer", plan_id="#101", dry_run=True))
     service.publish(PublishRequest(kind="ready", plan_id="101", dry_run=True))
+    service.land(LandRequest(kind="plan", plan_id="101", branch="plan-101", dry_run=True))
 
     assert calls == []
 
@@ -4258,8 +4266,17 @@ def test_public_export_cut_is_exact() -> None:
     assert exported >= _NEW_EXPORTS
     assert _RETIRED_EXPORTS.isdisjoint(exported)
     assert exported == _NEW_EXPORTS | _RETAINED_EXPORTS
-    assert len(delivery_pkg.__all__) == 63
+    assert len(delivery_pkg.__all__) == 59
     assert not hasattr(delivery_pkg, "DeliveryTrain")
+    for finalize_name in (
+        "finalize_landed_plan",
+        "LandedPlan",
+        "LandFinalization",
+        "ObjectiveLandUpdate",
+        "LearnConsumeUpdate",
+        "squash_commit_message",
+    ):
+        assert not hasattr(delivery_pkg, finalize_name)
     for retired in {
         "DeliveryOperationFacts",
         "LayerBodyFacts",
@@ -4283,3 +4300,443 @@ def test_public_export_cut_is_exact() -> None:
 
     assert not hasattr(recover_mod, "RecoverError")
     assert not hasattr(recover_mod, "recover_operations")
+
+
+# --- the Land family (the incremental plan variant) -------------------------------------------
+
+
+_STACKED_LAND_MESSAGE = (
+    "plan #7 carries stacked delivery lineage — stacked layers land only as one "
+    "atomic train, never individually\n"
+    "Landing one layer merges into its parent branch and tears the train. "
+    "Inspect the train with: perk objective stack status"
+)
+
+
+def _land_request(**over: Any) -> LandRequest:
+    fields: dict[str, Any] = {"kind": "plan", "plan_id": "7", "branch": "plan-7"}
+    fields.update(over)
+    return LandRequest(**fields)
+
+
+def _land_plan_state(
+    *, title: str = "My Feature", header: dict[str, object] | None = None
+) -> PlanState:
+    return PlanState(
+        id="7",
+        url="fake://plan/7",
+        title=title,
+        header=dict(header or {}),
+        pr=None,
+        state="OPEN",
+    )
+
+
+def _branch_pr(*, is_draft: bool = False, state: str = "OPEN", base_ref: str = "main"):
+    return prs.PullRequest(
+        number=42,
+        url="u/pr/42",
+        is_draft=is_draft,
+        state=state,
+        existed=True,
+        base_ref=base_ref,
+    )
+
+
+def _recording_land_runtime(monkeypatch: pytest.MonkeyPatch, fin: Any | None = None):
+    """Bind a recording finalize into the module-level land runtime the façade reads."""
+    from perk.delivery import land_plan as land_plan_mod
+    from perk.delivery.finalize import LandFinalization, LearnConsumeUpdate, ObjectiveLandUpdate
+
+    calls: list[dict[str, Any]] = []
+    result = fin or LandFinalization(
+        learn_state="pending",
+        plan_issue_closed=False,
+        objective=ObjectiveLandUpdate(None, (), "no_objective_link"),
+        learn=LearnConsumeUpdate((), "no_consumed_learn"),
+    )
+
+    def finalize(repo_root, *, landed, pr_base, close_objective_on_complete=True):
+        calls.append(
+            {
+                "repo_root": repo_root,
+                "landed": landed,
+                "pr_base": pr_base,
+                "close_objective_on_complete": close_objective_on_complete,
+            }
+        )
+        return result
+
+    monkeypatch.setattr(
+        land_plan_mod, "_DEFAULT_LAND_RUNTIME", land_plan_mod._LandRuntime(finalize=finalize)
+    )
+    return calls
+
+
+def test_land_request_guards_kind_and_nonblank_identity() -> None:
+    request = _land_request()
+    assert (request.objective_id, request.consumed_learn) == (None, ())
+    assert (request.delivery_lineage, request.dry_run) == (None, False)
+    # plan_id is carried verbatim — no #-normalization (refusal bytes use it as-is).
+    assert _land_request(plan_id="#7").plan_id == "#7"
+    with pytest.raises(ValueError, match="unknown land kind"):
+        LandRequest(kind=cast(Any, "objective"), plan_id="7", branch="plan-7")
+    with pytest.raises(ValueError, match="plan_id must be nonblank"):
+        _land_request(plan_id="  ")
+    with pytest.raises(ValueError, match="branch must be nonblank"):
+        _land_request(branch="")
+    with pytest.raises(FrozenInstanceError):
+        request.dry_run = True  # ty: ignore[invalid-assignment]
+
+
+def test_land_result_is_a_strict_kind_detail_wrapper() -> None:
+    detail = LandResult.Plan(
+        dry_run=False,
+        pr=LandResult.MergedPr(number=42, state="MERGED"),
+        objective=LandResult.ObjectiveUpdate("10", ("1.1",), None, closed=True),
+        learn=LandResult.LearnUpdate(("45",), None),
+        plan_issue_closed=True,
+        learn_state="pending",
+    )
+    result = LandResult(kind="plan", plan=detail)
+    assert result.plan is detail
+    with pytest.raises(ValueError, match="unknown land result kind"):
+        LandResult(kind=cast(Any, "objective"), plan=detail)
+    with pytest.raises(ValueError, match="detail must match kind exactly"):
+        LandResult(kind="plan")
+    for frozen in cast(
+        "tuple[Any, ...]", (detail, detail.pr, detail.objective, detail.learn, result)
+    ):
+        with pytest.raises(FrozenInstanceError):
+            type(frozen).__setattr__(frozen, "kind", "x")
+    # The nested update records default like the internal finalize records they mirror.
+    assert LandResult.ObjectiveUpdate(None, (), "dry_run").closed is False
+    assert (
+        LandResult.Plan(
+            dry_run=True,
+            pr=LandResult.MergedPr(0, "OPEN"),
+            objective=LandResult.ObjectiveUpdate(None, (), "dry_run"),
+            learn=LandResult.LearnUpdate((), "dry_run"),
+        ).learn_state
+        is None
+    )
+
+
+def test_delivery_land_builds_one_bound_context_and_dispatches(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from perk.delivery import land_plan as land_plan_mod
+
+    persistence = FakeDeliveryPersistence()
+    git = FakeDeliveryGit(repo_root=Path("/bound-repo"))
+    github = FakeDeliveryGitHub()
+    service = Delivery(persistence=persistence, git=git, github=github)
+    request = _land_request()
+    expected = LandResult(
+        kind="plan",
+        plan=LandResult.Plan(
+            dry_run=False,
+            pr=LandResult.MergedPr(42, "MERGED"),
+            objective=LandResult.ObjectiveUpdate(None, (), "no_objective_link"),
+            learn=LandResult.LearnUpdate((), "no_consumed_learn"),
+        ),
+    )
+    captured: list[tuple[Any, LandRequest, object]] = []
+
+    def dispatch(context, actual_request, *, runtime):
+        captured.append((context, actual_request, runtime))
+        return expected
+
+    monkeypatch.setattr(land_plan_mod, "_dispatch", dispatch)
+    assert service.land(request) is expected
+    ((context, actual_request, runtime),) = captured
+    assert context.persistence is persistence and context.git is git and context.github is github
+    assert actual_request is request and runtime is land_plan_mod._DEFAULT_LAND_RUNTIME
+
+
+@pytest.mark.parametrize("dry_run", [False, True])
+def test_land_refuses_cached_stacked_lineage_before_everything(dry_run: bool) -> None:
+    # The cached half refuses with ZERO authority access — even on --dry-run (a would-merge
+    # preview for a stacked plan would be a lie), and before the dry-run early return.
+    persistence = FakeDeliveryPersistence()
+    git = FakeDeliveryGit()
+    github = FakeDeliveryGitHub()
+    with pytest.raises(DeliveryError) as excinfo:
+        _delivery(persistence, git, github).land(
+            _land_request(delivery_lineage="01LINEAGE", dry_run=dry_run)
+        )
+    assert excinfo.value.error_type == "stacked_plan"
+    assert (excinfo.value.phase, excinfo.value.origin) == ("land", "domain")
+    assert str(excinfo.value) == _STACKED_LAND_MESSAGE
+    assert persistence.calls == [] and git.calls == [] and github.calls == []
+
+
+def test_land_dry_run_is_offline_and_exact() -> None:
+    persistence = FakeDeliveryPersistence()
+    git = FakeDeliveryGit()
+    github = FakeDeliveryGitHub()
+
+    result = _delivery(persistence, git, github).land(_land_request(dry_run=True))
+
+    assert result == LandResult(
+        kind="plan",
+        plan=LandResult.Plan(
+            dry_run=True,
+            pr=LandResult.MergedPr(number=0, state="OPEN"),
+            objective=LandResult.ObjectiveUpdate(None, (), "dry_run"),
+            learn=LandResult.LearnUpdate((), "dry_run"),
+        ),
+    )
+    assert persistence.calls == [] and git.calls == [] and github.calls == []
+
+
+def test_land_plan_not_found_refuses_before_any_mutation() -> None:
+    persistence = FakeDeliveryPersistence()
+    github = FakeDeliveryGitHub()
+    with pytest.raises(DeliveryError) as excinfo:
+        _delivery(persistence, github=github).land(_land_request())
+    assert excinfo.value.error_type == "plan_not_found"
+    assert (excinfo.value.phase, excinfo.value.origin) == ("land", "domain")
+    assert str(excinfo.value) == "Plan issue #7 not found"
+    assert persistence.calls == [("get_plan", "7")]
+    assert github.calls == []
+
+
+def test_land_header_half_stacked_refusal_wins_over_stale_ref() -> None:
+    # A stale cached ref WITHOUT the lineage still refuses once the authoritative plan header
+    # shows it — refused after the pre-merge read, before any mutation.
+    persistence = FakeDeliveryPersistence(
+        plans={"7": _land_plan_state(header={"delivery_lineage": "01LINEAGE"})}
+    )
+    github = FakeDeliveryGitHub()
+    with pytest.raises(DeliveryError) as excinfo:
+        _delivery(persistence, github=github).land(_land_request())
+    assert excinfo.value.error_type == "stacked_plan"
+    assert str(excinfo.value) == _STACKED_LAND_MESSAGE
+    assert github.calls == []
+
+
+def test_land_whitespace_header_lineage_is_not_stacked(monkeypatch: pytest.MonkeyPatch) -> None:
+    # The isinstance/strip guard: a whitespace-only header lineage is not stacked — lands.
+    _recording_land_runtime(monkeypatch)
+    persistence = FakeDeliveryPersistence(
+        plans={"7": _land_plan_state(header={"delivery_lineage": "  "})}
+    )
+    github = FakeDeliveryGitHub(branch_prs={"plan-7": _branch_pr()})
+
+    result = _delivery(persistence, github=github).land(_land_request())
+
+    detail = result.plan
+    assert detail is not None and detail.pr == LandResult.MergedPr(42, "MERGED")
+    assert ("merge_pr", 42, "My Feature\n\nCloses #7") in github.calls
+
+
+def test_land_no_pr_refusal_names_the_branch() -> None:
+    persistence = FakeDeliveryPersistence(plans={"7": _land_plan_state()})
+    github = FakeDeliveryGitHub()
+    with pytest.raises(DeliveryError) as excinfo:
+        _delivery(persistence, github=github).land(_land_request())
+    assert excinfo.value.error_type == "no_pr"
+    assert (excinfo.value.phase, excinfo.value.origin) == ("land", "domain")
+    assert str(excinfo.value) == "No PR found for branch 'plan-7'\nRun /submit first."
+    assert github.calls == [("pr_for_branch", "plan-7")]
+
+
+@pytest.mark.parametrize(
+    ("source", "error_type"),
+    (
+        (IssueBackendError("issues failed"), "github_error"),
+        (GitHubError("github failed"), "github_error"),
+        (ObjectiveStoreError("objectives failed"), "github_error"),
+        (TrainPersistenceError("persistence failed"), "github_error"),
+        (TrainReconstructionError("gateway failed", error_type="github_error"), "github_error"),
+        (git_mod.GitError("git failed"), "git_error"),
+    ),
+)
+def test_land_maps_expected_boundary_failures(source: Exception, error_type: str) -> None:
+    persistence = FakeDeliveryPersistence(errors={("get_plan", "7"): source})
+    with pytest.raises(DeliveryError) as excinfo:
+        _delivery(persistence).land(_land_request())
+    assert excinfo.value.error_type == error_type
+    assert excinfo.value.phase == "land"
+    assert excinfo.value.origin == ("git" if error_type == "git_error" else "github")
+    assert str(excinfo.value) == str(source)
+
+
+def test_land_production_pr_lookup_wrapper_translates_at_the_boundary() -> None:
+    # The production pr_for_branch adapter wraps GitHubError into TrainReconstructionError
+    # (same message text); the façade translates it to the github_error land failure.
+    persistence = FakeDeliveryPersistence(plans={"7": _land_plan_state()})
+    github = FakeDeliveryGitHub(
+        errors={
+            ("pr_for_branch", "plan-7"): TrainReconstructionError(
+                "gh pr list failed", error_type="github_error"
+            )
+        }
+    )
+    with pytest.raises(DeliveryError) as excinfo:
+        _delivery(persistence, github=github).land(_land_request())
+    assert (excinfo.value.error_type, excinfo.value.phase, excinfo.value.origin) == (
+        "github_error",
+        "land",
+        "github",
+    )
+    assert str(excinfo.value) == "gh pr list failed"
+
+
+def test_land_unexpected_programming_errors_propagate() -> None:
+    boom = RuntimeError("bug")
+    persistence = FakeDeliveryPersistence(errors={("get_plan", "7"): boom})
+    with pytest.raises(RuntimeError) as excinfo:
+        _delivery(persistence).land(_land_request())
+    assert excinfo.value is boom
+
+
+def test_land_draft_pr_marks_ready_then_merges_then_finalizes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls = _recording_land_runtime(monkeypatch)
+    persistence = FakeDeliveryPersistence(plans={"7": _land_plan_state()})
+    git = FakeDeliveryGit(repo_root=Path("/repo"))
+    github = FakeDeliveryGitHub(branch_prs={"plan-7": _branch_pr(is_draft=True)})
+
+    result = _delivery(persistence, git, github).land(
+        _land_request(objective_id="10", consumed_learn=("45",))
+    )
+
+    assert github.calls == [
+        ("pr_for_branch", "plan-7"),
+        ("mark_pr_ready", 42),
+        ("merge_pr", 42, "My Feature\n\nCloses #7"),
+    ]
+    assert persistence.calls == [("get_plan", "7"), ("backend_id",)]
+    from perk.delivery.finalize import LandedPlan
+
+    assert calls == [
+        {
+            "repo_root": Path("/repo"),
+            "landed": LandedPlan(plan_id="7", objective_id="10", consumed_learn=("45",)),
+            "pr_base": "main",
+            "close_objective_on_complete": True,
+        }
+    ]
+    detail = result.plan
+    assert detail is not None
+    assert detail.pr == LandResult.MergedPr(number=42, state="MERGED")
+    assert detail.dry_run is False
+
+
+def test_land_ready_pr_skips_mark_ready(monkeypatch: pytest.MonkeyPatch) -> None:
+    _recording_land_runtime(monkeypatch)
+    persistence = FakeDeliveryPersistence(plans={"7": _land_plan_state()})
+    github = FakeDeliveryGitHub(branch_prs={"plan-7": _branch_pr(is_draft=False)})
+
+    _delivery(persistence, github=github).land(_land_request())
+
+    assert github.calls == [
+        ("pr_for_branch", "plan-7"),
+        ("merge_pr", 42, "My Feature\n\nCloses #7"),
+    ]
+
+
+def test_land_already_merged_is_idempotent_and_still_finalizes_with_real_base(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls = _recording_land_runtime(monkeypatch)
+    persistence = FakeDeliveryPersistence(plans={"7": _land_plan_state()})
+    github = FakeDeliveryGitHub(
+        branch_prs={"plan-7": _branch_pr(state="MERGED", base_ref="release")}
+    )
+
+    result = _delivery(persistence, github=github).land(_land_request())
+
+    # already MERGED → no mark-ready, no merge call, no backend-identity read…
+    assert github.calls == [("pr_for_branch", "plan-7")]
+    assert persistence.calls == [("get_plan", "7")]
+    # …but finalization still runs with the REAL pre-merge base_ref.
+    assert calls[0]["pr_base"] == "release"
+    detail = result.plan
+    assert detail is not None and detail.pr == LandResult.MergedPr(42, "MERGED")
+
+
+def test_land_base_ref_is_captured_before_the_merge(monkeypatch: pytest.MonkeyPatch) -> None:
+    # The synthetic merged PullRequest carries no base_ref; finalize must see the pre-merge one.
+    calls = _recording_land_runtime(monkeypatch)
+    persistence = FakeDeliveryPersistence(plans={"7": _land_plan_state()})
+    github = FakeDeliveryGitHub(branch_prs={"plan-7": _branch_pr(base_ref="release")})
+
+    _delivery(persistence, github=github).land(_land_request())
+
+    assert calls[0]["pr_base"] == "release"
+
+
+def test_land_squash_message_composes_from_the_authoritative_read(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Non-github backends get the `Plan: <id> — <url>` footer from the authoritative
+    # PlanState.url (not a cached ref); GitHub keeps `Closes #N`.
+    _recording_land_runtime(monkeypatch)
+    persistence = FakeDeliveryPersistence(
+        plans={"7": _land_plan_state(title="  Ship it  ")}, backend_id="linear"
+    )
+    github = FakeDeliveryGitHub(branch_prs={"plan-7": _branch_pr()})
+
+    _delivery(persistence, github=github).land(_land_request())
+
+    assert ("merge_pr", 42, "Ship it\n\nPlan: 7 — fake://plan/7") in github.calls
+    assert ("backend_id",) in persistence.calls
+
+
+def test_land_empty_title_falls_back_to_the_bare_footer(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _recording_land_runtime(monkeypatch)
+    persistence = FakeDeliveryPersistence(plans={"7": _land_plan_state(title="")})
+    github = FakeDeliveryGitHub(branch_prs={"plan-7": _branch_pr()})
+
+    _delivery(persistence, github=github).land(_land_request())
+
+    assert ("merge_pr", 42, "Closes #7") in github.calls
+
+
+def test_land_result_maps_the_finalization_field_for_field(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from perk.delivery.finalize import LandFinalization, LearnConsumeUpdate, ObjectiveLandUpdate
+
+    fin = LandFinalization(
+        learn_state="skipped",
+        plan_issue_closed=True,
+        objective=ObjectiveLandUpdate("10", ("1.1", "1.2"), None, closed=True),
+        learn=LearnConsumeUpdate(("45", "50"), "failed: #51"),
+    )
+    _recording_land_runtime(monkeypatch, fin)
+    persistence = FakeDeliveryPersistence(plans={"7": _land_plan_state()})
+    github = FakeDeliveryGitHub(branch_prs={"plan-7": _branch_pr()})
+
+    result = _delivery(persistence, github=github).land(_land_request())
+
+    assert result == LandResult(
+        kind="plan",
+        plan=LandResult.Plan(
+            dry_run=False,
+            pr=LandResult.MergedPr(number=42, state="MERGED"),
+            objective=LandResult.ObjectiveUpdate("10", ("1.1", "1.2"), None, closed=True),
+            learn=LandResult.LearnUpdate(("45", "50"), "failed: #51"),
+            plan_issue_closed=True,
+            learn_state="skipped",
+        ),
+    )
+
+
+def test_land_fake_authority_defaults_mirror_production() -> None:
+    persistence = FakeDeliveryPersistence()
+    assert persistence.backend_id() == "github"
+    assert persistence.calls == [("backend_id",)]
+    github = FakeDeliveryGitHub()
+    merged = github.merge_pr(42, commit_message="msg")
+    assert merged == prs.PullRequest(
+        number=42, url="", is_draft=False, state="MERGED", existed=True
+    )
+    assert merged.base_ref == ""
+    assert github.calls == [("merge_pr", 42, "msg")]
