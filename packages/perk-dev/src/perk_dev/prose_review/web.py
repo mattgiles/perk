@@ -13,13 +13,16 @@ Handlers capture the app's current immutable catalog generation and respond with
 ``*Out`` models only — a handler may look up domain values and hand them to a
 ``from_domain`` constructor, but
 no domain object is ever serialized into a response body. Repository-content reads
-fall into exactly two families: built-asset reads (``index.html`` included) go through
-the contained-read helper that proves both the dist root and the candidate sit under
-the repository root of trust (a symlinked ``dist/`` must not launder outside targets
-in); canonical-source reads go through the SourceAdapter
+fall into exactly three families: built-asset reads (``index.html`` included) go
+through the contained-read helper that proves both the dist root and the candidate sit
+under the repository root of trust (a symlinked ``dist/`` must not launder outside
+targets in); canonical-source reads go through the SourceAdapter
 (:mod:`perk_dev.prose_review.source_adapter`) — root-bound, catalog-membership-checked,
-and text-only. The TypeScript adapter's random temporary snapshot is controlled IPC
-over that already-authorized text, not another repository-content read family.
+and text-only; and the observation-only :mod:`perk_dev.prose_review.git` adapter runs
+fixed non-mutating ``git status``/``git diff`` commands over the repo root, exposing no
+path the catalog does not already map. The TypeScript adapter's random temporary
+snapshot is controlled IPC over that already-authorized text, not another
+repository-content read family.
 """
 
 import json
@@ -58,6 +61,8 @@ from perk_dev.prose_review.dto import (
     CatalogSummaryOut,
     CheckRunOut,
     ComparisonOptionsOut,
+    GitDiffOut,
+    GitStatusOut,
     LatestCheckOut,
     SearchOut,
     SourceSaveOut,
@@ -66,6 +71,7 @@ from perk_dev.prose_review.dto import (
     UnitSourceOut,
     source_save_out,
 )
+from perk_dev.prose_review.git import GitReader
 from perk_dev.prose_review.source_adapter import (
     SourceReadError,
     SourceReadFailure,
@@ -112,10 +118,16 @@ CSRF_PLACEHOLDER = "__PROSE_REVIEW_CSRF__"
 # header names arrive lowercased).
 _CSRF_HEADER_BYTES = CSRF_HEADER.lower().encode("ascii")
 
+# `style-src` carries `'unsafe-inline'` because `@pierre/diffs` injects shadow-root
+# `<style>` nodes AND emits `style="…"` attributes (both -elem and -attr vectors — no
+# narrower carve-out exists). script-src/connect/img/font stay `'self'`, so style
+# injection has no exfiltration destination; the dom-sinks scan and reject-unknown
+# parsers remain the HTML/script-injection guards, and our own code keeps the
+# app.css-only discipline as a house rule.
 _CSP = (
-    "default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; "
-    "img-src 'self'; font-src 'self'; base-uri 'none'; form-action 'none'; "
-    "frame-ancestors 'none'"
+    "default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; "
+    "connect-src 'self'; img-src 'self'; font-src 'self'; base-uri 'none'; "
+    "form-action 'none'; frame-ancestors 'none'"
 )
 
 # Stamped on EVERY HTTP response — rejections, 404s, and framework-generated 500s alike.
@@ -327,6 +339,7 @@ def create_app(
     csrf_token: str,
     reload_catalog: Callable[[Path], CatalogSnapshot] | None = None,
     check_commands: Mapping[CheckId, CheckCommand] | None = None,
+    git_reader: GitReader | None = None,
 ) -> SecurityGuardMiddleware:
     """Build the guarded app over an app-scoped, swappable immutable catalog generation.
 
@@ -349,6 +362,10 @@ def create_app(
     # they never take `source_transaction_mutex`, never touch the catalog generation,
     # and stay permitted while writes are frozen (read-only and useful for diagnosis).
     runner = CheckRunner(repo_resolved, commands=check_commands)
+    # The app-lifetime read-only Git observer; `git_reader` is the test seam (the
+    # `check_commands` pattern). Status/diff are computed fresh per request — never
+    # cached, never coupled to the catalog generation.
+    reader = GitReader(repo_resolved) if git_reader is None else git_reader
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
@@ -569,6 +586,25 @@ def create_app(
         if not runner.cancel(run_id):
             raise HTTPException(status_code=404, detail="unknown check run")
         return Response(status_code=204)
+
+    @app.get("/api/git/status", response_model=GitStatusOut)
+    def git_status() -> GitStatusOut:
+        # Always 200: reader unavailability is an envelope, never an error status.
+        # The captured generation partitions folded entries by catalog membership —
+        # non-catalog paths (and anonymous undecodable records) are count-only.
+        generation = state.generation
+        return GitStatusOut.from_domain(
+            reader.status(),
+            lambda path: len(generation.snapshot.units_for_path(path)) > 0,
+        )
+
+    @app.get("/api/git/diff", response_model=GitDiffOut)
+    def git_diff(path: str) -> GitDiffOut:
+        generation = state.generation
+        if len(generation.snapshot.units_for_path(path)) == 0:
+            # The /api/source no-leak posture: one fixed detail for a non-catalog path.
+            raise HTTPException(status_code=404, detail="unknown path")
+        return GitDiffOut.from_domain(reader.diff(path))
 
     @app.get("/api/checks/latest", response_model=LatestCheckOut)
     def latest_check() -> LatestCheckOut:

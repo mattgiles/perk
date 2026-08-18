@@ -48,6 +48,10 @@ _SANCTIONED_SUBPROCESS_WRAPPERS = {
     ("run_worker", "_spawn_worker"),
     ("materialize", "run_worktree_setup"),
     ("shared", "run_skills"),
+    # The prose-review GitReader's one bytes-mode captured spawn (app-owned, the
+    # checks-`_spawn` precedent): porcelain `-z` pathname bytes and diff content
+    # bytes are undecodable in `proc.run_captured`'s strict text mode.
+    ("git", "_run_captured_bytes"),
 }
 
 # The one sanctioned `subprocess.Popen` site: the prose-review CheckRunner's streaming
@@ -87,8 +91,9 @@ def test_subprocess_run_only_in_sanctioned_wrappers_with_check_and_timeout():
     offenders: list[str] = []
     scan_roots = (
         REPO_ROOT / "src" / "perk",
-        # The one deliberate perk-dev exception is the CheckRunner's Popen `_spawn`
-        # (sanctioned below); perk-dev must contain zero subprocess.run literals.
+        # The two deliberate perk-dev exceptions are the CheckRunner's Popen `_spawn`
+        # (sanctioned below) and the GitReader's bytes-mode `_run_captured_bytes`
+        # (sanctioned above); no other perk-dev subprocess literal is permitted.
         REPO_ROOT / "packages" / "perk-dev" / "src" / "perk_dev",
     )
     for path in sorted(p for root in scan_roots for p in root.rglob("*.py")):

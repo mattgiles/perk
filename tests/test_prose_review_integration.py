@@ -11,8 +11,10 @@ import json
 import os
 import re
 import secrets
+import shutil
 import socket
 import stat
+import subprocess
 import sys
 import threading
 import time
@@ -49,9 +51,9 @@ PLAN_CONTEXT_PATH = Path("prompts/contexts/plan-authoring.md")
 PLAN_SKILL_PATH = Path("skills/perk-plan/SKILL.md")
 PLAN_DRAFT_PATH = Path("extension/factories/planDraft.ts")
 CSP = (
-    "default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; "
-    "img-src 'self'; font-src 'self'; base-uri 'none'; form-action 'none'; "
-    "frame-ancestors 'none'"
+    "default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; "
+    "connect-src 'self'; img-src 'self'; font-src 'self'; base-uri 'none'; "
+    "form-action 'none'; frame-ancestors 'none'"
 )
 
 # One xdist worker: the module fixture builds the frontend and owns a live server.
@@ -840,3 +842,81 @@ def test_lifespan_shutdown_kills_an_active_check_run(server: _RunningServer) -> 
     ):
         assert time.monotonic() < deadline, "runner threads lingered after lifespan shutdown"
         time.sleep(0.05)
+
+
+def _git(repo: Path, *args: str) -> None:
+    subprocess.run(
+        ["git", *args],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+        timeout=30,
+        env={
+            **os.environ,
+            "GIT_CONFIG_GLOBAL": "/dev/null",
+            "GIT_CONFIG_SYSTEM": "/dev/null",
+        },
+    )
+
+
+def test_git_status_and_diff_round_trip_over_real_http(
+    server: _RunningServer, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The fixture trust root becomes a real dirty repository for this test only:
+    # commit the baseline, dirty one catalog file plus one outside file, observe over
+    # HTTP, then restore the tree and drop `.git` (status/diff are computed fresh per
+    # request, so no other test can observe the interlude).
+    # The SERVER phase must be hermetic too: the in-process GitReader spawns with
+    # `os.environ`, so a developer's global config (e.g. `core.excludesFile`) must
+    # not be able to hide the fixture files during the HTTP round trip.
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", "/dev/null")
+    monkeypatch.setenv("GIT_CONFIG_SYSTEM", "/dev/null")
+    repo = server.repo_root
+    agents = repo / "AGENTS.md"
+    original = agents.read_bytes()
+    outside = repo / "outside-the-catalog.xyz"
+    _git(repo, "init", "-q")
+    try:
+        _git(repo, "add", "-A")
+        _git(
+            repo,
+            "-c",
+            "user.name=Prose Review",
+            "-c",
+            "user.email=prose-review@example.invalid",
+            "commit",
+            "-q",
+            "-m",
+            "baseline",
+        )
+        agents.write_bytes(original + b"\nintegration git marker\n")
+        outside.write_text("outside\n", encoding="utf-8")
+
+        with httpx.Client(base_url=server.base_url, timeout=10) as client:
+            status = client.get("/api/git/status")
+            assert status.status_code == 200
+            _assert_security_headers(status)
+            body = status.json()
+            assert body["status"] == "available"
+            assert body["reason"] is None
+            states = {entry["path"]: entry["state"] for entry in body["entries"]}
+            assert states["AGENTS.md"] == "modified"
+            assert body["other_change_count"] >= 1
+
+            diff = client.get("/api/git/diff", params={"path": "AGENTS.md"})
+            assert diff.status_code == 200
+            _assert_security_headers(diff)
+            diff_body = diff.json()
+            assert diff_body["status"] == "available"
+            assert diff_body["reason"] is None
+            assert "+integration git marker" in diff_body["diff"]
+            assert diff_body["truncated"] is False
+
+            missing = client.get("/api/git/diff", params={"path": "outside-the-catalog.xyz"})
+            assert missing.status_code == 404
+            assert missing.json() == {"detail": "unknown path"}
+            _assert_security_headers(missing)
+    finally:
+        agents.write_bytes(original)
+        outside.unlink(missing_ok=True)
+        shutil.rmtree(repo / ".git")
