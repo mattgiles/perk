@@ -1,10 +1,19 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { setImmediate as tick } from "node:timers/promises";
-import { JSDOM } from "jsdom";
 import * as React from "react";
-import { createRoot, type Root } from "react-dom/client";
 import { tsImport } from "tsx/esm/api";
+import {
+  buttonByLabel,
+  buttonByText,
+  buttonStartingWith,
+  type Deferred,
+  deferred,
+  installDom,
+  itemAt,
+  normalizedText,
+  response,
+  stubFetch,
+} from "./componentHarness.ts";
 import type {
   ComparisonChoice,
   ComparisonOptions,
@@ -133,134 +142,11 @@ function source(unit: UnitRef, focus: string): UnitSource {
   };
 }
 
-function response(status: number, body: unknown): Response {
-  return new Response(JSON.stringify(body), {
-    status,
-    headers: { "content-type": "application/json" },
-  });
-}
-
-type Deferred<T> = {
-  promise: Promise<T>;
-  resolve: (value: T) => void;
-};
-
-function deferred<T>(): Deferred<T> {
-  let resolve!: (value: T) => void;
-  const promise = new Promise<T>((complete) => {
-    resolve = complete;
-  });
-  return { promise, resolve };
-}
-
-function itemAt<T>(items: ArrayLike<T>, index: number): T {
-  const item = items[index];
-  assert.ok(item !== undefined, `missing item at index ${index}`);
-  return item;
-}
-
-type RenderHarness = {
-  container: HTMLElement;
-  render: (node: React.ReactNode) => Promise<void>;
-  click: (element: Element) => Promise<void>;
-  settle: () => Promise<void>;
-  cleanup: () => Promise<void>;
-};
-
-function installDom(): RenderHarness {
-  const dom = new JSDOM("<!doctype html><html><body><div id='root'></div></body></html>", {
-    url: "http://127.0.0.1/",
-  });
-  const previous = new Map<string, PropertyDescriptor | undefined>();
-  const globals: Record<string, unknown> = {
-    window: dom.window,
-    document: dom.window.document,
-    navigator: dom.window.navigator,
-    HTMLElement: dom.window.HTMLElement,
-    Element: dom.window.Element,
-    Node: dom.window.Node,
-    Event: dom.window.Event,
-    MouseEvent: dom.window.MouseEvent,
-    MutationObserver: dom.window.MutationObserver,
-    getComputedStyle: dom.window.getComputedStyle.bind(dom.window),
-    IS_REACT_ACT_ENVIRONMENT: true,
-    React,
-  };
-  for (const [name, value] of Object.entries(globals)) {
-    previous.set(name, Object.getOwnPropertyDescriptor(globalThis, name));
-    Object.defineProperty(globalThis, name, { configurable: true, writable: true, value });
-  }
-
-  const container = dom.window.document.querySelector<HTMLElement>("#root");
-  assert.ok(container !== null);
-  const root: Root = createRoot(container);
-  return {
-    container,
-    async render(node: React.ReactNode): Promise<void> {
-      await React.act(async () => {
-        root.render(node);
-        await tick();
-      });
-    },
-    async click(element: Element): Promise<void> {
-      await React.act(async () => {
-        element.dispatchEvent(new dom.window.MouseEvent("click", { bubbles: true }));
-        await tick();
-      });
-    },
-    async settle(): Promise<void> {
-      await React.act(async () => {
-        await tick();
-        await tick();
-      });
-    },
-    async cleanup(): Promise<void> {
-      await React.act(async () => root.unmount());
-      dom.window.close();
-      for (const [name, descriptor] of previous) {
-        if (descriptor === undefined) {
-          Reflect.deleteProperty(globalThis, name);
-        } else {
-          Object.defineProperty(globalThis, name, descriptor);
-        }
-      }
-    },
-  };
-}
-
-function normalizedText(element: Element): string {
-  return (element.textContent ?? "").replaceAll(/\s+/g, " ").trim();
-}
-
-function buttonByText(container: ParentNode, text: string): HTMLButtonElement {
-  const button = [...container.querySelectorAll<HTMLButtonElement>("button")].find(
-    (candidate) => normalizedText(candidate) === text,
-  );
-  assert.ok(button !== undefined, `missing button: ${text}`);
-  return button;
-}
-
-function buttonStartingWith(container: ParentNode, text: string): HTMLButtonElement {
-  const button = [...container.querySelectorAll<HTMLButtonElement>("button")].find((candidate) =>
-    normalizedText(candidate).startsWith(text),
-  );
-  assert.ok(button !== undefined, `missing button starting with: ${text}`);
-  return button;
-}
-
-function buttonByLabel(container: ParentNode, label: string): HTMLButtonElement {
-  const button = container.querySelector<HTMLButtonElement>(`button[aria-label="${label}"]`);
-  assert.ok(button !== null, `missing labeled button: ${label}`);
-  return button;
-}
-
 test("App preserves fragment sessions and invalidates changed Compare origins", async () => {
   const harness = installDom();
-  const previousFetch = globalThis.fetch;
   const compareRequests: { url: string; request: Deferred<Response> }[] = [];
   const sourceUrls: string[] = [];
-  globalThis.fetch = async (input): Promise<Response> => {
-    const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+  const restoreFetch = stubFetch(async (url): Promise<Response> => {
     if (url === "/api/catalog/tree") {
       return response(200, TREE);
     }
@@ -278,7 +164,7 @@ test("App preserves fragment sessions and invalidates changed Compare origins", 
       return response(200, source(unit, "same\n"));
     }
     throw new Error(`unexpected request: ${url}`);
-  };
+  });
 
   try {
     await harness.render(React.createElement(App));
@@ -354,7 +240,7 @@ test("App preserves fragment sessions and invalidates changed Compare origins", 
     assert.match(harness.container.textContent ?? "", /Loading comparison options/);
     assert.ok(sourceUrls.length >= 2, "selected comparisons and Edit both use source loading");
   } finally {
-    globalThis.fetch = previousFetch;
+    restoreFetch();
     await harness.cleanup();
   }
 });
@@ -424,22 +310,20 @@ function centerElement(
 
 test("CenterPane shares equal-unit source and renders native line chunks for distinct units", async () => {
   const harness = installDom();
-  const previousFetch = globalThis.fetch;
   const sourceUrls: string[] = [];
   const workspace = new EditWorkspace();
   let sources = new Map([
     [UNIT_A.id, source(UNIT_A, "same\n")],
     [UNIT_B.id, source(UNIT_B, "same\n")],
   ]);
-  globalThis.fetch = async (input): Promise<Response> => {
-    const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+  const restoreFetch = stubFetch(async (url): Promise<Response> => {
     sourceUrls.push(url);
     const unitId = new URL(url, "http://127.0.0.1").searchParams.get("unit");
     assert.ok(unitId !== null);
     const body = sources.get(unitId);
     assert.ok(body !== undefined);
     return response(200, body);
-  };
+  });
 
   const selection: UnitSelection = {
     type: "unit",
@@ -485,24 +369,22 @@ test("CenterPane shares equal-unit source and renders native line chunks for dis
     assert.match(headers[0] ?? "", /unit:a/);
     assert.match(headers[1] ?? "", /unit:b/);
   } finally {
-    globalThis.fetch = previousFetch;
+    restoreFetch();
     await harness.cleanup();
   }
 });
 
 test("CenterPane preserves independent source failure states", async () => {
   const harness = installDom();
-  const previousFetch = globalThis.fetch;
   const sourceUrls: string[] = [];
   const workspace = new EditWorkspace();
-  globalThis.fetch = async (input): Promise<Response> => {
-    const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+  const restoreFetch = stubFetch(async (url): Promise<Response> => {
     sourceUrls.push(url);
     if (url.includes("unit%3Aa")) {
       return response(404, { detail: "source missing" });
     }
     return response(200, source(UNIT_C, "target survives\n"));
-  };
+  });
   const selection: UnitSelection = {
     type: "unit",
     target: { unit: UNIT_A, fragment: null },
@@ -523,7 +405,7 @@ test("CenterPane preserves independent source failure states", async () => {
     assert.match(panes[0]?.textContent ?? "", /Source unavailable.*source missing/s);
     assert.match(panes[1]?.textContent ?? "", /Source loaded; waiting for the other side/);
   } finally {
-    globalThis.fetch = previousFetch;
+    restoreFetch();
     await harness.cleanup();
   }
 });
