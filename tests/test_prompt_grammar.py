@@ -8,160 +8,21 @@ The frozen template-grammar subset (the SSOT is `shared/contracts.md §8.31`) is
    only from bare identifiers, double-quoted strings, `==`, and `and`/`or`/`not`.
 4. Plain `{% %}` tags only (no `{%- … -%}` / `{{- … -}}` whitespace-control markers).
 
-This guard uses an **allowlist posture**: it extracts every `{{ … }}` / `{% … %}` block and fails
-on any block matching no recognized construct — mirroring the node-4.2 vendored renderer's
-throw-loudly-on-anything-unsupported discipline. It checks construct membership only, not if/endif
-nesting balance (structural balance is proven by the golden harness rendering every real template).
-The validator is test-only tooling (like `extension/surfacesGuard.test.ts`), not runtime code.
+The scanner implementation is `perk_dev.prompt_grammar.scan_template` (shared with the
+prose-review Assembly preview gate); this guard consumes it over every real template with an
+allowlist posture — fail on any block matching no recognized construct — and additionally pins
+the scanner's whole-source lexical completeness (multiline/unterminated/stray delimiter forms
+are violations, a Python-side narrowing versus the TS runtime tokenizer).
 """
 
-import re
+from perk_dev.prompt_grammar import scan_template
 
 from perk._resources import prompts_dir
 
-# A `{{ … }}`, `{% … %}`, or `{# … #}` block, captured non-greedily (blocks never span lines).
-# Comments are matched only so the guard can REJECT them (not in the frozen subset).
-_BLOCK = re.compile(r"\{\{(.*?)\}\}|\{%(.*?)%\}|\{#(.*?)#\}")
-
-# A bare identifier — the only thing admitted inside `{{ }}` and the atom of a condition.
-_IDENT = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
-
-# `include "<path>"` — double-quoted path only, NO escapes (`[^"\\]*`, mirroring miniJinja). The
-# captured path is additionally checked for containment (non-empty / non-absolute / no `..`).
-_INCLUDE = re.compile(r'include\s+"([^"\\]*)"')
-
-# A whole `if`/`elif` condition: one-or-more of {identifier, double-quoted string (no escapes),
-# `==`} separated by whitespace. Anything else (parens, `!=`, `<`/`>`, filters, dots, numbers,
-# escaped quotes) leaves unrecognized text → no full match → violation. The string literal is
-# `[^"\\]*` to mirror miniJinja's reject-escapes rule.
-_COND = re.compile(r'(?:\s*(?:[A-Za-z_][A-Za-z0-9_]*|"[^"\\]*"|==)\s*)+')
-
-# Bare-word tokens that LOOK like identifiers but are jinja operators outside the frozen subset.
-# (The admitted keywords are exactly `and`/`or`/`not`; every other bare word is a variable name.)
-_BANNED_COND_WORDS = {"in", "is"}
-
-# Matches one condition token: a double-quoted string (no escapes), `==`, or a bare word.
-_COND_TOKEN = re.compile(r'"[^"\\]*"|==|[A-Za-z_][A-Za-z0-9_]*')
-
-
-def _cond_shape_valid(cond: str) -> bool:
-    """True iff the condition is well-formed in miniJinja's grammar (`or` < `and` < `not` < `==`).
-
-    `_COND` gates the character set; THIS rejects malformed valid-token sequences — `a b` (adjacent
-    atoms), `a ==` / `== a` (missing operand), bare `not` — that the runtime renderer throws on,
-    keeping the author-time guard consistent with render time.
-    """
-    kinds: list[str] = []
-    for match in _COND_TOKEN.finditer(cond):
-        token = match.group(0)
-        if token == "==":
-            kinds.append("eq")
-        elif token in ("and", "or", "not"):
-            kinds.append(token)
-        else:
-            kinds.append("atom")  # identifier or double-quoted string
-    pos = 0
-
-    def peek() -> str | None:
-        return kinds[pos] if pos < len(kinds) else None
-
-    def atom() -> bool:
-        nonlocal pos
-        if peek() == "atom":
-            pos += 1
-            return True
-        return False
-
-    def eq() -> bool:
-        nonlocal pos
-        if not atom():
-            return False
-        if peek() == "eq":
-            pos += 1
-            return atom()
-        return True
-
-    def not_expr() -> bool:
-        nonlocal pos
-        if peek() == "not":
-            pos += 1
-            return not_expr()
-        return eq()
-
-    def and_expr() -> bool:
-        nonlocal pos
-        if not not_expr():
-            return False
-        while peek() == "and":
-            pos += 1
-            if not not_expr():
-                return False
-        return True
-
-    def or_expr() -> bool:
-        nonlocal pos
-        if not and_expr():
-            return False
-        while peek() == "or":
-            pos += 1
-            if not and_expr():
-                return False
-        return True
-
-    return or_expr() and pos == len(kinds)
-
-
-def _include_path_is_valid(p: str) -> bool:
-    """Mirror miniJinja's resolveTemplatePath containment: non-empty / non-absolute / no `..`."""
-    if not p:
-        return False
-    if p.startswith("/") or re.match(r"^[A-Za-z]:", p):  # absolute (posix or windows drive)
-        return False
-    return ".." not in re.split(r"[\\/]", p)
-
-
-def _block_is_valid(raw: str, is_variable: bool) -> bool:
-    """True iff one extracted block (without its delimiters) is in the frozen subset."""
-    inner = raw.strip()
-    if is_variable:
-        # `{{ X }}`: X must be a single bare identifier (catches `{{- x -}}`, dots, filters, …).
-        return bool(_IDENT.fullmatch(inner))
-    # `{% X %}` (catches `{%- … -%}` since the leading `-` breaks every branch below).
-    if inner in {"else", "endif"}:
-        return True
-    include = _INCLUDE.fullmatch(inner)
-    if include is not None:
-        return _include_path_is_valid(include.group(1))
-    for keyword in ("if", "elif"):
-        prefix = keyword + " "
-        if inner.startswith(prefix):
-            cond = inner[len(prefix) :].strip()
-            if not cond or not _COND.fullmatch(cond):
-                return False
-            # Reject `in`/`is` operators (lexically identifiers) outside string literals.
-            words = _IDENT.findall(re.sub(r'"[^"\\]*"', " ", cond))
-            if any(word in _BANNED_COND_WORDS for word in words):
-                return False
-            # Reject malformed condition shapes the runtime renderer throws on.
-            return _cond_shape_valid(cond)
-    return False
-
 
 def _violations(text: str, rel: str) -> list[str]:
-    """Collect `path:line: <block>` violations in one template's source."""
-    out: list[str] = []
-    for lineno, line in enumerate(text.splitlines(), start=1):
-        for match in _BLOCK.finditer(line):
-            if match.group(3) is not None:
-                # `{# … #}` comment — never in the subset.
-                out.append(f"{rel}:{lineno}: {match.group(0)}")
-                continue
-            is_variable = match.group(1) is not None
-            inner = match.group(1) if is_variable else match.group(2)
-            assert inner is not None
-            if not _block_is_valid(inner, is_variable):
-                out.append(f"{rel}:{lineno}: {match.group(0)}")
-    return out
+    """Collect `path:line N: <block>` violations in one template's source."""
+    return [f"{rel}:{violation}" for violation in scan_template(text).violations]
 
 
 def _template_files() -> list[tuple[str, str]]:
@@ -243,3 +104,69 @@ def test_validator_accepts_in_subset_blocks() -> None:
     ]
     for block in good:
         assert not _violations(block, "synthetic.md"), f"unexpected violation for {block!r}"
+
+
+def test_whole_source_scan_flags_multiline_unterminated_stray_and_nested_forms() -> None:
+    bad = [
+        # Multiline blocks are violations even when their stripped content would be in-subset
+        # (deliberately stricter than the TS runtime tokenizer, which accepts multiline tags).
+        "{{ x\n}}",
+        "{%\nif a %}text{% endif %}",
+        "{% if a\n%}text{% endif %}",
+        "{# spanning\ncomment #}",
+        # Unterminated openers.
+        "{{ x",
+        "text {% if a",
+        "{# never closed",
+        # Stray closers (the TS runtime treats these as literal text; the scan does not).
+        "plain }} text",
+        "plain %} text",
+        "plain #} text",
+        "{{ x }}}}",
+        # Nested / partially matched delimiter forms.
+        "{{ a {% b %} }}",
+        "{{ {{ x }} }}",
+        "{% if a %} }}",
+    ]
+    for text in bad:
+        assert scan_template(text).violations, f"expected violation for {text!r}"
+
+
+def test_whole_source_scan_reports_start_lines_and_continues_past_violations() -> None:
+    text = 'ok {{ provider }}\n{# bad #}\n{% if a\n%}\n{% include "x.md" %}\n'
+    scan = scan_template(text)
+    assert scan.violations == ("line 2: {# bad #}", "line 3: {% if a")
+    assert scan.has_include is True
+    assert scan.identifiers == frozenset({"provider"})
+
+    unterminated = "one\ntwo {{ never\nthree {{ ignored }}\n"
+    assert scan_template(unterminated).violations == ("line 2: {{ never",)
+
+
+def test_has_include_is_true_exactly_for_valid_include_tags() -> None:
+    assert scan_template('{% include "a/b.md" %}').has_include is True
+    assert scan_template("{{ provider }}").has_include is False
+    for invalid in ('{% include "../x.md" %}', '{% include "" %}', '{% include "/x.md" %}'):
+        scan = scan_template(invalid)
+        assert scan.has_include is False
+        assert scan.violations
+
+
+def test_identifiers_collect_substitution_and_condition_names_minus_keywords() -> None:
+    text = (
+        "{{ provider }}\n"
+        '{% if provider == "github" and not pr_id or true %}\n'
+        "{% elif false %}\n"
+        "{% elif none %}\n"
+        "{% else %}\n"
+        "{% endif %}\n"
+        '{% include "common/x.md" %}\n'
+    )
+    scan = scan_template(text)
+    assert scan.violations == ()
+    # `true`/`false`/`none` are lexically identifiers to the scan (jinja literals are NOT
+    # admitted by the subset's variable namespace, so callers can reject them by mapping).
+    assert scan.identifiers == frozenset({"provider", "pr_id", "true", "false", "none"})
+    assert "and" not in scan.identifiers
+    assert "or" not in scan.identifiers
+    assert "not" not in scan.identifiers

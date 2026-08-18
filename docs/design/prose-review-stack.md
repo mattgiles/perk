@@ -10,9 +10,10 @@ one browser-authoritative workspace with safe Markdown/YAML, catalog-mapped Pyth
 catalog-mapped TypeScript persistence. The inspector, search, and comparison-option projection are
 pure in-memory `CatalogSnapshot` queries. Markdown, YAML, Python AST, and TypeScript compiler-API
 adapters resolve exact logical fragments over either the canonical load text or browser-supplied
-current text; every admitted family shares one whole-buffer validation and atomic-save pipeline,
-while later slices add Python call arguments, assembly views, and executable check handoffs without
-revisiting this stack.
+current text; every admitted family shares one whole-buffer validation and atomic-save pipeline.
+The backend Assembly preview (`AssemblyRenderer` + the scenario-options/render API below) is now
+shipped; later slices add Python call arguments, the Assembly-mode frontend, and executable check
+handoffs without revisiting this stack.
 
 ## HTTP layer: FastAPI + uvicorn
 
@@ -145,6 +146,92 @@ revisiting this stack.
   default `/docs` (Swagger UI) and `/redoc` pages load CDN-hosted assets and would violate the
   no-network-loaded-assets envelope; `/openapi.json` is locally generated but is an unused
   machine-readable surface this app never serves — disabled to minimize the surface area.
+
+## Assembly preview backend: `AssemblyRenderer` + the options/render API
+
+- **One deep renderer module over a save-linearized generation.**
+  `perk_dev.prose_review.assembly.AssemblyRenderer` is an app-lifetime object (resolved source
+  root + the one app-scoped TypeScript adapter) whose single `render` method takes an explicit
+  `CatalogSnapshot`, one validated assembly/scenario pair, nullable presentation overrides, and
+  path-keyed workspace buffers — and returns every authored layer exactly once in authored order.
+  The HTTP route runs the whole operation as one **source transaction**: `_CatalogState`'s mutex
+  (renamed `source_transaction_mutex`) serializes renders with saves, the critical section spans
+  writes-frozen rejection → generation capture → every canonical read/gate/prompt render/adapter
+  extraction → DTO conversion, and a post-refresh-failure state refuses render with fixed HTTP 409
+  `catalog stale` before any source read. One consequence pinned in tests: a render can only
+  observe a busy TypeScript helper slot from *unlocked* read/projection overlap, never from a
+  save. Out-of-process filesystem edits stay outside the app transaction.
+- **Assembly-wide, no-shape, toggle-independent semantics.** The renderer accepts no session-shape
+  id (a shape is navigation/provenance only) and never filters, expands, deduplicates, or reorders
+  layers. Authored `optional: true` is descriptive presence variance — `presence="varies"` plus
+  the exact marker `Presence varies by session shape or runtime.` — never a render-time filter.
+  Presentation booleans resolve scenario defaults with nullable overrides but change only the
+  top-level `ResolvedPresentation` echo; the per-layer tuple is byte-identical across toggle
+  values, and clients derive display visibility from the role-only `visibility_control` metadata
+  (`ambient-discovery` → `ambient`, `tool-contract` → `tools`, everything else null — bound
+  skills and Pi boundaries are never ambient substitutes), so contradictory wire states are
+  impossible.
+- **Workspace-first, path-keyed source resolution.** Browser workspace identity is the
+  catalog-authored root-relative path. The request may carry any catalog-known loaded file
+  (duplicate or unknown paths invalidate the whole request as fixed 422 `invalid workspace
+  buffers`); a buffered path — even an empty string — is never reread, and repeated same-path
+  layers share one request-local canonical read outcome. Every canonical fallback read derives
+  from the routed unit under the captured generation through the contained SourceAdapter reader;
+  buffer keys never become filesystem read targets. A `SourceReadError` becomes a per-position
+  typed `source-unavailable` failure with safe fixed copy while unrelated paths continue.
+- **The preview gate in front of the unchanged production render seam.** Prompt-root Markdown
+  (the shared `prompt_template_name` predicate, also used by scenario-fixture validation) is
+  gated by `perk_dev.prompt_grammar.scan_template` — the frozen-subset scanner moved out of
+  `tests/test_prompt_grammar.py`, now consumed by both the conformance guard and this gate —
+  before `perk.prompts.render_text` ever compiles it: any out-of-subset block →
+  `template-grammar-invalid`; any include (canonical or workspace) →
+  `template-include-unsupported`, so no editable request can trigger the packaged `prompts_dir()`
+  loader; any identifier outside the selected scenario's variables → `template-variable-unknown`,
+  confining rendering to the TS mini-jinja twin's mapping-only namespace (jinja's Environment
+  globals and `true`/`false`/`none` are unreachable). The scanner is whole-source —
+  unterminated/multiline/stray/nested delimiters are violations — a documented **Python-side
+  narrowing versus the TS runtime tokenizer** (`miniJinja.ts` accepts multiline tags and treats
+  stray closers as text); the frozen construct set and both runtimes are unchanged
+  (`shared/contracts.md §8.31`). Gate-passing structural errors (`if`/`endif` imbalance) surface
+  as `template-render-failed` from an exact `jinja2.TemplateError` catch; the string-only
+  variable contract stays a loud invariant.
+- **Raw Markdown versus ordered source-native code fragments.** Markdown outside `prompts/`
+  (skills, agent definitions) returns the exact whole text as one `raw-source` part, never parsed
+  as Jinja. Non-Markdown owned layers dispatch once through `source_adapter_for` and call the new
+  `SourceAdapter.extract_many` batch seam — one Python parse/compile/tokenize pass or one
+  TypeScript helper invocation per layer (the helper protocol already accepted ordered selector
+  batches; `resolve_range` now rides the one-item batch path and the base class owns
+  resolution-to-extraction slicing) — returning one `source-fragments` part per catalog fragment
+  in order with id/label provenance and exact source-native focus. Nothing is decoded, imported,
+  evaluated, or executed. Code layers are atomic result variants: any unresolved fragment fails
+  the whole authored layer with ordered safe problems (document-level `invalid-source` collapses
+  to one unit-level problem; helper unavailability and a missing adapter family are unit-level
+  `adapter-unavailable`/`unsupported-family`), and no partial content is returned while every
+  sibling layer stays in the result. Adapter diagnostic text, helper protocol details, and raw
+  exceptions never enter Assembly results — those remain on the focused edit/save surfaces.
+- **Typed boundary placeholders.** Every closed `BoundaryKind` maps exhaustively to a stable
+  semantic owner id (`pi-system`→`pi`, `user-content`→`user`, `runtime-state`→`runtime`,
+  `borrowed-prompt`→`borrowed-package`); a boundary layer carries owner + kind + authored
+  label/presentation and no source path, editable content, or guessed runtime text. Human-facing
+  display copy stays in the frontend's `BOUNDARY_INFO` (untouched this node).
+- **Two strict HTTP surfaces.** `GET /api/assembly/options?assembly=<id>` is a pure snapshot
+  query returning `AssemblyOptionsOut` (the assembly id plus complete ordered scenario fixtures
+  with object-shaped sorted variables); unknown assembly is fixed 404 `unknown assembly`.
+  `POST /api/assembly/render` accepts the exact strict body `{assembly, scenario, presentation:
+  {include_ambient: bool|null, include_tools: bool|null}, buffers: [{path, text}]}` (required
+  keys, `StrictInputModel` extra/coercion rejection) and returns the discriminated
+  `AssemblyRenderOut` (`type: owned | boundary | failure`, common presentation nested under
+  `presentation`, every `*Out` built via `from_domain`). One **Unicode-scalar input rule**:
+  `path`/`text` reject unpaired surrogates (not-UTF-8-encodable strings) at the boundary, and the
+  app's validation-error handler omits the default raw-input echo so a hostile buffer yields a
+  serializable framework 422, never a 500. Selection failures map to fixed 404
+  `unknown assembly render subject`; expected source/gate/render/adapter failures are guarded 200
+  layer results with all siblings. The POST accepts repository text and therefore sits under the
+  existing exact CSRF header rule; both routes retain the Host/Origin/CSP/no-store stamping.
+- **Deliberately deferred to Node 4.2:** frontend transport types/parsers/loaders, EditWorkspace
+  snapshot export, Assembly-mode UI, scenario/toggle controls and inspector, text-only rendered
+  presentation, visibility derivation, concatenated-view semantics, and replacement of the honest
+  Assembly placeholder.
 
 ## Frontend: Vite + React + TypeScript
 

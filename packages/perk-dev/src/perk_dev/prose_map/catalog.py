@@ -307,6 +307,23 @@ def _validate_references(graph: ProseMap, candidate_ids: set[str]) -> list[Findi
     return findings
 
 
+def prompt_template_name(candidate: Candidate) -> str | None:
+    """Return the root-relative template name for a rendered prompt candidate.
+
+    The one prompt-layer predicate shared by scenario-fixture validation and the
+    prose-review AssemblyRenderer: only ``markdown`` candidates strictly beneath
+    ``prompts/`` are Jinja templates; every other candidate returns ``None`` so the
+    two consumers cannot drift on which sources are rendered.
+    """
+    if candidate.kind != "markdown":
+        return None
+    candidate_path = Path(candidate.path)
+    prompt_root = Path("prompts")
+    if candidate_path == prompt_root or not candidate_path.is_relative_to(prompt_root):
+        return None
+    return candidate_path.relative_to(prompt_root).as_posix()
+
+
 type _TemplateMetadata = tuple[frozenset[str], tuple[str, ...]]
 
 
@@ -384,7 +401,6 @@ def validate_scenario_fixtures(
     candidates_by_id = {candidate.id: candidate for candidate in candidates}
     environment = Environment(loader=FileSystemLoader(root / "prompts"))
     cache: dict[str, _TemplateMetadata] = {}
-    prompt_root = Path("prompts")
     for assembly_id in sorted(previewable):
         assembly_scenarios = scenarios.get(assembly_id, [])
         if not assembly_scenarios:
@@ -400,12 +416,11 @@ def validate_scenario_fixtures(
             if layer.unit is None:
                 continue
             candidate = candidates_by_id.get(layer.unit)
-            if candidate is None or candidate.kind != "markdown":
+            if candidate is None:
                 continue
-            candidate_path = Path(candidate.path)
-            if candidate_path == prompt_root or not candidate_path.is_relative_to(prompt_root):
+            template_name = prompt_template_name(candidate)
+            if template_name is None:
                 continue
-            template_name = candidate_path.relative_to(prompt_root).as_posix()
             requirements[candidate.id] = _template_variables(
                 environment,
                 candidate.id,

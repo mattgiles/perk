@@ -4798,6 +4798,13 @@ Everything outside (1)–(4) is **outside the subset** — `{% for %}`/`{% endfo
 with an allowlist posture (fail on any block matching no recognized construct):
 `tests/test_prompt_grammar.py` (Python) and `extension/substrate/promptGrammar.test.ts` (TS).
 `shared/contracts.md §8.31` is the SSOT for the shared scan algorithm; the two guards mirror it.
+The Python guard's scanner implementation lives in `perk_dev.prompt_grammar.scan_template`
+(consumed by both `tests/test_prompt_grammar.py` and the prose-review Assembly preview gate) and
+scans **whole-source** — unterminated, multiline, stray, nested, or partially matched delimiters
+are violations rather than unexamined text. That lexical completeness is a deliberate Python-side
+narrowing relative to the TS runtime tokenizer (`miniJinja.ts` accepts multiline tags and treats
+stray closers as literal text); the frozen construct set, the TS guard, and both runtime
+renderers are unchanged.
 The guard checks **construct membership only**, not if/endif nesting balance — structural balance
 is already proven by the golden harness rendering every real template. Widening the subset later
 (e.g. a future template needing `in` or parentheses) is a deliberate decision that amends this

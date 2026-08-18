@@ -6,7 +6,7 @@ directly. Declaration order is the JSON key order, so the field order below is
 deliberate.
 """
 
-from typing import Literal, Self
+from typing import Annotated, Literal, Self
 
 from pydantic import Field
 
@@ -20,11 +20,28 @@ from perk_dev.prose_map.models import (
     ProseKind,
     ProseRole,
     RoutedUnit,
+    Scenario,
     SessionShape,
+)
+from perk_dev.prose_review.assembly import (
+    AssemblyLayerFailureReason,
+    AssemblyLayerProblem,
+    BoundaryOwner,
+    FailedAssemblyLayer,
+    LayerPresence,
+    LayerPresentation,
+    OwnedContentKind,
+    PresentationControl,
+    RenderedAssembly,
+    RenderedBoundaryLayer,
+    RenderedContentPart,
+    RenderedOwnedLayer,
+    ResolvedPresentation,
 )
 from perk_dev.prose_review.catalog import (
     AssemblyConsumer,
     AssemblyLayerView,
+    AssemblyView,
     CapabilityNode,
     CatalogQueryError,
     CatalogSnapshot,
@@ -679,4 +696,199 @@ class SearchOut(OutputModel):
         return cls(
             total=results.total,
             results=tuple(SearchResultOut.from_domain(hit) for hit in results.hits),
+        )
+
+
+class AssemblyScenarioOut(OutputModel):
+    """One authored scenario fixture: label, variables object, presentation defaults."""
+
+    id: str
+    label: str
+    variables: dict[str, str]
+    include_ambient: bool
+    include_tools: bool
+
+    @classmethod
+    def from_domain(cls, scenario: Scenario) -> Self:
+        # A JSON object inserted from the domain's sorted pairs, not an array of pairs.
+        return cls(
+            id=scenario.id,
+            label=scenario.label,
+            variables=dict(scenario.variables),
+            include_ambient=scenario.include_ambient,
+            include_tools=scenario.include_tools,
+        )
+
+
+class AssemblyOptionsOut(OutputModel):
+    """One assembly id plus its complete ordered scenario fixtures."""
+
+    assembly: str
+    scenarios: tuple[AssemblyScenarioOut, ...]
+
+    @classmethod
+    def from_domain(cls, view: AssemblyView) -> Self:
+        return cls(
+            assembly=view.assembly.id,
+            scenarios=tuple(
+                AssemblyScenarioOut.from_domain(scenario) for scenario in view.scenarios
+            ),
+        )
+
+
+class AssemblyPresentationOut(OutputModel):
+    """The resolved top-level presentation booleans (defaults plus overrides)."""
+
+    include_ambient: bool
+    include_tools: bool
+
+    @classmethod
+    def from_domain(cls, presentation: ResolvedPresentation) -> Self:
+        return cls(
+            include_ambient=presentation.include_ambient,
+            include_tools=presentation.include_tools,
+        )
+
+
+class AssemblyLayerPresentationOut(OutputModel):
+    """Common per-layer presentation metadata, nested under every layer variant."""
+
+    position: int
+    label: str | None
+    presence: LayerPresence
+    presence_label: str | None
+    visibility_control: PresentationControl | None
+
+    @classmethod
+    def from_domain(cls, presentation: LayerPresentation) -> Self:
+        return cls(
+            position=presentation.position,
+            label=presentation.label,
+            presence=presentation.presence,
+            presence_label=presentation.presence_label,
+            visibility_control=presentation.visibility_control,
+        )
+
+
+class AssemblyContentPartOut(OutputModel):
+    """One ordered content part with optional fragment provenance."""
+
+    fragment: FragmentRefOut | None
+    text: str
+
+    @classmethod
+    def from_domain(cls, part: RenderedContentPart) -> Self:
+        return cls(
+            fragment=(None if part.fragment is None else FragmentRefOut.from_domain(part.fragment)),
+            text=part.text,
+        )
+
+
+class AssemblyLayerProblemOut(OutputModel):
+    """One typed per-layer failure with its fixed safe detail copy."""
+
+    fragment: FragmentRefOut | None
+    reason: AssemblyLayerFailureReason
+    detail: str
+
+    @classmethod
+    def from_domain(cls, problem: AssemblyLayerProblem) -> Self:
+        return cls(
+            fragment=(
+                None if problem.fragment is None else FragmentRefOut.from_domain(problem.fragment)
+            ),
+            reason=problem.reason,
+            detail=problem.detail,
+        )
+
+
+class RenderedOwnedLayerOut(OutputModel):
+    """One successfully composed owned layer with its ordered content parts."""
+
+    type: Literal["owned"]
+    presentation: AssemblyLayerPresentationOut
+    unit: UnitRefOut
+    content_kind: OwnedContentKind
+    parts: tuple[AssemblyContentPartOut, ...]
+
+    @classmethod
+    def from_domain(cls, layer: RenderedOwnedLayer) -> Self:
+        return cls(
+            type="owned",
+            presentation=AssemblyLayerPresentationOut.from_domain(layer.presentation),
+            unit=UnitRefOut.from_domain(layer.unit),
+            content_kind=layer.content_kind,
+            parts=tuple(AssemblyContentPartOut.from_domain(part) for part in layer.parts),
+        )
+
+
+class RenderedBoundaryLayerOut(OutputModel):
+    """One external ownership placeholder carrying boundary kind plus owner id."""
+
+    type: Literal["boundary"]
+    presentation: AssemblyLayerPresentationOut
+    boundary: BoundaryKind
+    owner: BoundaryOwner
+
+    @classmethod
+    def from_domain(cls, layer: RenderedBoundaryLayer) -> Self:
+        return cls(
+            type="boundary",
+            presentation=AssemblyLayerPresentationOut.from_domain(layer.presentation),
+            boundary=layer.boundary,
+            owner=layer.owner,
+        )
+
+
+class FailedAssemblyLayerOut(OutputModel):
+    """One sibling-preserving typed failure layer with ordered safe problems."""
+
+    type: Literal["failure"]
+    presentation: AssemblyLayerPresentationOut
+    unit: UnitRefOut
+    problems: tuple[AssemblyLayerProblemOut, ...]
+
+    @classmethod
+    def from_domain(cls, layer: FailedAssemblyLayer) -> Self:
+        return cls(
+            type="failure",
+            presentation=AssemblyLayerPresentationOut.from_domain(layer.presentation),
+            unit=UnitRefOut.from_domain(layer.unit),
+            problems=tuple(
+                AssemblyLayerProblemOut.from_domain(problem) for problem in layer.problems
+            ),
+        )
+
+
+type AssemblyRenderedLayerOut = Annotated[
+    RenderedOwnedLayerOut | RenderedBoundaryLayerOut | FailedAssemblyLayerOut,
+    Field(discriminator="type"),
+]
+
+
+def _rendered_layer_out(
+    layer: RenderedOwnedLayer | RenderedBoundaryLayer | FailedAssemblyLayer,
+) -> RenderedOwnedLayerOut | RenderedBoundaryLayerOut | FailedAssemblyLayerOut:
+    if isinstance(layer, RenderedOwnedLayer):
+        return RenderedOwnedLayerOut.from_domain(layer)
+    if isinstance(layer, RenderedBoundaryLayer):
+        return RenderedBoundaryLayerOut.from_domain(layer)
+    return FailedAssemblyLayerOut.from_domain(layer)
+
+
+class AssemblyRenderOut(OutputModel):
+    """One complete guarded assembly render: every authored layer in authored order."""
+
+    assembly: str
+    scenario: AssemblyScenarioOut
+    presentation: AssemblyPresentationOut
+    layers: tuple[AssemblyRenderedLayerOut, ...]
+
+    @classmethod
+    def from_domain(cls, rendered: RenderedAssembly) -> Self:
+        return cls(
+            assembly=rendered.assembly.id,
+            scenario=AssemblyScenarioOut.from_domain(rendered.scenario),
+            presentation=AssemblyPresentationOut.from_domain(rendered.presentation),
+            layers=tuple(_rendered_layer_out(layer) for layer in rendered.layers),
         )

@@ -160,9 +160,12 @@ class SourceAdapter(ABC):
     def resolve_range(self, text: str, selector: str) -> RangeResolution:
         """Resolve exactly one selector against supplied text."""
 
-    def extract(self, text: str, selector: str) -> SourceExtraction:
-        """Extract one focus range, or return the canonical whole-text fallback."""
-        resolution = self.resolve_range(text, selector)
+    def _to_extraction(self, text: str, resolution: RangeResolution) -> SourceExtraction:
+        """Slice one validated resolution, or return the canonical whole-text fallback.
+
+        The single slicing/range-check authority: concrete adapters map their native
+        results to :class:`RangeResolution` values and never duplicate this conversion.
+        """
         if isinstance(resolution, UnresolvedRange):
             return SourceExtraction(before="", focus=text, after="", resolution=resolution)
         source_range = resolution.source_range
@@ -174,6 +177,19 @@ class SourceAdapter(ABC):
             after=text[source_range.end :],
             resolution=resolution,
         )
+
+    def extract(self, text: str, selector: str) -> SourceExtraction:
+        """Extract one focus range, or return the canonical whole-text fallback."""
+        return self._to_extraction(text, self.resolve_range(text, selector))
+
+    def extract_many(self, text: str, selectors: tuple[str, ...]) -> tuple[SourceExtraction, ...]:
+        """Extract one ordered result per selector: exact cardinality, `extract` semantics.
+
+        The default delegates to :meth:`extract` per selector; adapters with a batch
+        optimization (one parse, one helper invocation) override this while keeping the
+        same range validation and whole-text fallback semantics.
+        """
+        return tuple(self.extract(text, selector) for selector in selectors)
 
     def validate(self, text: str, selectors: tuple[str, ...]) -> tuple[SourceDiagnostic, ...]:
         """Validate syntax and exact re-resolution in selector input order."""
