@@ -1052,3 +1052,37 @@ test("concurrent indeterminate files keep global saves suspended until every rec
   assert.equal(workspace.writeState().suspended, false);
   assert.equal(workspace.beginSaveReview(UNIT_C.path).status, "reviewed");
 });
+
+test("exportBuffers exports the complete loaded workspace path-sorted with current text", async () => {
+  const empty = new EditWorkspace(immediateTransport(() => ({ status: "failed" })));
+  assert.deepEqual(empty.exportBuffers(), []);
+
+  const texts = new Map([
+    ["shared.md", "head A tail"],
+    ["other.md", "other B end"],
+    ["third.md", "third C body"],
+  ]);
+  const workspace = new EditWorkspace(
+    immediateTransport((target) => {
+      const text = texts.get(target.unit.path);
+      assert.ok(text !== undefined);
+      assert.ok(target.fragment !== null);
+      return loadOutcome(
+        target,
+        text,
+        editableView(target, text, target.fragment.id.toUpperCase()),
+      );
+    }),
+  );
+  // Deliberately unsorted load order: the export is path-sorted, not load-ordered.
+  assert.equal((await workspace.ensure(TARGET_C)).status, "loaded");
+  assert.equal((await workspace.ensure(TARGET_A)).status, "loaded");
+  assert.equal((await workspace.ensure(TARGET_B)).status, "loaded");
+
+  applyEdit(workspace, TARGET_A, "EDITED");
+  assert.deepEqual(workspace.exportBuffers(), [
+    { path: "other.md", text: "other B end" },
+    { path: "shared.md", text: "head EDITED tail" },
+    { path: "third.md", text: "third C body" },
+  ]);
+});
