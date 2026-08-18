@@ -8,9 +8,11 @@ a fixed command plus (for diffs) one catalog-membership-validated path placed af
 
 The process envelope is deliberately narrow and honestly claimed: the env overlay
 pins off prompts (``GIT_TERMINAL_PROMPT``), opportunistic index writes
-(``GIT_OPTIONAL_LOCKS``), and partial-clone lazy fetches (``GIT_NO_LAZY_FETCH`` —
-``git diff HEAD`` may otherwise contact a promisor remote), and ``core.fsmonitor``
-is forced off per invocation (it may name an external hook executable). Git-config-
+(``GIT_OPTIONAL_LOCKS``), partial-clone lazy fetches (``GIT_NO_LAZY_FETCH`` —
+``git diff HEAD`` may otherwise contact a promisor remote), and pathspec expansion
+(``GIT_LITERAL_PATHSPECS`` — the validated path stays one literal file, never a
+glob), and ``core.fsmonitor`` is forced off per invocation (it may name an external
+hook executable). Git-config-
 driven content filters (``filter.<driver>.clean``) remain OUTSIDE the suppression
 claim: the workbench adds no authority beyond what ``git status``/``git diff``
 already execute in the repo owner's own shell. The timeout kill is
@@ -73,11 +75,15 @@ DIFF_UNTRACKED_ARGV_PREFIX = (
     "--",
     "/dev/null",
 )
-# No prompts; no opportunistic index write; no partial-clone network fetch.
+# No prompts; no opportunistic index write; no partial-clone network fetch; and
+# literal pathspec semantics — the request-derived path after `--` is otherwise a
+# Git PATHSPEC (a catalog file legally named `docs/*.md`, or one starting with
+# `:(magic)`, could match non-catalog files and leak past the one-file boundary).
 GIT_ENV_OVERLAY = {
     "GIT_TERMINAL_PROMPT": "0",
     "GIT_OPTIONAL_LOCKS": "0",
     "GIT_NO_LAZY_FETCH": "1",
+    "GIT_LITERAL_PATHSPECS": "1",
 }
 
 GIT_TIMEOUT_SECONDS = 10
@@ -164,26 +170,48 @@ def _run_captured_bytes(
     )
 
 
-def _fold_state(xy: str) -> GitFileState | None:
-    """Fold one porcelain XY pair into the closed per-file state (None = drop).
+def _record_presence(xy: str) -> tuple[bool, bool]:
+    """One record's ``(in_head, in_worktree)`` under the HEAD↔worktree baseline.
 
-    Derived consistently with the HEAD↔worktree diff baseline so a badge never
-    promises a change its diff can't show. Presence: in-HEAD unless staged-add or
-    untracked; in-worktree unless the worktree side is deleted. Both absent (e.g.
-    ``AD`` — staged add then worktree delete) cancels out: its HEAD diff is empty,
-    so the record is dropped entirely. Any unrecognized XY lands in the both-present
+    ``X == "A"`` is a staged add and ``Y == "A"`` is Git's intent-to-add
+    (``git add -N`` reports ``" A"``) — either way the path is new relative to
+    HEAD; ``??`` is untracked. The worktree side is absent when the worktree copy
+    is deleted (``Y == "D"``) or a staged delete has nothing left on disk
+    (``"D "``).
+    """
+    x, y = xy[0], xy[1]
+    in_head = not (x == "A" or y == "A" or xy == "??")
+    in_worktree = not (y == "D" or (x == "D" and y == " "))
+    return in_head, in_worktree
+
+
+def _merge_states(xys: list[str]) -> GitFileState | None:
+    """Fold one path's porcelain records into the closed per-file state (None = drop).
+
+    Derived consistently with the served diff baseline so a badge never promises a
+    change its diff can't show. Porcelain v1 can emit SEVERAL records for one
+    pathname even with renames disabled: ``git rm --cached`` while the worktree copy
+    remains yields ``"D "`` + ``"??"``. Tracked records win that merge because they
+    describe exactly what the served HEAD-form diff shows (``git diff HEAD`` ignores
+    the untracked copy and reports the staged deletion); the ``??`` record decides
+    the state only when it is the path's sole record kind. Both absent (e.g. ``AD``
+    — staged add then worktree delete) cancels out: its HEAD diff is empty, so the
+    path is dropped entirely. Any unrecognized XY lands in the both-present
     quadrant → ``modified`` (safe: the badge says "changed", the diff shows the
     truth).
     """
-    if xy in _UNMERGED_XY:
+    if any(xy in _UNMERGED_XY for xy in xys):
         return "conflicted"
-    x, y = xy[0], xy[1]
-    in_head = not (x == "A" or xy == "??")
-    in_worktree = not (y == "D" or (x == "D" and y == " "))
+    tracked = [xy for xy in xys if xy != "??"]
+    if not tracked:
+        return "untracked"
+    presences = [_record_presence(xy) for xy in tracked]
+    in_head = any(head for head, _ in presences)
+    in_worktree = any(worktree for _, worktree in presences)
     if not in_head and not in_worktree:
         return None
     if not in_head:
-        return "untracked" if xy == "??" else "added"
+        return "added"
     if not in_worktree:
         return "deleted"
     return "modified"
@@ -195,9 +223,11 @@ def _fold_porcelain(raw: bytes) -> tuple[tuple[GitFileEntry, ...], int] | None:
     Decoding is strict UTF-8 PER RECORD: a record whose bytes fail to decode is
     counted anonymously (it can never name a catalog path) and never listed; a
     record that decodes but has the wrong shape fails the whole status closed
-    (``git-error``) rather than guessing at the vocabulary.
+    (``git-error``) rather than guessing at the vocabulary. Same-path records are
+    coalesced (first-seen order) so one path is always one entry — duplicate rows
+    would split the badge from the served diff.
     """
-    entries: list[GitFileEntry] = []
+    xys_by_path: dict[str, list[str]] = {}
     anonymous = 0
     for record in raw.split(b"\x00"):
         if record == b"":
@@ -209,10 +239,12 @@ def _fold_porcelain(raw: bytes) -> tuple[tuple[GitFileEntry, ...], int] | None:
             continue
         if len(text) < 4 or text[2] != " ":
             return None
-        state = _fold_state(text[:2])
-        if state is None:
-            continue
-        entries.append(GitFileEntry(path=text[3:], state=state))
+        xys_by_path.setdefault(text[3:], []).append(text[:2])
+    entries: list[GitFileEntry] = []
+    for path, xys in xys_by_path.items():
+        state = _merge_states(xys)
+        if state is not None:
+            entries.append(GitFileEntry(path=path, state=state))
     return tuple(entries), anonymous
 
 

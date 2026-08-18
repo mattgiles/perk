@@ -353,7 +353,9 @@ revisiting this stack.
   (the config key may name an external hook executable). No endpoint or process adapter exposes
   any mutating Git operation (the PRD non-goal); structural never-rules pin every argv to
   `git` + `status`/`diff` with zero mutating tokens, and the only request-derived argv content is
-  one catalog-membership-validated path placed after `--`. `src/perk/substrate/git.py` is
+  one catalog-membership-validated path placed after `--` — executed under
+  `GIT_LITERAL_PATHSPECS=1`, so a catalog file legally named like a glob (or one starting with
+  `:(magic)`) can never expand into other files. `src/perk/substrate/git.py` is
   deliberately broad (checkout/reset/push/…) and is NOT the exposed adapter; everything lives in
   perk-dev.
 - **One bytes-mode spawn site.** `git._run_captured_bytes` is the second sanctioned perk-dev
@@ -365,10 +367,10 @@ revisiting this stack.
   a catalog path — while a structurally malformed record fails the whole status closed); diff
   bytes decode with `errors="replace"`, so a request can never surface a decode error.
 - **The narrowed, honest process-envelope claim.** The env overlay pins off prompts
-  (`GIT_TERMINAL_PROMPT=0`), opportunistic index writes (`GIT_OPTIONAL_LOCKS=0`), and
-  partial-clone lazy fetches (`GIT_NO_LAZY_FETCH=1` — `git diff HEAD` may otherwise contact a
-  promisor remote); fsmonitor hooks are pinned off per invocation; `--no-ext-diff`/`--no-textconv`
-  pin external diff drivers and textconv helpers off. Git-config-driven content filters
+  (`GIT_TERMINAL_PROMPT=0`), opportunistic index writes (`GIT_OPTIONAL_LOCKS=0`), partial-clone
+  lazy fetches (`GIT_NO_LAZY_FETCH=1` — `git diff HEAD` may otherwise contact a promisor remote),
+  and pathspec expansion (`GIT_LITERAL_PATHSPECS=1`); fsmonitor hooks are pinned off per
+  invocation; `--no-ext-diff`/`--no-textconv` pin external diff drivers and textconv helpers off. Git-config-driven content filters
   (`filter.<driver>.clean` selected by `.gitattributes`) are explicitly OUTSIDE the suppression
   claim: they run with the repo owner's own configuration and authority — the workbench adds no
   authority beyond what `git status`/`git diff` already execute in the owner's shell. The timeout
@@ -377,9 +379,12 @@ revisiting this stack.
 - **The folded per-file state derives from the served diff baseline.** One view: working tree vs
   `HEAD` (staged + unstaged combined). Porcelain XY pairs fold to the closed vocabulary
   `modified | added | deleted | untracked | conflicted` by HEAD/worktree presence — unmerged
-  pairs are `conflicted`; a both-absent record (e.g. `AD`) is dropped entirely (its HEAD diff is
-  empty — no row, no badge, not counted); an unrecognized XY lands safely in `modified` — so a
-  badge never promises a change its diff can't show. `--no-index` rc 1 is disambiguated
+  pairs are `conflicted`; intent-to-add (` A`) is a new path relative to HEAD → `added`; a
+  both-absent record (e.g. `AD`) is dropped entirely (its HEAD diff is empty — no row, no badge,
+  not counted); same-path records coalesce into ONE entry with tracked records winning (`git rm
+  --cached` leaves `D ` + `??`, and `git diff HEAD` serves the staged deletion the tracked record
+  describes); an unrecognized XY lands safely in `modified` — so a badge never promises a change
+  its diff can't show. `--no-index` rc 1 is disambiguated
   explicitly (it means "differs" OR an operational error): only a clean-stderr, non-empty-patch
   rc 1 is a difference; everything else fails closed as `git-error`.
 - **Bounds.** The only unbounded input — an arbitrary worktree file — is refused BEFORE spawning
@@ -550,9 +555,9 @@ keeps the guard streaming-transparent, which the offset-polling CheckRunner now 
 | Process-group cancellation/timeout with a single finalizer | Cancel/timeout set flags under the lock and escalate SIGTERM → 5s whole-group-probed grace → SIGKILL outside it (the probe is `killpg(pgid, 0)`, so a SIGTERM-resistant descendant is still killed); only the reader thread assigns terminal status, clears the slot, and cancels the timer; flag precedence `cancelled` > `timeout` > exit-code | cancel/timeout/idempotence/resistant-descendant/thread-settling tests in `test_prose_review_checks.py`; the real-HTTP cancel round trip + lifespan-shutdown-with-active-run arm in `test_prose_review_integration.py` |
 | Check shutdown is app-scoped | `runner.shutdown()` rides the FastAPI lifespan (no `atexit`): the active run's process group dies and the reader joins on graceful shutdown | `test_shutdown_kills_the_active_run_and_leaves_no_threads` |
 | Checks never touch catalog state | Check runs never take `source_transaction_mutex`, never read or swap the generation, and stay permitted while `writes_frozen`; they observe the live working tree by design | `test_checks_stay_permitted_while_writes_are_frozen` |
-| Fixed read-only Git argv + env pins | The three argv tables are module constants: every argv starts `git`, the subcommand ∈ {`status`, `diff`}, the only `-c` is `core.fsmonitor=false`, and no mutating token exists; the env overlay pins `GIT_TERMINAL_PROMPT=0`, `GIT_OPTIONAL_LOCKS=0`, `GIT_NO_LAZY_FETCH=1`; every execution uses `cwd=<repo root>` and a 10s timeout. Config-driven `filter.<driver>.clean` content filters are outside the suppression claim (the owner's own git config/authority); the timeout kill is child-only — both accepted, documented residuals | `test_fixed_argv_constants_are_pinned`, `test_structural_never_rules_over_every_fixed_argv`, `test_every_execution_uses_pinned_cwd_timeout_and_env_overlay` in `test_prose_review_git.py` |
+| Fixed read-only Git argv + env pins | The three argv tables are module constants: every argv starts `git`, the subcommand ∈ {`status`, `diff`}, the only `-c` is `core.fsmonitor=false`, and no mutating token exists; the env overlay pins `GIT_TERMINAL_PROMPT=0`, `GIT_OPTIONAL_LOCKS=0`, `GIT_NO_LAZY_FETCH=1`, `GIT_LITERAL_PATHSPECS=1`; every execution uses `cwd=<repo root>` and a 10s timeout. Config-driven `filter.<driver>.clean` content filters are outside the suppression claim (the owner's own git config/authority); the timeout kill is child-only — both accepted, documented residuals | `test_fixed_argv_constants_are_pinned`, `test_structural_never_rules_over_every_fixed_argv`, `test_every_execution_uses_pinned_cwd_timeout_and_env_overlay` in `test_prose_review_git.py` |
 | One bytes-mode captured Git spawn | `git._run_captured_bytes` is the only other sanctioned perk-dev subprocess literal (list argv, explicit `check=`/`timeout=`); porcelain and diff bytes decode inside the adapter's failure boundary (per-record strict UTF-8, `errors="replace"` diff text), so responses are always-200 envelopes | the wrapper guard in `test_tooling.py`; fold/decode/failure arms in `test_prose_review_git.py` |
-| Catalog-scoped Git exposure | The status handler partitions folded entries by captured-generation `units_for_path` membership — non-catalog paths (anonymous undecodable records included) are count-only, never listed; a non-catalog diff path is the fixed no-leak 404 `unknown path`; the diff path is the only request-derived argv content and sits after `--` | partitioning/404/envelope pins in `test_prose_review_web.py`; the real-repo round trip in `test_prose_review_integration.py` |
+| Catalog-scoped Git exposure | The status handler partitions folded entries by captured-generation `units_for_path` membership — non-catalog paths (anonymous undecodable records included) are count-only, never listed; a non-catalog diff path is the fixed no-leak 404 `unknown path`; the diff path is the only request-derived argv content, sits after `--`, and is literal (`GIT_LITERAL_PATHSPECS=1` — never a pathspec) | partitioning/404/envelope pins in `test_prose_review_web.py`; the literal-pathspec real-git arm in `test_prose_review_git.py`; the real-repo round trip in `test_prose_review_integration.py` |
 | Bounded Git diff serving | The worktree file is size-checked BEFORE any spawn (> 5,000,000 bytes → `too-large`); decoded diff text caps at 500,000 code points with `truncated=True` (truncated rows render the built-in text view, never the library). HEAD-side content (committed state) and O(changed paths) status output are accepted, documented bounds | bounds arms in `test_prose_review_git.py`; the truncated-row gate in `workspaceComponents.test.ts` |
 
 ## The round-trip proof split

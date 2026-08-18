@@ -1446,3 +1446,173 @@ test("git status first load and transport failure render the fixed section copy"
     await harness.cleanup();
   }
 });
+
+test("a successful save re-observes git status, updates annotations, and refetches the open diff row", async () => {
+  const harness = installDom();
+  const text = "before A after";
+  let statusCalls = 0;
+  let diffCalls = 0;
+  const restoreFetch = stubFetch(async (url, init): Promise<Response> => {
+    if (url === "/api/catalog/tree") {
+      return response(200, TREE);
+    }
+    if (url === "/api/git/status") {
+      statusCalls += 1;
+      return response(
+        200,
+        gitStatusBody([{ path: "shared.md", state: statusCalls === 1 ? "modified" : "added" }]),
+      );
+    }
+    if (url.startsWith("/api/git/diff?")) {
+      diffCalls += 1;
+      return response(200, gitDiffBody(`+save pass ${diffCalls}\n`));
+    }
+    if (url.startsWith("/api/inspect?")) {
+      return response(404, { detail: "unknown unit" });
+    }
+    if (url.startsWith("/api/source?")) {
+      const parsed = new URL(url, "http://127.0.0.1");
+      const fragment = UNIT_A.fragments.find(
+        (candidate) => candidate.id === parsed.searchParams.get("fragment"),
+      );
+      const target: SourceTarget = { unit: UNIT_A, fragment: fragment ?? null };
+      return response(200, load(target, text, editableView(target, text, "A")));
+    }
+    if (url === "/api/source/project") {
+      const body = JSON.parse(String(init?.body)) as { fragment: string | null; text: string };
+      const fragment = UNIT_A.fragments.find((candidate) => candidate.id === body.fragment);
+      const target: SourceTarget = { unit: UNIT_A, fragment: fragment ?? null };
+      return response(200, editableView(target, body.text, "saved A"));
+    }
+    if (url === "/api/source/save") {
+      return response(200, {
+        status: "saved",
+        source: {
+          unit: UNIT_A.id,
+          kind: UNIT_A.kind,
+          file: {
+            path: UNIT_A.path,
+            mode: 0o644,
+            newline_style: "lf",
+            load_hash: "a".repeat(64),
+          },
+        },
+        materialized: [],
+        checks: [],
+        catalog_refreshed: true,
+        refresh_detail: null,
+      });
+    }
+    throw new Error(`unexpected request: ${url}`);
+  });
+
+  try {
+    await harness.render(React.createElement(App));
+    await harness.settle();
+    assert.equal(statusCalls, 1);
+
+    // Mount a diff row against the first status snapshot.
+    await harness.click(buttonByText(harness.container, "Workspace (0)"));
+    const drawer = harness.container.querySelector<HTMLElement>(".workspace-drawer");
+    assert.ok(drawer !== null);
+    assert.match(drawer.textContent ?? "", /shared\.md · modified/);
+    await openGitRow(harness, gitRowByText(drawer, "shared.md"));
+    await settleUntil(
+      () => (drawer.textContent ?? "").includes("+save pass 1"),
+      "the first diff never rendered",
+    );
+    assert.equal(diffCalls, 1);
+
+    // The successful save bumps the catalog epoch: the status effect re-observes,
+    // the badges/rows update to the new snapshot, and the still-open row refetches
+    // (the cache was invalidated by the new outcome).
+    await harness.click(buttonByLabel(harness.container, `Expand fragments for ${UNIT_A.id}`));
+    await harness.click(buttonByText(harness.container, "Fragment A"));
+    await harness.settle();
+    await harness.input(textarea(harness.container), "saved A");
+    await harness.click(buttonByText(harness.container, "Review full-file diff"));
+    await harness.click(buttonByText(harness.container, "Save reviewed file"));
+    await settleUntil(() => statusCalls === 2, "the save never re-observed git status");
+    await settleUntil(
+      () => (drawer.textContent ?? "").includes("shared.md · added"),
+      "the annotation never updated to the new snapshot",
+    );
+    await settleUntil(() => diffCalls === 2, "the open row never refetched after the invalidation");
+    await settleUntil(
+      () => (drawer.textContent ?? "").includes("+save pass 2"),
+      "the refetched diff never rendered",
+    );
+    // Both canonical shared.md units carry the refreshed badge.
+    const badges = [...harness.container.querySelectorAll(".git-badge")].map(
+      (badge) => badge.textContent,
+    );
+    assert.deepEqual(badges, ["added", "added"]);
+  } finally {
+    restoreFetch();
+    await harness.cleanup();
+  }
+});
+
+test("a freezing save re-observes git status through the frozen transition", async () => {
+  const harness = installDom();
+  const text = "before A after";
+  let statusCalls = 0;
+  const restoreFetch = stubFetch(async (url, init): Promise<Response> => {
+    if (url === "/api/catalog/tree") {
+      return response(200, TREE);
+    }
+    if (url === "/api/git/status") {
+      statusCalls += 1;
+      return response(200, gitStatusBody([]));
+    }
+    if (url.startsWith("/api/inspect?")) {
+      return response(404, { detail: "unknown unit" });
+    }
+    if (url.startsWith("/api/source?")) {
+      return response(200, load(TARGET_A, text, editableView(TARGET_A, text, "A")));
+    }
+    if (url === "/api/source/project") {
+      const body = JSON.parse(String(init?.body)) as { text: string };
+      return response(200, editableView(TARGET_A, body.text, "saved A"));
+    }
+    if (url === "/api/source/save") {
+      return response(200, {
+        status: "saved",
+        source: {
+          unit: UNIT_A.id,
+          kind: UNIT_A.kind,
+          file: {
+            path: UNIT_A.path,
+            mode: 0o644,
+            newline_style: "lf",
+            load_hash: "9".repeat(64),
+          },
+        },
+        materialized: [],
+        checks: [],
+        catalog_refreshed: false,
+        refresh_detail: CATALOG_STALE_DETAIL,
+      });
+    }
+    throw new Error(`unexpected request: ${url}`);
+  });
+
+  try {
+    await harness.render(React.createElement(App));
+    await harness.settle();
+    assert.equal(statusCalls, 1);
+    await harness.click(buttonByLabel(harness.container, `Expand fragments for ${UNIT_A.id}`));
+    await harness.click(buttonByText(harness.container, "Fragment A"));
+    await harness.settle();
+    await harness.input(textarea(harness.container), "saved A");
+    await harness.click(buttonByText(harness.container, "Review full-file diff"));
+    await harness.click(buttonByText(harness.container, "Save reviewed file"));
+    // The catalog epoch never bumps on a failed refresh, so a second status
+    // request proves the frozen false→true transition drives the re-observation
+    // (the working tree changed even though the catalog could not reload).
+    await settleUntil(() => statusCalls === 2, "the freezing save never re-observed git status");
+  } finally {
+    restoreFetch();
+    await harness.cleanup();
+  }
+});

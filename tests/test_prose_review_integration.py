@@ -859,11 +859,18 @@ def _git(repo: Path, *args: str) -> None:
     )
 
 
-def test_git_status_and_diff_round_trip_over_real_http(server: _RunningServer) -> None:
+def test_git_status_and_diff_round_trip_over_real_http(
+    server: _RunningServer, monkeypatch: pytest.MonkeyPatch
+) -> None:
     # The fixture trust root becomes a real dirty repository for this test only:
     # commit the baseline, dirty one catalog file plus one outside file, observe over
     # HTTP, then restore the tree and drop `.git` (status/diff are computed fresh per
     # request, so no other test can observe the interlude).
+    # The SERVER phase must be hermetic too: the in-process GitReader spawns with
+    # `os.environ`, so a developer's global config (e.g. `core.excludesFile`) must
+    # not be able to hide the fixture files during the HTTP round trip.
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", "/dev/null")
+    monkeypatch.setenv("GIT_CONFIG_SYSTEM", "/dev/null")
     repo = server.repo_root
     agents = repo / "AGENTS.md"
     original = agents.read_bytes()

@@ -62,6 +62,8 @@ def _status_reader(
         ("T ", "modified"),
         ("A ", "added"),
         ("AM", "added"),
+        # Intent-to-add (`git add -N`): the path is new relative to HEAD.
+        (" A", "added"),
         ("D ", "deleted"),
         (" D", "deleted"),
         ("MD", "deleted"),
@@ -96,6 +98,23 @@ def test_both_absent_record_is_dropped_entirely(
     reader = _status_reader(monkeypatch, tmp_path, b"AD ghost.md\x00 M kept.md\x00")
     assert reader.status() == GitStatusAvailable(
         entries=(GitFileEntry(path="kept.md", state="modified"),), other_paths=0
+    )
+
+
+def test_same_path_records_coalesce_into_one_baseline_aware_entry(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    # `git rm --cached` with the worktree copy intact emits BOTH `D ` and `??` for
+    # one pathname. The tracked record wins the merge — `git diff HEAD` ignores the
+    # untracked copy and serves the staged deletion — so the one coalesced entry
+    # (`deleted`) always agrees with the diff its row will show.
+    reader = _status_reader(monkeypatch, tmp_path, b"D  a.md\x00?? a.md\x00 M b.md\x00")
+    assert reader.status() == GitStatusAvailable(
+        entries=(
+            GitFileEntry(path="a.md", state="deleted"),
+            GitFileEntry(path="b.md", state="modified"),
+        ),
+        other_paths=0,
     )
 
 
@@ -169,6 +188,9 @@ def test_fixed_argv_constants_are_pinned() -> None:
         "GIT_TERMINAL_PROMPT": "0",
         "GIT_OPTIONAL_LOCKS": "0",
         "GIT_NO_LAZY_FETCH": "1",
+        # The request-derived path after `--` must stay one literal file: without
+        # this a catalog file named like a glob (or `:(magic)`) is a pathspec.
+        "GIT_LITERAL_PATHSPECS": "1",
     }
 
 
@@ -413,8 +435,17 @@ def _commit(repo: Path, message: str) -> None:
     )
 
 
+def _hermetic_reader_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Pin the READER phase hermetic too: GitReader spawns with ``os.environ``, so a
+    developer's global config (e.g. a ``core.excludesFile`` matching the fixture
+    names) must not be able to hide fixtures or skew assertions."""
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", "/dev/null")
+    monkeypatch.setenv("GIT_CONFIG_SYSTEM", "/dev/null")
+
+
 @pytest.fixture()
-def git_repo(tmp_path: Path) -> Path:
+def git_repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    _hermetic_reader_env(monkeypatch)
     repo = tmp_path / "repo"
     repo.mkdir()
     _git(repo, "init", "-q")
@@ -483,6 +514,48 @@ def test_real_git_folds_states_and_serves_head_and_no_index_diffs(git_repo: Path
     assert reader.diff("ghost.md") == GitDiffAvailable(diff="", truncated=False)
 
 
+def test_real_git_coalesces_rm_cached_and_classifies_intent_to_add(git_repo: Path) -> None:
+    # `git rm --cached`: one path, two porcelain records (`D ` + `??`) — one entry.
+    _git(git_repo, "rm", "--cached", "-q", "tracked.md")
+    # Intent-to-add: ` A` — a new path relative to HEAD, never "modified".
+    (git_repo / "ita.md").write_text("intent\n", encoding="utf-8")
+    _git(git_repo, "add", "-N", "ita.md")
+
+    reader = GitReader(git_repo)
+    status = reader.status()
+    assert isinstance(status, GitStatusAvailable)
+    assert {entry.path: entry.state for entry in status.entries} == {
+        "tracked.md": "deleted",
+        "ita.md": "added",
+    }
+
+    # The badge agrees with the served diff: `git diff HEAD` ignores the untracked
+    # copy and reports the staged deletion.
+    deleted = reader.diff("tracked.md")
+    assert isinstance(deleted, GitDiffAvailable)
+    assert "-one" in deleted.diff
+    ita = reader.diff("ita.md")
+    assert isinstance(ita, GitDiffAvailable)
+    assert "+intent" in ita.diff
+
+
+def test_real_git_diff_path_is_literal_never_a_pathspec(git_repo: Path) -> None:
+    # A catalog file may legally be named like a glob; without literal pathspec
+    # semantics `git diff … -- 'glob*.md'` would match (and leak) other files.
+    (git_repo / "glob*.md").write_text("literal one\n", encoding="utf-8")
+    (git_repo / "globX.md").write_text("other one\n", encoding="utf-8")
+    _git(git_repo, "add", "-A")
+    _commit(git_repo, "glob names")
+    (git_repo / "glob*.md").write_text("literal two\n", encoding="utf-8")
+    (git_repo / "globX.md").write_text("other two\n", encoding="utf-8")
+
+    reader = GitReader(git_repo)
+    result = reader.diff("glob*.md")
+    assert isinstance(result, GitDiffAvailable)
+    assert "+literal two" in result.diff
+    assert "globX.md" not in result.diff
+
+
 def test_real_git_clean_tree_and_clean_path(git_repo: Path) -> None:
     reader = GitReader(git_repo)
     assert reader.status() == GitStatusAvailable(entries=(), other_paths=0)
@@ -490,7 +563,10 @@ def test_real_git_clean_tree_and_clean_path(git_repo: Path) -> None:
     assert reader.diff("tracked.md") == GitDiffAvailable(diff="", truncated=False)
 
 
-def test_real_git_outside_any_repository_is_git_error(tmp_path: Path) -> None:
+def test_real_git_outside_any_repository_is_git_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _hermetic_reader_env(monkeypatch)
     reader = GitReader(tmp_path)
     assert reader.status() == GitStatusUnavailable(reason="git-error")
     assert reader.diff("a.md") == GitDiffUnavailable(reason="git-error")
