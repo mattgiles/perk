@@ -1,11 +1,13 @@
-"""The idempotent post-merge land finalization seam (`perk.delivery.finalize`).
+"""The idempotent post-merge land finalization (package-internal `perk.delivery.finalize`).
 
-The four durable bookkeeping effects extracted from `perk pr land`: the learn-state stamp, the
+The four durable bookkeeping effects behind every land path: the learn-state stamp, the
 explicit plan-issue close, the objective reconciliation, and the learn-issue consume — driven by
-reconstructed inputs (`LandedPlan`), never the worktree cache. The CLI-level land behavior stays
-pinned in `tests/test_pr_land.py`; the import-level cache-independence proof is the
-fresh-interpreter guard in `tests/test_delivery_continuation.py` (no `perk.state` module loads
-with `perk.delivery`).
+reconstructed inputs (`LandedPlan`), never the worktree cache. Consumers bind it by module path
+(`Delivery.land`'s runtime, stacked landing's per-layer finalize, recovery) — it is no longer a
+public package export. The CLI-level land behavior stays pinned in `tests/test_pr_land.py` and
+the façade matrix in `tests/test_delivery_facade.py`; the import-level cache-independence proof
+is the fresh-interpreter guard in `tests/test_delivery_continuation.py` (no `perk.state` module
+loads with `perk.delivery`).
 """
 
 from pathlib import Path

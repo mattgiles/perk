@@ -35,6 +35,7 @@ from perk.backends.linear import attachments as linear_attachments
 from perk.backends.linear import client as linear_client
 from perk.backends.resolve import resolve_objective_store
 from perk.cli.cli import cli
+from perk.github import prs
 from perk.objective.drift import DriftCode
 from perk.run import run_report
 from perk.state import cache
@@ -89,9 +90,11 @@ def _patch_pr_tier_for_submit(monkeypatch: pytest.MonkeyPatch) -> dict[str, obje
 def _patch_pr_tier_for_land(
     monkeypatch: pytest.MonkeyPatch, *, draft: bool = True, merged: bool = False
 ) -> dict[str, object]:
+    # `Delivery.land`'s production GitHub authority delegates to `perk.github.prs`, so the
+    # PR-tier stubs target that module (the module-level `perk.github` aliases are unused here).
     calls: dict[str, object] = {"readied": False, "merged": False, "commit_message": None}
     monkeypatch.setattr(
-        github,
+        prs,
         "find_pr_for_branch",
         lambda **k: _pr(draft=draft, state="MERGED" if merged else "OPEN"),
     )
@@ -104,8 +107,8 @@ def _patch_pr_tier_for_land(
         calls["commit_message"] = k.get("commit_message")
         return _pr(state="MERGED")
 
-    monkeypatch.setattr(github, "mark_pr_ready", _ready)
-    monkeypatch.setattr(github, "merge_pr", _merge)
+    monkeypatch.setattr(prs, "mark_pr_ready", _ready)
+    monkeypatch.setattr(prs, "merge_pr", _merge)
     return calls
 
 

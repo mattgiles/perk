@@ -53,6 +53,9 @@ Delivery.sync(SyncRequest {mode, objective_id, run_id?, include_base?, dry_run?,
 Delivery.recover(RecoverRequest {kind=operation_conclusion|cancellation_metadata,
                                  objective_id, action?, dry_run?, operation_id?}, consent=...)
   -> RecoverResult {kind; exactly one of OperationConclusion | CancellationMetadata}
+Delivery.land(LandRequest {kind=plan, plan_id, branch, objective_id, consumed_learn,
+                           delivery_lineage, dry_run?})
+  -> LandResult {kind; exactly the matching Plan detail}
 ```
 
 Prepare is a closed flat family: authoring capability; replan facts from one objective snapshot;
@@ -66,20 +69,35 @@ guards. `PublishRequest` is a closed layer/ready matrix; `PublishResult` has exa
 `Layer`/`Ready` details and carries nested cascade facts as `SyncResult` directly. The pure
 `DeliveryTrain` reconstruction, private capability rows, internal `LayerContext`/layer core,
 publication/synchronization engines and runtimes, and production adapters are not package-root
-APIs. `DeliveryError` is the bounded status + Prepare + Transfer + Publish + sync + Recover hierarchy;
-status still translates only its exact six-code subset, while every Publish error carries joint
-phase/origin metadata. Claimed-prefix/continuation/writer/record-recovery vocabulary stays
-internal. The package root additionally exports `RecoverRequest`/`RecoverResult` and has exactly
-63 exports; the recovery context/runtime/adapters remain internal, and there is no
-`recover_operations` or `RecoverError` compatibility path. `RecoverRequest` is a strict
+APIs. `DeliveryError` is the bounded status + Prepare + Transfer + Publish + sync + Recover + Land
+hierarchy; status still translates only its exact six-code subset, while every Publish and Land
+error carries joint phase/origin metadata (Land: domain refusals `stacked_plan` /
+`plan_not_found` / `no_pr` vs the `github_error` infra translation under the `land` phase —
+no Git authority call exists on that path, so no speculative `git_error` arm). Claimed-prefix/continuation/writer/record-recovery vocabulary stays
+internal. The package root additionally exports `RecoverRequest`/`RecoverResult` and
+`LandRequest`/`LandResult` and has exactly 59 exports; the recovery and land
+context/runtime/adapters remain internal, there is no `recover_operations` or `RecoverError`
+compatibility path, and the post-merge finalization family (`finalize_landed_plan`,
+`LandedPlan`, `LandFinalization`, `ObjectiveLandUpdate`, `LearnConsumeUpdate`) plus
+`squash_commit_message` left the root — package-internal module-path consumers only.
+`RecoverRequest` is a strict
 two-kind family — `operation_conclusion` plus the `cancellation_metadata` repair variant
 (report-only action, no operation target, no consent) — and `RecoverResult` is the matching
 strict wrapper: one kind↔detail guard over nested `OperationConclusion` (the complete
 operation report and consent previews) and `CancellationMetadata` (per-candidate
 `CancellationAction` rows, the separate failed action, aborted/dry-run/unavailable facts),
-with no forwarding properties. Landing evidence stays deferred/type-only so importing the
-package does not create a façade↔landing cycle. Landing mutation remains a separate operation
-seam.
+with no forwarding properties. `LandRequest` is the realized Land family's first variant
+(`kind="plan"` — the complete incremental `perk pr land` operation; reconstructed caller
+intent, `plan_id` carried verbatim), and `LandResult` is the strict kind↔detail wrapper from
+day one (nested `PrSummary`/`ObjectiveUpdate`/`LearnUpdate`/`Plan` records mirroring the
+internal finalize records field-for-field; the plan-ref-derived request intent fields carry
+no defaults — omission fails at construction) so the `objective` variant lands beside `plan`
+without reshaping. `Delivery.land` deliberately takes **no consent callback and no lock** on
+this variant — both arrive with atomic objective landing. Landing evidence stays
+deferred/type-only so importing the package does not create a façade↔landing cycle. The
+atomic objective-landing mutation (readiness preview + `land_train` and the
+readiness/landing root exports) remains a separate internal operation seam until that node
+migrates it.
 
 The façade receives three nominal aggregate authorities:
 
@@ -120,8 +138,12 @@ adds `get_pr`, `create_pr`, `update_pr_body`, `update_pr_base`, `reopen_pr`, `ma
 cancellation-metadata variant adds only the optional persistence capability
 `native_cancellation_metadata_writer()` — a concrete default-`None` method overridden by the
 lazy production adapter (returning the resolved store exactly when it structurally satisfies
-the package-internal writer Protocol) and the owned fake. No parallel
-branch/stack/objective authority is introduced.
+the package-internal writer Protocol) and the owned fake. Land adds exactly abstract
+persistence `backend_id()` (the aligned issue-backend identity for backend-branching squash
+text — abstract because a wrong silent default would be dishonest) and abstract GitHub
+`merge_pr(number, *, commit_message)` (the direct idempotent squash merge returning the
+synthetic MERGED view); no default-branch capability is added (that read stays inside the
+internal finalizer). No parallel branch/stack/objective authority is introduced.
 
 The nominal interfaces make authority ownership explicit and support small owned in-memory fakes;
 interface, real adapter, and constructor-configured fake move together. Calls that authoring
@@ -146,7 +168,10 @@ manifest/directory enumeration, the temporarily retained per-layer finalizer, sl
 config resolves before the lock, which is then held through consent, reclassification,
 convergence, metadata reads, and the final sweep. Publish binds the same authorities plus bound
 status/sync into one private context; its private runtime owns only
-clock/sleep/id/PR-body validation. Both Publish dry-run arms
+clock/sleep/id/PR-body validation. Land binds the three aggregates into one private context;
+its private runtime holds only the temporarily retained package-internal per-layer finalizer
+(`finalize_landed_plan`, still resolve-based — an authority-driven rebind is deliberately
+deferred with the remaining landing migration). Both Publish dry-run arms and the Land dry-run
 return before every authority call. Every effectful operation still reconstructs fresh state before
 deciding anything. Mutators return typed
 before/after projections and per-effect outcomes; command handlers do not infer success from log
@@ -708,6 +733,7 @@ The cold CLI namespace reflects the domain split:
 | `perk objective stack sync` | `Delivery.sync` cascade/continue/abort | Published branch suffix, then checkpoints; or retained local conflict state |
 | `perk objective stack recover` | `Delivery.recover` operation conclusion | Only effects required to conclude an existing prepared operation |
 | `perk objective stack land` | `land` | GitHub stack merge, then idempotent bookkeeping |
+| `perk pr land` | `Delivery.land` plan | PR ready→squash-merge, then idempotent bookkeeping |
 
 > **Status (landed vs deferred):** `stack status`, the complete `stack sync` control surface,
 > `stack recover`, and the warm `/objective-*` gestures are landed (contracts §8.49/§8.51).
@@ -717,9 +743,12 @@ The cold CLI namespace reflects the domain split:
 > `/objective-land`, contracts §8.56), interrupted-landing recovery (the §8.51 LAND arm:
 > handle×observation classification, automatic all-after roll-forward, confirmed abandon,
 > the `--accept-prefix` breach, and the finalization-convergence pass), and the
-> ordered-journal-evidence objective reconciliation drive are all landed. The broader landing
-> mutation/finalization machinery is still a direct operation seam awaiting its own façade
-> migration; recover keeps only a private runtime callback to the shared per-layer finalizer.
+> ordered-journal-evidence objective reconciliation drive are all landed. The incremental
+> `perk pr land` is landed behind `Delivery.land` (the `kind="plan"` variant; contracts §8.4),
+> with post-merge finalization package-internal. The atomic objective-landing
+> mutation/finalization machinery (`land_train` + the readiness/landing root exports) is still
+> a direct operation seam awaiting its own façade migration; recover and `Delivery.land` keep
+> only private runtime callbacks to the shared per-layer finalizer.
 > Cancellation-metadata repair is landed as the second Recover variant
 > (`kind="cancellation_metadata"`): dispatched before worktree config and the operation lock,
 > isolated from every operation-conclusion mechanism (no journal mutation, classification,

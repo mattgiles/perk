@@ -1,7 +1,9 @@
 """The delivery **finalize** operation — idempotent post-merge land finalization.
 
-The durable post-merge bookkeeping every land path performs per merged plan, extracted from the
-incremental `perk pr land` worker so stacked landing/recovery can reuse it per layer. The
+The durable post-merge bookkeeping every land path performs per merged plan. **Package-internal**
+(no root export): consumers bind it by module path — :meth:`perk.delivery.facade.Delivery.land`'s
+private runtime (the incremental plan variant), stacked landing's per-layer finalize
+(:mod:`perk.delivery.landing`), and recovery's roll-forward (:mod:`perk.delivery.recover`). The
 operation owns exactly **four durable effects**, in order: stamp the canonical `learn_state`
 plan-header field (contracts.md §8.36, never-downgrade) → close the plan issue where autoclose
 cannot (non-default github base / non-github backends) → reconcile the linked objective

@@ -4,9 +4,10 @@
 projection to :mod:`perk.delivery.train`; ``prepare`` owns authoring capability, replan facts,
 plan identity, stacked-planning classification, and executable layer-start preparation;
 ``transfer`` owns replan routing and mutation; ``publish`` owns layer publication and
-draft-to-ready routing; ``sync`` dispatches the suffix transaction engine; and ``recover`` owns
-operation conclusion plus the narrow cancellation-metadata repair. Construction remains
-assignment-only and pure derivation stays in this module.
+draft-to-ready routing; ``sync`` dispatches the suffix transaction engine; ``recover`` owns
+operation conclusion plus the narrow cancellation-metadata repair; and ``land`` owns the
+incremental plan land (ready → direct squash merge → the four-effect finalization
+bookkeeping). Construction remains assignment-only and pure derivation stays in this module.
 """
 
 from abc import ABC, abstractmethod
@@ -107,6 +108,8 @@ _DELIVERY_ERROR_TYPES = frozenset(
         "objective_not_open",
         "invalid_roadmap",
         "supersede_unsupported",
+        "stacked_plan",
+        "plan_not_found",
     }
 )
 
@@ -130,7 +133,8 @@ type PublishKind = Literal["layer", "ready"]
 type PublishDelivery = Literal["incremental", "stacked"]
 type RecoverKind = Literal["operation_conclusion", "cancellation_metadata"]
 type RecoverAction = Literal["report", "abandon", "accept_prefix"]
-type DeliveryPhase = Literal["layer", "cascade", "ready"]
+type LandKind = Literal["plan"]
+type DeliveryPhase = Literal["layer", "cascade", "ready", "land"]
 type DeliveryOrigin = Literal["domain", "git", "github", "delivery"]
 type PlanningDecisionKind = Literal[
     "ready",
@@ -856,6 +860,83 @@ type _RecoverConsent = Callable[
 
 
 @dataclass(frozen=True)
+class LandRequest:
+    """Request one plan land: the complete incremental ``perk pr land`` operation.
+
+    The request is reconstructed caller intent — the façade never reads the worktree
+    ``cache.plan-ref``. ``plan_id`` is carried verbatim (no ``#``-normalization: refusal and
+    message bytes use it as-is), and ``delivery_lineage`` is the cached ref's value — the
+    local half of the stacked routing discriminator (the header half rides the façade's
+    authoritative plan read). The three plan-ref-derived fields carry **no defaults**:
+    ``delivery_lineage`` gates the stacked refusal (on the offline dry-run it is the only
+    evidence) and ``objective_id``/``consumed_learn`` steer finalization, so a caller that
+    forgets to reconstruct one must fail at construction, never land with silently weaker
+    behavior (the empty values ``None``/``()`` remain expressible — just explicit).
+    """
+
+    kind: LandKind
+    plan_id: str
+    branch: str
+    objective_id: str | None
+    consumed_learn: tuple[str, ...]
+    delivery_lineage: str | None
+    dry_run: bool = False
+
+    def __post_init__(self) -> None:
+        if self.kind != "plan":
+            raise ValueError(f"unknown land kind: {self.kind!r}")
+        if not _nonblank(self.plan_id):
+            raise ValueError("land plan_id must be nonblank")
+        if not _nonblank(self.branch):
+            raise ValueError("land branch must be nonblank")
+
+
+@dataclass(frozen=True)
+class LandResult:
+    """The strict kind↔detail result family returned by :meth:`Delivery.land`: exactly the
+    detail matching ``kind`` is present (the ``objective`` variant arrives with atomic
+    objective landing)."""
+
+    @dataclass(frozen=True)
+    class PrSummary:
+        """The picked PR number/state subset — merge evidence on a real land, the synthetic
+        ``(0, "OPEN")`` preview on a dry run (deliberately NOT named after either arm)."""
+
+        number: int
+        state: str
+
+    @dataclass(frozen=True)
+    class ObjectiveUpdate:
+        objective: str | None
+        nodes_marked: tuple[str, ...]
+        skipped_reason: str | None
+        closed: bool = False
+
+    @dataclass(frozen=True)
+    class LearnUpdate:
+        closed: tuple[str, ...]
+        skipped_reason: str | None
+
+    @dataclass(frozen=True)
+    class Plan:
+        dry_run: bool
+        pr: "LandResult.PrSummary"
+        objective: "LandResult.ObjectiveUpdate"
+        learn: "LandResult.LearnUpdate"
+        plan_issue_closed: bool = False
+        learn_state: str | None = None
+
+    kind: LandKind
+    plan: Plan | None = None
+
+    def __post_init__(self) -> None:
+        if self.kind != "plan":
+            raise ValueError(f"unknown land result kind: {self.kind!r}")
+        if (self.plan is not None) != (self.kind == "plan"):
+            raise ValueError("land result detail must match kind exactly")
+
+
+@dataclass(frozen=True)
 class StatusRequest:
     """Request one objective's current delivery status."""
 
@@ -893,7 +974,7 @@ class DeliveryError(Exception):
             raise ValueError(f"unknown delivery error type {error_type!r} (allowed: {allowed})")
         if (phase is None) != (origin is None):
             raise ValueError("delivery error phase and origin must be jointly present or absent")
-        if phase is not None and phase not in ("layer", "cascade", "ready"):
+        if phase is not None and phase not in ("layer", "cascade", "ready", "land"):
             raise ValueError(f"unknown delivery error phase: {phase!r}")
         if origin is not None and origin not in ("domain", "git", "github", "delivery"):
             raise ValueError(f"unknown delivery error origin: {origin!r}")
@@ -919,6 +1000,12 @@ class DeliveryPersistence(ABC):
     @abstractmethod
     def get_plan(self, *, issue_id: str) -> PlanState | None:
         """Read one plan by backend-owned id."""
+        ...
+
+    @abstractmethod
+    def backend_id(self) -> str:
+        """The aligned issue-backend identity (e.g. ``"github"``) — abstract because a wrong
+        silent default would mis-shape backend-branching squash text."""
         ...
 
     @abstractmethod
@@ -1230,6 +1317,12 @@ class DeliveryGitHub(ABC):
     @abstractmethod
     def mark_pr_ready(self, number: int) -> None:
         """Convert one draft PR to ready-for-review."""
+        ...
+
+    @abstractmethod
+    def merge_pr(self, number: int, *, commit_message: str) -> prs.PullRequest:
+        """Directly squash-merge one PR (idempotent; the returned view is synthetic MERGED
+        evidence carrying no ``base_ref``)."""
         ...
 
     @abstractmethod
@@ -1668,6 +1761,35 @@ class Delivery:
             raise DeliveryError(str(exc), error_type="invalid_config") from exc
         except (GitHubError, IssueBackendError, ObjectiveStoreError, TrainPersistenceError) as exc:
             raise DeliveryError(str(exc), error_type="github_error") from exc
+
+    def land(self, request: LandRequest) -> LandResult:
+        """Land one plan's PR: ready (if draft) → direct idempotent squash merge → the
+        four-effect finalization bookkeeping. The pending-learn marker and the Linear agent
+        "landed" activity emission stay caller-owned (worktree-scoped, per the seam
+        contract)."""
+        from perk.delivery import land_plan as land_plan_mod  # noqa: PLC0415 — façade/engine cycle
+
+        context = land_plan_mod._LandContext(
+            persistence=self._persistence,
+            git=self._git,
+            github=self._github,
+        )
+        try:
+            return land_plan_mod._dispatch(
+                context, request, runtime=land_plan_mod._DEFAULT_LAND_RUNTIME
+            )
+        except DeliveryError:
+            raise
+        except (
+            train.TrainReconstructionError,
+            GitHubError,
+            IssueBackendError,
+            ObjectiveStoreError,
+            TrainPersistenceError,
+        ) as exc:
+            raise DeliveryError(
+                str(exc), error_type="github_error", phase="land", origin="github"
+            ) from exc
 
     def publish(self, request: PublishRequest) -> PublishResult:
         """Publish one layer or open one layer's PR for review."""

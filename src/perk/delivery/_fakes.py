@@ -72,6 +72,7 @@ class FakeDeliveryPersistence(_FailureMixin, DeliveryPersistence):
         outcome_results: Mapping[str, AppendResult] | None = None,
         header_results: Mapping[str, PlanHeaderUpdate] | None = None,
         successors_by_run: Mapping[str, ObjectiveRef] | None = None,
+        backend_id: str = "github",
         preserve_transfer_carries: bool = False,
         finalize_result: bool = True,
         close_result: bool = True,
@@ -94,6 +95,7 @@ class FakeDeliveryPersistence(_FailureMixin, DeliveryPersistence):
         self._outcome_results = dict(outcome_results or {})
         self._header_results = dict(header_results or {})
         self._successors_by_run = dict(successors_by_run or {})
+        self._backend_id = backend_id
         self._preserve_transfer_carries = preserve_transfer_carries
         self._finalize_result = finalize_result
         self._close_result = close_result
@@ -128,6 +130,12 @@ class FakeDeliveryPersistence(_FailureMixin, DeliveryPersistence):
         self.calls.append(call)
         self._raise_failure(call)
         return self._plan_bodies.get(issue_id)
+
+    def backend_id(self) -> str:
+        call: Call = ("backend_id",)
+        self.calls.append(call)
+        self._raise_failure(call)
+        return self._backend_id
 
     def update_plan_header(self, *, issue_id: str, fields: dict[str, object]) -> PlanHeaderUpdate:
         copied = deepcopy(fields)
@@ -612,6 +620,14 @@ class FakeDeliveryGitHub(_FailureMixin, DeliveryGitHub):
         call: Call = ("mark_pr_ready", number)
         self.calls.append(call)
         self._raise_failure(call)
+
+    def merge_pr(self, number: int, *, commit_message: str) -> prs.PullRequest:
+        """Record the exact merge call and answer the real endpoint's synthetic MERGED shape
+        (no ``base_ref``); failures ride the shared ``_FailureMixin`` scripting."""
+        call: Call = ("merge_pr", number, commit_message)
+        self.calls.append(call)
+        self._raise_failure(call)
+        return prs.PullRequest(number=number, url="", is_draft=False, state="MERGED", existed=True)
 
     def create_stack(self, pull_requests: tuple[int, ...]) -> stacks.StackMutationOutcome:
         call: Call = ("create_stack", pull_requests)
