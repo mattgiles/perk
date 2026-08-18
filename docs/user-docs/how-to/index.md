@@ -109,6 +109,8 @@ for exactly one goal.
   `.pi/agents/`, list it, and run it through `workflowScript`.
 - [How to scope Pi resources per project](./scope-pi-resources-per-project.md) — filter one
   package's extensions, skills, prompts, or themes with `pi config -l`.
+- [How to enable shell completion](./enable-shell-completion.md) — activate TAB completion so
+  plan and objective ids complete from the live issue backend, with title previews.
 
 ## Providers & backends
 
