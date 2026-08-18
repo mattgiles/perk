@@ -227,7 +227,7 @@ test("a failed start with no latest run is the start-failed notice", async () =>
   assert.deepEqual(lastState(h.states), { active: null, history: [], notice: "start-failed" });
 });
 
-test("the cancel response body is ignored: polling stays the one writer", async () => {
+test("the cancel acknowledgment is status-only: polling stays the one writer", async () => {
   const h = harness();
   h.session.start("prose-map");
   lastRequest(h.pending).respond(respond(200, run({ output: "a\n", next_offset: 2 })));
@@ -238,9 +238,10 @@ test("the cancel response body is ignored: polling stays the one writer", async 
   const cancelPost = lastRequest(h.pending);
   assert.equal(cancelPost.url, "/api/checks/run/run-1/cancel");
   assert.equal(cancelPost.init?.method, "POST");
-  // A hostile/duplicate body must not double-record or drop output.
+  // The server acknowledges with an empty 204; even a hostile body-carrying
+  // response must not double-record or drop output — the session never reads it.
   cancelPost.respond(
-    respond(200, run({ status: "cancelled", output: "REPLACED", next_offset: 8 })),
+    respond(204, run({ status: "cancelled", output: "REPLACED", next_offset: 8 })),
   );
   await tick();
   assert.equal(h.states.length, emitted, "cancel acknowledgment emits nothing");
@@ -367,9 +368,26 @@ test("adoptLatest adopts only a running run and ignores terminal or null", async
   assert.equal(lastRequest(reloadHarness.pending).url, "/api/checks/run/reloaded-1?offset=8");
 });
 
-test("getState returns the current snapshot and history is capped at 20", async () => {
+test("a stale terminal latest observed on mount is never adopted by a failed start", async () => {
   const h = harness();
-  assert.deepEqual(h.session.getState(), { active: null, history: [], notice: null });
+  h.session.adoptLatest();
+  const stale = run({ run: "stale-1", status: "failed", exit_code: 1, output: "old\n" });
+  lastRequest(h.pending).respond(respond(200, { run: stale }));
+  await tick();
+  assert.equal(h.states.length, 0, "a terminal latest is observed on mount, not adopted");
+
+  h.session.start("prose-map");
+  lastRequest(h.pending).fail(new Error("network down"));
+  await tick();
+  // Reconciliation returns the SAME pre-existing terminal record: it is known from
+  // the mount baseline, so the real start failure surfaces instead of the stale run.
+  lastRequest(h.pending).respond(respond(200, { run: stale }));
+  await tick();
+  assert.deepEqual(lastState(h.states), { active: null, history: [], notice: "start-failed" });
+});
+
+test("history is newest-first and capped at 20", async () => {
+  const h = harness();
   for (let index = 0; index < 23; index += 1) {
     h.session.start("ruff");
     lastRequest(h.pending).respond(
@@ -377,9 +395,8 @@ test("getState returns the current snapshot and history is capped at 20", async 
     );
     await tick();
   }
-  const state = h.session.getState();
+  const state = lastState(h.states);
   assert.equal(state.history.length, 20);
   assert.equal(state.history[0]?.run, "run-22", "history is newest-first");
   assert.equal(state.history[19]?.run, "run-3");
-  assert.deepEqual(h.session.getState(), lastState(h.states));
 });

@@ -51,7 +51,6 @@ export type CheckSession = {
   start: (check: CheckId) => void;
   cancel: () => void;
   adoptLatest: () => void;
-  getState: () => CheckSessionState;
   dispose: () => void;
 };
 
@@ -80,8 +79,10 @@ export function createCheckSession(deps: CheckSessionDeps): CheckSession {
   let generation = 0;
   let state: CheckSessionState = { active: null, history: [], notice: null };
   let nextOffset = 0;
-  // Every run id this session has already recorded (active, history, or lost) — the
-  // latest-reconciliation read adopts only runs outside this set.
+  // Every run id this session has already observed — adopted (active, history, or
+  // lost) or merely seen as a pre-existing terminal `latest` record on mount. The
+  // latest-reconciliation read adopts only runs outside this set, so a stale
+  // terminal run that predates a failed start can never masquerade as its outcome.
   const knownRuns = new Set<string>();
 
   function emit(next: CheckSessionState): void {
@@ -278,7 +279,9 @@ export function createCheckSession(deps: CheckSessionDeps): CheckSession {
     },
     adoptLatest(): void {
       // Called once on App mount: re-adopt a still-running run after a page reload.
-      // A terminal or null result is ignored (history is client-session state).
+      // A terminal or null result is ignored (history is client-session state) but
+      // its id is still RECORDED as known — the baseline that keeps a later failed
+      // start's reconciliation from adopting this stale pre-existing record.
       const current = generation;
       void (async () => {
         try {
@@ -287,7 +290,11 @@ export function createCheckSession(deps: CheckSessionDeps): CheckSession {
             return;
           }
           const parsed = parseLatestCheck(await response.json());
-          if (parsed === null || parsed.run === null || parsed.run.status !== "running") {
+          if (parsed === null || parsed.run === null) {
+            return;
+          }
+          knownRuns.add(parsed.run.run);
+          if (parsed.run.status !== "running") {
             return;
           }
           if (generation !== current || state.active !== null) {
@@ -298,9 +305,6 @@ export function createCheckSession(deps: CheckSessionDeps): CheckSession {
           // Reload recovery is best-effort.
         }
       })();
-    },
-    getState(): CheckSessionState {
-      return state;
     },
     dispose(): void {
       generation += 1;

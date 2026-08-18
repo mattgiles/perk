@@ -50,12 +50,7 @@ from perk_dev.prose_review.assembly import (
     WorkspaceBuffer,
 )
 from perk_dev.prose_review.catalog import CatalogSnapshot, load_catalog
-from perk_dev.prose_review.checks import (
-    CheckCommand,
-    CheckId,
-    CheckRunner,
-    UnknownCheckError,
-)
+from perk_dev.prose_review.checks import CheckCommand, CheckId, CheckRunner
 from perk_dev.prose_review.dto import (
     AssemblyOptionsOut,
     AssemblyRenderOut,
@@ -552,12 +547,9 @@ def create_app(
 
     @app.post("/api/checks/run", response_model=CheckRunOut)
     def start_check(request: CheckRunInput) -> CheckRunOut:
-        try:
-            started = runner.start(request.check)
-        except UnknownCheckError as exc:
-            # Reachable only with a partial injected mapping: the Literal boundary
-            # already 422s ids outside the closed vocabulary.
-            raise HTTPException(status_code=404, detail="unknown check") from exc
+        # The closed CheckId Literal is the whole admission boundary: unknown ids are
+        # the stamped framework 422 and never reach the runner's mapping lookup.
+        started = runner.start(request.check)
         if started is None:
             raise HTTPException(status_code=409, detail="check already running")
         return CheckRunOut.from_domain(started, 0)
@@ -569,14 +561,14 @@ def create_app(
             raise HTTPException(status_code=404, detail="unknown check run")
         return CheckRunOut.from_domain(snapshot_now, offset)
 
-    @app.post("/api/checks/run/{run_id}/cancel", response_model=CheckRunOut)
-    def cancel_check(run_id: str) -> CheckRunOut:
-        # A status-only acknowledgment for the client (its polling loop remains the
-        # one writer of run state); idempotent on a terminal run.
-        cancelled = runner.cancel(run_id)
-        if cancelled is None:
+    @app.post("/api/checks/run/{run_id}/cancel", status_code=204)
+    def cancel_check(run_id: str) -> Response:
+        # An empty status-only acknowledgment: the client's polling loop remains the
+        # one writer of run state, so no snapshot rides back. Idempotent on a
+        # terminal run.
+        if not runner.cancel(run_id):
             raise HTTPException(status_code=404, detail="unknown check run")
-        return CheckRunOut.from_domain(cancelled, 0)
+        return Response(status_code=204)
 
     @app.get("/api/checks/latest", response_model=LatestCheckOut)
     def latest_check() -> LatestCheckOut:

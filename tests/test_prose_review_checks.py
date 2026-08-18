@@ -9,6 +9,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 import pytest
+from perk_dev.prose_review import checks as checks_module
 from perk_dev.prose_review.checks import (
     CHECK_COMMANDS,
     OUTPUT_CAP_CHARS,
@@ -16,7 +17,6 @@ from perk_dev.prose_review.checks import (
     CheckCommand,
     CheckRunner,
     CheckRunSnapshot,
-    UnknownCheckError,
 )
 
 DEADLINE_SECONDS = 30.0
@@ -59,6 +59,27 @@ def _fake(script: str, *, timeout_seconds: int = 30) -> CheckCommand:
 _PID_THEN_BLOCK = (
     "import os, sys, time\n"
     "print(os.getpid(), flush=True)\n"
+    "print('STARTED', flush=True)\n"
+    "time.sleep(600)\n"
+)
+
+# A same-group descendant that ignores SIGTERM and holds the inherited stdout pipe;
+# CHILD-UP is printed only after the handler is installed, so a test that waited for
+# it genuinely exercises the resistant arm.
+_RESISTANT_CHILD_SOURCE = (
+    "import signal, time\n"
+    "signal.signal(signal.SIGTERM, signal.SIG_IGN)\n"
+    "print('CHILD-UP', flush=True)\n"
+    "while True:\n"
+    "    time.sleep(0.2)\n"
+)
+# The leader spawns the resistant child (inheriting the process group and stdout),
+# reports both pids, then blocks; the leader itself dies on SIGTERM.
+_RESISTANT_FAMILY_SCRIPT = (
+    "import os, subprocess, sys, time\n"
+    f"child = subprocess.Popen([sys.executable, '-c', {_RESISTANT_CHILD_SOURCE!r}])\n"
+    "print(os.getpid(), flush=True)\n"
+    "print(child.pid, flush=True)\n"
     "print('STARTED', flush=True)\n"
     "time.sleep(600)\n"
 )
@@ -241,8 +262,7 @@ def test_cancel_kills_the_process_group_and_records_cancelled(tmp_path: Path) ->
     started = runner.start("ruff")
     assert started is not None
     child_pid = _started_pid(runner, started.run_id)
-    acknowledged = runner.cancel(started.run_id)
-    assert acknowledged is not None
+    assert runner.cancel(started.run_id) is True
     final = _wait_terminal(runner, started.run_id)
     assert final.status == "cancelled"
     assert final.exit_code is None
@@ -257,8 +277,47 @@ def test_cancel_after_terminal_is_idempotent(tmp_path: Path) -> None:
     assert started is not None
     final = _wait_terminal(runner, started.run_id)
     assert final.status == "passed"
-    again = runner.cancel(started.run_id)
-    assert again == final
+    # Idempotent success acknowledgment; the terminal record stays untouched.
+    assert runner.cancel(started.run_id) is True
+    assert runner.get(started.run_id) == final
+    assert runner.cancel("absent-run") is False
+
+
+def test_cancel_kills_a_sigterm_resistant_descendant_with_the_whole_group(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # The regression arm: the leader dies on SIGTERM while its same-group child
+    # ignores it and holds the merged pipe; only the group-wide probe + SIGKILL
+    # escalation removes it (a leader-only poll would wedge the reader and the slot).
+    monkeypatch.setattr(checks_module, "KILL_GRACE_SECONDS", 0.5)
+    runner = CheckRunner(tmp_path, commands={"ruff": _fake(_RESISTANT_FAMILY_SCRIPT)})
+    started = runner.start("ruff")
+    assert started is not None
+
+    def family_up() -> tuple[int, int] | None:
+        snapshot = runner.get(started.run_id)
+        assert snapshot is not None
+        lines = snapshot.output.splitlines()
+        if "STARTED" not in lines or "CHILD-UP" not in lines:
+            return None
+        pids = [int(line) for line in lines if line.isdigit()]
+        return (pids[0], pids[1])
+
+    leader_pid, child_pid = _wait_for(family_up, message="the resistant family never came up")
+    assert runner.cancel(started.run_id) is True
+    final = _wait_terminal(runner, started.run_id)
+    assert final.status == "cancelled"
+    _assert_group_dead(leader_pid)
+
+    def child_gone() -> bool | None:
+        try:
+            os.kill(child_pid, 0)
+        except ProcessLookupError:
+            return True
+        return None
+
+    _wait_for(child_gone, message=f"SIGTERM-resistant child {child_pid} still alive")
 
 
 def test_timeout_fires_and_records_timeout(tmp_path: Path) -> None:
@@ -367,10 +426,24 @@ def test_latest_serves_running_and_none_before_any_run(tmp_path: Path) -> None:
     _wait_terminal(runner, started.run_id)
 
 
-def test_unknown_check_id_raises_for_partial_injected_mappings(tmp_path: Path) -> None:
-    runner = CheckRunner(tmp_path, commands={"ruff": _fake("print('ok')")})
-    with pytest.raises(UnknownCheckError):
-        runner.start("tsc")
+def test_checks_run_with_the_repo_root_as_working_directory(tmp_path: Path) -> None:
+    # The allowlist's real commands are relative-path invocations (pytest paths,
+    # ruff/biome roots, node test files): the spawn must anchor them at the supplied
+    # repository root, proven here by an actual relative read.
+    (tmp_path / "marker.txt").write_text("relative-read-proof", encoding="utf-8")
+    script = (
+        "import os, pathlib\n"
+        "print(os.getcwd(), flush=True)\n"
+        "print(pathlib.Path('marker.txt').read_text(encoding='utf-8'), flush=True)\n"
+    )
+    runner = CheckRunner(tmp_path, commands={"ruff": _fake(script)})
+    started = runner.start("ruff")
+    assert started is not None
+    final = _wait_terminal(runner, started.run_id)
+    assert final.status == "passed"
+    reported_cwd, marker = final.output.splitlines()[:2]
+    assert Path(reported_cwd).resolve() == tmp_path.resolve()
+    assert marker == "relative-read-proof"
 
 
 def test_shutdown_kills_the_active_run_and_leaves_no_threads(tmp_path: Path) -> None:

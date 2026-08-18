@@ -27,7 +27,7 @@ import time
 from collections import deque
 from collections.abc import Mapping
 from contextlib import suppress
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Literal
 
@@ -143,10 +143,6 @@ CHECK_COMMANDS: dict[CheckId, CheckCommand] = {
 }
 
 
-class UnknownCheckError(Exception):
-    """A check id absent from the runner's (possibly injected) command mapping."""
-
-
 @dataclass(frozen=True, slots=True)
 class CheckRunSnapshot:
     """One immutable copy of a run record — never the live mutable record."""
@@ -161,49 +157,33 @@ class CheckRunSnapshot:
     truncated: bool
 
 
+@dataclass(slots=True)
 class _CheckRun:
     """The live mutable run record; every field mutation happens under the runner lock."""
 
-    __slots__ = (
-        "cancel_requested",
-        "check",
-        "chunks",
-        "command",
-        "exit_code",
-        "length",
-        "proc",
-        "reader",
-        "run_id",
-        "status",
-        "timeout_fired",
-        "timer",
-        "truncated",
-    )
-
-    def __init__(self, run_id: str, check: CheckId, command: CheckCommand) -> None:
-        self.run_id = run_id
-        self.check = check
-        self.command = command
-        self.status: CheckRunStatus = "running"
-        self.exit_code: int | None = None
-        self.chunks: list[str] = []
-        self.length = 0
-        self.truncated = False
-        self.cancel_requested = False
-        self.timeout_fired = False
-        self.proc: subprocess.Popen[str] | None = None
-        self.reader: threading.Thread | None = None
-        self.timer: threading.Timer | None = None
+    run_id: str
+    check: CheckId
+    command: CheckCommand
+    status: CheckRunStatus = "running"
+    exit_code: int | None = None
+    chunks: list[str] = field(default_factory=list)
+    length: int = 0
+    truncated: bool = False
+    cancel_requested: bool = False
+    timeout_fired: bool = False
+    proc: subprocess.Popen[str] | None = None
+    reader: threading.Thread | None = None
+    timer: threading.Timer | None = None
 
 
 class CheckRunner:
     """App-lifetime executor of allowlisted checks: one active slot, bounded record ring.
 
     ``commands`` is the test seam — the mapping is used as-is, wholesale (production
-    default :data:`CHECK_COMMANDS`); a request naming an id absent from a partial
-    injected mapping raises :class:`UnknownCheckError`. Thread-safe via the one lock:
-    sync-def endpoints run in uvicorn's threadpool, and the reader/timer threads
-    contend for the same records.
+    default :data:`CHECK_COMMANDS`), and callers only ever start ids present in it
+    (the HTTP boundary's closed ``CheckId`` Literal guarantees that in production).
+    Thread-safe via the one lock: sync-def endpoints run in uvicorn's threadpool, and
+    the reader/timer threads contend for the same records.
     """
 
     def __init__(
@@ -220,9 +200,7 @@ class CheckRunner:
     def start(self, check_id: CheckId) -> CheckRunSnapshot | None:
         """Start one allowlisted check; ``None`` means the single app-wide slot is busy."""
         with self._lock:
-            command = self._commands.get(check_id)
-            if command is None:
-                raise UnknownCheckError(check_id)
+            command = self._commands[check_id]
             if self._active is not None:
                 return None
             record = _CheckRun(secrets.token_urlsafe(8), check_id, command)
@@ -248,6 +226,7 @@ class CheckRunner:
             record.reader = reader
             timer = threading.Timer(command.timeout_seconds, self._on_timeout, args=(record,))
             timer.daemon = True
+            timer.name = f"check-timer-{record.run_id}"
             record.timer = timer
             reader.start()
             timer.start()
@@ -265,20 +244,23 @@ class CheckRunner:
                 return None
             return _snapshot(self._runs[-1])
 
-    def cancel(self, run_id: str) -> CheckRunSnapshot | None:
-        """Request cancellation; idempotent — a terminal run returns its snapshot untouched."""
+    def cancel(self, run_id: str) -> bool:
+        """Request cancellation; ``False`` only for an unknown/evicted run.
+
+        A status-only acknowledgment (the client's polling loop is the one reader of
+        run state); idempotent — cancelling an already-terminal run is success.
+        """
         with self._lock:
             record = self._find(run_id)
             if record is None:
-                return None
+                return False
             if record.status != "running":
-                return _snapshot(record)
+                return True
             record.cancel_requested = True
             proc = record.proc
         if proc is not None:
             _kill_group(proc)
-        with self._lock:
-            return _snapshot(record)
+        return True
 
     def shutdown(self) -> None:
         """Flag the active run cancelled, kill its process group, and join the reader.
@@ -383,19 +365,36 @@ def _snapshot(record: _CheckRun) -> CheckRunSnapshot:
     )
 
 
-def _kill_group(proc: subprocess.Popen[str]) -> None:
-    """SIGTERM the process group, poll for grace, then SIGKILL — never ``wait()``.
+def _group_alive(pgid: int) -> bool:
+    """True while any member of the process group remains (a zombie leader included)."""
+    try:
+        os.killpg(pgid, 0)
+    except ProcessLookupError:
+        return False
+    except OSError:
+        # Unsignalable (e.g. permission drift): assume alive so escalation proceeds.
+        return True
+    return True
 
-    The reader owns the one ``proc.wait()`` (the single reaper); this escalation only
-    signals and polls. ``start_new_session=True`` makes the child's pid its pgid. A
-    group already gone (or unsignalable mid-teardown) is success, not an error.
+
+def _kill_group(proc: subprocess.Popen[str]) -> None:
+    """SIGTERM the process group, poll the WHOLE group for grace, then SIGKILL.
+
+    Never ``wait()`` — the reader owns the one reap; this escalation only signals and
+    polls. ``start_new_session=True`` makes the child's pid its pgid. The grace probe
+    checks the process group rather than the leader: a SIGTERM-resistant descendant
+    that outlives the leader must still be SIGKILLed, or it could hold the merged
+    pipe open and wedge the reader, the single active slot, and shutdown. An unreaped
+    leader zombie keeps the group observable until the reader reaps it — that only
+    delays loop exit, never the kill. A group already gone is success, not an error.
     """
+    pgid = proc.pid
     with suppress(OSError):
-        os.killpg(proc.pid, signal.SIGTERM)
+        os.killpg(pgid, signal.SIGTERM)
     deadline = time.monotonic() + KILL_GRACE_SECONDS
     while time.monotonic() < deadline:
-        if proc.poll() is not None:
+        if not _group_alive(pgid):
             return
         time.sleep(0.05)
     with suppress(OSError):
-        os.killpg(proc.pid, signal.SIGKILL)
+        os.killpg(pgid, signal.SIGKILL)

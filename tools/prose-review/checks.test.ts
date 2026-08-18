@@ -21,6 +21,29 @@ const RUN: CheckRun = {
   truncated: false,
 };
 
+test("the closed check vocabulary is pinned exactly", () => {
+  // Backend/frontend wire drift (a dropped or renamed id/status in checks.ts) must
+  // fail here — iterating over the live arrays alone would be self-referential.
+  assert.deepEqual(
+    [...CHECK_IDS],
+    [
+      "prose-map",
+      "learned-docs",
+      "prompt-parity",
+      "worker-prompt-pins",
+      "worker-test-pins",
+      "ruff",
+      "ty",
+      "biome",
+      "tsc",
+    ],
+  );
+  assert.deepEqual(
+    [...CHECK_RUN_STATUSES],
+    ["running", "passed", "failed", "cancelled", "timeout", "spawn-failed"],
+  );
+});
+
 test("parseCheckRun accepts every closed id and status", () => {
   assert.deepEqual(parseCheckRun(RUN), RUN);
   for (const check of CHECK_IDS) {

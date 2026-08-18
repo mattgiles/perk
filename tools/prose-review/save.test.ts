@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { CHECK_IDS } from "./src/checks.ts";
 import { CATALOG_STALE_DETAIL, CONFLICT_DETAIL, parseSourceSaveResult } from "./src/save.ts";
 import { createSaveReview } from "./src/saveReview.ts";
 import type { UnitRef } from "./src/tree.ts";
@@ -98,6 +99,15 @@ test("parseSourceSaveResult accepts every tagged domain outcome", () => {
       detail: "Save support has not landed for this source family.",
     },
   );
+});
+
+test("parseSourceSaveResult accepts every allowlisted check id", () => {
+  // Suggested checks ride the one CheckRunner vocabulary: a backend response naming
+  // any allowlisted id must parse, so dropping an id from checks.ts fails here.
+  const checks = CHECK_IDS.map((id) => ({ id, command: `run ${id}` }));
+  const parsed = parseSourceSaveResult({ ...SAVED, checks });
+  assert.ok(parsed !== null && parsed.status === "saved");
+  assert.deepEqual(parsed.checks, checks);
 });
 
 test("parseSourceSaveResult rejects malformed and incoherent combinations", () => {

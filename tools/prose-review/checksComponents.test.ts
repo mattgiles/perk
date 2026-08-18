@@ -190,8 +190,8 @@ test("suggested-check Run buttons and the drawer Checks section cover the run li
     }
     if (url === "/api/checks/run/run-A/cancel") {
       cancelHeaders = init?.headers as Record<string, string>;
-      // The acknowledgment body is ignored by the session.
-      return response(200, runPayload({ status: "cancelled", output: "IGNORED" }));
+      // The empty status-only acknowledgment; polling owns the state transition.
+      return new Response(null, { status: 204 });
     }
     if (url.startsWith("/api/checks/run/run-A?")) {
       return pollResponse();
@@ -259,7 +259,6 @@ test("suggested-check Run buttons and the drawer Checks section cover the run li
     await harness.settle();
     const cancelledRow = rowByText(harness.container, "Cancelled");
     buttonByText(cancelledRow, "Run again");
-    assert.doesNotMatch(cancelledRow.textContent ?? "", /IGNORED/);
     assert.equal(buttonByText(harness.container, "Run").disabled, false);
 
     // Run again re-posts; a terminal response lands straight in history with its

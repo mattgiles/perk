@@ -8,6 +8,7 @@ ever write one output dir), so this suite never touches the launcher's real ``di
 
 import hashlib
 import json
+import os
 import re
 import secrets
 import socket
@@ -749,7 +750,8 @@ def test_check_run_streams_and_cancels_over_real_http(server: _RunningServer) ->
             time.sleep(0.05)
 
         cancelled = client.post(f"/api/checks/run/{run_id}/cancel", headers=headers)
-        assert cancelled.status_code == 200
+        assert cancelled.status_code == 204
+        assert cancelled.content == b""
         while True:
             assert time.monotonic() < deadline, "cancelled run never went terminal"
             body = poll(client, run_id, offset)
@@ -759,3 +761,82 @@ def test_check_run_streams_and_cancels_over_real_http(server: _RunningServer) ->
         assert body["status"] == "cancelled"
         assert body["exit_code"] is None
         assert re.match(r"line-\d+", client.get(f"/api/checks/run/{run_id}").json()["output"])
+
+
+def test_lifespan_shutdown_kills_an_active_check_run(server: _RunningServer) -> None:
+    # The launcher-shutdown regression: a dedicated uvicorn instance exits while an
+    # injected long-running check is still active; the lifespan-wired
+    # `runner.shutdown()` must kill the run's process group and finish the runner
+    # threads — deleting or miswiring `create_app`'s lifespan callback fails here.
+    pid_then_block = (
+        "import os, time\n"
+        "print(os.getpid(), flush=True)\n"
+        "print('STARTED', flush=True)\n"
+        "time.sleep(600)\n"
+    )
+    token = secrets.token_urlsafe(32)
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    sock.bind(("127.0.0.1", 0))
+    sock.listen(128)
+    port = int(sock.getsockname()[1])
+    app = create_app(
+        snapshot=server.snapshot,
+        repo_root=server.repo_root,
+        selector_root=ROOT,
+        dist_dir=server.repo_root / "dist",
+        allowed_host=f"127.0.0.1:{port}",
+        csrf_token=token,
+        check_commands={
+            "prose-map": CheckCommand(
+                label="Blocking fake",
+                argv=(sys.executable, "-c", pid_then_block),
+                timeout_seconds=600,
+            ),
+        },
+    )
+    uv_server = uvicorn.Server(uvicorn.Config(app, log_level="warning", access_log=False))
+    thread = threading.Thread(
+        target=lambda: uv_server.run(sockets=[sock]),
+        name="prose-review-lifespan-uvicorn",
+        daemon=True,
+    )
+    thread.start()
+    deadline = time.monotonic() + 30
+    while not uv_server.started:
+        assert thread.is_alive(), "uvicorn thread exited before startup"
+        assert time.monotonic() < deadline, "uvicorn did not report started within 30s"
+        time.sleep(0.05)
+
+    with httpx.Client(base_url=f"http://127.0.0.1:{port}", timeout=10) as client:
+        started = client.post(
+            "/api/checks/run",
+            headers={"X-Prose-Review-Csrf": token, "Content-Type": "application/json"},
+            json={"check": "prose-map"},
+        )
+        assert started.status_code == 200
+        run_id = started.json()["run"]
+        child_pid: int | None = None
+        while child_pid is None:
+            assert time.monotonic() < deadline, "the blocking check never reported its pid"
+            output = client.get(f"/api/checks/run/{run_id}").json()["output"]
+            lines = output.splitlines()
+            if "STARTED" in lines:
+                child_pid = int(lines[0])
+            time.sleep(0.05)
+
+    # Graceful shutdown with the run still active: the lifespan hook must clean up.
+    uv_server.should_exit = True
+    thread.join(timeout=30)
+    assert not thread.is_alive(), "uvicorn thread did not exit within 30s"
+    while True:
+        try:
+            os.killpg(child_pid, 0)
+        except ProcessLookupError:
+            break
+        assert time.monotonic() < deadline, f"check process group {child_pid} still alive"
+        time.sleep(0.05)
+    while any(
+        worker.name.startswith(("check-run-", "check-timer-")) for worker in threading.enumerate()
+    ):
+        assert time.monotonic() < deadline, "runner threads lingered after lifespan shutdown"
+        time.sleep(0.05)

@@ -3102,8 +3102,10 @@ def test_check_cancel_round_trip_and_busy_slot_over_the_guarded_app(
         f"/api/checks/run/{run_id}/cancel",
         headers={web.CSRF_HEADER: TOKEN},
     )
-    assert cancelled.status_code == 200
-    assert cancelled.json()["run"] == run_id
+    # An empty status-only acknowledgment: polling remains the one state read.
+    assert cancelled.status_code == 204
+    assert cancelled.content == b""
+    _assert_security_headers(cancelled)
     final = _poll_check(client, run_id, lambda body: body["status"] != "running")
     assert (final["status"], final["exit_code"]) == ("cancelled", None)
 
@@ -3146,19 +3148,6 @@ def test_check_unknown_id_and_negative_offset_are_framework_422s(
     _assert_security_headers(unknown)
     negative = client.get("/api/checks/run/absent", params={"offset": -1})
     assert negative.status_code == 422
-
-
-def test_check_id_absent_from_partial_injected_mapping_is_the_fixed_404(
-    snapshot: CatalogSnapshot, repo: Path
-) -> None:
-    client = _client(snapshot, repo, check_commands={"ruff": _fake_check("print('ok')")})
-    response = client.post(
-        "/api/checks/run",
-        headers={web.CSRF_HEADER: TOKEN},
-        json={"check": "tsc"},
-    )
-    assert response.status_code == 404
-    assert response.json() == {"detail": "unknown check"}
 
 
 def test_check_posts_are_csrf_guarded(snapshot: CatalogSnapshot, repo: Path) -> None:

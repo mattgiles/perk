@@ -298,16 +298,19 @@ slices add Python call arguments without revisiting this stack.
   status, clears the single active slot, and cancels the timeout timer (spawn failure aside,
   recorded terminal `spawn-failed` synchronously in `start()` before either exists). The daemon
   timeout timer and `cancel()` only set their flag under the lock and run the process-group kill
-  escalation outside it — SIGTERM, up to 5s of polled grace, SIGKILL; never `wait()` (the reader
-  owns the one reap). Terminal status follows flag precedence `cancelled` > `timeout` >
+  escalation outside it — SIGTERM, then up to 5s polling the WHOLE process group
+  (`killpg(pgid, 0)` — a SIGTERM-resistant descendant that outlives the leader must still be
+  SIGKILLed, or it could hold the merged pipe open and wedge the reader/slot), then SIGKILL;
+  never `wait()` (the reader owns the one reap). Terminal status follows flag precedence `cancelled` > `timeout` >
   exit-code-derived, with `exit_code` non-null only for `passed`/`failed`.
 - **One run slot, bounded records, offset polling.** One active run app-wide: a busy slot is
   HTTP 409; a bounded ring retains the 20 most recent records (evicted/unknown runs are the
   fixed 404 `unknown check run`). Four sync-def routes on the existing envelope:
-  `POST /api/checks/run` (strict `{check: CheckId}` body — unknown ids are the framework 422;
-  an id absent from a partial injected test mapping is the fixed 404 `unknown check`),
+  `POST /api/checks/run` (strict `{check: CheckId}` body — the closed Literal is the whole
+  admission boundary: unknown ids are the framework 422),
   `GET /api/checks/run/{run_id}?offset=N` (`ge=0`, clamped to the captured length),
-  `POST /api/checks/run/{run_id}/cancel` (status-only acknowledgment; idempotent on terminal
+  `POST /api/checks/run/{run_id}/cancel` (an empty 204 status-only acknowledgment — the
+  client's polling loop is the one reader of run state; idempotent on terminal
   runs), and `GET /api/checks/latest` — the reconciliation read serving page-reload re-adoption
   and indeterminate-start recovery. Both POSTs sit under the existing CSRF rule; the pure-ASGI
   guard needed no change (streaming-transparency was pinned for exactly this consumer).
@@ -325,8 +328,10 @@ slices add Python call arguments without revisiting this stack.
   session adopts a started run, polls with the growing offset, retires terminal runs into the
   App-level newest-first history (capped at 20), treats a poll/cancel 404 as the
   terminal-unrecoverable client-only `lost` state, reconciles refused/indeterminate starts
-  through `latest`, ignores the cancel response body (the polling loop is the one writer of run
-  state), and re-adopts a still-running run on mount. Starting any check opens the workspace
+  through `latest` (adopting only run ids the session has never observed — a terminal record
+  seen on mount is recorded as known, so a stale pre-existing run can never masquerade as a
+  failed start's outcome), treats the empty cancel acknowledgment as status-only (the polling
+  loop is the one writer of run state), and re-adopts a still-running run on mount. Starting any check opens the workspace
   drawer's Checks section — notice line, per-run rows (label, `<code>` command, text status,
   exit code, truncation marker, Cancel/Run again), and captured output in a lazily-mounted
   `<details>` `<pre>` rendered strictly as JSX text.
@@ -436,7 +441,7 @@ keeps the guard streaming-transparent, which the offset-polling CheckRunner now 
 | No shell in check execution | One sanctioned `subprocess.Popen` site (`checks._spawn`): list argv, `cwd=`, `start_new_session=`, devnull stdin, merged text pipes | the Popen guard in `test_tooling.py`; spawn/capture arms in `test_prose_review_checks.py` |
 | One check-run slot + reconciliation | A busy slot is HTTP 409 `check already running`; `GET /api/checks/latest` is the reconciliation read for reloaded/raced clients; a bounded 20-record ring backs polling with the fixed 404 `unknown check run` beyond it | busy/ring/latest tests in `test_prose_review_checks.py` + `test_prose_review_web.py` |
 | Bounded check-output capture | 2,000,000-code-point cap; past it the record is `truncated` and the reader drains without storing (the child never blocks on a full pipe) | `test_output_cap_truncates_and_keeps_draining` |
-| Process-group cancellation/timeout with a single finalizer | Cancel/timeout set flags under the lock and escalate SIGTERM → 5s grace → SIGKILL on the process group outside it; only the reader thread assigns terminal status, clears the slot, and cancels the timer; flag precedence `cancelled` > `timeout` > exit-code | cancel/timeout/idempotence/thread-settling tests in `test_prose_review_checks.py`; the real-HTTP cancel round trip in `test_prose_review_integration.py` |
+| Process-group cancellation/timeout with a single finalizer | Cancel/timeout set flags under the lock and escalate SIGTERM → 5s whole-group-probed grace → SIGKILL outside it (the probe is `killpg(pgid, 0)`, so a SIGTERM-resistant descendant is still killed); only the reader thread assigns terminal status, clears the slot, and cancels the timer; flag precedence `cancelled` > `timeout` > exit-code | cancel/timeout/idempotence/resistant-descendant/thread-settling tests in `test_prose_review_checks.py`; the real-HTTP cancel round trip + lifespan-shutdown-with-active-run arm in `test_prose_review_integration.py` |
 | Check shutdown is app-scoped | `runner.shutdown()` rides the FastAPI lifespan (no `atexit`): the active run's process group dies and the reader joins on graceful shutdown | `test_shutdown_kills_the_active_run_and_leaves_no_threads` |
 | Checks never touch catalog state | Check runs never take `source_transaction_mutex`, never read or swap the generation, and stay permitted while `writes_frozen`; they observe the live working tree by design | `test_checks_stay_permitted_while_writes_are_frozen` |
 
