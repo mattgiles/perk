@@ -186,6 +186,7 @@ def test_sampled_shape_layers_mirror_the_assembly_view_order(
     assert shape is not None
     assembly = snapshot.get_assembly(shape.assembly)
     assert assembly is not None
+    assert shape_out.assembly == shape.assembly
     assert [layer.position for layer in shape_out.layers] == list(
         range(1, len(assembly.layers) + 1)
     )
@@ -227,7 +228,7 @@ def test_shape_and_layer_key_order_matches_declaration(tree: CapabilityTreeOut) 
     shape_out = _shape_out(tree, "plan.warm")
     assert shape_out is not None
     dumped = shape_out.model_dump(mode="json")
-    assert list(dumped.keys()) == ["id", "label", "delivery", "layers"]
+    assert list(dumped.keys()) == ["id", "label", "delivery", "assembly", "layers"]
     assert list(dumped["layers"][0].keys()) == [
         "position",
         "optional",

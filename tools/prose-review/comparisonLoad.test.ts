@@ -21,6 +21,7 @@ const WARM: SessionShape = {
   id: "plan.warm",
   label: "Plan warm",
   delivery: "warm",
+  assembly: "plan-authoring",
   layers: [],
 };
 const COLD: SessionShape = { ...WARM, id: "plan.cold", label: "Plan cold", delivery: "cold" };

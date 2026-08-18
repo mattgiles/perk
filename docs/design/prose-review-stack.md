@@ -5,15 +5,16 @@
 skeleton — the minimal secure launcher (`perk-dev prose-review`) plus the served round-trip proof
 — and now carrying the three-pane workbench shell (fragment-aware capability tree / mode bar +
 focused in-memory editing), the relationship inspector (consumers, consuming shapes + delivery
-siblings, concerns, lineage), header catalog search, workspace-backed whole-unit Compare mode, and
-one browser-authoritative workspace with safe Markdown/YAML, catalog-mapped Python, and
-catalog-mapped TypeScript persistence. The inspector, search, and comparison-option projection are
+siblings, concerns, lineage), header catalog search, workspace-backed whole-unit Compare mode, the
+Assembly preview mode (scenario picker, visibility toggles, separate/concatenated views, read-only
+scenario variables in the inspector), and one browser-authoritative workspace with safe
+Markdown/YAML, catalog-mapped Python, and catalog-mapped TypeScript persistence. The inspector, search, and comparison-option projection are
 pure in-memory `CatalogSnapshot` queries. Markdown, YAML, Python AST, and TypeScript compiler-API
 adapters resolve exact logical fragments over either the canonical load text or browser-supplied
 current text; every admitted family shares one whole-buffer validation and atomic-save pipeline.
-The backend Assembly preview (`AssemblyRenderer` + the scenario-options/render API below) is now
-shipped; later slices add Python call arguments, the Assembly-mode frontend, and executable check
-handoffs without revisiting this stack.
+The Assembly preview is now shipped end to end — the backend `AssemblyRenderer` + the
+scenario-options/render API below, and the Assembly-mode frontend that consumes them; later slices
+add Python call arguments and executable check handoffs without revisiting this stack.
 
 ## HTTP layer: FastAPI + uvicorn
 
@@ -147,7 +148,7 @@ handoffs without revisiting this stack.
   no-network-loaded-assets envelope; `/openapi.json` is locally generated but is an unused
   machine-readable surface this app never serves — disabled to minimize the surface area.
 
-## Assembly preview backend: `AssemblyRenderer` + the options/render API
+## Assembly preview: `AssemblyRenderer`, the options/render API, and the Assembly-mode frontend
 
 - **One deep renderer module over a save-linearized generation.**
   `perk_dev.prose_review.assembly.AssemblyRenderer` is an app-lifetime object (resolved source
@@ -213,7 +214,7 @@ handoffs without revisiting this stack.
   semantic owner id (`pi-system`→`pi`, `user-content`→`user`, `runtime-state`→`runtime`,
   `borrowed-prompt`→`borrowed-package`); a boundary layer carries owner + kind + authored
   label/presentation and no source path, editable content, or guessed runtime text. Human-facing
-  display copy stays in the frontend's `BOUNDARY_INFO` (untouched this node).
+  display copy stays in the frontend's `BOUNDARY_INFO` (reused verbatim by the Assembly cards).
 - **Two strict HTTP surfaces.** `GET /api/assembly/options?assembly=<id>` is a pure snapshot
   query returning `AssemblyOptionsOut` (the assembly id plus complete ordered scenario fixtures
   with object-shaped sorted variables); unknown assembly is fixed 404 `unknown assembly`.
@@ -228,10 +229,43 @@ handoffs without revisiting this stack.
   `unknown assembly render subject`; expected source/gate/render/adapter failures are guarded 200
   layer results with all siblings. The POST accepts repository text and therefore sits under the
   existing exact CSRF header rule; both routes retain the Host/Origin/CSP/no-store stamping.
-- **Deliberately deferred to Node 4.2:** frontend transport types/parsers/loaders, EditWorkspace
-  snapshot export, Assembly-mode UI, scenario/toggle controls and inspector, text-only rendered
-  presentation, visibility derivation, concatenated-view semantics, and replacement of the honest
-  Assembly placeholder.
+- **Assembly-mode frontend (the consumption chain over the contract above).**
+  `tools/prose-review/src/assembly.ts` mirrors both wire shapes with reject-unknown structural
+  parsers — module-local closed vocabularies for the endpoint-only enums, a deliberately *open*
+  non-empty `reason` on layer problems (the display contract is the server's fixed `detail`
+  copy), and an empty `scenarios` array rejected at the parse boundary so a parsed options value
+  always carries at least one scenario (the auto-first-scenario controller stays total).
+  `assemblyLoad.ts` is the never-rejecting classified transport pair: options 404 → refused;
+  render `not-sent` without fetching when the CSRF token is missing; the deterministic
+  404/409/422 arms → refused (copy only — no retry affordance); everything else → failed, and —
+  because render never mutates — failed renders carry a safe explicit `Re-render` retry.
+  `assemblySession.ts` owns the two-stage options→render state machine with one latest-wins
+  generation across both stages and the completion-merge rule: a render completion mutates only
+  the live `ready` state's render slot (dropped when the generation moved or the state left
+  `ready`), so same-generation visibility overrides survive an in-flight render. Opening a
+  shape's assembly auto-selects the first ordered scenario and renders immediately; scenario
+  switches reset both overrides to the new scenario's authored defaults. Assembly-local state
+  mirrors Compare's lifetime — cleared on mode exit and subject change, re-opened by a
+  catalog-epoch bump; a non-shape selection shows a fixed hint.
+- **Client-derived visibility + the two views.** Visibility toggles never re-POST: hiding is
+  derived locally (`override ?? scenario default` against each layer's `visibility_control`),
+  which the toggle-independent per-layer wire contract above makes sound; render requests carry
+  the nullable overrides so the server echo matches at request time (the echo is parsed for
+  shape-soundness but the live derivation source is local state). The separate view renders one
+  card per visible layer — owned parts as escaped text with fragment captions, boundary
+  owner/explanation copy from `BOUNDARY_INFO` with the wire owner as data, failure problems with
+  the server's fixed safe detail. The concatenated view joins visible layers with one blank
+  line: owned parts verbatim, boundaries as `[[ boundary: <label> · owner: <owner> ]]`, failures
+  as `[[ layer failed: <unit id> ]]`, with a fixed note when any visible layer's presence varies.
+- **Workspace-backed live preview.** `EditWorkspace.exportBuffers()` exports the complete loaded
+  workspace (`{path, text}` records, path-sorted, dirty or not — the render request is the
+  browser's whole loaded workspace) as the render request's buffers; the App's global workspace
+  subscription pokes the session, which fingerprints the serialized export sent with the last
+  issued render and re-renders only on mismatch — an unsaved edit is visible in the preview
+  without a save. The tree DTO now carries `SessionShapeOut.assembly` (`id, label, delivery,
+  assembly, layers`) so a shape selection names the options/render subject, and the frontend
+  `SessionShape` parser requires it non-empty. The selected scenario's variables render read-only
+  in the inspector's shape branch; the center pane owns the controls.
 
 ## Frontend: Vite + React + TypeScript
 
@@ -374,7 +408,9 @@ stale-helper/transient retry, discard cancel/confirm, exact manual reversion, `b
 full-file diff metadata, hostile-text escaping, conflict Copy/Reload, indeterminate reconciliation,
 catalog refresh/invalidation, and refresh-failure freeze. Shape-origin layer selection,
 placement-aware option refresh, graph-backed target families, boundary omission, independent pane
-scrolling, empty-target copy, mode-local reset, Assembly's honest placeholder, relationship/search,
-and Host/Origin/CSP/no-store hardening remain in the regression pass. Unsaved workspace state still
+scrolling, empty-target copy, mode-local reset, the Assembly preview (auto first-scenario render,
+POST-free visibility toggles, exact concatenated markers, scenario-switch override reset,
+buffer-edit re-render through the injected-workspace seam, hostile-text escaping),
+relationship/search, and Host/Origin/CSP/no-store hardening remain in the regression pass. Unsaved workspace state still
 has no browser persistence; only an explicit revision-reviewed save can mutate an admitted canonical
 file.

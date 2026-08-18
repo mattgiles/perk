@@ -51,6 +51,7 @@ const WIRE: CapabilityTree = {
               id: "plan.warm",
               label: "Warm",
               delivery: "warm",
+              assembly: "plan-authoring",
               layers: [BOUNDARY_LAYER, UNIT_LAYER],
             },
           ],
@@ -71,7 +72,15 @@ function withLayer(layer: unknown): unknown {
             id: "planning.plan",
             label: "Plan",
             units: [],
-            session_shapes: [{ id: "plan.warm", label: "Warm", delivery: "warm", layers: [layer] }],
+            session_shapes: [
+              {
+                id: "plan.warm",
+                label: "Warm",
+                delivery: "warm",
+                assembly: "plan-authoring",
+                layers: [layer],
+              },
+            ],
             children: [],
           },
         ],
@@ -211,13 +220,47 @@ test("parseTree rejects an unknown unit kind", () => {
 });
 
 test("parseTree rejects an unknown delivery mode", () => {
-  const shape = { id: "plan.warm", label: "Warm", delivery: "tepid", layers: [] };
+  const shape = {
+    id: "plan.warm",
+    label: "Warm",
+    delivery: "tepid",
+    assembly: "plan-authoring",
+    layers: [],
+  };
   assert.equal(
     parseTree({
       capabilities: [{ ...WIRE.capabilities[0], session_shapes: [shape], children: [] }],
     }),
     null,
   );
+});
+
+function withShape(shape: unknown): unknown {
+  return {
+    capabilities: [{ ...WIRE.capabilities[0], session_shapes: [shape], children: [] }],
+  };
+}
+
+test("parseTree accepts and retains the shape's assembly id", () => {
+  const parsed = parseTree(WIRE);
+  assert.ok(parsed !== null);
+  assert.equal(parsed.capabilities[0]?.children[0]?.session_shapes[0]?.assembly, "plan-authoring");
+});
+
+test("parseTree rejects a shape with a missing, empty, or ill-typed assembly", () => {
+  const shape = {
+    id: "plan.warm",
+    label: "Warm",
+    delivery: "warm",
+    assembly: "plan-authoring",
+    layers: [],
+  };
+  const { assembly: _omitted, ...missing } = shape;
+  assert.equal(parseTree(withShape(missing)), null);
+  assert.equal(parseTree(withShape({ ...shape, assembly: "" })), null);
+  assert.equal(parseTree(withShape({ ...shape, assembly: null })), null);
+  assert.equal(parseTree(withShape({ ...shape, assembly: 7 })), null);
+  assert.notEqual(parseTree(withShape(shape)), null);
 });
 
 test("parseTree rejects an unknown boundary kind", () => {

@@ -801,3 +801,156 @@ body {
   font-family: ui-monospace, monospace;
   font-size: 0.85rem;
 }
+
+/* ── Assembly preview ──────────────────────────────────────────────────── */
+
+.assembly-preview {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  min-height: 0;
+}
+
+.assembly-header h2,
+.assembly-header p {
+  margin: 0 0 0.35rem;
+  overflow-wrap: anywhere;
+}
+
+.assembly-id {
+  font-family: ui-monospace, monospace;
+  font-size: 0.9rem;
+}
+
+.assembly-scope-note,
+.assembly-varies-note,
+.assembly-hidden-note {
+  font-style: italic;
+  opacity: 0.8;
+  margin: 0;
+}
+
+.assembly-control-bar {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  flex-wrap: wrap;
+  padding: 0.4rem 0;
+  border-top: 1px solid color-mix(in srgb, currentcolor 20%, transparent);
+  border-bottom: 1px solid color-mix(in srgb, currentcolor 20%, transparent);
+}
+
+.assembly-scenario-picker,
+.assembly-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  white-space: nowrap;
+}
+
+.assembly-view-switch {
+  display: inline-flex;
+  gap: 0.25rem;
+  margin-left: auto;
+}
+
+.assembly-view-switch button {
+  font: inherit;
+  padding: 0.15rem 0.6rem;
+  border: 1px solid color-mix(in srgb, currentcolor 35%, transparent);
+  border-radius: 0.25rem;
+  background: none;
+  color: inherit;
+  cursor: pointer;
+}
+
+.assembly-view-switch button[aria-pressed="true"] {
+  background: color-mix(in srgb, currentcolor 18%, transparent);
+  font-weight: 600;
+}
+
+.assembly-rendered {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  min-height: 0;
+  overflow: auto;
+}
+
+.assembly-layer-card {
+  border: 1px solid color-mix(in srgb, currentcolor 25%, transparent);
+  border-radius: 0.25rem;
+  padding: 0.5rem 0.75rem;
+}
+
+.assembly-layer-header {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  margin-bottom: 0.35rem;
+}
+
+.assembly-layer-title {
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.presence-badge,
+.owner-badge {
+  font-size: 0.8rem;
+  padding: 0.05rem 0.4rem;
+  border: 1px solid color-mix(in srgb, currentcolor 35%, transparent);
+  border-radius: 0.6rem;
+  opacity: 0.85;
+  white-space: nowrap;
+}
+
+.assembly-part-caption {
+  margin: 0.25rem 0 0.1rem;
+  font-size: 0.85rem;
+  opacity: 0.75;
+  overflow-wrap: anywhere;
+}
+
+.assembly-part-text,
+.assembly-concatenated {
+  margin: 0;
+  padding: 0.5rem;
+  font-family: ui-monospace, monospace;
+  font-size: 0.85rem;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  background: color-mix(in srgb, currentcolor 6%, transparent);
+  border-radius: 0.25rem;
+}
+
+.assembly-failure-body h3 {
+  margin: 0.25rem 0;
+  font-size: 1rem;
+}
+
+.assembly-problem-list {
+  margin: 0.25rem 0;
+  padding-left: 1.5rem;
+}
+
+.assembly-render-failed {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.scenario-variables {
+  margin: 0.25rem 0;
+}
+
+.scenario-variables dt {
+  font-family: ui-monospace, monospace;
+  font-weight: 600;
+}
+
+.scenario-variables dd {
+  margin: 0 0 0.35rem 1rem;
+  overflow-wrap: anywhere;
+}

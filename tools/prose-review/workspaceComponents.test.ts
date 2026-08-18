@@ -1,10 +1,16 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { setImmediate as tick } from "node:timers/promises";
-import { JSDOM } from "jsdom";
 import * as React from "react";
-import { createRoot, type Root } from "react-dom/client";
 import { tsImport } from "tsx/esm/api";
+import {
+  buttonByLabel,
+  buttonByText,
+  deferred,
+  installDom as installSharedDom,
+  type RenderHarness,
+  response,
+  stubFetch,
+} from "./componentHarness.ts";
 import type {
   ComparisonChoice,
   ComparisonOptions,
@@ -104,117 +110,8 @@ const TREE: CapabilityTree = {
   ],
 };
 
-type Deferred<T> = {
-  promise: Promise<T>;
-  resolve: (value: T) => void;
-};
-
-function deferred<T>(): Deferred<T> {
-  let resolve!: (value: T) => void;
-  const promise = new Promise<T>((settle) => {
-    resolve = settle;
-  });
-  return { promise, resolve };
-}
-
-type RenderHarness = {
-  window: JSDOM["window"];
-  container: HTMLElement;
-  render: (node: React.ReactNode) => Promise<void>;
-  click: (element: Element) => Promise<void>;
-  input: (element: HTMLTextAreaElement, value: string) => Promise<void>;
-  settle: () => Promise<void>;
-  cleanup: () => Promise<void>;
-};
-
 function installDom(): RenderHarness {
-  const dom = new JSDOM(
-    "<!doctype html><html><head><meta name='csrf-token' content='test-token'></head><body><div id='root'></div></body></html>",
-    { url: "http://127.0.0.1/" },
-  );
-  const previous = new Map<string, PropertyDescriptor | undefined>();
-  const globals: Record<string, unknown> = {
-    window: dom.window,
-    document: dom.window.document,
-    navigator: dom.window.navigator,
-    HTMLElement: dom.window.HTMLElement,
-    HTMLTextAreaElement: dom.window.HTMLTextAreaElement,
-    Element: dom.window.Element,
-    Node: dom.window.Node,
-    Event: dom.window.Event,
-    MouseEvent: dom.window.MouseEvent,
-    InputEvent: dom.window.InputEvent,
-    MutationObserver: dom.window.MutationObserver,
-    getComputedStyle: dom.window.getComputedStyle.bind(dom.window),
-    IS_REACT_ACT_ENVIRONMENT: true,
-    React,
-  };
-  for (const [name, value] of Object.entries(globals)) {
-    previous.set(name, Object.getOwnPropertyDescriptor(globalThis, name));
-    Object.defineProperty(globalThis, name, { configurable: true, writable: true, value });
-  }
-
-  const container = dom.window.document.querySelector<HTMLElement>("#root");
-  assert.ok(container !== null);
-  const root: Root = createRoot(container);
-  return {
-    window: dom.window,
-    container,
-    async render(node: React.ReactNode): Promise<void> {
-      await React.act(async () => {
-        root.render(node);
-        await tick();
-      });
-    },
-    async click(element: Element): Promise<void> {
-      await React.act(async () => {
-        element.dispatchEvent(new dom.window.MouseEvent("click", { bubbles: true }));
-        await tick();
-      });
-    },
-    async input(element: HTMLTextAreaElement, value: string): Promise<void> {
-      const setter = Object.getOwnPropertyDescriptor(
-        dom.window.HTMLTextAreaElement.prototype,
-        "value",
-      )?.set;
-      assert.ok(setter !== undefined);
-      const previousValue = element.value;
-      await React.act(async () => {
-        setter.call(element, value);
-        const tracked = element as HTMLTextAreaElement & {
-          _valueTracker?: { setValue: (next: string) => void };
-        };
-        tracked._valueTracker?.setValue(previousValue);
-        element.dispatchEvent(new dom.window.InputEvent("input", { bubbles: true }));
-        element.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
-        await tick();
-      });
-    },
-    async settle(): Promise<void> {
-      await React.act(async () => {
-        await tick();
-        await tick();
-      });
-    },
-    async cleanup(): Promise<void> {
-      await React.act(async () => root.unmount());
-      dom.window.close();
-      for (const [name, descriptor] of previous) {
-        if (descriptor === undefined) {
-          Reflect.deleteProperty(globalThis, name);
-        } else {
-          Object.defineProperty(globalThis, name, descriptor);
-        }
-      }
-    },
-  };
-}
-
-function response(status: number, body: unknown): Response {
-  return new Response(JSON.stringify(body), {
-    status,
-    headers: { "content-type": "application/json" },
-  });
+  return installSharedDom({ csrfToken: "test-token" });
 }
 
 function editableView(target: SourceTarget, text: string, focus: string): SourceView {
@@ -259,20 +156,6 @@ function load(target: SourceTarget, text: string, view: SourceView): UnitSource 
   };
 }
 
-function buttonByText(container: ParentNode, text: string): HTMLButtonElement {
-  const button = [...container.querySelectorAll<HTMLButtonElement>("button")].find(
-    (candidate) => (candidate.textContent ?? "").replaceAll(/\s+/g, " ").trim() === text,
-  );
-  assert.ok(button !== undefined, `missing button: ${text}`);
-  return button;
-}
-
-function buttonByLabel(container: ParentNode, label: string): HTMLButtonElement {
-  const button = container.querySelector<HTMLButtonElement>(`button[aria-label="${label}"]`);
-  assert.ok(button !== null, `missing labeled button: ${label}`);
-  return button;
-}
-
 function textarea(container: ParentNode): HTMLTextAreaElement {
   const editor = container.querySelector<HTMLTextAreaElement>("textarea");
   assert.ok(editor !== null, "missing source textarea");
@@ -295,6 +178,12 @@ function center(
       selection,
       comparisonState,
       selectedComparison,
+      assemblyState: { status: "idle" },
+      assemblyCallbacks: {
+        chooseScenario: () => undefined,
+        setOverride: () => undefined,
+        rerender: () => undefined,
+      },
     }),
   );
 }
@@ -375,7 +264,10 @@ test("focused textarea preserves raw boundaries, escaped context, aliases, Compa
     assert.equal(loads, 1);
 
     await harness.render(center(workspace, "assembly", selection));
-    assert.match(harness.container.textContent ?? "", /Assembly mode is not built yet/);
+    assert.match(
+      harness.container.textContent ?? "",
+      /Select a session shape to preview its assembly\./,
+    );
     await harness.render(center(workspace, "edit", selection));
     assert.equal(textarea(harness.container).value, "line1\nCHANGED\n");
   } finally {
@@ -742,12 +634,10 @@ test("conflict and indeterminate UI preserve Copy Edits, exact failures, and des
 
 test("successful App save refreshes catalog and inspector without replacing workspace state", async () => {
   const harness = installDom();
-  const previousFetch = globalThis.fetch;
   const text = "before A after";
   let treeRequests = 0;
   let inspectRequests = 0;
-  globalThis.fetch = async (input, init): Promise<Response> => {
-    const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+  const restoreFetch = stubFetch(async (url, init): Promise<Response> => {
     if (url === "/api/catalog/tree") {
       treeRequests += 1;
       return treeRequests === 1 ? response(200, TREE) : response(500, { detail: "failed" });
@@ -798,7 +688,7 @@ test("successful App save refreshes catalog and inspector without replacing work
       });
     }
     throw new Error(`unexpected request: ${url}`);
-  };
+  });
 
   try {
     await harness.render(React.createElement(App));
@@ -821,17 +711,15 @@ test("successful App save refreshes catalog and inspector without replacing work
     assert.equal(buttonByText(harness.container, "Edit").ariaPressed, "true");
     assert.equal(textarea(harness.container).value, "saved A");
   } finally {
-    globalThis.fetch = previousFetch;
+    restoreFetch();
     await harness.cleanup();
   }
 });
 
 test("catalog refresh failure freezes App writes with exact recovery guidance", async () => {
   const harness = installDom();
-  const previousFetch = globalThis.fetch;
   const text = "before A after";
-  globalThis.fetch = async (input, init): Promise<Response> => {
-    const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+  const restoreFetch = stubFetch(async (url, init): Promise<Response> => {
     if (url === "/api/catalog/tree") {
       return response(200, TREE);
     }
@@ -865,7 +753,7 @@ test("catalog refresh failure freezes App writes with exact recovery guidance", 
       });
     }
     throw new Error(`unexpected request: ${url}`);
-  };
+  });
 
   try {
     await harness.render(React.createElement(App));
@@ -882,7 +770,7 @@ test("catalog refresh failure freezes App writes with exact recovery guidance", 
     assert.equal(warning?.textContent, CATALOG_STALE_DETAIL);
     assert.ok((harness.container.textContent ?? "").includes(CATALOG_STALE_DETAIL));
   } finally {
-    globalThis.fetch = previousFetch;
+    restoreFetch();
     await harness.cleanup();
   }
 });
@@ -1048,15 +936,13 @@ test("validation and generated-lineage refusal are rendered without implicit ret
 
 test("App drawer, confirmed discard, last-target Open, manual reversion, and unload guard are file-based", async () => {
   const harness = installDom();
-  const previousFetch = globalThis.fetch;
   const sourceTexts = new Map([
     ["shared.md", "head\r\nA\r\ntail"],
     ["other.md", "other B end"],
   ]);
   const getCounts = new Map<string, number>();
   let projectCalls = 0;
-  globalThis.fetch = async (input, init): Promise<Response> => {
-    const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+  const restoreFetch = stubFetch(async (url, init): Promise<Response> => {
     if (url === "/api/catalog/tree") {
       return response(200, TREE);
     }
@@ -1096,7 +982,7 @@ test("App drawer, confirmed discard, last-target Open, manual reversion, and unl
       return response(404, { detail: "unknown comparison subject" });
     }
     throw new Error(`unexpected request: ${url}`);
-  };
+  });
 
   const beforeUnloadListeners: EventListener[] = [];
   const removedBeforeUnloadListeners: EventListener[] = [];
@@ -1204,7 +1090,7 @@ test("App drawer, confirmed discard, last-target Open, manual reversion, and unl
     assert.match(harness.container.textContent ?? "", /No files need attention\./);
     assert.doesNotMatch(harness.container.textContent ?? "", /Save/);
   } finally {
-    globalThis.fetch = previousFetch;
+    restoreFetch();
     await harness.cleanup();
   }
 });

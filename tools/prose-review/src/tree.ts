@@ -38,6 +38,7 @@ export type SessionShape = {
   id: string;
   label: string;
   delivery: DeliveryMode;
+  assembly: string;
   layers: AssemblyLayer[];
 };
 
@@ -131,7 +132,9 @@ function parseShape(value: unknown): SessionShape | null {
     !isRecord(value) ||
     typeof value.id !== "string" ||
     typeof value.label !== "string" ||
-    !isDeliveryMode(value.delivery)
+    !isDeliveryMode(value.delivery) ||
+    typeof value.assembly !== "string" ||
+    value.assembly.length === 0
   ) {
     return null;
   }
@@ -139,7 +142,13 @@ function parseShape(value: unknown): SessionShape | null {
   if (layers === null) {
     return null;
   }
-  return { id: value.id, label: value.label, delivery: value.delivery, layers };
+  return {
+    id: value.id,
+    label: value.label,
+    delivery: value.delivery,
+    assembly: value.assembly,
+    layers,
+  };
 }
 
 function parseNode(value: unknown): CapabilityNode | null {

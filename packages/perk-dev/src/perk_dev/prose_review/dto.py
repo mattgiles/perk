@@ -185,6 +185,7 @@ class SessionShapeOut(OutputModel):
     id: str
     label: str
     delivery: DeliveryMode
+    assembly: str
     layers: tuple[AssemblyLayerOut, ...]
 
     @classmethod
@@ -198,6 +199,7 @@ class SessionShapeOut(OutputModel):
             id=shape.id,
             label=shape.label,
             delivery=shape.delivery,
+            assembly=shape.assembly,
             layers=tuple(AssemblyLayerOut.from_domain(layer) for layer in assembly.layers),
         )
 
