@@ -80,6 +80,11 @@ export function SearchBar({ onSelect }: { onSelect: (target: SourceTarget) => vo
   // `.search-panel button.search-result` query never captures the filter/Clear
   // controls, and unhandled keys (selects, Enter) keep their native behavior.
   const onKeyDown = (event: ReactKeyboardEvent<HTMLElement>): void => {
+    // An active IME composition owns its keys (Esc cancels the composition,
+    // arrows move through candidates) — never claim composing events.
+    if (event.nativeEvent.isComposing) {
+      return;
+    }
     if (event.key === "Escape") {
       event.preventDefault();
       controller.close();
@@ -87,6 +92,11 @@ export function SearchBar({ onSelect }: { onSelect: (target: SourceTarget) => vo
       return;
     }
     if (event.key !== "ArrowDown" && event.key !== "ArrowUp") {
+      return;
+    }
+    // Modified arrows keep their native behavior (e.g. Shift+ArrowDown extends
+    // the input's text selection).
+    if (event.ctrlKey || event.metaKey || event.altKey || event.shiftKey) {
       return;
     }
     const bar = barRef.current;

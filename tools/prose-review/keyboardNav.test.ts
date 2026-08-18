@@ -1,8 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import type { Change } from "diff";
 import { JSDOM } from "jsdom";
-import { changedChunkIndexes, cyclePane, moveFocusInList } from "./src/keyboardNav.ts";
+import { cyclePane, moveFocusInList } from "./src/keyboardNav.ts";
 
 const dom = new JSDOM("<!doctype html><html><body></body></html>");
 
@@ -64,28 +63,4 @@ test("moveFocusInList jumps Home/End and enters at the first entry from outside"
   assert.equal(moveFocusInList([a, b, c], null, "ArrowDown"), a);
   assert.equal(moveFocusInList([a, b, c], element(), "ArrowUp"), null);
   assert.equal(moveFocusInList([], a, "Home"), null, "an empty list handles nothing");
-});
-
-function chunk(value: string, flags: { added?: boolean; removed?: boolean } = {}): Change {
-  return {
-    value,
-    added: flags.added ?? false,
-    removed: flags.removed ?? false,
-    count: 1,
-  };
-}
-
-test("changedChunkIndexes lists added/removed chunk indexes in chunk order", () => {
-  assert.deepEqual(
-    changedChunkIndexes([
-      chunk("same"),
-      chunk("gone", { removed: true }),
-      chunk("new", { added: true }),
-      chunk("same"),
-      chunk("tail", { added: true }),
-    ]),
-    [1, 2, 4],
-  );
-  assert.deepEqual(changedChunkIndexes([chunk("same"), chunk("same")]), []);
-  assert.deepEqual(changedChunkIndexes([]), []);
 });

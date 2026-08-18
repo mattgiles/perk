@@ -185,6 +185,13 @@ test("App preserves fragment sessions and invalidates changed Compare origins", 
     );
     assert.equal(selectedTargets.length, 1);
     assert.equal(selectedTargets[0], duplicateTargets[1]);
+    // The selected comparison target carries aria-current and yields it on reselection.
+    assert.equal(itemAt(duplicateTargets, 1).getAttribute("aria-current"), "true");
+    assert.equal(itemAt(duplicateTargets, 0).getAttribute("aria-current"), null);
+    await harness.click(itemAt(duplicateTargets, 0));
+    assert.equal(itemAt(duplicateTargets, 0).getAttribute("aria-current"), "true");
+    assert.equal(itemAt(duplicateTargets, 1).getAttribute("aria-current"), null);
+    await harness.click(itemAt(duplicateTargets, 1));
     assert.match(harness.container.textContent ?? "", /No differences in current content/);
 
     await harness.click(buttonByLabel(harness.container, `Expand fragments for ${UNIT_A.id}`));

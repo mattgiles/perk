@@ -31,7 +31,7 @@ export type RenderHarness = {
   render: (node: React.ReactNode) => Promise<void>;
   click: (element: Element) => Promise<void>;
   keydown: (element: Element, key: string, init?: KeyboardEventInit) => Promise<KeyboardEvent>;
-  input: (element: HTMLTextAreaElement, value: string) => Promise<void>;
+  input: (element: HTMLInputElement | HTMLTextAreaElement, value: string) => Promise<void>;
   selectOption: (element: HTMLSelectElement, value: string) => Promise<void>;
   settle: () => Promise<void>;
   cleanup: () => Promise<void>;
@@ -114,16 +114,16 @@ export function installDom(options: InstallDomOptions = {}): RenderHarness {
       });
       return event;
     },
-    async input(element: HTMLTextAreaElement, value: string): Promise<void> {
-      const setter = Object.getOwnPropertyDescriptor(
-        dom.window.HTMLTextAreaElement.prototype,
-        "value",
-      )?.set;
+    async input(element: HTMLInputElement | HTMLTextAreaElement, value: string): Promise<void> {
+      // The element's own prototype supplies the native value setter (input and
+      // textarea alike), bypassing React's value tracker so the dispatched input
+      // event re-renders the controlled component.
+      const setter = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(element), "value")?.set;
       assert.ok(setter !== undefined);
       const previousValue = element.value;
       await React.act(async () => {
         setter.call(element, value);
-        const tracked = element as HTMLTextAreaElement & {
+        const tracked = element as (HTMLInputElement | HTMLTextAreaElement) & {
           _valueTracker?: { setValue: (next: string) => void };
         };
         tracked._valueTracker?.setValue(previousValue);

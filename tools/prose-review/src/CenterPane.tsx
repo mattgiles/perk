@@ -11,7 +11,6 @@ import {
   type SelectedComparison,
 } from "./comparison.ts";
 import type { ComparisonLoadState } from "./comparisonLoad.ts";
-import { changedChunkIndexes } from "./keyboardNav.ts";
 import { CLIPBOARD_FAILURE_DETAIL, type SourceDiagnostic } from "./save.ts";
 import {
   type Selection,
@@ -67,7 +66,10 @@ function SourceLoadPresentation({
     }
     const { source: loaded } = state;
     const onKeyDown = (event: KeyboardEvent): void => {
+      // A held chord auto-repeats: without this guard the first keydown opens the
+      // review and a repeat immediately saves — crossing the gate on one press.
       if (
+        event.repeat ||
         (event.key !== "s" && event.key !== "S") ||
         (!event.ctrlKey && !event.metaKey) ||
         event.altKey
@@ -536,8 +538,13 @@ function ComparisonPanes({
   // The change-traversal state: `currentChange` is the position within the changed
   // chunks (-1 = not started, so the first `Next change` lands on change 1). The
   // state resets naturally — SelectedComparisonPair remounts the panes per pairKey.
+  // The traversal order: chunk indexes carrying a change, in chunk order (each
+  // changed chunk renders in exactly one pane, so an index is a unique anchor).
   const containerRef = useRef<HTMLDivElement | null>(null);
-  const changed = chunks === null ? [] : changedChunkIndexes(chunks);
+  const changed =
+    chunks === null
+      ? []
+      : chunks.flatMap((chunk, index) => (chunk.added || chunk.removed ? [index] : []));
   const [currentChange, setCurrentChange] = useState(-1);
   const canPrevious = currentChange > 0;
   const canNext = changed.length > 0 && currentChange < changed.length - 1;

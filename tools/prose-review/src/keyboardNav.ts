@@ -1,10 +1,8 @@
 // The pure keyboard-navigation helpers behind the workbench's keyboard contract
-// (recorded in docs/design/prose-review-stack.md): F6 pane cycling, clamped
-// DOM-order list stepping (tree entries and search results), and the Compare
-// changed-chunk traversal order. Framework-free so node:test drives them directly;
-// the components own only event wiring and focus calls.
-
-import type { Change } from "diff";
+// (recorded in docs/design/prose-review-stack.md): F6 pane cycling and clamped
+// DOM-order list stepping (tree entries and search results). Framework-free so
+// node:test drives them directly; the components own only event wiring and focus
+// calls.
 
 /**
  * The next pane in the F6 cycle. `panes` is the fixed cycle order (null entries —
@@ -61,19 +59,4 @@ export function moveFocusInList(
     return null;
   }
   return buttons[next] ?? null;
-}
-
-/**
- * The Compare traversal order: the chunk indexes carrying an added or removed
- * change, in chunk order. Each changed chunk renders in exactly one pane, so a
- * chunk index resolves to a unique focusable element.
- */
-export function changedChunkIndexes(chunks: Change[]): number[] {
-  const indexes: number[] = [];
-  chunks.forEach((chunk, index) => {
-    if (chunk.added || chunk.removed) {
-      indexes.push(index);
-    }
-  });
-  return indexes;
 }

@@ -577,8 +577,8 @@ backgrounds are the secondary cue.
   inspector stacks under the center pane, both keep their own scroll), the comparison grid stacks
   to one column with a `12rem` per-pane `min-height`, and the search bar wraps.
 
-Behavior contracts live in `tools/prose-review/keyboardNav.test.ts` (the pure cycle/step/
-changed-index helpers) and `tools/prose-review/accessibilityComponents.test.ts` (the rendered
+Behavior contracts live in `tools/prose-review/keyboardNav.test.ts` (the pure cycle/step
+helpers) and `tools/prose-review/accessibilityComponents.test.ts` (the rendered
 contract); the CDP browser leg re-verifies real focus rings, `F6` reachability, and the CSS
 geometry that jsdom cannot observe.
 
@@ -649,7 +649,7 @@ occurrence identity, attention drawer, discard, unload lifecycle, catalog-epoch 
 freeze) and CenterPane (shared path loads, focused textarea, transient retry, native current-text
 diff chunks, frozen save review, same-path direct/indirect presentation gating, diagnostics,
 conflict/reconciliation, and escaped handoffs). The keyboard & accessibility contract (the section
-above) adds `keyboardNav.test.ts` for the pure pane-cycle/list-step/changed-index helpers and
+above) adds `keyboardNav.test.ts` for the pure pane-cycle/list-step helpers and
 `accessibilityComponents.test.ts` for the rendered contract — F6 cycling with the open-drawer leg,
 tree arrow navigation and `aria-current`, search panel keys, drawer Esc/Open focus moves, the
 review-gated Mod+S round trip, Compare `del`/`ins` traversal, and the never-suppress-outline

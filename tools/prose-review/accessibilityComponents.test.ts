@@ -7,13 +7,13 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import test from "node:test";
-import { setImmediate as tick } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
 import * as React from "react";
 import { tsImport } from "tsx/esm/api";
 import {
   buttonByLabel,
   buttonByText,
+  buttonStartingWith,
   installDom,
   itemAt,
   normalizedText,
@@ -57,7 +57,10 @@ const WARM: SessionShape = {
   label: "Warm shape",
   delivery: "warm",
   assembly: "test-assembly",
-  layers: [{ position: 1, optional: false, label: "Warm layer", unit: UNIT_A, boundary: null }],
+  layers: [
+    { position: 1, optional: false, label: "System boundary", unit: null, boundary: "pi-system" },
+    { position: 2, optional: false, label: "Warm layer", unit: UNIT_A, boundary: null },
+  ],
 };
 const TREE: CapabilityTree = {
   capabilities: [
@@ -232,35 +235,22 @@ test("the selected tree entry carries aria-current and yields it on reselection"
     await harness.click(shapeEntry);
     assert.equal(unitEntry.getAttribute("aria-current"), null, "reselection clears the old entry");
     assert.equal(shapeEntry.getAttribute("aria-current"), "true");
+
+    // Boundary entries carry the same current marker.
+    await harness.click(buttonByLabel(harness.container, "Expand layers for Warm shape"));
+    const boundaryEntry = buttonStartingWith(harness.container, "System boundary");
+    assert.equal(boundaryEntry.getAttribute("aria-current"), null);
+    await harness.click(boundaryEntry);
+    assert.equal(boundaryEntry.getAttribute("aria-current"), "true");
+    assert.equal(shapeEntry.getAttribute("aria-current"), null);
+    await harness.click(unitEntry);
+    assert.equal(boundaryEntry.getAttribute("aria-current"), null, "the boundary yields too");
+    assert.equal(unitEntry.getAttribute("aria-current"), "true");
   } finally {
     restoreFetch();
     await harness.cleanup();
   }
 });
-
-async function typeInto(
-  harness: RenderHarness,
-  element: HTMLInputElement,
-  value: string,
-): Promise<void> {
-  // The harness textarea idiom for text inputs: bypass React's value tracker so a
-  // native input event re-renders the controlled component.
-  const setter = Object.getOwnPropertyDescriptor(
-    harness.window.HTMLInputElement.prototype,
-    "value",
-  )?.set;
-  assert.ok(setter !== undefined);
-  const previousValue = element.value;
-  await React.act(async () => {
-    setter.call(element, value);
-    const tracked = element as HTMLInputElement & {
-      _valueTracker?: { setValue: (next: string) => void };
-    };
-    tracked._valueTracker?.setValue(previousValue);
-    element.dispatchEvent(new harness.window.InputEvent("input", { bubbles: true }));
-    await tick();
-  });
-}
 
 test("search keys: ArrowDown enters results, ArrowUp returns, Esc closes and refocuses", async () => {
   const harness = installDom();
@@ -290,12 +280,21 @@ test("search keys: ArrowDown enters results, ArrowUp returns, Esc closes and ref
     await harness.keydown(input, "ArrowDown");
     assert.equal(activeElement(harness), input, "a closed panel leaves ArrowDown alone");
 
-    await typeInto(harness, input, "unit");
+    await harness.input(input, "unit");
     await harness.settle();
     const results = [
       ...harness.container.querySelectorAll<HTMLElement>(".search-panel button.search-result"),
     ];
     assert.equal(results.length, 2);
+
+    // Modified and composing arrows keep their native behavior (text selection,
+    // IME candidate navigation) — never claimed for result navigation.
+    const shifted = await harness.keydown(input, "ArrowDown", { shiftKey: true });
+    assert.equal(shifted.defaultPrevented, false, "Shift+ArrowDown stays native");
+    assert.equal(activeElement(harness), input);
+    const composing = await harness.keydown(input, "ArrowDown", { isComposing: true });
+    assert.equal(composing.defaultPrevented, false, "composing ArrowDown stays native");
+    assert.equal(activeElement(harness), input);
 
     await harness.keydown(input, "ArrowDown");
     assert.equal(activeElement(harness), results[0], "ArrowDown enters the first result");
@@ -400,6 +399,10 @@ test("Mod+S review-gates the save: review first, save second, no-op otherwise", 
     // Alt-modified chords stay unclaimed.
     const alted = await harness.keydown(body, "s", { ctrlKey: true, altKey: true });
     assert.equal(alted.defaultPrevented, false);
+    assert.equal(harness.container.querySelector(".save-review"), null);
+
+    // A held chord's auto-repeat never acts — the review gate needs distinct presses.
+    await harness.keydown(body, "s", { ctrlKey: true, repeat: true });
     assert.equal(harness.container.querySelector(".save-review"), null);
 
     // First press: opens the full-file save review (the beginSaveReview arm).
