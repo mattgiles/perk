@@ -1,6 +1,6 @@
 ---
 title: The Astro/Starlight docs-site pipeline — external-tree bridge, nav ordering, loader admission, workspace pins
-read_when: You are touching docs/site (astro.config.mjs, content.config.ts, frontmatter/nav), the docs build gate or link sweep, docs_scan's corpus mirror, or the docs-site npm workspace/toolchain pins.
+read_when: You are touching the docs site, MDX/links, Starlight CSS/a11y, Pagefind/pagination, docs census gates, corpus mirroring, or workspace/toolchain pins.
 cluster: toolchain-gotchas
 ---
 
@@ -18,18 +18,27 @@ non-obvious behavioral facts and traps.
 ## Distillation
 
 - The render cache makes per-render audits incomplete; the build gate must re-sweep the live
-  source corpus and assert the built output.
-- MDX has two validation paths: markdown links receive the remark sweep, while component/JSX
-  links need explicit post-build assertions.
-- MDX markdown belongs in classed `div` containers, not explicit `p` wrappers; external-tree
-  relative component imports work without a Vite alias.
-- Duplicated SVG variants need post-build content-parity and SVG-local accessibility checks.
+  source corpus and assert the built output — "The external-tree bridge".
+- MDX links have two validation paths: markdown links receive the remark sweep; every page's
+  JSX-carried links need explicit post-build assertions — "MDX page traps".
+- MDX marked regions use JSX comments, not the HTML comments used by Markdown; runtime censuses
+  are set-equal to live authorities — "Docs↔runtime censuses and marked regions".
+- Starlight presentation work pins token consumers, cascade-layer behavior, container-query
+  geometry, exact keyed routes, and reduced motion — "Starlight CSS facts".
+- Full-corpus static accessibility combines jsdom axe-core with committed contrast math and
+  clause-by-clause accounting — "Static accessibility gates".
+- Search tuning starts with index membership and token presence, then follows a bounded ladder;
+  pagination is an edge-by-edge opt-in — "Pagefind" and "Pagination".
+- `.md`→`.mdx` keeps route identity stable but fans out across every source/inventory mirror;
+  candidate jsdom pins must respect the effective dev floor — "Rename and pin fan-out".
+- Duplicated SVG variants need post-build content-parity and SVG-local accessibility checks —
+  "Hand-authored SVG variant discipline".
 - Fragment validation follows browser semantics, including decoded ids, empty fragments, and
-  pathless query links.
+  pathless query links — "URL-fragment validation needs browser semantics".
 - A scope-scoped CI row must run every relevant GitHub gate, including lint/typecheck for files
-  that do not themselves carry a code suffix.
+  without a code suffix; cross-scope guards deliberately run twice — "Process patterns".
 - Corpus membership and blueprint counts are live facts, not frozen enumerations; reconcile the
-  design SSOT whenever the corpus grows.
+  design SSOT whenever the corpus grows — "Starlight/Astro content facts".
 
 ## The external-tree bridge (pinned at astro@7.2.1)
 
@@ -88,11 +97,92 @@ non-obvious behavioral facts and traps.
 - **External-tree relative imports work directly.** `docs/user-docs/index.mdx` imports Astro
   components through a relative path into `docs/site/src/components/`; no Vite-alias fallback was
   needed. The only related config change was adding the page stylesheet to `customCss`.
-- **One MDX page is a meaningful validation bound.** The remark sweep checks markdown-syntax
-  links on `index.mdx`, but JSX attribute `href`s do not enter that tree. Every new
-  component-carried link on an MDX page therefore needs a post-build component-href assertion.
-  The MDX-faithful sweep remains deferred while this is a one-page case, with the justification
-  recorded next to the sweep in `docs/site/src/remark-rewrite-corpus-links.mjs`.
+- **The live MDX inventory is the validation bound.** The remark sweep checks markdown-syntax
+  links, but JSX attribute `href`s do not enter that tree. Every MDX page's component-carried
+  links therefore need explicit post-build assertions. `docs/site/README.md` owns the living
+  page inventory and the fidelity comment in
+  `docs/site/src/remark-rewrite-corpus-links.mjs` explains the split. Adding or renaming an MDX
+  page reconciles both in the same PR. Treating one historical page as the bound repeats this
+  doc's own warning that enumerated membership freezes while a corpus grows.
+
+## Docs↔runtime censuses and marked regions
+
+Marked-region syntax follows the host format. Markdown uses HTML comments; MDX drops those
+comments, so an MDX guard must use JSX comments instead. A scanner that recognizes only the
+Markdown form can report an empty or stale region while the rendered page looks fine.
+
+The docs↔runtime census in `docs/site/src/in-session-reference.test.mjs` compares a
+marker-bounded documentation region set-equal to live registrations rather than maintaining a
+third expected list. The reusable guard recipe lives in `workflow/source-scan-guards.md`; this
+site-specific consequence is that its triggers cross the Python docs gate and the docs-site
+workspace gate, so both scopes invoke it. A full `just test` runs it twice by design. When the
+workspace `check` script changes, update the exact pinned script assertion in
+`tests/test_docs_gates.py` in the same PR.
+
+Registry-derived prose must preserve distinctions that a flat table can erase. `doors.warm` in
+`shared/registry.yaml` means warm capability, not necessarily a standalone slash launcher:
+gist-author and objective-author are warm-capable without such launchers, while `/implement` is
+a context refresh rather than a warm stage door. Derive each displayed claim from the matching
+registry field rather than using warm capability as a proxy.
+
+## Starlight CSS facts
+
+- Starlight 0.41.7 sets no body font size. A custom property alone is dead configuration unless a
+  selector consumes it; guards should pin the consumer as well as the token.
+- `customCss` stylesheets are unlayered. A plain element rule can therefore outrank a rule inside
+  `@layer starlight.*`; reason from the actual cascade order before escalating specificity.
+- Intrinsically sized SVG variants should switch on a containing figure's `inline-size`, not the
+  viewport. Container queries expose the right variant at the geometry that owns the choice and
+  make the minimum readable-label width hold by construction.
+- Route-specific, zero-corpus-edit presentation can key from
+  `body:has(a[aria-current="page"][href="…"])`. Keep the route list exact and assert the built
+  HTML contains the expected `aria-current` anchor for every keyed route; substring selectors
+  quietly bleed styling onto neighboring pages.
+- Under reduced motion, make an animation complete once with `animation-iteration-count: 1`.
+  Setting it to zero can strand content in a pre-animation state.
+
+## Static accessibility gates
+
+A deterministic static gate can run axe-core across the full built corpus in jsdom. Disable
+exactly `color-contrast`, whose jsdom result is not trustworthy, and replace it with committed
+WCAG 2.2 contrast math over the live token CSS. This is a substitution, not an exemption: keep a
+per-clause accounting table showing which requirements the static corpus proves and which still
+need rendered/browser evidence.
+
+The jsdom dependency participates in the repo's `engine-strict=true` install. Before selecting a
+pin, compare its `engines` floor with the documented effective development floor; a semver-valid
+package can still make installation impossible on the supported dev runtime.
+
+## Pagefind search membership and tuning
+
+Search has two consumers of ranking configuration: Pagefind and the framework integration. The
+shared module at `docs/site/src/pagefind-ranking.mjs` must export the framework's *effective*
+defaults, not an empty user-override literal, or the two consumers rank from different baselines.
+
+Pagefind ANDs query words. Before changing weights, prove that the intended result contains every
+query token. Then use a bounded ladder: measure the current result, make at most one copy edit,
+make at most one ranking adjustment, and stop. This keeps tuning evidence attributable instead
+of layering knobs until one fixture passes.
+
+Prove index membership separately from ranking. Compare the pages selected by
+`data-pagefind-body` set-equal to the intended corpus and search for a bound sentinel token from a
+known page. A good rank among the pages that happened to enter the index says nothing about an
+omitted page.
+
+## Pagination is an edge-by-edge opt-in
+
+Starlight resolves per-page `prev: true` / `next: true` before the global `pagination: false`.
+A desired linear sequence therefore opts in each edge from its adjacent pages. Guard both the
+rendered `rel="prev"` / `rel="next"` links and the frontmatter mirror; either surface alone can
+drift while the other still appears plausible.
+
+## Rename and pin fan-out
+
+A `.md`→`.mdx` rename keeps the route and sidebar slug stable, but the source extension appears
+in multiple inventories. Sweep source-relative links, the exact-count comments in
+`docs/site/src/remark-rewrite-corpus-links.mjs` and `docs/site/README.md`, and the built-site
+`mdxPages` href-integrity list. Routes are the stable identity; source suffixes are implementation
+facts that every mirror must reconcile.
 
 ## Hand-authored SVG variant discipline
 
@@ -142,7 +232,8 @@ non-obvious behavioral facts and traps.
   Files selected by the docs row but by no code-suffix lint/typecheck glob — such as
   `docs/site/src/styles/tokens.css` and `tsconfig.json` — otherwise make an in-session docs-only
   run skip Biome or tsc. The docs row therefore runs Biome over `docs/site` and the workspace
-  typecheck in addition to the docs check.
+  typecheck in addition to the docs check. When one guard's triggers span two scopes, invoke it
+  in both and accept the duplicate full-suite run rather than leaving either scoped run blind.
 - **The integration gate is deliberately build-shaped.** Post-build checks live outside `src/`,
   so the unit-test glob cannot run them without a built site; the workspace `check` script orders
   build before tests. Its accepted cost is a full Astro build (roughly 30–60 seconds) in
@@ -163,10 +254,10 @@ non-obvious behavioral facts and traps.
   through `just docs-check` and the docs-scoped CI row on every build. These structural assertions
   cover the external-tree page, component hrefs, SVG variants, and other facts that source-only
   tests cannot prove.
-- `docs/user-docs/index.mdx` is the sole MDX page. Its markdown links are swept best-effort through
-  the markdown parser, while JSX-attribute hrefs remain outside remark and rely on post-build
-  component-href checks. Preserve this stated one-page bound or replace it with MDX-faithful
-  sweeping as the corpus grows.
+- The live MDX inventory is maintained in `docs/site/README.md` and mirrored by the fidelity
+  comment in `docs/site/src/remark-rewrite-corpus-links.mjs`. Markdown links are swept through the
+  Markdown processor; every listed page's JSX-attribute links rely on explicit post-build checks.
+  Reconcile those surfaces in the same PR whenever the inventory changes.
 - The site's admission rule and `docs_scan._iter_user_docs` agree by convention only (drift is
   silent).
 - The token guard's markdown parsing is coupled to the blueprint's table shapes — a restructure

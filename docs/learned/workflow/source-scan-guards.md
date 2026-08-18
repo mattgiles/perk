@@ -1,6 +1,6 @@
 ---
 title: Source-scan guard tests
-read_when: You are adding a source-scan or corpus guard, proving config consumption, safeguarding a secret write, ratcheting a baseline, or testing byte-threshold and newline semantics.
+read_when: You are adding source/corpus guards, docs↔runtime censuses, marked fact tables, family maps, compile-time policy registries, or vacuity proofs.
 cluster: quality-and-guards
 ---
 
@@ -22,6 +22,17 @@ the session-data path guards in both planes.
 - Live-corpus assertions beat frozen membership lists when concurrent changes can grow the set.
 - Byte gates measure original bytes but normalize decoded newlines for text-reader parity; every
   counting rule needs a discriminating boundary fixture.
+- Hub-and-children families keep one literal map, then guard its partition, hub census, live click
+  tree, and two levels of non-vacuity — "Hub + N children family guards".
+- A prose promise must name the guard's real allowlist; marked fact regions are validated on every
+  canonical and mirrored surface — "Promise parity" and "Marker-bounded fact tables".
+- Docs↔runtime censuses compare marked regions set-equal to live harness authorities, with no
+  hand-maintained third list — "Docs↔runtime census guards".
+- Editorial boundaries discover their corpus at runtime and use fence-aware scanners with
+  mutation-style unit coverage — "Editorial-boundary guards".
+- External-SDK policy registries pair compile-time key exhaustiveness with runtime unknown-field
+  findings; adoption of a corpus guard includes the normalization sweep — "Compile-time census
+  pins" and "Guard-adoption ripple".
 
 ## The node:test-as-grep-guard recipe
 
@@ -120,6 +131,81 @@ and a no-extras sweep (declared tokens not bound by the blueprint fail).
 Assert the **entire** `devDependencies` mapping equals a literal dict (names AND versions) —
 that defeats range expressions, dropped deps, and silent additions, turning a "changing a pin
 requires objective reconciliation" design rule into CI structure.
+
+## Hub + N children family guards
+
+A reference hub split into several child pages needs one hand-maintained placement artifact, not
+separate expected lists in every test. In `tests/test_user_docs_cli_reference.py`, the literal
+`FAMILY_MAP` maps each page to its root-token set. Guard the map itself: pages form the intended
+partition, every token has one placement, and known roots occur where expected.
+
+The hub's marked census region is then compared set-equal to live roots minus an explicit
+allowlist, with spot checks for known anchors. The extractor must recognize every documented-entry
+shape that actually exists; scan the corpus before choosing its syntax rather than fitting a
+regex to one convenient row. Prove non-vacuity at two levels: the overall family has enough
+members and each child contributes enough roots for its role. The live side must walk the actual
+click tree. A copied fingerprint constant only proves that two stale transcriptions still agree.
+
+## Prose promises must match guard contracts
+
+When prose says a test guarantees "every X", the same edit must compare that sentence with the
+test's exclusions. State the allowlist or exception class in the prose. A guard can be internally
+correct while its surrounding documentation promises a stronger property; treating the test name
+as proof of the sentence hides that mismatch.
+
+## Marker-bounded fact tables
+
+Fact tables that are partly hand-authored and partly source-derived use unique, ordered
+`perk:reference-facts:<key>:start` / `end` regions. The reusable extractor in
+`tests/test_user_docs_reference_facts.py` validates marker uniqueness, order, non-overlap, and a
+non-empty body before comparing facts. Guard every surface that carries the table, including
+mirrors; marking only the canonical page turns the unmarked copy into an invisible drift surface.
+
+One gap remains intentionally open. The perk-expert provider table has no reference-facts markers,
+and the current provider check compares only provider-id order. Seam, default, and package columns
+can drift silently on both surfaces. Gate membership is wired, but adding mirror markers and
+extending the column comparison is follow-up guard work, not something the existing test proves.
+
+## Docs↔runtime census guards
+
+A census region should be set-equal to a live authority, never to a third expected list. Depending
+on the surface, the authority may be a real extension harness session's registrations, an exported
+tool census, or `loadRegistry()`. Hygiene checks make failures diagnostic: each marker occurs once,
+the region is non-empty, each row carries exactly one code-form name, names are unique, and known
+anchors are present.
+
+Loading the extension from a docs test needs hermetic session state. Change into a scaffolded
+temporary repo during extension load and neutralize `PERK_RUN_ID`; otherwise the checkout's own
+`.perk/config.toml` can alter registrations and make a docs census depend on developer state.
+`docs/site/src/in-session-reference.test.mjs` is the docs-site instance; its cross-scope execution
+posture is described in `toolchain/docs-site-astro-starlight.md`.
+
+## Editorial-boundary guards
+
+An authoring boundary becomes structural only when the guard discovers its page set from the live
+corpus rather than a frozen filename list. For fenced Markdown, scan with CommonMark-compatible
+closing semantics so labels inside examples are not mistaken for editorial prose. Keep scanner
+unit tests beside the guard and cover both directions: a real offender is found, while fenced
+counterexamples remain exempt. Pin the test in `DOCS_CHECK_PYTEST_TARGETS`, and report label
+violations as label problems rather than collapsing them into a generic parse failure. The
+reference implementation is `tests/test_explanation_boundary.py`.
+
+## Compile-time census pins against external SDKs
+
+A hand-maintained per-field policy registry can be made exhaustive by checking it against
+`keyof ExternalSdkType` with TypeScript's `satisfies` operator. An SDK field addition then breaks
+`tsc` before a runtime scan can miss it. Pair that compile-time pin with a runtime
+unclassified-field finding: one guards catalog completeness, the other protects values entering
+through dynamic paths. In `tools/prose-map/catalog.ts`, registry insertion order also determines
+generated fragment order, so exact output ordering is part of the policy surface.
+
+## Guard-adoption ripple
+
+Introducing a corpus-wide shape guard over an established convention requires a same-change
+normalization sweep. Grandfathering existing drift makes the new rule vacuous where it matters
+most. Expect a broad item-shape extractor to widen after it meets the real corpus, while narrower
+quadrant or placement guards remain strict. This is discovery, not a reason to weaken the adopted
+contract.
 
 ## Live-corpus guard craft
 

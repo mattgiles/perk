@@ -31,6 +31,9 @@ knowledge below is what an agent can't derive from reading any single file.
 - Delivery vs scoping are separate layers: bindings put a skill INTO a session; the exposure
   model decides what a cold launch DISCOVERS (§8.39 is canonical) — "The layered
   skills-exposure model (scoping)".
+- Pi compaction preserves append-only branch history, so warm dedup scans only the active context
+  window; delivery tests cover every template arm and the final dispatch boundary — "The two
+  doors and the cold↔warm dedup marker".
 
 ## The data contract and the resolver (Nodes 1.1, 1.2)
 
@@ -84,14 +87,27 @@ Anyone changing the pointer format again reaches for the helper, not a re-inline
 Cold and warm renderers are **independent code paths** that must not double-deliver when both fire
 for one session (a cold launch *and* `before_agent_start`). They dedup through one **byte-identical
 header literal**: `BINDING_HEADER` (TS, `extension/substrate/bindingDelivery.ts`) ≡ `_HEADER` (Python,
-`perk/substrate/binding_delivery.py`). The warm injector skips when **any entry on `ctx.sessionManager.getBranch()`
-already contains the header** — a shape-agnostic scan (`branch.some(e => JSON.stringify(e).includes(HEADER))`)
-robust because the header is a distinctive literal. The equality is pinned by a literal test in BOTH
-planes; changing the literal in one plane must update the other in the same turn. It is idempotent
-across turns/reloads, and re-delivers after compaction drops the original entry (the ongoing value).
+`perk/substrate/binding_delivery.py`). The warm injector skips when the header already occurs in Pi's **active model-context window** — a
+shape-agnostic marker scan over `activeContextWindow(branchOf(ctx))`. Pi compaction appends history;
+it does not delete the original delivery entry. Scanning the full branch would therefore suppress
+re-delivery forever even after the marker left model context. The window begins at the latest
+compaction's `firstKeptEntryId` (or just after that compaction as fallback) and excludes compaction
+entries so a summary quoting the header cannot masquerade as live delivery. The cross-plane header
+equality is pinned by literal tests in both planes; changing one must update the other in the same
+turn.
 
-The cold/warm injection+strip mechanics (why the strip must be conditional, why it must be narrower
-than planMode's) are pi-lifecycle facts captured in `pi/context-injection.md`.
+The cold/warm injection+strip and compaction mechanics are captured in
+`pi/context-injection.md`; contracts §8.38 names their externally relevant behavior.
+
+### Coverage must reach each rendered arm and the dispatch boundary
+
+A drive-coverage census needs one rendered row for every template arm that names tools. A generic
+`namesNoTools` arm does not exercise the provider-specific arm merely because both reach the same
+renderer. Enumerate each naming arm so a new provider/tool-bearing path cannot enter uncovered.
+
+Likewise, renderer assertions prove only renderer output. Assert the injected text where it leaves
+the dispatch boundary: a send-time suffix or wrapper can change delivered content without changing
+the renderer result. Keep both layers when the renderer and dispatcher can independently drift.
 
 ### The `binding_trigger` "borrows-a-stage" hazard
 

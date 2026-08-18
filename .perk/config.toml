@@ -65,7 +65,7 @@ glob = "*.ts,*.tsx,*.js,*.jsx,*.mjs"
 [[ci.checks]]
 name = "docs-check"
 command = "just docs-check"
-glob = "docs/user-docs/**,docs/site/**,package.json,package-lock.json,justfile"
+glob = "docs/user-docs/**,docs/site/**,skills/perk-expert/**,shared/providers.yaml,shared/schemas/**,package.json,package-lock.json,justfile"
 
 # Mirror discipline: every surface this row runs is also reached through the generic checks
 # (typecheck-js runs the workspace tsc, test-js's tools/**/*.test.ts glob runs the workspace's

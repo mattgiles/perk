@@ -50,7 +50,7 @@ runner's GitHub credential.
 
 GitHub is the default issue backend. Linear is optional and stores plans as Linear issues and
 objectives as Linear Projects. See [How to switch the issue backend to Linear](../how-to/switch-to-linear.md)
-for the configuration path and [Providers & issue backends](./providers-and-backends.md) for
+for the configuration path and [Issue backends](./providers-and-backends/issue-backends.md) for
 the backend contract.
 
 ### Remote runner

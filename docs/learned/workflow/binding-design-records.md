@@ -1,6 +1,6 @@
 ---
 title: Binding design records & disposable-scaffold spikes
-read_when: You are authoring a binding design record, spike, or blueprint — disposable-scaffold evidence, teardown proofs, cross-section arithmetic, re-measure at commit, reconciliation rules.
+read_when: You are authoring or reconciling a binding design record/spike/blueprint — evidence, teardown, cross-section invariants, stale current-state claims, or narrowed literals.
 cluster: knowledge-stewardship
 ---
 
@@ -60,6 +60,17 @@ that misses root-level files undercounts silently).
 Preserve verbatim outputs + the methodology in the record, because the checks themselves are torn
 down with the scaffold. Once the target becomes committed code, prefer making the checks
 repo-owned and re-runnable (deferred here until `docs/site/` exists — flagged, not fiction).
+
+## Reconcile the whole current-state narrative
+
+A plan that names stale statements sets the minimum sweep, not its boundary. Re-read the record's
+entire current-state narrative against the merged implementation: neighboring decisions, residuals,
+and summaries can restate the same assumption without sharing the named wording.
+
+When an implementation narrows a literal invariant, grep the full record for every phrasing of that
+invariant before declaring reconciliation complete. Adjacent bullets often encode it once as a
+value, once as a rule, and once as an exception. Fixing only the exact sentence identified by the
+plan leaves an internally contradictory binding record.
 
 ## Cross-references
 

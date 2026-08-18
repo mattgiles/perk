@@ -30,3 +30,5 @@ clusters:
     rollup: "Keeping the record true — the /learn evidence pipeline and harvest core, doc-reconciliation craft, session-audit expectation curation, binding design records."
   - id: quality-and-guards
     rollup: "Code-quality disciplines — source-scan guard tests, test-pin sweeps, broad-catch narrowing, Pydantic boundary models, lease-fenced outbox delivery."
+  - id: prose-governance
+    rollup: "Model-facing prose governance — the prose-map catalog/scenarios, the perk-dev prose-review workbench (FastAPI/Vite), source adapters, the edit workspace."

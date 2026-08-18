@@ -6,7 +6,7 @@ This is the readable projection of perk's living, workflow-first prose graph. It
 ## Coverage
 
 - **206** canonical source units
-- **698** logical fragments
+- **699** logical fragments
 - **16** session shapes and **10** assemblies
 - **15** explicitly excluded candidates (policy-only; not displayed)
 - **0** validation findings
@@ -50,6 +50,7 @@ Discovery cues and managed instructions present before a workflow is selected.
   - `cluster:cross-plane-contracts` — cross-plane-contracts routing cue (`clusters.cross-plane-contracts.rollup`)
   - `cluster:knowledge-stewardship` — knowledge-stewardship routing cue (`clusters.knowledge-stewardship.rollup`)
   - `cluster:quality-and-guards` — quality-and-guards routing cue (`clusters.quality-and-guards.rollup`)
+  - `cluster:prose-governance` — prose-governance routing cue (`clusters.prose-governance.rollup`)
 - `managed:downstream-agents`
   - `symbol:_agents_inner` — Managed downstream AGENTS instructions (`symbol:_agents_inner`)
 - `managed:repo-agents`

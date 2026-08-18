@@ -1,10 +1,10 @@
 ---
-title: Objective delivery trains — the operation journal, TrainPersistence, stacked-roadmap mechanics, landing readiness + the atomic landing mutation, cancellation/doctor drift diagnostics
-read_when: You are touching src/perk/delivery/ (journal, TrainPersistence, train/stack probes, stacked /submit publication, stack sync), delivery_order, a delivery/recovery node, or stacked-delivery headers.
+title: Objective delivery — the Delivery façade, migration slices, journals, trains, sync, recovery, and landing
+read_when: You are changing the Delivery façade or adapters/fakes, migrating a delivery operation, reading trains, syncing/recovering/landing stacks, or editing delivery contracts.
 cluster: objective-system
 ---
 
-# Objective delivery trains — the operation journal, TrainPersistence, and stacked-roadmap mechanics
+# Objective delivery — the façade, train journal, and stacked-roadmap mechanics
 
 `shared/contracts.md` **§8.42** (the stored domain contract) and **§8.43** (the operation journal
 + train persistence) are the normative statements — this doc points at them and carries only the
@@ -18,8 +18,8 @@ history a future delivery/recovery node should not re-derive.
   transfer/recover, land/landing) — "The seam map".
 - The naive "rescan → one retry → typed error" journal shape hides three append-discipline
   holes — "The three append-discipline holes".
-- Train reads reconstruct from stored facts + fresh probes (never re-derive membership) — "The
-  train read path (reconstruction + stack status probes)".
+- Train reads enter through `Delivery.status` and reconstruct from stored facts plus fresh probes
+  without re-deriving membership — "The train read path (through `Delivery.status`)".
 - The stacked `/submit` publish operation has five posture traps (idempotency, retry, refetch,
   checkpoint timing, …) — "The stacked `/submit` publish operation — five posture traps".
 - The sync cascade is transactional: isolated-worktree rebase candidates, journal-first, ONE
@@ -33,36 +33,39 @@ history a future delivery/recovery node should not re-derive.
   gotchas".
 - "Residuals" is a flagged-ownership register (who owns each deferred edge), not current
   behavior.
+- `Delivery` from `resolve_delivery(repo_root)` is the canonical operation boundary; nominal
+  aggregate ABCs own production adapters and `_fakes`, while legacy reconstruction seams remain
+  internal compatibility details — "The seam map".
+- Façade migrations use narrow internal Protocols, complete-or-nothing laziness, bounded error
+  subsets, explicit consent, real-runtime tests, and exact export cuts — "Façade-slice migration
+  pattern".
 
 ## The seam map
 
-- `src/perk/delivery/journal.py` — the event grammar, the fold, and the fail-closed
-  `JournalCorruptionError` posture.
-- `src/perk/delivery/persistence.py` — `TrainPersistence`, the backend-aligned adapter;
-  `journal_carrier_id` resolution across the three stores.
-- `src/perk/objective/graph.py` — `delivery_order` / `validate_stacked_roadmap` (the stacked
-  roadmap's contraction + topological ordering).
-- `src/perk/objective/render.py` + `src/perk/plan.py` — the conditional/stripping header emission
-  (the additive stored-field recipe; see `workflow/plan-ref-lifecycle.md`).
-- `src/perk/delivery/train.py` / `src/perk/delivery/observe.py` / `src/perk/github/stacks.py` /
-  `src/perk/delivery/capability.py` — the train read path + stack status/capability probes (see
-  "The train read path" below).
-- `src/perk/delivery/sync.py` / `src/perk/delivery/continuation.py` — the published-suffix
-  synchronization operation (`perk objective stack sync`, contracts §8.49): the
-  checkpoint-claimed-prefix cascade, the atomic multi-lease push, and the lineage-keyed
-  conflict-retention manifest.
-- `src/perk/delivery/transfer.py` / `src/perk/delivery/recover.py` — the objective-replan
-  transfer protocol (§8.53) and conclude-only recovery (§8.51): predecessor-carried manifest,
-  deferred close, fold-first TRANSFER routing, kind-specific fresh-authority classification,
-  roll-forward/abandon, and the orphan sweep.
-- `src/perk/delivery/land.py` / `src/perk/delivery/landing.py` — the §8.55 pure
-  landing-readiness projection (dry-run preflight; never imports `observe`/the gateway) and
-  the §8.56 journaled atomic landing mutation over it (merge-async for a multi-layer train,
-  a SHA-pinned direct squash for the dynamic singleton; journal-first, abandon only with
-  proof, per-PR identity-corroborated verification, per-layer `finalize.py` bookkeeping).
+`src/perk/delivery/facade.py` is the canonical repository-scoped operation boundary. Callers obtain
+one `Delivery` with `resolve_delivery(repo_root)` and invoke status, prepare, transfer, publish,
+sync, recover, or land instead of composing persistence, probes, gateways, and engines themselves.
+The outside contracts are nominal aggregate ABCs; their production adapters and the matching owned
+test doubles in `src/perk/delivery/_fakes.py` evolve together.
 
-Operation nodes and recovery work depend on §8.43's *exact* semantics — amend the contract, not
-just the code.
+The modules below remain important implementation seams, but they are behind the façade:
+
+- `journal.py` and `persistence.py` own the event grammar, fail-closed fold, backend-aligned
+  persistence, and `journal_carrier_id` resolution.
+- `objective/graph.py`, `objective/render.py`, and `plan.py` own delivery ordering and stored
+  header mechanics.
+- `train.py`, `observe.py`, `github/stacks.py`, and `capability.py` own pure train
+  classification, production observations, wire probing, and capability checks.
+- `sync.py` and `continuation.py` own transactional suffix synchronization and retained
+  conflicts; `transfer.py` and `recover.py` own replan transfer and operation conclusion.
+- `land.py`, `landing.py`, and `finalize.py` own landing readiness, journaled atomic mutation,
+  and final bookkeeping.
+
+`TrainReads` and similar reconstruction-era composition seams still exist for operation families
+not yet migrated, but they are internal compatibility seams rather than the public read boundary.
+New callers start at `Delivery`; later slices retire old seams only when their complete caller and
+export cuts are proved. Operation work still depends on §8.43's exact journal semantics — amend
+the contract with behavior changes rather than bypassing the façade.
 
 ## The three append-discipline holes in the naive "rescan → one retry → typed error" shape
 
@@ -130,12 +133,15 @@ tests. The engagement-exclusion requirement needed **zero new code**: the generi
 sentinel classifier already drops journal comments from human-engagement inputs (pinned by tests
 only).
 
-## The train read path (reconstruction + stack status probes)
+## The train read path (through `Delivery.status`)
 
-The read path splits deliberately: `src/perk/delivery/train.py` is the pure classification core
-(tested with in-memory Protocol fakes), `src/perk/github/stacks.py` the wire adapter
-(fake-subprocess tests), and `src/perk/delivery/observe.py` the production wiring leaf (probe
-conversions; the hard-fail vs. tolerant-degrade split).
+The canonical read begins at `resolve_delivery(repo_root).status(...)`. The façade's nominal status
+authority owns repository and backend wiring, then delegates projection to the pure core in
+`src/perk/delivery/train.py`. `src/perk/github/stacks.py` remains the wire adapter and
+`src/perk/delivery/observe.py` the production conversion leaf, including the hard-fail versus
+tolerant-degrade split. Tests may drive those internal seams narrowly, but production callers do
+not assemble a `TrainReads` bundle themselves. The reconstruction seam survives only for
+not-yet-migrated operation families and compatibility tests.
 
 ### Fail-open classification arms are the recurring trap in projection pipelines
 
@@ -182,6 +188,75 @@ push. Pin the complete argv + timeout (`src/perk/substrate/git.py` /
   stacked train existed — a production stacked train (three layers, create + append) ran live at
   the stacked-publication dogfood gate. The tolerant read (`available=False`) remains the
   designed containment if the live preview drifts.
+
+## Façade-slice migration pattern
+
+Each operation-family migration follows one repeatable cut rather than wrapping old composition in
+an adapter shim.
+
+### Nominal outside, structural inside
+
+Expose nominal aggregate ABCs at the façade so caller capability and ownership are explicit. Keep
+pure cores dependent on narrow structural Protocols. One aggregate production authority can satisfy
+several narrow internal seams directly; an adapter whose only job is translating the aggregate back
+into the old bundle preserves complexity instead of removing it. Test doubles belong to the façade
+in `_fakes.py`, not scattered beside callers.
+
+### Resolve lazily and cache only complete success
+
+Repository resolution is complete-or-nothing. Resolve the full authority tuple lazily on first use
+and cache only after every member succeeds. If any member fails, cache nothing; a partial cache
+turns a transient failure into a permanently split authority graph.
+
+Move eager composition inputs into authority methods and call them at the point of need. This makes
+early refusals and dry projections provably zero-I/O. Prove the claim by monkeypatching every
+substrate entry point to record or raise, then exercising each short-circuit — a fake that simply
+returns no data cannot demonstrate that the read was skipped.
+
+### Bound errors per operation
+
+The façade maintains one validated wide vocabulary of delivery error codes, while each operation
+accepts only its own private subset for adapter passthrough. An in-vocabulary but out-of-subset code
+is a programming error and propagates rather than being flattened into a generic result. Every new
+operation or code extends the wide gate and makes an explicit subset decision.
+
+When one slice reuses another's adapter, unwrap a guarded `__cause__` only for the exact legacy error
+whose message contract must survive. Classification-and-continue authority calls return frozen,
+nested discriminants on the ABC, outside the public export ledger. Avoid import cycles by passing
+primitive facts instead of whole authorities. Do not invent a dry-run adapter when dry-run omits the
+operation entirely.
+
+### Requests make consent and blank-input policy explicit
+
+Consent on a mutating operation is mandatory input, never a default sentinel. Auto-approval may be
+a valid caller decision, but each call site must spell it so mutation cannot appear through a new
+default.
+
+Frozen request dataclasses validate nonblank invariants in `__post_init__`. That moves policy to
+every CLI boundary: normalize blank text to absence where optional, or return typed
+`invalid_input` before request construction. Missing one caller lets a raw constructor error break
+the CLI's JSON envelope. Moving an engine behind an adapter also changes exception types at phase
+boundaries; sweep every phase-scoped `except` rather than assuming the old catch still applies.
+
+Defaulted internal projection fields may carry already-observed snapshot facts through a pure
+pipeline without triggering new reads or growing public output. Describe concurrency honestly:
+an observation is not a lease. Supersession is established by the authoritative redirect field,
+not inferred from raw id inequality.
+
+### Pin exports and drive production delegates
+
+An export cut is an exact-list contract. Name the added, removed, and retained symbols and assert all
+three sets; a broad import smoke test cannot prove a retired seam disappeared or a compatibility
+name stayed internal.
+
+After migration, keep at least one public-path test on the real default runtime. Every ABC addition
+also gets a production-adapter delegation test; Protocol fakes everywhere leave the actual delegate
+unverified. When tests need to swap the runtime, patch the module symbol the public path resolves,
+then retain the real-default lane alongside it.
+
+Finally, review against the approved plan as authority. A reviewer preference that contradicts a
+settled plan decision is declined with recorded rationale rather than silently redesigning the
+slice during review.
 
 ## The stacked `/submit` publish operation — five posture traps
 
@@ -407,7 +482,12 @@ anything else.
   must name both arms — "failed" and "missing" read identically in prose but are different code
   paths.
 
-## Residuals (flagged, owned by later nodes)
+## Residual proof bounds (façade operation slices already landed)
+
+The façade slices through status, prepare, transfer, publish, sync, recover, and land are current
+behavior, not deferred design. The remaining bullets are proof bounds or future schema edges; the
+continued existence of internal reconstruction seams is a migration detail, not evidence that the
+façade is optional.
 
 - `before`/`after`/`observed` are opaque validated mappings — kind-specific shapes belong to the
   operation nodes; only the envelope is pinned.

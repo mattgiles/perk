@@ -1,6 +1,6 @@
 ---
 title: The report-wave module — flow migrations onto code-owned waves, lane semantics, and the wave test machinery
-read_when: You are touching extension/waves/, migrating flow prompt mechanics onto a code-owned wave tool, debugging lane coverage or wave guard state, or writing wave tests.
+read_when: You are changing extension/waves, review-wave identity/launch manifests, single-use post state, Ponytail coverage, flow migrations, lane semantics, or wave tests.
 cluster: subagent-orchestration
 ---
 
@@ -29,8 +29,10 @@ session-scoped guard-state patterns, and the wave test machinery worth reusing.
   flow-migration checklist (prompt mechanics → module-owned tool)".
 - Lane semantics: status ≠ validity ≠ coverage — a lane can complete with an invalid report, and
   coverage is per-angle — "Lane semantics — status ≠ validity ≠ coverage".
-- Per-session wave guard state (one wave per flow pass, collectable pending state) —
-  "Session-scoped guard state".
+- Review posting uses one shared discriminated single-use state across static/dynamic doors, bound
+  to one resolved PR and consumed only after successful mutation — "Session-scoped guard state".
+- Launch manifests preserve requested/runnable/preflight-failed lanes and required Ponytail
+  coverage, so instability becomes honest incompleteness — "Session-scoped guard state".
 - "Watch items / residuals" is the flagged-edges register — check it before extending the
   module.
 
@@ -227,24 +229,56 @@ rather than being treated as terminal.
 
 ## Session-scoped guard state
 
-Three related patterns keep wave state session-safe:
+### One discriminated, single-use post record
 
-- **The guard-closure pattern.** Tool A records its outcome; sibling tool B refuses against it
-  (`run_pr_review_wave` → `lastWave`; `post_pr_review` → `incomplete_coverage`); no-record ⇒ pass
-  keeps B usable standalone. A cheap shape for mechanizing any "tool B must respect tool A's last
-  outcome" invariant. The guard remembers only the *last* wave outcome (by design — a later
-  complete wave resets it).
-- **Sibling doors sharing a guard go module-scope with an exported recorder + per-registration
-  reset** (`recordReviewWaveOutcome` in `extension/doors/prReview.ts` — the register function
-  resets it because a fresh registration is a fresh session). The reset-on-register nuance is
-  what keeps module-scope state session-safe.
-- **`executionMode: "sequential"` is the concurrency guard** for one-pending-wave state (the
-  `pending` slot in the review-wave pair) — the check-then-store is non-racy *only* because of
-  it.
-- **The collect-grace race idiom.** Collect races the pending `result` against a bounded,
-  env-overridable grace to absorb the completion-event-vs-`subagent_wait` wake race; unsettled ⇒
-  soft-fail with pending **retained**. No cancel surface is needed — the module timeout settles a
-  stuck wave and a later collect drains it.
+Static and dynamic PR-review doors share one module-scoped state machine: `null`, `pending`, a
+recorded wave outcome, then `consumed`. Decode tool parameters first; immediately after successful
+decode transition to `pending`, before resolving the review target or spawning lanes. Bad input
+preserves the prior usable record, but any valid new pass invalidates it even if target resolution
+or launch later fails. This prevents an old complete result from being posted after a newer attempt.
+Registration resets module state for a fresh session.
+
+A successful post consumes the record exactly once. A `review_target_changed` refusal demotes a recorded
+outcome back to pending because its identity evidence is no longer postable. Other mutation
+failures retain the record so a transient failure can be retried without rerunning the wave. Keep
+the post tool sequential: this check/transition sequence is safe only under one-at-a-time execution.
+
+### Layer identity through every boundary
+
+The parent resolves the PR once before spawning and threads that expected PR into each lane task.
+Children read review context only through an expected-PR-checked path. At mutation time Python
+resolves the target afresh and refuses if it differs. There is deliberately no second TypeScript
+pre-post read: duplicate reads widen the race window without replacing the authoritative mutation
+check. Binding is to PR identity, not head SHA, so new commits do not silently retarget the review
+to another PR.
+
+The durable posted identity comes from exactly one source: the successful mutation response. Do
+not preserve a caller-supplied or preflight identity as if it proved what GitHub accepted. Likewise,
+when an input field is removed, reject the stale key by making the whole decoded batch invalid;
+silently dropping it lets old callers appear successful under changed semantics.
+
+### Truthful launch and coverage manifests
+
+`WaveLaunchManifest` preserves three ordered sets: requested lanes, runnable lanes, and keyed
+preflight failures. If preflight rejects every lane, launch returns `ok: false` with those specific
+failures rather than manufacturing a synthetic wave failure. Pending state keeps the full requested
+order so collection retains the true coverage denominator even when some lanes never spawn.
+
+Ponytail is required and exclusively owns the standalone YAGNI/simplification pass. Do not dilute
+that ownership into another angle or count a missing Ponytail as covered. The honest TOCTOU posture
+is that repository or target instability yields incomplete coverage, never falsely accepted
+coverage; the system does not claim head-SHA immutability.
+
+### Adjacent tripwires
+
+A prompt-surface or tool-schema change also updates the prose-graph projection in
+`docs/design/prose-prompt-map.md` and its pinned fragment total. Those count failures are
+intentional ripple detectors, not unrelated test churn.
+
+For start/collect wave pairs, `executionMode: "sequential"` remains the concurrency guard. Collect
+races the pending result against a bounded, environment-overridable grace to absorb the completion-
+event versus `subagent_wait` wake race. An unsettled result soft-fails while retaining pending; the
+module timeout eventually settles a stuck run and a later collect drains it.
 
 ## Deliberate non-behaviors need regression pins
 
