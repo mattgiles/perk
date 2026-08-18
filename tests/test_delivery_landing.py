@@ -1,25 +1,42 @@
-"""Hermetic fake-driven tests for the delivery landing operation (contracts.md §8.56).
+"""Hermetic fake-driven tests for the objective ``Delivery.land`` variant — the landing
+mutation and its dry-run preview (contracts.md §8.55/§8.56).
 
-Every effectful seam of ``land_train`` is injected (the ``test_delivery_sync.py`` style):
-a faked assessment returning a scripted :class:`LandReadiness`, a recording persistence
-fake, scripted gateway outcomes (submit/poll/direct-merge/evidence/facts), Protocol-sized
-issue-backend/store fakes, and one interleaved ops log pinning the load-bearing ordering
-(assess → approve → re-observe → prepared → submit → accepted → poll → verify → completed →
-finalize bottom→top → aggregate close). OFFLINE — no git / gh / network; injected
-``now``/``sleep`` make the 60-tick poll deterministic.
+The behavior matrix drives the real façade over harness-owned aggregate fakes (the
+``test_delivery_recover.py`` style): a ``Delivery`` subclass scripting the reconstruction,
+queue-style gateway scripts (submit/probe/direct-merge/evidence), a recording persistence
+over the owned fake, a monkeypatched ``_DEFAULT_LANDING_RUNTIME`` (lock/sleep/now/finalize)
+plus a scripted ``assess_land_readiness``, and one interleaved ops log pinning the
+load-bearing ordering (lock → reconstruct → assess → consent → re-observe → prepared →
+submit → accepted → poll → verify → completed → finalize bottom→top → aggregate close).
+OFFLINE — no git / gh / network; injected ``now``/``sleep`` make the 60-tick poll
+deterministic.
 """
 
 import contextlib
 from dataclasses import replace
 from pathlib import Path
-from typing import cast
 
 import pytest
 
 from perk import objective
 from perk.backends.issue_backend import IssueBackendError, PlanState
 from perk.backends.objective_store import ObjectiveState, ObjectiveStoreError
-from perk.delivery import land, land_records, landing, oplock, train
+from perk.cli.ensure import UserFacingCliError
+from perk.delivery import (
+    Delivery,
+    DeliveryError,
+    LandRequest,
+    LandResult,
+    StatusRequest,
+    StatusResult,
+    land,
+    land_records,
+    landing,
+    observe,
+    oplock,
+    train,
+)
+from perk.delivery._fakes import FakeDeliveryGit, FakeDeliveryGitHub, FakeDeliveryPersistence
 from perk.delivery.finalize import LandFinalization, LearnConsumeUpdate, ObjectiveLandUpdate
 from perk.delivery.journal import (
     EventRole,
@@ -34,9 +51,8 @@ from perk.delivery.persistence import AppendResult, JournalAppendAmbiguous
 from perk.github import GitHubError
 from perk.github.stacks import (
     DirectMergeOutcome,
-    MergeAsyncResult,
+    MergeAsyncProbe,
     MergeAsyncSubmitOutcome,
-    PrDeliveryFacts,
     PrMergedEvidence,
 )
 
@@ -238,9 +254,88 @@ def _node(node_id: str, status: objective.NodeStatus) -> objective.ObjectiveNode
     return objective.ObjectiveNode(id=node_id, description="d", status=status)
 
 
-class _Probe:
-    def active_plan_ids(self, plan_ids) -> frozenset[str]:
-        return frozenset()
+class _HarnessPersistence(FakeDeliveryPersistence):
+    """Forward the landing-touched persistence surface to the harness recorders (the owned
+    fake keeps the aggregate nominal; the harness owns the interleaved ops log)."""
+
+    def __init__(self, harness: "_Harness") -> None:
+        super().__init__()
+        self._h = harness
+
+    def append_prepared(self, objective_id: str, record: PreparedRecord) -> AppendResult:
+        return self._h.append_prepared(objective_id, record)
+
+    def append_outcome(self, objective_id: str, record: OutcomeRecord) -> AppendResult:
+        return self._h.append_outcome(objective_id, record)
+
+    def read_journal(self, objective_id: str) -> JournalFold:
+        return self._h.read_journal(objective_id)
+
+    def get_plan(self, *, issue_id: str) -> PlanState | None:
+        return self._h.get_plan(issue_id=issue_id)
+
+    def get_objective(self, *, objective_id: str) -> ObjectiveState | None:
+        return self._h.get_objective(objective_id=objective_id)
+
+    def close_objective(self, *, objective_id: str, dry_run: bool = False) -> bool:
+        return self._h.close_objective(objective_id=objective_id, dry_run=dry_run)
+
+    def backend_id(self) -> str:
+        return self._h.backend_id
+
+
+class _HarnessGitHub(FakeDeliveryGitHub):
+    """Forward the landing-touched gateway surface to the harness scripts."""
+
+    def __init__(self, harness: "_Harness") -> None:
+        super().__init__()
+        self._h = harness
+
+    def submit_merge_async(self, number: int, *, sha: str) -> MergeAsyncSubmitOutcome:
+        return self._h.submit_async(number=number, sha=sha)
+
+    def merge_async_probe(self, number: int, *, uuid: str) -> MergeAsyncProbe:
+        return self._h.poll_async(number=number, uuid=uuid)
+
+    def merge_pr_direct(
+        self, number: int, *, sha: str, commit_message: str | None
+    ) -> DirectMergeOutcome:
+        return self._h.merge_direct(number=number, sha=sha, commit_message=commit_message)
+
+    def merged_evidence(self, number: int) -> PrMergedEvidence | None:
+        return self._h.merged_evidence(number=number)
+
+
+class _HarnessDelivery(Delivery):
+    """The real façade over the harness world, with the status reconstruction scripted (the
+    ``test_delivery_recover.py`` convention — the engine reaches it through the façade's
+    cause-preserving bridge)."""
+
+    def __init__(self, harness: "_Harness") -> None:
+        self._h = harness
+        super().__init__(
+            persistence=_HarnessPersistence(harness),
+            git=FakeDeliveryGit(repo_root=ROOT),
+            github=_HarnessGitHub(harness),
+        )
+
+    def status(self, request: StatusRequest) -> StatusResult:
+        status = self._h.reconstruct(ROOT, request.objective_id)
+        if isinstance(status, train.DeliveryTrain):
+            return StatusResult(
+                objective_id=status.objective_id,
+                objective_url=status.objective_url,
+                redirected_from=status.redirected_from,
+                train=status,
+                no_train_reason=None,
+            )
+        return StatusResult(
+            objective_id=status.objective_id,
+            objective_url=status.objective_url,
+            redirected_from=status.redirected_from,
+            train=None,
+            no_train_reason=status.reason,
+        )
 
 
 class _Harness:
@@ -254,11 +349,16 @@ class _Harness:
         self.prepared: list[PreparedRecord] = []
         self.outcomes: list[OutcomeRecord] = []
         self.outcome_boom: dict[EventRole, Exception] = {}
-        # gateway scripts
+        # gateway scripts — queue-style: the retry/poll sequences are per-call scripts.
         self.submits: list[MergeAsyncSubmitOutcome] = []
-        self.polls: list[MergeAsyncResult | Exception] = []
+        self.polls: list[MergeAsyncProbe] = []
         self.directs: list[DirectMergeOutcome] = []
-        self.facts_queue: list[PrDeliveryFacts | Exception | None] = []
+        # The one strict identity read serves three phases: pre-``prepared`` reads are the
+        # re-observation (default: OPEN at the approved identity; script drift through
+        # ``reobserve_queue``), post-``prepared`` reads are verification or the abandon
+        # proof (default: the ``evidence`` dict — MERGED rows for verification; abandon
+        # tests script OPEN proof rows via ``script_open_proof``).
+        self.reobserve_queue: list[PrMergedEvidence | Exception | None] = []
         self.evidence: dict[int, PrMergedEvidence | Exception | None] = {
             501: _evidence(501),
             502: _evidence(502),
@@ -287,14 +387,12 @@ class _Harness:
         self.ops.append(("reconstruct", objective_id))
         return self.train
 
-    def observations_factory(self, _root: Path, base: str) -> land.LandObservations:
-        self.ops.append(("observations", base))
-        # Opaque — the faked assessment never touches it.
-        return cast("land.LandObservations", object())
-
     def assess(self, train_projection, *, observations, remote_writers):
         self.ops.append(("assess",))
         assert train_projection is self.train
+        # The engine wires the aggregate-backed observation adapters itself.
+        assert isinstance(observations, observe.GatewayLandObservations)
+        assert isinstance(remote_writers, observe._AggregateWriterProbe)
         return self.readiness
 
     def approve(self, readiness: land.LandReadiness) -> bool:
@@ -304,10 +402,6 @@ class _Harness:
     def decline(self, readiness: land.LandReadiness) -> bool:
         self.ops.append(("approve", readiness.disposition.value))
         return False
-
-    @property
-    def persistence(self) -> "_Harness":
-        return self
 
     def append_prepared(self, objective_id: str, record: PreparedRecord) -> AppendResult:
         self.ops.append(("prepared", record.operation_id))
@@ -400,48 +494,48 @@ class _Harness:
         self.closed.append(objective_id)
         return True
 
-    def pr_facts(self, *, number: int, repo_root: Path) -> PrDeliveryFacts | None:
-        self.ops.append(("pr_facts", number))
-        if self.facts_queue:
-            entry = self.facts_queue.pop(0)
-            if isinstance(entry, Exception):
-                raise entry
-            return entry
-        return self._good_facts(number)
-
-    def _good_facts(self, number: int) -> PrDeliveryFacts:
+    def _open_evidence(self, number: int) -> PrMergedEvidence:
+        """OPEN at the approved identity — the re-observation/abandon-proof happy shape
+        (``merge_commit_sha`` honestly null pre-merge)."""
         row = next(r for r in _ROWS if r.pr_number == number)
         assert row.branch is not None and row.expected_base_ref is not None
         assert row.expected_head_sha is not None
-        return PrDeliveryFacts(
+        return PrMergedEvidence(
             number=number,
             state="OPEN",
-            is_draft=False,
             base_ref=row.expected_base_ref,
             head_ref=row.branch,
             head_sha=row.expected_head_sha,
+            merge_commit_sha=None,
         )
 
-    def submit_async(self, *, number: int, sha: str, repo_root: Path) -> MergeAsyncSubmitOutcome:
+    def script_open_proof(self) -> None:
+        """Script the post-submit reads as OPEN-at-recorded-head rows — the abandon proof
+        (verification never runs on these arms)."""
+        self.evidence = {number: self._open_evidence(number) for number in (501, 502)}
+
+    def submit_async(self, *, number: int, sha: str) -> MergeAsyncSubmitOutcome:
         self.ops.append(("submit", number, sha))
         return self.submits.pop(0)
 
-    def poll_async(self, *, number: int, uuid: str, repo_root: Path) -> MergeAsyncResult:
+    def poll_async(self, *, number: int, uuid: str) -> MergeAsyncProbe:
         self.ops.append(("poll", uuid))
-        entry = self.polls.pop(0) if self.polls else MergeAsyncResult("pending", None, "")
-        if isinstance(entry, Exception):
-            raise entry
-        return entry
+        return self.polls.pop(0) if self.polls else MergeAsyncProbe("pending", None, "")
 
     def merge_direct(
-        self, *, number: int, sha: str, commit_message: str | None, repo_root: Path
+        self, *, number: int, sha: str, commit_message: str | None
     ) -> DirectMergeOutcome:
         self.ops.append(("merge_direct", number, sha, commit_message))
         return self.directs.pop(0)
 
-    def merged_evidence(self, *, number: int, repo_root: Path) -> PrMergedEvidence | None:
+    def merged_evidence(self, *, number: int) -> PrMergedEvidence | None:
         self.ops.append(("evidence", number))
-        entry = self.evidence.get(number)
+        if self.reobserve_queue:
+            entry = self.reobserve_queue.pop(0)
+        elif not any(op[0] == "prepared" for op in self.ops):
+            entry = self._open_evidence(number)
+        else:
+            entry = self.evidence.get(number)
         if isinstance(entry, Exception):
             raise entry
         return entry
@@ -464,34 +558,37 @@ class _Harness:
     def sleep(self, seconds: float) -> None:
         self.sleeps.append(seconds)
 
-    def run(self, *, approve="approve", objective_id: str = OBJECTIVE) -> landing.LandOutcome:
+    def run(
+        self,
+        *,
+        approve: str | None = "approve",
+        objective_id: str = OBJECTIVE,
+        dry_run: bool = False,
+    ) -> "LandResult.Objective":
         callback = None
         if approve == "approve":
             callback = self.approve
         elif approve == "decline":
             callback = self.decline
-        return landing.land_train(
-            ROOT,
+        request = LandRequest(
+            kind="objective",
             objective_id=objective_id,
-            run_id="01RUN",
-            remote_writers=_Probe(),
-            approve=callback,
-            reconstruct=self.reconstruct,
-            observations_factory=self.observations_factory,
-            assess=self.assess,
-            persistence_factory=lambda _root: self.persistence,
-            issues_factory=lambda _root: self,
-            store_factory=lambda _root: self,
-            pr_facts=self.pr_facts,
-            submit_async=self.submit_async,
-            poll_async=self.poll_async,
-            merge_direct=self.merge_direct,
-            merged_evidence=self.merged_evidence,
+            run_id=None if dry_run else "01RUN",
+            dry_run=dry_run,
+        )
+        runtime = landing._LandingRuntime(
             finalize=self.finalize,
-            lock=self.lock,
+            operation_lock=self.lock,
             sleep=self.sleep,
             now=lambda: "T0",
         )
+        with pytest.MonkeyPatch.context() as monkeypatch:
+            monkeypatch.setattr(landing, "_DEFAULT_LANDING_RUNTIME", runtime)
+            monkeypatch.setattr(land, "assess_land_readiness", self.assess)
+            result = _HarnessDelivery(self).land(request, consent=callback)
+        detail = result.objective
+        assert detail is not None and result.plan is None
+        return detail
 
 
 def _outcome_roles(h: _Harness) -> list[str]:
@@ -504,7 +601,7 @@ def _outcome_roles(h: _Harness) -> list[str]:
 def test_happy_multi_layer_order_pinned():
     h = _Harness(_readiness(plan_value=_stack_plan()))
     h.submits = [_pending_submit()]
-    h.polls = [MergeAsyncResult("merged", "d" * 40, "")]
+    h.polls = [MergeAsyncProbe("merged", "d" * 40, "")]
     outcome = h.run()
     assert outcome.outcome == "merged"
     assert outcome.operation_id is not None and outcome.merge_async_uuid == "u-1"
@@ -512,16 +609,16 @@ def test_happy_multi_layer_order_pinned():
     assert [layer.pr_number for layer in outcome.landed_layers] == [501, 502]
     assert [layer.merge_commit_sha for layer in outcome.landed_layers] == [MC1, MC2]
     assert all(layer.finalization is not None for layer in outcome.landed_layers)
-    # The load-bearing ordering (the interleaved ops log).
+    # The load-bearing ordering (the interleaved ops log): the lock precedes the
+    # reconstruction and is held through consent, merge, verification, finalize, and close.
     kinds = [op[0] for op in h.ops]
     assert kinds == [
         "lock",
         "reconstruct",
-        "observations",
         "assess",
         "approve",
-        "pr_facts",  # re-observe 501
-        "pr_facts",  # re-observe 502
+        "evidence",  # re-observe 501
+        "evidence",  # re-observe 502
         "prepared",
         "submit",
         "accepted",
@@ -615,10 +712,15 @@ def test_singleton_happy_path_no_accepted_ever():
 def test_singleton_missing_plan_is_plan_not_found():
     h = _Harness(_readiness(layers=(_ROWS[0],), plan_value=_singleton_plan()))
     h.plans.pop("101")
-    with pytest.raises(landing.LandError) as exc:
+    with pytest.raises(DeliveryError) as exc:
         h.run()
     assert exc.value.error_type == "plan_not_found"
+    assert (exc.value.phase, exc.value.origin) == ("land", "domain")
     assert h.prepared == [] and h.outcomes == []
+    # The load-bearing ordering: the step-6 plan read refuses BEFORE consent — the
+    # callback is never consulted on a missing plan.
+    assert ("get_plan", "101") in h.ops
+    assert not any(op[0] == "approve" for op in h.ops)
 
 
 # --- consent + refusals ---------------------------------------------------------------
@@ -630,7 +732,7 @@ def test_declined_journals_nothing():
     assert outcome.outcome == "declined"
     assert outcome.operation_id is None
     assert h.prepared == [] and h.outcomes == []
-    assert not any(op[0] in ("submit", "pr_facts") for op in h.ops)
+    assert not any(op[0] in ("submit", "evidence") for op in h.ops)
 
 
 def test_nothing_to_land_approved_closes_the_objective():
@@ -651,9 +753,10 @@ def test_nothing_to_land_revalidates_node_terminality_after_the_pause():
     # never closes an incomplete objective, and nothing was closed.
     h = _Harness(_readiness(disposition=land.LandDisposition.NOTHING_TO_LAND, layers=()))
     h.nodes.append(_node("1.3", objective.NodeStatus.PENDING))
-    with pytest.raises(landing.LandError) as excinfo:
+    with pytest.raises(DeliveryError) as excinfo:
         h.run()
     assert excinfo.value.error_type == "land_drift"
+    assert (excinfo.value.phase, excinfo.value.origin) == ("land", "domain")
     assert "non-terminal node(s) 1.3" in str(excinfo.value)
     assert h.closed == []
 
@@ -676,7 +779,7 @@ def test_aggregate_close_on_a_closed_objective_reports_no_transition():
     # already closed ⇒ objective_closed: false, close never re-issued.
     h = _Harness(_readiness(plan_value=_stack_plan()))
     h.submits = [_pending_submit()]
-    h.polls = [MergeAsyncResult("merged", "d" * 40, "")]
+    h.polls = [MergeAsyncProbe("merged", "d" * 40, "")]
     h.objective_state = "closed"
     outcome = h.run()
     assert outcome.outcome == "merged"
@@ -694,25 +797,32 @@ def test_nothing_to_land_declined():
 
 
 def test_nothing_to_land_close_failure_is_a_typed_store_error():
-    # The close is this arm's PRIMARY effect — never fail-open.
+    # The close is this arm's PRIMARY effect — never fail-open; the façade boundary
+    # translates the raw store failure to the same typed envelope the CLI mapped it to.
     h = _Harness(_readiness(disposition=land.LandDisposition.NOTHING_TO_LAND, layers=()))
     h.close_boom = ObjectiveStoreError("api down")
-    with pytest.raises(ObjectiveStoreError):
+    with pytest.raises(DeliveryError) as exc:
         h.run()
+    assert exc.value.error_type == "github_error"
+    assert (exc.value.phase, exc.value.origin) == ("land", "github")
+    assert str(exc.value) == "api down"
 
 
-def test_blocked_raises_land_blocked_with_readiness_attached():
+def test_blocked_returns_the_in_band_readiness_only_detail():
+    # BLOCKED is an in-band refusal detail, not an exception (§8.56): the mutation arm
+    # returns before consent with `outcome: None` carrying the full composed readiness —
+    # the CLI maps it to its exit-1 `land_blocked` envelope.
     blocker = train.TrainFinding(
         kind=train.FindingKind.BLOCKER, code="pr_behind", message="PR #501 is BEHIND"
     )
     readiness = _readiness(disposition=land.LandDisposition.BLOCKED, findings=(blocker,))
     h = _Harness(readiness)
-    with pytest.raises(landing.LandError) as exc:
-        h.run()
-    assert exc.value.error_type == "land_blocked"
-    assert exc.value.readiness is readiness
-    assert "pr_behind" in str(exc.value)
+    outcome = h.run()
+    assert outcome.outcome is None and outcome.dry_run is False
+    assert outcome.readiness is readiness
+    assert outcome.operation_id is None and outcome.landed_layers == ()
     assert h.prepared == [] and h.outcomes == []
+    assert not any(op[0] in ("approve", "submit", "evidence") for op in h.ops)
 
 
 @pytest.mark.parametrize(
@@ -729,18 +839,19 @@ def test_reobserve_drift_is_land_drift_with_nothing_journaled(mutate):
     # Every re-observation predicate individually refuses — with nothing journaled and no
     # submission attempted.
     h = _Harness(_readiness(plan_value=_stack_plan()))
-    h.facts_queue = [mutate(h._good_facts(501))]
-    with pytest.raises(landing.LandError) as exc:
+    h.reobserve_queue = [mutate(h._open_evidence(501))]
+    with pytest.raises(DeliveryError) as exc:
         h.run()
     assert exc.value.error_type == "land_drift"
+    assert (exc.value.phase, exc.value.origin) == ("land", "domain")
     assert h.prepared == [] and h.outcomes == []
     assert not any(op[0] in ("submit", "merge_direct") for op in h.ops)
 
 
 def test_reobserve_read_failure_is_land_drift():
     h = _Harness(_readiness(plan_value=_stack_plan()))
-    h.facts_queue = [GitHubError("boom")]
-    with pytest.raises(landing.LandError) as exc:
+    h.reobserve_queue = [GitHubError("boom")]
+    with pytest.raises(DeliveryError) as exc:
         h.run()
     assert exc.value.error_type == "land_drift"
     assert h.prepared == []
@@ -749,15 +860,16 @@ def test_reobserve_read_failure_is_land_drift():
 def test_oplock_busy_is_operation_in_progress():
     h = _Harness(_readiness(plan_value=_stack_plan()))
     h.lock_busy = True
-    with pytest.raises(landing.LandError) as exc:
+    with pytest.raises(DeliveryError) as exc:
         h.run()
     assert exc.value.error_type == "operation_in_progress"
+    assert (exc.value.phase, exc.value.origin) == ("land", "domain")
     assert h.ops == []  # refused before any read
 
 
 def test_null_lineage_refuses_not_stacked():
     h = _Harness(_readiness(plan_value=_stack_plan()), lineage=None)
-    with pytest.raises(landing.LandError) as exc:
+    with pytest.raises(DeliveryError) as exc:
         h.run()
     assert exc.value.error_type == "not_stacked"
 
@@ -767,9 +879,81 @@ def test_no_delivery_train_refuses_not_stacked():
     h.train = train.NoDeliveryTrain(
         objective_id=OBJECTIVE, objective_url=URL, redirected_from=None, reason="incremental"
     )
-    with pytest.raises(landing.LandError) as exc:
+    with pytest.raises(DeliveryError) as exc:
         h.run()
     assert exc.value.error_type == "not_stacked"
+    # The mutation message shape (distinct from the dry-run's — both preserved).
+    assert str(exc.value) == f"objective {OBJECTIVE} has no delivery train (incremental)"
+
+
+def test_consent_callback_exceptions_propagate_untranslated():
+    # The CLI's typed `confirmation_required` refusal is raised INSIDE its consent callback
+    # and must reach the caller untranslated (never swallowed into a DeliveryError).
+    h = _Harness(_readiness(plan_value=_stack_plan()))
+
+    def refusing(readiness: land.LandReadiness) -> bool:
+        raise UserFacingCliError("needs confirmation", error_type="confirmation_required")
+
+    request = LandRequest(kind="objective", objective_id=OBJECTIVE, run_id="01RUN")
+    runtime = landing._LandingRuntime(
+        finalize=h.finalize, operation_lock=h.lock, sleep=h.sleep, now=lambda: "T0"
+    )
+    with pytest.MonkeyPatch.context() as monkeypatch:
+        monkeypatch.setattr(landing, "_DEFAULT_LANDING_RUNTIME", runtime)
+        monkeypatch.setattr(land, "assess_land_readiness", h.assess)
+        with pytest.raises(UserFacingCliError) as exc:
+            _HarnessDelivery(h).land(request, consent=refusing)
+    assert exc.value.error_type == "confirmation_required"
+    assert h.prepared == [] and h.outcomes == []
+
+
+# --- the dry-run arm --------------------------------------------------------------------
+
+
+def test_dry_run_is_lock_free_consent_free_and_readiness_only():
+    h = _Harness(_readiness(plan_value=_stack_plan()))
+    outcome = h.run(approve=None, dry_run=True)
+    assert outcome.dry_run is True and outcome.outcome is None
+    assert outcome.readiness is h.readiness
+    assert outcome.redirected_from is None
+    assert (outcome.operation_id, outcome.merge_async_uuid) == (None, None)
+    assert outcome.landed_layers == () and outcome.notes == ()
+    assert outcome.objective_closed is False and outcome.reconcile_evidence is None
+    # Lock-free, consent-free, journal-free: exactly the reads.
+    assert [op[0] for op in h.ops] == ["reconstruct", "assess"]
+    assert h.prepared == [] and h.outcomes == []
+
+
+def test_dry_run_no_train_uses_the_dry_run_message_shape():
+    h = _Harness(_readiness(plan_value=_stack_plan()))
+    h.train = train.NoDeliveryTrain(
+        objective_id=OBJECTIVE, objective_url=URL, redirected_from=None, reason="incremental"
+    )
+    with pytest.raises(DeliveryError) as exc:
+        h.run(approve=None, dry_run=True)
+    assert exc.value.error_type == "not_stacked"
+    assert (exc.value.phase, exc.value.origin) == ("land", "domain")
+    assert str(exc.value) == f"Objective #{OBJECTIVE}: incremental"
+
+
+def test_dry_run_redirected_from_is_the_reconstruction_fact():
+    h = _Harness(_readiness(plan_value=_stack_plan()))
+    h.train = replace(_train(), redirected_from="9")
+    outcome = h.run(approve=None, dry_run=True)
+    assert outcome.redirected_from == "9"
+
+
+def test_mutation_redirected_from_is_the_requested_id_comparison():
+    # The mutation detail derives redirect from the requested-vs-active ids (the historical
+    # CLI comparison, `#` prefixes stripped) — engine-owned now.
+    h = _Harness(_readiness(plan_value=_stack_plan()))
+    h.submits = [_pending_submit()]
+    h.polls = [MergeAsyncProbe("merged", "d" * 40, "")]
+    assert h.run(objective_id=f"#{OBJECTIVE}").redirected_from is None
+    h2 = _Harness(_readiness(plan_value=_stack_plan()))
+    h2.submits = [_pending_submit()]
+    h2.polls = [MergeAsyncProbe("merged", "d" * 40, "")]
+    assert h2.run(objective_id="9").redirected_from == "9"
 
 
 # --- submit classification ------------------------------------------------------------
@@ -778,9 +962,11 @@ def test_no_delivery_train_refuses_not_stacked():
 def test_submit_404_abandons_with_proof_then_merge_async_unavailable():
     h = _Harness(_readiness(plan_value=_stack_plan()))
     h.submits = [_submit(404, None, "Not Found")]
-    with pytest.raises(landing.LandError) as exc:
+    h.script_open_proof()
+    with pytest.raises(DeliveryError) as exc:
         h.run()
     assert exc.value.error_type == "merge_async_unavailable"
+    assert (exc.value.phase, exc.value.origin) == ("land", "domain")
     (abandoned,) = h.outcomes
     assert abandoned.role is EventRole.ABANDONED
     assert abandoned.observed["reason"] == "submit_404"
@@ -800,7 +986,8 @@ def test_submit_404_abandons_with_proof_then_merge_async_unavailable():
 def test_submit_rejection_abandons_then_land_failed(submitted, reason):
     h = _Harness(_readiness(plan_value=_stack_plan()))
     h.submits = [submitted]
-    with pytest.raises(landing.LandError) as exc:
+    h.script_open_proof()
+    with pytest.raises(DeliveryError) as exc:
         h.run()
     assert exc.value.error_type == "land_failed"
     (abandoned,) = h.outcomes
@@ -810,8 +997,9 @@ def test_submit_rejection_abandons_then_land_failed(submitted, reason):
 def test_poll_failed_abandons_then_land_failed():
     h = _Harness(_readiness(plan_value=_stack_plan()))
     h.submits = [_pending_submit()]
-    h.polls = [MergeAsyncResult("failed", None, "merge conflict")]
-    with pytest.raises(landing.LandError) as exc:
+    h.polls = [MergeAsyncProbe("failed", None, "merge conflict")]
+    h.script_open_proof()
+    with pytest.raises(DeliveryError) as exc:
         h.run()
     assert exc.value.error_type == "land_failed"
     assert _outcome_roles(h) == ["accepted", "abandoned"]
@@ -822,12 +1010,9 @@ def test_poll_failed_abandons_then_land_failed():
 def test_abandon_proof_contradiction_appends_nothing_and_stays_pending():
     h = _Harness(_readiness(plan_value=_stack_plan()))
     h.submits = [_submit(404, None, "Not Found")]
-    # Re-observe (2 good calls) passes; the abandon proof's first re-read contradicts.
-    h.facts_queue = [
-        h._good_facts(501),
-        h._good_facts(502),
-        replace(h._good_facts(501), state="CLOSED"),
-    ]
+    # Re-observe (the pre-journal zone) passes; the abandon proof's first re-read
+    # contradicts (the PR no longer observes OPEN).
+    h.evidence = {501: replace(h._open_evidence(501), state="CLOSED")}
     outcome = h.run()
     assert outcome.outcome == "pending"
     assert _outcome_roles(h) == []  # never claim before-state without proof
@@ -837,7 +1022,7 @@ def test_abandon_proof_contradiction_appends_nothing_and_stays_pending():
 def test_abandon_proof_read_failure_appends_nothing_and_stays_pending():
     h = _Harness(_readiness(plan_value=_stack_plan()))
     h.submits = [_submit(400, "failed", "closed")]
-    h.facts_queue = [h._good_facts(501), h._good_facts(502), GitHubError("read down")]
+    h.evidence = {501: GitHubError("read down")}
     outcome = h.run()
     assert outcome.outcome == "pending"
     assert _outcome_roles(h) == []
@@ -895,7 +1080,7 @@ def test_retry_side_merged_recovers_the_ambiguous_first_attempt():
 def test_ambiguous_submit_retries_exactly_once_then_409_recovers_the_handle():
     h = _Harness(_readiness(plan_value=_stack_plan()))
     h.submits = [_submit(None, None, "timeout"), _pending_submit(status=409)]
-    h.polls = [MergeAsyncResult("merged", "d" * 40, "")]
+    h.polls = [MergeAsyncProbe("merged", "d" * 40, "")]
     outcome = h.run()
     assert outcome.outcome == "merged"
     submits = [op for op in h.ops if op[0] == "submit"]
@@ -924,9 +1109,10 @@ def test_unparseable_2xx_submit_is_ambiguous_not_success():
 def test_foreign_409_options_are_merge_request_conflict_without_accepted():
     h = _Harness(_readiness(plan_value=_stack_plan()))
     h.submits = [_pending_submit(status=409, uuid="u-foreign", expected="f" * 40)]
-    with pytest.raises(landing.LandError) as exc:
+    with pytest.raises(DeliveryError) as exc:
         h.run()
     assert exc.value.error_type == "merge_request_conflict"
+    assert (exc.value.phase, exc.value.origin) == ("land", "domain")
     assert "u-foreign" in str(exc.value)
     assert _outcome_roles(h) == []  # no accepted; the prepared operation stays unresolved
     assert h.prepared != []
@@ -963,8 +1149,8 @@ def test_enqueued_stops_immediately_as_unexpected_enqueued():
     h = _Harness(_readiness(plan_value=_stack_plan()))
     h.submits = [_pending_submit()]
     h.polls = [
-        MergeAsyncResult("pending", None, ""),
-        MergeAsyncResult("enqueued", None, ""),
+        MergeAsyncProbe("pending", None, ""),
+        MergeAsyncProbe("enqueued", None, ""),
     ]
     outcome = h.run()
     assert outcome.outcome == "unexpected_enqueued"
@@ -974,12 +1160,14 @@ def test_enqueued_stops_immediately_as_unexpected_enqueued():
 
 
 def test_per_tick_poll_failures_are_tolerated_within_budget():
+    # An expired/unreadable probe consumes the tick exactly like the historical tolerated
+    # strict-reader GitHubError — never a terminal classification.
     h = _Harness(_readiness(plan_value=_stack_plan()))
     h.submits = [_pending_submit()]
     h.polls = [
-        GitHubError("tick down"),
-        GitHubError("tick down"),
-        MergeAsyncResult("merged", "d" * 40, ""),
+        MergeAsyncProbe("unreadable", None, "tick down"),
+        MergeAsyncProbe("expired", None, "Not Found"),
+        MergeAsyncProbe("merged", "d" * 40, ""),
     ]
     outcome = h.run()
     assert outcome.outcome == "merged"
@@ -1004,7 +1192,7 @@ def test_per_tick_poll_failures_are_tolerated_within_budget():
 def test_merged_but_verification_fails_stays_pending_without_completed(evidence):
     h = _Harness(_readiness(plan_value=_stack_plan()))
     h.submits = [_pending_submit()]
-    h.polls = [MergeAsyncResult("merged", "d" * 40, "")]
+    h.polls = [MergeAsyncProbe("merged", "d" * 40, "")]
     h.evidence[502] = evidence
     outcome = h.run()
     assert outcome.outcome == "pending"
@@ -1018,7 +1206,7 @@ def test_verification_tolerates_retarget_to_the_objective_base():
     # merge — landing onto the objective base is a legitimate landing of the approved train.
     h = _Harness(_readiness(plan_value=_stack_plan()))
     h.submits = [_pending_submit()]
-    h.polls = [MergeAsyncResult("merged", "d" * 40, "")]
+    h.polls = [MergeAsyncProbe("merged", "d" * 40, "")]
     h.evidence[502] = _evidence(502, base_ref="main")
     outcome = h.run()
     assert outcome.outcome == "merged"
@@ -1030,7 +1218,7 @@ def test_completed_append_store_failure_degrades_to_merged_with_note():
     # verification that degrades to a note (invariant 20); finalization still runs.
     h = _Harness(_readiness(plan_value=_stack_plan()))
     h.submits = [_pending_submit()]
-    h.polls = [MergeAsyncResult("merged", "d" * 40, "")]
+    h.polls = [MergeAsyncProbe("merged", "d" * 40, "")]
     h.outcome_boom[EventRole.COMPLETED] = ObjectiveStoreError("store outage")
     outcome = h.run()
     assert outcome.outcome == "merged"
@@ -1041,7 +1229,7 @@ def test_completed_append_store_failure_degrades_to_merged_with_note():
 def test_completed_append_failure_degrades_to_merged_with_note():
     h = _Harness(_readiness(plan_value=_stack_plan()))
     h.submits = [_pending_submit()]
-    h.polls = [MergeAsyncResult("merged", "d" * 40, "")]
+    h.polls = [MergeAsyncProbe("merged", "d" * 40, "")]
     h.outcome_boom[EventRole.COMPLETED] = JournalAppendAmbiguous("append ambiguous")
     outcome = h.run()
     assert outcome.outcome == "merged"  # invariant 20: a confirmed merge never reads unmerged
@@ -1058,7 +1246,7 @@ def test_completed_append_failure_degrades_to_merged_with_note():
 def test_finalize_failure_notes_and_remaining_layers_still_finalize():
     h = _Harness(_readiness(plan_value=_stack_plan()))
     h.submits = [_pending_submit()]
-    h.polls = [MergeAsyncResult("merged", "d" * 40, "")]
+    h.polls = [MergeAsyncProbe("merged", "d" * 40, "")]
     h.finalize_boom["101"] = RuntimeError("backend exploded")
     outcome = h.run()
     assert outcome.outcome == "merged"
@@ -1071,7 +1259,7 @@ def test_finalize_failure_notes_and_remaining_layers_still_finalize():
 def test_consumed_learn_read_failure_finalizes_without_it():
     h = _Harness(_readiness(plan_value=_stack_plan()))
     h.submits = [_pending_submit()]
-    h.polls = [MergeAsyncResult("merged", "d" * 40, "")]
+    h.polls = [MergeAsyncProbe("merged", "d" * 40, "")]
     h.plan_boom = IssueBackendError("api down")
     outcome = h.run()
     assert outcome.outcome == "merged"
@@ -1082,7 +1270,7 @@ def test_consumed_learn_read_failure_finalizes_without_it():
 def test_aggregate_close_fail_open():
     h = _Harness(_readiness(plan_value=_stack_plan()))
     h.submits = [_pending_submit()]
-    h.polls = [MergeAsyncResult("merged", "d" * 40, "")]
+    h.polls = [MergeAsyncProbe("merged", "d" * 40, "")]
     h.close_boom = ObjectiveStoreError("api down")
     outcome = h.run()
     assert outcome.outcome == "merged"
@@ -1093,7 +1281,7 @@ def test_aggregate_close_fail_open():
 def test_aggregate_close_skipped_while_nodes_remain():
     h = _Harness(_readiness(plan_value=_stack_plan()))
     h.submits = [_pending_submit()]
-    h.polls = [MergeAsyncResult("merged", "d" * 40, "")]
+    h.polls = [MergeAsyncProbe("merged", "d" * 40, "")]
     h.nodes.append(_node("1.3", objective.NodeStatus.PENDING))
     outcome = h.run()
     assert outcome.outcome == "merged"
@@ -1108,9 +1296,11 @@ def test_aggregate_close_skipped_while_nodes_remain():
 def test_singleton_rejection_abandons_then_land_failed():
     h = _Harness(_readiness(layers=(_ROWS[0],), plan_value=_singleton_plan()))
     h.directs = [_direct(405, False, detail="Head branch was modified")]
-    with pytest.raises(landing.LandError) as exc:
+    h.script_open_proof()
+    with pytest.raises(DeliveryError) as exc:
         h.run()
     assert exc.value.error_type == "land_failed"
+    assert (exc.value.phase, exc.value.origin) == ("land", "domain")
     (abandoned,) = h.outcomes
     assert abandoned.role is EventRole.ABANDONED
     assert abandoned.observed["reobserved"] == [{"pr_number": 501, "state": "OPEN", "head_sha": H1}]
@@ -1120,7 +1310,8 @@ def test_singleton_404_is_land_failed_not_unavailable():
     # The legacy endpoint exists everywhere — a missing PR is drift, not availability.
     h = _Harness(_readiness(layers=(_ROWS[0],), plan_value=_singleton_plan()))
     h.directs = [_direct(404, False, detail="Not Found")]
-    with pytest.raises(landing.LandError) as exc:
+    h.script_open_proof()
+    with pytest.raises(DeliveryError) as exc:
         h.run()
     assert exc.value.error_type == "land_failed"
 

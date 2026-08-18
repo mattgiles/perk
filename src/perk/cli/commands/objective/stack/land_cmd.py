@@ -1,17 +1,18 @@
-"""``perk objective stack land`` — the objective landing worker (contracts.md §8.55/§8.56).
+"""``perk objective stack land`` — a thin mapper over the objective ``Delivery.land``
+variant (contracts.md §8.55/§8.56).
 
-``--dry-run`` is the read-only readiness preview (§8.55; behavior unchanged — the envelope
-preserves the §8.55 field prefix/order, with the §8.56 mutation fields appended as trailing
-nulls/empties): reconstruct the train, compose the
-:class:`~perk.delivery.land.LandReadiness` projection from fresh GitHub observations, and
-report the complete dry-run land plan — blockers are a
-successful *detection* (exit 0, the ``stack status`` split). Bare ``land`` is the journaled
-atomic landing mutation (§8.56) over ``perk.delivery.landing.land_train``: consent
-(``--yes`` auto-approves; non-interactive without it is the typed ``confirmation_required``
-refusal), the re-observe/journal-first protocol, and the honest outcome envelope.
+``--dry-run`` maps ``LandRequest(kind="objective", dry_run=True)`` — the read-only readiness
+preview (§8.55; the envelope preserves the §8.55 field prefix/order, with the §8.56 mutation
+fields appended as trailing nulls/empties). Bare ``land`` maps the journaled atomic landing
+mutation (§8.56): the façade owns the operation lock and the consent boundary — this
+command only reconstructs caller intent (objective id, run id) and supplies the consent
+callback (``--yes`` auto-approves; non-interactive without it is the typed
+``confirmation_required`` refusal). A BLOCKED mutation arrives as the in-band
+readiness-only detail (``outcome: null``) and maps here to the exit-1 ``land_blocked``
+envelope.
 
-Exit codes: 0 = an honest success envelope (every ``--dry-run`` assessment, and the
-mutation outcomes ``merged``, ``pending``, ``unexpected_enqueued``,
+Exit codes (unchanged): 0 = an honest success envelope (every ``--dry-run`` assessment, and
+the mutation outcomes ``merged``, ``pending``, ``unexpected_enqueued``,
 ``completed_without_merge``, ``declined`` — a pending/enqueued landing is unresolved, never
 a failure); 1 = the typed failures (``land_blocked``, ``land_failed``,
 ``merge_async_unavailable``, ``merge_request_conflict``, ``land_drift``,
@@ -30,12 +31,15 @@ from perk.cli.commands.objective.stack.status_cmd import FindingOut, ObjectiveOu
 from perk.cli.context import require_github, require_repo
 from perk.cli.emit import emit, fail
 from perk.cli.ensure import UserFacingCliError
-from perk.delivery import land, landing, observe, train
-from perk.delivery.journal import JournalCorruptionError
-from perk.delivery.persistence import TrainPersistenceError
-from perk.github import GitHubError
-from perk.run.writer_probe import GhaRemoteWriterProbe
-from perk.substrate import git
+from perk.delivery import (
+    DeliveryError,
+    LandRequest,
+    LandResult,
+    land,
+    landing,
+    resolve_delivery,
+    train,
+)
 from perk.substrate.output import user_output
 
 # --- the ``--json`` envelope (OutputModel family; declaration order load-bearing) ---
@@ -268,10 +272,10 @@ class ObjectiveStackLandOut(OutputModel):
         )
 
     @classmethod
-    def from_outcome(
-        cls, result: landing.LandOutcome, *, redirected_from: str | None = None
-    ) -> "ObjectiveStackLandOut":
-        base = cls.from_domain(result.readiness, redirected_from=redirected_from, dry_run=False)
+    def from_outcome(cls, result: "LandResult.Objective") -> "ObjectiveStackLandOut":
+        base = cls.from_domain(
+            result.readiness, redirected_from=result.redirected_from, dry_run=False
+        )
         return base.model_copy(
             update={
                 "outcome": result.outcome,
@@ -424,7 +428,7 @@ _UNRESOLVED_GUIDANCE = (
 )
 
 
-def _render_outcome(result: landing.LandOutcome) -> None:
+def _render_outcome(result: "LandResult.Objective") -> None:
     for note in result.notes:
         user_output(click.style(f"note: {note}", dim=True))
     if result.outcome == "declined":
@@ -470,7 +474,7 @@ def _render_outcome(result: landing.LandOutcome) -> None:
     _render_evidence(result)
 
 
-def _render_evidence(result: landing.LandOutcome) -> None:
+def _render_evidence(result: "LandResult.Objective") -> None:
     evidence = result.reconcile_evidence
     if evidence is None:
         return
@@ -515,7 +519,8 @@ def land_stack(
     non-interactive without it refuses), every layer PR is re-observed, the operation is
     journaled first, then merged (merge-async for a multi-layer train; a SHA-pinned direct
     squash for the dynamic singleton), verified per PR, finalized per layer, and the
-    objective closed once every node is terminal. Exit 0 = an honest outcome envelope
+    objective closed once every node is terminal (consent and the operation lock are
+    façade-owned). Exit 0 = an honest outcome envelope
     (merged, pending, unexpected_enqueued, completed_without_merge, declined — a pending/
     enqueued landing is unresolved, not failed); 1 = typed failures; 2 = not-a-repo.
     """
@@ -526,30 +531,17 @@ def land_stack(
 
 
 def _land_dry_run(ctx: click.Context, *, objective: str | None, as_json: bool) -> None:
-    """The §8.55 read-only readiness preview — same reads, the §8.55 envelope field
+    """The §8.55 read-only readiness preview — one façade call, the §8.55 envelope field
     prefix/order preserved (the §8.56 mutation fields serialize as trailing nulls/empties),
-    no consent."""
+    no consent, no run id."""
     try:
         repo_root = require_repo(ctx)
         objective_id = resolve_objective_id(repo_root, objective)
-        reads = observe.resolve_train_reads(repo_root)
-        status = train.reconstruct_train(
-            objective_id,
-            store=reads.store,
-            issues=reads.issues,
-            persistence=reads.persistence,
-            git=reads.git,
-            github=reads.github,
+        result = resolve_delivery(repo_root).land(
+            LandRequest(kind="objective", objective_id=objective_id, dry_run=True)
         )
-    except train.TrainReconstructionError as exc:
+    except DeliveryError as exc:
         fail(ctx, as_json=as_json, error_type=exc.error_type, message=str(exc))
-        return
-    except JournalCorruptionError as exc:
-        fail(ctx, as_json=as_json, error_type="journal_corruption", message=str(exc))
-        return
-    except (IssueBackendError, ObjectiveStoreError, TrainPersistenceError) as exc:
-        # The backend-read translation matching `stack status` (an authority read failed).
-        fail(ctx, as_json=as_json, error_type="github_error", message=str(exc))
         return
     except UserFacingCliError as exc:
         fail(
@@ -559,72 +551,43 @@ def _land_dry_run(ctx: click.Context, *, objective: str | None, as_json: bool) -
             message=exc.format_message(),
         )
         return
-    if isinstance(status, train.NoDeliveryTrain):
-        fail(
-            ctx,
-            as_json=as_json,
-            error_type="not_stacked",
-            message=f"Objective #{status.objective_id}: {status.reason}",
-        )
-        return
-    readiness = land.assess_land_readiness(
-        status,
-        observations=observe.GatewayLandObservations(repo_root, base=status.base),
-        remote_writers=GhaRemoteWriterProbe(repo_root),
-    )
+    detail = result.objective
+    if detail is None:
+        raise ValueError("objective land returned no objective detail")
     payload = ObjectiveStackLandOut.from_domain(
-        readiness, redirected_from=status.redirected_from
+        detail.readiness, redirected_from=detail.redirected_from
     ).model_dump(mode="json")
     emit(
         as_json=as_json,
         payload=payload,
-        render=lambda: _render_human(readiness, heading="landing readiness (dry run)"),
+        render=lambda: _render_human(detail.readiness, heading="landing readiness (dry run)"),
     )
 
 
 def _land_mutation(
     ctx: click.Context, *, objective: str | None, run_id: str | None, yes: bool, as_json: bool
 ) -> None:
-    """The §8.56 mutating path (the error ladder mirrors ``sync_cmd``'s)."""
-    objective_id: str | None = None
+    """The §8.56 mutating path: reconstruct caller intent (objective id, run id), make one
+    façade call with the consent callback, and map the detail/typed errors onto today's
+    envelopes."""
     try:
         repo_root = require_repo(ctx)
         require_github(ctx)
         objective_id = resolve_objective_id(repo_root, objective)
         resolved_run_id = resolve_run_id(repo_root, objective_id, run_id)
-        result = landing.land_train(
-            repo_root,
-            objective_id=objective_id,
-            run_id=resolved_run_id,
-            approve=_make_approve(yes=yes),
-            remote_writers=GhaRemoteWriterProbe(repo_root),
+        result = resolve_delivery(repo_root).land(
+            LandRequest(kind="objective", objective_id=objective_id, run_id=resolved_run_id),
+            consent=_make_approve(yes=yes),
         )
-    except landing.LandError as exc:
-        extra: dict[str, object] | None = None
-        if exc.error_type == "land_blocked" and exc.readiness is not None:
-            # The full readiness report: rendered to stderr for humans, attached to the
-            # JSON fail envelope as the dry-run-shaped `readiness` payload.
-            if not as_json:
-                _render_human(exc.readiness, heading="landing readiness")
-            extra = {
-                "readiness": ObjectiveStackLandOut.from_domain(
-                    exc.readiness,
-                    redirected_from=_redirected_from(objective_id, exc.readiness),
-                    dry_run=False,
-                ).model_dump(mode="json")
-            }
-        fail(ctx, as_json=as_json, error_type=exc.error_type, message=str(exc), extra=extra)
-        return
-    except train.TrainReconstructionError as exc:
+    except DeliveryError as exc:
         fail(ctx, as_json=as_json, error_type=exc.error_type, message=str(exc))
         return
-    except JournalCorruptionError as exc:
-        fail(ctx, as_json=as_json, error_type="journal_corruption", message=str(exc))
+    except train.TrainReconstructionError as exc:
+        # The CLI-side run-id resolution walks the objective store (`resolve_run_id` — the
+        # sync split), so its typed reconstruction/backend failures keep their envelopes.
+        fail(ctx, as_json=as_json, error_type=exc.error_type, message=str(exc))
         return
-    except git.GitError as exc:
-        fail(ctx, as_json=as_json, error_type="git_error", message=str(exc))
-        return
-    except (IssueBackendError, ObjectiveStoreError, TrainPersistenceError, GitHubError) as exc:
+    except (IssueBackendError, ObjectiveStoreError) as exc:
         fail(ctx, as_json=as_json, error_type="github_error", message=str(exc))
         return
     except UserFacingCliError as exc:
@@ -635,18 +598,32 @@ def _land_mutation(
             message=exc.format_message(),
         )
         return
-    payload = ObjectiveStackLandOut.from_outcome(
-        result, redirected_from=_redirected_from(objective_id, result.readiness)
-    ).model_dump(mode="json")
-    emit(as_json=as_json, payload=payload, render=lambda: _render_outcome(result))
-
-
-def _redirected_from(requested: str | None, readiness: land.LandReadiness) -> str | None:
-    """The supersession-redirect fact for the mutation envelopes: the reconstruction follows
-    ``superseded_by`` forward, so a requested id differing from the readiness's ACTIVE
-    objective id was redirected (the dry-run path's ``redirected_from`` semantics)."""
-    if requested is None:
-        return None
-    if requested.removeprefix("#") == readiness.objective_id.removeprefix("#"):
-        return None
-    return requested
+    detail = result.objective
+    if detail is None:
+        raise ValueError("objective land returned no objective detail")
+    if detail.outcome is None:
+        # The in-band BLOCKED refusal (§8.56): the full readiness report rendered to stderr
+        # for humans, attached to the exit-1 JSON fail envelope as the dry-run-shaped
+        # `readiness` payload — `land_blocked` is a CLI-authored envelope code.
+        if not as_json:
+            _render_human(detail.readiness, heading="landing readiness")
+        blockers = "; ".join(f"[{f.code}] {f.message}" for f in detail.readiness.blockers)
+        fail(
+            ctx,
+            as_json=as_json,
+            error_type="land_blocked",
+            message=(
+                f"objective {detail.readiness.objective_id} is not ready to land: "
+                f"{blockers or 'blocked'}"
+            ),
+            extra={
+                "readiness": ObjectiveStackLandOut.from_domain(
+                    detail.readiness,
+                    redirected_from=detail.redirected_from,
+                    dry_run=False,
+                ).model_dump(mode="json")
+            },
+        )
+        return
+    payload = ObjectiveStackLandOut.from_outcome(detail).model_dump(mode="json")
+    emit(as_json=as_json, payload=payload, render=lambda: _render_outcome(detail))

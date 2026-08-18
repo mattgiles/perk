@@ -4,8 +4,10 @@ Both the mutating operations (sync/publish/transfer) and the landing-readiness p
 on the same question — does any affected plan have an active remote writer? — so the Protocol
 and its typed failure live in this tiny leaf, importable from either side without dragging in
 an operation module (``land`` must not import ``sync``: ``sync`` imports ``observe``, which
-imports ``land``). The production adapter is ``perk.run.writer_probe.GhaRemoteWriterProbe``;
-the CLI wires it.
+imports ``land``). The production adapter is the aggregate-backed
+``perk.delivery.observe._AggregateWriterProbe`` over
+``DeliveryGitHub.active_writer_plan_ids`` (no trigger exclusions); the landing engine
+constructs it.
 """
 
 from collections.abc import Sequence

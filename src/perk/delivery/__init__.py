@@ -1,13 +1,12 @@
-"""The compact public delivery façade and retained operation exports.
+"""The compact public delivery façade.
 
 The canonical surface is the repository-scoped :class:`Delivery` status, Prepare, Transfer,
-publish, sync, Recover (operation conclusion plus the cancellation-metadata repair), and Land
-(the incremental plan variant) families over three nominal aggregate authorities. Pure train
-projection, layer context/core, capability rows, production adapters,
-transfer/publication/synchronization/recovery/land internals, and compatibility readers are
-internal modules — post-merge finalization is package-internal (bound through the land
-runtime). Journal and landing/readiness exports remain public only while the atomic
-objective-landing operation completes its migration.
+Publish, Sync, Recover (operation conclusion plus the cancellation-metadata repair), and Land
+(the incremental plan variant plus the atomic objective variant) families over three nominal
+aggregate authorities — exactly the twenty names below. Every operation module is internal:
+pure train projection, layer context/core, capability rows, production adapters, the
+journal/persistence machinery, landing readiness and the landing mutation, post-merge
+finalization, and compatibility readers are module-path concerns only.
 """
 
 from perk.delivery.facade import (
@@ -31,91 +30,18 @@ from perk.delivery.facade import (
     TransferRequest,
     TransferResult,
 )
-from perk.delivery.journal import (
-    JOURNAL_EVENT_MAX_CHARS,
-    JOURNAL_SCHEMA_VERSION,
-    EventRole,
-    JournalCorruptionError,
-    JournalEvent,
-    JournalFold,
-    JournalRecordTooLarge,
-    OperationKind,
-    OperationState,
-    OutcomeRecord,
-    PreparedRecord,
-    canonical_payload,
-    ensure_event_size,
-    fold_events,
-    mint_operation_id,
-    parse_journal_comment,
-    render_event,
-)
-from perk.delivery.land import (
-    CheckView,
-    LandDisposition,
-    LandLayerReadiness,
-    LandObservationError,
-    LandObservations,
-    LandPlan,
-    LandPlanLayer,
-    LandReadiness,
-    MergeRulesView,
-    PrLandView,
-    assess_land_readiness,
-)
-from perk.delivery.landing import (
-    LandedLayer,
-    LandError,
-    LandOutcome,
-    land_train,
-)
-from perk.delivery.observe import GatewayLandObservations, resolve_delivery
-from perk.delivery.persistence import (
-    AppendResult,
-    JournalAppendAmbiguous,
-    TrainPersistence,
-    TrainPersistenceError,
-    UnresolvedOperationError,
-    resolve_train_persistence,
-)
+from perk.delivery.observe import resolve_delivery
 
 __all__ = [
-    "JOURNAL_EVENT_MAX_CHARS",
-    "JOURNAL_SCHEMA_VERSION",
-    "AppendResult",
-    "CheckView",
     "Delivery",
     "DeliveryError",
     "DeliveryGit",
     "DeliveryGitHub",
     "DeliveryPersistence",
-    "EventRole",
-    "GatewayLandObservations",
-    "JournalAppendAmbiguous",
-    "JournalCorruptionError",
-    "JournalEvent",
-    "JournalFold",
-    "JournalRecordTooLarge",
-    "LandDisposition",
-    "LandError",
-    "LandLayerReadiness",
-    "LandObservationError",
-    "LandObservations",
-    "LandOutcome",
-    "LandPlan",
-    "LandPlanLayer",
-    "LandReadiness",
     "LandRequest",
     "LandResult",
-    "LandedLayer",
-    "MergeRulesView",
-    "OperationKind",
-    "OperationState",
-    "OutcomeRecord",
-    "PrLandView",
     "PrepareRequest",
     "PrepareResult",
-    "PreparedRecord",
     "PublishRequest",
     "PublishResult",
     "RecoverRequest",
@@ -124,19 +50,7 @@ __all__ = [
     "StatusResult",
     "SyncRequest",
     "SyncResult",
-    "TrainPersistence",
-    "TrainPersistenceError",
     "TransferRequest",
     "TransferResult",
-    "UnresolvedOperationError",
-    "assess_land_readiness",
-    "canonical_payload",
-    "ensure_event_size",
-    "fold_events",
-    "land_train",
-    "mint_operation_id",
-    "parse_journal_comment",
-    "render_event",
     "resolve_delivery",
-    "resolve_train_persistence",
 ]

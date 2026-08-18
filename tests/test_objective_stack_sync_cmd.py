@@ -20,11 +20,8 @@ from perk.cli.commands.objective.stack import shared, sync_cmd
 from perk.cli.ensure import UserFacingCliError
 from perk.delivery import DeliveryError, SyncRequest, SyncResult
 from perk.delivery.journal import mint_operation_id
-from perk.delivery.writers import WriterObservationError
-from perk.github import GitHubError
 from perk.github.workflows import WorkflowRun, WorkflowRunListing, _workflow_runs_args
 from perk.run import discovery
-from perk.run.writer_probe import GhaRemoteWriterProbe
 
 _URL = "https://github.com/o/r/issues/1431"
 B1 = "1" * 40
@@ -378,7 +375,10 @@ def test_active_writer_discovery_uses_the_server_side_status_filter(monkeypatch)
     assert statuses == ["queued", "in_progress"]
 
 
-def test_writer_probe_excludes_only_the_invoking_run(monkeypatch):
+def test_writer_discovery_excludes_only_the_invoking_run(monkeypatch):
+    # The exclusion semantics live in the shared discovery read (the aggregate authority
+    # forwards a corroborated pair into it); an exact (run, plan) pair excludes only that
+    # run's row.
     own_run = mint_operation_id()
     other_run = mint_operation_id()
 
@@ -391,11 +391,13 @@ def test_writer_probe_excludes_only_the_invoking_run(monkeypatch):
         ]
 
     monkeypatch.setattr(discovery.github, "list_workflow_runs", fake_list)
-    probe = GhaRemoteWriterProbe(Path("/repo"), exclude_run_id=own_run, exclude_plan_id="1457")
-    assert probe.active_plan_ids(["1457", "1458"]) == frozenset({"1458"})
+    active = discovery.active_writer_plan_ids(
+        Path("/repo"), ["1457", "1458"], exclude_run_id=own_run, exclude_plan_id="1457"
+    )
+    assert active == frozenset({"1458"})
 
 
-def test_writer_probe_keeps_another_active_writer_on_the_invoking_plan(monkeypatch):
+def test_writer_discovery_keeps_another_active_writer_on_the_invoking_plan(monkeypatch):
     own_run = mint_operation_id()
     other_run = mint_operation_id()
 
@@ -408,18 +410,10 @@ def test_writer_probe_keeps_another_active_writer_on_the_invoking_plan(monkeypat
         ]
 
     monkeypatch.setattr(discovery.github, "list_workflow_runs", fake_list)
-    probe = GhaRemoteWriterProbe(Path("/repo"), exclude_run_id=own_run, exclude_plan_id="1457")
-    assert probe.active_plan_ids(["1457"]) == frozenset({"1457"})
-
-
-def test_writer_probe_failure_raises_the_typed_error(monkeypatch):
-    def boom(*, workflow, repo_root, limit=100, status=None):
-        raise GitHubError("api down")
-
-    monkeypatch.setattr(discovery.github, "list_workflow_runs", boom)
-    probe = GhaRemoteWriterProbe(Path("/repo"))
-    with pytest.raises(WriterObservationError, match="api down"):
-        probe.active_plan_ids(["1457"])
+    active = discovery.active_writer_plan_ids(
+        Path("/repo"), ["1457"], exclude_run_id=own_run, exclude_plan_id="1457"
+    )
+    assert active == frozenset({"1457"})
 
 
 def test_workflow_runs_args_carries_the_status_filter():

@@ -771,10 +771,18 @@ merge_pr{ number, commit_message? }                 -> PullRequest (state MERGED
   stored (Q8).
 - **`perk pr land` is a thin mapper over `Delivery.land`.** The command reconstructs the cached
   plan-ref into one `LandRequest(kind="plan", plan_id, branch, objective_id, consumed_learn,
-  delivery_lineage, dry_run)` — the three plan-ref-derived intent fields carry **no defaults**
-  (forgetting to reconstruct one fails at construction; `None`/`()` stay expressible, just
-  explicit) — and makes exactly one
-  `resolve_delivery(repo_root).land(request)` call; the façade (engine:
+  delivery_lineage, dry_run)` and makes exactly one
+  `resolve_delivery(repo_root).land(request)` call — never a consent callback: the plan
+  variant (and the objective dry-run) has no confirmation boundary and the façade rejects
+  one with `ValueError` (consent belongs to the objective mutation, §8.56). The flat
+  kind-guarded request family gives the plan-ref-derived intent fields
+  (`objective_id`/`consumed_learn`/`delivery_lineage`) dataclass defaults — an **accepted
+  residual**: their omission on a plan request is no longer construction-detectable,
+  mitigated because the header-half stacked refusal still protects every real run (only the
+  fully offline dry-run relies on the cached half) and the single production construction
+  site passes every field explicitly under exact-request pins; `plan_id`/`branch` omission
+  stays guard-detectable, and a plan request rejects `run_id` (objective-mutation-only). The
+  façade (engine:
   `perk.delivery.land_plan`) owns refusal ordering, the mutation protocol, and the
   finalization dispatch, and returns the strict kind↔detail `LandResult` (nested
   `PrSummary`/`ObjectiveUpdate`/`LearnUpdate`/`Plan` records — the `--json` envelope maps them
@@ -6265,7 +6273,11 @@ all-layers-published graph fallback may be `ready` without context). The package
 `PublishRequest`, `PublishResult`, `TransferRequest`, and `TransferResult` but no publication or
 transfer core/runtime/error. Removing `DeliveryOperationFacts`, `LayerBodyFacts`,
 `PublicationError`, `PublicationResult`, `TrainRowFacts`, and `publish_layer` plus adding the two
-Transfer values leaves the exact 61-name `perk.delivery.__all__`.
+Transfer values left the exact 61-name `perk.delivery.__all__` of that era; the atomic
+objective-landing migration has since completed the cut to the **canonical 20-name surface**
+(`Delivery`, `resolve_delivery`, `DeliveryError`, the three authority ABCs, and the seven
+request/result families) — every operation module, the journal/persistence machinery, and
+the landing readiness/mutation internals are module-path-internal only.
 
 The façade composes three nominal ABC authorities, with each interface, real adapter, and owned
 constructor-configured fake moving in lockstep. `DeliveryPersistence` aggregates objective, plan,
@@ -6988,7 +7000,8 @@ are the typed refusal `claimed_prefix_malformed`.
 
 **The operation lock.** Every `Delivery.sync` request (cascade, continue, or abort) acquires the
 private runtime's operation lock exactly ONCE around dispatch; recover (§8.51), transfer (§8.53),
-and land (§8.56) use the same lock in their own entrypoints. It is a machine-local non-blocking
+and land (§8.56) use the same lock in their own dispatches (land's is runtime-bound inside
+`Delivery.land`'s objective mutation arm; its dry-run preview is lock-free). It is a machine-local non-blocking
 `flock` at
 the main checkout (`.perk/workflow/stack-operation.lock`,
 `perk/delivery/oplock.py::stack_operation_lock`); a busy lock is the typed refusal
@@ -8403,10 +8416,14 @@ wires *this* module and `sync.py` imports `observe`); it owns its observation vi
 `LandObservationError`) and never sees `perk.github` types. The shared remote-writer seam
 (`RemoteWriterProbe` + `WriterObservationError`) lives in the leaf `perk/delivery/writers.py`
 (moved from `sync.py`, which re-exports both names) so mutating and readiness preflights share
-one fail-closed observation contract. Production wiring:
-`observe.GatewayLandObservations(repo_root, base=…)` over `perk/github/stacks.py`
-(`pr_land_facts` / `base_merge_rules` / `stack_capability`), wrapping `GitHubError` into
-`LandObservationError` — except the capability bool, which passes through (below).
+one fail-closed observation contract. Production wiring is aggregate-backed: the landing
+engine constructs `observe.GatewayLandObservations(github, base=…)` over the bound
+`DeliveryGitHub` (`pr_land_facts` / `base_merge_rules` / `stack_capability`), wrapping the
+aggregate's failures (`GitHubError` on the readiness read; the frozen merge-rules
+`ProbeError`, whose message is the same `str(exc)` bytes) into `LandObservationError` —
+except the capability bool, which passes through (below) — plus the fail-closed
+`observe._AggregateWriterProbe` over `DeliveryGitHub.active_writer_plan_ids` (exact
+forwarding, no trigger exclusions).
 
 **Dispositions.** `READY | BLOCKED | NOTHING_TO_LAND`. READY iff ≥1 **non-landed** layer and ZERO blockers
 (information never vetoes — advisory threads, failed optional checks, and a clean ACTIVE
@@ -8540,9 +8557,13 @@ GitHub's own `mergeStateStatus: BLOCKED` is the covering authority for that case
 (`commands/objective/stack/land_cmd.py`; the group's land verb). **No remote mutation
 anywhere in this section**: bare `land` (no `--dry-run`) is the §8.56 landing mutation on
 this same argv shape (it replaced the historical `land_unimplemented` refusal).
-`--dry-run` resolves the objective (explicit arg → worktree plan-ref → `no_objective`),
-reconstructs the train with exactly `stack status`'s exception→envelope mapping, maps
-`NoDeliveryTrain` → typed `not_stacked` (exit 1), assesses, and reports. Envelope
+`--dry-run` resolves the objective (explicit arg → worktree plan-ref → `no_objective`) and
+makes exactly one `Delivery.land(LandRequest(kind="objective", objective_id, dry_run=True))`
+call — lock-free, consent-free, run-id-free; the engine reconstructs the train (a
+train-less objective is the typed `not_stacked` with the `Objective #N: <reason>` dry-run
+message shape, exit 1; reconstruction failures keep exactly `stack status`'s typed
+envelope mapping through the façade's land boundary), assesses, and returns the
+readiness-only detail the command maps onto the envelope. Envelope
 (`ObjectiveStackLandOut`, snapshotted at
 `shared/schemas/outputs/objective-stack-land.schema.json`; field order load-bearing):
 `{success, error_type, objective{id,url,redirected_from}, dry_run, disposition, base,
@@ -8576,21 +8597,27 @@ train is only the `NOTHING_TO_LAND` disposition.
 
 ## §8.56 · Objective landing (the journaled atomic merge)
 
-**The operation.** `perk.delivery.landing.land_train(repo_root, *, objective_id, run_id,
-remote_writers, approve=…, …seams)` is the landing **mutation** behind bare
-`perk objective stack land` — a thin consumer of the §8.55 readiness projection
-(`assess_land_readiness`, consumed as-is, never re-derived) plus the §8.43 journal
-(`TrainPersistence.append_prepared`/`append_outcome`), the per-layer finalize seam
-(`perk.delivery.finalize.finalize_landed_plan`), and the machine-local operation lock
-(oplock scope grows to sync + recover + **land**; a busy lock is the typed
-`operation_in_progress`). No extra merge modes, no queue emulation, no generalized landing
-abstraction. Injection shape mirrors `sync.py`: one public entry with keyword-injectable
-seams defaulting to production wiring. `land.py` stays the pure readiness core (its import
-direction forbids `observe`/gateway imports); the mutation lives in the new
-`perk/delivery/landing.py`. The squash-message helper is the public pure
+**The operation.** `Delivery.land(LandRequest(kind="objective", objective_id, run_id,
+dry_run=False), consent=…)` is the landing **mutation** behind bare
+`perk objective stack land` — the façade-bound engine (`perk/delivery/landing.py`, no
+public entry) is a thin consumer of the §8.55 readiness projection
+(`assess_land_readiness`, consumed as-is, never re-derived) plus the §8.43 journal through
+the aggregate persistence (`append_prepared`/`append_outcome`), the per-layer finalize seam
+(`perk.delivery.finalize.finalize_landed_plan`, bound through the private landing runtime),
+and the machine-local operation lock (oplock scope grows to sync + recover + **land**; a
+busy lock is the typed `operation_in_progress`; acquired before reconstruction and held
+through consent, merge, verification, finalization, and close — the dry-run preview is
+lock-free). `consent` is the Land family's confirmation callback over the composed
+`LandReadiness` (`None` auto-approves); it fires for both the READY land plan and the
+NOTHING_TO_LAND completion preview, and the façade rejects a callback on the non-mutating
+shapes (`kind="plan"` and the objective dry-run) with `ValueError` — never
+accept-and-ignore. The request always carries a nonblank `run_id` on the mutation and never
+on the preview (construction-guarded). No extra merge modes, no queue emulation, no
+generalized landing abstraction. `land.py` stays the pure readiness core (its import
+direction forbids `observe`/gateway imports). The squash-message helper stays the pure
 `landing.squash_commit_message(*, issue, url, backend_id, title)` (byte-identical to the
 incremental `pr land` footer format — GitHub `Closes #N`, non-github `Plan: <id> — <url>`;
-`pr/land_cmd.py` imports it — one implementation, no drift).
+one implementation, no drift) — module-path internal, no root export.
 
 **The wire contract (GitHub's stacked-PR merge API, public preview).** Submit:
 `PUT /repos/{owner}/{repo}/pulls/{top}/merge-async` with EXACTLY
@@ -8613,20 +8640,29 @@ must land even where merge-async preview enrollment is absent). Gateway surface
 (`perk/github/stacks.py`): `submit_merge_async` / `merge_pr_direct` are **total** (the
 `--include` status + `Retry-After` classification; a spawn failure folds into the ambiguous
 `status=None` arm; an unparseable 2xx/409 body leaves `state=None` — ambiguous, never a
-guessed success); `merge_async_result` / `pr_merged_evidence` (per-PR
+guessed success); `pr_merged_evidence` (per-PR
 `state + baseRefName + headRefName + headRefOid + mergeCommit.oid` — the identity fields
 the verification corroborates; a zero-exit reply carrying an explicitly-null PR node is the
-ordinary lookup miss, `None`) are **strict** (they decide whether a journal outcome may be
-appended — junk raises, never degrades). Operation-conclusion recovery reaches the total handle
-probe and strict merged evidence through the aggregate `DeliveryGitHub.merge_async_probe` and
-`DeliveryGitHub.merged_evidence` methods; objective close likewise uses
+ordinary lookup miss, `None`) is **strict** (it decides whether a journal outcome may be
+appended — junk raises, never degrades). The landing engine reaches every landing effect
+and observation through the aggregate `DeliveryGitHub`: `submit_merge_async` /
+`merge_pr_direct` (the two mutations above), the **total** `merge_async_probe` as the poll
+(the four live states pass through — `merged` carries `details.sha`; an `expired`/
+`unreadable` probe consumes the tick exactly like the historical tolerated per-tick
+strict-reader failure), and `merged_evidence` for the post-approval re-observation, per-PR
+verification, and abandon proof (`merge_commit_sha` is ignored pre-merge; the raw
+`GitHubError` posture and drift/unproven message bytes are unchanged).
+Operation-conclusion recovery reaches the same handle probe and strict merged evidence
+through `DeliveryGitHub.merge_async_probe` and
+`DeliveryGitHub.merged_evidence`; objective close likewise uses
 `DeliveryPersistence.close_objective`. Recovery binds LAND issue reads only to the existing
-`train.PlanReader` shape, while provider `backend_id` remains landing-mutation-only. Its temporarily
-retained per-layer `finalize_landed_plan(close_objective_on_complete=False)` call is private
-`_RecoverRuntime` machinery, not a fourth public authority or request field.
+`train.PlanReader` shape; the landing mutation additionally reads the provider identity
+through `DeliveryPersistence.backend_id()`. The temporarily
+retained per-layer `finalize_landed_plan(close_objective_on_complete=False)` calls are private
+`_RecoverRuntime`/`_LandingRuntime` machinery, not a fourth public authority or request field.
 
-**The protocol, in order.** (1) The operation lock. (2) Reconstruct
-(`observe.resolve_train_reads` + `reconstruct_train`); `NoDeliveryTrain` or a null
+**The protocol, in order.** (1) The operation lock. (2) Reconstruct (the façade's
+cause-preserving train-reconstruction bridge); `NoDeliveryTrain` or a null
 `delivery_lineage` → typed `not_stacked`. (3) Assess (§8.55). (4) **NOTHING_TO_LAND** →
 `approve` with the completion preview ("nothing to merge; close objective #N") — declined ⇒
 `outcome: declined`; approved ⇒ the **state-aware close** (`landing.state_aware_close`,
@@ -8637,12 +8673,16 @@ failure is a typed error, never fail-open) ⇒ `outcome: completed_without_merge
 note). The approval pause is a race boundary: node terminality is REVALIDATED on the fresh
 fetch — a node added/reopened during the pause ⇒ typed `land_drift`, nothing closed (a
 stale NOTHING_TO_LAND snapshot never closes an incomplete objective). **No journal** (no remote train mutation to guard; the close is
-idempotent/convergent). (5) **BLOCKED** → the typed refusal `land_blocked` carrying the full
-composed readiness. (6) **READY**: for `singleton_squash` the load-bearing pre-merge
+idempotent/convergent). (5) **BLOCKED** → the **in-band refusal detail**: the mutation arm
+returns the readiness-only `LandResult.Objective` (`outcome: null`, the full composed
+readiness embedded) before consent — no exception, `DeliveryError` stays payload-free; the
+CLI maps it to its exit-1 `land_blocked` envelope (below). (6) **READY**: for `singleton_squash` the load-bearing pre-merge
 `get_plan` read happens NOW (missing ⇒ typed `plan_not_found`; it supplies the squash
 title/url + the tolerantly-parsed `consumed_learn`); then `approve(readiness)` — the
 rendered land plan; declined ⇒ `outcome: declined`, nothing journaled. (7) **Re-observe**
-every layer PR after the arbitrary approval pause (`stacks.pr_delivery_facts`: OPEN, head ==
+every layer PR after the arbitrary approval pause (the strict aggregate
+`DeliveryGitHub.merged_evidence` — `PrMergedEvidence` carries every inspected identity
+fact, `merge_commit_sha` ignored pre-merge: OPEN, head ==
 plan `head_sha`, base == expected base ref, head ref == branch); any mismatch/read failure →
 typed `land_drift`, nothing journaled. (8) **Prepared** (journal-first, read back; the
 one-unresolved gate and `JournalAppendAmbiguous` propagate typed). (9) **Submit** — classification
@@ -8669,10 +8709,11 @@ one identical retry, with the same preserved-ambiguity rule — only a `merged` 
 (including the already-merged idempotent arm, which recovers an applied-but-unconfirmed
 first attempt) concludes it; anything else leaves `pending`. **No `accepted` event ever on
 the singleton** — there is no handle. (10) **Poll** (async
-arm): up to 60 ticks, injected `sleep(1)`; `pending` continues; `merged` ⇒ verification;
+arm): up to 60 ticks, injected `sleep(1)`, over the total `merge_async_probe`; `pending`
+continues; `merged` ⇒ verification (its `sha` is the journaled `reported_sha`);
 `failed` ⇒ abandon-with-proof then `land_failed`; `enqueued` ⇒ stop immediately,
-`outcome: unexpected_enqueued` (unresolved); per-tick read failures are tolerated within the
-budget; exhaustion ⇒ `outcome: pending`. (11) **Abandon-with-proof** (terminal
+`outcome: unexpected_enqueued` (unresolved); an `expired`/`unreadable` probe consumes the
+tick (the historical tolerated per-tick read failure); exhaustion ⇒ `outcome: pending`. (11) **Abandon-with-proof** (terminal
 non-application only): every layer PR re-observed OPEN at its exact expected head ⇒ append
 `abandoned` and let the typed failure propagate (retry is legal — the operation is
 resolved); ANY contradiction or read failure ⇒ NO outcome append, `outcome: pending` (never
@@ -8749,24 +8790,44 @@ pre-merge objects reachable) / Git objects.
 `unexpected_enqueued` mean the LAND operation stays **unresolved** — never success, never
 failure (§8.51's `stack recover` concludes it once the merge settles or expires — the
 recorded operation identity, the journaled `accepted` UUID handle or the prepared `mode`,
-is the recovery probe's input). `LandError.error_type` (exit 1): `not_stacked | land_blocked |
-land_drift | land_failed | merge_async_unavailable | merge_request_conflict | plan_not_found
-| operation_in_progress | confirmation_required`; reconstruction/persistence/backend errors
-keep their existing typed passthrough at the CLI boundary (the `sync_cmd` ladder, plus
-`journal_corruption` and `git_error`); exit 2 = not-a-repo. `land_blocked` renders the full
-readiness report to stderr (the shared human renderer with a "landing readiness" heading)
-and attaches the dry-run-shaped readiness payload to the JSON fail envelope under the
-`readiness` key.
+is the recovery probe's input). Failures are the bounded `DeliveryError` vocabulary with
+`phase="land"` (exit 1). Engine refusals/protocol classifications — `not_stacked` (both
+message shapes preserved: the dry-run's `Objective #N: <reason>` and the mutation's
+`objective N has no delivery train (<reason>)`), `plan_not_found`, `land_drift`,
+`merge_request_conflict`, `merge_async_unavailable`, `land_failed`,
+`operation_in_progress` — carry `origin="domain"`. The boundary origin rule:
+`train.TrainReconstructionError` passes its code through when it is a known delivery code
+(else normalizes to `github_error`), with origin derived from the final code (`git_error` →
+`git`; `github_error`, including the unknown-code fallback → `github`; every other
+recognized code → `domain`); `GitHubError`/`IssueBackendError`/`ObjectiveStoreError`/
+`TrainPersistenceError` (including `JournalAppendAmbiguous`) → `github_error`/`github`;
+`JournalCorruptionError` → `journal_corruption`/`delivery`; a defensive `GitError` →
+`git_error`/`git` (the engine makes no Git authority calls). `JournalRecordTooLarge` is
+deliberately **not** translated — an oversize append propagates as the unexpected
+programming error it always was (both phases; a typed mapping would be a behavior change
+and a façade-only translation would break invariant 20 post-verification). A consent
+callback raising (the CLI's typed `confirmation_required` refusal) propagates
+untranslated. Exit 2 = not-a-repo. `land_blocked` is a **CLI-authored envelope code** (like
+`confirmation_required`/`no_objective`): the CLI maps the in-band BLOCKED detail to the
+exit-1 fail envelope carrying the verbatim message
+`objective <id> is not ready to land: <"[code] message"-joined blockers or 'blocked'>`,
+renders the full readiness report to stderr (the shared human renderer with a "landing
+readiness" heading), and attaches the dry-run-shaped readiness payload to the JSON fail
+envelope under the `readiness` key.
 
 **The cold worker.** `perk objective stack land [OBJECTIVE] [--dry-run] [--run-id ID]
-[--yes] [--json]` — `--dry-run` stays the §8.55 read-only preview (behavior unchanged; the
+[--yes] [--json]` — a thin request→façade→map on **both arms** (envelope/exit semantics
+unchanged). `--dry-run` maps the §8.55 read-only preview (behavior unchanged; the
 envelope preserves the §8.55 field prefix/order with the §8.56 mutation fields appended as
 trailing nulls/empties; no consent, `--yes`/`--run-id` ignored). Bare
 `land` requires GitHub auth (`require_github`), resolves the run id (explicit `--run-id` →
 the ACTIVE objective header's `run_id` → typed `invalid_input`; `stack/shared.py::
-resolve_run_id`, shared with sync), and confirms: `--yes` auto-approves (still rendering
+resolve_run_id`, shared with sync — caller intent reconstruction stays CLI-side, and its
+store-walk failures keep their typed envelopes at the command boundary), passes the
+consent callback to `Delivery.land`, and confirms: `--yes` auto-approves (still rendering
 what it approved); a non-interactive session without `--yes` is the typed
-`confirmation_required` refusal BEFORE any prompt. The success envelope grows the trailing
+`confirmation_required` refusal BEFORE any prompt (raised inside the callback,
+propagating through the façade untranslated). The success envelope grows the trailing
 fields `{outcome, operation_id, merge_async_uuid, landed_layers: [{node_id, plan_id,
 pr_number, merge_commit_sha, learn_state, plan_issue_closed, nodes_marked, finalized,
 base_sha, head_sha}],

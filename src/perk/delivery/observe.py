@@ -8,13 +8,16 @@ network work; the nominal adapters resolve or observe their authorities only whe
 needs them.
 
 The compatibility ``TrainReads`` / ``resolve_train_reads`` / ``reconstruct_repo_train`` seams
-remain internal while the deferred delivery operation families migrate. Landing observations also
-remain here. Stable Git/GitHub failures become typed pure-core errors, while the preview stack
+remain internal (transfer's roll-forward core still binds ``reconstruct_repo_train``). The
+aggregate-backed landing-observation adapters also live here: the package-internal
+:class:`GatewayLandObservations` and the fail-closed :class:`_AggregateWriterProbe`, both
+constructed by the landing engine from the bound :class:`~perk.delivery.facade.DeliveryGitHub`.
+Stable Git/GitHub failures become typed pure-core errors, while the preview stack
 read and landing-readiness enrichment retain their documented tolerant/fail-closed postures.
 """
 
 import os
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -284,6 +287,21 @@ class RepoDeliveryGitHub(DeliveryGitHub):
     def merged_evidence(self, number: int) -> stacks.PrMergedEvidence | None:
         return stacks.pr_merged_evidence(number=number, repo_root=self._repo_root)
 
+    def pr_land_facts(self, number: int) -> stacks.PrLandFacts | None:
+        """The rich landing-readiness enrichment — raw ``GitHubError`` posture (the landing
+        observations adapter wraps it into the typed ``LandObservationError``)."""
+        return stacks.pr_land_facts(number=number, repo_root=self._repo_root)
+
+    def submit_merge_async(self, number: int, *, sha: str) -> stacks.MergeAsyncSubmitOutcome:
+        return stacks.submit_merge_async(number=number, sha=sha, repo_root=self._repo_root)
+
+    def merge_pr_direct(
+        self, number: int, *, sha: str, commit_message: str | None
+    ) -> stacks.DirectMergeOutcome:
+        return stacks.merge_pr_direct(
+            number=number, sha=sha, commit_message=commit_message, repo_root=self._repo_root
+        )
+
     def active_writer_plan_ids(
         self,
         plan_ids: tuple[str, ...],
@@ -388,19 +406,20 @@ class RepoDeliveryGitHub(DeliveryGitHub):
 
 
 class GatewayLandObservations:
-    """The production :class:`~perk.delivery.land.LandObservations` over
-    ``perk.github.stacks``: the strict readiness/rules reads wrap every ``GitHubError`` into
-    the typed :class:`~perk.delivery.land.LandObservationError` (the assessment converts it
-    into the read-specific fail-closed blocker); ``stack_capability`` passes the gateway's
-    fail-closed bool through — the §8.55 declared boolean arm."""
+    """The package-internal :class:`~perk.delivery.land.LandObservations` over the aggregate
+    :class:`~perk.delivery.facade.DeliveryGitHub`: the strict readiness/rules reads wrap the
+    aggregate's failures into the typed :class:`~perk.delivery.land.LandObservationError`
+    (the assessment converts it into the read-specific fail-closed blocker);
+    ``stack_capability`` passes the aggregate's fail-closed bool through — the §8.55
+    declared boolean arm."""
 
-    def __init__(self, repo_root: Path, *, base: str) -> None:
-        self._repo_root = repo_root
+    def __init__(self, github: DeliveryGitHub, *, base: str) -> None:
+        self._github = github
         self._base = base
 
     def pr_readiness(self, number: int) -> land.PrLandView | None:
         try:
-            facts = stacks.pr_land_facts(number=number, repo_root=self._repo_root)
+            facts = self._github.pr_land_facts(number)
         except GitHubError as exc:
             raise land.LandObservationError(str(exc)) from exc
         if facts is None:
@@ -425,17 +444,33 @@ class GatewayLandObservations:
         )
 
     def base_merge_rules(self) -> land.MergeRulesView:
-        try:
-            rules = stacks.base_merge_rules(self._repo_root, self._base)
-        except GitHubError as exc:
-            raise land.LandObservationError(str(exc)) from exc
+        rules = self._github.base_merge_rules(self._base)
+        if isinstance(rules, DeliveryGitHub.ProbeError):
+            # The aggregate's frozen discriminant carries `str(exc)` — same bytes as the
+            # historical raw-wrap.
+            raise land.LandObservationError(rules.message)
         return land.MergeRulesView(
             squash_allowed=rules.squash_allowed,
             merge_queue_required=rules.merge_queue_required,
         )
 
     def stack_capability(self) -> bool:
-        return stacks.stack_capability(self._repo_root)
+        return self._github.stack_capability()
+
+
+@dataclass(frozen=True)
+class _AggregateWriterProbe:
+    """The aggregate-backed :class:`~perk.delivery.writers.RemoteWriterProbe` for landing
+    readiness: exact forwarding with no trigger exclusions, and the aggregate's identical
+    fail-closed posture (an unreadable observation raises
+    :class:`~perk.delivery.writers.WriterObservationError`, never an empty set)."""
+
+    github: DeliveryGitHub
+
+    def active_plan_ids(self, plan_ids: Sequence[str]) -> frozenset[str]:
+        return self.github.active_writer_plan_ids(
+            tuple(plan_ids), trigger_plan_id=None, trigger_run_id=None
+        )
 
 
 class RepoDeliveryPersistence(DeliveryPersistence):

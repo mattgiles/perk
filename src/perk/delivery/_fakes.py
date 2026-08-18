@@ -7,7 +7,7 @@ outcomes). Calls are recorded and failures are keyed by call shape so boundary a
 tests use the same three-authority contract as production.
 """
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from copy import deepcopy
 from dataclasses import replace
 from pathlib import Path
@@ -503,6 +503,9 @@ class FakeDeliveryGitHub(_FailureMixin, DeliveryGitHub):
         strict_stacks: Mapping[int, stacks.StackRestFacts | None] | None = None,
         merge_probes: Mapping[tuple[int, str], stacks.MergeAsyncProbe] | None = None,
         merged_evidence: Mapping[int, stacks.PrMergedEvidence | None] | None = None,
+        land_facts: Mapping[int, stacks.PrLandFacts | None] | None = None,
+        merge_async_submits: Sequence[stacks.MergeAsyncSubmitOutcome] = (),
+        direct_merges: Sequence[stacks.DirectMergeOutcome] = (),
         active_writers: frozenset[str] = frozenset(),
         errors: Mapping[Call, Exception] | None = None,
     ) -> None:
@@ -517,6 +520,11 @@ class FakeDeliveryGitHub(_FailureMixin, DeliveryGitHub):
         self._strict_stacks = dict(strict_stacks or {})
         self._merge_probes = dict(merge_probes or {})
         self._merged_evidence = dict(merged_evidence or {})
+        self._land_facts = dict(land_facts or {})
+        # The landing mutations' retry sequences need per-call scripts (queue-style for
+        # repeated identical calls), not static returns.
+        self._merge_async_submits = list(merge_async_submits)
+        self._direct_merges = list(direct_merges)
         self._active_writers = frozenset(active_writers)
         self.calls: list[Call] = []
 
@@ -558,6 +566,30 @@ class FakeDeliveryGitHub(_FailureMixin, DeliveryGitHub):
         self.calls.append(call)
         self._raise_failure(call)
         return self._merged_evidence.get(number)
+
+    def pr_land_facts(self, number: int) -> stacks.PrLandFacts | None:
+        call: Call = ("pr_land_facts", number)
+        self.calls.append(call)
+        self._raise_failure(call)
+        return self._land_facts.get(number)
+
+    def submit_merge_async(self, number: int, *, sha: str) -> stacks.MergeAsyncSubmitOutcome:
+        call: Call = ("submit_merge_async", number, sha)
+        self.calls.append(call)
+        self._raise_failure(call)
+        if not self._merge_async_submits:
+            raise AssertionError(f"no fake merge-async submit scripted for {call!r}")
+        return self._merge_async_submits.pop(0)
+
+    def merge_pr_direct(
+        self, number: int, *, sha: str, commit_message: str | None
+    ) -> stacks.DirectMergeOutcome:
+        call: Call = ("merge_pr_direct", number, sha, commit_message)
+        self.calls.append(call)
+        self._raise_failure(call)
+        if not self._direct_merges:
+            raise AssertionError(f"no fake direct merge scripted for {call!r}")
+        return self._direct_merges.pop(0)
 
     def active_writer_plan_ids(
         self,
