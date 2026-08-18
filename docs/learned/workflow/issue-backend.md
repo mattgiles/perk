@@ -1,6 +1,6 @@
 ---
 title: The IssueBackend seam — protocol, GitHub adapter, and the issue-tier consumer boundary
-read_when: You are touching perk/backends/issue_backend.py, its GitHub adapter, the resolver in perk/backends/resolve.py, an issue-tier consumer, adding a backend, or the boundary/import-direction tests.
+read_when: You are changing issue-backend reads/writes, presence-only diagnostics, plan-kind guards, adapters/resolution, backend fakes, conformance, or import-direction tests.
 cluster: backends-and-integrations
 ---
 
@@ -29,6 +29,12 @@ the `GitHubIssueBackend` adapter (now `perk/backends/github/backend.py`) + `reso
   the fake's conformance, pytest on kwarg-recorder equality) — "Growing a protocol signature".
 - The invariants any new backend must keep (not-found substrings, numeric-id edge tags,
   mixed-tier except tuples) — "Cross-backend contracts to preserve".
+- Issue kind and payload health are separate axes; presence-only flags are computed at the backend
+  read boundary without decoding a plan — "Presence-only evidence and guarded writers".
+- Diagnostics choose the weakest read carrying the evidence, while invariant writes are enforced
+  by the backend and explained by the door — "Presence-only evidence and guarded writers".
+- Default-miss fakes hide redirect/targeting mistakes; map every plausible target to a distinct
+  value or exception and keep whole-repo consumer censuses — "Backend fake posture".
 
 ## Protocol-module shape
 
@@ -215,6 +221,37 @@ identity-matched settings entry is *removed* when the selection is absent — ha
 package without selecting it is explicitly unsupported. Composing it inside `_converge_settings`
 keeps it under the `settings-wiring` SSOT (doctor dry-runs/fixes it with zero new
 checks/capabilities).
+
+## Presence-only evidence and guarded writers
+
+Issue kind and payload health are independent evidence axes. Positive identification uses stored
+presence-only flags computed at the backend read boundary. It must not decode the payload or ask a
+consumer to inspect body text: on Linear, kind headers can ride attachments that a body read never
+sees. Keying a recovery or repair refusal on decoded-header truthiness locks the door precisely when
+a damaged payload makes recovery necessary.
+
+Enforce write invariants at the backend mutation boundary through its typed error channel. A door
+may preflight the same rule to provide a friendlier typed refusal, but it does not replace writer
+enforcement. The read-then-PATCH race remains inherent on non-transactional backends; document it
+rather than implying the UX preflight is a lock.
+
+Read tolerance can turn a fail-early path into a fail-late path after side effects. Before loosening
+any read, trace the next write and ask what can already have changed when it fails. Tolerance belongs
+in deliberately presence-only reads, never in plan reconstruction.
+
+Diagnostics use the weakest read that carries their evidence. Prefer `read_issue` for stored marker
+presence over `get_plan`, and resolve the actual carrier through contracts §8.43
+`journal_carrier_id` before reading. A generic writer that becomes merge-only will also break tests
+that quietly used it as a creator; reseed those fixtures through the sanctioned creation seam
+instead of reopening create behavior.
+
+## Backend fake posture
+
+A fake whose unmapped input returns a benign miss hides wrong-target and stale-redirect bugs. Wire
+every plausible target with distinguishable results so a mistargeted read fails loudly. Grow the
+same map additively for error cases by allowing an exception-valued entry to raise; do not add a
+second special-case fake path. As with protocol changes elsewhere in this doc, a whole-repo census
+of consumers and conforming fakes is stronger than an enumerated fixture-fallout list.
 
 ## Gotchas / residuals
 

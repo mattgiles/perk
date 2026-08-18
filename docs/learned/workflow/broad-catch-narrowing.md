@@ -1,6 +1,6 @@
 ---
 title: Narrowing broad exception catches — latent-bug exposure, census incompleteness, typed-catch derivation
-read_when: You are narrowing broad `except Exception` catches to typed expected failures, choosing a typed catch set for a fail-open boundary, or planning an exception-posture sweep.
+read_when: You are deriving catches at parser/adapter trust boundaries, widening user input, designing degrade-and-continue or cleanup catches, or guarding path containment.
 cluster: quality-and-guards
 ---
 
@@ -101,15 +101,47 @@ unenumerated exception type turns the promised degrade into a raise exactly wher
 mattered. Auditing the invariant means deriving the set from the try-block's operations (the rule
 above), then checking it against the boundary's *promise*.
 
-## The sanctioned broad catch: an atomic-write helper's cleanup boundary
+## Widening a trust boundary reopens exception posture
 
-**An atomic-write helper's cleanup boundary is wider than `OSError`.** A caller-supplied
+When an endpoint starts feeding user-supplied text into an existing parser, re-derive the catch at
+that parser boundary. A previously settled tuple may cover only the old trusted inputs. Start from
+the library's full error taxonomy, and catch the documented base class when variants are not a
+stable subclass family. If some variants omit fields used in diagnostics, read them through a safe
+fallback rather than narrowing the catch to the convenient variant.
+
+The right width is taxonomy-driven: neither reflexively `Exception` nor the narrowest error seen in
+one fixture. Pair malformed-input cases with the new endpoint so the widened boundary cannot regress
+back to raw tracebacks.
+
+## Sanctioned broad catches are policy boundaries
+
+### Atomic-write cleanup
+
+An atomic-write helper's cleanup boundary is wider than `OSError`. A caller-supplied
+
 `encoding` can raise `LookupError`/`UnicodeEncodeError` *after* temp-file allocation, and cleanup
 itself (`rmSync`/`unlink`) can throw and **mask the original error**. The shipped shape (anchors:
 `src/perk/state/cache.py`, `extension/substrate/cache.ts`): the entire post-allocation region
 catches everything (`BaseException` on the Python plane) → best-effort cleanup inside its own
 suppressed try → bare `raise`. A deliberate broad catch is correct when it exists **only** to
 remove temp state and always re-raises — the named exception to the narrow-typed-catch rule.
+
+### Degrade-and-continue browser opening
+
+A second sanctioned shape is an explicitly marked degrade-and-continue boundary where every
+failure has the same policy. Browser opener backends can raise arbitrary platform-specific types;
+if opening is optional, catch broadly, report the refusal/degrade, and continue. This is not error
+swallowing: the boundary is named, the outcome is observable, and no failure variant would change
+the caller's decision.
+
+## Whole-chain containment for URL-derived paths
+
+A URL-derived path can contain an embedded NUL, making `Path.resolve()` raise `ValueError` rather
+than `OSError`. Put the entire containment chain inside one refusal boundary: resolve the candidate
+and allowed root, check relativity/containment, confirm a file, and read it. Wrapping only the final
+read leaves earlier adversarial-path failures as raw exceptions. `perk_dev/prose_review/web.py` is
+the reference boundary. Degrade every failure in that chain to the same contained-read refusal;
+never continue with a partially checked path.
 
 ## Payload-parse failures are backend errors
 

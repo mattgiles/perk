@@ -226,8 +226,9 @@ carry the site's own gates:
 
 CI reaches every docs gate through `just lint`/`just typecheck`/`just test`;
 `tests/test_docs_gates.py` is the structural proof of that wiring (scripts, recipes,
-workflow steps, and the scope-aware `docs-check` `[[ci.checks]]` row — which keeps docs-only
-changes verified in-session when the code-suffix globs all skip). `just docs-check` runs the
+workflow steps, and the scope-aware `docs-check` `[[ci.checks]]` row — whose triggers include
+the canonical/site docs, perk-expert mirror, and shared provider/schema authorities, keeping
+catalog- or mirror-only changes verified when code-suffix globs skip). `just docs-check` runs the
 site's Biome lint and typecheck itself for the same reason: docs-scoped files like
 `src/styles/tokens.css` or `tsconfig.json` match no code-suffix check glob, so the docs row
 must reach every gate GitHub CI would run for them.

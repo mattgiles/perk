@@ -1,6 +1,6 @@
 ---
 title: Biome / tsc gotchas in perk's pinned TS toolchain
-read_when: You hit a Biome or tsc error in the extension, a discriminated-union narrowing surprise, a `--write` formatting trap (template-literal prose, new-file collapse), or the JS object-shape guard idiom.
+read_when: You hit Biome/tsc errors in extension UI or CSS, accessibility/complexity lints, union narrowing, strict indexing, `--write` mangling, or object-shape guards.
 cluster: toolchain-gotchas
 ---
 
@@ -22,6 +22,20 @@ rules are general.
 - **`noUselessUndefinedInitialization` → `noImplicitAnyLet` (the `let x = undefined` trap chain).**
   Biome rewrites `let x = undefined` to `let x;`, which then trips `noImplicitAnyLet`. Resolve by
   giving an explicit type instead of an initializer: e.g. `let model: Model<Api> | undefined;`.
+- **`useSemanticElements`** turns an ARIA search landmark into the native `<search>` element. Prefer
+  changing the element over suppressing the rule.
+- **`noNoninteractiveTabindex`** flags a scroll region that is intentionally keyboard-focusable.
+  When the focus target has no better native element, put the narrow suppression adjacent to its
+  `tabIndex` attribute so the exception cannot silently cover sibling markup.
+- **`noStaticElementInteractions`** also sees keydown delegation on a wrapper `div`, even when the
+  interactive descendants own the visible controls. Either move the listener to a semantic owner
+  or document the exact delegation exception at the attribute.
+- **`useIndexOf`** rejects `findIndex` when the predicate only compares identity. Use `indexOf` so
+  the intent and generated scan are direct.
+
+CSS suppressions are declaration-scoped too. `lint/complexity/noImportantStyles` requires one
+`biome-ignore` on each declaration containing `!important`; a comment above the whole rule block
+does not suppress its individual declarations.
 
 ## `noControlCharactersInRegex` rejects a sentinel placeholder — single-pass alternation instead
 

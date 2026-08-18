@@ -20,6 +20,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 DOCS_CHECK_PYTEST_TARGETS = (
     "tests/test_user_docs_metadata.py",
     "tests/test_user_docs_cli_reference.py",
+    "tests/test_user_docs_reference_facts.py",
     "tests/test_explanation_boundary.py",
     "tests/test_user_docs_findability.py",
     "tests/test_docs_site_tokens.py",
@@ -95,8 +96,17 @@ def test_perk_ci_has_the_scope_aware_docs_check_row():
     row = rows[0]
     assert row["command"] == "just docs-check"
     globs = row["glob"].split(",")
-    # The four scope families: canonical docs, the site tree, the root Node manifests, and
-    # the docs task configuration.
-    members = ("docs/user-docs/**", "docs/site/**", "package.json", "package-lock.json", "justfile")
+    # Canonical/site docs, the perk-expert mirror, provider/schema authorities, root Node
+    # manifests, and docs task configuration all select the fact/corpus guard family.
+    members = (
+        "docs/user-docs/**",
+        "docs/site/**",
+        "skills/perk-expert/**",
+        "shared/providers.yaml",
+        "shared/schemas/**",
+        "package.json",
+        "package-lock.json",
+        "justfile",
+    )
     for member in members:
         assert member in globs, f"docs-check glob missing {member}"

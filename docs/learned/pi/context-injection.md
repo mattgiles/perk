@@ -1,6 +1,6 @@
 ---
-title: Pi context injection — the conditional inject-and-strip pattern, stage-field disambiguation
-read_when: You are injecting context into a session (planMode/objectiveAuthor/bindings) and stripping it later, deduplicating an injection via branchCarries, or serving two stages from one adapter.
+title: Pi context injection — active compaction windows, conditional stripping, stage-field disambiguation
+read_when: You are injecting or stripping session context, deduplicating delivery across compaction, handling Pi compaction callbacks, or validating branch-entry data.
 cluster: pi-extension
 ---
 
@@ -25,37 +25,62 @@ conditional**, not unconditional:
   is off.
 
 The pattern: **keep while relevant, strip only when stale.** Injected custom messages persist to the
-branch (`pi/extension-api.md`), so after compaction drops the original entry the context naturally
-disappears and re-injects — the ongoing value of keying on live state rather than a one-shot flag.
+branch (`pi/extension-api.md`). Compaction does not drop those entries from the branch: Pi appends a
+compaction entry and rebuilds only the model context from the summary plus the entries beginning at
+`firstKeptEntryId`. Re-delivery decisions therefore need the active model-context window, not the
+append-only branch history.
 
-## Once-only injection dedup: the stringify-includes branch scan
+## Dedup against the active compaction window
 
 Injected custom messages persist to the branch as *message* entries whose exact shape (where
-`customType` sits) varies — so the proven once-only dedup guard serializes each entry and scans
-for a needle, **not** a typed customType scan. The pattern's home is the shared
-`branchCarries(branch, needle)` helper in `extension/substrate/workflowState.ts` (beside
-`branchOf`), adopted by every per-turn injector — toolGating's mode context, planMode's
-plan-authoring context, objectiveAuthor's objective-authoring context, gistAuthor's context, the
-two plan adapter bridges (plannotator/tombell), and bindingDelivery's header scan (migrated from
-its hand-rolled `branchHasHeader`). Two original adopters are since removed with Objective #1416
-— the juicesharp todo bridge and checkpoints' steps-context scan (itself one of the two migrated
-hand-rolled sites). Prefer this enumeration over a hard count; counts are drift magnets.
+`customType` sits) varies. The shared `branchCarries(branch, needle)` helper in
+`extension/substrate/workflowState.ts` therefore serializes entries and scans for a distinctive
+marker rather than assuming one custom-entry shape. A full-branch scan is suitable only for a
+strict once-per-session fact: Pi's branch is append-only through compaction, so it sees every
+historical marker forever. Used for model-context delivery, it silently suppresses the very
+post-compaction re-delivery the model now needs.
 
-The dedup key is each block's **marker literal** (a distinctive substring of the injected
-content), not the customType. The notable refinement is **per-flavor dedup** for plannotator's
-two-flavors-one-customType case: keying on the flavor's marker means a stage change still
-delivers the missing flavor while a prior copy of the *other* flavor sits on the branch — a
-customType key would wrongly suppress it. The scan is safe as long as the marker can't appear in
-other entries' data — the known accepted false positive is a tool result quoting perk's own
-source (which would suppress a post-compaction re-inject); a typed scan over message-entry
-customType is the documented escalation if that ever bites.
+The reusable delivery pattern is `activeContextWindow(...)`, beside `branchCarries` in
+`extension/substrate/workflowState.ts` and consumed by
+`extension/substrate/bindingDelivery.ts`. It finds the latest compaction, starts at that entry's
+validated `firstKeptEntryId`, falls back to the first entry after the compaction when the id is
+missing or unusable, and excludes compaction entries themselves. A summary that quotes a marker
+is evidence of old delivery, not a live custom block. Run the shape-agnostic marker scan only over
+this returned window. Contracts §8.38 records the cold/warm binding-delivery behavior that relies
+on that distinction.
+
+The dedup key remains each block's **marker literal**, not the custom type. In plannotator's
+two-flavors-one-customType case, per-flavor markers let a stage transition deliver the missing
+flavor even while the other flavor is active. Distinctive markers still matter: an unrelated
+live tool result quoting one can false-positive, at which point a typed message-entry scan is the
+escalation.
+
+`bindingDelivery` is the first active-window adopter. ToolGating's mode context, planMode,
+objectiveAuthor, gistAuthor, and the plannotator/tombell plan bridges still pass the full branch
+to `branchCarries`; whether each needs post-compaction re-injection remains unaudited. Do not
+infer that their current behavior is intentional. Escalate to `activeContextWindow` when the
+feature's delivery lifetime is model-context-bound.
 
 An adjacent timing fact: slash commands do **not** fire `before_agent_start`, and a command
-handler reads the branch **as-of the last completed turn** — so a fresh session shows 0–1 copies
-of each injected context, and per-turn re-injection growth is only observable after completed
-turns. The payload census confirmed the pre-dedup growth empirically (each perk context ×2 after
-two turns; recorded in `docs/design/context-payload-baseline.md`) — the branch-scan dedup above
-is what bounds it.
+handler reads the branch **as of the last completed turn**. A fresh session therefore shows 0–1
+copies of each injected context, and per-turn growth is observable only after completed turns.
+The payload census in `docs/design/context-payload-baseline.md` established the original growth;
+the active-window scan bounds copies in the live context while still permitting delivery after
+compaction.
+
+## Compaction callback lifecycle and data-shape discipline
+
+In Pi 0.84.1, manual compaction remains in the same `AgentSession` and extension runner; it does
+not replace the session. `CompactOptions.onComplete` may use the captured extension API, but it
+must not retain or read the event `ctx`, nor recompute session state from that stale callback
+context. Pi's extension `sendUserMessage` wrapper is void/fire-and-forget: protect the synchronous
+call boundary only rather than pretending an asynchronous result can be awaited.
+
+Compaction metadata also illustrates a broader TypeScript boundary rule. After checking a few
+fields on an `unknown` object, do not cast the original object to a richer declared structure.
+Validate and reconstruct the fields one by one, or return a `Pick` containing only the fields the
+check actually proved. `activeContextWindow` deliberately treats `firstKeptEntryId` as unknown
+until its string check; the same discipline applies to every branch-entry decoder.
 
 ## Two content flavors, one customType
 
@@ -93,7 +118,7 @@ exactly one authoring context present.
 
 - `extension/factories/planMode.ts`, `extension/factories/objectiveAuthor.ts` — the two read-only authoring injectors
 - `extension/substrate/bindingDelivery.ts` — the narrowest strip (own custom type only)
-- `extension/substrate/workflowState.ts` — `branchCarries`, the shared once-only dedup guard
+- `extension/substrate/workflowState.ts` — `branchCarries` plus the compaction-aware `activeContextWindow`
 - `docs/learned/pi/extension-api.md` — the every-call `context` event + injected-message persistence
 - `docs/learned/workflow/skill-bindings.md` — cold↔warm binding delivery this strip discipline serves
 - `docs/learned/workflow/objective-lifecycle.md` — the authoring loop using the `stage` discriminator

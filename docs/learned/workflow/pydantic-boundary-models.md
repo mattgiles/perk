@@ -1,6 +1,6 @@
 ---
 title: Pydantic boundary↔domain conversion (Pydantic at the edges, frozen `@dataclass` domain)
-read_when: Converting a config/registry/objective/cache or external-API boundary onto the lenient-parse-model → frozen-`@dataclass` → `validate()` pattern, or pinning a `--json` envelope onto `OutputModel`.
+read_when: You are modeling config/API/subprocess/CLI boundaries, strict discriminated unions, frozen domain conversion, named parse results, or pinned JSON envelopes.
 cluster: quality-and-guards
 ---
 
@@ -34,6 +34,10 @@ mutation line.
   including conditional-key omission — "OUTPUT-envelope golden-pinning".
 - ty flags frozen-model mutation as `invalid-assignment` in tests — every conversion hits it;
   the fix idiom is in "The ty `invalid-assignment` frozen-mutation gotcha".
+- Strict discriminated request/response models belong only at a subprocess edge; variants copy
+  explicitly into frozen domain dataclasses — "Strict subprocess protocols".
+- At three payload components, return a frozen named result and use `dataclasses.replace` in tests
+  rather than extending positional tuples — "Strict subprocess protocols".
 - Historical: the supersession records (the intro's old-framing warnings, the removed-validator
   notes) document the migration, not current guidance to re-apply.
 
@@ -366,6 +370,28 @@ hand-rolled `isinstance` ladders onto `StrictInputModel` / `RootModel`:
   `github.ResolveThreadRequest`, to replace a `list[dict]` batch item, then flip the gateway signature
   and drop the now-redundant `str(item["thread_id"])` coercions) is completeness-proven by **whole-tree
   `ty check tests perk`** — it catches every stale dict-literal call site grep would miss.
+
+## Strict subprocess protocols with discriminated variants
+
+Keep strict Pydantic at the subprocess trust boundary only. Request and response models use
+`extra="forbid"`, strict validation, discriminated variants, and model-level rules for cross-field
+pairing. Immediately copy each validated variant field-by-field into frozen dataclasses; internal
+business/domain types do not inherit Pydantic behavior.
+
+A PEP 695 union alias annotated with a `Field` discriminator remains strict under that posture. For
+a degenerate variant, make its no-payload field a *required* `Literal[None]`: callers must send the
+explicit null and any non-null mismatch fails as invalid JSON rather than being coerced or treated as
+missing. Pin each variant's wrong-discriminator, extra-field, missing-null, and pairing errors at the
+wire decoder.
+
+When a subprocess wrapper has no stdin channel, write the validated request to an adapter-owned
+temporary file and pass only its path in argv. The file is a transport detail; request validation and
+cleanup remain at the adapter boundary.
+
+Once a parse operation returns three payload components, replace the positional tuple with a frozen
+named-result dataclass. Tests should start from a real parsed result and use `dataclasses.replace` to
+compose nearby variant cases. That preserves field meaning as the result grows and avoids hand-built
+fixtures drifting from parser defaults.
 
 ## OUTPUT-envelope golden-pinning (`OutputModel.from_domain(...).model_dump(mode="json")`)
 

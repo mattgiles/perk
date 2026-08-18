@@ -1,6 +1,6 @@
 ---
 title: Reconciling drifted docs against the converged codebase
-read_when: You are reconciling a guidelines/design/validation doc against reality, sweeping prose after a symbol retires, staging a dogfood record, sequencing work around /submit, or objective roadmap prose.
+read_when: You are reconciling mirrored/design/validation docs, producing source-verified or dogfood evidence, auditing volatile facts, sequencing /submit work, or reconciling objective prose.
 cluster: knowledge-stewardship
 ---
 
@@ -26,6 +26,18 @@ with the grouped CLI) has its own craft. These are the durable rules from doing 
   you're in the file — "Sweep-step craft: mirrors, no-ops, and neighbor staleness".
 - Distillation headers are derived content: verify each summary bullet against the current body
   after every update — "docs/learned curation-batch craft".
+- Mirror drift is omission-shaped; pin a claim ledger before a move and compare every destination
+  against it — "Mirror and fact-drift reconciliation".
+- Volatile catalogs belong in source-verified reference surfaces, not how-to enumerations; same-
+  turn contract amendments come from shipped code — "Mirror and fact-drift reconciliation".
+- Source verification is a labeled substitute, never a live-pass claim; isolated docs-IA reviews
+  prove their own cold context — "Acceptance evidence craft".
+- Evidence gates re-derive state, bind records to a commit, and preserve only evidence commits
+  after certification — "Acceptance evidence craft".
+- Dogfood/manual evidence is a pre-submit blocker and must be recorded on the PR; prose-only gate
+  choreography is not enforcement — "Acceptance evidence craft".
+- Disposable remote proofs establish cleanup before mutation and prove absence afterward —
+  "Disposable-repo proof hygiene".
 
 ## Roadmap `pr` field ≠ merge PR — verify before citing
 
@@ -101,6 +113,38 @@ the claimed referent **exists as described** before committing the claim — nev
 repoint as a mechanical substitution. A repoint to "file X's coverage of helper Y" failed because
 X never names Y (it exercises the helper end-to-end without naming it); the fix describes the
 actual coverage shape.
+
+## Mirror and fact-drift reconciliation
+
+Mirror drift usually appears as an omission, not a contradiction. Lockstep edits propagate a
+shared sentence, while a newly discovered precision fact lands only on the canonical surface. A
+claim-by-claim ledger comparison is the reliable detector. When restructuring mirrored docs, pin
+the exact fact ledger in the plan before moving text; it makes the relocation loss-proof and is
+the later audit checklist. The perk-expert mirror remains convention-guarded rather than fully
+machine-derived, an accepted trade that makes this ledger discipline more important.
+
+How-to pages rot fastest where they enumerate a foreign or volatile catalog. A task guide should
+link the stable upstream authority rather than an installed path or copied set. Route catalogs,
+defaults, and compatibility postures to reference pages whose facts are regenerated or verified
+against source. Ground those claims while planning so implementation-time checks confirm a known
+model rather than discover it under deadline. Every backend or config fact correction also greps
+`skills/perk-expert/references/` for the matching sentence in the same turn.
+
+A same-turn contract amendment is written from the shipped code, not copied from approved plan
+prose. By reconciliation the plan is one revision stale; exact error tables, field names, and
+authority ordering can have changed during implementation. The plan-fidelity review angle is the
+backstop for that difference. Correcting a contract to match landed behavior is itself an
+amendment, not tolerated drift.
+
+Backend-neutral wording requires per-backend reachability evidence. Tolerant reads and strict
+decoders can make a degraded state reachable on one backend only. Verify each carrier and qualify
+the prose rather than generalizing from one implementation.
+
+The hub-plus-children reference split is settled mechanics: keep a stable hub, assign consecutive
+nested sidebar order, and preserve heading slugs when moving text. The pattern has held for
+in-session, CLI, and configuration families. Any heading restructure covered by the prose graph
+also regenerates `docs/design/prose-prompt-map.md` via `uv run perk-dev prose-map sync`; name that
+file in the plan's expected diff rather than discovering the tripwire late.
 
 ## Validation-record reconciliation (the `remote-runner-e2e-dogfood.md` genre)
 
@@ -199,6 +243,46 @@ acceptance-traceable:
 - **Pinned protocols drift across eras** — restate recipes with explicit era notes (e.g. bare
   `perk plan` now opens idle; "after the seed turn" changed meaning); a report-only record
   tolerates *named* deviations, never silent ones.
+
+## Acceptance evidence craft
+
+### Source verification is a named substitute
+
+Static source tracing may substitute for a live walkthrough only when the evidence maps each
+step to its owning code anchor and pinned tests. Label the result exactly as source-verified with
+live execution waived by the operator directive; never call it a live-run pass. Quote the
+governing directive verbatim and list any claims the static evidence cannot establish as
+unverifiable.
+
+For a cold-context evaluation of docs information architecture, copy the built site into a unique
+temporary directory outside the repo and record its directory listing as isolation proof. Use a
+user-level read-only agent with no project context, run paired navigation tasks in each session,
+and after any content fix rebuild the site and start a fresh isolated session. Reusing the warm
+review context tests memory, not the docs.
+
+### Gates re-derive and records bind to one commit
+
+A gate verifies state at execution; it does not trust even a same-plan "verified" note. Bind the
+evidence record to the implement-worktree SHA that was certified. After that gate, allow only
+commits that update evidence records, or re-certify the changed implementation. For a CI leg that
+can exist only after submit, use an explicit forward reference rather than inventing a result.
+
+Manual acceptance and dogfood records are submission blockers. A commit message does not satisfy
+"recorded on the PR"; put the evidence on the PR at submit time. If an address pass changes the
+build under review, rerun the affected leg and record the addressed-build result. Browser dogfood
+is executable evidence: drive the real launcher-served application through headless CDP rather
+than deferring the check to an unspecified human.
+
+Acceptance choreography spread across sessions degrades silently. If the evidence matters to a
+merge decision, encode a machine-checkable condition at the enforcement point. Strong prose in a
+prior session is not a gate.
+
+### Disposable-repo proof hygiene
+
+Remote proofs use a unique timestamped repository name and hard-preflight the required `gh`
+scopes. Install an unconditional cleanup trap before the first remote mutation. Record secret
+*names* only, sanitize evidence identifiers, and finish with post-hoc absence proofs for the
+repository, branches, worktrees, and related issues. Cleanup intention is not cleanup evidence.
 
 ## Sequencing work around `/submit` — post-submit operator work lands incomplete
 

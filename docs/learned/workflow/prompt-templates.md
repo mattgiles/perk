@@ -1,6 +1,6 @@
 ---
-title: The cross-plane prompt-template seam — bundling tier, the frozen mini-jinja subset + author-time guard, the byte-parity render config (jinja2 + vendored miniJinja), the two-tier render-parity tests, and the prompt-move pattern
-read_when: You are bundling a top-level resource dir, working the cross-plane jinja2/miniJinja render seam, the CRLF byte-parity hazard, or moving an inline prompt literal onto a `prompts/` template.
+title: The prompt-template seam — cross-plane parity, Python source-text rendering, static fixture unions, prompt moves
+read_when: You are working on prompt loading/rendering, source-text includes, static Jinja fixture completeness, cross-plane parity, grammar guards, or moving inline prompts to `prompts/`.
 cluster: cross-plane-contracts
 ---
 
@@ -34,6 +34,11 @@ without changing output).
   prose-copy goldens — "Two-tier render-parity replaces the prose-copy golden bridge".
 - Moving an inline prompt literal onto a template without output change (single-plane prompts
   belong in `prompts/` too) — "The prompt-move pattern (the cornerstone)".
+- Python's canonical source-text entry point shares one loader-bound Environment with named
+  rendering; its contract is output bytes and exception classes, not diagnostics — "The Python
+  two-entry-point render seam".
+- Fixture completeness is the static union of variables across every conditional arm and include,
+  not one StrictUndefined render path — "Static-union fixture validation".
 
 ## Which bundling tier a new top-level resource dir joins
 
@@ -165,6 +170,51 @@ parity); Python validates the whole var map **eagerly** (`TypeError` before dele
 "Reference engine unchanged" does NOT mean "skip enforcing the shared contract on that plane" — a
 documented cross-plane contract is mechanically enforced on **both** planes (the *when* may differ —
 lazy vs eager — as long as both forbid the `str(value)`/`String(value)` coercion divergence).
+
+## The Python two-entry-point render seam
+
+Python has two entry points for one renderer. `render_text` is the canonical low-level operation
+for caller-supplied template source; `render` resolves a named source through the module loader and
+delegates to it. Both use the single module-level loader bound into the single Jinja Environment.
+Do not create a second Environment or expose a loader/config parameter: that shared binding is what
+lets includes inside caller-supplied text resolve root-relative to `prompts/` with exactly the same
+policy as named templates.
+
+Source text is rendered through Jinja's `from_string` path. The accepted cost is loss of bytecode
+cache and source name/filename provenance. Accordingly, the stable contract is rendered bytes plus
+exception classes; diagnostic wording and filenames are not API. Validate that every variable value
+is a string *before* loader lookup so bad-data errors have deterministic precedence over a missing
+include or source. Pair that ordering with regressions rather than relying on Jinja's incidental
+lookup sequence.
+
+This API is a render mechanism, not a sandbox. Grammar restrictions remain author-time policy in the
+prompt guards. The static scanner used by prose-map tests must not migrate into production as a
+security boundary. The TypeScript twin deliberately exposes only named rendering because no TS
+consumer needs source text; cross-plane surface symmetry is not a goal when ownership is single-
+plane.
+
+Tier-A golden fixtures exercise both Python entry points against the same committed bytes. That
+keeps named-source and source-text behavior locked without introducing a second set of expected
+outputs.
+
+## Static-union fixture validation
+
+Rendering with `StrictUndefined` visits one conditional arm and cannot prove a fixture supplies the
+variables needed by the other arms. Fixture completeness is computed by static Jinja AST inspection:
+collect the union of referenced variables across every branch and every statically named include.
+Use one per-template metadata cache for repeated parsing, but start a fresh visited set for each
+top-level template so cycle protection does not leak across independent analyses.
+
+The inspection Environment stays separate from production rendering configuration. It exists to
+establish requirements, not to reproduce output. Missing fixture data is an aggregate finding so an
+author sees every gap at once; inability to parse a template or establish its include graph is a
+hard contextual error because no trustworthy requirement set exists.
+
+Scope the check to scenarios that can actually preview a template: a template is previewable when a
+session shape references it. Extra variables in a scenario are allowed because one scenario may
+serve multiple consumers. Only Markdown under `prompts/` is parsed as Jinja; neighboring manifests
+and support files are not templates. `perk_dev.prose_map.catalog` owns the inspection and scenario
+mapping.
 
 ## Two-tier render-parity replaces the prose-copy golden bridge
 

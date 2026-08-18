@@ -1,6 +1,6 @@
 ---
 title: Borrowed Pi packages — the lockstep-surfaces recipe and the evaluation bar
-read_when: You are adding, retiring, or changing a borrowed Pi package (`BORROWED_PACKAGES`), vetting a borrow candidate, allowlisting its tools in read-only mode, or weighing a provider seam vs a plain borrow.
+read_when: You are changing borrowed/filtered Pi packages, package convergence or health equivalence, source-bound reviewer skills, launch exposure, or borrow-vs-provider decisions.
 cluster: config-and-convergence
 ---
 
@@ -14,12 +14,30 @@ among them the two **required** borrows the retired askuser/todo seams collapsed
 for changing that set without leaving surfaces stale, plus the evaluation bar that decides whether
 a capability is a borrow at all.
 
+## Distillation
+
+- Borrow changes update convergence, committed settings, capability summary, contracts, and tests
+  in one turn — "The lockstep-surfaces recipe".
+- Most borrows are strings; a filtered borrow is an object-form member installed but ambiently
+  disabled by all four Pi resource filters — "Filtered borrowed packages".
+- Merge/dedup and managed-state health must share one package-entry equivalence relation, or
+  convergence manufactures phantom drift — "The provider→borrow reclassification trap".
+- Source-bound reviewer skills use an exact installed `skillPath`, inheritance off, and deterministic
+  non-retryable preflight failures that remain in coverage — "Source-bound skill isolation".
+- Purpose-built subset parsers stay narrow; external manifests get minimal field extraction rather
+  than a wider quasi-YAML parser — "The miniYaml reversal".
+- Borrow vetting checks singleton UI slots, headless behavior, maintenance/license, and Pi floors;
+  repo non-mutation is the read-only bar — "Vetting" and "The read-only bar".
+- Lazy install/restart, filter security limits, and attempted-vs-covered bookkeeping remain explicit
+  residuals — "Residuals".
+
 ## The lockstep-surfaces recipe
 
 Adding (or removing) a borrowed package touches a fixed set of surfaces **in one turn**:
 
-1. `BORROWED_PACKAGES` in `src/perk/convergence/init/settings.py` — a plain unpinned `npm:` string entry **plus one
-   rationale line** in the comment block above (every entry has one; keep the pattern).
+1. `BORROWED_PACKAGES` in `src/perk/convergence/init/settings.py` — normally a plain unpinned
+   `npm:` string plus one rationale line. A borrow that must be installed but ambiently disabled
+   uses the filtered object-form exception described below.
 2. The committed `.pi/settings.json` in this repo — same entry; never let the committed settings lag
    `BORROWED_PACKAGES`. The edit is **identity-based**: when an object-form entry with the same
    npm identity already exists (a former provider entry), adding the borrow changes nothing in
@@ -33,6 +51,24 @@ Adding (or removing) a borrowed package touches a fixed set of surfaces **in one
    the package alters (e.g. the tool-gating restricted set).
 5. Tests — a membership assert in `tests/test_init_idempotent.py`, plus any behavior anchor (e.g.
    `READ_ONLY_TOOLS` membership in `extension/substrate/toolGating.test.ts`).
+
+## Filtered borrowed packages
+
+Ponytail is the first object-form borrowed member. It is installed for source-bound review waves
+but ambiently disabled by setting all four Pi resource filters to empty arrays. Three pieces must
+stay coordinated:
+
+1. The dedicated reconciler in `src/perk/convergence/init/settings.py` matches donor identity,
+   preserves position, pin, and unrelated keys, forces the four empty filters, removes duplicate
+   identities, and appends a canonical entry when absent. This is deterministic convergence, not a
+   committed-settings special case.
+2. Managed-state health normalizes that exact identity with the same merge/dedup equivalence. If
+   convergence and hash/compare disagree about semantic equality, every run creates phantom drift.
+3. `src/perk/substrate/skill_exposure.py` excludes the package from cold-launch skill discovery on
+   the exact `skills: []` opt-out. It does not reimplement Pi's general filter matching.
+
+The empty filters are a loading boundary, not a security boundary. Explicit source-bound loading is
+still possible and is the reason this object exists.
 
 ## The provider→borrow reclassification equivalence trap
 
@@ -48,7 +84,29 @@ Fix shape: canonicalize merge-equivalence in the health lens — `_canonical_pac
 spec; filter-carrying objects stay semantically richer and still classify as drift.
 
 General rule: **when two mechanisms (merge/dedup vs hash/compare) observe the same data, they
-must share the equivalence relation** — or every reclassification manufactures phantom drift.
+must share the equivalence relation** — or every reclassification manufactures phantom drift. The
+filtered object exception is a second instance: donor merge/dedup and canonical health comparison
+must normalize the same identity to the same meaning.
+
+## Source-bound skill isolation
+
+A reviewer lane may load one exact skill from an ambiently disabled package without enabling the
+package's other resources. Resolve an invocation-local `skillPath` to the installed file and turn
+skill inheritance off. The workflow's `skill:` key remains lookup metadata; it is not the loading
+mechanism.
+
+Preflight the package identity, manifest, and skill frontmatter before spawn. A missing or malformed
+source is a typed deterministic, non-retryable `skill-unavailable` result. The lane remains in the
+requested coverage denominator and never spawns; do not hide installation drift as a generic wave
+failure or retry. Doctor carries marker tripwires over the upstream version pins whose mechanics
+this path relies on.
+
+## The miniYaml reversal
+
+`miniYaml` remains a dependency-free parser for its purpose-built contract subset. Validating an
+external manifest is not a reason to widen it toward general YAML. Extract only the minimal field
+needed for identity/frontmatter preflight with a dedicated bounded reader. Expanding a tiny internal
+parser to accept foreign-file grammar creates an accidental second YAML implementation.
 
 ## A borrowed package's behavior change rides managed convergence — never a hand-edit
 
@@ -144,8 +202,14 @@ source), actively maintained, license, and the package's pi-version floor vs per
 - SDK in-process children (`SDK_READ_ONLY_TOOLS` in `extension/worker/readOnlySession.ts`) deliberately
   stay strict — widening them so SDK children can use borrowed tools is an **explicit decision, not
   drift** (spawned pi-subagents children already inherit the tools via `.pi/settings.json`).
-- String-entry packages can't filter skills — a bundled skill is accepted wholesale. If one becomes
-  noisy, the object-form `package_filter` is the lever.
+- Most string-entry packages cannot filter skills. The Ponytail object is the narrow exception;
+  future filtered borrows require an explicit convergence and health-equivalence decision.
+- npm installation remains lazy and the running Pi session must restart before a newly converged
+  package is available. Until then, `ponytail` can report honestly uncovered; this composes with the
+  linked-worktree install facts in `toolchain/worktree-node-modules.md`.
+- Empty resource filters are a loading boundary, not a security boundary.
+- Wave bookkeeping is authoritative: `last_pr_review` records attempted and covered arrays. Any
+  future wave-recording door must provide both instead of reconstructing one from the other.
 
 ## Cross-references
 
