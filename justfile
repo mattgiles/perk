@@ -81,13 +81,13 @@ test-py *args:
 # oversubscription: session construction is I/O-bound, so more in-flight files overlap
 # their I/O waits.
 test-js:
-    node --test --test-reporter=dot --test-concurrency=$(( $(getconf _NPROCESSORS_ONLN) * 2 )) "extension/**/*.test.ts" "tools/**/*.test.ts" "docs/site/src/**/*.test.mjs"
+    node --test --test-reporter=dot --test-concurrency=$(( $(getconf _NPROCESSORS_ONLN) * 2 )) "extension/**/*.test.ts" "docs/site/src/**/*.test.mjs"
 
 # run the test suite (python: pytest; extension TS + docs-site .mjs: node:test; docs site:
 # static build + post-build checks)
 test *args:
     uv run pytest {{args}}
-    node --test --test-reporter=dot --test-concurrency=$(( $(getconf _NPROCESSORS_ONLN) * 2 )) "extension/**/*.test.ts" "tools/**/*.test.ts" "docs/site/src/**/*.test.mjs"
+    node --test --test-reporter=dot --test-concurrency=$(( $(getconf _NPROCESSORS_ONLN) * 2 )) "extension/**/*.test.ts" "docs/site/src/**/*.test.mjs"
     npm run docs:check
 
 # build the python wheel + sdist (pinned to perk — perk-dev is never published)
@@ -125,13 +125,19 @@ docs-check:
     node --test --test-reporter=dot "docs/site/src/**/*.test.mjs"
     npm run docs:check
 
-# the standalone prose-review workspace gate: workspace tsc + the sink-scan/typed-boundary
-# node tests + the Vite build — independently complete so a workspace-suffix-only change
-# (.html/.json) still runs every workspace surface, not just Vite transpilation
+# the opt-in prose-review workbench gate (never mirrored by a CI row): workspace tsc + the
+# prose-map and workbench node:test suites + the Vite build — run explicitly when working on
+# the workbench or the prose map. Pair with `just prose-review-test`.
 prose-review-check:
     npm run prose-review:typecheck
-    node --test "tools/prose-review/*.test.ts"
+    node --test "tools/prose-map/*.test.ts" "tools/prose-review/*.test.ts"
     npm run prose-review:build
+
+# the opt-in perk-dev prose pytest suite (workbench + living map): excluded from default
+# collection (tests/conftest.py env gate) and never run on CI — run explicitly when
+# working on the workbench or the prose map. Pair with `just prose-review-check`.
+prose-review-test *args:
+    PERK_PROSE_REVIEW_TESTS=1 uv run pytest tests/test_prose_review_*.py tests/test_prose_map*.py {{args}}
 
 # validate CHANGELOG.md structure (two-phase convention: markers, headers, hash tokens)
 changelog-check:

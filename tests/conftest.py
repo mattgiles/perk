@@ -20,6 +20,13 @@ _SOURCE_ROOTS = ("src", "extension", "tests", "shared", "docs", "skills", "agent
 _SOURCE_SUFFIXES = frozenset({".py", ".ts", ".md", ".yaml", ".yml", ".json", ".jinja"})
 _XDIST_AUTO_WORKER_CAP = 6
 
+# The perk-dev prose suites (the Prose Review Workbench + the living prose map) are
+# opt-in: they are heavy (Vite builds, real uvicorn servers, the Node selector helper)
+# and guard a personal maintainer tool, so default runs and CI never collect them.
+# Run them explicitly with `just prose-review-test` (which sets this variable).
+if os.environ.get("PERK_PROSE_REVIEW_TESTS") != "1":
+    collect_ignore_glob = ["test_prose_review_*.py", "test_prose_map*.py"]
+
 
 @dataclass
 class LaunchExecRecorder:
