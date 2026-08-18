@@ -1,4 +1,4 @@
-"""Contract tests for the compact ``perk.delivery`` status/Prepare façade."""
+"""Contract tests for the compact ``perk.delivery`` façade (all seven operation families)."""
 
 import inspect
 from dataclasses import FrozenInstanceError, fields, replace

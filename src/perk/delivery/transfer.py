@@ -39,9 +39,8 @@ from pydantic import BeforeValidator
 from perk import objective, plan
 from perk.backends.issue_backend import PlanState
 from perk.backends.objective_store import ObjectiveRef, ObjectiveState
-from perk.backends.resolve import resolve_issue_backend, resolve_objective_store
 from perk.boundary import StrictInputModel, StrTuple, translate_validation_errors
-from perk.delivery import observe, oplock, sync
+from perk.delivery import oplock, sync
 from perk.delivery.facade import (
     DeliveryError,
     DeliveryGit,
@@ -59,7 +58,7 @@ from perk.delivery.journal import (
     PreparedRecord,
     mint_operation_id,
 )
-from perk.delivery.persistence import AppendResult, resolve_train_persistence
+from perk.delivery.persistence import AppendResult
 from perk.delivery.train import (
     STRUCTURAL_BLOCKER_CODES,
     LayerPr,
@@ -548,23 +547,6 @@ class TransferSeams:
     persistence: TransferPersistence
     reconstruct: Callable[[Path, str], TrainStatus]
     now: Callable[[], str]
-
-
-def resolve_transfer_seams(
-    repo_root: Path,
-    *,
-    reconstruct: Callable[[Path, str], TrainStatus] = observe.reconstruct_repo_train,
-    now: Callable[[], str] = plan.now_iso,
-) -> TransferSeams:
-    """Compose the production roll-forward seams from the committed ``[issues]`` selection."""
-    return TransferSeams(
-        repo_root=repo_root,
-        store=resolve_objective_store(repo_root),
-        issues=resolve_issue_backend(repo_root),
-        persistence=resolve_train_persistence(repo_root),
-        reconstruct=reconstruct,
-        now=now,
-    )
 
 
 @dataclass(frozen=True)

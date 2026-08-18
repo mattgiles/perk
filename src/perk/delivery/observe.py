@@ -1,15 +1,13 @@
-"""Production adapters for the delivery façade and deferred internal readers.
+"""Production adapters for the delivery façade.
 
 :func:`resolve_delivery` is the sole public production constructor for the canonical
-:class:`perk.delivery.facade.Delivery` status, Prepare, Transfer, Publish, sync, and Recover
-variants.
+:class:`perk.delivery.facade.Delivery` across all seven operation families — status, Prepare,
+Transfer, Publish, sync, Recover, and land.
 Construction is assignment-only and does no configuration, credential, Git, subprocess, or
 network work; the nominal adapters resolve or observe their authorities only when an operation
 needs them.
 
-The compatibility ``TrainReads`` / ``resolve_train_reads`` / ``reconstruct_repo_train`` seams
-remain internal (transfer's roll-forward core still binds ``reconstruct_repo_train``). The
-aggregate-backed landing-observation adapters also live here: the package-internal
+The aggregate-backed landing-observation adapters also live here: the package-internal
 :class:`GatewayLandObservations` and the fail-closed :class:`_AggregateWriterProbe`, both
 constructed by the landing engine from the bound :class:`~perk.delivery.facade.DeliveryGitHub`.
 Stable Git/GitHub failures become typed pure-core errors, while the preview stack
@@ -39,9 +37,7 @@ from perk.delivery.train import (
     StackEntryView,
     StackView,
     TrainReconstructionError,
-    TrainStatus,
     WorktreeFacts,
-    reconstruct_train,
 )
 from perk.github import GitHubError, prs, stacks
 from perk.substrate import git as git_mod
@@ -621,40 +617,4 @@ def resolve_delivery(repo_root: Path) -> Delivery:
         persistence=RepoDeliveryPersistence(repo_root),
         git=RepoDeliveryGit(repo_root),
         github=RepoDeliveryGitHub(repo_root),
-    )
-
-
-@dataclass(frozen=True)
-class TrainReads:
-    """Internal compatibility composition for delivery operations not yet on the façade."""
-
-    store: RepoDeliveryPersistence
-    issues: RepoDeliveryPersistence
-    persistence: RepoDeliveryPersistence
-    git: RepoDeliveryGit
-    github: RepoDeliveryGitHub
-
-
-def resolve_train_reads(repo_root: Path) -> TrainReads:
-    """Compose deferred internal train readers without eagerly resolving any authority."""
-    persistence = RepoDeliveryPersistence(repo_root)
-    return TrainReads(
-        store=persistence,
-        issues=persistence,
-        persistence=persistence,
-        git=RepoDeliveryGit(repo_root),
-        github=RepoDeliveryGitHub(repo_root),
-    )
-
-
-def reconstruct_repo_train(repo_root: Path, objective_id: str) -> TrainStatus:
-    """Internal compatibility reconstruction for deferred delivery operation families."""
-    reads = resolve_train_reads(repo_root)
-    return reconstruct_train(
-        objective_id,
-        store=reads.store,
-        issues=reads.issues,
-        persistence=reads.persistence,
-        git=reads.git,
-        github=reads.github,
     )

@@ -58,7 +58,7 @@ death-after-close repair — at-least-once; the reconcile pass is idempotent).
 
 The sole service entry is :meth:`perk.delivery.facade.Delivery.recover`. Its private immutable
 context binds the three aggregate authorities plus the façade's train reconstruction bridge; its
-private runtime carries only config/path enumeration, the lock, the temporarily retained
+private runtime carries only config/path enumeration, the lock, the package-internal
 per-layer finalizer, sleep, and clock. No backend resolver, dependency factory, or low-level
 recovery entrypoint is public.
 

@@ -16,7 +16,7 @@ Deliberately caller-owned (per the finalize seam contract): the pending-learn ma
 
 The sole service entry is :meth:`perk.delivery.facade.Delivery.land`. Its private immutable
 context binds the three aggregate authorities; the private runtime carries only the
-temporarily retained per-layer finalizer. No consent callback and no lock exist on this
+package-internal per-layer finalizer. No consent callback and no lock exist on this
 variant — both belong to the objective variant (:mod:`perk.delivery.landing`), and the
 façade rejects a consent callback here.
 """
