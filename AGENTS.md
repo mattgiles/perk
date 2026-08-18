@@ -33,7 +33,11 @@ and is owned by `perk init` — never hand-edit between its markers).*
   submitting (never bare `just ci` in bash; the `[[ci.checks]]` rows mirror `just ci`'s targets,
   `setup` being env prep owned by the `[worktree] setup` hook), and its green report is
   definitive — no re-verification. While iterating, use narrow targeted checks. Grow a Python
-  test harness when it widens what the suite checks. Each phase ends on a **dogfood gate** —
+  test harness when it widens what the suite checks. The perk-dev prose suites
+  (`tests/test_prose_review_*.py`, `tests/test_prose_map*.py`, `tools/prose-map/*.test.ts`,
+  `tools/prose-review/*.test.ts`) are a deliberate opt-in carve-out from the two default
+  framework suites — run via `just prose-review-test` + `just prose-review-check`, never by
+  `just ci` or the `[[ci.checks]]` rows. Each phase ends on a **dogfood gate** —
   perk must drive the next phase before it starts — whose automatable preconditions are
   ordinary test cases, not bespoke scripts.
 - **Amend the contract, don't drift.** A change to cross-plane *behavior* amends

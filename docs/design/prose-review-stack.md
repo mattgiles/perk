@@ -590,6 +590,22 @@ Existence is never treated as freshness. Tests never share the launcher's `dist/
 server-integration fixture builds unconditionally, once per module, into a fixture-owned temp
 directory (`vite --outDir`), so no two processes ever write one output dir.
 
+### Test regime: the prose suites are opt-in
+
+The perk-dev prose suites — `tests/test_prose_review_*.py`, `tests/test_prose_map*.py`,
+`tools/prose-map/*.test.ts`, and `tools/prose-review/*.test.ts` — are a deliberate opt-in
+carve-out from the default framework suites: they are heavy (Vite builds, real uvicorn servers,
+the Node selector helper) and guard a personal maintainer tool, so default `pytest`/`just test`
+runs and the `[[ci.checks]]` rows never collect or run them (there is no `prose-review-check` CI
+row). The two explicit runners are `just prose-review-test` (sets `PERK_PROSE_REVIEW_TESTS=1`,
+lifting the `tests/conftest.py` collection-ignore gate) and `just prose-review-check` (workspace
+tsc + the prose-map and workbench node:test suites + the Vite build). Static coverage stays
+default: `typecheck-js` still runs the workspace tsc, `typecheck-py` (ty) still covers `tests/`,
+and `lint-py`/`lint-js` still lint everything. Accepted consequence (explicit decision): the
+repo-wide living-map drift guard (`test_prose_map.py::test_repository_prose_map_is_complete_and_current`)
+leaves default CI — map drift is caught only by on-demand runs of the suite or the in-app
+prose-map check.
+
 ## The security envelope (pinned invariants)
 
 The guard is the **outermost ASGI wrapper** (`SecurityGuardMiddleware(fastapi_app)` — outside
@@ -643,6 +659,8 @@ marker-preserving Python and TypeScript saves, proves the replacement generation
 edited TypeScript unit and permits a later save, and pins marker-removing Python saves to the
 committed-but-stale write freeze. Frontend proof remains node:test coverage of every parse/transport
 boundary and the pure workspace state machine, including determinate write-failed same-buffer retry.
+(All of these proof suites now run only through the opt-in `just prose-review-test` /
+`just prose-review-check` gates — the test-regime section above — never in default CI.)
 A jsdom harness loads TSX through the exact-pinned `tsx` API to exercise the rendered App coordinator
 (fragment preservation, placement invalidation, stale outcomes, mode reset, duplicate choice
 occurrence identity, attention drawer, discard, unload lifecycle, catalog-epoch refresh, and write
