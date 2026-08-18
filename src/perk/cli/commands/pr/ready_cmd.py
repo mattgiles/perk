@@ -22,6 +22,7 @@ from perk import delivery, github
 from perk.backends import resolve
 from perk.backends.issue_backend import IssueBackendError
 from perk.boundary import OutputModel
+from perk.cli import completions
 from perk.cli.context import require_github, require_repo
 from perk.cli.emit import emit, fail
 from perk.cli.ensure import UserFacingCliError
@@ -39,7 +40,7 @@ class PrReadyResult:
 
 
 @click.command("ready")
-@click.argument("plan", required=False)
+@click.argument("plan", required=False, shell_complete=completions.complete_plan_id)
 @click.option(
     "--dry-run",
     is_flag=True,

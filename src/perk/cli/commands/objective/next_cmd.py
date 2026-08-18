@@ -7,6 +7,7 @@ import click
 from perk import objective
 from perk.backends import resolve
 from perk.backends.objective_store import ObjectiveStoreError
+from perk.cli import completions
 from perk.cli.alias import alias
 from perk.cli.commands.objective.shared import node_to_dict, parse_objective_id, stacked_selection
 from perk.cli.context import require_repo
@@ -17,7 +18,7 @@ from perk.substrate.output import machine_output, user_output
 
 @alias("n")
 @click.command("next")
-@click.argument("number")
+@click.argument("number", shell_complete=completions.complete_objective_id)
 @click.option("--json", "as_json", is_flag=True, help="Emit a machine-readable report to stdout.")
 @click.pass_context
 def next_objective(ctx: click.Context, *, number: str, as_json: bool) -> None:

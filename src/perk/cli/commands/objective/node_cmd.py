@@ -7,6 +7,7 @@ import click
 from perk import objective
 from perk.backends import resolve
 from perk.backends.objective_store import ObjectiveStoreError
+from perk.cli import completions
 from perk.cli.commands.objective.shared import parse_objective_id
 from perk.cli.context import require_github, require_repo
 from perk.cli.emit import fail
@@ -15,7 +16,7 @@ from perk.substrate.output import machine_output, user_output
 
 
 @click.command("node")
-@click.argument("number")
+@click.argument("number", shell_complete=completions.complete_objective_id)
 @click.option("--node", "node_id", required=True, help="The roadmap node id (e.g. 1.2).")
 @click.option(
     "--status",

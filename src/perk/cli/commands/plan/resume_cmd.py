@@ -18,6 +18,7 @@ import click
 from perk import github, plan
 from perk.backends import resolve
 from perk.backends.issue_backend import IssueBackendError
+from perk.cli import completions
 from perk.cli.context import require_github, require_repo
 from perk.cli.emit import fail
 from perk.cli.ensure import Ensure, UserFacingCliError
@@ -36,7 +37,7 @@ from perk.substrate.registry import stage_by_id
 
 
 @click.command("resume", context_settings={"ignore_unknown_options": True})
-@click.argument("plan")
+@click.argument("plan", shell_complete=completions.complete_plan_id)
 @click.option("--dry-run", is_flag=True, help="Resolve + print the stage without launching.")
 @click.option("--json", "as_json", is_flag=True, help="Emit a machine-readable report to stdout.")
 @click.option(

@@ -20,6 +20,7 @@ renders `UserFacingCliError`), not-a-repo via `require_repo`.
 import click
 
 from perk.backends.issue_backend import IssueBackendError
+from perk.cli import completions
 from perk.cli.alias import alias
 from perk.cli.context import require_github, require_repo
 from perk.cli.ensure import UserFacingCliError
@@ -32,7 +33,7 @@ from perk.substrate.registry import stage_by_id
 
 @alias("impl")
 @click.command("implement", cls=PlanLauncherCommand, epilog=PI_PASSTHROUGH_EPILOG)
-@click.argument("plan", required=False)
+@click.argument("plan", required=False, shell_complete=completions.complete_plan_id)
 @click.option(
     "--worktree",
     help=(

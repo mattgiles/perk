@@ -20,6 +20,7 @@ from perk import github, objective
 from perk.backends import issue_backend, resolve
 from perk.backends.issue_backend import IssueBackendError
 from perk.backends.objective_store import ObjectiveState, ObjectiveStoreError
+from perk.cli import completions
 from perk.cli.alias import alias
 from perk.cli.commands.objective.shared import (
     classify_stacked_veto,
@@ -518,7 +519,7 @@ def _render_run(payload: dict[str, Any], *, as_json: bool) -> None:
 
 @alias("r")
 @click.command("run")
-@click.argument("number")
+@click.argument("number", shell_complete=completions.complete_objective_id)
 @click.option(
     "--remote",
     default="",

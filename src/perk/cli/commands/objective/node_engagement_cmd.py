@@ -22,6 +22,7 @@ import click
 from perk.backends import resolve
 from perk.backends.engagement import render_node_engagement
 from perk.backends.objective_store import ObjectiveStoreError
+from perk.cli import completions
 from perk.cli.commands.objective.shared import parse_objective_id
 from perk.cli.context import require_repo
 from perk.cli.emit import fail
@@ -30,7 +31,7 @@ from perk.substrate.output import machine_output, user_output
 
 
 @click.command("node-engagement")
-@click.argument("number")
+@click.argument("number", shell_complete=completions.complete_objective_id)
 @click.option("--node", "node_id", required=True, help="The roadmap node id (e.g. 2.3).")
 @click.option("--json", "as_json", is_flag=True, help="Emit a machine-readable report to stdout.")
 @click.pass_context

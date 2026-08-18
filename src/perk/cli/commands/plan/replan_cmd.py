@@ -25,6 +25,7 @@ import click
 from perk.backends import resolve
 from perk.backends.engagement import render_plan_engagement
 from perk.backends.issue_backend import IssueBackendError
+from perk.cli import completions
 from perk.cli.commands.seeded_door import SeededLaunch, run_seeded_door, seeded_door_options
 from perk.cli.context import require_github
 from perk.cli.ensure import UserFacingCliError
@@ -90,7 +91,7 @@ def _seed_prompt(
 
 
 @click.command("replan", context_settings={"ignore_unknown_options": True})
-@click.argument("plan")
+@click.argument("plan", shell_complete=completions.complete_plan_id)
 @seeded_door_options(
     worktree_help="Worktree to position (replan runs at repo root).",
     dry_run_help="Materialize + print the seed; launch nothing.",
