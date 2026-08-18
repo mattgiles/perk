@@ -25,6 +25,7 @@ from perk import objective
 from perk.backends import resolve
 from perk.backends.engagement import EMPTY_NODE_ENGAGEMENT, render_node_engagement
 from perk.backends.objective_store import ObjectiveStoreError
+from perk.cli import completions
 from perk.cli.commands.objective.shared import objective_read_instruction, parse_objective_id
 from perk.cli.commands.seeded_door import SeededLaunch, run_seeded_door, seeded_door_options
 from perk.cli.context import require_github
@@ -206,7 +207,7 @@ def _seed_prompt(
 
 
 @click.command("plan", context_settings={"ignore_unknown_options": True})
-@click.argument("number", required=False)
+@click.argument("number", required=False, shell_complete=completions.complete_objective_id)
 @click.option("--node", "node_id", help="Plan a specific node id (else next actionable).")
 @seeded_door_options(
     worktree_help="Worktree to position (objective plan runs at repo root).",

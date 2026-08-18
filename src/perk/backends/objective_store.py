@@ -62,6 +62,18 @@ class ObjectiveRef:
 
 
 @dataclass(frozen=True)
+class ObjectiveSummary:
+    """One open objective in the bounded completion/browse read
+    (:meth:`ObjectiveStore.list_objective_completion_candidates`). ``id`` is the opaque
+    backend-owned boundary id (a GitHub number stringified; a Linear Project id) — exactly what
+    a user types at an objective-taking command. No URL: the completion surface consumes only
+    id + title."""
+
+    id: str
+    title: str
+
+
+@dataclass(frozen=True)
 class AdoptableSourceIssue:
     """One pre-existing project issue read verbatim for in-place objective adoption (§8.30).
 
@@ -406,6 +418,23 @@ class ObjectiveStore(Protocol):
         and the ``adopted`` detection (an ``objective-header`` block in the same overview — an
         adopted gist project has been re-authored in place as an objective). ``()`` for a store
         with no project surface. Raises on an infra/query failure (never masks it as empty)."""
+        ...
+
+    def list_objective_completion_candidates(self) -> tuple[ObjectiveSummary, ...]:
+        """The **open** objective population as a bounded completion/browse read — never an
+        exhaustive census: ONE backend page per underlying query, sorted newest-created-first
+        **within the fetched page**; membership beyond the page is explicitly not promised.
+        Raises on an infra failure (never masks it as an empty tuple — the completion callback
+        owns the swallow). Performs no ``io_step`` narration (stderr output would garble a TAB
+        completion).
+
+        The Linear project-backed population is a **best-effort heuristic**, not authoritative
+        objective identity: the authoritative ``objective-header`` rides the metadata sentinel's
+        attachments, but sentinel discovery is per-project (N+1 queries — unacceptable per TAB),
+        so the scan keys on the overview's Reconcilable marker pair + project state instead. A
+        crash-window orphan project (overview written, sentinel never created) or a
+        marker-drifted objective may mis-classify — cosmetic for completion, since every invoked
+        command still validates through :meth:`get_objective`."""
         ...
 
     def get_objective(self, *, objective_id: str) -> ObjectiveState | None:

@@ -15,6 +15,7 @@ not-a-repo.
 import click
 
 from perk.boundary import OutputModel
+from perk.cli import completions
 from perk.cli.commands.objective.stack.land_cmd import ReconcileEvidenceOut
 from perk.cli.commands.objective.stack.shared import resolve_objective_id
 from perk.cli.commands.objective.stack.status_cmd import ObjectiveOut
@@ -259,7 +260,7 @@ def _render_result(result: RecoverResult.OperationConclusion) -> None:
 
 
 @click.command("recover")
-@click.argument("objective", required=False)
+@click.argument("objective", required=False, shell_complete=completions.complete_objective_id)
 @click.option(
     "--dry-run",
     "dry_run",

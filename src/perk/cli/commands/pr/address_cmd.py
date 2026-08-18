@@ -22,6 +22,7 @@ local-positioning gesture has no remote meaning — use the positional ``PLAN``.
 import click
 
 from perk.backends.issue_backend import IssueBackendError
+from perk.cli import completions
 from perk.cli.context import require_github, require_repo
 from perk.cli.ensure import UserFacingCliError
 from perk.cli.launcher_grammar import PI_PASSTHROUGH_EPILOG, PlanLauncherCommand
@@ -56,7 +57,7 @@ _ADDRESS_HELP = (
     help=_ADDRESS_HELP,
     epilog=PI_PASSTHROUGH_EPILOG,
 )
-@click.argument("plan", required=False)
+@click.argument("plan", required=False, shell_complete=completions.complete_plan_id)
 @click.option(
     "--worktree",
     help=(

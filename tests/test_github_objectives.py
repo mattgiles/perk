@@ -43,6 +43,29 @@ def test_find_objective_issue_label_scoped(monkeypatch):
     assert any("labels=perk:objective" in tok for c in rec.calls for tok in c)
 
 
+def test_list_open_objective_issues_maps_rows_and_skips_prs(monkeypatch):
+    issues = [
+        {"number": 5, "title": "O5", "html_url": "u/5", "body": "b"},
+        "not-a-dict",  # skipped defensively
+        {"number": 6, "title": "PR", "html_url": "u/6", "body": "b", "pull_request": {}},
+        {"number": 7, "title": "O7", "html_url": "u/7", "body": "b"},
+    ]
+    rec = _GhRecorder(get=_Proc(0, stdout=json.dumps(issues)))
+    monkeypatch.setattr(subprocess, "run", rec)
+    rows = objectives.list_open_objective_issues(repo_root=ROOT)
+    # The list endpoint's default created-descending order is preserved verbatim (no re-sort).
+    assert [(r.number, r.title) for r in rows] == [(5, "O5"), (7, "O7")]
+    [call] = rec.calls
+    assert any("labels=perk:objective" in tok for tok in call)
+    assert any("state=open" in tok for tok in call)
+
+
+def test_list_open_objective_issues_raises_on_infra_failure(monkeypatch):
+    monkeypatch.setattr(subprocess, "run", _GhRecorder(get=_Proc(1, stderr="HTTP 500")))
+    with pytest.raises(github.GitHubError):
+        objectives.list_open_objective_issues(repo_root=ROOT)
+
+
 def test_create_objective_issue_idempotent(monkeypatch):
     existing = [{"number": 5, "html_url": "u/5", "body": _obj_header("01RID")}]
     rec = _GhRecorder(get=_Proc(0, stdout=json.dumps(existing)))

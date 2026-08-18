@@ -125,6 +125,13 @@ class _FakeObjectiveStore:
             id=objective_id, url=f"fake://objective/{objective_id}", existed=False
         )
 
+    def list_objective_completion_candidates(self) -> tuple[objective_store.ObjectiveSummary, ...]:
+        return tuple(
+            objective_store.ObjectiveSummary(id=objective_id, title=obj.title)
+            for objective_id, obj in self._objectives.items()
+            if obj.state == "OPEN"
+        )
+
     def get_objective(self, *, objective_id: str) -> objective_store.ObjectiveState | None:
         obj = self._objectives.get(objective_id)
         if obj is None:

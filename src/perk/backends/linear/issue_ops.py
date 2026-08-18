@@ -306,6 +306,27 @@ class _LinearIssueOps:
             query, {"teamId": self._client.team_id(self._team_key), "label": label}, "issues"
         )
 
+    def _list_label_issues_one_page(self, label: str, selection: str) -> list[dict[str, object]]:
+        """The bounded one-page variant of :meth:`_list_label_issues` for completion/browse
+        reads: exactly ONE ``first: 50`` request — deliberately a single ``client.request``,
+        never ``client.paginate`` (a ``hasNextPage`` beyond the page is ignored; membership
+        beyond it is not promised). Keeps the non-terminal workflow-state filter (open issues
+        only). No promised order — callers sort locally."""
+        query = (
+            "query($teamId: ID!, $label: String!) { "
+            "issues(first: 50, filter: { "
+            "team: { id: { eq: $teamId } }, "
+            "labels: { name: { eq: $label } }, "
+            'state: { type: { nin: ["completed", "canceled"] } } '
+            f"}}) {{ nodes {{ {selection} }} }} }}"
+        )
+        data = self._client.request(
+            query, {"teamId": self._client.team_id(self._team_key), "label": label}
+        )
+        issues = _require_dict(data.get("issues"), "issues")
+        nodes = _require_list(issues.get("nodes"), "issues.nodes")
+        return [_require_dict(node, "issue node") for node in nodes]
+
     def issue_attachments(self, issue_id: str) -> list[dict[str, object]]:
         """An issue's raw attachment nodes (``{id, url, metadata}``). No cursor loop: perk writes
         at most two envelopes + the PR card per issue, so ``first: 50`` is a safe fixed bound.

@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from perk import github, plan
+from perk import github, objective, plan
 from perk.backends import engagement, issue_backend
 from perk.backends.issue_backend import IssueBackendError
 from perk.backends.linear import attachments
@@ -498,6 +498,45 @@ class LinearIssueBackend:
                 )
             )
         return tuple(summaries)
+
+    def list_plan_completion_candidates(self) -> tuple[issue_backend.PlanSummary, ...]:
+        """The bounded two-scan union (one ``first: 50`` page per scan, no cursor walk):
+        (1) open ``perk:plan``-labeled issues, and (2) open ``perk:objective-node``-labeled
+        issues carrying a plan-header attachment — ``save_node_plan``'s in-place unification
+        stores node plans there, never under the plan label. Deduped on identifier; sorted
+        ``createdAt``-descending locally (the queries promise no order)."""
+        rows: dict[str, tuple[str, issue_backend.PlanSummary]] = {}
+
+        def _collect(node: dict[str, object]) -> None:
+            identifier = _require_str(node.get("identifier"), "issue identifier")
+            rows.setdefault(
+                identifier,
+                (
+                    _opt_str(node.get("createdAt")) or "",
+                    issue_backend.PlanSummary(
+                        id=identifier, title=_require_str(node.get("title"), "issue title")
+                    ),
+                ),
+            )
+
+        # Both selections carry ONLY the consumed fields: result shaping reads the human
+        # identifier/title/createdAt, and the node scan's plan-header presence check reads only
+        # the attachment metadata (never ids/urls).
+        for node in self._ops._list_label_issues_one_page(
+            plan.PLAN_LABEL, "identifier title createdAt"
+        ):
+            _collect(node)
+        node_selection = "identifier title createdAt attachments(first: 50) { nodes { metadata } }"
+        for node in self._ops._list_label_issues_one_page(
+            objective.OBJECTIVE_NODE_LABEL, node_selection
+        ):
+            if not attachments.has_perk_attachment(
+                _attachment_nodes_of(node), kind=attachments.PLAN_HEADER_KIND
+            ):
+                continue
+            _collect(node)
+        ordered = sorted(rows.values(), key=lambda pair: pair[0], reverse=True)
+        return tuple(summary for _created, summary in ordered)
 
     def list_plans_pending_learn(
         self, *, limit: int = 50

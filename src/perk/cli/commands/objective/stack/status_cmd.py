@@ -12,6 +12,7 @@ from pathlib import Path
 import click
 
 from perk.boundary import OutputModel
+from perk.cli import completions
 from perk.cli.commands.objective.stack.shared import resolve_objective_id
 from perk.cli.context import require_config, require_repo
 from perk.cli.emit import emit, fail
@@ -400,7 +401,7 @@ def _render_local_observations(
 
 
 @click.command("status")
-@click.argument("objective", required=False)
+@click.argument("objective", required=False, shell_complete=completions.complete_objective_id)
 @click.option("--json", "as_json", is_flag=True, help="Emit a machine-readable report to stdout.")
 @click.pass_context
 def status_stack(ctx: click.Context, *, objective: str | None, as_json: bool) -> None:

@@ -83,6 +83,7 @@ export const sidebar = [
           "how-to/author-a-repo-skill",
           "how-to/write-a-custom-subagent",
           "how-to/scope-pi-resources-per-project",
+          "how-to/enable-shell-completion",
         ],
       },
       {

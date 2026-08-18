@@ -891,6 +891,42 @@ class LinearProjectObjectiveStore:
 
             return objective_store.ObjectiveRef(id=project_id, url=url, existed=False)
 
+    def list_objective_completion_candidates(self) -> tuple[objective_store.ObjectiveSummary, ...]:
+        """The bounded completion/browse read over ONE ``first: 50`` state-bearing projects page
+        (:meth:`_LinearProjectOps.list_projects_one_page` — the shared ``list_projects`` is
+        deliberately untouched). Two filters:
+
+        (a) perk-objectivehood via the Reconcilable marker pair in the overview content — a
+        **best-effort heuristic** (the authoritative identity is the sentinel's header
+        attachment, but sentinel discovery is per-project: N+1 queries, unacceptable per TAB); a
+        crash-window orphan project or a marker-drifted objective may mis-classify — cosmetic,
+        since every invoked command still validates through :meth:`get_objective`; and
+
+        (b) ``state not in {"completed", "canceled"}`` — a missing/``None`` state passes (no
+        observation is never treated as closed).
+
+        Sorted ``createdAt``-descending locally (the query promises no order)."""
+        with _translate_objective():
+            rows: list[tuple[str, objective_store.ObjectiveSummary]] = []
+            for project in self._projects.list_projects_one_page():
+                content = _opt_str(project.get("content")) or ""
+                if objective.replace_reconcilable_section(content, "") is None:
+                    continue
+                state = _opt_str(project.get("state"))
+                if state in ("completed", "canceled"):
+                    continue
+                rows.append(
+                    (
+                        _opt_str(project.get("createdAt")) or "",
+                        objective_store.ObjectiveSummary(
+                            id=_require_str(project.get("id"), "project id"),
+                            title=_opt_str(project.get("name")) or "",
+                        ),
+                    )
+                )
+            rows.sort(key=lambda pair: pair[0], reverse=True)
+            return tuple(summary for _created, summary in rows)
+
     def get_objective(self, *, objective_id: str) -> objective_store.ObjectiveState | None:
         """Reconstruct the objective state from the project + its node-issues. ``None`` when the
         project is absent. The roadmap is derived live from the node-issues (never stored as a

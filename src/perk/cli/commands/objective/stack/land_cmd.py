@@ -26,6 +26,7 @@ import click
 from perk.backends.issue_backend import IssueBackendError
 from perk.backends.objective_store import ObjectiveStoreError
 from perk.boundary import OutputModel
+from perk.cli import completions
 from perk.cli.commands.objective.stack.shared import resolve_objective_id, resolve_run_id
 from perk.cli.commands.objective.stack.status_cmd import FindingOut, ObjectiveOut
 from perk.cli.context import require_github, require_repo
@@ -490,7 +491,7 @@ def _render_evidence(result: "LandResult.Objective") -> None:
 
 
 @click.command("land")
-@click.argument("objective", required=False)
+@click.argument("objective", required=False, shell_complete=completions.complete_objective_id)
 @click.option(
     "--dry-run",
     "dry_run",

@@ -8,6 +8,7 @@ import click
 from perk import objective
 from perk.backends import resolve
 from perk.backends.objective_store import ObjectiveStoreError
+from perk.cli import completions
 from perk.cli.alias import alias
 from perk.cli.commands.objective.shared import parse_objective_id
 from perk.cli.context import require_github, require_repo
@@ -18,7 +19,7 @@ from perk.substrate.output import machine_output, user_output
 
 @alias("rec")
 @click.command("reconcile")
-@click.argument("number")
+@click.argument("number", shell_complete=completions.complete_objective_id)
 @click.option(
     "--body",
     "body_path",

@@ -167,6 +167,20 @@ class LearnIssueSummary:
 
 
 @dataclass(frozen=True)
+class PlanSummary:
+    """One open plan in the bounded completion/browse read
+    (:meth:`IssueBackend.list_plan_completion_candidates`).
+
+    ``id`` is the opaque backend-owned boundary id (a GitHub number stringified; a Linear human
+    identifier like ``ENG-123``) — exactly what a user types at a plan-taking command. No URL:
+    the completion surface consumes only id + title.
+    """
+
+    id: str
+    title: str
+
+
+@dataclass(frozen=True)
 class PendingLearnPlan:
     """A closed plan issue whose plan-header ``learn_state`` is ``pending`` (§8.36) —
     landed, /learn not yet run. ``closed_at`` is the backend's close timestamp
@@ -374,6 +388,16 @@ class IssueBackend(Protocol):
     def list_learn_issues(self) -> tuple[LearnIssueSummary, ...]:
         """Every open ``perk:learn`` issue (the learn-docs factory inbox). Raises on an
         infra/query failure (never masks it as an empty tuple)."""
+        ...
+
+    def list_plan_completion_candidates(self) -> tuple[PlanSummary, ...]:
+        """The **open** plan population as a bounded completion/browse read — never an
+        exhaustive census: ONE backend page per underlying query (GitHub: the list endpoint's
+        default page, ~30 rows; Linear: a single ``first: 50`` request per query — no cursor
+        pagination), sorted newest-created-first **within the fetched page(s)**; membership
+        beyond the page is explicitly not promised. Raises on an infra failure (never masks it
+        as an empty tuple — the completion callback owns the swallow). Performs no ``io_step``
+        narration (stderr output would garble a TAB completion)."""
         ...
 
     def list_plans_pending_learn(self, *, limit: int = 50) -> tuple[PendingLearnPlan, ...]:

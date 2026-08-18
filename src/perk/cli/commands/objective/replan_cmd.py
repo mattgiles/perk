@@ -31,6 +31,7 @@ from perk import objective
 from perk.backends import objective_store, resolve
 from perk.backends.engagement import render_objective_engagement
 from perk.backends.objective_store import ObjectiveStoreError
+from perk.cli import completions
 from perk.cli.commands.objective.shared import parse_objective_id
 from perk.cli.commands.seeded_door import SeededLaunch, run_seeded_door, seeded_door_options
 from perk.cli.context import require_github
@@ -207,7 +208,7 @@ def _seed_prompt(
 
 
 @click.command("replan", context_settings={"ignore_unknown_options": True})
-@click.argument("objective_arg")
+@click.argument("objective_arg", shell_complete=completions.complete_objective_id)
 @seeded_door_options(
     worktree_help="Worktree to position (objective replan runs at repo root).",
     dry_run_help="Materialize + print the seed; launch nothing.",

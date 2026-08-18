@@ -107,6 +107,15 @@ class TestGitHubDelegation:
         assert rec.kwargs["delivery"] == "stacked"
         assert rec.kwargs["delivery_lineage"] == "01LINEAGE"
 
+    def test_list_objective_completion_candidates(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        rec = _Recorder((objectives.OpenObjectiveIssue(number=252, title="O252"),))
+        monkeypatch.setattr(objectives, "list_open_objective_issues", rec)
+        result = GitHubObjectiveStore(tmp_path).list_objective_completion_candidates()
+        assert rec.kwargs == {"repo_root": tmp_path}
+        assert result == (objective_store.ObjectiveSummary(id="252", title="O252"),)
+
     def test_get_objective(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         rec = _Recorder(
             objectives.ObjectiveState(number=252, url="u252", title="t", header={}, nodes=())

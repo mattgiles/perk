@@ -38,6 +38,7 @@ import click
 from ulid import ULID
 
 from perk._resources import hunk_feedback_extension_path
+from perk.cli import completions
 from perk.cli.context import require_repo
 from perk.cli.emit import fail
 from perk.cli.ensure import UserFacingCliError
@@ -125,7 +126,7 @@ def _resolve_diff_base(worktree: Path, *, fetch: bool = True) -> str | None:
 
 
 @click.command("watch", context_settings={"ignore_unknown_options": True}, epilog=_EPILOG)
-@click.argument("plan")
+@click.argument("plan", shell_complete=completions.complete_plan_id)
 @click.option(
     "--dry-run",
     is_flag=True,

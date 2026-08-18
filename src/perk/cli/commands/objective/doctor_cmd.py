@@ -44,6 +44,7 @@ from perk.backends.objective_store import (
     RepairResult,
 )
 from perk.boundary import OutputModel
+from perk.cli import completions
 from perk.cli.alias import alias
 from perk.cli.commands.objective.shared import parse_objective_id
 from perk.cli.context import require_github, require_repo
@@ -389,7 +390,7 @@ def _repair_result_out(result: RepairResult) -> _RepairResultOut:
 
 @alias("doc")
 @click.command("doctor")
-@click.argument("number")
+@click.argument("number", shell_complete=completions.complete_objective_id)
 @click.option("--fix", is_flag=True, help="Apply the safe, unambiguous repairs (else report only).")
 @click.option("--dry-run", is_flag=True, help="With --fix: plan the repairs without writing.")
 @click.option("--json", "as_json", is_flag=True, help="Emit a machine-readable report to stdout.")
