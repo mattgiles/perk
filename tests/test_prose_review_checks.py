@@ -446,6 +446,40 @@ def test_checks_run_with_the_repo_root_as_working_directory(tmp_path: Path) -> N
     assert marker == "relative-read-proof"
 
 
+def test_real_prose_map_argv_passes_against_the_repository(tmp_path: Path) -> None:
+    # Scenario 8's transport arm: the app's real check id runs the REAL allowlisted
+    # argv (`uv run --no-sync perk-dev prose-map check`) as a subprocess against the
+    # real repository — no `check_commands` injection. The drift-FAILURE arm is
+    # deliberately split off: the CLI-level failure is pinned by
+    # test_prose_map.py::test_cli_check_reports_unclassified_tool_field_as_invalid,
+    # and the in-app failure walk is the recorded manual leg.
+    del tmp_path
+    repo_root = Path(__file__).parents[1]
+    runner = CheckRunner(repo_root)
+    try:
+        started = runner.start("prose-map")
+        assert started is not None
+        assert started.status == "running"
+
+        def terminal() -> CheckRunSnapshot | None:
+            snapshot = runner.get(started.run_id)
+            assert snapshot is not None
+            return snapshot if snapshot.status != "running" else None
+
+        # The real map check reads the whole repository; give it headroom beyond
+        # the suite's default deadline (well under the allowlist's 120s timeout).
+        final = _wait_for(
+            terminal, message="the real prose-map check never went terminal", deadline=90.0
+        )
+        assert final.status == "passed"
+        assert final.exit_code == 0
+        assert final.output != ""
+    finally:
+        # Isolation from the single-active-slot tests: this runner owns its own
+        # slot and always releases its process tree.
+        runner.shutdown()
+
+
 def test_shutdown_kills_the_active_run_and_leaves_no_threads(tmp_path: Path) -> None:
     baseline = set(threading.enumerate())
     runner = CheckRunner(tmp_path, commands={"ruff": _fake(_PID_THEN_BLOCK)})
