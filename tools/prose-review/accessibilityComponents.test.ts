@@ -309,8 +309,8 @@ test("search keys: ArrowDown enters results, ArrowUp returns, Esc closes and ref
     assert.equal(activeElement(harness), input, "ArrowUp from the first result returns");
 
     await harness.keydown(input, "ArrowDown");
-    const escape = await harness.keydown(itemAt(results, 0), "Escape");
-    assert.equal(escape.defaultPrevented, true);
+    const escapeEvent = await harness.keydown(itemAt(results, 0), "Escape");
+    assert.equal(escapeEvent.defaultPrevented, true);
     assert.equal(harness.container.querySelector(".search-panel"), null, "Esc closes the panel");
     assert.equal(activeElement(harness), input, "focus returns to the search input");
   } finally {
@@ -329,8 +329,8 @@ test("drawer Esc closes the drawer and returns focus to the Workspace button", a
     await harness.click(workspaceButton);
     const drawer = paneByClass(harness, "section.workspace-drawer");
     drawer.focus();
-    const escape = await harness.keydown(drawer, "Escape");
-    assert.equal(escape.defaultPrevented, true);
+    const escapeEvent = await harness.keydown(drawer, "Escape");
+    assert.equal(escapeEvent.defaultPrevented, true);
     assert.equal(harness.container.querySelector(".workspace-drawer"), null);
     assert.equal(activeElement(harness), workspaceButton);
   } finally {

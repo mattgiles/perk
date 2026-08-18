@@ -753,7 +753,12 @@ export function App({
             onRunCheck={startCheck}
           />
         </main>
-        <aside ref={inspectorRef} className="pane inspector-pane" aria-label="Inspector" tabIndex={-1}>
+        <aside
+          ref={inspectorRef}
+          className="pane inspector-pane"
+          aria-label="Inspector"
+          tabIndex={-1}
+        >
           <InspectorPane
             key={writeState.catalogEpoch}
             mode={mode}

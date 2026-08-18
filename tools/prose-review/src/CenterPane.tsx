@@ -494,9 +494,9 @@ function ComparisonSourcePane({
   side: "left" | "right";
 }) {
   return (
-    // tabIndex={0} keeps the independently scrolling region keyboard-scrollable.
     <section
       className="comparison-pane"
+      // biome-ignore lint/a11y/noNoninteractiveTabindex: an independently scrolling region must be focusable to be keyboard-scrollable.
       tabIndex={0}
       aria-label={side === "left" ? "Origin source" : "Target source"}
     >
@@ -567,6 +567,7 @@ function ComparisonPanes({
     }
   };
   return (
+    // biome-ignore lint/a11y/noStaticElementInteractions: the container only delegates the unmodified n/p shortcuts; focus lives on the del/ins chunks.
     <div
       ref={containerRef}
       className="comparison-result"

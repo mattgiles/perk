@@ -51,7 +51,8 @@ export function moveFocusInList(
   if (key === "End") {
     return buttons[buttons.length - 1] ?? null;
   }
-  const current = active === null ? -1 : buttons.findIndex((button) => button === active);
+  // Identity lookup only — a non-HTMLElement active is simply absent (-1).
+  const current = active === null ? -1 : buttons.indexOf(active as HTMLElement);
   if (current === -1) {
     return key === "ArrowDown" ? (buttons[0] ?? null) : null;
   }

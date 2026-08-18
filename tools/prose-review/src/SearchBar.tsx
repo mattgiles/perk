@@ -69,7 +69,7 @@ export function SearchBar({ onSelect }: { onSelect: (target: SourceTarget) => vo
   const [filters, setFilters] = useState<Filters>(NO_FILTERS);
   const [panel, setPanel] = useState<PanelState>({ status: "idle" });
   const [controller] = useState(() => createSearchPanel(setPanel));
-  const barRef = useRef<HTMLDivElement | null>(null);
+  const barRef = useRef<HTMLElement | null>(null);
   const inputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => () => controller.dispose(), [controller]);
@@ -79,7 +79,7 @@ export function SearchBar({ onSelect }: { onSelect: (target: SourceTarget) => vo
   // result buttons (ArrowUp from the first returns to the input). The scoped
   // `.search-panel button.search-result` query never captures the filter/Clear
   // controls, and unhandled keys (selects, Enter) keep their native behavior.
-  const onKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>): void => {
+  const onKeyDown = (event: ReactKeyboardEvent<HTMLElement>): void => {
     if (event.key === "Escape") {
       event.preventDefault();
       controller.close();
@@ -102,7 +102,8 @@ export function SearchBar({ onSelect }: { onSelect: (target: SourceTarget) => vo
       }
       return;
     }
-    const current = results.findIndex((result) => result === active);
+    // Identity lookup only — a non-HTMLElement active is simply absent (-1).
+    const current = active === null ? -1 : results.indexOf(active as HTMLElement);
     if (current === -1) {
       return;
     }
@@ -127,7 +128,7 @@ export function SearchBar({ onSelect }: { onSelect: (target: SourceTarget) => vo
   }
 
   return (
-    <div ref={barRef} className="search-bar" onKeyDown={onKeyDown}>
+    <search ref={barRef} className="search-bar" onKeyDown={onKeyDown}>
       <label className="search-field">
         Search
         <input
@@ -218,6 +219,6 @@ export function SearchBar({ onSelect }: { onSelect: (target: SourceTarget) => vo
           )}
         </div>
       )}
-    </div>
+    </search>
   );
 }
