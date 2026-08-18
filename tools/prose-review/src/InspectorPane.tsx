@@ -5,6 +5,7 @@ import type { AssemblySessionState } from "./assemblySession.ts";
 import { BOUNDARY_INFO } from "./boundaries.ts";
 import type { SelectedComparison } from "./comparison.ts";
 import type { ComparisonLoadState } from "./comparisonLoad.ts";
+import { GIT_STATE_LABELS, type GitFileState } from "./git.ts";
 import type { CapabilityRef, UnitInspect } from "./inspect.ts";
 import { createInspectLoader, type InspectLoadState } from "./inspectLoad.ts";
 import {
@@ -228,6 +229,8 @@ function UnitInspector({
   mode,
   comparisonState,
   selectedComparison,
+  gitState,
+  onShowGitChanges,
   onComparisonSelect,
   onSelect,
 }: {
@@ -235,6 +238,8 @@ function UnitInspector({
   mode: Mode;
   comparisonState: ComparisonLoadState;
   selectedComparison: SelectedComparison | null;
+  gitState: GitFileState | undefined;
+  onShowGitChanges: () => void;
   onComparisonSelect: (selection: SelectedComparison) => void;
   onSelect: SelectSource;
 }) {
@@ -270,6 +275,17 @@ function UnitInspector({
             <>
               <dt>Selector</dt>
               <dd>{detail.selector}</dd>
+            </>
+          )}
+          {gitState !== undefined && (
+            <>
+              <dt>Working tree</dt>
+              <dd>
+                {GIT_STATE_LABELS[gitState]}{" "}
+                <button type="button" onClick={onShowGitChanges}>
+                  View changes
+                </button>
+              </dd>
             </>
           )}
         </dl>
@@ -309,6 +325,8 @@ export function InspectorPane({
   comparisonState,
   selectedComparison,
   assemblyState,
+  gitStates,
+  onShowGitChanges,
   onComparisonSelect,
   onSelection,
   onSelect,
@@ -318,6 +336,8 @@ export function InspectorPane({
   comparisonState: ComparisonLoadState;
   selectedComparison: SelectedComparison | null;
   assemblyState: AssemblySessionState;
+  gitStates: ReadonlyMap<string, GitFileState>;
+  onShowGitChanges: () => void;
   onComparisonSelect: (selection: SelectedComparison) => void;
   onSelection: SelectSelection;
   onSelect: SelectSource;
@@ -400,6 +420,8 @@ export function InspectorPane({
       mode={mode}
       comparisonState={comparisonState}
       selectedComparison={selectedComparison}
+      gitState={gitStates.get(selection.target.unit.path)}
+      onShowGitChanges={onShowGitChanges}
       onComparisonSelect={onComparisonSelect}
       onSelect={onSelect}
     />

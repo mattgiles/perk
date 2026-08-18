@@ -20,6 +20,15 @@ import type {
 import type { ComparisonLoadState } from "./src/comparisonLoad.ts";
 import { EditWorkspace, type WorkspaceTransport } from "./src/editWorkspace.ts";
 import {
+  GIT_DIFF_EMPTY_COPY,
+  GIT_DIFF_FAILED_COPY,
+  GIT_DIFF_TRUNCATED_COPY,
+  GIT_STATUS_FAILED_COPY,
+  GIT_STATUS_LOADING_COPY,
+  GIT_STATUS_UNAVAILABLE_COPY,
+  gitOtherChangesNote,
+} from "./src/git.ts";
+import {
   CATALOG_STALE_DETAIL,
   CLIPBOARD_FAILURE_DETAIL,
   CONFLICT_DETAIL,
@@ -1091,6 +1100,347 @@ test("App drawer, confirmed discard, last-target Open, manual reversion, and unl
     await harness.click(buttonByText(harness.container, "Workspace (0)"));
     assert.match(harness.container.textContent ?? "", /No files need attention\./);
     assert.doesNotMatch(harness.container.textContent ?? "", /Save/);
+  } finally {
+    restoreFetch();
+    await harness.cleanup();
+  }
+});
+
+// ── The Git annotation surfaces ───────────────────────────────────────────────
+
+const GIT_TREE: CapabilityTree = {
+  capabilities: [
+    {
+      id: "foundation",
+      label: "Foundation",
+      units: [UNIT_A, UNIT_OTHER],
+      session_shapes: [
+        {
+          id: "shape:review",
+          label: "Review shape",
+          delivery: "cold",
+          assembly: "assembly:review",
+          layers: [{ position: 1, optional: false, label: null, unit: UNIT_A, boundary: null }],
+        },
+      ],
+      children: [],
+    },
+  ],
+};
+
+function gitStatusBody(
+  entries: { path: string; state: string }[],
+  otherChangeCount = 0,
+): Record<string, unknown> {
+  return {
+    status: "available",
+    reason: null,
+    entries,
+    other_change_count: otherChangeCount,
+  };
+}
+
+function gitDiffBody(diff: string, truncated = false): Record<string, unknown> {
+  return { status: "available", reason: null, diff, truncated };
+}
+
+function wholeUnitSource(unit: TreeUnit, text: string): UnitSource {
+  return {
+    file: { path: unit.path, mode: 0o644, newline_style: "lf", load_hash: HASH },
+    view: {
+      unit: unit.id,
+      fragment: null,
+      kind: unit.kind,
+      before: "",
+      focus: text,
+      after: "",
+      editable: true,
+      read_only_reason: null,
+    },
+  };
+}
+
+function gitRowByText(container: ParentNode, needle: string): HTMLElement {
+  const row = [...container.querySelectorAll<HTMLElement>("li.git-change")].find((candidate) =>
+    (candidate.textContent ?? "").includes(needle),
+  );
+  assert.ok(row !== undefined, `missing git row containing: ${needle}`);
+  return row;
+}
+
+async function settleUntil(predicate: () => boolean, message: string): Promise<void> {
+  // jsdom queues the details toggle task beyond setImmediate: poll briefly until
+  // React's onToggle/effect chain has run.
+  for (let attempt = 0; attempt < 50; attempt += 1) {
+    if (predicate()) {
+      return;
+    }
+    await React.act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    });
+  }
+  assert.fail(message);
+}
+
+async function openGitRow(harness: RenderHarness, row: HTMLElement): Promise<void> {
+  const summary = row.querySelector("summary");
+  assert.ok(summary !== null);
+  await harness.click(summary);
+  await settleUntil(
+    () => (row.querySelector("details")?.childElementCount ?? 0) > 1,
+    "git diff row body did not mount after opening",
+  );
+}
+
+test("git badges annotate canonical and shape-layer placements and the inspector opens the drawer", async () => {
+  const harness = installDom();
+  const text = "before A after";
+  const restoreFetch = stubFetch(async (url): Promise<Response> => {
+    if (url === "/api/catalog/tree") {
+      return response(200, GIT_TREE);
+    }
+    if (url === "/api/git/status") {
+      return response(200, gitStatusBody([{ path: "shared.md", state: "modified" }]));
+    }
+    if (url.startsWith("/api/git/diff?")) {
+      return response(200, gitDiffBody("+x\n"));
+    }
+    if (url.startsWith("/api/inspect?")) {
+      return response(404, { detail: "unknown unit" });
+    }
+    if (url.startsWith("/api/source?")) {
+      return response(200, wholeUnitSource(UNIT_A, text));
+    }
+    throw new Error(`unexpected request: ${url}`);
+  });
+
+  try {
+    await harness.render(React.createElement(App));
+    await harness.settle();
+    // The canonical placement badge: UNIT_A (shared.md) is annotated, UNIT_OTHER is not.
+    let badges = [...harness.container.querySelectorAll(".git-badge")];
+    assert.deepEqual(
+      badges.map((badge) => badge.textContent),
+      ["modified"],
+    );
+    // A shape-layer placement renders through the same unit branch and gains the
+    // same text badge (never color-only).
+    await harness.click(buttonByLabel(harness.container, "Expand layers for Review shape"));
+    badges = [...harness.container.querySelectorAll(".git-badge")];
+    assert.deepEqual(
+      badges.map((badge) => badge.textContent),
+      ["modified", "modified"],
+    );
+
+    // Selecting the unit annotates the inspector identity block with the working-tree
+    // row, and View changes opens the drawer (the record surface).
+    await harness.click(buttonByText(harness.container, "unit:a"));
+    await harness.settle();
+    assert.match(harness.container.textContent ?? "", /Working tree/);
+    assert.equal(harness.container.querySelector(".workspace-drawer"), null);
+    await harness.click(buttonByText(harness.container, "View changes"));
+    const drawer = harness.container.querySelector<HTMLElement>(".workspace-drawer");
+    assert.ok(drawer !== null);
+    assert.match(drawer.textContent ?? "", /Git changes/);
+    assert.match(drawer.textContent ?? "", /shared\.md · modified/);
+  } finally {
+    restoreFetch();
+    await harness.cleanup();
+  }
+});
+
+test("drawer git rows render per state, gate the injected view, and refresh retains the prior view", async () => {
+  const harness = installDom();
+  let statusCalls = 0;
+  const heldRefresh = deferred<Response>();
+  const restoreFetch = stubFetch(async (url): Promise<Response> => {
+    if (url === "/api/catalog/tree") {
+      return response(200, TREE);
+    }
+    if (url === "/api/git/status") {
+      statusCalls += 1;
+      if (statusCalls === 1) {
+        return response(
+          200,
+          gitStatusBody(
+            [
+              { path: "shared.md", state: "modified" },
+              { path: "other.md", state: "deleted" },
+              { path: "third.md", state: "untracked" },
+              { path: "missing.md", state: "added" },
+            ],
+            2,
+          ),
+        );
+      }
+      return heldRefresh.promise;
+    }
+    if (url.startsWith("/api/git/diff?path=")) {
+      const path = decodeURIComponent(url.slice("/api/git/diff?path=".length));
+      if (path === "shared.md") {
+        return response(200, gitDiffBody("+fresh content\n"));
+      }
+      if (path === "other.md") {
+        return response(200, gitDiffBody(""));
+      }
+      if (path === "third.md") {
+        return response(200, gitDiffBody("+capped\n", true));
+      }
+      return response(404, { detail: "unknown path" });
+    }
+    throw new Error(`unexpected request: ${url}`);
+  });
+
+  const stubPatches: string[] = [];
+  function StubDiffView({ patch }: { patch: string }) {
+    stubPatches.push(patch);
+    return React.createElement("div", { className: "stub-diff-view" }, "stub diff view");
+  }
+
+  try {
+    await harness.render(React.createElement(App, { gitDiffView: StubDiffView }));
+    await harness.settle();
+    await harness.click(buttonByText(harness.container, "Workspace (0)"));
+    const drawer = harness.container.querySelector<HTMLElement>(".workspace-drawer");
+    assert.ok(drawer !== null);
+    assert.equal(drawer.querySelectorAll("li.git-change").length, 4);
+    assert.match(drawer.textContent ?? "", /shared\.md · modified/);
+    assert.match(drawer.textContent ?? "", /other\.md · deleted/);
+    assert.match(drawer.textContent ?? "", /third\.md · untracked/);
+    assert.match(drawer.textContent ?? "", /missing\.md · added/);
+    assert.ok((drawer.textContent ?? "").includes(gitOtherChangesNote(2)));
+
+    // A loaded, non-empty, non-truncated row is the ONLY shape that mounts the
+    // injected view.
+    await openGitRow(harness, gitRowByText(drawer, "shared.md"));
+    await settleUntil(
+      () => drawer.querySelector(".stub-diff-view") !== null,
+      "the injected diff view never mounted",
+    );
+    assert.ok(stubPatches.every((patch) => patch === "+fresh content\n"));
+
+    // The empty row renders the fixed copy — never the injected view.
+    const emptyRow = gitRowByText(drawer, "other.md");
+    await openGitRow(harness, emptyRow);
+    await settleUntil(
+      () => (emptyRow.textContent ?? "").includes(GIT_DIFF_EMPTY_COPY),
+      "the empty-diff copy never rendered",
+    );
+    assert.equal(emptyRow.querySelector(".stub-diff-view"), null);
+
+    // The truncated row renders the notice plus the built-in raw text view.
+    const truncatedRow = gitRowByText(drawer, "third.md");
+    await openGitRow(harness, truncatedRow);
+    await settleUntil(
+      () => (truncatedRow.textContent ?? "").includes(GIT_DIFF_TRUNCATED_COPY),
+      "the truncated notice never rendered",
+    );
+    assert.equal(truncatedRow.querySelector(".git-diff-raw")?.textContent, "+capped\n");
+    assert.equal(truncatedRow.querySelector(".stub-diff-view"), null);
+
+    // The transport-failed row (the fixed no-leak 404 included) shows the fixed copy.
+    const failedRow = gitRowByText(drawer, "missing.md");
+    await openGitRow(harness, failedRow);
+    await settleUntil(
+      () => (failedRow.textContent ?? "").includes(GIT_DIFF_FAILED_COPY),
+      "the failed-diff copy never rendered",
+    );
+
+    // Refresh keeps the prior loaded view visible (rows retained) with the button
+    // locked until the new outcome lands.
+    const refresh = buttonByText(drawer, "Refresh");
+    await harness.click(refresh);
+    assert.equal(refresh.disabled, true);
+    assert.equal(drawer.querySelectorAll("li.git-change").length, 4);
+    assert.ok(drawer.querySelector(".stub-diff-view") !== null);
+
+    heldRefresh.resolve(
+      response(200, {
+        status: "unavailable",
+        reason: "git-error",
+        entries: [],
+        other_change_count: 0,
+      }),
+    );
+    await settleUntil(
+      () => (drawer.textContent ?? "").includes(GIT_STATUS_UNAVAILABLE_COPY["git-error"]),
+      "the unavailable copy never replaced the prior view",
+    );
+    assert.equal(drawer.querySelectorAll("li.git-change").length, 0);
+    assert.equal(buttonByText(drawer, "Refresh").disabled, false);
+  } finally {
+    restoreFetch();
+    await harness.cleanup();
+  }
+});
+
+test("hostile diff text stays literal through the default text view", async () => {
+  const harness = installDom();
+  const hostile = '+<script>alert(1)</script> <img src=x onerror=alert(2)> "quoted"\n';
+  const restoreFetch = stubFetch(async (url): Promise<Response> => {
+    if (url === "/api/catalog/tree") {
+      return response(200, TREE);
+    }
+    if (url === "/api/git/status") {
+      return response(200, gitStatusBody([{ path: "shared.md", state: "modified" }]));
+    }
+    if (url.startsWith("/api/git/diff?")) {
+      return response(200, gitDiffBody(hostile));
+    }
+    throw new Error(`unexpected request: ${url}`);
+  });
+
+  try {
+    // No injected view: the default composition is the built-in literal text view.
+    await harness.render(React.createElement(App));
+    await harness.settle();
+    await harness.click(buttonByText(harness.container, "Workspace (0)"));
+    const drawer = harness.container.querySelector<HTMLElement>(".workspace-drawer");
+    assert.ok(drawer !== null);
+    const row = gitRowByText(drawer, "shared.md");
+    await openGitRow(harness, row);
+    await settleUntil(
+      () => row.querySelector(".git-diff-raw") !== null,
+      "the raw diff view never mounted",
+    );
+    assert.equal(row.querySelector(".git-diff-raw")?.textContent, hostile);
+    assert.equal(harness.container.querySelectorAll("script, img").length, 0);
+  } finally {
+    restoreFetch();
+    await harness.cleanup();
+  }
+});
+
+test("git status first load and transport failure render the fixed section copy", async () => {
+  const harness = installDom();
+  const heldStatus = deferred<Response>();
+  const restoreFetch = stubFetch(async (url): Promise<Response> => {
+    if (url === "/api/catalog/tree") {
+      return response(200, TREE);
+    }
+    if (url === "/api/git/status") {
+      return heldStatus.promise;
+    }
+    throw new Error(`unexpected request: ${url}`);
+  });
+
+  try {
+    await harness.render(React.createElement(App));
+    await harness.settle();
+    await harness.click(buttonByText(harness.container, "Workspace (0)"));
+    const drawer = harness.container.querySelector<HTMLElement>(".workspace-drawer");
+    assert.ok(drawer !== null);
+    // The first load has no prior view to retain: the fixed loading copy renders
+    // and the Refresh button is locked.
+    assert.ok((drawer.textContent ?? "").includes(GIT_STATUS_LOADING_COPY));
+    assert.equal(buttonByText(drawer, "Refresh").disabled, true);
+
+    heldStatus.resolve(response(500, { detail: "boom" }));
+    await settleUntil(
+      () => (drawer.textContent ?? "").includes(GIT_STATUS_FAILED_COPY),
+      "the failed-status copy never rendered",
+    );
+    assert.equal(buttonByText(drawer, "Refresh").disabled, false);
   } finally {
     restoreFetch();
     await harness.cleanup();

@@ -6,6 +6,7 @@ directly. Declaration order is the JSON key order, so the field order below is
 deliberate.
 """
 
+from collections.abc import Callable
 from typing import Annotated, Literal, Self
 
 from pydantic import Field
@@ -57,6 +58,15 @@ from perk_dev.prose_review.comparison import (
     ComparisonOptions,
     ComparisonPlacement,
     ComparisonRelation,
+)
+from perk_dev.prose_review.git import (
+    GitDiffResult,
+    GitDiffUnavailable,
+    GitFileEntry,
+    GitFileState,
+    GitStatusResult,
+    GitStatusUnavailable,
+    GitUnavailableReason,
 )
 from perk_dev.prose_review.search import MatchField, SearchEntryKind, SearchHit, SearchResults
 from perk_dev.prose_review.source_adapter import (
@@ -580,6 +590,70 @@ class LatestCheckOut(OutputModel):
     @classmethod
     def from_domain(cls, snapshot: CheckRunSnapshot | None) -> Self:
         return cls(run=None if snapshot is None else CheckRunOut.from_domain(snapshot, 0))
+
+
+class GitFileStatusOut(OutputModel):
+    """One catalog-mapped path with its folded working-tree state."""
+
+    path: str
+    state: GitFileState
+
+    @classmethod
+    def from_domain(cls, entry: GitFileEntry) -> Self:
+        return cls(path=entry.path, state=entry.state)
+
+
+class GitStatusOut(OutputModel):
+    """The always-200 working-tree status envelope, partitioned by catalog membership.
+
+    Construction enforces the exact tagged combinations the frontend parsers pin:
+    available ⇒ ``reason is None``; unavailable ⇒ ``entries == ()`` and
+    ``other_change_count == 0``. ``is_catalog_path`` is the handler's captured-
+    generation membership predicate — non-catalog and anonymous undecodable records
+    are only ever counted, never listed.
+    """
+
+    status: Literal["available", "unavailable"]
+    reason: GitUnavailableReason | None
+    entries: tuple[GitFileStatusOut, ...]
+    other_change_count: int
+
+    @classmethod
+    def from_domain(cls, result: GitStatusResult, is_catalog_path: Callable[[str], bool]) -> Self:
+        if isinstance(result, GitStatusUnavailable):
+            return cls(status="unavailable", reason=result.reason, entries=(), other_change_count=0)
+        mapped = sorted(
+            (entry for entry in result.entries if is_catalog_path(entry.path)),
+            key=lambda entry: entry.path,
+        )
+        other = result.other_paths + sum(
+            1 for entry in result.entries if not is_catalog_path(entry.path)
+        )
+        return cls(
+            status="available",
+            reason=None,
+            entries=tuple(GitFileStatusOut.from_domain(entry) for entry in mapped),
+            other_change_count=other,
+        )
+
+
+class GitDiffOut(OutputModel):
+    """The always-200 per-file diff envelope.
+
+    Construction enforces: available ⇒ ``reason is None`` and ``diff`` is a string
+    (possibly empty); unavailable ⇒ ``diff is None`` and ``truncated is False``.
+    """
+
+    status: Literal["available", "unavailable"]
+    reason: GitUnavailableReason | None
+    diff: str | None
+    truncated: bool
+
+    @classmethod
+    def from_domain(cls, result: GitDiffResult) -> Self:
+        if isinstance(result, GitDiffUnavailable):
+            return cls(status="unavailable", reason=result.reason, diff=None, truncated=False)
+        return cls(status="available", reason=None, diff=result.diff, truncated=result.truncated)
 
 
 class UnitInspectOut(OutputModel):

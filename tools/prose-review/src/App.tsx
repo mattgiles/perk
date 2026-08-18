@@ -1,4 +1,11 @@
-import { useEffect, useState } from "react";
+import {
+  type ComponentType,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from "react";
 import { type AssemblySessionState, createAssemblySession } from "./assemblySession.ts";
 import { CenterPane } from "./CenterPane.tsx";
 import { type CheckRunView, type CheckSessionState, createCheckSession } from "./checkSession.ts";
@@ -6,6 +13,27 @@ import { CHECK_NOTICE_DETAILS, type CheckId } from "./checks.ts";
 import { comparisonRequest, type SelectedComparison } from "./comparison.ts";
 import { type ComparisonLoadState, createComparisonLoader } from "./comparisonLoad.ts";
 import { EditWorkspace, type WorkspaceSaveState } from "./editWorkspace.ts";
+import {
+  fetchGitDiff,
+  fetchGitStatus,
+  GIT_DIFF_EMPTY_COPY,
+  GIT_DIFF_LOADING_COPY,
+  GIT_DIFF_TRUNCATED_COPY,
+  GIT_STATE_LABELS,
+  GIT_STATUS_CLEAN_COPY,
+  GIT_STATUS_FAILED_COPY,
+  GIT_STATUS_LOADING_COPY,
+  GIT_STATUS_UNAVAILABLE_COPY,
+  type GitFileState,
+  type GitStatusOutcome,
+  gitOtherChangesNote,
+} from "./git.ts";
+import {
+  createGitDiffCache,
+  GIT_DIFF_IDLE_ROW,
+  type GitDiffCache,
+  type GitDiffRowState,
+} from "./gitDiffCache.ts";
 import { InspectorPane } from "./InspectorPane.tsx";
 import { SearchBar } from "./SearchBar.tsx";
 import { INDETERMINATE_DETAIL } from "./save.ts";
@@ -103,6 +131,143 @@ function CheckRunRow({
   );
 }
 
+// The component contract for the injected diff renderer: main.tsx (the production
+// composition root) passes the real @pierre/diffs-backed GitDiffView; the default
+// below keeps jsdom suites library-free. One composition shape, no conditional
+// fallback — the truncated-row presentation also renders this text view.
+export type GitDiffViewComponent = ComponentType<{ patch: string }>;
+
+export function GitDiffTextView({ patch }: { patch: string }) {
+  return <pre className="git-diff-raw">{patch}</pre>;
+}
+
+function GitDiffRowBody({
+  row,
+  diffView: DiffView,
+}: {
+  row: GitDiffRowState;
+  diffView: GitDiffViewComponent;
+}) {
+  if (row.status === "idle" || row.status === "loading") {
+    return <p className="pane-hint">{GIT_DIFF_LOADING_COPY}</p>;
+  }
+  if (row.status === "failed") {
+    return <p className="pane-hint">{row.copy}</p>;
+  }
+  // Empty and truncated patches never reach the injected view: PatchDiff rejects an
+  // empty patch, and a capped patch is no longer parseable — both render built-ins.
+  if (row.diff.trim() === "") {
+    return <p className="pane-hint">{GIT_DIFF_EMPTY_COPY}</p>;
+  }
+  if (row.truncated) {
+    return (
+      <>
+        <p className="pane-hint">{GIT_DIFF_TRUNCATED_COPY}</p>
+        <GitDiffTextView patch={row.diff} />
+      </>
+    );
+  }
+  return <DiffView patch={row.diff} />;
+}
+
+function GitChangeRow({
+  path,
+  state,
+  diffCache,
+  row,
+  diffView,
+}: {
+  path: string;
+  state: GitFileState;
+  diffCache: GitDiffCache;
+  row: GitDiffRowState;
+  diffView: GitDiffViewComponent;
+}) {
+  // The lazily-mounted body (the CheckRunRow pattern): the diff body exists only
+  // while the details element is open.
+  const [open, setOpen] = useState(false);
+  useEffect(() => {
+    // First open starts the fetch; a cache invalidation (a new status outcome)
+    // resets the row to idle, so a still-open row refetches against the new
+    // snapshot. `open` is idempotent for any non-idle row.
+    if (open && row.status === "idle") {
+      diffCache.open(path);
+    }
+  }, [open, row.status, diffCache, path]);
+  return (
+    <li className="git-change">
+      <span className="git-change-summary">
+        <strong>{path}</strong> · {GIT_STATE_LABELS[state]}
+      </span>
+      <details
+        className="git-change-details"
+        onToggle={(event) => setOpen(event.currentTarget.open)}
+      >
+        <summary>Diff</summary>
+        {open && <GitDiffRowBody row={row} diffView={diffView} />}
+      </details>
+    </li>
+  );
+}
+
+function GitChangesSection({
+  status,
+  pending,
+  onRefresh,
+  diffCache,
+  diffView,
+}: {
+  status: GitStatusOutcome | null;
+  pending: boolean;
+  onRefresh: () => void;
+  diffCache: GitDiffCache;
+  diffView: GitDiffViewComponent;
+}) {
+  const rows = useSyncExternalStore(diffCache.subscribe, diffCache.state);
+  // During a refresh the prior loaded view stays visible (badges and rows
+  // retained); only the Refresh button locks until the new outcome lands.
+  return (
+    <section className="workspace-git" aria-label="Git changes">
+      <h3>
+        Git changes{" "}
+        <button type="button" onClick={onRefresh} disabled={pending}>
+          Refresh
+        </button>
+      </h3>
+      {status === null && <p className="pane-hint">{GIT_STATUS_LOADING_COPY}</p>}
+      {status?.status === "failed" && <p className="pane-hint">{GIT_STATUS_FAILED_COPY}</p>}
+      {status?.status === "loaded" && status.result.status === "unavailable" && (
+        <p className="pane-hint">{GIT_STATUS_UNAVAILABLE_COPY[status.result.reason]}</p>
+      )}
+      {status?.status === "loaded" && status.result.status === "available" && (
+        <>
+          {status.result.entries.length === 0 ? (
+            <p className="pane-hint">{GIT_STATUS_CLEAN_COPY}</p>
+          ) : (
+            <ul>
+              {[...status.result.entries]
+                .sort((left, right) => (left.path < right.path ? -1 : 1))
+                .map((entry) => (
+                  <GitChangeRow
+                    key={entry.path}
+                    path={entry.path}
+                    state={entry.state}
+                    diffCache={diffCache}
+                    row={rows.get(entry.path) ?? GIT_DIFF_IDLE_ROW}
+                    diffView={diffView}
+                  />
+                ))}
+            </ul>
+          )}
+          {status.result.otherChangeCount > 0 && (
+            <p className="pane-hint">{gitOtherChangesNote(status.result.otherChangeCount)}</p>
+          )}
+        </>
+      )}
+    </section>
+  );
+}
+
 function WorkspaceButton({ open, onToggle }: { open: boolean; onToggle: () => void }) {
   const attentionFiles = useAttentionFiles();
   return (
@@ -118,12 +283,22 @@ function WorkspaceDrawer({
   checks,
   onRunCheck,
   onCancelCheck,
+  gitStatus,
+  gitStatusPending,
+  onRefreshGit,
+  gitDiffCache,
+  gitDiffView,
 }: {
   open: boolean;
   onOpen: (target: SourceTarget) => void;
   checks: CheckSessionState;
   onRunCheck: (check: CheckId) => void;
   onCancelCheck: () => void;
+  gitStatus: GitStatusOutcome | null;
+  gitStatusPending: boolean;
+  onRefreshGit: () => void;
+  gitDiffCache: GitDiffCache;
+  gitDiffView: GitDiffViewComponent;
 }) {
   const workspace = useWorkspace();
   const attentionFiles = useAttentionFiles();
@@ -177,6 +352,13 @@ function WorkspaceDrawer({
           })}
         </ul>
       )}
+      <GitChangesSection
+        status={gitStatus}
+        pending={gitStatusPending}
+        onRefresh={onRefreshGit}
+        diffCache={gitDiffCache}
+        diffView={gitDiffView}
+      />
       {showChecks && (
         <section className="workspace-checks" aria-label="Checks">
           <h3>Checks</h3>
@@ -227,7 +409,15 @@ function WorkspaceBeforeUnload() {
 // comparison options and selected target exist only while Compare is active, and the
 // assembly session only while Assembly is active. The optional workspace prop is the
 // test injection seam; production (main.tsx) renders <App /> and owns a fresh one.
-export function App({ workspace: injectedWorkspace }: { workspace?: EditWorkspace }) {
+// `gitDiffView` is the one library seam: main.tsx passes the @pierre/diffs-backed
+// renderer while the default keeps every jsdom mount library-free.
+export function App({
+  workspace: injectedWorkspace,
+  gitDiffView = GitDiffTextView,
+}: {
+  workspace?: EditWorkspace;
+  gitDiffView?: GitDiffViewComponent;
+}) {
   const [workspace] = useState(() => injectedWorkspace ?? new EditWorkspace());
   const [treeState, setTreeState] = useState<TreeLoadState>({ status: "loading" });
   const [treeWarning, setTreeWarning] = useState<string | null>(null);
@@ -253,6 +443,10 @@ export function App({ workspace: injectedWorkspace }: { workspace?: EditWorkspac
     notice: null,
   });
   const [checkSession] = useState(() => createCheckSession({ onState: setCheckState }));
+  const [gitStatus, setGitStatus] = useState<GitStatusOutcome | null>(null);
+  const [gitStatusPending, setGitStatusPending] = useState(true);
+  const [gitRefreshCount, setGitRefreshCount] = useState(0);
+  const [gitDiffCache] = useState(() => createGitDiffCache({ fetchDiff: fetchGitDiff }));
   const originKey = selectedOriginKey(selection);
   const request = selection?.type === "unit" ? comparisonRequest(selection) : null;
   const assemblyShapeId = selection?.type === "shape" ? selection.shape.id : null;
@@ -302,6 +496,50 @@ export function App({ workspace: injectedWorkspace }: { workspace?: EditWorkspac
     };
   }, [writeState.catalogEpoch]);
 
+  // The git-status load rides the catalog-tree effect shape (cancelled-flag
+  // cleanup); every completed outcome replaces the last one and invalidates the
+  // per-row diff cache, so diffs are fetched at most once per status snapshot.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: catalogEpoch and gitRefreshCount are the explicit refresh triggers.
+  useEffect(() => {
+    let cancelled = false;
+    setGitStatusPending(true);
+    const load = async (): Promise<void> => {
+      const outcome = await fetchGitStatus();
+      if (cancelled) {
+        return;
+      }
+      setGitStatus(outcome);
+      setGitStatusPending(false);
+      gitDiffCache.invalidate();
+    };
+    void load();
+    return () => {
+      cancelled = true;
+    };
+  }, [writeState.catalogEpoch, gitRefreshCount]);
+
+  // A false→true freeze transition means a save landed even though the catalog
+  // refresh failed — the working tree changed without an epoch bump, so re-observe.
+  const frozenRef = useRef(writeState.frozen);
+  useEffect(() => {
+    if (!frozenRef.current && writeState.frozen) {
+      setGitRefreshCount((count) => count + 1);
+    }
+    frozenRef.current = writeState.frozen;
+  }, [writeState.frozen]);
+
+  // Derived per-path annotation for the tree badges and the inspector row — empty
+  // unless the last completed outcome is loaded and available.
+  const gitStates: ReadonlyMap<string, GitFileState> = useMemo(() => {
+    const map = new Map<string, GitFileState>();
+    if (gitStatus?.status === "loaded" && gitStatus.result.status === "available") {
+      for (const entry of gitStatus.result.entries) {
+        map.set(entry.path, entry.state);
+      }
+    }
+    return map;
+  }, [gitStatus]);
+
   // Fragment-only navigation preserves this effect because originKey is the exact
   // unit/shape/position transport identity returned by comparisonRequest.
   // biome-ignore lint/correctness/useExhaustiveDependencies: request and originKey are equivalent.
@@ -326,6 +564,7 @@ export function App({ workspace: injectedWorkspace }: { workspace?: EditWorkspac
   useEffect(() => () => comparisonLoader.dispose(), [comparisonLoader]);
   useEffect(() => () => assemblySession.dispose(), [assemblySession]);
   useEffect(() => () => workspace.dispose(), [workspace]);
+  useEffect(() => () => gitDiffCache.dispose(), [gitDiffCache]);
 
   // Reload recovery: re-adopt a still-running check once on mount.
   useEffect(() => {
@@ -387,7 +626,12 @@ export function App({ workspace: injectedWorkspace }: { workspace?: EditWorkspac
           )}
           {treeWarning !== null && <p className="catalog-warning">{treeWarning}</p>}
           {treeState.status === "loaded" && (
-            <TreePane tree={treeState.tree} selection={selection} onSelect={select} />
+            <TreePane
+              tree={treeState.tree}
+              gitStates={gitStates}
+              selection={selection}
+              onSelect={select}
+            />
           )}
         </nav>
         <main className="pane center-pane">
@@ -415,6 +659,8 @@ export function App({ workspace: injectedWorkspace }: { workspace?: EditWorkspac
             comparisonState={comparisonState}
             selectedComparison={selectedComparison}
             assemblyState={assemblyState}
+            gitStates={gitStates}
+            onShowGitChanges={() => setDrawerOpen(true)}
             onComparisonSelect={setSelectedComparison}
             onSelection={select}
             onSelect={selectSource}
@@ -429,6 +675,11 @@ export function App({ workspace: injectedWorkspace }: { workspace?: EditWorkspac
           checks={checkState}
           onRunCheck={startCheck}
           onCancelCheck={checkSession.cancel}
+          gitStatus={gitStatus}
+          gitStatusPending={gitStatusPending}
+          onRefreshGit={() => setGitRefreshCount((count) => count + 1)}
+          gitDiffCache={gitDiffCache}
+          gitDiffView={gitDiffView}
         />
         <WorkspaceBeforeUnload />
       </div>

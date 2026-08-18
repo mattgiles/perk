@@ -335,6 +335,7 @@ def test_docs_site_publish_isolation():
     assert workbench["private"] is True
     assert "dependencies" not in workbench, workbench.get("dependencies")
     assert workbench["devDependencies"] == {
+        "@pierre/diffs": "1.3.5",
         "@types/jsdom": "27.0.0",
         "@types/react": "19.2.18",
         "@types/react-dom": "19.2.4",

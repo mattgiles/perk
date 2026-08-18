@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { BOUNDARY_INFO } from "./boundaries.ts";
+import { GIT_STATE_LABELS, type GitFileState } from "./git.ts";
 import {
   canonicalFragmentSelection,
   canonicalUnitSelection,
@@ -22,6 +23,8 @@ type SelectProps = {
   selection: Selection | null;
   onSelect: (selection: Selection) => void;
 };
+
+type GitStates = ReadonlyMap<string, GitFileState>;
 
 type Breadcrumb = Pick<CapabilityNode, "id" | "label">[];
 
@@ -65,14 +68,23 @@ function UnitBranch({
   unit,
   display,
   placement,
+  gitStates,
   selection,
   onSelect,
-}: { unit: TreeUnit; display: string; placement: Placement | null } & SelectProps) {
+}: {
+  unit: TreeUnit;
+  display: string;
+  placement: Placement | null;
+  gitStates: GitStates;
+} & SelectProps) {
   const [expanded, setExpanded] = useState(false);
   const unitSelection =
     placement === null
       ? canonicalUnitSelection(unit)
       : placedShapeLayerSelection(placement.shape, placement.position, unit);
+  // The working-tree annotation is a text word (never color-only) and covers
+  // canonical and shape-layer placements alike — both render through this branch.
+  const gitState = gitStates.get(unit.path);
   return (
     <div className="tree-unit-branch">
       <div className="tree-unit-row">
@@ -92,6 +104,7 @@ function UnitBranch({
           selection={selection}
           onSelect={onSelect}
         />
+        {gitState !== undefined && <span className="git-badge">{GIT_STATE_LABELS[gitState]}</span>}
       </div>
       {expanded && (
         <ul className="tree-branch fragment-branch">
@@ -141,9 +154,10 @@ function BoundaryButton({ layer, selection, onSelect }: { layer: AssemblyLayer }
 function LayerEntry({
   layer,
   shape,
+  gitStates,
   selection,
   onSelect,
-}: { layer: AssemblyLayer; shape: SessionShape } & SelectProps) {
+}: { layer: AssemblyLayer; shape: SessionShape; gitStates: GitStates } & SelectProps) {
   return (
     <li className="tree-layer">
       <span className="layer-position">{layer.position}</span>
@@ -152,6 +166,7 @@ function LayerEntry({
           unit={layer.unit}
           display={layer.label ?? layer.unit.id}
           placement={{ shape, position: layer.position }}
+          gitStates={gitStates}
           selection={selection}
           onSelect={onSelect}
         />
@@ -165,9 +180,10 @@ function LayerEntry({
 function ShapeEntry({
   shape,
   breadcrumb,
+  gitStates,
   selection,
   onSelect,
-}: { shape: SessionShape; breadcrumb: Breadcrumb } & SelectProps) {
+}: { shape: SessionShape; breadcrumb: Breadcrumb; gitStates: GitStates } & SelectProps) {
   const [expanded, setExpanded] = useState(false);
   const active =
     selection !== null && selection.type === "shape" && selection.shape.id === shape.id;
@@ -198,6 +214,7 @@ function ShapeEntry({
               key={layer.position}
               layer={layer}
               shape={shape}
+              gitStates={gitStates}
               selection={selection}
               onSelect={onSelect}
             />
@@ -212,12 +229,14 @@ function CapabilityEntry({
   node,
   breadcrumb,
   defaultExpanded,
+  gitStates,
   selection,
   onSelect,
 }: {
   node: CapabilityNode;
   breadcrumb: Breadcrumb;
   defaultExpanded: boolean;
+  gitStates: GitStates;
 } & SelectProps) {
   const [expanded, setExpanded] = useState(defaultExpanded);
   const authoredBreadcrumb = [...breadcrumb, { id: node.id, label: node.label }];
@@ -239,6 +258,7 @@ function CapabilityEntry({
               node={child}
               breadcrumb={authoredBreadcrumb}
               defaultExpanded={false}
+              gitStates={gitStates}
               selection={selection}
               onSelect={onSelect}
             />
@@ -248,6 +268,7 @@ function CapabilityEntry({
               key={shape.id}
               shape={shape}
               breadcrumb={authoredBreadcrumb}
+              gitStates={gitStates}
               selection={selection}
               onSelect={onSelect}
             />
@@ -258,6 +279,7 @@ function CapabilityEntry({
                 unit={unit}
                 display={unit.id}
                 placement={null}
+                gitStates={gitStates}
                 selection={selection}
                 onSelect={onSelect}
               />
@@ -269,7 +291,12 @@ function CapabilityEntry({
   );
 }
 
-export function TreePane({ tree, selection, onSelect }: { tree: CapabilityTree } & SelectProps) {
+export function TreePane({
+  tree,
+  gitStates,
+  selection,
+  onSelect,
+}: { tree: CapabilityTree; gitStates: GitStates } & SelectProps) {
   return (
     <ul className="tree-root">
       {tree.capabilities.map((node) => (
@@ -278,6 +305,7 @@ export function TreePane({ tree, selection, onSelect }: { tree: CapabilityTree }
           node={node}
           breadcrumb={[]}
           defaultExpanded={true}
+          gitStates={gitStates}
           selection={selection}
           onSelect={onSelect}
         />

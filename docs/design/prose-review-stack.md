@@ -13,9 +13,11 @@ pure in-memory `CatalogSnapshot` queries. Markdown, YAML, Python AST, and TypeSc
 adapters resolve exact logical fragments over either the canonical load text or browser-supplied
 current text; every admitted family shares one whole-buffer validation and atomic-save pipeline.
 The Assembly preview is now shipped end to end — the backend `AssemblyRenderer` + the
-scenario-options/render API below, and the Assembly-mode frontend that consumes them — and the
-CheckRunner now executes the allowlisted targeted checks below on explicit user action; later
-slices add Python call arguments without revisiting this stack.
+scenario-options/render API below, and the Assembly-mode frontend that consumes them — the
+CheckRunner executes the allowlisted targeted checks below on explicit user action, and the
+read-only Git observation adapter annotates catalog files with working-tree status and serves
+HEAD↔worktree diffs rendered by `@pierre/diffs`; later slices add Python call arguments without
+revisiting this stack.
 
 ## HTTP layer: FastAPI + uvicorn
 
@@ -26,7 +28,7 @@ slices add Python call arguments without revisiting this stack.
 - **Endpoints are sync `def`** — catalog queries are pure in-memory work over the request's captured
   immutable generation. `load_catalog` builds the launch generation and each successful save builds
   one complete replacement generation; the current generation swaps atomically. The only per-request
-  repository-content reads belong to the two families below, and handlers return `*Out` Pydantic
+  repository-content reads belong to the three families below, and handlers return `*Out` Pydantic
   models (`perk.boundary.OutputModel`,
   `from_domain` constructors). Domain objects are never serialized into a response body —
   handlers query the snapshot and hand domain values to the `from_domain` constructors; every
@@ -39,11 +41,15 @@ slices add Python call arguments without revisiting this stack.
   the canonical routed unit's immediate parent then immediate children, with deterministic preorder
   subtree traversal, and never treat shape-expanded assembly layers as reassigned to the shape's
   capability. The endpoint reads no source and adds no graph fields or repository-content path.
-- **Exactly two repository-content read families.** Built-asset reads (`index.html` included) go
-  through `web.read_contained`; canonical-source reads and writes go through the SourceAdapter
-  package (`perk_dev.prose_review.source_adapter`) — root-bound, catalog-membership-checked,
-  text-only, and the exclusive canonical source I/O owner on the serving path (catalog *discovery*
-  reads mapped sources once at load time; that is the catalog module's own contract). The package
+- **Exactly three repository-content read families — the third is observation-only.** Built-asset
+  reads (`index.html` included) go through `web.read_contained`; canonical-source reads and writes
+  go through the SourceAdapter package (`perk_dev.prose_review.source_adapter`) — root-bound,
+  catalog-membership-checked, text-only, and the exclusive canonical source I/O owner on the
+  serving path (catalog *discovery* reads mapped sources once at load time; that is the catalog
+  module's own contract). The third family is the read-only **Git observation adapter**
+  (`perk_dev.prose_review.git`, its own section below): fixed non-mutating `git status`/`git diff`
+  invocations over the resolved repo root that observe rather than open repository files (git
+  itself reads object/worktree content), exposing no path the catalog does not already map. The package
   keeps the public facade stable while separating frozen contracts, contained reads/dispatch, and
   the Markdown/YAML/Python/TypeScript implementations. `source_adapter_for` is the single
   kind-plus-suffix dispatch authority for both focused read projection and save admission: every
@@ -336,6 +342,106 @@ slices add Python call arguments without revisiting this stack.
   exit code, truncation marker, Cancel/Run again), and captured output in a lazily-mounted
   `<details>` `<pre>` rendered strictly as JSX text.
 
+## Git observation: read-only working-tree status and diffs
+
+- **One app-owned read-only adapter.** `perk_dev.prose_review.git.GitReader` (app-lifetime,
+  injectable via `create_app(git_reader=...)` — the `check_commands` seam) owns ALL Git
+  interaction. Its argv tables are module-level constants pinned by test: `git status --porcelain
+  --no-renames --untracked-files=all -z` and the two diff forms (`git diff --no-ext-diff
+  --no-textconv --no-color HEAD -- <path>`; untracked paths take the synthesized add-diff
+  `git diff … --no-index -- /dev/null <path>`), each prefixed with `-c core.fsmonitor=false`
+  (the config key may name an external hook executable). No endpoint or process adapter exposes
+  any mutating Git operation (the PRD non-goal); structural never-rules pin every argv to
+  `git` + `status`/`diff` with zero mutating tokens, and the only request-derived argv content is
+  one catalog-membership-validated path placed after `--`. `src/perk/substrate/git.py` is
+  deliberately broad (checkout/reset/push/…) and is NOT the exposed adapter; everything lives in
+  perk-dev.
+- **One bytes-mode spawn site.** `git._run_captured_bytes` is the second sanctioned perk-dev
+  subprocess literal (the checks-`_spawn` precedent, `tests/test_tooling.py`): porcelain `-z`
+  emits raw pathname bytes and diff output embeds file content bytes, so
+  `perk.substrate.proc.run_captured` (text-mode, strict locale decode) is unusable. All decoding
+  happens inside the adapter's failure boundary: porcelain records decode strict-UTF-8 PER RECORD
+  (an undecodable pathname is counted as an anonymous outside-catalog change — it can never name
+  a catalog path — while a structurally malformed record fails the whole status closed); diff
+  bytes decode with `errors="replace"`, so a request can never surface a decode error.
+- **The narrowed, honest process-envelope claim.** The env overlay pins off prompts
+  (`GIT_TERMINAL_PROMPT=0`), opportunistic index writes (`GIT_OPTIONAL_LOCKS=0`), and
+  partial-clone lazy fetches (`GIT_NO_LAZY_FETCH=1` — `git diff HEAD` may otherwise contact a
+  promisor remote); fsmonitor hooks are pinned off per invocation; `--no-ext-diff`/`--no-textconv`
+  pin external diff drivers and textconv helpers off. Git-config-driven content filters
+  (`filter.<driver>.clean` selected by `.gitattributes`) are explicitly OUTSIDE the suppression
+  claim: they run with the repo owner's own configuration and authority — the workbench adds no
+  authority beyond what `git status`/`git diff` already execute in the owner's shell. The timeout
+  kill is `subprocess.run`'s child-only kill (no process-group escalation) — an accepted,
+  documented residual.
+- **The folded per-file state derives from the served diff baseline.** One view: working tree vs
+  `HEAD` (staged + unstaged combined). Porcelain XY pairs fold to the closed vocabulary
+  `modified | added | deleted | untracked | conflicted` by HEAD/worktree presence — unmerged
+  pairs are `conflicted`; a both-absent record (e.g. `AD`) is dropped entirely (its HEAD diff is
+  empty — no row, no badge, not counted); an unrecognized XY lands safely in `modified` — so a
+  badge never promises a change its diff can't show. `--no-index` rc 1 is disambiguated
+  explicitly (it means "differs" OR an operational error): only a clean-stderr, non-empty-patch
+  rc 1 is a difference; everything else fails closed as `git-error`.
+- **Bounds.** The only unbounded input — an arbitrary worktree file — is refused BEFORE spawning
+  git (`stat().st_size > 5_000_000` → `too-large`); the decoded diff text is capped at its first
+  500,000 code points with `truncated=True`. Accepted, documented residuals: HEAD-side content is
+  committed repository state (bounded by the repo the owner committed), and status output is
+  O(changed paths) porcelain records with no file content. Executions run with a fixed 10s
+  timeout, fresh per request — no caching, no coupling to the catalog generation.
+- **Two always-200 GET envelopes.** `GET /api/git/status` → `GitStatusOut`: the handler captures
+  the current generation and partitions the reader's folded entries by `units_for_path`
+  membership — catalog-mapped paths list path-sorted `entries`, everything else (anonymous
+  undecodable records included) is only ever counted in `other_change_count`. `GET
+  /api/git/diff?path=…` → `GitDiffOut`; a path with no mapped units in the current generation is
+  the fixed no-leak 404 `unknown path` (the `/api/source` posture) — reader unavailability is
+  never an error status but a tagged envelope with the closed reason vocabulary
+  `git-missing | timeout | too-large | git-error`. Envelope invariants are enforced by DTO
+  construction and re-pinned by the frontend's reject-unknown parsers (contradictions parse to
+  null): available status ⇒ `reason is None`; unavailable status ⇒ no entries and a zero count;
+  available diff ⇒ `reason is None` and `diff` a string (possibly empty); unavailable diff ⇒
+  `diff is None` and `truncated is False`. Both GETs are read-only (no CSRF), and time-varying
+  Git state is never baked into the immutable tree/inspect DTOs — the frontend joins by `path`.
+- **The frontend surfaces.** `src/git.ts` owns the closed wire vocabulary, the reject-unknown
+  parsers, the classified never-throwing fetch helpers, and the complete fixed copy tables;
+  `src/gitDiffCache.ts` is the per-row diff state machine (fetch once per status snapshot,
+  results retained across close/reopen, generation-tagged latest-wins invalidation on every new
+  status outcome, out-of-order stale responses dropped). The App loads status through the
+  existing catalog-tree effect shape (cancelled-flag cleanup) keyed on the catalog epoch plus a
+  manual refresh counter (bumped by the drawer's Refresh button and by a writes-frozen false→true
+  transition — a save landed even though the catalog refresh failed); during a refresh the prior
+  loaded view stays visible with Refresh locked. Tree unit branches (canonical and shape-layer
+  placements alike) render a text state badge (never color-only), the inspector identity block
+  gains a "Working tree" row with a View-changes drawer handoff, and the workspace drawer gains
+  the "Git changes" section (the Checks-section pattern): path-sorted rows with lazily-mounted
+  per-row diff bodies, a count-only note for changes outside the catalog, and fixed copy for
+  every loading/failed/unavailable/empty/truncated arm.
+
+### Diff rendering: `@pierre/diffs`
+
+- **The adoption.** Drawer diffs render through `@pierre/diffs@1.3.5` (exact dev-only pin,
+  wholesale through the workspace's zero-runtime-dependency posture): `PatchDiff` in unified
+  view with `disableFileHeader: true`, `hunkSeparators: 'simple'`, the default pierre dark/light
+  themes, and `themeType: 'system'`. The default `shiki-js` engine bundles through Vite and
+  serves same-origin (`script-src 'self'` unchanged; its lazily-imported language chunks are
+  ordinary `/assets` modules).
+- **The CSP tradeoff.** The library injects shadow-root `<style>` nodes AND emits `style="…"`
+  attributes, so `style-src` carries `'unsafe-inline'` (both the `-elem` and `-attr` vectors —
+  no narrower carve-out exists). Accepted deliberately: script-src/connect/img/font stay
+  `'self'`, so style injection has no exfiltration destination; the dom-sinks scan and the
+  reject-unknown parsers remain the HTML/script-injection guards, and our own code keeps the
+  app.css-only discipline as a house rule (the `app.css` header comment).
+- **The jsdom seam constraint.** The library's heavy DOM/layout machinery (ResizeObserver,
+  scrollbar measuring, virtualization) is not renderable in jsdom, so `GitDiffView.tsx` is the
+  ONLY module importing `@pierre/diffs/react`; `main.tsx` (the production composition root)
+  passes it into `App`, whose default for the `gitDiffView` prop is the built-in literal-text
+  view — one composition shape, no conditional fallback; the real-renderer leg is proven by tsc
+  plus the browser dogfood. `PatchDiff` rejects an empty patch, so empty and truncated rows
+  render the built-in text view/fixed copy instead — the rejection is structurally unreachable.
+- **Future-migration intent (recorded, not scheduled).** The save-review diff
+  (`saveReview.ts`'s `createTwoFilesPatch` `<pre>`) and Compare mode (`CenterPane`'s `diffLines`
+  panes) are candidates to migrate onto `@pierre/diffs` once the Git-diff adoption has soaked —
+  a deliberate user-requested follow-up, out of scope for the Git-annotation slice.
+
 ## Frontend: Vite + React + TypeScript
 
 - A dedicated npm workspace **`tools/prose-review/`** (the `docs/site` workspace precedent), all
@@ -432,10 +538,10 @@ keeps the guard streaming-transparent, which the offset-polling CheckRunner now 
 | Loopback origin only: exactly `127.0.0.1:<port>` | The launcher binds `127.0.0.1:0`; the guard requires the `Host` header to byte-equal the one printed origin (`localhost` spellings, foreign hosts, missing port all 403) | `test_prose_review_web.py::test_host_rejection` (×3); `test_prose_review_integration.py::test_wrong_host_is_rejected_over_real_http` |
 | Origin exact-match | An `Origin` header, when present, must equal `http://127.0.0.1:<port>` exactly, else 403 | `test_origin_exact_match_passes_and_foreign_origin_is_rejected` |
 | CSRF token on every non-GET/HEAD request | Meta-tag injection: `index.html`'s `__PROSE_REVIEW_CSRF__` placeholder is replaced at serve time with the process token (`secrets.token_urlsafe(32)`); the guard requires **exactly one** `X-Prose-Review-Csrf` header `secrets.compare_digest`-matching it (zero/duplicate/wrong → 403). Projection and save share one mutation-header helper and refuse missing/empty metadata locally. | `test_csrf_all_four_arms`; projection/save security arms in `test_prose_review_web.py`; `sourceLoad.test.ts`; `saveLoad.test.ts` |
-| Repo-rooted read containment | Every **repository-content** read belongs to one of two families. Built-asset reads (`index.html` included) go through the contained-read helper: re-resolve the dist root, require it under the resolved repo root, resolve the candidate, require it under the dist root and a regular file — an escaping `dist/` symlink cannot launder outside targets in. Canonical-source reads go through the SourceAdapter (`perk_dev.prose_review.source_adapter`): lexical absolute-path rejection, resolved containment under the repo root, catalog membership, one descriptor for regular-file/mode/byte sampling, and strict UTF-8 — serving-path-exclusive. Supplied-text projection never calls that reader. The adapter-owned random TypeScript request is controlled IPC containing only that already-authorized snapshot; its generated path, fixed helper root, and unconditional cleanup are separately pinned. | traversal, child-symlink, `assets/`-dir-symlink, `dist`-root-symlink, and `index.html`-symlink tests in `test_prose_review_web.py`; traversal/absolute/symlink/NUL/non-text, same-descriptor metadata, canonical-read exclusion, and TypeScript temp-snapshot/cleanup/root-separation arms in `test_prose_review_source.py` |
+| Repo-rooted read containment | Every **repository-content** read belongs to one of three families. Built-asset reads (`index.html` included) go through the contained-read helper: re-resolve the dist root, require it under the resolved repo root, resolve the candidate, require it under the dist root and a regular file — an escaping `dist/` symlink cannot launder outside targets in. Canonical-source reads go through the SourceAdapter (`perk_dev.prose_review.source_adapter`): lexical absolute-path rejection, resolved containment under the repo root, catalog membership, one descriptor for regular-file/mode/byte sampling, and strict UTF-8 — serving-path-exclusive. Supplied-text projection never calls that reader. The adapter-owned random TypeScript request is controlled IPC containing only that already-authorized snapshot; its generated path, fixed helper root, and unconditional cleanup are separately pinned. The third family is the observation-only GitReader (its own rows below). | traversal, child-symlink, `assets/`-dir-symlink, `dist`-root-symlink, and `index.html`-symlink tests in `test_prose_review_web.py`; traversal/absolute/symlink/NUL/non-text, same-descriptor metadata, canonical-read exclusion, and TypeScript temp-snapshot/cleanup/root-separation arms in `test_prose_review_source.py` |
 | Repo-rooted conditional write containment | Save accepts no caller path/selector/adapter/mode. The active catalog resolves every same-path unit through `source_adapter_for` and admits only one shared Markdown, YAML, Python, or TypeScript adapter identity; generated sources, unmapped/mixed families, absolute/traversal/nonregular paths, and every symlink component refuse. Python validation parses/compiler-validates without execution; TypeScript sends only the reviewed buffer and catalog selectors through the fixed parser-only helper. Both re-resolve every mapped selector before mutation. Early and post-temp no-follow samples enforce the load hash; only a late-matching same-directory temp reaches `os.replace`, while helper failure re-samples before returning determinate failure/conflict. | adapter-identity admission, Python non-execution/validation, real TypeScript helper success/failure, lineage, traversal/symlink, early/late conflict, exact-byte/mode, atomicity, and failure-cleanup arms in `test_prose_review_save.py`; production catalog-refresh and strict HTTP arms in `test_prose_review_web.py`; separate-root real-uvicorn saves in `test_prose_review_integration.py` |
 | Text-only rendering (this node's slice) | React JSX text interpolation (escaped by default) + a node:test source scan banning HTML sinks (`innerHTML`, `outerHTML`, `insertAdjacentHTML`, `dangerouslySetInnerHTML`, `document.write`) + the CSP as backstop | `tools/prose-review/dom-sinks.test.ts` (with a vacuousness self-check) |
-| CSP + hardening headers on **every** HTTP response | `Content-Security-Policy: default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self'; font-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'` plus `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer`, `Cache-Control: no-store` — stamped by the guard on rejections, 404s, and framework-generated 500s alike | header assertions on every response shape, incl. `test_unhandled_exception_response_is_still_header_stamped` (pins the outermost placement) |
+| CSP + hardening headers on **every** HTTP response | `Content-Security-Policy: default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self'; img-src 'self'; font-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'` plus `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer`, `Cache-Control: no-store` — stamped by the guard on rejections, 404s, and framework-generated 500s alike. `style-src` carries `'unsafe-inline'` solely for `@pierre/diffs`' shadow-root `<style>` nodes and style attributes (both `-elem` and `-attr` vectors; no narrower carve-out exists) — an accepted, documented envelope amendment; every other directive is unchanged and style injection has no exfiltration destination | header assertions on every response shape, incl. `test_unhandled_exception_response_is_still_header_stamped` (pins the outermost placement) |
 | No framework doc surfaces | `docs_url=None, redoc_url=None, openapi_url=None` | `test_framework_doc_surfaces_are_disabled` (×3) |
 | Closed fixed-argv check allowlist | `CHECK_COMMANDS` is the one execution table: complete fixed argv per id, zero request-derived argv, no `just`/`npm run` script indirection, no mutating flags, `run_ci` and the full gates structurally absent; the client sends only a closed `CheckId` (Literal-validated 422 boundary) | the allowlist pin + structural-invariant tests in `test_prose_review_checks.py`; 422/404 arms in `test_prose_review_web.py` |
 | No shell in check execution | One sanctioned `subprocess.Popen` site (`checks._spawn`): list argv, `cwd=`, `start_new_session=`, devnull stdin, merged text pipes | the Popen guard in `test_tooling.py`; spawn/capture arms in `test_prose_review_checks.py` |
@@ -444,6 +550,10 @@ keeps the guard streaming-transparent, which the offset-polling CheckRunner now 
 | Process-group cancellation/timeout with a single finalizer | Cancel/timeout set flags under the lock and escalate SIGTERM → 5s whole-group-probed grace → SIGKILL outside it (the probe is `killpg(pgid, 0)`, so a SIGTERM-resistant descendant is still killed); only the reader thread assigns terminal status, clears the slot, and cancels the timer; flag precedence `cancelled` > `timeout` > exit-code | cancel/timeout/idempotence/resistant-descendant/thread-settling tests in `test_prose_review_checks.py`; the real-HTTP cancel round trip + lifespan-shutdown-with-active-run arm in `test_prose_review_integration.py` |
 | Check shutdown is app-scoped | `runner.shutdown()` rides the FastAPI lifespan (no `atexit`): the active run's process group dies and the reader joins on graceful shutdown | `test_shutdown_kills_the_active_run_and_leaves_no_threads` |
 | Checks never touch catalog state | Check runs never take `source_transaction_mutex`, never read or swap the generation, and stay permitted while `writes_frozen`; they observe the live working tree by design | `test_checks_stay_permitted_while_writes_are_frozen` |
+| Fixed read-only Git argv + env pins | The three argv tables are module constants: every argv starts `git`, the subcommand ∈ {`status`, `diff`}, the only `-c` is `core.fsmonitor=false`, and no mutating token exists; the env overlay pins `GIT_TERMINAL_PROMPT=0`, `GIT_OPTIONAL_LOCKS=0`, `GIT_NO_LAZY_FETCH=1`; every execution uses `cwd=<repo root>` and a 10s timeout. Config-driven `filter.<driver>.clean` content filters are outside the suppression claim (the owner's own git config/authority); the timeout kill is child-only — both accepted, documented residuals | `test_fixed_argv_constants_are_pinned`, `test_structural_never_rules_over_every_fixed_argv`, `test_every_execution_uses_pinned_cwd_timeout_and_env_overlay` in `test_prose_review_git.py` |
+| One bytes-mode captured Git spawn | `git._run_captured_bytes` is the only other sanctioned perk-dev subprocess literal (list argv, explicit `check=`/`timeout=`); porcelain and diff bytes decode inside the adapter's failure boundary (per-record strict UTF-8, `errors="replace"` diff text), so responses are always-200 envelopes | the wrapper guard in `test_tooling.py`; fold/decode/failure arms in `test_prose_review_git.py` |
+| Catalog-scoped Git exposure | The status handler partitions folded entries by captured-generation `units_for_path` membership — non-catalog paths (anonymous undecodable records included) are count-only, never listed; a non-catalog diff path is the fixed no-leak 404 `unknown path`; the diff path is the only request-derived argv content and sits after `--` | partitioning/404/envelope pins in `test_prose_review_web.py`; the real-repo round trip in `test_prose_review_integration.py` |
+| Bounded Git diff serving | The worktree file is size-checked BEFORE any spawn (> 5,000,000 bytes → `too-large`); decoded diff text caps at 500,000 code points with `truncated=True` (truncated rows render the built-in text view, never the library). HEAD-side content (committed state) and O(changed paths) status output are accepted, documented bounds | bounds arms in `test_prose_review_git.py`; the truncated-row gate in `workspaceComponents.test.ts` |
 
 ## The round-trip proof split
 
@@ -454,7 +564,8 @@ closed wire vocabulary in `tools/prose-review/src/wire.ts`). `/api/catalog/summa
 its original contract; `parseSummary` remains its typed local mirror, now exercised by tests only.
 The relationship inspector, catalog search, and comparison projection added `/api/inspect`,
 `/api/search`, and `/api/compare` — all pure in-memory snapshot queries (the search index is built
-once in `create_app`), so **no third file-read family** was added. `parseUnitInspect`, `parseSearch`,
+once in `create_app`), so no new file-read family was added there (the Git observation adapter
+later became the deliberate, observation-only third family — its own section above). `parseUnitInspect`, `parseSearch`,
 `parseComparisonOptions`, and the nested source parsers structurally require known fields and closed
 vocabularies while tolerating additive unknown response keys. The comparison options loader adds
 response-origin matching plus endpoint-specific latest-wins/clear/dispose invalidation.

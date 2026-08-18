@@ -21,6 +21,16 @@ from perk_dev.prose_review.catalog import CatalogQueryError, CatalogSnapshot, lo
 from perk_dev.prose_review.checks import CheckCommand, CheckId
 from perk_dev.prose_review.comparison import comparison_options
 from perk_dev.prose_review.dto import ComparisonOptionsOut
+from perk_dev.prose_review.git import (
+    GitDiffAvailable,
+    GitDiffResult,
+    GitDiffUnavailable,
+    GitFileEntry,
+    GitReader,
+    GitStatusAvailable,
+    GitStatusResult,
+    GitStatusUnavailable,
+)
 from perk_dev.prose_review.source_adapter import typescript as typescript_adapter_module
 from perk_dev.prose_review.source_adapter.contract import SourceAdapter
 from perk_dev.prose_review.source_adapter.write import CATALOG_STALE_DETAIL
@@ -33,9 +43,9 @@ ROOT = Path(__file__).parents[1]
 ALLOWED_HOST = "127.0.0.1:5"
 TOKEN = "test-token"
 CSP = (
-    "default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; "
-    "img-src 'self'; font-src 'self'; base-uri 'none'; form-action 'none'; "
-    "frame-ancestors 'none'"
+    "default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; "
+    "connect-src 'self'; img-src 'self'; font-src 'self'; base-uri 'none'; "
+    "form-action 'none'; frame-ancestors 'none'"
 )
 PYTHON_UNIT_ID = "python-symbol:packages/perk-dev/src/perk_dev/audit/bounding.py:_PREAMBLE"
 TYPESCRIPT_UNIT_ID = "typescript-tool:plan_review"
@@ -182,6 +192,7 @@ def _client(
     raise_server_exceptions: bool = True,
     reload_catalog: Callable[[Path], CatalogSnapshot] | None = None,
     check_commands: Mapping[CheckId, CheckCommand] | None = None,
+    git_reader: GitReader | None = None,
 ) -> TestClient:
     app = create_app(
         snapshot=snapshot,
@@ -192,6 +203,7 @@ def _client(
         csrf_token=TOKEN,
         reload_catalog=reload_catalog,
         check_commands=check_commands,
+        git_reader=git_reader,
     )
     return TestClient(
         app,
@@ -3236,3 +3248,132 @@ def test_checks_stay_permitted_while_writes_are_frozen(
     final = _poll_check(client, started.json()["run"], lambda body: body["status"] != "running")
     assert final["status"] == "passed"
     assert "diagnosing" in final["output"]
+
+
+# ── The Git observation endpoints ─────────────────────────────────────────────
+
+
+class _FakeGitReader(GitReader):
+    """The injected reader double (the `check_commands` seam): fixed typed results."""
+
+    def __init__(
+        self,
+        status_result: GitStatusResult,
+        diffs: Mapping[str, GitDiffResult] | None = None,
+    ) -> None:
+        super().__init__(Path("/nonexistent"))
+        self._status_result = status_result
+        self._diffs = dict(diffs or {})
+
+    def status(self) -> GitStatusResult:
+        return self._status_result
+
+    def diff(self, path: str) -> GitDiffResult:
+        return self._diffs[path]
+
+
+def test_git_status_partitions_by_catalog_membership_and_sorts(
+    snapshot: CatalogSnapshot, repo: Path
+) -> None:
+    catalog_paths = sorted({unit.candidate.path for unit in snapshot.units})
+    first, second = catalog_paths[0], catalog_paths[1]
+    reader = _FakeGitReader(
+        GitStatusAvailable(
+            entries=(
+                # Deliberately unsorted; the two non-catalog paths must be count-only.
+                GitFileEntry(path=second, state="modified"),
+                GitFileEntry(path="not-in-catalog.xyz", state="added"),
+                GitFileEntry(path=first, state="untracked"),
+                GitFileEntry(path="another/outside.txt", state="deleted"),
+            ),
+            other_paths=2,
+        )
+    )
+    response = _client(snapshot, repo, git_reader=reader).get("/api/git/status")
+    assert response.status_code == 200
+    _assert_security_headers(response)
+    payload = response.json()
+    assert list(payload.keys()) == ["status", "reason", "entries", "other_change_count"]
+    assert payload["status"] == "available"
+    assert payload["reason"] is None
+    assert payload["entries"] == [
+        {"path": first, "state": "untracked"},
+        {"path": second, "state": "modified"},
+    ]
+    # Anonymous undecodable records (2) plus the non-catalog listed paths (2).
+    assert payload["other_change_count"] == 4
+
+
+def test_git_status_unavailable_envelope_is_always_200(
+    snapshot: CatalogSnapshot, repo: Path
+) -> None:
+    reader = _FakeGitReader(GitStatusUnavailable(reason="git-error"))
+    response = _client(snapshot, repo, git_reader=reader).get("/api/git/status")
+    assert response.status_code == 200
+    _assert_security_headers(response)
+    # The pinned envelope invariant: unavailable ⇒ empty entries AND a zero count.
+    assert response.json() == {
+        "status": "unavailable",
+        "reason": "git-error",
+        "entries": [],
+        "other_change_count": 0,
+    }
+
+
+def test_git_diff_available_and_unavailable_envelopes(
+    snapshot: CatalogSnapshot, repo: Path
+) -> None:
+    catalog_paths = sorted({unit.candidate.path for unit in snapshot.units})
+    diffable, refused, empty = catalog_paths[0], catalog_paths[1], catalog_paths[2]
+    reader = _FakeGitReader(
+        GitStatusAvailable(entries=(), other_paths=0),
+        diffs={
+            diffable: GitDiffAvailable(diff="+changed\n", truncated=True),
+            refused: GitDiffUnavailable(reason="too-large"),
+            empty: GitDiffAvailable(diff="", truncated=False),
+        },
+    )
+    client = _client(snapshot, repo, git_reader=reader)
+
+    available = client.get("/api/git/diff", params={"path": diffable})
+    assert available.status_code == 200
+    _assert_security_headers(available)
+    payload = available.json()
+    assert list(payload.keys()) == ["status", "reason", "diff", "truncated"]
+    # The pinned envelope invariant: available ⇒ reason is None and diff is a string.
+    assert payload == {
+        "status": "available",
+        "reason": None,
+        "diff": "+changed\n",
+        "truncated": True,
+    }
+
+    unavailable = client.get("/api/git/diff", params={"path": refused})
+    assert unavailable.status_code == 200
+    # The pinned envelope invariant: unavailable ⇒ diff is None and truncated False.
+    assert unavailable.json() == {
+        "status": "unavailable",
+        "reason": "too-large",
+        "diff": None,
+        "truncated": False,
+    }
+
+    # A clean catalog path answers with an empty available diff, never a 404.
+    assert client.get("/api/git/diff", params={"path": empty}).json() == {
+        "status": "available",
+        "reason": None,
+        "diff": "",
+        "truncated": False,
+    }
+
+
+def test_git_diff_non_catalog_path_is_a_fixed_404(snapshot: CatalogSnapshot, repo: Path) -> None:
+    reader = _FakeGitReader(GitStatusAvailable(entries=(), other_paths=0))
+    client = _client(snapshot, repo, git_reader=reader)
+    response = client.get("/api/git/diff", params={"path": "not-in-catalog.xyz"})
+    assert response.status_code == 404
+    assert response.json() == {"detail": "unknown path"}
+    _assert_security_headers(response)
+    missing = client.get("/api/git/diff")
+    assert missing.status_code == 422
+    _assert_security_headers(missing)
