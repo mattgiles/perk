@@ -241,7 +241,11 @@ body {
 }
 
 .tree-entry.selected {
+  /* Shape + weight carry the selection (never hue alone); the inset start bar
+     is box-shadow so no layout shift occurs. */
   background: color-mix(in srgb, currentcolor 18%, transparent);
+  font-weight: 600;
+  box-shadow: inset 0.2rem 0 0 0 currentcolor;
 }
 
 .tree-layer {
@@ -561,12 +565,34 @@ body {
   border-radius: 0.6rem;
 }
 
+/* The legend badges mirror the chunk text decorations (non-color signal). */
 .comparison-removed-badge {
   background: color-mix(in srgb, #c92a2a 16%, transparent);
+  text-decoration: line-through;
 }
 
 .comparison-added-badge {
   background: color-mix(in srgb, #2f9e44 16%, transparent);
+  text-decoration: underline;
+}
+
+.comparison-legend button {
+  font: inherit;
+  color: inherit;
+  background: none;
+  border: 1px solid color-mix(in srgb, currentcolor 35%, transparent);
+  border-radius: 0.25rem;
+  padding: 0.05rem 0.5rem;
+  cursor: pointer;
+}
+
+.comparison-legend button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.comparison-change-counter {
+  white-space: nowrap;
 }
 
 .comparison-grid {
@@ -614,12 +640,16 @@ body {
   opacity: 0.72;
 }
 
+/* Explicit del/ins decorations: the guaranteed non-color diff signal (the tinted
+   backgrounds are retained as the secondary cue). */
 .comparison-removed {
   background: color-mix(in srgb, #c92a2a 20%, transparent);
+  text-decoration: line-through;
 }
 
 .comparison-added {
   background: color-mix(in srgb, #2f9e44 20%, transparent);
+  text-decoration: underline;
 }
 
 .workspace-drawer {
@@ -1055,4 +1085,54 @@ body {
   line-height: 1.4;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
+}
+
+/* ── Keyboard & accessibility ───────────────────────────────────── */
+
+/* Authored focus rings for the programmatic-focus targets: UA :focus-visible
+   heuristics don't reliably ring tabIndex={-1} containers or del/ins chunks.
+   Native controls keep their UA defaults — no other focus restyling, and no
+   outline suppression anywhere (guarded by a source-scan test). */
+.app-header:focus,
+.tree-pane:focus,
+.center-pane:focus,
+.inspector-pane:focus,
+.workspace-drawer:focus,
+.comparison-pane:focus,
+.comparison-removed:focus,
+.comparison-added:focus {
+  outline: 2px solid currentcolor;
+  outline-offset: -2px;
+}
+
+/* The 200%-zoom reflow (a 1280–1920-px window at 200% is a 640–960-CSS-px
+   viewport): the inspector stacks below the center pane, the tree stays left,
+   and every pane keeps its own scroll. */
+@media (max-width: 960px) {
+  .app {
+    grid-template-columns: minmax(12rem, 16rem) minmax(0, 1fr);
+    grid-template-rows: auto minmax(0, 3fr) minmax(0, 2fr) auto;
+    grid-template-areas:
+      "header header"
+      "tree center"
+      "tree inspector"
+      "drawer drawer";
+  }
+
+  .inspector-pane {
+    border-left: none;
+    border-top: 1px solid color-mix(in srgb, currentcolor 25%, transparent);
+  }
+
+  .comparison-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .comparison-pane {
+    min-height: 12rem;
+  }
+
+  .search-bar {
+    flex-wrap: wrap;
+  }
 }

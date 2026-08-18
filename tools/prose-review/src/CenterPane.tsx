@@ -1,5 +1,5 @@
 import { type Change, diffLines } from "diff";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { Mode } from "./App.tsx";
 import { AssemblyPane, type AssemblyPaneCallbacks } from "./AssemblyPane.tsx";
 import type { AssemblySessionState } from "./assemblySession.ts";
@@ -57,6 +57,34 @@ function SourceLoadPresentation({
 }) {
   const workspace = useWorkspace();
   const [clipboardFailure, setClipboardFailure] = useState<string | null>(null);
+  // The review-gated Mod+S shortcut, mirroring the `Review full-file diff` /
+  // `Save reviewed file` button conditions exactly (never skipping the review
+  // gate); the app shell suppresses the browser save-page dialog itself.
+  useEffect(() => {
+    if (state.status !== "loaded") {
+      return;
+    }
+    const { source: loaded } = state;
+    const onKeyDown = (event: KeyboardEvent): void => {
+      // A held chord auto-repeats: without this guard the first keydown opens the
+      // review and a repeat immediately saves — crossing the gate on one press.
+      if (
+        event.repeat ||
+        (event.key !== "s" && event.key !== "S") ||
+        (!event.ctrlKey && !event.metaKey) ||
+        event.altKey
+      ) {
+        return;
+      }
+      if (loaded.review === null && loaded.canReview) {
+        workspace.beginSaveReview(loaded.path);
+      } else if (loaded.review !== null && loaded.canSave) {
+        void workspace.saveReviewed(loaded.path);
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [state, workspace]);
   if (state.status === "loading") {
     return <p className="pane-hint">Loading source…</p>;
   }
@@ -409,25 +437,45 @@ function ComparisonHeader({ placement }: { placement: ComparisonPlacement }) {
   );
 }
 
+// Changed chunks render as native del/ins (semantics + guaranteed non-color
+// decoration in app.css); each changed chunk appears in exactly one pane, so its
+// chunk index is the unique traversal anchor (`data-change-index`, tabIndex={-1}).
 function DiffChunks({ chunks, side }: { chunks: Change[]; side: "left" | "right" }) {
   let offset = 0;
   return (
     <pre className="comparison-source-text">
-      {chunks.map((chunk) => {
+      {chunks.map((chunk, chunkIndex) => {
         offset += chunk.value.length;
         if ((side === "left" && chunk.added) || (side === "right" && chunk.removed)) {
           return null;
         }
-        const changed = side === "left" ? chunk.removed : chunk.added;
+        const key = `${offset}:${chunk.added}:${chunk.removed}`;
+        if (side === "left" && chunk.removed) {
+          return (
+            <del
+              key={key}
+              className="comparison-removed"
+              tabIndex={-1}
+              data-change-index={chunkIndex}
+            >
+              {chunk.value}
+            </del>
+          );
+        }
+        if (side === "right" && chunk.added) {
+          return (
+            <ins
+              key={key}
+              className="comparison-added"
+              tabIndex={-1}
+              data-change-index={chunkIndex}
+            >
+              {chunk.value}
+            </ins>
+          );
+        }
         return (
-          <span
-            key={`${offset}:${chunk.added}:${chunk.removed}`}
-            className={
-              changed
-                ? `comparison-${side === "left" ? "removed" : "added"}`
-                : "comparison-unchanged"
-            }
-          >
+          <span key={key} className="comparison-unchanged">
             {chunk.value}
           </span>
         );
@@ -448,7 +496,12 @@ function ComparisonSourcePane({
   side: "left" | "right";
 }) {
   return (
-    <section className="comparison-pane">
+    <section
+      className="comparison-pane"
+      // biome-ignore lint/a11y/noNoninteractiveTabindex: an independently scrolling region must be focusable to be keyboard-scrollable.
+      tabIndex={0}
+      aria-label={side === "left" ? "Origin source" : "Target source"}
+    >
       <ComparisonHeader placement={placement} />
       {state.status === "loading" && <p className="pane-hint">Loading source…</p>}
       {state.status === "refused" && (
@@ -482,11 +535,74 @@ function ComparisonPanes({
       ? diffLines(sourceCurrentText(left.source.view), sourceCurrentText(right.source.view))
       : null;
   const identical = chunks?.every((chunk) => !chunk.added && !chunk.removed) === true;
+  // The change-traversal state: `currentChange` is the position within the changed
+  // chunks (-1 = not started, so the first `Next change` lands on change 1). The
+  // state resets naturally — SelectedComparisonPair remounts the panes per pairKey.
+  // The traversal order: chunk indexes carrying a change, in chunk order (each
+  // changed chunk renders in exactly one pane, so an index is a unique anchor).
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const changed =
+    chunks === null
+      ? []
+      : chunks.flatMap((chunk, index) => (chunk.added || chunk.removed ? [index] : []));
+  const [currentChange, setCurrentChange] = useState(-1);
+  const canPrevious = currentChange > 0;
+  const canNext = changed.length > 0 && currentChange < changed.length - 1;
+  const focusChange = (position: number): void => {
+    const chunkIndex = changed[position];
+    if (chunkIndex === undefined) {
+      return;
+    }
+    const element = containerRef.current?.querySelector<HTMLElement>(
+      `[data-change-index="${chunkIndex}"]`,
+    );
+    if (element === null || element === undefined) {
+      return;
+    }
+    setCurrentChange(position);
+    element.focus();
+    element.scrollIntoView({ block: "nearest" });
+  };
+  const previousChange = (): void => {
+    if (canPrevious) {
+      focusChange(currentChange - 1);
+    }
+  };
+  const nextChange = (): void => {
+    if (canNext) {
+      focusChange(currentChange + 1);
+    }
+  };
   return (
-    <div className="comparison-result">
+    // biome-ignore lint/a11y/noStaticElementInteractions: the container only delegates the unmodified n/p shortcuts; focus lives on the del/ins chunks.
+    <div
+      ref={containerRef}
+      className="comparison-result"
+      onKeyDown={(event) => {
+        if (event.ctrlKey || event.metaKey || event.altKey || event.shiftKey) {
+          return;
+        }
+        if (event.key === "n") {
+          event.preventDefault();
+          nextChange();
+        } else if (event.key === "p") {
+          event.preventDefault();
+          previousChange();
+        }
+      }}
+    >
       <div className="comparison-legend">
         <span className="comparison-removed-badge">Removed from origin</span>
         <span className="comparison-added-badge">Added in target</span>
+        <button type="button" onClick={previousChange} disabled={!canPrevious}>
+          Previous change
+        </button>
+        <button type="button" onClick={nextChange} disabled={!canNext}>
+          Next change
+        </button>
+        <span className="comparison-change-counter">
+          Change {currentChange + 1} of {changed.length}
+        </span>
         {identical && <span>No differences in current content.</span>}
       </div>
       <div className="comparison-grid">

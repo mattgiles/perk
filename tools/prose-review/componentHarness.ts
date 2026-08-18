@@ -3,6 +3,9 @@
 // One DOM install/teardown, one act-wrapped render/interaction surface, and the
 // fetch-stub install/restore idiom — the suites own only their fixtures and routes.
 
+// The bootstrap DOM must exist before react-dom's module-scope environment
+// probes run — keep this side-effect import first.
+import "./domBootstrap.ts";
 import assert from "node:assert/strict";
 import { setImmediate as tick } from "node:timers/promises";
 import { JSDOM } from "jsdom";
@@ -27,7 +30,8 @@ export type RenderHarness = {
   container: HTMLElement;
   render: (node: React.ReactNode) => Promise<void>;
   click: (element: Element) => Promise<void>;
-  input: (element: HTMLTextAreaElement, value: string) => Promise<void>;
+  keydown: (element: Element, key: string, init?: KeyboardEventInit) => Promise<KeyboardEvent>;
+  input: (element: HTMLInputElement | HTMLTextAreaElement, value: string) => Promise<void>;
   selectOption: (element: HTMLSelectElement, value: string) => Promise<void>;
   settle: () => Promise<void>;
   cleanup: () => Promise<void>;
@@ -58,6 +62,7 @@ export function installDom(options: InstallDomOptions = {}): RenderHarness {
     Node: dom.window.Node,
     Event: dom.window.Event,
     MouseEvent: dom.window.MouseEvent,
+    KeyboardEvent: dom.window.KeyboardEvent,
     InputEvent: dom.window.InputEvent,
     MutationObserver: dom.window.MutationObserver,
     getComputedStyle: dom.window.getComputedStyle.bind(dom.window),
@@ -67,6 +72,12 @@ export function installDom(options: InstallDomOptions = {}): RenderHarness {
   for (const [name, value] of Object.entries(globals)) {
     previous.set(name, Object.getOwnPropertyDescriptor(globalThis, name));
     Object.defineProperty(globalThis, name, { configurable: true, writable: true, value });
+  }
+
+  // jsdom lacks scrollIntoView; production calls it plainly, so a no-op polyfill
+  // keeps the traversal handlers runnable under node:test.
+  if (dom.window.Element.prototype.scrollIntoView === undefined) {
+    dom.window.Element.prototype.scrollIntoView = () => undefined;
   }
 
   const container = dom.window.document.querySelector<HTMLElement>("#root");
@@ -87,16 +98,32 @@ export function installDom(options: InstallDomOptions = {}): RenderHarness {
         await tick();
       });
     },
-    async input(element: HTMLTextAreaElement, value: string): Promise<void> {
-      const setter = Object.getOwnPropertyDescriptor(
-        dom.window.HTMLTextAreaElement.prototype,
-        "value",
-      )?.set;
+    async keydown(element: Element, key: string, init?: KeyboardEventInit): Promise<KeyboardEvent> {
+      // Bubbling + cancelable mirrors real key events: React's delegated onKeyDown
+      // handlers and window-level listeners both observe it, and tests can assert
+      // defaultPrevented afterwards.
+      const event = new dom.window.KeyboardEvent("keydown", {
+        bubbles: true,
+        cancelable: true,
+        key,
+        ...init,
+      });
+      await React.act(async () => {
+        element.dispatchEvent(event);
+        await tick();
+      });
+      return event;
+    },
+    async input(element: HTMLInputElement | HTMLTextAreaElement, value: string): Promise<void> {
+      // The element's own prototype supplies the native value setter (input and
+      // textarea alike), bypassing React's value tracker so the dispatched input
+      // event re-renders the controlled component.
+      const setter = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(element), "value")?.set;
       assert.ok(setter !== undefined);
       const previousValue = element.value;
       await React.act(async () => {
         setter.call(element, value);
-        const tracked = element as HTMLTextAreaElement & {
+        const tracked = element as (HTMLInputElement | HTMLTextAreaElement) & {
           _valueTracker?: { setValue: (next: string) => void };
         };
         tracked._valueTracker?.setValue(previousValue);

@@ -185,6 +185,13 @@ test("App preserves fragment sessions and invalidates changed Compare origins", 
     );
     assert.equal(selectedTargets.length, 1);
     assert.equal(selectedTargets[0], duplicateTargets[1]);
+    // The selected comparison target carries aria-current and yields it on reselection.
+    assert.equal(itemAt(duplicateTargets, 1).getAttribute("aria-current"), "true");
+    assert.equal(itemAt(duplicateTargets, 0).getAttribute("aria-current"), null);
+    await harness.click(itemAt(duplicateTargets, 0));
+    assert.equal(itemAt(duplicateTargets, 0).getAttribute("aria-current"), "true");
+    assert.equal(itemAt(duplicateTargets, 1).getAttribute("aria-current"), null);
+    await harness.click(itemAt(duplicateTargets, 1));
     assert.match(harness.container.textContent ?? "", /No differences in current content/);
 
     await harness.click(buttonByLabel(harness.container, `Expand fragments for ${UNIT_A.id}`));
@@ -350,8 +357,8 @@ test("CenterPane shares equal-unit source and renders native line chunks for dis
     assert.equal(harness.container.querySelectorAll(".comparison-pane").length, 2);
     assert.equal(harness.container.querySelectorAll(".comparison-header").length, 2);
     assert.match(harness.container.textContent ?? "", /No differences in current content/);
-    assert.equal(harness.container.querySelectorAll(".comparison-added").length, 0);
-    assert.equal(harness.container.querySelectorAll(".comparison-removed").length, 0);
+    assert.equal(harness.container.querySelectorAll("ins.comparison-added").length, 0);
+    assert.equal(harness.container.querySelectorAll("del.comparison-removed").length, 0);
 
     sourceUrls.length = 0;
     sources = new Map([
@@ -366,9 +373,9 @@ test("CenterPane shares equal-unit source and renders native line chunks for dis
     const distinct = loadedComparison(placement(UNIT_A), distinctChoice);
     await harness.render(centerElement(workspace, selection, distinct.state, distinct.selected));
     assert.deepEqual(sourceUrls, ["/api/source?unit=unit%3Ab"]);
-    assert.equal(harness.container.querySelector(".comparison-removed")?.textContent, "same\n");
+    assert.equal(harness.container.querySelector("del.comparison-removed")?.textContent, "same\n");
     assert.equal(
-      harness.container.querySelector(".comparison-added")?.textContent,
+      harness.container.querySelector("ins.comparison-added")?.textContent,
       "before\nright only\n",
     );
     const headers = [...harness.container.querySelectorAll(".comparison-header")].map(

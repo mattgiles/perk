@@ -1,5 +1,7 @@
 import {
   type ComponentType,
+  type KeyboardEvent as ReactKeyboardEvent,
+  type RefObject,
   useEffect,
   useMemo,
   useRef,
@@ -35,6 +37,7 @@ import {
   type GitDiffRowState,
 } from "./gitDiffCache.ts";
 import { InspectorPane } from "./InspectorPane.tsx";
+import { cyclePane, moveFocusInList } from "./keyboardNav.ts";
 import { SearchBar } from "./SearchBar.tsx";
 import { INDETERMINATE_DETAIL } from "./save.ts";
 import {
@@ -268,10 +271,24 @@ function GitChangesSection({
   );
 }
 
-function WorkspaceButton({ open, onToggle }: { open: boolean; onToggle: () => void }) {
+function WorkspaceButton({
+  open,
+  onToggle,
+  buttonRef,
+}: {
+  open: boolean;
+  onToggle: () => void;
+  buttonRef: RefObject<HTMLButtonElement | null>;
+}) {
   const attentionFiles = useAttentionFiles();
   return (
-    <button type="button" className="workspace-button" aria-expanded={open} onClick={onToggle}>
+    <button
+      ref={buttonRef}
+      type="button"
+      className="workspace-button"
+      aria-expanded={open}
+      onClick={onToggle}
+    >
       Workspace ({attentionFiles.length})
     </button>
   );
@@ -280,6 +297,8 @@ function WorkspaceButton({ open, onToggle }: { open: boolean; onToggle: () => vo
 function WorkspaceDrawer({
   open,
   onOpen,
+  onClose,
+  sectionRef,
   checks,
   onRunCheck,
   onCancelCheck,
@@ -291,6 +310,8 @@ function WorkspaceDrawer({
 }: {
   open: boolean;
   onOpen: (target: SourceTarget) => void;
+  onClose: () => void;
+  sectionRef: RefObject<HTMLElement | null>;
   checks: CheckSessionState;
   onRunCheck: (check: CheckId) => void;
   onCancelCheck: () => void;
@@ -309,7 +330,18 @@ function WorkspaceDrawer({
   // renders whenever a run, a retained record, or a notice exists.
   const showChecks = checks.active !== null || checks.history.length > 0 || checks.notice !== null;
   return (
-    <section className="workspace-drawer" aria-label="Workspace">
+    <section
+      ref={sectionRef}
+      className="workspace-drawer"
+      aria-label="Workspace"
+      tabIndex={-1}
+      onKeyDown={(event) => {
+        if (event.key === "Escape") {
+          event.preventDefault();
+          onClose();
+        }
+      }}
+    >
       <h2>Workspace ({attentionFiles.length})</h2>
       {attentionFiles.length === 0 ? (
         <p>No files need attention.</p>
@@ -450,6 +482,66 @@ export function App({
   const originKey = selectedOriginKey(selection);
   const request = selection?.type === "unit" ? comparisonRequest(selection) : null;
   const assemblyShapeId = selection?.type === "shape" ? selection.shape.id : null;
+
+  // The F6 pane-cycle targets (tabIndex={-1} containers). The drawer ref is null
+  // while the drawer is unmounted, so the cycle skips it; the Workspace button ref
+  // is the drawer's Esc focus-return target.
+  const headerRef = useRef<HTMLElement | null>(null);
+  const treeRef = useRef<HTMLElement | null>(null);
+  const centerRef = useRef<HTMLElement | null>(null);
+  const inspectorRef = useRef<HTMLElement | null>(null);
+  const drawerRef = useRef<HTMLElement | null>(null);
+  const workspaceButtonRef = useRef<HTMLButtonElement | null>(null);
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent): void => {
+      if (event.key === "F6") {
+        const next = cyclePane(
+          [
+            headerRef.current,
+            treeRef.current,
+            centerRef.current,
+            inspectorRef.current,
+            drawerRef.current,
+          ],
+          document.activeElement,
+          event.shiftKey ? -1 : 1,
+        );
+        next?.focus();
+        event.preventDefault();
+        return;
+      }
+      // Suppress the browser's save-page dialog app-wide; the acting Mod+S
+      // listener lives in the Edit-mode source presentation (review-gated).
+      if (
+        (event.key === "s" || event.key === "S") &&
+        (event.ctrlKey || event.metaKey) &&
+        !event.altKey
+      ) {
+        event.preventDefault();
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, []);
+
+  // Tree arrow navigation, attached to the nav container (not TreePane) so the
+  // post-F6 container-focused case enters the list. Collapsed branches are
+  // unmounted, so the DOM-order button list is exactly the visible order.
+  const treeKeyDown = (event: ReactKeyboardEvent<HTMLElement>): void => {
+    const { key } = event;
+    if (key !== "ArrowDown" && key !== "ArrowUp" && key !== "Home" && key !== "End") {
+      return;
+    }
+    const nav = treeRef.current;
+    if (nav === null) {
+      return;
+    }
+    const next = moveFocusInList([...nav.querySelectorAll("button")], document.activeElement, key);
+    next?.focus();
+    // Clamped steps are handled too: arrow keys never scroll the tree pane.
+    event.preventDefault();
+  };
 
   useEffect(
     () =>
@@ -611,15 +703,25 @@ export function App({
   return (
     <WorkspaceProvider workspace={workspace}>
       <div className="app">
-        <header className="app-header">
+        <header ref={headerRef} className="app-header" tabIndex={-1}>
           <h1>Prose Review</h1>
           <SearchBar key={writeState.catalogEpoch} onSelect={selectSource} />
-          <WorkspaceButton open={drawerOpen} onToggle={() => setDrawerOpen((open) => !open)} />
+          <WorkspaceButton
+            open={drawerOpen}
+            onToggle={() => setDrawerOpen((open) => !open)}
+            buttonRef={workspaceButtonRef}
+          />
           {(writeState.frozen || writeState.suspended) && (
             <p className="write-state-warning">{writeState.detail ?? INDETERMINATE_DETAIL}</p>
           )}
         </header>
-        <nav className="pane tree-pane" aria-label="Capability tree">
+        <nav
+          ref={treeRef}
+          className="pane tree-pane"
+          aria-label="Capability tree"
+          tabIndex={-1}
+          onKeyDown={treeKeyDown}
+        >
           {treeState.status === "loading" && <p className="pane-hint">Loading catalog tree…</p>}
           {treeState.status === "failed" && (
             <p className="pane-hint">Failed to load catalog tree.</p>
@@ -634,7 +736,7 @@ export function App({
             />
           )}
         </nav>
-        <main className="pane center-pane">
+        <main ref={centerRef} className="pane center-pane" aria-label="Center pane" tabIndex={-1}>
           <CenterPane
             mode={mode}
             onModeChange={changeMode}
@@ -651,7 +753,12 @@ export function App({
             onRunCheck={startCheck}
           />
         </main>
-        <aside className="pane inspector-pane" aria-label="Inspector">
+        <aside
+          ref={inspectorRef}
+          className="pane inspector-pane"
+          aria-label="Inspector"
+          tabIndex={-1}
+        >
           <InspectorPane
             key={writeState.catalogEpoch}
             mode={mode}
@@ -671,7 +778,14 @@ export function App({
           onOpen={(target) => {
             selectSource(target);
             setDrawerOpen(false);
+            // Focus must never be left on a node the drawer close unmounts.
+            centerRef.current?.focus();
           }}
+          onClose={() => {
+            setDrawerOpen(false);
+            workspaceButtonRef.current?.focus();
+          }}
+          sectionRef={drawerRef}
           checks={checkState}
           onRunCheck={startCheck}
           onCancelCheck={checkSession.cancel}
