@@ -54,7 +54,7 @@ def _authed(monkeypatch) -> None:
 def _merged_detail(**over: object) -> delivery.LandResult.Plan:
     fields: dict[str, object] = {
         "dry_run": False,
-        "pr": delivery.LandResult.MergedPr(number=42, state="MERGED"),
+        "pr": delivery.LandResult.PrSummary(number=42, state="MERGED"),
         "objective": delivery.LandResult.ObjectiveUpdate(None, (), "no_objective_link"),
         "learn": delivery.LandResult.LearnUpdate((), "no_consumed_learn"),
         "plan_issue_closed": False,
@@ -67,7 +67,7 @@ def _merged_detail(**over: object) -> delivery.LandResult.Plan:
 def _dry_run_detail() -> delivery.LandResult.Plan:
     return delivery.LandResult.Plan(
         dry_run=True,
-        pr=delivery.LandResult.MergedPr(number=0, state="OPEN"),
+        pr=delivery.LandResult.PrSummary(number=0, state="OPEN"),
         objective=delivery.LandResult.ObjectiveUpdate(None, (), "dry_run"),
         learn=delivery.LandResult.LearnUpdate((), "dry_run"),
     )
@@ -132,7 +132,15 @@ def test_dry_run_request_rides_the_scripted_service(monkeypatch):
     result = _run(["pr", "land", "--dry-run", "--json"])
     assert result.exit_code == 0
     assert requests == [
-        delivery.LandRequest(kind="plan", plan_id="7", branch="plan-7", dry_run=True)
+        delivery.LandRequest(
+            kind="plan",
+            plan_id="7",
+            branch="plan-7",
+            objective_id=None,
+            consumed_learn=(),
+            delivery_lineage=None,
+            dry_run=True,
+        )
     ]
 
 
@@ -370,7 +378,7 @@ def test_landed_summary_lines():
 
 def test_result_to_dict_carries_objective():
     result = PrLandResult(
-        pr=delivery.LandResult.MergedPr(number=42, state="MERGED"),
+        pr=delivery.LandResult.PrSummary(number=42, state="MERGED"),
         branch="plan-7",
         issue="7",
         pending_learn=True,
@@ -395,7 +403,7 @@ def _land_result(
     learn: delivery.LandResult.LearnUpdate, *, learn_state: str | None = "pending"
 ) -> PrLandResult:
     return PrLandResult(
-        pr=delivery.LandResult.MergedPr(number=42, state="MERGED"),
+        pr=delivery.LandResult.PrSummary(number=42, state="MERGED"),
         branch="plan-7",
         issue="7",
         pending_learn=True,
@@ -431,7 +439,7 @@ def test_render_human_warns_on_a_failed_learn_state_stamp(capsys):
 
 def test_render_human_reports_close_and_objective_lines(capsys):
     result = PrLandResult(
-        pr=delivery.LandResult.MergedPr(number=42, state="MERGED"),
+        pr=delivery.LandResult.PrSummary(number=42, state="MERGED"),
         branch="plan-7",
         issue="7",
         pending_learn=True,

@@ -42,7 +42,7 @@ _BENIGN_LEARN_SKIPS = frozenset({"no_consumed_learn", "dry_run"})
 
 @dataclass(frozen=True)
 class PrLandResult:
-    pr: delivery.LandResult.MergedPr
+    pr: delivery.LandResult.PrSummary
     branch: str
     issue: str  # the opaque plan-issue id (GitHub: "42"; Linear: "ENG-123")
     pending_learn: bool
@@ -173,14 +173,14 @@ def _landed_summary(obj_update: delivery.LandResult.ObjectiveUpdate) -> str:
 
 
 class LandPrOut(OutputModel):
-    """The serialization boundary of :class:`delivery.LandResult.MergedPr`
+    """The serialization boundary of :class:`delivery.LandResult.PrSummary`
     (field order load-bearing)."""
 
     number: int
     state: str
 
     @classmethod
-    def from_domain(cls, pr: delivery.LandResult.MergedPr) -> "LandPrOut":
+    def from_domain(cls, pr: delivery.LandResult.PrSummary) -> "LandPrOut":
         return cls(number=pr.number, state=pr.state)
 
 

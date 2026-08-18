@@ -53,8 +53,8 @@ Delivery.sync(SyncRequest {mode, objective_id, run_id?, include_base?, dry_run?,
 Delivery.recover(RecoverRequest {kind=operation_conclusion|cancellation_metadata,
                                  objective_id, action?, dry_run?, operation_id?}, consent=...)
   -> RecoverResult {kind; exactly one of OperationConclusion | CancellationMetadata}
-Delivery.land(LandRequest {kind=plan, plan_id, branch, objective_id?, consumed_learn?,
-                           delivery_lineage?, dry_run?})
+Delivery.land(LandRequest {kind=plan, plan_id, branch, objective_id, consumed_learn,
+                           delivery_lineage, dry_run?})
   -> LandResult {kind; exactly the matching Plan detail}
 ```
 
@@ -72,8 +72,8 @@ publication/synchronization engines and runtimes, and production adapters are no
 APIs. `DeliveryError` is the bounded status + Prepare + Transfer + Publish + sync + Recover + Land
 hierarchy; status still translates only its exact six-code subset, while every Publish and Land
 error carries joint phase/origin metadata (Land: domain refusals `stacked_plan` /
-`plan_not_found` / `no_pr` vs the `github_error`/`git_error` infra translations under the
-`land` phase). Claimed-prefix/continuation/writer/record-recovery vocabulary stays
+`plan_not_found` / `no_pr` vs the `github_error` infra translation under the `land` phase —
+no Git authority call exists on that path, so no speculative `git_error` arm). Claimed-prefix/continuation/writer/record-recovery vocabulary stays
 internal. The package root additionally exports `RecoverRequest`/`RecoverResult` and
 `LandRequest`/`LandResult` and has exactly 59 exports; the recovery and land
 context/runtime/adapters remain internal, there is no `recover_operations` or `RecoverError`
@@ -89,8 +89,9 @@ operation report and consent previews) and `CancellationMetadata` (per-candidate
 with no forwarding properties. `LandRequest` is the realized Land family's first variant
 (`kind="plan"` — the complete incremental `perk pr land` operation; reconstructed caller
 intent, `plan_id` carried verbatim), and `LandResult` is the strict kind↔detail wrapper from
-day one (nested `MergedPr`/`ObjectiveUpdate`/`LearnUpdate`/`Plan` records mirroring the
-internal finalize records field-for-field) so the `objective` variant lands beside `plan`
+day one (nested `PrSummary`/`ObjectiveUpdate`/`LearnUpdate`/`Plan` records mirroring the
+internal finalize records field-for-field; the plan-ref-derived request intent fields carry
+no defaults — omission fails at construction) so the `objective` variant lands beside `plan`
 without reshaping. `Delivery.land` deliberately takes **no consent callback and no lock** on
 this variant — both arrive with atomic objective landing. Landing evidence stays
 deferred/type-only so importing the package does not create a façade↔landing cycle. The

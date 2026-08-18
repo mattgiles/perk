@@ -771,16 +771,18 @@ merge_pr{ number, commit_message? }                 -> PullRequest (state MERGED
   stored (Q8).
 - **`perk pr land` is a thin mapper over `Delivery.land`.** The command reconstructs the cached
   plan-ref into one `LandRequest(kind="plan", plan_id, branch, objective_id, consumed_learn,
-  delivery_lineage, dry_run)` and makes exactly one
+  delivery_lineage, dry_run)` — the three plan-ref-derived intent fields carry **no defaults**
+  (forgetting to reconstruct one fails at construction; `None`/`()` stay expressible, just
+  explicit) — and makes exactly one
   `resolve_delivery(repo_root).land(request)` call; the façade (engine:
   `perk.delivery.land_plan`) owns refusal ordering, the mutation protocol, and the
   finalization dispatch, and returns the strict kind↔detail `LandResult` (nested
-  `MergedPr`/`ObjectiveUpdate`/`LearnUpdate`/`Plan` records — the `--json` envelope maps them
+  `PrSummary`/`ObjectiveUpdate`/`LearnUpdate`/`Plan` records — the `--json` envelope maps them
   field-for-field, byte-unchanged). Façade failures are the bounded `DeliveryError` vocabulary
   with `phase="land"`: domain refusals (`stacked_plan`, `plan_not_found`, `no_pr`) carry
-  `origin="domain"` and render **bare**; infra failures translate to
-  `github_error`/`git_error` with `origin="github"`/`"git"` and keep the CLI's
-  `PR land failed\n<detail>` prefix.
+  `origin="domain"` and render **bare**; infra failures translate to `github_error` with
+  `origin="github"` and keep the CLI's `PR land failed\n<detail>` prefix (no Git authority
+  call exists on this path, so no speculative `git_error` arm).
 - **Stacked lineage refuses before any mutation.** `Delivery.land` applies the §8.47 routing
   discriminator — stacked ⟺ the request carries the cached ref's `delivery_lineage` OR the
   fetched plan header does (**header wins**: a stale cached ref must not silently land a stacked

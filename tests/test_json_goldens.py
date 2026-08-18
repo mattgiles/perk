@@ -237,7 +237,7 @@ def _pr_land_result():
     from perk.delivery import LandResult
 
     return PrLandResult(
-        pr=LandResult.MergedPr(number=42, state="OPEN"),
+        pr=LandResult.PrSummary(number=42, state="OPEN"),
         branch="plan-42",
         issue="42",
         pending_learn=True,

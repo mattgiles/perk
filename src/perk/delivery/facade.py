@@ -867,15 +867,19 @@ class LandRequest:
     ``cache.plan-ref``. ``plan_id`` is carried verbatim (no ``#``-normalization: refusal and
     message bytes use it as-is), and ``delivery_lineage`` is the cached ref's value — the
     local half of the stacked routing discriminator (the header half rides the façade's
-    authoritative plan read).
+    authoritative plan read). The three plan-ref-derived fields carry **no defaults**:
+    ``delivery_lineage`` gates the stacked refusal (on the offline dry-run it is the only
+    evidence) and ``objective_id``/``consumed_learn`` steer finalization, so a caller that
+    forgets to reconstruct one must fail at construction, never land with silently weaker
+    behavior (the empty values ``None``/``()`` remain expressible — just explicit).
     """
 
     kind: LandKind
     plan_id: str
     branch: str
-    objective_id: str | None = None
-    consumed_learn: tuple[str, ...] = ()
-    delivery_lineage: str | None = None
+    objective_id: str | None
+    consumed_learn: tuple[str, ...]
+    delivery_lineage: str | None
     dry_run: bool = False
 
     def __post_init__(self) -> None:
@@ -894,7 +898,10 @@ class LandResult:
     objective landing)."""
 
     @dataclass(frozen=True)
-    class MergedPr:
+    class PrSummary:
+        """The picked PR number/state subset — merge evidence on a real land, the synthetic
+        ``(0, "OPEN")`` preview on a dry run (deliberately NOT named after either arm)."""
+
         number: int
         state: str
 
@@ -913,7 +920,7 @@ class LandResult:
     @dataclass(frozen=True)
     class Plan:
         dry_run: bool
-        pr: "LandResult.MergedPr"
+        pr: "LandResult.PrSummary"
         objective: "LandResult.ObjectiveUpdate"
         learn: "LandResult.LearnUpdate"
         plan_issue_closed: bool = False
@@ -1773,11 +1780,6 @@ class Delivery:
             )
         except DeliveryError:
             raise
-        except git_mod.GitError as exc:
-            # Defensive completeness — no Git authority call exists on this path today.
-            raise DeliveryError(
-                str(exc), error_type="git_error", phase="land", origin="git"
-            ) from exc
         except (
             train.TrainReconstructionError,
             GitHubError,

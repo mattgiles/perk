@@ -80,7 +80,7 @@ def _dispatch(context: _LandContext, request: LandRequest, *, runtime: _LandRunt
             kind="plan",
             plan=LandResult.Plan(
                 dry_run=True,
-                pr=LandResult.MergedPr(number=0, state="OPEN"),
+                pr=LandResult.PrSummary(number=0, state="OPEN"),
                 objective=LandResult.ObjectiveUpdate(None, (), "dry_run"),
                 learn=LandResult.LearnUpdate((), "dry_run"),
             ),
@@ -136,7 +136,7 @@ def _dispatch(context: _LandContext, request: LandRequest, *, runtime: _LandRunt
         kind="plan",
         plan=LandResult.Plan(
             dry_run=False,
-            pr=LandResult.MergedPr(number=pr.number, state=pr.state),
+            pr=LandResult.PrSummary(number=pr.number, state=pr.state),
             objective=LandResult.ObjectiveUpdate(
                 objective=fin.objective.objective,
                 nodes_marked=fin.objective.nodes_marked,

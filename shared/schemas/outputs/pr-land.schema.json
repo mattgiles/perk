@@ -2,7 +2,7 @@
   "$defs": {
     "LandPrOut": {
       "additionalProperties": false,
-      "description": "The serialization boundary of :class:`delivery.LandResult.MergedPr`\n(field order load-bearing).",
+      "description": "The serialization boundary of :class:`delivery.LandResult.PrSummary`\n(field order load-bearing).",
       "properties": {
         "number": {
           "title": "Number",

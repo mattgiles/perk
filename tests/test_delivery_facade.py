@@ -1500,7 +1500,17 @@ def test_resolved_publish_dry_runs_ignore_committed_backend_and_credentials(
     service = observe.resolve_delivery(tmp_path)
     service.publish(PublishRequest(kind="layer", plan_id="#101", dry_run=True))
     service.publish(PublishRequest(kind="ready", plan_id="101", dry_run=True))
-    service.land(LandRequest(kind="plan", plan_id="101", branch="plan-101", dry_run=True))
+    service.land(
+        LandRequest(
+            kind="plan",
+            plan_id="101",
+            branch="plan-101",
+            objective_id=None,
+            consumed_learn=(),
+            delivery_lineage=None,
+            dry_run=True,
+        )
+    )
 
     assert calls == []
 
@@ -4314,7 +4324,14 @@ _STACKED_LAND_MESSAGE = (
 
 
 def _land_request(**over: Any) -> LandRequest:
-    fields: dict[str, Any] = {"kind": "plan", "plan_id": "7", "branch": "plan-7"}
+    fields: dict[str, Any] = {
+        "kind": "plan",
+        "plan_id": "7",
+        "branch": "plan-7",
+        "objective_id": None,
+        "consumed_learn": (),
+        "delivery_lineage": None,
+    }
     fields.update(over)
     return LandRequest(**fields)
 
@@ -4379,8 +4396,12 @@ def test_land_request_guards_kind_and_nonblank_identity() -> None:
     assert (request.delivery_lineage, request.dry_run) == (None, False)
     # plan_id is carried verbatim — no #-normalization (refusal bytes use it as-is).
     assert _land_request(plan_id="#7").plan_id == "#7"
+    # The plan-ref-derived intent fields carry NO defaults: forgetting to reconstruct one
+    # (e.g. the stacked discriminator) fails at construction, never lands silently weaker.
+    with pytest.raises(TypeError):
+        LandRequest(kind="plan", plan_id="7", branch="plan-7")  # ty: ignore[missing-argument]
     with pytest.raises(ValueError, match="unknown land kind"):
-        LandRequest(kind=cast(Any, "objective"), plan_id="7", branch="plan-7")
+        _land_request(kind=cast(Any, "objective"))
     with pytest.raises(ValueError, match="plan_id must be nonblank"):
         _land_request(plan_id="  ")
     with pytest.raises(ValueError, match="branch must be nonblank"):
@@ -4392,7 +4413,7 @@ def test_land_request_guards_kind_and_nonblank_identity() -> None:
 def test_land_result_is_a_strict_kind_detail_wrapper() -> None:
     detail = LandResult.Plan(
         dry_run=False,
-        pr=LandResult.MergedPr(number=42, state="MERGED"),
+        pr=LandResult.PrSummary(number=42, state="MERGED"),
         objective=LandResult.ObjectiveUpdate("10", ("1.1",), None, closed=True),
         learn=LandResult.LearnUpdate(("45",), None),
         plan_issue_closed=True,
@@ -4414,7 +4435,7 @@ def test_land_result_is_a_strict_kind_detail_wrapper() -> None:
     assert (
         LandResult.Plan(
             dry_run=True,
-            pr=LandResult.MergedPr(0, "OPEN"),
+            pr=LandResult.PrSummary(0, "OPEN"),
             objective=LandResult.ObjectiveUpdate(None, (), "dry_run"),
             learn=LandResult.LearnUpdate((), "dry_run"),
         ).learn_state
@@ -4436,7 +4457,7 @@ def test_delivery_land_builds_one_bound_context_and_dispatches(
         kind="plan",
         plan=LandResult.Plan(
             dry_run=False,
-            pr=LandResult.MergedPr(42, "MERGED"),
+            pr=LandResult.PrSummary(42, "MERGED"),
             objective=LandResult.ObjectiveUpdate(None, (), "no_objective_link"),
             learn=LandResult.LearnUpdate((), "no_consumed_learn"),
         ),
@@ -4482,7 +4503,7 @@ def test_land_dry_run_is_offline_and_exact() -> None:
         kind="plan",
         plan=LandResult.Plan(
             dry_run=True,
-            pr=LandResult.MergedPr(number=0, state="OPEN"),
+            pr=LandResult.PrSummary(number=0, state="OPEN"),
             objective=LandResult.ObjectiveUpdate(None, (), "dry_run"),
             learn=LandResult.LearnUpdate((), "dry_run"),
         ),
@@ -4527,7 +4548,7 @@ def test_land_whitespace_header_lineage_is_not_stacked(monkeypatch: pytest.Monke
     result = _delivery(persistence, github=github).land(_land_request())
 
     detail = result.plan
-    assert detail is not None and detail.pr == LandResult.MergedPr(42, "MERGED")
+    assert detail is not None and detail.pr == LandResult.PrSummary(42, "MERGED")
     assert ("merge_pr", 42, "My Feature\n\nCloses #7") in github.calls
 
 
@@ -4543,23 +4564,21 @@ def test_land_no_pr_refusal_names_the_branch() -> None:
 
 
 @pytest.mark.parametrize(
-    ("source", "error_type"),
+    "source",
     (
-        (IssueBackendError("issues failed"), "github_error"),
-        (GitHubError("github failed"), "github_error"),
-        (ObjectiveStoreError("objectives failed"), "github_error"),
-        (TrainPersistenceError("persistence failed"), "github_error"),
-        (TrainReconstructionError("gateway failed", error_type="github_error"), "github_error"),
-        (git_mod.GitError("git failed"), "git_error"),
+        IssueBackendError("issues failed"),
+        GitHubError("github failed"),
+        ObjectiveStoreError("objectives failed"),
+        TrainPersistenceError("persistence failed"),
+        TrainReconstructionError("gateway failed", error_type="github_error"),
     ),
 )
-def test_land_maps_expected_boundary_failures(source: Exception, error_type: str) -> None:
+def test_land_maps_expected_boundary_failures(source: Exception) -> None:
     persistence = FakeDeliveryPersistence(errors={("get_plan", "7"): source})
     with pytest.raises(DeliveryError) as excinfo:
         _delivery(persistence).land(_land_request())
-    assert excinfo.value.error_type == error_type
-    assert excinfo.value.phase == "land"
-    assert excinfo.value.origin == ("git" if error_type == "git_error" else "github")
+    assert excinfo.value.error_type == "github_error"
+    assert (excinfo.value.phase, excinfo.value.origin) == ("land", "github")
     assert str(excinfo.value) == str(source)
 
 
@@ -4622,7 +4641,7 @@ def test_land_draft_pr_marks_ready_then_merges_then_finalizes(
     ]
     detail = result.plan
     assert detail is not None
-    assert detail.pr == LandResult.MergedPr(number=42, state="MERGED")
+    assert detail.pr == LandResult.PrSummary(number=42, state="MERGED")
     assert detail.dry_run is False
 
 
@@ -4656,7 +4675,7 @@ def test_land_already_merged_is_idempotent_and_still_finalizes_with_real_base(
     # …but finalization still runs with the REAL pre-merge base_ref.
     assert calls[0]["pr_base"] == "release"
     detail = result.plan
-    assert detail is not None and detail.pr == LandResult.MergedPr(42, "MERGED")
+    assert detail is not None and detail.pr == LandResult.PrSummary(42, "MERGED")
 
 
 def test_land_base_ref_is_captured_before_the_merge(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -4720,7 +4739,7 @@ def test_land_result_maps_the_finalization_field_for_field(
         kind="plan",
         plan=LandResult.Plan(
             dry_run=False,
-            pr=LandResult.MergedPr(number=42, state="MERGED"),
+            pr=LandResult.PrSummary(number=42, state="MERGED"),
             objective=LandResult.ObjectiveUpdate("10", ("1.1", "1.2"), None, closed=True),
             learn=LandResult.LearnUpdate(("45", "50"), "failed: #51"),
             plan_issue_closed=True,

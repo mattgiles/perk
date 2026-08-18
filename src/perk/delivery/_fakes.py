@@ -503,7 +503,6 @@ class FakeDeliveryGitHub(_FailureMixin, DeliveryGitHub):
         strict_stacks: Mapping[int, stacks.StackRestFacts | None] | None = None,
         merge_probes: Mapping[tuple[int, str], stacks.MergeAsyncProbe] | None = None,
         merged_evidence: Mapping[int, stacks.PrMergedEvidence | None] | None = None,
-        merge_results: Mapping[int, prs.PullRequest] | None = None,
         active_writers: frozenset[str] = frozenset(),
         errors: Mapping[Call, Exception] | None = None,
     ) -> None:
@@ -518,7 +517,6 @@ class FakeDeliveryGitHub(_FailureMixin, DeliveryGitHub):
         self._strict_stacks = dict(strict_stacks or {})
         self._merge_probes = dict(merge_probes or {})
         self._merged_evidence = dict(merged_evidence or {})
-        self._merge_results = dict(merge_results or {})
         self._active_writers = frozenset(active_writers)
         self.calls: list[Call] = []
 
@@ -624,14 +622,11 @@ class FakeDeliveryGitHub(_FailureMixin, DeliveryGitHub):
         self._raise_failure(call)
 
     def merge_pr(self, number: int, *, commit_message: str) -> prs.PullRequest:
-        """Record the exact merge call; an unscripted merge answers the real endpoint's
-        synthetic MERGED shape (no ``base_ref``)."""
+        """Record the exact merge call and answer the real endpoint's synthetic MERGED shape
+        (no ``base_ref``); failures ride the shared ``_FailureMixin`` scripting."""
         call: Call = ("merge_pr", number, commit_message)
         self.calls.append(call)
         self._raise_failure(call)
-        scripted = self._merge_results.get(number)
-        if scripted is not None:
-            return scripted
         return prs.PullRequest(number=number, url="", is_draft=False, state="MERGED", existed=True)
 
     def create_stack(self, pull_requests: tuple[int, ...]) -> stacks.StackMutationOutcome:
