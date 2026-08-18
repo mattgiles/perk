@@ -88,7 +88,10 @@ export type AssemblyFailureLayer = {
   problems: AssemblyLayerProblem[];
 };
 
-export type AssemblyRenderedLayer = AssemblyOwnedLayer | AssemblyBoundaryLayer | AssemblyFailureLayer;
+export type AssemblyRenderedLayer =
+  | AssemblyOwnedLayer
+  | AssemblyBoundaryLayer
+  | AssemblyFailureLayer;
 
 export type AssemblyRender = {
   assembly: string;

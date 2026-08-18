@@ -178,6 +178,12 @@ function center(
       selection,
       comparisonState,
       selectedComparison,
+      assemblyState: { status: "idle" },
+      assemblyCallbacks: {
+        chooseScenario: () => undefined,
+        setOverride: () => undefined,
+        rerender: () => undefined,
+      },
     }),
   );
 }
@@ -258,7 +264,10 @@ test("focused textarea preserves raw boundaries, escaped context, aliases, Compa
     assert.equal(loads, 1);
 
     await harness.render(center(workspace, "assembly", selection));
-    assert.match(harness.container.textContent ?? "", /Assembly mode is not built yet/);
+    assert.match(
+      harness.container.textContent ?? "",
+      /Select a session shape to preview its assembly\./,
+    );
     await harness.render(center(workspace, "edit", selection));
     assert.equal(textarea(harness.container).value, "line1\nCHANGED\n");
   } finally {

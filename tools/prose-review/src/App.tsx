@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { type AssemblySessionState, createAssemblySession } from "./assemblySession.ts";
 import { CenterPane } from "./CenterPane.tsx";
 import { comparisonRequest, type SelectedComparison } from "./comparison.ts";
 import { type ComparisonLoadState, createComparisonLoader } from "./comparisonLoad.ts";
@@ -132,9 +133,11 @@ function WorkspaceBeforeUnload() {
 }
 
 // The three-pane workbench shell. Global mode/selection remain independent; the
-// comparison options and selected target exist only while Compare is active.
-export function App() {
-  const [workspace] = useState(() => new EditWorkspace());
+// comparison options and selected target exist only while Compare is active, and the
+// assembly session only while Assembly is active. The optional workspace prop is the
+// test injection seam; production (main.tsx) renders <App /> and owns a fresh one.
+export function App({ workspace: injectedWorkspace }: { workspace?: EditWorkspace }) {
+  const [workspace] = useState(() => injectedWorkspace ?? new EditWorkspace());
   const [treeState, setTreeState] = useState<TreeLoadState>({ status: "loading" });
   const [treeWarning, setTreeWarning] = useState<string | null>(null);
   const [writeState, setWriteState] = useState(() => workspace.writeState());
@@ -146,12 +149,26 @@ export function App() {
   const [selectedComparison, setSelectedComparison] = useState<SelectedComparison | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [comparisonLoader] = useState(() => createComparisonLoader(setComparisonState));
+  const [assemblyState, setAssemblyState] = useState<AssemblySessionState>({ status: "idle" });
+  const [assemblySession] = useState(() =>
+    createAssemblySession({
+      onState: setAssemblyState,
+      buffersFn: () => workspace.exportBuffers(),
+    }),
+  );
   const originKey = selectedOriginKey(selection);
   const request = selection?.type === "unit" ? comparisonRequest(selection) : null;
+  const assemblyShapeId = selection?.type === "shape" ? selection.shape.id : null;
 
   useEffect(
-    () => workspace.subscribeGlobal(() => setWriteState(workspace.writeState())),
-    [workspace],
+    () =>
+      workspace.subscribeGlobal(() => {
+        setWriteState(workspace.writeState());
+        // Buffer edits re-render the assembly preview only when the exported
+        // records actually changed (the session fingerprints them).
+        assemblySession.refreshBuffers();
+      }),
+    [workspace, assemblySession],
   );
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: catalogEpoch is the explicit refresh trigger.
@@ -199,13 +216,30 @@ export function App() {
     comparisonLoader.select(request);
   }, [comparisonLoader, mode, originKey, writeState.catalogEpoch]);
 
+  // The assembly subject: the selected shape names the assembly to fetch and render;
+  // a catalog-epoch bump re-opens the session against the refreshed catalog.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: assemblyShapeId is the subject identity.
+  useEffect(() => {
+    if (mode !== "assembly" || selection?.type !== "shape") {
+      return;
+    }
+    assemblySession.open(selection.shape.assembly);
+  }, [assemblySession, mode, assemblyShapeId, writeState.catalogEpoch]);
+
   useEffect(() => () => comparisonLoader.dispose(), [comparisonLoader]);
+  useEffect(() => () => assemblySession.dispose(), [assemblySession]);
   useEffect(() => () => workspace.dispose(), [workspace]);
 
   const select = (next: Selection): void => {
     if (mode === "compare" && selectedOriginKey(next) !== originKey) {
       comparisonLoader.clear();
       setSelectedComparison(null);
+    }
+    if (mode === "assembly") {
+      const nextShapeId = next.type === "shape" ? next.shape.id : null;
+      if (nextShapeId === null || nextShapeId !== assemblyShapeId) {
+        assemblySession.clear();
+      }
     }
     setSelection(next);
   };
@@ -218,6 +252,9 @@ export function App() {
     if (mode === "compare" && next !== "compare") {
       comparisonLoader.clear();
       setSelectedComparison(null);
+    }
+    if (mode === "assembly" && next !== "assembly") {
+      assemblySession.clear();
     }
     setMode(next);
   };
@@ -250,6 +287,12 @@ export function App() {
             selection={selection}
             comparisonState={comparisonState}
             selectedComparison={selectedComparison}
+            assemblyState={assemblyState}
+            assemblyCallbacks={{
+              chooseScenario: assemblySession.chooseScenario,
+              setOverride: assemblySession.setOverride,
+              rerender: assemblySession.rerender,
+            }}
           />
         </main>
         <aside className="pane inspector-pane" aria-label="Inspector">
@@ -259,6 +302,7 @@ export function App() {
             selection={selection}
             comparisonState={comparisonState}
             selectedComparison={selectedComparison}
+            assemblyState={assemblyState}
             onComparisonSelect={setSelectedComparison}
             onSelection={select}
             onSelect={selectSource}

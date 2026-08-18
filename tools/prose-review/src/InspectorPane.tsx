@@ -1,5 +1,7 @@
 import { useEffect, useState } from "react";
 import type { Mode } from "./App.tsx";
+import type { AssemblyScenario } from "./assembly.ts";
+import type { AssemblySessionState } from "./assemblySession.ts";
 import { BOUNDARY_INFO } from "./boundaries.ts";
 import type { SelectedComparison } from "./comparison.ts";
 import type { ComparisonLoadState } from "./comparisonLoad.ts";
@@ -182,6 +184,43 @@ function ComparisonPicker({
   );
 }
 
+// The read-only scenario-variables display for the shape branch while Assembly is
+// active (the center pane owns the controls; this section is display-only).
+function AssemblyShapeInspector({ state }: { state: AssemblySessionState }) {
+  if (state.status === "idle" || state.status === "loading-options") {
+    return <p className="pane-hint">Loading assembly options…</p>;
+  }
+  if (state.status === "options-refused") {
+    return <p className="pane-hint">Assembly options unavailable: {state.detail}</p>;
+  }
+  if (state.status === "options-failed") {
+    return <p className="pane-hint">Failed to load assembly options.</p>;
+  }
+  const scenario: AssemblyScenario =
+    state.options.scenarios.find((candidate) => candidate.id === state.scenarioId) ??
+    state.options.scenarios[0];
+  // Entries render in received key order — the server sorts.
+  const entries = Object.entries(scenario.variables);
+  return (
+    <section className="inspector-section">
+      <h3>Scenario variables (read-only)</h3>
+      <p className="inspector-block-title">{scenario.label}</p>
+      {entries.length === 0 ? (
+        <p className="pane-hint">No scenario variables.</p>
+      ) : (
+        <dl className="scenario-variables">
+          {entries.map(([name, value]) => (
+            <div key={name}>
+              <dt>{name}</dt>
+              <dd>{value}</dd>
+            </div>
+          ))}
+        </dl>
+      )}
+    </section>
+  );
+}
+
 // Relationship data remains unit-scoped. The component remounts only when the unit
 // changes, so fragment changes preserve the loaded relationship state.
 function UnitInspector({
@@ -269,6 +308,7 @@ export function InspectorPane({
   selection,
   comparisonState,
   selectedComparison,
+  assemblyState,
   onComparisonSelect,
   onSelection,
   onSelect,
@@ -277,6 +317,7 @@ export function InspectorPane({
   selection: Selection | null;
   comparisonState: ComparisonLoadState;
   selectedComparison: SelectedComparison | null;
+  assemblyState: AssemblySessionState;
   onComparisonSelect: (selection: SelectedComparison) => void;
   onSelection: SelectSelection;
   onSelect: SelectSource;
@@ -309,8 +350,12 @@ export function InspectorPane({
             <span className="delivery-badge">{selection.shape.delivery}</span>
           </p>
           <p className="inspector-breadcrumb">{joinBreadcrumb(selection.breadcrumb)}</p>
+          <dl>
+            <dt>Assembly</dt>
+            <dd>{selection.shape.assembly}</dd>
+          </dl>
         </div>
-        {mode === "compare" ? (
+        {mode === "compare" && (
           <section className="inspector-section">
             <h3>Choose an origin layer</h3>
             <ol className="inspector-list">
@@ -337,16 +382,17 @@ export function InspectorPane({
               })}
             </ol>
           </section>
-        ) : (
+        )}
+        {mode === "edit" && (
           <p className="pane-hint">
-            {mode === "edit"
-              ? "This shape has no singular source. Select a source-bearing assembly layer."
-              : "Assembly mode does not render a shape preview yet."}
+            This shape has no singular source. Select a source-bearing assembly layer.
           </p>
         )}
+        {mode === "assembly" && <AssemblyShapeInspector state={assemblyState} />}
       </div>
     );
   }
+
   return (
     <UnitInspector
       key={selection.target.unit.id}

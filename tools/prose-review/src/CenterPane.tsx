@@ -1,6 +1,8 @@
 import { type Change, diffLines } from "diff";
 import { useState } from "react";
 import type { Mode } from "./App.tsx";
+import { AssemblyPane, type AssemblyPaneCallbacks } from "./AssemblyPane.tsx";
+import type { AssemblySessionState } from "./assemblySession.ts";
 import { BOUNDARY_INFO } from "./boundaries.ts";
 import {
   type ComparisonPlacement,
@@ -542,29 +544,22 @@ function CompareMode({
   return <SelectedComparisonPair origin={state.options.origin} selected={selected} />;
 }
 
-function AssemblyMode({ selection }: { selection: Selection | null }) {
-  if (selection?.type === "shape") {
-    return <p className="pane-hint">Assembly mode does not render a shape preview yet.</p>;
-  }
-  return (
-    <p className="pane-hint">
-      Assembly mode is not built yet: assembly preview is a later capability.
-    </p>
-  );
-}
-
 export function CenterPane({
   mode,
   onModeChange,
   selection,
   comparisonState,
   selectedComparison,
+  assemblyState,
+  assemblyCallbacks,
 }: {
   mode: Mode;
   onModeChange: (mode: Mode) => void;
   selection: Selection | null;
   comparisonState: ComparisonLoadState;
   selectedComparison: SelectedComparison | null;
+  assemblyState: AssemblySessionState;
+  assemblyCallbacks: AssemblyPaneCallbacks;
 }) {
   return (
     <div className="center-content">
@@ -590,7 +585,16 @@ export function CenterPane({
             selected={selectedComparison}
           />
         )}
-        {mode === "assembly" && <AssemblyMode selection={selection} />}
+        {mode === "assembly" && (
+          // Keyed by shape id so the pane-local view switch resets on subject change
+          // (and survives scenario switches within one subject).
+          <AssemblyPane
+            key={selection?.type === "shape" ? selection.shape.id : "no-shape"}
+            selection={selection}
+            state={assemblyState}
+            callbacks={assemblyCallbacks}
+          />
+        )}
       </div>
     </div>
   );

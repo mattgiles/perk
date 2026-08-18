@@ -304,6 +304,12 @@ function centerElement(
       selection,
       comparisonState: state,
       selectedComparison: selected,
+      assemblyState: { status: "idle" },
+      assemblyCallbacks: {
+        chooseScenario: () => undefined,
+        setOverride: () => undefined,
+        rerender: () => undefined,
+      },
     }),
   );
 }
