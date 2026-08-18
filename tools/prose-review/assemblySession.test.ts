@@ -158,6 +158,46 @@ test("stale options completions after a newer open are dropped entirely", async 
   assert.equal(final.status === "ready" ? final.assembly : null, "assembly-b");
 });
 
+test("stale options completions after clear or dispose are dropped entirely", async () => {
+  const cleared = harness();
+  cleared.session.open("plan-authoring");
+  cleared.session.clear();
+  const emitted = cleared.states.length;
+  cleared.pending[0]?.respond(respond(200, structuredClone(OPTIONS)));
+  await tick();
+  assert.deepEqual(lastState(cleared.states), { status: "idle" });
+  assert.equal(cleared.states.length, emitted, "a cleared options completion must not emit");
+  assert.equal(cleared.pending.length, 1, "a cleared options completion must not issue a render");
+
+  const disposed = harness();
+  disposed.session.open("plan-authoring");
+  disposed.session.dispose();
+  const disposedEmissions = disposed.states.length;
+  disposed.pending[0]?.respond(respond(200, structuredClone(OPTIONS)));
+  await tick();
+  assert.equal(disposed.states.length, disposedEmissions);
+  assert.equal(disposed.pending.length, 1, "a disposed options completion must not issue a render");
+});
+
+test("a render completion after a newer open is dropped entirely", async () => {
+  const h = harness();
+  await openToReady(h);
+  h.session.open("assembly-b");
+  const emitted = h.states.length;
+  h.pending[1]?.respond(respond(200, structuredClone(render(WARM))));
+  await tick();
+  assert.equal(h.states.length, emitted, "a render superseded by open must not emit");
+  assert.deepEqual(lastState(h.states), { status: "loading-options", assembly: "assembly-b" });
+
+  // The newer open still completes normally after the stale render dropped.
+  h.pending[2]?.respond(
+    respond(200, { assembly: "assembly-b", scenarios: [structuredClone(WARM)] }),
+  );
+  await tick();
+  const final = lastState(h.states);
+  assert.equal(final.status === "ready" ? final.assembly : null, "assembly-b");
+});
+
 test("clear and dispose drop in-flight render completions", async () => {
   const h = harness();
   await openToReady(h);

@@ -106,18 +106,10 @@ export function installDom(options: InstallDomOptions = {}): RenderHarness {
       });
     },
     async selectOption(element: HTMLSelectElement, value: string): Promise<void> {
-      const setter = Object.getOwnPropertyDescriptor(
-        dom.window.HTMLSelectElement.prototype,
-        "value",
-      )?.set;
-      assert.ok(setter !== undefined);
-      const previousValue = element.value;
+      // Unlike inputs/textareas, React attaches no value tracker to a <select>:
+      // a plain value assignment plus one native change event is enough.
       await React.act(async () => {
-        setter.call(element, value);
-        const tracked = element as HTMLSelectElement & {
-          _valueTracker?: { setValue: (next: string) => void };
-        };
-        tracked._valueTracker?.setValue(previousValue);
+        element.value = value;
         element.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
         await tick();
       });

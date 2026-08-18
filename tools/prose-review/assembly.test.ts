@@ -7,12 +7,16 @@ import {
   type AssemblyOwnedLayer,
   type AssemblyRender,
   assemblyRenderMatchesRequest,
+  BOUNDARY_OWNERS,
+  type BoundaryOwner,
   concatenatedText,
+  OWNED_CONTENT_KINDS,
   parseAssemblyOptions,
   parseAssemblyRender,
   resolvedPresentation,
   visibleLayers,
 } from "./src/assembly.ts";
+import { BOUNDARY_KINDS, type BoundaryKind } from "./src/wire.ts";
 
 const SCENARIO_WARM = {
   id: "scenario:warm",
@@ -163,6 +167,23 @@ test("parseAssemblyOptions preserves variables in received key order", () => {
   assert.deepEqual(Object.keys(parsed.scenarios[0].variables), ["objective", "plan"]);
 });
 
+test("parseAssemblyOptions preserves prototype-sensitive variable keys as own data", () => {
+  // JSON.parse defines "__proto__" as an own property; the parser must keep it one
+  // instead of losing it to Object.prototype's legacy setter.
+  const variables: unknown = JSON.parse('{"__proto__": "shadowed", "plan": "42"}');
+  const parsed = parseAssemblyOptions(withScenario({ ...SCENARIO_WARM, variables }));
+  assert.ok(parsed !== null);
+  const kept = parsed.scenarios[0].variables;
+  assert.deepEqual(Object.keys(kept), ["__proto__", "plan"]);
+  assert.equal(Object.getOwnPropertyDescriptor(kept, "__proto__")?.value, "shadowed");
+  assert.equal(kept.plan, "42");
+});
+
+test("parseAssemblyOptions still rejects a non-string prototype-sensitive value", () => {
+  const variables: unknown = JSON.parse('{"__proto__": {"polluted": true}}');
+  assert.equal(parseAssemblyOptions(withScenario({ ...SCENARIO_WARM, variables })), null);
+});
+
 test("parseAssemblyRender accepts the exact wire shape with all three layer variants", () => {
   const parsed = parseAssemblyRender(structuredClone(RENDER));
   assert.deepEqual(parsed, RENDER);
@@ -170,6 +191,34 @@ test("parseAssemblyRender accepts the exact wire shape with all three layer vari
     parsed?.layers.map((layer) => layer.type),
     ["boundary", "owned", "failure"],
   );
+});
+
+test("parseAssemblyRender accepts every owned content kind", () => {
+  for (const kind of OWNED_CONTENT_KINDS) {
+    const layer: AssemblyOwnedLayer = { ...OWNED, content_kind: kind };
+    assert.deepEqual(parseAssemblyRender(withLayer(layer))?.layers, [layer]);
+  }
+});
+
+// The backend's exhaustive BoundaryKind → owner mapping; the completeness pins below
+// keep this table honest against both closed frontend vocabularies.
+const OWNER_BY_BOUNDARY: Record<BoundaryKind, BoundaryOwner> = {
+  "pi-system": "pi",
+  "user-content": "user",
+  "runtime-state": "runtime",
+  "borrowed-prompt": "borrowed-package",
+};
+
+test("parseAssemblyRender accepts every boundary owner with its boundary kind", () => {
+  assert.deepEqual(Object.keys(OWNER_BY_BOUNDARY).sort(), [...BOUNDARY_KINDS].sort());
+  assert.deepEqual(Object.values(OWNER_BY_BOUNDARY).sort(), [...BOUNDARY_OWNERS].sort());
+  for (const [boundary, owner] of Object.entries(OWNER_BY_BOUNDARY) as [
+    BoundaryKind,
+    BoundaryOwner,
+  ][]) {
+    const layer: AssemblyBoundaryLayer = { ...BOUNDARY, boundary, owner };
+    assert.deepEqual(parseAssemblyRender(withLayer(layer))?.layers, [layer]);
+  }
 });
 
 test("parseAssemblyRender rejects ill-rooted payloads", () => {
@@ -258,6 +307,70 @@ test("parseAssemblyRender rejects defective failure layers", () => {
     null,
   );
 });
+
+const PRESENTATION_KEYS = [
+  "position",
+  "label",
+  "presence",
+  "presence_label",
+  "visibility_control",
+] as const;
+
+for (const key of PRESENTATION_KEYS) {
+  test(`parseAssemblyRender rejects a layer presentation missing ${key}`, () => {
+    const { [key]: _omitted, ...rest } = OWNED.presentation;
+    assert.equal(parseAssemblyRender(withLayer({ ...OWNED, presentation: rest })), null);
+  });
+}
+
+const OWNED_KEYS = ["presentation", "unit", "content_kind", "parts"] as const;
+
+for (const key of OWNED_KEYS) {
+  test(`parseAssemblyRender rejects an owned layer missing ${key}`, () => {
+    const { [key]: _omitted, ...rest } = OWNED;
+    assert.equal(parseAssemblyRender(withLayer(rest)), null);
+  });
+}
+
+const PART_KEYS = ["fragment", "text"] as const;
+
+for (const key of PART_KEYS) {
+  test(`parseAssemblyRender rejects an owned part missing ${key}`, () => {
+    const part = OWNED.parts[1];
+    assert.ok(part !== undefined);
+    const { [key]: _omitted, ...rest } = part;
+    assert.equal(parseAssemblyRender(withLayer({ ...OWNED, parts: [rest] })), null);
+  });
+}
+
+const BOUNDARY_LAYER_KEYS = ["presentation", "boundary", "owner"] as const;
+
+for (const key of BOUNDARY_LAYER_KEYS) {
+  test(`parseAssemblyRender rejects a boundary layer missing ${key}`, () => {
+    const { [key]: _omitted, ...rest } = BOUNDARY;
+    assert.equal(parseAssemblyRender(withLayer(rest)), null);
+  });
+}
+
+const FAILURE_KEYS = ["presentation", "unit", "problems"] as const;
+
+for (const key of FAILURE_KEYS) {
+  test(`parseAssemblyRender rejects a failure layer missing ${key}`, () => {
+    const { [key]: _omitted, ...rest } = FAILURE;
+    assert.equal(parseAssemblyRender(withLayer(rest)), null);
+  });
+}
+
+const PROBLEM_KEYS = ["fragment", "reason", "detail"] as const;
+
+for (const key of PROBLEM_KEYS) {
+  test(`parseAssemblyRender rejects a failure problem missing ${key}`, () => {
+    const problem = FAILURE.problems[0];
+    assert.ok(problem !== undefined);
+    const { [key]: _omitted, ...rest } = problem;
+    assert.equal(parseAssemblyRender(withLayer({ ...FAILURE, problems: [rest] })), null);
+  });
+}
 
 test("parseAssemblyRender accepts an open non-empty problem reason", () => {
   const problem = FAILURE.problems[0];

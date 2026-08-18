@@ -268,12 +268,116 @@ test("Assembly preview: controls, local visibility, concatenated view, scenario 
     await harness.settle();
     assert.equal(harness.container.querySelectorAll(".assembly-layer-card").length, 3);
 
+    // The Tool contracts toggle works independently: it hides exactly its
+    // control-matching layer, leaves the ambient toggle untouched, and never POSTs.
+    await harness.click(toggleByLabel(harness.container, "Tool contracts"));
+    assert.equal(renderRequests.length, 3, "the tools toggle never re-POSTs");
+    const afterToolsCards = harness.container.querySelectorAll(".assembly-layer-card");
+    assert.equal(afterToolsCards.length, 2);
+    assert.doesNotMatch(harness.container.textContent ?? "", /Layer failed to render/);
+    assert.match(normalizedText(itemAt(afterToolsCards, 1)), /unit:skill/);
+    assert.equal(toggleByLabel(harness.container, "Tool contracts").checked, false);
+    assert.equal(toggleByLabel(harness.container, "Ambient skills").checked, true);
+    assert.match(
+      harness.container.textContent ?? "",
+      /1 layer\(s\) hidden by visibility toggles\./,
+    );
+
     // Mode exit clears; re-entry refetches.
     await harness.click(buttonByText(harness.container, "Edit"));
     assert.equal(harness.container.querySelectorAll(".assembly-layer-card").length, 0);
     await harness.click(buttonByText(harness.container, "Assembly"));
     assert.equal(optionsRequests.length, 3, "re-entering Assembly starts a fresh session");
     assert.match(harness.container.textContent ?? "", /Loading assembly options…/);
+  } finally {
+    restoreFetch();
+    await harness.cleanup();
+  }
+});
+
+test("Re-render retries only transient failures; refusals stay copy-only", async () => {
+  const harness = installDom({ csrfToken: "test-token" });
+  const renderRequests: Deferred<Response>[] = [];
+  const restoreFetch = stubFetch(async (url): Promise<Response> => {
+    if (url === "/api/catalog/tree") {
+      return response(200, TREE);
+    }
+    if (url.startsWith("/api/inspect?")) {
+      return response(404, { detail: "unknown unit" });
+    }
+    if (url.startsWith("/api/assembly/options?")) {
+      return response(200, OPTIONS);
+    }
+    if (url === "/api/assembly/render") {
+      const request = deferred<Response>();
+      renderRequests.push(request);
+      return request.promise;
+    }
+    throw new Error(`unexpected request: ${url}`);
+  });
+
+  const noRerenderButton = () =>
+    [...harness.container.querySelectorAll("button")].every(
+      (button) => normalizedText(button) !== "Re-render",
+    );
+
+  try {
+    await harness.render(React.createElement(App));
+    await harness.click(buttonByText(harness.container, "Warm shape warm"));
+    await harness.click(buttonByText(harness.container, "Assembly"));
+    await harness.settle();
+    assert.equal(renderRequests.length, 1);
+
+    // A transient failure offers exactly one explicit retry affordance.
+    itemAt(renderRequests, 0).resolve(response(500, { detail: "boom" }));
+    await harness.settle();
+    assert.match(harness.container.textContent ?? "", /Failed to render assembly\./);
+    assert.equal(renderRequests.length, 1, "failure alone must not auto-retry");
+    await harness.click(buttonByText(harness.container, "Re-render"));
+    assert.equal(renderRequests.length, 2, "Re-render issues exactly one new POST");
+
+    // A deterministic refusal is copy-only: no retry button, no further POSTs.
+    itemAt(renderRequests, 1).resolve(response(409, { detail: "catalog stale" }));
+    await harness.settle();
+    assert.match(harness.container.textContent ?? "", /Assembly render unavailable: catalog stale/);
+    assert.ok(noRerenderButton(), "refusals must not offer a retry affordance");
+    assert.equal(renderRequests.length, 2);
+  } finally {
+    restoreFetch();
+    await harness.cleanup();
+  }
+});
+
+test("a tokenless page reports render-not-sent without POSTing", async () => {
+  const harness = installDom();
+  let renderPosts = 0;
+  const restoreFetch = stubFetch(async (url): Promise<Response> => {
+    if (url === "/api/catalog/tree") {
+      return response(200, TREE);
+    }
+    if (url.startsWith("/api/inspect?")) {
+      return response(404, { detail: "unknown unit" });
+    }
+    if (url.startsWith("/api/assembly/options?")) {
+      return response(200, OPTIONS);
+    }
+    if (url === "/api/assembly/render") {
+      renderPosts += 1;
+      return response(200, assemblyRender(WARM));
+    }
+    throw new Error(`unexpected request: ${url}`);
+  });
+
+  try {
+    await harness.render(React.createElement(App));
+    await harness.click(buttonByText(harness.container, "Warm shape warm"));
+    await harness.click(buttonByText(harness.container, "Assembly"));
+    await harness.settle();
+    assert.match(
+      harness.container.textContent ?? "",
+      /The render request was not sent: the page is missing its security token\. Reload the page\./,
+    );
+    assert.equal(renderPosts, 0, "a missing token must never POST");
   } finally {
     restoreFetch();
     await harness.cleanup();

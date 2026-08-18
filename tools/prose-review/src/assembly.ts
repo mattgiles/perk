@@ -156,18 +156,21 @@ function isOwnedContentKind(value: unknown): value is OwnedContentKind {
 }
 
 // Entries stay in received key order — the server sorts, the client only displays.
+// Built via Object.fromEntries so every authored key (including prototype-sensitive
+// names like "__proto__") lands as an own data property instead of hitting a legacy
+// Object.prototype setter and silently vanishing.
 function parseVariables(value: unknown): Record<string, string> | null {
   if (!isRecord(value) || Array.isArray(value)) {
     return null;
   }
-  const variables: Record<string, string> = {};
+  const entries: [string, string][] = [];
   for (const [key, entry] of Object.entries(value)) {
     if (typeof entry !== "string") {
       return null;
     }
-    variables[key] = entry;
+    entries.push([key, entry]);
   }
-  return variables;
+  return Object.fromEntries(entries);
 }
 
 function parseScenario(value: unknown): AssemblyScenario | null {

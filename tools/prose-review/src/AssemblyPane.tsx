@@ -43,18 +43,7 @@ function layerTitle(layer: AssemblyRenderedLayer): string {
   return layer.type === "boundary" ? layer.boundary : layer.unit.id;
 }
 
-function keyedProblems<T>(problems: T[]): { problem: T; key: string }[] {
-  const occurrences = new Map<string, number>();
-  return problems.map((problem) => {
-    const identity = JSON.stringify(problem);
-    const occurrence = occurrences.get(identity) ?? 0;
-    occurrences.set(identity, occurrence + 1);
-    return { problem, key: `${identity}:${occurrence}` };
-  });
-}
-
 function LayerCard({ layer }: { layer: AssemblyRenderedLayer }) {
-  let partOffset = 0;
   return (
     <section className="assembly-layer-card">
       <div className="assembly-layer-header">
@@ -67,20 +56,17 @@ function LayerCard({ layer }: { layer: AssemblyRenderedLayer }) {
         {layer.type === "boundary" && <span className="owner-badge">{layer.owner}</span>}
       </div>
       {layer.type === "owned" &&
-        layer.parts.map((part) => {
-          partOffset += part.text.length + 1;
-          const key = `${partOffset}:${part.fragment?.id ?? ""}`;
-          return (
-            <div key={key} className="assembly-part">
-              {part.fragment !== null && (
-                <p className="assembly-part-caption">
-                  {part.fragment.label} ({part.fragment.id})
-                </p>
-              )}
-              <pre className="assembly-part-text">{part.text}</pre>
-            </div>
-          );
-        })}
+        layer.parts.map((part, index) => (
+          // biome-ignore lint/suspicious/noArrayIndexKey: a static read-only ordered list — never reordered or locally stateful.
+          <div key={index} className="assembly-part">
+            {part.fragment !== null && (
+              <p className="assembly-part-caption">
+                {part.fragment.label} ({part.fragment.id})
+              </p>
+            )}
+            <pre className="assembly-part-text">{part.text}</pre>
+          </div>
+        ))}
       {layer.type === "boundary" && (
         <div className="assembly-boundary-body">
           <p>
@@ -93,8 +79,9 @@ function LayerCard({ layer }: { layer: AssemblyRenderedLayer }) {
         <div className="assembly-failure-body">
           <h3>Layer failed to render</h3>
           <ol className="assembly-problem-list">
-            {keyedProblems(layer.problems).map(({ problem, key }) => (
-              <li key={key}>
+            {layer.problems.map((problem, index) => (
+              // biome-ignore lint/suspicious/noArrayIndexKey: a static read-only ordered list — never reordered or locally stateful.
+              <li key={index}>
                 {problem.fragment !== null && (
                   <span className="assembly-part-caption">
                     {problem.fragment.label} ({problem.fragment.id}){" "}
