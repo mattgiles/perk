@@ -691,3 +691,35 @@ buffer-edit re-render through the injected-workspace seam, hostile-text escaping
 relationship/search, and Host/Origin/CSP/no-store hardening remain in the regression pass. Unsaved workspace state still
 has no browser persistence; only an explicit revision-reviewed save can mutate an admitted canonical
 file.
+
+## Acceptance evidence (PRD §11)
+
+The eight acceptance scenarios, each with its automated evidence (the exact suites/tests — all in
+the opt-in prose gates, the test-regime section above) and its manual leg. The manual walk ran
+against the real launcher and real checkout (headless Chrome over CDP, trusted key events for the
+keyboard legs — the node 5.2/5.3 dogfood convention); the full per-scenario checklist is recorded
+on the node's plan issue (#1869, closed by the node PR).
+
+| # | Scenario | Automated evidence | Manual leg (recorded on #1869) |
+|---|---|---|---|
+| 1 | Warm/cold family | `test_prose_review_catalog.py` (real-catalog `plan.warm`/`plan.cold`, canonical aliases: `test_consumers_and_aliases_distinguish_canonical_and_shape_placements`); `test_prose_review_comparison.py` (plan-skill warm↔cold sibling options); `comparisonComponents.test.ts`; the integration compare round trip | Planning → Plan authoring lists both doors; the inspector names both as consumers of one canonical skill unit; Compare cold↔warm shows no differences |
+| 2 | Shared buffer | `editWorkspace.test.ts` (one buffer per path); `workspaceComponents.test.ts` (alias/Compare shared unsaved bytes); `assemblyComponents.test.ts` (App-level buffer-edit re-render) | The plan skill edited via one assembly placement; alias, Compare, and Assembly panes all reflect the one buffer |
+| 3 | Layered preview | `test_prose_review_assembly.py`; integration `test_assembly_options_…`/`test_guarded_assembly_render_round_trips_workspace_buffers_over_real_http`; `assembly*.test.ts` | `implement-interactive` and `implement-remote` previewed (the PRD's named pair); boundary placeholders labeled; per-scenario defaults applied |
+| 4 | Safe save | `test_prose_review_save.py` (exact bytes/mode/atomicity); `test_prose_review_web.py` (generation swap); integration `test_all_editable_families_save_over_real_http_with_exact_atomic_write`; `save.test.ts`/`saveLoad.test.ts`/`workspaceComponents.test.ts` (review gate, baseline adoption) | A real Markdown section edited → review diff → byte-exact save (fs-verified) → clean workspace → suggested prose-map check run to `Passed · exit 0` |
+| 5 | Conflict | `test_early_conflict_creates_no_temp`, `test_late_conflict_after_temp_preparation_cleans_temp_without_replacement`, `test_failure_classifier_reports_external_change_as_conflict`; frontend conflict Copy/Reload tests | External edit after load → save refuses; disk keeps the external content, the buffer keeps the edit; Copy Edits + confirmed Reload offered |
+| 6 | Invalid source | TS parser-diagnostic save arms; `test_python_save_missing_mapped_symbol_is_validation_failure_without_mutation`; `test_validation_is_syntax_first_and_leaves_target_unchanged`; the missing-heading batch arms in `test_prose_review_source.py` | Broken TS syntax refused at save with the structural diagnostic, disk untouched; mapped-heading removal is structurally unreachable from the UI (headings live in read-only context; whole-unit markdown is read-only) — the refusal itself is automated |
+| 7 | Containment | traversal/symlink/generated/unmapped arms across `test_prose_review_save.py`/`test_prose_review_source.py`/`test_prose_review_web.py` (asset containment incl. dist-root symlinks) | Spot-check only (the save transport is path-incapable from the UI): traversal/absolute unit ids 404, CSRF-less save 403, non-catalog git diff the no-leak 404 — the automated arms are primary |
+| 8 | Graph drift | `test_prose_map.py` CLI drift failure + repo currency; the checks allowlist pin; `test_prose_review_checks.py::test_real_prose_map_argv_passes_against_the_repository` (the real-argv transport arm) | An unmapped model-facing tool field injected → the drawer's prose-map run fails naming it (`unclassified-tool-field … walkProbe`); revert → passes |
+
+Cross-cutting additions from this node: `tools/prose-review/hostilePayload.test.ts` (ONE hostile
+payload through all five panes — source, save-review diff + drawer Git diff, validation/refusal
+error surfaces, Assembly separate + concatenated preview, check output — literal at every stop,
+zero materialized elements) plus a browser-side hostile spot-check during the walk.
+
+**A11y verification outcome (verify-only, no new code — a11y is a recorded non-goal):** the
+check-output and Git-annotation surfaces inherit the keyboard & accessibility contract — F6
+reaches the open drawer, Tab reaches Cancel/Run again, the Output disclosure, Git Refresh, the
+per-row Diff disclosures, and the inspector View-changes handoff; statuses are readable as text.
+**Accepted limitation (recorded, not fixed):** the scrollable text regions (`.check-run-output`,
+`.git-diff-raw`, `.save-diff`, `.assembly-rendered`, `.source-text`) have `overflow: auto` but no
+`tabIndex`, so they are not keyboard-scrollable.
