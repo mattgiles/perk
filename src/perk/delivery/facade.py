@@ -5,8 +5,8 @@ projection to :mod:`perk.delivery.train`; ``prepare`` owns authoring capability,
 plan identity, stacked-planning classification, and executable layer-start preparation;
 ``transfer`` owns replan routing and mutation; ``publish`` owns layer publication and
 draft-to-ready routing; ``sync`` dispatches the suffix transaction engine; and ``recover`` owns
-operation conclusion. Construction remains assignment-only and pure derivation stays in this
-module.
+operation conclusion plus the narrow cancellation-metadata repair. Construction remains
+assignment-only and pure derivation stays in this module.
 """
 
 from abc import ABC, abstractmethod
@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Literal
 
 if TYPE_CHECKING:
+    from perk.delivery.diagnostics import NativeCancellationMetadataWriter
     from perk.delivery.landing import LandEvidence
 
 from perk import objective
@@ -127,7 +128,7 @@ type PrepareKind = Literal["authoring", "plan_identity", "layer_start", "replan"
 type PrepareMode = Literal["strict", "best_effort", "planning", "execution"]
 type PublishKind = Literal["layer", "ready"]
 type PublishDelivery = Literal["incremental", "stacked"]
-type RecoverKind = Literal["operation_conclusion"]
+type RecoverKind = Literal["operation_conclusion", "cancellation_metadata"]
 type RecoverAction = Literal["report", "abandon", "accept_prefix"]
 type DeliveryPhase = Literal["layer", "cascade", "ready"]
 type DeliveryOrigin = Literal["domain", "git", "github", "delivery"]
@@ -710,7 +711,7 @@ type _SyncConsent = Callable[[SyncResult.Cascade | SyncResult.AbortPreview], boo
 
 @dataclass(frozen=True)
 class RecoverRequest:
-    """Request conclusion of one objective's interrupted delivery operation."""
+    """Request one Recover variant: operation conclusion or the cancellation-metadata repair."""
 
     kind: RecoverKind
     objective_id: str
@@ -719,19 +720,28 @@ class RecoverRequest:
     operation_id: str | None = None
 
     def __post_init__(self) -> None:
-        if self.kind != "operation_conclusion":
+        if self.kind not in ("operation_conclusion", "cancellation_metadata"):
             raise ValueError(f"unknown recover kind: {self.kind!r}")
         if self.action not in ("report", "abandon", "accept_prefix"):
             raise ValueError(f"unknown recover action: {self.action!r}")
         if not _nonblank(self.objective_id):
             raise ValueError("recover objective_id must be nonblank")
+        if self.kind == "cancellation_metadata":
+            # The repair variant has no operation target and no generic action verb.
+            if self.action != "report":
+                raise ValueError("cancellation_metadata recover accepts only the report action")
+            if self.operation_id is not None:
+                raise ValueError("cancellation_metadata recover accepts no operation target")
+            return
         if self.dry_run and self.action != "report":
             raise ValueError("dry-run recover cannot request an acting conclusion")
 
 
 @dataclass(frozen=True)
 class RecoverResult:
-    """The operation-conclusion report returned by :meth:`Delivery.recover`."""
+    """The strict two-variant result family returned by :meth:`Delivery.recover`: exactly the
+    detail matching ``kind`` is present — the operation-conclusion report or the
+    cancellation-metadata repair pass."""
 
     @dataclass(frozen=True)
     class MergedPrefix:
@@ -786,21 +796,58 @@ class RecoverResult:
         remainder: tuple["RecoverResult.RemainderPr", ...]
         detail: str
 
+    @dataclass(frozen=True)
+    class OperationConclusion:
+        """The operation-conclusion report: additive operation-produced data — deliberately
+        no combination guards."""
+
+        objective_id: str
+        objective_url: str
+        redirected_from: str | None
+        dry_run: bool
+        selection_required: bool
+        operations: tuple["RecoverResult.Operation", ...]
+        swept_worktrees: tuple[str, ...]
+        swept_refs: tuple[str, ...]
+        sweep_failures: tuple["RecoverResult.SweepFailure", ...]
+        sweep_skipped: str | None
+        landed_layers: tuple["RecoverResult.LandedLayer", ...] = ()
+        objective_closed: bool = False
+        reconcile_evidence: "LandEvidence | None" = None
+        notes: tuple[str, ...] = ()
+
+    @dataclass(frozen=True)
+    class CancellationAction:
+        """One per-candidate repair outcome: ``applied | would_apply | skipped | failed``."""
+
+        code: str
+        node_id: str
+        outcome: str
+        error: str | None = None
+
+    @dataclass(frozen=True)
+    class CancellationMetadata:
+        """The cancellation-metadata repair pass. ``failed`` names the aborting action and
+        stays separate from ``actions``; ``unavailable`` carries the fresh-proof failure."""
+
+        objective_id: str
+        actions: tuple["RecoverResult.CancellationAction", ...]
+        failed: "RecoverResult.CancellationAction | None"
+        aborted: bool
+        dry_run: bool
+        unavailable: str | None = None
+
     kind: RecoverKind
-    objective_id: str
-    objective_url: str
-    redirected_from: str | None
-    dry_run: bool
-    selection_required: bool
-    operations: tuple[Operation, ...]
-    swept_worktrees: tuple[str, ...]
-    swept_refs: tuple[str, ...]
-    sweep_failures: tuple[SweepFailure, ...]
-    sweep_skipped: str | None
-    landed_layers: tuple[LandedLayer, ...] = ()
-    objective_closed: bool = False
-    reconcile_evidence: "LandEvidence | None" = None
-    notes: tuple[str, ...] = ()
+    operation_conclusion: OperationConclusion | None = None
+    cancellation_metadata: CancellationMetadata | None = None
+
+    def __post_init__(self) -> None:
+        if self.kind not in ("operation_conclusion", "cancellation_metadata"):
+            raise ValueError(f"unknown recover result kind: {self.kind!r}")
+        if (self.operation_conclusion is not None) != (self.kind == "operation_conclusion") or (
+            (self.cancellation_metadata is not None) != (self.kind == "cancellation_metadata")
+        ):
+            raise ValueError("recover result detail must match kind exactly")
 
 
 type _RecoverConsent = Callable[
@@ -946,6 +993,16 @@ class DeliveryPersistence(ABC):
     ) -> None:
         """Write one layer's verified checkpoint pair atomically."""
         ...
+
+    def native_cancellation_metadata_writer(self) -> "NativeCancellationMetadataWriter | None":
+        """Expose the optional attachment-only cancellation writer (§8.54).
+
+        A concrete neutral default — ``None`` IS the unsupported-backend posture, so only
+        the persistence implementations that can actually offer the conditional writer
+        override it. The returned Protocol stays package-internal: it is a capability of
+        this authority, never a fourth public aggregate.
+        """
+        return None
 
 
 class DeliveryGit(ABC):
@@ -1577,10 +1634,15 @@ class Delivery:
         *,
         consent: _RecoverConsent | None = None,
     ) -> RecoverResult:
-        """Conclude interrupted operations through the aggregate delivery authorities."""
+        """Conclude interrupted operations — or run the isolated cancellation-metadata
+        repair — through the aggregate delivery authorities."""
         from perk.delivery import recover as recover_mod  # noqa: PLC0415 — façade/engine cycle
         from perk.delivery import sync as sync_mod  # noqa: PLC0415 — shared runtime error
 
+        if request.kind == "cancellation_metadata" and consent is not None:
+            raise ValueError(
+                "cancellation_metadata recover has no confirmation boundary — consent must be None"
+            )
         context = recover_mod._RecoverContext(
             repo_root=self._git.repo_root,
             persistence=self._persistence,

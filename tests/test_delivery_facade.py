@@ -1,7 +1,7 @@
 """Contract tests for the compact ``perk.delivery`` status/Prepare façade."""
 
 import inspect
-from dataclasses import FrozenInstanceError, replace
+from dataclasses import FrozenInstanceError, fields, replace
 from pathlib import Path
 from typing import Any, Literal, cast
 
@@ -1940,6 +1940,8 @@ def test_recover_request_accepts_the_complete_closed_matrix() -> None:
         RecoverRequest(kind="operation_conclusion", objective_id="10", action="abandon"),
         RecoverRequest(kind="operation_conclusion", objective_id="10", action="accept_prefix"),
         RecoverRequest(kind="operation_conclusion", objective_id="10", operation_id=""),
+        RecoverRequest(kind="cancellation_metadata", objective_id="10"),
+        RecoverRequest(kind="cancellation_metadata", objective_id="10", dry_run=True),
     )
 
     assert tuple(request.action for request in valid) == (
@@ -1948,8 +1950,11 @@ def test_recover_request_accepts_the_complete_closed_matrix() -> None:
         "abandon",
         "accept_prefix",
         "report",
+        "report",
+        "report",
     )
-    assert valid[-1].operation_id == ""
+    assert valid[4].operation_id == ""
+    assert valid[-1].dry_run is True and valid[-1].operation_id is None
 
 
 @pytest.mark.parametrize(
@@ -1973,6 +1978,15 @@ def test_recover_request_accepts_the_complete_closed_matrix() -> None:
             action="accept_prefix",
             dry_run=True,
         ),
+        lambda: RecoverRequest(kind="cancellation_metadata", objective_id=" "),
+        lambda: RecoverRequest(kind="cancellation_metadata", objective_id="10", action="abandon"),
+        lambda: RecoverRequest(
+            kind="cancellation_metadata", objective_id="10", action="accept_prefix"
+        ),
+        lambda: RecoverRequest(
+            kind="cancellation_metadata", objective_id="10", operation_id="01OP"
+        ),
+        lambda: RecoverRequest(kind="cancellation_metadata", objective_id="10", operation_id=""),
     ),
 )
 def test_recover_request_rejects_every_illegal_shape(build) -> None:
@@ -1983,16 +1997,18 @@ def test_recover_request_rejects_every_illegal_shape(build) -> None:
 def _recover_result() -> RecoverResult:
     return RecoverResult(
         kind="operation_conclusion",
-        objective_id="10",
-        objective_url="fake://objective/10",
-        redirected_from=None,
-        dry_run=False,
-        selection_required=False,
-        operations=(),
-        swept_worktrees=(),
-        swept_refs=(),
-        sweep_failures=(),
-        sweep_skipped=None,
+        operation_conclusion=RecoverResult.OperationConclusion(
+            objective_id="10",
+            objective_url="fake://objective/10",
+            redirected_from=None,
+            dry_run=False,
+            selection_required=False,
+            operations=(),
+            swept_worktrees=(),
+            swept_refs=(),
+            sweep_failures=(),
+            sweep_skipped=None,
+        ),
     )
 
 
@@ -2013,8 +2029,7 @@ def test_recover_result_nested_records_are_frozen_without_combination_guards() -
     failure = RecoverResult.SweepFailure("ref", "failed")
     abandon = RecoverResult.AbandonPreview("01OP", "sync", "created", "detail")
     accept = RecoverResult.AcceptPrefixPreview("01OP", "created", (merged,), (remainder,), "d")
-    result = RecoverResult(
-        kind="operation_conclusion",
+    conclusion = RecoverResult.OperationConclusion(
         objective_id="10",
         objective_url="u",
         redirected_from="9",
@@ -2029,12 +2044,63 @@ def test_recover_result_nested_records_are_frozen_without_combination_guards() -
         objective_closed=True,
         notes=("note",),
     )
+    result = RecoverResult(kind="operation_conclusion", operation_conclusion=conclusion)
 
-    assert result.operations == (operation,)
+    assert result.operation_conclusion is conclusion
+    assert conclusion.operations == (operation,)
     assert accept.merged_layers == (merged,) and abandon.kind == "sync"
     assert RecoverResult.Operation.__qualname__ == "RecoverResult.Operation"
     with pytest.raises(FrozenInstanceError):
         type(operation).__setattr__(operation, "action", "reported")
+    with pytest.raises(FrozenInstanceError):
+        type(conclusion).__setattr__(conclusion, "objective_closed", False)
+
+
+def test_recover_result_is_a_strict_two_variant_wrapper() -> None:
+    conclusion = _recover_result().operation_conclusion
+    assert conclusion is not None
+    action = RecoverResult.CancellationAction(
+        code="canceled_unpublished_projected", node_id="1.3", outcome="applied"
+    )
+    detail = RecoverResult.CancellationMetadata(
+        objective_id="10",
+        actions=(action,),
+        failed=None,
+        aborted=False,
+        dry_run=False,
+        unavailable=None,
+    )
+    cancellation = RecoverResult(kind="cancellation_metadata", cancellation_metadata=detail)
+
+    assert cancellation.cancellation_metadata is detail
+    assert cancellation.operation_conclusion is None
+    assert action.error is None
+    # The nested cancellation records are frozen data.
+    with pytest.raises(FrozenInstanceError):
+        type(action).__setattr__(action, "outcome", "failed")
+    with pytest.raises(FrozenInstanceError):
+        type(detail).__setattr__(detail, "aborted", True)
+    # No old top-level forwarding fields survive on the wrapper.
+    wrapper_fields = {f.name for f in fields(RecoverResult)}
+    assert wrapper_fields == {"kind", "operation_conclusion", "cancellation_metadata"}
+    # Exactly the detail matching kind: every cross-variant/empty combination is rejected.
+    for build in (
+        lambda: RecoverResult(kind="operation_conclusion"),
+        lambda: RecoverResult(kind="cancellation_metadata"),
+        lambda: RecoverResult(kind="operation_conclusion", cancellation_metadata=detail),
+        lambda: RecoverResult(kind="cancellation_metadata", operation_conclusion=conclusion),
+        lambda: RecoverResult(
+            kind="operation_conclusion",
+            operation_conclusion=conclusion,
+            cancellation_metadata=detail,
+        ),
+        lambda: RecoverResult(
+            kind=cast("Literal['operation_conclusion']", "future"),
+            operation_conclusion=conclusion,
+        ),
+    ):
+        with pytest.raises(ValueError):
+            build()
 
 
 def test_delivery_recover_binds_the_same_authorities_and_one_consent(
@@ -2264,6 +2330,246 @@ def test_delivery_recover_preserves_delivery_errors_and_maps_config_only(
     with pytest.raises(OSError) as raw:
         _delivery().recover(RecoverRequest(kind="operation_conclusion", objective_id="10"))
     assert raw.value is unexpected
+
+
+def test_recover_cancellation_rejects_consent_before_dispatch_or_authority_access(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from perk.delivery import recover as recover_mod
+
+    dispatched: list[RecoverRequest] = []
+
+    def dispatch(context, request, *, consent):
+        dispatched.append(request)
+        return _recover_result()
+
+    monkeypatch.setattr(recover_mod, "_dispatch", dispatch)
+    persistence = FakeDeliveryPersistence()
+    git = FakeDeliveryGit()
+    github = FakeDeliveryGitHub()
+    delivery = _delivery(persistence, git, github)
+
+    with pytest.raises(ValueError, match="no confirmation boundary"):
+        delivery.recover(
+            RecoverRequest(kind="cancellation_metadata", objective_id="10"),
+            consent=lambda preview: True,
+        )
+    assert dispatched == []
+    assert persistence.calls == [] and git.calls == [] and github.calls == []
+
+
+def test_recover_cancellation_unsupported_backend_is_an_empty_pass_without_reconstruction() -> None:
+    persistence = FakeDeliveryPersistence(
+        objectives={"10": _objective(header={"delivery": "stacked", "delivery_lineage": "L"})}
+    )
+    git = FakeDeliveryGit()
+    github = FakeDeliveryGitHub()
+
+    result = _delivery(persistence, git, github).recover(
+        RecoverRequest(kind="cancellation_metadata", objective_id="10", dry_run=True)
+    )
+
+    assert result.kind == "cancellation_metadata" and result.operation_conclusion is None
+    detail = result.cancellation_metadata
+    assert detail == RecoverResult.CancellationMetadata(
+        objective_id="10",
+        actions=(),
+        failed=None,
+        aborted=False,
+        dry_run=True,
+        unavailable=None,
+    )
+    # The unsupported arm answers before any reconstruction: one capability lookup, no
+    # objective/journal/Git/GitHub reads.
+    assert persistence.calls == [("native_cancellation_metadata_writer",)]
+    assert git.calls == [] and github.calls == []
+
+
+@pytest.mark.parametrize("dry_run", (False, True))
+def test_recover_cancellation_maps_the_repair_pass_through_nested_records(
+    monkeypatch: pytest.MonkeyPatch, dry_run: bool
+) -> None:
+    from perk.delivery import diagnostics
+
+    persistence = FakeDeliveryPersistence(cancellation_writer_supported=True)
+    delivery = _delivery(persistence)
+    captured: list[dict[str, Any]] = []
+    scripted = diagnostics.CancellationRepairResult(
+        actions=(
+            diagnostics.CancellationRepairAction(
+                code="canceled_unpublished_projected", node_id="1.2", outcome="applied"
+            ),
+            diagnostics.CancellationRepairAction(
+                code="canceled_unpublished_projected",
+                node_id="1.3",
+                outcome="skipped",
+                error="stale",
+            ),
+        ),
+        failed=diagnostics.CancellationRepairAction(
+            code="canceled_unpublished_projected",
+            node_id="1.4",
+            outcome="failed",
+            error="post-write drift",
+        ),
+        aborted=True,
+        dry_run=dry_run,
+        unavailable="proof gone",
+    )
+
+    def repair(objective_id, *, writer, reconstruct, dry_run=False):
+        captured.append(
+            {
+                "objective_id": objective_id,
+                "writer": writer,
+                "reconstruct": reconstruct,
+                "dry_run": dry_run,
+            }
+        )
+        return scripted
+
+    monkeypatch.setattr(diagnostics, "repair_projected_cancellations", repair)
+
+    result = delivery.recover(
+        RecoverRequest(kind="cancellation_metadata", objective_id="10", dry_run=dry_run)
+    )
+
+    (call,) = captured
+    assert call["objective_id"] == "10" and call["dry_run"] is dry_run
+    assert call["writer"] is persistence  # the exact capability-returned writer
+    detail = result.cancellation_metadata
+    assert detail == RecoverResult.CancellationMetadata(
+        objective_id="10",
+        actions=(
+            RecoverResult.CancellationAction(
+                code="canceled_unpublished_projected", node_id="1.2", outcome="applied"
+            ),
+            RecoverResult.CancellationAction(
+                code="canceled_unpublished_projected",
+                node_id="1.3",
+                outcome="skipped",
+                error="stale",
+            ),
+        ),
+        failed=RecoverResult.CancellationAction(
+            code="canceled_unpublished_projected",
+            node_id="1.4",
+            outcome="failed",
+            error="post-write drift",
+        ),
+        aborted=True,
+        dry_run=dry_run,
+        unavailable="proof gone",
+    )
+
+
+def test_recover_cancellation_normalizes_expected_reads_onto_the_unavailable_arm() -> None:
+    # An expected store outage inside the fresh proof becomes the diagnostics core's modeled
+    # unavailable arm (the retired doctor helper's normalization) — never a new escape path.
+    persistence = FakeDeliveryPersistence(
+        cancellation_writer_supported=True,
+        errors={("get_objective", "10"): ObjectiveStoreError("store down")},
+    )
+
+    result = _delivery(persistence).recover(
+        RecoverRequest(kind="cancellation_metadata", objective_id="10")
+    )
+
+    detail = result.cancellation_metadata
+    assert detail is not None
+    assert detail.aborted is True and detail.actions == () and detail.failed is None
+    assert detail.unavailable is not None and "store down" in detail.unavailable
+
+
+def test_recover_cancellation_is_isolated_from_operation_conclusion_machinery(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from perk.delivery import recover as recover_mod
+
+    def forbidden_config(repo_root: Path) -> Path:
+        raise AssertionError("cancellation repair must never resolve worktree config")
+
+    def forbidden_lock(repo_root: Path):
+        raise AssertionError("cancellation repair must never take the operation lock")
+
+    monkeypatch.setattr(
+        recover_mod,
+        "_DEFAULT_RECOVER_RUNTIME",
+        replace(
+            recover_mod._DEFAULT_RECOVER_RUNTIME,
+            worktree_root=forbidden_config,
+            operation_lock=forbidden_lock,
+        ),
+    )
+    persistence = FakeDeliveryPersistence(
+        cancellation_writer_supported=True,
+        objectives={
+            "10": _objective(header={"delivery": "stacked", "delivery_lineage": "lineage"})
+        },
+    )
+    git = FakeDeliveryGit(base_heads={"main": BaseHeadObservation(sha="a" * 40)})
+    github = FakeDeliveryGitHub()
+    delivery = _delivery(persistence, git, github)
+
+    result = delivery.recover(RecoverRequest(kind="cancellation_metadata", objective_id="10"))
+
+    detail = result.cancellation_metadata
+    assert detail is not None and detail.aborted is False and detail.actions == ()
+    # The same persistence authority answered the capability; the reconstruction-driven
+    # journal/Git reads are expected and permitted (they ARE the fresh safety proof)…
+    assert persistence.calls == [
+        ("native_cancellation_metadata_writer",),
+        ("get_objective", "10"),
+        ("read_journal", "10"),
+    ]
+    assert ("fetch",) in git.calls
+    # …while every operation-conclusion effect stays untouched: no journal mutation, no
+    # checkpoints, no close, and no sweep effects.
+    effect_names = {
+        "append_prepared",
+        "append_outcome",
+        "write_checkpoints",
+        "close_objective",
+    }
+    assert not [call for call in persistence.calls if call[0] in effect_names]
+    sweep_names = {"delete_ref", "remove_worktree", "prune_worktrees"}
+    assert not [call for call in git.calls if call[0] in sweep_names]
+
+
+def test_recover_cancellation_capability_failure_is_bounded_and_unexpected_propagates() -> None:
+    bounded = FakeDeliveryPersistence(
+        errors={("native_cancellation_metadata_writer",): ObjectiveStoreError("resolve failed")}
+    )
+    with pytest.raises(DeliveryError) as excinfo:
+        _delivery(bounded).recover(RecoverRequest(kind="cancellation_metadata", objective_id="10"))
+    assert excinfo.value.error_type == "github_error"
+    assert "resolve failed" in str(excinfo.value)
+
+    unexpected = RuntimeError("programmer bug")
+    broken = FakeDeliveryPersistence(errors={("native_cancellation_metadata_writer",): unexpected})
+    with pytest.raises(RuntimeError) as raw:
+        _delivery(broken).recover(RecoverRequest(kind="cancellation_metadata", objective_id="10"))
+    assert raw.value is unexpected
+
+
+def test_persistence_cancellation_writer_capability_defaults_to_none() -> None:
+    # The ABC method is a concrete neutral default, not a new abstract requirement…
+    assert "native_cancellation_metadata_writer" not in DeliveryPersistence.__abstractmethods__
+    fake = FakeDeliveryPersistence(cancellation_writer_supported=True)
+    assert DeliveryPersistence.native_cancellation_metadata_writer(fake) is None
+    # …and the owned fake's override is constructor-configured posture.
+    assert fake.native_cancellation_metadata_writer() is fake
+    assert FakeDeliveryPersistence().native_cancellation_metadata_writer() is None
+
+
+def test_facade_needs_no_runtime_diagnostics_import() -> None:
+    # The capability annotation is a quoted TYPE_CHECKING-only forward reference: the
+    # façade module's runtime namespace never binds the diagnostics Protocol (importing
+    # the façade would NameError otherwise), and the concrete default's return annotation
+    # stays the unevaluated string.
+    assert "NativeCancellationMetadataWriter" not in vars(facade_mod)
+    method = DeliveryPersistence.native_cancellation_metadata_writer
+    assert method.__annotations__["return"] == "NativeCancellationMetadataWriter | None"
 
 
 def test_prepare_request_and_result_validate_the_authoring_discriminator() -> None:

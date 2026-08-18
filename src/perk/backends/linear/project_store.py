@@ -1162,8 +1162,10 @@ class LinearProjectObjectiveStore:
         dry_run: bool = False,
     ) -> objective_store.CancellationRepairOutcome:
         """The §8.54 attachment-only conditional compare-and-write (the
-        ``NativeCancellationMetadataWriter`` seam) — doctor's narrow projected-cancellation
-        repair.
+        ``NativeCancellationMetadataWriter`` seam) — the narrow projected-cancellation
+        repair owned by ``Delivery.recover``'s cancellation-metadata variant (surfaced
+        through ``perk objective doctor --fix``) and exposed to it via the persistence
+        authority's optional writer capability.
 
         Performs a FRESH state-bearing read at the effect boundary (the projection sibling
         query), locates the node-issue, and checks every predicate against that fresh read:

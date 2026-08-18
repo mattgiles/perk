@@ -1,8 +1,10 @@
 """Constructor-configured fakes for the delivery façade's aggregate authorities.
 
 The fakes implement every nominal persistence, Git, and GitHub capability used by status and the
-mutation families, including operation conclusion. Calls are recorded and failures are keyed by
-call shape so boundary and ordering tests use the same three-authority contract as production.
+mutation families, including operation conclusion and the optional cancellation-metadata writer
+(constructor-configured supported/unsupported posture with call-keyed conditional-write
+outcomes). Calls are recorded and failures are keyed by call shape so boundary and ordering
+tests use the same three-authority contract as production.
 """
 
 from collections.abc import Mapping
@@ -12,7 +14,7 @@ from pathlib import Path
 
 from perk import objective
 from perk.backends.issue_backend import PlanHeaderUpdate, PlanState
-from perk.backends.objective_store import ObjectiveRef, ObjectiveState
+from perk.backends.objective_store import CancellationRepairOutcome, ObjectiveRef, ObjectiveState
 from perk.delivery.facade import DeliveryGit, DeliveryGitHub, DeliveryPersistence
 from perk.delivery.journal import EventRole, JournalFold, OutcomeRecord, PreparedRecord, fold_events
 from perk.delivery.persistence import AppendResult
@@ -23,6 +25,7 @@ from perk.delivery.train import (
     WorktreeFacts,
 )
 from perk.github import prs, stacks
+from perk.objective import NodeStatus
 from perk.substrate import git as git_mod
 
 type Call = tuple[object, ...]
@@ -72,6 +75,8 @@ class FakeDeliveryPersistence(_FailureMixin, DeliveryPersistence):
         preserve_transfer_carries: bool = False,
         finalize_result: bool = True,
         close_result: bool = True,
+        cancellation_writer_supported: bool = False,
+        cancellation_write_outcomes: Mapping[Call, CancellationRepairOutcome] | None = None,
         errors: Mapping[Call, Exception] | None = None,
     ) -> None:
         super().__init__(errors)
@@ -92,6 +97,8 @@ class FakeDeliveryPersistence(_FailureMixin, DeliveryPersistence):
         self._preserve_transfer_carries = preserve_transfer_carries
         self._finalize_result = finalize_result
         self._close_result = close_result
+        self._cancellation_writer_supported = cancellation_writer_supported
+        self._cancellation_write_outcomes = dict(cancellation_write_outcomes or {})
         self.calls: list[Call] = []
 
     def get_objective(self, *, objective_id: str) -> ObjectiveState | None:
@@ -241,6 +248,40 @@ class FakeDeliveryPersistence(_FailureMixin, DeliveryPersistence):
         )
         self.calls.append(call)
         self._raise_failure(call)
+
+    def native_cancellation_metadata_writer(self) -> "FakeDeliveryPersistence | None":
+        call: Call = ("native_cancellation_metadata_writer",)
+        self.calls.append(call)
+        self._raise_failure(call)
+        return self if self._cancellation_writer_supported else None
+
+    def write_node_cancellation_status(
+        self,
+        *,
+        objective_id: str,
+        node_id: str,
+        expected_status: NodeStatus,
+        new_status: NodeStatus,
+        require_native_canceled: bool | None,
+        require_no_raw_publish_claims: bool,
+        dry_run: bool = False,
+    ) -> CancellationRepairOutcome:
+        """The exact §8.54 writer signature; every conditional-write argument set is
+        recorded so forward, rollback, and dry-run rollback-verification calls stay
+        distinguishable. An unconfigured supported call answers ``APPLIED``."""
+        call: Call = (
+            "write_node_cancellation_status",
+            objective_id,
+            node_id,
+            expected_status,
+            new_status,
+            require_native_canceled,
+            require_no_raw_publish_claims,
+            dry_run,
+        )
+        self.calls.append(call)
+        self._raise_failure(call)
+        return self._cancellation_write_outcomes.get(call, CancellationRepairOutcome.APPLIED)
 
 
 class FakeDeliveryGit(_FailureMixin, DeliveryGit):

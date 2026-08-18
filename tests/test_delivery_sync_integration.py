@@ -448,7 +448,9 @@ def test_orphan_sweep_removes_real_residue_and_prunes(git_repo):
     )
     with pytest.MonkeyPatch.context() as monkeypatch:
         monkeypatch.setattr(recover, "_DEFAULT_RECOVER_RUNTIME", runtime)
-        result = delivery.recover(RecoverRequest(kind="operation_conclusion", objective_id="500"))
+        wrapped = delivery.recover(RecoverRequest(kind="operation_conclusion", objective_id="500"))
+    result = wrapped.operation_conclusion
+    assert result is not None
     assert result.operations == () and result.sweep_failures == ()
     # The on-disk orphan is removed directly; the stale admin entry (directory gone) is
     # classified too and collected by the trailing prune — BOTH ride swept_worktrees.

@@ -128,7 +128,7 @@ class ObjectiveStackRecoverOut(OutputModel):
     notes: tuple[str, ...] = ()
 
     @classmethod
-    def from_domain(cls, result: RecoverResult) -> "ObjectiveStackRecoverOut":
+    def from_domain(cls, result: RecoverResult.OperationConclusion) -> "ObjectiveStackRecoverOut":
         return cls(
             success=True,
             objective=ObjectiveOut(
@@ -209,7 +209,7 @@ def _make_consent(*, yes: bool):
     return consent
 
 
-def _render_result(result: RecoverResult) -> None:
+def _render_result(result: RecoverResult.OperationConclusion) -> None:
     if result.dry_run:
         user_output("dry run: nothing was concluded, journaled, or swept")
     if not result.operations:
@@ -342,7 +342,12 @@ def recover_stack(
             dry_run=dry_run,
             operation_id=operation_id,
         )
-        result = resolve_delivery(repo_root).recover(request, consent=_make_consent(yes=yes))
+        wrapped = resolve_delivery(repo_root).recover(request, consent=_make_consent(yes=yes))
+        # An operation_conclusion request always carries its detail (the strict wrapper's
+        # kind↔detail guard).
+        result = wrapped.operation_conclusion
+        if result is None:
+            raise AssertionError("operation_conclusion recover returned no operation detail")
     except DeliveryError as exc:
         fail(ctx, as_json=as_json, error_type=exc.error_type, message=str(exc))
         return

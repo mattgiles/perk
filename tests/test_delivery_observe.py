@@ -14,7 +14,7 @@ import pytest
 
 from perk import objective
 from perk.backends.issue_backend import PlanHeaderUpdate
-from perk.backends.objective_store import ObjectiveRef
+from perk.backends.objective_store import ObjectiveRef, ObjectiveStoreError
 from perk.delivery import land, observe
 from perk.delivery._fakes import FakeDeliveryGit, FakeDeliveryPersistence
 from perk.delivery.facade import (
@@ -169,6 +169,89 @@ class TestRepoDeliveryPersistence:
 
         assert authority.close_objective(objective_id="1431", dry_run=True) is True
         assert calls == [("close", "1431", True)]
+
+    def test_cancellation_writer_capability_returns_the_exact_supporting_store(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # A Linear-project-shaped store (structurally a NativeCancellationMetadataWriter)
+        # is returned by exact identity through ONE lazy aligned resolution — and the
+        # capability lookup performs no extra objective read.
+        reads: list[str] = []
+
+        class _WriterStore:
+            backend_id = "linear"
+
+            def get_objective(self, *, objective_id: str):
+                reads.append(objective_id)
+                return None
+
+            def write_node_cancellation_status(
+                self,
+                *,
+                objective_id: str,
+                node_id: str,
+                expected_status: objective.NodeStatus,
+                new_status: objective.NodeStatus,
+                require_native_canceled: bool | None,
+                require_no_raw_publish_claims: bool,
+                dry_run: bool = False,
+            ):
+                raise AssertionError("discovery must never write")
+
+        class _Issues:
+            backend_id = "linear"
+
+        store = _WriterStore()
+        resolved = {"store": 0, "issues": 0}
+
+        def store_resolver(_root: Path):
+            resolved["store"] += 1
+            return store
+
+        def issues_resolver(_root: Path):
+            resolved["issues"] += 1
+            return _Issues()
+
+        monkeypatch.setattr(observe, "resolve_objective_store", store_resolver)
+        monkeypatch.setattr(observe, "resolve_issue_backend", issues_resolver)
+        authority = observe.RepoDeliveryPersistence(tmp_path)
+
+        assert authority.native_cancellation_metadata_writer() is store
+        assert authority.native_cancellation_metadata_writer() is store
+        assert resolved == {"store": 1, "issues": 1}
+        assert reads == []
+
+    def test_cancellation_writer_capability_is_none_for_a_non_writer_store(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        class _PlainStore:
+            backend_id = "github"
+
+        class _Issues:
+            backend_id = "github"
+
+        monkeypatch.setattr(observe, "resolve_objective_store", lambda _root: _PlainStore())
+        monkeypatch.setattr(observe, "resolve_issue_backend", lambda _root: _Issues())
+        authority = observe.RepoDeliveryPersistence(tmp_path)
+
+        assert authority.native_cancellation_metadata_writer() is None
+
+    def test_cancellation_writer_capability_failure_is_uncached(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        resolved = {"store": 0}
+
+        def store_resolver(_root: Path):
+            resolved["store"] += 1
+            raise ObjectiveStoreError("resolver failed")
+
+        monkeypatch.setattr(observe, "resolve_objective_store", store_resolver)
+        authority = observe.RepoDeliveryPersistence(tmp_path)
+
+        for _ in range(2):
+            with pytest.raises(ObjectiveStoreError, match="resolver failed"):
+                authority.native_cancellation_metadata_writer()
+        assert resolved == {"store": 2}
 
 
 # ----------------------------------------------------------------- RepoDeliveryGit
