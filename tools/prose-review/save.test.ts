@@ -25,8 +25,8 @@ const SAVED = {
     },
   ],
   checks: [
-    { id: "prose-map", command: "perk-dev prose-map check" },
-    { id: "learned-docs", command: "perk learn docs-check" },
+    { id: "prose-map", command: "uv run --no-sync perk-dev prose-map check" },
+    { id: "learned-docs", command: "uv run --no-sync perk learn docs-check" },
   ],
   catalog_refreshed: true,
   refresh_detail: null,

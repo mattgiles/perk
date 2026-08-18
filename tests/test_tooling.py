@@ -50,11 +50,19 @@ _SANCTIONED_SUBPROCESS_WRAPPERS = {
     ("shared", "run_skills"),
 }
 
+# The one sanctioned `subprocess.Popen` site: the prose-review CheckRunner's streaming
+# spawn (app-owned; `perk.substrate.proc` stays blocking-and-capture). Every Popen must
+# pass explicit `cwd=` and `start_new_session=` (the killable-process-group discipline).
+_SANCTIONED_POPEN_SITES = {
+    ("checks", "_spawn"),
+}
 
-def _subprocess_run_sites(
+
+def _subprocess_call_sites(
     tree: ast.Module,
+    attribute: str,
 ) -> list[tuple[ast.Call, ast.FunctionDef | ast.AsyncFunctionDef | None]]:
-    """Every `subprocess.run(...)` call paired with its nearest enclosing function (or None)."""
+    """Every `subprocess.<attribute>(...)` call paired with its nearest enclosing function."""
     sites: list[tuple[ast.Call, ast.FunctionDef | ast.AsyncFunctionDef | None]] = []
 
     def walk(node: ast.AST, func: ast.FunctionDef | ast.AsyncFunctionDef | None) -> None:
@@ -63,7 +71,7 @@ def _subprocess_run_sites(
         if (
             isinstance(node, ast.Call)
             and isinstance(node.func, ast.Attribute)
-            and node.func.attr == "run"
+            and node.func.attr == attribute
             and isinstance(node.func.value, ast.Name)
             and node.func.value.id == "subprocess"
         ):
@@ -79,13 +87,14 @@ def test_subprocess_run_only_in_sanctioned_wrappers_with_check_and_timeout():
     offenders: list[str] = []
     scan_roots = (
         REPO_ROOT / "src" / "perk",
-        # No sanctioned entries live in perk-dev — it must contain zero subprocess.run literals.
+        # The one deliberate perk-dev exception is the CheckRunner's Popen `_spawn`
+        # (sanctioned below); perk-dev must contain zero subprocess.run literals.
         REPO_ROOT / "packages" / "perk-dev" / "src" / "perk_dev",
     )
     for path in sorted(p for root in scan_roots for p in root.rglob("*.py")):
         tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
         rel = path.relative_to(REPO_ROOT)
-        for call, func in _subprocess_run_sites(tree):
+        for call, func in _subprocess_call_sites(tree, "run"):
             where = f"{rel}:{func.name if func else '<module>'} (line {call.lineno})"
             if func is None or (path.stem, func.name) not in _SANCTIONED_SUBPROCESS_WRAPPERS:
                 offenders.append(
@@ -96,4 +105,15 @@ def test_subprocess_run_only_in_sanctioned_wrappers_with_check_and_timeout():
             for required in ("check", "timeout"):
                 if required not in keywords:
                     offenders.append(f"{where}: subprocess.run missing explicit `{required}=`")
+        for call, func in _subprocess_call_sites(tree, "Popen"):
+            where = f"{rel}:{func.name if func else '<module>'} (line {call.lineno})"
+            if func is None or (path.stem, func.name) not in _SANCTIONED_POPEN_SITES:
+                offenders.append(
+                    f"{where}: subprocess.Popen outside the sanctioned streaming spawn — "
+                    "sanction it here deliberately or use a captured wrapper"
+                )
+            keywords = {kw.arg for kw in call.keywords}
+            for required in ("cwd", "start_new_session"):
+                if required not in keywords:
+                    offenders.append(f"{where}: subprocess.Popen missing explicit `{required}=`")
     assert not offenders, "\n".join(offenders)

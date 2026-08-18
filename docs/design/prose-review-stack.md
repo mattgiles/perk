@@ -13,8 +13,9 @@ pure in-memory `CatalogSnapshot` queries. Markdown, YAML, Python AST, and TypeSc
 adapters resolve exact logical fragments over either the canonical load text or browser-supplied
 current text; every admitted family shares one whole-buffer validation and atomic-save pipeline.
 The Assembly preview is now shipped end to end — the backend `AssemblyRenderer` + the
-scenario-options/render API below, and the Assembly-mode frontend that consumes them; later slices
-add Python call arguments and executable check handoffs without revisiting this stack.
+scenario-options/render API below, and the Assembly-mode frontend that consumes them — and the
+CheckRunner now executes the allowlisted targeted checks below on explicit user action; later
+slices add Python call arguments without revisiting this stack.
 
 ## HTTP layer: FastAPI + uvicorn
 
@@ -101,8 +102,13 @@ add Python call arguments and executable check handoffs without revisiting this 
   `symbol:<name>` selector against the reviewed complete buffer before the common replacement tail.
   The validation-only code object is discarded: repository Python is never imported, evaluated, or
   executed. Python call arguments remain unsupported. The structured-text adapters expose exact
-  range resolution, batch revalidation, and semantic check hints (`prose-map`, plus `learned-docs`
-  for YAML). Markdown, YAML, catalog-mapped Python, and `.ts` `typescript-tool`,
+  range resolution, batch revalidation, and per-family semantic check hints over the one closed
+  `CheckId` vocabulary (`perk_dev.prose_review.checks`): Markdown suggests `prose-map` (plus
+  `prompt-parity` for prompt templates via the shared `prompt_template_name` predicate), YAML adds
+  `learned-docs`, Python adds `worker-prompt-pins`/`ruff`/`ty`, and TypeScript adds
+  `worker-prompt-pins`/`worker-test-pins`/`biome`/`tsc`. Suggested-check display strings are
+  sourced from the same `CHECK_COMMANDS` table the CheckRunner executes, so display and execution
+  can never drift. Markdown, YAML, catalog-mapped Python, and `.ts` `typescript-tool`,
   `typescript-model-call`, and `typescript-symbol` paths participate in the shared whole-buffer
   persistence pipeline.
   `GET /api/source` is the only canonical source-load endpoint and accepts an optional composite
@@ -267,6 +273,64 @@ add Python call arguments and executable check handoffs without revisiting this 
   `SessionShape` parser requires it non-empty. The selected scenario's variables render read-only
   in the inspector's shape branch; the center pane owns the controls.
 
+## CheckRunner: allowlisted targeted checks with streamed output and cancellation
+
+- **One app-owned allowlist module.** `perk_dev.prose_review.checks` is the single source of
+  truth for check identity (`CheckId`, the closed nine-id vocabulary), display command, and
+  execution: every `CHECK_COMMANDS` entry is a complete fixed argv (no `just` recipes, no
+  `npm run` script indirection), the display string IS the joined executed argv, and the client
+  only ever sends a check id — zero argv content is request-derived. Every entry is check-only
+  (`uv run --no-sync` / `npx --no-install` pin env-sync and network-install side effects out);
+  `run_ci`, `just`, formatters, and the full gates are structurally absent and pinned absent by
+  the allowlist test. `source_adapter/contract.py`'s `CheckHintId` is a re-export of `CheckId`
+  (import direction: contract → checks; no cycle).
+- **The streaming/cancellable process seam is app-owned.** `perk.substrate.proc.run_checked`
+  stays blocking-and-capture and is not reused. Exactly one `subprocess.Popen` call site
+  (`CheckRunner._spawn`, sanctioned in `tests/test_tooling.py` with mandatory `cwd=` and
+  `start_new_session=`): list argv, no shell anywhere, stdin devnull, one merged ordered
+  stdout+stderr text stream (stdlib incremental decoding, `errors="replace"`), and
+  `start_new_session=True` so the whole child tree is one killable process group. A daemon
+  reader thread captures line-by-line under the runner's one lock, capped at 2,000,000 code
+  points — past the cap the record is `truncated` and the reader drains without storing, so the
+  pipe never blocks the child. Offsets are Python str indexes over the monotone append-only
+  capture.
+- **The single-finalizer rule.** The reader thread is the only path that assigns a terminal
+  status, clears the single active slot, and cancels the timeout timer (spawn failure aside,
+  recorded terminal `spawn-failed` synchronously in `start()` before either exists). The daemon
+  timeout timer and `cancel()` only set their flag under the lock and run the process-group kill
+  escalation outside it — SIGTERM, up to 5s of polled grace, SIGKILL; never `wait()` (the reader
+  owns the one reap). Terminal status follows flag precedence `cancelled` > `timeout` >
+  exit-code-derived, with `exit_code` non-null only for `passed`/`failed`.
+- **One run slot, bounded records, offset polling.** One active run app-wide: a busy slot is
+  HTTP 409; a bounded ring retains the 20 most recent records (evicted/unknown runs are the
+  fixed 404 `unknown check run`). Four sync-def routes on the existing envelope:
+  `POST /api/checks/run` (strict `{check: CheckId}` body — unknown ids are the framework 422;
+  an id absent from a partial injected test mapping is the fixed 404 `unknown check`),
+  `GET /api/checks/run/{run_id}?offset=N` (`ge=0`, clamped to the captured length),
+  `POST /api/checks/run/{run_id}/cancel` (status-only acknowledgment; idempotent on terminal
+  runs), and `GET /api/checks/latest` — the reconciliation read serving page-reload re-adoption
+  and indeterminate-start recovery. Both POSTs sit under the existing CSRF rule; the pure-ASGI
+  guard needed no change (streaming-transparency was pinned for exactly this consumer).
+- **Isolated from the source transaction; app-scoped shutdown.** Check runs never take
+  `source_transaction_mutex`, never read or swap the catalog generation, and stay permitted
+  while `writes_frozen` (read-only and useful for diagnosis); a run observes the live working
+  tree, so concurrent saves are permitted by design. `create_app` wires `runner.shutdown()` into
+  the FastAPI lifespan (no `atexit`): uvicorn's graceful shutdown kills the active run's process
+  group and joins the reader, so the launcher never leaks a running suite and repeated app/test
+  construction leaks nothing process-global. `check_commands` is the injection seam (the
+  `reload_catalog` pattern) — tests substitute `sys.executable`-based argv under real ids.
+- **The client session (`checkSession.ts`) polls at 500ms with one writer.** `checks.ts` owns
+  the closed frontend vocabulary (ids, statuses, notice copy) and reject-unknown parsers;
+  `save.ts` reuses `CHECK_IDS` for suggested-check parsing — one vocabulary, no drift. The
+  session adopts a started run, polls with the growing offset, retires terminal runs into the
+  App-level newest-first history (capped at 20), treats a poll/cancel 404 as the
+  terminal-unrecoverable client-only `lost` state, reconciles refused/indeterminate starts
+  through `latest`, ignores the cancel response body (the polling loop is the one writer of run
+  state), and re-adopts a still-running run on mount. Starting any check opens the workspace
+  drawer's Checks section — notice line, per-run rows (label, `<code>` command, text status,
+  exit code, truncation marker, Cancel/Run again), and captured output in a lazily-mounted
+  `<details>` `<pre>` rendered strictly as JSX text.
+
 ## Frontend: Vite + React + TypeScript
 
 - A dedicated npm workspace **`tools/prose-review/`** (the `docs/site` workspace precedent), all
@@ -330,7 +394,9 @@ add Python call arguments and executable check handoffs without revisiting this 
   recovery rules. Successful save adopts returned metadata and retains its read-only lineage/check
   report. Catalog-refresh failure or reconciled lost success
   freezes later writes with truthful external repair/copy guidance. There is no custom unload text,
-  background persistence, backup, autosave, force overwrite, or in-app check execution.
+  background persistence, backup, autosave, or force overwrite. In-app check execution exists only
+  through the explicit allowlisted CheckRunner on user action (the section above) — saves still
+  never auto-run anything.
 - **Frontend dev loop (one `dist/` writer at a time):** launch the server once
   (`perk-dev prose-review` rebuilds on launch), then start the **build watcher**
   (`npm run dev --workspace tools/prose-review` = `vite build --watch`, not a dev server) and
@@ -353,8 +419,8 @@ directory (`vite --outDir`), so no two processes ever write one output dir.
 The guard is the **outermost ASGI wrapper** (`SecurityGuardMiddleware(fastapi_app)` — outside
 Starlette's `ServerErrorMiddleware`), HTTP-scope-only; lifespan/websocket scopes pass through
 untouched (no websocket routes exist — a future node adding them must give them their own guard
-policy first). Pure ASGI keeps the guard streaming-transparent for the later streaming
-CheckRunner.
+policy first; the lifespan pass-through is what runs the CheckRunner's shutdown hook). Pure ASGI
+keeps the guard streaming-transparent, which the offset-polling CheckRunner now relies on.
 
 | Invariant | Enforcement | Test |
 |---|---|---|
@@ -366,6 +432,13 @@ CheckRunner.
 | Text-only rendering (this node's slice) | React JSX text interpolation (escaped by default) + a node:test source scan banning HTML sinks (`innerHTML`, `outerHTML`, `insertAdjacentHTML`, `dangerouslySetInnerHTML`, `document.write`) + the CSP as backstop | `tools/prose-review/dom-sinks.test.ts` (with a vacuousness self-check) |
 | CSP + hardening headers on **every** HTTP response | `Content-Security-Policy: default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self'; font-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'` plus `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer`, `Cache-Control: no-store` — stamped by the guard on rejections, 404s, and framework-generated 500s alike | header assertions on every response shape, incl. `test_unhandled_exception_response_is_still_header_stamped` (pins the outermost placement) |
 | No framework doc surfaces | `docs_url=None, redoc_url=None, openapi_url=None` | `test_framework_doc_surfaces_are_disabled` (×3) |
+| Closed fixed-argv check allowlist | `CHECK_COMMANDS` is the one execution table: complete fixed argv per id, zero request-derived argv, no `just`/`npm run` script indirection, no mutating flags, `run_ci` and the full gates structurally absent; the client sends only a closed `CheckId` (Literal-validated 422 boundary) | the allowlist pin + structural-invariant tests in `test_prose_review_checks.py`; 422/404 arms in `test_prose_review_web.py` |
+| No shell in check execution | One sanctioned `subprocess.Popen` site (`checks._spawn`): list argv, `cwd=`, `start_new_session=`, devnull stdin, merged text pipes | the Popen guard in `test_tooling.py`; spawn/capture arms in `test_prose_review_checks.py` |
+| One check-run slot + reconciliation | A busy slot is HTTP 409 `check already running`; `GET /api/checks/latest` is the reconciliation read for reloaded/raced clients; a bounded 20-record ring backs polling with the fixed 404 `unknown check run` beyond it | busy/ring/latest tests in `test_prose_review_checks.py` + `test_prose_review_web.py` |
+| Bounded check-output capture | 2,000,000-code-point cap; past it the record is `truncated` and the reader drains without storing (the child never blocks on a full pipe) | `test_output_cap_truncates_and_keeps_draining` |
+| Process-group cancellation/timeout with a single finalizer | Cancel/timeout set flags under the lock and escalate SIGTERM → 5s grace → SIGKILL on the process group outside it; only the reader thread assigns terminal status, clears the slot, and cancels the timer; flag precedence `cancelled` > `timeout` > exit-code | cancel/timeout/idempotence/thread-settling tests in `test_prose_review_checks.py`; the real-HTTP cancel round trip in `test_prose_review_integration.py` |
+| Check shutdown is app-scoped | `runner.shutdown()` rides the FastAPI lifespan (no `atexit`): the active run's process group dies and the reader joins on graceful shutdown | `test_shutdown_kills_the_active_run_and_leaves_no_threads` |
+| Checks never touch catalog state | Check runs never take `source_transaction_mutex`, never read or swap the generation, and stay permitted while `writes_frozen`; they observe the live working tree by design | `test_checks_stay_permitted_while_writes_are_frozen` |
 
 ## The round-trip proof split
 

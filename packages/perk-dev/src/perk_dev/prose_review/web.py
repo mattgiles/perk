@@ -25,13 +25,14 @@ over that already-authorized text, not another repository-content read family.
 import json
 import logging
 import secrets
-from collections.abc import Awaitable, Callable, MutableMapping
+from collections.abc import AsyncIterator, Awaitable, Callable, Mapping, MutableMapping
+from contextlib import asynccontextmanager
 from dataclasses import dataclass, replace
 from pathlib import Path, PurePosixPath
 from threading import Lock
 from typing import Any
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import HTMLResponse, JSONResponse, Response
 from pydantic import Field, field_validator
@@ -49,12 +50,20 @@ from perk_dev.prose_review.assembly import (
     WorkspaceBuffer,
 )
 from perk_dev.prose_review.catalog import CatalogSnapshot, load_catalog
+from perk_dev.prose_review.checks import (
+    CheckCommand,
+    CheckId,
+    CheckRunner,
+    UnknownCheckError,
+)
 from perk_dev.prose_review.dto import (
     AssemblyOptionsOut,
     AssemblyRenderOut,
     CapabilityTreeOut,
     CatalogSummaryOut,
+    CheckRunOut,
     ComparisonOptionsOut,
+    LatestCheckOut,
     SearchOut,
     SourceSaveOut,
     SourceViewOut,
@@ -175,6 +184,12 @@ class AssemblyRenderInput(StrictInputModel):
     scenario: str = Field(min_length=1)
     presentation: AssemblyPresentationInput
     buffers: list[AssemblyWorkspaceBufferInput]
+
+
+class CheckRunInput(StrictInputModel):
+    """The check-start request: one closed allowlist id, zero request-derived argv."""
+
+    check: CheckId
 
 
 @dataclass(frozen=True, slots=True)
@@ -316,6 +331,7 @@ def create_app(
     allowed_host: str,
     csrf_token: str,
     reload_catalog: Callable[[Path], CatalogSnapshot] | None = None,
+    check_commands: Mapping[CheckId, CheckCommand] | None = None,
 ) -> SecurityGuardMiddleware:
     """Build the guarded app over an app-scoped, swappable immutable catalog generation.
 
@@ -333,7 +349,20 @@ def create_app(
     renderer = AssemblyRenderer(repo_resolved, typescript_adapter)
     state = _CatalogState(_CatalogGeneration.build(snapshot))
     reload_snapshot = load_catalog if reload_catalog is None else reload_catalog
-    app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
+    # The app-lifetime CheckRunner; `check_commands` is the test seam (the
+    # `reload_catalog` pattern). Check runs are isolated from the source transaction:
+    # they never take `source_transaction_mutex`, never touch the catalog generation,
+    # and stay permitted while writes are frozen (read-only and useful for diagnosis).
+    runner = CheckRunner(repo_resolved, commands=check_commands)
+
+    @asynccontextmanager
+    async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
+        # uvicorn's graceful shutdown runs this, so the launcher never leaks a
+        # running check; the outer guard passes lifespan scopes through untouched.
+        yield
+        runner.shutdown()
+
+    app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None, lifespan=lifespan)
 
     @app.exception_handler(RequestValidationError)
     async def request_validation_handler(
@@ -520,6 +549,41 @@ def create_app(
                 else:
                     state.generation = replacement
             return source_save_out(result)
+
+    @app.post("/api/checks/run", response_model=CheckRunOut)
+    def start_check(request: CheckRunInput) -> CheckRunOut:
+        try:
+            started = runner.start(request.check)
+        except UnknownCheckError as exc:
+            # Reachable only with a partial injected mapping: the Literal boundary
+            # already 422s ids outside the closed vocabulary.
+            raise HTTPException(status_code=404, detail="unknown check") from exc
+        if started is None:
+            raise HTTPException(status_code=409, detail="check already running")
+        return CheckRunOut.from_domain(started, 0)
+
+    @app.get("/api/checks/run/{run_id}", response_model=CheckRunOut)
+    def poll_check(run_id: str, offset: int = Query(default=0, ge=0)) -> CheckRunOut:
+        snapshot_now = runner.get(run_id)
+        if snapshot_now is None:
+            raise HTTPException(status_code=404, detail="unknown check run")
+        return CheckRunOut.from_domain(snapshot_now, offset)
+
+    @app.post("/api/checks/run/{run_id}/cancel", response_model=CheckRunOut)
+    def cancel_check(run_id: str) -> CheckRunOut:
+        # A status-only acknowledgment for the client (its polling loop remains the
+        # one writer of run state); idempotent on a terminal run.
+        cancelled = runner.cancel(run_id)
+        if cancelled is None:
+            raise HTTPException(status_code=404, detail="unknown check run")
+        return CheckRunOut.from_domain(cancelled, 0)
+
+    @app.get("/api/checks/latest", response_model=LatestCheckOut)
+    def latest_check() -> LatestCheckOut:
+        # The reconciliation read: page-reload re-adoption and indeterminate-start
+        # recovery (a fast run that went terminal before the client could ask is
+        # still visible here, so starts need no idempotency token).
+        return LatestCheckOut.from_domain(runner.latest())
 
     @app.get("/assets/{asset_path:path}")
     def asset(asset_path: str) -> Response:

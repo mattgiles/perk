@@ -576,8 +576,8 @@ def test_save_result_dtos_have_exact_tagged_shapes_and_reuse_lineage(
         source=source,
         materialized=(lineage,),
         checks=(
-            SuggestedCheck(id="prose-map", command="perk-dev prose-map check"),
-            SuggestedCheck(id="learned-docs", command="perk learn docs-check"),
+            SuggestedCheck(id="prose-map", command="uv run --no-sync perk-dev prose-map check"),
+            SuggestedCheck(id="learned-docs", command="uv run --no-sync perk learn docs-check"),
         ),
         catalog_refreshed=False,
         refresh_detail="refresh failed",
@@ -601,7 +601,7 @@ def test_save_result_dtos_have_exact_tagged_shapes_and_reuse_lineage(
     assert SavedSourceOut.from_domain(source).model_dump(mode="json") == dumped["source"]
     assert SuggestedCheckOut.from_domain(saved.checks[0]).model_dump(mode="json") == {
         "id": "prose-map",
-        "command": "perk-dev prose-map check",
+        "command": "uv run --no-sync perk-dev prose-map check",
     }
 
     diagnostic = SourceDiagnostic(

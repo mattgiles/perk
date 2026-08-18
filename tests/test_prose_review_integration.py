@@ -12,6 +12,7 @@ import re
 import secrets
 import socket
 import stat
+import sys
 import threading
 import time
 from collections.abc import Iterator
@@ -23,6 +24,7 @@ import pytest
 import uvicorn
 from perk_dev.prose_map.catalog import build_catalog
 from perk_dev.prose_review.catalog import CatalogSnapshot
+from perk_dev.prose_review.checks import CheckCommand
 from perk_dev.prose_review.cli import build_frontend
 from perk_dev.prose_review.comparison import comparison_options
 from perk_dev.prose_review.dto import (
@@ -53,6 +55,15 @@ CSP = (
 
 # One xdist worker: the module fixture builds the frontend and owns a live server.
 pytestmark = pytest.mark.xdist_group("prose_review_frontend")
+
+# The injected streaming CheckRunner fake: emits a line every 50ms until killed, so
+# the round trip below can observe mid-run growth before cancelling.
+_STREAMING_CHECK_SCRIPT = (
+    "import itertools, time\n"
+    "for index in itertools.count():\n"
+    "    print(f'line-{index}', flush=True)\n"
+    "    time.sleep(0.05)\n"
+)
 
 
 @dataclass(frozen=True)
@@ -127,6 +138,13 @@ def server(tmp_path_factory: pytest.TempPathFactory) -> Iterator[_RunningServer]
         allowed_host=f"127.0.0.1:{port}",
         csrf_token=token,
         reload_catalog=reload_after_write,
+        check_commands={
+            "prose-map": CheckCommand(
+                label="Streaming fake",
+                argv=(sys.executable, "-c", _STREAMING_CHECK_SCRIPT),
+                timeout_seconds=60,
+            ),
+        },
     )
     # Pins the assumptions this plan refuses to trust: Server.run serves a pre-bound
     # listening socket, and skips signal-handler installation off the main thread.
@@ -684,3 +702,49 @@ def test_assembly_render_rejects_an_unpaired_surrogate_buffer_over_real_http(
     assert response.status_code == 422
     _assert_security_headers(response)
     assert "\ud800" not in response.text
+
+
+def test_check_run_streams_and_cancels_over_real_http(server: _RunningServer) -> None:
+    deadline = time.monotonic() + 30
+
+    def poll(client: httpx.Client, run_id: str, offset: int) -> dict:
+        response = client.get(f"/api/checks/run/{run_id}", params={"offset": offset})
+        assert response.status_code == 200
+        _assert_security_headers(response)
+        return response.json()
+
+    with httpx.Client(base_url=server.base_url, timeout=10) as client:
+        token = _csrf_token(client.get("/").text)
+        headers = {"X-Prose-Review-Csrf": token, "Content-Type": "application/json"}
+        started = client.post("/api/checks/run", headers=headers, json={"check": "prose-map"})
+        assert started.status_code == 200
+        _assert_security_headers(started)
+        payload = started.json()
+        assert (payload["check"], payload["status"]) == ("prose-map", "running")
+        run_id = payload["run"]
+
+        # Observe mid-run output growth via offset polling: two successive non-empty
+        # slices while the run is still running.
+        offset = payload["next_offset"]
+        growth_observations = 0
+        while growth_observations < 2:
+            assert time.monotonic() < deadline, "no mid-run output growth observed"
+            body = poll(client, run_id, offset)
+            assert body["status"] == "running"
+            if body["output"]:
+                assert body["next_offset"] > offset
+                growth_observations += 1
+                offset = body["next_offset"]
+            time.sleep(0.05)
+
+        cancelled = client.post(f"/api/checks/run/{run_id}/cancel", headers=headers)
+        assert cancelled.status_code == 200
+        while True:
+            assert time.monotonic() < deadline, "cancelled run never went terminal"
+            body = poll(client, run_id, offset)
+            if body["status"] != "running":
+                break
+            time.sleep(0.05)
+        assert body["status"] == "cancelled"
+        assert body["exit_code"] is None
+        assert re.match(r"line-\d+", client.get(f"/api/checks/run/{run_id}").json()["output"])

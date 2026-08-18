@@ -184,6 +184,8 @@ function center(
         setOverride: () => undefined,
         rerender: () => undefined,
       },
+      checkActive: false,
+      onRunCheck: () => undefined,
     }),
   );
 }

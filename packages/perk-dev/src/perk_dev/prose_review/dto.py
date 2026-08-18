@@ -50,6 +50,7 @@ from perk_dev.prose_review.catalog import (
     LineageView,
     UnitAlias,
 )
+from perk_dev.prose_review.checks import CheckId, CheckRunSnapshot, CheckRunStatus
 from perk_dev.prose_review.comparison import (
     ComparisonChoice,
     ComparisonGroup,
@@ -300,7 +301,12 @@ class SourceDiagnosticOut(OutputModel):
 
 
 class SuggestedCheckOut(OutputModel):
-    """One named post-save command handoff; it is never executed by the workbench."""
+    """One named post-save check handoff with its allowlisted display command.
+
+    Never auto-run by a save: execution happens only through the explicit
+    CheckRunner endpoints on user action, against the same allowlist table this
+    command string is rendered from.
+    """
 
     id: CheckHintId
     command: str
@@ -533,6 +539,47 @@ def source_save_out(result: SourceSaveResult) -> SourceSaveOut:
     if isinstance(result, SourceConflict):
         return SourceConflictOut.from_domain(result)
     return SourceRefusedOut.from_domain(result)
+
+
+class CheckRunOut(OutputModel):
+    """One check-run snapshot serialized from the requested offset (offset polling)."""
+
+    run: str
+    check: CheckId
+    label: str
+    command: str
+    status: CheckRunStatus
+    exit_code: int | None
+    output: str
+    next_offset: int
+    truncated: bool
+
+    @classmethod
+    def from_domain(cls, snapshot: CheckRunSnapshot, offset: int) -> Self:
+        # Offsets are Python str indexes over the monotone append-only capture;
+        # clamping to the captured length keeps every requested slice total.
+        clamped = min(max(offset, 0), len(snapshot.output))
+        return cls(
+            run=snapshot.run_id,
+            check=snapshot.check,
+            label=snapshot.label,
+            command=snapshot.command,
+            status=snapshot.status,
+            exit_code=snapshot.exit_code,
+            output=snapshot.output[clamped:],
+            next_offset=len(snapshot.output),
+            truncated=snapshot.truncated,
+        )
+
+
+class LatestCheckOut(OutputModel):
+    """The reconciliation read: the most recent run (offset 0, full output) or null."""
+
+    run: CheckRunOut | None
+
+    @classmethod
+    def from_domain(cls, snapshot: CheckRunSnapshot | None) -> Self:
+        return cls(run=None if snapshot is None else CheckRunOut.from_domain(snapshot, 0))
 
 
 class UnitInspectOut(OutputModel):

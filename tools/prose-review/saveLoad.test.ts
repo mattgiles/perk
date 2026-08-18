@@ -27,7 +27,7 @@ const SAVED = {
     file: { path: UNIT.path, mode: 0o644, newline_style: "lf", load_hash: HASH },
   },
   materialized: [],
-  checks: [{ id: "prose-map", command: "perk-dev prose-map check" }],
+  checks: [{ id: "prose-map", command: "uv run --no-sync perk-dev prose-map check" }],
   catalog_refreshed: true,
   refresh_detail: null,
 };

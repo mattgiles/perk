@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
 import { type AssemblySessionState, createAssemblySession } from "./assemblySession.ts";
 import { CenterPane } from "./CenterPane.tsx";
+import { type CheckRunView, type CheckSessionState, createCheckSession } from "./checkSession.ts";
+import { CHECK_NOTICE_DETAILS, type CheckId } from "./checks.ts";
 import { comparisonRequest, type SelectedComparison } from "./comparison.ts";
 import { type ComparisonLoadState, createComparisonLoader } from "./comparisonLoad.ts";
 import { EditWorkspace, type WorkspaceSaveState } from "./editWorkspace.ts";
@@ -47,6 +49,60 @@ function selectedOriginKey(selection: Selection | null): string | null {
   return selection?.type === "unit" ? comparisonOriginKey(selection) : null;
 }
 
+// Status is always a text label (never color-only).
+const CHECK_STATUS_LABELS: Record<CheckRunView["status"], string> = {
+  running: "Running",
+  passed: "Passed",
+  failed: "Failed",
+  cancelled: "Cancelled",
+  timeout: "Timed out",
+  "spawn-failed": "Spawn failed",
+  lost: "Lost",
+};
+
+function CheckRunRow({
+  run,
+  onCancel,
+  onRunAgain,
+}: {
+  run: CheckRunView;
+  onCancel: () => void;
+  onRunAgain: (check: CheckId) => void;
+}) {
+  // The <pre> body mounts only once opened, so the drawer stays light with up to
+  // 20 retained outputs; captured output renders strictly as JSX text interpolation
+  // (hostile process output stays literal text).
+  const [outputOpen, setOutputOpen] = useState(false);
+  return (
+    <li className="check-run">
+      <span className="check-run-summary">
+        <strong>{run.label}</strong> · <code>{run.command}</code> ·{" "}
+        {CHECK_STATUS_LABELS[run.status]}
+        {run.exitCode !== null && <> · exit {run.exitCode}</>}
+        {run.truncated && <> · Output truncated.</>}
+      </span>
+      <span className="check-run-actions">
+        {run.status === "running" ? (
+          <button type="button" onClick={onCancel}>
+            Cancel
+          </button>
+        ) : (
+          <button type="button" onClick={() => onRunAgain(run.check)}>
+            Run again
+          </button>
+        )}
+      </span>
+      <details
+        className="check-run-details"
+        onToggle={(event) => setOutputOpen(event.currentTarget.open)}
+      >
+        <summary>Output</summary>
+        {outputOpen && <pre className="check-run-output">{run.output}</pre>}
+      </details>
+    </li>
+  );
+}
+
 function WorkspaceButton({ open, onToggle }: { open: boolean; onToggle: () => void }) {
   const attentionFiles = useAttentionFiles();
   return (
@@ -59,15 +115,24 @@ function WorkspaceButton({ open, onToggle }: { open: boolean; onToggle: () => vo
 function WorkspaceDrawer({
   open,
   onOpen,
+  checks,
+  onRunCheck,
+  onCancelCheck,
 }: {
   open: boolean;
   onOpen: (target: SourceTarget) => void;
+  checks: CheckSessionState;
+  onRunCheck: (check: CheckId) => void;
+  onCancelCheck: () => void;
 }) {
   const workspace = useWorkspace();
   const attentionFiles = useAttentionFiles();
   if (!open) {
     return null;
   }
+  // The record surface: a failed first start is always visible, so the section
+  // renders whenever a run, a retained record, or a notice exists.
+  const showChecks = checks.active !== null || checks.history.length > 0 || checks.notice !== null;
   return (
     <section className="workspace-drawer" aria-label="Workspace">
       <h2>Workspace ({attentionFiles.length})</h2>
@@ -111,6 +176,32 @@ function WorkspaceDrawer({
             );
           })}
         </ul>
+      )}
+      {showChecks && (
+        <section className="workspace-checks" aria-label="Checks">
+          <h3>Checks</h3>
+          {checks.notice !== null && (
+            <p className="check-notice">{CHECK_NOTICE_DETAILS[checks.notice]}</p>
+          )}
+          <ul>
+            {checks.active !== null && (
+              <CheckRunRow
+                key={checks.active.run}
+                run={checks.active}
+                onCancel={onCancelCheck}
+                onRunAgain={onRunCheck}
+              />
+            )}
+            {checks.history.map((run) => (
+              <CheckRunRow
+                key={run.run}
+                run={run}
+                onCancel={onCancelCheck}
+                onRunAgain={onRunCheck}
+              />
+            ))}
+          </ul>
+        </section>
       )}
     </section>
   );
@@ -156,6 +247,12 @@ export function App({ workspace: injectedWorkspace }: { workspace?: EditWorkspac
       buffersFn: () => workspace.exportBuffers(),
     }),
   );
+  const [checkState, setCheckState] = useState<CheckSessionState>({
+    active: null,
+    history: [],
+    notice: null,
+  });
+  const [checkSession] = useState(() => createCheckSession({ onState: setCheckState }));
   const originKey = selectedOriginKey(selection);
   const request = selection?.type === "unit" ? comparisonRequest(selection) : null;
   const assemblyShapeId = selection?.type === "shape" ? selection.shape.id : null;
@@ -230,6 +327,19 @@ export function App({ workspace: injectedWorkspace }: { workspace?: EditWorkspac
   useEffect(() => () => assemblySession.dispose(), [assemblySession]);
   useEffect(() => () => workspace.dispose(), [workspace]);
 
+  // Reload recovery: re-adopt a still-running check once on mount.
+  useEffect(() => {
+    checkSession.adoptLatest();
+    return () => checkSession.dispose();
+  }, [checkSession]);
+
+  // Starting any check opens the drawer — the record surface — so a click in the
+  // center pane is immediately visible.
+  const startCheck = (check: CheckId): void => {
+    checkSession.start(check);
+    setDrawerOpen(true);
+  };
+
   const select = (next: Selection): void => {
     if (mode === "compare" && selectedOriginKey(next) !== originKey) {
       comparisonLoader.clear();
@@ -293,6 +403,8 @@ export function App({ workspace: injectedWorkspace }: { workspace?: EditWorkspac
               setOverride: assemblySession.setOverride,
               rerender: assemblySession.rerender,
             }}
+            checkActive={checkState.active !== null}
+            onRunCheck={startCheck}
           />
         </main>
         <aside className="pane inspector-pane" aria-label="Inspector">
@@ -314,6 +426,9 @@ export function App({ workspace: injectedWorkspace }: { workspace?: EditWorkspac
             selectSource(target);
             setDrawerOpen(false);
           }}
+          checks={checkState}
+          onRunCheck={startCheck}
+          onCancelCheck={checkSession.cancel}
         />
         <WorkspaceBeforeUnload />
       </div>

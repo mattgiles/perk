@@ -397,4 +397,4 @@ class PythonSourceAdapter(SourceAdapter):
         return tuple(diagnostics)
 
     def affected_check_hints(self, unit: RoutedUnit) -> tuple[CheckHintId, ...]:
-        return ("prose-map",)
+        return ("prose-map", "worker-prompt-pins", "ruff", "ty")
