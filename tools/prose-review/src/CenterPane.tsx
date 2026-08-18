@@ -4,6 +4,7 @@ import type { Mode } from "./App.tsx";
 import { AssemblyPane, type AssemblyPaneCallbacks } from "./AssemblyPane.tsx";
 import type { AssemblySessionState } from "./assemblySession.ts";
 import { BOUNDARY_INFO } from "./boundaries.ts";
+import type { CheckId } from "./checks.ts";
 import {
   type ComparisonPlacement,
   comparisonPlacementKey,
@@ -45,10 +46,14 @@ function SourceLoadPresentation({
   target,
   state,
   retry,
+  checkActive,
+  onRunCheck,
 }: {
   target: SourceTarget;
   state: WorkspaceLoadState;
   retry: () => void;
+  checkActive: boolean;
+  onRunCheck: (check: CheckId) => void;
 }) {
   const workspace = useWorkspace();
   const [clipboardFailure, setClipboardFailure] = useState<string | null>(null);
@@ -289,7 +294,15 @@ function SourceLoadPresentation({
               <ul>
                 {saveState.result.checks.map((check) => (
                   <li key={check.id}>
-                    <code>{check.command}</code>
+                    <code>{check.command}</code>{" "}
+                    <button
+                      type="button"
+                      className="check-run-action"
+                      disabled={checkActive}
+                      onClick={() => onRunCheck(check.id)}
+                    >
+                      Run
+                    </button>
                   </li>
                 ))}
               </ul>
@@ -305,9 +318,25 @@ function SourceLoadPresentation({
   );
 }
 
-function SourceView({ target }: { target: SourceTarget }) {
+function SourceView({
+  target,
+  checkActive,
+  onRunCheck,
+}: {
+  target: SourceTarget;
+  checkActive: boolean;
+  onRunCheck: (check: CheckId) => void;
+}) {
   const { state, retry } = useWorkspaceSource(target);
-  return <SourceLoadPresentation target={target} state={state} retry={retry} />;
+  return (
+    <SourceLoadPresentation
+      target={target}
+      state={state}
+      retry={retry}
+      checkActive={checkActive}
+      onRunCheck={onRunCheck}
+    />
+  );
 }
 
 function BoundaryExplanation({ boundary, label }: { boundary: BoundaryKind; label: string }) {
@@ -323,7 +352,15 @@ function BoundaryExplanation({ boundary, label }: { boundary: BoundaryKind; labe
   );
 }
 
-function EditMode({ selection }: { selection: Selection | null }) {
+function EditMode({
+  selection,
+  checkActive,
+  onRunCheck,
+}: {
+  selection: Selection | null;
+  checkActive: boolean;
+  onRunCheck: (check: CheckId) => void;
+}) {
   if (selection === null) {
     return <p className="pane-hint">Select a unit in the capability tree to view its source.</p>;
   }
@@ -337,7 +374,14 @@ function EditMode({ selection }: { selection: Selection | null }) {
       </p>
     );
   }
-  return <SourceView key={sourceTargetKey(selection.target)} target={selection.target} />;
+  return (
+    <SourceView
+      key={sourceTargetKey(selection.target)}
+      target={selection.target}
+      checkActive={checkActive}
+      onRunCheck={onRunCheck}
+    />
+  );
 }
 
 function ComparisonHeader({ placement }: { placement: ComparisonPlacement }) {
@@ -552,6 +596,8 @@ export function CenterPane({
   selectedComparison,
   assemblyState,
   assemblyCallbacks,
+  checkActive,
+  onRunCheck,
 }: {
   mode: Mode;
   onModeChange: (mode: Mode) => void;
@@ -560,6 +606,8 @@ export function CenterPane({
   selectedComparison: SelectedComparison | null;
   assemblyState: AssemblySessionState;
   assemblyCallbacks: AssemblyPaneCallbacks;
+  checkActive: boolean;
+  onRunCheck: (check: CheckId) => void;
 }) {
   return (
     <div className="center-content">
@@ -577,7 +625,9 @@ export function CenterPane({
         ))}
       </div>
       <div className="center-mode-body">
-        {mode === "edit" && <EditMode selection={selection} />}
+        {mode === "edit" && (
+          <EditMode selection={selection} checkActive={checkActive} onRunCheck={onRunCheck} />
+        )}
         {mode === "compare" && (
           <CompareMode
             selection={selection}

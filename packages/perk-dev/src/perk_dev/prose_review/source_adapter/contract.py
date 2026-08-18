@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from typing import Literal
 
 from perk_dev.prose_map.models import Fragment, ProseKind, RoutedUnit
+from perk_dev.prose_review.checks import CheckId
 
 type NewlineStyle = Literal["none", "lf", "crlf", "cr", "mixed"]
 type RangeFailure = Literal[
@@ -21,7 +22,9 @@ type SourceDiagnosticCode = Literal[
     "selector-not-found",
     "selector-ambiguous",
 ]
-type CheckHintId = Literal["prose-map", "learned-docs"]
+# The one closed check vocabulary lives in perk_dev.prose_review.checks (which imports
+# nothing from source_adapter); this alias keeps the adapter-facing name stable.
+CheckHintId = CheckId
 type SourceReadFailure = Literal["unknown_unit", "unknown_fragment", "not_found", "not_text"]
 type ReadOnlyReason = Literal[
     "whole-unit",

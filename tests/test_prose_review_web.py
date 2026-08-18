@@ -4,7 +4,9 @@ import hashlib
 import json
 import shutil
 import stat
+import sys
 import threading
+import time
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import replace
 from pathlib import Path
@@ -16,6 +18,7 @@ from perk_dev.prose_map.catalog import build_catalog
 from perk_dev.prose_map.models import Fragment, RoutedUnit
 from perk_dev.prose_review import web
 from perk_dev.prose_review.catalog import CatalogQueryError, CatalogSnapshot, load_catalog
+from perk_dev.prose_review.checks import CheckCommand, CheckId
 from perk_dev.prose_review.comparison import comparison_options
 from perk_dev.prose_review.dto import ComparisonOptionsOut
 from perk_dev.prose_review.source_adapter import typescript as typescript_adapter_module
@@ -178,6 +181,7 @@ def _client(
     dist_dir: Path | None = None,
     raise_server_exceptions: bool = True,
     reload_catalog: Callable[[Path], CatalogSnapshot] | None = None,
+    check_commands: Mapping[CheckId, CheckCommand] | None = None,
 ) -> TestClient:
     app = create_app(
         snapshot=snapshot,
@@ -187,6 +191,7 @@ def _client(
         allowed_host=ALLOWED_HOST,
         csrf_token=TOKEN,
         reload_catalog=reload_catalog,
+        check_commands=check_commands,
     )
     return TestClient(
         app,
@@ -1255,7 +1260,9 @@ def test_save_success_derives_authority_and_refreshes_after_replacement(
         "load_hash": hashlib.sha256(text.encode()).hexdigest(),
     }
     assert payload["materialized"] == []
-    assert payload["checks"] == [{"id": "prose-map", "command": "perk-dev prose-map check"}]
+    assert payload["checks"] == [
+        {"id": "prose-map", "command": "uv run --no-sync perk-dev prose-map check"}
+    ]
     assert payload["catalog_refreshed"] is True
     assert payload["refresh_detail"] is None
     assert reload_observations == [text.encode()]
@@ -1307,7 +1314,14 @@ def test_typescript_save_is_guarded_exact_and_refreshes_after_replacement(
         },
     }
     assert payload["materialized"] == []
-    assert payload["checks"] == [{"id": "prose-map", "command": "perk-dev prose-map check"}]
+    assert [check["id"] for check in payload["checks"]] == [
+        "prose-map",
+        "worker-prompt-pins",
+        "worker-test-pins",
+        "biome",
+        "tsc",
+    ]
+    assert payload["checks"][0]["command"] == "uv run --no-sync perk-dev prose-map check"
     assert payload["catalog_refreshed"] is True
     assert payload["refresh_detail"] is None
     assert target.read_bytes() == text.encode("utf-8")
@@ -1740,7 +1754,12 @@ def test_save_unknown_unit_is_fixed_404_and_python_save_is_guarded_success(
         "load_hash": hashlib.sha256(text.encode("utf-8")).hexdigest(),
     }
     assert payload["materialized"] == []
-    assert payload["checks"] == [{"id": "prose-map", "command": "perk-dev prose-map check"}]
+    assert [check["id"] for check in payload["checks"]] == [
+        "prose-map",
+        "worker-prompt-pins",
+        "ruff",
+        "ty",
+    ]
     assert payload["catalog_refreshed"] is True
     assert payload["refresh_detail"] is None
     assert target.read_bytes() == text.encode("utf-8")
@@ -2948,3 +2967,272 @@ def test_render_after_a_freezing_save_is_a_fixed_409_without_source_or_helper_wo
     assert response.status_code == 409
     assert response.json() == {"detail": "catalog stale"}
     _assert_security_headers(response)
+
+
+# ── CheckRunner endpoints (offset polling; injected commands under real ids) ──
+
+CHECK_DEADLINE_SECONDS = 30.0
+
+
+def _fake_check(script: str, *, timeout_seconds: int = 30) -> CheckCommand:
+    return CheckCommand(
+        label="Fake check",
+        argv=(sys.executable, "-c", script),
+        timeout_seconds=timeout_seconds,
+    )
+
+
+def _gated_script(gate: Path, first: str = "one", second: str = "two") -> str:
+    return (
+        "import pathlib, time\n"
+        f"print({first!r}, flush=True)\n"
+        f"while not pathlib.Path({str(gate)!r}).exists():\n"
+        "    time.sleep(0.01)\n"
+        f"print({second!r}, flush=True)\n"
+    )
+
+
+def _poll_check(
+    client: TestClient,
+    run_id: str,
+    predicate: Callable[[dict], bool],
+    *,
+    offset: int | None = None,
+) -> dict:
+    end = time.monotonic() + CHECK_DEADLINE_SECONDS
+    while time.monotonic() < end:
+        params = {} if offset is None else {"offset": offset}
+        response = client.get(f"/api/checks/run/{run_id}", params=params)
+        assert response.status_code == 200
+        payload = response.json()
+        if predicate(payload):
+            return payload
+        time.sleep(0.02)
+    pytest.fail(f"check run {run_id} never satisfied the polled condition")
+
+
+def test_check_start_poll_and_offset_slices_over_the_guarded_app(
+    snapshot: CatalogSnapshot, repo: Path
+) -> None:
+    gate = repo / "gate"
+    client = _client(
+        snapshot,
+        repo,
+        check_commands={"prose-map": _fake_check(_gated_script(gate))},
+    )
+    started = client.post(
+        "/api/checks/run",
+        headers={web.CSRF_HEADER: TOKEN},
+        json={"check": "prose-map"},
+    )
+    assert started.status_code == 200
+    payload = started.json()
+    assert list(payload.keys()) == [
+        "run",
+        "check",
+        "label",
+        "command",
+        "status",
+        "exit_code",
+        "output",
+        "next_offset",
+        "truncated",
+    ]
+    assert payload["check"] == "prose-map"
+    assert payload["label"] == "Fake check"
+    assert payload["command"].startswith(sys.executable)
+    assert payload["status"] == "running"
+    assert payload["truncated"] is False
+    _assert_security_headers(started)
+    run_id = payload["run"]
+
+    mid = _poll_check(client, run_id, lambda body: "one" in body["output"])
+    assert mid["status"] == "running"
+    assert "two" not in mid["output"]
+    gate.touch()
+    tail = _poll_check(
+        client,
+        run_id,
+        lambda body: body["status"] != "running",
+        offset=mid["next_offset"],
+    )
+    # The offset slice carries only the growth past the first chunk.
+    assert "one" not in tail["output"]
+    assert (tail["status"], tail["exit_code"]) == ("passed", 0)
+    # Omitted offset defaults to 0: the full captured output.
+    full = client.get(f"/api/checks/run/{run_id}").json()
+    assert full["output"] == "one\ntwo\n"
+    # An offset past the captured length clamps to an empty tail slice.
+    clamped = client.get(f"/api/checks/run/{run_id}", params={"offset": 10_000}).json()
+    assert clamped["output"] == ""
+    assert clamped["next_offset"] == len(full["output"])
+
+
+def test_check_cancel_round_trip_and_busy_slot_over_the_guarded_app(
+    snapshot: CatalogSnapshot, repo: Path
+) -> None:
+    gate = repo / "never-created"
+    client = _client(
+        snapshot,
+        repo,
+        check_commands={
+            "prose-map": _fake_check(_gated_script(gate)),
+            "ruff": _fake_check("print('ok')"),
+        },
+    )
+    started = client.post(
+        "/api/checks/run",
+        headers={web.CSRF_HEADER: TOKEN},
+        json={"check": "prose-map"},
+    )
+    assert started.status_code == 200
+    run_id = started.json()["run"]
+    _poll_check(client, run_id, lambda body: "one" in body["output"])
+
+    busy = client.post(
+        "/api/checks/run",
+        headers={web.CSRF_HEADER: TOKEN},
+        json={"check": "ruff"},
+    )
+    assert busy.status_code == 409
+    assert busy.json() == {"detail": "check already running"}
+    _assert_security_headers(busy)
+
+    cancelled = client.post(
+        f"/api/checks/run/{run_id}/cancel",
+        headers={web.CSRF_HEADER: TOKEN},
+    )
+    # An empty status-only acknowledgment: polling remains the one state read.
+    assert cancelled.status_code == 204
+    assert cancelled.content == b""
+    _assert_security_headers(cancelled)
+    final = _poll_check(client, run_id, lambda body: body["status"] != "running")
+    assert (final["status"], final["exit_code"]) == ("cancelled", None)
+
+    # The slot is free again after the terminal transition.
+    second = client.post(
+        "/api/checks/run",
+        headers={web.CSRF_HEADER: TOKEN},
+        json={"check": "ruff"},
+    )
+    assert second.status_code == 200
+    _poll_check(client, second.json()["run"], lambda body: body["status"] == "passed")
+
+
+def test_check_unknown_run_poll_and_cancel_share_the_fixed_404(
+    snapshot: CatalogSnapshot, repo: Path
+) -> None:
+    client = _client(snapshot, repo, check_commands={"ruff": _fake_check("print('ok')")})
+    polled = client.get("/api/checks/run/absent")
+    assert polled.status_code == 404
+    assert polled.json() == {"detail": "unknown check run"}
+    _assert_security_headers(polled)
+    cancelled = client.post(
+        "/api/checks/run/absent/cancel",
+        headers={web.CSRF_HEADER: TOKEN},
+    )
+    assert cancelled.status_code == 404
+    assert cancelled.json() == {"detail": "unknown check run"}
+
+
+def test_check_unknown_id_and_negative_offset_are_framework_422s(
+    snapshot: CatalogSnapshot, repo: Path
+) -> None:
+    client = _client(snapshot, repo, check_commands={"ruff": _fake_check("print('ok')")})
+    unknown = client.post(
+        "/api/checks/run",
+        headers={web.CSRF_HEADER: TOKEN},
+        json={"check": "rm -rf /"},
+    )
+    assert unknown.status_code == 422
+    _assert_security_headers(unknown)
+    negative = client.get("/api/checks/run/absent", params={"offset": -1})
+    assert negative.status_code == 422
+
+
+def test_check_posts_are_csrf_guarded(snapshot: CatalogSnapshot, repo: Path) -> None:
+    client = _client(snapshot, repo, check_commands={"ruff": _fake_check("print('ok')")})
+    start = client.post("/api/checks/run", json={"check": "ruff"})
+    assert start.status_code == 403
+    assert start.json() == {"detail": "forbidden csrf token"}
+    _assert_security_headers(start)
+    cancel = client.post("/api/checks/run/absent/cancel")
+    assert cancel.status_code == 403
+    assert cancel.json() == {"detail": "forbidden csrf token"}
+
+
+def test_check_latest_serves_null_running_and_terminal(
+    snapshot: CatalogSnapshot, repo: Path
+) -> None:
+    gate = repo / "never-created"
+    client = _client(
+        snapshot,
+        repo,
+        check_commands={"prose-map": _fake_check(_gated_script(gate))},
+    )
+    empty = client.get("/api/checks/latest")
+    assert empty.status_code == 200
+    assert empty.json() == {"run": None}
+    _assert_security_headers(empty)
+
+    started = client.post(
+        "/api/checks/run",
+        headers={web.CSRF_HEADER: TOKEN},
+        json={"check": "prose-map"},
+    )
+    run_id = started.json()["run"]
+    _poll_check(client, run_id, lambda body: "one" in body["output"])
+    running = client.get("/api/checks/latest").json()["run"]
+    assert running is not None
+    assert (running["run"], running["status"]) == (run_id, "running")
+
+    client.post(f"/api/checks/run/{run_id}/cancel", headers={web.CSRF_HEADER: TOKEN})
+    _poll_check(client, run_id, lambda body: body["status"] != "running")
+    terminal = client.get("/api/checks/latest").json()["run"]
+    assert terminal is not None
+    # The reconciliation read serves the terminal record with its full output.
+    assert (terminal["run"], terminal["status"]) == (run_id, "cancelled")
+    assert terminal["output"] == "one\n"
+
+
+def test_checks_stay_permitted_while_writes_are_frozen(
+    snapshot: CatalogSnapshot, repo: Path
+) -> None:
+    _populate_sources(repo, GIST_FILES)
+    target = repo / "AGENTS.md"
+    target.write_bytes((ROOT / "AGENTS.md").read_bytes())
+    original = target.read_bytes()
+
+    def fail_reload(_root: Path) -> CatalogSnapshot:
+        raise CatalogQueryError("fixture refresh failure")
+
+    client = _client(
+        snapshot,
+        repo,
+        reload_catalog=fail_reload,
+        check_commands={"ruff": _fake_check("print('diagnosing')")},
+    )
+    saved = client.post(
+        "/api/source/save",
+        headers={web.CSRF_HEADER: TOKEN},
+        json={
+            "unit": "managed:repo-agents",
+            "load_hash": hashlib.sha256(original).hexdigest(),
+            "text": original.decode("utf-8").replace(
+                "*Conventions for working", "*Frozen checks conventions for working", 1
+            ),
+        },
+    )
+    assert saved.status_code == 200
+    assert saved.json()["catalog_refreshed"] is False
+
+    # Read-only and useful for diagnosis: check runs never touch catalog state.
+    started = client.post(
+        "/api/checks/run",
+        headers={web.CSRF_HEADER: TOKEN},
+        json={"check": "ruff"},
+    )
+    assert started.status_code == 200
+    final = _poll_check(client, started.json()["run"], lambda body: body["status"] != "running")
+    assert final["status"] == "passed"
+    assert "diagnosing" in final["output"]

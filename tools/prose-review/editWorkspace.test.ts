@@ -165,7 +165,7 @@ function savedOutcome(
         },
       },
       materialized: [],
-      checks: [{ id: "prose-map", command: "perk-dev prose-map check" }],
+      checks: [{ id: "prose-map", command: "uv run --no-sync perk-dev prose-map check" }],
       catalog_refreshed: catalogRefreshed,
       refresh_detail: catalogRefreshed ? null : CATALOG_STALE_DETAIL,
     },

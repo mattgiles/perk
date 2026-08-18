@@ -310,6 +310,8 @@ function centerElement(
         setOverride: () => undefined,
         rerender: () => undefined,
       },
+      checkActive: false,
+      onRunCheck: () => undefined,
     }),
   );
 }

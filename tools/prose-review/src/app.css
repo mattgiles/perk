@@ -954,3 +954,56 @@ body {
   margin: 0 0 0.35rem 1rem;
   overflow-wrap: anywhere;
 }
+
+/* ── Workspace checks section ──────────────────────────────────────────── */
+
+.workspace-checks {
+  margin-top: 0.75rem;
+  border-top: 1px solid color-mix(in srgb, currentcolor 25%, transparent);
+  padding-top: 0.5rem;
+}
+
+.workspace-checks h3 {
+  margin: 0;
+  font-size: 0.95rem;
+}
+
+.check-notice {
+  margin: 0.35rem 0 0;
+  opacity: 0.8;
+}
+
+.workspace-drawer li.check-run {
+  flex-wrap: wrap;
+}
+
+.check-run-summary {
+  overflow-wrap: anywhere;
+}
+
+.check-run-details {
+  flex-basis: 100%;
+}
+
+.check-run-details summary {
+  cursor: pointer;
+}
+
+.check-run-output {
+  margin: 0.35rem 0 0;
+  padding: 0.5rem;
+  border: 1px solid color-mix(in srgb, currentcolor 25%, transparent);
+  border-radius: 0.25rem;
+  max-height: 30vh;
+  overflow: auto;
+  font-family: ui-monospace, monospace;
+  font-size: 0.8rem;
+  line-height: 1.4;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.check-run-action:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}

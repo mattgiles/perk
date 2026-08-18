@@ -1,3 +1,4 @@
+import { CHECK_IDS, type CheckId } from "./checks.ts";
 import { type Lineage, parseLineage } from "./inspect.ts";
 import { parseSourceFile, type SourceFile } from "./source.ts";
 import { isProseKind, type ProseKind } from "./wire.ts";
@@ -20,9 +21,6 @@ export const SOURCE_REFUSAL_REASONS = [
   "catalog-stale",
 ] as const;
 export type SourceRefusalReason = (typeof SOURCE_REFUSAL_REASONS)[number];
-
-export const SUGGESTED_CHECK_IDS = ["prose-map", "learned-docs"] as const;
-export type SuggestedCheckId = (typeof SUGGESTED_CHECK_IDS)[number];
 
 export const GENERATED_LINEAGE_DETAIL =
   "Generated source files cannot be saved from the workbench.";
@@ -55,8 +53,10 @@ export type SourceDiagnostic = {
   column: number | null;
 };
 
+// Suggested checks share the one closed CheckRunner vocabulary (checks.ts) — one
+// vocabulary, no drift between save handoffs and the runnable allowlist.
 export type SuggestedCheck = {
-  id: SuggestedCheckId;
+  id: CheckId;
   command: string;
 };
 
@@ -131,11 +131,7 @@ function parseDiagnostic(value: unknown): SourceDiagnostic | null {
 }
 
 function parseSuggestedCheck(value: unknown): SuggestedCheck | null {
-  if (
-    !isRecord(value) ||
-    !included(SUGGESTED_CHECK_IDS, value.id) ||
-    typeof value.command !== "string"
-  ) {
+  if (!isRecord(value) || !included(CHECK_IDS, value.id) || typeof value.command !== "string") {
     return null;
   }
   return { id: value.id, command: value.command };

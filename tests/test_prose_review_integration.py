@@ -8,10 +8,12 @@ ever write one output dir), so this suite never touches the launcher's real ``di
 
 import hashlib
 import json
+import os
 import re
 import secrets
 import socket
 import stat
+import sys
 import threading
 import time
 from collections.abc import Iterator
@@ -23,6 +25,7 @@ import pytest
 import uvicorn
 from perk_dev.prose_map.catalog import build_catalog
 from perk_dev.prose_review.catalog import CatalogSnapshot
+from perk_dev.prose_review.checks import CheckCommand
 from perk_dev.prose_review.cli import build_frontend
 from perk_dev.prose_review.comparison import comparison_options
 from perk_dev.prose_review.dto import (
@@ -53,6 +56,15 @@ CSP = (
 
 # One xdist worker: the module fixture builds the frontend and owns a live server.
 pytestmark = pytest.mark.xdist_group("prose_review_frontend")
+
+# The injected streaming CheckRunner fake: emits a line every 50ms until killed, so
+# the round trip below can observe mid-run growth before cancelling.
+_STREAMING_CHECK_SCRIPT = (
+    "import itertools, time\n"
+    "for index in itertools.count():\n"
+    "    print(f'line-{index}', flush=True)\n"
+    "    time.sleep(0.05)\n"
+)
 
 
 @dataclass(frozen=True)
@@ -127,6 +139,13 @@ def server(tmp_path_factory: pytest.TempPathFactory) -> Iterator[_RunningServer]
         allowed_host=f"127.0.0.1:{port}",
         csrf_token=token,
         reload_catalog=reload_after_write,
+        check_commands={
+            "prose-map": CheckCommand(
+                label="Streaming fake",
+                argv=(sys.executable, "-c", _STREAMING_CHECK_SCRIPT),
+                timeout_seconds=60,
+            ),
+        },
     )
     # Pins the assumptions this plan refuses to trust: Server.run serves a pre-bound
     # listening socket, and skips signal-handler installation off the main thread.
@@ -490,7 +509,12 @@ def test_all_editable_families_save_over_real_http_with_exact_atomic_write(
         == hashlib.sha256(python_text.encode("utf-8")).hexdigest()
     )
     assert python_payload["source"]["file"]["mode"] == 0o764
-    assert [check["id"] for check in python_payload["checks"]] == ["prose-map"]
+    assert [check["id"] for check in python_payload["checks"]] == [
+        "prose-map",
+        "worker-prompt-pins",
+        "ruff",
+        "ty",
+    ]
     assert python_path.read_bytes() == python_text.encode("utf-8")
     assert stat.S_IMODE(python_path.stat().st_mode) == 0o764
 
@@ -503,7 +527,13 @@ def test_all_editable_families_save_over_real_http_with_exact_atomic_write(
         == hashlib.sha256(typescript_text.encode("utf-8")).hexdigest()
     )
     assert typescript_payload["source"]["file"]["mode"] == 0o754
-    assert [check["id"] for check in typescript_payload["checks"]] == ["prose-map"]
+    assert [check["id"] for check in typescript_payload["checks"]] == [
+        "prose-map",
+        "worker-prompt-pins",
+        "worker-test-pins",
+        "biome",
+        "tsc",
+    ]
     persisted_typescript = typescript_path.read_text(encoding="utf-8")
     assert persisted_typescript == typescript_text
     assert persisted_typescript.startswith(typescript_view["before"])
@@ -684,3 +714,129 @@ def test_assembly_render_rejects_an_unpaired_surrogate_buffer_over_real_http(
     assert response.status_code == 422
     _assert_security_headers(response)
     assert "\ud800" not in response.text
+
+
+def test_check_run_streams_and_cancels_over_real_http(server: _RunningServer) -> None:
+    deadline = time.monotonic() + 30
+
+    def poll(client: httpx.Client, run_id: str, offset: int) -> dict:
+        response = client.get(f"/api/checks/run/{run_id}", params={"offset": offset})
+        assert response.status_code == 200
+        _assert_security_headers(response)
+        return response.json()
+
+    with httpx.Client(base_url=server.base_url, timeout=10) as client:
+        token = _csrf_token(client.get("/").text)
+        headers = {"X-Prose-Review-Csrf": token, "Content-Type": "application/json"}
+        started = client.post("/api/checks/run", headers=headers, json={"check": "prose-map"})
+        assert started.status_code == 200
+        _assert_security_headers(started)
+        payload = started.json()
+        assert (payload["check"], payload["status"]) == ("prose-map", "running")
+        run_id = payload["run"]
+
+        # Observe mid-run output growth via offset polling: two successive non-empty
+        # slices while the run is still running.
+        offset = payload["next_offset"]
+        growth_observations = 0
+        while growth_observations < 2:
+            assert time.monotonic() < deadline, "no mid-run output growth observed"
+            body = poll(client, run_id, offset)
+            assert body["status"] == "running"
+            if body["output"]:
+                assert body["next_offset"] > offset
+                growth_observations += 1
+                offset = body["next_offset"]
+            time.sleep(0.05)
+
+        cancelled = client.post(f"/api/checks/run/{run_id}/cancel", headers=headers)
+        assert cancelled.status_code == 204
+        assert cancelled.content == b""
+        while True:
+            assert time.monotonic() < deadline, "cancelled run never went terminal"
+            body = poll(client, run_id, offset)
+            if body["status"] != "running":
+                break
+            time.sleep(0.05)
+        assert body["status"] == "cancelled"
+        assert body["exit_code"] is None
+        assert re.match(r"line-\d+", client.get(f"/api/checks/run/{run_id}").json()["output"])
+
+
+def test_lifespan_shutdown_kills_an_active_check_run(server: _RunningServer) -> None:
+    # The launcher-shutdown regression: a dedicated uvicorn instance exits while an
+    # injected long-running check is still active; the lifespan-wired
+    # `runner.shutdown()` must kill the run's process group and finish the runner
+    # threads — deleting or miswiring `create_app`'s lifespan callback fails here.
+    pid_then_block = (
+        "import os, time\n"
+        "print(os.getpid(), flush=True)\n"
+        "print('STARTED', flush=True)\n"
+        "time.sleep(600)\n"
+    )
+    token = secrets.token_urlsafe(32)
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    sock.bind(("127.0.0.1", 0))
+    sock.listen(128)
+    port = int(sock.getsockname()[1])
+    app = create_app(
+        snapshot=server.snapshot,
+        repo_root=server.repo_root,
+        selector_root=ROOT,
+        dist_dir=server.repo_root / "dist",
+        allowed_host=f"127.0.0.1:{port}",
+        csrf_token=token,
+        check_commands={
+            "prose-map": CheckCommand(
+                label="Blocking fake",
+                argv=(sys.executable, "-c", pid_then_block),
+                timeout_seconds=600,
+            ),
+        },
+    )
+    uv_server = uvicorn.Server(uvicorn.Config(app, log_level="warning", access_log=False))
+    thread = threading.Thread(
+        target=lambda: uv_server.run(sockets=[sock]),
+        name="prose-review-lifespan-uvicorn",
+        daemon=True,
+    )
+    thread.start()
+    deadline = time.monotonic() + 30
+    while not uv_server.started:
+        assert thread.is_alive(), "uvicorn thread exited before startup"
+        assert time.monotonic() < deadline, "uvicorn did not report started within 30s"
+        time.sleep(0.05)
+
+    with httpx.Client(base_url=f"http://127.0.0.1:{port}", timeout=10) as client:
+        started = client.post(
+            "/api/checks/run",
+            headers={"X-Prose-Review-Csrf": token, "Content-Type": "application/json"},
+            json={"check": "prose-map"},
+        )
+        assert started.status_code == 200
+        run_id = started.json()["run"]
+        child_pid: int | None = None
+        while child_pid is None:
+            assert time.monotonic() < deadline, "the blocking check never reported its pid"
+            output = client.get(f"/api/checks/run/{run_id}").json()["output"]
+            lines = output.splitlines()
+            if "STARTED" in lines:
+                child_pid = int(lines[0])
+            time.sleep(0.05)
+
+    # Graceful shutdown with the run still active: the lifespan hook must clean up.
+    uv_server.should_exit = True
+    thread.join(timeout=30)
+    assert not thread.is_alive(), "uvicorn thread did not exit within 30s"
+    while True:
+        try:
+            os.killpg(child_pid, 0)
+        except ProcessLookupError:
+            break
+        assert time.monotonic() < deadline, f"check process group {child_pid} still alive"
+        time.sleep(0.05)
+    while any(
+        worker.name.startswith(("check-run-", "check-timer-")) for worker in threading.enumerate()
+    ):
+        assert time.monotonic() < deadline, "runner threads lingered after lifespan shutdown"
+        time.sleep(0.05)

@@ -147,7 +147,7 @@ def test_markdown_save_writes_exact_utf8_and_preserves_latest_special_mode(
     assert target.read_bytes() == text.encode("utf-8")
     assert result.materialized == ()
     assert [(check.id, check.command) for check in result.checks] == [
-        ("prose-map", "perk-dev prose-map check")
+        ("prose-map", "uv run --no-sync perk-dev prose-map check")
     ]
     assert [path for path in target.parent.iterdir() if path.name.endswith(".tmp")] == []
 
@@ -174,8 +174,8 @@ def test_yaml_save_reports_materialization_and_both_named_checks(
     assert target.read_bytes() == text.encode("utf-8")
     assert [view.lineage.id for view in result.materialized] == ["ambient-index"]
     assert [(check.id, check.command) for check in result.checks] == [
-        ("prose-map", "perk-dev prose-map check"),
-        ("learned-docs", "perk learn docs-check"),
+        ("prose-map", "uv run --no-sync perk-dev prose-map check"),
+        ("learned-docs", "uv run --no-sync perk learn docs-check"),
     ]
 
 
@@ -256,7 +256,10 @@ def test_python_symbol_save_writes_complete_buffer_without_execution(
     assert not execution_marker.exists()
     assert result.materialized == ()
     assert [(check.id, check.command) for check in result.checks] == [
-        ("prose-map", "perk-dev prose-map check")
+        ("prose-map", "uv run --no-sync perk-dev prose-map check"),
+        ("worker-prompt-pins", "uv run --no-sync pytest tests/test_worker_prompt_parity.py -q"),
+        ("ruff", "uv run --no-sync ruff check src/perk packages/perk-dev/src tests"),
+        ("ty", "uv run --no-sync ty check"),
     ]
 
 
@@ -299,7 +302,10 @@ def test_python_backed_managed_save_reports_materialization(
     assert stat.S_IMODE(target.stat().st_mode) == 0o751
     assert [view.lineage.id for view in result.materialized] == ["downstream-agents"]
     assert [(check.id, check.command) for check in result.checks] == [
-        ("prose-map", "perk-dev prose-map check")
+        ("prose-map", "uv run --no-sync perk-dev prose-map check"),
+        ("worker-prompt-pins", "uv run --no-sync pytest tests/test_worker_prompt_parity.py -q"),
+        ("ruff", "uv run --no-sync ruff check src/perk packages/perk-dev/src tests"),
+        ("ty", "uv run --no-sync ty check"),
     ]
 
 
@@ -381,7 +387,11 @@ def test_typescript_tool_save_writes_exact_complete_buffer_through_fixed_helper(
     assert stat.S_IMODE(target.stat().st_mode) == 0o754
     assert result.materialized == ()
     assert [(check.id, check.command) for check in result.checks] == [
-        ("prose-map", "perk-dev prose-map check")
+        ("prose-map", "uv run --no-sync perk-dev prose-map check"),
+        ("worker-prompt-pins", "uv run --no-sync pytest tests/test_worker_prompt_parity.py -q"),
+        ("worker-test-pins", "node --test extension/worker/worker.test.ts"),
+        ("biome", "npx --no-install biome check extension tools"),
+        ("tsc", "npx --no-install tsc --noEmit"),
     ]
     assert [path for path in target.parent.iterdir() if path.name.endswith(".tmp")] == []
 

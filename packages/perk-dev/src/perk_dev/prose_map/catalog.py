@@ -310,10 +310,11 @@ def _validate_references(graph: ProseMap, candidate_ids: set[str]) -> list[Findi
 def prompt_template_name(candidate: Candidate) -> str | None:
     """Return the root-relative template name for a rendered prompt candidate.
 
-    The one prompt-layer predicate shared by scenario-fixture validation and the
-    prose-review AssemblyRenderer: only ``markdown`` candidates strictly beneath
-    ``prompts/`` are Jinja templates; every other candidate returns ``None`` so the
-    two consumers cannot drift on which sources are rendered.
+    The one prompt-layer predicate shared by scenario-fixture validation, the
+    prose-review AssemblyRenderer, and the Markdown adapter's check hints (a prompt
+    template suggests the render-parity check): only ``markdown`` candidates strictly
+    beneath ``prompts/`` are Jinja templates; every other candidate returns ``None``
+    so the consumers cannot drift on which sources are rendered.
     """
     if candidate.kind != "markdown":
         return None

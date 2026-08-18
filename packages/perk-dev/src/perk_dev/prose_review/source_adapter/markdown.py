@@ -1,5 +1,6 @@
 """Markdown SourceAdapter backed by the shared prose-map parser."""
 
+from perk_dev.prose_map.catalog import prompt_template_name
 from perk_dev.prose_map.markdown import (
     MarkdownDocument,
     MarkdownProblem,
@@ -83,4 +84,6 @@ class MarkdownSourceAdapter(SourceAdapter):
         return tuple(diagnostics)
 
     def affected_check_hints(self, unit: RoutedUnit) -> tuple[CheckHintId, ...]:
+        if prompt_template_name(unit.candidate) is not None:
+            return ("prose-map", "prompt-parity")
         return ("prose-map",)

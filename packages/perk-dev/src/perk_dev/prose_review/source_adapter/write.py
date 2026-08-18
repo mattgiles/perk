@@ -11,6 +11,7 @@ from typing import Literal
 
 from perk_dev.prose_map.models import RoutedUnit
 from perk_dev.prose_review.catalog import CatalogSnapshot, LineageView
+from perk_dev.prose_review.checks import CHECK_COMMANDS
 from perk_dev.prose_review.source_adapter.contract import (
     CheckHintId,
     SourceAdapter,
@@ -43,15 +44,17 @@ _REFUSAL_DETAILS: dict[SourceRefusalReason, str] = {
     "write-failed": "The source could not be saved safely.",
     "catalog-stale": CATALOG_STALE_DETAIL,
 }
-_CHECK_COMMANDS: dict[CheckHintId, str] = {
-    "prose-map": "perk-dev prose-map check",
-    "learned-docs": "perk learn docs-check",
-}
 
 
 @dataclass(frozen=True, slots=True)
 class SuggestedCheck:
-    """One named post-save check shown as a read-only command handoff."""
+    """One named post-save check handoff, displayed with its allowlisted command.
+
+    Saves never auto-run anything: execution exists only via the explicit
+    allowlisted CheckRunner on user action, and the display string is sourced from
+    the same :data:`~perk_dev.prose_review.checks.CHECK_COMMANDS` table the runner
+    executes — display and execution can never drift.
+    """
 
     id: CheckHintId
     command: str
@@ -221,7 +224,7 @@ def _suggested_checks(
             if check_id in seen:
                 continue
             seen.add(check_id)
-            checks.append(SuggestedCheck(id=check_id, command=_CHECK_COMMANDS[check_id]))
+            checks.append(SuggestedCheck(id=check_id, command=CHECK_COMMANDS[check_id].command))
     return tuple(checks)
 
 

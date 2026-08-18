@@ -302,4 +302,4 @@ class TypeScriptSourceAdapter(SourceAdapter):
         )
 
     def affected_check_hints(self, unit: RoutedUnit) -> tuple[CheckHintId, ...]:
-        return ("prose-map",)
+        return ("prose-map", "worker-prompt-pins", "worker-test-pins", "biome", "tsc")

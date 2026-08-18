@@ -519,7 +519,18 @@ def test_adapter_dispatch_and_semantic_check_hints() -> None:
     assert managed_python is not markdown
     assert managed_markdown is markdown
     assert markdown.affected_check_hints(_unit("doc.md")) == ("prose-map",)
-    assert python_adapter.affected_check_hints(_python_unit()) == ("prose-map",)
+    # Prompt templates (markdown strictly beneath prompts/) additionally suggest the
+    # render-parity check — the shared prompt_template_name predicate decides.
+    assert markdown.affected_check_hints(_unit("prompts/contexts/doc.md")) == (
+        "prose-map",
+        "prompt-parity",
+    )
+    assert python_adapter.affected_check_hints(_python_unit()) == (
+        "prose-map",
+        "worker-prompt-pins",
+        "ruff",
+        "ty",
+    )
     assert yaml_adapter.affected_check_hints(_yaml_unit()) == (
         "prose-map",
         "learned-docs",
@@ -1052,8 +1063,13 @@ def test_python_adapter_decorator_token_mismatch_fails_closed(
     assert extraction.resolution.diagnostic.selector is None
 
 
-def test_python_adapter_check_hint_is_only_prose_map() -> None:
-    assert _python_adapter().affected_check_hints(_unit("doc.py")) == ("prose-map",)
+def test_python_adapter_check_hints_name_the_python_family() -> None:
+    assert _python_adapter().affected_check_hints(_unit("doc.py")) == (
+        "prose-map",
+        "worker-prompt-pins",
+        "ruff",
+        "ty",
+    )
 
 
 def _typescript_adapter() -> TypeScriptSourceAdapter:
@@ -1524,8 +1540,14 @@ def test_every_real_typescript_fragment_is_batch_covered_through_the_python_adap
                 assert current.reason == "unsupported-source-shape", relative
 
 
-def test_typescript_adapter_check_hint_is_only_prose_map() -> None:
-    assert _typescript_adapter().affected_check_hints(_python_unit("module.ts")) == ("prose-map",)
+def test_typescript_adapter_check_hints_name_the_typescript_family() -> None:
+    assert _typescript_adapter().affected_check_hints(_python_unit("module.ts")) == (
+        "prose-map",
+        "worker-prompt-pins",
+        "worker-test-pins",
+        "biome",
+        "tsc",
+    )
 
 
 def test_default_extract_many_matches_repeated_extract_cardinality_order_and_fallback() -> None:
