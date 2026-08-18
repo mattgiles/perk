@@ -10,25 +10,45 @@ stays `tests/test_delivery_facade.py::test_public_export_cut_is_exact`).
 
 `perk.delivery.__all__` holds exactly the canonical **20 names**: 1 `Delivery` +
 1 `resolve_delivery` + 1 `DeliveryError` + 3 authority ABCs (`DeliveryPersistence`,
-`DeliveryGit`, `DeliveryGitHub`) + 14 request/result pairs (`Status`/`Prepare`/`Publish`/
-`Sync`/`Transfer`/`Recover`/`Land` × Request+Result). `test_public_export_cut_is_exact` pins the
+`DeliveryGit`, `DeliveryGitHub`) + 14 request/result records — the seven `Request`+`Result`
+pairs (`Status`/`Prepare`/`Publish`/`Sync`/`Transfer`/`Recover`/`Land`).
+`test_public_export_cut_is_exact` pins the
 exact set (`exported == _NEW_EXPORTS`, `len(__all__) == 20`) and asserts every retired name
 absent — the pin subsumes every per-node export cut.
 
 ## The import census
 
-Enumeration: `grep -rn "from perk.delivery\|import perk.delivery" src/perk --include='*.py'`
-filtered to paths outside `src/perk/delivery/`.
+Enumeration — both live import spellings, filtered to paths outside `src/perk/delivery/`:
+
+- `grep -rn "from perk.delivery\|import perk.delivery" src/perk --include='*.py'` (package-path
+  imports — root names and submodules), and
+- `grep -rn "from perk import" src/perk --include='*.py'` filtered to the `delivery` module name
+  (root-namespace module imports, e.g. `from perk import delivery, github, plan`).
 
 **Root-path imports** (the canonical surface; all names are among the 20):
 `cli/commands/plan/save_cmd.py`, `cli/commands/objective/replan_cmd.py`,
 `cli/commands/objective/create_cmd.py`, `cli/commands/objective/plan_cmd.py`,
 `cli/commands/objective/stack/sync_cmd.py`, `cli/commands/objective/stack/recover_cmd.py`,
-`cli/commands/pr/submit_cmd.py`, `run/launch/worktree.py`, `run/run_worker.py`, plus the root
-halves of the mixed imports below. `pr/submit_cmd.py` additionally aliases
-`from perk.delivery import SyncResult as DeliverySyncResult` — a root-path import kept aliased
-because the `PrSubmitResult.delivery` *field* shadows the `delivery` module name inside the
-dataclass body (this node deleted its former `perk.delivery.facade` bypass path).
+`run/launch/worktree.py`, `run/run_worker.py`, plus the root halves of the mixed imports below.
+
+**Root-namespace module imports** (`from perk import delivery`; every attribute reached through
+the module is one of the 20 public names — verified per file):
+
+| Consumer | `delivery.*` attributes used |
+|---|---|
+| `cli/commands/pr/ready_cmd.py` | `DeliveryError`, `PublishRequest`, `resolve_delivery` |
+| `cli/commands/pr/land_cmd.py` | `Delivery`, `DeliveryError`, `LandRequest`, `LandResult`, `resolve_delivery` |
+| `cli/commands/pr/submit_cmd.py` | `DeliveryError`, `PublishRequest`, `SyncResult`, `resolve_delivery` |
+
+`pr/submit_cmd.py` additionally aliases `from perk.delivery import SyncResult as
+DeliverySyncResult` — a root-path import kept aliased because the `PrSubmitResult.delivery`
+*field* shadows the `delivery` module name inside the dataclass body (this node deleted its
+former `perk.delivery.facade` bypass path). **Resolved deviation from the plan's step-3
+assumption:** the plan's selected spelling (`operation: delivery.SyncResult | None` over the
+existing module import) is structurally impossible — annotations evaluate eagerly in the class
+body (3.13, no deferred annotations), where the field assignment `delivery: str | None = None`
+has already bound `delivery = None`; the fix takes the census action matrix's other sanctioned
+arm ("FIX here: import from `perk.delivery`"), which is the arm this census records.
 
 **Submodule-path references** (deliberate; presentation and design-recorded internals stay
 outside the façade):
@@ -47,7 +67,7 @@ outside the façade):
 
 | Finding | Disposition |
 |---|---|
-| `pr/submit_cmd.py`: `from perk.delivery.facade import SyncResult as DeliverySyncResult` | FIXED — re-imported from the package root (aliased for the field-shadowing reason above) |
+| `pr/submit_cmd.py`: `from perk.delivery.facade import SyncResult as DeliverySyncResult` | FIXED — re-imported from the package root (aliased for the field-shadowing reason above; the plan-selected `delivery.SyncResult` spelling cannot resolve there — the resolved deviation recorded above) |
 | Dead compatibility chain: `observe.TrainReads`, `observe.resolve_train_reads`, `observe.reconstruct_repo_train`, `transfer.resolve_transfer_seams` | DELETED — reached only through `resolve_transfer_seams`'s default argument, itself caller-less (the façade constructs `TransferSeams` directly in `facade.py`, binding `self._reconstruct_train_status` for both transfer and recover roll-forward); no test exercised any of the four symbols. contracts.md §8.53 rewords the deleted symbol to the surviving behavior |
 
 ## The mechanism census
@@ -102,9 +122,18 @@ Three dimensions per node. **Surface removal**: the retired-name production grep
 outside the package and `test_public_export_cut_is_exact` passes (the exact root pin subsumes
 every per-node cut). **Test retirement**: the `tests/` grep's only hits are the sanctioned ones
 above. **Docs**: `shared/contracts.md` §8.42–§8.56 (+ the §8.4 land record) and
-`architecture.md` describe the final façade state —
-`grep -n "temporary export\|until Node\|unmigrated\|temporarily retained\|[0-9]\+ exports"` over
-both returns only the sanctioned historical survivors.
+`architecture.md` describe the final façade state. Two reproducible greps over
+`shared/contracts.md` + `docs/planning/stacked-prs/architecture.md`, with every expected hit
+classified:
+
+- Stale-migration wording — `grep -n "temporary export\|until Node\|unmigrated\|temporarily
+retained"` → exactly one hit: architecture.md's "…whose only public purpose was the unmigrated
+landing path)" (the sanctioned past-tense retirement narrative — it describes what the retired
+exports' purpose *was*).
+- Export counts — `grep -n "[0-9]\+ exports\|[0-9]\+-name"` → exactly three hits:
+contracts.md §8.44's "61-name `perk.delivery.__all__` of that era" (the sanctioned historical
+record) and its adjacent "canonical 20-name surface" sentence, plus architecture.md's "canonical
+**20 exports**" — the last two are the *current true* canonical count, not stale counts.
 
 | Node | Family migrated | Surface removal | Test retirement | Docs |
 |---|---|---|---|---|

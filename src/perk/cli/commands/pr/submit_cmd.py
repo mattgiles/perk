@@ -24,8 +24,10 @@ from perk.cli.context import require_github, require_repo
 from perk.cli.emit import emit, fail
 from perk.cli.ensure import UserFacingCliError
 
-# Root-path alias: inside `PrSubmitResult` the `delivery` *field* shadows the module, so the
-# `operation` annotation cannot spell `delivery.SyncResult` there.
+# Root-path alias: inside `PrSubmitResult` the `delivery` *field* shadows the module (the
+# annotation evaluates eagerly in the class body), so the `operation` annotation cannot spell
+# `delivery.SyncResult` there — the resolved deviation recorded in
+# docs/planning/stacked-prs/final-census.md.
 from perk.delivery import SyncResult as DeliverySyncResult
 from perk.github import GitHubError
 from perk.run import launch
