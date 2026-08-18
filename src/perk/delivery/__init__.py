@@ -5,8 +5,8 @@ Publish, Sync, Recover (operation conclusion plus the cancellation-metadata repa
 (the incremental plan variant plus the atomic objective variant) families over three nominal
 aggregate authorities — exactly the twenty names below. Every operation module is internal:
 pure train projection, layer context/core, capability rows, production adapters, the
-journal/persistence machinery, landing readiness and the landing mutation, post-merge
-finalization, and compatibility readers are module-path concerns only.
+journal/persistence machinery, landing readiness and the landing mutation, and post-merge
+finalization are module-path concerns only.
 """
 
 from perk.delivery.facade import (

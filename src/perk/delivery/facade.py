@@ -1074,7 +1074,8 @@ class DeliveryError(Exception):
 
 
 class DeliveryPersistence(ABC):
-    """Aggregate status authority over objective, plan, and journal persistence."""
+    """Aggregate persistence authority over objective, plan, and journal state for all seven
+    delivery operation families."""
 
     @abstractmethod
     def get_objective(self, *, objective_id: str) -> ObjectiveState | None:
@@ -1182,7 +1183,7 @@ class DeliveryPersistence(ABC):
 
 
 class DeliveryGit(ABC):
-    """Aggregate Git authority for status, Prepare, Transfer, and synchronization."""
+    """Aggregate Git authority for all seven delivery operation families."""
 
     @dataclass(frozen=True)
     class PushUrlsResult:
@@ -1325,7 +1326,7 @@ class DeliveryGit(ABC):
 
 
 class DeliveryGitHub(ABC):
-    """Aggregate GitHub authority for status, Prepare, Transfer, and synchronization."""
+    """Aggregate GitHub authority for all seven delivery operation families."""
 
     @dataclass(frozen=True)
     class MergeRules:

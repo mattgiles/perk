@@ -23,7 +23,10 @@ from perk.boundary import OutputModel
 from perk.cli.context import require_github, require_repo
 from perk.cli.emit import emit, fail
 from perk.cli.ensure import UserFacingCliError
-from perk.delivery.facade import SyncResult as DeliverySyncResult
+
+# Root-path alias: inside `PrSubmitResult` the `delivery` *field* shadows the module, so the
+# `operation` annotation cannot spell `delivery.SyncResult` there.
+from perk.delivery import SyncResult as DeliverySyncResult
 from perk.github import GitHubError
 from perk.run import launch
 from perk.state import cache

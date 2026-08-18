@@ -88,6 +88,18 @@ objective-landing migration retired the last compatibility exports (the eleven r
 names, the four landing names — `land_train` and `LandError` deleted outright —
 `GatewayLandObservations`, and the seventeen journal + six persistence names whose only
 public purpose was the unmigrated landing path).
+
+The final import census closed with the package root as the only public import path. Outside
+the package, production code references `perk.delivery` submodules solely for: the nested
+render vocabulary command modules need to present typed results (the `train` projections and
+the `land`/`landing` readiness and evidence records); the deliberately retained read-only
+helpers (`train.resolve_active_objective` — the supersession forward walk every stack command
+shares — `recover.observe_orphans`, `continuation.pending_continuation`, and
+`diagnostics.classify_finding`); and the internal layer-context records the worktree cache
+writes (`layer.LayerContext`/`LayerContextOut`). No production caller invokes delivery
+mechanics — publication, synchronization, transfer, recovery, or landing — outside a façade
+operation. The full census record is [final-census.md](final-census.md).
+
 `RecoverRequest` is a strict
 two-kind family — `operation_conclusion` plus the `cancellation_metadata` repair variant
 (report-only action, no operation target, no consent) — and `RecoverResult` is the matching
@@ -189,15 +201,15 @@ read plus bound status classification. Transfer binds the same aggregates into t
 private recovery seams and a fresh-only aggregate carrier; its runtime owns only lock/id/clock.
 Recover binds those same aggregates plus the façade's cause-aware status bridge into one private
 context. Its private runtime contains only worktree-root resolution, one shared lock, local
-manifest/directory enumeration, the temporarily retained per-layer finalizer, sleep, and clock;
+manifest/directory enumeration, the package-internal per-layer finalizer, sleep, and clock;
 config resolves before the lock, which is then held through consent, reclassification,
 convergence, metadata reads, and the final sweep. Publish binds the same authorities plus bound
 status/sync into one private context; its private runtime owns only
 clock/sleep/id/PR-body validation. Plan-variant land binds the three aggregates into one private
-context; its private runtime holds only the temporarily retained package-internal per-layer
+context; its private runtime holds only the package-internal per-layer
 finalizer. Objective-variant land binds persistence + GitHub plus the façade's cause-preserving
 train-reconstruction bridge into its own private context; its private runtime holds the same
-retained finalizer plus the operation lock, sleep, and clock (the sync/recover runtime shape),
+package-internal finalizer plus the operation lock, sleep, and clock (the sync/recover runtime shape),
 and the mutation arm holds that lock from reconstruction through consent, merge, verification,
 finalization, and close. Both Publish dry-run arms and the plan-variant Land dry-run
 return before every authority call (the objective dry-run is an online read — reconstruction +

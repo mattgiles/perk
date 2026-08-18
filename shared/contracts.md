@@ -6577,7 +6577,7 @@ remain read-only (the dry-run push is a no-op); build-ready derivation now rides
 projection (§8.46); suffix synchronization has since landed as its own operation (§8.49);
 recovery and the warm stack surface (`/objective-stack` + the typed stack tools) have since
 landed (§8.51); atomic landing has since landed (§8.55 readiness + §8.56 the mutation);
-doctor findings are a later node's contract.
+doctor findings have since landed (§8.54, the unified drift-finding policy).
 
 ## §8.46 · Stacked build readiness + parent-aware execution
 
@@ -7045,7 +7045,8 @@ manifest-less) `sync-*` residue is inert until `recover`'s orphan sweep (§8.51)
    `missing_lineage`; that member is unreachable here because step 1 already classifies a
    lineage-less train as `not_stacked`, but the shared set is context-free for §8.52 consumers.
 5. **Preflight every claimed layer** (all refusals before any candidate work): remote head ==
-   the `published_head_sha` checkpoint → else `remote_drift` (adoption is a later node); a
+   the `published_head_sha` checkpoint → else `remote_drift` (the `--adopt` arm below
+   re-anchors exactly one such layer); a
    fresh strict PR-facts read per layer — OPEN, base == the expected predecessor branch (the
    objective base for the bottom layer), head == the checkpoint → else `pr_drift`; native
    membership exactly the claimed PRs (`not_applicable` below two) → else `membership_drift`;
@@ -8132,9 +8133,9 @@ carried plans under an incremental successor instead receive the four stacked fi
 nulls in ONE generic write. Every group is skipped when stored values already match (idempotent
 rerun, no duplicate header effects); the former three transfer-only persistence wrappers do not
 exist. Verify (**before finalize**; failure → `transfer_unverified`, journal unresolved,
-predecessor open, no auto-abandon): a stacked successor requires a fresh
-`reconstruct_repo_train` whose full `(node_id, plan_id|null)` projection equals the recorded
-manifest projection exactly (a never-materialized carried node fails here), zero structural
+predecessor open, no auto-abandon): a stacked successor requires a fresh train reconstruction
+through the seams' bound `reconstruct` (the façade's cause-preserving bridge) whose full
+`(node_id, plan_id|null)` projection equals the recorded manifest projection exactly (a never-materialized carried node fails here), zero structural
 blockers, and `derive_claimed_prefix` equal to `before.claimed_prefix` (plan ids, branches,
 checkpoint pairs, order); an incremental successor verifies by direct reads (roadmap rows match
 the projection; every carried plan re-reads with the successor ownership pair and all four
@@ -8657,8 +8658,8 @@ through `DeliveryGitHub.merge_async_probe` and
 `DeliveryGitHub.merged_evidence`; objective close likewise uses
 `DeliveryPersistence.close_objective`. Recovery binds LAND issue reads only to the existing
 `train.PlanReader` shape; the landing mutation additionally reads the provider identity
-through `DeliveryPersistence.backend_id()`. The temporarily
-retained per-layer `finalize_landed_plan(close_objective_on_complete=False)` calls are private
+through `DeliveryPersistence.backend_id()`. The package-internal
+per-layer `finalize_landed_plan(close_objective_on_complete=False)` calls are private
 `_RecoverRuntime`/`_LandingRuntime` machinery, not a fourth public authority or request field.
 
 **The protocol, in order.** (1) The operation lock. (2) Reconstruct (the façade's
