@@ -508,7 +508,12 @@ def test_all_editable_families_save_over_real_http_with_exact_atomic_write(
         == hashlib.sha256(python_text.encode("utf-8")).hexdigest()
     )
     assert python_payload["source"]["file"]["mode"] == 0o764
-    assert [check["id"] for check in python_payload["checks"]] == ["prose-map"]
+    assert [check["id"] for check in python_payload["checks"]] == [
+        "prose-map",
+        "worker-prompt-pins",
+        "ruff",
+        "ty",
+    ]
     assert python_path.read_bytes() == python_text.encode("utf-8")
     assert stat.S_IMODE(python_path.stat().st_mode) == 0o764
 
@@ -521,7 +526,13 @@ def test_all_editable_families_save_over_real_http_with_exact_atomic_write(
         == hashlib.sha256(typescript_text.encode("utf-8")).hexdigest()
     )
     assert typescript_payload["source"]["file"]["mode"] == 0o754
-    assert [check["id"] for check in typescript_payload["checks"]] == ["prose-map"]
+    assert [check["id"] for check in typescript_payload["checks"]] == [
+        "prose-map",
+        "worker-prompt-pins",
+        "worker-test-pins",
+        "biome",
+        "tsc",
+    ]
     persisted_typescript = typescript_path.read_text(encoding="utf-8")
     assert persisted_typescript == typescript_text
     assert persisted_typescript.startswith(typescript_view["before"])
