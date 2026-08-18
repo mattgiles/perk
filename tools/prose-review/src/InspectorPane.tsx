@@ -170,6 +170,7 @@ function ComparisonPicker({
                   <button
                     type="button"
                     className={active ? "relation-entry selected" : "relation-entry"}
+                    aria-current={active ? "true" : undefined}
                     onClick={() => onSelect(candidate)}
                   >
                     {choice.label}

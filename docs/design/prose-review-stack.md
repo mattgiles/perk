@@ -522,6 +522,66 @@ revisiting this stack.
   is deliberately unusable against the API: the single-origin Host guard rejects any other
   origin, and no CORS/proxy escape hatch exists.
 
+## Keyboard & accessibility
+
+The PRD §5 contract, hardened across the shipped surfaces. Deliberate simplicity: every
+interactive element is a native control keeping its own Tab stop — **no** ARIA composite-widget
+roles (no `role="tree"`, no combobox), **no** roving tabindex, and **no** single-key shortcut
+layer. The additions below make the PRD's seven verbs *efficiently* reachable; revisit only if a
+later acceptance pass demands more.
+
+### Shortcut vocabulary
+
+| Key | Where | Behavior |
+| --- | --- | --- |
+| `F6` / `Shift+F6` | global | Cycle pane focus forward/backward: header → tree → center → inspector → drawer (only while open) → wrap. Moves DOM focus to the pane container (`tabIndex={-1}`); `preventDefault()`. |
+| `ArrowDown`/`ArrowUp` | tree pane | Move focus to the next/previous button inside the tree pane in DOM order (visible order — collapsed branches are unmounted), clamped at the ends. When the pane container itself is focused (post-F6), `ArrowDown` focuses the first button. |
+| `Home`/`End` | tree pane | First/last tree button. |
+| `Esc` | search bar | Close the results panel; focus returns to the search input. |
+| `ArrowDown` | search input, panel open | Focus the first selectable result button. |
+| `ArrowDown`/`ArrowUp` | search result buttons | Next/previous result, clamped; `ArrowUp` from the first result returns focus to the input. |
+| `Esc` | workspace drawer | Close the drawer; focus returns to the Workspace button. |
+| `Ctrl/Cmd+S` | global | Review-gated save mirroring the buttons exactly: with a loaded source in Edit mode — if a review is open and `canSave` → `saveReviewed`; else if no review is open and `canReview` → `beginSaveReview`; else no-op. Always `preventDefault()` (the browser save-page dialog is suppressed app-wide). |
+| `n` / `p` (no modifiers) | inside the Compare result | Next/previous change (same action as the legend buttons). |
+
+### Focus policy
+
+- Opening the drawer does **not** steal focus (the button's `aria-expanded` conveys state; the
+  drawer joins the F6 cycle and native Tab order). The drawer's **Open** action (select source +
+  close drawer) focuses the center pane container so focus is never left on an unmounted node.
+- Selection changes (tree/search/inspector) never steal focus — F6 covers moving to the result.
+- Mode switching and relationship selection get no dedicated keys: F6-to-center reaches the mode
+  bar in one Tab; F6-to-inspector reaches the relation buttons.
+
+### Non-color state rules
+
+State is never communicated by color alone: check statuses, Git states, `Dirty`, and
+editable/read-only badges are text; mode and assembly-view buttons carry `aria-pressed` +
+font-weight; the selected comparison target carries font-weight + `aria-current`. The selected
+tree entry adds `aria-current="true"`, `font-weight: 600`, and an inset `currentcolor` start bar
+(shape, not hue) over its background tint. Compare chunks render as native `del`/`ins` with
+explicit `line-through`/`underline` decorations (mirrored onto the legend badges); the tinted
+backgrounds are the secondary cue.
+
+### Focus visibility and the 200%-zoom reflow
+
+- **Authored focus rings, never suppression.** The programmatic-focus targets (the five pane
+  containers, `del`/`ins` chunks, the comparison panes) get an authored
+  `:focus { outline: 2px solid currentcolor; outline-offset: -2px; }` — UA `:focus-visible`
+  heuristics don't reliably ring `tabIndex={-1}` elements. Native controls keep UA defaults; no
+  other focus restyling exists, and `app.css` never suppresses outlines — a source-scan guard in
+  `accessibilityComponents.test.ts` pins `/outline\s*:\s*(none|0)/` absent.
+- **One `@media (max-width: 960px)` block** is the 200%-zoom proxy (common 1280–1920-px windows
+  at 200% land at 640–960 CSS px — the PRD names no exact width, only the licensed
+  inspector-stacking reflow): the grid becomes two columns / four rows (tree stays left, the
+  inspector stacks under the center pane, both keep their own scroll), the comparison grid stacks
+  to one column with a `12rem` per-pane `min-height`, and the search bar wraps.
+
+Behavior contracts live in `tools/prose-review/keyboardNav.test.ts` (the pure cycle/step/
+changed-index helpers) and `tools/prose-review/accessibilityComponents.test.ts` (the rendered
+contract); the CDP browser leg re-verifies real focus rings, `F6` reachability, and the CSS
+geometry that jsdom cannot observe.
+
 ## Build policy: rebuild on every launch
 
 The launcher runs the Vite build (via `perk.substrate.proc.run_checked`) before binding the
@@ -588,7 +648,12 @@ A jsdom harness loads TSX through the exact-pinned `tsx` API to exercise the ren
 occurrence identity, attention drawer, discard, unload lifecycle, catalog-epoch refresh, and write
 freeze) and CenterPane (shared path loads, focused textarea, transient retry, native current-text
 diff chunks, frozen save review, same-path direct/indirect presentation gating, diagnostics,
-conflict/reconciliation, and escaped handoffs). The packaging guard pins the diff and test libraries
+conflict/reconciliation, and escaped handoffs). The keyboard & accessibility contract (the section
+above) adds `keyboardNav.test.ts` for the pure pane-cycle/list-step/changed-index helpers and
+`accessibilityComponents.test.ts` for the rendered contract — F6 cycling with the open-drawer leg,
+tree arrow navigation and `aria-current`, search panel keys, drawer Esc/Open focus moves, the
+review-gated Mod+S round trip, Compare `del`/`ins` traversal, and the never-suppress-outline
+source scan. The packaging guard pins the diff and test libraries
 as exact dev-only dependencies while preserving the workspace's zero-runtime-dependency posture.
 
 The launcher-served **browser** leg covers source-native focused editing across

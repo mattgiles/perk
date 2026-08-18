@@ -57,6 +57,7 @@ function SourceButton({
     <button
       type="button"
       className={`${active ? "tree-entry selected" : "tree-entry"}${fragment ? " fragment" : ""}`}
+      aria-current={active ? "true" : undefined}
       onClick={() => onSelect(candidate)}
     >
       {display}
@@ -144,6 +145,7 @@ function BoundaryButton({ layer, selection, onSelect }: { layer: AssemblyLayer }
     <button
       type="button"
       className={active ? "tree-entry boundary selected" : "tree-entry boundary"}
+      aria-current={active ? "true" : undefined}
       onClick={() => onSelect({ type: "boundary", boundary, label: display })}
     >
       {display} <span className="boundary-owner">{BOUNDARY_INFO[boundary].owner}</span>
@@ -202,6 +204,7 @@ function ShapeEntry({
         <button
           type="button"
           className={active ? "tree-entry selected" : "tree-entry"}
+          aria-current={active ? "true" : undefined}
           onClick={() => onSelect(shapeSelection(shape, breadcrumb))}
         >
           {shape.label} <span className="delivery-badge">{shape.delivery}</span>

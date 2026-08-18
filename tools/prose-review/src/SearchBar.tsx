@@ -1,5 +1,6 @@
-import { useEffect, useState } from "react";
+import { type KeyboardEvent as ReactKeyboardEvent, useEffect, useRef, useState } from "react";
 import type { CapabilityRef } from "./inspect.ts";
+import { moveFocusInList } from "./keyboardNav.ts";
 import type { SearchResult } from "./search.ts";
 import {
   createSearchPanel,
@@ -68,8 +69,51 @@ export function SearchBar({ onSelect }: { onSelect: (target: SourceTarget) => vo
   const [filters, setFilters] = useState<Filters>(NO_FILTERS);
   const [panel, setPanel] = useState<PanelState>({ status: "idle" });
   const [controller] = useState(() => createSearchPanel(setPanel));
+  const barRef = useRef<HTMLDivElement | null>(null);
+  const inputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => () => controller.dispose(), [controller]);
+
+  // The search keyboard contract: Esc closes the panel and returns focus to the
+  // input; ArrowDown enters the results from the input; Arrow keys step between
+  // result buttons (ArrowUp from the first returns to the input). The scoped
+  // `.search-panel button.search-result` query never captures the filter/Clear
+  // controls, and unhandled keys (selects, Enter) keep their native behavior.
+  const onKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>): void => {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      controller.close();
+      inputRef.current?.focus();
+      return;
+    }
+    if (event.key !== "ArrowDown" && event.key !== "ArrowUp") {
+      return;
+    }
+    const bar = barRef.current;
+    if (bar === null) {
+      return;
+    }
+    const results = [...bar.querySelectorAll<HTMLElement>(".search-panel button.search-result")];
+    const active = document.activeElement;
+    if (active === inputRef.current) {
+      if (event.key === "ArrowDown" && results.length > 0) {
+        event.preventDefault();
+        results[0]?.focus();
+      }
+      return;
+    }
+    const current = results.findIndex((result) => result === active);
+    if (current === -1) {
+      return;
+    }
+    event.preventDefault();
+    const next = moveFocusInList(results, active, event.key);
+    if (next !== null) {
+      next.focus();
+    } else if (event.key === "ArrowUp" && current === 0) {
+      inputRef.current?.focus();
+    }
+  };
 
   function refresh(nextQuery: string, nextFilters: Filters): void {
     setQuery(nextQuery);
@@ -83,10 +127,11 @@ export function SearchBar({ onSelect }: { onSelect: (target: SourceTarget) => vo
   }
 
   return (
-    <div className="search-bar">
+    <div ref={barRef} className="search-bar" onKeyDown={onKeyDown}>
       <label className="search-field">
         Search
         <input
+          ref={inputRef}
           type="text"
           className="search-input"
           value={query}
