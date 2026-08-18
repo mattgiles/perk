@@ -57,6 +57,7 @@ const WARM: SessionShape = {
   id: "shape:warm",
   label: "Warm shape",
   delivery: "warm",
+  assembly: "test-assembly",
   layers: [BOUNDARY_LAYER, WARM_LAYER],
 };
 const COLD: SessionShape = {

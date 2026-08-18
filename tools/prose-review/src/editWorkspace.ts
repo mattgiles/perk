@@ -78,6 +78,11 @@ export type DirtyFileSummary = {
   target: SourceTarget;
 };
 
+export type WorkspaceBufferExport = {
+  path: string;
+  text: string;
+};
+
 export type AttentionFileSummary = DirtyFileSummary & {
   dirty: boolean;
   saveState: WorkspaceSaveState;
@@ -658,6 +663,18 @@ export class EditWorkspace {
       revision: entry.revision,
       dirty: !exactBytesEqual(currentBytes, entry.loadBytes),
     };
+  }
+
+  /**
+   * The complete loaded workspace as render-request buffers — one record per loaded
+   * file (not only dirty entries) with its current in-memory text, path-sorted.
+   */
+  exportBuffers(): WorkspaceBufferExport[] {
+    const buffers: WorkspaceBufferExport[] = [];
+    for (const [path, entry] of this.#files) {
+      buffers.push({ path, text: entry.currentText });
+    }
+    return buffers.sort((left, right) => left.path.localeCompare(right.path));
   }
 
   dirtyFiles(): DirtyFileSummary[] {
