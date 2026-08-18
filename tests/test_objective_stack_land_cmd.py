@@ -1,12 +1,12 @@
 """Tests for ``perk objective stack land`` (``commands/objective/stack/land_cmd.py``).
 
-CLI-level via ``CliRunner`` with the seams monkeypatched: the reconstruction seam
-(``train.reconstruct_train``) and the assessment seam (``land.assess_land_readiness``) for
-the unchanged ``--dry-run`` preview, and the operation seam (``landing.land_train``) for the
-bare mutating path — the readiness projection is pinned in ``test_delivery_land.py`` and the
-operation protocol in ``test_delivery_landing.py``; here the envelope (declared field
-order), consent wiring, run-id resolution, exit codes, and the human renders are the
-contract.
+CLI-level via ``CliRunner`` over the migrated-command convention: a ``Delivery`` subclass
+captures the exact ``LandRequest`` + consent callback and returns scripted ``LandResult``s
+(or raises scripted ``DeliveryError``s) with ``resolve_delivery`` monkeypatched — the
+readiness projection is pinned in ``test_delivery_land.py`` and the operation protocol in
+``test_delivery_landing.py``; here the envelope (declared field order), request
+reconstruction (objective id, run id), consent wiring, the in-band BLOCKED → ``land_blocked``
+mapping, exit codes, and the human renders are the contract.
 """
 
 import json
@@ -20,60 +20,13 @@ from perk import github, plan
 from perk.backends.objective_store import ObjectiveState
 from perk.cli.cli import cli
 from perk.cli.commands.objective.stack import land_cmd, shared
-from perk.delivery import land, landing, observe, train
+from perk.delivery import Delivery, DeliveryError, LandRequest, LandResult, land, landing, train
 from perk.delivery.finalize import LandFinalization, LearnConsumeUpdate, ObjectiveLandUpdate
 from perk.state import cache
 
 _URL = "https://github.com/o/r/issues/1431"
 _SHA_A = "a" * 40
 _SHA_B = "b" * 40
-
-
-def _no_train() -> train.NoDeliveryTrain:
-    return train.NoDeliveryTrain(
-        objective_id="1431",
-        objective_url=_URL,
-        redirected_from=None,
-        reason=train.NO_TRAIN_INCREMENTAL_REASON,
-    )
-
-
-def _layer() -> train.TrainLayer:
-    return train.TrainLayer(
-        node_id="1.1",
-        plan_id="100",
-        branch="plan-100",
-        pr_number=500,
-        intent=train.LayerIntent.PLANNED,
-        publication=train.LayerPublication.PUBLISHED,
-        git=train.LayerGit.SYNCED,
-        pr=train.LayerPr.READY,
-        membership=train.LayerMembership.NOT_APPLICABLE,
-        writer=train.LayerWriter.FREE,
-        finalization=train.LayerFinalization.NOT_MERGED,
-        parent_checkpoint_sha=_SHA_A,
-        published_head_sha=_SHA_B,
-        observed_remote_head_sha=_SHA_B,
-        observed_pr_base="main",
-        expected_pr_base="main",
-    )
-
-
-def _train(redirected_from: str | None = None) -> train.DeliveryTrain:
-    return train.DeliveryTrain(
-        objective_id="1431",
-        objective_url=_URL,
-        delivery_lineage="01JB0000000000000000000000",
-        base="main",
-        redirected_from=redirected_from,
-        layers=(_layer(),),
-        published_prefix_len=1,
-        unresolved_operation=None,
-        findings=(),
-        build_readiness=train.BuildReadiness(
-            next_node_id=None, ready=False, reason="all layers published"
-        ),
-    )
 
 
 def _row(**overrides) -> land.LandLayerReadiness:
@@ -143,13 +96,32 @@ def _ready_plan() -> land.LandPlan:
     )
 
 
-def _merged_outcome(
+def _dry_run_result(
+    readiness: land.LandReadiness, *, redirected_from: str | None = None
+) -> LandResult:
+    return LandResult(
+        kind="objective",
+        objective=LandResult.Objective(
+            readiness=readiness, redirected_from=redirected_from, dry_run=True
+        ),
+    )
+
+
+def _blocked_result(readiness: land.LandReadiness) -> LandResult:
+    """The in-band BLOCKED refusal detail (`outcome: None` on the mutation)."""
+    return LandResult(
+        kind="objective",
+        objective=LandResult.Objective(readiness=readiness, redirected_from=None, dry_run=False),
+    )
+
+
+def _merged_result(
     readiness: land.LandReadiness | None = None,
     *,
     outcome: landing.LandOutcomeKind = "merged",
     notes: tuple[str, ...] = (),
     finalized: bool = True,
-) -> landing.LandOutcome:
+) -> LandResult:
     fin = (
         LandFinalization(
             learn_state="pending",
@@ -175,14 +147,19 @@ def _merged_outcome(
         if outcome == "merged"
         else ()
     )
-    return landing.LandOutcome(
-        outcome=outcome,
-        readiness=readiness if readiness is not None else _readiness(plan_value=_ready_plan()),
-        operation_id="01OPERATION" if outcome not in ("declined",) else None,
-        merge_async_uuid=None,
-        landed_layers=layers,
-        objective_closed=outcome == "merged",
-        notes=notes,
+    return LandResult(
+        kind="objective",
+        objective=LandResult.Objective(
+            readiness=readiness if readiness is not None else _readiness(plan_value=_ready_plan()),
+            redirected_from=None,
+            dry_run=False,
+            outcome=outcome,
+            operation_id="01OPERATION" if outcome not in ("declined",) else None,
+            merge_async_uuid=None,
+            landed_layers=layers,
+            objective_closed=outcome == "merged",
+            notes=notes,
+        ),
     )
 
 
@@ -190,73 +167,58 @@ def _invoke(
     args,
     *,
     monkeypatch,
-    reconstruct=None,
-    readiness=None,
+    result: LandResult | None = None,
+    error: Exception | None = None,
     git_init=True,
     setup=None,
-    land_result=None,
-    land_error=None,
     header_run_id="01HEADERRUN",
     authed=True,
 ):
-    """Invoke the CLI in an isolated repo with the seams faked: ``reconstruct`` is the
-    ``train.reconstruct_train`` return (or raise), ``readiness`` the assessment's (the
-    dry-run path), ``land_result``/``land_error`` the ``landing.land_train`` outcome (the
-    mutating path — the fake drives the CLI's ``approve`` callback like the real operation);
-    records the objective ids asked for, the assessment's call kwargs, and the land calls."""
-    asked: list[str] = []
-    assessed: list[dict] = []
-    landed: list[dict] = []
+    """Invoke the CLI in an isolated repo with ``resolve_delivery`` monkeypatched to a
+    ``Delivery`` subclass that records the exact request + consent callback, raises the
+    scripted ``error``, or returns the scripted ``result`` (driving the consent callback
+    like the real operation: consent fires on every non-BLOCKED mutation; declining maps
+    onto the declined outcome)."""
+    calls: list[dict] = []
 
-    def fake_reconstruct(objective_id, **_kwargs):
-        asked.append(objective_id)
-        if isinstance(reconstruct, Exception):
-            raise reconstruct
-        assert reconstruct is not None, "reconstruct_train must not be reached"
-        return reconstruct
+    class _FakeDelivery(Delivery):
+        def __init__(self) -> None:  # no aggregate authorities — every call is scripted
+            pass
 
-    def fake_assess(projection, *, observations, remote_writers):
-        assessed.append(
-            {
-                "projection": projection,
-                "observations": observations,
-                "remote_writers": remote_writers,
-            }
-        )
-        assert readiness is not None, "assess_land_readiness must not be reached"
-        return readiness
-
-    def fake_land(repo_root, *, objective_id, run_id, approve, remote_writers, **_kwargs):
-        landed.append(
-            {
-                "objective_id": objective_id,
-                "run_id": run_id,
-                "remote_writers": remote_writers,
-            }
-        )
-        if isinstance(land_error, Exception):
-            raise land_error
-        assert land_result is not None, "land_train must not be reached"
-        if approve is not None and not approve(land_result.readiness):
-            return landing.LandOutcome(
-                outcome="declined",
-                readiness=land_result.readiness,
-                operation_id=None,
-                merge_async_uuid=None,
-                landed_layers=(),
-                objective_closed=False,
-                notes=(),
-            )
-        return land_result
+        def land(self, request: LandRequest, *, consent=None) -> LandResult:
+            calls.append({"request": request, "consent": consent})
+            if error is not None:
+                raise error
+            assert result is not None, "Delivery.land must not be reached"
+            detail = result.objective
+            assert detail is not None
+            if (
+                not request.dry_run
+                and consent is not None
+                and detail.outcome is not None
+                and not consent(detail.readiness)
+            ):
+                return LandResult(
+                    kind="objective",
+                    objective=replace(
+                        detail,
+                        outcome="declined",
+                        operation_id=None,
+                        merge_async_uuid=None,
+                        landed_layers=(),
+                        objective_closed=False,
+                        notes=(),
+                        reconcile_evidence=None,
+                    ),
+                )
+            return result
 
     class _Store:
         def get_objective(self, *, objective_id: str):
             header = {"run_id": header_run_id} if header_run_id else {}
             return ObjectiveState(id=objective_id, url=_URL, title="T", header=header, nodes=())
 
-    monkeypatch.setattr(train, "reconstruct_train", fake_reconstruct)
-    monkeypatch.setattr(land, "assess_land_readiness", fake_assess)
-    monkeypatch.setattr(landing, "land_train", fake_land)
+    monkeypatch.setattr(land_cmd, "resolve_delivery", lambda _root: _FakeDelivery())
     monkeypatch.setattr(shared, "resolve_objective_store", lambda root: _Store())
     monkeypatch.setattr(
         github, "check_auth", lambda: github.AuthStatus(authed, "octocat", ("repo",), None)
@@ -268,21 +230,23 @@ def _invoke(
         if setup is not None:
             setup(Path(d))
         outcome = runner.invoke(cli, args)
-    return outcome, asked, assessed, landed
+    return outcome, calls
 
 
 def test_bare_land_drives_the_mutation_with_yes(monkeypatch):
-    # Bare land is no longer the `land_unimplemented` refusal — it routes to land_train.
-    result, _, _, landed = _invoke(
+    result, calls = _invoke(
         ["objective", "stack", "land", "1431", "--yes", "--json"],
         monkeypatch=monkeypatch,
-        land_result=_merged_outcome(),
+        result=_merged_result(),
     )
     assert result.exit_code == 0
-    (call,) = landed
-    assert call["objective_id"] == "1431"
-    assert call["run_id"] == "01HEADERRUN"  # the active-header fallback
-    assert isinstance(call["remote_writers"], land_cmd.GhaRemoteWriterProbe)
+    (call,) = calls
+    request = call["request"]
+    # The exact reconstructed caller intent (the run-id header fallback) + a live consent.
+    assert request == LandRequest(
+        kind="objective", objective_id="1431", run_id="01HEADERRUN", dry_run=False
+    )
+    assert call["consent"] is not None
     payload = json.loads(result.stdout)
     # The mutation envelope's declared field order is load-bearing (trailing growth only).
     assert list(payload) == [
@@ -330,44 +294,46 @@ def test_bare_land_drives_the_mutation_with_yes(monkeypatch):
 
 
 def test_bare_land_explicit_run_id_wins(monkeypatch):
-    _, _, _, landed = _invoke(
+    _, calls = _invoke(
         ["objective", "stack", "land", "1431", "--run-id", "01EXPLICIT", "--yes", "--json"],
         monkeypatch=monkeypatch,
-        land_result=_merged_outcome(),
+        result=_merged_result(),
     )
-    assert landed[0]["run_id"] == "01EXPLICIT"
+    assert calls[0]["request"].run_id == "01EXPLICIT"
 
 
 def test_bare_land_missing_run_id_is_invalid_input(monkeypatch):
-    result, _, _, landed = _invoke(
+    result, calls = _invoke(
         ["objective", "stack", "land", "1431", "--yes", "--json"],
         monkeypatch=monkeypatch,
         header_run_id="",
     )
     assert result.exit_code == 1
     assert json.loads(result.stdout)["error_type"] == "invalid_input"
-    assert landed == []  # refused before the operation
+    assert calls == []  # refused before the operation
 
 
 def test_bare_land_non_interactive_without_yes_is_confirmation_required(monkeypatch):
-    result, _, _, _ = _invoke(
+    # The consent callback runs against the scripted readiness: non-interactive without
+    # --yes raises the typed refusal BEFORE any prompt, propagating through the façade.
+    result, _ = _invoke(
         ["objective", "stack", "land", "1431", "--json"],
         monkeypatch=monkeypatch,
-        land_result=_merged_outcome(),
+        result=_merged_result(),
     )
     assert result.exit_code == 1
     assert json.loads(result.stdout)["error_type"] == "confirmation_required"
 
 
 def test_bare_land_unauthed_refuses(monkeypatch):
-    result, _, _, landed = _invoke(
+    result, calls = _invoke(
         ["objective", "stack", "land", "1431", "--yes", "--json"],
         monkeypatch=monkeypatch,
         authed=False,
     )
     assert result.exit_code == 1
     assert json.loads(result.stdout)["error_type"] == "github_unauthed"
-    assert landed == []
+    assert calls == []
 
 
 def test_land_blocked_fail_envelope_carries_the_readiness_extra(monkeypatch):
@@ -379,19 +345,19 @@ def test_land_blocked_fail_envelope_carries_the_readiness_extra(monkeypatch):
         layers=(_row(merge_state_status="BEHIND"),),
         findings=(blocker,),
     )
-    error = landing.LandError(
-        "objective 1431 is not ready to land: [pr_behind] PR #500 is BEHIND",
-        error_type="land_blocked",
-        readiness=blocked,
-    )
-    result, _, _, _ = _invoke(
+    result, _ = _invoke(
         ["objective", "stack", "land", "1431", "--yes", "--json"],
         monkeypatch=monkeypatch,
-        land_error=error,
+        result=_blocked_result(blocked),
     )
     assert result.exit_code == 1
     payload = json.loads(result.stdout)
     assert payload["success"] is False and payload["error_type"] == "land_blocked"
+    # The blocked message bytes are pinned (the format string moved verbatim from the
+    # engine into the CLI mapping).
+    assert payload["message"] == (
+        "objective 1431 is not ready to land: [pr_behind] PR #500 is BEHIND"
+    )
     readiness_extra = payload["readiness"]
     assert readiness_extra["disposition"] == "blocked"
     assert readiness_extra["dry_run"] is False
@@ -418,25 +384,29 @@ def test_land_blocked_human_renders_the_readiness_report(monkeypatch):
         kind=train.FindingKind.BLOCKER, code="pr_behind", message="PR #500 is BEHIND"
     )
     blocked = _readiness(disposition=land.LandDisposition.BLOCKED, findings=(blocker,))
-    error = landing.LandError("not ready", error_type="land_blocked", readiness=blocked)
-    result, _, _, _ = _invoke(
+    result, _ = _invoke(
         ["objective", "stack", "land", "1431", "--yes"],
         monkeypatch=monkeypatch,
-        land_error=error,
+        result=_blocked_result(blocked),
     )
     assert result.exit_code == 1
     assert result.stdout == ""
     assert "landing readiness — BLOCKED" in result.stderr
     assert "[pr_behind] PR #500 is BEHIND" in result.stderr
-    assert "Error: not ready" in result.stderr
+    assert "Error: objective 1431 is not ready to land: [pr_behind] PR #500" in result.stderr
 
 
 def test_typed_land_errors_map_to_the_fail_envelope(monkeypatch):
-    error = landing.LandError("endpoint missing", error_type="merge_async_unavailable")
-    result, _, _, _ = _invoke(
+    error = DeliveryError(
+        "endpoint missing",
+        error_type="merge_async_unavailable",
+        phase="land",
+        origin="domain",
+    )
+    result, _ = _invoke(
         ["objective", "stack", "land", "1431", "--yes", "--json"],
         monkeypatch=monkeypatch,
-        land_error=error,
+        error=error,
     )
     assert result.exit_code == 1
     assert json.loads(result.stdout) == {
@@ -447,11 +417,11 @@ def test_typed_land_errors_map_to_the_fail_envelope(monkeypatch):
 
 
 def test_pending_outcome_is_an_honest_exit_zero(monkeypatch):
-    pending = _merged_outcome(outcome="pending", notes=("the LAND operation is unresolved",))
-    result, _, _, _ = _invoke(
+    pending = _merged_result(outcome="pending", notes=("the LAND operation is unresolved",))
+    result, _ = _invoke(
         ["objective", "stack", "land", "1431", "--yes", "--json"],
         monkeypatch=monkeypatch,
-        land_result=pending,
+        result=pending,
     )
     assert result.exit_code == 0
     payload = json.loads(result.stdout)
@@ -461,11 +431,11 @@ def test_pending_outcome_is_an_honest_exit_zero(monkeypatch):
 
 
 def test_pending_human_render_carries_the_unresolved_guidance(monkeypatch):
-    pending = _merged_outcome(outcome="pending", notes=("submission stayed ambiguous",))
-    result, _, _, _ = _invoke(
+    pending = _merged_result(outcome="pending", notes=("submission stayed ambiguous",))
+    result, _ = _invoke(
         ["objective", "stack", "land", "1431", "--yes"],
         monkeypatch=monkeypatch,
-        land_result=pending,
+        result=pending,
     )
     assert result.exit_code == 0
     assert "note: submission stayed ambiguous" in result.stderr
@@ -474,10 +444,10 @@ def test_pending_human_render_carries_the_unresolved_guidance(monkeypatch):
 
 
 def test_merged_human_render(monkeypatch):
-    result, _, _, _ = _invoke(
+    result, _ = _invoke(
         ["objective", "stack", "land", "1431", "--yes"],
         monkeypatch=monkeypatch,
-        land_result=_merged_outcome(),
+        result=_merged_result(),
     )
     assert result.exit_code == 0
     assert "landed 1 layer(s) atomically (operation 01OPERATION)" in result.stderr
@@ -486,10 +456,10 @@ def test_merged_human_render(monkeypatch):
 
 
 def test_finalize_failure_renders_loudly(monkeypatch):
-    result, _, _, _ = _invoke(
+    result, _ = _invoke(
         ["objective", "stack", "land", "1431", "--yes"],
         monkeypatch=monkeypatch,
-        land_result=_merged_outcome(finalized=False, notes=("finalize failed for plan #100",)),
+        result=_merged_result(finalized=False, notes=("finalize failed for plan #100",)),
     )
     assert "FINALIZE FAILED" in result.stderr
     assert "note: finalize failed for plan #100" in result.stderr
@@ -513,12 +483,18 @@ def _evidence() -> landing.LandEvidence:
     )
 
 
+def _with_evidence(result: LandResult) -> LandResult:
+    detail = result.objective
+    assert detail is not None
+    return LandResult(kind="objective", objective=replace(detail, reconcile_evidence=_evidence()))
+
+
 def test_merged_close_carries_reconcile_evidence(monkeypatch):
-    outcome = replace(_merged_outcome(), reconcile_evidence=_evidence())
-    result, _, _, _ = _invoke(
+    outcome = _with_evidence(_merged_result())
+    result, _ = _invoke(
         ["objective", "stack", "land", "1431", "--yes", "--json"],
         monkeypatch=monkeypatch,
-        land_result=outcome,
+        result=outcome,
     )
     payload = json.loads(result.stdout)
     assert payload["reconcile_evidence"] == {
@@ -537,10 +513,10 @@ def test_merged_close_carries_reconcile_evidence(monkeypatch):
         "notes": [],
     }
     # The human render prints the evidence summary + the reconcile hint.
-    result, _, _, _ = _invoke(
+    result, _ = _invoke(
         ["objective", "stack", "land", "1431", "--yes"],
         monkeypatch=monkeypatch,
-        land_result=outcome,
+        result=outcome,
     )
     assert "reconcile evidence: 1 layer(s), final base cccccccccccc" in result.stderr
     assert "reconcile objective #1431 with /objective-reconcile" in result.stderr
@@ -549,18 +525,24 @@ def test_merged_close_carries_reconcile_evidence(monkeypatch):
 def test_nothing_to_land_render_is_honest_about_a_skipped_close(monkeypatch):
     # completed_without_merge with objective_closed=False (already closed, or the close
     # was deferred) must never announce a close — and still renders any evidence summary.
-    outcome = replace(
-        _merged_outcome(outcome="completed_without_merge"),
+    detail = LandResult.Objective(
         readiness=_readiness(
             disposition=land.LandDisposition.NOTHING_TO_LAND, layers=(), plan_value=None
         ),
+        redirected_from=None,
+        dry_run=False,
+        outcome="completed_without_merge",
+        operation_id=None,
+        merge_async_uuid=None,
+        landed_layers=(),
         objective_closed=False,
+        notes=(),
         reconcile_evidence=_evidence(),
     )
-    result, _, _, _ = _invoke(
+    result, _ = _invoke(
         ["objective", "stack", "land", "1431", "--yes"],
         monkeypatch=monkeypatch,
-        land_result=outcome,
+        result=LandResult(kind="objective", objective=detail),
     )
     assert result.exit_code == 0
     assert "nothing to merge — objective #1431 was NOT closed (see notes)" in result.stderr
@@ -570,17 +552,23 @@ def test_nothing_to_land_render_is_honest_about_a_skipped_close(monkeypatch):
 
 def test_nothing_to_land_preview_names_the_landed_arm(monkeypatch):
     # The consent preview for a plan-less readiness covers the all-LANDED train too.
-    outcome = replace(
-        _merged_outcome(outcome="completed_without_merge"),
+    detail = LandResult.Objective(
         readiness=_readiness(
             disposition=land.LandDisposition.NOTHING_TO_LAND, layers=(), plan_value=None
         ),
+        redirected_from=None,
+        dry_run=False,
+        outcome="completed_without_merge",
+        operation_id=None,
+        merge_async_uuid=None,
+        landed_layers=(),
         objective_closed=True,
+        notes=(),
     )
-    result, _, _, _ = _invoke(
+    result, _ = _invoke(
         ["objective", "stack", "land", "1431", "--yes"],
         monkeypatch=monkeypatch,
-        land_result=outcome,
+        result=LandResult(kind="objective", objective=detail),
     )
     assert result.exit_code == 0
     assert "every layer is skipped or already landed" in result.stderr
@@ -589,19 +577,16 @@ def test_nothing_to_land_preview_names_the_landed_arm(monkeypatch):
 
 def test_dry_run_ready_envelope(monkeypatch):
     readiness = _readiness(plan_value=_ready_plan())
-    result, asked, assessed, _ = _invoke(
+    result, calls = _invoke(
         ["objective", "stack", "land", "1431", "--dry-run", "--json"],
         monkeypatch=monkeypatch,
-        reconstruct=_train(),
-        readiness=readiness,
+        result=_dry_run_result(readiness),
     )
     assert result.exit_code == 0
-    assert asked == ["1431"]
-    # The production wiring reached the assessment with the projection + real seams.
-    (call,) = assessed
-    assert call["projection"] is not None and call["projection"].objective_id == "1431"
-    assert isinstance(call["observations"], observe.GatewayLandObservations)
-    assert isinstance(call["remote_writers"], land_cmd.GhaRemoteWriterProbe)
+    # One façade call: the dry-run request carries no run id and no consent callback.
+    (call,) = calls
+    assert call["request"] == LandRequest(kind="objective", objective_id="1431", dry_run=True)
+    assert call["consent"] is None
     payload = json.loads(result.stdout)
     # The declared envelope field order is load-bearing — the §8.56 mutation fields grow
     # strictly at the tail (nulls/empties on the dry-run path).
@@ -693,11 +678,10 @@ def test_dry_run_blocked_envelope_still_exits_zero(monkeypatch):
         layers=(_row(merge_state_status="BEHIND"),),
         findings=(blocker,),
     )
-    result, _, _, _ = _invoke(
+    result, _ = _invoke(
         ["objective", "stack", "land", "1431", "--dry-run", "--json"],
         monkeypatch=monkeypatch,
-        reconstruct=_train(),
-        readiness=readiness,
+        result=_dry_run_result(readiness),
     )
     assert result.exit_code == 0  # a blocked verdict is a successful DETECTION
     payload = json.loads(result.stdout)
@@ -728,11 +712,10 @@ def test_unassessed_row_serializes_its_nulls(monkeypatch):
         unresolved_thread_count=None,
     )
     readiness = _readiness(disposition=land.LandDisposition.BLOCKED, layers=(row,))
-    result, _, _, _ = _invoke(
+    result, _ = _invoke(
         ["objective", "stack", "land", "1431", "--dry-run", "--json"],
         monkeypatch=monkeypatch,
-        reconstruct=_train(),
-        readiness=readiness,
+        result=_dry_run_result(readiness),
     )
     layer = json.loads(result.stdout)["layers"][0]
     assert layer["assessed"] is False
@@ -740,24 +723,35 @@ def test_unassessed_row_serializes_its_nulls(monkeypatch):
 
 
 def test_incremental_objective_is_not_stacked(monkeypatch):
-    result, _, assessed, _ = _invoke(
+    # The engine's dry-run message shape for a train-less objective, mapped straight
+    # through the DeliveryError ladder.
+    error = DeliveryError(
+        f"Objective #1431: {train.NO_TRAIN_INCREMENTAL_REASON}",
+        error_type="not_stacked",
+        phase="land",
+        origin="domain",
+    )
+    result, _ = _invoke(
         ["objective", "stack", "land", "1431", "--dry-run", "--json"],
         monkeypatch=monkeypatch,
-        reconstruct=_no_train(),
+        error=error,
     )
     assert result.exit_code == 1
     payload = json.loads(result.stdout)
     assert payload["error_type"] == "not_stacked"
     assert train.NO_TRAIN_INCREMENTAL_REASON in payload["message"]
-    assert assessed == []
 
 
 def test_reconstruction_failure_maps_error_type(monkeypatch):
-    error = train.TrainReconstructionError("no such objective", error_type="objective_not_found")
-    result, _, _, _ = _invoke(
+    # The façade boundary keeps the reconstruction code (recover precedent) — the CLI
+    # envelope preserves it byte-for-byte.
+    error = DeliveryError(
+        "no such objective", error_type="objective_not_found", phase="land", origin="domain"
+    )
+    result, _ = _invoke(
         ["objective", "stack", "land", "1431", "--dry-run", "--json"],
         monkeypatch=monkeypatch,
-        reconstruct=error,
+        error=error,
     )
     assert result.exit_code == 1
     payload = json.loads(result.stdout)
@@ -765,28 +759,27 @@ def test_reconstruction_failure_maps_error_type(monkeypatch):
 
 
 def test_no_objective_is_a_typed_failure(monkeypatch):
-    result, asked, _, _ = _invoke(
+    result, calls = _invoke(
         ["objective", "stack", "land", "--dry-run", "--json"], monkeypatch=monkeypatch
     )
     assert result.exit_code == 1
-    assert asked == []
+    assert calls == []
     assert json.loads(result.stdout)["error_type"] == "no_objective"
 
 
 def test_plan_ref_inference(monkeypatch):
     ref = plan.PlanRef(provider="github", pr_id="1474", url="u", labels=(), objective_id="1431")
     monkeypatch.setattr(cache, "read_plan_ref", lambda _root: ref)
-    _, asked, _, _ = _invoke(
+    _, calls = _invoke(
         ["objective", "stack", "land", "--dry-run", "--json"],
         monkeypatch=monkeypatch,
-        reconstruct=_train(),
-        readiness=_readiness(plan_value=_ready_plan()),
+        result=_dry_run_result(_readiness(plan_value=_ready_plan())),
     )
-    assert asked == ["1431"]
+    assert calls[0]["request"].objective_id == "1431"
 
 
 def test_not_a_repo_exits_two(monkeypatch):
-    result, _, _, _ = _invoke(
+    result, _ = _invoke(
         ["objective", "stack", "land", "1431", "--dry-run", "--json"],
         monkeypatch=monkeypatch,
         git_init=False,
@@ -796,22 +789,20 @@ def test_not_a_repo_exits_two(monkeypatch):
 
 
 def test_redirected_from_rides_the_envelope(monkeypatch):
-    result, _, _, _ = _invoke(
+    result, _ = _invoke(
         ["objective", "stack", "land", "9", "--dry-run", "--json"],
         monkeypatch=monkeypatch,
-        reconstruct=_train(redirected_from="9"),
-        readiness=_readiness(plan_value=_ready_plan()),
+        result=_dry_run_result(_readiness(plan_value=_ready_plan()), redirected_from="9"),
     )
     assert json.loads(result.stdout)["objective"]["redirected_from"] == "9"
 
 
 def test_human_render_ready(monkeypatch):
     readiness = _readiness(capability=True, plan_value=_ready_plan())
-    result, _, _, _ = _invoke(
+    result, _ = _invoke(
         ["objective", "stack", "land", "1431", "--dry-run"],
         monkeypatch=monkeypatch,
-        reconstruct=_train(),
-        readiness=readiness,
+        result=_dry_run_result(readiness),
     )
     assert result.exit_code == 0
     assert result.stdout == ""  # human render is stderr-only
@@ -835,11 +826,10 @@ def test_human_render_shows_the_head_ref_mismatch(monkeypatch):
             train.TrainFinding(kind=train.FindingKind.BLOCKER, code="wrong_head_ref", message="m"),
         ),
     )
-    result, _, _, _ = _invoke(
+    result, _ = _invoke(
         ["objective", "stack", "land", "1431", "--dry-run"],
         monkeypatch=monkeypatch,
-        reconstruct=_train(),
-        readiness=readiness,
+        result=_dry_run_result(readiness),
     )
     assert "head-ref other-branch (expected plan-100)" in result.stderr
 
@@ -862,11 +852,10 @@ def test_human_render_blocked_with_unobserved_rules_and_unassessed_row(monkeypat
         ),
         findings=(blocker, info),
     )
-    result, _, _, _ = _invoke(
+    result, _ = _invoke(
         ["objective", "stack", "land", "1431", "--dry-run"],
         monkeypatch=monkeypatch,
-        reconstruct=_train(),
-        readiness=readiness,
+        result=_dry_run_result(readiness),
     )
     assert result.exit_code == 0
     assert "landing readiness (dry run) — BLOCKED" in result.stderr

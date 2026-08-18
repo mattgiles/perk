@@ -16,7 +16,11 @@ from perk import objective
 from perk.backends.issue_backend import PlanHeaderUpdate
 from perk.backends.objective_store import ObjectiveRef, ObjectiveStoreError
 from perk.delivery import land, observe
-from perk.delivery._fakes import FakeDeliveryGit, FakeDeliveryPersistence
+from perk.delivery._fakes import (
+    FakeDeliveryGit,
+    FakeDeliveryGitHub,
+    FakeDeliveryPersistence,
+)
 from perk.delivery.facade import (
     Delivery,
     DeliveryError,
@@ -1086,30 +1090,30 @@ class TestRepoDeliveryGitHub:
 # ----------------------------------------------------------------- GatewayLandObservations
 
 
+def _land_facts(number: int = 501) -> stacks.PrLandFacts:
+    return stacks.PrLandFacts(
+        number=number,
+        state="OPEN",
+        is_draft=False,
+        base_ref="main",
+        head_ref="plan-101",
+        head_sha="b" * 40,
+        mergeable="MERGEABLE",
+        merge_state_status="CLEAN",
+        review_decision=None,
+        rollup_state="SUCCESS",
+        checks=(stacks.CheckFacts(name="ci", is_required=True, outcome="passed"),),
+        unresolved_thread_count=3,
+    )
+
+
 class TestGatewayLandObservations:
-    def test_pr_readiness_converts_to_the_view_type(self, tmp_path, monkeypatch) -> None:
-        facts = stacks.PrLandFacts(
-            number=501,
-            state="OPEN",
-            is_draft=False,
-            base_ref="main",
-            head_ref="plan-101",
-            head_sha="b" * 40,
-            mergeable="MERGEABLE",
-            merge_state_status="CLEAN",
-            review_decision=None,
-            rollup_state="SUCCESS",
-            checks=(stacks.CheckFacts(name="ci", is_required=True, outcome="passed"),),
-            unresolved_thread_count=3,
-        )
-        seen: list[int] = []
+    """The aggregate-backed landing observations adapter (constructed by the landing
+    engine from the bound ``DeliveryGitHub``)."""
 
-        def fake(*, number: int, repo_root) -> stacks.PrLandFacts:
-            seen.append(number)
-            return facts
-
-        monkeypatch.setattr(stacks, "pr_land_facts", fake)
-        view = observe.GatewayLandObservations(tmp_path, base="main").pr_readiness(501)
+    def test_pr_readiness_converts_to_the_view_type(self) -> None:
+        github = FakeDeliveryGitHub(land_facts={501: _land_facts()})
+        view = observe.GatewayLandObservations(github, base="main").pr_readiness(501)
         # The gateway's rollup aggregate state is deliberately NOT part of the core view
         # (it is consumed for pagination coherence; the assessment classifies the
         # per-check outcomes + mergeStateStatus instead).
@@ -1126,48 +1130,149 @@ class TestGatewayLandObservations:
             checks=(land.CheckView(name="ci", is_required=True, outcome="passed"),),
             unresolved_thread_count=3,
         )
-        assert seen == [501]
+        assert github.calls == [("pr_land_facts", 501)]
 
-    def test_pr_readiness_none_passthrough(self, tmp_path, monkeypatch) -> None:
-        monkeypatch.setattr(stacks, "pr_land_facts", lambda **_kw: None)
-        assert observe.GatewayLandObservations(tmp_path, base="main").pr_readiness(501) is None
+    def test_pr_readiness_none_passthrough(self) -> None:
+        github = FakeDeliveryGitHub()
+        assert observe.GatewayLandObservations(github, base="main").pr_readiness(501) is None
 
-    def test_pr_readiness_failure_wraps_to_land_observation_error(
-        self, tmp_path, monkeypatch
-    ) -> None:
+    def test_pr_readiness_failure_wraps_to_land_observation_error(self) -> None:
+        github = FakeDeliveryGitHub(errors={("pr_land_facts", 501): GitHubError("HTTP 500")})
+        with pytest.raises(land.LandObservationError, match="HTTP 500"):
+            observe.GatewayLandObservations(github, base="main").pr_readiness(501)
+
+    def test_base_merge_rules_converts_and_uses_the_bound_base(self) -> None:
+        github = FakeDeliveryGitHub(
+            merge_rules=DeliveryGitHub.MergeRules(squash_allowed=False, merge_queue_required=True)
+        )
+        rules = observe.GatewayLandObservations(github, base="develop").base_merge_rules()
+        assert rules == land.MergeRulesView(squash_allowed=False, merge_queue_required=True)
+        assert github.calls == [("base_merge_rules", "develop")]
+
+    def test_base_merge_rules_probe_error_wraps_to_land_observation_error(self) -> None:
+        # The aggregate's frozen ProbeError discriminant carries `str(exc)` — mapping its
+        # message keeps the historical raw-wrap bytes.
+        github = FakeDeliveryGitHub(merge_rules_error="HTTP 502")
+        with pytest.raises(land.LandObservationError, match="HTTP 502"):
+            observe.GatewayLandObservations(github, base="main").base_merge_rules()
+
+    def test_stack_capability_bool_passthrough(self) -> None:
+        # The declared boolean arm (§8.55): the aggregate's fail-closed bool passes through
+        # unwrapped — no LandObservationError translation exists for this read.
+        assert (
+            observe.GatewayLandObservations(
+                FakeDeliveryGitHub(stack_capable=False), base="main"
+            ).stack_capability()
+            is False
+        )
+        assert (
+            observe.GatewayLandObservations(
+                FakeDeliveryGitHub(stack_capable=True), base="main"
+            ).stack_capability()
+            is True
+        )
+
+
+class TestAggregateWriterProbe:
+    def test_forwards_exactly_with_no_trigger_exclusions(self) -> None:
+        github = FakeDeliveryGitHub(active_writers=frozenset({"102"}))
+        probe = observe._AggregateWriterProbe(github)
+        assert probe.active_plan_ids(["101", "102"]) == frozenset({"102"})
+        assert github.calls == [("active_writer_plan_ids", ("101", "102"), None, None)]
+
+    def test_observation_failure_stays_the_typed_fail_closed_error(self) -> None:
+        github = FakeDeliveryGitHub(
+            errors={
+                ("active_writer_plan_ids", ("101",), None, None): WriterObservationError(
+                    "gh api down"
+                )
+            }
+        )
+        with pytest.raises(WriterObservationError, match="gh api down"):
+            observe._AggregateWriterProbe(github).active_plan_ids(["101"])
+
+
+class TestLandGatewayDelegation:
+    """Exact stacks-function delegation for the three landing methods (argument
+    forwarding + posture)."""
+
+    def test_pr_land_facts_delegates_and_keeps_the_raw_posture(self, tmp_path, monkeypatch) -> None:
+        seen: list[tuple[int, Path]] = []
+        facts = _land_facts()
+
+        def fake(*, number: int, repo_root: Path) -> stacks.PrLandFacts:
+            seen.append((number, repo_root))
+            return facts
+
+        monkeypatch.setattr(stacks, "pr_land_facts", fake)
+        adapter = observe.RepoDeliveryGitHub(tmp_path)
+        assert adapter.pr_land_facts(501) is facts
+        assert seen == [(501, tmp_path)]
+
         def boom(**_kw: object) -> None:
             raise GitHubError("HTTP 500")
 
         monkeypatch.setattr(stacks, "pr_land_facts", boom)
-        with pytest.raises(land.LandObservationError, match="HTTP 500"):
-            observe.GatewayLandObservations(tmp_path, base="main").pr_readiness(501)
+        # Raw GitHubError posture — no TrainReconstructionError/LandObservationError wrap.
+        with pytest.raises(GitHubError, match="HTTP 500"):
+            adapter.pr_land_facts(501)
 
-    def test_base_merge_rules_converts_and_uses_the_bound_base(self, tmp_path, monkeypatch) -> None:
-        seen: list[str] = []
+    def test_submit_merge_async_delegates_exactly(self, tmp_path, monkeypatch) -> None:
+        seen: list[dict] = []
+        outcome = stacks.MergeAsyncSubmitOutcome(
+            status=202,
+            state="pending",
+            uuid="u-1",
+            merge_method="squash",
+            merge_action="direct_merge",
+            expected_head_sha="a" * 40,
+            retry_after_seconds=None,
+            rate_limited=False,
+            raw_detail="",
+        )
 
-        def fake(repo_root, base: str) -> stacks.MergeRules:
-            seen.append(base)
-            return stacks.MergeRules(squash_allowed=False, merge_queue_required=True)
+        def fake(*, number: int, sha: str, repo_root: Path) -> stacks.MergeAsyncSubmitOutcome:
+            seen.append({"number": number, "sha": sha, "repo_root": repo_root})
+            return outcome
 
-        monkeypatch.setattr(stacks, "base_merge_rules", fake)
-        rules = observe.GatewayLandObservations(tmp_path, base="develop").base_merge_rules()
-        assert rules == land.MergeRulesView(squash_allowed=False, merge_queue_required=True)
-        assert seen == ["develop"]
+        monkeypatch.setattr(stacks, "submit_merge_async", fake)
+        assert observe.RepoDeliveryGitHub(tmp_path).submit_merge_async(42, sha="a" * 40) is outcome
+        assert seen == [{"number": 42, "sha": "a" * 40, "repo_root": tmp_path}]
 
-    def test_base_merge_rules_failure_wraps_to_land_observation_error(
-        self, tmp_path, monkeypatch
-    ) -> None:
-        def boom(*_args: object, **_kw: object) -> None:
-            raise GitHubError("HTTP 502")
+    def test_merge_pr_direct_delegates_exactly(self, tmp_path, monkeypatch) -> None:
+        seen: list[dict] = []
+        outcome = stacks.DirectMergeOutcome(
+            status=200,
+            merged=True,
+            sha="b" * 40,
+            retry_after_seconds=None,
+            rate_limited=False,
+            raw_detail="",
+        )
 
-        monkeypatch.setattr(stacks, "base_merge_rules", boom)
-        with pytest.raises(land.LandObservationError, match="HTTP 502"):
-            observe.GatewayLandObservations(tmp_path, base="main").base_merge_rules()
+        def fake(
+            *, number: int, sha: str, commit_message: str | None, repo_root: Path
+        ) -> stacks.DirectMergeOutcome:
+            seen.append(
+                {
+                    "number": number,
+                    "sha": sha,
+                    "commit_message": commit_message,
+                    "repo_root": repo_root,
+                }
+            )
+            return outcome
 
-    def test_stack_capability_bool_passthrough(self, tmp_path, monkeypatch) -> None:
-        # The declared boolean arm (§8.55): the gateway's fail-closed bool passes through
-        # unwrapped — no LandObservationError translation exists for this read.
-        monkeypatch.setattr(stacks, "stack_capability", lambda _root: False)
-        assert observe.GatewayLandObservations(tmp_path, base="main").stack_capability() is False
-        monkeypatch.setattr(stacks, "stack_capability", lambda _root: True)
-        assert observe.GatewayLandObservations(tmp_path, base="main").stack_capability() is True
+        monkeypatch.setattr(stacks, "merge_pr_direct", fake)
+        adapter = observe.RepoDeliveryGitHub(tmp_path)
+        assert adapter.merge_pr_direct(42, sha="b" * 40, commit_message="title\n\nfooter") is (
+            outcome
+        )
+        assert seen == [
+            {
+                "number": 42,
+                "sha": "b" * 40,
+                "commit_message": "title\n\nfooter",
+                "repo_root": tmp_path,
+            }
+        ]

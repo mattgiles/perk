@@ -1,10 +1,19 @@
-"""The delivery **landing** operation — the journaled atomic merge (contracts.md §8.56).
+"""The delivery **landing** operation — the objective variant of ``Delivery.land``
+(contracts.md §8.55 dry-run readiness + §8.56 the journaled atomic merge).
 
-``land_train`` is a thin consumer of the §8.55 readiness projection
-(:func:`perk.delivery.land.assess_land_readiness`, consumed as-is — never re-derived) plus the
-§8.43 journal (:mod:`perk.delivery.journal` / :mod:`perk.delivery.persistence`), the
-per-layer finalize seam (:func:`perk.delivery.finalize.finalize_landed_plan`), and the
-machine-local operation lock (:mod:`perk.delivery.oplock`). A multi-layer train lands through
+The sole service entry is :meth:`perk.delivery.facade.Delivery.land` with
+``LandRequest(kind="objective", …)`` — no public engine entry exists. The dry-run arm is the
+lock-free, consent-free readiness preview; the mutation arm acquires the machine-local
+stack-operation lock (:mod:`perk.delivery.oplock`, bound through the private landing
+runtime) before reconstruction and holds it through consent, merge, verification,
+finalization, and close — the consent callback is the façade's ``consent`` keyword. The
+engine is a thin consumer of the §8.55 readiness projection
+(:func:`perk.delivery.land.assess_land_readiness`, consumed as-is — never re-derived) plus
+the §8.43 journal through the aggregate persistence, the per-layer finalize seam
+(:func:`perk.delivery.finalize.finalize_landed_plan`, runtime-bound), and the aggregate
+GitHub authority (``submit_merge_async``/``merge_pr_direct`` submit, the total
+``merge_async_probe`` as the poll, and strict ``merged_evidence`` for re-observation,
+verification, and abandon proof). A multi-layer train lands through
 GitHub's atomic async stack merge (submit → verified ``accepted`` handle → bounded poll); the
 dynamic singleton lands through an ordinary SHA-pinned direct squash merge (never in a native
 stack; merge-async preview enrollment must not be required — and no ``accepted`` event ever:
@@ -18,9 +27,6 @@ at its exact expected head); an unprovable state stays unresolved (``outcome: pe
 per-PR merge verification succeeds, a
 failed/ambiguous ``completed`` append or a finalize failure degrades to loud ``notes`` on an
 ``outcome: "merged"`` result — never an error exit.
-
-Injection shape mirrors :mod:`perk.delivery.sync`: one public entry with keyword-injectable
-seams defaulting to production wiring; Protocol-sized fakes in tests.
 """
 
 import time
@@ -32,10 +38,16 @@ from pathlib import Path
 from typing import Literal, Protocol
 
 from perk import objective, plan
-from perk.backends import resolve
 from perk.backends.issue_backend import IssueBackendError
 from perk.backends.objective_store import ObjectiveState, ObjectiveStoreError
 from perk.delivery import land, land_records, observe, oplock
+from perk.delivery.facade import (
+    DeliveryError,
+    DeliveryGitHub,
+    DeliveryPersistence,
+    LandRequest,
+    LandResult,
+)
 from perk.delivery.finalize import LandedPlan, LandFinalization, finalize_landed_plan
 from perk.delivery.journal import (
     EventRole,
@@ -47,11 +59,7 @@ from perk.delivery.journal import (
     PreparedRecord,
     mint_operation_id,
 )
-from perk.delivery.persistence import (
-    AppendResult,
-    TrainPersistenceError,
-    resolve_train_persistence,
-)
+from perk.delivery.persistence import AppendResult, TrainPersistenceError
 from perk.delivery.train import (
     DeliveryTrain,
     LayerPublication,
@@ -59,7 +67,6 @@ from perk.delivery.train import (
     PlanReader,
     TrainStatus,
 )
-from perk.delivery.writers import RemoteWriterProbe
 from perk.github import GitHubError, stacks
 
 # The bounded async-merge poll: up to 60 ticks, one injected second apart — a stack merge
@@ -77,25 +84,14 @@ type LandOutcomeKind = Literal[
 ]
 
 
-class LandError(Exception):
-    """A landing refused or failed with a typed cause. ``error_type`` is the stable machine
-    code the CLI boundary maps onto its failure envelope; ``readiness`` rides along on
-    ``land_blocked`` so the CLI can render the full report and attach it to the fail
-    envelope."""
+class _LandBlocked(Exception):
+    """Module-private control flow: the mutation arm's BLOCKED refusal, carrying the full
+    composed readiness up to ``_dispatch``, which maps it to the in-band readiness-only
+    ``LandResult.Objective`` detail (``outcome: None`` — the exit-code policy lives with
+    the caller; ``DeliveryError`` stays payload-free)."""
 
-    def __init__(
-        self,
-        message: str,
-        *,
-        error_type: str,  # not_stacked | land_blocked | land_drift | land_failed
-        # | merge_async_unavailable | merge_request_conflict | plan_not_found
-        # | operation_in_progress | confirmation_required (contracts.md §8.56;
-        # reconstruction/persistence/backend errors keep their existing typed passthrough
-        # at the CLI boundary, mirroring sync_cmd)
-        readiness: land.LandReadiness | None = None,
-    ) -> None:
-        super().__init__(message)
-        self.error_type = error_type
+    def __init__(self, readiness: land.LandReadiness) -> None:
+        super().__init__("landing blocked")
         self.readiness = readiness
 
 
@@ -180,7 +176,8 @@ def assemble_land_evidence(fold: JournalFold) -> LandEvidence:
 
 @dataclass(frozen=True)
 class LandOutcome:
-    """The honest result of one landing invocation (every arm is exit 0 at the CLI).
+    """The internal mutation-arm carrier ``_dispatch`` maps field-for-field into the public
+    ``LandResult.Objective`` detail (every arm is exit 0 at the CLI).
 
     ``pending`` / ``unexpected_enqueued`` mean the LAND operation stays **unresolved** —
     never success, never failure (``perk objective stack recover`` concludes it).
@@ -234,9 +231,10 @@ class LandPersistence(Protocol):
 
 
 class LandIssueReads(PlanReader, Protocol):
-    """Landing's plan reader plus backend identity for singleton squash text."""
+    """Landing's plan reader plus backend identity for singleton squash text (structurally
+    satisfied by the aggregate :class:`~perk.delivery.facade.DeliveryPersistence`)."""
 
-    backend_id: str
+    def backend_id(self) -> str: ...
 
 
 class LandObjectiveStore(Protocol):
@@ -247,40 +245,6 @@ class LandObjectiveStore(Protocol):
     def get_objective(self, *, objective_id: str) -> ObjectiveState | None: ...
 
     def close_objective(self, *, objective_id: str, dry_run: bool = False) -> bool: ...
-
-
-class _PrFactsRead(Protocol):
-    def __call__(self, *, number: int, repo_root: Path) -> stacks.PrDeliveryFacts | None: ...
-
-
-class _SubmitAsync(Protocol):
-    def __call__(
-        self, *, number: int, sha: str, repo_root: Path
-    ) -> stacks.MergeAsyncSubmitOutcome: ...
-
-
-class _PollAsync(Protocol):
-    def __call__(self, *, number: int, uuid: str, repo_root: Path) -> stacks.MergeAsyncResult: ...
-
-
-class _MergeDirect(Protocol):
-    def __call__(
-        self, *, number: int, sha: str, commit_message: str | None, repo_root: Path
-    ) -> stacks.DirectMergeOutcome: ...
-
-
-class _MergedEvidence(Protocol):
-    def __call__(self, *, number: int, repo_root: Path) -> stacks.PrMergedEvidence | None: ...
-
-
-class _Assess(Protocol):
-    def __call__(
-        self,
-        train_projection: DeliveryTrain,
-        *,
-        observations: land.LandObservations,
-        remote_writers: RemoteWriterProbe,
-    ) -> land.LandReadiness: ...
 
 
 class _Finalize(Protocol):
@@ -294,119 +258,192 @@ class _Finalize(Protocol):
     ) -> LandFinalization: ...
 
 
-def _default_observations(repo_root: Path, base: str) -> land.LandObservations:
-    return observe.GatewayLandObservations(repo_root, base=base)
+# ----------------------------------------------------------------- façade binding + runtime
+
+
+@dataclass(frozen=True)
+class _LandObjectiveContext:
+    """One façade-bound objective-land context: the aggregate authorities plus the façade's
+    cause-preserving train reconstruction bridge."""
+
+    repo_root: Path
+    persistence: DeliveryPersistence
+    github: DeliveryGitHub
+    reconstruct: Callable[[Path, str], TrainStatus]
+
+
+@dataclass(frozen=True)
+class _LandingRuntime:
+    """Private immutable helpers that are not delivery authorities."""
+
+    finalize: _Finalize
+    operation_lock: Callable[[Path], AbstractContextManager[None]]
+    sleep: Callable[[float], None]
+    now: Callable[[], str]
+
+
+_DEFAULT_LANDING_RUNTIME = _LandingRuntime(
+    finalize=finalize_landed_plan,
+    operation_lock=oplock.stack_operation_lock,
+    sleep=time.sleep,
+    now=plan.now_iso,
+)
 
 
 @dataclass(frozen=True)
 class _Landing:
-    """The per-invocation bundle: repo, call parameters, and every injected seam."""
+    """The per-invocation mutation bundle over the bound aggregate authorities."""
 
     repo_root: Path
     run_id: str
     approve: Callable[[land.LandReadiness], bool] | None
-    remote_writers: RemoteWriterProbe
     reconstruct: Callable[[Path, str], TrainStatus]
-    observations_factory: Callable[[Path, str], land.LandObservations]
-    assess: _Assess
     persistence: LandPersistence
     issues: LandIssueReads
     store: LandObjectiveStore
-    pr_facts: _PrFactsRead
-    submit_async: _SubmitAsync
-    poll_async: _PollAsync
-    merge_direct: _MergeDirect
-    merged_evidence: _MergedEvidence
+    github: DeliveryGitHub
     finalize: _Finalize
     sleep: Callable[[float], None]
     now: Callable[[], str]
 
 
-def land_train(
-    repo_root: Path,
-    *,
-    objective_id: str,
-    run_id: str,
-    remote_writers: RemoteWriterProbe,
-    approve: Callable[[land.LandReadiness], bool] | None = None,
-    reconstruct: Callable[[Path, str], TrainStatus] = observe.reconstruct_repo_train,
-    observations_factory: Callable[[Path, str], land.LandObservations] = _default_observations,
-    assess: _Assess = land.assess_land_readiness,
-    persistence_factory: Callable[[Path], LandPersistence] = resolve_train_persistence,
-    issues_factory: Callable[[Path], LandIssueReads] = resolve.resolve_issue_backend,
-    store_factory: Callable[[Path], LandObjectiveStore] = resolve.resolve_objective_store,
-    pr_facts: _PrFactsRead = stacks.pr_delivery_facts,
-    submit_async: _SubmitAsync = stacks.submit_merge_async,
-    poll_async: _PollAsync = stacks.merge_async_result,
-    merge_direct: _MergeDirect = stacks.merge_pr_direct,
-    merged_evidence: _MergedEvidence = stacks.pr_merged_evidence,
-    finalize: _Finalize = finalize_landed_plan,
-    lock: Callable[[Path], AbstractContextManager[None]] = oplock.stack_operation_lock,
-    sleep: Callable[[float], None] = time.sleep,
-    now: Callable[[], str] = plan.now_iso,
-) -> LandOutcome:
-    """Land ``objective_id``'s remaining delivery train atomically (the §8.56 operation).
+def _assess(github: DeliveryGitHub, status: DeliveryTrain) -> land.LandReadiness:
+    """The §8.55 projection over aggregate-backed observations plus the fail-closed
+    aggregate writer probe (shared by the dry-run preview and the mutation)."""
+    return land.assess_land_readiness(
+        status,
+        observations=observe.GatewayLandObservations(github, base=status.base),
+        remote_writers=observe._AggregateWriterProbe(github),
+    )
 
-    ``approve`` is the consent gate over the composed :class:`~perk.delivery.land.LandReadiness`
-    (``None`` = auto-approve) — it fires for both the READY land plan and the NOTHING_TO_LAND
-    completion preview; ``remote_writers`` is the required fail-closed writer preflight
-    (consumed by the readiness assessment — there is deliberately no default). Raises
-    :class:`LandError` on every typed refusal; reconstruction/persistence/backend errors
-    propagate for the CLI boundary's existing arms, always leaving any prepared operation
-    unresolved (recoverable).
+
+def _redirected_from(requested: str, readiness: land.LandReadiness) -> str | None:
+    """The supersession-redirect fact for the mutation details: the reconstruction follows
+    ``superseded_by`` forward, so a requested id differing from the readiness's ACTIVE
+    objective id was redirected (the dry-run path's ``redirected_from`` semantics)."""
+    if requested.removeprefix("#") == readiness.objective_id.removeprefix("#"):
+        return None
+    return requested
+
+
+def _objective_detail(outcome: LandOutcome, *, requested_id: str) -> LandResult:
+    """Map the internal mutation carrier field-for-field onto the public detail."""
+    return LandResult(
+        kind="objective",
+        objective=LandResult.Objective(
+            readiness=outcome.readiness,
+            redirected_from=_redirected_from(requested_id, outcome.readiness),
+            dry_run=False,
+            outcome=outcome.outcome,
+            operation_id=outcome.operation_id,
+            merge_async_uuid=outcome.merge_async_uuid,
+            landed_layers=outcome.landed_layers,
+            objective_closed=outcome.objective_closed,
+            notes=outcome.notes,
+            reconcile_evidence=outcome.reconcile_evidence,
+        ),
+    )
+
+
+def _dispatch(
+    context: _LandObjectiveContext,
+    request: LandRequest,
+    *,
+    consent: Callable[[land.LandReadiness], bool] | None,
+    runtime: _LandingRuntime,
+) -> LandResult:
+    """Run one objective land (see the module docstring).
+
+    The dry-run arm is lock-free and consent-free (unchanged reads: reconstruct → assess →
+    the readiness-only detail). The mutation arm holds the stack-operation lock around the
+    complete §8.56 protocol; a busy lock is the typed ``operation_in_progress``. A
+    ``consent`` callback of ``None`` auto-approves. Reconstruction/persistence/backend
+    errors propagate for the façade boundary's translation, always leaving any prepared
+    operation unresolved (recoverable).
     """
+    objective_id = request.objective_id
+    if objective_id is None:
+        raise ValueError("validated objective land request lost objective_id")
+    if request.dry_run:
+        status = context.reconstruct(context.repo_root, objective_id)
+        if isinstance(status, NoDeliveryTrain):
+            # The dry-run message shape (distinct from the mutation's — both preserved).
+            raise DeliveryError(
+                f"Objective #{status.objective_id}: {status.reason}",
+                error_type="not_stacked",
+                phase="land",
+                origin="domain",
+            )
+        readiness = _assess(context.github, status)
+        return LandResult(
+            kind="objective",
+            objective=LandResult.Objective(
+                readiness=readiness,
+                redirected_from=status.redirected_from,
+                dry_run=True,
+            ),
+        )
+    run_id = request.run_id
+    if run_id is None:
+        raise ValueError("validated objective land request lost run_id")
     landing = _Landing(
-        repo_root=repo_root,
+        repo_root=context.repo_root,
         run_id=run_id,
-        approve=approve,
-        remote_writers=remote_writers,
-        reconstruct=reconstruct,
-        observations_factory=observations_factory,
-        assess=assess,
-        persistence=persistence_factory(repo_root),
-        issues=issues_factory(repo_root),
-        store=store_factory(repo_root),
-        pr_facts=pr_facts,
-        submit_async=submit_async,
-        poll_async=poll_async,
-        merge_direct=merge_direct,
-        merged_evidence=merged_evidence,
-        finalize=finalize,
-        sleep=sleep,
-        now=now,
+        approve=consent,
+        reconstruct=context.reconstruct,
+        persistence=context.persistence,
+        issues=context.persistence,
+        store=context.persistence,
+        github=context.github,
+        finalize=runtime.finalize,
+        sleep=runtime.sleep,
+        now=runtime.now,
     )
     try:
-        with lock(repo_root):
-            return _land(landing, objective_id)
+        with runtime.operation_lock(context.repo_root):
+            try:
+                outcome = _land(landing, objective_id)
+            except _LandBlocked as blocked:
+                return LandResult(
+                    kind="objective",
+                    objective=LandResult.Objective(
+                        readiness=blocked.readiness,
+                        redirected_from=_redirected_from(objective_id, blocked.readiness),
+                        dry_run=False,
+                    ),
+                )
     except oplock.OperationLockBusy as exc:
-        raise LandError(str(exc), error_type="operation_in_progress") from exc
+        raise DeliveryError(
+            str(exc), error_type="operation_in_progress", phase="land", origin="domain"
+        ) from exc
+    return _objective_detail(outcome, requested_id=objective_id)
 
 
 # ----------------------------------------------------------------- the protocol
 
 
 def _land(b: _Landing, objective_id: str) -> LandOutcome:
-    # 1./2. Reconstruct + require a journalable lineage.
+    # 1./2. Reconstruct + require a journalable lineage (the lock is already held).
     status = b.reconstruct(b.repo_root, objective_id)
     if isinstance(status, NoDeliveryTrain):
-        raise LandError(
+        raise DeliveryError(
             f"objective {status.objective_id} has no delivery train ({status.reason})",
             error_type="not_stacked",
+            phase="land",
+            origin="domain",
         )
     if status.delivery_lineage is None:
-        raise LandError(
+        raise DeliveryError(
             f"objective {status.objective_id} carries no delivery_lineage — landing cannot "
             "be journaled",
             error_type="not_stacked",
+            phase="land",
+            origin="domain",
         )
     lineage = status.delivery_lineage
 
     # 3. Assess — the §8.55 projection, consumed as-is.
-    readiness = b.assess(
-        status,
-        observations=b.observations_factory(b.repo_root, status.base),
-        remote_writers=b.remote_writers,
-    )
+    readiness = _assess(b.github, status)
 
     # 4. NOTHING_TO_LAND: the confirmed completion-without-merge (no journal — no remote
     # train mutation to guard; the close is idempotent/convergent).
@@ -431,12 +468,14 @@ def _land(b: _Landing, objective_id: str) -> LandOutcome:
         elif state.state == "open":
             remaining = [node.id for node in state.nodes if node.status not in objective.TERMINAL]
             if remaining:
-                raise LandError(
+                raise DeliveryError(
                     f"objective #{readiness.objective_id} changed during confirmation — "
                     f"non-terminal node(s) {', '.join(remaining)} appeared after the "
                     "NOTHING_TO_LAND assessment; nothing was closed — rerun "
                     "`perk objective stack land`",
                     error_type="land_drift",
+                    phase="land",
+                    origin="domain",
                 )
             b.store.close_objective(objective_id=readiness.objective_id)
             closed = True
@@ -451,14 +490,10 @@ def _land(b: _Landing, objective_id: str) -> LandOutcome:
             reconcile_evidence=evidence,
         )
 
-    # 5. BLOCKED: the typed refusal carrying the full readiness report.
+    # 5. BLOCKED: the in-band refusal carrying the full readiness report (§8.56 — the CLI
+    # maps the readiness-only detail to its exit-1 `land_blocked` envelope).
     if readiness.disposition is land.LandDisposition.BLOCKED or readiness.plan is None:
-        blockers = "; ".join(f"[{f.code}] {f.message}" for f in readiness.blockers)
-        raise LandError(
-            f"objective {readiness.objective_id} is not ready to land: {blockers or 'blocked'}",
-            error_type="land_blocked",
-            readiness=readiness,
-        )
+        raise _LandBlocked(readiness)
     land_plan = readiness.plan
 
     # 6. READY. The singleton's load-bearing pre-merge plan read (squash title/url +
@@ -469,14 +504,16 @@ def _land(b: _Landing, objective_id: str) -> LandOutcome:
         sole = land_plan.layers[0]
         state = b.issues.get_plan(issue_id=sole.plan_id)
         if state is None:
-            raise LandError(
+            raise DeliveryError(
                 f"plan issue #{sole.plan_id} not found — cannot compose the squash message",
                 error_type="plan_not_found",
+                phase="land",
+                origin="domain",
             )
         singleton_message = squash_commit_message(
             issue=sole.plan_id,
             url=state.url,
-            backend_id=b.issues.backend_id,
+            backend_id=b.issues.backend_id(),
             title=state.title,
         )
         singleton_consumed = _consumed_learn(state.header)
@@ -531,16 +568,12 @@ def _land_async(
 ) -> LandOutcome:
     """The multi-layer arm: submit the SHA-pinned async merge, verify the returned options,
     record the ``accepted`` handle, poll to a verified terminal observation."""
-    submitted = b.submit_async(
-        number=land_plan.top_pr_number, sha=land_plan.top_head_sha, repo_root=b.repo_root
-    )
+    submitted = b.github.submit_merge_async(land_plan.top_pr_number, sha=land_plan.top_head_sha)
     first_ambiguous = _classify_async_submit(submitted) == "ambiguous"
     if first_ambiguous:
         # ONE identical SHA-pinned retry: a 409-pending-with-matching-options recovers the
         # handle (the architecture's ambiguity rule).
-        submitted = b.submit_async(
-            number=land_plan.top_pr_number, sha=land_plan.top_head_sha, repo_root=b.repo_root
-        )
+        submitted = b.github.submit_merge_async(land_plan.top_pr_number, sha=land_plan.top_head_sha)
     if first_ambiguous and _classify_async_submit(submitted) not in ("pending", "merged"):
         # The first request may already have created an async job (the PRs can re-observe
         # OPEN while it is still scheduled), so a retry-side 404/422/failed reply proves
@@ -569,7 +602,7 @@ def _land_async(
                 # The foreign-409 arm (or a mismatching 202 — fail closed either way): an
                 # EXISTING merge request whose options differ from ours. No accepted append;
                 # the prepared operation stays unresolved — a foreign merge may be in flight.
-                raise LandError(
+                raise DeliveryError(
                     f"an existing merge request for PR #{land_plan.top_pr_number} does not "
                     f"match this land plan (uuid={submitted.uuid!r}, "
                     f"merge_method={submitted.merge_method!r}, "
@@ -578,6 +611,8 @@ def _land_async(
                     f"direct_merge at {land_plan.top_head_sha}) — the LAND operation "
                     f"{operation_id} stays unresolved; investigate before retrying",
                     error_type="merge_request_conflict",
+                    phase="land",
+                    origin="domain",
                 )
             b.persistence.append_outcome(
                 readiness.objective_id,
@@ -682,18 +717,16 @@ def _poll(
     uuid: str,
     consumed: tuple[str, ...] | None,
 ) -> LandOutcome:
-    """The bounded handle poll: pending continues, merged verifies, failed abandons with
-    proof, enqueued stops immediately (terminal for the REQUEST, not the train — unresolved),
-    per-tick read failures are tolerated within the budget."""
+    """The bounded handle poll over the total aggregate probe: pending continues, merged
+    verifies, failed abandons with proof, enqueued stops immediately (terminal for the
+    REQUEST, not the train — unresolved); an ``expired``/``unreadable`` probe consumes the
+    tick exactly like the historical tolerated per-tick strict-reader failure."""
     for tick in range(_POLL_TICKS):
         if tick > 0:
             b.sleep(_POLL_DELAY_SECONDS)
-        try:
-            result = b.poll_async(number=land_plan.top_pr_number, uuid=uuid, repo_root=b.repo_root)
-        except GitHubError:
+        result = b.github.merge_async_probe(land_plan.top_pr_number, uuid=uuid)
+        if result.state in ("pending", "expired", "unreadable"):
             continue  # tolerated; counts against the budget
-        if result.state == "pending":
-            continue
         if result.state == "merged":
             return _verify_and_finalize(
                 b,
@@ -761,20 +794,14 @@ def _land_singleton(
     """The dynamic-singleton arm: one ordinary SHA-pinned direct squash merge. No
     ``accepted`` event ever — there is no handle."""
     sole = land_plan.layers[0]
-    merged = b.merge_direct(
-        number=sole.pr_number,
-        sha=sole.head_sha,
-        commit_message=commit_message,
-        repo_root=b.repo_root,
+    merged = b.github.merge_pr_direct(
+        sole.pr_number, sha=sole.head_sha, commit_message=commit_message
     )
     first_ambiguous = _classify_direct_merge(merged) == "ambiguous"
     if first_ambiguous:
         # ONE identical retry: the SHA pin + the already-merged idempotent arm make it safe.
-        merged = b.merge_direct(
-            number=sole.pr_number,
-            sha=sole.head_sha,
-            commit_message=commit_message,
-            repo_root=b.repo_root,
+        merged = b.github.merge_pr_direct(
+            sole.pr_number, sha=sole.head_sha, commit_message=commit_message
         )
     if first_ambiguous and _classify_direct_merge(merged) != "merged":
         # The first request may already have applied (an applied-but-unconfirmed merge
@@ -855,18 +882,22 @@ def _reobserve(
 ) -> None:
     """The post-approval re-observation: every layer PR OPEN, at its exact expected
     head, onto its expected base ref, on its expected branch — any mismatch or read failure
-    is ``land_drift`` with nothing journaled."""
+    is ``land_drift`` with nothing journaled. Reads the strict per-PR ``merged_evidence``
+    (it carries every inspected identity fact; ``merge_commit_sha`` is ignored pre-merge)
+    with the same raw ``GitHubError`` posture the historical facts read had."""
     for layer in land_plan.layers:
         row = rows.get(layer.node_id)
         expected_base = row.expected_base_ref if row is not None else None
         expected_branch = row.branch if row is not None else None
         try:
-            facts = b.pr_facts(number=layer.pr_number, repo_root=b.repo_root)
+            facts = b.github.merged_evidence(layer.pr_number)
         except GitHubError as exc:
-            raise LandError(
+            raise DeliveryError(
                 f"could not re-observe PR #{layer.pr_number} (layer {layer.node_id}) after "
                 f"approval: {exc} — nothing was journaled; rerun land",
                 error_type="land_drift",
+                phase="land",
+                origin="domain",
             ) from exc
         if (
             facts is None
@@ -883,12 +914,14 @@ def _reobserve(
                 if facts is not None
                 else "absent"
             )
-            raise LandError(
+            raise DeliveryError(
                 f"PR #{layer.pr_number} (layer {layer.node_id}) drifted after approval: "
                 f"observed {observed}, expected OPEN onto {expected_base!r} as "
                 f"{expected_branch!r} at {layer.head_sha} — nothing was journaled; rerun "
                 "land after reconciling",
                 error_type="land_drift",
+                phase="land",
+                origin="domain",
             )
 
 
@@ -905,14 +938,15 @@ def _terminal_non_application(
     message: str,
 ) -> LandOutcome:
     """The abandon-with-proof path (§8.56): a terminal non-application may be journaled
-    ``abandoned`` only when every layer PR re-observes OPEN at its exact expected head —
+    ``abandoned`` only when every layer PR re-observes OPEN at its exact expected head
+    (over the same strict ``merged_evidence`` identity read as the re-observation) —
     then the typed failure propagates (retry is legal: the operation is resolved). Any
     contradiction or read failure appends NO outcome and stays the honest ``pending``."""
     reobserved: list[dict[str, object]] = []
     proven = True
     for layer in land_plan.layers:
         try:
-            facts = b.pr_facts(number=layer.pr_number, repo_root=b.repo_root)
+            facts = b.github.merged_evidence(layer.pr_number)
         except GitHubError:
             proven = False
             break
@@ -947,7 +981,7 @@ def _terminal_non_application(
             },
         ),
     )
-    raise LandError(message, error_type=error_type)
+    raise DeliveryError(message, error_type=error_type, phase="land", origin="domain")
 
 
 def _verify_and_finalize(
@@ -979,7 +1013,7 @@ def _verify_and_finalize(
         expected_base = row.expected_base_ref if row is not None else None
         expected_branch = row.branch if row is not None else None
         try:
-            evidence = b.merged_evidence(number=layer.pr_number, repo_root=b.repo_root)
+            evidence = b.github.merged_evidence(layer.pr_number)
         except GitHubError as exc:
             evidence = None
             notes.append(f"could not read merged evidence for PR #{layer.pr_number}: {exc}")
@@ -1267,6 +1301,10 @@ _NO_HANDLE_AUTHORITY_HOURS = 24
 
 class _ProbeAsync(Protocol):
     def __call__(self, *, number: int, uuid: str, repo_root: Path) -> stacks.MergeAsyncProbe: ...
+
+
+class _MergedEvidence(Protocol):
+    def __call__(self, *, number: int, repo_root: Path) -> stacks.PrMergedEvidence | None: ...
 
 
 class LandProofSeams(Protocol):

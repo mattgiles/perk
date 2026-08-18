@@ -11,6 +11,8 @@ import perk.delivery as delivery_pkg
 from perk.backends.issue_backend import IssueBackendError, PlanHeaderUpdate, PlanState
 from perk.backends.objective_store import ObjectiveState, ObjectiveStoreError
 from perk.delivery import facade as facade_mod
+from perk.delivery import land as land_mod
+from perk.delivery import landing as landing_mod
 from perk.delivery import observe
 from perk.delivery import publish as publish_mod
 from perk.delivery._fakes import FakeDeliveryGit, FakeDeliveryGitHub, FakeDeliveryPersistence
@@ -109,6 +111,10 @@ _DELIVERY_ERROR_TYPES = {
     "continuation_invalid",
     "rebase_in_progress",
     "operation_in_progress",
+    "land_drift",
+    "land_failed",
+    "merge_async_unavailable",
+    "merge_request_conflict",
     "operation_ambiguous",
     "operation_not_found",
     "abandon_blocked",
@@ -233,6 +239,48 @@ _RETIRED_EXPORTS = {
     "ObjectiveLandUpdate",
     "finalize_landed_plan",
     "squash_commit_message",
+    # The atomic objective-landing migration retired the remaining compatibility surface:
+    # the readiness/landing exports plus the journal/persistence names whose only public
+    # purpose was the unmigrated landing path.
+    "CheckView",
+    "LandDisposition",
+    "LandLayerReadiness",
+    "LandObservationError",
+    "LandObservations",
+    "LandPlan",
+    "LandPlanLayer",
+    "LandReadiness",
+    "MergeRulesView",
+    "PrLandView",
+    "assess_land_readiness",
+    "LandedLayer",
+    "LandError",
+    "LandOutcome",
+    "land_train",
+    "GatewayLandObservations",
+    "JOURNAL_EVENT_MAX_CHARS",
+    "JOURNAL_SCHEMA_VERSION",
+    "EventRole",
+    "JournalCorruptionError",
+    "JournalEvent",
+    "JournalFold",
+    "JournalRecordTooLarge",
+    "OperationKind",
+    "OperationState",
+    "OutcomeRecord",
+    "PreparedRecord",
+    "canonical_payload",
+    "ensure_event_size",
+    "fold_events",
+    "mint_operation_id",
+    "parse_journal_comment",
+    "render_event",
+    "AppendResult",
+    "JournalAppendAmbiguous",
+    "TrainPersistence",
+    "TrainPersistenceError",
+    "UnresolvedOperationError",
+    "resolve_train_persistence",
 }
 _NEW_EXPORTS = {
     "Delivery",
@@ -256,47 +304,8 @@ _NEW_EXPORTS = {
     "LandResult",
     "resolve_delivery",
 }
-_RETAINED_EXPORTS = {
-    "JOURNAL_EVENT_MAX_CHARS",
-    "JOURNAL_SCHEMA_VERSION",
-    "AppendResult",
-    "EventRole",
-    "JournalAppendAmbiguous",
-    "JournalCorruptionError",
-    "JournalEvent",
-    "JournalFold",
-    "JournalRecordTooLarge",
-    "OperationKind",
-    "OperationState",
-    "OutcomeRecord",
-    "PreparedRecord",
-    "TrainPersistence",
-    "TrainPersistenceError",
-    "UnresolvedOperationError",
-    "canonical_payload",
-    "ensure_event_size",
-    "fold_events",
-    "mint_operation_id",
-    "parse_journal_comment",
-    "render_event",
-    "resolve_train_persistence",
-    "CheckView",
-    "GatewayLandObservations",
-    "LandDisposition",
-    "LandError",
-    "LandLayerReadiness",
-    "LandObservationError",
-    "LandObservations",
-    "LandOutcome",
-    "LandPlan",
-    "LandPlanLayer",
-    "LandReadiness",
-    "LandedLayer",
-    "MergeRulesView",
-    "PrLandView",
-    "assess_land_readiness",
-    "land_train",
-}
+# The migration is complete: every non-canonical export is retired — nothing is retained
+# beyond the canonical 20-name surface.
 
 
 def _objective(
@@ -4273,10 +4282,9 @@ def test_fake_failure_injection_logs_before_raising() -> None:
 
 def test_public_export_cut_is_exact() -> None:
     exported = set(delivery_pkg.__all__)
-    assert exported >= _NEW_EXPORTS
     assert _RETIRED_EXPORTS.isdisjoint(exported)
-    assert exported == _NEW_EXPORTS | _RETAINED_EXPORTS
-    assert len(delivery_pkg.__all__) == 59
+    assert exported == _NEW_EXPORTS
+    assert len(delivery_pkg.__all__) == 20
     assert not hasattr(delivery_pkg, "DeliveryTrain")
     for finalize_name in (
         "finalize_landed_plan",
@@ -4310,6 +4318,11 @@ def test_public_export_cut_is_exact() -> None:
 
     assert not hasattr(recover_mod, "RecoverError")
     assert not hasattr(recover_mod, "recover_operations")
+
+    from perk.delivery import landing as landing_mod
+
+    assert not hasattr(landing_mod, "LandError")
+    assert not hasattr(landing_mod, "land_train")
 
 
 # --- the Land family (the incremental plan variant) -------------------------------------------
@@ -4394,20 +4407,60 @@ def test_land_request_guards_kind_and_nonblank_identity() -> None:
     request = _land_request()
     assert (request.objective_id, request.consumed_learn) == (None, ())
     assert (request.delivery_lineage, request.dry_run) == (None, False)
+    assert request.run_id is None
     # plan_id is carried verbatim — no #-normalization (refusal bytes use it as-is).
     assert _land_request(plan_id="#7").plan_id == "#7"
-    # The plan-ref-derived intent fields carry NO defaults: forgetting to reconstruct one
-    # (e.g. the stacked discriminator) fails at construction, never lands silently weaker.
-    with pytest.raises(TypeError):
-        LandRequest(kind="plan", plan_id="7", branch="plan-7")  # ty: ignore[missing-argument]
+    # The accepted residual of the flat kind-guarded family (§8.4): the plan-ref-derived
+    # intent fields now carry defaults, so their omission is construction-legal — the
+    # header-half stacked refusal plus the pinned production request tests mitigate it.
+    minimal = LandRequest(kind="plan", plan_id="7", branch="plan-7")
+    assert (minimal.objective_id, minimal.consumed_learn, minimal.delivery_lineage) == (
+        None,
+        (),
+        None,
+    )
     with pytest.raises(ValueError, match="unknown land kind"):
-        _land_request(kind=cast(Any, "objective"))
+        _land_request(kind=cast(Any, "nope"))
     with pytest.raises(ValueError, match="plan_id must be nonblank"):
         _land_request(plan_id="  ")
+    with pytest.raises(ValueError, match="plan_id must be nonblank"):
+        LandRequest(kind="plan", branch="plan-7")  # omission stays guard-detectable
     with pytest.raises(ValueError, match="branch must be nonblank"):
         _land_request(branch="")
+    with pytest.raises(ValueError, match="plan land accepts no run_id"):
+        _land_request(run_id="01RUN")
     with pytest.raises(FrozenInstanceError):
         request.dry_run = True  # ty: ignore[invalid-assignment]
+
+
+def test_objective_land_request_guards_the_kind_matrix() -> None:
+    mutation = LandRequest(kind="objective", objective_id="10", run_id="01RUN")
+    assert mutation.dry_run is False
+    preview = LandRequest(kind="objective", objective_id="10", dry_run=True)
+    assert preview.run_id is None
+    with pytest.raises(ValueError, match="objective_id must be nonblank"):
+        LandRequest(kind="objective", objective_id=" ", run_id="01RUN")
+    with pytest.raises(ValueError, match="objective_id must be nonblank"):
+        LandRequest(kind="objective", run_id="01RUN")
+    # The mutation always journals a run identity; the preview never resolves one.
+    with pytest.raises(ValueError, match="mutation requires a nonblank run_id"):
+        LandRequest(kind="objective", objective_id="10")
+    with pytest.raises(ValueError, match="mutation requires a nonblank run_id"):
+        LandRequest(kind="objective", objective_id="10", run_id="  ")
+    with pytest.raises(ValueError, match="dry-run objective land accepts no run_id"):
+        LandRequest(kind="objective", objective_id="10", dry_run=True, run_id="01RUN")
+    # The plan-only fields must stay at their defaults.
+    plan_only_message = "accepts only objective_id, run_id, and dry_run"
+    with pytest.raises(ValueError, match=plan_only_message):
+        LandRequest(kind="objective", objective_id="10", run_id="01RUN", plan_id="7")
+    with pytest.raises(ValueError, match=plan_only_message):
+        LandRequest(kind="objective", objective_id="10", run_id="01RUN", branch="plan-7")
+    with pytest.raises(ValueError, match=plan_only_message):
+        LandRequest(kind="objective", objective_id="10", run_id="01RUN", consumed_learn=("45",))
+    with pytest.raises(ValueError, match=plan_only_message):
+        LandRequest(
+            kind="objective", objective_id="10", run_id="01RUN", delivery_lineage="01LINEAGE"
+        )
 
 
 def test_land_result_is_a_strict_kind_detail_wrapper() -> None:
@@ -4420,11 +4473,13 @@ def test_land_result_is_a_strict_kind_detail_wrapper() -> None:
         learn_state="pending",
     )
     result = LandResult(kind="plan", plan=detail)
-    assert result.plan is detail
+    assert result.plan is detail and result.objective is None
     with pytest.raises(ValueError, match="unknown land result kind"):
-        LandResult(kind=cast(Any, "objective"), plan=detail)
+        LandResult(kind=cast(Any, "nope"), plan=detail)
     with pytest.raises(ValueError, match="detail must match kind exactly"):
         LandResult(kind="plan")
+    with pytest.raises(ValueError, match="detail must match kind exactly"):
+        LandResult(kind="objective", plan=detail)
     for frozen in cast(
         "tuple[Any, ...]", (detail, detail.pr, detail.objective, detail.learn, result)
     ):
@@ -4441,6 +4496,199 @@ def test_land_result_is_a_strict_kind_detail_wrapper() -> None:
         ).learn_state
         is None
     )
+
+
+def _objective_readiness(
+    disposition: land_mod.LandDisposition = land_mod.LandDisposition.READY,
+) -> land_mod.LandReadiness:
+    return land_mod.LandReadiness(
+        objective_id="10",
+        objective_url="fake://objective/10",
+        delivery_lineage="01LINEAGE",
+        base="main",
+        disposition=disposition,
+        rules=None,
+        native_stack_capability=None,
+        layers=(),
+        findings=(),
+        plan=None,
+    )
+
+
+def test_objective_land_result_detail_guards() -> None:
+    # `outcome is None` ⇔ dry-run or BLOCKED; a dry-run detail carries no mutation facts.
+    ready = _objective_readiness()
+    blocked = _objective_readiness(land_mod.LandDisposition.BLOCKED)
+    preview = LandResult.Objective(readiness=ready, redirected_from=None, dry_run=True)
+    assert preview.outcome is None and preview.landed_layers == ()
+    refusal = LandResult.Objective(readiness=blocked, redirected_from="9", dry_run=False)
+    assert refusal.outcome is None
+    mutation = LandResult.Objective(
+        readiness=ready, redirected_from=None, dry_run=False, outcome="declined"
+    )
+    assert mutation.outcome == "declined"
+    with pytest.raises(ValueError, match="absent exactly on dry-run or BLOCKED"):
+        LandResult.Objective(readiness=ready, redirected_from=None, dry_run=False)
+    with pytest.raises(ValueError, match="absent exactly on dry-run or BLOCKED"):
+        LandResult.Objective(readiness=ready, redirected_from=None, dry_run=True, outcome="merged")
+    with pytest.raises(ValueError, match="absent exactly on dry-run or BLOCKED"):
+        LandResult.Objective(
+            readiness=blocked, redirected_from=None, dry_run=False, outcome="merged"
+        )
+    no_facts = "dry-run objective land carries no mutation facts"
+    with pytest.raises(ValueError, match=no_facts):
+        LandResult.Objective(
+            readiness=ready, redirected_from=None, dry_run=True, operation_id="01OP"
+        )
+    with pytest.raises(ValueError, match=no_facts):
+        LandResult.Objective(
+            readiness=ready, redirected_from=None, dry_run=True, merge_async_uuid="u-1"
+        )
+    with pytest.raises(ValueError, match=no_facts):
+        LandResult.Objective(
+            readiness=ready, redirected_from=None, dry_run=True, objective_closed=True
+        )
+    with pytest.raises(ValueError, match=no_facts):
+        LandResult.Objective(readiness=ready, redirected_from=None, dry_run=True, notes=("n",))
+    # The outer wrapper requires exactly the matching detail.
+    wrapped = LandResult(kind="objective", objective=preview)
+    assert wrapped.objective is preview and wrapped.plan is None
+    with pytest.raises(ValueError, match="detail must match kind exactly"):
+        LandResult(kind="objective")
+
+
+def test_land_consent_is_rejected_on_the_non_mutating_shapes() -> None:
+    # The façade never accepts a callback it would silently ignore: kind="plan" and the
+    # objective dry-run have no confirmation boundary.
+    service = _delivery(FakeDeliveryPersistence())
+    with pytest.raises(ValueError, match="plan land has no confirmation boundary"):
+        service.land(_land_request(), consent=lambda readiness: True)
+    with pytest.raises(ValueError, match="dry-run objective land has no confirmation boundary"):
+        service.land(
+            LandRequest(kind="objective", objective_id="10", dry_run=True),
+            consent=lambda readiness: True,
+        )
+
+
+def test_delivery_objective_land_builds_one_bound_context_and_dispatches(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    persistence = FakeDeliveryPersistence()
+    git = FakeDeliveryGit(repo_root=Path("/bound-repo"))
+    github = FakeDeliveryGitHub()
+    service = Delivery(persistence=persistence, git=git, github=github)
+    request = LandRequest(kind="objective", objective_id="10", run_id="01RUN")
+    expected = LandResult(
+        kind="objective",
+        objective=LandResult.Objective(
+            readiness=_objective_readiness(),
+            redirected_from=None,
+            dry_run=False,
+            outcome="declined",
+        ),
+    )
+    captured: list[tuple[Any, LandRequest, object, object]] = []
+
+    def consent(readiness: land_mod.LandReadiness) -> bool:
+        return False
+
+    def dispatch(context, actual_request, *, consent, runtime):
+        captured.append((context, actual_request, consent, runtime))
+        return expected
+
+    monkeypatch.setattr(landing_mod, "_dispatch", dispatch)
+    assert service.land(request, consent=consent) is expected
+    ((context, actual_request, actual_consent, runtime),) = captured
+    assert context.repo_root == Path("/bound-repo")
+    assert context.persistence is persistence and context.github is github
+    assert context.reconstruct == service._reconstruct_train_status
+    # The consent callback flows to the engine; the runtime is the module default at
+    # dispatch time (tests monkeypatch it).
+    assert actual_request is request and actual_consent is consent
+    assert runtime is landing_mod._DEFAULT_LANDING_RUNTIME
+
+
+@pytest.mark.parametrize(
+    ("raised", "expected_code", "expected_origin"),
+    [
+        # Reconstruction passthrough: code kept when known, origin derived from the code.
+        (
+            TrainReconstructionError("git fetch failed", error_type="git_error"),
+            "git_error",
+            "git",
+        ),
+        (
+            TrainReconstructionError("gh view failed", error_type="github_error"),
+            "github_error",
+            "github",
+        ),
+        (
+            TrainReconstructionError("no such objective", error_type="objective_not_found"),
+            "objective_not_found",
+            "domain",
+        ),
+        # The unknown-code fallback normalizes onto github_error/github (recover precedent).
+        (
+            TrainReconstructionError("weird", error_type="never_a_code"),
+            "github_error",
+            "github",
+        ),
+        # The backend family (JournalAppendAmbiguous is a TrainPersistenceError — same arm).
+        (GitHubError("api down"), "github_error", "github"),
+        (IssueBackendError("backend down"), "github_error", "github"),
+        (ObjectiveStoreError("store down"), "github_error", "github"),
+        (TrainPersistenceError("persistence down"), "github_error", "github"),
+        (JournalCorruptionError("bad journal"), "journal_corruption", "delivery"),
+        # Defensive: the engine makes no Git authority calls.
+        (git_mod.GitError("git broke"), "git_error", "git"),
+    ],
+)
+def test_delivery_objective_land_maps_expected_boundary_failures(
+    monkeypatch: pytest.MonkeyPatch,
+    raised: Exception,
+    expected_code: str,
+    expected_origin: str,
+) -> None:
+    def dispatch(context, request, *, consent, runtime):
+        raise raised
+
+    monkeypatch.setattr(landing_mod, "_dispatch", dispatch)
+    service = _delivery(FakeDeliveryPersistence())
+    with pytest.raises(DeliveryError) as excinfo:
+        service.land(LandRequest(kind="objective", objective_id="10", run_id="01RUN"))
+    assert excinfo.value.error_type == expected_code
+    assert (excinfo.value.phase, excinfo.value.origin) == ("land", expected_origin)
+    assert str(excinfo.value) == str(raised)
+    assert excinfo.value.__cause__ is raised
+
+
+def test_delivery_objective_land_preserves_delivery_errors_and_oversize_appends(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # A contextual DeliveryError passes through untouched; JournalRecordTooLarge is
+    # deliberately NOT translated — an oversize append propagates as the unexpected
+    # programming error it is today (a typed mapping would be a behavior change, and a
+    # façade-only translation would break invariant 20 post-verification).
+    typed = DeliveryError("busy", error_type="operation_in_progress", phase="land", origin="domain")
+    oversize = JournalRecordTooLarge("event too large")
+
+    def dispatch_typed(context, request, *, consent, runtime):
+        raise typed
+
+    monkeypatch.setattr(landing_mod, "_dispatch", dispatch_typed)
+    service = _delivery(FakeDeliveryPersistence())
+    request = LandRequest(kind="objective", objective_id="10", run_id="01RUN")
+    with pytest.raises(DeliveryError) as excinfo:
+        service.land(request)
+    assert excinfo.value is typed
+
+    def dispatch_oversize(context, request, *, consent, runtime):
+        raise oversize
+
+    monkeypatch.setattr(landing_mod, "_dispatch", dispatch_oversize)
+    with pytest.raises(JournalRecordTooLarge) as oversize_info:
+        service.land(request)
+    assert oversize_info.value is oversize
 
 
 def test_delivery_land_builds_one_bound_context_and_dispatches(
@@ -4759,3 +5007,50 @@ def test_land_fake_authority_defaults_mirror_production() -> None:
     )
     assert merged.base_ref == ""
     assert github.calls == [("merge_pr", 42, "msg")]
+
+
+def test_objective_land_fake_gateway_growth_scripts_and_records() -> None:
+    # The three new methods record exact calls; submit/direct are queue-style (the retry
+    # sequences need per-call scripts) and refuse unscripted calls loudly; pr_land_facts
+    # rides the shared failure injection (the raw-GitHubError read).
+    submit = stacks.MergeAsyncSubmitOutcome(
+        status=202,
+        state="pending",
+        uuid="u-1",
+        merge_method="squash",
+        merge_action="direct_merge",
+        expected_head_sha="a" * 40,
+        retry_after_seconds=None,
+        rate_limited=False,
+        raw_detail="",
+    )
+    direct = stacks.DirectMergeOutcome(
+        status=200,
+        merged=True,
+        sha="b" * 40,
+        retry_after_seconds=None,
+        rate_limited=False,
+        raw_detail="",
+    )
+    boom = GitHubError("HTTP 500")
+    github = FakeDeliveryGitHub(
+        merge_async_submits=(submit,),
+        direct_merges=(direct,),
+        errors={("pr_land_facts", 7): boom},
+    )
+    assert github.submit_merge_async(42, sha="a" * 40) is submit
+    assert github.merge_pr_direct(43, sha="b" * 40, commit_message="msg") is direct
+    assert github.pr_land_facts(5) is None
+    with pytest.raises(GitHubError) as excinfo:
+        github.pr_land_facts(7)
+    assert excinfo.value is boom
+    assert github.calls == [
+        ("submit_merge_async", 42, "a" * 40),
+        ("merge_pr_direct", 43, "b" * 40, "msg"),
+        ("pr_land_facts", 5),
+        ("pr_land_facts", 7),
+    ]
+    with pytest.raises(AssertionError, match="no fake merge-async submit scripted"):
+        github.submit_merge_async(42, sha="a" * 40)
+    with pytest.raises(AssertionError, match="no fake direct merge scripted"):
+        github.merge_pr_direct(43, sha="b" * 40, commit_message=None)

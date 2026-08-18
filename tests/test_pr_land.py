@@ -83,7 +83,14 @@ def _bind_land_delivery(
     requests: list[delivery.LandRequest] = []
 
     class _LandDelivery(delivery.Delivery):
-        def land(self, request: delivery.LandRequest) -> delivery.LandResult:
+        def land(
+            self,
+            request: delivery.LandRequest,
+            *,
+            consent: object = None,
+        ) -> delivery.LandResult:
+            # The plan variant has no confirmation boundary — the command never passes one.
+            assert consent is None
             requests.append(request)
             if error is not None:
                 raise error

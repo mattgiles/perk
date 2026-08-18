@@ -17,7 +17,8 @@ Deliberately caller-owned (per the finalize seam contract): the pending-learn ma
 The sole service entry is :meth:`perk.delivery.facade.Delivery.land`. Its private immutable
 context binds the three aggregate authorities; the private runtime carries only the
 temporarily retained per-layer finalizer. No consent callback and no lock exist on this
-variant — the objective variant introduces both with atomic objective landing.
+variant — both belong to the objective variant (:mod:`perk.delivery.landing`), and the
+façade rejects a consent callback here.
 """
 
 from dataclasses import dataclass
@@ -69,11 +70,17 @@ def _stacked_refusal(plan_id: str) -> DeliveryError:
 
 def _dispatch(context: _LandContext, request: LandRequest, *, runtime: _LandRuntime) -> LandResult:
     """Run one plan land in today's exact order (see the module docstring)."""
+    # Explicit narrowing: the flat request's kind guards make a blank/absent identity
+    # unreachable for kind="plan".
+    plan_id = request.plan_id
+    branch = request.branch
+    if plan_id is None or branch is None:
+        raise ValueError("validated plan land request lost plan_id/branch")
     # The cached half of the stacked routing discriminator runs BEFORE the dry-run early
     # return: a "would: mark ready → squash-merge" preview would be a lie for a stacked plan,
     # and the request-borne check keeps the dry run fully offline.
     if request.delivery_lineage is not None:
-        raise _stacked_refusal(request.plan_id)
+        raise _stacked_refusal(plan_id)
     if request.dry_run:
         # Fully offline: returns before EVERY authority call (the Publish dry-run guarantee).
         return LandResult(
@@ -87,10 +94,10 @@ def _dispatch(context: _LandContext, request: LandRequest, *, runtime: _LandRunt
         )
     # Load-bearing pre-merge plan read: the header half of the stacked discriminator must be
     # checked before any mutation, and the squash title/url ride the same read.
-    state = context.persistence.get_plan(issue_id=request.plan_id)
+    state = context.persistence.get_plan(issue_id=plan_id)
     if state is None:
         raise DeliveryError(
-            f"Plan issue #{request.plan_id} not found",
+            f"Plan issue #{plan_id} not found",
             error_type="plan_not_found",
             phase="land",
             origin="domain",
@@ -99,11 +106,11 @@ def _dispatch(context: _LandContext, request: LandRequest, *, runtime: _LandRunt
     # plan header shows it (a stale cached ref must not silently land a stacked layer).
     header_lineage = state.header.get("delivery_lineage")
     if isinstance(header_lineage, str) and bool(header_lineage.strip()):
-        raise _stacked_refusal(request.plan_id)
-    pr = context.github.pr_for_branch(request.branch)
+        raise _stacked_refusal(plan_id)
+    pr = context.github.pr_for_branch(branch)
     if pr is None:
         raise DeliveryError(
-            f"No PR found for branch {request.branch!r}\nRun /submit first.",
+            f"No PR found for branch {branch!r}\nRun /submit first.",
             error_type="no_pr",
             phase="land",
             origin="domain",
@@ -117,7 +124,7 @@ def _dispatch(context: _LandContext, request: LandRequest, *, runtime: _LandRunt
         pr = context.github.merge_pr(
             pr.number,
             commit_message=landing.squash_commit_message(
-                issue=request.plan_id,
+                issue=plan_id,
                 url=state.url,
                 backend_id=context.persistence.backend_id(),
                 title=state.title,
@@ -126,7 +133,7 @@ def _dispatch(context: _LandContext, request: LandRequest, *, runtime: _LandRunt
     fin = runtime.finalize(
         context.git.repo_root,
         landed=LandedPlan(
-            plan_id=request.plan_id,
+            plan_id=plan_id,
             objective_id=request.objective_id,
             consumed_learn=request.consumed_learn,
         ),

@@ -5,9 +5,11 @@ projection to :mod:`perk.delivery.train`; ``prepare`` owns authoring capability,
 plan identity, stacked-planning classification, and executable layer-start preparation;
 ``transfer`` owns replan routing and mutation; ``publish`` owns layer publication and
 draft-to-ready routing; ``sync`` dispatches the suffix transaction engine; ``recover`` owns
-operation conclusion plus the narrow cancellation-metadata repair; and ``land`` owns the
-incremental plan land (ready → direct squash merge → the four-effect finalization
-bookkeeping). Construction remains assignment-only and pure derivation stays in this module.
+operation conclusion plus the narrow cancellation-metadata repair; and ``land`` owns both
+land variants — the incremental plan land (ready → direct squash merge → the four-effect
+finalization bookkeeping) and the atomic objective landing (the §8.55 readiness preview plus
+the §8.56 journaled atomic merge, with the Land family's consent callback and operation
+lock). Construction remains assignment-only and pure derivation stays in this module.
 """
 
 from abc import ABC, abstractmethod
@@ -18,12 +20,12 @@ from typing import TYPE_CHECKING, Literal
 
 if TYPE_CHECKING:
     from perk.delivery.diagnostics import NativeCancellationMetadataWriter
-    from perk.delivery.landing import LandEvidence
+    from perk.delivery.landing import LandedLayer, LandEvidence, LandOutcomeKind
 
 from perk import objective
 from perk.backends.issue_backend import IssueBackendError, PlanHeaderUpdate, PlanState
 from perk.backends.objective_store import ObjectiveRef, ObjectiveState, ObjectiveStoreError
-from perk.delivery import capability, train
+from perk.delivery import capability, land, train
 from perk.delivery import layer as layer_mod
 from perk.delivery.journal import (
     JournalCorruptionError,
@@ -78,6 +80,10 @@ _DELIVERY_ERROR_TYPES = frozenset(
         "continuation_invalid",
         "rebase_in_progress",
         "operation_in_progress",
+        "land_drift",
+        "land_failed",
+        "merge_async_unavailable",
+        "merge_request_conflict",
         "operation_ambiguous",
         "operation_not_found",
         "abandon_blocked",
@@ -133,7 +139,7 @@ type PublishKind = Literal["layer", "ready"]
 type PublishDelivery = Literal["incremental", "stacked"]
 type RecoverKind = Literal["operation_conclusion", "cancellation_metadata"]
 type RecoverAction = Literal["report", "abandon", "accept_prefix"]
-type LandKind = Literal["plan"]
+type LandKind = Literal["plan", "objective"]
 type DeliveryPhase = Literal["layer", "cascade", "ready", "land"]
 type DeliveryOrigin = Literal["domain", "git", "github", "delivery"]
 type PlanningDecisionKind = Literal[
@@ -861,41 +867,70 @@ type _RecoverConsent = Callable[
 
 @dataclass(frozen=True)
 class LandRequest:
-    """Request one plan land: the complete incremental ``perk pr land`` operation.
+    """Request one land: the complete incremental ``perk pr land`` operation
+    (``kind="plan"``) or the atomic objective landing (``kind="objective"`` — the §8.55
+    readiness preview on ``dry_run=True``, the §8.56 journaled atomic merge otherwise).
 
     The request is reconstructed caller intent — the façade never reads the worktree
-    ``cache.plan-ref``. ``plan_id`` is carried verbatim (no ``#``-normalization: refusal and
-    message bytes use it as-is), and ``delivery_lineage`` is the cached ref's value — the
-    local half of the stacked routing discriminator (the header half rides the façade's
-    authoritative plan read). The three plan-ref-derived fields carry **no defaults**:
-    ``delivery_lineage`` gates the stacked refusal (on the offline dry-run it is the only
-    evidence) and ``objective_id``/``consumed_learn`` steer finalization, so a caller that
-    forgets to reconstruct one must fail at construction, never land with silently weaker
-    behavior (the empty values ``None``/``()`` remain expressible — just explicit).
+    ``cache.plan-ref``. Plan variant: ``plan_id`` is carried verbatim (no
+    ``#``-normalization: refusal and message bytes use it as-is), and ``delivery_lineage``
+    is the cached ref's value — the local half of the stacked routing discriminator (the
+    header half rides the façade's authoritative plan read). The plan-ref-derived intent
+    fields (``objective_id``/``consumed_learn``/``delivery_lineage``) carry dataclass
+    defaults only because the flat kind-guarded family requires them — an **accepted
+    residual** (§8.4): their omission on a plan request is no longer
+    construction-detectable; the header-half stacked refusal still protects every real run
+    (the façade's authoritative plan read wins — only the fully offline dry-run relies on
+    the cached half), and the single production construction site is pinned by
+    exact-request tests. ``plan_id``/``branch`` omission stays guard-detectable.
+
+    Objective variant: ``objective_id`` names the delivery train; the mutation always
+    journals a run identity (nonblank ``run_id`` required) while the read-only preview
+    never resolves one (``dry_run=True`` forbids it — the CLI split); the plan-only fields
+    must stay at their defaults.
     """
 
     kind: LandKind
-    plan_id: str
-    branch: str
-    objective_id: str | None
-    consumed_learn: tuple[str, ...]
-    delivery_lineage: str | None
+    plan_id: str | None = None
+    branch: str | None = None
+    objective_id: str | None = None
+    consumed_learn: tuple[str, ...] = ()
+    delivery_lineage: str | None = None
     dry_run: bool = False
+    run_id: str | None = None
 
     def __post_init__(self) -> None:
-        if self.kind != "plan":
-            raise ValueError(f"unknown land kind: {self.kind!r}")
-        if not _nonblank(self.plan_id):
-            raise ValueError("land plan_id must be nonblank")
-        if not _nonblank(self.branch):
-            raise ValueError("land branch must be nonblank")
+        if self.kind == "plan":
+            if not _nonblank(self.plan_id):
+                raise ValueError("land plan_id must be nonblank")
+            if not _nonblank(self.branch):
+                raise ValueError("land branch must be nonblank")
+            if self.run_id is not None:
+                raise ValueError("plan land accepts no run_id")
+            return
+        if self.kind == "objective":
+            if not _nonblank(self.objective_id):
+                raise ValueError("objective land objective_id must be nonblank")
+            if (
+                self.plan_id is not None
+                or self.branch is not None
+                or self.consumed_learn != ()
+                or self.delivery_lineage is not None
+            ):
+                raise ValueError("objective land accepts only objective_id, run_id, and dry_run")
+            if self.dry_run:
+                if self.run_id is not None:
+                    raise ValueError("dry-run objective land accepts no run_id")
+            elif not _nonblank(self.run_id):
+                raise ValueError("objective land mutation requires a nonblank run_id")
+            return
+        raise ValueError(f"unknown land kind: {self.kind!r}")
 
 
 @dataclass(frozen=True)
 class LandResult:
     """The strict kind↔detail result family returned by :meth:`Delivery.land`: exactly the
-    detail matching ``kind`` is present (the ``objective`` variant arrives with atomic
-    objective landing)."""
+    detail matching ``kind`` is present."""
 
     @dataclass(frozen=True)
     class PrSummary:
@@ -926,14 +961,58 @@ class LandResult:
         plan_issue_closed: bool = False
         learn_state: str | None = None
 
+    @dataclass(frozen=True)
+    class Objective:
+        """The objective variant's detail: the embedded §8.55 readiness projection
+        (:class:`perk.delivery.land.LandReadiness` as-is — ``land.py`` stays the one
+        projection authority, the ``StatusResult.train`` precedent) plus the §8.56 mutation
+        facts. ``outcome is None`` marks exactly the two non-mutating shapes: the dry-run
+        preview and the in-band BLOCKED refusal (the mutation arm's exit-code policy lives
+        with the caller — ``DeliveryError`` stays payload-free). Guards touch only
+        ``land`` values and None-ness/emptiness — never a ``landing`` type (that import
+        direction is a cycle)."""
+
+        readiness: land.LandReadiness
+        redirected_from: str | None
+        dry_run: bool
+        outcome: "LandOutcomeKind | None" = None
+        operation_id: str | None = None
+        merge_async_uuid: str | None = None
+        landed_layers: tuple["LandedLayer", ...] = ()
+        objective_closed: bool = False
+        notes: tuple[str, ...] = ()
+        reconcile_evidence: "LandEvidence | None" = None
+
+        def __post_init__(self) -> None:
+            blocked = self.readiness.disposition is land.LandDisposition.BLOCKED
+            if (self.outcome is None) != (self.dry_run or blocked):
+                raise ValueError(
+                    "objective land outcome must be absent exactly on dry-run or BLOCKED"
+                )
+            if self.dry_run and (
+                self.operation_id is not None
+                or self.merge_async_uuid is not None
+                or self.landed_layers != ()
+                or self.objective_closed
+                or self.notes != ()
+                or self.reconcile_evidence is not None
+            ):
+                raise ValueError("dry-run objective land carries no mutation facts")
+
     kind: LandKind
     plan: Plan | None = None
+    objective: "LandResult.Objective | None" = None
 
     def __post_init__(self) -> None:
-        if self.kind != "plan":
+        if self.kind not in ("plan", "objective"):
             raise ValueError(f"unknown land result kind: {self.kind!r}")
-        if (self.plan is not None) != (self.kind == "plan"):
+        if (self.plan is not None) != (self.kind == "plan") or (
+            (self.objective is not None) != (self.kind == "objective")
+        ):
             raise ValueError("land result detail must match kind exactly")
+
+
+type _LandConsent = Callable[[land.LandReadiness], bool]
 
 
 @dataclass(frozen=True)
@@ -1288,6 +1367,25 @@ class DeliveryGitHub(ABC):
         ...
 
     @abstractmethod
+    def pr_land_facts(self, number: int) -> stacks.PrLandFacts | None:
+        """Read one PR's rich landing-readiness enrichment (checks, review decision,
+        threads) — raw ``GitHubError`` posture."""
+        ...
+
+    @abstractmethod
+    def submit_merge_async(self, number: int, *, sha: str) -> stacks.MergeAsyncSubmitOutcome:
+        """Submit the SHA-pinned atomic async stack merge — **total** (ambiguity is data)."""
+        ...
+
+    @abstractmethod
+    def merge_pr_direct(
+        self, number: int, *, sha: str, commit_message: str | None
+    ) -> stacks.DirectMergeOutcome:
+        """The **total** SHA-pinned direct squash merge (the dynamic singleton's landing
+        arm — distinct from :meth:`merge_pr`, the non-pinned incremental REST merge)."""
+        ...
+
+    @abstractmethod
     def get_pr(self, number: int) -> prs.PullRequest | None:
         """Read one PR by number."""
         ...
@@ -1322,7 +1420,8 @@ class DeliveryGitHub(ABC):
     @abstractmethod
     def merge_pr(self, number: int, *, commit_message: str) -> prs.PullRequest:
         """Directly squash-merge one PR (idempotent; the returned view is synthetic MERGED
-        evidence carrying no ``base_ref``)."""
+        evidence carrying no ``base_ref``) — the incremental land's non-pinned REST merge,
+        distinct from :meth:`merge_pr_direct`, the total SHA-pinned singleton squash."""
         ...
 
     @abstractmethod
@@ -1762,11 +1861,27 @@ class Delivery:
         except (GitHubError, IssueBackendError, ObjectiveStoreError, TrainPersistenceError) as exc:
             raise DeliveryError(str(exc), error_type="github_error") from exc
 
-    def land(self, request: LandRequest) -> LandResult:
-        """Land one plan's PR: ready (if draft) → direct idempotent squash merge → the
-        four-effect finalization bookkeeping. The pending-learn marker and the Linear agent
+    def land(self, request: LandRequest, *, consent: _LandConsent | None = None) -> LandResult:
+        """Land one plan (``kind="plan"``: ready → direct idempotent squash merge → the
+        four-effect finalization bookkeeping) or one objective's remaining delivery train
+        atomically (``kind="objective"``: the §8.55 readiness preview on ``dry_run``, the
+        §8.56 journaled atomic merge otherwise). ``consent`` is the objective mutation's
+        confirmation gate over the composed readiness (``None`` auto-approves); the plan
+        variant and the objective dry-run have no confirmation boundary and reject a
+        callback (never accept-and-ignore). The pending-learn marker and the Linear agent
         "landed" activity emission stay caller-owned (worktree-scoped, per the seam
         contract)."""
+        if request.kind == "plan":
+            if consent is not None:
+                raise ValueError("plan land has no confirmation boundary — consent must be None")
+            return self._land_plan(request)
+        if request.dry_run and consent is not None:
+            raise ValueError(
+                "dry-run objective land has no confirmation boundary — consent must be None"
+            )
+        return self._land_objective(request, consent=consent)
+
+    def _land_plan(self, request: LandRequest) -> LandResult:
         from perk.delivery import land_plan as land_plan_mod  # noqa: PLC0415 — façade/engine cycle
 
         context = land_plan_mod._LandContext(
@@ -1787,6 +1902,53 @@ class Delivery:
             ObjectiveStoreError,
             TrainPersistenceError,
         ) as exc:
+            raise DeliveryError(
+                str(exc), error_type="github_error", phase="land", origin="github"
+            ) from exc
+
+    def _land_objective(self, request: LandRequest, *, consent: _LandConsent | None) -> LandResult:
+        """The §8.55/§8.56 objective variant with the land boundary translation. Note
+        :class:`~perk.delivery.journal.JournalRecordTooLarge` is deliberately NOT translated
+        — an oversize append propagates as the unexpected programming error it is today (in
+        both phases; a typed mapping would be a behavior change and a façade-only
+        translation would break invariant 20 post-verification)."""
+        from perk.delivery import landing as landing_mod  # noqa: PLC0415 — façade/engine cycle
+
+        context = landing_mod._LandObjectiveContext(
+            repo_root=self._git.repo_root,
+            persistence=self._persistence,
+            github=self._github,
+            reconstruct=self._reconstruct_train_status,
+        )
+        try:
+            return landing_mod._dispatch(
+                context,
+                request,
+                consent=consent,
+                runtime=landing_mod._DEFAULT_LANDING_RUNTIME,
+            )
+        except DeliveryError:
+            raise
+        except train.TrainReconstructionError as exc:
+            code = exc.error_type if exc.error_type in _DELIVERY_ERROR_TYPES else "github_error"
+            origin: DeliveryOrigin
+            if code == "git_error":
+                origin = "git"
+            elif code == "github_error":
+                origin = "github"
+            else:
+                origin = "domain"
+            raise DeliveryError(str(exc), error_type=code, phase="land", origin=origin) from exc
+        except JournalCorruptionError as exc:
+            raise DeliveryError(
+                str(exc), error_type="journal_corruption", phase="land", origin="delivery"
+            ) from exc
+        except git_mod.GitError as exc:
+            # Defensive: the engine makes no Git authority calls.
+            raise DeliveryError(
+                str(exc), error_type="git_error", phase="land", origin="git"
+            ) from exc
+        except (GitHubError, IssueBackendError, ObjectiveStoreError, TrainPersistenceError) as exc:
             raise DeliveryError(
                 str(exc), error_type="github_error", phase="land", origin="github"
             ) from exc
