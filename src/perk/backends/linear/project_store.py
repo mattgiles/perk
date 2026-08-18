@@ -891,7 +891,7 @@ class LinearProjectObjectiveStore:
 
             return objective_store.ObjectiveRef(id=project_id, url=url, existed=False)
 
-    def list_open_objectives(self) -> tuple[objective_store.ObjectiveSummary, ...]:
+    def list_objective_completion_candidates(self) -> tuple[objective_store.ObjectiveSummary, ...]:
         """The bounded completion/browse read over ONE ``first: 50`` state-bearing projects page
         (:meth:`_LinearProjectOps.list_projects_one_page` — the shared ``list_projects`` is
         deliberately untouched). Two filters:

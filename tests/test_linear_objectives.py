@@ -120,20 +120,18 @@ class TestFindObjectiveIssue:
             store.find_objective(run_id="01NOPE")
 
 
-class TestListOpenObjectives:
+class TestObjectiveCompletionCandidates:
     """The dormant store's bounded one-page label read (Protocol conformance): a single
     ``first: 50`` request, never a cursor walk, sorted ``createdAt``-descending locally."""
 
     def test_one_page_label_read_sorted_newest_first(self) -> None:
         rows: list[dict[str, object]] = [
             {
-                "id": "i1",
                 "identifier": "ENG-1",
                 "title": "Old",
                 "createdAt": "2026-01-01T00:00:00Z",
             },
             {
-                "id": "i2",
                 "identifier": "ENG-2",
                 "title": "New",
                 "createdAt": "2026-02-01T00:00:00Z",
@@ -145,7 +143,7 @@ class TestListOpenObjectives:
                 "issues(first: 50, filter": [{"issues": _page(rows, has_next=True, cursor="c")}],
             }
         )
-        result = store.list_open_objectives()
+        result = store.list_objective_completion_candidates()
         assert [(r.id, r.title) for r in result] == [("ENG-2", "New"), ("ENG-1", "Old")]
         # Exactly ONE request — hasNextPage: true never triggers a cursor walk.
         scans = _queries(fake, "issues(first: 50, filter")
@@ -153,6 +151,8 @@ class TestListOpenObjectives:
         [(query, variables)] = scans
         assert variables["label"] == objective.OBJECTIVE_LABEL
         assert "$cursor" not in query and "cursor" not in variables
+        # Only the consumed fields ride the selection.
+        assert "nodes { identifier title createdAt }" in query
 
     def test_raises_on_query_failure(self) -> None:
         failing, _ = _make_store(
@@ -164,7 +164,7 @@ class TestListOpenObjectives:
             }
         )
         with pytest.raises(ObjectiveStoreError, match="down"):
-            failing.list_open_objectives()
+            failing.list_objective_completion_candidates()
 
 
 class TestCreateObjectiveIssue:

@@ -201,7 +201,7 @@ class _FakeBackend:
             if issue.state == "OPEN"
         )
 
-    def list_open_plans(self) -> tuple[issue_backend.PlanSummary, ...]:
+    def list_plan_completion_candidates(self) -> tuple[issue_backend.PlanSummary, ...]:
         return tuple(
             issue_backend.PlanSummary(id=issue_id, title=issue.title)
             for issue_id, issue in self._issues.items()

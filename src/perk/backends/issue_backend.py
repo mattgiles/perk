@@ -168,7 +168,8 @@ class LearnIssueSummary:
 
 @dataclass(frozen=True)
 class PlanSummary:
-    """One open plan in the bounded completion/browse read (:meth:`IssueBackend.list_open_plans`).
+    """One open plan in the bounded completion/browse read
+    (:meth:`IssueBackend.list_plan_completion_candidates`).
 
     ``id`` is the opaque backend-owned boundary id (a GitHub number stringified; a Linear human
     identifier like ``ENG-123``) — exactly what a user types at a plan-taking command. No URL:
@@ -389,7 +390,7 @@ class IssueBackend(Protocol):
         infra/query failure (never masks it as an empty tuple)."""
         ...
 
-    def list_open_plans(self) -> tuple[PlanSummary, ...]:
+    def list_plan_completion_candidates(self) -> tuple[PlanSummary, ...]:
         """The **open** plan population as a bounded completion/browse read — never an
         exhaustive census: ONE backend page per underlying query (GitHub: the list endpoint's
         default page, ~30 rows; Linear: a single ``first: 50`` request per query — no cursor

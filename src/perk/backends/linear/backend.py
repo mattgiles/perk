@@ -499,7 +499,7 @@ class LinearIssueBackend:
             )
         return tuple(summaries)
 
-    def list_open_plans(self) -> tuple[issue_backend.PlanSummary, ...]:
+    def list_plan_completion_candidates(self) -> tuple[issue_backend.PlanSummary, ...]:
         """The bounded two-scan union (one ``first: 50`` page per scan, no cursor walk):
         (1) open ``perk:plan``-labeled issues, and (2) open ``perk:objective-node``-labeled
         issues carrying a plan-header attachment — ``save_node_plan``'s in-place unification
@@ -519,13 +519,14 @@ class LinearIssueBackend:
                 ),
             )
 
+        # Both selections carry ONLY the consumed fields: result shaping reads the human
+        # identifier/title/createdAt, and the node scan's plan-header presence check reads only
+        # the attachment metadata (never ids/urls).
         for node in self._ops._list_label_issues_one_page(
-            plan.PLAN_LABEL, "id identifier title createdAt"
+            plan.PLAN_LABEL, "identifier title createdAt"
         ):
             _collect(node)
-        node_selection = (
-            "id identifier title createdAt attachments(first: 50) { nodes { id url metadata } }"
-        )
+        node_selection = "identifier title createdAt attachments(first: 50) { nodes { metadata } }"
         for node in self._ops._list_label_issues_one_page(
             objective.OBJECTIVE_NODE_LABEL, node_selection
         ):

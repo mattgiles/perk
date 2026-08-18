@@ -1,10 +1,10 @@
 """Shell-completion callbacks for plan- and objective-id arguments (``shell_complete=``).
 
 A neutral ``perk/cli/``-level leaf beside ``plan_selection.py``: the callbacks Click invokes
-mid-TAB. Each TAB costs one bounded live backend read (``list_open_plans`` /
-``list_open_objectives`` — one page per query; no caching, by decision): the candidates are the
-open plan/objective ids, newest-created-first, each carrying a truncated title as the
-per-candidate description (rendered by zsh/fish; bash shows bare ids).
+mid-TAB. Each TAB costs one bounded live backend read (``list_plan_completion_candidates`` /
+``list_objective_completion_candidates`` — one page per query; no caching, by decision): the
+candidates are the open plan/objective ids, newest-created-first, each carrying a sanitized,
+truncated title as the per-candidate description (rendered by zsh/fish; bash shows bare ids).
 
 The callbacks are silent by construction — no ``io_step``, no ``user_output`` — and resolve the
 repo from ``Path.cwd()`` (never ``ctx.obj``: the root group callback does not run during
@@ -26,7 +26,18 @@ from perk.cli import plan_selection
 _HELP_MAX_CHARS = 60
 
 
+def _sanitize_title(title: str) -> str:
+    """Normalize a backend-controlled title to a printable single line before it reaches the
+    shell: titles are remote-authored DATA, a newline corrupts Click's line-framed completion
+    response, and C0/ESC control characters can render as terminal control sequences. Every
+    non-printable character (controls, ESC, CR/LF/TAB) becomes a space; whitespace runs
+    collapse."""
+    cleaned = "".join(char if char.isprintable() else " " for char in title)
+    return " ".join(cleaned.split())
+
+
 def _truncate_title(title: str) -> str:
+    title = _sanitize_title(title)
     if len(title) <= _HELP_MAX_CHARS:
         return title
     return title[: _HELP_MAX_CHARS - 1] + "…"
@@ -56,12 +67,12 @@ def _complete(
 
 def _open_plans(main_root: Path) -> Iterable[tuple[str, str]]:
     backend = resolve.resolve_issue_backend(main_root)
-    return ((row.id, row.title) for row in backend.list_open_plans())
+    return ((row.id, row.title) for row in backend.list_plan_completion_candidates())
 
 
 def _open_objectives(main_root: Path) -> Iterable[tuple[str, str]]:
     store = resolve.resolve_objective_store(main_root)
-    return ((row.id, row.title) for row in store.list_open_objectives())
+    return ((row.id, row.title) for row in store.list_objective_completion_candidates())
 
 
 def complete_plan_id(

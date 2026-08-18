@@ -636,16 +636,14 @@ def _objective_attachment() -> dict[str, object]:
     )
 
 
-class TestListOpenPlans:
+class TestPlanCompletionCandidates:
     """The bounded two-scan completion read: one ``first: 50`` page per scan (never a cursor
     walk), the union of plan-label rows and node-issues-with-plan-header, deduped on
-    identifier, sorted
-    ``createdAt``-descending locally."""
+    identifier, sorted ``createdAt``-descending locally."""
 
     @staticmethod
     def _row(identifier: str, title: str, created: str | None) -> dict[str, object]:
         row: dict[str, object] = {
-            "id": f"iss-{identifier}",
             "identifier": identifier,
             "title": title,
         }
@@ -708,7 +706,7 @@ class TestListOpenPlans:
                 "issues(first: 50, filter": [plan_page, node_page],
             }
         )
-        result = backend.list_open_plans()
+        result = backend.list_plan_completion_candidates()
         assert [(r.id, r.title) for r in result] == [
             ("ENG-2", "New plan"),
             ("ENG-3", "Node plan"),
@@ -728,9 +726,13 @@ class TestListOpenPlans:
         # Both scans keep the open-only (non-terminal) state filter.
         for query, _variables in scans:
             assert 'state: { type: { nin: ["completed", "canceled"] } } ' in query
-        # The node scan selects the attachment metadata the plan-header filter reads.
-        assert "attachments(first: 50) { nodes { id url metadata } }" in node_query
-        assert "createdAt" in plan_query
+        # Only the consumed fields ride each selection: the human identifier/title/createdAt,
+        # plus (node scan only) the attachment metadata the plan-header filter reads — never
+        # issue database ids or attachment ids/urls.
+        assert "nodes { identifier title createdAt }" in plan_query
+        assert (
+            "identifier title createdAt attachments(first: 50) { nodes { metadata } }" in node_query
+        )
 
     def test_raises_on_query_failure(self) -> None:
         failing, _ = _make_backend(
@@ -742,7 +744,7 @@ class TestListOpenPlans:
             }
         )
         with pytest.raises(IssueBackendError, match="down"):
-            failing.list_open_plans()
+            failing.list_plan_completion_candidates()
 
 
 class TestGistTwins:

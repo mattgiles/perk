@@ -234,7 +234,7 @@ class GitHubObjectiveStore:
             )
         return _objective_ref(created)
 
-    def list_open_objectives(self) -> tuple[objective_store.ObjectiveSummary, ...]:
+    def list_objective_completion_candidates(self) -> tuple[objective_store.ObjectiveSummary, ...]:
         with _translate():
             rows = objectives.list_open_objective_issues(repo_root=self._repo_root)
         return tuple(

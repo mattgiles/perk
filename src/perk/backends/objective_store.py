@@ -64,9 +64,10 @@ class ObjectiveRef:
 @dataclass(frozen=True)
 class ObjectiveSummary:
     """One open objective in the bounded completion/browse read
-    (:meth:`ObjectiveStore.list_open_objectives`). ``id`` is the opaque backend-owned boundary
-    id (a GitHub number stringified; a Linear Project id) — exactly what a user types at an
-    objective-taking command. No URL: the completion surface consumes only id + title."""
+    (:meth:`ObjectiveStore.list_objective_completion_candidates`). ``id`` is the opaque
+    backend-owned boundary id (a GitHub number stringified; a Linear Project id) — exactly what
+    a user types at an objective-taking command. No URL: the completion surface consumes only
+    id + title."""
 
     id: str
     title: str
@@ -419,7 +420,7 @@ class ObjectiveStore(Protocol):
         with no project surface. Raises on an infra/query failure (never masks it as empty)."""
         ...
 
-    def list_open_objectives(self) -> tuple[ObjectiveSummary, ...]:
+    def list_objective_completion_candidates(self) -> tuple[ObjectiveSummary, ...]:
         """The **open** objective population as a bounded completion/browse read — never an
         exhaustive census: ONE backend page per underlying query, sorted newest-created-first
         **within the fetched page**; membership beyond the page is explicitly not promised.

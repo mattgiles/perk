@@ -1305,7 +1305,7 @@ class TestLinearProjectObjectiveStore:
         assert store.journal_carrier_id(objective_id="proj-gone") is None
 
 
-class TestListOpenObjectives:
+class TestObjectiveCompletionCandidates:
     """The bounded projects-page completion read: marker-pair objectivehood (the documented
     best-effort heuristic), the open-state filter (a missing/None state passes), and the local
     ``createdAt``-descending sort — all over the ISOLATED one-page query (the shared
@@ -1317,7 +1317,6 @@ class TestListOpenObjectives:
     ) -> dict[str, object]:
         return {
             "id": pid,
-            "url": f"p/{pid}",
             "name": name,
             "content": content,
             "state": state,
@@ -1355,7 +1354,7 @@ class TestListOpenObjectives:
                 ],
             }
         )
-        result = store.list_open_objectives()
+        result = store.list_objective_completion_candidates()
         assert [(r.id, r.title) for r in result] == [
             ("proj-new", "New"),
             ("proj-none", "Stateless"),
@@ -1374,7 +1373,7 @@ class TestListOpenObjectives:
             }
         )
         with pytest.raises(ObjectiveStoreError, match="down"):
-            failing.list_open_objectives()
+            failing.list_objective_completion_candidates()
 
 
 class TestGistProjects:

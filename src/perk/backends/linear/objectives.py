@@ -218,14 +218,15 @@ class LinearObjectiveStore:
             )
             return _objective_ref(created)
 
-    def list_open_objectives(self) -> tuple[objective_store.ObjectiveSummary, ...]:
+    def list_objective_completion_candidates(self) -> tuple[objective_store.ObjectiveSummary, ...]:
         """The bounded one-page label read over open ``perk:objective`` issues (the dormant
         store's completion/browse read — Protocol conformance). Sorted ``createdAt``-descending
         locally (the query promises no order)."""
         with _translate_objective():
             rows: list[tuple[str, objective_store.ObjectiveSummary]] = []
+            # Only the consumed fields ride the selection (identifier/title/createdAt).
             for node in self._ops._list_label_issues_one_page(
-                objective.OBJECTIVE_LABEL, "id identifier title createdAt"
+                objective.OBJECTIVE_LABEL, "identifier title createdAt"
             ):
                 rows.append(
                     (

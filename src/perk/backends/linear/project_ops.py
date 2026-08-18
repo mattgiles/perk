@@ -397,12 +397,13 @@ class _LinearProjectOps:
 
     def list_projects_one_page(self) -> list[dict[str, object]]:
         """The bounded one-page state-bearing projects read for completion/browse, as
-        ``[{id, url, name, content, state, createdAt}, …]`` (``content``/``state``/``createdAt``
-        may be ``None``). A **new, isolated** sibling of :meth:`list_projects` (which stays
-        byte-unchanged — the gist scan and find-by-run-id depend on it): exactly ONE
-        ``first: 50`` request, never a cursor loop, so a live schema problem here degrades only
-        the completion read — never the existing gist/find scans. No promised order — callers
-        sort locally on ``createdAt``.
+        ``[{id, name, content, state, createdAt}, …]`` (``content``/``state``/``createdAt``
+        may be ``None``) — only the fields the completion consumer reads (no ``url``). A
+        **new, isolated** sibling of :meth:`list_projects` (which stays byte-unchanged — the
+        gist scan and find-by-run-id depend on it): exactly ONE ``first: 50`` request, never a
+        cursor loop, so a live schema problem here degrades only the completion read — never
+        the existing gist/find scans. No promised order — callers sort locally on
+        ``createdAt``.
 
         **Flagged (live gate):** this state-bearing projects selection is NOT yet live-proven —
         covered offline here; verify live before relying on it (mirrors the sibling project
@@ -411,7 +412,7 @@ class _LinearProjectOps:
         query = (
             "query($teamId: String!) { team(id: $teamId) "
             "{ projects(first: 50) "
-            "{ nodes { id url name content state createdAt } } } }"
+            "{ nodes { id name content state createdAt } } } }"
         )
         data = self._client.request(query, {"teamId": self._client.team_id(self._team_key)})
         team = _require_dict(data.get("team"), "team")
@@ -423,7 +424,6 @@ class _LinearProjectOps:
             result.append(
                 {
                     "id": _require_str(node.get("id"), "project id"),
-                    "url": _require_str(node.get("url"), "project url"),
                     "name": _opt_str(node.get("name")) or "",
                     "content": _opt_str(node.get("content")),
                     "state": _opt_str(node.get("state")),

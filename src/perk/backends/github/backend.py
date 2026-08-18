@@ -303,7 +303,7 @@ class GitHubIssueBackend:
             for s in summaries
         )
 
-    def list_open_plans(self) -> tuple[issue_backend.PlanSummary, ...]:
+    def list_plan_completion_candidates(self) -> tuple[issue_backend.PlanSummary, ...]:
         with _translate():
             rows = plans.list_open_plan_issues(repo_root=self._repo_root)
         return tuple(issue_backend.PlanSummary(id=str(r.number), title=r.title) for r in rows)

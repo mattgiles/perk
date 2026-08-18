@@ -29,7 +29,7 @@ class _FakeIssueBackend:
         self.rows = rows
         self.roots: list[Path] = []
 
-    def list_open_plans(self) -> tuple[issue_backend.PlanSummary, ...]:
+    def list_plan_completion_candidates(self) -> tuple[issue_backend.PlanSummary, ...]:
         if isinstance(self.rows, Exception):
             raise self.rows
         return tuple(issue_backend.PlanSummary(id=i, title=t) for i, t in self.rows)
@@ -39,7 +39,7 @@ class _FakeObjectiveStore:
     def __init__(self, rows: list[tuple[str, str]] | Exception) -> None:
         self.rows = rows
 
-    def list_open_objectives(self) -> tuple[objective_store.ObjectiveSummary, ...]:
+    def list_objective_completion_candidates(self) -> tuple[objective_store.ObjectiveSummary, ...]:
         if isinstance(self.rows, Exception):
             raise self.rows
         return tuple(objective_store.ObjectiveSummary(id=i, title=t) for i, t in self.rows)
@@ -108,6 +108,29 @@ class TestPlanCompletion:
         assert items[0].help == exactly_60
         assert items[1].help == "u" * 59 + "\u2026"
         assert len(items[1].help) == 60
+
+    def test_titles_are_sanitized_to_a_printable_single_line(
+        self, monkeypatch: pytest.MonkeyPatch, anchored_root: Path
+    ) -> None:
+        # Titles are remote-authored DATA: a newline corrupts Click's line-framed completion
+        # response and C0/ESC characters can render as terminal control sequences — every
+        # non-printable becomes a space and whitespace runs collapse, BEFORE truncation.
+        _wire_backend(
+            monkeypatch,
+            [
+                ("1", "line one\nline two"),
+                ("2", "esc \x1b[31mred\x1b[0m\ttab\r\n"),
+                ("3", "x" * 59 + "\n" + "y" * 30),
+            ],
+        )
+        items = completions.complete_plan_id(None, None, "")  # ty: ignore[invalid-argument-type]
+        assert items[0].help == "line one line two"
+        assert items[1].help == "esc [31mred [0m tab"
+        # Sanitize-then-truncate: the embedded newline became a space inside the 60-char bound.
+        assert items[2].help == "x" * 59 + "\u2026"
+        for item in items:
+            assert item.help is not None
+            assert item.help.isprintable()  # no CR/LF/ESC/C0 survives
 
     def test_resolver_failure_fails_soft_to_no_candidates(
         self, monkeypatch: pytest.MonkeyPatch, anchored_root: Path
@@ -202,8 +225,6 @@ class TestPostSeparatorSuppression:
 # these names today, so a future selector argument reusing a name fails the census until wired.
 _PLAN_ARG_NAMES = frozenset({"plan"})
 _OBJECTIVE_ARG_NAMES = frozenset({"number", "objective", "objective_arg"})
-# Deliberately-unwired exceptions, keyed (command path, argument name). Initially empty.
-_CENSUS_EXCEPTIONS: frozenset[tuple[str, str]] = frozenset()
 
 
 def _walk_commands(command: click.Command, path: str):
@@ -216,8 +237,7 @@ def _walk_commands(command: click.Command, path: str):
 class TestWiringCensus:
     """Exhaustive over the registered CLI tree: every ``click.Argument`` named ``plan`` carries
     ``complete_plan_id`` and every one named ``number``/``objective``/``objective_arg`` carries
-    ``complete_objective_id`` (via the parameter's stored custom shell-complete callback),
-    against the explicit — initially empty — exceptions set.
+    ``complete_objective_id`` (via the parameter's stored custom shell-complete callback).
 
     The guarantee is the NAME VOCABULARY: a future selector argument reusing one of these names
     fails this census until wired; an argument under a different name is out of the guard's
@@ -238,8 +258,6 @@ class TestWiringCensus:
         checked = 0
         for path, _command, param in self._arguments():
             callback = getattr(param, "_custom_shell_complete", None)
-            if (path, param.name) in _CENSUS_EXCEPTIONS:
-                continue
             if param.name in _PLAN_ARG_NAMES:
                 assert callback is completions.complete_plan_id, (
                     f"`{path}` argument {param.name!r} must carry complete_plan_id"

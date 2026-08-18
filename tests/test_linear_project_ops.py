@@ -492,13 +492,12 @@ class TestLinearProjectOps:
         nodes: list[dict[str, object]] = [
             {
                 "id": "p1",
-                "url": "u1",
                 "name": "A",
                 "content": "c",
                 "state": "started",
                 "createdAt": "2026-01-01T00:00:00Z",
             },
-            {"id": "p2", "url": "u2", "name": None, "content": None, "state": None},
+            {"id": "p2", "name": None, "content": None, "state": None},
         ]
         ops, fake = _make_project_ops(
             {
@@ -520,7 +519,6 @@ class TestLinearProjectOps:
         assert rows == [
             {
                 "id": "p1",
-                "url": "u1",
                 "name": "A",
                 "content": "c",
                 "state": "started",
@@ -528,7 +526,6 @@ class TestLinearProjectOps:
             },
             {
                 "id": "p2",
-                "url": "u2",
                 "name": "",
                 "content": None,
                 "state": None,
@@ -539,7 +536,9 @@ class TestLinearProjectOps:
         assert len(scans) == 1
         [(query, variables)] = scans
         assert "$cursor" not in query and "cursor" not in variables
-        assert "state createdAt" in query
+        # Only the consumed fields ride the selection (the completion consumer never reads a
+        # project url).
+        assert "nodes { id name content state createdAt }" in query
 
     def test_set_project_state_marks_completed(self) -> None:
         ops, fake = _make_project_ops({"projectUpdate(": [{"projectUpdate": {"success": True}}]})
