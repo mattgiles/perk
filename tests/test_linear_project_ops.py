@@ -470,6 +470,77 @@ class TestLinearProjectOps:
         assert "projectMilestone { id }" in query
         assert "labels { nodes { id } }" in query
 
+    def test_list_projects_query_stays_byte_stable(self) -> None:
+        # The one-page completion read is an ISOLATED sibling: the shared `list_projects`
+        # (the gist scan + find-by-run-id source) must stay byte-unchanged — no state,
+        # no createdAt, still cursor-paginated.
+        ops, fake = _make_project_ops(
+            {
+                "teams(filter": [_TEAM_RESPONSE],
+                "projects(first: 50, after": [{"team": {"projects": _page([])}}],
+            }
+        )
+        ops.list_projects()
+        [(query, _)] = _queries(fake, "projects(first")
+        assert query == (
+            "query($teamId: String!, $cursor: String) { team(id: $teamId) "
+            "{ projects(first: 50, after: $cursor) "
+            "{ nodes { id url name content } pageInfo { hasNextPage endCursor } } } }"
+        )
+
+    def test_list_projects_one_page_single_state_bearing_request(self) -> None:
+        nodes: list[dict[str, object]] = [
+            {
+                "id": "p1",
+                "url": "u1",
+                "name": "A",
+                "content": "c",
+                "state": "started",
+                "createdAt": "2026-01-01T00:00:00Z",
+            },
+            {"id": "p2", "url": "u2", "name": None, "content": None, "state": None},
+        ]
+        ops, fake = _make_project_ops(
+            {
+                "teams(filter": [_TEAM_RESPONSE],
+                "projects(first: 50)": [
+                    {
+                        "team": {
+                            "projects": {
+                                "nodes": nodes,
+                                # A next page must NOT trigger a cursor walk (one-page bound).
+                                "pageInfo": {"hasNextPage": True, "endCursor": "c"},
+                            }
+                        }
+                    }
+                ],
+            }
+        )
+        rows = ops.list_projects_one_page()
+        assert rows == [
+            {
+                "id": "p1",
+                "url": "u1",
+                "name": "A",
+                "content": "c",
+                "state": "started",
+                "createdAt": "2026-01-01T00:00:00Z",
+            },
+            {
+                "id": "p2",
+                "url": "u2",
+                "name": "",
+                "content": None,
+                "state": None,
+                "createdAt": None,
+            },
+        ]
+        scans = _queries(fake, "projects(first: 50)")
+        assert len(scans) == 1
+        [(query, variables)] = scans
+        assert "$cursor" not in query and "cursor" not in variables
+        assert "state createdAt" in query
+
     def test_set_project_state_marks_completed(self) -> None:
         ops, fake = _make_project_ops({"projectUpdate(": [{"projectUpdate": {"success": True}}]})
         ops.set_project_state("p-1", "completed")

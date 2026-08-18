@@ -201,6 +201,13 @@ class _FakeBackend:
             if issue.state == "OPEN"
         )
 
+    def list_open_plans(self) -> tuple[issue_backend.PlanSummary, ...]:
+        return tuple(
+            issue_backend.PlanSummary(id=issue_id, title=issue.title)
+            for issue_id, issue in self._issues.items()
+            if issue.state == "OPEN"
+        )
+
     def list_plans_pending_learn(
         self, *, limit: int = 50
     ) -> tuple[issue_backend.PendingLearnPlan, ...]:

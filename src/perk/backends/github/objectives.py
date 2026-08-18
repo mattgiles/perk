@@ -105,6 +105,38 @@ def find_objective_issue(*, run_id: str, repo_root: Path) -> ObjectiveIssue | No
     return ObjectiveIssue(number=found.number, url=found.url, existed=True)
 
 
+@dataclass(frozen=True)
+class OpenObjectiveIssue:
+    """One open objective issue row for the bounded completion/browse read (id + title only)."""
+
+    number: int
+    title: str
+
+
+def list_open_objective_issues(*, repo_root: Path) -> tuple[OpenObjectiveIssue, ...]:
+    """List the open ``perk:objective`` issues — the bounded completion/browse read.
+
+    One REST page over the shared label-scoped LIST read (``plans._list_label_issues`` — the
+    list endpoint's default ``created``-descending order, never the search index); membership
+    beyond that default page (~30 rows) is not promised. Skips non-dict and ``pull_request``
+    entries. Raises ``GitHubError`` on an infra/query failure (never masks it as an empty
+    tuple).
+    """
+    issues = plans._list_label_issues(
+        objective.OBJECTIVE_LABEL, repo_root=repo_root, what="failed to list objective issues"
+    )
+    rows: list[OpenObjectiveIssue] = []
+    for issue in issues:
+        if not isinstance(issue, dict) or "number" not in issue:
+            continue
+        if "pull_request" in issue:
+            continue
+        rows.append(
+            OpenObjectiveIssue(number=int(issue["number"]), title=str(issue.get("title", "")))
+        )
+    return tuple(rows)
+
+
 def create_objective_issue(
     *,
     title: str,

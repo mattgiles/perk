@@ -1305,6 +1305,78 @@ class TestLinearProjectObjectiveStore:
         assert store.journal_carrier_id(objective_id="proj-gone") is None
 
 
+class TestListOpenObjectives:
+    """The bounded projects-page completion read: marker-pair objectivehood (the documented
+    best-effort heuristic), the open-state filter (a missing/None state passes), and the local
+    ``createdAt``-descending sort — all over the ISOLATED one-page query (the shared
+    ``list_projects`` is never touched)."""
+
+    @staticmethod
+    def _project(
+        pid: str, name: str, content: str | None, state: str | None, created: str | None
+    ) -> dict[str, object]:
+        return {
+            "id": pid,
+            "url": f"p/{pid}",
+            "name": name,
+            "content": content,
+            "state": state,
+            "createdAt": created,
+        }
+
+    def test_filters_and_sorts_newest_first(self) -> None:
+        overview = linear.LinearProjectObjectiveStore._compose_overview("Prose.")
+        rows = [
+            self._project("proj-old", "Old", overview, "started", "2026-01-01T00:00:00Z"),
+            self._project("proj-new", "New", overview, "planned", "2026-03-01T00:00:00Z"),
+            # No state observed: passes (no observation is never treated as closed).
+            self._project("proj-none", "Stateless", overview, None, "2026-02-01T00:00:00Z"),
+            # Terminal states: excluded.
+            self._project("proj-done", "Done", overview, "completed", "2026-04-01T00:00:00Z"),
+            self._project("proj-cx", "Cx", overview, "canceled", "2026-04-02T00:00:00Z"),
+            # A gist-only project (no Reconcilable marker pair): excluded.
+            self._project(
+                "proj-gist",
+                "Gist",
+                plan.render_gist_header(
+                    run_id="01G", created="t", scope="objective", style="inline-code"
+                ),
+                "started",
+                "2026-05-01T00:00:00Z",
+            ),
+            # No overview content at all: excluded.
+            self._project("proj-empty", "Empty", None, "started", "2026-05-02T00:00:00Z"),
+        ]
+        store, fake = _make_project_store(
+            {
+                "teams(filter": [_TEAM_RESPONSE],
+                "projects(first: 50)": [
+                    {"team": {"projects": _page(rows, has_next=True, cursor="c")}}
+                ],
+            }
+        )
+        result = store.list_open_objectives()
+        assert [(r.id, r.title) for r in result] == [
+            ("proj-new", "New"),
+            ("proj-none", "Stateless"),
+            ("proj-old", "Old"),
+        ]
+        # Exactly ONE isolated one-page request; the shared cursor-paginated `list_projects`
+        # query is never issued (hasNextPage: true is ignored).
+        assert len(_queries(fake, "projects(first: 50)")) == 1
+        assert not _queries(fake, "projects(first: 50, after")
+
+    def test_raises_on_query_failure(self) -> None:
+        failing, _ = _make_project_store(
+            {
+                "teams(filter": [_TEAM_RESPONSE],
+                "projects(first: 50)": [LinearGraphQLError("Linear GraphQL error: down", codes=())],
+            }
+        )
+        with pytest.raises(ObjectiveStoreError, match="down"):
+            failing.list_open_objectives()
+
+
 class TestGistProjects:
     """The §8.41 project-tier gist arm: create_gist_source + list_gist_sources."""
 

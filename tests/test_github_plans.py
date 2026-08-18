@@ -218,6 +218,32 @@ def test_list_learn_issues_raises_on_infra_failure(monkeypatch):
         plans.list_learn_issues(repo_root=ROOT)
 
 
+# --- open-plan completion read (`list_open_plan_issues`) -------------------------------------
+
+
+def test_list_open_plan_issues_maps_rows_and_skips_prs(monkeypatch):
+    issues = [
+        {"number": 45, "title": "P45", "html_url": "u/45", "body": "b"},
+        "not-a-dict",  # skipped defensively
+        {"number": 60, "title": "PR", "html_url": "u/60", "body": "b", "pull_request": {}},
+        {"number": 50, "title": "P50", "html_url": "u/50", "body": "b"},
+    ]
+    rec = _GhRecorder(get=_Proc(0, stdout=json.dumps(issues)))
+    monkeypatch.setattr(subprocess, "run", rec)
+    rows = plans.list_open_plan_issues(repo_root=ROOT)
+    # The list endpoint's default created-descending order is preserved verbatim (no re-sort).
+    assert [(r.number, r.title) for r in rows] == [(45, "P45"), (50, "P50")]
+    [call] = rec.calls
+    assert any("labels=perk:plan" in tok for tok in call)
+    assert any("state=open" in tok for tok in call)
+
+
+def test_list_open_plan_issues_raises_on_infra_failure(monkeypatch):
+    monkeypatch.setattr(subprocess, "run", _GhRecorder(get=_Proc(1, stderr="HTTP 500")))
+    with pytest.raises(github.GitHubError):
+        plans.list_open_plan_issues(repo_root=ROOT)
+
+
 # --- pending-learn backlog (`perk learn pending`) --------------------------------------------
 
 

@@ -29,7 +29,7 @@ from _linear_fakes import (
     _queries,
 )
 
-from perk import github, plan
+from perk import github, objective, plan
 from perk.backends import issue_backend
 from perk.backends.issue_backend import IssueBackendError
 from perk.backends.linear import (
@@ -634,6 +634,115 @@ def _objective_attachment() -> dict[str, object]:
         url="https://perk.invalid/objective/01OBJ",
         att_id="att-obj",
     )
+
+
+class TestListOpenPlans:
+    """The bounded two-scan completion read: one ``first: 50`` page per scan (never a cursor
+    walk), the union of plan-label rows and node-issues-with-plan-header, deduped on
+    identifier, sorted
+    ``createdAt``-descending locally."""
+
+    @staticmethod
+    def _row(identifier: str, title: str, created: str | None) -> dict[str, object]:
+        row: dict[str, object] = {
+            "id": f"iss-{identifier}",
+            "identifier": identifier,
+            "title": title,
+        }
+        if created is not None:
+            row["createdAt"] = created
+        return row
+
+    @classmethod
+    def _node_row(
+        cls, identifier: str, title: str, created: str | None, atts: list[dict[str, object]]
+    ) -> dict[str, object]:
+        return {**cls._row(identifier, title, created), "attachments": {"nodes": atts}}
+
+    def test_two_scans_union_dedupe_and_local_newest_first_sort(self) -> None:
+        plan_page = {
+            "issues": _page(
+                [
+                    self._row("ENG-1", "Old plan", "2026-01-01T00:00:00Z"),
+                    self._row("ENG-2", "New plan", "2026-03-01T00:00:00Z"),
+                    self._row("ENG-5", "No created", None),  # missing createdAt sorts last
+                ],
+                has_next=True,  # a hasNextPage beyond the page must NOT trigger a cursor walk
+                cursor="c1",
+            )
+        }
+        node_page = {
+            "issues": _page(
+                [
+                    self._node_row(
+                        "ENG-3",
+                        "Node plan",
+                        "2026-02-01T00:00:00Z",
+                        [_plan_attachment("01NODE")],
+                    ),
+                    # No plan-header attachment (an unplanned node-issue): excluded.
+                    self._node_row(
+                        "ENG-4",
+                        "Unplanned node",
+                        "2026-04-01T00:00:00Z",
+                        [
+                            _perk_attachment_node(
+                                linear_attachments.OBJECTIVE_NODE_KIND,
+                                {"id": "1.1", "status": "pending"},
+                                url="https://perk.invalid/node/ENG-4",
+                            )
+                        ],
+                    ),
+                    # A row already seen by the plan scan: deduped on identifier.
+                    self._node_row(
+                        "ENG-2", "New plan", "2026-03-01T00:00:00Z", [_plan_attachment("01DUP")]
+                    ),
+                ],
+                has_next=True,
+                cursor="c2",
+            )
+        }
+        backend, fake = _make_backend(
+            {
+                "teams(filter": [_TEAM_RESPONSE],
+                "issues(first: 50, filter": [plan_page, node_page],
+            }
+        )
+        result = backend.list_open_plans()
+        assert [(r.id, r.title) for r in result] == [
+            ("ENG-2", "New plan"),
+            ("ENG-3", "Node plan"),
+            ("ENG-1", "Old plan"),
+            ("ENG-5", "No created"),
+        ]
+        # Exactly TWO list requests (one bounded page per scan) — hasNextPage: true is ignored.
+        scans = _queries(fake, "issues(first: 50, filter")
+        assert len(scans) == 2
+        (plan_query, plan_vars), (node_query, node_vars) = scans
+        assert plan_vars["label"] == plan.PLAN_LABEL
+        assert node_vars["label"] == objective.OBJECTIVE_NODE_LABEL
+        # The one-page reads never carry a cursor (a single request, no pagination loop).
+        for query, variables in scans:
+            assert "$cursor" not in query
+            assert "cursor" not in variables
+        # Both scans keep the open-only (non-terminal) state filter.
+        for query, _variables in scans:
+            assert 'state: { type: { nin: ["completed", "canceled"] } } ' in query
+        # The node scan selects the attachment metadata the plan-header filter reads.
+        assert "attachments(first: 50) { nodes { id url metadata } }" in node_query
+        assert "createdAt" in plan_query
+
+    def test_raises_on_query_failure(self) -> None:
+        failing, _ = _make_backend(
+            {
+                "teams(filter": [_TEAM_RESPONSE],
+                "issues(first: 50, filter": [
+                    LinearGraphQLError("Linear GraphQL error: down", codes=())
+                ],
+            }
+        )
+        with pytest.raises(IssueBackendError, match="down"):
+            failing.list_open_plans()
 
 
 class TestGistTwins:

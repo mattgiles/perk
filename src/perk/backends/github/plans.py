@@ -146,6 +146,14 @@ class LearnIssueSummary:
 
 
 @dataclass(frozen=True)
+class OpenPlanIssue:
+    """One open plan issue row for the bounded completion/browse read (id + title only)."""
+
+    number: int
+    title: str
+
+
+@dataclass(frozen=True)
 class PendingLearnPlanIssue:
     """A closed plan issue whose plan-header ``learn_state`` is ``pending`` (contracts.md §8.36)
     — landed, /learn not yet run. ``closed_at`` is GitHub's REST ``closed_at`` timestamp
@@ -155,6 +163,27 @@ class PendingLearnPlanIssue:
     title: str
     url: str
     closed_at: str | None
+
+
+def list_open_plan_issues(*, repo_root: Path) -> tuple[OpenPlanIssue, ...]:
+    """List the open ``perk:plan`` issues — the bounded completion/browse read.
+
+    One REST page over the shared label-scoped LIST read (:func:`_list_label_issues` — the list
+    endpoint's default ``created``-descending order, never the search index); membership beyond
+    that default page (~30 rows) is not promised. Skips non-dict and ``pull_request`` entries.
+    Raises ``GitHubError`` on an infra/query failure (never masks it as an empty tuple).
+    """
+    issues = _list_label_issues(
+        plan.PLAN_LABEL, repo_root=repo_root, what="failed to list open plan issues"
+    )
+    rows: list[OpenPlanIssue] = []
+    for issue in issues:
+        if not isinstance(issue, dict) or "number" not in issue:
+            continue
+        if "pull_request" in issue:
+            continue
+        rows.append(OpenPlanIssue(number=int(issue["number"]), title=str(issue.get("title", ""))))
+    return tuple(rows)
 
 
 def list_plans_pending_learn(*, repo_root: Path, limit: int) -> tuple[PendingLearnPlanIssue, ...]:

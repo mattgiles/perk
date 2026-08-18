@@ -218,6 +218,27 @@ class LinearObjectiveStore:
             )
             return _objective_ref(created)
 
+    def list_open_objectives(self) -> tuple[objective_store.ObjectiveSummary, ...]:
+        """The bounded one-page label read over open ``perk:objective`` issues (the dormant
+        store's completion/browse read — Protocol conformance). Sorted ``createdAt``-descending
+        locally (the query promises no order)."""
+        with _translate_objective():
+            rows: list[tuple[str, objective_store.ObjectiveSummary]] = []
+            for node in self._ops._list_label_issues_one_page(
+                objective.OBJECTIVE_LABEL, "id identifier title createdAt"
+            ):
+                rows.append(
+                    (
+                        _opt_str(node.get("createdAt")) or "",
+                        objective_store.ObjectiveSummary(
+                            id=_require_str(node.get("identifier"), "issue identifier"),
+                            title=_require_str(node.get("title"), "issue title"),
+                        ),
+                    )
+                )
+            rows.sort(key=lambda pair: pair[0], reverse=True)
+            return tuple(summary for _created, summary in rows)
+
     def get_objective(self, *, objective_id: str) -> objective_store.ObjectiveState | None:
         with _translate_objective():
             issue = self._ops._issue_or_none(

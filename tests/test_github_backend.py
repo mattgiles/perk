@@ -312,6 +312,13 @@ class TestDelegation:
         assert summary.header.plan == 12
         assert summary.header.decision == "SHOULD_BE_CODE"
 
+    def test_list_open_plans(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        rec = _Recorder((plans.OpenPlanIssue(number=42, title="T42"),))
+        monkeypatch.setattr(plans, "list_open_plan_issues", rec)
+        result = GitHubIssueBackend(tmp_path).list_open_plans()
+        assert rec.kwargs == {"repo_root": tmp_path}
+        assert result == (issue_backend.PlanSummary(id="42", title="T42"),)
+
     def test_list_plans_pending_learn(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
