@@ -32,7 +32,7 @@ failed/ambiguous ``completed`` append or a finalize failure degrades to loud ``n
 import time
 from collections.abc import Callable, Mapping
 from contextlib import AbstractContextManager
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime
 from pathlib import Path
 from typing import Literal, Protocol
@@ -82,17 +82,6 @@ _ABANDON_DETAIL_CAP = 500
 type LandOutcomeKind = Literal[
     "merged", "pending", "unexpected_enqueued", "completed_without_merge", "declined"
 ]
-
-
-class _LandBlocked(Exception):
-    """Module-private control flow: the mutation arm's BLOCKED refusal, carrying the full
-    composed readiness up to ``_dispatch``, which maps it to the in-band readiness-only
-    ``LandResult.Objective`` detail (``outcome: None`` — the exit-code policy lives with
-    the caller; ``DeliveryError`` stays payload-free)."""
-
-    def __init__(self, readiness: land.LandReadiness) -> None:
-        super().__init__("landing blocked")
-        self.readiness = readiness
 
 
 @dataclass(frozen=True)
@@ -172,30 +161,6 @@ def assemble_land_evidence(fold: JournalFold) -> LandEvidence:
         partial=bool(failures),
         notes=tuple(notes),
     )
-
-
-@dataclass(frozen=True)
-class LandOutcome:
-    """The internal mutation-arm carrier ``_dispatch`` maps field-for-field into the public
-    ``LandResult.Objective`` detail (every arm is exit 0 at the CLI).
-
-    ``pending`` / ``unexpected_enqueued`` mean the LAND operation stays **unresolved** —
-    never success, never failure (``perk objective stack recover`` concludes it).
-    ``merged`` is only reported after per-PR verification (invariant 20). ``notes`` are
-    loud human-facing detail lines, never failures. ``objective_closed`` reports a REAL
-    close transition (state-aware — a rerun on a closed objective reads ``False``);
-    ``reconcile_evidence`` rides every close transition, assembled fresh from the journal
-    (``None`` when nothing closed or the fold was unreadable).
-    """
-
-    outcome: LandOutcomeKind
-    readiness: land.LandReadiness
-    operation_id: str | None
-    merge_async_uuid: str | None
-    landed_layers: tuple[LandedLayer, ...]
-    objective_closed: bool
-    notes: tuple[str, ...]
-    reconcile_evidence: LandEvidence | None = None
 
 
 def squash_commit_message(*, issue: str, url: str, backend_id: str, title: str) -> str:
@@ -326,25 +291,6 @@ def _redirected_from(requested: str, readiness: land.LandReadiness) -> str | Non
     return requested
 
 
-def _objective_detail(outcome: LandOutcome, *, requested_id: str) -> LandResult:
-    """Map the internal mutation carrier field-for-field onto the public detail."""
-    return LandResult(
-        kind="objective",
-        objective=LandResult.Objective(
-            readiness=outcome.readiness,
-            redirected_from=_redirected_from(requested_id, outcome.readiness),
-            dry_run=False,
-            outcome=outcome.outcome,
-            operation_id=outcome.operation_id,
-            merge_async_uuid=outcome.merge_async_uuid,
-            landed_layers=outcome.landed_layers,
-            objective_closed=outcome.objective_closed,
-            notes=outcome.notes,
-            reconcile_evidence=outcome.reconcile_evidence,
-        ),
-    )
-
-
 def _dispatch(
     context: _LandObjectiveContext,
     request: LandRequest,
@@ -401,28 +347,24 @@ def _dispatch(
     )
     try:
         with runtime.operation_lock(context.repo_root):
-            try:
-                outcome = _land(landing, objective_id)
-            except _LandBlocked as blocked:
-                return LandResult(
-                    kind="objective",
-                    objective=LandResult.Objective(
-                        readiness=blocked.readiness,
-                        redirected_from=_redirected_from(objective_id, blocked.readiness),
-                        dry_run=False,
-                    ),
-                )
+            detail = _land(landing, objective_id)
     except oplock.OperationLockBusy as exc:
         raise DeliveryError(
             str(exc), error_type="operation_in_progress", phase="land", origin="domain"
         ) from exc
-    return _objective_detail(outcome, requested_id=objective_id)
+    # The supersession-redirect fact is a dispatch concern — applied ONCE here (the engine
+    # arms all build the detail with `redirected_from=None`; the frozen replace re-runs the
+    # detail's own guards).
+    return LandResult(
+        kind="objective",
+        objective=replace(detail, redirected_from=_redirected_from(objective_id, detail.readiness)),
+    )
 
 
 # ----------------------------------------------------------------- the protocol
 
 
-def _land(b: _Landing, objective_id: str) -> LandOutcome:
+def _land(b: _Landing, objective_id: str) -> LandResult.Objective:
     # 1./2. Reconstruct + require a journalable lineage (the lock is already held).
     status = b.reconstruct(b.repo_root, objective_id)
     if isinstance(status, NoDeliveryTrain):
@@ -490,10 +432,11 @@ def _land(b: _Landing, objective_id: str) -> LandOutcome:
             reconcile_evidence=evidence,
         )
 
-    # 5. BLOCKED: the in-band refusal carrying the full readiness report (§8.56 — the CLI
-    # maps the readiness-only detail to its exit-1 `land_blocked` envelope).
+    # 5. BLOCKED: the in-band refusal carrying the full readiness report (§8.56 —
+    # `outcome: None`, readiness-only; the CLI maps it to its exit-1 `land_blocked`
+    # envelope; `DeliveryError` stays payload-free).
     if readiness.disposition is land.LandDisposition.BLOCKED or readiness.plan is None:
-        raise _LandBlocked(readiness)
+        return LandResult.Objective(readiness=readiness, redirected_from=None, dry_run=False)
     land_plan = readiness.plan
 
     # 6. READY. The singleton's load-bearing pre-merge plan read (squash title/url +
@@ -565,7 +508,7 @@ def _land_async(
     operation_id: str,
     *,
     consumed: tuple[str, ...] | None,
-) -> LandOutcome:
+) -> LandResult.Objective:
     """The multi-layer arm: submit the SHA-pinned async merge, verify the returned options,
     record the ``accepted`` handle, poll to a verified terminal observation."""
     submitted = b.github.submit_merge_async(land_plan.top_pr_number, sha=land_plan.top_head_sha)
@@ -716,7 +659,7 @@ def _poll(
     operation_id: str,
     uuid: str,
     consumed: tuple[str, ...] | None,
-) -> LandOutcome:
+) -> LandResult.Objective:
     """The bounded handle poll over the total aggregate probe: pending continues, merged
     verifies, failed abandons with proof, enqueued stops immediately (terminal for the
     REQUEST, not the train — unresolved); an ``expired``/``unreadable`` probe consumes the
@@ -790,7 +733,7 @@ def _land_singleton(
     *,
     commit_message: str | None,
     consumed: tuple[str, ...] | None,
-) -> LandOutcome:
+) -> LandResult.Objective:
     """The dynamic-singleton arm: one ordinary SHA-pinned direct squash merge. No
     ``accepted`` event ever — there is no handle."""
     sole = land_plan.layers[0]
@@ -936,7 +879,7 @@ def _terminal_non_application(
     detail: str,
     error_type: str,
     message: str,
-) -> LandOutcome:
+) -> LandResult.Objective:
     """The abandon-with-proof path (§8.56): a terminal non-application may be journaled
     ``abandoned`` only when every layer PR re-observes OPEN at its exact expected head
     (over the same strict ``merged_evidence`` identity read as the re-observation) —
@@ -994,7 +937,7 @@ def _verify_and_finalize(
     uuid: str | None,
     reported_sha: str | None,
     consumed: tuple[str, ...] | None,
-) -> LandOutcome:
+) -> LandResult.Objective:
     """Per-PR merge verification, the ``completed`` append, per-layer finalization
     bottom→top, and the aggregate objective close. Once verification succeeds the result is
     ``merged`` — every later bookkeeping failure degrades to a loud note (invariant 20).
@@ -1278,10 +1221,13 @@ def _outcome(
     objective_closed: bool = False,
     notes: tuple[str, ...] = (),
     reconcile_evidence: LandEvidence | None = None,
-) -> LandOutcome:
-    return LandOutcome(
-        outcome=outcome,
+) -> LandResult.Objective:
+    """One mutation-arm detail (``redirected_from`` is applied once in ``_dispatch``)."""
+    return LandResult.Objective(
         readiness=readiness,
+        redirected_from=None,
+        dry_run=False,
+        outcome=outcome,
         operation_id=operation_id,
         merge_async_uuid=merge_async_uuid,
         landed_layers=landed_layers,

@@ -966,11 +966,19 @@ class LandResult:
         """The objective variant's detail: the embedded §8.55 readiness projection
         (:class:`perk.delivery.land.LandReadiness` as-is — ``land.py`` stays the one
         projection authority, the ``StatusResult.train`` precedent) plus the §8.56 mutation
-        facts. ``outcome is None`` marks exactly the two non-mutating shapes: the dry-run
+        facts. ``outcome is None`` marks exactly the two non-mutating shapes — the dry-run
         preview and the in-band BLOCKED refusal (the mutation arm's exit-code policy lives
-        with the caller — ``DeliveryError`` stays payload-free). Guards touch only
-        ``land`` values and None-ness/emptiness — never a ``landing`` type (that import
-        direction is a cycle)."""
+        with the caller — ``DeliveryError`` stays payload-free) — and a non-mutating detail
+        carries no mutation facts (readiness-only by construction). ``pending`` /
+        ``unexpected_enqueued`` outcomes mean the LAND operation stays **unresolved** —
+        never success, never failure (``perk objective stack recover`` concludes it);
+        ``merged`` is only reported after per-PR verification (invariant 20). ``notes`` are
+        loud human-facing detail lines, never failures; ``objective_closed`` reports a REAL
+        close transition (state-aware — a rerun on a closed objective reads ``False``);
+        ``reconcile_evidence`` rides every close transition, assembled fresh from the
+        journal (``None`` when nothing closed or the fold was unreadable). Guards touch
+        only ``land`` values and None-ness/emptiness — never a ``landing`` type (that
+        import direction is a cycle)."""
 
         readiness: land.LandReadiness
         redirected_from: str | None
@@ -989,7 +997,7 @@ class LandResult:
                 raise ValueError(
                     "objective land outcome must be absent exactly on dry-run or BLOCKED"
                 )
-            if self.dry_run and (
+            if self.outcome is None and (
                 self.operation_id is not None
                 or self.merge_async_uuid is not None
                 or self.landed_layers != ()
@@ -997,7 +1005,9 @@ class LandResult:
                 or self.notes != ()
                 or self.reconcile_evidence is not None
             ):
-                raise ValueError("dry-run objective land carries no mutation facts")
+                raise ValueError(
+                    "non-mutating objective land (dry-run or BLOCKED) carries no mutation facts"
+                )
 
     kind: LandKind
     plan: Plan | None = None

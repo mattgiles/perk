@@ -8680,7 +8680,9 @@ CLI maps it to its exit-1 `land_blocked` envelope (below). (6) **READY**: for `s
 `get_plan` read happens NOW (missing ⇒ typed `plan_not_found`; it supplies the squash
 title/url + the tolerantly-parsed `consumed_learn`); then `approve(readiness)` — the
 rendered land plan; declined ⇒ `outcome: declined`, nothing journaled. (7) **Re-observe**
-every layer PR after the arbitrary approval pause (`stacks.pr_delivery_facts`: OPEN, head ==
+every layer PR after the arbitrary approval pause (the strict aggregate
+`DeliveryGitHub.merged_evidence` — `PrMergedEvidence` carries every inspected identity
+fact, `merge_commit_sha` ignored pre-merge: OPEN, head ==
 plan `head_sha`, base == expected base ref, head ref == branch); any mismatch/read failure →
 typed `land_drift`, nothing journaled. (8) **Prepared** (journal-first, read back; the
 one-unresolved gate and `JournalAppendAmbiguous` propagate typed). (9) **Submit** — classification

@@ -717,6 +717,10 @@ def test_singleton_missing_plan_is_plan_not_found():
     assert exc.value.error_type == "plan_not_found"
     assert (exc.value.phase, exc.value.origin) == ("land", "domain")
     assert h.prepared == [] and h.outcomes == []
+    # The load-bearing ordering: the step-6 plan read refuses BEFORE consent — the
+    # callback is never consulted on a missing plan.
+    assert ("get_plan", "101") in h.ops
+    assert not any(op[0] == "approve" for op in h.ops)
 
 
 # --- consent + refusals ---------------------------------------------------------------

@@ -506,9 +506,6 @@ class FakeDeliveryGitHub(_FailureMixin, DeliveryGitHub):
         land_facts: Mapping[int, stacks.PrLandFacts | None] | None = None,
         merge_async_submits: Sequence[stacks.MergeAsyncSubmitOutcome] = (),
         direct_merges: Sequence[stacks.DirectMergeOutcome] = (),
-        merge_probe_script: Sequence[stacks.MergeAsyncProbe] = (),
-        merged_evidence_scripts: Mapping[int, Sequence[stacks.PrMergedEvidence | None]]
-        | None = None,
         active_writers: frozenset[str] = frozenset(),
         errors: Mapping[Call, Exception] | None = None,
     ) -> None:
@@ -524,14 +521,10 @@ class FakeDeliveryGitHub(_FailureMixin, DeliveryGitHub):
         self._merge_probes = dict(merge_probes or {})
         self._merged_evidence = dict(merged_evidence or {})
         self._land_facts = dict(land_facts or {})
-        # The landing operation's retry/poll sequences need per-call scripts (queue-style
-        # for repeated identical calls), not static returns.
+        # The landing mutations' retry sequences need per-call scripts (queue-style for
+        # repeated identical calls), not static returns.
         self._merge_async_submits = list(merge_async_submits)
         self._direct_merges = list(direct_merges)
-        self._merge_probe_script = list(merge_probe_script)
-        self._merged_evidence_scripts = {
-            number: list(queue) for number, queue in (merged_evidence_scripts or {}).items()
-        }
         self._active_writers = frozenset(active_writers)
         self.calls: list[Call] = []
 
@@ -563,8 +556,6 @@ class FakeDeliveryGitHub(_FailureMixin, DeliveryGitHub):
         call: Call = ("merge_async_probe", number, uuid)
         self.calls.append(call)
         self._raise_failure(call)
-        if self._merge_probe_script:
-            return self._merge_probe_script.pop(0)
         return self._merge_probes.get(
             (number, uuid),
             stacks.MergeAsyncProbe(state="unreadable", sha=None, message="unscripted"),
@@ -574,9 +565,6 @@ class FakeDeliveryGitHub(_FailureMixin, DeliveryGitHub):
         call: Call = ("merged_evidence", number)
         self.calls.append(call)
         self._raise_failure(call)
-        queue = self._merged_evidence_scripts.get(number)
-        if queue:
-            return queue.pop(0)
         return self._merged_evidence.get(number)
 
     def pr_land_facts(self, number: int) -> stacks.PrLandFacts | None:

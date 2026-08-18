@@ -4516,7 +4516,8 @@ def _objective_readiness(
 
 
 def test_objective_land_result_detail_guards() -> None:
-    # `outcome is None` ⇔ dry-run or BLOCKED; a dry-run detail carries no mutation facts.
+    # `outcome is None` ⇔ dry-run or BLOCKED; a non-mutating detail (either shape)
+    # carries no mutation facts — readiness-only by construction.
     ready = _objective_readiness()
     blocked = _objective_readiness(land_mod.LandDisposition.BLOCKED)
     preview = LandResult.Objective(readiness=ready, redirected_from=None, dry_run=True)
@@ -4535,7 +4536,7 @@ def test_objective_land_result_detail_guards() -> None:
         LandResult.Objective(
             readiness=blocked, redirected_from=None, dry_run=False, outcome="merged"
         )
-    no_facts = "dry-run objective land carries no mutation facts"
+    no_facts = "carries no mutation facts"
     with pytest.raises(ValueError, match=no_facts):
         LandResult.Objective(
             readiness=ready, redirected_from=None, dry_run=True, operation_id="01OP"
@@ -4550,6 +4551,16 @@ def test_objective_land_result_detail_guards() -> None:
         )
     with pytest.raises(ValueError, match=no_facts):
         LandResult.Objective(readiness=ready, redirected_from=None, dry_run=True, notes=("n",))
+    # The BLOCKED refusal is readiness-only too — a contradictory in-band refusal
+    # carrying mutation facts is constructor-rejected, not caller-ignored.
+    with pytest.raises(ValueError, match=no_facts):
+        LandResult.Objective(
+            readiness=blocked, redirected_from=None, dry_run=False, operation_id="01OP"
+        )
+    with pytest.raises(ValueError, match=no_facts):
+        LandResult.Objective(
+            readiness=blocked, redirected_from=None, dry_run=False, objective_closed=True
+        )
     # The outer wrapper requires exactly the matching detail.
     wrapped = LandResult(kind="objective", objective=preview)
     assert wrapped.objective is preview and wrapped.plan is None
