@@ -665,12 +665,14 @@ const CORE_FLOW_STAGES = [
   "○ learn",
 ];
 
-// Review loops and cache loops, with truthful shipped-surface labels (human review is the
-// universal gate; the agent wave is an optional browser-door assist; gist is human-only).
+// Review loops and cache loops, with truthful shipped-surface labels: human review is the
+// universal gate, and EVERY human-review loop carries the built-in optional agent wave (the
+// draft-review wave on authoring surfaces, the PR review wave on submit).
 const CORE_FLOW_LOOPS = [
-  ["↻ human review · optional agent wave", 2], // spine plan + objective-authoring satellite
+  ["↻ human review · optional agent wave", 3], // spine plan + gist + objective satellites
+  ["↻ human PR review · optional agent wave", 1],
+  ["↻ human review", 3], // exactly the three wave-suffixed labels above
   ["↻ human PR review", 1],
-  ["↻ human review", 3], // the two above plus the gist satellite's human-only loop
   ["↻ harvest → objective authoring", 1],
   ["↻ dreaming — corpus self-curation", 1],
 ];
@@ -697,8 +699,7 @@ const CORE_FLOW_TEXT_REQUIRED = [
   "How does a change move through perk? The spine walks seven stages in order — plan, save, " +
     "implement (shown in-flight as an example), submit, then address only if review asks, " +
     "then land, and finally learn.",
-  "optionally assisted",
-  "human review only",
+  "everywhere a human reviews, a built-in agent review wave can optionally assist",
   "harvest",
   "dreaming",
   "learn issues",

@@ -30,8 +30,8 @@
 
   `▸ implement` is shown as an example in-flight stage (visually-hidden `(current)` carries
   the state accessibly); review loops name their shipped surfaces truthfully — human review
-  is the universal plan/objective gate, the agent draft-review wave is an optional
-  browser-door assist, gist authoring is human-review only.
+  is the universal gate, and every human-review loop carries built-in optional agent-wave
+  assistance (the draft-review wave on authoring surfaces, the PR review wave on submit).
 */}
 
 <figure class="perk-diagram perk-core-flow" data-core-flow>
@@ -80,7 +80,7 @@
           The change goes up as a pull request for human review.
         </span>
       </span>
-      <span class="loop"><span aria-hidden="true">↻</span> human PR review</span>
+      <span class="loop"><span aria-hidden="true">↻</span> human PR review · optional agent wave</span>
     </li>
     <li class="stage conditional">
       <span class="tip-wrap">
@@ -124,7 +124,7 @@
       <div class="sat-body">
         <p class="mini-flow">
           <span class="mini-stage">plan</span><span class="mini-arrow" aria-hidden="true">→</span><span class="mini-stage">save</span>
-          <span class="loop"><span aria-hidden="true">↻</span> human review</span>
+          <span class="loop"><span aria-hidden="true">↻</span> human review · optional agent wave</span>
         </p>
         <ul class="feeds">
           <li class="feed"><span class="feed-glyph" aria-hidden="true">⇢</span> objective plan — seeds an objective</li>
@@ -228,6 +228,7 @@
     font-weight: 500;
     line-height: 1.4;
     white-space: nowrap;
+    box-shadow: var(--perk-shadow-low);
   }
   .stage.current button[data-core-flow-tip] {
     border: 2px solid var(--perk-accent);
@@ -248,6 +249,11 @@
     font-size: 16px;
     font-weight: 500;
     line-height: 1.35;
+  }
+
+  /* A decorative tick tying each spine review-loop badge to its chip. */
+  .flow-spine .loop::before {
+    content: "└ " / "";
   }
 
   .condition {
@@ -280,6 +286,7 @@
     background: var(--perk-surface);
     border: 1px solid var(--perk-border);
     border-radius: var(--perk-radius-card);
+    box-shadow: var(--perk-shadow-low);
   }
 
   .satellites summary {
@@ -295,6 +302,9 @@
   }
 
   .sat-hint {
+    display: block;
+    margin-block-start: 4px;
+    margin-inline-start: 1.4em;
     color: var(--perk-muted);
     font-family: var(--sl-font), sans-serif;
     font-size: 16px;
@@ -375,10 +385,13 @@
   }
 
   /* Labeled feeds: the dashed-rule treatment is decoration; the label is the semantics.
-     The rule takes the §5 legend row's bound muted token, like the feed text. */
+     The rule takes the §5 legend row's bound muted token, like the feed text. Hanging
+     indent: wrapped lines align after the feed glyph. */
   .feed {
     border-block-start: 1px dashed var(--perk-muted);
     padding-block-start: 7px;
+    padding-inline-start: 20px;
+    text-indent: -20px;
     color: var(--perk-muted);
     font-family: var(--sl-font-mono), monospace;
     font-size: 16px;
@@ -483,18 +496,34 @@
   }
 
   @container (min-width: 960px) {
-    /* The wide-spine arm: the compacted stages read as a single horizontal row at the
-       1280/1600 acceptance widths; wrapping remains solely as the narrow-container safety
+    /* The wide-spine “instrument strip”: chips march in one evenly-spaced row — the
+       condition label joins the strip inline, and the two review-loop badges hang beneath
+       their chips as zero-inline-size single lines (they overflow rightward over empty
+       row-2 space, so badge length never distorts chip rhythm; plan's badge always ends
+       before submit's begins). Wrapping remains solely as the narrow-container safety
        (the §6 no-overflow invariant outranks single-line rendering). */
     .flow-spine {
       column-gap: 8px;
+      row-gap: 20px;
     }
     .stage {
       column-gap: 8px;
     }
-    .stage .loop,
+    .stage .loop {
+      max-width: none;
+      inline-size: 0;
+      min-inline-size: 0;
+      white-space: nowrap;
+      margin-block-start: 2px;
+    }
+    .stage.conditional {
+      grid-template-columns: auto auto auto;
+    }
     .stage .condition {
-      max-width: 20ch;
+      grid-column: 3;
+      grid-row: 1;
+      max-width: none;
+      white-space: nowrap;
     }
     .satellites {
       grid-template-columns: repeat(3, 1fr);
