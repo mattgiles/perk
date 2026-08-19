@@ -11,6 +11,7 @@ PERK_AGENTS: tuple[str, ...] = (
     "adversarial-reviewer",
     "conflict-resolver",
     "draft-reviewer",
+    "dream-analyst",
     "harvest-analyst",
     "learn-analyst",
     "objective-explorer",

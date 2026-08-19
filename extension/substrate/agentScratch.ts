@@ -25,6 +25,7 @@ export const AGENT_SCRATCH_CONTEXT_TYPE = "perk:agent-scratch";
 export const REPORT_ONLY_CHILD_AGENTS = [
   "perk.adversarial-reviewer",
   "perk.draft-reviewer",
+  "perk.dream-analyst",
   "perk.harvest-analyst",
   "perk.learn-analyst",
   "perk.objective-explorer",

@@ -5,8 +5,8 @@ This is the readable projection of perk's living, workflow-first prose graph. It
 
 ## Coverage
 
-- **206** canonical source units
-- **699** logical fragments
+- **207** canonical source units
+- **701** logical fragments
 - **16** session shapes and **10** assemblies
 - **15** explicitly excluded candidates (policy-only; not displayed)
 - **0** validation findings
@@ -1185,6 +1185,7 @@ Capture learnings and route them into documentation, code, or harvested objectiv
 
 | Unit | Role | Audience | Canonical source | Consumed by |
 | --- | --- | --- | --- | --- |
+| `markdown:agents/dream-analyst.md` | `subagent-instruction` | `shipped` | [`agents/dream-analyst.md`](../../agents/dream-analyst.md) · `file` | — |
 | `markdown:agents/harvest-analyst.md` | `subagent-instruction` | `shipped` | [`agents/harvest-analyst.md`](../../agents/harvest-analyst.md) · `file` | — |
 | `markdown:agents/learn-analyst.md` | `subagent-instruction` | `shipped` | [`agents/learn-analyst.md`](../../agents/learn-analyst.md) · `file` | — |
 | `markdown:prompts/stages/learn-code.md` | `launch` | `shipped` | [`prompts/stages/learn-code.md`](../../prompts/stages/learn-code.md) · `file` | — |
@@ -1210,6 +1211,9 @@ Capture learnings and route them into documentation, code, or harvested objectiv
 <details>
 <summary>Logical fragments</summary>
 
+- `markdown:agents/dream-analyst.md`
+  - `frontmatter:description` — Discovery description (`frontmatter.description`)
+  - `section:what-you-do` — What you do (`heading:what-you-do`)
 - `markdown:agents/harvest-analyst.md`
   - `frontmatter:description` — Discovery description (`frontmatter.description`)
   - `section:what-you-do` — What you do (`heading:what-you-do`)
