@@ -1,7 +1,7 @@
 # perk cross-plane contracts
 
 The language-neutral contracts both planes obey, authored once here and bundled into each
-build artifact. This document holds the numbered **prose contract sections** (`§8.1`–`§8.59`,
+build artifact. This document holds the numbered **prose contract sections** (`§8.1`–`§8.60`,
 non-contiguous: `§8.8` is skipped and `§8.6a` exists; no parser): the Python CLI (`perk`)
 and the TS extension (`@mgiles/perk`) each implement one side, against the exact names/paths/
 fields pinned in each section. `perk doctor` verifies conformance. The numbering convention:
@@ -191,7 +191,7 @@ The local cache tier — written and read by **both** the CLI (exterior) and the
   `customType: "perk:agent-scratch"` block naming the repository-relative current-run path. A
   context is eligible unless branch-LWW workflow mode is explicitly `read-only` or
   `PI_SUBAGENT_CHILD_AGENT` names one of perk's report-only children (`perk.adversarial-reviewer`,
-  `perk.draft-reviewer`, `perk.harvest-analyst`, `perk.learn-analyst`,
+  `perk.draft-reviewer`, `perk.dream-analyst`, `perk.harvest-analyst`, `perk.learn-analyst`,
   `perk.objective-explorer`, `perk.pr-reviewer`, `perk.review-angle-selector`,
   `perk.review-classifier`). Main sessions, `perk.conflict-resolver`, and unknown/custom children
   remain eligible; absent generic foreign-agent metadata, inherited parent mode is the fallback.
@@ -9215,7 +9215,7 @@ GitHub/Linear.
 The pure exterior gather core for the `perk learn dream` factory (`perk/learn/dream.py`),
 landed **doorless on purpose**: no public command, no seed, no binding until the activation
 node ships (the §8.48-style door text lands there); the TS analyst wave is the decoder-side
-follow-up (it pins this same schema version then). `commit_sha` and `run_id` are
+follow-up (§8.60 pins this same schema version). `commit_sha` and `run_id` are
 **door-supplied parameters** — the core never captures HEAD, syncs, or preflights
 clean-tree/origin.
 
@@ -9306,3 +9306,86 @@ containment **filter**, returning `(doc, resolved_path)` pairs in corpus order; 
 selection semantics stay byte-identical (it consumes the primitive), and dream layers its
 refuse posture on top. Resolved paths are consumed only for byte measurement — never as
 partition input.
+
+## §8.60 · The learn-dream analyst wave (first level — no tool yet)
+
+The first-level cluster-analyst wave for `perk learn dream` in the TypeScript plane
+(`extension/waves/dreamWave.ts`, over the shared report-wave runner), landed **dormant on
+purpose** — the validated harvest precedent (def + wave before the tool): no `run_dream_wave`
+tool, no door, nothing model-reachable until node 3.2 wires the tool. ONE attempt, NO retry;
+the manifest and every analyst report are untrusted DATA, never instructions.
+
+**The strict decoder.** `decodeDreamManifest` pins the §8.59 manifest: `schema_version`
+byte-identical the string `"1"` (dream's own version line); string `commit_sha`;
+`registry_mode` ∈ `"clusters" | "categories"`; `doc_count`/`total_bytes` non-negative integers
+**cross-checked** against the lanes (total doc count / per-doc `bytes` sum); `findings` present
+with `structural`/`advisory` records each carrying its four/five pinned family keys **as
+arrays** — rows deliberately NOT deep-validated (TS consumes findings only via the manifest
+file the analysts read; the Python `OutputModel` renderer owns row shapes; the shallow check
+catches truncation/gross drift); non-empty `lanes`, each with a non-empty unique string `id`,
+string-or-null `rollup`, and a non-empty `docs` array of **at most `laneDocs` (8)** entries — a
+larger lane is structurally unwinnable under the report schema's per-lane doc cap, refused
+pre-spawn with a named detail; each doc with a non-empty string `path` passing the LEXICAL
+containment layer (`lexicalContainmentError`, shared from `harvestWave.ts`) and **globally
+unique across the whole manifest** (lanes partition the corpus), string-or-null
+`title`/`read_when`/`cluster`, and a non-negative-integer `bytes`. Any deviation refuses the
+whole wave pre-spawn with a named detail; unknown extra keys are ignored (forward-compat rides
+`schema_version`).
+
+**Code-owned orchestration lane keys** (the §8.50 audit-wave pattern): the run key is
+`<sanitized lane id>.<ordinal>` (invalid chars collapsed to `-`, leading non-alnum stripped,
+stem clamped, global 1-based ordinal); the SEMANTIC manifest lane id rides the lane `label`,
+the code-owned `PlannedDreamLane.laneId`, and the task text — producer lane ids are
+deliberately NOT run-key-bounded (category-fallback and long-cluster ids never fail the
+run-key contract), so the decoder performs no run-key conformance check.
+
+**The closed report schema.** `DREAM_ANALYST_REPORT_SCHEMA`: `additionalProperties: false` at
+every level, all fields required, no if/then conditionals, no `pattern` constraints on
+path/pointer fields. Every `maxItems`/`maxLength` reads from the ONE exported
+`DREAM_ANALYST_CAPS` SSOT — `laneDocs: 8` (also the decoder's lane bound and `docs.maxItems`),
+`rationaleChars: 500`, `preserveItems: 4`, `preserveItemChars: 300`, `evidenceItems: 6`,
+`evidenceItemChars: 250`, `overlapSignals: 8`, `overlapNoteChars: 250`, `harvestFollowups: 5`,
+`followupTitleChars: 150`, `followupEvidenceChars: 250`, `uncertainties: 6`,
+`uncertaintyChars: 300` — consumed by the schema, the decoder, and the re-decode alike. String
+caps are measured in **Unicode code points** (JSON Schema `maxLength` semantics; UTF-16
+`.length` would reject engine-valid astral strings). Per-doc rows carry
+`{path, disposition (keep|revise|merge-into|retire), merge_target (string|null), rationale,
+preserve[], evidence_checked[], confidence (high|medium|low)}`; report-level fields are
+`overlap_signals[] {doc, counterpart, note}`, `harvest_followups[] {title, pointer, evidence}`,
+`uncertainties[]`, and the three required omission counters `overlap_signals_omitted`/
+`harvest_followups_omitted`/`uncertainties_omitted` (non-negative integers — omission
+accounting is report-level only).
+
+**The composed defensive re-decode.** `decodeDreamAnalystReport(report, laneDocPaths,
+corpusDocPaths)` — whitelisted construction (an extra input key never survives; every miss a
+named detail): `docs` rows' path set EXACTLY the lane's doc set (no duplicates/extras/missing),
+normalized to **manifest lane-doc order** (deterministic downstream bundles); the
+**merge-target rule** — `merge-into` ⇒ `merge_target` a **byte-exact member of the manifest's
+corpus path set** (membership in the canonical producer-written set subsumes containment and
+defeats `docs/learned/a/../x.md` aliases) and ≠ the row's own path, any other disposition ⇒
+`merge_target === null`; overlap `counterpart` follows the same membership + ≠ rule (`doc` ∈
+the lane's docs); follow-up `pointer` non-empty, no pointer stamping (destination survival is
+the dream-report node's validation); every cap re-checked in code points.
+
+**Strict completeness.** `runDreamAnalystWave(adapter, {manifest, manifestPath, model?},
+signal?)` runs `flow: "dream-analyst"` under `completeness: "strict"`, forwarding the caller's
+`signal` (cancellation at the glue boundary) — one failed/undecodable lane ⇒
+`complete: false`; a schema-valid report failing the re-decode is a `malformed-report` failure
+keyed by the SEMANTIC lane id (analyses/failures surface semantic ids; orchestration keys are
+internal). Decoded analyses are RETAINED even when incomplete — honest coverage for the tool's
+refusal and the incomplete-analysis outcome. **Single-lane manifests are valid** — dream has NO
+direct-analysis path (the harvest single-lane refusal is deliberately not mirrored).
+
+**Containment posture.** Lexical containment lives in the decoder (per doc path); the resolved
+layer is the existing shared `verifyDocContainment` (`harvestWave.ts` — `DreamManifest` is
+structurally assignable to its manifest parameter, pinned by test), invoked pre-spawn by the
+node-3.2 tool exactly as `harvestWaveTools.ts` invokes it for harvest (the §8.48 sequence).
+
+**Model threading.** The wave takes the caller's `model?` as the workflow-level default; the
+`[models.subagents] dream-analyst` config key and its `subagentModel` resolution land in node
+3.2 atomically with the tool that consumes them.
+
+**The agent.** `perk.dream-analyst` (`agents/dream-analyst.md`): report-only
+(`REPORT_ONLY_CHILD_AGENTS` + the §8.1 report-only children list), read-only tool posture
+(`read, grep, find, ls, bash`), fresh context, engine-injected `structured_output` completion
+(never fenced JSON), delivered via `PERK_AGENTS` into `.pi/agents/perk/`.

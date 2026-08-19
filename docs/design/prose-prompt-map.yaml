@@ -310,7 +310,7 @@ routes:
     role: subagent-instruction
     priority: 85
   - id: agent-learn
-    match: { paths: ["agents/learn-analyst.md", "agents/harvest-analyst.md"] }
+    match: { paths: ["agents/learn-analyst.md", "agents/harvest-analyst.md", "agents/dream-analyst.md"] }
     capability: knowledge.learn
     audience: shipped
     role: subagent-instruction

@@ -91,7 +91,7 @@ function stringOrNull(value: unknown): value is string | null {
  * The lexical doc-containment layer (pure): relative, POSIX-normalizes without escaping, and
  * stays under `docs/learned/`. Returns the human-readable violation, or null when contained.
  */
-function lexicalContainmentError(path: string): string | null {
+export function lexicalContainmentError(path: string): string | null {
   if (posix.isAbsolute(path) || isAbsolute(path)) {
     return "is absolute";
   }
