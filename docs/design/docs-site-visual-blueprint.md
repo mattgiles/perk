@@ -78,6 +78,7 @@ its intended background(s); the complete foreground/background table is in §9.
 | `--perk-warning-low` | `#F8EBCB` | `#342B17` | Caution background | paired above |
 | `--perk-danger` | `#A33A3A` | `#FF9A9A` | Destructive/refusal foreground | 5.52:1 |
 | `--perk-danger-low` | `#FBE8E8` | `#3B1E1E` | Destructive/refusal background | paired above |
+| `--perk-shadow-low` | `0 1px 2px rgba(16, 21, 18, 0.06), 0 2px 6px rgba(16, 21, 18, 0.08)` | `0 1px 2px rgba(0, 0, 0, 0.35), 0 2px 6px rgba(0, 0, 0, 0.3)` | Low elevation on interactive cards | — |
 
 Status color never stands alone. Every status includes a text label and a non-color mark:
 `✓` success, `!` warning/human attention, and `×` destructive/refusal. Diagrams use the shape and
@@ -145,7 +146,7 @@ where Starlight's historical `white`/`black` variable names reverse between them
 | Cards radius | `10px` (`--perk-radius-card`) |
 | Prose measure | `72ch` target; acceptable rendered range 68–74ch |
 | Reference-wide measure | `92ch` maximum, used only for dense reference children/tables |
-| Depth | Border first; no shadow on ordinary cards; Starlight shadow only for floating/mobile UI |
+| Depth | Border first; low elevation (`--perk-shadow-low`) on interactive cards only (§12); otherwise no shadow on ordinary cards; Starlight shadow only for floating/mobile UI |
 | Focus | 3px `--perk-accent-strong` outline, 3px offset |
 
 Cards represent real choices; they are not the default wrapper for every link. Pill shapes are
@@ -272,7 +273,10 @@ routes, sidebar map, page dispositions, or acceptance matrices in
 Annotations:
 
 1. **Hero** — one promise, one qualifier, primary `Get started`, secondary workflow explanation.
-   The 64px title is the sole display-sized text.
+   The 64px title is the sole display-sized text. Realized finish (§12): the imageless hero
+   renders one column at every width under a radial accent-low wash fading to transparent; a
+   decorative CSS-generated `FIELD GUIDE + INSTRUMENT PANEL` eyebrow precedes the title outside
+   the accessibility tree; the tagline takes the muted tier with balanced wraps.
 2. **Spine** — a single-line instrument strip when it fits. `address` is visibly conditional by
    diamond, parenthetical text, and dashed connection; no animation or autoplay.
 3. **Intent cards** — four equal choices corresponding exactly to Tutorials, How-to guides,
@@ -322,7 +326,9 @@ repo-owned presentational classes. It required no Starlight component override.
 bands and regions; primary text carries headings; muted carries eyebrows/captions; accent marks
 links/current node/primary action; accent-strong carries hover/focus. In dark mode the geometry is
 unchanged: canvas becomes green-black, surfaces lift to `#171D19`, and accent becomes the lighter
-mint. There is no light-only shadow or dark-only information.
+mint. There is no light-only shadow or dark-only information. Interactive cards additionally
+carry the §2 low-elevation shadow; at ≥1280px the bands-4+5 row draws one shared top rule on the
+duo container (per-band rules return at narrow widths).
 
 ### B. Section landing — one quadrant-router shape
 
@@ -367,7 +373,9 @@ than a wall of cards.
 
 **Token map:** muted eyebrow, primary heading/need, surface + border for the 2–3 recommended cards,
 plain canvas for curated groups, accent links/focus. Dark mode changes only token values. Cards
-stay bordered, never glow, and all links retain non-color text/underline/focus cues.
+stay bordered with the §2 low-elevation shadow (§12), never glow; the whole recommended card is
+the click target (a stretched link) with hover/focus-within border emphasis, and all links retain
+non-color text/underline/focus cues.
 
 ### C. Reference — orientation hub plus dense child
 
@@ -849,3 +857,74 @@ re-verifies this table as part of its own reconciliation.
 | light | `#984e4d` | `#ffffff` | 5.95 |
 | light | `#a24848` | `#ffffff` | 5.90 |
 | light | `#aa0982` | `#ffffff` | 6.84 |
+
+## §12 Home and landing finish
+
+The home-page and quadrant-landing finish treatments over the §4A/§4B compositions: the
+imageless-hero column fix under a radial accent-low top-wash (the §2 depth-rule relaxation,
+realized with the §2-bound low-elevation `--perk-shadow-low` token on interactive cards), the
+CSS-generated hero eyebrow, the muted balanced tagline, the band-rhythm pass (duo seam +
+eyebrow→content coupling), hover/focus-symmetric intent cards, whole-card recommended-start
+click targets (a pure-CSS stretched link — accepted trade-off: card text is harder to select),
+the hero-action hover finish, and the two-planes exchange-line presence pass. Every treatment
+is CSS or component-style — the home `index.mdx` and the four landing `index.md` sources are
+untouched, and the §7 override set stays empty. The `transparent` gradient stop (U11) and the
+`rgba()` components inside the `--perk-shadow-low` value are the two sanctioned non-token value
+forms. The new transitions rely on the §6 reduced-motion block (value-complete, guard-pinned)
+to collapse under `prefers-reduced-motion: reduce`.
+
+### Bound treatments
+
+`File` is the `docs/site/src/`-relative path. The two U14 rows live inside the
+`@media (min-width: 1280px)` block — the duo seam exists only where bands 4+5 share a row; the
+per-band top rule returns at narrow widths where the bands stack. Realized value-exact in the
+named files, guarded by `tests/test_docs_site_system.py`.
+
+| Unit | File | Selector | Property | Bound value |
+|---|---|---|---|---|
+| U10 | `styles/compositions.css` | `.hero` | `grid-template-columns` | `100%` |
+| U11 | `styles/compositions.css` | `.hero` | `background` | `radial-gradient(120% 100% at 50% 0%, var(--sl-color-accent-low), transparent 70%)` |
+| U12 | `styles/system.css` | `.hero h1#_top::before` | `content` | `"Field guide + instrument panel" / ""` |
+| U13 | `styles/compositions.css` | `.hero .tagline` | `color` | `var(--perk-muted)` |
+| U13 | `styles/compositions.css` | `.hero .tagline` | `text-wrap` | `balance` |
+| U14 | `styles/compositions.css` | `.perk-home-duo` | `border-top` | `1px solid var(--perk-border)` |
+| U14 | `styles/compositions.css` | `.perk-home-duo .perk-band` | `border-top` | `none` |
+| U15 | `styles/compositions.css` | `.perk-band .sl-heading-wrapper + *` | `margin-top` | `0.75rem` |
+| U16 | `styles/compositions.css` | `.perk-band .sl-link-card` | `box-shadow` | `var(--perk-shadow-low)` |
+| U16 | `styles/compositions.css` | `.perk-band .sl-link-card` | `transition` | `border-color 150ms ease` |
+| U16 | `styles/compositions.css` | `.perk-band .sl-link-card:hover, .perk-band .sl-link-card:focus-within` | `background` | `var(--perk-surface)` |
+| U16 | `styles/compositions.css` | `.perk-band .sl-link-card:hover, .perk-band .sl-link-card:focus-within` | `border-color` | `var(--perk-accent)` |
+| U16 | `styles/compositions.css` | `.perk-band .sl-link-card:hover .icon, .perk-band .sl-link-card:focus-within .icon` | `color` | `var(--perk-accent)` |
+| U17 | `styles/compositions.css` | `.perk-recommended li` | `position` | `relative` |
+| U17 | `styles/compositions.css` | `.perk-recommended li` | `box-shadow` | `var(--perk-shadow-low)` |
+| U17 | `styles/compositions.css` | `.perk-recommended li` | `transition` | `border-color 150ms ease` |
+| U17 | `styles/compositions.css` | `.perk-recommended li a::after` | `content` | `""` |
+| U17 | `styles/compositions.css` | `.perk-recommended li a::after` | `position` | `absolute` |
+| U17 | `styles/compositions.css` | `.perk-recommended li a::after` | `inset` | `0` |
+| U17 | `styles/compositions.css` | `.perk-recommended li:hover, .perk-recommended li:focus-within` | `border-color` | `var(--perk-accent)` |
+| U18 | `styles/compositions.css` | `.hero .sl-link-button` | `transition` | `background-color 150ms ease, border-color 150ms ease, color 150ms ease` |
+| U18 | `styles/compositions.css` | `.hero .sl-link-button.primary:hover` | `background` | `var(--sl-color-accent-high)` |
+| U18 | `styles/compositions.css` | `.hero .sl-link-button.primary:hover` | `border-color` | `var(--sl-color-accent-high)` |
+| U18 | `styles/compositions.css` | `.hero .sl-link-button.minimal:hover` | `color` | `var(--perk-accent)` |
+| U18 | `styles/compositions.css` | `.hero .sl-link-button.minimal:hover` | `text-decoration` | `underline` |
+| U19 | `components/TwoPlanesDiagram.astro` | `.exchange` | `stroke-width` | `1.5` |
+
+### Hero-wash contrast evidence (2026-08-19)
+
+Method: the §9 WCAG 2.2 relative-luminance math over the four observable pairs the §12
+treatments introduce, per theme, resolved from the live tokens (`text`/`muted` over the wash,
+`accent` for the minimal-button hover over the wash, `text-invert` on `--sl-color-accent-high`
+for the primary-button hover). Worst-case-bound: the wash pairs are measured against pure
+`--sl-color-accent-low` — the gradient's 50% 0% origin — though the wash fades to transparent
+by 70%. Recomputed by live math in `tests/test_docs_site_system.py`.
+
+| Theme | Pair | Foreground | Background | Ratio |
+|---|---|---|---|---|
+| light | text/accent-low | `#18201d` | `#d9efe7` | 13.81 |
+| light | muted/accent-low | `#5f6b66` | `#d9efe7` | 4.61 |
+| light | accent/accent-low | `#126e5a` | `#d9efe7` | 5.13 |
+| light | text-invert/accent-high | `#ffffff` | `#0a5646` | 8.63 |
+| dark | text/accent-low | `#f1f5f0` | `#17382e` | 11.61 |
+| dark | muted/accent-low | `#aab6af` | `#17382e` | 6.10 |
+| dark | accent/accent-low | `#63d5b0` | `#17382e` | 7.11 |
+| dark | text-invert/accent-high | `#101512` | `#8be4c4` | 12.30 |

@@ -105,6 +105,18 @@ beat Starlight's `@layer starlight.*` styles without specificity games:
   button and sidebar entry links (the current-page pill keeps its native accent fill). Bound
   value-exact in the blueprint's §11, with dated code-palette contrast evidence recomputed by
   live WCAG math in `tests/test_docs_site_system.py`.
+- **§12 home & landing finish (the system.css share)** — the CSS-generated home hero eyebrow
+  (`.hero h1#_top::before`, reusing the shared eyebrow block's typography below). The rest of
+  the §12 home/landing treatments — the imageless-hero column fix under the radial accent-low
+  wash, the muted balanced tagline, the duo seam + eyebrow→content band rhythm, the
+  low-elevation (`--perk-shadow-low`) intent/recommended cards with symmetric hover/focus
+  finish, the stretched-link recommended cards, and the hero-action hover finish — live in
+  compositions.css; the two-planes exchange-line pass lives in its component. Bound value-exact
+  in the blueprint's §12 (with dated hero-wash contrast evidence recomputed by live WCAG math
+  in `tests/test_docs_site_system.py`). The §12 set carries the repo's two sanctioned
+  non-token CSS value forms: the `transparent` gradient stop in the hero wash
+  (compositions.css) and the `rgba()` components inside the §2-bound `--perk-shadow-low`
+  token value (tokens.css).
 - **§4B landing eyebrows + §4C path eyebrow/92ch wide mode** — pure CSS keyed on the
   sidebar's `aria-current="page"` link via `:has()`: the four quadrant landings render their
   section eyebrow above the H1, and exactly the five `reference/configuration/*` children

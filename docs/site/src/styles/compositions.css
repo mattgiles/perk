@@ -13,7 +13,27 @@
  * no-shadow cards, --perk-radius-control controls, pills only for compact statuses). They
  * style content the page opted into — NOT Starlight shell component overrides; the §7
  * committed override set stays empty.
+ *
+ * The `transparent` gradient stop in the hero wash (§12) is the one sanctioned non-token
+ * value form in this file (the rgba() shadow components live inside the §2-bound
+ * --perk-shadow-low token, not here).
  */
+
+/* U10 + U11 (§12) — one rule (guarded by selector uniqueness): the imageless hero collapses
+ * to one column at every width (Starlight's stock 7fr/4fr leaves an empty right column;
+ * revisit if a hero image is ever configured), under a restrained radial accent-low top-wash
+ * fading to transparent (the §2 depth-rule relaxation, §12). */
+.hero {
+  grid-template-columns: 100%;
+  background: radial-gradient(120% 100% at 50% 0%, var(--sl-color-accent-low), transparent 70%);
+}
+
+/* U13 (§12) — tagline onto the muted tier with balanced wraps (progressive enhancement;
+ * muted/accent-low is §12-verified over the wash's worst case). */
+.hero .tagline {
+  color: var(--perk-muted);
+  text-wrap: balance;
+}
 
 /* §4A bands: border separation + 24–48px responsive intervals (§2), eyebrow-styled h2s
  * (§3 eyebrow type: small, 600, letter-spaced; mono per the §3 operational-label rule). */
@@ -44,6 +64,13 @@
   color: var(--perk-muted);
 }
 
+/* U15 (§12) — eyebrow→content coupling: tighten the gap under a band eyebrow to a §2 spacing
+ * step (12px) so each band reads as one unit (out-competes Starlight's layered 1rem sibling
+ * rule and figure.perk-diagram's own 1.5rem margin-top by specificity). */
+.perk-band .sl-heading-wrapper + * {
+  margin-top: 0.75rem;
+}
+
 /* Band 6 (requirements + provenance): compact, quiet. */
 .perk-band-compact {
   padding-block: 1rem 1.5rem;
@@ -51,7 +78,10 @@
   color: var(--perk-muted);
 }
 
-/* Bands 4 + 5 share a row at >= 1280px; stacked (source order) below. */
+/* Bands 4 + 5 share a row at >= 1280px; stacked (source order) below. U14 (§12): where they
+ * share the row, ONE shared top rule on the duo container replaces the two per-band rules
+ * (which would break across the column gap); the per-band rule returns at narrow widths
+ * where the bands stack. */
 .perk-home-duo {
   display: grid;
 }
@@ -60,6 +90,11 @@
   .perk-home-duo {
     grid-template-columns: 1fr 1fr;
     column-gap: 3rem;
+    border-top: 1px solid var(--perk-border);
+  }
+
+  .perk-home-duo .perk-band {
+    border-top: none;
   }
 }
 
@@ -79,8 +114,12 @@
 }
 
 /* §4B recommended-start cards: an ordinary markdown list rendered as bordered surface
- * cards — border-first, no shadow (§2 depth rule); one card per row at 320px, 2–3-up
- * where the width makes that useful (§6 table). */
+ * cards — border-first with the §2 low-elevation shadow (§12); one card per row at 320px,
+ * 2–3-up where the width makes that useful (§6 table). U17 (§12): the whole card is the
+ * click target — a pure-CSS stretched link (each li carries exactly one link), with
+ * hover/focus-within border emphasis and a short transition (collapsed by the §6
+ * reduced-motion block). Accepted trade-off: card text is harder to select; the universal
+ * :focus-visible outline still hugs the inline link text. */
 .perk-recommended ul {
   list-style: none;
   padding: 0;
@@ -90,31 +129,69 @@
 }
 
 .perk-recommended li {
+  position: relative;
   background: var(--perk-surface);
   border: 1px solid var(--perk-border);
   border-radius: var(--perk-radius-card);
-  box-shadow: none;
+  box-shadow: var(--perk-shadow-low);
   padding: 1rem;
   margin-top: 0;
+  transition: border-color 150ms ease;
 }
 
-/* Content-scoped conformance: intent cards onto the bound card system (no shadow,
- * border-first, card radius, surface fill); hover emphasizes the border (the card's link
- * affordance itself stays non-color: title + arrow icon + focus outline). */
+.perk-recommended li a::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+}
+
+.perk-recommended li:hover,
+.perk-recommended li:focus-within {
+  border-color: var(--perk-accent);
+}
+
+/* Content-scoped conformance: intent cards onto the bound card system (border-first with
+ * the §2 low-elevation shadow — U16, §12 — card radius, surface fill); hover and
+ * :focus-within symmetrically emphasize the border and take the icon to accent (the card's
+ * link affordance itself stays non-color: title + arrow icon + focus outline); the short
+ * transition is collapsed by the §6 reduced-motion block. */
 .perk-band .sl-link-card {
-  box-shadow: none;
+  box-shadow: var(--perk-shadow-low);
   border: 1px solid var(--perk-border);
   border-radius: var(--perk-radius-card);
   background: var(--perk-surface);
+  transition: border-color 150ms ease;
 }
 
-.perk-band .sl-link-card:hover {
+.perk-band .sl-link-card:hover,
+.perk-band .sl-link-card:focus-within {
   background: var(--perk-surface);
   border-color: var(--perk-accent);
 }
 
+.perk-band .sl-link-card:hover .icon,
+.perk-band .sl-link-card:focus-within .icon {
+  color: var(--perk-accent);
+}
+
 /* Content-scoped conformance: hero actions take the §2 control radius (pills are limited
- * to compact statuses). */
+ * to compact statuses). U18 (§12): accent-strong carries the primary hover (§2); the
+ * minimal variant gains its missing hover affordance; the transition is collapsed by the
+ * §6 reduced-motion block. */
 .hero .sl-link-button {
   border-radius: var(--perk-radius-control);
+  transition:
+    background-color 150ms ease,
+    border-color 150ms ease,
+    color 150ms ease;
+}
+
+.hero .sl-link-button.primary:hover {
+  background: var(--sl-color-accent-high);
+  border-color: var(--sl-color-accent-high);
+}
+
+.hero .sl-link-button.minimal:hover {
+  color: var(--perk-accent);
+  text-decoration: underline;
 }

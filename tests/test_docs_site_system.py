@@ -17,8 +17,10 @@ asserts on row counts. Four families:
   reduced-motion block value-complete, the §4C containment/wide mode, and the §4B eyebrows
   with their exact route enumeration (set equality — a sixth `:is()` arm or a prefix match
   fails).
-- **§11 finish treatments** — the bound-treatments table realized value-exact in system.css
-  (one rule per selector; U7 resolves through the single `:root` rule).
+- **§11/§12 finish treatments** — the bound-treatments tables realized value-exact: §11 in
+  system.css (one rule per selector; U7 resolves through the single `:root` rule), §12 across
+  its named files (compositions.css, system.css, the two-planes diagram component), plus the
+  §12 hero-wash contrast evidence recomputed against the live tokens.
 - **Diagram geometry** — provable-by-construction §5 label sizing: container-query exposure
   keyed on the content column, `max-width` equal to each variant's viewBox width (no
   upscaling, so declared px sizes are final), and every `<text>` resolving to a ≥16px rule.
@@ -37,6 +39,7 @@ COMPONENTS_DIR = REPO_ROOT / "docs/site/src/components"
 DARK_SCOPE = ":root"
 LIGHT_SCOPE = ':root[data-theme="light"]'
 MEDIA_768 = "@media (min-width: 768px)"
+MEDIA_1280 = "@media (min-width: 1280px)"
 CONTAINER_736 = "@container (min-width: 736px)"
 
 # The settled §4B/§4C route enumerations (operator-confirmed in the plan): the four quadrant
@@ -56,6 +59,16 @@ CONFIG_WIDE_ROUTES = {
     "/reference/configuration/skills-and-bindings/",
 }
 
+# §12 file vocabulary (`docs/site/src/`-relative, as the bound-treatments table names them)
+# → repo paths, and the selectors whose rules live inside the 1280px media block (the U14 duo
+# seam exists only where bands 4+5 share a row).
+SECTION_12_FILES = {
+    "styles/compositions.css": COMPOSITIONS_CSS,
+    "styles/system.css": SYSTEM_CSS,
+    "components/TwoPlanesDiagram.astro": COMPONENTS_DIR / "TwoPlanesDiagram.astro",
+}
+SECTION_12_MEDIA_1280_SELECTORS = {".perk-home-duo", ".perk-home-duo .perk-band"}
+
 # §9 pair vocabulary → the live token carrying each side (resolved through var() indirection
 # in tokens.css). `accent-invert` is the §2 primary-button text — white on the light accent,
 # dark canvas on the dark accent — exactly `--sl-color-text-invert`.
@@ -73,6 +86,15 @@ PAIR_TOKENS = {
     "danger-low": "--perk-danger-low",
     "canvas": "--perk-canvas",
     "surface": "--perk-surface",
+}
+
+# The §12 hero-wash pairs additionally name the wash/hover surfaces and the primary-button
+# text tier directly (`text-invert` is Starlight's own property; the two accent surfaces have
+# no `--perk-*` alias).
+WASH_PAIR_TOKENS = PAIR_TOKENS | {
+    "text-invert": "--sl-color-text-invert",
+    "accent-low": "--sl-color-accent-low",
+    "accent-high": "--sl-color-accent-high",
 }
 
 
@@ -245,7 +267,9 @@ def _parse_finish_rows(blueprint: str) -> list[tuple[str, str, str, str]]:
 
 def _parse_palette_rows(blueprint: str) -> list[tuple[str, str, str, str]]:
     """The §11 contrast-evidence table: (theme, fg hex, bg hex, recorded 2-decimal ratio)."""
-    section = blueprint[blueprint.index("### Code-palette contrast evidence") :]
+    section = _section(
+        blueprint, "### Code-palette contrast evidence", "## §12 Home and landing finish"
+    )
     rows = []
     for line in section.splitlines():
         match = re.match(
@@ -253,6 +277,51 @@ def _parse_palette_rows(blueprint: str) -> list[tuple[str, str, str, str]]:
         )
         if match is not None:
             rows.append((match.group(1), match.group(2), match.group(3), match.group(4)))
+    return rows
+
+
+def _parse_home_landing_rows(blueprint: str) -> list[tuple[str, str, str, str, str]]:
+    """The §12 bound-treatments table: (unit, file, selector, property, value) — backtick-exact."""
+    section = _section(
+        blueprint, "## §12 Home and landing finish", "### Hero-wash contrast evidence"
+    )
+    rows = []
+    for line in section.splitlines():
+        match = re.match(
+            r"^\| (U\d+) \| `([^`]+)` \| `([^`]+)` \| `([^`]+)` \| `([^`]+)` \|$", line
+        )
+        if match is not None:
+            rows.append(
+                (match.group(1), match.group(2), match.group(3), match.group(4), match.group(5))
+            )
+    return rows
+
+
+def _parse_wash_rows(blueprint: str) -> list[tuple[str, str, str, str, str, str]]:
+    """The §12 hero-wash evidence: (theme, fg name, bg name, fg hex, bg hex, recorded ratio).
+
+    Deliberately a 5-column shape in the blueprint — it can never match the §11 palette
+    parser's 4-column row regex.
+    """
+    section = blueprint[blueprint.index("### Hero-wash contrast evidence") :]
+    rows = []
+    for line in section.splitlines():
+        match = re.match(
+            r"^\| (light|dark) \| ([\w-]+)/([\w-]+) \| `(#[0-9a-f]{6})` \|"
+            r" `(#[0-9a-f]{6})` \| ([\d.]+) \|$",
+            line,
+        )
+        if match is not None:
+            rows.append(
+                (
+                    match.group(1),
+                    match.group(2),
+                    match.group(3),
+                    match.group(4),
+                    match.group(5),
+                    match.group(6),
+                )
+            )
     return rows
 
 
@@ -522,6 +591,54 @@ def test_code_palette_contrast_evidence():
     # The §11 method note's membership claim: the stock --ec-codeFg values are palette members.
     assert "#d6deeb" in {fg for theme, fg, *_ in rows if theme == "dark"}
     assert "#403f53" in {fg for theme, fg, *_ in rows if theme == "light"}
+
+
+# --- §12 home/landing finish: the bound table realized value-exact -----------------------
+
+
+def test_home_landing_finish_applies_the_section_12_table():
+    """Every §12 bound-treatments row exists in its named file value-exact (spec↔artifact)."""
+    rows = _parse_home_landing_rows(BLUEPRINT.read_text(encoding="utf-8"))
+    # Parser sanity: the exact landed row count and unit set pinned at amendment time.
+    assert len(rows) == 26, f"expected the 26 §12 rows, parsed {len(rows)}"
+    assert {unit for unit, *_ in rows} == {f"U{n}" for n in range(10, 20)}
+
+    rules_by_file: dict[str, list[Rule]] = {}
+    for file_key, path in SECTION_12_FILES.items():
+        text = path.read_text(encoding="utf-8")
+        if path.suffix == ".astro":
+            text = _must_search(r"<style>(.*?)</style>", text, re.DOTALL).group(1)
+        rules_by_file[file_key] = _parse_css(text)
+
+    for unit, file_key, selector, prop, value in rows:
+        assert file_key in rules_by_file, f"{unit}: unknown §12 file {file_key!r}"
+        contexts = (MEDIA_1280,) if selector in SECTION_12_MEDIA_1280_SELECTORS else ()
+        rule = _find_rule(rules_by_file[file_key], selector, contexts)
+        assert rule.declarations.get(prop) == value, f"{unit}: {selector!r} {prop}"
+
+
+def test_hero_wash_contrast_evidence():
+    """The §12 dated hero-wash evidence holds by live math against the live tokens."""
+    rows = _parse_wash_rows(BLUEPRINT.read_text(encoding="utf-8"))
+    # Parser sanity: the four bound pairs per theme.
+    assert len(rows) == 8, f"expected the 8 §12 evidence rows, parsed {len(rows)}"
+    assert sum(1 for theme, *_ in rows if theme == "light") == 4
+    assert sum(1 for theme, *_ in rows if theme == "dark") == 4
+
+    scopes = _token_scopes()
+    for theme, fg_name, bg_name, fg_hex, bg_hex, recorded in rows:
+        fg = _resolve(scopes, theme, WASH_PAIR_TOKENS[fg_name])
+        bg = _resolve(scopes, theme, WASH_PAIR_TOKENS[bg_name])
+        # The recorded hexes must be the LIVE resolved tokens (a drifted transcription would
+        # make the recorded evidence a lie)…
+        assert fg == fg_hex, f"{theme} {fg_name}: live {fg} != §12 {fg_hex}"
+        assert bg == bg_hex, f"{theme} {bg_name}: live {bg} != §12 {bg_hex}"
+        # …and every pair must pass AA normal-text contrast with 2-decimal agreement.
+        ratio = _contrast(fg, bg)
+        assert ratio >= 4.5, f"{theme} {fg_name}/{bg_name}: {ratio:.2f} < 4.5"
+        assert f"{ratio:.2f}" == recorded, (
+            f"{theme} {fg_name}/{bg_name}: live {ratio:.2f} != recorded {recorded}"
+        )
 
 
 # --- Diagram geometry: the §5 label floor by construction -------------------------------
