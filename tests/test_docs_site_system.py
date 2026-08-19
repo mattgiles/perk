@@ -759,14 +759,32 @@ def test_core_flow_component_holds_the_interactive_source_contract():
 
     style_text = _must_search(r"<style>(.*?)</style>", text, re.DOTALL).group(1)
 
-    # Container-keyed layout only, at exactly the bound 640/960 thresholds.
-    container_preludes = re.findall(r"@container\s*([^{]+)\{", style_text)
-    thresholds = []
-    for prelude in container_preludes:
-        width = re.fullmatch(r"\(min-width:\s*(\d+)px\)\s*", prelude)
-        assert width is not None, f"non-min-width container prelude: {prelude!r}"
-        thresholds.append(int(width.group(1)))
-    assert sorted(set(thresholds)) == [640, 960], f"bound thresholds drifted: {thresholds}"
+    # Container-keyed layout only: the shared figure container at exactly the bound 640/960
+    # thresholds, plus the named per-card `satellite` container at its one intentional
+    # threshold (each card's summary flips on the CARD's width, never the viewport's).
+    figure_thresholds: list[int] = []
+    satellite_thresholds: list[int] = []
+    for prelude in re.findall(r"@container\s*([^{]+)\{", style_text):
+        named = re.fullmatch(r"satellite\s+\(min-width:\s*(\d+)px\)", prelude.strip())
+        unnamed = re.fullmatch(r"\(min-width:\s*(\d+)px\)", prelude.strip())
+        assert named is not None or unnamed is not None, (
+            f"unexpected container prelude: {prelude!r}"
+        )
+        if named is not None:
+            satellite_thresholds.append(int(named.group(1)))
+        else:
+            assert unnamed is not None
+            figure_thresholds.append(int(unnamed.group(1)))
+    assert sorted(set(figure_thresholds)) == [640, 960], (
+        f"bound figure thresholds drifted: {figure_thresholds}"
+    )
+    assert sorted(set(satellite_thresholds)) == [440], (
+        f"bound satellite-card threshold drifted: {satellite_thresholds}"
+    )
+    # The named container itself must exist on the satellite cards.
+    assert re.search(r"container:\s*satellite\s*/\s*inline-size", style_text), (
+        "the satellite cards must declare the named `satellite` inline-size container"
+    )
 
     # No viewport media query may drive exposure; @media print is the sole permitted form.
     for prelude in re.findall(r"@media\s*([^{]+)\{", style_text):
