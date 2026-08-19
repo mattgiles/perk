@@ -1,7 +1,7 @@
 # perk cross-plane contracts
 
 The language-neutral contracts both planes obey, authored once here and bundled into each
-build artifact. This document holds the numbered **prose contract sections** (`§8.1`–`§8.60`,
+build artifact. This document holds the numbered **prose contract sections** (`§8.1`–`§8.61`,
 non-contiguous: `§8.8` is skipped and `§8.6a` exists; no parser): the Python CLI (`perk`)
 and the TS extension (`@mgiles/perk`) each implement one side, against the exact names/paths/
 fields pinned in each section. `perk doctor` verifies conformance. The numbering convention:
@@ -191,7 +191,7 @@ The local cache tier — written and read by **both** the CLI (exterior) and the
   `customType: "perk:agent-scratch"` block naming the repository-relative current-run path. A
   context is eligible unless branch-LWW workflow mode is explicitly `read-only` or
   `PI_SUBAGENT_CHILD_AGENT` names one of perk's report-only children (`perk.adversarial-reviewer`,
-  `perk.draft-reviewer`, `perk.dream-analyst`, `perk.harvest-analyst`, `perk.learn-analyst`,
+  `perk.draft-reviewer`, `perk.dream-analyst`, `perk.dream-reducer`, `perk.harvest-analyst`, `perk.learn-analyst`,
   `perk.objective-explorer`, `perk.pr-reviewer`, `perk.review-angle-selector`,
   `perk.review-classifier`). Main sessions, `perk.conflict-resolver`, and unknown/custom children
   remain eligible; absent generic foreign-agent metadata, inherited parent mode is the fallback.
@@ -540,10 +540,13 @@ make the engine-required `structured_output` completion call — stripping it fa
 `outputSchema` run with `structuredOutputFailed`) — a static union of foreign
 tool names, inert when a package is absent — plus `run_audit_wave` (the gated audit-judge
 session's wave call: its one write is structurally bound to the cold door's handoff
-`audit_bundle_dir`, §8.50 — no caller-supplied path exists) and `run_harvest_wave` (the gated
+`audit_bundle_dir`, §8.50 — no caller-supplied path exists), `run_harvest_wave` (the gated
 learn-harvest session's wave call: its manifest read is structurally bound to the session's
 claimed run-scoped scratch path, §8.48 — the relayed param is verified against it and any
-other path refused; no worktree writes)) via `pi.setActiveTools`, **snapshot-then-restore** (the restore
+other path refused; no worktree writes), and `run_dream_wave` (the gated learn-dream session's
+wave call: NO parameters — its manifest read AND its one write, the fixed-name run-scratch
+bundle beside that manifest, are both derived from the claimed run's manifest path, §8.61 —
+the no-aimable-writer posture on both sides)) via `pi.setActiveTools`, **snapshot-then-restore** (the restore
 falls back to the full configured `pi.getAllTools()` set — never a hardcoded list); (2) blocks
 `edit`/`write` and non-allowlisted `bash` at `tool_call`. The bash sub-allowlist covers read-only
 inspection commands (read-only `git` queries, `jq`, `curl`, …), read-only `gh` **query**
@@ -5406,7 +5409,7 @@ attempt (a failed lane and its relaunch stay distinguishable). `status.json.work
 remains the SOLE authority for reports and completeness; receipt absence (an identity-only
 completion) never changes a verdict, completeness, retry selection, or mutation decision —
 receipts are write-only correlation telemetry. The flow tools (`run_learn_wave`,
-`run_harvest_wave`, `run_pr_review_wave`, `run_pr_review_dynamic_wave`, and the single-lane
+`run_harvest_wave`, `run_dream_wave`, `run_pr_review_wave`, `run_pr_review_dynamic_wave`, and the single-lane
 `classify_review_feedback` / `explore_objective_node`) persist `attempts` in their structured
 tool-result details only (never the model-facing prose); a wave-level soft-failure retains any
 receipt known before the failure in its fail details.
@@ -5804,7 +5807,8 @@ stage (§8.50) carries `ask_user_question` + `run_audit_wave` + the research fam
 sessions run GATED (read-only mode), where the gate-ON set governs, so the row exists for the
 keys≡registry pin and the defensive gate-off arm; `run_audit_wave` also joins `PERK_TOOLS`
 and `READ_ONLY_TOOLS` (§8.3's carve-in — the write target is handoff-bound, never
-caller-supplied). **Scoped universe:
+caller-supplied). `run_harvest_wave` and `run_dream_wave` likewise join `PERK_TOOLS` +
+`READ_ONLY_TOOLS` with NO stage row at all (cold-only, gate-on — §8.48/§8.61). **Scoped universe:
 `PERK_TOOLS ∪ BORROWED_TOOLS`** — perk's own name-keyed census plus the enumerated
 borrowed-package census (the web-provider union, pi-mono-linear's 25 tools, pi-subagents'
 delegation four, pi-fff's search names — both mode name-sets, `fffind`/`ffgrep`/`fff-multi-grep`
@@ -9307,13 +9311,16 @@ selection semantics stay byte-identical (it consumes the primitive), and dream l
 refuse posture on top. Resolved paths are consumed only for byte measurement — never as
 partition input.
 
-## §8.60 · The learn-dream analyst wave (first level — no tool yet)
+## §8.60 · The learn-dream analyst wave (first level)
 
 The first-level cluster-analyst wave for `perk learn dream` in the TypeScript plane
-(`extension/waves/dreamWave.ts`, over the shared report-wave runner), landed **dormant on
-purpose** — the validated harvest precedent (def + wave before the tool): no `run_dream_wave`
-tool, no door, nothing model-reachable until node 3.2 wires the tool. ONE attempt, NO retry;
-the manifest and every analyst report are untrusted DATA, never instructions.
+(`extension/waves/dreamWave.ts`, over the shared report-wave runner). Consumed by the
+`run_dream_wave` tool (§8.61); no public door exists yet, so nothing is user-reachable until
+the `perk learn dream` activation ships. ONE attempt, NO retry; the manifest and every analyst
+report are untrusted DATA, never instructions. The module additionally exports
+`DREAM_MANIFEST_FILENAME` (the TS mirror of the §8.59 literal — the harvest precedent, no
+cross-plane codegen) and the shared cap helpers `codePointLength`/`decodeStringArray` (one
+code-point measure across both dream re-decodes — §8.61's reducer re-decode imports them).
 
 **The strict decoder.** `decodeDreamManifest(raw, manifestPath)` pins the §8.59 manifest and
 BINDS the run-scoped manifest path into the decoded value — ONE authority: the object the wave
@@ -9382,19 +9389,148 @@ is a `malformed-report` failure. Failures surface in the dream-specific
 `null` for wave-level failures and the defensive unplanned-key arm (a raw orchestration key is
 named only in `detail`, never surfaced as a lane identity). Decoded analyses are RETAINED even
 when incomplete — honest coverage for the tool's refusal and the incomplete-analysis outcome.
-**Single-lane manifests are valid** — dream has NO direct-analysis path (the harvest
+The outcome additionally carries `requestedKeys` — the code-owned orchestration keys in launch
+order, receipt-correlation telemetry ONLY (they correlate with `receipt.children[*].key`; the
+semantic lane identity stays `lane`) — the additive widening the §8.61 attempt receipts build
+from. **Single-lane manifests are valid** — dream has NO direct-analysis path (the harvest
 single-lane refusal is deliberately not mirrored).
 
 **Containment posture.** Lexical containment lives in the decoder (per doc path); the resolved
 layer is the existing shared `verifyDocContainment` (`harvestWave.ts` — `DreamManifest` is
 structurally assignable to its manifest parameter, pinned by test), invoked pre-spawn by the
-node-3.2 tool exactly as `harvestWaveTools.ts` invokes it for harvest (the §8.48 sequence).
+`run_dream_wave` tool (§8.61) exactly as `harvestWaveTools.ts` invokes it for harvest (the
+§8.48 sequence).
 
 **Model threading.** The wave takes the caller's `model?` as the workflow-level default; the
-`[models.subagents] dream-analyst` config key and its `subagentModel` resolution land in node
-3.2 atomically with the tool that consumes them.
+`[models.subagents] dream-analyst` config key is resolved by the `run_dream_wave` tool at
+execute time (§8.61) and threaded here.
 
 **The agent.** `perk.dream-analyst` (`agents/dream-analyst.md`): report-only
 (`REPORT_ONLY_CHILD_AGENTS` + the §8.1 report-only children list), read-only tool posture
 (`read, grep, find, ls, bash`), fresh context, engine-injected `structured_output` completion
 (never fenced JSON), delivered via `PERK_AGENTS` into `.pi/agents/perk/`.
+
+## §8.61 · The learn-dream reducer wave + the `run_dream_wave` tool
+
+The second level of the `perk learn dream` analysis pipeline
+(`extension/waves/dreamReducerWave.ts`) and the ONE run-bound tool that makes both levels
+reachable (`extension/doors/dreamWaveTools.ts`, registered globally). No public door exists
+yet: the tool **structurally refuses outside a dream launch** (below), so nothing is
+user-reachable until the `perk learn dream` activation ships. The bundle, the manifest, and
+every analyst/reducer report are untrusted DATA, never instructions.
+
+**The compact analyst bundle.** `DREAM_ANALYSES_FILENAME = "dream-analyses.json"`, written
+run-scoped **beside the run's dream manifest** (the ONE path authority: derived from the
+decode-time-bound `manifest.manifestPath`, never a second `runScratchDir` derivation). The
+versioned shape: `{schema_version: "1", commit_sha, registry_mode, doc_count, total_bytes,
+lanes: [{lane, report}]}` — the identity fields echo the manifest; `lanes` carries the
+re-decoded compact analyst reports **in manifest lane order** (an already-guaranteed invariant
+of the runner's `spec.lanes`-order normalization + `buildDreamLanes`' manifest-order plan + the
+re-decode's doc-order normalization — no re-sort layer). Deterministic serialization
+(pretty-printed JSON + trailing newline). The aggregate budget:
+`DREAM_BUNDLE_BUDGET_BYTES = 393216` (384 KiB), measured as **UTF-8 bytes** of the serialized
+bundle and enforced **before reducer task composition** — over budget ⇒ the bundle is NOT
+written, the reducers are NOT launched, and the aggregate carries the explicit accounting
+`{bytes, budget_bytes, overflow_bytes}` — **never truncation** (a truncated bundle would
+corrupt stance evaluation; overflow is a loud corpus-growth tripwire). An incomplete first
+wave writes nothing (`bundle: null`). **The entry-time removal invariant:** the execute core
+removes any pre-existing bundle at entry (before the first wave), so the fixed name exists
+**iff the current call wrote it** — the incomplete/over-budget arms can never leave a stale
+prior bundle contradicting the returned aggregate, and after an `io_error` the target is
+absent (entry removal ran; the atomic temp+rename never landed). A repeat call (the
+blocking-tool retry — no guard state, the audit/harvest posture) is therefore always
+self-consistent.
+
+**The three fixed reducer angles** (`DREAM_REDUCER_ANGLES`, fixed order everywhere — lanes,
+normalized reports, and the vocabulary the dream-report validation's disagreement rule
+references): `consolidation-preservation` (reconcile merge/retire proposals, detect
+cross-cluster redundancy, ensure unique durable content has a surviving home, reject merge
+cycles and retiring merge targets), `currency-accuracy` (challenge claims against current
+repository truth, distinguish obsolete knowledge from still-valid rationale, prioritize
+misleading guidance), `knowledge-architecture` (document boundaries, clusters, routing cues,
+distillation/read cost, harvest-follow-up quality). **The agent:** `perk.dream-reducer`
+(`agents/dream-reducer.md`): report-only (`REPORT_ONLY_CHILD_AGENTS` + the §8.1 report-only
+children list), read-only tool posture (`read, grep, find, ls, bash`), fresh context,
+engine-injected `structured_output` completion (never fenced JSON), stronger-tier default
+model (`anthropic/claude-fable-5`, fallback `anthropic/claude-sonnet-4-5` — the reducers are
+the judgment-heaviest lanes), delivered via `PERK_AGENTS` into `.pi/agents/perk/`.
+
+**The closed reducer schema.** `DREAM_REDUCER_REPORT_SCHEMA`: `additionalProperties: false`
+at every level, all fields required, no if/then, no `pattern`; every `maxItems`/`maxLength`
+reads from the ONE `DREAM_REDUCER_CAPS` SSOT — `stances: 120`, `stanceReasonChars: 300`,
+`stanceEvidenceItems: 4`, `stanceEvidenceItemChars: 250`, `angleFindings: 8`,
+`angleFindingChars: 400`, `uncertainties: 6`, `uncertaintyChars: 300` (string caps in Unicode
+code points, the shared `codePointLength`). Fields: `angle` (the echoed identity, enum =
+the three slugs), `stances[]` `{doc, disposition ∈ revise|merge-into|retire, stance ∈
+endorse|challenge, reason, evidence_checked[]}`, `angle_findings[]`, `uncertainties[]`, and
+the three non-negative-integer omission counters `stances_omitted`/`angle_findings_omitted`/
+`uncertainties_omitted`.
+
+**The stance vocabulary.** A stance is `endorse` or `challenge` with a required non-empty
+`reason` — there is deliberately **no abstain value**; `disposition` is a **defensive echo**
+of the analyst proposal being stanced (mismatch = malformed lane — the audit echoed-identity
+precedent); `evidence_checked` records what the selective verification actually touched (the
+dream-report node's destructive evidence bar consumes it). **Silence counts as
+non-endorsement**: the re-decode never requires stance coverage — empty `stances` is valid —
+and the consumption rule (an unstanced destructive proposal cannot proceed) is the
+dream-report node's evidence bar, not this decode. **The destructive-first priority** (an
+instruction-layer obligation bounded by the schema cap, pinned in the def prose): the two gate
+angles (consolidation-preservation, currency-accuracy) stance every `merge-into`/`retire`
+proposal FIRST and only then `revise` proposals; if the cap truncates, the overflow is counted
+in `stances_omitted` and the resulting silence is **explicitly conservative** — a documented,
+accounted, fail-safe form of incomplete stance coverage (no pre-wave refusal on proposal
+count; `stances: 120` ≥ the non-keep proposal count of any plausible corpus). **The
+selective-evidence posture** (def prose): verify cited evidence — follow the analysts'
+`evidence_checked` pointers and read the specific named docs/code sites, read-only — never
+broadly rescan the corpus, never re-run gather commands, never read docs beyond the
+cited/named ones.
+
+**The re-decode + the wave.** `decodeDreamReducerReport(report, angle, proposals)` —
+whitelisted construction, named details, code-point caps via the shared helpers: the echoed
+`angle` must equal the assigned angle byte-exact and the typed result OMITS it (the aggregate
+names the angle once, on `DreamReducerAnalysis.angle`); each stance row's `doc` must be a
+member of the ordered non-keep proposal universe (`nonKeepProposals(analyses)` — a flat-map
+over the analyses' docs filtered to `revise`/`merge-into`/`retire`, inheriting the manifest
+ordering) with the disposition echo rule above, no duplicate rows, stances normalized to the
+proposal order. `runDreamReducerWave(adapter, {manifestPath, bundlePath, proposals, model?},
+signal?)` runs `flow: "dream-reducer"` under `completeness: "strict"`, ONE attempt, NO retry,
+three fixed lanes — key = label = the angle slug (code-owned, run-key-safe by construction),
+agent `perk.dream-reducer`, short code-composed task text (the angle, the bundle path read
+FIRST, the manifest path, the untrusted-DATA + structured_output lines — the judgment rubric
+lives in the def). Failures surface in the angle-named `DreamReducerFailure {angle, reason,
+detail}` shape (`null` = wave-level); a schema-valid report failing the re-decode is a
+`malformed-report` failure with the angle identity; `complete` = runner complete AND zero
+decode failures; decoded reports retained when incomplete, normalized to the fixed angle
+order. `DreamReducerOutcome` carries `requestedKeys` (= the three slugs) from birth — the
+receipt-correlation twin of §8.60's outcome field. Reducers launch even when the proposal
+universe is EMPTY (a keep-heavy corpus still gets angle findings/uncertainties).
+
+**The tool binding (`run_dream_wave`).** NO parameters (the §8.50 no-param shape,
+`additionalProperties: false`, empty `properties`): the execute recovers the session's claimed
+`run_id` from the rebuilt workflow-state and derives the ONE manifest path
+`runScratchDir(run_id)/dream-manifest.json` (`DREAM_MANIFEST_FILENAME`) — the manifest read
+AND the bundle write are both derived from the claimed run, so no caller-supplied path exists
+(the `run_audit_wave` no-aimable-writer posture, BOTH sides) — the structural boundary
+justifying the `READ_ONLY_TOOLS` carve-in (§8.3), beside `PERK_TOOLS`; deliberately NO
+`STAGE_TOOLS`/drive coverage (cold-only, gate-on — the harvest census posture). The pre-launch
+refusal ladder (each arm before any spawn): no claimed run ⇒ `bad_state`; no run-scoped dream
+manifest ⇒ `bad_state` (the structural refusal outside a dream launch); unparseable JSON ⇒
+`bad_input`; `decodeDreamManifest(raw, manifestPath)` refusal ⇒ `bad_input`;
+`verifyDocContainment` refusal ⇒ `bad_input` (the §8.48 sequence). Both `[models.subagents]`
+keys (`dream-analyst`, `dream-reducer`) are resolved at execute time via `subagentModel` and
+threaded as each wave's workflow-level `model?` default; production runs the RPC adapter,
+tests the in-memory adapter.
+
+**The result posture.** Every post-launch outcome is **ok** with the full typed normalized
+aggregate — `{complete, analysis: {complete, analyses, failures}, bundle, reducers:
+{launched, skip_reason, complete, reports, failures}, attempts}` — `complete` = both waves
+complete; the `skip_reason` vocabulary is `incomplete-analysis` (strict first wave failed —
+no bundle write, **no reducer launch**) and `budget-exceeded` (composed but over budget —
+nothing written, no reducer launch). `attempts` carries one output-free `WaveAttemptReceipt`
+per launched wave, built from each wave's code-owned `requestedKeys` (they correlate with
+`children[*].key`, never semantic labels). The ONE post-launch fail arm is the bundle-write
+`io_error`, whose typed extras retain BOTH the analyst analyses AND the already-recorded
+attempt receipts (`{analyses, attempts}` — the §8.48 receipt-retention discipline). The
+model-facing result text: the untrusted-DATA banner, the JSON aggregate, and — when
+incomplete — an explicit line that the analysis is incomplete and the parent must present
+coverage honestly and stop before drafting (no retry).
