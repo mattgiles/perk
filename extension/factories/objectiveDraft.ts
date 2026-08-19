@@ -11,8 +11,9 @@
 // `objective_save`/`/objective-save` still persist the objective to GitHub.
 //
 // Format doctrine: JSON is the storage/transport format, NEVER the human review surface. The
-// artifact carries `{schema_version, title?, prose, roadmap}` — the structured roadmap rides
-// verbatim (node-shape validation stays with the Python plane at save time, the
+// artifact carries `{schema_version, title?, prose, roadmap}` (plus, in a perk learn dream
+// session, the tool-written `dream_report` block — contracts §8.63) — the structured roadmap
+// rides verbatim (node-shape validation stays with the Python plane at save time, the
 // `parse_structured_roadmap` path). The review surface reads the draft via
 // `readObjectiveDraft` (over `readSessionArtifact` — digest-validated, fail-open) and renders
 // markdown via `renderObjectiveDraft` (the prose + a roadmap table) — never raw JSON; the
@@ -20,9 +21,10 @@
 // back as structured JSON.
 //
 // Vocabulary ownership: this module owns the shared draft/save param vocabulary
-// (`ObjectiveSaveParams`, `decodeObjectiveSaveParams`, `ROADMAP_PARAM_SCHEMA`) — objectiveDraft is
-// the LEAF (mirroring planDraft←planSave's direction); objectiveSave.ts consumes it, so it may
-// value-import `readObjectiveDraft` cycle-free for the approval→save orchestration.
+// (`ObjectiveSaveParams`, `decodeObjectiveSaveParams`, `ROADMAP_PARAM_SCHEMA`,
+// `DREAM_REPORT_PARAM_SCHEMA`) — objectiveDraft is the LEAF (mirroring planDraft←planSave's
+// direction); objectiveSave.ts consumes it, so it may value-import `readObjectiveDraft`
+// cycle-free for the approval→save orchestration.
 //
 // Imports stay node builtins + sibling seams (sessionData.ts, result.ts) so the module loads
 // under `node --test`; no manual `scratch`/`runs` path segments (cacheGuard.test.ts).
@@ -37,9 +39,15 @@ import {
   type SessionDataCtx,
   writeSessionArtifact,
 } from "../substrate/sessionData.ts";
-import { arrayParam, paramsOf, stringParam } from "../substrate/toolParams.ts";
+import { arrayParam, objectParam, paramsOf, stringParam } from "../substrate/toolParams.ts";
 import type { EntrySink } from "../substrate/workflowState.ts";
 import type { ReportTarget } from "../surfaces/report.ts";
+import { DREAM_REPORT_INPUT_SCHEMA } from "../waves/dreamReport.ts";
+import {
+  decodeDreamReportBlock,
+  type ObjectiveDreamReportBlock,
+  resolveDreamReportGate,
+} from "./objectiveDreamReport.ts";
 
 /** The reviewed objective delivery choice (contracts §8.45). */
 export type DeliveryChoice = "incremental" | "stacked";
@@ -53,6 +61,9 @@ export interface ObjectiveSaveParams {
   base?: string;
   // The reviewed delivery choice; omitted ⇒ incremental (the §8.42 absence rule).
   delivery?: DeliveryChoice;
+  // The dream-report input (perk learn dream only — §8.63); deep validation is the gate
+  // resolver's, so the decode keeps it opaque beyond the plain-object shape.
+  dream_report?: unknown;
 }
 
 /**
@@ -67,6 +78,20 @@ export const DELIVERY_PARAM_SCHEMA = {
     "The reviewed delivery choice — ask the human explicitly (incremental is the recommended " +
     "default: each plan lands independently; stacked lands ALL non-skipped roadmap nodes as " +
     "one atomic PR train — capability-checked at save).",
+} as const;
+
+/**
+ * The `dream_report` property, shared between `objective_save` and `objective_draft` so the
+ * two tools' dream contracts cannot drift: the §8.62 `DREAM_REPORT_INPUT_SCHEMA` embedded by
+ * identifier (the `DELIVERY_PARAM_SCHEMA`/`ROADMAP_PARAM_SCHEMA` shared-schema pattern) plus
+ * the gate description. Structurally unreachable in production until the `perk learn dream`
+ * door ships (the resolver refuses it outside a dream session).
+ */
+export const DREAM_REPORT_PARAM_SCHEMA = {
+  ...DREAM_REPORT_INPUT_SCHEMA,
+  description:
+    "The perk learn dream session's final report input (the parent's decisions only) — " +
+    "required inside a dream session, refused outside one.",
 } as const;
 
 /**
@@ -116,12 +141,22 @@ export function decodeObjectiveSaveParams(params: unknown): ObjectiveSaveParams 
   const roadmap = arrayParam(p, "roadmap");
   const base = stringParam(p, "base");
   const delivery = stringParam(p, "delivery");
-  if (prose === null || title === null || roadmap === null || base === null || delivery === null) {
+  // `dream_report` must be a plain object when present (absent → undefined); deep validation
+  // stays with the gate resolver (resolveDreamReportGate).
+  const dreamReport = objectParam(p, "dream_report");
+  if (
+    prose === null ||
+    title === null ||
+    roadmap === null ||
+    base === null ||
+    delivery === null ||
+    dreamReport === null
+  ) {
     return null;
   }
   // The delivery enum is strict beyond `string`: an off-enum value is present-but-mistyped.
   if (delivery !== undefined && delivery !== "incremental" && delivery !== "stacked") return null;
-  return { prose: prose ?? "", title, roadmap, base, delivery };
+  return { prose: prose ?? "", title, roadmap, base, delivery, dream_report: dreamReport };
 }
 
 /** The fixed working-objective artifact name (one JSON file: prose + the structured roadmap). */
@@ -144,7 +179,9 @@ export type ObjectiveDraftResult = Result<ObjectiveDraftOk>;
  * structured roadmap, verbatim — the draft never validates node shapes) as one JSON artifact and
  * write it through the accessor seam (file + `session_artifacts` provenance pointer). Soft
  * result, never throws — failure taxonomy: empty prose → `invalid_input`; no session run_id →
- * `no_run_id`; file-or-pointer write failure → `write_failed` (the seam already warned).
+ * `no_run_id`; a `dream_report` gate refusal → `invalid_input`/`bad_state` (the §8.63 matrix —
+ * validated at write time so a report-less dream bundle can never reach review);
+ * file-or-pointer write failure → `write_failed` (the seam already warned).
  */
 export function writeObjectiveDraft(
   sink: EntrySink,
@@ -155,6 +192,7 @@ export function writeObjectiveDraft(
     roadmap?: unknown[];
     base?: string;
     delivery?: DeliveryChoice;
+    dream_report?: unknown;
   },
 ): ObjectiveDraftResult {
   const fail = failFor(ctx, "objective-draft");
@@ -168,6 +206,13 @@ export function writeObjectiveDraft(
     return fail("session has no run_id — cannot write the objective-draft artifact", "no_run_id");
   }
 
+  // The §8.63 gate: validated at draft-write time via buildDreamReport, the ONE stamp stored
+  // with the block; `absent` keeps the payload byte-identical (every non-dream path unchanged).
+  const gate = resolveDreamReportGate(ctx, opts.dream_report, new Date().toISOString());
+  if (gate.kind === "refuse") {
+    return fail(gate.detail, gate.errorType);
+  }
+
   // Deterministic key order via the explicit literal; `title`/`base`/`delivery` are omitted
   // when blank/absent (schema_version stays 1 — an additive optional field, fail-open readers).
   const title = opts.title?.trim();
@@ -179,6 +224,7 @@ export function writeObjectiveDraft(
     ...(title ? { title } : {}),
     ...(base ? { base } : {}),
     ...(delivery ? { delivery } : {}),
+    ...(gate.kind === "block" ? { dream_report: gate.block } : {}),
     prose: opts.prose,
     roadmap,
   };
@@ -216,6 +262,8 @@ export interface ObjectiveDraft {
   base?: string;
   // The reviewed delivery choice; kept only when exactly the enum (junk → absent, like `base`).
   delivery?: DeliveryChoice;
+  // The dream-report block (§8.63); a present-but-malformed block refuses the WHOLE draft.
+  dream_report?: ObjectiveDreamReportBlock;
 }
 
 /**
@@ -223,7 +271,10 @@ export interface ObjectiveDraft {
  * `readSessionArtifact`'s loud tier): no pointer/file/digest → `null` (the seam already spoke);
  * malformed JSON, a non-object payload, an unsupported `schema_version`, or blank prose → a
  * stderr warning + `null`. `roadmap` defaults to `[]` when absent/non-array; `title` is kept
- * only when a non-blank string. Never throws.
+ * only when a non-blank string. A present-but-malformed `dream_report` block refuses the WHOLE
+ * draft (warn + `null`) — deliberately stricter than the lenient junk→absent handling of
+ * `base`/`delivery`, because silently dropping a malformed report is exactly what §8.63
+ * forbids. Never throws.
  */
 export function readObjectiveDraft(ctx: SessionDataCtx): ObjectiveDraft | null {
   const artifact = readSessionArtifact(ctx, OBJECTIVE_DRAFT_ARTIFACT);
@@ -258,10 +309,19 @@ export function readObjectiveDraft(ctx: SessionDataCtx): ObjectiveDraft | null {
     payload.delivery === "incremental" || payload.delivery === "stacked"
       ? payload.delivery
       : undefined;
+  let dreamReport: ObjectiveDreamReportBlock | undefined;
+  if ("dream_report" in payload) {
+    const block = decodeDreamReportBlock(payload.dream_report);
+    if (block === null) {
+      return refuse("carries a malformed dream_report block");
+    }
+    dreamReport = block;
+  }
   return {
     ...(title !== undefined ? { title } : {}),
     ...(base !== undefined ? { base } : {}),
     ...(delivery !== undefined ? { delivery } : {}),
+    ...(dreamReport !== undefined ? { dream_report: dreamReport } : {}),
     prose,
     roadmap,
   };
@@ -294,7 +354,10 @@ function nodeDependsOn(node: unknown): string {
  * a `## Roadmap` section with ONE markdown table. A prominent `**Delivery:**` line renders
  * directly under the title unconditionally (the reviewed choice must be visible either way —
  * contracts §8.45). The `Phase` column appears only when some node carries a non-blank string
- * `phase`. Pure; never throws.
+ * `phase`. When the draft carries a `dream_report` block, the stored CANONICAL parts append as
+ * the final section — the review surface IS the approval bundle: the objective and its report
+ * review (and are approved or denied) together (§8.63); the parts carry their own
+ * `# Dream report — <run_id>` headers. Pure; never throws.
  */
 /** The always-present prominent `**Delivery:**` review line (contracts §8.45). */
 function deliveryLine(draft: ObjectiveDraft): string {
@@ -313,23 +376,27 @@ export function renderObjectiveDraft(draft: ObjectiveDraft): string {
   out += `${deliveryLine(draft)}\n\n`;
   out += draft.prose;
 
-  if (draft.roadmap.length === 0) return out;
+  if (draft.roadmap.length > 0) {
+    const withPhase = draft.roadmap.some((node) => nodeString(node, "phase").trim().length > 0);
+    const header = withPhase
+      ? "| Node | Phase | Description | Depends On | Status |\n| --- | --- | --- | --- | --- |"
+      : "| Node | Description | Depends On | Status |\n| --- | --- | --- | --- |";
+    const rows = draft.roadmap.map((node) => {
+      const cells = [
+        tableCell(nodeString(node, "id")),
+        ...(withPhase ? [tableCell(nodeString(node, "phase"))] : []),
+        tableCell(nodeString(node, "description")),
+        tableCell(nodeDependsOn(node)),
+        tableCell(nodeString(node, "status") || "pending"),
+      ];
+      return `| ${cells.join(" | ")} |`;
+    });
+    out = `${out.trimEnd()}\n\n## Roadmap\n\n${header}\n${rows.join("\n")}\n`;
+  }
 
-  const withPhase = draft.roadmap.some((node) => nodeString(node, "phase").trim().length > 0);
-  const header = withPhase
-    ? "| Node | Phase | Description | Depends On | Status |\n| --- | --- | --- | --- | --- |"
-    : "| Node | Description | Depends On | Status |\n| --- | --- | --- | --- |";
-  const rows = draft.roadmap.map((node) => {
-    const cells = [
-      tableCell(nodeString(node, "id")),
-      ...(withPhase ? [tableCell(nodeString(node, "phase"))] : []),
-      tableCell(nodeString(node, "description")),
-      tableCell(nodeDependsOn(node)),
-      tableCell(nodeString(node, "status") || "pending"),
-    ];
-    return `| ${cells.join(" | ")} |`;
-  });
-  return `${out.trimEnd()}\n\n## Roadmap\n\n${header}\n${rows.join("\n")}\n`;
+  if (draft.dream_report === undefined) return out;
+  // The approval bundle: objective first, then the stored CANONICAL report parts.
+  return `${out.trimEnd()}\n\n${draft.dream_report.parts.join("\n\n")}\n`;
 }
 
 const TOOL_GUIDELINES = [
@@ -371,6 +438,7 @@ export function registerObjectiveDraft(pi: ExtensionAPI): void {
             "Optional target branch for this objective's plans (omit to use the repo default).",
         },
         delivery: DELIVERY_PARAM_SCHEMA,
+        dream_report: DREAM_REPORT_PARAM_SCHEMA,
         roadmap: {
           type: "array",
           description:

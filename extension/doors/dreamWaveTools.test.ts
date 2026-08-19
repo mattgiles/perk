@@ -3,9 +3,11 @@
 // (PERK_TOOLS + READ_ONLY_TOOLS, deliberately NO stage list), the ordered pre-spawn refusal
 // ladder (claimed run → manifest existence → parse → strict decode → resolved containment;
 // nothing spawns on any arm), the execute core's arms over the memory adapter with injected
-// write/remove spies (the entry-time removal invariant, the incomplete/over-budget skip arms,
-// the io_error receipt retention, the two-wave happy path), and the fake-RPC e2e sinking both
-// waves' spawn params (per-key config-model threading, analyst-before-reducer sequencing).
+// write/remove/marker spies (the entry-time removal invariant, the marker-clear-before-removal
+// invariant, the incomplete/over-budget skip arms, the io_error receipt retention, the
+// two-wave happy path with the finalize-in-place rewrite + digest marker, the finalize-write
+// io_error arm), and the fake-RPC e2e sinking both waves' spawn params (per-key config-model
+// threading, analyst-before-reducer sequencing, the production marker wiring).
 
 import assert from "node:assert/strict";
 import { existsSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
@@ -13,6 +15,7 @@ import { dirname, join } from "node:path";
 import { test } from "node:test";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { runScratchDir } from "../substrate/cache.ts";
+import { digestSessionData } from "../substrate/sessionData.ts";
 import { PERK_TOOLS, READ_ONLY_TOOLS, STAGE_TOOLS } from "../substrate/toolGating.ts";
 import { loadPerkSession, scaffoldRepo } from "../testing/harness.ts";
 import {
@@ -20,6 +23,7 @@ import {
   DREAM_ANALYSES_FILENAME,
   DREAM_BUNDLE_BUDGET_BYTES,
   DREAM_REDUCER_ANGLES,
+  finalizeDreamBundle,
 } from "../waves/dreamReducerWave.ts";
 import {
   DREAM_ANALYST_CAPS,
@@ -29,7 +33,12 @@ import {
 } from "../waves/dreamWave.ts";
 import { createMemoryWaveAdapter } from "../waves/memoryAdapter.ts";
 import { WAVE_RPC_REPLY_EVENT_PREFIX, WAVE_RPC_REQUEST_EVENT } from "../waves/rpcAdapter.ts";
-import { type DreamWaveOk, executeDreamWave, registerDreamWave } from "./dreamWaveTools.ts";
+import {
+  type DreamBundleMarkers,
+  type DreamWaveOk,
+  executeDreamWave,
+  registerDreamWave,
+} from "./dreamWaveTools.ts";
 
 const RUN_ID = "01DREAMRUN00";
 
@@ -213,23 +222,50 @@ function target(): { hasUI: boolean; ui: { notify: (m: string) => void } } {
   return { hasUI: true, ui: { notify: () => {} } };
 }
 
-/** Injected write/remove spies for the execute core. */
-function bundleSpies(opts: { writeThrows?: string } = {}): {
+/** The arbitrary manifest-bytes digest the execute-core tests thread through (the core treats
+ * it as an opaque token; only the registered execute computes a real one). */
+const MANIFEST_DIGEST = "sha256:test-manifest-digest";
+
+/** Injected write/remove/marker spies for the execute core: `events` records the shared
+ * clear/remove/write/set ordering (the marker-before-removal + finalize-then-set invariants);
+ * `clearFails` makes the verified clear report failure; `writeThrows` throws on every write,
+ * `finalizeThrows` only on the second (finalize) write. */
+function bundleSpies(
+  opts: { clearFails?: boolean; writeThrows?: string; finalizeThrows?: string } = {},
+): {
   writes: { path: string; content: string }[];
   removes: string[];
+  events: string[];
+  markers: DreamBundleMarkers;
   writeBundle: (path: string, content: string) => void;
   removeBundle: (path: string) => void;
 } {
   const writes: { path: string; content: string }[] = [];
   const removes: string[] = [];
+  const events: string[] = [];
   return {
     writes,
     removes,
+    events,
+    markers: {
+      clear: () => {
+        events.push("clear");
+        return opts.clearFails !== true;
+      },
+      set: (digest) => {
+        events.push(`set:${digest}`);
+      },
+    },
     writeBundle: (path, content) => {
       if (opts.writeThrows !== undefined) throw new Error(opts.writeThrows);
+      if (opts.finalizeThrows !== undefined && writes.length === 1) {
+        throw new Error(opts.finalizeThrows);
+      }
+      events.push("write");
       writes.push({ path, content });
     },
     removeBundle: (path) => {
+      events.push("remove");
       removes.push(path);
     },
   };
@@ -527,6 +563,8 @@ test("executeDreamWave: an incomplete first wave skips write + reducers (entry r
   const spies = bundleSpies();
   const result = await executeDreamWave(adapter, target(), {
     manifest,
+    manifestDigest: MANIFEST_DIGEST,
+    markers: spies.markers,
     writeBundle: spies.writeBundle,
     removeBundle: spies.removeBundle,
   });
@@ -546,8 +584,10 @@ test("executeDreamWave: an incomplete first wave skips write + reducers (entry r
     reports: [],
     failures: [],
   });
-  // The entry-time removal invariant: the stale-bundle removal runs on EVERY arm.
+  // The entry-time removal invariant: the stale-bundle removal runs on EVERY arm — and the
+  // marker is cleared FIRST, never set again (nothing finalized).
   assert.deepEqual(spies.removes, [BUNDLE_PATH]);
+  assert.deepEqual(spies.events, ["clear", "remove"], "marker cleared before removal, no set");
   assert.deepEqual(spies.writes, [], "zero write calls");
   assert.equal(adapter.calls.spawn.length, 1, "zero reducer lanes spawned");
   assert.equal(details.attempts.length, 1);
@@ -607,6 +647,8 @@ test("executeDreamWave: an over-budget bundle refuses with accounting — nothin
   const spies = bundleSpies();
   const result = await executeDreamWave(adapter, target(), {
     manifest,
+    manifestDigest: MANIFEST_DIGEST,
+    markers: spies.markers,
     writeBundle: spies.writeBundle,
     removeBundle: spies.removeBundle,
   });
@@ -628,6 +670,7 @@ test("executeDreamWave: an over-budget bundle refuses with accounting — nothin
   assert.deepEqual(spies.writes, [], "zero write calls — never truncation");
   assert.equal(adapter.calls.spawn.length, 1, "zero reducer spawns");
   assert.deepEqual(spies.removes, [join(dirname(MANIFEST_PATH), DREAM_ANALYSES_FILENAME)]);
+  assert.deepEqual(spies.events, ["clear", "remove"], "marker cleared, never set, no finalize");
   assert.equal(details.attempts.length, 1);
 });
 
@@ -639,8 +682,11 @@ test("executeDreamWave: a throwing entry-time removal is a typed io_error refusa
   const spies = bundleSpies();
   const result = await executeDreamWave(adapter, target(), {
     manifest,
+    manifestDigest: MANIFEST_DIGEST,
+    markers: spies.markers,
     writeBundle: spies.writeBundle,
     removeBundle: () => {
+      spies.events.push("remove-attempt");
       throw new Error("EACCES: permission denied");
     },
   });
@@ -659,6 +705,96 @@ test("executeDreamWave: a throwing entry-time removal is a typed io_error refusa
   assert.deepEqual(details.attempts, [], "nothing launched yet — no attempt receipt");
   assert.equal(adapter.calls.spawn.length, 0, "nothing spawns on a failed entry removal");
   assert.deepEqual(spies.writes, [], "nothing written");
+  // The invalidation record: the marker was cleared BEFORE the removal attempt, so the files
+  // the failed cleanup left behind are refused by recovery (fail-closed).
+  assert.deepEqual(spies.events, ["clear", "remove-attempt"], "clear precedes the removal");
+});
+
+test("executeDreamWave: an UNVERIFIED marker clear refuses io_error before ANY filesystem work or spawn", async () => {
+  // The fail-closed hazard this refusal prevents: with the old digest possibly still live, a
+  // subsequent removal failure would leave the prior bundle + prior digest PAIR intact and
+  // recoverable as fresh. The refusal fires before the removal even runs, so no mutation (and
+  // no such mixed state) can happen — asserted here with a remove spy that would also fail.
+  const cwd = scaffoldRepo();
+  const manifestPath = join(runScratchDir(cwd, RUN_ID), DREAM_MANIFEST_FILENAME);
+  mkdirSync(dirname(manifestPath), { recursive: true });
+  writeFileSync(manifestPath, manifestJson(), "utf8");
+  // A REAL prior finalized state: the old bundle on disk whose digest the (unclearable) old
+  // marker would still name.
+  const priorManifest = decodedManifest(
+    [{ id: "pi-1", rollup: null, docs: [dreamDoc("docs/learned/pi/subagents.md")] }],
+    manifestPath,
+  );
+  const priorBundle = finalizeDreamBundle(
+    priorManifest,
+    [
+      {
+        lane: "pi-1",
+        report: {
+          docs: [
+            {
+              path: "docs/learned/pi/subagents.md",
+              disposition: "keep",
+              merge_target: null,
+              rationale: "still true",
+              preserve: [],
+              evidence_checked: [],
+              confidence: "high",
+            },
+          ],
+          overlap_signals: [],
+          harvest_followups: [],
+          uncertainties: [],
+          overlap_signals_omitted: 0,
+          harvest_followups_omitted: 0,
+          uncertainties_omitted: 0,
+        },
+      },
+    ],
+    [],
+    digestSessionData(manifestJson()),
+  );
+  const priorBundlePath = join(dirname(manifestPath), DREAM_ANALYSES_FILENAME);
+  writeFileSync(priorBundlePath, priorBundle, "utf8");
+
+  const adapter = createMemoryWaveAdapter();
+  const spies = bundleSpies({ clearFails: true });
+  const result = await executeDreamWave(adapter, target(), {
+    manifest: priorManifest,
+    manifestDigest: digestSessionData(manifestJson()),
+    markers: spies.markers,
+    writeBundle: spies.writeBundle,
+    removeBundle: (path) => {
+      spies.events.push("remove-attempt");
+      throw new Error(`EACCES: permission denied '${path}'`);
+    },
+  });
+  const details = result.details as {
+    ok: boolean;
+    error?: string;
+    error_type?: string;
+    analyses?: unknown[];
+    attempts?: unknown[];
+  };
+  assert.equal(details.ok, false);
+  assert.equal(details.error_type, "io_error");
+  assert.match(details.error ?? "", /dream_bundle_digest invalidation could not be verified/);
+  assert.match(details.error ?? "", /possibly-recoverable prior finalized state/);
+  assert.deepEqual(details.analyses, [], "the extras shape is empty — nothing ran");
+  assert.deepEqual(details.attempts, []);
+  assert.equal(adapter.calls.spawn.length, 0, "nothing spawns");
+  assert.deepEqual(spies.writes, [], "nothing written");
+  assert.deepEqual(
+    spies.events,
+    ["clear"],
+    "the refusal fires BEFORE the removal attempt — no filesystem mutation is possible, so a " +
+      "failed clear can never combine with a failed removal into a stale recoverable pair",
+  );
+  assert.equal(
+    readFileSync(priorBundlePath, "utf8"),
+    priorBundle,
+    "the prior finalized state is untouched (the wave refused before mutating anything)",
+  );
 });
 
 test("executeDreamWave: a bundle-write throw is the io_error fail arm retaining analyses + attempts", async () => {
@@ -667,6 +803,8 @@ test("executeDreamWave: a bundle-write throw is the io_error fail arm retaining 
   const spies = bundleSpies({ writeThrows: "disk full" });
   const result = await executeDreamWave(adapter, target(), {
     manifest,
+    manifestDigest: MANIFEST_DIGEST,
+    markers: spies.markers,
     writeBundle: spies.writeBundle,
     removeBundle: spies.removeBundle,
   });
@@ -685,9 +823,10 @@ test("executeDreamWave: a bundle-write throw is the io_error fail arm retaining 
   assert.equal(details.attempts?.[0]?.flow, "dream-analyst");
   assert.equal(adapter.calls.spawn.length, 1, "no reducer spawn after a failed write");
   assert.deepEqual(spies.removes, [BUNDLE_PATH], "entry removal ran — the target stays absent");
+  assert.deepEqual(spies.events, ["clear", "remove"], "the marker stays cleared");
 });
 
-test("executeDreamWave: the happy path — one write, reducers read it, two attempt receipts", async () => {
+test("executeDreamWave: the happy path — analyst write, reducers read it, finalize rewrite + marker", async () => {
   const manifest = TWO_LANE_MANIFEST();
   const adapter = createMemoryWaveAdapter({
     aggregates: [completeAnalystAggregate(), completeReducerAggregate()],
@@ -695,6 +834,8 @@ test("executeDreamWave: the happy path — one write, reducers read it, two atte
   const spies = bundleSpies();
   const result = await executeDreamWave(adapter, target(), {
     manifest,
+    manifestDigest: MANIFEST_DIGEST,
+    markers: spies.markers,
     analystModel: "faux/analyst",
     reducerModel: "faux/reducer",
     writeBundle: spies.writeBundle,
@@ -708,11 +849,33 @@ test("executeDreamWave: the happy path — one write, reducers read it, two atte
     details.analysis.analyses.map((a) => a.lane),
     ["pi-1", "workflow-1"],
   );
-  // ONE atomic write of the fixed name beside the manifest, with the composed content.
-  assert.equal(spies.writes.length, 1);
+  // TWO atomic writes of the ONE fixed name beside the manifest: the composed analyst bundle
+  // the reducers read, then the finalize-in-place rewrite with the reducers section.
+  assert.equal(spies.writes.length, 2);
   assert.equal(spies.writes[0]?.path, BUNDLE_PATH);
   const expected = composeDreamBundle(manifest, details.analysis.analyses);
   assert.equal(spies.writes[0]?.content, expected.content);
+  assert.equal(spies.writes[1]?.path, BUNDLE_PATH, "the finalize rewrites the SAME fixed name");
+  const finalized = finalizeDreamBundle(
+    manifest,
+    details.analysis.analyses,
+    details.reducers.reports,
+    MANIFEST_DIGEST,
+  );
+  assert.equal(spies.writes[1]?.content, finalized);
+  assert.equal(
+    (JSON.parse(finalized) as { manifest_digest: string }).manifest_digest,
+    MANIFEST_DIGEST,
+    "the caller's manifest digest is bound into the finalized bundle",
+  );
+  // The marker is set to the digest of the finalized bytes, after the finalize write.
+  assert.deepEqual(spies.events, [
+    "clear",
+    "remove",
+    "write",
+    "write",
+    `set:${digestSessionData(finalized)}`,
+  ]);
   assert.deepEqual(details.bundle, {
     path: BUNDLE_PATH,
     written: true,
@@ -754,6 +917,39 @@ test("executeDreamWave: the happy path — one write, reducers read it, two atte
   assert.doesNotMatch(result.content[0]?.text ?? "", /INCOMPLETE/);
 });
 
+test("executeDreamWave: a finalize-write throw is the second io_error arm — marker stays cleared", async () => {
+  const manifest = TWO_LANE_MANIFEST();
+  const adapter = createMemoryWaveAdapter({
+    aggregates: [completeAnalystAggregate(), completeReducerAggregate()],
+  });
+  const spies = bundleSpies({ finalizeThrows: "disk full at finalize" });
+  const result = await executeDreamWave(adapter, target(), {
+    manifest,
+    manifestDigest: MANIFEST_DIGEST,
+    markers: spies.markers,
+    writeBundle: spies.writeBundle,
+    removeBundle: spies.removeBundle,
+  });
+  const details = result.details as {
+    ok: boolean;
+    error?: string;
+    error_type?: string;
+    analyses?: unknown[];
+    attempts?: { flow: string }[];
+  };
+  assert.equal(details.ok, false);
+  assert.equal(details.error_type, "io_error");
+  assert.match(details.error ?? "", /dream bundle finalize write failed: disk full at finalize/);
+  assert.equal(details.analyses?.length, 2, "the analyst analyses ride the fail extras");
+  assert.deepEqual(
+    details.attempts?.map((a) => a.flow),
+    ["dream-analyst", "dream-reducer"],
+    "BOTH attempt receipts are retained (the finalize failed after the reducer wave)",
+  );
+  assert.equal(spies.writes.length, 1, "only the analyst bundle landed");
+  assert.deepEqual(spies.events, ["clear", "remove", "write"], "the marker is never set");
+});
+
 test("executeDreamWave: a reducer lane failure ⇒ complete: false with analyses retained", async () => {
   const manifest = TWO_LANE_MANIFEST();
   const reducerAggregate = {
@@ -780,6 +976,8 @@ test("executeDreamWave: a reducer lane failure ⇒ complete: false with analyses
   const spies = bundleSpies();
   const result = await executeDreamWave(adapter, target(), {
     manifest,
+    manifestDigest: MANIFEST_DIGEST,
+    markers: spies.markers,
     writeBundle: spies.writeBundle,
     removeBundle: spies.removeBundle,
   });
@@ -796,6 +994,10 @@ test("executeDreamWave: a reducer lane failure ⇒ complete: false with analyses
     details.reducers.reports.map((r) => r.angle),
     [DREAM_REDUCER_ANGLES[0], DREAM_REDUCER_ANGLES[2]],
   );
+  // No finalize on an incomplete reducer wave: the analyses-only bundle stays behind (the
+  // finalized decode refuses it) and the marker stays cleared.
+  assert.equal(spies.writes.length, 1, "the analyses-only bundle is left as-is");
+  assert.deepEqual(spies.events, ["clear", "remove", "write"], "no marker set");
   assert.match(result.content[0]?.text ?? "", /INCOMPLETE/);
 });
 
@@ -818,7 +1020,11 @@ test("executeDreamWave: a pre-existing stale bundle is removed before the wave (
       value: [{ key: "pi-1.1", ok: false, error: "analyst crashed", report: null }],
     },
   });
-  const result = await executeDreamWave(adapter, target(), { manifest });
+  const result = await executeDreamWave(adapter, target(), {
+    manifest,
+    manifestDigest: MANIFEST_DIGEST,
+    markers: { clear: () => true, set: () => {} },
+  });
   const details = result.details as { ok: boolean } & DreamWaveOk;
   assert.equal(details.ok, true);
   assert.equal(details.complete, false);
@@ -885,16 +1091,34 @@ test("tool e2e: both configured models ride their wave's spawn; analyst complete
     assert.equal(reducerSpawn.model, "faux/dream-reducer-model");
     assert.match(reducerSpawn.workflowScript ?? "", /perk\.dream-reducer/);
     // The written bundle is REAL on this path (the default atomicWriteFileSync): the reducer
-    // task names it, and it holds the analyst reports.
+    // task names it, and — both waves complete — it holds the FINALIZED shape (the analyst
+    // reports plus the reducers section).
     const bundlePath = join(runScratchDir(cwd, RUN_ID), DREAM_ANALYSES_FILENAME);
     assert.ok(reducerSpawn.workflowScript?.includes(bundlePath));
-    const bundle = JSON.parse(readFileSync(bundlePath, "utf8")) as {
+    const finalizedBytes = readFileSync(bundlePath, "utf8");
+    const bundle = JSON.parse(finalizedBytes) as {
       lanes: { lane: string }[];
+      reducers: { angle: string }[];
     };
     assert.deepEqual(
       bundle.lanes.map((lane) => lane.lane),
       ["pi-1"],
     );
+    assert.deepEqual(
+      bundle.reducers.map((entry) => entry.angle),
+      [...DREAM_REDUCER_ANGLES],
+      "the on-disk bundle finalized in place",
+    );
+    // The production manifest binding: manifest_digest = the digest of the on-disk manifest
+    // bytes the registered execute read and decoded.
+    assert.equal(
+      (bundle as unknown as { manifest_digest: string }).manifest_digest,
+      digestSessionData(
+        readFileSync(join(runScratchDir(cwd, RUN_ID), DREAM_MANIFEST_FILENAME), "utf8"),
+      ),
+    );
+    // The production marker wiring: dream_bundle_digest holds the finalized bytes' digest.
+    assert.equal(h.workflowState().dream_bundle_digest, digestSessionData(finalizedBytes));
   } finally {
     h.dispose();
   }

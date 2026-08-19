@@ -183,9 +183,12 @@ manual approval → save failsafe and read-only → read-write boundary. Paired 
 
 - **`objective_draft`** — write the working structured draft. Optional `base` targets a
   non-default branch; optional `delivery` is `incremental` or `stacked`, with incremental the
-  recommended default. *Non-terminating.*
+  recommended default. Optional `dream_report` (`perk learn dream` only — required inside a
+  dream session, refused outside one; reviewed with the objective as one bundle).
+  *Non-terminating.*
 - **`objective_save`** — save the structured draft, including optional base and delivery.
-  *Terminating.*
+  Optional `dream_report` (`perk learn dream` only — required inside a dream session, refused
+  outside one; re-validated at save). *Terminating.*
 
 The review surface renders the delivery choice directly below the title. When the validated draft
 exists, `/objective-save` drives the shared approval-save seam. If no draft exists, it exits the

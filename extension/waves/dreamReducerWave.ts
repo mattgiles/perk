@@ -2,9 +2,12 @@
 // runner: three FIXED fresh-context `perk.dream-reducer` lanes (`DREAM_REDUCER_ANGLES`) that
 // cross-examine the complete first-level analyst outcome. Pure orchestration — this module
 // composes the bundle content and the reducer lanes but performs NO fs writes (the door owns
-// the one bundle write). It owns the bundle serialization (`composeDreamBundle` — the compact
+// the bundle writes). It owns the bundle serialization (`composeDreamBundle` — the compact
 // analyst reports beside the run's manifest, under the aggregate byte budget the door
-// enforces), the ordered non-keep proposal universe (`nonKeepProposals`), the closed reducer
+// enforces — plus `finalizeDreamBundle`, the post-complete-wave rewrite of the same fixed name
+// with the `reducers` section, and `decodeFinalizedDreamBundle`, the strict fail-closed
+// recovery decode the dream-report path re-reads it through), the ordered non-keep proposal
+// universe (`nonKeepProposals`), the closed reducer
 // report schema under the `DREAM_REDUCER_CAPS` SSOT, the composed defensive re-decode (the
 // disposition-echo rule, proposal-set membership, code-point caps via the shared dreamWave
 // helpers), and **strict** completeness — one failed or undecodable lane forces
@@ -17,6 +20,7 @@ import {
   type DreamDisposition,
   type DreamLaneAnalysis,
   type DreamManifest,
+  decodeDreamAnalystReport,
   decodeStringArray,
 } from "./dreamWave.ts";
 import {
@@ -111,6 +115,42 @@ export function composeDreamBundle(
   };
   const content = `${JSON.stringify(bundle, null, 2)}\n`;
   return { content, bytes: Buffer.byteLength(content, "utf8") };
+}
+
+/**
+ * Serialize the FINALIZED bundle — the rewrite of the SAME fixed name after a fully complete
+ * two-level wave (contracts.md §8.61): the `composeDreamBundle` wrapper fields unchanged
+ * (`schema_version` stays `"1"`) plus `manifest_digest` — the `sha256:<hex>` digest of the
+ * on-disk manifest BYTES this wave decoded (`analyses`/`reducers` must be in manifest lane /
+ * fixed `DREAM_REDUCER_ANGLES` order — guaranteed by the wave outcome shapes the door passes) —
+ * binding the manifest into the authenticated chain (the `dream_bundle_digest` marker
+ * authenticates these bundle bytes; this field extends that authority to the manifest, so an
+ * at-rest manifest edit that preserves the echoed identity fields still refuses at recovery) —
+ * plus a `reducers` array, each entry in the RAW ECHO shape `{angle, ...report}` — exactly the
+ * shape `decodeDreamReducerReport` accepts, so recovery re-decodes through the single row
+ * authority with no fork. The `reducers` key is present iff finalized: an incomplete reducer
+ * wave naturally leaves the analyses-only shape, which `decodeFinalizedDreamBundle` refuses —
+ * one fixed name means a cross-attempt MIXED state is structurally impossible. Same
+ * serialization convention as `composeDreamBundle` (pretty-printed JSON + trailing newline).
+ * The 384 KiB budget does NOT govern this rewrite — it bounds the reducer-INPUT bytes only.
+ */
+export function finalizeDreamBundle(
+  manifest: DreamManifest,
+  analyses: DreamLaneAnalysis[],
+  reducers: DreamReducerAnalysis[],
+  manifestDigest: string,
+): string {
+  const bundle = {
+    schema_version: "1",
+    commit_sha: manifest.commit_sha,
+    registry_mode: manifest.registry_mode,
+    doc_count: manifest.doc_count,
+    total_bytes: manifest.total_bytes,
+    manifest_digest: manifestDigest,
+    lanes: analyses.map((analysis) => ({ lane: analysis.lane, report: analysis.report })),
+    reducers: reducers.map((reducer) => ({ angle: reducer.angle, ...reducer.report })),
+  };
+  return `${JSON.stringify(bundle, null, 2)}\n`;
 }
 
 /**
@@ -381,6 +421,186 @@ export function decodeDreamReducerReport(
       uncertainties_omitted: counters.uncertainties_omitted as number,
     },
   };
+}
+
+/** The finalized-bundle wrapper's CLOSED key set (the recovery decoder's authored level). */
+const FINALIZED_WRAPPER_KEYS = new Set([
+  "schema_version",
+  "commit_sha",
+  "registry_mode",
+  "doc_count",
+  "total_bytes",
+  "manifest_digest",
+  "lanes",
+  "reducers",
+]);
+
+/** One bundle lane entry's CLOSED key set. */
+const LANE_ENTRY_KEYS = new Set(["lane", "report"]);
+
+/** One bundle reducer entry's CLOSED key set — the raw echo shape `{angle, ...report}`. */
+const REDUCER_ENTRY_KEYS = new Set([
+  "angle",
+  "stances",
+  "angle_findings",
+  "uncertainties",
+  "stances_omitted",
+  "angle_findings_omitted",
+  "uncertainties_omitted",
+]);
+
+/**
+ * The strict, fail-closed decode of a FINALIZED bundle read back from run scratch (the
+ * dream-report recovery path, contracts.md §8.61/§8.63) — every miss a named detail. The
+ * pinned unknown-key policy: closure is enforced at the levels THIS decoder authors — the
+ * wrapper, each lane entry, each reducer entry — where an unknown key refuses; INSIDE a row
+ * (analyst doc rows, stance rows, …) the reused row decoders (`decodeDreamAnalystReport`,
+ * `decodeDreamReducerReport`) stay the single authorities — their whitelisted construction
+ * means an extra row-level key is IGNORED and never survives into typed values (deliberately
+ * not a fork of the row decoders). The rest of the ladder: the analyses-only mid-wave shape
+ * (no `reducers` key) refuses as "not finalized"; `schema_version` must be `"1"`; the wrapper
+ * identity fields must equal the manifest's; `manifest_digest` must equal `manifestDigest` —
+ * the digest of the manifest bytes the CALLER just read and decoded, extending the bundle-byte
+ * authentication to the manifest itself; `lanes` must pair the manifest's lanes EXACTLY
+ * (same ids, same order — uniqueness of manifest ids makes duplicates/reorders unpairable);
+ * `reducers` must carry exactly the three `DREAM_REDUCER_ANGLES` in fixed order (the byte-exact
+ * angle echo inside `decodeDreamReducerReport` refuses duplicates/reorders).
+ */
+export function decodeFinalizedDreamBundle(
+  raw: unknown,
+  manifest: DreamManifest,
+  manifestDigest: string,
+):
+  | { ok: true; analyses: DreamLaneAnalysis[]; reducers: DreamReducerAnalysis[] }
+  | { ok: false; detail: string } {
+  if (!isRecord(raw)) {
+    return { ok: false, detail: "the dream bundle is not an object" };
+  }
+  for (const key of Object.keys(raw)) {
+    if (!FINALIZED_WRAPPER_KEYS.has(key)) {
+      return { ok: false, detail: `the dream bundle carries an unknown wrapper key '${key}'` };
+    }
+  }
+  if (!("reducers" in raw)) {
+    return {
+      ok: false,
+      detail:
+        "the dream bundle carries no reducers section — the dream wave did not finalize " +
+        "(analyses-only mid-wave shape)",
+    };
+  }
+  if (raw.schema_version !== "1") {
+    return {
+      ok: false,
+      detail: `dream bundle schema_version must be the string "1" (got ${JSON.stringify(raw.schema_version)})`,
+    };
+  }
+  const identity = [
+    ["commit_sha", manifest.commit_sha],
+    ["registry_mode", manifest.registry_mode],
+    ["doc_count", manifest.doc_count],
+    ["total_bytes", manifest.total_bytes],
+  ] as const;
+  for (const [field, expected] of identity) {
+    if (raw[field] !== expected) {
+      return {
+        ok: false,
+        detail:
+          `dream bundle ${field} (${JSON.stringify(raw[field])}) does not match the ` +
+          `manifest's (${JSON.stringify(expected)})`,
+      };
+    }
+  }
+  if (raw.manifest_digest !== manifestDigest) {
+    return {
+      ok: false,
+      detail:
+        `dream bundle manifest_digest (${JSON.stringify(raw.manifest_digest)}) does not match ` +
+        "the digest of the manifest just read — the manifest changed after the wave finalized",
+    };
+  }
+
+  if (!Array.isArray(raw.lanes)) {
+    return { ok: false, detail: "dream bundle lanes is not an array" };
+  }
+  if (raw.lanes.length !== manifest.lanes.length) {
+    return {
+      ok: false,
+      detail:
+        `dream bundle carries ${raw.lanes.length} lane(s), the manifest has ` +
+        `${manifest.lanes.length} — the lanes must pair exactly`,
+    };
+  }
+  const corpusDocPaths = new Set(
+    manifest.lanes.flatMap((lane) => lane.docs.map((doc) => doc.path)),
+  );
+  const analyses: DreamLaneAnalysis[] = [];
+  for (const [index, manifestLane] of manifest.lanes.entries()) {
+    const entry = raw.lanes[index];
+    if (!isRecord(entry)) {
+      return { ok: false, detail: `dream bundle lane entry ${index + 1} is not an object` };
+    }
+    for (const key of Object.keys(entry)) {
+      if (!LANE_ENTRY_KEYS.has(key)) {
+        return {
+          ok: false,
+          detail: `dream bundle lane entry ${index + 1} carries an unknown key '${key}'`,
+        };
+      }
+    }
+    if (entry.lane !== manifestLane.id) {
+      return {
+        ok: false,
+        detail:
+          `dream bundle lane ${index + 1} is ${JSON.stringify(entry.lane)}, the manifest's ` +
+          `lane is '${manifestLane.id}' (same ids, same order)`,
+      };
+    }
+    const decoded = decodeDreamAnalystReport(
+      entry.report,
+      manifestLane.docs.map((doc) => doc.path),
+      corpusDocPaths,
+    );
+    if (!decoded.ok) {
+      return { ok: false, detail: `dream bundle lane '${manifestLane.id}': ${decoded.detail}` };
+    }
+    analyses.push({ lane: manifestLane.id, report: decoded.report });
+  }
+
+  if (!Array.isArray(raw.reducers)) {
+    return { ok: false, detail: "dream bundle reducers is not an array" };
+  }
+  if (raw.reducers.length !== DREAM_REDUCER_ANGLES.length) {
+    return {
+      ok: false,
+      detail:
+        `dream bundle carries ${raw.reducers.length} reducer entrie(s) — exactly the ` +
+        `${DREAM_REDUCER_ANGLES.length} fixed angles are required`,
+    };
+  }
+  const proposals = nonKeepProposals(analyses);
+  const reducers: DreamReducerAnalysis[] = [];
+  for (const [index, angle] of DREAM_REDUCER_ANGLES.entries()) {
+    const entry = raw.reducers[index];
+    if (!isRecord(entry)) {
+      return { ok: false, detail: `dream bundle reducer entry ${index + 1} is not an object` };
+    }
+    for (const key of Object.keys(entry)) {
+      if (!REDUCER_ENTRY_KEYS.has(key)) {
+        return {
+          ok: false,
+          detail: `dream bundle reducer entry '${angle}' carries an unknown key '${key}'`,
+        };
+      }
+    }
+    const decoded = decodeDreamReducerReport(entry, angle, proposals);
+    if (!decoded.ok) {
+      return { ok: false, detail: `dream bundle reducer '${angle}': ${decoded.detail}` };
+    }
+    reducers.push({ angle, report: decoded.report });
+  }
+
+  return { ok: true, analyses, reducers };
 }
 
 /**

@@ -1,7 +1,7 @@
 # perk cross-plane contracts
 
 The language-neutral contracts both planes obey, authored once here and bundled into each
-build artifact. This document holds the numbered **prose contract sections** (`§8.1`–`§8.62`,
+build artifact. This document holds the numbered **prose contract sections** (`§8.1`–`§8.63`,
 non-contiguous: `§8.8` is skipped and `§8.6a` exists; no parser): the Python CLI (`perk`)
 and the TS extension (`@mgiles/perk`) each implement one side, against the exact names/paths/
 fields pinned in each section. `perk doctor` verifies conformance. The numbering convention:
@@ -133,12 +133,18 @@ The local cache tier — written and read by **both** the CLI (exterior) and the
   fixed constant `objective-draft.json` — `OBJECTIVE_DRAFT_ARTIFACT`,
   `extension/factories/objectiveDraft.ts` — and the path derives exclusively through the accessor seam;
   the gate's `edit`/`write`/bash blocking is unchanged). The artifact is a **single JSON file**
-  carrying `{schema_version: 1, title?, prose, roadmap}` — the structured roadmap rides
+  carrying `{schema_version: 1, title?, prose, roadmap}` — plus, in a `perk learn dream`
+  session, the **tool-written** `dream_report` block `{input, generated_at, parts}` (§8.63;
+  `readObjectiveDraft` refuses the WHOLE draft on a malformed block — deliberately stricter
+  than the lenient junk→absent `base`/`delivery` handling, because silently dropping a
+  malformed report is exactly what §8.63 forbids) — the structured roadmap rides
   **verbatim** (node-shape validation stays with the Python plane at save time, the
   `parse_structured_roadmap` path; an empty roadmap is allowed — only creation rejects
   roadmap-free objectives). **The JSON is storage/transport only** — the human review surface
   (node 2.2, Plannotator or the first-party editor) displays rendered markdown (the prose + a
-  markdown roadmap table) derived from the artifact, never raw JSON. Semantics: full rewrite per
+  markdown roadmap table; when the draft carries `dream_report`, the stored CANONICAL parts
+  append as the final section — the render is the objective+report **approval bundle**,
+  §8.63) derived from the artifact, never raw JSON. Semantics: full rewrite per
   call, non-terminating, NOT a save — `objective_save`/`/objective-save` remain the canonical
   GitHub persist surface. Failure taxonomy (soft results, never throws): mistyped params →
   `bad_input`; empty/whitespace prose → `invalid_input`; no session `run_id` → `no_run_id`;
@@ -464,6 +470,7 @@ end of the section).
 | `session_artifacts` | object \| null | per-name session-artifact provenance pointers `{run_id, name, path, digest, at}` (§8.1); appends carry the **whole merged map** (per-field LWW); strict-append tier |
 | `objective_node_claim` | object \| null | the objective node this session has claimed `planning` (`{ objective, node }`); written by the warm `objective_node` tool on a successful `planning` transition, cleared on a successful non-planning transition for the same node and after a successful node-linked plan save; best-effort tier (cheaply reconstructable; loud-but-non-fatal) |
 | `conflict_resolution_attempts` | number | the bounded conflict-resolution re-drive counter: incremented each time `/submit` drives the `perk.conflict-resolver` subagent on a definitively-unmergeable PR (cap `CONFLICT_RESOLUTION_ATTEMPT_CAP = 2`), reset to 0 on a clean submit; best-effort tier (cheaply reconstructable) |
+| `dream_bundle_digest` | string | the dream-wave finalized-bundle digest marker (§8.61): `""` = invalidated (cleared unconditionally at wave entry, BEFORE the stale-bundle removal attempt — the invalidation record); `sha256:<hex>` = the digest of the current finalized run-scratch bundle bytes, set only after a successful finalize write; the §8.63 dream-report recovery refuses unless the marker is present, non-empty, and byte-matches the bundle just read; per-field LWW, no rebuild change |
 | `perk_version` | string | the running perk (extension) version, stamped when run identity is established (the claim/fork/adopt/mint arms, §8.2) — the session-audit **exact-vintage** basis (the key literal is the cross-plane coordination point; the read side is `perk-dev`'s audit corpus/vintage layer); omitted when only the `perkVersion()` failure sentinel is available; best-effort tier |
 
 Automated PR-review postability is session-local interior state, not an appended workflow-state
@@ -9432,7 +9439,9 @@ re-decode's doc-order normalization — no re-sort layer). Deterministic seriali
 bundle and enforced **before reducer task composition** — over budget ⇒ the bundle is NOT
 written, the reducers are NOT launched, and the aggregate carries the explicit accounting
 `{bytes, budget_bytes, overflow_bytes}` — **never truncation** (a truncated bundle would
-corrupt stance evaluation; overflow is a loud corpus-growth tripwire). An incomplete first
+corrupt stance evaluation; overflow is a loud corpus-growth tripwire). The budget governs
+exactly these reducer-INPUT bytes — the post-complete finalize rewrite (below) happens after
+the reducers consumed them and is not budget-checked. An incomplete first
 wave writes nothing (`bundle: null`). **The entry-time removal invariant:** the execute core
 removes any pre-existing bundle at entry (before the first wave), so the fixed name exists
 **iff the current call wrote it** — the incomplete/over-budget arms can never leave a stale
@@ -9441,7 +9450,59 @@ absent (entry removal ran; the atomic temp+rename never landed). A repeat call (
 blocking-tool retry — no guard state, the audit/harvest posture) is therefore always
 self-consistent. A **failed entry-time removal** refuses `io_error` BEFORE any spawn — a
 typed refusal with empty `{analyses, attempts}` extras, never an uncaught throw (launching
-over an irremovable stale bundle would break the invariant).
+over an irremovable stale bundle would break the invariant); the digest marker (below) was
+already cleared, so whatever files the failed cleanup left behind are refused by the
+dream-report recovery.
+
+**The finalize-in-place rewrite + the `dream_bundle_digest` marker (the reviewed §8.61
+widening).** Reducer stances were previously never persisted (reducer reports lived only in
+the tool result); the dream-report draft path (§8.63) needs them to survive pi restarts, so
+after a **fully complete** two-level wave the execute core atomically REWRITES the existing
+`dream-analyses.json` via `finalizeDreamBundle(manifest, analyses, reducers, manifestDigest)`:
+the same wrapper fields (`schema_version` stays `"1"`) plus `manifest_digest` — the
+`sha256:<hex>` digest of the on-disk manifest BYTES the wave read and decoded, extending the
+marker's bundle-byte authentication to the manifest itself (an at-rest manifest edit that
+preserves the echoed identity fields still refuses at recovery) — plus `reducers`, an array
+in the fixed `DREAM_REDUCER_ANGLES` order, each entry the **raw echo shape**
+`{angle, ...report}` (exactly the shape `decodeDreamReducerReport` accepts, the angle
+echoed). Deliberately NOT a second
+file: one fixed name means the analyses-only mid-wave shape and the finalized shape are
+mutually exclusive states of one path — a cross-attempt MIXED state is structurally
+impossible; the `reducers` key is present **iff** finalized, and an incomplete reducer wave
+naturally leaves the analyses-only shape behind (recovery refuses it). The recovery-side
+decode is `decodeFinalizedDreamBundle(raw, manifest, manifestDigest)` — strict, fail-closed,
+every miss a named detail: **the pinned unknown-key policy** — the persisted format is CLOSED
+at every level this decoder authors (the wrapper: exactly `{schema_version, commit_sha,
+registry_mode, doc_count, total_bytes, manifest_digest, lanes, reducers}`; each lane entry:
+`{lane, report}`; each reducer entry: the raw echo keys) with unknown keys refusing; a
+missing `reducers` key refuses as not-finalized; the identity fields must equal the
+manifest's; `manifest_digest` must equal the caller's digest of the manifest bytes just read
+(the manifest-authentication link); `lanes` must pair the
+manifest's lanes EXACTLY (same ids, same order); `reducers` must carry exactly the three
+angles in fixed order (the byte-exact angle echo refuses duplicates/reorders); INSIDE a row
+the reused row decoders (`decodeDreamAnalystReport` over the manifest-derived lane/corpus
+path sets, `decodeDreamReducerReport` over `nonKeepProposals(analyses)`) stay the **single
+row authorities** — whitelisted construction means an extra row-level key is IGNORED and
+never survives into typed values (no fork of the row decoders). This
+closed-wrapper/whitelist-projected-row split is the decided policy, pinned by tests on both
+sides. **The marker lifecycle:** the freshness authority is the `dream_bundle_digest`
+workflow-state field (§8.3) — a bare run-scratch file is never trusted by the recovery
+consumer (the session-artifacts digest-pointer doctrine). The execute clears it (`""`)
+unconditionally at entry BEFORE the stale-bundle removal attempt — the invalidation record
+that keeps the removal `io_error` refusal fail-closed for downstream consumers — and sets it
+to the sha256 of the finalized bytes (`digestSessionData`, the `sha256:<hex>` convention)
+only after the finalize write succeeds. The entry clear is **verified**: `markers.clear()`
+returns the append+read-back result, and an UNVERIFIED clear refuses `io_error` before ANY
+filesystem work or spawn — with the old digest possibly still live, proceeding into a failed
+removal would leave the prior bundle + prior digest PAIR recoverable as fresh, so the wave
+stops instead (no mutation happens, and the untouched prior finalized state remains exactly
+what it was). The marker seam is injected into the execute core (`markers: {clear, set}`;
+the registered tool wires the production `appendWorkflowState` pair); `set` stays
+loud-but-non-fatal — a failed set warns via the read-back check and leaves the marker
+cleared by the entry clear, so recovery refuses; re-running the wave repairs it. A
+finalize-write throw is the SECOND post-launch `io_error` fail arm, mirroring the
+analyst-bundle arm's `{analyses, attempts}` extras retention (the message names the
+finalize).
 
 **The three fixed reducer angles** (`DREAM_REDUCER_ANGLES`, fixed order everywhere — lanes,
 normalized reports, and the vocabulary the dream-report validation's disagreement rule
@@ -9523,17 +9584,18 @@ keys (`dream-analyst`, `dream-reducer`) are resolved at execute time via `subage
 threaded as each wave's workflow-level `model?` default; production runs the RPC adapter,
 tests the in-memory adapter.
 
-**The result posture.** Every post-launch outcome — with the ONE exception of the
-bundle-write `io_error` fail arm below — is **ok** with the full typed normalized
+**The result posture.** Every post-launch outcome — with the exception of the two write
+`io_error` fail arms below — is **ok** with the full typed normalized
 aggregate — `{complete, analysis: {complete, analyses, failures}, bundle, reducers:
 {launched, skip_reason, complete, reports, failures}, attempts}` — `complete` = both waves
 complete; the `skip_reason` vocabulary is `incomplete-analysis` (strict first wave failed —
 no bundle write, **no reducer launch**) and `budget-exceeded` (composed but over budget —
 nothing written, no reducer launch). `attempts` carries one output-free `WaveAttemptReceipt`
 per launched wave, built from each wave's code-owned `requestedKeys` (they correlate with
-`children[*].key`, never semantic labels). The ONE post-launch fail arm is the bundle-write
-`io_error`, whose typed extras retain BOTH the analyst analyses AND the already-recorded
-attempt receipts (`{analyses, attempts}` — the §8.48 receipt-retention discipline). The
+`children[*].key`, never semantic labels). The TWO post-launch fail arms are the
+analyst-bundle-write and the finalize-write `io_error`s, whose typed extras retain BOTH the
+analyst analyses AND the already-recorded attempt receipts (`{analyses, attempts}` — the
+§8.48 receipt-retention discipline). The
 model-facing result text: the untrusted-DATA banner, the JSON aggregate, and — when
 incomplete — an explicit line that the analysis is incomplete and the parent must present
 coverage honestly and stop before drafting (no retry).
@@ -9545,9 +9607,10 @@ checkable, savable final report (`extension/waves/dreamReport.ts`): the structur
 dream-report model, the validation that proves the parent's judgment obeys the pinned curation
 policy, and the deterministic Markdown renderer that owns the CANONICAL report bytes in parts.
 Pure domain code — no fs, no tool registration, no `ExtensionAPI`; imports only the two dream
-siblings. Consumed by the `objective_draft`/review wiring (the `dream_report` param) and the
-part persistence, which land in later nodes — nothing here is user-reachable until the
-`perk learn dream` activation ships. The input is untrusted DATA, never instructions.
+siblings. Consumed by the `objective_draft`/review/save wiring (the `dream_report` param,
+§8.63 — landed); part persistence to the backend lands in a later node — nothing here is
+user-reachable until the `perk learn dream` activation ships. The input is untrusted DATA,
+never instructions.
 
 **The trust split.** Two input shapes: `DreamReportInput` — untrusted, model-supplied —
 carries ONLY the decisions the design assigns to the parent (the final per-doc disposition
@@ -9685,3 +9748,90 @@ enforce the part budget in ONE call, returning `{ok: true, report, parts}` or
 `{ok: false, details}` (the renderer's single-detail defensive arm wrapped into a one-element
 `details`) — so the draft path validates BEFORE review and an approved report is always
 savable.
+
+## §8.63 · The `dream_report` objective draft/review wiring
+
+The concrete `dream_report` field on the objective draft/review/save path — deliberately NOT
+a generic companion abstraction (one consumer, one kind). Everything lands dormant: no
+`perk learn dream` door exists yet, so the dream arms are structurally unreachable in
+production (a session outside a dream launch has no run-scoped `dream-manifest.json`) and are
+exercised by tests. Absence-compatible by construction: every existing objective path stays
+**byte-identical** without the field.
+
+**The shared param vocabulary.** `objective_draft` and `objective_save` both carry an
+optional `dream_report` parameter embedding the §8.62 `DREAM_REPORT_INPUT_SCHEMA` by
+identifier as `DREAM_REPORT_PARAM_SCHEMA` (`extension/factories/objectiveDraft.ts` — the leaf
+owning the shared vocabulary, the `DELIVERY_PARAM_SCHEMA`/`ROADMAP_PARAM_SCHEMA` pattern)
+plus the gate description ("required inside a dream session, refused outside one"). The
+shared `decodeObjectiveSaveParams` decodes it as a tri-state plain object (absent →
+`undefined`, present-but-not-a-plain-object → strict-fail); deep validation stays with the
+gate resolver.
+
+**The ONE gate resolver.** `resolveDreamReportGate(ctx, input, generatedAt)`
+(`extension/factories/objectiveDreamReport.ts`) implements the whole matrix ONCE — both
+`writeObjectiveDraft` and `saveObjective` consume its typed outcome
+(`absent` | `block` | `refuse{errorType, detail}`); no parallel branch/message
+implementations. "Dream session" is detected structurally, exactly like `run_dream_wave`: the
+session's claimed `run_id` + the existence of `runScratchDir(run_id)/dream-manifest.json` (no
+claimed run counts as non-dream). The matrix (identical at draft-write and save): non-dream +
+absent → `absent` (unchanged, byte-identical behavior); non-dream + present → refuse
+`invalid_input` (refusing rather than silently dropping it); dream + absent → refuse
+`invalid_input` (the objective and its report review as ONE bundle — draft-time enforcement
+means a report-less dream bundle can never reach review, so an approval is always savable,
+the §8.62 "validates BEFORE review" promise); dream + present → recover trusted context →
+`buildDreamReport(input, context)` → refuse on any failure, else yield the block. The gate
+reads ONE workflow-state snapshot with error distinction: an UNREADABLE state (a throwing
+branch read) refuses `bad_state` BEFORE the matrix — never conflated with a confirmed
+non-dream session (a transient read failure must not surface as `absent`). Failure
+taxonomy (soft results, never throws): gate violations and `buildDreamReport` validation
+refusals → `invalid_input` (the bounded ≤25 named details ride the message, newline-joined);
+an unreadable workflow state, context-recovery failures (missing/stale/tampered/undecodable
+run-scratch state — "re-run the dream wave"), and the save-time stored-parts mismatch →
+`bad_state`.
+
+**Trusted-context recovery** (module-internal, fail-closed, every arm a named detail):
+(1) read + parse the run-scoped manifest and `decodeDreamManifest(raw, manifestPath)` (the
+strict §8.60 decoder, path bound at decode time; no `verifyDocContainment` — the report path
+reads no doc files, so the lexical decode suffices; resolved containment stays the wave
+tool's pre-spawn concern); (2) **the freshness check** — the `dream_bundle_digest` marker
+(§8.3/§8.61, read from the gate's one workflow-state snapshot) must be present, non-empty,
+and equal the digest of the bundle bytes just read (missing/empty/mismatch refuses); (3)
+`decodeFinalizedDreamBundle(parsedBundle, manifest, digest-of-manifest-bytes-just-read)`
+(§8.61 — the analyses-only mid-wave shape refuses here, and the bundle's bound
+`manifest_digest` authenticates the manifest itself: the marker covers the bundle bytes and
+the bundle covers the manifest bytes, so an at-rest manifest edit refuses); the recovered
+context is `{manifest, analyses, reducers, run_id, generated_at}`.
+
+**The artifact block.** A valid dream draft stores `dream_report: {input, generated_at,
+parts}` in `objective-draft.json` — **tool-written only** (the model never writes the
+artifact): `writeObjectiveDraft` runs the gate, stamps `generated_at` ONCE
+(`new Date().toISOString()`), and stores the validated input beside the rendered CANONICAL
+parts. `readObjectiveDraft` validates the block via `decodeDreamReportBlock` (a plain-object
+`input`, a non-blank `generated_at`, a non-empty all-string `parts`) and refuses the WHOLE
+draft on a malformed block (warn + `null`) — deliberately stricter than the lenient
+junk→absent handling of `base`/`delivery` (§8.1).
+
+**One approval bundle.** `renderObjectiveDraft` appends the stored parts as the final section
+(`trimEnd()` + `"\n\n"` + `parts.join("\n\n")` + `"\n"`; the parts carry their own
+`# Dream report — <run_id>` headers), so the review surfaces need ZERO plumbing:
+`plan_review`'s objective arm and the browser door both review via
+`readObjectiveDraft` + `renderObjectiveDraft`, the browser's stale-draft guard covers the
+report bytes for free (it compares raw artifact bytes), and DENY routes the ordinary
+full-redraft `objective_draft` loop (no new machinery).
+
+**Save-time re-validation.** `saveObjective` accepts `dream_report` as ONE carrier with two
+sources: the direct tool path wraps only a PRESENT decoded value as `{input}` (the save
+stamps `generated_at`; an `{input: undefined}` carrier is never constructed — presence is the
+`opts.dream_report === undefined` boundary); the approval path (`objectiveApprovalSave`)
+passes the artifact block through whole — stored stamp AND stored parts. Before the cold-door
+call the gate re-runs against freshly recovered context, and when stored parts are present
+they are byte-compared (`JSON.stringify` equality) against the re-rendered parts — a mismatch
+(run-scratch drift or artifact tamper between draft-write and save) refuses `bad_state` with
+nothing saved and the read-only gate left on. The one `generated_at` stamp is what keeps the
+re-render deterministic. On success the save proceeds **unchanged** — the parts do NOT cross
+to the Python plane and no new cold-door flag exists: companion persistence + the run-scoped
+parts handoff to the save door are an explicitly deferred later node, not a silent omission.
+No new ok-details fields on either tool (the visible review bundle and the normal ok results
+already carry the signal). `STAGE_TOOLS`/`READ_ONLY_TOOLS` are untouched: `objective_draft`
+stays read-only-safe (the dream arm only READS run scratch; the marker rides the ordinary
+session-entry channel), `objective_save` stays gate-excluded.
