@@ -87,8 +87,10 @@ def test_create_plan_issue_dry_run_does_not_shell(monkeypatch):
 
 
 def test_create_plan_issue_idempotent_returns_existing_no_post(monkeypatch):
+    # The find_plan_issue dedup read is exhaustive: gh --paginate --slurp returns an array of
+    # page arrays, so the fake feeds one page wrapping the issue list.
     existing = [{"number": 7, "html_url": "u/7", "body": _header("01RID")}]
-    rec = _GhRecorder(get=_Proc(0, stdout=json.dumps(existing)))
+    rec = _GhRecorder(get=_Proc(0, stdout=json.dumps([existing])))
     monkeypatch.setattr(subprocess, "run", rec)
     issue = plans.create_plan_issue(title="t", body="b", repo_root=ROOT, run_id="01RID")
     assert issue.number == 7 and issue.existed is True
@@ -100,12 +102,26 @@ def test_find_plan_issue_match_and_no_match(monkeypatch):
         {"number": 1, "html_url": "u/1", "body": _header("OTHER")},
         {"number": 2, "html_url": "u/2", "body": _header("01RID")},
     ]
-    monkeypatch.setattr(subprocess, "run", _GhRecorder(get=_Proc(0, stdout=json.dumps(issues))))
+    monkeypatch.setattr(subprocess, "run", _GhRecorder(get=_Proc(0, stdout=json.dumps([issues]))))
     found = plans.find_plan_issue(run_id="01RID", repo_root=ROOT)
     assert found is not None and found.number == 2
 
     monkeypatch.setattr(subprocess, "run", _GhRecorder(get=_Proc(0, stdout="[]")))
     assert plans.find_plan_issue(run_id="01RID", repo_root=ROOT) is None
+
+
+def test_find_plan_issue_matches_beyond_the_first_page(monkeypatch):
+    # The idempotency scan is exhaustive: a run_id match sitting in the SECOND slurped page array
+    # (i.e. past GitHub's default first page) must be found — a first-page miss would mint a
+    # duplicate issue on re-save. Covers the parameterized find_learn_issue / find_gist_issue /
+    # find_objective_issue finders too (they share this code path).
+    page1 = [{"number": n, "html_url": f"u/{n}", "body": _header(f"OTHER{n}")} for n in range(30)]
+    page2 = [{"number": 777, "html_url": "u/777", "body": _header("01RID")}]
+    monkeypatch.setattr(
+        subprocess, "run", _GhRecorder(get=_Proc(0, stdout=json.dumps([page1, page2])))
+    )
+    found = plans.find_plan_issue(run_id="01RID", repo_root=ROOT)
+    assert found is not None and found.number == 777
 
 
 # --- learn issue -------------------------------------------------------------------
@@ -122,7 +138,7 @@ def test_find_learn_issue_is_label_scoped_and_ignores_the_plan_issue(monkeypatch
     # plan-header block) must NOT match find_learn_issue (which reads the learn-header block). This
     # is exactly what stops /learn from treating the plan issue as the learn issue.
     plan_issue = [{"number": 7, "html_url": "u/7", "body": _header("01RID")}]
-    rec = _GhRecorder(get=_Proc(0, stdout=json.dumps(plan_issue)))
+    rec = _GhRecorder(get=_Proc(0, stdout=json.dumps([plan_issue])))
     monkeypatch.setattr(subprocess, "run", rec)
     assert plans.find_learn_issue(run_id="01RID", repo_root=ROOT) is None
     # ...and the lookup is label-scoped to perk:learn.
@@ -132,7 +148,7 @@ def test_find_learn_issue_is_label_scoped_and_ignores_the_plan_issue(monkeypatch
 def test_find_learn_issue_matches_a_learn_issue_with_the_run_id(monkeypatch):
     learn_issue = [{"number": 99, "html_url": "u/99", "body": _learn_header("01RID")}]
     monkeypatch.setattr(
-        subprocess, "run", _GhRecorder(get=_Proc(0, stdout=json.dumps(learn_issue)))
+        subprocess, "run", _GhRecorder(get=_Proc(0, stdout=json.dumps([learn_issue])))
     )
     found = plans.find_learn_issue(run_id="01RID", repo_root=ROOT)
     assert found is not None and found.number == 99
@@ -140,7 +156,7 @@ def test_find_learn_issue_matches_a_learn_issue_with_the_run_id(monkeypatch):
 
 def test_create_learn_issue_idempotent_returns_existing_no_create(monkeypatch):
     existing = [{"number": 99, "html_url": "u/99", "body": _learn_header("01RID")}]
-    rec = _GhRecorder(get=_Proc(0, stdout=json.dumps(existing)))
+    rec = _GhRecorder(get=_Proc(0, stdout=json.dumps([existing])))
     monkeypatch.setattr(subprocess, "run", rec)
     issue = plans.create_learn_issue(
         title="Learnings: X", body="b", repo_root=ROOT, run_id="01RID", plan_number=7
@@ -204,7 +220,7 @@ def test_list_learn_issues_parses_open_issues(monkeypatch):
         "not-a-dict",  # skipped defensively
         {"number": 60, "title": "PR", "html_url": "u/60", "body": "b", "pull_request": {}},
     ]
-    rec = _GhRecorder(get=_Proc(0, stdout=json.dumps(issues)))
+    rec = _GhRecorder(get=_Proc(0, stdout=json.dumps([issues])))
     monkeypatch.setattr(subprocess, "run", rec)
     summaries = plans.list_learn_issues(repo_root=ROOT)
     assert [s.number for s in summaries] == [45, 50]  # the PR + the non-dict are skipped
@@ -215,6 +231,45 @@ def test_list_learn_issues_parses_open_issues(monkeypatch):
 def test_list_learn_issues_raises_on_infra_failure(monkeypatch):
     monkeypatch.setattr(subprocess, "run", _GhRecorder(get=_Proc(1, stderr="HTTP 500")))
     with pytest.raises(github.GitHubError):
+        plans.list_learn_issues(repo_root=ROOT)
+
+
+def test_list_learn_issues_returns_every_issue_across_pages(monkeypatch):
+    # The silent-truncation incident regression: with more open learn issues than GitHub's
+    # default 30-row page, the census must return every issue from every slurped page — and the
+    # single gh invocation must actually paginate (--paginate --slurp, per_page=100).
+    page1 = [
+        {"number": n, "title": f"L{n}", "html_url": f"u/{n}", "body": f"body {n}"}
+        for n in range(130, 100, -1)  # 30 rows: the default first page
+    ]
+    page2 = [
+        {"number": n, "title": f"L{n}", "html_url": f"u/{n}", "body": f"body {n}"}
+        for n in range(100, 81, -1)  # 19 more: the rows the unpaginated read used to drop
+    ]
+    rec = _GhRecorder(get=_Proc(0, stdout=json.dumps([page1, page2])))
+    monkeypatch.setattr(subprocess, "run", rec)
+    summaries = plans.list_learn_issues(repo_root=ROOT)
+    assert [s.number for s in summaries] == list(range(130, 100, -1)) + list(range(100, 81, -1))
+    [call] = rec.calls
+    for token in ("--paginate", "--slurp", "per_page=100", "labels=perk:learn", "state=open"):
+        assert any(token in tok for tok in call), token
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        # a non-list page element after a valid page: no partial census may escape
+        [[{"number": 1, "title": "L1", "html_url": "u/1", "body": "b"}], {"not": "a page"}],
+        # a non-list top level
+        {"weird": True},
+    ],
+)
+def test_list_learn_issues_fail_closed_on_unexpected_page_shape(monkeypatch, payload):
+    # The exhaustive read is a fail-closed boundary ("can't verify => don't promise"): an
+    # unexpected slurp shape raises rather than folding to a partial/empty census — a partial
+    # result here is exactly the silent-truncation bug being guarded against.
+    monkeypatch.setattr(subprocess, "run", _GhRecorder(get=_Proc(0, stdout=json.dumps(payload))))
+    with pytest.raises(github.GitHubError, match="unexpected slurped issues"):
         plans.list_learn_issues(repo_root=ROOT)
 
 
@@ -242,6 +297,17 @@ def test_list_open_plan_issues_raises_on_infra_failure(monkeypatch):
     monkeypatch.setattr(subprocess, "run", _GhRecorder(get=_Proc(1, stderr="HTTP 500")))
     with pytest.raises(github.GitHubError):
         plans.list_open_plan_issues(repo_root=ROOT)
+
+
+def test_list_open_plan_issues_stays_a_bounded_one_page_read(monkeypatch):
+    # The bounded browse contract, pinned: exactly one GET with NO pagination argv — membership
+    # beyond GitHub's default page is deliberately not promised (unlike the full-census readers).
+    rec = _GhRecorder(get=_Proc(0, stdout="[]"))
+    monkeypatch.setattr(subprocess, "run", rec)
+    plans.list_open_plan_issues(repo_root=ROOT)
+    [call] = rec.calls
+    for token in ("--paginate", "--slurp", "per_page"):
+        assert not any(token in tok for tok in call), token
 
 
 # --- pending-learn backlog (`perk learn pending`) --------------------------------------------
@@ -346,7 +412,7 @@ def test_find_gist_issue_is_label_scoped_and_ignores_the_plan_issue(monkeypatch)
     # A list carrying the PLAN issue (same run_id, but its run_id lives in the plan-header
     # block) must NOT match find_gist_issue (which reads the gist-header block).
     plan_issue = [{"number": 7, "html_url": "u/7", "body": _header("01RID")}]
-    rec = _GhRecorder(get=_Proc(0, stdout=json.dumps(plan_issue)))
+    rec = _GhRecorder(get=_Proc(0, stdout=json.dumps([plan_issue])))
     monkeypatch.setattr(subprocess, "run", rec)
     assert plans.find_gist_issue(run_id="01RID", repo_root=ROOT) is None
     # ...and the lookup is label-scoped to perk:gist.
@@ -355,14 +421,16 @@ def test_find_gist_issue_is_label_scoped_and_ignores_the_plan_issue(monkeypatch)
 
 def test_find_gist_issue_matches_a_gist_issue_with_the_run_id(monkeypatch):
     gist_issue = [{"number": 88, "html_url": "u/88", "body": _gist_header("01RID")}]
-    monkeypatch.setattr(subprocess, "run", _GhRecorder(get=_Proc(0, stdout=json.dumps(gist_issue))))
+    monkeypatch.setattr(
+        subprocess, "run", _GhRecorder(get=_Proc(0, stdout=json.dumps([gist_issue])))
+    )
     found = plans.find_gist_issue(run_id="01RID", repo_root=ROOT)
     assert found is not None and found.number == 88
 
 
 def test_create_gist_issue_idempotent_returns_existing_no_create(monkeypatch):
     existing = [{"number": 88, "html_url": "u/88", "body": _gist_header("01RID")}]
-    rec = _GhRecorder(get=_Proc(0, stdout=json.dumps(existing)))
+    rec = _GhRecorder(get=_Proc(0, stdout=json.dumps([existing])))
     monkeypatch.setattr(subprocess, "run", rec)
     issue = plans.create_gist_issue(
         title="Gist: X", body="b", repo_root=ROOT, run_id="01RID", scope="plan"
@@ -408,7 +476,7 @@ def test_list_gist_issues_parses_open_issues(monkeypatch):
         "not-a-dict",  # skipped defensively
         {"number": 60, "title": "PR", "html_url": "u/60", "body": "b", "pull_request": {}},
     ]
-    rec = _GhRecorder(get=_Proc(0, stdout=json.dumps(issues)))
+    rec = _GhRecorder(get=_Proc(0, stdout=json.dumps([issues])))
     monkeypatch.setattr(subprocess, "run", rec)
     summaries = plans.list_gist_issues(repo_root=ROOT)
     assert [s.number for s in summaries] == [45]  # the PR + the non-dict are skipped

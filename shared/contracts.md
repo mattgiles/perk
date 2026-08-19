@@ -681,7 +681,11 @@ create_plan_issue{ title, body, labels[], run_id }  -> PlanIssue{ number, url, e
 add_issue_comment{ issue, body }                    -> CommentResult{ posted }
     # POST repos/{o}/{r}/issues/{n}/comments (the plan-body first comment)
 find_plan_issue{ run_id }                           -> PlanIssue | null
-    # GET repos/{o}/{r}/issues?labels=perk:plan&state=open + header run_id match
+    # GET repos/{o}/{r}/issues?labels=perk:plan&state=open + header run_id match. EXHAUSTIVE on
+    # GitHub: `gh api --paginate --slurp` with per_page=100 scans the FULL open set (never just
+    # the default ~30-row first page — a first-page miss would mint a duplicate issue); the
+    # parameterized learn/gist/objective finders inherit the same scan. An unexpected slurped
+    # page shape raises GitHubError (fail-closed — no partial census).
 update_plan_issue{ number, title, body_comment }    -> PlanUpdate{ number, body_updated, title_updated, dry_run }
     # find the plan-body comment by marker -> PATCH .../issues/comments/{id} (-F body=@file)
     #   (fallback: POST a fresh comment, body_updated:false) ; PATCH .../issues/{n} (-f title=)
@@ -842,8 +846,11 @@ create_learn_issue{ title, body, run_id, plan_number } -> PlanIssue{ number, url
     # renders a learn-header block { run_id, created, plan } into the body so the finder matches.
 list_learn_issues{}                                 -> LearnIssueSummary[]{ number, title, url, body }
     # GET .../issues?labels=perk:learn&state=open (the find_plan_issue list call, label-scoped to
-    # perk:learn). Returns every open learn issue's full body for the factory inbox; raises on
-    # infra failure (never masks as empty); skips non-dict / pull_request entries.
+    # perk:learn). Returns every open learn issue's full body for the factory inbox — "every
+    # open" backed by full pagination on GitHub (`gh api --paginate --slurp`, per_page=100;
+    # Linear already cursor-paginates); an unexpected page shape raises (fail-closed, no partial
+    # census). Raises on infra failure (never masks as empty); skips non-dict / pull_request
+    # entries.
 list_plans_pending_learn{ limit }                   -> PendingLearnPlan[]{ id, title, url, closed_at }
     # GET .../issues?labels=perk:plan&state=closed&sort=updated&direction=desc&per_page=<limit>
     # (Linear: terminal-state label query + plan-header attachment decode, paginated then truncated).
@@ -5858,7 +5865,10 @@ lenient read — an unknown stored scope parses to `None`). Per-backend storage:
 `find_gist_issue{run_id}` (label + header-key scoped — cannot return a plan/learn issue),
 `create_gist_issue{title, body, run_id, scope, dry_run}` (idempotent via the finder; stamps
 `scope` into the header), and `list_gist_issues{} -> GistSummary[]{id, title, url, body, scope,
-adopted}` — every OPEN `perk:gist` issue; raises on infra failure, never masks as empty. The
+adopted}` — every OPEN `perk:gist` issue; raises on infra failure, never masks as empty. On
+GitHub `find_gist_issue` / `list_gist_issues` ride the same exhaustive full-open-set read as the
+plan/learn ops (`gh api --paginate --slurp`, per_page=100; fail-closed on an unexpected page
+shape). The
 `ObjectiveStore` grows the project-tier pair in the no-op-return family:
 `create_gist_source{title, prose, run_id, dry_run} -> ObjectiveRef | None` (`None` = "no project
 surface" — the CLI falls back to the issue tier; the Linear project store creates/finds the gist
