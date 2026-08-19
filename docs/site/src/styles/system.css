@@ -37,6 +37,12 @@
    * sanctioned literal-hex exception in this file. Code text stays the theme's primary text
    * (Starlight default; no rule). */
   --sl-color-bg-inline-code: #233029;
+
+  /* U7 — §2 shell edges: the header-bottom, sidebar inline-end, and mobile-ToC hairlines all
+   * consume this Starlight property, which defaults to --sl-color-black — in dark that is the
+   * page canvas itself, a nearly invisible edge. The bound border token resolves per theme
+   * (light already equals it). */
+  --sl-color-hairline-shade: var(--perk-border);
 }
 
 @media (min-width: 768px) {
@@ -132,7 +138,7 @@ mobile-starlight-toc summary:focus-visible {
 
 /* §4C table containment: a visible border frame around wide tables, keeping Starlight's
  * `display: block; overflow: auto` block-contained horizontal scroll (the page itself never
- * widens). Code blocks stay on Expressive Code defaults — no rule. */
+ * widens). */
 .sl-markdown-content table {
   background: var(--perk-surface);
   border: 1px solid var(--perk-border);
@@ -201,4 +207,70 @@ body:has(
   .sl-markdown-content :is(p, ul, ol, blockquote) {
     max-width: 72ch;
   }
+}
+
+/* U1 + U2 — §2/§4C code frames: the surface/border tokens (U1) and the 6px controls radius
+ * (U2) on Expressive Code frames. One element-level rule wins in both themes: EC's dark
+ * values are declared on :root (inherited — element-level beats inherited) and its light
+ * values sit on the element but inside @layer starlight.components (unlayered beats layered).
+ * The radius subtracts --ec-brdWd because EC renders the frame's outer radius as
+ * inner-radius + border-width. Code scrolling and syntax token themes stay on Expressive
+ * Code defaults. */
+.expressive-code {
+  --ec-codeBg: var(--perk-surface);
+  --ec-frm-edBg: var(--perk-surface);
+  --ec-frm-trmBg: var(--perk-surface);
+  --ec-brdCol: var(--perk-border);
+  --ec-brdRad: calc(var(--perk-radius-control) - var(--ec-brdWd));
+  --ec-frm-edTabBrdRad: calc(var(--perk-radius-control) - var(--ec-brdWd));
+}
+
+/* U3 — §2 blockquotes: a 3px neutral rule replaces Starlight's bare 1px hairline (both
+ * blockquote semantics; grouping-only — text stays the theme's primary). */
+.sl-markdown-content blockquote {
+  border-inline-start: 3px solid var(--perk-border);
+}
+
+/* U4 — §3 eyebrow vocabulary on table headers (mono, 12px, 600, tracked, uppercase, muted —
+ * muted-on-surface is §9-verified). No tinted band. */
+.sl-markdown-content th {
+  font-family: var(--sl-font-mono), monospace;
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--perk-muted);
+}
+
+/* U5 — §2 prose section interval (24–32px): heading space onto the bound interval.
+ * Starlight wraps article headings in .sl-heading-wrapper and spaces them with a layered
+ * 1.5em wrapper rule (~48px above H2 / ~36px above H3 at the §3 sizes); these unlayered
+ * rules re-bind H2/H3. H4's ~27px is already in-interval — no rule. */
+.sl-markdown-content :not(h1, h2, h3, h4, h5, h6, .sl-heading-wrapper)
+  + .sl-heading-wrapper.level-h2 {
+  margin-top: 2rem;
+}
+.sl-markdown-content
+  :not(h1, h2, h3, h4, h5, h6, .sl-heading-wrapper)
+  + .sl-heading-wrapper.level-h3 {
+  margin-top: 1.5rem;
+}
+
+/* U6 — §3 balanced heading wraps: on the block wrapper (the heading element itself renders
+ * inline inside it) plus the unwrapped article H1. Progressive enhancement — browsers
+ * without text-wrap: balance keep native wrapping. */
+h1#_top,
+.sl-markdown-content .sl-heading-wrapper {
+  text-wrap: balance;
+}
+
+/* U8 — §2 controls radius on the header search button (8px native). */
+button[data-open-modal] {
+  border-radius: var(--perk-radius-control);
+}
+
+/* U9 — §2 controls radius on sidebar entry links, including the aria-current pill (4px
+ * native; the pill keeps its native accent fill). */
+#starlight__sidebar a {
+  border-radius: var(--perk-radius-control);
 }
