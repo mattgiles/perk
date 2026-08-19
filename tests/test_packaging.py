@@ -256,6 +256,7 @@ def test_wheel_bundles_agents(built_wheel):
         "perk/_agents/review-angle-selector.md",
         "perk/_agents/draft-reviewer.md",
         "perk/_agents/dream-analyst.md",
+        "perk/_agents/dream-reducer.md",
         "perk/_agents/harvest-analyst.md",
     }
     assert expected <= names, expected - names

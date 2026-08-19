@@ -181,6 +181,8 @@ test("loadPerkConfig: parses all [models.subagents] agent keys", () => {
       'learn-analyst = "a/analyst"\nadversarial-reviewer = "a/adversarial"\n' +
       'review-angle-selector = "a/selector"\ndraft-reviewer = "a/draft"\n' +
       'harvest-analyst = "a/harvest"\n' +
+      'dream-analyst = "a/dreamer"\n' +
+      'dream-reducer = "a/reducer"\n' +
       'session-auditor = "a/auditor"\n',
   });
   assert.deepEqual(loadPerkConfig(cwd).subagents, {
@@ -193,6 +195,8 @@ test("loadPerkConfig: parses all [models.subagents] agent keys", () => {
     "review-angle-selector": "a/selector",
     "draft-reviewer": "a/draft",
     "harvest-analyst": "a/harvest",
+    "dream-analyst": "a/dreamer",
+    "dream-reducer": "a/reducer",
     "session-auditor": "a/auditor",
   });
 });
