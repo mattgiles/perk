@@ -144,6 +144,60 @@ class LinearProjectObjectiveStore:
                 existed=True,
             )
 
+    def find_open_objective_by_origin(
+        self, *, origin: objective.ObjectiveOrigin, exclude_run_id: str | None = None
+    ) -> objective_store.ObjectiveRef | None:
+        """The exhaustive-or-raise open-by-origin lookup (§8.24) — **team-scoped in v1** (a
+        cross-team origin-stamped objective is invisible; documented limitation).
+
+        Sweeps EVERY team project (``list_projects``, the existing paginated read) and resolves
+        each project's metadata sentinel (``_find_sentinel`` — the sentinel IS the authoritative
+        objective identity; no Reconcilable-marker heuristic). A sentinel-less project is
+        skipped — the only sane arm for a team containing ordinary (non-perk) projects, and the
+        same accepted create-crash orphan window ``find_objective`` already tolerates. A
+        kind-matched header attachment with a malformed payload raises
+        (``attachments.find_perk_attachment`` is fail-loud — the uncertainty raise); an origin
+        outside the closed vocabulary raises via ``objective.origin_value``. A surviving match
+        costs ONE ``project_or_none`` state read: ``completed``/``canceled`` ⇒ closed, skipped;
+        anything else (including a missing state) ⇒ open. The sweep costs one ``project_issues``
+        query per team project — the price of authority on a rare launch-time path (never a TAB
+        path); every query composed here (``list_projects`` / ``project_issues`` /
+        ``project_or_none``) is an existing production query shape.
+        """
+        with _translate_objective():
+            for project in self._projects.list_projects():
+                project_id = _require_str(project.get("id"), "project id")
+                sentinel = self._find_sentinel(project_id)
+                if sentinel is None:
+                    continue  # not a perk objective (or the accepted create-crash orphan)
+                header_att = attachments.find_perk_attachment(
+                    sentinel.attachments, kind=attachments.OBJECTIVE_HEADER_KIND
+                )
+                if header_att is None:
+                    continue  # unreachable in practice: the sentinel keys on this kind
+                try:
+                    stored = objective.origin_value(header_att.payload.get("origin"))
+                except ValueError as exc:
+                    raise IssueBackendError(f"objective {project_id!r}: {exc}") from exc
+                if stored is None or stored is not origin:
+                    continue
+                run_id = header_att.payload.get("run_id")
+                if (
+                    exclude_run_id is not None
+                    and isinstance(run_id, str)
+                    and run_id == exclude_run_id
+                ):
+                    continue
+                state_row = self._projects.project_or_none(project_id, "id url state")
+                state = None if state_row is None else _opt_str(state_row.get("state"))
+                if state in ("completed", "canceled"):
+                    continue  # closed — not part of the open population
+                url = None if state_row is None else _opt_str(state_row.get("url"))
+                if url is None:
+                    url = _require_str(project.get("url"), "project url")
+                return objective_store.ObjectiveRef(id=project_id, url=url, existed=True)
+            return None
+
     def read_objective_source(
         self, *, source_id: str
     ) -> objective_store.AdoptableObjectiveSource | None:
@@ -338,6 +392,14 @@ class LinearProjectObjectiveStore:
         complete). Idempotent on ``run_id``; ``dry_run`` → ``None``; an empty ``roadmap_nodes``
         raises.
 
+        **Origin carry (§8.24):** before composing the successor header, the create arm resolves
+        the OLD project's sentinel and validates its stored header ``origin`` through
+        ``objective.origin_value`` (a junk stored value raises), stamping the carried value into
+        the successor — no parameter (origin stays store/launch-owned). A sentinel-less /
+        header-less old project carries nothing (tolerant of the documented create-crash orphan
+        window). The read happens before ``projectCreate`` so a junk origin never orphans a
+        half-made successor project.
+
         ``close_predecessor=False`` is the §8.53 deferred-close arm: no old-side stamp / cancels /
         completion (those move to :meth:`finalize_supersession`), and the found-by-``run_id`` arm
         is **convergent** — it verifies + completes the interrupted subordinate creation writes
@@ -368,6 +430,22 @@ class LinearProjectObjectiveStore:
                     "objective roadmap is empty: an objective needs at least one node"
                 )
 
+            # The origin carry (§8.24): read the OLD sentinel's stored origin (validated — junk
+            # raises) before any successor write. Sentinel-less/header-less carries nothing.
+            carried_origin: objective.ObjectiveOrigin | None = None
+            old_sentinel = self._find_sentinel(old_objective_id)
+            if old_sentinel is not None:
+                old_header_att = attachments.find_perk_attachment(
+                    old_sentinel.attachments, kind=attachments.OBJECTIVE_HEADER_KIND
+                )
+                if old_header_att is not None:
+                    try:
+                        carried_origin = objective.origin_value(
+                            old_header_att.payload.get("origin")
+                        )
+                    except ValueError as exc:
+                        raise IssueBackendError(f"objective {old_objective_id!r}: {exc}") from exc
+
             # --- create the new (superseding) project + its overview + its fresh sentinel
             # (header carries `supersedes=<old>`) ---
             grouped = objective.group_nodes_by_phase(nodes)
@@ -387,6 +465,7 @@ class LinearProjectObjectiveStore:
                 supersedes=old_objective_id,
                 delivery=None if delivery is None else delivery.value,
                 delivery_lineage=delivery_lineage,
+                origin=None if carried_origin is None else carried_origin.value,
             )
             manifest_names = {f"{key[0]}{key[1]}": value for key, value in names.items()}
             self._create_metadata_sentinel(
@@ -786,11 +865,14 @@ class LinearProjectObjectiveStore:
         roadmap_nodes: list[objective.ObjectiveNode] | None = None,
         delivery: objective.DeliveryPolicy | None = None,
         delivery_lineage: str | None = None,
+        origin: objective.ObjectiveOrigin | None = None,
         dry_run: bool = False,
     ) -> objective_store.ObjectiveRef:
         """Create the project-backed objective: a project (overview = header + Reconcilable prose),
         one milestone per phase, one node-issue per roadmap node (in ``node_sort_key`` order),
-        and a blocking relation per EXPLICIT ``depends_on`` edge. Idempotent on ``run_id``."""
+        and a blocking relation per EXPLICIT ``depends_on`` edge. Idempotent on ``run_id``.
+        ``origin`` (§8.24) stamps into the sentinel's initial header attachment atomically;
+        ``None`` keeps the attachment payload key-set identical."""
         if dry_run:
             return objective_store.ObjectiveRef(id="0", url="(dry-run)", existed=False)
         with _translate_objective():
@@ -836,6 +918,7 @@ class LinearProjectObjectiveStore:
                 base=base,
                 delivery=None if delivery is None else delivery.value,
                 delivery_lineage=delivery_lineage,
+                origin=None if origin is None else origin.value,
             )
             manifest_names = {f"{key[0]}{key[1]}": value for key, value in names.items()}
             self._create_metadata_sentinel(

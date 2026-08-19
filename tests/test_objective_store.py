@@ -23,6 +23,7 @@ class _FakeObjective:
     run_id: str
     nodes: tuple[objective.ObjectiveNode, ...]
     state: str = "OPEN"
+    origin: str | None = None
 
 
 class _FakeObjectiveStore:
@@ -40,6 +41,21 @@ class _FakeObjectiveStore:
                 return objective_store.ObjectiveRef(
                     id=objective_id, url=f"fake://objective/{objective_id}", existed=True
                 )
+        return None
+
+    def find_open_objective_by_origin(
+        self, *, origin: objective.ObjectiveOrigin, exclude_run_id: str | None = None
+    ) -> objective_store.ObjectiveRef | None:
+        # A real conformer (not a stub): first OPEN objective with a matching origin whose
+        # run_id is not the caller's own — so future consumer CLI tests can drive through it.
+        for objective_id, obj in self._objectives.items():
+            if obj.state != "OPEN" or obj.origin != origin.value:
+                continue
+            if exclude_run_id is not None and obj.run_id == exclude_run_id:
+                continue
+            return objective_store.ObjectiveRef(
+                id=objective_id, url=f"fake://objective/{objective_id}", existed=True
+            )
         return None
 
     def read_objective_source(
@@ -107,6 +123,7 @@ class _FakeObjectiveStore:
         roadmap_nodes: list[objective.ObjectiveNode] | None = None,
         delivery: objective.DeliveryPolicy | None = None,
         delivery_lineage: str | None = None,
+        origin: objective.ObjectiveOrigin | None = None,
         dry_run: bool = False,
     ) -> objective_store.ObjectiveRef:
         if dry_run:
@@ -119,7 +136,11 @@ class _FakeObjectiveStore:
         objective_id = str(self._next_id)
         self._next_id += 1
         self._objectives[objective_id] = _FakeObjective(
-            title=title, body=body, run_id=run_id, nodes=tuple(roadmap_nodes)
+            title=title,
+            body=body,
+            run_id=run_id,
+            nodes=tuple(roadmap_nodes),
+            origin=None if origin is None else origin.value,
         )
         return objective_store.ObjectiveRef(
             id=objective_id, url=f"fake://objective/{objective_id}", existed=False
@@ -297,6 +318,40 @@ class TestFakeStoreConformance:
         again = store.create_objective(title="t", body="b", run_id="RUN1", roadmap_nodes=[_node()])
         assert again.id == created.id
         assert again.existed is True
+
+    def test_find_open_objective_by_origin_round_trip(self) -> None:
+        store = _make_store()
+        created = store.create_objective(
+            title="t",
+            body="b",
+            run_id="RUN9",
+            roadmap_nodes=[_node()],
+            origin=objective.ObjectiveOrigin.LEARN_DREAM,
+        )
+        found = store.find_open_objective_by_origin(origin=objective.ObjectiveOrigin.LEARN_DREAM)
+        assert found is not None
+        assert found.id == created.id and found.existed is True
+        # the caller-exclusion: excluding the objective's own run finds nothing
+        assert (
+            store.find_open_objective_by_origin(
+                origin=objective.ObjectiveOrigin.LEARN_DREAM, exclude_run_id="RUN9"
+            )
+            is None
+        )
+        # a closed objective leaves the open population
+        store.close_objective(objective_id=created.id)
+        assert (
+            store.find_open_objective_by_origin(origin=objective.ObjectiveOrigin.LEARN_DREAM)
+            is None
+        )
+
+    def test_find_open_objective_by_origin_ignores_origin_less_objectives(self) -> None:
+        store = _make_store()
+        store.create_objective(title="t", body="b", run_id="RUN1", roadmap_nodes=[_node()])
+        assert (
+            store.find_open_objective_by_origin(origin=objective.ObjectiveOrigin.LEARN_DREAM)
+            is None
+        )
 
     def test_create_objective_dry_run_shape(self) -> None:
         store = _make_store()

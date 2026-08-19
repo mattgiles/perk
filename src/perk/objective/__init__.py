@@ -72,6 +72,7 @@ from perk.objective._models import (
     ObjectiveHeader,
     ObjectiveNode,
     ObjectiveNodeEntry,
+    ObjectiveOrigin,
     PlanSelection,
     _find_marker_pair,
     _has_block,
@@ -106,6 +107,7 @@ from perk.objective.manifest import (
 )
 from perk.objective.parse import (
     delivery_policy,
+    origin_value,
     parse_adopt_mapping,
     parse_roadmap_nodes,
     parse_structured_roadmap,
@@ -160,6 +162,7 @@ __all__ = [
     "ObjectiveHeader",
     "ObjectiveNode",
     "ObjectiveNodeEntry",
+    "ObjectiveOrigin",
     "PlanSelection",
     "_escape_cell",
     "_find_marker_pair",
@@ -181,6 +184,7 @@ __all__ = [
     "nodes_for_pr",
     "objective_callout",
     "objective_created_update_body",
+    "origin_value",
     "parse_adopt_mapping",
     "parse_manifest",
     "parse_manifest_data",

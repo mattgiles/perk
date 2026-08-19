@@ -57,6 +57,10 @@ DELIVERY_TRAIN_MAX_LAYERS = 100
 
 # The valid `objective-header` field names (LBYL on the staged-population schema, mirroring
 # plan.PLAN_HEADER_FIELDS). `status` is the objective-level rollup, stored explicitly.
+# `origin` is deliberately EXCLUDED (contracts.md §8.24): it is stamped only at initial creation
+# (plus the store-side supersession carry), so the `update_objective_header` merge writers
+# structurally reject any post-create origin write — while a stored origin still round-trips
+# untouched through unrelated merges (all three writers merge into the parsed existing mapping).
 OBJECTIVE_HEADER_FIELDS = frozenset(
     {
         "run_id",
@@ -133,6 +137,19 @@ def mint_delivery_lineage() -> str:
     ``perk.state.run_id`` (same ULID vocabulary, different domain).
     """
     return str(ULID())
+
+
+class ObjectiveOrigin(StrEnum):
+    """The closed provenance vocabulary for machine-created objectives (contracts.md §8.24).
+
+    Absence of the objective-header ``origin`` field ⇒ a normally-authored objective; the field
+    is stamped at initial creation (``ObjectiveStore.create_objective``) and carried across
+    supersession store-side. Launch-owned — never model- or human-supplied — and deliberately
+    absent from ``OBJECTIVE_HEADER_FIELDS`` so the ``update_objective_header`` merge writers
+    reject any post-create origin write.
+    """
+
+    LEARN_DREAM = "learn-dream"
 
 
 class DeliveryPolicy(StrEnum):
@@ -293,6 +310,11 @@ class ObjectiveHeader:
     # The stable delivery-train identity across superseding objectives (a ULID string; minted at
     # stacked authoring, copied by replan). Present iff the lineage exists (stacked only).
     delivery_lineage: str | None = None
+    # The machine-creation provenance (typed `str` like `status`, with `ObjectiveOrigin` as the
+    # domain vocabulary). Rendered only when set — absence keeps existing headers byte-identical
+    # (the §8.42 additive-field rule). Stamped at initial creation + carried across supersession;
+    # never merge-written (see OBJECTIVE_HEADER_FIELDS).
+    origin: str | None = None
 
 
 def _has_block(text: str, key: str) -> bool:

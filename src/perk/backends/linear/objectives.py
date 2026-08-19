@@ -53,6 +53,18 @@ class LinearObjectiveStore:
             )
         return None if found is None else _objective_ref(found)
 
+    def find_open_objective_by_origin(
+        self, *, origin: objective.ObjectiveOrigin, exclude_run_id: str | None = None
+    ) -> objective_store.ObjectiveRef | None:
+        """Dormant issue-backed store: **raises** — deliberately OUTSIDE the ``→ None``/``→
+        False`` no-op family (§8.24). The lookup's contract is exhaustive-or-raise: ``None``
+        asserts *authoritatively none in the open population*, and a store that cannot answer
+        authoritatively must refuse loudly — a silent ``None`` here would falsely open a
+        fail-closed guard."""
+        raise objective_store.ObjectiveStoreError(
+            "the issue-backed Linear objective store does not support origin lookups"
+        )
+
     def _find_issue_by_run_id(
         self, *, label: str, header_key: str, run_id: str
     ) -> issue_backend.IssueRef | None:
@@ -143,6 +155,7 @@ class LinearObjectiveStore:
         roadmap_nodes: list[objective.ObjectiveNode] | None = None,
         delivery: objective.DeliveryPolicy | None = None,
         delivery_lineage: str | None = None,
+        origin: objective.ObjectiveOrigin | None = None,
         dry_run: bool = False,
     ) -> objective_store.ObjectiveRef:
         if dry_run:
@@ -182,6 +195,7 @@ class LinearObjectiveStore:
                 base=base,
                 delivery=None if delivery is None else delivery.value,
                 delivery_lineage=delivery_lineage,
+                origin=None if origin is None else origin.value,
             )
             header_block = plan.render_metadata_block(
                 objective.OBJECTIVE_HEADER_KEY,

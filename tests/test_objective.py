@@ -416,6 +416,49 @@ def test_delivery_policy_classifier():
         o.delivery_policy({"delivery": "weird"})
 
 
+# --- objective origin: header field, render omission, fail-closed validator (§8.24) ---------
+
+
+def test_objective_header_origin_round_trips():
+    header = o.ObjectiveHeader(run_id="01RID", created="t", origin="learn-dream")
+    data = o.render_header_block(header)
+    assert data["origin"] == "learn-dream"
+    rendered = render_metadata_block(o.OBJECTIVE_HEADER_KEY, data)
+    parsed = find_metadata_block(rendered, o.OBJECTIVE_HEADER_KEY)
+    assert parsed is not None and parsed["origin"] == "learn-dream"
+    # Deliberately NOT merge-writable: the update_objective_header writers reject it (LBYL),
+    # making origin create/supersede-only by structure.
+    assert "origin" not in o.OBJECTIVE_HEADER_FIELDS
+
+
+def test_objective_header_origin_emitted_last_after_delivery_pair():
+    header = o.ObjectiveHeader(
+        run_id="01RID",
+        created="t",
+        delivery="stacked",
+        delivery_lineage="01LINEAGE",
+        origin="learn-dream",
+    )
+    data = o.render_header_block(header)
+    assert list(data)[-3:] == ["delivery", "delivery_lineage", "origin"]
+
+
+def test_objective_header_origin_omitted_when_absent():
+    # The byte-compat proof (mirrors the delivery pair): absence keeps the rendered header
+    # key-set identical to today's shape.
+    data = o.render_header_block(o.ObjectiveHeader(run_id="01RID", created="t"))
+    assert "origin" not in data
+
+
+def test_origin_value_validator():
+    assert o.origin_value(None) is None
+    assert o.origin_value("learn-dream") is o.ObjectiveOrigin.LEARN_DREAM
+    with pytest.raises(ValueError, match="unknown objective origin"):
+        o.origin_value("weird")
+    with pytest.raises(ValueError, match="unknown objective origin"):
+        o.origin_value(42)
+
+
 def test_delivery_order_explicit_chain():
     nodes = [
         o.ObjectiveNode(id="1.3", description="C", status=N.PENDING, depends_on=("1.2",)),

@@ -89,6 +89,18 @@ class GitHubObjectiveStore:
             found = objectives.find_objective_issue(run_id=run_id, repo_root=self._repo_root)
         return None if found is None else _objective_ref(found)
 
+    def find_open_objective_by_origin(
+        self, *, origin: objective.ObjectiveOrigin, exclude_run_id: str | None = None
+    ) -> objective_store.ObjectiveRef | None:
+        """The exhaustive-or-raise open-by-origin lookup (§8.24) over ALL pages of the open
+        ``perk:objective`` label population (delegates to
+        ``objectives.find_objective_issue_by_origin``)."""
+        with _translate():
+            found = objectives.find_objective_issue_by_origin(
+                origin=origin.value, exclude_run_id=exclude_run_id, repo_root=self._repo_root
+            )
+        return None if found is None else _objective_ref(found)
+
     def read_objective_source(
         self, *, source_id: str
     ) -> objective_store.AdoptableObjectiveSource | None:
@@ -217,6 +229,7 @@ class GitHubObjectiveStore:
         roadmap_nodes: list[objective.ObjectiveNode] | None = None,
         delivery: objective.DeliveryPolicy | None = None,
         delivery_lineage: str | None = None,
+        origin: objective.ObjectiveOrigin | None = None,
         dry_run: bool = False,
     ) -> objective_store.ObjectiveRef:
         with _translate():
@@ -230,6 +243,7 @@ class GitHubObjectiveStore:
                 roadmap_nodes=roadmap_nodes,
                 delivery=None if delivery is None else delivery.value,
                 delivery_lineage=delivery_lineage,
+                origin=None if origin is None else origin.value,
                 dry_run=dry_run,
             )
         return _objective_ref(created)

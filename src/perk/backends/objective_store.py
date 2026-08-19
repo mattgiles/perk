@@ -247,6 +247,38 @@ class ObjectiveStore(Protocol):
         match; raises on an infra failure (never masks the error as None)."""
         ...
 
+    def find_open_objective_by_origin(
+        self, *, origin: objective.ObjectiveOrigin, exclude_run_id: str | None = None
+    ) -> ObjectiveRef | None:
+        """Find the first **open** objective whose stored header ``origin`` matches, skipping any
+        candidate whose header ``run_id`` equals ``exclude_run_id`` (the caller-exclusion that
+        makes a save-time conflict re-check sound with a single-ref API: the consumer excludes
+        its own run, so any returned ref IS a conflict). A candidate whose ``run_id`` is
+        missing/non-string is never treated as excluded (the fail-closed direction). Returns the
+        match with ``existed=True``; ``None`` means *authoritatively none in the exhaustively
+        enumerated open population*.
+
+        **Exhaustive-or-raise** (§8.24): the lookup never silently under-scans — a store that
+        cannot answer authoritatively must RAISE ``ObjectiveStoreError``, never return ``None``:
+
+        - an infra failure raises (never masked as ``None``);
+        - a header block/attachment that is **present but malformed** raises (genuine
+          uncertainty about a real objective must never read as authoritatively-none);
+        - an origin value present but **outside the closed vocabulary** raises (via
+          ``objective.origin_value`` — tampering/corruption is loud);
+        - an absent origin, or a known-but-different origin, is a non-match (skip);
+        - the enumeration covers the full relevant open population — never one bounded page.
+
+        Per-store scope: the GitHub store scans **all pages** of the open ``perk:objective``
+        label population (repo-scoped); the Linear project store is **team-scoped in v1** —
+        every team project swept via its metadata sentinel (the sentinel is the identity; a
+        sentinel-less project is skipped — the same accepted create-crash window as
+        ``find_objective``); the dormant issue-backed Linear store **raises** (deliberately
+        outside the ``→ None``/``→ False`` no-op family — ``None`` would falsely assert
+        authoritatively-none and silently open a fail-closed guard).
+        """
+        ...
+
     def read_objective_source(self, *, source_id: str) -> AdoptableObjectiveSource | None:
         """Read *any* pre-existing source (a Linear **Project** / a GitHub **issue**) verbatim for
         in-place adoption (§8.30) — the objective-tier twin of ``IssueBackend.read_issue``.
@@ -340,6 +372,12 @@ class ObjectiveStore(Protocol):
         owns the copy-or-mint lineage decision; the store persists what it is given. ``None``
         keeps the header byte-identical (the §8.42 absence rule).
 
+        **Origin carry:** the successor header inherits the predecessor's stored ``origin``
+        automatically — store-side, validated through ``objective.origin_value`` (a junk stored
+        value raises); no parameter (origin stays store/launch-owned, never model-supplied).
+        A header-less predecessor carries nothing. The guarded origin population is thereby
+        closed under replan (§8.24).
+
         ``close_predecessor=False`` is the transfer protocol's deferred-close arm (§8.53):
         create + carried moves/fresh nodes only — no ``superseded_by`` stamp, no close, no
         dropped-node cancels (those move to :meth:`finalize_supersession`, called only after
@@ -382,6 +420,7 @@ class ObjectiveStore(Protocol):
         roadmap_nodes: list[objective.ObjectiveNode] | None = None,
         delivery: objective.DeliveryPolicy | None = None,
         delivery_lineage: str | None = None,
+        origin: objective.ObjectiveOrigin | None = None,
         dry_run: bool = False,
     ) -> ObjectiveRef:
         """Create the objective (the two-step create): compose + post the objective (header +
@@ -394,7 +433,10 @@ class ObjectiveStore(Protocol):
         ``ObjectiveRef(id="0", url="(dry-run)", existed=False)`` without touching the backend. An
         empty roadmap raises (the storage backstop: no surface may store a node-less objective).
         ``delivery``/``delivery_lineage`` (§8.45) compose into the initial header atomically —
-        ``None`` keeps the header byte-identical (the §8.42 absence rule)."""
+        ``None`` keeps the header byte-identical (the §8.42 absence rule). ``origin`` (§8.24) is
+        the launch-owned machine-creation provenance, stamped into the INITIAL header atomically
+        (never create-then-merge); ``None`` keeps the header byte-identical (the §8.42 absence
+        rule)."""
         ...
 
     def create_gist_source(
