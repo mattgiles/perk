@@ -28,10 +28,7 @@ import {
   type SessionDataCtx,
 } from "../substrate/sessionData.ts";
 import { branchOf, rebuildWorkflowState } from "../substrate/workflowState.ts";
-import {
-  DREAM_ANALYSES_FILENAME,
-  decodeFinalizedDreamBundle,
-} from "../waves/dreamReducerWave.ts";
+import { DREAM_ANALYSES_FILENAME, decodeFinalizedDreamBundle } from "../waves/dreamReducerWave.ts";
 import { buildDreamReport, type DreamReportContext } from "../waves/dreamReport.ts";
 import { DREAM_MANIFEST_FILENAME, decodeDreamManifest } from "../waves/dreamWave.ts";
 

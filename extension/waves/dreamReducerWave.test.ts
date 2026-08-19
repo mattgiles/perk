@@ -430,7 +430,8 @@ test("decodeFinalizedDreamBundle: each refusal arm carries its named detail", ()
         raw.reducers = swap(raw.reducers as unknown[], 0, 1);
         return raw;
       },
-      detail: /reducer 'consolidation-preservation': reducer report echoes angle "currency-accuracy"/,
+      detail:
+        /reducer 'consolidation-preservation': reducer report echoes angle "currency-accuracy"/,
     },
     {
       label: "a duplicated reducer angle",
@@ -440,7 +441,8 @@ test("decodeFinalizedDreamBundle: each refusal arm carries its named detail", ()
         raw.reducers = [entries[0], entries[0], entries[2]];
         return raw;
       },
-      detail: /reducer 'currency-accuracy': reducer report echoes angle "consolidation-preservation"/,
+      detail:
+        /reducer 'currency-accuracy': reducer report echoes angle "consolidation-preservation"/,
     },
     {
       label: "an unknown reducer-entry key",

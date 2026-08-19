@@ -6,11 +6,20 @@
 // the artifact-first `/objective-save` command (seam-first; legacy drive as the no-draft fallback).
 
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
-import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { type SessionDataCtx, writeSessionArtifact } from "../substrate/sessionData.ts";
+import {
+  type ExtensionAPI,
+  type ExtensionContext,
+  SessionManager,
+} from "@earendil-works/pi-coding-agent";
+import { runScratchDir } from "../substrate/cache.ts";
+import {
+  digestSessionData,
+  type SessionDataCtx,
+  writeSessionArtifact,
+} from "../substrate/sessionData.ts";
 import type { ToolGating } from "../substrate/toolGating.ts";
 import {
   type EntrySink,
@@ -18,9 +27,28 @@ import {
   WORKFLOW_STATE_TYPE,
 } from "../substrate/workflowState.ts";
 import type { ReportTarget } from "../surfaces/report.ts";
-import { fakePerk, loadPerkSession, scaffoldRepo, spyInjections } from "../testing/harness.ts";
+import {
+  fakePerk,
+  loadPerkSession,
+  plantSession,
+  scaffoldRepo,
+  spyInjections,
+} from "../testing/harness.ts";
+import {
+  DREAM_ANALYSES_FILENAME,
+  DREAM_REDUCER_ANGLES,
+  type DreamReducerAnalysis,
+  finalizeDreamBundle,
+} from "../waves/dreamReducerWave.ts";
+import {
+  DREAM_MANIFEST_FILENAME,
+  type DreamLaneAnalysis,
+  type DreamManifest,
+  decodeDreamManifest,
+} from "../waves/dreamWave.ts";
 import { OBJECTIVE_BUDGET_TYPE } from "./objective.ts";
 import { OBJECTIVE_DRAFT_ARTIFACT } from "./objectiveDraft.ts";
+import { resolveDreamReportGate } from "./objectiveDreamReport.ts";
 import { objectiveApprovalSave, objectiveSaveGuidance } from "./objectiveSave.ts";
 
 const CREATE_JSON = JSON.stringify({
@@ -518,4 +546,251 @@ test("command: /objective-save with a draft but a failing cold door → error re
   } finally {
     h.dispose();
   }
+});
+
+// --- the dream_report gate at the save boundary (contracts §8.63) --------------------------------
+
+const DREAM_RUN = "01DREAMRID";
+const DREAM_DOC = "docs/learned/pi/subagents.md";
+const DREAM_STAMP = "2026-02-03T04:05:06Z";
+
+/** A minimal 1-lane / 1-doc raw producer manifest (the doc final-keeps — no units needed). */
+function dreamRawManifest(): Record<string, unknown> {
+  return {
+    schema_version: "1",
+    commit_sha: "abc123",
+    registry_mode: "clusters",
+    doc_count: 1,
+    total_bytes: 100,
+    findings: {
+      structural: {
+        stale_pointers: [],
+        broken_doc_paths: [],
+        duplicate_cues: [],
+        missing_frontmatter: [],
+      },
+      advisory: {
+        distillation_issues: [],
+        source_code_blocks: [],
+        overlong_cues: [],
+        cue_hazards: [],
+        empty_clusters: [],
+      },
+    },
+    lanes: [
+      {
+        id: "pi-1",
+        rollup: null,
+        docs: [{ path: DREAM_DOC, title: null, read_when: null, cluster: null, bytes: 100 }],
+      },
+    ],
+  };
+}
+
+function dreamAnalyses(): DreamLaneAnalysis[] {
+  return [
+    {
+      lane: "pi-1",
+      report: {
+        docs: [
+          {
+            path: DREAM_DOC,
+            disposition: "keep",
+            merge_target: null,
+            rationale: "still true",
+            preserve: [],
+            evidence_checked: [],
+            confidence: "high",
+          },
+        ],
+        overlap_signals: [],
+        harvest_followups: [],
+        uncertainties: [],
+        overlap_signals_omitted: 0,
+        harvest_followups_omitted: 0,
+        uncertainties_omitted: 0,
+      },
+    },
+  ];
+}
+
+function dreamReducers(): DreamReducerAnalysis[] {
+  return DREAM_REDUCER_ANGLES.map((angle) => ({
+    angle,
+    report: {
+      stances: [],
+      angle_findings: [],
+      uncertainties: [],
+      stances_omitted: 0,
+      angle_findings_omitted: 0,
+      uncertainties_omitted: 0,
+    },
+  }));
+}
+
+function dreamInput(): Record<string, unknown> {
+  return {
+    rows: [
+      {
+        path: DREAM_DOC,
+        disposition: "keep",
+        merge_target: null,
+        rationale: "the parent's reason",
+        fallback_reason: null,
+      },
+    ],
+    uncertainties: [],
+    selected_units: [],
+    overflow_units: [],
+    harvest_followups: [],
+    predicted_effects: { docs_after: 1, bytes_after: 100, note: null },
+  };
+}
+
+/** Plant the run-scoped dream files (manifest + finalized bundle); returns the marker digest.
+ * `finalized: false` plants the manifest only (dream detection without a finished wave). */
+function plantDreamFiles(cwd: string, opts: { finalized?: boolean } = {}): string {
+  const scratch = runScratchDir(cwd, DREAM_RUN);
+  mkdirSync(scratch, { recursive: true });
+  const manifestPath = join(scratch, DREAM_MANIFEST_FILENAME);
+  writeFileSync(manifestPath, `${JSON.stringify(dreamRawManifest(), null, 2)}\n`);
+  if (opts.finalized === false) return "";
+  const decoded = decodeDreamManifest(dreamRawManifest(), manifestPath);
+  assert.equal(decoded.ok, true, JSON.stringify(decoded));
+  const bundle = finalizeDreamBundle(
+    (decoded as { ok: true; manifest: DreamManifest }).manifest,
+    dreamAnalyses(),
+    dreamReducers(),
+  );
+  writeFileSync(join(scratch, DREAM_ANALYSES_FILENAME), bundle);
+  return digestSessionData(bundle);
+}
+
+test("tool: a dream session refuses a report-less save — nothing delegated to the cold door", async () => {
+  const cwd = scaffoldRepo({ handoff: { runId: DREAM_RUN, mode: "read-write" } });
+  plantDreamFiles(cwd, { finalized: false });
+  const argvFile = join(cwd, "argv.txt");
+  const bin = fakePerk(cwd, { stdout: CREATE_JSON, argvFile });
+  const h = await loadPerkSession({ cwd, env: { PERK_RUN_ID: DREAM_RUN, PERK_BIN: bin } });
+  try {
+    const result = await h.invokeTool("objective_save", { prose: PROSE });
+    const details = result.details as { ok: boolean; error?: string; error_type?: string };
+    assert.equal(details.ok, false);
+    assert.equal(details.error_type, "invalid_input");
+    assert.match(details.error ?? "", /must carry dream_report/);
+    assert.throws(() => readFileSync(argvFile, "utf8"), "no cold-door exec happened");
+  } finally {
+    h.dispose();
+  }
+});
+
+test("tool: dream_report outside a dream session refuses — nothing delegated", async () => {
+  const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
+  const argvFile = join(cwd, "argv.txt");
+  const bin = fakePerk(cwd, { stdout: CREATE_JSON, argvFile });
+  const h = await loadPerkSession({ cwd, env: { PERK_RUN_ID: "01RID", PERK_BIN: bin } });
+  try {
+    const result = await h.invokeTool("objective_save", {
+      prose: PROSE,
+      dream_report: dreamInput(),
+    });
+    const details = result.details as { ok: boolean; error?: string; error_type?: string };
+    assert.equal(details.ok, false);
+    assert.equal(details.error_type, "invalid_input");
+    assert.match(details.error ?? "", /only valid inside a perk learn dream session/);
+    assert.throws(() => readFileSync(argvFile, "utf8"), "no cold-door exec happened");
+  } finally {
+    h.dispose();
+  }
+});
+
+test("tool: dream + valid direct-param save proceeds — the cold-door argv is unchanged", async () => {
+  const cwd = scaffoldRepo();
+  const digest = plantDreamFiles(cwd);
+  const file = plantSession(cwd, [
+    { run_id: DREAM_RUN, mode: "read-write", dream_bundle_digest: digest },
+  ]);
+  const argvFile = join(cwd, "argv.txt");
+  const bin = fakePerk(cwd, { stdout: CREATE_JSON, argvFile });
+  const h = await loadPerkSession({
+    cwd,
+    sessionManager: SessionManager.open(file),
+    env: { PERK_BIN: bin },
+  });
+  try {
+    const result = await h.invokeTool("objective_save", {
+      prose: PROSE,
+      dream_report: dreamInput(),
+    });
+    const details = result.details as { ok: boolean; objective?: { id: string } };
+    assert.equal(details.ok, true, JSON.stringify(details));
+    assert.equal(details.objective?.id, "7");
+    assert.equal(result.terminate, true);
+    const argv = readFileSync(argvFile, "utf8").trimEnd().split("\n");
+    assert.equal(argv[0], "objective");
+    assert.equal(argv[1], "create");
+    // No new flags: the parts do NOT cross to the Python plane yet (§8.63 explicit deferral).
+    assert.ok(
+      !argv.some((arg) => arg.startsWith("--dream")),
+      `no dream flag rides the cold door (got ${JSON.stringify(argv)})`,
+    );
+  } finally {
+    h.dispose();
+  }
+});
+
+test("objectiveApprovalSave: a dream draft whose stored parts match the re-render saves; a mutated part refuses bad_state", async () => {
+  // Both arms over the pure-fake seam: the draft block comes from the REAL gate resolver (the
+  // same stored stamp keeps the save-side re-render byte-identical).
+  const run = async (
+    mutate: (parts: string[]) => string[],
+  ): Promise<{
+    outcome: Awaited<ReturnType<typeof objectiveApprovalSave>>;
+    gating: ReturnType<typeof fakeGating>;
+    argvs: string[][];
+  }> => {
+    const cwd = scaffoldRepo();
+    const digest = plantDreamFiles(cwd);
+    const branch: unknown[] = [
+      stateEntry({ run_id: DREAM_RUN, mode: "read-only", dream_bundle_digest: digest }),
+    ];
+    const ctx = reportableCtx(cwd, branch);
+    const gate = resolveDreamReportGate(ctx, dreamInput(), DREAM_STAMP);
+    assert.equal(gate.kind, "block", JSON.stringify(gate));
+    const block = (gate as { kind: "block"; block: { parts: string[] } }).block;
+    const payload = `${JSON.stringify({
+      schema_version: 1,
+      title: "Ship retries",
+      dream_report: { ...block, parts: mutate([...block.parts]) },
+      prose: PROSE,
+      roadmap: DRAFT_ROADMAP,
+    })}\n`;
+    assert.ok(writeSessionArtifact(fakeSink(branch), ctx, OBJECTIVE_DRAFT_ARTIFACT, payload));
+    const argvs: string[][] = [];
+    const pi = fakeApprovalPi(branch, { stdout: CREATE_JSON, argvs });
+    const gating = fakeGating(true);
+    const outcome = await objectiveApprovalSave(pi, ctx as unknown as ExtensionContext, gating);
+    return { outcome, gating, argvs };
+  };
+
+  const saved = await run((parts) => parts);
+  assert.equal(saved.outcome.status, "saved");
+  assert.equal(saved.gating.exits, 1, "the gate exited on the saved arm");
+  assert.ok(!saved.argvs[0]?.some((arg) => arg.startsWith("--dream")), "no new cold-door flags");
+
+  const tampered = await run((parts) => [`${parts[0]}tampered`, ...parts.slice(1)]);
+  assert.equal(tampered.outcome.status, "save-failed");
+  const result = tampered.outcome.status === "save-failed" ? tampered.outcome.result : null;
+  assert.equal(result?.details.ok, false);
+  assert.equal(
+    result?.details.ok === false && result.details.error_type,
+    "bad_state",
+    JSON.stringify(result?.details),
+  );
+  assert.match(
+    result?.content[0]?.text ?? "",
+    /the reviewed report no longer matches the wave state — re-draft and re-review/,
+  );
+  assert.equal(tampered.gating.exits, 0, "a refused save leaves the gate ON");
+  assert.equal(tampered.argvs.length, 0, "nothing reached the cold door");
 });
