@@ -93,8 +93,18 @@ beat Starlight's `@layer starlight.*` styles without specificity games:
   (`animation-iteration-count: 1`, not 0, so JS `animationend` contracts still fire while
   motion collapses to a single ~0ms cycle).
 - **§4C table containment** — a visible border frame on `.sl-markdown-content table`, keeping
-  Starlight's block-contained horizontal scroll (the page never widens). Code blocks stay on
-  Expressive Code defaults.
+  Starlight's block-contained horizontal scroll (the page never widens).
+- **§11 article-page & shell-chrome finish** — code-frame surface/border/radius onto the bound
+  tokens (one element-level `.expressive-code` rule whose custom-property declarations beat
+  Expressive Code's layered theme arms in both themes — dark values are inherited from `:root`,
+  light values are layered; code scrolling and syntax token themes stay on EC defaults), the
+  3px neutral blockquote rule, mono table-header eyebrows, H2/H3 heading rhythm onto the §2
+  24–32px interval (overriding Starlight's layered 1.5em wrapper rule), balanced heading wraps
+  (progressive enhancement), shell hairline edges onto `--perk-border` (dark's stock default
+  resolves to the canvas — a nearly invisible edge), and the 6px control radius on the search
+  button and sidebar entry links (the current-page pill keeps its native accent fill). Bound
+  value-exact in the blueprint's §11, with dated code-palette contrast evidence recomputed by
+  live WCAG math in `tests/test_docs_site_system.py`.
 - **§4B landing eyebrows + §4C path eyebrow/92ch wide mode** — pure CSS keyed on the
   sidebar's `aria-current="page"` link via `:has()`: the four quadrant landings render their
   section eyebrow above the H1, and exactly the five `reference/configuration/*` children
@@ -129,12 +139,12 @@ repo's documented effective dev floor (>=22.19.0, below) and would be rejected u
 floor change.
 
 **What is machine-proven here vs. rendered review:** local fonts, both themes' values,
-contrast, type scale/measure/focus/reduced-motion/containment structure, diagram geometry and
-labeling, landmark/skip-link/name rules, and the full-corpus axe bar are all deterministic
-gates in CI. The rendered residue — visual theme review, in-situ scroll/reflow/zoom QA,
-real keyboard traversal, screen-reader listen-through, Expressive Code syntax-token contrast —
-is assigned to the objective's final-gate human review (node 5.2), a recorded split, not a
-silent deferral.
+contrast (the §9 pairs and the §11 code-palette evidence — the full emitted syntax palette
+against the code-frame surfaces), type scale/measure/focus/reduced-motion/containment/finish
+structure, diagram geometry and labeling, landmark/skip-link/name rules, and the full-corpus
+axe bar are all deterministic gates in CI. The rendered residue — visual theme review, in-situ
+scroll/reflow/zoom QA, real keyboard traversal, screen-reader listen-through — is assigned to
+the objective's final-gate human review (node 5.2), a recorded split, not a silent deferral.
 
 ## Sidebar & pagination
 
@@ -267,8 +277,8 @@ explicit objective reconciliation (their shared reconciliation rule):
   `src/styles/tokens.css`. `tests/test_docs_site_tokens.py` guards value-exact agreement with
   the blueprint — for both the stylesheet and the `customCss` wiring order — normalizing only
   quote style, whitespace, and hex case (Biome formats the CSS); `tests/test_docs_site_system.py`
-  guards the §2/§3/§4/§6 system rules in `src/styles/system.css`, the §9 contrast evidence by
-  live WCAG math, and the §5 diagram-geometry label floor.
+  guards the §2/§3/§4/§6/§11 system rules in `src/styles/system.css`, the §9 and §11 contrast
+  evidence by live WCAG math, and the §5 diagram-geometry label floor.
 
 ## Deliberately local-only
 

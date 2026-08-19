@@ -22,7 +22,8 @@ Later plans treat the following as decided input, not as open visual-design ques
 - the five-diagram shared legend and accessible inline-SVG rendering contract (§5);
 - responsive, zoom, overflow, and reduced-motion behavior (§6);
 - a zero-entry component-override set under an absolute cap of three (§7);
-- the result of the content/IA route-detail reconciliation (§8).
+- the result of the content/IA route-detail reconciliation (§8);
+- the article-page and shell-chrome finish treatments (§11).
 
 The named consumers are node 2.1 (shell `customCss` wiring and Fontsource vendoring), node 2.4
 (baseline rendering), node 3.1 (home and landing execution plus the first diagrams), nodes 4.1–4.5
@@ -30,7 +31,8 @@ The named consumers are node 2.1 (shell `customCss` wiring and Fontsource vendor
 final gate).
 
 **Reconciliation rule:** changing a bound decision in this record requires an explicit objective
-reconciliation on Objective #1622. This includes changing either font family, a final token,
+reconciliation on **Objective #1898** (the reconciliation authority for this record, transferred
+from closed Objective #1622 by this amendment). This includes changing either font family, a final token,
 composition order, diagram semantics, the committed override set, or the absolute override cap.
 Ordinary implementation that applies these decisions does not require reconciliation.
 
@@ -400,8 +402,8 @@ frames, show a monospaced path label when the file context matters, and may opt 
 reference-wide mode. Prose remains 72ch even in that mode.
 
 Wide tables are block-contained with a visible border and horizontal scrolling; the page itself
-never scrolls horizontally. Code follows Expressive Code defaults where possible and scrolls
-inside its frame. At narrow widths, Starlight's native mobile header/menu and collapsed page TOC
+never scrolls horizontally. Code scrolling and syntax themes follow Expressive Code defaults;
+the frame surface, border, and radius values are bound in §11. At narrow widths, Starlight's native mobile header/menu and collapsed page TOC
 remain unchanged. The scaffold's real `reference/cli` and `reference/configuration` pages passed
 these constraints with one and fourteen tables respectively at every tested width (§9).
 
@@ -785,3 +787,65 @@ Post-teardown proof (exactly the two deliverables):
 ```
 
 Nothing scaffold-shaped survives this record.
+
+## §11 Article-page and shell-chrome finish
+
+### Bound treatments
+
+| Unit | Selector | Property | Bound value |
+|---|---|---|---|
+| U1 | `.expressive-code` | `--ec-codeBg` | `var(--perk-surface)` |
+| U1 | `.expressive-code` | `--ec-frm-edBg` | `var(--perk-surface)` |
+| U1 | `.expressive-code` | `--ec-frm-trmBg` | `var(--perk-surface)` |
+| U1 | `.expressive-code` | `--ec-brdCol` | `var(--perk-border)` |
+| U2 | `.expressive-code` | `--ec-brdRad` | `calc(var(--perk-radius-control) - var(--ec-brdWd))` |
+| U2 | `.expressive-code` | `--ec-frm-edTabBrdRad` | `calc(var(--perk-radius-control) - var(--ec-brdWd))` |
+| U3 | `.sl-markdown-content blockquote` | `border-inline-start` | `3px solid var(--perk-border)` |
+| U4 | `.sl-markdown-content th` | `font-family` | `var(--sl-font-mono), monospace` |
+| U4 | `.sl-markdown-content th` | `font-size` | `0.75rem` |
+| U4 | `.sl-markdown-content th` | `font-weight` | `600` |
+| U4 | `.sl-markdown-content th` | `letter-spacing` | `0.08em` |
+| U4 | `.sl-markdown-content th` | `text-transform` | `uppercase` |
+| U4 | `.sl-markdown-content th` | `color` | `var(--perk-muted)` |
+| U5 | `.sl-markdown-content :not(h1, h2, h3, h4, h5, h6, .sl-heading-wrapper) + .sl-heading-wrapper.level-h2` | `margin-top` | `2rem` |
+| U5 | `.sl-markdown-content :not(h1, h2, h3, h4, h5, h6, .sl-heading-wrapper) + .sl-heading-wrapper.level-h3` | `margin-top` | `1.5rem` |
+| U6 | `h1#_top, .sl-markdown-content .sl-heading-wrapper` | `text-wrap` | `balance` |
+| U7 | `:root` | `--sl-color-hairline-shade` | `var(--perk-border)` |
+| U8 | `button[data-open-modal]` | `border-radius` | `var(--perk-radius-control)` |
+| U9 | `#starlight__sidebar a` | `border-radius` | `var(--perk-radius-control)` |
+
+### Code-palette contrast evidence (2026-08-19)
+
+Method: the §9 WCAG 2.2 relative-luminance math over the complete emitted syntax palette —
+every inline `style="--0:#…;--1:#…"` span pair across `docs/site/dist/**/index.html` after
+`just docs-build`, case-normalized and deduped (1,109 occurrences; 11 dark / 10 light colors),
+with every dark foreground (`--0`) measured on the landed dark `--perk-surface` and every
+light foreground (`--1`) on the landed light `--perk-surface`. The stock `--ec-codeFg` values
+from the emitted `ec.*.css` (`#d6deeb` dark / `#403f53` light) are members of the palette;
+gutter foregrounds (`--ec-gtrFg`) are out of scope — no gutter renders in the corpus. Tied to
+the pinned `astro@7.2.1` + `@astrojs/starlight@0.41.7` output; an EC/Starlight pin bump
+re-verifies this table as part of its own reconciliation.
+
+| Theme | Foreground | Background | Ratio |
+|---|---|---|---|
+| dark | `#7fdbca` | `#171d19` | 10.51 |
+| dark | `#82aaff` | `#171d19` | 7.46 |
+| dark | `#919f9f` | `#171d19` | 6.25 |
+| dark | `#c5e478` | `#171d19` | 12.02 |
+| dark | `#c789d6` | `#171d19` | 6.51 |
+| dark | `#c792ea` | `#171d19` | 7.12 |
+| dark | `#d6deeb` | `#171d19` | 12.65 |
+| dark | `#d9f5dd` | `#171d19` | 14.72 |
+| dark | `#ecc48d` | `#171d19` | 10.48 |
+| dark | `#f78c6c` | `#171d19` | 7.28 |
+| dark | `#ff6a83` | `#171d19` | 6.23 |
+| light | `#096e72` | `#ffffff` | 6.03 |
+| light | `#111111` | `#ffffff` | 18.88 |
+| light | `#3b61b0` | `#ffffff` | 5.96 |
+| light | `#403f53` | `#ffffff` | 10.22 |
+| light | `#5f636f` | `#ffffff` | 6.00 |
+| light | `#7c5686` | `#ffffff` | 5.95 |
+| light | `#8844ae` | `#ffffff` | 6.03 |
+| light | `#984e4d` | `#ffffff` | 5.95 |
+| light | `#a24848` | `#ffffff` | 5.90 |
+| light | `#aa0982` | `#ffffff` | 6.84 |
