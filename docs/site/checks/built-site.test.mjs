@@ -227,30 +227,12 @@ test("the home page renders the hero actions and the five band sections", () => 
   }
 });
 
-// Semantic content is pinned per figure so hand-duplicated wide/narrow variants cannot drift
-// apart silently: `ordered` labels appear in source order in BOTH variants, `required` labels
-// are present, and arrowhead / dashed-conditional-connector counts match.
+// Semantic content is pinned per static-SVG figure so hand-duplicated wide/narrow variants
+// cannot drift apart silently: `ordered` labels appear in source order in BOTH variants,
+// `required` labels are present, and arrowhead / dashed-conditional-connector counts match.
+// The home's band-2 core-flow figure is interactive semantic HTML, not SVG — its contract is
+// pinned by its own test below.
 const HOME_DIAGRAM_CONTENT = [
-  {
-    name: "workflow spine",
-    ordered: ["○ plan", "○ save", "▸ implement", "○ submit", "◇ address", "○ land", "○ learn"],
-    required: ["(if review asks)"],
-    titleRequired: "workflow spine",
-    descriptionRequired: [
-      "Seven stages connected",
-      "Implement is shown highlighted as an example in-flight stage",
-      "if review asks",
-      "address is conditional",
-    ],
-    textRequired: [
-      "plan, save",
-      "implement (shown in-flight above as an example)",
-      "address only if review asks",
-      "land, and finally learn",
-    ],
-    arrowheads: 6,
-    conditionalConnectors: 1,
-  },
   {
     name: "two planes",
     ordered: ["Exterior", "Durable state", "Interior"],
@@ -416,15 +398,19 @@ function normalizeMarkupText(markup) {
 
 function assertDiagramFigures(page, expectedFigures) {
   const html = fs.readFileSync(path.join(distDir, page), "utf8");
-  const figures = [...html.matchAll(/<figure class="perk-diagram[^"]*".*?<\/figure>/gs)];
+  // Figures carrying the `perk-core-flow` modifier hold the interactive semantic-HTML
+  // contract (their own test) — only the static-SVG figures take the assertions below.
+  const staticFigures = [
+    ...html.matchAll(/<figure class="perk-diagram[^"]*".*?<\/figure>/gs),
+  ].filter(([figure]) => !/^<figure class="[^"]*\bperk-core-flow\b/.test(figure));
   assert.equal(
-    figures.length,
+    staticFigures.length,
     expectedFigures.length,
-    `${page}: expected exactly ${expectedFigures.length} perk-diagram figure(s)`,
+    `${page}: expected exactly ${expectedFigures.length} static perk-diagram figure(s)`,
   );
 
   const seenIds = new Set();
-  figures.forEach(([figure], figureIndex) => {
+  staticFigures.forEach(([figure], figureIndex) => {
     const expected = expectedFigures[figureIndex];
     const svgs = [...figure.matchAll(/<svg.*?<\/svg>/gs)].map(([block]) => block);
     assert.equal(svgs.length, 2, `${expected.name}: expected exactly two SVG variants`);
@@ -557,15 +543,19 @@ function assertDiagramFigures(page, expectedFigures) {
     }
   });
 
-  const textBlocks = [
-    ...html.matchAll(/<\/figure>\s*<div class="perk-diagram-text"[^>]*>(.*?)<\/div>/gs),
-  ].map((match) => match[1]);
+  // Per-matched-figure adjacency: each static figure is immediately followed by its own
+  // textual equivalent (never a page-global count, which a second figure could satisfy).
+  const textBlocks = staticFigures.map((match, figureIndex) => {
+    const tail = html.slice(match.index + match[0].length);
+    const adjacent = tail.match(/^\s*<div class="perk-diagram-text"[^>]*>(.*?)<\/div>/s);
+    assert.ok(
+      adjacent,
+      `${page}: figure ${expectedFigures[figureIndex].name} needs an ` +
+        "immediately-adjacent perk-diagram-text",
+    );
+    return adjacent[1];
+  });
   const texts = textBlocks.map((block) => normalizeMarkupText(block));
-  assert.equal(
-    texts.length,
-    expectedFigures.length,
-    `${page}: each diagram figure needs an adjacent perk-diagram-text`,
-  );
   texts.forEach((text, figureIndex) => {
     const expected = expectedFigures[figureIndex];
     for (const semantic of expected.textRequired) {
@@ -634,6 +624,181 @@ test("diagram pages render labeled, content-equal wide and narrow SVG variants",
     "explanation/headless-and-remote/index.html",
     HEADLESS_REMOTE_DIAGRAM_CONTENT,
   );
+});
+
+// --- The interactive core-flow figure (home band 2) ------------------------------------------
+
+// Bound verbatim (the visual blueprint §5 interactive contract): the 9 supplementary
+// tooltips — 7 spine stages + the 2 cache curation loops. Supplementary color only; the
+// diagram + textual equivalent stand alone.
+const CORE_FLOW_TOOLTIPS = {
+  "perk-core-flow-tip-plan":
+    "A read-only session explores the repo and authors a bounded plan; a human review gates it " +
+    "before save — on the browser review door an agent draft-review wave assists.",
+  "perk-core-flow-tip-save":
+    "The approved plan is persisted as a durable issue — the canonical artifact the rest of " +
+    "the workflow consumes.",
+  "perk-core-flow-tip-implement":
+    "A worktree session executes the saved plan and runs the repo's CI checks before submitting.",
+  "perk-core-flow-tip-submit": "The change goes up as a pull request for human review.",
+  "perk-core-flow-tip-address":
+    "Review feedback is classified and resolved — this stage runs only when review asks.",
+  "perk-core-flow-tip-land":
+    "The approved pull request merges; objective nodes advance and reconcile automatically.",
+  "perk-core-flow-tip-learn":
+    "Durable learnings from the session are captured into learn issues for later consolidation.",
+  "perk-core-flow-tip-harvest":
+    "Harvest mines docs/learned for improvement opportunities and authors one bounded " +
+    "objective — an objective factory, never a direct plan.",
+  "perk-core-flow-tip-dreaming":
+    "Dreaming reads the learned corpus as a whole and authors a reviewed curation objective — " +
+    "pruning and consolidating perk's memory.",
+};
+
+const CORE_FLOW_STAGES = [
+  "○ plan",
+  "○ save",
+  "▸ implement (current)",
+  "○ submit",
+  "◇ address",
+  "○ land",
+  "○ learn",
+];
+
+// Review loops and cache loops, with truthful shipped-surface labels (human review is the
+// universal gate; the agent wave is an optional browser-door assist; gist is human-only).
+const CORE_FLOW_LOOPS = [
+  ["↻ human review · optional agent wave", 2], // spine plan + objective-authoring satellite
+  ["↻ human PR review", 1],
+  ["↻ human review", 3], // the two above plus the gist satellite's human-only loop
+  ["↻ harvest → objective authoring", 1],
+  ["↻ dreaming — corpus self-curation", 1],
+];
+
+const CORE_FLOW_SATELLITES = [
+  ["gist authoring", "problem statements — plan → save"],
+  ["objective authoring", "plans of plans — plan → save"],
+  ["docs/learned", "the durable learned-docs cache"],
+];
+
+const CORE_FLOW_FEEDS = [
+  "⇢ objective plan — seeds an objective",
+  "⇢ spine plan — seeds a plan",
+  "⇢ spine plan — each node emits a bounded plan",
+  "⇢ spine plan — ambient learned context",
+  "⇢ objective plan — ambient learned context",
+  "⇢ gist plan — ambient learned context",
+  "spine learn ⇢ docs/learned — mediated: /learn captures learn issues; perk learn docs " +
+    "folds them into the corpus",
+];
+
+const CORE_FLOW_TEXT_REQUIRED = [
+  // The bound stage-order sentence, entire.
+  "How does a change move through perk? The spine walks seven stages in order — plan, save, " +
+    "implement (shown in-flight as an example), submit, then address only if review asks, " +
+    "then land, and finally learn.",
+  "optionally assisted",
+  "human review only",
+  "harvest",
+  "dreaming",
+  "learn issues",
+  "perk learn docs",
+];
+
+const countOccurrences = (text, needle) => text.split(needle).length - 1;
+
+test("the home band-2 core-flow figure holds the interactive semantic-HTML contract", () => {
+  const html = fs.readFileSync(path.join(distDir, "index.html"), "utf8");
+  const figures = [
+    ...html.matchAll(/<figure class="[^"]*\bperk-core-flow\b[^"]*"[^>]*>.*?<\/figure>/gs),
+  ];
+  assert.equal(figures.length, 1, "expected exactly one perk-core-flow figure on the home");
+  const [figure] = figures[0];
+  assert.match(
+    figure.match(/^<figure[^>]*>/)[0],
+    /class="perk-diagram perk-core-flow[^"]*"[^>]*\bdata-core-flow\b/,
+    "the figure must reuse the shared perk-diagram class and carry the controller mount hook",
+  );
+
+  // Zero inline SVG: connectors are CSS decoration; semantics live in source order + text.
+  assert.equal([...figure.matchAll(/<svg/g)].length, 0, "no <svg> anywhere in the core flow");
+
+  // Three source-expanded, independently-native disclosures with bound labels AND their
+  // collapsed-visible hints INSIDE the <summary>.
+  const details = [...figure.matchAll(/<details([^>]*)>(.*?)<\/details>/gs)];
+  assert.equal(details.length, 3, "expected exactly three satellite disclosures");
+  details.forEach((match, index) => {
+    const [, attributes, body] = match;
+    assert.match(attributes, /\bopen\b/, `satellite ${index}: <details> must ship open`);
+    assert.match(attributes, /\bdata-core-flow-disclosure\b/, `satellite ${index}: mount hook`);
+    const summary = body.match(/<summary[^>]*>(.*?)<\/summary>/s);
+    assert.ok(summary, `satellite ${index}: missing <summary>`);
+    const summaryText = normalizeMarkupText(summary[1]);
+    const [label, hint] = CORE_FLOW_SATELLITES[index];
+    assert.ok(summaryText.includes(label), `satellite ${index}: summary lost ${label}`);
+    assert.ok(summaryText.includes(hint), `satellite ${index}: summary hint ${hint} missing`);
+  });
+
+  // The 7 stage chips in source order inside the spine list.
+  const spine = figure.match(/<ol class="flow-spine[^"]*"[^>]*>.*?<\/ol>/s);
+  assert.ok(spine, "missing the flow-spine list");
+  const stageButtons = [
+    ...spine[0].matchAll(/<button[^>]*data-core-flow-tip[^>]*>(.*?)<\/button>/gs),
+  ].map(([, inner]) => normalizeMarkupText(inner));
+  assert.deepEqual(stageButtons, CORE_FLOW_STAGES);
+  assert.ok(
+    normalizeMarkupText(spine[0]).includes("(if review asks)"),
+    "the conditional address step lost its visible condition label",
+  );
+
+  // Bound loop labels, exact occurrence counts (↻ human review is a prefix of the wave label).
+  const figureText = normalizeMarkupText(figure);
+  for (const [label, count] of CORE_FLOW_LOOPS) {
+    assert.equal(countOccurrences(figureText, label), count, `loop label ${label}`);
+  }
+
+  // Labeled feeds: the three ambient-context feeds plus the mediated learn feed.
+  for (const feed of CORE_FLOW_FEEDS) {
+    assert.ok(figureText.includes(feed), `feed label missing: ${feed}`);
+  }
+  assert.equal(countOccurrences(figureText, "ambient learned context"), 3);
+
+  // Exactly 9 tooltip triggers, each a real <button type="button"> colocated with its
+  // [role="tooltip"][hidden] sibling inside one .tip-wrap, aria-describedby resolving to a
+  // document-unique id, and the bound copy verbatim.
+  const wraps = [
+    ...figure.matchAll(
+      /<span class="tip-wrap[^"]*"[^>]*><button type="button" data-core-flow-tip aria-describedby="([^"]+)"[^>]*>.*?<\/button><span role="tooltip" id="([^"]+)" hidden data-core-flow-tooltip[^>]*>(.*?)<\/span><\/span>/gs,
+    ),
+  ];
+  assert.equal(wraps.length, 9, "expected 9 colocated trigger/tooltip pairs");
+  assert.equal([...figure.matchAll(/data-core-flow-tip\b/g)].length, 9);
+  const expectedIds = Object.keys(CORE_FLOW_TOOLTIPS);
+  assert.deepEqual(
+    wraps.map(([, describedby]) => describedby),
+    expectedIds,
+    "trigger order / aria-describedby ids drifted",
+  );
+  for (const [, describedby, tooltipId, copy] of wraps) {
+    assert.equal(describedby, tooltipId, "aria-describedby must point at the sibling tooltip");
+    const occurrences = [...html.matchAll(new RegExp(` id="${tooltipId}"`, "g"))];
+    assert.equal(occurrences.length, 1, `id ${tooltipId} must be document-unique`);
+    assert.equal(normalizeMarkupText(copy), CORE_FLOW_TOOLTIPS[tooltipId]);
+  }
+
+  // The adjacent textual equivalent immediately follows the figure (Astro may inline the
+  // controller-mount module script between the two — an artifact of the component script,
+  // not of source order).
+  const figureMatch = figures[0];
+  const tail = html.slice(figureMatch.index + figureMatch[0].length);
+  const adjacent = tail.match(
+    /^\s*(?:<script type="module">.*?<\/script>\s*)?<div class="perk-diagram-text"[^>]*>(.*?)<\/div>/s,
+  );
+  assert.ok(adjacent, "the core-flow figure needs its adjacent perk-diagram-text");
+  const text = normalizeMarkupText(adjacent[1]);
+  for (const phrase of CORE_FLOW_TEXT_REQUIRED) {
+    assert.ok(text.includes(phrase), `textual equivalent missing ${JSON.stringify(phrase)}`);
+  }
 });
 
 test("every route-style internal href on an MDX page maps to a built page", () => {

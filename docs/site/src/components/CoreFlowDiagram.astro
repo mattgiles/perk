@@ -1,0 +1,373 @@
+{/*
+  The interactive core-flow diagram — home band 2. The first member of the §5 interactive
+  semantic-HTML contract class (docs/design/docs-site-visual-blueprint.md §5): one responsive
+  semantic-HTML/CSS representation of the plan-driven spine (seven stages, review loops),
+  three independent collapsed-by-default satellite disclosures (gist authoring, objective
+  authoring, the docs/learned cache with its harvest + dreaming curation loops), and labeled
+  dashed feeds. No <svg> anywhere: all semantics live in source order and visible text;
+  connectors are CSS-generated decorative glyphs/rules in the accessibility-neutral
+  `content: "…" / ""` form. Colors come only from existing --perk-* / --sl-color-* custom
+  properties on §9-verified pairs; every font-size is declared in px and >= 16.
+
+  Layout is container-keyed on the figure's inline size (compositions.css makes
+  figure.perk-diagram an inline-size container): vertical spine + stacked satellites by
+  default (and in no-container-query browsers), a horizontal wrapping spine from 640px, and a
+  three-up satellite row from 960px. No viewport media query.
+
+  No-JS/print strategy: the three <details> ship `open` in source, so the unenhanced page
+  (and the static a11y gate, which never runs scripts) is content-complete. The processed
+  module script below mounts src/core-flow-controller.mjs, which removes `open` on enhance,
+  re-opens on `beforeprint`/restores on `afterprint`, and drives the 9 supplementary tooltips
+  (7 stage chips + the 2 cache loops — hover/focus intent, tap pinning on hover-incapable
+  devices, a document-level Escape dismiss latch, one visible at a time). Tooltip copy is
+  supplementary color only; every tooltip is the sibling of its real <button> trigger inside
+  the same position:relative .tip-wrap, with aria-describedby always pointing at it.
+
+  `▸ implement` is shown as an example in-flight stage (visually-hidden `(current)` carries
+  the state accessibly); review loops name their shipped surfaces truthfully — human review
+  is the universal plan/objective gate, the agent draft-review wave is an optional
+  browser-door assist, gist authoring is human-review only.
+*/}
+
+<figure class="perk-diagram perk-core-flow" data-core-flow>
+  <ol class="flow-spine">
+    <li class="stage">
+      <span class="tip-wrap"><button type="button" data-core-flow-tip aria-describedby="perk-core-flow-tip-plan"><span class="glyph" aria-hidden="true">○</span> plan</button><span role="tooltip" id="perk-core-flow-tip-plan" hidden data-core-flow-tooltip>A read-only session explores the repo and authors a bounded plan; a human review gates it before save — on the browser review door an agent draft-review wave assists.</span></span>
+      <span class="loop"><span aria-hidden="true">↻</span> human review · optional agent wave</span>
+    </li>
+    <li class="stage">
+      <span class="tip-wrap"><button type="button" data-core-flow-tip aria-describedby="perk-core-flow-tip-save"><span class="glyph" aria-hidden="true">○</span> save</button><span role="tooltip" id="perk-core-flow-tip-save" hidden data-core-flow-tooltip>The approved plan is persisted as a durable issue — the canonical artifact the rest of the workflow consumes.</span></span>
+    </li>
+    <li class="stage current">
+      <span class="tip-wrap"><button type="button" data-core-flow-tip aria-describedby="perk-core-flow-tip-implement"><span class="glyph" aria-hidden="true">▸</span> implement<span class="visually-hidden"> (current)</span></button><span role="tooltip" id="perk-core-flow-tip-implement" hidden data-core-flow-tooltip>A worktree session executes the saved plan and runs the repo's CI checks before submitting.</span></span>
+    </li>
+    <li class="stage">
+      <span class="tip-wrap"><button type="button" data-core-flow-tip aria-describedby="perk-core-flow-tip-submit"><span class="glyph" aria-hidden="true">○</span> submit</button><span role="tooltip" id="perk-core-flow-tip-submit" hidden data-core-flow-tooltip>The change goes up as a pull request for human review.</span></span>
+      <span class="loop"><span aria-hidden="true">↻</span> human PR review</span>
+    </li>
+    <li class="stage conditional">
+      <span class="tip-wrap"><button type="button" data-core-flow-tip aria-describedby="perk-core-flow-tip-address"><span class="glyph" aria-hidden="true">◇</span> address</button><span role="tooltip" id="perk-core-flow-tip-address" hidden data-core-flow-tooltip>Review feedback is classified and resolved — this stage runs only when review asks.</span></span>
+      <span class="condition">(if review asks)</span>
+    </li>
+    <li class="stage">
+      <span class="tip-wrap"><button type="button" data-core-flow-tip aria-describedby="perk-core-flow-tip-land"><span class="glyph" aria-hidden="true">○</span> land</button><span role="tooltip" id="perk-core-flow-tip-land" hidden data-core-flow-tooltip>The approved pull request merges; objective nodes advance and reconcile automatically.</span></span>
+    </li>
+    <li class="stage">
+      <span class="tip-wrap"><button type="button" data-core-flow-tip aria-describedby="perk-core-flow-tip-learn"><span class="glyph" aria-hidden="true">○</span> learn</button><span role="tooltip" id="perk-core-flow-tip-learn" hidden data-core-flow-tooltip>Durable learnings from the session are captured into learn issues for later consolidation.</span></span>
+    </li>
+  </ol>
+  <div class="satellites">
+    <details open data-core-flow-disclosure>
+      <summary><span class="sat-label">gist authoring</span> <span class="sat-hint">problem statements — plan → save</span></summary>
+      <div class="sat-body">
+        <p class="mini-flow"><span class="mini-stage">plan</span><span class="mini-arrow" aria-hidden="true">→</span><span class="mini-stage">save</span><span class="loop"><span aria-hidden="true">↻</span> human review</span></p>
+        <ul class="feeds">
+          <li class="feed"><span class="feed-glyph" aria-hidden="true">⇢</span> objective plan — seeds an objective</li>
+          <li class="feed"><span class="feed-glyph" aria-hidden="true">⇢</span> spine plan — seeds a plan</li>
+        </ul>
+      </div>
+    </details>
+    <details open data-core-flow-disclosure>
+      <summary><span class="sat-label">objective authoring</span> <span class="sat-hint">plans of plans — plan → save</span></summary>
+      <div class="sat-body">
+        <p class="mini-flow"><span class="mini-stage">plan</span><span class="mini-arrow" aria-hidden="true">→</span><span class="mini-stage">save</span><span class="loop"><span aria-hidden="true">↻</span> human review · optional agent wave</span></p>
+        <ul class="feeds">
+          <li class="feed"><span class="feed-glyph" aria-hidden="true">⇢</span> spine plan — each node emits a bounded plan</li>
+        </ul>
+      </div>
+    </details>
+    <details open data-core-flow-disclosure>
+      <summary><span class="sat-label">docs/learned</span> <span class="sat-hint">the durable learned-docs cache</span></summary>
+      <div class="sat-body">
+        <div class="cache">
+          <span class="tip-wrap"><button type="button" data-core-flow-tip aria-describedby="perk-core-flow-tip-harvest"><span aria-hidden="true">↻</span> harvest → objective authoring</button><span role="tooltip" id="perk-core-flow-tip-harvest" hidden data-core-flow-tooltip>Harvest mines docs/learned for improvement opportunities and authors one bounded objective — an objective factory, never a direct plan.</span></span>
+          <span class="tip-wrap"><button type="button" data-core-flow-tip aria-describedby="perk-core-flow-tip-dreaming"><span aria-hidden="true">↻</span> dreaming — corpus self-curation</button><span role="tooltip" id="perk-core-flow-tip-dreaming" hidden data-core-flow-tooltip>Dreaming reads the learned corpus as a whole and authors a reviewed curation objective — pruning and consolidating perk's memory.</span></span>
+        </div>
+        <ul class="feeds">
+          <li class="feed"><span class="feed-glyph" aria-hidden="true">⇢</span> spine plan — ambient learned context</li>
+          <li class="feed"><span class="feed-glyph" aria-hidden="true">⇢</span> objective plan — ambient learned context</li>
+          <li class="feed"><span class="feed-glyph" aria-hidden="true">⇢</span> gist plan — ambient learned context</li>
+          <li class="feed">spine learn <span aria-hidden="true">⇢</span> docs/learned — mediated: /learn captures learn issues; perk learn docs folds them into the corpus</li>
+        </ul>
+      </div>
+    </details>
+  </div>
+</figure>
+
+<style>
+  /* --- Spine: vertical by default (also the no-container-query rendering) ----------------- */
+  .flow-spine {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    row-gap: 6px;
+  }
+
+  .stage {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    column-gap: 10px;
+    row-gap: 6px;
+  }
+
+  /* Decorative CSS-generated connectors (the accessibility-neutral alt form): ↓/→ solid
+     transitions, ⇣/⇢ the dashed conditional transition into address. */
+  .stage + .stage::before {
+    content: "↓" / "";
+    inline-size: 100%;
+    padding-inline-start: 1.5rem;
+    color: var(--perk-muted);
+    font-family: var(--sl-font-mono), monospace;
+    font-size: 16px;
+    line-height: 1;
+  }
+  .stage + .stage.conditional::before {
+    content: "⇣" / "";
+  }
+
+  .stage button[data-core-flow-tip] {
+    background: var(--perk-surface);
+    border: 1px solid var(--perk-border);
+    border-radius: var(--perk-radius-control);
+    padding: 5px 12px;
+    color: var(--perk-text);
+    font-family: var(--sl-font-mono), monospace;
+    font-size: 16px;
+    font-weight: 500;
+    line-height: 1.4;
+  }
+  .stage.current button[data-core-flow-tip] {
+    border: 2px solid var(--perk-accent);
+    padding: 4px 11px;
+    color: var(--perk-accent);
+  }
+
+  .glyph {
+    color: var(--perk-muted);
+  }
+  .stage.current .glyph {
+    color: var(--perk-accent);
+  }
+
+  .loop {
+    color: var(--perk-muted);
+    font-family: var(--sl-font-mono), monospace;
+    font-size: 16px;
+    font-weight: 500;
+  }
+
+  .condition {
+    color: var(--perk-muted);
+    font-family: var(--sl-font), sans-serif;
+    font-size: 16px;
+  }
+
+  .visually-hidden {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    padding: 0;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+
+  /* --- Satellites: stacked full-width by default ------------------------------------------ */
+  .satellites {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 12px;
+    margin-block-start: 24px;
+  }
+
+  .satellites details {
+    background: var(--perk-surface);
+    border: 1px solid var(--perk-border);
+    border-radius: var(--perk-radius-card);
+  }
+
+  .satellites summary {
+    padding: 10px 14px;
+    cursor: pointer;
+  }
+
+  .sat-label {
+    color: var(--perk-text);
+    font-family: var(--sl-font-mono), monospace;
+    font-size: 16px;
+    font-weight: 500;
+  }
+
+  .sat-hint {
+    color: var(--perk-muted);
+    font-family: var(--sl-font), sans-serif;
+    font-size: 16px;
+  }
+
+  .sat-body {
+    padding: 2px 14px 14px;
+  }
+
+  .mini-flow {
+    margin: 0;
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    column-gap: 8px;
+    row-gap: 6px;
+    color: var(--perk-text);
+    font-family: var(--sl-font-mono), monospace;
+    font-size: 16px;
+    font-weight: 500;
+  }
+
+  .mini-stage {
+    border: 1px solid var(--perk-border);
+    border-radius: var(--perk-radius-control);
+    padding: 2px 8px;
+  }
+
+  .mini-arrow {
+    color: var(--perk-muted);
+  }
+
+  /* The docs/learned durable-cache cylinder (CSS-shaped: elliptical rim over a rounded-base
+     body; decorative geometry only — the loop labels carry the semantics). */
+  .cache {
+    position: relative;
+    margin-block: 14px 14px;
+    padding: 20px 14px 14px;
+    background: var(--sl-color-accent-low);
+    border: 1px solid var(--perk-border);
+    border-block-start: none;
+    border-radius: 0 0 50% 50% / 0 0 12px 12px;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    row-gap: 6px;
+  }
+  .cache::before {
+    content: "";
+    position: absolute;
+    inset-inline: -1px;
+    inset-block-start: -9px;
+    block-size: 18px;
+    background: var(--sl-color-accent-low);
+    border: 1px solid var(--perk-border);
+    border-radius: 50%;
+  }
+
+  .cache .tip-wrap button {
+    background: transparent;
+    border: 0;
+    padding: 2px 4px;
+    text-align: start;
+    color: var(--perk-text);
+    font-family: var(--sl-font-mono), monospace;
+    font-size: 16px;
+    font-weight: 500;
+  }
+
+  .feeds {
+    list-style: none;
+    margin: 10px 0 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    row-gap: 6px;
+  }
+
+  /* Labeled feeds: the dashed-rule treatment is decoration; the label is the semantics. */
+  .feed {
+    border-block-start: 1px dashed var(--perk-border);
+    padding-block-start: 6px;
+    color: var(--perk-muted);
+    font-family: var(--sl-font-mono), monospace;
+    font-size: 16px;
+  }
+
+  .feed-glyph {
+    color: var(--perk-muted);
+  }
+
+  /* --- Supplementary tooltips (colocated siblings of their triggers) ---------------------- */
+  .tip-wrap {
+    position: relative;
+    display: inline-block;
+  }
+
+  [data-core-flow-tooltip] {
+    position: absolute;
+    bottom: calc(100% + 8px);
+    left: 50%;
+    transform: translateX(-50%);
+    width: max-content;
+    max-width: min(36ch, calc(100cqw - 16px));
+    padding: 8px 10px;
+    background: var(--perk-surface);
+    border: 1px solid var(--perk-border);
+    border-radius: var(--perk-radius-control);
+    color: var(--perk-text);
+    font-family: var(--sl-font), sans-serif;
+    font-size: 16px;
+    font-weight: 400;
+    line-height: 1.4;
+    text-align: start;
+    z-index: 3;
+  }
+  [data-core-flow-tooltip][data-align="start"] {
+    left: 0;
+    transform: none;
+  }
+  [data-core-flow-tooltip][data-align="end"] {
+    left: auto;
+    right: 0;
+    transform: none;
+  }
+  [data-core-flow-tooltip][hidden] {
+    display: none;
+  }
+
+  /* --- Container flips: horizontal spine from 640px, three-up satellites from 960px ------- */
+  @container (min-width: 640px) {
+    .flow-spine {
+      flex-direction: row;
+      align-items: center;
+      flex-wrap: wrap;
+      column-gap: 10px;
+      row-gap: 14px;
+    }
+    .stage + .stage::before {
+      content: "→" / "";
+      inline-size: auto;
+      padding-inline-start: 0;
+    }
+    .stage + .stage.conditional::before {
+      content: "⇢" / "";
+    }
+  }
+
+  @container (min-width: 960px) {
+    .satellites {
+      grid-template-columns: repeat(3, 1fr);
+      align-items: start;
+    }
+  }
+</style>
+
+<script>
+  // The site's first (and only) client script: mount the extracted, unit-tested interaction
+  // controller on every core-flow figure. Unenhanced pages (no JS, print, the static a11y
+  // gate) are content-complete from source — enhancement only collapses the satellites and
+  // adds the supplementary tooltips.
+  import { enhanceCoreFlow } from "../core-flow-controller.mjs";
+
+  for (const root of document.querySelectorAll("[data-core-flow]")) {
+    enhanceCoreFlow(root);
+  }
+</script>
