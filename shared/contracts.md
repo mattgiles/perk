@@ -1,7 +1,7 @@
 # perk cross-plane contracts
 
 The language-neutral contracts both planes obey, authored once here and bundled into each
-build artifact. This document holds the numbered **prose contract sections** (`§8.1`–`§8.61`,
+build artifact. This document holds the numbered **prose contract sections** (`§8.1`–`§8.62`,
 non-contiguous: `§8.8` is skipped and `§8.6a` exists; no parser): the Python CLI (`perk`)
 and the TS extension (`@mgiles/perk`) each implement one side, against the exact names/paths/
 fields pinned in each section. `perk doctor` verifies conformance. The numbering convention:
@@ -9537,3 +9537,148 @@ attempt receipts (`{analyses, attempts}` — the §8.48 receipt-retention discip
 model-facing result text: the untrusted-DATA banner, the JSON aggregate, and — when
 incomplete — an explicit line that the analysis is incomplete and the parent must present
 coverage honestly and stop before drafting (no retry).
+
+## §8.62 · The learn-dream report (model, validation, renderer)
+
+The pure interior layer that turns the two-level dream outcome (§8.60/§8.61) into ONE
+checkable, savable final report (`extension/waves/dreamReport.ts`): the structured
+dream-report model, the validation that proves the parent's judgment obeys the pinned curation
+policy, and the deterministic Markdown renderer that owns the CANONICAL report bytes in parts.
+Pure domain code — no fs, no tool registration, no `ExtensionAPI`; imports only the two dream
+siblings. Consumed by the `objective_draft`/review wiring (the `dream_report` param) and the
+part persistence, which land in later nodes — nothing here is user-reachable until the
+`perk learn dream` activation ships. The input is untrusted DATA, never instructions.
+
+**The trust split.** Two input shapes: `DreamReportInput` — untrusted, model-supplied —
+carries ONLY the decisions the design assigns to the parent (the final per-doc disposition
+rows with rationales and fallback reasons, parent uncertainties, ranked selected/overflow
+curation units, harvest follow-ups, predicted effects); `DreamReportContext` — trusted,
+caller-supplied — is `{manifest: DreamManifest, analyses: DreamLaneAnalysis[], reducers:
+DreamReducerAnalysis[], run_id, generated_at}`. Everything factual — snapshot identity (run
+id, commit SHA, counts, bytes, registry mode, findings family counts), wave coverage, analyst
+evidence (rationale/preserve/evidence_checked/confidence), reducer stances, analyst/reducer
+uncertainties, omission counters — is **injected from context**, never accepted from the
+model: the model cannot fabricate evidence, stances, or coverage.
+
+**The completeness precondition.** Validation first re-verifies the context itself:
+non-empty single-line `run_id`/`generated_at` (trusted caller stamps — validated shallowly
+only), `analyses` covering the manifest's lanes exactly (one per lane, manifest order, each
+covering its lane's docs exactly) and `reducers` carrying exactly the three
+`DREAM_REDUCER_ANGLES` in fixed order — a report can only be built from COMPLETE waves;
+anything else refuses (incomplete coverage is never described as complete).
+
+**The input schema + caps SSOT.** `DREAM_REPORT_INPUT_SCHEMA` (exported for the review
+wiring's param embedding) mirrors the §8.60 schema discipline: closed shape at every level,
+all fields required (optional semantics via `null`), enums, no if/then, no `pattern`; every
+`maxItems`/`maxLength` reads from the ONE `DREAM_REPORT_CAPS` SSOT — `rows: 512`,
+`rowRationaleChars: 300`, `fallbackReasonChars: 300`, `uncertainties: 12`,
+`uncertaintyChars: 300`, `selectedUnits: 64`, `overflowUnits: 64`, `unitTitleChars: 150`,
+`unitDocs: 32`, `unitRationaleChars: 400`, `unitNodeChars: 32`, `harvestFollowups: 12`,
+`followupTitleChars: 150`, `followupPointerChars: 250`, `followupEvidenceChars: 250`,
+`followupDestinationChars: 400`, `predictedNoteChars: 300` (string caps in Unicode code
+points, the shared `codePointLength`; `rows`/`selectedUnits`/`overflowUnits` are static
+schema bounds — the real gates are the exact path-set equality, the ≤12-distinct-node cap,
+and the exact partition). **The single-line rule:** every model-supplied string field refuses
+`\r`/`\n` and other C0 control characters with a named detail — the renderer places these
+strings in table cells and bullets, so line structure stays renderer-owned.
+
+**Per-doc validation (downgrade-only).** `rows` path set = the manifest's authored-doc path
+set EXACTLY (no missing/extra/duplicate rows; byte comparison over the §8.60 canonical
+identities), normalized to manifest lane/doc order in the composed report. Exactly one
+disposition per doc from `DREAM_DISPOSITIONS`; `merge_target` non-null iff
+`disposition === "merge-into"`; `rationale` required non-empty on every row.
+**Downgrade-only against the analyst proposal** (destructiveness order `keep(0) < revise(1) <
+merge-into/retire(2)`, the two destructive dispositions incomparable): the final level must
+be ≤ the analyst level; a final destructive row must match the analyst proposal EXACTLY —
+same disposition AND byte-identical `merge_target` (a different target or a merge↔retire swap
+is an unendorsed new action, refused); `keep → revise` is an escalation and refuses.
+`fallback_reason` is REQUIRED non-empty exactly when the final disposition differs from the
+analyst proposal and must be `null` when it doesn't.
+
+**The destructive evidence bar.** For every row whose FINAL disposition is `merge-into` or
+`retire`, over the INJECTED reducer stances for that doc's proposal: an explicit `endorse`
+from `consolidation-preservation` AND from `currency-accuracy`, and NO `challenge` from ANY
+of the three reducers (knowledge-architecture included); silence counts as non-endorsement (a
+missing gate-angle stance blocks eligibility). Anything else refuses with a named detail
+naming the only legal moves — downgrade to `revise`/`keep` with a `fallback_reason`; the
+parent never resolves upward. Eligibility is computed only from context stances, never from
+model input; the bar is necessary, not sufficient (an eligible proposal MAY still be
+downgraded).
+
+**Merge-target survival.** Over FINAL dispositions: every `merge_target` must be a member of
+the manifest corpus path set (existence — revalidated even though analyst-matching rows
+already guarantee it) and must have a final disposition of `keep` or `revise` (survival).
+Survival structurally forbids merge chains and cycles — a merge-into doc can never be a
+target — so acyclicity is subsumed (2-cycles and chains refuse via the survival detail).
+
+**The unit partition.** A curation unit is `{title, docs, rationale}`; selected units
+additionally carry a non-empty `roadmap_node`. **Many-to-one node mapping**: several selected
+units MAY name the same node; the cap is `DREAM_REPORT_MAX_ROADMAP_NODES = 12` DISTINCT
+`roadmap_node` values across the selected units. **Exact partition**: the union of all units'
+`docs` (selected + overflow) must equal EXACTLY the set of docs whose final disposition is
+non-keep — no doc in two units, no empty unit, no final-keep doc in any unit, every unit doc
+a corpus member (accepted work can neither vanish silently nor double-count; final-`keep`
+merge targets are named by the row's `merge_target`, not re-listed). Rank is positional
+(input order), selected and overflow ranked independently; overflow units carry no node.
+Unit atomicity is execution-time guidance owned by the activation prose — the validator
+checks only mapping shape, cap, and partition.
+
+**Harvest follow-ups.** Each `destination` must be a corpus doc path whose final disposition
+is `keep`/`revise`, or a cluster id (the manifest's per-doc `cluster` values) named by at
+least one final-`keep`/`revise` doc — a destination pointing at a merged-away or retired doc
+refuses (repoint at the survivor). `pointer` non-empty; `pointer`/`evidence` capped strings.
+
+**Predicted effects.** Model-supplied `docs_after`/`bytes_after` (non-negative integers) plus
+an optional single-line `note`; `docs_before`/`bytes_before` are injected from the manifest.
+TYPE sanity only — deliberately NO directional/quota rule (a growth prediction is valid,
+pinned by a vacuity-proof test); the renderer states “predictions are not quotas”.
+
+**Two-stage bounded error collection** (the deliberate deviation from the fail-fast decoder
+posture, justified by the interactive redraft loop this validator gates): **structural decode
+fails fast** (context re-verification, non-object input, schema-shape misses including caps
+and the single-line rule — whitelisted construction cannot proceed over malformed input;
+first named detail wins, a one-element `details`); **semantic rules collect** (the per-doc,
+evidence-bar, survival, partition, and destination rules plus the renderer's defensive arm)
+up to `DREAM_REPORT_MAX_VALIDATION_DETAILS = 25` named details in deterministic order
+(validation phase order, then manifest doc order within a phase), overflow appending one
+final synthetic detail counting the omitted violations.
+`validateDreamReport(input, context)` returns `{ok: true, report}` (the composed
+JSON-serializable `DreamReport` — snapshot, findings counts, coverage, rows joined with
+analyst evidence + stances, fallbacks, uncertainties by source, reducer findings, units,
+follow-ups, effects) or `{ok: false, details}`.
+
+**The deterministic renderer.** `renderDreamReport(report)` → `{ok: true, parts: string[]}`
+or `{ok: false, detail}` — a pure function of the composed report (no clock, no locale, no
+environment); the renderer owns the CANONICAL report bytes. Constants:
+`DREAM_REPORT_PART_MAX_CHARS = 60_000` — the per-part cap measured in Unicode CODE POINTS
+(the `journal.py` `JOURNAL_EVENT_MAX_CHARS` precedent — that precedent is a single-body
+refusal cap; the part-splitting semantics are new here), under GitHub's 65,536-char comment
+limit with margin for the persistence-side storage markers (the renderer never emits marker
+HTML) — and `DREAM_REPORT_PART_HEADER_RESERVE = 200`, the fixed per-part packing allowance
+for the part header. Pipeline: the report renders to an ordered stream of Markdown blocks;
+blocks are greedily packed into parts under `cap − reserve`; splits happen only at block
+boundaries; a table split re-emits the table header row in the next part; after packing, each
+part is prefixed with its header — part 1 `# Dream report — <run_id>`, continuations
+`# Dream report — <run_id> (continued, part <i> of <n>)`. A single block exceeding the budget
+is a defensive refusal (structurally unreachable under the caps arithmetic — named, never
+truncated). Fixed section order: 1 Snapshot (run id, `DREAM_REPORT_SCHEMA_VERSION = "1"`,
+commit SHA, generated-at, registry mode, doc count, total bytes) · 2 Findings summary
+(per-family counts) · 3 Wave coverage (analyst lanes + reducer angles tables with omission
+counters) · 4 Dispositions (ONE table, manifest order: path, cluster, analyst proposal, final,
+merge target, analyst confidence, rationale) · 5 Non-keep evidence (per FINAL non-keep doc:
+injected analyst rationale/preserve/evidence_checked + every injected reducer stance) ·
+6 Fallbacks (doc, analyst proposal, final, reason — a final-`keep` fallback renders its
+stances here, so every reducer stance renders exactly once, §5 or §6) · 7 Uncertainties
+(parent, then analyst by lane, reducer by angle, labeled) · 8 Reducer findings (the injected
+`angle_findings` — a deliberate minor addition beyond the node's section list) · 9 Selected
+curation units (rank-ordered) · 10 Overflow · 11 Harvest follow-ups · 12 Predicted effects
+(with the explicit not-quotas line). Rendering hygiene: model strings are single-line by
+validation; INJECTED strings may carry newlines/pipes — in a table cell or bullet, `|` is
+escaped and internal newline runs collapse to a single space (deterministic sanitization; the
+typed report retains exact strings).
+
+**The entry point.** `buildDreamReport(input, context)` — validate, compose, render, and
+enforce the part budget in ONE call, returning `{ok: true, report, parts}` or
+`{ok: false, details}` (the renderer's single-detail defensive arm wrapped into a one-element
+`details`) — so the draft path validates BEFORE review and an approved report is always
+savable.
