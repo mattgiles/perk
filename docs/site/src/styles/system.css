@@ -2,8 +2,9 @@
  * perk system stylesheet — the field-guide/instrument-panel system rules the binding visual
  * blueprint (docs/design/docs-site-visual-blueprint.md) binds beyond tokens and compositions:
  * the §3 type scale and its consuming rules, the §2 measure/focus/inline-code treatments, the
- * §4C table containment and path-eyebrow/92ch wide mode, the §4B landing eyebrows, and the §6
- * reduced-motion behavior. Loaded through Starlight `customCss` after compositions.css; the
+ * §4C table containment and path-eyebrow/92ch wide mode, the §4B landing eyebrows, the §6
+ * reduced-motion behavior, and the §11 article-page/shell-chrome finish treatments. Loaded
+ * through Starlight `customCss` after compositions.css; the
  * wiring is guarded by tests/test_docs_site_tokens.py and the values/consumers by
  * tests/test_docs_site_system.py (spec↔artifact, parsed from the blueprint).
  *

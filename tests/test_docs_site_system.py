@@ -1,21 +1,24 @@
 """Docs-site system-stylesheet and diagram-geometry guard.
 
 `docs/site/src/styles/system.css` applies the binding visual blueprint's type scale, measure,
-focus, reduced-motion, containment, and eyebrow/wide-mode decisions
-(`docs/design/docs-site-visual-blueprint.md` §2/§3/§4/§6), and the five diagram components
-apply the §5 label-size floor through container-query variant exposure. Following the
+focus, reduced-motion, containment, eyebrow/wide-mode, and article-page/shell-chrome finish
+decisions (`docs/design/docs-site-visual-blueprint.md` §2/§3/§4/§6/§11), and the five diagram
+components apply the §5 label-size floor through container-query variant exposure. Following the
 `tests/test_docs_site_tokens.py` spec↔artifact discipline, these tests parse *both* the
 blueprint and the site sources and compare — no third transcription — with loud parser-sanity
-asserts on row counts. Three families:
+asserts on row counts. Four families:
 
 - **Contrast math** — the committed WCAG 2.2 check over the LIVE token values (all §9 pairs in
   both themes, plus the inline-code backgrounds), replacing axe's layout-dependent
-  `color-contrast` rule (disabled in `docs/site/checks/a11y.test.mjs`).
+  `color-contrast` rule (disabled in `docs/site/checks/a11y.test.mjs`), and the §11
+  code-palette evidence recomputed against the live surface tokens.
 - **system.css structure** — the §3 scale's custom properties AND their consuming rules (a
   token without its consumer is dead), the §2 measure/focus/inline-code treatments, the §6
   reduced-motion block value-complete, the §4C containment/wide mode, and the §4B eyebrows
   with their exact route enumeration (set equality — a sixth `:is()` arm or a prefix match
   fails).
+- **§11 finish treatments** — the bound-treatments table realized value-exact in system.css
+  (one rule per selector; U7 resolves through the single `:root` rule).
 - **Diagram geometry** — provable-by-construction §5 label sizing: container-query exposure
   keyed on the content column, `max-width` equal to each variant's viewBox width (no
   upscaling, so declared px sizes are final), and every `<text>` resolving to a ≥16px rule.
@@ -223,6 +226,34 @@ def _parse_contrast_pairs(blueprint: str) -> list[tuple[str, str, str, str, str]
             )
         )
     return pairs
+
+
+def _parse_finish_rows(blueprint: str) -> list[tuple[str, str, str, str]]:
+    """The §11 bound-treatments table: (unit, selector, property, value) — backtick-exact."""
+    section = _section(
+        blueprint,
+        "## §11 Article-page and shell-chrome finish",
+        "### Code-palette contrast evidence",
+    )
+    rows = []
+    for line in section.splitlines():
+        match = re.match(r"^\| (U\d) \| `([^`]+)` \| `([^`]+)` \| `([^`]+)` \|$", line)
+        if match is not None:
+            rows.append((match.group(1), match.group(2), match.group(3), match.group(4)))
+    return rows
+
+
+def _parse_palette_rows(blueprint: str) -> list[tuple[str, str, str, str]]:
+    """The §11 contrast-evidence table: (theme, fg hex, bg hex, recorded 2-decimal ratio)."""
+    section = blueprint[blueprint.index("### Code-palette contrast evidence") :]
+    rows = []
+    for line in section.splitlines():
+        match = re.match(
+            r"^\| (light|dark) \| `(#[0-9a-f]{6})` \| `(#[0-9a-f]{6})` \| ([\d.]+) \|$", line
+        )
+        if match is not None:
+            rows.append((match.group(1), match.group(2), match.group(3), match.group(4)))
+    return rows
 
 
 # --- Live token resolution + WCAG math --------------------------------------------------
@@ -453,6 +484,44 @@ def test_system_css_eyebrows_and_wide_mode_enumerate_the_settled_routes():
     assert path_eyebrow.declarations.get("text-transform") == "none"
     recap = _find_rule(rules, f"{scope_selector} .sl-markdown-content :is(p, ul, ol, blockquote)")
     assert recap.declarations.get("max-width") == prose_measure
+
+
+# --- §11 finish treatments: the bound table realized value-exact -------------------------
+
+
+def test_system_css_applies_article_shell_finish():
+    """Every §11 bound-treatments row exists in system.css value-exact (spec↔artifact)."""
+    rows = _parse_finish_rows(BLUEPRINT.read_text(encoding="utf-8"))
+    # Parser sanity: the exact approved-row count and unit set pinned at amendment time.
+    assert len(rows) == 19, f"expected the 19 §11 rows, parsed {len(rows)}"
+    assert {unit for unit, *_ in rows} == {f"U{n}" for n in range(1, 10)}
+
+    rules = _parse_css(SYSTEM_CSS.read_text(encoding="utf-8"))
+    for unit, selector, prop, value in rows:
+        rule = _find_rule(rules, selector)
+        assert rule.declarations.get(prop) == value, f"{unit}: {selector!r} {prop}"
+
+
+def test_code_palette_contrast_evidence():
+    """The §11 dated palette evidence holds by live math against the live surface tokens."""
+    rows = _parse_palette_rows(BLUEPRINT.read_text(encoding="utf-8"))
+    assert len(rows) == 21, f"expected the 21 §11 evidence rows, parsed {len(rows)}"
+    assert sum(1 for theme, *_ in rows if theme == "dark") == 11
+    assert sum(1 for theme, *_ in rows if theme == "light") == 10
+
+    scopes = _token_scopes()
+    for theme, fg, bg, recorded in rows:
+        # The recorded background must be the LIVE resolved --perk-surface for its theme (a
+        # drifted token would make the recorded evidence a lie)…
+        assert bg == _resolve(scopes, theme, "--perk-surface"), f"{theme} background drift"
+        # …and every ratio must pass AA and agree with the recorded 2-decimal value.
+        ratio = _contrast(fg, bg)
+        assert ratio >= 4.5, f"{theme} {fg}: {ratio:.2f} < 4.5"
+        assert f"{ratio:.2f}" == recorded, f"{theme} {fg}: live {ratio:.2f} != recorded {recorded}"
+
+    # The §11 method note's membership claim: the stock --ec-codeFg values are palette members.
+    assert "#d6deeb" in {fg for theme, fg, *_ in rows if theme == "dark"}
+    assert "#403f53" in {fg for theme, fg, *_ in rows if theme == "light"}
 
 
 # --- Diagram geometry: the §5 label floor by construction -------------------------------
