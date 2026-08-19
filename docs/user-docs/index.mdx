@@ -17,7 +17,7 @@ hero:
 
 import { CardGrid, LinkCard } from "@astrojs/starlight/components";
 import TwoPlanesDiagram from "../site/src/components/TwoPlanesDiagram.astro";
-import WorkflowSpineDiagram from "../site/src/components/WorkflowSpineDiagram.astro";
+import CoreFlowDiagram from "../site/src/components/CoreFlowDiagram.astro";
 
 # A deliberate workflow for agent-assisted engineering
 
@@ -25,12 +25,22 @@ import WorkflowSpineDiagram from "../site/src/components/WorkflowSpineDiagram.as
 
 ## The workflow
 
-<WorkflowSpineDiagram />
+<CoreFlowDiagram />
 
 <div class="perk-diagram-text">
-  How does a change move through perk? It walks seven stages in order — plan, save,
-  implement (shown in-flight above as an example), submit, then address only if review
-  asks, then land, and finally learn.
+  How does a change move through perk? The spine walks seven stages in order — plan, save,
+  implement (shown in-flight as an example), submit, then address only if review asks, then
+  land, and finally learn. Review loops guard two stages: every plan is reviewed by a human
+  before save, and a submitted PR is reviewed by a human before land — and everywhere a
+  human reviews, a built-in agent review wave can optionally assist. Three satellite flows
+  feed the spine: gist authoring (plan → save, the same human review loop) seeds objective
+  plans and spine plans; objective authoring (plan → save, same loop) emits the spine's
+  bounded plans; and the docs/learned cache — perk's durable learned-docs
+  store — feeds ambient learned context into all three plan stages. The cache runs two
+  curation loops: harvest, which mines it to author one bounded improvement objective, and
+  dreaming, which reads the corpus as a whole and authors a reviewed curation objective. The
+  spine's learn stage reaches docs/learned only through mediation: /learn captures learnings
+  into durable learn issues, and separate perk learn docs plans fold them into the corpus.
 </div>
 
 </section>

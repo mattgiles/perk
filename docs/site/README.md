@@ -52,23 +52,46 @@ The build-completion sweep validates two more link families beyond dangling targ
 An exact-match Vite alias resolves the bare `@astrojs/starlight/components` specifier from the
 site tree so corpus `.mdx` pages can import Starlight components (Starlight's own internal
 `components/…` subpaths are deliberately not captured). Repo-owned content components live in
-`src/components/` — currently five static, prop-free inline-SVG diagram components: the home
-imports `WorkflowSpineDiagram.astro` and `TwoPlanesDiagram.astro`, the objective tutorial imports
-`PlansInsideObjectivesDiagram.astro`, the stage matrix imports `WarmColdDoorsDiagram.astro`, and
-the headless/remote explanation imports `HeadlessRemoteDiagram.astro`, all by relative path and
-all conforming to the visual blueprint's §5 diagram legend and rendering contract.
+`src/components/` — currently five prop-free diagram components: four static inline-SVG
+components (the home imports `TwoPlanesDiagram.astro`, the objective tutorial imports
+`PlansInsideObjectivesDiagram.astro`, the stage matrix imports `WarmColdDoorsDiagram.astro`,
+and the headless/remote explanation imports `HeadlessRemoteDiagram.astro`) plus the
+**interactive semantic-HTML `CoreFlowDiagram.astro`** (home band 2), all imported by relative
+path and all conforming to the visual blueprint's §5 diagram legend and its two rendering
+contracts.
 
-Each component renders two content-equal SVG variants and exposes exactly one at any width via
-a **container query on the actual content column**: `figure.perk-diagram` (compositions.css) is
-an `inline-size` container, the narrow variant is the default, and an
+Each **static SVG component** renders two content-equal SVG variants and exposes exactly one at
+any width via a **container query on the actual content column**: `figure.perk-diagram`
+(compositions.css) is an `inline-size` container, the narrow variant is the default, and an
 `@container (min-width: 736px)` block flips to the wide variant only where the column fits its
 736-unit viewBox at scale 1. With each variant's `max-width` equal to its own viewBox width (no
 upscaling) and narrow viewBoxes ≤ 288 units (the content width at the 320px acceptance floor),
 every SVG label renders at its declared ≥16 CSS px at every width — including 200% zoom — by
 construction, not by viewport heuristics. Browsers without container-query support keep the
-content-identical narrow variant. `tests/test_docs_site_system.py` guards the geometry
-(variant/viewBox/max-width/@container shape, no viewport-media-query exposure, and every
-`<text>` resolving to a ≥16px rule in its component's own `<style>`).
+content-identical narrow variant.
+
+The **core-flow component** holds the §5 interactive semantic-HTML contract instead: **zero
+inline SVG** (all semantics are source-order text; connectors are decorative CSS-generated
+glyphs/rules), three satellite `<details>` shipping `open` in source (the unenhanced page is
+content-complete), and layout container-keyed with no viewport media query — the shared
+`figure.perk-diagram` container drives exactly the bound **640px** (horizontal spine) and
+**960px** (three-up satellite row) thresholds, and each satellite card is its own **named
+inline-size container** (`satellite`) flipping its summary hint inline↔stacked on the card's
+own width at one intentional 440px threshold (the container-queries sub-layout pattern).
+`tests/test_docs_site_system.py` guards both shapes: the SVG four's geometry
+(variant/viewBox/max-width/@container shape, no viewport-media-query exposure, every `<text>`
+resolving to a ≥16px rule in its component's own `<style>`) and the core-flow source contract
+(zero SVG, details-open, the 640/960 figure + 440 satellite thresholds, every declared
+font-size px ≥ 16).
+
+**Client-script convention (deliberately narrow):** the core-flow component mounts the site's
+first — and only — client script, one processed module `<script>` importing the extracted
+framework-free controller `src/core-flow-controller.mjs` (enhance = collapse the disclosures,
+drive the supplementary tooltips, re-open around print). The controller is jsdom-unit-tested
+by `src/core-flow-controller.test.mjs`, which rides the existing `docs/site/src/**/*.test.mjs`
+glob run by `just test` and `just docs-check` — the site's `scripts.check` stays deliberately
+unchanged (an asymmetry recorded here: unit tests need no build, so they never run inside
+`check`).
 
 ## Visual system stylesheet (`src/styles/system.css`)
 
@@ -150,6 +173,11 @@ repo's documented effective dev floor (>=22.19.0, below) and would be rejected u
 `.npmrc`'s `engine-strict=true`; 29.1.1's floor (`^22.13.0 || …`) fits with no manifest/README
 floor change.
 
+Because pages load with `runScripts: "outside-only"`, the axe gate exercises exactly the
+**unenhanced** core-flow state — details open, tooltips hidden — i.e. the no-JS/print-complete
+source DOM; enhanced-state behavior is covered by the controller unit tests and rendered
+review.
+
 **What is machine-proven here vs. rendered review:** local fonts, both themes' values,
 contrast (the §9 pairs and the §11 code-palette evidence — the full emitted syntax palette
 against the code-frame surfaces), type scale/measure/focus/reduced-motion/containment/finish
@@ -220,13 +248,14 @@ carry the site's own gates:
 
 - **`typecheck`** — `astro sync && tsc --noEmit`: sync regenerates the gitignored
   `.astro/types.d.ts` first, so a fresh checkout typechecks. The site's five `.astro`
-  components are static and prop-free (no frontmatter logic), so `@astrojs/check` stays
-  unwired: the accepted coverage is Astro's build-time compilation (a malformed component
-  fails `astro build`, which `just docs-build`/`docs:check` run in CI) plus the post-build
-  structural assertions below — a component gaining props or frontmatter logic wires
-  `@astrojs/check` then. `checkJs` stays off; the `.mjs` plugins are unit-tested instead.
-  Runs inside `just typecheck-js`. (`.astro` files also sit outside Biome's `files.includes`
-  — the same accepted-coverage record.)
+  components remain prop-free with no frontmatter logic (the core-flow component's
+  interactivity lives entirely in its processed module script + the extracted, unit-tested
+  controller), so `@astrojs/check` stays unwired: the accepted coverage is Astro's build-time
+  compilation (a malformed component fails `astro build`, which `just docs-build`/`docs:check`
+  run in CI) plus the post-build structural assertions below — a component gaining props or
+  frontmatter logic wires `@astrojs/check` then. `checkJs` stays off; the `.mjs` plugins and
+  the core-flow controller are unit-tested instead. Runs inside `just typecheck-js`. (`.astro`
+  files also sit outside Biome's `files.includes` — the same accepted-coverage record.)
 - **`check`** — `astro build && node --test "src/in-session-reference.test.mjs"
   "checks/**/*.test.mjs"`: the static build (which enforces the schema and link/anchor/escape
   gates), the source/runtime in-session vocabulary guard, and the **post-build checks** in
@@ -237,9 +266,11 @@ carry the site's own gates:
   (no built output for `_authoring`; the `data-pagefind-body` page set — the search-index
   membership — equals the routed corpus), and the
   home/landing/objective-tutorial/stage-matrix/headless-remote
-  structure (hero actions, the five band anchors, all five diagram figures'
-  two-labeled-variant shape, component-href integrity, recommended-start regions, the how-to
-  group anchors, and the eyebrow/wide-mode `aria-current` coupling);
+  structure (hero actions, the five band anchors, the four static diagram figures'
+  two-labeled-variant shape, the core-flow figure's interactive semantic-HTML contract —
+  zero SVG, the three details-open satellites, stage/loop/feed labels, the 9 colocated
+  tooltip pairs with bound copy — component-href integrity, recommended-start regions, the
+  how-to group anchors, and the eyebrow/wide-mode `aria-current` coupling);
   `a11y.test.mjs` runs the full-corpus static axe gate (above);
   `pagefind.test.mjs` runs the loopback-served **ten-query relevance matrix** (blueprint §7,
   top-5 bar, sharing `src/pagefind-ranking.mjs` with the browser UI so the two can never

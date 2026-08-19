@@ -19,7 +19,8 @@ Later plans treat the following as decided input, not as open visual-design ques
   posture (§3);
 - the home, quadrant-landing, and reference compositions in both themes, including their narrow
   linearization (§4);
-- the five-diagram shared legend and accessible inline-SVG rendering contract (§5);
+- the five-diagram shared legend and its two rendering contracts — static SVG and
+  interactive semantic HTML (§5);
 - responsive, zoom, overflow, and reduced-motion behavior (§6);
 - a zero-entry component-override set under an absolute cap of three (§7);
 - the result of the content/IA route-detail reconciliation (§8);
@@ -255,9 +256,12 @@ routes, sidebar map, page dispositions, or acceptance matrices in
 │ Turn intent into a reviewed plan, bounded change, PR, and learning.          │
 │ [ Get started ]  [ Understand the workflow ]                                 │
 ├──────────────────────────────────────────────────────────────────────────────┤
-│ 2 SPINE                                                                     │
-│ ○ plan — ○ save — ▸ implement — ○ submit — ◇ address (if review asks)       │
-│          — ○ land — ○ learn                                                  │
+│ 2 CORE FLOW                                                                 │
+│ ○ plan → ○ save → ▸ implement → ○ submit ⇢ ◇ address → ○ land → ○ learn    │
+│ │↻ human review        │↻ human PR review   ← stacked two-line loop badges   │
+│ │optional agent wave   │optional agent wave    on stems under plan/submit    │
+│ [▸ gist authoring + hint] [▸ objective authoring + hint] [▸ docs/learned +   │
+│  hint]  ← three collapsed-by-default satellite disclosures (one row ≥960)    │
 ├──────────────────────────────────────────────────────────────────────────────┤
 │ 3 CHOOSE BY INTENT                                                          │
 │ [Learn step by step] [Solve a task] [Look up details] [Understand why]       │
@@ -277,8 +281,13 @@ Annotations:
    renders one column at every width under a radial accent-low wash fading to transparent; a
    decorative CSS-generated `FIELD GUIDE + INSTRUMENT PANEL` eyebrow precedes the title outside
    the accessibility tree; the tagline takes the muted tier with balanced wraps.
-2. **Spine** — a single-line instrument strip when it fits. `address` is visibly conditional by
-   diamond, parenthetical text, and dashed connection; no animation or autoplay.
+2. **Core flow** — the interactive semantic-HTML core-flow diagram (§5): a horizontal
+   wrapping spine (container ≥640px) with stacked two-line `↻` review-loop badges hanging
+   on stems under plan and submit, `address` visibly conditional by diamond and dashed
+   connection (no inline condition label — operator-settled; the condition is stated in the
+   adjacent textual equivalent), and the three satellite disclosures below it (collapsed by
+   default once enhanced; a three-up row at container ≥960px; expanded and content-complete
+   for no-JS and print). No animation or autoplay; tooltips are supplementary only.
 3. **Intent cards** — four equal choices corresponding exactly to Tutorials, How-to guides,
    Reference, and Explanation. Each asks a reader-language question and links to its existing
    section route.
@@ -302,14 +311,16 @@ repo-owned presentational classes. It required no Starlight component override.
 │ [Get started]              │
 │ [Understand workflow]      │
 ├────────────────────────────┤
-│ SPINE (one stage per row)  │
-│ ○ plan                     │
+│ CORE FLOW (one stage/row)  │
+│ ○ plan (↻ loop badge)      │
 │ ○ save                     │
 │ ▸ implement                │
-│ ○ submit                   │
-│ ◇ address (if needed)      │
+│ ○ submit (↻ loop badge)    │
+│ ◇ address (⇢ dashed in)    │
 │ ○ land                     │
 │ ○ learn                    │
+│ satellites stacked (full   │
+│ width, collapsed → hint)   │
 ├────────────────────────────┤
 │ 4 intent cards, one/row    │
 ├────────────────────────────┤
@@ -422,7 +433,8 @@ canvas rather than becoming high-contrast black boxes.
 
 ## §5 Diagram legend
 
-The required five-diagram family — workflow spine, plans inside objectives, two planes/one
+The required five-diagram family — the core flow (the workflow spine with its review loops,
+satellite flows, and the docs/learned cache), plans inside objectives, two planes/one
 contract, warm/cold doors, and headless/remote flow — shares this vocabulary.
 
 ### Semantic vocabulary
@@ -437,6 +449,10 @@ contract, warm/cold doors, and headless/remote flow — shares this vocabulary.
 | Plane/ownership region | 10px rounded container | solid boundary | surface + border | region heading (`Exterior`, `Interior`) |
 | Trust/process boundary | rectangular region | dashed boundary | canvas + border | boundary label on the line |
 | Durable state/artifact | document cylinder/tab shape | solid | accent-low + border | artifact/state noun |
+| Review loop | `↻` prefix on a text badge | none (text row) | muted | participants named in the label (`human review`, `PR review`, `optional agent wave`) |
+| Expandable satellite region | native `<details>` container, card radius (10px), `<summary>` disclosure marker | solid 1px border | surface + border | summary label + collapsed-visible hint; content complete when expanded/no-JS/print |
+| Durable-cache loop | loop badge on the §5 durable-state cylinder (CSS-shaped) | solid | accent-low + border | `↻ <name> → <consumer>` (or an em-dash qualifier) |
+| Labeled feed | `⇢` glyph / dashed rule | dashed | muted | mandatory label naming source ⇢ target + the exchanged context; a mediated feed names every hop |
 
 Color may reinforce these meanings but never creates them. A monochrome rendering must still
 preserve node state, conditionality, gates, boundaries, and direction through glyph, shape, line
@@ -445,7 +461,9 @@ style, and label.
 ### Arrow semantics
 
 - solid single arrow: ordered control or state transition;
-- dashed single arrow: conditional transition, always with an adjacent condition label;
+- dashed single arrow: conditional transition **or** labeled feed — a label is mandatory
+  either way (the adjacent condition for a conditional transition; source ⇢ target + the
+  exchanged context for a feed);
 - solid bidirectional arrow: explicit read/write exchange, labeled with the exchanged artifact;
 - no arrowhead: grouping/association only;
 - crossing a dashed trust/process boundary requires a label at the crossing.
@@ -460,26 +478,54 @@ least 16 CSS px at their final 100% size so they remain legible at 200% zoom. Ca
 text, muted, accent, status, and border colors come only from §2 CSS properties — never literal
 light/dark hex values inside a diagram.
 
-### Rendering and accessibility contract
+### Rendering and accessibility contracts
 
-Diagrams are theme-aware inline SVG. Their CSS consumes `--perk-*` custom properties, so one SVG
-serves both themes. Every semantic diagram has:
+The family renders through two contract classes. Requirements shared by both: labels ≥ 16 CSS
+px at final 100% size, colors only from §2 CSS properties, meaningful source order, an
+**adjacent textual equivalent** immediately before or after the figure (one sentence
+introducing the question, then a short sequence/relationship statement containing every node
+and edge a reader needs to act on), no page-level horizontal overflow at any width, and 320px
+linearization (scale without shrinking labels below the floor, or switch to a stacked vertical
+arrangement with the same reading order). At 200% zoom, labels do not overlap or clip; a
+complex diagram may scroll in an explicitly labeled contained region.
+
+**Static-SVG contract** (members: the two-planes, plans-inside-objectives, warm/cold-doors,
+and headless/remote components). Diagrams are theme-aware inline SVG; their CSS consumes
+`--perk-*` custom properties, so one SVG serves both themes. Every semantic diagram has:
 
 1. `role="img"` plus an SVG `<title>` and `<desc>` associated through `aria-labelledby` (or
    equivalent accessible naming when rendered through a component);
 2. meaningful groups and labels in source order;
-3. an **adjacent textual equivalent** immediately before or after it: one sentence introducing
-   the question, then a short sequence/relationship statement containing every node and edge a
-   reader needs to act on;
+3. the adjacent textual equivalent above;
 4. no essential hover-only detail.
 
-At 320px, a diagram either scales without reducing labels below the minimum or switches to a
-stacked vertical arrangement with the same reading order. At 200% zoom, labels do not overlap or
-clip; a complex diagram may scroll in an explicitly labeled contained region, but page-level
-horizontal overflow is forbidden.
+**Interactive semantic-HTML contract** (member: the core-flow component). Real HTML carries
+all content — every node, loop, feed, and condition is source-order text in semantic elements;
+connectors are decorative CSS-generated glyphs/rules in the accessibility-neutral
+`content: "…" / ""` form (decorative SVG is permitted by this contract class but unused — the
+core-flow component pins zero SVG). Expandable regions are independent native
+`details`/`summary` disclosures, **source-expanded**: the unenhanced page (no-JS, print, the
+static a11y gate) is content-complete; enhancement collapses them by default, and
+`beforeprint` re-expands (with `afterprint` restore). Layout is container-keyed — never a
+viewport media query: the shared figure container drives the bound 640px (horizontal spine)
+and 960px (satellite row) thresholds, and each satellite card is additionally its own named
+inline-size container (`satellite`) whose summary hint flips inline↔stacked on the card's
+own width at one intentional threshold (440px). Supplementary tooltips are the sanctioned refinement of “no
+essential hover-only detail” (still governing — tooltip copy is supplementary color only,
+never load-bearing): triggers are real `<button type="button">` elements with
+`aria-describedby` always pointing at the colocated tooltip; per trigger, hover/focus/pin
+intents and a dismissal latch drive visibility — visible ⇔ (hover ∨ focus ∨ pinned) ∧
+¬dismissed — so hover/focus show, losing one intent while another holds does not hide,
+blur/pointerleave hide once intents drop, tap toggles a pin on hover-incapable devices
+(focus/pointer are not intents there), document-level Escape dismisses and latches until
+intent fully drops or a new tap, and only one tooltip is visible at a time. The visible
+tooltip is itself **hoverable** (WCAG 2.2 SC 1.4.13): it holds the same hover intent as its
+trigger and a hit-area bridge spans the trigger–tooltip gap, so the pointer can cross onto
+the tooltip without dismissing it. Keyboard
+operability, visible focus, and reduced-motion behavior follow §2/§6.
 
-The authoring tool is deliberately unbound until node 3.1 planning. Hand-authored SVG, a script,
-or another tool is acceptable only when its output conforms to this rendering contract.
+The authoring tool is deliberately unbound until node 3.1 planning. Hand-authored SVG/HTML, a
+script, or another tool is acceptable only when its output conforms to its rendering contract.
 
 ## §6 Responsive behavior
 

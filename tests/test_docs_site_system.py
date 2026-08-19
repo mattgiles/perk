@@ -3,7 +3,9 @@
 `docs/site/src/styles/system.css` applies the binding visual blueprint's type scale, measure,
 focus, reduced-motion, containment, eyebrow/wide-mode, and article-page/shell-chrome finish
 decisions (`docs/design/docs-site-visual-blueprint.md` §2/§3/§4/§6/§11), and the five diagram
-components apply the §5 label-size floor through container-query variant exposure. Following the
+components apply the §5 label-size floor — the four static-SVG components through
+container-query variant exposure, the interactive core-flow component through explicit ≥16px
+declarations under its own source contract. Following the
 `tests/test_docs_site_tokens.py` spec↔artifact discipline, these tests parse *both* the
 blueprint and the site sources and compare — no third transcription — with loud parser-sanity
 asserts on row counts. Four families:
@@ -23,7 +25,9 @@ asserts on row counts. Four families:
   §12 hero-wash contrast evidence recomputed against the live tokens.
 - **Diagram geometry** — provable-by-construction §5 label sizing: container-query exposure
   keyed on the content column, `max-width` equal to each variant's viewBox width (no
-  upscaling, so declared px sizes are final), and every `<text>` resolving to a ≥16px rule.
+  upscaling, so declared px sizes are final), and every `<text>` resolving to a ≥16px rule;
+  plus the core-flow component's interactive source contract (zero SVG, three details-open
+  disclosures, the bound 640/960 container thresholds, px ≥16 font sizes).
 """
 
 import re
@@ -643,19 +647,33 @@ def test_hero_wash_contrast_evidence():
 
 # --- Diagram geometry: the §5 label floor by construction -------------------------------
 
+# The committed component set: four static-SVG components under the §5 two-variant contract,
+# plus the interactive semantic-HTML core-flow component (its own source contract below).
+SVG_DIAGRAM_COMPONENTS = {
+    "TwoPlanesDiagram.astro",
+    "PlansInsideObjectivesDiagram.astro",
+    "WarmColdDoorsDiagram.astro",
+    "HeadlessRemoteDiagram.astro",
+}
+CORE_FLOW_COMPONENT = "CoreFlowDiagram.astro"
+
 
 def test_diagram_components_hold_the_label_floor_by_construction():
     components = sorted(COMPONENTS_DIR.glob("*.astro"))
-    assert len(components) == 5, [component.name for component in components]
+    assert {component.name for component in components} == SVG_DIAGRAM_COMPONENTS | {
+        CORE_FLOW_COMPONENT
+    }, [component.name for component in components]
 
     # The exposure container: figure.perk-diagram is the inline-size container the components'
-    # @container queries key on.
+    # @container queries key on (the core-flow figure reuses it through the shared class).
     composition_rules = _parse_css(COMPOSITIONS_CSS.read_text(encoding="utf-8"))
     figure = _find_rule(composition_rules, ".perk-diagram")
     assert figure.declarations.get("container-type") == "inline-size"
 
     for component in components:
         name = component.name
+        if name == CORE_FLOW_COMPONENT:
+            continue  # interactive semantic-HTML contract — its own test below
         # Strip the {/* … */} header comment — it narrates the markup it precedes (e.g.
         # `<svg role="img">`), which must not read as elements.
         text = re.sub(r"\{/\*.*?\*/\}", "", component.read_text(encoding="utf-8"), flags=re.DOTALL)
@@ -720,3 +738,62 @@ def test_diagram_components_hold_the_label_floor_by_construction():
                     px = re.fullmatch(r"([\d.]+)px", size)
                     assert px is not None, f"{name} {variant}: non-px font-size {size!r}"
                     assert float(px.group(1)) >= 16, f"{name} {variant}: {size} < 16px"
+
+
+def test_core_flow_component_holds_the_interactive_source_contract():
+    """The §5 interactive semantic-HTML contract, provable from source: zero inline SVG,
+    three source-expanded disclosures (no-JS/print content-completeness), exactly the two
+    bound container thresholds keyed on the shared figure container (no viewport media query;
+    `@media print` is the sole permitted exception), and every declared font-size px ≥ 16."""
+    component = COMPONENTS_DIR / CORE_FLOW_COMPONENT
+    # Strip the {/* … */} header comment — it narrates markup, which must not read as elements.
+    text = re.sub(r"\{/\*.*?\*/\}", "", component.read_text(encoding="utf-8"), flags=re.DOTALL)
+
+    assert "<svg" not in text, "the core-flow component must carry no inline SVG at all"
+
+    details = re.findall(r"<details\b[^>]*>", text)
+    assert len(details) == 3, f"expected exactly three <details>, found {len(details)}"
+    for tag in details:
+        assert re.search(r"<details open\b", tag), f"<details> must ship open in source: {tag}"
+        assert "data-core-flow-disclosure" in tag, f"missing the controller hook: {tag}"
+
+    style_text = _must_search(r"<style>(.*?)</style>", text, re.DOTALL).group(1)
+
+    # Container-keyed layout only: the shared figure container at exactly the bound 640/960
+    # thresholds, plus the named per-card `satellite` container at its one intentional
+    # threshold (each card's summary flips on the CARD's width, never the viewport's).
+    figure_thresholds: list[int] = []
+    satellite_thresholds: list[int] = []
+    for prelude in re.findall(r"@container\s*([^{]+)\{", style_text):
+        named = re.fullmatch(r"satellite\s+\(min-width:\s*(\d+)px\)", prelude.strip())
+        unnamed = re.fullmatch(r"\(min-width:\s*(\d+)px\)", prelude.strip())
+        assert named is not None or unnamed is not None, (
+            f"unexpected container prelude: {prelude!r}"
+        )
+        if named is not None:
+            satellite_thresholds.append(int(named.group(1)))
+        else:
+            assert unnamed is not None
+            figure_thresholds.append(int(unnamed.group(1)))
+    assert sorted(set(figure_thresholds)) == [640, 960], (
+        f"bound figure thresholds drifted: {figure_thresholds}"
+    )
+    assert sorted(set(satellite_thresholds)) == [440], (
+        f"bound satellite-card threshold drifted: {satellite_thresholds}"
+    )
+    # The named container itself must exist on the satellite cards.
+    assert re.search(r"container:\s*satellite\s*/\s*inline-size", style_text), (
+        "the satellite cards must declare the named `satellite` inline-size container"
+    )
+
+    # No viewport media query may drive exposure; @media print is the sole permitted form.
+    for prelude in re.findall(r"@media\s*([^{]+)\{", style_text):
+        assert prelude.strip() == "print", f"viewport media query in the core flow: {prelude!r}"
+
+    # Every declared font size is px and >= 16 (mono/Inter floors alike).
+    sizes = re.findall(r"font-size:\s*([^;}]+)", style_text)
+    assert sizes, "expected explicit font-size declarations"
+    for size in sizes:
+        px = re.fullmatch(r"([\d.]+)px", size.strip())
+        assert px is not None, f"non-px font-size {size!r}"
+        assert float(px.group(1)) >= 16, f"{size} < 16px"
