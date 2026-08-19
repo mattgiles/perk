@@ -185,6 +185,13 @@ body:has(a[aria-current="page"][href="/explanation/"]) h1#_top::before {
   content: "Explanation" / "";
 }
 
+/* U12 (§12) — the §4A hero eyebrow, CSS-generated (zero corpus edits), home-only via .hero:
+ * reuses the shared h1#_top::before block's typography above; the `/ ""` alt-text form keeps
+ * it decorative (outside the accessibility tree). */
+.hero h1#_top::before {
+  content: "Field guide + instrument panel" / "";
+}
+
 /* §4C path eyebrow + 92ch reference-wide mode — ONE scope enumerating the five exact
  * configuration-children routes (no prefix matching: a future sixth child must be enrolled
  * deliberately, never silently). Tables may enter the 92ch mode; prose on the same page

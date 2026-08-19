@@ -8,7 +8,9 @@
  * Dark is Starlight's default theme, so the dark column lives on :root and the
  * light column on :root[data-theme='light']. The explicit --sl-color-text/bg
  * assignments preserve canvas/surface despite Starlight's historically reversed
- * white/black variable names.
+ * white/black variable names. The rgba() components inside the §2-bound
+ * --perk-shadow-low value are a sanctioned non-token value form (§12) — the
+ * token's full shadow list is itself the bound value.
  */
 
 :root {
@@ -34,6 +36,7 @@
   --perk-warning-low: #342b17;
   --perk-danger: #ff9a9a;
   --perk-danger-low: #3b1e1e;
+  --perk-shadow-low: 0 1px 2px rgba(0, 0, 0, 0.35), 0 2px 6px rgba(0, 0, 0, 0.3);
 
   /* §2 Starlight ramp — dark/default theme */
   --sl-color-white: #f1f5f0;
@@ -70,6 +73,7 @@
   --perk-warning-low: #f8ebcb;
   --perk-danger: #a33a3a;
   --perk-danger-low: #fbe8e8;
+  --perk-shadow-low: 0 1px 2px rgba(16, 21, 18, 0.06), 0 2px 6px rgba(16, 21, 18, 0.08);
 
   /* §2 Starlight ramp — light theme */
   --sl-color-white: #18201d;

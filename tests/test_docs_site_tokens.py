@@ -147,7 +147,7 @@ def test_tokens_css_matches_blueprint():
     )
 
     # Parser sanity: a silently-empty parse must not pass vacuously.
-    assert len(core) == 13, sorted(core)
+    assert len(core) == 14, sorted(core)
     assert len(dark_ramp) >= 15, sorted(dark_ramp)
     assert len(light_ramp) >= 17, sorted(light_ramp)
 
