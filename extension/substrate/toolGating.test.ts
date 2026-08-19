@@ -87,6 +87,10 @@ test("READ_ONLY_TOOLS: the exact recomposed set + order", () => {
     // The harvest-wave carve-in (the gated learn-harvest session's wave call; the manifest
     // read is bound to the claimed run-scoped scratch path — any other path refused).
     "run_harvest_wave",
+    // The dream-wave carve-in (the gated learn-dream session's wave call; NO parameters — the
+    // manifest read AND the fixed-name bundle write are both derived from the claimed run's
+    // manifest path, the no-aimable-writer posture on both sides).
+    "run_dream_wave",
   ]);
 });
 

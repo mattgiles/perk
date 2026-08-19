@@ -15,6 +15,7 @@ import { registerAuditWave } from "./doors/auditWaveTools.ts";
 import { registerCiExecutor } from "./doors/ciExecutor.ts";
 import { registerCommitAndCompact } from "./doors/commitCompact.ts";
 import { registerDraftReviewWaveTools } from "./doors/draftReviewWaveTools.ts";
+import { registerDreamWave } from "./doors/dreamWaveTools.ts";
 import { registerHarvestWave } from "./doors/harvestWaveTools.ts";
 import { registerLand } from "./doors/land.ts";
 import { registerLearn } from "./doors/learn.ts";
@@ -597,6 +598,7 @@ export default function (pi: ExtensionAPI) {
   registerReviewWaveTools(pi);
   registerAuditWave(pi);
   registerHarvestWave(pi);
+  registerDreamWave(pi);
 
   // The flow-scoped draft-review-wave pair (`start_draft_review_wave`/
   // `collect_draft_review_wave`) the draft-review door drives: non-blocking draft-review

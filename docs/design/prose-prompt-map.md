@@ -5,8 +5,8 @@ This is the readable projection of perk's living, workflow-first prose graph. It
 
 ## Coverage
 
-- **207** canonical source units
-- **701** logical fragments
+- **209** canonical source units
+- **706** logical fragments
 - **16** session shapes and **10** assemblies
 - **15** explicitly excluded candidates (policy-only; not displayed)
 - **0** validation findings
@@ -1186,6 +1186,7 @@ Capture learnings and route them into documentation, code, or harvested objectiv
 | Unit | Role | Audience | Canonical source | Consumed by |
 | --- | --- | --- | --- | --- |
 | `markdown:agents/dream-analyst.md` | `subagent-instruction` | `shipped` | [`agents/dream-analyst.md`](../../agents/dream-analyst.md) · `file` | — |
+| `markdown:agents/dream-reducer.md` | `subagent-instruction` | `shipped` | [`agents/dream-reducer.md`](../../agents/dream-reducer.md) · `file` | — |
 | `markdown:agents/harvest-analyst.md` | `subagent-instruction` | `shipped` | [`agents/harvest-analyst.md`](../../agents/harvest-analyst.md) · `file` | — |
 | `markdown:agents/learn-analyst.md` | `subagent-instruction` | `shipped` | [`agents/learn-analyst.md`](../../agents/learn-analyst.md) · `file` | — |
 | `markdown:prompts/stages/learn-code.md` | `launch` | `shipped` | [`prompts/stages/learn-code.md`](../../prompts/stages/learn-code.md) · `file` | — |
@@ -1205,6 +1206,7 @@ Capture learnings and route them into documentation, code, or harvested objectiv
 | `typescript-model-call:extension/doors/learn.ts:module:sendUserMessage:1` | `tool-contract` | `shipped` | [`extension/doors/learn.ts`](../../extension/doors/learn.ts) · `symbol:module/call:sendUserMessage/1` | — |
 | `typescript-model-call:extension/doors/learnFactory.ts:module:sendUserMessage:0` | `tool-contract` | `shipped` | [`extension/doors/learnFactory.ts`](../../extension/doors/learnFactory.ts) · `symbol:module/call:sendUserMessage/0` | — |
 | `typescript-tool:learn` | `tool-contract` | `shipped` | [`extension/doors/learn.ts`](../../extension/doors/learn.ts) · `tool:learn` | — |
+| `typescript-tool:run_dream_wave` | `tool-contract` | `shipped` | [`extension/doors/dreamWaveTools.ts`](../../extension/doors/dreamWaveTools.ts) · `tool:run_dream_wave` | — |
 | `typescript-tool:run_harvest_wave` | `tool-contract` | `shipped` | [`extension/doors/harvestWaveTools.ts`](../../extension/doors/harvestWaveTools.ts) · `tool:run_harvest_wave` | — |
 | `typescript-tool:run_learn_wave` | `tool-contract` | `shipped` | [`extension/doors/learn.ts`](../../extension/doors/learn.ts) · `tool:run_learn_wave` | learn.cold, learn.warm |
 
@@ -1212,6 +1214,9 @@ Capture learnings and route them into documentation, code, or harvested objectiv
 <summary>Logical fragments</summary>
 
 - `markdown:agents/dream-analyst.md`
+  - `frontmatter:description` — Discovery description (`frontmatter.description`)
+  - `section:what-you-do` — What you do (`heading:what-you-do`)
+- `markdown:agents/dream-reducer.md`
   - `frontmatter:description` — Discovery description (`frontmatter.description`)
   - `section:what-you-do` — What you do (`heading:what-you-do`)
 - `markdown:agents/harvest-analyst.md`
@@ -1282,6 +1287,10 @@ Capture learnings and route them into documentation, code, or harvested objectiv
   - `parameters.properties.summary.description` — parameters.properties.summary.description (`tool:learn.parameters.properties.summary.description`)
   - `parameters.properties.decision.description` — parameters.properties.decision.description (`tool:learn.parameters.properties.decision.description`)
   - `parameters.properties.target.description` — parameters.properties.target.description (`tool:learn.parameters.properties.target.description`)
+- `typescript-tool:run_dream_wave`
+  - `description` — description (`tool:run_dream_wave.description`)
+  - `promptSnippet` — promptSnippet (`tool:run_dream_wave.promptSnippet`)
+  - `promptGuidelines` — promptGuidelines (`tool:run_dream_wave.promptGuidelines`)
 - `typescript-tool:run_harvest_wave`
   - `description` — description (`tool:run_harvest_wave.description`)
   - `promptSnippet` — promptSnippet (`tool:run_harvest_wave.promptSnippet`)

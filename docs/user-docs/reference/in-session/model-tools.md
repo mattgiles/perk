@@ -34,6 +34,7 @@ These tools are registered by perk itself. Command-specific semantics live in
 | Learn lifecycle | `run_learn_wave` |
 | Developer analysis | `run_audit_wave` |
 | Learn factories | `run_harvest_wave` |
+| Learn factories | `run_dream_wave` |
 | PR lifecycle | `land` |
 | Automated review | `post_pr_review` |
 | PR lifecycle | `ready` |

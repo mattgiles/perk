@@ -29,6 +29,7 @@ from pathlib import Path
 import pytest
 
 from perk import __version__
+from perk.convergence.init.agents import PERK_AGENTS
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
@@ -243,21 +244,15 @@ def test_build_pins_and_all_packages_flag_present():
 @pytest.mark.xdist_group("wheel_build")
 def test_wheel_bundles_agents(built_wheel):
     # perk's subagent defs are bundled into the wheel as `perk/_agents` (force-include) so
-    # `perk init` can materialize them into consumer `.pi/agents/perk/` dirs.
+    # `perk init` can materialize them into consumer `.pi/agents/perk/` dirs. The census is
+    # exact in both directions: PERK_AGENTS (the delivery SSOT) must equal the `agents/`
+    # source-def set — a def added without joining the tuple would package fine yet never be
+    # delivered by `perk init` — and every PERK_AGENTS def must ride the wheel.
+    source_defs = {path.stem for path in (REPO_ROOT / "agents").glob("*.md")}
+    assert set(PERK_AGENTS) == source_defs, set(PERK_AGENTS) ^ source_defs
     with zipfile.ZipFile(built_wheel) as zf:
         names = set(zf.namelist())
-    expected = {
-        "perk/_agents/pr-reviewer.md",
-        "perk/_agents/review-classifier.md",
-        "perk/_agents/objective-explorer.md",
-        "perk/_agents/conflict-resolver.md",
-        "perk/_agents/learn-analyst.md",
-        "perk/_agents/adversarial-reviewer.md",
-        "perk/_agents/review-angle-selector.md",
-        "perk/_agents/draft-reviewer.md",
-        "perk/_agents/dream-analyst.md",
-        "perk/_agents/harvest-analyst.md",
-    }
+    expected = {f"perk/_agents/{name}.md" for name in PERK_AGENTS}
     assert expected <= names, expected - names
 
 

@@ -208,7 +208,7 @@ warm door**. The orchestration that drives it lives in
 ## Agent-def delivery to consumer repos (the realized design)
 
 perk's subagent defs — the `PERK_AGENTS` tuple (kept sorted), currently `adversarial-reviewer`,
-`conflict-resolver`, `draft-reviewer`, `dream-analyst`, `harvest-analyst`, `learn-analyst`,
+`conflict-resolver`, `draft-reviewer`, `dream-analyst`, `dream-reducer`, `harvest-analyst`, `learn-analyst`,
 `objective-explorer`, `pr-reviewer`, `review-angle-selector`, `review-classifier` — reach
 consumer repos via the Python wheel + `perk init`. This closed the former "known gap." (Don't
 restate a hard count in prose — counts are drift magnets per

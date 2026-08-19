@@ -263,6 +263,14 @@ export const READ_ONLY_TOOLS = [
   // `perk.harvest-analyst` over the already-carved-in SUBAGENT_TOOLS/SUBAGENT_CHILD_TOOLS, and
   // it writes nothing to the worktree (contracts.md §8.48).
   "run_harvest_wave",
+  // The dream-wave carve-in: the seeded `perk learn dream` session runs GATED (the read-only
+  // objective-author borrow), so `run_dream_wave` must be reachable while read-only. The tool
+  // takes NO parameters: its manifest read AND its one write (the fixed-name run-scratch
+  // bundle beside that manifest) are both derived from the claimed run's manifest path — no
+  // caller-supplied path exists (the `run_audit_wave` no-aimable-writer posture, BOTH sides),
+  // and it spawns only the read-only `perk.dream-analyst`/`perk.dream-reducer` over the
+  // already-carved-in delegation family (contracts.md §8.61).
+  "run_dream_wave",
 ];
 
 /**
@@ -287,6 +295,7 @@ export const PERK_TOOLS: readonly string[] = [
   "run_learn_wave",
   "run_audit_wave",
   "run_harvest_wave",
+  "run_dream_wave",
   "land",
   "post_pr_review",
   "ready",

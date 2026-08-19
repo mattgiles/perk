@@ -68,6 +68,8 @@ PERK_TOML_TEMPLATE = """\
 # review-angle-selector = "anthropic/claude-opus-5"
 # draft-reviewer = "openai/gpt-5.6-sol"
 # harvest-analyst = "openai/gpt-5.6-terra"
+# dream-analyst = "openai/gpt-5.6-terra"
+# dream-reducer = "anthropic/claude-fable-5"
 
 # ═══ How work is verified — and whether it's trusted ═══
 

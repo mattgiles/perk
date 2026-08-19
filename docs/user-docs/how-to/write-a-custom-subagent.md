@@ -14,7 +14,7 @@ Add one project agent and execute it through the `subagent` tool's workflow surf
 
 1. **Choose a user-owned path.** Project agents are discovered recursively under `.pi/agents/`, so
    create `.pi/agents/my-specialist.md` or place the file in your own nested directory. Do not use
-   `.pi/agents/perk/`: perk owns only that subtree, converges its ten `perk.*` agents there, and
+   `.pi/agents/perk/`: perk owns only that subtree, converges its eleven `perk.*` agents there, and
    prunes foreign files from it.
 2. **Write a minimal agent definition.** The frontmatter `name` is its runtime name; the body is its
    system prompt.
