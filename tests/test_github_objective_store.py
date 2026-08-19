@@ -85,6 +85,7 @@ class TestGitHubDelegation:
             "roadmap_nodes": None,
             "delivery": None,
             "delivery_lineage": None,
+            "origin": None,
             "dry_run": False,
         }
         assert result == objective_store.ObjectiveRef(id="252", url="u252", existed=False)
@@ -106,6 +107,58 @@ class TestGitHubDelegation:
         assert rec.kwargs is not None
         assert rec.kwargs["delivery"] == "stacked"
         assert rec.kwargs["delivery_lineage"] == "01LINEAGE"
+
+    def test_create_objective_forwards_origin(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # The non-None arm (the defaulted-None forwarding discipline): the enum reaches the
+        # substrate as its "learn-dream" value — dropping/hard-coding it in the adapter fails
+        # here; the default-None forwarding is pinned by test_create_objective's kwargs dict.
+        rec = _Recorder(objectives.ObjectiveIssue(number=252, url="u252", existed=False))
+        monkeypatch.setattr(objectives, "create_objective_issue", rec)
+        GitHubObjectiveStore(tmp_path).create_objective(
+            title="t", body="b", run_id="RUN1", origin=objective.ObjectiveOrigin.LEARN_DREAM
+        )
+        assert rec.kwargs is not None
+        assert rec.kwargs["origin"] == "learn-dream"
+
+    def test_find_open_objective_by_origin_delegates(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        rec = _Recorder(objectives.ObjectiveIssue(number=252, url="u252", existed=True))
+        monkeypatch.setattr(objectives, "find_objective_issue_by_origin", rec)
+        result = GitHubObjectiveStore(tmp_path).find_open_objective_by_origin(
+            origin=objective.ObjectiveOrigin.LEARN_DREAM, exclude_run_id="RUN1"
+        )
+        assert rec.kwargs == {
+            "origin": "learn-dream",
+            "exclude_run_id": "RUN1",
+            "repo_root": tmp_path,
+        }
+        assert result == objective_store.ObjectiveRef(id="252", url="u252", existed=True)
+
+    def test_find_open_objective_by_origin_none_passthrough(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        rec = _Recorder(None)
+        monkeypatch.setattr(objectives, "find_objective_issue_by_origin", rec)
+        result = GitHubObjectiveStore(tmp_path).find_open_objective_by_origin(
+            origin=objective.ObjectiveOrigin.LEARN_DREAM
+        )
+        assert result is None
+        assert rec.kwargs["exclude_run_id"] is None  # the default forwards as None
+
+    def test_find_open_objective_by_origin_translates_github_error(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        def boom(**kwargs: Any) -> None:
+            raise github.GitHubError("origin scan exploded")
+
+        monkeypatch.setattr(objectives, "find_objective_issue_by_origin", boom)
+        with pytest.raises(ObjectiveStoreError, match="origin scan exploded"):
+            GitHubObjectiveStore(tmp_path).find_open_objective_by_origin(
+                origin=objective.ObjectiveOrigin.LEARN_DREAM
+            )
 
     def test_list_objective_completion_candidates(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch

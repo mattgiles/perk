@@ -150,6 +150,7 @@ def create_objective_issue(
     supersedes: str | None = None,
     delivery: str | None = None,
     delivery_lineage: str | None = None,
+    origin: str | None = None,
     dry_run: bool = False,
 ) -> ObjectiveIssue:
     """Create the ``perk:objective`` issue (the two-step create). ``body`` is the authored
@@ -165,7 +166,9 @@ def create_objective_issue(
 
     ``delivery``/``delivery_lineage`` compose into the INITIAL header (atomic — never a
     create-then-merge, which could crash between writes and persist a stacked-reviewed
-    objective as incremental); ``None`` renders byte-identically to before (§8.42).
+    objective as incremental); ``None`` renders byte-identically to before (§8.42). ``origin``
+    (the launch-owned machine-creation provenance, §8.24) composes the same way — atomic at
+    create, absent ⇒ byte-identical.
     """
     if dry_run:
         return ObjectiveIssue(number=0, url="(dry-run)", existed=False)
@@ -203,6 +206,7 @@ def create_objective_issue(
         supersedes=supersedes,
         delivery=delivery,
         delivery_lineage=delivery_lineage,
+        origin=origin,
     )
     header_block = plan.render_metadata_block(
         objective.OBJECTIVE_HEADER_KEY, objective.render_header_block(header)
@@ -383,6 +387,12 @@ def supersede_objective_issue(
     the comment from the supplied prose and backfills the header. (The issue POST itself carries
     the run-id header atomically, so the first GitHub effect is always run-id-discoverable.)
 
+    **Origin carry (§8.24):** before composing the successor header, the create arm reads the
+    OLD issue's stored header ``origin`` (validated through ``objective.origin_value`` — a junk
+    stored value raises, naming the old issue) and stamps it into the successor — no parameter
+    (origin stays store/launch-owned), a header-less old body carries nothing. The read happens
+    before the successor issue POST so a junk origin never orphans a half-made successor.
+
     ``carry_map`` is not applicable (GitHub objectives have no child issues — carried nodes are
     authored fresh rows). ``dry_run`` returns early; an empty ``roadmap_nodes`` raises (the
     storage backstop)."""
@@ -403,6 +413,13 @@ def supersede_objective_issue(
     if not list(roadmap_nodes):
         raise _exec.GitHubError("objective roadmap is empty: an objective needs at least one node")
 
+    old_body = plans._get_issue_body(old_number, repo_root)
+    old_header = plan.find_metadata_block(old_body, objective.OBJECTIVE_HEADER_KEY) or {}
+    try:
+        carried_origin = objective.origin_value(old_header.get("origin"))
+    except ValueError as exc:
+        raise _exec.GitHubError(f"objective #{old_number}: {exc}") from exc
+
     created = create_objective_issue(
         title=title,
         body=prose,
@@ -414,6 +431,7 @@ def supersede_objective_issue(
         supersedes=objective.canonical_pr(old_number),
         delivery=delivery,
         delivery_lineage=delivery_lineage,
+        origin=None if carried_origin is None else carried_origin.value,
     )
 
     if close_predecessor:
@@ -430,6 +448,57 @@ def supersede_objective_issue(
                 f"(non-fatal): {exc}"
             )
     return created
+
+
+def find_objective_issue_by_origin(
+    *, origin: str, exclude_run_id: str | None, repo_root: Path
+) -> ObjectiveIssue | None:
+    """Find the first open ``perk:objective`` issue whose stored header ``origin`` matches — the
+    GitHub arm of the exhaustive-or-raise open-by-origin lookup (§8.24).
+
+    Enumerates **all pages** of the open label population
+    (:func:`plans._list_label_issues_all_pages` — never the one bounded page the run_id finds
+    use). Skips non-dict / number-less / ``pull_request`` rows and non-``str`` bodies
+    (header-absent → not an objective shape, the ``find_objective`` silent-skip precedent);
+    **raises** ``GitHubError`` on a present-but-malformed header block or an origin value
+    outside the closed vocabulary (genuine uncertainty must never read as authoritatively-none).
+    A candidate whose header ``run_id`` is a ``str`` equal to ``exclude_run_id`` is skipped (the
+    caller-exclusion); a missing/non-str ``run_id`` is never treated as excluded (fail-closed).
+    ``None`` only after exhausting every page.
+    """
+    issues = plans._list_label_issues_all_pages(
+        objective.OBJECTIVE_LABEL,
+        repo_root=repo_root,
+        what="failed to list objective issues",
+    )
+    for issue in issues:
+        if not isinstance(issue, dict) or "number" not in issue:
+            continue
+        if "pull_request" in issue:
+            continue
+        body = issue.get("body")
+        if not isinstance(body, str):
+            continue
+        if not plan.has_metadata_block(body, objective.OBJECTIVE_HEADER_KEY):
+            continue  # not an objective shape — the silent-skip precedent
+        header = plan.find_metadata_block(body, objective.OBJECTIVE_HEADER_KEY)
+        if header is None:
+            raise _exec.GitHubError(
+                f"objective #{issue['number']}: objective-header block is present but malformed"
+            )
+        try:
+            stored = objective.origin_value(header.get("origin"))
+        except ValueError as exc:
+            raise _exec.GitHubError(f"objective #{issue['number']}: {exc}") from exc
+        if stored is None or stored.value != origin:
+            continue
+        run_id = header.get("run_id")
+        if exclude_run_id is not None and isinstance(run_id, str) and run_id == exclude_run_id:
+            continue
+        return ObjectiveIssue(
+            number=int(issue["number"]), url=str(issue.get("html_url", "")), existed=True
+        )
+    return None
 
 
 def _converge_objective_subordinates(

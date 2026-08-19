@@ -56,8 +56,9 @@ def render_header_block(header: ObjectiveHeader) -> dict[str, object]:
     Emits the 8 base :class:`ObjectiveHeader` fields in DECLARATION order (nulls included) —
     byte-identical to the former ``header.model_dump(mode="json")`` (all fields are flat scalars,
     dumped in declaration order with no JSON transform). The delivery pair (``delivery`` /
-    ``delivery_lineage``) is **omitted when absent** — deliberately unlike the null-emitting base
-    fields — so incremental objectives keep the existing storage shape (contracts.md §8.42).
+    ``delivery_lineage``) and ``origin`` are **omitted when absent** — deliberately unlike the
+    null-emitting base fields — so incremental / normally-authored objectives keep the existing
+    storage shape (contracts.md §8.42).
     """
     data: dict[str, object] = {
         "run_id": header.run_id,
@@ -73,6 +74,8 @@ def render_header_block(header: ObjectiveHeader) -> dict[str, object]:
         data["delivery"] = header.delivery
     if header.delivery_lineage is not None:
         data["delivery_lineage"] = header.delivery_lineage
+    if header.origin is not None:
+        data["origin"] = header.origin
     return data
 
 

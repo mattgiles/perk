@@ -4271,6 +4271,61 @@ Reconcilable region markers, the `Adopted-from` archive note, and the copyable c
   plan-header)`, Linear the plan-header attachment), consumed by `plan from`'s `already_a_plan`
   refusal.
 
+**Objective #1892 Node 1.1 amendment — objective `origin` + the open-by-origin lookup.**
+Additive, store-tier only (no CLI flag, no extension/TS change): machine-created objectives carry
+a provenance stamp, and the store tier can answer "is an open objective with this origin already
+live?" authoritatively — the foundation for the dream-launch guard and the save-time conflict
+re-check (later nodes).
+
+- **The `origin` header field.** A **closed vocabulary** (`objective.ObjectiveOrigin`, a
+  `StrEnum`; first value `learn-dream`), stored as a `str` in the `objective-header` (typed like
+  `status`/`delivery`, the enum is the domain vocabulary). **Absence-compatible:** rendered only
+  when set (the §8.42 additive-field rule) — every existing objective and every origin-less
+  create/supersede renders byte-identically. **Launch-owned:** never model- or human-supplied —
+  the launch flow injects it from claimed machine state; no interactive surface passes it.
+- **Write surface = create + the supersession carry, structurally enforced.** `origin` is stamped
+  atomically into the INITIAL header by `create_objective(origin=…)` (never create-then-merge),
+  and both live stores' `supersede_objective` automatically carry the predecessor's stored origin
+  into the successor header (store-side, no parameter; validated — a junk stored value raises
+  BEFORE the successor create; a header-less/sentinel-less predecessor carries nothing).
+  `origin` is deliberately **excluded from `OBJECTIVE_HEADER_FIELDS`**, so the three
+  `update_objective_header` writers reject any post-create origin merge via their existing LBYL
+  check — while a stored origin round-trips untouched through unrelated merges (all three
+  writers merge into the *parsed existing* mapping). The dormant issue-backed store's
+  `create_objective` still stamps origin (it composes a real header); `adopt_source_as_objective`
+  never stamps one (a machine-originated objective is never adopted-from).
+- **The `origin_value` validator** (`objective/parse.py`): `None` → `None`; a value in the closed
+  vocabulary → the enum; **anything else raises `ValueError`** (fail-closed on junk/tampering,
+  mirroring `delivery_policy`). Stores translate the `ValueError` into their native error at the
+  boundary. (The header-dict origin classifier — the `delivery_policy` twin — is deferred to the
+  first node that reads a specific objective's origin.)
+- **`find_open_objective_by_origin(origin, exclude_run_id=None) → ObjectiveRef | None`**
+  (declared after `find_objective`): the first **open** match whose header `run_id` ≠
+  `exclude_run_id` (`existed=True`); `None` means *authoritatively none in the exhaustively
+  enumerated open population*. `exclude_run_id` is the caller-exclusion that makes a save-time
+  re-check sound with a single-ref API (the consumer excludes its own run; any returned ref IS a
+  conflict); a candidate with a missing/non-str `run_id` is never treated as excluded
+  (fail-closed). **Exhaustive-or-raise:** an infra failure raises; a **present-but-malformed**
+  header block/attachment raises (uncertainty about a real objective never reads as
+  authoritatively-none); an origin outside the closed vocabulary raises (via `origin_value`);
+  absent/different-known origins are non-matches (skip); the enumeration covers the full relevant
+  open population — never one bounded page. A store that cannot answer authoritatively must
+  RAISE, never return `None`.
+- **Per-store scope.** GitHub: **all pages** of the open `perk:objective` label population
+  (a new paginated `_list_label_issues_all_pages` sibling; the bounded default-page reads are
+  untouched). Linear project store: **team-scoped in v1** (a cross-team origin-stamped objective
+  is invisible — documented limitation) — every team project swept via its metadata **sentinel**
+  (the sentinel IS the identity; never the Reconcilable-marker heuristic); a sentinel-less
+  project is skipped (the same accepted create-crash window as `find_objective`); a surviving
+  match costs one project-state read (`completed`/`canceled` ⇒ closed, anything else including
+  missing ⇒ open). The dormant issue-backed Linear store **raises**
+  (`"the issue-backed Linear objective store does not support origin lookups"`) — deliberately
+  OUTSIDE the `→ None`/`→ False` no-op family, which would falsely assert authoritatively-none
+  and silently open a fail-closed guard.
+- **Closed under replan.** The supersession carry keeps the guarded origin population closed
+  across re-authoring; during a deferred-close transfer window (§8.53) both predecessor and
+  successor are visibly origin-stamped, so a concurrent origin-guarded launch correctly refuses.
+
 ## §8.25 · The human-engagement read contract (Objective #682, Node 1.2)
 
 A backend-neutral **READ** surface for human engagement — comments, description edits, and

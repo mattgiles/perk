@@ -391,10 +391,14 @@ class TestLinearProjectObjectiveStore:
 
     def test_supersede_objective_persists_delivery_pair_into_successor_header(self) -> None:
         # The supersede arm composes the SUCCESSOR header separately from create — the delivery
-        # pair (and the cold door's copied lineage) must reach that sentinel too. The old-side
-        # close is fail-open, so its first read is scripted to fail (the create must survive).
+        # pair (and the cold door's copied lineage) must reach that sentinel too. The origin-carry
+        # read sees a sentinel-less old project (carries nothing); the old-side close is
+        # fail-open, so ITS read is scripted to fail (the create must survive).
         responses = self._create_responses()
-        responses["project(id: $id)"] = [IssueBackendError("old project unreadable (scripted)")]
+        responses["project(id: $id)"] = [
+            {"project": {"issues": _page([])}},  # the carry read: sentinel-less old project
+            IssueBackendError("old project unreadable (scripted)"),  # the fail-open close read
+        ]
         store, fake = _make_project_store(responses)
         ref = store.supersede_objective(
             old_objective_id="proj-old",
@@ -419,7 +423,10 @@ class TestLinearProjectObjectiveStore:
         self,
     ) -> None:
         responses = self._create_responses()
-        responses["project(id: $id)"] = [IssueBackendError("old project unreadable (scripted)")]
+        responses["project(id: $id)"] = [
+            {"project": {"issues": _page([])}},  # the carry read: sentinel-less old project
+            IssueBackendError("old project unreadable (scripted)"),  # the fail-open close read
+        ]
         store, fake = _make_project_store(responses)
         store.supersede_objective(
             old_objective_id="proj-old",
@@ -434,6 +441,122 @@ class TestLinearProjectObjectiveStore:
         )
         fields = _att_fields(header_att)
         assert "delivery" not in fields and "delivery_lineage" not in fields
+
+    def test_create_objective_persists_origin_into_sentinel_header(self) -> None:
+        store, fake = _make_project_store(self._create_responses())
+        store.create_objective(
+            title="Big Objective",
+            body=_STORE_BODY,
+            run_id="01RUN",
+            roadmap_nodes=_store_nodes(),
+            origin=objective.ObjectiveOrigin.LEARN_DREAM,
+        )
+        header_att = next(
+            a for a in _att_creates(fake) if a["url"] == "https://perk.invalid/objective/01RUN"
+        )
+        assert _att_fields(header_att)["origin"] == "learn-dream"
+
+    def test_create_objective_absent_origin_keeps_header_fields_identical(self) -> None:
+        store, fake = _make_project_store(self._create_responses())
+        store.create_objective(
+            title="Big Objective",
+            body=_STORE_BODY,
+            run_id="01RUN",
+            roadmap_nodes=_store_nodes(),
+        )
+        header_att = next(
+            a for a in _att_creates(fake) if a["url"] == "https://perk.invalid/objective/01RUN"
+        )
+        assert "origin" not in _att_fields(header_att)
+
+    def _supersede_carry_responses(self, old_issues_page: object) -> dict[str, list[object]]:
+        """The deferred-close supersede scripting for the origin-carry tests: the carry read
+        (``project_issues`` on the OLD project) is scripted via the ``issues(first`` needle;
+        ``close_predecessor=False`` keeps the old side otherwise untouched."""
+        responses = self._create_responses()
+        responses["issues(first"] = [old_issues_page]
+        return responses
+
+    def test_supersede_objective_carries_stored_origin(self) -> None:
+        # The §8.24 origin carry: an ordinary replan keeps the successor inside the guarded
+        # origin population — store-side, no new parameter.
+        old_page = {
+            "project": {
+                "issues": _page([_sentinel_row("01OLD", header_extra={"origin": "learn-dream"})])
+            }
+        }
+        store, fake = _make_project_store(self._supersede_carry_responses(old_page))
+        ref = store.supersede_objective(
+            old_objective_id="proj-old",
+            title="Successor",
+            prose=_STORE_BODY,
+            run_id="01RUN",
+            roadmap_nodes=_store_nodes(),
+            carry_map={},
+            close_predecessor=False,
+        )
+        assert ref == objective_store.ObjectiveRef(id="proj-1", url="p/url", existed=False)
+        header_att = next(
+            a for a in _att_creates(fake) if a["url"] == "https://perk.invalid/objective/01RUN"
+        )
+        fields = _att_fields(header_att)
+        assert fields["supersedes"] == "proj-old"
+        assert fields["origin"] == "learn-dream"
+
+    def test_supersede_objective_absent_origin_stays_absent(self) -> None:
+        old_page = {"project": {"issues": _page([_sentinel_row("01OLD")])}}
+        store, fake = _make_project_store(self._supersede_carry_responses(old_page))
+        store.supersede_objective(
+            old_objective_id="proj-old",
+            title="Successor",
+            prose=_STORE_BODY,
+            run_id="01RUN",
+            roadmap_nodes=_store_nodes(),
+            carry_map={},
+            close_predecessor=False,
+        )
+        header_att = next(
+            a for a in _att_creates(fake) if a["url"] == "https://perk.invalid/objective/01RUN"
+        )
+        assert "origin" not in _att_fields(header_att)
+
+    def test_supersede_objective_sentinel_less_old_project_carries_nothing(self) -> None:
+        # Tolerant of the documented create-crash orphan window (the same acceptance as
+        # find_objective): a sentinel-less old project simply carries no origin.
+        old_page = {"project": {"issues": _page([])}}
+        store, fake = _make_project_store(self._supersede_carry_responses(old_page))
+        store.supersede_objective(
+            old_objective_id="proj-old",
+            title="Successor",
+            prose=_STORE_BODY,
+            run_id="01RUN",
+            roadmap_nodes=_store_nodes(),
+            carry_map={},
+            close_predecessor=False,
+        )
+        header_att = next(
+            a for a in _att_creates(fake) if a["url"] == "https://perk.invalid/objective/01RUN"
+        )
+        assert "origin" not in _att_fields(header_att)
+
+    def test_supersede_objective_junk_stored_origin_raises(self) -> None:
+        # Fail-closed BEFORE projectCreate: a junk stored origin never orphans a half-made
+        # successor project.
+        old_page = {
+            "project": {"issues": _page([_sentinel_row("01OLD", header_extra={"origin": "weird"})])}
+        }
+        store, fake = _make_project_store(self._supersede_carry_responses(old_page))
+        with pytest.raises(ObjectiveStoreError, match="unknown objective origin"):
+            store.supersede_objective(
+                old_objective_id="proj-old",
+                title="Successor",
+                prose=_STORE_BODY,
+                run_id="01RUN",
+                roadmap_nodes=_store_nodes(),
+                carry_map={},
+                close_predecessor=False,
+            )
+        assert not _queries(fake, "projectCreate(")
 
     def test_create_objective_prepends_overview_callout(self) -> None:
         # A fresh project-backed objective leads its overview with the copyable
@@ -548,6 +671,185 @@ class TestLinearProjectObjectiveStore:
         )
         with pytest.raises(ObjectiveStoreError, match="no project"):
             store.find_objective(run_id="01RUN")
+
+    # ------------------------------------------------- find_open_objective_by_origin (§8.24)
+
+    def _origin_sweep_responses(
+        self,
+        projects: list[dict[str, object]],
+        issue_pages: list[object],
+        state_rows: list[object] | None = None,
+    ) -> dict[str, list[object]]:
+        """The sentinel-sweep scripting: ``projects(first`` = the team projects page,
+        ``issues(first`` = one ``project_issues`` response per swept project (in order),
+        ``project(id: $id)`` = the per-match state read. Needle order matters: the
+        ``issues(first`` needle must precede ``project(id: $id)`` (the ``project_issues``
+        query text contains both)."""
+        responses: dict[str, list[object]] = {
+            "teams(filter": [_TEAM_RESPONSE],
+            "projects(first": [{"team": {"projects": _page(projects)}}],
+            "issues(first": issue_pages,
+        }
+        if state_rows is not None:
+            responses["project(id: $id)"] = state_rows
+        return responses
+
+    @staticmethod
+    def _project_row(
+        pid: str, *, content: str = "plain overview — no markers"
+    ) -> dict[str, object]:
+        return {"id": pid, "url": f"p/{pid}", "name": "O", "content": content}
+
+    def test_find_open_objective_by_origin_matches_without_reconcilable_markers(self) -> None:
+        # The marker-drift coverage: the sweep keys on the metadata sentinel (the authoritative
+        # identity), never the overview's Reconcilable-marker heuristic — a marker-less
+        # overview still matches.
+        store, _fake = _make_project_store(
+            self._origin_sweep_responses(
+                [self._project_row("proj-1")],
+                [
+                    {
+                        "project": {
+                            "issues": _page(
+                                [_sentinel_row("01RUN", header_extra={"origin": "learn-dream"})]
+                            )
+                        }
+                    }
+                ],
+                [{"project": {"id": "proj-1", "url": "p/1", "state": "started"}}],
+            )
+        )
+        ref = store.find_open_objective_by_origin(origin=objective.ObjectiveOrigin.LEARN_DREAM)
+        assert ref == objective_store.ObjectiveRef(id="proj-1", url="p/1", existed=True)
+
+    @pytest.mark.parametrize("state", ["completed", "canceled"])
+    def test_find_open_objective_by_origin_skips_closed_projects(self, state: str) -> None:
+        store, _ = _make_project_store(
+            self._origin_sweep_responses(
+                [self._project_row("proj-1")],
+                [
+                    {
+                        "project": {
+                            "issues": _page(
+                                [_sentinel_row("01RUN", header_extra={"origin": "learn-dream"})]
+                            )
+                        }
+                    }
+                ],
+                [{"project": {"id": "proj-1", "url": "p/1", "state": state}}],
+            )
+        )
+        assert (
+            store.find_open_objective_by_origin(origin=objective.ObjectiveOrigin.LEARN_DREAM)
+            is None
+        )
+
+    def test_find_open_objective_by_origin_missing_state_reads_open(self) -> None:
+        # No observation is never treated as closed; the ref URL falls back to the list row.
+        store, _ = _make_project_store(
+            self._origin_sweep_responses(
+                [self._project_row("proj-1")],
+                [
+                    {
+                        "project": {
+                            "issues": _page(
+                                [_sentinel_row("01RUN", header_extra={"origin": "learn-dream"})]
+                            )
+                        }
+                    }
+                ],
+                [{"project": None}],
+            )
+        )
+        ref = store.find_open_objective_by_origin(origin=objective.ObjectiveOrigin.LEARN_DREAM)
+        assert ref == objective_store.ObjectiveRef(id="proj-1", url="p/proj-1", existed=True)
+
+    def test_find_open_objective_by_origin_skips_sentinel_less_projects(self) -> None:
+        # An ordinary (non-perk) team project — or the accepted create-crash orphan — is
+        # skipped; the sweep continues to the real match.
+        store, _ = _make_project_store(
+            self._origin_sweep_responses(
+                [self._project_row("proj-1"), self._project_row("proj-2")],
+                [
+                    {"project": {"issues": _page([])}},  # proj-1: no sentinel
+                    {
+                        "project": {
+                            "issues": _page(
+                                [_sentinel_row("01RUN", header_extra={"origin": "learn-dream"})]
+                            )
+                        }
+                    },
+                ],
+                [{"project": {"id": "proj-2", "url": "p/2", "state": "started"}}],
+            )
+        )
+        ref = store.find_open_objective_by_origin(origin=objective.ObjectiveOrigin.LEARN_DREAM)
+        assert ref == objective_store.ObjectiveRef(id="proj-2", url="p/2", existed=True)
+
+    def test_find_open_objective_by_origin_junk_stored_origin_raises(self) -> None:
+        store, _ = _make_project_store(
+            self._origin_sweep_responses(
+                [self._project_row("proj-1")],
+                [
+                    {
+                        "project": {
+                            "issues": _page(
+                                [_sentinel_row("01RUN", header_extra={"origin": "weird"})]
+                            )
+                        }
+                    }
+                ],
+            )
+        )
+        with pytest.raises(ObjectiveStoreError, match="unknown objective origin"):
+            store.find_open_objective_by_origin(origin=objective.ObjectiveOrigin.LEARN_DREAM)
+
+    def test_find_open_objective_by_origin_honors_exclude_run_id(self) -> None:
+        # The caller-exclusion: the consumer's own run is skipped; a FOREIGN match is found.
+        store, _ = _make_project_store(
+            self._origin_sweep_responses(
+                [self._project_row("proj-1"), self._project_row("proj-2")],
+                [
+                    {
+                        "project": {
+                            "issues": _page(
+                                [_sentinel_row("01MINE", header_extra={"origin": "learn-dream"})]
+                            )
+                        }
+                    },
+                    {
+                        "project": {
+                            "issues": _page(
+                                [_sentinel_row("01FOREIGN", header_extra={"origin": "learn-dream"})]
+                            )
+                        }
+                    },
+                ],
+                [{"project": {"id": "proj-2", "url": "p/2", "state": "started"}}],
+            )
+        )
+        ref = store.find_open_objective_by_origin(
+            origin=objective.ObjectiveOrigin.LEARN_DREAM, exclude_run_id="01MINE"
+        )
+        assert ref == objective_store.ObjectiveRef(id="proj-2", url="p/2", existed=True)
+
+    def test_find_open_objective_by_origin_none_when_nothing_matches(self) -> None:
+        # Origin-less sentinels are non-matches; None = authoritatively none in the swept
+        # team population (never a state read for a non-match).
+        store, fake = _make_project_store(
+            self._origin_sweep_responses(
+                [self._project_row("proj-1")],
+                [{"project": {"issues": _page([_sentinel_row("01RUN")])}}],
+            )
+        )
+        assert (
+            store.find_open_objective_by_origin(origin=objective.ObjectiveOrigin.LEARN_DREAM)
+            is None
+        )
+        # only the projects list + the per-project sentinel scan ran — no state read
+        assert not [
+            q for q, _ in fake.requests if "project(id: $id)" in q and "issues(first" not in q
+        ]
 
     # ----------------------------------------------------------------- get_objective
 
@@ -1041,6 +1343,36 @@ class TestLinearProjectObjectiveStore:
         store, _ = _make_project_store({})
         with pytest.raises(ObjectiveStoreError, match="unknown objective-header field"):
             store.update_objective_header(objective_id="proj-1", fields={"bogus": 1})
+
+    def test_update_objective_header_rejects_origin_merge(self) -> None:
+        # `origin` is deliberately OUTSIDE OBJECTIVE_HEADER_FIELDS: create/supersede-only by
+        # structure — the existing LBYL check rejects any post-create origin write.
+        store, fake = _make_project_store({})
+        with pytest.raises(ObjectiveStoreError, match="unknown objective-header field"):
+            store.update_objective_header(objective_id="proj-1", fields={"origin": "learn-dream"})
+        assert fake.requests == []
+
+    def test_update_objective_header_unrelated_merge_preserves_stored_origin(self) -> None:
+        # The round-trip regression: the writer merges into the PARSED existing payload, so a
+        # stored origin survives unrelated header merges untouched.
+        store, fake = _make_project_store(
+            {
+                "issues(first": [
+                    {
+                        "project": {
+                            "issues": _page(
+                                [_sentinel_row("01RUN", header_extra={"origin": "learn-dream"})]
+                            )
+                        }
+                    }
+                ],
+                "attachmentCreate(": [_attachment_create_ok()],
+            }
+        )
+        store.update_objective_header(objective_id="proj-1", fields={"status": "done"})
+        [att] = _att_creates(fake)
+        fields = _att_fields(att)
+        assert fields["status"] == "done" and fields["origin"] == "learn-dream"
 
     def test_update_objective_header_no_sentinel_raises(self) -> None:
         store, _ = _make_project_store({"issues(first": [{"project": {"issues": _page([])}}]})

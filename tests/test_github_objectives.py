@@ -5,16 +5,18 @@ import pytest
 from _github_fakes import ROOT, _GhDispatch, _GhRecorder, _has, _Proc
 
 from perk import github, objective, plan
-from perk.backends.github import objectives
+from perk.backends.github import objectives, plans
 
 # --------------------------------------------------------------- objective ops
 
 
-def _obj_header(run_id: str, comment_id=None) -> str:
+def _obj_header(run_id: str, comment_id=None, *, origin=None) -> str:
     return plan.render_metadata_block(
         objective.OBJECTIVE_HEADER_KEY,
         objective.render_header_block(
-            objective.ObjectiveHeader(run_id=run_id, created="t", objective_comment_id=comment_id)
+            objective.ObjectiveHeader(
+                run_id=run_id, created="t", objective_comment_id=comment_id, origin=origin
+            )
         ),
     )
 
@@ -25,13 +27,29 @@ def _obj_roadmap(nodes) -> str:
     )
 
 
-def _obj_body(run_id, nodes, comment_id=None) -> str:
-    return f"{_obj_header(run_id, comment_id)}\n\n{_obj_roadmap(nodes)}\n"
+def _obj_body(run_id, nodes, comment_id=None, *, origin=None) -> str:
+    return f"{_obj_header(run_id, comment_id, origin=origin)}\n\n{_obj_roadmap(nodes)}\n"
 
 
 def _lists_comments(issue: int):
     endpoint = f"issues/{issue}/comments"
     return lambda gh: "POST" not in gh and any(endpoint in token for token in gh)
+
+
+class _Once:
+    """A dispatch predicate that matches only its FIRST hit — for scripting two different
+    responses to byte-identical calls (e.g. supersede's origin-carry read of the old issue body
+    vs the close path's later re-read of the same endpoint)."""
+
+    def __init__(self, pred) -> None:
+        self._pred = pred
+        self._used = False
+
+    def __call__(self, gh) -> bool:
+        if self._used or not self._pred(gh):
+            return False
+        self._used = True
+        return True
 
 
 def test_find_objective_issue_label_scoped(monkeypatch):
@@ -196,6 +214,41 @@ def test_create_objective_issue_absent_delivery_keeps_header_byte_identity(monke
     assert "delivery" not in issue_body
     header = plan.find_metadata_block(issue_body, objective.OBJECTIVE_HEADER_KEY)
     assert header is not None and "delivery" not in header
+
+
+def test_create_objective_issue_emits_origin_when_passed(monkeypatch):
+    nodes = [
+        objective.ObjectiveNode(id="1.1", description="A", status=objective.NodeStatus.PENDING)
+    ]
+    rec = _two_step_dispatch(nodes)
+    monkeypatch.setattr(subprocess, "run", rec)
+    objectives.create_objective_issue(
+        title="Obj",
+        body="# Obj\n\nprose",
+        repo_root=ROOT,
+        run_id="01RID",
+        roadmap_nodes=nodes,
+        origin="learn-dream",
+    )
+    issue_body = next(b for b in rec.body_files if objective.OBJECTIVE_ROADMAP_KEY in b)
+    header = plan.find_metadata_block(issue_body, objective.OBJECTIVE_HEADER_KEY)
+    assert header is not None and header["origin"] == "learn-dream"
+
+
+def test_create_objective_issue_absent_origin_keeps_header_byte_identity(monkeypatch):
+    nodes = [
+        objective.ObjectiveNode(id="1.1", description="A", status=objective.NodeStatus.PENDING)
+    ]
+    rec = _two_step_dispatch(nodes)
+    monkeypatch.setattr(subprocess, "run", rec)
+    objectives.create_objective_issue(
+        title="Obj", body="# Obj\n\nprose", repo_root=ROOT, run_id="01RID", roadmap_nodes=nodes
+    )
+    issue_body = next(b for b in rec.body_files if objective.OBJECTIVE_ROADMAP_KEY in b)
+    # The stored header block is byte-identical to the pre-origin shape (the §8.42 rule).
+    assert "origin" not in issue_body
+    header = plan.find_metadata_block(issue_body, objective.OBJECTIVE_HEADER_KEY)
+    assert header is not None and "origin" not in header
 
 
 def test_create_objective_issue_dry_run_does_not_shell(monkeypatch):
@@ -438,7 +491,9 @@ def test_supersede_objective_issue_close_failure_is_fail_open(monkeypatch):
             ),
             (_has("issues/200", ".body"), _Proc(0, _obj_body("01RID", nodes))),
             (_has("issues/200", "PATCH"), _Proc(0, "{}")),
-            # the OLD-side close fails (read returns error) — must be swallowed fail-open
+            # the create arm's origin-carry read of the old body succeeds (origin-less)…
+            (_Once(_has("issues/42", ".body")), _Proc(0, _obj_body("01OLD", nodes))),
+            # …then the OLD-side close's re-read fails — must be swallowed fail-open
             (_has("issues/42", ".body"), _Proc(1, stderr="boom")),
         ]
     )
@@ -482,6 +537,7 @@ def test_supersede_deferred_close_never_touches_the_old_issue(monkeypatch):
             ),
             (_has("issues/200", ".body"), _Proc(0, _obj_body("01RID", nodes))),
             (_has("issues/200", "PATCH"), _Proc(0, "{}")),
+            (_has("issues/42", ".body"), _Proc(0, _obj_body("01OLD", nodes))),  # the carry read
         ]
     )
     monkeypatch.setattr(subprocess, "run", rec)
@@ -495,7 +551,8 @@ def test_supersede_deferred_close_never_touches_the_old_issue(monkeypatch):
         close_predecessor=False,
     )
     assert created.number == 200 and created.existed is False
-    assert not any("issues/42" in " ".join(c) for c in rec.calls)
+    # The origin-carry READ is the only old-side touch — never a mutation (no PATCH, no close).
+    assert not any("issues/42" in " ".join(c) and ("PATCH" in c or "POST" in c) for c in rec.calls)
     assert not any("state=closed" in " ".join(c) for c in rec.calls)
     # The successor still records the supersedes backlink.
     assert any(
@@ -682,6 +739,114 @@ def test_finalize_supersession_issue_refuses_a_conflicting_stamp(monkeypatch):
     with pytest.raises(github.GitHubError, match="already superseded"):
         objectives.finalize_supersession_issue(old_number=42, new_number=200, repo_root=ROOT)
     assert not any("PATCH" in c for c in rec.calls)
+
+
+def test_supersede_objective_issue_carries_stored_origin(monkeypatch):
+    # The §8.24 origin carry: an ordinary replan keeps the successor inside the guarded
+    # origin population — store-side, no new parameter.
+    nodes = [
+        objective.ObjectiveNode(id="1.1", description="A", status=objective.NodeStatus.PENDING)
+    ]
+    rec = _GhDispatch(
+        [
+            (_has("issues", "GET"), _Proc(0, "[]")),
+            (_has("{repo}/labels", "POST"), _Proc(0, "{}")),
+            (_has("comments", "POST"), _Proc(0, json.dumps({"id": 555}))),
+            (
+                _has("repos/{owner}/{repo}/issues", "POST"),
+                _Proc(0, json.dumps({"number": 200, "url": "u/200"})),
+            ),
+            (_has("issues/200", ".body"), _Proc(0, _obj_body("01RID", nodes))),
+            (_has("issues/200", "PATCH"), _Proc(0, "{}")),
+            (
+                _has("issues/42", ".body"),
+                _Proc(0, _obj_body("01OLD", nodes, origin="learn-dream")),
+            ),
+            (_has("issues/42", "PATCH"), _Proc(0, "{}")),
+        ]
+    )
+    monkeypatch.setattr(subprocess, "run", rec)
+    created = objectives.supersede_objective_issue(
+        old_number=42,
+        title="t",
+        prose="p",
+        repo_root=ROOT,
+        run_id="01RID",
+        roadmap_nodes=nodes,
+    )
+    assert created.number == 200
+    new_body = next(
+        b
+        for b in rec.body_files
+        if (h := plan.find_metadata_block(b, objective.OBJECTIVE_HEADER_KEY)) is not None
+        and h.get("supersedes") == "#42"
+    )
+    header = plan.find_metadata_block(new_body, objective.OBJECTIVE_HEADER_KEY)
+    assert header is not None and header["origin"] == "learn-dream"
+
+
+def test_supersede_objective_issue_absent_origin_stays_absent(monkeypatch):
+    nodes = [
+        objective.ObjectiveNode(id="1.1", description="A", status=objective.NodeStatus.PENDING)
+    ]
+    rec = _GhDispatch(
+        [
+            (_has("issues", "GET"), _Proc(0, "[]")),
+            (_has("{repo}/labels", "POST"), _Proc(0, "{}")),
+            (_has("comments", "POST"), _Proc(0, json.dumps({"id": 555}))),
+            (
+                _has("repos/{owner}/{repo}/issues", "POST"),
+                _Proc(0, json.dumps({"number": 200, "url": "u/200"})),
+            ),
+            (_has("issues/200", ".body"), _Proc(0, _obj_body("01RID", nodes))),
+            (_has("issues/200", "PATCH"), _Proc(0, "{}")),
+            (_has("issues/42", ".body"), _Proc(0, _obj_body("01OLD", nodes))),
+            (_has("issues/42", "PATCH"), _Proc(0, "{}")),
+        ]
+    )
+    monkeypatch.setattr(subprocess, "run", rec)
+    objectives.supersede_objective_issue(
+        old_number=42,
+        title="t",
+        prose="p",
+        repo_root=ROOT,
+        run_id="01RID",
+        roadmap_nodes=nodes,
+    )
+    new_body = next(
+        b
+        for b in rec.body_files
+        if (h := plan.find_metadata_block(b, objective.OBJECTIVE_HEADER_KEY)) is not None
+        and h.get("supersedes") == "#42"
+    )
+    # The successor header is byte-identical to the pre-origin shape (the §8.42 rule).
+    assert "origin" not in new_body
+
+
+def test_supersede_objective_issue_junk_stored_origin_raises(monkeypatch):
+    # Fail-closed BEFORE the successor POST: a junk stored origin never orphans a half-made
+    # successor issue.
+    nodes = [
+        objective.ObjectiveNode(id="1.1", description="A", status=objective.NodeStatus.PENDING)
+    ]
+    junk_body = _obj_header("01OLD").replace("superseded_by: null", "origin: weird")
+    rec = _GhDispatch(
+        [
+            (_has("issues", "GET"), _Proc(0, "[]")),
+            (_has("issues/42", ".body"), _Proc(0, junk_body)),
+        ]
+    )
+    monkeypatch.setattr(subprocess, "run", rec)
+    with pytest.raises(github.GitHubError, match="unknown objective origin"):
+        objectives.supersede_objective_issue(
+            old_number=42,
+            title="t",
+            prose="p",
+            repo_root=ROOT,
+            run_id="01RID",
+            roadmap_nodes=nodes,
+        )
+    assert rec.method_calls("POST") == 0  # no successor issue was created
 
 
 def test_get_objective_parses_header_and_nodes(monkeypatch):
@@ -916,3 +1081,195 @@ def test_update_objective_header_rejects_unknown_field(monkeypatch):
     monkeypatch.setattr(subprocess, "run", lambda *a, **k: _Proc(0, _obj_header("01RID")))
     with pytest.raises(github.GitHubError, match="unknown objective-header field"):
         objectives.update_objective_header(number=5, fields={"bogus": "x"}, repo_root=ROOT)
+
+
+def test_update_objective_header_rejects_origin_merge(monkeypatch):
+    # `origin` is deliberately OUTSIDE OBJECTIVE_HEADER_FIELDS: create/supersede-only by
+    # structure — the existing LBYL check rejects any post-create origin write.
+    monkeypatch.setattr(subprocess, "run", lambda *a, **k: _Proc(0, _obj_header("01RID")))
+    with pytest.raises(github.GitHubError, match="unknown objective-header field"):
+        objectives.update_objective_header(
+            number=5, fields={"origin": "learn-dream"}, repo_root=ROOT
+        )
+
+
+def test_update_objective_header_unrelated_merge_preserves_stored_origin(monkeypatch):
+    # The round-trip regression: the writers merge into the PARSED existing mapping, so a
+    # stored origin survives unrelated header merges untouched.
+    stored = _obj_header("01RID", origin="learn-dream")
+    rec = _GhDispatch(
+        [
+            (_has("issues/5", ".body"), _Proc(0, stored)),
+            (_has("issues/5", "PATCH"), _Proc(0, "{}")),
+        ]
+    )
+    monkeypatch.setattr(subprocess, "run", rec)
+    objectives.update_objective_header(number=5, fields={"status": "complete"}, repo_root=ROOT)
+    patched = rec.body_files[-1]
+    header = plan.find_metadata_block(patched, objective.OBJECTIVE_HEADER_KEY)
+    assert header is not None
+    assert header["status"] == "complete" and header["origin"] == "learn-dream"
+
+
+# --------------------------------------------------- the open-by-origin lookup (§8.24)
+
+
+def _page_eq(n: int):
+    # exact-token match (`page=1` is a substring of `per_page=100`, so _has would misfire)
+    return lambda gh: f"page={n}" in gh
+
+
+def _origin_row(number: int, run_id: str, *, origin: str | None = None) -> dict:
+    return {
+        "number": number,
+        "html_url": f"u/{number}",
+        "body": _obj_header(run_id, origin=origin),
+    }
+
+
+def test_list_label_issues_all_pages_exhausts_pages(monkeypatch):
+    full_page = [_origin_row(i, f"01R{i}") for i in range(100)]
+    short_page = [_origin_row(200, "01R200")]
+    rec = _GhDispatch(
+        [
+            (_page_eq(1), _Proc(0, json.dumps(full_page))),
+            (_page_eq(2), _Proc(0, json.dumps(short_page))),
+        ]
+    )
+    monkeypatch.setattr(subprocess, "run", rec)
+    rows = plans._list_label_issues_all_pages(
+        objective.OBJECTIVE_LABEL, repo_root=ROOT, what="failed"
+    )
+    assert len(rows) == 101  # the full page triggered the next fetch; the short page stopped
+    assert len(rec.calls) == 2
+    assert all(any("per_page=100" in tok for tok in c) for c in rec.calls)
+
+
+def test_list_label_issues_all_pages_short_first_page_stops(monkeypatch):
+    rec = _GhDispatch([(_page_eq(1), _Proc(0, json.dumps([_origin_row(1, "01R1")])))])
+    monkeypatch.setattr(subprocess, "run", rec)
+    rows = plans._list_label_issues_all_pages(
+        objective.OBJECTIVE_LABEL, repo_root=ROOT, what="failed"
+    )
+    assert len(rows) == 1 and len(rec.calls) == 1
+
+
+def test_list_label_issues_all_pages_raises_on_page_failure(monkeypatch):
+    # A mid-scan page failure raises — a partial scan is never reported as complete.
+    full_page = [_origin_row(i, f"01R{i}") for i in range(100)]
+    rec = _GhDispatch(
+        [
+            (_page_eq(1), _Proc(0, json.dumps(full_page))),
+            (_page_eq(2), _Proc(1, stderr="HTTP 500")),
+        ]
+    )
+    monkeypatch.setattr(subprocess, "run", rec)
+    with pytest.raises(github.GitHubError):
+        plans._list_label_issues_all_pages(objective.OBJECTIVE_LABEL, repo_root=ROOT, what="failed")
+
+
+def test_find_objective_issue_by_origin_matches_on_a_later_page(monkeypatch):
+    # The pagination proof: an authoritative scan finds a match beyond the first page.
+    full_page = [_origin_row(i, f"01R{i}") for i in range(100)]
+    match_page = [_origin_row(200, "01R200", origin="learn-dream")]
+    rec = _GhDispatch(
+        [
+            (_page_eq(1), _Proc(0, json.dumps(full_page))),
+            (_page_eq(2), _Proc(0, json.dumps(match_page))),
+        ]
+    )
+    monkeypatch.setattr(subprocess, "run", rec)
+    found = objectives.find_objective_issue_by_origin(
+        origin="learn-dream", exclude_run_id=None, repo_root=ROOT
+    )
+    assert found is not None
+    assert found.number == 200 and found.url == "u/200" and found.existed is True
+
+
+def test_find_objective_issue_by_origin_row_guards_skip(monkeypatch):
+    rows = [
+        "not-a-dict",
+        {"html_url": "u/no-number", "body": _obj_header("01A", origin="learn-dream")},
+        {
+            "number": 2,
+            "html_url": "u/2",
+            "body": _obj_header("01B", origin="learn-dream"),
+            "pull_request": {},
+        },
+        {"number": 3, "html_url": "u/3", "body": None},  # non-str body → header-absent
+        {"number": 4, "html_url": "u/4", "body": "no header block here"},  # header-less → skip
+        _origin_row(5, "01C"),  # origin absent → non-match
+        _origin_row(6, "01D", origin="learn-dream"),  # the surviving match
+    ]
+    rec = _GhRecorder(get=_Proc(0, stdout=json.dumps(rows)))
+    monkeypatch.setattr(subprocess, "run", rec)
+    found = objectives.find_objective_issue_by_origin(
+        origin="learn-dream", exclude_run_id=None, repo_root=ROOT
+    )
+    assert found is not None and found.number == 6
+
+
+def test_find_objective_issue_by_origin_skips_a_different_known_origin(monkeypatch):
+    # A known-but-different origin is a non-match (skip), never a raise.
+    rows = [_origin_row(5, "01C", origin="learn-dream")]
+    monkeypatch.setattr(subprocess, "run", _GhRecorder(get=_Proc(0, stdout=json.dumps(rows))))
+    assert (
+        objectives.find_objective_issue_by_origin(
+            origin="some-other-origin", exclude_run_id=None, repo_root=ROOT
+        )
+        is None
+    )
+
+
+def test_find_objective_issue_by_origin_malformed_header_raises(monkeypatch):
+    # Present-but-malformed = genuine uncertainty about a real objective — never
+    # authoritatively-none.
+    broken = "<!-- perk:metadata-block:objective-header -->\nno closing marker"
+    rows = [{"number": 5, "html_url": "u/5", "body": broken}]
+    monkeypatch.setattr(subprocess, "run", _GhRecorder(get=_Proc(0, stdout=json.dumps(rows))))
+    with pytest.raises(github.GitHubError, match="present but malformed"):
+        objectives.find_objective_issue_by_origin(
+            origin="learn-dream", exclude_run_id=None, repo_root=ROOT
+        )
+
+
+def test_find_objective_issue_by_origin_unknown_origin_raises(monkeypatch):
+    rows = [_origin_row(5, "01C", origin=None)]
+    rows[0]["body"] = _obj_header("01C").replace("superseded_by: null", "origin: weird")
+    monkeypatch.setattr(subprocess, "run", _GhRecorder(get=_Proc(0, stdout=json.dumps(rows))))
+    with pytest.raises(github.GitHubError, match="unknown objective origin"):
+        objectives.find_objective_issue_by_origin(
+            origin="learn-dream", exclude_run_id=None, repo_root=ROOT
+        )
+
+
+def test_find_objective_issue_by_origin_honors_exclude_run_id(monkeypatch):
+    # The caller-exclusion: the consumer's own run is skipped; a FOREIGN match is still found.
+    rows = [
+        _origin_row(5, "01MINE", origin="learn-dream"),
+        _origin_row(6, "01FOREIGN", origin="learn-dream"),
+    ]
+    monkeypatch.setattr(subprocess, "run", _GhRecorder(get=_Proc(0, stdout=json.dumps(rows))))
+    found = objectives.find_objective_issue_by_origin(
+        origin="learn-dream", exclude_run_id="01MINE", repo_root=ROOT
+    )
+    assert found is not None and found.number == 6
+
+
+def test_find_objective_issue_by_origin_none_on_no_match(monkeypatch):
+    rows = [_origin_row(5, "01A"), _origin_row(6, "01B")]
+    monkeypatch.setattr(subprocess, "run", _GhRecorder(get=_Proc(0, stdout=json.dumps(rows))))
+    assert (
+        objectives.find_objective_issue_by_origin(
+            origin="learn-dream", exclude_run_id=None, repo_root=ROOT
+        )
+        is None
+    )
+
+
+def test_find_objective_issue_by_origin_raises_on_infra_failure(monkeypatch):
+    monkeypatch.setattr(subprocess, "run", _GhRecorder(get=_Proc(1, stderr="HTTP 500")))
+    with pytest.raises(github.GitHubError):
+        objectives.find_objective_issue_by_origin(
+            origin="learn-dream", exclude_run_id=None, repo_root=ROOT
+        )

@@ -315,6 +315,51 @@ class TestCreateObjectiveIssue:
         header = plan.find_metadata_block(description, objective.OBJECTIVE_HEADER_KEY)
         assert header is not None and header["base"] == "develop"
 
+    def test_create_persists_origin_into_objective_header(self) -> None:
+        # The dormant store still stamps origin at create (it composes a real header) — only
+        # the lookup refuses (see TestFindOpenObjectiveByOrigin).
+        store, fake = _make_store(
+            {
+                "teams(filter": [_TEAM_RESPONSE],
+                "issues(first": [_no_issues()],
+                "issueLabels(filter": [_LABEL_FOUND],
+                "issueCreate(": [
+                    {
+                        "issueCreate": {
+                            "success": True,
+                            "issue": {"id": "obj-1", "identifier": "ENG-9", "url": "u-obj"},
+                        }
+                    }
+                ],
+                "commentCreate(": [_COMMENT_CREATED],
+                "issue(id": [_objective_issue_response(_inline_objective_description("01NEW"))],
+                "issueUpdate(": [{"issueUpdate": {"success": True}}],
+            }
+        )
+        store.create_objective(
+            title="t",
+            body="The objective prose.",
+            run_id="01NEW",
+            roadmap_nodes=_objective_nodes(),
+            origin=objective.ObjectiveOrigin.LEARN_DREAM,
+        )
+        [(_, create_vars)] = _queries(fake, "issueCreate(")
+        description = _input_payload(create_vars)["description"]
+        assert isinstance(description, str)
+        header = plan.find_metadata_block(description, objective.OBJECTIVE_HEADER_KEY)
+        assert header is not None and header["origin"] == "learn-dream"
+
+
+class TestFindOpenObjectiveByOrigin:
+    def test_refuses_with_a_raise_never_none(self) -> None:
+        # The dormant store cannot answer the exhaustive-or-raise lookup authoritatively — it
+        # RAISES (deliberately outside the → None / → False no-op family): a silent None would
+        # falsely assert authoritatively-none and open a fail-closed guard.
+        store, fake = _make_store()
+        with pytest.raises(ObjectiveStoreError, match="does not support origin lookups"):
+            store.find_open_objective_by_origin(origin=objective.ObjectiveOrigin.LEARN_DREAM)
+        assert fake.requests == []
+
 
 class TestGetObjective:
     def test_happy_path(self) -> None:
@@ -373,6 +418,13 @@ class TestUpdateObjectiveHeader:
         store, fake = _make_store()
         with pytest.raises(ObjectiveStoreError, match="unknown objective-header field"):
             store.update_objective_header(objective_id="obj-1", fields={"nope": 1})
+        assert fake.requests == []
+
+    def test_origin_merge_rejected_lbyl(self) -> None:
+        # `origin` is deliberately OUTSIDE OBJECTIVE_HEADER_FIELDS (create/supersede-only).
+        store, fake = _make_store()
+        with pytest.raises(ObjectiveStoreError, match="unknown objective-header field"):
+            store.update_objective_header(objective_id="obj-1", fields={"origin": "learn-dream"})
         assert fake.requests == []
 
     def test_dry_run_composes_only(self) -> None:

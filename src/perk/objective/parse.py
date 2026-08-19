@@ -3,8 +3,9 @@
 The roadmap-block readers/validators:
 :func:`validate_roadmap` (the shared per-node schema gate), :func:`parse_roadmap_nodes` (read +
 validate the ``objective-roadmap`` block), :func:`parse_structured_roadmap` (the out-of-band
-structured-roadmap path), :func:`parse_adopt_mapping` (the in-place adoption side-map), and
-:func:`delivery_policy` (the objective delivery-policy read classifier).
+structured-roadmap path), :func:`parse_adopt_mapping` (the in-place adoption side-map),
+:func:`delivery_policy` (the objective delivery-policy read classifier), and
+:func:`origin_value` (the fail-closed objective-origin value validator).
 """
 
 from typing import cast
@@ -19,6 +20,7 @@ from perk.objective._models import (
     NodeStatus,
     ObjectiveNode,
     ObjectiveNodeEntry,
+    ObjectiveOrigin,
     StructuredRoadmapNode,
     _has_block,
 )
@@ -41,6 +43,23 @@ def delivery_policy(header: dict[str, object]) -> DeliveryPolicy:
     if value == DeliveryPolicy.INCREMENTAL.value:
         return DeliveryPolicy.INCREMENTAL
     raise ValueError(f"unknown objective delivery policy: {value!r}")
+
+
+def origin_value(value: object) -> ObjectiveOrigin | None:
+    """Validate a stored objective-header ``origin`` value (contracts.md §8.24).
+
+    ``None`` (absent) ⇒ ``None`` (a normally-authored objective); a value in the closed
+    :class:`ObjectiveOrigin` vocabulary ⇒ the enum member. **Anything else raises
+    ``ValueError``** — fail-closed on junk/tampering (mirroring :func:`delivery_policy`'s
+    posture): genuine uncertainty about a stored origin must never read as origin-less. Stores
+    translate the ``ValueError`` into their native error at the boundary.
+    """
+    if value is None:
+        return None
+    for member in ObjectiveOrigin:
+        if value == member.value:
+            return member
+    raise ValueError(f"unknown objective origin: {value!r}")
 
 
 def validate_roadmap(data: dict[str, object]) -> tuple[list[ObjectiveNode], list[str]]:
