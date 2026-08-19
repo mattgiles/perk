@@ -35,9 +35,11 @@ import {
   DELIVERY_PARAM_SCHEMA,
   type DeliveryChoice,
   decodeObjectiveSaveParams,
+  DREAM_REPORT_PARAM_SCHEMA,
   ROADMAP_PARAM_SCHEMA,
   readObjectiveDraft,
 } from "./objectiveDraft.ts";
+import { resolveDreamReportGate } from "./objectiveDreamReport.ts";
 
 /** The `objective-save` registry stage id (the objectiveAuthor.ts constant's sibling). */
 export const OBJECTIVE_SAVE_STAGE = "objective-save";
@@ -70,6 +72,13 @@ function decodeObjectiveCreate(payload: ColdJson): ObjectiveCreatePayload | null
  * The single save implementation both surfaces call. Delegates the GitHub write to the Python cold
  * door, then links the live session (`active_objective` + budget marker). Returns a soft result
  * (never throws); failures set `details.ok = false` and append no linkage.
+ *
+ * `dream_report` is ONE carrier with two sources (§8.63): the direct tool path supplies
+ * `{input}` and the save stamps `generated_at`; the approval path passes the artifact block
+ * through with its stored stamp AND stored parts — the stored parts are byte-compared against
+ * the freshly re-rendered ones, so run-scratch drift or artifact tamper between draft-write
+ * and save refuses `bad_state` (nothing saved, the gate stays on). The parts do NOT cross to
+ * the Python plane yet — companion persistence is deferred (explicit in §8.63, not silent).
  */
 export async function saveObjective(
   pi: ExtensionAPI,
@@ -80,6 +89,7 @@ export async function saveObjective(
     roadmap?: unknown[];
     base?: string;
     delivery?: DeliveryChoice;
+    dream_report?: { input: unknown; generated_at?: string; parts?: string[] };
   },
 ): Promise<ObjectiveSaveResult> {
   const fail = failFor(ctx, "objective-save");
@@ -89,6 +99,30 @@ export async function saveObjective(
     return fail("no objective prose to save (draft the objective first)", "invalid_input");
   if (opts.roadmap !== undefined && !Array.isArray(opts.roadmap)) {
     return fail("roadmap must be a JSON array of nodes", "invalid_input");
+  }
+
+  // The §8.63 fail-closed re-validation, before anything reaches the cold door. Presence is
+  // the `opts.dream_report === undefined` boundary — an `{input: undefined}` carrier is never
+  // constructed (the execute wraps only a present decoded value; the approval path passes the
+  // validated artifact block).
+  const generatedAt = opts.dream_report?.generated_at ?? new Date().toISOString();
+  const gate =
+    opts.dream_report === undefined
+      ? resolveDreamReportGate(ctx, undefined, generatedAt)
+      : resolveDreamReportGate(ctx, opts.dream_report.input, generatedAt);
+  if (gate.kind === "refuse") {
+    return fail(gate.detail, gate.errorType);
+  }
+  if (gate.kind === "block" && opts.dream_report?.parts !== undefined) {
+    // The approval path: the reviewed (stored) parts must byte-match the re-render against
+    // freshly recovered context — the same stored `generated_at` stamp keeps the comparison
+    // deterministic.
+    if (JSON.stringify(gate.block.parts) !== JSON.stringify(opts.dream_report.parts)) {
+      return fail(
+        "the reviewed report no longer matches the wave state — re-draft and re-review",
+        "bad_state",
+      );
+    }
   }
 
   const branch = () => branchOf(ctx);
@@ -175,6 +209,9 @@ export async function objectiveApprovalSave(
     roadmap: draft.roadmap,
     base: draft.base,
     delivery: draft.delivery,
+    // The approval path passes the artifact block through whole — stored stamp + stored parts
+    // (the save re-validates and byte-compares, §8.63).
+    ...(draft.dream_report !== undefined ? { dream_report: draft.dream_report } : {}),
   });
   let gateExited = false;
   if (result.details.ok && wasReadOnly) {
@@ -231,6 +268,7 @@ export function registerObjectiveSave(pi: ExtensionAPI, gating: ToolGating): voi
             "Optional target branch for this objective's plans (omit to use the repo default).",
         },
         delivery: DELIVERY_PARAM_SCHEMA,
+        dream_report: DREAM_REPORT_PARAM_SCHEMA,
         roadmap: {
           type: "array",
           description:
@@ -251,7 +289,13 @@ export function registerObjectiveSave(pi: ExtensionAPI, gating: ToolGating): voi
           "bad_input",
         );
       }
-      return saveObjective(pi, ctx, decoded);
+      // The direct tool path wraps ONLY a present decoded value as the `{input}` carrier (the
+      // save stamps generated_at); no stored parts, so no byte-compare on this path.
+      const { dream_report, ...rest } = decoded;
+      return saveObjective(pi, ctx, {
+        ...rest,
+        ...(dream_report !== undefined ? { dream_report: { input: dream_report } } : {}),
+      });
     },
   });
 

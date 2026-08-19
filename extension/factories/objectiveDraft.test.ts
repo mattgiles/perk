@@ -97,6 +97,7 @@ test("decode smoke: absent prose decodes to empty string (the core owns invalid_
     roadmap: undefined,
     base: undefined,
     delivery: undefined,
+    dream_report: undefined,
   });
 });
 
@@ -512,6 +513,7 @@ test("decodeObjectiveSaveParams: tri-state strict-fail shapes", () => {
     roadmap: [{ id: "1.1" }],
     base: undefined,
     delivery: undefined,
+    dream_report: undefined,
   });
   // prose absent decodes to "" (saveObjective's invalid_input arm keeps owning that message).
   assert.equal(decodeObjectiveSaveParams({})?.prose, "");
