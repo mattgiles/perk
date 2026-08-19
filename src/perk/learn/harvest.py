@@ -1,8 +1,11 @@
-"""The gather/partition core for the ``perk learn harvest`` factory.
+"""The shared learned-corpus gather core both learn factories build on.
 
-Corpus/``--from`` resolution over ``docs/learned/`` + the pure lane partition + the versioned
-manifest render/write. Dependency-light on purpose (stdlib + ``perk.learn.docs_scan`` +
-``perk.boundary`` + ``perk.state.cache`` + ``perk.cli.ensure``): the cold door supplies
+Corpus/``--from`` resolution over ``docs/learned/`` for the ``perk learn harvest`` factory + the
+pure lane partition + the versioned manifest render/write; :func:`eligible_learned_docs` (the
+guarded eligible-corpus enumeration) and :func:`partition_lanes`/:data:`MAX_LANE_DOCS` are the
+shared primitives ``perk.learn.dream`` builds on. Dependency-light on purpose (stdlib +
+``perk.learn.docs_scan`` + ``perk.boundary`` + ``perk.state.cache`` + ``perk.cli.ensure``): the
+cold door supplies
 ``run_id``/``commit_sha`` and owns every CLI concern (flags, ``--json``). Single- vs multi-lane
 **routing** (direct in-session analysis vs the analyst wave) is the fallback state table's first
 split, decided by the lane count (``len(partition_lanes(docs))``, the per-group lane contract —
@@ -39,32 +42,29 @@ class HarvestLane:
     docs: tuple[LearnedDoc, ...]
 
 
-def resolve_harvest_docs(repo_root: Path, from_targets: Sequence[str]) -> tuple[LearnedDoc, ...]:
-    """Resolve the harvest selection over the eligible learned corpus.
+def eligible_learned_docs(repo_root: Path) -> tuple[tuple[LearnedDoc, Path], ...]:
+    """The eligible learned corpus: ``(doc, resolved_path)`` pairs in corpus order.
 
     The corpus is ``read_learned_docs(repo_root)`` — the sole enumerator (``index.md``
     exclusion, ``(category, slug)`` order, and ``None``-cue tolerance all inherited) — filtered
-    once to the **eligible corpus**: docs whose resolved path stays inside
-    ``docs/learned/`` (an escaped-symlink entry is excluded from every arm, so the default and
-    ``--from docs/learned`` stay equivalent by construction and harvest never selects
-    outside-tree content). Empty ``from_targets`` → the full eligible corpus; otherwise the
-    deduped union of per-target selections, in corpus order.
+    once to the docs whose resolved path stays inside ``docs/learned/`` (an escaped-symlink
+    entry is silently **filtered**; a caller wanting the refuse posture compares this set
+    against the raw enumeration itself).
 
-    Raises ``UserFacingCliError``: ``invalid_input`` when ``docs/learned`` itself resolves
+    Raises ``UserFacingCliError`` ``invalid_input`` when ``docs/learned`` itself resolves
     outside the repository (a symlinked corpus root — refused before any scan, or the outside
-    target would become the trusted containment root); ``invalid_from`` for a target that
-    resolves outside ``docs/learned/`` or does not exist; ``no_harvest_docs`` when the selection
-    is empty.
+    target would become the trusted containment root).
     """
     learned_root = (repo_root / "docs" / "learned").resolve()
     # Path-traversal guard: the per-doc containment below is relative to learned_root, so a
     # docs/learned that is itself a symlink out of the repository would launder outside-tree
-    # files into the manifest (and the launched session would be told to read them). Refuse
-    # before reading anything.
+    # files into a manifest (and the launched session would be told to read them). Refuse
+    # before reading anything. The message names no single factory — both learn factories
+    # share this guard.
     if not learned_root.is_relative_to(repo_root.resolve()):
         raise UserFacingCliError(
             "docs/learned resolves outside the repository (a symlinked corpus root) — "
-            "harvest refuses to read outside-tree content.",
+            "refusing to read outside-tree content.",
             error_type="invalid_input",
         )
     eligible: list[tuple[LearnedDoc, Path]] = []
@@ -72,6 +72,25 @@ def resolve_harvest_docs(repo_root: Path, from_targets: Sequence[str]) -> tuple[
         resolved = (repo_root / doc.path).resolve()
         if resolved.is_relative_to(learned_root):
             eligible.append((doc, resolved))
+    return tuple(eligible)
+
+
+def resolve_harvest_docs(repo_root: Path, from_targets: Sequence[str]) -> tuple[LearnedDoc, ...]:
+    """Resolve the harvest selection over the eligible learned corpus.
+
+    The corpus is :func:`eligible_learned_docs` (an escaped-symlink entry is excluded from
+    every arm, so the default and ``--from docs/learned`` stay equivalent by construction and
+    harvest never selects outside-tree content). Empty ``from_targets`` → the full eligible
+    corpus; otherwise the deduped union of per-target selections, in corpus order.
+
+    Raises ``UserFacingCliError``: ``invalid_input`` when ``docs/learned`` itself resolves
+    outside the repository (a symlinked corpus root — refused before any scan, or the outside
+    target would become the trusted containment root); ``invalid_from`` for a target that
+    resolves outside ``docs/learned/`` or does not exist; ``no_harvest_docs`` when the selection
+    is empty.
+    """
+    eligible = eligible_learned_docs(repo_root)
+    learned_root = (repo_root / "docs" / "learned").resolve()
 
     if not from_targets:
         selected = tuple(doc for doc, _resolved in eligible)

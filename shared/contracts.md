@@ -1,7 +1,7 @@
 # perk cross-plane contracts
 
 The language-neutral contracts both planes obey, authored once here and bundled into each
-build artifact. This document holds the numbered **prose contract sections** (`§8.1`–`§8.57`,
+build artifact. This document holds the numbered **prose contract sections** (`§8.1`–`§8.59`,
 non-contiguous: `§8.8` is skipped and `§8.6a` exists; no parser): the Python CLI (`perk`)
 and the TS extension (`@mgiles/perk`) each implement one side, against the exact names/paths/
 fields pinned in each section. `perk doctor` verifies conformance. The numbering convention:
@@ -9209,3 +9209,100 @@ construction site — it ships standalone into the wheel and cannot import the c
 two sites are pinned together by a path-parity test). The family is disposable local cache:
 ignored by run GC, retained for the worktree's life, removed with the worktree; never copied to
 GitHub/Linear.
+
+## §8.59 · The learn-dream gather core (manifest contract — no door yet)
+
+The pure exterior gather core for the `perk learn dream` factory (`perk/learn/dream.py`),
+landed **doorless on purpose**: no public command, no seed, no binding until the activation
+node ships (the §8.48-style door text lands there); the TS analyst wave is the decoder-side
+follow-up (it pins this same schema version then). `commit_sha` and `run_id` are
+**door-supplied parameters** — the core never captures HEAD, syncs, or preflights
+clean-tree/origin.
+
+**The manifest.** Versioned JSON (schema_version the string `"1"` — dream's own version line,
+independent of harvest's), written run-scoped at
+`.perk/workflow/scratch/runs/<run_id>/dream-manifest.json` (`DREAM_MANIFEST_FILENAME`):
+
+```json
+{ "schema_version": "1",
+  "commit_sha": "<door-supplied>",
+  "registry_mode": "clusters",
+  "doc_count": 63,
+  "total_bytes": 1160620,
+  "findings": {
+    "structural": {
+      "stale_pointers": [ { "doc": "docs/learned/pi/context-injection.md",
+                            "pointer": "perk/run/launch.py::_gone",
+                            "reason": "missing-symbol" } ],
+      "broken_doc_paths": [ { "doc": "docs/learned/pi/context-injection.md",
+                              "target": "../workflow/renamed.md" } ],
+      "duplicate_cues": [ { "key": "when touching the extension api.",
+                            "docs": [ "docs/learned/pi/context-injection.md",
+                                      "docs/learned/pi/extension-api.md" ] } ],
+      "missing_frontmatter": [ "docs/learned/pi/untitled.md" ] },
+    "advisory": {
+      "distillation_issues": [ { "doc": "docs/learned/pi/context-system.md",
+                                 "problem": "missing" } ],
+      "source_code_blocks": [ { "doc": "docs/learned/pi/extension-api.md",
+                                "language": "ts", "lines": 14 } ],
+      "overlong_cues": [ { "doc": "docs/learned/pi/tui-surfaces.md", "length": 214 } ],
+      "cue_hazards": [ { "doc": "docs/learned/pi/subagents.md",
+                         "hazard": "space-hash" } ],
+      "empty_clusters": [ "prose-governance" ] } },
+  "lanes": [
+    { "id": "pi-extension-1",
+      "rollup": "Pi SDK/extension substrate craft — …",
+      "docs": [ { "path": "docs/learned/pi/context-injection.md",
+                  "title": "…", "read_when": "…",
+                  "cluster": "pi-extension", "bytes": 12345 } ] } ] }
+```
+
+`registry_mode` ∈ `"clusters" | "categories"`; per-doc `bytes` is the raw file byte size;
+`doc_count`/`total_bytes` are the corpus count and the per-doc-bytes sum; the per-doc cue field
+is named `read_when` (matching the harvest manifest and the frontmatter key); `None`
+title/cue/cluster/rollup values are carried as JSON `null`, never dropped.
+
+**The two-source partition.** Lanes join the committed cluster registry
+(`docs/learned/clusters.yaml` — ids + rollups + **file order**, the presentation SSOT matching
+the `docs-sync` rendering) with each doc's `cluster` frontmatter: per registry cluster, members
+= the docs whose `cluster` matches, path-sorted, chunked sequentially at `MAX_LANE_DOCS` (the
+shared harvest cap, 8); lane ids `<cluster>-<n>`, 1-based per cluster; **every chunk lane of a
+cluster carries that cluster's `rollup`**; an empty cluster emits no lane. The **category
+fallback** applies only to a **truly absent** registry (`load_cluster_registry` → `None`):
+`partition_lanes` semantics — `<category>-<n>` ids in sorted-group order — with `rollup: null`
+and `registry_mode: "categories"`.
+
+**The refusal vocabulary** (all `UserFacingCliError`s): `no_learned_docs` (empty corpus);
+`invalid_registry` (a present-but-broken registry — the loader's precise reason relayed);
+`incomplete_registry` (any doc whose `cluster` is undeclared or names no registry id — every
+offending doc listed; the docs-sync posture, never a silent fallback); `invalid_input` (the
+symlinked corpus root, escaping docs, and unreadable doc bytes — snapshot honesty, never a
+silent 0). Byte measurement runs **before** the partition, so an unreadable doc is refused
+`invalid_input`, never misnamed `incomplete_registry` (the never-raising scan degrades an
+unreadable doc's frontmatter — its `cluster` included — to `null`): readability precedes
+membership. **Dream refuses where harvest filters**: an enumerated doc whose resolved path
+escapes `docs/learned/` is a refusal naming every escaping doc — a complete-corpus audit never
+silently narrows the corpus, so a completed gather's doc set is exactly the
+`read_learned_docs` enumeration.
+
+**Findings.** One `check_docs` call mapped into the pinned **closed** sets above (the field
+vocabularies are `docs_sync`/`docs_scan`'s, by reference — dream only *reads* the existing
+scanners, never widens the docs-check report). Every family is filtered by its **owner-doc
+field only** against the manifest path set: a `broken_doc_paths` row's `target` (and a
+`stale_pointers` row's `pointer`) never participates in filtering — a broken target is by
+definition not a corpus member; it IS the finding. `duplicate_cues` comes from
+`duplicate_read_when` (learned-docs-only by construction; groups kept when all `docs` are in
+the path set — degenerate post-refusal, pinned for determinism); `empty_clusters` carries
+cluster ids untouched (registry mode only; `[]` in fallback). Deliberately excluded: artifact
+freshness/`stale_files` and `ambient_routing_bytes` (generated-artifact mechanics `docs-sync`
+repairs), `oversize_docs` (derivable from per-doc `bytes`), `registry_error`/`cluster_issues`
+(structurally impossible — refused before a gather completes), and any duplicate-**title**
+family (`DocsCheckReport` exposes only `duplicate_read_when`; the whole-corpus analysts read
+titles anyway).
+
+**The shared primitive.** `eligible_learned_docs(repo_root)` (extracted in
+`perk/learn/harvest.py`) owns the symlinked-corpus-root guard + the per-doc resolved
+containment **filter**, returning `(doc, resolved_path)` pairs in corpus order; harvest's
+selection semantics stay byte-identical (it consumes the primitive), and dream layers its
+refuse posture on top. Resolved paths are consumed only for byte measurement — never as
+partition input.

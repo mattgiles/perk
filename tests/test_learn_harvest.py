@@ -12,6 +12,7 @@ from perk.learn.harvest import (
     MANIFEST_SCHEMA_VERSION,
     MAX_LANE_DOCS,
     HarvestLane,
+    eligible_learned_docs,
     partition_lanes,
     render_manifest,
     resolve_harvest_docs,
@@ -153,6 +154,28 @@ def test_corpus_symlink_containment(tmp_path: Path):
         "docs/learned/workflow/linked.md",
         "docs/learned/workflow/real.md",
     ]
+
+
+def test_eligible_learned_docs_guard_and_containment_filter(tmp_path: Path):
+    """The shared primitive: (doc, resolved) pairs in corpus order, escaping symlinks silently
+    FILTERED (harvest's posture), and the symlinked-corpus-root guard refusing up front."""
+    real = _doc(tmp_path, "workflow", "real")
+    outside = tmp_path / "outside.md"
+    outside.write_text("# Outside\n", encoding="utf-8")
+    escaped = tmp_path / "docs" / "learned" / "workflow" / "escaped.md"
+    escaped.symlink_to(outside)
+
+    pairs = eligible_learned_docs(tmp_path)
+    assert [(doc.path, resolved) for doc, resolved in pairs] == [
+        ("docs/learned/workflow/real.md", real.resolve())
+    ]
+
+    repo = tmp_path / "repo"
+    (repo / "docs").mkdir(parents=True)
+    (repo / "docs" / "learned").symlink_to(tmp_path / "docs" / "learned")
+    with pytest.raises(UserFacingCliError) as exc_info:
+        eligible_learned_docs(repo)
+    assert exc_info.value.error_type == "invalid_input"
 
 
 def test_symlinked_corpus_root_outside_repo_is_refused(tmp_path: Path):
