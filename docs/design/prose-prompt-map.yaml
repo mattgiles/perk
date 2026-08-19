@@ -310,7 +310,7 @@ routes:
     role: subagent-instruction
     priority: 85
   - id: agent-learn
-    match: { paths: ["agents/learn-analyst.md", "agents/harvest-analyst.md", "agents/dream-analyst.md"] }
+    match: { paths: ["agents/learn-analyst.md", "agents/harvest-analyst.md", "agents/dream-analyst.md", "agents/dream-reducer.md"] }
     capability: knowledge.learn
     audience: shipped
     role: subagent-instruction
@@ -414,7 +414,7 @@ routes:
     role: tool-contract
     priority: 85
   - id: ts-learn
-    match: { paths: ["extension/doors/learn*.ts", "extension/doors/harvestWaveTools.ts"] }
+    match: { paths: ["extension/doors/learn*.ts", "extension/doors/harvestWaveTools.ts", "extension/doors/dreamWaveTools.ts"] }
     capability: knowledge.learn
     audience: shipped
     role: tool-contract

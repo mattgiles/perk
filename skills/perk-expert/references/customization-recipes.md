@@ -65,7 +65,8 @@ to perk's subagents (frontmatter/`[models.subagents]` own those).
 
 Fixed-key table — affects only perk's own agents (`pr-reviewer`, `review-classifier`,
 `objective-explorer`, `conflict-resolver`, `learn-analyst`, `adversarial-reviewer`,
-`review-angle-selector`, `draft-reviewer`, `harvest-analyst`, plus the dev-only
+`review-angle-selector`, `draft-reviewer`, `harvest-analyst`, `dream-analyst`,
+`dream-reducer`, plus the dev-only
 `session-auditor` — dormant in consumer repos). An absent key uses
 the agent's frontmatter default.
 
