@@ -62,10 +62,14 @@ class PlanUpdate:
 
 
 def _list_label_issues(label: str, *, repo_root: Path, what: str) -> list[Any]:
-    """The shared label-scoped open-issue LIST read (the **list** endpoint, not the
-    eventually-consistent search index). Returns the raw issue list (``[]`` when the payload is
-    not a list); callers keep their own per-entry filtering/mapping. Raises ``GitHubError`` on an
-    infra/query failure (never masks it)."""
+    """The **bounded one-page** label-scoped open-issue browse read (the **list** endpoint, not
+    the eventually-consistent search index). One unpaginated request: GitHub's default page
+    (~30 rows, ``created``-descending) — membership beyond it is not promised (the counterpart of
+    Linear's ``_list_label_issues_one_page``). Full-census callers (idempotency finders, the
+    learn/gist inboxes) must use :func:`_list_label_issues_all_pages` instead. Returns the raw
+    issue list (``[]`` when the payload is not a list — a tolerant fail-open browse fold);
+    callers keep their own per-entry filtering/mapping. Raises ``GitHubError`` on an infra/query
+    failure (never masks it)."""
     issues = _exec._run_json(
         _exec._rest_args(
             "repos/{owner}/{repo}/issues",
@@ -78,6 +82,39 @@ def _list_label_issues(label: str, *, repo_root: Path, what: str) -> list[Any]:
         default="[]",
     )
     return issues if isinstance(issues, list) else []
+
+
+def _list_label_issues_all_pages(label: str, *, repo_root: Path, what: str) -> list[Any]:
+    """The **exhaustive** label-scoped open-issue LIST read — every page, one gh invocation.
+
+    ``gh api --paginate`` follows GitHub's REST ``Link`` headers to termination; ``--slurp``
+    (gh >= 2.48.0) wraps the pages in one outer JSON array, so a list endpoint yields an **array
+    of page arrays**, flattened here into one entry list. Decode is **fail-closed** ("can't
+    verify ⇒ don't promise"): any unexpected shape — a non-list top level or a non-list page
+    element — raises ``GitHubError`` rather than returning a partial census (a partial result
+    here IS the silent-truncation bug this helper exists to prevent). Per-entry dict/
+    ``pull_request`` filtering stays with callers, matching :func:`_list_label_issues`.
+    """
+    args = _exec._rest_args(
+        "repos/{owner}/{repo}/issues",
+        method="GET",
+        fields={"labels": label, "state": "open", "per_page": "100"},
+    )
+    pages = _exec._run_json(
+        [*args, "--paginate", "--slurp"],
+        what=what,
+        source="`gh api issues --paginate`",
+        cwd=repo_root,
+        default="[]",
+    )
+    if not isinstance(pages, list):
+        raise _exec.GitHubError(f"unexpected slurped issues payload for {label!r}: {pages!r}")
+    entries: list[Any] = []
+    for page in pages:
+        if not isinstance(page, list):
+            raise _exec.GitHubError(f"unexpected slurped issues page for {label!r}: {page!r}")
+        entries.extend(page)
+    return entries
 
 
 def create_label(
@@ -116,14 +153,22 @@ def find_plan_issue(
 ) -> PlanIssue | None:
     """Find an open ``label``-scoped issue whose metadata-block ``run_id`` matches (idempotency).
 
-    Uses the **list** endpoint (not the eventually-consistent search index). Returns None for
-    no match; raises ``GitHubError`` on an infra/query failure (never masks the error as None).
+    An **exhaustive full-open-set scan** (:func:`_list_label_issues_all_pages` — the list
+    endpoint, never the eventually-consistent search index): an idempotency finder that saw only
+    the default first page would miss an older match and let the caller mint a **duplicate**
+    issue on re-save/re-learn/re-gist/re-objective. Returns None for no match; raises
+    ``GitHubError`` on an infra/query failure or an unexpected page shape (never masks either
+    as None).
 
     Parameterized by ``label``/``header_key``: the defaults find the ``perk:plan`` issue
     (``plan-header``); ``find_learn_issue`` passes ``perk:learn``/``learn-header`` so the learn
     lookup is **label-scoped** and cannot match the plan issue (which shares the same ``run_id``).
+    ``find_gist_issue`` and ``objectives.find_objective_issue`` delegate the same way, so all
+    three inherit the exhaustive scan.
     """
-    issues = _list_label_issues(label, repo_root=repo_root, what="failed to list plan issues")
+    issues = _list_label_issues_all_pages(
+        label, repo_root=repo_root, what="failed to list plan issues"
+    )
     for issue in issues:
         if not isinstance(issue, dict):
             continue
@@ -241,11 +286,12 @@ def list_plans_pending_learn(*, repo_root: Path, limit: int) -> tuple[PendingLea
 def list_learn_issues(*, repo_root: Path) -> tuple[LearnIssueSummary, ...]:
     """List every open ``perk:learn`` issue (number/title/url/body) for the learn-docs factory.
 
-    Reuses the ``find_plan_issue`` list call (the LIST endpoint, not the eventually-consistent
-    search index), scoped to ``perk:learn``. Raises ``GitHubError`` on an infra/query failure
-    (never masks it as an empty list); skips non-dict entries.
+    "Every open" is backed by full pagination (:func:`_list_label_issues_all_pages` — the LIST
+    endpoint, not the eventually-consistent search index), scoped to ``perk:learn``: the factory
+    inbox is a census, never a page. Raises ``GitHubError`` on an infra/query failure or an
+    unexpected page shape (never masks either as an empty list); skips non-dict entries.
     """
-    issues = _list_label_issues(
+    issues = _list_label_issues_all_pages(
         plan.LEARN_LABEL, repo_root=repo_root, what="failed to list learn issues"
     )
     summaries: list[LearnIssueSummary] = []
@@ -366,9 +412,10 @@ def reopen_issue(*, number: int, repo_root: Path, dry_run: bool = False) -> bool
 def find_learn_issue(*, run_id: str, repo_root: Path) -> PlanIssue | None:
     """Find an open ``perk:learn`` issue whose ``learn-header`` ``run_id`` matches.
 
-    The label-scoped twin of ``find_plan_issue``: scoped to ``perk:learn`` + the ``learn-header``
-    block so it never returns the plan issue (which shares the plan's ``run_id`` under the
-    ``warm: keep`` learn stage). Returns None for no match; raises on an infra failure.
+    The label-scoped twin of ``find_plan_issue`` (inheriting its exhaustive full-open-set scan):
+    scoped to ``perk:learn`` + the ``learn-header`` block so it never returns the plan issue
+    (which shares the plan's ``run_id`` under the ``warm: keep`` learn stage). Returns None for
+    no match; raises on an infra failure.
     """
     return find_plan_issue(
         run_id=run_id,
@@ -427,9 +474,10 @@ def create_learn_issue(
 def find_gist_issue(*, run_id: str, repo_root: Path) -> PlanIssue | None:
     """Find an open ``perk:gist`` issue whose ``gist-header`` ``run_id`` matches.
 
-    The label-scoped twin of ``find_plan_issue`` (the exact ``find_learn_issue`` shape): scoped
-    to ``perk:gist`` + the ``gist-header`` block so it never returns a plan/learn issue. Returns
-    None for no match; raises on an infra failure.
+    The label-scoped twin of ``find_plan_issue`` (the exact ``find_learn_issue`` shape,
+    inheriting the exhaustive full-open-set scan): scoped to ``perk:gist`` + the ``gist-header``
+    block so it never returns a plan/learn issue. Returns None for no match; raises on an infra
+    failure.
     """
     return find_plan_issue(
         run_id=run_id,
@@ -493,11 +541,12 @@ class GistIssueSummary:
 def list_gist_issues(*, repo_root: Path) -> tuple[GistIssueSummary, ...]:
     """List every open ``perk:gist`` issue (number/title/url/body) for ``perk gist list``.
 
-    Mirrors :func:`list_learn_issues` (the LIST endpoint, scoped to ``perk:gist``). Raises
-    ``GitHubError`` on an infra/query failure (never masks it as an empty list); skips non-dict
-    and ``pull_request`` entries.
+    Mirrors :func:`list_learn_issues` (the exhaustive :func:`_list_label_issues_all_pages` read,
+    scoped to ``perk:gist`` — "every open" is backed by full pagination). Raises ``GitHubError``
+    on an infra/query failure or an unexpected page shape (never masks either as an empty list);
+    skips non-dict and ``pull_request`` entries.
     """
-    issues = _list_label_issues(
+    issues = _list_label_issues_all_pages(
         plan.GIST_LABEL, repo_root=repo_root, what="failed to list gist issues"
     )
     summaries: list[GistIssueSummary] = []

@@ -16,7 +16,7 @@ remote execution.
 | Tool | Requirement | Compatibility detail |
 |---|---|---|
 | `git` | Required | perk uses git repositories, branches, commits, and worktrees. No minimum git version is enforced. |
-| `gh` | Required and authenticated | A GitHub account is mandatory for the GitHub workflow. perk reaches GitHub only through the authenticated GitHub CLI; it does not make raw GitHub HTTPS requests. |
+| `gh` | Version 2.48.0 or newer, authenticated | A GitHub account is mandatory for the GitHub workflow. perk reaches GitHub only through the authenticated GitHub CLI; it does not make raw GitHub HTTPS requests. Exhaustive issue reads use `gh api --slurp` (gh 2.48.0); an older gh fails those reads loudly rather than silently truncating. |
 | `node` | Version 22 or newer | This is the one tool-version gate in the environment check. The Pi extension relies on Node's native TypeScript type stripping. |
 | `pi` | Required | Pi is the agent harness perk launches. perk does not enforce a separate Pi version gate. |
 | `skills` | Required | perk uses the skills CLI to synchronize its workflow skills. perk does not enforce a separate skills version gate. |

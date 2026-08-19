@@ -35,8 +35,10 @@ def _lists_comments(issue: int):
 
 
 def test_find_objective_issue_label_scoped(monkeypatch):
+    # The parameterized find_plan_issue read is exhaustive: gh --paginate --slurp returns an
+    # array of page arrays, so the fake feeds one page wrapping the issue list.
     issues = [{"number": 5, "html_url": "u/5", "body": _obj_header("01RID")}]
-    rec = _GhRecorder(get=_Proc(0, stdout=json.dumps(issues)))
+    rec = _GhRecorder(get=_Proc(0, stdout=json.dumps([issues])))
     monkeypatch.setattr(subprocess, "run", rec)
     found = objectives.find_objective_issue(run_id="01RID", repo_root=ROOT)
     assert found is not None and found.number == 5 and found.existed is True
@@ -66,9 +68,20 @@ def test_list_open_objective_issues_raises_on_infra_failure(monkeypatch):
         objectives.list_open_objective_issues(repo_root=ROOT)
 
 
+def test_list_open_objective_issues_stays_a_bounded_one_page_read(monkeypatch):
+    # The bounded browse contract, pinned: exactly one GET with NO pagination argv — membership
+    # beyond GitHub's default page is deliberately not promised (unlike the full-census readers).
+    rec = _GhRecorder(get=_Proc(0, stdout="[]"))
+    monkeypatch.setattr(subprocess, "run", rec)
+    objectives.list_open_objective_issues(repo_root=ROOT)
+    [call] = rec.calls
+    for token in ("--paginate", "--slurp", "per_page"):
+        assert not any(token in tok for tok in call), token
+
+
 def test_create_objective_issue_idempotent(monkeypatch):
     existing = [{"number": 5, "html_url": "u/5", "body": _obj_header("01RID")}]
-    rec = _GhRecorder(get=_Proc(0, stdout=json.dumps(existing)))
+    rec = _GhRecorder(get=_Proc(0, stdout=json.dumps([existing])))
     monkeypatch.setattr(subprocess, "run", rec)
     issue = objectives.create_objective_issue(
         title="Obj", body="# Obj\n\nprose", repo_root=ROOT, run_id="01RID"
@@ -256,7 +269,7 @@ def test_adopt_issue_as_objective_stamps_in_place(monkeypatch):
 
 def test_adopt_issue_as_objective_idempotent(monkeypatch):
     existing = [{"number": 7, "html_url": "u/7", "body": _obj_header("01RID")}]
-    rec = _GhDispatch([(_has("issues", "GET"), _Proc(0, json.dumps(existing)))])
+    rec = _GhDispatch([(_has("issues", "GET"), _Proc(0, json.dumps([existing])))])
     monkeypatch.setattr(subprocess, "run", rec)
     adopted = objectives.adopt_issue_as_objective(
         number=7,
@@ -393,7 +406,7 @@ def test_supersede_objective_issue_creates_new_and_closes_old(monkeypatch):
 
 def test_supersede_objective_issue_idempotent(monkeypatch):
     existing = [{"number": 200, "html_url": "u/200", "body": _obj_header("01RID")}]
-    rec = _GhDispatch([(_has("issues", "GET"), _Proc(0, json.dumps(existing)))])
+    rec = _GhDispatch([(_has("issues", "GET"), _Proc(0, json.dumps([existing])))])
     monkeypatch.setattr(subprocess, "run", rec)
     created = objectives.supersede_objective_issue(
         old_number=42,
@@ -501,7 +514,7 @@ def test_supersede_deferred_close_found_arm_heals_a_missing_body_comment(monkeyp
     existing = [{"number": 200, "html_url": "u/200", "body": _obj_header("01RID")}]
     rec = _GhDispatch(
         [
-            (_has("issues", "GET"), _Proc(0, json.dumps(existing))),
+            (_has("issues", "GET"), _Proc(0, json.dumps([existing]))),
             (_has("issues/200", ".body"), _Proc(0, _obj_body("01RID", nodes))),
             (_lists_comments(200), _Proc(0, "[]")),
             (_has("comments", "POST"), _Proc(0, json.dumps({"id": 777}))),
@@ -538,7 +551,7 @@ def test_supersede_deferred_close_found_arm_recovers_post_before_backfill(monkey
     prior_comment = objective.render_body_comment(nodes, prose="replan prose")
     rec = _GhDispatch(
         [
-            (_has("issues", "GET"), _Proc(0, json.dumps(existing))),
+            (_has("issues", "GET"), _Proc(0, json.dumps([existing]))),
             (_has("issues/200", ".body"), _Proc(0, _obj_body("01RID", nodes))),
             (
                 _lists_comments(200),
@@ -572,7 +585,7 @@ def test_supersede_deferred_close_found_arm_heals_a_vanished_comment(monkeypatch
     existing = [{"number": 200, "html_url": "u/200", "body": _obj_header("01RID", 9)}]
     rec = _GhDispatch(
         [
-            (_has("issues", "GET"), _Proc(0, json.dumps(existing))),
+            (_has("issues", "GET"), _Proc(0, json.dumps([existing]))),
             (_has("issues/200", ".body"), _Proc(0, _obj_body("01RID", nodes, comment_id=9))),
             (_has("comments/9"), _Proc(1, stderr="Not Found (404)")),
             (_lists_comments(200), _Proc(0, "[]")),
@@ -604,7 +617,7 @@ def test_supersede_deferred_close_found_arm_converges_as_a_noop(monkeypatch):
     existing = [{"number": 200, "html_url": "u/200", "body": _obj_header("01RID", 9)}]
     rec = _GhDispatch(
         [
-            (_has("issues", "GET"), _Proc(0, json.dumps(existing))),
+            (_has("issues", "GET"), _Proc(0, json.dumps([existing]))),
             (_has("issues/200", ".body"), _Proc(0, _obj_body("01RID", nodes, comment_id=9))),
             (_has("comments/9"), _Proc(0, "the body comment")),
         ]

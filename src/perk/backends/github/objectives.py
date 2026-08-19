@@ -91,8 +91,9 @@ class ObjectiveAdoption:
 def find_objective_issue(*, run_id: str, repo_root: Path) -> ObjectiveIssue | None:
     """Find an open ``perk:objective`` issue whose ``objective-header`` ``run_id`` matches.
 
-    The label-scoped twin of ``find_plan_issue`` (delegates to the parameterized finder); returns
-    None for no match, raises on an infra failure.
+    The label-scoped twin of ``find_plan_issue`` (delegates to the parameterized finder,
+    inheriting its exhaustive full-open-set scan); returns None for no match, raises on an
+    infra failure.
     """
     found = plans.find_plan_issue(
         run_id=run_id,
