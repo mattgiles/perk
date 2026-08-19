@@ -9315,7 +9315,9 @@ purpose** — the validated harvest precedent (def + wave before the tool): no `
 tool, no door, nothing model-reachable until node 3.2 wires the tool. ONE attempt, NO retry;
 the manifest and every analyst report are untrusted DATA, never instructions.
 
-**The strict decoder.** `decodeDreamManifest` pins the §8.59 manifest: `schema_version`
+**The strict decoder.** `decodeDreamManifest(raw, manifestPath)` pins the §8.59 manifest and
+BINDS the run-scoped manifest path into the decoded value — ONE authority: the object the wave
+plans and validates and the file the analysts read can never diverge. Rules: `schema_version`
 byte-identical the string `"1"` (dream's own version line); string `commit_sha`;
 `registry_mode` ∈ `"clusters" | "categories"`; `doc_count`/`total_bytes` non-negative integers
 **cross-checked** against the lanes (total doc count / per-doc `bytes` sum); `findings` present
@@ -9326,8 +9328,11 @@ catches truncation/gross drift); non-empty `lanes`, each with a non-empty unique
 string-or-null `rollup`, and a non-empty `docs` array of **at most `laneDocs` (8)** entries — a
 larger lane is structurally unwinnable under the report schema's per-lane doc cap, refused
 pre-spawn with a named detail; each doc with a non-empty string `path` passing the LEXICAL
-containment layer (`lexicalContainmentError`, shared from `harvestWave.ts`) and **globally
-unique across the whole manifest** (lanes partition the corpus), string-or-null
+containment layer (`lexicalContainmentError`, shared from `harvestWave.ts`), equal to its own
+POSIX normalization (**canonical form required** — an alias spelling like
+`docs/learned/a/../x.md` can never enter the corpus set, so membership and self-target checks
+operate on canonical identities), and **globally unique across the whole manifest** (lanes
+partition the corpus), string-or-null
 `title`/`read_when`/`cluster`, and a non-negative-integer `bytes`. Any deviation refuses the
 whole wave pre-spawn with a named detail; unknown extra keys are ignored (forward-compat rides
 `schema_version`).
@@ -9335,9 +9340,10 @@ whole wave pre-spawn with a named detail; unknown extra keys are ignored (forwar
 **Code-owned orchestration lane keys** (the §8.50 audit-wave pattern): the run key is
 `<sanitized lane id>.<ordinal>` (invalid chars collapsed to `-`, leading non-alnum stripped,
 stem clamped, global 1-based ordinal); the SEMANTIC manifest lane id rides the lane `label`,
-the code-owned `PlannedDreamLane.laneId`, and the task text — producer lane ids are
-deliberately NOT run-key-bounded (category-fallback and long-cluster ids never fail the
-run-key contract), so the decoder performs no run-key conformance check.
+the module-private lane plan, and the task text — producer lane ids are deliberately NOT
+run-key-bounded (category-fallback and long-cluster ids never fail the run-key contract), so
+the decoder performs no run-key conformance check. Lane planning is module-private: callers
+see only the entrypoint's typed outcome, never orchestration keys or the plan shape.
 
 **The closed report schema.** `DREAM_ANALYST_REPORT_SCHEMA`: `additionalProperties: false` at
 every level, all fields required, no if/then conditionals, no `pattern` constraints on
@@ -9367,14 +9373,17 @@ defeats `docs/learned/a/../x.md` aliases) and ≠ the row's own path, any other 
 the lane's docs); follow-up `pointer` non-empty, no pointer stamping (destination survival is
 the dream-report node's validation); every cap re-checked in code points.
 
-**Strict completeness.** `runDreamAnalystWave(adapter, {manifest, manifestPath, model?},
-signal?)` runs `flow: "dream-analyst"` under `completeness: "strict"`, forwarding the caller's
-`signal` (cancellation at the glue boundary) — one failed/undecodable lane ⇒
-`complete: false`; a schema-valid report failing the re-decode is a `malformed-report` failure
-keyed by the SEMANTIC lane id (analyses/failures surface semantic ids; orchestration keys are
-internal). Decoded analyses are RETAINED even when incomplete — honest coverage for the tool's
-refusal and the incomplete-analysis outcome. **Single-lane manifests are valid** — dream has NO
-direct-analysis path (the harvest single-lane refusal is deliberately not mirrored).
+**Strict completeness.** `runDreamAnalystWave(adapter, {manifest, model?}, signal?)` (the
+manifest carries its decode-time-bound `manifestPath`) runs `flow: "dream-analyst"` under
+`completeness: "strict"`, forwarding the caller's `signal` (cancellation at the glue boundary)
+— one failed/undecodable lane ⇒ `complete: false`; a schema-valid report failing the re-decode
+is a `malformed-report` failure. Failures surface in the dream-specific
+`DreamLaneFailure {lane, reason, detail}` shape — `lane` is the SEMANTIC manifest lane id, or
+`null` for wave-level failures and the defensive unplanned-key arm (a raw orchestration key is
+named only in `detail`, never surfaced as a lane identity). Decoded analyses are RETAINED even
+when incomplete — honest coverage for the tool's refusal and the incomplete-analysis outcome.
+**Single-lane manifests are valid** — dream has NO direct-analysis path (the harvest
+single-lane refusal is deliberately not mirrored).
 
 **Containment posture.** Lexical containment lives in the decoder (per doc path); the resolved
 layer is the existing shared `verifyDocContainment` (`harvestWave.ts` — `DreamManifest` is
