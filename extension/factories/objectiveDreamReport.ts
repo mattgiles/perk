@@ -22,12 +22,8 @@
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { runScratchDir } from "../substrate/cache.ts";
-import {
-  activeSessionRunId,
-  digestSessionData,
-  type SessionDataCtx,
-} from "../substrate/sessionData.ts";
-import { branchOf, rebuildWorkflowState } from "../substrate/workflowState.ts";
+import { digestSessionData, type SessionDataCtx } from "../substrate/sessionData.ts";
+import { branchOf, rebuildWorkflowState, type WorkflowState } from "../substrate/workflowState.ts";
 import { DREAM_ANALYSES_FILENAME, decodeFinalizedDreamBundle } from "../waves/dreamReducerWave.ts";
 import { buildDreamReport, type DreamReportContext } from "../waves/dreamReport.ts";
 import { DREAM_MANIFEST_FILENAME, decodeDreamManifest } from "../waves/dreamWave.ts";
@@ -73,22 +69,28 @@ export function decodeDreamReportBlock(value: unknown): ObjectiveDreamReportBloc
  *  1. the run-scoped manifest: read + parse + `decodeDreamManifest` (the strict §8.60 decoder,
  *     path bound at decode time). No `verifyDocContainment` — this path reads no doc files;
  *     the lexical decode suffices (resolved containment is the wave tool's pre-spawn concern);
- *  2. the freshness check: the rebuilt `dream_bundle_digest` marker must be present, non-empty,
- *     and equal the digest of the bundle bytes just read — a bare file is never trusted
- *     (missing marker = no finalized wave; empty = invalidated by a newer attempt, including a
- *     cleanup-failure residue; mismatch = stale/tampered bytes);
- *  3. the strict finalized decode (`decodeFinalizedDreamBundle` — the analyses-only mid-wave
- *     shape refuses here).
+ *  2. the freshness check: the `dream_bundle_digest` marker (read from the caller's ONE
+ *     workflow-state snapshot) must be present, non-empty, and equal the digest of the bundle
+ *     bytes just read — a bare file is never trusted (missing marker = no finalized wave;
+ *     empty = invalidated by a newer attempt, including a cleanup-failure residue; mismatch =
+ *     stale/tampered bytes);
+ *  3. the strict finalized decode (`decodeFinalizedDreamBundle` over the digest of the
+ *     manifest bytes just read — the marker authenticates the bundle bytes and the bundle's
+ *     `manifest_digest` extends that authority to the manifest, so an at-rest manifest edit
+ *     refuses; the analyses-only mid-wave shape refuses here too).
  */
 function recoverDreamReportContext(
   ctx: SessionDataCtx,
   runId: string,
+  marker: string | undefined,
   generatedAt: string,
 ): { ok: true; context: DreamReportContext } | { ok: false; detail: string } {
   const manifestPath = join(runScratchDir(ctx.cwd, runId), DREAM_MANIFEST_FILENAME);
+  let manifestBytes: string;
   let rawManifest: unknown;
   try {
-    rawManifest = JSON.parse(readFileSync(manifestPath, "utf8"));
+    manifestBytes = readFileSync(manifestPath, "utf8");
+    rawManifest = JSON.parse(manifestBytes);
   } catch (error) {
     const detail = error instanceof Error ? error.message : String(error);
     return { ok: false, detail: `dream manifest unreadable at '${manifestPath}': ${detail}` };
@@ -108,7 +110,6 @@ function recoverDreamReportContext(
       detail: `no dream bundle at '${bundlePath}' — re-run the dream wave`,
     };
   }
-  const marker = rebuildWorkflowState(branchOf(ctx)).dream_bundle_digest;
   if (marker === undefined || marker === "") {
     return {
       ok: false,
@@ -129,7 +130,11 @@ function recoverDreamReportContext(
     const detail = error instanceof Error ? error.message : String(error);
     return { ok: false, detail: `dream bundle is not valid JSON: ${detail}` };
   }
-  const decoded = decodeFinalizedDreamBundle(rawBundle, manifest.manifest);
+  const decoded = decodeFinalizedDreamBundle(
+    rawBundle,
+    manifest.manifest,
+    digestSessionData(manifestBytes),
+  );
   if (!decoded.ok) {
     return { ok: false, detail: `${decoded.detail} — re-run the dream wave` };
   }
@@ -163,15 +168,33 @@ export type DreamReportGateOutcome =
  * | dream     | absent         | refuse `invalid_input` (one approval bundle) |
  * | dream     | present        | recover context → `buildDreamReport` → refuse or `block` |
  *
+ * An UNREADABLE workflow state (a throwing branch read) refuses `bad_state` BEFORE the matrix —
+ * it is never conflated with a confirmed non-dream session (the `activeSessionRunId`
+ * null-on-throw sentinel would otherwise let a transient read failure surface as `absent`).
+ *
  * Failure taxonomy: gate violations + `buildDreamReport` refusals → `invalid_input` (the
- * bounded ≤25 named details newline-joined); context-recovery failures → `bad_state`.
+ * bounded ≤25 named details newline-joined); an unreadable workflow state and
+ * context-recovery failures → `bad_state`.
  */
 export function resolveDreamReportGate(
   ctx: SessionDataCtx,
   input: unknown,
   generatedAt: string,
 ): DreamReportGateOutcome {
-  const runId = activeSessionRunId(ctx);
+  // ONE workflow-state snapshot for the whole gate (run identity + the freshness marker),
+  // read with error distinction: unreadable state fails closed, never "non-dream".
+  let state: WorkflowState;
+  try {
+    state = rebuildWorkflowState(branchOf(ctx));
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    return {
+      kind: "refuse",
+      errorType: "bad_state",
+      detail: `session workflow state is unreadable — cannot resolve the dream_report gate: ${detail}`,
+    };
+  }
+  const runId = typeof state.run_id === "string" && state.run_id.length > 0 ? state.run_id : null;
   const dream =
     runId !== null && existsSync(join(runScratchDir(ctx.cwd, runId), DREAM_MANIFEST_FILENAME));
   if (runId === null || !dream) {
@@ -193,7 +216,7 @@ export function resolveDreamReportGate(
         "report review as one bundle",
     };
   }
-  const recovered = recoverDreamReportContext(ctx, runId, generatedAt);
+  const recovered = recoverDreamReportContext(ctx, runId, state.dream_bundle_digest, generatedAt);
   if (!recovered.ok) {
     return { kind: "refuse", errorType: "bad_state", detail: recovered.detail };
   }

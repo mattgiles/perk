@@ -114,12 +114,14 @@ function resultText(details: DreamWaveOk): string {
 }
 
 /** The injected `dream_bundle_digest` marker seam: `clear` invalidates (the empty-string
- * record), `set` publishes the finalized bytes' digest. The registered execute wires the
- * production `appendWorkflowState` pair; tests inject fakes. Both are loud-but-non-fatal on
- * append failure (the seam's read-back warning) — a failed `set` leaves the marker cleared, so
- * recovery refuses (fail-closed, never silent). */
+ * record) and returns whether the cleared state was VERIFIED (append + read-back) — a false
+ * return stops the wave before any filesystem work or spawn, because proceeding over an
+ * unverified invalidation could leave a prior bundle + prior digest pair recoverable; `set`
+ * publishes the finalized bytes' digest and stays loud-but-non-fatal (a failed set leaves the
+ * marker cleared by the entry clear, so recovery refuses — fail-closed, never silent). The
+ * registered execute wires the production `appendWorkflowState` pair; tests inject fakes. */
 export interface DreamBundleMarkers {
-  clear(): void;
+  clear(): boolean;
   set(digest: string): void;
 }
 
@@ -133,7 +135,9 @@ export interface DreamBundleMarkers {
  *
  *  1. `markers.clear()` FIRST, unconditionally — any new attempt invalidates prior finalized
  *     state BEFORE the filesystem is touched (the invalidation record: a failed removal below
- *     leaves prior files behind, but recovery refuses them on the cleared marker);
+ *     leaves prior files behind, but recovery refuses them on the cleared marker); a clear
+ *     that cannot be VERIFIED (a false return) refuses `io_error` before any filesystem work
+ *     or spawn — proceeding could leave a prior bundle+digest pair recoverable as fresh;
  *  2. entry-time bundle removal — the current-attempt-only invariant: the fixed name exists
  *     iff the CURRENT call wrote it, so the incomplete/over-budget arms can never leave a
  *     stale prior bundle contradicting the returned aggregate, and after a write `io_error`
@@ -158,6 +162,9 @@ export async function executeDreamWave(
   target: ReportTarget,
   opts: {
     manifest: DreamManifest;
+    /** The `sha256:<hex>` digest of the manifest BYTES the caller read + decoded — bound into
+     * the finalized bundle so recovery authenticates the manifest too. */
+    manifestDigest: string;
     markers: DreamBundleMarkers;
     analystModel?: string;
     reducerModel?: string;
@@ -174,8 +181,17 @@ export async function executeDreamWave(
   const remove = opts.removeBundle ?? ((path: string) => rmSync(path, { force: true }));
 
   // The invalidation record FIRST: any new attempt clears the digest marker before the removal
-  // attempt below, so a failed cleanup leaves prior files behind that recovery refuses.
-  opts.markers.clear();
+  // attempt below, so a failed cleanup leaves prior files behind that recovery refuses. An
+  // UNVERIFIED clear refuses outright — with the old digest possibly still live, a failed
+  // removal below would leave the prior bundle+digest pair recoverable as fresh.
+  if (!opts.markers.clear()) {
+    return fail(
+      "dream_bundle_digest invalidation could not be verified — refusing to run the wave over " +
+        "possibly-recoverable prior finalized state",
+      "io_error",
+      { analyses: [], attempts: [] },
+    );
+  }
 
   // One path authority: the bundle lives beside the decode-time-bound manifest path — no
   // second runScratchDir derivation inside this core. A failed removal refuses BEFORE any
@@ -278,7 +294,12 @@ export async function executeDreamWave(
     // file), then the digest marker publishes the finalized bytes for the recovery consumer.
     // An incomplete reducer wave never reaches here: the analyses-only shape stays behind with
     // a cleared marker, and the finalized decode refuses it.
-    const finalized = finalizeDreamBundle(opts.manifest, analysis.analyses, reducers.reports);
+    const finalized = finalizeDreamBundle(
+      opts.manifest,
+      analysis.analyses,
+      reducers.reports,
+      opts.manifestDigest,
+    );
     try {
       write(bundlePath, finalized);
     } catch (error) {
@@ -358,10 +379,13 @@ export function registerDreamWave(pi: ExtensionAPI): void {
       if (!existsSync(expected)) {
         return fail("no dream manifest for this run — run `perk learn dream` first", "bad_state");
       }
-      // 3. Read + parse the derived path.
+      // 3. Read + parse the derived path (the bytes are kept: their digest is bound into the
+      //    finalized bundle so recovery can authenticate the manifest too).
+      let manifestBytes: string;
       let raw: unknown;
       try {
-        raw = JSON.parse(readFileSync(expected, "utf8"));
+        manifestBytes = readFileSync(expected, "utf8");
+        raw = JSON.parse(manifestBytes);
       } catch (error) {
         const detail = error instanceof Error ? error.message : String(error);
         return fail(`dream manifest unreadable at '${expected}': ${detail}`, "bad_input");
@@ -382,9 +406,11 @@ export function registerDreamWave(pi: ExtensionAPI): void {
       // the workflow-level model default (the agent frontmatter default otherwise).
       const analystModel = subagentModel(ctx.cwd, "dream-analyst");
       const reducerModel = subagentModel(ctx.cwd, "dream-reducer");
-      // The production digest-marker pair: the ordinary strict-append session-entry channel
-      // (loud-but-non-fatal read-back — a failed set leaves the marker cleared, fail-closed).
-      const marker = (digest: string): void => {
+      // The production digest-marker pair: the ordinary strict-append session-entry channel.
+      // The boolean is the seam's verified append+read-back result — the execute core refuses
+      // the wave on an unverified CLEAR (fail-closed); a failed SET stays loud-but-non-fatal
+      // (the entry clear already invalidated, so recovery refuses).
+      const marker = (digest: string): boolean =>
         appendWorkflowState(pi, ctx, {
           data: { dream_bundle_digest: digest },
           field: "dream_bundle_digest",
@@ -392,10 +418,15 @@ export function registerDreamWave(pi: ExtensionAPI): void {
           scope: "run_dream_wave",
           failure: `dream_bundle_digest read-back failed (${digest === "" ? "clear" : digest})`,
         });
-      };
       return executeDreamWave(createRpcWaveAdapter(pi.events), ctx, {
         manifest: decoded.manifest,
-        markers: { clear: () => marker(""), set: marker },
+        manifestDigest: digestSessionData(manifestBytes),
+        markers: {
+          clear: () => marker(""),
+          set: (digest) => {
+            marker(digest);
+          },
+        },
         ...(analystModel !== undefined ? { analystModel } : {}),
         ...(reducerModel !== undefined ? { reducerModel } : {}),
         ...(signal !== undefined ? { signal } : {}),

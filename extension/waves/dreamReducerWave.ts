@@ -120,19 +120,25 @@ export function composeDreamBundle(
 /**
  * Serialize the FINALIZED bundle — the rewrite of the SAME fixed name after a fully complete
  * two-level wave (contracts.md §8.61): the `composeDreamBundle` wrapper fields unchanged
- * (`schema_version` stays `"1"`) plus a `reducers` array in the fixed `DREAM_REDUCER_ANGLES`
- * order, each entry in the RAW ECHO shape `{angle, ...report}` — exactly the shape
- * `decodeDreamReducerReport` accepts, so recovery re-decodes through the single row authority
- * with no fork. The `reducers` key is present iff finalized: an incomplete reducer wave
- * naturally leaves the analyses-only shape, which `decodeFinalizedDreamBundle` refuses — one
- * fixed name means a cross-attempt MIXED state is structurally impossible. Same serialization
- * convention as `composeDreamBundle` (pretty-printed JSON + trailing newline). The 384 KiB
- * budget does NOT govern this rewrite — it bounds the reducer-INPUT bytes only.
+ * (`schema_version` stays `"1"`) plus `manifest_digest` — the `sha256:<hex>` digest of the
+ * on-disk manifest BYTES this wave decoded (`analyses`/`reducers` must be in manifest lane /
+ * fixed `DREAM_REDUCER_ANGLES` order — guaranteed by the wave outcome shapes the door passes) —
+ * binding the manifest into the authenticated chain (the `dream_bundle_digest` marker
+ * authenticates these bundle bytes; this field extends that authority to the manifest, so an
+ * at-rest manifest edit that preserves the echoed identity fields still refuses at recovery) —
+ * plus a `reducers` array, each entry in the RAW ECHO shape `{angle, ...report}` — exactly the
+ * shape `decodeDreamReducerReport` accepts, so recovery re-decodes through the single row
+ * authority with no fork. The `reducers` key is present iff finalized: an incomplete reducer
+ * wave naturally leaves the analyses-only shape, which `decodeFinalizedDreamBundle` refuses —
+ * one fixed name means a cross-attempt MIXED state is structurally impossible. Same
+ * serialization convention as `composeDreamBundle` (pretty-printed JSON + trailing newline).
+ * The 384 KiB budget does NOT govern this rewrite — it bounds the reducer-INPUT bytes only.
  */
 export function finalizeDreamBundle(
   manifest: DreamManifest,
   analyses: DreamLaneAnalysis[],
   reducers: DreamReducerAnalysis[],
+  manifestDigest: string,
 ): string {
   const bundle = {
     schema_version: "1",
@@ -140,6 +146,7 @@ export function finalizeDreamBundle(
     registry_mode: manifest.registry_mode,
     doc_count: manifest.doc_count,
     total_bytes: manifest.total_bytes,
+    manifest_digest: manifestDigest,
     lanes: analyses.map((analysis) => ({ lane: analysis.lane, report: analysis.report })),
     reducers: reducers.map((reducer) => ({ angle: reducer.angle, ...reducer.report })),
   };
@@ -423,6 +430,7 @@ const FINALIZED_WRAPPER_KEYS = new Set([
   "registry_mode",
   "doc_count",
   "total_bytes",
+  "manifest_digest",
   "lanes",
   "reducers",
 ]);
@@ -451,7 +459,9 @@ const REDUCER_ENTRY_KEYS = new Set([
  * means an extra row-level key is IGNORED and never survives into typed values (deliberately
  * not a fork of the row decoders). The rest of the ladder: the analyses-only mid-wave shape
  * (no `reducers` key) refuses as "not finalized"; `schema_version` must be `"1"`; the wrapper
- * identity fields must equal the manifest's; `lanes` must pair the manifest's lanes EXACTLY
+ * identity fields must equal the manifest's; `manifest_digest` must equal `manifestDigest` —
+ * the digest of the manifest bytes the CALLER just read and decoded, extending the bundle-byte
+ * authentication to the manifest itself; `lanes` must pair the manifest's lanes EXACTLY
  * (same ids, same order — uniqueness of manifest ids makes duplicates/reorders unpairable);
  * `reducers` must carry exactly the three `DREAM_REDUCER_ANGLES` in fixed order (the byte-exact
  * angle echo inside `decodeDreamReducerReport` refuses duplicates/reorders).
@@ -459,6 +469,7 @@ const REDUCER_ENTRY_KEYS = new Set([
 export function decodeFinalizedDreamBundle(
   raw: unknown,
   manifest: DreamManifest,
+  manifestDigest: string,
 ):
   | { ok: true; analyses: DreamLaneAnalysis[]; reducers: DreamReducerAnalysis[] }
   | { ok: false; detail: string } {
@@ -499,6 +510,14 @@ export function decodeFinalizedDreamBundle(
           `manifest's (${JSON.stringify(expected)})`,
       };
     }
+  }
+  if (raw.manifest_digest !== manifestDigest) {
+    return {
+      ok: false,
+      detail:
+        `dream bundle manifest_digest (${JSON.stringify(raw.manifest_digest)}) does not match ` +
+        "the digest of the manifest just read — the manifest changed after the wave finalized",
+    };
   }
 
   if (!Array.isArray(raw.lanes)) {

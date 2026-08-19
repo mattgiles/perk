@@ -4,12 +4,12 @@
 // landing.
 
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
-import { runScratchDir, sessionDataDir } from "../substrate/cache.ts";
+import { sessionDataDir } from "../substrate/cache.ts";
 import {
   digestSessionData,
   readSessionArtifact,
@@ -23,20 +23,9 @@ import {
   WORKFLOW_STATE_TYPE,
 } from "../substrate/workflowState.ts";
 import type { ReportTarget } from "../surfaces/report.ts";
+import { dreamReportInput, plantDreamFiles } from "../testing/dreamFixtures.ts";
 import { loadPerkSession, plantSession, scaffoldRepo } from "../testing/harness.ts";
-import {
-  DREAM_ANALYSES_FILENAME,
-  DREAM_REDUCER_ANGLES,
-  type DreamReducerAnalysis,
-  finalizeDreamBundle,
-} from "../waves/dreamReducerWave.ts";
 import { DREAM_REPORT_INPUT_SCHEMA } from "../waves/dreamReport.ts";
-import {
-  DREAM_MANIFEST_FILENAME,
-  type DreamLaneAnalysis,
-  type DreamManifest,
-  decodeDreamManifest,
-} from "../waves/dreamWave.ts";
 import {
   DREAM_REPORT_PARAM_SCHEMA,
   decodeObjectiveSaveParams,
@@ -498,123 +487,16 @@ test("renderObjectiveDraft: cells are sanitized (pipes escaped, newlines collaps
 // --- the dream_report gate at the draft boundary (contracts §8.63) -------------------------------
 
 const DREAM_RUN = "RID";
-const DREAM_DOC = "docs/learned/pi/subagents.md";
 
-/** A minimal 1-lane / 1-doc raw producer manifest (the doc final-keeps, so the valid input
- * needs no curation units). */
-function dreamRawManifest(): Record<string, unknown> {
-  return {
-    schema_version: "1",
-    commit_sha: "abc123",
-    registry_mode: "clusters",
-    doc_count: 1,
-    total_bytes: 100,
-    findings: {
-      structural: {
-        stale_pointers: [],
-        broken_doc_paths: [],
-        duplicate_cues: [],
-        missing_frontmatter: [],
-      },
-      advisory: {
-        distillation_issues: [],
-        source_code_blocks: [],
-        overlong_cues: [],
-        cue_hazards: [],
-        empty_clusters: [],
-      },
-    },
-    lanes: [
-      {
-        id: "pi-1",
-        rollup: null,
-        docs: [{ path: DREAM_DOC, title: null, read_when: null, cluster: null, bytes: 100 }],
-      },
-    ],
-  };
-}
-
-function dreamAnalyses(): DreamLaneAnalysis[] {
-  return [
-    {
-      lane: "pi-1",
-      report: {
-        docs: [
-          {
-            path: DREAM_DOC,
-            disposition: "keep",
-            merge_target: null,
-            rationale: "still true",
-            preserve: [],
-            evidence_checked: [],
-            confidence: "high",
-          },
-        ],
-        overlap_signals: [],
-        harvest_followups: [],
-        uncertainties: [],
-        overlap_signals_omitted: 0,
-        harvest_followups_omitted: 0,
-        uncertainties_omitted: 0,
-      },
-    },
-  ];
-}
-
-function dreamReducers(): DreamReducerAnalysis[] {
-  return DREAM_REDUCER_ANGLES.map((angle) => ({
-    angle,
-    report: {
-      stances: [],
-      angle_findings: [],
-      uncertainties: [],
-      stances_omitted: 0,
-      angle_findings_omitted: 0,
-      uncertainties_omitted: 0,
-    },
-  }));
-}
-
-/** A valid model input over the one-keep-doc fixture. */
-function dreamInput(): Record<string, unknown> {
-  return {
-    rows: [
-      {
-        path: DREAM_DOC,
-        disposition: "keep",
-        merge_target: null,
-        rationale: "the parent's reason",
-        fallback_reason: null,
-      },
-    ],
-    uncertainties: [],
-    selected_units: [],
-    overflow_units: [],
-    harvest_followups: [],
-    predicted_effects: { docs_after: 1, bytes_after: 100, note: null },
-  };
-}
-
-/** Plant the dream-session state: the run-scoped manifest, the finalized bundle, the digest
- * marker on the branch. `finalized: false` leaves the wave state broken (manifest only). */
+/** Plant the shared dream-session state (testing/dreamFixtures.ts) with the digest marker on
+ * the branch. `finalized: false` leaves the wave state broken (manifest only, no marker). */
 function plantDreamState(cwd: string, branch: unknown[], opts: { finalized?: boolean } = {}): void {
-  const scratch = runScratchDir(cwd, DREAM_RUN);
-  mkdirSync(scratch, { recursive: true });
-  const manifestPath = join(scratch, DREAM_MANIFEST_FILENAME);
-  writeFileSync(manifestPath, `${JSON.stringify(dreamRawManifest(), null, 2)}\n`);
-  if (opts.finalized === false) return;
-  const decoded = decodeDreamManifest(dreamRawManifest(), manifestPath);
-  assert.equal(decoded.ok, true, JSON.stringify(decoded));
-  const bundle = finalizeDreamBundle(
-    (decoded as { ok: true; manifest: DreamManifest }).manifest,
-    dreamAnalyses(),
-    dreamReducers(),
-  );
-  writeFileSync(join(scratch, DREAM_ANALYSES_FILENAME), bundle);
+  const digest = plantDreamFiles(cwd, DREAM_RUN, opts);
+  if (digest === "") return;
   branch.push({
     type: "custom",
     customType: WORKFLOW_STATE_TYPE,
-    data: { dream_bundle_digest: digestSessionData(bundle) },
+    data: { dream_bundle_digest: digest },
   });
 }
 
@@ -654,7 +536,7 @@ test("core: dream_report outside a dream session ⇒ invalid_input, nothing writ
     const result = quietly(() =>
       writeObjectiveDraft(fakeSink(branch), reportableCtx(cwd, branch), {
         prose: PROSE,
-        dream_report: dreamInput(),
+        dream_report: dreamReportInput(),
       }),
     );
     assert.equal(result.details.ok, false);
@@ -691,7 +573,7 @@ test("core: a dream session with no finalized wave ⇒ bad_state, nothing writte
     const result = quietly(() =>
       writeObjectiveDraft(fakeSink(branch), reportableCtx(cwd, branch), {
         prose: PROSE,
-        dream_report: dreamInput(),
+        dream_report: dreamReportInput(),
       }),
     );
     assert.equal(result.details.ok, false);
@@ -711,7 +593,7 @@ test("core: dream + valid stores the tool-written block; readObjectiveDraft roun
     const ctx = reportableCtx(cwd, branch);
     const result = writeObjectiveDraft(fakeSink(branch), ctx, {
       prose: PROSE,
-      dream_report: dreamInput(),
+      dream_report: dreamReportInput(),
     });
     assert.equal(result.details.ok, true, JSON.stringify(result.details));
 
@@ -720,7 +602,7 @@ test("core: dream + valid stores the tool-written block; readObjectiveDraft roun
     ) as { dream_report: ObjectiveDreamReportBlock };
     // The block is TOOL-written {input, generated_at, parts}, inserted before prose.
     assert.deepEqual(Object.keys(parsed), ["schema_version", "dream_report", "prose", "roadmap"]);
-    assert.deepEqual(parsed.dream_report.input, dreamInput());
+    assert.deepEqual(parsed.dream_report.input, dreamReportInput());
     assert.ok(parsed.dream_report.generated_at.trim());
     assert.ok(parsed.dream_report.parts.length >= 1);
     assert.ok(parsed.dream_report.parts[0]?.startsWith(`# Dream report — ${DREAM_RUN}`));

@@ -256,6 +256,10 @@ test("DREAM_BUNDLE_BUDGET_BYTES is 384 KiB", () => {
 
 // ---------------------------------------------------------------- the finalized bundle
 
+/** The arbitrary manifest-bytes digest the finalized fixtures bind (opaque to this module —
+ * real digests are computed by the door and the recovery path over the on-disk bytes). */
+const MANIFEST_DIGEST = "sha256:fixture-manifest-digest";
+
 function typedStance(doc: string): DreamStance {
   const disposition = PROPOSALS.find((p) => p.doc === doc)?.disposition ?? "revise";
   return {
@@ -285,7 +289,7 @@ function fixtureReducers(): DreamReducerAnalysis[] {
 /** The parsed finalized fixture (each test mutates its own copy). */
 function finalizedRaw(): Record<string, unknown> {
   return JSON.parse(
-    finalizeDreamBundle(fixtureManifest(), fixtureAnalyses(), fixtureReducers()),
+    finalizeDreamBundle(fixtureManifest(), fixtureAnalyses(), fixtureReducers(), MANIFEST_DIGEST),
   ) as Record<string, unknown>;
 }
 
@@ -293,22 +297,28 @@ test("finalizeDreamBundle ↔ decodeFinalizedDreamBundle: deterministic round-tr
   const manifest = fixtureManifest();
   const analyses = fixtureAnalyses();
   const reducers = fixtureReducers();
-  const first = finalizeDreamBundle(manifest, analyses, reducers);
-  assert.equal(first, finalizeDreamBundle(manifest, analyses, reducers), "deterministic bytes");
+  const first = finalizeDreamBundle(manifest, analyses, reducers, MANIFEST_DIGEST);
+  assert.equal(
+    first,
+    finalizeDreamBundle(manifest, analyses, reducers, MANIFEST_DIGEST),
+    "deterministic bytes",
+  );
   assert.ok(first.endsWith("\n"), "trailing newline (the composeDreamBundle convention)");
 
   const parsed = JSON.parse(first) as Record<string, unknown>;
-  // The wrapper is the composeDreamBundle shape plus the reducers key — nothing else.
+  // The wrapper is the composeDreamBundle shape plus manifest_digest + reducers — nothing else.
   assert.deepEqual(Object.keys(parsed), [
     "schema_version",
     "commit_sha",
     "registry_mode",
     "doc_count",
     "total_bytes",
+    "manifest_digest",
     "lanes",
     "reducers",
   ]);
   assert.equal(parsed.schema_version, "1", "schema_version stays 1");
+  assert.equal(parsed.manifest_digest, MANIFEST_DIGEST, "the manifest digest is bound in");
   // Each reducer entry is the RAW ECHO shape {angle, ...report} — what the row decoder accepts.
   const entries = parsed.reducers as Record<string, unknown>[];
   assert.deepEqual(
@@ -325,7 +335,7 @@ test("finalizeDreamBundle ↔ decodeFinalizedDreamBundle: deterministic round-tr
     "uncertainties_omitted",
   ]);
 
-  const decoded = decodeFinalizedDreamBundle(parsed, manifest);
+  const decoded = decodeFinalizedDreamBundle(parsed, manifest, MANIFEST_DIGEST);
   assert.equal(decoded.ok, true, JSON.stringify(decoded));
   const value = decoded as { ok: true; analyses: DreamLaneAnalysis[]; reducers: unknown };
   assert.deepEqual(value.analyses, analyses, "the analyses round-trip byte-equivalently");
@@ -362,6 +372,12 @@ test("decodeFinalizedDreamBundle: each refusal arm carries its named detail", ()
       label: "a manifest cross-check mismatch",
       raw: () => ({ ...finalizedRaw(), commit_sha: "other" }),
       detail: /commit_sha \("other"\) does not match the manifest's \("abc123"\)/,
+    },
+    {
+      label: "a manifest_digest mismatch (the manifest changed after the wave finalized)",
+      raw: () => ({ ...finalizedRaw(), manifest_digest: "sha256:other" }),
+      detail:
+        /manifest_digest \("sha256:other"\) does not match the digest of the manifest just read/,
     },
     {
       label: "a missing lane",
@@ -466,7 +482,7 @@ test("decodeFinalizedDreamBundle: each refusal arm carries its named detail", ()
     },
   ];
   for (const arm of arms) {
-    const result = decodeFinalizedDreamBundle(arm.raw(), manifest);
+    const result = decodeFinalizedDreamBundle(arm.raw(), manifest, MANIFEST_DIGEST);
     assert.equal(result.ok, false, `must refuse: ${arm.label}`);
     assert.match((result as { detail: string }).detail, arm.detail, arm.label);
   }
@@ -480,7 +496,7 @@ test("decodeFinalizedDreamBundle: the pinned row-level policy — an extra key I
   const raw = finalizedRaw();
   const stances = (raw.reducers as { stances: Record<string, unknown>[] }[])[0]?.stances ?? [];
   (stances[0] as Record<string, unknown>).smuggled = "an extra row-level key";
-  const result = decodeFinalizedDreamBundle(raw, fixtureManifest());
+  const result = decodeFinalizedDreamBundle(raw, fixtureManifest(), MANIFEST_DIGEST);
   assert.equal(result.ok, true, JSON.stringify(result));
   const decoded = result as { ok: true; reducers: DreamReducerAnalysis[] };
   const stance = decoded.reducers[0]?.report.stances[0];

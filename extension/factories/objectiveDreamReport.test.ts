@@ -94,6 +94,11 @@ function decodedManifest(manifestPath: string): DreamManifest {
   return (result as { ok: true; manifest: DreamManifest }).manifest;
 }
 
+/** The exact manifest bytes `plantDream` writes by default (what the bound digest covers). */
+function defaultManifestBytes(): string {
+  return `${JSON.stringify(rawManifest(), null, 2)}\n`;
+}
+
 function assessment(path: string, overrides: Partial<DreamDocAssessment> = {}): DreamDocAssessment {
   return {
     path,
@@ -217,11 +222,16 @@ function plantDream(
   const manifestPath = join(scratch, DREAM_MANIFEST_FILENAME);
   const manifest = decodedManifest(manifestPath);
   if (opts.manifest !== false) {
-    writeFileSync(manifestPath, opts.manifest ?? `${JSON.stringify(rawManifest(), null, 2)}\n`);
+    writeFileSync(manifestPath, opts.manifest ?? defaultManifestBytes());
   }
   const bundle =
     opts.bundle === undefined
-      ? finalizeDreamBundle(manifest, fixtureAnalyses(), fixtureReducers())
+      ? finalizeDreamBundle(
+          manifest,
+          fixtureAnalyses(),
+          fixtureReducers(),
+          digestSessionData(defaultManifestBytes()),
+        )
       : opts.bundle;
   if (bundle !== false) {
     writeFileSync(join(scratch, DREAM_ANALYSES_FILENAME), bundle);
@@ -267,6 +277,30 @@ test("decodeDreamReportBlock: a valid block round-trips; every malformed shape r
 });
 
 // --- the gate matrix ------------------------------------------------------------------------
+
+test("gate: an UNREADABLE workflow state refuses bad_state — never conflated with non-dream", () => {
+  const cwd = mkdtempSync(join(tmpdir(), "objective-dream-report-test-"));
+  try {
+    const throwing: SessionDataCtx = {
+      cwd,
+      sessionManager: {
+        getBranch: () => {
+          throw new Error("branch storage exploded");
+        },
+      },
+    };
+    // Both the absent-input and present-input shapes fail closed BEFORE the matrix: a
+    // transient branch-read failure must never surface as `absent` (the silent-drop hazard).
+    for (const input of [undefined, validInput()]) {
+      const { errorType, detail } = refusal(resolveDreamReportGate(throwing, input, STAMP));
+      assert.equal(errorType, "bad_state");
+      assert.match(detail, /session workflow state is unreadable/);
+      assert.match(detail, /branch storage exploded/);
+    }
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
 
 test("gate: non-dream + absent → absent (no claimed run, and claimed-run-without-manifest)", () => {
   const cwd = mkdtempSync(join(tmpdir(), "objective-dream-report-test-"));
@@ -412,6 +446,7 @@ test("gate: recovery failure arms are bad_state with named details", () => {
           planted.manifest,
           fixtureAnalyses(),
           fixtureReducers(),
+          digestSessionData(defaultManifestBytes()),
         );
         // Rewrite the on-disk bundle with one flipped byte; the marker still names the
         // original finalized digest.
@@ -422,6 +457,25 @@ test("gate: recovery failure arms are bad_state with named details", () => {
         return planted;
       },
       detail: /does not match the session's finalized digest — re-run the dream wave/,
+    },
+    {
+      // The at-rest manifest tamper the bound manifest_digest catches: the echoed identity
+      // fields, paths, counts, and bytes all survive the edit, so only the digest binding
+      // refuses — the marker still matches the untouched bundle bytes.
+      label: "manifest tampered at rest (identity fields preserved)",
+      plant: () => {
+        const planted = plantDream();
+        const tampered = rawManifest();
+        (tampered.findings as { advisory: { empty_clusters: unknown[] } }).advisory.empty_clusters =
+          ["prose-governance"];
+        writeFileSync(
+          join(runScratchDir(planted.cwd, RUN_ID), DREAM_MANIFEST_FILENAME),
+          `${JSON.stringify(tampered, null, 2)}\n`,
+        );
+        return planted;
+      },
+      detail:
+        /manifest_digest .* does not match the digest of the manifest just read — the manifest changed after the wave finalized/,
     },
     {
       // A cleanly-digested analyses-only bundle (mid-wave shape): freshness passes, the
@@ -444,6 +498,7 @@ test("gate: recovery failure arms are bad_state with named details", () => {
           decodedManifest("/unused"),
           fixtureAnalyses(),
           fixtureReducers(),
+          digestSessionData(defaultManifestBytes()),
         );
         const mutated = `${JSON.stringify(
           { ...(JSON.parse(finalized) as Record<string, unknown>), smuggled: 1 },

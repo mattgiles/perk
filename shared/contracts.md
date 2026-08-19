@@ -9458,20 +9458,26 @@ dream-report recovery.
 widening).** Reducer stances were previously never persisted (reducer reports lived only in
 the tool result); the dream-report draft path (§8.63) needs them to survive pi restarts, so
 after a **fully complete** two-level wave the execute core atomically REWRITES the existing
-`dream-analyses.json` via `finalizeDreamBundle(manifest, analyses, reducers)`: the same
-wrapper fields (`schema_version` stays `"1"`) plus `reducers` — an array in the fixed
-`DREAM_REDUCER_ANGLES` order, each entry the **raw echo shape** `{angle, ...report}` (exactly
-the shape `decodeDreamReducerReport` accepts, the angle echoed). Deliberately NOT a second
+`dream-analyses.json` via `finalizeDreamBundle(manifest, analyses, reducers, manifestDigest)`:
+the same wrapper fields (`schema_version` stays `"1"`) plus `manifest_digest` — the
+`sha256:<hex>` digest of the on-disk manifest BYTES the wave read and decoded, extending the
+marker's bundle-byte authentication to the manifest itself (an at-rest manifest edit that
+preserves the echoed identity fields still refuses at recovery) — plus `reducers`, an array
+in the fixed `DREAM_REDUCER_ANGLES` order, each entry the **raw echo shape**
+`{angle, ...report}` (exactly the shape `decodeDreamReducerReport` accepts, the angle
+echoed). Deliberately NOT a second
 file: one fixed name means the analyses-only mid-wave shape and the finalized shape are
 mutually exclusive states of one path — a cross-attempt MIXED state is structurally
 impossible; the `reducers` key is present **iff** finalized, and an incomplete reducer wave
 naturally leaves the analyses-only shape behind (recovery refuses it). The recovery-side
-decode is `decodeFinalizedDreamBundle(raw, manifest)` — strict, fail-closed, every miss a
-named detail: **the pinned unknown-key policy** — the persisted format is CLOSED at every
-level this decoder authors (the wrapper: exactly `{schema_version, commit_sha, registry_mode,
-doc_count, total_bytes, lanes, reducers}`; each lane entry: `{lane, report}`; each reducer
-entry: the raw echo keys) with unknown keys refusing; a missing `reducers` key refuses as
-not-finalized; the identity fields must equal the manifest's; `lanes` must pair the
+decode is `decodeFinalizedDreamBundle(raw, manifest, manifestDigest)` — strict, fail-closed,
+every miss a named detail: **the pinned unknown-key policy** — the persisted format is CLOSED
+at every level this decoder authors (the wrapper: exactly `{schema_version, commit_sha,
+registry_mode, doc_count, total_bytes, manifest_digest, lanes, reducers}`; each lane entry:
+`{lane, report}`; each reducer entry: the raw echo keys) with unknown keys refusing; a
+missing `reducers` key refuses as not-finalized; the identity fields must equal the
+manifest's; `manifest_digest` must equal the caller's digest of the manifest bytes just read
+(the manifest-authentication link); `lanes` must pair the
 manifest's lanes EXACTLY (same ids, same order); `reducers` must carry exactly the three
 angles in fixed order (the byte-exact angle echo refuses duplicates/reorders); INSIDE a row
 the reused row decoders (`decodeDreamAnalystReport` over the manifest-derived lane/corpus
@@ -9485,12 +9491,18 @@ consumer (the session-artifacts digest-pointer doctrine). The execute clears it 
 unconditionally at entry BEFORE the stale-bundle removal attempt — the invalidation record
 that keeps the removal `io_error` refusal fail-closed for downstream consumers — and sets it
 to the sha256 of the finalized bytes (`digestSessionData`, the `sha256:<hex>` convention)
-only after the finalize write succeeds. The marker seam is injected into the execute core
-(`markers: {clear, set}`; the registered tool wires the production `appendWorkflowState`
-pair — loud-but-non-fatal: a failed set warns via the read-back check and leaves the marker
-cleared, so recovery refuses; re-running the wave repairs it). A finalize-write throw is the
-SECOND post-launch `io_error` fail arm, mirroring the analyst-bundle arm's
-`{analyses, attempts}` extras retention (the message names the finalize).
+only after the finalize write succeeds. The entry clear is **verified**: `markers.clear()`
+returns the append+read-back result, and an UNVERIFIED clear refuses `io_error` before ANY
+filesystem work or spawn — with the old digest possibly still live, proceeding into a failed
+removal would leave the prior bundle + prior digest PAIR recoverable as fresh, so the wave
+stops instead (no mutation happens, and the untouched prior finalized state remains exactly
+what it was). The marker seam is injected into the execute core (`markers: {clear, set}`;
+the registered tool wires the production `appendWorkflowState` pair); `set` stays
+loud-but-non-fatal — a failed set warns via the read-back check and leaves the marker
+cleared by the entry clear, so recovery refuses; re-running the wave repairs it. A
+finalize-write throw is the SECOND post-launch `io_error` fail arm, mirroring the
+analyst-bundle arm's `{analyses, attempts}` extras retention (the message names the
+finalize).
 
 **The three fixed reducer angles** (`DREAM_REDUCER_ANGLES`, fixed order everywhere — lanes,
 normalized reports, and the vocabulary the dream-report validation's disagreement rule
@@ -9767,21 +9779,28 @@ absent → `absent` (unchanged, byte-identical behavior); non-dream + present �
 `invalid_input` (the objective and its report review as ONE bundle — draft-time enforcement
 means a report-less dream bundle can never reach review, so an approval is always savable,
 the §8.62 "validates BEFORE review" promise); dream + present → recover trusted context →
-`buildDreamReport(input, context)` → refuse on any failure, else yield the block. Failure
+`buildDreamReport(input, context)` → refuse on any failure, else yield the block. The gate
+reads ONE workflow-state snapshot with error distinction: an UNREADABLE state (a throwing
+branch read) refuses `bad_state` BEFORE the matrix — never conflated with a confirmed
+non-dream session (a transient read failure must not surface as `absent`). Failure
 taxonomy (soft results, never throws): gate violations and `buildDreamReport` validation
 refusals → `invalid_input` (the bounded ≤25 named details ride the message, newline-joined);
-context-recovery failures (missing/stale/tampered/undecodable run-scratch state — "re-run the
-dream wave") and the save-time stored-parts mismatch → `bad_state`.
+an unreadable workflow state, context-recovery failures (missing/stale/tampered/undecodable
+run-scratch state — "re-run the dream wave"), and the save-time stored-parts mismatch →
+`bad_state`.
 
 **Trusted-context recovery** (module-internal, fail-closed, every arm a named detail):
 (1) read + parse the run-scoped manifest and `decodeDreamManifest(raw, manifestPath)` (the
 strict §8.60 decoder, path bound at decode time; no `verifyDocContainment` — the report path
 reads no doc files, so the lexical decode suffices; resolved containment stays the wave
-tool's pre-spawn concern); (2) **the freshness check** — the rebuilt `dream_bundle_digest`
-marker (§8.3/§8.61) must be present, non-empty, and equal the digest of the bundle bytes just
-read (missing/empty/mismatch refuses); (3) `decodeFinalizedDreamBundle(parsedBundle,
-manifest)` (§8.61 — the analyses-only mid-wave shape refuses here); the recovered context is
-`{manifest, analyses, reducers, run_id, generated_at}`.
+tool's pre-spawn concern); (2) **the freshness check** — the `dream_bundle_digest` marker
+(§8.3/§8.61, read from the gate's one workflow-state snapshot) must be present, non-empty,
+and equal the digest of the bundle bytes just read (missing/empty/mismatch refuses); (3)
+`decodeFinalizedDreamBundle(parsedBundle, manifest, digest-of-manifest-bytes-just-read)`
+(§8.61 — the analyses-only mid-wave shape refuses here, and the bundle's bound
+`manifest_digest` authenticates the manifest itself: the marker covers the bundle bytes and
+the bundle covers the manifest bytes, so an at-rest manifest edit refuses); the recovered
+context is `{manifest, analyses, reducers, run_id, generated_at}`.
 
 **The artifact block.** A valid dream draft stores `dream_report: {input, generated_at,
 parts}` in `objective-draft.json` — **tool-written only** (the model never writes the

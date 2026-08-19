@@ -6,7 +6,7 @@
 // the artifact-first `/objective-save` command (seam-first; legacy drive as the no-draft fallback).
 
 import assert from "node:assert/strict";
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
 import {
@@ -14,12 +14,7 @@ import {
   type ExtensionContext,
   SessionManager,
 } from "@earendil-works/pi-coding-agent";
-import { runScratchDir } from "../substrate/cache.ts";
-import {
-  digestSessionData,
-  type SessionDataCtx,
-  writeSessionArtifact,
-} from "../substrate/sessionData.ts";
+import { type SessionDataCtx, writeSessionArtifact } from "../substrate/sessionData.ts";
 import type { ToolGating } from "../substrate/toolGating.ts";
 import {
   type EntrySink,
@@ -27,6 +22,7 @@ import {
   WORKFLOW_STATE_TYPE,
 } from "../substrate/workflowState.ts";
 import type { ReportTarget } from "../surfaces/report.ts";
+import { dreamReportInput, plantDreamFiles } from "../testing/dreamFixtures.ts";
 import {
   fakePerk,
   loadPerkSession,
@@ -34,18 +30,6 @@ import {
   scaffoldRepo,
   spyInjections,
 } from "../testing/harness.ts";
-import {
-  DREAM_ANALYSES_FILENAME,
-  DREAM_REDUCER_ANGLES,
-  type DreamReducerAnalysis,
-  finalizeDreamBundle,
-} from "../waves/dreamReducerWave.ts";
-import {
-  DREAM_MANIFEST_FILENAME,
-  type DreamLaneAnalysis,
-  type DreamManifest,
-  decodeDreamManifest,
-} from "../waves/dreamWave.ts";
 import { OBJECTIVE_BUDGET_TYPE } from "./objective.ts";
 import { OBJECTIVE_DRAFT_ARTIFACT } from "./objectiveDraft.ts";
 import { resolveDreamReportGate } from "./objectiveDreamReport.ts";
@@ -549,126 +533,19 @@ test("command: /objective-save with a draft but a failing cold door → error re
 });
 
 // --- the dream_report gate at the save boundary (contracts §8.63) --------------------------------
+// (the persisted-dream fixture is the shared testing/dreamFixtures.ts encoding; the local
+// wrapper just fixes this suite's run id)
 
 const DREAM_RUN = "01DREAMRID";
-const DREAM_DOC = "docs/learned/pi/subagents.md";
 const DREAM_STAMP = "2026-02-03T04:05:06Z";
 
-/** A minimal 1-lane / 1-doc raw producer manifest (the doc final-keeps — no units needed). */
-function dreamRawManifest(): Record<string, unknown> {
-  return {
-    schema_version: "1",
-    commit_sha: "abc123",
-    registry_mode: "clusters",
-    doc_count: 1,
-    total_bytes: 100,
-    findings: {
-      structural: {
-        stale_pointers: [],
-        broken_doc_paths: [],
-        duplicate_cues: [],
-        missing_frontmatter: [],
-      },
-      advisory: {
-        distillation_issues: [],
-        source_code_blocks: [],
-        overlong_cues: [],
-        cue_hazards: [],
-        empty_clusters: [],
-      },
-    },
-    lanes: [
-      {
-        id: "pi-1",
-        rollup: null,
-        docs: [{ path: DREAM_DOC, title: null, read_when: null, cluster: null, bytes: 100 }],
-      },
-    ],
-  };
-}
-
-function dreamAnalyses(): DreamLaneAnalysis[] {
-  return [
-    {
-      lane: "pi-1",
-      report: {
-        docs: [
-          {
-            path: DREAM_DOC,
-            disposition: "keep",
-            merge_target: null,
-            rationale: "still true",
-            preserve: [],
-            evidence_checked: [],
-            confidence: "high",
-          },
-        ],
-        overlap_signals: [],
-        harvest_followups: [],
-        uncertainties: [],
-        overlap_signals_omitted: 0,
-        harvest_followups_omitted: 0,
-        uncertainties_omitted: 0,
-      },
-    },
-  ];
-}
-
-function dreamReducers(): DreamReducerAnalysis[] {
-  return DREAM_REDUCER_ANGLES.map((angle) => ({
-    angle,
-    report: {
-      stances: [],
-      angle_findings: [],
-      uncertainties: [],
-      stances_omitted: 0,
-      angle_findings_omitted: 0,
-      uncertainties_omitted: 0,
-    },
-  }));
-}
-
-function dreamInput(): Record<string, unknown> {
-  return {
-    rows: [
-      {
-        path: DREAM_DOC,
-        disposition: "keep",
-        merge_target: null,
-        rationale: "the parent's reason",
-        fallback_reason: null,
-      },
-    ],
-    uncertainties: [],
-    selected_units: [],
-    overflow_units: [],
-    harvest_followups: [],
-    predicted_effects: { docs_after: 1, bytes_after: 100, note: null },
-  };
-}
-
-/** Plant the run-scoped dream files (manifest + finalized bundle); returns the marker digest.
- * `finalized: false` plants the manifest only (dream detection without a finished wave). */
-function plantDreamFiles(cwd: string, opts: { finalized?: boolean } = {}): string {
-  const scratch = runScratchDir(cwd, DREAM_RUN);
-  mkdirSync(scratch, { recursive: true });
-  const manifestPath = join(scratch, DREAM_MANIFEST_FILENAME);
-  writeFileSync(manifestPath, `${JSON.stringify(dreamRawManifest(), null, 2)}\n`);
-  if (opts.finalized === false) return "";
-  const decoded = decodeDreamManifest(dreamRawManifest(), manifestPath);
-  assert.equal(decoded.ok, true, JSON.stringify(decoded));
-  const bundle = finalizeDreamBundle(
-    (decoded as { ok: true; manifest: DreamManifest }).manifest,
-    dreamAnalyses(),
-    dreamReducers(),
-  );
-  writeFileSync(join(scratch, DREAM_ANALYSES_FILENAME), bundle);
-  return digestSessionData(bundle);
+function plantDream(cwd: string, opts: { finalized?: boolean } = {}): string {
+  return plantDreamFiles(cwd, DREAM_RUN, opts);
 }
 
 test("tool: a dream session refuses a report-less save — nothing delegated to the cold door", async () => {
   const cwd = scaffoldRepo({ handoff: { runId: DREAM_RUN, mode: "read-write" } });
-  plantDreamFiles(cwd, { finalized: false });
+  plantDream(cwd, { finalized: false });
   const argvFile = join(cwd, "argv.txt");
   const bin = fakePerk(cwd, { stdout: CREATE_JSON, argvFile });
   const h = await loadPerkSession({ cwd, env: { PERK_RUN_ID: DREAM_RUN, PERK_BIN: bin } });
@@ -692,7 +569,7 @@ test("tool: dream_report outside a dream session refuses — nothing delegated",
   try {
     const result = await h.invokeTool("objective_save", {
       prose: PROSE,
-      dream_report: dreamInput(),
+      dream_report: dreamReportInput(),
     });
     const details = result.details as { ok: boolean; error?: string; error_type?: string };
     assert.equal(details.ok, false);
@@ -706,7 +583,7 @@ test("tool: dream_report outside a dream session refuses — nothing delegated",
 
 test("tool: dream + valid direct-param save proceeds — the cold-door argv is unchanged", async () => {
   const cwd = scaffoldRepo();
-  const digest = plantDreamFiles(cwd);
+  const digest = plantDream(cwd);
   const file = plantSession(cwd, [
     { run_id: DREAM_RUN, mode: "read-write", dream_bundle_digest: digest },
   ]);
@@ -720,7 +597,7 @@ test("tool: dream + valid direct-param save proceeds — the cold-door argv is u
   try {
     const result = await h.invokeTool("objective_save", {
       prose: PROSE,
-      dream_report: dreamInput(),
+      dream_report: dreamReportInput(),
     });
     const details = result.details as { ok: boolean; objective?: { id: string } };
     assert.equal(details.ok, true, JSON.stringify(details));
@@ -750,12 +627,12 @@ test("objectiveApprovalSave: a dream draft whose stored parts match the re-rende
     argvs: string[][];
   }> => {
     const cwd = scaffoldRepo();
-    const digest = plantDreamFiles(cwd);
+    const digest = plantDream(cwd);
     const branch: unknown[] = [
       stateEntry({ run_id: DREAM_RUN, mode: "read-only", dream_bundle_digest: digest }),
     ];
     const ctx = reportableCtx(cwd, branch);
-    const gate = resolveDreamReportGate(ctx, dreamInput(), DREAM_STAMP);
+    const gate = resolveDreamReportGate(ctx, dreamReportInput(), DREAM_STAMP);
     assert.equal(gate.kind, "block", JSON.stringify(gate));
     const block = (gate as { kind: "block"; block: { parts: string[] } }).block;
     const payload = `${JSON.stringify({
