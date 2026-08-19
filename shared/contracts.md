@@ -9229,15 +9229,26 @@ independent of harvest's), written run-scoped at
   "registry_mode": "clusters",
   "doc_count": 63,
   "total_bytes": 1160620,
-  "findings": { "structural": { "stale_pointers": [{ "doc", "pointer", "reason" }],
-                                "broken_doc_paths": [{ "doc", "target" }],
-                                "duplicate_cues": [{ "key", "docs" }],
-                                "missing_frontmatter": ["<path>"] },
-                "advisory":   { "distillation_issues": [{ "doc", "problem" }],
-                                "source_code_blocks": [{ "doc", "language", "lines" }],
-                                "overlong_cues": [{ "doc", "length" }],
-                                "cue_hazards": [{ "doc", "hazard" }],
-                                "empty_clusters": ["<cluster id>"] } },
+  "findings": {
+    "structural": {
+      "stale_pointers": [ { "doc": "docs/learned/pi/context-injection.md",
+                            "pointer": "perk/run/launch.py::_gone",
+                            "reason": "missing-symbol" } ],
+      "broken_doc_paths": [ { "doc": "docs/learned/pi/context-injection.md",
+                              "target": "../workflow/renamed.md" } ],
+      "duplicate_cues": [ { "key": "when touching the extension api.",
+                            "docs": [ "docs/learned/pi/context-injection.md",
+                                      "docs/learned/pi/extension-api.md" ] } ],
+      "missing_frontmatter": [ "docs/learned/pi/untitled.md" ] },
+    "advisory": {
+      "distillation_issues": [ { "doc": "docs/learned/pi/context-system.md",
+                                 "problem": "missing" } ],
+      "source_code_blocks": [ { "doc": "docs/learned/pi/extension-api.md",
+                                "language": "ts", "lines": 14 } ],
+      "overlong_cues": [ { "doc": "docs/learned/pi/tui-surfaces.md", "length": 214 } ],
+      "cue_hazards": [ { "doc": "docs/learned/pi/subagents.md",
+                         "hazard": "space-hash" } ],
+      "empty_clusters": [ "prose-governance" ] } },
   "lanes": [
     { "id": "pi-extension-1",
       "rollup": "Pi SDK/extension substrate craft — …",
@@ -9266,7 +9277,10 @@ and `registry_mode: "categories"`.
 `incomplete_registry` (any doc whose `cluster` is undeclared or names no registry id — every
 offending doc listed; the docs-sync posture, never a silent fallback); `invalid_input` (the
 symlinked corpus root, escaping docs, and unreadable doc bytes — snapshot honesty, never a
-silent 0). **Dream refuses where harvest filters**: an enumerated doc whose resolved path
+silent 0). Byte measurement runs **before** the partition, so an unreadable doc is refused
+`invalid_input`, never misnamed `incomplete_registry` (the never-raising scan degrades an
+unreadable doc's frontmatter — its `cluster` included — to `null`): readability precedes
+membership. **Dream refuses where harvest filters**: an enumerated doc whose resolved path
 escapes `docs/learned/` is a refusal naming every escaping doc — a complete-corpus audit never
 silently narrows the corpus, so a completed gather's doc set is exactly the
 `read_learned_docs` enumeration.

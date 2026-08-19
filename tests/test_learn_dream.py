@@ -344,6 +344,161 @@ def test_render_manifest_exact_shape_and_null_carriage(tmp_path: Path):
     assert DREAM_MANIFEST_SCHEMA_VERSION == "1"
 
 
+def test_render_manifest_registry_mode_exact_shape_with_every_finding_family(tmp_path: Path):
+    """The registry-mode render, pinned end to end: non-null cluster/rollup metadata and a
+    NON-EMPTY row in every closed finding family — mis-wired ``OutputModel`` converters (or
+    hard-coded null registry metadata) cannot pass. The user-doc-owned broken link proves the
+    owner-doc filter at the rendered layer."""
+    _registry(tmp_path, [("wf", "Workflow rollup."), ("spare", "No members.")])
+    a = _doc(
+        tmp_path,
+        "workflow",
+        "a",
+        cluster="wf",
+        title="A",
+        read_when="When A.",
+        body="# A\n\n`perk/nonexistent_module.py::gone` and [gone](../missing-target.md).\n",
+    )
+    b = _doc(tmp_path, "workflow", "b", cluster="wf", title="B", read_when="Same cue.")
+    c = _doc(tmp_path, "workflow", "c", cluster="wf", title="C", read_when="Same cue.")
+    d = tmp_path / "docs" / "learned" / "workflow" / "d.md"
+    d.write_text("---\ncluster: wf\n---\n\n# D\n", encoding="utf-8")  # missing frontmatter
+    e = _doc(  # over the distillation threshold, no `## Distillation` header → "missing"
+        tmp_path,
+        "workflow",
+        "e",
+        cluster="wf",
+        title="E",
+        read_when="When E.",
+        body="# E\n\n" + "filler text line\n" * 800,
+    )
+    f = _doc(  # a 10-line `py` fence → a copied-source block row
+        tmp_path,
+        "workflow",
+        "f",
+        cluster="wf",
+        title="F",
+        read_when="When F.",
+        body="# F\n\n```py\n" + "".join(f"code line {i}\n" for i in range(1, 11)) + "```\n",
+    )
+    g = _doc(tmp_path, "workflow", "g", cluster="wf", title="G", read_when="X" * 201)
+    h = _doc(  # a plain-scalar ` #` → the space-hash hazard; YAML parses the cue as "When H."
+        tmp_path, "workflow", "h", cluster="wf", title="H", read_when="When H. #tag"
+    )
+    user_doc = tmp_path / "docs" / "user-docs" / "x.md"
+    user_doc.parent.mkdir(parents=True, exist_ok=True)
+    user_doc.write_text("# X\n\n[gone](missing.md)\n", encoding="utf-8")
+
+    size = {p.name[0]: p.stat().st_size for p in (a, b, c, d, e, f, g, h)}
+    rendered = render_manifest(gather_dream(tmp_path), commit_sha="abc123")
+    assert json.loads(rendered) == {
+        "schema_version": "1",
+        "commit_sha": "abc123",
+        "registry_mode": "clusters",
+        "doc_count": 8,
+        "total_bytes": sum(size.values()),
+        "findings": {
+            "structural": {
+                "stale_pointers": [
+                    {
+                        "doc": "docs/learned/workflow/a.md",
+                        "pointer": "perk/nonexistent_module.py::gone",
+                        "reason": "missing-file",
+                    }
+                ],
+                "broken_doc_paths": [
+                    {"doc": "docs/learned/workflow/a.md", "target": "../missing-target.md"}
+                ],
+                "duplicate_cues": [
+                    {
+                        "key": "same cue.",
+                        "docs": [
+                            "docs/learned/workflow/b.md",
+                            "docs/learned/workflow/c.md",
+                        ],
+                    }
+                ],
+                "missing_frontmatter": ["docs/learned/workflow/d.md"],
+            },
+            "advisory": {
+                "distillation_issues": [
+                    {"doc": "docs/learned/workflow/e.md", "problem": "missing"}
+                ],
+                "source_code_blocks": [
+                    {"doc": "docs/learned/workflow/f.md", "language": "py", "lines": 10}
+                ],
+                "overlong_cues": [{"doc": "docs/learned/workflow/g.md", "length": 201}],
+                "cue_hazards": [{"doc": "docs/learned/workflow/h.md", "hazard": "space-hash"}],
+                "empty_clusters": ["spare"],
+            },
+        },
+        "lanes": [
+            {
+                "id": "wf-1",
+                "rollup": "Workflow rollup.",
+                "docs": [
+                    {
+                        "path": "docs/learned/workflow/a.md",
+                        "title": "A",
+                        "read_when": "When A.",
+                        "cluster": "wf",
+                        "bytes": size["a"],
+                    },
+                    {
+                        "path": "docs/learned/workflow/b.md",
+                        "title": "B",
+                        "read_when": "Same cue.",
+                        "cluster": "wf",
+                        "bytes": size["b"],
+                    },
+                    {
+                        "path": "docs/learned/workflow/c.md",
+                        "title": "C",
+                        "read_when": "Same cue.",
+                        "cluster": "wf",
+                        "bytes": size["c"],
+                    },
+                    {
+                        "path": "docs/learned/workflow/d.md",
+                        "title": None,
+                        "read_when": None,
+                        "cluster": "wf",
+                        "bytes": size["d"],
+                    },
+                    {
+                        "path": "docs/learned/workflow/e.md",
+                        "title": "E",
+                        "read_when": "When E.",
+                        "cluster": "wf",
+                        "bytes": size["e"],
+                    },
+                    {
+                        "path": "docs/learned/workflow/f.md",
+                        "title": "F",
+                        "read_when": "When F.",
+                        "cluster": "wf",
+                        "bytes": size["f"],
+                    },
+                    {
+                        "path": "docs/learned/workflow/g.md",
+                        "title": "G",
+                        "read_when": "X" * 201,
+                        "cluster": "wf",
+                        "bytes": size["g"],
+                    },
+                    {
+                        "path": "docs/learned/workflow/h.md",
+                        "title": "H",
+                        "read_when": "When H.",
+                        "cluster": "wf",
+                        "bytes": size["h"],
+                    },
+                ],
+            }
+        ],
+    }
+
+
 def test_render_manifest_is_byte_deterministic(tmp_path: Path):
     _registry(tmp_path, [("wf", "Workflow rollup.")])
     _doc(tmp_path, "workflow", "a", cluster="wf")
@@ -381,6 +536,24 @@ def test_write_manifest_writes_run_scoped_scratch(tmp_path: Path):
 def test_unreadable_doc_bytes_is_invalid_input(tmp_path: Path):
     _doc(tmp_path, "workflow", "a")
     sealed = _doc(tmp_path, "workflow", "b")
+    sealed.chmod(0o000)
+    try:
+        with pytest.raises(UserFacingCliError) as exc_info:
+            gather_dream(tmp_path)
+        assert exc_info.value.error_type == "invalid_input"
+        assert "docs/learned/workflow/b.md" in str(exc_info.value)
+    finally:
+        sealed.chmod(0o644)
+
+
+@pytest.mark.skipif(os.geteuid() == 0, reason="permission bits are advisory as root")
+def test_unreadable_doc_bytes_in_registry_mode_is_invalid_input(tmp_path: Path):
+    """Registry mode must surface the READ failure, never `incomplete_registry`: the unreadable
+    doc's frontmatter (its `cluster` included) degrades to None in the never-raising scan, so
+    byte measurement must precede the partition — readability precedes membership."""
+    _registry(tmp_path, [("wf", "Workflow rollup.")])
+    _doc(tmp_path, "workflow", "a", cluster="wf")
+    sealed = _doc(tmp_path, "workflow", "b", cluster="wf")  # cluster unreadable once sealed
     sealed.chmod(0o000)
     try:
         with pytest.raises(UserFacingCliError) as exc_info:

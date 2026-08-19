@@ -182,12 +182,15 @@ def partition_dream_lanes(
 
 def gather_dream(repo_root: Path) -> DreamGather:
     """The composition seam the door calls: resolve (refuses empty/escaping) → load the registry
-    (refuses invalid) → partition (refuses incomplete) → measure sizes (refuses unreadable) →
+    (refuses invalid) → measure sizes (refuses unreadable) → partition (refuses incomplete) →
     collect findings.
 
     Sizes are measured from the pairs' **resolved paths** (consumed here and nowhere else);
     an ``OSError`` on a doc's byte read → ``invalid_input`` naming the doc — snapshot honesty,
-    never a silent 0.
+    never a silent 0. Measurement runs BEFORE the partition on purpose: an unreadable doc's
+    frontmatter (its ``cluster`` included) degrades to ``None`` in the never-raising scan, so
+    partitioning first would misname the failure ``incomplete_registry`` — readability precedes
+    membership.
     """
     pairs = resolve_dream_docs(repo_root)
     docs = tuple(doc for doc, _resolved in pairs)
@@ -197,7 +200,6 @@ def gather_dream(repo_root: Path) -> DreamGather:
             f"the cluster registry is invalid — {registry.reason}",
             error_type="invalid_registry",
         )
-    lanes = partition_dream_lanes(docs, registry)
     sizes: dict[str, int] = {}
     for doc, resolved in pairs:
         try:
@@ -210,7 +212,7 @@ def gather_dream(repo_root: Path) -> DreamGather:
             ) from exc
     return DreamGather(
         docs=docs,
-        lanes=lanes,
+        lanes=partition_dream_lanes(docs, registry),
         registry_mode="clusters" if registry is not None else "categories",
         sizes=sizes,
         findings=_collect_findings(repo_root, docs, registry_present=registry is not None),
