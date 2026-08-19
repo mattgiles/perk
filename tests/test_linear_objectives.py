@@ -41,9 +41,10 @@ def _inline_objective_description(
     *,
     comment_id: str | int | None = None,
     nodes: list[objective.ObjectiveNode] | None = None,
+    origin: str | None = None,
 ) -> str:
     header = objective.ObjectiveHeader(
-        run_id=run_id, created="t", objective_comment_id=comment_id, status="active"
+        run_id=run_id, created="t", objective_comment_id=comment_id, status="active", origin=origin
     )
     header_block = plan.render_metadata_block(
         objective.OBJECTIVE_HEADER_KEY, objective.render_header_block(header), style="inline-code"
@@ -317,7 +318,9 @@ class TestCreateObjectiveIssue:
 
     def test_create_persists_origin_into_objective_header(self) -> None:
         # The dormant store still stamps origin at create (it composes a real header) — only
-        # the lookup refuses (see TestFindOpenObjectiveByOrigin).
+        # the lookup refuses (see TestFindOpenObjectiveByOrigin). The backfill reread is
+        # origin-bearing so the final issueUpdate proves the comment-id merge RETAINS origin
+        # (the dormant-writer round-trip regression).
         store, fake = _make_store(
             {
                 "teams(filter": [_TEAM_RESPONSE],
@@ -332,7 +335,11 @@ class TestCreateObjectiveIssue:
                     }
                 ],
                 "commentCreate(": [_COMMENT_CREATED],
-                "issue(id": [_objective_issue_response(_inline_objective_description("01NEW"))],
+                "issue(id": [
+                    _objective_issue_response(
+                        _inline_objective_description("01NEW", origin="learn-dream")
+                    )
+                ],
                 "issueUpdate(": [{"issueUpdate": {"success": True}}],
             }
         )
@@ -348,6 +355,16 @@ class TestCreateObjectiveIssue:
         assert isinstance(description, str)
         header = plan.find_metadata_block(description, objective.OBJECTIVE_HEADER_KEY)
         assert header is not None and header["origin"] == "learn-dream"
+        # The comment-id backfill (an unrelated header merge) must not erase the stamp.
+        [(_, update_vars)] = _queries(fake, "issueUpdate(")
+        backfilled_description = _input_payload(update_vars)["description"]
+        assert isinstance(backfilled_description, str)
+        backfilled = plan.find_metadata_block(
+            backfilled_description, objective.OBJECTIVE_HEADER_KEY
+        )
+        assert backfilled is not None
+        assert backfilled["origin"] == "learn-dream"
+        assert backfilled["objective_comment_id"] == "cmt-uuid-1"
 
 
 class TestFindOpenObjectiveByOrigin:

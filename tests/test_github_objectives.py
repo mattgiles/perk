@@ -849,6 +849,73 @@ def test_supersede_objective_issue_junk_stored_origin_raises(monkeypatch):
     assert rec.method_calls("POST") == 0  # no successor issue was created
 
 
+def test_supersede_objective_issue_malformed_old_header_raises(monkeypatch):
+    # Absent vs malformed (the lookup's own discrimination): a present-yet-unparseable old
+    # header is genuine uncertainty about the predecessor's origin — raise BEFORE any
+    # successor POST, never silently carry nothing.
+    nodes = [
+        objective.ObjectiveNode(id="1.1", description="A", status=objective.NodeStatus.PENDING)
+    ]
+    broken = "<!-- perk:metadata-block:objective-header -->\nno closing marker"
+    rec = _GhDispatch(
+        [
+            (_has("issues", "GET"), _Proc(0, "[]")),
+            (_has("issues/42", ".body"), _Proc(0, broken)),
+        ]
+    )
+    monkeypatch.setattr(subprocess, "run", rec)
+    with pytest.raises(github.GitHubError, match="present but malformed"):
+        objectives.supersede_objective_issue(
+            old_number=42,
+            title="t",
+            prose="p",
+            repo_root=ROOT,
+            run_id="01RID",
+            roadmap_nodes=nodes,
+        )
+    assert rec.method_calls("POST") == 0  # no successor issue was created
+
+
+def test_supersede_objective_issue_header_less_old_body_carries_nothing(monkeypatch):
+    # A header-LESS old body (no block at all) is the tolerated carry-nothing arm — the
+    # successor is still created, origin-less.
+    nodes = [
+        objective.ObjectiveNode(id="1.1", description="A", status=objective.NodeStatus.PENDING)
+    ]
+    rec = _GhDispatch(
+        [
+            (_has("issues", "GET"), _Proc(0, "[]")),
+            (_has("{repo}/labels", "POST"), _Proc(0, "{}")),
+            (_has("comments", "POST"), _Proc(0, json.dumps({"id": 555}))),
+            (
+                _has("repos/{owner}/{repo}/issues", "POST"),
+                _Proc(0, json.dumps({"number": 200, "url": "u/200"})),
+            ),
+            (_has("issues/200", ".body"), _Proc(0, _obj_body("01RID", nodes))),
+            (_has("issues/200", "PATCH"), _Proc(0, "{}")),
+            (_has("issues/42", ".body"), _Proc(0, "just human prose, no perk blocks")),
+            (_has("issues/42", "PATCH"), _Proc(0, "{}")),
+        ]
+    )
+    monkeypatch.setattr(subprocess, "run", rec)
+    created = objectives.supersede_objective_issue(
+        old_number=42,
+        title="t",
+        prose="p",
+        repo_root=ROOT,
+        run_id="01RID",
+        roadmap_nodes=nodes,
+    )
+    assert created.number == 200
+    new_body = next(
+        b
+        for b in rec.body_files
+        if (h := plan.find_metadata_block(b, objective.OBJECTIVE_HEADER_KEY)) is not None
+        and h.get("supersedes") == "#42"
+    )
+    assert "origin" not in new_body
+
+
 def test_get_objective_parses_header_and_nodes(monkeypatch):
     nodes = [
         objective.ObjectiveNode(id="1.1", description="A", status=objective.NodeStatus.DONE),
@@ -1114,11 +1181,6 @@ def test_update_objective_header_unrelated_merge_preserves_stored_origin(monkeyp
 # --------------------------------------------------- the open-by-origin lookup (§8.24)
 
 
-def _page_eq(n: int):
-    # exact-token match (`page=1` is a substring of `per_page=100`, so _has would misfire)
-    return lambda gh: f"page={n}" in gh
-
-
 def _origin_row(number: int, run_id: str, *, origin: str | None = None) -> dict:
     return {
         "number": number,
@@ -1127,58 +1189,65 @@ def _origin_row(number: int, run_id: str, *, origin: str | None = None) -> dict:
     }
 
 
-def test_list_label_issues_all_pages_exhausts_pages(monkeypatch):
-    full_page = [_origin_row(i, f"01R{i}") for i in range(100)]
-    short_page = [_origin_row(200, "01R200")]
-    rec = _GhDispatch(
-        [
-            (_page_eq(1), _Proc(0, json.dumps(full_page))),
-            (_page_eq(2), _Proc(0, json.dumps(short_page))),
-        ]
-    )
+def _slurped(*pages: list) -> str:
+    """A ``gh api --paginate --slurp`` payload: an array of per-page row arrays."""
+    return json.dumps(list(pages))
+
+
+def test_list_label_issues_all_pages_flattens_slurped_pages(monkeypatch):
+    page_one = [_origin_row(i, f"01R{i}") for i in range(3)]
+    page_two = [_origin_row(200, "01R200")]
+    rec = _GhRecorder(get=_Proc(0, stdout=_slurped(page_one, page_two)))
     monkeypatch.setattr(subprocess, "run", rec)
     rows = plans._list_label_issues_all_pages(
         objective.OBJECTIVE_LABEL, repo_root=ROOT, what="failed"
     )
-    assert len(rows) == 101  # the full page triggered the next fetch; the short page stopped
-    assert len(rec.calls) == 2
-    assert all(any("per_page=100" in tok for tok in c) for c in rec.calls)
+    assert [r["number"] for r in rows] == [0, 1, 2, 200]
+    # ONE argv: gh owns the page loop (native --paginate --slurp), per_page=100 per request.
+    [call] = rec.calls
+    assert "--paginate" in call and "--slurp" in call
+    assert "per_page=100" in call
 
 
-def test_list_label_issues_all_pages_short_first_page_stops(monkeypatch):
-    rec = _GhDispatch([(_page_eq(1), _Proc(0, json.dumps([_origin_row(1, "01R1")])))])
-    monkeypatch.setattr(subprocess, "run", rec)
-    rows = plans._list_label_issues_all_pages(
-        objective.OBJECTIVE_LABEL, repo_root=ROOT, what="failed"
-    )
-    assert len(rows) == 1 and len(rec.calls) == 1
-
-
-def test_list_label_issues_all_pages_raises_on_page_failure(monkeypatch):
-    # A mid-scan page failure raises — a partial scan is never reported as complete.
-    full_page = [_origin_row(i, f"01R{i}") for i in range(100)]
-    rec = _GhDispatch(
-        [
-            (_page_eq(1), _Proc(0, json.dumps(full_page))),
-            (_page_eq(2), _Proc(1, stderr="HTTP 500")),
-        ]
-    )
-    monkeypatch.setattr(subprocess, "run", rec)
+def test_list_label_issues_all_pages_raises_on_request_failure(monkeypatch):
+    # A failed request raises — a partial scan is never reported as complete.
+    monkeypatch.setattr(subprocess, "run", _GhRecorder(get=_Proc(1, stderr="HTTP 500")))
     with pytest.raises(github.GitHubError):
         plans._list_label_issues_all_pages(objective.OBJECTIVE_LABEL, repo_root=ROOT, what="failed")
 
 
-def test_find_objective_issue_by_origin_matches_on_a_later_page(monkeypatch):
-    # The pagination proof: an authoritative scan finds a match beyond the first page.
-    full_page = [_origin_row(i, f"01R{i}") for i in range(100)]
-    match_page = [_origin_row(200, "01R200", origin="learn-dream")]
-    rec = _GhDispatch(
-        [
-            (_page_eq(1), _Proc(0, json.dumps(full_page))),
-            (_page_eq(2), _Proc(0, json.dumps(match_page))),
-        ]
+def test_list_label_issues_all_pages_raises_on_empty_output(monkeypatch):
+    # Fail-closed: empty stdout is NOT an empty population (no "[]" default — only a genuinely
+    # parsed empty page reads as empty).
+    monkeypatch.setattr(subprocess, "run", _GhRecorder(get=_Proc(0, stdout="")))
+    with pytest.raises(github.GitHubError):
+        plans._list_label_issues_all_pages(objective.OBJECTIVE_LABEL, repo_root=ROOT, what="failed")
+
+
+def test_list_label_issues_all_pages_raises_on_non_list_payload(monkeypatch):
+    monkeypatch.setattr(subprocess, "run", _GhRecorder(get=_Proc(0, stdout='{"oops": 1}')))
+    with pytest.raises(github.GitHubError, match="expected an array of pages"):
+        plans._list_label_issues_all_pages(objective.OBJECTIVE_LABEL, repo_root=ROOT, what="failed")
+
+
+def test_list_label_issues_all_pages_raises_on_non_list_page(monkeypatch):
+    # A flat row array (e.g. --slurp silently dropped) is an unexpected shape — raise, never
+    # misread rows as pages.
+    monkeypatch.setattr(
+        subprocess, "run", _GhRecorder(get=_Proc(0, stdout=json.dumps([_origin_row(1, "01R1")])))
     )
-    monkeypatch.setattr(subprocess, "run", rec)
+    with pytest.raises(github.GitHubError, match="expected a page array"):
+        plans._list_label_issues_all_pages(objective.OBJECTIVE_LABEL, repo_root=ROOT, what="failed")
+
+
+def test_find_objective_issue_by_origin_matches_on_a_later_page(monkeypatch):
+    # The pagination integration check: the authoritative scan finds a match beyond the first
+    # slurped page.
+    page_one = [_origin_row(i, f"01R{i}") for i in range(100)]
+    page_two = [_origin_row(200, "01R200", origin="learn-dream")]
+    monkeypatch.setattr(
+        subprocess, "run", _GhRecorder(get=_Proc(0, stdout=_slurped(page_one, page_two)))
+    )
     found = objectives.find_objective_issue_by_origin(
         origin="learn-dream", exclude_run_id=None, repo_root=ROOT
     )
@@ -1201,7 +1270,7 @@ def test_find_objective_issue_by_origin_row_guards_skip(monkeypatch):
         _origin_row(5, "01C"),  # origin absent → non-match
         _origin_row(6, "01D", origin="learn-dream"),  # the surviving match
     ]
-    rec = _GhRecorder(get=_Proc(0, stdout=json.dumps(rows)))
+    rec = _GhRecorder(get=_Proc(0, stdout=_slurped(rows)))
     monkeypatch.setattr(subprocess, "run", rec)
     found = objectives.find_objective_issue_by_origin(
         origin="learn-dream", exclude_run_id=None, repo_root=ROOT
@@ -1212,7 +1281,7 @@ def test_find_objective_issue_by_origin_row_guards_skip(monkeypatch):
 def test_find_objective_issue_by_origin_skips_a_different_known_origin(monkeypatch):
     # A known-but-different origin is a non-match (skip), never a raise.
     rows = [_origin_row(5, "01C", origin="learn-dream")]
-    monkeypatch.setattr(subprocess, "run", _GhRecorder(get=_Proc(0, stdout=json.dumps(rows))))
+    monkeypatch.setattr(subprocess, "run", _GhRecorder(get=_Proc(0, stdout=_slurped(rows))))
     assert (
         objectives.find_objective_issue_by_origin(
             origin="some-other-origin", exclude_run_id=None, repo_root=ROOT
@@ -1226,7 +1295,7 @@ def test_find_objective_issue_by_origin_malformed_header_raises(monkeypatch):
     # authoritatively-none.
     broken = "<!-- perk:metadata-block:objective-header -->\nno closing marker"
     rows = [{"number": 5, "html_url": "u/5", "body": broken}]
-    monkeypatch.setattr(subprocess, "run", _GhRecorder(get=_Proc(0, stdout=json.dumps(rows))))
+    monkeypatch.setattr(subprocess, "run", _GhRecorder(get=_Proc(0, stdout=_slurped(rows))))
     with pytest.raises(github.GitHubError, match="present but malformed"):
         objectives.find_objective_issue_by_origin(
             origin="learn-dream", exclude_run_id=None, repo_root=ROOT
@@ -1236,7 +1305,7 @@ def test_find_objective_issue_by_origin_malformed_header_raises(monkeypatch):
 def test_find_objective_issue_by_origin_unknown_origin_raises(monkeypatch):
     rows = [_origin_row(5, "01C", origin=None)]
     rows[0]["body"] = _obj_header("01C").replace("superseded_by: null", "origin: weird")
-    monkeypatch.setattr(subprocess, "run", _GhRecorder(get=_Proc(0, stdout=json.dumps(rows))))
+    monkeypatch.setattr(subprocess, "run", _GhRecorder(get=_Proc(0, stdout=_slurped(rows))))
     with pytest.raises(github.GitHubError, match="unknown objective origin"):
         objectives.find_objective_issue_by_origin(
             origin="learn-dream", exclude_run_id=None, repo_root=ROOT
@@ -1249,16 +1318,39 @@ def test_find_objective_issue_by_origin_honors_exclude_run_id(monkeypatch):
         _origin_row(5, "01MINE", origin="learn-dream"),
         _origin_row(6, "01FOREIGN", origin="learn-dream"),
     ]
-    monkeypatch.setattr(subprocess, "run", _GhRecorder(get=_Proc(0, stdout=json.dumps(rows))))
+    monkeypatch.setattr(subprocess, "run", _GhRecorder(get=_Proc(0, stdout=_slurped(rows))))
     found = objectives.find_objective_issue_by_origin(
         origin="learn-dream", exclude_run_id="01MINE", repo_root=ROOT
     )
     assert found is not None and found.number == 6
 
 
+@pytest.mark.parametrize(
+    ("mutate", "exclude"),
+    [
+        # run_id line removed entirely → a missing run_id is never treated as excluded
+        (lambda body: body.replace("run_id: 01CAND\n", ""), "01CAND"),
+        # a non-str run_id whose string form EQUALS exclude_run_id → still never excluded
+        (lambda body: body.replace("run_id: 01CAND", "run_id: 42"), "42"),
+    ],
+)
+def test_find_objective_issue_by_origin_never_excludes_missing_or_non_str_run_id(
+    monkeypatch, mutate, exclude
+):
+    # The fail-closed exclusion branch: only a string run_id equal to exclude_run_id is the
+    # caller's own run — malformed metadata must surface as a conflict, never self-exclude.
+    body = mutate(_obj_header("01CAND", origin="learn-dream"))
+    rows = [{"number": 5, "html_url": "u/5", "body": body}]
+    monkeypatch.setattr(subprocess, "run", _GhRecorder(get=_Proc(0, stdout=_slurped(rows))))
+    found = objectives.find_objective_issue_by_origin(
+        origin="learn-dream", exclude_run_id=exclude, repo_root=ROOT
+    )
+    assert found is not None and found.number == 5
+
+
 def test_find_objective_issue_by_origin_none_on_no_match(monkeypatch):
     rows = [_origin_row(5, "01A"), _origin_row(6, "01B")]
-    monkeypatch.setattr(subprocess, "run", _GhRecorder(get=_Proc(0, stdout=json.dumps(rows))))
+    monkeypatch.setattr(subprocess, "run", _GhRecorder(get=_Proc(0, stdout=_slurped(rows))))
     assert (
         objectives.find_objective_issue_by_origin(
             origin="learn-dream", exclude_run_id=None, repo_root=ROOT

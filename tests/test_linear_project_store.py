@@ -723,26 +723,54 @@ class TestLinearProjectObjectiveStore:
         assert ref == objective_store.ObjectiveRef(id="proj-1", url="p/1", existed=True)
 
     @pytest.mark.parametrize("state", ["completed", "canceled"])
-    def test_find_open_objective_by_origin_skips_closed_projects(self, state: str) -> None:
+    def test_find_open_objective_by_origin_sweeps_past_closed_matches(self, state: str) -> None:
+        # Non-vacuous continuation proof: a CLOSED origin match on projects page 1 must not
+        # stop the sweep — the open match on the NEXT projects page is returned (pinning both
+        # closed-match continuation and the exhaustive project pagination).
         store, _ = _make_project_store(
-            self._origin_sweep_responses(
-                [self._project_row("proj-1")],
-                [
+            {
+                "teams(filter": [_TEAM_RESPONSE],
+                "projects(first": [
+                    {
+                        "team": {
+                            "projects": _page(
+                                [self._project_row("proj-1")], has_next=True, cursor="c1"
+                            )
+                        }
+                    },
+                    {"team": {"projects": _page([self._project_row("proj-2")])}},
+                ],
+                "issues(first": [
                     {
                         "project": {
                             "issues": _page(
                                 [_sentinel_row("01RUN", header_extra={"origin": "learn-dream"})]
                             )
                         }
-                    }
+                    },
+                    {
+                        "project": {
+                            "issues": _page(
+                                [
+                                    _sentinel_row(
+                                        "01OTHER",
+                                        header_extra={"origin": "learn-dream"},
+                                        uuid="i-s2",
+                                        identifier="ENG-2",
+                                    )
+                                ]
+                            )
+                        }
+                    },
                 ],
-                [{"project": {"id": "proj-1", "url": "p/1", "state": state}}],
-            )
+                "project(id: $id)": [
+                    {"project": {"id": "proj-1", "url": "p/1", "state": state}},
+                    {"project": {"id": "proj-2", "url": "p/2", "state": "started"}},
+                ],
+            }
         )
-        assert (
-            store.find_open_objective_by_origin(origin=objective.ObjectiveOrigin.LEARN_DREAM)
-            is None
-        )
+        ref = store.find_open_objective_by_origin(origin=objective.ObjectiveOrigin.LEARN_DREAM)
+        assert ref == objective_store.ObjectiveRef(id="proj-2", url="p/2", existed=True)
 
     def test_find_open_objective_by_origin_missing_state_reads_open(self) -> None:
         # No observation is never treated as closed; the ref URL falls back to the list row.
@@ -832,6 +860,41 @@ class TestLinearProjectObjectiveStore:
             origin=objective.ObjectiveOrigin.LEARN_DREAM, exclude_run_id="01MINE"
         )
         assert ref == objective_store.ObjectiveRef(id="proj-2", url="p/2", existed=True)
+
+    @pytest.mark.parametrize("stored_run_id", [None, 42])
+    def test_find_open_objective_by_origin_never_excludes_missing_or_non_str_run_id(
+        self, stored_run_id: object
+    ) -> None:
+        # The fail-closed exclusion branch: only a STRING run_id equal to exclude_run_id is
+        # the caller's own run — malformed metadata must surface as a conflict, never
+        # self-exclude (even when its string form equals exclude_run_id).
+        store, _ = _make_project_store(
+            self._origin_sweep_responses(
+                [self._project_row("proj-1")],
+                [
+                    {
+                        "project": {
+                            "issues": _page(
+                                [
+                                    _sentinel_row(
+                                        "01RUN",
+                                        header_extra={
+                                            "origin": "learn-dream",
+                                            "run_id": stored_run_id,
+                                        },
+                                    )
+                                ]
+                            )
+                        }
+                    }
+                ],
+                [{"project": {"id": "proj-1", "url": "p/1", "state": "started"}}],
+            )
+        )
+        ref = store.find_open_objective_by_origin(
+            origin=objective.ObjectiveOrigin.LEARN_DREAM, exclude_run_id=str(stored_run_id)
+        )
+        assert ref == objective_store.ObjectiveRef(id="proj-1", url="p/1", existed=True)
 
     def test_find_open_objective_by_origin_none_when_nothing_matches(self) -> None:
         # Origin-less sentinels are non-matches; None = authoritatively none in the swept

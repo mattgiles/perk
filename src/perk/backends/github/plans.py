@@ -85,36 +85,37 @@ def _list_label_issues(label: str, *, repo_root: Path, what: str) -> list[Any]:
 
 
 def _list_label_issues_all_pages(label: str, *, repo_root: Path, what: str) -> list[Any]:
-    """The **exhaustive** label-scoped open-issue LIST read — every page, one gh invocation.
-
-    ``gh api --paginate`` follows GitHub's REST ``Link`` headers to termination; ``--slurp``
-    (gh >= 2.48.0) wraps the pages in one outer JSON array, so a list endpoint yields an **array
-    of page arrays**, flattened here into one entry list. Decode is **fail-closed** ("can't
-    verify ⇒ don't promise"): any unexpected shape — a non-list top level or a non-list page
-    element — raises ``GitHubError`` rather than returning a partial census (a partial result
-    here IS the silent-truncation bug this helper exists to prevent). Per-entry dict/
-    ``pull_request`` filtering stays with callers, matching :func:`_list_label_issues`.
-    """
-    args = _exec._rest_args(
-        "repos/{owner}/{repo}/issues",
-        method="GET",
-        fields={"labels": label, "state": "open", "per_page": "100"},
-    )
-    pages = _exec._run_json(
-        [*args, "--paginate", "--slurp"],
-        what=what,
-        source="`gh api issues --paginate`",
-        cwd=repo_root,
-        default="[]",
-    )
+    """The exhaustive sibling of :func:`_list_label_issues`: the same label-scoped open-issue
+    LIST read across **every** page via ``gh api``'s native ``--paginate --slurp`` (one argv;
+    the output is an array of per-page row arrays, flattened here), for authoritative
+    population scans — never the bounded default-page reads (which stay on
+    :func:`_list_label_issues`, byte-unchanged). Fail-closed: a request failure, empty output,
+    or non-list payload/page raises ``GitHubError`` — an incomplete scan is never reported as
+    complete (no empty-stdout default: only a genuinely parsed ``[]`` page reads as empty)."""
+    args = [
+        *_exec._rest_args(
+            "repos/{owner}/{repo}/issues",
+            method="GET",
+            fields={"labels": label, "state": "open", "per_page": "100"},
+        ),
+        "--paginate",
+        "--slurp",
+    ]
+    pages = _exec._run_json(args, what=what, source="`gh api issues`", cwd=repo_root)
     if not isinstance(pages, list):
-        raise _exec.GitHubError(f"unexpected slurped issues payload for {label!r}: {pages!r}")
-    entries: list[Any] = []
+        raise _exec.GitHubError(
+            f"{what}: unexpected slurped issues payload: expected an array of pages, "
+            f"got {type(pages).__name__}"
+        )
+    result: list[Any] = []
     for page in pages:
         if not isinstance(page, list):
-            raise _exec.GitHubError(f"unexpected slurped issues page for {label!r}: {page!r}")
-        entries.extend(page)
-    return entries
+            raise _exec.GitHubError(
+                f"{what}: unexpected slurped issues page: expected a page array, "
+                f"got {type(page).__name__}"
+            )
+        result.extend(page)
+    return result
 
 
 def create_label(

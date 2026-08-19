@@ -390,8 +390,10 @@ def supersede_objective_issue(
     **Origin carry (§8.24):** before composing the successor header, the create arm reads the
     OLD issue's stored header ``origin`` (validated through ``objective.origin_value`` — a junk
     stored value raises, naming the old issue) and stamps it into the successor — no parameter
-    (origin stays store/launch-owned), a header-less old body carries nothing. The read happens
-    before the successor issue POST so a junk origin never orphans a half-made successor.
+    (origin stays store/launch-owned). A header-LESS old body carries nothing, but a
+    present-yet-malformed old header raises (absent vs malformed — the lookup's own
+    discrimination). The read happens before the successor issue POST so a bad predecessor
+    never orphans a half-made successor.
 
     ``carry_map`` is not applicable (GitHub objectives have no child issues — carried nodes are
     authored fresh rows). ``dry_run`` returns early; an empty ``roadmap_nodes`` raises (the
@@ -413,8 +415,19 @@ def supersede_objective_issue(
     if not list(roadmap_nodes):
         raise _exec.GitHubError("objective roadmap is empty: an objective needs at least one node")
 
+    # Absent vs malformed matters here (the lookup's discrimination): a header-LESS old body
+    # carries nothing, but a present-yet-unparseable header is genuine uncertainty about the
+    # predecessor's origin — raising keeps the guarded origin population closed under replan
+    # (a silent origin-less successor would escape the open-by-origin guard).
     old_body = plans._get_issue_body(old_number, repo_root)
-    old_header = plan.find_metadata_block(old_body, objective.OBJECTIVE_HEADER_KEY) or {}
+    old_header: dict[str, object] = {}
+    if plan.has_metadata_block(old_body, objective.OBJECTIVE_HEADER_KEY):
+        found_header = plan.find_metadata_block(old_body, objective.OBJECTIVE_HEADER_KEY)
+        if found_header is None:
+            raise _exec.GitHubError(
+                f"objective #{old_number}: objective-header block is present but malformed"
+            )
+        old_header = found_header
     try:
         carried_origin = objective.origin_value(old_header.get("origin"))
     except ValueError as exc:
