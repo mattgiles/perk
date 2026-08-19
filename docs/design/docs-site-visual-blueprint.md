@@ -514,7 +514,10 @@ intents and a dismissal latch drive visibility — visible ⇔ (hover ∨ focus 
 ¬dismissed — so hover/focus show, losing one intent while another holds does not hide,
 blur/pointerleave hide once intents drop, tap toggles a pin on hover-incapable devices
 (focus/pointer are not intents there), document-level Escape dismisses and latches until
-intent fully drops or a new tap, and only one tooltip is visible at a time. Keyboard
+intent fully drops or a new tap, and only one tooltip is visible at a time. The visible
+tooltip is itself **hoverable** (WCAG 2.2 SC 1.4.13): it holds the same hover intent as its
+trigger and a hit-area bridge spans the trigger–tooltip gap, so the pointer can cross onto
+the tooltip without dismissing it. Keyboard
 operability, visible focus, and reduced-motion behavior follow §2/§6.
 
 The authoring tool is deliberately unbound until node 3.1 planning. Hand-authored SVG/HTML, a

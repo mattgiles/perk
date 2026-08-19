@@ -9,14 +9,19 @@
 // Tooltip state machine (bound in the visual blueprint §5): per trigger, three intent bits
 // (`hover`, `focus`, `pinned`) and a `dismissed` latch —
 //   visible ⇔ (hover ∨ focus ∨ pinned) ∧ ¬dismissed.
-// Losing one intent while another holds does NOT hide. On hover-capable devices hover/focus
-// drive visibility and click is a no-op; on hover-incapable devices click toggles `pinned`
-// (Enter/Space on the button also produce click — the keyboard path) while focus AND pointer
-// events are ignored as intent, so a tap's focus-then-synthesized-click sequence yields
-// exactly one visible toggle-on. Escape is owned at the document level: it hides the open
-// tooltip regardless of where focus sits and latches `dismissed`, which clears only when the
-// trigger's remaining intents fully drop (pointerleave/blur) or on a new tap — so Escape
-// never flickers while still hovered/focused. Only one tooltip is visible at a time.
+// Losing one intent while another holds does NOT hide. Hover intent is held by the trigger
+// OR the visible tooltip itself (WCAG 2.2 SC 1.4.13 hoverable): a pointerleave whose
+// `relatedTarget` is the paired trigger/tooltip is a crossing, not a departure, so the
+// tooltip never blinks off mid-crossing — and the component's CSS bridges the 8px gap with
+// a hit-area pseudo-element so the crossing never passes dead space. On hover-capable
+// hover/focus drive visibility and click is a no-op; on hover-incapable devices click
+// toggles `pinned` (Enter/Space on the button also produce click — the keyboard path) while
+// focus AND pointer events are ignored as intent, so a tap's focus-then-synthesized-click
+// sequence yields exactly one visible toggle-on. Escape is owned at the document level: it
+// hides the open tooltip regardless of where focus sits and latches `dismissed`, which
+// clears only when the trigger's remaining intents fully drop (pointerleave/blur) or on a
+// new tap — so Escape never flickers while still hovered/focused. Only one tooltip is
+// visible at a time.
 
 /**
  * Enhance one core-flow figure. Idempotent (`data-enhanced` on the root); a root whose
@@ -108,16 +113,24 @@ export function enhanceCoreFlow(root, { matchMedia } = {}) {
     const tooltip = doc.getElementById(trigger.getAttribute("aria-describedby"));
     const state = { tooltip, hover: false, focus: false, pinned: false, dismissed: false };
 
-    trigger.addEventListener("pointerenter", () => {
+    const hoverEnter = () => {
       if (hoverIncapable) return; // taps fire pointerenter too — never hover intent
       state.hover = true;
       sync(state);
-    });
-    trigger.addEventListener("pointerleave", () => {
+    };
+    const hoverLeave = (event) => {
+      // A leave whose destination is the paired trigger/tooltip is a crossing between the
+      // two hover surfaces (SC 1.4.13: the tooltip is hoverable) — hover intent survives.
+      const to = event.relatedTarget ?? null;
+      if (to !== null && (trigger.contains(to) || tooltip.contains(to))) return;
       state.hover = false;
       settleDismissal(state);
       sync(state);
-    });
+    };
+    trigger.addEventListener("pointerenter", hoverEnter);
+    trigger.addEventListener("pointerleave", hoverLeave);
+    tooltip.addEventListener("pointerenter", hoverEnter);
+    tooltip.addEventListener("pointerleave", hoverLeave);
     trigger.addEventListener("focus", () => {
       if (hoverIncapable) return; // the tap sequence synthesizes focus before click
       state.focus = true;

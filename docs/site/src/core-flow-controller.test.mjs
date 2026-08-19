@@ -79,15 +79,43 @@ test("enhance collapses all three disclosures; they toggle independently", () =>
   }
 });
 
-test("uninjected default path: matchMedia resolves through ownerDocument.defaultView", () => {
+test("uninjected default path: the root window's own matchMedia is queried, bound to it", () => {
+  const { dom, win, root, triggers, tooltips } = fixture({ enhance: false });
+  try {
+    // jsdom ships no matchMedia — install a spy implementation on THIS fixture's window so
+    // the uninjected call must resolve (and bind) through ownerDocument.defaultView.
+    const calls = [];
+    win.matchMedia = function matchMedia(query) {
+      calls.push({ query, receiver: this });
+      return { matches: query === "(hover: none)" };
+    };
+    enhanceCoreFlow(root); // no options
+    assert.deepEqual(
+      calls.map(({ query }) => query),
+      ["(hover: none)"],
+    );
+    assert.equal(calls[0].receiver, win, "matchMedia must be bound to the root window");
+    // The spy answered hover-none, so the hover-incapable arm must be live: hover is not
+    // intent; click pins.
+    fire(win, triggers.a, "pointerenter");
+    assert.equal(visible(tooltips.a), false);
+    triggers.a.click();
+    assert.equal(visible(tooltips.a), true);
+  } finally {
+    dom.window.close();
+  }
+});
+
+test("absent matchMedia (the jsdom default): falls back to hover-capable and enhances", () => {
   const { dom, win, root, triggers, tooltips, disclosures } = fixture({
     enhance: false,
   });
   try {
-    enhanceCoreFlow(root); // no options — win.matchMedia (jsdom's) must be used
+    assert.equal(win.matchMedia, undefined); // the fixture's premise
+    enhanceCoreFlow(root); // no options — the absent-capability fallback arm
     assert.equal(root.hasAttribute("data-enhanced"), true);
     for (const disclosure of disclosures) assert.equal(disclosure.hasAttribute("open"), false);
-    fire(win, triggers.a, "pointerenter"); // jsdom matchMedia matches nothing → hover-capable
+    fire(win, triggers.a, "pointerenter"); // fallback is hover-capable
     assert.equal(visible(tooltips.a), true);
   } finally {
     dom.window.close();
@@ -121,6 +149,30 @@ test("hover-capable: focus shows / blur hides; pointerenter shows / pointerleave
     fire(win, triggers.a, "pointerenter");
     assert.equal(visible(tooltips.a), true);
     fire(win, triggers.a, "pointerleave");
+    assert.equal(visible(tooltips.a), false);
+  } finally {
+    dom.window.close();
+  }
+});
+
+test("the tooltip itself is hoverable: crossing from trigger to tooltip keeps it open", () => {
+  const { dom, win, triggers, tooltips } = fixture();
+  try {
+    // The pointer crosses from the trigger onto the tooltip (the CSS bridge makes the two
+    // hit areas contiguous, so the leave's relatedTarget IS the tooltip): hover intent
+    // survives the crossing — the tooltip never blinks off.
+    fire(win, triggers.a, "pointerenter");
+    assert.equal(visible(tooltips.a), true);
+    triggers.a.dispatchEvent(new win.MouseEvent("pointerleave", { relatedTarget: tooltips.a }));
+    assert.equal(visible(tooltips.a), true);
+    fire(win, tooltips.a, "pointerenter");
+    assert.equal(visible(tooltips.a), true);
+    // Crossing back down onto the trigger keeps it open too…
+    tooltips.a.dispatchEvent(new win.MouseEvent("pointerleave", { relatedTarget: triggers.a }));
+    assert.equal(visible(tooltips.a), true);
+    // …and leaving the tooltip for anywhere else releases the hover intent.
+    fire(win, tooltips.a, "pointerenter");
+    fire(win, tooltips.a, "pointerleave");
     assert.equal(visible(tooltips.a), false);
   } finally {
     dom.window.close();

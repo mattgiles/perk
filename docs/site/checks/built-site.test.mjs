@@ -764,11 +764,12 @@ test("the home band-2 core-flow figure holds the interactive semantic-HTML contr
   assert.equal(countOccurrences(figureText, "ambient learned context"), 3);
 
   // Exactly 9 tooltip triggers, each a real <button type="button"> colocated with its
-  // [role="tooltip"][hidden] sibling inside one .tip-wrap, aria-describedby resolving to a
-  // document-unique id, and the bound copy verbatim.
+  // [role="tooltip"][hidden] sibling inside one .tip-wrap (whitespace-tolerant — the source
+  // formats each element on its own line), aria-describedby resolving to a document-unique
+  // id, and the bound copy verbatim.
   const wraps = [
     ...figure.matchAll(
-      /<span class="tip-wrap[^"]*"[^>]*><button type="button" data-core-flow-tip aria-describedby="([^"]+)"[^>]*>.*?<\/button><span role="tooltip" id="([^"]+)" hidden data-core-flow-tooltip[^>]*>(.*?)<\/span><\/span>/gs,
+      /<span class="tip-wrap[^"]*"[^>]*>\s*<button type="button" data-core-flow-tip aria-describedby="([^"]+)"[^>]*>.*?<\/button>\s*<span role="tooltip" id="([^"]+)" hidden data-core-flow-tooltip[^>]*>(.*?)<\/span>\s*<\/span>/gs,
     ),
   ];
   assert.equal(wraps.length, 9, "expected 9 colocated trigger/tooltip pairs");
@@ -799,6 +800,22 @@ test("the home band-2 core-flow figure holds the interactive semantic-HTML contr
   for (const phrase of CORE_FLOW_TEXT_REQUIRED) {
     assert.ok(text.includes(phrase), `textual equivalent missing ${JSON.stringify(phrase)}`);
   }
+
+  // The controller mount must actually ship: some module script on the page (inline or a
+  // built asset) carries the controller's attribute/event contract — markers that survive
+  // minification. Without this, deleting the component's mount block would leave the
+  // shipped disclosures permanently expanded and every tooltip dead while tests stay green.
+  const mountMarkers = ["data-core-flow-disclosure", "data-core-flow-tip", "beforeprint"];
+  const scriptSources = [
+    ...[...html.matchAll(/<script type="module">(.*?)<\/script>/gs)].map(([, inline]) => inline),
+    ...[...html.matchAll(/<script type="module" src="(\/[^"]+)"/g)].map(([, src]) =>
+      fs.readFileSync(path.join(distDir, src.slice(1)), "utf8"),
+    ),
+  ];
+  assert.ok(
+    scriptSources.some((source) => mountMarkers.every((marker) => source.includes(marker))),
+    "the built home ships no script carrying the core-flow controller contract",
+  );
 });
 
 test("every route-style internal href on an MDX page maps to a built page", () => {
