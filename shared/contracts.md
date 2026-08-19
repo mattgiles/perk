@@ -9644,8 +9644,8 @@ up to `DREAM_REPORT_MAX_VALIDATION_DETAILS = 25` named details in deterministic 
 final synthetic detail counting the omitted violations.
 `validateDreamReport(input, context)` returns `{ok: true, report}` (the composed
 JSON-serializable `DreamReport` — snapshot, findings counts, coverage, rows joined with
-analyst evidence + stances, fallbacks, uncertainties by source, reducer findings, units,
-follow-ups, effects) or `{ok: false, details}`.
+analyst evidence + stances, uncertainties by source, reducer findings, units, follow-ups,
+effects) or `{ok: false, details}`.
 
 **The deterministic renderer.** `renderDreamReport(report)` → `{ok: true, parts: string[]}`
 or `{ok: false, detail}` — a pure function of the composed report (no clock, no locale, no
@@ -9657,18 +9657,21 @@ limit with margin for the persistence-side storage markers (the renderer never e
 HTML) — and `DREAM_REPORT_PART_HEADER_RESERVE = 200`, the fixed per-part packing allowance
 for the part header. Pipeline: the report renders to an ordered stream of Markdown blocks;
 blocks are greedily packed into parts under `cap − reserve`; splits happen only at block
-boundaries; a table split re-emits the table header row in the next part; after packing, each
+boundaries; a table split re-emits the table header row in the next part; bullet-list
+sections (§7 Uncertainties, §8 Reducer findings) pack per bullet line — a block group splits
+at line boundaries, header re-emission applying only to tables — keeping the single-block
+defensive refusal structurally unreachable under the caps arithmetic; after packing, each
 part is prefixed with its header — part 1 `# Dream report — <run_id>`, continuations
 `# Dream report — <run_id> (continued, part <i> of <n>)`. A single block exceeding the budget
-is a defensive refusal (structurally unreachable under the caps arithmetic — named, never
-truncated). Fixed section order: 1 Snapshot (run id, `DREAM_REPORT_SCHEMA_VERSION = "1"`,
+is a defensive refusal (named, never truncated). Fixed section order: 1 Snapshot (run id, `DREAM_REPORT_SCHEMA_VERSION = "1"`,
 commit SHA, generated-at, registry mode, doc count, total bytes) · 2 Findings summary
 (per-family counts) · 3 Wave coverage (analyst lanes + reducer angles tables with omission
 counters) · 4 Dispositions (ONE table, manifest order: path, cluster, analyst proposal, final,
 merge target, analyst confidence, rationale) · 5 Non-keep evidence (per FINAL non-keep doc:
 injected analyst rationale/preserve/evidence_checked + every injected reducer stance) ·
-6 Fallbacks (doc, analyst proposal, final, reason — a final-`keep` fallback renders its
-stances here, so every reducer stance renders exactly once, §5 or §6) · 7 Uncertainties
+6 Fallbacks (rendered directly from the rows carrying a non-null `fallback_reason`, manifest
+order: doc, analyst proposal, final, reason — a final-`keep` fallback renders its stances
+here, so every reducer stance renders exactly once, §5 or §6) · 7 Uncertainties
 (parent, then analyst by lane, reducer by angle, labeled) · 8 Reducer findings (the injected
 `angle_findings` — a deliberate minor addition beyond the node's section list) · 9 Selected
 curation units (rank-ordered) · 10 Overflow · 11 Harvest follow-ups · 12 Predicted effects

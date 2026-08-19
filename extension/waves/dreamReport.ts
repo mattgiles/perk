@@ -275,15 +275,6 @@ export interface DreamReportRow {
   stances: DreamReportStanceRecord[];
 }
 
-/** One recorded non-destructive fallback (a row whose final departs from the analyst). */
-export interface DreamReportFallback {
-  path: string;
-  analyst_disposition: DreamDisposition;
-  analyst_merge_target: string | null;
-  final_disposition: DreamDisposition;
-  reason: string;
-}
-
 /** One analyst lane's coverage line (complete by construction — rendered for verification). */
 export interface DreamReportAnalystCoverage {
   lane: string;
@@ -323,7 +314,6 @@ export interface DreamReport {
     reducers: DreamReportReducerCoverage[];
   };
   rows: DreamReportRow[];
-  fallbacks: DreamReportFallback[];
   uncertainties: {
     parent: string[];
     analysts: { lane: string; items: string[] }[];
@@ -1067,20 +1057,6 @@ export function validateDreamReport(
       });
     }
   }
-  const fallbacks: DreamReportFallback[] = rows.flatMap((row) =>
-    row.fallback_reason === null
-      ? []
-      : [
-          {
-            path: row.path,
-            analyst_disposition: row.analyst_disposition,
-            analyst_merge_target: row.analyst_merge_target,
-            final_disposition: row.final_disposition,
-            reason: row.fallback_reason,
-          },
-        ],
-  );
-
   const report: DreamReport = {
     snapshot: {
       schema_version: DREAM_REPORT_SCHEMA_VERSION,
@@ -1138,7 +1114,6 @@ export function validateDreamReport(
       })),
     },
     rows,
-    fallbacks,
     uncertainties: {
       parent: typed.uncertainties,
       analysts: context.analyses.map((analysis) => ({
@@ -1170,11 +1145,12 @@ export function validateDreamReport(
 
 // --------------------------------------------------------------------------- the renderer
 
-/** One packable Markdown block: same-table blocks join with `\n` (consecutive table lines);
- * a row block carries its table's header for re-emission after a mid-table split. */
+/** One packable Markdown block: same-group consecutive blocks join with `\n` (consecutive
+ * table or bullet lines); a table-row block carries its table's header for re-emission after
+ * a mid-table split (`null` for non-table groups — bullet lines split without re-emission). */
 interface RenderBlock {
   text: string;
-  tableId: number | null;
+  groupId: number | null;
   tableHeader: string | null;
 }
 
@@ -1195,7 +1171,8 @@ function joinOrDash(items: string[]): string {
  * Render the composed report to CANONICAL Markdown bytes in parts — a pure function of the
  * report (no clock, no locale, no environment): an ordered stream of blocks greedily packed
  * under `DREAM_REPORT_PART_MAX_CHARS − DREAM_REPORT_PART_HEADER_RESERVE` code points, splits
- * only at block boundaries, a table split re-emitting the table header row in the next part,
+ * only at block boundaries (bullet-list sections pack per bullet line, so a block group
+ * splits at line boundaries), a table split re-emitting the table header row in the next part,
  * every part prefixed with its header after packing. A single block exceeding the budget is a
  * defensive refusal (structurally unreachable under the caps arithmetic — named, never
  * truncated).
@@ -1204,20 +1181,30 @@ export function renderDreamReport(
   report: DreamReport,
 ): { ok: true; parts: string[] } | { ok: false; detail: string } {
   const blocks: RenderBlock[] = [];
-  let nextTableId = 0;
+  let nextGroupId = 0;
   const push = (text: string): void => {
-    blocks.push({ text, tableId: null, tableHeader: null });
+    blocks.push({ text, groupId: null, tableHeader: null });
+  };
+  /** Push each line as its own block sharing ONE fresh group: unsplit output joins with `\n`
+   * (byte-identical to a single joined block); an oversized section splits at line
+   * boundaries with no header re-emission. */
+  const pushLines = (lines: string[]): void => {
+    const groupId = nextGroupId;
+    nextGroupId += 1;
+    for (const line of lines) {
+      blocks.push({ text: line, groupId, tableHeader: null });
+    }
   };
   const pushTable = (headerCells: string[], rows: string[][]): void => {
-    const tableId = nextTableId;
-    nextTableId += 1;
+    const groupId = nextGroupId;
+    nextGroupId += 1;
     const header =
       `| ${headerCells.join(" | ")} |\n` + `| ${headerCells.map(() => "---").join(" | ")} |`;
-    blocks.push({ text: header, tableId, tableHeader: null });
+    blocks.push({ text: header, groupId, tableHeader: null });
     for (const row of rows) {
       blocks.push({
         text: `| ${row.map(sanitize).join(" | ")} |`,
-        tableId,
+        groupId,
         tableHeader: header,
       });
     }
@@ -1238,7 +1225,7 @@ export function renderDreamReport(
   push(
     [
       `- Run: ${sanitize(report.snapshot.run_id)}`,
-      `- Report schema version: ${DREAM_REPORT_SCHEMA_VERSION}`,
+      `- Report schema version: ${sanitize(report.snapshot.schema_version)}`,
       `- Commit: ${sanitize(report.snapshot.commit_sha)}`,
       `- Generated at: ${sanitize(report.snapshot.generated_at)}`,
       `- Registry mode: ${report.snapshot.registry_mode}`,
@@ -1322,29 +1309,28 @@ export function renderDreamReport(
     push(stanceBullets(row.stances));
   }
 
-  // 6 — Fallbacks: the recorded non-destructive departures. A fallback doc whose final is
-  // keep renders its injected stances HERE (its proposal never reaches §5), so every reducer
+  // 6 — Fallbacks: the recorded non-destructive departures, rendered directly from the rows
+  // carrying a non-null fallback_reason (manifest order). A fallback doc whose final is keep
+  // renders its injected stances HERE (its proposal never reaches §5), so every reducer
   // stance renders exactly once — §5 (final non-keep) or §6 (final keep).
   push("## Fallbacks");
-  if (report.fallbacks.length === 0) {
+  const fallbackRows = report.rows.filter((row) => row.fallback_reason !== null);
+  if (fallbackRows.length === 0) {
     push("_None._");
   }
-  const rowByPath = new Map(report.rows.map((row) => [row.path, row]));
-  for (const fallback of report.fallbacks) {
-    push(`### ${fallback.path}`);
+  for (const row of fallbackRows) {
+    push(`### ${row.path}`);
     push(
       [
-        `- Analyst proposal: ${describeProposal(
-          fallback.analyst_disposition,
-          fallback.analyst_merge_target,
+        `- Analyst proposal: ${sanitize(
+          describeProposal(row.analyst_disposition, row.analyst_merge_target),
         )}`,
-        `- Final: ${fallback.final_disposition}`,
-        `- Reason: ${sanitize(fallback.reason)}`,
+        `- Final: ${row.final_disposition}`,
+        `- Reason: ${sanitize(row.fallback_reason as string)}`,
       ].join("\n"),
     );
-    if (fallback.final_disposition === "keep") {
-      const row = rowByPath.get(fallback.path);
-      push(stanceBullets(row?.stances ?? []));
+    if (row.final_disposition === "keep") {
+      push(stanceBullets(row.stances));
     }
   }
 
@@ -1354,13 +1340,17 @@ export function renderDreamReport(
   const uncertaintyLines: string[] = [
     ...report.uncertainties.parent.map((item) => `- Parent: ${sanitize(item)}`),
     ...report.uncertainties.analysts.flatMap((entry) =>
-      entry.items.map((item) => `- Analyst ${entry.lane}: ${sanitize(item)}`),
+      entry.items.map((item) => `- Analyst ${sanitize(entry.lane)}: ${sanitize(item)}`),
     ),
     ...report.uncertainties.reducers.flatMap((entry) =>
       entry.items.map((item) => `- Reducer ${entry.angle}: ${sanitize(item)}`),
     ),
   ];
-  push(uncertaintyLines.length === 0 ? "_None._" : uncertaintyLines.join("\n"));
+  if (uncertaintyLines.length === 0) {
+    push("_None._");
+  } else {
+    pushLines(uncertaintyLines);
+  }
 
   // 8 — Reducer findings: the injected per-angle `angle_findings` (bounded cross-corpus
   // value — a deliberate minor addition beyond the node's section list).
@@ -1368,7 +1358,11 @@ export function renderDreamReport(
   const findingLines: string[] = report.reducer_findings.flatMap((entry) =>
     entry.items.map((item) => `- ${entry.angle}: ${sanitize(item)}`),
   );
-  push(findingLines.length === 0 ? "_None._" : findingLines.join("\n"));
+  if (findingLines.length === 0) {
+    push("_None._");
+  } else {
+    pushLines(findingLines);
+  }
 
   // 9 — Selected curation units (rank = position).
   push("## Selected curation units");
@@ -1433,14 +1427,14 @@ export function renderDreamReport(
   });
   const bodies: string[] = [];
   let current = "";
-  let prevTableId: number | null = null;
+  let prevGroupId: number | null = null;
   for (const block of blocks) {
     if (current === "") {
       const length = codePointLength(block.text);
       if (length > budget) return oversize(length);
       current = block.text;
     } else {
-      const separator = block.tableId !== null && block.tableId === prevTableId ? "\n" : "\n\n";
+      const separator = block.groupId !== null && block.groupId === prevGroupId ? "\n" : "\n\n";
       const candidate = current + separator + block.text;
       if (codePointLength(candidate) <= budget) {
         current = candidate;
@@ -1453,7 +1447,7 @@ export function renderDreamReport(
         current = opener;
       }
     }
-    prevTableId = block.tableId;
+    prevGroupId = block.groupId;
   }
   if (current !== "") bodies.push(current);
 

@@ -323,7 +323,7 @@ function fixtureContext(): DreamReportContext {
             confidence: "medium",
           }),
         ],
-        { uncertainties: ["unsure the cue survives a merge"] },
+        { uncertainties: ["unsure the cue survives a merge"], overlap_signals_omitted: 2 },
       ),
       analysisOf("workflow-1", [
         assessment(DOC_WAVES, {
@@ -352,7 +352,11 @@ function fixtureContext(): DreamReportContext {
             "docs/learned/index.md",
           ]),
         ],
-        { uncertainties: ["the retire may be premature"] },
+        {
+          uncertainties: ["the retire may be premature"],
+          stances_omitted: 1,
+          uncertainties_omitted: 3,
+        },
       ),
       reducerOf("knowledge-architecture", [], {
         angle_findings: ["cluster routing stays coherent"],
@@ -935,7 +939,9 @@ test("downgrade-only: legal downgrades pass WITH a fallback_reason; the fallback
   });
   const report = validReport(downgraded, context);
   assert.deepEqual(
-    report.fallbacks.map((f) => [f.path, f.analyst_disposition, f.final_disposition]),
+    report.rows
+      .filter((row) => row.fallback_reason !== null)
+      .map((row) => [row.path, row.analyst_disposition, row.final_disposition]),
     [
       [DOC_SUB, "merge-into", "keep"],
       [DOC_WAVES, "retire", "revise"],
@@ -1203,7 +1209,10 @@ test("units: overflow-only reports pass; the zero-unit all-keep report passes (n
   const noAction = validReport(inputFor(allKeep), allKeep);
   assert.deepEqual(noAction.selected_units, []);
   assert.deepEqual(noAction.overflow_units, []);
-  assert.deepEqual(noAction.fallbacks, []);
+  assert.ok(
+    noAction.rows.every((row) => row.fallback_reason === null),
+    "every all-keep row carries fallback_reason: null",
+  );
 });
 
 // ------------------------------------------------------- harvest follow-ups (D8)
@@ -1342,7 +1351,15 @@ test("collection is bounded: >25 violations truncate with the synthetic count de
 
 test("the composed report joins validated input with injected context (manifest order)", () => {
   const context = fixtureContext();
-  const result = buildDreamReport(fixtureInput(), context);
+  // Reverse the row order and the unit's doc order so the manifest-order assertion below
+  // actually exercises normalization (input order must never leak into the composed rows).
+  const shuffledInput = (): DreamReportInput => {
+    const input = fixtureInput();
+    input.rows.reverse();
+    (input.selected_units[0] as { docs: string[] }).docs.reverse();
+    return input;
+  };
+  const result = buildDreamReport(shuffledInput(), context);
   assert.equal(result.ok, true, JSON.stringify(result));
   const { report, parts } = result as { ok: true; report: DreamReport; parts: string[] };
 
@@ -1379,20 +1396,23 @@ test("the composed report joins validated input with injected context (manifest 
       ["currency-accuracy", "challenge"],
     ],
   );
-  assert.deepEqual(report.fallbacks, [
-    {
-      path: DOC_WAVES,
-      analyst_disposition: "retire",
-      analyst_merge_target: null,
-      final_disposition: "revise",
-      reason: "currency-accuracy challenged the retire",
-    },
-  ]);
+  assert.deepEqual(
+    report.rows
+      .filter((row) => row.fallback_reason !== null)
+      .map((row) => [
+        row.path,
+        row.analyst_disposition,
+        row.analyst_merge_target,
+        row.final_disposition,
+        row.fallback_reason,
+      ]),
+    [[DOC_WAVES, "retire", null, "revise", "currency-accuracy challenged the retire"]],
+  );
   assert.deepEqual(report.coverage.analysts, [
     {
       lane: "pi-extension-1",
       docs: 2,
-      overlap_signals_omitted: 0,
+      overlap_signals_omitted: 2,
       harvest_followups_omitted: 0,
       uncertainties_omitted: 0,
     },
@@ -1404,14 +1424,29 @@ test("the composed report joins validated input with injected context (manifest 
       uncertainties_omitted: 0,
     },
   ]);
-  assert.deepEqual(
-    report.coverage.reducers.map((c) => [c.angle, c.stances]),
-    [
-      ["consolidation-preservation", 2],
-      ["currency-accuracy", 2],
-      ["knowledge-architecture", 0],
-    ],
-  );
+  assert.deepEqual(report.coverage.reducers, [
+    {
+      angle: "consolidation-preservation",
+      stances: 2,
+      stances_omitted: 0,
+      angle_findings_omitted: 0,
+      uncertainties_omitted: 0,
+    },
+    {
+      angle: "currency-accuracy",
+      stances: 2,
+      stances_omitted: 1,
+      angle_findings_omitted: 0,
+      uncertainties_omitted: 3,
+    },
+    {
+      angle: "knowledge-architecture",
+      stances: 0,
+      stances_omitted: 0,
+      angle_findings_omitted: 0,
+      uncertainties_omitted: 0,
+    },
+  ]);
   assert.deepEqual(report.uncertainties.parent, ["unsure the merged doc needs a new cue"]);
   assert.deepEqual(report.uncertainties.analysts, [
     { lane: "pi-extension-1", items: ["unsure the cue survives a merge"] },
@@ -1435,7 +1470,7 @@ test("the composed report joins validated input with injected context (manifest 
   );
 
   // validateDreamReport shares the composed-report shape; buildDreamReport adds the parts.
-  const validated = validateDreamReport(fixtureInput(), context);
+  const validated = validateDreamReport(shuffledInput(), context);
   assert.deepEqual((validated as { ok: true; report: DreamReport }).report, report);
   assert.equal(parts.length, 1);
 });
@@ -1483,7 +1518,7 @@ const PINNED_PART = `# Dream report — 01RUNDREAM
 
 | Lane | Docs | Overlap signals omitted | Harvest follow-ups omitted | Uncertainties omitted |
 | --- | --- | --- | --- | --- |
-| pi-extension-1 | 2 | 0 | 0 | 0 |
+| pi-extension-1 | 2 | 2 | 0 | 0 |
 | workflow-1 | 1 | 0 | 0 | 0 |
 
 ### Reducer angles
@@ -1491,7 +1526,7 @@ const PINNED_PART = `# Dream report — 01RUNDREAM
 | Angle | Stances | Stances omitted | Angle findings omitted | Uncertainties omitted |
 | --- | --- | --- | --- | --- |
 | consolidation-preservation | 2 | 0 | 0 | 0 |
-| currency-accuracy | 2 | 0 | 0 | 0 |
+| currency-accuracy | 2 | 1 | 0 | 3 |
 | knowledge-architecture | 0 | 0 | 0 | 0 |
 
 ## Dispositions
@@ -1593,7 +1628,9 @@ test("renderDreamReport: part splitting under the code-point cap with header re-
     manifest,
     Object.fromEntries(paths.map((p) => [p, { disposition: "revise" }])),
   );
-  const longRationale = "r".repeat(290);
+  // Astral rationale: each 𝛼 is ONE code point but TWO UTF-16 units — 290 code points stays
+  // under the rowRationaleChars cap while doubling the string's UTF-16 length.
+  const longRationale = "𝛼".repeat(290);
   const input = inputFor(
     context,
     Object.fromEntries(paths.map((p) => [p, { rationale: longRationale }])),
@@ -1608,6 +1645,16 @@ test("renderDreamReport: part splitting under the code-point cap with header re-
       "every part stays under the code-point cap",
     );
   }
+  // The discriminating pin: packing measured in UTF-16 units would split earlier and never
+  // produce a part whose UTF-16 length exceeds the cap while its code-point length fits.
+  assert.ok(
+    parts.some(
+      (part) =>
+        part.length > DREAM_REPORT_PART_MAX_CHARS &&
+        codePointLength(part) <= DREAM_REPORT_PART_MAX_CHARS,
+    ),
+    "the part cap is measured in code points, not UTF-16 units",
+  );
   assert.ok(parts[0]?.startsWith(`# Dream report — ${RUN_ID}\n\n`), "the first part's header");
   for (const [index, part] of parts.entries()) {
     if (index === 0) continue;
@@ -1653,6 +1700,85 @@ test("renderDreamReport: injected pipes/newlines sanitize in cells and bullets",
     text.includes("- currency-accuracy: endorse — line1 line2 (checked: —)"),
     "injected stance reasons sanitize in bullets",
   );
+});
+
+test("renderDreamReport: an oversized bullet-list section splits at line boundaries", () => {
+  // A cap-conformant report whose §7 uncertainty bullets alone (35 lanes × 6 × ~310 code
+  // points ≈ 65K) exceed the packing budget — rendered as ONE joined block this exact input
+  // hits the oversize refusal; per-line grouping splits it at bullet boundaries instead.
+  const manifest = genManifest(280);
+  const base = contextFor(manifest);
+  const uncertainty = "u".repeat(290);
+  const context: DreamReportContext = {
+    ...base,
+    analyses: base.analyses.map((analysis) => ({
+      ...analysis,
+      report: {
+        ...analysis.report,
+        uncertainties: Array.from({ length: 6 }, () => uncertainty),
+      },
+    })),
+  };
+  const input = inputFor(context);
+  const result = buildDreamReport(input, context);
+  assert.equal(result.ok, true, JSON.stringify(result).slice(0, 400));
+  const parts = (result as { ok: true; parts: string[] }).parts;
+  assert.ok(parts.length >= 2, `expected a split inside §7, got ${parts.length} part(s)`);
+  for (const part of parts) {
+    assert.ok(
+      codePointLength(part) <= DREAM_REPORT_PART_MAX_CHARS,
+      "every part stays under the code-point cap",
+    );
+  }
+  const text = parts.join("\n");
+  assert.equal(
+    text.split("## Uncertainties").length - 1,
+    1,
+    "the section heading renders exactly once across all parts",
+  );
+  assert.equal(
+    text.split("- Analyst gen-").length - 1,
+    context.analyses.length * 6,
+    "every uncertainty bullet renders exactly once",
+  );
+});
+
+test("renderDreamReport: a final-keep fallback renders its stances in §6 exactly once", () => {
+  // A destructive proposal (both gates endorsing) downgraded to final keep with a fallback
+  // reason: the doc never reaches §5, and its injected stances render under §6 — the
+  // exactly-once §5-or-§6 rule.
+  const manifest = fixtureManifest();
+  const context = contextFor(manifest, {
+    [DOC_SUB]: { disposition: "merge-into", merge_target: DOC_WAVES },
+  });
+  const input = inputFor(context, {
+    [DOC_SUB]: { disposition: "keep", merge_target: null, fallback_reason: "kept after all" },
+  });
+  const result = buildDreamReport(input, context);
+  assert.equal(result.ok, true, JSON.stringify(result));
+  const { report, parts } = result as { ok: true; report: DreamReport; parts: string[] };
+  const text = parts.join("\n");
+  const nonKeepSection = text.slice(
+    text.indexOf("## Non-keep evidence"),
+    text.indexOf("## Fallbacks"),
+  );
+  assert.ok(
+    !nonKeepSection.includes(`### ${DOC_SUB}`),
+    "the final-keep doc's heading never appears under §5",
+  );
+  const fallbacksSection = text.slice(
+    text.indexOf("## Fallbacks"),
+    text.indexOf("## Uncertainties"),
+  );
+  assert.ok(fallbacksSection.includes(`### ${DOC_SUB}`), "the fallback doc renders under §6");
+  const subRow = report.rows.find((row) => row.path === DOC_SUB);
+  const stances = subRow?.stances ?? [];
+  assert.equal(stances.length, 2, "both gate endorsements joined onto the row");
+  for (const stance of stances) {
+    const line = `- ${stance.angle}: ${stance.stance} — ${stance.reason} (checked: —)`;
+    assert.ok(fallbacksSection.includes(line), `the stance bullet renders under §6: ${line}`);
+    assert.equal(text.split(line).length - 1, 1, `the stance line renders exactly once: ${line}`);
+  }
 });
 
 test("renderDreamReport: a single oversize block refuses (never truncates)", () => {
