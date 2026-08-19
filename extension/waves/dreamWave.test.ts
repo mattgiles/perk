@@ -14,6 +14,7 @@ import {
   DREAM_ANALYST_CAPS,
   DREAM_ANALYST_REPORT_SCHEMA,
   DREAM_DISPOSITIONS,
+  DREAM_MANIFEST_FILENAME,
   type DreamAnalystReport,
   type DreamManifest,
   decodeDreamAnalystReport,
@@ -162,6 +163,14 @@ function laneOneReport(overrides: Record<string, unknown> = {}): Record<string, 
     overrides,
   );
 }
+
+test("DREAM_MANIFEST_FILENAME mirrors dream.py::DREAM_MANIFEST_FILENAME", () => {
+  // The cross-plane lockstep pin (the HARVEST_MANIFEST_FILENAME precedent): the Python §8.59
+  // gather core writes this exact run-scoped name, and every registered-tool binding derives
+  // its read path from the TS constant — a one-sided rename would leave both suites green
+  // while run_dream_wave can never find the produced manifest.
+  assert.equal(DREAM_MANIFEST_FILENAME, "dream-manifest.json");
+});
 
 // ------------------------------------------------------------------- the strict decode
 

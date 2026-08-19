@@ -81,7 +81,8 @@ further subagents** — you evaluate and report.
 
    - `angle` — your assigned angle, echoed byte-exact;
    - `stances` — the stance rows `{doc, disposition, stance, reason, evidence_checked}`
-     (step 3); an empty array is valid when your angle endorses nothing;
+     (step 3); an empty array is valid only when your angle evaluated **no** proposals — a
+     proposal you dispute gets an explicit `challenge` row, never silence;
    - `angle_findings` — your angle's cross-cutting observations (step 4);
    - `uncertainties` — the doubts worth surfacing (step 4);
    - `stances_omitted`, `angle_findings_omitted`, `uncertainties_omitted` — the omission

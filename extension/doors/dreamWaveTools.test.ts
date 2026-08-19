@@ -185,14 +185,25 @@ function reducerReportOf(angle: string, overrides: Record<string, unknown> = {})
   };
 }
 
+/** A real stance on the fixture analysts' one non-keep proposal (context-injection, revise) —
+ * decodable ONLY when the door threads `nonKeepProposals(analysis.analyses)` into the reducer
+ * re-decode (an empty or wrong proposal set would malform the lane). */
+const BRIDGE_STANCE = {
+  doc: "docs/learned/pi/context-injection.md",
+  disposition: "revise",
+  stance: "endorse",
+  reason: "verified against the checkout",
+  evidence_checked: ["re-read the cited pointer"],
+};
+
 function completeReducerAggregate(): { state: string; value: unknown } {
   return {
     state: "complete",
-    value: DREAM_REDUCER_ANGLES.map((angle) => ({
+    value: DREAM_REDUCER_ANGLES.map((angle, index) => ({
       key: angle,
       ok: true,
       error: null,
-      report: reducerReportOf(angle),
+      report: reducerReportOf(angle, index === 0 ? { stances: [BRIDGE_STANCE] } : {}),
     })),
   };
 }
@@ -620,6 +631,36 @@ test("executeDreamWave: an over-budget bundle refuses with accounting — nothin
   assert.equal(details.attempts.length, 1);
 });
 
+test("executeDreamWave: a throwing entry-time removal is a typed io_error refusal — zero spawns", async () => {
+  // The removal failure arm: never an uncaught throw, never a launch over an irremovable
+  // stale bundle — the typed refusal carries the (empty) extras shape.
+  const manifest = TWO_LANE_MANIFEST();
+  const adapter = createMemoryWaveAdapter();
+  const spies = bundleSpies();
+  const result = await executeDreamWave(adapter, target(), {
+    manifest,
+    writeBundle: spies.writeBundle,
+    removeBundle: () => {
+      throw new Error("EACCES: permission denied");
+    },
+  });
+  const details = result.details as {
+    ok: boolean;
+    error?: string;
+    error_type?: string;
+    analyses?: unknown[];
+    attempts?: unknown[];
+  };
+  assert.equal(details.ok, false);
+  assert.equal(details.error_type, "io_error");
+  assert.match(details.error ?? "", /stale dream bundle removal failed/);
+  assert.match(details.error ?? "", /EACCES/);
+  assert.deepEqual(details.analyses, [], "nothing analyzed yet — the extras shape is empty");
+  assert.deepEqual(details.attempts, [], "nothing launched yet — no attempt receipt");
+  assert.equal(adapter.calls.spawn.length, 0, "nothing spawns on a failed entry removal");
+  assert.deepEqual(spies.writes, [], "nothing written");
+});
+
 test("executeDreamWave: a bundle-write throw is the io_error fail arm retaining analyses + attempts", async () => {
   const manifest = TWO_LANE_MANIFEST();
   const adapter = createMemoryWaveAdapter({ aggregate: completeAnalystAggregate() });
@@ -696,6 +737,10 @@ test("executeDreamWave: the happy path — one write, reducers read it, two atte
     details.reducers.reports.map((r) => r.angle),
     [...DREAM_REDUCER_ANGLES],
   );
+  // The nonKeepProposals bridge is LIVE: the stance echoing the analyst's actual non-keep
+  // proposal survives the reducer re-decode into the tool result — an empty or wrong proposal
+  // set passed to the reducer wave would have malformed this lane instead.
+  assert.deepEqual(details.reducers.reports[0]?.report.stances, [BRIDGE_STANCE]);
   // Two attempt receipts whose requestedKeys are each wave's code-owned orchestration keys.
   assert.deepEqual(
     details.attempts.map((a) => [a.flow, a.attempt]),

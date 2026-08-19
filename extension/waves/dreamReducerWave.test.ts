@@ -739,6 +739,17 @@ test("the dream-reducer def agrees with the report schema — fields, stances, c
   const defPath = join(import.meta.dirname, "..", "..", "agents", "dream-reducer.md");
   const def = readFileSync(defPath, "utf8");
   const flat = def.replace(/\s+/g, " ");
+  // Frontmatter: the runtime name perk.dream-reducer, the stronger-tier default model, and
+  // the read-only isolation posture (the auditWaveTools.test.ts precedent) — these fields
+  // define the reducer's identity and execution behavior, so they are pinned exactly.
+  assert.match(def, /^name: dream-reducer$/m);
+  assert.match(def, /^package: perk$/m);
+  assert.match(def, /^model: anthropic\/claude-fable-5$/m);
+  assert.match(def, /^ {2}- anthropic\/claude-sonnet-4-5$/m);
+  assert.match(def, /^tools: read, grep, find, ls, bash$/m);
+  assert.match(def, /^systemPromptMode: replace$/m);
+  assert.match(def, /^inheritProjectContext: false$/m);
+  assert.match(def, /^inheritSkills: false$/m);
   const schema = DREAM_REDUCER_REPORT_SCHEMA as {
     required: string[];
     properties: { stances: { items: { required: string[] } } };

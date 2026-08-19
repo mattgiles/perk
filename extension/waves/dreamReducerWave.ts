@@ -70,13 +70,21 @@ export const DREAM_REDUCER_CAPS = {
   uncertaintyChars: 300,
 } as const;
 
-/** The stanceable (non-keep) disposition vocabulary — the schema's `disposition` enum. */
-const STANCEABLE_DISPOSITIONS = ["revise", "merge-into", "retire"] as const;
+/** One stanceable disposition — definitionally the analyst vocabulary minus `keep`, so the
+ * exported proposal/stance contracts can never carry a keep row. */
+export type DreamStanceDisposition = Exclude<DreamDisposition, "keep">;
+
+/** The stanceable (non-keep) disposition vocabulary in schema-enum order. */
+const STANCEABLE_DISPOSITIONS: readonly DreamStanceDisposition[] = [
+  "revise",
+  "merge-into",
+  "retire",
+];
 
 /** One analyst proposal a reducer may stance: a non-keep-disposed doc. */
 export interface DreamProposal {
   doc: string;
-  disposition: DreamDisposition;
+  disposition: DreamStanceDisposition;
 }
 
 /**
@@ -113,9 +121,9 @@ export function composeDreamBundle(
  */
 export function nonKeepProposals(analyses: DreamLaneAnalysis[]): readonly DreamProposal[] {
   return analyses.flatMap((analysis) =>
-    analysis.report.docs
-      .filter((doc) => doc.disposition !== "keep")
-      .map((doc) => ({ doc: doc.path, disposition: doc.disposition })),
+    analysis.report.docs.flatMap((doc) =>
+      doc.disposition === "keep" ? [] : [{ doc: doc.path, disposition: doc.disposition }],
+    ),
   );
 }
 
@@ -181,7 +189,7 @@ export const DREAM_REDUCER_REPORT_SCHEMA = {
  * selective verification actually touched. */
 export interface DreamStance {
   doc: string;
-  disposition: DreamDisposition;
+  disposition: DreamStanceDisposition;
   stance: "endorse" | "challenge";
   reason: string;
   evidence_checked: string[];
@@ -279,7 +287,8 @@ export function decodeDreamReducerReport(
       return { ok: false, detail: "a stance row is not an object" };
     }
     const doc = raw.doc;
-    if (typeof doc !== "string" || !dispositionByDoc.has(doc)) {
+    const expected = typeof doc === "string" ? dispositionByDoc.get(doc) : undefined;
+    if (typeof doc !== "string" || expected === undefined) {
       return {
         ok: false,
         detail: `stance doc ${JSON.stringify(doc)} is not one of the analysts' non-keep proposals`,
@@ -288,7 +297,6 @@ export function decodeDreamReducerReport(
     if (byDoc.has(doc)) {
       return { ok: false, detail: `duplicate stance row for '${doc}'` };
     }
-    const expected = dispositionByDoc.get(doc);
     if (raw.disposition !== expected) {
       return {
         ok: false,
@@ -324,7 +332,7 @@ export function decodeDreamReducerReport(
     // Whitelisted construction — never a raw-object spread.
     byDoc.set(doc, {
       doc,
-      disposition: expected as DreamDisposition,
+      disposition: expected,
       stance,
       reason,
       evidence_checked: evidenceChecked.items,
@@ -435,11 +443,11 @@ export async function runDreamReducerWave(
     signal,
   );
 
-  // The lane keys ARE the angle slugs, so failures re-map directly; wave-level (and any
-  // unmappable) failures carry `angle: null`.
-  const angles: ReadonlySet<string> = new Set(DREAM_REDUCER_ANGLES);
+  // The lane keys ARE the angle slugs (code-owned, fixed), and the runner normalizes strictly
+  // against them — a keyed report/failure carries an angle by construction; wave-level failures
+  // carry `angle: null`.
   const failures: DreamReducerFailure[] = result.failures.map((failure) => ({
-    angle: failure.key !== null && angles.has(failure.key) ? failure.key : null,
+    angle: failure.key,
     reason: failure.reason,
     detail: failure.detail,
   }));
@@ -447,17 +455,6 @@ export async function runDreamReducerWave(
   const byAngle = new Map<string, DreamReducerReport>();
   let decodeFailures = 0;
   for (const waveReport of result.reports) {
-    if (!angles.has(waveReport.key)) {
-      // Unreachable without upstream drift (normalizeLanes only yields requested keys), but a
-      // defensive named failure beats a crash on an untrusted aggregate.
-      decodeFailures += 1;
-      failures.push({
-        angle: null,
-        reason: "malformed-report",
-        detail: `aggregate carries an unplanned lane key '${waveReport.key}'`,
-      });
-      continue;
-    }
     const decoded = decodeDreamReducerReport(waveReport.report, waveReport.key, opts.proposals);
     if (decoded.ok) {
       byAngle.set(waveReport.key, decoded.report);

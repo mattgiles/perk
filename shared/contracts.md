@@ -9439,7 +9439,9 @@ removes any pre-existing bundle at entry (before the first wave), so the fixed n
 prior bundle contradicting the returned aggregate, and after an `io_error` the target is
 absent (entry removal ran; the atomic temp+rename never landed). A repeat call (the
 blocking-tool retry — no guard state, the audit/harvest posture) is therefore always
-self-consistent.
+self-consistent. A **failed entry-time removal** refuses `io_error` BEFORE any spawn — a
+typed refusal with empty `{analyses, attempts}` extras, never an uncaught throw (launching
+over an irremovable stale bundle would break the invariant).
 
 **The three fixed reducer angles** (`DREAM_REDUCER_ANGLES`, fixed order everywhere — lanes,
 normalized reports, and the vocabulary the dream-report validation's disagreement rule
@@ -9521,7 +9523,8 @@ keys (`dream-analyst`, `dream-reducer`) are resolved at execute time via `subage
 threaded as each wave's workflow-level `model?` default; production runs the RPC adapter,
 tests the in-memory adapter.
 
-**The result posture.** Every post-launch outcome is **ok** with the full typed normalized
+**The result posture.** Every post-launch outcome — with the ONE exception of the
+bundle-write `io_error` fail arm below — is **ok** with the full typed normalized
 aggregate — `{complete, analysis: {complete, analyses, failures}, bundle, reducers:
 {launched, skip_reason, complete, reports, failures}, attempts}` — `complete` = both waves
 complete; the `skip_reason` vocabulary is `incomplete-analysis` (strict first wave failed —

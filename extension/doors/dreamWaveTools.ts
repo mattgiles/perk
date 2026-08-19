@@ -113,8 +113,9 @@ function resultText(details: DreamWaveOk): string {
  *
  *  1. entry-time bundle removal — the current-attempt-only invariant: the fixed name exists
  *     iff the CURRENT call wrote it, so the incomplete/over-budget arms can never leave a
- *     stale prior bundle contradicting the returned aggregate, and after an `io_error` the
- *     target is absent (the atomic temp+rename never landed);
+ *     stale prior bundle contradicting the returned aggregate, and after a write `io_error`
+ *     the target is absent (the atomic temp+rename never landed); a removal failure refuses
+ *     `io_error` before any spawn (empty `{analyses, attempts}` extras);
  *  2. the strict analyst wave; incomplete ⇒ ok `complete: false` with `bundle: null` and
  *     `skip_reason: "incomplete-analysis"` — no write, no reducer launch;
  *  3. compose + budget-check the bundle BEFORE reducer task composition; over budget ⇒ ok
@@ -143,9 +144,19 @@ export async function executeDreamWave(
   const remove = opts.removeBundle ?? ((path: string) => rmSync(path, { force: true }));
 
   // One path authority: the bundle lives beside the decode-time-bound manifest path — no
-  // second runScratchDir derivation inside this core.
+  // second runScratchDir derivation inside this core. A failed removal refuses BEFORE any
+  // spawn (a typed io_error, never an uncaught throw): launching over an irremovable stale
+  // bundle would break the current-attempt-only invariant.
   const bundlePath = join(dirname(opts.manifest.manifestPath), DREAM_ANALYSES_FILENAME);
-  remove(bundlePath);
+  try {
+    remove(bundlePath);
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    return fail(`stale dream bundle removal failed at '${bundlePath}': ${detail}`, "io_error", {
+      analyses: [],
+      attempts: [],
+    });
+  }
 
   const analysis = await runDreamAnalystWave(
     adapter,
