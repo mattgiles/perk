@@ -47,7 +47,7 @@
           assists.
         </span>
       </span>
-      <span class="loop"><span aria-hidden="true">↻</span> human review · optional agent wave</span>
+      <span class="loop"><span class="loop-review"><span aria-hidden="true">↻</span> human review</span><span class="loop-wave">optional agent wave</span></span>
     </li>
     <li class="stage">
       <span class="tip-wrap">
@@ -80,7 +80,7 @@
           The change goes up as a pull request for human review.
         </span>
       </span>
-      <span class="loop"><span aria-hidden="true">↻</span> human PR review · optional agent wave</span>
+      <span class="loop"><span class="loop-review"><span aria-hidden="true">↻</span> human PR review</span><span class="loop-wave">optional agent wave</span></span>
     </li>
     <li class="stage conditional">
       <span class="tip-wrap">
@@ -91,7 +91,6 @@
           Review feedback is classified and resolved — this stage runs only when review asks.
         </span>
       </span>
-      <span class="condition">(if review asks)</span>
     </li>
     <li class="stage">
       <span class="tip-wrap">
@@ -124,7 +123,7 @@
       <div class="sat-body">
         <p class="mini-flow">
           <span class="mini-stage">plan</span><span class="mini-arrow" aria-hidden="true">→</span><span class="mini-stage">save</span>
-          <span class="loop"><span aria-hidden="true">↻</span> human review · optional agent wave</span>
+          <span class="loop"><span class="loop-review"><span aria-hidden="true">↻</span> human review</span><span class="loop-wave">optional agent wave</span></span>
         </p>
         <ul class="feeds">
           <li class="feed"><span class="feed-glyph" aria-hidden="true">⇢</span> objective plan — seeds an objective</li>
@@ -139,7 +138,7 @@
       <div class="sat-body">
         <p class="mini-flow">
           <span class="mini-stage">plan</span><span class="mini-arrow" aria-hidden="true">→</span><span class="mini-stage">save</span>
-          <span class="loop"><span aria-hidden="true">↻</span> human review · optional agent wave</span>
+          <span class="loop"><span class="loop-review"><span aria-hidden="true">↻</span> human review</span><span class="loop-wave">optional agent wave</span></span>
         </p>
         <ul class="feeds">
           <li class="feed"><span class="feed-glyph" aria-hidden="true">⇢</span> spine plan — each node emits a bounded plan</li>
@@ -195,6 +194,9 @@
   }
 
   .stage {
+    /* Starlight's layered markdown rules add margins to li/li+li — inside a flex/grid row
+       they would shift every non-first item down; the whole figure owns its own rhythm. */
+    margin: 0;
     display: flex;
     align-items: center;
     flex-wrap: wrap;
@@ -243,24 +245,31 @@
     color: var(--perk-accent);
   }
 
+  /* Review-loop annotations are one stacked two-line component — the review line over the
+     wave line — on a drawn stem (an unambiguous chip↔annotation attachment), with
+     deliberate air between the strip and the annotation. */
   .loop {
     color: var(--perk-muted);
     font-family: var(--sl-font-mono), monospace;
     font-size: 16px;
     font-weight: 500;
     line-height: 1.35;
+    border-inline-start: 2px solid var(--perk-muted);
+    padding-inline-start: 10px;
+    padding-block: 1px;
   }
 
-  /* A decorative tick tying each spine review-loop badge to its chip. */
-  .flow-spine .loop::before {
-    content: "└ " / "";
+  .loop .loop-review,
+  .loop .loop-wave {
+    display: block;
+    white-space: nowrap;
+    width: max-content;
   }
 
-  .condition {
-    color: var(--perk-muted);
-    font-family: var(--sl-font), sans-serif;
-    font-size: 16px;
-    line-height: 1.35;
+  .flow-spine .loop {
+    flex-basis: 100%;
+    margin-inline-start: 12px;
+    margin-block-start: 6px;
   }
 
   .visually-hidden {
@@ -282,7 +291,11 @@
     margin-block-start: 28px;
   }
 
+  /* Each card is its own named container: the summary hint flips inline↔stacked on the
+     CARD's width (not the viewport's) at one intentional threshold below. */
   .satellites details {
+    margin: 0; /* Starlight's layered not-first-child margin would misalign the grid row */
+    container: satellite / inline-size;
     background: var(--perk-surface);
     border: 1px solid var(--perk-border);
     border-radius: var(--perk-radius-card);
@@ -311,7 +324,16 @@
     line-height: 1.35;
   }
 
+  /* A wide card carries its hint inline beside the label; a narrow card stacks it. */
+  @container satellite (min-width: 440px) {
+    .sat-hint {
+      display: inline;
+      margin: 0;
+    }
+  }
+
   .sat-body {
+    margin: 0;
     padding: 2px 16px 16px;
   }
 
@@ -388,6 +410,7 @@
      The rule takes the §5 legend row's bound muted token, like the feed text. Hanging
      indent: wrapped lines align after the feed glyph. */
   .feed {
+    margin: 0;
     border-block-start: 1px dashed var(--perk-muted);
     padding-block-start: 7px;
     padding-inline-start: 20px;
@@ -486,12 +509,11 @@
       grid-row: 1;
       justify-self: start;
     }
-    .stage .loop,
-    .stage .condition {
+    .stage .loop {
       grid-column: 2;
       grid-row: 2;
       justify-self: start;
-      max-width: 24ch;
+      margin-block-start: 6px;
     }
   }
 
@@ -510,20 +532,8 @@
       column-gap: 8px;
     }
     .stage .loop {
-      max-width: none;
       inline-size: 0;
       min-inline-size: 0;
-      white-space: nowrap;
-      margin-block-start: 2px;
-    }
-    .stage.conditional {
-      grid-template-columns: auto auto auto;
-    }
-    .stage .condition {
-      grid-column: 3;
-      grid-row: 1;
-      max-width: none;
-      white-space: nowrap;
     }
     .satellites {
       grid-template-columns: repeat(3, 1fr);

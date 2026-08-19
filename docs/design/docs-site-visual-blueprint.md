@@ -257,8 +257,9 @@ routes, sidebar map, page dispositions, or acceptance matrices in
 │ [ Get started ]  [ Understand the workflow ]                                 │
 ├──────────────────────────────────────────────────────────────────────────────┤
 │ 2 CORE FLOW                                                                 │
-│ ○ plan ↻ → ○ save → ▸ implement → ○ submit ↻ ⇢ ◇ address (if review asks)  │
-│          → ○ land → ○ learn                                                  │
+│ ○ plan → ○ save → ▸ implement → ○ submit ⇢ ◇ address → ○ land → ○ learn    │
+│ │↻ human review        │↻ human PR review   ← stacked two-line loop badges   │
+│ │optional agent wave   │optional agent wave    on stems under plan/submit    │
 │ [▸ gist authoring + hint] [▸ objective authoring + hint] [▸ docs/learned +   │
 │  hint]  ← three collapsed-by-default satellite disclosures (one row ≥960)    │
 ├──────────────────────────────────────────────────────────────────────────────┤
@@ -281,11 +282,12 @@ Annotations:
    decorative CSS-generated `FIELD GUIDE + INSTRUMENT PANEL` eyebrow precedes the title outside
    the accessibility tree; the tagline takes the muted tier with balanced wraps.
 2. **Core flow** — the interactive semantic-HTML core-flow diagram (§5): a horizontal
-   wrapping spine (container ≥640px) with `↻` review-loop badges on plan and submit,
-   `address` visibly conditional by diamond, parenthetical text, and dashed connection, and
-   the three satellite disclosures below it (collapsed by default once enhanced; a three-up
-   row at container ≥960px; expanded and content-complete for no-JS and print). No animation
-   or autoplay; tooltips are supplementary only.
+   wrapping spine (container ≥640px) with stacked two-line `↻` review-loop badges hanging
+   on stems under plan and submit, `address` visibly conditional by diamond and dashed
+   connection (no inline condition label — operator-settled; the condition is stated in the
+   adjacent textual equivalent), and the three satellite disclosures below it (collapsed by
+   default once enhanced; a three-up row at container ≥960px; expanded and content-complete
+   for no-JS and print). No animation or autoplay; tooltips are supplementary only.
 3. **Intent cards** — four equal choices corresponding exactly to Tutorials, How-to guides,
    Reference, and Explanation. Each asks a reader-language question and links to its existing
    section route.
@@ -310,11 +312,11 @@ repo-owned presentational classes. It required no Starlight component override.
 │ [Understand workflow]      │
 ├────────────────────────────┤
 │ CORE FLOW (one stage/row)  │
-│ ○ plan ↻                   │
+│ ○ plan (↻ loop badge)      │
 │ ○ save                     │
 │ ▸ implement                │
-│ ○ submit ↻                 │
-│ ◇ address (if needed)      │
+│ ○ submit (↻ loop badge)    │
+│ ◇ address (⇢ dashed in)    │
 │ ○ land                     │
 │ ○ learn                    │
 │ satellites stacked (full   │
@@ -504,9 +506,11 @@ connectors are decorative CSS-generated glyphs/rules in the accessibility-neutra
 core-flow component pins zero SVG). Expandable regions are independent native
 `details`/`summary` disclosures, **source-expanded**: the unenhanced page (no-JS, print, the
 static a11y gate) is content-complete; enhancement collapses them by default, and
-`beforeprint` re-expands (with `afterprint` restore). Layout is container-keyed on the shared
-figure container at the bound 640px (horizontal spine) and 960px (satellite row) thresholds —
-never a viewport media query. Supplementary tooltips are the sanctioned refinement of “no
+`beforeprint` re-expands (with `afterprint` restore). Layout is container-keyed — never a
+viewport media query: the shared figure container drives the bound 640px (horizontal spine)
+and 960px (satellite row) thresholds, and each satellite card is additionally its own named
+inline-size container (`satellite`) whose summary hint flips inline↔stacked on the card's
+own width at one intentional threshold (440px). Supplementary tooltips are the sanctioned refinement of “no
 essential hover-only detail” (still governing — tooltip copy is supplementary color only,
 never load-bearing): triggers are real `<button type="button">` elements with
 `aria-describedby` always pointing at the colocated tooltip; per trigger, hover/focus/pin

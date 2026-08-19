@@ -73,13 +73,16 @@ content-identical narrow variant.
 The **core-flow component** holds the §5 interactive semantic-HTML contract instead: **zero
 inline SVG** (all semantics are source-order text; connectors are decorative CSS-generated
 glyphs/rules), three satellite `<details>` shipping `open` in source (the unenhanced page is
-content-complete), and layout container-keyed on the same shared `figure.perk-diagram`
-container at exactly the bound **640px** (horizontal spine) and **960px** (three-up satellite
-row) thresholds — no viewport media query. `tests/test_docs_site_system.py` guards both
-shapes: the SVG four's geometry (variant/viewBox/max-width/@container shape, no
-viewport-media-query exposure, every `<text>` resolving to a ≥16px rule in its component's own
-`<style>`) and the core-flow source contract (zero SVG, details-open, the 640/960 thresholds,
-every declared font-size px ≥ 16).
+content-complete), and layout container-keyed with no viewport media query — the shared
+`figure.perk-diagram` container drives exactly the bound **640px** (horizontal spine) and
+**960px** (three-up satellite row) thresholds, and each satellite card is its own **named
+inline-size container** (`satellite`) flipping its summary hint inline↔stacked on the card's
+own width at one intentional 440px threshold (the container-queries sub-layout pattern).
+`tests/test_docs_site_system.py` guards both shapes: the SVG four's geometry
+(variant/viewBox/max-width/@container shape, no viewport-media-query exposure, every `<text>`
+resolving to a ≥16px rule in its component's own `<style>`) and the core-flow source contract
+(zero SVG, details-open, the 640/960 figure + 440 satellite thresholds, every declared
+font-size px ≥ 16).
 
 **Client-script convention (deliberately narrow):** the core-flow component mounts the site's
 first — and only — client script, one processed module `<script>` importing the extracted

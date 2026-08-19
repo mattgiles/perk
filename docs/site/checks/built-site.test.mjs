@@ -667,12 +667,12 @@ const CORE_FLOW_STAGES = [
 
 // Review loops and cache loops, with truthful shipped-surface labels: human review is the
 // universal gate, and EVERY human-review loop carries the built-in optional agent wave (the
-// draft-review wave on authoring surfaces, the PR review wave on submit).
+// draft-review wave on authoring surfaces, the PR review wave on submit) — rendered as one
+// stacked two-line component (the review line over the wave line; operator-settled).
 const CORE_FLOW_LOOPS = [
-  ["↻ human review · optional agent wave", 3], // spine plan + gist + objective satellites
-  ["↻ human PR review · optional agent wave", 1],
-  ["↻ human review", 3], // exactly the three wave-suffixed labels above
+  ["↻ human review", 3], // spine plan + gist + objective satellites
   ["↻ human PR review", 1],
+  ["optional agent wave", 4], // every human-review loop carries the wave line
   ["↻ harvest → objective authoring", 1],
   ["↻ dreaming — corpus self-curation", 1],
 ];
@@ -747,9 +747,11 @@ test("the home band-2 core-flow figure holds the interactive semantic-HTML contr
     ...spine[0].matchAll(/<button[^>]*data-core-flow-tip[^>]*>(.*?)<\/button>/gs),
   ].map(([, inner]) => normalizeMarkupText(inner));
   assert.deepEqual(stageButtons, CORE_FLOW_STAGES);
+  // Operator-settled: NO inline condition label — conditionality is encoded by the ◇ glyph,
+  // the dashed connector, and the adjacent textual equivalent.
   assert.ok(
-    normalizeMarkupText(spine[0]).includes("(if review asks)"),
-    "the conditional address step lost its visible condition label",
+    !normalizeMarkupText(figure).includes("(if review asks)"),
+    "the nixed inline condition label crept back into the figure",
   );
 
   // Bound loop labels, exact occurrence counts (↻ human review is a prefix of the wave label).
