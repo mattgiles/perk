@@ -67,6 +67,15 @@ export interface WorkflowState {
    */
   objective_node_claim?: { objective: string; node: string } | null;
   /**
+   * The dream-wave finalized-bundle digest marker (§8.61) — the freshness/integrity authority
+   * the dream-report recovery (§8.63) trusts over the bare run-scratch bundle file. `""` =
+   * invalidated (cleared unconditionally at wave entry BEFORE the stale-bundle removal attempt,
+   * so a failed cleanup leaves prior files behind but recovery refuses them); `sha256:<hex>` =
+   * the digest of the current finalized bundle bytes, set only after a successful finalize
+   * write. Per-field LWW; no rebuild change.
+   */
+  dream_bundle_digest?: string;
+  /**
    * The bounded conflict-resolution re-drive counter (§8.3). Incremented each time
    * `/submit` drives the `perk.conflict-resolver` subagent on a definitively-unmergeable PR;
    * reset to 0 on a clean submit. Best-effort tier (cheaply reconstructable). Per-field LWW in

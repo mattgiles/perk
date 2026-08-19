@@ -3,8 +3,8 @@
 //
 // The tool takes NO parameters (the `run_audit_wave` posture, BOTH sides): the execute recovers
 // the session's claimed `run_id` from the rebuilt workflow-state and derives the ONE manifest
-// path `runScratchDir(run_id)/dream-manifest.json` — its manifest read AND its one write (the
-// fixed-name run-scratch bundle beside that manifest) are both derived from the claimed run,
+// path `runScratchDir(run_id)/dream-manifest.json` — its manifest read AND its writes (the
+// fixed-name run-scratch bundle beside that manifest) are all derived from the claimed run,
 // so no caller-supplied path exists and a gated session cannot aim the reader or the writer
 // anywhere. A session with no run-scoped dream manifest is structurally refused `bad_state` —
 // no dream launch exists until the `perk learn dream` door ships, so the tool is registered
@@ -13,11 +13,18 @@
 //
 // The sequence: the first-level analyst wave (strict) → the compact analyst bundle written
 // under the enforced aggregate byte budget → the three fixed reducer lanes — reducers launch
-// ONLY after a complete first wave and an in-budget write. Post-launch outcomes return ok with
-// `complete: false` (the audit posture); the ONE post-launch fail arm is the bundle-write
-// `io_error`, whose extras retain the analyst analyses AND every already-recorded attempt
-// receipt. Analyst and reducer reports are untrusted DATA, re-decoded in code before they
-// reach the parent.
+// ONLY after a complete first wave and an in-budget write — then, only when BOTH waves
+// completed, the finalize-in-place rewrite of the same fixed name (`finalizeDreamBundle`, the
+// added `reducers` section). Two writes of ONE name: the analyst write feeds the reducers; the
+// finalize rewrite is what the dream-report recovery consumes. The `dream_bundle_digest`
+// workflow-state marker is the recovery-side freshness authority: cleared unconditionally at
+// entry BEFORE the stale-bundle removal attempt (the invalidation record — a failed cleanup
+// leaves prior files behind, but recovery refuses them), set to the sha256 of the finalized
+// bytes only after the finalize write succeeds. Post-launch outcomes return ok with
+// `complete: false` (the audit posture); the TWO post-launch fail arms are the bundle-write
+// and finalize-write `io_error`s, whose extras retain the analyst analyses AND every
+// already-recorded attempt receipt. Analyst and reducer reports are untrusted DATA, re-decoded
+// in code before they reach the parent.
 
 import { existsSync, readFileSync, rmSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -25,7 +32,8 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { atomicWriteFileSync, runScratchDir } from "../substrate/cache.ts";
 import { subagentModel } from "../substrate/config.ts";
 import { failFor, ok, type Result } from "../substrate/result.ts";
-import { branchOf, rebuildWorkflowState } from "../substrate/workflowState.ts";
+import { digestSessionData } from "../substrate/sessionData.ts";
+import { appendWorkflowState, branchOf, rebuildWorkflowState } from "../substrate/workflowState.ts";
 import type { ReportTarget } from "../surfaces/report.ts";
 import {
   composeDreamBundle,
@@ -33,6 +41,7 @@ import {
   DREAM_BUNDLE_BUDGET_BYTES,
   type DreamReducerAnalysis,
   type DreamReducerFailure,
+  finalizeDreamBundle,
   nonKeepProposals,
   runDreamReducerWave,
 } from "../waves/dreamReducerWave.ts";
@@ -104,31 +113,52 @@ function resultText(details: DreamWaveOk): string {
   return parts.join("\n\n");
 }
 
+/** The injected `dream_bundle_digest` marker seam: `clear` invalidates (the empty-string
+ * record), `set` publishes the finalized bytes' digest. The registered execute wires the
+ * production `appendWorkflowState` pair; tests inject fakes. Both are loud-but-non-fatal on
+ * append failure (the seam's read-back warning) — a failed `set` leaves the marker cleared, so
+ * recovery refuses (fail-closed, never silent). */
+export interface DreamBundleMarkers {
+  clear(): void;
+  set(digest: string): void;
+}
+
 /**
- * The `run_dream_wave` execute core, extracted for testability with the adapter AND the bundle
- * write/remove functions injected (the `executeAuditWave` pattern; `writeBundle` defaults to
- * the writeGuard-sanctioned `atomicWriteFileSync`, `removeBundle` to `rmSync` with
- * `force: true`). Caller preconditions: the manifest came from `decodeDreamManifest` and
- * `verifyDocContainment` was run (the registered tool's pre-spawn ladder). Sequence:
+ * The `run_dream_wave` execute core, extracted for testability with the adapter, the bundle
+ * write/remove functions, AND the digest-marker seam injected (the `executeAuditWave` pattern;
+ * `writeBundle` defaults to the writeGuard-sanctioned `atomicWriteFileSync`, `removeBundle` to
+ * `rmSync` with `force: true`). Caller preconditions: the manifest came from
+ * `decodeDreamManifest` and `verifyDocContainment` was run (the registered tool's pre-spawn
+ * ladder). Sequence:
  *
- *  1. entry-time bundle removal — the current-attempt-only invariant: the fixed name exists
+ *  1. `markers.clear()` FIRST, unconditionally — any new attempt invalidates prior finalized
+ *     state BEFORE the filesystem is touched (the invalidation record: a failed removal below
+ *     leaves prior files behind, but recovery refuses them on the cleared marker);
+ *  2. entry-time bundle removal — the current-attempt-only invariant: the fixed name exists
  *     iff the CURRENT call wrote it, so the incomplete/over-budget arms can never leave a
  *     stale prior bundle contradicting the returned aggregate, and after a write `io_error`
  *     the target is absent (the atomic temp+rename never landed); a removal failure refuses
  *     `io_error` before any spawn (empty `{analyses, attempts}` extras);
- *  2. the strict analyst wave; incomplete ⇒ ok `complete: false` with `bundle: null` and
- *     `skip_reason: "incomplete-analysis"` — no write, no reducer launch;
- *  3. compose + budget-check the bundle BEFORE reducer task composition; over budget ⇒ ok
+ *  3. the strict analyst wave; incomplete ⇒ ok `complete: false` with `bundle: null` and
+ *     `skip_reason: "incomplete-analysis"` — no write, no reducer launch (marker stays
+ *     cleared);
+ *  4. compose + budget-check the bundle BEFORE reducer task composition; over budget ⇒ ok
  *     `complete: false` with explicit `{bytes, budget_bytes, overflow_bytes}` accounting and
  *     `skip_reason: "budget-exceeded"` — nothing written, no reducer launch;
- *  4. the one write; a throw ⇒ the `io_error` fail arm retaining `{analyses, attempts}`;
- *  5. the reducer wave over the written bundle; ok with `complete` = both waves complete.
+ *  5. the analyst-bundle write; a throw ⇒ the `io_error` fail arm retaining
+ *     `{analyses, attempts}`;
+ *  6. the reducer wave over the written bundle; an incomplete reducer wave leaves the
+ *     analyses-only bundle and a cleared marker (the finalized decode refuses it anyway);
+ *  7. only when BOTH waves completed: the finalize-in-place rewrite of the same fixed name; a
+ *     throw ⇒ the second post-launch `io_error` fail arm (mirroring arm 5's extras); on
+ *     success `markers.set(digest)` with the sha256 of the finalized bytes.
  */
 export async function executeDreamWave(
   adapter: WaveAdapter,
   target: ReportTarget,
   opts: {
     manifest: DreamManifest;
+    markers: DreamBundleMarkers;
     analystModel?: string;
     reducerModel?: string;
     signal?: AbortSignal;
@@ -142,6 +172,10 @@ export async function executeDreamWave(
   );
   const write = opts.writeBundle ?? atomicWriteFileSync;
   const remove = opts.removeBundle ?? ((path: string) => rmSync(path, { force: true }));
+
+  // The invalidation record FIRST: any new attempt clears the digest marker before the removal
+  // attempt below, so a failed cleanup leaves prior files behind that recovery refuses.
+  opts.markers.clear();
 
   // One path authority: the bundle lives beside the decode-time-bound manifest path — no
   // second runScratchDir derivation inside this core. A failed removal refuses BEFORE any
@@ -239,6 +273,26 @@ export async function executeDreamWave(
   );
   attempts.push(toAttemptReceipt("dream-reducer", 1, reducers.requestedKeys, reducers.receipt));
 
+  if (analysis.complete && reducers.complete) {
+    // Finalize in place — the SAME fixed name gains the reducers section (never a second
+    // file), then the digest marker publishes the finalized bytes for the recovery consumer.
+    // An incomplete reducer wave never reaches here: the analyses-only shape stays behind with
+    // a cleared marker, and the finalized decode refuses it.
+    const finalized = finalizeDreamBundle(opts.manifest, analysis.analyses, reducers.reports);
+    try {
+      write(bundlePath, finalized);
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : String(error);
+      return fail(`dream bundle finalize write failed: ${detail}`, "io_error", {
+        analyses: analysis.analyses,
+        attempts,
+      });
+    }
+    // A failed marker append warns loudly via the seam's read-back check and leaves the
+    // marker cleared — recovery refuses (fail-closed); re-running the wave repairs it.
+    opts.markers.set(digestSessionData(finalized));
+  }
+
   const details: DreamWaveOk = {
     complete: analysis.complete && reducers.complete,
     analysis: analysisDetails,
@@ -328,8 +382,20 @@ export function registerDreamWave(pi: ExtensionAPI): void {
       // the workflow-level model default (the agent frontmatter default otherwise).
       const analystModel = subagentModel(ctx.cwd, "dream-analyst");
       const reducerModel = subagentModel(ctx.cwd, "dream-reducer");
+      // The production digest-marker pair: the ordinary strict-append session-entry channel
+      // (loud-but-non-fatal read-back — a failed set leaves the marker cleared, fail-closed).
+      const marker = (digest: string): void => {
+        appendWorkflowState(pi, ctx, {
+          data: { dream_bundle_digest: digest },
+          field: "dream_bundle_digest",
+          expected: digest,
+          scope: "run_dream_wave",
+          failure: `dream_bundle_digest read-back failed (${digest === "" ? "clear" : digest})`,
+        });
+      };
       return executeDreamWave(createRpcWaveAdapter(pi.events), ctx, {
         manifest: decoded.manifest,
+        markers: { clear: () => marker(""), set: marker },
         ...(analystModel !== undefined ? { analystModel } : {}),
         ...(reducerModel !== undefined ? { reducerModel } : {}),
         ...(signal !== undefined ? { signal } : {}),

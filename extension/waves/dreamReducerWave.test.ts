@@ -1,6 +1,8 @@
 // The dream reducer wave module's suite (the dreamWave.test.ts matrix shape): the bundle
 // serialization (deterministic bytes, identity echoes, UTF-8 byte measurement, the ONE
-// happy-path ordering pin), the ordered non-keep proposal universe, the schema↔caps lockstep,
+// happy-path ordering pin), the finalized-bundle round-trip + the strict recovery decode (the
+// closed-wrapper/whitelist-projected-row unknown-key policy, both sides), the ordered non-keep
+// proposal universe, the schema↔caps lockstep,
 // the composed defensive re-decode (the angle/disposition echo rules, proposal membership,
 // code-point caps, whitelisted construction), the strict-completeness runner over the memory
 // adapter (fixed angle lanes, requestedKeys, model/signal forwarding), and the agent-def ↔
@@ -18,8 +20,12 @@ import {
   DREAM_REDUCER_CAPS,
   DREAM_REDUCER_REPORT_SCHEMA,
   type DreamProposal,
+  type DreamReducerAnalysis,
   type DreamReducerReport,
+  type DreamStance,
   decodeDreamReducerReport,
+  decodeFinalizedDreamBundle,
+  finalizeDreamBundle,
   nonKeepProposals,
   runDreamReducerWave,
 } from "./dreamReducerWave.ts";
@@ -246,6 +252,244 @@ test("composeDreamBundle: bytes are UTF-8 bytes, not UTF-16 units or code points
 test("DREAM_BUNDLE_BUDGET_BYTES is 384 KiB", () => {
   assert.equal(DREAM_BUNDLE_BUDGET_BYTES, 393216);
   assert.equal(DREAM_BUNDLE_BUDGET_BYTES, 384 * 1024);
+});
+
+// ---------------------------------------------------------------- the finalized bundle
+
+function typedStance(doc: string): DreamStance {
+  const disposition = PROPOSALS.find((p) => p.doc === doc)?.disposition ?? "revise";
+  return {
+    doc,
+    disposition,
+    stance: "endorse",
+    reason: "verified against the checkout",
+    evidence_checked: ["re-read the cited pointer"],
+  };
+}
+
+/** Typed reducer analyses over the fixture proposals, in the fixed angle order. */
+function fixtureReducers(): DreamReducerAnalysis[] {
+  return DREAM_REDUCER_ANGLES.map((angle, index) => ({
+    angle,
+    report: {
+      stances: index === 0 ? [typedStance("docs/learned/pi/context-injection.md")] : [],
+      angle_findings: index === 1 ? ["cross-lane redundancy between the two pi docs"] : [],
+      uncertainties: [],
+      stances_omitted: 0,
+      angle_findings_omitted: 0,
+      uncertainties_omitted: 0,
+    },
+  }));
+}
+
+/** The parsed finalized fixture (each test mutates its own copy). */
+function finalizedRaw(): Record<string, unknown> {
+  return JSON.parse(
+    finalizeDreamBundle(fixtureManifest(), fixtureAnalyses(), fixtureReducers()),
+  ) as Record<string, unknown>;
+}
+
+test("finalizeDreamBundle ↔ decodeFinalizedDreamBundle: deterministic round-trip, raw echo shape", () => {
+  const manifest = fixtureManifest();
+  const analyses = fixtureAnalyses();
+  const reducers = fixtureReducers();
+  const first = finalizeDreamBundle(manifest, analyses, reducers);
+  assert.equal(first, finalizeDreamBundle(manifest, analyses, reducers), "deterministic bytes");
+  assert.ok(first.endsWith("\n"), "trailing newline (the composeDreamBundle convention)");
+
+  const parsed = JSON.parse(first) as Record<string, unknown>;
+  // The wrapper is the composeDreamBundle shape plus the reducers key — nothing else.
+  assert.deepEqual(Object.keys(parsed), [
+    "schema_version",
+    "commit_sha",
+    "registry_mode",
+    "doc_count",
+    "total_bytes",
+    "lanes",
+    "reducers",
+  ]);
+  assert.equal(parsed.schema_version, "1", "schema_version stays 1");
+  // Each reducer entry is the RAW ECHO shape {angle, ...report} — what the row decoder accepts.
+  const entries = parsed.reducers as Record<string, unknown>[];
+  assert.deepEqual(
+    entries.map((entry) => entry.angle),
+    [...DREAM_REDUCER_ANGLES],
+  );
+  assert.deepEqual(Object.keys(entries[0] ?? {}), [
+    "angle",
+    "stances",
+    "angle_findings",
+    "uncertainties",
+    "stances_omitted",
+    "angle_findings_omitted",
+    "uncertainties_omitted",
+  ]);
+
+  const decoded = decodeFinalizedDreamBundle(parsed, manifest);
+  assert.equal(decoded.ok, true, JSON.stringify(decoded));
+  const value = decoded as { ok: true; analyses: DreamLaneAnalysis[]; reducers: unknown };
+  assert.deepEqual(value.analyses, analyses, "the analyses round-trip byte-equivalently");
+  assert.deepEqual(value.reducers, reducers, "the reducers round-trip byte-equivalently");
+});
+
+test("decodeFinalizedDreamBundle: each refusal arm carries its named detail", () => {
+  const manifest = fixtureManifest();
+  const swap = <T>(items: T[], a: number, b: number): T[] => {
+    const out = [...items];
+    const tmp = out[a] as T;
+    out[a] = out[b] as T;
+    out[b] = tmp;
+    return out;
+  };
+  const arms: { label: string; raw: () => unknown; detail: RegExp }[] = [
+    { label: "non-object", raw: () => "nope", detail: /not an object/ },
+    {
+      label: "the analyses-only mid-wave shape (no reducers key)",
+      raw: () => JSON.parse(composeDreamBundle(manifest, fixtureAnalyses()).content),
+      detail: /no reducers section — the dream wave did not finalize/,
+    },
+    {
+      label: "an unknown wrapper key",
+      raw: () => ({ ...finalizedRaw(), smuggled: 1 }),
+      detail: /unknown wrapper key 'smuggled'/,
+    },
+    {
+      label: "wrong schema_version",
+      raw: () => ({ ...finalizedRaw(), schema_version: "2" }),
+      detail: /schema_version must be the string "1"/,
+    },
+    {
+      label: "a manifest cross-check mismatch",
+      raw: () => ({ ...finalizedRaw(), commit_sha: "other" }),
+      detail: /commit_sha \("other"\) does not match the manifest's \("abc123"\)/,
+    },
+    {
+      label: "a missing lane",
+      raw: () => {
+        const raw = finalizedRaw();
+        raw.lanes = (raw.lanes as unknown[]).slice(0, 1);
+        return raw;
+      },
+      detail: /carries 1 lane\(s\), the manifest has 2 — the lanes must pair exactly/,
+    },
+    {
+      label: "reordered lanes",
+      raw: () => {
+        const raw = finalizedRaw();
+        raw.lanes = swap(raw.lanes as unknown[], 0, 1);
+        return raw;
+      },
+      detail: /lane 1 is "workflow-1", the manifest's lane is 'pi-extension-1'/,
+    },
+    {
+      label: "an unknown lane-entry key",
+      raw: () => {
+        const raw = finalizedRaw();
+        const lane = (raw.lanes as Record<string, unknown>[])[0] as Record<string, unknown>;
+        lane.smuggled = 1;
+        return raw;
+      },
+      detail: /lane entry 1 carries an unknown key 'smuggled'/,
+    },
+    {
+      label: "a lane report the analyst re-decode rejects",
+      raw: () => {
+        const raw = finalizedRaw();
+        const lane = (raw.lanes as { report: { docs: { disposition: string }[] } }[])[0];
+        (lane as { report: { docs: { disposition: string }[] } }).report.docs[0] = {
+          ...(lane as { report: { docs: { disposition: string }[] } }).report.docs[0],
+          disposition: "bogus",
+        } as { disposition: string };
+        return raw;
+      },
+      detail: /dream bundle lane 'pi-extension-1': .*outside the vocabulary/,
+    },
+    {
+      label: "a missing reducer angle",
+      raw: () => {
+        const raw = finalizedRaw();
+        raw.reducers = (raw.reducers as unknown[]).slice(0, 2);
+        return raw;
+      },
+      detail: /carries 2 reducer entrie\(s\) — exactly the 3 fixed angles/,
+    },
+    {
+      label: "an extra reducer entry",
+      raw: () => {
+        const raw = finalizedRaw();
+        const entries = raw.reducers as unknown[];
+        raw.reducers = [...entries, entries[0]];
+        return raw;
+      },
+      detail: /carries 4 reducer entrie\(s\) — exactly the 3 fixed angles/,
+    },
+    {
+      label: "reordered reducer angles (the byte-exact echo refuses)",
+      raw: () => {
+        const raw = finalizedRaw();
+        raw.reducers = swap(raw.reducers as unknown[], 0, 1);
+        return raw;
+      },
+      detail: /reducer 'consolidation-preservation': reducer report echoes angle "currency-accuracy"/,
+    },
+    {
+      label: "a duplicated reducer angle",
+      raw: () => {
+        const raw = finalizedRaw();
+        const entries = raw.reducers as unknown[];
+        raw.reducers = [entries[0], entries[0], entries[2]];
+        return raw;
+      },
+      detail: /reducer 'currency-accuracy': reducer report echoes angle "consolidation-preservation"/,
+    },
+    {
+      label: "an unknown reducer-entry key",
+      raw: () => {
+        const raw = finalizedRaw();
+        const entry = (raw.reducers as Record<string, unknown>[])[0] as Record<string, unknown>;
+        entry.smuggled = 1;
+        return raw;
+      },
+      detail: /reducer entry 'consolidation-preservation' carries an unknown key 'smuggled'/,
+    },
+    {
+      label: "a stance doc outside the proposal universe",
+      raw: () => {
+        const raw = finalizedRaw();
+        const entry = (raw.reducers as { stances: unknown[] }[])[0] as { stances: unknown[] };
+        entry.stances = [stanceRow("docs/learned/gone.md", { disposition: "revise" })];
+        return raw;
+      },
+      detail: /not one of the analysts' non-keep proposals/,
+    },
+  ];
+  for (const arm of arms) {
+    const result = decodeFinalizedDreamBundle(arm.raw(), manifest);
+    assert.equal(result.ok, false, `must refuse: ${arm.label}`);
+    assert.match((result as { detail: string }).detail, arm.detail, arm.label);
+  }
+});
+
+test("decodeFinalizedDreamBundle: the pinned row-level policy — an extra key INSIDE a stance row is ignored", () => {
+  // The other half of the closed-wrapper/whitelist-projected-row policy: closure is enforced
+  // only at the levels this decoder authors; INSIDE a row the reused row decoders are the
+  // single authority — whitelisted construction, so the extra key never survives into the
+  // typed value (and never refuses).
+  const raw = finalizedRaw();
+  const stances = (raw.reducers as { stances: Record<string, unknown>[] }[])[0]?.stances ?? [];
+  (stances[0] as Record<string, unknown>).smuggled = "an extra row-level key";
+  const result = decodeFinalizedDreamBundle(raw, fixtureManifest());
+  assert.equal(result.ok, true, JSON.stringify(result));
+  const decoded = result as { ok: true; reducers: DreamReducerAnalysis[] };
+  const stance = decoded.reducers[0]?.report.stances[0];
+  assert.deepEqual(stance, typedStance("docs/learned/pi/context-injection.md"));
+  assert.deepEqual(Object.keys(stance ?? {}).sort(), [
+    "disposition",
+    "doc",
+    "evidence_checked",
+    "reason",
+    "stance",
+  ]);
 });
 
 // ---------------------------------------------------------------- the proposal universe
