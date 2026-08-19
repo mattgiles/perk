@@ -21,6 +21,10 @@ import {
   type WaveScriptReceipt,
 } from "./reportWave.ts";
 
+/** The run-scoped dream-manifest filename — the TS mirror of the Python §8.59 literal (the
+ * `HARVEST_MANIFEST_FILENAME` precedent; no cross-plane codegen). */
+export const DREAM_MANIFEST_FILENAME = "dream-manifest.json";
+
 /** The per-doc disposition vocabulary — exactly the four the analyst def lands. */
 export const DREAM_DISPOSITIONS = ["keep", "revise", "merge-into", "retire"] as const;
 
@@ -523,9 +527,10 @@ const CONFIDENCE_VALUES = new Set(["high", "medium", "low"]);
 /**
  * String caps are measured in Unicode CODE POINTS — JSON Schema `maxLength` semantics, so the
  * schema and this re-decode agree on the measure (UTF-16 `.length` would reject engine-valid
- * astral strings).
+ * astral strings). Exported so the reducer wave's re-decode (`dreamReducerWave.ts`) shares the
+ * ONE code-point measure across both dream re-decodes.
  */
-function codePointLength(s: string): number {
+export function codePointLength(s: string): number {
   let length = 0;
   for (const _ of s) length += 1;
   return length;
@@ -535,8 +540,9 @@ function isDisposition(value: unknown): value is DreamDisposition {
   return typeof value === "string" && (DREAM_DISPOSITIONS as readonly string[]).includes(value);
 }
 
-/** Decode one capped string array: items within `maxItems`, each within `maxChars` code points. */
-function decodeStringArray(
+/** Decode one capped string array: items within `maxItems`, each within `maxChars` code points.
+ * Exported for the reducer wave's re-decode (one shared cap-checking helper). */
+export function decodeStringArray(
   raw: unknown,
   maxItems: number,
   maxChars: number,
@@ -827,6 +833,12 @@ export interface DreamWaveOutcome {
   analyses: DreamLaneAnalysis[];
   failures: DreamLaneFailure[];
   receipt: WaveScriptReceipt;
+  /**
+   * The code-owned orchestration `WaveLane.key`s in launch order — receipt-correlation
+   * telemetry ONLY (they correlate with `receipt.children[*].key`); semantic lane identity
+   * stays `DreamLaneAnalysis.lane`/`DreamLaneFailure.lane`.
+   */
+  requestedKeys: string[];
 }
 
 /**
@@ -910,5 +922,6 @@ export async function runDreamAnalystWave(
     analyses,
     failures,
     receipt: result.receipt,
+    requestedKeys: planned.map((lane) => lane.key),
   };
 }

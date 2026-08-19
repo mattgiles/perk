@@ -49,7 +49,8 @@ export interface PerkConfig {
    * The agent-keyed `[models.subagents]` table: a per-agent model override for each perk-owned
    * project agent (`pr-reviewer`, `review-classifier`, `objective-explorer`, `conflict-resolver`,
    * `learn-analyst`, `adversarial-reviewer`, `review-angle-selector`, `draft-reviewer`,
-   * `harvest-analyst` — consumed by `run_harvest_wave` at execute time — and the
+   * `harvest-analyst` — consumed by `run_harvest_wave` at execute time — `dream-analyst` and
+   * `dream-reducer` — consumed by `run_dream_wave` at execute time — and the
    * dev-only `session-auditor`, whose def is repo-local to perk's own repository
    * (`.pi/agents/perk-dev/session-auditor.md`, never delivered by `perk init`), so the key is
    * dormant in consumer repos). Each configured
@@ -75,6 +76,8 @@ export interface PerkConfig {
     "review-angle-selector"?: string;
     "draft-reviewer"?: string;
     "harvest-analyst"?: string;
+    "dream-analyst"?: string;
+    "dream-reducer"?: string;
     "session-auditor"?: string;
   };
   /**
@@ -326,6 +329,8 @@ const SUBAGENT_KEYS = [
   "review-angle-selector",
   "draft-reviewer",
   "harvest-analyst",
+  "dream-analyst",
+  "dream-reducer",
   // Dev-only: the perk-dev session-audit judgment wave's auditor (dormant in consumer repos).
   "session-auditor",
 ] as const;

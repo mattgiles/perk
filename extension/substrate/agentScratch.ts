@@ -26,6 +26,7 @@ export const REPORT_ONLY_CHILD_AGENTS = [
   "perk.adversarial-reviewer",
   "perk.draft-reviewer",
   "perk.dream-analyst",
+  "perk.dream-reducer",
   "perk.harvest-analyst",
   "perk.learn-analyst",
   "perk.objective-explorer",
