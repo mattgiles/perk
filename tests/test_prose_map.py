@@ -280,7 +280,7 @@ def test_tool_field_governance_findings_have_exact_contract_messages() -> None:
 def test_repository_prose_map_is_complete_and_current(built: BuildResult) -> None:
     assert built.catalog.findings == ()
     assert len(built.catalog.units) > 150
-    assert len(built.catalog.governed_tools) == 35
+    assert len(built.catalog.governed_tools) == 36
     assert (ROOT / RENDERED_PATH).read_text(encoding="utf-8") == built.rendered
 
 
