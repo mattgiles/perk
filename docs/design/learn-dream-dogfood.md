@@ -161,7 +161,9 @@ restored direct `{agent, task}` public execution, so the "Direct execution was r
 marker is stale even at the guidance-verified 0.50.0 tarball. Until successor node 5.5
 reconciles the guidance/probes, a rerun applies the reviewed disposition recorded in Part B:
 run on the naturally-installed version with the single unmet marker disclosed;
-`subagent-bridge-config` must still read `ok`.)* A focused pin proving a product
+`subagent-bridge-config` must still read `ok`.)* *(resolved 2026-08-20 by objective #1892
+node 5.5: guidance/probes reconciled — the public-execution probe row dropped, guidance
+re-verified at 0.52.1)* A focused pin proving a product
 defect follows the scope boundary — a D-row + successor node, never an in-node fix; the gate
 records a bounded FAIL rather than spending a dream attempt on a known-bad product.
 
@@ -680,7 +682,9 @@ carries this exact label.
    deviation from Part A's both-rows-`ok` requirement, recorded here and noted in Part A;
    successor node **1892/5.5** carries the guidance/probe re-verify. Affected step:
    preflight only (every dream-relevant orchestration probe was satisfied; the live wave ran
-   14 + 3 lanes to completion on 0.52.1).
+   14 + 3 lanes to completion on 0.52.1). *(resolved 2026-08-20 by objective #1892 node 5.5:
+   guidance/probes reconciled — the public-execution probe row dropped, guidance re-verified
+   at 0.52.1)*
 
 No dream defect was demonstrated; the state machine's product-FAIL arms were never invoked.
 
@@ -709,6 +713,8 @@ pass. Offline pins for each ran green in this pass's preflight:
   marked `skipped`); equivalence rests on the offline parity pins cited in the criteria
   table, recorded as not-live-proven with no live successor.
 - **The `subagent-compat` guidance re-verify** — successor node **1892/5.5** (D2).
+  *(resolved 2026-08-20 by objective #1892 node 5.5: guidance/probes reconciled — the
+  public-execution probe row dropped, guidance re-verified at 0.52.1)*
 
 ### Teardown/census attestations
 

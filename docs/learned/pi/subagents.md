@@ -77,8 +77,10 @@ fragment forced).
 
 A committed frontmatter `model` default + a **top-level workflow-level `model` on the one
 `subagent` workflowScript call** (a default flowing onto every lane — single-child runs included;
-there are no non-workflowScript spawns anymore, so there is no per-call inline `model` shape
-left). `/pr-review`'s `run_pr_review_wave` tool reads `[models.subagents] pr-reviewer` from
+public direct `{agent, task}` is a real top-level spawn shape again since the 0.49 restoration,
+and a top-level `model` on such a call still works because the conversion spreads non-child
+params as workflow defaults — the workflow-level-`model` knob guidance itself stands).
+`/pr-review`'s `run_pr_review_wave` tool reads `[models.subagents] pr-reviewer` from
 `.perk/config.toml` (overlaid by `.perk/local.toml` for per-user override) and the wave module
 applies it as the wave's workflow-level `model` default — **no committed-file churn**.
 
@@ -247,8 +249,10 @@ expecting `perk/_agents/<name>.md`) + **this doc's agent listing** (the census i
 adding an agent should touch the doc that teaches adding agents — that is how the listing stays
 current instead of drifting). `test_doctor` / `test_init_idempotent` auto-cover delivery. The
 model is configurable via `[models.subagents] <name>`, injected as the **top-level workflow-level
-`model`** on the one `subagent` workflowScript call — a default flowing onto every lane,
-single-child runs included (agentOverrides don't reach project agents — see the top of this doc). The census has been followed
+`model`** on the one `subagent` workflowScript call — a default flowing onto every lane of
+perk's own wave calls (all code-owned workflowScript spawns — perk's convention, not an
+upstream constraint), single-child runs included (agentOverrides don't reach project agents —
+see the top of this doc). The census has been followed
 verbatim on real additions (most recently the agent since renamed `adversarial-reviewer`, added as
 `guest-reviewer`) and worked cleanly — a **rename** walks the identical census (plus a `git mv` of
 the source and a reconverge that prunes the old delivered def) — the only
@@ -416,7 +420,18 @@ shape:
   resolution, not a report. `/learn`'s analyst fan-out likewise rides the report-wave module
   (`extension/waves/learnWave.ts` → `runReportWave`, behind `run_learn_wave`) — an async
   RPC-spawned all-settled `runs.all` whose script the module renders, with engine-validated
-  structured reports instead of fenced JSON.
+  structured reports instead of fenced JSON. **Update (2026-08-20, re-verified at 0.52.1):**
+  pi-subagents 0.49.0 (#1059) RESTORED public direct `{agent, task}` single-child execution —
+  `normalizePublicSubagentExecution` now converts it into a generated one-child
+  `runs.run("main", …)` workflowScript (the child gets `output: true` by default; the remaining
+  top-level params — `model`, `context`, etc. — ride as workflow defaults; with
+  `asyncByDefault: false` the converted run stays synchronous when `async` is omitted, 0.52.0
+  #1257) — so `workflowScript` remains the sole MULTI-agent orchestration surface while direct
+  `{agent, task}` is the idiomatic one-child shape (sugar over the same workflow path —
+  streaming/receipts identical by construction; upstream's own tool description teaches this
+  split, while some packaged upstream skill prose still lags it). perk's code-owned wave spawns
+  are unaffected; `conflict-resolver`'s explicit-return one-child workflowScript stays
+  deliberate (perk controls the compact `{key, ok, error, output}` projection).
 
 ### RPC-spawned async waves stream identically (the settled 0.45.0 verdict)
 
@@ -470,20 +485,27 @@ The live-run watch axes — all four **confirmed live** across the three streami
   as one held turn.
 
 **Upstream-drift caveat:** the load-bearing delivery mechanics above are **source-read-derived**
-(pi-subagents `src/` at 0.43.0) — an upstream change to the supervisor-channel or workflow
+(pi-subagents `src/` at 0.43.0; re-verified at **0.52.1** covering the supervisor-channel
+delivery chain, the v1 RPC seam, the workflow-structured-output mechanics, and public
+execution) — an upstream change to the supervisor-channel or workflow
 contract invalidates the loop shape silently; re-verify on pi-subagents bumps (the grouped
 `tasks[]` removal across upstream v0.41.0–v0.42.1 is exactly this failure mode: it live-broke
-both review doors with no test tripping). The doctor `subagent-compat` check is now the
+both review doors with no test tripping). Since 0.51.0 the transport is platform-split —
+watcher platforms (e.g. linux) use per-request-dir + root fs-watchers plus a 5s safety poller,
+with a ≤500ms poll fallback on watcher failure; darwin uses only a demand-gated ≤500ms poller;
+win32 an always-on ≤500ms poller — delivery semantics and the relay-loop shape unchanged. The
+doctor `subagent-compat` check is now the
 early-warning tripwire for **surface-level** drift: it probes the installed source for marker
 presence (`workflowScript`, `outputSchema`/`structuredOutput`, `"subagent_wait"`, the
 supervisor-channel trio `"contact_supervisor"`/`"subagent_supervisor_request"`/`triggerTurn`,
-the workflowScript-only public-execution cutover (`Direct execution was removed`), the v1 RPC
+the v1 RPC
 events (`subagents:rpc:v1:*`), retained children (`listRetainedChildren`) + the retained-child
 resume contract (`resume and agent are mutually exclusive`), the statement-body
 explicit-return vm wrapper (`(async () => {`), and the 0.45.0 completion-receipt surfaces —
 the wait-completion projection (`toWaitCompletion`/`recordWaitCompletion`), `subagent_wait`'s
 `completions` details, and the serialized workflow child `runId: child.runId`) and warns
-loudly on divergence. Substring
+loudly on divergence; public execution is deliberately unprobed since the 0.49 restoration —
+no stable load-bearing literal distinguishes a compatible surface there. Substring
 presence only — the deeper wait/streaming mechanics remain source-read-derived and still
 warrant a manual re-verify on bumps.
 
@@ -579,8 +601,10 @@ doctor `subagent-compat` probes grown over `rpc.ts` are the drift tripwire):
   `{methods[], capabilities: {asyncSpawn: true, …}, events: {…, asyncComplete}, session}`.
   `events.asyncComplete` is the ADVERTISED async-complete channel name (currently
   `"subagent:async-complete"`); perk's adapter takes it from ping rather than pinning it.
-- **RPC `spawn` is async-only** (`async: false` ⇒ `invalid_params`) and workflowScript-only
-  (params go through `normalizePublicSubagentExecution`; direct `{agent, task}` is rejected).
+- **RPC `spawn` is async-only** (`async: false` ⇒ `invalid_params`); params go through
+  `normalizePublicSubagentExecution`, which since 0.49 ACCEPTS a direct `{agent, task}` and
+  converts it onto the workflow path — never rejected (a prior "rejected" claim here was
+  stale). perk's adapter always sends workflowScript, so nothing perk-side changes.
   The success `data.details` carries `asyncId` + `asyncDir` identifying the detached run.
 - **The async-complete event** payload spreads the result-file data plus `runId`/`triggerTurn`;
   match a spawned run via `asyncDir` (fall back to `id` — both optional, at least one present).

@@ -194,10 +194,10 @@ Distinct from the fixed `[models.subagents]` model-override table. Author your o
 `.pi/agents/` **except** the perk-owned `.pi/agents/perk/` subdir (perk rewrites and prunes that
 subdir on every `perk init`). The runtime name comes from the **frontmatter** `name` (+ optional
 `package` — perk reserves `package: perk`), and `model` is set there (not in `[models.subagents]`). Invoke it
-via pi's native `subagent` tool in `workflowScript` mode by its runtime name — direct
-`{agent, task}` execution was removed, so a run is an explicit-return one-child workflowScript
-(`return runs.run("main", {agent: "my-reviewer", task: "…"})`); `subagent { action: "list" }`
-still enumerates discovered agents. pi-subagents' **builtin** agents don't appear: perk converges
+via pi's native `subagent` tool by its runtime name — `subagent({agent: "my-reviewer",
+task: "…"})` (pi-subagents ≥ 0.49 converts a direct one-child call onto the workflow path);
+use `workflowScript` for multi-child orchestration or a custom result projection;
+`subagent { action: "list" }` still enumerates discovered agents. pi-subagents' **builtin** agents don't appear: perk converges
 the constant `"subagents": {"disableBuiltins": true}` into `.pi/settings.json` in every perk repo (engine-only
 borrow — perk ships its own `perk.*` agents). To re-enable one builtin, add a project-settings
 per-agent `"subagents": {"agentOverrides": {"<name>": {"disabled": false}}}` entry; it survives

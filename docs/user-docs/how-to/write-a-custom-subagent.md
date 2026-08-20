@@ -8,7 +8,7 @@ sidebarGroup: "Customization"
 
 # How to write a custom subagent
 
-Add one project agent and execute it through the `subagent` tool's workflow surface.
+Add one project agent and run it directly through the `subagent` tool.
 
 ## Steps
 
@@ -37,17 +37,14 @@ Add one project agent and execute it through the `subagent` tool's workflow surf
    subagent({ action: "list" })
    ```
 
-4. **Run one child through `workflowScript`.** Use a stable child key and explicitly return the
-   `runs.run` result:
+4. **Run one child directly.** Pass the agent's runtime name and the task:
 
    ```js
-   subagent({
-     workflowScript: `return runs.run("specialist-review", {
-       agent: "my-specialist",
-       task: "Review src/payments.ts"
-     })`
-   })
+   subagent({ agent: "my-specialist", task: "Review src/payments.ts" })
    ```
+
+   pi-subagents converts a direct one-child call onto the workflow path internally; use
+   `workflowScript` when you need multi-child orchestration or a custom result projection.
 
 ## Builtins in a perk repo
 
@@ -60,7 +57,7 @@ perk preserves sibling user-owned `subagents` settings when it reconverges its o
 
 ## Expected result
 
-`subagent({ action: "list" })` reports the project agent as executable, and the workflow returns that
+`subagent({ action: "list" })` reports the project agent as executable, and the run returns that
 agent's focused review output.
 
 ## Related

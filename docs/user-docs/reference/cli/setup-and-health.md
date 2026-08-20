@@ -93,8 +93,8 @@ overrides via `pi config -l`; see
 The `package` group also carries the report-only `subagent-compat` check: it reads the installed
 pi-subagents version and probes the installed source for the orchestration surfaces perk's
 guidance assumes (`workflowScript` orchestration, the `outputSchema` → `structuredOutput`
-results, the `subagent_wait` async wait tool, the supervisor channel, the
-`workflowScript`-only public-execution cutover, the v1 extension RPC events, retained
+results, the `subagent_wait` async wait tool, the supervisor channel, the v1 extension RPC
+events, retained
 children + the retained-child resume contract, the statement-body explicit-return script
 wrapper, the completion-receipt surfaces — the wait-completion projection,
 `details.completions` on `subagent_wait`, and the serialized workflow child `runId` — and the
