@@ -817,7 +817,6 @@ def test_subagent_compat_probe_table_covers_verified_surfaces():
     # version: the surfaces stay probed, without pinning the table shut against future rows.
     probed_files = {relpath for _label, relpath, _required in _SUBAGENT_COMPAT_PROBES}
     assert probed_files >= {
-        "src/extension/public-execution.ts",
         "src/extension/rpc.ts",
         "src/runs/background/retained-children.ts",
         "src/workflows/scripted-workflow.ts",
@@ -834,11 +833,11 @@ def test_subagent_compat_probe_table_covers_verified_surfaces():
 
 
 def test_subagent_compat_acceptance_probe_is_pinned_exactly():
-    # The 0.50.0 re-verify pins: the guidance-verified version itself, and the load-bearing
+    # The 0.52.1 re-verify pins: the guidance-verified version itself, and the load-bearing
     # acceptance-disable probe row IN FULL (label + file + both markers). The generated fake
     # tree derives from the probe table, so without this exact pin the suite would stay green
     # if the version bump, the row's label, or either marker were dropped.
-    assert _SUBAGENTS_GUIDANCE_VERIFIED_VERSION == "0.50.0"
+    assert _SUBAGENTS_GUIDANCE_VERIFIED_VERSION == "0.52.1"
     assert (
         "explicit acceptance disable",
         "src/runs/shared/acceptance.ts",

@@ -28,6 +28,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `perk doctor`: the `subagent-compat` check no longer warns on every published pi-subagents ≥ 0.49 — upstream restored the direct one-child `{agent, task}` public execution surface, so the probe row pinning the old public-execution cutover marker is dropped and perk's subagent guidance is source-re-verified at 0.52.1 (the guidance-verified version bumped from 0.50.0) (3975eea1)
 - Multiline diagnostics routed through `report()` no longer write raw stderr across Pi's interactive layout: slash commands show a one-line managed headline plus complete display-only transcript detail, while equivalent model tools retain the full diagnostic in their Result. (9e304195)
 
 ## [3.0.0] - 2026-08-13

@@ -625,7 +625,7 @@ _SUBAGENTS_PACKAGE_DIRNAME = "pi-subagents"
 
 # The pi-subagents version perk's guidance was source-read against; bumped only on a
 # deliberate re-verify of the guidance (never a pin — the package stays unpinned).
-_SUBAGENTS_GUIDANCE_VERIFIED_VERSION = "0.50.0"
+_SUBAGENTS_GUIDANCE_VERIFIED_VERSION = "0.52.1"
 
 # One row per surface expectation perk's subagent guidance assumes:
 # (label, relative file path in the installed package, required substrings). Probes are
@@ -641,11 +641,11 @@ _SUBAGENT_COMPAT_PROBES: tuple[tuple[str, str, tuple[str, ...]], ...] = (
         "src/intercom/native-supervisor-channel.ts",
         ('"contact_supervisor"', '"subagent_supervisor_request"', "triggerTurn"),
     ),
-    (
-        "workflowScript-only public execution",
-        "src/extension/public-execution.ts",
-        ("Direct execution was removed",),
-    ),
+    # Public execution is deliberately unprobed: upstream restored direct `{agent, task}`
+    # execution (>= 0.49) and converts it onto the workflow path, so no stable load-bearing
+    # literal distinguishes a compatible surface in public-execution.ts. The guidance relies
+    # on workflowScript orchestration (probed via schemas.ts/scripted-workflow.ts), not on
+    # any public-execution cutover.
     (
         "v1 extension RPC events",
         "src/extension/rpc.ts",
@@ -821,7 +821,7 @@ def _subagent_compat_check(root: Path) -> Check:
     detail = (
         "probed surfaces: workflowScript + outputSchema/structuredOutput + subagent_wait + "
         "supervisor channel (contact_supervisor, subagent_supervisor_request, triggerTurn) + "
-        "workflowScript-only public execution + v1 RPC events (subagents:rpc:v1:*) + "
+        "v1 RPC events (subagents:rpc:v1:*) + "
         "retained children/resume + statement-body explicit-return scripts + "
         "completion receipts (wait-completion projection, subagent_wait details.completions, "
         "serialized workflow child runId) + streaming-wave delivery chain (session-scoped "
