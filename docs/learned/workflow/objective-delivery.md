@@ -34,8 +34,8 @@ history a future delivery/recovery node should not re-derive.
 - "Residuals" is a flagged-ownership register (who owns each deferred edge), not current
   behavior.
 - `Delivery` from `resolve_delivery(repo_root)` is the canonical operation boundary; nominal
-  aggregate ABCs own production adapters and `_fakes`, while legacy reconstruction seams remain
-  internal compatibility details — "The seam map".
+  aggregate ABCs own production adapters and `_fakes`; the reconstruction-era compatibility
+  seams are deleted (retirement guard-pinned) — "The seam map".
 - Façade migrations use narrow internal Protocols, complete-or-nothing laziness, bounded error
   subsets, explicit consent, real-runtime tests, and exact export cuts — "Façade-slice migration
   pattern".
@@ -61,11 +61,15 @@ The modules below remain important implementation seams, but they are behind the
 - `land.py`, `landing.py`, and `finalize.py` own landing readiness, journaled atomic mutation,
   and final bookkeeping.
 
-`TrainReads` and similar reconstruction-era composition seams still exist for operation families
-not yet migrated, but they are internal compatibility seams rather than the public read boundary.
-New callers start at `Delivery`; later slices retire old seams only when their complete caller and
-export cuts are proved. Operation work still depends on §8.43's exact journal semantics — amend
-the contract with behavior changes rather than bypassing the façade.
+The reconstruction-era compatibility chain (`observe.TrainReads`, `observe.resolve_train_reads`,
+`observe.reconstruct_repo_train`, `transfer.resolve_transfer_seams`) is **deleted** — the façade
+constructs its transfer/recover seams directly in `facade.py` (binding
+`_reconstruct_train_status` for roll-forward), and train reconstruction survives only as the
+package-internal `train.reconstruct_train` (no out-of-package caller, retired from the export
+ledger). The retirement is guard-pinned by `tests/test_delivery_facade.py`'s `_RETIRED_EXPORTS`
+disjointness assertion and recorded in `docs/planning/stacked-prs/final-census.md`. New callers
+start at `Delivery`. Operation work still depends on §8.43's exact journal semantics — amend the
+contract with behavior changes rather than bypassing the façade.
 
 ## The three append-discipline holes in the naive "rescan → one retry → typed error" shape
 
@@ -139,9 +143,8 @@ The canonical read begins at `resolve_delivery(repo_root).status(...)`. The faç
 authority owns repository and backend wiring, then delegates projection to the pure core in
 `src/perk/delivery/train.py`. `src/perk/github/stacks.py` remains the wire adapter and
 `src/perk/delivery/observe.py` the production conversion leaf, including the hard-fail versus
-tolerant-degrade split. Tests may drive those internal seams narrowly, but production callers do
-not assemble a `TrainReads` bundle themselves. The reconstruction seam survives only for
-not-yet-migrated operation families and compatibility tests.
+tolerant-degrade split. There is no public reconstruction seam: `train.reconstruct_train` is
+package-internal (the façade's status path calls it), and the old `TrainReads` bundle is deleted.
 
 ### Fail-open classification arms are the recurring trap in projection pipelines
 
@@ -485,9 +488,10 @@ anything else.
 ## Residual proof bounds (façade operation slices already landed)
 
 The façade slices through status, prepare, transfer, publish, sync, recover, and land are current
-behavior, not deferred design. The remaining bullets are proof bounds or future schema edges; the
-continued existence of internal reconstruction seams is a migration detail, not evidence that the
-façade is optional.
+behavior, not deferred design. The remaining bullets are proof bounds or future schema edges;
+internal train reconstruction lives behind the façade, and the reconstruction-era compatibility
+chain is gone (retirement pinned by `tests/test_delivery_facade.py`'s `_RETIRED_EXPORTS`
+disjointness assertion; recorded in `docs/planning/stacked-prs/final-census.md`).
 
 - `before`/`after`/`observed` are opaque validated mappings — kind-specific shapes belong to the
   operation nodes; only the envelope is pinned.
