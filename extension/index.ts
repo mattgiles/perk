@@ -21,9 +21,13 @@ import { registerLand } from "./doors/land.ts";
 import { registerLearn } from "./doors/learn.ts";
 import { CODE_DOOR, DOCS_DOOR, registerLearnFactoryDoor } from "./doors/learnFactory.ts";
 import { registerLifecycleGates } from "./doors/lifecycleGates.ts";
-import { registerObjectiveReviewBrowser } from "./doors/objectiveReviewBrowser.ts";
+import {
+  openObjectiveReviewSurface,
+  registerObjectiveReviewBrowser,
+} from "./doors/objectiveReviewBrowser.ts";
 import { registerObjectiveStack } from "./doors/objectiveStack.ts";
-import { registerPlanReviewBrowser } from "./doors/planReviewBrowser.ts";
+import { plannotatorPresent } from "./doors/plannotatorHandoff.ts";
+import { openPlanReviewSurface, registerPlanReviewBrowser } from "./doors/planReviewBrowser.ts";
 import { registerPrReview } from "./doors/prReview.ts";
 import { registerPrReviewBrowser } from "./doors/prReviewBrowser.ts";
 import { registerPrReviewDynamic } from "./doors/prReviewDynamic.ts";
@@ -166,8 +170,15 @@ export default function (pi: ExtensionAPI) {
   // `plan_review`, perk's UNIVERSAL review door: plannotator-selected → the event-bus
   // bridge; ANY other selection → the first-party in-TUI editor review. It takes `gating` only to
   // COMPOSE the approvalSave seam on an APPROVED review (auto-save → D1a gate exit) — Invariant 1
-  // holds: the door composes the gate through the seam, never owns it.
-  registerPlanReview(pi, gating);
+  // holds: the door composes the gate through the seam, never owns it. The injected wave-launch
+  // deps power the plannotator launch chooser (§8.23): the presence probe + the two door open
+  // cores are composed HERE so planReview.ts imports nothing from door modules (the value-import
+  // cycle break — planReviewBrowser.ts already value-imports planReview.ts).
+  registerPlanReview(pi, gating, {
+    present: () => plannotatorPresent(pi),
+    plan: (ctx, opts) => openPlanReviewSurface(pi, ctx, gating, opts),
+    objective: (ctx, opts) => openObjectiveReviewSurface(pi, ctx, gating, opts),
+  });
 
   // Objective-author context injection (the objective mirror of plan mode's authoring
   // half). Keyed off (read-only gate AND stage === objective-author); planMode defers to it.

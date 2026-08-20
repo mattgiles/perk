@@ -41,6 +41,7 @@ import type { StartedSurface } from "./plannotatorHandoff.ts";
 import {
   observePlanReviewReadiness,
   openPlanReviewAndGuide,
+  openPlanReviewSurface,
   planReviewBrowserGuidance,
   routePlanReviewDecision,
 } from "./planReviewBrowser.ts";
@@ -634,7 +635,7 @@ test("open: a post-degrade decision is ignored loudly (never routed into a save)
   );
 });
 
-test("open: primes BOTH surfaces with the deterministic URL/plan mode, injects ONE URL-free guidance, clears on settle", async () => {
+test("open core: primes BOTH surfaces with the deterministic URL/plan mode, RETURNS URL-free guidance (nothing sent), clears on settle", async () => {
   const cwd = scaffoldRepo();
   const bus = fakeBus();
   const injected: string[] = [];
@@ -665,7 +666,7 @@ test("open: primes BOTH surfaces with the deterministic URL/plan mode, injects O
     signal: undefined,
   } as unknown as ExtensionContext;
 
-  await openPlanReviewAndGuide(
+  const guidance = await openPlanReviewSurface(
     pi,
     ctx,
     fakeGating(false),
@@ -685,10 +686,17 @@ test("open: primes BOTH surfaces with the deterministic URL/plan mode, injects O
   assert.equal(requests.length, 1);
   assert.equal(requests[0]?.portAtEmit, "45001");
   assert.equal(requests[0]?.payload?.planContent, "# The draft\n");
-  // ONE guidance injection: custom rendered, no server address, entry report names the lane.
-  assert.equal(injected.length, 1, "one guidance injection");
-  assert.match(injected[0] ?? "", /check the rollback story/);
-  assert.doesNotMatch(injected[0] ?? "", /127\.0\.0\.1|localhost|45001/);
+  // The core RETURNS the guidance (template launch line + the binding suffix) and sends nothing
+  // itself — delivery belongs to the caller (the door wrapper / plan_review's wave arm).
+  assert.equal(injected.length, 0, "the core never sends — the caller owns delivery");
+  assert.match(guidance ?? "", /start_draft_review_wave/, "the template launch line");
+  assert.match(
+    guidance ?? "",
+    /Follow the `perk-plan-review-browser` skill/,
+    "the command:plan-review-browser binding suffix rides the returned guidance",
+  );
+  assert.match(guidance ?? "", /check the rollback story/);
+  assert.doesNotMatch(guidance ?? "", /127\.0\.0\.1|localhost|45001/);
   assert.ok(
     notified.some(
       (n) => n.severity === "info" && n.message.includes("custom lane: check the rollback story"),

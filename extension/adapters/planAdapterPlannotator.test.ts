@@ -1,7 +1,7 @@
 // The plannotator plan adapter (augment posture, injection + bridge only):
 // injection only when (gate active AND plannotator-plan selected) — three content flavors, one
-// customType (the plan bridge context; the objective flavor in an objective-author session; the
-// gist flavor in a gist-author session) —
+// customType (the plan bridge context; the objective flavor in an objective-authoring session —
+// objective-author OR objective-save; the gist flavor in a gist-author session) —
 // stale-marker strip on deselect (all flavors), and the pure event-bus bridge core — the bounded handshake
 // (timeout / unavailable), the human decision (approved / denied + feedback), the turn-abort
 // path, and the per-review result-listener lifecycle (disposed via the `bus.on` unsubscribe).
@@ -147,6 +147,34 @@ test("objective-author session: the OBJECTIVE-flavored bridge context is injecte
       content.includes("[PLAN ADAPTER: PLANNOTATOR]"),
       false,
       "the plan marker is not injected in an objective-author session",
+    );
+  } finally {
+    h.dispose();
+  }
+});
+
+test("objective-save session: the OBJECTIVE flavor is injected (not the plan flavor)", async () => {
+  // plan_review routes BOTH objective stages to the objective review arm, so the adapter
+  // context (the carrier of the objective review-surface delta) must reach objective-save too.
+  const cwd = scaffoldRepo({
+    handoff: { runId: "01RID", mode: "read-only", stage: "objective-save" },
+  });
+  selectPlannotator(cwd);
+  const h = await loadPerkSession({
+    cwd,
+    sessionManager: SessionManager.inMemory(cwd),
+    env: { PERK_RUN_ID: "01RID" },
+  });
+  try {
+    const injected = await h.emitBeforeAgentStart();
+    const bridge = injected.filter((m) => m.customType === PLAN_ADAPTER_PLANNOTATOR_CONTEXT_TYPE);
+    assert.equal(bridge.length, 1, "exactly one bridge context injected");
+    const content = String(bridge[0]?.content);
+    assert.equal(content, OBJECTIVE_ADAPTER_PLANNOTATOR_CONTEXT, "the objective flavor");
+    assert.equal(
+      content.includes("[PLAN ADAPTER: PLANNOTATOR]"),
+      false,
+      "the plan flavor is not injected in an objective-save session",
     );
   } finally {
     h.dispose();

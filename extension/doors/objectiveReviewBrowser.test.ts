@@ -47,6 +47,7 @@ import {
   objectiveReviewBrowserGuidance,
   observeObjectiveReviewReadiness,
   openObjectiveReviewAndGuide,
+  openObjectiveReviewSurface,
   routeObjectiveReviewDecision,
 } from "./objectiveReviewBrowser.ts";
 import type { StartedSurface } from "./plannotatorHandoff.ts";
@@ -608,7 +609,7 @@ test("decision: aborted → silent; unavailable → error report only (the obser
   );
 });
 
-// ------------------------------------------------- openObjectiveReviewAndGuide (fake deps + bus)
+// ---------------------------------------------- openObjectiveReviewSurface (fake deps + bus)
 
 /** A minimal in-process event bus (the pi.events shape the bridge speaks). */
 function fakeBus(): {
@@ -710,7 +711,7 @@ test("open: a post-degrade decision is ignored loudly (never routed into a save)
   );
 });
 
-test("open: primes BOTH surfaces (plan mode + objective draft type), injects ONE URL-free guidance, clears on settle", async () => {
+test("open core: primes BOTH surfaces (plan mode + objective draft type), RETURNS URL-free guidance (nothing sent), clears on settle", async () => {
   const cwd = scaffoldRepo();
   const bus = fakeBus();
   const injected: string[] = [];
@@ -741,7 +742,7 @@ test("open: primes BOTH surfaces (plan mode + objective draft type), injects ONE
     signal: undefined,
   } as unknown as ExtensionContext;
 
-  await openObjectiveReviewAndGuide(
+  const guidance = await openObjectiveReviewSurface(
     pi,
     ctx,
     fakeGating(false),
@@ -775,10 +776,17 @@ test("open: primes BOTH surfaces (plan mode + objective draft type), injects ONE
   assert.equal(requests[0]?.payload?.planContent, RENDERED);
   assert.match(requests[0]?.payload?.planContent ?? "", /## Roadmap/);
   assert.doesNotMatch(requests[0]?.payload?.planContent ?? "", /schema_version/);
-  // ONE guidance injection: custom rendered, no server address, entry report names the lane.
-  assert.equal(injected.length, 1, "one guidance injection");
-  assert.match(injected[0] ?? "", /check the dependency story/);
-  assert.doesNotMatch(injected[0] ?? "", /127\.0\.0\.1|localhost|45001/);
+  // The core RETURNS the guidance (template launch line + the binding suffix) and sends nothing
+  // itself — delivery belongs to the caller (the door wrapper / plan_review's wave arm).
+  assert.equal(injected.length, 0, "the core never sends — the caller owns delivery");
+  assert.match(guidance ?? "", /start_draft_review_wave/, "the template launch line");
+  assert.match(
+    guidance ?? "",
+    /Follow the `perk-objective-review-browser` skill/,
+    "the command:objective-review-browser binding suffix rides the returned guidance",
+  );
+  assert.match(guidance ?? "", /check the dependency story/);
+  assert.doesNotMatch(guidance ?? "", /127\.0\.0\.1|localhost|45001/);
   assert.ok(
     notified.some(
       (n) => n.severity === "info" && n.message.includes("custom lane: check the dependency story"),

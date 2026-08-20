@@ -15,18 +15,29 @@ import { join } from "node:path";
 import { test } from "node:test";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
-import { type SessionDataCtx, writeSessionArtifact } from "../substrate/sessionData.ts";
+import {
+  readSessionArtifact,
+  type SessionDataCtx,
+  writeSessionArtifact,
+} from "../substrate/sessionData.ts";
 import type { ToolGating } from "../substrate/toolGating.ts";
 import type { EntrySink } from "../substrate/workflowState.ts";
 import { WORKFLOW_STATE_TYPE } from "../substrate/workflowState.ts";
 import type { ReportTarget } from "../surfaces/report.ts";
 import { loadPerkSession, scaffoldRepo } from "../testing/harness.ts";
+import { GIST_DRAFT_ARTIFACT } from "./gistDraft.ts";
+import { OBJECTIVE_DRAFT_ARTIFACT } from "./objectiveDraft.ts";
 import { PLAN_DRAFT_ARTIFACT } from "./planDraft.ts";
 import {
   applyPlannotatorDirectEdits,
+  chooseReviewLaunch,
+  executeObjectiveReview,
   executePlanReview,
   type PlanReviewUI,
+  type ReviewLaunchUI,
   type ReviewOutcome,
+  registerPlanReview,
+  type WaveLaunch,
 } from "./planReview.ts";
 
 function selectPlanProvider(cwd: string, id: string): void {
@@ -97,26 +108,35 @@ function fakeColdDoorPi(
   } as unknown as ExtensionAPI;
 }
 
-/** A recording first-party UI: scripted editor/select answers, captured prompts. */
+/** A recording first-party UI: scripted editor/select/input answers, captured prompts + opts. */
 function fakeUI(script: {
   editor?: (string | undefined)[];
   select?: (string | undefined)[];
-}): PlanReviewUI & {
-  editors: { title: string; prefill: string | undefined }[];
-  selects: { title: string; options: string[] }[];
-} {
+  input?: (string | undefined)[];
+}): PlanReviewUI &
+  ReviewLaunchUI & {
+    editors: { title: string; prefill: string | undefined }[];
+    selects: { title: string; options: string[]; opts?: { signal?: AbortSignal } }[];
+    inputs: { title: string; opts?: { signal?: AbortSignal } }[];
+  } {
   const editorAnswers = [...(script.editor ?? [])];
   const selectAnswers = [...(script.select ?? [])];
+  const inputAnswers = [...(script.input ?? [])];
   const ui = {
     editors: [] as { title: string; prefill: string | undefined }[],
-    selects: [] as { title: string; options: string[] }[],
+    selects: [] as { title: string; options: string[]; opts?: { signal?: AbortSignal } }[],
+    inputs: [] as { title: string; opts?: { signal?: AbortSignal } }[],
     async editor(title: string, prefill?: string) {
       ui.editors.push({ title, prefill });
       return editorAnswers.shift();
     },
-    async select(title: string, options: string[]) {
-      ui.selects.push({ title, options });
+    async select(title: string, options: string[], opts?: { signal?: AbortSignal }) {
+      ui.selects.push({ title, options, opts });
       return selectAnswers.shift();
+    },
+    async input(title: string, _placeholder?: string, opts?: { signal?: AbortSignal }) {
+      ui.inputs.push({ title, opts });
+      return inputAnswers.shift();
     },
   };
   return ui;
@@ -659,4 +679,491 @@ test("applyPlannotatorDirectEdits: approved + section -> patched/edited/remainde
   assert.equal(passed.edited, false);
   assert.equal(passed.directEditsFailed, false);
   assert.equal(passed.outcome, denied);
+});
+
+// ------------------------------------------------- the launch chooser (the plannotator wave arm)
+
+const LAUNCH_WAVE = "Browser review + reviewer wave";
+const LAUNCH_PLAIN = "Browser review only";
+
+/** A recording WaveLaunch fake: scripted presence + canned opener guidance (null = port fail). */
+function fakeWave(opts: {
+  present?: boolean;
+  planGuidance?: string | null;
+  objectiveGuidance?: string | null;
+}): WaveLaunch & {
+  planCalls: { draft: string; custom?: string }[];
+  objectiveCalls: { rendered: string; artifactRaw: string; custom?: string }[];
+} {
+  const wave = {
+    planCalls: [] as { draft: string; custom?: string }[],
+    objectiveCalls: [] as { rendered: string; artifactRaw: string; custom?: string }[],
+    present: () => opts.present ?? true,
+    async plan(_ctx: ExtensionContext, o: { draft: string; custom?: string }) {
+      wave.planCalls.push(o);
+      return opts.planGuidance === undefined ? "PLAN WAVE GUIDANCE" : opts.planGuidance;
+    },
+    async objective(
+      _ctx: ExtensionContext,
+      o: { rendered: string; artifactRaw: string; custom?: string },
+    ) {
+      wave.objectiveCalls.push(o);
+      return opts.objectiveGuidance === undefined
+        ? "OBJECTIVE WAVE GUIDANCE"
+        : opts.objectiveGuidance;
+    },
+  };
+  return wave;
+}
+
+const CHOOSER_DRAFT = "# The working draft\n\nStep one.\n";
+
+/** The chooser scaffold: plannotator selected, plan draft planted, scripted ui + wave. */
+function chooserScaffold(script: {
+  select?: (string | undefined)[];
+  input?: (string | undefined)[];
+}): {
+  ctx: SessionDataCtx & ReportTarget;
+  pi: ExtensionAPI;
+  gating: ToolGating & { exits: number };
+  ui: ReturnType<typeof fakeUI>;
+} {
+  const cwd = scaffoldRepo();
+  selectPlanProvider(cwd, "plannotator-plan");
+  const branch: unknown[] = [stateEntry({ run_id: "RID", mode: "read-only" })];
+  const ui = fakeUI(script);
+  const ctx = headfulCtx(cwd, branch, ui);
+  assert.ok(
+    writeSessionArtifact(fakeSink(branch), ctx, PLAN_DRAFT_ARTIFACT, CHOOSER_DRAFT),
+    "the draft artifact landed",
+  );
+  const pi = fakeColdDoorPi(branch, { stdout: PLAN_JSON });
+  return { ctx, pi, gating: fakeGating(true), ui };
+}
+
+test("chooser: eligible round offers the two launch flavors; 'Browser review only' -> the plain bridge review", async () => {
+  const s = chooserScaffold({ select: [LAUNCH_PLAIN] });
+  const wave = fakeWave({});
+  const bridge = cannedBridge(DENIED);
+  const result = await executePlanReview(
+    s.pi,
+    s.ctx as unknown as ExtensionContext,
+    s.gating,
+    bridge,
+    {},
+    undefined,
+    wave,
+  );
+  assert.equal(s.ui.selects.length, 1, "the chooser select opened once");
+  assert.equal(s.ui.selects[0]?.title, "Plan review launch");
+  assert.deepEqual(s.ui.selects[0]?.options, [LAUNCH_WAVE, LAUNCH_PLAIN]);
+  assert.equal(s.ui.inputs.length, 0, "the plain flavor never asks for a custom angle");
+  assert.equal(wave.planCalls.length, 0, "no wave launch");
+  assert.deepEqual(bridge.reviewed, [CHOOSER_DRAFT], "the plain blocking review ran");
+  assert.match(String(result.content[0]?.text), /DENIED/, "the existing outcome mapping held");
+});
+
+test("chooser: the wave choice -> opener runs (trimmed custom), non-terminating wave_launched, bridge never runs", async () => {
+  const s = chooserScaffold({
+    select: [LAUNCH_WAVE],
+    input: ["  check the rollback story  "],
+  });
+  const wave = fakeWave({});
+  const bridge = cannedBridge(DENIED);
+  const result = await executePlanReview(
+    s.pi,
+    s.ctx as unknown as ExtensionContext,
+    s.gating,
+    bridge,
+    {},
+    undefined,
+    wave,
+  );
+  assert.equal(s.ui.inputs.length, 1, "the custom-angle input opened");
+  assert.match(s.ui.inputs[0]?.title ?? "", /Custom review angle/);
+  assert.deepEqual(wave.planCalls, [{ draft: CHOOSER_DRAFT, custom: "check the rollback story" }]);
+  assert.equal(bridge.reviewed.length, 0, "the blocking bridge review never ran");
+  assert.equal(result.terminate, undefined, "the wave result is NON-terminating");
+  assert.equal(result.content[0]?.text, "PLAN WAVE GUIDANCE", "the opener's guidance verbatim");
+  const details = result.details as Record<string, unknown>;
+  assert.equal(details.ok, true);
+  assert.equal(details.status, "wave_launched");
+  assert.equal(details.subject, undefined, "the plan arm carries no subject key");
+  assert.equal(s.gating.exits, 0, "the gate is untouched — the decision routes later");
+});
+
+test("chooser: a null opener return (port-pick failure) -> falls through to the plain review in the same call", async () => {
+  const s = chooserScaffold({ select: [LAUNCH_WAVE], input: [undefined] });
+  const wave = fakeWave({ planGuidance: null });
+  const bridge = cannedBridge(DENIED);
+  const result = await executePlanReview(
+    s.pi,
+    s.ctx as unknown as ExtensionContext,
+    s.gating,
+    bridge,
+    {},
+    undefined,
+    wave,
+  );
+  assert.equal(wave.planCalls.length, 1, "the opener was attempted");
+  assert.deepEqual(bridge.reviewed, [CHOOSER_DRAFT], "the plain blocking review ran as fallback");
+  const details = result.details as { status?: string };
+  assert.equal(details.status, "completed", "the fallback review's outcome is the result");
+});
+
+test("chooser: param-tier source -> no chooser, plain review (the drafts-only law)", async () => {
+  const cwd = scaffoldRepo();
+  selectPlanProvider(cwd, "plannotator-plan");
+  const branch: unknown[] = [stateEntry({ run_id: "RID", mode: "read-only" })];
+  const ui = fakeUI({});
+  const ctx = headfulCtx(cwd, branch, ui);
+  const wave = fakeWave({});
+  const bridge = cannedBridge(DENIED);
+  await executePlanReview(
+    fakeColdDoorPi(branch, { stdout: PLAN_JSON }),
+    ctx as unknown as ExtensionContext,
+    fakeGating(true),
+    bridge,
+    { plan: "# Param plan" },
+    undefined,
+    wave,
+  );
+  assert.equal(ui.selects.length, 0, "no chooser on a param-tier source");
+  assert.equal(wave.planCalls.length, 0);
+  assert.deepEqual(bridge.reviewed, ["# Param plan"]);
+});
+
+test("chooser: present() false OR wave undefined -> no chooser, byte-stable plain review", async () => {
+  for (const wave of [fakeWave({ present: false }), undefined]) {
+    const s = chooserScaffold({});
+    const bridge = cannedBridge(DENIED);
+    await executePlanReview(
+      s.pi,
+      s.ctx as unknown as ExtensionContext,
+      s.gating,
+      bridge,
+      {},
+      undefined,
+      wave,
+    );
+    assert.equal(s.ui.selects.length, 0, "no chooser");
+    assert.deepEqual(bridge.reviewed, [CHOOSER_DRAFT], "the plain review ran unchanged");
+  }
+});
+
+test("chooser: an abort landing during the awaited opener -> aborted, never wave_launched", async () => {
+  // The one execute-level abort smoke (the dialog-by-dialog precedence matrix lives in the
+  // chooseReviewLaunch unit test below): the turn is interrupted while the opener is in flight
+  // — the resolved guidance must never be reported as a successful launch.
+  const controller = new AbortController();
+  const s = chooserScaffold({ select: [LAUNCH_WAVE], input: [undefined] });
+  const wave = fakeWave({});
+  wave.plan = async (_ctx: ExtensionContext, o: { draft: string; custom?: string }) => {
+    wave.planCalls.push(o);
+    controller.abort(); // the interruption lands mid-open
+    return "PLAN WAVE GUIDANCE"; // a resolved open the abort must outrank
+  };
+  const bridge = cannedBridge(DENIED);
+  const result = await executePlanReview(
+    s.pi,
+    s.ctx as unknown as ExtensionContext,
+    s.gating,
+    bridge,
+    {},
+    controller.signal,
+    wave,
+  );
+  const details = result.details as { status?: string };
+  assert.equal(details.status, "aborted", "never wave_launched after the abort");
+  assert.equal(result.terminate, undefined);
+  assert.equal(bridge.reviewed.length, 0, "no blocking review after the abort");
+});
+
+// ---------------------------------------------------- the objective wave arm (baseline ordering)
+
+/**
+ * Measure how many `getBranch` calls ONE validated artifact read makes (self-adapting to seam
+ * refactors) so the ordering pin below can swap the world exactly between the two reads.
+ */
+function measureArtifactReadCalls(): number {
+  const cwd = scaffoldRepo();
+  const branch: unknown[] = [stateEntry({ run_id: "RID" })];
+  const setupCtx = headfulCtx(cwd, branch);
+  assert.ok(writeSessionArtifact(fakeSink(branch), setupCtx, OBJECTIVE_DRAFT_ARTIFACT, "{}"));
+  let calls = 0;
+  const countingCtx = {
+    cwd,
+    sessionManager: {
+      getBranch: () => {
+        calls += 1;
+        return branch;
+      },
+    },
+  } as unknown as SessionDataCtx;
+  assert.ok(readSessionArtifact(countingCtx, OBJECTIVE_DRAFT_ARTIFACT) !== null);
+  assert.ok(calls > 0, "the read consults the branch");
+  return calls;
+}
+
+const OBJ_V1 = JSON.stringify({ schema_version: 1, prose: "Baseline prose (v1)." });
+const OBJ_V2 = JSON.stringify({ schema_version: 1, prose: "Newer prose (v2)." });
+
+test("objective wave arm: the stale-guard baseline is captured BEFORE the validated read (ordering pin)", async () => {
+  const cwd = scaffoldRepo();
+  selectPlanProvider(cwd, "plannotator-plan");
+  const branch: unknown[] = [stateEntry({ run_id: "RID", mode: "read-only" })];
+  const setupCtx = headfulCtx(cwd, branch);
+  const path = writeSessionArtifact(fakeSink(branch), setupCtx, OBJECTIVE_DRAFT_ARTIFACT, OBJ_V1);
+  assert.ok(path, "v1 landed");
+  const branchV1 = [...branch];
+  assert.ok(
+    writeSessionArtifact(fakeSink(branch), setupCtx, OBJECTIVE_DRAFT_ARTIFACT, OBJ_V2),
+    "v2 landed",
+  );
+  const branchV2 = [...branch];
+  // Rewind the world to v1; a concurrent objective_draft write (-> v2, file + pointer together)
+  // fires between the two reads — after exactly one full artifact read's worth of branch reads.
+  writeFileSync(path ?? "", OBJ_V1, "utf8");
+  const perRead = measureArtifactReadCalls();
+  let calls = 0;
+  const ui = fakeUI({ select: [LAUNCH_WAVE], input: [undefined] });
+  const ctx = {
+    cwd,
+    sessionManager: {
+      getBranch: () => {
+        calls += 1;
+        if (calls === perRead + 1) writeFileSync(path ?? "", OBJ_V2, "utf8");
+        return calls <= perRead ? branchV1 : branchV2;
+      },
+    },
+    hasUI: true,
+    ui: { notify() {}, ...ui },
+  } as unknown as ExtensionContext;
+  const wave = fakeWave({});
+  const bridge = cannedBridge(DENIED);
+  const result = await executeObjectiveReview(
+    fakeColdDoorPi(branch, { stdout: PLAN_JSON }),
+    ctx,
+    fakeGating(true),
+    bridge,
+    undefined,
+    wave,
+  );
+  assert.equal(wave.objectiveCalls.length, 1, "the objective opener launched");
+  const call = wave.objectiveCalls[0];
+  assert.equal(
+    call?.artifactRaw,
+    OBJ_V1,
+    "artifactRaw is the FIRST read's bytes — the pre-validated-read baseline, never a re-read",
+  );
+  assert.match(
+    call?.rendered ?? "",
+    /Newer prose \(v2\)\./,
+    "the render derives from the later read",
+  );
+  assert.doesNotMatch(call?.rendered ?? "", /Baseline prose/);
+  assert.equal(bridge.reviewed.length, 0, "no blocking review on the wave arm");
+  assert.equal(result.terminate, undefined, "non-terminating");
+  const details = result.details as Record<string, unknown>;
+  assert.equal(details.status, "wave_launched");
+  assert.equal(details.ok, true);
+  assert.equal(details.subject, "objective");
+  assert.equal(result.content[0]?.text, "OBJECTIVE WAVE GUIDANCE");
+});
+
+test("objective wave arm: a null opener return (port-pick failure) -> falls through to the plain review", async () => {
+  const cwd = scaffoldRepo();
+  selectPlanProvider(cwd, "plannotator-plan");
+  const branch: unknown[] = [stateEntry({ run_id: "RID", mode: "read-only" })];
+  const ui = fakeUI({ select: [LAUNCH_WAVE], input: [undefined] });
+  const ctx = headfulCtx(cwd, branch, ui);
+  assert.ok(
+    writeSessionArtifact(fakeSink(branch), ctx, OBJECTIVE_DRAFT_ARTIFACT, OBJ_V1),
+    "the objective draft landed",
+  );
+  const wave = fakeWave({ objectiveGuidance: null });
+  const bridge = cannedBridge(DENIED);
+  const result = await executeObjectiveReview(
+    fakeColdDoorPi(branch, { stdout: PLAN_JSON }),
+    ctx as unknown as ExtensionContext,
+    fakeGating(true),
+    bridge,
+    undefined,
+    wave,
+  );
+  assert.equal(wave.objectiveCalls.length, 1, "the opener was attempted");
+  assert.equal(bridge.reviewed.length, 1, "the plain blocking review ran as fallback");
+  assert.match(bridge.reviewed[0] ?? "", /Baseline prose \(v1\)\./, "the RENDERED draft reviewed");
+  const details = result.details as { status?: string; subject?: string };
+  assert.equal(details.status, "completed", "the fallback review's outcome is the result");
+  assert.equal(details.subject, "objective");
+  assert.match(String(result.content[0]?.text), /DENIED/);
+});
+
+test("gist arm: never sees a chooser (no gist wave door exists)", async () => {
+  const cwd = scaffoldRepo();
+  selectPlanProvider(cwd, "plannotator-plan");
+  const branch: unknown[] = [
+    stateEntry({ run_id: "RID", mode: "read-only", stage: "gist-author" }),
+  ];
+  const ui = fakeUI({});
+  const ctx = headfulCtx(cwd, branch, ui);
+  assert.ok(
+    writeSessionArtifact(
+      fakeSink(branch),
+      ctx,
+      GIST_DRAFT_ARTIFACT,
+      JSON.stringify({ schema_version: 1, prose: "A gist." }),
+    ),
+    "the gist draft landed",
+  );
+  const wave = fakeWave({});
+  const bridge = cannedBridge(DENIED);
+  await executePlanReview(
+    fakeColdDoorPi(branch, { stdout: PLAN_JSON }),
+    ctx as unknown as ExtensionContext,
+    fakeGating(true),
+    bridge,
+    {},
+    undefined,
+    wave,
+  );
+  assert.equal(ui.selects.length, 0, "no chooser on the gist arm");
+  assert.equal(wave.planCalls.length, 0);
+  assert.equal(wave.objectiveCalls.length, 0);
+  assert.equal(bridge.reviewed.length, 1, "the plain gist bridge review ran");
+});
+
+// ----------------------------------------------------------- chooseReviewLaunch (unit, pure ui)
+
+test("chooseReviewLaunch: Esc arms, trim behavior, and every abort re-check point", async () => {
+  // Esc at the select -> plain (the flavor choice, never a cancel).
+  {
+    const ui = fakeUI({ select: [undefined] });
+    assert.deepEqual(await chooseReviewLaunch(ui, "Plan"), { launch: "plain" });
+  }
+  // The plain pick -> plain; no input dialog.
+  {
+    const ui = fakeUI({ select: [LAUNCH_PLAIN] });
+    assert.deepEqual(await chooseReviewLaunch(ui, "Plan"), { launch: "plain" });
+    assert.equal(ui.inputs.length, 0);
+  }
+  // The wave pick + a padded custom -> trimmed custom; the caller's signal is FORWARDED to
+  // both dialogs (a dropped signal would leave a real pending dialog un-dismissable on abort).
+  {
+    const controller = new AbortController();
+    const ui = fakeUI({ select: [LAUNCH_WAVE], input: ["  the angle  "] });
+    assert.deepEqual(await chooseReviewLaunch(ui, "Objective", controller.signal), {
+      launch: "wave",
+      custom: "the angle",
+    });
+    assert.equal(ui.selects[0]?.title, "Objective review launch", "the subject noun titles it");
+    assert.equal(ui.selects[0]?.opts?.signal, controller.signal, "the select gets the signal");
+    assert.equal(ui.inputs[0]?.opts?.signal, controller.signal, "the input gets the signal");
+  }
+  // The wave pick + blank/Esc input -> wave with NO custom key.
+  for (const typed of ["   ", undefined]) {
+    const ui = fakeUI({ select: [LAUNCH_WAVE], input: [typed] });
+    const choice = await chooseReviewLaunch(ui, "Plan");
+    assert.equal(choice.launch, "wave");
+    assert.equal("custom" in choice, false);
+  }
+  // Abort at entry: no dialog is ever opened.
+  {
+    const controller = new AbortController();
+    controller.abort();
+    const ui = fakeUI({ select: [LAUNCH_WAVE] });
+    assert.deepEqual(await chooseReviewLaunch(ui, "Plan", controller.signal), {
+      launch: "aborted",
+    });
+    assert.equal(ui.selects.length, 0);
+  }
+  // Abort landing during the select outranks the resolved selection.
+  {
+    const controller = new AbortController();
+    const ui = fakeUI({});
+    ui.select = async (title: string, options: string[]) => {
+      ui.selects.push({ title, options });
+      controller.abort();
+      return LAUNCH_WAVE;
+    };
+    assert.deepEqual(await chooseReviewLaunch(ui, "Plan", controller.signal), {
+      launch: "aborted",
+    });
+    assert.equal(ui.inputs.length, 0, "the input is never reached");
+  }
+  // Abort landing during the input outranks the resolved text.
+  {
+    const controller = new AbortController();
+    const ui = fakeUI({ select: [LAUNCH_WAVE] });
+    ui.input = async (title: string) => {
+      ui.inputs.push({ title });
+      controller.abort();
+      return "typed text";
+    };
+    assert.deepEqual(await chooseReviewLaunch(ui, "Plan", controller.signal), {
+      launch: "aborted",
+    });
+  }
+});
+
+// ---------------------------------------------------------------- the registration pins
+
+/** A recording fake pi capturing `registerTool` definitions (events stubbed for the bridge). */
+interface RegisteredToolDef {
+  name?: string;
+  description?: string;
+  promptGuidelines?: string[];
+  execute?: (
+    toolCallId: string,
+    params: unknown,
+    signal: AbortSignal | undefined,
+    onUpdate: unknown,
+    ctx: unknown,
+  ) => Promise<{ details: Record<string, unknown>; content: { text?: string }[] }>;
+}
+
+function recordingPi(defs: RegisteredToolDef[]): ExtensionAPI {
+  return {
+    events: {
+      emit() {},
+      on() {
+        return () => {};
+      },
+    },
+    registerTool(def: unknown) {
+      defs.push(def as RegisteredToolDef);
+    },
+  } as unknown as ExtensionAPI;
+}
+
+test("registerPlanReview: the tool description + a guideline name the wave arm (wave_launched)", () => {
+  const defs: RegisteredToolDef[] = [];
+  registerPlanReview(recordingPi(defs), fakeGating(true));
+  const def = defs.find((d) => d.name === "plan_review");
+  assert.ok(def, "plan_review registered");
+  assert.match(String(def?.description), /reviewer wave/, "the description names the wave arm");
+  assert.match(String(def?.description), /wave_launched/, "…and the result status");
+  assert.ok(
+    (def?.promptGuidelines ?? []).some((g) => g.includes("wave_launched")),
+    "a guideline covers the wave_launched follow-through",
+  );
+});
+
+test("registerPlanReview: the injected wave deps thread through the registered tool (composition pin)", async () => {
+  // The wave param is optional, so a dropped index.ts composition (or a registration that
+  // forgets to forward it into execute) would compile and leave the direct-injection tests
+  // green while the chooser never appears in the product — invoke the CAPTURED tool definition
+  // with the deps injected at registration to pin the forwarding end-to-end.
+  const defs: RegisteredToolDef[] = [];
+  const wave = fakeWave({});
+  registerPlanReview(recordingPi(defs), fakeGating(true), wave);
+  const def = defs.find((d) => d.name === "plan_review");
+  assert.ok(def?.execute, "plan_review registered with an execute");
+  const s = chooserScaffold({ select: [LAUNCH_WAVE], input: [undefined] });
+  const result = await def?.execute?.("t1", {}, undefined, undefined, s.ctx);
+  assert.equal(s.ui.selects.length, 1, "the chooser fired through the registered tool");
+  assert.deepEqual(wave.planCalls, [{ draft: CHOOSER_DRAFT }], "the registered wave deps ran");
+  assert.equal(result?.details.status, "wave_launched");
+  assert.equal(result?.content[0]?.text, "PLAN WAVE GUIDANCE", "the opener's guidance returned");
 });

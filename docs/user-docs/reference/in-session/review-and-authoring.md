@@ -181,7 +181,13 @@ pasted draft text from the model. The shared companion tools are:
   *Non-terminating.*
 - **`plan_review`** — process the human decision through the normal approval/denial/save seams.
   It terminates on a successful approval-driven save and otherwise leaves the session available
-  for revision or recovery.
+  for revision or recovery. On the Plannotator provider, an eligible call — the Plannotator
+  extension actually loaded (the presence probe) plus a validated plan or objective draft
+  artifact — first opens an in-TUI launch chooser — browser review **with** the
+  reviewer wave or **without** it (Esc chooses without; the review always proceeds). Choosing
+  the wave asks for an optional custom review angle, opens the same browser flow as the matching
+  door below, and returns wave guidance (`wave_launched`) instead of blocking; the browser
+  decision then routes back automatically. Gist review has no wave door and stays plain.
 
 ### `/plan-review-browser`
 
@@ -190,6 +196,12 @@ session. The browser opens on the exact draft bytes; 2–3 selected
 grounding/scope/decision-completeness/risk lanes stream phrase annotations. Any argument text adds
 one custom review lane, and exactly one automatic final core-Ponytail lane follows outside both
 menus/caps.
+
+The same flow is reachable from inside `plan_review`: on the Plannotator provider the tool's
+launch chooser offers "Browser review + reviewer wave" every eligible round, with an optional
+custom-angle input on the wave choice. `/plan-review-browser <angle text>` remains the manual
+door for plans and `/objective-review-browser <angle text>` for objectives — the
+subject-appropriate doors (the plan door refuses objective stages).
 
 **APPROVE** applies Direct Edits to the plan artifact, then auto-saves. If the artifact changed
 while the browser was open, approval refuses as stale and saves nothing; re-run the door. A failed
