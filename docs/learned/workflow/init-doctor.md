@@ -28,16 +28,20 @@ cluster: config-and-convergence
 
 ## The split
 
-- **`perk init` converges forward**: desired state, idempotent, never migrations. Maps to
-  `perk/convergence/init.py` (`GITIGNORE_BODY`, `converge()`).
+- **`perk init` converges forward**: desired state, idempotent, never migrations. Maps to the
+  `src/perk/convergence/init/` package — facade `__init__.py` (`run_init`,
+  `managed_convergences()`, `ManagedConvergence`), `GITIGNORE_BODY` in `blocks.py`.
 - **`perk doctor --fix` repairs legacy oddities**: one-off fixes for things `init` can't undo or
-  that stem from historical inconsistencies. Maps to `perk/convergence/doctor.py` (`_MIGRATIONS`).
+  that stem from historical inconsistencies. Maps to the `src/perk/convergence/doctor/` package
+  (`fixes.py::_MIGRATIONS`).
 - **`doctor` is the diagnostic pre-flight layer**: It utilizes report-only free functions
   (non-converging) inside `verify:` blocks. While `init` actively manages forward on-disk files,
   `doctor` provides diagnostic gating without mutating state (unless `--fix` is explicitly run).
 
 Keep `init` a clean forward path — never a pile of version branches. New desired state goes into
-`init`'s `converge()`; one-off/legacy repairs go into `doctor`'s `_MIGRATIONS`.
+the `init` package's convergences (the per-piece `ManagedConvergence.converge` callables listed by
+`managed_convergences()`); one-off/legacy repairs go into the `doctor` package's
+`fixes.py::_MIGRATIONS`.
 
 ## Managed convergence is the SSOT for doctor checks — never hand-author a check
 
@@ -52,7 +56,7 @@ So to add any new managed piece (the recipe is **three edits**, never a bespoke 
 
 1. Add a `ManagedConvergence` in `init.managed_convergences()` — its `name` becomes the doctor
    check name; `covers` lists the capability names it verifies.
-2. Add the matching `Capability` in `perk/convergence/capabilities.py` (referenced by the convergence's
+2. Add the matching `Capability` in `src/perk/convergence/capabilities.py` (referenced by the convergence's
    `covers`).
 3. Optionally add a `name → render-group` entry in `doctor._MANAGED_GROUP` (purely cosmetic
    grouping; absent ⇒ falls back to `"repository"`).
@@ -78,7 +82,7 @@ managed convergence; no → a report-only `_build_checks` entry.
 
 ## The managed-artifact set (`managed_artifacts()`) — the eligibility trio
 
-`perk/convergence/managed_state.py` is the managed-artifact version+hash state library: init and
+`src/perk/convergence/managed_state.py` is the managed-artifact version+hash state library: init and
 `doctor --fix` record each managed artifact's desired-content digest + perk version into
 `.perk/managed-state.toml`, and doctor's report-only `_artifact_health_check` (`artifact-health`,
 contracts §8.5/§8.6) classifies live content against it (up-to-date / stale / drifted).
@@ -120,14 +124,16 @@ leaves it churning on every change.
 
 The proper two-plane fix:
 
-1. **`init`** — add the entry to `GITIGNORE_BODY` so it lives *inside* the managed block (init owns
-   all managed gitignore entries; never hand-add outside the `# BEGIN/END perk managed` block).
+1. **`init`** — add the entry to `GITIGNORE_BODY` (`src/perk/convergence/init/blocks.py`) so it
+   lives *inside* the managed block (init owns all managed gitignore entries; never hand-add
+   outside the `# BEGIN/END perk managed` block).
 2. **`doctor --fix`** — run `git rm --cached <file>` (kept on disk) and strip any stray ungrouped
-   line. `is_tracked` / `rm_cached` helpers live in `perk/substrate/git.py`.
+   line. `is_tracked` / `rm_cached` helpers live in `src/perk/substrate/git.py`.
 
-**Generalizable rule:** any file materialized into `.pi/workflow/` is transient and must be added
-to the managed gitignore block in `init.py` (alongside `plan-ref.json`, `handoff/`, `scratch/`,
-`markers/`).
+**Generalizable rule:** any file materialized into `.perk/workflow/` is transient and covered by
+the managed gitignore block — the whole `.perk/workflow/` tree is gitignored **wholesale**
+(`/.perk/workflow/` in `GITIGNORE_BODY`), so a new transient file under it needs no per-file
+entry.
 
 ## `report.changes` must reflect real filesystem deltas (idempotency)
 
@@ -137,7 +143,7 @@ attempted". The load-bearing invariant `test_cli_idempotent_second_run`
 `changes == []`. A convergence that always appends a change on success breaks it.
 
 The pattern for any side-effecting step (e.g. shelling out to an external CLI): **snapshot before
-and after, append only on difference.** `_sync_skills` snapshots the `.agents/skills/` symlink set
+and after, append only on difference.** `sync_skills` snapshots the `.agents/skills/` symlink set
 (`_skill_link_state`: name → target) before and after running `skills sync`, and appends a change
 only when the set actually changed.
 
@@ -210,8 +216,9 @@ only (never raw text, matching `pi/extension-api.md`'s `getSystemPromptOptions` 
 note), with a stable line grammar that later
 audits diff against; the committed baseline is `docs/design/context-payload-baseline.md`.
 
-This made `<!-- BEGIN perk managed -->` a **cross-plane string contract**: `perk/convergence/init.py`
-(`AGENTS_BEGIN`) writes it, `extension/doors/selfcheck.ts` (`MANAGED_AGENTS_MARKER`) reads it. Changing the
+This made `<!-- BEGIN perk managed -->` a **cross-plane string contract**:
+`src/perk/convergence/init/blocks.py` (`AGENTS_BEGIN`, facade-re-exported) writes it,
+`extension/doors/selfcheck.ts` (`MANAGED_AGENTS_MARKER`) reads it. Changing the
 literal in one plane must update the other in the same turn (recorded in `shared/contracts.md` §8.7).
 
 **Byte-match proof for the managed AGENTS block:** after editing the convergence source
@@ -239,23 +246,24 @@ had been silently invisible in human output the whole time. Durable rule: **any 
 value MUST be added to the render group order in the same change**, and a render-visibility test
 is cheap insurance.
 
-This is distinct from `perk/convergence/doctor.py`'s `_MANAGED_GROUP` (which only *assigns* a managed
+This is distinct from `src/perk/convergence/doctor/data.py`'s `_MANAGED_GROUP` (which only *assigns* a managed
 convergence's group name, falling back to `"repository"`); assigning a group there does **not**
 make it render unless that group is also in the render module's `GROUP_ORDER`
-(`perk/cli/commands/doctor/render.py`). Any new doctor groups will remain completely invisible in
+(`src/perk/cli/commands/doctor/render.py`). Any new doctor groups will remain completely invisible in
 the condensed human text unless explicitly added there.
 
 ## The optional `EnvCheck` tier (a non-fatal tool — #617)
 
 Adding a tool whose **absence should warn, not block** is a reusable three-touch pattern in
-`perk/convergence/`:
+`src/perk/convergence/`:
 
-- **`env.py`:** add an `optional: bool = False` flag to the frozen `EnvCheck` dataclass; add an
+- **`env.py` (`src/perk/convergence/env.py`):** add an `optional: bool = False` flag to the frozen `EnvCheck` dataclass; add an
   optional-tool check helper mirroring the required one but stamping **`optional=True` on BOTH the
   present and absent results**; and change `required_tools_ok` to filter optional checks out
   (`all(c.ok for c in checks if not c.optional)`). **That filter is what keeps a missing optional
   tool off the `missing_tool` exit-2 path.**
-- **`doctor.py`:** map the env status as `"ok" if c.ok else ("warn" if c.optional else "fail")`
+- **`doctor/checks.py` (`src/perk/convergence/doctor/checks.py`):** map the env status as
+  `"ok" if c.ok else ("warn" if c.optional else "fail")`
   (annotate the local as `Status` for ty). **No `GROUP_ORDER` change** — `environment` already
   renders, and a `warn` leaves `report.healthy` / the exit code untouched (the existing
   healthy-allows-warnings invariant).
@@ -374,7 +382,7 @@ mechanics make the isolation workable:
 ## Managed template reconvergence
 
 When you edit managed full-file templates in the codebase (for example, `PERK_RUN_WORKFLOW` in
-`perk/run/workflow_artifacts.py`), you must immediately trigger self-repo copy reconvergence (such as
+`src/perk/run/workflow_artifacts.py`), you must immediately trigger self-repo copy reconvergence (such as
 updating `.github/workflows/perk-run.yml` in perk's own repo) in the same turn. Run
 `perk doctor --fix` or `perk init` to apply the updated template to the self-repo, and commit the
 converged changes together with the template edits.
@@ -393,7 +401,7 @@ top-of-file normally — see `docs/learned/workflow/cli-command-groups.md`.
 
 ### `register_with_aliases` single-command constraint
 
-The `register_with_aliases` helper in `perk/cli/alias.py` is strictly designed for single-command
+The `register_with_aliases` helper in `src/perk/cli/alias.py` is strictly designed for single-command
 registration. Attempting to pass extra positionals (e.g., trying to register multiple commands in a
 single call) will fail loudly at import time.
 
@@ -427,7 +435,7 @@ this is the reusable recipe:
   `worktree.py`) and shared fixtures **stay** — prove sole-consumption before deleting.
 - **The `_MIGRATIONS` forward-migration seam (a filesystem `rmtree`).** `doctor --fix` migrates a
   former consumer forward via `_remove_orphaned_git_clone(root)` appended to the `_MIGRATIONS`
-  tuple (`perk/convergence/doctor/fixes.py`): forward-only, filesystem-only on a gitignored path
+  tuple (`src/perk/convergence/doctor/fixes.py`): forward-only, filesystem-only on a gitignored path
   (no network), returning `(changes, errors)` so a failed `shutil.rmtree` lands on
   `report.fix_errors` **loudly** (`OSError` → append to errors); a
   `run_doctor(fix=True, verify=False)` test exercises it without seeding a failing check. The
@@ -442,12 +450,14 @@ the `again.fixed == []` idempotency tests.
 
 ## Cross-references
 
-- `perk/convergence/init.py` — `GITIGNORE_BODY`, `converge()`, `ManagedConvergence`, `managed_convergences()`,
-  `_skill_link_state`, `_sync_skills`
-- `perk/convergence/doctor.py` — `_MIGRATIONS`, `_managed_checks`, `_MANAGED_GROUP`, `_apply_fixes`
-- `perk/cli/commands/doctor/render.py` — `GROUP_ORDER` (the human-render group allow-list)
-- `perk/convergence/capabilities.py` — `Capability`, `applicable()`
-- `perk/substrate/git.py` — `is_tracked`, `rm_cached`
+- `src/perk/convergence/init/__init__.py` — the facade (`run_init`, `managed_convergences()`,
+  `ManagedConvergence`); `blocks.py` — `GITIGNORE_BODY`; `skills.py` — `_skill_link_state`,
+  `sync_skills`
+- `src/perk/convergence/doctor/` — `fixes.py::_MIGRATIONS`, `checks.py::_managed_checks`,
+  `data.py::_MANAGED_GROUP`, `fixes.py::_apply_fixes`
+- `src/perk/cli/commands/doctor/render.py` — `GROUP_ORDER` (the human-render group allow-list)
+- `src/perk/convergence/capabilities.py` — `Capability`, `applicable()`
+- `src/perk/substrate/git.py` — `is_tracked`, `rm_cached`
 - `tests/test_doctor.py` — `test_every_required_capability_has_a_doctor_check`
 - `tests/test_init_t5.py` — `test_cli_idempotent_second_run`
 - `extension/doors/selfcheck.ts` — `MANAGED_AGENTS_MARKER`, `readAmbientIndex`, `buildSelfcheckReport`

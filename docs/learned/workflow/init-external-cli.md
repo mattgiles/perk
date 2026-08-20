@@ -124,7 +124,9 @@ therefore one facade patch point each — the same discipline as `sync_skills`.
 `skills init` / `skills update --sync` would clone over the network during *verified* init tests
 (the ones that run `verify=True`). The pattern that keeps the test suite offline:
 
-- Route the whole shell through **one module-level function** (`init._sync_skills`). Note the
+- Route the whole shell through **one module-level function** — the **public** `init.sync_skills`
+  (defined in `src/perk/convergence/init/skills.py`, re-exported through the facade precisely so
+  the existing `init_mod.sync_skills` monkeypatch keeps working). Note the
   seam's signature has shifted since the original landing (an optional error-string return for
   the fatal post-step, `repo_skill_names`; the one-time `self_repo` param was dropped again when
   delivery presence went strict on `.agents/skills/`) — grep tests for the seam name
@@ -132,8 +134,9 @@ therefore one facade patch point each — the same discipline as `sync_skills`.
 - Gate the call site `if verify:` in `run_init` — the pure unit-test path (`verify=False`) already
   skips it. (The sync runs in **both** self-repo and consumer trees — see below.)
 - Stub that one seam in `tests/conftest.py`'s `stub_env`
-  (`monkeypatch.setattr(init_mod, "_sync_skills", lambda root, changes: None)`), next to the env /
-  github stubs. Any other verified-path test (e.g. the non-fatal github test) stubs the same seam.
+  (`monkeypatch.setattr(init_mod, "sync_skills", lambda root, changes, **kw: None)`), next to the
+  env / github stubs. Any other verified-path test (e.g. the non-fatal github test) stubs the same
+  seam.
 
 One function = one patch point. Don't scatter `subprocess.run` calls across the convergence.
 
@@ -154,44 +157,55 @@ has no `pi` manifest at all*, dropping just the `skills` key from the manifest (
 package removal was required; neither is.
 
 Consequently the `run_init` gate dropped its `not self_repo` half (`if verify:` now). `perk doctor
---fix` performs the same `init._sync_skills` under the covers as its repair gesture (plain `perk
-doctor` stays read-only). The `is_self_repo(root)` split still drives ref pinning (below).
+--fix` performs the same `init.sync_skills` under the covers as its repair gesture (plain `perk
+doctor` stays read-only). The `is_self_repo(root)` split still drives install pinning (below).
 
 **Dogfooding caveat:** because the CLI clones the perk git repo at a pinned ref into a content-
 addressed worktree, a perk developer's *uncommitted* edits to `skills/perk-*/SKILL.md` are not
 reflected in the loaded `.agents/skills/` symlink until pushed and re-synced. The committed
-`skills/<name>/` bodies remain the in-repo source and a pre-sync `is_skill_installed` fallback.
+`skills/<name>/` bodies remain the in-repo source; the one-time pre-sync `is_skill_installed`
+fallback is retired — presence is strict on `.agents/skills/` everywhere, and the self-repo
+committed-but-undelivered state is classified by doctor's `_skills_delivery_check` instead (see
+`skill-bindings.md`).
 
-## Ref pinning mirrors `_desired_packages`
+## Ref pinning: the skills-manifest `main` ref beside the version-pinned installs
 
-The committed fragment resolves its source `ref` the same way the Pi package entry does
-(`_desired_packages`): both the self-repo **and** consumers track `main`. `PERK_SKILLS` is
+> **Update (superseded — the "mirrors `_desired_packages`" claim no longer holds).**
+> `_desired_packages` (in `src/perk/convergence/init/settings.py`) now wires `..` for the
+> self-repo and the **version-pinned** `npm:@mgiles/perk@{__version__}` (`_perk_npm_entry`) for
+> consumers, and the remote CI install pins `perk=={__version__}`
+> (`workflow_artifacts._PERK_INSTALL_CONSUMER`). Only the **skills-CLI manifest source ref**
+> still tracks `main` (`_desired_skills_manifest`) — the why-`main` rationale below survives for
+> that one surface. The full policy is `distribution.md` §"The three-way install-pin policy".
+
+Historically the committed fragment resolved its source `ref` the same way the Pi package entry
+did: both the self-repo **and** consumers tracked `main`. Still current: `PERK_SKILLS` is
 the SSOT tuple of fragment skill names; `_desired_skills_manifest(self_repo)` renders the YAML
 (the `self_repo` param is retained for signature stability but no longer branches the ref).
 
 Why `main`, not a tag: perk has no release cadence. The lone `v0.0.1` tag went stale because
 `__version__` was never bumped and the tag never moved, so a consumer pinned to `v{__version__}`
 received a months-old skill set missing newer skills → `missing-skill` at `skills update --sync`.
-`main` is the only ref that reflects current state for this pre-1.0 rolling tool. Trade-off:
-consumer installs are no longer pinned/reproducible — accepted deliberately; a stale clone is
-refreshed by re-sync / `git pull`.
+`main` is the only ref that reflects current state for the skills source of this pre-1.0 rolling
+tool. Trade-off: the consumer-delivered skill set is not pinned/reproducible — accepted
+deliberately; a stale clone is refreshed by re-sync / `git pull`.
 
-The lockstep principle still holds, restated: the skills source, the Pi `git:` package, and the
-remote CI install (`workflow_artifacts._PERK_INSTALL_CONSUMER`) all resolve from the same `main`
-ref.
+**`__version__`'s remaining role after the collapse (#552) — since superseded.** Once the three
+consumer-ref sites collapsed `v{__version__}` → `main` — `init._desired_skills_manifest`,
+`init._desired_packages` (the Pi `git:` package), and `workflow_artifacts._PERK_INSTALL_CONSUMER`
+(the remote CI install) — `__version__` was for a while **only** a `perk --version` value + the
+AGENTS managed-block `perk version:` stamp, never a ref pin.
 
-**`__version__`'s remaining role after the collapse (#552).** Once the three consumer-ref sites
-collapsed `v{__version__}` → `main` — `init._desired_skills_manifest`, `init._desired_packages` (the
-Pi `git:` package), and `workflow_artifacts._PERK_INSTALL_CONSUMER` (the remote CI install) —
-`__version__` is now **only** a `perk --version` value + the AGENTS managed-block `perk version:`
-stamp, **never again a ref pin**. The import was therefore **removed from `workflow_artifacts.py`**
-(and its test) once the last ref reference left, while `init.py` keeps it for the managed-block stamp
-and `test_init_idempotent.py` keeps it for the self-mode negative assertion.
+> **Update.** `__version__` is again the machine-surface install pin: the npm extension entry
+> (`_perk_npm_entry` → `npm:@mgiles/perk@{__version__}`) and the PyPI consumer install
+> (`workflow_artifacts._PERK_INSTALL_CONSUMER` → `perk=={__version__}`) both derive from it, and
+> `from perk import __version__` is back in `workflow_artifacts.py`. See `distribution.md`
+> §"The three-way install-pin policy". The #552 collapse above stands as history.
 
 ## The `PERK_SKILLS` SSOT cascade + the self-converge `missing-skill` expectation (#617)
 
 **`PERK_SKILLS` is a true SSOT — one tuple edit cascades to three mechanisms.** Adding a skill name to
-the `PERK_SKILLS` tuple in `init.py` (kept **alphabetical**) auto-regenerates the committed manifest
+the `PERK_SKILLS` tuple in `src/perk/convergence/init/skills.py` (kept **alphabetical**) auto-regenerates the committed manifest
 fragment (the `skills-manifest` ManagedConvergence), feeds `sync_skills()`'s post-sync verification,
 and is picked up by the `skills-delivery` doctor check — **no further code change**. The SSOT holds
 even for a **non-`perk-` skill name** (e.g. a bundled upstream skill like `ast-grep`).
@@ -207,11 +221,11 @@ strict on the `.agents/skills/` delivery read path — the only path warm inject
 skills-delivery check classifies a missing self-repo delivery as pre-merge **first appearance →
 warn** vs a **stale delivered set → fail** by probing the local `origin/main` for the committed
 `skills/<name>`), and the test suite runs with **verification disabled** so no real shell runs.
-(`perk init` also writes a gitignored `.pi/perk.local.toml` — never appears in `git status`.)
+(`perk init` also writes a gitignored `.perk/local.toml` — never appears in `git status`.)
 
 ## Promoting external skills into the managed manifest (the three-SSOT split) (#647)
 
-The skills-delivery surface has **three** constants in `init.py`, each with a distinct meaning —
+The skills-delivery surface has **three** constants in `src/perk/convergence/init/skills.py`, each with a distinct meaning —
 editing the wrong one is the trap:
 
 - **`PERK_SKILLS`** — perk-authored skill names only, source `perk`. Add a **perk** skill here.
@@ -258,7 +272,7 @@ transient `.agents/` paths it owns (`local.yaml`, `cache/`, `skills/`, `.claude/
 
 **perk's managed gitignore block does not touch `.agents/` at all** — that boundary is owned by the
 `skills` CLI. Don't add `.agents/` entries to `GITIGNORE_BODY`; don't let perk converge paths
-another tool owns. (Contrast with `.pi/workflow/` transient files, which perk *does* own and gitignore
+another tool owns. (Contrast with `.perk/workflow/` transient files, which perk *does* own and gitignore
 — see `init-doctor.md`.)
 
 ## Cross-repo plans: scope the PR to the current repo
@@ -282,7 +296,7 @@ net is the backstop.
 
 ## Repo-authored skills: a second fragment, a verify-gated gesture (not a ManagedConvergence)
 
-A repo can author its **own** skills under `.pi/skills/<name>/SKILL.md`. perk renders them into a
+A repo can author its **own** skills under `.perk/skills/<name>/SKILL.md` (`REPO_SKILLS_REL`). perk renders them into a
 **second** skills-CLI manifest fragment, `.agents/manifest.d/perk-repo-skills.yaml`, beside the
 perk-managed `perk.yaml`, under a self-referential GitHub source derived from
 `github.repo_identity` (alias `perk-<repo>`, the repo `url`, its default-branch `ref`). The
@@ -294,7 +308,7 @@ fragment. Rendering a *valid* fragment does a GitHub read (`repo_identity`), and
 convergences run **unconditionally in offline unit tests** — so a managed convergence here would
 shell `gh` in every `run_init(verify=False)`. Instead it mirrors the **skills-delivery gesture**:
 init/doctor call it **under `verify` only**, right beside `sync_skills`, **before** the sync (so
-the skills CLI sees the declared `.pi/skills/` source). The deciding question repeats the
+the skills CLI sees the declared `.perk/skills/` source). The deciding question repeats the
 init-doctor rule: *does this do network I/O on a valid input?* If yes → verify-gated gesture, never
 a `ManagedConvergence`. **`.agents/manifest.yaml` is never mutated** — only the `.d/` fragment.
 
@@ -312,7 +326,7 @@ declared repo-authored skill **names** (`repo_skill_names`), folds them into the
 presence loop (a free backstop for a CLI that exits 0 but skips an unresolvable skill — robust to
 either "non-zero exit" or "exit-0-but-skipped" CLI behavior), and appends **one** repo-aware
 remediation clause to every failure message, gated solely on "are repo-authored skills declared?"
-(a freshly-added `.pi/skills/` skill is unresolvable until committed + pushed to the default branch).
+(a freshly-added `.perk/skills/` skill is unresolvable until committed + pushed to the default branch).
 
 ### Substrate-build patterns (the dormant module beneath the gesture)
 
@@ -354,11 +368,13 @@ surfaced patterns that generalize beyond skills:
 
 ## Cross-references
 
-- `perk/convergence/init.py` — `PERK_SKILLS`, `_desired_skills_manifest`, `_converge_skills_manifest`,
-  `_skill_link_state`, `_sync_skills`, `_desired_packages`, `is_self_repo`, `run_init`
-- `perk/convergence/capabilities.py` — the `skills-manifest` capability
-- `perk/convergence/doctor.py` — `_MANAGED_GROUP` (`skills-manifest` → `skills` group)
-- `tests/conftest.py` — `stub_env` (the `_sync_skills` patch seam)
+- `src/perk/convergence/init/skills.py` — `PERK_SKILLS`, `_desired_skills_manifest`,
+  `_converge_skills_manifest`, `_skill_link_state`, `sync_skills`
+- `src/perk/convergence/init/settings.py` — `_desired_packages`
+- `src/perk/convergence/init/__init__.py` — the facade (`is_self_repo`, `run_init`)
+- `src/perk/convergence/capabilities.py` — the `skills-manifest` capability
+- `src/perk/convergence/doctor/data.py` — `_MANAGED_GROUP` (`skills-manifest` → `skills` group)
+- `tests/conftest.py` — `stub_env` (the `sync_skills` patch seam)
 - `tests/test_init_t5.py` — `test_cli_idempotent_second_run`
 - `init-doctor.md` — managed-convergence SSOT and the `changes`-delta idempotency rule
 - `github-gateway.md` — the `repo_identity` read shape this convergence is the sole consumer of

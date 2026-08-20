@@ -1,10 +1,10 @@
 ---
-title: Adding a perk.toml config table — cross-plane parsing, placement, and convergence
+title: Adding a `.perk/config.toml` config table — cross-plane parsing, placement, and convergence
 read_when: You are adding a [table] or key to .perk/config.toml, deciding where a knob is consumed, anchoring a committed read to the main checkout, a `local.toml` secret fallback, or CI-check gating.
 cluster: config-and-convergence
 ---
 
-# Adding a `perk.toml` config table
+# Adding a `.perk/config.toml` config table
 
 perk's `.perk/config.toml` is read by **both planes** — the TypeScript extension (interior) and the
 Python CLI (exterior) — through deliberately narrow parsers. Two additions (repo trust,
@@ -85,7 +85,7 @@ The two planes handle values they can't use differently:
   (`extension/substrate/config.ts`) now reads strings plus **native booleans and numbers**
   (`TomlScalar`); anything else (dates, arrays, inline tables) is still silently dropped, and
   consumers guard with `typeof` checks (a string `"true"` no longer grants trust).
-- **Python — ill-typed values raise.** The pydantic table models in `perk/substrate/config.py`
+- **Python — ill-typed values raise.** The pydantic table models in `src/perk/substrate/config.py`
   no longer silently discard: an ill-typed value raises `ConfigError` (field-path message via
   `translate_validation_errors`), surfaced by doctor's `config` check. The `bool`-is-`int`-subclass
   trap (`isinstance(True, int)` is `True`, so `reserve_tokens = true` would otherwise read as `1`)
@@ -100,9 +100,9 @@ The two planes handle values they can't use differently:
 ## Committed-only read vs the overlaid `load_config`
 
 Most tables (`[providers]`, `[subagents]`, `[[bindings]]`) read through `load_config`, which overlays
-`perk.local.toml` for per-user, session-transient overrides. Config that converges into a
-**committed** artifact must not. `[compaction]` lands in `settings.json` (committed), so
-`load_committed_compaction` (`perk/substrate/config.py`) reads committed `.pi/perk.toml` **only**, bypassing the
+the gitignored `.perk/local.toml` for per-user, session-transient overrides. Config that converges
+into a **committed** artifact must not. `[compaction]` lands in `settings.json` (committed), so
+`load_committed_compaction` (`src/perk/substrate/config.py`) reads committed `.perk/config.toml` **only**, bypassing the
 overlay — otherwise a per-user local override would produce a stray committed git diff. Per-user
 overrides for such knobs belong in pi's native global `~/.pi/agent/settings.json` (pi merges it under
 project settings).
@@ -112,14 +112,14 @@ lands in committed files.
 
 Committed-only knobs now have **three precedents** (`[compaction]`, `[issues]`, the
 settings-convergence reads); the recipe is fixed: a pure `parse_*(raw)` parser + a
-`load_committed_*(repo_root)` that reads `.pi/perk.toml` via `_read_toml` only, lets
+`load_committed_*(repo_root)` that reads `.perk/config.toml` via `_read_toml` only, lets
 `TOMLDecodeError` propagate, and stays OUT of the overlaid `Config` dataclass. Tests must include
 the **"local overlay is ignored"** case — it's the whole point of the shape.
 
 ### Main-checkout anchoring for committed canonical-store selectors
 
 The `[issues]` backend/team committed-only readers (`_committed_issues` in
-`perk/substrate/config.py`; `resolveIssueBackendId` in `extension/substrate/config.ts`) resolve
+`src/perk/substrate/config.py`; `resolveIssueBackendId` in `extension/substrate/config.ts`) resolve
 `git.main_worktree_root(repo_root) or repo_root` / `mainCheckoutRoot(cwd)` **before** reading the
 committed config.
 
@@ -159,24 +159,26 @@ committed config.
   `subprocess.run` return object, look for a test-file-level global subprocess fake — stub the
   new seam at module level (matching its real environment result) rather than widening the fake.
 
-## The local-only secret-fallback reader (`perk.local.toml`)
+## The local-only secret-fallback reader (`.perk/local.toml`)
 
-A secret may now live in the **gitignored** `perk.local.toml` (never the committed `perk.toml`) — a
+A secret may now live in the **gitignored** `.perk/local.toml` (never the committed
+`.perk/config.toml`) — a
 deliberate, documented relaxation of "Linear key in the environment only." `LINEAR_API_KEY`'s
 `[linear] api_key` is read by `config.load_local_linear_api_key(repo_root)`, which reads
-`.pi/perk.local.toml` **only** — the **inverse** of the `load_committed_*` family.
+`paths.local_config_file` (`.perk/local.toml`) **only** — the **inverse** of the
+`load_committed_*` family.
 
 - **It resolves the MAIN checkout first (#730).** The reader reads from
   `git.main_worktree_root(repo_root) or repo_root`, so the gitignored secret is found from inside a
   linked worktree **without a file copy and without relying on the launch env-seed** (the
-  `perk.local.toml` lives only in the main checkout; a worktree has none). The `or repo_root`
+  `.perk/local.toml` lives only in the main checkout; a worktree has none). The `or repo_root`
   fallback keeps every non-worktree / non-repo caller — including every `tmp_path`-rooted test —
   **byte-identical** (`main_worktree_root` returns `None` outside a repo). See
   `docs/learned/workflow/worktree-lifecycle.md` for the `main_worktree_root` primitive.
 
 - **Critical divergence:** it is **fail-soft on `tomllib.TOMLDecodeError` (returns `None`)**, unlike
   the committed readers which **propagate** it for the config check to map. Rationale: a best-effort
-  secret seed must never crash an otherwise-valid command, and a malformed `perk.local.toml` is
+  secret seed must never crash an otherwise-valid command, and a malformed `.perk/local.toml` is
   surfaced nowhere else today.
 - The key is **deliberately NOT added to the merged `Config` dataclass** (that would make it
   readable from the **committed** file and widen the surface) — a standalone reader, mirroring
@@ -192,7 +194,7 @@ config-fallback `client_from_env` seam + the worktree env bridge).
 
 `[worktree] setup` (an array of shell command strings) parses through the `WorktreeTable` model —
 an after-mode validator on `setup` strips each entry and drops blanks (a non-string element
-raises) — and is **overlay-aware via `load_config`**: a `perk.local.toml` array **replaces
+raises) — and is **overlay-aware via `load_config`**: a `.perk/local.toml` array **replaces
 wholesale**. This contrasts with
 `[issues]`/`[compaction]`, which deliberately bypass the overlay (they pick the canonical store).
 The decision rule is reaffirmed: **overlay is safe for session-transient config (a per-user
@@ -321,7 +323,7 @@ so a `glob = "*.py"` row can run only the Python toolchain.
 
 ## Convergence composition (the settings-targeting path)
 
-Add a settings-targeting converger by composing it *inside* `_converge_settings` (`perk/convergence/init.py`):
+Add a settings-targeting converger by composing it *inside* `_converge_settings` (`src/perk/convergence/init/settings.py`):
 `_converge_compaction` mutates the shared `settings` dict before the `json.dumps` no-op short-circuit,
 so it rides the existing `settings-wiring` `ManagedConvergence` for free — **no new doctor check**.
 This mirrors `_converge_provider_packages`. Fold returned change fragments into the init/doctor `parts`
@@ -334,7 +336,7 @@ summary. See `init-doctor.md` for the managed-convergence SSOT.
 - **Absent** ⇒ leave the block untouched (perk can't prove ownership of a bare key, so removal is
   unsafe).
 
-**Residual wrinkle:** deleting `[compaction]` from `perk.toml` leaves a stale `settings.json` block to
+**Residual wrinkle:** deleting `[compaction]` from `.perk/config.toml` leaves a stale `settings.json` block to
 clean up by hand.
 
 ### snake_case → camelCase mapping in the table model
@@ -398,10 +400,10 @@ launched session's model; the remote runner is unaffected.
 
 - `extension/substrate/config.ts` — `parseTomlSubset` (the scalar-subset TS parser); `parseCiChecks` (`[[ci.checks]]` → `CiCheck[]`)
 - `extension/doors/ciExecutor.ts` — `decideCiScope` (the `[ci] trusted` interior gate); `changedFiles`/`matchesGlob`/skip plumbing (the `[[ci.checks]]` glob gating)
-- `perk/substrate/config.py` — the pydantic table models (`ConfigFileModel`, `CompactionTable`,
+- `src/perk/substrate/config.py` — the pydantic table models (`ConfigFileModel`, `CompactionTable`,
   `WorktreeTable`, …); `load_committed_compaction`, `load_committed_issues_backend` (the
   committed-only reads)
-- `perk/convergence/init.py` — `_converge_settings` / `_converge_compaction` composition
+- `src/perk/convergence/init/settings.py` — `_converge_settings` / `_converge_compaction` composition
 - `docs/learned/workflow/init-doctor.md` — the managed-convergence SSOT
 - `docs/learned/workflow/provider-seam.md` — the mirrored selection shape
 - `docs/learned/workflow/linear-backend.md` — the consumer side of the local-only `[linear] api_key` reader

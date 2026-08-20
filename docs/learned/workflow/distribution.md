@@ -196,7 +196,7 @@ The durable distribution rule for how consumer-side install commands are pinned:
 
 - **Machine / reproducibility surfaces pin to `__version__`** — the remote-runner consumer install
   (`src/perk/run/workflow_artifacts.py`) pins `perk=={__version__}`, and the npm extension wiring
-  (`src/perk/substrate/settings.py` / the convergence layer) pins `@mgiles/perk@{__version__}`. Both derive
+  (`src/perk/convergence/init/settings.py`, the `_perk_npm_entry` owner) pins `@mgiles/perk@{__version__}`. Both derive
   from the **one** `__version__` SSOT (the `importlib`-derived value).
 - **Human-facing docs stay unpinned (always-latest)** — `README` / get-started read a bare
   `uv tool install perk`.
@@ -320,8 +320,8 @@ Mechanical reusables that DO transfer from the git lifecycle:
 
 ## Cross-references
 
-- `docs/learned/workflow/init-external-cli.md` — `__version__`'s post-collapse role (version-string +
-  AGENTS-stamp only, never a ref pin)
+- `docs/learned/workflow/init-external-cli.md` — the skills-manifest `main` ref that survives
+  beside the version-pinned install pins
 - `docs/learned/workflow/init-doctor.md` — the fail-level-baseline-shift + `verify=True`
   `report.healthy` census rules a new fail-level check triggers
 - `docs/learned/workflow/borrowed-packages.md` — the append-only borrowed npm entries the identity

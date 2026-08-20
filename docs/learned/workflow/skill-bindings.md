@@ -17,9 +17,9 @@ knowledge below is what an agent can't derive from reading any single file.
 
 - The two-plane subsystem rides one shared data contract (`shared/bindings.yaml`) + a resolver
   per plane — "The data contract and the resolver".
-- Delivery filters to **user-originated** bindings only: a resolved binding value-equal to a
-  shipped default is dropped (frozen-dataclass set membership; the TS twin serializes a tuple
-  key) — "'User-originated' is the delivery filter".
+- Delivery renders the **full resolved** overlay — shipped defaults ⊕ user bindings — for the
+  matching trigger (the shipped defaults carry no hardcoded nudges; both doors deliver through
+  the same path) — "Historical: 'user-originated' was the delivery filter".
 - Two delivery doors (cold + warm) share a dedup marker so a skill never lands twice — "The two
   doors and the cold↔warm dedup marker".
 - Linked-worktree delivery works only because the cold door mirrors `.agents/skills/` during
@@ -31,8 +31,9 @@ knowledge below is what an agent can't derive from reading any single file.
 - Delivery vs scoping are separate layers: bindings put a skill INTO a session; the exposure
   model decides what a cold launch DISCOVERS (§8.39 is canonical) — "The layered
   skills-exposure model (scoping)".
-- Pi compaction preserves append-only branch history, so warm dedup scans only the active context
-  window; delivery tests cover every template arm and the final dispatch boundary — "The two
+- Pi compaction preserves append-only branch history, so warm dedup scans the active context
+  window **and** the submitting `event.prompt` (the launch turn is not yet on the branch);
+  delivery tests cover every template arm and the final dispatch boundary — "The two
   doors and the cold↔warm dedup marker".
 
 ## The data contract and the resolver (Nodes 1.1, 1.2)
@@ -59,14 +60,21 @@ Resolution overlays user bindings onto shipped defaults. Two subtle semantics:
   issues primitive plus an `applied` set in the resolver — **the resolver does not call validate**.
   Downstream delivery nodes get unique-triggers-by-construction for free.
 
-## "User-originated" is the delivery filter — and the frozen-dataclass test is exact
+## Historical: "user-originated" was the delivery filter — and the frozen-dataclass test was exact
 
-perk still hardcodes its own "Follow the … skill" nudges (until a later node deletes them), so the
-delivery layer must deliver **only** user-originated bindings to avoid double-pointing. The exact
-test: a resolved binding **value-equal to a shipped default is dropped**; a *new* trigger or an
-*override* of a perk-owned trigger is delivered. Python expresses this as frozen-dataclass set
-membership (`Binding` is `@dataclass(frozen=True)` → hashable; `b not in set(defaults)`). The TS twin
-has no value identity (plain object), so it serializes a tuple key
+> **Update (superseded — delivery is now the full resolved overlay).** perk's own nudges are no
+> longer hardcoded; delivery renders the **full resolved** set — shipped defaults ⊕ user bindings
+> — for the matching trigger (`render_cold_bindings` in `src/perk/substrate/binding_delivery.py`;
+> the TS warm door mirrors it). No user-originated filter exists anywhere in delivery code. The
+> section below is the historical instance of a still-real pattern: a TS plane mirroring a Python
+> set/`in` over structural objects via a serialized tuple key.
+
+perk once hardcoded its own "Follow the … skill" nudges, so the delivery layer had to deliver
+**only** user-originated bindings to avoid double-pointing. The exact
+test: a resolved binding **value-equal to a shipped default was dropped**; a *new* trigger or an
+*override* of a perk-owned trigger was delivered. Python expressed this as frozen-dataclass set
+membership (`Binding` is `@dataclass(frozen=True)` → hashable; `b not in set(defaults)`). The TS
+twin has no value identity (plain object), so it serialized a tuple key
 (`JSON.stringify([trigger,kind,targetId,skill,mode])`) into a `Set` — the same pattern applies any
 time a TS plane mirrors a Python set/`in` over structural objects.
 
@@ -87,8 +95,12 @@ Anyone changing the pointer format again reaches for the helper, not a re-inline
 Cold and warm renderers are **independent code paths** that must not double-deliver when both fire
 for one session (a cold launch *and* `before_agent_start`). They dedup through one **byte-identical
 header literal**: `BINDING_HEADER` (TS, `extension/substrate/bindingDelivery.ts`) ≡ `_HEADER` (Python,
-`perk/substrate/binding_delivery.py`). The warm injector skips when the header already occurs in Pi's **active model-context window** — a
-shape-agnostic marker scan over `activeContextWindow(branchOf(ctx))`. Pi compaction appends history;
+`src/perk/substrate/binding_delivery.py`). The warm injector skips when the header already occurs
+in Pi's **active model-context window** — a shape-agnostic marker scan over
+`activeContextWindow(branchOf(ctx))` — **or in the submitting `event.prompt`**: at
+`before_agent_start` the just-submitted prompt is not yet on the branch, so the branch scan alone
+cannot cover the launch turn (the `event.prompt.includes(BINDING_HEADER)` guard is what stops a
+cold-delivered launch prompt from double-delivering). Pi compaction appends history;
 it does not delete the original delivery entry. Scanning the full branch would therefore suppress
 re-delivery forever even after the marker left model context. The window begins at the latest
 compaction's `firstKeptEntryId` (or just after that compaction as fallback) and excludes compaction
@@ -111,7 +123,7 @@ the renderer result. Keep both layers when the renderer and dispatcher can indep
 
 ### The `binding_trigger` "borrows-a-stage" hazard
 
-`launch_stage` (`perk/run/launch.py`) is the single cold-launch chokepoint every stage launcher routes
+`launch_stage` (`src/perk/run/launch/__init__.py`) is the single cold-launch chokepoint every stage launcher routes
 through, so binding delivery wired there covers all launches uniformly. But the trigger defaults to
 `f"stage:{stage.id}"`, and **`learn-docs` borrows the `plan` stage descriptor** — keying delivery off
 `stage.id` alone would fire `plan`'s bindings for it. The fix is an explicit
@@ -141,7 +153,7 @@ Two delivery-surface boundaries that held:
   objective body with no `pi` session / initial prompt, so `command:objective-reconcile` can only
   fire at the warm door. Don't wire cold delivery for non-launching workers.
 - **Delivery I/O lives apart from the model.** Disk reads (`SKILL.md` transclusion) live in
-  `perk/substrate/binding_delivery.py`, keeping `perk/substrate/bindings.py` a pure model/resolver. Resolver `issues` +
+  `src/perk/substrate/binding_delivery.py`, keeping `src/perk/substrate/bindings.py` a pure model/resolver. Resolver `issues` +
   delivery `warnings` are **returned, never raised**, and surfaced loud-but-non-fatal: a missing
   transclude target degrades to the nudge pointer with a warning, never blocking a launch.
 
@@ -195,11 +207,13 @@ committed entries there are *borrowed* skills (`dignified-python`, `ruff`, `ty`,
 count) live at `skills/<name>/SKILL.md` and reach Pi via the `..` package's `skills` CLI sync, not
 via `.agents/skills/` symlinks the self-repo materializes. A naive `.agents/skills/<name>/SKILL.md`
 presence check therefore emits **one false warning per bound `perk-*` skill** on perk's own
-`perk doctor` (8 at the time the trap was hit). The fix:
-`is_skill_installed(root, skill, *, self_repo=False)` accepts a `skills/<name>/SKILL.md` fallback
-**only** when `self_repo`. Any future code asking "is this perk skill installed?" must thread
-`self_repo` or it mis-fires on perk's own tree. (See `init-external-cli.md` for why this fallback is
-also the pre-sync safety net.)
+`perk doctor` (8 at the time the trap was hit). The current mechanics (the one-time
+`self_repo=` fallback param is **retired**): `is_skill_installed(root, skill)` is strict on
+`.agents/skills/<name>/SKILL.md` — the delivery read path — in self-repo and consumer trees
+alike; the self-repo committed `skills/` layout is classified **separately** by doctor's
+`_skills_delivery_check` (pre-merge first appearance → warn vs a stale delivered set → fail,
+probing the local `origin/main` for the committed `skills/<name>`). (See `init-external-cli.md`
+for the delivery-path posture.)
 
 Plan-claim caution: a plan must **not** claim an in-branch skill edit "reflects immediately" via
 `.agents/skills/` — in the self-repo those entries are symlinks into a **commit-pinned skills-CLI
@@ -208,30 +222,36 @@ mirror + dogfood symlink-swap mechanics are below).
 
 ### Two-tier validation split (deliberate, not an oversight)
 
-- **doctor** validates the **full resolved set** (`resolve_bindings(user, defaults=load_bindings()
-  .bindings).bindings`) with the **self-repo `skills/` fallback**.
-- **Injection** (cold `render_cold_bindings` nudge path + warm `bindingSuffix`) checks only
-  **user-originated** bindings and uses `.agents/skills/<name>` **only** (default `self_repo=False`)
-  — byte-identical to the delivery read path. Injection only ever references skills the *user*
-  installed under `.agents/skills/`; the self-repo fallback is doctor-only. Keep these asymmetric on
-  purpose.
+- **doctor**'s `_bindings_check` validates the **full resolved set** (`resolve_bindings(user,
+  defaults=load_bindings().bindings).bindings`) with **strict** `.agents/skills/` presence (no
+  fallback).
+- **Injection** (cold `render_cold_bindings` nudge path + warm `bindingSuffix`) uses the
+  **identical strict read** — `.agents/skills/<name>` only, byte-identical to the delivery read
+  path.
 
-### The blind-spot consequence: green doctor, injection ENOENT
+The deliberate asymmetry now lives one check over: doctor's `_skills_delivery_check` owns the
+self-repo committed-`skills/`-layout classification (first appearance vs stale — the trap above),
+so the bindings tier and the injection tier read the same strict path on purpose.
 
-The two-tier asymmetry above has a **failure mode**, not just a false-warning fix. In the self-repo,
-doctor's skills-delivery check accepts the committed `skills/<name>/SKILL.md` fallback — but warm
-injection reads **only** `.agents/skills/<name>/SKILL.md`. So a **stale `.agents/skills/` mirror
-passes doctor green and then ENOENTs at injection time** (a dangling worktree symlink whose target
-moved/was never synced). Doctor can't see it because it's looking at the *other* tier. The symptom:
-a binding that doctor reports healthy still fails to deliver its skill body in a live worktree
-session.
+### The blind-spot consequence: green doctor, injection ENOENT (historical — the fix landed)
 
-Manual repair when you hit it: run `skills update --sync` in the **main checkout** (re-materializes
-`.agents/skills/`), then re-point the worktree's `.agents/skills/<name>` symlink (the cold-door
-`materialize_skills` mirror does this at launch — a stale one predates the current target). The
-structural fix (make doctor's self-repo check see the tier injection actually reads, or converge the
-mirror) is tracked on objective #1206 node 4.3 (item 3, status `planning`) — a status pointer, not
-fiction to author here.
+> **Update (the structural fix shipped).** Doctor now checks the tier injection actually reads —
+> `is_skill_installed` is strict on `.agents/skills/` everywhere — so a dangling/stale mirror
+> surfaces as a doctor warn instead of passing green. The failure mode below is the history that
+> motivated the fix; the manual-repair recipe still applies when you hit a stale worktree mirror.
+
+The former fallback asymmetry had a **failure mode**, not just a false-warning fix. In the
+self-repo, doctor's skills-delivery check accepted the committed `skills/<name>/SKILL.md` fallback
+— but warm injection reads **only** `.agents/skills/<name>/SKILL.md`. So a **stale
+`.agents/skills/` mirror passed doctor green and then ENOENTed at injection time** (a dangling
+worktree symlink whose target moved/was never synced). Doctor couldn't see it because it was
+looking at the *other* tier. The symptom: a binding that doctor reported healthy still failed to
+deliver its skill body in a live worktree session.
+
+Manual repair when you hit a stale mirror: run `skills update --sync` in the **main checkout**
+(re-materializes `.agents/skills/`), then re-point the worktree's `.agents/skills/<name>` symlink
+(the cold-door `materialize_skills` mirror does this at launch — a stale one predates the current
+target).
 
 **Confirmed live, with the durable timing shape.** The worktree mirror freezes at implement-launch
 against the main checkout's *then-current* (possibly stale) sync. Main can re-sync minutes later,
@@ -259,7 +279,7 @@ registry/config checks — don't double-fail).
 
 ### `DELIVERABLE_COMMAND_TARGETS` is the command-trigger vocabulary
 
-The frozenset in `perk/substrate/bindings.py` is the SSOT — each member (e.g.
+The frozenset in `src/perk/substrate/bindings.py` is the SSOT — each member (e.g.
 `command:pr-review`, `command:objective-replan`, `command:replan`) is a command with a binding-delivery surface (a
 Mechanism-B `bindingSuffix` call site, and for the cold doors a `binding_trigger="command:<id>"`
 override). Don't enumerate the members here — the set keeps growing and a hard-coded list goes
@@ -275,11 +295,11 @@ Adding a deliverable command + skill requires **all** of these to change togethe
 break (the concrete instance is `/pr-review` → `command:pr-review`):
 
 1. **`shared/bindings.yaml`** — the `{trigger, skill, mode}` row.
-2. **`perk/substrate/bindings.py` `DELIVERABLE_COMMAND_TARGETS`** frozenset (+ its comment listing the
+2. **`src/perk/substrate/bindings.py` `DELIVERABLE_COMMAND_TARGETS`** frozenset (+ its comment listing the
    `bindingSuffix` call sites) — else doctor's binding-target check fails.
 3. The warm command must call **`bindingSuffix(ctx.cwd, "command:<id>")`** (Mechanism B) — the skill
    pointer is never hardcoded in the guidance body.
-4. **`perk/convergence/init.py` `PERK_SKILLS`** tuple, then **regenerate** the committed manifest fragment
+4. **`src/perk/convergence/init/skills.py` `PERK_SKILLS`** tuple, then **regenerate** the committed manifest fragment
    `.agents/manifest.d/perk.yaml` (it's generated via `_desired_skills_manifest(True)`, not
    hand-edited — watch for pre-existing drift).
 5. **THREE** binding-count test sites: Python `tests/test_bindings.py` `EXPECTED_DEFAULTS`; TS
@@ -291,9 +311,9 @@ break (the concrete instance is `/pr-review` → `command:pr-review`):
    command targets **and spell out their count in words** ("Ten command targets have a delivery
    surface…" today). Both must be bumped in the same turn — they had already drifted once (stuck
    at "eight") before that was caught. Total: the five-site code/test lockstep + 2 prose sites.
-7. If configurable: `extension/substrate/config.ts` `PerkConfig` + parser, and `perk/substrate/config.py` `Config` for
+7. If configurable: `extension/substrate/config.ts` `PerkConfig` + parser, and `src/perk/substrate/config.py` `Config` for
    forward parity — flag the Python side as possibly-unused until a cold door exists (don't omit it).
-   Concretely, `perk/substrate/config.py`'s `SubagentsTable.pr_reviewer` (`[models.subagents]
+   Concretely, `src/perk/substrate/config.py`'s `SubagentsTable.pr_reviewer` (`[models.subagents]
    pr-reviewer`) is **parsed-but-unused** on the Python side today; only the TS warm `/pr-review`
    path consumes it.
 
@@ -373,7 +393,7 @@ composition). The canonical spec is `shared/contracts.md` §8.39 — the three-l
 bound-skill union, the argv shape, and the fail-open ladder all live there; this section captures
 only the cross-cutting reasoning that generalizes beyond the feature. Source pointers:
 `src/perk/substrate/skill_exposure.py` (the model),
-`perk/run/launch/__init__.py::_skill_exposure_argv` (the argv seam),
+`src/perk/run/launch/__init__.py::_skill_exposure_argv` (the argv seam),
 `src/perk/substrate/config.py` (the `[skills]` namespace).
 
 ### Zero-change rollout via an explicit engagement rule
@@ -414,17 +434,17 @@ a plane that deliberately doesn't consume.
 
 - `shared/bindings.yaml`, `shared/contracts.md` §8.9 — the data contract and trigger vocabulary
   (§8.39 — the skills-exposure spec: three-layer resolution, argv shape, fail-open ladder)
-- `perk/substrate/bindings.py` — pure model + resolver; `perk/substrate/binding_delivery.py` — `_HEADER`, cold render
+- `src/perk/substrate/bindings.py` — pure model + resolver; `src/perk/substrate/binding_delivery.py` — `_HEADER`, cold render
 - `extension/substrate/bindingDelivery.ts` — `BINDING_HEADER`, `BINDING_CONTEXT_TYPE`, warm injector + dedup scan
-- `perk/run/launch.py` — `launch_stage`, the `binding_trigger` param (the borrows-a-stage seam)
+- `src/perk/run/launch/__init__.py` — `launch_stage`, the `binding_trigger` param (the borrows-a-stage seam)
 - `docs/learned/workflow/shared-contracts.md` — adding a new parsed `shared/` contract
 - `docs/learned/pi/context-injection.md` — the conditional inject-and-strip lifecycle
 - `docs/learned/toolchain/biome.md` — the `parseTomlSubset` rewrite gotchas
-- `perk/substrate/bindings.py` — `is_skill_installed(root, skill, *, self_repo)`; `perk/convergence/doctor.py` — the
-  report-only `bindings` check; `DELIVERABLE_COMMAND_TARGETS`
+- `src/perk/substrate/bindings.py` — `is_skill_installed(root, skill)` (strict on the delivery
+  read path); `src/perk/convergence/doctor/checks.py` — the report-only `bindings` check;
+  `DELIVERABLE_COMMAND_TARGETS`
 - `docs/learned/workflow/init-doctor.md` — why a report-only check ≠ a hand-authored managed check
-- `docs/learned/workflow/init-external-cli.md` — the `skills` CLI as single delivery path (the
-  pre-sync `is_skill_installed` fallback)
+- `docs/learned/workflow/init-external-cli.md` — the `skills` CLI as single delivery path
 - `docs/learned/pi/subagents.md` — `/pr-review` (`command:pr-review`), the concrete `command:<id>` binding instance
 - `docs/learned/workflow/cold-door-launch.md` — the worktree `.agents/skills/` mirror (`materialize_skills`);
   also the launch argv seam the exposure scoping flags compose into
