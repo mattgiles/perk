@@ -55,6 +55,8 @@ attribute-access import path verbatim (zero consumer/test import churn). Submodu
 - ``_helpers`` — shared leaf: the payload/markdown helpers + module constants.
 - ``issue_ops`` / ``project_ops`` — the ``_LinearIssueOps`` / ``_LinearProjectOps`` substrates.
 - ``backend`` — ``LinearIssueBackend`` (the issue tier).
+- ``dream_report`` — ``LinearDreamArtifactPublisher`` (the dream-artifact upload + Resources
+  link).
 - ``objectives`` — ``LinearObjectiveStore`` (issue-backed, dormant).
 - ``project_store`` — ``LinearProjectObjectiveStore`` (project-backed).
 - ``readiness`` — the init/doctor readiness probes.
@@ -66,6 +68,7 @@ from perk.backends.linear._helpers import (
     to_linear_markdown,
 )
 from perk.backends.linear.backend import LinearIssueBackend
+from perk.backends.linear.dream_report import LinearDreamArtifactPublisher
 from perk.backends.linear.issue_ops import _LinearIssueOps
 from perk.backends.linear.objectives import LinearObjectiveStore
 from perk.backends.linear.project_ops import _LinearProjectOps
@@ -81,6 +84,7 @@ from perk.backends.linear.readiness import (
 __all__ = [
     "_NODE_STATUS_STATE_TYPE",
     "_REQUIRED_STATE_TYPES",
+    "LinearDreamArtifactPublisher",
     "LinearIssueBackend",
     "LinearObjectiveStore",
     "LinearProjectObjectiveStore",

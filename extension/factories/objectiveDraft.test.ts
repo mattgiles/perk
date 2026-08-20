@@ -585,6 +585,32 @@ test("core: a dream session with no finalized wave ⇒ bad_state, nothing writte
   }
 });
 
+test("core: invariance-violating rendered parts refuse invalid_input at draft-write (§8.64)", () => {
+  // The draft-write side of the shared gate's invariance mirror — a single-line rationale
+  // carrying a perk HTML marker renders into the dispositions table and refuses, so an
+  // approved report is always Python-savable.
+  const cwd = tempCwd();
+  try {
+    const branch: unknown[] = [runIdEntry(DREAM_RUN)];
+    plantDreamState(cwd, branch);
+    const input = dreamReportInput();
+    const rows = input.rows as Record<string, unknown>[];
+    rows[0] = { ...rows[0], rationale: "keep <!-- perk:metadata-block:plan-body --> visible" };
+    const result = quietly(() =>
+      writeObjectiveDraft(fakeSink(branch), reportableCtx(cwd, branch), {
+        prose: PROSE,
+        dream_report: input,
+      }),
+    );
+    assert.equal(result.details.ok, false);
+    assert.equal(result.details.ok === false && result.details.error_type, "invalid_input");
+    assert.match(result.content[0]?.text ?? "", /invariance rule/);
+    assert.ok(!existsSync(join(sessionDataDir(cwd, DREAM_RUN), OBJECTIVE_DRAFT_ARTIFACT)));
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
 test("core: dream + valid stores the tool-written block; readObjectiveDraft round-trips it", () => {
   const cwd = tempCwd();
   try {

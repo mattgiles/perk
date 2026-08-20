@@ -554,6 +554,18 @@ class _LinearProjectOps:
         if payload.get("success") is not True:
             raise IssueBackendError(f"failed to attach to milestone on Linear issue {issue_id!r}")
 
+    def project_external_links(self, project_id: str) -> list[dict[str, object]]:
+        """Read the project's **Resources** links (the Project ``externalLinks`` connection) as
+        raw ``{label, url}`` nodes — the presence probe the dream-artifact publisher runs before
+        uploading (retry idempotence keys on the link's label). Raises on a missing project /
+        infra failure (the publisher is fail-loud, part of the convergent save sequence)."""
+        query = (
+            "query($id: String!, $cursor: String) { project(id: $id) "
+            "{ externalLinks(first: 50, after: $cursor) "
+            "{ nodes { label url } pageInfo { hasNextPage endCursor } } } }"
+        )
+        return self._client.paginate(query, {"id": project_id}, "project", "externalLinks")
+
     def create_entity_external_link(self, *, project_id: str, label: str, url: str) -> None:
         """Add a link to the project's **Resources** section (``entityExternalLinkCreate`` —
         live-verified). Used best-effort for human discoverability of the metadata sentinel;

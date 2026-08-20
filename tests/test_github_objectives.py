@@ -1160,6 +1160,25 @@ def test_update_objective_header_rejects_origin_merge(monkeypatch):
         )
 
 
+def test_update_objective_header_merges_dream_report(monkeypatch):
+    # `dream_report` (§8.64) is merge-writable by design (recorded AFTER create — the
+    # activation-last ordering), unlike `origin`; the write merges into the parsed existing
+    # mapping, preserving a stored origin untouched.
+    stored = _obj_header("01RID", origin="learn-dream")
+    rec = _GhDispatch(
+        [
+            (_has("issues/5", ".body"), _Proc(0, stored)),
+            (_has("issues/5", "PATCH"), _Proc(0, "{}")),
+        ]
+    )
+    monkeypatch.setattr(subprocess, "run", rec)
+    objectives.update_objective_header(number=5, fields={"dream_report": "5"}, repo_root=ROOT)
+    patched = rec.body_files[-1]
+    header = plan.find_metadata_block(patched, objective.OBJECTIVE_HEADER_KEY)
+    assert header is not None
+    assert header["dream_report"] == "5" and header["origin"] == "learn-dream"
+
+
 def test_update_objective_header_unrelated_merge_preserves_stored_origin(monkeypatch):
     # The round-trip regression: the writers merge into the PARSED existing mapping, so a
     # stored origin survives unrelated header merges untouched.

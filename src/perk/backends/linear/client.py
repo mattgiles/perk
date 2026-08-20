@@ -29,7 +29,8 @@ Explicit deferrals (flagged, not silently omitted):
 """
 
 import os
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
 from pathlib import Path
 from typing import cast
 
@@ -89,6 +90,17 @@ _API_KEY_HINT = (
 _TIMEOUT = 30  # seconds — matches github.py's _WRITE_TIMEOUT; one wrapper, one ceiling.
 
 _BODY_SLICE = 500  # bounded body excerpt in diagnostics
+
+
+@dataclass(frozen=True)
+class FileUploadTarget:
+    """A ``fileUpload`` reservation: the signed ``upload_url`` to PUT the bytes to, the durable
+    ``asset_url`` the uploaded file will live at (workspace-auth-gated), and the headers Linear
+    requires on the PUT (propagated verbatim)."""
+
+    upload_url: str
+    asset_url: str
+    headers: tuple[tuple[str, str], ...]
 
 
 class LinearGraphQLError(IssueBackendError):
@@ -240,6 +252,71 @@ class LinearClient:
         viewer_id = _require_str(viewer.get("id"), "viewer id")
         self._viewer_id_cache = viewer_id
         return viewer_id
+
+    def file_upload(self, *, content_type: str, filename: str, size: int) -> FileUploadTarget:
+        """Reserve a workspace file upload (the ``fileUpload`` GraphQL mutation).
+
+        Returns the signed-PUT target; the caller uploads the bytes with :meth:`upload_asset`
+        and then attaches ``asset_url`` wherever it belongs. Raises ``IssueBackendError`` on a
+        refused reservation or a malformed payload.
+        """
+        mutation = (
+            "mutation($contentType: String!, $filename: String!, $size: Int!) "
+            "{ fileUpload(contentType: $contentType, filename: $filename, size: $size) "
+            "{ success uploadFile { uploadUrl assetUrl headers { key value } } } }"
+        )
+        data = self.request(
+            mutation, {"contentType": content_type, "filename": filename, "size": size}
+        )
+        payload = _require_dict(data.get("fileUpload"), "fileUpload")
+        if payload.get("success") is not True:
+            raise IssueBackendError(f"Linear fileUpload failed for {filename!r}")
+        upload_file = _require_dict(payload.get("uploadFile"), "fileUpload.uploadFile")
+        headers: list[tuple[str, str]] = []
+        for raw in _require_list(upload_file.get("headers"), "fileUpload.uploadFile.headers"):
+            node = _require_dict(raw, "fileUpload header")
+            headers.append(
+                (
+                    _require_str(node.get("key"), "fileUpload header key"),
+                    _require_str(node.get("value"), "fileUpload header value"),
+                )
+            )
+        return FileUploadTarget(
+            upload_url=_require_str(upload_file.get("uploadUrl"), "fileUpload uploadUrl"),
+            asset_url=_require_str(upload_file.get("assetUrl"), "fileUpload assetUrl"),
+            headers=tuple(headers),
+        )
+
+    def upload_asset(
+        self,
+        upload_url: str,
+        *,
+        headers: Sequence[tuple[str, str]],
+        content: bytes,
+        content_type: str,
+    ) -> None:
+        """PUT the reserved bytes to the signed upload URL (the :meth:`file_upload` follow-up).
+
+        Routed through the same injectable transport as :meth:`request` (offline-testable via
+        ``httpx.MockTransport``); propagates the reservation's returned headers plus the
+        ``Content-Type``. Raises ``IssueBackendError`` on a transport failure or a non-2xx
+        response.
+        """
+        try:
+            with httpx.Client(transport=self._transport, timeout=self._timeout) as client:
+                response = client.put(
+                    upload_url,
+                    content=content,
+                    headers=[*headers, ("Content-Type", content_type)],
+                )
+        except httpx.HTTPError as exc:
+            raise IssueBackendError(f"Linear asset upload failed: {exc}") from exc
+        if response.status_code < 200 or response.status_code >= 300:
+            excerpt = response.text[:_BODY_SLICE]
+            message = f"Linear asset upload failed with HTTP {response.status_code}"
+            if excerpt:
+                message += f": {excerpt}"
+            raise IssueBackendError(message)
 
     def paginate(
         self, query: str, variables: dict[str, object], *path: str

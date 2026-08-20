@@ -15,8 +15,10 @@
 // FAILSAFE invocation of the same seam, keeping the legacy drive-the-session behavior as the
 // no-draft fallback (objectives have no transcript scrape by design).
 
+import { join } from "node:path";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { bindingSuffix } from "../substrate/bindingDelivery.ts";
+import { atomicWriteFileSync, ensureRunScratch } from "../substrate/cache.ts";
 import {
   booleanField,
   type ColdJson,
@@ -43,6 +45,14 @@ import { resolveDreamReportGate } from "./objectiveDreamReport.ts";
 
 /** The `objective-save` registry stage id (the objectiveAuthor.ts constant's sibling). */
 export const OBJECTIVE_SAVE_STAGE = "objective-save";
+
+/**
+ * The run-scoped dream-report transfer filename (contracts §8.64) — the extension→door handoff
+ * carrying the reviewed CANONICAL parts. The Python mirror is
+ * `perk.learn.dream_companion.DREAM_REPORT_TRANSFER_FILENAME` (parity-pinned by test), beside
+ * the existing `DREAM_MANIFEST_FILENAME` mirror pair.
+ */
+export const DREAM_REPORT_TRANSFER_FILENAME = "dream-report-transfer.json";
 
 /** The ok-arm fields — the structured `details` surface doubles as branch-safe persisted state. */
 export interface ObjectiveSaveOk {
@@ -127,6 +137,25 @@ export async function saveObjective(
 
   const branch = () => branchOf(ctx);
   const runId = rebuildWorkflowState(branch()).run_id ?? "";
+
+  if (gate.kind === "block") {
+    // The §8.64 transfer write (the dream arm only): the reviewed CANONICAL parts cross to the
+    // Python save door through the run-scoped scratch handoff — written atomically BEFORE the
+    // cold door is invoked. A write failure is the soft `scratch_failed` failure (the
+    // runColdDoor stdin-staging precedent): the cold door is NOT invoked, nothing activates,
+    // and the read-only gate stays on. Non-dream saves write nothing (byte-identical).
+    try {
+      const dir = ensureRunScratch(ctx.cwd, runId);
+      const content = `${JSON.stringify(
+        { schema_version: "1", run_id: runId, parts: gate.block.parts },
+        null,
+        2,
+      )}\n`;
+      atomicWriteFileSync(join(dir, DREAM_REPORT_TRANSFER_FILENAME), content);
+    } catch (err) {
+      return fail(`could not stage the dream-report transfer: ${String(err)}`, "scratch_failed");
+    }
+  }
 
   const args = ["objective", "create", "--json"];
   if (opts.title) args.push("--title", opts.title);

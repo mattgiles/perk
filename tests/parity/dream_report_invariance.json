@@ -1,0 +1,33 @@
+{
+  "comment": "The cross-plane parity fixture for the dream-report part-invariance rule (contracts.md §8.64). Consumed by BOTH tests/test_dream_companion.py (Python validate_report_parts) and extension/factories/objectiveDreamReport.test.ts (the TS reportPartInvarianceViolations mirror) — one shared set, the execution-path parity discipline. An `invalid` entry carries either a literal `part` or a `{repeat, count}` expansion (for the oversize case).",
+  "run_id": "01PARITYRUN000000000000000",
+  "valid": [
+    "# Dream report — plain markdown\n\nWith **bold**, `inline code`, and a\n\n```yaml\nfenced: block\n```\n",
+    "A part quoting a non-perk HTML comment <!-- not ours --> passes."
+  ],
+  "invalid": [
+    { "reason": "empty part", "part": "" },
+    { "reason": "blank part", "part": "  \n\t\n" },
+    {
+      "reason": "embedded perk HTML-comment marker",
+      "part": "text with <!-- perk:metadata-block:plan-body --> embedded"
+    },
+    {
+      "reason": "embedded closing perk HTML-comment marker",
+      "part": "text with <!-- /perk:roadmap-table --> embedded"
+    },
+    {
+      "reason": "literal companion marker text",
+      "part": "quoting perk:learn-dream-report inline"
+    },
+    {
+      "reason": "perk-rendered details open line",
+      "part": "before\n<details><summary><code>plan-body</code></summary>\nafter"
+    },
+    {
+      "reason": "perk-rendered details close line",
+      "part": "before\n</details>\nafter"
+    },
+    { "reason": "oversize rendered comment body", "repeat": "a", "count": 65001 }
+  ]
+}
