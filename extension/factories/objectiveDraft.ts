@@ -84,8 +84,8 @@ export const DELIVERY_PARAM_SCHEMA = {
  * The `dream_report` property, shared between `objective_save` and `objective_draft` so the
  * two tools' dream contracts cannot drift: the §8.62 `DREAM_REPORT_INPUT_SCHEMA` embedded by
  * identifier (the `DELIVERY_PARAM_SCHEMA`/`ROADMAP_PARAM_SCHEMA` shared-schema pattern) plus
- * the gate description. Structurally unreachable in production until the `perk learn dream`
- * door ships (the resolver refuses it outside a dream session).
+ * the gate description. Structurally reachable only inside a `perk learn dream` session (the
+ * resolver refuses it outside one).
  */
 export const DREAM_REPORT_PARAM_SCHEMA = {
   ...DREAM_REPORT_INPUT_SCHEMA,

@@ -4,7 +4,10 @@
 // workflow-state entry — the dreamReport.test.ts + objectiveDraft.test.ts fixture recipes):
 // the four matrix arms, the recovery happy path feeding `buildDreamReport` to an ok block,
 // render determinism under one stamp, every named recovery-failure arm (the digest-pointer
-// doctrine's fail-closed ladder), and the `decodeDreamReportBlock` shape check. Fully offline.
+// doctrine's fail-closed ladder), the §8.65 revalidation-bracket re-check (injected stubs —
+// the temp cwds here are not git repos; the REAL default bracket is exercised end-to-end by
+// the boundary suites over the git-backed testing/dreamFixtures.ts fixture), and the
+// `decodeDreamReportBlock` shape check. Fully offline.
 
 import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -254,6 +257,12 @@ function refusal(outcome: DreamReportGateOutcome): { errorType: string; detail: 
   return { errorType: refused.errorType, detail: refused.detail };
 }
 
+/** An always-ok injected bracket (the temp cwds here are not git repos, so the tests that
+ * reach past recovery pin the bracket explicitly instead of the real default). */
+function okBracket(): { ok: boolean; detail: string | null } {
+  return { ok: true, detail: null };
+}
+
 // --- decodeDreamReportBlock -----------------------------------------------------------------
 
 test("decodeDreamReportBlock: a valid block round-trips; every malformed shape refuses", () => {
@@ -351,7 +360,7 @@ test("gate: dream + valid → block carrying the input, the stamp, and the rende
   const { cwd, ctx } = plantDream();
   try {
     const input = validInput();
-    const outcome = resolveDreamReportGate(ctx, input, STAMP);
+    const outcome = resolveDreamReportGate(ctx, input, STAMP, okBracket);
     assert.equal(outcome.kind, "block", JSON.stringify(outcome));
     const block = (
       outcome as { kind: "block"; block: { input: unknown; generated_at: string; parts: string[] } }
@@ -373,8 +382,8 @@ test("gate: dream + valid → block carrying the input, the stamp, and the rende
 test("gate: determinism — two calls with the same input + stamp render byte-identical parts", () => {
   const { cwd, ctx } = plantDream();
   try {
-    const first = resolveDreamReportGate(ctx, validInput(), STAMP);
-    const second = resolveDreamReportGate(ctx, validInput(), STAMP);
+    const first = resolveDreamReportGate(ctx, validInput(), STAMP, okBracket);
+    const second = resolveDreamReportGate(ctx, validInput(), STAMP, okBracket);
     assert.equal(first.kind, "block");
     assert.equal(second.kind, "block");
     assert.deepEqual(
@@ -393,7 +402,7 @@ test("gate: a buildDreamReport refusal → invalid_input with the named details 
     const input = validInput();
     (input.rows as unknown[]).pop(); // drop DOC_WAVES → a missing-row semantic detail
     (input.selected_units as { docs: string[] }[])[0]?.docs.push(DOC_SUB); // a final-keep doc in a unit
-    const { errorType, detail } = refusal(resolveDreamReportGate(ctx, input, STAMP));
+    const { errorType, detail } = refusal(resolveDreamReportGate(ctx, input, STAMP, okBracket));
     assert.equal(errorType, "invalid_input");
     const lines = detail.split("\n");
     assert.ok(lines.length >= 2, "the collected details ride the message newline-joined");
@@ -527,6 +536,59 @@ test("gate: recovery failure arms are bad_state with named details", () => {
   }
 });
 
+// --- the revalidation-bracket re-check (contracts §8.65) --------------------------------------
+
+test("gate: a drifted bracket refuses bad_state with the stale message (after recovery)", () => {
+  const { cwd, ctx, manifest } = plantDream();
+  try {
+    const seen: { cwd: string; sha: string }[] = [];
+    const outcome = resolveDreamReportGate(ctx, validInput(), STAMP, (bracketCwd, sha) => {
+      seen.push({ cwd: bracketCwd, sha });
+      return { ok: false, detail: "HEAD moved from abc123 to def456" };
+    });
+    const { errorType, detail } = refusal(outcome);
+    assert.equal(errorType, "bad_state");
+    assert.match(detail, /repository moved since the dream snapshot/);
+    assert.match(detail, /HEAD moved from abc123 to def456/);
+    assert.match(detail, /the analysis is stale; re-run perk learn dream/);
+    // The bracket runs against the session cwd and the manifest's stamped commit — after the
+    // manifest was decoded and authenticated (recovery succeeded first).
+    assert.deepEqual(seen, [{ cwd, sha: manifest.commit_sha }]);
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+test("gate: non-dream and pre-recovery arms never invoke the bracket (spy)", () => {
+  const boom = (): { ok: boolean; detail: string | null } => {
+    throw new Error("the bracket must not run on this arm");
+  };
+  // Non-dream arms: absent → absent; present → invalid_input — no bracket either way.
+  const cwd = mkdtempSync(join(tmpdir(), "objective-dream-report-test-"));
+  try {
+    assert.deepEqual(resolveDreamReportGate(ctxOf(cwd, []), undefined, STAMP, boom), {
+      kind: "absent",
+    });
+    const { errorType } = refusal(
+      resolveDreamReportGate(ctxOf(cwd, [runIdEntry(RUN_ID)]), validInput(), STAMP, boom),
+    );
+    assert.equal(errorType, "invalid_input");
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+  // A dream session whose recovery fails refuses BEFORE the bracket.
+  const planted = plantDream({ marker: "" });
+  try {
+    const { errorType, detail } = refusal(
+      resolveDreamReportGate(planted.ctx, validInput(), STAMP, boom),
+    );
+    assert.equal(errorType, "bad_state");
+    assert.match(detail, /no finalized dream wave/);
+  } finally {
+    rmSync(planted.cwd, { recursive: true, force: true });
+  }
+});
+
 // --- the part-invariance mirror (contracts §8.64; parity-pinned with the Python twin) ----------
 
 const PARITY_FIXTURE_PATH = join(
@@ -572,7 +634,9 @@ test("gate: invariance-violating rendered parts refuse invalid_input (both consu
     const input = validInput();
     const rows = input.rows as Record<string, unknown>[];
     rows[0] = { ...rows[0], rationale: "keep <!-- perk:metadata-block:plan-body --> visible" };
-    const { errorType, detail } = refusal(resolveDreamReportGate(planted.ctx, input, STAMP));
+    const { errorType, detail } = refusal(
+      resolveDreamReportGate(planted.ctx, input, STAMP, okBracket),
+    );
     assert.equal(errorType, "invalid_input");
     assert.match(detail, /invariance rule/);
     assert.match(detail, /perk HTML-comment marker/);

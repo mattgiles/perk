@@ -3,6 +3,8 @@
 // Node builtins only (so it loads cleanly under `node --test`); shells `git` via `execFileSync`,
 // never with a shell. Fail-open by design: every failure degrades to the caller's `cwd` (or null
 // where stated) rather than throwing — the carriers that use this must never wedge a session.
+// The ONE deliberate fail-closed composition is `revalidationBracket` (documented there): a
+// snapshot proof must treat an unprovable probe as drift, never as "unchanged".
 
 import { execFileSync } from "node:child_process";
 import { isAbsolute, resolve } from "node:path";
@@ -112,6 +114,44 @@ export function worktreeDirty(cwd: string): boolean | null {
   } catch {
     return null;
   }
+}
+
+/**
+ * The dream-snapshot revalidation bracket (contracts.md §8.65) — the module's ONE deliberately
+ * **fail-closed** composition (a documented exception to the fail-open charter above): it exists
+ * to PROVE the repository still matches a stamped snapshot, so an unprovable probe must read as
+ * drift, never as "unchanged". The claim is END-STATE equality only — HEAD unchanged and the
+ * working tree clean at the moment of the check — never mid-window byte immutability (a
+ * transient modify-and-restore inside the window is invisible by design; §8.65's accepted
+ * residuals). `probes` defaults to the real `headSha`/`worktreeDirty` and exists so tests can
+ * pin each fail-closed arm independently (from a non-repo fixture the HEAD arm returns first,
+ * making the dirty-null arm reachable only through the seam).
+ */
+export function revalidationBracket(
+  cwd: string,
+  expectedSha: string,
+  probes?: { head?: (cwd: string) => string | null; dirty?: (cwd: string) => boolean | null },
+): { ok: boolean; detail: string | null } {
+  const head = probes?.head ?? headSha;
+  const dirty = probes?.dirty ?? worktreeDirty;
+  const actual = head(cwd);
+  if (actual === null) {
+    return {
+      ok: false,
+      detail: "HEAD could not be resolved — cannot prove the snapshot is unchanged",
+    };
+  }
+  if (actual !== expectedSha) {
+    return { ok: false, detail: `HEAD moved from ${expectedSha} to ${actual}` };
+  }
+  const isDirty = dirty(cwd);
+  if (isDirty === null) {
+    return { ok: false, detail: "working-tree cleanliness could not be verified" };
+  }
+  if (isDirty) {
+    return { ok: false, detail: "the working tree is no longer clean" };
+  }
+  return { ok: true, detail: null };
 }
 
 /**

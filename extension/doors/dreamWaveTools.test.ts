@@ -3,11 +3,14 @@
 // (PERK_TOOLS + READ_ONLY_TOOLS, deliberately NO stage list), the ordered pre-spawn refusal
 // ladder (claimed run → manifest existence → parse → strict decode → resolved containment;
 // nothing spawns on any arm), the execute core's arms over the memory adapter with injected
-// write/remove/marker spies (the entry-time removal invariant, the marker-clear-before-removal
-// invariant, the incomplete/over-budget skip arms, the io_error receipt retention, the
-// two-wave happy path with the finalize-in-place rewrite + digest marker, the finalize-write
-// io_error arm), and the fake-RPC e2e sinking both waves' spawn params (per-key config-model
-// threading, analyst-before-reducer sequencing, the production marker wiring).
+// write/remove/marker/bracket spies (the entry-time removal invariant, the
+// marker-clear-before-removal invariant, the incomplete/over-budget skip arms — bracket never
+// invoked, `bracket: null` — the io_error receipt retention, the two-wave happy path with the
+// bracket-then-finalize-in-place rewrite + digest marker, the drifted-bracket arm (no finalize,
+// no marker set), the finalize-write io_error arm), and the fake-RPC e2e sinking both waves'
+// spawn params (per-key config-model threading, analyst-before-reducer sequencing, the
+// production marker wiring, the REAL default revalidation bracket over a git fixture — happy
+// and drifted).
 
 import assert from "node:assert/strict";
 import { existsSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
@@ -17,6 +20,7 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { runScratchDir } from "../substrate/cache.ts";
 import { digestSessionData } from "../substrate/sessionData.ts";
 import { PERK_TOOLS, READ_ONLY_TOOLS, STAGE_TOOLS } from "../substrate/toolGating.ts";
+import { dreamRepoCommit, initDreamRepo } from "../testing/dreamFixtures.ts";
 import { loadPerkSession, scaffoldRepo } from "../testing/harness.ts";
 import {
   composeDreamBundle,
@@ -226,17 +230,24 @@ function target(): { hasUI: boolean; ui: { notify: (m: string) => void } } {
  * it as an opaque token; only the registered execute computes a real one). */
 const MANIFEST_DIGEST = "sha256:test-manifest-digest";
 
-/** Injected write/remove/marker spies for the execute core: `events` records the shared
- * clear/remove/write/set ordering (the marker-before-removal + finalize-then-set invariants);
- * `clearFails` makes the verified clear report failure; `writeThrows` throws on every write,
- * `finalizeThrows` only on the second (finalize) write. */
+/** Injected write/remove/marker/bracket spies for the execute core: `events` records the
+ * shared clear/remove/write/bracket/set ordering (the marker-before-removal,
+ * bracket-before-finalize, and finalize-then-set invariants); `clearFails` makes the verified
+ * clear report failure; `writeThrows` throws on every write, `finalizeThrows` only on the
+ * second (finalize) write; `drift` makes the bracket report drift with that detail. */
 function bundleSpies(
-  opts: { clearFails?: boolean; writeThrows?: string; finalizeThrows?: string } = {},
+  opts: {
+    clearFails?: boolean;
+    writeThrows?: string;
+    finalizeThrows?: string;
+    drift?: string;
+  } = {},
 ): {
   writes: { path: string; content: string }[];
   removes: string[];
   events: string[];
   markers: DreamBundleMarkers;
+  bracket: () => { ok: boolean; detail: string | null };
   writeBundle: (path: string, content: string) => void;
   removeBundle: (path: string) => void;
 } {
@@ -247,6 +258,12 @@ function bundleSpies(
     writes,
     removes,
     events,
+    bracket: () => {
+      events.push("bracket");
+      return opts.drift !== undefined
+        ? { ok: false, detail: opts.drift }
+        : { ok: true, detail: null };
+    },
     markers: {
       clear: () => {
         events.push("clear");
@@ -565,6 +582,7 @@ test("executeDreamWave: an incomplete first wave skips write + reducers (entry r
     manifest,
     manifestDigest: MANIFEST_DIGEST,
     markers: spies.markers,
+    bracket: spies.bracket,
     writeBundle: spies.writeBundle,
     removeBundle: spies.removeBundle,
   });
@@ -577,6 +595,7 @@ test("executeDreamWave: an incomplete first wave skips write + reducers (entry r
     { lane: "workflow-1", reason: "lane-failed", detail: "analyst crashed" },
   ]);
   assert.equal(details.bundle, null, "the bundle is never composed on an incomplete first wave");
+  assert.equal(details.bracket, null, "the bracket is never evaluated on an earlier arm");
   assert.deepEqual(details.reducers, {
     launched: false,
     skip_reason: "incomplete-analysis",
@@ -649,6 +668,7 @@ test("executeDreamWave: an over-budget bundle refuses with accounting — nothin
     manifest,
     manifestDigest: MANIFEST_DIGEST,
     markers: spies.markers,
+    bracket: spies.bracket,
     writeBundle: spies.writeBundle,
     removeBundle: spies.removeBundle,
   });
@@ -667,6 +687,7 @@ test("executeDreamWave: an over-budget bundle refuses with accounting — nothin
   );
   assert.equal(details.reducers.launched, false);
   assert.equal(details.reducers.skip_reason, "budget-exceeded");
+  assert.equal(details.bracket, null, "the bracket is never evaluated on the budget arm");
   assert.deepEqual(spies.writes, [], "zero write calls — never truncation");
   assert.equal(adapter.calls.spawn.length, 1, "zero reducer spawns");
   assert.deepEqual(spies.removes, [join(dirname(MANIFEST_PATH), DREAM_ANALYSES_FILENAME)]);
@@ -684,6 +705,7 @@ test("executeDreamWave: a throwing entry-time removal is a typed io_error refusa
     manifest,
     manifestDigest: MANIFEST_DIGEST,
     markers: spies.markers,
+    bracket: spies.bracket,
     writeBundle: spies.writeBundle,
     removeBundle: () => {
       spies.events.push("remove-attempt");
@@ -763,6 +785,7 @@ test("executeDreamWave: an UNVERIFIED marker clear refuses io_error before ANY f
     manifest: priorManifest,
     manifestDigest: digestSessionData(manifestJson()),
     markers: spies.markers,
+    bracket: spies.bracket,
     writeBundle: spies.writeBundle,
     removeBundle: (path) => {
       spies.events.push("remove-attempt");
@@ -805,6 +828,7 @@ test("executeDreamWave: a bundle-write throw is the io_error fail arm retaining 
     manifest,
     manifestDigest: MANIFEST_DIGEST,
     markers: spies.markers,
+    bracket: spies.bracket,
     writeBundle: spies.writeBundle,
     removeBundle: spies.removeBundle,
   });
@@ -836,6 +860,7 @@ test("executeDreamWave: the happy path — analyst write, reducers read it, fina
     manifest,
     manifestDigest: MANIFEST_DIGEST,
     markers: spies.markers,
+    bracket: spies.bracket,
     analystModel: "faux/analyst",
     reducerModel: "faux/reducer",
     writeBundle: spies.writeBundle,
@@ -868,14 +893,17 @@ test("executeDreamWave: the happy path — analyst write, reducers read it, fina
     MANIFEST_DIGEST,
     "the caller's manifest digest is bound into the finalized bundle",
   );
-  // The marker is set to the digest of the finalized bytes, after the finalize write.
+  // The marker is set to the digest of the finalized bytes, after the finalize write — and
+  // the bracket runs BETWEEN the reducer wave and the finalize write.
   assert.deepEqual(spies.events, [
     "clear",
     "remove",
     "write",
+    "bracket",
     "write",
     `set:${digestSessionData(finalized)}`,
   ]);
+  assert.deepEqual(details.bracket, { ok: true, detail: null });
   assert.deepEqual(details.bundle, {
     path: BUNDLE_PATH,
     written: true,
@@ -927,6 +955,7 @@ test("executeDreamWave: a finalize-write throw is the second io_error arm — ma
     manifest,
     manifestDigest: MANIFEST_DIGEST,
     markers: spies.markers,
+    bracket: spies.bracket,
     writeBundle: spies.writeBundle,
     removeBundle: spies.removeBundle,
   });
@@ -947,7 +976,50 @@ test("executeDreamWave: a finalize-write throw is the second io_error arm — ma
     "BOTH attempt receipts are retained (the finalize failed after the reducer wave)",
   );
   assert.equal(spies.writes.length, 1, "only the analyst bundle landed");
-  assert.deepEqual(spies.events, ["clear", "remove", "write"], "the marker is never set");
+  assert.deepEqual(
+    spies.events,
+    ["clear", "remove", "write", "bracket"],
+    "the marker is never set (the bracket passed; the finalize write threw)",
+  );
+});
+
+test("executeDreamWave: a drifted bracket skips the finalize AND the marker set", async () => {
+  const manifest = TWO_LANE_MANIFEST();
+  const adapter = createMemoryWaveAdapter({
+    aggregates: [completeAnalystAggregate(), completeReducerAggregate()],
+  });
+  const spies = bundleSpies({ drift: "HEAD moved from aaa to bbb" });
+  const result = await executeDreamWave(adapter, target(), {
+    manifest,
+    manifestDigest: MANIFEST_DIGEST,
+    markers: spies.markers,
+    bracket: spies.bracket,
+    writeBundle: spies.writeBundle,
+    removeBundle: spies.removeBundle,
+  });
+  const details = result.details as { ok: boolean } & DreamWaveOk;
+  assert.equal(details.ok, true, "drift is a post-launch outcome — ok + complete: false");
+  assert.equal(details.complete, false, "a drifted wave is never complete");
+  assert.equal(details.analysis.complete, true, "both waves DID complete");
+  assert.equal(details.reducers.complete, true);
+  assert.deepEqual(details.bracket, { ok: false, detail: "HEAD moved from aaa to bbb" });
+  assert.equal(
+    details.analysis.analyses.length,
+    2,
+    "analyses retained for honest coverage reporting",
+  );
+  assert.equal(details.reducers.reports.length, DREAM_REDUCER_ANGLES.length);
+  // NO finalize write, NO marker set: the write spy saw exactly the one analyst-bundle write,
+  // and the entry clear stands — recovery refuses the analyses-only bundle, so a drifted wave
+  // is structurally undraftable.
+  assert.equal(spies.writes.length, 1, "exactly one bundle write — the finalize never ran");
+  assert.deepEqual(spies.events, ["clear", "remove", "write", "bracket"], "no marker set");
+  // The drift line ACCOMPANIES the generic incomplete instruction, never replaces it.
+  const text = result.content[0]?.text ?? "";
+  assert.match(text, /INCOMPLETE/);
+  assert.match(text, /present the coverage honestly/);
+  assert.match(text, /repository DRIFTED during the wave \(HEAD moved from aaa to bbb\)/);
+  assert.match(text, /the dream snapshot is STALE/);
 });
 
 test("executeDreamWave: a reducer lane failure ⇒ complete: false with analyses retained", async () => {
@@ -978,6 +1050,7 @@ test("executeDreamWave: a reducer lane failure ⇒ complete: false with analyses
     manifest,
     manifestDigest: MANIFEST_DIGEST,
     markers: spies.markers,
+    bracket: spies.bracket,
     writeBundle: spies.writeBundle,
     removeBundle: spies.removeBundle,
   });
@@ -995,10 +1068,12 @@ test("executeDreamWave: a reducer lane failure ⇒ complete: false with analyses
     [DREAM_REDUCER_ANGLES[0], DREAM_REDUCER_ANGLES[2]],
   );
   // No finalize on an incomplete reducer wave: the analyses-only bundle stays behind (the
-  // finalized decode refuses it) and the marker stays cleared.
+  // finalized decode refuses it), the marker stays cleared, and the bracket is never invoked.
   assert.equal(spies.writes.length, 1, "the analyses-only bundle is left as-is");
-  assert.deepEqual(spies.events, ["clear", "remove", "write"], "no marker set");
+  assert.deepEqual(spies.events, ["clear", "remove", "write"], "no marker set, no bracket");
+  assert.equal(details.bracket, null, "the bracket is never evaluated on an earlier arm");
   assert.match(result.content[0]?.text ?? "", /INCOMPLETE/);
+  assert.doesNotMatch(result.content[0]?.text ?? "", /DRIFTED/, "no drift line off the drift arm");
 });
 
 test("executeDreamWave: a pre-existing stale bundle is removed before the wave (real fs default)", async () => {
@@ -1024,6 +1099,7 @@ test("executeDreamWave: a pre-existing stale bundle is removed before the wave (
     manifest,
     manifestDigest: MANIFEST_DIGEST,
     markers: { clear: () => true, set: () => {} },
+    bracket: () => ({ ok: true, detail: null }),
   });
   const details = result.details as { ok: boolean } & DreamWaveOk;
   assert.equal(details.ok, true);
@@ -1037,14 +1113,34 @@ test("executeDreamWave: a pre-existing stale bundle is removed before the wave (
 
 // ----------------------------------------------------------------- the fake-RPC e2e
 
+/** Scaffold a claimed dream session over a REAL clean git repo whose HEAD stamps the planted
+ * manifest — the registered-tool e2e exercises the production revalidation bracket end-to-end
+ * (`dreamRepoCommit` after planting drifts it). `config` is committed as `.perk/config.toml`
+ * before the snapshot commit so the tree stays clean through the wave. */
+function scaffoldDreamGitRepo(opts: { config?: string } = {}): {
+  cwd: string;
+  sha: string;
+  manifestPath: string;
+} {
+  const cwd = scaffoldRepo({
+    handoff: { runId: RUN_ID, mode: "read-only", stage: "objective-author" },
+  });
+  if (opts.config !== undefined) {
+    mkdirSync(join(cwd, ".perk"), { recursive: true });
+    writeFileSync(join(cwd, ".perk", "config.toml"), opts.config, "utf8");
+  }
+  const sha = initDreamRepo(cwd);
+  const manifestPath = join(runScratchDir(cwd, RUN_ID), DREAM_MANIFEST_FILENAME);
+  mkdirSync(dirname(manifestPath), { recursive: true });
+  writeFileSync(manifestPath, manifestJson(undefined, { commit_sha: sha }), "utf8");
+  return { cwd, sha, manifestPath };
+}
+
 test("tool e2e: both configured models ride their wave's spawn; analyst completes before reducers", async () => {
-  const { cwd } = scaffoldDreamRepo();
-  mkdirSync(join(cwd, ".perk"), { recursive: true });
-  writeFileSync(
-    join(cwd, ".perk", "config.toml"),
-    '[models.subagents]\ndream-analyst = "faux/dream-analyst-model"\ndream-reducer = "faux/dream-reducer-model"\n',
-    "utf8",
-  );
+  const { cwd } = scaffoldDreamGitRepo({
+    config:
+      '[models.subagents]\ndream-analyst = "faux/dream-analyst-model"\ndream-reducer = "faux/dream-reducer-model"\n',
+  });
   const analystAggregate = [
     {
       key: "pi-1.1",
@@ -1119,6 +1215,63 @@ test("tool e2e: both configured models ride their wave's spawn; analyst complete
     );
     // The production marker wiring: dream_bundle_digest holds the finalized bytes' digest.
     assert.equal(h.workflowState().dream_bundle_digest, digestSessionData(finalizedBytes));
+    // The REAL default bracket ran and passed: the repo never moved and the run scratch is
+    // gitignored, so the end state matches the stamped snapshot.
+    assert.deepEqual(details.bracket, { ok: true, detail: null });
+  } finally {
+    h.dispose();
+  }
+});
+
+test("tool e2e: repository drift during the wave is caught by the REAL default bracket", async () => {
+  // HEAD moves off the stamped snapshot before the wave completes — the registered execute's
+  // production bracket (revalidationBracket over ctx.cwd + the manifest's commit_sha) reports
+  // drift: complete: false, no finalize (the on-disk bundle stays analyses-only), marker
+  // cleared — structurally undraftable.
+  const { cwd } = scaffoldDreamGitRepo();
+  dreamRepoCommit(cwd, "drift: a commit after the manifest was stamped");
+  const analystAggregate = [
+    {
+      key: "pi-1.1",
+      ok: true,
+      error: null,
+      report: analystReportOf([docRow("docs/learned/pi/subagents.md")]),
+    },
+  ];
+  const reducerAggregate = DREAM_REDUCER_ANGLES.map((angle) => ({
+    key: angle,
+    ok: true,
+    error: null,
+    report: reducerReportOf(angle),
+  }));
+  const h = await loadPerkSession({
+    cwd,
+    env: { PERK_RUN_ID: RUN_ID },
+    extraExtensions: [fakeSubagentsRpc([analystAggregate, reducerAggregate])],
+  });
+  try {
+    const result = await h.invokeTool("run_dream_wave", {});
+    const details = result.details as { ok: boolean } & DreamWaveOk;
+    assert.equal(details.ok, true, "drift is a post-launch outcome — ok + complete: false");
+    assert.equal(details.complete, false);
+    assert.equal(
+      details.analysis.complete,
+      true,
+      "both waves completed — only the bracket drifted",
+    );
+    assert.equal(details.reducers.complete, true);
+    assert.equal(details.bracket?.ok, false);
+    assert.match(details.bracket?.detail ?? "", /HEAD moved/);
+    // The marker stays at the entry clear — recovery refuses.
+    assert.equal(h.workflowState().dream_bundle_digest, "");
+    // The on-disk bundle never finalized (no reducers key) — the analyses-only mid-wave shape.
+    const bundle = JSON.parse(
+      readFileSync(join(runScratchDir(cwd, RUN_ID), DREAM_ANALYSES_FILENAME), "utf8"),
+    ) as Record<string, unknown>;
+    assert.ok(!("reducers" in bundle), "the finalize write was skipped");
+    const text = result.content[0]?.text ?? "";
+    assert.match(text, /INCOMPLETE/);
+    assert.match(text, /DRIFTED/);
   } finally {
     h.dispose();
   }

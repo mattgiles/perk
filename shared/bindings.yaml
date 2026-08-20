@@ -76,6 +76,9 @@ bindings:
   - trigger: "command:learn-harvest"
     skill: perk-learn-harvest
     mode: nudge
+  - trigger: "command:learn-dream"
+    skill: perk-learn-dream
+    mode: nudge
   - trigger: "command:pr-review"
     skill: perk-pr-review
     mode: nudge

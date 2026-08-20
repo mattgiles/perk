@@ -7,15 +7,17 @@
 // fixed-name run-scratch bundle beside that manifest) are all derived from the claimed run,
 // so no caller-supplied path exists and a gated session cannot aim the reader or the writer
 // anywhere. A session with no run-scoped dream manifest is structurally refused `bad_state` —
-// no dream launch exists until the `perk learn dream` door ships, so the tool is registered
-// but unreachable in every other session. That is what makes the `READ_ONLY_TOOLS` membership
-// safe (contracts.md §8.61).
+// only a `perk learn dream` launch plants one, so the tool is registered globally but
+// structurally unreachable outside a dream launch. That is what makes the `READ_ONLY_TOOLS`
+// membership safe (contracts.md §8.61).
 //
 // The sequence: the first-level analyst wave (strict) → the compact analyst bundle written
 // under the enforced aggregate byte budget → the three fixed reducer lanes — reducers launch
 // ONLY after a complete first wave and an in-budget write — then, only when BOTH waves
-// completed, the finalize-in-place rewrite of the same fixed name (`finalizeDreamBundle`, the
-// added `reducers` section). Two writes of ONE name: the analyst write feeds the reducers; the
+// completed, the revalidation bracket against the manifest's stamped `commit_sha` (drift skips
+// the finalize AND the marker set — a drifted wave is structurally undraftable) and, bracket
+// ok, the finalize-in-place rewrite of the same fixed name (`finalizeDreamBundle`, the added
+// `reducers` section). Two writes of ONE name: the analyst write feeds the reducers; the
 // finalize rewrite is what the dream-report recovery consumes. The `dream_bundle_digest`
 // workflow-state marker is the recovery-side freshness authority: cleared unconditionally at
 // entry BEFORE the stale-bundle removal attempt (the invalidation record — a failed cleanup
@@ -31,6 +33,7 @@ import { dirname, join } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { atomicWriteFileSync, runScratchDir } from "../substrate/cache.ts";
 import { subagentModel } from "../substrate/config.ts";
+import { revalidationBracket } from "../substrate/git.ts";
 import { failFor, ok, type Result } from "../substrate/result.ts";
 import { digestSessionData } from "../substrate/sessionData.ts";
 import { appendWorkflowState, branchOf, rebuildWorkflowState } from "../substrate/workflowState.ts";
@@ -71,6 +74,10 @@ export interface DreamWaveOk {
     analyses: DreamLaneAnalysis[];
     failures: DreamLaneFailure[];
   };
+  /** The post-wave revalidation-bracket outcome (contracts.md §8.65) — `null` means never
+   * evaluated (an earlier arm already made the run incomplete); evaluated only after BOTH
+   * waves completed, BEFORE the finalize write. */
+  bracket: { ok: boolean; detail: string | null } | null;
   bundle: {
     path: string;
     written: boolean;
@@ -109,6 +116,13 @@ function resultText(details: DreamWaveOk): string {
         "skip reason, uncovered angles) and stop before drafting; never paper over a gap (no " +
         "retry).",
     );
+    // The drift line ACCOMPANIES the generic incomplete instruction, never replaces it.
+    if (details.bracket !== null && !details.bracket.ok) {
+      parts.push(
+        `The repository DRIFTED during the wave (${details.bracket.detail}) — the dream ` +
+          "snapshot is STALE.",
+      );
+    }
   }
   return parts.join("\n\n");
 }
@@ -153,9 +167,15 @@ export interface DreamBundleMarkers {
  *     `{analyses, attempts}`;
  *  6. the reducer wave over the written bundle; an incomplete reducer wave leaves the
  *     analyses-only bundle and a cleared marker (the finalized decode refuses it anyway);
- *  7. only when BOTH waves completed: the finalize-in-place rewrite of the same fixed name; a
- *     throw ⇒ the second post-launch `io_error` fail arm (mirroring arm 5's extras); on
- *     success `markers.set(digest)` with the sha256 of the finalized bytes.
+ *  7. only when BOTH waves completed: the revalidation bracket (`opts.bracket()` — required so
+ *     the compiler walks every call site to an explicit choice; production wires
+ *     `revalidationBracket` against the manifest's stamped `commit_sha`) runs BEFORE the
+ *     finalize write; drift ⇒ skip the finalize write AND `markers.set` (the entry clear
+ *     stands — recovery refuses the analyses-only bundle, so a drifted wave is structurally
+ *     undraftable), returning ok with `complete: false` and the bracket recorded;
+ *  8. bracket ok ⇒ the finalize-in-place rewrite of the same fixed name; a throw ⇒ the second
+ *     post-launch `io_error` fail arm (mirroring arm 5's extras); on success
+ *     `markers.set(digest)` with the sha256 of the finalized bytes.
  */
 export async function executeDreamWave(
   adapter: WaveAdapter,
@@ -166,6 +186,10 @@ export async function executeDreamWave(
      * the finalized bundle so recovery authenticates the manifest too. */
     manifestDigest: string;
     markers: DreamBundleMarkers;
+    /** The post-wave revalidation bracket (contracts.md §8.65) — REQUIRED on purpose: every
+     * call site (production and tests) makes an explicit choice; production wires
+     * `revalidationBracket(ctx.cwd, manifest.commit_sha)`. */
+    bracket: () => { ok: boolean; detail: string | null };
     analystModel?: string;
     reducerModel?: string;
     signal?: AbortSignal;
@@ -228,6 +252,7 @@ export async function executeDreamWave(
     const details: DreamWaveOk = {
       complete: false,
       analysis: analysisDetails,
+      bracket: null,
       bundle: null,
       reducers: {
         launched: false,
@@ -248,6 +273,7 @@ export async function executeDreamWave(
     const details: DreamWaveOk = {
       complete: false,
       analysis: analysisDetails,
+      bracket: null,
       bundle: {
         path: bundlePath,
         written: false,
@@ -289,7 +315,16 @@ export async function executeDreamWave(
   );
   attempts.push(toAttemptReceipt("dream-reducer", 1, reducers.requestedKeys, reducers.receipt));
 
+  let bracket: { ok: boolean; detail: string | null } | null = null;
   if (analysis.complete && reducers.complete) {
+    // The post-wave revalidation bracket (§8.65): evaluated only after BOTH waves completed,
+    // BEFORE the finalize write. Drift skips the finalize AND the marker set — the entry
+    // clear stands, so recovery refuses the analyses-only bundle left behind (a drifted wave
+    // is structurally undraftable); the analyses + reducer reports stay in the aggregate for
+    // honest coverage reporting.
+    bracket = opts.bracket();
+  }
+  if (bracket?.ok === true) {
     // Finalize in place — the SAME fixed name gains the reducers section (never a second
     // file), then the digest marker publishes the finalized bytes for the recovery consumer.
     // An incomplete reducer wave never reaches here: the analyses-only shape stays behind with
@@ -315,8 +350,9 @@ export async function executeDreamWave(
   }
 
   const details: DreamWaveOk = {
-    complete: analysis.complete && reducers.complete,
+    complete: analysis.complete && reducers.complete && bracket?.ok === true,
     analysis: analysisDetails,
+    bracket,
     bundle: {
       path: bundlePath,
       written: true,
@@ -421,6 +457,9 @@ export function registerDreamWave(pi: ExtensionAPI): void {
       return executeDreamWave(createRpcWaveAdapter(pi.events), ctx, {
         manifest: decoded.manifest,
         manifestDigest: digestSessionData(manifestBytes),
+        // The production revalidation bracket (§8.65): END-STATE HEAD + tree-clean against the
+        // manifest's stamped commit — fail-closed (an unprovable probe reads as drift).
+        bracket: () => revalidationBracket(ctx.cwd, decoded.manifest.commit_sha),
         markers: {
           clear: () => marker(""),
           set: (digest) => {

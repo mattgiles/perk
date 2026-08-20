@@ -44,6 +44,8 @@ skills:
   - source: perk
     name: perk-learn-docs
   - source: perk
+    name: perk-learn-dream
+  - source: perk
     name: perk-learn-harvest
   - source: perk
     name: perk-objective-author

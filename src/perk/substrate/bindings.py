@@ -48,6 +48,7 @@ MODES: tuple[str, ...] = ("nudge", "transclude")
 # plus the cold `binding_trigger=` overrides in
 # perk/cli/commands/: `command:learn-docs`/`command:learn-code` (learn/factory_common.py),
 # `command:learn-harvest` (learn/harvest_cmd.py — cold-only, no warm call site),
+# `command:learn-dream` (learn/dream_cmd.py — cold-only, no warm call site),
 # `command:objective-replan` (objective/replan_cmd.py), `command:replan`
 # (plan/replan_cmd.py), `command:skills-create` (skills/create_cmd.py), and
 # `command:skills-refine` (skills/refine_cmd.py).
@@ -61,6 +62,7 @@ DELIVERABLE_COMMAND_TARGETS: frozenset[str] = frozenset(
         "learn-docs",
         "learn-code",
         "learn-harvest",
+        "learn-dream",
         "pr-review",
         "pr-review-dynamic",
         "pr-review-terminal",

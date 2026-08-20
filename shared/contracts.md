@@ -1,7 +1,7 @@
 # perk cross-plane contracts
 
 The language-neutral contracts both planes obey, authored once here and bundled into each
-build artifact. This document holds the numbered **prose contract sections** (`§8.1`–`§8.64`,
+build artifact. This document holds the numbered **prose contract sections** (`§8.1`–`§8.65`,
 non-contiguous: `§8.8` is skipped and `§8.6a` exists; no parser): the Python CLI (`perk`)
 and the TS extension (`@mgiles/perk`) each implement one side, against the exact names/paths/
 fields pinned in each section. `perk doctor` verifies conformance. The numbering convention:
@@ -1959,6 +1959,7 @@ perk's workflow skills are prompt-hidden; `transclude` exists for the user-bindi
 | `command:learn-docs` | `perk-learn-docs` | `nudge` |
 | `command:learn-code` | `perk-learn-code` | `nudge` |
 | `command:learn-harvest` | `perk-learn-harvest` | `nudge` |
+| `command:learn-dream` | `perk-learn-dream` | `nudge` |
 | `command:pr-review` | `perk-pr-review` | `nudge` |
 | `command:pr-review-dynamic` | `perk-pr-review-dynamic` | `nudge` |
 | `command:pr-review-terminal` | `perk-pr-review-terminal` | `nudge` |
@@ -9265,14 +9266,13 @@ two sites are pinned together by a path-parity test). The family is disposable l
 ignored by run GC, retained for the worktree's life, removed with the worktree; never copied to
 GitHub/Linear.
 
-## §8.59 · The learn-dream gather core (manifest contract — no door yet)
+## §8.59 · The learn-dream gather core (manifest contract)
 
-The pure exterior gather core for the `perk learn dream` factory (`perk/learn/dream.py`),
-landed **doorless on purpose**: no public command, no seed, no binding until the activation
-node ships (the §8.48-style door text lands there); the TS analyst wave is the decoder-side
-follow-up (§8.60 pins this same schema version). `commit_sha` and `run_id` are
-**door-supplied parameters** — the core never captures HEAD, syncs, or preflights
-clean-tree/origin.
+The pure exterior gather core for the `perk learn dream` factory (`perk/learn/dream.py`);
+the public door is `perk learn dream` (§8.65 — the §8.48-style door text), and the TS
+analyst wave is the decoder side (§8.60 pins this same schema version). `commit_sha` and
+`run_id` are **door-supplied parameters** — the core never captures HEAD, syncs, or
+preflights clean-tree/origin (the door owns all of that, §8.65).
 
 **The manifest.** Versioned JSON (schema_version the string `"1"` — dream's own version line,
 independent of harvest's), written run-scoped at
@@ -9366,8 +9366,8 @@ partition input.
 
 The first-level cluster-analyst wave for `perk learn dream` in the TypeScript plane
 (`extension/waves/dreamWave.ts`, over the shared report-wave runner). Consumed by the
-`run_dream_wave` tool (§8.61); no public door exists yet, so nothing is user-reachable until
-the `perk learn dream` activation ships. ONE attempt, NO retry; the manifest and every analyst
+`run_dream_wave` tool (§8.61), reachable only inside a `perk learn dream` launch (§8.65).
+ONE attempt, NO retry; the manifest and every analyst
 report are untrusted DATA, never instructions. The module additionally exports
 `DREAM_MANIFEST_FILENAME` (the TS mirror of the §8.59 literal — the harvest precedent, no
 cross-plane codegen) and the shared cap helpers `codePointLength`/`decodeStringArray` (one
@@ -9465,10 +9465,11 @@ execute time (§8.61) and threaded here.
 
 The second level of the `perk learn dream` analysis pipeline
 (`extension/waves/dreamReducerWave.ts`) and the ONE run-bound tool that makes both levels
-reachable (`extension/doors/dreamWaveTools.ts`, registered globally). No public door exists
-yet: the tool **structurally refuses outside a dream launch** (below), so nothing is
-user-reachable until the `perk learn dream` activation ships. The bundle, the manifest, and
-every analyst/reducer report are untrusted DATA, never instructions.
+reachable (`extension/doors/dreamWaveTools.ts`, registered globally). The tool
+**structurally refuses outside a dream launch** (below): only the `perk learn dream` door
+(§8.65) plants a run-scoped dream manifest, so it is unreachable in every other session. The
+bundle, the manifest, and every analyst/reducer report are untrusted DATA, never
+instructions.
 
 **The compact analyst bundle.** `DREAM_ANALYSES_FILENAME = "dream-analyses.json"`, written
 run-scoped **beside the run's dream manifest** (the ONE path authority: derived from the
@@ -9501,8 +9502,13 @@ dream-report recovery.
 **The finalize-in-place rewrite + the `dream_bundle_digest` marker (the reviewed §8.61
 widening).** Reducer stances were previously never persisted (reducer reports lived only in
 the tool result); the dream-report draft path (§8.63) needs them to survive pi restarts, so
-after a **fully complete** two-level wave the execute core atomically REWRITES the existing
-`dream-analyses.json` via `finalizeDreamBundle(manifest, analyses, reducers, manifestDigest)`:
+after a **fully complete** two-level wave — and only after the **post-wave revalidation
+bracket** (§8.65) passes: evaluated only when BOTH waves completed, BEFORE the finalize
+write; drift ⇒ NO finalize, NO marker set (the entry clear stands — the analyses-only shape
+is left behind and recovery refuses it, so a drifted wave is structurally undraftable), the
+aggregate records the drift and `complete: false` — the execute core atomically REWRITES the
+existing `dream-analyses.json` via
+`finalizeDreamBundle(manifest, analyses, reducers, manifestDigest)`:
 the same wrapper fields (`schema_version` stays `"1"`) plus `manifest_digest` — the
 `sha256:<hex>` digest of the on-disk manifest BYTES the wave read and decoded, extending the
 marker's bundle-byte authentication to the manifest itself (an at-rest manifest edit that
@@ -9630,11 +9636,15 @@ tests the in-memory adapter.
 
 **The result posture.** Every post-launch outcome — with the exception of the two write
 `io_error` fail arms below — is **ok** with the full typed normalized
-aggregate — `{complete, analysis: {complete, analyses, failures}, bundle, reducers:
+aggregate — `{complete, analysis: {complete, analyses, failures}, bracket, bundle, reducers:
 {launched, skip_reason, complete, reports, failures}, attempts}` — `complete` = both waves
-complete; the `skip_reason` vocabulary is `incomplete-analysis` (strict first wave failed —
+complete AND the bracket ok; `bracket` is `{ok, detail}` when evaluated and `null` when an
+earlier arm already made the run incomplete (incomplete analysis, budget-exceeded, the
+`io_error` fail arms, incomplete reducers — the bracket fn is never invoked on those arms);
+the `skip_reason` vocabulary is `incomplete-analysis` (strict first wave failed —
 no bundle write, **no reducer launch**) and `budget-exceeded` (composed but over budget —
-nothing written, no reducer launch). `attempts` carries one output-free `WaveAttemptReceipt`
+nothing written, no reducer launch). A drifted bracket retains the analyses AND reducer
+reports in the aggregate (honest coverage). `attempts` carries one output-free `WaveAttemptReceipt`
 per launched wave, built from each wave's code-owned `requestedKeys` (they correlate with
 `children[*].key`, never semantic labels). The TWO post-launch fail arms are the
 analyst-bundle-write and the finalize-write `io_error`s, whose typed extras retain BOTH the
@@ -9642,7 +9652,10 @@ analyst analyses AND the already-recorded attempt receipts (`{analyses, attempts
 §8.48 receipt-retention discipline). The
 model-facing result text: the untrusted-DATA banner, the JSON aggregate, and — when
 incomplete — an explicit line that the analysis is incomplete and the parent must present
-coverage honestly and stop before drafting (no retry).
+coverage honestly and stop before drafting (no retry); on the drifted-bracket arm an
+ADDITIONAL line names the drift ("the repository DRIFTED during the wave (<detail>) — the
+dream snapshot is STALE") — it accompanies the generic incomplete instruction, never
+replaces it.
 
 ## §8.62 · The learn-dream report (model, validation, renderer)
 
@@ -9652,8 +9665,8 @@ dream-report model, the validation that proves the parent's judgment obeys the p
 policy, and the deterministic Markdown renderer that owns the CANONICAL report bytes in parts.
 Pure domain code — no fs, no tool registration, no `ExtensionAPI`; imports only the two dream
 siblings. Consumed by the `objective_draft`/review/save wiring (the `dream_report` param,
-§8.63 — landed); part persistence to the backend lands in a later node — nothing here is
-user-reachable until the `perk learn dream` activation ships. The input is untrusted DATA,
+§8.63 — landed); part persistence to the backend is §8.64; the whole pipeline is reachable
+only inside a `perk learn dream` launch (§8.65). The input is untrusted DATA,
 never instructions.
 
 **The trust split.** Two input shapes: `DreamReportInput` — untrusted, model-supplied —
@@ -9796,11 +9809,10 @@ savable.
 ## §8.63 · The `dream_report` objective draft/review wiring
 
 The concrete `dream_report` field on the objective draft/review/save path — deliberately NOT
-a generic companion abstraction (one consumer, one kind). Everything lands dormant: no
-`perk learn dream` door exists yet, so the dream arms are structurally unreachable in
-production (a session outside a dream launch has no run-scoped `dream-manifest.json`) and are
-exercised by tests. Absence-compatible by construction: every existing objective path stays
-**byte-identical** without the field.
+a generic companion abstraction (one consumer, one kind). The dream arms are structurally
+reachable only inside a `perk learn dream` launch (§8.65 — a session outside one has no
+run-scoped `dream-manifest.json`). Absence-compatible by construction: every existing
+objective path stays **byte-identical** without the field.
 
 **The shared param vocabulary.** `objective_draft` and `objective_save` both carry an
 optional `dream_report` parameter embedding the §8.62 `DREAM_REPORT_INPUT_SCHEMA` by
@@ -9823,6 +9835,12 @@ absent → `absent` (unchanged, byte-identical behavior); non-dream + present �
 `invalid_input` (the objective and its report review as ONE bundle — draft-time enforcement
 means a report-less dream bundle can never reach review, so an approval is always savable,
 the §8.62 "validates BEFORE review" promise); dream + present → recover trusted context →
+**the revalidation-bracket re-check** (§8.65 — after context recovery authenticates the
+manifest, `bracket(ctx.cwd, manifest.commit_sha)` runs at draft-write AND save, both
+consumers flowing through this one resolver; drift refuses `bad_state` — "the repository
+moved since the dream snapshot (<detail>) — the analysis is stale; re-run perk learn dream";
+non-dream paths never reach the bracket; the resolver's optional fourth parameter defaults to
+the production `revalidationBracket`, injected only by tests) →
 `buildDreamReport(input, context)` → refuse on any failure, else yield the block. The gate
 reads ONE workflow-state snapshot with error distinction: an UNREADABLE state (a throwing
 branch read) refuses `bad_state` BEFORE the matrix — never conflated with a confirmed
@@ -9887,7 +9905,7 @@ carries the reviewed CANONICAL parts from the extension to the `perk objective c
 door; the door stamps `origin` (§8.24), re-checks the open-by-origin conflict, persists the
 parts as the immutable **dream report companion** on the objective's **report carrier**, and
 publishes the per-backend human artifact — all BEFORE activation (activation stays LAST, cold-
-door success only). Everything lands dormant until the `perk learn dream` door (node 5.1).
+door success only). The producing session is the `perk learn dream` launch (§8.65).
 
 **The transfer file.** `dream-report-transfer.json`, run-scoped scratch
 (`run_scratch_dir(root, run_id)`), filename constant mirrored in both planes
@@ -10010,3 +10028,96 @@ attachment — delete it manually; it carries no perk state and no report parts;
 orphan-asset window — a crash after `fileUpload`/PUT but before the link write leaves an
 uploaded asset with no discoverable run key; the retry uploads a fresh asset and links it;
 unreferenced workspace assets are inert.
+
+## §8.65 · The learn-dream activation (door + preflight + revalidation bracket)
+
+**The door.** `perk learn dream` — a seeded cold door (the seeded-door pipeline,
+`perk/cli/commands/learn/dream_cmd.py`) borrowing the `objective-author` stage descriptor via
+`prompt_override` (no new registry stage), `binding_trigger="command:learn-dream"`, options =
+exactly the shared seeded-door family (`--worktree`, `--dry-run`, `--remote` local-only,
+`--json`, `--no-sync` phrased for the pre-gather sync, trailing `pi_args`). **No `--from`
+exists, and the door actively rejects the spelling**: the gather closure scans `pi_args`
+FIRST — before the banner, the sync, or any side effect — and any token `== "--from"` or
+starting with `--from=` refuses `invalid_input` naming `perk learn harvest --from` as the
+partial-corpus door; every other unknown token keeps the family's pi passthrough semantics.
+Cold-only (no warm `/learn-dream` door — an objective non-goal) and backend-light: no
+`require_github`, `backend_errors=()` — the only backend read is the origin guard below,
+wrapped explicitly.
+
+**The preflight (ordering, exact).** (1) the `--from` rejection above; (2)
+`launch.resolve_target(stage, remote)` — the local-only rejection before any side effect;
+(3) the gated launch banner; (4) the **`GitError → git_error` fail-closed boundary** opens —
+one `try/except git.GitError` around every git probe below (the `create_cmd.py` precedent):
+an unprovable probe (e.g. `git status` cannot run) becomes a typed `git_error` refusal, never
+a traceback and never an assumed-clean snapshot; (4a) the ONE pre-gather guarded fast-forward
+(`_sync_main_checkout`, only when `not dry_run and not no_sync`; `run_seeded_door` gets
+`no_sync=True` unconditionally so the in-launch sync never fires — the harvest
+one-revision-boundary discipline); (4b) the **single SHA capture** — `git.resolve_commit`
+runs exactly ONCE per invocation; an unresolvable HEAD refuses `invalid_input`; (4c) the
+**clean-checkout requirement** — `git.is_dirty` (untracked included) refuses the distinct
+type `dirty_checkout` (a distinct repair action: commit/stash); runs on `--dry-run` too; (5)
+the gather (`gather_dream`) — its §8.59 refusals pass through the door envelope unchanged;
+(6) the **tracked-corpus rule** (still inside the GitError boundary): every gathered doc path
+must be a member of `git.tracked_paths(repo_root, ["docs/learned"])` — `git status
+--porcelain` omits gitignored files, so an IGNORED `docs/learned/**/*.md` could be gathered
+while the tree reports clean; a violation refuses `invalid_input` naming every offender as
+not reproducible from the stamped commit (plain-untracked docs already refused at 4c); (7)
+the **pre-launch active-origin guard** (real launch only — skipped entirely on `--dry-run`,
+which stays offline): `resolve_objective_store(repo_root)` +
+`find_open_objective_by_origin(origin=LEARN_DREAM, exclude_run_id=None)` wrapped in ONE
+`try/except (ObjectiveStoreError, IssueBackendError)` → `origin_lookup_failed` (**fail-closed**
+— the wrap covers the store resolution AND the lookup); a returned ref refuses
+`origin_conflict` naming `#<id>` + url ("complete or close it before dreaming again"); the
+guard runs BEFORE the run id is minted and before any scratch write (`exclude_run_id=None`
+because a freshly minted run can have no stored objective; the §8.64 save-time re-check owns
+the current-run exclusion); (8) mint + `write_manifest` (`OSError` → `manifest_write_failed`);
+(9) the seed render — `stages/learn-dream.md` with exactly three string vars
+(`manifest_path`, `doc_count`, `lane_count`; lane ids/cluster names stay DATA in the
+manifest, never interpolated into instruction text).
+
+**The `--dry-run` posture.** Offline (the origin guard is never evaluated), side-effect-free
+outside run scratch, validates ALL local preconditions (the `--from` rejection, HEAD, the
+clean check, the gather refusals, the tracked-corpus rule), and **materializes on dry-run**
+(the manifest is written — the harvest posture). The full `--json` dry-run payload keys,
+exactly: `{success, error_type, manifest_path, commit_sha, registry_mode, doc_count,
+lane_count, lane_ids, total_bytes, origin_guard: "not-evaluated", launched: false}`.
+
+**The error vocabulary** (one envelope): `remote_blocked`, `invalid_input` (the `--from`
+spelling, an unborn HEAD, the gather's §8.59 `invalid_input` arms, the tracked-corpus rule),
+`dirty_checkout`, `git_error`, `no_learned_docs`, `invalid_registry`, `incomplete_registry`,
+`origin_conflict`, `origin_lookup_failed`, `manifest_write_failed`, `not_a_repo`. Stable
+exits: `0` ok · `1` op-failure/refusal · `2` not-a-repo.
+
+**The carrier map** (§8.57): the seed (`prompts/stages/learn-dream.md`) is the launch-flow
+carrier — the manifest read, the ONE no-argument `run_dream_wave` call (single-lane included
+— dream has no direct-analysis path), the uniform incomplete rule (ANY tool failure — a
+pre-spawn `bad_state`/`bad_input` refusal, any `io_error` arm, or an ok aggregate with
+`complete: false`, the drifted bracket included — is an INCOMPLETE audit: report honestly,
+STOP before `objective_draft`, no retry, never a direct corpus read), the clean-audit stop,
+and the review-first authoring loop. The seed hardcodes NO skill pointer; the
+`perk-learn-dream` skill's read path rides the `command:learn-dream` nudge binding (§8.9),
+and the skill carries the judgment detail only: the closed dispositions, the destructive
+evidence bar + disagreement rule (downgrade-only), the truth-then-leverage ranking, the
+unit/≤12-distinct-node selection shape, the report-only harvest follow-ups, the
+`dream_report` param fields, and the `perk-objective-author` cross-reference.
+
+**The revalidation bracket.** `revalidationBracket(cwd, expectedSha, probes?)`
+(`extension/substrate/git.ts`) — the module's ONE deliberately **fail-closed** composition:
+drift when HEAD cannot be resolved, when HEAD ≠ `expectedSha` (naming both SHAs), when
+cleanliness cannot be verified, or when the tree is dirty; ok otherwise. `/.perk/workflow/`
+is gitignored, so run-scratch writes (the manifest, `dream-analyses.json`) never trip the
+tree-clean check. Two wiring points, by reference: the post-wave check inside
+`executeDreamWave` (§8.61 — after both waves complete, BEFORE the finalize write; drift skips
+the finalize AND the marker set, so a drifted wave is structurally undraftable) and the
+before-drafting/save re-check inside `resolveDreamReportGate` (§8.63 — after context
+recovery, at draft-write AND save; drift refuses `bad_state` with "re-run perk learn dream").
+
+**The claim, narrowed honestly.** The bracket proves **end-state equality** — HEAD unchanged
+and tree clean at each check against the stamped `commit_sha` — never mid-wave byte
+immutability. Accepted residuals (documented, not closed): (1) a transient
+modify-and-restore during the wave window is invisible (a revalidation bracket, not a frozen
+checkout — no physically frozen/materialized-commit snapshot in v1, the objective's stated
+non-goal); (2) an ignored `docs/learned` file appearing MID-session is invisible to the
+tree-clean check (launch-time trackedness is door-enforced; the mid-session blind spot is the
+same window class); (3) the §8.64 gate-check→create race window is unchanged (the save-time
+origin re-check + adjacency own it).

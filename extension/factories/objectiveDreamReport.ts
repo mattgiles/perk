@@ -14,7 +14,10 @@
 // run-scratch bundle is never trusted — the `dream_bundle_digest` workflow-state marker
 // (cleared at wave entry, set to the finalized bytes' digest after a successful finalize) is
 // the freshness/integrity authority, and the bundle is strictly re-decoded through
-// `decodeFinalizedDreamBundle` on every recovery read (untrusted-at-rest posture).
+// `decodeFinalizedDreamBundle` on every recovery read (untrusted-at-rest posture). After a
+// successful recovery the revalidation bracket (contracts.md §8.65) re-proves HEAD-unchanged +
+// tree-clean against the manifest's stamped `commit_sha` — at draft-write AND save, since both
+// consumers flow through the one resolver; drift refuses `bad_state` (the analysis is stale).
 //
 // Imports only the dream wave siblings, the substrate seams, and node builtins — cycle-free
 // (nothing in `waves/` imports factories) and loadable under `node --test`.
@@ -22,6 +25,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { runScratchDir } from "../substrate/cache.ts";
+import { revalidationBracket } from "../substrate/git.ts";
 import { digestSessionData, type SessionDataCtx } from "../substrate/sessionData.ts";
 import { branchOf, rebuildWorkflowState, type WorkflowState } from "../substrate/workflowState.ts";
 import { DREAM_ANALYSES_FILENAME, decodeFinalizedDreamBundle } from "../waves/dreamReducerWave.ts";
@@ -265,6 +269,10 @@ export function resolveDreamReportGate(
   ctx: SessionDataCtx,
   input: unknown,
   generatedAt: string,
+  bracket: (
+    cwd: string,
+    expectedSha: string,
+  ) => { ok: boolean; detail: string | null } = revalidationBracket,
 ): DreamReportGateOutcome {
   // ONE workflow-state snapshot for the whole gate (run identity + the freshness marker),
   // read with error distinction: unreadable state fails closed, never "non-dream".
@@ -304,6 +312,22 @@ export function resolveDreamReportGate(
   const recovered = recoverDreamReportContext(ctx, runId, state.dream_bundle_digest, generatedAt);
   if (!recovered.ok) {
     return { kind: "refuse", errorType: "bad_state", detail: recovered.detail };
+  }
+  // The revalidation-bracket re-check (contracts.md §8.65): the manifest — with its stamped
+  // commit_sha — is now decoded and authenticated, so re-prove HEAD-unchanged + tree-clean
+  // against it. Both `writeObjectiveDraft` and `saveObjective` flow through this resolver, so
+  // the bracket re-fires at draft-write AND save; non-dream paths never reach it (the matrix
+  // above returned already). The parameter default is the production bracket — tests inject
+  // stubs.
+  const drift = bracket(ctx.cwd, recovered.context.manifest.commit_sha);
+  if (!drift.ok) {
+    return {
+      kind: "refuse",
+      errorType: "bad_state",
+      detail:
+        `the repository moved since the dream snapshot (${drift.detail}) — the analysis is ` +
+        "stale; re-run perk learn dream",
+    };
   }
   const built = buildDreamReport(input, recovered.context);
   if (!built.ok) {

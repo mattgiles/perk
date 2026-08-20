@@ -23,7 +23,7 @@ import {
   WORKFLOW_STATE_TYPE,
 } from "../substrate/workflowState.ts";
 import type { ReportTarget } from "../surfaces/report.ts";
-import { dreamReportInput, plantDreamFiles } from "../testing/dreamFixtures.ts";
+import { dreamRepoCommit, dreamReportInput, plantDreamFiles } from "../testing/dreamFixtures.ts";
 import { loadPerkSession, plantSession, scaffoldRepo } from "../testing/harness.ts";
 import { DREAM_REPORT_INPUT_SCHEMA } from "../waves/dreamReport.ts";
 import {
@@ -605,6 +605,31 @@ test("core: invariance-violating rendered parts refuse invalid_input at draft-wr
     assert.equal(result.details.ok, false);
     assert.equal(result.details.ok === false && result.details.error_type, "invalid_input");
     assert.match(result.content[0]?.text ?? "", /invariance rule/);
+    assert.ok(!existsSync(join(sessionDataDir(cwd, DREAM_RUN), OBJECTIVE_DRAFT_ARTIFACT)));
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+test("core: repository drift after the wave refuses bad_state at draft-write (the real §8.65 bracket)", () => {
+  // The boundary suite's real-default-bracket drift case: the fixture repo's HEAD moves off
+  // the stamped snapshot after planting, so the gate's production bracket refuses — stale
+  // analysis, nothing written.
+  const cwd = tempCwd();
+  try {
+    const branch: unknown[] = [runIdEntry(DREAM_RUN)];
+    plantDreamState(cwd, branch);
+    dreamRepoCommit(cwd, "drift: the repo moved after the wave");
+    const result = quietly(() =>
+      writeObjectiveDraft(fakeSink(branch), reportableCtx(cwd, branch), {
+        prose: PROSE,
+        dream_report: dreamReportInput(),
+      }),
+    );
+    assert.equal(result.details.ok, false);
+    assert.equal(result.details.ok === false && result.details.error_type, "bad_state");
+    assert.match(result.content[0]?.text ?? "", /repository moved since the dream snapshot/);
+    assert.match(result.content[0]?.text ?? "", /re-run perk learn dream/);
     assert.ok(!existsSync(join(sessionDataDir(cwd, DREAM_RUN), OBJECTIVE_DRAFT_ARTIFACT)));
   } finally {
     rmSync(cwd, { recursive: true, force: true });

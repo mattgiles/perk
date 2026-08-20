@@ -24,6 +24,7 @@ from perk.cli.commands.learn.code_cmd import code_learn
 from perk.cli.commands.learn.docs_check_cmd import docs_check_learn
 from perk.cli.commands.learn.docs_cmd import docs_learn
 from perk.cli.commands.learn.docs_sync_cmd import docs_sync_learn
+from perk.cli.commands.learn.dream_cmd import dream_learn
 from perk.cli.commands.learn.evidence_cmd import evidence_learn
 from perk.cli.commands.learn.harvest_cmd import harvest_learn
 from perk.cli.commands.learn.pending_cmd import pending_learn
@@ -66,7 +67,8 @@ learn_group = LearnGroup(
         "Capture + consolidate learnings. Bare `perk learn` launches the learn stage (a primed "
         "pi session); `capture`, `skip`, `code`, `docs`, `docs-check`, `docs-sync`, and "
         "`evidence` are the cold workers the warm doors delegate to; `harvest` is the cold-only "
-        "objective factory that mines docs/learned (no warm door); `pending` lists closed "
+        "objective factory that mines docs/learned (no warm door); `dream` is the cold-only "
+        "whole-corpus curation factory over docs/learned (no warm door); `pending` lists closed "
         "plans still awaiting /learn."
     ),
     # Launcher options (--worktree/--dry-run/--remote/pi-args) must survive group-level parsing
@@ -79,6 +81,7 @@ learn_group.add_command(code_learn)
 learn_group.add_command(docs_learn)
 learn_group.add_command(docs_check_learn)
 learn_group.add_command(docs_sync_learn)
+learn_group.add_command(dream_learn)
 learn_group.add_command(evidence_learn)
 learn_group.add_command(harvest_learn)
 learn_group.add_command(pending_learn)

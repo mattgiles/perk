@@ -8,7 +8,7 @@ import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { commitsSince, headSha, sinceBaseSha, worktreeDirty } from "./git.ts";
+import { commitsSince, headSha, revalidationBracket, sinceBaseSha, worktreeDirty } from "./git.ts";
 
 /** `git init` a scratch repo: two commits, `origin/main` planted at the FIRST (the base). */
 function scratchRepo(opts: { originHead?: boolean } = {}): { cwd: string; baseSha: string } {
@@ -95,4 +95,48 @@ test("commitsSince: a null fromSha lists every commit (the unborn-HEAD-at-captur
   const listing = commitsSince(cwd, null);
   assert.ok(listing !== null, "expected a commit listing");
   assert.ok(listing.includes("work") && listing.includes("base"));
+});
+
+test("revalidationBracket: matching HEAD + clean tree is ok", () => {
+  const { cwd } = scratchRepo();
+  const sha = headSha(cwd);
+  assert.ok(sha !== null);
+  assert.deepEqual(revalidationBracket(cwd, sha), { ok: true, detail: null });
+});
+
+test("revalidationBracket: a moved HEAD drifts, naming both SHAs", () => {
+  const { cwd, baseSha } = scratchRepo();
+  const head = headSha(cwd);
+  const result = revalidationBracket(cwd, baseSha);
+  assert.equal(result.ok, false);
+  assert.ok(result.detail?.includes(baseSha), `expected ${baseSha} in ${result.detail}`);
+  assert.ok(result.detail?.includes(head ?? ""), `expected ${head} in ${result.detail}`);
+});
+
+test("revalidationBracket: a dirty tree drifts (untracked files included)", () => {
+  const { cwd } = scratchRepo();
+  const sha = headSha(cwd);
+  assert.ok(sha !== null);
+  writeFileSync(join(cwd, "untracked.txt"), "dirty\n", "utf8");
+  const result = revalidationBracket(cwd, sha);
+  assert.equal(result.ok, false);
+  assert.match(result.detail ?? "", /no longer clean/);
+});
+
+test("revalidationBracket: a non-repo cwd drifts fail-CLOSED (the head-null arm)", () => {
+  const norepo = mkdtempSync(join(tmpdir(), "perk-git-norepo-"));
+  const result = revalidationBracket(norepo, "a".repeat(40));
+  assert.equal(result.ok, false);
+  assert.match(result.detail ?? "", /HEAD could not be resolved/);
+});
+
+test("revalidationBracket: an unprovable dirty probe drifts (the second fail-closed arm)", () => {
+  // Reachable only through the probe seam: a resolvable HEAD but a null cleanliness probe —
+  // an unprovable end state must read as drift, never as "unchanged".
+  const { cwd } = scratchRepo();
+  const sha = headSha(cwd);
+  assert.ok(sha !== null);
+  const result = revalidationBracket(cwd, sha, { dirty: () => null });
+  assert.equal(result.ok, false);
+  assert.match(result.detail ?? "", /cleanliness could not be verified/);
 });

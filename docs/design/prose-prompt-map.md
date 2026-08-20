@@ -5,8 +5,8 @@ This is the readable projection of perk's living, workflow-first prose graph. It
 
 ## Coverage
 
-- **209** canonical source units
-- **706** logical fragments
+- **211** canonical source units
+- **718** logical fragments
 - **16** session shapes and **10** assemblies
 - **15** explicitly excluded candidates (policy-only; not displayed)
 - **0** validation findings
@@ -864,6 +864,7 @@ Human and agent review surfaces for gists, objectives, and plans.
   - `promptGuidelines.2` — promptGuidelines item 3 (`tool:plan_review.promptGuidelines.2`)
   - `promptGuidelines.3` — promptGuidelines item 4 (`tool:plan_review.promptGuidelines.3`)
   - `promptGuidelines.4` — promptGuidelines item 5 (`tool:plan_review.promptGuidelines.4`)
+  - `promptGuidelines.5` — promptGuidelines item 6 (`tool:plan_review.promptGuidelines.5`)
   - `parameters.properties.plan.description` — parameters.properties.plan.description (`tool:plan_review.parameters.properties.plan.description`)
 - `typescript-tool:start_draft_review_wave`
   - `description` — description (`tool:start_draft_review_wave.description`)
@@ -1191,11 +1192,13 @@ Capture learnings and route them into documentation, code, or harvested objectiv
 | `markdown:agents/learn-analyst.md` | `subagent-instruction` | `shipped` | [`agents/learn-analyst.md`](../../agents/learn-analyst.md) · `file` | — |
 | `markdown:prompts/stages/learn-code.md` | `launch` | `shipped` | [`prompts/stages/learn-code.md`](../../prompts/stages/learn-code.md) · `file` | — |
 | `markdown:prompts/stages/learn-docs.md` | `launch` | `shipped` | [`prompts/stages/learn-docs.md`](../../prompts/stages/learn-docs.md) · `file` | — |
+| `markdown:prompts/stages/learn-dream.md` | `launch` | `shipped` | [`prompts/stages/learn-dream.md`](../../prompts/stages/learn-dream.md) · `file` | — |
 | `markdown:prompts/stages/learn-harvest.md` | `launch` | `shipped` | [`prompts/stages/learn-harvest.md`](../../prompts/stages/learn-harvest.md) · `file` | — |
 | `markdown:prompts/stages/learn-orchestrate.md` | `launch` | `shipped` | [`prompts/stages/learn-orchestrate.md`](../../prompts/stages/learn-orchestrate.md) · `file` | — |
 | `markdown:prompts/stages/learn.md` | `launch` | `shipped` | [`prompts/stages/learn.md`](../../prompts/stages/learn.md) · `file` | learn.cold, learn.warm |
 | `markdown:skills/perk-learn-code/SKILL.md` | `skill-detail` | `shipped` | [`skills/perk-learn-code/SKILL.md`](../../skills/perk-learn-code/SKILL.md) · `file` | — |
 | `markdown:skills/perk-learn-docs/SKILL.md` | `skill-detail` | `shipped` | [`skills/perk-learn-docs/SKILL.md`](../../skills/perk-learn-docs/SKILL.md) · `file` | — |
+| `markdown:skills/perk-learn-dream/SKILL.md` | `skill-detail` | `shipped` | [`skills/perk-learn-dream/SKILL.md`](../../skills/perk-learn-dream/SKILL.md) · `file` | — |
 | `markdown:skills/perk-learn-harvest/SKILL.md` | `skill-detail` | `shipped` | [`skills/perk-learn-harvest/SKILL.md`](../../skills/perk-learn-harvest/SKILL.md) · `file` | — |
 | `markdown:skills/perk-learn/SKILL.md` | `skill-detail` | `shipped` | [`skills/perk-learn/SKILL.md`](../../skills/perk-learn/SKILL.md) · `file` | learn.cold, learn.warm |
 | `markdown:skills/perk-learn/backends/github.md` | `skill-detail` | `shipped` | [`skills/perk-learn/backends/github.md`](../../skills/perk-learn/backends/github.md) · `file` | — |
@@ -1229,6 +1232,8 @@ Capture learnings and route them into documentation, code, or harvested objectiv
   - `body` — Document body (`file-body`)
 - `markdown:prompts/stages/learn-docs.md`
   - `body` — Document body (`file-body`)
+- `markdown:prompts/stages/learn-dream.md`
+  - `body` — Document body (`file-body`)
 - `markdown:prompts/stages/learn-harvest.md`
   - `body` — Document body (`file-body`)
 - `markdown:prompts/stages/learn-orchestrate.md`
@@ -1245,6 +1250,16 @@ Capture learnings and route them into documentation, code, or harvested objectiv
   - `section:consolidating-learnings-into-docs-learned-the-learn-docs-factory` — Consolidating learnings into `docs/learned/` (the `/learn-docs` factory) (`heading:consolidating-learnings-into-docs-learned-the-learn-docs-factory`)
   - `section:consolidating-learnings-into-docs-learned-the-learn-docs-factory/loop-detail-beyond-the-launch-guidance` — Loop detail (beyond the launch guidance) (`heading:consolidating-learnings-into-docs-learned-the-learn-docs-factory/loop-detail-beyond-the-launch-guidance`)
   - `section:consolidating-learnings-into-docs-learned-the-learn-docs-factory/content-quality-rules-the-cornerstone` — Content-quality rules (the cornerstone) (`heading:consolidating-learnings-into-docs-learned-the-learn-docs-factory/content-quality-rules-the-cornerstone`)
+- `markdown:skills/perk-learn-dream/SKILL.md`
+  - `frontmatter:description` — Discovery description (`frontmatter.description`)
+  - `section:dreaming-over-docs-learned-the-perk-learn-dream-factory` — Dreaming over `docs/learned/` (the `perk learn dream` factory) (`heading:dreaming-over-docs-learned-the-perk-learn-dream-factory`)
+  - `section:dreaming-over-docs-learned-the-perk-learn-dream-factory/the-closed-dispositions` — The closed dispositions (`heading:dreaming-over-docs-learned-the-perk-learn-dream-factory/the-closed-dispositions`)
+  - `section:dreaming-over-docs-learned-the-perk-learn-dream-factory/the-destructive-evidence-bar-the-disagreement-rule` — The destructive evidence bar + the disagreement rule (`heading:dreaming-over-docs-learned-the-perk-learn-dream-factory/the-destructive-evidence-bar-the-disagreement-rule`)
+  - `section:dreaming-over-docs-learned-the-perk-learn-dream-factory/ranking-truth-first-then-leverage` — Ranking (truth first, then leverage) (`heading:dreaming-over-docs-learned-the-perk-learn-dream-factory/ranking-truth-first-then-leverage`)
+  - `section:dreaming-over-docs-learned-the-perk-learn-dream-factory/selection` — Selection (`heading:dreaming-over-docs-learned-the-perk-learn-dream-factory/selection`)
+  - `section:dreaming-over-docs-learned-the-perk-learn-dream-factory/harvest-follow-ups` — Harvest follow-ups (`heading:dreaming-over-docs-learned-the-perk-learn-dream-factory/harvest-follow-ups`)
+  - `section:dreaming-over-docs-learned-the-perk-learn-dream-factory/the-dream-report-param-fields` — The `dream_report` param fields (`heading:dreaming-over-docs-learned-the-perk-learn-dream-factory/the-dream-report-param-fields`)
+  - `section:dreaming-over-docs-learned-the-perk-learn-dream-factory/boundaries` — Boundaries (`heading:dreaming-over-docs-learned-the-perk-learn-dream-factory/boundaries`)
 - `markdown:skills/perk-learn-harvest/SKILL.md`
   - `frontmatter:description` — Discovery description (`frontmatter.description`)
   - `section:harvesting-docs-learned-into-an-improvement-objective-the-perk-learn-harvest-factory` — Harvesting `docs/learned/` into an improvement objective (the `perk learn harvest` factory) (`heading:harvesting-docs-learned-into-an-improvement-objective-the-perk-learn-harvest-factory`)
@@ -1603,6 +1618,7 @@ Expert configuration guidance, structural search, and ancillary model utilities.
   - `section:perk-providers-issue-backends/linear-backend/readiness-checks` — Readiness checks (`heading:perk-providers-issue-backends/linear-backend/readiness-checks`)
   - `section:perk-providers-issue-backends/linear-backend/project-backed-objectives` — Project-backed objectives (`heading:perk-providers-issue-backends/linear-backend/project-backed-objectives`)
   - `section:perk-providers-issue-backends/linear-backend/native-attachment-metadata` — Native attachment metadata (`heading:perk-providers-issue-backends/linear-backend/native-attachment-metadata`)
+  - `section:perk-providers-issue-backends/linear-backend/the-dream-report-companion` — The dream-report companion (`heading:perk-providers-issue-backends/linear-backend/the-dream-report-companion`)
   - `section:perk-providers-issue-backends/linear-backend/replan-and-cancellation` — Replan and cancellation (`heading:perk-providers-issue-backends/linear-backend/replan-and-cancellation`)
   - `section:perk-providers-issue-backends/linear-backend/optional-agentsession-emission` — Optional AgentSession emission (`heading:perk-providers-issue-backends/linear-backend/optional-agentsession-emission`)
   - `section:perk-providers-issue-backends/current-caveats-and-maturity` — Current caveats and maturity (`heading:perk-providers-issue-backends/current-caveats-and-maturity`)
