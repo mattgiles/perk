@@ -1,17 +1,17 @@
 ---
 title: Linear issue backend
-read_when: You are touching `perk/backends/linear/`, Linear GraphQL queries or test fakes, perk metadata (attachments or inline markers), init/doctor readiness, or the project-backed objective store.
+read_when: You are touching `src/perk/backends/linear/`, Linear GraphQL queries or test fakes, perk metadata (attachments or inline markers), init/doctor readiness, or the project-backed objective store.
 cluster: backends-and-integrations
 ---
 
 # The Linear issue backend
 
 Objective #252 Phase 2/3 built the Linear backend in layers: the httpx GraphQL client
-(`perk/backends/linear/client.py`), the `LinearIssueBackend` adapter (`perk/backends/linear/backend.py`;
-both originally flat `linear.py` / `linear_backend.py` modules, since folded into the
-`perk/backends/linear/` package), dual-encoding
-metadata markers in `perk/plan.py`/`perk/objective.py`, init/doctor readiness wiring, and
-backend-aware prompt rendering. Backend-agnostic protocol learnings live in `issue-backend.md`;
+(`src/perk/backends/linear/client.py`), the `LinearIssueBackend` adapter
+(`src/perk/backends/linear/backend.py`; both originally flat `linear.py` / `linear_backend.py`
+modules, since folded into the `src/perk/backends/linear/` package), dual-encoding
+metadata markers in `src/perk/plan.py` / the `src/perk/objective/` package, init/doctor readiness
+wiring, and backend-aware prompt rendering. Backend-agnostic protocol learnings live in `issue-backend.md`;
 this doc is the Linear-specific knowledge. Since #1355 the header/node/manifest metadata kinds
 ride native Linear attachments (see the attachment-native section below); dual-encoding governs
 only the still-inline surfaces.
@@ -35,16 +35,16 @@ only the still-inline surfaces.
 - Offline testing: httpx `MockTransport` recipes + the scripted GraphQL fake — "Offline test
   recipes"; register more-specific query needles FIRST — "`_FakeLinear` insertion-order
   substring footgun".
-- Historical: "Live smoke gate" and "Measurement-node / live-spike process facts" are validation
-  records; the landed-arc sections (E2E lifecycle, GraphQL type-literacy, idiomatic-backend)
-  chronicle their nodes.
+- Historical: "Live-validation record (dated)" and "Live-spike process craft" carry the dated
+  live-run evidence; the landed-arc sections (E2E lifecycle, GraphQL type-literacy,
+  idiomatic-backend) chronicle their nodes.
 
 ## Linear API facts (audited against official docs)
 
 - **Auth**: personal API keys use a *plain* `Authorization: <key>` header — `Bearer` is
   OAuth2-only. Getting this wrong fails confusingly; the test suite pins the raw-key form.
 - **Rate limiting arrives as HTTP 400**, not 429: `errors[].extensions.code == "RATELIMITED"`.
-  Consequence: `perk/backends/linear/client.py` parses the JSON body **errors-array-first, regardless of
+  Consequence: `src/perk/backends/linear/client.py` parses the JSON body **errors-array-first, regardless of
   HTTP status**; status-based handling is only the fallback for non-2xx bodies without GraphQL
   errors.
 - **Partial success is real**: HTTP 200 can carry `errors` alongside partial `data`. The client
@@ -62,14 +62,61 @@ only the still-inline surfaces.
 - **No retry/backoff on RATELIMITED** — a typed loud failure by design (Linear's API-key budget of
   ~2,500–5,000 req/h is huge headroom for CLI-scale use).
 
+### Not-found discrimination (#558, proven live 2026-06)
+
+- **The canonical discriminator is a PAIRING**: `INPUT_ERROR` present in `exc.codes` **AND** the
+  `"entity not found"` message prefix — because `INPUT_ERROR` is **generic** (it also fires on
+  argument-validation errors), a code alone over-matches. One module-level helper
+  `_is_entity_not_found(exc)` in the client layer (`src/perk/backends/linear/client.py`) backs
+  every not-found read site.
+- **Before tightening an error predicate to a GraphQL `extensions.code`, confirm the code is
+  *specific*.** Linear reuses generic codes across unrelated failure classes.
+- **Folding a live observation into a predicate means re-shaping the offline twins to the observed
+  reality in the same change.** The fakes emitted `codes=()`; a naive predicate tightening silently
+  re-raised the *whole* not-found suite until the twins gained the observed code.
+- **Discrimination tests must prove the tightening NARROWED** — the valuable cases are the
+  *negative* ones: a not-found message under `RATELIMITED` (or with no code) **re-raises**; a
+  generic `INPUT_ERROR` carrying a non-not-found message **re-raises**. Only the paired shape is
+  swallowed.
+- Two reserved hardenings deliberately shipped as **documented deferrals, not edits** — RATELIMITED
+  fail-loud (kept) and `uuid_for` (kept, later collapsed — see the bare-identifier-mutations
+  section below) — the honest outcome of a gating observation that did not fire.
+
+## Bare-identifier mutations + the module-level mutation wrapper (#562/#620)
+
+The verified issue mutations (`issueUpdate`/`commentCreate`) take the **bare boundary identifier**
+directly (observed live 2026-06-15, #564: both succeed with `PER-n`; a bogus `PER-99999` still
+errors `INPUT_ERROR` / "Entity not found"); `LinearClient.uuid_for` + its cache are **deleted** —
+no resolve-on-demand layer remains. The durable architecture:
+
+- **Shared issue-mutation behavior both op classes need lives MODULE-LEVEL, not on one op class.**
+  The verified-mutation call sites span **two** client-only op classes (the issue ops AND the
+  project ops' attach-issue-to-project), and — per the substrate-home principle below — the
+  project ops do **not** compose the issue ops; both only register the shared client. A method on
+  one class is unreachable from the other. So the not-found-mapping wrapper is a **free function
+  parameterized by `client`** (`_request_issue_mutation`, `src/perk/backends/linear/_helpers.py`),
+  the only shape that avoids four copies. *General rule: shared mutation behavior the two op
+  classes both need is module-level (client-parameterized), because they are **siblings over a
+  shared client, not a composition**.*
+- **A byte-identical not-found mapping survives the deletion by RELOCATING it** into that thin
+  request wrapper (it governs only the wrapped `request` call; the `success is not True` payload
+  checks stay AFTER the wrapper returns). And **capture-at-create beats resolve-on-demand** for the
+  one consumer that still needs a UUID: a raw create variant returns the create-time UUID for the
+  UUID-only `issueRelationCreate` (relations still take UUIDs; zero extra queries).
+- One intentional `uuid_for` string survives in production — a docstring back-reference on the
+  request wrapper (a `grep` for `uuid_for` in `src/perk/` hits it; **expected, not a leftover**).
+  The test-fakes dropped their scripted `UuidForIssue` reply entries / branch and **flipped
+  mutation-id assertions from the resolved UUID to the boundary identifier** (plus `assert not` a
+  resolution query fired).
+
 ## Attachment-native perk metadata (the #1355 storage model)
 
 The perk metadata kinds enumerated by the `*_KIND` constants in
-`perk/backends/linear/attachments.py` — `plan-header`, `learn-header`, `gist-header`,
+`src/perk/backends/linear/attachments.py` — `plan-header`, `learn-header`, `gist-header`,
 `objective-node`, `objective-header`, `objective-manifest` — are stored as **native Linear issue
 attachments** carrying a machine-readable `metadata` envelope, no longer as inline-code blocks in
 bodies. The envelope shape is `source` / `schema_version` / `kind` / `payload_json` (see
-`perk/backends/linear/attachments.py`).
+`src/perk/backends/linear/attachments.py`).
 
 - **URL as upsert identity.** Attachment URLs use the honest non-resolving
   `https://perk.invalid/...` scheme (RFC-2606 `.invalid`); Linear's `attachmentCreate` upserts by
@@ -123,7 +170,7 @@ bodies. The envelope shape is `source` / `schema_version` / `kind` / `payload_js
 
 ## Dual-encoding metadata markers
 
-`perk/plan.py` renders metadata blocks in two forms: HTML `<!-- perk:x -->` markers for GitHub and
+`src/perk/plan.py` renders metadata blocks in two forms: HTML `<!-- perk:x -->` markers for GitHub and
 inline-code `` `perk:x` `` sentinels for Linear (ProseMirror strips HTML comments). Since #1355
 dual-encoding governs only the still-inline surfaces (plan-body comments, Reconcilable markers,
 callouts) — the header/node/manifest kinds moved to native attachments (see the attachment-native
@@ -168,7 +215,7 @@ Related facts:
 - **Issue descriptions are composed directly inline-code-style**
   (`render_metadata_block(..., style="inline-code")`, the `create_learn_issue` precedent).
 - **Comment bodies are transcoded** via `to_linear_markdown` because they're rendered from
-  `objective.py`'s HTML marker constants.
+  the `src/perk/objective/` package's HTML marker constants.
 
 Two distinct disciplines in one backend — keep them straight when adding ops.
 
@@ -181,13 +228,17 @@ Two distinct disciplines in one backend — keep them straight when adding ops.
 - `LinearIssueBackend.backend_id` is a module-level `"linear"` literal — never import
   `perk.backends.resolve` for it (the resolver imports the Linear backend module at wiring time; the
   import-direction test pins this).
-- The four ensured labels live in `perk/backends/linear/readiness.py`'s `_PERK_LABELS` (duplicating the plan/objective
-  constants by reference, not value) — **adding a fifth perk label requires touching that tuple**
-  or it silently stops being ensured at init.
+- The ensured perk labels live in `src/perk/backends/linear/readiness.py`'s `_PERK_LABELS`
+  (duplicating the plan/objective constants by reference, not value) — **adding a perk label
+  requires touching that tuple** or it silently stops being ensured at init.
+- `[issues] team` resolves by Linear team **KEY** (e.g. `PER`), **not** the workspace / display
+  name (#554, observed live). A name silently fails team resolution and surfaces only at **land**
+  as the *non-fatal* `plan issue close skipped (non-fatal): Linear team '<x>' not found`
+  (`plan_issue_closed: false`); the GitHub squash-merge still succeeds.
 
 ## Readiness wiring (init/doctor)
 
-- `check_readiness` (`perk/backends/linear/readiness.py`) is **one report-shaped probe with two consumers**: doctor
+- `check_readiness` (`src/perk/backends/linear/readiness.py`) is **one report-shaped probe with two consumers**: doctor
   (lookup-only) and init/`--fix` (converge), split by an `ensure_labels` flag. It **never raises**
   — every failure mode is a field. Phases short-circuit auth → team → labels, and the
   short-circuit itself is asserted in tests by counting fake-client requests.
@@ -206,15 +257,16 @@ gesture, never a `ManagedConvergence`.
 ## The env-first / config-fallback `client_from_env` seam + the worktree env bridge (#654)
 
 `client_from_env(env=None, *, repo_root: Path | None = None)` is **env-first** (stripped), then
-falls back to the `repo_root` `perk.local.toml` `[linear] api_key` when env is blank. The
+falls back to the `repo_root` `.perk/local.toml` `[linear] api_key` when env is blank. The
 `repo_root=None` default preserves every existing caller byte-for-byte. It is threaded at four
 in-process sites (`resolve_issue_backend`, `resolve_objective_store`, `doctor._linear_checks`,
 `init._linear_readiness`); a **fifth** site (`doctor._fix_linear_labels`) was intentionally left
 env-only (low impact; a future "config fallback everywhere" pass should thread it for symmetry).
 
-- **The worktree/gitignore bridge — corrected (#730).** A *gitignored* `perk.local.toml` IS honored
-  from inside a linked worktree, but the original "via the env-seed, **not** a file copy … the
-  env-seed carries it" framing was only *partially* true and masked a structural bug. Every worktree
+- **The worktree/gitignore bridge — corrected (#730).** A *gitignored* local config (then
+  `.pi/perk.local.toml`, now `.perk/local.toml`) IS honored from inside a linked worktree, but the
+  original "via the env-seed, **not** a file copy … the env-seed carries it" framing was only
+  *partially* true and masked a structural bug. Every worktree
   cold-door funnels through `resolve_issue_backend(repo_root)` where `repo_root` is the **worktree**,
   so `load_local_linear_api_key(worktree)` resolved a `<worktree>/.pi/perk.local.toml` that never
   exists — the env-seed was the *only* bridge, and it does not fire on every path. The fix is a
@@ -241,7 +293,7 @@ See `docs/learned/workflow/config-tables.md` for the local-only secret-fallback 
 
 ## Agent-session emission (one-way, internally gated)
 
-`perk/backends/linear/agent.py` + the `agent-session.json` cache helpers emit Linear AgentSession /
+`src/perk/backends/linear/agent.py` + the `agent-session.json` cache helpers emit Linear AgentSession /
 AgentActivity updates during implement runs. Four hook sites (`launch_stage`, `run_worker`,
 `_pr_submit_impl`, `_pr_land_impl`) each make a **bare unconditional call** — the gate (stamped
 `provider == "linear"` + `LINEAR_AGENT_TOKEN` present) and the try/except live INSIDE each emitter.
@@ -263,7 +315,7 @@ per-site.
 
 The wrong test shape: monkeypatch the emitter with a raising spy — the try/except is *inside* the
 emitter, so the raise propagates, fails the test, and proves nothing. The honest shape: **force the
-gate open** (monkeypatch `emission_enabled` in `perk/backends/linear/agent.py` → True, plus a canned
+gate open** (monkeypatch `emission_enabled` in `src/perk/backends/linear/agent.py` → True, plus a canned
 `cache.read_agent_session` for follow-up emitters) and **break the substrate**
 (`agent_client_from_env` raising), then assert exit-code/`--json`-payload byte-neutrality
 end-to-end through the real fail-soft wrapper. Reusable whenever a fail-open side-channel is wired
@@ -294,7 +346,7 @@ every request the emitters compose without touching emitter code or the real cli
   re-save) that per-command tests can't.
 - **A new mutation needs the fake to ROUTE it AND have the needed workflow states (#855).**
   Exercising objective replan (supersede) surfaced three `FakeLinearWorkspace`
-  (`tests/test_linear_lifecycle.py`) gaps: (a) a **`"projectId"` arm in the `issueUpdate(` handler**
+  (`tests/_linear_fakes.py`) gaps: (a) a **`"projectId"` arm in the `issueUpdate(` handler**
   (attach-to-project was previously unrouted); (b) a **new `projectUpdateCreate(` arm** — the
   fail-open status update previously hit the `unrouted` `AssertionError`, and `objective create`'s
   status update only survived because its caller wraps it in `except Exception`; and (c) a
@@ -305,7 +357,8 @@ every request the emitters compose without touching emitter code or the real cli
 
 ## Backend-aware prompts (Node 3.1)
 
-- **Per-plane plan-read SSOT helpers**: `perk/run/launch.py::_plan_read_instruction` ↔
+- **Per-plane plan-read SSOT helpers**: `src/perk/run/launch/prompts.py::_plan_read_instruction`
+  (re-exported by the `src/perk/run/launch/` package) ↔
   `extension/doors/lifecycleGates.ts::planReadInstruction`, byte-parity pinned by lockstep
   `LINEAR_READ_SUBSTRINGS` lists asserted from BOTH suites
   (`tests/test_worker_prompt_parity.py` ↔ `extension/worker/worker.test.ts`).
@@ -324,7 +377,7 @@ every request the emitters compose without touching emitter code or the real cli
 
 Objective seed prompts gained their own backend-aware read clause, mirroring the plan-read precedent:
 one parity-pinned helper per plane — `objective_read_instruction` (Python,
-`perk/cli/commands/objective/shared.py`) ↔ byte-identical `objectiveReadInstruction` (TS,
+`src/perk/cli/commands/objective/shared.py`) ↔ byte-identical `objectiveReadInstruction` (TS,
 `extension/factories/objectivePlan.ts`) — appended as a **supplemental clause** to the existing
 `perk objective show <id>` step in the three objective seed prompts (cold `_seed_prompt`, warm
 `factoryGuidance` + `reconcileGuidance`). Byte-parity is pinned by a paired `OBJECTIVE_LINEAR_SUBSTRINGS`
@@ -340,7 +393,8 @@ documented above (a third instance; see `shared-contracts.md`).
   intent, not a test).
 - **Cold-vs-warm backend-source asymmetry is the load-bearing design call.** Cold has
   `store.backend_id` + `state.url` already in hand (free). Warm must resolve the backend from
-  `resolveIssueBackendId(ctx.cwd)` (committed `.pi/perk.toml`, **NOT** `loadPerkConfig`'s overlay) and
+  `resolveIssueBackendId(ctx.cwd)` (the committed `.perk/config.toml`, main-checkout-anchored —
+  **NOT** `loadPerkConfig`'s overlay) and
   fetch the url via a `runColdDoor(["objective","show",id,"--json"])` round-trip **only when
   `backend === "linear"`** (github needs no clause → no fetch), and **fail-open** to the indirect
   `run \`perk objective show <id>\` for its URL` form. Config is authoritative for the warm plane
@@ -370,142 +424,53 @@ documented above (a third instance; see `shared-contracts.md`).
   must be pinned on the *recorded query* — scripted fakes return fields regardless of the
   selection (extends the doc's existing selection-pin discipline).
 
-## Live smoke gate — RAN green (Modes 1 & 2 + the Projects spike)
+## Live-validation record (dated)
 
-The live smoke gate that once held UNRUN has now **run**: Mode 1 (issue lifecycle,
-#554), Mode 2 (GitHub-integration coexistence, #564), and the Linear Projects spike (#567) all fired
-**green — no backend defect, docs-only PRs.** The facts below resolve what the runbook reserved; the
-residual register at the bottom carries only the items the live runs did *not* answer.
+The live smoke gate ran **green** across every mode; the items the live runs did *not* answer live
+in the Still-deferred register below.
 
-### Proven-live fidelity facts
+- **2026-06-15 — Modes 1 & 2 + the Projects spike (#554/#558/#564/#567; PRs
+  #553/#557/#561/#563/#565/#566): green, no backend defect, docs-only PRs.**
+  - **ProseMirror round-trip is CLEAN** — `find_metadata_block` survives a real Linear round-trip
+    for the plan-header (issue description), the plan-body (first comment), and the objective body
+    comment sentinels, with **no raw HTML / `<details>` artifacts**; a re-save **patches the body
+    comment in place** (comment count stays 1), confirming the form-preserving
+    `replace_metadata_block` path live. *(These round-trip facts predate #1355 — they proved the
+    inline model; the moved header/node/manifest kinds no longer ride bodies.)*
+  - **String `PER-*` identifiers flow through every `--json` envelope** end-to-end; the squash
+    footer is `Plan: PER-<n> — <url>` — closure is the explicit `close_issue` call, never a
+    merge-message magic word.
+  - The missing-entity observation — `issue(id:"PER-9999")` errors with the **generic**
+    `INPUT_ERROR` code, *not* a dedicated `NOT_FOUND` — seeded the paired not-found discriminator
+    (see the Not-found discrimination section above).
 
-*(These ProseMirror round-trip facts predate #1355 — they proved the inline model; the moved
-header/node/manifest kinds no longer ride bodies.)*
+### GitHub-integration coexistence (#564, 2026-06-15)
 
-- **ProseMirror round-trip is CLEAN.** `find_metadata_block` survives a real Linear round-trip for
-  the plan-header (issue description), the plan-body (first comment), and the objective body comment
-  sentinels — **no raw HTML / `<details>` artifacts**. A re-save **patches the body comment in
-  place** (comment count stays 1), confirming the form-preserving `replace_metadata_block` path live.
-- **Missing-entity shape**: `issue(id:"PER-9999")` → `message: "Entity not found: Issue"` with
-  `extensions.code: "INPUT_ERROR"` — a **generic** input-error code, *not* a dedicated `NOT_FOUND`
-  (see the discriminator below).
-- **String `PER-*` identifiers flow through every `--json` envelope** end-to-end; the squash footer is
-  `Plan: PER-<n> — <url>` (no `Closes #N`, no Linear magic words — closure is the explicit
-  `close_issue` call, not a merge-message side effect).
+The Linear GitHub integration links PRs as **attachments, not comments** — the linkback-tolerance
+concern is structurally moot, and the offline twin
+`test_foreign_linkback_comment_does_not_perturb_marker_scans` is *stricter* than reality. perk's
+`plan-PER-<n>` branch auto-links without Linear's branch template; on-land `close_issue` beside a
+Done-on-merge automation is a **same-state write** (no new state-history transition).
+**"Installed ≠ connected"**: the decisive isolation test is a control PR in `issue.branchName`'s
+canonical format — `team.gitAutomationStates` confirms automation *config*, and the App
+installation is not introspectable from a normal `gh` token.
 
-### Not-found discrimination tightened (#558)
-
-The reserved deferral "tighten `"not found"` to `.codes` when 4.1 observes one" is **RESOLVED — but
-NOT in the `.codes`-only direction the roadmap reserved.** Because `INPUT_ERROR` is **generic** (it
-also fires on argument-validation errors), the correct discriminator is the **pairing** of
-`INPUT_ERROR` present in `exc.codes` **AND** the `"entity not found"` message prefix. One
-module-level helper `_is_entity_not_found(exc)` now backs the three sites (`_issue_or_none`,
-`_uuid_for`, `_comment_body_or_none`). The cross-cutting lessons:
-
-- **Before tightening an error predicate to a GraphQL `extensions.code`, confirm the code is
-  *specific*.** Linear reuses generic codes across unrelated failure classes; a code alone can
-  over-match.
-- **Folding a live observation into a predicate means re-shaping the offline twins to the observed
-  reality in the same change.** The fakes emitted `codes=()`; a naive predicate tightening silently
-  re-raised the *whole* not-found suite until the twins gained the observed code.
-- **Discrimination tests must prove the tightening NARROWED** — the valuable cases are the *negative*
-  ones: a not-found message under `RATELIMITED` (or with no code) now **re-raises**; a generic
-  `INPUT_ERROR` carrying a non-not-found message **re-raises**. Only the paired shape is swallowed.
-
-Two reserved hardenings deliberately shipped as **documented deferrals, not edits** — RATELIMITED
-fail-loud (kept) and `_uuid_for` (kept, see below) — the honest outcome of a gating observation that
-did not fire.
-
-### Mutation identifier acceptance (#564)
-
-`issueUpdate(id:"PER-n")` and `commentCreate(input:{issueId:"PER-n"})` both succeed with the **bare
-identifier** (a bogus `PER-99999` still errors `INPUT_ERROR` / "Entity not found"), so `_uuid_for`
-*could* collapse to a pass-through. That observation **delivered as #562 (PR for #620)** — see below.
-
-#### The `uuid_for` collapse delivered (#562 / #620)
-
-The deferred collapse landed: `LinearClient.uuid_for` + its cache are **deleted**, and the verified
-mutations now pass the **bare boundary identifier** directly (no resolve-on-demand). Two reusable
-lessons:
-
-- **Shared issue-mutation behavior both op classes need lives MODULE-LEVEL, not on one op class.**
-  The plan said "a tiny private helper on the issue-ops class," but the verified-mutation call sites
-  span **two** client-only op classes (the issue ops AND the project ops' attach-issue-to-project),
-  and — per the substrate-home principle above — the project ops do **not** compose the issue ops;
-  both only register the shared client. A method on one class is unreachable from the other. So the
-  not-found-mapping wrapper is a **free function parameterized by `client`** (`_request_issue_mutation`),
-  the only shape that avoids four copies. *General rule: shared mutation behavior the two op classes
-  both need is module-level (client-parameterized), because they are **siblings over a shared client,
-  not a composition**.*
-- **A byte-identical not-found mapping survives the deletion by RELOCATING it** into that thin
-  request wrapper (it governs only the wrapped `request` call; the `success is not True` payload
-  checks stay AFTER the wrapper returns). And **capture-at-create beats resolve-on-demand** for the
-  one consumer that still needs a UUID: a raw create variant returns the create-time UUID for the
-  UUID-only `issueRelationCreate` (relations still take UUIDs; zero extra queries).
-- One intentional `uuid_for` string survives in production — a docstring back-reference on the
-  request wrapper (a `grep` for `uuid_for` in `perk/` hits it; **expected, not a leftover**). The
-  test-fakes dropped their scripted `UuidForIssue` reply entries / branch and **flipped mutation-id
-  assertions from the resolved UUID to the boundary identifier** (plus `assert not` a resolution
-  query fired).
-
-### GitHub-integration coexistence (#564)
-
-- **The Linear GitHub integration links PRs as attachments (issue sidebar), NOT comments.** So the
-  "linkback tolerance" concern (foreign comments perturbing marker-keyed scans) is **structurally
-  moot** — the offline twin `test_foreign_linkback_comment_does_not_perturb_marker_scans` is
-  *stricter* than reality.
-- **perk's `plan-PER-<n>` branch auto-links directly** — it does **not** need Linear's
-  `username/identifier-title` branch template (a control PR in that exact format linked identically).
-- **On-land `close_issue` beside a Done-on-merge automation is a same-state write** — it refreshes
-  `completedAt` but produces **no new state-history transition** (history stays monotonic
-  Backlog → In Progress → Done).
-- **"Installed ≠ connected" (the big operational lesson).** The Linear GitHub App installed on the
-  org but **not wired to the run repo** means **zero** PR events reach Linear regardless of branch
-  name. The decisive isolation test is a **control PR from `issue.branchName`'s canonical format**:
-  if even that doesn't link, it's the *connection*, not perk's branch name. You **cannot** introspect
-  the App installation from a normal `gh` token (a "count 0" is a 404, not an empty list);
-  `team.gitAutomationStates { event, state, branchPattern }` confirms automation *config* even when
-  the repo mapping itself is uncheckable.
-
-### Config gotcha (#554)
-
-`[issues] team` resolves by Linear team **KEY** (e.g. `PER`), **not** the workspace / display name.
-A name silently fails team resolution and surfaces only at **land** as a *non-fatal*
-`plan issue close skipped (non-fatal): Linear team '<x>' not found` (`plan_issue_closed: false`); the
-GitHub squash-merge still succeeds.
-
-### Mode 4 — project-backed objective lifecycle proven live (#621)
-
-The four previously not-live-proven Project ops are now **proven live** (driven from perk's own
-GitHub-backed dev repo against team PER):
-
-- **Idempotency:** find-by-run-id returns the **same UUID** / `existed:true` with **no duplicate**
-  milestones or issues.
-- **Project Update posts on create / land / reconcile**; **close** drives the Project state to
-  `completed`; the **node workflow-state mirror fires BOTH directions** (in-progress→started at
-  plan-save, done→completed on mark-done).
-- **ProseMirror metadata round-trip is CLEAN** through create→reconcile (zero HTML artifacts), and
-  a re-save **patches in place**. **Node↔plan unification creates NO new `perk:plan` issue** (the
-  plan-header merges into the node-issue). **No RATELIMITED** at low volume.
-
-**Setup gotchas** (running Linear from a GitHub-default repo):
-
-- **Backend selection reads COMMITTED `.pi/perk.toml` only** — the `.pi/perk.local.toml` overlay is
-  deliberately **ignored** (same committed-only discipline as compaction). So pointing perk at
-  Linear needs a **working-tree edit** to committed `.pi/perk.toml` reverted before commit; a local
-  overlay silently no-ops.
-- Use **`uv run perk`**, not the stale global `perk` (a separate uv-tool install). The doctor
-  `linear` group only appears **once committed config selects linear**.
-
-**GraphQL probe gotchas:** `issueRelationCreate`'s `type` is a GraphQL **enum** — a quoted inline
-literal fails validation; pass it via a typed `$input` variable. And **urllib HTTPS fails on this
-host** (`CERTIFICATE_VERIFY_FAILED`) — use `curl` for ad-hoc probes (see Measurement-node facts).
-
-**`get_objective` reconstruction facts** (the empirical baseline the #626 drift doctor formalizes):
-`objective show --json` **omits `depends_on`** and **derives `phase` from the node id** (not the
-milestone); `depends_on` is reconstructed from **blocking relations**. And `get_objective` **silently
-absorbs drift** — an un-assigned node disappears, an unknown relation is dropped, a milestone rename
-is invisible — which is exactly why the manifest-pinned drift doctor exists.
+- **2026-06-16 — Mode 4, project-backed objective lifecycle (#621; PR #619): green.**
+  - **Find-by-run-id is idempotent** — the same UUID / `existed:true`, no duplicate milestones or
+    issues.
+  - **Project Updates post on create / land / reconcile**; **close** drives the Project to
+    `completed`; the node workflow-state mirror fires **both directions** (in-progress→started at
+    plan-save, done→completed on mark-done).
+  - **Metadata round-trip is clean through create→reconcile** with in-place re-save patching;
+    node↔plan unification creates **no new `perk:plan` issue**; no RATELIMITED at low volume.
+  - Also proven live here: `projectUpdateCreate`, `set_project_state`, `list_projects`,
+    `_workflow_state_id`, and the #626 ops (`attach_issue_to_milestone`,
+    `project_issues_with_milestones`).
+  - **Setup gotchas** (running Linear from a GitHub-default repo): backend selection reads the
+    **committed `.perk/config.toml` only** — a local overlay silently no-ops (see
+    `config-tables.md`); use **`uv run perk`**, never a stale global install (see
+    `toolchain/worktree-node-modules.md`); the doctor `linear` group appears only once committed
+    config selects linear.
 
 ## Linear Projects substrate + `LinearProjectObjectiveStore` (now BUILT)
 
@@ -541,7 +506,7 @@ document assertion stays byte-green. This is the general recipe for promoting ma
 delegated collaborator onto its client tier.
 
 - The `_require_*` helpers + the not-found discriminator moved **DOWN** to the client layer
-  (`perk/backends/linear/client.py`, re-imported by `backend.py`) to avoid an import cycle. The `INPUT_ERROR`-in-`.codes`
+  (`src/perk/backends/linear/client.py`, re-imported by `backend.py`) to avoid an import cycle. The `INPUT_ERROR`-in-`.codes`
   AND `"entity not found"`-message pairing stayed intact (do not loosen to `.codes`-only).
 - The **team-id cache is keyed by `team_key`** (the client stays team-agnostic at construction; op
   classes pass their bound team_key). A single shared cache via the client beats op-class
@@ -587,6 +552,11 @@ additions (omit the key, never an explicit `null`).
   (byte-stable), and **fails open** by swallowing the backend error (`LinearGraphQLError` is a
   subclass, so both a `success:false` payload AND a raised error are caught); a `None` state id is
   skipped silently before any write.
+- **Live-observed reconstruction limits (#621)** — the empirical baseline the #626 drift doctor
+  formalizes: `objective show --json` **omits `depends_on`** and **derives `phase` from the node
+  id** (not the milestone), and `get_objective` **silently absorbs drift** — an un-assigned node
+  disappears, an unknown relation is dropped, a milestone rename is invisible — which is exactly
+  why the manifest-pinned drift doctor exists.
 
 ### The `_FakeLinear` substring-keyed fake — insertion ORDER is load-bearing (the sharpest footgun)
 
@@ -624,6 +594,9 @@ lookup). So relation-create must **NOT** route through the not-found discriminat
 (the store passes already-resolved UUIDs). Relation *reads* filter `type == "blocks"` (Linear
 returns related/duplicate/blocks); direction is carried by the field (`relations` vs
 `inverseRelations`), the enum stays `"blocks"` — there is no `"blockedBy"` enum.
+
+Live probe fact (Mode 4, #621): `issueRelationCreate`'s `type` is a GraphQL **enum** — a quoted
+inline literal fails validation; pass it via a typed `$input` variable.
 
 ### Milestone + create facts (retained from the spike)
 
@@ -689,7 +662,7 @@ drift-repair node.
 
 ### Fail-open Project Updates (#606)
 
-`projectUpdateCreate` bodies come from **pure backend-neutral composers** (`perk/objective.py`)
+`projectUpdateCreate` bodies come from **pure backend-neutral composers** (`src/perk/objective/render.py`)
 computed from counts the call site already holds → **no extra network reads**. Each call site wraps
 in `try/except`, logs a non-fatal stderr line (`... skipped (non-fatal): {exc}`), and **never
 changes the command result**; in `_reconcile_objective_on_land` the post lives in its own helper
@@ -697,7 +670,7 @@ changes the command result**; in `_reconcile_objective_on_land` the post lives i
 existing close fail-open). `projectUpdateCreate(` does **not** substring-collide with `projectUpdate(`
 (next char `C`), but place the more-specific needle first defensively. `projectUpdateCreate` was
 offline-covered only at authoring — now **proven live** along with `set_project_state` /
-`list_projects` / `_workflow_state_id` (the Mode-4 confirmations above, #621).
+`list_projects` / `_workflow_state_id` (the Live-validation record above, #621).
 
 ### The manifest-drift architecture (#609) — for the follow-up implementer
 
@@ -741,7 +714,7 @@ The **Linear-backend-specific** mechanics:
   blocked-by lookup on the missing uuid. Store-level drift tests drive the real project store, then
   mutate the fake's issues/relations/milestones directly to inject each drift class.
 - Both new ops were **offline-only / not-live-proven** at authoring time — now live-proven, see the
-  Mode-4 confirmations below.
+  Live-validation record above.
 
 ### `check_project_readiness` (#603) — a separate function
 
@@ -751,31 +724,24 @@ new checks) and `init`'s linear readiness (a nullable `LinearReport.project` sub
 census + the non-fatal-sub-report discipline live in `init-doctor.md` — keep the detail there to
 avoid duplication.
 
-## Measurement-node / live-spike process facts
+## Live-spike process craft
 
-- **The firing mechanism**: import `perk.backends.linear.client_from_env()` +
+- **The firing mechanism**: `client_from_env()` (`src/perk/backends/linear/client.py`) +
   `LinearClient.request(QUERY, VARS)`, resolving the team UUID via
-  `teams(filter:{key:{eq:"PER"}})`. The throwaway runner lives in `/tmp` (no committed `scripts/`
-  file) — honors the "no bespoke scripts" discipline while still capturing machine GraphQL documents
-  + error shapes.
-- **Check `LINEAR_API_KEY` in the session env before assuming a live node must be deferred** to an
+  `teams(filter:{key:{eq:"PER"}})`; the throwaway runner lives in `/tmp` — no bespoke committed
+  scripts.
+- **Check `LINEAR_API_KEY` in the session env** before assuming a live node must be deferred to an
   operator — a live spike may be fireable in-session.
-- **Driving session-stages from a non-interactive harness**: the `--json` cold workers
-  (`perk plan save --plan-file … --json`, `perk pr submit/land --json`, `perk learn capture … --json`,
-  `perk objective … --json`) exercise the deterministic mutation paths **without a session**.
-  **`perk implement` is the only stage with no `--json` worker** (the work *is* the session) — to
-  position its worktree manually, `perk worktree create plan-<id>` then **copy
-  `.pi/workflow/plan-ref.json` into the new worktree** (the PR-workers read the worktree-local
+- **The `--json` cold workers drive the deterministic mutation paths sessionlessly**;
+  `perk implement` is the only stage with no `--json` worker (the work *is* the session) —
+  position its worktree via `perk worktree create plan-<id>` and copy
+  `.perk/workflow/plan-ref.json` into the new worktree (the PR-workers read the worktree-local
   plan-ref).
-- **Gotcha — probe side-effects clobber idempotency**: overwriting an issue *description* while
-  probing destroys its `plan-header` sentinel, so a later `perk plan save` creates a **new** issue
-  (idempotency keys off that sentinel). Use a throwaway field or restore immediately.
-- **Gotcha — Python `urllib` SSL fails in this env** (`CERTIFICATE_VERIFY_FAILED`); use `curl` for
+- **Probe side-effects clobber idempotency**: overwriting an issue *description* while probing
+  destroys its `plan-header` sentinel, so a later `perk plan save` creates a **new** issue — use a
+  throwaway field or restore immediately.
+- **Python `urllib` HTTPS fails on this host** (`CERTIFICATE_VERIFY_FAILED`) — use `curl` for
   ad-hoc Linear GraphQL probes.
-- **Runbook drift corrected**: `perk init --verify` is **not** a flag
-  (labels are created by `perk doctor --fix`); `perk plan-save` is `perk plan save`; `perk resume` is
-  `perk plan resume`; the `perk submit` / `perk land` flat aliases *do* work; `perk pr land` is
-  idempotent on an already-merged PR.
 
 ### Reconciliation pattern (cross-cutting)
 
@@ -801,7 +767,8 @@ and a prose-first overview order. The durable craft:
 - **Workspace-scoped labels + the four→five ripple.** Dropping `teamId` from the label create input
   makes labels workspace-scoped (safe — lookup was already unscoped). Adding a perk label is a **wide
   ripple** (`_PERK_LABELS`, readiness count tests, doctor/init docstrings, contracts §, user docs) —
-  grep `four perk` / count-asserts before touching the label set.
+  the #678 four→five expansion touched all of them; grep the readiness label-count comments and
+  count-asserts before touching the label set.
 - **Attachments + fail-open seam.** `attachmentCreate` is idempotent by URL (no id to track) → safe to
   post on every PR stamp; wired fail-open into `update_plan_header` (catches
   `(IssueBackendError, GitHubError, ValueError)` — the `ValueError` covers `int(pr_field)`). The
@@ -827,15 +794,18 @@ discriminator (`_is_entity_not_found`) folds a missing issue/session → empty; 
 
 ## GraphQL type-literacy consolidation (Node 3.1, PR #731)
 
-The dignified-python audit's type-literacy node tightened the Linear backend package to **zero
-`cast(`** — the only `cast` calls that remain are inside the four `_opt_*`/`_require_*` helper
-*definitions* in the client layer, which internalize the ty narrowing quirk so call sites stay cast-free.
+The dignified-python audit's type-literacy node made the Linear backend package's call sites ride
+the `_opt_*`/`_require_*` narrowing helpers instead of raw `cast(` — the helper *definitions* in
+the client layer internalize the ty narrowing quirk — with **one standing exception**:
+`src/perk/backends/linear/agent.py::_parse_created_session` (the agent-session emitter) carries
+two direct `cast("dict[str, object]", …)` local narrowings. The confinement claim covers the
+helper-riding call sites, not a package-wide zero.
 The durable placement decisions:
 
 - **Substrate-home placement.** The *generic* narrowing helpers (`_opt_*`/`_require_*`) live in
-  `perk/backends/linear/client.py` (the lower client layer). The *domain* payload mapping — the one pilot
+  `src/perk/backends/linear/client.py` (the lower client layer). The *domain* payload mapping — the one pilot
   `TypedDict` plus its narrowing helper — lives in the package leaf
-  `perk/backends/linear/_helpers.py`, which **imports** the generics. Generic narrowing is
+  `src/perk/backends/linear/_helpers.py`, which **imports** the generics. Generic narrowing is
   substrate; payload-shape knowledge is domain — keep them in their own tiers.
 - **The single `TypedDict` pilot.** The recurring 6-field issue selection
   (`id identifier url title description state { type }`, shared by `backend.get_plan` /
@@ -848,7 +818,7 @@ The durable placement decisions:
 ## Issue-tier boundary model (the `TypedDict` pilot retired)
 
 The Node-3.1 `LinearIssueNode` `TypedDict` pilot above was **retired** for a lenient response model
-(`LinearIssueNodeModel` + nested `_IssueStateNode` in `perk/backends/linear/_helpers.py`), mirroring
+(`LinearIssueNodeModel` + nested `_IssueStateNode` in `src/perk/backends/linear/_helpers.py`), mirroring
 the GitHub node-2.1 boundary→domain pattern. Because the one recurring selection
 (`id identifier url title description state{type}`) feeds **two** domain objects — `PlanState` via
 `get_plan` AND `AdoptableIssue` via `read_issue` — there is **no single `to_domain()`**: the model
@@ -895,8 +865,8 @@ The cancellation/doctor work over the project-backed store pinned the authority 
 
 ## Still-deferred register (trimmed)
 
-The live smoke resolved the fidelity / not-found / mutation-acceptance items above; what remains
-unobserved:
+The live runs in the Live-validation record above resolved the fidelity / not-found /
+mutation-acceptance items; what remains unobserved:
 
 - **RATELIMITED retry/backoff** — still unobserved at low CLI volume; the typed loud failure stands.
 - **`LINEAR_API_KEY` as a GHA secret** for headless/remote runs.
