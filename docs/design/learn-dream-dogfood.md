@@ -719,7 +719,7 @@ pass. Offline pins for each ran green in this pass's preflight:
   file remain at their real `scratch/runs/01M0FYB03K4V9CP7HY113Y68SB/` locations under
   normal perk run-scratch GC; the parent session remains in Pi's normal session history (no
   duplicate transcript was created anywhere).
-- **Capture root:** deletion scheduled immediately after this evidence commit, per Part A
-  step 8 — the confirming attestation lands in the follow-up commit.
-- **No raw residue staged:** `git diff --cached --name-only` at this commit contained only
-  `docs/` paths — no `.perk/` or `.pi-subagents/` path staged.
+- **Capture root:** deleted immediately after the evidence commit (`rm -rf` + `test ! -e`
+  confirmed), per Part A step 8 — this attestation commit follows the evidence commit.
+- **No raw residue staged:** `git diff --cached --name-only` at each commit contained only
+  `docs/` paths — no `.perk/` or `.pi-subagents/` path was ever staged.
