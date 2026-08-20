@@ -129,6 +129,7 @@ EXPECTED_SURFACE: dict[str, object] = {
             ("docs", ()),
             ("docs-check", ()),
             ("docs-sync", ()),
+            ("dream", ()),
             ("evidence", ()),
             ("harvest", ()),
             ("pending", ()),

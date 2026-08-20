@@ -108,6 +108,11 @@
     manifest_path: ".perk/workflow/scratch/runs/01RID/harvest-manifest.json"
     doc_count: "8"
     lane_count: "3"
+- template: "stages/learn-dream.md"
+  vars:
+    manifest_path: ".perk/workflow/scratch/runs/01RID/dream-manifest.json"
+    doc_count: "63"
+    lane_count: "13"
 - template: "stages/skills/create.md"
   vars:
     repo_skills_rel: ".pi/skills"

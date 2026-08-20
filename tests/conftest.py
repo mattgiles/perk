@@ -66,8 +66,20 @@ def _git(cwd: Path, *args: str) -> str:
 
 
 def _copy_template(source: Path, destination: Path) -> Path:
-    """Copy an immutable repo template without sharing mutable files or following symlinks."""
-    shutil.copytree(source, destination, dirs_exist_ok=True, symlinks=True)
+    """Copy an immutable repo template without sharing mutable files or following symlinks.
+
+    Git lock files are excluded: a git command in a session-scoped template can spawn detached
+    background maintenance whose transient `.git/objects/maintenance.lock` vanishes between
+    copytree's scandir and the copy (`shutil.Error` — an observed CI flake); locks are runtime
+    state that must never ride into a fresh fixture repo anyway.
+    """
+    shutil.copytree(
+        source,
+        destination,
+        dirs_exist_ok=True,
+        symlinks=True,
+        ignore=shutil.ignore_patterns("*.lock"),
+    )
     return destination
 
 
@@ -289,6 +301,11 @@ def _unborn_git_template(tmp_path_factory: pytest.TempPathFactory) -> Path:
     _git(root, "init", "-q")
     _git(root, "config", "user.email", "t@example.com")
     _git(root, "config", "user.name", "perk tests")
+    # No detached background maintenance in fixture repos: an auto-spawned `git maintenance`/gc
+    # mutates `.git` concurrently with the copytree fan-out (the transient-lock race above).
+    # Set on the ROOT template so every derived copy inherits it via the copied `.git/config`.
+    _git(root, "config", "maintenance.auto", "false")
+    _git(root, "config", "gc.auto", "0")
     return root
 
 

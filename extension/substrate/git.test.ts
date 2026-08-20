@@ -8,7 +8,14 @@ import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { commitsSince, headSha, sinceBaseSha, worktreeDirty } from "./git.ts";
+import {
+  commitsSince,
+  headSha,
+  indexHidesChanges,
+  revalidationBracket,
+  sinceBaseSha,
+  worktreeDirty,
+} from "./git.ts";
 
 /** `git init` a scratch repo: two commits, `origin/main` planted at the FIRST (the base). */
 function scratchRepo(opts: { originHead?: boolean } = {}): { cwd: string; baseSha: string } {
@@ -95,4 +102,89 @@ test("commitsSince: a null fromSha lists every commit (the unborn-HEAD-at-captur
   const listing = commitsSince(cwd, null);
   assert.ok(listing !== null, "expected a commit listing");
   assert.ok(listing.includes("work") && listing.includes("base"));
+});
+
+test("revalidationBracket: matching HEAD + clean tree is ok", () => {
+  const { cwd } = scratchRepo();
+  const sha = headSha(cwd);
+  assert.ok(sha !== null);
+  assert.deepEqual(revalidationBracket(cwd, sha), { ok: true, detail: null });
+});
+
+test("revalidationBracket: a moved HEAD drifts, naming both SHAs", () => {
+  const { cwd, baseSha } = scratchRepo();
+  const head = headSha(cwd);
+  const result = revalidationBracket(cwd, baseSha);
+  assert.equal(result.ok, false);
+  assert.ok(result.detail?.includes(baseSha), `expected ${baseSha} in ${result.detail}`);
+  assert.ok(result.detail?.includes(head ?? ""), `expected ${head} in ${result.detail}`);
+});
+
+test("revalidationBracket: a dirty tree drifts (untracked files included)", () => {
+  const { cwd } = scratchRepo();
+  const sha = headSha(cwd);
+  assert.ok(sha !== null);
+  writeFileSync(join(cwd, "untracked.txt"), "dirty\n", "utf8");
+  const result = revalidationBracket(cwd, sha);
+  assert.equal(result.ok, false);
+  assert.match(result.detail ?? "", /no longer clean/);
+});
+
+test("revalidationBracket: a non-repo cwd drifts fail-CLOSED (the head-null arm)", () => {
+  const norepo = mkdtempSync(join(tmpdir(), "perk-git-norepo-"));
+  const result = revalidationBracket(norepo, "a".repeat(40));
+  assert.equal(result.ok, false);
+  assert.match(result.detail ?? "", /HEAD could not be resolved/);
+});
+
+test("revalidationBracket: an unprovable dirty probe drifts (the second fail-closed arm)", () => {
+  // Reachable only through the probe seam: a resolvable HEAD but a null cleanliness probe —
+  // an unprovable end state must read as drift, never as "unchanged".
+  const { cwd } = scratchRepo();
+  const sha = headSha(cwd);
+  assert.ok(sha !== null);
+  const result = revalidationBracket(cwd, sha, { dirty: () => null });
+  assert.equal(result.ok, false);
+  assert.match(result.detail ?? "", /cleanliness could not be verified/);
+});
+
+test("indexHidesChanges: false on a plain repo, true under skip-worktree/assume-unchanged, null outside a repo", () => {
+  const { cwd } = scratchRepo();
+  const g = (...args: string[]) =>
+    execFileSync("git", args, { cwd, stdio: ["ignore", "ignore", "ignore"] });
+  assert.equal(indexHidesChanges(cwd), false);
+  g("update-index", "--skip-worktree", "seed.txt");
+  assert.equal(indexHidesChanges(cwd), true, "skip-worktree is detected");
+  g("update-index", "--no-skip-worktree", "seed.txt");
+  g("update-index", "--assume-unchanged", "seed.txt");
+  assert.equal(indexHidesChanges(cwd), true, "assume-unchanged is detected");
+  const norepo = mkdtempSync(join(tmpdir(), "perk-git-norepo-"));
+  assert.equal(indexHidesChanges(norepo), null);
+});
+
+test("revalidationBracket: a flagged index drifts — status can no longer prove cleanliness", () => {
+  // The hidden-edit hazard: mark a file skip-worktree and EDIT it — `git status` stays clean
+  // and HEAD still matches, so only the flags arm catches the drift.
+  const { cwd } = scratchRepo();
+  const sha = headSha(cwd);
+  assert.ok(sha !== null);
+  execFileSync("git", ["update-index", "--skip-worktree", "seed.txt"], {
+    cwd,
+    stdio: ["ignore", "ignore", "ignore"],
+  });
+  writeFileSync(join(cwd, "seed.txt"), "silently changed\n", "utf8");
+  assert.equal(worktreeDirty(cwd), false, "sanity: the status probe alone would have passed");
+  const result = revalidationBracket(cwd, sha);
+  assert.equal(result.ok, false);
+  assert.match(result.detail ?? "", /assume-unchanged\/skip-worktree/);
+  assert.match(result.detail ?? "", /cannot be proven/);
+});
+
+test("revalidationBracket: an unprovable flags probe drifts (the third fail-closed arm)", () => {
+  const { cwd } = scratchRepo();
+  const sha = headSha(cwd);
+  assert.ok(sha !== null);
+  const result = revalidationBracket(cwd, sha, { flags: () => null });
+  assert.equal(result.ok, false);
+  assert.match(result.detail ?? "", /index flag state could not be verified/);
 });

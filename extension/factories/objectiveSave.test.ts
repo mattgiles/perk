@@ -22,7 +22,7 @@ import {
   WORKFLOW_STATE_TYPE,
 } from "../substrate/workflowState.ts";
 import type { ReportTarget } from "../surfaces/report.ts";
-import { dreamReportInput, plantDreamFiles } from "../testing/dreamFixtures.ts";
+import { dreamRepoCommit, dreamReportInput, plantDreamFiles } from "../testing/dreamFixtures.ts";
 import {
   fakePerk,
   loadPerkSession,
@@ -644,6 +644,38 @@ test("tool: dream + valid direct-param save proceeds — the cold-door argv is u
     assert.equal(transfer.run_id, DREAM_RUN);
     assert.ok(transfer.parts.length >= 1);
     assert.ok(transfer.parts.every((part) => typeof part === "string" && part.length > 0));
+  } finally {
+    h.dispose();
+  }
+});
+
+test("tool: repository drift after the wave refuses bad_state at save (the real §8.65 bracket)", async () => {
+  // The save-boundary real-default-bracket drift case: HEAD moves off the stamped snapshot
+  // after planting, so the gate refuses before the transfer write and the cold door.
+  const cwd = scaffoldRepo();
+  const digest = plantDream(cwd);
+  dreamRepoCommit(cwd, "drift: the repo moved after the wave");
+  const file = plantSession(cwd, [
+    { run_id: DREAM_RUN, mode: "read-write", dream_bundle_digest: digest },
+  ]);
+  const argvFile = join(cwd, "argv.txt");
+  const bin = fakePerk(cwd, { stdout: CREATE_JSON, argvFile });
+  const h = await loadPerkSession({
+    cwd,
+    sessionManager: SessionManager.open(file),
+    env: { PERK_BIN: bin },
+  });
+  try {
+    const result = await h.invokeTool("objective_save", {
+      prose: PROSE,
+      dream_report: dreamReportInput(),
+    });
+    const details = result.details as { ok: boolean; error?: string; error_type?: string };
+    assert.equal(details.ok, false);
+    assert.equal(details.error_type, "bad_state");
+    assert.match(details.error ?? "", /repository moved since the dream snapshot/);
+    assert.match(details.error ?? "", /re-run perk learn dream/);
+    assert.throws(() => readFileSync(argvFile, "utf8"), "no cold-door exec happened");
   } finally {
     h.dispose();
   }

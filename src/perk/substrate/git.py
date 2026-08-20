@@ -226,6 +226,23 @@ def tracked_paths(repo: Path, pathspecs: list[str]) -> list[str]:
     return [line for line in out.splitlines() if line]
 
 
+def index_flagged_paths(repo: Path) -> list[str]:
+    """Tracked paths whose index entry hides worktree changes from ``git status``: the
+    ``assume-unchanged`` bit (a lowercase ``ls-files -v`` tag) or the ``skip-worktree`` bit
+    (``S``/``s`` — sparse checkouts). ``[]`` when none.
+
+    Callers that prove snapshot cleanliness via ``status --porcelain`` must treat any flagged
+    path as unprovable — an edit under either bit stays invisible to status. Propagates
+    ``GitError`` (no silent pass).
+    """
+    out = _run(["ls-files", "-v"], cwd=repo)
+    flagged: list[str] = []
+    for line in out.splitlines():
+        if len(line) > 2 and (line[0] == "S" or line[0].islower()):
+            flagged.append(line[2:])
+    return flagged
+
+
 def ls_tree_names(repo: Path, ref: str, pathspec: str) -> list[str]:
     """The entry names under ``pathspec`` on ``ref`` (``git ls-tree --name-only``); ``[]`` if none.
 
@@ -591,12 +608,31 @@ def resolve_commit(repo: Path, ref: str) -> str | None:
 
     Peels tags/branches/short-hashes to a commit via ``rev-parse --verify --quiet <ref>^{commit}``;
     an unresolvable ref exits non-zero → GitError → None (LBYL, mirrors ``remote_ref_exists``).
+    Callers that must distinguish an unresolvable ref from a FAILED probe use
+    :func:`head_commit` instead — this helper deliberately folds both into ``None``.
     """
     try:
         out = _run(["rev-parse", "--verify", "--quiet", f"{ref}^{{commit}}"], cwd=repo)
     except GitError:
         return None
     return out.strip() or None
+
+
+def head_commit(repo: Path) -> str | None:
+    """The full commit SHA ``HEAD`` peels to, ``None`` for an UNBORN head — ``GitError`` otherwise.
+
+    The strict twin of :func:`resolve_commit` for the one ref where the two ``None`` causes need
+    different repair actions: a verification failure under ``--verify --quiet`` (exit 1 — no
+    commits yet, user-repairable) returns ``None``, while any other failure (not a repo, corrupt
+    object store, a probe that cannot run) raises ``GitError`` so callers fail closed instead of
+    misreporting a broken probe as "commit once".
+    """
+    proc = _run_capture(["rev-parse", "--verify", "--quiet", "HEAD^{commit}"], cwd=repo)
+    if proc.returncode == 0 and proc.stdout.strip():
+        return proc.stdout.strip()
+    if proc.returncode == 1:
+        return None
+    raise GitError(f"git rev-parse HEAD failed: {proc.stderr.strip() or f'exit {proc.returncode}'}")
 
 
 def merge_base(repo: Path, a: str, b: str) -> str | None:
