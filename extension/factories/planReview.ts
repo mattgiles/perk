@@ -37,8 +37,9 @@
 // never imported: doors value-import this module), and returns the NON-terminating
 // `wave_launched` result carrying the door guidance verbatim; the browser decision then routes
 // through the door's background decision task. Esc ⇒ the plain flavor (never a cancel); abort
-// outranks every dialog result; a null opener return (synchronous port-pick failure, loudly
-// reported in the core) falls open to the plain blocking review in the same call.
+// outranks every dialog result AND the awaited opener (an interrupted turn never reports a
+// launched wave); a null opener return (synchronous port-pick failure, loudly reported in the
+// core) falls open to the plain blocking review in the same call.
 //
 // `ctx.ui.editor` takes NO AbortSignal (unlike select/confirm/input) — `signal?.aborted` is
 // checked between dialogs; an in-flight editor dialog survives a turn abort and its result is
@@ -806,6 +807,10 @@ export async function executeObjectiveReview(
           artifactRaw: baseline.content,
           ...(choice.custom !== undefined ? { custom: choice.custom } : {}),
         });
+        // Abort outranks the opener result too: a turn interrupted during the awaited open must
+        // never report a successful launch (the door's own bridge abort handling settles the
+        // background tasks and clears the primed surfaces).
+        if (sig?.aborted) return objectiveReviewOutcomeResult({ status: "aborted" });
         if (guidance !== null) return waveLaunchedResult(OBJECTIVE_SUBJECT, guidance);
         // null = the synchronous port-pick failure (already loudly reported inside the core) —
         // fall open to the plain blocking review in the same call: the review never wedges.
@@ -1117,6 +1122,10 @@ export async function executePlanReview(
           draft: src.plan,
           ...(choice.custom !== undefined ? { custom: choice.custom } : {}),
         });
+        // Abort outranks the opener result too: a turn interrupted during the awaited open must
+        // never report a successful launch (the door's own bridge abort handling settles the
+        // background tasks and clears the primed surfaces).
+        if (sig?.aborted) return reviewOutcomeResult({ status: "aborted" });
         if (guidance !== null) return waveLaunchedResult(PLAN_SUBJECT, guidance);
         // null = the synchronous port-pick failure (already loudly reported inside the core) —
         // fall open to the plain blocking review in the same call: the review never wedges.

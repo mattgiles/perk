@@ -3697,9 +3697,10 @@ one-stop current shape.
   captured **before** the validated read — the door's fail-closed stale-guard ordering) — an
   in-TUI chooser is shown BEFORE anything launches: "Browser review + reviewer wave" vs
   "Browser review only". Shown **every** eligible round (no config key); Esc/dismiss selects the
-  plain flavor (the chooser picks a flavor, never cancels the review); **abort outranks Esc and
-  every dialog result** (`signal?.aborted` is checked at entry and re-checked immediately after
-  each awaited dialog, before interpreting it). The wave choice collects an optional **trimmed**
+  plain flavor (the chooser picks a flavor, never cancels the review); **abort outranks Esc,
+  every dialog result, and the awaited opener** (`signal?.aborted` is checked at entry,
+  re-checked immediately after each awaited dialog before interpreting it, and re-checked after
+  the awaited open core — an interrupted turn never reports a launched wave). The wave choice collects an optional **trimmed**
   custom review angle (Esc/blank ⇒ none) and delegates to the door-shared open core
   (`openPlanReviewSurface` / `openObjectiveReviewSurface`), returning the **non-terminating**
   `details.status: "wave_launched"` result (`subject: "objective"` on the objective arm)

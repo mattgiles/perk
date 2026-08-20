@@ -181,8 +181,9 @@ pasted draft text from the model. The shared companion tools are:
   *Non-terminating.*
 - **`plan_review`** — process the human decision through the normal approval/denial/save seams.
   It terminates on a successful approval-driven save and otherwise leaves the session available
-  for revision or recovery. On the Plannotator provider, an eligible call (a validated plan or
-  objective draft artifact) first opens an in-TUI launch chooser — browser review **with** the
+  for revision or recovery. On the Plannotator provider, an eligible call — the Plannotator
+  extension actually loaded (the presence probe) plus a validated plan or objective draft
+  artifact — first opens an in-TUI launch chooser — browser review **with** the
   reviewer wave or **without** it (Esc chooses without; the review always proceeds). Choosing
   the wave asks for an optional custom review angle, opens the same browser flow as the matching
   door below, and returns wave guidance (`wave_launched`) instead of blocking; the browser

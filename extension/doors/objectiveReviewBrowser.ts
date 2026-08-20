@@ -330,8 +330,10 @@ export async function routeObjectiveReviewDecision(
  * RETURN the composed guidance string (template + the `command:objective-review-browser`
  * binding suffix) — the caller decides how to deliver it (the door wrapper injects it via
  * `sendUserMessage`; `plan_review`'s wave arm returns it as a non-terminating tool result,
- * contracts.md §8.23). Returns `null` on the synchronous port-pick failure arm (loudly reported
- * here — the caller falls back). While plannotator sets up, its in-process `console.error`
+ * contracts.md §8.23). Returns `null` on the synchronous port-pick failure arm — loudly
+ * reported here, then CALLER-handled: the door wrapper simply injects nothing (the report
+ * already spoke), while `plan_review`'s wave arm — the one fallback caller — falls open to the
+ * plain blocking review. While plannotator sets up, its in-process `console.error`
  * chatter re-routes through the TUI-safe report() seam (the debounce restores once setup goes
  * quiet, with the `finally` as a backstop). `deps` is the injectable browser-open seam (tests
  * drive a fake port picker/probe/clock). `rendered` is the reviewed markdown; `artifactRaw` is
