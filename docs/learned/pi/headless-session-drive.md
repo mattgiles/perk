@@ -256,9 +256,6 @@ the corrections are the durable knowledge.
     `subagent` tool directly and the failure was **silent**: the model idled without its tools
     and burned the whole budget — which is why the worker's post-bind terminating-tool preflight
     (`extension/worker/worker.ts`) fails fast instead).
-- **The real runtime resolves an API key even for a faux provider** — seed `AuthStorage.inMemory`
-  with a dummy key for the faux provider id (the structured-output path sidesteps this; the full
-  runtime does not).
 - **Injected `eventSink` and the default NDJSON file sink are mutually exclusive per drive** — to
   assert both the in-process stream and the on-disk NDJSON, drive the scenario twice.
 

@@ -38,16 +38,13 @@ double-load is pi discovery behavior and remains.
 
 ## Bash allowlist in read-only plan sessions
 
-`extension/substrate/toolGating.ts` `SAFE_PATTERNS` restricts bash in read-only (`mode: read-only`) sessions
-to:
-
-```
-cd / cat / head / tail / grep / find / ls
-git status | git log | git diff
-jq
-curl
-gh <issue|pr|repo|run|release|label> <view|list|diff|status|checks> | gh search … | gh auth status
-```
+The authoritative inventory of what bash passes in read-only (`mode: read-only`) sessions is
+**`SAFE_PATTERNS` in `extension/substrate/toolGating.ts`** — a far larger allowlist than any
+prose snapshot: read/inspect-only commands, scoped `git` and package-manager *metadata* queries,
+structural-search tools, `perk objective` read verbs, and `gh` query subcommands. **Never mirror
+the inventory into prose — it drifts** (this doc's own earlier snapshot did); extending it is the
+five-surface lockstep (see §"Allowlisting a read-only bash gate command is a five-surface
+lockstep" below).
 
 Since #485 the safe check is applied **per top-level segment**, not just to the leading command:
 `isReadOnlyBashCommand` splits the command into quote-aware top-level segments (on `;`/`&&`/`||`/`|`,
@@ -62,9 +59,9 @@ and **tightens** the model: a non-safe command *anywhere* in a compound command 
 `>>/dev/null`) before scanning — both discard output and write nothing to the filesystem. Redirects
 to a **real path** (`> file`, `&> file`, `>> file`) are *not* carved out and stay destructive.
 
-Excluded: `gh` mutating subcommands (create/edit/merge/close/comment/clone/…) **and `gh api`**
-(it can POST/PATCH — GET-vs-mutation by regex is fragile), `perk` (mutating subcommands), `npm`,
-`uv`, any write command. This is **intentional** — plan sessions must not mutate state.
+Excluded, in durable policy terms: mutating `gh` subcommands **and `gh api`** stay blocked
+(GET-vs-mutation by regex is fragile), as do `perk`'s mutating subcommands and every write
+command. This is **intentional** — plan sessions must not mutate state.
 Read-only `gh` *query* subcommands were allowlisted in #416 so the ambient AGENTS guidance
 ("GitHub access goes through `gh`") is followable in read-only sessions.
 
@@ -152,8 +149,9 @@ shape (landed exactly as planned, zero deviations):
    anchoring (e.g. `npx some-other-pkg` stays blocked) and the destructive-`>`-redirect veto (a
    `<cmd> > file` stays blocked even though the leading command is now safe).
 3. **`shared/contracts.md`** — amend the read-only-gate paragraph (same-turn contract discipline).
-4. **`docs/user-docs/reference/in-session.md`** — the **two** read-only-allowlist notes (near the
-   top + the later `READ_ONLY_TOOLS` note); both need updating.
+4. **`docs/user-docs/reference/in-session/model-tools.md`** — the §"Structural read-only gate"
+   explanation (`reference/in-session.md` is only the surface-map page; the gate explanation
+   lives in the model-tools reference).
 5. **This learned doc** — record the new entry as a command-keyed precedent.
 
 **Mechanism-choice lesson:** perk **cannot own `grep`** — it's a Pi builtin, not a perk-registered
