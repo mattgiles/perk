@@ -46,7 +46,12 @@ The plan seam must always produce perk's reviewed, canonical plan artifact.
   perk's read-only gate.
 - **`plannotator-plan` — AUGMENT.** perk retains `/plan`, authoring context, and the read-only gate,
   but vacates `--plan`, `Ctrl+Alt+P`, and the colliding startup handler. `planAdapterPlannotator`
-  sends the draft through `plan_review` to the browser. Approval without direct edits uses the
+  sends the draft through `plan_review` to the browser. On an eligible call (a validated plan or
+  objective draft artifact) `plan_review` first shows an in-TUI launch chooser — browser review
+  with or without the streamed reviewer wave (Esc = without; the review always proceeds); the
+  wave choice takes an optional custom angle, opens the `/plan-review-browser` /
+  `/objective-review-browser` flow, and returns non-blocking `wave_launched` guidance while the
+  browser decision routes back automatically. Approval without direct edits uses the
   ordinary approval/save seam. Approved plan direct edits are applied and the edited bytes saved;
   an unapplyable diff falls back to the original bytes with a warning. Approved objective or gist
   direct edits do not save: they return one revise round so the agent folds the edits into the

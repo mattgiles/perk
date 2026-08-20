@@ -3687,6 +3687,31 @@ one-stop current shape.
   (`ok:false` + `error`/`error_type` on unavailable / save-failed / bad_input / no_plan /
   no_objective_draft; `ok:true` on verdicts and the sanctioned fail-open skips), so `tool_outcome`
   run events classify it via `details.ok` rather than the `!isError` fallback.
+
+  **The launch chooser (the plannotator arms' wave opt-in).** The moment `plan_review`
+  dispatches to a plannotator arm on an **eligible** round — the injected `WaveLaunch` deps
+  present (the plannotator presence probe + the two door open cores, composed at the
+  `registerPlanReview` call site in `extension/index.ts`; the factory imports nothing from door
+  modules), plannotator loaded, and the review source a **validated draft artifact** (plan arm:
+  `source === "plan-draft"`; objective arm: a non-null raw `objective-draft.json` baseline
+  captured **before** the validated read — the door's fail-closed stale-guard ordering) — an
+  in-TUI chooser is shown BEFORE anything launches: "Browser review + reviewer wave" vs
+  "Browser review only". Shown **every** eligible round (no config key); Esc/dismiss selects the
+  plain flavor (the chooser picks a flavor, never cancels the review); **abort outranks Esc and
+  every dialog result** (`signal?.aborted` is checked at entry and re-checked immediately after
+  each awaited dialog, before interpreting it). The wave choice collects an optional **trimmed**
+  custom review angle (Esc/blank ⇒ none) and delegates to the door-shared open core
+  (`openPlanReviewSurface` / `openObjectiveReviewSurface`), returning the **non-terminating**
+  `details.status: "wave_launched"` result (`subject: "objective"` on the objective arm)
+  carrying the door's guidance **verbatim** — the model launches the wave in the same turn, and
+  the human's browser decision routes back through the door's background decision task (stale
+  guards, degrade token, untrusted-feedback delimiting — all the door's existing code, shared
+  not duplicated). A **synchronous port-pick failure** (a null core return, loudly reported
+  there) falls **open** to the plain blocking review in the same call; an **asynchronous**
+  readiness degrade follows the door's existing loud degrade path and recovers through the next
+  `plan_review` round's chooser ("Browser review only" is one keystroke away — no forced-wave
+  mode exists). Ineligible rounds — a param-tier source, plannotator absent, no injected deps,
+  or the gist arm (no gist wave door exists) — keep today's plain blocking review silently.
 - **The three backends.** All three speak review-first
   (`plan_draft` → `plan_review` → auto-save on approval):
 
@@ -3695,6 +3720,11 @@ one-stop current shape.
   | `perk-plan` | `PLAN_AUTHORING_CONTEXT` | first-party in-TUI review | present + `/plan-save` |
   | `plannotator-plan` | `PLAN_ADAPTER_PLANNOTATOR_CONTEXT` | browser bridge | present + `/plan-save` |
   | `tombell-plan` | `PLAN_ADAPTER_TOMBELL_CONTEXT` (conditioned injection, Node 2.6) | first-party in-TUI review | present + `/plan-save` (incl. tombell's own interactive `/plan` `setActiveTools` restriction arm) |
+
+  Under the plannotator selection the authoring context is **flavor-dispatched per stage** (one
+  customType, three contents — §8.42's per-flavor marker dedup): the plan flavor by default, the
+  **objective** flavor in **both** objective stages (`objective-author` **and** `objective-save`
+  — matching `plan_review`'s objective-arm stage routing), and the gist flavor in `gist-author`.
 
 - **Plannotator "Direct Edits" (browser edits of the reviewed document).** Plannotator's
   plan-review browser lets the reviewer edit the reviewed document directly; the edits arrive as
@@ -3757,6 +3787,13 @@ one-stop current shape.
     against a code-review server) → the prior env value ALWAYS restored when the poll ends. The
     URL is deterministic the moment the port is picked, so the door primes its companions and
     injects the guidance immediately, then ends its turn.
+  - **The shared open core:** the door's whole open path is the exported guidance-RETURNING
+    core `openPlanReviewSurface` (start the browser → prime both surfaces → the background
+    readiness + decision tasks → return the composed guidance string, or null on the loudly
+    reported port-pick failure); the command handler is a thin `sendUserMessage` wrapper, and
+    `plan_review`'s wave arm consumes the SAME core — one open path, byte-identical semantics
+    (the `applyPlannotatorDirectEdits` sharing precedent). The wave-arm guidance carries the
+    same `command:plan-review-browser` skill-binding suffix.
   - **The dual prime/clear lifecycle:** the moment the port is picked the door primes BOTH
     companion surfaces — `primeAnnotationSurface({mode: "plan", url})` (the `push_annotations`
     plan mode, §8.4) and `primeDraftReviewContext({draftType: "plan", draft, custom?})`
@@ -3848,6 +3885,11 @@ one-stop current shape.
     `plan-review` bridge action carries the rendered objective as `planContent` (arbitrary
     markdown bytes; no plan-specific validation). The door primes its companions and injects
     the guidance immediately, then ends its turn.
+  - **The shared open core:** identical — the exported guidance-RETURNING core
+    `openObjectiveReviewSurface` with the command handler as a thin `sendUserMessage` wrapper;
+    `plan_review`'s objective wave arm consumes the SAME core — one open path, byte-identical
+    semantics — and the wave-arm guidance carries the same `command:objective-review-browser`
+    skill-binding suffix.
   - **The dual prime/clear lifecycle:** identical — `primeAnnotationSurface({mode: "plan",
     url})` + `primeDraftReviewContext({draftType: "objective", draft: rendered, custom?})`;
     both cleared when the bridge settles AND on the readiness-degrade arm (idempotent).
@@ -4816,8 +4858,9 @@ nothing, the subset being shared).
   `prompts/contexts/adapters/` — with each module's identity marker passed as the `{{ marker }}`
   render var (never a template literal), so the marker the strip handler scans for cannot drift
   from the injected prose; the marker-as-render-var invariant now serves both the strip **and**
-  the dedup key (plannotator's two flavors share one customType but dedup per-flavor on their
-  distinct markers).
+  the dedup key (plannotator's three flavors — plan / objective / gist, the objective flavor
+  serving both objective stages — share one customType but dedup per-flavor on their distinct
+  markers).
 
 **Fail loudly on a missing var.** jinja2 uses `StrictUndefined` (raises `jinja2.UndefinedError`);
 the vendored `miniJinja` renderer matches it — a referenced name that is **absent OR non-string**
