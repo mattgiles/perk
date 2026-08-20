@@ -13,10 +13,12 @@ Approval is deliberately two-stage:
 1. the reviewed plan approved the bound routes, 91-shot matrix, pass protocols, contrast method,
    note shape, and defect policy;
 2. the final PR carries the rendered evidence in a
-   [durable SHA-pinned comment](PR_COMMENT_URL_PENDING), and merge is the approval of this record.
+   [durable SHA-pinned comment](https://github.com/mattgiles/perk/pull/1917#issuecomment-5349696465),
+   and merge is the approval of this record.
 
 The screenshots and disposable scripts follow the earlier evidence-delivery mechanism: they are
-committed under `docs/planning/evidence-1898-3.1/` at `EVIDENCE_SHA_PENDING` so the PR comment can
+committed under `docs/planning/evidence-1898-3.1/` at
+`e101a3f82502e1a43be4b2e78b392ecbffd59a73` so the PR comment can
 link immutable raw files, then the directory is removed by the final pre-merge commit. The merged
 tree contains this note and its `docs/index.md` row, with zero evidence binaries and zero disposable
 scripts.
@@ -38,7 +40,7 @@ have happened.
 | Date | 2026-08-19 local (`2026-08-20T00:19:47Z` final capture timestamp) |
 | Operator/executor | Operator-settled protocol; implementing agent executed the scripted and manual sweeps |
 | Trunk SHA | `0b7ca80053bf7650fdc0a9c07c4ced38af9cda71` |
-| PR evidence SHA | `EVIDENCE_SHA_PENDING` (the commit containing the disposable evidence directory) |
+| PR evidence SHA | `e101a3f82502e1a43be4b2e78b392ecbffd59a73` (the commit containing the disposable evidence directory) |
 | Platform | macOS 26.5 arm64 |
 | Browser | Google Chrome 151.0.7922.140, headless CDP |
 | Toolchain | Node v26.3.0; npm 11.16.0; Astro 7.2.1; Starlight 0.41.7 |
@@ -58,8 +60,9 @@ Every base-row assertion checked route identity, forced theme, loaded local font
 0px page overflow, and (on home) the expected enhanced disclosure state. All 91 final PNGs were
 reviewed as contact sheets and representative full-resolution images; compositions, shell modes,
 contained tables/code, source-order linearization, and light/dark finish agreed with the blueprint.
-The [durable PR comment](PR_COMMENT_URL_PENDING) carries galleries grouped by page/state and raw
-links pinned to `EVIDENCE_SHA_PENDING`.
+The [durable PR comment](https://github.com/mattgiles/perk/pull/1917#issuecomment-5349696465)
+carries galleries grouped by page/state and raw links pinned to
+`e101a3f82502e1a43be4b2e78b392ecbffd59a73`.
 
 | # | Shot | Route/state | Theme | Width | Result | Assertion |
 |---:|---|---|---|---:|---|---|

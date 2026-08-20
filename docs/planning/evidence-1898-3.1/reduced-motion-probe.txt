@@ -1,9 +1,0 @@
-Reduced-motion computed-style probe
-Emulation: prefers-reduced-motion: reduce
-Threshold: every transition-duration <= 0.1ms
-
-/  .perk-band .sl-link-card  count=4  duration=1e-05s  max=0.01ms  PASS
-/  .hero .sl-link-button  count=2  duration=1e-05s  max=0.01ms  PASS
-/tutorials/  .perk-recommended li  count=2  duration=1e-05s  max=0.01ms  PASS
-
-Verdict: PASS
