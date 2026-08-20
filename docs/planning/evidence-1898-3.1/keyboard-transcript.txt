@@ -1,0 +1,28 @@
+Keyboard-only hardening pass
+URL: http://localhost:4323/
+Driver: CDP Input.dispatchKeyEvent only (Tab, Shift-Tab, Enter, Space, Escape)
+
+Tab 5: hero-action — Get started
+Tab 6: hero-action — Understand the workflow
+Tab 8: tooltip-trigger — ○ plan — tooltip visible
+Escape: plan tooltip dismissed; focus remained on the plan trigger; latch held
+Shift-Tab → Section titled “The workflow”; Tab → plan: focus intent dropped/re-established and tooltip reappeared
+Tab 9: tooltip-trigger — ○ save — tooltip visible
+Tab 10: tooltip-trigger — ▸ implement (current) — tooltip visible
+Tab 11: tooltip-trigger — ○ submit — tooltip visible
+Tab 12: tooltip-trigger — ◇ address — tooltip visible
+Tab 13: tooltip-trigger — ○ land — tooltip visible
+Tab 14: tooltip-trigger — ○ learn — tooltip visible
+Tab 15: summary — gist authoring problem statements — plan → save
+Enter: summary 1 opened and closed independently; peers stayed unchanged
+Tab 16: summary — objective authoring plans of plans — plan → save
+Space: summary 2 opened and closed independently; peers stayed unchanged
+Tab 17: summary — docs/learned the durable learned-docs cache
+Enter: summary 3 opened and closed independently; peers stayed unchanged
+Space: summary 3 reopened so its two cache tooltip buttons entered the Tab order
+Tab 18: tooltip-trigger — ↻ harvest → objective authoring — tooltip visible
+Tab 19: tooltip-trigger — ↻ dreaming — corpus self-curation — tooltip visible
+
+Counts: 2 hero actions; 9 tooltip buttons; 3 summaries; relevant controls reached in source order (0 → 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8 → 9 → 10 → 11 → 12 → 13).
+Shift-Tab reverse walk: left the figure after 12 stops at “Section titled “The workflow””; no focus trap.
+Verdict: PASS

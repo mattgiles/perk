@@ -1,0 +1,12 @@
+theme  pair                     fg       bg       ratio  AA
+-----  -----------------------  -------  -------  -----  ----
+light  text/accent-low          #18201d  #d9efe7  13.81  PASS
+light  muted/accent-low         #5f6b66  #d9efe7  4.61   PASS
+light  accent/accent-low        #126e5a  #d9efe7  5.13   PASS
+light  text-invert/accent-high  #ffffff  #0a5646  8.63   PASS
+dark   text/accent-low          #f1f5f0  #17382e  11.61  PASS
+dark   muted/accent-low         #aab6af  #17382e  6.10   PASS
+dark   accent/accent-low        #63d5b0  #17382e  7.11   PASS
+dark   text-invert/accent-high  #101512  #8be4c4  12.30  PASS
+
+Verdict: PASS (8/8 live pairs agree with §12 to 2 decimals)
