@@ -1,6 +1,6 @@
 ---
 title: The ObjectiveStore seam — splitting an objective tier off IssueBackend
-read_when: You are touching `perk/backends/objective_store.py`, its GitHub/Linear stores, an objective-storage consumer, the node↔plan unification protocol, objective replan/supersede, or Protocol growth.
+read_when: You are touching `src/perk/backends/objective_store.py`, its GitHub/Linear stores, an objective-storage consumer, the node↔plan unification protocol, objective replan/supersede, or Protocol growth.
 cluster: objective-system
 ---
 
@@ -8,13 +8,16 @@ cluster: objective-system
 
 Objective #548 carved the **objective-storage tier** out of `IssueBackend` into its own
 backend-neutral Protocol — the parallel split to the issue tier (`issue-backend.md`). The contract
-lives in `perk/backends/objective_store.py` (the `Protocol`, frozen result dataclasses, the
-`ObjectiveStoreError` type); the concrete stores now live in the backend packages
-(`perk/backends/github/objective_store.py`, `perk/backends/linear/objectives.py`) and the resolver
-in `perk/backends/resolve.py` (all originally one *perk/backends/objective_stores.py*, since
-carved apart). This doc preserves the patterns that generalize the
-issue-backend extraction to a second tier off the same monolith, plus the Phase-3 node↔plan
-unification protocol.
+lives in `src/perk/backends/objective_store.py` (the `Protocol`, frozen result dataclasses, the
+`ObjectiveStoreError` type); the concrete stores live in the backend packages —
+`src/perk/backends/github/objective_store.py`, and on Linear the **live project-backed
+`LinearProjectObjectiveStore`** in `src/perk/backends/linear/project_store.py` (what
+`resolve_objective_store` constructs on the Linear arm) alongside the **dormant issue-backed
+`LinearObjectiveStore`** in `src/perk/backends/linear/objectives.py` (self-labeled dormant, not
+resolver-wired); the resolver is `src/perk/backends/resolve.py` (all originally one
+*perk/backends/objective_stores.py*, since carved apart). This doc preserves the patterns that
+generalize the issue-backend extraction to a second tier off the same monolith, plus the Phase-3
+node↔plan unification protocol.
 
 ## Distillation
 
@@ -35,6 +38,12 @@ unification protocol.
 - Scripted node-linked plan saves must mint a fresh run id per node — the ambient run id
   triggers the same-run-id upsert that rewrites the previous plan in place — "The same-run-id
   upsert trap".
+- `find_open_objective_by_origin` is exhaustive-or-raise (§8.24): never silently under-scan; the
+  dormant store raises rather than returning a falsely-authoritative `None` — "The origin
+  lookup — exhaustive-or-raise".
+- The reviewed dream report persists as marker-keyed companion comments on the objective's
+  `journal_carrier_id`, with the `dream_report` header reference recorded LAST as the completion
+  marker — "The dream-companion flow".
 - Historical: the node-numbered growth narratives (Phase-4 protocol growth, the manifest/doctor
   design arcs, adoption growth) chronicle landed work.
 
@@ -160,7 +169,7 @@ both issue-backed stores objective id == issue id, so it was behaviorally identi
 ## The objective-tier source-scan guard mirrors the issue-tier one
 
 The new objective-tier guard asserts no production module outside `objective_stores.py` /
-`perk/github/` calls the objective gateway functions. When you add it you **MUST move those
+`src/perk/github/` calls the objective gateway functions. When you add it you **MUST move those
 functions OUT of the issue-tier guard's function set**, else the old scan flags the new module.
 Static conformance is one ty-checked annotated binding per store (a protocol-annotated local bound
 to the concrete instance).
@@ -274,7 +283,8 @@ detect drift = `diff(manifest, observed)`, repair only the safe/unambiguous case
 
 ### The manifest pattern (structural identity, not live state)
 
-The `objective-manifest` block (primitives in `perk/objective.py`) pins each node's
+The `objective-manifest` block (primitives in the `src/perk/objective/` package, `manifest.py`)
+pins each node's
 **id/slug/description + explicit `depends_on` (always a list)** plus a `phases` map of pinned
 milestone names. `status`/`pr` are **deliberately excluded** — they are live/observed, not identity.
 Parsing is **three-state**: absent / malformed / valid. The block lives in the overview **between**
@@ -284,7 +294,7 @@ surface), extending the `save_node_plan→None` / `post_status_update→False` n
 
 ### Pure engine split
 
-`perk/objective/drift.py` is fully **offline** (no network/clock/Click): the **store** builds an
+`src/perk/objective/drift.py` is fully **offline** (no network/clock/Click): the **store** builds an
 observed snapshot (the one network step), then the pure `detect_drift` returns a report of conditions
 each carrying a stable **code / severity / target / `repairable` flag**. The test suite is one case
 per code; a **malformed or absent manifest short-circuits** (no baseline to diff).
@@ -404,6 +414,44 @@ The flip side of `plan_save` being a `run_id`-keyed upsert:
 (`None` = "no project surface" / "doesn't adopt"); `dry_run → None` falls through to the offline
 compose-preview. (See `in-place-adoption.md` for the full adoption story.)
 
+## The origin lookup — exhaustive-or-raise
+
+`ObjectiveStore.find_open_objective_by_origin(origin, exclude_run_id=None)` answers "is an open
+objective with this origin already live?" under the **exhaustive-or-raise** posture (§8.24): a
+store never silently under-scans. Infra failure raises; a present-but-malformed header raises; an
+off-vocabulary origin raises via the closed `ObjectiveOrigin` vocabulary
+(`src/perk/objective/_models.py`) and the fail-closed `origin_value` classifier
+(`src/perk/objective/parse.py`); only an absent or *different* origin is a skip. Each store
+enumerates its full open population: GitHub is an all-pages label scan; the Linear project store
+is a team-scoped sentinel sweep; and the **dormant issue-backed store RAISES** — a deliberate
+break from the `→None` no-op family, because `None` here would falsely assert
+authoritatively-none and silently open a fail-closed guard.
+
+Two consumers, distinguished by `exclude_run_id`:
+
+- **The pre-launch active-origin guard** (`src/perk/cli/commands/learn/dream_cmd.py`) enforces
+  one open learn-dream objective per repo with `exclude_run_id=None`, failing closed on an
+  unanswerable lookup (`origin_lookup_failed` / `origin_conflict`).
+- **The save-time conflict re-check** (`src/perk/cli/commands/objective/create_cmd.py`) passes
+  `exclude_run_id=resolved_run_id` — the caller-exclusion that makes a single-ref API sound for
+  conflict checks: excluding its own run means any returned ref IS a conflict.
+
+## The dream-companion flow
+
+The reviewed dream report persists as marker-keyed companion comments on the objective's report
+carrier — `ObjectiveStore.journal_carrier_id` (GitHub = the objective issue itself; Linear = the
+project metadata sentinel issue). The backend-neutral core is `src/perk/learn/dream_companion.py`
+(contracts §8.64): the marker grammar, the part-invariance + size rule, the run-scoped
+`DREAM_REPORT_TRANSFER_FILENAME` extension→door transfer, and the convergent `persist_parts`.
+
+The save ordering in `src/perk/cli/commands/objective/create_cmd.py::_converge_dream_companion`
+is: strict transfer validation (`_read_dream_transfer`: run-id match, requires the run-scoped
+dream manifest, part-invariance violations refuse) → `persist_parts` →
+`resolve.publish_dream_artifact` (a Linear-only artifact upload; GitHub no-ops — the no-op family
+again) → record the `dream_report` header reference **last** (§8.64's convergent ordering — the
+header ref is the completion marker, so an interrupted save converges on retry). The Linear
+sentinel/attachment mechanics live in `linear-backend.md` — point, don't restate.
+
 ## Deferred-doc staleness is intentional, tracked
 
 A code-only extraction node deliberately leaves the contract/module-docstring prose stale for the
@@ -414,9 +462,10 @@ reconcile via outcomes" discipline). The reconcile pass also disambiguated the l
 
 ## Cross-references
 
-- `perk/backends/objective_store.py` — the contract module
-- `perk/backends/github/objective_store.py`, `perk/backends/linear/objectives.py` — the concrete
-  stores; `perk/backends/resolve.py` — the resolver
+- `src/perk/backends/objective_store.py` — the contract module
+- `src/perk/backends/github/objective_store.py`, `src/perk/backends/linear/project_store.py` (the
+  live project-backed store), `src/perk/backends/linear/objectives.py` (dormant) — the concrete
+  stores; `src/perk/backends/resolve.py` — the resolver
 - `docs/learned/workflow/issue-backend.md` — the parallel issue-tier split off the same monolith
 - `docs/learned/workflow/linear-backend.md` — the Linear facade refactor + the project-backed store
 - `docs/learned/workflow/objective-lifecycle.md` — objective node status + the supervisor loop

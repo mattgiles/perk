@@ -56,7 +56,9 @@ or an atomic commit — never leave a transient state that only a skippable down
 
 ### Atomic commit detail
 
-`github.update_objective_node` accepts `status` **and** `pr` in one call, so the backlink +
+The `ObjectiveStore.update_objective_node` method accepts `status` **and** `pr` in one call
+(plan-save calls `store.update_objective_node` in `src/perk/cli/commands/plan/save_cmd.py`; the
+GitHub gateway impl lives in `src/perk/backends/github/objectives.py`), so the backlink +
 `planning → in_progress` advance is a **single write** inside `plan-save` (threaded via `--node-id` +
 the warm tool's `node_id`). It is fail-open + non-fatal + idempotent on re-save — mirrors
 `_reconcile_objective_on_land`'s fail-open posture (the durable artifact already exists, never raise
@@ -65,7 +67,8 @@ after it).
 ### Pending-first selection over live claims
 
 `next_plannable()` prefers **pending** nodes over resumable `planning` claims (the claim set is
-`resumable_claims()` in `perk/objective.py`), so parallel plan sessions don't steal each other's
+`DependencyGraph.resumable_claims()` in the `src/perk/objective/` package — `_models.py`,
+facade-re-exported via `perk.objective`), so parallel plan sessions don't steal each other's
 claims while pending work exists. The fallback resume can still "steal" a live claim when it's the
 *only* plannable node — `objective show`'s `claims:` line / the `resumable_claims` JSON field is
 the coordination surface for humans running sessions in parallel. There are still **no lease
@@ -111,10 +114,14 @@ durable plan schema didn't need widening.
 
 **Residual risk:** a transient link failure on save (issue created, `update_objective_node` fails)
 leaves the node `planning`+`pr=null` → *resumable*, so a fresh run could author a **second** plan for
-it. Mitigated by a loud stderr warning + idempotent re-save; the real fix (deterministic node-claim
-via an `active_objective_node` workflow-state field) is deliberately out of scope. The cold
-`objective-plan` door does **not** set `active_objective` in session today, which is why `node_id`
-stays model-passed (symmetric with `objective_id`) rather than session-state-derived.
+it. Mitigated by a loud stderr warning + idempotent re-save; at the time, the real fix (a
+deterministic node-claim via a workflow-state field) was deliberately out of scope.
+
+> **Update (the deterministic node-claim shipped):** the claim carrier now exists as
+> `objective_node_claim` on workflow state (`extension/substrate/workflowState.ts`). The planning
+> claim recorded in-session is what the approval-driven save reads — explicit tool-arg ids win
+> outright — and the claim clears on a successful save (`extension/factories/planSave.ts`). The
+> residual-risk narrative above is the history that motivated it.
 
 ## The "design-only node" pattern (#609)
 
@@ -218,10 +225,14 @@ artifact, `plan_review` renders + reviews it, and an APPROVED verdict auto-saves
 `objectiveApprovalSave` seam. The artifact mechanics worth preserving:
 
 - **Store-as-JSON, render-at-the-door.** `objective_draft` writes a JSON artifact
-  (`{schema_version: 1, title?, prose, roadmap}`); the digest is computed over the **serialized
-  JSON**, not the prose; and the roadmap rides verbatim as `unknown[]` — node-shape validation
-  stays with the Python plane at save time. JSON is storage/transport only; the human review
-  surface renders markdown from it.
+  (`{schema_version: 1, title?, prose, roadmap, base?, delivery?, dream_report?}` — the optional
+  reviewed `base` (target branch), the reviewed `delivery` choice (§8.45; a shared enum property
+  keeps `objective_draft` and `objective_save` from drifting), and the gated `dream_report` block
+  (§8.63 — `resolveDreamReportGate` validates at draft-write time; the approval save re-reads the
+  artifact and forwards the block, `extension/factories/objectiveSave.ts`)); the digest is
+  computed over the **serialized JSON**, not the prose; and the roadmap rides verbatim as
+  `unknown[]` — node-shape validation stays with the Python plane at save time. JSON is
+  storage/transport only; the human review surface renders markdown from it.
 - **Renderers live with the artifact owner, not the consumer.** `extension/factories/objectiveDraft.ts`
   exports both the reader (`readObjectiveDraft` — fail-open validation, warn+null on bad
   JSON/shape/schema_version/blank prose) and the markdown renderer (`renderObjectiveDraft`).
@@ -287,7 +298,7 @@ Frame both as the **"don't author fiction for an unbuilt path"** discipline appl
 ### In-flight classification is the shared pure classifier, not supervisor-inline logic
 
 The supervisor no longer classifies inline. In-flight nodes delegate to
-`resume.resolve_next_action` (`perk/run/resume.py`) — the shared pure classifier spec'd by
+`resume.resolve_next_action` (`src/perk/run/resume.py`) — the shared pure classifier spec'd by
 contracts.md **§8.37** and shared verbatim with `perk plan resume`; §8.20 now carries only the
 verdict→action mapping. The classifier returns the seven-verdict `NextAction` StrEnum
 (`implement` / `address` / `learn` / `ready_for_review` / `awaiting_review` / `pr_closed` /
@@ -300,7 +311,7 @@ canonical state identically — is pinned by `tests/test_next_action_parity.py`.
 - **PR existence is the implement-done signal.** No PR → `implement`; a **draft** PR means
   implement is *complete* → `ready_for_review` (never re-dispatch implement from a draft, and no
   feedback fetch on that arm).
-- **`needs_address` moved into the classifier module** (same `perk/run/resume.py`): open non-draft
+- **`needs_address` moved into the classifier module** (same `src/perk/run/resume.py`): open non-draft
   PRs classify `address` when it fires, else `awaiting_review`. Latest-review-*per-author*
   tie-break via ISO-8601 string compare with `>=` (`None` sorts oldest); `COMMENTED`/`APPROVED`
   reviews and discussion comments are **never** triggers — only an unresolved thread or a
@@ -336,10 +347,13 @@ existing `plan_required` fallback on a malformed/non-numeric id.
 
 ## Cross-references
 
-- `perk/objective.py` — `DependencyGraph` (`plannable_nodes`, `next_plannable`, `resumable_claims`,
-  `classify_for_planning`, `PlanSelection`)
-- `perk/cli/commands/objective/run_cmd.py` — the `perk objective run` supervisor
-- `perk/run/resume.py` — `resolve_next_action` + `NextAction` + `needs_address` (the shared classifier)
+- the `src/perk/objective/` package — `DependencyGraph`/`PlanSelection` in `_models.py`
+  (`plannable_nodes`, `next_plannable`, `resumable_claims`, `classify_for_planning`); the graph
+  constructors and `delivery_order`/`validate_stacked_roadmap` in `graph.py`; all
+  facade-re-exported via `perk.objective`
+- `src/perk/cli/commands/objective/run_cmd.py` — the `perk objective run` supervisor
+- `src/perk/run/resume.py` — `resolve_next_action` + `NextAction` + `needs_address` (the shared
+  classifier)
 - `docs/learned/workflow/cold-door-launch.md` — the composition + testing mechanics the supervisor relies on
 - `shared/contracts.md` §8.20 — the capstone supervisor loop contract (verdict→action mapping);
   §8.37 — the shared classifier spec (parity pinned by `tests/test_next_action_parity.py`)
