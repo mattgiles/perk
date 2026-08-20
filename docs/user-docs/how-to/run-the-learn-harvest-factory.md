@@ -48,8 +48,8 @@ re-run, never a whole-corpus direct read.
 
 ## Related
 
-- **Do:** [How to author an objective roadmap](author-a-roadmap.md) — the hand-authored path to the
-  same objective shape.
+- **Do:** [How to run the learn-dream factory](run-the-learn-dream-factory.md) — the whole-corpus
+  inward audit that curates the corpus itself.
 - **Do:** [How to run the learn-docs factory](run-the-learn-docs-factory.md) — grow the
   docs/learned corpus harvest mines.
 - **Look up:** [Objectives — the roadmap model](../reference/objectives.md) — what the curated

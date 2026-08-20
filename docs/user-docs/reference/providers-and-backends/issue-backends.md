@@ -200,7 +200,10 @@ metadata sentinel issue. On Linear the rendered report is additionally uploaded 
 file asset and linked in the Project's **Resources** as `Dream report (<run_id>)`, so humans never
 have to read the sentinel. The `objective-header` records the carrier's id under `dream_report`.
 The save is convergent: re-running it never duplicates or rewrites a part — a changed part fails
-loudly instead.
+loudly instead. Both backends also implement the shared open-objective-by-origin lookup behind
+the one-open-dream-objective guard — with one scope caveat: GitHub sweeps the repo's whole open
+`perk:objective` population (per-repo), while Linear is **team-scoped** in v1, so two repos
+sharing one Linear team share the guard.
 
 One narrow Linear failure window is documented rather than closed: if the save crashes after the
 Project is created but **before** its metadata sentinel exists, that Project is invisible to
