@@ -6,11 +6,14 @@ cluster: backends-and-integrations
 
 # The IssueBackend seam
 
-Objective #252 nodes 1.1/1.2 carved the backend-neutral issue tier: `perk/backends/issue_backend.py` (the
-protocol module — error type, frozen dataclasses, the 21-method `IssueBackend` Protocol) and
-the `GitHubIssueBackend` adapter (now `perk/backends/github/backend.py`) + `resolve_issue_backend`
-(now `perk/backends/resolve.py`; both originally one *perk/backends/issues.py*, since carved into the
-`perk/backends/github/` package). All 21 issue-tier consumers route through the resolver. This doc preserves the patterns, enforcement, and residuals.
+Objective #252 nodes 1.1/1.2 carved the backend-neutral issue tier: `src/perk/backends/issue_backend.py`
+(the protocol module — error type, frozen dataclasses, the `IssueBackend` Protocol + its `backend_id`
+attribute) and the `GitHubIssueBackend` adapter (`src/perk/backends/github/backend.py`), which
+delegates into the plan/issue substrate `src/perk/backends/github/plans.py`, + `resolve_issue_backend`
+(`src/perk/backends/resolve.py`; adapter and resolver were originally one *perk/backends/issues.py*,
+since carved into the `src/perk/backends/github/` package). Consumers reach the tier only through the
+resolver, enforced by the substrate-import scan (`tests/test_resolve.py::TestConsumerBoundary`). This
+doc preserves the patterns, enforcement, and residuals.
 
 ## Distillation
 
@@ -38,34 +41,39 @@ the `GitHubIssueBackend` adapter (now `perk/backends/github/backend.py`) + `reso
 
 ## Protocol-module shape
 
-`perk/run/runner.py` is the in-repo template for a contract module: module docstring + error type +
-frozen dataclasses + a plain `Protocol`, all in one module. `perk/backends/issue_backend.py` followed it;
+`src/perk/run/runner.py` is the in-repo template for a contract module: module docstring + error type +
+frozen dataclasses + a plain `Protocol`, all in one module. `src/perk/backends/issue_backend.py` followed it;
 future contract modules should too.
 
 - **Static conformance via one annotated binding per implementation**: a function returning the
   protocol type with the concrete instance bound to a protocol-annotated local makes ty fail CI on
   any implementation↔protocol drift. No `@runtime_checkable`, no isinstance — one annotated
-  binding per backend is the whole conformance suite.
+  binding per backend is the whole conformance suite. The current bindings are
+  `tests/test_issue_backend.py::_make_backend` (`_FakeBackend`),
+  `tests/test_github_backend.py::_make_backend` (`GitHubIssueBackend`), and `tests/_linear_fakes.py`
+  (`LinearIssueBackend`) — together with the protocol module itself, they own the census of what
+  the Protocol carries; this doc deliberately restates no method count.
 - **Extraction-style plans should carry an explicit rename table** (old gateway name → protocol
   name, parameter re-typings, finder splits) — that level of specificity made nodes 1.1/1.2
   mechanical.
 
 ## Late-bound delegation over a heavily-monkeypatched substrate
 
-`GitHubIssueBackend` resolves every delegate via **attribute access on the `github` module object
-at call time**, so the ~94 existing `monkeypatch.setattr(github, ...)` fixtures keep intercepting
-unchanged — even patches applied *after* backend construction. A dedicated late-binding test
-(`tests/test_github_backend.py`) pins this guarantee; refactoring the adapter to bound-method references
-would **silently break the entire suite's fixtures**.
+`GitHubIssueBackend` resolves every delegate via **attribute access on the `plans` module object
+(`perk.backends.github.plans`) at call time**, so the suite's `monkeypatch.setattr(plans, ...)`
+fixtures keep intercepting unchanged — even patches applied *after* backend construction, pinned by
+`tests/test_github_backend.py::TestLateBinding::test_patch_after_construction_still_intercepts`.
+Refactoring the adapter to bound-method references would **silently break the entire suite's
+fixtures**.
 
-The issue-tier function bodies deliberately remain in `github.py` as the backend's private
-substrate. A physical move stays possible but is only worth the fixture churn once a second
-backend exists and the fixtures migrate to a Fake backend (Node 4.1).
+The physical move happened: the issue-tier function bodies live in
+`src/perk/backends/github/plans.py` (the GitHub backend's private substrate), and the late-binding
+guarantee moved with them.
 
 ## Two-shape fixture rule after a seam re-type
 
-- Tests feeding **monkeypatched gateway fakes** return the *native* gateway shape (the `github.py`
-  dataclasses) — the adapter does the conversion, never the fake.
+- Tests feeding **monkeypatched gateway fakes** return the *native* gateway shape (the substrate
+  dataclasses in `src/perk/backends/github/plans.py`) — the adapter does the conversion, never the fake.
 - Tests of **consumer-internal pure logic** construct the *neutral* protocol shape directly.
 
 `tests/test_resume.py` has the paired-helper precedent (a native-state helper alongside a
@@ -73,17 +81,22 @@ neutral-state helper).
 
 ## Boundary + import-direction enforcement
 
-- **Source-scan boundary test** (`tests/test_resolve.py`): no module under `perk/` except
-  the `perk/backends/github/` package and the `perk/github/` package may call the 21 issue-tier gateway
-  functions. New production code reaches the issue tier via the resolver in `perk/backends/resolve.py`.
-  - **The allowed-set now includes `objective_stores.py`** because `GitHubObjectiveStore.close_objective`
-    legitimately calls the issue-close primitive directly (a GitHub objective IS an issue). Note the
-    asymmetry: the *objective*-tier guard owns a **different** function set and does NOT include the
-    issue-close primitive, so a cross-tier call like this fires the issue-tier guard, not the
-    objective-tier one — know which guard owns which set (see `objective-store.md`).
-- **The import-direction guards are *substring* assertions over file text**, so they bite
-  docstrings and comments too: `perk/github/` prose cannot even *mention* the resolver's name or
-  the protocol module's name. Phrase around it ("the resolver in the issues module") or loosen the
+- **Substrate-import boundary test**
+  (`tests/test_resolve.py::TestConsumerBoundary::test_no_production_module_imports_the_substrate_directly`):
+  an **import** scan, not a per-function-call scan — no module under `src/perk/` outside the
+  `src/perk/backends/github/` package may import the substrate modules (`SUBSTRATE_MODULES` =
+  `perk.backends.github.plans` + `perk.backends.github.objectives`). Production reaches
+  issue/objective ops through `resolve.resolve_issue_backend` / `resolve.resolve_objective_store`;
+  one test covers **both** tiers.
+  - **No allowlist special-case remains**: `GitHubObjectiveStore.close_objective` legitimately
+    calls `plans.close_issue` directly (a GitHub objective IS an issue), and it does so from
+    *inside* the allowed package — the whole backend package is the allowed set (see
+    `objective-store.md`).
+- **The import-direction guards are *substring* assertions over raw source text**
+  (`tests/test_issue_backend.py::TestImportDirection`), so they bite docstrings and comments too:
+  `src/perk/github/` source must not contain `issue_backend`, a dotted `perk.backends` path, or
+  `perk.delivery` — slash-form prose references are the sanctioned phrasing, per the test's own
+  comment. Phrase around the forbidden spellings ("the issue-backend adapter") or loosen the
   guard to import-statement scanning.
 
 ## Cross-backend contracts to preserve
@@ -121,9 +134,10 @@ shape lives in `extension/substrate/toolParams.ts` (`idParam`/`idArrayParam` —
 
 ### URL-peeling in the shared id parser (the single chokepoint)
 
-`perk/cli/commands/plan/resume_cmd.py::parse_plan_id` is the **single chokepoint** every plan/objective
+`src/perk/cli/plan_selection.py::parse_plan_id` is the **single chokepoint** every plan/objective
 id-taking command routes through: `perk implement`, `perk plan resume`/`replan`/`from`, and all
-`perk objective` verbs (via the thin `parse_objective_id` alias in `objective/shared.py`). So a
+`perk objective` verbs (via the thin `parse_objective_id` alias in
+`src/perk/cli/commands/objective/shared.py`). So a
 pure-function change there gained all ~15 commands the URL-acceptance feature **uniformly** — the
 payoff of one shared opaque-id parser.
 
@@ -169,7 +183,7 @@ canonical record.
 - **The stamp discipline**: `cache.plan-ref.provider` := the resolved backend's `backend_id`,
   stamped verbatim. `reconstruct_plan_ref` stays pure (provider passed in, no config read in
   `resume.py`). Stamp sites that hold no backend instance use
-  `issues.resolve_issue_backend_id(repo_root)` — that id resolver exists precisely so stamping
+  `resolve.resolve_issue_backend_id(repo_root)` — that id resolver exists precisely so stamping
   needn't construct a backend. Future stamp sites follow the pass-the-id-in pattern rather than
   reading config deep in pure modules.
 
@@ -201,12 +215,13 @@ fakes; only `ty check tests perk` + full pytest **together** catch both arms. Cr
 
 The resolver deliberately collapses `tomllib.TOMLDecodeError` into `IssueBackendError` (consumers
 need one error type), which erases the malformed-TOML vs bad-selection distinction doctor needs
-(warn-defer vs fail). The landed shape: `_issues_check` calls `load_committed_issues_backend`
+(warn-defer vs fail). The landed shape: `_issues_check` (now in
+`src/perk/convergence/doctor/checks.py`) calls `load_committed_issues_backend`
 first to catch `TOMLDecodeError` (→ warn, defer to the config check), then calls the resolver and
-maps its `IssueBackendError` arms. **Known substring coupling**: the linear-vs-unknown split
-matches `"not yet supported"` in the resolver's error text — rewording it silently degrades the
-tailored remediation (still `fail`, so not dangerous). If a third arm ever appears, give
-`IssueBackendError` a structured kind instead.
+maps its outcomes by the **returned backend id**: absent/`github` → ok; `linear` with a committed
+team → ok; `linear` without a team → fail; an unknown selection → fail via the resolver's raise.
+The check maps resolver outcomes and never duplicates the vocabulary (its docstring's own rule).
+If arms multiply, give `IssueBackendError` a structured kind instead.
 
 ## Opaque backend-owned header ids
 
@@ -257,13 +272,15 @@ of consumers and conforming fakes is stronger than an enumerated fixture-fallout
 
 - **Module-name shadowing**: the pre-carve *perk/backends/issues.py* collided with natural local names
   (e.g. an `issues` list), forcing `from perk import issues as issues_mod` imports — the carve into
-  `perk/backends/github/` + `perk/backends/resolve.py` dissolved it; avoid module names that collide
-  with natural locals when adding backend modules.
+  `src/perk/backends/github/` + `src/perk/backends/resolve.py` dissolved it; avoid module names that
+  collide with natural locals when adding backend modules.
 - **`PlanState` default friction**: the protocol's `PlanState` has no `state` default while the
   gateway shape does — backends must always populate it; expect fixture friction at extraction
   time.
-- **`resolve_issue_backend`'s non-github `raise` arms are placeholders, not dead code** — each is
-  replaced when that backend's constructing arm lands; don't "clean them up".
+- **`resolve_issue_backend`'s Linear constructing arm landed** — config-driven selection is live;
+  the Linear arm requires a committed `[issues] team` + the `LINEAR_API_KEY` env var (either
+  missing raises a hinted `IssueBackendError`). The one remaining final `raise` is a defensive
+  known-id-without-implementation arm, unreachable today — keep it, don't "clean it up".
 - `error_type="github_error"` for `IssueBackendError` at CLI boundaries is still GitHub-named (the
   rename was explicitly deferred).
 - **The protocol's docstring contracts** (normalized `"OPEN"/"CLOSED"` states, string ids, the
@@ -284,12 +301,15 @@ subsystem story.)
 
 ## github-native rows → adapter mapping; the import-direction docstring trap (#690)
 
-The `perk/github/` gateway returns **github-native rows** (raw `author_login` / `author_id` /
-`author_is_bot`); the **adapter** (`perk/backends/github/backend.py`) maps them to the neutral `engagement.*`
-contract via `classify_author`. The gateway never imports the backend tier — and the import-direction
-guard (`tests/test_issue_backend.py::TestImportDirection`) is a **raw source-string scan over the
-whole `perk/github/` package**, so even a **docstring** that mentions the backend-tier module path
-trips it. Keep gateway prose free of the literal module path (say "the issue-backend adapter").
+The honest engagement substrate is `src/perk/backends/github/engagement.py`: it returns
+**github-native rows** (`IssueCommentRow` / `DescriptionEditRow`, carrying raw author fields) and
+imports only the downward `perk.github._exec` transport; the **adapter**
+(`src/perk/backends/github/backend.py`) maps them to the neutral `engagement.*` contract via
+`classify_author` (`src/perk/backends/engagement.py`). The gateway never imports the backend tier —
+and the import-direction guard (`tests/test_issue_backend.py::TestImportDirection`) is a **raw
+source-string scan over the whole `src/perk/github/` package**, so even a **docstring** that
+mentions the backend-tier module path trips it. Keep gateway prose free of the literal module path
+(say "the issue-backend adapter").
 
 ## `read_issue` — the third issue-read shape (#708)
 
@@ -299,13 +319,14 @@ exists because neither sibling can read a raw human issue. (See `in-place-adopti
 
 ## Cross-references
 
-- `perk/backends/issue_backend.py` — the protocol module
-- `perk/backends/github/backend.py` — `GitHubIssueBackend`; `perk/backends/resolve.py` —
+- `src/perk/backends/issue_backend.py` — the protocol module
+- `src/perk/backends/github/backend.py` — `GitHubIssueBackend`; `src/perk/backends/resolve.py` —
   `resolve_issue_backend`, `resolve_issue_backend_id`
-- `perk/github/` — the private substrate the adapter delegates into
+- `src/perk/backends/github/plans.py` — the plan/issue substrate the adapter delegates into
+- `src/perk/github/` — the gh transport gateway whose `_exec` helper family the substrate rides
 - `tests/test_issue_backend.py`, `tests/test_github_backend.py`, `tests/test_resolve.py` —
   conformance/import-direction, delegation/late-binding, and resolver/boundary tests
-- `docs/learned/workflow/github-gateway.md` — the gateway the substrate lives in
+- `docs/learned/workflow/github-gateway.md` — the gh transport/PR-tier gateway package
 - `docs/learned/workflow/linear-backend.md` — the Linear backend's client, dual-encoding markers,
   readiness wiring, and prompt rendering
 - `docs/learned/workflow/objective-store.md` — the parallel objective-storage tier split off the
