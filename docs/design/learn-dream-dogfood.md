@@ -26,8 +26,8 @@ causes on unchanged product bytes.
 the sync boundary is offline-pinned), forced/synthetic failures (every refusal arm beyond the
 two designed probes is capture-if-fired only), a warm `/learn-dream` door (an objective
 non-goal), executing the saved curation objective's roadmap, and the **Linear live proof**
-(consciously deferred by reviewed decision to the named successor node — see
-[the Linear live-proof successor](#the-linear-live-proof-successor) below).
+(dropped by owner decision — out of scope for this objective; see
+[the Linear live proof — dropped](#the-linear-live-proof--dropped-owner-decision) below).
 
 **The contracts-coherence rider.** The node's planning-time ledger (10 topics over §8.24 +
 §8.59–§8.65, cross-checked against the seed, the `perk-learn-dream` skill, and the CLI
@@ -443,7 +443,7 @@ Every criterion is classified in Part B as **observed live** · **not fired → 
 | ≤12-node roadmap | live (saved roadmap) | offline-pinned (`dreamReport.test.ts` cap pins) |
 | durable overflow + harvest follow-ups | live (report sections; either may be honestly empty) | offline-pinned |
 | atomic objective+report review | live (one approval bundle; companion comments + `dream_report` header) | offline-pinned (`extension/factories/objectiveDreamReport.test.ts` + `tests/test_objective_dream_save_cmd.py`) |
-| GitHub/Linear origin + companion equivalence | GitHub live; Linear **offline parity** — `tests/test_linear_project_store.py` + `tests/test_linear_objectives.py` (origin lookup/stamp/carry) and `tests/test_dream_companion_backends.py` + `tests/parity/dream_report_invariance.json` (companion + invariance) — recorded as *flagged not-live-proven* with the successor below | same |
+| GitHub/Linear origin + companion equivalence | GitHub live; Linear **offline parity** — `tests/test_linear_project_store.py` + `tests/test_linear_objectives.py` (origin lookup/stamp/carry) and `tests/test_dream_companion_backends.py` + `tests/parity/dream_report_invariance.json` (companion + invariance) — recorded as *flagged not-live-proven*, permanently for this objective (the live proof was dropped by owner decision — the section below) | same |
 | honest no-action outcome | unobserved, not passed (prompt/skill-defined judgment; the harvest zero-opportunity precedent) | **observed live** |
 | byte-identical legacy behavior | offline-pinned — `tests/test_objective_dream_save_cmd.py` (cold-door side), `extension/factories/objectiveDraft.test.ts` "core: absence byte-identity" (draft side), `extension/factories/objectiveSave.test.ts` (save side) | same |
 
@@ -451,18 +451,19 @@ Every criterion is classified in Part B as **observed live** · **not fired → 
 inapplicable at today's expected state) still report; all other criteria are unproven → FAIL
 per the grade rule.
 
-### The Linear live-proof successor
+### The Linear live proof — dropped (owner decision)
 
-The Linear live proof staged into this gate by node 4.3 is **consciously deferred** (a
-reviewed user decision recorded in this node's plan). To keep the objective honest,
-implementation creates ONE successor node before submit:
-
-```bash
-uv run perk objective node-add 1892 --phase 5 --depends-on 5.2 --description "Linear live-proof gate for dream origin + companion: drive the §8.64 save arm live against a Linear workspace — origin stamped at create, sentinel companion parts, upload_file + Resources link, dream_report header, idempotent retry convergence, and the live origin guard (origin_conflict) — the live proof staged out of node 5.2 by reviewed decision (docs/design/learn-dream-dogfood.md)."
-```
-
-The residuals section and the equivalence acceptance row both name the created successor node
-id in Part B.
+The Linear live proof staged into this gate by node 4.3 was first deferred to a successor
+node (this node's plan), then **dropped entirely by owner decision** (2026-08-20, post-gate):
+live Linear testing is out of scope for this objective. History, honestly: the deferral
+successor already existed as node **1892/5.3** when this pass ran, and the pass's node-add
+minted a duplicate (**1892/5.4**) — both were then marked `skipped` (5.4 as the accidental
+duplicate, 5.3 with the owner decision recorded in its description; the roadmap has no node
+deletion, so `skipped` is the removal record). Dream origin + companion equivalence on Linear
+therefore rests on the offline parity/conformance pins (`tests/test_linear_project_store.py`,
+`tests/test_linear_objectives.py`, `tests/test_dream_companion_backends.py`,
+`tests/parity/dream_report_invariance.json`) and is recorded as **not-live-proven** in the
+acceptance table — permanently for this objective, with no live successor.
 
 ## Part B — dated evidence (2026-08-20 UTC)
 
@@ -642,7 +643,7 @@ again." No session launched, no run id minted (the newest run-scratch dir is sti
 | ≤12-node roadmap | **observed live** | saved roadmap: exactly 12 distinct nodes |
 | durable overflow + harvest follow-ups | **observed live** | overflow honestly empty (`_None._`); 8 follow-up rows with surviving destinations |
 | atomic objective+report review | **observed live** | one approval bundle — `plan_review` approved→auto-saved; companion comments + `dream_report`/`origin` header |
-| GitHub/Linear origin + companion equivalence | GitHub **live**; Linear **offline parity, flagged not-live-proven** | `tests/test_linear_project_store.py` + `tests/test_linear_objectives.py` (origin lookup/stamp/carry); `tests/test_dream_companion_backends.py` + `tests/parity/dream_report_invariance.json` (companion + invariance); successor node **1892/5.4** |
+| GitHub/Linear origin + companion equivalence | GitHub **live**; Linear **offline parity, flagged not-live-proven** | `tests/test_linear_project_store.py` + `tests/test_linear_objectives.py` (origin lookup/stamp/carry); `tests/test_dream_companion_backends.py` + `tests/parity/dream_report_invariance.json` (companion + invariance); no live successor — dropped by owner decision (nodes 5.3/5.4 skipped) |
 | honest no-action outcome | unobserved, not passed | the audit was actionable; prompt/skill-defined judgment (the harvest zero-opportunity precedent) |
 | byte-identical legacy behavior | offline-pinned | `tests/test_objective_dream_save_cmd.py`; `objectiveDraft.test.ts` "core: absence byte-identity"; `objectiveSave.test.ts` |
 
@@ -703,9 +704,10 @@ pass. Offline pins for each ran green in this pass's preflight:
   the first pass with the surface available. Unobserved, not passed.
 - **Honest no-action (clean audit) terminal** — the audit was actionable. Unobserved, not
   passed (prompt/skill-defined judgment).
-- **Linear origin + companion live proof** — deferred by reviewed decision to successor node
-  **1892/5.4** (offline parity pins cited in the criteria table); recorded as
-  not-live-proven.
+- **Linear origin + companion live proof** — dropped by owner decision (out of scope for
+  this objective; the pre-existing deferral node 5.3 and this pass's duplicate 5.4 were both
+  marked `skipped`); equivalence rests on the offline parity pins cited in the criteria
+  table, recorded as not-live-proven with no live successor.
 - **The `subagent-compat` guidance re-verify** — successor node **1892/5.5** (D2).
 
 ### Teardown/census attestations
