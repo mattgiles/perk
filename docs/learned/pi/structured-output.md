@@ -12,13 +12,22 @@ call it, and validate the call.
 
 ## The tool-calling idiom
 
-Build one `Tool` with a TypeBox `parameters` schema, put it in `Context.tools`, call `complete()`,
-then run `validateToolCall([tool], call)` on the first `content` block of `type === "toolCall"`.
+Build one `Tool` with a TypeBox `parameters` schema, put it in `Context.tools`, complete it
+(registry dispatch, or the compat `complete` fallback), then run `validateToolCall([tool], call)`
+on the first `content` block of `type === "toolCall"`.
 
-- `extension/substrate/structuredOutput.ts` is the reusable layer: `resolveModelAuth(ctx)` reuses the session's
-  configured + authenticated model; `completeStructured(opts)` builds the single-tool `Context`,
-  calls `complete`, and validates the returned tool call.
-- `extension/factories/planTitle.ts` is the first consumer.
+- `extension/substrate/structuredOutput.ts` is the reusable layer: `completeStructured(opts)`
+  builds the single-tool `Context` and completes it via the injected registry **`dispatch`** when
+  the host provides one — pi ≥ 0.84's `ModelRegistry.complete`, where **pi owns final request
+  assembly end to end** (resolved auth, nullable headers, credential-resolved `baseUrl`, provider
+  `env`) — else falls back to the compat `complete` with caller-resolved auth
+  (`resolveModelAuth(ctx)` reusing the session's configured + authenticated model). The fallback
+  has a pre-existing limitation: it forwards apiKey/headers/env but has **no `baseUrl` option**,
+  so a credential-resolved endpoint is silently dropped on old hosts — the dispatch path is the
+  fix. Either path validates the returned tool call.
+- `extension/factories/planTitle.ts` is the first consumer: it **feature-detects**
+  `registry.complete` (`typeof … === "function"` — absent on older hosts, never assumed) and
+  wraps it as `dispatch`.
 
 Both layers return **never-throwing soft outcomes** (`{ok, value?, error?}`) — no throw reaches the
 caller.
@@ -39,7 +48,7 @@ configured. This mirrors the existing `PERK_SELFCHECK` pattern.
 
 **`ModelRegistry.getApiKeyAndHeaders` is NOT an offline gate.** It returns `ok: true` with an
 undefined key when none exists (absent `authHeader` config), so auth resolution *succeeds* for
-keyless real models — no AuthStorage seeding is needed for faux models, and `PERK_NO_LLM` is the
+keyless real models — no credential seeding is needed for faux models, and `PERK_NO_LLM` is the
 ONLY thing keeping keyless tests offline. Never rely on auth-resolution failure as a test guard.
 
 ## Faux-provider routing depends on WHO makes the model call
@@ -74,6 +83,8 @@ Third-party API names, to re-verify against the installed `@earendil-works/pi-ai
 them:
 
 - `@earendil-works/pi-ai` (root) — the types plus `validateToolCall`, `StringEnum`, `Type`.
+- `@earendil-works/pi-coding-agent` — `ModelRegistry.complete` (`dist/core/model-registry.d.ts`),
+  the pi ≥ 0.84 registry dispatch `completeStructured` prefers; feature-detect it, never assume it.
 - `@earendil-works/pi-ai/compat` — the old global API since pi-ai 0.80: `complete`, `getModel`, and
   the faux-provider test helpers (`registerFauxProvider`, `setResponses`, the faux tool-call /
   message builders). Pi's extension loader aliases the root to the compat entry (plus an explicit

@@ -6,10 +6,11 @@ cluster: pi-extension
 
 # Pi extension API
 
-Facts verified against the dist source of `@earendil-works/pi-coding-agent` 0.78.x and re-checked
-at 0.80.5 (the one notable 0.80 change is the pi-ai `/compat` split — the global pi-ai API moved
-off the root; see `headless-session-drive.md`). These are the non-obvious API contours an agent
-can't derive from the package's root type exports.
+Facts verified against the dist source of `@earendil-works/pi-coding-agent` 0.78.x, re-checked at
+0.80.5, and re-audited against the installed 0.84.1 (the notable hops: 0.80's pi-ai `/compat`
+split — the global pi-ai API moved off the root — and 0.84's `ModelRuntime` consolidation of the
+session-creation inputs; both covered in `headless-session-drive.md`). These are the non-obvious
+API contours an agent can't derive from the package's root type exports.
 
 ## Distillation
 
@@ -101,8 +102,11 @@ remove it even on its own injection turn (defeating delivery). Any strip of inje
 ## `session_compact` is a first-class pi SDK event — no harness fiction
 
 The `@earendil-works/pi-coding-agent` `ExtensionAPI.on` overloads already declare
-`on("session_compact", …)`, and `SessionCompactEvent` (`{ type, compactionEntry, fromExtension }`) is
-in the `SessionEvent` union — so `pi.on("session_compact", …)` typechecks natively in production. Only
+`on("session_compact", …)`, and `SessionCompactEvent` (`{ type, compactionEntry, fromExtension,
+reason, willRetry }` at 0.84.1 — `reason: "manual" | "threshold" | "overflow"` names what
+triggered the compaction; `willRetry` is `true` when the aborted turn is retried after this
+compaction, i.e. overflow recovery) is in the `SessionEvent` union — so
+`pi.on("session_compact", …)` typechecks natively in production. Only
 the **test** harness needed work: `extension/testing/harness.ts` `emitLifecycle`'s union is
 **type-only** (the runtime forwards any event via `emit(event as never)`), so adding
 `session_compact` to it is a pure TS-surface change, not new runtime plumbing.
@@ -128,7 +132,7 @@ rebuild + render, no re-seed.)
 - The checkpoints-specific charter survey is **not** duplicated here — it lives in
   `docs/design/checkpoints-rpiv-todo-comparison.md`.
 
-## `ctx.ui.editor` facts (pi 0.78.x)
+## `ctx.ui.editor` facts (pi 0.84.1)
 
 `editor(title, prefill) → Promise<string | undefined>`. Enter submits, Shift+Enter inserts a
 newline, Esc resolves `undefined`, Ctrl+G opens `$EDITOR`. Two non-obvious contours:
@@ -360,17 +364,21 @@ for **any** `git:` package — and perk still recognizes `git:` package identiti
 
 pi materializes a `git:` package as a clone at `.pi/git/<host>/<path>/` and loads the extension
 from it via jiti, resolving the extension's imports through a **fixed host-alias set**
-(`getAliases` in `dist/core/extensions/loader.js`; at 0.80.5: the pi-coding-agent /
-pi-agent-core / pi-tui / pi-ai (+ `/compat`, `/oauth`) families under both the `@earendil-works`
-and `@mariozechner` scopes, plus typebox (+ `/compile`, `/value`) and the `@sinclair/typebox`
-twins) **plus** native `node_modules` walking. Three distinct gaps in
-`@earendil-works/pi-coding-agent/dist/core/package-manager.js` can leave a consumer loading *no*
-tools or *months-old* code:
+(`getAliases` in `dist/core/extensions/loader.js`; at 0.84.1: the pi-coding-agent /
+pi-agent-core / pi-tui / pi-ai (+ `/compat`, `/oauth`, `/providers/all`) families under both the
+`@earendil-works` and `@mariozechner` scopes, plus typebox (+ `/compile`, `/value`) and the
+`@sinclair/typebox` twins) **plus** native `node_modules` walking. Three distinct gaps in
+`@earendil-works/pi-coding-agent/dist/core/package-manager.js` (re-verified at 0.84.1) can leave
+a consumer loading *no* tools or *months-old* code:
 
-- **(a) No self-heal install.** `installGit`/`ensureGitRef` run `npm install --omit=dev` **only**
-  on a fresh clone OR when `localHead != targetHead`. A clone already present at the pinned ref
-  returns early and never installs (`pi update` shares that early return) — so a clone can carry
-  no / partial `node_modules` and pi cannot self-heal → `Cannot find module 'yaml'` at load.
+- **(a) No load-time self-heal.** At 0.84.1 the **install/update path self-heals**: `installGit`
+  on a present clone delegates to `ensureGitRef` (fetch + head-compare; when heads match it
+  completes an interrupted update via the `.pi-update-incomplete` marker or runs
+  `repairMissingGitDependencies`) — the pre-0.84 "a clone already present at the pinned ref
+  returns early and never installs" absolute is gone. But the **load path**
+  (`resolvePackageSources`) still only collects a present project/user-scoped clone — no fetch,
+  no repair — so a clone carrying no / partial `node_modules` still fails at load
+  (`Cannot find module 'yaml'`) until an install/update pass runs.
 - **(b) Unlocked lazy-clone race.** `resolvePackageSources` clones a missing `git:` package lazily
   and **UNLOCKED**. Two near-simultaneous launches against an absent clone race: the second sees
   the first's half-created dir, takes the `else` (collect) branch over an incomplete checkout, and
@@ -379,15 +387,16 @@ tools or *months-old* code:
 - **(c) Frozen present clone.** A **present project-scoped** clone is left **frozen** — pi's
   branch for it only calls `collectPackageResources` with no `git fetch`/`reset`, so a months-old
   clone keeps loading months-old code (wrong import paths; a since-retired import → a hard load
-  failure) while a static `doctor` reports green.
+  failure) while a static `doctor` reports green. Only `temporary` unpinned sources are refreshed
+  at load (`refreshTemporaryGitSource`).
 
 ## Sources
 
 - `@earendil-works/pi-coding-agent` dist (`agent-session.js`, `dist/index.d.ts`,
   `dist/core/extensions/loader.js`, `dist/core/package-manager.js`) — verified at 0.78.x,
-  re-verified against the installed pinned pi 0.80.5. Re-verify against the installed version
-  before relying on a deep-source detail; pin checks
-  matter (see `pi/context-system.md` on the read-only allowlist and `toolchain/worktree-node-modules.md`
+  re-verified at 0.80.5, re-audited against the installed 0.84.1. Re-verify against the
+  installed version before relying on a deep-source detail; pin checks matter (see
+  `pi/context-system.md` on the read-only allowlist and `toolchain/worktree-node-modules.md`
   on resolving the *installed* SDK in a worktree).
 
 ## Cross-references
