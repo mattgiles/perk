@@ -1,6 +1,6 @@
 ---
 title: The §8.25 human-engagement read contract
-read_when: You are working on the §8.25 human-engagement read contract — a read seam (issue-keyed vs node-keyed), a flow consumer, the `perk/backends/engagement.py` renderers, or the delivery asymmetry.
+read_when: You are working on the §8.25 human-engagement read contract — a read seam (issue-keyed vs node-keyed), a flow consumer, the `src/perk/backends/engagement.py` renderers, or the delivery asymmetry.
 cluster: backends-and-integrations
 ---
 
@@ -15,10 +15,10 @@ end to end.
 
 ## The decoupled-vocabulary leaf
 
-`perk/backends/issue_backend.py` (issue-keyed) and `perk/backends/objective_store.py`
+`src/perk/backends/issue_backend.py` (issue-keyed) and `src/perk/backends/objective_store.py`
 (objective-keyed) are **intentionally decoupled** — neither imports the other. But the engagement
 reads need a shared vocabulary: the result dataclasses, `AgentSessionRead`, and the author model.
-That vocabulary lives in a **third pure leaf**, `perk/backends/engagement.py`, which imports
+That vocabulary lives in a **third pure leaf**, `src/perk/backends/engagement.py`, which imports
 *neither* tier.
 
 **The rule:** when two intentionally-decoupled modules need a shared vocabulary type, add a pure
@@ -53,10 +53,20 @@ whole-repo `ty check` is the oracle that catches an unconformed site.
 
 ## The empty/no-op conformer family + shared frozen constants
 
-The posture is **honest-now-vs-dormant**: only the honest implementer does real work; every other
-implementer and fake ships a clean **empty/no-op** return — `()` for comments/edits, and the
-**shared frozen constants** `EMPTY_AGENT_SESSION` / `EMPTY_NODE_ENGAGEMENT` for the bundle reads.
-Each no-op docstring flags where the honest read actually lands.
+**Honesty is per-method, per-backend**: a backend implements a read honestly wherever its platform
+exposes the primitive, and ships a clean **empty/no-op** return where it doesn't — `()` for
+comments/edits, and the **shared frozen constants** `EMPTY_AGENT_SESSION` / `EMPTY_NODE_ENGAGEMENT`
+for the bundle reads. The current matrix:
+
+| read | GitHub issue backend | Linear issue backend | GitHub objective store | Linear project store | dormant Linear store |
+|---|---|---|---|---|---|
+| `read_comments` | honest (gh GraphQL) | honest | honest (the objective IS an issue) | honest (project threads) | empty |
+| `read_description_edits` | honest (`userContentEdits`) | honest | honest | honest-empty (no project-level edit-history primitive — a flagged deferral) | empty |
+| `read_agent_session` | empty (no GitHub surface) | honest | empty | empty | empty |
+| `read_node_engagement` | — (issue tier) | — (issue tier) | empty (no per-node issues) | honest (node-issue comments+edits) | empty |
+
+Test fakes stay all-empty. Each no-op docstring flags where the honest read actually lands (or why
+none exists).
 
 A single shared **immutable** constant is safe to reuse across all no-op sites (the constants are
 frozen). This mirrors the established `save_node_plan → None` / `post_status_update → False` no-op
@@ -96,8 +106,8 @@ family on the objective store.
 ## The renderer family (untrusted-DATA bounded blocks)
 
 The renderer family is pure and dependency-free (so unit-testable): `render_node_engagement` /
-`render_plan_engagement` / `render_objective_engagement` → `_render_engagement` →
-`_engagement_item_lines`.
+`render_plan_engagement` / `render_adopted_engagement` / `render_objective_engagement` →
+`_render_engagement` → `_engagement_item_lines`.
 
 - **Filtering policy.** Skip only the unambiguous perk-sentinel **comments**. Render description
   **edits labeled-by-kind, never filtered** — classification is preview-grade, and silently

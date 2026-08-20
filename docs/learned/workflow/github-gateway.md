@@ -1,14 +1,17 @@
 ---
-title: The github.py gateway — parse-helper family, consolidation boundary rules, the not-found fold, mutation-posting policies, strict per-PR paginated reads, merge-async outcome classification
-read_when: You are touching `perk/github/`, adding a REST/GraphQL call, designing a mutation-posting policy or failure ladder, debugging a phantom-`None` lookup, or parsing diffs into review-comment anchors.
+title: The src/perk/github/ gateway package — parse-helper family, consolidation boundary rules, the not-found fold, mutation-posting policies, strict per-PR paginated reads, merge-async outcome classification
+read_when: You are touching `src/perk/github/`, adding a REST/GraphQL call, designing a mutation-posting policy or failure ladder, debugging a phantom-`None` lookup, or parsing diffs into review-comment anchors.
 cluster: backends-and-integrations
 ---
 
-# The github.py gateway
+# The src/perk/github/ gateway package
 
-`perk/github/` is the single gateway for `gh` subprocess calls. A dignified-sweep consolidation
-carried 19 hand-rolled parse sites onto a small helper family; this doc preserves the boundary
-rules that made the migration safe and the one residual risk it accepted.
+`src/perk/github/` is the gateway package for `gh` subprocess calls (the `_exec.py` transport
+helper family + the PR/CI/repo-tier reads and mutations). The GitHub backend's issue/objective
+substrate (`src/perk/backends/github/`) rides the same `_exec` helpers — see `issue-backend.md`. A
+dignified-sweep consolidation carried 19 hand-rolled parse sites onto a small helper family; this
+doc preserves the boundary rules that made the migration safe and the one residual risk it
+accepted.
 
 ## Distillation
 
@@ -51,7 +54,7 @@ the runner would have changed behavior.
 - **When a migration drops a module's `subprocess` import, census ALL module-attribute patch
   strings first.** The `perk.substrate.proc` centralization (`run_captured` + structured
   `ProcFailure` with canonical default `str()` shapes, resolving `subprocess.run` at call time on
-  the shared module object so global monkeypatches survive; `perk/github/_exec.py` now sits atop
+  the shared module object so global monkeypatches survive; `src/perk/github/_exec.py` now sits atop
   it) removed facade modules' own `subprocess` imports — breaking every test patch that resolves
   *through* a facade module. `grep -rn "\.subprocess" tests/` finds them all, in BOTH forms:
   string-path patches (`monkeypatch.setattr("pkg.mod.subprocess.run", …)`) AND attribute-chain
@@ -174,7 +177,7 @@ anchors **both**). Two durable points:
 
 ## `repo_identity` — a third repo-view read shape (strict-on-incomplete)
 
-`perk/github/repo.py::repo_identity(repo_root) -> RepoIdentity(name, url, default_branch)` is a
+`src/perk/github/repo.py::repo_identity(repo_root) -> RepoIdentity(name, url, default_branch)` is a
 **third** repo-view read shape, distinct from the two that came before it:
 
 - `prs.default_branch` reads `defaultBranchRef` only;
@@ -187,7 +190,7 @@ is **strict-on-incomplete**: a 0-exit payload missing any of the three required 
 `GitHubError` rather than returning a partial identity. It is **GitHub-only by construction** —
 `gh repo view` resolves only a GitHub remote, so a remote-less / non-GitHub repo just exits non-zero
 and the lenient `_failed` path raises (no special-casing needed). The re-export from
-`perk/github/__init__.py` keeps `__all__` isort-sorted (`RepoIdentity` before `Review`,
+`src/perk/github/__init__.py` keeps `__all__` isort-sorted (`RepoIdentity` before `Review`,
 `repo_identity` before `rerun_workflow_run`).
 
 The read's **sole consumer** is the repo-authored-skills source derivation (`derive_repo_source`),
@@ -323,7 +326,7 @@ composition) lives in `pydantic-boundary-models.md` — not duplicated here.
 
 ## Cross-references
 
-- `perk/github/` — the gateway and the helper family
+- `src/perk/github/` — the gateway and the helper family
 - `docs/learned/workflow/pydantic-boundary-models.md` — the boundary↔domain conversion recipe (the
   gateway response converters apply its lenient-parse-model → frozen-dataclass pattern)
 - `docs/learned/workflow/init-external-cli.md` — the repo-authored-skills convergence, sole consumer
