@@ -9,7 +9,10 @@ dirty-refusal probe → the live `dream-1` leg → the overlap-refusal probe whe
 census), with attempt 1 plus at most one fresh-session attempt 2 reserved for confirmed
 external/interruption causes on unchanged product bytes.
 
-**Overall verdict:** *(pending — filled by Part B)*
+**Overall verdict:** **`PASS`** (`dream-1`, attempt 1, terminal `SAVED_OBJECTIVE` — objective
+#1926 retained open as real backlog; both live probes fired; full two-level wave coverage;
+two D-rows — one environment, one reviewed preflight deviation with successor node 5.5; no
+dream defect — see Part B).
 
 **The scope boundary (one rule, no exceptions).** This gate's in-node edits touch only
 non-executing documentation prose. Any defect discovered in executing surfaces — production
@@ -152,7 +155,13 @@ done
 
 Any dependency install failure, focused-pin failure, missing/non-`ok` doctor row, unresolved
 model, or failed credential smoke **blocks launch and consumes no attempt budget**: repair an
-environment-only problem and rerun the entire preflight. A focused pin proving a product
+environment-only problem and rerun the entire preflight. *(Dated note, 2026-08-20 — D2: the
+`subagent-compat` row cannot read `ok` on any published pi-subagents ≥ 0.49 — upstream
+restored direct `{agent, task}` public execution, so the "Direct execution was removed"
+marker is stale even at the guidance-verified 0.50.0 tarball. Until successor node 5.5
+reconciles the guidance/probes, a rerun applies the reviewed disposition recorded in Part B:
+run on the naturally-installed version with the single unmet marker disclosed;
+`subagent-bridge-config` must still read `ok`.)* A focused pin proving a product
 defect follows the scope boundary — a D-row + successor node, never an in-node fix; the gate
 records a bounded FAIL rather than spending a dream attempt on a known-bad product.
 
@@ -455,54 +464,262 @@ uv run perk objective node-add 1892 --phase 5 --depends-on 5.2 --description "Li
 The residuals section and the equivalence acceptance row both name the created successor node
 id in Part B.
 
-## Part B — dated evidence
-
-*(empty — filled after the live gate; committed before any raw-evidence deletion)*
+## Part B — dated evidence (2026-08-20 UTC)
 
 ### Run metadata
 
-*(pending)*
+- **UTC window:** preflight from 15:46Z; baselines/inventory/probe 1 by 15:57Z; `dream-1`
+  launched 15:58:50Z; the objective saved 16:36:11Z; probe 2 + census + evidence mining
+  completed the same UTC hour.
+- **Worktree/branch (all actors):**
+  `/Users/mattgiles/dev/github/mattgiles/perk/.worktrees/plan-1925`, branch `plan-1925`.
+  Actors: the staging shell = this implement session's per-command bash tool (no long-lived
+  process — the Part A no-`trap` arm, with the explicit teardown attested below); `dream-1` =
+  one fresh interactive Pi session started by the operator in a separate terminal from this
+  worktree.
+- **Clean initial HEAD (authoritative; no rerun):**
+  `5c3b50582cafeb68af1b32a9339fd2bf8b6c11f8` — `git status --porcelain` empty immediately
+  before the leg, empty again after probe 2 (`git rev-parse HEAD` unchanged).
+- **Dependencies:** `uv sync --all-packages` OK; root `npm ci` OK; `.pi/npm` `npm ci` failed
+  once on lockfile drift (D1, environment — the harvest record's D1 recurrence) — repaired via
+  `npm install --prefix .pi/npm`, then `npm ci --prefix .pi/npm` clean. No attempt budget
+  consumed.
+- **Versions:** perk 3.0.0; pi 0.84.2; pi-subagents 0.52.1 (the reviewed D2 disposition —
+  below).
+- **Focused offline pins:** the seven Python files → **280 passed**; the six TypeScript files
+  → **140 passed, 0 failed**.
+- **Doctor rows:** `subagent-bridge-config` **ok** ("intercom bridge active");
+  `subagent-compat` **warn** at 0.52.1 — exactly one unmet expectation (the
+  "Direct execution was removed" marker absent from `src/extension/public-execution.ts`).
+  Diagnosis established the marker is absent from every published pi-subagents ≥ 0.49
+  **including the guidance-verified 0.50.0 tarball** (upstream restored direct
+  `{agent, task}` public execution), and that 0.48.0 is the newest all-markers version
+  (doctor read fully `ok` on a temporary 0.48.0 install during diagnosis). **Reviewed
+  operator decision:** run the gate on 0.52.1 — the pairing pi would naturally lazy-install —
+  with the warn disclosed as a deviation from Part A's both-rows-`ok` requirement (D2;
+  successor node **1892/5.5** carries the guidance/probe re-verify). 0.52.1 was restored
+  before any further step; every dream-relevant orchestration probe (workflowScript, RPC
+  events, waves, receipts, supervisor channel) read ok in the 0.48.0 diagnostic and the
+  divergence names only the relaxed public-execution posture.
+- **Wave models (safe helper — the only process that may read `.perk/local.toml`):**
+  `dream-analyst` → `openai/gpt-5.6-terra` (frontmatter; fallback `openai/gpt-5.6-luna`);
+  `dream-reducer` → `anthropic/claude-fable-5` (frontmatter; fallback
+  `anthropic/claude-sonnet-4-5`); no `models.subagents` override; committed-config SHA-256
+  `fc873f953b37115f97e87adb821e37b3e6c7a24f43bde32e1b7688171bbdfcf2`;
+  `local_config_present: false`, `local_config_sha256: null`.
+- **Model catalog + credential smokes:** both resolved primaries listed by `pi --list-models`;
+  `openai/gpt-5.6-terra` returned exactly `READY`; `anthropic/claude-fable-5` returned
+  `READY.` (trailing period) on the Part A prompt and exactly `READY` on a clarified
+  no-punctuation re-prompt — a prompt-phrasing friction note, not a credential failure (the
+  credentialed call succeeded both times).
+- **Capture root:** mode-0700 `mktemp -d` directory
+  (`$TMPDIR/perk-learn-dream-dogfood.0IKi9I`). No `.perk/local.toml` bytes and no complete
+  parent JSONL were ever copied into it; the parent JSONL was queried in place and only the
+  minimized event projection was written.
 
 ### Pre-attempt origin preflight
 
-*(pending)*
+The open `perk:objective` census carried exactly ONE issue (`#1892` — this node's own
+objective); zero bodies matched `origin: learn-dream`. **Not blocked**; attempt 1 available.
 
-### Independent inventory
+### Independent inventory (fresh, pre-leg, at the initial HEAD)
 
-*(pending)*
+`dream-inventory.json` SHA-256
+`649d66149323172dd5386a05e447fc63cd9384d5f7d7d2ddc0c4ebf64666ead3`; **66 eligible docs**
+(`docs/learned/index.md` excluded), **13 non-empty clusters**, **14 lanes** in registry order,
+every lane ≤ 8 docs — matching the planning-time orientation expectation exactly:
+
+| Lane id | Docs |
+|---|---|
+| `pi-extension-1` | 8 |
+| `subagent-orchestration-1` | 2 |
+| `toolchain-gotchas-1` | 8 |
+| `toolchain-gotchas-2` | 1 |
+| `code-migration-1` | 4 |
+| `doors-and-launch-1` | 7 |
+| `plan-lifecycle-1` | 6 |
+| `objective-system-1` | 3 |
+| `backends-and-integrations-1` | 5 |
+| `config-and-convergence-1` | 7 |
+| `cross-plane-contracts-1` | 4 |
+| `knowledge-stewardship-1` | 4 |
+| `quality-and-guards-1` | 6 |
+| `prose-governance-1` | 1 |
 
 ### Probe 1 — dirty refusal
 
-*(pending)*
+One untracked `dogfood-dirty-probe.txt` → `perk learn dream --dry-run --json` refused
+`{success: false, error_type: "dirty_checkout"}` → probe file deleted → teardown proven by an
+empty `git status --porcelain`. (A subsequent clean `--dry-run` — free, offline,
+`origin_guard: "not-evaluated"` — pre-validated the partition: its manifest byte-matched the
+inventory at the recorded HEAD.) No attempt budget consumed.
 
 ### Attempt matrix
 
-*(pending)*
+| Attempt | UTC launch | HEAD | Parent session id | Dream run id | Outcome | Budget |
+|---|---|---|---|---|---|---|
+| `dream-1` | 15:58:50Z | `5c3b5058` | `01a01fe5-8633-7256-a88a-fa2f75d349e6` | `01M0FYB03K4V9CP7HY113Y68SB` | APPROVED review auto-saved objective #1926 (`SAVED_OBJECTIVE`) | attempt 1 (closes the gate) |
+
+No rerun occurred; attempt 2 was never consumed. No DENIED review, no operator interruption,
+no `/objective-save` failsafe (the review surface was available and approved the draft).
+Classification note: the operator's hand-back message named both `SAVED_OBJECTIVE: 1926` and
+`CLEAN_AUDIT`; the event projection is unambiguous — three `objective_draft` calls and an
+approving `plan_review` with `saved: true` — so the recorded terminal is `SAVED_OBJECTIVE`
+(the product artifacts, not the label, are authoritative).
 
 ### Live-leg evidence
 
-*(pending)*
+- **Manifest**
+  (`.perk/workflow/scratch/runs/01M0FYB03K4V9CP7HY113Y68SB/dream-manifest.json`):
+  `schema_version "1"`, `commit_sha 5c3b5058…` (= the recorded HEAD), `registry_mode
+  "clusters"`, `doc_count 66`, `total_bytes 1232494`, lane ids/per-lane paths **byte-equal**
+  the independent inventory (the Part A jq predicate returned true). Manifest bytes SHA-256
+  `sha256:e1ad792e…` — equal to the finalized bundle's `manifest_digest` (the
+  manifest-authentication link verified at rest).
+- **Wave invocation:** exactly **one** `run_dream_wave` call — JSONL line 13, 15:59:04.044Z,
+  no arguments; result line 16, 16:14:29.690Z, `is_error: false` (≈ 15.4 min). Typed
+  aggregate: `complete: true`; `analysis.complete: true` with **14/14** lane reports and zero
+  failures; `bracket {ok: true}`; `bundle {written: true, bytes: 127420, budget_bytes:
+  393216, overflow_bytes: 0}`; `reducers {launched: true, complete: true}` with **3/3**
+  reports and zero failures; `attempts` = `[{dream-analyst, attempt 1, 14 requested keys},
+  {dream-reducer, attempt 1, 3 requested keys}]` — one attempt per wave, no lane retry.
+- **Finalized bundle** (`dream-analyses.json`): the finalized shape — identity fields echoing
+  the manifest, `manifest_digest` present (verified above), 14 lanes in manifest order, and
+  the `reducers` section carrying the three fixed angles in order. Stance coverage over the
+  40 non-keep proposals: `consolidation-preservation` 40 stances (39 endorse / 1 challenge),
+  `currency-accuracy` 40 (all endorse), `knowledge-architecture` 40 (all endorse); zero
+  `stances_omitted` on all three; 6/6/8 angle findings.
+- **Session shape:** 9 tool calls total — 2 `read` at line 10 (the `perk-learn-dream` skill;
+  the run-scoped manifest), the one wave call, 1 `read` at line 18 (the
+  `perk-objective-author` skill, post-wave), 3 `objective_draft` (lines 21/24/29, all ok),
+  1 `ask_user_question` (line 27 — the delivery choice), 1 `plan_review` (line 32). Zero
+  `bash`, zero direct corpus reads.
+- **Save gesture:** `plan_review` result (line 36): `approved: true`, `saved: true`,
+  `save.objective {id "1926", url https://github.com/mattgiles/perk/issues/1926}`,
+  `existed: false`. **Zero `objective_save` calls** (auto-save on APPROVED).
+- **The saved objective** (#1926, "Learned-corpus curation — dream audit at 5c3b505", OPEN):
+  header `run_id 01M0FYB03K4V9CP7HY113Y68SB`, `created 2026-08-20T16:36:11Z`,
+  `status active`, **`origin: learn-dream`**, **`dream_report: '1926'`** (the objective issue
+  is its own report carrier — the GitHub arm). Roadmap: **12 nodes** (1.1–1.7, 2.1–2.5), all
+  `pending` — exactly at the ≤ 12-distinct-node cap, 12 selected units mapping one-to-one.
+  **Retained open as real backlog** (the origin guard now blocks future dreams until it
+  completes — by design).
+- **The dream report as persisted:** 3 marker-keyed companion comments
+  (`perk:learn-dream-report:01M0FYB03K4V9CP7HY113Y68SB:1..3`), each **byte-equal** to
+  `marker + blank line + canonical part` (verified against the run-scoped transfer file's
+  parts: 59,521 / 58,827 / 43,372 chars — under the 60,000 part cap; full comment bodies
+  59,584 / 58,890 / 43,435 — under the 65,000 backstop).
+- **Report content:** 66 disposition rows (one per corpus doc) — analyst proposals 26 `keep`
+  / 40 `revise`, final dispositions identical (zero fallback rows, zero destructive
+  dispositions — the evidence bar never fired); overflow honestly `_None._`; **8 harvest
+  follow-up rows**, each citing a surviving (`keep`/`revise`) destination; predicted effects
+  66 → 66 docs, 1,232,494 → ~1,160,000 bytes with the not-quotas note.
+- **Run-id lookup:** `gh issue list … --search "01M0FYB03K4V9CP7HY113Y68SB in:body"` →
+  exactly `#1926`.
 
 ### Probe 2 — overlap refusal
 
-*(pending)*
+One staging-shell `perk learn dream --json` after the save →
+`{success: false, error_type: "origin_conflict"}` with the message naming the saved objective
+exactly: "an open learn-dream objective already exists: #1926
+(https://github.com/mattgiles/perk/issues/1926) — complete or close it before dreaming
+again." No session launched, no run id minted (the newest run-scratch dir is still the
+`dream-1` run's), no attempt consumed.
 
-### Acceptance-criteria classification
+### Acceptance-criteria classification (the `SAVED_OBJECTIVE` column)
 
-*(pending)*
+| Criterion | Classification | Evidence |
+|---|---|---|
+| full-corpus audit at one stamped commit | **observed live** | manifest = inventory at HEAD `5c3b5058`; `doc_count 66` |
+| dirty refusal | **observed live** | probe 1 |
+| overlap (`origin_conflict`) refusal | **observed live** | probe 2 (names #1926) |
+| stale-bracket refusal | offline-pinned | `extension/substrate/git.test.ts` `revalidationBracket` pins; `dreamWaveTools.test.ts` post-wave no-finalize arm; `objectiveDreamReport.test.ts` drifted-`bad_state` pins (bracket read `{ok: true}` live) |
+| ≤8-doc semantic lanes | **observed live** | 14 cluster lanes, max 8 docs |
+| three reducers with stances | **observed live** | finalized bundle: 3 angles, 40 stances each, zero omitted |
+| incomplete-lane refusal | offline-pinned | strict-completeness pins in `dreamWave.test.ts` / `dreamReducerWave.test.ts` / `dreamWaveTools.test.ts` (14/14 + 3/3 live — the arm never fired) |
+| one disposition per doc | **observed live** | 66 rows, one per doc + `dreamReport.test.ts` pins |
+| evidence-bar enforcement | offline-pinned | zero destructive proposals fired live; `dreamReport.test.ts` destructive-eligibility pins (the one live reducer `challenge` accompanied a `revise` proposal, below the bar's scope) |
+| ≤12-node roadmap | **observed live** | saved roadmap: exactly 12 distinct nodes |
+| durable overflow + harvest follow-ups | **observed live** | overflow honestly empty (`_None._`); 8 follow-up rows with surviving destinations |
+| atomic objective+report review | **observed live** | one approval bundle — `plan_review` approved→auto-saved; companion comments + `dream_report`/`origin` header |
+| GitHub/Linear origin + companion equivalence | GitHub **live**; Linear **offline parity, flagged not-live-proven** | `tests/test_linear_project_store.py` + `tests/test_linear_objectives.py` (origin lookup/stamp/carry); `tests/test_dream_companion_backends.py` + `tests/parity/dream_report_invariance.json` (companion + invariance); successor node **1892/5.4** |
+| honest no-action outcome | unobserved, not passed | the audit was actionable; prompt/skill-defined judgment (the harvest zero-opportunity precedent) |
+| byte-identical legacy behavior | offline-pinned | `tests/test_objective_dream_save_cmd.py`; `objectiveDraft.test.ts` "core: absence byte-identity"; `objectiveSave.test.ts` |
 
 ### Verdict
 
-*(pending)*
+| Attempt | Base grade | Terminal kind | Modifier | Label |
+|---|---|---|---|---|
+| `dream-1` (attempt 1, authoritative) | `PASS` | `SAVED_OBJECTIVE` | — | **`PASS`** |
+
+**Overall: `PASS`** (attempt 1 authoritative — no `AFTER RERUN` modifier). `docs/index.md`
+carries this exact label.
 
 ### Defect/friction log
 
-*(pending)*
+1. **D1 — `.pi/npm` lockfile drift blocked the `npm ci` preflight step.** Observation:
+   `npm ci --prefix .pi/npm` failed `EUSAGE` ("package.json and package-lock.json … are not
+   in sync"; missing entries such as `@earendil-works/pi-coding-agent@0.84.2`).
+   Classification: **environment** — `.pi/npm` is a gitignored, pi-managed lazy-install root
+   that had drifted through ordinary pi package installs before any dream actor ran (the
+   harvest record's D1 recurrence). Disposition: repaired in place with
+   `npm install --prefix .pi/npm`, after which `npm ci` passed and the remaining preflight
+   ran clean. No attempt budget consumed; no product change; no successor.
+2. **D2 — the `subagent-compat` doctor row cannot read `ok` on any published pi-subagents
+   ≥ 0.49.** Observation: at the naturally-installed 0.52.1 the row warns with exactly one
+   unmet expectation — the "Direct execution was removed" marker absent from
+   `src/extension/public-execution.ts`. Diagnosis: upstream **restored** direct
+   `{agent, task}` public execution at 0.49.0, and the marker is absent even from the
+   published guidance-verified 0.50.0 tarball; 0.48.0 is the newest version satisfying every
+   probe (a temporary 0.48.0 install read fully `ok`, then 0.52.1 was restored).
+   Classification: **the tripwire fired correctly on a real upstream surface change** — the
+   check behaved as designed; perk's guidance markers are stale against the evolved surface
+   (real product follow-up work, out of this docs-only node's scope). Disposition:
+   **reviewed operator decision** to run the gate on 0.52.1 with the warn disclosed — a
+   deviation from Part A's both-rows-`ok` requirement, recorded here and noted in Part A;
+   successor node **1892/5.5** carries the guidance/probe re-verify. Affected step:
+   preflight only (every dream-relevant orchestration probe was satisfied; the live wave ran
+   14 + 3 lanes to completion on 0.52.1).
+
+No dream defect was demonstrated; the state machine's product-FAIL arms were never invoked.
 
 ### Honest residuals
 
-*(pending)*
+Every arm below is capture-if-fired only; none fired live, and none is claimed as a live
+pass. Offline pins for each ran green in this pass's preflight:
+
+- **Stale-bracket / drift arms** — the bracket read `{ok: true}` at the post-wave check and
+  the draft/save gate re-checks never refused (no drift occurred). Pins: cited in the
+  criteria table.
+- **Incomplete audit** — no wave/lane failure, no over-budget bundle (127,420 of 393,216
+  bytes), no `io_error` arm. Pins: the strict-completeness and budget/finalize arms in the
+  three wave test files.
+- **Evidence bar / downgrade** — zero destructive proposals in this corpus; zero fallback
+  rows (the parent's finals matched every analyst proposal). Pins: `dreamReport.test.ts`
+  destructive-eligibility + downgrade-only pins.
+- **Model fallback** — every analyst/reducer child succeeded on its primary model; neither
+  fallback chain engaged. Recorded as an unobserved arm, not a pass.
+- **DENIED-review continuation and the `/objective-save` failsafe** — the review approved on
+  the first pass with the surface available. Unobserved, not passed.
+- **Honest no-action (clean audit) terminal** — the audit was actionable. Unobserved, not
+  passed (prompt/skill-defined judgment).
+- **Linear origin + companion live proof** — deferred by reviewed decision to successor node
+  **1892/5.4** (offline parity pins cited in the criteria table); recorded as
+  not-live-proven.
+- **The `subagent-compat` guidance re-verify** — successor node **1892/5.5** (D2).
 
 ### Teardown/census attestations
 
-*(pending)*
+- **Objective census (pre/post):** exactly `+1` — `#1926`, precisely the intentionally
+  retained saved output (`#1892` → `#1892, #1926`). No other objective delta exists.
+- **Tree/HEAD:** `git status --porcelain` empty after probe 2; `git rev-parse HEAD` still
+  `5c3b5058…` — the dream actors made no repository edit.
+- **Raw artifacts:** no child-transcript mining pipeline ran (Part A's
+  product-artifact-first posture); the run-scoped manifest, finalized bundle, and transfer
+  file remain at their real `scratch/runs/01M0FYB03K4V9CP7HY113Y68SB/` locations under
+  normal perk run-scratch GC; the parent session remains in Pi's normal session history (no
+  duplicate transcript was created anywhere).
+- **Capture root:** deletion scheduled immediately after this evidence commit, per Part A
+  step 8 — the confirming attestation lands in the follow-up commit.
+- **No raw residue staged:** `git diff --cached --name-only` at this commit contained only
+  `docs/` paths — no `.perk/` or `.pi-subagents/` path staged.
