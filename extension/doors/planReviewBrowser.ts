@@ -287,21 +287,25 @@ export async function routePlanReviewDecision(
 }
 
 /**
- * The background open: start the plan-review browser, prime BOTH companion surfaces the moment
- * the port is picked (the URL is deterministic — see the header note), observe readiness and
- * the human decision in background tasks, and inject the guidance immediately. While
+ * The guidance-returning open core: start the plan-review browser, prime BOTH companion
+ * surfaces the moment the port is picked (the URL is deterministic — see the header note),
+ * observe readiness and the human decision in background tasks, and RETURN the composed
+ * guidance string (template + the `command:plan-review-browser` binding suffix) — the caller
+ * decides how to deliver it (the door wrapper injects it via `sendUserMessage`; `plan_review`'s
+ * wave arm returns it as a non-terminating tool result, contracts.md §8.23). Returns `null` on
+ * the synchronous port-pick failure arm (loudly reported here — the caller falls back). While
  * plannotator sets up, its in-process `console.error` chatter re-routes through the TUI-safe
  * report() seam (the debounce restores once setup goes quiet, with the `finally` as a
  * backstop). `deps` is the injectable browser-open seam (tests drive a fake port
  * picker/probe/clock).
  */
-export async function openPlanReviewAndGuide(
+export async function openPlanReviewSurface(
   pi: ExtensionAPI,
   ctx: ExtensionContext,
   gating: ToolGating,
   opts: { draft: string; custom?: string },
   deps: StartBrowserDeps = {},
-): Promise<void> {
+): Promise<string | null> {
   let started: StartedSurface<ReviewOutcome>;
   try {
     started = await startPlannotatorPlanReview(
@@ -318,7 +322,7 @@ export async function openPlanReviewAndGuide(
       `could not pick a free local port for the plannotator plan-review server: ${detail}`,
       { alsoLog: true },
     );
-    return;
+    return null;
   }
 
   // Prime BOTH companion surfaces the moment the port is picked: push_annotations serves this
@@ -380,10 +384,26 @@ export async function openPlanReviewAndGuide(
       ? `working plan draft → plannotator browser review + draft reviewers (custom lane: ${opts.custom}) → APPROVE auto-saves / DENY returns feedback`
       : "working plan draft → plannotator browser review + draft reviewers → APPROVE auto-saves / DENY returns feedback",
   );
-  pi.sendUserMessage(
+  return (
     planReviewBrowserGuidance({ ...(opts.custom !== undefined ? { custom: opts.custom } : {}) }) +
-      bindingSuffix(ctx.cwd, `command:${SCOPE}`),
+    bindingSuffix(ctx.cwd, `command:${SCOPE}`)
   );
+}
+
+/**
+ * The door-facing open: the thin `sendUserMessage` wrapper over `openPlanReviewSurface` — the
+ * command handler's delivery is the guidance injection; a `null` core return (port-pick
+ * failure, already loudly reported) injects nothing.
+ */
+export async function openPlanReviewAndGuide(
+  pi: ExtensionAPI,
+  ctx: ExtensionContext,
+  gating: ToolGating,
+  opts: { draft: string; custom?: string },
+  deps: StartBrowserDeps = {},
+): Promise<void> {
+  const guidance = await openPlanReviewSurface(pi, ctx, gating, opts, deps);
+  if (guidance !== null) pi.sendUserMessage(guidance);
 }
 
 // ------------------------------------------------------------------------ registration

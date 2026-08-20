@@ -29,6 +29,17 @@
 // is always explicit) / backend-unavailable all soft-skip so plan authoring never wedges — those
 // arms keep the present-the-plan + human-`/plan-save` discipline (the manual failsafe).
 //
+// THE LAUNCH CHOOSER (plannotator arms only, §8.23): on an eligible round (injected `WaveLaunch`
+// deps present, plannotator loaded, the review source a validated draft artifact) the tool first
+// asks the human — "Browser review + reviewer wave" vs "Browser review only" — before anything
+// launches. The wave choice collects an optional trimmed custom angle, delegates to the door's
+// guidance-returning open core (openPlanReviewSurface / openObjectiveReviewSurface, injected —
+// never imported: doors value-import this module), and returns the NON-terminating
+// `wave_launched` result carrying the door guidance verbatim; the browser decision then routes
+// through the door's background decision task. Esc ⇒ the plain flavor (never a cancel); abort
+// outranks every dialog result; a null opener return (synchronous port-pick failure, loudly
+// reported in the core) falls open to the plain blocking review in the same call.
+//
 // `ctx.ui.editor` takes NO AbortSignal (unlike select/confirm/input) — `signal?.aborted` is
 // checked between dialogs; an in-flight editor dialog survives a turn abort and its result is
 // discarded (the aborted arm wins). Enter submits in the editor dialog (Shift+Enter = newline),
@@ -69,6 +80,7 @@ import {
   isPlannotatorPlanSelected,
 } from "../adapters/planAdapterPlannotator.ts";
 import type { Result } from "../substrate/result.ts";
+import { readSessionArtifact } from "../substrate/sessionData.ts";
 import type { ToolGating } from "../substrate/toolGating.ts";
 import { paramsOf, stringParam } from "../substrate/toolParams.ts";
 import { applyUnifiedDiff } from "../substrate/unifiedDiff.ts";
@@ -78,7 +90,11 @@ import { readGistDraft, renderGistDraft } from "./gistDraft.ts";
 import { type GistApprovalSaveOutcome, gistApprovalSave } from "./gistSave.ts";
 import { implementHereExit, implementHereGuidance } from "./implementHere.ts";
 import { OBJECTIVE_AUTHOR_STAGE } from "./objectiveAuthor.ts";
-import { readObjectiveDraft, renderObjectiveDraft } from "./objectiveDraft.ts";
+import {
+  OBJECTIVE_DRAFT_ARTIFACT,
+  readObjectiveDraft,
+  renderObjectiveDraft,
+} from "./objectiveDraft.ts";
 import { readNodeClaim } from "./objectivePlan.ts";
 import {
   OBJECTIVE_SAVE_STAGE,
@@ -472,6 +488,92 @@ export function applyPlannotatorDirectEdits(
   return { outcome, reviewedPlan: basePlan, edited: false, directEditsFailed: false };
 }
 
+// ------------------------------------------------------ the launch chooser (the wave arm)
+
+/**
+ * The injected wave-launch deps (composed in index.ts from the door exports — structural on
+ * purpose: this module imports NOTHING from door modules, avoiding the value-import cycle;
+ * `planReviewBrowser.ts` already value-imports this module). `present` is the plannotator
+ * presence probe (`plannotatorPresent(pi)` at the call site); `plan`/`objective` are the
+ * guidance-returning door open cores (`openPlanReviewSurface` / `openObjectiveReviewSurface`) —
+ * one open path, byte-identical door semantics (contracts.md §8.23). `null` from an opener is
+ * the synchronous port-pick failure (already loudly reported inside the core) — the caller
+ * falls open to the plain blocking review.
+ */
+export interface WaveLaunch {
+  present(): boolean;
+  plan(ctx: ExtensionContext, opts: { draft: string; custom?: string }): Promise<string | null>;
+  objective(
+    ctx: ExtensionContext,
+    opts: { rendered: string; artifactRaw: string; custom?: string },
+  ): Promise<string | null>;
+}
+
+/** The minimal structural `ctx.ui` subset the launch chooser needs (both dialogs signal-aware). */
+export interface ReviewLaunchUI {
+  select(
+    title: string,
+    options: string[],
+    opts?: { signal?: AbortSignal },
+  ): Promise<string | undefined>;
+  input(
+    title: string,
+    placeholder?: string,
+    opts?: { signal?: AbortSignal },
+  ): Promise<string | undefined>;
+}
+
+/** The launch chooser's outcome: the review flavor (never a cancel), or the aborted turn. */
+export type ReviewLaunchChoice =
+  | { launch: "plain" }
+  | { launch: "wave"; custom?: string }
+  | { launch: "aborted" };
+
+const LAUNCH_WAVE = "Browser review + reviewer wave";
+const LAUNCH_PLAIN = "Browser review only";
+const CUSTOM_ANGLE_TITLE = "Custom review angle (optional — Enter to skip)";
+
+/**
+ * The launch chooser (pure over the injected ui slice — offline-testable): every eligible
+ * plannotator round asks the human whether the browser review launches WITH the streamed
+ * reviewer wave; the wave choice then asks for an optional custom review angle. Esc/dismiss
+ * anywhere selects a FLAVOR, never cancels the review (Esc at the chooser ⇒ plain; Esc/blank at
+ * the angle input ⇒ wave with no custom lane — the input is `.trim()`'d before blank detection,
+ * the door handlers' exact discipline). ABORT OUTRANKS EVERYTHING: `signal?.aborted` is checked
+ * at entry and re-checked immediately after each awaited dialog, BEFORE interpreting its result
+ * (the `runFirstPartyReview` discipline) — a conforming caller can never launch a browser or
+ * enter a blocking review after the turn was interrupted. No other return paths exist.
+ */
+export async function chooseReviewLaunch(
+  ui: ReviewLaunchUI,
+  subjectNoun: string,
+  signal?: AbortSignal,
+): Promise<ReviewLaunchChoice> {
+  if (signal?.aborted) return { launch: "aborted" };
+  const picked = await ui.select(`${subjectNoun} review launch`, [LAUNCH_WAVE, LAUNCH_PLAIN], {
+    signal,
+  });
+  if (signal?.aborted) return { launch: "aborted" }; // abort outranks Esc AND any selection
+  if (picked !== LAUNCH_WAVE) return { launch: "plain" }; // Esc/dismiss = the plain flavor
+  const raw = await ui.input(CUSTOM_ANGLE_TITLE, undefined, { signal });
+  if (signal?.aborted) return { launch: "aborted" }; // abort outranks the input result too
+  const custom = (raw ?? "").trim();
+  return custom.length > 0 ? { launch: "wave", custom } : { launch: "wave" };
+}
+
+/**
+ * The NON-terminating wave-launched result: the door core's guidance rides back verbatim as the
+ * tool text (same templates, same binding suffix — the model behaves identically whether the
+ * human summoned the door or chose the wave inside `plan_review`), and the human's browser
+ * decision routes through the door's background decision task — never through this call.
+ */
+function waveLaunchedResult(subject: ReviewSubject, guidance: string): ToolResult {
+  return {
+    content: [{ type: "text", text: guidance }],
+    details: { ok: true, status: "wave_launched", ...subject.detailsExtra },
+  };
+}
+
 // ----------------------------------------------------------------- the first-party review core
 
 /** The minimal structural `ctx.ui` subset the first-party review needs (the ciExecutor.ts pure-core + injected-fakes recipe). */
@@ -650,10 +752,19 @@ export async function executeObjectiveReview(
   gating: ToolGating,
   bridge: { review(plan: string, signal?: AbortSignal): Promise<ReviewOutcome> },
   signal?: AbortSignal,
+  wave?: WaveLaunch,
 ): Promise<ToolResult> {
   // 1. Headless → soft skip (fail-open; never wedges CI/supervisor runs on an interactive UI).
   if (!ctx.hasUI) return skipResult();
-  // 2. The draft artifact is the sole review source — no draft → soft skip with the
+  // 2. The wave arm's stale-guard baseline is captured BEFORE the validated read below (the
+  //    objective door's fail-closed ordering): the rendered bytes always derive from a read at
+  //    or after this baseline, so a concurrent objective_draft write between the two reads makes
+  //    the browsed render NEWER than the baseline and routeObjectiveReviewDecision's existing
+  //    guard refuses the approval — the reverse order would fail open (approve unreviewed
+  //    bytes). Raw artifact bytes on purpose: the save-authoritative surface catches
+  //    render-invisible changes.
+  const baseline = readSessionArtifact(ctx, OBJECTIVE_DRAFT_ARTIFACT);
+  // 3. The draft artifact is the sole review source — no draft → soft skip with the
   //    objective_draft redirect.
   const draft = readObjectiveDraft(ctx);
   if (draft === null) {
@@ -675,13 +786,31 @@ export async function executeObjectiveReview(
       },
     };
   }
-  // 3. The reviewed bytes are the RENDERED markdown (prose + roadmap table) — never raw JSON.
+  // 4. The reviewed bytes are the RENDERED markdown (prose + roadmap table) — never raw JSON.
   const rendered = renderObjectiveDraft(draft);
-  // 4. Backend dispatch (mirrors the plan path): plannotator-selected → the bridge; ANY other
+  // 5. Backend dispatch (mirrors the plan path): plannotator-selected → the bridge; ANY other
   //    selection → the first-party editor, view-only.
   const sig = signal ?? ctx.signal;
   let outcome: ReviewOutcome;
   if (isPlannotatorPlanSelected(ctx.cwd)) {
+    // The launch chooser (contracts.md §8.23): every eligible round the human picks with/without
+    // the streamed reviewer wave BEFORE anything launches. Eligibility is drafts-only — the wave
+    // door stale-guards the raw artifact baseline, so a null baseline keeps the plain path
+    // (silently: there is no forced mode to warn about).
+    if (wave?.present() && baseline !== null) {
+      const choice = await chooseReviewLaunch(ctx.ui, "Objective", sig);
+      if (choice.launch === "aborted") return objectiveReviewOutcomeResult({ status: "aborted" });
+      if (choice.launch === "wave") {
+        const guidance = await wave.objective(ctx, {
+          rendered,
+          artifactRaw: baseline.content,
+          ...(choice.custom !== undefined ? { custom: choice.custom } : {}),
+        });
+        if (guidance !== null) return waveLaunchedResult(OBJECTIVE_SUBJECT, guidance);
+        // null = the synchronous port-pick failure (already loudly reported inside the core) —
+        // fall open to the plain blocking review in the same call: the review never wedges.
+      }
+    }
     outcome = await bridge.review(rendered, sig);
     // APPROVE + Direct Edits (browser edits of the RENDERED markdown), checked BEFORE the
     // approved-save routing (the approved-first discipline): the save seam re-reads the
@@ -731,7 +860,7 @@ export async function executeObjectiveReview(
     });
     outcome = fp.outcome;
   }
-  // 5. An APPROVED decision (either backend) wires into the objectiveApprovalSave seam (the
+  // 6. An APPROVED decision (either backend) wires into the objectiveApprovalSave seam (the
   //    STRUCTURED artifact is re-read at save time — never the rendered bytes; auto-save → D1a
   //    gate exit → terminating result); everything else maps via objectiveReviewOutcomeResult.
   //    Approved-first routing: objectiveReviewOutcomeResult's completed case renders DENIED.
@@ -906,6 +1035,7 @@ export async function executePlanReview(
   bridge: { review(plan: string, signal?: AbortSignal): Promise<ReviewOutcome> },
   params: unknown,
   signal?: AbortSignal,
+  wave?: WaveLaunch,
 ): Promise<ToolResult> {
   // Tool-boundary decode, in this tool's native fail-open vocabulary: a MISTYPED
   // `plan` (or non-object params) skip-shapes (`reason: "bad_input"`) without reviewing; an
@@ -937,7 +1067,7 @@ export async function executePlanReview(
   //    the gist arm (the rendered gist draft).
   const launchedStage = rebuildWorkflowState(branchOf(ctx)).stage;
   if (launchedStage === OBJECTIVE_AUTHOR_STAGE || launchedStage === OBJECTIVE_SAVE_STAGE) {
-    return executeObjectiveReview(pi, ctx, gating, bridge, signal ?? ctx.signal);
+    return executeObjectiveReview(pi, ctx, gating, bridge, signal ?? ctx.signal, wave);
   }
   if (launchedStage === GIST_AUTHOR_STAGE) {
     return executeGistReview(pi, ctx, gating, bridge, signal ?? ctx.signal);
@@ -974,6 +1104,24 @@ export async function executePlanReview(
   let edited = false;
   let directEditsFailed = false;
   if (isPlannotatorPlanSelected(ctx.cwd)) {
+    // The launch chooser (contracts.md §8.23): every eligible round the human picks with/without
+    // the streamed reviewer wave BEFORE anything launches. Eligibility is drafts-only — the wave
+    // door reviews and stale-guards the validated artifact, so a param-tier source keeps the
+    // plain path (silently: there is no forced mode to warn about; the `wave === undefined` arm
+    // is defensive/test-only and behaves identically).
+    if (wave?.present() && src.source === "plan-draft") {
+      const choice = await chooseReviewLaunch(ctx.ui, "Plan", sig);
+      if (choice.launch === "aborted") return reviewOutcomeResult({ status: "aborted" });
+      if (choice.launch === "wave") {
+        const guidance = await wave.plan(ctx, {
+          draft: src.plan,
+          ...(choice.custom !== undefined ? { custom: choice.custom } : {}),
+        });
+        if (guidance !== null) return waveLaunchedResult(PLAN_SUBJECT, guidance);
+        // null = the synchronous port-pick failure (already loudly reported inside the core) —
+        // fall open to the plain blocking review in the same call: the review never wedges.
+      }
+    }
     outcome = await bridge.review(src.plan, sig);
     // APPROVE + Direct Edits (browser plan edits, contracts.md §8.23): mechanically apply the
     // reviewer's diff via the shared helper (the first-party pre-verdict write-back, replayed
@@ -1032,8 +1180,10 @@ export async function executePlanReview(
  * Register `plan_review` — perk's universal review door. In READ_ONLY_TOOLS so it is callable
  * INSIDE plan mode (the whole point — review happens before the gate ever comes off). Fail-open
  * everywhere: headless / dismissed / backend-unavailable all soft-skip so authoring never wedges.
+ * `wave` is the injected wave-launch deps (index.ts composes them from the door open cores);
+ * absent ⇒ the chooser never appears and every path is byte-stable.
  */
-export function registerPlanReview(pi: ExtensionAPI, gating: ToolGating): void {
+export function registerPlanReview(pi: ExtensionAPI, gating: ToolGating, wave?: WaveLaunch): void {
   const bridge = createPlannotatorBridge(pi.events);
 
   pi.registerTool({
@@ -1044,14 +1194,18 @@ export function registerPlanReview(pi: ExtensionAPI, gating: ToolGating): void {
       "selected, otherwise perk's in-TUI editor review — and wait for the human decision. " +
       "Reviews the validated plan-draft artifact (keep it current with plan_draft); on approval " +
       "the plan is auto-saved and the turn terminates. On deny, revise per the returned " +
-      "feedback, rewrite the draft with plan_draft, and call again. No-op skip when the session " +
-      "is headless or the review is dismissed.",
+      "feedback, rewrite the draft with plan_draft, and call again. On the Plannotator surface " +
+      "the human may first opt into a streamed reviewer wave — the call then returns immediately " +
+      'with wave guidance (status "wave_launched") to follow in the same turn, and the browser ' +
+      "decision routes back automatically. No-op skip when the session is headless or the " +
+      "review is dismissed.",
     promptSnippet: "Request a human review of the working plan draft",
     promptGuidelines: [
       "Keep the working draft current with plan_draft — the validated plan-draft artifact is what plan_review reviews AND auto-saves; the plan param is only a fallback when no draft exists.",
       "Call plan_review only when the plan is decision-complete.",
       "On a DENIED review, revise per the feedback, rewrite the draft with plan_draft, then call plan_review again.",
       "On an APPROVED plan_review, the plan is auto-saved and the turn ends — never re-dump the plan as a final message and never tell the user to run /plan-save; relay the save outcome instead.",
+      "On a wave_launched result (the human opted into the reviewer wave), follow the returned guidance in the same turn — launch the wave and relay its findings; the human's browser decision routes back automatically, so never re-call plan_review while that browser review is open.",
       "If plan_review reports it was skipped or unavailable (headless, dismissed), fall back to presenting the complete plan; the human runs /plan-save (the manual failsafe).",
     ],
     executionMode: "sequential",
@@ -1068,7 +1222,7 @@ export function registerPlanReview(pi: ExtensionAPI, gating: ToolGating): void {
       },
     },
     async execute(_toolCallId, params, signal, _onUpdate, ctx) {
-      return executePlanReview(pi, ctx, gating, bridge, params, signal);
+      return executePlanReview(pi, ctx, gating, bridge, params, signal, wave);
     },
   });
 }

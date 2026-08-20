@@ -9,7 +9,8 @@
 // (1) the plannotator review-step authoring context (injected while the gate is active AND
 // plannotator is selected — THREE content flavors, one customType, each once-only: branch-scan
 // dedup'd on the flavor's marker: the plan bridge context, the objective flavor when the stage
-// is `objective-author`, or the gist flavor when the stage is `gist-author`) and (2) the pure
+// is `objective-author` or `objective-save` (both objective stages route to the objective
+// review arm), or the gist flavor when the stage is `gist-author`) and (2) the pure
 // event-bus bridge
 // (`requestPlannotatorPlanReview`; `createPlannotatorBridge` is its thin structural wrapper)
 // that planReview.ts dispatches to when plannotator is the selected plan provider and the
@@ -52,6 +53,7 @@ import { randomUUID } from "node:crypto";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { GIST_AUTHOR_STAGE } from "../factories/gistAuthor.ts";
 import { OBJECTIVE_AUTHOR_STAGE } from "../factories/objectiveAuthor.ts";
+import { OBJECTIVE_SAVE_STAGE } from "../factories/objectiveSave.ts";
 import { resolvedPlanProviderId } from "../factories/planMode.ts";
 // Type-only (erased at runtime — no cycle): the outcome vocabulary lives with the review door.
 import type { ReviewOutcome } from "../factories/planReview.ts";
@@ -86,8 +88,8 @@ export const PLAN_ADAPTER_PLANNOTATOR_CONTEXT = render("contexts/adapters/planno
 });
 
 /**
- * The objective flavor of the bridge prompt, injected in an
- * `objective-author` session instead of the plan flavor. An APPROVED review auto-saves the
+ * The objective flavor of the bridge prompt, injected in an objective-authoring session
+ * (stage `objective-author` or `objective-save`) instead of the plan flavor. An APPROVED review auto-saves the
  * objective via the `objectiveApprovalSave` seam; `/objective-save` is the manual failsafe on
  * the skipped/unavailable arms.
  */
@@ -288,18 +290,19 @@ export function extractDirectEdits(feedback: string): { diff: string; remainder?
  */
 export function registerPlanAdapterPlannotator(pi: ExtensionAPI): void {
   // Inject the bridge context while the read-only gate is active AND plannotator is selected.
-  // Three content flavors, one customType: an objective-author session (also read-only) gets
-  // the objective flavor (the review surface renders the objective draft), a gist-author
-  // session gets the gist flavor (the rendered gist draft); any other gated stage gets the plan
-  // flavor. The gate-active check reads the persisted `perk:workflow-state.mode` (the gate's
-  // state twin) — never the gate itself.
+  // Three content flavors, one customType: an objective-authoring session (also read-only —
+  // BOTH objective stages: `plan_review` routes objective-author AND objective-save to the
+  // objective review arm) gets the objective flavor (the review surface renders the objective
+  // draft), a gist-author session gets the gist flavor (the rendered gist draft); any other
+  // gated stage gets the plan flavor. The gate-active check reads the persisted
+  // `perk:workflow-state.mode` (the gate's state twin) — never the gate itself.
   pi.on("before_agent_start", async (_event, ctx) => {
     if (!isPlannotatorPlanSelected(ctx.cwd)) return;
     const branch = branchOf(ctx);
     const state = rebuildWorkflowState(branch);
     if (state.mode !== "read-only") return;
     const flavor =
-      state.stage === OBJECTIVE_AUTHOR_STAGE
+      state.stage === OBJECTIVE_AUTHOR_STAGE || state.stage === OBJECTIVE_SAVE_STAGE
         ? "objective"
         : state.stage === GIST_AUTHOR_STAGE
           ? "gist"
