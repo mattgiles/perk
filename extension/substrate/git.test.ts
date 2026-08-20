@@ -8,7 +8,14 @@ import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { commitsSince, headSha, revalidationBracket, sinceBaseSha, worktreeDirty } from "./git.ts";
+import {
+  commitsSince,
+  headSha,
+  indexHidesChanges,
+  revalidationBracket,
+  sinceBaseSha,
+  worktreeDirty,
+} from "./git.ts";
 
 /** `git init` a scratch repo: two commits, `origin/main` planted at the FIRST (the base). */
 function scratchRepo(opts: { originHead?: boolean } = {}): { cwd: string; baseSha: string } {
@@ -139,4 +146,45 @@ test("revalidationBracket: an unprovable dirty probe drifts (the second fail-clo
   const result = revalidationBracket(cwd, sha, { dirty: () => null });
   assert.equal(result.ok, false);
   assert.match(result.detail ?? "", /cleanliness could not be verified/);
+});
+
+test("indexHidesChanges: false on a plain repo, true under skip-worktree/assume-unchanged, null outside a repo", () => {
+  const { cwd } = scratchRepo();
+  const g = (...args: string[]) =>
+    execFileSync("git", args, { cwd, stdio: ["ignore", "ignore", "ignore"] });
+  assert.equal(indexHidesChanges(cwd), false);
+  g("update-index", "--skip-worktree", "seed.txt");
+  assert.equal(indexHidesChanges(cwd), true, "skip-worktree is detected");
+  g("update-index", "--no-skip-worktree", "seed.txt");
+  g("update-index", "--assume-unchanged", "seed.txt");
+  assert.equal(indexHidesChanges(cwd), true, "assume-unchanged is detected");
+  const norepo = mkdtempSync(join(tmpdir(), "perk-git-norepo-"));
+  assert.equal(indexHidesChanges(norepo), null);
+});
+
+test("revalidationBracket: a flagged index drifts — status can no longer prove cleanliness", () => {
+  // The hidden-edit hazard: mark a file skip-worktree and EDIT it — `git status` stays clean
+  // and HEAD still matches, so only the flags arm catches the drift.
+  const { cwd } = scratchRepo();
+  const sha = headSha(cwd);
+  assert.ok(sha !== null);
+  execFileSync("git", ["update-index", "--skip-worktree", "seed.txt"], {
+    cwd,
+    stdio: ["ignore", "ignore", "ignore"],
+  });
+  writeFileSync(join(cwd, "seed.txt"), "silently changed\n", "utf8");
+  assert.equal(worktreeDirty(cwd), false, "sanity: the status probe alone would have passed");
+  const result = revalidationBracket(cwd, sha);
+  assert.equal(result.ok, false);
+  assert.match(result.detail ?? "", /assume-unchanged\/skip-worktree/);
+  assert.match(result.detail ?? "", /cannot be proven/);
+});
+
+test("revalidationBracket: an unprovable flags probe drifts (the third fail-closed arm)", () => {
+  const { cwd } = scratchRepo();
+  const sha = headSha(cwd);
+  assert.ok(sha !== null);
+  const result = revalidationBracket(cwd, sha, { flags: () => null });
+  assert.equal(result.ok, false);
+  assert.match(result.detail ?? "", /index flag state could not be verified/);
 });

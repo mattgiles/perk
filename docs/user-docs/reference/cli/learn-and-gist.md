@@ -144,9 +144,13 @@ factories (`--worktree`, `--dry-run`, `--remote` local-only, `--json`, `--no-syn
 The door stamps an **immutable snapshot**: it fast-forwards the checkout you run it from
 **before** gathering (a guarded, best-effort sync; `--no-sync` skips it, the generic pre-launch
 sync is suppressed for this command, and `--dry-run` never syncs), requires a resolvable HEAD, a
-**clean checkout** (untracked files included — `dirty_checkout` otherwise), and every gathered
-doc **tracked** at the stamped commit (a gitignored `docs/learned` doc refuses — it would not be
-reproducible from the commit). HEAD is captured exactly once; the manifest
+**clean checkout** (untracked files included — `dirty_checkout` otherwise; an unborn HEAD is
+`invalid_input`, while a HEAD probe that fails to run is `git_error`), **no
+assume-unchanged/skip-worktree index flags** (either bit hides edits from `git status`, so a
+flagged index — e.g. a sparse checkout — refuses), and the gathered corpus **equal to the
+tracked learned corpus in both directions**: a gitignored `docs/learned` doc refuses (not
+reproducible from the commit), and a tracked doc missing from disk refuses (a sparse checkout
+must never silently narrow a whole-corpus audit). HEAD is captured exactly once; the manifest
 (`.perk/workflow/scratch/runs/<run_id>/dream-manifest.json`) carries it as `commit_sha`. Every
 git probe is fail-closed: a probe that cannot run refuses `git_error`, never a traceback.
 
@@ -157,10 +161,11 @@ skips the guard (reported as `"not-evaluated"`).
 
 In the launched session, the two-level dream wave runs under a **revalidation bracket**: after
 the wave completes — and again at draft-write and save — perk re-proves HEAD-unchanged +
-tree-clean against the stamped `commit_sha`. Drift makes the outcome stale/incomplete (the wave
-result is never finalized; drafting refuses). The bracket's claim is deliberately narrow: it
-proves **end-state** equality at each check, not mid-wave byte immutability (there is no frozen
-checkout — a transient modify-and-restore inside the window is an accepted residual).
+tree-clean (with no assume-unchanged/skip-worktree index flags, which would blind the
+cleanliness probe) against the stamped `commit_sha`. Drift makes the outcome stale/incomplete
+(the wave result is never finalized; drafting refuses). The bracket's claim is deliberately
+narrow: it proves **end-state** equality at each check, not mid-wave byte immutability (there is
+no frozen checkout — a transient modify-and-restore inside the window is an accepted residual).
 
 The session ends in one of three honest outcomes: an **incomplete audit** (any wave failure or
 drift — reported, never papered over), a **clean audit** (nothing worth selecting — reported,
@@ -171,7 +176,8 @@ The `--dry-run --json` payload carries exactly
 `{success, error_type, manifest_path, commit_sha, registry_mode, doc_count, lane_count,
 lane_ids, total_bytes, origin_guard: "not-evaluated", launched: false}` (the manifest is real —
 materialize-on-dry-run). The error vocabulary: `remote_blocked`, `invalid_input` (the `--from`
-spelling, an unborn HEAD, an untracked/ignored gathered doc, and the gather's own refusals),
+spelling, an unborn HEAD, a flagged index, an untracked/ignored gathered doc, a tracked doc
+missing from disk, and the gather's own refusals),
 `dirty_checkout`, `git_error`, `no_learned_docs`, `invalid_registry`, `incomplete_registry`,
 `origin_conflict`, `origin_lookup_failed`, `manifest_write_failed`, and `not_a_repo`. Exits:
 `0` ok · `1` op-failure/refusal · `2` not-a-repo.

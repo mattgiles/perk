@@ -9639,8 +9639,10 @@ tests the in-memory adapter.
 aggregate — `{complete, analysis: {complete, analyses, failures}, bracket, bundle, reducers:
 {launched, skip_reason, complete, reports, failures}, attempts}` — `complete` = both waves
 complete AND the bracket ok; `bracket` is `{ok, detail}` when evaluated and `null` when an
-earlier arm already made the run incomplete (incomplete analysis, budget-exceeded, the
-`io_error` fail arms, incomplete reducers — the bracket fn is never invoked on those arms);
+earlier incomplete **ok** arm skipped it (incomplete analysis, budget-exceeded, incomplete
+reducers — the bracket fn is never invoked on those arms; the `io_error` **fail** arms return
+the failure-details shape below — error fields plus `{analyses, attempts}` — which carries no
+`bracket` field at all);
 the `skip_reason` vocabulary is `incomplete-analysis` (strict first wave failed —
 no bundle write, **no reducer launch**) and `budget-exceeded` (composed but over budget —
 nothing written, no reducer launch). A drifted bracket retains the analyses AND reducer
@@ -10052,16 +10054,27 @@ an unprovable probe (e.g. `git status` cannot run) becomes a typed `git_error` r
 a traceback and never an assumed-clean snapshot; (4a) the ONE pre-gather guarded fast-forward
 (`_sync_main_checkout`, only when `not dry_run and not no_sync`; `run_seeded_door` gets
 `no_sync=True` unconditionally so the in-launch sync never fires — the harvest
-one-revision-boundary discipline); (4b) the **single SHA capture** — `git.resolve_commit`
-runs exactly ONCE per invocation; an unresolvable HEAD refuses `invalid_input`; (4c) the
-**clean-checkout requirement** — `git.is_dirty` (untracked included) refuses the distinct
-type `dirty_checkout` (a distinct repair action: commit/stash); runs on `--dry-run` too; (5)
-the gather (`gather_dream`) — its §8.59 refusals pass through the door envelope unchanged;
-(6) the **tracked-corpus rule** (still inside the GitError boundary): every gathered doc path
-must be a member of `git.tracked_paths(repo_root, ["docs/learned"])` — `git status
---porcelain` omits gitignored files, so an IGNORED `docs/learned/**/*.md` could be gathered
-while the tree reports clean; a violation refuses `invalid_input` naming every offender as
-not reproducible from the stamped commit (plain-untracked docs already refused at 4c); (7)
+one-revision-boundary discipline); (4b) the **single SHA capture** — the STRICT resolver
+`git.head_commit` runs exactly ONCE per invocation: an UNBORN head (a `--verify --quiet`
+verification failure) refuses `invalid_input` ("commit once"), while any other probe failure
+raises `GitError` into the boundary's `git_error` arm — a broken probe never misreports as
+"commit once"; (4c) the **clean-checkout requirement** — `git.is_dirty` (untracked included)
+refuses the distinct type `dirty_checkout` (a distinct repair action: commit/stash); runs on
+`--dry-run` too; (4d) the **index-flag refusal** — `git.index_flagged_paths` (any
+assume-unchanged or skip-worktree entry, the `ls-files -v` lowercase/`S` tags) refuses
+`invalid_input` naming the flagged paths (≤10 shown): either bit hides edits from
+`git status`, so 4c's proof would not be a proof (a sparse checkout is the common producer);
+(5) the gather (`gather_dream`) — its §8.59 refusals pass through the door envelope
+unchanged; (6) the **tracked-corpus rule** (still inside the GitError boundary), BOTH
+directions — the gathered doc-path set must EQUAL the tracked learned corpus (the tracked
+`docs/learned/**/*.md` set minus the generated `index.md` — the `read_learned_docs`
+enumeration rule): gathered ⊆ tracked because `git status --porcelain` omits gitignored
+files, so an IGNORED doc could be gathered while the tree reports clean (refused
+`invalid_input` naming every offender as not reproducible from the stamped commit;
+plain-untracked docs already refused at 4c); tracked ⊆ gathered because the gather
+enumerates the FILESYSTEM, so a tracked doc absent from disk (a sparse/skip-worktree
+checkout) would silently narrow a "whole-corpus" audit (refused `invalid_input` naming every
+missing doc); (7)
 the **pre-launch active-origin guard** (real launch only — skipped entirely on `--dry-run`,
 which stays offline): `resolve_objective_store(repo_root)` +
 `find_open_objective_by_origin(origin=LEARN_DREAM, exclude_run_id=None)` wrapped in ONE
@@ -10083,8 +10096,8 @@ exactly: `{success, error_type, manifest_path, commit_sha, registry_mode, doc_co
 lane_count, lane_ids, total_bytes, origin_guard: "not-evaluated", launched: false}`.
 
 **The error vocabulary** (one envelope): `remote_blocked`, `invalid_input` (the `--from`
-spelling, an unborn HEAD, the gather's §8.59 `invalid_input` arms, the tracked-corpus rule),
-`dirty_checkout`, `git_error`, `no_learned_docs`, `invalid_registry`, `incomplete_registry`,
+spelling, an unborn HEAD, the index-flag refusal, the gather's §8.59 `invalid_input` arms,
+both tracked-corpus arms), `dirty_checkout`, `git_error`, `no_learned_docs`, `invalid_registry`, `incomplete_registry`,
 `origin_conflict`, `origin_lookup_failed`, `manifest_write_failed`, `not_a_repo`. Stable
 exits: `0` ok · `1` op-failure/refusal · `2` not-a-repo.
 
@@ -10104,7 +10117,10 @@ unit/≤12-distinct-node selection shape, the report-only harvest follow-ups, th
 **The revalidation bracket.** `revalidationBracket(cwd, expectedSha, probes?)`
 (`extension/substrate/git.ts`) — the module's ONE deliberately **fail-closed** composition:
 drift when HEAD cannot be resolved, when HEAD ≠ `expectedSha` (naming both SHAs), when
-cleanliness cannot be verified, or when the tree is dirty; ok otherwise. `/.perk/workflow/`
+cleanliness cannot be verified, when the tree is dirty, when the index-flag state cannot be
+verified, or when the index carries assume-unchanged/skip-worktree flags
+(`indexHidesChanges` — either bit hides edits from the status probe, the same hazard the
+door's 4d refusal closes at launch time); ok otherwise. `/.perk/workflow/`
 is gitignored, so run-scratch writes (the manifest, `dream-analyses.json`) never trip the
 tree-clean check. Two wiring points, by reference: the post-wave check inside
 `executeDreamWave` (§8.61 — after both waves complete, BEFORE the finalize write; drift skips
@@ -10117,7 +10133,8 @@ and tree clean at each check against the stamped `commit_sha` — never mid-wave
 immutability. Accepted residuals (documented, not closed): (1) a transient
 modify-and-restore during the wave window is invisible (a revalidation bracket, not a frozen
 checkout — no physically frozen/materialized-commit snapshot in v1, the objective's stated
-non-goal); (2) an ignored `docs/learned` file appearing MID-session is invisible to the
+non-goal — a transient flag-edit-unflag inside the window is the same class); (2) an
+ignored `docs/learned` file appearing MID-session is invisible to the
 tree-clean check (launch-time trackedness is door-enforced; the mid-session blind spot is the
 same window class); (3) the §8.64 gate-check→create race window is unchanged (the save-time
 origin re-check + adjacency own it).

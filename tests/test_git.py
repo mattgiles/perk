@@ -340,6 +340,30 @@ def test_is_dirty(tmp_path):
     assert git.is_dirty(work) is True
 
 
+def test_head_commit_strict_arms(git_repo, tmp_path_factory):
+    # A committed repo resolves to the same SHA as rev-parse.
+    assert git.head_commit(git_repo) == _sha(git_repo)
+    # An UNBORN head (git init, no commits) is None — the user-repairable arm.
+    unborn = tmp_path_factory.mktemp("unborn")
+    subprocess.run(["git", "init", "-q"], cwd=unborn, check=True)
+    assert git.head_commit(unborn) is None
+    # Any other probe failure raises — never folded into the unborn None (the strict twin of
+    # resolve_commit; a broken probe must not misreport as "commit once").
+    with pytest.raises(git.GitError):
+        git.head_commit(tmp_path_factory.mktemp("norepo"))
+
+
+def test_index_flagged_paths(git_repo, tmp_path_factory):
+    assert git.index_flagged_paths(git_repo) == []
+    subprocess.run(["git", "update-index", "--skip-worktree", "f.txt"], cwd=git_repo, check=True)
+    assert git.index_flagged_paths(git_repo) == ["f.txt"]
+    subprocess.run(["git", "update-index", "--no-skip-worktree", "f.txt"], cwd=git_repo, check=True)
+    subprocess.run(["git", "update-index", "--assume-unchanged", "f.txt"], cwd=git_repo, check=True)
+    assert git.index_flagged_paths(git_repo) == ["f.txt"]
+    with pytest.raises(git.GitError):  # a failed probe propagates (no silent pass)
+        git.index_flagged_paths(tmp_path_factory.mktemp("norepo"))
+
+
 # --- origin-aware create base helpers ---------------------------------------------------
 
 

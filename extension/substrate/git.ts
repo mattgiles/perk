@@ -117,23 +117,53 @@ export function worktreeDirty(cwd: string): boolean | null {
 }
 
 /**
+ * Whether the index carries `assume-unchanged` (a lowercase `git ls-files -v` tag) or
+ * `skip-worktree` (`S`/`s` — sparse checkouts) entries. Either bit hides worktree edits from
+ * `git status --porcelain`, so a status-based cleanliness proof over a flagged index is not a
+ * proof. **Fail-open to null** on any failure (not a repo, git missing) — callers must NOT
+ * conflate null with "no flags". Own `execFileSync` rather than the `git()` helper: `git()`
+ * conflates empty output (an empty index — meaningful here) with failure.
+ */
+export function indexHidesChanges(cwd: string): boolean | null {
+  try {
+    const out = execFileSync("git", ["ls-files", "-v"], {
+      cwd,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+    });
+    return out.split("\n").some((line) => {
+      const tag = line[0];
+      return tag !== undefined && (tag === "S" || (tag >= "a" && tag <= "z"));
+    });
+  } catch {
+    return null;
+  }
+}
+
+/**
  * The dream-snapshot revalidation bracket (contracts.md §8.65) — the module's ONE deliberately
  * **fail-closed** composition (a documented exception to the fail-open charter above): it exists
  * to PROVE the repository still matches a stamped snapshot, so an unprovable probe must read as
- * drift, never as "unchanged". The claim is END-STATE equality only — HEAD unchanged and the
- * working tree clean at the moment of the check — never mid-window byte immutability (a
+ * drift, never as "unchanged". The claim is END-STATE equality only — HEAD unchanged, the
+ * working tree clean, and no assume-unchanged/skip-worktree index flags (which would hide edits
+ * from the status probe) at the moment of the check — never mid-window byte immutability (a
  * transient modify-and-restore inside the window is invisible by design; §8.65's accepted
- * residuals). `probes` defaults to the real `headSha`/`worktreeDirty` and exists so tests can
- * pin each fail-closed arm independently (from a non-repo fixture the HEAD arm returns first,
- * making the dirty-null arm reachable only through the seam).
+ * residuals). `probes` defaults to the real `headSha`/`worktreeDirty`/`indexHidesChanges` and
+ * exists so tests can pin each fail-closed arm independently (from a non-repo fixture the HEAD
+ * arm returns first, making the later null arms reachable only through the seam).
  */
 export function revalidationBracket(
   cwd: string,
   expectedSha: string,
-  probes?: { head?: (cwd: string) => string | null; dirty?: (cwd: string) => boolean | null },
+  probes?: {
+    head?: (cwd: string) => string | null;
+    dirty?: (cwd: string) => boolean | null;
+    flags?: (cwd: string) => boolean | null;
+  },
 ): { ok: boolean; detail: string | null } {
   const head = probes?.head ?? headSha;
   const dirty = probes?.dirty ?? worktreeDirty;
+  const flags = probes?.flags ?? indexHidesChanges;
   const actual = head(cwd);
   if (actual === null) {
     return {
@@ -150,6 +180,18 @@ export function revalidationBracket(
   }
   if (isDirty) {
     return { ok: false, detail: "the working tree is no longer clean" };
+  }
+  const hidden = flags(cwd);
+  if (hidden === null) {
+    return { ok: false, detail: "index flag state could not be verified" };
+  }
+  if (hidden) {
+    return {
+      ok: false,
+      detail:
+        "the index carries assume-unchanged/skip-worktree flag(s) — worktree cleanliness " +
+        "cannot be proven against the snapshot",
+    };
   }
   return { ok: true, detail: null };
 }

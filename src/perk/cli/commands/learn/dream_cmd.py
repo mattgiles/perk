@@ -12,8 +12,12 @@ guard, wrapped explicitly and **fail-closed** (an unanswerable lookup refuses
 ``origin_lookup_failed``, never proceeds).
 
 **The snapshot promise.** Dream audits an immutable snapshot: the preflight requires a resolvable
-HEAD, a CLEAN checkout (untracked included), and every gathered doc TRACKED at the stamped commit
-(``git status --porcelain`` omits gitignored files, so trackedness is checked separately); the one
+HEAD (via the strict :func:`perk.substrate.git.head_commit` — an unborn head refuses
+``invalid_input`` while a failed probe refuses ``git_error``), a CLEAN checkout (untracked
+included) with NO assume-unchanged/skip-worktree index flags (either bit hides edits from
+``git status``, making cleanliness unprovable), and the gathered corpus EQUAL to the tracked
+learned corpus in both directions (``git status --porcelain`` omits gitignored files and a sparse
+checkout omits tracked files from disk, so set equality is checked separately); the one
 guarded fast-forward runs BEFORE gather (suppressed on ``--dry-run``/``--no-sync``; the in-launch
 sync is always suppressed — the harvest one-revision-boundary discipline), and HEAD is captured
 exactly ONCE per invocation. The whole git preflight sits inside a ``GitError → git_error``
@@ -112,7 +116,10 @@ def dream_learn(
 
             # The SINGLE SHA capture — HEAD is resolved exactly once per invocation; the
             # manifest's commit_sha and the in-session revalidation bracket both anchor to it.
-            sha = git.resolve_commit(repo_root, "HEAD")
+            # The STRICT resolver on purpose: an unborn head returns None (the invalid_input
+            # arm below), while a failed probe raises GitError into the boundary's git_error
+            # arm — a broken probe must never misreport as "commit once".
+            sha = git.head_commit(repo_root)
             if sha is None:
                 raise UserFacingCliError(
                     "The repository has no resolvable HEAD commit — commit once before dreaming.",
@@ -131,22 +138,56 @@ def dream_learn(
                     error_type="dirty_checkout",
                 )
 
+            # No assume-unchanged/skip-worktree index flags: either bit hides edits from
+            # `git status`, so the clean check above cannot prove a flagged path matches the
+            # stamped commit (a sparse checkout is the common producer). Fail closed — the
+            # in-session revalidation bracket reads the same flags as drift.
+            flagged = git.index_flagged_paths(repo_root)
+            if flagged:
+                shown = ", ".join(flagged[:10]) + (
+                    f" (+{len(flagged) - 10} more)" if len(flagged) > 10 else ""
+                )
+                raise UserFacingCliError(
+                    "the git index carries assume-unchanged/skip-worktree flag(s) (sparse "
+                    "checkout?) — `git status` cannot prove such paths match the stamped "
+                    f"commit, so the dream snapshot is unprovable: {shown}",
+                    error_type="invalid_input",
+                )
+
             with io_step("gathering the learned corpus") as s:
                 gathered = dream.gather_dream(repo_root)
                 s.done(f"gathered {gathered.doc_count} doc(s) into {len(gathered.lanes)} lane(s)")
 
-            # The tracked-corpus check: `git status --porcelain` omits gitignored files, so an
-            # IGNORED docs/learned doc could be gathered while the tree reports clean — but it
-            # is not reproducible from the stamped commit. Every gathered doc must be tracked.
-            # (Plain-untracked docs already refused at the clean check; only ignored members
-            # reach this.)
-            tracked = set(git.tracked_paths(repo_root, ["docs/learned"]))
-            untracked = [doc.path for doc in gathered.docs if doc.path not in tracked]
+            # The tracked-corpus check, BOTH directions — the gathered corpus must EQUAL the
+            # tracked learned corpus (the same enumeration rule as `read_learned_docs`:
+            # `docs/learned/**/*.md` minus the generated index.md):
+            #  - gathered ⊆ tracked: `git status --porcelain` omits gitignored files, so an
+            #    IGNORED doc could be gathered while the tree reports clean — not reproducible
+            #    from the stamped commit (plain-untracked docs already refused at the clean
+            #    check);
+            #  - tracked ⊆ gathered: the gather enumerates the FILESYSTEM, so a tracked doc
+            #    absent from disk (a sparse/skip-worktree checkout) would silently narrow a
+            #    "whole-corpus" audit to the present subset.
+            tracked = {
+                path
+                for path in git.tracked_paths(repo_root, ["docs/learned"])
+                if path.endswith(".md") and path != "docs/learned/index.md"
+            }
+            gathered_paths = {doc.path for doc in gathered.docs}
+            untracked = sorted(gathered_paths - tracked)
             if untracked:
                 raise UserFacingCliError(
                     "gathered learned doc(s) are not tracked at the stamped commit (gitignored "
                     "or otherwise untracked) — the dream snapshot is not reproducible from "
                     f"commit {sha}: " + ", ".join(untracked),
+                    error_type="invalid_input",
+                )
+            missing = sorted(tracked - gathered_paths)
+            if missing:
+                raise UserFacingCliError(
+                    "tracked learned doc(s) are missing from the gathered corpus (sparse "
+                    "checkout?) — a whole-corpus audit never silently narrows to the docs "
+                    "present on disk: " + ", ".join(missing),
                     error_type="invalid_input",
                 )
         except git.GitError as exc:
