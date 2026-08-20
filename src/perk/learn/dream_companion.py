@@ -41,8 +41,6 @@ from perk.boundary import StrictInputModel, StrTuple
 # extension/factories/objectiveSave.ts; parity-pinned by test).
 DREAM_REPORT_TRANSFER_FILENAME = "dream-report-transfer.json"
 
-TRANSFER_SCHEMA_VERSION = "1"
-
 # The shared size backstop: the FULL rendered comment body (marker + blank line + part) must fit
 # with margin under GitHub's 65,536-char issue-comment limit (§8.62 already caps parts at 60,000
 # code points; the marker + a plausible run id stay well inside the 65,000 backstop).
@@ -68,6 +66,11 @@ _CANONICAL_INDEX_RE = re.compile(r"^[1-9][0-9]*$")
 _PERK_HTML_MARKER_RE = re.compile(r"<!--\s*/?perk:[^>]+?\s*-->")
 _DETAILS_OPEN_RE = re.compile(r"^<details><summary><code>[^<]*</code></summary>$")
 _DETAILS_CLOSE = "</details>"
+# Every line boundary `str.splitlines()` recognizes EXCEPT `\n` — `to_linear_markdown` splits on
+# all of them and rejoins with `\n`, so any other boundary form is normalized in the stored
+# Linear body and would defeat the dual-candidate byte comparison forever (the POST lands, the
+# read-back conflicts, and every retry conflicts with the immutable comment).
+_NON_CANONICAL_LINE_BOUNDARY_RE = re.compile("[\r\x0b\x0c\x1c\x1d\x1e\x85\u2028\u2029]")
 
 
 class CompanionConflictError(Exception):
@@ -125,6 +128,8 @@ def validate_report_parts(parts: Sequence[str], *, run_id: str) -> tuple[str, ..
       substring detection);
     - an exact perk-rendered ``<details><summary><code>…</code></summary>`` / ``</details>``
       wrapper line (the transcoder drops them);
+    - any line boundary other than ``\n`` (``\r``, vertical tab, form feed, FS/GS/RS, NEL,
+      U+2028/U+2029 — the transcoder's ``splitlines()`` + ``"\n".join`` normalizes them);
     - a full rendered comment body (marker + blank line + part) over
       :data:`COMPANION_COMMENT_MAX_CHARS` code points.
     """
@@ -147,6 +152,11 @@ def validate_report_parts(parts: Sequence[str], *, run_id: str) -> tuple[str, ..
             violations.append(
                 f"{where}: carries a perk-rendered <details> wrapper line (dropped by the "
                 "Linear transcoder)"
+            )
+        if _NON_CANONICAL_LINE_BOUNDARY_RE.search(part):
+            violations.append(
+                f"{where}: carries a line boundary other than \\n (normalized by the Linear "
+                "transcoder)"
             )
         body_length = len(render_part_comment(run_id, index, part))
         if body_length > COMPANION_COMMENT_MAX_CHARS:
@@ -187,8 +197,9 @@ def _parse_companion_comment(
 
     Returns ``None`` when the body carries no marker text (unrelated untrusted DATA). A body
     carrying the marker text MUST parse strictly: exactly one marker-text occurrence, never
-    edited, the marker on the first line, and a canonical-decimal index — anything else raises
-    :class:`CompanionConflictError`.
+    edited, the marker on the PHYSICAL first line (leading blank lines or indentation are
+    corruption, never normalized away — this applies to foreign-run comments identically), and
+    a canonical-decimal index — anything else raises :class:`CompanionConflictError`.
     """
     if _MARKER_TEXT not in body:
         return None
@@ -199,7 +210,9 @@ def _parse_companion_comment(
         raise CompanionConflictError(
             f"{where}: companion comment was edited at {edited_at} (perk never edits a part)"
         )
-    lines = body.strip().splitlines()
+    lines = body.splitlines()
+    # The physical first line — trailing whitespace on the line is tolerated (backend padding),
+    # leading content is not (`^`-anchored regexes refuse indentation).
     first = lines[0].rstrip() if lines else ""
     match = _HTML_MARKER_RE.match(first) or _INLINE_MARKER_RE.match(first)
     if match is None:

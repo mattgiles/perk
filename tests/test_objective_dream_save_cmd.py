@@ -1,9 +1,10 @@
 """The `perk objective create` dream-transfer arc (contracts.md §8.64).
 
-Recording Protocol fakes pin the D2 ordering (transfer decode → stacked prepare → origin guard →
-create → carrier → parts → artifact → header), the refusal ladder (each `invalid_input` BEFORE
-anything durable), the fail-closed guard, the converging retry, the byte-positioned
-`post_status_update`, and the byte-identical payload/dry-run behavior.
+Recording Protocol fakes pin the D2 ordering (transfer decode → the GitHub auth probe → stacked
+prepare → origin guard → create → carrier → parts → artifact → header), the refusal ladder (each
+`invalid_input` BEFORE the auth probe or anything durable — the auth stub records into the same
+event list, so `events == []` proves zero network reach), the fail-closed guard, the converging
+retry, the byte-positioned `post_status_update`, and the byte-identical payload/dry-run behavior.
 """
 
 import json
@@ -30,12 +31,6 @@ _RUN = "01RIDDREAM0000000000000000"
 
 def _git_init(path: str) -> None:
     subprocess.run(["git", "init", "-q"], cwd=path, check=True)
-
-
-def _authed(monkeypatch) -> None:
-    monkeypatch.setattr(
-        github, "check_auth", lambda: github.AuthStatus(True, "octocat", ("repo",), None)
-    )
 
 
 def _transfer_blob(parts: list[str] | None = None, *, run_id: str = _RUN) -> str:
@@ -134,11 +129,13 @@ class _RecordingIssues:
 
 
 class _RecordingPublisher:
+    """A recording stand-in for ``resolve.publish_dream_artifact`` (monkeypatched by name)."""
+
     def __init__(self, events: list, *, raises: bool = False) -> None:
         self.events = events
         self._raises = raises
 
-    def publish(self, *, objective_id: str, run_id: str, parts) -> None:
+    def __call__(self, repo_root, *, objective_id: str, run_id: str, parts) -> None:
         self.events.append(("artifact", objective_id, run_id))
         if self._raises:
             raise IssueBackendError("publish boom")
@@ -160,22 +157,37 @@ def _invoke(
     issues=None,
     publisher=None,
     transfer: str | None = None,
+    raw_transfer_bytes: bytes | None = None,
     manifest: bool = True,
     body: str = "# Dream objective\n\nprose",
     run_id: str = _RUN,
+    events: list | None = None,
 ):
-    _authed(monkeypatch)
+    # The auth stub RECORDS into the shared event list — the refusal-ladder tests assert
+    # `events == []`, proving the offline refusals fire before the GitHub auth probe (the
+    # command's first network reach) as well as before any store/backend call.
+    def _check_auth():
+        if events is not None:
+            events.append(("auth",))
+        return github.AuthStatus(True, "octocat", ("repo",), None)
+
+    monkeypatch.setattr(github, "check_auth", _check_auth)
     monkeypatch.setattr(resolve, "resolve_objective_store", lambda _root: store)
     if issues is not None:
         monkeypatch.setattr(resolve, "resolve_issue_backend", lambda _root: issues)
     if publisher is not None:
-        monkeypatch.setattr(resolve, "resolve_dream_artifact_publisher", lambda _root: publisher)
+        monkeypatch.setattr(resolve, "publish_dream_artifact", publisher)
     runner = CliRunner()
     with runner.isolated_filesystem() as d:
         _git_init(d)
         root = Path(d)
         if transfer is not None:
             cache.write_scratch(root, run_id, dc.DREAM_REPORT_TRANSFER_FILENAME, transfer)
+        if raw_transfer_bytes is not None:
+            # Invalid-UTF-8-at-rest: written as raw bytes, bypassing the text writer.
+            path = cache.run_scratch_dir(root, run_id) / dc.DREAM_REPORT_TRANSFER_FILENAME
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(raw_transfer_bytes)
         if manifest:
             cache.write_scratch(root, run_id, "dream-manifest.json", "{}")
         bf = root / "obj.md"
@@ -202,10 +214,11 @@ def _first_positions(events: list) -> list[str]:
 def test_transfer_absent_is_the_byte_identical_create(monkeypatch):
     events: list = []
     store = _RecordingStore(events)
-    result = _invoke(_BASE_ARGS, monkeypatch=monkeypatch, store=store, transfer=None)
+    result = _invoke(_BASE_ARGS, monkeypatch=monkeypatch, store=store, transfer=None, events=events)
     assert result.exit_code == 0, result.output
     assert store.created_kwargs is not None and store.created_kwargs["origin"] is None
-    assert _first_positions(events) == ["create", "status_update"]  # no guard, no companion
+    # No guard, no companion — and the auth probe stays the first network reach.
+    assert _first_positions(events) == ["auth", "create", "status_update"]
 
 
 def test_dry_run_skips_the_whole_transfer_arc(monkeypatch):
@@ -214,10 +227,14 @@ def test_dry_run_skips_the_whole_transfer_arc(monkeypatch):
     events: list = []
     store = _RecordingStore(events)
     result = _invoke(
-        [*_BASE_ARGS, "--dry-run"], monkeypatch=monkeypatch, store=store, transfer=_transfer_blob()
+        [*_BASE_ARGS, "--dry-run"],
+        monkeypatch=monkeypatch,
+        store=store,
+        transfer=_transfer_blob(),
+        events=events,
     )
     assert result.exit_code == 0, result.output
-    assert _first_positions(events) == ["create"]
+    assert _first_positions(events) == ["create"]  # offline: not even the auth probe runs
     assert store.created_kwargs is not None and store.created_kwargs["origin"] is None
     payload = json.loads(result.stdout)
     assert payload == {
@@ -245,12 +262,15 @@ def test_transfer_present_runs_the_full_d2_ordering(monkeypatch):
         issues=issues,
         publisher=publisher,
         transfer=_transfer_blob(),
+        events=events,
     )
     assert result.exit_code == 0, result.output
-    # The compressed D2 order: stacked prepare (its existing position) → the origin guard →
-    # create → carrier → parts → artifact → header — and post_status_update stays LAST
+    # The compressed D2 order: the transfer arc first (no event — offline), then the auth probe
+    # (the first network reach), then stacked prepare (its existing position) → the origin
+    # guard → create → carrier → parts → artifact → header — and post_status_update stays LAST
     # (fresh-create bookkeeping, after the whole try-block).
     assert _first_positions(events) == [
+        "auth",
         "prepare",
         "guard",
         "create",
@@ -336,9 +356,30 @@ def test_retry_with_existing_objective_converges_and_skips_status_update(monkeyp
 def test_malformed_transfer_json_refuses_before_create(monkeypatch):
     events: list = []
     store = _RecordingStore(events)
-    result = _invoke(_BASE_ARGS, monkeypatch=monkeypatch, store=store, transfer="{not json")
+    result = _invoke(
+        _BASE_ARGS, monkeypatch=monkeypatch, store=store, transfer="{not json", events=events
+    )
     assert result.exit_code == 1
     assert json.loads(result.stdout)["error_type"] == "invalid_input"
+    assert events == []  # no auth probe, no store call — zero network reach
+
+
+def test_unreadable_transfer_refuses_before_create(monkeypatch):
+    # Invalid UTF-8 at rest reaches the same stable invalid_input envelope as malformed JSON —
+    # never a raw traceback / generic cold-door crash.
+    events: list = []
+    store = _RecordingStore(events)
+    result = _invoke(
+        _BASE_ARGS,
+        monkeypatch=monkeypatch,
+        store=store,
+        transfer=None,
+        events=events,
+        raw_transfer_bytes=b'\xff\xfe{"schema_version": "1"}',
+    )
+    assert result.exit_code == 1
+    payload = json.loads(result.stdout)
+    assert payload["error_type"] == "invalid_input" and "unreadable" in payload["message"]
     assert events == []
 
 
@@ -348,7 +389,7 @@ def test_transfer_schema_violation_refuses_before_create(monkeypatch):
     blob = json.dumps(
         {"schema_version": "1", "run_id": _RUN, "parts": ["ok"], "origin": "learn-dream"}
     )
-    result = _invoke(_BASE_ARGS, monkeypatch=monkeypatch, store=store, transfer=blob)
+    result = _invoke(_BASE_ARGS, monkeypatch=monkeypatch, store=store, transfer=blob, events=events)
     assert result.exit_code == 1
     assert json.loads(result.stdout)["error_type"] == "invalid_input"
     assert events == []
@@ -362,6 +403,7 @@ def test_cross_run_transfer_refuses(monkeypatch):
         monkeypatch=monkeypatch,
         store=store,
         transfer=_transfer_blob(run_id="01RIDOTHER0000000000000000"),
+        events=events,
     )
     assert result.exit_code == 1
     payload = json.loads(result.stdout)
@@ -375,7 +417,12 @@ def test_transfer_without_manifest_refuses(monkeypatch):
     events: list = []
     store = _RecordingStore(events)
     result = _invoke(
-        _BASE_ARGS, monkeypatch=monkeypatch, store=store, transfer=_transfer_blob(), manifest=False
+        _BASE_ARGS,
+        monkeypatch=monkeypatch,
+        store=store,
+        transfer=_transfer_blob(),
+        manifest=False,
+        events=events,
     )
     assert result.exit_code == 1
     payload = json.loads(result.stdout)
@@ -391,6 +438,7 @@ def test_transfer_with_supersedes_refuses(monkeypatch):
         monkeypatch=monkeypatch,
         store=store,
         transfer=_transfer_blob(),
+        events=events,
     )
     assert result.exit_code == 1
     assert json.loads(result.stdout)["error_type"] == "invalid_input"
@@ -405,6 +453,7 @@ def test_invariance_violating_parts_refuse_before_create(monkeypatch):
         monkeypatch=monkeypatch,
         store=store,
         transfer=_transfer_blob(["fine", "bad <!-- perk:metadata-block:x --> part"]),
+        events=events,
     )
     assert result.exit_code == 1
     payload = json.loads(result.stdout)

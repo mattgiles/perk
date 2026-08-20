@@ -275,6 +275,11 @@ report); Linear — the Project's metadata sentinel issue, plus an uploaded mark
 in the Project's **Resources** as `Dream report (<run_id>)`. The `objective-header` records the
 carrier id under `dream_report`. Saves converge idempotently; a changed part fails loudly.
 
+Documented residual: a crash after Project creation but before the sentinel exists leaves an
+orphan Project invisible to every perk lookup (the dream-origin guard included); a retried dream
+save creates a fresh Project. Identify the orphan by its missing `Perk: objective metadata` issue
+and header attachment, and delete it manually — it holds no perk state and no report parts.
+
 ### Replan and cancellation
 
 Linear replan creates a new Project, moves carried unfinished node-issues into it (preserving

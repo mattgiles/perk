@@ -1,13 +1,13 @@
 """Backend-shape coverage for the dream-report companion + artifact (contracts.md §8.64).
 
 GitHub (the ``tests/test_github_journal.py`` harness pattern): the carrier is the normalized
-objective issue itself, parts land there as HTML-marker comments, and the publisher arm is the
-no-op. Linear (the ``tests/test_linear_journal.py`` pattern): the carrier is the Project
-metadata sentinel, the stored bodies carry the TRANSCODED inline-code marker (the real
-``to_linear_markdown``), and the artifact publisher (``fileUpload`` → signed PUT → Resources
+objective issue itself, parts land there as HTML-marker comments, and the publish arm is an
+immediate no-op. Linear (the ``tests/test_linear_journal.py`` pattern): the carrier is the
+Project metadata sentinel, the stored bodies carry the TRANSCODED inline-code marker (the real
+``to_linear_markdown``), and the artifact publish flow (``fileUpload`` → signed PUT → Resources
 link) is driven both over the stateful ``FakeLinearWorkspace`` and over the REAL
-``LinearClient`` HTTP paths via ``httpx.MockTransport`` (header propagation + per-boundary
-failure injection).
+``LinearClient`` HTTP paths via ``httpx.MockTransport`` (header propagation, UTF-8 byte sizing,
+and per-boundary failure injection).
 """
 
 import json
@@ -21,16 +21,12 @@ from _github_fakes import ROOT, _has, _Proc
 from _linear_fakes import FakeLinearWorkspace
 
 from perk import objective, plan
+from perk.backends import linear, resolve
 from perk.backends.github.backend import GitHubIssueBackend
 from perk.backends.github.objective_store import GitHubObjectiveStore
 from perk.backends.issue_backend import IssueBackendError
-from perk.backends.linear import (
-    LinearDreamArtifactPublisher,
-    LinearIssueBackend,
-    LinearProjectObjectiveStore,
-)
+from perk.backends.linear import LinearIssueBackend, LinearProjectObjectiveStore
 from perk.backends.linear.client import LinearClient
-from perk.backends.resolve import NoOpDreamArtifactPublisher
 from perk.learn import dream_companion as dc
 
 _RUN = "01RUNAAAAAAAAAAAAAAAAAAAAA"
@@ -119,9 +115,19 @@ def test_github_parts_land_on_the_normalized_objective_issue(
     assert len(posted) == 2
 
 
-def test_github_publisher_arm_is_the_noop() -> None:
-    publisher = NoOpDreamArtifactPublisher()
-    assert publisher.publish(objective_id="252", run_id=_RUN, parts=["p"]) is None
+def test_github_publish_arm_is_an_immediate_no_op(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The default (GitHub) selection returns before any client construction or network flow —
+    # the marker-keyed parts on the objective issue ARE the visible artifact.
+    def _no_client(**_: object) -> object:
+        raise AssertionError("the GitHub arm must never construct a Linear client")
+
+    monkeypatch.setattr(resolve.linear_client, "client_from_env", _no_client)
+    assert (
+        resolve.publish_dream_artifact(tmp_path, objective_id="252", run_id=_RUN, parts=["p"])
+        is None
+    )
 
 
 # --- Linear: the sentinel carrier + the transcoded round trip ----------------------------------
@@ -159,33 +165,44 @@ def test_linear_carrier_routes_to_the_sentinel_and_stores_the_transcoded_form() 
 # --- Linear: the artifact publisher over the stateful workspace fake ---------------------------
 
 
-def test_linear_publisher_uploads_and_links(tmp_path: Path) -> None:
+def test_linear_publish_uploads_and_links(tmp_path: Path) -> None:
     ws, _store, _issues, obj_id = _linear_setup()
-    publisher = LinearDreamArtifactPublisher(ws, team_key="ENG", repo_root=tmp_path)
-    publisher.publish(objective_id=obj_id, run_id=_RUN, parts=["part one", "part two"])
-    [reservation] = ws.uploads
-    assert reservation["contentType"] == "text/markdown"
-    assert reservation["filename"] == f"dream-report-{_RUN}.md"
-    assert reservation["size"] == len(b"part one\n\npart two")
+    linear.publish_dream_artifact(
+        ws,
+        team_key="ENG",
+        repo_root=tmp_path,
+        objective_id=obj_id,
+        run_id=_RUN,
+        parts=["part one", "part two"],
+    )
     [upload] = ws.uploaded_assets
+    assert upload["filename"] == f"dream-report-{_RUN}.md"
+    assert upload["content_type"] == "text/markdown"
     # The canonical parts joined verbatim — a file asset, never transcoded.
     assert upload["content"] == b"part one\n\npart two"
-    assert upload["content_type"] == "text/markdown"
-    assert upload["upload_url"] == reservation["uploadUrl"]
     project = ws.project_by_id(obj_id)
     links = cast("list[dict[str, object]]", project["external_links"])
     [dream_link] = [link for link in links if link["label"] == f"Dream report ({_RUN})"]
-    assert dream_link["url"] == reservation["assetUrl"]
+    assert dream_link["url"] == upload["asset_url"]
 
 
-def test_linear_publisher_probe_skips_when_the_labeled_link_exists(tmp_path: Path) -> None:
+def test_linear_publish_probe_skips_when_the_labeled_link_exists(tmp_path: Path) -> None:
     ws, _store, _issues, obj_id = _linear_setup()
-    publisher = LinearDreamArtifactPublisher(ws, team_key="ENG", repo_root=tmp_path)
-    publisher.publish(objective_id=obj_id, run_id=_RUN, parts=["part one"])
-    first_asset = ws.uploads[0]["assetUrl"]
-    publisher.publish(objective_id=obj_id, run_id=_RUN, parts=["part one"])
-    assert len(ws.uploads) == 1  # no second reservation
-    assert len(ws.uploaded_assets) == 1  # no second PUT
+
+    def _publish() -> None:
+        linear.publish_dream_artifact(
+            ws,
+            team_key="ENG",
+            repo_root=tmp_path,
+            objective_id=obj_id,
+            run_id=_RUN,
+            parts=["part one"],
+        )
+
+    _publish()
+    first_asset = ws.uploaded_assets[0]["asset_url"]
+    _publish()
+    assert len(ws.uploaded_assets) == 1  # no second upload
     project = ws.project_by_id(obj_id)
     links = cast("list[dict[str, object]]", project["external_links"])
     [dream_link] = [link for link in links if link["label"] == f"Dream report ({_RUN})"]
@@ -237,6 +254,7 @@ class _HttpScript:
     ) -> None:
         self.puts: list[httpx.Request] = []
         self.links: list[dict[str, object]] = []
+        self.file_upload_variables: list[dict[str, object]] = []
         self.upload_count = 0
         self._file_upload_fails = file_upload_fails
         self._put_status = put_status
@@ -261,6 +279,7 @@ class _HttpScript:
                 }
             )
         if "fileUpload(" in query:
+            self.file_upload_variables.append(body["variables"])
             if self._file_upload_fails:
                 return _graphql({"fileUpload": {"success": False, "uploadFile": None}})
             self.upload_count += 1
@@ -275,14 +294,21 @@ class _HttpScript:
         raise AssertionError(f"unrouted GraphQL query: {query}")
 
 
-def _publisher(script: _HttpScript, tmp_path: Path) -> LinearDreamArtifactPublisher:
+def _publish(script: _HttpScript, tmp_path: Path, parts: list[str]) -> None:
     client = LinearClient("lin_api_test", transport=httpx.MockTransport(script))
-    return LinearDreamArtifactPublisher(client, team_key="ENG", repo_root=tmp_path)
+    linear.publish_dream_artifact(
+        client,
+        team_key="ENG",
+        repo_root=tmp_path,
+        objective_id="proj-1",
+        run_id=_RUN,
+        parts=parts,
+    )
 
 
 def test_real_client_put_propagates_reservation_headers(tmp_path: Path) -> None:
     script = _HttpScript()
-    _publisher(script, tmp_path).publish(objective_id="proj-1", run_id=_RUN, parts=["part one"])
+    _publish(script, tmp_path, ["part one"])
     [put] = script.puts
     assert str(put.url) == "https://uploads.linear.test/put/1"
     assert put.headers["x-linear-signature"] == "sig-1"  # the reservation header, propagated
@@ -295,29 +321,42 @@ def test_real_client_put_propagates_reservation_headers(tmp_path: Path) -> None:
     }
 
 
+def test_real_client_reserves_and_puts_utf8_bytes_for_multibyte_parts(tmp_path: Path) -> None:
+    # Real rendered reports carry non-ASCII text (the report heading uses an em dash); Linear's
+    # reservation contract is BYTE length, so pin bytes ≠ code points end to end.
+    script = _HttpScript()
+    part = "# Dream report — résumé\n\n★ multibyte body"
+    expected = part.encode("utf-8")
+    assert len(expected) > len(part)  # the multibyte pin: bytes strictly exceed code points
+    _publish(script, tmp_path, [part])
+    [reservation] = script.file_upload_variables
+    assert reservation["size"] == len(expected)
+    [put] = script.puts
+    assert put.content == expected
+
+
 def test_real_client_file_upload_refusal_is_loud(tmp_path: Path) -> None:
     script = _HttpScript(file_upload_fails=True)
     with pytest.raises(IssueBackendError, match="fileUpload failed"):
-        _publisher(script, tmp_path).publish(objective_id="proj-1", run_id=_RUN, parts=["p"])
+        _publish(script, tmp_path, ["p"])
     assert script.puts == [] and script.links == []  # nothing after the failed boundary
 
 
 def test_real_client_put_failure_is_loud(tmp_path: Path) -> None:
     script = _HttpScript(put_status=403)
     with pytest.raises(IssueBackendError, match="HTTP 403"):
-        _publisher(script, tmp_path).publish(objective_id="proj-1", run_id=_RUN, parts=["p"])
+        _publish(script, tmp_path, ["p"])
     assert script.links == []  # the link write never ran
 
 
 def test_real_client_link_failure_is_loud_and_the_retry_uploads_fresh(tmp_path: Path) -> None:
     script = _HttpScript(link_failures=1)
-    publisher = _publisher(script, tmp_path)
     with pytest.raises(IssueBackendError, match="external link"):
-        publisher.publish(objective_id="proj-1", run_id=_RUN, parts=["p"])
+        _publish(script, tmp_path, ["p"])
     assert script.links == []
     # The accepted orphan-asset residual: the retry uploads a FRESH asset and links it (the
     # first uploaded asset stays behind, inert).
-    publisher.publish(objective_id="proj-1", run_id=_RUN, parts=["p"])
+    _publish(script, tmp_path, ["p"])
     assert script.upload_count == 2
     [link] = script.links
     assert link["url"] == "https://uploads.linear.test/asset/2"

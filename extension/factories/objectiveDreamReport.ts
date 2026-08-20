@@ -46,6 +46,20 @@ const MARKER_TEXT = "perk:learn-dream-report";
 const PERK_HTML_MARKER_RE = /<!--\s*\/?perk:[^>]+?\s*-->/;
 const DETAILS_OPEN_RE = /^<details><summary><code>[^<]*<\/code><\/summary>$/;
 const DETAILS_CLOSE = "</details>";
+// Every line boundary Python's `str.splitlines()` recognizes EXCEPT `\n` — the Linear
+// transcoder splits on all of them and rejoins with `\n`, so any other boundary form would be
+// normalized in the stored body and defeat the persistence-side byte comparison forever.
+const NON_CANONICAL_LINE_BOUNDARIES = [
+  "\r",
+  "\v",
+  "\f",
+  "\u001c",
+  "\u001d",
+  "\u001e",
+  "\u0085",
+  "\u2028",
+  "\u2029",
+];
 
 /**
  * The TS mirror of Python's `validate_report_parts` (contracts §8.64) — run over the freshly
@@ -81,6 +95,11 @@ export function reportPartInvarianceViolations(parts: string[], runId: string): 
       violations.push(
         `${where}: carries a perk-rendered <details> wrapper line (dropped by the Linear ` +
           "transcoder)",
+      );
+    }
+    if (NON_CANONICAL_LINE_BOUNDARIES.some((boundary) => part.includes(boundary))) {
+      violations.push(
+        `${where}: carries a line boundary other than \\n (normalized by the Linear transcoder)`,
       );
     }
     const bodyLength = codePointLength(`<!-- ${MARKER_TEXT}:${runId}:${index} -->\n\n${part}`);

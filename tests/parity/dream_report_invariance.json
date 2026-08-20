@@ -28,6 +28,18 @@
       "reason": "perk-rendered details close line",
       "part": "before\n</details>\nafter"
     },
+    {
+      "reason": "carriage-return line boundary (transcoder-normalized)",
+      "part": "line one\r\nline two"
+    },
+    {
+      "reason": "unicode line-separator boundary (transcoder-normalized)",
+      "part": "before\u2028after"
+    },
+    {
+      "reason": "unicode paragraph-separator boundary (transcoder-normalized)",
+      "part": "before\u2029after"
+    },
     { "reason": "oversize rendered comment body", "repeat": "a", "count": 65001 }
   ]
 }

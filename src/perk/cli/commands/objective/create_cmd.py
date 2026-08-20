@@ -69,9 +69,17 @@ def _read_dream_transfer(repo_root: Path, run_id_value: str) -> tuple[str, ...] 
     and the shared part-invariance + size rule — every miss refuses ``invalid_input``, never a
     silent ignore.
     """
-    raw_text = cache.read_scratch(
-        repo_root, run_id_value, dream_companion.DREAM_REPORT_TRANSFER_FILENAME
-    )
+    try:
+        raw_text = cache.read_scratch(
+            repo_root, run_id_value, dream_companion.DREAM_REPORT_TRANSFER_FILENAME
+        )
+    except (OSError, ValueError) as exc:
+        # The transfer is untrusted-at-rest: an unreadable file or invalid UTF-8
+        # (UnicodeDecodeError is a ValueError) must reach the same stable refusal envelope as
+        # malformed JSON, never escape as a raw traceback / generic cold-door crash.
+        raise UserFacingCliError(
+            f"dream-report transfer is unreadable: {exc}", error_type="invalid_input"
+        ) from exc
     if raw_text is None:
         return None
     try:
@@ -130,8 +138,9 @@ def _converge_dream_companion(
         )
     issues = resolve.resolve_issue_backend(repo_root)
     dream_companion.persist_parts(issues, carrier_id=carrier, run_id=run_id_value, parts=parts)
-    publisher = resolve.resolve_dream_artifact_publisher(repo_root)
-    publisher.publish(objective_id=objective_id, run_id=run_id_value, parts=parts)
+    resolve.publish_dream_artifact(
+        repo_root, objective_id=objective_id, run_id=run_id_value, parts=parts
+    )
     store.update_objective_header(objective_id=objective_id, fields={"dream_report": carrier})
     user_output(
         click.style("✓ ", fg="green")
@@ -224,8 +233,6 @@ def create_objective(
     """Mint a run_id and create the perk:objective issue from authored markdown."""
     try:
         repo_root = require_repo(ctx)
-        if not dry_run:
-            require_github(ctx)
         body_text = body_path.read_text(encoding="utf-8").strip()
         if not body_text:
             raise UserFacingCliError("Objective body is empty", error_type="empty_body")
@@ -303,6 +310,12 @@ def create_objective(
                 "dream save always creates a fresh objective.",
                 error_type="invalid_input",
             )
+        # The GitHub auth probe runs only AFTER the offline refusal ladder above (body/roadmap
+        # validation, the handoff recovery, and the whole transfer arc) — §8.64's "before any
+        # network" is literal: a malformed transfer refuses `invalid_input` even unauthed,
+        # never masked by `github_unauthed`. The dry-run skip is unchanged.
+        if not dry_run:
+            require_github(ctx)
         # The reviewed delivery choice (§8.45). Only an explicit `stacked` changes anything —
         # absent (and an explicit `incremental`, forwarded verbatim from the reviewed draft)
         # keeps every existing path byte-identical (§8.42's absence rule: incremental is never

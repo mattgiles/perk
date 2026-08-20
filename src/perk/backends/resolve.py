@@ -15,7 +15,6 @@ durable state is written, so the local overlay is never consulted.
 import tomllib
 from collections.abc import Sequence
 from pathlib import Path
-from typing import Protocol
 
 from perk.backends import issue_backend, linear, objective_store
 from perk.backends.github.backend import GitHubIssueBackend
@@ -118,36 +117,22 @@ def resolve_objective_store(repo_root: Path) -> objective_store.ObjectiveStore:
     raise IssueBackendError(f"no backend implementation for {backend_id!r}")
 
 
-class DreamArtifactPublisher(Protocol):
-    """The per-backend human-visibility strategy for a persisted dream report (contracts.md
-    §8.64), resolved off the committed ``[issues]`` selection by
-    :func:`resolve_dream_artifact_publisher`. ``publish`` is part of the convergent save
-    sequence — fail-loud (raise ``IssueBackendError``), never fail-open bookkeeping; a retry
-    converges."""
+def publish_dream_artifact(
+    repo_root: Path, *, objective_id: str, run_id: str, parts: Sequence[str]
+) -> None:
+    """Publish the per-backend human artifact for a persisted dream report (contracts.md §8.64),
+    keyed off the committed ``[issues]`` selection.
 
-    def publish(self, *, objective_id: str, run_id: str, parts: Sequence[str]) -> None: ...
-
-
-class NoOpDreamArtifactPublisher:
-    """The GitHub arm (the no-op-family precedent): the marker-keyed companion parts on the
-    objective issue itself ARE the human-visible artifact — nothing further to publish."""
-
-    def publish(self, *, objective_id: str, run_id: str, parts: Sequence[str]) -> None:
-        return None
-
-
-def resolve_dream_artifact_publisher(repo_root: Path) -> DreamArtifactPublisher:
-    """Resolve the per-backend dream-artifact publisher off the committed ``[issues]`` selection
-    (contracts.md §8.64).
-
-    GitHub → the no-op (the marker-keyed companion parts on the objective issue itself ARE the
-    human-visible artifact); Linear → ``LinearDreamArtifactPublisher`` (the ``fileUpload`` +
-    signed-PUT + Resources-link sequence). Mirrors ``resolve_objective_store``'s Linear
-    requirements (committed ``[issues] team`` + ``LINEAR_API_KEY``).
+    GitHub → an immediate return (the marker-keyed companion parts on the objective issue itself
+    ARE the human-visible artifact); Linear → the upload + Resources-link flow
+    (``linear.publish_dream_artifact``), mirroring ``resolve_objective_store``'s Linear
+    requirements (committed ``[issues] team`` + ``LINEAR_API_KEY``). Part of the convergent save
+    sequence — fail-loud (raises ``IssueBackendError``), never fail-open bookkeeping; a retry
+    converges.
     """
     backend_id = resolve_issue_backend_id(repo_root)
     if backend_id == GITHUB_BACKEND_ID:
-        return NoOpDreamArtifactPublisher()
+        return
     if backend_id == LINEAR_BACKEND_ID:
         team = config.load_committed_issues_team(repo_root)
         if team is None:
@@ -156,5 +141,13 @@ def resolve_dream_artifact_publisher(repo_root: Path) -> DreamArtifactPublisher:
                 "set the Linear team key in .perk/config.toml"
             )
         client = linear_client.client_from_env(repo_root=repo_root)
-        return linear.LinearDreamArtifactPublisher(client, team_key=team, repo_root=repo_root)
+        linear.publish_dream_artifact(
+            client,
+            team_key=team,
+            repo_root=repo_root,
+            objective_id=objective_id,
+            run_id=run_id,
+            parts=parts,
+        )
+        return
     raise IssueBackendError(f"no backend implementation for {backend_id!r}")

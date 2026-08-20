@@ -195,6 +195,31 @@ def test_malformed_marked_comment_is_corruption():
         _persist(issues, ["part one"])
 
 
+def test_leading_blank_line_before_marker_is_corruption():
+    # The marker must sit on the PHYSICAL first line — a leading blank line is never
+    # normalized away into acceptance.
+    issues, fake = _issues()
+    fake.seed(_CARRIER, f"\n<!-- perk:learn-dream-report:{_RUN}:1 -->\n\npart one")
+    with pytest.raises(dc.CompanionConflictError, match="well-formed"):
+        _persist(issues, ["part one"])
+
+
+def test_leading_whitespace_on_the_marker_line_is_corruption():
+    issues, fake = _issues()
+    fake.seed(_CARRIER, f"  <!-- perk:learn-dream-report:{_RUN}:1 -->\n\npart one")
+    with pytest.raises(dc.CompanionConflictError, match="well-formed"):
+        _persist(issues, ["part one"])
+
+
+def test_foreign_run_leading_blank_line_is_corruption_not_silent_skip():
+    # Strict parsing applies to FOREIGN-run marked comments identically: a leading blank line
+    # is corruption, never "parses after normalization, then non-participates".
+    issues, fake = _issues()
+    fake.seed(_CARRIER, f"\n<!-- perk:learn-dream-report:{_OTHER_RUN}:1 -->\n\nforeign part")
+    with pytest.raises(dc.CompanionConflictError, match="well-formed"):
+        _persist(issues, ["part one"])
+
+
 def test_double_marker_text_is_corruption():
     issues, fake = _issues()
     fake.seed(

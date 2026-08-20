@@ -18,14 +18,9 @@ from perk.backends import resolve
 from perk.backends.github.backend import GitHubIssueBackend
 from perk.backends.github.objective_store import GitHubObjectiveStore
 from perk.backends.issue_backend import IssueBackendError
-from perk.backends.linear import (
-    LinearDreamArtifactPublisher,
-    LinearIssueBackend,
-    LinearProjectObjectiveStore,
-)
+from perk.backends.linear import LinearIssueBackend, LinearProjectObjectiveStore
 from perk.backends.resolve import (
-    NoOpDreamArtifactPublisher,
-    resolve_dream_artifact_publisher,
+    publish_dream_artifact,
     resolve_issue_backend,
     resolve_issue_backend_id,
     resolve_objective_store,
@@ -164,21 +159,34 @@ class TestObjectiveResolver:
             resolve_objective_store(tmp_path)
 
 
-class TestDreamArtifactPublisherResolver:
-    """The dream-artifact publisher seam (contracts.md §8.64) — resolved off the same committed
+class TestPublishDreamArtifact:
+    """The dream-artifact publish function (contracts.md §8.64) — keyed off the same committed
     ``[issues]`` selection as the store/backend resolvers."""
 
-    def test_default_resolves_the_github_noop(self, tmp_path: Path) -> None:
-        publisher = resolve_dream_artifact_publisher(tmp_path)
-        assert isinstance(publisher, NoOpDreamArtifactPublisher)
+    def test_default_github_arm_is_an_immediate_no_op(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        def _no_client(**_: object) -> object:
+            raise AssertionError("the GitHub arm must never construct a Linear client")
 
-    def test_linear_selection_resolves_the_linear_publisher(
+        monkeypatch.setattr(resolve.linear_client, "client_from_env", _no_client)
+        assert publish_dream_artifact(tmp_path, objective_id="7", run_id="01R", parts=["p"]) is None
+
+    def test_linear_selection_routes_to_the_linear_flow(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         monkeypatch.setenv("LINEAR_API_KEY", "lin_api_test")
         _write_config(tmp_path, "perk.toml", '[issues]\nbackend = "linear"\nteam = "ENG"\n')
-        publisher = resolve_dream_artifact_publisher(tmp_path)
-        assert isinstance(publisher, LinearDreamArtifactPublisher)
+        calls: list[dict[str, object]] = []
+        monkeypatch.setattr(
+            resolve.linear,
+            "publish_dream_artifact",
+            lambda _client, **kwargs: calls.append(kwargs),
+        )
+        publish_dream_artifact(tmp_path, objective_id="proj-1", run_id="01R", parts=["p"])
+        [call] = calls
+        assert call["team_key"] == "ENG"
+        assert call["objective_id"] == "proj-1" and call["run_id"] == "01R"
 
     def test_linear_selection_missing_team_raises(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -186,7 +194,7 @@ class TestDreamArtifactPublisherResolver:
         monkeypatch.setenv("LINEAR_API_KEY", "lin_api_test")
         _write_config(tmp_path, "perk.toml", '[issues]\nbackend = "linear"\n')
         with pytest.raises(IssueBackendError, match=r"\[issues\] team is required"):
-            resolve_dream_artifact_publisher(tmp_path)
+            publish_dream_artifact(tmp_path, objective_id="proj-1", run_id="01R", parts=["p"])
 
     def test_linear_selection_missing_api_key_raises(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -194,7 +202,7 @@ class TestDreamArtifactPublisherResolver:
         monkeypatch.delenv("LINEAR_API_KEY", raising=False)
         _write_config(tmp_path, "perk.toml", '[issues]\nbackend = "linear"\nteam = "ENG"\n')
         with pytest.raises(IssueBackendError, match="LINEAR_API_KEY"):
-            resolve_dream_artifact_publisher(tmp_path)
+            publish_dream_artifact(tmp_path, objective_id="proj-1", run_id="01R", parts=["p"])
 
 
 # The GitHub plan/issue + objective substrate modules. Production code must reach them through the

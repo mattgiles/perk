@@ -9867,8 +9867,10 @@ stays fully offline and byte-identical (the transfer arc, the guard, and the com
 skipped; payload unchanged).
 
 **Save-door ordering (the dream arm, strictly).** (1) transfer decode + the shared
-part-invariance rule — before any network, so a violating report refuses while nothing durable
-exists; (2) the existing stacked block stays byte-positioned (strict train validation +
+part-invariance rule — before ANY network, the GitHub auth probe included (`require_github`
+runs only after the offline refusal ladder, so a malformed transfer refuses `invalid_input`
+even unauthed — never masked by `github_unauthed`); an unreadable / invalid-UTF-8 transfer
+file refuses the same `invalid_input`, never a raw crash; (2) the existing stacked block stays byte-positioned (strict train validation +
 `Delivery.prepare` exactly where they run today — a dream+stacked save keeps the
 pre-persistence capability gate); (3) the **origin conflict re-check** immediately before
 create: `find_open_objective_by_origin(origin=LEARN_DREAM, exclude_run_id=<run id>)` — a
@@ -9898,9 +9900,10 @@ canonical HTML `<!-- perk:learn-dream-report:<run_id>:<i> -->`; the parser also 
 inline-code rewrite `` `perk:learn-dream-report:<run_id>:<i>` ``. `<i>` is a canonical 1-based
 decimal (no leading zeros/signs — any other spelling in a marked comment is corruption).
 Marker-text detection is substring-based; a comment carrying the marker text MUST parse
-strictly (marker on the first line, identity from the first line, marker-text count > 1 in one
-body = corruption, an edited marked comment = corruption); an unmarked comment is unrelated
-untrusted DATA. A comment body is `marker + blank line + part`. **Dual-candidate
+strictly (marker on the PHYSICAL first line — leading blank lines/indentation are corruption,
+never normalized away, for foreign-run comments identically; identity from the first line;
+marker-text count > 1 in one body = corruption; an edited marked comment = corruption); an
+unmarked comment is unrelated untrusted DATA. A comment body is `marker + blank line + part`. **Dual-candidate
 byte-identity:** a stored body converges iff byte-equal to the verbatim render OR the local
 transcode candidate (the marker-line inline-code rewrite derived by the same rule as
 `to_linear_markdown`, never imported from the Linear backend — with invariant content the only
@@ -9917,20 +9920,24 @@ raises `CompanionAppendAmbiguous` — never a blind re-POST).
 planes — `tests/parity/dream_report_invariance.json`): parts must be **transcode-invariant** —
 non-empty; no perk HTML-comment marker; no literal `perk:learn-dream-report` marker text; no
 exact `<details><summary><code>…</code></summary>` / `</details>` wrapper line (the shapes
-`to_linear_markdown` rewrites/drops); full comment body ≤ 65,000 chars
+`to_linear_markdown` rewrites/drops); no line boundary other than `\n` (`\r`, VT, FF, FS/GS/RS,
+NEL, U+2028/U+2029 — the transcoder's `splitlines()` + `"\n".join` normalizes every other form,
+which would defeat the dual-candidate byte comparison forever); full comment body ≤ 65,000 chars
 (`COMPANION_COMMENT_MAX_CHARS`, the backstop under GitHub's 65,536; §8.62 already caps parts
 at 60,000 code points). Enforced at THREE points: TS-side in the gate resolver (draft-write
 AND save — approved ⇒ savable), door-side at transfer decode (before anything durable), and as
 the `persist_parts` pre-POST backstop.
 
-**The per-backend human artifact** (`resolve_dream_artifact_publisher(repo_root)` in
-`perk/backends/resolve.py`, resolved off the committed `[issues]` selection). GitHub → a
-**no-op** (the marker-keyed parts on the objective issue ARE the visible artifact). Linear →
-`LinearDreamArtifactPublisher` (`perk/backends/linear/dream_report.py`): presence probe first
-(the new `project_external_links` read — skip when a Resources link labeled
-`Dream report (<run_id>)` exists), else `LinearClient.file_upload(content_type="text/markdown",
-filename="dream-report-<run_id>.md", size)` → `upload_asset` (the signed PUT through the same
-injectable transport, propagating the reservation headers + `Content-Type`) → the existing
+**The per-backend human artifact** (`publish_dream_artifact(repo_root, …)` in
+`perk/backends/resolve.py`, ONE function keyed off the committed `[issues]` selection — no
+strategy objects). GitHub → an **immediate return** (the marker-keyed parts on the objective
+issue ARE the visible artifact). Linear → the `perk/backends/linear/dream_report.py`
+`publish_dream_artifact` flow: presence probe first (the new `project_external_links` read —
+skip when a Resources link labeled `Dream report (<run_id>)` exists), else
+`LinearClient.upload_file(filename="dream-report-<run_id>.md", content_type="text/markdown",
+content)` — one call owning the whole `fileUpload` reservation (sized by the actual bytes) +
+signed-PUT choreography (the PUT rides the same injectable transport, propagating the
+reservation headers + `Content-Type`) and returning the asset URL — → the existing
 `create_entity_external_link(project_id, label, url=<assetUrl>)`. The uploaded bytes are the
 canonical parts joined `"\n\n"` — verbatim, never transcoded (a file asset, not a comment).
 **Fail-loud** (part of the convergent sequence, never fail-open bookkeeping) — each boundary

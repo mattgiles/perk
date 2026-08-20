@@ -11,7 +11,6 @@ not collect this module.
 import itertools
 import json
 import uuid
-from collections.abc import Sequence
 from pathlib import Path
 from typing import cast
 
@@ -226,9 +225,8 @@ class FakeLinearWorkspace(LinearClient):
         # Re-creates REPLACE the record in place, keeping the same attachment id (the
         # live-verified upsert-by-(url, issueId) + REPLACE-metadata semantics).
         self.attachments: dict[tuple[str, str], dict[str, object]] = {}
-        # fileUpload reservations + the PUT records (the dream-artifact publisher path); the
-        # real `upload_asset` is an httpx PUT, overridden below to record in-memory.
-        self.uploads: list[dict[str, object]] = []
+        # The dream-artifact uploads (the real `upload_file` is a GraphQL reservation + an
+        # httpx PUT, overridden below to record in-memory).
         self.uploaded_assets: list[dict[str, object]] = []
         self.requests: list[tuple[str, dict[str, object]]] = []
         self._seq = itertools.count(1)
@@ -293,24 +291,21 @@ class FakeLinearWorkspace(LinearClient):
     def comments_of(self, issue: dict[str, object]) -> list[dict[str, object]]:
         return cast("list[dict[str, object]]", issue["comments"])
 
-    def upload_asset(
-        self,
-        upload_url: str,
-        *,
-        headers: Sequence[tuple[str, str]],
-        content: bytes,
-        content_type: str,
-    ) -> None:
-        """Record the signed PUT in-memory (the real client PUTs over httpx — covered by the
-        ``httpx.MockTransport`` tests; the workspace fake keeps the publisher offline)."""
+    def upload_file(self, *, filename: str, content_type: str, content: bytes) -> str:
+        """Record the whole upload in-memory and mint a fake asset URL (the real client's
+        reservation + signed PUT are covered by the ``httpx.MockTransport`` tests; the
+        workspace fake keeps the publish flow offline)."""
+        n = len(self.uploaded_assets) + 1
+        asset_url = f"https://uploads.linear.test/asset/{n}"
         self.uploaded_assets.append(
             {
-                "upload_url": upload_url,
-                "headers": tuple(headers),
-                "content": content,
+                "filename": filename,
                 "content_type": content_type,
+                "content": content,
+                "asset_url": asset_url,
             }
         )
+        return asset_url
 
     def add_foreign_comment(self, identifier: str, body: str) -> None:
         """Simulate a Linear GitHub-integration linkback comment (a foreign writer)."""
@@ -606,27 +601,6 @@ class FakeLinearWorkspace(LinearClient):
                 "projectMilestoneCreate": {
                     "success": True,
                     "projectMilestone": {"id": mid, "name": payload.get("name", "")},
-                }
-            }
-        if "fileUpload(" in query:
-            n = len(self.uploads) + 1
-            reservation: dict[str, object] = {
-                "uploadUrl": f"https://uploads.linear.test/put/{n}",
-                "assetUrl": f"https://uploads.linear.test/asset/{n}",
-                "headers": [{"key": "x-fake-signature", "value": f"sig-{n}"}],
-                "contentType": v.get("contentType"),
-                "filename": v.get("filename"),
-                "size": v.get("size"),
-            }
-            self.uploads.append(reservation)
-            return {
-                "fileUpload": {
-                    "success": True,
-                    "uploadFile": {
-                        "uploadUrl": reservation["uploadUrl"],
-                        "assetUrl": reservation["assetUrl"],
-                        "headers": reservation["headers"],
-                    },
                 }
             }
         if "attachmentsForURL(" in query:
