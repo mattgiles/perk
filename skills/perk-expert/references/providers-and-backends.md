@@ -266,6 +266,20 @@ and Reconcilable markers use Linear-safe inline-code sentinels where they must r
 This attachment model is a clean break. Inline metadata from earlier perk versions is not read;
 those Linear artifacts must be re-created or re-saved.
 
+### The dream-report companion
+
+Dormant until the `perk learn dream` door ships. A dream-session objective persists the reviewed
+dream report as immutable marker-keyed comments (`perk:learn-dream-report:<run_id>:<part>`) on
+its report carrier: GitHub — the objective issue itself (the comments are the human-visible
+report); Linear — the Project's metadata sentinel issue, plus an uploaded markdown asset linked
+in the Project's **Resources** as `Dream report (<run_id>)`. The `objective-header` records the
+carrier id under `dream_report`. Saves converge idempotently; a changed part fails loudly.
+
+Documented residual: a crash after Project creation but before the sentinel exists leaves an
+orphan Project invisible to every perk lookup (the dream-origin guard included); a retried dream
+save creates a fresh Project. Identify the orphan by its missing `Perk: objective metadata` issue
+and header attachment, and delete it manually — it holds no perk state and no report parts.
+
 ### Replan and cancellation
 
 Linear replan creates a new Project, moves carried unfinished node-issues into it (preserving

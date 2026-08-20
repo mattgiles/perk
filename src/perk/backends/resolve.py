@@ -13,6 +13,7 @@ durable state is written, so the local overlay is never consulted.
 """
 
 import tomllib
+from collections.abc import Sequence
 from pathlib import Path
 
 from perk.backends import issue_backend, linear, objective_store
@@ -113,4 +114,40 @@ def resolve_objective_store(repo_root: Path) -> objective_store.ObjectiveStore:
             )
         client = linear_client.client_from_env(repo_root=repo_root)
         return linear.LinearProjectObjectiveStore(client, team_key=team, repo_root=repo_root)
+    raise IssueBackendError(f"no backend implementation for {backend_id!r}")
+
+
+def publish_dream_artifact(
+    repo_root: Path, *, objective_id: str, run_id: str, parts: Sequence[str]
+) -> None:
+    """Publish the per-backend human artifact for a persisted dream report (contracts.md §8.64),
+    keyed off the committed ``[issues]`` selection.
+
+    GitHub → an immediate return (the marker-keyed companion parts on the objective issue itself
+    ARE the human-visible artifact); Linear → the upload + Resources-link flow
+    (``linear.publish_dream_artifact``), mirroring ``resolve_objective_store``'s Linear
+    requirements (committed ``[issues] team`` + ``LINEAR_API_KEY``). Part of the convergent save
+    sequence — fail-loud (raises ``IssueBackendError``), never fail-open bookkeeping; a retry
+    converges.
+    """
+    backend_id = resolve_issue_backend_id(repo_root)
+    if backend_id == GITHUB_BACKEND_ID:
+        return
+    if backend_id == LINEAR_BACKEND_ID:
+        team = config.load_committed_issues_team(repo_root)
+        if team is None:
+            raise IssueBackendError(
+                '[issues] team is required when backend = "linear" — '
+                "set the Linear team key in .perk/config.toml"
+            )
+        client = linear_client.client_from_env(repo_root=repo_root)
+        linear.publish_dream_artifact(
+            client,
+            team_key=team,
+            repo_root=repo_root,
+            objective_id=objective_id,
+            run_id=run_id,
+            parts=parts,
+        )
+        return
     raise IssueBackendError(f"no backend implementation for {backend_id!r}")

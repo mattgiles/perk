@@ -190,6 +190,25 @@ they must live in prose.
 This attachment model is a clean break from earlier inline metadata: older Linear artifacts must be
 re-created or re-saved before current perk can manage them.
 
+### The dream-report companion
+
+*(Lands dormant — nothing writes it until the `perk learn dream` door ships.)* An objective saved
+by a dream session durably persists the reviewed dream report as immutable, marker-keyed comments
+(`perk:learn-dream-report:<run_id>:<part>`) on the objective's report carrier — on GitHub the
+objective issue itself (those comments are the human-visible report), on Linear the Project's
+metadata sentinel issue. On Linear the rendered report is additionally uploaded as a workspace
+file asset and linked in the Project's **Resources** as `Dream report (<run_id>)`, so humans never
+have to read the sentinel. The `objective-header` records the carrier's id under `dream_report`.
+The save is convergent: re-running it never duplicates or rewrites a part — a changed part fails
+loudly instead.
+
+One narrow Linear failure window is documented rather than closed: if the save crashes after the
+Project is created but **before** its metadata sentinel exists, that Project is invisible to
+perk's objective lookups (including the one-open-dream-objective guard), so a retried dream save
+creates a **fresh** Project and the orphan lingers. An orphan is easy to identify — a Project
+with no `Perk: objective metadata` issue and no perk header attachment — and safe to delete
+manually: it carries no perk state and no report parts.
+
 ### Replan and cancellation behavior
 
 Objective replan creates a net-new Project. Carried unfinished node-issues are **moved** to the

@@ -450,6 +450,21 @@ def test_objective_header_origin_omitted_when_absent():
     assert "origin" not in data
 
 
+# --- the dream-report companion reference (§8.64) ---------------------------------------------
+
+
+def test_dream_report_is_a_merge_writable_header_field():
+    # `dream_report` is deliberately IN the merge-writable set (recorded AFTER create — the
+    # activation-last ordering forbids an initial-header stamp), while `origin` stays excluded
+    # (create/supersede-only by structure). No ObjectiveHeader dataclass field: the merge
+    # writers merge into the parsed existing mapping, and a superseding successor deliberately
+    # does not carry it.
+    assert "dream_report" in o.OBJECTIVE_HEADER_FIELDS
+    assert "origin" not in o.OBJECTIVE_HEADER_FIELDS
+    data = o.render_header_block(o.ObjectiveHeader(run_id="01RID", created="t"))
+    assert "dream_report" not in data  # never rendered at create — merge-written only
+
+
 def test_origin_value_validator():
     assert o.origin_value(None) is None
     assert o.origin_value("learn-dream") is o.ObjectiveOrigin.LEARN_DREAM

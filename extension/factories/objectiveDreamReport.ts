@@ -26,7 +26,92 @@ import { digestSessionData, type SessionDataCtx } from "../substrate/sessionData
 import { branchOf, rebuildWorkflowState, type WorkflowState } from "../substrate/workflowState.ts";
 import { DREAM_ANALYSES_FILENAME, decodeFinalizedDreamBundle } from "../waves/dreamReducerWave.ts";
 import { buildDreamReport, type DreamReportContext } from "../waves/dreamReport.ts";
-import { DREAM_MANIFEST_FILENAME, decodeDreamManifest } from "../waves/dreamWave.ts";
+import {
+  codePointLength,
+  DREAM_MANIFEST_FILENAME,
+  decodeDreamManifest,
+} from "../waves/dreamWave.ts";
+
+/**
+ * The shared part-invariance + size rule's comment-body cap (contracts §8.64) — the full
+ * rendered companion comment (marker + blank line + part) must fit with margin under GitHub's
+ * 65,536-char issue-comment limit. The Python twin is
+ * `perk.learn.dream_companion.COMPANION_COMMENT_MAX_CHARS` (parity-pinned fixtures).
+ */
+export const COMPANION_COMMENT_MAX_CHARS = 65_000;
+
+// The invariance shapes (the exact shapes the Linear transcoder `to_linear_markdown`
+// rewrites/drops — derived locally by the same rule, mirroring the Python twin).
+const MARKER_TEXT = "perk:learn-dream-report";
+const PERK_HTML_MARKER_RE = /<!--\s*\/?perk:[^>]+?\s*-->/;
+const DETAILS_OPEN_RE = /^<details><summary><code>[^<]*<\/code><\/summary>$/;
+const DETAILS_CLOSE = "</details>";
+// Every line boundary Python's `str.splitlines()` recognizes EXCEPT `\n` — the Linear
+// transcoder splits on all of them and rejoins with `\n`, so any other boundary form would be
+// normalized in the stored body and defeat the persistence-side byte comparison forever.
+const NON_CANONICAL_LINE_BOUNDARIES = [
+  "\r",
+  "\v",
+  "\f",
+  "\u001c",
+  "\u001d",
+  "\u001e",
+  "\u0085",
+  "\u2028",
+  "\u2029",
+];
+
+/**
+ * The TS mirror of Python's `validate_report_parts` (contracts §8.64) — run over the freshly
+ * rendered parts at draft-write AND save (both flow through `resolveDreamReportGate`), so an
+ * approved report is always Python-savable: no empty/blank part, no perk HTML-comment marker,
+ * no literal companion marker text, no perk-rendered `<details>` wrapper line (the shapes the
+ * Linear transcoder rewrites/drops — transcode-invariance keeps the persistence-side
+ * dual-candidate byte comparison exact), and every rendered comment body (marker + blank line +
+ * part) within `COMPANION_COMMENT_MAX_CHARS` code points. Returns named violations (`[]` =
+ * valid). Parity-pinned against the Python twin by the shared fixture set.
+ */
+export function reportPartInvarianceViolations(parts: string[], runId: string): string[] {
+  const violations: string[] = [];
+  parts.forEach((part, i) => {
+    const index = i + 1;
+    const where = `part ${index}`;
+    if (part.trim() === "") {
+      violations.push(`${where}: empty part`);
+      return;
+    }
+    if (part.includes(MARKER_TEXT)) {
+      violations.push(`${where}: carries the literal '${MARKER_TEXT}' marker text`);
+    }
+    if (PERK_HTML_MARKER_RE.test(part)) {
+      violations.push(
+        `${where}: carries a perk HTML-comment marker (<!-- perk:… --> is rewritten by the ` +
+          "Linear transcoder)",
+      );
+    }
+    if (
+      part.split(/\r\n|\r|\n/).some((line) => DETAILS_OPEN_RE.test(line) || line === DETAILS_CLOSE)
+    ) {
+      violations.push(
+        `${where}: carries a perk-rendered <details> wrapper line (dropped by the Linear ` +
+          "transcoder)",
+      );
+    }
+    if (NON_CANONICAL_LINE_BOUNDARIES.some((boundary) => part.includes(boundary))) {
+      violations.push(
+        `${where}: carries a line boundary other than \\n (normalized by the Linear transcoder)`,
+      );
+    }
+    const bodyLength = codePointLength(`<!-- ${MARKER_TEXT}:${runId}:${index} -->\n\n${part}`);
+    if (bodyLength > COMPANION_COMMENT_MAX_CHARS) {
+      violations.push(
+        `${where}: rendered comment body is ${bodyLength} chars (cap ${COMPANION_COMMENT_MAX_CHARS})`,
+      );
+    }
+  });
+  if (parts.length === 0) violations.push("parts: empty list");
+  return violations;
+}
 
 /**
  * The `dream_report` block the objective-draft artifact carries (tool-written only — the model
@@ -223,6 +308,16 @@ export function resolveDreamReportGate(
   const built = buildDreamReport(input, recovered.context);
   if (!built.ok) {
     return { kind: "refuse", errorType: "invalid_input", detail: built.details.join("\n") };
+  }
+  // The §8.64 invariance mirror, at draft-write AND save (this resolver is both), so an
+  // approved report is always savable by the Python door's identical rule.
+  const violations = reportPartInvarianceViolations(built.parts, runId);
+  if (violations.length > 0) {
+    return {
+      kind: "refuse",
+      errorType: "invalid_input",
+      detail: `dream report parts violate the invariance rule: ${violations.join("; ")}`,
+    };
   }
   return { kind: "block", block: { input, generated_at: generatedAt, parts: built.parts } };
 }

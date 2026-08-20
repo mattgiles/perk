@@ -7,10 +7,11 @@
 // doctrine's fail-closed ladder), and the `decodeDreamReportBlock` shape check. Fully offline.
 
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { test } from "node:test";
+import { fileURLToPath } from "node:url";
 import { runScratchDir } from "../substrate/cache.ts";
 import { digestSessionData, type SessionDataCtx } from "../substrate/sessionData.ts";
 import { WORKFLOW_STATE_TYPE } from "../substrate/workflowState.ts";
@@ -29,8 +30,10 @@ import {
   decodeDreamManifest,
 } from "../waves/dreamWave.ts";
 import {
+  COMPANION_COMMENT_MAX_CHARS,
   type DreamReportGateOutcome,
   decodeDreamReportBlock,
+  reportPartInvarianceViolations,
   resolveDreamReportGate,
 } from "./objectiveDreamReport.ts";
 
@@ -521,5 +524,59 @@ test("gate: recovery failure arms are bad_state with named details", () => {
     } finally {
       rmSync(planted.cwd, { recursive: true, force: true });
     }
+  }
+});
+
+// --- the part-invariance mirror (contracts §8.64; parity-pinned with the Python twin) ----------
+
+const PARITY_FIXTURE_PATH = join(
+  dirname(fileURLToPath(import.meta.url)),
+  "..",
+  "..",
+  "tests",
+  "parity",
+  "dream_report_invariance.json",
+);
+
+interface ParityFixture {
+  run_id: string;
+  valid: string[];
+  invalid: ({ reason: string } & ({ part: string } | { repeat: string; count: number }))[];
+}
+
+test("invariance parity: the shared fixture set is accepted/rejected exactly like the Python twin", () => {
+  const fixture = JSON.parse(readFileSync(PARITY_FIXTURE_PATH, "utf8")) as ParityFixture;
+  assert.deepEqual(reportPartInvarianceViolations(fixture.valid, fixture.run_id), []);
+  for (const entry of fixture.invalid) {
+    const part = "part" in entry ? entry.part : entry.repeat.repeat(entry.count);
+    const violations = reportPartInvarianceViolations([part], fixture.run_id);
+    assert.ok(violations.length > 0, `expected a violation for: ${entry.reason}`);
+  }
+});
+
+test("invariance parity: the comment-body cap pins the Python constant", () => {
+  // perk.learn.dream_companion.COMPANION_COMMENT_MAX_CHARS is the same literal.
+  assert.equal(COMPANION_COMMENT_MAX_CHARS, 65_000);
+});
+
+test("invariance parity: an empty parts list is a violation", () => {
+  assert.notDeepEqual(reportPartInvarianceViolations([], "R"), []);
+});
+
+test("gate: invariance-violating rendered parts refuse invalid_input (both consumers share this resolver)", () => {
+  // A single-line rationale carrying a perk HTML marker passes §8.62's single-line rule but
+  // renders into the dispositions table — the §8.64 mirror refuses the rendered parts, at
+  // draft-write AND save (writeObjectiveDraft and saveObjective both run this gate).
+  const planted = plantDream();
+  try {
+    const input = validInput();
+    const rows = input.rows as Record<string, unknown>[];
+    rows[0] = { ...rows[0], rationale: "keep <!-- perk:metadata-block:plan-body --> visible" };
+    const { errorType, detail } = refusal(resolveDreamReportGate(planted.ctx, input, STAMP));
+    assert.equal(errorType, "invalid_input");
+    assert.match(detail, /invariance rule/);
+    assert.match(detail, /perk HTML-comment marker/);
+  } finally {
+    rmSync(planted.cwd, { recursive: true, force: true });
   }
 });

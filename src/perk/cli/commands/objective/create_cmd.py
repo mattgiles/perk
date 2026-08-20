@@ -11,7 +11,8 @@ import click
 from perk import objective, plan
 from perk.backends import resolve
 from perk.backends.issue_backend import IssueBackendError
-from perk.backends.objective_store import ObjectiveStoreError
+from perk.backends.objective_store import ObjectiveStore, ObjectiveStoreError
+from perk.boundary import translate_validation_errors
 from perk.cli.alias import alias
 from perk.cli.context import require_github, require_repo
 from perk.cli.emit import fail
@@ -24,6 +25,8 @@ from perk.delivery import (
     resolve_delivery,
 )
 from perk.github import GitHubError
+from perk.learn import dream_companion
+from perk.learn.dream import DREAM_MANIFEST_FILENAME
 from perk.state import cache, run_id
 from perk.substrate import git
 from perk.substrate.config import ConfigError, load_config
@@ -53,6 +56,96 @@ def _adopt_from_handoff(
     if ho_adopt:
         return str(ho_adopt)
     return adopt_from
+
+
+def _read_dream_transfer(repo_root: Path, run_id_value: str) -> tuple[str, ...] | None:
+    """Read + strictly validate the run-scoped dream-report transfer (contracts.md §8.64).
+
+    Absent → ``None`` (the ordinary create path, byte-identical). Present → the strict decode
+    (``schema_version`` literal ``"1"``; the ``run_id`` cross-run guard; non-empty parts), the
+    structural launch evidence (a present transfer requires the run-scoped dream manifest —
+    ``origin`` is thereby launch-owned: no ``--origin`` flag exists, manual/direct saves have no
+    transfer file and never stamp it; a manual retry with the same ``--run-id`` IS convergence),
+    and the shared part-invariance + size rule — every miss refuses ``invalid_input``, never a
+    silent ignore.
+    """
+    try:
+        raw_text = cache.read_scratch(
+            repo_root, run_id_value, dream_companion.DREAM_REPORT_TRANSFER_FILENAME
+        )
+    except (OSError, ValueError) as exc:
+        # The transfer is untrusted-at-rest: an unreadable file or invalid UTF-8
+        # (UnicodeDecodeError is a ValueError) must reach the same stable refusal envelope as
+        # malformed JSON, never escape as a raw traceback / generic cold-door crash.
+        raise UserFacingCliError(
+            f"dream-report transfer is unreadable: {exc}", error_type="invalid_input"
+        ) from exc
+    if raw_text is None:
+        return None
+    try:
+        raw = json.loads(raw_text)
+    except json.JSONDecodeError as exc:
+        raise UserFacingCliError(
+            f"dream-report transfer is not valid JSON: {exc}", error_type="invalid_input"
+        ) from exc
+    with translate_validation_errors(_TransferDecodeError, source="dream-report transfer"):
+        transfer = dream_companion.DreamReportTransferModel.model_validate(raw)
+    if transfer.run_id != run_id_value:
+        raise UserFacingCliError(
+            f"dream-report transfer carries run_id {transfer.run_id!r} but this save resolves "
+            f"run_id {run_id_value!r} — refusing the cross-run transfer.",
+            error_type="invalid_input",
+        )
+    manifest = cache.run_scratch_dir(repo_root, run_id_value) / DREAM_MANIFEST_FILENAME
+    if not manifest.is_file():
+        raise UserFacingCliError(
+            "dream-report transfer present without the run-scoped dream manifest — a dream save "
+            "only exists inside a perk learn dream launch.",
+            error_type="invalid_input",
+        )
+    violations = dream_companion.validate_report_parts(transfer.parts, run_id=run_id_value)
+    if violations:
+        raise UserFacingCliError(
+            "dream report parts violate the invariance rule: " + "; ".join(violations),
+            error_type="invalid_input",
+        )
+    return transfer.parts
+
+
+class _TransferDecodeError(UserFacingCliError):
+    """The transfer decode's ``ValidationError`` translation target (``invalid_input``)."""
+
+    def __init__(self, message: str) -> None:
+        super().__init__(message, error_type="invalid_input")
+
+
+def _converge_dream_companion(
+    repo_root: Path,
+    *,
+    store: ObjectiveStore,
+    objective_id: str,
+    run_id_value: str,
+    parts: tuple[str, ...],
+) -> None:
+    """The post-create companion convergence (contracts.md §8.64) — every step idempotent, so a
+    retry with the same ``--run-id`` converges: resolve the carrier, ``persist_parts``
+    (create-once, byte-compared), publish the per-backend human artifact (Linear real / GitHub
+    no-op), then record the ``dream_report`` header reference LAST."""
+    carrier = store.journal_carrier_id(objective_id=objective_id)
+    if carrier is None:
+        raise ObjectiveStoreError(
+            f"objective {objective_id} has no report carrier (absent right after create)"
+        )
+    issues = resolve.resolve_issue_backend(repo_root)
+    dream_companion.persist_parts(issues, carrier_id=carrier, run_id=run_id_value, parts=parts)
+    resolve.publish_dream_artifact(
+        repo_root, objective_id=objective_id, run_id=run_id_value, parts=parts
+    )
+    store.update_objective_header(objective_id=objective_id, fields={"dream_report": carrier})
+    user_output(
+        click.style("✓ ", fg="green")
+        + f"Dream report companion converged ({len(parts)} parts on carrier {carrier})"
+    )
 
 
 def _supersedes_from_handoff(
@@ -140,8 +233,6 @@ def create_objective(
     """Mint a run_id and create the perk:objective issue from authored markdown."""
     try:
         repo_root = require_repo(ctx)
-        if not dry_run:
-            require_github(ctx)
         body_text = body_path.read_text(encoding="utf-8").strip()
         if not body_text:
             raise UserFacingCliError("Objective body is empty", error_type="empty_body")
@@ -203,6 +294,28 @@ def create_objective(
                 "adoption).",
                 error_type="invalid_input",
             )
+        # The dream-report transfer arc (§8.64): the run-scoped transfer file (written by the
+        # extension's dream save arm) carries the reviewed report parts across the plane
+        # boundary. Ordering (D2): transfer decode + part validation FIRST (before any network,
+        # so a violating report refuses while nothing durable exists yet) → the stacked
+        # validation/prepare block (its existing position) → the origin guard → create.
+        # ``--dry-run`` stays fully offline and byte-identical — the transfer arc, the guard,
+        # and the companion are all skipped (payload unchanged).
+        dream_parts: tuple[str, ...] | None = None
+        if not dry_run:
+            dream_parts = _read_dream_transfer(repo_root, resolved_run_id)
+        if dream_parts is not None and (adopt_from is not None or supersedes is not None):
+            raise UserFacingCliError(
+                "a dream-report transfer cannot be combined with --supersedes/--adopt-from — a "
+                "dream save always creates a fresh objective.",
+                error_type="invalid_input",
+            )
+        # The GitHub auth probe runs only AFTER the offline refusal ladder above (body/roadmap
+        # validation, the handoff recovery, and the whole transfer arc) — §8.64's "before any
+        # network" is literal: a malformed transfer refuses `invalid_input` even unauthed,
+        # never masked by `github_unauthed`. The dry-run skip is unchanged.
+        if not dry_run:
+            require_github(ctx)
         # The reviewed delivery choice (§8.45). Only an explicit `stacked` changes anything —
         # absent (and an explicit `incremental`, forwarded verbatim from the reviewed draft)
         # keeps every existing path byte-identical (§8.42's absence rule: incremental is never
@@ -291,6 +404,23 @@ def create_objective(
                     error_type="adopt_unsupported",
                 )
         else:
+            origin: objective.ObjectiveOrigin | None = None
+            if dream_parts is not None:
+                origin = objective.ObjectiveOrigin.LEARN_DREAM
+                # The save-time origin conflict re-check (§8.24's first save-time consumer),
+                # adjacent to the create to minimize the residual re-check→create race window
+                # (non-atomic by design — documented, not closed). Exhaustive-or-raise: a
+                # lookup failure raises → fail closed (the ObjectiveStoreError arm below).
+                conflict = store.find_open_objective_by_origin(
+                    origin=origin, exclude_run_id=resolved_run_id
+                )
+                if conflict is not None:
+                    raise UserFacingCliError(
+                        f"an open learn-dream objective already exists: #{conflict.id} "
+                        f"({conflict.url}) — complete or close it before saving another dream "
+                        "objective.",
+                        error_type="origin_conflict",
+                    )
             issue = store.create_objective(
                 title=resolved_title,
                 body=body_text,
@@ -299,13 +429,31 @@ def create_objective(
                 roadmap_nodes=roadmap_nodes,
                 delivery=resolved_delivery,
                 delivery_lineage=delivery_lineage,
+                origin=origin,
                 dry_run=dry_run,
             )
+            if dream_parts is not None:
+                # Companion convergence AFTER create — the find-then-return ``run_id``
+                # idempotency recovers an interrupted dream save's later steps here (the
+                # create-internal window itself is the store tier's documented posture).
+                _converge_dream_companion(
+                    repo_root,
+                    store=store,
+                    objective_id=issue.id,
+                    run_id_value=resolved_run_id,
+                    parts=dream_parts,
+                )
     except DeliveryError as exc:
         fail(ctx, as_json=as_json, error_type=exc.error_type, message=str(exc))
         return
     except git.GitError as exc:
         fail(ctx, as_json=as_json, error_type="git_error", message=str(exc))
+        return
+    except dream_companion.CompanionConflictError as exc:
+        fail(ctx, as_json=as_json, error_type="companion_conflict", message=str(exc))
+        return
+    except dream_companion.CompanionAppendAmbiguous as exc:
+        fail(ctx, as_json=as_json, error_type="companion_ambiguous", message=str(exc))
         return
     except (IssueBackendError, GitHubError) as exc:
         fail(ctx, as_json=as_json, error_type="github_error", message=str(exc))

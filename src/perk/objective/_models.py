@@ -75,6 +75,15 @@ OBJECTIVE_HEADER_FIELDS = frozenset(
         # (fresh incremental objectives stay byte-identical); merge-writable on all stores.
         "delivery",
         "delivery_lineage",
+        # The dream-report companion reference (contracts.md §8.64): the carrier id whose
+        # comments hold the persisted report parts. Merge-writable by design — the node's
+        # ordering records it AFTER create (activation-last), so it cannot be stamped into the
+        # initial header like `origin`. No `ObjectiveHeader` dataclass field: the merge writers
+        # merge into the parsed existing mapping, and nothing consumes it structurally —
+        # discovery is the marker scan keyed on the header's own `run_id`. A superseding
+        # successor deliberately does not carry it (the report stays with the run that
+        # produced it).
+        "dream_report",
     }
 )
 

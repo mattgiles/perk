@@ -200,7 +200,12 @@ fields ride native **attachments** instead — see
   stacked objective**: `delivery: stacked` (the reviewed delivery choice — absence means
   incremental, and `incremental` is never written) and `delivery_lineage` (the stable ULID
   identity of the delivery train, minted at stacked authoring and copied by replan; see
-  [Delivery](#delivery)). Incremental objectives store neither field.
+  [Delivery](#delivery)). Incremental objectives store neither field. A third conditional
+  field, `dream_report`, appears only on an objective saved by a `perk learn dream` session
+  (dormant until that door ships): the id of the issue whose comments durably hold the reviewed
+  dream-report parts — on GitHub the objective issue itself, on Linear the Project's metadata
+  sentinel (see
+  [Issue backends](./providers-and-backends/issue-backends.md#the-dream-report-companion)).
 - **`objective-roadmap`** (issue body) — the **canonical** flat-node roadmap YAML
   (`{schema_version: "1", nodes: [...]}`), deterministically re-rendered on every node update.
   `depends_on` / `comment` columns are omitted from serialization unless some node specifies them.

@@ -1,7 +1,7 @@
 # perk cross-plane contracts
 
 The language-neutral contracts both planes obey, authored once here and bundled into each
-build artifact. This document holds the numbered **prose contract sections** (`§8.1`–`§8.63`,
+build artifact. This document holds the numbered **prose contract sections** (`§8.1`–`§8.64`,
 non-contiguous: `§8.8` is skipped and `§8.6a` exists; no parser): the Python CLI (`perk`)
 and the TS extension (`@mgiles/perk`) each implement one side, against the exact names/paths/
 fields pinned in each section. `perk doctor` verifies conformance. The numbering convention:
@@ -4285,7 +4285,7 @@ Reconcilable region markers, the `Adopted-from` archive note, and the copyable c
 Additive, store-tier only (no CLI flag, no extension/TS change): machine-created objectives carry
 a provenance stamp, and the store tier can answer "is an open objective with this origin already
 live?" authoritatively — the foundation for the dream-launch guard and the save-time conflict
-re-check (later nodes).
+re-check (the guard's first save-time consumer is the §8.64 dream save door).
 
 - **The `origin` header field.** A **closed vocabulary** (`objective.ObjectiveOrigin`, a
   `StrEnum`; first value `learn-dream`), stored as a `str` in the `objective-header` (typed like
@@ -9828,10 +9828,141 @@ call the gate re-runs against freshly recovered context, and when stored parts a
 they are byte-compared (`JSON.stringify` equality) against the re-rendered parts — a mismatch
 (run-scratch drift or artifact tamper between draft-write and save) refuses `bad_state` with
 nothing saved and the read-only gate left on. The one `generated_at` stamp is what keeps the
-re-render deterministic. On success the save proceeds **unchanged** — the parts do NOT cross
-to the Python plane and no new cold-door flag exists: companion persistence + the run-scoped
-parts handoff to the save door are an explicitly deferred later node, not a silent omission.
+re-render deterministic. On success the parts cross to the Python save door through the
+run-scoped transfer file and are durably persisted as the report companion — **§8.64** (which
+superseded the original §8.63 deferral); no new cold-door flag exists.
 No new ok-details fields on either tool (the visible review bundle and the normal ok results
 already carry the signal). `STAGE_TOOLS`/`READ_ONLY_TOOLS` are untouched: `objective_draft`
 stays read-only-safe (the dream arm only READS run scratch; the marker rides the ordinary
 session-entry channel), `objective_save` stays gate-excluded.
+
+## §8.64 · Dream companion persistence + convergent save ordering
+
+The dream save's durable half (Objective #1892 Node 4.3): the run-scoped **transfer file**
+carries the reviewed CANONICAL parts from the extension to the `perk objective create` save
+door; the door stamps `origin` (§8.24), re-checks the open-by-origin conflict, persists the
+parts as the immutable **dream report companion** on the objective's **report carrier**, and
+publishes the per-backend human artifact — all BEFORE activation (activation stays LAST, cold-
+door success only). Everything lands dormant until the `perk learn dream` door (node 5.1).
+
+**The transfer file.** `dream-report-transfer.json`, run-scoped scratch
+(`run_scratch_dir(root, run_id)`), filename constant mirrored in both planes
+(`perk.learn.dream_companion.DREAM_REPORT_TRANSFER_FILENAME` ↔
+`extension/factories/objectiveSave.ts` — parity-pinned): `{schema_version: "1", run_id, parts}`.
+Written atomically by `saveObjective` on the dream arm only — after the gate yields `block`
+(and after the approval-path byte-compare), BEFORE the cold door; a write throw is the soft
+`errorType: "scratch_failed"` failure (the `runColdDoor` stdin-staging precedent) — the cold
+door is NOT invoked, nothing activates, the read-only gate stays on. Non-dream saves write
+nothing (byte-identical). **No `origin` field**: the transfer has one producer and one meaning,
+so the door derives `ObjectiveOrigin.LEARN_DREAM` on the validated dream arm itself — origin
+stays launch-owned (no `--origin` flag exists; manual/direct saves have no transfer file and
+never stamp it; a manual retry with the same `--run-id` IS convergence). `run_id` is the
+cross-run mismatch guard. Door-side decode is a `StrictInputModel`
+(`DreamReportTransferModel`): `schema_version` literal `"1"`, `run_id` must equal the door's
+resolved run id, `parts` a non-empty list of non-empty strings — malformed refuses
+`invalid_input` (never ignored). **Structural launch evidence:** a present transfer requires
+the run-scoped `dream-manifest.json`; transfer-without-manifest refuses `invalid_input`. A
+transfer combined with `--supersedes`/`--adopt-from` refuses `invalid_input`. `--dry-run`
+stays fully offline and byte-identical (the transfer arc, the guard, and the companion are all
+skipped; payload unchanged).
+
+**Save-door ordering (the dream arm, strictly).** (1) transfer decode + the shared
+part-invariance rule — before ANY network, the GitHub auth probe included (`require_github`
+runs only after the offline refusal ladder, so a malformed transfer refuses `invalid_input`
+even unauthed — never masked by `github_unauthed`); an unreadable / invalid-UTF-8 transfer
+file refuses the same `invalid_input`, never a raw crash; (2) the existing stacked block stays byte-positioned (strict train validation +
+`Delivery.prepare` exactly where they run today — a dream+stacked save keeps the
+pre-persistence capability gate); (3) the **origin conflict re-check** immediately before
+create: `find_open_objective_by_origin(origin=LEARN_DREAM, exclude_run_id=<run id>)` — a
+returned ref refuses `error_type="origin_conflict"` naming the existing objective id + url;
+exhaustive-or-raise means a lookup failure fails closed; the residual re-check→create race is
+documented (below), not closed — guard adjacency to create minimizes the window; (4)
+`create_objective(…, origin=LEARN_DREAM)` — origin stamped atomically at initial creation;
+the find-then-return `run_id` idempotency recovers an interrupted dream save's later steps;
+(5) companion convergence: carrier = `journal_carrier_id(objective_id)` (`None` → raise) →
+`persist_parts` (create-once, byte-compared) → `publish_dream_artifact` (Linear real / GitHub
+no-op) → `update_objective_header({"dream_report": <carrier_id>})` LAST; (6)
+`post_status_update` stays byte-positioned (after the try-block, fresh-create only) — the
+accepted consequence: a companion failure after create skips it, and the converging retry
+(`existed=True`) skips it permanently (bookkeeping, never load-bearing); (7) the `--json`
+payload is byte-identical (no new machine fields — the header field is the durable reference);
+one `user_output` narration line reports the converged part count + carrier; (8) activation
+LAST: `saveObjective` appends `active_objective` + the budget marker only after cold-door
+success — any failure in 1–5 exits non-zero, nothing activates, the gate stays on, retry
+converges. Failure mapping: `CompanionConflictError` → `error_type="companion_conflict"`;
+`CompanionAppendAmbiguous` → `"companion_ambiguous"`.
+
+**The companion core** (`perk/learn/dream_companion.py` — backend contracts only; mirrors the
+§8.43 journal disciplines without reusing the journal). The **report carrier** is
+`ObjectiveStore.journal_carrier_id` — GitHub: the objective issue itself (normalized id);
+Linear: the Project metadata sentinel's identifier. **Marker grammar** (dual-encoding):
+canonical HTML `<!-- perk:learn-dream-report:<run_id>:<i> -->`; the parser also accepts the
+inline-code rewrite `` `perk:learn-dream-report:<run_id>:<i>` ``. `<i>` is a canonical 1-based
+decimal (no leading zeros/signs — any other spelling in a marked comment is corruption).
+Marker-text detection is substring-based; a comment carrying the marker text MUST parse
+strictly (marker on the PHYSICAL first line — leading blank lines/indentation are corruption,
+never normalized away, for foreign-run comments identically; identity from the first line;
+marker-text count > 1 in one body = corruption; an edited marked comment = corruption); an
+unmarked comment is unrelated untrusted DATA. A comment body is `marker + blank line + part`. **Dual-candidate
+byte-identity:** a stored body converges iff byte-equal to the verbatim render OR the local
+transcode candidate (the marker-line inline-code rewrite derived by the same rule as
+`to_linear_markdown`, never imported from the Linear backend — with invariant content the only
+rewritten line is perk's own marker line, so the candidate is exact). **`persist_parts`**: one
+complete `read_comments` scan (foreign-run companion comments parse strictly but never
+participate; an index outside `1..N` for this run is corruption — a stale longer render never
+silently tolerated; conflicting duplicates under one key are corruption); per index, present +
+byte-equal → idempotent skip, differing → loud `CompanionConflictError`; absent → POST with
+the rescan-one-retry ambiguity policy (a raised POST is AMBIGUOUS; the complete rescan
+decides; only proven absence earns the one retry; a failed rescan or a still-unproven write
+raises `CompanionAppendAmbiguous` — never a blind re-POST).
+
+**The three-point invariance rule** (ONE shared rule, parity-pinned fixtures across both
+planes — `tests/parity/dream_report_invariance.json`): parts must be **transcode-invariant** —
+non-empty; no perk HTML-comment marker; no literal `perk:learn-dream-report` marker text; no
+exact `<details><summary><code>…</code></summary>` / `</details>` wrapper line (the shapes
+`to_linear_markdown` rewrites/drops); no line boundary other than `\n` (`\r`, VT, FF, FS/GS/RS,
+NEL, U+2028/U+2029 — the transcoder's `splitlines()` + `"\n".join` normalizes every other form,
+which would defeat the dual-candidate byte comparison forever); full comment body ≤ 65,000 chars
+(`COMPANION_COMMENT_MAX_CHARS`, the backstop under GitHub's 65,536; §8.62 already caps parts
+at 60,000 code points). Enforced at THREE points: TS-side in the gate resolver (draft-write
+AND save — approved ⇒ savable), door-side at transfer decode (before anything durable), and as
+the `persist_parts` pre-POST backstop.
+
+**The per-backend human artifact** (`publish_dream_artifact(repo_root, …)` in
+`perk/backends/resolve.py`, ONE function keyed off the committed `[issues]` selection — no
+strategy objects). GitHub → an **immediate return** (the marker-keyed parts on the objective
+issue ARE the visible artifact). Linear → the `perk/backends/linear/dream_report.py`
+`publish_dream_artifact` flow: presence probe first (the new `project_external_links` read —
+skip when a Resources link labeled `Dream report (<run_id>)` exists), else
+`LinearClient.upload_file(filename="dream-report-<run_id>.md", content_type="text/markdown",
+content)` — one call owning the whole `fileUpload` reservation (sized by the actual bytes) +
+signed-PUT choreography (the PUT rides the same injectable transport, propagating the
+reservation headers + `Content-Type`) and returning the asset URL — → the existing
+`create_entity_external_link(project_id, label, url=<assetUrl>)`. The uploaded bytes are the
+canonical parts joined `"\n\n"` — verbatim, never transcoded (a file asset, not a comment).
+**Fail-loud** (part of the convergent sequence, never fail-open bookkeeping) — each boundary
+failure fails the save; retry converges. Uploaded assets are workspace-auth-gated (fine — the
+artifact serves workspace humans). Non-binding recorded intent: once `gh` grows general-file
+issue attachment (cli/cli#14194; today's preview `--attach` is images/video only), the GitHub
+arm may attach the rendered report file — a desire, not a promise.
+
+**The `dream_report` header field.** `OBJECTIVE_HEADER_FIELDS` gains `dream_report` —
+merge-writable by design (recorded AFTER create per the activation-last ordering; `origin`
+stays excluded). Value = the carrier id only (GitHub: the objective issue's own normalized
+number; Linear: the sentinel identifier) — the header already carries the run's `run_id`,
+parts are keyed `(run_id, index)`, and discovery is the marker scan (no comment-id list). No
+`ObjectiveHeader` dataclass field; a superseding successor deliberately does not carry it (the
+report stays with the run that produced it).
+
+**Documented residuals** (accepted, not closed): (1) the origin-guard re-check→create race
+(non-atomic by design; adjacency minimizes the window); (2) the store-tier interrupted-create
+posture — `create_objective`'s find-then-return on a `run_id` hit does not converge a
+partially created objective (a pre-existing window shared by every objective save; this node's
+OWN steps are each convergent); (3) the Linear pre-sentinel orphan window — a project created
+but its sentinel create crashed is invisible to `find_objective` AND
+`find_open_objective_by_origin`; a dream retry creates a fresh project and the orphan lingers.
+Guidance: an orphan is a project with no `Perk: objective metadata` issue and no perk header
+attachment — delete it manually; it carries no perk state and no report parts; (4) the Linear
+orphan-asset window — a crash after `fileUpload`/PUT but before the link write leaves an
+uploaded asset with no discoverable run key; the retry uploads a fresh asset and links it;
+unreferenced workspace assets are inert.

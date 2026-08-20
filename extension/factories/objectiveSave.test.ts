@@ -6,7 +6,7 @@
 // the artifact-first `/objective-save` command (seam-first; legacy drive as the no-draft fallback).
 
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
 import {
@@ -33,7 +33,11 @@ import {
 import { OBJECTIVE_BUDGET_TYPE } from "./objective.ts";
 import { OBJECTIVE_DRAFT_ARTIFACT } from "./objectiveDraft.ts";
 import { resolveDreamReportGate } from "./objectiveDreamReport.ts";
-import { objectiveApprovalSave, objectiveSaveGuidance } from "./objectiveSave.ts";
+import {
+  DREAM_REPORT_TRANSFER_FILENAME,
+  objectiveApprovalSave,
+  objectiveSaveGuidance,
+} from "./objectiveSave.ts";
 
 const CREATE_JSON = JSON.stringify({
   success: true,
@@ -70,6 +74,13 @@ test("tool: objective_save delegates, links active_objective + seeds budget mark
     const marker = entries.find((e) => e.customType === OBJECTIVE_BUDGET_TYPE);
     assert.ok(marker, "budget marker seeded");
     assert.equal(marker?.data?.objective_id, "7");
+    // a non-dream save writes NO transfer file (§8.64 — the dream arm only).
+    assert.ok(
+      !existsSync(
+        join(cwd, ".perk", "workflow", "scratch", "runs", "01RID", DREAM_REPORT_TRANSFER_FILENAME),
+      ),
+      "no dream-report transfer on a non-dream save",
+    );
   } finally {
     h.dispose();
   }
@@ -606,14 +617,71 @@ test("tool: dream + valid direct-param save proceeds — the cold-door argv is u
     const argv = readFileSync(argvFile, "utf8").trimEnd().split("\n");
     assert.equal(argv[0], "objective");
     assert.equal(argv[1], "create");
-    // No new flags: the parts do NOT cross to the Python plane yet (§8.63 explicit deferral).
+    // No new flags: the parts cross to the Python plane through the run-scoped transfer
+    // FILE (§8.64), never a cold-door flag.
     assert.ok(
       !argv.some((arg) => arg.startsWith("--dream")),
       `no dream flag rides the cold door (got ${JSON.stringify(argv)})`,
     );
+    // The transfer file landed before the cold door ran: the D1 schema with this run's id and
+    // the gate block's parts (the direct path stamps generated_at at save time, so the exact
+    // part bytes are pinned on the approval-path test where the stamp is stored).
+    const transferPath = join(
+      cwd,
+      ".perk",
+      "workflow",
+      "scratch",
+      "runs",
+      DREAM_RUN,
+      DREAM_REPORT_TRANSFER_FILENAME,
+    );
+    const transfer = JSON.parse(readFileSync(transferPath, "utf8")) as {
+      schema_version: string;
+      run_id: string;
+      parts: string[];
+    };
+    assert.equal(transfer.schema_version, "1");
+    assert.equal(transfer.run_id, DREAM_RUN);
+    assert.ok(transfer.parts.length >= 1);
+    assert.ok(transfer.parts.every((part) => typeof part === "string" && part.length > 0));
   } finally {
     h.dispose();
   }
+});
+
+test("tool: an invariance-violating dream_report refuses invalid_input — nothing delegated", async () => {
+  // A single-line rationale carrying a perk HTML marker passes §8.62's single-line rule but
+  // fails the §8.64 invariance mirror at the save gate — refused before the cold door.
+  const cwd = scaffoldRepo();
+  const digest = plantDream(cwd);
+  const file = plantSession(cwd, [
+    { run_id: DREAM_RUN, mode: "read-write", dream_bundle_digest: digest },
+  ]);
+  const argvFile = join(cwd, "argv.txt");
+  const bin = fakePerk(cwd, { stdout: CREATE_JSON, argvFile });
+  const h = await loadPerkSession({
+    cwd,
+    sessionManager: SessionManager.open(file),
+    env: { PERK_BIN: bin },
+  });
+  try {
+    const input = dreamReportInput();
+    const rows = input.rows as Record<string, unknown>[];
+    rows[0] = { ...rows[0], rationale: "keep <!-- perk:metadata-block:plan-body --> visible" };
+    const result = await h.invokeTool("objective_save", { prose: PROSE, dream_report: input });
+    const details = result.details as { ok: boolean; error?: string; error_type?: string };
+    assert.equal(details.ok, false);
+    assert.equal(details.error_type, "invalid_input");
+    assert.match(details.error ?? "", /invariance rule/);
+    assert.throws(() => readFileSync(argvFile, "utf8"), "no cold-door exec happened");
+  } finally {
+    h.dispose();
+  }
+});
+
+test("transfer filename parity: the Python DREAM_REPORT_TRANSFER_FILENAME literal", () => {
+  // perk.learn.dream_companion.DREAM_REPORT_TRANSFER_FILENAME pins the same literal.
+  assert.equal(DREAM_REPORT_TRANSFER_FILENAME, "dream-report-transfer.json");
 });
 
 test("objectiveApprovalSave: a dream draft whose stored parts match the re-render saves; a mutated part refuses bad_state", async () => {
@@ -670,4 +738,88 @@ test("objectiveApprovalSave: a dream draft whose stored parts match the re-rende
   );
   assert.equal(tampered.gating.exits, 0, "a refused save leaves the gate ON");
   assert.equal(tampered.argvs.length, 0, "nothing reached the cold door");
+});
+
+test("objectiveApprovalSave: the dream arm stages the transfer file with the exact schema bytes", async () => {
+  const cwd = scaffoldRepo();
+  const digest = plantDream(cwd);
+  const branch: unknown[] = [
+    stateEntry({ run_id: DREAM_RUN, mode: "read-only", dream_bundle_digest: digest }),
+  ];
+  const ctx = reportableCtx(cwd, branch);
+  const gate = resolveDreamReportGate(ctx, dreamReportInput(), DREAM_STAMP);
+  assert.equal(gate.kind, "block", JSON.stringify(gate));
+  const block = (gate as { kind: "block"; block: { parts: string[] } }).block;
+  const payload = `${JSON.stringify({
+    schema_version: 1,
+    title: "Ship retries",
+    dream_report: block,
+    prose: PROSE,
+    roadmap: DRAFT_ROADMAP,
+  })}\n`;
+  assert.ok(writeSessionArtifact(fakeSink(branch), ctx, OBJECTIVE_DRAFT_ARTIFACT, payload));
+  const pi = fakeApprovalPi(branch, { stdout: CREATE_JSON });
+  const outcome = await objectiveApprovalSave(
+    pi,
+    ctx as unknown as ExtensionContext,
+    fakeGating(true),
+  );
+  assert.equal(outcome.status, "saved");
+  // The exact D1 schema bytes: pretty-printed JSON + trailing newline, parts identical to the
+  // gate block's (the stored stamp keeps the save-side re-render byte-identical).
+  const transferPath = join(
+    cwd,
+    ".perk",
+    "workflow",
+    "scratch",
+    "runs",
+    DREAM_RUN,
+    DREAM_REPORT_TRANSFER_FILENAME,
+  );
+  assert.equal(
+    readFileSync(transferPath, "utf8"),
+    `${JSON.stringify({ schema_version: "1", run_id: DREAM_RUN, parts: block.parts }, null, 2)}\n`,
+  );
+});
+
+test("objectiveApprovalSave: a transfer write failure is soft scratch_failed — cold door NOT invoked, gate on", async () => {
+  const cwd = scaffoldRepo();
+  const digest = plantDream(cwd);
+  const branch: unknown[] = [
+    stateEntry({ run_id: DREAM_RUN, mode: "read-only", dream_bundle_digest: digest }),
+  ];
+  const ctx = reportableCtx(cwd, branch);
+  const gate = resolveDreamReportGate(ctx, dreamReportInput(), DREAM_STAMP);
+  assert.equal(gate.kind, "block", JSON.stringify(gate));
+  const block = (gate as { kind: "block"; block: { parts: string[] } }).block;
+  const payload = `${JSON.stringify({
+    schema_version: 1,
+    title: "Ship retries",
+    dream_report: block,
+    prose: PROSE,
+    roadmap: DRAFT_ROADMAP,
+  })}\n`;
+  assert.ok(writeSessionArtifact(fakeSink(branch), ctx, OBJECTIVE_DRAFT_ARTIFACT, payload));
+  // Force the atomic write to throw: a DIRECTORY occupies the transfer target path.
+  mkdirSync(
+    join(cwd, ".perk", "workflow", "scratch", "runs", DREAM_RUN, DREAM_REPORT_TRANSFER_FILENAME),
+    { recursive: true },
+  );
+  const argvs: string[][] = [];
+  const pi = fakeApprovalPi(branch, { stdout: CREATE_JSON, argvs });
+  const gating = fakeGating(true);
+  const outcome = await objectiveApprovalSave(pi, ctx as unknown as ExtensionContext, gating);
+  assert.equal(outcome.status, "save-failed");
+  const result = outcome.status === "save-failed" ? outcome.result : null;
+  assert.equal(result?.details.ok, false);
+  assert.equal(result?.details.ok === false && result.details.error_type, "scratch_failed");
+  assert.match(result?.content[0]?.text ?? "", /could not stage the dream-report transfer/);
+  assert.equal(argvs.length, 0, "the cold door was NOT invoked");
+  assert.equal(gating.exits, 0, "the read-only gate stays on");
+  assert.equal(
+    rebuildWorkflowState(branch as Parameters<typeof rebuildWorkflowState>[0]).active_objective ??
+      null,
+    null,
+    "nothing activated",
+  );
 });

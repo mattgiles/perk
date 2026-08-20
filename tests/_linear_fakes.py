@@ -225,6 +225,9 @@ class FakeLinearWorkspace(LinearClient):
         # Re-creates REPLACE the record in place, keeping the same attachment id (the
         # live-verified upsert-by-(url, issueId) + REPLACE-metadata semantics).
         self.attachments: dict[tuple[str, str], dict[str, object]] = {}
+        # The dream-artifact uploads (the real `upload_file` is a GraphQL reservation + an
+        # httpx PUT, overridden below to record in-memory).
+        self.uploaded_assets: list[dict[str, object]] = []
         self.requests: list[tuple[str, dict[str, object]]] = []
         self._seq = itertools.count(1)
         self._clock = itertools.count(1)
@@ -287,6 +290,22 @@ class FakeLinearWorkspace(LinearClient):
 
     def comments_of(self, issue: dict[str, object]) -> list[dict[str, object]]:
         return cast("list[dict[str, object]]", issue["comments"])
+
+    def upload_file(self, *, filename: str, content_type: str, content: bytes) -> str:
+        """Record the whole upload in-memory and mint a fake asset URL (the real client's
+        reservation + signed PUT are covered by the ``httpx.MockTransport`` tests; the
+        workspace fake keeps the publish flow offline)."""
+        n = len(self.uploaded_assets) + 1
+        asset_url = f"https://uploads.linear.test/asset/{n}"
+        self.uploaded_assets.append(
+            {
+                "filename": filename,
+                "content_type": content_type,
+                "content": content,
+                "asset_url": asset_url,
+            }
+        )
+        return asset_url
 
     def add_foreign_comment(self, identifier: str, body: str) -> None:
         """Simulate a Linear GitHub-integration linkback comment (a foreign writer)."""
@@ -403,6 +422,9 @@ class FakeLinearWorkspace(LinearClient):
             project = self.projects.get(str(v.get("id", "")))
             if project is None:
                 raise _not_found()
+            if "externalLinks(" in query:  # the Resources read (dream-artifact presence probe)
+                links = cast("list[dict[str, object]]", project.get("external_links", []))
+                return {"project": {"externalLinks": self._page_of(list(links), v.get("cursor"))}}
             if "issues(first" in query:
                 with_milestone = "projectMilestone" in query
                 nodes = [
