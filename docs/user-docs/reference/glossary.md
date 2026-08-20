@@ -20,6 +20,14 @@ operator-facing; each entry links to the page that owns the detail.
 - **Door.** A supported way to enter or drive a stage: a **warm door** stays in the current
   session, a **cold-local door** launches a fresh local session, and a **cold-remote door** runs an
   eligible bounded stage on the remote runner. See [Stages and doors](./in-session/stages-and-doors.mdx).
+- **Dream.** The whole-corpus curation factory (`perk learn dream`): an inward audit of the
+  learned corpus at one stamped commit that curates one bounded curation objective. Contrast a
+  **harvest**, the bounded outward mine that reads docs as lenses into the code. See
+  [Run the learn-dream factory](../how-to/run-the-learn-dream-factory.md).
+- **Dream report.** The reviewed, durable companion record of a dream — one disposition row per
+  doc, plus selections, overflow, and follow-ups — persisted as immutable comments on the
+  objective's report carrier. See
+  [The dream-report companion](./providers-and-backends/issue-backends.md#the-dream-report-companion).
 - **Gist.** A rough, problem-space statement of intent upstream of both plans and objectives,
   without implementation detail. See
   [Gists, plans, and objectives](../explanation/gists-plans-and-objectives.md).

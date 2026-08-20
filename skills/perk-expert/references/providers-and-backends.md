@@ -286,6 +286,41 @@ orphan Project invisible to every perk lookup (the dream-origin guard included);
 save creates a fresh Project. Identify the orphan by its missing `Perk: objective metadata` issue
 and header attachment, and delete it manually — it holds no perk state and no report parts.
 
+### Dream origin and the one-open-dream guard
+
+A dream-authored objective additionally carries the `origin` objective-header field with the
+value `learn-dream` — a closed vocabulary, never model- or human-supplied. It is stamped
+atomically into the initial header at `create_objective` time (never create-then-merge), carried
+automatically across `supersede_objective` (a replan's successor stays visibly dream-originated),
+and structurally excluded from post-create header merges — the header-update writers reject any
+later origin write while round-tripping a stored origin untouched through unrelated merges.
+Origin-less objectives render byte-identically to before the field existed.
+
+Both backends implement the open-objective-by-origin lookup the guard consumes,
+**exhaustive-or-raise** so consumers fail closed — an infra failure, a present-but-malformed
+header, or an out-of-vocabulary stored origin raises; only an exhaustively enumerated open
+population with no match answers "none":
+
+- **GitHub** sweeps **all pages** of the repo's open `perk:objective` label population — the
+  guard population is per-repo.
+- **Linear** (Project-backed) sweeps the **team's** projects via each Project's metadata
+  sentinel (the sentinel IS the identity; a sentinel-less project is skipped — the same
+  accepted create-crash window as the orphan residual above). The sweep is **team-scoped in
+  v1**: two repos sharing one Linear team share the guard, and a cross-team dream objective is
+  invisible to it — the documented limitation. The dormant issue-backed Linear store raises
+  (it cannot answer authoritatively).
+
+The lookup guards two points of `perk learn dream`:
+
+- **The pre-launch door guard** — before minting the run: an open dream objective refuses
+  `origin_conflict` naming the existing objective (complete or close it before dreaming again);
+  a lookup that cannot answer refuses `origin_lookup_failed` rather than proceeding on
+  uncertainty. `--dry-run` stays offline and never evaluates the guard.
+- **The save-time re-check** — immediately before `create_objective`, excluding the session's
+  own run id (so a converging retry of this dream's save never self-conflicts): any returned
+  ref refuses `origin_conflict`; an unanswerable lookup refuses. The residual re-check→create
+  race is documented, not closed — guard adjacency to create minimizes the window.
+
 ### Replan and cancellation
 
 Linear replan creates a new Project, moves carried unfinished node-issues into it (preserving

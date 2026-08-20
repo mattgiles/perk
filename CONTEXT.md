@@ -141,3 +141,43 @@ open at its recorded head, accepted explicitly (`stack recover --accept-prefix`)
 completed record covering only the merged prefix (`external_prefix: true` + the remainder
 proof).
 _Avoid_: partial land, broken stack
+
+### Learned-corpus curation
+
+**Learned corpus**:
+The tracked `docs/learned/` doc set (minus the generated index) that `/learn` grows and the
+curation factories read.
+_Avoid_: knowledge base, notes
+
+**Dream**:
+The whole-corpus curation audit at one stamped commit (`perk learn dream`), reading the corpus
+inward to curate the corpus itself; contrast **harvest**, the bounded outward mine that reads
+docs as lenses into the code.
+_Avoid_: full harvest, corpus scan
+
+**Dream report**:
+The reviewed, durable companion record of a dream (one row per doc, stances, selections,
+overflow, follow-ups), persisted as immutable marker-keyed comments on the objective's report
+carrier.
+_Avoid_: audit log, wave output
+
+**Disposition**:
+The one final per-doc curation verdict from the closed set `keep` / `revise` / `merge-into` /
+`retire`.
+_Avoid_: action, fate, status
+
+**Curation unit**:
+One coherent plan-sized bundle of curation work (e.g. a merge source + survivor + forced
+repoints), selected or ranked into overflow, mapping many-to-one onto roadmap nodes.
+_Avoid_: task, work item
+
+**Curation objective**:
+The ONE bounded objective a dream authors (≤ 12 distinct roadmap nodes), carrying
+`origin: learn-dream`.
+_Avoid_: cleanup epic
+
+**Harvest follow-up**:
+A report-only code-improvement lead surfaced during a dream, citing a **surviving destination**
+(a final-`keep`/`revise` doc, or a cluster named by one); never curation-roadmap work and never
+a minted issue.
+_Avoid_: code TODO, side quest

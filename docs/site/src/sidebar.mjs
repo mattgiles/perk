@@ -65,6 +65,7 @@ export const sidebar = [
           "how-to/run-the-learn-docs-factory",
           "how-to/run-the-learn-code-factory",
           "how-to/run-the-learn-harvest-factory",
+          "how-to/run-the-learn-dream-factory",
         ],
       },
       {

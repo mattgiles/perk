@@ -206,6 +206,10 @@ fields ride native **attachments** instead — see
   dream-report parts — on GitHub the objective issue itself, on Linear the Project's metadata
   sentinel (see
   [Issue backends](./providers-and-backends/issue-backends.md#the-dream-report-companion)).
+  A fourth conditional field, `origin`, likewise appears only on a dream-authored objective
+  (value `learn-dream`): stamped once at creation, never merged into a header after create,
+  and carried forward by replan supersession — it is what the one-open-dream-objective guard
+  reads.
 - **`objective-roadmap`** (issue body) — the **canonical** flat-node roadmap YAML
   (`{schema_version: "1", nodes: [...]}`), deterministically re-rendered on every node update.
   `depends_on` / `comment` columns are omitted from serialization unless some node specifies them.

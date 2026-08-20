@@ -87,6 +87,9 @@ for exactly one goal.
   `SHOULD_BE_CODE` `perk:learn` issues into their real code homes.
 - [How to run the learn-harvest factory](./run-the-learn-harvest-factory.md) — mine `docs/learned/`
   as lenses into the code and curate ONE bounded improvement objective.
+- [How to run the learn-dream factory](./run-the-learn-dream-factory.md) — audit the whole learned
+  corpus at one stamped commit and curate ONE bounded curation objective plus the durable dream
+  report.
 
 ## Headless & remote
 
