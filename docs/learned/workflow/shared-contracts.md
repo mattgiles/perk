@@ -8,7 +8,7 @@ cluster: cross-plane-contracts
 
 Anything both planes must agree on lives in `shared/` and is read **directly by each plane — no
 codegen**. There are two kinds of shared artifact: **parsed data files** (`registry.yaml`,
-`bindings.yaml`) read by a Python reader + a TS reader, and **prose contracts** (`contracts.md`).
+`bindings.yaml`, `providers.yaml`) read by a Python reader + a TS reader, and **prose contracts** (`contracts.md`).
 This doc captures the repeatable recipe for both, because the ripple is wide and easy to under-do.
 
 ## Distillation
@@ -30,16 +30,17 @@ This doc captures the repeatable recipe for both, because the ripple is wide and
 
 ## The six-seam recipe for a new parsed data file
 
-`bindings.yaml` is the **second** instance of the pattern `registry.yaml` established. To add a
-third, mirror exactly these six seams (no codegen, no manifest edits):
+`registry.yaml` established the pattern; `bindings.yaml` and `providers.yaml` are its second and
+third instances. To add a **new** parsed data file, mirror exactly these six seams (no codegen,
+no manifest edits):
 
 1. **Data file** `shared/<name>.yaml` with `schema_version: 1` + a documenting header comment.
-2. **Python reader** `perk/<name>.py` — `load_*` raises a dedicated `*Error` **only for structural
+2. **Python reader** `src/perk/substrate/<name>.py` — `load_*` raises a dedicated `*Error` **only for structural
    failures** (missing file / not a mapping / unsupported `schema_version`); `validate()` returns
-   `list[Issue]` and **never raises for content**. Reuse `Issue`/`Severity` from `perk/substrate/registry.py`
+   `list[Issue]` and **never raises for content**. Reuse `Issue`/`FindingSeverity` from `src/perk/substrate/registry.py`
    (one findings vocabulary — don't redefine). Parse leniently (coerce missing/ill-typed fields to
    `""`) so the *validator*, not the parser, reports every shape problem in one place.
-3. **TS reader** `extension/<name>.ts` — a thin structural parse via the **vendored bounded reader**
+3. **TS reader** `extension/substrate/<name>.ts` — a thin structural parse via the **vendored bounded reader**
    `extension/substrate/miniYaml.ts` (scoped to perk's own files; throws loudly on any unsupported
    construct); throws on missing-file/wrong-shape only. **The Python plane is the authoritative
    validator**; TS does not deep-validate. (The TS plane no longer depends on the `yaml` npm
@@ -167,7 +168,7 @@ facts**; single-plane narrative lives in the owning module's header docstring.
 ## The cross-plane SSOT prompt-fragment pattern
 
 When a prompt fragment must agree **byte-for-byte across planes**, give each plane one exported
-helper (`perk/run/launch.py::_plan_read_instruction` ↔ `extension/doors/lifecycleGates.ts::planReadInstruction`)
+helper (`src/perk/run/launch/prompts.py::_plan_read_instruction` ↔ `extension/doors/lifecycleGates.ts::planReadInstruction`)
 plus a shared literal-fragment substring list (`LINEAR_READ_SUBSTRINGS`) asserted from BOTH suites
 (`tests/test_worker_prompt_parity.py` ↔ `extension/worker/worker.test.ts`). Choose substrings as
 fragments of the *instruction*, not the scaffold — scaffold fragments match every arm and pin
@@ -181,8 +182,9 @@ automatically and the TS parser carries lists opaquely, so the whole change is Y
 assertion. **Never add registry vocabulary speculatively.**
 
 **Registry `writes` changes trip TWO pytest pins, not one.** Beyond the vocabulary-membership
-assertion in `test_stage_io_contract`, stage-shape tests in `tests/test_registry.py` (e.g.
-`test_objective_author_is_the_single_initial`) pin a stage's **exact `writes` list**. Grep
+assertion in `test_stage_io_contract`, stage-shape tests in `tests/test_registry.py` (e.g. the
+exact per-stage `writes` assertions in `test_two_component_topology`) pin a stage's **exact
+`writes` list**. Grep
 `tests/test_registry.py` for the stage id whenever changing any stage's I/O in
 `shared/registry.yaml`.
 
@@ -199,16 +201,16 @@ alarm, not a defect — so guidance polish must update the pins in **both** suit
 
 A new stage in `shared/registry.yaml` ripples to:
 
-1. The validator's **single-initial / symmetric-edge** invariants (`perk/substrate/registry.py`) — the new
+1. The validator's **single-initial / symmetric-edge** invariants (`src/perk/substrate/registry.py`) — the new
    initial must be the *only* stage with no predecessors, and every edge must be listed on both ends.
-2. `perk/cli/stages.py` `DEDICATED_STAGES` (if it needs a seeded/positional launcher rather than the
-   generic one) + `perk/cli/cli.py` registration.
+2. `src/perk/cli/stages.py` `DEDICATED_STAGES` (if it needs a seeded/positional launcher rather than the
+   generic one) + `src/perk/cli/cli.py` registration.
 3. Tests that **hardcode the full stage-id list and the initial assertion**
    (`test_registry.py::test_real_registry_is_valid`,
    `test_cli_stages.py::test_all_stages_are_generated`).
 
 **Grep the stage-id list before assuming a graph change is local.** A new skill also requires
-updating BOTH `PERK_SKILLS` in `perk/convergence/init.py` AND the committed manifest fragment
+updating BOTH `PERK_SKILLS` in `src/perk/convergence/init/skills.py` AND the committed manifest fragment
 `.agents/manifest.d/perk.yaml` (`perk doctor`'s `skills-manifest` check flags drift).
 
 ## Default at the new edge, don't loosen a shared validator
@@ -221,8 +223,12 @@ validator strict.
 
 ## Cross-references
 
-- `perk/substrate/registry.py` — `Issue`/`Severity`, the validator invariants (the canonical first contract)
-- `shared/bindings.yaml` + `perk/substrate/bindings.py` + `extension/substrate/bindings.ts` — the second instance
+- `src/perk/substrate/registry.py` — `Issue`/`FindingSeverity`, the validator invariants (the canonical first contract)
+- `shared/bindings.yaml` + `src/perk/substrate/bindings.py` + `extension/substrate/bindings.ts` — the second instance
+- `shared/providers.yaml` + `src/perk/substrate/providers.py` + `extension/substrate/providers.ts`
+  — the third instance (the provider-selection supported set)
+- `docs/learned/workflow/provider-seam.md` — the provider catalog's seam-specific application of
+  this recipe (which seams exist, how each vacates; it cross-links back here)
 - `tests/test_packaging.py` — the wheel + npm-pack bundle assertions (the publish-surface guard)
 - `docs/learned/workflow/skill-bindings.md` — the bindings subsystem this contract underpins
 - `docs/learned/workflow/init-doctor.md` — managed-convergence SSOT (the doctor-check side of drift)
