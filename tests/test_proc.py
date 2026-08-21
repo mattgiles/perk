@@ -186,3 +186,16 @@ def test_which_absolute_miss_returns_none(monkeypatch):
     """A PATH miss is None — miss policy (the typed refusal) stays with each caller."""
     monkeypatch.setattr(shutil, "which", lambda binary: None)
     assert proc.which_absolute("pi") is None
+
+
+def test_which_absolute_preserves_a_symlink_candidate(tmp_path, monkeypatch):
+    """Path.absolute(), not resolve(): a version-manager shim (a symlink) is returned as the
+    symlink pathname, never chased to its target — an implementation that resolved symlinks
+    would exec the target instead of the shim."""
+    target = tmp_path / "real-pi"
+    target.write_text("", encoding="utf-8")
+    shim = tmp_path / "shim-pi"
+    shim.symlink_to(target)
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(shutil, "which", lambda binary: "shim-pi")
+    assert proc.which_absolute("pi") == str(tmp_path / "shim-pi")

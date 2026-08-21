@@ -215,8 +215,9 @@ shim path is exec'd as-is), `None` on a miss (miss policy stays with callers).
   argv[0] stays `"pi"`) and wraps chdir+exec in the `launch_failed` `OSError` arm. Scope of the
   miss abort: **exec-phase only** (no chdir, no lock sweep) — earlier `launch_stage` phases
   (worktree materialization, handoff write, Linear emission…) may already have run, and that
-  leftover state is the deliberate idempotent-resume posture (a re-run after installing pi
-  reuses the same worktree/handoff).
+  leftover state is the deliberate idempotent-resume posture: a re-run after installing pi
+  reuses the same materialized worktree, while still minting its own fresh `run_id` + handoff
+  (the aborted run's handoff file simply remains, like any other superseded run's).
 - **The hunk watch seam**: `hunk_cli_path` (`src/perk/convergence/init/review_cli.py`) delegates
   to the same probe — its earlier `shutil.which` pass-through could still hand `perk plan watch`
   a relative candidate (the absolutization gap, now closed).
@@ -224,8 +225,12 @@ shim path is exec'd as-is), `None` on a miss (miss policy stays with callers).
 **Bounded protection (recorded residual):** this closes *name substitution* from the worktree.
 It does NOT close the shebang-interpreter lookup: pi's bin is a `#!/usr/bin/env node` script,
 and post-chdir `env` walks the unchanged `PATH`, so a relative entry could still select a
-worktree-local `node`. Sanitizing/rewriting the operator's `PATH` is out of scope (a behavior
-change with its own hazards; a relative `PATH` entry is an operator-environment pathology).
+worktree-local `node`. Nor does it repair an untrusted *invocation* environment: pre-chdir
+resolution anchors trust to the invocation cwd, so launching from **inside** the inspected tree
+with a relative `PATH` entry still resolves within it (every shell command run there is equally
+compromised — a shell-level pathology, the same residual class). Sanitizing/rewriting the
+operator's `PATH` is out of scope (a behavior change with its own hazards; a relative `PATH`
+entry is an operator-environment pathology).
 
 ## A shared `--worktree` option does not imply positioning for a `worktree: none` stage policy
 

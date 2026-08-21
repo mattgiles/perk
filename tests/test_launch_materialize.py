@@ -226,16 +226,16 @@ def test_launch_exported_linear_key_wins_over_local_config():
 def test_exec_pi_resolves_before_chdir_and_execs_the_absolute_path(
     tmp_path, monkeypatch, launch_context_factory
 ):
-    """The pi executable is resolved BEFORE the chdir and the exec receives the resolver's
-    absolute path (no bare-name PATH re-resolution under the worktree); argv[0] stays "pi"."""
+    """The REAL resolver runs pre-chdir — through which_absolute, probing "pi" — and the exec
+    receives its cwd-absolutized result (no bare-name PATH re-resolution under the worktree);
+    argv[0] stays "pi"."""
     events: list[object] = []
     agent_dir = tmp_path / "agent"
     agent_dir.mkdir()
     monkeypatch.setattr(launch, "_pi_agent_dir", lambda: agent_dir)
+    monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(
-        launch,
-        "_resolve_pi_executable",
-        lambda: events.append("resolve") or "/resolved/bin/pi",
+        shutil, "which", lambda binary: events.append(("which", binary)) or "bin/pi"
     )
     monkeypatch.setattr(launch.os, "chdir", lambda path: events.append("chdir"))
     monkeypatch.setattr(
@@ -243,9 +243,10 @@ def test_exec_pi_resolves_before_chdir_and_execs_the_absolute_path(
     )
     ctx = launch_context_factory(stage=_stage("implement"), plan_ref=_PLAN_REF)
     launch._exec_pi(ctx)
-    assert events.index("resolve") < events.index("chdir")  # resolved pre-chdir
-    exec_event = events[-1]
-    assert exec_event == ("exec", "/resolved/bin/pi", list(ctx.argv))
+    assert events[0] == ("which", "pi")  # the real resolver probed the pi binary…
+    assert events.index(("which", "pi")) < events.index("chdir")  # …BEFORE the chdir
+    # …and the exec received the probe's cwd-absolutized result as the file argument
+    assert events[-1] == ("exec", str(tmp_path / "bin" / "pi"), list(ctx.argv))
     assert ctx.argv[0] == "pi"  # argv[0] conventionally stays the bare name
 
 
@@ -253,11 +254,16 @@ def test_exec_pi_which_miss_aborts_before_any_exec_phase_side_effect(
     tmp_path, monkeypatch, launch_context_factory
 ):
     """A PATH miss is a typed pi_cli_missing refusal raised BEFORE any exec-phase side effect
-    (no chdir, no exec) — the REAL resolver runs through which_absolute. Deliberately scoped:
-    this claims nothing about earlier launch_stage phases (the idempotent-resume posture)."""
+    (no lock sweep, no chdir, no exec) — the REAL resolver runs through which_absolute.
+    Deliberately scoped: this claims nothing about earlier launch_stage phases (the
+    idempotent-resume posture)."""
     events: list[str] = []
     agent_dir = tmp_path / "agent"
     agent_dir.mkdir()
+    # A stale (non-directory) agent lock: the sweep would remove it, so its survival proves
+    # the refusal precedes the sweep — not just the chdir/exec.
+    stale_lock = agent_dir / "settings.json.lock"
+    stale_lock.write_text("", encoding="utf-8")
     monkeypatch.setattr(launch, "_pi_agent_dir", lambda: agent_dir)
     monkeypatch.setattr(shutil, "which", lambda binary: None)
     monkeypatch.setattr(launch.os, "chdir", lambda path: events.append("chdir"))
@@ -268,29 +274,42 @@ def test_exec_pi_which_miss_aborts_before_any_exec_phase_side_effect(
     assert excinfo.value.error_type == "pi_cli_missing"
     assert "npm install -g @earendil-works/pi-coding-agent" in excinfo.value.format_message()
     assert events == []  # neither chdir nor exec happened
+    assert stale_lock.exists()  # the lock sweep never ran either
 
 
-def test_exec_pi_exec_race_oserror_becomes_launch_failed(
-    tmp_path, monkeypatch, launch_context_factory
+@pytest.mark.parametrize("failure_point", ["chdir", "execvpe"])
+def test_exec_pi_chdir_or_exec_oserror_becomes_launch_failed(
+    tmp_path, monkeypatch, launch_context_factory, failure_point
 ):
-    """The presence probe does not eliminate the exec race: a chdir/exec OSError is the typed
-    launch_failed refusal naming the worktree, chained from the original error."""
+    """The presence probe does not eliminate the exec race: an OSError from EITHER the chdir or
+    the exec is the typed launch_failed refusal naming the worktree, chained from the original
+    error — and a failed chdir never reaches the exec."""
+    events: list[str] = []
     agent_dir = tmp_path / "agent"
     agent_dir.mkdir()
     monkeypatch.setattr(launch, "_pi_agent_dir", lambda: agent_dir)
     monkeypatch.setattr(launch, "_resolve_pi_executable", lambda: "/stub/bin/pi")
-    monkeypatch.setattr(launch.os, "chdir", lambda path: None)
 
-    def _boom(program, argv, env):
-        raise OSError("boom")
+    def _chdir(path):
+        if failure_point == "chdir":
+            raise OSError("boom")
+        events.append("chdir")
 
-    monkeypatch.setattr(launch.os, "execvpe", _boom)
+    def _execvpe(program, argv, env):
+        if failure_point == "execvpe":
+            raise OSError("boom")
+        events.append("exec")  # unreachable recorder — proves a failed chdir skips the exec
+
+    monkeypatch.setattr(launch.os, "chdir", _chdir)
+    monkeypatch.setattr(launch.os, "execvpe", _execvpe)
     ctx = launch_context_factory(stage=_stage("implement"), plan_ref=_PLAN_REF)
     with pytest.raises(UserFacingCliError) as excinfo:
         launch._exec_pi(ctx)
     assert excinfo.value.error_type == "launch_failed"
     assert str(ctx.resolved.path) in excinfo.value.format_message()
     assert isinstance(excinfo.value.__cause__, OSError)
+    if failure_point == "chdir":
+        assert events == []  # a failed chdir never reaches the exec
 
 
 class _Result:

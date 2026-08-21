@@ -36,6 +36,11 @@ def which_absolute(binary: str) -> str | None:
     CURRENT cwd via ``Path.absolute()`` (no symlink resolution — a version-manager shim path is
     exec'd as-is, not its target).
 
+    Bounded trust: the probe trusts the *invocation* environment. With a relative ``PATH``
+    entry, a launcher invoked from inside an untrusted tree still resolves within it — a
+    shell-level pathology this probe cannot repair (the same recorded residual class as the
+    shebang-interpreter ``PATH`` walk); it closes post-chdir re-resolution, nothing more.
+
     Returns ``None`` on a miss — miss policy stays with callers (each owns its typed refusal).
     """
     candidate = shutil.which(binary)
