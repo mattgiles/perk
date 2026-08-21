@@ -50,6 +50,7 @@ def _layer(**overrides) -> train.TrainLayer:
         "observed_remote_head_sha": "b" * 40,
         "observed_pr_base": "main",
         "expected_pr_base": "main",
+        "handoff": train.LayerHandoff.NOT_APPLICABLE,
     }
     values.update(overrides)
     return train.TrainLayer(**values)
@@ -202,6 +203,7 @@ def test_stacked_happy_path_envelope(monkeypatch):
     layer = body["layers"][0]
     assert layer["node_id"] == "1.2" and layer["pr_number"] == 1465
     assert layer["publication"] == "published" and layer["membership"] == "exact"
+    assert layer["handoff"] == "not_applicable"  # the defaulted honest no-surface fact
 
 
 def test_blockers_present_still_exits_zero(monkeypatch):
@@ -265,6 +267,32 @@ def test_human_render_and_envelope_carry_the_landed_prefix(monkeypatch):
         ["objective", "stack", "status", "1431"], monkeypatch=monkeypatch, result=_train()
     )
     assert "published prefix 1/1)" in result.stderr
+
+
+def test_handoff_axis_rides_the_envelope_and_the_render(monkeypatch):
+    stamped = _train(layers=(_layer(handoff=train.LayerHandoff.READY),))
+    result, _ = _invoke(
+        ["objective", "stack", "status", "1431", "--json"],
+        monkeypatch=monkeypatch,
+        result=stamped,
+    )
+    assert json.loads(result.stdout)["train"]["layers"][0]["handoff"] == "ready"
+    result, _ = _invoke(
+        ["objective", "stack", "status", "1431"], monkeypatch=monkeypatch, result=stamped
+    )
+    assert "1. 1.2 plan #1457 [published] pr #1465 (ready) stack exact handoff ready" in (
+        result.stderr
+    )
+    stale = _train(layers=(_layer(handoff=train.LayerHandoff.STALE),))
+    result, _ = _invoke(
+        ["objective", "stack", "status", "1431"], monkeypatch=monkeypatch, result=stale
+    )
+    assert "handoff stale" in result.stderr
+    # A not_applicable layer renders without the part (the pre-growth line shape).
+    result, _ = _invoke(
+        ["objective", "stack", "status", "1431"], monkeypatch=monkeypatch, result=_train()
+    )
+    assert "handoff" not in result.stderr
 
 
 def test_human_render_names_the_build_ready_layer(monkeypatch):

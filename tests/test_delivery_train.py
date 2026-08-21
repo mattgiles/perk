@@ -7,7 +7,7 @@ git/pr/membership/publication axes, the published prefix, and the forward supers
 redirect.
 """
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
 import pytest
 
@@ -21,6 +21,7 @@ from perk.delivery.train import (
     FindingKind,
     LayerFinalization,
     LayerGit,
+    LayerHandoff,
     LayerIntent,
     LayerMembership,
     LayerPr,
@@ -316,12 +317,41 @@ def _completed_publish_op(operation_id: str, *, plan_id: str) -> journal_mod.Ope
     )
 
 
-def _fold(*ops: journal_mod.OperationState) -> journal_mod.JournalFold:
+def _fold(
+    *ops: journal_mod.OperationState,
+    stamps: tuple[journal_mod.ReadyStampEvent, ...] = (),
+) -> journal_mod.JournalFold:
     return journal_mod.JournalFold(
         events=tuple(op.prepared for op in ops),
         operations={op.operation_id: op for op in ops},
         unresolved=tuple(op for op in ops if not op.resolved),
         delivery_lineage=_LINEAGE,
+        stamps=stamps,
+    )
+
+
+def _stamp_event(
+    *,
+    objective_id: str = "10",
+    plan_id: str = "101",
+    node_id: str = "1.1",
+    head_sha: str = _SHA_B,
+    created_at: str = "2026-03-01T00:00:00Z",
+    comment_id: str = "s1",
+) -> journal_mod.ReadyStampEvent:
+    record = journal_mod.ReadyStampRecord(
+        objective_id=objective_id,
+        delivery_lineage=_LINEAGE,
+        plan_id=plan_id,
+        node_id=node_id,
+        head_sha=head_sha,
+    )
+    return journal_mod.ReadyStampEvent(
+        record=record,
+        key=journal_mod.stamp_key(record),
+        canonical_payload=journal_mod.canonical_stamp_payload(record),
+        comment_id=comment_id,
+        created_at=created_at,
     )
 
 
@@ -2409,3 +2439,138 @@ class TestLandedClassification:
         status = _reconstruct(store, issues=issues, git=git, github=github, persistence=persistence)
         assert status.layers[0].publication is LayerPublication.LANDED
         assert status.build_readiness.next_node_id == "1.2"
+
+
+# ----------------------------------------------------------------- the handoff axis
+
+
+class TestHandoff:
+    """The derived per-layer handoff state (contracts.md §8.44): publication-axis-first, the
+    latest active-objective stamp for the layer's plan vs the verified published head."""
+
+    def _reconstruct_with_stamps(
+        self,
+        *stamps: journal_mod.ReadyStampEvent,
+        draft_bottom: bool = False,
+    ):
+        store, issues, git, github = _published_two_layer()
+        if draft_bottom:
+            github.prs[201] = _open_pr(
+                201, base="main", draft=True, head_ref="plan-101", head_sha=_SHA_B
+            )
+        persistence = _FakeJournal(
+            fold=_fold(
+                _completed_publish_op("01JA0000000000000000000101", plan_id="101"),
+                _completed_publish_op("01JA0000000000000000000102", plan_id="102"),
+                stamps=stamps,
+            )
+        )
+        return _reconstruct(store, issues=issues, git=git, github=github, persistence=persistence)
+
+    def test_matching_stamp_on_a_ready_pr_is_ready(self) -> None:
+        status = self._reconstruct_with_stamps(_stamp_event(plan_id="101", head_sha=_SHA_B))
+        bottom, top = status.layers
+        assert bottom.publication is LayerPublication.PUBLISHED
+        assert bottom.handoff is LayerHandoff.READY
+        assert top.handoff is LayerHandoff.UNSTAMPED  # plan 102 carries no stamp
+
+    def test_draft_hold_is_suspended_and_undrafting_resumes_ready(self) -> None:
+        # A draft PR still classifies PUBLISHED — the stamp survives the hold (transient by
+        # design): the identical fixture flipped non-draft resumes ready.
+        stamp = _stamp_event(plan_id="101", head_sha=_SHA_B)
+        held = self._reconstruct_with_stamps(stamp, draft_bottom=True)
+        assert held.layers[0].publication is LayerPublication.PUBLISHED
+        assert held.layers[0].handoff is LayerHandoff.SUSPENDED
+        resumed = self._reconstruct_with_stamps(stamp)
+        assert resumed.layers[0].handoff is LayerHandoff.READY
+
+    def test_latest_stamp_at_an_older_head_is_stale(self) -> None:
+        # Latest-wins: an OLDER stamp matching the current head is also present, but only the
+        # latest stamp decides.
+        older_matching = _stamp_event(
+            plan_id="101", head_sha=_SHA_B, created_at="t1", comment_id="s1"
+        )
+        newer_stale = _stamp_event(plan_id="101", head_sha=_SHA_D, created_at="t2", comment_id="s2")
+        status = self._reconstruct_with_stamps(older_matching, newer_stale)
+        assert status.layers[0].handoff is LayerHandoff.STALE
+
+    @pytest.mark.parametrize("draft", [False, True])
+    def test_no_stamp_is_unstamped_whatever_the_draft_bit(self, draft: bool) -> None:
+        # The out-of-band ready-for-review bit alone never creates a stamp.
+        status = self._reconstruct_with_stamps(draft_bottom=draft)
+        assert status.layers[0].publication is LayerPublication.PUBLISHED
+        assert status.layers[0].handoff is LayerHandoff.UNSTAMPED
+
+    def test_predecessor_objective_stamp_never_projects(self) -> None:
+        # The projection-level supersession pin: a stamp under the predecessor's identity on
+        # the shared lineage folds as history but leaves the active layer unstamped.
+        status = self._reconstruct_with_stamps(
+            _stamp_event(objective_id="9", plan_id="101", head_sha=_SHA_B)
+        )
+        assert status.layers[0].handoff is LayerHandoff.UNSTAMPED
+
+    def test_landed_layer_is_not_applicable_even_with_a_matching_stamp(self) -> None:
+        store, issues, git, github, persistence = TestLandedClassification()._landed_bottom_world()
+        assert persistence.fold is not None
+        persistence.fold = replace(
+            persistence.fold, stamps=(_stamp_event(plan_id="101", head_sha=_SHA_B),)
+        )
+        status = _reconstruct(store, issues=issues, git=git, github=github, persistence=persistence)
+        assert status.layers[0].publication is LayerPublication.LANDED
+        assert status.layers[0].handoff is LayerHandoff.NOT_APPLICABLE
+
+    def test_publication_drift_is_not_applicable(self) -> None:
+        store, issues, git, github = _published_two_layer()
+        git.branches["plan-101"] = _SHA_D  # the remote moved past the checkpoint
+        persistence = _FakeJournal(
+            fold=_fold(
+                _completed_publish_op("01JA0000000000000000000101", plan_id="101"),
+                _completed_publish_op("01JA0000000000000000000102", plan_id="102"),
+                stamps=(_stamp_event(plan_id="101", head_sha=_SHA_B),),
+            )
+        )
+        status = _reconstruct(store, issues=issues, git=git, github=github, persistence=persistence)
+        assert status.layers[0].publication is LayerPublication.PUBLICATION_DRIFT
+        assert status.layers[0].handoff is LayerHandoff.NOT_APPLICABLE
+
+    def test_unpublished_layer_is_not_applicable(self) -> None:
+        store, issues = _single_plan_store()
+        persistence = _FakeJournal(
+            fold=_fold(stamps=(_stamp_event(plan_id="101", head_sha=_SHA_B),))
+        )
+        status = _reconstruct(store, issues=issues, persistence=persistence)
+        assert status.layers[0].publication is LayerPublication.UNPUBLISHED
+        assert status.layers[0].handoff is LayerHandoff.NOT_APPLICABLE
+
+    def test_corrupt_journal_is_not_applicable_and_the_blocker_names_the_loss(self) -> None:
+        # Fail-closed: an underivable fold never claims unstamped, and the widened
+        # journal_corruption blocker names BOTH losses.
+        store, issues, git, github = _published_two_layer()
+        status = _reconstruct(
+            store, issues=issues, git=git, github=github, persistence=_FakeJournal(corrupt="boom")
+        )
+        assert status.layers[0].publication is LayerPublication.PUBLISHED
+        assert status.layers[0].handoff is LayerHandoff.NOT_APPLICABLE
+        corruption = [f for f in status.blockers if f.code == "journal_corruption"]
+        assert len(corruption) == 1
+        assert corruption[0].message == (
+            "the operation journal is corrupt (boom); unresolved-operation facts and "
+            "ready-stamp handoff evidence are unknown"
+        )
+
+    def test_incremental_objective_has_no_handoff_surface(self) -> None:
+        store = _FakeStore()
+        store.add("10", header={}, nodes=(_node("1.1"),))
+        status = _reconstruct(store)
+        assert isinstance(status, NoDeliveryTrain)
+
+    def test_handoff_never_vetoes_readiness_or_the_prefix(self) -> None:
+        # The no-gating pin: an all-published, all-unstamped train reports byte-identical
+        # build_readiness and published_prefix_len to the pre-stamp fixtures.
+        status = self._reconstruct_with_stamps()
+        assert all(layer.handoff is LayerHandoff.UNSTAMPED for layer in status.layers)
+        assert status.published_prefix_len == 2
+        assert status.build_readiness.ready is False
+        assert status.build_readiness.next_node_id is None
+        assert status.build_readiness.reason == "all layers published or landed"
+        assert status.blockers == ()

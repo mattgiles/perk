@@ -178,6 +178,22 @@ class LayerFinalization(StrEnum):
     FINALIZED = "finalized"
 
 
+class LayerHandoff(StrEnum):
+    """The derived (never stored) per-layer handoff axis (contracts.md §8.44): does the latest
+    active-objective ready stamp for the layer's plan name the current verified published
+    head? Exists only over verified PUBLISHED layers — everything else is ``not_applicable``.
+    ``suspended`` is the draft-conversion hold on a still-valid stamp (transient by design:
+    ANY return to non-draft resumes ``ready`` while the head still matches; durable withdrawal
+    is a content change or supersession). The non-draft bit alone never creates a stamp — an
+    ``unstamped`` layer stays ``unstamped`` whatever its draft bit says."""
+
+    READY = "ready"
+    STALE = "stale"
+    SUSPENDED = "suspended"
+    UNSTAMPED = "unstamped"
+    NOT_APPLICABLE = "not_applicable"
+
+
 class FindingKind(StrEnum):
     BLOCKER = "blocker"
     INFO = "info"
@@ -378,6 +394,9 @@ class TrainLayer:
     observed_remote_head_sha: str | None
     observed_pr_base: str | None
     expected_pr_base: str | None
+    # Defaulted trailing growth: TrainLayer is directly constructed across many tests, and
+    # NOT_APPLICABLE stays the honest "no handoff surface" fact (contracts.md §8.44).
+    handoff: LayerHandoff = LayerHandoff.NOT_APPLICABLE
 
 
 @dataclass(frozen=True)
@@ -507,6 +526,7 @@ class _LayerWork:
     observed_remote_head_sha: str | None = None
     observed_pr_base: str | None = None
     expected_pr_base: str | None = None
+    handoff: LayerHandoff = LayerHandoff.NOT_APPLICABLE
     # Journal-covered AND corroborated merged (the §8.44 landed classification) — set by the
     # landed pre-pass; the corroborating PR read is cached so the PR observation never
     # re-reads it.
@@ -562,6 +582,7 @@ class _LayerWork:
             observed_remote_head_sha=self.observed_remote_head_sha,
             observed_pr_base=self.observed_pr_base,
             expected_pr_base=self.expected_pr_base,
+            handoff=self.handoff,
         )
 
 
@@ -804,7 +825,7 @@ def _fold_journal(
                 code="journal_corruption",
                 message=(
                     f"the operation journal is corrupt ({exc}); unresolved-operation facts "
-                    "are unknown"
+                    "and ready-stamp handoff evidence are unknown"
                 ),
             )
         )
@@ -1647,6 +1668,40 @@ def _observe_membership(
     )
 
 
+def _derive_handoff(
+    layers: list[_LayerWork],
+    *,
+    fold: JournalFold | None,
+    active_id: str,
+) -> None:
+    """Derive the total per-layer handoff state (contracts.md §8.44) — pure projection state:
+    no findings, no other axis mutated, no readiness/prefix input. Publication axis first:
+    only verified PUBLISHED layers carry a non-``not_applicable`` value (landed / unpublished /
+    drift stay ``not_applicable``); an unavailable fold leaves the handoff ``not_applicable``
+    too — fail-closed, never a claimed ``unstamped`` (the widened ``journal_corruption`` /
+    ``missing_lineage`` blocker tells the story). Only the LATEST active-objective stamp for
+    the layer's plan decides: absent ⇒ ``unstamped``; naming a different head ⇒ ``stale``
+    (even when an older stamp matches the current head); matching + PR draft ⇒ ``suspended``
+    (the transient hold); matching + non-draft ⇒ ``ready``."""
+    if fold is None:
+        return
+    for work in layers:
+        if work.publication is not LayerPublication.PUBLISHED:
+            continue
+        # PUBLISHED requires a joined plan and the full verified checkpoint pair — no
+        # defensive not_applicable arms for impossible states.
+        assert work.plan_id is not None and work.published_head_sha is not None
+        stamp = fold.latest_ready_stamp(objective_id=active_id, plan_id=work.plan_id)
+        if stamp is None:
+            work.handoff = LayerHandoff.UNSTAMPED
+        elif stamp.record.head_sha != work.published_head_sha:
+            work.handoff = LayerHandoff.STALE
+        elif work.pr is LayerPr.DRAFT:
+            work.handoff = LayerHandoff.SUSPENDED
+        else:
+            work.handoff = LayerHandoff.READY
+
+
 def _observe_base(
     layers: list[_LayerWork],
     prefix: int,
@@ -1785,8 +1840,9 @@ def reconstruct_train(
     proof; unsafe nodes gain projection-only ordering surrogates) → validate/derive the
     canonical order → node↔plan join → PUBLISH coverage + checkpoint topology → predecessor
     identity → Git observation → PR observation → publication classification → native-stack
-    membership → the published prefix. Raises :class:`TrainReconstructionError` only where no
-    honest projection exists; every observable conflict is a finding instead.
+    membership → the per-layer handoff derivation (publication is final only after membership
+    may declassify it) → the published prefix. Raises :class:`TrainReconstructionError` only
+    where no honest projection exists; every observable conflict is a finding instead.
     """
     state, redirected_from = resolve_active_objective(store, objective_id)
     active_id = state.id
@@ -1913,6 +1969,7 @@ def reconstruct_train(
     _observe_prs(layers, github=github, base=base, findings=findings)
     _classify_publication(layers)
     _observe_membership(layers, github=github, findings=findings)
+    _derive_handoff(layers, fold=fold, active_id=_bare(active_id))
     _check_landed_finalization(layers, findings=findings)
     landed_prefix = _landed_prefix(layers, findings=findings)
     prefix = _published_prefix(layers, findings=findings)

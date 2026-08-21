@@ -1011,6 +1011,39 @@ test("renderLandOutcome: pending routes to /objective-recover, never 'deferred'"
   assert.doesNotMatch(pending, /deferred/);
 });
 
+test("renderStackStatus: the handoff part renders only for a non-not_applicable value", () => {
+  const text = renderStackStatus({
+    objective: { id: "7" },
+    train: {
+      base: "main",
+      published_prefix_len: 2,
+      layers: [
+        {
+          node_id: "1.1",
+          branch: "plan-101",
+          pr_number: 11,
+          publication: "published",
+          handoff: "ready",
+        },
+        {
+          node_id: "1.2",
+          branch: "plan-102",
+          pr_number: 12,
+          publication: "landed",
+          handoff: "not_applicable",
+        },
+        { node_id: "1.3", branch: "plan-103", pr_number: 13, publication: "unpublished" },
+      ],
+    },
+  });
+  assert.match(text, /1\. 1\.1 plan-101 pr #11 \[published\] handoff ready/);
+  // not_applicable and an absent field both degrade the part, never the render.
+  assert.match(text, /2\. 1\.2 plan-102 pr #12 \[landed\]\n/);
+  assert.match(text, /3\. 1\.3 plan-103 pr #13 \[unpublished\]$/m);
+  assert.doesNotMatch(text, /1\.2 .*handoff/);
+  assert.doesNotMatch(text, /1\.3 .*handoff/);
+});
+
 test("renderStackStatus: the landed prefix rides the train line when non-zero", () => {
   const payload = {
     objective: { id: "7" },

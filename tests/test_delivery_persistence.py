@@ -25,6 +25,7 @@ from perk.delivery import journal
 from perk.delivery.persistence import (
     AppendResult,
     JournalAppendAmbiguous,
+    StampAppendResult,
     TrainPersistence,
     TrainPersistenceError,
     UnresolvedOperationError,
@@ -103,7 +104,10 @@ class _FakeIssues:
     ``post_plan`` entries consumed per ``add_issue_comment`` call (default ``"ok"``):
     ``"ok"`` succeed; ``"raise_after"`` record then raise (ambiguous-landed); ``"raise_lost"``
     raise without recording (ambiguous-lost); ``"tamper"`` record a same-key different-payload
-    event then raise (the read-back conflict). ``read_plan`` entries consumed per
+    event then raise (the read-back conflict); ``"tamper_stamp"`` the ready-stamp mirror — the
+    timestamp-free stamp payload has no ``created: `` line, so the mutation rides
+    ``delivery_lineage: `` instead (parses fine, same key, differing canonical payload).
+    ``read_plan`` entries consumed per
     ``read_comments`` call (default ``"ok"``): ``"ok"`` honest read; ``"raise"`` an infra
     failure; ``"empty"`` a stale view that hides every comment (read-back visibility lag).
     ``ops`` records the interleaved ``("post"|"read", issue_id)`` sequence — the convergence-
@@ -146,6 +150,9 @@ class _FakeIssues:
             raise IssueBackendError("boom (write lost)")
         if behavior == "tamper":
             self._record(issue_id, body.replace("created: ", "created: 9999-"))
+            raise IssueBackendError("boom (write tampered)")
+        if behavior == "tamper_stamp":
+            self._record(issue_id, body.replace("delivery_lineage: ", "delivery_lineage: 9"))
             raise IssueBackendError("boom (write tampered)")
         self._record(issue_id, body)
         if behavior == "race":
@@ -210,6 +217,26 @@ def _outcome(
         role=role,
         created="2026-01-02T00:00:00Z",
         observed={"verified": True},
+    )
+
+
+_HEAD = "a" * 40
+
+
+def _stamp(
+    *,
+    objective_id: str = "100",
+    lineage: str = _LINEAGE,
+    plan_id: str = "201",
+    node_id: str = "1.1",
+    head_sha: str = _HEAD,
+) -> journal.ReadyStampRecord:
+    return journal.ReadyStampRecord(
+        objective_id=objective_id,
+        delivery_lineage=lineage,
+        plan_id=plan_id,
+        node_id=node_id,
+        head_sha=head_sha,
     )
 
 
@@ -527,6 +554,118 @@ class TestAppendOutcome:
         fold = persistence.read_journal("100")
         assert fold.operations[_OP_1].resolved is True
         assert fold.unresolved == ()
+
+
+class TestAppendReadyStamp:
+    def test_fresh_append_reads_back(self) -> None:
+        persistence, store, issues = _make()
+        store.add("100", carrier="SENT-100")
+        result = persistence.append_ready_stamp("100", _stamp())
+        assert result == StampAppendResult(key=f"100:201:1.1:{_HEAD}", existed=False)
+        [(carrier, body)] = issues.post_calls
+        assert carrier == "SENT-100"  # the ACTIVE objective's issue-tier carrier
+        assert body == journal.render_stamp_event(_stamp())
+        assert len(issues.comments["SENT-100"]) == 1
+
+    def test_idempotent_re_append_at_the_same_head(self) -> None:
+        persistence, store, issues = _make()
+        store.add("100")
+        persistence.append_ready_stamp("100", _stamp())
+        result = persistence.append_ready_stamp("100", _stamp())
+        assert result.existed is True
+        assert len(issues.post_calls) == 1  # the re-append never POSTs
+
+    def test_ambiguous_landed_converges_without_duplicate(self) -> None:
+        # The representative convergence case proving the _stamp_landed wiring (the full
+        # four-arm ambiguity matrix stays covered once by TestAppendPrepared).
+        persistence, store, issues = _make()
+        store.add("100")
+        issues.post_plan = ["raise_after"]
+        result = persistence.append_ready_stamp("100", _stamp())
+        assert result.existed is False
+        assert len(issues.post_calls) == 1  # the rescan proved it landed — no retry
+
+    def test_ambiguous_message_names_the_ready_stamp_key(self) -> None:
+        persistence, store, issues = _make()
+        store.add("100")
+        issues.read_plan = ["ok", "empty", "empty"]  # the fold read, then two stale rescans
+        with pytest.raises(
+            JournalAppendAmbiguous, match=f"append of ready-stamp 100:201:1.1:{_HEAD}"
+        ):
+            persistence.append_ready_stamp("100", _stamp())
+        assert len(issues.post_calls) == 2  # exactly two POST attempts, never more
+
+    def test_rescan_failure_is_ambiguous_without_retry(self) -> None:
+        persistence, store, issues = _make()
+        store.add("100")
+        issues.read_plan = ["ok", "raise"]
+        with pytest.raises(JournalAppendAmbiguous, match=r"append of ready-stamp .* rescan"):
+            persistence.append_ready_stamp("100", _stamp())
+        assert len(issues.post_calls) == 1
+
+    def test_tampered_read_back_is_corruption(self) -> None:
+        persistence, store, issues = _make()
+        store.add("100")
+        issues.post_plan = ["tamper_stamp"]
+        with pytest.raises(journal.JournalCorruptionError, match="DIFFERENT payload"):
+            persistence.append_ready_stamp("100", _stamp())
+
+    def test_objective_identity_mismatch_fails_closed(self) -> None:
+        persistence, store, issues = _make()
+        store.add("100")
+        with pytest.raises(TrainPersistenceError, match="claims objective"):
+            persistence.append_ready_stamp("100", _stamp(objective_id="999"))
+        assert issues.post_calls == []
+
+    def test_lineage_mismatch_fails_closed(self) -> None:
+        persistence, store, issues = _make()
+        store.add("100", lineage="01JZ0000000000000000000000")
+        with pytest.raises(TrainPersistenceError, match="refusing to append"):
+            persistence.append_ready_stamp("100", _stamp())
+        assert issues.post_calls == []
+
+    def test_stamp_appends_outside_the_one_unresolved_operation_gate(self) -> None:
+        # The pinned asymmetry: a stamp is not a remote-mutating operation — it appends
+        # cleanly while an unresolved PUBLISH blocks append_prepared.
+        persistence, store, _ = _make()
+        store.add("100")
+        persistence.append_prepared("100", _prepared())
+        result = persistence.append_ready_stamp("100", _stamp())
+        assert result.existed is False
+        with pytest.raises(UnresolvedOperationError):
+            persistence.append_prepared("100", _prepared(operation_id=_OP_2))
+
+    def test_supersession_scoping_retains_history_but_never_projects(self) -> None:
+        # The replan/transfer regression: a predecessor-identity stamp on the shared lineage
+        # folds (append-only history) but projects only under its own objective identity.
+        persistence, store, issues = _make()
+        store.add("A", carrier="SENT-A")
+        persistence.append_ready_stamp("A", _stamp(objective_id="A"))
+        store.add("B", supersedes="A", carrier="SENT-B")
+        fold = persistence.read_journal("B")
+        assert len(fold.stamps) == 1
+        assert fold.latest_ready_stamp(objective_id="B", plan_id="201") is None
+        stamp = fold.latest_ready_stamp(objective_id="A", plan_id="201")
+        assert stamp is not None and stamp.record.objective_id == "A"
+        assert len(issues.comments["SENT-A"]) == 1
+        assert issues.comments.get("SENT-B", []) == []  # nothing ever copies stamps forward
+
+    def test_conversion_scoping_exercises_the_inference_path(self) -> None:
+        # The stacked→incremental regression: a conversion successor stores NO lineage, so the
+        # fold's effective lineage is operation-inferred — the predecessor's stamp still folds
+        # and still never projects under the successor identity.
+        persistence, store, issues = _make()
+        store.add("A", carrier="SENT-A")
+        persistence.append_prepared("A", _prepared(objective_id="A"))
+        persistence.append_outcome("A", _outcome())
+        persistence.append_ready_stamp("A", _stamp(objective_id="A"))
+        store.add("B", lineage=None, supersedes="A", carrier="SENT-B")
+        fold = persistence.read_journal("B")
+        assert fold.delivery_lineage == _LINEAGE  # inferred from the operation records
+        assert len(fold.stamps) == 1
+        assert fold.latest_ready_stamp(objective_id="B", plan_id="201") is None
+        assert fold.latest_ready_stamp(objective_id="A", plan_id="201") is not None
+        assert issues.comments.get("SENT-B", []) == []
 
 
 class TestTypedWriters:

@@ -70,7 +70,14 @@ plan worktree's linked objective when omitted.
   delivery train from the durable authorities (objective store, plan issues, the operation
   journal, Git refs, GitHub PR + native-stack state) and reports one line per layer
   bottom→top, classified **blockers** and **information** findings (each naming
-  expected-vs-observed), and the `next build-ready:` line. The report also carries **recovery
+  expected-vs-observed), and the `next build-ready:` line. The per-layer axes include
+  `handoff`, derived from **ready-stamp journal events** (a non-operation journal event kind:
+  objective-identity-scoped and bound to the exact published head it was made at) —
+  `unstamped` = no stamp names the layer's current verified published head under this
+  objective; `stale` = the head moved past the latest stamp; `suspended` = the PR is currently
+  draft while the stamp still matches (a transient hold); `ready` = the latest stamp matches
+  and the PR is ready-for-review; `not_applicable` for landed/unpublished/unverified layers.
+  The report also carries **recovery
   visibility**: every unresolved operation, the pending conflict-continuation manifest, and
   the orphaned-residue observation. Blockers found is still exit 0 — status is a successful
   *detection*.

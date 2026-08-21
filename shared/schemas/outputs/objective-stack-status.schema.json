@@ -245,6 +245,10 @@
             }
           ],
           "title": "Expected Pr Base"
+        },
+        "handoff": {
+          "title": "Handoff",
+          "type": "string"
         }
       },
       "required": [
@@ -263,7 +267,8 @@
         "published_head_sha",
         "observed_remote_head_sha",
         "observed_pr_base",
-        "expected_pr_base"
+        "expected_pr_base",
+        "handoff"
       ],
       "title": "LayerOut",
       "type": "object"
