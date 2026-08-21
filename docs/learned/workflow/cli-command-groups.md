@@ -6,18 +6,18 @@ cluster: doors-and-launch
 
 # CLI command groups
 
-The perk CLI's command surface is organized as group directories under `perk/cli/commands/` with a
-sectioned root help. This doc is the structure playbook: the group-dir template, the hybrid
+The perk CLI's command surface is organized as group directories under `src/perk/cli/commands/`
+with a sectioned root help. This doc is the structure playbook: the group-dir template, the hybrid
 default-dispatch recipe for stage-name/group collisions, byte-compat discipline across folds, the
 help taxonomy, and the test patterns that made the migrations cheap. Realized shapes to copy:
-`perk/cli/commands/objective/`, `perk/cli/commands/pr/`, `perk/cli/commands/learn/`,
-`perk/cli/commands/plan/`.
+`src/perk/cli/commands/objective/`, `src/perk/cli/commands/pr/`, `src/perk/cli/commands/learn/`,
+`src/perk/cli/commands/plan/`, `src/perk/cli/commands/gist/`.
 
 ## Distillation
 
 - New/folded command groups follow the group-dir template: `__init__.py` (docstring + AliasGroup
   + bottom registrations), standalone `{verb}_{noun}` command files, cross-verb helpers in
-  `{group}/shared.py` (underscore dropped), envelope helpers once in `perk/cli/emit.py` —
+  `{group}/shared.py` (underscore dropped), envelope helpers once in `src/perk/cli/emit.py` —
   "The §8.1 group-dir template".
 - A stage name colliding with a group name uses the hybrid default-dispatch group recipe
   (Click 8.4.x) — "The hybrid default-dispatch group recipe".
@@ -40,9 +40,9 @@ help taxonomy, and the test patterns that made the migrations cheap. Realized sh
 - Verb-local helpers move with the verb and keep their `_` prefix. Cross-verb helpers go in
   `{group}/shared.py` and **drop the leading underscore** — intentional intra-package API
   (e.g. `parse_objective_id`, `action_payload`).
-- The result-envelope helpers (`fail`/`emit`/`EXIT_FOR_TYPE`) live **once** in `perk/cli/emit.py` —
-  a neutral `perk/cli/`-level leaf beside `context.py`/`ensure.py` that every group (and
-  `perk_dev`) imports. Groups still never import another group's `shared.py`.
+- The result-envelope helpers (`fail`/`emit`/`EXIT_FOR_TYPE`) live **once** in
+  `src/perk/cli/emit.py` — a neutral `src/perk/cli/`-level leaf beside `context.py`/`ensure.py`
+  that every group (and `perk_dev`) imports. Groups still never import another group's `shared.py`.
 - Nested groups nest dirs and follow the same pattern recursively (`workflow/run/`,
   `doctor/workflow/`).
 
@@ -50,7 +50,8 @@ help taxonomy, and the test patterns that made the migrations cheap. Realized sh
 
 When a subgroup needs the parent's helpers, the import cycle is **helper-induced, not
 registration-induced** — extract the shared helpers into a sibling leaf module (the
-`perk/cli/commands/doctor/render.py` pattern) so both `__init__.py`s import top-of-file normally.
+`src/perk/cli/commands/doctor/render.py` pattern) so both `__init__.py`s import top-of-file
+normally.
 Prefer this over the bottom-of-file `# noqa: E402` import idiom whenever shared helpers cause the
 cycle; bottom-of-file imports remain only for genuinely registration-induced cycles (see
 `workflow/init-doctor.md`).
@@ -59,7 +60,7 @@ cycle; bottom-of-file imports remain only for genuinely registration-induced cyc
 
 When a stage launcher and a command group want the same name (`perk learn` launches the learn stage
 AND `perk learn capture|docs` are verbs), the coexistence template is
-`perk/cli/commands/learn/__init__.py` (`LearnGroup`):
+`src/perk/cli/commands/learn/__init__.py` (`LearnGroup`):
 
 - Group `context_settings={"ignore_unknown_options": True}` so launcher options (`--worktree`,
   `--dry-run`, `--remote`, pi-args) survive group-level parsing and reach `resolve_command` intact.
@@ -71,8 +72,8 @@ AND `perk learn capture|docs` are verbs), the coexistence template is
   don't.
 - `--help` needs no special diversion: it's a known eager option consumed during the group's own
   parse (even with `ignore_unknown_options`), so group help renders before `resolve_command` runs.
-- The hidden launcher comes from the public `make_stage_launcher(stage)` in `perk/cli/stages.py`,
-  registered via `add_command` with `hidden = True`, and the stage joins `DEDICATED_STAGES` so the
+- The hidden launcher comes from the public `make_stage_launcher(stage)` in
+  `src/perk/cli/stages.py`, registered via `add_command` with `hidden = True`, and the stage joins `DEDICATED_STAGES` so the
   generic launcher generator skips it.
 
 This is the template for any future stage-name/group collision.
@@ -81,8 +82,8 @@ This is the template for any future stage-name/group collision.
 
 Folds must keep JSON shapes, `error_type`s, and exit codes byte-identical:
 
-- The consolidated `perk/cli/emit.fail(..., extra=)` signature preserves exact key order by
-  merging `extra` **after** the base keys. Dry-run-capable verbs pass `extra={"dry_run": False}` on
+- The consolidated `fail(..., extra=)` signature in `src/perk/cli/emit.py` preserves exact key
+  order by merging `extra` **after** the base keys. Dry-run-capable verbs pass `extra={"dry_run": False}` on
   every failure path.
 - When a plan asserts "X is the only divergence" among N near-identical private helpers, **re-grep
   all N bodies before consolidating** — the pr fold found *five of eight* `_fail` copies carried
@@ -90,7 +91,7 @@ Folds must keep JSON shapes, `error_type`s, and exit codes byte-identical:
 
 ## Sectioned root help (`SectionedGroup`)
 
-- `SectionedGroup(AliasGroup)` in `perk/cli/alias.py` is **root-only** (Launchers/Groups/Setup/
+- `SectionedGroup(AliasGroup)` in `src/perk/cli/alias.py` is **root-only** (Launchers/Groups/Setup/
   Other/Hidden): extend-don't-replace keeps existing `isinstance(cli, AliasGroup)` assertions green;
   plain subgroups stay plain `AliasGroup`. Cheap lock: assert `isinstance(cli, SectionedGroup)` for
   root and the negative for subgroups.
@@ -105,15 +106,18 @@ Folds must keep JSON shapes, `error_type`s, and exit codes byte-identical:
 - The `Hidden` section is env-gated default-off — `PERK_SHOW_HIDDEN` with the same truthiness shape
   as `PERK_RUN_ID` (`not in (None, "", "0")`); the section is omitted entirely when empty or when
   the flag is off.
-- Help-taxonomy upkeep when adding a group is two lines: `COMMAND_GROUPS` in `perk/cli/alias.py` +
-  the groups-section test.
-- **The launcher long-help sentence reaches only half the launcher section:** the `STAGE_LAUNCHERS`
-  root section lists 12 commands, but only those built by `make_stage_launcher` carry the generated
-  "Opens a primed pi session…" long-help paragraph — the dedicated hand-written commands
-  (`implement`, the `learn` group help, `resume`, `replan`, `objective-author`, `objective-plan`)
-  do not; the section *header* is what disambiguates them. Uniform launcher help would require
-  hand-adding the sentence (or a shared helper) to the dedicated commands — don't assume the
-  factory covers the whole section.
+- Help-taxonomy upkeep when adding a group is two lines: `COMMAND_GROUPS` in
+  `src/perk/cli/alias.py` + the groups-section test.
+- **The launcher long-help sentence reaches only part of the launcher section:** only commands
+  built by `make_stage_launcher` carry the generated "Opens a primed pi session…" long-help
+  paragraph — dedicated hand-written commands do not (uniform launcher help would require
+  hand-adding the sentence, or a shared helper); the section *header* is what disambiguates them.
+  Don't assume the factory covers the whole section. The section's membership is the live
+  authority, never a frozen list here: `STAGE_LAUNCHERS` is a **curated 3-item list**
+  (`plan`/`implement`/`learn`, `src/perk/cli/alias.py`) **plus** the flat aliases
+  (submit/address/land/…), which `SectionedGroup.format_commands` routes into the launcher
+  bucket **before** consulting the list; guarded by `tests/test_cli_help_sections.py`'s drift
+  guard.
 - **Click two-paragraph help = a free short/long split:** composing help as
   `summary + blank line + long sentence` enriches `--help` bodies while leaving listing rows
   untouched — `get_short_help_str()` takes only the first paragraph. This is the cheap way to add
@@ -145,11 +149,11 @@ substring assertion fails when the wrap point lands mid-phrase. Normalize first 
 
 Not every command wants a group or a stage launcher. A **flat top-level informational command**
 (two worked examples: `run-worker`, `perk release-notes`) is a single-file
-`commands/{name}_cmd.py` registered beside `run_worker_cmd` in `perk/cli/cli.py` — no alias, no
+`commands/{name}_cmd.py` registered beside `run_worker_cmd` in `src/perk/cli/cli.py` — no alias, no
 group, no registry stage. An unlisted root command falls into `SectionedGroup.format_commands`'
 `Other` catch-all **automatically**; there is no taxonomy edit. The full recipe is four touches:
 
-1. The flat `commands/{name}_cmd.py` module + `cli.add_command(...)` in `perk/cli/cli.py`.
+1. The flat `commands/{name}_cmd.py` module + `cli.add_command(...)` in `src/perk/cli/cli.py`.
 2. `tests/test_cli_parity_smoke.py`'s `EXPECTED_SURFACE` fingerprint: a `root` row
    (alphabetically sorted, usually no aliases) **and** a `sections: "other"` entry.
 3. `tests/test_cli_help_sections.py::test_workers_render_under_other`: assert the command renders
@@ -246,6 +250,12 @@ stays the structural *how-to*. Summary of the decided shape:
   `objective-author`/`objective-plan`/`objective-save` (+ `oauthor`/`oplan`), flat
   `save`/`resume`/`replan`, and `plan-save` (`psave`).
 
+The decided noun-group list above is the #495-era snapshot. The **live** group census is
+`COMMAND_GROUPS` in `src/perk/cli/alias.py` — now including `gist`, which postdates the decision
+and joined via the standard two-line taxonomy upkeep — guarded by
+`tests/test_cli_help_sections.py` + `tests/test_cli_parity_smoke.py::EXPECTED_SURFACE`. Derive
+the current taxonomy from `alias.py`, never from this doc.
+
 **`pr ready` is worker-only (W), not L+W** — `ready` is not a registry stage and has no launcher; it
 is only the `perk pr ready` worker plus the warm `/ready` door, and merely gains the flat alias
 `perk ready`. A future implementer must **not** build a launcher for it (that would require an
@@ -281,7 +291,7 @@ and `remove`, since `refi < remo` — not where "add it after create" would sugg
 
 ### `MergedCommand` mechanics (conceptually)
 
-`MergedCommand` (in `perk/cli/stages.py`, built by `make_merged_command`) is a `click.Command`
+`MergedCommand` (in `src/perk/cli/stages.py`, built by `make_merged_command`) is a `click.Command`
 subclass holding **two intact halves** — the launcher (`make_stage_launcher(stage)`) and an existing
 worker `Command`. It dispatches on the literal `--json` token *anywhere* in argv (the proven
 `LearnGroup` pattern), stashes the chosen half, and delegates the **full argv** to it — **neither
@@ -303,9 +313,9 @@ rendered rows unchanged (the diff is exactly the *added* rows, nothing moves).
 
 `register_stage_commands` auto-generates one flat `perk <stage>` launcher per registry stage **not**
 in `DEDICATED_STAGES`. Replacing it with a grouped/merged command requires BOTH: add the stage id to
-`DEDICATED_STAGES` (`perk/cli/stages.py`, stops generation) AND drop it from the curated
-`STAGE_LAUNCHERS` list (`perk/cli/alias.py`, honesty — `test_section_lists_drift_guard`'s "no stale
-entries" assertion). Step 2 is rarely load-bearing for *rendering* (the flat alias keeps the row
+`DEDICATED_STAGES` (`src/perk/cli/stages.py`, stops generation) AND drop it from the curated
+`STAGE_LAUNCHERS` list (`src/perk/cli/alias.py`, honesty — `test_section_lists_drift_guard`'s
+"no stale entries" assertion). Step 2 is rarely load-bearing for *rendering* (the flat alias keeps the row
 live), but the list must stay honest.
 
 ### Build merged/grouped commands defensively
@@ -372,9 +382,9 @@ verb token. Add separate end-to-end merged-routing coverage through `cli` (launc
 
 Nodes 3.1/3.2/3.3 edit the SAME files, so rebasing onto a merged sibling is **expected** conflict
 whose resolution is almost always a **union** of each node's deletions/additions, not a choice of
-sides. Hand-merge concentrates in `perk/cli/stages.py` (`DEDICATED_STAGES`) and the `perk/cli/cli.py`
-root import+registration block; the big structural fixtures (`STAGE_LAUNCHERS`, `EXPECTED_SURFACE`,
-`EXPECTED_ROOT_ALIASES`) usually auto-merge because nodes edit line-disjoint entries — but
+sides. Hand-merge concentrates in `src/perk/cli/stages.py` (`DEDICATED_STAGES`) and the
+`src/perk/cli/cli.py` root import+registration block; the big structural fixtures
+(`STAGE_LAUNCHERS`, `EXPECTED_SURFACE`, `EXPECTED_ROOT_ALIASES`) usually auto-merge because nodes edit line-disjoint entries — but
 **re-verify the merged `EXPECTED_SURFACE` by eye** and run `just ci` (the authoritative union check).
 Incidental `package-lock.json` churn re-blocks `git rebase`; `git checkout package-lock.json` first
 (the known stale-SDK/package-lock trap — see `toolchain/worktree-node-modules.md`).
@@ -394,8 +404,9 @@ pytest existence check"). The structural successors live in `tests/test_cli_pari
 ### An SSOT node can disprove its parent objective — propagate to THREE surfaces
 
 The launcher/worker (L/W/L+W) annotations in an *aspirational* objective target tree are author-time
-guesses — verify each against `shared/registry.yaml` (does the stage id exist?) + `perk/cli/
-stages.py`, never the tree (a command has a launcher half only if it's a registry stage). The
+guesses — verify each against `shared/registry.yaml` (does the stage id exist?) +
+`src/perk/cli/stages.py`, never the tree (a command has a launcher half only if it's a registry
+stage). The
 objective's tree annotated `pr ready` as L+W; verified, `ready` is **not** a registry stage, so it is
 worker-only. When a docs-SSOT node corrects its parent, the fix must reach **three** surfaces: (1)
 the SSOT itself, (2) the objective's **Reconcilable prose**, and (3) the downstream **node
@@ -433,7 +444,8 @@ Companion test lessons for cwd-sensitive CLI verbs:
 
 ## The `objective doctor` worker (#626)
 
-`perk objective doctor <id> [--fix] [--dry-run] [--json]` (`perk/cli/commands/objective/doctor_cmd.py`)
+`perk objective doctor <id> [--fix] [--dry-run] [--json]`
+(`src/perk/cli/commands/objective/doctor_cmd.py`)
 is the manifest-drift detect/repair worker (the engine lives in `objective-store.md`). Its **exit
 codes** follow the report-vs-abort split: a detect or fix that *completes* → **0** — **even an
 ERROR-severity report-only drift is a clean report** (drift was successfully *detected*); an
@@ -447,15 +459,19 @@ omit it). Per the parity-smoke rule above, a new worker must be added to `EXPECT
 `perk skills` wraps an upstream skills CLI as a noun-group. The durable architecture:
 
 - **Pass-through-first.** Every verb is a thin **forward** to the substrate binary EXCEPT the verbs
-  upstream lacks — here `remove` is the single reimplementation (perk edits the manifest directly,
-  then runs `skills sync`). The pass-through runner uses **inherited stdio** (NO `capture_output`) so
+  upstream lacks. The non-pass-through set is **derived from the group's `__init__.py`
+  docstring/registrations** (`src/perk/cli/commands/skills/__init__.py`), never this doc —
+  currently `remove` (direct manifest edit + `skills sync`), the repo-authored-skill verbs
+  `scaffold`/`delete`, and the session-launching write-capable doors `create`/`refine` (the
+  `write-capable-cold-doors.md` shape). The pass-through runner uses **inherited stdio** (NO
+  `capture_output`) so
   the user sees native output, then propagates the upstream exit code **verbatim**; the reimplemented
   verb's own sync uses `capture_output=True` (it needs stderr on rollback).
 - **Managed-source authority.** The perk manifest fragment's `sources` keys are the authoritative
   "is this perk-managed" check (upstream errors on duplicate aliases).
 - **The sanctioned-subprocess guard (standing discipline).**
   `tests/test_tooling.py::test_subprocess_run_only_in_sanctioned_wrappers_with_check_and_timeout`
-  enforces that EVERY `subprocess.run` site in `perk/` lives in an allowlisted
+  enforces that EVERY `subprocess.run` site in `src/perk/` lives in an allowlisted
   `_SANCTIONED_SUBPROCESS_WRAPPERS` set keyed by `(file_stem, func_name)` (**bare stem**, not full
   path) and carries explicit `check=` / `timeout=`. A new site fails CI until added — budget for it
   whenever introducing a subprocess call (dignified-python).
@@ -466,7 +482,7 @@ omit it). Per the parity-smoke rule above, a new worker must be added to `EXPECT
   `EXPECTED_SURFACE` + the help-sections assertion + docs) is already documented above — `perk skills`
   is one more instance.
 - **The envelope helpers are shared, not mirrored.** The group's original ~5-line
-  `skills_fail` / `skills_emit` copies were superseded by the `perk/cli/emit.py` consolidation —
+  `skills_fail` / `skills_emit` copies were superseded by the `src/perk/cli/emit.py` consolidation —
   skills verbs now import `fail`/`emit` like every other group. That alignment carried one
   deliberate behavior change: `skills_fail` always exited 1, so the `not_a_repo` failure now exits
   **2** per the CLI-wide `EXIT_FOR_TYPE` convention.
@@ -491,11 +507,11 @@ only the `pi.exec` argv arrays in the extension change.
 
 ## Cross-references
 
-- `perk/cli/commands/objective/`, `perk/cli/commands/pr/` — realized group-dir shapes
-- `perk/cli/commands/learn/__init__.py` — `LearnGroup`, the hybrid default-dispatch template
-- `perk/cli/commands/plan/__init__.py` — `PlanGroup`, the hybrid group with a merged `save` verb
+- `src/perk/cli/commands/objective/`, `src/perk/cli/commands/pr/` — realized group-dir shapes
+- `src/perk/cli/commands/learn/__init__.py` — `LearnGroup`, the hybrid default-dispatch template
+- `src/perk/cli/commands/plan/__init__.py` — `PlanGroup`, the hybrid group with a merged `save` verb
   (the `MergedCommand` launcher+worker folded under `--json`, Node 3.2)
-- `perk/cli/alias.py` — `AliasGroup`, `SectionedGroup`, `COMMAND_GROUPS`, `register_with_aliases`
-- `perk/cli/stages.py` — `make_stage_launcher`, `DEDICATED_STAGES`
+- `src/perk/cli/alias.py` — `AliasGroup`, `SectionedGroup`, `COMMAND_GROUPS`, `register_with_aliases`
+- `src/perk/cli/stages.py` — `make_stage_launcher`, `DEDICATED_STAGES`
 - `docs/learned/workflow/init-doctor.md` — the bottom-of-file-imports idiom this doc supersedes for
   helper-induced cycles

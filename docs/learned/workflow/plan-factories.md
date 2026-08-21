@@ -18,8 +18,9 @@ cluster: doors-and-launch
   (fail-soft, seed-byte-unchanged when empty); a warm door INSTRUCTS the model to run a read
   worker — "Cold-injects / warm-instructs is a reusable factory pattern".
 - N sibling factories share one core — "The parameterized factory-family pattern".
-- Eight seeded cold doors share `seeded_door.py`'s three exports (`run_seeded_door` /
-  `SeededLaunch` / `seeded_door_options`) under a byte-pin discipline — "The shared
+- The seeded cold doors share `seeded_door.py`'s three exports (`run_seeded_door` /
+  `SeededLaunch` / `seeded_door_options`) under a byte-pin discipline; the family census is
+  derived from `run_seeded_door`'s callers, never a frozen count — "The shared
   seeded-cold-door pipeline".
 - A new sibling factory is a multi-surface LOCKSTEP (bindings.yaml, deliverable targets, skill
   set + manifest fragment, …) or delivery silently breaks — "Parallel-factory wiring is a
@@ -31,7 +32,7 @@ A seeded read-only plan-mode session historically **could not run `gh`/`perk` in
 `extension/substrate/toolGating.ts` `SAFE_PATTERNS` allowed only
 `cat`/`head`/`tail`/`grep`/`find`/`ls`/`git status|log|diff`/`jq`/`curl`.
 So every cold-door factory did its GitHub reads up front and materialized the result into a
-file the session reads via the `read` tool (e.g. `.pi/workflow/scratch/learn-docs-inbox.md`),
+file the session reads via the `read` tool (e.g. `.perk/workflow/scratch/learn-docs-inbox.md`),
 with untrusted fetched bodies wrapped in a marker (`<untrusted_learning>…</untrusted_learning>`).
 
 Since #416 the read-only gate allowlists read-shaped `gh` *query* subcommands, so the constraint
@@ -46,8 +47,9 @@ forced: ad-hoc read-only `gh` queries pass the gate. **Future edits must not res
 When factory guidance exists on both planes (the warm `/objective-plan` guidance and the cold
 seed prompt), mirror the *loop* but derive each plane's carrier step from its own mechanics, never
 copy text across. The proven instance: the warm factory instructs an **unconditional**
-`objective_node` planning mark — a `planning → planning` re-mark is valid/idempotent in
-`perk/objective.py` and re-records the `objective_node_claim`, which is what makes
+`objective_node` planning mark — a `planning → planning` re-mark is valid/idempotent in the
+`src/perk/objective/` package (`update_node` in `graph.py`) and re-records the
+`objective_node_claim`, which is what makes
 resume-into-an-existing-claim safe — while the cold seed prompt instructs **no** mark, because the
 cold door already marked the node pre-launch and the link rides `handoff_extra`.
 
@@ -86,8 +88,8 @@ gathers and how it seeds*, not in its gather→render-inbox→launch spine — d
 cold-door command. Extract a shared core parameterized by a **frozen config dataclass** exposed as
 module constants, and reduce each per-command entrypoint to a thin delegator.
 
-The proven instance is the learn factory pair. `perk/cli/commands/learn/factory_common.py` holds
-the frozen `LearnFactoryKind` dataclass (the per-factory parameter bundle: inbox filename, seed
+The proven instance is the learn factory pair. `src/perk/cli/commands/learn/factory_common.py`
+holds the frozen `LearnFactoryKind` dataclass (the per-factory parameter bundle: inbox filename, seed
 template, binding trigger, a `select` callable picking this kind's subset out of the
 `(doc_destined, code_destined)` partition, an `include_docs_scan` gate, and a cross-hinting
 `empty_message`) plus the two module constants `DOCS_FACTORY` / `CODE_FACTORY` and the shared
@@ -104,11 +106,14 @@ constants directly).
 A *seeded cold door* is a launcher command with one orchestration shape: **parse → resolve backend
 state up front (the read-only session it launches cannot be trusted to) → materialize untrusted
 DATA into a scratch/inbox file → `--dry-run`/`--json` supervisor report → `launch_stage` with a
-seeded prompt**. Eight doors share it: `plan from`/`replan`, `objective plan`/`replan`/
-`author --from`, the two learn factories (`learn docs`/`code`), and `perk learn harvest`. The
-shared seam is `src/perk/cli/commands/seeded_door.py`; the doors delegate from
-`plan/from_cmd.py`, `plan/replan_cmd.py`, `objective/author_cmd.py`, `objective/plan_cmd.py`,
-`objective/replan_cmd.py`, `learn/factory_common.py`, and `learn/harvest_cmd.py`.
+seeded prompt**. The family census is **the set of `run_seeded_door` callers** — grep under
+`src/perk/cli/commands/` (the `seeded_door.py` module docstring names the family); the grep is
+the authority, the names below a derived snapshot. Currently: `plan from`/`plan replan`,
+`objective plan`/`objective replan`/`objective author --from`, and the four learn doors
+(`learn docs`/`learn code`/`learn harvest`/`learn dream`), delegating from `plan/from_cmd.py`,
+`plan/replan_cmd.py`, `objective/author_cmd.py`, `objective/plan_cmd.py`,
+`objective/replan_cmd.py`, `learn/factory_common.py`, `learn/harvest_cmd.py`, and
+`learn/dream_cmd.py`. The shared seam is `src/perk/cli/commands/seeded_door.py`.
 
 ### Three exports, one contract
 
@@ -169,8 +174,8 @@ indistinguishable from omission because the test stubs read captured kwargs via 
 
 ### The byte-pin discipline scales to a whole-family convergence
 
-When the pipeline was extracted (a 7-command convergence at the time — harvest joined later), the
-entire behavior-preservation proof was: **zero edits to existing test files** + pre-change
+When the pipeline was extracted (a 7-command convergence at the time — harvest and dream joined
+later), the entire behavior-preservation proof was: **zero edits to existing test files** + pre-change
 `--help` captures (to `/tmp`) diffed against post-conversion output. No helper-level duplicate
 tests were added — the doors' existing suites already pin the behavior (reaffirms
 `cold-door-launch.md`'s byte-exact test-pin discipline).
@@ -230,8 +235,8 @@ for the canonical fail-open pattern.
 
 ## Cross-references
 
-- `perk/cli/commands/learn/factory_common.py` — the `LearnFactoryKind` frozen config dataclass, the `DOCS_FACTORY` / `CODE_FACTORY` constants, and the shared `run_factory` core (thin delegators in `docs_cmd.py` / `code_cmd.py`)
-- `perk/cli/commands/seeded_door.py` — the pipeline (`run_seeded_door`, `SeededLaunch`, `seeded_door_options`)
+- `src/perk/cli/commands/learn/factory_common.py` — the `LearnFactoryKind` frozen config dataclass, the `DOCS_FACTORY` / `CODE_FACTORY` constants, and the shared `run_factory` core (thin delegators in `docs_cmd.py` / `code_cmd.py`)
+- `src/perk/cli/commands/seeded_door.py` — the pipeline (`run_seeded_door`, `SeededLaunch`, `seeded_door_options`)
 - `tests/test_seeded_door.py` — the pipeline suite + the source-scan guard
 - `docs/learned/workflow/cold-door-launch.md` — the launch seam the pipeline's tail composes
 - `docs/learned/workflow/source-scan-guards.md` — the guard pattern enforcing the shared primitives
