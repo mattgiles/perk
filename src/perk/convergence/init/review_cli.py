@@ -9,10 +9,10 @@ doctor's warn-level ``review-cli`` check. Best-effort throughout — an install 
 a warning carrying the manual hint, never fatal (the ``_reconcile_extension_install`` posture).
 """
 
-import shutil
 from pathlib import Path
 
 from perk.substrate import npm
+from perk.substrate.proc import which_absolute
 
 HUNK_BINARY = "hunk"
 HUNK_NPM_SPEC = "hunkdiff"
@@ -25,9 +25,11 @@ def hunk_cli_path() -> str | None:
     The exec-carrying variant of :func:`hunk_cli_present`: a launcher that chdirs before
     exec'ing hunk must resolve the absolute path FIRST and exec that path — re-resolving the
     bare name after the chdir would let a relative ``PATH`` entry (e.g. ``.``) pick up an
-    executable inside the target directory.
+    executable inside the target directory. Delegates to :func:`which_absolute` because
+    ``shutil.which`` alone can return a *relative* candidate (when the matching ``PATH`` entry
+    is itself relative) that a post-chdir exec would reinterpret under the worktree.
     """
-    return shutil.which(HUNK_BINARY)
+    return which_absolute(HUNK_BINARY)
 
 
 def hunk_cli_present() -> bool:

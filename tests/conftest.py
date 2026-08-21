@@ -30,11 +30,16 @@ if os.environ.get("PERK_PROSE_REVIEW_TESTS") != "1":
 
 @dataclass
 class LaunchExecRecorder:
-    """Calls made at the irreversible launch boundary."""
+    """Calls made at the irreversible launch boundary.
+
+    ``pi_path`` is the stubbed ``_resolve_pi_executable`` result — hermetic (never the host's
+    real ``shutil.which("pi")``) and absolute, so exec assertions compare against it.
+    """
 
     agent_dir: Path
     chdirs: list[Path] = field(default_factory=list)
     calls: list[tuple[str, tuple[str, ...], dict[str, str]]] = field(default_factory=list)
+    pi_path: str = "/stub/bin/pi"
 
 
 type GitRepoFactory = Callable[[Path], Path]
@@ -180,6 +185,7 @@ def launch_exec_recorder(tmp_path, monkeypatch) -> LaunchExecRecorder:
     agent_dir.mkdir()
     recorder = LaunchExecRecorder(agent_dir=agent_dir)
     monkeypatch.setattr(launch, "_pi_agent_dir", lambda: agent_dir)
+    monkeypatch.setattr(launch, "_resolve_pi_executable", lambda: recorder.pi_path)
     monkeypatch.setattr(launch.os, "chdir", lambda path: recorder.chdirs.append(Path(path)))
     monkeypatch.setattr(
         launch.os,

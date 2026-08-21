@@ -5,6 +5,7 @@ use), pinning the kwargs contract, the env-overlay layering, and the three ``Pro
 arms with their canonical message shapes.
 """
 
+import shutil
 import subprocess
 
 import pytest
@@ -168,3 +169,33 @@ def test_run_checked_exit_arm_falls_back_to_cmd_failed(monkeypatch):
     with pytest.raises(proc.ProcFailure) as excinfo:
         proc.run_checked(["tool", "arg"], timeout=5)
     assert str(excinfo.value) == "tool arg failed"
+
+
+# --- which_absolute (the shared exec-launcher probe) --------------------------------------------
+
+
+def test_which_absolute_absolutizes_a_relative_which_result(tmp_path, monkeypatch):
+    """A relative PATH entry makes shutil.which return a relative candidate — the probe
+    absolutizes it against the cwd AT CALL TIME, so a later chdir cannot reinterpret it."""
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(shutil, "which", lambda binary: "bin/pi")
+    assert proc.which_absolute("pi") == str(tmp_path / "bin" / "pi")
+
+
+def test_which_absolute_miss_returns_none(monkeypatch):
+    """A PATH miss is None — miss policy (the typed refusal) stays with each caller."""
+    monkeypatch.setattr(shutil, "which", lambda binary: None)
+    assert proc.which_absolute("pi") is None
+
+
+def test_which_absolute_preserves_a_symlink_candidate(tmp_path, monkeypatch):
+    """Path.absolute(), not resolve(): a version-manager shim (a symlink) is returned as the
+    symlink pathname, never chased to its target — an implementation that resolved symlinks
+    would exec the target instead of the shim."""
+    target = tmp_path / "real-pi"
+    target.write_text("", encoding="utf-8")
+    shim = tmp_path / "shim-pi"
+    shim.symlink_to(target)
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(shutil, "which", lambda binary: "shim-pi")
+    assert proc.which_absolute("pi") == str(tmp_path / "shim-pi")

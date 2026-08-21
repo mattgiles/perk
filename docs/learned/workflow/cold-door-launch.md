@@ -6,7 +6,7 @@ cluster: doors-and-launch
 
 # The cold-door pi-launch seam
 
-A perk *local* stage launch ends by `execvpe`-ing into `pi`: the perk CLI process **becomes** pi. This
+A perk *local* stage launch ends in `os.execvpe(<absolute pi path>, …)`: the perk CLI process **becomes** pi. This
 seam (`src/perk/run/launch/`) carries a handful of non-obvious mechanics about argv construction, pi's
 project-trust prompt on throwaway worktrees, and what happens when a `--json` surface composes a
 launcher that emits its own JSON.
@@ -25,9 +25,13 @@ launcher that emits its own JSON.
   positioning time (gitignored → never checked out) — "Worktree positioning must mirror
   `.agents/skills/`".
 - A **path-probing** launcher seam resolves the absolute executable path BEFORE `os.chdir` —
-  a bare-name exec after chdir can select a binary from the inspected tree; the pi launch itself
-  chdirs then execs bare `pi` (PATH-resolved post-chdir) — "Exec-launcher safety at path-probing
-  seams: resolve the absolute executable path BEFORE the chdir".
+  a bare-name exec after chdir can select a binary from the inspected tree. Both probing seams
+  (the pi launch and the hunk watch) now share this safe shape via the one shared
+  `which_absolute` probe: resolve + absolutize pre-chdir, exec the absolute path, typed refusal
+  on a miss, the chdir/exec race an ordinary `OSError` arm. Bounded scope: name-substitution is
+  closed; the shebang-interpreter (`/usr/bin/env node`) PATH walk post-chdir remains a recorded
+  residual — "Exec-launcher safety at path-probing seams: resolve the absolute executable path
+  BEFORE the chdir".
 
 ## Build `argv` once, branch only on execute-vs-preview
 
@@ -187,7 +191,7 @@ parsing or CLI trust resolution — so this is purely **local cold-door launch**
 
 ## A local stage launch never returns
 
-It ends in `os.execvpe("pi", …)` — the CLI *becomes* pi, and nothing after that runs. A supervisor
+It ends in `os.execvpe(<absolute pi path>, …)` — the CLI *becomes* pi, and nothing after that runs. A supervisor
 **cannot** compose a *local* launch (it would never come back); landing therefore stays the
 human/interactive path (see `objective-lifecycle.md`).
 
@@ -198,10 +202,35 @@ For a launcher seam that **probes** for its executable, a presence probe + bare-
 code-under-watch tree — the launcher would exec attacker-controlled content from the very
 worktree it is inspecting. The safe shape for such a seam: ship a **path-returning probe seam
 resolved pre-chdir** and exec the **absolute path** (argv[0] stays the bare name); the chdir/exec
-race stays an ordinary `OSError` arm. Source pointer: the hunk-CLI probe seam in
-`src/perk/convergence/init/review_cli.py`. The pi launch itself is not this shape: `_exec_pi`
-(`src/perk/run/launch/__init__.py`) builds the child env, sweeps stale pi agent locks, does
-`os.chdir(worktree)`, then `os.execvpe("pi", …)` — a bare name, PATH-resolved after the chdir.
+race stays an ordinary `OSError` arm. Both probing seams now share ONE probe —
+`which_absolute(binary)` in `src/perk/substrate/proc.py` (a pure-stdlib leaf): `shutil.which`
+pre-chdir, absolutized via `Path.absolute()` because which can return a **relative** candidate
+when the matching `PATH` entry is itself relative (no symlink resolution — a version-manager
+shim path is exec'd as-is), `None` on a miss (miss policy stays with callers).
+
+- **The pi launch**: `_exec_pi` (`src/perk/run/launch/__init__.py`) calls
+  `_resolve_pi_executable` → `which_absolute("pi")` as its FIRST statement — a miss is a typed
+  `pi_cli_missing` refusal carrying the install hint, with **no bare-name fallback** — then
+  passes the absolute path to `os.execvpe` (no PATH search once the path carries a separator;
+  argv[0] stays `"pi"`) and wraps chdir+exec in the `launch_failed` `OSError` arm. Scope of the
+  miss abort: **exec-phase only** (no chdir, no lock sweep) — earlier `launch_stage` phases
+  (worktree materialization, handoff write, Linear emission…) may already have run, and that
+  leftover state is the deliberate idempotent-resume posture: a re-run after installing pi
+  reuses the same materialized worktree, while still minting its own fresh `run_id` + handoff
+  (the aborted run's handoff file simply remains, like any other superseded run's).
+- **The hunk watch seam**: `hunk_cli_path` (`src/perk/convergence/init/review_cli.py`) delegates
+  to the same probe — its earlier `shutil.which` pass-through could still hand `perk plan watch`
+  a relative candidate (the absolutization gap, now closed).
+
+**Bounded protection (recorded residual):** this closes *name substitution* from the worktree.
+It does NOT close the shebang-interpreter lookup: pi's bin is a `#!/usr/bin/env node` script,
+and post-chdir `env` walks the unchanged `PATH`, so a relative entry could still select a
+worktree-local `node`. Nor does it repair an untrusted *invocation* environment: pre-chdir
+resolution anchors trust to the invocation cwd, so launching from **inside** the inspected tree
+with a relative `PATH` entry still resolves within it (every shell command run there is equally
+compromised — a shell-level pathology, the same residual class). Sanitizing/rewriting the
+operator's `PATH` is out of scope (a behavior change with its own hazards; a relative `PATH`
+entry is an operator-environment pathology).
 
 ## A shared `--worktree` option does not imply positioning for a `worktree: none` stage policy
 
