@@ -106,7 +106,10 @@ class _FakeIssues:
     raise without recording (ambiguous-lost); ``"tamper"`` record a same-key different-payload
     event then raise (the read-back conflict); ``"tamper_stamp"`` the ready-stamp mirror — the
     timestamp-free stamp payload has no ``created: `` line, so the mutation rides
-    ``delivery_lineage: `` instead (parses fine, same key, differing canonical payload).
+    ``delivery_lineage: `` instead (parses fine, same key, differing canonical payload);
+    ``"race_stamp"`` record the body AND a same-key different-payload stamp, then succeed (the
+    stamp full-scan race); ``"stamp_junk"`` record the body AND a malformed ready-stamp
+    comment, then succeed (concurrent cross-grammar corruption during the rescan).
     ``read_plan`` entries consumed per
     ``read_comments`` call (default ``"ok"``): ``"ok"`` honest read; ``"raise"`` an infra
     failure; ``"empty"`` a stale view that hides every comment (read-back visibility lag).
@@ -154,11 +157,19 @@ class _FakeIssues:
         if behavior == "tamper_stamp":
             self._record(issue_id, body.replace("delivery_lineage: ", "delivery_lineage: 9"))
             raise IssueBackendError("boom (write tampered)")
+        if behavior == "stamp_junk":
+            self._record(issue_id, body)
+            self._record(issue_id, "<!-- perk:stack-ready-stamp:junk -->\n\nnot a fence")
+            return CommentResult(posted=True)
         self._record(issue_id, body)
         if behavior == "race":
             # A concurrent writer's conflicting duplicate lands right AFTER ours — the rescan
             # sees the byte-identical match first, the conflict second (the full-scan pin).
             self._record(issue_id, body.replace("created: ", "created: 9999-"))
+            return CommentResult(posted=True)
+        if behavior == "race_stamp":
+            # The ready-stamp mirror of "race": same key, differing payload, AFTER the match.
+            self._record(issue_id, body.replace("delivery_lineage: ", "delivery_lineage: 9"))
             return CommentResult(posted=True)
         if behavior == "raise_after":
             raise IssueBackendError("boom (write landed)")
@@ -411,6 +422,16 @@ class TestAppendPrepared:
             persistence.append_prepared("100", _prepared())
         assert len(issues.post_calls) == 1
 
+    def test_concurrent_corrupt_stamp_fails_the_operation_rescan_closed(self) -> None:
+        # The cross-grammar rescan pin: a malformed ready-stamp comment arriving DURING the
+        # operation POST (after the clean pre-append fold) fails the read-back closed — the
+        # guarded remote mutation never proceeds past corruption in EITHER journal grammar.
+        persistence, store, issues = _make()
+        store.add("100")
+        issues.post_plan = ["stamp_junk"]
+        with pytest.raises(journal.JournalCorruptionError, match="ready-stamp"):
+            persistence.append_prepared("100", _prepared())
+
     def test_invisible_read_back_retries_once_then_converges(self) -> None:
         # A successful POST whose read-back cannot see the event is ambiguous → the same
         # one-retry policy; the duplicate byte-identical comment dedupes in the fold.
@@ -609,6 +630,34 @@ class TestAppendReadyStamp:
         issues.post_plan = ["tamper_stamp"]
         with pytest.raises(journal.JournalCorruptionError, match="DIFFERENT payload"):
             persistence.append_ready_stamp("100", _stamp())
+
+    def test_stamp_read_back_scans_past_the_first_match(self) -> None:
+        # The _stamp_landed complete-scan pin: a same-key conflicting duplicate LATER in the
+        # rescan (after the byte-identical match) must still be corruption — never a
+        # first-match return.
+        persistence, store, issues = _make()
+        store.add("100")
+        issues.post_plan = ["race_stamp"]
+        with pytest.raises(journal.JournalCorruptionError, match="DIFFERENT payload"):
+            persistence.append_ready_stamp("100", _stamp())
+
+    def test_recycled_head_re_stamp_is_idempotent_and_never_reorders(self) -> None:
+        # The pinned deterministic-idempotence corner (contracts.md §8.43): after stamping
+        # head A then head B, re-stamping the recycled EXACT head A is existed=True (no new
+        # comment) and B's stamp stays latest — re-affirmation of a recycled head is a
+        # content change or supersession, never a byte-identical re-append.
+        persistence, store, issues = _make()
+        store.add("100")
+        head_b = "b" * 40
+        persistence.append_ready_stamp("100", _stamp())
+        persistence.append_ready_stamp("100", _stamp(head_sha=head_b))
+        result = persistence.append_ready_stamp("100", _stamp())
+        assert result.existed is True
+        assert len(issues.post_calls) == 2  # the re-stamp never POSTs
+        latest = persistence.read_journal("100").latest_ready_stamp(
+            objective_id="100", plan_id="201"
+        )
+        assert latest is not None and latest.record.head_sha == head_b
 
     def test_objective_identity_mismatch_fails_closed(self) -> None:
         persistence, store, issues = _make()

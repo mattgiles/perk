@@ -129,27 +129,40 @@ _STAMP_INLINE_MARKER_RE = re.compile(
     r"^`perk:stack-ready-stamp:([^:`\s]+):([^:`\s]+):([^:`\s]+):([^:`\s]+)`$",
 )
 
-_HEAD_SHA_RE = re.compile(r"^[0-9a-f]{40}$")
+_HEAD_SHA_RE = re.compile(r"[0-9a-f]{40}")
+
+# The marker-safe segment allowlist: every real segment shape fits (numeric GitHub ids, Linear
+# identifiers like ENG-123, ULID lineages, `<phase>.<n>` node ids), while everything that could
+# break either marker encoding is excluded by construction — the colon (the operation marker's
+# separator: the reverse-collision guarantee), whitespace/backticks (the inline-code encoding),
+# and `<`/`>`/`!` (an embedded `-->` would terminate the HTML comment early and mangle the
+# Linear transcode). A non-conforming id is a typed refusal at construction and parse — loud,
+# never a silently mangled marker (contracts.md §8.43).
+_STAMP_SEGMENT_RE = re.compile(r"[A-Za-z0-9._-]+")
 
 
 def _require_stamp_segment(value: str, *, what: str) -> str:
-    """Validate one stamp payload field (one implementation, both edges): nonblank, no colon /
-    whitespace / backtick (the segment must survive both marker encodings verbatim), and no
-    leading ``#`` (ids are canonical-bare at construction and parse — exact equality
-    everywhere, no normalization branch in the fold)."""
+    """Validate one stamp payload field (one implementation, both edges): nonblank, no leading
+    ``#`` (ids are canonical-bare at construction and parse — exact equality everywhere, no
+    normalization branch in the fold), and drawn from the marker-safe allowlist
+    (:data:`_STAMP_SEGMENT_RE`)."""
     if not value:
         raise ValueError(f"{what} must be nonblank")
-    if any(ch in value for ch in ":`") or any(ch.isspace() for ch in value):
-        raise ValueError(f"{what} must not contain a colon, backtick, or whitespace: {value!r}")
     if value.startswith("#"):
         raise ValueError(f"{what} must be canonical-bare (no leading '#'): {value!r}")
+    if _STAMP_SEGMENT_RE.fullmatch(value) is None:
+        raise ValueError(
+            f"{what} is not a marker-safe segment (allowed: letters, digits, '.', '_', '-'): "
+            f"{value!r}"
+        )
     return value
 
 
 def _require_head_sha(value: str) -> str:
-    """Validate a stamp's ``head_sha`` as the full 40-hex lowercase object id (the verified
+    """Validate a stamp's ``head_sha`` as EXACTLY the full 40-hex lowercase object id
+    (``fullmatch`` — a ``$``-anchored match would admit a trailing newline; the verified
     checkpoint form — an abbreviation or ref would be re-pinnable, violating immutability)."""
-    if _HEAD_SHA_RE.match(value) is None:
+    if _HEAD_SHA_RE.fullmatch(value) is None:
         raise ValueError(f"head_sha is not a 40-hex lowercase object id: {value!r}")
     return value
 
@@ -682,9 +695,9 @@ def parse_carrier_comment(
     ``before``/``after`` payload merely *mentions* the stamp text (e.g. journaled user-authored
     prose) parses cleanly as an operation, never as a malformed stamp. Only a body with no
     operation marker text and the stamp marker text parses under the stamp grammar (the reverse
-    collision is structurally impossible: every stamp payload field is colon-free or 40-hex, so
-    a rendered stamp body can never contain the colon-carrying operation marker text). Neither
-    text → unrelated untrusted DATA (``None``).
+    collision is structurally impossible: every stamp payload field is a marker-safe allowlisted
+    segment or 40-hex, so a rendered stamp body can never contain the colon-carrying operation
+    marker text). Neither text → unrelated untrusted DATA (``None``).
     """
     if _MARKER_TEXT in body:
         return parse_journal_comment(

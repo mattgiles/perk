@@ -2533,6 +2533,29 @@ class TestHandoff:
         assert status.layers[0].publication is LayerPublication.PUBLICATION_DRIFT
         assert status.layers[0].handoff is LayerHandoff.NOT_APPLICABLE
 
+    def test_membership_declassification_is_not_applicable(self) -> None:
+        # The derivation-ordering pin: handoff runs AFTER membership, which is what
+        # declassifies these otherwise-verified stamped layers — a derivation moved before
+        # _observe_membership would leak ready/unstamped onto publication_drift layers.
+        store, issues, git, github = _published_two_layer()
+        github.stack = StackView(available=True, stacked=False)  # stack_missing declassifies
+        persistence = _FakeJournal(
+            fold=_fold(
+                _completed_publish_op("01JA0000000000000000000101", plan_id="101"),
+                _completed_publish_op("01JA0000000000000000000102", plan_id="102"),
+                stamps=(_stamp_event(plan_id="101", head_sha=_SHA_B),),
+            )
+        )
+        status = _reconstruct(store, issues=issues, git=git, github=github, persistence=persistence)
+        assert [layer.publication for layer in status.layers] == [
+            LayerPublication.PUBLICATION_DRIFT,
+            LayerPublication.PUBLICATION_DRIFT,
+        ]
+        assert [layer.handoff for layer in status.layers] == [
+            LayerHandoff.NOT_APPLICABLE,
+            LayerHandoff.NOT_APPLICABLE,
+        ]
+
     def test_unpublished_layer_is_not_applicable(self) -> None:
         store, issues = _single_plan_store()
         persistence = _FakeJournal(

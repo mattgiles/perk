@@ -48,7 +48,6 @@ from perk.delivery.journal import (
     ensure_event_size,
     fold_events,
     parse_carrier_comment,
-    parse_journal_comment,
     render_event,
     render_stamp_event,
     stamp_key,
@@ -333,8 +332,9 @@ class TrainPersistence:
         Gates (in order): the record's ``objective_id`` must name the active objective (a
         lineage is shared across supersession, so identity is checked separately); the active
         objective's stored ``delivery_lineage`` must equal the record's (fail closed); an
-        existing byte-identical stamp for this key is an idempotent success (``existed=True``)
-        — a same-key differing payload already raised in the fold. Deliberately NO
+        existing stamp for this key is an idempotent success (``existed=True`` — byte-identity
+        is implied: a same-key differing payload already raised in the fold, and the gates fix
+        every non-key field). Deliberately NO
         one-unresolved-operation gate: the stamp is not a remote-mutating operation — it never
         appends a prepared record and sits outside the §8.43 operation protocol. The write
         follows the size-cap + ambiguity + read-back discipline (module docstring).
@@ -354,13 +354,12 @@ class TrainPersistence:
         fold = self.read_journal(objective_id)
         key = stamp_key(record)
         canonical = canonical_stamp_payload(record)
-        existing = next((stamp for stamp in fold.stamps if stamp.key == key), None)
-        if existing is not None:
-            if existing.canonical_payload == canonical:
-                return StampAppendResult(key=key, existed=True)
-            raise JournalCorruptionError(
-                f"ready-stamp {key} already exists with a differing payload (conflicting duplicate)"
-            )
+        # A same-key match is byte-identical by construction: the key fixes the four id/head
+        # segments, schema_version/event are parse-pinned literals, and the only remaining
+        # field (delivery_lineage) is fixed by the stored-lineage gate above plus the fold's
+        # own effective-lineage validation — so key presence alone IS the idempotent success.
+        if any(stamp.key == key for stamp in fold.stamps):
+            return StampAppendResult(key=key, existed=True)
         body = render_stamp_event(record)
         ensure_event_size(body)
         carrier = self._carrier_id(objective_id)
@@ -433,19 +432,23 @@ class TrainPersistence:
         self, *, carrier: str, operation_id: str, role: EventRole, canonical: str
     ) -> bool:
         """Rescan the carrier for the deterministic event key — the COMPLETE scan, never a
-        first-match return: ANY differing payload under the key (e.g. a concurrent writer's
-        conflicting duplicate) → corruption before the append boundary is crossed; a
-        byte-identical match with no conflicts → landed; absent → False (proven absent)."""
+        first-match return, routed through the ONE grammar dispatcher so a concurrently-arrived
+        corrupt comment in EITHER journal grammar (e.g. a malformed ready stamp) fails the
+        rescan closed before the append boundary is crossed: ANY differing payload under the
+        key (e.g. a concurrent writer's conflicting duplicate) → corruption; a byte-identical
+        match with no conflicts → landed; absent → False (proven absent)."""
         found = False
         for comment in self._issues.read_comments(issue_id=carrier):
-            event = parse_journal_comment(
+            event = parse_carrier_comment(
                 comment.body,
                 comment_id=comment.id,
                 created_at=comment.created_at,
                 edited_at=comment.edited_at,
                 carrier=carrier,
             )
-            if event is None or (event.operation_id, event.role) != (operation_id, role):
+            if not isinstance(event, JournalEvent):
+                continue
+            if (event.operation_id, event.role) != (operation_id, role):
                 continue
             if event.canonical_payload != canonical:
                 raise JournalCorruptionError(

@@ -630,6 +630,12 @@ class TestStampStrictRejections:
         with pytest.raises(journal.JournalCorruptionError, match="not a YAML mapping"):
             self._parse(body)
 
+    def test_unparseable_yaml(self) -> None:
+        marker = journal.render_stamp_marker(_stamp())
+        body = f"{marker}\n\n```yaml\n{{unbalanced\n```"
+        with pytest.raises(journal.JournalCorruptionError, match="not parseable"):
+            self._parse(body)
+
     def test_wrong_event_value(self) -> None:
         body = journal.render_stamp_event(_stamp()).replace("event: ready_stamp", "event: stamped")
         with pytest.raises(journal.JournalCorruptionError, match="event"):
@@ -672,6 +678,19 @@ class TestStampStrictRejections:
             _stamp(objective_id="#252")
         with pytest.raises(ValueError, match="canonical-bare"):
             _stamp(plan_id="#101")
+
+    def test_head_sha_with_trailing_newline_is_rejected(self) -> None:
+        # fullmatch, not a $-anchored match: `$` would admit a trailing newline, and rendering
+        # such a record would embed the newline in the marker line.
+        with pytest.raises(ValueError, match="head_sha"):
+            _stamp(head_sha="a" * 40 + "\n")
+
+    @pytest.mark.parametrize("node_id", ["x-->y", "a<!--b", "phase:one", "Phase 1", "a`b"])
+    def test_marker_unsafe_node_id_is_a_typed_refusal(self, node_id: str) -> None:
+        # The marker-safe allowlist: an id that would break either marker encoding (or the
+        # deterministic colon-joined key) cannot construct a stamp — loud, never mangled.
+        with pytest.raises(ValueError, match="node_id"):
+            _stamp(node_id=node_id)
 
     def test_marker_objective_mismatch(self) -> None:
         body = journal.render_stamp_event(_stamp()).replace(

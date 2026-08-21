@@ -6296,8 +6296,14 @@ including the double-marker rule), so an operation whose opaque `before`/`after`
 *mentions* the stamp text (journaled user-authored prose) parses cleanly as an operation, never
 as a malformed stamp; only a body with no operation marker text and the stamp marker text parses
 under the stamp grammar; neither text → unrelated DATA. The reverse collision is structurally
-impossible: every stamp payload field is validated colon-free (or 40-hex), so a rendered stamp
-body can never contain the colon-carrying operation marker text.
+impossible: every stamp payload field is validated against the **marker-safe segment allowlist**
+(letters, digits, `.`, `_`, `-`) or is 40-hex, so a rendered stamp body can never contain the
+colon-carrying operation marker text — nor any character that would break either marker encoding
+(whitespace/backticks for the inline-code form; `<`/`>`/`!` whose embedded `-->` would terminate
+the HTML comment early). Every real segment shape fits the allowlist (numeric GitHub ids, Linear
+identifiers, ULID lineages, `<phase>.<n>` node ids); an exotic id that does not fit is a **typed
+refusal at construction and parse** — that layer simply cannot carry a stamp until its id
+conforms, loud and never a silently mangled marker.
 
 The stamp's deterministic event key is the 4-segment
 `objective_id:plan_id:node_id:head_sha` (all four in the marker, tamper-checked against the
@@ -6306,7 +6312,12 @@ payload). The payload is **pure fact** — `schema_version` (`"1"`), `event` (`"
 load-bearing; it fixes the canonical bytes) — with **no timestamp and no run_id**: the
 deterministic canonical bytes ARE the idempotence contract (a same-head re-stamp re-derives
 byte-identical bytes → `existed=True`), and temporal ordering (latest-wins) comes from the
-carrier comment's `(created_at, comment_id)`, exactly like the operation fold. Ids are
+carrier comment's `(created_at, comment_id)`, exactly like the operation fold. One deliberate
+corner of that trade: a byte-identical re-stamp never advances temporal order (first occurrence
+wins), so returning a branch to an EXACT prior head and re-stamping cannot displace a newer
+stamp at another head — the layer reads `stale` until a content change produces a new head to
+stamp (or supersession re-affirms under a new identity). Deterministic idempotence is chosen
+over re-affirmation of a recycled head. Ids are
 **canonical-bare**: a leading `#` on `objective_id`/`plan_id` is rejected at construction and
 parse, so the fold scopes by exact equality — no normalization branch anywhere. `head_sha` is
 the full 40-hex lowercase object id (the verified checkpoint form). Corruption — always a typed
@@ -6320,7 +6331,10 @@ stored lineage).
 
 The stamp write path (`TrainPersistence.append_ready_stamp`) rides the append discipline above
 unchanged — the same size cap, complete-scan read-back, rescan-first ambiguity policy, and one
-bounded retry (ambiguity diagnostics read `append of ready-stamp <key> …`). The stamp-specific
+bounded retry (ambiguity diagnostics read `append of ready-stamp <key> …`). Every read-back
+rescan — operation and stamp alike — routes through the one grammar dispatcher, so a
+concurrently-arrived corrupt comment in EITHER grammar fails the rescan closed before the append
+boundary is crossed. The stamp-specific
 differences: the record's `objective_id` must name the objective being appended to and the
 stored `delivery_lineage` must equal the record's (the same identity/lineage gates as
 `append_prepared`); the stamp sits **outside the one-unresolved-operation gate** — it is not a
