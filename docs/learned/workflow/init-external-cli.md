@@ -184,9 +184,9 @@ the SSOT tuple of fragment skill names; `_desired_skills_manifest(self_repo)` re
 (the `self_repo` param is retained for signature stability but no longer branches the ref).
 
 Why `main`, not a tag — the original motivation: at the time perk had no release cadence. The
-lone `v0.0.1` tag went stale because `__version__` was never bumped and the tag never moved, so
-a consumer pinned to `v{__version__}` received a months-old skill set missing newer skills →
-`missing-skill` at `skills update --sync`. The rationale that survives the release pipeline
+lone `v0.0.1` tag went stale because `__version__` was never bumped and no newer version/tag was
+ever cut, so a consumer pinned to `v{__version__}` received a months-old skill set missing newer
+skills → `missing-skill` at `skills update --sync`. The rationale that survives the release pipeline
 (perk now cuts real `v{version}` releases — `distribution.md`): skill bodies ship via the
 skills CLI's git clone, not the npm/PyPI artifacts, so `main` remains the ref that reflects the
 current skill set. Trade-off: the consumer-delivered skill set is not pinned/reproducible —
