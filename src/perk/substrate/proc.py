@@ -12,13 +12,36 @@ owns the terminal; nothing is captured) for gestures like init's offered ``gh au
 
 ``subprocess.run`` is resolved at call time on the shared module object, so tests that
 monkeypatch the global ``subprocess.run`` keep working unchanged.
+
+``which_absolute`` is the shared exec-launcher probe (resolve + absolutize a binary BEFORE any
+``os.chdir``) — a pure-stdlib leaf both the pi launch and the hunk watch seam reach.
 """
 
 import os
+import shutil
 import subprocess
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Literal
+
+
+def which_absolute(binary: str) -> str | None:
+    """``shutil.which`` + absolutization — the shared exec-launcher probe.
+
+    Exec-launcher safety contract: call this BEFORE any ``os.chdir`` and exec the returned
+    absolute path (argv[0] conventionally stays the bare name). ``shutil.which`` can return a
+    **relative** candidate when the matching ``PATH`` entry is itself relative (e.g. ``.``), and
+    a relative path handed to a post-chdir exec is reinterpreted under the new cwd — the very
+    directory the launcher just entered. The candidate is therefore absolutized against the
+    CURRENT cwd via ``Path.absolute()`` (no symlink resolution — a version-manager shim path is
+    exec'd as-is, not its target).
+
+    Returns ``None`` on a miss — miss policy stays with callers (each owns its typed refusal).
+    """
+    candidate = shutil.which(binary)
+    if candidate is None:
+        return None
+    return str(Path(candidate).absolute())
 
 
 class ProcFailure(Exception):

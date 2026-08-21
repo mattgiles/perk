@@ -1,5 +1,6 @@
 import dataclasses
 import json
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -34,6 +35,7 @@ def test_implement_materializes_worktree_and_is_idempotent(git_repo, monkeypatch
 
     execs: list[tuple[str, list[str]]] = []
     monkeypatch.setattr("perk.run.launch.os.chdir", lambda _p: None)
+    monkeypatch.setattr("perk.run.launch._resolve_pi_executable", lambda: "/stub/bin/pi")
     monkeypatch.setattr("perk.run.launch.os.execvpe", lambda f, a, e: execs.append((f, list(a))))
     # Don't shell gh in this real-git integration test (the plan-body fetch is its own test).
     monkeypatch.setattr("perk.backends.github.plans.get_plan_body", lambda **_k: None)
@@ -57,7 +59,7 @@ def test_implement_materializes_worktree_and_is_idempotent(git_repo, monkeypatch
     assert cache.read_plan_ref(wt) == _PLAN_REF_MODEL
     handoffs = list((wt / ".perk" / "workflow" / "handoff").glob("*.json"))
     assert len(handoffs) == 1
-    assert execs and execs[0][0] == "pi"
+    assert execs and execs[0][0] == "/stub/bin/pi"  # the resolver's absolute path, not "pi"
 
     # branch plan-42 exists
     branches = subprocess.run(
@@ -83,6 +85,7 @@ def test_launch_warms_extension_install_before_exec(git_repo, monkeypatch):
         "ensure_extension_install_present",
         lambda repo_root, *, self_repo: events.append(("warm-install", repo_root, self_repo)),
     )
+    monkeypatch.setattr("perk.run.launch._resolve_pi_executable", lambda: "/stub/bin/pi")
     monkeypatch.setattr("perk.run.launch.os.execvpe", lambda f, a, e: events.append("exec"))
     launch_stage(
         repo_root=git_repo,
@@ -123,6 +126,7 @@ def test_install_step_resolves_done_when_install_happens(git_repo, monkeypatch, 
     cache.write_plan_ref(git_repo, _PLAN_REF)
     config = Config(worktree_root=git_repo / ".worktrees")
     monkeypatch.setattr("perk.run.launch.os.chdir", lambda _p: None)
+    monkeypatch.setattr("perk.run.launch._resolve_pi_executable", lambda: "/stub/bin/pi")
     monkeypatch.setattr("perk.run.launch.os.execvpe", lambda f, a, e: None)
     monkeypatch.setattr("perk.backends.github.plans.get_plan_body", lambda **_k: None)
     monkeypatch.setattr(
@@ -150,6 +154,7 @@ def test_install_step_resolves_warn_when_install_did_not_take(git_repo, monkeypa
     cache.write_plan_ref(git_repo, _PLAN_REF)
     config = Config(worktree_root=git_repo / ".worktrees")
     monkeypatch.setattr("perk.run.launch.os.chdir", lambda _p: None)
+    monkeypatch.setattr("perk.run.launch._resolve_pi_executable", lambda: "/stub/bin/pi")
     monkeypatch.setattr("perk.run.launch.os.execvpe", lambda f, a, e: None)
     monkeypatch.setattr("perk.backends.github.plans.get_plan_body", lambda **_k: None)
     monkeypatch.setattr(
@@ -216,6 +221,76 @@ def test_launch_exported_linear_key_wins_over_local_config():
         fallback_linear_api_key="lin_api_local",
     )
     assert env["LINEAR_API_KEY"] == "lin_api_env"
+
+
+def test_exec_pi_resolves_before_chdir_and_execs_the_absolute_path(
+    tmp_path, monkeypatch, launch_context_factory
+):
+    """The pi executable is resolved BEFORE the chdir and the exec receives the resolver's
+    absolute path (no bare-name PATH re-resolution under the worktree); argv[0] stays "pi"."""
+    events: list[object] = []
+    agent_dir = tmp_path / "agent"
+    agent_dir.mkdir()
+    monkeypatch.setattr(launch, "_pi_agent_dir", lambda: agent_dir)
+    monkeypatch.setattr(
+        launch,
+        "_resolve_pi_executable",
+        lambda: events.append("resolve") or "/resolved/bin/pi",
+    )
+    monkeypatch.setattr(launch.os, "chdir", lambda path: events.append("chdir"))
+    monkeypatch.setattr(
+        launch.os, "execvpe", lambda program, argv, env: events.append(("exec", program, argv))
+    )
+    ctx = launch_context_factory(stage=_stage("implement"), plan_ref=_PLAN_REF)
+    launch._exec_pi(ctx)
+    assert events.index("resolve") < events.index("chdir")  # resolved pre-chdir
+    exec_event = events[-1]
+    assert exec_event == ("exec", "/resolved/bin/pi", list(ctx.argv))
+    assert ctx.argv[0] == "pi"  # argv[0] conventionally stays the bare name
+
+
+def test_exec_pi_which_miss_aborts_before_any_exec_phase_side_effect(
+    tmp_path, monkeypatch, launch_context_factory
+):
+    """A PATH miss is a typed pi_cli_missing refusal raised BEFORE any exec-phase side effect
+    (no chdir, no exec) — the REAL resolver runs through which_absolute. Deliberately scoped:
+    this claims nothing about earlier launch_stage phases (the idempotent-resume posture)."""
+    events: list[str] = []
+    agent_dir = tmp_path / "agent"
+    agent_dir.mkdir()
+    monkeypatch.setattr(launch, "_pi_agent_dir", lambda: agent_dir)
+    monkeypatch.setattr(shutil, "which", lambda binary: None)
+    monkeypatch.setattr(launch.os, "chdir", lambda path: events.append("chdir"))
+    monkeypatch.setattr(launch.os, "execvpe", lambda program, argv, env: events.append("exec"))
+    ctx = launch_context_factory(stage=_stage("implement"), plan_ref=_PLAN_REF)
+    with pytest.raises(UserFacingCliError) as excinfo:
+        launch._exec_pi(ctx)
+    assert excinfo.value.error_type == "pi_cli_missing"
+    assert "npm install -g @earendil-works/pi-coding-agent" in excinfo.value.format_message()
+    assert events == []  # neither chdir nor exec happened
+
+
+def test_exec_pi_exec_race_oserror_becomes_launch_failed(
+    tmp_path, monkeypatch, launch_context_factory
+):
+    """The presence probe does not eliminate the exec race: a chdir/exec OSError is the typed
+    launch_failed refusal naming the worktree, chained from the original error."""
+    agent_dir = tmp_path / "agent"
+    agent_dir.mkdir()
+    monkeypatch.setattr(launch, "_pi_agent_dir", lambda: agent_dir)
+    monkeypatch.setattr(launch, "_resolve_pi_executable", lambda: "/stub/bin/pi")
+    monkeypatch.setattr(launch.os, "chdir", lambda path: None)
+
+    def _boom(program, argv, env):
+        raise OSError("boom")
+
+    monkeypatch.setattr(launch.os, "execvpe", _boom)
+    ctx = launch_context_factory(stage=_stage("implement"), plan_ref=_PLAN_REF)
+    with pytest.raises(UserFacingCliError) as excinfo:
+        launch._exec_pi(ctx)
+    assert excinfo.value.error_type == "launch_failed"
+    assert str(ctx.resolved.path) in excinfo.value.format_message()
+    assert isinstance(excinfo.value.__cause__, OSError)
 
 
 class _Result:
@@ -534,7 +609,7 @@ def test_launch_sweeps_stale_lock_before_exec(launch_context_factory, launch_exe
     )
     launch._exec_pi(ctx)
     assert not stale.exists()  # swept before exec
-    assert [call[0] for call in launch_exec_recorder.calls] == ["pi"]
+    assert [call[0] for call in launch_exec_recorder.calls] == [launch_exec_recorder.pi_path]
 
 
 def test_implement_materializes_plan_body_snapshot(tmp_path, monkeypatch, capsys):
@@ -690,7 +765,7 @@ def test_implement_linear_emission_failure_never_blocks_exec(
     )
     launch._emit_linear_run_started(ctx)
     launch._exec_pi(ctx)
-    assert [call[0] for call in launch_exec_recorder.calls] == ["pi"]
+    assert [call[0] for call in launch_exec_recorder.calls] == [launch_exec_recorder.pi_path]
     assert "run-started emission skipped (non-fatal)" in capsys.readouterr().err
 
 
@@ -707,6 +782,7 @@ def test_handoff_extra_is_merged_into_handoff(git_repo, monkeypatch):
     monkeypatch.setattr("perk.run.launch.cache.write_handoff", _capture)
     monkeypatch.setattr("perk.run.launch.cache.write_plan_ref", lambda *a, **k: None)
     monkeypatch.setattr("perk.run.launch.os.chdir", lambda _p: None)
+    monkeypatch.setattr("perk.run.launch._resolve_pi_executable", lambda: "/stub/bin/pi")
     monkeypatch.setattr("perk.run.launch.os.execvpe", lambda f, a, e: None)
 
     launch_stage(
@@ -838,7 +914,7 @@ def test_launch_banner_heads_output_before_staging_warnings(
         remote=None,
         pi_args=[],
     )
-    assert [call[0] for call in launch_exec_recorder.calls] == ["pi"]
+    assert [call[0] for call in launch_exec_recorder.calls] == [launch_exec_recorder.pi_path]
     err = capsys.readouterr().err
     assert "skills: mirrored" not in err
     # the summary line heads the output, before the extensions staging warning

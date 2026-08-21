@@ -99,6 +99,7 @@ from perk.state import cache, run_id
 from perk.substrate import git as git
 from perk.substrate.config import Config, StageModel, load_local_linear_api_key
 from perk.substrate.output import io_step, log_warn, machine_output, user_output
+from perk.substrate.proc import which_absolute
 from perk.substrate.registry import Stage
 from perk.substrate.skill_exposure import skill_exposure_argv
 
@@ -550,12 +551,40 @@ def _build_exec_env(
     return env
 
 
+def _resolve_pi_executable() -> str:
+    """Resolve the absolute path of the ``pi`` binary — typed refusal on a PATH miss.
+
+    Module-level on purpose: ``_exec_pi`` reads it as a bare facade global, so
+    ``monkeypatch.setattr(launch, "_resolve_pi_executable", …)`` rebinds the name it calls
+    (the module-docstring name-binding rule). No bare-name fallback — a miss is a
+    ``pi_cli_missing`` refusal, never a raw ``FileNotFoundError`` traceback from ``execvpe``'s
+    exhausted PATH walk.
+    """
+    candidate = which_absolute("pi")
+    if candidate is None:
+        raise UserFacingCliError(
+            "pi CLI not found on PATH — install it: "
+            "npm install -g @earendil-works/pi-coding-agent (requires Node >= 22).",
+            error_type="pi_cli_missing",
+        )
+    return candidate
+
+
 def _exec_pi(ctx: _LaunchContext) -> None:
     """Build the child env, sweep stale pi agent locks, chdir into the worktree, and ``exec pi``
     — the CLI *becomes* pi, so nothing after this runs.
 
+    The pi executable is resolved to an ABSOLUTE path pre-chdir via
+    :func:`_resolve_pi_executable` (FIRST, before any exec-phase side effect): re-resolving the
+    bare name after the chdir would let a relative ``PATH`` entry (e.g. ``.``) pick up a ``pi``
+    inside the very worktree being launched into. Bounded protection: this closes pi-name
+    substitution from the worktree, not the ``#!/usr/bin/env node`` shebang-interpreter lookup
+    (pi's bin script's ``env`` still walks the unchanged ``PATH`` post-chdir — a recorded
+    residual; sanitizing the operator's ``PATH`` is out of scope).
+
     Annotated ``-> None`` (not ``NoReturn``): tests stub ``os.execvpe`` and control returns.
     """
+    pi_path = _resolve_pi_executable()  # pre-chdir: aborts the exec phase before any side effect
     # PERK_CLI_VERSION carries the running CLI's version into the launched session so the
     # extension's `session_start` handler can surface a soft drift warning when the live loaded
     # `@mgiles/perk` extension differs from the CLI that launched it (a stale lazy-installed npm:
@@ -576,8 +605,17 @@ def _exec_pi(ctx: _LaunchContext) -> None:
         fallback_linear_api_key=local_linear_key,
     )
     _sweep_stale_pi_agent_locks(_pi_agent_dir())  # silence pi's stale-lock startup warning
-    os.chdir(ctx.resolved.path)  # pi's ctx.cwd becomes the worktree; the extension claims there
-    os.execvpe("pi", list(ctx.argv), env)  # the CLI *becomes* pi — nothing after this runs
+    # The presence probe does not eliminate the exec race — a failed chdir/exec is an ordinary
+    # OSError arm, not a crash (the watch-seam shape).
+    try:
+        os.chdir(ctx.resolved.path)  # pi's ctx.cwd becomes the worktree; the extension claims there
+        # absolute pi path: no bare-name PATH re-resolution after the chdir; argv[0] stays "pi"
+        os.execvpe(pi_path, list(ctx.argv), env)  # the CLI *becomes* pi — nothing after this runs
+    except OSError as exc:
+        raise UserFacingCliError(
+            f"could not launch pi in {ctx.resolved.path}: {exc}",
+            error_type="launch_failed",
+        ) from exc
 
 
 def _stage_model_argv(config: Config, stage_id: str) -> list[str]:
@@ -667,6 +705,7 @@ __all__ = [
     "_materialize_into_worktree",
     "_pi_agent_dir",
     "_plan_read_instruction",
+    "_resolve_pi_executable",
     "_resolve_prompt",
     "_run_setup_hook",
     "_skill_exposure_argv",

@@ -7,6 +7,7 @@ where they are looked up (`perk.convergence.init.review_cli`'s `hunk_cli_present
 `perk.substrate.npm.install_global`, resolved via the `npm` module attribute at call time).
 """
 
+import shutil
 from pathlib import Path
 
 from perk.convergence import init as init_mod
@@ -27,6 +28,18 @@ def _record_installs(monkeypatch) -> list[str]:
     calls: list[str] = []
     monkeypatch.setattr(npm, "install_global", lambda spec, **kw: calls.append(spec))
     return calls
+
+
+# --- hunk_cli_path ------------------------------------------------------------------------------
+
+
+def test_hunk_cli_path_absolutizes_a_relative_which_result(tmp_path, monkeypatch):
+    """A relative PATH entry yields a relative which candidate — hunk_cli_path (via the shared
+    which_absolute probe) anchors it to the cwd at probe time, so `perk plan watch`'s post-chdir
+    exec cannot reinterpret it under the worktree."""
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(shutil, "which", lambda binary: "hunk")
+    assert review_cli.hunk_cli_path() == str(tmp_path / "hunk")
 
 
 # --- ensure_review_cli ------------------------------------------------------------------------

@@ -22,7 +22,7 @@ lands the worker.**
 - **Today the cold door execs an interactive `pi`.** `perk/launch.py` `launch_stage(...)` mints a
   `run_id`, writes the handoff blob (`cache.write_handoff`), materializes the plan-ref
   (`cache.write_plan_ref`) and plan body (`_materialize_plan_body`) into the worktree, sets
-  `PERK_RUN_ID` in the env, `os.chdir(wt)`, and `os.execvpe("pi", argv, env)` — "the CLI *becomes*
+  `PERK_RUN_ID` in the env, `os.chdir(wt)`, and `os.execvpe(<absolute pi path>, argv, env)` — "the CLI *becomes*
   pi — nothing after this runs." The session is **human-driven** in a TUI. The initial prompt is
   seeded by `_initial_prompt(stage, plan_ref)` (`_implement_prompt`/`_address_prompt`/`_learn_prompt`),
   and skill-binding nudges are appended via `render_cold_bindings`.

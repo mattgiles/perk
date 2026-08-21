@@ -1193,6 +1193,7 @@ def _patch_sync_git(
     monkeypatch.setattr(
         launch.init, "ensure_extension_install_present", lambda repo_root, *, self_repo: None
     )
+    monkeypatch.setattr("perk.run.launch._resolve_pi_executable", lambda: "/stub/bin/pi")
     monkeypatch.setattr("perk.run.launch.os.chdir", lambda _p: None)
     monkeypatch.setattr("perk.run.launch.os.execvpe", lambda _f, _a, _e: None)
     return calls
