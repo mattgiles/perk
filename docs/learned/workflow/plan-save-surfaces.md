@@ -66,8 +66,9 @@ model that is the only path. Correct wording branches on reality: `plan_save` + 
 the warm gather writes no handoff), else `plan_review` with handoff recovery and `/plan-save` as
 the human failsafe.
 
-Residual: `prompts/stages/replan.md` still instructs an autonomous `plan_save` in a gated
-session (a known, deliberately deferred instance).
+Resolved: the replan seed (`prompts/stages/replan.md`) now directs the approval-driven
+`plan_review` auto-save — an APPROVED review updates plan #N in place (the save is keyed on the
+run id; the objective link is preserved) — closing the last known instance of this trap.
 
 ## The fix pattern: `handoff_extra` as a general cold-door carrier
 
@@ -202,7 +203,7 @@ error raised at a *later* relation step still trips the newly-inserted call). Ce
 exercising that path — **happy AND error** — and add the response to each map. (A refinement of the
 fixture-sweep rules in `linear-backend.md` / `cold-door-client.md` — cross-ref, don't duplicate.)
 
-Mechanical aside: adding the gateway function's name to `perk/github/__init__.py` must place it in
+Mechanical aside: adding the gateway function's name to `src/perk/github/__init__.py` must place it in
 isort-alphabetical position in BOTH the import list and `__all__`, or ruff's `RUF022` fails CI — see
 `docs/learned/toolchain/ruff.md`.
 
@@ -230,8 +231,8 @@ on-land step is fail-open and only prints on success, a stale header broke the w
 - `extension/factories/objectivePlan.ts` — the `objective_node_claim` writer + claim helpers
 - `docs/learned/workflow/plan-review-flow.md` — the review-side tiering + the approvalSave seam
 - `docs/learned/pi/tool-param-decode.md` — the fallback-chain optionality flip
-- `perk/cli/commands/plan/save_cmd.py` — `_link_from_handoff`, the re-save merge via `update_plan_header`
-- `perk/run/launch.py` — `launch_stage` `handoff_extra` param
+- `src/perk/cli/commands/plan/save_cmd.py` — `_link_from_handoff`, the re-save merge via `update_plan_header`
+- `src/perk/run/launch/__init__.py` — `launch_stage` `handoff_extra` param
 - `tests/test_plan_save.py` — recover/override/unlinked + the empty-dict skip assertion
 - `docs/learned/workflow/plan-ref-lifecycle.md` — the plan-ref/header schema and fail-open on-land shape
 - `docs/learned/workflow/objective-lifecycle.md` — node linkage + the objective re-save gap

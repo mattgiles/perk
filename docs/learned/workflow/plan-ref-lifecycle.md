@@ -98,7 +98,7 @@ ripple above:
   (no `learn_state: null` line) and the exact-dict + conformance-fake ripple never fires. An
   absent field = a legacy plan → the reader falls back to the local marker.
 - **Split writer postures by consequence.** `pr land` stamps **fail-open-loud** behind a
-  **never-downgrade** guard (`_stamp_learn_state` in `perk/delivery/finalize.py`): an
+  **never-downgrade** guard (`_stamp_learn_state` in `src/perk/delivery/finalize.py`): an
   idempotent re-land must not resurrect a `captured`/`skipped` plan to `pending`, and the guard
   returns the *kept* value so the envelope reports the **effective** state. `learn capture` /
   `learn skip` stamp **strictly** (exit 1 on failure) — the stamp IS their job.

@@ -10,7 +10,8 @@ there is no TS twin, consistent with ``perk/state/cache.py``'s "no GC policy her
 Two eligibility rules:
 
 - **terminal-stage prune** — the run's handoff records a *consumed*, registry-terminal stage
-  (a stage with empty ``successors``; currently exactly ``learn``, computed never hardcoded);
+  (a stage with empty ``successors``; currently ``{gist-save, learn, audit}``, computed never
+  hardcoded);
 - **age-based prune** — anything else older than ``max_age_days`` (default 14). This is the
   rule that covers warm-minted run dirs which have no handoff/stage at all.
 
