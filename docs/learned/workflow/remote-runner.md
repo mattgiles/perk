@@ -1,14 +1,14 @@
 ---
 title: The remote-runner dispatch + CI execution seam
-read_when: You are working on `perk/run/` (runner, run_worker, discovery), the `perk-run.yml` workflow + `perk-remote-setup` action, the `--remote` dispatch path, or the worker-entry resolver.
+read_when: You are working on `src/perk/run/` (runner, run_worker, discovery), the `perk-run.yml` workflow + `perk-remote-setup` action, the `--remote` dispatch path, or the worker-entry resolver.
 cluster: doors-and-launch
 ---
 
 # The remote-runner dispatch + CI execution seam
 
 perk can dispatch a stage drive to a remote runner (today: GitHub Actions) instead of running it on
-the local worktree. The seam spans Python (`perk/run/runner.py` dispatch + `perk/run/run_worker.py` CI
-entrypoint), a managed CI artifact (`.github/workflows/perk-run.yml` + the `perk-remote-setup`
+the local worktree. The seam spans Python (`src/perk/run/runner.py` dispatch +
+`src/perk/run/run_worker.py` CI entrypoint), a managed CI artifact (`.github/workflows/perk-run.yml` + the `perk-remote-setup`
 composite action), and the TS worker the runner ultimately drives (`extension/workerMain.ts` →
 `driveStage`). This doc captures the non-obvious shape and the load-bearing rules.
 
@@ -63,8 +63,12 @@ while workflow-*template* fixes go live only after merging to main (dispatch pin
 
 ## The `Runner` contract (Node 2.1)
 
-`perk/run/runner.py` defines a runner-agnostic `Runner` **Protocol** + value types
-(`RunHandle`/`RunObservation`/`DispatchRecord`) + the concrete `GitHubActionsRunner` + `select_runner`.
+`src/perk/run/runner.py` defines a runner-agnostic `Runner` **Protocol** + value types
+(`RunHandle` — with its `RunHandleModel` boundary — and `RunObservation`) + the concrete
+`GitHubActionsRunner` + `select_runner`. The **persisted dispatch record** is
+`src/perk/state/cache.py`'s `Dispatch` (frozen dataclass) + `DispatchModel` (the LenientParseModel
+boundary), written/read via `cache.write_dispatch` / `cache.read_dispatch` (+
+`cache.list_dispatch_records`) from the `--remote` drive in `src/perk/run/launch/remote.py`.
 `observe`/`cancel` are implemented at the **library level (not stubbed)** so the supervisor nodes
 (3.1/3.2) consume settled shapes — only the supervisor *command surfaces* are deferred to those
 nodes. The old `remote_not_driven` error was **retired** in favor of three honest error types:
@@ -100,8 +104,9 @@ gate**; the finalize write-back (status→dispatched + handle) is **best-effort 
 Failed-dispatch records are deliberately **kept** (`status:"failed"` + `error`) for later supervisor
 visibility — never deleted.
 
-The dispatch record rides the existing `scratch/runs/<run_id>/dispatch.json` path — a path
-`perk init` already creates and `.gitignore` already excludes (`/.pi/workflow/scratch/`). **No new
+The dispatch record rides the existing `.perk/workflow/scratch/runs/<run_id>/dispatch.json` path
+(`cache.run_scratch_dir`) — a path `perk init` already creates and `.gitignore` already excludes
+(the single `/.perk/workflow/` entry). **No new
 cache layout / gitignore / init / doctor change was needed**; reuse the run-scoped scratch dir for
 per-run durable artifacts rather than adding a `SUBDIRS` entry. Cross-ref `plan-ref-lifecycle.md` and
 the `§8.2` establish-before-consume discipline.
@@ -155,8 +160,9 @@ While event-stream reporting components are called unguarded, their internal rep
 
 The **canonical existence source for remote runs is GitHub's own run enumeration**: the managed
 workflow's run-name embeds `perk {stage} · plan #{plan} · {run_id}`, `runner.parse_run_name`
-recovers those fields, and `Runner.discover` (orchestrated by `perk/run/discovery.py`) turns the
-listing into `DiscoveredRun`s (smoke runs and foreign titles filtered out). Local dispatch JSON
+recovers those fields, and `Runner.discover` turns the
+listing into `DiscoveredRun`s (smoke runs and foreign titles filtered out); the orchestration
+lives in `src/perk/run/discovery.py`. Local dispatch JSON
 files (under `scratch/runs/<run_id>/dispatch.json`) are a **cache/correlation accelerator** —
 they enrich discovered rows (plan url, objective backlink, precise dispatch time) and are the
 only durable trace of failed/never-triggered dispatches. Supervisor read surfaces (`run list`,
@@ -194,7 +200,7 @@ stderr notes but never raise or alter exit codes when network or API limits are 
 - **Resolver-candidate vs migration-helper have independent lifecycles.** Dropping the `consumer-git`
   *candidate* does **not** mean retiring the clone-path SSOT: `consumer_git_clone_root` + `GIT_PACKAGE`
   (now in `settings.py`) **stay**, because the doctor forward-migration `_remove_orphaned_git_clone`
-  (`perk/convergence/doctor/fixes.py`) still `rmtree`s an orphaned `.pi/git/<host>/<path>`. **Rule: a
+  (`src/perk/convergence/doctor/fixes.py`) still `rmtree`s an orphaned `.pi/git/<host>/<path>`. **Rule: a
   resolver candidate for a retired path can go the moment a superseding path exists; the *cleanup
   migration* for already-deployed consumers outlives it** — don't conflate "stop probing X" with
   "delete the derivation of X's location." (See `init-doctor.md` for the migration seam.)
@@ -211,7 +217,7 @@ worker-deps step a **loud `::error::` + `exit 1` deferral**, not a silently-brok
 **two-spec** install `npm install @mgiles/perk@{__version__} @earendil-works/pi-coding-agent
 --prefix .pi/npm --legacy-peer-deps` — the second spec is the B-pre-c fix: the package ships zero
 runtime deps and `--legacy-peer-deps` skips peers, so without the SDK's real deps the worker's
-import set stays open (anchor: `workflow_artifacts.py::_WORKER_DEPS_CONSUMER`; `_NPM_NAME =
+import set stays open (anchor: `src/perk/run/workflow_artifacts.py::_WORKER_DEPS_CONSUMER`; `_NPM_NAME =
 NPM_PACKAGE.removeprefix("npm:")` derives from the same settings SSOT). Self-repo keeps `npm ci`.
 The path stayed labeled execution-untested until the 2026-07-06 consumer dogfood proved it live
 (`docs/design/remote-runner-consumer-dogfood.md`) — the durable rule stands: a realized-but-
@@ -280,9 +286,9 @@ plan's surface — `--fix` converges the whole repo, not just your target artifa
 
 ## Cross-references
 
-- `perk/run/runner.py` — the `Runner` Protocol, value types, `GitHubActionsRunner`, `select_runner`
-- `perk/run/run_worker.py` — the CI worker entrypoint + the three-candidate worker-entry ladder
-- `perk/convergence/doctor/fixes.py` — `_remove_orphaned_git_clone` (the cleanup migration that
+- `src/perk/run/runner.py` — the `Runner` Protocol, value types, `GitHubActionsRunner`, `select_runner`
+- `src/perk/run/run_worker.py` — the CI worker entrypoint + the three-candidate worker-entry ladder
+- `src/perk/convergence/doctor/fixes.py` — `_remove_orphaned_git_clone` (the cleanup migration that
   outlives the retired `consumer-git` resolver candidate)
 - `extension/workerMain.ts` — the worker entry the runner drives into
 - `shared/contracts.md` §8.13 (Runner contract + dispatch record) / §8.14 (Actions runner artifact +

@@ -236,22 +236,22 @@ checkout) and returns its `.parent`:
 - **Safe layering:** `config` importing `git` is fine — `git.py` imports only stdlib, so there is no
   cycle risk.
 
-## The `[worktree] setup` hook and the `created`-flag dry-run asymmetry (#652)
+## The `[worktree] setup` hook and the dry-run preview asymmetry (#652)
 
-`[worktree] setup` is an array of shell commands run inside a freshly created worktree before
-`exec pi` (see `cold-door-launch.md` for `run_worktree_setup`, the single canonical
-setup-execution path). The durable gotcha is in the dry-run preview:
+`[worktree] setup` is an array of shell commands run inside a newly materialized worktree
+(freshly created or restored) before `exec pi`, via the marker-gated `run_pending_setup` (see
+`cold-door-launch.md`; `run_worktree_setup` stays the single canonical setup-*execution* path).
+The durable gotcha is in the dry-run preview:
 
-- **`ResolvedWorktree.created` does NOT cover the dry-run "would create" case.** `created=True` is
-  set only in the `elif materialize:` branch of `resolve_worktree`, so on a `--dry-run`
-  (`materialize=False`) `created` is **always False**, even when the stage *would* freshly create
-  the worktree. The real-run hook gate (`if resolved.created and config.worktree_setup`) therefore
-  can't drive the dry-run preview. The fix: the `_emit_dry_run_preview` "would run setup" branch
-  **re-derives the would-create signal independently** as
-  `stage.worktree == "create" and not resolved.path.exists()` (the same condition that gates a real
-  create), NOT `resolved.created` — the same two-signal split the existing dry-run base-resolution
-  already uses. **Future "fires only on fresh create" features should expect this
-  real-run-vs-preview asymmetry.**
+- **The real-run gate does NOT cover the dry-run "would materialize" case.** The real-run gate is
+  the `SETUP_PENDING` marker, set only when the positioner actually materializes the worktree (a
+  `create-fresh`/`restore-remote` disposition of `ResolvedWorktree`); a `--dry-run`
+  (`materialize=False`) writes **no marker**, even when the stage *would* materialize. So
+  `_emit_dry_run_preview` (its `setup` param) derives the "would run setup" preview
+  **independently from the would-materialize dispositions** (`create-fresh`/`restore-remote`, per
+  its docstring) — the commands are previewed, never run, and no marker is written — the same
+  two-signal split the existing dry-run base-resolution already uses. **Future "fires only on
+  fresh materialization" features should expect this real-run-vs-preview asymmetry.**
 - **`user_output` → stderr, `machine_output` → stdout.** A dry-run preview test asserting the human
   "would run setup: …" line reads `capsys.readouterr().err`; the JSON payload is on `.out`.
 - **ty gotcha:** a `**kwargs` dict passed to a keyword-only `resolve_worktree` trips ty
