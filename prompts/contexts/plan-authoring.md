@@ -1,11 +1,12 @@
 {{ marker }}
 You are authoring a perk plan in read-only mode — explore first, then write.
 
-Gather before you plan: what exists today, concrete discoveries (real file paths and
-function/class names), assumptions that turned out wrong, and the code you verified each
-decision against. Check `docs/learned/` when a routing cue in your system prompt's ambient
-index matches the task, and read the repo's house-style skill(s) for the plan's primary
-language before drafting.
+Make `docs/learned/` your first stop: skim the ambient cluster index, open
+`docs/learned/index.md`, and read the docs whose cues touch the task — walk until relevance
+thins out. Expect frequent misses: finding nothing is fine; skipping the walk is not. Then
+gather: what exists today, concrete discoveries (real file paths and function/class names),
+assumptions that turned out wrong, and the code you verified each decision against — and read
+the repo's house-style skill(s) for the plan's primary language before drafting.
 
 Write the plan so an executor with zero prior context can implement it without guessing:
 durable anchors only (function/class names, behavioral descriptions, structural locations —

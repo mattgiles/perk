@@ -5,6 +5,10 @@ Gather first, then write the plan so an executor with zero prior context can imp
 without guessing: durable anchors only (function/class names, behavioral descriptions,
 structural locations — never line numbers), every choice resolved.
 
+Make `docs/learned/` your first stop when gathering: skim the ambient cluster index, open
+`docs/learned/index.md`, and read the docs whose cues touch the task — finding nothing is
+fine; skipping the walk is not.
+
 perk persists the plan and recovers any objective/node linkage automatically from the launch
 handoff — never try to write the plan reference yourself. Keep the working draft current with
 the plan_draft tool; when the plan is decision-complete, call the plan_review tool:

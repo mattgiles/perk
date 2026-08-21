@@ -385,6 +385,8 @@ def test_committed_catalog_census():
         "plan.draft-before-review",
         "plan.grill-before-review",
         "bindings.nudge-skill-read",
+        "plan.learned-docs-first-stop",
+        "objective-author.learned-docs-first-stop",
         "engagement.untrusted-as-data",
         "address.classifier-child-first",
         "objective-plan.route-explorer-report",

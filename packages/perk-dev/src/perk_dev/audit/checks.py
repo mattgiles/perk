@@ -1,4 +1,4 @@
-"""The five deterministic session-audit checkers + their registry.
+"""The deterministic session-audit checkers + their registry.
 
 Each checker is a pure function ``ParsedSession -> CheckResult`` over the session JSONL
 read edge's flat projection. Semantics are **sound, not complete**: a ``violated`` result
@@ -474,10 +474,13 @@ def _delivery_texts(parsed: ParsedSession) -> list[tuple[int, str]]:
     return out
 
 
-def _bash_reads_suffix(command: object, suffix: str) -> bool:
-    """Whether a bash command demonstrably reads a path ending with ``suffix``: some
-    segment led by a pinned reader command carries a token (shell quotes stripped) ending
-    with the exact suffix. An ``ls``/``stat``/``echo`` of the path is NOT uptake."""
+def _bash_reader_token(command: object, predicate: Callable[[str], bool]) -> bool:
+    """Whether a bash command demonstrably reads a path satisfying ``predicate``: some
+    segment led by a pinned reader command (``cat``/``head``/``tail``/``less``/``more``/
+    ``bat``, plus the ``sed -n`` carve-in) carries a token (shell quotes stripped)
+    satisfying it. A mention in a non-reader command (``ls``/``stat``/``echo``) is NOT a
+    read — mention is not execution. The one shell-token seam the reader-route checkers
+    share; never grow a second shell parser."""
     if not isinstance(command, str):
         return False
     for segment in split_top_level_segments(command):
@@ -487,9 +490,195 @@ def _bash_reads_suffix(command: object, suffix: str) -> bool:
         reader_led = words[0] in _READER_COMMANDS or (
             words[0] == "sed" and len(words) > 1 and words[1] == "-n"
         )
-        if reader_led and any(w.strip("'\"").endswith(suffix) for w in words[1:]):
+        if reader_led and any(predicate(w.strip("'\"")) for w in words[1:]):
             return True
     return False
+
+
+def _bash_reads_suffix(command: object, suffix: str) -> bool:
+    """The exact-suffix wrapper over :func:`_bash_reader_token` —
+    ``bindings.nudge-skill-read``'s uptake route, behavior-identical to its pre-seam
+    form."""
+    return _bash_reader_token(command, lambda token: token.endswith(suffix))
+
+
+# ------------------------------------------------- docs/learned first-stop consult
+
+
+# The graded authoring-skill bindings per expectation id — the borrower guard: the
+# stage-borrowing factory doors (learn-docs/learn-code/replan on stage plan;
+# learn-harvest/learn-dream/objective-replan on stage objective-author) override their
+# binding_trigger to command:<door>, so none of these names is ever delivered there.
+_PLAN_AUTHORING_SKILLS = frozenset({"perk-plan", "perk-objective-plan"})
+_OBJECTIVE_AUTHOR_SKILLS = frozenset({"perk-objective-author"})
+
+_CONSULT_TOOLS = ("read", "grep", "find", "bash")
+
+
+def _delivered_skills(parsed: ParsedSession) -> frozenset[str]:
+    """Every skill name delivered by a nudge pointer or a transcluded body (the same
+    ``extract_signals`` scan scope + pointer grammar the nudge checker uses)."""
+    delivered: set[str] = set()
+    for _index, text in _delivery_texts(parsed):
+        delivered.update(NUDGE_PATTERN.findall(text))
+        delivered.update(TRANSCLUDE_PATTERN.findall(text))
+    return frozenset(delivered)
+
+
+def _lexical_segments(path: str) -> list[str] | None:
+    """The path's segments with ``.``/``..`` resolved purely lexically (no filesystem
+    access — transcript paths may not exist here). ``None`` when a ``..`` climbs past the
+    path's own root: an escaping path is never resolvable against it."""
+    segments: list[str] = []
+    for segment in path.split("/"):
+        if segment in ("", "."):
+            continue
+        if segment == "..":
+            if not segments:
+                return None
+            segments.pop()
+            continue
+        segments.append(segment)
+    return segments
+
+
+def _targets_docs_learned(candidate: object, cwd: str | None) -> bool:
+    """Whether a path string targets the session repository's ``docs/learned/`` corpus.
+    Lexically normalized first (so ``docs/learned/../x`` never counts): a relative path
+    must resolve under ``docs/learned`` from the repo root the session runs in; an
+    absolute path must resolve under ``<cwd>/docs/learned`` (the session header's cwd —
+    no header cwd means no absolute-path evidence). Impostors whose segments merely
+    contain the words (``notdocs/learned``, ``docs/learnedness``) and foreign trees'
+    ``docs/learned`` never qualify."""
+    if not isinstance(candidate, str) or not candidate:
+        return False
+    segments = _lexical_segments(candidate)
+    if segments is None:
+        return False
+    if candidate.startswith("/"):
+        if cwd is None or not cwd.startswith("/"):
+            return False
+        root = _lexical_segments(cwd)
+        if root is None:
+            return False
+        expected = [*root, "docs", "learned"]
+        return segments[: len(expected)] == expected
+    return segments[:2] == ["docs", "learned"]
+
+
+def _consult_args_qualify(tool_name: str, args: dict[str, object], cwd: str | None) -> bool:
+    """Whether one tool call's args are a docs/learned consult: a ``read`` of a
+    qualifying ``path``; a ``grep``/``find`` whose string ``path`` argument qualifies
+    (the fuzzy ``pattern`` argument never counts); or a ``bash`` reader-led segment
+    naming a qualifying path."""
+    if tool_name in ("read", "grep", "find"):
+        return _targets_docs_learned(args.get("path"), cwd)
+    if tool_name == "bash":
+        return _bash_reader_token(
+            args.get("command"), lambda token: _targets_docs_learned(token, cwd)
+        )
+    return False
+
+
+def _check_learned_docs_first_stop(
+    parsed: ParsedSession, graded_skills: frozenset[str], population: str
+) -> CheckResult:
+    """The shared core of ``plan.learned-docs-first-stop`` and
+    ``objective-author.learned-docs-first-stop``.
+
+    Precondition 1 (the borrower guard): a graded authoring-skill binding was delivered
+    (nudge or transclusion). Absent -> ``not-exercised`` — this deterministically
+    exempts the stage-borrowing factory doors, whose binding overrides mean the
+    authoring nudge never reaches them. Precondition 2: >=1 ``plan_review`` toolCall;
+    the anchor is the first (file order), the chain its ancestors.
+
+    Decidable clause: a successful paired consult execution (see
+    ``_consult_args_qualify``) whose *result entry* is on the anchor's ancestor chain —
+    the consult's result must precede the review on its branch, so it could actually
+    have informed the reviewed plan. This single rule decides every ordering edge: a
+    consult batched in the review's own assistant entry does not qualify (its result is
+    a descendant), nor does a delayed/post-review result or a sibling-fork consult. A
+    *pending* qualifying consult call on the chain blocks the absence verdict ->
+    ``unchecked`` — not because a future result could join the chain (the file is
+    append-only; it cannot), but because pairing itself can fail on quirky data: a
+    mismatched/foreign ``toolCallId`` leaves a physically-present ancestor result
+    unpaired, and violating there would be a false verdict (warm-claim's documented
+    leniency). Violated cites the first review entry.
+
+    Undecidable residue: whether the stay was long enough to inform the plan is
+    judgment-tier; sequential invocations in one linear branch are not told apart
+    (mirrors warm-claim's documented coarseness).
+    """
+    delivered = _delivered_skills(parsed)
+    if not (delivered & graded_skills):
+        return CheckResult(
+            status="not-exercised",
+            entries=(),
+            detail=(
+                f"no {population} binding delivered — "
+                "a borrowed-stage factory launch or pre-delivery session"
+            ),
+        )
+    reviews = [i for i, _e, c in _tool_calls(parsed) if c.name == "plan_review"]
+    if not reviews:
+        return CheckResult(
+            status="not-exercised", entries=(), detail="no plan_review call occurred"
+        )
+    cwd = parsed.header.cwd if parsed.header is not None else None
+    first = reviews[0]
+    chain = set(_ancestors(parents_table(parsed), first))
+    pending_on_chain = False
+    for tool_name in _CONSULT_TOOLS:
+        executions, pending = pair_executions(parsed, tool_name)
+        if any(
+            ex.result_index in chain
+            and not ex.is_error
+            and _consult_args_qualify(tool_name, ex.args, cwd)
+            for ex in executions
+        ):
+            return CheckResult(
+                status="satisfied",
+                entries=(),
+                detail=(
+                    "a successful docs/learned consult precedes the first plan_review on its branch"
+                ),
+            )
+        pending_on_chain = pending_on_chain or any(
+            p.call_index in chain and _consult_args_qualify(tool_name, p.args, cwd) for p in pending
+        )
+    if pending_on_chain:
+        return CheckResult(
+            status="unchecked",
+            entries=(),
+            detail=(
+                "a qualifying docs/learned consult is still unpaired — "
+                "the transcript may be in flight"
+            ),
+        )
+    return CheckResult(
+        status="violated",
+        entries=(first,),
+        detail=(
+            f"the first plan_review (entry {first}) has no docs/learned consult result "
+            "on its ancestor chain"
+        ),
+    )
+
+
+def _check_learned_docs_first_stop_plan(parsed: ParsedSession) -> CheckResult:
+    """``plan.learned-docs-first-stop`` — the plan-stage shapes, graded on a delivered
+    ``perk-plan`` or ``perk-objective-plan`` binding (see
+    :func:`_check_learned_docs_first_stop`)."""
+    return _check_learned_docs_first_stop(
+        parsed, _PLAN_AUTHORING_SKILLS, "perk-plan/perk-objective-plan"
+    )
+
+
+def _check_learned_docs_first_stop_objective_author(parsed: ParsedSession) -> CheckResult:
+    """``objective-author.learned-docs-first-stop`` — objective authoring, graded on a
+    delivered ``perk-objective-author`` binding (see
+    :func:`_check_learned_docs_first_stop`)."""
+    return _check_learned_docs_first_stop(parsed, _OBJECTIVE_AUTHOR_SKILLS, "perk-objective-author")
 
 
 _GH_API_REVIEW_PATH = re.compile(r"/(pulls|issues)/[^\s]*/(reviews|comments)")
@@ -695,6 +884,8 @@ CHECKERS: dict[str, Checker] = {
     "objective-plan.warm-claim-before-authoring": _check_warm_claim_before_authoring,
     "plan.draft-before-review": _check_draft_before_review,
     "bindings.nudge-skill-read": _check_nudge_skill_read,
+    "plan.learned-docs-first-stop": _check_learned_docs_first_stop_plan,
+    "objective-author.learned-docs-first-stop": _check_learned_docs_first_stop_objective_author,
     "address.classifier-child-first": _check_classifier_child_first,
     "read-only.no-worktree-mutation": _check_no_worktree_mutation,
 }

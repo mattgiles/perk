@@ -61,3 +61,21 @@ def test_non_string_variables_fail_before_template_lookup() -> None:
 def test_missing_named_template_raises_template_not_found() -> None:
     with pytest.raises(jinja2.TemplateNotFound):
         render("_fixtures/templates/missing.md", {"name": "Ada"})
+
+
+@pytest.mark.parametrize(
+    "template",
+    [
+        "contexts/plan-authoring.md",
+        "stages/objective-author/seed.md",
+        "stages/objective-author/adopt.md",
+        "stages/objective-author/file.md",
+    ],
+)
+def test_authoring_carriers_pin_learned_docs_first_stop(template: str) -> None:
+    # Drift guard on the docs/learned first-stop consult: each authoring carrier keeps
+    # naming the corpus AND the mandatory framing (a softening back to an optional
+    # mention must fail here) — short token pins that rewrapping cannot bisect.
+    source = _load_template_source(template)
+    assert "docs/learned/" in source
+    assert "skipping the walk is not" in source

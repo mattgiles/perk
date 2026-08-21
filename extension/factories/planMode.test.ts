@@ -17,6 +17,7 @@ test("planContextContent: carries the gather-then-plan contract; appends the con
   assert.match(base, /concrete discoveries/);
   assert.match(base, /never line numbers/);
   assert.match(base, /docs\/learned/);
+  assert.match(base, /first stop/);
   assert.match(base, /house-style skill/);
   // The review-first ending — plan_review when decision-complete; /plan-save is the
   // manual failsafe when the review reports skipped/unavailable.
