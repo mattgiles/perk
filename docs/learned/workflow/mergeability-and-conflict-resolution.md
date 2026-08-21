@@ -1,6 +1,6 @@
 ---
 title: "/submit mergeability gate + the conflict-resolver subagent"
-read_when: You are touching the merge-tree conflict probe (`perk/substrate/git.py`), the `/submit` warm reactive drive, the conflict-resolver subagent, a PR-mergeability gotcha, or a post-rebase prose sweep.
+read_when: You are touching the merge-tree conflict probe (`src/perk/substrate/git.py`), the `/submit` warm reactive drive, the conflict-resolver subagent, a PR-mergeability gotcha, or a post-rebase prose sweep.
 cluster: plan-lifecycle
 ---
 
@@ -15,7 +15,7 @@ data-format example).
 > **One Code Rule.** Everything below names files + describes behavior. The merge-tree output block
 > and the GraphQL/CLI shapes are **data-format examples**, marked as such \u2014 not reproduced logic.
 
-## The local conflict probe (`perk/substrate/git.py`)
+## The local conflict probe (`src/perk/substrate/git.py`)
 
 `git merge-tree --write-tree` is a **deterministic offline probe** \u2014 no network, no working-tree
 mutation. **The exit code IS the verdict:**
@@ -179,7 +179,7 @@ don't drift" discipline).
 
 ## Cross-references
 
-- `perk/substrate/git.py` \u2014 the `git merge-tree --write-tree` probe, `MergeProbe.mergeable`
+- `src/perk/substrate/git.py` \u2014 the `git merge-tree --write-tree` probe, `MergeProbe.mergeable`
 - `extension/doors/submit.ts` \u2014 `driveConflictResolution`, the bounded re-drive cap, the type-guard
 - `extension/doors/land.ts` \u2014 `driveReconcileAfterLand`, the shape `driveConflictResolution` mirrors
 - `extension/worker/worker.ts` \u2014 `evaluateTerminal`'s `mergeable !== false` implement bar

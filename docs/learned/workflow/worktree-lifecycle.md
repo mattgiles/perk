@@ -1,13 +1,13 @@
 ---
-title: Worktree filesystem lifecycle — batch ops over plan-<N> checkouts
+title: Worktree filesystem lifecycle — batch ops over plan-<id> checkouts
 read_when: You are writing a worktree-batch command, extending `perk worktree wipe`'s residue sweep, the `[worktree] setup` hook, locating the main checkout via `main_worktree_root`, or a dirty worktree test.
 cluster: plan-lifecycle
 ---
 
 # Worktree filesystem lifecycle
 
-perk worktrees are filesystem checkouts (`plan-<N>/`) created per worktree stage. Batch operations over
-them — like `perk worktree wipe` (`perk/cli/commands/worktree/wipe_cmd.py`) — are a distinct concern from a
+perk worktrees are filesystem checkouts (`plan-<id>/`) created per worktree stage. Batch operations over
+them — like `perk worktree wipe` (`src/perk/cli/commands/worktree/wipe_cmd.py`) — are a distinct concern from a
 worktree's plan-ref *binding* role (see `plan-ref-lifecycle.md`). The mechanics below generalize to any
 worktree-batch command.
 
@@ -32,13 +32,16 @@ worktree-batch command.
 Filter `git.worktree_list()` by **both**:
 
 - `wt.path.parent.resolve() == worktree_root.resolve()`, **and**
-- name matching `^plan-(\d+)$`.
+- name matching `^plan-(\S+)$` (`_PLAN_WT_RE`), where the captured id is the **opaque plan id**
+  (`plan-42` / `plan-ENG-123` — GitHub-numeric or Linear identifiers, per `_plan_id`'s docstring).
 
 **`.resolve()` on BOTH sides is mandatory** — git porcelain returns absolute paths and macOS
-`/var`→`/private/var` symlinks otherwise mismatch. This filter naturally excludes the main repo
-worktree (not under `worktree_root`) and any hand-created / non-numeric worktrees. The rule is
-**not** scoped to batch candidate identification — it holds for **all `git worktree list` path
-comparisons** (another site: `perk worktree checkout`'s best-effort branch-label lookup,
+`/var`→`/private/var` symlinks otherwise mismatch. This filter still excludes the main repo
+worktree (not under `worktree_root`) and non-`plan-*` names — but a hand-created worktree that
+*matches* `plan-*` IS a candidate, protected by the **uncertainty ⇒ skip** posture (its plan lookup
+fails, so it is skipped) — the same safety-by-posture note the stranded-branch section carries.
+The rule is **not** scoped to batch candidate identification — it holds for **all
+`git worktree list` path comparisons** (another site: `perk worktree checkout`'s best-effort branch-label lookup,
 `src/perk/cli/commands/worktree/checkout_cmd.py`).
 
 The same rule has a new site beyond worktree matching: **CliRunner JSON-payload assertions on
@@ -159,7 +162,7 @@ returns the `CompletedProcess` (callers parse stdout/stderr on partial failure),
 
 ## Wipe also sweeps unregistered residue dirs + stranded branches
 
-Beyond git-registered `plan-<N>` worktrees, `perk worktree wipe` sweeps two further populations that
+Beyond git-registered `plan-<id>` worktrees, `perk worktree wipe` sweeps two further populations that
 the registered-candidate filter can't see. Both are additive to the existing gather→act flow.
 
 - **Unregistered `plan-*` residue dirs** under the worktree root are what a timed-out removal plus a
@@ -194,7 +197,7 @@ pytest fixtures. The *actual* validation of a destructive sweep is the first rea
 `node_modules` trees under disk contention is unproven at scale. Treat the first real run as the
 validation, not the fixtures.
 
-Source pointer: `perk/cli/commands/worktree/wipe_cmd.py` (`_enumerate_residue`,
+Source pointer: `src/perk/cli/commands/worktree/wipe_cmd.py` (`_enumerate_residue`,
 `_enumerate_stranded_branches`, `_Residue`).
 
 ## Sacrificial-state teardown is identity-scoped and self-owned
@@ -224,7 +227,7 @@ checkout) and returns its `.parent`:
 - **Contrast `repo_root` / `--show-toplevel`,** which returns the *worktree's* own root — the whole
   reason a separate primitive exists. Use `main_worktree_root` for anything that lives canonically in
   the main checkout **only** (gitignored secrets/config that are never copied into a worktree, e.g.
-  the `.pi/perk.local.toml` Linear key — see `config-tables.md` / `linear-backend.md`).
+  the `.perk/local.toml` Linear key — see `config-tables.md` / `linear-backend.md`).
 - **Fail-open to `None`** (not a git repo) preserves the caller's non-repo fallback (callers use
   `main_worktree_root(repo_root) or repo_root`, keeping `tmp_path`-rooted tests byte-identical).
 - **Test gotcha (macOS):** `tmp_path` is a `/var → /private/var` symlink and `--git-common-dir`
@@ -265,18 +268,18 @@ Worktree lifecycle lives entirely in the Python plane. `wipe` is a plain CLI sub
 emits plain text (no `--json`), and matches the rest of the `wt` family — so no
 `contracts.md`/`registry.yaml` edit is needed (cli-vs-pi §2.2).
 
-## Test-harness gotcha: `.pi/` makes a bare test repo dirty
+## Test-harness gotcha: `.perk/` makes a bare test repo dirty
 
-`cache.set_marker(wt, cache.PENDING_LEARN)` writes into `.pi/workflow/markers/`, which makes the
-worktree *dirty* in a bare test repo (where `.pi/` isn't gitignored). The dirty guard then fires
-*before* the pending-learn guard and masks the intended assertion. **Fix in the test:** write `.pi/`
+`cache.set_marker(wt, cache.PENDING_LEARN)` writes into `.perk/workflow/markers/`, which makes the
+worktree *dirty* in a bare test repo (where `.perk/` isn't gitignored). The dirty guard then fires
+*before* the pending-learn guard and masks the intended assertion. **Fix in the test:** write `.perk/`
 into the repo's `.git/info/exclude` to mirror what `perk init` gitignores in real repos, so the marker
 is the sole signal under test.
 
 ## Cross-references
 
-- `perk/cli/commands/worktree/wipe_cmd.py` — `wipe_worktrees`, `_classify_worktree`, `WipeDecision`, `_wipe_impl`, `_gather_facts`, `_enumerate_residue`, `_enumerate_stranded_branches`, `_Residue`, `_MAX_REMOVE_WORKERS`
-- `perk/substrate/git.py` — `delete_branch`, `delete_branches`, `delete_remote_branches`, `has_remote`, `_run_capture`, `worktree_remove`, `worktree_prune`, `worktree_list`, `_is_recoverable_remove_failure`, `_WORKTREE_REMOVE_TIMEOUT`
+- `src/perk/cli/commands/worktree/wipe_cmd.py` — `wipe_worktrees`, `_classify_worktree`, `WipeDecision`, `_wipe_impl`, `_gather_facts`, `_enumerate_residue`, `_enumerate_stranded_branches`, `_Residue`, `_MAX_REMOVE_WORKERS`
+- `src/perk/substrate/git.py` — `delete_branch`, `delete_branches`, `delete_remote_branches`, `has_remote`, `_run_capture`, `worktree_remove`, `worktree_prune`, `worktree_list`, `_is_recoverable_remove_failure`, `_WORKTREE_REMOVE_TIMEOUT`
 - `docs/learned/workflow/plan-ref-lifecycle.md` — the plan-ref *binding* role of a worktree (distinct from filesystem batch ops)
 - `docs/learned/workflow/session-data.md` — the CliRunner-payload instance of the `.resolve()` rule
 - `docs/learned/workflow/cold-door-launch.md` — `run_worktree_setup`, the single canonical setup-execution path

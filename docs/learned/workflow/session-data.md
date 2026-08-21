@@ -159,7 +159,7 @@ The full producer→consumer recipe, composed from the rules proven above and in
    `run_id` + `name` through the seam).
 4. **Refusal tiers**: run_id mismatch → *silent* `null` (fork isolation, not an anomaly);
    broken-promise (missing file / digest mismatch) → stderr warn + `null`.
-5. **GC**: artifacts are prunable (`perk/state/gc.py`); pruned runs leave dangling pointers **by
+5. **GC**: artifacts are prunable (`src/perk/state/gc.py`); pruned runs leave dangling pointers **by
    design** — consumers must tolerate `null` forever.
 6. **Guards + registry**: manual `scratch`/`runs` path construction trips
    `extension/cacheGuard.test.ts` / `tests/test_cache_guard.py` — go through the seam; if a stage
@@ -194,20 +194,20 @@ name.
 
 ## GC: the destructive-op triad
 
-`perk/state/gc.py` + `perk state prune` + the `cache-gc` doctor check established the shape to reuse for
+`src/perk/state/gc.py` + `perk state prune` + the `cache-gc` doctor check established the shape to reuse for
 any future reclaim/cleanup feature:
 
-- **Pure-read policy module** (`perk/state/gc.py::plan_prune`, injectable `now`).
+- **Pure-read policy module** (`src/perk/state/gc.py::plan_prune`, injectable `now`).
 - **Report-only doctor check** (`cache-gc`: warn + remediation, no `--fix` arm — doctor fixes stay
   documented-non-destructive; pure FS + bundled registry, so deterministic in unit tests).
 - **A single destructive command** (`perk state prune`, alias `gc`) — the ONLY deletion site.
 
 Key policies:
 
-- **Registry-derived terminal set**: `terminal_stage_ids()` computes successor-less stages from the
-  bundled registry (currently `{learn}`), degrading to `frozenset()` with a stderr warn on
-  `RegistryError` — never hardcode stage names into GC-like policies; a graph change must flow
-  through automatically.
+- **Registry-derived terminal set**: `terminal_stage_ids()` (`src/perk/state/gc.py`) computes the
+  successor-less stages from the bundled registry (currently `{gist-save, learn, audit}`),
+  degrading to `frozenset()` with a stderr warn on `RegistryError` — never hardcode stage names
+  into GC-like policies; a graph change must flow through automatically.
 - **Conservative eligibility ladder**: current-run protection (`PERK_RUN_ID` base-ULID match covers
   fork children) → terminal-stage rule (requires a *consumed* handoff; unreadable handoff ⇒ never
   terminal-pruned, age rule only) → age rule (ULID self-date, `st_mtime` fallback for non-ULID
@@ -217,8 +217,8 @@ Key policies:
   "fixing" this.
 - `DEFAULT_MAX_AGE_DAYS` is a module constant pinned in §8.1; a `[gc]` config table was
   deliberately deferred as premature.
-- The result-envelope helpers (`fail`/`emit`/`EXIT_FOR_TYPE`) live once in `perk/cli/emit.py`, a
-  neutral `perk/cli/`-level leaf — groups never import another group's `shared.py` (see
+- The result-envelope helpers (`fail`/`emit`/`EXIT_FOR_TYPE`) live once in `src/perk/cli/emit.py`, a
+  neutral `src/perk/cli/`-level leaf — groups never import another group's `shared.py` (see
   `cli-command-groups.md`).
 
 ## Test recipes
