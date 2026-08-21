@@ -285,8 +285,9 @@ The reusable split:
   of the bundle (never a silent fallback to model-authored scripts).
 
 The `[models.subagents]`-key model is resolved by the tool at execute time and applied as the
-wave's **workflow-level `model` default** (flowing onto every lane) because
-`subagents.agentOverrides` does not reach project agents (see `pi/subagents.md`).
+wave's **workflow-level `model` default** (flowing onto every lane) because an `agentOverrides`
+entry cannot displace the def's frontmatter-pinned `model:` (the 0.52 custom-agent override path
+is frontmatter-sensitive — see `pi/subagents.md`).
 
 `decodeEvidence` is **lenient-never-null** (returns defaults, never `null`), so `runColdDoor`'s
 `bad_output` arm is **deliberately unreachable**. The decode-policy criterion: be lenient when a success

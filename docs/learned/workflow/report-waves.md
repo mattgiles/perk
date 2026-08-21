@@ -74,11 +74,29 @@ session-scoped guard-state patterns, and the wave test machinery worth reusing.
   GC's terminal set (`terminal_stage_ids()`), firing the exact-set pin in `tests/test_gc.py` — a
   stage-adding plan should sweep `src/perk/state/gc.py` alongside the
   stageTools/toolGating/registry pins.
+- `harvestWave.ts` — the seeded `perk learn harvest` session's analyst fan-out behind the
+  `run_harvest_wave` tool (`extension/doors/harvestWaveTools.ts`). The one `manifest_path` param
+  is a **relay handshake, not an authority**: the execute derives the only acceptable run-scoped
+  path from the claimed run's workflow-state and reads the derived path (contracts §8.48); a
+  single-lane manifest is refused toward the seed's direct-analysis path. Best-effort
+  completeness, ONE attempt, no retry; reports re-decoded + pointer-stamped in code.
+- `dreamWave.ts` — the `perk learn dream` session's FIRST-level analyst wave: strict §8.59
+  manifest decode that binds the run-scoped manifest path into the decoded value, run-key-safe
+  orchestration keys (the `auditWave.ts` pattern), the `DREAM_ANALYST_CAPS` SSOT, and **strict**
+  completeness (one failed/undecodable lane forces `complete: false`); one attempt, no retry
+  (contracts §8.60).
+- `dreamReducerWave.ts` — the SECOND-level wave: three FIXED fresh-context `perk.dream-reducer`
+  lanes (`DREAM_REDUCER_ANGLES`) cross-examining the complete analyst outcome; **pure
+  orchestration** — it composes/finalizes the bundle content while the door owns every fs write;
+  the `DREAM_REDUCER_CAPS` SSOT; strict (contracts §8.61). Both dream levels run behind the ONE
+  **parameterless** `run_dream_wave` tool (`extension/doors/dreamWaveTools.ts`) — the
+  `run_audit_wave` workflow-state-bound posture on BOTH the read and write sides; reducers
+  launch only after a complete first wave and an in-budget bundle write.
 
 ## The fixed spawn contract carries an explicit acceptance disable
 
 Every wave spawn carries `acceptance: {level: "none", reason}` (`WAVE_ACCEPTANCE`, a fixed
-`WaveSpawnParams` field — no per-lane/per-flow opt-out). Without it, pi-subagents 0.46.0
+`WaveSpawnParams` field — no per-lane/per-flow opt-out). Without it, pi-subagents (since 0.46.0)
 auto-infers a generic acceptance contract for reviewer/analyst-named or read-only children and
 injects a fenced `acceptance-report` completion instruction into every lane — a competing
 completion contract observed steering a child into invalid `structured_output` attempts.
@@ -357,8 +375,9 @@ Instances:
   `decodeStartReviewWaveParams` is the single seam to adjust if door-recorded context is
   adopted).
 - pi-subagents is deliberately UNPINNED; the guidance is source-re-verified at the version
-  pinned by `_SUBAGENTS_GUIDANCE_VERIFIED_VERSION`, and the doctor `subagent-compat` probes are
-  the drift tripwire — re-verify the adapter on any bump.
+  pinned by `_SUBAGENTS_GUIDANCE_VERIFIED_VERSION` (`src/perk/convergence/doctor/checks.py`),
+  and the doctor `subagent-compat` probes are the drift tripwire — re-verify the adapter on any
+  bump.
 - The pre-digest recipe for foreign-seam nodes (read the unimportable dependency's source at plan
   time, pin the envelope as module constants, keep unversioned names advertised-not-pinned) is
   recorded in `pi/subagents.md` — cross-link, don't restate.
@@ -376,6 +395,7 @@ Instances:
   and its adapters
 - `extension/waves/prReviewWave.ts`, `learnWave.ts`, `prReviewDynamicWave.ts`,
   `adversarialReviewWave.ts`, `draftReviewWave.ts`, `reviewClassifierWave.ts`,
-  `objectiveExplorerWave.ts` — the flow entrypoints
+  `objectiveExplorerWave.ts`, `auditWave.ts`, `harvestWave.ts`, `dreamWave.ts`,
+  `dreamReducerWave.ts` — the flow entrypoints
 - `extension/doors/reviewWaveTools.ts` — the start/collect tool pair (live — the review doors
   drive it)

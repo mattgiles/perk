@@ -19,10 +19,18 @@ non-obvious rules an agent can't derive from any single file.
 > **One Code Rule.** Everything below names files and describes behavior; it does not reproduce
 > source (the one GitHub-API reference is flagged as such). Read the pointers.
 
+> **Version anchoring.** Upstream mechanics in this doc are source-read against the installed
+> pi-subagents at the version pinned by `_SUBAGENTS_GUIDANCE_VERIFIED_VERSION`
+> (`src/perk/convergence/doctor/checks.py`) — bumped only on a deliberate guidance re-verify; the
+> doctor `subagent-compat` check warns when installed ≠ verified. Version numbers appearing in
+> this doc name upstream **events** (when a behavior changed), never verification currency.
+
 ## Distillation
 
-- `subagents.agentOverrides` reaches **builtin** agents only — never `.pi/agents/` project
-  agents (its own section; a prior contracts note claiming otherwise is corrected there).
+- Since 0.52, `subagents.agentOverrides` also reaches custom (user/project/package) agents via a
+  **frontmatter-sensitive fill** — an override never displaces a field the def's frontmatter
+  sets; builtins keep the full-override path. perk defs pin `model:` in frontmatter, so
+  `[models.subagents]` + the workflow-level `model` stays perk's knob (its own section below).
 - Builtins are OFF in every perk repo; the re-enable precedence lives in "Builtins are OFF in
   every perk repo — and the re-enable precedence".
 - Mutation shapes: the current shape is read-only child + PARENT posts once after reconciling
@@ -43,15 +51,28 @@ non-obvious rules an agent can't derive from any single file.
 - Historical: the correction blocks and landed-arc passages (the agent-def delivery arc, the
   reconverge ritual chronicle) record settled history — read them as records, not open work.
 
-## `subagents.agentOverrides` reaches only BUILTIN agents — never project agents
+## `subagents.agentOverrides` — full overrides for builtins, frontmatter-sensitive fills for custom agents
 
-`subagents.agentOverrides` only applies to **builtin** agents; it does **not** reach project agents
-loaded from `.pi/agents/`. Proof: `pi-subagents`' `applyBuiltinOverrides`
-(`.pi/npm/node_modules/pi-subagents/src/agents/agents.ts`).
+`subagents.agentOverrides` takes two paths
+(`.pi/npm/node_modules/pi-subagents/src/agents/agents.ts`):
+
+- **Builtins**: `applyBuiltinOverrides` — override fields displace unconditionally.
+- **Custom agents** (user/project/package sources): `applyCustomAgentOverrides` →
+  `applyCustomAgentOverride`, a **frontmatter-sensitive fill** — an override never displaces a
+  field the def's own frontmatter sets (`agentHasFrontmatterField` over the recorded frontmatter
+  set). Exceptions: `description` always applies; `disabled` applies only when the def didn't set
+  it; `model` fills only when frontmatter has no `model` (and clears `modelSource`); `tools`
+  fills only when frontmatter has no `tools`. A project-scope override's presence
+  **short-circuits** the user-scope override entirely (checked first, no merge).
+
+Before 0.52, overrides reached builtins only (this doc's prior absolute).
 
 **Correction:** a prior `shared/contracts.md` §8.3 note claimed the classifier model is "overridable
-via `subagents.agentOverrides`." That was **wrong** and is corrected — do not restate it as
-still-true.
+via `subagents.agentOverrides`." That was **wrong when made** and stands corrected as history.
+Under the 0.52 custom-agent override path the *conclusion* still holds for perk's agents, for a
+new reason: every perk def pins `model:` in frontmatter, and the custom-agent override path
+never displaces a frontmatter-set field. Do not resurrect the claim — or the old builtins-only
+mechanism story.
 
 ## Builtins are OFF in every perk repo — and the re-enable precedence
 
@@ -63,7 +84,7 @@ builtins are model-facing noise everywhere — this is perk's posture, not a per
 package's behavior must be converged, and `init-doctor.md` for the delta-gating this constant-desired
 fragment forced).
 
-**Re-enable precedence, verified in pi-subagents' `applyBuiltinOverrides`** (`.pi/npm/node_modules/pi-subagents/src/agents/agents.ts`):
+**Re-enable precedence** (`applyBuiltinOverrides`, `.pi/npm/node_modules/pi-subagents/src/agents/agents.ts`):
 
 - A **project-settings** per-agent `subagents.agentOverrides.<name>.disabled: false` **works** —
   the per-agent project override is consulted *before* the project bulk-disable flag, so it
@@ -82,7 +103,10 @@ and a top-level `model` on such a call still works because the conversion spread
 params as workflow defaults — the workflow-level-`model` knob guidance itself stands).
 `/pr-review`'s `run_pr_review_wave` tool reads `[models.subagents] pr-reviewer` from
 `.perk/config.toml` (overlaid by `.perk/local.toml` for per-user override) and the wave module
-applies it as the wave's workflow-level `model` default — **no committed-file churn**.
+applies it as the wave's workflow-level `model` default — **no committed-file churn**. (An
+`agentOverrides` model can't displace the defs' frontmatter-pinned `model:` — see the
+agentOverrides section — so the workflow-level `model` default, not an override map, is the
+mechanism.)
 
 ## Two mutation shapes — when the spawned child posts vs. when the parent does
 
@@ -221,9 +245,17 @@ restate a hard count in prose — counts are drift magnets per
 Discovery (`pi-subagents/src/agents/agents.ts`) is **recursive** over `<root>/.pi/agents` (+ legacy
 `.agents`), and the runtime name is derived from **frontmatter** (`name` + `package`), **NOT the file
 path** — so `.pi/agents/perk/<name>.md` with `package: perk` yields runtime name `perk.<name>`
-identically to a top-level file (subdir placement is free). **Installed npm packages are never
-scanned for agent defs** — shipping agents in the npm package would NOT make them discoverable. This
-is *why* the carrier is the Python wheel + `perk init` materialization, not the npm package.
+identically to a top-level file (subdir placement is free). Installed npm packages ARE scanned
+for **declared** agent dirs: `collectPackageSubagentPaths` reads the `package.json` keys
+`pi-subagents.agents` / `pi.subagents.agents` (path arrays resolved against the package root)
+across the project root itself, project/user `.pi/npm/node_modules/*`, settings-declared
+packages, and the global npm root; hits load as `source: "package"` (lowest custom precedence in
+`AGENT_SOURCE_PRIORITY`: builtin < package < user < project) with first-declaration-wins dedupe
+by name, and custom `agentOverrides` apply to them. **Undeclared packages are still never
+scanned**, and perk's own npm `package.json` declares no agent dirs (only `pi.extensions`) — so
+the carrier remains the Python wheel + `perk init` materialization, not the npm package. The
+"why" is now "perk declares none", not "structurally impossible"; switching to an npm-declared
+agent dir is a design decision, explicitly not made.
 
 **Discovery is live filesystem-based, not launch-time**: an agent def written to `.pi/agents/`
 mid-session is immediately discoverable and usable by a same-session wave — no reload or restart
@@ -251,8 +283,8 @@ current instead of drifting). `test_doctor` / `test_init_idempotent` auto-cover 
 model is configurable via `[models.subagents] <name>`, injected as the **top-level workflow-level
 `model`** on the one `subagent` workflowScript call — a default flowing onto every lane of
 perk's own wave calls (all code-owned workflowScript spawns — perk's convention, not an
-upstream constraint), single-child runs included (agentOverrides don't reach project agents —
-see the top of this doc). The census has been followed
+upstream constraint), single-child runs included (an `agentOverrides` model can't displace the
+defs' frontmatter-pinned `model:` — see the agentOverrides section). The census has been followed
 verbatim on real additions (most recently the agent since renamed `adversarial-reviewer`, added as
 `guest-reviewer`) and worked cleanly — a **rename** walks the identical census (plus a `git mv` of
 the source and a reconverge that prunes the old delivered def) — the only
@@ -361,10 +393,9 @@ follow-up if missing plan bodies prove common).
 
 ## Supervisor-channel streaming (progress updates → a live parent loop)
 
-Mechanics verified in `pi-subagents/src/` (re-verified at 0.43.0; the chain re-verified again at
-**0.45.0** for the RPC-spawned-wave verdict below) while wiring
-`/pr-review-terminal`'s live findings streaming — they dictate the only workable parent loop
-shape:
+Mechanics source-read in `pi-subagents/src/` (currency per the version-anchor convention above)
+while wiring `/pr-review-terminal`'s live findings streaming — they dictate the only workable
+parent loop shape:
 
 - **`contact_supervisor` exists in every child regardless of the agent's `tools:` allowlist** —
   it is registered by pi-subagents' injected prompt-runtime extension
@@ -377,7 +408,7 @@ shape:
   a parent-side poller (≤500ms) injects each request via `pi.sendMessage({customType:
   "subagent_supervisor_request"})` with default `deliverAs: "steer"` — delivered **before the next
   LLM call** (i.e. when the current tool call returns) — with **`triggerTurn: true` on
-  every request** (re-verified at 0.43.0): an idle parent wakes (progress updates included). Progress updates **never
+  every request**: an idle parent wakes (progress updates included). Progress updates **never
   enter the `pending` map** — there is no polling surface for them.
 - **The wait tool is `subagent_wait`, and it wakes on completion / needs-attention only** — a
   progress update does NOT break the wait. **`subagent_wait` expiry IS the streaming cadence**: a
@@ -401,8 +432,9 @@ shape:
   (the `Dir:` line) → `read <Dir>/status.json`. **At 0.43 the cut went further: direct
   `{agent, task}` single-child execution was also removed** — `src/extension/public-execution.ts`
   rejects it with `Direct execution was removed. Use workflowScript: "return runs.run('main',
-  { agent, task })".` — so `workflowScript` is the **sole public execution surface, one-child
-  runs included**. perk's four remaining direct-spawn guidance surfaces (`/address` classify,
+  { agent, task })".` — so `workflowScript` became, from 0.43, the **sole public execution
+  surface, one-child runs included**. perk's four remaining direct-spawn guidance surfaces
+  (`/address` classify,
   the objective-plan explorer, `/submit`'s conflict-resolver, `/learn`'s analyst fan-out) were
   converted accordingly at the time: an explicit-return one-child `runs.run` returning the
   compact `{key, ok, error, output}` projection (never the raw ChildResult — its `results`
@@ -420,7 +452,7 @@ shape:
   resolution, not a report. `/learn`'s analyst fan-out likewise rides the report-wave module
   (`extension/waves/learnWave.ts` → `runReportWave`, behind `run_learn_wave`) — an async
   RPC-spawned all-settled `runs.all` whose script the module renders, with engine-validated
-  structured reports instead of fenced JSON. **Update (2026-08-20, re-verified at 0.52.1):**
+  structured reports instead of fenced JSON. **Update:**
   pi-subagents 0.49.0 (#1059) RESTORED public direct `{agent, task}` single-child execution —
   `normalizePublicSubagentExecution` now converts it into a generated one-child
   `runs.run("main", …)` workflowScript (the child gets `output: true` by default; the remaining
@@ -433,13 +465,13 @@ shape:
   are unaffected; `conflict-resolver`'s explicit-return one-child workflowScript stays
   deliberate (perk controls the compact `{key, ok, error, output}` projection).
 
-### RPC-spawned async waves stream identically (the settled 0.45.0 verdict)
+### RPC-spawned async waves stream identically (the settled verdict)
 
 An RPC-spawned async workflowScript wave delivers supervisor-channel progress updates to the
 parent session **identically** to a model-called wave, **by construction**: the v1 RPC `spawn` is
 a thin envelope over the same executor with the parent session's context, and parent-side
 delivery is **session-scoped file polling** (matching `orchestratorSessionId` against the current
-session), never run-scoped. Supporting facts, source-read at 0.45.0:
+session), never run-scoped. Supporting facts:
 
 - **Async workflows run in-process in the parent pi** — `status.json` carries
   `pid: process.pid`; only single/chain runs get the detached runner. Consequence: an "async"
@@ -485,12 +517,11 @@ The live-run watch axes — all four **confirmed live** across the three streami
   as one held turn.
 
 **Upstream-drift caveat:** the load-bearing delivery mechanics above are **source-read-derived**
-(pi-subagents `src/` at 0.43.0; re-verified at **0.52.1** covering the supervisor-channel
-delivery chain, the v1 RPC seam, the workflow-structured-output mechanics, and public
-execution) — an upstream change to the supervisor-channel or workflow
-contract invalidates the loop shape silently; re-verify on pi-subagents bumps (the grouped
-`tasks[]` removal across upstream v0.41.0–v0.42.1 is exactly this failure mode: it live-broke
-both review doors with no test tripping). Since 0.51.0 the transport is platform-split —
+at the constant-pinned version (covering the supervisor-channel delivery chain, the v1 RPC
+seam, the workflow-structured-output mechanics, and public execution) — an upstream change to
+the supervisor-channel or workflow contract invalidates the loop shape silently; re-verify on
+pi-subagents bumps (the grouped `tasks[]` removal across upstream v0.41.0–v0.42.1 is exactly
+this failure mode: it live-broke both review doors with no test tripping). Since 0.51.0 the transport is platform-split —
 watcher platforms (e.g. linux) use per-request-dir + root fs-watchers plus a 5s safety poller,
 with a ≤500ms poll fallback on watcher failure; darwin uses only a demand-gated ≤500ms poller;
 win32 an always-on ≤500ms poller — delivery semantics and the relay-loop shape unchanged. The
@@ -524,8 +555,8 @@ body — the implementation had zero dead ends because discovery wasn't left to 
 
 The `/pr-review` report wave rides these mechanics (now module-run: `extension/waves/prReviewWave.ts`
 over the v1 RPC via the flow-scoped `run_pr_review_wave` tool), source-read in
-`.pi/npm/node_modules/pi-subagents/src/` at 0.43.0 and re-verified at 0.45.0 and again at 0.46.0
-(same upstream-drift caveat as above — re-verify on bumps). The two single-child flows
+`.pi/npm/node_modules/pi-subagents/src/` (currency per the version-anchor convention; same
+upstream-drift caveat as above — re-verify on bumps). The two single-child flows
 (`/address` classify, the objective-plan explorer) ride the same mechanics through their own
 single-lane wave entrypoints (`classify_review_feedback` / `explore_objective_node` — the
 schemas are module constants, nothing prompt-transcribed):
@@ -550,7 +581,7 @@ schemas are module constants, nothing prompt-transcribed):
   description's own rule for reviewer/read-only calls), an acceptance-heuristic wobble cannot flip
   a lane's `ok` — the "report-only children trip `acceptance: auto`" hazard (below) cannot discard
   a schema-valid report. **But omission is not enough against the distinct PROMPT-COMPETITION
-  hazard** (0.46.0, `src/runs/foreground/subagent-executor.ts` + `src/runs/shared/acceptance.ts`):
+  hazard** (since 0.46.0; `src/runs/foreground/subagent-executor.ts` + `src/runs/shared/acceptance.ts`):
   with `acceptance` absent, pi-subagents auto-infers a generic acceptance contract for
   reviewer/analyst-named or read-only children and injects a fenced `acceptance-report`
   completion instruction into the child's input — a COMPETING completion contract observed
@@ -588,9 +619,9 @@ physically unable to make the engine-REQUIRED `structured_output` completion cal
 pi-subagents exposes an extension-to-extension RPC bridge on pi's in-process event bus, and
 perk's report-wave module (`extension/waves/reportWave.ts` + `rpcAdapter.ts`) launches report
 waves through it — the mechanics below are source-read in
-`.pi/npm/node_modules/pi-subagents/src/extension/rpc.ts` at **0.43.0**, re-verified at
-**0.45.0** (same upstream-drift caveat: re-verify the adapter on every pi-subagents bump; the
-doctor `subagent-compat` probes grown over `rpc.ts` are the drift tripwire):
+`.pi/npm/node_modules/pi-subagents/src/extension/rpc.ts` (same upstream-drift caveat: re-verify
+the adapter on every pi-subagents bump; the doctor `subagent-compat` probes grown over `rpc.ts`
+are the drift tripwire):
 
 - **The envelope**: requests arrive on `subagents:rpc:v1:request` as
   `{version: 1, requestId, method, params?, source?}`; the reply is emitted once on
@@ -608,7 +639,7 @@ doctor `subagent-compat` probes grown over `rpc.ts` are the drift tripwire):
   The success `data.details` carries `asyncId` + `asyncDir` identifying the detached run.
 - **The async-complete event** payload spreads the result-file data plus `runId`/`triggerTurn`;
   match a spawned run via `asyncDir` (fall back to `id` — both optional, at least one present).
-  At 0.45.0 the payload also carries a normalized per-child `results` array (child `runId`,
+  Since 0.45.0 the payload also carries a normalized per-child `results` array (child `runId`,
   `success`, `outputState`, artifact paths — the row's `agent` field carries the workflow LANE
   KEY, not an agent name), which perk's `rpcAdapter` normalizes into output-free receipt
   children (`output`/`summary`/`structuredOutput` never copied; malformed rows dropped). And
@@ -645,7 +676,7 @@ Where to look when you need a subagent child's token or provider-cache numbers:
 - **Child session files persist only when opted into** — `sessionFile`/`sessionDir`/`share` on the
   spawn config; otherwise the cwd-encoded sessions dir gets nothing for the child.
 - **The always-present usage surface is the per-child artifact pair**
-  `.pi-subagents/artifacts/<runId>_<agent>_<i>_transcript.jsonl` + `_meta.json` (at 0.43
+  `.pi-subagents/artifacts/<runId>_<agent>_<i>_transcript.jsonl` + `_meta.json` (since 0.43
   `getArtifactPaths` also yields a written `<base>.jsonl`, but the usage instrument remains the
   transcript + meta pair). Assistant records in the transcript carry per-message `usage`
   (`input`/`cacheRead`/`cacheWrite`); `_meta.json` carries aggregate usage, model, and duration.
@@ -661,7 +692,7 @@ Where to look when you need a subagent child's token or provider-cache numbers:
 
 Two cleanup traps for anything that sweeps up after a wave:
 
-- **A wave receipt is an identity trail, not a complete artifact inventory.** With pi-subagents
+- **A wave receipt is an identity trail, not a complete artifact inventory.** Since pi-subagents
   0.45.2, `children[].artifactPaths` names child session JSONLs under the **parent session store**,
   while the metadata/transcript quads + structured-output captures live **separately**,
   run-id-keyed, under `.pi-subagents/artifacts/`. Exact cleanup derives BOTH sets, validates every
