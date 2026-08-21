@@ -7,17 +7,17 @@ cluster: plan-lifecycle
 # `/submit` mergeability gate + the conflict-resolver subagent
 
 `/submit` gained a **mergeability gate**: after the PR is created it runs a local conflict probe,
-reports the result, and \u2014 in a session \u2014 reactively drives a write-capable `conflict-resolver`
+reports the result, and — in a session — reactively drives a write-capable `conflict-resolver`
 subagent to fix conflicts before the implement run can naturally complete. This doc captures the
 non-obvious mechanics; it does not reproduce source (the one output-shape block is flagged as a
 data-format example).
 
 > **One Code Rule.** Everything below names files + describes behavior. The merge-tree output block
-> and the GraphQL/CLI shapes are **data-format examples**, marked as such \u2014 not reproduced logic.
+> and the GraphQL/CLI shapes are **data-format examples**, marked as such — not reproduced logic.
 
 ## The local conflict probe (`src/perk/substrate/git.py`)
 
-`git merge-tree --write-tree` is a **deterministic offline probe** \u2014 no network, no working-tree
+`git merge-tree --write-tree` is a **deterministic offline probe** — no network, no working-tree
 mutation. **The exit code IS the verdict:**
 
 - `0` = clean (merges without conflict),
@@ -39,13 +39,13 @@ CONFLICT (content): Merge conflict in <path>
 
 Line 1 is the merged tree OID. Then the **conflicted-file-info block** of `<mode> <object>
 <stage>\t<path>` lines runs **until the first blank line**, followed by informational `CONFLICT (...)`
-messages. **Parse unique paths from the info block only** (first-seen order) \u2014 not from the prose
+messages. **Parse unique paths from the info block only** (first-seen order) — not from the prose
 `CONFLICT` lines.
 
-## The load-bearing bug class \u2014 carry the verdict explicitly
+## The load-bearing bug class — carry the verdict explicitly
 
 **Do NOT derive mergeability from `len(conflicts) == 0`.** A real conflict whose paths fail to parse
-yields an *empty* tuple yet is genuinely unmergeable \u2014 silently bypassing the gate. The fix:
+yields an *empty* tuple yet is genuinely unmergeable — silently bypassing the gate. The fix:
 `MergeProbe` carries an **explicit `mergeable: bool` taken from the exit code**, authoritative and
 independent of the parsed paths.
 
@@ -55,12 +55,12 @@ which files conflict*, never for deciding *whether* there is a conflict.
 
 ## Fail-open everywhere
 
-- Fetch failure / unresolvable `origin/<base>` / a weird exit \u2192 `determined=False` \u2192 the caller maps
+- Fetch failure / unresolvable `origin/<base>` / a weird exit → `determined=False` → the caller maps
   it to `mergeable=None`.
 - The **submit call site is also try/except-guarded** so a probe failure NEVER changes submit's exit
   code.
 - `--dry-run` stays **offline** (no probe).
-- Conflicts present \u2192 submit still **succeeds mechanically (exit 0)**; mergeability is **reported**,
+- Conflicts present → submit still **succeeds mechanically (exit 0)**; mergeability is **reported**,
   not an op failure.
 - New `--json` fields: `base`, `mergeable` (`bool | null`), `conflicts[]`. The probe runs **after**
   the PR is created + the body validated.
@@ -100,29 +100,31 @@ and "painted itself into a corner" before centralizing — start with the single
 - **Short-circuit** unless `details.ok && mergeable === false`; `conflicts[]` is advisory and may
   be empty when path parsing loses a definitive conflict verdict.
 - **Deliver guidance** via `pi.sendUserMessage(msg, ctx.isIdle() ? {} : { deliverAs: "followUp" })`
-  \u2014 idle command path = immediate turn; streaming tool path = `followUp` after the terminating batch.
+  — idle command path = immediate turn; streaming tool path = `followUp` after the terminating
+  batch.
 - **Wire the drive into BOTH** the tool `execute` and the command handler.
 - **Bounded re-drive**: a new `conflict_resolution_attempts?: number` `WorkflowState` field
   (best-effort tier, per-field LWW), cap `CONFLICT_RESOLUTION_ATTEMPT_CAP = 2`, incremented via
   `appendWorkflowState`, **reset to 0 on every clean submit** (the idempotent pre-check skips the
-  append when already 0). Past the cap \u2192 loud `report(..., "error", ...)`, **no drive \u2014 never loop.**
+  append when already 0). Past the cap → loud `report(..., "error", ...)`, **no drive — never
+  loop.**
 - **Advisory-decode leniency**: the new `base`/`mergeable`/`conflicts` fields must NOT make a
-  successful submit decode to `null` (`mergeable` is a tri-state read; a malformed `conflicts` \u2192 `[]`).
-  See `cold-door-client.md` for the advisory-decode tier this rides.
+  successful submit decode to `null` (`mergeable` is a tri-state read; a malformed `conflicts` →
+  `[]`). See `cold-door-client.md` for the advisory-decode tier this rides.
 - **TS gotcha**: a boolean helper like `isUnmergeable(details)` does **NOT** narrow the `Result`
-  union \u2014 make it a **type guard** (`details is OkDetails<SubmitOk>`).
+  union — make it a **type guard** (`details is OkDetails<SubmitOk>`).
 
 Cross-reference `warm-door-commands.md` for the `terminate` + `followUp` composition and the
-drive-helper test shape (the drive can no longer be harness-routed via `invokeTool` \u2014 split into a
+drive-helper test shape (the drive can no longer be harness-routed via `invokeTool` — split into a
 pure-impl unit test + drive-helper decision/delivery spy tests).
 
 ## The conflict-resolver subagent (first write-capable + context-inheriting)
 
 `agents/conflict-resolver.md` carries `tools: read,grep,find,ls,bash,edit,write`,
-`inheritProjectContext: true`, `inheritSkills: true` \u2014 **unlike** the read-only classifier/reviewer,
+`inheritProjectContext: true`, `inheritSkills: true` — **unlike** the read-only classifier/reviewer,
 because resolving conflicts requires understanding the code and running the repo's checks. Like the
 reviewer, it **fetches its own context read-only** via `perk pr review-context --json` (reuses the
-existing op \u2014 no new gateway op) and treats fetched text as untrusted **DATA**.
+existing op — no new gateway op) and treats fetched text as untrusted **DATA**.
 
 See `pi/subagents.md` for the full widening-lockstep census and the project-vs-builtin /
 workflow-level-model facts (not duplicated here).
@@ -152,40 +154,40 @@ guard's remediation message) — still named `perk.cli.ensure.fail`. Only PR rev
 
 `evaluateTerminal`'s implement arm now requires `submitDetails.mergeable !== false` **in addition to**
 `ok && pr`: `true` / `null` / absent all allow completion (fail-open); only a definitive `false`
-blocks (\u2192 `agent_idle_incomplete`). The resolver follow-up turns run inside the **same** `prompt()`
-drive; the final clean re-submit overwrites the captured details so natural-idle then passes \u2014 and
+blocks (→ `agent_idle_incomplete`). The resolver follow-up turns run inside the **same** `prompt()`
+drive; the final clean re-submit overwrites the captured details so natural-idle then passes — and
 the attempt cap prevents an infinite drive.
 
 ## GitHub mergeability gotchas (#554)
 
 - **Force-pushing a rebased branch can leave the PR's `headRefOid` stale.** `gh pr view --json
   mergeable` keeps reporting `CONFLICTING` against the *old* head even though the branch API shows the
-  new tip. **Fix**: push a fresh **fast-forward** commit (e.g. `git commit --allow-empty`) \u2014 the new
+  new tip. **Fix**: push a fresh **fast-forward** commit (e.g. `git commit --allow-empty`) — the new
   push event unsticks the head and mergeability recomputes.
 - **Throwaway smoke plans that all append to the same file collide on merge.** Use a **unique file
   per branch** to avoid rebase conflicts across sequential lands.
 
 ## Contracts / docs touched in-turn (the discipline held)
 
-#556 amended `shared/contracts.md` \u00a78.3 / \u00a78.4 / \u00a78.11 and the user docs **in the same turn** as the
-mergeability gate \u2014 a pointer, not a reproduction (the "amend the contract / update the user docs,
+#556 amended `shared/contracts.md` §8.3 / §8.4 / §8.11 and the user docs **in the same turn** as the
+mergeability gate — a pointer, not a reproduction (the "amend the contract / update the user docs,
 don't drift" discipline).
 
 ## Sources
 
-- #556 (PR #559) \u2014 the mergeability gate, `driveConflictResolution`, the conflict-resolver subagent,
+- #556 (PR #559) — the mergeability gate, `driveConflictResolution`, the conflict-resolver subagent,
   the worker bar
-- #554 (PR #553) \u2014 the GitHub force-push `headRefOid` + unique-file-per-branch mergeability gotchas
+- #554 (PR #553) — the GitHub force-push `headRefOid` + unique-file-per-branch mergeability gotchas
 
 ## Cross-references
 
-- `src/perk/substrate/git.py` \u2014 the `git merge-tree --write-tree` probe, `MergeProbe.mergeable`
-- `extension/doors/submit.ts` \u2014 `driveConflictResolution`, the bounded re-drive cap, the type-guard
-- `extension/doors/land.ts` \u2014 `driveReconcileAfterLand`, the shape `driveConflictResolution` mirrors
-- `extension/worker/worker.ts` \u2014 `evaluateTerminal`'s `mergeable !== false` implement bar
-- `agents/conflict-resolver.md` \u2014 the write-capable + context-inheriting agent def
-- `docs/learned/workflow/warm-door-commands.md` \u2014 the terminate+followUp composition, the
+- `src/perk/substrate/git.py` — the `git merge-tree --write-tree` probe, `MergeProbe.mergeable`
+- `extension/doors/submit.ts` — `driveConflictResolution`, the bounded re-drive cap, the type-guard
+- `extension/doors/land.ts` — `driveReconcileAfterLand`, the shape `driveConflictResolution` mirrors
+- `extension/worker/worker.ts` — `evaluateTerminal`'s `mergeable !== false` implement bar
+- `agents/conflict-resolver.md` — the write-capable + context-inheriting agent def
+- `docs/learned/workflow/warm-door-commands.md` — the terminate+followUp composition, the
   reactive-sub-result drive, the drive-helper test shape
-- `docs/learned/pi/subagents.md` \u2014 the widening-lockstep census, project-vs-builtin agents
-- `docs/learned/workflow/cold-door-client.md` \u2014 the advisory-decode leniency the new fields ride
-- `docs/learned/workflow/linear-backend.md` \u2014 the live-smoke source for the #554 gotchas
+- `docs/learned/pi/subagents.md` — the widening-lockstep census, project-vs-builtin agents
+- `docs/learned/workflow/cold-door-client.md` — the advisory-decode leniency the new fields ride
+- `docs/learned/workflow/linear-backend.md` — the live-smoke source for the #554 gotchas
