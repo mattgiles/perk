@@ -8,6 +8,7 @@ real read edge, so pairing and branch machinery are exercised end to end.
 import json
 from pathlib import Path
 
+import pytest
 from perk_dev.audit.checks import CHECKERS, CheckResult
 from perk_dev.audit.expectations import load_catalog
 
@@ -521,58 +522,43 @@ def test_nudge_unread_skill_named_among_several(tmp_path: Path):
 # ------------------------------------------------- docs/learned first-stop consult
 
 
-def test_learned_plan_satisfied_via_read(tmp_path: Path):
+@pytest.mark.parametrize(
+    ("skill", "tool", "args"),
+    [
+        # Every consult route satisfies; a corpus grep/find is a legitimate walk. The
+        # absolute form must resolve under the session header's cwd (/repo in fixtures);
+        # the gate accepts either graded plan skill.
+        pytest.param("perk-plan", "read", {"path": "docs/learned/index.md"}, id="read-relative"),
+        pytest.param(
+            "perk-objective-plan",
+            "read",
+            {"path": "/repo/docs/learned/workflow/plan-ref-lifecycle.md"},
+            id="read-absolute-under-cwd",
+        ),
+        pytest.param("perk-plan", "bash", {"command": "cat docs/learned/index.md"}, id="bash-cat"),
+        pytest.param(
+            "perk-plan",
+            "bash",
+            {"command": "sed -n '1,40p' docs/learned/index.md"},
+            id="bash-sed-n",
+        ),
+        pytest.param(
+            "perk-plan", "grep", {"pattern": "plan-ref", "path": "docs/learned/"}, id="grep-path"
+        ),
+        pytest.param(
+            "perk-plan",
+            "find",
+            {"pattern": "lifecycle", "path": "docs/learned/**"},
+            id="find-path",
+        ),
+    ],
+)
+def test_learned_plan_satisfied_consult_routes(
+    tmp_path: Path, skill: str, tool: str, args: dict[str, object]
+):
     entries = [
-        _delivery("u0", None, "perk-plan"),
-        *_exec("e1", "u0", "read", {"path": "docs/learned/index.md"}),
-        _call("r1", "e1r", "plan_review", {}),
-    ]
-    assert LEARNED_PLAN(_parse(tmp_path, entries)).status == "satisfied"
-
-
-def test_learned_plan_satisfied_via_absolute_read(tmp_path: Path):
-    # An absolute path qualifies too — the predicate is the adjacent (docs, learned)
-    # segment pair, not a repo-relative prefix. Gated on either graded plan skill.
-    entries = [
-        _delivery("u0", None, "perk-objective-plan"),
-        *_exec("e1", "u0", "read", {"path": "/repo/docs/learned/workflow/plan-ref-lifecycle.md"}),
-        _call("r1", "e1r", "plan_review", {}),
-    ]
-    assert LEARNED_PLAN(_parse(tmp_path, entries)).status == "satisfied"
-
-
-def test_learned_plan_satisfied_via_bash_cat(tmp_path: Path):
-    entries = [
-        _delivery("u0", None, "perk-plan"),
-        *_exec("e1", "u0", "bash", {"command": "cat docs/learned/index.md"}),
-        _call("r1", "e1r", "plan_review", {}),
-    ]
-    assert LEARNED_PLAN(_parse(tmp_path, entries)).status == "satisfied"
-
-
-def test_learned_plan_satisfied_via_bash_sed_n(tmp_path: Path):
-    entries = [
-        _delivery("u0", None, "perk-plan"),
-        *_exec("e1", "u0", "bash", {"command": "sed -n '1,40p' docs/learned/index.md"}),
-        _call("r1", "e1r", "plan_review", {}),
-    ]
-    assert LEARNED_PLAN(_parse(tmp_path, entries)).status == "satisfied"
-
-
-def test_learned_plan_satisfied_via_grep_path(tmp_path: Path):
-    # A corpus search is a legitimate walk: a grep whose path targets docs/learned counts.
-    entries = [
-        _delivery("u0", None, "perk-plan"),
-        *_exec("e1", "u0", "grep", {"pattern": "plan-ref", "path": "docs/learned/"}),
-        _call("r1", "e1r", "plan_review", {}),
-    ]
-    assert LEARNED_PLAN(_parse(tmp_path, entries)).status == "satisfied"
-
-
-def test_learned_plan_satisfied_via_find_path(tmp_path: Path):
-    entries = [
-        _delivery("u0", None, "perk-plan"),
-        *_exec("e1", "u0", "find", {"pattern": "lifecycle", "path": "docs/learned/**"}),
+        _delivery("u0", None, skill),
+        *_exec("e1", "u0", tool, args),
         _call("r1", "e1r", "plan_review", {}),
     ]
     assert LEARNED_PLAN(_parse(tmp_path, entries)).status == "satisfied"
@@ -589,12 +575,17 @@ def test_learned_plan_pattern_mention_does_not_count(tmp_path: Path):
 
 
 def test_learned_plan_impostor_paths_do_not_satisfy(tmp_path: Path):
-    # Adjacent-segment matching rejects paths that merely contain the words.
+    # The predicate anchors to the session repository: word-impostor segments, a foreign
+    # tree's docs/learned, a `..` escape out of the corpus, and a climb above the repo
+    # root are all rejected.
     entries = [
         _delivery("u0", None, "perk-plan"),
         *_exec("e1", "u0", "read", {"path": "/tmp/notdocs/learned/x.md"}),
         *_exec("e2", "e1r", "read", {"path": "docs/learnedness/y.md"}),
-        _call("r1", "e2r", "plan_review", {}),
+        *_exec("e3", "e2r", "read", {"path": "/tmp/docs/learned/index.md"}),
+        *_exec("e4", "e3r", "read", {"path": "docs/learned/../design/x.md"}),
+        *_exec("e5", "e4r", "read", {"path": "../docs/learned/x.md"}),
+        _call("r1", "e5r", "plan_review", {}),
     ]
     parsed = _parse(tmp_path, entries)
     result = LEARNED_PLAN(parsed)
@@ -659,8 +650,10 @@ def test_learned_plan_sibling_fork_consult_violates(tmp_path: Path):
 
 
 def test_learned_plan_pending_consult_on_chain_is_unchecked(tmp_path: Path):
-    # A qualifying consult call with no paired result yet (a live session mid-read)
-    # blocks the absence verdict — the result may still flush as an ancestor.
+    # A qualifying consult call with no paired result blocks the absence verdict. Not
+    # because a future result could join the chain (the file is append-only; it cannot)
+    # but because pairing itself can fail on quirky data — a violation must stay
+    # proof-grade (see the mismatched-id test below for the concrete false-verdict risk).
     entries = [
         _delivery("u0", None, "perk-plan"),
         _call("e1a", "u0", "read", {"path": "docs/learned/index.md"}, "c-e1"),
@@ -669,6 +662,21 @@ def test_learned_plan_pending_consult_on_chain_is_unchecked(tmp_path: Path):
     result = LEARNED_PLAN(_parse(tmp_path, entries))
     assert result.status == "unchecked"
     assert "in flight" in result.detail
+
+
+def test_learned_plan_mismatched_result_id_is_unchecked(tmp_path: Path):
+    # The consult's result entry physically precedes the review on its branch but
+    # carries a foreign toolCallId, so the call stays unpaired: the consult genuinely
+    # happened and could have informed the plan — violating here would be a false
+    # verdict. This pairing quirk is why the pending arm exists (mirrors warm-claim).
+    entries = [
+        _delivery("u0", None, "perk-plan"),
+        _call("e1a", "u0", "read", {"path": "docs/learned/index.md"}, "c-e1"),
+        _result("e1r", "e1a", "read", call_id="c-other"),
+        _call("r1", "e1r", "plan_review", {}),
+    ]
+    result = LEARNED_PLAN(_parse(tmp_path, entries))
+    assert result.status == "unchecked"
 
 
 def test_learned_plan_pending_unrelated_read_still_violates(tmp_path: Path):

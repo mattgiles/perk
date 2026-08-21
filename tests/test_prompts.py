@@ -74,5 +74,8 @@ def test_missing_named_template_raises_template_not_found() -> None:
 )
 def test_authoring_carriers_pin_learned_docs_first_stop(template: str) -> None:
     # Drift guard on the docs/learned first-stop consult: each authoring carrier keeps
-    # naming the corpus — a short token pin that rewrapping cannot bisect.
-    assert "docs/learned/" in _load_template_source(template)
+    # naming the corpus AND the mandatory framing (a softening back to an optional
+    # mention must fail here) — short token pins that rewrapping cannot bisect.
+    source = _load_template_source(template)
+    assert "docs/learned/" in source
+    assert "skipping the walk is not" in source

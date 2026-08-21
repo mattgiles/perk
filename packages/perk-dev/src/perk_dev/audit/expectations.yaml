@@ -211,10 +211,14 @@ expectations:
       session's first plan_review call a successful docs/learned consult appears whose
       RESULT entry is an ancestor of that review call: a read of a docs/learned path, a
       grep/find whose path argument targets docs/learned, or a read-only bash reader-led
-      segment naming a docs/learned path (a path qualifies iff adjacent path segments
-      equal docs/learned). The ambient cluster index rides the system prompt, so the floor
-      is opening the catalog or a doc — a brief stay satisfies; relevance judgment (and
-      finding nothing) stays with the model.
+      segment naming a docs/learned path (a path qualifies iff it lexically resolves
+      under the session repository's docs/learned/ — relative from the repo root, or
+      absolute under the session header's cwd; ".." escapes and foreign trees'
+      docs/learned never count). The stated source is the shared plan-authoring context;
+      REPLACE-posture tombell-plan sessions receive the identical first-stop clause via
+      prompts/contexts/adapters/tombell-plan.md instead. The ambient cluster index rides
+      the system prompt, so the floor is opening the catalog or a doc — a brief stay
+      satisfies; relevance judgment (and finding nothing) stays with the model.
     violation: >-
       The session reaches its first plan_review with no docs/learned consult result on
       that call's ancestor chain — the ambient index was never followed into the catalog

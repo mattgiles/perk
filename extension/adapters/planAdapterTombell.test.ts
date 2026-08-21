@@ -52,6 +52,7 @@ test("tombell selected + gate active: injects the review-first bridge context (f
           m.customType === PLAN_ADAPTER_TOMBELL_CONTEXT_TYPE &&
           String(m.content).includes("[PLAN ADAPTER: TOMBELL]") &&
           String(m.content).includes("docs/learned") &&
+          String(m.content).includes("skipping the walk is not") &&
           String(m.content).includes("plan_draft") &&
           String(m.content).includes("plan_review") &&
           String(m.content).includes("/plan-save"),

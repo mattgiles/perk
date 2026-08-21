@@ -525,28 +525,58 @@ def _delivered_skills(parsed: ParsedSession) -> frozenset[str]:
     return frozenset(delivered)
 
 
-def _targets_docs_learned(candidate: object) -> bool:
-    """Whether a path string targets the ``docs/learned/`` corpus: split on ``/``, some
-    adjacent segment pair equals (``docs``, ``learned``). Accepts bare ``docs/learned``,
-    files under it, and absolute or repo-relative forms; rejects impostors whose
-    segments merely contain the words (``notdocs/learned``, ``docs/learnedness``)."""
-    if not isinstance(candidate, str):
+def _lexical_segments(path: str) -> list[str] | None:
+    """The path's segments with ``.``/``..`` resolved purely lexically (no filesystem
+    access — transcript paths may not exist here). ``None`` when a ``..`` climbs past the
+    path's own root: an escaping path is never resolvable against it."""
+    segments: list[str] = []
+    for segment in path.split("/"):
+        if segment in ("", "."):
+            continue
+        if segment == "..":
+            if not segments:
+                return None
+            segments.pop()
+            continue
+        segments.append(segment)
+    return segments
+
+
+def _targets_docs_learned(candidate: object, cwd: str | None) -> bool:
+    """Whether a path string targets the session repository's ``docs/learned/`` corpus.
+    Lexically normalized first (so ``docs/learned/../x`` never counts): a relative path
+    must resolve under ``docs/learned`` from the repo root the session runs in; an
+    absolute path must resolve under ``<cwd>/docs/learned`` (the session header's cwd —
+    no header cwd means no absolute-path evidence). Impostors whose segments merely
+    contain the words (``notdocs/learned``, ``docs/learnedness``) and foreign trees'
+    ``docs/learned`` never qualify."""
+    if not isinstance(candidate, str) or not candidate:
         return False
-    segments = candidate.split("/")
-    return any(
-        segments[i] == "docs" and segments[i + 1] == "learned" for i in range(len(segments) - 1)
-    )
+    segments = _lexical_segments(candidate)
+    if segments is None:
+        return False
+    if candidate.startswith("/"):
+        if cwd is None or not cwd.startswith("/"):
+            return False
+        root = _lexical_segments(cwd)
+        if root is None:
+            return False
+        expected = [*root, "docs", "learned"]
+        return segments[: len(expected)] == expected
+    return segments[:2] == ["docs", "learned"]
 
 
-def _consult_args_qualify(tool_name: str, args: dict[str, object]) -> bool:
+def _consult_args_qualify(tool_name: str, args: dict[str, object], cwd: str | None) -> bool:
     """Whether one tool call's args are a docs/learned consult: a ``read`` of a
     qualifying ``path``; a ``grep``/``find`` whose string ``path`` argument qualifies
     (the fuzzy ``pattern`` argument never counts); or a ``bash`` reader-led segment
     naming a qualifying path."""
     if tool_name in ("read", "grep", "find"):
-        return _targets_docs_learned(args.get("path"))
+        return _targets_docs_learned(args.get("path"), cwd)
     if tool_name == "bash":
-        return _bash_reader_token(args.get("command"), _targets_docs_learned)
+        return _bash_reader_token(
+            args.get("command"), lambda token: _targets_docs_learned(token, cwd)
+        )
     return False
 
 
@@ -568,10 +598,12 @@ def _check_learned_docs_first_stop(
     have informed the reviewed plan. This single rule decides every ordering edge: a
     consult batched in the review's own assistant entry does not qualify (its result is
     a descendant), nor does a delayed/post-review result or a sibling-fork consult. A
-    *pending* qualifying consult call on the chain (result not yet landed — a live
-    session) blocks the absence verdict -> ``unchecked``. Violated cites the first
-    review entry (decisive: a future result cannot become an ancestor of a recorded
-    entry).
+    *pending* qualifying consult call on the chain blocks the absence verdict ->
+    ``unchecked`` — not because a future result could join the chain (the file is
+    append-only; it cannot), but because pairing itself can fail on quirky data: a
+    mismatched/foreign ``toolCallId`` leaves a physically-present ancestor result
+    unpaired, and violating there would be a false verdict (warm-claim's documented
+    leniency). Violated cites the first review entry.
 
     Undecidable residue: whether the stay was long enough to inform the plan is
     judgment-tier; sequential invocations in one linear branch are not told apart
@@ -592,6 +624,7 @@ def _check_learned_docs_first_stop(
         return CheckResult(
             status="not-exercised", entries=(), detail="no plan_review call occurred"
         )
+    cwd = parsed.header.cwd if parsed.header is not None else None
     first = reviews[0]
     chain = set(_ancestors(parents_table(parsed), first))
     pending_on_chain = False
@@ -600,7 +633,7 @@ def _check_learned_docs_first_stop(
         if any(
             ex.result_index in chain
             and not ex.is_error
-            and _consult_args_qualify(tool_name, ex.args)
+            and _consult_args_qualify(tool_name, ex.args, cwd)
             for ex in executions
         ):
             return CheckResult(
@@ -611,7 +644,7 @@ def _check_learned_docs_first_stop(
                 ),
             )
         pending_on_chain = pending_on_chain or any(
-            p.call_index in chain and _consult_args_qualify(tool_name, p.args) for p in pending
+            p.call_index in chain and _consult_args_qualify(tool_name, p.args, cwd) for p in pending
         )
     if pending_on_chain:
         return CheckResult(
