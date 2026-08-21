@@ -14,8 +14,8 @@ narrowing helpers, and the migration playbook that keeps door tests green.
 ## Distillation
 
 - The substrate is MANDATORY: every warm door shelling to a `--json` cold door consumes
-  `runColdDoor` — hand-rolled exec/parse is a regression — "Rollout COMPLETE — the substrate is
-  mandatory".
+  `runColdDoor` — hand-rolled exec/parse is a regression (guard-enforced:
+  `coldDoorGuard.test.ts`) — "Rollout COMPLETE — the substrate is mandatory".
 - Decode strictness is a policy SPLIT by tier (which fields strict-fail vs default) — "The
   decode policy split (the reusable pattern)".
 - The parsed `success:false` envelope rides `payload` only on the two envelope-bearing fail
@@ -29,11 +29,13 @@ narrowing helpers, and the migration playbook that keeps door tests green.
 
 ## Rollout COMPLETE — the substrate is mandatory
 
-All nine warm doors (submit/ready/land, planSave/objectiveSave, address/learn/learnFactory,
-objectivePlan ×2) delegate through `runColdDoor`; no per-door `activeRunId` copies remain (the
-stamp fallback is uniformly `cold-door-<ts>`). **A new warm door that shells to a Python `--json`
-cold door MUST consume the substrate — hand-rolled exec/parse is a regression, not a style
-choice.**
+Every warm door that shells to a Python `--json` cold door delegates through `runColdDoor`,
+enforced by the source-scan guard `extension/coldDoorGuard.test.ts` (no `PERK_BIN` reference and
+no perk exec outside `substrate/coldDoor.ts`). The live consumer census is **derived, never
+listed** — grep `runColdDoor` imports under `extension/doors/` + `extension/factories/` (this
+census froze once at "nine" and drifted). No per-door `activeRunId` copies remain (the stamp
+fallback is uniformly `cold-door-<ts>`). **A new warm door that shells to a Python `--json` cold
+door MUST consume the substrate — hand-rolled exec/parse is a regression, not a style choice.**
 
 ## What the client is
 
@@ -178,7 +180,7 @@ Future doors only test their own decode edges.
   caller's argv). Write argv assertions by flag *adjacency* (`argv[argv.indexOf(flag) + 1]`) or
   order-independent regex — never positionally.
 - The staging assertion shape: read the fake-perk argv file, take the value after the flag, assert
-  it contains the `.pi/workflow/scratch/runs/<runId>` path, then read the staged file back.
+  it contains the `.perk/workflow/scratch/runs/<runId>` path, then read the staged file back.
 
 ## Migration test rituals
 
@@ -239,6 +241,7 @@ delegating to an existing cold door:
 - `extension/substrate/coldDoor.ts` — `runColdDoor`, the narrowing helpers (incl. `nullableStringField`),
   `activeRunId`
 - `extension/substrate/coldDoor.test.ts` — the client mechanics pins + the compile-time `ExecHost` drift check
+- `extension/coldDoorGuard.test.ts` — the mandatory-delegation source-scan guard
 - `extension/doors/land.ts` — the advisory-drop + three-way-narrow exemplar
 - `extension/factories/planSave.ts` — `decodePlanSave`, the derive-don't-decode exemplar
 - `extension/doors/address.ts` — the fail-arm payload re-narrowing exemplar

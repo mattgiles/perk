@@ -7,9 +7,9 @@ cluster: doors-and-launch
 # Warm-door commands
 
 perk's warm doors are the TS slash-commands registered via `pi.registerCommand` (and their sibling
-custom tools). They sit in front of cold Python doors (`perk plan-save`, `perk objective-save`, …)
-that own the durable GitHub mutations. Three cross-cutting disciplines govern how a warm command must
-behave; getting any one wrong produces a **false-success** or **dead-end** that no single file
+custom tools). They sit in front of cold Python doors (`perk plan save`, `perk objective create`,
+…) that own the durable GitHub mutations. Three cross-cutting disciplines govern how a warm
+command must behave; getting any one wrong produces a **false-success** or **dead-end** that no single file
 reveals.
 
 ## Distillation
@@ -32,20 +32,30 @@ reveals.
 ## The read-only tool-gating trap (why command/tool pairs are asymmetric)
 
 In a read-only session, `extension/substrate/toolGating.ts` calls `pi.setActiveTools(READ_ONLY_TOOLS)`
-(`read`/`grep`/`find`/`ls`/`bash`) which **hides every custom tool**. But `pi.registerCommand`
-commands stay **visible regardless of mode**. So a canonical tool gated behind read-only is
-invisible while its sibling `/command` is the *only* save affordance the agent can see.
+— the five builtins (`read`/`grep`/`find`/`ls`/`bash`) **plus a curated family of read-only-safe
+carve-outs** (the session-data draft writers, review/wave tools, bounded delegated transitions
+like `objective_node`, the research/delegation families — each with a justification comment in
+`toolGating.ts`; point there for the live set, never enumerate it). The structural guarantees the
+lesson rests on: **write-capable tools never ride the set** (every save tool is invisible while
+gated) and a custom tool is hidden **unless deliberately carved in** — while `pi.registerCommand`
+commands stay **visible regardless of mode**. So a canonical **write** tool gated off is
+invisible while its sibling `/command` is the *only* visible save affordance the agent can see.
 
 This is the structural reason a warm command and its tool are **not symmetric**, and why you cannot
 toggle the gate from inside a model turn (`/plan off` is a user/keyboard action — `planMode.ts`
 registers it as a command + `Ctrl+Alt+P`). The danger: if the visible command cannot carry the
 hidden tool's full payload, it becomes a **trap that produces junk and returns false success**.
 
-**Plan-vs-objective asymmetry — the diagnostic test.** A *plan is its prose*, so `/plan-save` can
-legitimately scrape one assistant message and save inline. An *objective's roadmap is structured
-data* that cannot be scraped from a message — so `/objective-save` can never validly save. Before
-treating a command/tool pair as symmetric, ask: **can the command carry the tool's full payload?**
-If not, it must not half-write.
+**Plan-vs-objective asymmetry — the diagnostic test.** Before treating a command/tool pair as
+symmetric, ask: **can the command carry or recover the tool's full payload?** Recovery includes
+the validated session-data draft artifact — both saves are artifact-first today. A *plan is its
+prose*, so `/plan-save` resolves the validated `plan-draft` artifact → param → transcript scrape
+(`resolvePlanSource`, `planSave.ts`) — the scrape is legitimate because prose can live in one
+assistant message. An *objective's roadmap is structured data* that can never be scraped from a
+message — so `/objective-save` resolves **only** the validated structured `objective_draft`
+artifact (`objectiveApprovalSave`, `objectiveSave.ts`); with no draft present the command
+performs no write and drives the structured save instead. If a command can neither carry nor
+recover the payload, it must not half-write.
 
 ## The stage-scoping sibling trap (a drive naming a tool the stage filtered off)
 
@@ -114,11 +124,15 @@ A redirect that merely **prints an instruction to the agent** ("call the `object
 your prose and roadmap") is itself a bug: a *human* typed the command, so the printed instruction
 reads as "do it manually" and nothing happens (#109's regression, fixed in #112/#113).
 
+Present-tense status: today `/objective-save` is the **artifact-first manual failsafe** — it saves
+a validated `objective_draft` artifact when one exists; the on-ramp + drive-the-session shapes
+above remain its no-draft arm.
+
 ## Warm commands DRIVE the session; they don't dead-end or do work in the handler
 
 The durable pattern shared by **every** warm perk workflow command (`/address`, `/objective-plan`,
-`/objective-reconcile`, `/objective-save`, `/learn-docs`, `/learn`): the handler does **not** do the
-durable work itself. It **drives the session** —
+`/objective-reconcile`, `/objective-save` (no-draft arm), `/learn-docs`, `/learn`): the handler
+does **not** do the durable work itself. It **drives the session** —
 
 ```
 pi.sendUserMessage(<pureGuidance>(...) + bindingSuffix(ctx.cwd, "<trigger>"))
@@ -351,7 +365,7 @@ chain.
 - `extension/factories/planSave.ts` — `savePlan`, the three-way `nodeLink` render, the "one text field, two
   doors" shape
 - `extension/factories/objectiveSave.ts` — the on-ramp / drive-the-session conversion (dead `extractObjectiveMarkdown`)
-- `extension/substrate/toolGating.ts` — `READ_ONLY_TOOLS`, the gate that hides custom tools but not commands
+- `extension/substrate/toolGating.ts` — `READ_ONLY_TOOLS`, the gate that hides non-carved-in custom tools (all write tools) but not commands
 - `extension/factories/planMode.ts` — `/plan off` / `Ctrl+Alt+P` (the gate is a user gesture, not a turn action)
 - `docs/learned/workflow/plan-save-surfaces.md` — the two-surface fidelity gap + `handoff_extra` carrier
 - `docs/learned/workflow/objective-lifecycle.md` — the authoring/save loop the driving commands feed
