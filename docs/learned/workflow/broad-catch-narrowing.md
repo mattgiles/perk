@@ -38,7 +38,7 @@ sites against a full CI run, don't trust it.
 Never copy a catch tuple mechanically — enumerate what the try-block actually does:
 
 - **Fail-open + filesystem I/O ⇒ tuple catch** `(IssueBackendError, OSError)` — anchors:
-  `perk/backends/linear/agent.py` (writing `agent-session.json`), `perk/run/run_report.py`
+  `src/perk/backends/linear/agent.py` (writing `agent-session.json`), `src/perk/run/run_report.py`
   (appending `GITHUB_STEP_SUMMARY`).
 - **Pure-backend-call siblings** catch the domain error alone.
 - **A fail-open catch that substitutes an empty value is only safe when the consumer is
@@ -118,12 +118,12 @@ back to raw tracebacks.
 ### Atomic-write cleanup
 
 An atomic-write helper's cleanup boundary is wider than `OSError`. A caller-supplied
-
 `encoding` can raise `LookupError`/`UnicodeEncodeError` *after* temp-file allocation, and cleanup
 itself (`rmSync`/`unlink`) can throw and **mask the original error**. The shipped shape (anchors:
-`src/perk/state/cache.py`, `extension/substrate/cache.ts`): the entire post-allocation region
-catches everything (`BaseException` on the Python plane) → best-effort cleanup inside its own
-suppressed try → bare `raise`. A deliberate broad catch is correct when it exists **only** to
+`src/perk/substrate/fs.py::atomic_write_text` — re-exported by `perk.state.cache` for its legacy
+call sites — and `extension/substrate/cache.ts::atomicWriteFileSync`): the entire post-allocation
+region catches everything (`BaseException` on the Python plane) → best-effort cleanup inside its
+own suppressed try → bare `raise`. A deliberate broad catch is correct when it exists **only** to
 remove temp state and always re-raises — the named exception to the narrow-typed-catch rule.
 
 ### Degrade-and-continue browser opening
