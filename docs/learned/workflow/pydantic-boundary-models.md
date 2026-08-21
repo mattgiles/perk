@@ -22,7 +22,7 @@ mutation line.
 
 - Three role-named bases — `LenientParseModel` (read edge: stored files + external APIs),
   `StrictInputModel` (machine-authored CLI batch inputs), `OutputModel` (`--json` envelopes) —
-  "The three role-named bases in `perk/boundary.py`".
+  "The three role-named bases in `src/perk/boundary.py`".
 - Every conversion follows lenient parse model → explicit `_to_X()` converter → frozen dataclass
   → the unchanged `validate()` content pass — "The canonical per-model recipe" (the executable
   reference is `tests/test_boundary.py`).
@@ -41,9 +41,11 @@ mutation line.
 - Historical: the supersession records (the intro's old-framing warnings, the removed-validator
   notes) document the migration, not current guidance to re-apply.
 
-## The three role-named bases in `perk/boundary.py`
+## The three role-named bases in `src/perk/boundary.py`
 
-`perk/boundary.py` exports three **role-named** bases plus the kept legacy `StrictBoundaryModel`. The
+`src/perk/boundary.py` exports three **role-named** bases, plus the `StrTuple` coercion type and the
+`format_validation_error` / `translate_validation_errors` / `ValidationError` helpers (the module's
+full `__all__`). The
 canonical recipe lives as an executable **reference test** in `tests/test_boundary.py` (a throwaway
 `LenientParseModel` → `_to_X` converter → frozen `@dataclass` → `_validate -> list[str]` content
 pass) — mirror that test's shape, not reproduced code here:
@@ -54,15 +56,12 @@ pass) — mirror that test's shape, not reproduced code here:
   sibling keys natively; lax coercion tolerates `"true"`/`1` → `True` and a YAML list → tuple. It has
   **no `str ← int/bool/None` coercion row**, so a bad-typed field still raises — the malformed-edge
   message contract survives.
-- **`StrictInputModel`** — `frozen=True, extra="forbid", strict=True`. **Config-identical to**
-  `StrictBoundaryModel`; the differentiation is role-naming for machine-authored CLI batch inputs
-  where a typo must fail loudly.
+- **`StrictInputModel`** — `frozen=True, extra="forbid", strict=True`. The config the removed
+  legacy `StrictBoundaryModel` carried (see "The `StrictBoundaryModel` removal → the AST discipline
+  guard" below); role-named for machine-authored CLI batch inputs where a typo must fail loudly.
 - **`OutputModel`** — `frozen=True, extra="forbid"` (no `strict` — coercion is irrelevant because it
   is built from trusted domain values). For `--json` snapshots and stored-block serialization dumped
   via `model_dump(mode="json")`.
-- **`StrictBoundaryModel`** — KEPT (docstring re-marked legacy/transitional), plus the `StrTuple`
-  coercion type and the `format_validation_error` / `translate_validation_errors` / `ValidationError`
-  re-exports.
 
 ## The canonical per-model recipe
 
@@ -127,8 +126,8 @@ parse model at the boundary" that the code disproved: the stored block was read 
 ## Applying the lenient-parse pattern to API gateway response shapes
 
 The boundary-inversion recipe applies unchanged to **external API response shapes** (GitHub `gh`
-JSON, Linear GraphQL nodes) — not just perk's own stored files. Point at `perk/github/` and
-`perk/backends/linear/_helpers.py` for the concrete models. The gateway-specific mechanics:
+JSON, Linear GraphQL nodes) — not just perk's own stored files. Point at `src/perk/github/` and
+`src/perk/backends/linear/_helpers.py` for the concrete models. The gateway-specific mechanics:
 
 - **Validate at the CALL SITE, not inside the converter.** The hand-rolled converters
   (`_pull_request` / `_parse_review_threads` / `_parse_reviews` / the issue + workflow-run reads)
@@ -175,7 +174,7 @@ JSON, Linear GraphQL nodes) — not just perk's own stored files. Point at `perk
   `PullRequestModel._normalized_state()`, `_login` → a nested `_Actor(LenientParseModel)`); retain
   generic connection-walk plumbing (`_pr_node` / `_nodes` GraphQL `{nodes:[…]}` unwrapping — it has
   no nameable boundary). **Substrate-home rule:** the domain payload-shape model lives in the package
-  leaf (`perk/backends/linear/_helpers.py`), not the generic client module that keeps the low-level
+  leaf (`src/perk/backends/linear/_helpers.py`), not the generic client module that keeps the low-level
   `_opt_*`/`_require_*` helpers.
 
 This is a Python-internal tightening with a byte-identical happy path, so per this doc's cross-plane
