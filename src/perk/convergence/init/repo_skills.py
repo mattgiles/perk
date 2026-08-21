@@ -1,10 +1,6 @@
 """Repo-authored-skills substrate: render the skills-CLI manifest fragment for a repo's *own*
 ``.perk/skills/*/SKILL.md`` skills under a self-referential GitHub source.
 
-Dormant substrate: nothing in production calls this yet. A later node wires
-:func:`build_repo_skills_manifest` into ``perk init`` / ``perk doctor --fix`` as a managed
-convergence of ``.agents/manifest.d/perk-repo-skills.yaml``.
-
 Pure helpers (parse/validate/render) are deterministic and offline; the orchestrator is the only
 impure surface — filesystem discovery, the sanctioned ``git`` wrappers, and exactly one GitHub
 gateway read (``github.repo_identity``). Every boundary that raises (``GitHubError`` / ``GitError``)

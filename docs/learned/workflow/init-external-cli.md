@@ -183,12 +183,14 @@ did: both the self-repo **and** consumers tracked `main`. Still current: `PERK_S
 the SSOT tuple of fragment skill names; `_desired_skills_manifest(self_repo)` renders the YAML
 (the `self_repo` param is retained for signature stability but no longer branches the ref).
 
-Why `main`, not a tag: perk has no release cadence. The lone `v0.0.1` tag went stale because
-`__version__` was never bumped and the tag never moved, so a consumer pinned to `v{__version__}`
-received a months-old skill set missing newer skills → `missing-skill` at `skills update --sync`.
-`main` is the only ref that reflects current state for the skills source of this pre-1.0 rolling
-tool. Trade-off: the consumer-delivered skill set is not pinned/reproducible — accepted
-deliberately; a stale clone is refreshed by re-sync / `git pull`.
+Why `main`, not a tag — the original motivation: at the time perk had no release cadence. The
+lone `v0.0.1` tag went stale because `__version__` was never bumped and the tag never moved, so
+a consumer pinned to `v{__version__}` received a months-old skill set missing newer skills →
+`missing-skill` at `skills update --sync`. The rationale that survives the release pipeline
+(perk now cuts real `v{version}` releases — `distribution.md`): skill bodies ship via the
+skills CLI's git clone, not the npm/PyPI artifacts, so `main` remains the ref that reflects the
+current skill set. Trade-off: the consumer-delivered skill set is not pinned/reproducible —
+accepted deliberately; a stale clone is refreshed by re-sync / `git pull`.
 
 **`__version__`'s remaining role after the collapse (#552) — since superseded.** Once the three
 consumer-ref sites collapsed `v{__version__}` → `main` — `init._desired_skills_manifest`,
@@ -328,7 +330,7 @@ either "non-zero exit" or "exit-0-but-skipped" CLI behavior), and appends **one*
 remediation clause to every failure message, gated solely on "are repo-authored skills declared?"
 (a freshly-added `.perk/skills/` skill is unresolvable until committed + pushed to the default branch).
 
-### Substrate-build patterns (the dormant module beneath the gesture)
+### Substrate-build patterns (building the module beneath the gesture)
 
 Building `repo_skills.build_repo_skills_manifest` (discover/parse/validate/render + orchestrator)
 surfaced patterns that generalize beyond skills:

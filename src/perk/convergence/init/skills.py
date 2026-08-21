@@ -100,10 +100,11 @@ MANAGED_SKILL_NAMES: tuple[str, ...] = tuple(
 def _desired_skills_manifest(self_repo: bool) -> str:
     """The YAML content of the perk-managed manifest fragment.
 
-    Both perk's own tree and consumers track ``main``. perk has no release cadence (a
-    single, long-stale ``v0.0.1`` tag), so ``main`` is the only ref that reflects current
-    state; a stale clone is refreshed by re-sync / ``git pull``. Mirrors how
-    ``_desired_packages`` resolves the git package entry from ``main`` for consumers.
+    Both perk's own tree and consumers track ``main`` (``self_repo`` is retained for signature
+    stability; it does not branch the ref): skills ship via the skills CLI's git clone, and the
+    delivered set deliberately rolls with ``main`` — not pinned/reproducible; a stale clone is
+    refreshed by re-sync / ``git pull``. The version-pinning contrast with the extension/package
+    wiring lives in docs/learned/workflow/init-external-cli.md §"Ref pinning".
     """
     sources = sorted([PERK_SKILL_SOURCE, *REQUIRED_SKILL_SOURCES], key=lambda s: s.key)
     skills = sorted([("perk", name) for name in PERK_SKILLS] + list(REQUIRED_EXTERNAL_SKILLS))
