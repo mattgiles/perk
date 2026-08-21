@@ -1,7 +1,9 @@
 """``TrainPersistence`` — the backend-aligned train-persistence adapter (contracts.md §8.43).
 
 The one coherent persistence view over a delivery train's durable logical state: the operation
-journal (read via succession folding, written via the gated read-back append) plus the reusable
+journal (read via succession folding, written via the gated read-back append), the ready-stamp
+events riding the same carriers (folded alongside — objective-identity scoping happens at the
+fold's ``latest_ready_stamp`` accessor, never here), plus the reusable
 typed writers for the checkpoint pair and objective lineage stamp. Transfer-specific ownership,
 identity, and clearing groups use its private issue seam's generic header merge-write. Composes
 the selected :class:`ObjectiveStore` and
@@ -24,6 +26,7 @@ Append disciplines (the architecture's cross-machine recovery contract):
 """
 
 import contextlib
+from collections.abc import Callable
 from dataclasses import dataclass, replace
 from pathlib import Path
 
@@ -38,11 +41,16 @@ from perk.delivery.journal import (
     OperationKind,
     OutcomeRecord,
     PreparedRecord,
+    ReadyStampEvent,
+    ReadyStampRecord,
     canonical_payload,
+    canonical_stamp_payload,
     ensure_event_size,
     fold_events,
-    parse_journal_comment,
+    parse_carrier_comment,
     render_event,
+    render_stamp_event,
+    stamp_key,
 )
 
 # The supersession-chain walk's depth cap (active objective + predecessors); a breach is
@@ -73,6 +81,16 @@ class AppendResult:
 
     operation_id: str
     role: EventRole
+    existed: bool
+
+
+@dataclass(frozen=True)
+class StampAppendResult:
+    """The result of one ready-stamp append (the operation shape doesn't fit — a stamp has no
+    operation id or role). ``key`` is the deterministic 4-segment event key; ``existed=True``
+    means the byte-identical stamp was already on the carrier (nothing was written)."""
+
+    key: str
     existed: bool
 
 
@@ -107,8 +125,10 @@ class TrainPersistence:
 
     def read_journal(self, objective_id: str) -> JournalFold:
         """The succession-folding journal read: walk the ``supersedes`` chain from the active
-        objective, read every chain member's carrier, parse the perk-marked events, and fold
-        them against the active objective's ``delivery_lineage``.
+        objective, read every chain member's carrier, parse the perk-marked events (operation
+        events AND ready stamps — stamps fold as append-only history; objective-identity
+        scoping happens at the fold's ``latest_ready_stamp`` accessor), and fold them against
+        the active objective's ``delivery_lineage``.
 
         Raises :class:`TrainPersistenceError` when the objective is absent (a journal read
         against a missing objective is a caller bug, never an empty journal);
@@ -117,9 +137,12 @@ class TrainPersistence:
         """
         chain, lineage = self._supersession_chain(objective_id)
         events: list[JournalEvent] = []
+        stamps: list[ReadyStampEvent] = []
         for member_id in chain:
-            events.extend(self._carrier_events(member_id))
-        return fold_events(events, expected_lineage=lineage)
+            member_events, member_stamps = self._carrier_events(member_id)
+            events.extend(member_events)
+            stamps.extend(member_stamps)
+        return fold_events(events, expected_lineage=lineage, stamps=stamps)
 
     def _supersession_chain(self, objective_id: str) -> tuple[list[str], str | None]:
         """The active objective's id + every predecessor id (via ``supersedes``), plus the
@@ -155,22 +178,29 @@ class TrainPersistence:
             current = predecessor
             current_id = predecessor_id
 
-    def _carrier_events(self, member_objective_id: str) -> list[JournalEvent]:
-        """One chain member's parsed journal events, stamped with the member as their carrier
-        objective. Unmarked comments are dropped (unrelated DATA); corruption propagates."""
+    def _carrier_events(
+        self, member_objective_id: str
+    ) -> tuple[list[JournalEvent], list[ReadyStampEvent]]:
+        """One chain member's parsed events — each comment routed through the ONE grammar
+        dispatcher exactly once. Operation events are stamped with the member as their carrier
+        objective; ready stamps carry no carrier field (nothing routes or folds by a stamp's
+        carrier). Unmarked comments are dropped (unrelated DATA); corruption propagates."""
         carrier = self._carrier_id(member_objective_id)
         events: list[JournalEvent] = []
+        stamps: list[ReadyStampEvent] = []
         for comment in self._issues.read_comments(issue_id=carrier):
-            event = parse_journal_comment(
+            event = parse_carrier_comment(
                 comment.body,
                 comment_id=comment.id,
                 created_at=comment.created_at,
                 edited_at=comment.edited_at,
                 carrier=carrier,
             )
-            if event is not None:
+            if isinstance(event, JournalEvent):
                 events.append(replace(event, carrier_objective_id=member_objective_id))
-        return events
+            elif isinstance(event, ReadyStampEvent):
+                stamps.append(event)
+        return events, stamps
 
     def _require_objective(self, objective_id: str) -> ObjectiveState:
         state = self._store.get_objective(objective_id=objective_id)
@@ -295,6 +325,52 @@ class TrainPersistence:
         )
         return AppendResult(operation_id=record.operation_id, role=record.role, existed=False)
 
+    def append_ready_stamp(self, objective_id: str, record: ReadyStampRecord) -> StampAppendResult:
+        """The gated, read-back ready-stamp append onto the ACTIVE objective's carrier
+        (contracts.md §8.43 — unlike outcomes, stamps never route to a predecessor carrier).
+
+        Gates (in order): the record's ``objective_id`` must name the active objective (a
+        lineage is shared across supersession, so identity is checked separately); the active
+        objective's stored ``delivery_lineage`` must equal the record's (fail closed); an
+        existing stamp for this key is an idempotent success (``existed=True`` — byte-identity
+        is implied: a same-key differing payload already raised in the fold, and the gates fix
+        every non-key field). Deliberately NO
+        one-unresolved-operation gate: the stamp is not a remote-mutating operation — it never
+        appends a prepared record and sits outside the §8.43 operation protocol. The write
+        follows the size-cap + ambiguity + read-back discipline (module docstring).
+        """
+        if record.objective_id != objective_id:
+            raise TrainPersistenceError(
+                f"ready-stamp record claims objective {record.objective_id!r} but is being "
+                f"appended to objective {objective_id!r} — refusing to append"
+            )
+        state = self._require_objective(objective_id)
+        stored_lineage = _header_str(state.header, "delivery_lineage", objective_id=objective_id)
+        if stored_lineage != record.delivery_lineage:
+            raise TrainPersistenceError(
+                f"objective {objective_id} stores delivery_lineage {stored_lineage!r} but the "
+                f"ready-stamp record carries {record.delivery_lineage!r} — refusing to append"
+            )
+        fold = self.read_journal(objective_id)
+        key = stamp_key(record)
+        canonical = canonical_stamp_payload(record)
+        # A same-key match is byte-identical by construction: the key fixes the four id/head
+        # segments, schema_version/event are parse-pinned literals, and the only remaining
+        # field (delivery_lineage) is fixed by the stored-lineage gate above plus the fold's
+        # own effective-lineage validation — so key presence alone IS the idempotent success.
+        if any(stamp.key == key for stamp in fold.stamps):
+            return StampAppendResult(key=key, existed=True)
+        body = render_stamp_event(record)
+        ensure_event_size(body)
+        carrier = self._carrier_id(objective_id)
+        self._post_and_verify(
+            carrier=carrier,
+            body=body,
+            what=f"ready-stamp {key}",
+            landed=lambda: self._stamp_landed(carrier=carrier, key=key, canonical=canonical),
+        )
+        return StampAppendResult(key=key, existed=False)
+
     def _append(
         self,
         *,
@@ -309,32 +385,46 @@ class TrainPersistence:
         ensure_event_size(body)
         carrier = self._carrier_id(member_objective_id)
         role = EventRole.PREPARED if isinstance(record, PreparedRecord) else record.role
+        self._post_and_verify(
+            carrier=carrier,
+            body=body,
+            what=f"{record.operation_id}:{role.value}",
+            landed=lambda: self._event_landed(
+                carrier=carrier,
+                operation_id=record.operation_id,
+                role=role,
+                canonical=canonical,
+            ),
+        )
+
+    def _post_and_verify(
+        self, *, carrier: str, body: str, what: str, landed: Callable[[], bool]
+    ) -> None:
+        """The shared two-POST retry/ambiguity core (operations and ready stamps alike): POST
+        with the rescan-one-retry ambiguity policy and read back through ``landed``. At most
+        TWO POST attempts ever; a still-unproven event raises
+        :class:`JournalAppendAmbiguous`."""
         for _attempt in range(2):
             # A raised POST is AMBIGUOUS (the write may have landed) — read convergence
             # decides, never a blind retry.
             with contextlib.suppress(IssueBackendError):
                 self._issues.add_issue_comment(issue_id=carrier, body=body)
             try:
-                landed = self._event_landed(
-                    carrier=carrier,
-                    operation_id=record.operation_id,
-                    role=role,
-                    canonical=canonical,
-                )
+                present = landed()
             except IssueBackendError as exc:
                 # A failed rescan proves NOTHING (neither present nor absent): the event is
                 # ambiguous and another POST is forbidden — only a rescan that proved absence
                 # earns the retry.
                 raise JournalAppendAmbiguous(
-                    f"append of {record.operation_id}:{role.value} to carrier {carrier} is "
+                    f"append of {what} to carrier {carrier} is "
                     f"unverifiable — the read-back rescan failed ({exc}); rescan the carrier "
                     "before any remote effect"
                 ) from exc
-            if landed:
+            if present:
                 return
             # Proven absent on this rescan — the one bounded retry loops.
         raise JournalAppendAmbiguous(
-            f"append of {record.operation_id}:{role.value} to carrier {carrier} could not be "
+            f"append of {what} to carrier {carrier} could not be "
             "verified after one retry — rescan the carrier before any remote effect"
         )
 
@@ -342,23 +432,52 @@ class TrainPersistence:
         self, *, carrier: str, operation_id: str, role: EventRole, canonical: str
     ) -> bool:
         """Rescan the carrier for the deterministic event key — the COMPLETE scan, never a
-        first-match return: ANY differing payload under the key (e.g. a concurrent writer's
-        conflicting duplicate) → corruption before the append boundary is crossed; a
-        byte-identical match with no conflicts → landed; absent → False (proven absent)."""
+        first-match return, routed through the ONE grammar dispatcher so a concurrently-arrived
+        corrupt comment in EITHER journal grammar (e.g. a malformed ready stamp) fails the
+        rescan closed before the append boundary is crossed: ANY differing payload under the
+        key (e.g. a concurrent writer's conflicting duplicate) → corruption; a byte-identical
+        match with no conflicts → landed; absent → False (proven absent)."""
         found = False
         for comment in self._issues.read_comments(issue_id=carrier):
-            event = parse_journal_comment(
+            event = parse_carrier_comment(
                 comment.body,
                 comment_id=comment.id,
                 created_at=comment.created_at,
                 edited_at=comment.edited_at,
                 carrier=carrier,
             )
-            if event is None or (event.operation_id, event.role) != (operation_id, role):
+            if not isinstance(event, JournalEvent):
+                continue
+            if (event.operation_id, event.role) != (operation_id, role):
                 continue
             if event.canonical_payload != canonical:
                 raise JournalCorruptionError(
                     f"read-back of {operation_id}:{role.value} on carrier {carrier} found the "
+                    "event key with a DIFFERENT payload (conflicting duplicate)"
+                )
+            found = True
+        return found
+
+    def _stamp_landed(self, *, carrier: str, key: str, canonical: str) -> bool:
+        """Rescan the carrier for the deterministic stamp key — the COMPLETE scan, never a
+        first-match return, considering only ready-stamp events (an operation comment merely
+        mentioning the stamp text is skipped, never misparsed): ANY differing payload under
+        the key → corruption before the append boundary is crossed; a byte-identical match
+        with no conflicts → landed; absent → False (proven absent)."""
+        found = False
+        for comment in self._issues.read_comments(issue_id=carrier):
+            event = parse_carrier_comment(
+                comment.body,
+                comment_id=comment.id,
+                created_at=comment.created_at,
+                edited_at=comment.edited_at,
+                carrier=carrier,
+            )
+            if not isinstance(event, ReadyStampEvent) or event.key != key:
+                continue
+            if event.canonical_payload != canonical:
+                raise JournalCorruptionError(
+                    f"read-back of ready-stamp {key} on carrier {carrier} found the "
                     "event key with a DIFFERENT payload (conflicting duplicate)"
                 )
             found = True

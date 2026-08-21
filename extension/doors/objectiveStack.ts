@@ -133,6 +133,8 @@ export function renderStackStatus(payload: ColdJson): string {
       const pr = numberField(layer, "pr_number");
       if (pr !== undefined) parts.push(`pr #${pr}`);
       parts.push(`[${stringField(layer, "publication") ?? "?"}]`);
+      const handoff = stringField(layer, "handoff");
+      if (handoff !== undefined && handoff !== "not_applicable") parts.push(`handoff ${handoff}`);
       lines.push(`  ${index + 1}. ${parts.join(" ")}`);
     });
     const readiness = objectField(train, "next_build_ready");

@@ -1,20 +1,23 @@
 """The delivery operation journal — grammar, records, and the pure fold (contracts.md §8.43).
 
 The **operation journal** is the append-only logical record of stack operations (publish / sync /
-adopt / transfer / land), physically carried as one strict, marked, schema-versioned comment per
-event on the objective's journal carrier (GitHub: the objective issue's comments; Linear: the
-Project metadata sentinel issue's comments). This module is the journal's **pure** layer: the
-marker grammar, the frozen record dataclasses + their strict edge models, the canonical
-serialization (the byte-identity key), and the fail-closed event fold. No I/O, no backend imports
-— it imports ``perk.boundary``, ``yaml``, ``ulid``, and stdlib only; the adapter that reads/writes
-carriers lives in :mod:`perk.delivery.persistence`.
+adopt / transfer / land) plus the one **non-operation event kind**, the ready stamp (the durable
+per-layer handoff fact, contracts.md §8.43) — each physically carried as one strict, marked,
+schema-versioned comment per event on the objective's journal carrier (GitHub: the objective
+issue's comments; Linear: the Project metadata sentinel issue's comments). This module is the
+journal's **pure** layer: the marker grammars, the frozen record dataclasses + their strict edge
+models, the canonical serialization (the byte-identity key), and the fail-closed event fold. No
+I/O, no backend imports — it imports ``perk.boundary``, ``yaml``, ``ulid``, and stdlib only; the
+adapter that reads/writes carriers lives in :mod:`perk.delivery.persistence`.
 
 Fail-closed disciplines (mirroring §8.42's fail-closed ``delivery_policy`` classifier):
 
-- A comment with no ``perk:stack-operation-event`` marker text is unrelated untrusted DATA
-  (ignored, never parsed). A comment carrying the marker text is perk's own region and MUST parse
-  strictly — a malformed / edited / tampered perk-marked event raises
-  :class:`JournalCorruptionError`, never a silent skip.
+- A comment with neither the ``perk:stack-operation-event`` nor the ``perk:stack-ready-stamp``
+  marker text is unrelated untrusted DATA (ignored, never parsed). A comment carrying a marker
+  text is perk's own region and MUST parse strictly under exactly ONE grammar — the routing
+  dispatcher :func:`parse_carrier_comment` gives the operation marker precedence — and a
+  malformed / edited / tampered perk-marked event raises :class:`JournalCorruptionError`,
+  never a silent skip.
 - Byte-identity for idempotency is **canonical-serialization equality**: two events are "the
   same" iff their re-rendered canonical payloads are byte-equal — which makes GitHub (HTML
   marker) and Linear (transcoded inline-code marker) events comparable, because the logical key
@@ -31,7 +34,7 @@ from enum import StrEnum
 from typing import Literal
 
 import yaml
-from pydantic import field_validator
+from pydantic import ValidationInfo, field_validator
 from ulid import ULID
 
 from perk.boundary import (
@@ -113,6 +116,55 @@ _HTML_MARKER_RE = re.compile(
     r"^<!--\s*perk:stack-operation-event:([^:\s]+):([^:\s]+?)\s*-->$",
 )
 _INLINE_MARKER_RE = re.compile(r"^`perk:stack-operation-event:([^:`\s]+):([^:`\s]+)`$")
+
+# The ready stamp's own disjoint marker (contracts.md §8.43): pre-stamp readers skip stamp
+# comments as unrelated DATA (no operation-marker substring), so mixed-version machines never
+# see corruption where a new event kind merely exists. Four colon-free key segments:
+# objective_id : plan_id : node_id : head_sha.
+_STAMP_MARKER_TEXT = "perk:stack-ready-stamp"
+_STAMP_HTML_MARKER_RE = re.compile(
+    r"^<!--\s*perk:stack-ready-stamp:([^:\s]+):([^:\s]+):([^:\s]+):([^:\s]+?)\s*-->$",
+)
+_STAMP_INLINE_MARKER_RE = re.compile(
+    r"^`perk:stack-ready-stamp:([^:`\s]+):([^:`\s]+):([^:`\s]+):([^:`\s]+)`$",
+)
+
+_HEAD_SHA_RE = re.compile(r"[0-9a-f]{40}")
+
+# The marker-safe segment allowlist: every real segment shape fits (numeric GitHub ids, Linear
+# identifiers like ENG-123, ULID lineages, `<phase>.<n>` node ids), while everything that could
+# break either marker encoding is excluded by construction — the colon (the operation marker's
+# separator: the reverse-collision guarantee), whitespace/backticks (the inline-code encoding),
+# and `<`/`>`/`!` (an embedded `-->` would terminate the HTML comment early and mangle the
+# Linear transcode). A non-conforming id is a typed refusal at construction and parse — loud,
+# never a silently mangled marker (contracts.md §8.43).
+_STAMP_SEGMENT_RE = re.compile(r"[A-Za-z0-9._-]+")
+
+
+def _require_stamp_segment(value: str, *, what: str) -> str:
+    """Validate one stamp payload field (one implementation, both edges): nonblank, no leading
+    ``#`` (ids are canonical-bare at construction and parse — exact equality everywhere, no
+    normalization branch in the fold), and drawn from the marker-safe allowlist
+    (:data:`_STAMP_SEGMENT_RE`)."""
+    if not value:
+        raise ValueError(f"{what} must be nonblank")
+    if value.startswith("#"):
+        raise ValueError(f"{what} must be canonical-bare (no leading '#'): {value!r}")
+    if _STAMP_SEGMENT_RE.fullmatch(value) is None:
+        raise ValueError(
+            f"{what} is not a marker-safe segment (allowed: letters, digits, '.', '_', '-'): "
+            f"{value!r}"
+        )
+    return value
+
+
+def _require_head_sha(value: str) -> str:
+    """Validate a stamp's ``head_sha`` as EXACTLY the full 40-hex lowercase object id
+    (``fullmatch`` — a ``$``-anchored match would admit a trailing newline; the verified
+    checkpoint form — an abbreviation or ref would be re-pinnable, violating immutability)."""
+    if _HEAD_SHA_RE.fullmatch(value) is None:
+        raise ValueError(f"head_sha is not a 40-hex lowercase object id: {value!r}")
+    return value
 
 
 def render_marker(operation_id: str, role: EventRole) -> str:
@@ -325,6 +377,116 @@ def ensure_event_size(body: str) -> None:
         )
 
 
+# ----------------------------------------------------------------- the ready stamp
+
+
+@dataclass(frozen=True)
+class ReadyStampRecord:
+    """The immutable ready-stamp record (contracts.md §8.43): the durable human handoff fact,
+    bound to the exact published head it was made at.
+
+    Pure fact — no timestamp, no run id: the deterministic canonical bytes ARE the idempotence
+    contract (a same-head re-stamp re-derives byte-identical bytes); temporal ordering comes
+    from the carrier comment's ``(created_at, comment_id)``. Every id is canonical-bare (a
+    leading ``#`` is rejected at construction and parse), so fold scoping uses exact equality.
+    """
+
+    objective_id: str
+    delivery_lineage: str
+    plan_id: str
+    node_id: str
+    head_sha: str
+
+    def __post_init__(self) -> None:
+        _require_stamp_segment(self.objective_id, what="objective_id")
+        _require_stamp_segment(self.delivery_lineage, what="delivery_lineage")
+        _require_stamp_segment(self.plan_id, what="plan_id")
+        _require_stamp_segment(self.node_id, what="node_id")
+        _require_head_sha(self.head_sha)
+
+
+def stamp_key(record: ReadyStampRecord) -> str:
+    """The deterministic 4-segment event key (the marker's key segments, colon-joined)."""
+    return f"{record.objective_id}:{record.plan_id}:{record.node_id}:{record.head_sha}"
+
+
+class ReadyStampModel(StrictInputModel):
+    """The strict parse shape of a ready-stamp payload (``extra="forbid"``; ``schema_version``
+    must be the literal ``"1"``; ids canonical-bare; ``head_sha`` 40-hex lowercase)."""
+
+    schema_version: Literal["1"]
+    event: Literal["ready_stamp"]
+    objective_id: str
+    delivery_lineage: str
+    plan_id: str
+    node_id: str
+    head_sha: str
+
+    @field_validator("objective_id", "delivery_lineage", "plan_id", "node_id")
+    @classmethod
+    def _segment(cls, value: str, info: ValidationInfo) -> str:
+        return _require_stamp_segment(value, what=str(info.field_name))
+
+    @field_validator("head_sha")
+    @classmethod
+    def _sha(cls, value: str) -> str:
+        return _require_head_sha(value)
+
+    def to_domain(self) -> ReadyStampRecord:
+        return ReadyStampRecord(
+            objective_id=self.objective_id,
+            delivery_lineage=self.delivery_lineage,
+            plan_id=self.plan_id,
+            node_id=self.node_id,
+            head_sha=self.head_sha,
+        )
+
+
+class ReadyStampOut(OutputModel):
+    """Serialize-only snapshot of a :class:`ReadyStampRecord` (declaration order load-bearing —
+    it fixes the canonical serialization bytes, contracts.md §8.43)."""
+
+    schema_version: str
+    event: str
+    objective_id: str
+    delivery_lineage: str
+    plan_id: str
+    node_id: str
+    head_sha: str
+
+    @classmethod
+    def from_domain(cls, record: ReadyStampRecord) -> "ReadyStampOut":
+        return cls(
+            schema_version=JOURNAL_SCHEMA_VERSION,
+            event="ready_stamp",
+            objective_id=record.objective_id,
+            delivery_lineage=record.delivery_lineage,
+            plan_id=record.plan_id,
+            node_id=record.node_id,
+            head_sha=record.head_sha,
+        )
+
+
+def canonical_stamp_payload(record: ReadyStampRecord) -> str:
+    """The canonical serialization of a ready stamp — the byte-identity key (a separate
+    function from :func:`canonical_payload`, keeping the operation union closed)."""
+    return yaml.safe_dump(
+        ReadyStampOut.from_domain(record).model_dump(mode="json"), sort_keys=False
+    )
+
+
+def render_stamp_marker(record: ReadyStampRecord) -> str:
+    """The canonical HTML marker line for one ready stamp."""
+    return f"<!-- {_STAMP_MARKER_TEXT}:{stamp_key(record)} -->"
+
+
+def render_stamp_event(record: ReadyStampRecord) -> str:
+    """Render one ready-stamp comment body — the :func:`render_event` shape (marker line,
+    blank line, one ``yaml`` fence; nothing for the Linear transcoder to touch but the
+    marker)."""
+    return f"{render_stamp_marker(record)}\n\n```yaml\n{canonical_stamp_payload(record)}```"
+
+
 # ----------------------------------------------------------------- parsing
 
 
@@ -442,6 +604,118 @@ def _extract_single_yaml_fence(rest: list[str], *, where: str) -> str:
     return "\n".join(payload_lines) + "\n" if payload_lines else ""
 
 
+@dataclass(frozen=True)
+class ReadyStampEvent:
+    """One parsed ready-stamp event: the strict record plus its physical-comment identity.
+
+    ``key`` is the marker's deterministic 4-segment key; ``canonical_payload`` the re-rendered
+    canonical serialization (the byte-identity key). No carrier field: nothing routes or folds
+    by a stamp's carrier — scoping is the record's own objective identity (contracts.md §8.43).
+    """
+
+    record: ReadyStampRecord
+    key: str
+    canonical_payload: str
+    comment_id: str
+    created_at: str
+
+
+def parse_stamp_comment(
+    body: str,
+    *,
+    comment_id: str,
+    created_at: str,
+    edited_at: str | None,
+    carrier: str | None = None,
+) -> ReadyStampEvent | None:
+    """Parse one carrier comment into a :class:`ReadyStampEvent`.
+
+    Returns ``None`` when the body carries no ``perk:stack-ready-stamp`` marker text in either
+    encoding; fail-closed otherwise, mirroring :func:`parse_journal_comment` arm for arm — a
+    present-but-malformed / edited / tampered stamp raises :class:`JournalCorruptionError`.
+    Callers routing whole carriers go through :func:`parse_carrier_comment` (one grammar per
+    comment, operation-marker precedence); this parser assumes the body is a stamp region.
+    """
+    if _STAMP_MARKER_TEXT not in body:
+        return None
+    where = f"ready-stamp comment {comment_id}"
+    if carrier is not None:
+        where += f" on carrier {carrier}"
+    if body.count(_STAMP_MARKER_TEXT) > 1:
+        raise JournalCorruptionError(f"{where}: carries more than one ready-stamp marker")
+    if edited_at is not None:
+        raise JournalCorruptionError(
+            f"{where}: ready stamp was edited at {edited_at} (perk never edits an event)"
+        )
+    lines = body.strip().splitlines()
+    first = lines[0].rstrip() if lines else ""
+    match = _STAMP_HTML_MARKER_RE.match(first) or _STAMP_INLINE_MARKER_RE.match(first)
+    if match is None:
+        raise JournalCorruptionError(
+            f"{where}: marker text present but the body does not start with a well-formed "
+            "stack-ready-stamp marker line"
+        )
+    payload_text = _extract_single_yaml_fence(lines[1:], where=where)
+    try:
+        raw = yaml.safe_load(payload_text)
+    except yaml.YAMLError as exc:
+        raise JournalCorruptionError(f"{where}: payload is not parseable YAML ({exc})") from exc
+    if not isinstance(raw, dict):
+        raise JournalCorruptionError(f"{where}: payload is not a YAML mapping")
+    with translate_validation_errors(JournalCorruptionError, source=where):
+        parsed = ReadyStampModel.model_validate(raw)
+    record = parsed.to_domain()
+    marker_key = ":".join(match.groups())
+    if stamp_key(record) != marker_key:
+        raise JournalCorruptionError(
+            f"{where}: marker identity {marker_key} disagrees with the payload's "
+            f"{stamp_key(record)} (tampering)"
+        )
+    return ReadyStampEvent(
+        record=record,
+        key=marker_key,
+        canonical_payload=canonical_stamp_payload(record),
+        comment_id=comment_id,
+        created_at=created_at,
+    )
+
+
+def parse_carrier_comment(
+    body: str,
+    *,
+    comment_id: str,
+    created_at: str,
+    edited_at: str | None,
+    carrier: str | None = None,
+) -> JournalEvent | ReadyStampEvent | None:
+    """Route one carrier comment through exactly ONE grammar (contracts.md §8.43).
+
+    Operation-marker precedence: a body carrying the operation marker text parses under the
+    operation grammar — whatever it returns or raises stands — so an operation whose opaque
+    ``before``/``after`` payload merely *mentions* the stamp text (e.g. journaled user-authored
+    prose) parses cleanly as an operation, never as a malformed stamp. Only a body with no
+    operation marker text and the stamp marker text parses under the stamp grammar (the reverse
+    collision is structurally impossible: every stamp payload field is a marker-safe allowlisted
+    segment or 40-hex, so a rendered stamp body can never contain the colon-carrying operation
+    marker text). Neither text → unrelated untrusted DATA (``None``).
+    """
+    if _MARKER_TEXT in body:
+        return parse_journal_comment(
+            body,
+            comment_id=comment_id,
+            created_at=created_at,
+            edited_at=edited_at,
+            carrier=carrier,
+        )
+    return parse_stamp_comment(
+        body,
+        comment_id=comment_id,
+        created_at=created_at,
+        edited_at=edited_at,
+        carrier=carrier,
+    )
+
+
 # ----------------------------------------------------------------- fold (pure)
 
 
@@ -475,16 +749,36 @@ class JournalFold:
     ``events`` is the post-dedupe event sequence ordered by ``(created_at, comment_id)``;
     ``operations`` maps ``operation_id`` → folded state (insertion = fold order);
     ``unresolved`` are the operations lacking a terminal outcome; ``delivery_lineage`` is the
-    fold's lineage (the expected lineage when given, else the single lineage the events carry).
+    fold's lineage (the expected lineage when given, else the single lineage the events carry);
+    ``stamps`` is the post-dedupe ready-stamp sequence ordered by ``(created_at, comment_id)``
+    — append-only history across the succession chain, projected per objective identity through
+    :meth:`latest_ready_stamp`.
     """
 
     events: tuple[JournalEvent, ...]
     operations: Mapping[str, OperationState]
     unresolved: tuple[OperationState, ...] = ()
     delivery_lineage: str | None = None
+    stamps: tuple[ReadyStampEvent, ...] = ()
+
+    def latest_ready_stamp(self, *, objective_id: str, plan_id: str) -> ReadyStampEvent | None:
+        """The latest stamp whose record names EXACTLY this objective identity + plan
+        (contracts.md §8.43's fold scoping: stamps bind to the objective identity they were
+        made under — a predecessor's stamp never projects for a successor). Exact equality:
+        ids are canonical-bare by construction, so no normalization branch exists here."""
+        for stamp in reversed(self.stamps):
+            record = stamp.record
+            if record.objective_id == objective_id and record.plan_id == plan_id:
+                return stamp
+        return None
 
 
-def fold_events(events: Iterable[JournalEvent], *, expected_lineage: str | None) -> JournalFold:
+def fold_events(
+    events: Iterable[JournalEvent],
+    *,
+    expected_lineage: str | None,
+    stamps: Iterable[ReadyStampEvent] = (),
+) -> JournalFold:
     """Fold parsed journal events into per-operation state — fail-closed.
 
     Rules: a duplicate ``(operation_id, role)`` key with a byte-identical canonical payload
@@ -495,6 +789,13 @@ def fold_events(events: Iterable[JournalEvent], *, expected_lineage: str | None)
     deletion IS corruption); both terminal outcomes for one operation is corruption; ``accepted``
     on a non-``land`` operation is corruption; a prepared record whose lineage differs from
     ``expected_lineage`` (when given) is foreign and never silently folds.
+
+    Ready stamps fold by the same disciplines: sorted ``(created_at, comment_id)``, deduped by
+    key (byte-identical first-wins; a differing payload under one key is corruption), and
+    lineage-validated against the fold's **effective** lineage — the supplied
+    ``expected_lineage``, or, when ``None``, the lineage the operation-record inference
+    resolves (stamps never *contribute* to the inference). Only a fold that ends with no
+    lineage at all folds stamps unverifiable, as parsed.
     """
     ordered = sorted(events, key=lambda e: (e.created_at, e.comment_id))
     deduped: list[JournalEvent] = []
@@ -585,10 +886,35 @@ def fold_events(events: Iterable[JournalEvent], *, expected_lineage: str | None)
         if expected_lineage is not None
         else (next(iter(lineages)) if lineages else None)
     )
+
+    deduped_stamps: list[ReadyStampEvent] = []
+    stamps_by_key: dict[str, ReadyStampEvent] = {}
+    for stamp in sorted(stamps, key=lambda s: (s.created_at, s.comment_id)):
+        prior = stamps_by_key.get(stamp.key)
+        if prior is None:
+            stamps_by_key[stamp.key] = stamp
+            deduped_stamps.append(stamp)
+            continue
+        if prior.canonical_payload != stamp.canonical_payload:
+            raise JournalCorruptionError(
+                f"conflicting duplicate ready-stamp {stamp.key} events (comments "
+                f"{prior.comment_id} and {stamp.comment_id} carry differing payloads)"
+            )
+        # Byte-identical duplicate: idempotent — first occurrence wins.
+    if delivery_lineage is not None:
+        for stamp in deduped_stamps:
+            if stamp.record.delivery_lineage != delivery_lineage:
+                raise JournalCorruptionError(
+                    f"ready-stamp {stamp.key} carries foreign delivery_lineage "
+                    f"{stamp.record.delivery_lineage!r} (expected {delivery_lineage!r}) — a "
+                    "foreign-lineage stamp never silently folds"
+                )
+
     unresolved = tuple(op for op in operations.values() if not op.resolved)
     return JournalFold(
         events=tuple(deduped),
         operations=operations,
         unresolved=unresolved,
         delivery_lineage=delivery_lineage,
+        stamps=tuple(deduped_stamps),
     )

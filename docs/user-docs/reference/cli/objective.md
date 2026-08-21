@@ -253,7 +253,12 @@ the current plan worktree's linked objective (neither → a typed `no_objective`
 (`incremental` | `stacked`), `train` with per-layer axes + `blockers`/`information` + the
 derived `next_build_ready` block (`{node_id, ready, reason}` — the first unpublished layer in
 delivery order, buildable only when the train has no blockers and no unresolved operation), or
-the `no_train` explanation). The human render adds one line: `next build-ready: <id>` /
+the `no_train` explanation). The per-layer axes include `handoff`, derived from **ready-stamp
+journal events**: `unstamped` = no stamp names the layer's current verified published head
+under this objective; `stale` = the head moved past the latest stamp; `suspended` = the PR is
+currently draft while the stamp still matches (a transient hold); `ready` = the latest stamp
+matches and the PR is ready-for-review; `not_applicable` for landed/unpublished/unverified
+layers. The human render adds one line: `next build-ready: <id>` /
 `build blocked: <reason>`. The report also carries **recovery visibility**: every unresolved
 operation (`operations[]`, each with its id/kind/prepared time and an `active operation:` line
 in the human render), this lineage's **pending continuation manifest** (`continuation` — an

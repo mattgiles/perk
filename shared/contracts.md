@@ -6280,6 +6280,80 @@ ambiguous** — it proves neither presence nor absence, so it raises `JournalApp
 without a retry (only a rescan that proved absence earns the retry). The remote effect an event
 guards must not proceed past an ambiguous append.
 
+**The ready stamp — the non-operation journal event.** The journal carries one non-operation
+event kind: the **ready stamp**, the durable per-layer human handoff fact ("this layer's PR was
+deliberately flipped ready-for-review at exactly this published head"). Its marker is its own
+disjoint grammar — the HTML comment
+`<!-- perk:stack-ready-stamp:<objective-id>:<plan-id>:<node-id>:<head-sha> -->`, transcoded on
+Linear to `` `perk:stack-ready-stamp:<…>` `` by the existing marker transcoder; the parser
+accepts both encodings. The disjointness is the deliberate compatibility posture: a stamp body
+carries no `perk:stack-operation-event` substring, so pre-stamp perk versions skip stamp
+comments as unrelated DATA rather than raising `JournalCorruptionError` and blocking the whole
+train on mixed-version machines. **One grammar per comment, operation-marker precedence**: every
+carrier comment routes through ONE dispatcher (`parse_carrier_comment`), never both parsers — a
+body carrying the operation marker text parses under the operation grammar (its own rules stand,
+including the double-marker rule), so an operation whose opaque `before`/`after` payload merely
+*mentions* the stamp text (journaled user-authored prose) parses cleanly as an operation, never
+as a malformed stamp; only a body with no operation marker text and the stamp marker text parses
+under the stamp grammar; neither text → unrelated DATA. The reverse collision is structurally
+impossible: every stamp payload field is validated against the **marker-safe segment allowlist**
+(letters, digits, `.`, `_`, `-`) or is 40-hex, so a rendered stamp body can never contain the
+colon-carrying operation marker text — nor any character that would break either marker encoding
+(whitespace/backticks for the inline-code form; `<`/`>`/`!` whose embedded `-->` would terminate
+the HTML comment early). Every real segment shape fits the allowlist (numeric GitHub ids, Linear
+identifiers, ULID lineages, `<phase>.<n>` node ids); an exotic id that does not fit is a **typed
+refusal at construction and parse** — that layer simply cannot carry a stamp until its id
+conforms, loud and never a silently mangled marker.
+
+The stamp's deterministic event key is the 4-segment
+`objective_id:plan_id:node_id:head_sha` (all four in the marker, tamper-checked against the
+payload). The payload is **pure fact** — `schema_version` (`"1"`), `event` (`"ready_stamp"`),
+`objective_id`, `delivery_lineage`, `plan_id`, `node_id`, `head_sha` (declaration order
+load-bearing; it fixes the canonical bytes) — with **no timestamp and no run_id**: the
+deterministic canonical bytes ARE the idempotence contract (a same-head re-stamp re-derives
+byte-identical bytes → `existed=True`), and temporal ordering (latest-wins) comes from the
+carrier comment's `(created_at, comment_id)`, exactly like the operation fold. One deliberate
+corner of that trade: a byte-identical re-stamp never advances temporal order (first occurrence
+wins), so returning a branch to an EXACT prior head and re-stamping cannot displace a newer
+stamp at another head — the layer reads `stale` until a content change produces a new head to
+stamp (or supersession re-affirms under a new identity). Deterministic idempotence is chosen
+over re-affirmation of a recycled head. Ids are
+**canonical-bare**: a leading `#` on `objective_id`/`plan_id` is rejected at construction and
+parse, so the fold scopes by exact equality — no normalization branch anywhere. `head_sha` is
+the full 40-hex lowercase object id (the verified checkpoint form). Corruption — always a typed
+raise: a detectably edited stamp; a malformed marker/body; a marker↔payload identity mismatch on
+any key segment; a conflicting same-key duplicate (byte-identical duplicates dedupe first-wins);
+and a stamp whose `delivery_lineage` differs from the fold's **effective** lineage — the
+supplied expected lineage, or, when absent, the lineage the operation-record inference resolves
+(stamps never *contribute* to the inference; only a fold that ends with no lineage at all folds
+stamps unverifiable, as parsed — a test-only arm, since the production read always supplies the
+stored lineage).
+
+The stamp write path (`TrainPersistence.append_ready_stamp`) rides the append discipline above
+unchanged — the same size cap, complete-scan read-back, rescan-first ambiguity policy, and one
+bounded retry (ambiguity diagnostics read `append of ready-stamp <key> …`). Every read-back
+rescan — operation and stamp alike — routes through the one grammar dispatcher, so a
+concurrently-arrived corrupt comment in EITHER grammar fails the rescan closed before the append
+boundary is crossed. The stamp-specific
+differences: the record's `objective_id` must name the objective being appended to and the
+stored `delivery_lineage` must equal the record's (the same identity/lineage gates as
+`append_prepared`); the stamp sits **outside the one-unresolved-operation gate** — it is not a
+remote-mutating operation, never appends a prepared record, and appends cleanly while e.g. a
+PUBLISH is unresolved; and stamps always append to the **ACTIVE objective's carrier** (unlike
+outcomes, never a predecessor's). **Fold scoping**: stamps fold across the succession chain
+(append-only history is retained, like predecessor operations) but *project* only under the
+objective identity they name — `JournalFold.latest_ready_stamp(objective_id, plan_id)` filters
+on the record's own `objective_id` and is plan-keyed (within one objective identity the
+node↔plan link is bijective — `duplicate_plan_link` guards it — so a same-objective repair
+re-link at the same plan/head keeps the stamp effective; `node_id` rides the key/payload for
+reader context and key distinctness only). Replan/transfer supersession and stacked→incremental
+conversion therefore structurally never carry a stamp forward: the key contains the objective
+id, so re-affirmation under the successor is required. Engagement exclusion is inherited (the
+generic `perk:*` sentinel classifier). No command writes stamps yet — the append path exists on
+`TrainPersistence` and is exercised by tests only; the stacked `/ready` arm is the first writer
+(a later node), and no dependency gating reads the handoff state yet (§8.46 build readiness and
+the §8.55/§8.56 landing gates are deliberately unchanged).
+
 **The rest of the stored train state** uses the §8.42 merge-write seams. `TrainPersistence`
 retains the reusable typed writers: `write_checkpoints` writes the `parent_checkpoint_sha` +
 `published_head_sha` pair in ONE `update_plan_header` call, and `write_delivery_lineage` delegates
@@ -6461,7 +6535,29 @@ parent-ref verification.
 (`absent|draft|ready|merged|closed|wrong_base`), `membership`
 (`not_applicable|unknown|absent|exact|divergent`), `writer` (`free|active|dirty` — read-only:
 is a local worktree checked out on the layer's branch, branch identity = plan-header `branch`
-else the `plan-<plan-id>` convention), and `finalization` (`not_merged|merged|finalized`).
+else the `plan-<plan-id>` convention), `finalization` (`not_merged|merged|finalized`), and
+`handoff` (`ready|stale|suspended|unstamped|not_applicable`) — the derived (never stored)
+ready-stamp handoff axis (§8.43). Derivation is publication-axis-first: only a verified
+PUBLISHED layer carries a non-`not_applicable` handoff (landed / unpublished /
+publication_drift stay `not_applicable`), and only the **latest** active-objective ready stamp
+for the layer's plan (by the carrier comment's `(created_at, comment_id)`) decides — no stamp
+⇒ `unstamped` (whatever the PR's draft bit says: the out-of-band ready-for-review bit never
+*creates* a stamp); the latest stamp naming a different head ⇒ `stale` (even when an older
+stamp matches the current head); matching `published_head_sha` + PR `DRAFT` ⇒ `suspended`;
+matching + non-draft ⇒ `ready`. **Suspension is transient by design**: the stamp is the durable
+handoff fact bound to the exact head, and converting the PR back to draft is a live *hold* on a
+still-valid stamp, not a revocation — ANY return to non-draft (an idempotent `/ready` re-run or
+the GitHub UI) resumes `ready` while the head still matches; **durable withdrawal is a content
+change** (any push stales the stamp — head-binding is the base invalidation) **or supersession**
+(replan). When the fold is unavailable (missing lineage / journal corruption) a
+verified-PUBLISHED layer's handoff stays `not_applicable` — fail-closed, never a claimed
+`unstamped` — and the `journal_corruption` blocker message names both losses: `the operation
+journal is corrupt ({exc}); unresolved-operation facts and ready-stamp handoff evidence are
+unknown`. The derivation emits **no findings and feeds no gate**: build readiness (§8.46),
+`published_prefix_len`, and the §8.55/§8.56 landing gates are deliberately unchanged — handoff
+gating is a later node's contract amendment. Exposure: `TrainLayer.handoff`, the trailing
+`LayerOut.handoff` envelope field, and both human renders (the CLI's `_layer_line` and the
+extension's `renderStackStatus` append `handoff <value>` for a non-`not_applicable` layer).
 **Publication** (the load-bearing definition): the FULL checkpoint pair present (the pair is
 written together — a half-pair is a `checkpoint_pair_incomplete` blocker and classifies as
 drift, never publication; `checkpoint_drift` is reserved for remote/head/ancestry mismatch) AND the remote branch verified at `published_head_sha` (`synced` requires a
@@ -6546,7 +6642,8 @@ projection-only PENDING ordering surrogates, never returned/persisted) → roadm
 `delivery_order` over the effective nodes → the node↔plan join (idempotent per layer — a plan
 preloaded by the cancellation proof is never re-joined, so canonical findings emit once) →
 PUBLISH coverage + checkpoint topology → predecessors → Git observation (reusing the fetch) →
-PRs → publication → membership → prefix → base → readiness. Production reconstruction also
+PRs → publication → membership → the handoff derivation (after membership, which may
+declassify publication) → prefix → base → readiness. Production reconstruction also
 captures `objective_title` and the exact active-state `objective_nodes` tuple on the immutable
 train for planning Prepare; both are defaulted internal projection inputs and are deliberately
 absent from `TrainOut`, so status human/JSON bytes do not grow. `DeliveryTrain` additionally
@@ -6601,7 +6698,8 @@ degrade: the **preview** native-stack read (membership `unknown` + information
 `stack_read_unavailable`, never a blocker — but unverifiable membership still declassifies the
 affected layers' publication to drift: the information posture governs the *finding*, not the
 verification bar) and journal **corruption** (`JournalCorruptionError` → the
-`journal_corruption` blocker; unresolved-operation facts report unknown). A superseded objective
+`journal_corruption` blocker; unresolved-operation facts and ready-stamp handoff evidence
+report unknown). A superseded objective
 **redirects forward** along `superseded_by` (cycle guard + depth cap 50; breach ⇒
 `supersession_corruption`) to the active objective and reports `redirected_from`. An incremental
 objective short-circuits before fallback trunk detection, fetch, or any GitHub work into the

@@ -80,6 +80,8 @@ class LayerOut(OutputModel):
     observed_remote_head_sha: str | None
     observed_pr_base: str | None
     expected_pr_base: str | None
+    # Declared last: the handoff axis is additive envelope growth (contracts.md §8.44).
+    handoff: str
 
     @classmethod
     def from_domain(cls, layer: train.TrainLayer) -> "LayerOut":
@@ -100,6 +102,7 @@ class LayerOut(OutputModel):
             observed_remote_head_sha=layer.observed_remote_head_sha,
             observed_pr_base=layer.observed_pr_base,
             expected_pr_base=layer.expected_pr_base,
+            handoff=layer.handoff.value,
         )
 
 
@@ -331,6 +334,8 @@ def _layer_line(layer: train.TrainLayer) -> str:
         parts.append(f"stack {layer.membership.value}")
     if layer.writer is not train.LayerWriter.FREE:
         parts.append(f"writer {layer.writer.value}")
+    if layer.handoff is not train.LayerHandoff.NOT_APPLICABLE:
+        parts.append(f"handoff {layer.handoff.value}")
     return " ".join(parts)
 
 
