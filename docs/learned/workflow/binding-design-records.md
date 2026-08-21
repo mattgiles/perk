@@ -59,7 +59,11 @@ that misses root-level files undercounts silently).
 
 Preserve verbatim outputs + the methodology in the record, because the checks themselves are torn
 down with the scaffold. Once the target becomes committed code, prefer making the checks
-repo-owned and re-runnable (deferred here until `docs/site/` exists — flagged, not fiction).
+repo-owned and re-runnable — the docs-site instance resolved exactly that way: the committed
+`docs/site/` now carries repo-owned, re-runnable checks (the `docs/site/src/*.test.mjs` unit
+suites run in `just test`; the post-build checks — `docs/site/checks/*.test.mjs` +
+`src/in-session-reference.test.mjs` — run via the site `check` script, CI-wired as
+`npm run docs:check`).
 
 ## Reconcile the whole current-state narrative
 

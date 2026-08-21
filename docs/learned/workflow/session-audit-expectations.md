@@ -230,8 +230,15 @@ Two CLI-boundary patterns from `perk-dev audit attribution` (the attribution rep
   arm has its own accumulator statement, and a fixture exercising only one arm lets sibling arms
   be dropped silently.
 
-Residual: the wave suites are memory-adapter/fake-RPC only — the first live wave run is the
-integration test; the scale envelope is ~≤15 lanes at default ceilings.
+Residual (reconciled after the first live corpus pass — `docs/design/session-audit-dogfood.md`):
+the wave suites remain memory-adapter/fake-RPC, but live proof now exists — the first baseline
+attempt degraded honestly end-to-end (wave-level `run-failed`, all 15 lanes `lane-failed`, bundle
+preserved), and the post-fix baseline completed 15/15 lanes `report`; 15 lanes is the scale
+exercised live at default ceilings. Still unobserved live (pinned-only; the record's coverage
+table names the pin suite per arm): the `malformed-report` sanitizer degrade, the pre-dispatch
+packet-collision and missing-`packet_path` arms, the wave-level `unavailable`/`spawn-failed`/
+`timeout`/`cancelled` reasons, the zero-lane short-circuit, and the over-budget `unboundable`
+packet.
 
 ## Known open edges for checker work
 

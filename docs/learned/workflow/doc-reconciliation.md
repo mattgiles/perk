@@ -6,7 +6,7 @@ cluster: knowledge-stewardship
 
 # Reconciling drifted docs against the converged codebase
 
-A docs-only reconciliation (e.g. bringing `docs/planning/python-cli-guidelines.md` back in line
+A docs-only reconciliation (e.g. bringing `docs/guiding-principles/python-cli-guidelines.md` back in line
 with the grouped CLI) has its own craft. These are the durable rules from doing one for real.
 
 ## Distillation
@@ -422,7 +422,7 @@ deliberate addition since: …"; instance: `src/perk/objective/render.py`).
 
 When a principle doc's covered surface grows 10x, first test whether its *classification
 criterion* still sorts everything correctly. The "narrow `--json` list" principle in
-`docs/planning/cli-vs-pi.md` survived the surface growing from four commands to every cold
+`docs/guiding-principles/cli-vs-pi.md` survived the surface growing from four commands to every cold
 worker/door plus a second machine consumer — because both consumers are still *machines that
 launch perk*. When the criterion still classifies correctly, an additive status note suffices;
 don't touch the principle itself.
@@ -482,7 +482,7 @@ Three patterns from reconciling Objective #548's prose against its landed nodes:
 
 ## Cross-references
 
-- `docs/planning/python-cli-guidelines.md`, `docs/planning/cli-vs-pi.md` — the reconciled docs and
+- `docs/guiding-principles/python-cli-guidelines.md`, `docs/guiding-principles/cli-vs-pi.md` — the reconciled docs and
   their status-note conventions
 - `docs/learned/workflow/objective-lifecycle.md` — the roadmap whose `pr` field carries plan
   issues, and the remainder-node reconcile playbook for PRs that merged with work incomplete
