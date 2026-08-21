@@ -1,15 +1,16 @@
 ---
 title: Splitting a large Python module into a package — the script-generated recipe
-read_when: You are splitting a `perk/<mod>.py` into a `perk/<mod>/` package, folding a flat module into a package / relocating across packages, or fixing monkeypatch or source-scan-guard fallout from a move.
+read_when: You are splitting a `src/perk/<mod>.py` into a `src/perk/<mod>/` package, folding a flat module into a package / relocating across packages, or fixing a move's monkeypatch/source-scan-guard fallout.
 cluster: code-migration
 ---
 
 # Splitting a Python module into a package
 
-Turning a large single-file module (e.g. a ~2100-line `perk/github.py`) into a `perk/<mod>/`
+Turning a large single-file module (e.g. a ~2100-line `src/perk/<mod>.py`) into a `src/perk/<mod>/`
 package while **preserving every public import path** is mechanically risky if hand-edited. The
 durable insight: treat it as a **script-generated** transform with completeness *proofs*, not a
-careful manual edit. Validated by the `perk/github.py` → `perk/github/` split (plan #438 → PR #446).
+careful manual edit. Validated by the `perk/github.py` → `perk/github/` split (plan #438 → PR #446;
+pre-src-layout — the package now lives at `src/perk/github/`).
 
 ## Distillation
 
@@ -68,15 +69,17 @@ For a large verbatim module→package split, a one-shot generator script is the 
 - **A sorted `__all__` silences ruff F401 with no per-file-ignore.** Listing every re-export in a
   sorted `__all__` in the new `__init__.py` is enough — no `[tool.ruff] per-file-ignores` entry
   needed.
-- **hatchling `packages = ["perk"]` auto-includes the new subpackage.** No `pyproject.toml` change;
+- **hatchling `packages = ["src/perk"]` auto-includes the new subpackage** (hatchling strips the
+  `src/` prefix, so the wheel still contains `perk/…`). No `pyproject.toml` change;
   `tests/test_packaging.py` stayed green untouched.
 
 ## Refinements from the objective-#714 split arc (linear_backend, init/doctor, objective/launch)
 
 Objective #714 ("Dignified Python") re-ran this recipe across **three more applications** — #720
-(the former ``linear_backend`` module — now `src/perk/backends/linear/` — → a 7-submodule package), #722 (`perk/convergence/doctor.py` →
-a `doctor/` package), #726 (`perk/objective.py` → `perk/objective/` + the `run`/`launch` split) —
-plus the long-method-extraction discipline (#732). The original recipe held; these are the durable
+(the former ``linear_backend`` module — now `src/perk/backends/linear/` — → a 7-submodule package),
+#722 (`perk/convergence/doctor.py` — now `src/perk/convergence/doctor/` — → a `doctor/` package),
+#726 (`perk/objective.py` → `perk/objective/` — now `src/perk/objective/` — + the `run`/`launch`
+split) — plus the long-method-extraction discipline (#732). The original recipe held; these are the durable
 sharpenings.
 
 - **The seed-generous import-resolution loop makes the upfront import census non-load-bearing.**
@@ -217,3 +220,5 @@ disagreed with the pinned version on import-sorting) before committing generated
 - `docs/learned/toolchain/ty.md` — the narrowing oracle that confirms the seed-generous import loop
 - `docs/learned/workflow/source-scan-guards.md` — the `__file__`→package-dir-glob guard fix
 - `docs/learned/workflow/linear-backend.md` — the long-method-extraction call-sequence oracle (#732)
+- `docs/learned/toolchain/uv-workspace-src-layout.md` — the src-layout baseline a future split
+  starts from

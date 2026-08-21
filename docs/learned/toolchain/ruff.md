@@ -10,7 +10,10 @@ cluster: toolchain-gotchas
 
 - **`just ci`** runs `ruff check` only — lint rules including E501 (line length). This is what the
   CI gate checks.
-- **The pre-commit hook** runs `ruff-format` (style normalization — wrapping, spacing, etc.).
+- **The pre-commit hook** (prek, wired in `prek.toml`) runs **both** `ruff-check` (plain lint —
+  reports, never mutates) and `ruff-format` (reformats staged Python and **fails the commit** when
+  it changed anything). The two stances differ deliberately — `prek.toml` is the authority for the
+  wiring.
 
 These are **independent checks**. CI can be fully green while the pre-commit hook would still
 reformat files.
@@ -72,7 +75,7 @@ that looks innocuous.)
 ### Sibling: `RUF003` on a semantic glyph in a `#` comment
 
 The same ambiguous-unicode family fires on literal **semantic glyphs** — the leveled-log vocabulary
-`›` (U+203A), `✓`, `⚠` (see `perk/substrate/output.py`): a glyph in a `#` comment trips **`RUF003`**
+`›` (U+203A), `✓`, `⚠` (see `src/perk/substrate/output.py`): a glyph in a `#` comment trips **`RUF003`**
 (ambiguous-unicode-character-comment), and the same glyph in a docstring trips **`RUF002`**. The
 rule: keep semantic glyphs inside **string literals / format strings** (where they belong and are
 not flagged), and **reword prose comments to avoid the literal glyph** — say "step line" /
@@ -81,7 +84,7 @@ rewording the *comment/docstring*, never the string literal that legitimately ca
 
 ## `RUF022`: keep `__all__` isort-sorted
 
-Adding a name to a package `__init__.py` (e.g. a new re-export in `perk/github/__init__.py`)
+Adding a name to a package `__init__.py` (e.g. a new re-export in `src/perk/github/__init__.py`)
 requires inserting it in **isort-alphabetical** position in BOTH the import list AND `__all__` —
 ruff's **RUF022** (`unsorted-dunder-all`) fails CI on an unsorted `__all__`. A first commit that
 appends the new symbol to the end of `__all__` will be rejected; the fix is mechanical (place the
@@ -127,7 +130,7 @@ imports by hand — F401 auto-removal handles them.
 
 | Check | Run by | Catches |
 |---|---|---|
-| `ruff check` | `just ci` | Lint rules (E501, etc.) |
-| `ruff format` | Pre-commit hook | Style normalization |
+| `ruff check` | `just ci` + the prek pre-commit hook (report-only) | Lint rules (E501, etc.) |
+| `ruff format` | prek pre-commit hook (mutates — fails the commit on change) | Style normalization |
 
 Always verify `git log` advanced after a commit if a pre-commit hook is active.

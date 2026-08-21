@@ -47,9 +47,9 @@ verify the top-level resolutions with `npm ls`.
 ## Diagnosing pre-existing breakage (prove provenance FIRST)
 
 A stale SDK is only one cause of "red in files I never touched" — main itself can be genuinely
-broken at your branch point (e.g. the #386/#387 merge race left a stale `issue: { number }`
-fixture failing tsc on origin/main HEAD; both #391 and #392 found genuine red-on-main this way).
-Before assuming you caused it, **prove provenance**:
+broken at your branch point (a merge race can leave a stale fixture failing tsc on origin/main
+HEAD; see `workflow/cold-door-client.md` §"The merge-race fixture sweep" for the incident shape
+and the repo-wide fixture-sweep rule). Before assuming you caused it, **prove provenance**:
 
 ```
 git stash && npx tsc --noEmit -p . && git stash pop
@@ -63,6 +63,11 @@ misattribute it to your change.
 naming files/tests absent from your branch means *re-check `git log origin/main`*, not your diff
 (the same "red in files I never touched" family, with a moving branch point instead of a stale
 SDK).
+
+Two sibling reaffirmations live in `workflow/pydantic-boundary-models.md` §"Process + toolchain
+reaffirmations" (their corpus home): the SIGTERM/143 no-`FAILED`-line kill (rerun first, don't
+debug) and the change-unscoped whole-tree-`ty` rule (prove a sibling's latent debt pre-existing
+via the git-stash diagnostic).
 
 ### The delete/edit rebase-conflict recipe
 
@@ -102,12 +107,6 @@ lockfile — an `npm ci --prefix .pi/npm` EUSAGE failure before a live run is an
 preflight blocker, not a product defect**: heal with `npm install --prefix .pi/npm`, restart the
 declared preflight without consuming attempt budget, and never commit the ignored install state.
 
-## False failure: a `run_ci` test exit of -1/143 is a kill, not a failure
-
-A `run_ci` test run reporting exit code **-1/143 with no `FAILED` line** was SIGTERMed mid-run,
-not failed — a clean rerun passes unchanged. Check for an actual `FAILED` assertion line before
-debugging; rerun first.
-
 ## Stale globally-installed `perk` + accidental self-converge
 
 The same staleness trap has a Python-plane analogue. A smoke that exercises a `shared/` source change
@@ -130,8 +129,12 @@ runtime's nested one — see `docs/learned/pi/headless-session-drive.md` for the
 
 ## Cross-references
 
-- `docs/learned/pi/extension-api.md` — the 0.78.x API surface a stale SDK fails to provide
+- `docs/learned/pi/extension-api.md` — the extension API surface a stale SDK fails to provide
 - `docs/learned/toolchain/biome.md` — the other half of the TS CI gate
 - `docs/learned/workflow/provider-seam.md` — the `shared/providers.yaml` seam these smokes exercise
 - `docs/learned/workflow/cold-door-client.md` — the merge-race fixture sweep after a cross-plane
   shape change
+- `docs/learned/workflow/pydantic-boundary-models.md` — the SIGTERM/143 + change-unscoped-ty
+  reaffirmation bullets (§"Process + toolchain reaffirmations")
+- `docs/learned/workflow/distribution.md` — the `pi-ai` bin-path lockfile churn at the release seam
+- `docs/learned/pi/headless-session-drive.md` — the nested-`pi-ai` per-instance-registry resolution
