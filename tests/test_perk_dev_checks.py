@@ -148,6 +148,8 @@ def _index_of(parsed: ParsedSession, eid: str) -> int:
 WARM_CLAIM = CHECKERS["objective-plan.warm-claim-before-authoring"]
 DRAFT_BEFORE_REVIEW = CHECKERS["plan.draft-before-review"]
 NUDGE_READ = CHECKERS["bindings.nudge-skill-read"]
+LEARNED_PLAN = CHECKERS["plan.learned-docs-first-stop"]
+LEARNED_AUTHOR = CHECKERS["objective-author.learned-docs-first-stop"]
 CLASSIFIER_FIRST = CHECKERS["address.classifier-child-first"]
 NO_MUTATION = CHECKERS["read-only.no-worktree-mutation"]
 
@@ -167,6 +169,8 @@ def test_registry_matches_committed_deterministic_ids():
         "objective-plan.warm-claim-before-authoring",
         "plan.draft-before-review",
         "bindings.nudge-skill-read",
+        "plan.learned-docs-first-stop",
+        "objective-author.learned-docs-first-stop",
         "address.classifier-child-first",
         "read-only.no-worktree-mutation",
     }
@@ -512,6 +516,238 @@ def test_nudge_unread_skill_named_among_several(tmp_path: Path):
     _assert_violated(result)
     assert result.entries == (_index_of(parsed, "u0"),)
     assert "perk-implement" in result.detail and "perk-plan" not in result.detail
+
+
+# ------------------------------------------------- docs/learned first-stop consult
+
+
+def test_learned_plan_satisfied_via_read(tmp_path: Path):
+    entries = [
+        _delivery("u0", None, "perk-plan"),
+        *_exec("e1", "u0", "read", {"path": "docs/learned/index.md"}),
+        _call("r1", "e1r", "plan_review", {}),
+    ]
+    assert LEARNED_PLAN(_parse(tmp_path, entries)).status == "satisfied"
+
+
+def test_learned_plan_satisfied_via_absolute_read(tmp_path: Path):
+    # An absolute path qualifies too — the predicate is the adjacent (docs, learned)
+    # segment pair, not a repo-relative prefix. Gated on either graded plan skill.
+    entries = [
+        _delivery("u0", None, "perk-objective-plan"),
+        *_exec("e1", "u0", "read", {"path": "/repo/docs/learned/workflow/plan-ref-lifecycle.md"}),
+        _call("r1", "e1r", "plan_review", {}),
+    ]
+    assert LEARNED_PLAN(_parse(tmp_path, entries)).status == "satisfied"
+
+
+def test_learned_plan_satisfied_via_bash_cat(tmp_path: Path):
+    entries = [
+        _delivery("u0", None, "perk-plan"),
+        *_exec("e1", "u0", "bash", {"command": "cat docs/learned/index.md"}),
+        _call("r1", "e1r", "plan_review", {}),
+    ]
+    assert LEARNED_PLAN(_parse(tmp_path, entries)).status == "satisfied"
+
+
+def test_learned_plan_satisfied_via_bash_sed_n(tmp_path: Path):
+    entries = [
+        _delivery("u0", None, "perk-plan"),
+        *_exec("e1", "u0", "bash", {"command": "sed -n '1,40p' docs/learned/index.md"}),
+        _call("r1", "e1r", "plan_review", {}),
+    ]
+    assert LEARNED_PLAN(_parse(tmp_path, entries)).status == "satisfied"
+
+
+def test_learned_plan_satisfied_via_grep_path(tmp_path: Path):
+    # A corpus search is a legitimate walk: a grep whose path targets docs/learned counts.
+    entries = [
+        _delivery("u0", None, "perk-plan"),
+        *_exec("e1", "u0", "grep", {"pattern": "plan-ref", "path": "docs/learned/"}),
+        _call("r1", "e1r", "plan_review", {}),
+    ]
+    assert LEARNED_PLAN(_parse(tmp_path, entries)).status == "satisfied"
+
+
+def test_learned_plan_satisfied_via_find_path(tmp_path: Path):
+    entries = [
+        _delivery("u0", None, "perk-plan"),
+        *_exec("e1", "u0", "find", {"pattern": "lifecycle", "path": "docs/learned/**"}),
+        _call("r1", "e1r", "plan_review", {}),
+    ]
+    assert LEARNED_PLAN(_parse(tmp_path, entries)).status == "satisfied"
+
+
+def test_learned_plan_pattern_mention_does_not_count(tmp_path: Path):
+    # The fuzzy pattern argument never counts — only a path argument targets the corpus.
+    entries = [
+        _delivery("u0", None, "perk-plan"),
+        *_exec("e1", "u0", "grep", {"pattern": "docs/learned"}),
+        _call("r1", "e1r", "plan_review", {}),
+    ]
+    _assert_violated(LEARNED_PLAN(_parse(tmp_path, entries)))
+
+
+def test_learned_plan_impostor_paths_do_not_satisfy(tmp_path: Path):
+    # Adjacent-segment matching rejects paths that merely contain the words.
+    entries = [
+        _delivery("u0", None, "perk-plan"),
+        *_exec("e1", "u0", "read", {"path": "/tmp/notdocs/learned/x.md"}),
+        *_exec("e2", "e1r", "read", {"path": "docs/learnedness/y.md"}),
+        _call("r1", "e2r", "plan_review", {}),
+    ]
+    parsed = _parse(tmp_path, entries)
+    result = LEARNED_PLAN(parsed)
+    _assert_violated(result)
+    assert result.entries == (_index_of(parsed, "r1"),)
+
+
+def test_learned_plan_mention_only_bash_does_not_satisfy(tmp_path: Path):
+    # A non-reader command naming the path is a mention, not a consult.
+    entries = [
+        _delivery("u0", None, "perk-plan"),
+        *_exec("e1", "u0", "bash", {"command": "echo docs/learned/x.md"}),
+        *_exec("e2", "e1r", "bash", {"command": "ls docs/learned"}),
+        _call("r1", "e2r", "plan_review", {}),
+    ]
+    _assert_violated(LEARNED_PLAN(_parse(tmp_path, entries)))
+
+
+def test_learned_plan_failed_consult_does_not_satisfy(tmp_path: Path):
+    entries = [
+        _delivery("u0", None, "perk-plan"),
+        *_exec("e1", "u0", "read", {"path": "docs/learned/index.md"}, is_error=True),
+        _call("r1", "e1r", "plan_review", {}),
+    ]
+    _assert_violated(LEARNED_PLAN(_parse(tmp_path, entries)))
+
+
+def test_learned_plan_same_entry_batched_consult_violates(tmp_path: Path):
+    # A consult batched in the review's own assistant entry informed nothing: its result
+    # is a descendant of the review call, never an ancestor.
+    entries = [
+        _delivery("u0", None, "perk-plan"),
+        _multi("m1", "u0", [("read", {"path": "docs/learned/index.md"}), ("plan_review", {})]),
+        _result("mr", "m1", "read", call_id="c-m1-0"),
+    ]
+    parsed = _parse(tmp_path, entries)
+    result = LEARNED_PLAN(parsed)
+    _assert_violated(result)
+    assert result.entries == (_index_of(parsed, "m1"),)
+
+
+def test_learned_plan_post_review_result_violates(tmp_path: Path):
+    # The consult call precedes the review on its branch but its RESULT lands after —
+    # it could not have informed the reviewed plan.
+    entries = [
+        _delivery("u0", None, "perk-plan"),
+        _call("e1a", "u0", "read", {"path": "docs/learned/index.md"}, "c-e1"),
+        _call("r1", "e1a", "plan_review", {}),
+        _result("e1r", "r1", "read", call_id="c-e1"),
+    ]
+    _assert_violated(LEARNED_PLAN(_parse(tmp_path, entries)))
+
+
+def test_learned_plan_sibling_fork_consult_violates(tmp_path: Path):
+    # The consult lives on an abandoned sibling fork — not on the review's ancestor chain.
+    entries = [
+        _delivery("u0", None, "perk-plan"),
+        *_exec("e1", "u0", "read", {"path": "docs/learned/index.md"}),
+        _call("r1", "u0", "plan_review", {}),
+    ]
+    _assert_violated(LEARNED_PLAN(_parse(tmp_path, entries)))
+
+
+def test_learned_plan_pending_consult_on_chain_is_unchecked(tmp_path: Path):
+    # A qualifying consult call with no paired result yet (a live session mid-read)
+    # blocks the absence verdict — the result may still flush as an ancestor.
+    entries = [
+        _delivery("u0", None, "perk-plan"),
+        _call("e1a", "u0", "read", {"path": "docs/learned/index.md"}, "c-e1"),
+        _call("r1", "e1a", "plan_review", {}),
+    ]
+    result = LEARNED_PLAN(_parse(tmp_path, entries))
+    assert result.status == "unchecked"
+    assert "in flight" in result.detail
+
+
+def test_learned_plan_pending_unrelated_read_still_violates(tmp_path: Path):
+    entries = [
+        _delivery("u0", None, "perk-plan"),
+        _call("e1a", "u0", "read", {"path": "/repo/README.md"}, "c-e1"),
+        _call("r1", "e1a", "plan_review", {}),
+    ]
+    _assert_violated(LEARNED_PLAN(_parse(tmp_path, entries)))
+
+
+def test_learned_plan_not_exercised_without_review(tmp_path: Path):
+    entries = [
+        _delivery("u0", None, "perk-plan"),
+        *_exec("e1", "u0", "read", {"path": "docs/learned/index.md"}),
+    ]
+    result = LEARNED_PLAN(_parse(tmp_path, entries))
+    assert result.status == "not-exercised"
+    assert "no plan_review" in result.detail
+
+
+def test_learned_plan_not_exercised_for_borrower(tmp_path: Path):
+    # A borrowed-stage factory session (binding_trigger override): some other skill is
+    # delivered, never a graded authoring binding — exempt, even with a plan_review.
+    entries = [
+        _delivery("u0", None, "perk-learn-dream"),
+        _call("r1", "u0", "plan_review", {}),
+    ]
+    result = LEARNED_PLAN(_parse(tmp_path, entries))
+    assert result.status == "not-exercised"
+    assert "borrowed-stage" in result.detail
+
+
+def test_learned_plan_transcluded_binding_is_gated_in(tmp_path: Path):
+    # Transclude-delivered authoring bindings count as delivered for the guard.
+    entries = [
+        _custom("c0", None, "Skill `perk-plan` (inlined for `stage:plan`):\n\nbody"),
+        _call("r1", "c0", "plan_review", {}),
+    ]
+    _assert_violated(LEARNED_PLAN(_parse(tmp_path, entries)))
+
+
+def test_learned_author_satisfied(tmp_path: Path):
+    entries = [
+        _delivery("u0", None, "perk-objective-author"),
+        *_exec("e1", "u0", "read", {"path": "docs/learned/index.md"}),
+        _call("r1", "e1r", "plan_review", {}),
+    ]
+    assert LEARNED_AUTHOR(_parse(tmp_path, entries)).status == "satisfied"
+
+
+def test_learned_author_violated_without_consult(tmp_path: Path):
+    entries = [
+        _delivery("u0", None, "perk-objective-author"),
+        _call("r1", "u0", "plan_review", {}),
+    ]
+    parsed = _parse(tmp_path, entries)
+    result = LEARNED_AUTHOR(parsed)
+    _assert_violated(result)
+    assert result.entries == (_index_of(parsed, "r1"),)
+
+
+def test_learned_checkers_gate_on_their_own_population(tmp_path: Path):
+    # Each id grades only its own skill set: a plan binding leaves the objective-author
+    # checker not-exercised, and vice versa.
+    entries = [
+        _delivery("u0", None, "perk-plan"),
+        _call("r1", "u0", "plan_review", {}),
+    ]
+    parsed = _parse(tmp_path, entries)
+    assert LEARNED_AUTHOR(parsed).status == "not-exercised"
+    _assert_violated(LEARNED_PLAN(parsed))
+    entries = [
+        _delivery("u0", None, "perk-objective-author"),
+        _call("r1", "u0", "plan_review", {}),
+    ]
+    parsed = _parse(tmp_path, entries)
+    assert LEARNED_PLAN(parsed).status == "not-exercised"
+    _assert_violated(LEARNED_AUTHOR(parsed))
 
 
 # ------------------------------------------------------------- classifier first

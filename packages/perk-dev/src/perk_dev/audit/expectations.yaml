@@ -194,3 +194,50 @@ expectations:
       classification, not the model.
     tier: deterministic
     enforcement: structural
+
+  - id: plan.learned-docs-first-stop
+    kind: prompt-adherence
+    surface: docs/learned first-stop consult (plan-stage shapes)
+    source: prompts/contexts/plan-authoring.md
+    applies_to:
+      - stage:plan
+      - command:plan
+      - stage:objective-plan
+      - command:objective-plan
+    vintage_floor: "3.2.0"
+    evidence: >-
+      The session carries a delivered perk-plan or perk-objective-plan binding (the
+      borrowed-stage factory doors override their binding and are exempt), and before the
+      session's first plan_review call a successful docs/learned consult appears whose
+      RESULT entry is an ancestor of that review call: a read of a docs/learned path, a
+      grep/find whose path argument targets docs/learned, or a read-only bash reader-led
+      segment naming a docs/learned path (a path qualifies iff adjacent path segments
+      equal docs/learned). The ambient cluster index rides the system prompt, so the floor
+      is opening the catalog or a doc — a brief stay satisfies; relevance judgment (and
+      finding nothing) stays with the model.
+    violation: >-
+      The session reaches its first plan_review with no docs/learned consult result on
+      that call's ancestor chain — the ambient index was never followed into the catalog
+      or any learned doc in time to inform the reviewed plan.
+    tier: deterministic
+    enforcement: prose-only
+
+  - id: objective-author.learned-docs-first-stop
+    kind: prompt-adherence
+    surface: docs/learned first-stop consult (objective authoring)
+    source: prompts/stages/objective-author/seed.md
+    applies_to:
+      - stage:objective-author
+      - command:objective-author
+    vintage_floor: "3.2.0"
+    evidence: >-
+      Same consult evidence as plan.learned-docs-first-stop, gated on a delivered
+      perk-objective-author binding — the learn-harvest/learn-dream/objective-replan doors
+      borrow this stage with a command binding override and are exempt. The stated surface
+      is the bare seed; the adopt.md and file.md launch variants carry the identical
+      first-stop clause.
+    violation: >-
+      An objective-authoring session (perk-objective-author binding delivered) reaches its
+      first plan_review with no docs/learned consult result on that call's ancestor chain.
+    tier: deterministic
+    enforcement: prose-only
