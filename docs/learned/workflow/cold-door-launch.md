@@ -7,7 +7,7 @@ cluster: doors-and-launch
 # The cold-door pi-launch seam
 
 A perk *local* stage launch ends by `execvpe`-ing into `pi`: the perk CLI process **becomes** pi. This
-seam (`perk/run/launch/`) carries a handful of non-obvious mechanics about argv construction, pi's
+seam (`src/perk/run/launch/`) carries a handful of non-obvious mechanics about argv construction, pi's
 project-trust prompt on throwaway worktrees, and what happens when a `--json` surface composes a
 launcher that emits its own JSON.
 
@@ -24,9 +24,10 @@ launcher that emits its own JSON.
 - A linked-worktree session sees zero skills unless the cold door mirrors `.agents/skills/` at
   positioning time (gitignored → never checked out) — "Worktree positioning must mirror
   `.agents/skills/`".
-- Resolve the absolute executable path BEFORE `os.chdir(worktree)` — a bare-name exec after
-  chdir can select a binary from the inspected tree — "Exec-launcher safety: resolve the
-  absolute executable path BEFORE the chdir".
+- A **path-probing** launcher seam resolves the absolute executable path BEFORE `os.chdir` —
+  a bare-name exec after chdir can select a binary from the inspected tree; the pi launch itself
+  chdirs then execs bare `pi` (PATH-resolved post-chdir) — "Exec-launcher safety at path-probing
+  seams: resolve the absolute executable path BEFORE the chdir".
 
 ## Build `argv` once, branch only on execute-vs-preview
 
@@ -99,27 +100,35 @@ vars into this layering rather than writing `env.setdefault()` loops.
   NOT get the quiet vars — CI logs keep full npm output.
 - **Fail-soft:** the quieting is advisory; if pi ever sanitizes the child env before spawning npm,
   the noise returns silently (no breakage, no detection).
-- **#654 — Linear key seed.** `launch_stage` seeds `env["LINEAR_API_KEY"]` from
+- **#654 — Linear key seed.** `_exec_pi`/`_build_exec_env` seed `env["LINEAR_API_KEY"]` from
   `load_local_linear_api_key(repo_root)` (the **main checkout**), **only when env doesn't already
-  provide it**, just before `os.execvpe` — built **before `os.chdir(worktree)`** so worktree
-  consumers inherit it. This is the bridge that carries a gitignored `perk.local.toml` secret into a
-  linked worktree session (see `docs/learned/workflow/linear-backend.md` for the consumer side).
+  provide it**, just before `os.execvpe` — read **before the `os.chdir(worktree)`** so worktree
+  consumers inherit it. This is the bridge that carries a gitignored `.perk/local.toml` secret into
+  a linked worktree session (see `docs/learned/workflow/linear-backend.md` for the consumer side).
 
 ## Running a repo-configured setup hook before exec (#652)
 
-`run_worktree_setup` runs the `[worktree] setup` commands via `bash -lc` inside a **freshly
-created** worktree before `exec pi`, **aborting the launch on any failure**. It is the **single
-canonical setup-execution path** with two consumers (cold-door `launch_stage` + manual
-`perk worktree create`'s `_create_impl`), mirroring `materialize_plan_body`/`materialize_skills`.
-Command output is **captured** (stderr merged into stdout, `errors="replace"`): swallowed on
-success (the `$ {command}` echoes are the narration), replayed in full to stderr before the abort
-on failure.
+`run_worktree_setup` (`src/perk/run/launch/materialize.py`) runs the `[worktree] setup` commands
+via `bash -lc` inside a **newly materialized** (freshly created or restored) worktree before
+`exec pi`, **aborting the launch on any failure**. It stays the **single canonical
+setup-execution path** — the *how*, mirroring `materialize_plan_body`/`materialize_skills`;
+*whether* it runs is the **marker-gated** `run_pending_setup` (`src/perk/run/launch/__init__.py`),
+keyed on the `cache.SETUP_PENDING` (`"setup-pending"`) marker. The marker lifecycle: **set** by
+the positioner at materialization (`create-fresh`/`restore-remote`,
+`src/perk/run/launch/worktree.py`) and by `perk worktree create`; **cleared only on success** — a
+failed setup leaves the marker in place, so the next run retries it (fix-then-re-run). Three
+consumers of `run_pending_setup`: the cold door's `_run_setup_hook` (self-gates: disposition ≠
+`root`), `perk worktree create`'s `_create_impl` (including its retry arm on an existing worktree
+still carrying the marker), and `perk plan watch` (`src/perk/cli/commands/plan/watch_cmd.py`,
+post-restore/reuse). Command output is **captured** (stderr merged into stdout,
+`errors="replace"`): swallowed on success (the `$ {command}` echoes are the narration), replayed
+in full to stderr before the abort on failure.
 
 - **Scope boundary:** the remote runner's `position_worktree` deliberately does **not** run the hook
   (CI env setup belongs to the GHA composite action) — a recorded non-goal. This is
   Python-plane-only (the TS extension never creates worktrees).
-- See `docs/learned/workflow/worktree-lifecycle.md` for the `created`-flag dry-run asymmetry that
-  gates the dry-run preview of this hook.
+- See `docs/learned/workflow/worktree-lifecycle.md` for the dry-run preview asymmetry that
+  governs the dry-run preview of this hook.
 
 ## `stage.worktree != "none"` is the canonical worktree-stage predicate
 
@@ -141,7 +150,7 @@ positioning time. Two compounding root causes:
    main repo's skills. The dangling skill-binding warnings (`bindingDelivery.ts` pointer fallback)
    are a *symptom* of this, not a separate bug.
 
-**The fix shape:** `materialize_skills(repo_root, worktree)` in `perk/run/launch/materialize.py` mirrors
+**The fix shape:** `materialize_skills(repo_root, worktree)` in `src/perk/run/launch/materialize.py` mirrors
 `materialize_plan_body`, wired into `launch_stage`'s `if stage.worktree != "none":` block **right
 after `materialize_plan_body`** (after the `dry_run` early return, before `os.chdir`/`os.execvpe`).
 It creates **per-skill symlinks** — one per entry of `repo_root/.agents/skills/*` — each pointing at
@@ -182,14 +191,17 @@ It ends in `os.execvpe("pi", …)` — the CLI *becomes* pi, and nothing after t
 **cannot** compose a *local* launch (it would never come back); landing therefore stays the
 human/interactive path (see `objective-lifecycle.md`).
 
-## Exec-launcher safety: resolve the absolute executable path BEFORE the chdir
+## Exec-launcher safety at path-probing seams: resolve the absolute executable path BEFORE the chdir
 
-A presence probe + bare-name exec *after* `os.chdir(worktree)` lets a relative `PATH` entry
-(e.g. `.`) select a binary from the code-under-watch tree — the launcher would exec attacker-
-controlled content from the very worktree it is inspecting. The safe shape: ship a
-**path-returning probe seam resolved pre-chdir** and exec the **absolute path** (argv[0] stays
-the bare name); the chdir/exec race stays an ordinary `OSError` arm. Source pointer: the
-hunk-CLI probe seam in `src/perk/convergence/init/review_cli.py`.
+For a launcher seam that **probes** for its executable, a presence probe + bare-name exec *after*
+`os.chdir(worktree)` lets a relative `PATH` entry (e.g. `.`) select a binary from the
+code-under-watch tree — the launcher would exec attacker-controlled content from the very
+worktree it is inspecting. The safe shape for such a seam: ship a **path-returning probe seam
+resolved pre-chdir** and exec the **absolute path** (argv[0] stays the bare name); the chdir/exec
+race stays an ordinary `OSError` arm. Source pointer: the hunk-CLI probe seam in
+`src/perk/convergence/init/review_cli.py`. The pi launch itself is not this shape: `_exec_pi`
+(`src/perk/run/launch/__init__.py`) builds the child env, sweeps stale pi agent locks, does
+`os.chdir(worktree)`, then `os.execvpe("pi", …)` — a bare name, PATH-resolved after the chdir.
 
 ## A shared `--worktree` option does not imply positioning for a `worktree: none` stage policy
 
@@ -239,12 +251,15 @@ worktree block — safe because it is idempotent and depends on neither `env` no
 load-bearing *reason* it had to move: the repo-root install must be fully warmed before
 `materialize_extensions` clones it.
 
-**The partial-tree cache hazard (general lesson).** The clone uses a hardlink ladder (`copytree` with
-`os.link`, falling back to a deep copy; `shutil.Error` subclasses `OSError`). A **presence-only**
-idempotency resume guard combined with a writer that leaves a partial tree on a mid-copy failure would
-**permanently cache corruption** (a half-copied package can satisfy a presence check yet fail to
-load). Fix: `rmtree(dst, ignore_errors=True)` in the failure branch so a failed stage degrades to a
-fresh in-session install. **General rule: a presence-only resume guard requires its writer to clean up
+**The partial-tree cache hazard (general lesson).** The clone is two-tier and `OSError`-only
+(`src/perk/run/launch/materialize.py`): `_clone_npm_tree` tries the hardlink
+`copytree(copy_function=os.link)` and on `OSError` rmtrees + retries as a deep copy;
+`materialize_extensions` wraps the clone in `except OSError` and rmtrees the partial tree
+(`shutil.Error` subclasses `OSError`, so `OSError`-only suffices). A **presence-only**
+idempotency resume guard combined with a writer that leaves a partial tree on a mid-copy failure
+would **permanently cache corruption** (a half-copied package can satisfy a presence check yet
+fail to load) — the rmtree in the failure branch lets a failed stage degrade to a fresh
+in-session install. **General rule: a presence-only resume guard requires its writer to clean up
 partial state on failure, or it caches corruption.**
 
 **Posture + test gotchas.** Loud-but-non-fatal + idempotent (mirrors `materialize_skills`); TTY-gated
@@ -259,13 +274,16 @@ committing (box-drawing glyphs are easy to transcribe wrong).
 
 The node-4.3 dignified sweep of `perk/run/launch.py` / the run worker established three constraints:
 
-- **`perk/state/cache.py` is a deliberate import-leaf** (it imports only `perk.substrate.output`), and
-  `github.py` *lazily* imports `cache` for cycle avoidance — so any helper that calls *into*
-  `github` cannot live in `cache.py` without creating a real import cycle. When a backlog says
-  "move helper X to a shared home", check the candidate home's import posture first:
-  **promote-in-place in the consumer-owning module** is the correct move when the shared home is
-  a leaf. This is why the public plan-body materializer lives in the `perk/run/launch/` package, with the run worker
-  as the documented second consumer, rather than relocated.
+- **Check the candidate home's import posture before relocating a helper.** At the time of the
+  sweep `perk/state/cache.py` was a deliberate import-leaf; today it is not (it imports
+  `perk.plan`, `perk.boundary`, `perk.delivery.layer`, `perk.run.runner`, and
+  `perk.substrate.fs`/`output`) — the neutral import-leaf is now `src/perk/substrate/fs.py` (the
+  relocated `atomic_write_text`, re-exported by `cache`). The durable rule is unchanged: when a
+  backlog says "move helper X to a shared home", check the candidate home's import posture
+  first — **promote-in-place in the consumer-owning module** is the correct move when the shared
+  home is a leaf. This is why the public plan-body materializer lives in the
+  `src/perk/run/launch/` package, with the run worker as the documented second consumer, rather
+  than relocated.
 - **Frozen-dataclass state transitions**: keep the initial construction, then use
   `dataclasses.replace` for every subsequent status evolution — unchanged fields carry by
   construction and the persisted dicts stay byte-identical.
@@ -284,7 +302,7 @@ surface nesting a command that calls `machine_output` must isolate that inner st
 ## Leveled progress-log discipline
 
 The cold-door launch path narrates its perceptible waits through the glyph-only leveled-log
-vocabulary in `perk/substrate/output.py`, **all routed through `user_output` → stderr**
+vocabulary in `src/perk/substrate/output.py`, **all routed through `user_output` → stderr**
 (python-cli-guidelines.md §7.5) so they never touch the stdout `--json` payload. Steps go through
 **`io_step(attempt)`** — the context-manager seam yielding a handle whose `.done(msg)` /
 `.warn(msg)` resolves the step; `log_done`/`log_warn` stay the raw surface for step-less
@@ -349,12 +367,12 @@ combined stream.
 
 ## Cross-references
 
-- `perk/run/launch/` — `launch_stage` argv construction + `--approve` trust injection
+- `src/perk/run/launch/` — `launch_stage` argv construction + `--approve` trust injection
 - `docs/learned/workflow/plan-factories.md` — the shared seeded-cold-door pipeline (whose tail composes `launch_stage`) now lives there
-- `perk/cli/commands/objective/run_cmd.py` — the supervisor that composes the remote dispatch launcher
+- `src/perk/cli/commands/objective/run_cmd.py` — the supervisor that composes the remote dispatch launcher
 - `docs/learned/workflow/objective-lifecycle.md` — the supervisor design that composes these mechanics
 - `docs/learned/workflow/remote-runner.md` — the remote dispatch path that emits the nested `machine_output`
 - `docs/learned/workflow/skill-bindings.md` — the skill-delivery subsystem the worktree mirror feeds
-- `docs/learned/workflow/worktree-lifecycle.md` — the `[worktree] setup` hook + `created`-flag dry-run asymmetry
+- `docs/learned/workflow/worktree-lifecycle.md` — the `[worktree] setup` hook + the dry-run preview asymmetry
 - `docs/learned/workflow/linear-backend.md` — the consumer side of the Linear-key env-seed
 - `docs/learned/pi/extension-api.md` — pi's git-root skill-discovery boundary

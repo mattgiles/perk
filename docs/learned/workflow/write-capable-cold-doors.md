@@ -14,8 +14,9 @@ shared posture below are what an agent can't derive from any single file.
 ## Write-capable cold door = borrow the `save` stage (the architectural lever)
 
 A dedicated cold door (a CLI verb, **not** a registry stage) that must WRITE the main checkout
-borrows the **`save` stage descriptor** for launch. `save` is the only `mode: read-write,
-worktree: none` stage besides `objective-save` — and `worktree: none` is the load-bearing property:
+borrows the **`save` stage descriptor** for launch. `save` is one of three `mode: read-write,
+worktree: none` stages (`objective-save`, `gist-save`, `save` — per `shared/registry.yaml`) — and
+`worktree: none` is the load-bearing property:
 it resolves to `repo_root` (the main checkout). Every *other* read-write stage resolves to a linked
 worktree, which is wrong here (a repo-owned skill lives in the main working tree). This is the
 write-capable sibling of the read-only `plan`-stage borrow the plan factories use (cross-ref
@@ -26,25 +27,27 @@ The borrow is otherwise **inert** — borrowing `save` injects no save-stage beh
 - A `binding_trigger="command:skills-<verb>"` override suppresses `stage:save`'s bindings and
   delivers the authoring skill (`perk-skill-author`) instead (cross-ref the `binding_trigger`
   "borrows-a-stage" hazard in `skill-bindings.md` — **any** stage-borrowing command must set this).
-- The extension's authoring-context injection is gated on `mode: read-only ∧ stage ∈ {plan,
-  objective-author}`, so a `mode: read-write` borrow of `save` injects no plan-authoring context.
+- The extension's authoring-context injection is gated on the **read-only** mode (plan mode plus
+  the objective-/gist-author mirrors, `extension/index.ts`), so a `mode: read-write` borrow of
+  `save` injects no authoring context.
 
-There is **no structural write-sandbox.** "Scoped to `.pi/skills/NAME/**`" is a **soft scope** carried
+There is **no structural write-sandbox.** "Scoped to `.perk/skills/NAME/**`" is a **soft scope** carried
 in the seed prompt only — nothing enforces it. Pass `repo_root` = the main checkout (see the
 resolution helper below) so the launched session positions there even when the verb is invoked from a
 worktree.
 
-*Source pointers:* `perk/cli/commands/skills/create_cmd.py` + `refine_cmd.py` (`_save_stage()` reads
-the `save` descriptor off `load_registry()`; the `binding_trigger` override on the `launch_stage`
-call), `perk/run/launch.py` `launch_stage` (the single cold-launch chokepoint).
+*Source pointers:* `src/perk/cli/commands/skills/create_cmd.py` + `refine_cmd.py` (both doors read
+the `save` descriptor via `stage_by_id("save")` — `src/perk/substrate/registry.py`; the
+`binding_trigger` override on the `launch_stage` call), the `src/perk/run/launch/` package
+(`launch_stage` in `__init__.py` — the single cold-launch chokepoint).
 
 ## The repo-skills lifecycle verbs share one posture
 
-`perk skills scaffold` / `delete` / `create` / `refine` (`perk/cli/commands/skills/`) split by
+`perk skills scaffold` / `delete` / `create` / `refine` (`src/perk/cli/commands/skills/`) split by
 write-capability:
 
 - **`scaffold` / `delete`** are deterministic filesystem verbs (write/rmtree the
-  `.pi/skills/NAME/` dir, then reconverge).
+  `.perk/skills/NAME/` dir, then reconverge).
 - **`create` / `refine`** are the write-capable cold doors (borrow `save`, soft-scope seed, launch
   an authoring session).
 
@@ -56,7 +59,7 @@ on the **existing** dir, pointing at `perk skills refine`.
 
 ## Main-checkout resolution for repo-owned content invoked from a worktree
 
-Content that must live in the MAIN working tree (here `.pi/skills/`, which the repo-skills
+Content that must live in the MAIN working tree (here `.perk/skills/`, which the repo-skills
 convergence reads) resolves its root via the established `config.py` precedent
 `git.main_worktree_root(repo_root) or repo_root` (cross-ref `config-tables.md`'s local-secret
 reader, which uses the same idiom). Factor it into **one tiny helper** (`repo_skills_root(ctx)` in
@@ -90,7 +93,7 @@ encode only the **stitched offline precondition** as a regression test
 (`tests/test_repo_skills_dogfood.py`):
 
 - Run the **real** CLI verb with only `github.repo_identity` stubbed (so convergence renders
-  offline), then assert **BOTH** the frontmatter-valid `.pi/skills/<name>/SKILL.md` **AND** the
+  offline), then assert **BOTH** the frontmatter-valid `.perk/skills/<name>/SKILL.md` **AND** the
   converged `.agents/manifest.d/perk-repo-skills.yaml` shape — i.e. the exact input `skills sync`
   consumes. Pin the main checkout to the fixture with
   `monkeypatch.setattr(shared.git, "main_worktree_root", lambda _root: None)`.
