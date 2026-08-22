@@ -11,7 +11,7 @@ the file's first 80 lines), and the ambient-block budget (gate #1: the raw commi
 region in ``.pi/APPEND_SYSTEM.md`` ≤ 5,120 bytes, measured on every measurable committed block
 regardless of registry presence/validity or freshness — an
 unmeasurable block reports ``null`` and never gates here). **Hygiene** (missing frontmatter,
-copied-source-looking code blocks, dup-``read_when``/stale-pointer/broken-link facts reused
+copied-source-looking code blocks, dup-``read_when``/stale-pointer/broken-doc-ref facts reused
 from ``docs_scan``, plus the over-threshold raw-size rows) is advisory — printed, never
 gating. Exit ``0`` ok · ``1`` stale or cue/cluster/distillation/ambient-budget violation ·
 ``2`` not-a-repo (D5).
@@ -364,7 +364,7 @@ def _render_human(report: DocsCheckReport) -> None:
             f"source-code-blocks: {len(report.source_code_blocks)}, "
             f"dup-read_when: {len(report.duplicate_read_when)}, "
             f"stale-ptr: {len(report.stale_pointers)}, "
-            f"broken-link: {len(report.broken_doc_paths)}, "
+            f"broken-doc-ref: {len(report.broken_doc_paths)}, "
             f"over-12KB docs: {len(report.oversize_docs)}",
             dim=True,
         )

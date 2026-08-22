@@ -5393,9 +5393,16 @@ DocEntry       = { kind, path, title: str|null, snippet: str|null }
 DocFindings    = { stale_pointers: StalePointer[], broken_doc_paths: BrokenDocPath[],
                    duplicate_groups: DuplicateGroup[] }
 StalePointer   = { doc, pointer, reason }            # reason ∈ {missing-file, missing-symbol}
-BrokenDocPath  = { doc, target }
+BrokenDocPath  = { doc, target }                     # target: as written, `#fragment` stripped
 DuplicateGroup = { basis, key, docs: str[] }         # basis ∈ {title, read_when}
 ```
+
+`broken_doc_paths` rows come from **two detectors**: doc→doc Markdown/MDX link targets
+(parent-relative resolution, unchanged) and full-span backtick inline-code `.md`/`.mdx` path
+tokens (optional `#fragment` stripped; a `/` is required — a bare filename is a name-mention;
+the link-rule exclusions reused; flagged only when the token resolves under **none** of the repo
+root, the containing doc's parent, and the containing doc's scan root). The family, shape,
+ordering, and cap are unchanged — the bundle envelope is byte-compatible.
 
 `status ∈ {found, missing, ambiguous}`. `artifact` paths are **relative to repo_root**
 (portable). The full shape is always serialized (no `exclude_unset`) so absent values render

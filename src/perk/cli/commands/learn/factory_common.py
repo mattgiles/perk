@@ -145,7 +145,7 @@ def _scan_section(inventory: tuple[DocEntry, ...], findings: DocFindings) -> lis
 
     has_findings = findings.stale_pointers or findings.broken_doc_paths or findings.duplicate_groups
     if not has_findings:
-        lines.append("No stale pointers, broken doc links, or duplicate cues detected.")
+        lines.append("No stale pointers, broken doc references, or duplicate cues detected.")
         lines.append("")
         return lines
 
@@ -156,10 +156,10 @@ def _scan_section(inventory: tuple[DocEntry, ...], findings: DocFindings) -> lis
             lines.append(f"- `{sp.pointer}` in `{sp.doc}` ({sp.reason})")
         lines.append("")
     if findings.broken_doc_paths:
-        lines.append("### Broken doc→doc links (cleanup-first)")
+        lines.append("### Broken doc references (cleanup-first)")
         lines.append("")
         for bp in findings.broken_doc_paths:
-            lines.append(f"- `{bp.target}` linked from `{bp.doc}`")
+            lines.append(f"- `{bp.target}` referenced from `{bp.doc}`")
         lines.append("")
     if findings.duplicate_groups:
         lines.append("### Duplicate cues (cleanup-first)")

@@ -45,7 +45,7 @@ on inspection, really belongs in code.
   One docs file can consolidate several issues; one issue can feed several files.
 
 - **Cleanup-first, elaborated.** The inbox's existing-docs scan is the input: prune or fix the
-  stale source pointers / broken doc→doc links / duplicate routing cues it flags before adding new
+  stale source pointers / broken doc references / duplicate routing cues it flags before adding new
   content, and prefer **UPDATE an existing doc** over a near-duplicate **NEW** doc.
 
 - **The docs-sync mechanics.** `perk learn docs-sync` rebuilds `docs/learned/index.md` + the

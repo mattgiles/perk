@@ -29,7 +29,7 @@ the raw committed routing region in ``.pi/APPEND_SYSTEM.md`` ≤
 measured on every measurable committed block regardless of registry presence/validity or
 freshness) — from **advisory hygiene** (missing
 frontmatter, copied-source-looking code blocks, the over-threshold raw-size rows, plus the
-reused ``docs_scan`` dup-``read_when``/stale-pointer/broken-link facts — reported, never
+reused ``docs_scan`` dup-``read_when``/stale-pointer/broken-doc-ref facts — reported, never
 gating).
 """
 
