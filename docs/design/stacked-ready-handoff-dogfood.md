@@ -366,7 +366,51 @@ Captured 2026-08-22 (operator, dev checkout root).
 
 ### S1 — warm authoring
 
-*Not yet executed.* (Objective `<N>`, `delivery_lineage`, roadmap-vs-spec deviation notes.)
+Executed 2026-08-22 (`perk objective author`, dev checkout, pinned binary). The docs objective:
+**#1980** — "Stacked ready-handoff docs train: teach the ready→reconcile continuation + handoff
+repair", created `2026-08-22T20:21:28Z`, `run_id: 01M0NHNAADZY64319WAGWZQVG0`. Header excerpt
+(the machine facts for the delivery choice):
+
+```yaml
+status: active
+base: null
+delivery: stacked
+delivery_lineage: 01M0NJ5ASVYS4VMBEWXXVJNXRA
+```
+
+- **Material pins — all hold:** `delivery: stacked`; `delivery_lineage` minted; default base
+  (`base: null`); **2 nodes with the explicit dependency edge** (`1.2` → `depends_on: ['1.1']`);
+  the descriptions carry the § Train spec verbatim-in-spirit — every file path, boundary, and
+  scope guard intact (backticks and the `handoff <state>` token survived YAML rendering);
+  node 1.1(d) names "the design record's § Coherence-audit matrix" as the fix census source.
+- **Named deviations (cosmetic, recorded):** node ids `1.1`/`1.2` (one phase) vs the spec's flat
+  "node 1 / node 2" — the same id-shape drift the prior gate accepted; slugs
+  `user-docs-ready-continuation` / `perk-expert-mirror` (the spec pinned none). Two findability
+  nits: the census pointer in 1.1(d) names the matrix but not its file path
+  (`docs/design/stacked-ready-handoff-dogfood.md` — and NOTE: the record lives on this PR's
+  branch `plan-1978`, not yet on main, so the train's planning sessions must be pointed at
+  PR #1979 to read it); and node 1.2's description does not itself name the census source —
+  acceptable: 1.2 mirrors "node 1.1's canonical content", so the census reaches it
+  transitively. Mitigation pinned for S2/S6: the operator names the record's branch/PR when
+  driving each planning session.
+- **Delivery-choice UX (dated operator attestation, 2026-08-22):** the authoring session asked
+  the stacked-vs-incremental delivery question BEFORE the plannotator review, answered
+  `stacked`. The header excerpt above is the machine half.
+- **Capability preflight:** the save succeeded and created #1980, so the §8.45 preflight
+  necessarily passed (it runs before the store mutation).
+- **Post-save train read** (`perk objective stack status 1980`, operator capture, verbatim):
+
+  ```text
+  Objective #1980: stacked delivery train (base main, published prefix 0/2)
+    lineage 01M0NJ5ASVYS4VMBEWXXVJNXRA
+    1. 1.1 unplanned [unpublished] no pr
+    2. 1.2 unplanned [unpublished] no pr
+    next build-ready: 1.1
+  no findings
+  ```
+
+  Both layers `unplanned [unpublished]` with **no `handoff` suffix** — the axis is
+  `not_applicable` below verified publication, exactly as § matrix family 1 pins.
 
 ### S2 — layer 1 publish
 
