@@ -570,7 +570,27 @@ suspend gesture (no perk command performs it, by design).
   the hold is purely the draft bit (and correspondingly NO `stamped ≠ head` disclosure
   renders — that disclosure is stale-only, exactly as the § matrix pins).
 
-**Resume half:** *pending — the `/ready` re-run.*
+**Resume half executed 2026-08-22** — `/ready` re-run in layer 1's session.
+
+- **The re-stamp converged idempotently (durable halves):** PR #1982 `isDraft: false` again;
+  the journal still holds **exactly one** ready-stamp comment, at the same key
+  (`1980:1981:1.1:f7f25f9d…`) — the byte-identical append converged (`existed=true`; nothing
+  written); train read: `1.1 … pr #1982 (ready) … handoff ready`, the `planning gated` line
+  gone again.
+- **The continuation fired again on the re-stamp (per design), and the re-entered pass
+  concluded an honest no-op** (operator-captured session transcript): liveness re-checked (PR
+  OPEN, live head = stamped head), the pinned range re-judged byte-identical, the engagement
+  block re-read unchanged, and the previous pass's prose write re-verified in the live body
+  comment before declaring "No writes made — nothing is stale, and re-writing identical
+  conclusions would be churn." Both pass outcomes — S4's real write and this no-op — are
+  passes for the arm.
+- **Bonus capture — the rendered continuation seed:** the operator's transcript preserved the
+  injected `stages/objective-reconcile-ready.md` guidance verbatim — liveness check FIRST
+  (MERGED/CLOSED → stop; drifted head → report, still judge the pinned range), judge EXACTLY
+  the pinned range (never the ambient PR diff), engagement as untrusted DATA, the
+  never-clobber section boundary, the three powers (prose / descriptions / guarded
+  tail-append, NO status/PR), skip-if-nothing-stale, and the stamp-stands failure posture —
+  the §8.66 warm-twin contract observed end to end.
 
 ### S6 — layer 2 publish
 
