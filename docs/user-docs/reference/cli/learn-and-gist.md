@@ -66,7 +66,7 @@ factory). The cold door partitions the open issues by their captured `decision`:
 classification except a pre-stamped `SHOULD_BE_CODE` (those route to `perk learn code`; legacy /
 unclassified default to docs) lands here. The inbox carries each learning's classification line
 (`decision` + optional `target`) plus an existing-docs scan (inventory + stale pointers / broken
-links / duplicate cues) for cleanup-first placement. The factory remains a **curator and verifier**:
+doc references / duplicate cues) for cleanup-first placement. The factory remains a **curator and verifier**:
 it still emits a `SHOULD_BE_CODE` follow-up step when a doc-destined learning actually belongs in
 code/comment/docstring/schema/user-docs, and regenerates the routing via `perk learn docs-sync`
 (never by hand). `--gather` materializes the inbox and emits `{inbox_path, learn_numbers}` without
@@ -194,7 +194,8 @@ never guessed**, and never fails the command. A learn-docs consolidation plan (n
 
 The `--json` bundle also carries `docs_findings` — an advisory, deterministic enrichment of the
 existing-docs inventory: `stale_pointers` (source pointers like `` `perk/x.py::sym` `` that no
-longer resolve), `broken_doc_paths` (doc→doc `.md` links that no longer exist), and
+longer resolve), `broken_doc_paths` (doc→doc references — Markdown links and backtick
+`.md`/`.mdx` path tokens — that no longer resolve), and
 `duplicate_groups` (the rare exact title/`read_when` collision guard). It surfaces doc drift
 advisorily (the `/learn` existing-docs analyst weighs it candidate-vs-corpus); it never fixes
 anything. `--json` emits the machine-readable bundle (the
@@ -290,7 +291,7 @@ categories **gate the exit**:
 **Hygiene** is advisory — always printed, never changing the exit — and covers missing
 `title`/`read_when` frontmatter, copied-source-looking code blocks (a source-language fence with `≥ 10`
 non-blank lines; data-format/CLI fences are ignored), duplicated `read_when` cues, stale source
-pointers, broken doc→doc links, and the over-12KB doc count (`over-12KB docs: N` — the raw size
+pointers, broken doc references, and the over-12KB doc count (`over-12KB docs: N` — the raw size
 is a note, never a gate; the per-doc byte list rides `--json` as `oversize_docs`). Read-only and
 purely local. Exit `0` ok · `1` stale or
 cue/cluster/distillation/ambient-budget violation · `2` not-a-repo. Freshness is intentionally **not** wired into `just ci` /

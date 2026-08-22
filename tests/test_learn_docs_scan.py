@@ -207,6 +207,177 @@ def test_valid_doc_path_mdx_target(tmp_path: Path):
     assert scan_docs_richly(tmp_path).broken_doc_paths == ()
 
 
+# --- broken doc references: full-span backtick doc-path tokens ---------------------------------
+
+
+def test_backtick_doc_token_repo_root_missing_flags(tmp_path: Path):
+    # The motivating class: a repo-root-anchored `docs/planning/…` citation whose tree was removed.
+    _write(
+        tmp_path / "docs/learned/workflow/doc.md",
+        "See `docs/planning/stacked-prs/objective.md` for the shape.\n",
+    )
+    findings = scan_docs_richly(tmp_path)
+    assert findings.broken_doc_paths == (
+        BrokenDocPath(
+            doc="docs/learned/workflow/doc.md",
+            target="docs/planning/stacked-prs/objective.md",
+        ),
+    )
+
+
+def test_backtick_doc_token_repo_root_present_clean(tmp_path: Path):
+    # The `shared/contracts.md`-shape case: a repo-root-anchored citation of a real doc is clean.
+    _write(tmp_path / "docs/planning/stacked-prs/objective.md", "# Objective\n")
+    _write(
+        tmp_path / "docs/learned/workflow/doc.md",
+        "See `docs/planning/stacked-prs/objective.md` for the shape.\n",
+    )
+    assert scan_docs_richly(tmp_path).broken_doc_paths == ()
+
+
+def test_backtick_doc_token_strips_fragment(tmp_path: Path):
+    _write(tmp_path / "docs/learned/x.md", "Anchored: `docs/guide.md#heading`.\n")
+    findings = scan_docs_richly(tmp_path)
+    assert findings.broken_doc_paths == (
+        BrokenDocPath(doc="docs/learned/x.md", target="docs/guide.md"),
+    )
+    _write(tmp_path / "docs/guide.md", "# Guide\n")
+    assert scan_docs_richly(tmp_path).broken_doc_paths == ()
+
+
+def test_backtick_doc_token_mdx_detected(tmp_path: Path):
+    _write(tmp_path / "docs/learned/x.md", "An `guides/page.mdx` token.\n")
+    findings = scan_docs_richly(tmp_path)
+    assert findings.broken_doc_paths == (
+        BrokenDocPath(doc="docs/learned/x.md", target="guides/page.mdx"),
+    )
+
+
+def test_backtick_doc_token_parent_base(tmp_path: Path):
+    # A parent-relative sibling mention resolves against the containing doc's dir.
+    _write(tmp_path / "docs/learned/workflow/sub.md", "See `guides/x.md`.\n")
+    findings = scan_docs_richly(tmp_path)
+    assert findings.broken_doc_paths == (
+        BrokenDocPath(doc="docs/learned/workflow/sub.md", target="guides/x.md"),
+    )
+    _write(tmp_path / "docs/learned/workflow/guides/x.md", "# X\n")
+    assert scan_docs_richly(tmp_path).broken_doc_paths == ()
+
+
+def test_backtick_doc_token_learned_scan_root_base(tmp_path: Path):
+    # The two-tier index's cross-category shorthand: a `workflow/` doc citing `pi/b.md` resolves
+    # against the learned scan root (`docs/learned/`).
+    _write(tmp_path / "docs/learned/workflow/a.md", "Cross-category: `pi/b.md`.\n")
+    findings = scan_docs_richly(tmp_path)
+    assert findings.broken_doc_paths == (
+        BrokenDocPath(doc="docs/learned/workflow/a.md", target="pi/b.md"),
+    )
+    _write(tmp_path / "docs/learned/pi/b.md", "# B\n")
+    assert scan_docs_richly(tmp_path).broken_doc_paths == ()
+
+
+def test_backtick_doc_token_user_docs_scan_root_base(tmp_path: Path):
+    # A user doc citing another user doc from the user-docs root resolves via its scan root.
+    _write(tmp_path / "docs/user-docs/reference/b.md", "# B\n")
+    _write(tmp_path / "docs/user-docs/guides/a.md", "# A\n\nSee `reference/b.md`.\n")
+    assert scan_docs_richly(tmp_path).broken_doc_paths == ()
+
+
+def test_backtick_doc_token_slashless_skipped(tmp_path: Path):
+    # A bare filename is a name-mention, not a path claim (corpus-tuned) — never flagged.
+    _write(tmp_path / "docs/learned/x.md", "Every skill has a `SKILL.md`.\n")
+    assert scan_docs_richly(tmp_path).broken_doc_paths == ()
+
+
+def test_backtick_doc_token_non_full_span_and_pointer_shaped_skipped(tmp_path: Path):
+    # Prose-carrying spans and pointer-shaped spans are not doc-path tokens.
+    _write(
+        tmp_path / "docs/learned/x.md",
+        "Prose `see docs/x.md` and pointer-shaped `docs/x.md::sym`.\n",
+    )
+    assert scan_docs_richly(tmp_path) == DocFindings()
+
+
+def test_backtick_doc_token_url_skipped(tmp_path: Path):
+    _write(tmp_path / "docs/learned/x.md", "External `https://example.com/x.md`.\n")
+    assert scan_docs_richly(tmp_path).broken_doc_paths == ()
+
+
+def test_backtick_doc_token_absolute_skipped(tmp_path: Path):
+    _write(tmp_path / "docs/learned/x.md", "Absolute `/docs/x.md`.\n")
+    assert scan_docs_richly(tmp_path).broken_doc_paths == ()
+
+
+def test_stale_pointer_and_backtick_doc_token_fire_independently(tmp_path: Path):
+    # The extension families are disjoint: one doc carrying a phantom source pointer AND a stale
+    # backtick doc token yields one finding in EACH family.
+    (tmp_path / "src/perk").mkdir(parents=True)
+    _write(
+        tmp_path / "docs/learned/x.md",
+        "Ghost `perk/gone.py::fn` beside stale `docs/planning/objective.md`.\n",
+    )
+    findings = scan_docs_richly(tmp_path)
+    assert findings.stale_pointers == (
+        StalePointer(doc="docs/learned/x.md", pointer="perk/gone.py::fn", reason="missing-file"),
+    )
+    assert findings.broken_doc_paths == (
+        BrokenDocPath(doc="docs/learned/x.md", target="docs/planning/objective.md"),
+    )
+
+
+def test_backtick_doc_token_deduped_per_doc(tmp_path: Path):
+    _write(
+        tmp_path / "docs/learned/x.md",
+        "First `docs/gone.md` then again `docs/gone.md`.\n",
+    )
+    assert len(scan_docs_richly(tmp_path).broken_doc_paths) == 1
+
+
+def test_cross_arm_dedup_link_and_backtick_share_one_row(tmp_path: Path):
+    # A Markdown link and a backtick token sharing one fragment-stripped target → one row.
+    _write(
+        tmp_path / "docs/learned/x.md",
+        "[g](sub/ghost.md#frag) and the same `sub/ghost.md` token.\n",
+    )
+    findings = scan_docs_richly(tmp_path)
+    assert findings.broken_doc_paths == (
+        BrokenDocPath(doc="docs/learned/x.md", target="sub/ghost.md"),
+    )
+
+
+def test_links_differing_only_in_fragment_dedupe_to_one_row(tmp_path: Path):
+    # The per-doc dedup key is the fragment-stripped target (deliberate micro-change).
+    _write(
+        tmp_path / "docs/learned/x.md",
+        "[a](ghost.md#one) and [b](ghost.md#two).\n",
+    )
+    findings = scan_docs_richly(tmp_path)
+    assert findings.broken_doc_paths == (BrokenDocPath(doc="docs/learned/x.md", target="ghost.md"),)
+
+
+def test_mixed_arm_findings_sorted_by_doc_then_target(tmp_path: Path):
+    _write(
+        tmp_path / "docs/learned/x.md",
+        "Token `a-token/ghost.md` and link [z](z-link-ghost.md).\n",
+    )
+    findings = scan_docs_richly(tmp_path)
+    assert [(b.doc, b.target) for b in findings.broken_doc_paths] == [
+        ("docs/learned/x.md", "a-token/ghost.md"),
+        ("docs/learned/x.md", "z-link-ghost.md"),
+    ]
+
+
+def test_climbing_backtick_token_degrades_never_raises(tmp_path: Path):
+    # A `..`-climbing token walks the guarded resolve on every base without raising — the
+    # outcome is flag-or-skip, never an exception out of the advisory scan.
+    _write(
+        tmp_path / "docs/learned/x.md",
+        "Climb: `../../../../../../nowhere-perk-test/ghost.md`.\n",
+    )
+    findings = scan_docs_richly(tmp_path)
+    assert len(findings.broken_doc_paths) <= 1
+
+
 # --- duplicate / routing collisions -----------------------------------------------------------
 
 

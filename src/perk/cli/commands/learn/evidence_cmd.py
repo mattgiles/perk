@@ -304,7 +304,7 @@ def _render_human(bundle: EvidenceBundle, render: RenderReport | None = None) ->
         f"plan {plan_status}, pr {pr_status}, planning {planning_summary}, "
         f"{impl_runs} impl run(s), docs: {docs} "
         f"(stale-ptr: {len(findings.stale_pointers)}, "
-        f"broken-link: {len(findings.broken_doc_paths)}, "
+        f"broken-doc-ref: {len(findings.broken_doc_paths)}, "
         f"dup-groups: {len(findings.duplicate_groups)})"
     )
     if render is not None:

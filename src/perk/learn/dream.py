@@ -68,8 +68,8 @@ class DreamFindings:
 
     Every family is filtered by its **owner-doc field only** against the manifest path set (the
     field vocabularies are ``docs_sync``/``docs_scan``'s — reused, never widened). Structural =
-    verifiable breakage (stale pointers, broken doc links, duplicate ``read_when`` cues, missing
-    frontmatter); advisory = quality/read-cost signals (distillation issues, copied-source
+    verifiable breakage (stale pointers, broken doc references, duplicate ``read_when`` cues,
+    missing frontmatter); advisory = quality/read-cost signals (distillation issues, copied-source
     blocks, overlong cues, cue hazards, empty registry clusters).
     """
 

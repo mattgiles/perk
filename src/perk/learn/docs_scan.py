@@ -7,8 +7,9 @@ Two concerns, one dependency-light leaf (imports only stdlib + ``yaml`` + ``perk
   ``existing_docs[]``.
 - **The rich, deterministic, advisory scan** (``scan_docs_richly`` → ``DocFindings``) — the
   verifiable facts the existing-docs analyst angle needs to point a capture at an *existing* doc
-  with *verified evidence*: which source pointers no longer resolve (phantoms), which doc→doc links
-  are broken, and (a cheap guard) which docs share an *exact* normalized title / routing cue.
+  with *verified evidence*: which source pointers no longer resolve (phantoms), which doc→doc
+  references are broken (Markdown links plus full-span backtick doc-path tokens), and (a cheap
+  guard) which docs share an *exact* normalized title / routing cue.
 
 Both are pure (no GitHub/backends), deterministic (sorted output, no wall-clock/random), and **never
 raise** (per-doc try/except; ``OSError`` → skip). The split honors "deterministic" (the scan) and
@@ -56,6 +57,21 @@ _POINTER_RE = re.compile(r"^(?P<path>[\w./-]+\.(?:py|ts|tsx|js))(?:::(?P<symbol>
 
 # A Markdown link's target (the parenthesized part).
 _MD_LINK_RE = re.compile(r"\[[^\]]*\]\(([^)]+)\)")
+
+# A backtick span whose WHOLE content is a doc-path token — a `.md`/`.mdx` path with an optional
+# `#fragment` (the `path` group is the fragment-stripped target). The first-char class `[\w.]`
+# structurally excludes absolute (`/…`) tokens; the charset (mirroring `_POINTER_RE`) structurally
+# excludes whitespace, `|`, and URL schemes (`:`). The lowercase `.md`/`.mdx` alternation matches
+# `_USER_DOC_SUFFIXES`.
+_DOC_TOKEN_RE = re.compile(r"^(?P<path>[\w.][\w./-]*\.(?:md|mdx))(?:#\S*)?$")
+
+# Each kind's scan root — the third resolution base for backtick doc-path tokens (derived from the
+# existing root constants, no duplicated literals).
+_KIND_SCAN_ROOTS = {
+    "learned": _LEARNED_GLOB[0],
+    "user-doc": _USER_DOCS_ROOT,
+    "skill": _SKILLS_GLOB[0],
+}
 
 
 class _DocFrontmatter(LenientParseModel):
@@ -112,10 +128,11 @@ class StalePointer:
 
 @dataclass(frozen=True)
 class BrokenDocPath:
-    """A doc→doc Markdown/MDX link whose target no longer exists."""
+    """A doc→doc reference whose target no longer resolves — a Markdown/MDX link target or a
+    full-span backtick inline-code ``.md``/``.mdx`` path token."""
 
     doc: str
-    target: str  # the link target as written
+    target: str  # the reference target as written, `#fragment` stripped
 
 
 @dataclass(frozen=True)
@@ -386,9 +403,10 @@ def scan_docs_richly(repo_root: Path) -> DocFindings:
 
     Deterministic (sorted output), bounded (each doc read once; each finding family sorted then
     capped at ``_MAX_FINDINGS``), and **never raises** (per-doc ``OSError`` → skip). Verifiable
-    facts only: stale source pointers (phantoms), broken doc→doc links, and exact normalized
-    title/routing-cue collisions (a guard). The de-dup *decision* is candidate-vs-corpus — the
-    analyst's, powered by these facts; this scan never decides de-dup.
+    facts only: stale source pointers (phantoms), broken doc→doc references (Markdown links plus
+    full-span backtick doc-path tokens), and exact normalized title/routing-cue collisions (a
+    guard). The de-dup *decision* is candidate-vs-corpus — the analyst's, powered by these facts;
+    this scan never decides de-dup.
     """
     docs = _read_docs(repo_root)
 
@@ -510,29 +528,73 @@ def _stale_pointers(repo_root: Path, doc: _ScannedDoc) -> list[StalePointer]:
     return list(found.values())
 
 
-def _broken_doc_paths(repo_root: Path, doc: _ScannedDoc) -> list[BrokenDocPath]:
-    """The doc→doc ``.md``/``.mdx`` links a doc carries that no longer resolve.
+def _excluded_doc_target(target: str) -> bool:
+    """The shared doc-target exclusions both detection arms apply: whitespace/``|`` captures (the
+    validated false-positive code-snippet shapes ``](cmd: C)`` / ``](scratch|runs)``) and external
+    ``http(s)``/``mailto`` targets. For backtick tokens `_DOC_TOKEN_RE`'s charset already excludes
+    all of these — the call there is structurally a no-op, kept so both arms share one rule."""
+    if any(c.isspace() for c in target) or "|" in target:
+        return True
+    return target.startswith(("http://", "https://", "mailto:"))
 
-    Resolves relative to the doc's parent dir (normalizing ``..`` so cross-tree links resolve);
-    skips external links, pure anchors, and whitespace/``|`` captures (the validated false-positive
-    code-snippet shapes ``](cmd: C)`` / ``](scratch|runs)``).
+
+def _doc_reference_resolves(repo_root: Path, doc: _ScannedDoc, target: str) -> bool:
+    """Whether a backtick doc-path token resolves under ANY of its three bases — in order: the
+    repo root, the containing doc's parent dir, the containing doc's scan root.
+
+    The bases beyond the repo root are corpus-tuned acceptance vocabulary: parent-relative
+    sibling mentions, and the two-tier learned index's cross-category shorthand (a ``workflow/``
+    doc citing ``pi/subagents.md`` — real under ``docs/learned/``). A failing base degrades to
+    non-resolving (the never-raise posture unchanged).
+    """
+    bases = (repo_root, doc.path.parent, repo_root / _KIND_SCAN_ROOTS[doc.kind])
+    for base in bases:
+        try:
+            resolved = (base / target).resolve()
+        except (OSError, ValueError):
+            continue  # a pathological token degrades this base to non-resolving
+        if _is_existing_file(resolved):
+            return True
+    return False
+
+
+def _broken_doc_paths(repo_root: Path, doc: _ScannedDoc) -> list[BrokenDocPath]:
+    """The doc→doc ``.md``/``.mdx`` references a doc carries that no longer resolve — two arms,
+    deduped per doc on the fragment-stripped target.
+
+    **Markdown/MDX links** resolve relative to the doc's parent dir only (Markdown link
+    semantics; ``..`` normalizes so cross-tree links resolve). **Full-span backtick doc-path
+    tokens** (`_DOC_TOKEN_RE`; optional ``#fragment`` stripped) must contain a ``/`` — a
+    slashless token (``SKILL.md``) is a name-mention, not a path claim (corpus-tuned) — and flag
+    only when the token resolves under NONE of `_doc_reference_resolves`'s three bases (the
+    tri-base rule admits repo-root-anchored citations and the learned index's cross-category
+    shorthand; both suppressions came from a live-corpus acceptance survey). Both arms share
+    `_excluded_doc_target`. Advisory: an intentional historical citation of a removed doc stays
+    flagged — the analyst keeps the weighing judgment.
     """
     parent = doc.path.parent
-    found: dict[str, BrokenDocPath] = {}
+    found: dict[str, BrokenDocPath] = {}  # dedup per doc, keyed by the fragment-stripped target
     for raw in _MD_LINK_RE.findall(doc.text):
         target = raw.split("#", 1)[0]
         if not target.endswith(_USER_DOC_SUFFIXES):
             continue
-        if any(c.isspace() for c in target) or "|" in target:
-            continue
-        if target.startswith(("http://", "https://", "mailto:")):
+        if _excluded_doc_target(target):
             continue
         try:
             resolved = (parent / target).resolve()
         except (OSError, ValueError):
             continue  # a pathological link target degrades to skip, never crashes the scan
         if not _is_existing_file(resolved):
-            found.setdefault(raw, BrokenDocPath(doc=doc.rel, target=target))
+            found.setdefault(target, BrokenDocPath(doc=doc.rel, target=target))
+    for span in _INLINE_CODE_RE.findall(doc.text):
+        match = _DOC_TOKEN_RE.match(span)
+        if match is None:
+            continue
+        target = match.group("path")
+        if "/" not in target or _excluded_doc_target(target):
+            continue
+        if not _doc_reference_resolves(repo_root, doc, target):
+            found.setdefault(target, BrokenDocPath(doc=doc.rel, target=target))
     return sorted(found.values(), key=lambda b: b.target)
 
 

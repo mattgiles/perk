@@ -371,8 +371,10 @@ both `perk/learn/evidence.py` (the bundle manifest's `docs_findings`) and the do
 the docs-plan analyst can do cleanup-first + UPDATE-vs-NEW placement. Three cross-cutting learnings:
 
 - **Deterministic-FACTS vs LLM-JUDGMENT split.** The Python layer emits only **verifiable FACTS** —
-  stale source pointers (phantom `path::symbol` spans), broken doc→doc `.md` links, and exact
-  normalized title/`read_when` collisions. The de-dup **DECISION** stays with the LLM analyst and is
+  stale source pointers (phantom `path::symbol` spans), broken doc→doc references (Markdown links
+  **plus** full-span backtick `.md`/`.mdx` path tokens, the latter tri-base-resolved — repo root /
+  doc parent / the doc's scan root — with slashless name-mentions skipped), and exact normalized
+  title/`read_when` collisions. The de-dup **DECISION** stays with the LLM analyst and is
   **candidate-vs-corpus** ("does THIS capture already live in an existing doc?"), powered by those
   facts plus the full docs inventory — the scan **never decides de-dup**. Within-corpus
   exact-collision detection (`_duplicate_groups`) fires **0× on a curated corpus** (every title is
@@ -388,7 +390,12 @@ the docs-plan analyst can do cleanup-first + UPDATE-vs-NEW placement. Three cros
   scanner is **high-recall by design** — weigh findings by relevance and tune precision against the
   real corpus before committing the rules. (This is the principle that governs a doc-cleanup
   judgment call: fix present-tense mechanics pointers, leave narrative history — see
-  `cold-door-launch.md`'s stale-pointer cleanup.)
+  `cold-door-launch.md`'s stale-pointer cleanup.) The backtick doc-token widening repeated the
+  method: at the dream-dogfood audit (`docs/design/learn-dream-dogfood.md`, objective #1926, commit
+  `5c3b5058`) the deterministic scan was blind to the analysts' verified stale `docs/planning/…`
+  backtick refs, and a live-corpus acceptance survey of every backtick `.md`/`.mdx` token (326
+  doc/token pairs) produced the two suppressions — skip slashless tokens, add the scan-root
+  resolution base — that cut ~100+ structural false positives down to the genuine handful.
 
 - **"Never raises" must catch `UnicodeDecodeError` and guard text-derived path ops.** A file scanner
   guarded only by `except OSError` is **incomplete**: `read_text(encoding="utf-8")` on a
