@@ -2,7 +2,9 @@
 // selection when a plan authoring mode is on (perk gate read-only OR tombell's own persisted
 // `plan-mode-state`; objective-author and gist-author excepted), inert (+ stale-marker strip) under the default
 // selection. Driven through a REAL bound AgentSession (offline) via the shared harness. See
-// planAdapterTombell.ts.
+// planAdapterTombell.ts. The suite doubles as the contracts.md §8.57 seeded-plan-shape proof
+// for the REPLACE-posture flow-carrier claim: under `tombell-plan` the adapter block is the
+// designated plan-authoring flow carrier, and these cases verify it per adapter-visible shape.
 
 import assert from "node:assert/strict";
 import { mkdirSync, writeFileSync } from "node:fs";
@@ -35,7 +37,15 @@ test("isTombellPlanSelected: true only when [providers] plan = tombell-plan", ()
   assert.equal(isTombellPlanSelected(sel), true);
 });
 
-test("tombell selected + gate active: injects the review-first bridge context (fallback kept)", async () => {
+// This ONE case IS the per-shape verification for every pointer-carrying seeded plan door
+// (`plan from` adopt/file, `plan replan`, `learn docs`, `learn code`): they all present the
+// identical `{mode: read-only, stage: plan}` adapter-visible state, and the adapter is
+// shape-blind — it reads only the rebuilt workflow state's mode/stage plus branch markers
+// (contracts.md §8.57's REPLACE-posture carve-out); seed text, adoption/replan metadata,
+// handoff extras, and binding triggers are all invisible to it. The content assertions pin
+// the flow the carve-out promises the adapter carries. Per-door lookalike fixtures would be
+// duplicate coverage.
+test("tombell selected + the seeded plan shape ({mode: read-only, stage: plan}): injects the review-first bridge context (fallback kept)", async () => {
   const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-only", stage: "plan" } });
   selectTombell(cwd);
   const h = await loadPerkSession({
@@ -155,6 +165,37 @@ test("gist-author session: the bridge context defers (gistAuthor owns that sessi
   }
 });
 
+// `perk objective plan` is the one seeded door whose adapter-visible state differs (stage
+// `objective-plan`, not `plan`); under the REPLACE posture the adapter is the flow carrier
+// there too, so this pins the stage-exception guard's ordinary arm — the control arm of the
+// objective-author/gist-author carve-out (a broadened exception set must fail loudly).
+test("tombell selected + objective-plan factory session: the bridge context injects (the exception set stays exactly objective-author/gist-author)", async () => {
+  const cwd = scaffoldRepo({
+    handoff: { runId: "01RID", mode: "read-only", stage: "objective-plan" },
+  });
+  selectTombell(cwd);
+  const h = await loadPerkSession({
+    cwd,
+    env: { PERK_RUN_ID: "01RID" },
+    sessionManager: SessionManager.inMemory(cwd),
+  });
+  try {
+    const injected = await h.emitBeforeAgentStart();
+    assert.ok(
+      injected.some(
+        (m) =>
+          m.customType === PLAN_ADAPTER_TOMBELL_CONTEXT_TYPE &&
+          String(m.content).includes("plan_review"),
+      ),
+      "the bridge context is injected in an objective-plan session (ordinary arm of the stage-exception guard)",
+    );
+  } finally {
+    h.dispose();
+  }
+});
+
+// The once-only half of the seeded-shape proof (§8.57's "the flow is still stated exactly
+// once per session").
 test("bridge context dedups against a prior copy on the branch (once-only per live copy)", async () => {
   const cwd = scaffoldRepo();
   selectTombell(cwd);
