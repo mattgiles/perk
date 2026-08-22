@@ -3380,7 +3380,14 @@ timeout is **inconclusive, not unhealthy** (`awaiting_run` + `timed_out:true`, e
   "next_action": "<§8.37 verdict>" | null, // set on every in-flight arm
   "node": "<id>" | null, "stage": "implement" | "address" | null,
   "run_id": "<ULID>" | null,     // present on dispatched
-  "remediation": "<cmd>" | null, // present on plan_required AND the merged-learn-pending arm
+  "remediation": "<cmd>" | null, // present on plan_required, the merged-learn-pending arm,
+                                 // and every stacked blocked arm (build_blocked /
+                                 // repair_required / handoff_required — the owning command)
+  "reason": "<detail>" | null,   // present on the stacked blocked arms (the exact veto /
+                                 // the composed handoff summary)
+  "blockers": […],               // present on the stacked blocked arms: the shared §8.46
+                                 // GateBlockerOut rows (technical rows on the veto arms,
+                                 // handoff rows on handoff_required)
   "closed": false,               // present on completed (+ "audit": [{node,status,pr}, …])
   "timed_out": false,            // present on awaiting_run under --wait
   "dry_run": false }

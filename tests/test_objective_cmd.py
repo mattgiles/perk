@@ -1877,6 +1877,9 @@ def test_show_stacked_degrades_tolerantly_when_the_live_read_fails(monkeypatch):
 
 
 def test_show_incremental_payload_stays_byte_identical(monkeypatch):
+    # The BYTE pin: the incremental envelope serializes exactly the pre-growth shape — no
+    # stacked_readiness key, no field reorder, no nested-shape change (a key-set comparison
+    # would let all of those pass silently).
     from perk.cli.commands.objective import show_cmd
 
     monkeypatch.setattr(
@@ -1890,19 +1893,52 @@ def test_show_incremental_payload_stays_byte_identical(monkeypatch):
         ),
     )
     result = _invoke(["objective", "show", "42", "--json"])
-    payload = json.loads(result.output)
-    assert "stacked_readiness" not in payload
-    assert set(payload) == {
-        "success",
-        "error_type",
-        "objective",
-        "summary",
-        "nodes",
-        "next_node",
-        "resumable_claims",
-        "selection_kind",
-        "all_complete",
+    expected = {
+        "success": True,
+        "error_type": None,
+        "objective": {
+            "id": "42",
+            "url": "u/42",
+            "title": "Obj",
+            "header": {"run_id": "01RID"},
+        },
+        "summary": {
+            "pending": 1,
+            "planning": 0,
+            "in_progress": 0,
+            "done": 1,
+            "blocked": 0,
+            "skipped": 0,
+            "total": 2,
+        },
+        "nodes": [
+            {
+                "id": "1.1",
+                "description": "A",
+                "status": "done",
+                "pr": None,
+                "phase": "Phase 1",
+            },
+            {
+                "id": "1.2",
+                "description": "B",
+                "status": "pending",
+                "pr": None,
+                "phase": "Phase 1",
+            },
+        ],
+        "next_node": {
+            "id": "1.2",
+            "description": "B",
+            "status": "pending",
+            "pr": None,
+            "phase": "Phase 1",
+        },
+        "resumable_claims": [],
+        "selection_kind": "plannable",
+        "all_complete": False,
     }
+    assert result.stdout == json.dumps(expected) + "\n"
 
 
 def test_not_a_repo_exit_2(monkeypatch):

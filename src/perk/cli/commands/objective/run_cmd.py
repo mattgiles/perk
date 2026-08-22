@@ -31,6 +31,7 @@ from perk.cli.commands.objective.shared import (
     stacked_lower_attention,
     stacked_selection,
     technical_gate_blockers,
+    unready_dependency_blockers,
 )
 from perk.cli.context import require_github, require_repo
 from perk.cli.emit import fail
@@ -483,6 +484,9 @@ def _run_impl(
                 )
                 return payload
             if gate.unready_dependencies:
+                # Every stacked blocked arm carries the shared §8.46 rows — this defensive
+                # fallback included (the dependency_not_ready technical rows).
+                rows = unready_dependency_blockers(stacked.train, gate)
                 payload.update(
                     action="build_blocked",
                     reason="; ".join(
@@ -490,6 +494,7 @@ def _run_impl(
                         for dep in gate.unready_dependencies
                     ),
                     remediation=f"perk objective stack status {number}",
+                    blockers=[row.model_dump(mode="json") for row in rows],
                 )
                 return payload
         payload.update(

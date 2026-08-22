@@ -3696,10 +3696,17 @@ def test_execution_fresh_start_refuses_handoff_blocked_before_the_parent_fetch()
     assert git.calls == []  # refused before the parent fetch
 
 
-def test_publication_ready_check_stays_handoff_ungated() -> None:
-    # The publish-ungated regression: require_ready_layer (the shared technical check
-    # publish.py::_route routes submit + address finalization through) succeeds on a train
-    # whose predecessor is published but unstamped/stale — publication never reads handoff.
+@pytest.mark.parametrize(
+    ("handoff", "stamped"),
+    [(LayerHandoff.UNSTAMPED, None), (LayerHandoff.STALE, "c" * 40)],
+)
+def test_publication_ready_check_stays_handoff_ungated(
+    handoff: LayerHandoff, stamped: str | None
+) -> None:
+    # The unit half of the publish-ungated regression: require_ready_layer (the shared
+    # technical check) never reads handoff. The path-level half — through the real
+    # `publish.py::_route` boundary submit + address finalization share — is
+    # tests/test_delivery_publish.py::test_publication_never_reads_the_predecessor_handoff.
     nodes = (
         ObjectiveNode(id="1.1", description="Bottom", status=NodeStatus.IN_PROGRESS, pr="#101"),
         ObjectiveNode(
@@ -3715,7 +3722,8 @@ def test_publication_ready_check_stays_handoff_ungated() -> None:
                 "plan-101",
                 pr_number=201,
                 publication=LayerPublication.PUBLISHED,
-                handoff=LayerHandoff.UNSTAMPED,
+                handoff=handoff,
+                stamped_head=stamped,
             ),
             _train_layer("1.2", "102", "plan-102"),
         ),

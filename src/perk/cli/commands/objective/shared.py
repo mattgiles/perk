@@ -137,7 +137,7 @@ def handoff_gate_blockers(
     return tuple(_handoff_row(layer) for layer in layers)
 
 
-def _unready_dependency_rows(
+def unready_dependency_blockers(
     status: train_mod.DeliveryTrain, gate: train_mod.HandoffGate
 ) -> tuple[GateBlockerOut, ...]:
     """The defensive ``dependency_not_ready`` arm (contracts.md §8.46): the train's blocker
@@ -182,7 +182,7 @@ def compose_planning_gate(
         )
     if gate.unready_dependencies:
         return PlanningGateOut(
-            node_id=candidate, ready=False, blockers=_unready_dependency_rows(status, gate)
+            node_id=candidate, ready=False, blockers=unready_dependency_blockers(status, gate)
         )
     return PlanningGateOut(node_id=candidate, ready=True, blockers=())
 
@@ -215,18 +215,26 @@ def handoff_blocked_summary(node_id: str, layers: tuple[train_mod.TrainLayer, ..
 @dataclass(frozen=True)
 class StackedSelection:
     """The readiness-derived planning classification of a STACKED objective (contracts.md
-    §8.46) — the one seam the plan door, ``objective next``, and the run supervisor consume.
+    §8.46) — the one seam the plan door, ``objective next``, ``objective show``, and the run
+    supervisor consume.
 
-    ``kind`` is one of ``"build_blocked"`` (the train's readiness veto — ``reason`` carries
-    the exact findings), ``"handoff_blocked"`` (the candidate is technically plannable but a
-    direct dependency's handoff stamp is missing/stale/suspended — ``handoff_blockers``
-    carries the blocking layers in delivery order), ``"plannable"`` (the readiness-derived
-    candidate has no committed plan yet), ``"in_flight"`` (the candidate carries a committed
-    plan — implement it), or ``"no_candidate"`` (every layer is published — consumers fall
-    through to the existing graph classification; completion semantics unchanged). ``node``
-    is the candidate for ``plannable``/``in_flight``/``handoff_blocked``, else ``None``.
-    ``ready``/``reason`` mirror the train's
-    :class:`~perk.delivery.train.BuildReadiness` (the handoff arm composes its own reason).
+    ``kind`` is one of ``"build_blocked"``, ``"handoff_blocked"`` (the candidate is
+    technically plannable but a direct dependency's handoff stamp is missing/stale/suspended
+    — ``handoff_blockers`` carries the blocking layers in delivery order and ``reason`` is
+    the composed human summary), ``"plannable"`` (the readiness-derived candidate has no
+    committed plan yet), ``"in_flight"`` (the candidate carries a committed plan — implement
+    it), or ``"no_candidate"`` (every layer is published — consumers fall through to the
+    existing graph classification; completion semantics unchanged).
+
+    ``build_blocked`` has three variants — :func:`selection_gate_blockers` relies on the
+    distinctions: the train's readiness veto (``node=None``; ``ready``/``reason`` mirror
+    :class:`~perk.delivery.train.BuildReadiness` — the exact findings/operation); the
+    not-plannable-status candidate (``node`` = that candidate on a technically READY train;
+    ``reason`` names the status); and the gate's defensive unready-dependency arm
+    (``node=None`` on a technically READY train; ``reason`` = the joined
+    ``"<dep>: <reason>"`` rows). ``node`` is otherwise the candidate for
+    ``plannable``/``in_flight``/``handoff_blocked``, else ``None``; ``ready`` is ``True``
+    only on ``plannable``/``in_flight``.
     """
 
     kind: str
@@ -347,7 +355,7 @@ def selection_gate_blockers(selection: "StackedSelection") -> tuple[GateBlockerO
     # (whose recomputed gate is empty).
     gate = train_mod.check_handoff_gate(status, node_id=candidate)
     if gate.unready_dependencies:
-        return _unready_dependency_rows(status, gate)
+        return unready_dependency_blockers(status, gate)
     return technical_gate_blockers(status)
 
 

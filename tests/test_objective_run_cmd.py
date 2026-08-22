@@ -1109,6 +1109,53 @@ def test_no_candidate_graph_fallback_is_handoff_gated(monkeypatch):
     assert [row["dependency_node_id"] for row in payload["blockers"]] == ["1.1"]
 
 
+def test_no_candidate_graph_fallback_unready_dependency_fails_closed_with_rows(monkeypatch):
+    # The fail-closed sibling of the handoff arm: a graph-plannable node whose skip-contracted
+    # direct dep resolves to a layerless non-terminal node pauses as build_blocked carrying
+    # the full dependency_not_ready blocker row — never a bare plan_required.
+    from dataclasses import replace
+
+    _authed(monkeypatch)
+    nodes = (
+        objective.ObjectiveNode(
+            id="1.1", description="A", status=N.IN_PROGRESS, pr="#6", depends_on=()
+        ),
+        objective.ObjectiveNode(id="1.2", description="S", status=N.SKIPPED, depends_on=("1.1",)),
+        objective.ObjectiveNode(id="1.3", description="C", status=N.PENDING, depends_on=("1.2",)),
+    )
+    train = replace(
+        _supervisor_train(()),
+        build_readiness=train_mod.BuildReadiness(None, False, "all layers published"),
+        objective_nodes=nodes,
+    )
+    selection = _stacked_selection("no_candidate")
+    selection = selection.__class__(**{**selection.__dict__, "train": train})
+    monkeypatch.setattr(run_cmd, "stacked_selection", lambda *_a: selection)
+    result = _invoke(monkeypatch, ["137", "--json"], objective_state=_stacked_state(nodes))
+    payload = _payload(result)
+    assert payload["action"] == "build_blocked"
+    assert payload["reason"] == (
+        "1.1: no train layer exists for this dependency (status in_progress) — fail closed"
+    )
+    assert payload["remediation"] == "perk objective stack status 137"
+    assert payload["blockers"] == [
+        {
+            "kind": "technical",
+            "code": "dependency_not_ready",
+            "message": (
+                "1.1: no train layer exists for this dependency (status in_progress) — fail closed"
+            ),
+            "dependency_node_id": None,
+            "plan": None,
+            "pr": None,
+            "handoff_state": None,
+            "stamped_head": None,
+            "current_head": None,
+            "remediation": "perk objective stack status 137",
+        }
+    ]
+
+
 def test_in_flight_dispatch_stays_handoff_ungated(monkeypatch):
     # An in-flight candidate resumes/dispatches even while its dep sits unstamped: the
     # structural fresh-vs-resume boundary lives in execution Prepare, not the supervisor.

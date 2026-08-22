@@ -177,21 +177,28 @@ gh pr view    # base: main, draft
 
 Keep this session open — you'll come back to it in Step 6.
 
-## Step 5 — Plan, implement, and publish layer 2
+## Step 5 — Ready layer 1, then plan, implement, and publish layer 2
 
-Now the stacked shape appears. Plan the next node — from a fresh shell in the scratch
-repo's root checkout:
+Now the stacked shape appears. One gate applies before the next node can be planned:
+planning a dependent requires the predecessor's **post-review handoff** — an unstamped
+predecessor refuses typed `node_not_handoff_ready` naming the exact command to run. So
+first review layer 1 on its draft PR (`gh pr view --web` from Step 4 — in this tutorial's
+scratch world, a quick self-review), then record the handoff — from layer 1's session:
+
+```
+/ready
+```
+
+(or `perk ready <plan-1>` from any shell). Now plan the next node — from a fresh shell in
+the scratch repo's root checkout:
 
 ```bash
 perk objective plan <N>
 ```
 
 perk selects node `1.2` even though layer 1 is only published, not merged — on a stacked
-train, a published-but-unmerged predecessor is exactly what the next layer builds on. One
-gate applies first: planning a dependent requires the predecessor's **post-review handoff**
-— review layer 1 on its draft PR, then record the handoff (`perk ready <plan-1>`, or
-`/ready` from layer 1's session) before planning node 1.2; an unstamped predecessor refuses
-typed `node_not_handoff_ready` naming that exact command. Type:
+train, a published-but-unmerged (reviewed and handoff-stamped) predecessor is exactly what
+the next layer builds on. Type:
 
 > Plan node 1.2: add slug(text) to textkit.py, built on normalize() — join the normalized
 > words with hyphens.
@@ -268,8 +275,10 @@ individually, from each layer's own session (or worktree):
 /ready
 ```
 
-Run it in the layer-2 session (layer 1's handoff was already recorded in Step 5 — a re-run
-converges idempotently on the same stamp). Readying records the handoff
+Run it in the layer-1 session, then in the layer-2 session. Layer 1 was already stamped in
+Step 5, but Step 6's fix moved its head — a content change stales the old stamp (the stamp
+binds to the exact reviewed head), so this re-run records a fresh one at the amended head.
+Readying records the handoff
 only — it never merges anything (it also unblocks planning of the layer's direct
 dependents, which is exactly what Step 5 used). Both PRs now show ready-for-review while
 the train waits, whole, for the landing.
