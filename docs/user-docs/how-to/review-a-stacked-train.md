@@ -35,8 +35,15 @@ default).
 4. **Approve on the draft; the author records the handoff.** Review verdicts are the
    ordinary per-PR ones, made on **draft** layer PRs. After review + address, the author
    records the deliberate handoff with `/ready` — it stamps the exact reviewed head into the
-   delivery journal (and flips a draft ready-for-review). Readying still never merges
-   anything — a fully-ready train waits, whole, for its landing.
+   delivery journal (and flips a draft ready-for-review). The stamp **continues into the
+   ready-time reconcile pass**: the author's session (or the flat `perk ready <PLAN>` launch
+   from a terminal) reconciles the objective against the accepted layer's pinned
+   `parent_checkpoint..stamped_head` range — Reconcilable prose, node descriptions, and
+   guarded tail-appends only, never node status or PR mutations. Converting a stamped PR
+   back to draft is a **transient hold** (`handoff suspended`) — any return to non-draft
+   resumes it. And address commits **stale the stamp naturally** (it binds to the exact
+   reviewed head): after the fix is addressed, the author re-readies. Readying still never
+   merges anything — a fully-ready train waits, whole, for its landing.
 5. **Never press GitHub's merge button on an individual layer.** A layer PR's merge target
    is its *parent's branch*: merging one layer alone merges into the wrong target and tears
    the train. perk's own `/land` refuses a stacked plan with a typed `stacked_plan` error —
