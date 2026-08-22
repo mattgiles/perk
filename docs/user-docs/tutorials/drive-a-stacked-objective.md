@@ -181,16 +181,48 @@ Keep this session open — you'll come back to it in Step 6.
 
 Now the stacked shape appears. One gate applies before the next node can be planned:
 planning a dependent requires the predecessor's **post-review handoff** — an unstamped
-predecessor refuses typed `node_not_handoff_ready` naming the exact command to run. So
-first review layer 1 on its draft PR (`gh pr view --web` from Step 4 — in this tutorial's
-scratch world, a quick self-review), then record the handoff — from layer 1's session:
+predecessor refuses typed `node_not_handoff_ready` naming the exact command to run. See
+the gate on the train itself:
+
+```bash
+perk objective stack status <N>
+```
+
+```
+Objective #<N>: stacked delivery train (base main, published prefix 1/2)
+  lineage 01XXXXXXXXXXXXXXXXXXXXXXXX
+  1. 1.1 plan #<plan-1> [published] pr #<pr-1> (draft) stack exact handoff unstamped
+  2. 1.2 unplanned [unpublished] no pr
+  next build-ready: 1.2
+  planning gated: 1.2 waits on 1.1 (plan #<plan-1>, PR #<pr-1>) — unstamped; record the handoff: perk ready <plan-1>
+no findings
+```
+
+Build-ready and handoff-gated are different axes: node `1.2` is the next build-ready
+layer, yet planning it stays gated until layer 1's handoff is recorded — the status names
+both, with the copyable remediation. So first review layer 1 on its draft PR
+(`gh pr view --web` from Step 4 — in this tutorial's scratch world, a quick self-review),
+then record the handoff — from layer 1's session:
 
 ```
 /ready
 ```
 
-(or `perk ready <plan-1>` from any shell). Now plan the next node — from a fresh shell in
-the scratch repo's root checkout:
+`/ready` records the deliberate handoff stamp at the exact reviewed head (flipping the
+draft ready-for-review). The stamp is not the end of the gesture: the same session is
+driven straight into the **ready-time reconcile pass** over the pinned
+`parent_checkpoint..stamped_head` range — the accepted-but-not-landed layer's exact diff.
+Its powers are deliberately narrow — rewrite the objective's Reconcilable prose, update
+node **descriptions**, add genuinely-new nodes only as guarded `pending` tail-appends —
+never node status or PR mutations (nodes stay `in_progress` until the whole train lands).
+An honest no-op is a legitimate outcome, and the pass runs on **every** successful stamp,
+re-stamps included — see [`/ready`](../reference/in-session/workflow-commands.md#ready)
+for the full detail.
+
+`perk ready <plan-1>` from an interactive terminal does the same — it records the stamp,
+then launches the seeded ready-time reconcile session; a non-interactive run stamps and
+honestly reports that the pass was not launched. Now plan the next node — from a fresh
+shell in the scratch repo's root checkout:
 
 ```bash
 perk objective plan <N>
@@ -230,8 +262,8 @@ perk objective stack status <N>
 ```
 Objective #<N>: stacked delivery train (base main, published prefix 2/2)
   lineage 01XXXXXXXXXXXXXXXXXXXXXXXX
-  1. 1.1 plan #<plan-1> [published] pr #<pr-1> (draft) stack exact
-  2. 1.2 plan #<plan-2> [published] pr #<pr-2> (draft) stack exact
+  1. 1.1 plan #<plan-1> [published] pr #<pr-1> (ready) stack exact handoff ready
+  2. 1.2 plan #<plan-2> [published] pr #<pr-2> (draft) stack exact handoff unstamped
   build blocked: all layers published or landed
 no findings
 ```
@@ -278,7 +310,10 @@ individually, from each layer's own session (or worktree):
 Run it in the layer-1 session, then in the layer-2 session. Layer 1 was already stamped in
 Step 5, but Step 6's fix moved its head — a content change stales the old stamp (the stamp
 binds to the exact reviewed head), so this re-run records a fresh one at the amended head.
-Readying records the handoff
+(Converting a stamped PR back to draft is only a transient hold — `handoff suspended` —
+and any return to non-draft resumes it; see
+[How to recover a stacked delivery train](../how-to/recover-a-stacked-train.md#handoff-repair)
+for the repair detail.) Readying records the handoff
 only — it never merges anything (it also unblocks planning of the layer's direct
 dependents, which is exactly what Step 5 used). Both PRs now show ready-for-review while
 the train waits, whole, for the landing.
@@ -339,8 +374,9 @@ You authored an objective whose plans **could not land independently** — layer
 layer 1's code — chose **stacked** delivery past a real capability preflight, published two
 draft PRs as a native GitHub **stack** (each layer's PR on its parent's branch, each diff
 just that layer), watched a layer-1 fix **cascade automatically** through the published
-layers above it, readied each layer individually, and landed the whole train as **one
-atomic merge** that finalized every layer and closed the objective.
+layers above it, readied each layer individually — each stamp continuing into the
+ready-time reconcile pass — and landed the whole train as **one atomic merge** that
+finalized every layer and closed the objective.
 
 The `perk-stacked-tutorial` repo was disposable — delete it whenever you like:
 

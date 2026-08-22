@@ -1,6 +1,6 @@
 ---
 title: "How to recover a stacked delivery train"
-description: "Diagnose an interrupted or drifted stacked-train operation from its symptom and conclude it with the right sync or recover move."
+description: "Diagnose an interrupted or drifted stacked-train operation from its symptom and conclude it with the right sync, recover, or handoff-repair move."
 sidebar:
   order: 2185
 sidebarGroup: "Objectives & learnings"
@@ -12,7 +12,8 @@ Diagnose an interrupted or drifted stacked-train operation from its symptom and 
 with the right move. The first move is always **read-only visibility**:
 [`perk objective stack status`](../reference/cli/objective.md#perk-objective-stack-status-objective)
 shows the train's unresolved operations, the pending conflict-continuation manifest, and any
-orphaned residue; [`perk objective stack recover
+orphaned residue — plus each published layer's `handoff <state>` and any `planning gated:`
+line (the handoff rows below); [`perk objective stack recover
 --dry-run`](../reference/cli/objective.md#perk-objective-stack-recover-objective) classifies every
 unresolved operation against fresh authority **without acting**. Read first, then pick the
 row below that matches what you see. In a session, the same surfaces are `/objective-stack`,
@@ -37,6 +38,19 @@ row below that matches what you see. In a session, the same surfaces are `/objec
 | A published branch was edited out-of-band — sync refuses `remote_drift` / `pr_drift` | [`perk objective stack status`](../reference/cli/objective.md#perk-objective-stack-status-objective) | — | A deliberate edit: adopt it with [`stack sync --adopt NODE`](../reference/cli/objective.md#perk-objective-stack-sync-objective) and cascade the layers above; an edit you can't explain: investigate before adopting anything |
 | The objective base advanced (`base_advanced` notice in the status report — a notice, never a blocker) | [`perk objective stack status`](../reference/cli/objective.md#perk-objective-stack-status-objective) | — | [`stack sync --base`](../reference/cli/objective.md#perk-objective-stack-sync-objective) re-anchors the whole train onto the advanced base |
 | Leftover `sync-*` worktrees or `refs/perk/sync/*` refs (a killed sync process) | [`perk objective stack recover`](../reference/cli/objective.md#perk-objective-stack-recover-objective) | — | The recover **orphan sweep** collects residue no parseable continuation manifest claims, after every conclude/report pass; an unparseable manifest skips the whole sweep (`sweep_skipped` — an unreadable claim could be protecting anything) |
+
+## Handoff repair
+
+Handoff states are review-side facts on the **stamp axis** — these repairs never involve
+`stack sync` or `stack recover`.
+
+| Symptom | What happened | Repair |
+|---|---|---|
+| Planning refuses typed `node_not_handoff_ready` (or `objective next`/`show`/`run` names a handoff blocker) | A direct dependency's post-review handoff stamp is missing | Run the copyable remediation the refusal prints: [`perk ready <PLAN>`](../reference/cli.md#perk-ready-plan) on the blocking dependency, after its review + address |
+| `handoff stale` — the status line discloses `stamped <sha12> ≠ head <sha12>` | The layer's head moved after the stamp: a self-rewrite (address / re-`/submit`) or a cascade from a lower layer's fix — a stamp binds the exact reviewed head and never carries forward mechanically | Re-review the new head, then re-ready (`/ready`, or `perk ready <PLAN>`) |
+| `handoff suspended` | The stamped PR was converted back to draft — a transient hold; the stamp still stands | Any return to non-draft resumes it — e.g. the idempotent `/ready` re-run (it converges on the same stamp) |
+| The stamp succeeded but the ready-time reconcile session failed to launch (the loud second outcome, exit 1) | Only the pass launch failed; the stamp is never rolled back | The stamp stands; re-run `perk ready <PLAN>` from an interactive terminal to enter the pass |
+| The ready-time pass refuses `stacked_append_refused` | The tail-append guard blocked a structural roadmap change (a stacked roadmap accepts only guarded `pending` tail-appends) | Structural changes route through [`perk objective replan`](../reference/cli/objective.md#perk-objective-replan-number) |
 
 ## What recover never does
 
