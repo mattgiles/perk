@@ -757,8 +757,29 @@ descriptions+prose write — with the guarded tail-append the one power never ex
 
 ### S10 — objective land
 
-*Not yet executed.* (Dry-run readiness + land plan; the confirmed atomic land; finalization,
-close, the post-land reconcile gesture.)
+**Readiness half executed 2026-08-22** (`perk objective stack land 1980 --dry-run`, run from
+the record worktree — read-only): **`disposition: "ready"`**, `blockers: []`.
+
+- `rules: {squash_allowed: true, merge_queue_required: false}`; native stack API surface
+  present (host-schema evidence only).
+- The exact bottom→top **LandPlan**: `mode: "stack_merge_async"`, `merge_method: "squash"`,
+  `top_pr_number: 1984`, `top_head_sha: 149a8dcf…`; layers `[1982: e2cb9e5d… → ca046b8b…,
+  1984: ca046b8b… → 149a8dcf…]` — each layer's `base_sha` = its predecessor's head; layer 1's
+  = the S0 main head exactly (**main never advanced — the base-advancement cascade arm did
+  not fire**; § Named residuals).
+- Per-layer observations: `OPEN ready … MERGEABLE/CLEAN` ×2; information rows: two
+  `active_worktree` advisories (landing merges remote PRs; local branches untouched) + one
+  `optional_check_failed` on #1984 ("lint · typecheck · test") — diagnosed benign: the GHA
+  run on `plan-1983` at 22:52:55Z was **CANCELLED** (superseded by the cascade push's
+  concurrency cancel) and the current run on the same head is SUCCESS; the rollup reports
+  both (the prior gate's d2 "duplicate check-run reporting on cascade-rewritten heads"
+  sibling observation, recurring; optional either way — no required checks).
+- **By-omission capture:** the readiness verdict consulted PR state, drafts, bases, checks,
+  and mergeability — never the ready stamps (the stamp is planning control, not merge
+  policy; § matrix family 5).
+
+**Confirmed-land half:** *pending — the operator-confirmed `perk objective stack land 1980`
++ the post-land `/objective-reconcile` gesture.*
 
 ### S11 — census + residue sweep
 
