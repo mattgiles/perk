@@ -343,7 +343,7 @@ Linear-backend arms (the dogfood repo is GitHub).
 
 ## Part B — the captured evidence
 
-> **Execution not started.** The live legs run as post-submit follow-up phases; each phase
+> **Execution in progress.** The live legs run as post-submit follow-up phases; each phase
 > lands its dated evidence here as docs-only commits. Unexecuted steps' tables remain
 > skeletons — no cell pre-claims an outcome.
 
@@ -351,18 +351,18 @@ Linear-backend arms (the dogfood repo is GitHub).
 
 | Phase boundary | Main-checkout SHA | `which perk` | Notes |
 |---|---|---|---|
-| — | — | — | — |
+| S0–S1 (2026-08-22) | `e2cb9e5de3b9eb37668b9ad31fea449979b56fc7` | `/Users/mattgiles/.local/bin/perk` (`perk 3.1.0`, the uv tool shim) | operator-installed via `uv tool install --force --from ~/dev/github/mattgiles/perk perk` from the dev (main) checkout at that SHA; `npm ci` refreshed in the same driving checkout (operator-attested 2026-08-22) |
 
 ### S0 — preconditions
 
-*Not yet executed.*
+Captured 2026-08-22 (operator, dev checkout root).
 
 | Check | Expected | Observed |
 |---|---|---|
-| provenance | pinned binary from main @ recorded SHA; `npm ci` in the dev checkout | — |
-| branch rules re-check | `gh api repos/mattgiles/perk/rules/branches/main` → no required-review / merge-queue rule | — |
-| suspend gesture available | `gh pr ready --help` documents `--undo` | — |
-| prior capability rows | reused by reference (`stacked-publication-dogfood.md` Step 0, `stacked-delivery-dogfood.md` Step 0) — same repo/base | — |
+| provenance | pinned binary from main @ recorded SHA; `npm ci` in the dev checkout | `git rev-parse HEAD` → `e2cb9e5de3b9eb37668b9ad31fea449979b56fc7`; `which perk` → `/Users/mattgiles/.local/bin/perk`; `perk --version` → `perk 3.1.0`; `npm ci` run (attested — the provenance row above is the machine half) |
+| branch rules re-check | `gh api repos/mattgiles/perk/rules/branches/main` → no required-review / merge-queue rule | `[]` — no branch rules of any type on `main` |
+| suspend gesture available | `gh pr ready --help` documents `--undo` | present: `--undo   Convert a pull request to "draft"` (help caveats "If supported by your plan" — moot here: this public repo's draft layer PRs are already proven live by the prior gates) |
+| prior capability rows | reused by reference (`stacked-publication-dogfood.md` Step 0, `stacked-delivery-dogfood.md` Step 0) — same repo/base | reused as pinned; the one fresh re-check is the rules read above (`[]` also re-confirms no merge-queue rule) |
 
 ### S1 — warm authoring
 
