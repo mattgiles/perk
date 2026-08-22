@@ -1,6 +1,6 @@
 """Tests for the repo-authored-skills substrate (``perk/convergence/init/repo_skills.py``) and
-its supporting GitHub gateway read (``perk/github/repo.py``). Dormant substrate: pure
-parse/validate/render helpers plus the orchestrator, exercised offline.
+its supporting GitHub gateway read (``perk/github/repo.py``): pure parse/validate/render helpers
+plus the orchestrator, exercised offline.
 """
 
 import json
