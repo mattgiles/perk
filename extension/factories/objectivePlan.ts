@@ -822,9 +822,13 @@ export function registerObjectivePlan(pi: ExtensionAPI, gating: ToolGating): voi
     label: "Reconcile objective prose",
     description:
       "Rewrite the objective's Reconcilable prose region (the marker-bounded prose in the " +
-      "objective body) to reconcile it against a merged PR. The Mechanical roadmap table and any " +
-      "Immutable notes are NEVER touched. Delegates the write to the perk cold door.",
-    promptSnippet: "Reconcile the objective's Reconcilable prose region against the merged diff",
+      "objective body) to reconcile it against the pass's evidence — a merged PR (post-land) or " +
+      "a stacked layer's pinned accepted diff range (the ready-time pass). The Mechanical " +
+      "roadmap table and any Immutable notes are NEVER touched. Delegates the write to the perk " +
+      "cold door.",
+    promptSnippet:
+      "Reconcile the objective's Reconcilable prose region against the pass's evidence " +
+      "(merged diff, or the ready-time pinned accepted range)",
     promptGuidelines: RECONCILE_TOOL_GUIDELINES,
     executionMode: "sequential",
     parameters: {

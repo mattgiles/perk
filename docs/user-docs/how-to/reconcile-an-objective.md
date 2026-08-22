@@ -60,9 +60,9 @@ The pass runs in two situations with two evidence sources:
   merged/closed PR mid-pass stops the pass — the post-land reconcile owns that world). Powers
   narrow: prose rewrites, node **descriptions**, and guarded **`pending` tail-appends** only —
   no status or PR-link mutations (nothing landed yet). On a stacked objective, `node-add` /
-  `add_objective_node` accepts **only** a tail-append that leaves every existing node, edge,
-  and delivery-order position untouched; a refusal (`stacked_append_refused`) means the
-  discovery is structural — route it through
+  `add_objective_node` accepts **only** a tail-append that orders strictly last with the
+  existing delivery order as an unchanged prefix; a refusal (`stacked_append_refused`) means
+  the discovery is structural — route it through
   [`perk objective replan`](../reference/cli/objective.md#perk-objective-replan-number).
 
 ## Related

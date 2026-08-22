@@ -95,10 +95,10 @@ node back to non-terminal via `objective_node`/`perk objective node` does **not*
 the invariant rides node *insertion* only.
 
 **Stacked objectives guard the insertion.** On a stacked-delivery objective every node-add is
-validated by the store against its own fresh read as a **tail-append**: exactly one new
-`pending` node that orders strictly last, leaving every existing node, dependency encoding,
-resolved edge, and delivery-order position untouched (dry-run included). Anything else refuses
-typed (`stacked_append_refused`) — a refusal means the discovery is structural, and the route
+validated by the store against its own fresh read as a **tail-append**: one new `pending` node
+that orders strictly last, with the existing delivery order as an unchanged prefix and no
+inferred↔explicit dependency-mode flip (dry-run included). Anything else refuses typed
+(`stacked_append_refused`) — a refusal means the discovery is structural, and the route
 is [`perk objective replan`](./cli/objective.md#perk-objective-replan-number). Incremental
 objectives stay unguarded.
 

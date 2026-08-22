@@ -34,14 +34,15 @@ import { report } from "../surfaces/report.ts";
 const READY_EVIDENCE_ID_RE = /^[A-Za-z0-9._-]{1,64}$/;
 const READY_FULL_SHA_RE = /^[0-9a-f]{40}$/;
 
-/** The stacked handoff cohort — decoded all-or-nothing (advisory detail, never half-rendered). */
+/** The stacked handoff cohort — decoded all-or-nothing (advisory detail, never half-rendered).
+ * Deliberately facts-only: the worker envelope's `reconcile_notice`/`reconcile_retry` are cold
+ * presentation strings — the warm door derives its own retry gesture from `plan`, so missing
+ * presentation data can never suppress an otherwise valid continuation. */
 export interface ReadyHandoff {
   objective: string;
   node: string;
   stamped_head: string;
   stamp_advanced: boolean;
-  reconcile_notice: string;
-  reconcile_retry: string;
   plan: string;
   parent_checkpoint: string;
 }
@@ -85,8 +86,6 @@ function decodeReady(payload: ColdJson): ReadyOk | null {
     const node = stringField(payload, "node");
     const stampedHead = stringField(payload, "stamped_head");
     const stampAdvanced = booleanField(payload, "stamp_advanced");
-    const reconcileNotice = stringField(payload, "reconcile_notice");
-    const reconcileRetry = stringField(payload, "reconcile_retry");
     const plan = stringField(payload, "plan");
     const parentCheckpoint = stringField(payload, "parent_checkpoint");
     if (
@@ -94,8 +93,6 @@ function decodeReady(payload: ColdJson): ReadyOk | null {
       node !== undefined &&
       stampedHead !== undefined &&
       stampAdvanced !== undefined &&
-      reconcileNotice !== undefined &&
-      reconcileRetry !== undefined &&
       plan !== undefined &&
       parentCheckpoint !== undefined
     ) {
@@ -104,8 +101,6 @@ function decodeReady(payload: ColdJson): ReadyOk | null {
         node,
         stamped_head: stampedHead,
         stamp_advanced: stampAdvanced,
-        reconcile_notice: reconcileNotice,
-        reconcile_retry: reconcileRetry,
         plan,
         parent_checkpoint: parentCheckpoint,
       };
@@ -131,11 +126,12 @@ export async function markReady(pi: ExtensionAPI, ctx: ExtensionContext): Promis
   let message = `${verb}: PR #${r.data.pr.number} is open for review.`;
   const handoff = r.data.handoff;
   if (handoff !== undefined) {
+    // Stamp facts only — the continuation is announced by driveReadyReconcile, and only once
+    // its refusal arms (gate, cohort, evidence) have actually accepted the drive.
     const stamped = handoff.stamp_advanced ? "Handoff stamped" : "Handoff already stamped";
     message +=
       ` ${stamped}: objective #${handoff.objective} node ${handoff.node} at ` +
-      `${handoff.stamped_head}. Continuing into the ready-time reconcile pass ` +
-      `(re-run: ${handoff.reconcile_retry}).`;
+      `${handoff.stamped_head}.`;
   }
   return ok(message, r.data, { terminate: true });
 }
@@ -220,6 +216,14 @@ export async function driveReadyReconcile(
       stamped_head: handoff.stamped_head,
       read_clause: readClause,
     }) + bindingSuffix(ctx.cwd, "command:objective-reconcile");
+  // Announce the continuation only HERE — after every refusal arm has accepted the drive.
+  report(
+    ctx,
+    "ready",
+    "info",
+    `continuing into the ready-time reconcile pass — objective #${handoff.objective}, ` +
+      `pinned range ${handoff.parent_checkpoint}..${handoff.stamped_head}`,
+  );
   if (ctx.isIdle()) {
     // The `/ready` command path (idle): inject an immediate turn.
     pi.sendUserMessage(message);

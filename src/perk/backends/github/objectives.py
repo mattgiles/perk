@@ -738,7 +738,7 @@ def add_objective_node(
         raise _exec.GitHubError(f"could not add node to phase {phase} on #{number} (id collision)")
     updated, new_id = result
     fresh_header = plan.find_metadata_block(body, objective.OBJECTIVE_HEADER_KEY) or {}
-    objective_store.ensure_stacked_tail_append(fresh_header, nodes, updated)
+    objective_store.ensure_stacked_tail_append(fresh_header, nodes, updated, new_id)
     if dry_run:
         return ObjectiveNodeAdd(number=number, node_id=new_id, comment_updated=False, dry_run=True)
 

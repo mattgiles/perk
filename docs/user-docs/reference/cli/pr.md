@@ -138,9 +138,9 @@ stamp_advanced, reconcile_notice, reconcile_retry, plan, parent_checkpoint` (all
 offline dry-run; `stacked: false` with the rest null on an incremental plan; all populated on
 stacked success — `reconcile_notice` reports that the ready-time reconcile pass was **not**
 launched because this worker is deterministic and non-launching, naming `perk ready <plan>` in
-an interactive terminal as the launcher; `reconcile_retry` carries the copyable re-run; `plan`
-+ `parent_checkpoint` are the continuation evidence — with `stamped_head` they pin the accepted
-diff range `parent_checkpoint..stamped_head`).
+an interactive terminal as the launcher; `reconcile_retry` carries the copyable re-run;
+`plan` and `parent_checkpoint` are the continuation evidence — with `stamped_head` they pin
+the accepted diff range `parent_checkpoint..stamped_head`).
 
 **The `perk ready` wrapper on top of this worker**: identical options (`PLAN`, `--dry-run`,
 `--json`), identical failure envelopes and exit codes, and byte-identical `--json` output. Its

@@ -256,10 +256,13 @@ and joined via the standard two-line taxonomy upkeep — guarded by
 `tests/test_cli_help_sections.py` + `tests/test_cli_parity_smoke.py::EXPECTED_SURFACE`. Derive
 the current taxonomy from `alias.py`, never from this doc.
 
-**`pr ready` is worker-only (W), not L+W** — `ready` is not a registry stage and has no launcher; it
-is only the `perk pr ready` worker plus the warm `/ready` door, and merely gains the flat alias
-`perk ready`. A future implementer must **not** build a launcher for it (that would require an
-illegal `ready` registry stage). See §11.7 Correction 1.
+**`pr ready` is worker-only (W), not L+W** — `ready` is not a registry stage and has no generated
+launcher; `perk pr ready` is the deterministic non-launching worker. *Amended by contracts.md
+§8.66:* the flat spelling `perk ready` is now a distinct **continuation wrapper** command (worker
+mechanics first, then — stacked + interactive only — a seeded ready-time reconcile launch). That
+launch still adds NO `ready` registry stage: it borrows the `objective-save` stage descriptor
+with a `binding_trigger` override, so the original constraint stands — never mint a `ready`
+stage. See §11.7 Correction 1 (as amended).
 
 ## The enacted taxonomy arc (nodes 1.1–3.3, all landed)
 
@@ -331,8 +334,10 @@ A stage with a launcher + warm session-flow but **no deterministic worker** is l
 plain `@click.command` mirroring the launcher's option set by hand (`--worktree`/`--dry-run`/
 `--remote`/`pi_args`), with the two-paragraph short/long help split (documented above). `pr address`
 is this shape. The genuinely merged set is exactly **`pr submit`, `pr land`, `plan save`**. Reaffirm:
-**`pr ready` is worker-only (W)** — not a registry stage, so a launcher would require an illegal
-`ready` stage; it only gains the flat alias `perk ready`.
+**`pr ready` is worker-only (W)** — not a registry stage, so a generated launcher would require an
+illegal `ready` stage. (Since contracts.md §8.66 the flat `perk ready` is a distinct
+continuation-wrapper command — not a launcher for a `ready` stage; its seeded launch borrows
+`objective-save`.)
 
 ### Pure-relocation fold ≠ the launcher+worker merge model
 

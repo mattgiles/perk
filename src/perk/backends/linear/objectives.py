@@ -443,7 +443,7 @@ class LinearObjectiveStore:
             # The stacked tail-append guard (contracts.md §8.66), against this same fresh
             # description read — dry-run included.
             fresh_header = plan.find_metadata_block(body, objective.OBJECTIVE_HEADER_KEY) or {}
-            objective_store.ensure_stacked_tail_append(fresh_header, nodes, updated)
+            objective_store.ensure_stacked_tail_append(fresh_header, nodes, updated, new_id)
             if dry_run:
                 return objective_store.ObjectiveNodeAdd(
                     objective_id=objective_id, node_id=new_id, comment_updated=False, dry_run=True

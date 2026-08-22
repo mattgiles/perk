@@ -404,42 +404,34 @@ def validate_stacked_roadmap(nodes: list[ObjectiveNode]) -> list[str]:
 
 
 def validate_stacked_tail_append(
-    existing: Sequence[ObjectiveNode], candidate: Sequence[ObjectiveNode]
+    existing: Sequence[ObjectiveNode], candidate: Sequence[ObjectiveNode], new_id: str
 ) -> list[str]:
     """Validate one stacked-roadmap node-add as a guarded **tail-append** (contracts.md §8.66)
     — the :func:`validate_stacked_roadmap`-style errors-list contract (``[]`` = valid).
 
     The ready-time reconcile pass may grow an accepted-but-not-landed train only at its tail:
-    the candidate is the existing roadmap plus exactly one new ``pending`` node that orders
-    strictly last, with every existing identity, encoding, resolved edge, and delivery-order
-    position untouched. Anything else is a structural roadmap change and routes through
-    ``perk objective replan``. A ``ValueError`` from the order/edge helpers (a skipped-only
-    cycle) is reported as an error string, never raised.
-
-    Checks, in order: the complete candidate re-validates (:func:`validate_stacked_roadmap`,
-    reported verbatim); exactly one new node, entering as ``pending`` only (also keeps the
-    prefix check non-vacuous — a skipped node would vanish from delivery order); no
-    graph-mode flip (an all-inferred roadmap flipping to explicit-edge mode silently vacates
-    every inferred edge, which order comparison alone can miss); existing identities +
-    ``depends_on`` encodings unchanged; resolved direct edges unchanged over the existing ids
-    (catches inference shifts, e.g. a mid-roadmap phase insertion re-pointing the next
-    phase's first node); and delivery-order prefix identity (the existing order is exactly
-    the candidate order's prefix, the new node the single trailing element).
+    ``candidate`` is the store-composed :func:`add_node` output (existing + the one new node
+    named by ``new_id``), so this guard deliberately does NOT re-census arbitrary candidate
+    shapes — :func:`add_node` already preserves every existing node and ``depends_on``
+    encoding by construction. What it validates: the complete candidate re-validates
+    (:func:`validate_stacked_roadmap`, reported verbatim); the new node enters as ``pending``
+    only (the structural no-premature-status arm — also keeps the prefix check non-vacuous,
+    since a skipped node would vanish from delivery order); no inferred↔explicit graph-mode
+    flip (the flip silently vacates every inferred edge, which order comparison alone can
+    miss); and delivery-order prefix identity — the existing order is exactly the candidate
+    order's prefix with the new node the single trailing element (this also catches inference
+    shifts, e.g. a mid-roadmap phase insertion re-pointing the next phase's first node).
+    Anything refused is a structural roadmap change and routes through
+    ``perk objective replan``. A ``ValueError`` from the order helper (a skipped-only cycle)
+    is reported as an error string, never raised.
     """
     existing_nodes = list(existing)
     candidate_nodes = list(candidate)
     errors = validate_stacked_roadmap(candidate_nodes)
-    existing_ids = {node.id for node in existing_nodes}
-    new_ids = [node.id for node in candidate_nodes if node.id not in existing_ids]
-    if len(candidate_nodes) != len(existing_nodes) + 1 or len(new_ids) != 1:
-        errors.append(
-            "a stacked tail-append adds exactly one new node "
-            f"(existing {len(existing_nodes)} node(s), candidate {len(candidate_nodes)} "
-            f"node(s), {len(new_ids)} new id(s))"
-        )
+    new_node = next((node for node in candidate_nodes if node.id == new_id), None)
+    if new_node is None:  # defensive: the store passes add_node's own new_id
+        errors.append(f"the new node {new_id} is missing from the candidate")
         return errors
-    new_id = new_ids[0]
-    new_node = next(node for node in candidate_nodes if node.id == new_id)
     if new_node.status is not NodeStatus.PENDING:
         errors.append(
             f"a stacked tail-append enters as pending only — new node {new_id} is "
@@ -451,32 +443,6 @@ def validate_stacked_tail_append(
         errors.append(
             "a stacked tail-append must not flip the roadmap between inferred and "
             "explicit-edge dependency modes"
-        )
-    candidate_map = {node.id: node for node in candidate_nodes}
-    for node in existing_nodes:
-        counterpart = candidate_map.get(node.id)
-        if counterpart is None:
-            errors.append(f"existing node {node.id} is missing from the candidate")
-        elif counterpart.depends_on != node.depends_on:
-            errors.append(f"existing node {node.id}'s depends_on encoding changed")
-    try:
-        existing_deps = resolved_direct_deps(existing_nodes)
-        candidate_deps = resolved_direct_deps(candidate_nodes)
-    except ValueError as exc:
-        errors.append(str(exc))
-        return errors
-    candidate_existing_deps = {
-        node_id: deps for node_id, deps in candidate_deps.items() if node_id != new_id
-    }
-    if candidate_existing_deps != existing_deps:
-        changed = sorted(
-            node_id
-            for node_id in set(existing_deps) | set(candidate_existing_deps)
-            if existing_deps.get(node_id) != candidate_existing_deps.get(node_id)
-        )
-        errors.append(
-            "a stacked tail-append must not change existing resolved dependencies "
-            f"(changed: {', '.join(changed)})"
         )
     try:
         existing_order = [node.id for node in delivery_order(existing_nodes)]

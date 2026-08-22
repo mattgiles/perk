@@ -1102,7 +1102,7 @@ def test_add_objective_node_stacked_refuses_non_tail_append(monkeypatch, dry_run
         objectives.add_objective_node(
             number=123, phase=1, description="Gamma", repo_root=ROOT, dry_run=dry_run
         )
-    assert any("resolved dependencies" in e for e in err.value.errors)
+    assert any("order strictly last" in e for e in err.value.errors)
     assert rec.method_calls("PATCH") == 0
 
 

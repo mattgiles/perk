@@ -309,7 +309,7 @@ def _worker_tail(plan_id: str) -> str:
 
 class PrReadyOut(OutputModel):
     """The ``--json`` serialization boundary of :class:`PrReadyResult` (order load-bearing —
-    the seven continuation fields are tail-additive).
+    the nine continuation fields are tail-additive).
 
     Null semantics: dry-run → all nine continuation fields null; incremental →
     ``stacked=false``, rest null; stacked success → all populated (``reconcile_notice`` /

@@ -721,8 +721,8 @@ def test_tail_append_accepts_inferred_mode_append():
     existing = _tail_nodes(("1.1", "pending", None), ("1.2", "pending", None))
     same_phase = [*existing, o.ObjectiveNode(id="1.3", description="new", status=N.PENDING)]
     new_phase = [*existing, o.ObjectiveNode(id="2.1", description="new", status=N.PENDING)]
-    assert o.validate_stacked_tail_append(existing, same_phase) == []
-    assert o.validate_stacked_tail_append(existing, new_phase) == []
+    assert o.validate_stacked_tail_append(existing, same_phase, "1.3") == []
+    assert o.validate_stacked_tail_append(existing, new_phase, "2.1") == []
 
 
 def test_tail_append_accepts_explicit_mode_tail_dependency():
@@ -731,7 +731,7 @@ def test_tail_append_accepts_explicit_mode_tail_dependency():
         *existing,
         o.ObjectiveNode(id="2.1", description="new", status=N.PENDING, depends_on=("1.2",)),
     ]
-    assert o.validate_stacked_tail_append(existing, candidate) == []
+    assert o.validate_stacked_tail_append(existing, candidate, "2.1") == []
 
 
 def test_tail_append_accepts_independent_node_that_orders_last():
@@ -740,48 +740,39 @@ def test_tail_append_accepts_independent_node_that_orders_last():
         *existing,
         o.ObjectiveNode(id="9.1", description="island", status=N.PENDING, depends_on=()),
     ]
-    assert o.validate_stacked_tail_append(existing, candidate) == []
+    assert o.validate_stacked_tail_append(existing, candidate, "9.1") == []
 
 
 def test_tail_append_refuses_non_pending_new_node():
     existing = _tail_nodes(("1.1", "pending", None), ("1.2", "pending", None))
     candidate = [*existing, o.ObjectiveNode(id="1.3", description="new", status=N.IN_PROGRESS)]
-    errors = o.validate_stacked_tail_append(existing, candidate)
+    errors = o.validate_stacked_tail_append(existing, candidate, "1.3")
     assert any("pending only" in e for e in errors)
 
 
-def test_tail_append_refuses_more_than_one_new_node():
-    existing = _tail_nodes(("1.1", "pending", None), ("1.2", "pending", None))
-    candidate = [
-        *existing,
-        o.ObjectiveNode(id="1.3", description="new", status=N.PENDING),
-        o.ObjectiveNode(id="1.4", description="newer", status=N.PENDING),
-    ]
-    errors = o.validate_stacked_tail_append(existing, candidate)
-    assert any("exactly one new node" in e for e in errors)
-
-
 def test_tail_append_refuses_mid_roadmap_phase_insertion():
-    # Inferred mode: inserting 1.2 between 1.1 and 2.1 re-points 2.1's inferred edge from
-    # 1.1 to the new node — the resolved-edge check catches the inference shift.
+    # Inferred mode: inserting 1.2 between 1.1 and 2.1 re-points 2.1's inferred edge AND
+    # lands the new node mid-order — the delivery-order prefix check refuses it (a real
+    # production shape: add_node into an earlier phase).
     existing = _tail_nodes(("1.1", "pending", None), ("2.1", "pending", None))
     added = o.add_node(existing, phase=1, description="squeezed in")
     assert added is not None
     candidate, new_id = added
     assert new_id == "1.2"
-    errors = o.validate_stacked_tail_append(existing, candidate)
-    assert any("resolved dependencies" in e for e in errors)
+    errors = o.validate_stacked_tail_append(existing, candidate, new_id)
+    assert any("order strictly last" in e for e in errors)
 
 
 def test_tail_append_refuses_graph_mode_flip():
     # An all-inferred roadmap must not flip to explicit-edge mode: the flip silently vacates
-    # every existing inferred edge.
+    # every existing inferred edge — and order comparison alone can miss it (here the flipped
+    # candidate's delivery order happens to keep the existing prefix).
     existing = _tail_nodes(("1.1", "pending", None), ("1.2", "pending", None))
     candidate = [
         *existing,
         o.ObjectiveNode(id="2.1", description="new", status=N.PENDING, depends_on=("1.2",)),
     ]
-    errors = o.validate_stacked_tail_append(existing, candidate)
+    errors = o.validate_stacked_tail_append(existing, candidate, "2.1")
     assert any("flip" in e for e in errors)
 
 
@@ -793,7 +784,7 @@ def test_tail_append_refuses_early_ordering_independent_node():
         *existing,
         o.ObjectiveNode(id="1.1", description="early", status=N.PENDING, depends_on=()),
     ]
-    errors = o.validate_stacked_tail_append(existing, candidate)
+    errors = o.validate_stacked_tail_append(existing, candidate, "1.1")
     assert any("order strictly last" in e for e in errors)
 
 
@@ -804,7 +795,7 @@ def test_tail_append_refuses_invalid_candidate_roadmap():
         *existing,
         o.ObjectiveNode(id="2.1", description="new", status=N.PENDING, depends_on=("9.9",)),
     ]
-    errors = o.validate_stacked_tail_append(existing, candidate)
+    errors = o.validate_stacked_tail_append(existing, candidate, "2.1")
     assert "node 2.1 depends on unknown node: 9.9" in errors
 
 
@@ -821,7 +812,7 @@ def test_tail_append_reports_skipped_cycle_as_error_string():
         *existing,
         o.ObjectiveNode(id="3.1", description="new", status=N.PENDING, depends_on=("2.1",)),
     ]
-    errors = o.validate_stacked_tail_append(existing, candidate)
+    errors = o.validate_stacked_tail_append(existing, candidate, "3.1")
     assert any("cycle among skipped delivery nodes" in e for e in errors)
 
 

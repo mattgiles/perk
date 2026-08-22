@@ -64,10 +64,11 @@ const AUTHORING_TOOLS = [
 test("STAGE_TOOLS: the two objective stage lists are pinned exactly (least privilege)", () => {
   // The exact-set pin for the /objective-review-browser widening: the six authoring/reconcile
   // tools + the draft-review companions + plan_review (the door guidance names it; it routes to
-  // the objective review arm in both stages) + `ready` (the ready→reconcile continuation's
-  // re-entry gesture — the ready-time pass guidance can land in these sessions, §8.66) + the
-  // universal research bundle — and NOTHING else. A presence check alone would let unrelated
-  // scoped tools ride these gate-OFF sessions.
+  // the objective review arm in both stages) + the universal research bundle — and NOTHING
+  // else. A presence check alone would let unrelated scoped tools ride these gate-OFF sessions
+  // (e.g. the §8.66 ready-time reconcile guidance deliberately avoids naming `ready`, so the
+  // zero-argument ready tool never rides an unbound main-root objective session where it could
+  // act on the cached selector's plan instead of the continuation's).
   const expected = [
     "ask_user_question",
     "objective_draft",
@@ -75,7 +76,6 @@ test("STAGE_TOOLS: the two objective stage lists are pinned exactly (least privi
     "reconcile_objective",
     "add_objective_node",
     "objective_node",
-    "ready",
     "start_draft_review_wave",
     "collect_draft_review_wave",
     "push_annotations",
@@ -493,7 +493,9 @@ const DRIVE_COVERAGE: readonly {
     // The ready→reconcile continuation drive (contracts.md §8.66): fires wherever a stacked
     // `/ready` can succeed — the same stage set as the reconcile drive above (the pass uses
     // the same reconcile trio). Gate-active sessions are covered by the drive's own
-    // gating.isActive() refusal, not by this list.
+    // gating.isActive() refusal, not by this list. The template deliberately names NO
+    // ready/land re-entry gesture (re-entry guidance lives on the human-facing surfaces), so
+    // this row passes without widening the objective-stage lists.
     drive: "driveReadyReconcile (stages/objective-reconcile-ready.md)",
     stages: [...WORKTREE_STAGES, "objective-author", "objective-save", "objective-plan"],
     text: () =>

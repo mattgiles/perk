@@ -70,14 +70,15 @@ def ensure_stacked_tail_append(
     header: dict[str, object],
     existing: Sequence[objective.ObjectiveNode],
     candidate: Sequence[objective.ObjectiveNode],
+    new_id: str,
 ) -> None:
     """The one tail-append guard every store's ``add_objective_node`` runs (contracts.md §8.66).
 
-    Called against the store's OWN fresh read (``existing``) and the exact candidate it is
-    about to persist — dry-run included, so the preview refuses exactly like the write.
-    Incremental / no-delivery objectives pass unguarded (behavior unchanged); a junk
-    ``delivery`` header value refuses fail-closed; a STACKED objective must satisfy
-    :func:`perk.objective.validate_stacked_tail_append`.
+    Called against the store's OWN fresh read (``existing``), the exact ``add_node``-composed
+    candidate it is about to persist, and that call's own ``new_id`` — dry-run included, so
+    the preview refuses exactly like the write. Incremental / no-delivery objectives pass
+    unguarded (behavior unchanged); a junk ``delivery`` header value refuses fail-closed; a
+    STACKED objective must satisfy :func:`perk.objective.validate_stacked_tail_append`.
     """
     try:
         policy = objective.delivery_policy(header)
@@ -85,7 +86,7 @@ def ensure_stacked_tail_append(
         raise StackedAppendRefused((str(exc),)) from exc
     if policy is not objective.DeliveryPolicy.STACKED:
         return
-    errors = objective.validate_stacked_tail_append(existing, candidate)
+    errors = objective.validate_stacked_tail_append(existing, candidate, new_id)
     if errors:
         raise StackedAppendRefused(errors)
 

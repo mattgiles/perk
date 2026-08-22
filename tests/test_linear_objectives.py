@@ -637,7 +637,7 @@ class TestAddObjectiveNode:
             store.add_objective_node(
                 objective_id="obj-1", phase=1, description="Gamma", dry_run=dry_run
             )
-        assert any("resolved dependencies" in e for e in err.value.errors)
+        assert any("order strictly last" in e for e in err.value.errors)
         assert not _queries(fake, "issueUpdate(")
 
     def test_stacked_accepts_tail_append(self) -> None:

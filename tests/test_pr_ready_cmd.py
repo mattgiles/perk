@@ -822,7 +822,40 @@ def test_ready_wrapper_interactive_stacked_stamp_launches_the_pass(monkeypatch):
         assert "node 1.1" in seed
         assert "plan #7" in seed
         assert "gh pr view 42" in seed
-        assert "perk ready 7" in seed
+        # The seed deliberately names NO ready/land re-entry gesture — those tools are scoped
+        # off in the borrowed stage's session; re-entry guidance is human-facing only.
+        assert "perk ready" not in seed
+
+
+def test_ready_wrapper_launch_anchors_to_the_main_root_from_a_linked_worktree(
+    git_repo, monkeypatch
+):
+    # The two-roots rule (contracts.md §8.66), proven with DISTINCT roots: invoked inside a
+    # linked worktree, the launch anchors repo_root AND config to the MAIN checkout — the
+    # config marker exists only as a main-root untracked file, so passing the invocation
+    # root (or its config) would fail both assertions.
+    from perk.cli.context import PerkContext
+    from perk.substrate import git as git_mod
+
+    _authed(monkeypatch)
+    _interactive(monkeypatch)
+    calls = _spy_launch(monkeypatch)
+    _stub_stacked(monkeypatch, train=_stacked_train(), is_draft=True)
+    (git_repo / ".perk").mkdir(exist_ok=True)
+    (git_repo / ".perk" / "config.toml").write_text(
+        '[workflow]\nbase = "main-root-marker"\n', encoding="utf-8"
+    )
+    wt = git_repo / ".worktrees" / "plan-7"
+    git_mod.worktree_add(git_repo, wt, branch="plan-7", create_branch=True)
+    cache.write_plan_ref(wt, _STACKED_REF)
+    ctx = PerkContext.for_test(cwd=wt, repo_root=wt)
+    result = CliRunner().invoke(cli, ["ready"], obj=ctx)
+    assert result.exit_code == 0, result.output
+    assert len(calls) == 1
+    kwargs = calls[0]
+    assert Path(kwargs["repo_root"]).resolve() == git_repo.resolve()
+    assert Path(kwargs["repo_root"]).resolve() != wt.resolve()
+    assert kwargs["config"].workflow_base == "main-root-marker"
 
 
 def test_ready_wrapper_existed_restamp_still_launches(monkeypatch):

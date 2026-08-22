@@ -10448,9 +10448,14 @@ when nothing was emitted yet), a loud stderr line naming the standing stamp and 
 `perk ready <plan>` retry, exit 1 — a deliberate broad degrade boundary; the stamp is never
 rolled back.
 
-**The warm drive.** The warm `/ready` door decodes the stacked cohort all-or-nothing (now
-including `plan` + `parent_checkpoint`) and passes the worker's `stacked` routing fact through so
-a malformed cohort is distinguishable from an incremental result. `driveReadyReconcile` fires on
+**The warm drive.** The warm `/ready` door decodes the stacked cohort all-or-nothing and
+**facts-only** — the six fields `objective`/`node`/`stamped_head`/`stamp_advanced`/`plan`/
+`parent_checkpoint`; the envelope's `reconcile_notice`/`reconcile_retry` presentation strings
+are deliberately NOT part of the cohort (the drive derives its own retry gesture from `plan`,
+so missing presentation data can never suppress a valid continuation) — and passes the worker's
+`stacked` routing fact through so a malformed cohort is distinguishable from an incremental
+result. The stamp gesture's own report carries stamp facts only; the continuation is announced
+by the drive, and only once its refusal arms have accepted. `driveReadyReconcile` fires on
 every successful stacked stamp (`existed=true` included) and injects the SAME rendered template
 (TS render twin) plus the `command:objective-reconcile` binding suffix — idle sessions get an
 immediate turn, streaming sessions `deliverAs: "followUp"` (the land precedent). The refusal
@@ -10476,19 +10481,23 @@ failed or empty pass rolls nothing back and `perk ready <plan>` re-enters. The p
 whole-train reconcile pass is unchanged.
 
 **The stacked tail-append guard (store-owned).** The pure validator
-`objective.validate_stacked_tail_append(existing, candidate)` returns the errors-list contract
-(`[]` = valid) with six ordered checks: (1) `validate_stacked_roadmap(candidate)` verbatim;
-(2) candidate = existing + exactly ONE new node whose status is `pending` (the structural
-no-premature-status arm — also keeps the prefix check non-vacuous); (3) no inferred↔explicit
-graph-mode flip; (4) every existing identity + `depends_on` encoding unchanged; (5) resolved
-direct edges unchanged over the existing ids (`resolved_direct_deps`); (6) delivery-order prefix
-identity — the existing order is exactly the candidate order's prefix with the new node the
-single trailing element; a helper `ValueError` (skipped-only cycle) is reported as an error,
-never raised. Enforcement lives INSIDE each store's `add_objective_node` against the store's OWN
-fresh read (no door-side check-then-act window; the persisted candidate is exactly the validated
-one), **dry-run included**, via the shared `objective_store.ensure_stacked_tail_append`: a
-STACKED policy runs the validator; a junk `delivery` header value refuses fail-closed;
-incremental / no-delivery objectives stay unguarded (behavior unchanged). The typed refusal is
+`objective.validate_stacked_tail_append(existing, candidate, new_id)` returns the errors-list
+contract (`[]` = valid). It is deliberately scoped to the shapes production can produce —
+`candidate` is always the store-composed `add_node` output (existing + the one new node named
+by `new_id`), so it does not re-census arbitrary candidates (`add_node` preserves every
+existing node and `depends_on` encoding by construction). The checks: (1)
+`validate_stacked_roadmap(candidate)` verbatim; (2) the new node enters as `pending` only (the
+structural no-premature-status arm — also keeps the prefix check non-vacuous); (3) no
+inferred↔explicit graph-mode flip (the flip vacates every inferred edge, which order
+comparison alone can miss); (4) delivery-order prefix identity — the existing order is exactly
+the candidate order's prefix with the new node the single trailing element (this also catches
+inference shifts, e.g. a mid-roadmap phase insertion); a helper `ValueError` (skipped-only
+cycle) is reported as an error, never raised. Enforcement lives INSIDE each store's
+`add_objective_node` against the store's OWN fresh read (no door-side check-then-act window;
+the persisted candidate is exactly the validated one), **dry-run included**, via the shared
+`objective_store.ensure_stacked_tail_append`: a STACKED policy runs the validator; a junk
+`delivery` header value refuses fail-closed; incremental / no-delivery objectives stay
+unguarded (behavior unchanged). The typed refusal is
 `StackedAppendRefused(ObjectiveStoreError)` carrying the error list; the `objective node-add`
 door maps it to `error_type: stacked_append_refused` with the errors plus the routing line
 "structural roadmap changes route through: perk objective replan <id>". Everything else
@@ -10498,6 +10507,8 @@ door maps it to `error_type: stacked_append_refused` with the errors plus the ro
 deliberately by the liveness stop, head-drift reporting, skip-if-stale idempotence, and the
 tail-append guard; the post-land whole-train reconcile remains the final truth pass. The
 borrowed stage presents as `objective-save` in stage-keyed surfaces (the same trade the
-plan-borrowing factories accepted), and — since the ready-time guidance can land in the three
-objective stages (warm) and the seeded cold session runs on the borrowed stage — the `ready`
-tool joins the three objective-stage §8.40 lists as the pass's re-entry gesture.
+plan-borrowing factories accepted). The rendered pass guidance deliberately names NO
+ready/land re-entry gesture: re-entry guidance lives on the human-facing surfaces (the worker
+tail, the drive warnings, the launch stderr), so the §8.40 objective-stage lists stay
+unwidened — the zero-argument `ready` tool must never ride an unbound main-root session where
+it could act on the cached selector's plan instead of the continuation's.

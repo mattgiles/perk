@@ -408,17 +408,17 @@ class TestFakeStoreConformance:
             *nodes,
             objective.ObjectiveNode(id="2.1", description="C", status=objective.NodeStatus.DONE),
         ]
-        objective_store.ensure_stacked_tail_append({}, nodes, bad)  # incremental: unguarded
-        objective_store.ensure_stacked_tail_append({"delivery": "stacked"}, nodes, good)
+        objective_store.ensure_stacked_tail_append({}, nodes, bad, "2.1")  # incremental: unguarded
+        objective_store.ensure_stacked_tail_append({"delivery": "stacked"}, nodes, good, "2.1")
         with pytest.raises(objective_store.StackedAppendRefused) as err:
-            objective_store.ensure_stacked_tail_append({"delivery": "stacked"}, nodes, bad)
+            objective_store.ensure_stacked_tail_append({"delivery": "stacked"}, nodes, bad, "2.1")
         assert isinstance(err.value, objective_store.ObjectiveStoreError)
         assert any("pending only" in e for e in err.value.errors)
         assert "stacked tail-append refused" in str(err.value)
         with pytest.raises(
             objective_store.StackedAppendRefused, match="unknown objective delivery"
         ):
-            objective_store.ensure_stacked_tail_append({"delivery": "weird"}, nodes, good)
+            objective_store.ensure_stacked_tail_append({"delivery": "weird"}, nodes, good, "2.1")
 
     def test_adoption_no_op_signals(self) -> None:
         # A store with no project-source surface returns None for both adoption methods.

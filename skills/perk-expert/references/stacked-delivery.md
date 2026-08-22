@@ -73,12 +73,13 @@ an honest typed `capability_unsupported` refusal naming the exact expected-vs-ob
   supervisor pauses as `handoff_required` — naming the same `perk ready <PLAN>` — rather than
   ever auto-running it. Readying still
   never merges anything — a fully-ready train waits, whole, for its landing.
-- **The stamp continues into the ready-time reconcile pass.** Every successful stacked stamp
-  (an `existed=true` re-stamp included) immediately reconciles the objective against the
-  accepted layer's pinned diff range `parent_checkpoint..stamped_head` — while future work is
-  still fluid, without pretending the layer landed. Warm (`/ready` in a session): the same
-  session is driven into the pass; a read-only (gated) session or a malformed envelope refuses
-  LOUDLY and skips — the stamp stands. Cold: `perk ready <PLAN>` (the flat spelling) is the
+- **The stamp continues into the ready-time reconcile pass.** After a successful stacked stamp
+  (an `existed=true` re-stamp included), perk reconciles the objective against the accepted
+  layer's pinned diff range `parent_checkpoint..stamped_head` — while future work is still
+  fluid, without pretending the layer landed — unless a refusal arm applies. Warm (`/ready` in
+  a session): the stamp report carries the stamp facts only, and the same session is then
+  driven into the pass (announced once accepted); a read-only (gated) session or a malformed
+  envelope refuses LOUDLY and skips — the stamp stands. Cold: `perk ready <PLAN>` (the flat spelling) is the
   **continuation wrapper** — the exact `perk pr ready` worker mechanics, then, in an
   interactive terminal (stdin+stdout TTYs, no `--json`/`--dry-run`), a seeded reconcile
   session launched in the main checkout (borrowing the `objective-save` stage descriptor,
@@ -91,9 +92,9 @@ an honest typed `capability_unsupported` refusal naming the exact expected-vs-ob
   (nodes stay `in_progress` until the train lands).
 - **The stacked node-add guard.** On a stacked objective, `add_objective_node` /
   `perk objective node-add` is validated by the store against its own fresh read as a strict
-  tail-append (one new `pending` node ordering strictly last; no mode flip, no edge or
-  delivery-order change to existing nodes; dry-run included). A refusal is typed
-  `stacked_append_refused` and routes structural changes to `perk objective replan`.
+  tail-append (one new `pending` node ordering strictly last, the existing delivery order an
+  unchanged prefix, no inferred↔explicit dependency-mode flip; dry-run included). A refusal is
+  typed `stacked_append_refused` and routes structural changes to `perk objective replan`.
 - **`perk pr land` / `/land` refuse a stacked layer** typed `stacked_plan` before any
   mutation: a layer PR targets its parent's branch, so landing one alone would merge into the
   wrong target and tear the train. Landing is objective-scoped and atomic (below).

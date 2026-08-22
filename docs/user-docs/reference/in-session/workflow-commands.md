@@ -109,9 +109,11 @@ requires no unresolved operation or structural blocker. An already-ready PR is i
 target-publication revalidation — and still stamps. A failed stamp names its remediation
 (ambiguous/transient arms converge on re-run).
 
-Every successful stacked stamp (a re-stamp included) then **drives the ready-time reconcile
-pass in-session**: the same session is steered into reconciling the objective against the
-accepted layer's pinned diff range (`parent_checkpoint..stamped_head`) — prose rewrites, node
+After a successful stacked stamp (a re-stamp included), `/ready` **drives the ready-time
+reconcile pass in-session — unless a refusal arm applies**: the stamp report itself carries
+only the stamp facts, and the continuation is announced separately, once accepted. When it
+drives, the same session is steered into reconciling the objective against the accepted
+layer's pinned diff range (`parent_checkpoint..stamped_head`) — prose rewrites, node
 description updates, and guarded `pending` tail-appends only; nothing is marked done, because
 nothing landed. The refusal arms are **loud, never silent**: a read-only (gated) session warns
 instead of driving (the pass's write tools are gated off), and a malformed/mixed-version

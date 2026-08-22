@@ -56,7 +56,13 @@ def node_add_objective(
     """Insert a new node into a phase (auto-assigned `<phase>.<n>`; appended after that phase's
     last node). Use sparingly — only when a genuinely new unit of work emerged (a deferred
     follow-up, an uncovered defect or gap, a missing prerequisite for a later node, or
-    human-requested work)."""
+    human-requested work).
+
+    \b
+    Stacked objectives accept guarded tail-appends only: the new node must be pending and must
+    order strictly last (no dependency-mode flip, no mid-roadmap insertion) — --dry-run refuses
+    identically. A refusal (stacked_append_refused) means the change is structural: route it
+    through perk objective replan. Incremental objectives are unguarded."""
     try:
         repo_root = require_repo(ctx)
         number = parse_objective_id(number)
