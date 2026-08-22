@@ -1455,6 +1455,25 @@ def test_node_add_json(monkeypatch):
     assert captured["status"] is N.PENDING  # default
 
 
+def test_node_add_stacked_refusal_maps_error_and_names_replan(monkeypatch):
+    # The door maps the store-owned tail-append refusal (contracts.md §8.66) to its own typed
+    # error — the validator findings verbatim plus the structural replan route.
+    _authed(monkeypatch)
+
+    def _refuse(**k):
+        raise objective_store.StackedAppendRefused(("not a tail append", "pending only"))
+
+    monkeypatch.setattr(objectives, "add_objective_node", _refuse)
+    result = _invoke(
+        ["objective", "node-add", "42", "--phase", "1", "--description", "X", "--json"]
+    )
+    assert result.exit_code == 1
+    payload = json.loads(result.stdout)
+    assert payload["error_type"] == "stacked_append_refused"
+    assert "not a tail append; pending only" in payload["message"]
+    assert "perk objective replan 42" in payload["message"]
+
+
 def test_node_add_human_output_names_the_reopen(monkeypatch):
     _authed(monkeypatch)
     _stub_node_add(monkeypatch)

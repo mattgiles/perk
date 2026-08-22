@@ -637,9 +637,13 @@ no real consumer needs).
 A flat top-level name is *earned* (§11.1-A4), never defaulted. The surviving flat top-level names:
 
 - **`implement` (`impl`)** — the one flat working verb (unchanged).
-- **The hot-path PR aliases** `submit` / `address` / `land` / `ready`, each aliasing its
-  `perk pr <verb>`. Note `address` aliases a launcher-only command and `ready` aliases a
-  worker-only command — neither is itself a merged L+W (see §11.7-E and the `pr ready` correction).
+- **The hot-path PR aliases** `submit` / `address` / `land` / `ready`. `submit`/`address`/`land`
+  each alias their `perk pr <verb>` object; `address` aliases a launcher-only command. `ready` is
+  the one flat name that is **no longer a bare alias**: since the ready→reconcile continuation
+  (contracts.md §8.66), flat `perk ready` is a distinct continuation-wrapper command (the exact
+  `perk pr ready` worker mechanics, then — stacked + interactive only — a seeded reconcile
+  launch), while `perk pr ready` remains the worker-only command (see §11.7-E and the `pr ready`
+  correction, as amended by §8.66).
 - **The short group aliases** `obj` / `wt` / `st` / `reg` / `wf` survive.
 
 All other historical flat names are removed with no back-compat alias (§11.5 removal list).
@@ -675,7 +679,7 @@ Every command in the current surface, mapped to its new canonical spelling:
 | `submit` (flat launcher) + `pr submit` (worker) | `pr submit` (+ flat alias `submit`) | L+W merged | |
 | `land` (flat launcher) + `pr land` (worker) | `pr land` (+ flat alias `land`) | L+W merged | |
 | `address` (flat launcher) | `pr address` (+ flat alias `address`) | L, `--preview` | no worker merge |
-| `pr ready` (worker) | `pr ready` (+ flat alias `ready`) | **W only** | correction: not L+W |
+| `pr ready` (worker) | `pr ready` (+ flat `ready`, since §8.66 a distinct continuation wrapper) | **W only** | correction: not L+W |
 | `plan` (flat launcher) | `plan` (bare → read-only authoring; hybrid group) | H | unchanged spelling |
 | `implement` (`impl`) | `implement` (`impl`) | L | unchanged (the one flat verb) |
 | `learn` group | `learn` (bare hybrid + `capture`/`docs`) | H | unchanged |
@@ -728,7 +732,7 @@ perk
 │   ├── submit    L+W  [--dry-run --json]     (flat alias: perk submit)
 │   ├── address   L    [--preview]            (flat alias: perk address)
 │   ├── land      L+W  [--dry-run --json]     (flat alias: perk land)
-│   ├── ready     W    [--dry-run --json]     (flat alias: perk ready)   # worker-only (correction)
+│   ├── ready     W    [--dry-run --json]     (flat: perk ready — §8.66 continuation wrapper)
 │   ├── check                 W  [--json]
 │   ├── feedback              W  [--json]
 │   ├── resolve-threads       W  [--batch --dry-run]
@@ -781,9 +785,15 @@ Asserted by `tests/test_cli_help_sections.py`.
 `ready` is only the pr-group worker `perk pr ready` (dual-surface `--dry-run`/`--json`) plus the
 warm `/ready` door (`extension/doors/ready.ts`) that shells `["pr","ready","--json"]`. So the
 genuinely merged (L+W) commands are **`pr submit`, `pr land`, and `plan save` only**; `pr ready`
-stays **worker-only (W)** and merely gains the flat alias `perk ready`. Giving `ready` a launcher
-would mean adding a `ready` registry stage — forbidden by the objective's non-goals. §11.5 and
-§11.6 annotate `pr ready` as **W**.
+stays **worker-only (W)**. §11.5 and §11.6 annotate `pr ready` as **W**.
+
+*Amended by the ready→reconcile continuation (contracts.md §8.66):* the flat spelling
+`perk ready` is no longer a bare alias of the worker — it is a separate continuation-wrapper
+command (same option surface, byte-identical `--json`/failure envelopes; the launching arm is
+additive). The correction's core still holds: there is STILL no `ready` registry stage and no
+generated launcher — the wrapper's seeded launch **borrows the `objective-save` stage
+descriptor** with a `binding_trigger="command:objective-reconcile"` override, and
+`perk pr ready` remains the deterministic non-launching worker.
 
 **Correction 2 — `--preview` started as a warm-only flag.** It was originally a warm `/address`
 slash-arg parsed in `extension/doors/address.ts`. The SSOT documents `pr address` as launcher-only

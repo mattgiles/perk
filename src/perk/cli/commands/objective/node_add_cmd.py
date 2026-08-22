@@ -6,7 +6,11 @@ import click
 
 from perk import objective
 from perk.backends import resolve
-from perk.backends.objective_store import ObjectiveStore, ObjectiveStoreError
+from perk.backends.objective_store import (
+    ObjectiveStore,
+    ObjectiveStoreError,
+    StackedAppendRefused,
+)
 from perk.cli import completions
 from perk.cli.commands.objective.shared import parse_objective_id
 from perk.cli.context import require_github, require_repo
@@ -52,7 +56,13 @@ def node_add_objective(
     """Insert a new node into a phase (auto-assigned `<phase>.<n>`; appended after that phase's
     last node). Use sparingly — only when a genuinely new unit of work emerged (a deferred
     follow-up, an uncovered defect or gap, a missing prerequisite for a later node, or
-    human-requested work)."""
+    human-requested work).
+
+    \b
+    Stacked objectives accept guarded tail-appends only: the new node must be pending and must
+    order strictly last (no dependency-mode flip, no mid-roadmap insertion) — --dry-run refuses
+    identically. A refusal (stacked_append_refused) means the change is structural: route it
+    through perk objective replan. Incremental objectives are unguarded."""
     try:
         repo_root = require_repo(ctx)
         number = parse_objective_id(number)
@@ -69,6 +79,19 @@ def node_add_objective(
             comment=comment,
             dry_run=dry_run,
         )
+    except StackedAppendRefused as exc:
+        # The store-owned tail-append guard (contracts.md §8.66): a refusal means the
+        # discovery is structural — name the replan route, never the generic store arm.
+        fail(
+            ctx,
+            as_json=as_json,
+            error_type="stacked_append_refused",
+            message=(
+                "; ".join(exc.errors)
+                + f"\nstructural roadmap changes route through: perk objective replan {number}"
+            ),
+        )
+        return
     except ObjectiveStoreError as exc:
         error_type = "invalid_input" if "collision" in str(exc) else "github_error"
         fail(ctx, as_json=as_json, error_type=error_type, message=str(exc))

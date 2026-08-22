@@ -572,7 +572,9 @@ export default function (pi: ExtensionAPI) {
   registerSubmit(pi);
 
   // The warm `ready` door: the deliberate draft→ready review gate (submit keeps draft).
-  registerReady(pi);
+  // Takes `gating`: the warm ready→reconcile continuation refuses (loudly) to drive the
+  // ready-time pass into a read-only session (contracts.md §8.66).
+  registerReady(pi, gating);
 
   // Warm doors: `land` merges + sets pending-learn; `learn` clears it (TS-only).
   registerLand(pi);

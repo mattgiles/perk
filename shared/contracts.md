@@ -2007,9 +2007,11 @@ stage with no `_initial_prompt` — today only `plan`) stays idle, so a binding 
 whole prompt and never auto-starts a turn; the idle stage's pointer is delivered **warm** by
 Mechanism A instead. The launch trigger is `stage:<stage.id>` by default; the `learn-docs` cold door
 (which borrows the `plan` stage) overrides it to `command:learn-docs` via `launch_stage`'s
-`binding_trigger` parameter, so it never fires `stage:plan`. `objective-reconcile` is a non-launching
-**worker** (it rewrites the objective body, no initial prompt), so `command:objective-reconcile` has
-**no cold delivery surface** — it fires only at the warm door. `nudge` renders a ``Follow the
+`binding_trigger` parameter, so it never fires `stage:plan`. The `objective-reconcile` CLI verb
+itself remains a non-launching **worker** (it rewrites the objective body, no initial prompt),
+but `command:objective-reconcile` now ALSO has a cold delivery surface: the `perk ready`
+continuation wrapper's seeded launch (§8.66, borrowing the `objective-save` stage) overrides
+`binding_trigger` to it — alongside the warm door where it always fired. `nudge` renders a ``Follow the
 `<skill>` skill (read `.agents/skills/<skill>/SKILL.md`).`` pointer line (the read path is
 unconditional — no frontmatter read at render time; it is identical for visible and prompt-hidden
 skills alike); `transclude` inlines `.agents/skills/<skill>/SKILL.md` with its YAML
@@ -6393,7 +6395,10 @@ an oversize record, a nonconforming id) name their own remediation — a re-run 
 converge them. Dependency gating reads the handoff state through exactly one check — §8.46's
 direct-dependency handoff gate (`check_handoff_gate`, planning + fresh execution starts only);
 §8.46 build readiness and the §8.55/§8.56 landing gates are unchanged (landing gains no stamp
-requirement).
+requirement). The journal module additionally exports the public exact-form predicate
+`is_full_head_sha` (a `fullmatch` over the 40-hex lowercase vocabulary) for the §8.66
+continuation boundaries — stored checkpoint strings are presence-invariant but not
+vocabulary-invariant, so consumers validate both diff-range endpoints before interpolating.
 
 **The rest of the stored train state** uses the §8.42 merge-write seams. `TrainPersistence`
 retains the reusable typed writers: `write_checkpoints` writes the `parent_checkpoint_sha` +
@@ -8391,13 +8396,19 @@ one-unresolved-operation gate, so an already-non-draft PR stamps even while an o
 unresolved — the suspended→resume and failed-append re-run paths stay convergent). OPEN
 already-ready skips only the mutation-gate vetoes and the flip, even when a later global veto
 exists; operational drift on unrelated layers does not block review. Publish returns the fetched
-PR plus its original `was_draft` plus the nested `Ready.stamp {record, existed}` detail; an
+PR plus its original `was_draft` plus the nested `Ready.stamp {record, existed,
+parent_checkpoint_sha}` detail (`parent_checkpoint_sha` from the same verified projection as
+the record — the PUBLISHED pair invariant — so continuation consumers can compose the pinned
+diff range; its stored *vocabulary* is not invariant, hence §8.66's boundary validation); an
 append failure/ambiguity is `ReadyStampError` (`ready_stamp_failed`, phase `ready`, origin
 `github`) carrying the truthful `pr`/`was_draft` — the CLI's failure envelope reports them while
 exiting nonzero, and the grown success envelope carries the derived continuation facts
 (`stacked`, `objective`, `node`, `stamped_head`, `stamp_advanced`, the reconcile-not-launched
-notice + copyable retry). The pre-stamp "unchanged ready envelope and bytes" posture is
-superseded by this contract.
+notice + copyable retry, and the tail-additive §8.66 pair `plan` + `parent_checkpoint` — one
+null cohort: all populated exactly when a stamp exists). The notice names the wrapper/worker
+split truthfully (`perk pr ready` is the deterministic non-launching worker; `perk ready` in an
+interactive terminal launches the pass — §8.66). The pre-stamp "unchanged ready envelope and
+bytes" posture is superseded by this contract.
 
 **Status.** Ordinary `/submit` and `/address` now converge published suffixes automatically;
 explicit sync remains the owner of base advancement, adoption, continuation/abort, preview, and
@@ -10404,3 +10415,100 @@ ignored `docs/learned` file appearing MID-session is invisible to the
 tree-clean check (launch-time trackedness is door-enforced; the mid-session blind spot is the
 same window class); (3) the §8.64 gate-check→create race window is unchanged (the save-time
 origin re-check + adjacency own it).
+
+## §8.66 · The ready→reconcile continuation + the ready-time reconcile pass
+
+**The wrapper/worker split.** `perk pr ready` is the deterministic, **non-launching worker**
+(§8.52 mechanics unchanged); `perk ready` is a distinct Click command — the **continuation
+wrapper** — that runs the exact worker execution seam first (identical selection preamble,
+failure envelopes, and exit codes; failure paths exit inside the shared `fail` mapping, they
+never return), then decides the continuation. The non-launching arms — `--json`, `--dry-run`,
+non-TTY, incremental, no stamp — emit exactly the worker's output (the `--json` envelope is
+byte-equal, the two §8.52 continuation fields included) and never start a session: continuation
+facts, never a session. The **TTY gate** requires BOTH `sys.stdin.isatty()` and
+`sys.stdout.isatty()` (the launch execs the full-screen pi TUI). The flat root alias `ready`
+binds the wrapper; `perk pr ready` keeps the worker object.
+
+**The pinned cold launch contract.** On a successful stacked stamp (an `existed=true` re-stamp
+included — re-running ready re-enters the pass), the wrapper resolves everything BEFORE emitting:
+it validates the evidence vocabulary (both diff-range endpoints — the stamped head and the
+stamp's `parent_checkpoint_sha` — against `journal.is_full_head_sha`), resolves the **borrowed
+`objective-save` stage descriptor** (the documented non-stage-factory borrow: `mode: read-write`,
+`worktree: none` → the main checkout, `cold_local: true`; no new registry stage, no
+`DEDICATED_STAGES`/`STAGE_TOOLS` row, no GC-terminal change), renders the shared seed template
+`prompts/stages/objective-reconcile-ready.md` (string-only variables: `objective`, `node`,
+`plan`, `pr`, `parent_checkpoint`, `stamped_head`, `read_clause` — evidence interpolates only
+after validation and is framed as untrusted DATA), then emits the worker output with a
+"launching…" tail and calls `launch_stage` with `repo_root = main_repo_root(invocation root)`,
+`config = load_main_config(main root)`, `binding_trigger="command:objective-reconcile"` (the
+learn-docs override precedent — the launch never fires `stage:objective-save`; the binding in
+`shared/bindings.yaml` is untouched), `worktree=None`, `pi_args=[]`. **Launch failure after a
+successful stamp is the second reported outcome**: the worker output (truthful not-launched tail
+when nothing was emitted yet), a loud stderr line naming the standing stamp and the
+`perk ready <plan>` retry, exit 1 — a deliberate broad degrade boundary; the stamp is never
+rolled back.
+
+**The warm drive.** The warm `/ready` door decodes the stacked cohort all-or-nothing and
+**facts-only** — the six fields `objective`/`node`/`stamped_head`/`stamp_advanced`/`plan`/
+`parent_checkpoint`; the envelope's `reconcile_notice`/`reconcile_retry` presentation strings
+are deliberately NOT part of the cohort (the drive derives its own retry gesture from `plan`,
+so missing presentation data can never suppress a valid continuation) — and passes the worker's
+`stacked` routing fact through so a malformed cohort is distinguishable from an incremental
+result. The stamp gesture's own report carries stamp facts only; the continuation is announced
+by the drive, and only once its refusal arms have accepted. `driveReadyReconcile` fires on
+every successful stacked stamp (`existed=true` included) and injects the SAME rendered template
+(TS render twin) plus the `command:objective-reconcile` binding suffix — idle sessions get an
+immediate turn, streaming sessions `deliverAs: "followUp"` (the land precedent). The refusal
+arms are LOUD, never silent: a gate-active (read-only) session refuses — the pass's write tools
+are gated off, a drive would dead-end; a `stacked=true` result with a missing/malformed cohort
+warns (mixed-version envelope); evidence failing the strict local vocabulary
+(`^[A-Za-z0-9._-]{1,64}$` ids; `^[0-9a-f]{40}$` for BOTH range endpoints; integer PR number)
+warns. Every warning names the standing stamp and the re-run retry. Incremental results and
+failures drive nothing, quietly.
+
+**The ready-time pass (the template's decided powers).** The pass reconciles the objective
+against an ACCEPTED-but-NOT-landed layer: judge exactly the pinned
+`parent_checkpoint..stamped_head` range (recovered via `git fetch origin refs/pull/<pr>/head`,
+never the live/ambient PR diff), with a **liveness stop first** (`gh pr view <pr> --json
+state,headRefOid`: MERGED/CLOSED → stop and report — the post-land whole-train reconcile owns
+that world; live-head drift is reported, the pinned range still judged). Powers, and ONLY these:
+rewrite the Reconcilable prose (`reconcile_objective`); update node **descriptions**
+(`objective_node` `description` — NO `status` and NO `pr` mutations; nodes stay `in_progress`
+until objective-scoped landing); add genuinely-new nodes ONLY as guarded `pending` tail-appends
+(`add_objective_node`). NO dependency/order rewiring of existing nodes. Skip-if-stale,
+evidence-bound, conservative under uncertainty. Fail-open/no-rollback: the stamp stands; a
+failed or empty pass rolls nothing back and `perk ready <plan>` re-enters. The post-land
+whole-train reconcile pass is unchanged.
+
+**The stacked tail-append guard (store-owned).** The pure validator
+`objective.validate_stacked_tail_append(existing, candidate, new_id)` returns the errors-list
+contract (`[]` = valid). It is deliberately scoped to the shapes production can produce —
+`candidate` is always the store-composed `add_node` output (existing + the one new node named
+by `new_id`), so it does not re-census arbitrary candidates (`add_node` preserves every
+existing node and `depends_on` encoding by construction). The checks: (1)
+`validate_stacked_roadmap(candidate)` verbatim; (2) the new node enters as `pending` only (the
+structural no-premature-status arm — also keeps the prefix check non-vacuous); (3) no
+inferred↔explicit graph-mode flip (the flip vacates every inferred edge, which order
+comparison alone can miss); (4) delivery-order prefix identity — the existing order is exactly
+the candidate order's prefix with the new node the single trailing element (this also catches
+inference shifts, e.g. a mid-roadmap phase insertion); a helper `ValueError` (skipped-only
+cycle) is reported as an error, never raised. Enforcement lives INSIDE each store's
+`add_objective_node` against the store's OWN fresh read (no door-side check-then-act window;
+the persisted candidate is exactly the validated one), **dry-run included**, via the shared
+`objective_store.ensure_stacked_tail_append`: a STACKED policy runs the validator; a junk
+`delivery` header value refuses fail-closed; incremental / no-delivery objectives stay
+unguarded (behavior unchanged). The typed refusal is
+`StackedAppendRefused(ObjectiveStoreError)` carrying the error list; the `objective node-add`
+door maps it to `error_type: stacked_append_refused` with the errors plus the routing line
+"structural roadmap changes route through: perk objective replan <id>". Everything else
+(reopen-on-incomplete included) is unchanged.
+
+**Accepted residual concurrency.** No lease exists between the pass and LAND/planning — bounded
+deliberately by the liveness stop, head-drift reporting, skip-if-stale idempotence, and the
+tail-append guard; the post-land whole-train reconcile remains the final truth pass. The
+borrowed stage presents as `objective-save` in stage-keyed surfaces (the same trade the
+plan-borrowing factories accepted). The rendered pass guidance deliberately names NO
+ready/land re-entry gesture: re-entry guidance lives on the human-facing surfaces (the worker
+tail, the drive warnings, the launch stderr), so the §8.40 objective-stage lists stay
+unwidened — the zero-argument `ready` tool must never ride an unbound main-root session where
+it could act on the cached selector's plan instead of the continuation's.

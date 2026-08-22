@@ -494,6 +494,10 @@ def _ready(context: _PublishContext, request: PublishRequest) -> PublishResult:
     # the verified projection, so an unconstructable stamp refuses the whole gesture with
     # nothing flipped.
     record = _build_stamp_record(train, target, plan_id=wanted, pr=pr, was_draft=was_draft)
+    # PUBLISHED classification invariant: the verified pair is present alongside head_sha —
+    # the same projection fact _build_stamp_record narrows, never a live re-read.
+    parent_checkpoint_sha = target.parent_checkpoint_sha
+    assert parent_checkpoint_sha is not None
     if was_draft:
         require_reviewable_layer(train, plan_id=wanted, mutating=True)
         context.github.mark_pr_ready(pr.number)
@@ -505,7 +509,11 @@ def _ready(context: _PublishContext, request: PublishRequest) -> PublishResult:
         ready=PublishResult.Ready(
             pr=pr,
             was_draft=was_draft,
-            stamp=PublishResult.Ready.Stamp(record=record, existed=result.existed),
+            stamp=PublishResult.Ready.Stamp(
+                record=record,
+                existed=result.existed,
+                parent_checkpoint_sha=parent_checkpoint_sha,
+            ),
         ),
     )
 

@@ -1396,6 +1396,7 @@ def _cascade_publish_layer() -> PublishResult.Layer:
                             head_sha="b" * 40,
                         ),
                         existed=False,
+                        parent_checkpoint_sha="a" * 40,
                     ),
                 ),
             ),

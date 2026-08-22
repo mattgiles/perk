@@ -1339,6 +1339,96 @@ class TestLinearProjectObjectiveStore:
         assert not _queries(fake, "projectMilestoneCreate(")
         assert not _att_creates(fake)
 
+    def _stacked_guard_responses(
+        self, header_extra: dict[str, object] | None = None
+    ) -> dict[str, list[object]]:
+        # Two-node roadmap (1.1, 2.1) whose sentinel header says delivery: stacked.
+        n11 = objective.ObjectiveNode(
+            id="1.1", description="Alpha", status=objective.NodeStatus.PENDING
+        )
+        n21 = objective.ObjectiveNode(
+            id="2.1", description="Beta", status=objective.NodeStatus.PENDING
+        )
+        extra: dict[str, object] = header_extra or {
+            "delivery": "stacked",
+            "delivery_lineage": "01LINEAGE",
+        }
+        return {
+            "issues(first": [
+                {
+                    "project": {
+                        "issues": _page(
+                            [
+                                _sentinel_row("01RUN", header_extra=extra),
+                                _node_issue(n11, uuid="i-11", identifier="ENG-11"),
+                                _node_issue(n21, uuid="i-21", identifier="ENG-21"),
+                            ]
+                        )
+                    }
+                }
+            ],
+            "inverseRelations(": [_blocked_by(), _blocked_by()],
+            "project(id": [
+                {"project": {"id": "proj-1", "url": "u", "name": "O", "content": _STORE_BODY}}
+            ],
+        }
+
+    @pytest.mark.parametrize("dry_run", [False, True])
+    def test_add_objective_node_stacked_refuses_non_tail_append(self, dry_run: bool) -> None:
+        # The store-owned tail-append guard over this store's own fresh roadmap read (the
+        # header rides the same read's metadata sentinel) — dry-run included: a mid-roadmap
+        # phase insertion re-points inference and is refused before any mutation.
+        store, fake = _make_project_store(self._stacked_guard_responses())
+        with pytest.raises(objective_store.StackedAppendRefused) as err:
+            store.add_objective_node(
+                objective_id="proj-1", phase=1, description="Gamma", dry_run=dry_run
+            )
+        assert any("order strictly last" in e for e in err.value.errors)
+        assert not _queries(fake, "issueCreate(")
+        assert not _queries(fake, "projectMilestoneCreate(")
+        assert not _att_creates(fake)
+
+    def test_add_objective_node_stacked_accepts_tail_append(self) -> None:
+        # A pending tail-append passes the guard and materializes the node-issue as before.
+        n11 = objective.ObjectiveNode(
+            id="1.1", description="Alpha", status=objective.NodeStatus.PENDING, slug="alpha"
+        )
+        responses = self._add_node_responses(n11)
+        manifest = objective.render_manifest_block([n11], {"1": "Foundations"})
+        responses["issues(first"] = [
+            {
+                "project": {
+                    "issues": _page(
+                        [
+                            _sentinel_row(
+                                "01RUN",
+                                manifest=manifest,
+                                header_extra={
+                                    "delivery": "stacked",
+                                    "delivery_lineage": "01LINEAGE",
+                                },
+                            ),
+                            _node_issue(n11, uuid="i-11", identifier="ENG-11"),
+                        ]
+                    )
+                }
+            }
+        ]
+        store, fake = _make_project_store(responses)
+        added = store.add_objective_node(objective_id="proj-1", phase=2, description="Beta work")
+        assert added.node_id == "2.1" and added.dry_run is False
+        assert len(_queries(fake, "issueCreate(")) == 1
+
+    def test_add_objective_node_stacked_junk_delivery_refused(self) -> None:
+        store, fake = _make_project_store(
+            self._stacked_guard_responses(header_extra={"delivery": "weird"})
+        )
+        with pytest.raises(
+            objective_store.StackedAppendRefused, match="unknown objective delivery"
+        ):
+            store.add_objective_node(objective_id="proj-1", phase=2, description="Gamma")
+        assert not _queries(fake, "issueCreate(")
+
     # ----------------------------------------------------------------- update_objective_body
 
     def test_update_objective_body_splices_overview(self) -> None:

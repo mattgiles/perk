@@ -528,10 +528,16 @@ class PublishResult:
         class Stamp:
             """The stacked handoff detail: the appended ready-stamp record as-is plus the
             append's idempotence fact (``existed=True`` = the byte-identical stamp was
-            already on the carrier — a converging re-run, nothing written)."""
+            already on the carrier — a converging re-run, nothing written) and the verified
+            layer's parent checkpoint (a verified PUBLISHED layer always carries the full
+            checkpoint pair — the same projection invariant the stamp record leans on for
+            ``head_sha``). The pair's *presence* is invariant but its stored *vocabulary* is
+            not — continuation consumers validate the exact 40-hex form at their own edges
+            (contracts.md §8.66)."""
 
             record: ReadyStampRecord
             existed: bool
+            parent_checkpoint_sha: str
 
         pr: prs.PullRequest
         was_draft: bool

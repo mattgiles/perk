@@ -11,6 +11,7 @@ The :class:`DependencyGraph` / :class:`PlanSelection` dataclasses themselves liv
 
 import heapq
 import re
+from collections.abc import Sequence
 from dataclasses import replace
 from typing import Any
 
@@ -398,6 +399,61 @@ def validate_stacked_roadmap(nodes: list[ObjectiveNode]) -> list[str]:
         errors.append(
             f"a stacked delivery train allows at most {DELIVERY_TRAIN_MAX_LAYERS} non-skipped "
             f"nodes (got {active})"
+        )
+    return errors
+
+
+def validate_stacked_tail_append(
+    existing: Sequence[ObjectiveNode], candidate: Sequence[ObjectiveNode], new_id: str
+) -> list[str]:
+    """Validate one stacked-roadmap node-add as a guarded **tail-append** (contracts.md §8.66)
+    — the :func:`validate_stacked_roadmap`-style errors-list contract (``[]`` = valid).
+
+    The ready-time reconcile pass may grow an accepted-but-not-landed train only at its tail:
+    ``candidate`` is the store-composed :func:`add_node` output (existing + the one new node
+    named by ``new_id``), so this guard deliberately does NOT re-census arbitrary candidate
+    shapes — :func:`add_node` already preserves every existing node and ``depends_on``
+    encoding by construction. What it validates: the complete candidate re-validates
+    (:func:`validate_stacked_roadmap`, reported verbatim); the new node enters as ``pending``
+    only (the structural no-premature-status arm — also keeps the prefix check non-vacuous,
+    since a skipped node would vanish from delivery order); no inferred↔explicit graph-mode
+    flip (the flip silently vacates every inferred edge, which order comparison alone can
+    miss); and delivery-order prefix identity — the existing order is exactly the candidate
+    order's prefix with the new node the single trailing element (this also catches inference
+    shifts, e.g. a mid-roadmap phase insertion re-pointing the next phase's first node).
+    Anything refused is a structural roadmap change and routes through
+    ``perk objective replan``. A ``ValueError`` from the order helper (a skipped-only cycle)
+    is reported as an error string, never raised.
+    """
+    existing_nodes = list(existing)
+    candidate_nodes = list(candidate)
+    errors = validate_stacked_roadmap(candidate_nodes)
+    new_node = next((node for node in candidate_nodes if node.id == new_id), None)
+    if new_node is None:  # defensive: the store passes add_node's own new_id
+        errors.append(f"the new node {new_id} is missing from the candidate")
+        return errors
+    if new_node.status is not NodeStatus.PENDING:
+        errors.append(
+            f"a stacked tail-append enters as pending only — new node {new_id} is "
+            f"{new_node.status.value}"
+        )
+    if any(node.depends_on is not None for node in existing_nodes) != any(
+        node.depends_on is not None for node in candidate_nodes
+    ):
+        errors.append(
+            "a stacked tail-append must not flip the roadmap between inferred and "
+            "explicit-edge dependency modes"
+        )
+    try:
+        existing_order = [node.id for node in delivery_order(existing_nodes)]
+        candidate_order = [node.id for node in delivery_order(candidate_nodes)]
+    except ValueError as exc:
+        errors.append(str(exc))
+        return errors
+    if candidate_order != [*existing_order, new_id]:
+        errors.append(
+            "a stacked tail-append must order strictly last — expected delivery order "
+            f"{', '.join([*existing_order, new_id])}; got {', '.join(candidate_order)}"
         )
     return errors
 

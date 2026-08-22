@@ -5,8 +5,8 @@ This is the readable projection of perk's living, workflow-first prose graph. It
 
 ## Coverage
 
-- **211** canonical source units
-- **718** logical fragments
+- **214** canonical source units
+- **723** logical fragments
 - **16** session shapes and **10** assemblies
 - **15** explicitly excluded candidates (policy-only; not displayed)
 - **0** validation findings
@@ -337,6 +337,7 @@ Select, explore, and plan the next objective roadmap node.
   - `section:reconciling-an-objective-after-landing-the-objective-reconcile-pass/what-to-reconcile/when-to-add-a-node` — When to add a node (`heading:reconciling-an-objective-after-landing-the-objective-reconcile-pass/what-to-reconcile/when-to-add-a-node`)
   - `section:reconciling-an-objective-after-landing-the-objective-reconcile-pass/skip-if-nothing-is-stale` — Skip if nothing is stale (`heading:reconciling-an-objective-after-landing-the-objective-reconcile-pass/skip-if-nothing-is-stale`)
   - `section:reconciling-an-objective-after-landing-the-objective-reconcile-pass/never-delegate-boundaries` — Never-delegate boundaries (`heading:reconciling-an-objective-after-landing-the-objective-reconcile-pass/never-delegate-boundaries`)
+  - `section:reconciling-an-objective-after-landing-the-objective-reconcile-pass/the-ready-time-mode-after-a-stacked-handoff-stamp` — The ready-time mode (after a stacked handoff stamp) (`heading:reconciling-an-objective-after-landing-the-objective-reconcile-pass/the-ready-time-mode-after-a-stacked-handoff-stamp`)
 - `markdown:skills/perk-objective-replan/SKILL.md`
   - `frontmatter:description` — Discovery description (`frontmatter.description`)
   - `section:re-authoring-an-objective-the-objective-replan-cold-door` — Re-authoring an objective (the `objective replan` cold door) (`heading:re-authoring-an-objective-the-objective-replan-cold-door`)
@@ -632,6 +633,8 @@ Validate, publish, and prepare changes for review and landing.
 
 | Unit | Role | Audience | Canonical source | Consumed by |
 | --- | --- | --- | --- | --- |
+| `typescript-model-call:extension/doors/ready.ts:module:sendUserMessage:0` | `tool-contract` | `shipped` | [`extension/doors/ready.ts`](../../extension/doors/ready.ts) · `symbol:module/call:sendUserMessage/0` | — |
+| `typescript-model-call:extension/doors/ready.ts:module:sendUserMessage:1` | `tool-contract` | `shipped` | [`extension/doors/ready.ts`](../../extension/doors/ready.ts) · `symbol:module/call:sendUserMessage/1` | — |
 | `typescript-model-call:extension/doors/submit.ts:module:sendUserMessage:0` | `tool-contract` | `shipped` | [`extension/doors/submit.ts`](../../extension/doors/submit.ts) · `symbol:module/call:sendUserMessage/0` | — |
 | `typescript-model-call:extension/doors/submit.ts:module:sendUserMessage:1` | `tool-contract` | `shipped` | [`extension/doors/submit.ts`](../../extension/doors/submit.ts) · `symbol:module/call:sendUserMessage/1` | — |
 | `typescript-tool:ready` | `tool-contract` | `shipped` | [`extension/doors/ready.ts`](../../extension/doors/ready.ts) · `tool:ready` | — |
@@ -641,6 +644,10 @@ Validate, publish, and prepare changes for review and landing.
 <details>
 <summary>Logical fragments</summary>
 
+- `typescript-model-call:extension/doors/ready.ts:module:sendUserMessage:0`
+  - `argument:0` — sendUserMessage model-facing argument (`symbol:module/call:sendUserMessage/0/argument:0`)
+- `typescript-model-call:extension/doors/ready.ts:module:sendUserMessage:1`
+  - `argument:0` — sendUserMessage model-facing argument (`symbol:module/call:sendUserMessage/1/argument:0`)
 - `typescript-model-call:extension/doors/submit.ts:module:sendUserMessage:0`
   - `argument:0` — sendUserMessage model-facing argument (`symbol:module/call:sendUserMessage/0/argument:0`)
 - `typescript-model-call:extension/doors/submit.ts:module:sendUserMessage:1`
@@ -692,6 +699,7 @@ Synchronize, recover, land, and reconcile multi-plan objective delivery.
 | Unit | Role | Audience | Canonical source | Consumed by |
 | --- | --- | --- | --- | --- |
 | `markdown:prompts/stages/objective-land.md` | `control-guidance` | `shipped` | [`prompts/stages/objective-land.md`](../../prompts/stages/objective-land.md) · `file` | — |
+| `markdown:prompts/stages/objective-reconcile-ready.md` | `control-guidance` | `shipped` | [`prompts/stages/objective-reconcile-ready.md`](../../prompts/stages/objective-reconcile-ready.md) · `file` | — |
 | `markdown:prompts/stages/objective-reconcile.md` | `control-guidance` | `shipped` | [`prompts/stages/objective-reconcile.md`](../../prompts/stages/objective-reconcile.md) · `file` | — |
 | `markdown:prompts/stages/objective-recover.md` | `control-guidance` | `shipped` | [`prompts/stages/objective-recover.md`](../../prompts/stages/objective-recover.md) · `file` | — |
 | `markdown:prompts/stages/objective-sync.md` | `control-guidance` | `shipped` | [`prompts/stages/objective-sync.md`](../../prompts/stages/objective-sync.md) · `file` | — |
@@ -710,6 +718,8 @@ Synchronize, recover, land, and reconcile multi-plan objective delivery.
 <summary>Logical fragments</summary>
 
 - `markdown:prompts/stages/objective-land.md`
+  - `body` — Document body (`file-body`)
+- `markdown:prompts/stages/objective-reconcile-ready.md`
   - `body` — Document body (`file-body`)
 - `markdown:prompts/stages/objective-reconcile.md`
   - `body` — Document body (`file-body`)
@@ -1619,6 +1629,7 @@ Expert configuration guidance, structural search, and ancillary model utilities.
   - `section:perk-providers-issue-backends/linear-backend/project-backed-objectives` — Project-backed objectives (`heading:perk-providers-issue-backends/linear-backend/project-backed-objectives`)
   - `section:perk-providers-issue-backends/linear-backend/native-attachment-metadata` — Native attachment metadata (`heading:perk-providers-issue-backends/linear-backend/native-attachment-metadata`)
   - `section:perk-providers-issue-backends/linear-backend/the-dream-report-companion` — The dream-report companion (`heading:perk-providers-issue-backends/linear-backend/the-dream-report-companion`)
+  - `section:perk-providers-issue-backends/linear-backend/dream-origin-and-the-one-open-dream-guard` — Dream origin and the one-open-dream guard (`heading:perk-providers-issue-backends/linear-backend/dream-origin-and-the-one-open-dream-guard`)
   - `section:perk-providers-issue-backends/linear-backend/replan-and-cancellation` — Replan and cancellation (`heading:perk-providers-issue-backends/linear-backend/replan-and-cancellation`)
   - `section:perk-providers-issue-backends/linear-backend/optional-agentsession-emission` — Optional AgentSession emission (`heading:perk-providers-issue-backends/linear-backend/optional-agentsession-emission`)
   - `section:perk-providers-issue-backends/current-caveats-and-maturity` — Current caveats and maturity (`heading:perk-providers-issue-backends/current-caveats-and-maturity`)

@@ -10,6 +10,7 @@ from perk.backends.github import plans
 from perk.backends.issue_backend import IssueBackendError
 from perk.backends.objective_store import ObjectiveStoreError
 from perk.cli.cli import cli
+from perk.cli.commands.pr import ready_cmd as ready_cmd_mod
 from perk.delivery import train as train_mod
 from perk.delivery._fakes import FakeDeliveryGit, FakeDeliveryGitHub, FakeDeliveryPersistence
 from perk.delivery.journal import JournalCorruptionError, JournalRecordTooLarge
@@ -18,6 +19,7 @@ from perk.delivery.persistence import (
     StampAppendResult,
     TrainPersistenceError,
 )
+from perk.run import launch
 from perk.state import cache
 
 _REF = plan.PlanRef(
@@ -698,6 +700,226 @@ def test_pr_ready_not_a_repo_exits_2(monkeypatch):
         result = runner.invoke(cli, ["pr", "ready", "--json"])
     assert result.exit_code == 2
     assert json.loads(result.output)["error_type"] == "not_a_repo"
+
+
+# --- the continuation wrapper (`perk ready`) — contracts.md §8.66 ---------------------------
+
+
+def _fake_sys(*, stdin_tty: bool, stdout_tty: bool) -> type:
+    """A fake `sys` for ready_cmd's TTY gate — CliRunner swaps the real streams anyway."""
+
+    class _Stream:
+        def __init__(self, tty: bool) -> None:
+            self._tty = tty
+
+        def isatty(self) -> bool:
+            return self._tty
+
+    class _Sys:
+        stdin = _Stream(stdin_tty)
+        stdout = _Stream(stdout_tty)
+
+    return _Sys
+
+
+def _spy_launch(monkeypatch, *, boom: Exception | None = None) -> list[dict]:
+    calls: list[dict] = []
+
+    def _launch_stage(**kwargs):
+        calls.append(kwargs)
+        if boom is not None:
+            raise boom
+
+    monkeypatch.setattr(launch, "launch_stage", _launch_stage)
+    return calls
+
+
+def _interactive(monkeypatch) -> None:
+    monkeypatch.setattr(ready_cmd_mod, "sys", _fake_sys(stdin_tty=True, stdout_tty=True))
+
+
+def test_ready_wrapper_json_is_byte_equal_to_the_worker_and_never_launches(monkeypatch):
+    # --json is a non-launching arm even on a TTY: the wrapper emits EXACTLY the worker's
+    # envelope (the two new continuation fields included).
+    _authed(monkeypatch)
+    _interactive(monkeypatch)
+    calls = _spy_launch(monkeypatch)
+    _stub_stacked(monkeypatch, train=_stacked_train(), is_draft=True)
+    worker = _run(monkeypatch, ["pr", "ready", "--json"], ref=_STACKED_REF)
+    _stub_stacked(monkeypatch, train=_stacked_train(), is_draft=True)
+    wrapper = _run(monkeypatch, ["ready", "--json"], ref=_STACKED_REF)
+    assert worker.exit_code == 0 and wrapper.exit_code == 0
+    assert wrapper.stdout == worker.stdout
+    data = json.loads(wrapper.stdout)
+    assert data["plan"] == "7"
+    assert data["parent_checkpoint"] == _PARENT_SHA
+    assert calls == []
+
+
+def test_ready_wrapper_dry_run_never_launches(monkeypatch):
+    _interactive(monkeypatch)
+    calls = _spy_launch(monkeypatch)
+    _bind_ready_delivery(monkeypatch)
+    result = _run(monkeypatch, ["ready", "--dry-run", "--json"])
+    assert result.exit_code == 0
+    data = json.loads(result.stdout)
+    assert data["dry_run"] is True
+    assert data["plan"] is None and data["parent_checkpoint"] is None
+    assert calls == []
+
+
+@pytest.mark.parametrize(("stdin_tty", "stdout_tty"), [(False, True), (True, False)])
+def test_ready_wrapper_non_tty_never_launches(monkeypatch, stdin_tty, stdout_tty):
+    # The TTY gate needs BOTH ends (the launch execs the full-screen pi TUI); the human
+    # output is the worker's, truthful not-launched tail included.
+    _authed(monkeypatch)
+    monkeypatch.setattr(ready_cmd_mod, "sys", _fake_sys(stdin_tty=stdin_tty, stdout_tty=stdout_tty))
+    calls = _spy_launch(monkeypatch)
+    _stub_stacked(monkeypatch, train=_stacked_train(), is_draft=True)
+    result = _run(monkeypatch, ["ready"], ref=_STACKED_REF)
+    assert result.exit_code == 0, result.output
+    assert "not launched" in result.stderr
+    assert "perk ready 7" in result.stderr
+    assert calls == []
+
+
+def test_ready_wrapper_incremental_never_launches(monkeypatch):
+    _authed(monkeypatch)
+    _interactive(monkeypatch)
+    calls = _spy_launch(monkeypatch)
+    _stub_pr(monkeypatch, is_draft=True)
+    result = _run(monkeypatch, ["ready"])
+    assert result.exit_code == 0, result.output
+    assert "open for review" in result.stderr
+    assert calls == []
+
+
+def test_ready_wrapper_interactive_stacked_stamp_launches_the_pass(monkeypatch):
+    # The launching arm: one launch_stage call per the pinned contract — the borrowed
+    # objective-save stage, the command:objective-reconcile binding trigger, main-root
+    # anchoring, and a seed carrying the exact stamp evidence.
+    _authed(monkeypatch)
+    _interactive(monkeypatch)
+    calls = _spy_launch(monkeypatch)
+    _stub_stacked(monkeypatch, train=_stacked_train(), is_draft=True)
+    runner = CliRunner()
+    with runner.isolated_filesystem() as d:
+        _git_init(d)
+        cache.write_plan_ref(Path(d), _STACKED_REF)
+        result = runner.invoke(cli, ["ready"])
+        assert result.exit_code == 0, result.output
+        assert "launching the ready-time reconcile session" in result.stderr
+        assert len(calls) == 1
+        kwargs = calls[0]
+        assert kwargs["repo_root"] == Path(d).resolve()
+        assert kwargs["stage"].id == "objective-save"
+        assert kwargs["binding_trigger"] == "command:objective-reconcile"
+        assert kwargs["worktree"] is None and kwargs["remote"] is None
+        assert kwargs["dry_run"] is False and kwargs["pi_args"] == []
+        seed = kwargs["prompt_override"]
+        assert f"{_PARENT_SHA}..{_HEAD_SHA}" in seed
+        assert "objective #500" in seed
+        assert "node 1.1" in seed
+        assert "plan #7" in seed
+        assert "gh pr view 42" in seed
+        # The seed deliberately names NO ready/land re-entry gesture — those tools are scoped
+        # off in the borrowed stage's session; re-entry guidance is human-facing only.
+        assert "perk ready" not in seed
+
+
+def test_ready_wrapper_launch_anchors_to_the_main_root_from_a_linked_worktree(
+    git_repo, monkeypatch
+):
+    # The two-roots rule (contracts.md §8.66), proven with DISTINCT roots: invoked inside a
+    # linked worktree, the launch anchors repo_root AND config to the MAIN checkout — the
+    # config marker exists only as a main-root untracked file, so passing the invocation
+    # root (or its config) would fail both assertions.
+    from perk.cli.context import PerkContext
+    from perk.substrate import git as git_mod
+
+    _authed(monkeypatch)
+    _interactive(monkeypatch)
+    calls = _spy_launch(monkeypatch)
+    _stub_stacked(monkeypatch, train=_stacked_train(), is_draft=True)
+    (git_repo / ".perk").mkdir(exist_ok=True)
+    (git_repo / ".perk" / "config.toml").write_text(
+        '[workflow]\nbase = "main-root-marker"\n', encoding="utf-8"
+    )
+    wt = git_repo / ".worktrees" / "plan-7"
+    git_mod.worktree_add(git_repo, wt, branch="plan-7", create_branch=True)
+    cache.write_plan_ref(wt, _STACKED_REF)
+    ctx = PerkContext.for_test(cwd=wt, repo_root=wt)
+    result = CliRunner().invoke(cli, ["ready"], obj=ctx)
+    assert result.exit_code == 0, result.output
+    assert len(calls) == 1
+    kwargs = calls[0]
+    assert Path(kwargs["repo_root"]).resolve() == git_repo.resolve()
+    assert Path(kwargs["repo_root"]).resolve() != wt.resolve()
+    assert kwargs["config"].workflow_base == "main-root-marker"
+
+
+def test_ready_wrapper_existed_restamp_still_launches(monkeypatch):
+    # Re-running /ready re-enters reconciliation: an existed=True re-stamp still launches.
+    _authed(monkeypatch)
+    _interactive(monkeypatch)
+    calls = _spy_launch(monkeypatch)
+    persistence = FakeDeliveryPersistence(
+        stamp_results={_STAMP_KEY: StampAppendResult(key=_STAMP_KEY, existed=True)}
+    )
+    _stub_stacked(monkeypatch, train=_stacked_train(), is_draft=True, persistence=persistence)
+    result = _run(monkeypatch, ["ready"], ref=_STACKED_REF)
+    assert result.exit_code == 0, result.output
+    assert len(calls) == 1
+
+
+def test_ready_wrapper_malformed_parent_checkpoint_is_the_second_outcome(monkeypatch):
+    # Stored checkpoints are not vocabulary-checked by the projection: a non-40-hex parent
+    # refuses the launch AFTER the stamp stood — worker output + loud stderr, exit 1, no
+    # launch call.
+    _authed(monkeypatch)
+    _interactive(monkeypatch)
+    calls = _spy_launch(monkeypatch)
+    train = _stacked_train()
+    bad_layer = train.layers[0]
+    from dataclasses import replace as dc_replace
+
+    train = dc_replace(train, layers=(dc_replace(bad_layer, parent_checkpoint_sha="f" * 39),))
+    _stub_stacked(monkeypatch, train=train, is_draft=True)
+    result = _run(monkeypatch, ["ready"], ref=_STACKED_REF)
+    assert result.exit_code == 1
+    assert "not launched" in result.stderr
+    assert "not a full 40-hex lowercase object id" in result.stderr
+    assert "perk ready 7" in result.stderr
+    assert calls == []
+
+
+def test_ready_wrapper_launch_failure_is_the_second_outcome(monkeypatch):
+    # A launch exception after a successful stamp: loud stderr naming the standing stamp +
+    # the retry gesture, exit 1 — the stamp is never rolled back.
+    _authed(monkeypatch)
+    _interactive(monkeypatch)
+    calls = _spy_launch(monkeypatch, boom=RuntimeError("exec failed"))
+    _stub_stacked(monkeypatch, train=_stacked_train(), is_draft=True)
+    result = _run(monkeypatch, ["ready"], ref=_STACKED_REF)
+    assert result.exit_code == 1
+    assert "launching the ready-time reconcile session" in result.stderr
+    assert "exec failed" in result.stderr
+    assert "stamp already stands" in result.stderr
+    assert "perk ready 7" in result.stderr
+    assert len(calls) == 1
+
+
+def test_ready_wrapper_worker_failure_exits_with_the_worker_envelope(monkeypatch):
+    # Failure paths exit inside _fail_ready with the worker-identical envelope/exit code.
+    _authed(monkeypatch)
+    _interactive(monkeypatch)
+    calls = _spy_launch(monkeypatch)
+    _stub_plan(monkeypatch)
+    _bind_ready_delivery(monkeypatch)
+    result = _run(monkeypatch, ["ready", "--json"])
+    assert result.exit_code == 1
+    assert json.loads(result.stdout)["error_type"] == "no_pr"
+    assert calls == []
 
 
 def test_pr_ready_no_arg_inside_linked_worktree_reads_its_own_binding(git_repo, monkeypatch):

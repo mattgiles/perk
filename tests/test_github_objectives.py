@@ -5,17 +5,22 @@ import pytest
 from _github_fakes import ROOT, _GhDispatch, _GhRecorder, _has, _Proc
 
 from perk import github, objective, plan
+from perk.backends import objective_store
 from perk.backends.github import objectives, plans
 
 # --------------------------------------------------------------- objective ops
 
 
-def _obj_header(run_id: str, comment_id=None, *, origin=None) -> str:
+def _obj_header(run_id: str, comment_id=None, *, origin=None, delivery=None) -> str:
     return plan.render_metadata_block(
         objective.OBJECTIVE_HEADER_KEY,
         objective.render_header_block(
             objective.ObjectiveHeader(
-                run_id=run_id, created="t", objective_comment_id=comment_id, origin=origin
+                run_id=run_id,
+                created="t",
+                objective_comment_id=comment_id,
+                origin=origin,
+                delivery=delivery,
             )
         ),
     )
@@ -27,8 +32,9 @@ def _obj_roadmap(nodes) -> str:
     )
 
 
-def _obj_body(run_id, nodes, comment_id=None, *, origin=None) -> str:
-    return f"{_obj_header(run_id, comment_id, origin=origin)}\n\n{_obj_roadmap(nodes)}\n"
+def _obj_body(run_id, nodes, comment_id=None, *, origin=None, delivery=None) -> str:
+    header = _obj_header(run_id, comment_id, origin=origin, delivery=delivery)
+    return f"{header}\n\n{_obj_roadmap(nodes)}\n"
 
 
 def _lists_comments(issue: int):
@@ -1075,6 +1081,86 @@ def test_add_objective_node_bad_roadmap_raises(monkeypatch):
     )
     with pytest.raises(github.GitHubError, match="invalid objective roadmap"):
         objectives.add_objective_node(number=123, phase=1, description="Gamma", repo_root=ROOT)
+
+
+def _stacked_add_nodes() -> list[objective.ObjectiveNode]:
+    return [
+        objective.ObjectiveNode(id="1.1", description="A", status=objective.NodeStatus.PENDING),
+        objective.ObjectiveNode(id="2.1", description="B", status=objective.NodeStatus.PENDING),
+    ]
+
+
+@pytest.mark.parametrize("dry_run", [False, True])
+def test_add_objective_node_stacked_refuses_non_tail_append(monkeypatch, dry_run):
+    # The store-owned tail-append guard, against the same fresh body read — dry-run included:
+    # a mid-roadmap phase insertion re-points 2.1's inferred edge and is refused before any
+    # PATCH.
+    issue_body = _obj_body("01RID", _stacked_add_nodes(), delivery="stacked")
+    rec = _GhDispatch([(_has("issues/123", ".body"), _Proc(0, issue_body))])
+    monkeypatch.setattr(subprocess, "run", rec)
+    with pytest.raises(objective_store.StackedAppendRefused) as err:
+        objectives.add_objective_node(
+            number=123, phase=1, description="Gamma", repo_root=ROOT, dry_run=dry_run
+        )
+    assert any("order strictly last" in e for e in err.value.errors)
+    assert rec.method_calls("PATCH") == 0
+
+
+def test_add_objective_node_stacked_refuses_non_pending_status(monkeypatch):
+    issue_body = _obj_body("01RID", _stacked_add_nodes(), delivery="stacked")
+    rec = _GhDispatch([(_has("issues/123", ".body"), _Proc(0, issue_body))])
+    monkeypatch.setattr(subprocess, "run", rec)
+    with pytest.raises(objective_store.StackedAppendRefused) as err:
+        objectives.add_objective_node(
+            number=123,
+            phase=2,
+            description="Gamma",
+            status=objective.NodeStatus.IN_PROGRESS,
+            repo_root=ROOT,
+        )
+    assert any("pending only" in e for e in err.value.errors)
+    assert rec.method_calls("PATCH") == 0
+
+
+def test_add_objective_node_stacked_accepts_tail_append(monkeypatch):
+    # A pending append to the last phase passes the guard and writes.
+    issue_body = _obj_body("01RID", _stacked_add_nodes(), delivery="stacked")
+    rec = _GhDispatch(
+        [
+            (_has("issues/123", "PATCH"), _Proc(0, "{}")),
+            (_has("issues/123", ".body"), _Proc(0, issue_body)),
+        ]
+    )
+    monkeypatch.setattr(subprocess, "run", rec)
+    result = objectives.add_objective_node(number=123, phase=2, description="Gamma", repo_root=ROOT)
+    assert result.node_id == "2.2" and result.dry_run is False
+    assert rec.method_calls("PATCH") == 1
+
+
+def test_add_objective_node_junk_delivery_header_refused(monkeypatch):
+    # A junk stored `delivery` value fails closed (never guessed incremental).
+    issue_body = _obj_body("01RID", _stacked_add_nodes(), delivery="weird")
+    rec = _GhDispatch([(_has("issues/123", ".body"), _Proc(0, issue_body))])
+    monkeypatch.setattr(subprocess, "run", rec)
+    with pytest.raises(objective_store.StackedAppendRefused, match="unknown objective delivery"):
+        objectives.add_objective_node(number=123, phase=2, description="Gamma", repo_root=ROOT)
+    assert rec.method_calls("PATCH") == 0
+
+
+def test_add_objective_node_incremental_stays_unguarded(monkeypatch):
+    # No delivery header → the guard never engages: even a mid-roadmap insertion writes
+    # (behavior unchanged for incremental objectives).
+    issue_body = _obj_body("01RID", _stacked_add_nodes())
+    rec = _GhDispatch(
+        [
+            (_has("issues/123", "PATCH"), _Proc(0, "{}")),
+            (_has("issues/123", ".body"), _Proc(0, issue_body)),
+        ]
+    )
+    monkeypatch.setattr(subprocess, "run", rec)
+    result = objectives.add_objective_node(number=123, phase=1, description="Gamma", repo_root=ROOT)
+    assert result.node_id == "1.2"
+    assert rec.method_calls("PATCH") == 1
 
 
 def test_update_objective_body_splices_reconcilable_region(monkeypatch):

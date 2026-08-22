@@ -91,8 +91,12 @@ alias: [`perk land`](../cli.md#perk-land).
 
 ### `perk pr ready [PLAN]`
 
-Ready a plan's PR — a **worker-only** command (not a merged L+W: `ready` is not a registry
-stage and has no launcher). For an **incremental** plan this marks the draft PR ready for
+Ready a plan's PR — the **deterministic, non-launching worker** (not a merged L+W: `ready` is
+not a registry stage). The flat spelling `perk ready` is a **different command** — the
+continuation wrapper that runs these exact worker mechanics and then, on a successful stacked
+stamp in an interactive terminal, launches the ready-time reconcile session (see
+[`perk ready`](../cli.md) and the failure/retry story below). For an **incremental** plan this
+marks the draft PR ready for
 review (the deliberate review gate). For a **stacked** layer it is the deliberate
 **post-review human handoff**: review happens on the draft layer PR, and after review +
 address this gesture stamps the exact verified current head into the delivery journal — on
@@ -130,11 +134,23 @@ refuses **before** any mutation — the PR is never flipped when the handoff can
 
 `--json` emits the grown envelope: the original `success, error_type, message, pr, was_draft,
 dry_run` plus the tail-additive continuation facts `stacked, objective, node, stamped_head,
-stamp_advanced, reconcile_notice, reconcile_retry` (all null on the offline dry-run;
-`stacked: false` with the rest null on an incremental plan; all populated on stacked success —
-`reconcile_notice` reports that the ready-time reconcile pass was **not** launched, this worker
-is deterministic and non-launching, and `reconcile_retry` carries the copyable re-run). Flat
-alias: [`perk ready`](../cli.md#perk-ready-plan).
+stamp_advanced, reconcile_notice, reconcile_retry, plan, parent_checkpoint` (all null on the
+offline dry-run; `stacked: false` with the rest null on an incremental plan; all populated on
+stacked success — `reconcile_notice` reports that the ready-time reconcile pass was **not**
+launched because this worker is deterministic and non-launching, naming `perk ready <plan>` in
+an interactive terminal as the launcher; `reconcile_retry` carries the copyable re-run;
+`plan` and `parent_checkpoint` are the continuation evidence — with `stamped_head` they pin
+the accepted diff range `parent_checkpoint..stamped_head`).
+
+**The `perk ready` wrapper on top of this worker**: identical options (`PLAN`, `--dry-run`,
+`--json`), identical failure envelopes and exit codes, and byte-identical `--json` output. Its
+one addition is the launching arm — an interactive (stdin AND stdout TTY), non-JSON,
+non-dry-run run whose stacked stamp succeeded (an already-stamped re-run included) launches the
+seeded ready-time reconcile session in the main checkout (borrowing the `objective-save` stage;
+the session judges the pinned accepted range and may only rewrite Reconcilable prose, update
+node descriptions, or add guarded `pending` tail nodes). A launch failure after a successful
+stamp is a second reported outcome: loud stderr, exit 1 — the stamp stands, nothing is rolled
+back, and re-running `perk ready <plan>` retries the pass.
 
 ### `perk pr check`
 

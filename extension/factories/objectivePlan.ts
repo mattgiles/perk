@@ -631,9 +631,10 @@ export function objectiveReadInstruction(
  * Fetch the objective's URL via `perk objective show <id> --json` (reading `objective.url`).
  * Lenient: returns "" on any failure / missing url — never throws (the seed prompt's step-1
  * `perk objective show <id>` step surfaces the URL anyway). Only called for the linear backend
- * (github needs no clause → no fetch).
+ * (github needs no clause → no fetch). Exported for the warm drives that compose the same
+ * backend-aware read clause (the ready-time reconcile drive in `doors/ready.ts`).
  */
-async function fetchObjectiveUrl(
+export async function fetchObjectiveUrl(
   pi: ExtensionAPI,
   ctx: ExtensionContext,
   objectiveId: string,
@@ -680,7 +681,7 @@ export function reconcileGuidance(objective: string, backend = "github", url = "
 }
 
 const RECONCILE_TOOL_GUIDELINES = [
-  "Call reconcile_objective only to rewrite the objective's Reconcilable prose region after a PR merged — the roadmap table and Immutable notes are never touched.",
+  "Call reconcile_objective only to rewrite the objective's Reconcilable prose region after a PR merged or after a stacked ready stamp (the ready-time pass) — the roadmap table and Immutable notes are never touched.",
   "Pass reconcile_objective the FULL replacement prose; it overwrites the marker-bounded Reconcilable region wholesale.",
   "Judgment + durable writes stay with you; skip reconcile_objective when nothing is stale (do not churn).",
 ];
@@ -688,6 +689,7 @@ const RECONCILE_TOOL_GUIDELINES = [
 const ADD_NODE_TOOL_GUIDELINES = [
   "Use add_objective_node SPARINGLY — only during reconciliation, when a genuine new unit of work emerged that wasn't planned: a deferred follow-up the PR flagged, an uncovered defect/gap, a missing prerequisite for a later node, or human-requested work from the engagement block.",
   "add_objective_node is only for genuinely-new, unplanned work — never to restate, rename, or re-scope an existing node (use objective_node's `description` for that).",
+  "Stacked objectives accept guarded `pending` tail-appends only — a refusal means the discovery is structural: route it to `perk objective replan`.",
   "Judgment + durable writes stay with you; add_objective_node delegates the write to the canonical Python plane.",
 ];
 
@@ -820,9 +822,13 @@ export function registerObjectivePlan(pi: ExtensionAPI, gating: ToolGating): voi
     label: "Reconcile objective prose",
     description:
       "Rewrite the objective's Reconcilable prose region (the marker-bounded prose in the " +
-      "objective body) to reconcile it against a merged PR. The Mechanical roadmap table and any " +
-      "Immutable notes are NEVER touched. Delegates the write to the perk cold door.",
-    promptSnippet: "Reconcile the objective's Reconcilable prose region against the merged diff",
+      "objective body) to reconcile it against the pass's evidence — a merged PR (post-land) or " +
+      "a stacked layer's pinned accepted diff range (the ready-time pass). The Mechanical " +
+      "roadmap table and any Immutable notes are NEVER touched. Delegates the write to the perk " +
+      "cold door.",
+    promptSnippet:
+      "Reconcile the objective's Reconcilable prose region against the pass's evidence " +
+      "(merged diff, or the ready-time pinned accepted range)",
     promptGuidelines: RECONCILE_TOOL_GUIDELINES,
     executionMode: "sequential",
     parameters: {

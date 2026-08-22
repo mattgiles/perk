@@ -124,6 +124,16 @@ validates without writing. Used **sparingly** during reconciliation, when a genu
 work emerged: a deferred follow-up the plan/PR flagged, an uncovered defect or gap, a missing
 prerequisite for a later node, or human-requested work from the engagement block.
 
+**Stacked objectives accept guarded tail-appends only** (contracts.md §8.66): the store
+validates the add against its own fresh read — the new node must be `pending` (so `--status`
+is effectively fixed there) and must order strictly last with the existing delivery order as
+an unchanged prefix (no inferred↔explicit dependency-mode flip — an explicit `--depends-on`
+on an otherwise-inferred roadmap refuses; a mid-roadmap `--phase` insertion refuses).
+`--dry-run` refuses identically. A refusal exits 1 typed **`stacked_append_refused`** with the
+validator findings — it means the discovery is structural: route it through
+[`perk objective replan`](#perk-objective-replan-number). Incremental objectives are
+unguarded (all options behave unconditionally).
+
 A successful **non-terminal** add (any `--status` other than `done`/`skipped`) also **reopens a
 closed objective** (the reopen-on-incomplete invariant — roadmap incomplete ⇒ open, the mirror of
 land's close-on-complete; human output adds `✓ Reopened #N (roadmap incomplete again)`). The one

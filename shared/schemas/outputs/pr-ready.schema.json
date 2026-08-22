@@ -22,7 +22,7 @@
     }
   },
   "additionalProperties": false,
-  "description": "The ``--json`` serialization boundary of :class:`PrReadyResult` (order load-bearing \u2014\nthe seven continuation fields are tail-additive).\n\nNull semantics: dry-run \u2192 all seven continuation fields null; incremental \u2192\n``stacked=false``, rest null; stacked success \u2192 all populated (``reconcile_notice`` /\n``reconcile_retry`` are CLI-composed presentation: the ready-time reconcile pass was not\nlaunched \u2014 this worker never launches \u2014 plus the copyable re-run gesture).",
+  "description": "The ``--json`` serialization boundary of :class:`PrReadyResult` (order load-bearing \u2014\nthe nine continuation fields are tail-additive).\n\nNull semantics: dry-run \u2192 all nine continuation fields null; incremental \u2192\n``stacked=false``, rest null; stacked success \u2192 all populated (``reconcile_notice`` /\n``reconcile_retry`` are CLI-composed presentation: the ready-time reconcile pass was not\nlaunched \u2014 the worker never launches \u2014 plus the copyable re-run gesture; ``plan`` /\n``parent_checkpoint`` are the continuation evidence consumers compose the pinned diff\nrange from, contracts.md \u00a78.66).",
   "properties": {
     "success": {
       "title": "Success",
@@ -137,6 +137,28 @@
         }
       ],
       "title": "Reconcile Retry"
+    },
+    "plan": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Plan"
+    },
+    "parent_checkpoint": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Parent Checkpoint"
     }
   },
   "required": [
@@ -152,7 +174,9 @@
     "stamped_head",
     "stamp_advanced",
     "reconcile_notice",
-    "reconcile_retry"
+    "reconcile_retry",
+    "plan",
+    "parent_checkpoint"
   ],
   "title": "PrReadyOut",
   "type": "object"

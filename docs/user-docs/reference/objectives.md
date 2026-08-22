@@ -94,6 +94,14 @@ replan` closed it deliberately — dead lineage is never resurrected). Flipping 
 node back to non-terminal via `objective_node`/`perk objective node` does **not** auto-reopen —
 the invariant rides node *insertion* only.
 
+**Stacked objectives guard the insertion.** On a stacked-delivery objective every node-add is
+validated by the store against its own fresh read as a **tail-append**: one new `pending` node
+that orders strictly last, with the existing delivery order as an unchanged prefix and no
+inferred↔explicit dependency-mode flip (dry-run included). Anything else refuses typed
+(`stacked_append_refused`) — a refusal means the discovery is structural, and the route
+is [`perk objective replan`](./cli/objective.md#perk-objective-replan-number). Incremental
+objectives stay unguarded.
+
 ## Node statuses
 
 A node's `status` is one of six values (`NodeStatus`):
@@ -261,6 +269,16 @@ the authored plan comprehends your feedback. You can inspect it directly with
 [`perk objective node-engagement N --node <id>`](./cli/objective.md#perk-objective-node-engagement-number).
 GitHub single-issue objectives have no per-node issues, so this is a Linear-first behavior (empty on
 GitHub).
+
+### Reconcile is no longer post-land-only
+
+The reconcile pass has **two invocations**: post-land (a node's PR merged — judge the merged
+diff) and **ready-time** (a stacked layer's `perk ready` handoff stamp just recorded — judge
+the pinned accepted range `parent_checkpoint..stamped_head` while the layer is accepted but
+not landed). The ready-time pass narrows its powers to prose rewrites, node **descriptions**,
+and guarded `pending` tail-appends — no status or PR-link mutations, because nothing landed;
+nodes stay `in_progress` until the objective-scoped landing. See
+[How to reconcile an objective manually](../how-to/reconcile-an-objective.md#the-two-reconcile-modes).
 
 ### Objective + node-issue engagement at reconcile time
 

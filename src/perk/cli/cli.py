@@ -19,7 +19,7 @@ from perk.cli.commands.pr import (
     pr_land_command,
     pr_submit_command,
 )
-from perk.cli.commands.pr.ready_cmd import ready_pr
+from perk.cli.commands.pr.ready_cmd import ready_continuation
 from perk.cli.commands.registry import registry_group
 from perk.cli.commands.release_notes_cmd import release_notes_cmd
 from perk.cli.commands.run_worker_cmd import run_worker_cmd
@@ -58,13 +58,15 @@ cli.add_command(plan_group)
 # generating flat `perk plan` / `perk save` launchers.
 cli.add_command(pr_group)
 # Flat hot-path aliases: the SAME command objects registered at
-# the root under a flat name, so `perk submit` resolves to the merged `pr submit`, etc. `ready` is
-# worker-only (no `ready` registry stage) and gains only the flat alias. register_flat_alias
+# the root under a flat name, so `perk submit` resolves to the merged `pr submit`, etc. `ready`
+# is the one split spelling: the flat name is the continuation WRAPPER (worker mechanics, then
+# the interactive ready-time reconcile launch — contracts.md §8.66), while `perk pr ready` keeps
+# the deterministic non-launching worker object. register_flat_alias
 # records each in FLAT_ALIAS_ATTR so SectionedGroup routes their rows into the launcher section.
 register_flat_alias(cli, pr_submit_command, "submit")
 register_flat_alias(cli, pr_land_command, "land")
 register_flat_alias(cli, pr_address_command, "address")
-register_flat_alias(cli, ready_pr, "ready")
+register_flat_alias(cli, ready_continuation, "ready")
 cli.add_command(learn_group)
 # The `learn` group is hybrid: bare `perk learn` default-dispatches to the hidden
 # stage launcher, while `capture` and `docs` are the cold workers. `docs` is a dedicated cold
