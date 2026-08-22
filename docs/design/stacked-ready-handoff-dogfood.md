@@ -512,8 +512,35 @@ durable-authority-derived). All BEFORE any stamp exists.
 
 ### S4 — stamp layer 1 (warm carrier)
 
-*Not yet executed.* (Stamp report, ready-stamp journal event, the in-session pass outcome,
-`handoff ready` read.)
+Executed 2026-08-22 — `/ready` in layer 1's implement session (operator-driven, pinned
+checkout extension).
+
+- **Warm continuation announcement (operator capture, verbatim — the session's terminal
+  output; the earlier `Marked ready` / `Handoff stamped` report lines were ephemeral and are
+  covered by the durable halves below):**
+
+  ```text
+  perk: ready — continuing into the ready-time reconcile pass —
+  objective #1980, pinned range
+  e2cb9e5de3b9eb37668b9ad31fea449979b56fc7..f7f25f9d65577f0cb7df8fc0d8a440cfd5c4d5d1
+  ```
+
+  The pinned range endpoints equal the plan header's `parent_checkpoint_sha` /
+  `published_head_sha` pair exactly (S2) — the §8.66 continuation contract observed live.
+- **The PR flip (durable half):** `gh pr view 1982` → `isDraft: false`, `OPEN`, head unchanged
+  at `f7f25f9d…`.
+- **The ready-stamp journal event (durable half):** issue #1980 comment **5382684660**, created
+  `2026-08-22T21:26:53Z` — the deterministic marker
+  `<!-- perk:stack-ready-stamp:1980:1981:1.1:f7f25f9d65577f0cb7df8fc0d8a440cfd5c4d5d1 -->`
+  carrying the full §8.43 record (`event: ready_stamp`, `objective_id: '1980'`,
+  `delivery_lineage: 01M0NJ5ASVYS4VMBEWXXVJNXRA`, `plan_id: '1981'`, `node_id: '1.1'`,
+  `head_sha: f7f25f9d…`).
+- **Train read after the stamp:** layer 1.1 `pr #1982 (ready) … handoff ready`; the S3
+  `planning gated` line is GONE — `planning_gate: {node_id: "1.2", ready: true, blockers: []}`
+  (the S3→S4 gate contrast, captured both sides).
+- **The in-session ready-time reconcile pass:** *outcome pending capture — the pass was still
+  running when this evidence committed; its writes (or honest no-op) land in the next
+  evidence commit.*
 
 ### S5 — suspend/resume
 
