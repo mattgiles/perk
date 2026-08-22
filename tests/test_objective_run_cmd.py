@@ -909,3 +909,236 @@ def test_incremental_dry_run_payload_has_no_build_readiness(monkeypatch):
     result = _invoke(monkeypatch, ["137", "--dry-run", "--json"], objective_state=_state(nodes))
     assert result.exit_code == 0
     assert "build_readiness" not in _payload(result)
+
+
+# ------------------------------------------------------------------- the handoff gate (§8.46)
+
+
+def _stamped_layer(
+    node_id: str,
+    plan_id: str,
+    pr_number: int,
+    *,
+    handoff: train_mod.LayerHandoff,
+    stamped: str | None = None,
+) -> train_mod.TrainLayer:
+    from dataclasses import replace
+
+    return replace(
+        _train_layer(node_id, plan_id, pr_number, published=True),
+        handoff=handoff,
+        stamped_head_sha=stamped,
+    )
+
+
+def _handoff_selection(train, node, blockers, *, reason):
+    from perk.cli.commands.objective.shared import StackedSelection
+
+    return StackedSelection(
+        kind="handoff_blocked",
+        node=node,
+        ready=False,
+        reason=reason,
+        train=train,
+        handoff_blockers=blockers,
+    )
+
+
+def _draft_lower_plan(monkeypatch):
+    """Serve the published lower layer's plan with a DRAFT PR: the lower-attention scan skips
+    it (a review wait), so the handoff arm is reachable."""
+    monkeypatch.setattr(
+        plans,
+        "get_plan",
+        lambda **kwargs: plans.PlanState(
+            number=kwargs["number"],
+            url=f"u/{kwargs['number']}",
+            title="Lower",
+            header={"objective_id": "137"},
+            pr=_pr(number=41, is_draft=True),
+        ),
+    )
+    monkeypatch.setattr(
+        github,
+        "get_pr_feedback",
+        lambda **kwargs: pytest.fail("a draft lower layer never fetches feedback"),
+    )
+
+
+def test_handoff_blocked_selection_pauses_as_handoff_required_with_rows(monkeypatch):
+    _authed(monkeypatch)
+    lower = objective.ObjectiveNode(id="1.1", description="A", status=N.IN_PROGRESS, pr="#6")
+    upper = objective.ObjectiveNode(
+        id="1.2", description="B", status=N.PENDING, depends_on=("1.1",)
+    )
+    blocker = _stamped_layer("1.1", "6", 41, handoff=train_mod.LayerHandoff.UNSTAMPED)
+    train = _supervisor_train((blocker, _train_layer("1.2", "7", None, published=False)))
+    reason = "node 1.2 waits on 1.1 (plan #6, PR #41) — unstamped; record the handoff: perk ready 6"
+    selection = _handoff_selection(train, upper, (blocker,), reason=reason)
+    monkeypatch.setattr(run_cmd, "stacked_selection", lambda *_a: selection)
+    _draft_lower_plan(monkeypatch)
+    monkeypatch.setattr(
+        run_cmd,
+        "_dispatch_stage_remote",
+        lambda **kwargs: pytest.fail("a handoff pause never dispatches"),
+    )
+    result = _invoke(monkeypatch, ["137", "--json"], objective_state=_stacked_state((lower, upper)))
+    assert result.exit_code == 0
+    payload = _payload(result)
+    assert payload["action"] == "handoff_required"
+    assert payload["node"] == "1.2"
+    assert payload["reason"] == reason
+    assert payload["remediation"] == "perk ready 6"  # the FIRST (bottom-most) blocker's gesture
+    assert [row["kind"] for row in payload["blockers"]] == ["handoff"]
+    assert payload["blockers"][0]["plan"] == "6" and payload["blockers"][0]["pr"] == 41
+    # The human render names the gesture and the never-auto-run posture.
+    assert "handoff required" in result.output
+    assert "a human records the handoff — never auto-run" in result.output
+
+
+def test_lower_address_outranks_the_handoff_pause(monkeypatch):
+    # Lower-attention-first: actionable feedback on the blocking dep dispatches address — the
+    # address commits are exactly what re-stamps route through — before any handoff pause.
+    _authed(monkeypatch)
+    lower = objective.ObjectiveNode(id="1.1", description="A", status=N.IN_PROGRESS, pr="#6")
+    upper = objective.ObjectiveNode(
+        id="1.2", description="B", status=N.PENDING, depends_on=("1.1",)
+    )
+    blocker = _stamped_layer("1.1", "6", 41, handoff=train_mod.LayerHandoff.UNSTAMPED)
+    train = _supervisor_train((blocker, _train_layer("1.2", "7", None, published=False)))
+    selection = _handoff_selection(train, upper, (blocker,), reason="unused")
+    monkeypatch.setattr(run_cmd, "stacked_selection", lambda *_a: selection)
+    monkeypatch.setattr(
+        plans,
+        "get_plan",
+        lambda **kwargs: plans.PlanState(
+            number=6,
+            url="u/6",
+            title="Lower",
+            header={"objective_id": "137"},
+            pr=_pr(number=41),
+        ),
+    )
+    monkeypatch.setattr(
+        github, "get_pr_feedback", lambda **kwargs: _feedback(threads=(_thread(False),))
+    )
+    sink: dict = {}
+    _stub_launch(monkeypatch, sink)
+    result = _invoke(monkeypatch, ["137", "--json"], objective_state=_stacked_state((lower, upper)))
+    payload = _payload(result)
+    assert payload["action"] == "dispatched"
+    assert payload["stage"] == "address" and payload["node"] == "1.1"
+
+
+def test_blocked_arms_carry_the_shared_blocker_rows(monkeypatch):
+    # The veto arms (§8.52) carry the technical rows; a train-less selection build_blocked
+    # carries an empty list (never a missing key).
+    _authed(monkeypatch)
+    node = objective.ObjectiveNode(id="1.1", description="A", status=N.IN_PROGRESS, pr="#7")
+    operation = train_mod.UnresolvedOperationFacts("01OP", "sync", "t0")
+    train = _supervisor_train(
+        (_train_layer("1.1", "7", 42, published=True),), unresolved=(operation,)
+    )
+    selection = _stacked_selection("no_candidate")
+    selection = selection.__class__(**{**selection.__dict__, "train": train})
+    monkeypatch.setattr(run_cmd, "stacked_selection", lambda *_a: selection)
+    result = _invoke(monkeypatch, ["137", "--json"], objective_state=_stacked_state((node,)))
+    payload = _payload(result)
+    assert payload["action"] == "repair_required"
+    assert payload["blockers"] == [
+        {
+            "kind": "technical",
+            "code": "unresolved_operation",
+            "message": "operation 01OP (sync, prepared t0) is unresolved",
+            "dependency_node_id": None,
+            "plan": None,
+            "pr": None,
+            "handoff_state": None,
+            "stamped_head": None,
+            "current_head": None,
+            "remediation": "perk objective stack recover 137",
+        }
+    ]
+
+    monkeypatch.setattr(
+        run_cmd,
+        "stacked_selection",
+        lambda *_a: _stacked_selection("build_blocked", reason="[checkpoint_drift] x"),
+    )
+    blocked = _invoke(
+        monkeypatch,
+        ["137", "--json"],
+        objective_state=_stacked_state(
+            [objective.ObjectiveNode(id="1.1", description="A", status=N.PENDING)]
+        ),
+    )
+    blocked_payload = _payload(blocked)
+    assert blocked_payload["action"] == "build_blocked"
+    assert blocked_payload["blockers"] == []
+
+
+def test_no_candidate_graph_fallback_is_handoff_gated(monkeypatch):
+    # Structurally unreachable today (an all-published train has no plannable graph node),
+    # but the promise holds by construction: a graph-plannable node whose skip-contracted
+    # direct dep lacks a ready stamp pauses as handoff_required, never plan_required.
+    from dataclasses import replace
+
+    _authed(monkeypatch)
+    nodes = (
+        objective.ObjectiveNode(
+            id="1.1", description="A", status=N.IN_PROGRESS, pr="#6", depends_on=()
+        ),
+        objective.ObjectiveNode(id="1.2", description="S", status=N.SKIPPED, depends_on=("1.1",)),
+        objective.ObjectiveNode(id="1.3", description="C", status=N.PENDING, depends_on=("1.2",)),
+    )
+    blocker = _stamped_layer("1.1", "6", 41, handoff=train_mod.LayerHandoff.UNSTAMPED)
+    train = replace(
+        _supervisor_train((blocker,)),
+        build_readiness=train_mod.BuildReadiness(None, False, "all layers published"),
+        objective_nodes=nodes,
+    )
+    selection = _stacked_selection("no_candidate")
+    selection = selection.__class__(**{**selection.__dict__, "train": train})
+    monkeypatch.setattr(run_cmd, "stacked_selection", lambda *_a: selection)
+    _draft_lower_plan(monkeypatch)
+    result = _invoke(monkeypatch, ["137", "--json"], objective_state=_stacked_state(nodes))
+    payload = _payload(result)
+    assert payload["action"] == "handoff_required"
+    assert payload["node"] == "1.3"
+    assert payload["remediation"] == "perk ready 6"
+    assert [row["dependency_node_id"] for row in payload["blockers"]] == ["1.1"]
+
+
+def test_in_flight_dispatch_stays_handoff_ungated(monkeypatch):
+    # An in-flight candidate resumes/dispatches even while its dep sits unstamped: the
+    # structural fresh-vs-resume boundary lives in execution Prepare, not the supervisor.
+    _authed(monkeypatch)
+    lower = objective.ObjectiveNode(id="1.1", description="A", status=N.IN_PROGRESS, pr="#6")
+    upper = objective.ObjectiveNode(
+        id="1.2", description="B", status=N.IN_PROGRESS, pr="#7", depends_on=("1.1",)
+    )
+    blocker = _stamped_layer("1.1", "6", 41, handoff=train_mod.LayerHandoff.UNSTAMPED)
+    train = _supervisor_train((blocker, _train_layer("1.2", "7", None, published=False)))
+    selection = _stacked_selection("in_flight", upper)
+    selection = selection.__class__(**{**selection.__dict__, "train": train})
+    monkeypatch.setattr(run_cmd, "stacked_selection", lambda *_a: selection)
+
+    def get_plan(**kwargs):
+        number = kwargs["number"]
+        return plans.PlanState(
+            number=number,
+            url=f"u/{number}",
+            title="Plan",
+            header={"objective_id": "137"},
+            # The lower layer's PR is draft (a review wait); the upper plan has no PR yet
+            # (implement is the next stage).
+            pr=_pr(number=41, is_draft=True) if number == 6 else None,
+        )
+
+    monkeypatch.setattr(plans, "get_plan", get_plan)
+    sink: dict = {}
+    _stub_launch(monkeypatch, sink)
+    result = _invoke(monkeypatch, ["137", "--json"], objective_state=_stacked_state((lower, upper)))
+    payload = _payload(result)
+    assert payload["action"] == "dispatched"
+    assert payload["stage"] == "implement" and payload["node"] == "1.2"

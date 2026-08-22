@@ -596,3 +596,185 @@ def _sha(root: Path) -> str:
         timeout=60,
     )
     return out.stdout.strip()
+
+
+# --- the planning_gate block (§8.46) ------------------------------------------------------
+
+
+def _gated_world():
+    """A technically-ready two-layer train: published-unstamped 1.1, candidate 1.2 whose
+    direct dep is 1.1 (the roadmap rides train.objective_nodes)."""
+    from perk import objective
+
+    nodes = (
+        objective.ObjectiveNode(
+            id="1.1",
+            description="A",
+            status=objective.NodeStatus.IN_PROGRESS,
+            pr="#1457",
+            depends_on=(),
+        ),
+        objective.ObjectiveNode(
+            id="1.2",
+            description="B",
+            status=objective.NodeStatus.PENDING,
+            depends_on=("1.1",),
+        ),
+    )
+    bottom = _layer(node_id="1.1", handoff=train.LayerHandoff.UNSTAMPED)
+    top = _layer(
+        node_id="1.2",
+        plan_id=None,
+        branch=None,
+        pr_number=None,
+        intent=train.LayerIntent.UNPLANNED,
+        publication=train.LayerPublication.UNPUBLISHED,
+        git=train.LayerGit.ABSENT,
+        pr=train.LayerPr.ABSENT,
+        membership=train.LayerMembership.NOT_APPLICABLE,
+        parent_checkpoint_sha=None,
+        published_head_sha=None,
+        observed_remote_head_sha=None,
+        observed_pr_base=None,
+    )
+    return nodes, replace(
+        _train(layers=(bottom, top)),
+        build_readiness=train.BuildReadiness(next_node_id="1.2", ready=True, reason=None),
+        objective_nodes=nodes,
+    )
+
+
+def test_planning_gate_no_candidate_arm(monkeypatch):
+    result, _ = _invoke(
+        ["objective", "stack", "status", "1431", "--json"],
+        monkeypatch=monkeypatch,
+        result=_train(),
+    )
+    payload = json.loads(result.stdout)
+    assert payload["train"]["planning_gate"] == {"node_id": None, "ready": False, "blockers": []}
+    # LayerOut is unchanged: the internal stamped head never reaches the per-layer envelope.
+    layer = payload["train"]["layers"][0]
+    assert "stamped_head_sha" not in layer and "stamped_head" not in layer
+
+
+def test_planning_gate_handoff_arm_and_human_line(monkeypatch):
+    _nodes, world = _gated_world()
+    result, _ = _invoke(
+        ["objective", "stack", "status", "1431", "--json"],
+        monkeypatch=monkeypatch,
+        result=world,
+    )
+    payload = json.loads(result.stdout)
+    gate = payload["train"]["planning_gate"]
+    assert gate["node_id"] == "1.2" and gate["ready"] is False
+    (row,) = gate["blockers"]
+    assert row["kind"] == "handoff" and row["dependency_node_id"] == "1.1"
+    assert row["plan"] == "1457" and row["pr"] == 1465
+    assert row["handoff_state"] == "unstamped" and row["remediation"] == "perk ready 1457"
+    human, _ = _invoke(
+        ["objective", "stack", "status", "1431"], monkeypatch=monkeypatch, result=world
+    )
+    assert "next build-ready: 1.2" in human.stderr
+    assert (
+        "planning gated: 1.2 waits on 1.1 (plan #1457, PR #1465) — unstamped; "
+        "record the handoff: perk ready 1457"
+    ) in human.stderr
+
+
+def test_planning_gate_stale_human_line_names_the_head_mismatch(monkeypatch):
+    _nodes, world = _gated_world()
+    stale = replace(
+        world,
+        layers=(
+            replace(
+                world.layers[0],
+                handoff=train.LayerHandoff.STALE,
+                stamped_head_sha="s" * 40,
+                observed_remote_head_sha="d" * 40,
+            ),
+            world.layers[1],
+        ),
+    )
+    human, _ = _invoke(
+        ["objective", "stack", "status", "1431"], monkeypatch=monkeypatch, result=stale
+    )
+    assert (
+        f"planning gated: 1.2 waits on 1.1 (plan #1457, PR #1465) — stale; "
+        f"stamped {'s' * 12} ≠ head {'d' * 12}; record the handoff: perk ready 1457"
+    ) in human.stderr
+
+
+def test_planning_gate_ready_arm(monkeypatch):
+    _nodes, world = _gated_world()
+    stamped = replace(
+        world,
+        layers=(
+            replace(
+                world.layers[0],
+                handoff=train.LayerHandoff.READY,
+                stamped_head_sha="b" * 40,
+            ),
+            world.layers[1],
+        ),
+    )
+    result, _ = _invoke(
+        ["objective", "stack", "status", "1431", "--json"],
+        monkeypatch=monkeypatch,
+        result=stamped,
+    )
+    payload = json.loads(result.stdout)
+    assert payload["train"]["planning_gate"] == {
+        "node_id": "1.2",
+        "ready": True,
+        "blockers": [],
+    }
+    human, _ = _invoke(
+        ["objective", "stack", "status", "1431"], monkeypatch=monkeypatch, result=stamped
+    )
+    assert "planning gated" not in human.stderr
+
+
+def test_planning_gate_technical_arm(monkeypatch):
+    finding = train.TrainFinding(
+        kind=train.FindingKind.BLOCKER, code="checkpoint_drift", message="moved"
+    )
+    _nodes, world = _gated_world()
+    vetoed = replace(
+        world,
+        findings=(finding,),
+        build_readiness=train.BuildReadiness(
+            next_node_id="1.2", ready=False, reason="the train has blocker findings"
+        ),
+    )
+    result, _ = _invoke(
+        ["objective", "stack", "status", "1431", "--json"],
+        monkeypatch=monkeypatch,
+        result=vetoed,
+    )
+    gate = json.loads(result.stdout)["train"]["planning_gate"]
+    assert gate["ready"] is False
+    (row,) = gate["blockers"]
+    assert row["kind"] == "technical" and row["code"] == "checkpoint_drift"
+    assert row["remediation"] == "perk objective stack status 1431"
+    human, _ = _invoke(
+        ["objective", "stack", "status", "1431"], monkeypatch=monkeypatch, result=vetoed
+    )
+    assert "planning gated" not in human.stderr  # only handoff rows render the gated line
+
+
+def test_planning_gate_defensive_dependency_not_ready_arm(monkeypatch):
+    _nodes, world = _gated_world()
+    # Drop the dep's layer entirely: the layerless non-terminal dep fails closed as the
+    # gate-owned dependency_not_ready technical row.
+    depless = replace(world, layers=(world.layers[1],))
+    result, _ = _invoke(
+        ["objective", "stack", "status", "1431", "--json"],
+        monkeypatch=monkeypatch,
+        result=depless,
+    )
+    gate = json.loads(result.stdout)["train"]["planning_gate"]
+    assert gate["ready"] is False
+    (row,) = gate["blockers"]
+    assert row["kind"] == "technical" and row["code"] == "dependency_not_ready"
+    assert row["message"].startswith("1.1: ")
+    assert row["remediation"] == "perk objective stack status 1431"

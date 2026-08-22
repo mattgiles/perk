@@ -554,6 +554,51 @@ def test_delivery_order_cycle_among_skipped_nodes_raises():
     assert "the dependency graph contains a cycle" in o.validate_stacked_roadmap(nodes)
 
 
+def test_resolved_direct_deps_explicit_vs_inferred_edges():
+    # Explicit depends_on wins; without any, sequential inference by phase position applies
+    # (delivery_order already exercises the deep mechanics — this pins the public accessor).
+    explicit = [
+        o.ObjectiveNode(id="1.1", description="A", status=N.PENDING, depends_on=()),
+        o.ObjectiveNode(id="1.2", description="B", status=N.PENDING, depends_on=()),
+        o.ObjectiveNode(id="1.3", description="C", status=N.PENDING, depends_on=("1.1", "1.2")),
+    ]
+    assert o.resolved_direct_deps(explicit) == {
+        "1.1": frozenset(),
+        "1.2": frozenset(),
+        "1.3": frozenset({"1.1", "1.2"}),
+    }
+    inferred = [
+        o.ObjectiveNode(id="1.1", description="A", status=N.PENDING),
+        o.ObjectiveNode(id="1.2", description="B", status=N.PENDING),
+    ]
+    assert o.resolved_direct_deps(inferred) == {
+        "1.1": frozenset(),
+        "1.2": frozenset({"1.1"}),
+    }
+
+
+def test_resolved_direct_deps_contracts_through_skipped_and_drops_unknown_ids():
+    nodes = [
+        o.ObjectiveNode(id="1.1", description="A", status=N.PENDING, depends_on=()),
+        o.ObjectiveNode(id="1.2", description="B", status=N.SKIPPED, depends_on=("1.1",)),
+        o.ObjectiveNode(id="1.3", description="C", status=N.PENDING, depends_on=("1.2", "9.9")),
+    ]
+    deps = o.resolved_direct_deps(nodes)
+    assert deps["1.3"] == frozenset({"1.1"})  # skip-contracted; unknown 9.9 dropped
+    assert "1.2" not in deps  # skipped nodes carry no entry of their own
+
+
+def test_resolved_direct_deps_skipped_cycle_raises():
+    nodes = [
+        o.ObjectiveNode(id="1.1", description="A", status=N.PENDING, depends_on=()),
+        o.ObjectiveNode(id="1.2", description="B", status=N.SKIPPED, depends_on=("1.3",)),
+        o.ObjectiveNode(id="1.3", description="C", status=N.SKIPPED, depends_on=("1.2",)),
+        o.ObjectiveNode(id="1.4", description="D", status=N.PENDING, depends_on=("1.2",)),
+    ]
+    with pytest.raises(ValueError, match="cycle"):
+        o.resolved_direct_deps(nodes)
+
+
 def test_delivery_order_shared_skipped_subgraph_is_not_exponential():
     # The memoization proof: a fibonacci-shaped skipped chain (each skipped node depends on the
     # previous two) re-expands the same subgraph once per incoming path without memoization —
