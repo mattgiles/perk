@@ -113,7 +113,7 @@ export async function markReady(pi: ExtensionAPI, ctx: ExtensionContext): Promis
 
 const TOOL_GUIDELINES = [
   "For an incremental plan, call ready only when the PR is ready for human review; it marks the draft PR ready (the deliberate review gate). submit keeps the PR draft on purpose.",
-  "For a STACKED plan, /ready is the deliberate HUMAN handoff made AFTER review + address: it stamps the exact verified published head into the delivery journal (draft and non-draft PRs alike). Never call it as routine post-submit choreography — review happens on the draft layer PR; only invoke it when the human explicitly asks.",
+  "For a STACKED plan, /ready is the deliberate HUMAN handoff made AFTER review + address: it stamps the exact verified published head into the delivery journal (draft and non-draft PRs alike), and the recorded stamp unblocks planning of the layer's direct dependents. Never call it as routine post-submit choreography — review happens on the draft layer PR; only invoke it when the human explicitly asks.",
   "ready operates on the active plan's worktree — it takes no arguments; the PR is discovered from the local plan-ref's branch. Idempotent: an already-ready PR is success, and a re-run converges on the same stamp.",
   "A failed stamp (error_type ready_stamp_failed) names its own remediation: the ambiguous/transient arms converge on re-run; deterministic failures need their named repair first.",
 ];

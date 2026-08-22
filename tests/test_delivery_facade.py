@@ -13,6 +13,7 @@ from perk.backends.objective_store import ObjectiveState, ObjectiveStoreError
 from perk.delivery import facade as facade_mod
 from perk.delivery import land as land_mod
 from perk.delivery import landing as landing_mod
+from perk.delivery import layer as layer_mod
 from perk.delivery import observe
 from perk.delivery import publish as publish_mod
 from perk.delivery._fakes import FakeDeliveryGit, FakeDeliveryGitHub, FakeDeliveryPersistence
@@ -57,6 +58,7 @@ from perk.delivery.train import (
     FindingKind,
     LayerFinalization,
     LayerGit,
+    LayerHandoff,
     LayerIntent,
     LayerMembership,
     LayerPr,
@@ -149,6 +151,7 @@ _DELIVERY_ERROR_TYPES = {
     "supersede_unsupported",
     "stacked_plan",
     "plan_not_found",
+    "node_not_handoff_ready",
 }
 _STATUS_ERROR_TYPES = {
     "objective_not_found",
@@ -363,14 +366,18 @@ def _train_layer(
     branch: str | None,
     *,
     remote_head: str | None = None,
+    pr_number: int | None = None,
+    publication: LayerPublication = LayerPublication.UNPUBLISHED,
+    handoff: LayerHandoff = LayerHandoff.NOT_APPLICABLE,
+    stamped_head: str | None = None,
 ) -> TrainLayer:
     return TrainLayer(
         node_id=node_id,
         plan_id=plan_id,
         branch=branch,
-        pr_number=None,
+        pr_number=pr_number,
         intent=LayerIntent.PLANNED if plan_id is not None else LayerIntent.UNPLANNED,
-        publication=LayerPublication.UNPUBLISHED,
+        publication=publication,
         git=LayerGit.ABSENT,
         pr=LayerPr.ABSENT,
         membership=LayerMembership.NOT_APPLICABLE,
@@ -381,6 +388,8 @@ def _train_layer(
         observed_remote_head_sha=remote_head,
         observed_pr_base=None,
         expected_pr_base=None,
+        handoff=handoff,
+        stamped_head_sha=stamped_head,
     )
 
 
@@ -3138,7 +3147,15 @@ def test_planning_prepare_uses_one_status_snapshot_and_never_probes_parent() -> 
     status = _planning_train(
         nodes=nodes,
         layers=(
-            _train_layer("1.1", "101", "plan-101", remote_head="a" * 40),
+            _train_layer(
+                "1.1",
+                "101",
+                "plan-101",
+                remote_head="a" * 40,
+                pr_number=201,
+                publication=LayerPublication.PUBLISHED,
+                handoff=LayerHandoff.READY,
+            ),
             _train_layer("1.2", None, None),
         ),
         candidate="1.2",
@@ -3241,6 +3258,208 @@ def test_planning_candidate_status_matrix(
         assert result.planning.reason == (
             f"the next build-ready layer 1.1 is {status.value} — not plannable in that status"
         )
+
+
+def _handoff_world(
+    *,
+    dep_handoff: LayerHandoff = LayerHandoff.UNSTAMPED,
+    stamped_head: str | None = None,
+    remote_head: str | None = None,
+) -> DeliveryTrain:
+    """A two-layer train whose bottom layer is published with the given handoff state and
+    whose top node is the technically-ready planning candidate."""
+    nodes = (
+        ObjectiveNode(id="1.1", description="Bottom", status=NodeStatus.IN_PROGRESS, pr="#101"),
+        ObjectiveNode(
+            id="1.2", description="Child", status=NodeStatus.PENDING, depends_on=("1.1",)
+        ),
+    )
+    return _planning_train(
+        nodes=nodes,
+        layers=(
+            _train_layer(
+                "1.1",
+                "101",
+                "plan-101",
+                pr_number=201,
+                publication=LayerPublication.PUBLISHED,
+                handoff=dep_handoff,
+                stamped_head=stamped_head,
+                remote_head=remote_head,
+            ),
+            _train_layer("1.2", None, None),
+        ),
+        candidate="1.2",
+    )
+
+
+def test_planning_candidate_arm_is_handoff_gated() -> None:
+    # The readiness-candidate ready arm runs the §8.46 gate first: an unstamped published
+    # dep yields handoff_blocked carrying the dep's own TrainLayer(s) in delivery order.
+    status = _handoff_world(stamped_head=None, remote_head="b" * 40)
+    result = _StatusDelivery(StatusResult("10", status.objective_url, None, status, None)).prepare(
+        PrepareRequest(kind="layer_start", mode="planning", objective_id="10")
+    )
+    decision = result.planning
+    assert decision is not None and decision.kind == "handoff_blocked"
+    assert decision.node is not None and decision.node.id == "1.2"
+    assert decision.handoff_blockers is not None
+    (blocker,) = decision.handoff_blockers
+    assert blocker.node_id == "1.1" and blocker.plan_id == "101" and blocker.pr_number == 201
+    assert blocker.handoff is LayerHandoff.UNSTAMPED
+
+
+def test_planning_wrong_candidate_still_wins_before_the_gate() -> None:
+    status = _handoff_world()
+    result = _StatusDelivery(StatusResult("10", status.objective_url, None, status, None)).prepare(
+        PrepareRequest(kind="layer_start", mode="planning", objective_id="10", node_id="other")
+    )
+    assert result.planning is not None and result.planning.kind == "wrong_candidate"
+
+
+def test_planning_candidate_ready_stamped_dep_passes_the_gate() -> None:
+    status = _handoff_world(dep_handoff=LayerHandoff.READY, stamped_head="b" * 40)
+    result = _StatusDelivery(StatusResult("10", status.objective_url, None, status, None)).prepare(
+        PrepareRequest(kind="layer_start", mode="planning", objective_id="10")
+    )
+    assert result.planning is not None and result.planning.kind == "ready"
+
+
+def test_planning_in_flight_candidate_is_never_handoff_gated() -> None:
+    # An in-flight candidate resumes ungated even while its dep sits unstamped.
+    nodes = (
+        ObjectiveNode(id="1.1", description="Bottom", status=NodeStatus.IN_PROGRESS, pr="#101"),
+        ObjectiveNode(
+            id="1.2",
+            description="Child",
+            status=NodeStatus.IN_PROGRESS,
+            pr="#102",
+            depends_on=("1.1",),
+        ),
+    )
+    status = _planning_train(
+        nodes=nodes,
+        layers=(
+            _train_layer(
+                "1.1",
+                "101",
+                "plan-101",
+                pr_number=201,
+                publication=LayerPublication.PUBLISHED,
+                handoff=LayerHandoff.UNSTAMPED,
+            ),
+            _train_layer("1.2", "102", "plan-102"),
+        ),
+        candidate="1.2",
+    )
+    result = _StatusDelivery(StatusResult("10", status.objective_url, None, status, None)).prepare(
+        PrepareRequest(kind="layer_start", mode="planning", objective_id="10")
+    )
+    assert result.planning is not None and result.planning.kind == "in_flight"
+
+
+def _skip_contracted_world() -> DeliveryTrain:
+    """candidate None; graph-plannable 1.3 whose SKIPPED direct dep contracts to the
+    unstamped published 1.1 — the graph-fallback arms' only reachable handoff block."""
+    nodes = (
+        ObjectiveNode(
+            id="1.1",
+            description="Bottom",
+            status=NodeStatus.IN_PROGRESS,
+            pr="#101",
+            depends_on=(),
+        ),
+        ObjectiveNode(
+            id="1.2", description="Skipped", status=NodeStatus.SKIPPED, depends_on=("1.1",)
+        ),
+        ObjectiveNode(
+            id="1.3", description="Child", status=NodeStatus.PENDING, depends_on=("1.2",)
+        ),
+    )
+    return _planning_train(
+        nodes=nodes,
+        layers=(
+            _train_layer(
+                "1.1",
+                "101",
+                "plan-101",
+                pr_number=201,
+                publication=LayerPublication.PUBLISHED,
+                handoff=LayerHandoff.UNSTAMPED,
+            ),
+            _train_layer("1.3", None, None),
+        ),
+        candidate=None,
+        ready=False,
+        reason="unused",
+    )
+
+
+@pytest.mark.parametrize("requested", [None, "1.3"])
+def test_planning_graph_fallback_arms_are_handoff_gated(requested: str | None) -> None:
+    # Both graph-fallback ready arms (explicit requested node + automatic selection) run the
+    # gate: the skip-contracted direct dep 1.1 blocks with its unstamped layer.
+    status = _skip_contracted_world()
+    result = _StatusDelivery(StatusResult("10", status.objective_url, None, status, None)).prepare(
+        PrepareRequest(kind="layer_start", mode="planning", objective_id="10", node_id=requested)
+    )
+    decision = result.planning
+    assert decision is not None and decision.kind == "handoff_blocked"
+    assert decision.node is not None and decision.node.id == "1.3"
+    assert decision.handoff_blockers is not None
+    assert [layer.node_id for layer in decision.handoff_blockers] == ["1.1"]
+
+
+def test_planning_explicitly_blocked_node_stays_blocked_despite_a_ready_stamped_dep() -> None:
+    # The status-classification arms run BEFORE the gate and never consult it: a ready-stamped
+    # dep never unblocks a blocked-status node.
+    nodes = (
+        ObjectiveNode(id="1.1", description="Bottom", status=NodeStatus.IN_PROGRESS, pr="#101"),
+        ObjectiveNode(id="1.2", description="Held", status=NodeStatus.BLOCKED, depends_on=("1.1",)),
+    )
+    status = _planning_train(
+        nodes=nodes,
+        layers=(
+            _train_layer(
+                "1.1",
+                "101",
+                "plan-101",
+                pr_number=201,
+                publication=LayerPublication.PUBLISHED,
+                handoff=LayerHandoff.READY,
+                stamped_head="b" * 40,
+            ),
+        ),
+        candidate=None,
+        ready=False,
+        reason="unused",
+    )
+    result = _StatusDelivery(StatusResult("10", status.objective_url, None, status, None)).prepare(
+        PrepareRequest(kind="layer_start", mode="planning", objective_id="10", node_id="1.2")
+    )
+    assert result.planning is not None and result.planning.kind == "blocked"
+
+
+def test_planning_gate_unready_dependencies_map_to_build_blocked() -> None:
+    # The defensive totality arm: a technically-ready candidate whose dep resolves to a
+    # layerless non-terminal node fails closed as build_blocked with the joined reasons.
+    nodes = (
+        ObjectiveNode(id="1.1", description="Ghost", status=NodeStatus.IN_PROGRESS, pr="#101"),
+        ObjectiveNode(
+            id="1.2", description="Child", status=NodeStatus.PENDING, depends_on=("1.1",)
+        ),
+    )
+    status = _planning_train(
+        nodes=nodes,
+        layers=(_train_layer("1.2", None, None),),
+        candidate="1.2",
+    )
+    result = _StatusDelivery(StatusResult("10", status.objective_url, None, status, None)).prepare(
+        PrepareRequest(kind="layer_start", mode="planning", objective_id="10")
+    )
+    decision = result.planning
+    assert decision is not None and decision.kind == "build_blocked"
+    assert decision.reason is not None and decision.reason.startswith("1.1: ")
 
 
 def test_planning_ready_decision_carries_other_resumable_claims() -> None:
@@ -3407,7 +3626,14 @@ def test_execution_prepare_verifies_parent_in_exact_aggregate_order() -> None:
     status = _planning_train(
         nodes=nodes,
         layers=(
-            _train_layer("1.1", "101", "plan-101"),
+            _train_layer(
+                "1.1",
+                "101",
+                "plan-101",
+                pr_number=201,
+                publication=LayerPublication.PUBLISHED,
+                handoff=LayerHandoff.READY,
+            ),
             _train_layer("1.2", "102", "plan-102"),
         ),
         candidate="1.2",
@@ -3426,6 +3652,85 @@ def test_execution_prepare_verifies_parent_in_exact_aggregate_order() -> None:
         ("remote_branch_sha", "plan-101"),
         ("resolve_commit", parent_sha),
     ]
+
+
+def test_execution_fresh_start_refuses_handoff_blocked_before_the_parent_fetch() -> None:
+    # The §8.46 execution gate: after require_ready_layer (technical) and BEFORE
+    # prepare_layer_start — the refusal fires with ZERO Git authority calls.
+    nodes = (
+        ObjectiveNode(id="1.1", description="Bottom", status=NodeStatus.IN_PROGRESS, pr="#101"),
+        ObjectiveNode(
+            id="1.2", description="Child", status=NodeStatus.PENDING, pr="#102", depends_on=("1.1",)
+        ),
+    )
+    status = _planning_train(
+        nodes=nodes,
+        layers=(
+            _train_layer(
+                "1.1",
+                "101",
+                "plan-101",
+                pr_number=201,
+                publication=LayerPublication.PUBLISHED,
+                handoff=LayerHandoff.STALE,
+                stamped_head="c" * 40,
+                remote_head="b" * 40,
+            ),
+            _train_layer("1.2", "102", "plan-102"),
+        ),
+        candidate="1.2",
+    )
+    git = FakeDeliveryGit()
+    service = _StatusDelivery(StatusResult("10", status.objective_url, None, status, None), git=git)
+
+    with pytest.raises(DeliveryError) as excinfo:
+        service.prepare(
+            PrepareRequest(kind="layer_start", mode="execution", objective_id="10", plan_id="102")
+        )
+
+    assert excinfo.value.error_type == "node_not_handoff_ready"
+    message = str(excinfo.value)
+    assert "1.1 (plan #101, PR #201) — stale" in message
+    assert f"stamped {'c' * 12} ≠ head {'b' * 12}" in message
+    assert "record the handoff: perk ready 101" in message
+    assert git.calls == []  # refused before the parent fetch
+
+
+@pytest.mark.parametrize(
+    ("handoff", "stamped"),
+    [(LayerHandoff.UNSTAMPED, None), (LayerHandoff.STALE, "c" * 40)],
+)
+def test_publication_ready_check_stays_handoff_ungated(
+    handoff: LayerHandoff, stamped: str | None
+) -> None:
+    # The unit half of the publish-ungated regression: require_ready_layer (the shared
+    # technical check) never reads handoff. The path-level half — through the real
+    # `publish.py::_route` boundary submit + address finalization share — is
+    # tests/test_delivery_publish.py::test_publication_never_reads_the_predecessor_handoff.
+    nodes = (
+        ObjectiveNode(id="1.1", description="Bottom", status=NodeStatus.IN_PROGRESS, pr="#101"),
+        ObjectiveNode(
+            id="1.2", description="Child", status=NodeStatus.PENDING, pr="#102", depends_on=("1.1",)
+        ),
+    )
+    status = _planning_train(
+        nodes=nodes,
+        layers=(
+            _train_layer(
+                "1.1",
+                "101",
+                "plan-101",
+                pr_number=201,
+                publication=LayerPublication.PUBLISHED,
+                handoff=handoff,
+                stamped_head=stamped,
+            ),
+            _train_layer("1.2", "102", "plan-102"),
+        ),
+        candidate="1.2",
+    )
+    context = layer_mod.require_ready_layer(status, plan_id="102")
+    assert context.node_id == "1.2" and context.parent_branch == "plan-101"
 
 
 def test_execution_no_train_is_a_bounded_invalid_train_refusal() -> None:
@@ -4360,6 +4665,9 @@ _STACKED_LAND_MESSAGE = (
     "plan #7 carries stacked delivery lineage — stacked layers land only as one "
     "atomic train, never individually\n"
     "Landing one layer merges into its parent branch and tears the train. "
+    "Review + address happen on the layer PR; when done, record the post-review handoff "
+    "with /ready (perk ready 7); the train lands whole via /objective-land "
+    "(perk objective stack land). "
     "Inspect the train with: perk objective stack status"
 )
 

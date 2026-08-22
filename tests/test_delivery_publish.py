@@ -51,6 +51,7 @@ from perk.delivery.train import (
     FindingKind,
     LayerFinalization,
     LayerGit,
+    LayerHandoff,
     LayerIntent,
     LayerMembership,
     LayerPr,
@@ -69,6 +70,7 @@ from perk.github.stacks import (
     StackRestEntry,
     StackRestFacts,
 )
+from perk.objective import NodeStatus, ObjectiveNode
 from perk.substrate import git
 
 ROOT = Path("/repo")
@@ -245,6 +247,9 @@ class _World:
         self.base = "main"
         self.blockers = blockers
         self.capability = capability
+        # Roadmap nodes carried on the reconstructed projection (empty for most scenarios;
+        # the handoff-ungated regression sets them so a hypothetical gate would really bite).
+        self.objective_nodes: tuple[ObjectiveNode, ...] = ()
         self.timeline: list[tuple] = []
         self.persistence = _FakePersistence(self, unresolved or [])
         # Git state.
@@ -329,6 +334,7 @@ class _World:
             build_readiness=BuildReadiness(
                 next_node_id=next_node, ready=ready, reason=None if ready else "veto"
             ),
+            objective_nodes=self.objective_nodes,
         )
 
     def _issues(self) -> "_World":
@@ -840,6 +846,38 @@ def test_second_layer_create_registers_the_stack():
     assert world.persistence.checkpoints == [("102", P1, C2)]
     (outcome,) = world.persistence.outcomes
     assert outcome.observed == {"branch_sha": C2, "pr": 77, "stack": [55, 77]}
+
+
+@pytest.mark.parametrize(
+    ("handoff", "stamped"),
+    [(LayerHandoff.UNSTAMPED, None), (LayerHandoff.STALE, "e" * 40)],
+)
+def test_publication_never_reads_the_predecessor_handoff(
+    handoff: LayerHandoff, stamped: str | None
+) -> None:
+    # The §8.46 publish-ungated regression at the REAL routing boundary: `_route` (the one
+    # publication path both `/submit` and `/address`'s finalize_address reach through
+    # `Delivery.publish(kind="layer")`) succeeds on a train whose predecessor is published
+    # but unstamped/stale — the handoff gate belongs to planning + fresh execution starts
+    # only, never to publication. The roadmap nodes ride the projection so a hypothetically
+    # gated route would genuinely block here rather than pass vacuously.
+    world = _second_layer_world()
+    world.layers[0] = replace(world.layers[0], handoff=handoff, stamped_head_sha=stamped)
+    world.objective_nodes = (
+        ObjectiveNode(
+            id="1", description="Bottom", status=NodeStatus.IN_PROGRESS, pr="#101", depends_on=()
+        ),
+        ObjectiveNode(
+            id="2", description="Child", status=NodeStatus.PENDING, pr="#102", depends_on=("1",)
+        ),
+    )
+
+    result = world.publish("102")
+
+    assert result.pr.number == 77 and result.parent_branch == "plan-101"
+    assert world.persistence.checkpoints == [("102", P1, C2)]
+    (outcome,) = world.persistence.outcomes
+    assert outcome.role is EventRole.COMPLETED
 
 
 def test_kth_layer_appends_exactly_the_missing_suffix():

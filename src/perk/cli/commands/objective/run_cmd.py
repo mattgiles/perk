@@ -24,14 +24,20 @@ from perk.cli import completions
 from perk.cli.alias import alias
 from perk.cli.commands.objective.shared import (
     classify_stacked_veto,
+    handoff_blocked_summary,
+    handoff_gate_blockers,
     parse_objective_id,
+    selection_gate_blockers,
     stacked_lower_attention,
     stacked_selection,
+    technical_gate_blockers,
+    unready_dependency_blockers,
 )
 from perk.cli.context import require_github, require_repo
 from perk.cli.emit import fail
 from perk.cli.ensure import Ensure, UserFacingCliError
 from perk.cli.plan_selection import load_main_config, main_repo_root
+from perk.delivery import train as train_mod
 from perk.github import GitHubError
 from perk.run import discovery, launch, resume, run_report, runner
 from perk.state import cache
@@ -365,10 +371,13 @@ def _run_impl(
     if stacked is not None:
         veto = classify_stacked_veto(stacked, number)
         if veto is not None:
+            # Every blocked arm carries the shared §8.46 blocker rows (technical here).
+            rows = () if stacked.train is None else technical_gate_blockers(stacked.train)
             payload.update(
                 action=veto.action,
                 reason=veto.reason,
                 remediation=veto.remediation,
+                blockers=[row.model_dump(mode="json") for row in rows],
             )
             return payload
         if stacked.kind == "build_blocked":
@@ -376,6 +385,7 @@ def _run_impl(
                 action="build_blocked",
                 reason=stacked.reason,
                 remediation=f"perk objective stack status {number}",
+                blockers=[row.model_dump(mode="json") for row in selection_gate_blockers(stacked)],
             )
             return payload
         if stacked.train is not None:
@@ -407,6 +417,18 @@ def _run_impl(
                     run_id=run_id_val,
                 )
                 return payload
+        if stacked.kind == "handoff_blocked" and stacked.node is not None:
+            # Lower-layer address attention ran first (the address commits are exactly what
+            # re-stamps route through); the pause names the human gesture — never auto-run.
+            rows = handoff_gate_blockers(stacked.handoff_blockers)
+            payload.update(
+                action="handoff_required",
+                node=stacked.node.id,
+                reason=stacked.reason,
+                remediation=rows[0].remediation if rows else None,
+                blockers=[row.model_dump(mode="json") for row in rows],
+            )
+            return payload
         if stacked.kind == "plannable" and stacked.node is not None:
             node = stacked.node
             payload.update(
@@ -445,6 +467,36 @@ def _run_impl(
         return payload
     if selection.kind == "plannable" and selection.node is not None:
         node = selection.node
+        if stacked is not None and stacked.train is not None:
+            # The gated no_candidate fallback (contracts.md §8.46): structurally unreachable
+            # today (an all-published train has no plannable graph node), but the promise
+            # holds by construction — a graph-plannable node never dispatches past a blocked
+            # handoff gate.
+            gate = train_mod.check_handoff_gate(stacked.train, node_id=node.id)
+            if gate.blocking_layers:
+                rows = handoff_gate_blockers(gate.blocking_layers)
+                payload.update(
+                    action="handoff_required",
+                    node=node.id,
+                    reason=handoff_blocked_summary(node.id, gate.blocking_layers),
+                    remediation=rows[0].remediation if rows else None,
+                    blockers=[row.model_dump(mode="json") for row in rows],
+                )
+                return payload
+            if gate.unready_dependencies:
+                # Every stacked blocked arm carries the shared §8.46 rows — this defensive
+                # fallback included (the dependency_not_ready technical rows).
+                rows = unready_dependency_blockers(stacked.train, gate)
+                payload.update(
+                    action="build_blocked",
+                    reason="; ".join(
+                        f"{dep.dependency_node_id}: {dep.reason}"
+                        for dep in gate.unready_dependencies
+                    ),
+                    remediation=f"perk objective stack status {number}",
+                    blockers=[row.model_dump(mode="json") for row in rows],
+                )
+                return payload
         payload.update(
             action="plan_required",
             node=node.id,
@@ -500,6 +552,11 @@ def _render_run(payload: dict[str, Any], *, as_json: bool) -> None:
     elif action == "build_blocked":
         user_output(
             f"build blocked — {payload.get('reason')} (check: {payload.get('remediation')})"
+        )
+    elif action == "handoff_required":
+        user_output(
+            f"handoff required — {payload.get('reason')} (run: {payload.get('remediation')}; "
+            "a human records the handoff — never auto-run)"
         )
     elif action == "repair_required":
         user_output(

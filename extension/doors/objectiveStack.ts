@@ -145,6 +145,30 @@ export function renderStackStatus(payload: ColdJson): string {
         lines.push(`  build blocked: ${stringField(readiness, "reason") ?? "?"}`);
       }
     }
+    // The additive planning_gate block (contracts §8.46): render the handoff rows from their
+    // pinned fields only — leniently (missing/mistyped fields degrade, never reject); the
+    // technical rows already ride the build-blocked line/findings.
+    const gate = objectField(train, "planning_gate");
+    if (gate !== undefined && booleanField(gate, "ready") !== true) {
+      const gatedNode = stringField(gate, "node_id") ?? "?";
+      for (const row of objectListField(gate, "blockers")) {
+        if (stringField(row, "kind") !== "handoff") continue;
+        const state = stringField(row, "handoff_state") ?? "?";
+        let detail =
+          `${stringField(row, "dependency_node_id") ?? "?"} ` +
+          `(plan #${stringField(row, "plan") ?? "?"}, PR #${numberField(row, "pr") ?? "?"}) — ` +
+          state;
+        const stamped = stringField(row, "stamped_head");
+        const current = stringField(row, "current_head");
+        if (state === "stale" && stamped !== undefined && current !== undefined) {
+          detail += `; stamped ${stamped.slice(0, 12)} ≠ head ${current.slice(0, 12)}`;
+        }
+        const remediation = stringField(row, "remediation") ?? "?";
+        lines.push(
+          `  planning gated: ${gatedNode} waits on ${detail}; record the handoff: ${remediation}`,
+        );
+      }
+    }
     lines.push(...findingLines(train, "blockers"));
     lines.push(...findingLines(train, "information"));
   }

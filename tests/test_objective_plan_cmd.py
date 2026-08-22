@@ -1045,3 +1045,63 @@ def test_seed_prompt_injects_the_layer_context_block():
     primed = _seed_prompt("7", node, "Ship it", layer_context=block)
     assert "<stacked_layer_context>" in primed
     assert "never as instructions" in primed  # the untrusted framing survives
+
+
+def _handoff_layer(*, handoff, stamped=None, observed=None):
+    from perk.delivery import train as train_mod
+
+    return train_mod.TrainLayer(
+        node_id="1.1",
+        plan_id="101",
+        branch="plan-101",
+        pr_number=201,
+        intent=train_mod.LayerIntent.PLANNED,
+        publication=train_mod.LayerPublication.PUBLISHED,
+        git=train_mod.LayerGit.SYNCED,
+        pr=train_mod.LayerPr.DRAFT,
+        membership=train_mod.LayerMembership.NOT_APPLICABLE,
+        writer=train_mod.LayerWriter.FREE,
+        finalization=train_mod.LayerFinalization.NOT_MERGED,
+        parent_checkpoint_sha="a" * 40,
+        published_head_sha="b" * 40,
+        observed_remote_head_sha=observed,
+        observed_pr_base=None,
+        expected_pr_base=None,
+        handoff=handoff,
+        stamped_head_sha=stamped,
+    )
+
+
+def test_stacked_handoff_blocked_is_a_typed_refusal():
+    # The §8.46 door refusal: each blocking dep/plan/PR/state (+ the head mismatch when
+    # stale), the copyable `perk ready <PLAN>` first, then the stack-status hint.
+    from perk import objective
+    from perk.cli.commands.objective.plan_cmd import _planning_node_choice
+    from perk.cli.ensure import UserFacingCliError
+    from perk.delivery import PrepareResult
+    from perk.delivery import train as train_mod
+
+    node = objective.ObjectiveNode(
+        id="1.2", description="Child", status=N.PENDING, depends_on=("1.1",)
+    )
+    decision = PrepareResult.PlanningDecision(
+        kind="handoff_blocked",
+        objective_id="7",
+        objective_title="Obj",
+        objective_url="u/7",
+        requested_node_id=None,
+        node=_planning_node(node),
+        handoff_blockers=(
+            _handoff_layer(
+                handoff=train_mod.LayerHandoff.STALE, stamped="s" * 40, observed="h" * 40
+            ),
+        ),
+    )
+    with pytest.raises(UserFacingCliError) as excinfo:
+        _planning_node_choice(decision, "7")
+    assert excinfo.value.error_type == "node_not_handoff_ready"
+    assert str(excinfo.value) == (
+        "Node 1.2 is not handoff-ready: it waits on 1.1 (plan #101, PR #201) — stale; "
+        f"stamped {'s' * 12} ≠ head {'h' * 12}; record the handoff: perk ready 101\n"
+        "Inspect the train: perk objective stack status 7"
+    )

@@ -3375,19 +3375,42 @@ timeout is **inconclusive, not unhealthy** (`awaiting_run` + `timed_out:true`, e
   "objective": "<id>",           // opaque string objective id (§8.21; Node 4.1)
   "budget": { "runs": 0, "turns": 0, "tokens": 0, "elapsed_ms": 0 },
   "action": "dispatched" | "ready_for_review" | "awaiting_review" | "awaiting_run"
-          | "plan_required" | "blocked" | "completed" | "merged_pending_reconcile" | "pr_closed",
+          | "plan_required" | "blocked" | "completed" | "merged_pending_reconcile" | "pr_closed"
+          | "build_blocked" | "repair_required" | "handoff_required",  // stacked (§8.46/§8.52)
   "next_action": "<§8.37 verdict>" | null, // set on every in-flight arm
   "node": "<id>" | null, "stage": "implement" | "address" | null,
   "run_id": "<ULID>" | null,     // present on dispatched
-  "remediation": "<cmd>" | null, // present on plan_required AND the merged-learn-pending arm
+  "remediation": "<cmd>" | null, // present on plan_required, the merged-learn-pending arm,
+                                 // and every stacked blocked arm (build_blocked /
+                                 // repair_required / handoff_required — the owning command)
+  "reason": "<detail>" | null,   // present on the stacked blocked arms (the exact veto /
+                                 // the composed handoff summary)
+  "blockers": […],               // present on the stacked blocked arms: the shared §8.46
+                                 // GateBlockerOut rows (technical rows on the veto arms,
+                                 // handoff rows on handoff_required)
   "closed": false,               // present on completed (+ "audit": [{node,status,pr}, …])
   "timed_out": false,            // present on awaiting_run under --wait
   "dry_run": false }
 ```
 
+The stacked arms: `build_blocked`/`repair_required` are §8.52's train-wide vetoes;
+`handoff_required` is §8.46's direct-dependency handoff pause — emitted AFTER the
+lower-layer address attention (the address commits are exactly what re-stamps route through, so
+address dispatch on the blocking dep beats pausing), carrying `reason` (the composed summary),
+`remediation` (the FIRST — bottom-most, delivery-order — blocker's `perk ready <PLAN>`; a human
+records the handoff, never auto-run), and the shared `blockers` rows. Every stacked blocked arm
+(the §8.52 veto arms, selection `build_blocked`, and `handoff_required`) carries the additive
+`blockers` payload list of §8.46 `GateBlockerOut` rows (technical rows on the veto/technical
+arms, handoff rows on the handoff arm). The `no_candidate` graph fallback is gated too: when the
+graph classification yields plannable, the gate runs over the stacked train before
+`plan_required` (structurally unreachable today — an all-published train has no plannable graph
+node — but the promise holds by construction). `in_flight` dispatch stays ungated: an existing
+branch/worktree resumes by construction; a fresh start refuses inside execution Prepare.
+
 Error types + exits: `not_a_repo` → 2; `objective_not_found`, `github_error`, `dispatch_failed`
 (propagated from `launch_stage`) → 1. Benign decision kinds (`plan_required`/`blocked`/`awaiting_*`/
-`ready_for_review`/`merged_pending_reconcile`/`pr_closed`/`completed`) are **not** errors (exit 0).
+`ready_for_review`/`merged_pending_reconcile`/`pr_closed`/`completed`, plus the stacked
+`build_blocked`/`repair_required`/`handoff_required` pauses) are **not** errors (exit 0).
 
 ---
 
@@ -6367,8 +6390,10 @@ nothing appended), then mark-ready-if-draft, then the append. An append failure 
 facts (`pr`, `was_draft`); the ambiguous/transient arms converge on re-run via the deterministic
 event key, while deterministic failures (a corrupt journal, a stored identity/lineage mismatch,
 an oversize record, a nonconforming id) name their own remediation — a re-run alone does not
-converge them. Dependency gating still deliberately reads no handoff state (§8.46 build
-readiness and the §8.55/§8.56 landing gates are unchanged — a later node).
+converge them. Dependency gating reads the handoff state through exactly one check — §8.46's
+direct-dependency handoff gate (`check_handoff_gate`, planning + fresh execution starts only);
+§8.46 build readiness and the §8.55/§8.56 landing gates are unchanged (landing gains no stamp
+requirement).
 
 **The rest of the stored train state** uses the §8.42 merge-write seams. `TrainPersistence`
 retains the reusable typed writers: `write_checkpoints` writes the `parent_checkpoint_sha` +
@@ -6480,9 +6505,12 @@ The nested detail vocabulary adds no package-root exports: `PlanIdentity`; `Plan
 `PlanningContext {position, layer_count, delivery_lineage, base, predecessor_node_id,
 predecessor_plan_id, parent_branch, observed_parent_head_sha}` (one-based position/count); and
 `PlanningDecision {kind, objective_id, objective_title, objective_url, requested_node_id, node,
-reason, skipped_claim_ids, context}`. Decision `kind` is exactly `ready | build_blocked |
-in_flight | wrong_candidate | complete | node_not_found | terminal | blocked | no_actionable`;
-node/reason/skipped/context presence is shape-validated (context only on train-derived `ready`; the
+reason, skipped_claim_ids, context, handoff_blockers}`. Decision `kind` is exactly `ready |
+build_blocked | handoff_blocked | in_flight | wrong_candidate | complete | node_not_found |
+terminal | blocked | no_actionable`;
+node/reason/skipped/context/handoff-blockers presence is shape-validated (context only on
+train-derived `ready`; `handoff_blockers` — the blocking `TrainLayer`s in delivery order —
+exactly on `handoff_blocked`, which also carries `node`; the
 all-layers-published graph fallback may be `ready` without context). The package root exports
 `PublishRequest`, `PublishResult`, `TransferRequest`, and `TransferResult` but no publication or
 transfer core/runtime/error. Removing `DeliveryOperationFacts`, `LayerBodyFacts`,
@@ -6575,9 +6603,13 @@ change** (any push stales the stamp — head-binding is the base invalidation) *
 verified-PUBLISHED layer's handoff stays `not_applicable` — fail-closed, never a claimed
 `unstamped` — and the `journal_corruption` blocker message names both losses: `the operation
 journal is corrupt ({exc}); unresolved-operation facts and ready-stamp handoff evidence are
-unknown`. The derivation emits **no findings and feeds no gate**: build readiness (§8.46),
-`published_prefix_len`, and the §8.55/§8.56 landing gates are deliberately unchanged — handoff
-gating is a later node's contract amendment. Exposure: `TrainLayer.handoff`, the trailing
+unknown`. The derivation emits **no findings and mutates no other axis**: build readiness
+(§8.46), `published_prefix_len`, and the §8.55/§8.56 landing gates are deliberately unchanged —
+the axis feeds exactly one gate, §8.46's direct-dependency handoff gate (`check_handoff_gate`),
+a separate check beside `BuildReadiness`. Whenever a latest stamp exists the derivation also
+records the **internal** `TrainLayer.stamped_head_sha` (the stamp's recorded head; `None` when
+unstamped/`not_applicable`) — explicitly NOT a `LayerOut` field: the stamp SHA reaches the wire
+only through §8.46's gate blocker rows. Exposure: `TrainLayer.handoff`, the trailing
 `LayerOut.handoff` envelope field, and both human renders (the CLI's `_layer_line` and the
 extension's `renderStackStatus` append `handoff <value>` for a non-`not_applicable` layer).
 **Publication** (the load-bearing definition): the FULL checkpoint pair present (the pair is
@@ -6853,15 +6885,111 @@ byte-identical; stacked `--dry-run` remains offline on the existing graph path a
 `"build_readiness": "unchecked (dry-run)"`.
 
 Planning classification returns the nested decision vocabulary from §8.44. A non-ready train is
-`build_blocked`; a pending or planning-without-plan candidate is `ready` unless an explicit other
-node was requested (`wrong_candidate`); in-progress or planning-with-plan is `in_flight` before
-that comparison; another candidate status is `build_blocked`. Without a readiness candidate, the
+`build_blocked`; a pending or planning-without-plan candidate runs the direct-dependency handoff
+gate (below) and is `ready` when it passes — unless an explicit other node was requested
+(`wrong_candidate`, which still wins before the gate); in-progress or planning-with-plan is
+`in_flight` before that comparison (in-flight stays handoff-ungated); another candidate status is
+`build_blocked` (the status arms run before the gate and never consult it — a ready-stamped dep
+never unblocks an explicitly `blocked` node). Without a readiness candidate, the
 captured dependency graph yields explicit `ready | in_flight | node_not_found | terminal |
-blocked`, or automatic `ready | in_flight | complete | no_actionable`; a graph-fallback `ready`
-contains no train context. `skipped_claim_ids` comes from that same graph and excludes the selected
+blocked`, or automatic `ready | in_flight | complete | no_actionable` — and BOTH graph-fallback
+`ready` arms run the same gate first; a graph-fallback `ready`
+contains no train context. A gate with `blocking_layers` is `handoff_blocked` (node = the
+selected node, the blocking layers carried); a gate with only `unready_dependencies` is
+`build_blocked` with the joined `"<dep>: <reason>"` detail. `skipped_claim_ids` comes from that
+same graph and excludes the selected
 node. The CLI mapper preserves every existing refusal code/message (`node_not_build_ready`,
-`objective_in_flight`, `no_actionable_node`) and consumes the decision's title/URL/node/context for
+`objective_in_flight`, `no_actionable_node`), adds the `handoff_blocked` →
+`node_not_handoff_ready` refusal (each blocking dep/plan/PR/state + the head mismatch when
+stale, the copyable `perk ready <PLAN>` first, then the stack-status hint), and consumes the
+decision's title/URL/node/context for
 seed, lookup completion, mark, engagement, notes, and handoff.
+
+**The direct-dependency handoff gate.** `check_handoff_gate(train, *, node_id) -> HandoffGate
+{node_id, blocking_layers, unready_dependencies, ready}` (`perk.delivery.train`, exported beside
+`reconstruct_train`) is a **pure function over the reconstructed projection** and a separate
+check beside `BuildReadiness` — deliberately NOT folded into `require_ready_layer`, whose
+`publish.py::_route` caller backs submit and address finalization: **publication, repair,
+submit, address finalization, sync, recover, and re-ready are never handoff-gated, by
+construction.** The gate emits no findings, mutates no axis, and never touches `BuildReadiness`.
+A stacked node may be planned (and its layer fresh-started) only when each of its **direct
+resolved roadmap dependencies** satisfies the gate. Dependency resolution is
+`perk.objective.resolved_direct_deps(nodes)` — the public accessor over the same
+skip-transparent resolution `delivery_order` uses (explicit `depends_on` wins, else sequential
+inference; edges contracted transitively through SKIPPED nodes; unknown dep ids dropped;
+`ValueError` on a skipped-node cycle) — evaluated over `train.objective_nodes`; strictly direct
+edges otherwise (no recursive withdrawal through live nodes: a stale ancestor blocks only its
+own direct dependents). Per-dep satisfaction, total and in this order: (1) dep node status in
+`TERMINAL` ⇒ satisfied (terminal wins over any layer/stamp state); (2) the dep's layer:
+`LANDED` ⇒ satisfied (merged is stronger than stamped); `PUBLISHED` + handoff `READY` ⇒
+satisfied; `PUBLISHED` + `UNSTAMPED`/`STALE`/`SUSPENDED` ⇒ the layer joins `blocking_layers`
+(represented by **its own `TrainLayer`** — no duplicate blocker dataclass; remediation is
+composed at the presentation boundary, never in the domain); `PUBLISHED` + `NOT_APPLICABLE`
+(fold unavailable) ⇒ an `UnreadyDependency {dependency_node_id, reason}` naming the evidence
+loss — fail-closed, never a claimed `unstamped` (on every real path the train already carries
+the `missing_lineage`/`journal_corruption` blocker, so the technical veto fires first; this arm
+keeps the gate total); any other publication ⇒ an `UnreadyDependency` (the technical readiness
+truth owns the detail; unreachable past a passing technical check); (3) no layer, non-terminal
+⇒ satisfied only when a `ProjectedCancellation` in `train.projected_canceled_nodes` names it,
+else an `UnreadyDependency` (fail closed). Deterministic ordering: `blocking_layers` in
+**delivery order** (the bottom-most blocked dependency first — the first blocker's remediation
+is the earliest actionable repair); `unready_dependencies` sorted by `node_sort_key`; all
+downstream serialization/rendering inherits this order.
+
+**The shared machine discriminator (one output type, three envelopes).** `GateBlockerOut {kind,
+code, message, dependency_node_id, plan, pr, handoff_state, stamped_head, current_head,
+remediation}` and `PlanningGateOut {node_id, ready, blockers}` live in the objective CLI's
+shared module with one composition helper, `compose_planning_gate(train, gate|None)`, whose
+pinned arms are: **no candidate** (`next_build_ready.node_id` null) → `{node_id: null, ready:
+false, blockers: []}` (the explanation already rides `next_build_ready.reason`; simultaneous
+train blockers/operations stay in their existing envelope fields, never duplicated into gate
+rows); **technically blocked** → `ready:false` + one `kind:"technical"` row per train blocker
+finding (`code`/`message` verbatim; remediation `perk objective stack status <N>`) and one per
+unresolved operation (`code:"unresolved_operation"`; remediation `perk objective stack recover
+<N>`); **technically ready, handoff-blocked** → one `kind:"handoff"` row per blocking layer
+(delivery order; fields-only — `code`/`message` null: `dependency_node_id`=node_id,
+`plan`=plan_id, `pr`=pr_number, `handoff_state`=the axis value, `stamped_head`=the internal
+`stamped_head_sha` (null when unstamped), `current_head`=`observed_remote_head_sha`,
+`remediation`=`perk ready <plan>`); **technically ready, unready deps** (defensive) → the
+train's blocker findings as technical rows when any exist, else one technical row per unready
+dep with the gate-owned `code:"dependency_not_ready"`, message `"<dep>: <reason>"`, and the
+stack-status remediation; **both pass** → `{node_id, ready: true, blockers: []}`. Handoff-row
+non-null invariant: a handoff row derives from a verified-PUBLISHED `TrainLayer` whose
+`plan_id`/`pr_number` are non-null by construction — the composition narrows with
+`Ensure.not_none` (a null is a programming error, never a rendered state), so
+`plan`/`pr`/`remediation` are always populated on handoff rows; the nullable wire types exist
+for the technical rows. Envelope exposure: `perk objective stack status --json` `train` gains
+the trailing additive `planning_gate: PlanningGateOut` (gate target `next_build_ready.node_id`;
+schema regenerated — `LayerOut` unchanged) and the human render, when the train is technically
+ready but the gate blocks, one line per handoff blocker (`planning gated: <node> waits on <dep>
+(plan #<p>, PR #<pr>) — <state>[; stamped <sha12> ≠ head <sha12>]; record the handoff: perk
+ready <p>`); `perk objective next --json` `build_ready` gains the always-present `blockers`
+list (technical rows on `build_blocked`, handoff rows on `handoff_blocked`, `[]` on
+plannable/in-flight/no-candidate) and a per-blocker human line (`handoff blocked: node <id>
+waits on …`); the run supervisor's blocked arms carry the same rows (§8.20); `perk objective
+show` gains `stacked_readiness` (below). The warm `renderStackStatus` leniently renders
+`planning_gate` handoff rows from their pinned fields (missing/mistyped fields degrade, never
+reject). **Execution Prepare, fresh-start arm only**: after `require_ready_layer` succeeds
+(technical, untouched) and before `prepare_layer_start` (refuse before the parent fetch),
+execution Prepare runs the gate — `blocking_layers` ⇒ the new façade-validated
+`error_type="node_not_handoff_ready"` (each blocking dep/plan/PR/state, the stamped-vs-current
+heads when stale, the copyable `perk ready <PLAN>`); `unready_dependencies` (defensive,
+unreachable past `require_ready_layer`) ⇒ `node_not_build_ready`. Exactly the fresh-start arms
+reach execution Prepare by construction (local `_create_fresh` and remote `position_branch`
+call it only when `origin/plan-<N>` is absent); existing branches/worktrees resume ungated, and
+the supervisor does not pre-gate `in_flight` dispatch — a remote dispatch of a handoff-blocked
+fresh start fails at the worker with the typed error (accepted cost). `perk objective show`
+(stacked only; incremental payloads byte-identical) performs the live `stacked_selection` read
+with a **tolerant degrade**: the payload gains `stacked_readiness {checked, ready, reason,
+blockers}` — `checked:false` + the error in `reason` (`ready:null`, `blockers:[]`) when the
+live read failed, in which case show still renders and keeps the graph-derived `next_node`
+(explicitly marked unchecked: `readiness unchecked (<error>) — check: perk objective next
+<N>`); when checked, `next_node` is selection-derived (the plannable node, else null — the same
+truth as `objective next`). Field-source posture (pinned): `selection_kind`,
+`resumable_claims`, `summary`, and `nodes` stay **graph-derived observational facts** with
+their existing offline vocabulary and source, checked or not (`selection_kind` never emits
+`handoff_blocked`); the live truth rides exclusively in `stacked_readiness` + the `next_node`
+override.
 
 Hard failures are distinct from decisions and preserve exact precedence: `redirected_from` (the
 only supersession signal — provider normalization such as `007`→`7` with no redirect is accepted)
@@ -6873,10 +7001,15 @@ Prepare runs before the existing `update_objective_node(..., planning)` write, b
 supersession after observation, and duplicate launches remain possible and are outside this
 contract.
 
-`stacked_selection(repo_root, state)` remains unchanged for **`perk objective next`** and the
-**`objective run` supervisor**: it still returns `StackedSelection {kind, node, ready, reason,
-train}`, calls status once, supplies `build_ready {ready, reason}` to next, and drives the
-supervisor's honest `action: "build_blocked"`/remediation arms. The run supervisor's dry-run status
+`stacked_selection(repo_root, state)` serves **`perk objective next`**, **`perk objective
+show`**, and the **`objective run` supervisor**: it returns `StackedSelection {kind, node,
+ready, reason, train, handoff_blockers}`, calls status once, and runs the handoff gate on the
+plannable-candidate arm only (`in_flight` stays ungated): `blocking_layers` ⇒
+`kind="handoff_blocked"` (node = the candidate, `ready=false`, `reason` = the composed human
+summary naming dep/plan/PR/state + the `perk ready <plan>` remediation, the blocking layers +
+train carried); `unready_dependencies` ⇒ the existing `kind="build_blocked"` with the reasons
+joined. It supplies `build_ready {ready, reason, blockers}` to next and drives the supervisor's
+honest `action: "build_blocked"`/`"handoff_required"` arms. The run supervisor's dry-run status
 omission and repair/lower-address prioritization remain §8.52 behavior.
 
 **Predecessor context seeds stacked planning.** The plan door's seed gains a stacked-only DATA

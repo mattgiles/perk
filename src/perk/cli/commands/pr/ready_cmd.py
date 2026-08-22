@@ -80,8 +80,9 @@ def ready_pr(ctx: click.Context, *, plan: str | None, dry_run: bool, as_json: bo
     (submit keeps the PR draft on purpose). Stacked layers: the deliberate POST-review human
     handoff — review happens on the draft layer PR, and after review + address this gesture
     stamps the exact verified published head into the delivery journal (draft AND non-draft
-    PRs; mark-ready first, then the append). Never routine post-submit choreography; never
-    auto-run. A failed stamp exits 1 as ready_stamp_failed with the truthful pr/was_draft;
+    PRs; mark-ready first, then the append); the recorded stamp unblocks planning of the
+    layer's direct dependents. Never routine post-submit choreography; never auto-run.
+    A failed stamp exits 1 as ready_stamp_failed with the truthful pr/was_draft;
     an ambiguous/transient append converges on an idempotent re-run.
 
     \b

@@ -97,7 +97,8 @@ rebasing use the parent branch.
 Ready the active plan's PR. Incremental: mark the draft PR ready for review — `/submit`
 deliberately leaves it draft. Stacked: the deliberate **post-review handoff** — review happens
 on the draft layer PR, and after review + address `/ready` stamps the exact verified published
-head (draft and non-draft PRs). Supervisors and factories name it; it is never auto-run. Paired
+head (draft and non-draft PRs); the recorded stamp **unblocks planning of the layer's direct
+dependents**. Supervisors and factories name it; it is never auto-run. Paired
 tool:
 
 - **`ready`** — open the draft for review (incremental) or record the handoff stamp (stacked).

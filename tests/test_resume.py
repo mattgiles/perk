@@ -495,9 +495,13 @@ def test_stacked_draft_pr_gate_names_the_handoff_and_objective_land(monkeypatch)
         header={"delivery_lineage": "01LINEAGE", "objective_id": "500"},
     )
     assert data["next_action"] == "ready_for_review" and data["resumed_stage"] is None
-    assert "review proceeds on the draft" in data["message"]
-    assert "perk ready 7" in data["message"]
-    assert "/objective-land" in data["message"]
+    # The exact-text pin (docs/learned/workflow/test-pin-sweeps.md): the stacked gate line
+    # names the handoff AND that it unblocks planning of dependent nodes (§8.46).
+    assert data["message"] == (
+        "plan #7 (PR #55): draft layer PR — review proceeds on the draft; when review + "
+        "address are done, record the handoff with perk ready 7 (this also unblocks "
+        "planning of dependent nodes); the train lands whole via /objective-land"
+    )
     assert "/land when satisfied" not in data["message"]
 
 

@@ -44,6 +44,7 @@ def _train(
     layers: tuple[train_mod.TrainLayer, ...] = (),
     findings: tuple[train_mod.TrainFinding, ...] = (),
     unresolved: tuple[train_mod.UnresolvedOperationFacts, ...] = (),
+    nodes: tuple[objective.ObjectiveNode, ...] = (),
 ) -> train_mod.DeliveryTrain:
     return train_mod.DeliveryTrain(
         objective_id="10",
@@ -59,6 +60,7 @@ def _train(
         findings=findings,
         build_readiness=readiness,
         unresolved_operations=unresolved,
+        objective_nodes=nodes,
     )
 
 
@@ -383,3 +385,253 @@ def test_authority_read_failures_map_to_the_stable_github_error(monkeypatch, tmp
         shared.stacked_selection(tmp_path, _state((_node("1.2", N.PENDING),)))
     assert excinfo.value.error_type == "github_error"
     assert "journal carrier missing" in str(excinfo.value)
+
+
+# ----------------------------------------------------------------- the handoff gate seam (§8.46)
+
+
+def _stamped_layer(
+    node_id: str,
+    plan_id: str,
+    pr_number: int,
+    *,
+    handoff: train_mod.LayerHandoff,
+    stamped_head: str | None = None,
+    observed: str | None = "h" * 40,
+) -> train_mod.TrainLayer:
+    return replace(
+        _published_layer(node_id, plan_id, pr_number),
+        handoff=handoff,
+        stamped_head_sha=stamped_head,
+        observed_remote_head_sha=observed,
+    )
+
+
+def _dep_nodes() -> tuple[objective.ObjectiveNode, ...]:
+    return (
+        objective.ObjectiveNode(
+            id="1.1", description="d", status=N.IN_PROGRESS, pr="#101", depends_on=()
+        ),
+        objective.ObjectiveNode(id="1.2", description="d", status=N.PENDING, depends_on=("1.1",)),
+    )
+
+
+def test_stacked_selection_handoff_blocked_arm(monkeypatch, tmp_path: Path):
+    # The plannable-candidate arm runs the gate: an unstamped dep yields handoff_blocked with
+    # the blocking layers and a composed human reason naming dep/plan/PR/state + remediation.
+    train = _train(
+        _ready("1.2"),
+        layers=(_stamped_layer("1.1", "101", 201, handoff=train_mod.LayerHandoff.UNSTAMPED),),
+        nodes=_dep_nodes(),
+    )
+    _stub_status(monkeypatch, train)
+    selection = shared.stacked_selection(tmp_path, _state(_dep_nodes()))
+    assert selection is not None
+    assert selection.kind == "handoff_blocked"
+    assert selection.node is not None and selection.node.id == "1.2"
+    assert selection.ready is False
+    assert selection.reason == (
+        "node 1.2 waits on 1.1 (plan #101, PR #201) — unstamped; record the handoff: perk ready 101"
+    )
+    assert [layer.node_id for layer in selection.handoff_blockers] == ["1.1"]
+
+
+def test_stacked_selection_in_flight_stays_ungated(monkeypatch, tmp_path: Path):
+    nodes = (
+        objective.ObjectiveNode(
+            id="1.1", description="d", status=N.IN_PROGRESS, pr="#101", depends_on=()
+        ),
+        objective.ObjectiveNode(
+            id="1.2", description="d", status=N.IN_PROGRESS, pr="#102", depends_on=("1.1",)
+        ),
+    )
+    train = _train(
+        _ready("1.2"),
+        layers=(_stamped_layer("1.1", "101", 201, handoff=train_mod.LayerHandoff.UNSTAMPED),),
+        nodes=nodes,
+    )
+    _stub_status(monkeypatch, train)
+    selection = shared.stacked_selection(tmp_path, _state(nodes))
+    assert selection is not None and selection.kind == "in_flight"
+
+
+def test_stacked_selection_ready_stamped_dep_is_plannable(monkeypatch, tmp_path: Path):
+    train = _train(
+        _ready("1.2"),
+        layers=(
+            _stamped_layer(
+                "1.1", "101", 201, handoff=train_mod.LayerHandoff.READY, stamped_head="h" * 40
+            ),
+        ),
+        nodes=_dep_nodes(),
+    )
+    _stub_status(monkeypatch, train)
+    selection = shared.stacked_selection(tmp_path, _state(_dep_nodes()))
+    assert selection is not None and selection.kind == "plannable"
+
+
+def test_stacked_selection_unready_dependency_is_build_blocked(monkeypatch, tmp_path: Path):
+    # The defensive gate arm: a layerless non-terminal dep joins the reasons as build_blocked.
+    train = _train(_ready("1.2"), layers=(), nodes=_dep_nodes())
+    _stub_status(monkeypatch, train)
+    selection = shared.stacked_selection(tmp_path, _state(_dep_nodes()))
+    assert selection is not None
+    assert selection.kind == "build_blocked"
+    assert selection.reason is not None and selection.reason.startswith("1.1: ")
+
+
+# ----------------------------------------------------------------- compose_planning_gate arms
+
+
+_GATE_ROW_FIELDS = [
+    "kind",
+    "code",
+    "message",
+    "dependency_node_id",
+    "plan",
+    "pr",
+    "handoff_state",
+    "stamped_head",
+    "current_head",
+    "remediation",
+]
+
+
+def test_compose_no_candidate_arm():
+    train = _train(train_mod.BuildReadiness(None, False, "all layers published"))
+    gate = shared.compose_planning_gate(train, None)
+    assert gate.model_dump(mode="json") == {"node_id": None, "ready": False, "blockers": []}
+
+
+def test_compose_technically_blocked_arm_mirrors_the_veto_split():
+    operation = train_mod.UnresolvedOperationFacts("01OP", "sync", "t0")
+    train = _train(
+        train_mod.BuildReadiness("1.2", False, "veto"),
+        findings=(_finding("checkpoint_drift", "remote moved"),),
+        unresolved=(operation,),
+    )
+    gate = shared.compose_planning_gate(train, None)
+    payload = gate.model_dump(mode="json")
+    assert payload["node_id"] == "1.2" and payload["ready"] is False
+    assert payload["blockers"] == [
+        {
+            "kind": "technical",
+            "code": "checkpoint_drift",
+            "message": "remote moved",
+            "dependency_node_id": None,
+            "plan": None,
+            "pr": None,
+            "handoff_state": None,
+            "stamped_head": None,
+            "current_head": None,
+            "remediation": "perk objective stack status 10",
+        },
+        {
+            "kind": "technical",
+            "code": "unresolved_operation",
+            "message": "operation 01OP (sync, prepared t0) is unresolved",
+            "dependency_node_id": None,
+            "plan": None,
+            "pr": None,
+            "handoff_state": None,
+            "stamped_head": None,
+            "current_head": None,
+            "remediation": "perk objective stack recover 10",
+        },
+    ]
+
+
+def test_compose_handoff_arm_pins_the_row_fields_and_non_null_invariant():
+    train = _train(
+        _ready("1.2"),
+        layers=(
+            _stamped_layer(
+                "1.1",
+                "101",
+                201,
+                handoff=train_mod.LayerHandoff.STALE,
+                stamped_head="s" * 40,
+                observed="h" * 40,
+            ),
+        ),
+        nodes=_dep_nodes(),
+    )
+    gate = shared.compose_planning_gate(train, None)
+    payload = gate.model_dump(mode="json")
+    assert payload["node_id"] == "1.2" and payload["ready"] is False
+    (row,) = payload["blockers"]
+    assert list(row) == _GATE_ROW_FIELDS  # the pinned field names, declaration order
+    assert row == {
+        "kind": "handoff",
+        "code": None,
+        "message": None,
+        "dependency_node_id": "1.1",
+        "plan": "101",
+        "pr": 201,
+        "handoff_state": "stale",
+        "stamped_head": "s" * 40,
+        "current_head": "h" * 40,
+        "remediation": "perk ready 101",
+    }
+    # The non-null invariant: every handoff row carries plan/pr/remediation.
+    assert row["plan"] is not None and row["pr"] is not None and row["remediation"] is not None
+
+
+def test_compose_handoff_row_refuses_a_null_plan_join():
+    # A handoff-blocked layer with a null plan/pr is a programming error, never a rendered row.
+    broken = replace(
+        _stamped_layer("1.1", "101", 201, handoff=train_mod.LayerHandoff.UNSTAMPED),
+        plan_id=None,
+    )
+    with pytest.raises(UserFacingCliError):
+        shared.handoff_gate_blockers((broken,))
+
+
+def test_compose_defensive_dependency_not_ready_arm():
+    train = _train(_ready("1.2"), layers=(), nodes=_dep_nodes())
+    gate = shared.compose_planning_gate(train, None)
+    payload = gate.model_dump(mode="json")
+    assert payload["ready"] is False
+    (row,) = payload["blockers"]
+    assert row["kind"] == "technical" and row["code"] == "dependency_not_ready"
+    assert row["message"] is not None and row["message"].startswith("1.1: ")
+    assert row["remediation"] == "perk objective stack status 10"
+
+
+def test_compose_both_pass_arm():
+    train = _train(
+        _ready("1.2"),
+        layers=(
+            _stamped_layer(
+                "1.1", "101", 201, handoff=train_mod.LayerHandoff.READY, stamped_head="h" * 40
+            ),
+        ),
+        nodes=_dep_nodes(),
+    )
+    gate = shared.compose_planning_gate(train, None)
+    assert gate.model_dump(mode="json") == {"node_id": "1.2", "ready": True, "blockers": []}
+
+
+def test_selection_gate_blockers_by_kind(monkeypatch, tmp_path: Path):
+    # handoff rows on handoff_blocked; technical rows on build_blocked; [] otherwise.
+    blocked_train = _train(
+        _ready("1.2"),
+        layers=(_stamped_layer("1.1", "101", 201, handoff=train_mod.LayerHandoff.UNSTAMPED),),
+        nodes=_dep_nodes(),
+    )
+    _stub_status(monkeypatch, blocked_train)
+    handoff_selection = shared.stacked_selection(tmp_path, _state(_dep_nodes()))
+    assert handoff_selection is not None
+    rows = shared.selection_gate_blockers(handoff_selection)
+    assert [row.kind for row in rows] == ["handoff"]
+
+    veto_train = _train(
+        train_mod.BuildReadiness("1.2", False, "veto"),
+        findings=(_finding("checkpoint_drift", "remote moved"),),
+    )
+    veto_selection = _selection(veto_train, kind="build_blocked", reason="veto")
+    veto_rows = shared.selection_gate_blockers(veto_selection)
+    assert [(row.kind, row.code) for row in veto_rows] == [("technical", "checkpoint_drift")]
+
+    plannable = _selection(_train(_ready("1.2")), kind="plannable", reason=None)
+    assert shared.selection_gate_blockers(plannable) == ()

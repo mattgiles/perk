@@ -175,8 +175,8 @@ def _gate_message(
         if stacked:
             return prefix + (
                 "draft layer PR — review proceeds on the draft; when review + address are "
-                f"done, record the handoff with perk ready {plan_id}; the train lands whole "
-                "via /objective-land"
+                f"done, record the handoff with perk ready {plan_id} (this also unblocks "
+                "planning of dependent nodes); the train lands whole via /objective-land"
             )
         return prefix + (
             "draft PR — mark it ready (perk pr ready from the plan worktree) "

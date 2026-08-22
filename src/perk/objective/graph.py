@@ -243,7 +243,10 @@ def _contracted_deps(nodes: list[ObjectiveNode]) -> dict[str, set[str]]:
     must not re-expand per incoming path, or a fan-shaped skipped chain goes exponential). A
     dependency cycle lying entirely among skipped nodes raises ``ValueError``: contraction
     cannot represent it, and the caller's Kahn pass only sees non-skipped nodes, so silently
-    dropping the back-edge would derive an order from an invalid graph.
+    dropping the back-edge would derive an order from an invalid graph. EVERY skipped node is
+    swept (memoized, still linear) — a skipped-only cycle unreachable from any non-skipped
+    node (a disconnected component, or an all-skipped roadmap) raises too, never returns
+    normally.
     """
     graph = build_graph(nodes)
     node_map = {n.id: n for n in graph.nodes}
@@ -280,7 +283,25 @@ def _contracted_deps(nodes: list[ObjectiveNode]) -> dict[str, set[str]]:
         for dep in node.depends_on or ():
             deps |= expand(dep)
         contracted[node.id] = deps
+    for node in graph.nodes:
+        # The disconnected-component sweep: skipped nodes unreachable from any non-skipped
+        # node still validate (a cycle there raises rather than silently vanishing).
+        if node.status is NodeStatus.SKIPPED:
+            skipped_deps(node.id)
     return contracted
+
+
+def resolved_direct_deps(nodes: list[ObjectiveNode]) -> dict[str, frozenset[str]]:
+    """The resolved DIRECT dependency edges of the non-skipped nodes (contracts.md §8.46).
+
+    The public accessor over the same skip-transparent resolution :func:`delivery_order`
+    uses: explicit ``depends_on`` wins, else sequential inference; edges through SKIPPED
+    nodes contract transitively; unknown dep ids are dropped (validation reports those).
+    Strictly direct edges otherwise — no recursive withdrawal through live nodes. Raises
+    ``ValueError`` on a dependency cycle lying entirely among skipped nodes (matching
+    :func:`delivery_order`).
+    """
+    return {node_id: frozenset(deps) for node_id, deps in _contracted_deps(nodes).items()}
 
 
 def delivery_order(nodes: list[ObjectiveNode]) -> tuple[ObjectiveNode, ...]:

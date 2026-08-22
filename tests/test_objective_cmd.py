@@ -1633,7 +1633,7 @@ def test_next_stacked_payload_carries_the_build_ready_block(monkeypatch):
     assert result.exit_code == 0
     payload = json.loads(result.output)
     assert payload["next_node"]["id"] == "1.2"
-    assert payload["build_ready"] == {"ready": True, "reason": None}
+    assert payload["build_ready"] == {"ready": True, "reason": None, "blockers": []}
 
 
 def test_next_stacked_build_blocked_constrains_next_node(monkeypatch):
@@ -1649,7 +1649,7 @@ def test_next_stacked_build_blocked_constrains_next_node(monkeypatch):
     assert result.exit_code == 0
     payload = json.loads(result.output)
     assert payload["next_node"] is None
-    assert payload["build_ready"] == {"ready": False, "reason": "[x] y"}
+    assert payload["build_ready"] == {"ready": False, "reason": "[x] y", "blockers": []}
 
 
 def test_next_stacked_build_blocked_human_line(monkeypatch):
@@ -1664,6 +1664,281 @@ def test_next_stacked_build_blocked_human_line(monkeypatch):
     result = _invoke(["objective", "next", "42"])
     assert result.exit_code == 0
     assert "build blocked: [x] y" in result.output
+
+
+def _handoff_world():
+    """A minimal stacked world: published-unstamped 1.1 blocking plannable candidate 1.2."""
+    from perk.delivery import train as train_mod
+
+    nodes = (
+        objective.ObjectiveNode(
+            id="1.1", description="A", status=N.IN_PROGRESS, pr="#101", depends_on=()
+        ),
+        objective.ObjectiveNode(id="1.2", description="B", status=N.PENDING, depends_on=("1.1",)),
+    )
+    layer = train_mod.TrainLayer(
+        node_id="1.1",
+        plan_id="101",
+        branch="plan-101",
+        pr_number=201,
+        intent=train_mod.LayerIntent.PLANNED,
+        publication=train_mod.LayerPublication.PUBLISHED,
+        git=train_mod.LayerGit.SYNCED,
+        pr=train_mod.LayerPr.DRAFT,
+        membership=train_mod.LayerMembership.NOT_APPLICABLE,
+        writer=train_mod.LayerWriter.FREE,
+        finalization=train_mod.LayerFinalization.NOT_MERGED,
+        parent_checkpoint_sha="a" * 40,
+        published_head_sha="b" * 40,
+        observed_remote_head_sha="b" * 40,
+        observed_pr_base="main",
+        expected_pr_base="main",
+        handoff=train_mod.LayerHandoff.UNSTAMPED,
+    )
+    train = train_mod.DeliveryTrain(
+        objective_id="42",
+        objective_url="u/42",
+        delivery_lineage="01JB0000000000000000000000",
+        base="main",
+        redirected_from=None,
+        layers=(layer,),
+        published_prefix_len=1,
+        unresolved_operation=None,
+        findings=(),
+        build_readiness=train_mod.BuildReadiness(next_node_id="1.2", ready=True, reason=None),
+        objective_nodes=nodes,
+    )
+    return nodes, layer, train
+
+
+def _handoff_next_selection():
+    from perk.cli.commands.objective.shared import StackedSelection
+
+    nodes, layer, train = _handoff_world()
+    reason = (
+        "node 1.2 waits on 1.1 (plan #101, PR #201) — unstamped; record the handoff: perk ready 101"
+    )
+    return StackedSelection(
+        kind="handoff_blocked",
+        node=nodes[1],
+        ready=False,
+        reason=reason,
+        train=train,
+        handoff_blockers=(layer,),
+    )
+
+
+def test_next_stacked_handoff_blocked_payload_and_human_line(monkeypatch):
+    from perk.cli.commands.objective import next_cmd
+
+    monkeypatch.setattr(objectives, "get_objective", lambda **k: _stacked_next_state())
+    monkeypatch.setattr(next_cmd, "stacked_selection", lambda *_a: _handoff_next_selection())
+    result = _invoke(["objective", "next", "42", "--json"])
+    assert result.exit_code == 0
+    payload = json.loads(result.output)
+    assert payload["next_node"] is None
+    build_ready = payload["build_ready"]
+    assert build_ready["ready"] is False
+    assert build_ready["reason"] == (
+        "node 1.2 waits on 1.1 (plan #101, PR #201) — unstamped; record the handoff: perk ready 101"
+    )
+    (row,) = build_ready["blockers"]
+    assert row["kind"] == "handoff" and row["dependency_node_id"] == "1.1"
+    assert row["plan"] == "101" and row["pr"] == 201
+    assert row["handoff_state"] == "unstamped" and row["remediation"] == "perk ready 101"
+
+    human = _invoke(["objective", "next", "42"])
+    assert human.exit_code == 0
+    assert (
+        "handoff blocked: node 1.2 waits on 1.1 (plan #101, PR #201) — unstamped; "
+        "record the handoff: perk ready 101"
+    ) in human.output
+
+
+def test_next_stacked_technical_blockers_ride_the_build_ready_block(monkeypatch):
+    from perk.cli.commands.objective import next_cmd
+    from perk.cli.commands.objective.shared import StackedSelection
+    from perk.delivery import train as train_mod
+
+    _, _, train = _handoff_world()
+    from dataclasses import replace as dc_replace
+
+    vetoed = dc_replace(
+        train,
+        findings=(
+            train_mod.TrainFinding(
+                kind=train_mod.FindingKind.BLOCKER, code="checkpoint_drift", message="moved"
+            ),
+        ),
+        build_readiness=train_mod.BuildReadiness("1.2", False, "veto"),
+    )
+    selection = StackedSelection(
+        kind="build_blocked", node=None, ready=False, reason="veto", train=vetoed
+    )
+    monkeypatch.setattr(objectives, "get_objective", lambda **k: _stacked_next_state())
+    monkeypatch.setattr(next_cmd, "stacked_selection", lambda *_a: selection)
+    result = _invoke(["objective", "next", "42", "--json"])
+    payload = json.loads(result.output)
+    (row,) = payload["build_ready"]["blockers"]
+    assert row["kind"] == "technical" and row["code"] == "checkpoint_drift"
+    assert row["message"] == "moved"
+    assert row["remediation"] == "perk objective stack status 42"
+
+
+# --- objective show: the stacked live-readiness block (§8.46) ------------------------------
+
+
+def _stacked_show_state():
+    return objectives.ObjectiveState(
+        number=42,
+        url="u/42",
+        title="Obj",
+        header={"delivery": "stacked", "delivery_lineage": "01JB0000000000000000000000"},
+        nodes=(
+            objective.ObjectiveNode(
+                id="1.1", description="A", status=N.IN_PROGRESS, pr="#101", depends_on=()
+            ),
+            objective.ObjectiveNode(
+                id="1.2", description="B", status=N.PENDING, depends_on=("1.1",)
+            ),
+        ),
+    )
+
+
+def test_show_stacked_checked_overrides_next_node_with_the_live_truth(monkeypatch):
+    from perk.cli.commands.objective import show_cmd
+    from perk.cli.commands.objective.shared import StackedSelection
+
+    nodes, _layer, train = _handoff_world()
+    live = StackedSelection(kind="plannable", node=nodes[1], ready=True, reason=None, train=train)
+    monkeypatch.setattr(objectives, "get_objective", lambda **k: _stacked_show_state())
+    monkeypatch.setattr(show_cmd, "stacked_selection", lambda *_a: live)
+    result = _invoke(["objective", "show", "42", "--json"])
+    assert result.exit_code == 0
+    payload = json.loads(result.output)
+    assert payload["stacked_readiness"] == {
+        "checked": True,
+        "ready": True,
+        "reason": None,
+        "blockers": [],
+    }
+    assert payload["next_node"]["id"] == "1.2"
+    # The graph-observational posture: selection_kind keeps its offline vocabulary/source.
+    assert payload["selection_kind"] == "in_flight"
+    human = _invoke(["objective", "show", "42"])
+    assert "next: 1.2" in human.stderr
+
+
+def test_show_stacked_handoff_blocked_nulls_next_node_and_renders_the_line(monkeypatch):
+    from perk.cli.commands.objective import show_cmd
+
+    live = _handoff_next_selection()
+    monkeypatch.setattr(objectives, "get_objective", lambda **k: _stacked_show_state())
+    monkeypatch.setattr(show_cmd, "stacked_selection", lambda *_a: live)
+    result = _invoke(["objective", "show", "42", "--json"])
+    payload = json.loads(result.output)
+    assert payload["next_node"] is None
+    block = payload["stacked_readiness"]
+    assert block["checked"] is True and block["ready"] is False
+    assert [row["kind"] for row in block["blockers"]] == ["handoff"]
+    # selection_kind never emits handoff_blocked — it stays the graph's own vocabulary.
+    assert payload["selection_kind"] != "handoff_blocked"
+    human = _invoke(["objective", "show", "42"])
+    assert (
+        "next: — (handoff blocked: node 1.2 waits on 1.1 (plan #101, PR #201) — unstamped; "
+        "record the handoff: perk ready 101)"
+    ) in human.stderr
+
+
+def test_show_stacked_degrades_tolerantly_when_the_live_read_fails(monkeypatch):
+    from perk.cli.commands.objective import show_cmd
+    from perk.cli.ensure import UserFacingCliError
+
+    def boom(*_a):
+        raise UserFacingCliError("git fetch failed: offline", error_type="git_error")
+
+    monkeypatch.setattr(objectives, "get_objective", lambda **k: _stacked_show_state())
+    monkeypatch.setattr(show_cmd, "stacked_selection", boom)
+    result = _invoke(["objective", "show", "42", "--json"])
+    assert result.exit_code == 0  # the degrade arm still renders
+    payload = json.loads(result.output)
+    assert payload["stacked_readiness"] == {
+        "checked": False,
+        "ready": None,
+        "reason": "git fetch failed: offline",
+        "blockers": [],
+    }
+    # Unchecked: next_node keeps the graph-derived value.
+    assert payload["next_node"] is None  # 1.2's dep 1.1 is non-terminal in the offline graph
+    human = _invoke(["objective", "show", "42"])
+    assert (
+        "readiness unchecked (git fetch failed: offline) — check: perk objective next 42"
+    ) in human.stderr
+
+
+def test_show_incremental_payload_stays_byte_identical(monkeypatch):
+    # The BYTE pin: the incremental envelope serializes exactly the pre-growth shape — no
+    # stacked_readiness key, no field reorder, no nested-shape change (a key-set comparison
+    # would let all of those pass silently).
+    from perk.cli.commands.objective import show_cmd
+
+    monkeypatch.setattr(
+        show_cmd, "stacked_selection", lambda *_a: pytest.fail("incremental must not read live")
+    )
+    monkeypatch.setattr(
+        objectives,
+        "get_objective",
+        lambda **k: objectives.ObjectiveState(
+            number=42, url="u/42", title="Obj", header={"run_id": "01RID"}, nodes=_nodes()
+        ),
+    )
+    result = _invoke(["objective", "show", "42", "--json"])
+    expected = {
+        "success": True,
+        "error_type": None,
+        "objective": {
+            "id": "42",
+            "url": "u/42",
+            "title": "Obj",
+            "header": {"run_id": "01RID"},
+        },
+        "summary": {
+            "pending": 1,
+            "planning": 0,
+            "in_progress": 0,
+            "done": 1,
+            "blocked": 0,
+            "skipped": 0,
+            "total": 2,
+        },
+        "nodes": [
+            {
+                "id": "1.1",
+                "description": "A",
+                "status": "done",
+                "pr": None,
+                "phase": "Phase 1",
+            },
+            {
+                "id": "1.2",
+                "description": "B",
+                "status": "pending",
+                "pr": None,
+                "phase": "Phase 1",
+            },
+        ],
+        "next_node": {
+            "id": "1.2",
+            "description": "B",
+            "status": "pending",
+            "pr": None,
+            "phase": "Phase 1",
+        },
+        "resumable_claims": [],
+        "selection_kind": "plannable",
+        "all_complete": False,
+    }
+    assert result.stdout == json.dumps(expected) + "\n"
 
 
 def test_not_a_repo_exit_2(monkeypatch):

@@ -35,11 +35,18 @@ an honest typed `capability_unsupported` refusal naming the exact expected-vs-ob
 - **The operation journal.** Every mutating stack operation (publish, sync, adopt, land,
   transfer) is journaled on the objective *first* — a crashed operation stays
   recoverable/concludable rather than lost.
-- **Node selection is build-readiness-derived.** Planning selects the next **build-ready**
-  layer in delivery order — not merely the next pending node — which permits planning the
-  next layer while its predecessor is published-but-unmerged. An explicit `--node` naming the
-  wrong layer refuses typed `node_not_build_ready`; `stack status` carries the
-  `next build-ready:` line (or `build blocked: <reason>`).
+- **Node selection is build-readiness- and handoff-derived.** Planning selects the next
+  **build-ready** layer in delivery order — not merely the next pending node — which permits
+  planning the next layer while its predecessor is published-but-unmerged — AND requires each
+  of the candidate's **direct dependencies** to be done/skipped, landed, or a
+  verified-published layer whose handoff stamp is `ready`. An explicit `--node` naming the
+  wrong layer refuses typed `node_not_build_ready`; a candidate whose dependency lacks a
+  `ready` stamp refuses typed `node_not_handoff_ready` — the remediation is the copyable
+  `perk ready <PLAN>` on the blocking dependency's plan. `stack status` carries the
+  `next build-ready:` line (or `build blocked: <reason>`) plus the `planning_gate` block and
+  the `planning gated: …` lines when handoff-blocked. Publication, submit, address
+  finalization, sync, recover, and re-ready are never handoff-gated; in-flight work resumes
+  ungated (only a fresh layer start refuses).
 - **The PR body is presentation, not authority.** perk inserts a `### This layer` section and
   a `### Train context` table into each layer PR's body; both are **non-authoritative** and
   refresh only at publication — the delivery train itself is the authority.
@@ -61,7 +68,10 @@ an honest typed `capability_unsupported` refusal naming the exact expected-vs-ob
   the journal append) — and flips a draft ready-for-review. It is never routine post-submit
   choreography. A failed/ambiguous stamp exits `ready_stamp_failed` with the truthful
   `pr`/`was_draft`; the ambiguous/transient arms converge on an idempotent re-run (the
-  deterministic stamp key), deterministic failures name their own repair. Readying still
+  deterministic stamp key), deterministic failures name their own repair. The recorded stamp
+  **unblocks planning of the layer's direct dependents** (the handoff gate above); the run
+  supervisor pauses as `handoff_required` — naming the same `perk ready <PLAN>` — rather than
+  ever auto-running it. Readying still
   never merges anything — a fully-ready train waits, whole, for its landing.
 - **`perk pr land` / `/land` refuse a stacked layer** typed `stacked_plan` before any
   mutation: a layer PR targets its parent's branch, so landing one alone would merge into the

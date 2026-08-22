@@ -18,6 +18,8 @@ from perk.delivery.train import (
     NO_TRAIN_INCREMENTAL_REASON,
     BaseHeadObservation,
     BranchPrView,
+    BuildReadiness,
+    DeliveryTrain,
     FindingKind,
     LayerFinalization,
     LayerGit,
@@ -33,8 +35,11 @@ from perk.delivery.train import (
     StackEntryView,
     StackView,
     TrainFinding,
+    TrainLayer,
     TrainReconstructionError,
+    UnreadyDependency,
     WorktreeFacts,
+    check_handoff_gate,
     reconstruct_train,
 )
 from perk.objective import NodeStatus, ObjectiveNode
@@ -2472,7 +2477,11 @@ class TestHandoff:
         bottom, top = status.layers
         assert bottom.publication is LayerPublication.PUBLISHED
         assert bottom.handoff is LayerHandoff.READY
+        # The internal stamped-head record rides every stamped state (§8.46's gate rows carry
+        # it to the wire); an unstamped layer records none.
+        assert bottom.stamped_head_sha == _SHA_B
         assert top.handoff is LayerHandoff.UNSTAMPED  # plan 102 carries no stamp
+        assert top.stamped_head_sha is None
 
     def test_draft_hold_is_suspended_and_undrafting_resumes_ready(self) -> None:
         # A draft PR still classifies PUBLISHED — the stamp survives the hold (transient by
@@ -2493,6 +2502,7 @@ class TestHandoff:
         newer_stale = _stamp_event(plan_id="101", head_sha=_SHA_D, created_at="t2", comment_id="s2")
         status = self._reconstruct_with_stamps(older_matching, newer_stale)
         assert status.layers[0].handoff is LayerHandoff.STALE
+        assert status.layers[0].stamped_head_sha == _SHA_D  # the LATEST stamp's head
 
     @pytest.mark.parametrize("draft", [False, True])
     def test_no_stamp_is_unstamped_whatever_the_draft_bit(self, draft: bool) -> None:
@@ -2589,7 +2599,9 @@ class TestHandoff:
 
     def test_handoff_never_vetoes_readiness_or_the_prefix(self) -> None:
         # The no-gating pin: an all-published, all-unstamped train reports byte-identical
-        # build_readiness and published_prefix_len to the pre-stamp fixtures.
+        # build_readiness and published_prefix_len to the pre-stamp fixtures. Handoff state
+        # feeds exactly one SEPARATE check — check_handoff_gate (§8.46) — which never touches
+        # BuildReadiness or the prefix.
         status = self._reconstruct_with_stamps()
         assert all(layer.handoff is LayerHandoff.UNSTAMPED for layer in status.layers)
         assert status.published_prefix_len == 2
@@ -2597,3 +2609,268 @@ class TestHandoff:
         assert status.build_readiness.next_node_id is None
         assert status.build_readiness.reason == "all layers published or landed"
         assert status.blockers == ()
+
+
+# ----------------------------------------------------------------- the handoff gate (§8.46)
+
+
+def _gate_layer(
+    node_id: str,
+    plan_id: str,
+    pr_number: int,
+    *,
+    publication: LayerPublication = LayerPublication.PUBLISHED,
+    handoff: LayerHandoff = LayerHandoff.NOT_APPLICABLE,
+    stamped_head_sha: str | None = None,
+    observed: str | None = None,
+) -> TrainLayer:
+    return TrainLayer(
+        node_id=node_id,
+        plan_id=plan_id,
+        branch=f"plan-{plan_id}",
+        pr_number=pr_number,
+        intent=LayerIntent.PLANNED,
+        publication=publication,
+        git=LayerGit.SYNCED,
+        pr=LayerPr.DRAFT,
+        membership=LayerMembership.NOT_APPLICABLE,
+        writer=LayerWriter.FREE,
+        finalization=LayerFinalization.NOT_MERGED,
+        parent_checkpoint_sha=_SHA_A,
+        published_head_sha=_SHA_B,
+        observed_remote_head_sha=observed,
+        observed_pr_base=None,
+        expected_pr_base=None,
+        handoff=handoff,
+        stamped_head_sha=stamped_head_sha,
+    )
+
+
+def _gate_train(
+    nodes: tuple[ObjectiveNode, ...],
+    layers: tuple[TrainLayer, ...],
+    *,
+    projected: tuple[ProjectedCancellation, ...] = (),
+) -> DeliveryTrain:
+    return DeliveryTrain(
+        objective_id="10",
+        objective_url="u/10",
+        delivery_lineage=_LINEAGE,
+        base="main",
+        redirected_from=None,
+        layers=layers,
+        published_prefix_len=0,
+        unresolved_operation=None,
+        findings=(),
+        build_readiness=BuildReadiness(next_node_id=None, ready=False, reason="unused"),
+        projected_canceled_nodes=projected,
+        objective_nodes=nodes,
+    )
+
+
+class TestHandoffGate:
+    """`check_handoff_gate` (contracts.md §8.46): the pure direct-dependency gate beside
+    BuildReadiness — satisfaction arms, fail-closed totality, and deterministic ordering."""
+
+    def test_terminal_dep_wins_over_any_layer_state(self) -> None:
+        # A DONE dep satisfies even while its layer sits published-but-unstamped.
+        train = _gate_train(
+            (
+                _node("1.1", status=NodeStatus.DONE, pr="#101"),
+                _node("1.2", pr="#102", depends_on=("1.1",)),
+            ),
+            (
+                _gate_layer("1.1", "101", 201, handoff=LayerHandoff.UNSTAMPED),
+                _gate_layer("1.2", "102", 202, publication=LayerPublication.UNPUBLISHED),
+            ),
+        )
+        gate = check_handoff_gate(train, node_id="1.2")
+        assert gate.ready is True
+        assert gate.blocking_layers == () and gate.unready_dependencies == ()
+
+    def test_landed_dep_satisfies(self) -> None:
+        train = _gate_train(
+            (
+                _node("1.1", status=NodeStatus.IN_PROGRESS, pr="#101"),
+                _node("1.2", pr="#102", depends_on=("1.1",)),
+            ),
+            (
+                _gate_layer("1.1", "101", 201, publication=LayerPublication.LANDED),
+                _gate_layer("1.2", "102", 202, publication=LayerPublication.UNPUBLISHED),
+            ),
+        )
+        assert check_handoff_gate(train, node_id="1.2").ready is True
+
+    def test_ready_stamped_dep_satisfies(self) -> None:
+        train = _gate_train(
+            (
+                _node("1.1", status=NodeStatus.IN_PROGRESS, pr="#101"),
+                _node("1.2", pr="#102", depends_on=("1.1",)),
+            ),
+            (
+                _gate_layer("1.1", "101", 201, handoff=LayerHandoff.READY, stamped_head_sha=_SHA_B),
+                _gate_layer("1.2", "102", 202, publication=LayerPublication.UNPUBLISHED),
+            ),
+        )
+        assert check_handoff_gate(train, node_id="1.2").ready is True
+
+    @pytest.mark.parametrize(
+        "handoff", [LayerHandoff.UNSTAMPED, LayerHandoff.STALE, LayerHandoff.SUSPENDED]
+    )
+    def test_blocked_per_state_with_full_layer_facts(self, handoff: LayerHandoff) -> None:
+        stamped = _SHA_C if handoff is not LayerHandoff.UNSTAMPED else None
+        train = _gate_train(
+            (
+                _node("1.1", status=NodeStatus.IN_PROGRESS, pr="#101"),
+                _node("1.2", pr="#102", depends_on=("1.1",)),
+            ),
+            (
+                _gate_layer(
+                    "1.1",
+                    "101",
+                    201,
+                    handoff=handoff,
+                    stamped_head_sha=stamped,
+                    observed=_SHA_B,
+                ),
+                _gate_layer("1.2", "102", 202, publication=LayerPublication.UNPUBLISHED),
+            ),
+        )
+        gate = check_handoff_gate(train, node_id="1.2")
+        assert gate.ready is False and gate.unready_dependencies == ()
+        (blocker,) = gate.blocking_layers
+        # The blocker IS the dep's own TrainLayer — every wire field rides it.
+        assert blocker.node_id == "1.1" and blocker.plan_id == "101"
+        assert blocker.pr_number == 201 and blocker.handoff is handoff
+        assert blocker.stamped_head_sha == stamped
+        assert blocker.observed_remote_head_sha == _SHA_B
+
+    def test_blockers_in_delivery_order_and_unready_in_node_sort_order(self) -> None:
+        # blocking_layers follow train.layers (bottom-most first); unready deps sort by
+        # node_sort_key (1.2 before 1.10 — numeric, not lexical).
+        train = _gate_train(
+            (
+                _node("1.1", status=NodeStatus.IN_PROGRESS, pr="#101"),
+                _node("1.3", status=NodeStatus.IN_PROGRESS, pr="#103"),
+                _node("1.2", status=NodeStatus.PENDING),
+                _node("1.10", status=NodeStatus.PENDING),
+                _node("2.1", pr="#104", depends_on=("1.3", "1.1", "1.10", "1.2")),
+            ),
+            (
+                _gate_layer("1.1", "101", 201, handoff=LayerHandoff.UNSTAMPED),
+                _gate_layer("1.3", "103", 203, handoff=LayerHandoff.STALE, stamped_head_sha=_SHA_C),
+            ),
+        )
+        gate = check_handoff_gate(train, node_id="2.1")
+        assert [layer.node_id for layer in gate.blocking_layers] == ["1.1", "1.3"]
+        assert [dep.dependency_node_id for dep in gate.unready_dependencies] == ["1.2", "1.10"]
+
+    def test_skip_contraction_resolves_the_direct_dep_through_a_skipped_node(self) -> None:
+        # 1.3 depends on skipped 1.2, which depends on 1.1: the resolved DIRECT dep is 1.1 —
+        # blocked while 1.1 is unstamped, satisfied once 1.1 is ready-stamped.
+        nodes = (
+            _node("1.1", status=NodeStatus.IN_PROGRESS, pr="#101"),
+            _node("1.2", status=NodeStatus.SKIPPED, depends_on=("1.1",)),
+            _node("1.3", pr="#103", depends_on=("1.2",)),
+        )
+        blocked = _gate_train(
+            nodes, (_gate_layer("1.1", "101", 201, handoff=LayerHandoff.UNSTAMPED),)
+        )
+        gate = check_handoff_gate(blocked, node_id="1.3")
+        assert [layer.node_id for layer in gate.blocking_layers] == ["1.1"]
+        satisfied = _gate_train(
+            nodes,
+            (_gate_layer("1.1", "101", 201, handoff=LayerHandoff.READY, stamped_head_sha=_SHA_B),),
+        )
+        assert check_handoff_gate(satisfied, node_id="1.3").ready is True
+
+    def test_projected_canceled_dep_satisfies_via_the_record_node_id(self) -> None:
+        # A layerless non-terminal dep satisfies only through a ProjectedCancellation record
+        # naming it (the field carries records with .node_id, not an id set).
+        nodes = (
+            _node("1.1", status=NodeStatus.PENDING),
+            _node("1.2", pr="#102", depends_on=("1.1",)),
+        )
+        layers = (_gate_layer("1.2", "102", 202, publication=LayerPublication.UNPUBLISHED),)
+        satisfied = _gate_train(
+            nodes,
+            layers,
+            projected=(ProjectedCancellation(node_id="1.1", persisted_status=NodeStatus.PENDING),),
+        )
+        assert check_handoff_gate(satisfied, node_id="1.2").ready is True
+        blocked = check_handoff_gate(_gate_train(nodes, layers), node_id="1.2")
+        assert blocked.blocking_layers == ()
+        assert blocked.unready_dependencies == (
+            UnreadyDependency(
+                dependency_node_id="1.1",
+                reason="no train layer exists for this dependency (status pending) — fail closed",
+            ),
+        )
+
+    def test_fold_unavailable_fails_closed_as_unready_never_a_claimed_unstamped(self) -> None:
+        # PUBLISHED + handoff not_applicable = the fold was unavailable: an UnreadyDependency
+        # naming the evidence loss, never a blocking "unstamped" claim.
+        train = _gate_train(
+            (
+                _node("1.1", status=NodeStatus.IN_PROGRESS, pr="#101"),
+                _node("1.2", pr="#102", depends_on=("1.1",)),
+            ),
+            (
+                _gate_layer("1.1", "101", 201, handoff=LayerHandoff.NOT_APPLICABLE),
+                _gate_layer("1.2", "102", 202, publication=LayerPublication.UNPUBLISHED),
+            ),
+        )
+        gate = check_handoff_gate(train, node_id="1.2")
+        assert gate.blocking_layers == ()
+        (dep,) = gate.unready_dependencies
+        assert dep.dependency_node_id == "1.1"
+        assert "handoff evidence is unavailable" in dep.reason
+
+    def test_unverified_publication_is_unready_not_blocking(self) -> None:
+        train = _gate_train(
+            (
+                _node("1.1", status=NodeStatus.IN_PROGRESS, pr="#101"),
+                _node("1.2", pr="#102", depends_on=("1.1",)),
+            ),
+            (
+                _gate_layer("1.1", "101", 201, publication=LayerPublication.PUBLICATION_DRIFT),
+                _gate_layer("1.2", "102", 202, publication=LayerPublication.UNPUBLISHED),
+            ),
+        )
+        gate = check_handoff_gate(train, node_id="1.2")
+        assert gate.blocking_layers == ()
+        (dep,) = gate.unready_dependencies
+        assert dep.reason == "publication is publication_drift — not a verified publication"
+
+    def test_direct_edges_only_a_stale_grandparent_never_blocks_through_a_live_parent(
+        self,
+    ) -> None:
+        train = _gate_train(
+            (
+                _node("1.1", status=NodeStatus.IN_PROGRESS, pr="#101"),
+                _node("1.2", status=NodeStatus.IN_PROGRESS, pr="#102", depends_on=("1.1",)),
+                _node("1.3", pr="#103", depends_on=("1.2",)),
+            ),
+            (
+                _gate_layer("1.1", "101", 201, handoff=LayerHandoff.STALE, stamped_head_sha=_SHA_C),
+                _gate_layer("1.2", "102", 202, handoff=LayerHandoff.READY, stamped_head_sha=_SHA_B),
+                _gate_layer("1.3", "103", 203, publication=LayerPublication.UNPUBLISHED),
+            ),
+        )
+        assert check_handoff_gate(train, node_id="1.3").ready is True
+
+    def test_gate_mutates_nothing_and_emits_no_findings(self) -> None:
+        train = _gate_train(
+            (
+                _node("1.1", status=NodeStatus.IN_PROGRESS, pr="#101"),
+                _node("1.2", pr="#102", depends_on=("1.1",)),
+            ),
+            (
+                _gate_layer("1.1", "101", 201, handoff=LayerHandoff.UNSTAMPED),
+                _gate_layer("1.2", "102", 202, publication=LayerPublication.UNPUBLISHED),
+            ),
+        )
+        before_readiness = train.build_readiness
+        before_findings = train.findings
+        check_handoff_gate(train, node_id="1.2")
+        assert train.build_readiness == before_readiness and train.findings == before_findings

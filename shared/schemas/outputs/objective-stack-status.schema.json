@@ -123,6 +123,129 @@
       "title": "FindingOut",
       "type": "object"
     },
+    "GateBlockerOut": {
+      "additionalProperties": false,
+      "description": "One planning-gate blocker row (contracts.md \u00a78.46) \u2014 the shared machine\ndiscriminator every gate-carrying envelope serializes.\n\n``kind`` is ``\"technical\"`` (a train readiness veto \u2014 ``code``/``message`` verbatim, or\nthe gate-owned defensive ``dependency_not_ready``) or ``\"handoff\"`` (a handoff-blocked\ndirect dependency \u2014 fields-only, no prose: consumers read the pinned fields). Handoff\nrows derive from a verified-PUBLISHED layer, so ``plan``/``pr``/``remediation`` are\nalways populated there (the nullable wire types exist for the technical rows).",
+      "properties": {
+        "kind": {
+          "title": "Kind",
+          "type": "string"
+        },
+        "code": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Code"
+        },
+        "message": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Message"
+        },
+        "dependency_node_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Dependency Node Id"
+        },
+        "plan": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Plan"
+        },
+        "pr": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Pr"
+        },
+        "handoff_state": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Handoff State"
+        },
+        "stamped_head": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Stamped Head"
+        },
+        "current_head": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Current Head"
+        },
+        "remediation": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Remediation"
+        }
+      },
+      "required": [
+        "kind",
+        "code",
+        "message",
+        "dependency_node_id",
+        "plan",
+        "pr",
+        "handoff_state",
+        "stamped_head",
+        "current_head",
+        "remediation"
+      ],
+      "title": "GateBlockerOut",
+      "type": "object"
+    },
     "LayerOut": {
       "additionalProperties": false,
       "properties": {
@@ -411,6 +534,41 @@
       "title": "OrphanedResidueOut",
       "type": "object"
     },
+    "PlanningGateOut": {
+      "additionalProperties": false,
+      "description": "The composed planning-gate block (contracts.md \u00a78.46): the evaluated candidate\n(``None`` when no candidate exists), the technical-AND-handoff verdict for\nplanning/fresh starts, and the blocker rows.",
+      "properties": {
+        "node_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Node Id"
+        },
+        "ready": {
+          "title": "Ready",
+          "type": "boolean"
+        },
+        "blockers": {
+          "items": {
+            "$ref": "#/$defs/GateBlockerOut"
+          },
+          "title": "Blockers",
+          "type": "array"
+        }
+      },
+      "required": [
+        "node_id",
+        "ready",
+        "blockers"
+      ],
+      "title": "PlanningGateOut",
+      "type": "object"
+    },
     "TrainOut": {
       "additionalProperties": false,
       "properties": {
@@ -482,6 +640,14 @@
           "default": 0,
           "title": "Landed Prefix Len",
           "type": "integer"
+        },
+        "planning_gate": {
+          "$ref": "#/$defs/PlanningGateOut",
+          "default": {
+            "node_id": null,
+            "ready": false,
+            "blockers": []
+          }
         }
       },
       "required": [

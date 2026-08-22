@@ -9,7 +9,13 @@ from perk.backends import resolve
 from perk.backends.objective_store import ObjectiveStoreError
 from perk.cli import completions
 from perk.cli.alias import alias
-from perk.cli.commands.objective.shared import node_to_dict, parse_objective_id, stacked_selection
+from perk.cli.commands.objective.shared import (
+    handoff_blocker_phrase,
+    node_to_dict,
+    parse_objective_id,
+    selection_gate_blockers,
+    stacked_selection,
+)
 from perk.cli.context import require_repo
 from perk.cli.emit import fail
 from perk.cli.ensure import UserFacingCliError
@@ -49,16 +55,29 @@ def next_objective(ctx: click.Context, *, number: str, as_json: bool) -> None:
 
     if selection is not None:
         next_node = selection.node if selection.kind == "plannable" else None
+        # The always-present additive blocker rows (contracts.md §8.46): technical rows on
+        # build_blocked, handoff rows on handoff_blocked, [] otherwise.
+        blockers = selection_gate_blockers(selection)
         payload: dict[str, object] = {
             "success": True,
             "error_type": None,
             "next_node": node_to_dict(next_node) if next_node else None,
-            "build_ready": {"ready": selection.ready, "reason": selection.reason},
+            "build_ready": {
+                "ready": selection.ready,
+                "reason": selection.reason,
+                "blockers": [row.model_dump(mode="json") for row in blockers],
+            },
         }
         if as_json:
             machine_output(json.dumps(payload))
         elif next_node is not None:
             user_output(f"next: {next_node.id}")
+        elif selection.kind == "handoff_blocked" and selection.node is not None:
+            for layer in selection.handoff_blockers:
+                user_output(
+                    f"handoff blocked: node {selection.node.id} waits on "
+                    f"{handoff_blocker_phrase(layer)}"
+                )
         elif not selection.ready:
             user_output(f"build blocked: {selection.reason}")
         else:
