@@ -191,7 +191,7 @@ perk objective stack status <N>
 ```
 Objective #<N>: stacked delivery train (base main, published prefix 1/2)
   lineage 01XXXXXXXXXXXXXXXXXXXXXXXX
-  1. 1.1 plan #<plan-1> [published] pr #<pr-1> (draft) stack exact handoff unstamped
+  1. 1.1 plan #<plan-1> [published] pr #<pr-1> (draft) writer active handoff unstamped
   2. 1.2 unplanned [unpublished] no pr
   next build-ready: 1.2
   planning gated: 1.2 waits on 1.1 (plan #<plan-1>, PR #<pr-1>) — unstamped; record the handoff: perk ready <plan-1>
@@ -200,7 +200,11 @@ no findings
 
 Build-ready and handoff-gated are different axes: node `1.2` is the next build-ready
 layer, yet planning it stays gated until layer 1's handoff is recorded — the status names
-both, with the copyable remediation. So first review layer 1 on its draft PR
+both, with the copyable remediation. Read layer 1's line closely: `writer active` reports
+the Step 4 implement worktree you kept open (clean — a dirty one would read
+`writer dirty`), `handoff unstamped` is the gate itself, and there is no `stack` part yet —
+a single published PR is explicitly not a stack; membership appears once two or more
+published PRs exist. So first review layer 1 on its draft PR
 (`gh pr view --web` from Step 4 — in this tutorial's scratch world, a quick self-review),
 then record the handoff — from layer 1's session:
 
@@ -262,11 +266,17 @@ perk objective stack status <N>
 ```
 Objective #<N>: stacked delivery train (base main, published prefix 2/2)
   lineage 01XXXXXXXXXXXXXXXXXXXXXXXX
-  1. 1.1 plan #<plan-1> [published] pr #<pr-1> (ready) stack exact handoff ready
-  2. 1.2 plan #<plan-2> [published] pr #<pr-2> (draft) stack exact handoff unstamped
+  1. 1.1 plan #<plan-1> [published] pr #<pr-1> (ready) stack exact writer active handoff ready
+  2. 1.2 plan #<plan-2> [published] pr #<pr-2> (draft) stack exact writer active handoff unstamped
   build blocked: all layers published or landed
 no findings
 ```
+
+Both layers now carry `stack exact` — the native-stack membership check over the two
+published PRs — and `writer active` for their open implement worktrees. Layer 1 shows
+`(ready)` with `handoff ready` (the stamp you recorded earlier in this step), while the
+just-published layer 2 is still `(draft)` and `handoff unstamped` — it gets its review and
+handoff in Step 7.
 
 Open a layer PR on GitHub (`gh pr view <pr-2> --web`) and read its body: perk inserts a
 `### This layer` section (with an explicit disclaimer — the delivery train is
