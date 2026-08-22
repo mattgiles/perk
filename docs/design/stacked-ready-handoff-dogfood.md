@@ -538,9 +538,21 @@ checkout extension).
 - **Train read after the stamp:** layer 1.1 `pr #1982 (ready) … handoff ready`; the S3
   `planning gated` line is GONE — `planning_gate: {node_id: "1.2", ready: true, blockers: []}`
   (the S3→S4 gate contrast, captured both sides).
-- **The in-session ready-time reconcile pass:** *outcome pending capture — the pass was still
-  running when this evidence committed; its writes (or honest no-op) land in the next
-  evidence commit.*
+- **The in-session ready-time reconcile pass (completed 2026-08-22):** the pass judged
+  exactly the pinned range (3 user-docs files, +71/−14) plus the engagement block, verified
+  liveness (live head = stamped head, no drift), and made **one correctly-bounded write**: the
+  Reconcilable prose now records the operator-approved two-phase excerpt-capture sequencing
+  the accepted layer refined (phase-1 renderer-derived shapes — the Step-2 excerpt verified
+  against this record's real S1 capture — with real-capture replacement on the same layer
+  before the train lands, judged at land time). Durable half: objective comment 5382411634
+  `updated_at: 2026-08-22T21:28:28Z`; the excerpt-discipline paragraph present in the
+  marker-bounded Reconcilable region; the Mechanical roadmap table, Immutable region, node
+  descriptions, and statuses/PR fields byte-untouched; no node adds (the pass judged the
+  phase-2 refresh layer 1's own completion discipline, not a new unit of work — so the
+  `stacked_append_refused` capture-if-fired arm did not fire here). Session report tail
+  (operator capture): "The handoff stamp stands; planning of node 1.2 is now unblocked."
+  **The warm-carrier arm's full sequence — stamp → announced continuation → bounded judgment
+  pass → real write — observed live.**
 
 ### S5 — suspend/resume
 
