@@ -609,8 +609,35 @@ delivery_lineage: 01M0NJ5ASVYS4VMBEWXXVJNXRA
 predecessor_plan_id: '1981'
 ```
 
-**Implement/publish half:** *pending — interactive implement → `run_ci` → `/submit` (the
-stack CREATE).*
+**Implement/publish half executed 2026-08-22.**
+
+- **Interactive implement** (`perk impl 1983`, dev checkout; operator capture of the launch
+  narration): `✓ layer 1.2 starts from plan-1981 @ f7f25f9d6557` — the parent derived from the
+  reconstructed train at layer 1's published (and stamped) head exactly; worktree `plan-1983`
+  created; `impl_run_ids: [01M0NRE0DEVSPS6A32D5D03CN8]`.
+- **`run_ci`** (operator-pasted, 2026-08-22): `perk CI: all checks passed.` — `✓ docs-check`,
+  every code-suffix row glob-skipped (this layer's own files are `skills/perk-expert/**`;
+  the branch's cumulative diff also carries layer 1's user-docs files — the conservative
+  over-checking the prior gate recorded, still honest).
+- **Publish (warm `/submit` — the stack CREATE):** submit result (operator capture):
+  `Opened draft PR #1984 … (stack #1985, layer 2/2)`.
+  - PR facts: `{"number": 1984, "state": "OPEN", "isDraft": true, "baseRefName":
+    "plan-1981", "headRefName": "plan-1983", "headRefOid": "29d4375d5bf125b871c196bd5cb2672653438d77",
+    "mergedAt": null}` — base = the layer-1 branch.
+  - Journal (issue #1980): operation **01M0NRP6XWAHG4S00SZSGNDV7A**, `prepared` (22:15:35Z) →
+    `completed` (22:15:49Z; `observed: {branch_sha: 29d4375d…, pr: 1984, stack: […]}`).
+  - **Native stack registered:** `gh api 'repos/mattgiles/perk/stacks?pull_request=1984'` →
+    stack **#1985** (`base: {ref: "main"}`, `open: true`, created 22:15:42Z), members
+    bottom→top `[#1982 @ plan-1981 f7f25f9d… (non-draft), #1984 @ plan-1983 29d4375d…
+    (draft)]`.
+  - Checkpoint pair on the #1983 header: `parent_checkpoint_sha: f7f25f9d…` (= layer 1's
+    published head exactly), `published_head_sha: 29d4375d…`.
+- **Train read** (`perk objective stack status 1980`): `published prefix 2/2`; layer 1.1
+  `pr #1982 (ready) stack exact … handoff ready`, layer 1.2 `pr #1984 (draft) stack exact …
+  handoff unstamped`; `observed_pr_base` = `expected_pr_base` ×2 (`main` / `plan-1981`);
+  `build blocked: all layers published or landed` (the honest technical no-candidate) with
+  `planning_gate: {node_id: null, ready: false, blockers: []}` — the §8.46 no-candidate arm
+  rendered exactly as pinned (no gate rows without a candidate).
 
 ### S7 — stamp layer 2 (warm carrier)
 
