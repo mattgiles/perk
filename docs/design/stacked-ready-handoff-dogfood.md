@@ -778,13 +778,58 @@ the record worktree — read-only): **`disposition: "ready"`**, `blockers: []`.
   and mergeability — never the ready stamps (the stamp is planning control, not merge
   policy; § matrix family 5).
 
-**Confirmed-land half:** *pending — the operator-confirmed `perk objective stack land 1980`
-+ the post-land `/objective-reconcile` gesture.*
+**Confirmed-land half executed 2026-08-22** (operator, dev checkout root; consent = the
+recorded dry-run above + the rendered consent plan approved `y`).
+
+- **The consent plan** (operator capture) rendered the identical two-layer table + `top pin:
+  pr #1984 at 149a8dcf…` — byte-consistent with the dry-run LandPlan.
+- **The atomic land:** `landed 2 layer(s) atomically (operation 01M0NVZKKZ0MZCVPJH8TZ3B5W9)`
+  — `1.1 (pr #1982): merged as 9d1733b6b195`, `1.2 (pr #1984): merged as b5bded35b071`;
+  `objective #1980 complete — closed`; `reconcile evidence: 2 layer(s), final base
+  b5bded35b071 … /objective-reconcile`.
+- **The LAND journal triple (durable half):** operation `01M0NVZKKZ0MZCVPJH8TZ3B5W9` —
+  `prepared` 23:13:09Z → `accepted` 23:13:14Z → `completed` 23:13:20Z (≈11 s end to end; no
+  interruption this gate, by design — the interruption→recovery arm is the prior gate's
+  proven fact).
+- **Merge facts:** #1982 `MERGED` 23:13:14Z as `9d1733b6b1950a657bdf5eddd91c66dec1f614f2`;
+  #1984 `MERGED` 23:13:15Z as `b5bded35b0714099343efb17e0e3d51fbff474b0`; remote `main` =
+  `b5bded35…` (= the reconcile evidence's final base exactly).
+- **Bookkeeping converged:** issues #1980/#1981/#1983 all `CLOSED`; `objective show` →
+  `done: 2` of 2, `next: — (complete)`.
+- **Terminal train read:** `published prefix 2/2, landed 2`; both layers `[landed] pr
+  (merged)`; the `handoff` suffix GONE — the axis exists only over verified PUBLISHED layers
+  (`not_applicable` once landed), as pinned. The one information row is the expected
+  post-landing truth: `base_advanced` (main moved from the recorded objective base
+  `e2cb9e5d…` to the train's final merged base `b5bded35…`; a landed train is never
+  re-synced — the row's generic sync hint is advisory vocabulary, not an instruction).
+- **The post-land whole-train pass (operator transcript): a near-no-op with exactly the
+  land-scoped residue** — one targeted `reconcile_objective` write resolving the
+  forward-looking excerpt-sequencing commitment into its recorded outcome (satisfiable only
+  at land time, by construction) plus tense-shifts on the now-fixed gaps; node descriptions
+  deliberately skipped ("already reconciled at ready time; the merged diffs match them
+  exactly"); no new nodes; no status/PR mutations ("the cold land path already marked both
+  nodes done and closed the objective"). **The design thesis observed live: ready-time
+  reconciliation kept future intent current, leaving the post-land pass only what could not
+  exist earlier.**
 
 ### S11 — census + residue sweep
 
-*Not yet executed.* (PR/issue/main census, terminal train read, scoped wipe + absence census,
-docs gate.)
+**Durable census executed 2026-08-22** (read-only, from the record worktree):
+
+- **PR census:** #1982/#1984 both `MERGED` (23:13:14/15Z) at `9d1733b6…`/`b5bded35…`.
+- **Issue census:** objective #1980 and plan issues #1981/#1983 all `CLOSED`; nodes `done`
+  ×2.
+- **Main census (at `b5bded35…`, via the contents API):** all four deliverable surfaces
+  carry the new content — the tutorial (23 continuation/handoff mentions), both stacked
+  how-tos (the Handoff repair table present), and the perk-expert mirror (the handoff-repair
+  routing rows present).
+- **Terminal train read:** recorded at S10 (landed 2; the expected `base_advanced` row; no
+  unresolved operations, no continuation, no orphaned residue).
+
+**Local-side sweep:** *pending — the operator's updated-main docs gate, the train-worktree
+removal, remote branch deletion, and the absence census.* (Pre-sweep observation: remote
+`plan-1981`/`plan-1983` refs still exist; both train worktrees still checked out — the
+`writer active` rows in the terminal read.)
 
 ### Evidence-fill reconciliation sweep (S12)
 
