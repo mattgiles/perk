@@ -1461,6 +1461,10 @@ class LinearProjectObjectiveStore:
                     f"could not add node to phase {phase} on {objective_id!r} (id collision)"
                 )
             updated, new_id = result
+            # The stacked tail-append guard (contracts.md §8.66), against this same fresh
+            # roadmap read (the header rides the same read's metadata sentinel) — dry-run
+            # included.
+            objective_store.ensure_stacked_tail_append(state.header, list(state.nodes), updated)
             new_node = next(n for n in updated if n.id == new_id)
             if dry_run:
                 return objective_store.ObjectiveNodeAdd(

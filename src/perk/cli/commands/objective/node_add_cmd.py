@@ -6,7 +6,11 @@ import click
 
 from perk import objective
 from perk.backends import resolve
-from perk.backends.objective_store import ObjectiveStore, ObjectiveStoreError
+from perk.backends.objective_store import (
+    ObjectiveStore,
+    ObjectiveStoreError,
+    StackedAppendRefused,
+)
 from perk.cli import completions
 from perk.cli.commands.objective.shared import parse_objective_id
 from perk.cli.context import require_github, require_repo
@@ -69,6 +73,19 @@ def node_add_objective(
             comment=comment,
             dry_run=dry_run,
         )
+    except StackedAppendRefused as exc:
+        # The store-owned tail-append guard (contracts.md §8.66): a refusal means the
+        # discovery is structural — name the replan route, never the generic store arm.
+        fail(
+            ctx,
+            as_json=as_json,
+            error_type="stacked_append_refused",
+            message=(
+                "; ".join(exc.errors)
+                + f"\nstructural roadmap changes route through: perk objective replan {number}"
+            ),
+        )
+        return
     except ObjectiveStoreError as exc:
         error_type = "invalid_input" if "collision" in str(exc) else "github_error"
         fail(ctx, as_json=as_json, error_type=error_type, message=str(exc))

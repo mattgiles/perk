@@ -42,9 +42,15 @@ def _inline_objective_description(
     comment_id: str | int | None = None,
     nodes: list[objective.ObjectiveNode] | None = None,
     origin: str | None = None,
+    delivery: str | None = None,
 ) -> str:
     header = objective.ObjectiveHeader(
-        run_id=run_id, created="t", objective_comment_id=comment_id, status="active", origin=origin
+        run_id=run_id,
+        created="t",
+        objective_comment_id=comment_id,
+        status="active",
+        origin=origin,
+        delivery=delivery,
     )
     header_block = plan.render_metadata_block(
         objective.OBJECTIVE_HEADER_KEY, objective.render_header_block(header), style="inline-code"
@@ -615,6 +621,48 @@ class TestAddObjectiveNode:
         assert added == objective_store.ObjectiveNodeAdd(
             objective_id="obj-1", node_id="1.3", comment_updated=False, dry_run=True
         )
+        assert not _queries(fake, "issueUpdate(")
+
+    @pytest.mark.parametrize("dry_run", [False, True])
+    def test_stacked_refuses_non_tail_append(self, dry_run: bool) -> None:
+        # The store-owned tail-append guard over the same fresh description read — dry-run
+        # included: a mid-roadmap phase insertion re-points inference and is refused.
+        nodes = [
+            objective.ObjectiveNode(id="1.1", description="A", status=objective.NodeStatus.PENDING),
+            objective.ObjectiveNode(id="2.1", description="B", status=objective.NodeStatus.PENDING),
+        ]
+        description = _inline_objective_description("01N", nodes=nodes, delivery="stacked")
+        store, fake = _make_store({"issue(id": [_objective_issue_response(description)]})
+        with pytest.raises(objective_store.StackedAppendRefused) as err:
+            store.add_objective_node(
+                objective_id="obj-1", phase=1, description="Gamma", dry_run=dry_run
+            )
+        assert any("resolved dependencies" in e for e in err.value.errors)
+        assert not _queries(fake, "issueUpdate(")
+
+    def test_stacked_accepts_tail_append(self) -> None:
+        nodes = [
+            objective.ObjectiveNode(id="1.1", description="A", status=objective.NodeStatus.PENDING),
+            objective.ObjectiveNode(id="2.1", description="B", status=objective.NodeStatus.PENDING),
+        ]
+        description = _inline_objective_description("01N", nodes=nodes, delivery="stacked")
+        store, fake = _make_store(
+            {
+                "issue(id": [_objective_issue_response(description)],
+                "issueUpdate(": [{"issueUpdate": {"success": True}}],
+            }
+        )
+        added = store.add_objective_node(objective_id="obj-1", phase=2, description="Gamma")
+        assert added.node_id == "2.2" and added.dry_run is False
+        assert len(_queries(fake, "issueUpdate(")) == 1
+
+    def test_junk_delivery_header_refused(self) -> None:
+        description = _inline_objective_description("01N", delivery="weird")
+        store, fake = _make_store({"issue(id": [_objective_issue_response(description)]})
+        with pytest.raises(
+            objective_store.StackedAppendRefused, match="unknown objective delivery"
+        ):
+            store.add_objective_node(objective_id="obj-1", phase=1, description="Gamma")
         assert not _queries(fake, "issueUpdate(")
 
 

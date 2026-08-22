@@ -2042,6 +2042,9 @@ def test_choreography_submit_draft_review_address_stamp():
     assert ready.was_draft is True
     assert ready.stamp is not None
     assert ready.stamp.existed is False and ready.stamp.record.head_sha == C3
+    # The continuation fact rides the same verified projection as the record: the stamp
+    # carries the layer's parent checkpoint so consumers can compose the pinned diff range.
+    assert ready.stamp.parent_checkpoint_sha == MAIN
     # Read-back through the production fold accessor: the appended stamp is served back by
     # the journal read and names the post-address head.
     served = latest_stamp(world)
@@ -2056,3 +2059,4 @@ def test_choreography_submit_draft_review_address_stamp():
     ]
     assert again.was_draft is False
     assert again.stamp is not None and again.stamp.existed is True
+    assert again.stamp.parent_checkpoint_sha == MAIN

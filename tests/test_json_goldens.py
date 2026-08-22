@@ -247,6 +247,7 @@ def _pr_ready_result():
                     head_sha="b" * 40,
                 ),
                 existed=False,
+                parent_checkpoint_sha="a" * 40,
             ),
         ),
         plan_id="42",

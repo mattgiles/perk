@@ -158,6 +158,16 @@ def _require_stamp_segment(value: str, *, what: str) -> str:
     return value
 
 
+def is_full_head_sha(value: str) -> bool:
+    """Whether ``value`` is EXACTLY the full 40-hex lowercase object id (``fullmatch``).
+
+    The public predicate for continuation boundaries (contracts.md §8.66): stored checkpoint
+    strings are presence-invariant but not vocabulary-invariant, so consumers validate both
+    range endpoints against this exact form before interpolating or driving.
+    """
+    return _HEAD_SHA_RE.fullmatch(value) is not None
+
+
 def _require_head_sha(value: str) -> str:
     """Validate a stamp's ``head_sha`` as EXACTLY the full 40-hex lowercase object id
     (``fullmatch`` — a ``$``-anchored match would admit a trailing newline; the verified

@@ -188,7 +188,7 @@ routes:
     role: launch
     priority: 90
   - id: prompt-objective-delivery
-    match: { paths: ["prompts/stages/objective-land.md", "prompts/stages/objective-recover.md", "prompts/stages/objective-sync.md", "prompts/stages/objective-reconcile.md"] }
+    match: { paths: ["prompts/stages/objective-land.md", "prompts/stages/objective-recover.md", "prompts/stages/objective-sync.md", "prompts/stages/objective-reconcile.md", "prompts/stages/objective-reconcile-ready.md"] }
     capability: delivery.objective
     audience: shipped
     role: control-guidance

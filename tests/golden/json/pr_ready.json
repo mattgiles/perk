@@ -13,6 +13,8 @@
   "node": "1.2",
   "stamped_head": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
   "stamp_advanced": true,
-  "reconcile_notice": "the ready-time reconcile pass was not launched \u2014 perk ready is deterministic and non-launching",
-  "reconcile_retry": "perk ready 42"
+  "reconcile_notice": "the ready-time reconcile pass was not launched \u2014 perk pr ready is the deterministic, non-launching worker; run perk ready <plan> in an interactive terminal to launch it",
+  "reconcile_retry": "perk ready 42",
+  "plan": "42",
+  "parent_checkpoint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 }

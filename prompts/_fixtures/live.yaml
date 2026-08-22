@@ -246,6 +246,24 @@
   vars:
     objective: "7"
     read_clause: "This objective is a Linear Project (https://linear.app/x/ENG-1). Its roadmap nodes are Linear issues in that Project — inspect a node-issue's detail or discussion with the `linear_get_issue` and `linear_list_comments` tools; if the linear tools are unavailable, open https://linear.app/x/ENG-1."
+- template: "stages/objective-reconcile-ready.md"
+  vars:
+    objective: "7"
+    node: "2.1"
+    plan: "42"
+    pr: "77"
+    parent_checkpoint: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    stamped_head: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+    read_clause: ""
+- template: "stages/objective-reconcile-ready.md"
+  vars:
+    objective: "ENG-7"
+    node: "2.1"
+    plan: "ENG-42"
+    pr: "77"
+    parent_checkpoint: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    stamped_head: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+    read_clause: "This objective is a Linear Project (https://linear.app/x/ENG-1). Its roadmap nodes are Linear issues in that Project — inspect a node-issue's detail or discussion with the `linear_get_issue` and `linear_list_comments` tools; if the linear tools are unavailable, open https://linear.app/x/ENG-1."
 - template: "stages/objective-sync.md"
   vars:
     objective: "7"

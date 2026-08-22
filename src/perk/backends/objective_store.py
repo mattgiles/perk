@@ -27,6 +27,7 @@ Backend-neutral naming: the methods drop the issue-tier's ``_issue`` suffix
 ``issue_id``), because the stored thing is an objective - a GitHub issue **or** a Linear Project.
 """
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import Literal, Protocol
@@ -48,6 +49,45 @@ class ObjectiveStoreError(Exception):
     Backend-neutral: concrete stores map their native errors (``GitHubError``, Linear HTTP errors)
     into this at the boundary.
     """
+
+
+class StackedAppendRefused(ObjectiveStoreError):
+    """A stacked objective's node-add failed the tail-append guard (contracts.md §8.66).
+
+    Raised by each store's ``add_objective_node`` against its OWN fresh read (no door-side
+    check-then-act window) — dry-run included. ``errors`` carries
+    :func:`perk.objective.validate_stacked_tail_append`'s findings verbatim (or the
+    fail-closed junk-``delivery``-header refusal). Structural roadmap changes route through
+    ``perk objective replan``.
+    """
+
+    def __init__(self, errors: Sequence[str]) -> None:
+        self.errors: tuple[str, ...] = tuple(errors)
+        super().__init__("stacked tail-append refused: " + "; ".join(self.errors))
+
+
+def ensure_stacked_tail_append(
+    header: dict[str, object],
+    existing: Sequence[objective.ObjectiveNode],
+    candidate: Sequence[objective.ObjectiveNode],
+) -> None:
+    """The one tail-append guard every store's ``add_objective_node`` runs (contracts.md §8.66).
+
+    Called against the store's OWN fresh read (``existing``) and the exact candidate it is
+    about to persist — dry-run included, so the preview refuses exactly like the write.
+    Incremental / no-delivery objectives pass unguarded (behavior unchanged); a junk
+    ``delivery`` header value refuses fail-closed; a STACKED objective must satisfy
+    :func:`perk.objective.validate_stacked_tail_append`.
+    """
+    try:
+        policy = objective.delivery_policy(header)
+    except ValueError as exc:
+        raise StackedAppendRefused((str(exc),)) from exc
+    if policy is not objective.DeliveryPolicy.STACKED:
+        return
+    errors = objective.validate_stacked_tail_append(existing, candidate)
+    if errors:
+        raise StackedAppendRefused(errors)
 
 
 @dataclass(frozen=True)

@@ -2,6 +2,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from perk import objective, plan
+from perk.backends import objective_store
 from perk.backends.github import plans
 from perk.github import _exec
 from perk.substrate.output import user_output
@@ -715,7 +716,10 @@ def add_objective_node(
     rendered table in the ``objective-body`` comment.
 
     Raises ``GitHubError`` if the roadmap is invalid or the auto-assigned id collides; the comment
-    re-render is best-effort (the frontmatter is the source of truth).
+    re-render is best-effort (the frontmatter is the source of truth). A STACKED objective
+    additionally runs the tail-append guard against this same fresh read (contracts.md §8.66)
+    — dry-run included — raising ``StackedAppendRefused`` so the persisted candidate is exactly
+    the validated one.
     """
     body = plans._get_issue_body(number, repo_root)
     nodes, errors = objective.parse_roadmap_nodes(body)
@@ -733,6 +737,8 @@ def add_objective_node(
     if result is None:
         raise _exec.GitHubError(f"could not add node to phase {phase} on #{number} (id collision)")
     updated, new_id = result
+    fresh_header = plan.find_metadata_block(body, objective.OBJECTIVE_HEADER_KEY) or {}
+    objective_store.ensure_stacked_tail_append(fresh_header, nodes, updated)
     if dry_run:
         return ObjectiveNodeAdd(number=number, node_id=new_id, comment_updated=False, dry_run=True)
 

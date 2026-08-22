@@ -285,6 +285,21 @@ class TestGitHubDelegation:
             objective_id="252", node_id="1.3", comment_updated=True, dry_run=False
         )
 
+    def test_add_objective_node_stacked_refusal_passes_through(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # The substrate's typed tail-append refusal (contracts.md §8.66) must reach the door
+        # AS StackedAppendRefused — the adapter's GitHubError translation never rewraps it.
+        def _refuse(**_kwargs: object) -> objectives.ObjectiveNodeAdd:
+            raise objective_store.StackedAppendRefused(("not a tail append",))
+
+        monkeypatch.setattr(objectives, "add_objective_node", _refuse)
+        with pytest.raises(objective_store.StackedAppendRefused) as err:
+            GitHubObjectiveStore(tmp_path).add_objective_node(
+                objective_id="252", phase=1, description="Gamma"
+            )
+        assert err.value.errors == ("not a tail append",)
+
     def test_update_objective_body(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         rec = _Recorder(
             objectives.ObjectiveBodyUpdate(number=252, comment_id=777, updated=True, dry_run=False)

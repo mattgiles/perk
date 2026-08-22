@@ -5,8 +5,8 @@ This is the readable projection of perk's living, workflow-first prose graph. It
 
 ## Coverage
 
-- **211** canonical source units
-- **718** logical fragments
+- **212** canonical source units
+- **720** logical fragments
 - **16** session shapes and **10** assemblies
 - **15** explicitly excluded candidates (policy-only; not displayed)
 - **0** validation findings
@@ -692,6 +692,7 @@ Synchronize, recover, land, and reconcile multi-plan objective delivery.
 | Unit | Role | Audience | Canonical source | Consumed by |
 | --- | --- | --- | --- | --- |
 | `markdown:prompts/stages/objective-land.md` | `control-guidance` | `shipped` | [`prompts/stages/objective-land.md`](../../prompts/stages/objective-land.md) · `file` | — |
+| `markdown:prompts/stages/objective-reconcile-ready.md` | `control-guidance` | `shipped` | [`prompts/stages/objective-reconcile-ready.md`](../../prompts/stages/objective-reconcile-ready.md) · `file` | — |
 | `markdown:prompts/stages/objective-reconcile.md` | `control-guidance` | `shipped` | [`prompts/stages/objective-reconcile.md`](../../prompts/stages/objective-reconcile.md) · `file` | — |
 | `markdown:prompts/stages/objective-recover.md` | `control-guidance` | `shipped` | [`prompts/stages/objective-recover.md`](../../prompts/stages/objective-recover.md) · `file` | — |
 | `markdown:prompts/stages/objective-sync.md` | `control-guidance` | `shipped` | [`prompts/stages/objective-sync.md`](../../prompts/stages/objective-sync.md) · `file` | — |
@@ -710,6 +711,8 @@ Synchronize, recover, land, and reconcile multi-plan objective delivery.
 <summary>Logical fragments</summary>
 
 - `markdown:prompts/stages/objective-land.md`
+  - `body` — Document body (`file-body`)
+- `markdown:prompts/stages/objective-reconcile-ready.md`
   - `body` — Document body (`file-body`)
 - `markdown:prompts/stages/objective-reconcile.md`
   - `body` — Document body (`file-body`)
@@ -1619,6 +1622,7 @@ Expert configuration guidance, structural search, and ancillary model utilities.
   - `section:perk-providers-issue-backends/linear-backend/project-backed-objectives` — Project-backed objectives (`heading:perk-providers-issue-backends/linear-backend/project-backed-objectives`)
   - `section:perk-providers-issue-backends/linear-backend/native-attachment-metadata` — Native attachment metadata (`heading:perk-providers-issue-backends/linear-backend/native-attachment-metadata`)
   - `section:perk-providers-issue-backends/linear-backend/the-dream-report-companion` — The dream-report companion (`heading:perk-providers-issue-backends/linear-backend/the-dream-report-companion`)
+  - `section:perk-providers-issue-backends/linear-backend/dream-origin-and-the-one-open-dream-guard` — Dream origin and the one-open-dream guard (`heading:perk-providers-issue-backends/linear-backend/dream-origin-and-the-one-open-dream-guard`)
   - `section:perk-providers-issue-backends/linear-backend/replan-and-cancellation` — Replan and cancellation (`heading:perk-providers-issue-backends/linear-backend/replan-and-cancellation`)
   - `section:perk-providers-issue-backends/linear-backend/optional-agentsession-emission` — Optional AgentSession emission (`heading:perk-providers-issue-backends/linear-backend/optional-agentsession-emission`)
   - `section:perk-providers-issue-backends/current-caveats-and-maturity` — Current caveats and maturity (`heading:perk-providers-issue-backends/current-caveats-and-maturity`)

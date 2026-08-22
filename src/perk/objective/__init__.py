@@ -98,6 +98,7 @@ from perk.objective.graph import (
     summary,
     update_node,
     validate_stacked_roadmap,
+    validate_stacked_tail_append,
 )
 from perk.objective.manifest import (
     Manifest,
@@ -210,4 +211,5 @@ __all__ = [
     "update_node",
     "validate_roadmap",
     "validate_stacked_roadmap",
+    "validate_stacked_tail_append",
 ]
