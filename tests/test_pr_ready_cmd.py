@@ -7,9 +7,17 @@ from click.testing import CliRunner
 
 from perk import delivery, github, plan
 from perk.backends.github import plans
+from perk.backends.issue_backend import IssueBackendError
+from perk.backends.objective_store import ObjectiveStoreError
 from perk.cli.cli import cli
 from perk.delivery import train as train_mod
 from perk.delivery._fakes import FakeDeliveryGit, FakeDeliveryGitHub, FakeDeliveryPersistence
+from perk.delivery.journal import JournalCorruptionError, JournalRecordTooLarge
+from perk.delivery.persistence import (
+    JournalAppendAmbiguous,
+    StampAppendResult,
+    TrainPersistenceError,
+)
 from perk.state import cache
 
 _REF = plan.PlanRef(
@@ -295,8 +303,6 @@ def test_stacked_ready_fetches_published_pr_then_marks_then_stamps(monkeypatch):
 
 
 def test_stacked_ready_existing_stamp_reports_not_advanced(monkeypatch):
-    from perk.delivery.persistence import StampAppendResult
-
     _authed(monkeypatch)
     persistence = FakeDeliveryPersistence(
         stamp_results={_STAMP_KEY: StampAppendResult(key=_STAMP_KEY, existed=True)}
@@ -311,15 +317,41 @@ def test_stacked_ready_existing_stamp_reports_not_advanced(monkeypatch):
     assert data["stamped_head"] == _HEAD_SHA
 
 
-def test_stacked_ready_append_failure_is_ready_stamp_failed_after_mark(monkeypatch):
-    # Mark-first ordering (contracts.md §8.43): the append failure surfaces AFTER the flip, so
-    # the envelope must carry the truthful PR facts — and mark_pr_ready WAS called.
-    from perk.backends.issue_backend import IssueBackendError
-
+@pytest.mark.parametrize(
+    ("boom", "fragment", "claims_rerun_convergence"),
+    [
+        (
+            JournalAppendAmbiguous("append of ready-stamp is unverifiable"),
+            "converges via the deterministic event key",
+            True,
+        ),
+        (
+            JournalCorruptionError("conflicting duplicate under the key"),
+            "re-running will NOT converge",
+            False,
+        ),
+        (
+            JournalRecordTooLarge("rendered journal event is 70000 chars"),
+            "oversize",
+            False,
+        ),
+        (
+            TrainPersistenceError("objective 500 stores delivery_lineage '01OTHER'"),
+            "identity/lineage mismatch",
+            False,
+        ),
+        (IssueBackendError("backend down"), "re-run to retry", True),
+        (ObjectiveStoreError("store unavailable"), "re-run to retry", True),
+    ],
+)
+def test_stacked_ready_append_failure_matrix(monkeypatch, boom, fragment, claims_rerun_convergence):
+    # The stamp append exception matrix (contracts.md §8.43): every arm is ready_stamp_failed
+    # with the truthful PR facts, mark-first ordering holds (the append failure surfaces AFTER
+    # the flip), and only the ambiguous/transient causes claim the converging re-run —
+    # JournalAppendAmbiguous must keep its own arm despite being a TrainPersistenceError
+    # subclass (catch-order regression guard).
     _authed(monkeypatch)
-    persistence = FakeDeliveryPersistence(
-        errors={("append_ready_stamp", "500", _STAMP_KEY): IssueBackendError("backend down")}
-    )
+    persistence = FakeDeliveryPersistence(errors={("append_ready_stamp", "500", _STAMP_KEY): boom})
     authority, _requests = _stub_stacked(
         monkeypatch, train=_stacked_train(), is_draft=True, persistence=persistence
     )
@@ -330,8 +362,13 @@ def test_stacked_ready_append_failure_is_ready_stamp_failed_after_mark(monkeypat
     assert data["pr"] == {"number": 42, "url": "u/pr/42"}
     assert data["was_draft"] is True
     assert data["dry_run"] is False
-    assert "re-run" in data["message"]
-    assert ("mark_pr_ready", 42) in authority.calls
+    assert fragment in data["message"]
+    # Only the ambiguous/transient arms may claim the converging/retrying re-run.
+    if not claims_rerun_convergence:
+        assert "re-run to retry" not in data["message"]
+        assert "converges via the deterministic event key" not in data["message"]
+    # Mark-first ordering: the flip happened before the failed append.
+    assert authority.calls == [("get_pr", 42), ("mark_pr_ready", 42)]
 
 
 def test_stacked_ready_mark_failure_never_appends(monkeypatch):
@@ -350,14 +387,24 @@ def test_stacked_ready_mark_failure_never_appends(monkeypatch):
     assert not [call for call in persistence.calls if call[0] == "append_ready_stamp"]
 
 
-def test_stacked_ready_missing_lineage_refuses_pre_mutation(monkeypatch):
+@pytest.mark.parametrize(
+    ("lineage", "fragment"),
+    [
+        # No stored lineage: refused before ReadyStampRecord construction is even attempted.
+        (None, "stores no delivery_lineage"),
+        # A marker-unsafe stored segment: ReadyStampRecord construction raises ValueError and
+        # the translation names the nonconforming id (no convergence-on-re-run claim).
+        ("01 LINEAGE!", "cannot carry a handoff stamp"),
+    ],
+)
+def test_stacked_ready_unconstructable_stamp_refuses_pre_mutation(monkeypatch, lineage, fragment):
     # The pre-mutation construction refusal: an unconstructable stamp refuses the WHOLE
     # gesture before any mutation — the PR is never flipped and nothing is appended.
     _authed(monkeypatch)
     persistence = FakeDeliveryPersistence()
     authority, _requests = _stub_stacked(
         monkeypatch,
-        train=_stacked_train(delivery_lineage=None),
+        train=_stacked_train(delivery_lineage=lineage),
         is_draft=True,
         persistence=persistence,
     )
@@ -365,6 +412,7 @@ def test_stacked_ready_missing_lineage_refuses_pre_mutation(monkeypatch):
     assert result.exit_code == 1
     data = json.loads(result.output)
     assert data["error_type"] == "ready_stamp_failed"
+    assert fragment in data["message"]
     assert data["pr"] == {"number": 42, "url": "u/pr/42"}
     assert data["was_draft"] is True
     assert authority.calls == [("get_pr", 42)]

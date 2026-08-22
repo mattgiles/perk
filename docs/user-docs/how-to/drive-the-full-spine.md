@@ -14,6 +14,12 @@ cold shell where it does not. This is the reliable step sequence for an operator
 perk. (First time? The [Get started tutorial](../tutorials/get-started.md) *teaches* the same path
 hands-on on a throwaway repo; this guide is the map, not the lesson.)
 
+> **Incremental plans only.** Steps 4–6 below describe the incremental ordering. A **stacked**
+> layer inverts it and lands differently: review + [`/address`](address-review-feedback.md) happen
+> on the **draft** layer PR, then `/ready` records the post-review handoff stamp, and the train
+> lands whole via `/objective-land` (an individual layer's `/land` refuses). Follow
+> [How to review a stacked train](review-a-stacked-train.md) for that path.
+
 ## The spine, end to end
 
 1. **Author and save the plan.** Draft in a read-only authoring session — warm
@@ -35,9 +41,7 @@ hands-on on a throwaway repo; this guide is the map, not the lesson.)
    [`/submit`](../reference/in-session/workflow-commands.md#submit) once the work is committed — it pushes the
    branch and opens a draft PR. The cold worker is [`perk submit`](../reference/cli.md#perk-submit).
 4. **Mark it ready.** Run warm [`/ready`](../reference/in-session/workflow-commands.md#ready) to move the draft PR
-   to ready-for-review — the deliberate review gate. (Stacked layers differ: review happens on
-   the draft, and `/ready` is the post-review handoff — see
-   [How to review a stacked train](review-a-stacked-train.md).) It does not run CI — run
+   to ready-for-review — the deliberate review gate. It does not run CI — run
    [`/ci`](../reference/in-session/workflow-commands.md#ci) first.
 5. **Address feedback (conditional).** If a reviewer leaves feedback, run warm
    [`/address`](../reference/in-session/workflow-commands.md#address). This step is optional — you only enter it

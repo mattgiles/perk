@@ -46,6 +46,7 @@ from perk.delivery.journal import (
     OperationState,
     OutcomeRecord,
     PreparedRecord,
+    ReadyStampRecord,
 )
 from perk.delivery.layer import LayerError
 from perk.delivery.persistence import AppendResult, TrainPersistenceError
@@ -1365,6 +1366,31 @@ def _cascade_publish_layer() -> PublishResult.Layer:
                 ready=PublishResult.Ready(pr=_publish_pr(), was_draft=False),
             ),
             "invalid dry-run ready",
+        ),
+        (
+            # An otherwise-VALID dry-run ready (the exact sentinel PR + was_draft=True) that
+            # additionally carries a stamp: the dry-run ⇒ no-stamp validation must reject it
+            # on its own — the offline preview never appends a handoff.
+            lambda: PublishResult(
+                kind="ready",
+                plan_id="101",
+                dry_run=True,
+                ready=PublishResult.Ready(
+                    pr=prs.PullRequest(0, "(dry-run)", True, "OPEN", True),
+                    was_draft=True,
+                    stamp=PublishResult.Ready.Stamp(
+                        record=ReadyStampRecord(
+                            objective_id="500",
+                            delivery_lineage="01LINEAGE",
+                            plan_id="101",
+                            node_id="1.1",
+                            head_sha="b" * 40,
+                        ),
+                        existed=False,
+                    ),
+                ),
+            ),
+            "dry-run ready publish result carries no stamp",
         ),
     ),
 )

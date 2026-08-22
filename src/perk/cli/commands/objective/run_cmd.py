@@ -480,12 +480,13 @@ def _render_run(payload: dict[str, Any], *, as_json: bool) -> None:
             + f"dispatched {payload['stage']} for node {node} (run {payload.get('run_id')})"
         )
     elif action == "ready_for_review":
-        # Delivery-neutral (the run payload carries no delivery kind): review the draft PR;
-        # /ready and landing (/land incremental; /objective-land for a stacked train) are
-        # human gestures — the supervisor never runs them.
+        # Delivery-neutral (the run payload carries no delivery kind), so both orderings are
+        # named explicitly; /ready and landing stay human gestures — the supervisor never
+        # runs them.
         user_output(
-            f"PR #{pr} awaits review on the draft — /ready and landing (/land incremental; "
-            "/objective-land stacked) are human gestures, never auto-run"
+            f"PR #{pr} is at the human boundary — incremental: /ready opens the draft for "
+            "review, then /land; stacked: review + address on the draft, then /ready records "
+            "the handoff (the train lands via /objective-land); never auto-run"
         )
     elif action == "awaiting_review":
         user_output(f"node {node} (PR #{pr}): no actionable feedback — awaiting the human review")

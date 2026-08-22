@@ -63,9 +63,11 @@ class PrReadyResult:
     "--dry-run",
     is_flag=True,
     help=(
-        "Offline preview: validate the selection (PLAN is parse-checked; no backend or GitHub "
-        "read) and report what a real run would do — no PR is resolved or marked, no handoff "
-        "stamp is appended, and nothing is classified (delivery kind included)."
+        "Offline selection-validation preview: PLAN is parse-checked and the no-argument form "
+        "confirms a saved plan exists — no backend or GitHub read, no delivery classification, "
+        "so it cannot predict which arm a real run would take. Nothing is resolved, marked, or "
+        "stamped; a real run marks the draft PR ready (incremental) or records the post-review "
+        "handoff stamp (stacked)."
     ),
 )
 @click.option("--json", "as_json", is_flag=True, help="Emit a machine-readable report to stdout.")
@@ -299,7 +301,13 @@ def _result_to_dict(result: PrReadyResult) -> dict[str, object]:
 def _render_human(result: PrReadyResult) -> None:
     if result.dry_run:
         user_output(click.style("pr ready --dry-run (no GitHub writes)", dim=True))
-        user_output("  would: mark the PR ready for review (if draft)")
+        # The offline preview validates selection only — it performs no delivery
+        # classification, so it cannot claim which arm a real run would take.
+        user_output("  validated the plan selection offline (nothing resolved or classified)")
+        user_output(
+            "  a real run would: mark the draft PR ready for review (incremental) or record "
+            "the post-review handoff stamp (stacked)"
+        )
         return
     verb = "Marked ready" if result.ready.was_draft else "Already ready"
     user_output(

@@ -51,7 +51,6 @@ from perk.delivery.train import (
     FindingKind,
     LayerFinalization,
     LayerGit,
-    LayerHandoff,
     LayerIntent,
     LayerMembership,
     LayerPr,
@@ -323,7 +322,7 @@ class _World:
             delivery_lineage=LINEAGE,
             base=self.base,
             redirected_from=None,
-            layers=tuple(self._with_handoff(layer) for layer in self.layers),
+            layers=tuple(self.layers),
             published_prefix_len=prefix,
             unresolved_operation=unresolved,
             findings=findings,
@@ -331,31 +330,6 @@ class _World:
                 next_node_id=next_node, ready=ready, reason=None if ready else "veto"
             ),
         )
-
-    def _with_handoff(self, layer: TrainLayer) -> TrainLayer:
-        """The §8.44 handoff derivation over world state: only verified PUBLISHED layers carry
-        a value — the latest active-objective stamp for the plan decides (absent ⇒ unstamped;
-        another head ⇒ stale; matching + draft ⇒ suspended; matching + non-draft ⇒ ready)."""
-        if layer.publication is not LayerPublication.PUBLISHED or layer.plan_id is None:
-            return layer
-        stamp = next(
-            (
-                stamp
-                for stamp in reversed(self.persistence.stamps)
-                if stamp.record.objective_id == OBJECTIVE
-                and stamp.record.plan_id == layer.plan_id.removeprefix("#")
-            ),
-            None,
-        )
-        if stamp is None:
-            handoff = LayerHandoff.UNSTAMPED
-        elif stamp.record.head_sha != layer.published_head_sha:
-            handoff = LayerHandoff.STALE
-        elif layer.pr_number is not None and self.pr_entries[layer.pr_number].draft:
-            handoff = LayerHandoff.SUSPENDED
-        else:
-            handoff = LayerHandoff.READY
-        return replace(layer, handoff=handoff)
 
     def _issues(self) -> "_World":
         return self
@@ -1992,14 +1966,22 @@ def test_choreography_submit_draft_review_address_stamp():
     """submit → draft review → address → stamp, pinned at the delivery level (contracts.md
     §8.43/§8.52): publish never touches draft state on an existing PR, review runs on drafts,
     and the stacked ready gesture orders mark-ready strictly before the head-exact stamp
-    append — with the deterministic key making the re-run converge."""
+    append — with the deterministic key making the re-run converge. Stamp read-back is
+    asserted through the production fold accessor (`JournalFold.latest_ready_stamp`) over the
+    persistence's own `read_journal` — the exact seam `_derive_handoff` consumes; the
+    fold→handoff projection itself is pinned by `tests/test_delivery_train.py`."""
+
+    def latest_stamp(world: _World):
+        fold = world.persistence.read_journal(OBJECTIVE)
+        return fold.latest_ready_stamp(objective_id=OBJECTIVE, plan_id="101")
+
     world = _bottom_world()
-    # 1. Submit at head C1: a draft PR; no handoff yet — the reconstructed layer is UNSTAMPED.
+    # 1. Submit at head C1: a draft PR; no handoff yet — the fold serves back no stamp.
     first = world.publish("101")
     assert first.pr.number == 77 and first.published_head_sha == C1
     assert world.pr_entries[77].draft is True
     assert world.events("mark_ready") == [] and world.events("ready_stamp") == []
-    assert world._reconstruct(ROOT, OBJECTIVE).layers[0].handoff is LayerHandoff.UNSTAMPED
+    assert latest_stamp(world) is None
     # 2. Draft review: no mechanics — the PR stays draft (review runs on drafts).
     assert world.pr_entries[77].draft is True
     # 3. Address: the branch advances to C3 and republishes (the same publication mechanic
@@ -2022,7 +2004,11 @@ def test_choreography_submit_draft_review_address_stamp():
     assert ready.was_draft is True
     assert ready.stamp is not None
     assert ready.stamp.existed is False and ready.stamp.record.head_sha == C3
-    assert world._reconstruct(ROOT, OBJECTIVE).layers[0].handoff is LayerHandoff.READY
+    # Read-back through the production fold accessor: the appended stamp is served back by
+    # the journal read and names the post-address head.
+    served = latest_stamp(world)
+    assert served is not None and served.record == ready.stamp.record
+    assert served.record.head_sha == C3
     # 5. Converging re-run: no second mark-ready; the deterministic key answers existed=True.
     again = world.ready("101")
     assert world.events("mark_ready") == [("mark_ready", 77)]
