@@ -641,7 +641,32 @@ predecessor_plan_id: '1981'
 
 ### S7 — stamp layer 2 (warm carrier)
 
-*Not yet executed.* (Stamp + pass; both layers `handoff ready`.)
+Executed 2026-08-22 — `/ready` in layer 2's implement session (operator-driven; the session
+transcript captured the full rendered continuation seed again, now with layer 2's identities).
+
+- **Continuation announcement (operator capture):** pinned range
+  `f7f25f9d…..29d4375d…` — layer 2's own incremental diff exactly (its
+  `parent_checkpoint_sha..published_head_sha` pair from S6).
+- **The ready-stamp journal event (durable half):** the journal now holds **two** stamp
+  comments — the new key `1980:1983:1.2:29d4375d5bf125b871c196bd5cb2672653438d77` (created
+  `2026-08-22T22:21:39Z`) beside S4's untouched layer-1 stamp.
+- **PR flip:** #1984 `isDraft: false`, OPEN.
+- **Train read:** BOTH layers `(ready) stack exact … handoff ready` — the fully-stamped
+  train S8 deliberately breaks. (`perk objective show 1980` now renders the graph-fallback
+  `next: — (in flight: node 1.1 pr #1981)` — the §8.46 no-candidate fall-through; no surface
+  claims a plannable node.)
+- **The re-entered pass concluded an honest no-op with full re-verification** (operator
+  transcript): liveness (live head = stamped head), the pinned-range diff recovered via
+  `git fetch origin refs/pull/1984/head`, the accepted diff judged point-for-point against
+  node 1.2's description (the five-row handoff-repair block added to Recovery routing; the
+  Daily-work verification no-op the plan expected; the footer refresh; SKILL.md/mental-model
+  untouched with cues confirmed), engagement folded (authoring-time description edits only),
+  the new-node check explicitly empty — "skip — nothing is stale … no writes". Correctly
+  bounded: no status/PR mutations; nodes stay `in_progress`.
+- **Era note (recorded, not a defect):** `perk address [PLAN]` now accepts the positional
+  plan id — the prior gate's d1 ergonomics follow-up (#1709) landed between gates; S8 uses
+  the current shape `perk address 1981` (the prior record's `--worktree` shape remains valid
+  but is no longer the ergonomic path).
 
 ### S8 — staleness (both arms)
 
