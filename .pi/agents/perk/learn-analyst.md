@@ -65,7 +65,8 @@ subagents** — you analyze and report.
      `existing_docs[]` inventory (learned docs / user docs / skills) **plus the manifest's
      `docs_findings`** (the deterministic rich scan). Read `docs_findings`: `stale_pointers` (a
      doc's verified ghost source pointer — file/symbol gone), `broken_doc_paths` (a doc→doc/catalog
-     link that no longer resolves), `duplicate_groups` (the rare exact title/routing-cue collision
+     reference — a Markdown link or a backtick `.md`/`.mdx` path token — that no longer
+     resolves), `duplicate_groups` (the rare exact title/routing-cue collision
      guard). **The scan is corpus-wide and high-recall** — learned docs intentionally carry
      historical pointers, so weigh findings **by relevance to the candidate doc(s) for THIS
      capture**; surface the rest as `fyi`, never inflate. Carry forward two clauses:
@@ -76,7 +77,7 @@ subagents** — you analyze and report.
        `stale_pointers`: the doc that is phantoms is the ghost → `STALE_DOC` on it, **not** a
        harmonizing `UPDATE_EXISTING_DOC` on both.
      Decision routing: a topical match against an otherwise-valid doc → `UPDATE_EXISTING_DOC`
-     (`target` = its path); stale pointers / broken links on a doc you'd update → still
+     (`target` = its path); stale pointers / broken doc references on a doc you'd update → still
      `UPDATE_EXISTING_DOC` (also fix them); a doc that is *mostly* phantoms → `STALE_DOC`. Do not
      disambiguate on a filename alone — `read` the candidate doc to confirm the target.
 
