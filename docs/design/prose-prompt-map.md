@@ -5,8 +5,8 @@ This is the readable projection of perk's living, workflow-first prose graph. It
 
 ## Coverage
 
-- **212** canonical source units
-- **720** logical fragments
+- **214** canonical source units
+- **723** logical fragments
 - **16** session shapes and **10** assemblies
 - **15** explicitly excluded candidates (policy-only; not displayed)
 - **0** validation findings
@@ -337,6 +337,7 @@ Select, explore, and plan the next objective roadmap node.
   - `section:reconciling-an-objective-after-landing-the-objective-reconcile-pass/what-to-reconcile/when-to-add-a-node` — When to add a node (`heading:reconciling-an-objective-after-landing-the-objective-reconcile-pass/what-to-reconcile/when-to-add-a-node`)
   - `section:reconciling-an-objective-after-landing-the-objective-reconcile-pass/skip-if-nothing-is-stale` — Skip if nothing is stale (`heading:reconciling-an-objective-after-landing-the-objective-reconcile-pass/skip-if-nothing-is-stale`)
   - `section:reconciling-an-objective-after-landing-the-objective-reconcile-pass/never-delegate-boundaries` — Never-delegate boundaries (`heading:reconciling-an-objective-after-landing-the-objective-reconcile-pass/never-delegate-boundaries`)
+  - `section:reconciling-an-objective-after-landing-the-objective-reconcile-pass/the-ready-time-mode-after-a-stacked-handoff-stamp` — The ready-time mode (after a stacked handoff stamp) (`heading:reconciling-an-objective-after-landing-the-objective-reconcile-pass/the-ready-time-mode-after-a-stacked-handoff-stamp`)
 - `markdown:skills/perk-objective-replan/SKILL.md`
   - `frontmatter:description` — Discovery description (`frontmatter.description`)
   - `section:re-authoring-an-objective-the-objective-replan-cold-door` — Re-authoring an objective (the `objective replan` cold door) (`heading:re-authoring-an-objective-the-objective-replan-cold-door`)
@@ -632,6 +633,8 @@ Validate, publish, and prepare changes for review and landing.
 
 | Unit | Role | Audience | Canonical source | Consumed by |
 | --- | --- | --- | --- | --- |
+| `typescript-model-call:extension/doors/ready.ts:module:sendUserMessage:0` | `tool-contract` | `shipped` | [`extension/doors/ready.ts`](../../extension/doors/ready.ts) · `symbol:module/call:sendUserMessage/0` | — |
+| `typescript-model-call:extension/doors/ready.ts:module:sendUserMessage:1` | `tool-contract` | `shipped` | [`extension/doors/ready.ts`](../../extension/doors/ready.ts) · `symbol:module/call:sendUserMessage/1` | — |
 | `typescript-model-call:extension/doors/submit.ts:module:sendUserMessage:0` | `tool-contract` | `shipped` | [`extension/doors/submit.ts`](../../extension/doors/submit.ts) · `symbol:module/call:sendUserMessage/0` | — |
 | `typescript-model-call:extension/doors/submit.ts:module:sendUserMessage:1` | `tool-contract` | `shipped` | [`extension/doors/submit.ts`](../../extension/doors/submit.ts) · `symbol:module/call:sendUserMessage/1` | — |
 | `typescript-tool:ready` | `tool-contract` | `shipped` | [`extension/doors/ready.ts`](../../extension/doors/ready.ts) · `tool:ready` | — |
@@ -641,6 +644,10 @@ Validate, publish, and prepare changes for review and landing.
 <details>
 <summary>Logical fragments</summary>
 
+- `typescript-model-call:extension/doors/ready.ts:module:sendUserMessage:0`
+  - `argument:0` — sendUserMessage model-facing argument (`symbol:module/call:sendUserMessage/0/argument:0`)
+- `typescript-model-call:extension/doors/ready.ts:module:sendUserMessage:1`
+  - `argument:0` — sendUserMessage model-facing argument (`symbol:module/call:sendUserMessage/1/argument:0`)
 - `typescript-model-call:extension/doors/submit.ts:module:sendUserMessage:0`
   - `argument:0` — sendUserMessage model-facing argument (`symbol:module/call:sendUserMessage/0/argument:0`)
 - `typescript-model-call:extension/doors/submit.ts:module:sendUserMessage:1`

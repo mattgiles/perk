@@ -1,11 +1,16 @@
 ---
 name: perk-objective-reconcile
-description: Orchestrating the perk /objective-reconcile pass — after a PR linked to an objective node merges, reconcile the objective's stale roadmap prose (and node descriptions) against what was actually built. Use when reconciling an objective in a perk repo post-merge.
+description: Orchestrating the perk objective-reconcile pass — reconcile an objective's stale roadmap prose (and node descriptions) against what was actually built, either post-land (after a node's PR merges) or at ready time (after a stacked layer's handoff stamp, against the pinned accepted diff range). Use when reconciling an objective in a perk repo.
 stages: []
 disable-model-invocation: true
 ---
 
 # Reconciling an objective after landing (the `/objective-reconcile` pass)
+
+One pass, two invocations: **post-land** (this section — the merged diff is the evidence) and
+**ready-time** (the last section — an accepted-but-not-landed stacked layer at its pinned diff
+range). Everything between — the untrusted-DATA posture, the section boundary, what to
+reconcile, don't-churn — applies to both; the ready-time section narrows the powers.
 
 `/objective-reconcile` is perk's **post-merge reconciliation** surface: when a PR linked to an
 objective node merges, the roadmap should reflect what was *actually* built, not what was originally
@@ -106,3 +111,27 @@ divergence in the diff.
 - **Judgment** — what diverged, whether anything is actually stale — is yours.
 - **Durable writes** — `reconcile_objective`, `objective_node`, and `add_objective_node` — are
   yours, never a child's.
+
+## The ready-time mode (after a stacked handoff stamp)
+
+The same pass also runs immediately after a **stacked layer's ready stamp** (contracts.md §8.66)
+— the layer is ACCEPTED but **not landed**, so the objective is reconciled while future work is
+still fluid, without pretending the layer merged. The differences from post-land:
+
+- **The evidence is the pinned accepted range**, never the live/ambient PR diff: judge exactly
+  `parent_checkpoint..stamped_head` (recover it via `git fetch origin refs/pull/<pr>/head`, then
+  `git diff <parent_checkpoint> <stamped_head>`).
+- **Liveness stop first**: `gh pr view <pr> --json state,headRefOid`. A MERGED/CLOSED PR means
+  the train landed or the layer left the accepted state mid-pass — STOP and report; the
+  post-land whole-train reconcile owns that world. A live head that differs from the stamped
+  head is REPORTED as drift (the stamp is stale then anyway), and you still judge the pinned
+  range.
+- **Powers narrow to three**: rewrite the Reconcilable prose (`reconcile_objective`); update
+  node **descriptions** (`objective_node` `description` — **NO `status` and NO `pr` mutations**
+  in this pass: nothing landed, so nodes stay `in_progress` until the objective-scoped
+  landing); add genuinely-new nodes ONLY as guarded **`pending` tail-appends** via
+  `add_objective_node` — the store refuses anything else (`stacked_append_refused`), and a
+  refusal means the discovery is structural: route it to `perk objective replan`. NO
+  dependency/order rewiring of existing nodes.
+- **Fail-open, no rollback**: the handoff stamp already stands — a failed or empty pass rolls
+  nothing back, and re-running `perk ready <plan>` re-enters the pass.

@@ -33,9 +33,13 @@ escape a group:
 
 - **The one earned flat verb** `implement` (`impl`) — the heavy cold-only working stage, typed
   constantly, reads as a bare imperative.
-- **The hot-path PR flat aliases** `submit` / `address` / `land` / `ready`, each aliasing its
+- **The hot-path PR flat aliases** `submit` / `address` / `land`, each aliasing its
   canonical `perk pr <verb>` (the canonical `pr` entry is authoritative; the flat alias is the
-  ergonomic spelling).
+  ergonomic spelling) — plus the flat **`ready`**, which is NOT a bare alias: `perk ready` is
+  the interactive **continuation wrapper** (the exact `perk pr ready` worker mechanics, then —
+  on a successful stacked handoff stamp in an interactive terminal — it launches the seeded
+  ready-time reconcile session; `--json`/`--dry-run`/non-TTY runs emit exactly the worker's
+  output and never launch).
 - **Setup & Health**: `init` and `doctor` (which is itself a group).
 - **The informational `release-notes`** — prints the bundled changelog's release notes (see
   [Remote and utility commands](./cli/remote-and-utility.md#perk-release-notes)).
@@ -51,8 +55,9 @@ This hub keeps the [stage-launcher spine](#stage-launchers-the-earned-flat-names
 **The launcher+worker merge.** Where a stage has *both* a real session-launcher half and a
 deterministic worker half, they merge into **one** command: a session by default, the worker under
 `--json` (the mode the warm door already shells). The genuinely merged commands are exactly
-`pr submit`, `pr land`, and `plan save`. `pr address` is launcher-only; `pr ready` is worker-only;
-each still gains its flat alias.
+`pr submit`, `pr land`, and `plan save`. `pr address` is launcher-only; `pr ready` is the
+deterministic non-launching worker whose flat spelling `perk ready` is the separate continuation
+wrapper described above; the others still gain their flat aliases.
 
 The in-session, warm `/…` commands and the model-facing tools you use *inside* a `pi` session are
 a separate surface, documented in [In-session commands & tools](./in-session.md). This page covers
@@ -131,13 +136,19 @@ under `--json`. A learn-docs consolidation plan is exempt: no marker, no learn p
 
 ### `perk ready [PLAN]`
 
-Flat alias for [`perk pr ready`](./cli/pr.md#perk-pr-ready-plan) (the canonical entry). Ready a
-plan's PR — the deliberate review gate for an incremental plan; for a stacked layer, the
-deliberate **post-review human handoff** that stamps the exact verified published head (draft
-and non-draft PRs; never routine post-submit choreography) and thereby unblocks planning of the
-layer's direct dependents. A worker-only command (`--dry-run` /
-`--json`). `PLAN` selects the plan canonically and works from the repository root (no worktree
-needed); omitted, the invoking checkout's active saved plan is used.
+The interactive **continuation wrapper** over [`perk pr ready`](./cli/pr.md#perk-pr-ready-plan)
+(the deterministic, non-launching worker — the canonical mechanics reference). The wrapper runs
+the exact worker mechanics first — the deliberate review gate for an incremental plan; for a
+stacked layer, the deliberate **post-review human handoff** that stamps the exact verified
+published head (draft and non-draft PRs; never routine post-submit choreography) and thereby
+unblocks planning of the layer's direct dependents. Then, on a successful stacked stamp in an
+interactive terminal (stdin and stdout both TTYs), it launches the seeded **ready-time
+reconcile session** against the accepted layer's pinned diff range; re-running re-enters the
+pass. `--json`, `--dry-run`, and non-TTY runs never launch — they emit exactly the worker's
+output (the `--json` envelope is byte-identical). A launch failure after a successful stamp
+exits 1 with the stamp standing; re-run `perk ready <plan>` to retry. `PLAN` selects the plan
+canonically and works from the repository root (no worktree needed); omitted, the invoking
+checkout's active saved plan is used.
 
 ## Command groups
 
@@ -155,7 +166,7 @@ above are the spine; every other command's detail lives on its family reference 
 | `perk submit` | Push the branch and open a draft PR. | [this page](#perk-submit) |
 | `perk address` | Classify PR review feedback and resolve the threads. | [this page](#perk-address-plan) |
 | `perk land` | Merge the ready/approved PR and reconcile. | [this page](#perk-land) |
-| `perk ready` | Ready a plan's PR: the review gate (incremental) or the post-review handoff stamp (stacked). | [this page](#perk-ready-plan) |
+| `perk ready` | Ready a plan's PR (review gate / handoff stamp), then launch the ready-time reconcile pass (stacked, interactive). | [this page](#perk-ready-plan) |
 | `perk plan` | Author and revise plans: save, resume, replan, from, watch. | [Plan commands](./cli/plan.md) |
 | `perk objective` (alias `obj`) | Author and drive objectives, incl. the stacked delivery train. | [Objective commands](./cli/objective.md) |
 | `perk pr` | The canonical PR lifecycle group behind the flat spine aliases. | [PR commands](./cli/pr.md) |

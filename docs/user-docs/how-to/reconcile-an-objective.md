@@ -47,6 +47,24 @@ automatic `/land`-driven reconcile didn't run, or needs a redo.
 > [`/land`](../reference/in-session/workflow-commands.md#land) auto-drives `/objective-reconcile` — so this manual
 > path is for the off-spine or re-run case.
 
+## The two reconcile modes
+
+The pass runs in two situations with two evidence sources:
+
+- **Post-land** (the steps above): a node's PR **merged** — judge the merged diff. All the
+  reconcile powers apply, including marking a node `done` (with an audit) when this PR truly
+  completed it.
+- **Ready-time** (stacked objectives): a layer's [`perk ready`](../reference/cli/pr.md#perk-pr-ready-plan)
+  handoff stamp just recorded — the layer is **accepted but not landed**. The pass judges the
+  **pinned accepted range** `parent_checkpoint..stamped_head` (never the live PR diff; a
+  merged/closed PR mid-pass stops the pass — the post-land reconcile owns that world). Powers
+  narrow: prose rewrites, node **descriptions**, and guarded **`pending` tail-appends** only —
+  no status or PR-link mutations (nothing landed yet). On a stacked objective, `node-add` /
+  `add_objective_node` accepts **only** a tail-append that leaves every existing node, edge,
+  and delivery-order position untouched; a refusal (`stacked_append_refused`) means the
+  discovery is structural — route it through
+  [`perk objective replan`](../reference/cli/objective.md#perk-objective-replan-number).
+
 ## Related
 
 - **Do:** [How to advance or skip roadmap nodes manually](advance-or-skip-nodes.md) — fix a node's
