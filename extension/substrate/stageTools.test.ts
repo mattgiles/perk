@@ -64,8 +64,10 @@ const AUTHORING_TOOLS = [
 test("STAGE_TOOLS: the two objective stage lists are pinned exactly (least privilege)", () => {
   // The exact-set pin for the /objective-review-browser widening: the six authoring/reconcile
   // tools + the draft-review companions + plan_review (the door guidance names it; it routes to
-  // the objective review arm in both stages) + the universal research bundle — and NOTHING
-  // else. A presence check alone would let unrelated scoped tools ride these gate-OFF sessions.
+  // the objective review arm in both stages) + `ready` (the ready→reconcile continuation's
+  // re-entry gesture — the ready-time pass guidance can land in these sessions, §8.66) + the
+  // universal research bundle — and NOTHING else. A presence check alone would let unrelated
+  // scoped tools ride these gate-OFF sessions.
   const expected = [
     "ask_user_question",
     "objective_draft",
@@ -73,6 +75,7 @@ test("STAGE_TOOLS: the two objective stage lists are pinned exactly (least privi
     "reconcile_objective",
     "add_objective_node",
     "objective_node",
+    "ready",
     "start_draft_review_wave",
     "collect_draft_review_wave",
     "push_annotations",
@@ -485,6 +488,24 @@ const DRIVE_COVERAGE: readonly {
     drive: "reconcileGuidance (post-land drive + /objective-reconcile)",
     stages: [...WORKTREE_STAGES, "objective-author", "objective-save", "objective-plan"],
     text: () => reconcileGuidance("5", "github", "https://example.test/issues/5"),
+  },
+  {
+    // The ready→reconcile continuation drive (contracts.md §8.66): fires wherever a stacked
+    // `/ready` can succeed — the same stage set as the reconcile drive above (the pass uses
+    // the same reconcile trio). Gate-active sessions are covered by the drive's own
+    // gating.isActive() refusal, not by this list.
+    drive: "driveReadyReconcile (stages/objective-reconcile-ready.md)",
+    stages: [...WORKTREE_STAGES, "objective-author", "objective-save", "objective-plan"],
+    text: () =>
+      render("stages/objective-reconcile-ready.md", {
+        objective: "5",
+        node: "2.1",
+        plan: "42",
+        pr: "77",
+        parent_checkpoint: "a".repeat(40),
+        stamped_head: "b".repeat(40),
+        read_clause: "Read the linked Project too.",
+      }),
   },
   {
     // The stacked-delivery drives: registered globally, gate-on soft-refuses, and the

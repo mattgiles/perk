@@ -420,6 +420,10 @@ export const STAGE_TOOLS: Readonly<Record<string, readonly string[]>> = {
     "reconcile_objective",
     "add_objective_node",
     "objective_node",
+    // The ready→reconcile continuation (contracts.md §8.66): the ready-time pass guidance
+    // can land here (warm drive after a stacked /ready; the cold seed runs on the borrowed
+    // objective-save stage) and names the `ready` re-entry gesture — it must not dead-end.
+    "ready",
     // The /objective-review-browser companions (gate-OFF coverage: after objectiveApprovalSave
     // exits the gate mid-flow, late collects/pushes must not dead-end) + plan_review (the door
     // guidance names it; it routes to the objective review arm here).
@@ -436,6 +440,8 @@ export const STAGE_TOOLS: Readonly<Record<string, readonly string[]>> = {
     "reconcile_objective",
     "add_objective_node",
     "objective_node",
+    // The ready→reconcile continuation's re-entry gesture (see the objective-author note).
+    "ready",
     // The /objective-review-browser companions + plan_review (see the objective-author note).
     "start_draft_review_wave",
     "collect_draft_review_wave",
@@ -452,6 +458,8 @@ export const STAGE_TOOLS: Readonly<Record<string, readonly string[]>> = {
     "explore_objective_node",
     "reconcile_objective",
     "add_objective_node",
+    // The ready→reconcile continuation's re-entry gesture (see the objective-author note).
+    "ready",
     // The /plan-review-browser companions (gate-OFF coverage: after approvalSave exits the gate
     // mid-flow, late collects/pushes must not dead-end — the drive-coverage guard forces this
     // the moment the guidance names them).
