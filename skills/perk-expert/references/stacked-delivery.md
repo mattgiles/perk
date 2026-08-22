@@ -183,6 +183,17 @@ row:
 | The objective base advanced (`base_advanced` notice in the status report — a notice, never a blocker) | `stack status` | `stack sync --base` re-anchors the whole train onto the advanced base |
 | Leftover `sync-*` worktrees or `refs/perk/sync/*` refs (a killed sync process) | `stack recover` | The **orphan sweep** collects residue no parseable continuation manifest claims; an unparseable manifest skips the whole sweep (`sweep_skipped` — an unreadable claim could be protecting anything) |
 
+**Handoff repair.** Handoff states are review-side facts on the **stamp axis** — these
+repairs never involve `stack sync` or `stack recover`:
+
+| Symptom | What happened | Repair |
+|---|---|---|
+| Planning refuses typed `node_not_handoff_ready` (or `objective next`/`show`/`run` names a handoff blocker) | A direct dependency's post-review handoff stamp is missing | Run the copyable remediation the refusal prints: `perk ready <PLAN>` on the blocking dependency, after its review + address |
+| `handoff stale` — the status line discloses `stamped <sha12> ≠ head <sha12>` | The layer's head moved after the stamp: a self-rewrite (address / re-`/submit`) or a cascade from a lower layer's fix — a stamp binds the exact reviewed head and never carries forward mechanically | Re-review the new head, then re-ready (`/ready`, or `perk ready <PLAN>`) |
+| `handoff suspended` | The stamped PR was converted back to draft — a transient hold; the stamp still stands | Any return to non-draft resumes it — e.g. the idempotent `/ready` re-run (it converges on the same stamp) |
+| The stamp succeeded but the ready-time reconcile session failed to launch (the loud second outcome, exit 1) | Only the pass launch failed; the stamp is never rolled back | The stamp stands; re-run `perk ready <PLAN>` from an interactive terminal to enter the pass |
+| The ready-time pass refuses `stacked_append_refused` | The tail-append guard blocked a structural roadmap change (a stacked roadmap accepts only guarded `pending` tail-appends) | Structural changes route through `perk objective replan` |
+
 **Retry is never recover's verb.** Recover *concludes* — it rolls a verified `all_after`
 forward, abandons a proven `all_before` under confirmation, or reports; when a retry is the
 right move, the report names the **owning command** (`/submit` for PUBLISH, `stack sync` for
@@ -220,8 +231,10 @@ The shape is here; the exact current flags and outputs come from perk itself:
 
 ---
 
-*Canonical source: `docs/user-docs/reference/objectives.md` (Delivery) + the stacked sections of
-`docs/user-docs/reference/{cli,in-session}.md`; the teaching pages
-`docs/user-docs/tutorials/drive-a-stacked-objective.md`,
+*Canonical source: `docs/user-docs/reference/objectives.md` (Delivery) + the stacked sections
+of `docs/user-docs/reference/cli.md` (the flat `perk ready` wrapper),
+`docs/user-docs/reference/cli/objective.md` (the `objective stack` group), and
+`docs/user-docs/reference/in-session/workflow-commands.md` (`/ready` + the objective doors);
+the teaching pages `docs/user-docs/tutorials/drive-a-stacked-objective.md`,
 `docs/user-docs/how-to/review-a-stacked-train.md`, and
 `docs/user-docs/how-to/recover-a-stacked-train.md`.*
