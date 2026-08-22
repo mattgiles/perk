@@ -173,7 +173,7 @@ perk ready <p>`.
 
 | Surface | Phrase/vocabulary | Source anchor | Agrees? | Disposition |
 |---|---|---|---|---|
-| `objective plan --dry-run` | payload `build_readiness: "unchecked (dry-run)"` (stacked only) — the dry run skips the live train reconstruction and SAYS so | `plan_cmd.py` | yes | agrees |
+| `objective plan --dry-run` | payload `build_readiness: "unchecked (dry-run)"` (stacked only) — the dry run skips the live train reconstruction and SAYS so | `plan_cmd.py` | yes | agrees — *live S3 note (2026-08-22): the payload composes only when the offline selection resolves a candidate; on this train's shape the offline graph refuses `objective_in_flight` first (still honest — nothing claims the live check ran); the payload capture landed via `run --dry-run` instead* |
 | `objective run --dry-run` | same `build_readiness: "unchecked (dry-run)"` honesty | `run_cmd.py` | yes | agrees |
 | `perk pr ready --dry-run` | offline selection-validation only: "no backend or GitHub read, no delivery classification, so it cannot predict which arm a real run would take. Nothing is resolved, marked, or stamped"; human render mirrors it | `ready_cmd.py` (worker `--dry-run` help + `_render_human`) | yes | agrees |
 | `perk ready --dry-run` | the wrapper adds "no launch" to the same offline honesty; never launches | `ready_cmd.py::ready_continuation` | yes | agrees |
@@ -414,13 +414,101 @@ delivery_lineage: 01M0NJ5ASVYS4VMBEWXXVJNXRA
 
 ### S2 — layer 1 publish
 
-*Not yet executed.* (Plan header trio, PR facts, PUBLISH journal pair, `handoff unstamped`
-read.)
+Executed 2026-08-22 (dev checkout, pinned binary).
+
+- **Warm planning** (`perk objective plan 1980` → plannotator review → save): plan issue
+  **#1981** — "Document ready→reconcile continuation and handoff repair in user docs", created
+  `2026-08-22T21:00:56Z`, with a fresh per-session run id (`01M0NJGBFVXGS4T5QR7PC0VJH1` ≠ the
+  authoring session's `01M0NHNAAD…`). The saved header trio:
+
+  ```yaml
+  objective_id: '1980'
+  objective_node_id: '1.1'
+  delivery_lineage: 01M0NJ5ASVYS4VMBEWXXVJNXRA
+  ```
+
+- **Interactive implement** (`perk implement 1981`; operator-attested 2026-08-22): the implement
+  run id journaled on the plan header (`impl_run_ids: [01M0NMFGS3K8H3K1J5S7ZQQQBG]`).
+- **`run_ci`** (operator-pasted excerpt, 2026-08-22 — the in-session run-all report before
+  `/submit`): `perk CI: all checks passed.` — `✓ docs-check`; lint/typecheck/test rows and
+  `changelog-check` glob-skipped (a `docs/user-docs/`-only diff); terminal line "Full gate
+  green — the change is verified …".
+- **Publish (warm `/submit` — draft):**
+  - PR facts: `gh pr view` → `{"number": 1982, "state": "OPEN", "isDraft": true,
+    "baseRefName": "main", "headRefName": "plan-1981",
+    "headRefOid": "f7f25f9d65577f0cb7df8fc0d8a440cfd5c4d5d1", "mergedAt": null}` — draft,
+    base = the objective base (`main`).
+  - Journal (issue #1980 comments): operation **01M0NMZ5VA370YA788SZMKJBCH**, `prepared`
+    (comment 5382616947, 21:10:34Z) → `completed` (comment 5382617735, 21:10:46Z;
+    `observed: {branch_sha: f7f25f9d…, pr: 1982, stack: null}`). The bottom layer creates no
+    stack membership — expected and recorded.
+  - The header's publish-written checkpoint pair: `parent_checkpoint_sha: e2cb9e5d…` (= the S0
+    main SHA exactly) / `published_head_sha: f7f25f9d…`.
+- **Train read** (`perk objective stack status 1980 --json`): `published_prefix_len: 1`;
+  layer 1.1 `publication: "published"`, `pr: "draft"`, `membership: "not_applicable"`,
+  **`handoff: "unstamped"`**, `observed_pr_base` = `expected_pr_base` = `main`; layer 1.2
+  `unpublished`, `handoff: "not_applicable"`, `expected_pr_base: "plan-1981"`;
+  `next_build_ready: {node_id: "1.2", ready: true}` (technical readiness) while
+  `planning_gate: {node_id: "1.2", ready: false}` carries the one `kind: "handoff"` row
+  (`handoff_state: "unstamped"`, `stamped_head: null`, `current_head: f7f25f9d…`,
+  `remediation: "perk ready 1981"`); `blockers: []`; `unresolved_operation: null`. The human
+  render, verbatim:
+
+  ```text
+  Objective #1980: stacked delivery train (base main, published prefix 1/2)
+    lineage 01M0NJ5ASVYS4VMBEWXXVJNXRA
+    1. 1.1 plan #1981 [published] pr #1982 (draft) writer active handoff unstamped
+    2. 1.2 unplanned [unpublished] no pr
+    next build-ready: 1.2
+    planning gated: 1.2 waits on 1.1 (plan #1981, PR #1982) — unstamped; record the handoff: perk ready 1981
+  no findings
+  ```
+
+  (`writer active` on layer 1 is the implement worktree's live writer claim — expected while
+  the session's worktree exists; not a blocker.) The `handoff unstamped` suffix and the
+  `planning gated` line match § matrix family 1 byte-for-byte.
 
 ### S3 — gated planning (the refusal)
 
-*Not yet executed.* (The typed refusal, the `next --json` handoff row, `show`'s
-`stacked_readiness`, the `planning gated` status line, the `unchecked (dry-run)` capture.)
+Executed 2026-08-22 (pinned binary; the deterministic reads/refusals run from the record
+branch's worktree — repo-root resolution is checkout-independent and every capture is
+durable-authority-derived). All BEFORE any stamp exists.
+
+- **The typed refusal** (`perk objective plan 1980 --json`, bare AND `--node 1.2` — identical
+  envelopes, exit 1):
+
+  ```json
+  {"success": false, "error_type": "node_not_handoff_ready", "message": "Node 1.2 is not
+  handoff-ready: it waits on 1.1 (plan #1981, PR #1982) — unstamped; record the handoff:
+  perk ready 1981\nInspect the train: perk objective stack status 1980"}
+  ```
+
+- **`perk objective next 1980 --json`**: `next_node: null`; `build_ready.ready: false`;
+  `build_ready.reason: "node 1.2 waits on 1.1 (plan #1981, PR #1982) — unstamped; record the
+  handoff: perk ready 1981"`; `build_ready.blockers` = exactly one `kind: "handoff"` row
+  (`dependency_node_id: "1.1"`, `plan: "1981"`, `pr: 1982`, `handoff_state: "unstamped"`,
+  `stamped_head: null`, `current_head: f7f25f9d…`, `remediation: "perk ready 1981"`). Human
+  render: `handoff blocked: node 1.2 waits on …` — the same composed phrase.
+- **`perk objective show 1980`**: `next: — (handoff blocked: node 1.2 waits on 1.1 (plan
+  #1981, PR #1982) — unstamped; record the handoff: perk ready 1981)`; `--json` carries
+  `stacked_readiness: {checked: true, ready: false, reason: <same>, blockers: [<the same
+  handoff row>]}` while `selection_kind: "in_flight"` stays the offline graph-derived
+  observational fact — exactly the §8.46 split the matrix pins.
+- **`stack status`**: the `planning gated:` line captured verbatim at S2 (above).
+- **Dry-run language — a named in-place recipe deviation (not a defect):**
+  `perk objective plan 1980 --dry-run --json` refused typed `objective_in_flight` ("No new
+  node to plan: node 1.1 has a plan in flight (pr #1981, status in_progress)…") — the plan
+  door's dry run keeps the OFFLINE graph classification, and on this train shape the offline
+  graph (1.1 `in_progress`, 1.2 dep-gated) refuses before the seed composes, so the
+  `build_readiness: "unchecked (dry-run)"` payload structurally cannot appear on the plan door
+  here. Both surfaces stay honest: neither pretends the live check ran. The pinned capture
+  routes to the supervisor instead — `perk objective run 1980 --dry-run --json` →
+  `"build_readiness": "unchecked (dry-run)"` in the payload, with `action:
+  "ready_for_review"` and the delivery-neutral human line rendered verbatim: "PR #1982 is at
+  the human boundary — incremental: /ready opens the draft for review, then /land; stacked:
+  review + address on the draft, then /ready records the handoff (the train lands via
+  /objective-land); never auto-run" — live-verifying two § matrix rows (family 3's
+  `run --dry-run` and family 2's `ready_for_review`) in one capture.
 
 ### S4 — stamp layer 1 (warm carrier)
 
