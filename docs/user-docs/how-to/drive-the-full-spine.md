@@ -14,6 +14,12 @@ cold shell where it does not. This is the reliable step sequence for an operator
 perk. (First time? The [Get started tutorial](../tutorials/get-started.md) *teaches* the same path
 hands-on on a throwaway repo; this guide is the map, not the lesson.)
 
+> **Incremental plans only.** Steps 4–6 below describe the incremental ordering. A **stacked**
+> layer inverts it and lands differently: review + [`/address`](address-review-feedback.md) happen
+> on the **draft** layer PR, then `/ready` records the post-review handoff stamp, and the train
+> lands whole via `/objective-land` (an individual layer's `/land` refuses). Follow
+> [How to review a stacked train](review-a-stacked-train.md) for that path.
+
 ## The spine, end to end
 
 1. **Author and save the plan.** Draft in a read-only authoring session — warm

@@ -22,8 +22,10 @@ default you used in [Drive a multi-plan goal with an objective](./drive-an-objec
 
 You've completed [Get started with perk](./get-started.md) and
 [Drive a multi-plan goal with an objective](./drive-an-objective.mdx): perk is installed and
-verified, and you know the spine (`implement → /submit → /ready → /land`) and the objective
-loop (`author → plan → implement → land`). This lesson starts from a fresh scratch repo.
+verified, and you know the incremental spine (`implement → /submit → review → /ready → /land`)
+and the objective loop (`author → plan → implement → land`). On a stacked objective, review
+happens on the **draft** layer PR and `/ready` is the deliberate post-review handoff.
+This lesson starts from a fresh scratch repo.
 
 ## Step 1 — Create a scratch repo
 
@@ -254,13 +256,15 @@ classifies and fixes it, and its finalizer runs the same publish-plus-cascade.)
 
 ## Step 7 — Ready each layer
 
-Each layer PR flips ready-for-review individually, from its own session (or worktree):
+Review happens on each **draft** layer PR. After review + address, `/ready` records the
+deliberate handoff stamp at the exact reviewed head — and flips the draft ready-for-review —
+individually, from each layer's own session (or worktree):
 
 ```
 /ready
 ```
 
-Run it in the layer-1 session, then in the layer-2 session. Readying is the review gate
+Run it in the layer-1 session, then in the layer-2 session. Readying records the handoff
 only — it never merges anything. Both PRs now show ready-for-review while the train waits,
 whole, for the landing.
 

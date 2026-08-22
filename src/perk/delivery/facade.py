@@ -34,8 +34,9 @@ from perk.delivery.journal import (
     OperationKind,
     OutcomeRecord,
     PreparedRecord,
+    ReadyStampRecord,
 )
-from perk.delivery.persistence import AppendResult, TrainPersistenceError
+from perk.delivery.persistence import AppendResult, StampAppendResult, TrainPersistenceError
 from perk.github import GitHubError, prs, stacks
 from perk.objective import NodeStatus, ObjectiveNode
 from perk.substrate import git as git_mod
@@ -99,6 +100,7 @@ _DELIVERY_ERROR_TYPES = frozenset(
         "stack_registration_drift",
         "stack_registration_failed",
         "publication_drift",
+        "ready_stamp_failed",
         "no_pr",
         "pr_not_open",
         "layer_not_published",
@@ -509,8 +511,18 @@ class PublishResult:
 
     @dataclass(frozen=True)
     class Ready:
+        @dataclass(frozen=True)
+        class Stamp:
+            """The stacked handoff detail: the appended ready-stamp record as-is plus the
+            append's idempotence fact (``existed=True`` = the byte-identical stamp was
+            already on the carrier — a converging re-run, nothing written)."""
+
+            record: ReadyStampRecord
+            existed: bool
+
         pr: prs.PullRequest
         was_draft: bool
+        stamp: "PublishResult.Ready.Stamp | None" = None
 
     kind: PublishKind
     plan_id: str
@@ -610,6 +622,8 @@ class PublishResult:
         )
         if detail.pr != expected or not detail.was_draft:
             raise ValueError("invalid dry-run ready publish result")
+        if detail.stamp is not None:
+            raise ValueError("dry-run ready publish result carries no stamp")
 
 
 @dataclass(frozen=True)
@@ -1073,6 +1087,31 @@ class DeliveryError(Exception):
         self.origin = origin
 
 
+class ReadyStampError(DeliveryError):
+    """The stacked ready gesture could not record (or refused to record) the handoff stamp.
+
+    Always ``error_type="ready_stamp_failed"`` / ``phase="ready"``; ``origin`` distinguishes
+    the pre-mutation construction refusal (``"domain"`` — nothing flipped) from an append
+    failure after the mark-ready mechanics (``"github"``). The typed payload carries the
+    truthful PR facts so the failure envelope never loses what actually happened: ``pr`` is
+    the fetched pull request and ``was_draft`` its pre-gesture draft bit. The message names
+    the per-cause remediation; only the ambiguous/transient arms converge on a re-run (the
+    deterministic stamp key makes the retry idempotent).
+    """
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        pr: prs.PullRequest,
+        was_draft: bool,
+        origin: DeliveryOrigin,
+    ) -> None:
+        super().__init__(message, error_type="ready_stamp_failed", phase="ready", origin=origin)
+        self.pr = pr
+        self.was_draft = was_draft
+
+
 class DeliveryPersistence(ABC):
     """Aggregate persistence authority over objective, plan, and journal state for all seven
     delivery operation families."""
@@ -1121,6 +1160,11 @@ class DeliveryPersistence(ABC):
     @abstractmethod
     def append_outcome(self, objective_id: str, record: OutcomeRecord) -> AppendResult:
         """Append one terminal operation outcome through the aligned persistence."""
+        ...
+
+    @abstractmethod
+    def append_ready_stamp(self, objective_id: str, record: ReadyStampRecord) -> StampAppendResult:
+        """Append one ready-stamp handoff event through the aligned persistence."""
         ...
 
     @abstractmethod

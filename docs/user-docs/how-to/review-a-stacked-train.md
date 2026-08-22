@@ -32,9 +32,11 @@ default).
    commit plus re-`/submit`), and perk's **automatic cascade** rewrites every published
    layer above the fix onto the new head. You never coordinate the rebase, and the upper
    layers' diffs stay exactly their own work.
-4. **Approve and ready layers normally.** Review verdicts are the ordinary per-PR ones,
-   and the author flips each layer ready-for-review individually with `/ready`. Readying
-   never merges anything — a fully-ready train still waits, whole, for its landing.
+4. **Approve on the draft; the author records the handoff.** Review verdicts are the
+   ordinary per-PR ones, made on **draft** layer PRs. After review + address, the author
+   records the deliberate handoff with `/ready` — it stamps the exact reviewed head into the
+   delivery journal (and flips a draft ready-for-review). Readying still never merges
+   anything — a fully-ready train waits, whole, for its landing.
 5. **Never press GitHub's merge button on an individual layer.** A layer PR's merge target
    is its *parent's branch*: merging one layer alone merges into the wrong target and tears
    the train. perk's own `/land` refuses a stacked plan with a typed `stacked_plan` error —

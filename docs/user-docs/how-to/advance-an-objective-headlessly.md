@@ -25,7 +25,7 @@ next machine-safe or human boundary.
    | `dispatched` | It sent the next ready `implement` or `address` stage to CI; inspect the named run. |
    | `awaiting_run` | A matching Actions run is queued or in progress; wait or invoke the command with `--wait`. |
    | `plan_required` | Author the named node's plan with the printed command. |
-   | `ready_for_review` | Implementation produced a draft pull request; inspect it and mark it ready with the human `/ready` gate. |
+   | `ready_for_review` | Implementation produced a draft pull request; `/ready` is the human boundary. Incremental: run `/ready` to open the draft for review (the review gate). Stacked: review + address on the draft first, then `/ready` records the handoff stamp. |
    | `awaiting_review` | The pull request is waiting at the human review boundary. |
    | `merged_pending_reconcile` | The merge is visible but its land reconciliation or local learn pass is still pending; follow any printed `perk plan resume` remediation. |
    | `build_blocked` | A stacked delivery train is not build-ready; inspect it with the printed stack-status command. |

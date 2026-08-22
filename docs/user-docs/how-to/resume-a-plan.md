@@ -27,7 +27,7 @@ machine, or any time you want a clean session against an existing plan.
    | No PR yet | Launches `implement`. |
    | PR open with actionable review feedback | Launches `address`. |
    | PR merged, learn pending | Launches `learn`. |
-   | PR open as a **draft** | Reports the gate: mark it ready, then `/land`. |
+   | PR open as a **draft** | Reports the gate — incremental: mark it ready, then `/land`; stacked: review on the draft, then the `perk ready` handoff (`/objective-land` for the train). |
    | PR open, clean | Reports the gate: awaiting human review. |
    | PR closed unmerged | Reports the gate: needs your attention (reopen or replan). |
    | PR merged and learned | Reports done — nothing to resume. |

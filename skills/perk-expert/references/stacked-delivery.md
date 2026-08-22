@@ -55,8 +55,14 @@ an honest typed `capability_unsupported` refusal naming the exact expected-vs-ob
   claimed published suffix: only the invoking plan's committed head is a local source, and
   every successor is rewritten from its verified published head. The result says how many
   layers moved (or that the suffix was already in sync).
-- **`/ready` flips each layer PR ready-for-review individually** — it never merges anything;
-  a fully-ready train still waits, whole, for its landing.
+- **`/ready` is the deliberate post-review human handoff.** Review happens on the **draft**
+  layer PR; after review + address, `/ready` stamps the exact verified published head into
+  the delivery journal — on draft AND non-draft PRs alike (mark-ready mechanics first, then
+  the journal append) — and flips a draft ready-for-review. It is never routine post-submit
+  choreography. A failed/ambiguous stamp exits `ready_stamp_failed` with the truthful
+  `pr`/`was_draft`; the ambiguous/transient arms converge on an idempotent re-run (the
+  deterministic stamp key), deterministic failures name their own repair. Readying still
+  never merges anything — a fully-ready train waits, whole, for its landing.
 - **`perk pr land` / `/land` refuse a stacked layer** typed `stacked_plan` before any
   mutation: a layer PR targets its parent's branch, so landing one alone would merge into the
   wrong target and tear the train. Landing is objective-scoped and atomic (below).

@@ -458,10 +458,10 @@ def test_nothing_to_resume_exits_0(monkeypatch, unborn_git_repo_factory):
 # --- the human-gate arms: report, never launch (real AND dry-run) -----------------------
 
 
-def _gate_case(monkeypatch, pr, *, feedback=None):
+def _gate_case(monkeypatch, pr, *, feedback=None, header=None):
     """Invoke a real (non-dry-run) resume against a gate-arm PR; launching is forbidden."""
     _authed(monkeypatch)
-    monkeypatch.setattr(plans, "get_plan", lambda **k: _state(pr=pr))
+    monkeypatch.setattr(plans, "get_plan", lambda **k: _state(header=header, pr=pr))
     if feedback is not None:
         monkeypatch.setattr(github, "get_pr_feedback", lambda **k: feedback)
 
@@ -482,6 +482,23 @@ def test_draft_pr_gates_on_ready_for_review(monkeypatch):
     data = _gate_case(monkeypatch, _pr("OPEN", is_draft=True))
     assert data["next_action"] == "ready_for_review" and data["resumed_stage"] is None
     assert data["pr"] == 55 and "draft PR" in data["message"]
+    # Incremental wording: mark ready, then the incremental /land.
+    assert "perk pr ready" in data["message"] and "/land" in data["message"]
+
+
+def test_stacked_draft_pr_gate_names_the_handoff_and_objective_land(monkeypatch):
+    # Delivery-aware gate wording: a stacked layer reviews on the draft, records the
+    # post-review handoff with `perk ready`, and lands whole via /objective-land — never /land.
+    data = _gate_case(
+        monkeypatch,
+        _pr("OPEN", is_draft=True),
+        header={"delivery_lineage": "01LINEAGE", "objective_id": "500"},
+    )
+    assert data["next_action"] == "ready_for_review" and data["resumed_stage"] is None
+    assert "review proceeds on the draft" in data["message"]
+    assert "perk ready 7" in data["message"]
+    assert "/objective-land" in data["message"]
+    assert "/land when satisfied" not in data["message"]
 
 
 def test_open_clean_pr_gates_on_awaiting_review(monkeypatch):

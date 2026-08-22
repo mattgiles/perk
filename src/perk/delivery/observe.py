@@ -29,8 +29,13 @@ from perk.backends.resolve import (
 )
 from perk.delivery import diagnostics, land, writers
 from perk.delivery.facade import Delivery, DeliveryGit, DeliveryGitHub, DeliveryPersistence
-from perk.delivery.journal import JournalFold, OutcomeRecord, PreparedRecord
-from perk.delivery.persistence import AppendResult, TrainPersistence, TrainPersistenceError
+from perk.delivery.journal import JournalFold, OutcomeRecord, PreparedRecord, ReadyStampRecord
+from perk.delivery.persistence import (
+    AppendResult,
+    StampAppendResult,
+    TrainPersistence,
+    TrainPersistenceError,
+)
 from perk.delivery.train import (
     BaseHeadObservation,
     PrFactsView,
@@ -583,6 +588,10 @@ class RepoDeliveryPersistence(DeliveryPersistence):
     def append_outcome(self, objective_id: str, record: OutcomeRecord) -> AppendResult:
         _store, _issues, persistence = self._resolve()
         return persistence.append_outcome(objective_id, record)
+
+    def append_ready_stamp(self, objective_id: str, record: ReadyStampRecord) -> StampAppendResult:
+        _store, _issues, persistence = self._resolve()
+        return persistence.append_ready_stamp(objective_id, record)
 
     def write_checkpoints(
         self,

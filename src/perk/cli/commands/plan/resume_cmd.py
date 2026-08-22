@@ -122,7 +122,13 @@ def resume_cmd(
             _render_done(plan_id, as_json=as_json)
             return
         pr = Ensure.not_none(state.pr, "gate verdict with no PR — this is a bug")
-        _render_gate(plan_id, next_action, pr.number, as_json=as_json)
+        _render_gate(
+            plan_id,
+            next_action,
+            pr.number,
+            stacked=ref.delivery_lineage is not None,
+            as_json=as_json,
+        )
         return
 
     worktree_name = launch.resolve_plan_worktree_name(ref)
@@ -158,10 +164,20 @@ def resume_cmd(
     )
 
 
-def _gate_message(plan_id: str, next_action: resume.NextAction, pr_number: int) -> str:
-    """The human gate line for a non-launchable verdict (contracts.md §8.37)."""
+def _gate_message(
+    plan_id: str, next_action: resume.NextAction, pr_number: int, *, stacked: bool
+) -> str:
+    """The human gate line for a non-launchable verdict (contracts.md §8.37) —
+    delivery-aware: a stacked layer reviews on the draft PR, records the post-review handoff
+    with `perk ready`, and lands whole as a train (never `/land`)."""
     prefix = f"plan #{plan_id} (PR #{pr_number}): "
     if next_action is resume.NextAction.READY_FOR_REVIEW:
+        if stacked:
+            return prefix + (
+                "draft layer PR — review proceeds on the draft; when review + address are "
+                f"done, record the handoff with perk ready {plan_id}; the train lands whole "
+                "via /objective-land"
+            )
         return prefix + (
             "draft PR — mark it ready (perk pr ready from the plan worktree) "
             "and /land when satisfied"
@@ -172,9 +188,9 @@ def _gate_message(plan_id: str, next_action: resume.NextAction, pr_number: int) 
 
 
 def _render_gate(
-    plan_id: str, next_action: resume.NextAction, pr_number: int, *, as_json: bool
+    plan_id: str, next_action: resume.NextAction, pr_number: int, *, stacked: bool, as_json: bool
 ) -> None:
-    message = _gate_message(plan_id, next_action, pr_number)
+    message = _gate_message(plan_id, next_action, pr_number, stacked=stacked)
     if as_json:
         machine_output(
             json.dumps(

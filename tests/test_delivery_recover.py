@@ -39,10 +39,11 @@ from perk.delivery.journal import (
     OperationState,
     OutcomeRecord,
     PreparedRecord,
+    ReadyStampRecord,
     canonical_payload,
     mint_operation_id,
 )
-from perk.delivery.persistence import AppendResult, UnresolvedOperationError
+from perk.delivery.persistence import AppendResult, StampAppendResult, UnresolvedOperationError
 from perk.delivery.train import (
     BuildReadiness,
     DeliveryTrain,
@@ -227,6 +228,9 @@ class _FakePersistence(DeliveryPersistence):
             self.unresolved_records[record.operation_id] = moved  # accepted keeps it live
             self.accepted_records[record.operation_id] = record
         return AppendResult(record.operation_id, record.role, existed=False)
+
+    def append_ready_stamp(self, objective_id: str, record: ReadyStampRecord) -> StampAppendResult:
+        raise AssertionError("recovery flows never stamp a handoff")
 
     def write_checkpoints(
         self, plan_id: str, *, parent_checkpoint_sha: str, published_head_sha: str

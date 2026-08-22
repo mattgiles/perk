@@ -22,7 +22,7 @@
     }
   },
   "additionalProperties": false,
-  "description": "The ``--json`` serialization boundary of :class:`PrReadyResult` (order load-bearing).",
+  "description": "The ``--json`` serialization boundary of :class:`PrReadyResult` (order load-bearing \u2014\nthe seven continuation fields are tail-additive).\n\nNull semantics: dry-run \u2192 all seven continuation fields null; incremental \u2192\n``stacked=false``, rest null; stacked success \u2192 all populated (``reconcile_notice`` /\n``reconcile_retry`` are CLI-composed presentation: the ready-time reconcile pass was not\nlaunched \u2014 this worker never launches \u2014 plus the copyable re-run gesture).",
   "properties": {
     "success": {
       "title": "Success",
@@ -60,6 +60,83 @@
     "dry_run": {
       "title": "Dry Run",
       "type": "boolean"
+    },
+    "stacked": {
+      "anyOf": [
+        {
+          "type": "boolean"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Stacked"
+    },
+    "objective": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Objective"
+    },
+    "node": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Node"
+    },
+    "stamped_head": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Stamped Head"
+    },
+    "stamp_advanced": {
+      "anyOf": [
+        {
+          "type": "boolean"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Stamp Advanced"
+    },
+    "reconcile_notice": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Reconcile Notice"
+    },
+    "reconcile_retry": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Reconcile Retry"
     }
   },
   "required": [
@@ -68,7 +145,14 @@
     "message",
     "pr",
     "was_draft",
-    "dry_run"
+    "dry_run",
+    "stacked",
+    "objective",
+    "node",
+    "stamped_head",
+    "stamp_advanced",
+    "reconcile_notice",
+    "reconcile_retry"
   ],
   "title": "PrReadyOut",
   "type": "object"

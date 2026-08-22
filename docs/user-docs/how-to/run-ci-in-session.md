@@ -48,8 +48,8 @@ when one of these grants trust — a committed `[ci] trusted = true` in config, 
 interactive confirmation, or a per-session approval latch. A headless session with **none** of these
 **refuses** to run (fail-closed) rather than executing untrusted commands unattended.
 
-> **Note:** warm `/ready` does **not** run the CI checks — it only marks the draft PR ready for
-> review (the deliberate review gate). Run `/ci` first.
+> **Note:** warm `/ready` does **not** run the CI checks — it marks the draft PR ready (and,
+> for a stacked layer, records the handoff stamp). Run `/ci` first.
 
 ## Related
 

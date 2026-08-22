@@ -46,6 +46,7 @@ from perk.delivery.journal import (
     OperationState,
     OutcomeRecord,
     PreparedRecord,
+    ReadyStampRecord,
 )
 from perk.delivery.layer import LayerError
 from perk.delivery.persistence import AppendResult, TrainPersistenceError
@@ -130,6 +131,7 @@ _DELIVERY_ERROR_TYPES = {
     "stack_registration_drift",
     "stack_registration_failed",
     "publication_drift",
+    "ready_stamp_failed",
     "no_pr",
     "pr_not_open",
     "layer_not_published",
@@ -294,6 +296,7 @@ _NEW_EXPORTS = {
     "StatusResult",
     "PublishRequest",
     "PublishResult",
+    "ReadyStampError",
     "RecoverRequest",
     "RecoverResult",
     "SyncRequest",
@@ -305,7 +308,7 @@ _NEW_EXPORTS = {
     "resolve_delivery",
 }
 # The migration is complete: every non-canonical export is retired — nothing is retained
-# beyond the canonical 20-name surface.
+# beyond the canonical 21-name surface.
 
 
 def _objective(
@@ -1363,6 +1366,31 @@ def _cascade_publish_layer() -> PublishResult.Layer:
                 ready=PublishResult.Ready(pr=_publish_pr(), was_draft=False),
             ),
             "invalid dry-run ready",
+        ),
+        (
+            # An otherwise-VALID dry-run ready (the exact sentinel PR + was_draft=True) that
+            # additionally carries a stamp: the dry-run ⇒ no-stamp validation must reject it
+            # on its own — the offline preview never appends a handoff.
+            lambda: PublishResult(
+                kind="ready",
+                plan_id="101",
+                dry_run=True,
+                ready=PublishResult.Ready(
+                    pr=prs.PullRequest(0, "(dry-run)", True, "OPEN", True),
+                    was_draft=True,
+                    stamp=PublishResult.Ready.Stamp(
+                        record=ReadyStampRecord(
+                            objective_id="500",
+                            delivery_lineage="01LINEAGE",
+                            plan_id="101",
+                            node_id="1.1",
+                            head_sha="b" * 40,
+                        ),
+                        existed=False,
+                    ),
+                ),
+            ),
+            "dry-run ready publish result carries no stamp",
         ),
     ),
 )
@@ -4284,7 +4312,7 @@ def test_public_export_cut_is_exact() -> None:
     exported = set(delivery_pkg.__all__)
     assert _RETIRED_EXPORTS.isdisjoint(exported)
     assert exported == _NEW_EXPORTS
-    assert len(delivery_pkg.__all__) == 20
+    assert len(delivery_pkg.__all__) == 21
     assert not hasattr(delivery_pkg, "DeliveryTrain")
     for finalize_name in (
         "finalize_landed_plan",
