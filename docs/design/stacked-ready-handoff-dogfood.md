@@ -556,8 +556,21 @@ checkout extension).
 
 ### S5 — suspend/resume
 
-*Not yet executed.* (`handoff suspended` read, the idempotent re-stamp envelope
-(`stamp_advanced: false`), the re-entered pass.)
+**Suspend half executed 2026-08-22** (operator): `gh pr ready --undo 1982` →
+`✓ Pull request mattgiles/perk#1982 is converted to "draft"` — the sanctioned out-of-band
+suspend gesture (no perk command performs it, by design).
+
+- **Train read:** layer 1.1 `pr #1982 (draft) … handoff suspended`; the gate closed again —
+  `planning gated: 1.2 waits on 1.1 (plan #1981, PR #1982) — suspended; record the handoff:
+  perk ready 1981`.
+- **Next-action surfaces:** `objective next` (human) and `objective show` both name the same
+  suspended blocker with the same copyable remediation.
+- **The decisive JSON fact** (`next --json` blocker row): `handoff_state: "suspended"` with
+  `stamped_head` = `current_head` = `f7f25f9d…` — the stamp is still valid and head-matching;
+  the hold is purely the draft bit (and correspondingly NO `stamped ≠ head` disclosure
+  renders — that disclosure is stale-only, exactly as the § matrix pins).
+
+**Resume half:** *pending — the `/ready` re-run.*
 
 ### S6 — layer 2 publish
 
