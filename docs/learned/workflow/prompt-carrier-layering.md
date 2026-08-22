@@ -52,6 +52,14 @@ bodies, and the door-suite tests (e.g. `extension/doors/prReviewTerminal.test.ts
 - **One nudge per launch trigger is the delivery design:** a cold `command:<id>` binding
   intentionally suppresses the warm `stage:<id>` nudge (header dedup); base-skill reachability
   moves to explicit read-path cross-references *inside* the specialized skills.
+- **Closed: the REPLACE-posture flow-carrier claim is pinned by one generic seeded-plan-shape
+  proof.** The adapter is shape-blind (it reads only the rebuilt workflow state's mode/stage
+  plus branch markers), every pointer-carrying seeded door presents the identical
+  `{mode: read-only, stage: plan}` state, and `planAdapterTombell.test.ts`'s gate-active case
+  (injection + flow content) plus dedup case (once-only) exercise exactly that state, with the
+  objective-plan control arm pinning the exception set at exactly
+  `{objective-author, gist-author}`. One generic shape test beats per-door lookalike fixtures
+  when the shapes are adapter-indistinguishable.
 
 ## Migration craft
 
@@ -88,8 +96,6 @@ bodies, and the door-suite tests (e.g. `extension/doors/prReviewTerminal.test.ts
   `perk-learn-harvest`'s dedicated test. The ceilings gate ambient descriptions and committed
   template files only — they never measure a skill *body* — so body drift in the other perk
   skills remains wholly CI-inert (no body-size guard exists).
-- Provider-neutral seed flow-pointers rest on the REPLACE-posture adapter genuinely carrying the
-  flow — asserted in contracts, not verified per session shape by any test.
 
 ## Cross-references
 

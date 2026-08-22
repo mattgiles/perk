@@ -87,8 +87,11 @@ function decodeObjectiveCreate(payload: ColdJson): ObjectiveCreatePayload | null
  * `{input}` and the save stamps `generated_at`; the approval path passes the artifact block
  * through with its stored stamp AND stored parts — the stored parts are byte-compared against
  * the freshly re-rendered ones, so run-scratch drift or artifact tamper between draft-write
- * and save refuses `bad_state` (nothing saved, the gate stays on). The parts do NOT cross to
- * the Python plane yet — companion persistence is deferred (explicit in §8.63, not silent).
+ * and save refuses `bad_state` (nothing saved, the gate stays on). On the dream arm the
+ * reviewed CANONICAL parts cross to the Python plane through the run-scoped
+ * `dream-report-transfer.json` handoff (§8.64) — staged atomically before the cold door (a
+ * write failure is the soft `scratch_failed` refusal; the door is not invoked) — and
+ * `perk objective create` re-validates the transfer and converges the companion idempotently.
  */
 export async function saveObjective(
   pi: ExtensionAPI,
