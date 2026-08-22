@@ -670,8 +670,44 @@ transcript captured the full rendered continuation seed again, now with layer 2'
 
 ### S8 — staleness (both arms)
 
-*Not yet executed.* (Feedback or the attested fallback; the SYNC before/after table; both
-layers `handoff stale` with the `stamped ≠ head` disclosures.)
+Executed 2026-08-22 — the primary arm fired: real operator review feedback on layer 1, then
+`perk address 1981` (the current-era positional shape) finishing through `finalize_address`.
+
+- **The feedback (operator review on PR #1982, COMMENT review, one thread):** true up the
+  tutorial's phase-1 renderer-derived `stack status` excerpts against the REAL captures from
+  this gate's own train — the review comment carried the three verbatim renders (post-
+  authoring, published-before-stamp with the `planning gated` line, both-published) as DATA.
+  Honest, actionable, and it completes layer 1's own phase-2 excerpt obligation (the
+  discipline S4's pass recorded on the objective).
+- **The cascade journal record** (issue #1980): ONE trigger-scoped SYNC operation
+  **01M0NTT5DZFNEX6CXBQV1GB4V2**, `prepared` (22:52:48Z) → `completed` (22:52:58Z; record
+  created 22:52:56Z), observing the address publish rewriting layer 1 AND republishing the
+  successor atomically:
+
+  | Branch | Before | After |
+  |---|---|---|
+  | `plan-1981` | `f7f25f9d65577f0cb7df8fc0d8a440cfd5c4d5d1` | `ca046b8b06e44f5002333c3c349ab2f72ce63612` |
+  | `plan-1983` | `29d4375d5bf125b871c196bd5cb2672653438d77` | `149a8dcfe4160ae7fb98a0644a4d4bc9c90eb010` |
+
+- **PR settle:** #1982 and #1984 both `OPEN`, non-draft, bases unchanged (`main` /
+  `plan-1981`), heads = the after-table SHAs exactly.
+- **Thread resolution** (GraphQL `reviewThreads` on #1982): `isResolved: true`, the
+  finalize-posted reply ("Regenerated all three stack-status excerpts byte-faithfully from
+  the live renderer (_render_human/_layer_line), placeholder…") preceding the resolve —
+  reply-then-resolve observed.
+- **Both staleness arms, one read** (`stack status`): layer 1.1 `handoff stale`
+  (self-rewrite) AND layer 1.2 `handoff stale` (cascade rewrite — **the no-mechanical-carry
+  fact live**: the journal's two stamps still name `f7f25f9d…`/`29d4375d…` while the
+  observed heads are `ca046b8b…`/`149a8dcf…`).
+- **Named in-place observation (not a defect): the rendered `stamped <sha12> ≠ head <sha12>`
+  disclosure is candidate-scoped by design** — it rides the gate/blocker rows
+  (`handoff_blocker_phrase` / `_gate_row_phrase` / the §8.46 rows), and this fully-published
+  2-layer train has no planning candidate, so no surface composes a gate row to carry it
+  (`next`/`show` render the honest technical `build blocked: all layers published or
+  landed`). The machine disclosure stands as the journal-stamp-keys-vs-current-heads
+  comparison above; on a train with an unplanned dependent the gate row would render it (the
+  S3/S5 captures show exactly that composition). The protocol's pinned "each with the
+  `stamped ≠ head` disclosure" expectation is era-corrected to this candidate-scoped truth.
 
 ### S9 — re-ready (wrapper carrier)
 
