@@ -171,6 +171,15 @@ journey without making deterministic workers secretly agentic.
   read-only projection. "Unchecked" must not be presented as if it were the action a real run
   would take.
 
+  > **Status (2026-08-22):** deliberately not shipped as written. The landed behavior keeps
+  > stacked planning/supervisor dry-runs offline and reports `build_readiness: "unchecked
+  > (dry-run)"` honestly (`perk objective plan --dry-run`, `perk objective run --dry-run`) —
+  > "No live dry-run projection" is a human-approved cut recorded in objective #1951's
+  > Boundaries. The live-read surfaces are `perk objective next`/`show`/`stack status` (and
+  > `show` degrades a failed live read as `readiness unchecked (<error>)` rather than
+  > pretending). The coherence audit lives in
+  > `docs/design/stacked-ready-handoff-dogfood.md`.
+
 The command-line pass is broader than the ready command itself. Every surface that claims to know
 the next objective action must consume the same readiness truth:
 
