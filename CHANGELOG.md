@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 <!-- As of 12a5a89 -->
 
+### Added
+
+- The stamped stacked-delivery lifecycle is proven live end-to-end and fully taught: a real two-layer docs train drove publish → handoff stamp → the `node_not_handoff_ready` planning gate → the ready-time reconcile continuation (warm `/ready` and the `perk ready <PLAN>` wrapper) → the suspend hold and idempotent re-stamp → self-rewrite and cascade staleness with re-ready repair → the atomic objective landing (`docs/design/stacked-ready-handoff-dogfood.md`, **PASSED** 2026-08-22, zero defects; the five-family coherence audit found runtime surfaces in agreement). The train's own merged layers delivered the teaching: the stacked tutorial walks the continuation with real captured excerpts, the review and recovery how-tos gained the transient draft hold, stale-after-address, and a Handoff repair table, and the perk-expert stacked reference mirrors it all
+
 ## [3.1.0] - 2026-08-20
 
 ### Added

@@ -13,6 +13,15 @@ route to follow-ups #1709/#1710; the deliberate live-remote-runner skip remains 
 named residual. Part B and the Verdict section are complete; this PR may leave draft at the
 explicit review gate (§ Sequencing).
 
+> **Superseded-in-part (2026-08-22):** this record's Step-6 "ready" evidence predates the
+> ready **stamp** — three `perk pr ready --json` draft flips with no stamp, no planning gate,
+> and no reconcile continuation. The stamped stacked lifecycle (handoff stamp →
+> direct-dependency planning gate → ready-time reconcile continuation → suspend/stale repair →
+> stamped-train landing) is proven by
+> [`stacked-ready-handoff-dogfood.md`](./stacked-ready-handoff-dogfood.md) (Objective #1951
+> node 4.1, PASSED 2026-08-22). Everything else here stands as the authoritative pre-stamp
+> lifecycle proof.
+
 **Prior vs current coverage.** The prior gate record
 [`stacked-publication-dogfood.md`](./stacked-publication-dogfood.md) (node 2.4, PASSED
 2026-08-10) proved **authoring persistence + publication only**, on a sacrificial train driven

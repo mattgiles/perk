@@ -1,11 +1,16 @@
 # Dogfood: the stamped stacked lifecycle (Objective #1951, Node 4.1)
 
-**Status: IN PROGRESS (started 2026-08-22).** This validation record (the
+**Status: PASSED 2026-08-22.** This validation record (the
 `stacked-publication-dogfood` genre — Part A the repeatable protocol, Part B the dated captured
 evidence + defect log) proves the **stamped** stacked lifecycle live in the designated durable
 dogfood repository (`mattgiles/perk`): publish → handoff stamp → gated planning → ready-time
-reconcile → stale/suspend/re-ready repair → objective land. The verdict is written from the
-§ Verdict matrix only after Part B is complete — never pre-claimed.
+reconcile → stale/suspend/re-ready repair → objective land — driven same-day on the real
+2-layer docs train **#1980** (PRs #1982/#1984, merged atomically as operation
+`01M0NVZKKZ0MZCVPJH8TZ3B5W9`). **Overall verdict: PASS** (the § Verdict matrix's
+all-arms-pass row; **zero defects** — the defect log holds only two named non-defect
+observations; unfired capture-if-fired arms stand as named residuals pinned to their hermetic
+suites). Part B and the Verdicts section are complete; per § Sequencing this record's PR
+leaves draft only at the explicit review gate.
 
 **Prior vs current coverage.** The prior lifecycle record
 [`stacked-delivery-dogfood.md`](./stacked-delivery-dogfood.md) (objective #1698, PASSED
@@ -343,9 +348,9 @@ Linear-backend arms (the dogfood repo is GitHub).
 
 ## Part B — the captured evidence
 
-> **Execution in progress.** The live legs run as post-submit follow-up phases; each phase
-> lands its dated evidence here as docs-only commits. Unexecuted steps' tables remain
-> skeletons — no cell pre-claims an outcome.
+> **Execution COMPLETE (2026-08-22).** Every live leg (S0–S11) ran the same day, the evidence
+> landing here as docs-only commits phase by phase; S12 (this evidence-fill close) finalizes
+> the verdicts and annotations.
 
 ### Provenance rows
 
@@ -826,57 +831,108 @@ recorded dry-run above + the rendered consent plan approved `y`).
 - **Terminal train read:** recorded at S10 (landed 2; the expected `base_advanced` row; no
   unresolved operations, no continuation, no orphaned residue).
 
-**Local-side sweep:** *pending — the operator's updated-main docs gate, the train-worktree
-removal, remote branch deletion, and the absence census.* (Pre-sweep observation: remote
-`plan-1981`/`plan-1983` refs still exist; both train worktrees still checked out — the
-`writer active` rows in the terminal read.)
+**Local-side sweep executed 2026-08-22** (operator, dev checkout on updated main):
 
-### Evidence-fill reconciliation sweep (S12)
+- **Docs gate on updated main (`b5bded35…`):** `just docs-check` GREEN — 74 pytest
+  metadata/reference/gate tests; Biome clean; docs-site TypeScript clean; node tests clean;
+  Astro build **77 pages** (the stacked tutorial + both stacked how-tos routed); all 22
+  rendered-site checks pass (axe: low-impact advisories only).
+- **Worktree sweep:** `perk worktree wipe` removed `plan-1981` + `plan-1983` (and 3 unrelated
+  merged worktrees), deleting their local AND remote branches itself ("deleted 5 remote
+  branch(es) on origin") — the operator's manual `git push origin --delete` then found
+  `remote ref does not exist` ×2, itself absence evidence. The guard held for this record's
+  own worktree: `skip plan-1978: PR is OPEN, not merged`; unmerged/pending-learn worktrees
+  all skipped.
+- **Absence census (independent verification):** `git ls-remote` empty for both train refs;
+  no `plan-1981`/`plan-1983` entry in `git worktree list`; no local branches remain.
 
-*Not yet executed.* (The A3 cross-annotations — the dated keep-and-annotate note on
-`stacked-delivery-dogfood.md`'s Status line, the conditional `objective-delivery.md` note — the
-`docs/index.md` row, and the actual-verdict CHANGELOG entry.)
+### Evidence-fill reconciliation sweep (S12, 2026-08-22)
+
+- **A3 — the prior record annotated:** a dated keep-and-annotate supersession note on
+  [`stacked-delivery-dogfood.md`](./stacked-delivery-dogfood.md)'s Status block — its Step-6
+  ready evidence predates the stamp; the stamped lifecycle is proven here; everything else
+  there stands (committed with this fill).
+- **A3 — `docs/learned/workflow/objective-delivery.md`: a stated no-op.** Its
+  ready/stamp-adjacent passages concern learn-stamp effects, layer-identity stamping, and
+  readiness-enrichment fail-closed arms — no claim this gate settles; annotating would
+  manufacture scope.
+- **Doc-side census closure:** every `doc fix → train layer N` disposition in the § matrix
+  landed via the train itself (PR #1982 for the three user-docs rows, PR #1984 for the
+  perk-expert row; both MERGED); the two `agrees` doc rows held; the one keep-and-annotate
+  (A4, the seed doc) was committed with this record's scaffold. Every runtime row was
+  additionally exercised live during S2–S10 with zero divergences — the
+  `runtime follow-up #<issue>` column ends EMPTY.
+- **A5:** the `docs/index.md` row and the ONE actual-verdict `[Unreleased]` CHANGELOG entry
+  ride this fill commit.
 
 ### Defect log
 
-Every incident hit during the gate, its diagnosis artifacts, and its disposition (d-series).
+**No defects.** Every arm ran clean on the first attempt — no perk code defect, no
+docs-content defect routed through the train's machinery, no restart boundary. Two named
+**non-defect observations** were recorded in place:
 
-| # | Incident | Diagnosis artifacts | Disposition |
-|---|---|---|---|
-| — | — | — | — |
+1. **The plan-door dry-run recipe deviation (S3):** on a train whose offline graph holds no
+   plannable candidate, `objective plan --dry-run` refuses `objective_in_flight` before the
+   seed composes, so the `build_readiness: "unchecked (dry-run)"` payload capture routes to
+   `objective run --dry-run` (both surfaces honest; the § matrix row carries the dated note).
+2. **Duplicate check-run reporting on cascade-rewritten heads (S10):** the landing dry-run's
+   `optional_check_failed` row reflected a CANCELLED superseded GHA run (concurrency cancel
+   from the cascade push) beside the SUCCESS run on the same head — the prior gate's d2
+   sibling observation recurring, optional and non-blocking; no new follow-up (the shape is
+   GitHub-side reporting, already on record).
 
 ### Evidence gaps (dated operator attestations)
 
-*None recorded yet.* (Warm-session facts — the in-session continuation drives, the seeded
-launch — are expected to land here as dated attestations paired with their durable machine
-halves.)
+Accepted inline gaps, each with its durable machine half in this record — not residuals, not
+verdict degradations:
 
-### Named residuals (pre-authored)
+- **S1 delivery-question UX (2026-08-22):** operator-attested (asked before the plannotator
+  review, answered `stacked`); the saved header is the machine half.
+- **S2 implement-launch narration (2026-08-22):** not captured for layer 1 (S6's layer-2
+  narration WAS captured verbatim); the header checkpoint pair + PUBLISH journal record are
+  the durable half.
+- **S4/S5/S7 ephemeral warm report lines (2026-08-22):** the `Marked ready`/`Handoff stamped`
+  lines scrolled out of the session buffers; the continuation announcements and full pass
+  conclusions WERE captured, and the journal stamps + PR flips are the durable halves
+  throughout.
 
-- **Capture-if-fired arms that may not fire** — recorded here only if they stay unfired:
-  the ready-time pass's tail-append guard refusal (`stacked_append_refused` — pinned by the
-  store-guard suites), the `ReadyStampError` arms (ambiguous/transient append and the
-  deterministic refusals — pinned in `tests/test_pr_ready_cmd.py` and the delivery publish
-  suites), and a retained sync conflict (`sync --continue`/`--abort` — pinned by the §8.49
-  conflict suites in `tests/test_delivery_sync.py`).
-- **No second clone / no remote-runner arm (deliberate).** Fresh-checkout/durable-authority
-  independence and the interruption→recovery conclusion are the prior gates' proven facts,
-  reused by reference — this gate re-proves neither.
+### Named residuals (final)
+
+Unfired capture-if-fired arms — each pinned to its hermetic suite; none degrades the verdict:
+
+- **The tail-append guard refusal never fired** (`stacked_append_refused`): all four
+  ready-time passes judged no new unit of work, so the guard was never exercised live —
+  pinned by `tests/test_objective_cmd.py` (the stacked node-add guard suites).
+- **The `ReadyStampError` arms never fired:** every stamp append succeeded first-try — the
+  ambiguous/transient and deterministic-refusal arms stay pinned by
+  `tests/test_pr_ready_cmd.py` + `tests/test_delivery_facade.py`.
+- **The wrapper launch-failure second outcome never fired** (both S9 launches were clean) —
+  pinned by the wrapper arms in `tests/test_pr_ready_cmd.py`.
+- **No retained sync conflict** (the S8 cascade rebased clean — disjoint file ownership by
+  construction) — pinned by the §8.49 conflict suites in `tests/test_delivery_sync.py`.
+- **The base-advancement cascade never fired** (main never advanced during the gate) — the
+  staleness arms fired via the real feedback cascade instead, so no cascade-coverage gap.
+- **No second clone / no remote-runner arm (deliberate, pre-authored).**
+  Fresh-checkout/durable-authority independence and the interruption→recovery conclusion are
+  the prior gates' proven facts, reused by reference — this gate re-proved neither.
 
 ### Verdicts
 
-Derived by the § Verdict matrix from the evidence above — written only when Part B is complete.
+Derived by the § Verdict matrix from the evidence above.
 
 | Arm | Verdict | Surviving evidence |
 |---|---|---|
-| Gated-planning refusal | — | — |
-| Warm stamp + in-session continuation | — | — |
-| Suspend hold + idempotent resume | — | — |
-| Stale via self-rewrite | — | — |
-| Stale via cascade | — | — |
-| Wrapper re-ready + seeded launch | — | — |
-| Ready-time pass behavior | — | — |
-| Atomic land + close + post-land reconcile | — | — |
-| Audit coherence | — | — |
+| Gated-planning refusal | **PASS** | S3: typed `node_not_handoff_ready` (bare + `--node`, exit 1); the same blocker + `perk ready 1981` remediation on `next`/`show`/`stack status`; the JSON handoff row |
+| Warm stamp + in-session continuation | **PASS** | S4/S7: journal stamps at the exact heads; PR flips; announced pinned ranges = the checkpoint pairs; S4's bounded prose write |
+| Suspend hold + idempotent resume | **PASS** | S5: `handoff suspended` with `stamped_head` = `current_head`; re-`/ready` → one unchanged journal comment (`existed=true`), `handoff ready`, the pass re-entered |
+| Stale via self-rewrite | **PASS** | S8: layer 1 `handoff stale` after the address publish (stamp at `f7f25f9d…` vs head `ca046b8b…`) |
+| Stale via cascade | **PASS** | S8: layer 2 `handoff stale` off the trigger-scoped SYNC (`01M0NTT5…`) — no mechanical stamp carry |
+| Wrapper re-ready + seeded launch | **PASS** | S9: fresh stamps at both post-cascade heads (4 journal comments total); both seeded sessions launched clean in the main checkout |
+| Ready-time pass behavior | **PASS** | S4 write / S5 audited no-op / S9 audited no-op + descriptions-and-prose write — all bounded (no status/PR, no node adds); the post-land pass left only land-scoped residue |
+| Atomic land + close + post-land reconcile | **PASS** | S10: one journaled operation (`prepared→accepted→completed`), sequential merges to main `b5bded35…`, nodes done ×2, objective closed, the near-no-op post-land pass |
+| Audit coherence | **PASS** | every § matrix row dispositioned: runtime rows all held live; doc fixes landed via the train; A4 keep-and-annotate committed; the follow-up column empty |
 
-**Overall: —** (not yet derived).
+**Overall: PASS.** Every planned arm passed on the first attempt — the § Verdict matrix's
+all-arms-pass row — with zero defects, both continuation carriers proven live, both staleness
+arms fired by real work, and the audit's expected outcome ("runtime surfaces agree; findings
+are doc-side") confirmed end to end. Unfired arms stand honestly in § Named residuals.
