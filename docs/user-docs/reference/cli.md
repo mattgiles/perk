@@ -131,8 +131,10 @@ under `--json`. A learn-docs consolidation plan is exempt: no marker, no learn p
 
 ### `perk ready [PLAN]`
 
-Flat alias for [`perk pr ready`](./cli/pr.md#perk-pr-ready-plan) (the canonical entry). Mark a plan's
-draft PR ready for review (the deliberate review gate) — a worker-only command (`--dry-run` /
+Flat alias for [`perk pr ready`](./cli/pr.md#perk-pr-ready-plan) (the canonical entry). Ready a
+plan's PR — the deliberate review gate for an incremental plan; for a stacked layer, the
+deliberate **post-review human handoff** that stamps the exact verified published head (draft
+and non-draft PRs; never routine post-submit choreography). A worker-only command (`--dry-run` /
 `--json`). `PLAN` selects the plan canonically and works from the repository root (no worktree
 needed); omitted, the invoking checkout's active saved plan is used.
 
@@ -152,7 +154,7 @@ above are the spine; every other command's detail lives on its family reference 
 | `perk submit` | Push the branch and open a draft PR. | [this page](#perk-submit) |
 | `perk address` | Classify PR review feedback and resolve the threads. | [this page](#perk-address-plan) |
 | `perk land` | Merge the ready/approved PR and reconcile. | [this page](#perk-land) |
-| `perk ready` | Mark a plan's draft PR ready for review. | [this page](#perk-ready-plan) |
+| `perk ready` | Ready a plan's PR: the review gate (incremental) or the post-review handoff stamp (stacked). | [this page](#perk-ready-plan) |
 | `perk plan` | Author and revise plans: save, resume, replan, from, watch. | [Plan commands](./cli/plan.md) |
 | `perk objective` (alias `obj`) | Author and drive objectives, incl. the stacked delivery train. | [Objective commands](./cli/objective.md) |
 | `perk pr` | The canonical PR lifecycle group behind the flat spine aliases. | [PR commands](./cli/pr.md) |

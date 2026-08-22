@@ -58,8 +58,8 @@ trusted = true
 
 An array-of-tables: each `[[ci.checks]]` row declares one check. The in-session CI executor
 consumes the rows: warm `/ci` gives the one-line overall summary, while the `run_ci` tool returns
-the detailed per-check report. `/ready` does not run checks; it only marks the draft PR ready for
-review, so run the checks first.
+the detailed per-check report. `/ready` does not run checks; it marks the draft PR ready (and,
+for a stacked layer, records the handoff stamp), so run the checks first.
 
 Checks run **concurrently**. Declared order governs the detailed **report** order, not execution
 order. Each row must therefore be independently runnable; when sequencing matters, put the

@@ -37,16 +37,21 @@ from perk.delivery.journal import (
     OperationState,
     OutcomeRecord,
     PreparedRecord,
+    ReadyStampEvent,
+    ReadyStampRecord,
     canonical_payload,
+    canonical_stamp_payload,
     mint_operation_id,
+    stamp_key,
 )
-from perk.delivery.persistence import AppendResult, UnresolvedOperationError
+from perk.delivery.persistence import AppendResult, StampAppendResult, UnresolvedOperationError
 from perk.delivery.train import (
     BuildReadiness,
     DeliveryTrain,
     FindingKind,
     LayerFinalization,
     LayerGit,
+    LayerHandoff,
     LayerIntent,
     LayerMembership,
     LayerPr,
@@ -130,6 +135,7 @@ class _FakePersistence:
         self.prepared: list[PreparedRecord] = []
         self.outcomes: list[OutcomeRecord] = []
         self.checkpoints: list[tuple[str, str, str]] = []
+        self.stamps: list[ReadyStampEvent] = []
         # Fail-once process-death hook: raised BEFORE the outcome append lands (the P6
         # boundary — checkpoints written, `completed` not yet durable).
         self.outcome_boom: Exception | None = None
@@ -166,7 +172,26 @@ class _FakePersistence:
             operations=ops,
             unresolved=tuple(ops.values()),
             delivery_lineage=LINEAGE,
+            stamps=tuple(self.stamps),
         )
+
+    def append_ready_stamp(self, objective_id: str, record: ReadyStampRecord) -> StampAppendResult:
+        """Real key semantics: an already-held key is the idempotent no-write success; a fresh
+        key stores a stamp event served back through the fold reconstruction reads."""
+        key = stamp_key(record)
+        existed = any(stamp.key == key for stamp in self.stamps)
+        self._world.timeline.append(("ready_stamp", key, existed))
+        if not existed:
+            self.stamps.append(
+                ReadyStampEvent(
+                    record=record,
+                    key=key,
+                    canonical_payload=canonical_stamp_payload(record),
+                    comment_id=f"stamp-{len(self.stamps)}",
+                    created_at=f"s{len(self.stamps)}",
+                )
+            )
+        return StampAppendResult(key=key, existed=existed)
 
     def append_prepared(self, objective_id: str, record: PreparedRecord) -> AppendResult:
         if self.unresolved_records:
@@ -298,7 +323,7 @@ class _World:
             delivery_lineage=LINEAGE,
             base=self.base,
             redirected_from=None,
-            layers=tuple(self.layers),
+            layers=tuple(self._with_handoff(layer) for layer in self.layers),
             published_prefix_len=prefix,
             unresolved_operation=unresolved,
             findings=findings,
@@ -306,6 +331,31 @@ class _World:
                 next_node_id=next_node, ready=ready, reason=None if ready else "veto"
             ),
         )
+
+    def _with_handoff(self, layer: TrainLayer) -> TrainLayer:
+        """The §8.44 handoff derivation over world state: only verified PUBLISHED layers carry
+        a value — the latest active-objective stamp for the plan decides (absent ⇒ unstamped;
+        another head ⇒ stale; matching + draft ⇒ suspended; matching + non-draft ⇒ ready)."""
+        if layer.publication is not LayerPublication.PUBLISHED or layer.plan_id is None:
+            return layer
+        stamp = next(
+            (
+                stamp
+                for stamp in reversed(self.persistence.stamps)
+                if stamp.record.objective_id == OBJECTIVE
+                and stamp.record.plan_id == layer.plan_id.removeprefix("#")
+            ),
+            None,
+        )
+        if stamp is None:
+            handoff = LayerHandoff.UNSTAMPED
+        elif stamp.record.head_sha != layer.published_head_sha:
+            handoff = LayerHandoff.STALE
+        elif layer.pr_number is not None and self.pr_entries[layer.pr_number].draft:
+            handoff = LayerHandoff.SUSPENDED
+        else:
+            handoff = LayerHandoff.READY
+        return replace(layer, handoff=handoff)
 
     def _issues(self) -> "_World":
         return self
@@ -566,13 +616,8 @@ class _World:
             )
         return self.sync_result
 
-    def publish(
-        self,
-        plan_id: str,
-        *,
-        run_id: str = "01RUN",
-        trigger_run_id: str | None = None,
-    ) -> PublishResult.Layer:
+    def _delivery(self) -> Delivery:
+        """Bind one `Delivery` over this world's aggregate seams (publish and ready alike)."""
         world = self
 
         class _Git:
@@ -661,6 +706,10 @@ class _World:
             def pr_for_branch(self, branch: str) -> PullRequest | None:
                 return world._pr_for_branch(branch=branch, repo_root=ROOT)
 
+            def mark_pr_ready(self, number: int) -> None:
+                world.timeline.append(("mark_ready", number))
+                world.pr_entries[number].draft = False
+
         class _Delivery(Delivery):
             def __init__(self) -> None:
                 super().__init__(
@@ -686,6 +735,15 @@ class _World:
                     return super().sync(request, consent=consent)
                 return world._synchronize(request, consent=consent)
 
+        return _Delivery()
+
+    def publish(
+        self,
+        plan_id: str,
+        *,
+        run_id: str = "01RUN",
+        trigger_run_id: str | None = None,
+    ) -> PublishResult.Layer:
         runtime = publish._PublishRuntime(
             mint_operation_id=mint_operation_id,
             now=lambda: "2026-01-01T00:00:00Z",
@@ -694,7 +752,7 @@ class _World:
         )
         with pytest.MonkeyPatch.context() as monkeypatch:
             monkeypatch.setattr(publish, "_DEFAULT_PUBLISH_RUNTIME", runtime)
-            result = _Delivery().publish(
+            result = self._delivery().publish(
                 PublishRequest(
                     kind="layer",
                     plan_id=plan_id,
@@ -705,6 +763,20 @@ class _World:
         if result.layer is None:
             raise AssertionError("layer publish returned no layer detail")
         return result.layer
+
+    def ready(self, plan_id: str, objective_id: str = OBJECTIVE) -> PublishResult.Ready:
+        """Drive the stacked ready arm (mark-ready-if-draft, then the stamp append)."""
+        result = self._delivery().publish(
+            PublishRequest(
+                kind="ready",
+                plan_id=plan_id,
+                delivery="stacked",
+                objective_id=objective_id,
+            )
+        )
+        if result.ready is None:
+            raise AssertionError("ready publish returned no ready detail")
+        return result.ready
 
     def events(self, kind: str) -> list[tuple]:
         return [t for t in self.timeline if t[0] == kind]
@@ -1911,3 +1983,52 @@ def test_resume_pr_moved_off_its_before_state_is_publication_drift():
     with pytest.raises(DeliveryError) as excinfo:
         world.publish("102")
     assert excinfo.value.error_type == "publication_drift"
+
+
+# ----------------------------------------------------------------- the cross-command choreography
+
+
+def test_choreography_submit_draft_review_address_stamp():
+    """submit → draft review → address → stamp, pinned at the delivery level (contracts.md
+    §8.43/§8.52): publish never touches draft state on an existing PR, review runs on drafts,
+    and the stacked ready gesture orders mark-ready strictly before the head-exact stamp
+    append — with the deterministic key making the re-run converge."""
+    world = _bottom_world()
+    # 1. Submit at head C1: a draft PR; no handoff yet — the reconstructed layer is UNSTAMPED.
+    first = world.publish("101")
+    assert first.pr.number == 77 and first.published_head_sha == C1
+    assert world.pr_entries[77].draft is True
+    assert world.events("mark_ready") == [] and world.events("ready_stamp") == []
+    assert world._reconstruct(ROOT, OBJECTIVE).layers[0].handoff is LayerHandoff.UNSTAMPED
+    # 2. Draft review: no mechanics — the PR stays draft (review runs on drafts).
+    assert world.pr_entries[77].draft is True
+    # 3. Address: the branch advances to C3 and republishes (the same publication mechanic
+    #    address finalization routes through) — the PR stays draft, still no stamp.
+    world.local["plan-101"] = C3
+    world.ancestry.add((MAIN, C3))
+    second = world.publish("101")
+    assert second.published_head_sha == C3
+    assert world.pr_entries[77].draft is True
+    assert world.events("ready_stamp") == []
+    # 4. Stamp: mark-ready strictly before the append; the record binds the POST-address
+    #    verified head (C3, never C1).
+    ready = world.ready("101")
+    key = f"{OBJECTIVE}:101:1:{C3}"
+    assert world.events("mark_ready") == [("mark_ready", 77)]
+    assert world.events("ready_stamp") == [("ready_stamp", key, False)]
+    assert world.timeline.index(("mark_ready", 77)) < world.timeline.index(
+        ("ready_stamp", key, False)
+    )
+    assert ready.was_draft is True
+    assert ready.stamp is not None
+    assert ready.stamp.existed is False and ready.stamp.record.head_sha == C3
+    assert world._reconstruct(ROOT, OBJECTIVE).layers[0].handoff is LayerHandoff.READY
+    # 5. Converging re-run: no second mark-ready; the deterministic key answers existed=True.
+    again = world.ready("101")
+    assert world.events("mark_ready") == [("mark_ready", 77)]
+    assert world.events("ready_stamp") == [
+        ("ready_stamp", key, False),
+        ("ready_stamp", key, True),
+    ]
+    assert again.was_draft is False
+    assert again.stamp is not None and again.stamp.existed is True

@@ -1465,7 +1465,10 @@ validate_pr_body(body, *, pr_number)                -> string[]   (empty == vali
   (`extension/doors/plannotatorHandoff.ts` owns the envelope + fallback ladder).
 - **Draft → ready is a deliberate gesture.** Submit keeps the PR **draft**; perk does **not**
   auto-publish. `perk pr ready` (warm `/ready`) is the explicit review gate — `mark_pr_ready` if
-  draft, idempotent. Land's mark-ready-if-draft stays a safety net. Completion is never inferred
+  draft, idempotent. On a **stacked** layer the same gesture is the deliberate post-review human
+  handoff: it stamps the exact verified published head into the delivery journal (draft and
+  non-draft PRs; mark-ready first, then the append — §8.43/§8.52); the incremental arm is
+  unchanged. Land's mark-ready-if-draft stays a safety net. Completion is never inferred
   from PR open/closed state alone.
 - **Re-submit on rewritten history.** `perk pr submit` **force-pushes the perk-owned plan branch
   with `--force-with-lease`** (auto-force; a no-op on the first push): plan branches (`plan-<n>`)
@@ -6349,10 +6352,16 @@ re-link at the same plan/head keeps the stamp effective; `node_id` rides the key
 reader context and key distinctness only). Replan/transfer supersession and stacked→incremental
 conversion therefore structurally never carry a stamp forward: the key contains the objective
 id, so re-affirmation under the successor is required. Engagement exclusion is inherited (the
-generic `perk:*` sentinel classifier). No command writes stamps yet — the append path exists on
-`TrainPersistence` and is exercised by tests only; the stacked `/ready` arm is the first writer
-(a later node), and no dependency gating reads the handoff state yet (§8.46 build readiness and
-the §8.55/§8.56 landing gates are deliberately unchanged).
+generic `perk:*` sentinel classifier). The stacked ready arm of `Delivery.publish` is the stamp
+writer: the record is constructed **pre-mutation** from the verified projection (a `None`
+lineage or a marker-unsafe id segment is a typed `ReadyStampError` refusal — nothing flipped,
+nothing appended), then mark-ready-if-draft, then the append. An append failure or ambiguity is
+`ReadyStampError` (`error_type: ready_stamp_failed`, phase `ready`) carrying the truthful PR
+facts (`pr`, `was_draft`); the ambiguous/transient arms converge on re-run via the deterministic
+event key, while deterministic failures (a corrupt journal, a stored identity/lineage mismatch,
+an oversize record, a nonconforming id) name their own remediation — a re-run alone does not
+converge them. Dependency gating still deliberately reads no handoff state (§8.46 build
+readiness and the §8.55/§8.56 landing gates are unchanged — a later node).
 
 **The rest of the stored train state** uses the §8.42 merge-write seams. `TrainPersistence`
 retains the reusable typed writers: `write_checkpoints` writes the `parent_checkpoint_sha` +
@@ -6446,8 +6455,11 @@ operation protocol, not a partial discriminator. Its frozen nested records are `
   refusal (a present objective is nonblank).
 
 `PublishResult {kind, plan_id, dry_run, layer?, ready?}` carries the canonical bare plan id and
-exactly one matching nested detail. `Ready {pr, was_draft}` preserves the gateway PR and its
-pre-mutation draft fact. `Layer` is exactly `{pr, branch, header_update, plan_embedded, pr_checked,
+exactly one matching nested detail. `Ready {pr, was_draft, stamp?}` preserves the gateway PR and
+its pre-mutation draft fact; `stamp` is the optional nested `Stamp {record, existed}` detail (the
+§8.43 `ReadyStampRecord` carried as-is plus the append's idempotence fact) — present exactly on
+stacked ready success, `None` on incremental and dry-run alike (the enclosing `dry_run` flag
+distinguishes them), and constructor-validated absent on a dry run. `Layer` is exactly `{pr, branch, header_update, plan_embedded, pr_checked,
 parent_branch, operation_id, stack_number, stack_size, stack_position, parent_checkpoint_sha,
 published_head_sha, resumed, converged_noop, cascade}`. The stack triple is all-null or all-positive
 with position within size. A real layer has nonblank branches/checkpoints, a non-dry-run header
@@ -6469,15 +6481,18 @@ all-layers-published graph fallback may be `ready` without context). The package
 transfer core/runtime/error. Removing `DeliveryOperationFacts`, `LayerBodyFacts`,
 `PublicationError`, `PublicationResult`, `TrainRowFacts`, and `publish_layer` plus adding the two
 Transfer values left the exact 61-name `perk.delivery.__all__` of that era; the atomic
-objective-landing migration has since completed the cut to the **canonical 20-name surface**
-(`Delivery`, `resolve_delivery`, `DeliveryError`, the three authority ABCs, and the seven
+objective-landing migration has since completed the cut to the **canonical surface** — now
+twenty-one names (`Delivery`, `resolve_delivery`, `DeliveryError`, the payload-carrying
+`ReadyStampError` the stacked ready arm raises, the three authority ABCs, and the seven
 request/result families) — every operation module, the journal/persistence machinery, and
 the landing readiness/mutation internals are module-path-internal only.
 
 The façade composes three nominal ABC authorities, with each interface, real adapter, and owned
 constructor-configured fake moving in lockstep. `DeliveryPersistence` aggregates objective, plan,
 and journal reads plus `get_plan_body(*, issue_id)`, `update_plan_header(*, issue_id, fields)`,
-prepared/outcome appends, checkpoint-pair writes, transfer carry normalization, objective lookup
+prepared/outcome appends, the ready-stamp append (`append_ready_stamp(objective_id, record) ->
+StampAppendResult` — delegated to the §8.43 `TrainPersistence` path), checkpoint-pair writes,
+transfer carry normalization, objective lookup
 by run id, supersede creation, and supersession finalization. `DeliveryGit` exposes its bound `repo_root`,
 aggregates trunk/fetch/exact-ref-fetch/local-commit-resolution/ref/ancestry/worktree/base reads,
 adds `push_with_exact_lease(branch, *, expected_remote_sha)`, plus Prepare's push-URL resolution and
@@ -8224,12 +8239,25 @@ the projection-correlated number before any gate/mutation (`no_pr` on absent num
 `require_reviewable_layer(train, plan_id, mutating=false)` first requires a known target whose
 publication axis is exactly `PUBLISHED`; failure is `layer_not_published` with axes/findings and
 therefore precedes interpretation of a fresh close race. A fetched non-OPEN PR is then
-`pr_not_open`. Only an OPEN draft enters `mutating=true`, which additionally requires no unresolved
+`pr_not_open`. The ready-stamp record is constructed next, **before any mutation**, entirely from
+the verified projection (bare objective id, train lineage, the target layer's `node_id` +
+`published_head_sha`): an unconstructable stamp is a pre-mutation `ReadyStampError` refusal
+(origin `domain`) — the PR is never flipped when the handoff cannot be recorded. Only an OPEN
+draft enters `mutating=true`, which additionally requires no unresolved
 operation (`unresolved_operation`) and no train-wide structural blocker (`structural_blockers`,
-including `missing_lineage`), before `mark_pr_ready`. OPEN already-ready succeeds without a write
-after the validation-only gate, even when a later global veto exists. Operational drift on
-unrelated layers does not block review. Publish returns the fetched PR plus its original
-`was_draft`; contextual errors map back to the unchanged ready envelope and bytes.
+including `missing_lineage`), before `mark_pr_ready`. The stamp append then runs on draft AND
+non-draft PRs alike — mark-ready first, then `append_ready_stamp` (the append sits outside the
+one-unresolved-operation gate, so an already-non-draft PR stamps even while an operation is
+unresolved — the suspended→resume and failed-append re-run paths stay convergent). OPEN
+already-ready skips only the mutation-gate vetoes and the flip, even when a later global veto
+exists; operational drift on unrelated layers does not block review. Publish returns the fetched
+PR plus its original `was_draft` plus the nested `Ready.stamp {record, existed}` detail; an
+append failure/ambiguity is `ReadyStampError` (`ready_stamp_failed`, phase `ready`, origin
+`github`) carrying the truthful `pr`/`was_draft` — the CLI's failure envelope reports them while
+exiting nonzero, and the grown success envelope carries the derived continuation facts
+(`stacked`, `objective`, `node`, `stamped_head`, `stamp_advanced`, the reconcile-not-launched
+notice + copyable retry). The pre-stamp "unchanged ready envelope and bytes" posture is
+superseded by this contract.
 
 **Status.** Ordinary `/submit` and `/address` now converge published suffixes automatically;
 explicit sync remains the owner of base advancement, adoption, continuation/abort, preview, and

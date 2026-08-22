@@ -7,5 +7,12 @@
     "url": "https://github.com/o/r/pull/42"
   },
   "was_draft": true,
-  "dry_run": false
+  "dry_run": false,
+  "stacked": true,
+  "objective": "63",
+  "node": "1.2",
+  "stamped_head": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "stamp_advanced": true,
+  "reconcile_notice": "the ready-time reconcile pass was not launched \u2014 perk ready is deterministic and non-launching",
+  "reconcile_retry": "perk ready 42"
 }

@@ -129,7 +129,8 @@ green-lights).
 
 Array-of-tables; each row is one check. Consumed by the in-session CI executor (warm `/ci` gives
 the one-line overall summary; the `run_ci` tool returns the detailed per-check report); `/ready`
-does not run them — it only marks the draft PR ready for review (run the checks first). Checks run
+does not run them — it marks the draft PR ready (and, for a stacked layer, records the handoff
+stamp); run the checks first. Checks run
 **concurrently**; declared order governs the detailed **report** order, not execution order — each
 row must be independently runnable (sequence inside one `command`, e.g. `"build && test"`). `/ci`
 / the `run_ci` `check` argument accept a single name or a comma-separated list.

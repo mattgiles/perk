@@ -13,6 +13,12 @@ cross-machine serialization is the one-unresolved-operation journal gate plus th
 lease — the remote itself arbitrates competing writers. Failures leave the prepared operation
 **unresolved** (recoverable, blocking successor readiness) rather than guessing; only the pure
 no-op convergence returns without touching the journal.
+
+The stacked ready arm orders two mutations under one contract: mark-ready first (draft PRs
+only), then the ready-stamp journal append — the pure record construction happens before
+either, so an unconstructable stamp refuses the whole gesture with nothing flipped, and an
+append failure after the flip reports the truthful PR facts (the deterministic stamp key makes
+the ambiguous arms converge on re-run).
 """
 
 import contextlib
@@ -24,6 +30,7 @@ from typing import Never, Protocol, cast
 
 from perk import plan
 from perk.backends.issue_backend import IssueBackendError, PlanHeaderUpdate, PlanState
+from perk.backends.objective_store import ObjectiveStoreError
 from perk.delivery import sync as sync_mod
 from perk.delivery.facade import (
     DeliveryError,
@@ -32,6 +39,7 @@ from perk.delivery.facade import (
     DeliveryPersistence,
     PublishRequest,
     PublishResult,
+    ReadyStampError,
     StatusRequest,
     StatusResult,
     SyncRequest,
@@ -40,9 +48,12 @@ from perk.delivery.facade import (
 )
 from perk.delivery.journal import (
     EventRole,
+    JournalCorruptionError,
+    JournalRecordTooLarge,
     OperationKind,
     OutcomeRecord,
     PreparedRecord,
+    ReadyStampRecord,
     mint_operation_id,
 )
 from perk.delivery.layer import (
@@ -54,12 +65,16 @@ from perk.delivery.layer import (
     require_reviewable_layer,
 )
 from perk.delivery.persistence import (
+    JournalAppendAmbiguous,
+    StampAppendResult,
+    TrainPersistenceError,
     UnresolvedOperationError,
 )
 from perk.delivery.train import (
     DeliveryTrain,
     NoDeliveryTrain,
     PrFactsView,
+    TrainLayer,
     TrainReconstructionError,
     TrainStatus,
 )
@@ -468,22 +483,134 @@ def _ready(context: _PublishContext, request: PublishRequest) -> PublishResult:
             f"No PR found for published layer {layer.node_id} (expected #{layer.pr_number})",
             error_type="no_pr",
         )
-    require_reviewable_layer(train, plan_id=wanted, mutating=False)
+    target = require_reviewable_layer(train, plan_id=wanted, mutating=False)
     if pr.state.upper() != "OPEN":
         raise LayerError(
             f"PR #{pr.number} for published layer {layer.node_id} is {pr.state}, not OPEN",
             error_type="pr_not_open",
         )
     was_draft = pr.is_draft
+    # Construct the stamp BEFORE either mutation (contracts.md §8.43): all facts come from
+    # the verified projection, so an unconstructable stamp refuses the whole gesture with
+    # nothing flipped.
+    record = _build_stamp_record(train, target, plan_id=wanted, pr=pr, was_draft=was_draft)
     if was_draft:
         require_reviewable_layer(train, plan_id=wanted, mutating=True)
         context.github.mark_pr_ready(pr.number)
+    result = _append_stamp(context, record, pr=pr, was_draft=was_draft)
     return PublishResult(
         kind="ready",
         plan_id=wanted,
         dry_run=False,
-        ready=PublishResult.Ready(pr=pr, was_draft=was_draft),
+        ready=PublishResult.Ready(
+            pr=pr,
+            was_draft=was_draft,
+            stamp=PublishResult.Ready.Stamp(record=record, existed=result.existed),
+        ),
     )
+
+
+def _build_stamp_record(
+    train: DeliveryTrain,
+    target: TrainLayer,
+    *,
+    plan_id: str,
+    pr: prs.PullRequest,
+    was_draft: bool,
+) -> ReadyStampRecord:
+    """Construct the ready-stamp record from the verified projection — never live reads.
+
+    Pure derivation, no mutation: a ``None`` lineage or a marker-unsafe id segment is a typed
+    :class:`ReadyStampError` refusal (origin ``domain``) — the PR is never flipped when the
+    handoff cannot be recorded, and no re-run converges until the stored state conforms.
+    """
+    if train.delivery_lineage is None:
+        raise ReadyStampError(
+            f"objective {train.objective_id} stores no delivery_lineage — the handoff stamp "
+            "cannot be journaled, so nothing was marked ready; repair the objective's stored "
+            "lineage before retrying (re-running converges nothing until it conforms)",
+            pr=pr,
+            was_draft=was_draft,
+            origin="domain",
+        )
+    # PUBLISHED classification invariant: a verified publication always carries the full
+    # checkpoint pair — no defensive re-checks beyond the type narrow.
+    head_sha = target.published_head_sha
+    assert head_sha is not None
+    try:
+        return ReadyStampRecord(
+            objective_id=train.objective_id.removeprefix("#"),
+            delivery_lineage=train.delivery_lineage,
+            plan_id=plan_id,
+            node_id=target.node_id,
+            head_sha=head_sha,
+        )
+    except ValueError as exc:
+        raise ReadyStampError(
+            f"layer {target.node_id} (plan #{plan_id}) cannot carry a handoff stamp — {exc}; "
+            "nothing was marked ready, and re-running converges nothing until the "
+            "nonconforming id is repaired",
+            pr=pr,
+            was_draft=was_draft,
+            origin="domain",
+        ) from exc
+
+
+def _append_stamp(
+    context: _PublishContext,
+    record: ReadyStampRecord,
+    *,
+    pr: prs.PullRequest,
+    was_draft: bool,
+) -> StampAppendResult:
+    """The stamp append — the second mutation, after the mark-ready mechanics.
+
+    Every failure is a :class:`ReadyStampError` (origin ``github``) carrying the truthful PR
+    facts; the message names the per-cause remediation, and only the ambiguous/transient arms
+    claim the converging re-run (the deterministic stamp key makes it idempotent).
+    """
+    try:
+        return context.persistence.append_ready_stamp(record.objective_id, record)
+    except JournalAppendAmbiguous as exc:
+        raise ReadyStampError(
+            f"the handoff stamp append is ambiguous — it may or may not have landed ({exc}); "
+            "re-running `perk ready` converges via the deterministic event key",
+            pr=pr,
+            was_draft=was_draft,
+            origin="github",
+        ) from exc
+    except JournalCorruptionError as exc:
+        raise ReadyStampError(
+            f"the journal carrier is corrupt — the handoff stamp cannot be appended ({exc}); "
+            "repair the carrier first — re-running will NOT converge",
+            pr=pr,
+            was_draft=was_draft,
+            origin="github",
+        ) from exc
+    except JournalRecordTooLarge as exc:
+        raise ReadyStampError(
+            f"the rendered handoff stamp is oversize — {exc}; the stored identity segments "
+            "must shrink before a stamp can be recorded",
+            pr=pr,
+            was_draft=was_draft,
+            origin="github",
+        ) from exc
+    except TrainPersistenceError as exc:
+        raise ReadyStampError(
+            f"the stored objective state disagrees with the stamp — {exc}; repair the stored "
+            "identity/lineage mismatch before retrying",
+            pr=pr,
+            was_draft=was_draft,
+            origin="github",
+        ) from exc
+    except (IssueBackendError, ObjectiveStoreError) as exc:
+        raise ReadyStampError(
+            f"the handoff stamp append failed ({exc}); re-run to retry — if it persists, "
+            "inspect the journal carrier",
+            pr=pr,
+            was_draft=was_draft,
+            origin="github",
+        ) from exc
 
 
 # ----------------------------------------------------------------- routing

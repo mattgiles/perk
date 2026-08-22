@@ -35,7 +35,9 @@ hands-on on a throwaway repo; this guide is the map, not the lesson.)
    [`/submit`](../reference/in-session/workflow-commands.md#submit) once the work is committed — it pushes the
    branch and opens a draft PR. The cold worker is [`perk submit`](../reference/cli.md#perk-submit).
 4. **Mark it ready.** Run warm [`/ready`](../reference/in-session/workflow-commands.md#ready) to move the draft PR
-   to ready-for-review — the deliberate review gate. It does not run CI — run
+   to ready-for-review — the deliberate review gate. (Stacked layers differ: review happens on
+   the draft, and `/ready` is the post-review handoff — see
+   [How to review a stacked train](review-a-stacked-train.md).) It does not run CI — run
    [`/ci`](../reference/in-session/workflow-commands.md#ci) first.
 5. **Address feedback (conditional).** If a reviewer leaves feedback, run warm
    [`/address`](../reference/in-session/workflow-commands.md#address). This step is optional — you only enter it

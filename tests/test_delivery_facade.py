@@ -130,6 +130,7 @@ _DELIVERY_ERROR_TYPES = {
     "stack_registration_drift",
     "stack_registration_failed",
     "publication_drift",
+    "ready_stamp_failed",
     "no_pr",
     "pr_not_open",
     "layer_not_published",
@@ -294,6 +295,7 @@ _NEW_EXPORTS = {
     "StatusResult",
     "PublishRequest",
     "PublishResult",
+    "ReadyStampError",
     "RecoverRequest",
     "RecoverResult",
     "SyncRequest",
@@ -305,7 +307,7 @@ _NEW_EXPORTS = {
     "resolve_delivery",
 }
 # The migration is complete: every non-canonical export is retired — nothing is retained
-# beyond the canonical 20-name surface.
+# beyond the canonical 21-name surface.
 
 
 def _objective(
@@ -4284,7 +4286,7 @@ def test_public_export_cut_is_exact() -> None:
     exported = set(delivery_pkg.__all__)
     assert _RETIRED_EXPORTS.isdisjoint(exported)
     assert exported == _NEW_EXPORTS
-    assert len(delivery_pkg.__all__) == 20
+    assert len(delivery_pkg.__all__) == 21
     assert not hasattr(delivery_pkg, "DeliveryTrain")
     for finalize_name in (
         "finalize_landed_plan",

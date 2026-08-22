@@ -78,6 +78,37 @@ class TestRepoDeliveryPersistence:
             ("header", "101", {"branch": "plan-101"}),
         ]
 
+    def test_append_ready_stamp_delegates_exactly(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from perk.delivery.journal import ReadyStampRecord
+        from perk.delivery.persistence import StampAppendResult
+
+        record = ReadyStampRecord(
+            objective_id="500",
+            delivery_lineage="01LINEAGE",
+            plan_id="101",
+            node_id="1.1",
+            head_sha="b" * 40,
+        )
+        expected = StampAppendResult(key=f"500:101:1.1:{'b' * 40}", existed=True)
+        calls: list[tuple[object, ...]] = []
+
+        class _TrainPersistence:
+            def append_ready_stamp(
+                self, objective_id: str, stamp: ReadyStampRecord
+            ) -> StampAppendResult:
+                calls.append(("append_ready_stamp", objective_id, stamp))
+                return expected
+
+        authority = observe.RepoDeliveryPersistence(tmp_path)
+        monkeypatch.setattr(
+            authority, "_resolve", lambda: (object(), object(), _TrainPersistence())
+        )
+
+        assert authority.append_ready_stamp("500", record) == expected
+        assert calls == [("append_ready_stamp", "500", record)]
+
     @pytest.mark.parametrize(
         ("backend_id", "expected_carries"),
         (("github", {}), ("linear", {"1.1": "ENG-1"})),

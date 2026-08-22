@@ -27,6 +27,11 @@ _STACKED_REF = plan.PlanRef(
     objective_id="500",
     delivery_lineage="01LINEAGE",
 )
+# Valid 40-hex heads: the stacked ready arm constructs a ReadyStampRecord from the projection,
+# so every stacked fixture must carry a real object-id shape.
+_PARENT_SHA = "a" * 40
+_HEAD_SHA = "b" * 40
+_STAMP_KEY = f"500:7:1.1:{_HEAD_SHA}"
 
 
 def _git_init(path: str) -> None:
@@ -56,6 +61,7 @@ def _bind_ready_delivery(
     numbered_pr: github.PullRequest | None = None,
     train: train_mod.DeliveryTrain | None = None,
     errors: dict[tuple[object, ...], Exception] | None = None,
+    persistence: FakeDeliveryPersistence | None = None,
 ) -> tuple[FakeDeliveryGitHub, list[delivery.PublishRequest]]:
     authority = FakeDeliveryGitHub(
         branch_prs={"plan-7": branch_pr} if branch_pr is not None else {},
@@ -81,7 +87,7 @@ def _bind_ready_delivery(
             return super().publish(request)
 
     service = _ReadyDelivery(
-        persistence=FakeDeliveryPersistence(),
+        persistence=persistence if persistence is not None else FakeDeliveryPersistence(),
         git=FakeDeliveryGit(),
         github=authority,
     )
@@ -108,11 +114,27 @@ def _run(monkeypatch, args, *, write_ref=True, ref: plan.PlanRef = _REF):
 
 def test_pr_ready_marks_draft(monkeypatch):
     _authed(monkeypatch)
-    authority, requests = _stub_pr(monkeypatch, is_draft=True)
+    persistence = FakeDeliveryPersistence()
+    _stub_plan(monkeypatch)
+    pr = github.PullRequest(number=42, url="u/pr/42", is_draft=True, state="OPEN", existed=True)
+    authority, requests = _bind_ready_delivery(monkeypatch, branch_pr=pr, persistence=persistence)
     result = _run(monkeypatch, ["pr", "ready", "--json"])
     assert result.exit_code == 0
     data = json.loads(result.output)
     assert data["success"] is True and data["was_draft"] is True
+    # Incremental untouched: no stamp mechanics, and the continuation facts are honest —
+    # stacked=false, everything else null.
+    assert data["stacked"] is False
+    assert (
+        data["objective"]
+        is data["node"]
+        is data["stamped_head"]
+        is data["stamp_advanced"]
+        is data["reconcile_notice"]
+        is data["reconcile_retry"]
+        is None
+    )
+    assert not [call for call in persistence.calls if call[0] == "append_ready_stamp"]
     assert authority.calls == [("pr_for_branch", "plan-7"), ("mark_pr_ready", 42)]
     assert requests == [delivery.PublishRequest(kind="ready", plan_id="7", delivery="incremental")]
 
@@ -177,6 +199,7 @@ def _stacked_train(
     publication: train_mod.LayerPublication = train_mod.LayerPublication.PUBLISHED,
     findings: tuple[train_mod.TrainFinding, ...] = (),
     unresolved: tuple[train_mod.UnresolvedOperationFacts, ...] = (),
+    delivery_lineage: str | None = "01LINEAGE",
 ) -> train_mod.DeliveryTrain:
     layer = train_mod.TrainLayer(
         node_id="1.1",
@@ -194,16 +217,16 @@ def _stacked_train(
         membership=train_mod.LayerMembership.NOT_APPLICABLE,
         writer=train_mod.LayerWriter.FREE,
         finalization=train_mod.LayerFinalization.NOT_MERGED,
-        parent_checkpoint_sha="p" * 40,
-        published_head_sha="h" * 40,
-        observed_remote_head_sha="h" * 40,
+        parent_checkpoint_sha=_PARENT_SHA,
+        published_head_sha=_HEAD_SHA,
+        observed_remote_head_sha=_HEAD_SHA,
         observed_pr_base="main",
         expected_pr_base="main",
     )
     return train_mod.DeliveryTrain(
         objective_id="500",
         objective_url="u/objective/500",
-        delivery_lineage="01LINEAGE",
+        delivery_lineage=delivery_lineage,
         base="main",
         redirected_from=None,
         layers=(layer,),
@@ -224,6 +247,8 @@ def _stub_stacked(
     is_draft: bool,
     pr_exists: bool = True,
     pr_state: str = "OPEN",
+    errors: dict[tuple[object, ...], Exception] | None = None,
+    persistence: FakeDeliveryPersistence | None = None,
 ) -> tuple[FakeDeliveryGitHub, list[delivery.PublishRequest]]:
     _stub_plan(
         monkeypatch,
@@ -240,24 +265,116 @@ def _stub_stacked(
         if pr_exists
         else None
     )
-    return _bind_ready_delivery(monkeypatch, numbered_pr=pr, train=train)
+    return _bind_ready_delivery(
+        monkeypatch, numbered_pr=pr, train=train, errors=errors, persistence=persistence
+    )
 
 
-def test_stacked_ready_fetches_published_pr_then_marks(monkeypatch):
+def test_stacked_ready_fetches_published_pr_then_marks_then_stamps(monkeypatch):
     _authed(monkeypatch)
-    authority, requests = _stub_stacked(monkeypatch, train=_stacked_train(), is_draft=True)
+    persistence = FakeDeliveryPersistence()
+    authority, requests = _stub_stacked(
+        monkeypatch, train=_stacked_train(), is_draft=True, persistence=persistence
+    )
     result = _run(monkeypatch, ["pr", "ready", "--json"], ref=_STACKED_REF)
     assert result.exit_code == 0, result.output
     data = json.loads(result.output)
     assert data["pr"] == {"number": 42, "url": "u/pr/42"}
     assert data["was_draft"] is True
+    assert data["stacked"] is True
+    assert data["objective"] == "500" and data["node"] == "1.1"
+    assert data["stamped_head"] == _HEAD_SHA
+    assert data["stamp_advanced"] is True
+    assert "not launched" in data["reconcile_notice"]
+    assert data["reconcile_retry"] == "perk ready 7"
     assert authority.calls == [("get_pr", 42), ("mark_pr_ready", 42)]
+    assert ("append_ready_stamp", "500", _STAMP_KEY) in persistence.calls
     assert requests == [
         delivery.PublishRequest(kind="ready", plan_id="7", delivery="stacked", objective_id="500")
     ]
 
 
+def test_stacked_ready_existing_stamp_reports_not_advanced(monkeypatch):
+    from perk.delivery.persistence import StampAppendResult
+
+    _authed(monkeypatch)
+    persistence = FakeDeliveryPersistence(
+        stamp_results={_STAMP_KEY: StampAppendResult(key=_STAMP_KEY, existed=True)}
+    )
+    _authority, _requests = _stub_stacked(
+        monkeypatch, train=_stacked_train(), is_draft=True, persistence=persistence
+    )
+    result = _run(monkeypatch, ["pr", "ready", "--json"], ref=_STACKED_REF)
+    assert result.exit_code == 0, result.output
+    data = json.loads(result.output)
+    assert data["stamp_advanced"] is False
+    assert data["stamped_head"] == _HEAD_SHA
+
+
+def test_stacked_ready_append_failure_is_ready_stamp_failed_after_mark(monkeypatch):
+    # Mark-first ordering (contracts.md §8.43): the append failure surfaces AFTER the flip, so
+    # the envelope must carry the truthful PR facts — and mark_pr_ready WAS called.
+    from perk.backends.issue_backend import IssueBackendError
+
+    _authed(monkeypatch)
+    persistence = FakeDeliveryPersistence(
+        errors={("append_ready_stamp", "500", _STAMP_KEY): IssueBackendError("backend down")}
+    )
+    authority, _requests = _stub_stacked(
+        monkeypatch, train=_stacked_train(), is_draft=True, persistence=persistence
+    )
+    result = _run(monkeypatch, ["pr", "ready", "--json"], ref=_STACKED_REF)
+    assert result.exit_code == 1
+    data = json.loads(result.output)
+    assert data["error_type"] == "ready_stamp_failed"
+    assert data["pr"] == {"number": 42, "url": "u/pr/42"}
+    assert data["was_draft"] is True
+    assert data["dry_run"] is False
+    assert "re-run" in data["message"]
+    assert ("mark_pr_ready", 42) in authority.calls
+
+
+def test_stacked_ready_mark_failure_never_appends(monkeypatch):
+    _authed(monkeypatch)
+    persistence = FakeDeliveryPersistence()
+    _authority, _requests = _stub_stacked(
+        monkeypatch,
+        train=_stacked_train(),
+        is_draft=True,
+        errors={("mark_pr_ready", 42): github.GitHubError("cannot mark")},
+        persistence=persistence,
+    )
+    result = _run(monkeypatch, ["pr", "ready", "--json"], ref=_STACKED_REF)
+    assert result.exit_code == 1
+    assert json.loads(result.output)["error_type"] == "github_error"
+    assert not [call for call in persistence.calls if call[0] == "append_ready_stamp"]
+
+
+def test_stacked_ready_missing_lineage_refuses_pre_mutation(monkeypatch):
+    # The pre-mutation construction refusal: an unconstructable stamp refuses the WHOLE
+    # gesture before any mutation — the PR is never flipped and nothing is appended.
+    _authed(monkeypatch)
+    persistence = FakeDeliveryPersistence()
+    authority, _requests = _stub_stacked(
+        monkeypatch,
+        train=_stacked_train(delivery_lineage=None),
+        is_draft=True,
+        persistence=persistence,
+    )
+    result = _run(monkeypatch, ["pr", "ready", "--json"], ref=_STACKED_REF)
+    assert result.exit_code == 1
+    data = json.loads(result.output)
+    assert data["error_type"] == "ready_stamp_failed"
+    assert data["pr"] == {"number": 42, "url": "u/pr/42"}
+    assert data["was_draft"] is True
+    assert authority.calls == [("get_pr", 42)]
+    assert not [call for call in persistence.calls if call[0] == "append_ready_stamp"]
+
+
 def test_stacked_already_ready_validates_target_but_ignores_global_vetoes(monkeypatch):
+    # The stamp append sits outside the one-unresolved-operation gate (§8.43): a non-draft PR
+    # stamps even while an operation is unresolved — the suspended→resume and failed-append
+    # re-run paths stay convergent.
     _authed(monkeypatch)
     operation = train_mod.UnresolvedOperationFacts("01OP", "sync", "t0")
     finding = train_mod.TrainFinding(
@@ -266,11 +383,17 @@ def test_stacked_already_ready_validates_target_but_ignores_global_vetoes(monkey
         message="lineage absent",
     )
     train = _stacked_train(findings=(finding,), unresolved=(operation,))
-    authority, _requests = _stub_stacked(monkeypatch, train=train, is_draft=False)
+    persistence = FakeDeliveryPersistence()
+    authority, _requests = _stub_stacked(
+        monkeypatch, train=train, is_draft=False, persistence=persistence
+    )
     result = _run(monkeypatch, ["pr", "ready", "--json"], ref=_STACKED_REF)
     assert result.exit_code == 0, result.output
-    assert json.loads(result.output)["was_draft"] is False
+    data = json.loads(result.output)
+    assert data["was_draft"] is False
+    assert data["stacked"] is True and data["stamp_advanced"] is True
     assert authority.calls == [("get_pr", 42)]
+    assert ("append_ready_stamp", "500", _STAMP_KEY) in persistence.calls
 
 
 def test_stacked_ready_missing_pr_is_no_pr(monkeypatch):
@@ -359,15 +482,18 @@ def test_stacked_already_ready_target_drift_is_layer_not_published(monkeypatch):
 def test_stacked_ready_draft_refuses_unresolved_operation(monkeypatch):
     _authed(monkeypatch)
     operation = train_mod.UnresolvedOperationFacts("01OP", "sync", "t0")
+    persistence = FakeDeliveryPersistence()
     authority, _requests = _stub_stacked(
         monkeypatch,
         train=_stacked_train(unresolved=(operation,)),
         is_draft=True,
+        persistence=persistence,
     )
     result = _run(monkeypatch, ["pr", "ready", "--json"], ref=_STACKED_REF)
     assert result.exit_code == 1
     assert json.loads(result.output)["error_type"] == "unresolved_operation"
     assert authority.calls == [("get_pr", 42)]
+    assert not [call for call in persistence.calls if call[0] == "append_ready_stamp"]
 
 
 def test_stacked_ready_draft_refuses_structural_blocker(monkeypatch):
@@ -503,6 +629,17 @@ def test_pr_ready_dry_run_offline(monkeypatch):
     assert result.exit_code == 0
     data = json.loads(result.output)
     assert data["success"] is True and data["dry_run"] is True
+    # The offline preview classifies nothing: all seven continuation fields are null.
+    assert (
+        data["stacked"]
+        is data["objective"]
+        is data["node"]
+        is data["stamped_head"]
+        is data["stamp_advanced"]
+        is data["reconcile_notice"]
+        is data["reconcile_retry"]
+        is None
+    )
     assert requests == [delivery.PublishRequest(kind="ready", plan_id="7", dry_run=True)]
     assert authority.calls == []
 

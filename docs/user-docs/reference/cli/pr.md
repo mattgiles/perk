@@ -91,25 +91,48 @@ alias: [`perk land`](../cli.md#perk-land).
 
 ### `perk pr ready [PLAN]`
 
-Mark a plan's draft PR ready for review (the deliberate review gate) — a **worker-only**
-command (not a merged L+W: `ready` is not a registry stage and has no launcher). `PLAN` is an
+Ready a plan's PR — a **worker-only** command (not a merged L+W: `ready` is not a registry
+stage and has no launcher). For an **incremental** plan this marks the draft PR ready for
+review (the deliberate review gate). For a **stacked** layer it is the deliberate
+**post-review human handoff**: review happens on the draft layer PR, and after review +
+address this gesture stamps the exact verified current head into the delivery journal — on
+draft AND non-draft PRs alike (mark-ready mechanics first, then the journal append). It is
+never routine post-submit choreography: supervisors and factories name it, they never run it.
+`PLAN` is an
 optional plan issue id or pasted issue URL: it selects the plan canonically with one backend
 read, so `perk pr ready 1699` works from the repository root — ready needs no source files, no
 worktree, and never writes the active-plan selector; omitted, the invoking checkout's own saved
 plan is used (inside a plan worktree, that worktree's binding). An explicit `PLAN` naming an
 existing issue with no plan-header refuses typed (`issue_kind_mismatch`). `--dry-run` is an
 offline validation preview: it parse-checks an explicit `PLAN` and confirms a saved plan exists
-on the no-argument form, but performs no backend or GitHub read — no PR is resolved or marked
-(and nothing is kind-classified). For a stacked plan, the worker reconstructs the train and
+on the no-argument form, but performs no backend or GitHub read — no PR is resolved or marked,
+no stamp is appended (and nothing is kind-classified). For a stacked plan, the worker
+reconstructs the train and
 fetches the projection-correlated PR: the target must be exactly published; marking a draft also
 requires no unresolved operation and no structural train blocker (unrelated operational drift does
 not block). An already-ready PR revalidates target identity/publication but skips those global
-mutation vetoes and succeeds idempotently. A target the projection classifies as merged, closed,
+mutation vetoes — and still stamps (the append sits outside the one-unresolved-operation gate,
+keeping the re-run paths convergent). A target the projection classifies as merged, closed,
 wrong-base, or otherwise drifted refuses as `layer_not_published`; if the projection still says
 published but the freshly fetched PR closed after reconstruction, that race refuses as
 `pr_not_open`. Other typed failures include `unresolved_operation` and `structural_blockers` (plus
 `no_pr` for a vanished correlated PR).
-`--json` emits the unchanged machine shape. Flat alias: [`perk ready`](../cli.md#perk-ready-plan).
+
+The stamp failure contract: a failed or ambiguous stamp append exits nonzero with
+`error_type: ready_stamp_failed` while the envelope still reports the truthful `pr` and
+`was_draft`. The message carries per-cause remediation — an ambiguous or transient append
+converges on an idempotent re-run (the deterministic stamp key); a corrupt journal, a
+stored-state mismatch, an oversize record, or a nonconforming id names its own repair (a
+re-run alone will not converge). An unconstructable stamp (missing lineage, marker-unsafe id)
+refuses **before** any mutation — the PR is never flipped when the handoff cannot be recorded.
+
+`--json` emits the grown envelope: the original `success, error_type, message, pr, was_draft,
+dry_run` plus the tail-additive continuation facts `stacked, objective, node, stamped_head,
+stamp_advanced, reconcile_notice, reconcile_retry` (all null on the offline dry-run;
+`stacked: false` with the rest null on an incremental plan; all populated on stacked success —
+`reconcile_notice` reports that the ready-time reconcile pass was **not** launched, this worker
+is deterministic and non-launching, and `reconcile_retry` carries the copyable re-run). Flat
+alias: [`perk ready`](../cli.md#perk-ready-plan).
 
 ### `perk pr check`
 

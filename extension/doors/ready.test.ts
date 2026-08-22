@@ -14,6 +14,22 @@ const READY_JSON = JSON.stringify({
   was_draft: true,
 });
 
+const STACKED_READY_JSON = JSON.stringify({
+  success: true,
+  error_type: null,
+  message: null,
+  pr: { number: 42, url: "https://gh/o/r/pull/42" },
+  was_draft: true,
+  dry_run: false,
+  stacked: true,
+  objective: "500",
+  node: "1.2",
+  stamped_head: "b".repeat(40),
+  stamp_advanced: true,
+  reconcile_notice: "the ready-time reconcile pass was not launched",
+  reconcile_retry: "perk ready 7",
+});
+
 test("tool: ready delegates, surfaces the PR, and terminates", async () => {
   const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
   const bin = fakePerk(cwd, { stdout: READY_JSON });
@@ -80,6 +96,63 @@ test("tool: success:true with a malformed pr fails as bad_output (unexpected pay
     assert.equal(details.ok, false);
     assert.equal(details.error_type, "bad_output");
     assert.match(details.error ?? "", /unexpected payload/);
+  } finally {
+    h.dispose();
+  }
+});
+
+test("tool: a stacked payload surfaces the handoff facts", async () => {
+  const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
+  const bin = fakePerk(cwd, { stdout: STACKED_READY_JSON });
+  const h = await loadPerkSession({ cwd, env: { PERK_RUN_ID: "01RID", PERK_BIN: bin } });
+  try {
+    const result = await h.invokeTool("ready", {});
+    assert.equal(result.terminate, true);
+    const details = result.details as {
+      ok: boolean;
+      handoff?: { objective?: string; node?: string; stamp_advanced?: boolean };
+    };
+    assert.equal(details.ok, true);
+    assert.equal(details.handoff?.objective, "500");
+    assert.equal(details.handoff?.node, "1.2");
+    assert.equal(details.handoff?.stamp_advanced, true);
+    const text = result.content[0]?.text ?? "";
+    assert.match(text, /Handoff stamped/);
+    assert.match(text, /objective #500 node 1\.2/);
+    assert.match(text, /not launched/);
+    assert.match(text, /perk ready 7/);
+  } finally {
+    h.dispose();
+  }
+});
+
+test("tool: a partial stacked cohort is dropped whole (legacy success line)", async () => {
+  // stacked:true without stamped_head — the augmentation must be validated-and-dropped whole,
+  // never half-rendered; the legacy success line still renders (the worker already succeeded).
+  const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
+  const partial = JSON.stringify({
+    success: true,
+    error_type: null,
+    message: null,
+    pr: { number: 42, url: "https://gh/o/r/pull/42" },
+    was_draft: true,
+    stacked: true,
+    objective: "500",
+    node: "1.2",
+    stamp_advanced: true,
+    reconcile_notice: "n",
+    reconcile_retry: "perk ready 7",
+  });
+  const bin = fakePerk(cwd, { stdout: partial });
+  const h = await loadPerkSession({ cwd, env: { PERK_RUN_ID: "01RID", PERK_BIN: bin } });
+  try {
+    const result = await h.invokeTool("ready", {});
+    const details = result.details as { ok: boolean; handoff?: object };
+    assert.equal(details.ok, true);
+    assert.equal(details.handoff, undefined, "a partial cohort never attaches");
+    const text = result.content[0]?.text ?? "";
+    assert.match(text, /Marked ready: PR #42 is open for review\./);
+    assert.doesNotMatch(text, /Handoff/);
   } finally {
     h.dispose();
   }

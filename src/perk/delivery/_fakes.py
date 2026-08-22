@@ -16,8 +16,16 @@ from perk import objective
 from perk.backends.issue_backend import PlanHeaderUpdate, PlanState
 from perk.backends.objective_store import CancellationRepairOutcome, ObjectiveRef, ObjectiveState
 from perk.delivery.facade import DeliveryGit, DeliveryGitHub, DeliveryPersistence
-from perk.delivery.journal import EventRole, JournalFold, OutcomeRecord, PreparedRecord, fold_events
-from perk.delivery.persistence import AppendResult
+from perk.delivery.journal import (
+    EventRole,
+    JournalFold,
+    OutcomeRecord,
+    PreparedRecord,
+    ReadyStampRecord,
+    fold_events,
+    stamp_key,
+)
+from perk.delivery.persistence import AppendResult, StampAppendResult
 from perk.delivery.train import (
     BaseHeadObservation,
     PrFactsView,
@@ -70,6 +78,7 @@ class FakeDeliveryPersistence(_FailureMixin, DeliveryPersistence):
         journals: Mapping[str, JournalFold] | None = None,
         prepared_results: Mapping[str, AppendResult] | None = None,
         outcome_results: Mapping[str, AppendResult] | None = None,
+        stamp_results: Mapping[str, StampAppendResult] | None = None,
         header_results: Mapping[str, PlanHeaderUpdate] | None = None,
         successors_by_run: Mapping[str, ObjectiveRef] | None = None,
         backend_id: str = "github",
@@ -93,6 +102,7 @@ class FakeDeliveryPersistence(_FailureMixin, DeliveryPersistence):
         self._journals = dict(journals or {})
         self._prepared_results = dict(prepared_results or {})
         self._outcome_results = dict(outcome_results or {})
+        self._stamp_results = dict(stamp_results or {})
         self._header_results = dict(header_results or {})
         self._successors_by_run = dict(successors_by_run or {})
         self._backend_id = backend_id
@@ -240,6 +250,13 @@ class FakeDeliveryPersistence(_FailureMixin, DeliveryPersistence):
             record.operation_id,
             AppendResult(operation_id=record.operation_id, role=record.role, existed=False),
         )
+
+    def append_ready_stamp(self, objective_id: str, record: ReadyStampRecord) -> StampAppendResult:
+        key = stamp_key(record)
+        call: Call = ("append_ready_stamp", objective_id, key)
+        self.calls.append(call)
+        self._raise_failure(call)
+        return self._stamp_results.get(key, StampAppendResult(key=key, existed=False))
 
     def write_checkpoints(
         self,

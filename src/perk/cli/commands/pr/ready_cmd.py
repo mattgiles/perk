@@ -1,14 +1,24 @@
-"""`perk pr ready [PLAN]` — the deliberate draft→ready review gate (the cold ready door).
+"""`perk pr ready [PLAN]` — the deliberate ready gesture (the cold ready door).
 
-perk deliberately does NOT auto-publish on submit (the PR stays draft). `/ready` (`perk pr ready`)
-is the explicit gesture that opens the PR for review. The optional positional ``PLAN`` selects
+For an **incremental** plan this is the review gate: perk deliberately does NOT auto-publish on
+submit (the PR stays draft), and `/ready` (`perk pr ready`) is the explicit gesture that opens
+the PR for review. For a **stacked** layer it is the deliberate post-review HUMAN handoff:
+review happens on the draft layer PR, and after review + address the human runs ready to record
+the handoff stamp at the exact verified published head — on draft AND non-draft PRs alike
+(mark-ready mechanics first, then the journal append). It is never routine post-submit
+choreography and never auto-run. The optional positional ``PLAN`` selects
 the plan canonically (one backend read via ``perk.cli.plan_selection.select_plan``) — ready
 needs no source files, so `perk pr ready 42` works from the repository root without requiring
 or creating a worktree; the no-argument form keeps reading the invoking checkout's own
 ``cache.plan-ref`` (inside a plan worktree, that worktree's binding). The command derives only the
 selected plan id, delivery mode, and stacked objective id; ``Delivery.publish`` owns incremental
-and stacked draft-to-ready mechanics. An already-ready stacked PR still validates the target but
-skips mutation-only vetoes.
+and stacked ready mechanics. An already-ready stacked PR still validates the target but
+skips mutation-only vetoes — and still stamps. A failed/ambiguous stamp append exits nonzero
+with ``error_type: ready_stamp_failed`` while the envelope reports the truthful ``pr`` and
+``was_draft``; the ambiguous/transient arms converge on an idempotent re-run (the deterministic
+stamp key), deterministic failures name their own remediation. This worker is deterministic and
+non-launching — it never starts the ready-time reconcile pass (which does not exist yet); the
+envelope's ``reconcile_notice``/``reconcile_retry`` say so.
 
 Exit codes: 0 ready · 1 no saved plan / plan not found / no PR / op failure · 2 not-a-repo.
 """
@@ -34,8 +44,16 @@ from perk.substrate.output import user_output
 
 @dataclass(frozen=True)
 class PrReadyResult:
-    pr: github.PullRequest
-    was_draft: bool
+    """The thin command-level carrier around the façade's ready detail.
+
+    ``stacked`` is the command's own routing decision (``None`` on the offline dry run, which
+    classifies nothing); the continuation facts are derived from ``ready.stamp`` at the
+    serialization boundary only.
+    """
+
+    ready: delivery.PublishResult.Ready
+    plan_id: str
+    stacked: bool | None
     dry_run: bool
 
 
@@ -46,13 +64,23 @@ class PrReadyResult:
     is_flag=True,
     help=(
         "Offline preview: validate the selection (PLAN is parse-checked; no backend or GitHub "
-        "read) and report what a real run would do — no PR is resolved or marked."
+        "read) and report what a real run would do — no PR is resolved or marked, no handoff "
+        "stamp is appended, and nothing is classified (delivery kind included)."
     ),
 )
 @click.option("--json", "as_json", is_flag=True, help="Emit a machine-readable report to stdout.")
 @click.pass_context
 def ready_pr(ctx: click.Context, *, plan: str | None, dry_run: bool, as_json: bool) -> None:
-    """Mark a plan's draft PR ready for review (the deliberate review gate).
+    """Ready a plan's PR: the review gate (incremental) or the handoff stamp (stacked).
+
+    \b
+    Incremental plans: mark the draft PR ready for review — the deliberate review gate
+    (submit keeps the PR draft on purpose). Stacked layers: the deliberate POST-review human
+    handoff — review happens on the draft layer PR, and after review + address this gesture
+    stamps the exact verified published head into the delivery journal (draft AND non-draft
+    PRs; mark-ready first, then the append). Never routine post-submit choreography; never
+    auto-run. A failed stamp exits 1 as ready_stamp_failed with the truthful pr/was_draft;
+    an ambiguous/transient append converges on an idempotent re-run.
 
     \b
     PLAN is an optional plan issue id (e.g. 42, #42, ENG-123, or the pasted issue URL): pass it
@@ -80,6 +108,21 @@ def ready_pr(ctx: click.Context, *, plan: str | None, dry_run: bool, as_json: bo
             selected=selected,
             explicit_plan_id=explicit_plan_id,
         )
+    except delivery.ReadyStampError as exc:
+        # The stamp-specific failure envelope: the gesture may already have flipped the PR, so
+        # the truthful PR facts always ride along (contracts.md §8.43).
+        fail(
+            ctx,
+            as_json=as_json,
+            error_type=exc.error_type,
+            message=str(exc),
+            extra={
+                "pr": {"number": exc.pr.number, "url": exc.pr.url},
+                "was_draft": exc.was_draft,
+                "dry_run": False,
+            },
+        )
+        return
     except delivery.DeliveryError as exc:
         message = str(exc) if exc.origin == "domain" else f"pr ready failed\n{exc}"
         fail(
@@ -127,6 +170,7 @@ def _pr_ready_impl(
     explicit_plan_id: str | None = None,
 ) -> PrReadyResult:
     """Select one plan in the CLI, then delegate ready mechanics to Delivery.publish."""
+    stacked: bool | None = None
     if dry_run:
         plan_id = explicit_plan_id
         if plan_id is None:
@@ -173,7 +217,12 @@ def _pr_ready_impl(
     detail = published.ready
     if detail is None:
         raise ValueError("ready publish returned no ready detail")
-    return PrReadyResult(pr=detail.pr, was_draft=detail.was_draft, dry_run=published.dry_run)
+    return PrReadyResult(
+        ready=detail,
+        plan_id=published.plan_id,
+        stacked=stacked,
+        dry_run=published.dry_run,
+    )
 
 
 class ReadyPrOut(OutputModel):
@@ -188,8 +237,26 @@ class ReadyPrOut(OutputModel):
         return cls(number=pr.number, url=pr.url)
 
 
+def _reconcile_notice() -> str:
+    return (
+        "the ready-time reconcile pass was not launched — perk ready is deterministic and "
+        "non-launching"
+    )
+
+
+def _reconcile_retry(plan_id: str) -> str:
+    return f"perk ready {plan_id}"
+
+
 class PrReadyOut(OutputModel):
-    """The ``--json`` serialization boundary of :class:`PrReadyResult` (order load-bearing)."""
+    """The ``--json`` serialization boundary of :class:`PrReadyResult` (order load-bearing —
+    the seven continuation fields are tail-additive).
+
+    Null semantics: dry-run → all seven continuation fields null; incremental →
+    ``stacked=false``, rest null; stacked success → all populated (``reconcile_notice`` /
+    ``reconcile_retry`` are CLI-composed presentation: the ready-time reconcile pass was not
+    launched — this worker never launches — plus the copyable re-run gesture).
+    """
 
     success: bool
     error_type: str | None
@@ -197,16 +264,31 @@ class PrReadyOut(OutputModel):
     pr: ReadyPrOut
     was_draft: bool
     dry_run: bool
+    stacked: bool | None
+    objective: str | None
+    node: str | None
+    stamped_head: str | None
+    stamp_advanced: bool | None
+    reconcile_notice: str | None
+    reconcile_retry: str | None
 
     @classmethod
     def from_domain(cls, result: PrReadyResult) -> "PrReadyOut":
+        stamp = result.ready.stamp
         return cls(
             success=True,
             error_type=None,
             message=None,
-            pr=ReadyPrOut.from_domain(result.pr),
-            was_draft=result.was_draft,
+            pr=ReadyPrOut.from_domain(result.ready.pr),
+            was_draft=result.ready.was_draft,
             dry_run=result.dry_run,
+            stacked=result.stacked,
+            objective=stamp.record.objective_id if stamp is not None else None,
+            node=stamp.record.node_id if stamp is not None else None,
+            stamped_head=stamp.record.head_sha if stamp is not None else None,
+            stamp_advanced=(not stamp.existed) if stamp is not None else None,
+            reconcile_notice=_reconcile_notice() if stamp is not None else None,
+            reconcile_retry=_reconcile_retry(result.plan_id) if stamp is not None else None,
         )
 
 
@@ -219,10 +301,19 @@ def _render_human(result: PrReadyResult) -> None:
         user_output(click.style("pr ready --dry-run (no GitHub writes)", dim=True))
         user_output("  would: mark the PR ready for review (if draft)")
         return
-    verb = "Marked ready" if result.was_draft else "Already ready"
+    verb = "Marked ready" if result.ready.was_draft else "Already ready"
     user_output(
         click.style("✓ ", fg="green")
         + f"{verb}: PR "
-        + click.style(f"#{result.pr.number}", fg="cyan")
+        + click.style(f"#{result.ready.pr.number}", fg="cyan")
         + " is open for review"
     )
+    stamp = result.ready.stamp
+    if stamp is None:
+        return
+    stamped = "Handoff stamped" if not stamp.existed else "Handoff already stamped"
+    user_output(
+        f"  {stamped}: objective #{stamp.record.objective_id} node {stamp.record.node_id} "
+        f"at {stamp.record.head_sha}"
+    )
+    user_output(f"  {_reconcile_notice()}; re-run: {_reconcile_retry(result.plan_id)}")

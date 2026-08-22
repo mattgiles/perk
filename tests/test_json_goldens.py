@@ -228,8 +228,31 @@ def _pr_submit_result():
 
 def _pr_ready_result():
     from perk.cli.commands.pr.ready_cmd import PrReadyResult
+    from perk.delivery import PublishResult
+    from perk.delivery.journal import ReadyStampRecord
 
-    return PrReadyResult(pr=_pull_request(), was_draft=True, dry_run=False)
+    # The fully-populated stacked success: the ready detail carries the handoff stamp, so the
+    # golden pins every continuation field (stacked/objective/node/stamped_head/stamp_advanced
+    # plus the CLI-composed reconcile notice + retry).
+    return PrReadyResult(
+        ready=PublishResult.Ready(
+            pr=_pull_request(),
+            was_draft=True,
+            stamp=PublishResult.Ready.Stamp(
+                record=ReadyStampRecord(
+                    objective_id="63",
+                    delivery_lineage="01LINEAGE",
+                    plan_id="42",
+                    node_id="1.2",
+                    head_sha="b" * 40,
+                ),
+                existed=False,
+            ),
+        ),
+        plan_id="42",
+        stacked=True,
+        dry_run=False,
+    )
 
 
 def _pr_land_result():

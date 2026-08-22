@@ -50,7 +50,7 @@ it with fresh context. perk classifies the plan's canonical state into its **nex
 | plan state | next action |
 | --- | --- |
 | no PR yet | launches `implement` |
-| PR open, **draft** | the ready-for-review gate (yours: mark it ready, then `/land`) |
+| PR open, **draft** | the ready-for-review gate (yours — incremental: mark it ready, then `/land`; stacked: review on the draft, then the `perk ready` handoff; the train lands via `/objective-land`) |
 | PR open, actionable review feedback | launches `address` |
 | PR open, clean | awaiting the human review/land gate |
 | PR merged, learn pending | launches `learn` |
