@@ -711,8 +711,49 @@ Executed 2026-08-22 — the primary arm fired: real operator review feedback on 
 
 ### S9 — re-ready (wrapper carrier)
 
-*Not yet executed.* (Fresh stamps `stamp_advanced: true`, the seeded launches, pass outcomes;
-both `handoff ready` at the post-cascade heads.)
+Executed 2026-08-22 — `perk ready 1981` then `perk ready 1983`, each from an interactive
+terminal at the dev checkout root (the flat wrapper spelling, positional plan selection).
+
+- **Wrapper pre-session output (operator captures, both runs, same shape):** `✓ found plan
+  #<p>` → `✓ Already ready: PR #<pr> is open for review` (the cascade preserved non-draft —
+  the stamp still lands on a non-draft PR, per design) → `Handoff stamped: objective #1980
+  node <id> at <post-cascade head>` (fresh stamps at `ca046b8b…` / `149a8dcf…`) →
+  `launching the ready-time reconcile session…` → the pi banner (the seeded session opened
+  in the main checkout). **The designed launch-failure second outcome did NOT fire** — both
+  launches were clean (the arm stays capture-if-fired; § Named residuals).
+- **The journal (durable half):** now **four** append-only stamp comments — the two
+  superseded keys at `f7f25f9d…`/`29d4375d…` retained as history beside the two fresh keys
+  `1980:1981:1.1:ca046b8b…` and `1980:1983:1.2:149a8dcf…`; the handoff axis derives from the
+  LATEST stamp per plan, so the train reads both layers `handoff ready` at the post-cascade
+  heads.
+- **Seeded pass, layer 1 (operator transcript): honest no-op with a full divergence audit** —
+  liveness (live head = stamped head `ca046b8b…`), the pinned range `e2cb9e5d…..ca046b8b…`
+  judged (3 files, +81/−14, inside the train's ownership boundary), node 1.1's description
+  matched point-by-point ((a)–(d), the conditional no-op included), the excerpt-discipline
+  refinement confirmed already-recorded, engagement folded, "clean skip — nothing is stale."
+  Plus the pass's own forward-looking note: a real-capture refresh would re-stale the stamp —
+  "the documented repair is re-review + re-ready, exactly as the layer's own new docs teach."
+- **Seeded pass, layer 2 (operator transcript): evidence-bound writes** — the pass found two
+  real divergences in the accepted mirror (the handoff-repair guidance shipped as a distinct
+  stamp-axis "Handoff repair" table rather than appended routing rows; the canonical-source
+  footer re-pointed at the reorganized reference paths) and applied exactly its two
+  in-bounds powers: `objective_node` description reconcile for 1.2 (no status/PR) and
+  `reconcile_objective` prose rewrite (a layer-2 accepted-revision note in "accepted"
+  language + the Why bullet reshaped). Durable halves verified: the 1.2 roadmap description
+  now carries the accepted table shape; objective comment updated `2026-08-22T23:06:54Z`.
+- **The land-time excerpt judgment — settled with evidence (2026-08-22):** the tutorial at
+  the current layer-1 head `ca046b8b…` carries all three `stack status` excerpts
+  **byte-faithful to this record's real captured renders modulo exactly the placeholder
+  substitutions** (`1980→<N>`, `1981→<plan-1>`, `1982→<pr-1>`, `1983→<plan-2>`,
+  `1984→<pr-2>`, lineage→01XXXX…) — the `handoff <state>` suffixes, `writer active`, the
+  `planning gated:` line, and the 2/2 mixed state (`ready`+`ready` / `draft`+`unstamped`)
+  all match the live renders. The two-phase discipline's land-time requirement is satisfied
+  at the current heads; no further refresh commit is owed before landing.
+
+Across S4/S5/S9 the ready-time pass has now exhibited its full designed behavior envelope
+live: a real prose write, a verified no-op re-entry, a no-op with full audit, and a
+descriptions+prose write — with the guarded tail-append the one power never exercised
+(nothing warranted it; capture-if-fired, § Named residuals).
 
 ### S10 — objective land
 
