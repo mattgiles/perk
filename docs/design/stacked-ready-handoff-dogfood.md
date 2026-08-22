@@ -594,7 +594,23 @@ suspend gesture (no perk command performs it, by design).
 
 ### S6 — layer 2 publish
 
-*Not yet executed.* (The S3-contrast gate pass, plan/PR/journal facts, stack CREATE.)
+**Planning half executed 2026-08-22.** The gate-passes contrast with S3: the SAME bare
+`perk objective plan 1980` that refused typed `node_not_handoff_ready` at S3 now selected
+node **1.2** and saved cleanly — the only train change in between was S4's handoff stamp
+(and S5 proved the hold/resume around it). Plan issue **#1983** — "Mirror handoff-repair
+routing table in perk-expert stacked-delivery reference", created `2026-08-22T22:09:49Z`,
+fresh per-session run id (`01M0NQ2DS8Z2HTN42PVADYBC73`); the saved header carries the trio
+plus the chain link:
+
+```yaml
+objective_id: '1980'
+objective_node_id: '1.2'
+delivery_lineage: 01M0NJ5ASVYS4VMBEWXXVJNXRA
+predecessor_plan_id: '1981'
+```
+
+**Implement/publish half:** *pending — interactive implement → `run_ci` → `/submit` (the
+stack CREATE).*
 
 ### S7 — stamp layer 2 (warm carrier)
 
