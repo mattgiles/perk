@@ -30,6 +30,7 @@ next machine-safe or human boundary.
    | `merged_pending_reconcile` | The merge is visible but its land reconciliation or local learn pass is still pending; follow any printed `perk plan resume` remediation. |
    | `build_blocked` | A stacked delivery train is not build-ready; inspect it with the printed stack-status command. |
    | `repair_required` | Stacked state or an unresolved operation needs the printed recovery or status command before dispatch can continue. |
+   | `handoff_required` | The next stacked node waits on a direct dependency's post-review handoff stamp; a human records it with the printed `perk ready <PLAN>` — the supervisor never auto-runs it. |
    | `blocked` | Every remaining node depends on unfinished work; resolve the dependency or blocker. |
    | `pr_closed` | A pull request closed without merging and needs a human decision. |
    | `completed` | Every node is terminal; the supervisor reports the audit and closes the objective when not in dry-run mode. |

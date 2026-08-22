@@ -26,7 +26,11 @@ from perk.backends import resolve
 from perk.backends.engagement import EMPTY_NODE_ENGAGEMENT, render_node_engagement
 from perk.backends.objective_store import ObjectiveStoreError
 from perk.cli import completions
-from perk.cli.commands.objective.shared import objective_read_instruction, parse_objective_id
+from perk.cli.commands.objective.shared import (
+    handoff_blocker_phrase,
+    objective_read_instruction,
+    parse_objective_id,
+)
 from perk.cli.commands.seeded_door import SeededLaunch, run_seeded_door, seeded_door_options
 from perk.cli.context import require_github
 from perk.cli.ensure import Ensure, UserFacingCliError
@@ -76,6 +80,16 @@ def _planning_node_choice(
         raise UserFacingCliError(
             f"Objective #{number} is not build-ready: {decision.reason}\n{hint}",
             error_type="node_not_build_ready",
+        )
+    if decision.kind == "handoff_blocked":
+        gated = Ensure.not_none(decision.node, "handoff_blocked decision must carry a node")
+        blockers = Ensure.not_none(
+            decision.handoff_blockers, "handoff_blocked decision must carry blockers"
+        )
+        detail = "; ".join(handoff_blocker_phrase(layer) for layer in blockers)
+        raise UserFacingCliError(
+            f"Node {gated.id} is not handoff-ready: it waits on {detail}\n{hint}",
+            error_type="node_not_handoff_ready",
         )
     if decision.kind == "in_flight":
         in_flight = Ensure.not_none(decision.node, "in_flight decision must carry a node")

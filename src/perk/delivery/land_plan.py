@@ -61,6 +61,9 @@ def _stacked_refusal(plan_id: str) -> DeliveryError:
         f"plan #{plan_id} carries stacked delivery lineage — stacked layers land only as one "
         "atomic train, never individually\n"
         "Landing one layer merges into its parent branch and tears the train. "
+        "Review + address happen on the layer PR; when done, record the post-review handoff "
+        f"with /ready (perk ready {plan_id}); the train lands whole via /objective-land "
+        "(perk objective stack land). "
         "Inspect the train with: perk objective stack status",
         error_type="stacked_plan",
         phase="land",

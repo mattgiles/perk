@@ -134,7 +134,8 @@ under `--json`. A learn-docs consolidation plan is exempt: no marker, no learn p
 Flat alias for [`perk pr ready`](./cli/pr.md#perk-pr-ready-plan) (the canonical entry). Ready a
 plan's PR — the deliberate review gate for an incremental plan; for a stacked layer, the
 deliberate **post-review human handoff** that stamps the exact verified published head (draft
-and non-draft PRs; never routine post-submit choreography). A worker-only command (`--dry-run` /
+and non-draft PRs; never routine post-submit choreography) and thereby unblocks planning of the
+layer's direct dependents. A worker-only command (`--dry-run` /
 `--json`). `PLAN` selects the plan canonically and works from the repository root (no worktree
 needed); omitted, the invoking checkout's active saved plan is used.
 

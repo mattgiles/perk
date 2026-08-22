@@ -57,11 +57,17 @@ plans a specific node id instead of the next actionable one. Local-only; adds `-
 hub's [pre-launch fast-forward](../cli.md#pre-launch-fast-forward-read-only-planningauthoring)
 before launch; `--no-sync` opts out.
 
-For a **stacked** objective, node selection is **build-readiness-derived** (a live
+For a **stacked** objective, node selection is **build-readiness- and handoff-derived** (a live
 delivery-train reconstruction): the single plannable candidate is the next unpublished layer in
 delivery order — which permits planning the next layer while its predecessor is
-published-but-unmerged. A blocked train is a typed `node_not_build_ready` refusal carrying the
-exact veto (check `perk objective stack status <N>`), and an explicit `--node` must name the
+published-but-unmerged — and each of the candidate's **direct dependencies** must additionally
+be done/skipped, landed, or a verified-published layer whose post-review **handoff stamp** is
+`ready` (recorded with `perk ready <PLAN>` after review + address). A blocked train is a typed
+`node_not_build_ready` refusal carrying the
+exact veto (check `perk objective stack status <N>`); a handoff-blocked candidate is a typed
+`node_not_handoff_ready` refusal naming each blocking dependency (plan, PR, handoff state, the
+stamped-vs-current heads when stale) with the copyable `perk ready <PLAN>` remediation; and an
+explicit `--node` must name the
 ready candidate. The plan seed then carries the layer's position and its verified predecessor
 context (branch + remote head; the already-fetched `origin/<parent>` is locally inspectable) —
 perk records no planning-time SHA. `--dry-run` skips the readiness check (offline) and says so
@@ -90,7 +96,17 @@ limitations.
 
 ### `perk objective show NUMBER` (alias `s`)
 
-Show an objective's header, roadmap, summary, and next actionable node.
+Show an objective's header, roadmap, summary, and next actionable node. For a **stacked**
+objective, show additionally performs the same **live** readiness read as `objective next`
+(network + `git fetch`) with a tolerant degrade: the `--json` payload gains a
+`stacked_readiness` block (`{checked, ready, reason, blockers}`) and `next_node` becomes the
+live plannable candidate (else `null`) — the same truth `objective next` reports. When the
+live read fails, show still renders: `checked: false` carries the error in `reason`,
+`next_node` keeps the graph-derived value, and the human render marks it
+(`readiness unchecked (<error>) — check: perk objective next <N>`). The remaining fields
+(`selection_kind`, `resumable_claims`, `summary`, `nodes`) stay **graph-derived observational
+facts** with their offline vocabulary either way — the live truth rides exclusively in
+`stacked_readiness` and the `next_node` override. Incremental payloads are unchanged.
 
 ### `perk objective node NUMBER`
 
@@ -164,10 +180,16 @@ old issue is closed. See
 ### `perk objective next NUMBER` (alias `n`)
 
 Print the next plannable node (pending, or a resumable `planning` claim). For a **stacked**
-objective the selection is **build-readiness-derived** (a live delivery-train reconstruction;
-the next unpublished layer in delivery order): `next_node` is constrained to that candidate
+objective the selection is **build-readiness- and handoff-derived** (a live delivery-train
+reconstruction;
+the next unpublished layer in delivery order, whose direct dependencies must each be terminal,
+landed, or ready-stamped): `next_node` is constrained to that candidate
 (or `null`), and the `--json` payload gains an additive `build_ready` block
-(`{ready, reason}`); a blocked train prints `build blocked: <reason>`. Incremental payloads
+(`{ready, reason, blockers}` — `blockers` carries the shared gate rows: technical rows when the
+train itself vetoes, handoff rows when a dependency's stamp is missing/stale/suspended, `[]`
+otherwise); a blocked train prints `build blocked: <reason>`, and a handoff-blocked candidate
+prints one line per blocker (`handoff blocked: node <id> waits on <dep> (plan #<p>, PR #<pr>)
+— <state>; record the handoff: perk ready <p>`). Incremental payloads
 are unchanged.
 
 ### `perk objective run NUMBER` (alias `r`)
@@ -185,8 +207,16 @@ kind: unresolved operations and operational drift yield `action: "repair_require
 owning `stack recover`/`stack status` command, while structural blockers stay `build_blocked`.
 With no veto, published layers are scanned bottom-to-top: actionable lower-layer feedback dispatches
 `address` before upper planning/implementation, while draft-ready and awaiting-review layers are
-waiting gates and do not outrank upper work. `--dry-run` keeps the offline graph classification,
-never reconstructs the train, and says so in the payload
+waiting gates and do not outrank upper work. A technically-ready candidate whose direct
+dependency lacks a `ready` handoff stamp pauses as `action: "handoff_required"` (after the
+lower-layer address scan — address commits are exactly what re-stamps route through), carrying
+the composed reason and the first blocker's copyable `perk ready <PLAN>` remediation — a human
+records the handoff; the supervisor never auto-runs it. Every stacked blocked arm
+(`build_blocked`, `repair_required`, `handoff_required`) also carries an additive `blockers`
+list of shared gate rows (technical rows on the veto arms, handoff rows on the handoff arm).
+In-flight dispatch stays ungated (an existing branch/worktree resumes; only a fresh layer start
+refuses with the typed `node_not_handoff_ready`). `--dry-run` keeps the offline graph
+classification, never reconstructs the train, and says so in the payload
 (`"build_readiness": "unchecked (dry-run)"`, stacked only).
 
 ### `perk objective doctor NUMBER` (alias `doc`)
@@ -258,8 +288,17 @@ journal events**: `unstamped` = no stamp names the layer's current verified publ
 under this objective; `stale` = the head moved past the latest stamp; `suspended` = the PR is
 currently draft while the stamp still matches (a transient hold); `ready` = the latest stamp
 matches and the PR is ready-for-review; `not_applicable` for landed/unpublished/unverified
-layers. The human render adds one line: `next build-ready: <id>` /
-`build blocked: <reason>`. The report also carries **recovery visibility**: every unresolved
+layers. The `train` object also carries the trailing `planning_gate` block
+(`{node_id, ready, blockers}`) — the technical-AND-handoff planning verdict for the
+readiness candidate: `ready: true` only when the train is buildable AND every direct
+dependency of the candidate is terminal, landed, or ready-stamped; `blockers` rows are
+`kind: "technical"` (a train veto, verbatim code/message + the owning remediation) or
+`kind: "handoff"` (a dependency whose handoff stamp is `unstamped`/`stale`/`suspended` —
+fields-only: dep node, plan, PR, state, stamped/current heads, and the copyable
+`perk ready <plan>`). `next_build_ready` itself stays purely technical. The human render adds
+one line: `next build-ready: <id>` /
+`build blocked: <reason>` — plus, when the train is technically ready but the gate blocks,
+one `planning gated: …` line per handoff blocker. The report also carries **recovery visibility**: every unresolved
 operation (`operations[]`, each with its id/kind/prepared time and an `active operation:` line
 in the human render), this lineage's **pending continuation manifest** (`continuation` — an
 unparseable manifest is reported as `parseable: false`, never hidden), and the machine-local

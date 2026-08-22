@@ -57,6 +57,7 @@ from perk.delivery.train import (
     FindingKind,
     LayerFinalization,
     LayerGit,
+    LayerHandoff,
     LayerIntent,
     LayerMembership,
     LayerPr,
@@ -149,6 +150,7 @@ _DELIVERY_ERROR_TYPES = {
     "supersede_unsupported",
     "stacked_plan",
     "plan_not_found",
+    "node_not_handoff_ready",
 }
 _STATUS_ERROR_TYPES = {
     "objective_not_found",
@@ -363,14 +365,18 @@ def _train_layer(
     branch: str | None,
     *,
     remote_head: str | None = None,
+    pr_number: int | None = None,
+    publication: LayerPublication = LayerPublication.UNPUBLISHED,
+    handoff: LayerHandoff = LayerHandoff.NOT_APPLICABLE,
+    stamped_head: str | None = None,
 ) -> TrainLayer:
     return TrainLayer(
         node_id=node_id,
         plan_id=plan_id,
         branch=branch,
-        pr_number=None,
+        pr_number=pr_number,
         intent=LayerIntent.PLANNED if plan_id is not None else LayerIntent.UNPLANNED,
-        publication=LayerPublication.UNPUBLISHED,
+        publication=publication,
         git=LayerGit.ABSENT,
         pr=LayerPr.ABSENT,
         membership=LayerMembership.NOT_APPLICABLE,
@@ -381,6 +387,8 @@ def _train_layer(
         observed_remote_head_sha=remote_head,
         observed_pr_base=None,
         expected_pr_base=None,
+        handoff=handoff,
+        stamped_head_sha=stamped_head,
     )
 
 
@@ -3138,7 +3146,15 @@ def test_planning_prepare_uses_one_status_snapshot_and_never_probes_parent() -> 
     status = _planning_train(
         nodes=nodes,
         layers=(
-            _train_layer("1.1", "101", "plan-101", remote_head="a" * 40),
+            _train_layer(
+                "1.1",
+                "101",
+                "plan-101",
+                remote_head="a" * 40,
+                pr_number=201,
+                publication=LayerPublication.PUBLISHED,
+                handoff=LayerHandoff.READY,
+            ),
             _train_layer("1.2", None, None),
         ),
         candidate="1.2",
@@ -3407,7 +3423,14 @@ def test_execution_prepare_verifies_parent_in_exact_aggregate_order() -> None:
     status = _planning_train(
         nodes=nodes,
         layers=(
-            _train_layer("1.1", "101", "plan-101"),
+            _train_layer(
+                "1.1",
+                "101",
+                "plan-101",
+                pr_number=201,
+                publication=LayerPublication.PUBLISHED,
+                handoff=LayerHandoff.READY,
+            ),
             _train_layer("1.2", "102", "plan-102"),
         ),
         candidate="1.2",
@@ -4360,6 +4383,9 @@ _STACKED_LAND_MESSAGE = (
     "plan #7 carries stacked delivery lineage — stacked layers land only as one "
     "atomic train, never individually\n"
     "Landing one layer merges into its parent branch and tears the train. "
+    "Review + address happen on the layer PR; when done, record the post-review handoff "
+    "with /ready (perk ready 7); the train lands whole via /objective-land "
+    "(perk objective stack land). "
     "Inspect the train with: perk objective stack status"
 )
 

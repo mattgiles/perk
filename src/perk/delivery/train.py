@@ -397,6 +397,42 @@ class TrainLayer:
     # Defaulted trailing growth: TrainLayer is directly constructed across many tests, and
     # NOT_APPLICABLE stays the honest "no handoff surface" fact (contracts.md §8.44).
     handoff: LayerHandoff = LayerHandoff.NOT_APPLICABLE
+    # The latest stamp's recorded head (contracts.md §8.46) — INTERNAL only, never a LayerOut
+    # field: present exactly when a latest stamp exists (ready/stale/suspended), ``None`` when
+    # unstamped/not_applicable. Reaches the wire only through the handoff-gate blocker rows.
+    stamped_head_sha: str | None = None
+
+
+@dataclass(frozen=True)
+class UnreadyDependency:
+    """A direct dependency that fails the handoff gate closed for a NON-handoff reason
+    (contracts.md §8.46's fail-closed totality arms — in practice the train's technical
+    readiness veto has already fired before these are reachable)."""
+
+    dependency_node_id: str
+    reason: str
+
+
+@dataclass(frozen=True)
+class HandoffGate:
+    """The direct-dependency handoff gate verdict for one candidate node (contracts.md
+    §8.46) — a pure derivation beside :class:`BuildReadiness`, never folded into it.
+
+    ``blocking_layers`` are the handoff-blocked direct dependencies as their own
+    :class:`TrainLayer` facts, in delivery order (the bottom-most blocked dependency first,
+    so the first blocker's remediation is the earliest actionable repair);
+    ``unready_dependencies`` are the fail-closed totality arms, ordered by
+    :func:`perk.objective.node_sort_key`. The gate emits no findings, mutates no axis, and
+    never touches :class:`BuildReadiness`.
+    """
+
+    node_id: str
+    blocking_layers: tuple[TrainLayer, ...]
+    unready_dependencies: tuple[UnreadyDependency, ...]
+
+    @property
+    def ready(self) -> bool:
+        return not self.blocking_layers and not self.unready_dependencies
 
 
 @dataclass(frozen=True)
@@ -527,6 +563,7 @@ class _LayerWork:
     observed_pr_base: str | None = None
     expected_pr_base: str | None = None
     handoff: LayerHandoff = LayerHandoff.NOT_APPLICABLE
+    stamped_head_sha: str | None = None
     # Journal-covered AND corroborated merged (the §8.44 landed classification) — set by the
     # landed pre-pass; the corroborating PR read is cached so the PR observation never
     # re-reads it.
@@ -583,6 +620,7 @@ class _LayerWork:
             observed_pr_base=self.observed_pr_base,
             expected_pr_base=self.expected_pr_base,
             handoff=self.handoff,
+            stamped_head_sha=self.stamped_head_sha,
         )
 
 
@@ -1682,7 +1720,9 @@ def _derive_handoff(
     ``missing_lineage`` blocker tells the story). Only the LATEST active-objective stamp for
     the layer's plan decides: absent ⇒ ``unstamped``; naming a different head ⇒ ``stale``
     (even when an older stamp matches the current head); matching + PR draft ⇒ ``suspended``
-    (the transient hold); matching + non-draft ⇒ ``ready``."""
+    (the transient hold); matching + non-draft ⇒ ``ready``. Whenever a latest stamp exists the
+    layer also records its ``stamped_head_sha`` (internal — §8.46's gate blocker rows carry it
+    to the wire)."""
     if fold is None:
         return
     for work in layers:
@@ -1694,7 +1734,9 @@ def _derive_handoff(
         stamp = fold.latest_ready_stamp(objective_id=active_id, plan_id=work.plan_id)
         if stamp is None:
             work.handoff = LayerHandoff.UNSTAMPED
-        elif stamp.record.head_sha != work.published_head_sha:
+            continue
+        work.stamped_head_sha = stamp.record.head_sha
+        if stamp.record.head_sha != work.published_head_sha:
             work.handoff = LayerHandoff.STALE
         elif work.pr is LayerPr.DRAFT:
             work.handoff = LayerHandoff.SUSPENDED
@@ -1998,4 +2040,85 @@ def reconstruct_train(
         landed_prefix_len=landed_prefix,
         objective_title=state.title,
         objective_nodes=tuple(state.nodes),
+    )
+
+
+def check_handoff_gate(train: DeliveryTrain, *, node_id: str) -> HandoffGate:
+    """The direct-dependency handoff gate (contracts.md §8.46) — pure over one reconstructed
+    projection, deliberately a separate check beside :class:`BuildReadiness` (publication,
+    repair, submit, and address finalization stay handoff-ungated by construction).
+
+    ``node_id``'s direct dependencies resolve via
+    :func:`perk.objective.resolved_direct_deps` (skip-transparent, strictly direct edges —
+    a stale ancestor blocks only its own direct dependents). Each dependency satisfies the
+    gate, in this total order: a TERMINAL node status wins over any layer/stamp state; a
+    LANDED layer satisfies (merged is stronger than stamped); a verified PUBLISHED layer
+    satisfies only with handoff READY — unstamped/stale/suspended block; a PUBLISHED layer
+    whose handoff fold is unavailable (``not_applicable``) fails closed as an
+    :class:`UnreadyDependency` naming the evidence loss (never a claimed ``unstamped``);
+    any other publication is an :class:`UnreadyDependency` (the technical readiness truth
+    owns the detail); a layerless non-terminal dependency satisfies only when a
+    :class:`ProjectedCancellation` names it, else fails closed.
+    """
+    nodes = list(train.objective_nodes)
+    node_by_id = {node.id: node for node in nodes}
+    deps = objective.resolved_direct_deps(nodes).get(node_id, frozenset())
+    layer_by_node = {layer.node_id: layer for layer in train.layers}
+    blocked_ids: set[str] = set()
+    unready: list[UnreadyDependency] = []
+    for dep_id in deps:
+        dep_node = node_by_id.get(dep_id)
+        if dep_node is not None and dep_node.status in objective.TERMINAL:
+            continue
+        layer = layer_by_node.get(dep_id)
+        if layer is not None:
+            if layer.publication is LayerPublication.LANDED:
+                continue
+            if layer.publication is LayerPublication.PUBLISHED:
+                if layer.handoff is LayerHandoff.READY:
+                    continue
+                if layer.handoff in (
+                    LayerHandoff.UNSTAMPED,
+                    LayerHandoff.STALE,
+                    LayerHandoff.SUSPENDED,
+                ):
+                    blocked_ids.add(dep_id)
+                    continue
+                unready.append(
+                    UnreadyDependency(
+                        dependency_node_id=dep_id,
+                        reason=(
+                            "the handoff evidence is unavailable (missing lineage or "
+                            "journal corruption) — the stamp state cannot be derived"
+                        ),
+                    )
+                )
+                continue
+            unready.append(
+                UnreadyDependency(
+                    dependency_node_id=dep_id,
+                    reason=(
+                        f"publication is {layer.publication.value} — not a verified publication"
+                    ),
+                )
+            )
+            continue
+        if any(fact.node_id == dep_id for fact in train.projected_canceled_nodes):
+            continue
+        status_detail = dep_node.status.value if dep_node is not None else "unknown"
+        unready.append(
+            UnreadyDependency(
+                dependency_node_id=dep_id,
+                reason=(
+                    f"no train layer exists for this dependency (status {status_detail}) "
+                    "— fail closed"
+                ),
+            )
+        )
+    return HandoffGate(
+        node_id=node_id,
+        blocking_layers=tuple(layer for layer in train.layers if layer.node_id in blocked_ids),
+        unready_dependencies=tuple(
+            sorted(unready, key=lambda dep: objective.node_sort_key(dep.dependency_node_id))
+        ),
     )

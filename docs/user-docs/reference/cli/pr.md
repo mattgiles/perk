@@ -96,7 +96,9 @@ stage and has no launcher). For an **incremental** plan this marks the draft PR 
 review (the deliberate review gate). For a **stacked** layer it is the deliberate
 **post-review human handoff**: review happens on the draft layer PR, and after review +
 address this gesture stamps the exact verified current head into the delivery journal — on
-draft AND non-draft PRs alike (mark-ready mechanics first, then the journal append). It is
+draft AND non-draft PRs alike (mark-ready mechanics first, then the journal append) — and the
+recorded stamp **unblocks planning of the layer's direct dependents** (the handoff gate).
+It is
 never routine post-submit choreography: supervisors and factories name it, they never run it.
 `PLAN` is an
 optional plan issue id or pasted issue URL: it selects the plan canonically with one backend

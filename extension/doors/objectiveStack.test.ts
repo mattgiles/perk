@@ -1067,6 +1067,85 @@ test("renderStackStatus: the landed prefix rides the train line when non-zero", 
   assert.match(renderStackStatus(zero), /published prefix 2\/2\)/);
 });
 
+test("renderStackStatus: planning_gate handoff rows render after the readiness line", () => {
+  const text = renderStackStatus({
+    objective: { id: "7" },
+    train: {
+      base: "main",
+      published_prefix_len: 1,
+      layers: [
+        { node_id: "1.1", branch: "plan-101", pr_number: 11, publication: "published" },
+        { node_id: "1.2", branch: "plan-102", publication: "unpublished" },
+      ],
+      next_build_ready: { node_id: "1.2", ready: true, reason: null },
+      planning_gate: {
+        node_id: "1.2",
+        ready: false,
+        blockers: [
+          {
+            kind: "handoff",
+            code: null,
+            message: null,
+            dependency_node_id: "1.1",
+            plan: "101",
+            pr: 11,
+            handoff_state: "stale",
+            stamped_head: "a".repeat(40),
+            current_head: "b".repeat(40),
+            remediation: "perk ready 101",
+          },
+          // A technical row never renders a planning-gated line (the build-blocked
+          // line/findings already carry it).
+          { kind: "technical", code: "prefix_gap", message: "gap" },
+        ],
+      },
+    },
+  });
+  assert.match(text, /next build-ready: 1\.2/);
+  assert.match(
+    text,
+    /planning gated: 1\.2 waits on 1\.1 \(plan #101, PR #11\) — stale; stamped a{12} ≠ head b{12}; record the handoff: perk ready 101/,
+  );
+  assert.doesNotMatch(text, /planning gated: .*prefix_gap/);
+});
+
+test("renderStackStatus: planning_gate degrades leniently (absent, ready, malformed)", () => {
+  const base = {
+    objective: { id: "7" },
+    train: {
+      base: "main",
+      published_prefix_len: 0,
+      layers: [{ node_id: "1.1", branch: "plan-101", publication: "unpublished" }],
+      next_build_ready: { node_id: "1.1", ready: true, reason: null },
+    },
+  };
+  // Absent block: the pre-growth render is unchanged.
+  assert.doesNotMatch(renderStackStatus(base), /planning gated/);
+  // A ready gate renders nothing.
+  const ready = {
+    ...base,
+    train: { ...base.train, planning_gate: { node_id: "1.1", ready: true, blockers: [] } },
+  };
+  assert.doesNotMatch(renderStackStatus(ready), /planning gated/);
+  // Malformed fields degrade to placeholders — never a reject.
+  const malformed = {
+    ...base,
+    train: {
+      ...base.train,
+      planning_gate: {
+        node_id: 7,
+        ready: "nope",
+        blockers: [{ kind: "handoff", dependency_node_id: 9, plan: 101, pr: "11" }, "junk"],
+      },
+    },
+  };
+  const text = renderStackStatus(malformed);
+  assert.match(
+    text,
+    /planning gated: \? waits on \? \(plan #\?, PR #\?\) — \?; record the handoff: \?/,
+  );
+});
+
 // --- driveStackReconcile: decision + delivery-mode unit tests (spy pi, no real turn) -------------
 
 function spyPi(): {

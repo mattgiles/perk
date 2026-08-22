@@ -13,6 +13,11 @@ import click
 
 from perk.boundary import OutputModel
 from perk.cli import completions
+from perk.cli.commands.objective.shared import (
+    GateBlockerOut,
+    PlanningGateOut,
+    compose_planning_gate,
+)
 from perk.cli.commands.objective.stack.shared import resolve_objective_id
 from perk.cli.context import require_config, require_repo
 from perk.cli.emit import emit, fail
@@ -127,11 +132,14 @@ class TrainOut(OutputModel):
     unresolved_operation: OperationOut | None
     blockers: tuple[FindingOut, ...]
     information: tuple[FindingOut, ...]
-    # Declared last: the readiness block, the observed base head, and the landed prefix
-    # are additive envelope growths (contracts.md §8.46 / §8.44 / §8.51).
+    # Declared last: the readiness block, the observed base head, the landed prefix, and the
+    # planning gate are additive envelope growths (contracts.md §8.46 / §8.44 / §8.51).
+    # ``next_build_ready`` stays byte-compatible and purely technical; ``planning_gate`` is
+    # the technical-AND-handoff planning verdict (§8.46).
     next_build_ready: NextBuildReadyOut
     observed_base_head_sha: str | None
     landed_prefix_len: int = 0
+    planning_gate: PlanningGateOut = PlanningGateOut(node_id=None, ready=False, blockers=())
 
     @classmethod
     def from_domain(cls, result: train.DeliveryTrain) -> "TrainOut":
@@ -153,6 +161,7 @@ class TrainOut(OutputModel):
             next_build_ready=NextBuildReadyOut.from_domain(result.build_readiness),
             observed_base_head_sha=result.observed_base_head_sha,
             landed_prefix_len=result.landed_prefix_len,
+            planning_gate=compose_planning_gate(result, None),
         )
 
 
@@ -322,6 +331,21 @@ def _observe_orphans(ctx: click.Context, repo_root: Path) -> OrphanedResidueOut:
 # --- rendering ---
 
 
+def _gate_row_phrase(row: GateBlockerOut) -> str:
+    """One handoff-gate blocker row's human phrase (fields-only — the §8.46 handoff rows
+    carry no prose)."""
+    if row.kind != "handoff":
+        return f"[{row.code}] {row.message}; check: {row.remediation}"
+    detail = f"{row.dependency_node_id} (plan #{row.plan}, PR #{row.pr}) — {row.handoff_state}"
+    if (
+        row.stamped_head is not None
+        and row.current_head is not None
+        and row.handoff_state == "stale"
+    ):
+        detail += f"; stamped {row.stamped_head[:12]} ≠ head {row.current_head[:12]}"
+    return detail + f"; record the handoff: {row.remediation}"
+
+
 def _layer_line(layer: train.TrainLayer) -> str:
     parts = [layer.node_id]
     parts.append(f"plan #{layer.plan_id}" if layer.plan_id is not None else "unplanned")
@@ -360,6 +384,11 @@ def _render_human(result: StatusResult) -> None:
         user_output(f"  next build-ready: {readiness.next_node_id}")
     else:
         user_output(f"  build blocked: {readiness.reason}")
+    if readiness.ready:
+        gate = compose_planning_gate(status, None)
+        if not gate.ready:
+            for row in gate.blockers:
+                user_output(f"  planning gated: {gate.node_id} waits on {_gate_row_phrase(row)}")
     for operation in status.unresolved_operations:
         user_output(
             f"  active operation: {operation.operation_id} ({operation.kind}, prepared "

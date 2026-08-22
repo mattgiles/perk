@@ -1633,7 +1633,7 @@ def test_next_stacked_payload_carries_the_build_ready_block(monkeypatch):
     assert result.exit_code == 0
     payload = json.loads(result.output)
     assert payload["next_node"]["id"] == "1.2"
-    assert payload["build_ready"] == {"ready": True, "reason": None}
+    assert payload["build_ready"] == {"ready": True, "reason": None, "blockers": []}
 
 
 def test_next_stacked_build_blocked_constrains_next_node(monkeypatch):
@@ -1649,7 +1649,7 @@ def test_next_stacked_build_blocked_constrains_next_node(monkeypatch):
     assert result.exit_code == 0
     payload = json.loads(result.output)
     assert payload["next_node"] is None
-    assert payload["build_ready"] == {"ready": False, "reason": "[x] y"}
+    assert payload["build_ready"] == {"ready": False, "reason": "[x] y", "blockers": []}
 
 
 def test_next_stacked_build_blocked_human_line(monkeypatch):

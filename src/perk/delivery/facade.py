@@ -118,6 +118,7 @@ _DELIVERY_ERROR_TYPES = frozenset(
         "supersede_unsupported",
         "stacked_plan",
         "plan_not_found",
+        "node_not_handoff_ready",
     }
 )
 
@@ -147,6 +148,7 @@ type DeliveryOrigin = Literal["domain", "git", "github", "delivery"]
 type PlanningDecisionKind = Literal[
     "ready",
     "build_blocked",
+    "handoff_blocked",
     "in_flight",
     "wrong_candidate",
     "complete",
@@ -301,11 +303,13 @@ class PrepareResult:
         reason: str | None = None
         skipped_claim_ids: tuple[str, ...] | None = None
         context: "PrepareResult.PlanningContext | None" = None
+        handoff_blockers: tuple[train.TrainLayer, ...] | None = None
 
         def __post_init__(self) -> None:
             allowed = {
                 "ready",
                 "build_blocked",
+                "handoff_blocked",
                 "in_flight",
                 "wrong_candidate",
                 "complete",
@@ -316,7 +320,14 @@ class PrepareResult:
             }
             if self.kind not in allowed:
                 raise ValueError(f"unknown planning decision kind: {self.kind!r}")
-            node_kinds = {"ready", "in_flight", "wrong_candidate", "terminal", "blocked"}
+            node_kinds = {
+                "ready",
+                "handoff_blocked",
+                "in_flight",
+                "wrong_candidate",
+                "terminal",
+                "blocked",
+            }
             if (self.node is not None) != (self.kind in node_kinds):
                 raise ValueError("planning decision node does not match kind")
             if (self.reason is not None) != (self.kind == "build_blocked"):
@@ -325,6 +336,8 @@ class PrepareResult:
                 raise ValueError("planning decision skipped claims exist only for ready")
             if self.context is not None and self.kind != "ready":
                 raise ValueError("planning context exists only for ready")
+            if (self.handoff_blockers is not None) != (self.kind == "handoff_blocked"):
+                raise ValueError("planning handoff blockers exist only for handoff_blocked")
             if not _nonblank(self.objective_id):
                 raise ValueError("planning objective id must be nonblank")
 
@@ -1637,6 +1650,49 @@ def _ready_decision(
     )
 
 
+def _gated_ready_decision(
+    status: train.DeliveryTrain,
+    *,
+    requested_node_id: str | None,
+    node: ObjectiveNode,
+    graph: objective.DependencyGraph,
+    derive_context: bool,
+) -> PrepareResult.PlanningDecision:
+    """Run the direct-dependency handoff gate (contracts.md §8.46) before any ``ready``
+    decision: blocking layers → ``handoff_blocked`` (the layers carried); unready
+    dependencies alone → ``build_blocked`` (defensive — in practice the train's technical
+    veto fired first); a passing gate delegates to :func:`_ready_decision`."""
+    gate = train.check_handoff_gate(status, node_id=node.id)
+    if gate.blocking_layers:
+        return PrepareResult.PlanningDecision(
+            kind="handoff_blocked",
+            objective_id=status.objective_id,
+            objective_title=status.objective_title,
+            objective_url=status.objective_url,
+            requested_node_id=requested_node_id,
+            node=_planning_node(node),
+            handoff_blockers=gate.blocking_layers,
+        )
+    if gate.unready_dependencies:
+        return PrepareResult.PlanningDecision(
+            kind="build_blocked",
+            objective_id=status.objective_id,
+            objective_title=status.objective_title,
+            objective_url=status.objective_url,
+            requested_node_id=requested_node_id,
+            reason="; ".join(
+                f"{dep.dependency_node_id}: {dep.reason}" for dep in gate.unready_dependencies
+            ),
+        )
+    return _ready_decision(
+        status,
+        requested_node_id=requested_node_id,
+        node=node,
+        graph=graph,
+        context=_derive_planning_context(status, node_id=node.id) if derive_context else None,
+    )
+
+
 def _classify_planning(
     status: train.DeliveryTrain, *, requested_node_id: str | None
 ) -> PrepareResult.PlanningDecision:
@@ -1677,12 +1733,12 @@ def _classify_planning(
                     requested_node_id=requested_node_id,
                     node=_planning_node(candidate),
                 )
-            return _ready_decision(
+            return _gated_ready_decision(
                 status,
                 requested_node_id=requested_node_id,
                 node=candidate,
                 graph=graph,
-                context=_derive_planning_context(status, node_id=candidate.id),
+                derive_context=True,
             )
         if candidate.status is NodeStatus.IN_PROGRESS or (
             candidate.status is NodeStatus.PLANNING and candidate.pr is not None
@@ -1718,12 +1774,12 @@ def _classify_planning(
                 requested_node_id=requested_node_id,
             )
         if requested in graph.plannable_nodes():
-            return _ready_decision(
+            return _gated_ready_decision(
                 status,
                 requested_node_id=requested_node_id,
                 node=requested,
                 graph=graph,
-                context=None,
+                derive_context=False,
             )
         if requested in graph.in_flight_nodes():
             kind: PlanningDecisionKind = "in_flight"
@@ -1745,12 +1801,12 @@ def _classify_planning(
         selected = selection.node
         if selected is None:
             raise ValueError("plannable graph selection must carry a node")
-        return _ready_decision(
+        return _gated_ready_decision(
             status,
             requested_node_id=None,
             node=selected,
             graph=graph,
-            context=None,
+            derive_context=False,
         )
     if selection.kind == "in_flight":
         selected = selection.node
@@ -1772,6 +1828,21 @@ def _classify_planning(
         objective_url=status.objective_url,
         requested_node_id=None,
     )
+
+
+def _handoff_blocker_detail(layer: train.TrainLayer) -> str:
+    """One handoff-blocked dependency's refusal detail: dep/plan/PR/state, the
+    stamped-vs-current heads when stale, and the copyable ``perk ready <PLAN>``."""
+    line = f"{layer.node_id} (plan #{layer.plan_id}, PR #{layer.pr_number}) — {layer.handoff.value}"
+    if (
+        layer.handoff is train.LayerHandoff.STALE
+        and layer.stamped_head_sha is not None
+        and layer.observed_remote_head_sha is not None
+    ):
+        line += (
+            f"; stamped {layer.stamped_head_sha[:12]} ≠ head {layer.observed_remote_head_sha[:12]}"
+        )
+    return line + f"; record the handoff: perk ready {layer.plan_id}"
 
 
 def _raw_prepare_git_error(exc: git_mod.GitError | train.TrainReconstructionError) -> str:
@@ -2456,6 +2527,31 @@ class Delivery:
             )
         try:
             context = layer_mod.require_ready_layer(status, plan_id=plan_id)
+        except layer_mod.LayerError as exc:
+            raise DeliveryError(str(exc), error_type=exc.error_type) from exc
+        # The direct-dependency handoff gate (contracts.md §8.46) runs AFTER the technical
+        # readiness check and BEFORE the parent fetch: exactly the fresh-start arms reach
+        # execution Prepare (an existing branch/worktree resumes without it), and publication
+        # (`publish.py::_route`'s `require_ready_layer`) stays handoff-ungated by construction.
+        gate = train.check_handoff_gate(status, node_id=context.node_id)
+        if gate.blocking_layers:
+            detail = "; ".join(_handoff_blocker_detail(layer) for layer in gate.blocking_layers)
+            raise DeliveryError(
+                f"layer {context.node_id} (plan #{context.plan_id}) cannot fresh-start: it "
+                f"waits on the handoff of {detail}",
+                error_type="node_not_handoff_ready",
+            )
+        if gate.unready_dependencies:
+            # Defensive totality: unreachable past require_ready_layer (the technical veto
+            # fires first).
+            reasons = "; ".join(
+                f"{dep.dependency_node_id}: {dep.reason}" for dep in gate.unready_dependencies
+            )
+            raise DeliveryError(
+                f"layer {context.node_id} (plan #{context.plan_id}) is not build-ready: {reasons}",
+                error_type="node_not_build_ready",
+            )
+        try:
             prepared = layer_mod.prepare_layer_start(
                 context,
                 fetch=self._git.fetch_refs,

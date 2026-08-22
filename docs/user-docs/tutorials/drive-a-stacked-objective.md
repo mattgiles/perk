@@ -187,7 +187,11 @@ perk objective plan <N>
 ```
 
 perk selects node `1.2` even though layer 1 is only published, not merged — on a stacked
-train, a published-but-unmerged predecessor is exactly what the next layer builds on. Type:
+train, a published-but-unmerged predecessor is exactly what the next layer builds on. One
+gate applies first: planning a dependent requires the predecessor's **post-review handoff**
+— review layer 1 on its draft PR, then record the handoff (`perk ready <plan-1>`, or
+`/ready` from layer 1's session) before planning node 1.2; an unstamped predecessor refuses
+typed `node_not_handoff_ready` naming that exact command. Type:
 
 > Plan node 1.2: add slug(text) to textkit.py, built on normalize() — join the normalized
 > words with hyphens.
@@ -264,9 +268,11 @@ individually, from each layer's own session (or worktree):
 /ready
 ```
 
-Run it in the layer-1 session, then in the layer-2 session. Readying records the handoff
-only — it never merges anything. Both PRs now show ready-for-review while the train waits,
-whole, for the landing.
+Run it in the layer-2 session (layer 1's handoff was already recorded in Step 5 — a re-run
+converges idempotently on the same stamp). Readying records the handoff
+only — it never merges anything (it also unblocks planning of the layer's direct
+dependents, which is exactly what Step 5 used). Both PRs now show ready-for-review while
+the train waits, whole, for the landing.
 
 ## Step 8 — Land the whole train atomically
 

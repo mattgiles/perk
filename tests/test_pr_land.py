@@ -223,6 +223,9 @@ def test_real_land_carries_the_cached_lineage_verbatim(monkeypatch, unborn_git_r
         "plan #7 carries stacked delivery lineage — stacked layers land only as one "
         "atomic train, never individually\n"
         "Landing one layer merges into its parent branch and tears the train. "
+        "Review + address happen on the layer PR; when done, record the post-review handoff "
+        "with /ready (perk ready 7); the train lands whole via /objective-land "
+        "(perk objective stack land). "
         "Inspect the train with: perk objective stack status",
         error_type="stacked_plan",
         phase="land",
