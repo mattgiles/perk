@@ -6459,8 +6459,8 @@ train.base}`. Exactly this corroborated arm **suppresses** the findings the land
 legitimately produces: the absent-remote-branch `checkpoint_drift` (branch deletion at merge
 is the expected state), the retarget `pr_wrong_base`, and native-stack membership (the axis
 reads `not_applicable`; the membership probe's desired composition becomes the non-landed
-layers' PRs). A merged PR **without** coverage, or failing corroboration, keeps today's drift
-findings unchanged — never adopted. `landed_prefix_len` is the maximal bottom-contiguous
+layers' PRs). A merged PR **without** coverage, or failing corroboration, keeps its ordinary
+drift findings — never adopted. `landed_prefix_len` is the maximal bottom-contiguous
 LANDED run; a landed-classified layer above a non-landed one keeps its axis value but emits
 the blocker `landed_prefix_gap` (deliberately NOT structural — recover must still classify).
 The INFO `landed_unfinalized` fires when a landed layer's finalization ≠ `finalized` or its
@@ -7198,12 +7198,11 @@ evidence report).
 **The operation** is the public `Delivery.sync(SyncRequest(...), consent=...)` façade over the
 private `perk.delivery.sync` transactional engine: change a published stacked layer — or re-anchor
 the whole train onto an advanced objective base (`--base`) — and move every published successor
-with it as one transaction. `Delivery.sync` uses one documented local import, binds its three
-aggregate authorities plus `self.status`, and reads the immutable private `_DEFAULT_SYNC_RUNTIME`
-at invocation time. The runtime owns only worktree-root configuration, the operation lock,
-continuation-manifest/containment/path helpers, clock, sleep, and operation-id minting; no
-persistence/Git/GitHub behavior or public constructor seam lives there. Tests replace the whole
-frozen runtime symbol in a scoped monkeypatch, never mutate it.
+with it as one transaction. `Delivery.sync` binds its three
+aggregate authorities plus `self.status`; the remaining mechanics (worktree-root
+configuration, the operation lock, continuation-manifest/containment/path helpers, clock,
+sleep, operation-id minting) live in a module-private runtime with no
+persistence/Git/GitHub behavior or public constructor seam.
 
 **The operation universe is the checkpoint-claimed prefix — never `published_prefix_len`.**
 The train classifier truncates its verified prefix on exactly the discrepancies sync exists
@@ -7251,6 +7250,16 @@ manifest-less) `sync-*` residue is inert until `recover`'s orphan sweep (§8.51)
 1. **Reconstruct fresh** through the context's bound `Delivery.status(StatusRequest(...))`; every
    fresh/re-entry reconstruction uses that same service and authority instances. A successful
    no-train result / no lineage → `not_stacked`; a status `DeliveryError` propagates unchanged.
+   **Structural refusal runs here** — immediately after reconstruction/lineage validation,
+   before the continuation gate and journal route (`_continue` runs the same check in the same
+   position): structural identity/topology blockers on the reconstruction refuse as
+   `claimed_prefix_malformed` — a
+   structurally mis-linked plan must never be checkpointed; the OPERATIONAL blocker axes
+   (checkpoint/PR/stack drift) deliberately pass through to sync's own fresh preflight below.
+   The complete public `STRUCTURAL_BLOCKER_CODES` set lives in `delivery.train` and includes
+   `missing_lineage`; that member is unreachable here because the reconstruction already
+   classifies a
+   lineage-less train as `not_stacked`, but the shared set is context-free for §8.52 consumers.
 2. **Continuation gate**: any manifest for this lineage → `sync_conflict_pending` (the
    message names the manifest path and the retained worktree; clearing is manual until the
    continue/abort surface). An unparseable manifest is treated as PRESENT — fail closed,
@@ -7261,13 +7270,7 @@ manifest-less) `sync-*` residue is inert until `recover`'s orphan sweep (§8.51)
    **flag-independent** (a plain sync resumes an unresolved ADOPT and vice versa: the record,
    not the invocation, names what must conclude); any other unresolved kind →
    `unresolved_operation`.
-4. **Derive the claimed prefix** (above). Before ANY route (fresh or resume), structural
-   identity/topology blockers on the reconstruction refuse as `claimed_prefix_malformed` — a
-   structurally mis-linked plan must never be checkpointed; the OPERATIONAL blocker axes
-   (checkpoint/PR/stack drift) deliberately pass through to sync's own fresh preflight below.
-   The complete public `STRUCTURAL_BLOCKER_CODES` set lives in `delivery.train` and includes
-   `missing_lineage`; that member is unreachable here because step 1 already classifies a
-   lineage-less train as `not_stacked`, but the shared set is context-free for §8.52 consumers.
+4. **Derive the claimed prefix** (above).
 5. **Preflight every claimed layer** (all refusals before any candidate work): remote head ==
    the `published_head_sha` checkpoint → else `remote_drift` (the `--adopt` arm below
    re-anchors exactly one such layer); a
@@ -7298,8 +7301,8 @@ manifest-less) `sync-*` residue is inert until `recover`'s orphan sweep (§8.51)
    `multiple_push_urls` (`--atomic` is atomic within ONE receiving repository — no pretended
    distributed atomicity). The same authority runs the no-op atomic probe against the sole URL,
    pinned to the bottom affected layer's branch at its verified remote head; private capability
-   formatters preserve §8.45's caveat strings. Failure is `atomic_push_unsupported`. This
-   discharges §8.47's recorded deviation without a public probe helper.
+   formatters preserve §8.45's caveat strings. Failure is `atomic_push_unsupported`. There is
+   no public probe helper.
 8. **Candidate calculation** in ONE isolated worktree (`<worktree_root>/sync-<operation_id>`;
    temp refs `refs/perk/sync/<operation_id>/<branch>`; the freshly minted operation ULID
    names all residue). Bottom-up over the affected set: source = the local head when locally
@@ -7335,7 +7338,10 @@ manifest-less) `sync-*` residue is inert until `recover`'s orphan sweep (§8.51)
     `push --atomic --porcelain --no-verify --no-signed --no-follow-tags
     --recurse-submodules=no` to `origin` with `-c push.pushOption=` cleared, each included ref
     under `--force-with-lease=refs/heads/<branch>:<exact before sha>` (never an absence lease —
-    sync never pushes creations). A rejection → refetch and classify: all-at-before →
+    sync never pushes creations). The exclusion is deliberate: pushing a ref at its own lease
+    would be a no-op with a stale-lease race window, and exclusion has exactly the same race
+    parity as the unleased base head — step 10's re-observation is the close. A rejection →
+    refetch and classify: all-at-before →
     append `abandoned` (observed = the all-before proof) + `push_rejected` (retry = rerun
     sync); an unreadable refetch → `postcondition_unverified` (unresolved); mixed →
     `sync_drift` (unresolved, fail closed). Individual refs are NEVER retried.
@@ -7380,10 +7386,8 @@ with no successors is **checkpoint-only**: nothing needs pushing, but the operat
 journals (prepared → checkpoints → completed) — the record is what makes the adoption
 durable. The journal kind is **ADOPT** (`OperationKind.ADOPT`): the payload is SYNC's shape
 plus `after.adopted = {node_id, plan_id, remote_head}` (all strings, required — the resume
-decoder is strict). **The push set excludes no-op refs** (before == after — the adopted
-branch itself when nothing above it moved): pushing a ref at its own lease would be a no-op
-with a stale-lease race window; excluding it has exactly the same race parity as the unleased
-base head — the post-approval re-observation (step 10) is the close.
+decoder is strict). The push set follows step 12's no-op exclusion — the adopted
+branch itself is excluded when nothing above it moved.
 
 **The resume path** (an unresolved SYNC **or ADOPT** on this lineage). Re-derive the expected
 states from
@@ -7409,8 +7413,9 @@ is `sync_drift`, fail closed. Then observe every recorded ref: **all at `after`*
 forward under the same operation (steps 13–14, the parent edges re-derived from the record:
 `base_parent` / the stored unchanged edge / the predecessor's recorded candidate); **all at
 `before`** → append `abandoned` (observed = the all-before proof) and prepare a **fresh**
-operation in the same invocation (the full protocol from step 4). This is a **deliberate
-deviation** from publish's same-operation retry arm: sync's candidates live in disposable
+operation in the same invocation (the full protocol from step 4). Sync abandons and
+recomputes fresh — unlike publish's same-operation retry arm — because sync's candidates
+live in disposable
 temp refs that do not survive a crash, and a recomputed rebase yields different SHAs.
 **Mixed/unrelated** → `sync_drift`, unresolved (`recover` owns explicit repair, §8.51).
 For explicit sync these arms retain their existing result shapes. Under `trigger_plan_id`, an
@@ -7454,8 +7459,8 @@ scan — unparseable files are reported, never skipped silently), and `validated
 (below). The
 delivery plane owns the module to avoid the import cycle (`state/cache.py` imports
 `perk.delivery.layer` at module scope): `continuation.py` reaches the atomic-write seam
-through `perk.substrate.fs.atomic_write_text` (relocated from `state/cache.py`, which
-re-exports it) and never imports `perk.state`.
+through `perk.substrate.fs.atomic_write_text` (which `state/cache.py`
+re-exports) and never imports `perk.state`.
 
 **Containment validation (the deletion-authority rule).** Manifest data is NEVER deletion
 authority by itself: before continue or abort touches the filesystem or refs,
@@ -7527,7 +7532,7 @@ operation simply never happened. Like `--continue`, no cascade flags compose.
 **The result arms** (`SyncResult`; invariant: `operation_id` non-null ⟺ a prepared record was
 journaled by, or resumed by, this invocation). Identity fields (`objective_id`,
 `objective_url`, `redirected_from`) ride the result so the CLI never re-reconstructs;
-`base_advanced` is the §8.44 status notice, independent of `base_cascaded`. The moved frozen data
+`base_advanced` is the §8.44 status notice, independent of `base_cascaded`. The result family
 is `SyncResult` plus nested `Layer`, `Cascade`, and `AbortPreview`; only `SyncRequest` and
 `SyncResult` are package-root sync-family exports. No `SyncResult.__post_init__` combination matrix
 is added: the table below and operation protocol remain the authority for additive reachable arms.
@@ -7555,7 +7560,7 @@ non-refusal notes, e.g. failed cleanup or manifest retirement). The JSON envelop
 one, so machine-routed success can never hide leftover residue.
 
 **The error vocabulary is bounded.** Private `SyncError` is a named `DeliveryError` subclass
-retained for recover/transfer compatibility; it accepts the same façade-wide bounded vocabulary.
+consumed by recover and transfer; it accepts the same façade-wide bounded vocabulary.
 `Delivery.sync` preserves any `DeliveryError` unchanged and maps only expected boundary failures:
 raw `GitError` → `git_error`; `GitHubError` and backend/store/persistence failures →
 `github_error`; an allowed `TrainReconstructionError` code/message passes through;
@@ -7609,7 +7614,7 @@ operation failures, 2 = not-a-repo. The explicit command remains the owner of ba
 adoption, conflict continuation, abort, and preview; ordinary submit/address propagation delegates
 to the same operation through §8.52.
 
-**Status.** Sync never changes PR bases or native stack membership — branch names are stable,
+**Scope.** Sync never changes PR bases or native stack membership — branch names are stable,
 only heads move, membership is verified unchanged. Local branch refs of affected layers are
 deliberately left stale after a successful sync (repositioning worktrees is existing
 territory elsewhere). The warm surface over this worker is §8.51's.
@@ -7628,8 +7633,10 @@ empty — its own initial AND terminal; GC's terminal-stage rule prunes its run 
 session must classify honestly in future corpus sweeps, never as `plan`. `mode: read-only`,
 `worktree: none` (runs in the **invoking** checkout — `resolve_worktree` returns the invoking
 repo root unchanged, and `.pi/settings.json` loads the extension from `..`, so a judge invoked
-from a plan worktree dogfoods that branch's door + extension; the default bundle path and the
-corpus census anchor to the main root regardless; the one write is gitignored scratch), doors
+from a plan worktree exercises that branch's door + extension; the default bundle path and the
+corpus census anchor to the main root regardless; the default bundle write is gitignored
+scratch, workflow-state linkage is the standard session marker, and an explicit `--out` may
+target another absolute path), doors
 cold-local-only, `run_id` mint. `command: audit judge` is a label — the dedicated door lives in
 **perk-dev**, so `audit` joins `DEDICATED_STAGES` (no generic `perk audit` launcher) and there is
 no `shared/bindings.yaml` entry (`binding_trigger=None`). Tool censuses: §8.40's tables carry the
@@ -7657,8 +7664,8 @@ skipped); materialization `OSError`s → `io_error`. The
 seed (`prompts/stages/audit.md`) injects the deterministic summary as fenced DATA (the same
 unstyled line builder `audit run`/`audit fold` render through — the summary and the CLI render
 cannot drift), drives ONE no-argument `run_audit_wave` call, frames every returned report as
-untrusted DATA and every violation lead as a lead-not-proof, presents every degradation as
-`unchecked`, and ends on the copyable `perk-dev audit fold --bundle <dir>` callout (composed
+untrusted DATA and every violation lead as a lead-not-proof,
+and ends on the copyable `perk-dev audit fold --bundle <dir>` callout (composed
 door-side with `shlex.join`, so a bundle path with spaces/metacharacters survives a paste). Dry-run
 payload keys: `{success, error_type, bundle_dir, deterministic_path, manifest_path, packetized,
 expectations, launched: false}`.
@@ -7690,8 +7697,9 @@ are recorded `lane-failed` ("duplicate session basename in bundle — ambiguous 
 while unaffected lanes still dispatch. The per-lane `outputSchema` is the tri-state verdict
 shape (`verdict: satisfied|violated|unclear`, `confidence: high|medium|low`, integer
 `citations`, `rationale`, echoed identity) — closed, all required, NO conditionals (the salvage
-rule; violated⇒citations is enforced at fold time). `best-effort` completeness, ONE attempt,
-**no retry**; the `[models.subagents] session-auditor` key rides as the workflow-level model
+rule; violated⇒citations is enforced at fold time). Completeness/retry policy is §8.35's
+report-wave policy (`best-effort`, ONE attempt, no retry); the
+`[models.subagents] session-auditor` key rides as the workflow-level model
 default. **Zero-lane short-circuit**: no dispatched lanes ⇒ the wave is never launched (a
 synthetic complete result) and the tool still writes `verdicts.json` — its `lanes` carry only
 the pre-dispatch degrades (`lane-failed`: a basename collision / a missing `packet_path`), so
@@ -7744,7 +7752,7 @@ repository-scoped delivery façade. The closed request family is a strict TWO-ki
 discriminator: `operation_conclusion` (conclude-only recovery) and `cancellation_metadata`
 (the §8.54 metadata repair), each with the flat fields `{objective_id, action, dry_run,
 operation_id}`. For `operation_conclusion`, `action ∈ {report, abandon, accept_prefix}`
-replaces the old pair of service booleans, and a supplied operation id is carried verbatim
+is the single closed action verb, and a supplied operation id is carried verbatim
 (including `""`) so target selection remains the authority and returns `operation_not_found`
 for a nonmatch. `cancellation_metadata` accepts only a nonblank `objective_id` plus optional
 `dry_run`: an acting action or ANY operation id (even `""`) is rejected at construction, and
@@ -7836,7 +7844,7 @@ branch/PR/stack observation) stays the safety gate, so the bypass never authoriz
 checkpoint/identity mutation; all-after remains report-only with the owning `/submit`,
 all-before remains confirmation + fresh reclassification + the abandoned outcome, mixed
 remains report-only, and the orphan sweep still runs last. Other kinds and multi-unresolved
-states keep today's gates.
+states keep their gates.
 (1) Reconstruct fresh; §8.49's fail-closed **structural gate**
 applies before anything else (`refuse_structural_blockers` — identity/topology blockers
 refuse as `claimed_prefix_malformed`: a mis-linked layer can still corroborate on
@@ -7917,13 +7925,9 @@ append `completed` (§8.56 shape — layers bottom→top with fresh per-PR merge
 layer's merge commit; §8.43 read-back discipline makes a re-run idempotent) → finalize each
 layer bottom→top (per-layer isolated `finalize_landed_plan(close_objective_on_complete=
 False)`; `consumed_learn` re-read fail-open; `pr_base` = the layer's expected base ref) →
-the state-aware close → action `rolled_forward`. Invariant-20 analog: after full
-verification a failed `completed` append degrades to a loud note and finalization still
-runs — but the close is **deferred** (closing before the completion is durable would
-assemble empty reconcile evidence and, close transitions being real-transition-only,
-permanently suppress the §8.56 drive); the op stays unresolved and the next run converges
-the journal, then closes WITH evidence. The same deferral applies to §8.56's landing
-mutation. `external_prefix` →
+the state-aware close → action `rolled_forward`. A failed `completed` append follows §8.56's
+`Invariant 20` deferral rule (loud note, finalization still runs, the close deferred until a
+later run converges the journal). `external_prefix` →
 **`--accept-prefix` only** (`landing.accept_external_prefix`): without the flag the row
 reports with the structured preview (`merged_layers` + `remainder`, dry-run included) and
 the hint (accept, then `stack sync --base`, then `land`); with the flag the target must
@@ -7960,18 +7964,16 @@ needs fresh `pr_merged_evidence` corroboration (MERGED at the recorded merge com
 branch, base tolerance) — failure is a loud note + skip; merged PRs with no coverage are
 never touched (the scope guard). Corroboration runs on the **dry-run path too**: a
 would-act row is emitted only for a proof-backed layer, so the preview never promises a
-finalize the real run would refuse. Then the **state-aware close** (shared with the
-conclusions and §8.56): re-fetch, `state == "open"` + every node terminal →
-`store.close_objective` (isolated fail-open) → `objective_closed: true` — a REAL
-transition; a rerun on a closed objective reports `false`. The convergence close waits for
-a CONVERGED journal: while any LAND operation is still unresolved in the fresh fold (e.g.
-a deferred `completed` append), the close is skipped with a loud note — closing there
-would assemble incomplete evidence. Cross-machine duplicate closes
+finalize the real run would refuse. Then §8.56's **state-aware close** runs (shared with the
+conclusions), with one recovery-specific ordering delta: the convergence close waits for
+a CONVERGED journal — while any LAND operation is still unresolved in the fresh fold (e.g.
+a deferred `completed` append), the close is skipped with a loud note (closing there
+would assemble incomplete evidence). Cross-machine duplicate closes
 remain possible (idempotent close, machine-local lock): the reconcile-drive guarantee is
 honestly **at-least-once**. Acted-on layers ride `landed_layers` rows; dry-run would-act
 rows carry `finalized: null` (not attempted — distinguishable from attempted-and-failed
-`false`). Every close transition assembles `reconcile_evidence` fresh from the fold
-(§8.56's `assemble_land_evidence`). **The close-then-evidence crash repair**: recover's
+`false`). Close transitions assemble `reconcile_evidence` per §8.56.
+**The close-then-evidence crash repair**: recover's
 convergence pass also re-emits that fresh-fold evidence for an **already-closed,
 journal-complete** objective (fresh corroboration: state CLOSED, every node terminal, no
 unresolved LAND in the fold) with a loud "re-emitting reconcile evidence" note while
@@ -7979,7 +7981,8 @@ unresolved LAND in the fold) with a loud "re-emitting reconcile evidence" note w
 the evidence/drive step would otherwise suppress the reconcile drive permanently (a rerun
 sees "already closed"). Deliberately at-least-once: EVERY recover on such an objective
 re-emits (the reconcile pass is idempotent; recover is operator-invoked); dry-run never
-emits.
+emits. The warm drive gates on evidence presence, never `objective_closed` (§8.56), so this
+re-emission — which honestly rides `objective_closed: false` — still re-fires it.
 (3) **Select the target**: one unresolved operation is the implicit target; several require
 `--operation ULID` — without it the report succeeds with `selection_required: true` (rows
 still classified), except under `--abandon`/`--accept-prefix`, where acting ambiguously is the typed refusal
@@ -8019,7 +8022,8 @@ Typed refusals never sweep (the sweep runs only after a successful conclude/repo
 
 **Errors.** Recovery uses the single bounded `DeliveryError`; its recovery-specific additions are
 `operation_ambiguous`, `operation_not_found`, `abandon_blocked`, `accept_blocked`, and
-`unsupported_operation_kind`, while it reuses `operation_in_progress`, `not_stacked`,
+`unsupported_operation_kind` (reachable only through the impossible-by-construction TRANSFER
+abandon fallback), while it reuses `operation_in_progress`, `not_stacked`,
 `invalid_input`, the sync/transfer tail codes, and journal/config/infra codes already in the façade
 vocabulary. Existing `DeliveryError`s pass unchanged. The façade boundary translates allowed
 reconstruction codes, journal corruption/oversize, raw Git, GitHub/backend/persistence, and sync
@@ -8034,7 +8038,7 @@ and `--abandon` × `--accept-prefix` are `invalid_input`
 (preview first, then act; one conclusion per invocation). Both confirmations follow sync's
 discipline (stderr
 render, `--yes` auto-approve, non-interactive without `--yes` → `confirmation_required`). After
-flag-first validation and the retained eager validation-only config read, the command resolves one
+flag-first validation and the eager validation-only config read, the command resolves one
 Delivery, maps the booleans to one closed action, constructs one `RecoverRequest`, calls
 `Delivery.recover` once with the union consent callback, and renders the existing DTO. It catches
 one `DeliveryError`; no low-level recovery/Git/GitHub/backend error ladder remains.
@@ -8062,7 +8066,8 @@ discipline: 0 = successful classification/report/no-op/actions (including declin
 **The warm stack surface** (`extension/doors/objectiveStack.ts`; mutations stay canonical in
 Python — every tool delegates through the cold door). **Four commands**: `/objective-stack
 [N]` is a direct read door (exec `stack status --json`, render the train + operations +
-continuation + residue honoring `observed: false`; decode fully lenient/render-only; works
+continuation + residue honoring `observed: false`; decode fully lenient/render-only —
+nothing is appended to workflow-state; works
 in every session including gate-on); `/objective-sync [N]`, `/objective-recover [N]`, and
 `/objective-land [N]` (§8.56) are drive-the-session commands injecting pure exported
 guidance (`objectiveSyncGuidance`/`objectiveRecoverGuidance`/`objectiveLandGuidance`,
@@ -8090,24 +8095,14 @@ resolved objective explicitly to the cold door. **Gating census**: the five tool
 `PERK_TOOLS` and the worktree-family stage lists (`WORKTREE_STAGE_TOOLS` — explicit repair
 from implement/address sessions and §8.52's converged workflow); the three drive rows join
 the drive-coverage guard. No registry stage is added — the warm commands are
-globally-registered doors/drivers (the `ready` non-stage precedent).
-
-**Status.** Recovery/control is landed; automatic submit/address propagation consumes it through
-§8.52. TRANSFER recovery is landed (§8.53); LAND recovery is landed (this section — the
-handle×shape classification, the roll-forward/abandon/accept-prefix conclusions, and the
-finalization-convergence pass; the landing mutation itself is §8.56).
-`unsupported_operation_kind` remains only for the impossible-by-construction TRANSFER
-abandon fallback. Cold-envelope decodes on the warm surface stay
-render-only — nothing is appended to workflow-state; the one drive is §8.56's reconcile
-drive (`driveStackReconcile`), gated on non-empty `reconcile_evidence` — evidence
-presence, never `objective_closed` (§8.56), so this section's close-then-evidence
-crash-repair re-emission (which honestly rides `objective_closed: false`) re-fires it.
+globally-registered doors/drivers (the `ready` non-stage pattern). The one warm drive is
+§8.56's reconcile drive (`driveStackReconcile`); the landing mutation itself is §8.56's.
 
 ## §8.52 · Workflow convergence (automatic propagation, finalization, supervision, and reviewability)
 
 **One structural vocabulary.** `perk.delivery.train.STRUCTURAL_BLOCKER_CODES` is the complete,
-context-free set of train identity/topology blocker codes, including `missing_lineage` — and,
-since §8.54, the non-recoverable cancellation/checkpoint-topology/journal-history codes
+context-free set of train identity/topology blocker codes, including `missing_lineage` and
+the non-recoverable cancellation/checkpoint-topology/journal-history codes
 (`canceled_status_conflict`, `canceled_plan_unresolved`, `canceled_published_layer`,
 `canceled_remote_work`, `cancellation_evidence_unavailable`, `checkpoint_pair_incomplete`,
 `checkpoint_prefix_gap`, `checkpoint_parent_mismatch`, `missing_publish_outcome`,
@@ -8118,7 +8113,7 @@ Sync's structural gate, supervisor veto classification, and reviewability consum
 public set; no caller maintains a context-specific copy. Package-internal `ClaimedLayer` facts plus
 `derive_claimed_prefix(train) -> tuple[ClaimedLayer, ...]` remain the one
 checkpoint-claimed-universe contract shared by publish routing, sync mutation, transfer, and
-recovery; they are no longer package-root API.
+recovery; they are package-internal, never package-root API.
 
 **Automatic lower-layer submit.** After reconstructing, the bound Publish context derives the
 claimed prefix *before* reading publish's journal fold. A claimed plan with a claimed successor
@@ -8132,24 +8127,13 @@ declassified by PR/membership/remote drift remains checkpoint-claimed and reache
 preflight instead of turning a lower submit into a top republish. The automatic path never includes
 the objective base.
 
-**Trigger semantics.** `trigger_plan_id` is normalized like stored plan ids and must identify a
-claimed layer, else `claimed_prefix_malformed` explains that publication classification and
-checkpoint claims disagree and points to stack status. It is mutually exclusive with
-`include_base` and adoption (`invalid_input`); dry-run remains legal. Only the trigger layer's
-local committed head is read as a possible source, using the ordinary change rule (exists,
-differs from checkpoint, and is not an ancestor of the checkpoint). Every successor source is its
-verified published head even when its local branch is ahead; unrelated successor work is never
-published by somebody else's submit. A trigger branch that does not resolve to a committed local
-head fails closed as `git_error`; an unchanged/stale trigger is the existing no-op result, and
-the selected trigger source must contain its stored parent edge (`stale_parent`).
-
-A trigger resume preserves sync's fail-closed record recovery with one critical composition:
-all-before abandons with proof and runs fresh with the trigger as usual; mixed is `sync_drift`;
-all-after rolls the old operation forward, reconstructs, and runs the full fresh trigger protocol
-in the same invocation. The returned arm is the fresh arm (`resumed: false`, fresh operation id or
-null on no-op), with a note naming the concluded id: `concluded unresolved operation <id>
-(roll-forward) before cascading`. A completed older operation can therefore never report that it
-published a newer trigger head.
+**Trigger semantics.** The trigger validation, affected-set, source-selection, no-op, and
+trigger-resume rules are §8.49's (step 6 and the resume path). The submit-supplied context:
+automatic submit passes raw `(trigger_plan_id, trigger_run_id)`; `trigger_plan_id` must
+identify a claimed layer, only that layer's local committed head is read as a possible source,
+and every successor source is its verified published head — unrelated successor work is never
+published by somebody else's submit. A trigger branch that does not resolve to a committed
+local head fails closed as `git_error`.
 
 **Writer exclusion and result contract.** `RepoDeliveryGitHub` owns the private
 `_corroborated_remote_run_id` proof and active-writer observation. Automatic submit passes the raw
@@ -8188,11 +8172,8 @@ rows are omitted, replies positively reported as posted are stripped, and a requ
 from the report is retried without its reply because the posting outcome is unknown. An absent or
 malformed result payload carries no per-thread claim and instructs inspection before a retry. Full
 success appends `last_review_batch`, returns nested submit + resolve facts, drives the same bounded
-conflict-resolution follow-up as `submit`, and terminates. The headless address predicate is
-finalizer success + recorded batch + successful effective submit evidence with
-`mergeable !== false`; the finalizer's nested submit is the first
-evidence and a later standalone clean submit supersedes it (a later failed submit cannot satisfy
-the predicate). The address stage registry rows include `github.plan`,
+conflict-resolution follow-up as `submit`, and terminates. The headless address-success
+predicate is §8.11/§8.38's. The address stage registry rows include `github.plan`,
 `github.objective`, and `github.stack` on both reads and writes because finalization is publication.
 
 **Supervisor convergence.** `classify_stacked_veto(selection, objective_id)` runs before branching
@@ -8228,8 +8209,8 @@ only kind/id/dry-run and returns through the façade before backend/config/crede
 Incremental ready derives canonical `plan-<id>` internally and uses the all-state
 `DeliveryGitHub.pr_for_branch`: absence is `no_pr`; any returned draft is sent to `mark_pr_ready`
 regardless of OPEN/CLOSED/MERGED and a gateway rejection remains `github_error/(ready,github)`;
-any non-draft is the idempotent already-ready result regardless of state. This intentionally
-preserves the pre-migration all-state edge rather than adding an OPEN gate.
+any non-draft is the idempotent already-ready result regardless of state. The incremental
+all-state ready path deliberately accepts a draft in any PR state and has no OPEN gate.
 
 Stacked ready calls bound status once, derives the target, and fetches the full `PullRequest` from
 the projection-correlated number before any gate/mutation (`no_pr` on absent number/object).
@@ -8258,18 +8239,16 @@ exiting nonzero, and the grown success envelope carries the derived continuation
 (`stacked`, `objective`, `node`, `stamped_head`, `stamp_advanced`, the reconcile-not-launched
 notice + copyable retry, and the tail-additive §8.66 pair `plan` + `parent_checkpoint` — one
 null cohort: all populated exactly when a stamp exists). The notice names the wrapper/worker
-split truthfully (`perk pr ready` is the deterministic non-launching worker; `perk ready` in an
-interactive terminal launches the pass — §8.66). The pre-stamp "unchanged ready envelope and
-bytes" posture is superseded by this contract.
+split truthfully (§8.66 owns the distinction).
 
-**Status.** Ordinary `/submit` and `/address` now converge published suffixes automatically;
-explicit sync remains the owner of base advancement, adoption, continuation/abort, preview, and
-operator-driven repair. Reviewability and supervisor prioritization consume the train projection.
-Atomic landing and ordinary-land stacked refusal remain separate later contracts.
+**Ownership.** Ordinary `/submit` and `/address` converge published suffixes automatically;
+explicit sync owns base advancement, adoption, continuation/abort, preview, and
+operator-driven repair.
 
 ## §8.53 · Objective replan transfer (stacked supersession — the convergence protocol)
 
-**The public boundary and D1 routing matrix.** `objective create --supersedes` submits one frozen
+**The public boundary and routing matrix.** `objective create --supersedes` (the door context
+is §8.32's) submits one frozen
 intent-only `TransferRequest` to `Delivery.transfer`; no predecessor snapshot, policy, provider,
 store, probe, callback, clock, lock, or factory crosses the boundary. Transfer validates the
 roadmap/dependency/carry shape before any authority call, canonicalizes the predecessor id, then
@@ -8288,20 +8267,19 @@ lineage presence:
 
 A stacked-policy predecessor with a missing/blank/junk `delivery_lineage` refuses fail-closed
 (`missing_lineage`). A stacked→incremental successor stores **no** `delivery`/`delivery_lineage`
-(§8.42's absence rule); the predecessor keeps its historical lineage, so its journal (including
+(§8.42's absence rule); the predecessor keeps its stored lineage, so its journal (including
 the completed TRANSFER) stays readable via the predecessor id. `--dry-run` stays offline (the
 transfer never engages).
 
-**The protocol** (the lock is acquired before D1, journal fold, planning, and probes, and held
+**The protocol** (the lock is acquired before the authoritative predecessor read, journal
+fold, planning, and probes, and held
 through completion): fold → rerun routing → plan → **prepare → create → stamp → verify → finalize
 → complete**. Fresh dispatch is private `perk/delivery/transfer.py` machinery reached only through
-`Delivery.transfer`; its `_FreshTransfer` carries `TransferSeams`, aggregate Git/GitHub
-authorities, and the explicitly typed carry-normalization callable required only by fresh
-dispatch. `_TransferRuntime` is the whole private clock/id/lock test seam. There is no
-`run_transfer` compatibility entrypoint. `roll_forward_transfer(seams, record)` remains the
+`Delivery.transfer` (the private seams are `transfer.py`'s own);
+`roll_forward_transfer(seams, record)` is the
 lock-ASSUMED conclusion core shared by same-run rerun and recover's all-after arm.
 
-**Planning (the preflight, split by predecessor policy — D13).** A stacked predecessor:
+**Planning (the preflight, split by predecessor policy).** A stacked predecessor:
 reconstruct the train, `refuse_structural_blockers`, `derive_claimed_prefix` (**"published" for
 every immutability/prefix rule = the checkpoint-claimed prefix**, never the classifier's
 verified prefix). An incremental predecessor (→ stacked successor): a direct observation path —
@@ -8328,15 +8306,15 @@ detail, **nothing written when planning raises**:
 - **Suffix reshaping + the open-PR guards**: below the prefix, reshaping is arbitrary — except
   every predecessor plan with an OPEN PR is **mandatory-carry** (dropping one → `dropped_open_pr`
   until the PR closes), and a policy-**changing** replan (stacked↔incremental, either direction)
-  refuses while any carried plan has an OPEN PR → `pr_exists` (an existing remote PR already
-  makes the layer published, so the conversion path no longer applies). No local branch is ever
+  refuses while any carried plan has an OPEN PR → `pr_exists` (an existing remote PR makes
+  the layer published, so conversion is refused). No local branch is ever
   rewritten.
 - **Dirty/active blocking** (sync's posture verbatim) over every carried plan plus every
   open-PR plan: a DIRTY worktree → `dirty_worktree`; positively observed remote writers →
   `active_writer`; an unreadable observation → `writer_observation_unavailable` (never "no
   writers").
 
-**The transfer manifest (D7).** The predecessor-carried `PreparedRecord` (kind `transfer`) IS
+**The transfer manifest.** The predecessor-carried `PreparedRecord` (kind `transfer`) IS
 the durable manifest — sufficient to re-drive creation cross-session (a recover process has no
 session artifacts). This is the stored interpretation of the architecture doc's "successor
 carries a transfer manifest": the **predecessor journal record** is the sole durable manifest;
@@ -8365,24 +8343,18 @@ prose). **Roll-forward corroboration**: a successor found by `record.run_id` mus
 (`transfer_incomplete`; a foreign objective is never adopted as the successor).
 
 **Execution (steps create → complete), every write convergent/idempotent.** Create:
-`supersede_objective(close_predecessor=False)` — deferred close (§8.32's D8 Protocol growth),
-find-then-return idempotent on `run_id` with a **convergent found-arm**. GitHub first discovers
-an existing roadmap-marker objective-body comment before posting, so the comment-POST/header-id-
-backfill interruption reuses the original REST id without a duplicate. Linear re-materializes the
-manifest attachment, overview callout, milestones, carried moves, missing fresh node-issues, and
-missing dependency relations. A fresh Linear node's issueCreate atomically stores a recoverable
-fingerprint (target project + node-id-prefixed title + clean description + phase milestone + node
-label); if its later objective-node attachment write was interrupted, the found-arm resumes the
-unique matching issue, refuses ambiguity/conflict, and only mints when no match exists. Each write
-is idempotent. Stamp: per carried plan, derived from the
+`supersede_objective(close_predecessor=False)` — deferred close,
+find-then-return idempotent on `run_id` with a **convergent found-arm** (the provider-adapter
+write mechanics — GitHub's comment-discovery reuse, Linear's re-materialization and the atomic
+create-time node fingerprint the found-arm resumes — are the adapters' own; each write
+is idempotent). Stamp: per carried plan, derived from the
 manifest alone — claimed-prefix plans receive one generic grouped `update_plan_header` ownership
 write (`objective_id` + NEW `objective_node_id`); carried-unpublished plans under a stacked
 successor additionally receive one grouped identity write (`delivery_lineage` + the
 successor-delivery-order `predecessor_plan_id`, explicit null when the layer below is unplanned);
 carried plans under an incremental successor instead receive the four stacked fields as explicit
 nulls in ONE generic write. Every group is skipped when stored values already match (idempotent
-rerun, no duplicate header effects); the former three transfer-only persistence wrappers do not
-exist. Verify (**before finalize**; failure → `transfer_unverified`, journal unresolved,
+rerun, no duplicate header effects). Verify (**before finalize**; failure → `transfer_unverified`, journal unresolved,
 predecessor open, no auto-abandon): a stacked successor requires a fresh train reconstruction
 through the seams' bound `reconstruct` (the façade's cause-preserving bridge) whose full
 `(node_id, plan_id|null)` projection equals the recorded manifest projection exactly (a never-materialized carried node fails here), zero structural
@@ -8396,7 +8368,7 @@ raises; cancel dropped still-open Linear node-issues; close/complete; best-effor
 update). Complete: the COMPLETED outcome appends to the **predecessor** carrier (§8.43's
 outcome routing).
 
-**Rerun + recovery (D11).** At the save, the predecessor fold routes first: an unresolved
+**Rerun + recovery.** At the save, the predecessor fold routes first: an unresolved
 TRANSFER strict-decodes its manifest, then `find_objective(run_id=record.run_id)` — found +
 same run → **roll forward** from the recorded manifest and return success; found + different
 run → `transfer_incomplete` naming the predecessor + operation (the documented entry is
@@ -8408,17 +8380,15 @@ stamped by THIS run's successor re-finalizes idempotently and returns success (t
 interrupted-finalize tail and the idempotent re-save); any other stamp → `objective_not_open`.
 The incremental→stacked arm's lineage resolution is likewise rerun-convergent: a same-run
 successor's stored lineage wins over copy-or-mint (a fresh mint mid-convergence would fork the
-train identity). `perk objective stack recover` owns cross-session conclusion through
-`Delivery.recover(RecoverRequest(kind="operation_conclusion", ...))` (§8.51's TRANSFER arm).
-That arm binds `TransferSeams` directly from the façade's aggregate persistence and cause-aware
-status bridge—never from a caller factory—and rejects the LAND-only `accept_prefix` action before
-successor observation or any effect.
+train identity). Cross-session conclusion is §8.51's TRANSFER arm
+(`perk objective stack recover` through
+`Delivery.recover(RecoverRequest(kind="operation_conclusion", ...))`).
 
-**The door posture** (`objective replan`, §8.32). The door calls
+**The door posture** is §8.32's; the `objective replan` door calls
 `Delivery.prepare(PrepareRequest(kind="replan", objective_id=...))` once. Prepare reads the
 objective once, classifies policy fail-closed and, for a stacked predecessor, refuses on any
 unresolved journal operation (TRANSFER → `transfer_incomplete` + the recover hint; other kinds →
-`unresolved_operation`), calls bound `Delivery.status`, applies the same structural
+`unresolved_operation`), applies the same structural
 identity/topology blocker gate as save, and returns only the facts needed to render a
 `<stacked_delivery_facts>` scratch block: the
 claimed-prefix MUST-carry listing (exact order), the mandatory-carry open-PR plans, and the
@@ -8440,7 +8410,7 @@ reconstruction/store/issue/persistence exception to the shared core, preserving 
 infrastructure verification behavior. Unexpected programming errors propagate. The CLI consumes
 one `DeliveryError` envelope; any prepared failure remains unresolved and recoverable.
 
-**Residuals (flagged).** The **D14 Linear creation window**: Linear cannot make its first write
+**Edge cases and current limitations.** The **Linear creation window**: Linear cannot make its first write
 run-id-discoverable (discovery IS the sentinel header attachment), so a crash inside the
 `create_project` → header-attachment window leaves an **inert non-perk residue project** — no
 sentinel ⇒ invisible to `find_objective`/journal/train, and no predecessor-touching write has
@@ -8452,7 +8422,7 @@ after the sentinel, even a fresh node issue whose create succeeded before its at
 recoverable through the atomic create-time fingerprint described above. The non-journaled
 incremental→stacked arm's cross-session abandonment is not journal-discoverable. In particular,
 real Linear process death after a carried node MOVE but before plan ownership/finalization is
-**not proven** by this refactor: no durable operation record binds a later run to the preflighted
+**not proven**: no durable operation record binds a later run to the preflighted
 request. Designing that recovery posture is a separately reviewed behavior change, not a
 permissive inference from partial state. An oversize manifest refuses rather than truncating. The
 journaled Linear transfer path is fake-proven; live proof belongs to the Linear smoke gate.
@@ -8464,7 +8434,7 @@ node-issue's native workflow-state type through the state-bearing sibling query
 `_LinearProjectOps.project_issues_for_objective_projection` (the byte-stable `project_issues`
 selection plus `state { type }`, normalized lowercase or `null`; the original query stays
 byte-stable). A roadmap node whose native type is **`canceled`** reads back with effective
-`status=SKIPPED` while its PERSISTED attachment status rides the new provenance
+`status=SKIPPED` while its PERSISTED attachment status rides the provenance field
 `ObjectiveState.native_cancellations: tuple[NativeCancellation(node_id, persisted_status), ...]`
 (default-empty — no provenance means existing behavior; GitHub and the dormant issue-backed
 Linear store never emit one). The attachment is perk's persisted status; native canceled is the
@@ -8478,7 +8448,8 @@ shared nullable plan-PR parser both production `get_plan` adapters route through
 absent/null/blank/`"None"` = no claim; a positive integer (or string, optional leading `#`)
 resolves; anything malformed/non-positive resolves **no** number while the raw header value
 stays readable (for `malformed_plan_header` classification and cancellation evidence) — a
-malformed PR claim no longer raises before train classification. Read-side tolerance only;
+malformed PR claim resolves no number rather than raising before train classification.
+Read-side tolerance only;
 writers remain strict, and infra failures resolving a valid PR keep their typed errors.
 
 **The exact safe-contraction proof.** A native-canceled node contracts (projects as skipped)
@@ -8495,7 +8466,8 @@ plan backlink — the plan resolves (else `canceled_plan_unresolved` beside the 
 affecting the plan (abandoned-only is acceptable — recovery writes it only after all-before
 proof; missing lineage / corruption ⇒ `cancellation_evidence_unavailable`, fail closed), the
 observed remote branch is absent, and the all-state branch-owned PR lookup
-(`GitHubProbe.pr_for_branch → BranchPrView`, production `prs.find_pr_for_branch`; a STABLE
+(`GitHubProbe.pr_for_branch` — a structural all-state number/state view, production backed by
+`prs.find_pr_for_branch`; `BranchPrView` is the declared shape, not the return type; a STABLE
 read — failure is a typed `github_error`) finds nothing (else `canceled_remote_work`). A
 semantically stale but well-typed `predecessor_plan_id` does not prevent contraction; a
 non-string one is malformed and unsafe. Failed predicates emit ALL applicable findings.
@@ -8508,15 +8480,15 @@ subset.
 
 **Checkpoint topology + journal coverage.** Stored checkpoint claims are checked as topology
 (header-derived, distinct from remote observation): a half-pair is
-`checkpoint_pair_incomplete` (replacing the old half-pair `checkpoint_drift`;
-`checkpoint_drift` is reserved for remote/head/ancestry mismatch), a claim above a layer
+`checkpoint_pair_incomplete`
+(`checkpoint_drift` is reserved for remote/head/ancestry mismatch), a claim above a layer
 without a FULL pair is `checkpoint_prefix_gap`, and adjacent full claims whose child
 `parent_checkpoint_sha` differs from the predecessor's `published_head_sha` is
 `checkpoint_parent_mismatch` (`predecessor_mismatch` and the verified-publication `prefix_gap`
 stay distinct). Journal coverage classifies every checkpoint-claiming plan's PUBLISH history
 with total precedence (§8.43). The non-recoverable cancellation/topology/history codes join
-`STRUCTURAL_BLOCKER_CODES` (§8.52); the two pending codes are excluded, and §8.51 gains the
-fold-first sole-PUBLISH recovery route so a real unresolved PUBLISH stays concludable despite
+`STRUCTURAL_BLOCKER_CODES` (§8.52); the two pending codes are excluded, and §8.51's
+fold-first sole-PUBLISH recovery route keeps a real unresolved PUBLISH concludable despite
 its own structural evidence. Remediation is never "replan past it": repair the edited
 Linear/plan/journal/GitHub authority, rerun status, then replan only if a coherent future
 roadmap still needs reshaping.
@@ -8548,10 +8520,8 @@ Production ownership lives behind `Delivery.recover(RecoverRequest(kind=
 "cancellation_metadata", objective_id, dry_run))` (§8.51): the persistence authority exposes
 the writer through the optional capability `DeliveryPersistence.
 native_cancellation_metadata_writer()` — a concrete default-`None` method (the
-unsupported-backend posture) with a quoted type-only annotation, overridden only by the lazy
-production adapter (which returns the resolved objective store exactly when it structurally
-satisfies the Protocol, through its one aligned resolution, with no extra objective read and
-failed-resolution non-caching) and the owned fake. `None` is a successful empty pass before
+unsupported-backend posture), overridden by the production adapter and the owned fake.
+`None` is a successful empty pass before
 any reconstruction; only the Recover engine consumes the Protocol and
 `repair_projected_cancellations` in production — the Protocol is never a package-root export
 or a fourth aggregate authority.
@@ -8574,40 +8544,35 @@ conditional validation with no write/compensation. This is not distributed atomi
 prevents stale snapshots from writing and compensates observed drift. Doctor never repairs plan
 identity, checkpoints, journal history, branches, PRs, or native stack membership.
 
-**The two-part doctor.** Both report diagnosis and the train repair are façade consumers. One
-zero-I/O `Delivery`
-is constructed per command and reused for initial diagnosis, post-manifest re-diagnosis, the
-cancellation Recover pass, and the
-final remaining-findings read. Each diagnosis calls
+**The two-part doctor.** Report diagnosis and the train repair are façade consumers. Each
+diagnosis calls
 `Delivery.status(StatusRequest(objective_id=active_id))`; its bounded `DeliveryError` becomes the
 modeled `unavailable` state with the same error type/message, so a routine plan/journal/store
-outage is never an escape. The cancellation repair's effect-boundary proof lives inside the
-Recover engine: a private reconstruction closure over the façade's cause-aware bridge, pinned
-to the request objective on every call, normalizing expected
-issue/objective/train-persistence read failures to
-`TrainReconstructionError(error_type="github_error")` so the repair core answers its modeled
-unavailable arm; no public read API is reintroduced. Doctor itself is a thin request/result
+outage is never an escape. Doctor itself is a thin request/result
 mapper: for a currently stacked diagnosis it constructs exactly
 `RecoverRequest(kind="cancellation_metadata", objective_id=active_id, dry_run=dry_run)`,
 calls the shared `Delivery.recover` once with no consent, and maps the strict
-`CancellationMetadata` detail into `_TrainFixOut`; a bounded `DeliveryError` raised before a
+`CancellationMetadata` detail into the fix object; a bounded `DeliveryError` raised before a
 modeled detail exists (e.g. lazy persistence capability resolution failed) is treated as an
 unavailable/aborted repair pass — the final diagnosis still runs and the assembled report
-keeps `success: true` with the exit-1 posture. Current incremental/unavailable diagnoses
-short-circuit before any Recover call, exactly as before.
+keeps `success: true` with the exit-1 posture. Incremental/unavailable diagnoses
+short-circuit before any Recover call.
 
 `perk objective doctor` resolves the requested objective through `train.resolve_active_objective`
 ONCE — manifest detection/repair and train reconstruction/repair all target the ACTIVE id
 (`objective` reports it; additive `redirected_from` preserves the requested id; a predecessor is
 never mutated by `doctor OLD --fix`). The report is two parts: the existing Linear manifest drift
-plus the exact `DeliveryTrain` findings on every backend, each annotated with the diagnosis policy
-(`TrainFindingOut: code, severity, node_id, plan_id, message, repairable, remediation`).
-`TrainDiagnosisOut` (field order load-bearing): `state: stacked|incremental|unavailable,
-objective_id, redirected_from, error_type, message, blockers[], information[]` — stacked
+plus the exact `DeliveryTrain` findings on every backend, each annotated with the diagnosis
+policy. The doctor output shapes are schema-backed objects (the Python classes are
+underscore-private; the snapshot `shared/schemas/outputs/objective-doctor.schema.json` is the
+shape authority): the train-finding object
+`{code, severity, node_id, plan_id, message, repairable, remediation}`;
+the train-diagnosis object (field order load-bearing) `{state: stacked|incremental|unavailable,
+objective_id, redirected_from, error_type, message, blockers[], information[]}` — stacked
 carries findings with null error/message; incremental the no-train message; unavailable the
 typed error + message with empty findings. `--fix` additionally runs the cancellation repair
-(`TrainRepairActionOut: code, node_id, outcome: applied|would_apply|skipped|failed, error`;
-`TrainFixOut: state, applied, skipped, failed, remaining, aborted, dry_run` with states
+(the repair-action object `{code, node_id, outcome: applied|would_apply|skipped|failed, error}`;
+the fix object `{state, applied, skipped, failed, remaining, aborted, dry_run}` with states
 `completed` (a NON-ABORTED pass — candidates applied/would-apply, or skipped as
 converged/STALE race outcomes, so `completed` never implies every candidate converged; failed
 null; aborted false),
@@ -8625,7 +8590,7 @@ detect-unavailable 1; manifest-abort 1; current-train-unavailable 1; write/verif
 active-resolution/store failure the fail envelope 1.
 
 **The both-headers corruption signature (report-only).** A third check rides every doctor
-report: `corruption: [_CorruptionFindingOut{code, carrier, message, remediation}]` (appended
+report: `corruption: [{code, carrier, message, remediation}]` (appended
 last — additive). The check resolves the ACTIVE objective's **issue-tier carrier** via the
 §8.43 `journal_carrier_id` (GitHub → the objective issue; Linear project store → the metadata
 **sentinel** issue's identifier — so a sentinel bearing both attachments is detected) and reads
@@ -8646,7 +8611,7 @@ output is byte-unchanged). An `IssueBackendError` from the check fails the repor
 **Compatibility.** No provenance ⇒ byte-existing behavior; the stack-status JSON shape is
 unchanged (new findings and `intent: canceled` are values inside existing string fields);
 doctor additions are additive. Missing journal/Git/GitHub/plan/header proof fails cancellation
-closed. The Linear additions are offline/fake-proven; live smoke remains later hardening. This
+closed. The Linear additions are fake-proven; live proof belongs to the Linear smoke gate. This
 section classifies/projects the cancellation-derived dynamic singleton and all-skipped train
 only — singleton landing and all-skipped objective completion are the landing mutation's
 contract (§8.56).
@@ -8666,7 +8631,7 @@ wires *this* module and `sync.py` imports `observe`); it owns its observation vi
 (`PrLandView`/`CheckView`/`MergeRulesView`, the `LandObservations` Protocol +
 `LandObservationError`) and never sees `perk.github` types. The shared remote-writer seam
 (`RemoteWriterProbe` + `WriterObservationError`) lives in the leaf `perk/delivery/writers.py`
-(moved from `sync.py`, which re-exports both names) so mutating and readiness preflights share
+so mutating and readiness preflights share
 one fail-closed observation contract. Production wiring is aggregate-backed: the landing
 engine constructs `observe.GatewayLandObservations(github, base=…)` over the bound
 `DeliveryGitHub` (`pr_land_facts` / `base_merge_rules` / `stack_capability`), wrapping the
@@ -8705,11 +8670,13 @@ SHA-pinned direct squash, endpoint-guaranteed; the
 capability and composition arms are **not consulted**: `native_stack_capability` stays null)
 else `stack_merge_async`.
 
-**Assessment order.** (1) Train state composes first: every train BLOCKER passes through
+**Assessment order** (an enrichment-read failure after a sound reconstruction is a specific
+BLOCKER, never an abort: disposition BLOCKED with the rest of the report still rendered —
+can't-verify ⇒ not-ready). (1) Train state composes first: every train BLOCKER passes through
 verbatim; every `unresolved_operations` entry (ANY kind, including a prior LAND — recovery is
 the recovery node's concern) becomes the blocker `unresolved_operation`; train INFO findings
 compose as information. (2) Zero layers short-circuits (above). (3) Publication completeness, checked on BOTH axes:
-every layer must be `published` — each offending layer is an `incomplete_publication` blocker
+every **non-landed** layer must be `published` — each offending layer is an `incomplete_publication` blocker
 (embedding its publication axis value); a `published` layer missing any §8.46-guaranteed
 identity/checkpoint field classifies back to `incomplete_publication` rather than being
 trusted; and when every layer reads `published` but `published_prefix_len` still falls short
@@ -8717,8 +8684,9 @@ of the layer count, the inconsistent projection is one train-wide `incomplete_pu
 blocker (fail-closed — never READY). (4) Only published layers are **assessable**; non-published layers get honest
 `assessed: false` rows with null observations while published siblings are STILL fully
 assessed (the report stays complete on a partially published train). (5) Local writers from
-the train's writer axis: `DIRTY` → blocker `dirty_worktree`; clean `ACTIVE` → information
-`active_worktree`. (6) Remote writers over every layer with a plan id (planned-but-unpublished
+the train's writer axis (non-landed layers): `DIRTY` → blocker `dirty_worktree`; clean `ACTIVE` → information
+`active_worktree`. (6) Remote writers over every **non-landed** layer with a plan id
+(planned-but-unpublished
 included — an active writer anywhere in the train is affected): non-empty → blocker
 `active_writer` naming the plans; `WriterObservationError` → blocker
 `writer_observation_unavailable`. (7) Base merge rules → `rules`; `squash_allowed: false` →
@@ -8759,9 +8727,7 @@ flow through legally), and (b) the land-only codes, enumerated exhaustively: blo
 `optional_check_failed`, `unresolved_threads`. No raw error types pass into codes; failure
 text goes into `message`.
 
-**Fail-closed enrichment posture.** An enrichment-read failure after a sound reconstruction is
-a specific BLOCKER, never an abort: disposition BLOCKED with the rest of the report still
-rendered (can't-verify ⇒ not-ready). The **raising** reads — per-PR readiness
+**Fail-closed enrichment posture.** The **raising** reads — per-PR readiness
 (`readiness_unobserved`), merge rules (`merge_rules_unobserved`), the writer probe
 (`writer_observation_unavailable`) — each embed the exact failure text in the blocker message.
 The capability probe is the ONE declared boolean arm: the gateway's `stack_capability()`
@@ -8807,7 +8773,7 @@ GitHub's own `mergeStateStatus: BLOCKED` is the covering authority for that case
 **The cold worker.** `perk objective stack land [OBJECTIVE] --dry-run [--json]`
 (`commands/objective/stack/land_cmd.py`; the group's land verb). **No remote mutation
 anywhere in this section**: bare `land` (no `--dry-run`) is the §8.56 landing mutation on
-this same argv shape (it replaced the historical `land_unimplemented` refusal).
+this same argv shape.
 `--dry-run` resolves the objective (explicit arg → worktree plan-ref → `no_objective`) and
 makes exactly one `Delivery.land(LandRequest(kind="objective", objective_id, dry_run=True))`
 call — lock-free, consent-free, run-id-free; the engine reconstructs the train (a
@@ -8826,10 +8792,9 @@ observed_base_ref, observed_head_ref, observed_head_sha, mergeable, merge_state_
 review_decision, required_checks_failed[], required_checks_pending[],
 optional_checks_failed[], unresolved_thread_count|null, landed`; unassessed rows serialize their
 nulls as-is; `landed` is trailing additive growth), and `plan` is `{mode, merge_method, top_pr_number, top_head_sha,
-layers[{node_id, plan_id, pr_number, base_sha, head_sha}]}` — plus the §8.56 mutation
-fields declared strictly at the tail (`outcome, operation_id, merge_async_uuid,
-landed_layers[], objective_closed, notes[], reconcile_evidence|null` — nulls/empties on every dry-run envelope, so
-the §8.55 byte order is preserved). Exit codes: **a BLOCKED verdict
+layers[{node_id, plan_id, pr_number, base_sha, head_sha}]}` — plus §8.56's mutation
+fields declared strictly at the tail (nulls/empties on every dry-run envelope, so
+the readiness byte order is preserved). Exit codes: **a BLOCKED verdict
 is a successful detection ⇒ exit 0** with every blocker rendered (the `stack status` split);
 `1` = the typed failures where no honest assessment exists (reconstruction failures,
 `not_stacked`, `no_objective`, invalid input); `2` = not-a-repo. `--json` →
@@ -8839,9 +8804,9 @@ finding-message scraping): disposition headline, the rules line (including the h
 (unassessed rows say `not assessed`), the plan summary when READY, then
 `blockers:`/`information:`.
 
-**Status.** This section is the read path only; the landing mutation (journal writes, merge
+**Scope.** This section is the read path only; the landing mutation (journal writes, merge
 submission, UUID polling, finalization, confirmation) and the all-skipped objective
-*completion* have since landed as §8.56; interrupted-LAND recovery has since landed as
+*completion* are §8.56's; interrupted-LAND recovery is
 §8.51's LAND arm. Here an unresolved LAND is simply a readiness blocker (its conclusion
 routes to `stack recover`) and the clean zero-layer
 train is only the `NOTHING_TO_LAND` disposition.
@@ -8884,13 +8849,15 @@ validation failure. Poll: `GET …/merge-async/{uuid}` — `status ∈ pending |
 enqueued | failed` (exhaustive; unknown raises); `merged` carries `details.sha` (the merge
 commit — required, else the read raises); `enqueued` is terminal for the REQUEST (the queue
 owns the outcome), not for the train; the handle expires after 24h (404). A stack merge is
-atomic: merged entirely or nothing. The **dynamic singleton** lands via the legacy
+atomic: merged entirely or nothing. The **dynamic singleton** lands via the
 synchronous `PUT …/pulls/{n}/merge` with `merge_method=squash` + the same `sha` head-pin +
 the squash commit message (it is never in a native stack — membership NOT_APPLICABLE — and
 must land even where merge-async preview enrollment is absent). Gateway surface
 (`perk/github/stacks.py`): `submit_merge_async` / `merge_pr_direct` are **total** (the
 `--include` status + `Retry-After` classification; a spawn failure folds into the ambiguous
-`status=None` arm; an unparseable 2xx/409 body leaves `state=None` — ambiguous, never a
+`status=None` arm; an unparseable 2xx/409 body stays ambiguous — `submit_merge_async`
+exposes `state=None`, and `merge_pr_direct`, which has no `state` field, exposes
+`merged=False`/`sha=None` — never a
 guessed success); `pr_merged_evidence` (per-PR
 `state + baseRefName + headRefName + headRefOid + mergeCommit.oid` — the identity fields
 the verification corroborates; a zero-exit reply carrying an explicitly-null PR node is the
@@ -8899,10 +8866,9 @@ appended — junk raises, never degrades). The landing engine reaches every land
 and observation through the aggregate `DeliveryGitHub`: `submit_merge_async` /
 `merge_pr_direct` (the two mutations above), the **total** `merge_async_probe` as the poll
 (the four live states pass through — `merged` carries `details.sha`; an `expired`/
-`unreadable` probe consumes the tick exactly like the historical tolerated per-tick
-strict-reader failure), and `merged_evidence` for the post-approval re-observation, per-PR
-verification, and abandon proof (`merge_commit_sha` is ignored pre-merge; the raw
-`GitHubError` posture and drift/unproven message bytes are unchanged).
+`unreadable` probe consumes the tick — the tolerated per-tick read
+failure), and `merged_evidence` for the post-approval re-observation, per-PR
+verification, and abandon proof (`merge_commit_sha` is ignored pre-merge).
 Operation-conclusion recovery reaches the same handle probe and strict merged evidence
 through `DeliveryGitHub.merge_async_probe` and
 `DeliveryGitHub.merged_evidence`; objective close likewise uses
@@ -8916,8 +8882,8 @@ per-layer `finalize_landed_plan(close_objective_on_complete=False)` calls are pr
 cause-preserving train-reconstruction bridge); `NoDeliveryTrain` or a null
 `delivery_lineage` → typed `not_stacked`. (3) Assess (§8.55). (4) **NOTHING_TO_LAND** →
 `approve` with the completion preview ("nothing to merge; close objective #N") — declined ⇒
-`outcome: declined`; approved ⇒ the **state-aware close** (`landing.state_aware_close`,
-shared with §8.51: re-fetch; `state == "open"` + all-terminal ⇒ `store.close_objective` —
+`outcome: declined`; approved ⇒ the **state-aware close** (`landing.state_aware_close`:
+re-fetch; `state == "open"` + all-terminal ⇒ `store.close_objective` —
 this arm's PRIMARY effect: a store
 failure is a typed error, never fail-open) ⇒ `outcome: completed_without_merge`,
 `objective_closed` = the REAL transition (an already-closed objective reports `false` + a
@@ -8955,7 +8921,7 @@ ANY other retry reply (404/400/422/failed/still-ambiguous) leaves `outcome: pend
 NO outcome append — the first request may already have created the async job, so a
 retry-side rejection proves nothing about it. The singleton arm merges directly: `merged`
 ⇒ verification; any 4xx ⇒ abandon-with-proof then `land_failed` (the 404 arm too — the
-legacy endpoint exists everywhere; a missing PR is drift, not availability); ambiguous ⇒
+synchronous endpoint exists everywhere; a missing PR is drift, not availability); ambiguous ⇒
 one identical retry, with the same preserved-ambiguity rule — only a `merged` retry reply
 (including the already-merged idempotent arm, which recovers an applied-but-unconfirmed
 first attempt) concludes it; anything else leaves `pending`. **No `accepted` event ever on
@@ -8964,7 +8930,7 @@ arm): up to 60 ticks, injected `sleep(1)`, over the total `merge_async_probe`; `
 continues; `merged` ⇒ verification (its `sha` is the journaled `reported_sha`);
 `failed` ⇒ abandon-with-proof then `land_failed`; `enqueued` ⇒ stop immediately,
 `outcome: unexpected_enqueued` (unresolved); an `expired`/`unreadable` probe consumes the
-tick (the historical tolerated per-tick read failure); exhaustion ⇒ `outcome: pending`. (11) **Abandon-with-proof** (terminal
+tick; exhaustion ⇒ `outcome: pending`. (11) **Abandon-with-proof** (terminal
 non-application only): every layer PR re-observed OPEN at its exact expected head ⇒ append
 `abandoned` and let the typed failure propagate (retry is legal — the operation is
 resolved); ANY contradiction or read failure ⇒ NO outcome append, `outcome: pending` (never
@@ -9067,9 +9033,9 @@ readiness" heading), and attaches the dry-run-shaped readiness payload to the JS
 envelope under the `readiness` key.
 
 **The cold worker.** `perk objective stack land [OBJECTIVE] [--dry-run] [--run-id ID]
-[--yes] [--json]` — a thin request→façade→map on **both arms** (envelope/exit semantics
-unchanged). `--dry-run` maps the §8.55 read-only preview (behavior unchanged; the
-envelope preserves the §8.55 field prefix/order with the §8.56 mutation fields appended as
+[--yes] [--json]` — a thin request→façade→map on **both arms**. `--dry-run` is the §8.55
+read-only preview (its envelope and exit semantics are §8.55's, with this section's mutation
+fields appended as
 trailing nulls/empties; no consent, `--yes`/`--run-id` ignored). Bare
 `land` requires GitHub auth (`require_github`), resolves the run id (explicit `--run-id` →
 the ACTIVE objective header's `run_id` → typed `invalid_input`; `stack/shared.py::
@@ -9093,8 +9059,9 @@ headline, per-layer merged/finalized lines, the objective-close line, the
 `/objective-reconcile` hint on close-with-evidence (naming the resolved objective id), notes, and the
 pending/enqueued guidance — close reporting is honest on EVERY arm (Python + warm
 renderers): `completed_without_merge` with `objective_closed: false` never announces a
-close (the LAND operation is unresolved — landing is blocked until it
-concludes; `stack recover` concludes it once the merge settles or expires).
+close (the close is state-aware — an already-closed objective honestly reports `false`;
+only `pending` and `unexpected_enqueued` leave the LAND operation unresolved, and
+`stack recover` concludes those once the merge settles or expires).
 
 **The warm surface.** The fifth typed tool `objective_stack_land {objective?, dry_run?,
 confirm?}` (strict tri-state decode; the adopt-shaped consent gate — `!dry_run && !confirm`
@@ -9130,17 +9097,7 @@ BEGIN/END UNTRUSTED DATA with a never-obey directive. Idle → `sendUserMessage`
 idempotent backend close cannot prove exactly-once cross-machine); the reconcile pass
 itself is idempotent ("skip if nothing stale").
 
-**Status.** Landed: the mutation, the singleton arm, the NOTHING_TO_LAND completion (now
-state-aware), the state-aware aggregate objective close, interrupted-landing recovery
-(§8.51's LAND arm — classification, roll-forward, abandon, accept-prefix, the
-finalization-convergence pass), the strict read-side payload models
-(`land_records.py`), the fresh-assembled reconcile evidence, and the at-least-once
-reconcile drive. The wire shapes are pinned from GitHub's official stacked-PR merge-API
-reference; CI stays hermetic against fakes — the live proof is the landing dogfood gate
-(merge-async recovery, post-partial-merge composition, remainder retarget timing, and the
-end-to-end breach → `sync --base` → `land` flow against real GitHub).
-
-## §8.57 · Single-statement-of-contract prompt layering (Objective #1610, Node 3.1)
+## §8.57 · Single-statement-of-contract prompt layering
 
 **The single-statement-of-contract layering rule.** Per stage, each contract statement has
 exactly one **canonical carrier**; every other surface points at it, never restates it. The
@@ -9171,7 +9128,7 @@ their launch-shape deltas — the untrusted-DATA framing, the shape-specific inv
 guidance, and the shape's save semantics — deferring the flow to the same mode context.
 Marker-dedup guarantees one live copy, so the flow is still stated exactly once per session.
 The carve-out: under a **REPLACE-posture** provider selection (the provider owns the plan
-surface and perk's mode context is never injected — today `tombell-plan`), the **adapter
+surface and perk's mode context is never injected — the `tombell-plan` adapter), the **adapter
 block** is the designated flow carrier for that session shape instead: carrying the flow there
 is the surface delta, not a restatement (the seeds' flow pointers stay provider-neutral so they
 name whichever carrier is injected). No other stage or surface may claim these exceptions without
@@ -9187,7 +9144,7 @@ frontmatter is outside the gate), `SEED_TEMPLATE_MAX_BYTES = 9_088` and
 `prompts/README.md` and `prompts/_fixtures/**`, measured as raw committed file bytes,
 pre-render — `prompts/contexts/**` including adapter blocks is the INJECTED-CONTEXT class;
 everything else, include partials included, is the SEED/launch class — a closed rule, so prose
-cannot evade the gate by moving into a partial). Each ceiling derives per the settled rule —
+cannot evade the gate by moving into a partial). Each ceiling derives per the derivation rule —
 measured post-diet maximum × 1.25, rounded up to the next 64-byte boundary (688 B → 896 B;
 7,225 B → 9,088 B; 1,556 B → 1,984 B) — with the derivation fixed in each constant's comment; a
 reset is an ordinary human-reviewed code change justified in its PR — no automatic ratchet, no
@@ -9200,11 +9157,11 @@ set's scope). Pointer-recap bar: a pointer sentence MAY name the rules
 it defers to — the byte ceilings are the enforced bound; prose shape stays this section's
 judgment.
 
-**Migration recipe** (what nodes 3.2–3.4 execute, one stage family per node): (a) inventory
+**Carrier maintenance.** Bringing a stage family under this rule: (a) inventory
 each stage's contract statements across its launch statement(s), injected context(s), adapter
 block(s), skill body, and ambient description; (b) assign each statement its one canonical
 carrier per the standard map above; (c) rewrite the non-canonical surfaces to pointers / live
-state / surface delta / detail — never inventing new contract prose mid-migration; (d) reconcile
+state / surface delta / detail — never inventing new contract prose mid-maintenance; (d) reconcile
 suites that pin the edited prose in the same change (prompt-prose edits touch no parity
 fixture — §8.31's Tier B is engine-vs-engine — but extension context/factory tests and binding
 guards may pin strings).
@@ -9215,9 +9172,8 @@ teach the requested/runnable launch vocabulary, but never restate its full rubri
 procedure. The bound review skills and reviewer agent definitions remain the canonical detail and
 judgment carriers for ownership, exact-source recheck, and the residual filesystem race.
 
-**Scope.** The objective's migration nodes cover the named stage families; all other perk-owned
-stage prose (e.g. the `skills` door family) is held to this rule as ordinary maintenance going
-forward.
+**Scope.** Every perk-owned stage's prose
+(e.g. the `skills` door family) is held to this rule as ordinary maintenance.
 
 ## §8.58 · The hunk watch feedback bridge
 
