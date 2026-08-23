@@ -289,7 +289,11 @@ The local cache tier — written and read by **both** the CLI (exterior) and the
   - **Selector vs binding duality (#43).** The file plays **two roles by checkout**. In the
     **repo root** it is a mutable **selector** — "the plan a no-arg cold `perk implement`
     consumes next" — written by `save`; the `worktree: none` stages (`plan`/`objective-plan`/
-    `save`) run here. In a **`plan-<N>` worktree** it is the durable **binding** — "this
+    `save`) run here (one effective-stage exception: a stacked child-layer `objective plan`
+    with a live observed parent head launches `objective-plan` through a transient
+    `worktree: "reuse"` replacement and runs in the **predecessor's** bound worktree — §8.46;
+    that checkout's binding is the predecessor's and is never rewritten by the session). In a
+    **`plan-<N>` worktree** it is the durable **binding** — "this
     worktree IS implementing plan #N" — materialized by the **positioner**
     (`launch.resolve_worktree`, which owns binding materialization: a fresh/restored checkout
     is bound immediately after checkout creation, and an existing checkout is only accepted

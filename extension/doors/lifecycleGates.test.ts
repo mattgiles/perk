@@ -250,6 +250,22 @@ test("planningStageRefusal: planning stages refuse; other/absent stages pass", (
   }
 });
 
+test("planningStageRefusal: an unreadable branch refuses (fail-closed)", () => {
+  // Without the state the guard cannot prove the session is not a positioned planning session
+  // (whose cwd binding is the PREDECESSOR), so an unreadable branch refuses, never allows.
+  const throwing = {
+    sessionManager: {
+      getBranch: () => {
+        throw new Error("branch unavailable");
+      },
+    },
+  };
+  const message = planningStageRefusal(throwing, "land");
+  assert.ok(message !== null, "unreadable state refuses");
+  assert.match(message, /could not be read/);
+  assert.match(message, /branch unavailable/);
+});
+
 test("lifecycle doors refuse in a planning session — the two-ref regression", async () => {
   // The dangerous shape after an approved save in a positioned stacked planning session: the
   // cwd binding is the PREDECESSOR (readPlanRef(ctx.cwd)) while active_plan_ref is the

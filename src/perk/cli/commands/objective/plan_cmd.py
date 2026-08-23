@@ -167,10 +167,14 @@ class _PositionProbe:
     ``local_head_sha`` are ``None`` when unprobed (missing checkout or a failed probe)."""
 
     checkout_path: Path
-    will_restore: bool
-    local_head_sha: str | None
-    dirty: bool | None
-    probe_failed: bool
+    will_restore: bool = False
+    local_head_sha: str | None = None
+    dirty: bool | None = None
+
+    @property
+    def probe_failed(self) -> bool:
+        """An existing checkout whose HEAD could not be read — its local state is unknown."""
+        return not self.will_restore and self.local_head_sha is None
 
 
 def _probe_predecessor_checkout(
@@ -188,54 +192,28 @@ def _probe_predecessor_checkout(
     name = launch.checked_name(worktree if worktree is not None else f"plan-{predecessor_plan_id}")
     path = config.worktree_root / name
     if not path.exists():
-        return _PositionProbe(
-            checkout_path=path,
-            will_restore=True,
-            local_head_sha=None,
-            dirty=None,
-            probe_failed=False,
-        )
+        return _PositionProbe(checkout_path=path, will_restore=True)
     try:
         local_head = git.resolve_commit(path, "HEAD")
         dirty = git.is_dirty(path)
     except GitError:
-        local_head = None
-        dirty = None
-    if local_head is None:
-        return _PositionProbe(
-            checkout_path=path,
-            will_restore=False,
-            local_head_sha=None,
-            dirty=None,
-            probe_failed=True,
-        )
-    return _PositionProbe(
-        checkout_path=path,
-        will_restore=False,
-        local_head_sha=local_head,
-        dirty=dirty,
-        probe_failed=False,
-    )
+        return _PositionProbe(checkout_path=path)  # probe_failed derives: unknown local state
+    return _PositionProbe(checkout_path=path, local_head_sha=local_head, dirty=dirty)
 
 
 def _layer_context_block(
     context: PrepareResult.PlanningContext | None,
-    *,
-    checkout_path: Path | None = None,
-    local_head_sha: str | None = None,
-    dirty: bool | None = None,
-    will_restore: bool = False,
-    probe_failed: bool = False,
+    probe: _PositionProbe | None = None,
 ) -> str:
     """Render Prepare's stacked predecessor-context DATA block for the plan seed.
 
-    Pure presentation. The optional keyword args are the positioned arm's probe facts
-    (``checkout_path`` set ⇔ the session runs in the predecessor's checkout): the block then
-    names the checkout (path + branch), the planned restore when the checkout is missing
-    locally, an explicit drift line when the local HEAD differs from the observed published
-    head, a dirtiness note, or the unknown-state note when the probes failed. Non-positioned
-    arms keep today's lines; a child with no observed live remote parent head gets one honest
-    repo-root line. Incremental renderings (``context is None``) stay byte-identical (empty).
+    Pure presentation. ``probe`` is the positioned arm's probe record (set ⇔ the session runs
+    in the predecessor's checkout): the block then names the checkout (path + branch), the
+    planned restore when the checkout is missing locally, an explicit drift line when the
+    local HEAD differs from the observed published head, a dirtiness note, or the
+    unknown-state note when the probes failed. Non-positioned arms keep today's lines; a
+    child with no observed live remote parent head gets one honest repo-root line.
+    Incremental renderings (``context is None``) stay byte-identical (empty).
     """
     if context is None:
         return ""
@@ -260,30 +238,32 @@ def _layer_context_block(
         f"The parent branch is already fetched — `origin/{parent_branch}` is locally "
         "inspectable with read-only git.",
     ]
-    if checkout_path is not None:
+    if probe is not None:
         lines.append(
-            f"This session runs in the predecessor's checkout at `{checkout_path}` (branch "
-            f"`{parent_branch}`) — read/grep/find see the stack as implemented, not trunk."
+            f"This session runs in the predecessor's checkout at `{probe.checkout_path}` "
+            f"(branch `{parent_branch}`) — read/grep/find see the stack as implemented, not "
+            "trunk."
         )
-        if will_restore:
+        if probe.will_restore:
             lines.append(
                 f"That checkout is not on this machine yet: it will be restored from "
                 f"`origin/{parent_branch}` at the published head before the session starts."
             )
-        if probe_failed:
+        if probe.probe_failed:
             lines.append(
                 "The checkout's local state could not be probed — treat it as unknown; the "
                 f"published state is `origin/{parent_branch}`."
             )
         else:
             observed = context.observed_parent_head_sha
-            if local_head_sha is not None and observed is not None and local_head_sha != observed:
+            local_head = probe.local_head_sha
+            if local_head is not None and observed is not None and local_head != observed:
                 lines.append(
-                    f"Local drift: the checkout's HEAD {local_head_sha[:12]} differs from the "
+                    f"Local drift: the checkout's HEAD {local_head[:12]} differs from the "
                     f"observed published head {observed[:12]} — plan against interfaces; the "
                     f"published state is `origin/{parent_branch}`."
                 )
-            if dirty is True:
+            if probe.dirty is True:
                 lines.append(
                     "The checkout has uncommitted local changes — treat them as context "
                     "noise, not published state."
@@ -469,14 +449,7 @@ def plan_objective(
                     )
                     stage_override = dataclasses.replace(stage, worktree="reuse")
                     launch_plan_id = context.predecessor_plan_id
-                    layer_block = _layer_context_block(
-                        context,
-                        checkout_path=probe.checkout_path,
-                        local_head_sha=probe.local_head_sha,
-                        dirty=probe.dirty,
-                        will_restore=probe.will_restore,
-                        probe_failed=probe.probe_failed,
-                    )
+                    layer_block = _layer_context_block(context, probe)
                 else:
                     # No live remote parent head observed (or the bottom layer): plan at the
                     # repo root as today — a selection rule, honest in the DATA block.

@@ -1169,9 +1169,15 @@ def test_stacked_bottom_layer_stays_at_repo_root(monkeypatch, unborn_git_repo_fa
     assert "bottom layer" in launched["prompt"]
 
 
-def test_positioning_probe_failure_is_fail_soft(monkeypatch, unborn_git_repo_factory):
+@pytest.mark.parametrize("failing_probe", ["resolve_commit", "is_dirty"])
+def test_positioning_probe_failure_is_fail_soft(
+    monkeypatch, unborn_git_repo_factory, failing_probe
+):
     # A raising git probe (GitError) never escapes gather — the launch proceeds with the
     # unknown-state line (presentation only; the positioner keeps every typed diagnostic).
+    # Each probe is exercised independently: `resolve_commit` raising short-circuits before
+    # `is_dirty`; a raising `is_dirty` must degrade the same way AFTER a successful HEAD
+    # resolution.
     from pathlib import Path
 
     from perk.substrate import git as git_mod
@@ -1185,8 +1191,14 @@ def test_positioning_probe_failure_is_fail_soft(monkeypatch, unborn_git_repo_fac
     def _boom(*_a, **_k):
         raise GitError("probe blew up")
 
-    monkeypatch.setattr(git_mod, "resolve_commit", _boom)
-    monkeypatch.setattr(git_mod, "is_dirty", _boom)
+    if failing_probe == "resolve_commit":
+        monkeypatch.setattr(git_mod, "resolve_commit", _boom)
+        monkeypatch.setattr(
+            git_mod, "is_dirty", lambda *_a, **_k: pytest.fail("short-circuits before is_dirty")
+        )
+    else:
+        monkeypatch.setattr(git_mod, "resolve_commit", lambda *_a, **_k: "c" * 40)
+        monkeypatch.setattr(git_mod, "is_dirty", _boom)
     launched: dict = {}
     _stub_launch(monkeypatch, launched)
     runner = CliRunner()
@@ -1255,13 +1267,15 @@ def test_positioning_worktree_name_selects_only_the_directory(monkeypatch, unbor
 def test_layer_context_block_positioned_names_path_and_branch():
     from pathlib import Path
 
-    from perk.cli.commands.objective.plan_cmd import _layer_context_block
+    from perk.cli.commands.objective.plan_cmd import _layer_context_block, _PositionProbe
 
     block = _layer_context_block(
         _child_context(),
-        checkout_path=Path("/wt/plan-101"),
-        local_head_sha="a" * 40,  # equal to the observed head — no drift line
-        dirty=False,
+        _PositionProbe(
+            checkout_path=Path("/wt/plan-101"),
+            local_head_sha="a" * 40,  # equal to the observed head — no drift line
+            dirty=False,
+        ),
     )
     assert "runs in the predecessor's checkout at `/wt/plan-101` (branch `plan-101`)" in block
     assert "Local drift" not in block
@@ -1276,13 +1290,15 @@ def test_layer_context_block_positioned_names_path_and_branch():
 def test_layer_context_block_positioned_drift_line_exactly_when_heads_differ():
     from pathlib import Path
 
-    from perk.cli.commands.objective.plan_cmd import _layer_context_block
+    from perk.cli.commands.objective.plan_cmd import _layer_context_block, _PositionProbe
 
     drifted = _layer_context_block(
         _child_context(),
-        checkout_path=Path("/wt/plan-101"),
-        local_head_sha="b" * 40,
-        dirty=False,
+        _PositionProbe(
+            checkout_path=Path("/wt/plan-101"),
+            local_head_sha="b" * 40,
+            dirty=False,
+        ),
     )
     assert (
         f"Local drift: the checkout's HEAD {'b' * 12} differs from the observed published "
@@ -1294,13 +1310,15 @@ def test_layer_context_block_positioned_drift_line_exactly_when_heads_differ():
 def test_layer_context_block_positioned_dirty_note():
     from pathlib import Path
 
-    from perk.cli.commands.objective.plan_cmd import _layer_context_block
+    from perk.cli.commands.objective.plan_cmd import _layer_context_block, _PositionProbe
 
     block = _layer_context_block(
         _child_context(),
-        checkout_path=Path("/wt/plan-101"),
-        local_head_sha="a" * 40,
-        dirty=True,
+        _PositionProbe(
+            checkout_path=Path("/wt/plan-101"),
+            local_head_sha="a" * 40,
+            dirty=True,
+        ),
     )
     assert "uncommitted local changes — treat them as context noise" in block
 
@@ -1308,22 +1326,24 @@ def test_layer_context_block_positioned_dirty_note():
 def test_layer_context_block_positioned_will_restore_line():
     from pathlib import Path
 
-    from perk.cli.commands.objective.plan_cmd import _layer_context_block
+    from perk.cli.commands.objective.plan_cmd import _layer_context_block, _PositionProbe
 
     block = _layer_context_block(
-        _child_context(), checkout_path=Path("/wt/plan-101"), will_restore=True
+        _child_context(), _PositionProbe(checkout_path=Path("/wt/plan-101"), will_restore=True)
     )
     assert "restored from `origin/plan-101` at the published head" in block
 
 
 def test_layer_context_block_positioned_probe_failed_line():
+    # probe_failed is DERIVED: an existing checkout (not a planned restore) whose HEAD could
+    # not be read reports the unknown-state line.
     from pathlib import Path
 
-    from perk.cli.commands.objective.plan_cmd import _layer_context_block
+    from perk.cli.commands.objective.plan_cmd import _layer_context_block, _PositionProbe
 
-    block = _layer_context_block(
-        _child_context(), checkout_path=Path("/wt/plan-101"), probe_failed=True
-    )
+    probe = _PositionProbe(checkout_path=Path("/wt/plan-101"))
+    assert probe.probe_failed is True
+    block = _layer_context_block(_child_context(), probe)
     assert "could not be probed" in block
     assert "Local drift" not in block
     assert "uncommitted local changes" not in block
@@ -1345,7 +1365,7 @@ def test_probe_predecessor_checkout_missing_path_plans_a_restore(tmp_path):
     probe = _probe_predecessor_checkout(Config(worktree_root=tmp_path / ".worktrees"), None, "101")
     assert probe.checkout_path == tmp_path / ".worktrees" / "plan-101"
     assert probe.will_restore is True
-    assert probe.probe_failed is False
+    assert probe.probe_failed is False  # a planned restore is not a failed probe
     assert probe.local_head_sha is None and probe.dirty is None
 
 

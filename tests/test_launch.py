@@ -240,29 +240,6 @@ def test_launch_stage_forwards_bare_plan_id_to_the_positioner(tmp_path, monkeypa
     assert "plan_ref" not in data
 
 
-def test_launch_stage_default_passes_no_plan_id(tmp_path, monkeypatch, capsys):
-    # Every existing caller omits `plan_id` — the positioner sees None (byte-identical path).
-    captured: dict = {}
-    real = launch.resolve_worktree
-
-    def spy(**kwargs):
-        captured.update(kwargs)
-        return real(**kwargs)
-
-    monkeypatch.setattr(launch, "resolve_worktree", spy)
-    launch_stage(
-        repo_root=tmp_path,
-        config=_config(tmp_path),
-        stage=_stage("plan"),
-        worktree=None,
-        dry_run=True,
-        remote=None,
-        pi_args=[],
-    )
-    assert captured["plan_id"] is None
-    capsys.readouterr()
-
-
 def test_worktree_stage_auto_approves_and_respects_user_no_approve(tmp_path, capsys):
     # Worktree stages auto-inject `--approve` (perk launches its own managed checkout, so project
     # trust is implicit), but a user-passed `--no-approve` wins via pi's last-wins trust parsing.

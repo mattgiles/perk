@@ -206,6 +206,46 @@ test("fork: an inherited pi_session_id derives a child run_id", async () => {
   }
 });
 
+test("fork: the parent's node claim is inherited via LWW, never written by the fork arm", async () => {
+  // Deliberate semantics (mirrors stage/mode inheritance): a fork of a planning session is
+  // still that node's planning session, so the parent's `objective_node_claim` stays visible
+  // through the per-field LWW rebuild and keeps the implement-here exits suppressed there —
+  // clearing it on fork would reopen the no-save-exit gap in forks of positioned sessions.
+  // The fork arm itself writes NO claim field (its entry carries only the derived identity).
+  const cwd = scaffoldRepo();
+  const file = plantSession(cwd, [
+    {
+      run_id: "01RID",
+      pi_session_id: "OTHER-SESSION",
+      mode: "read-only",
+      stage: "objective-plan",
+      objective_node_claim: { objective: "7", node: "2.3" },
+    },
+  ]);
+  const h = await loadPerkSession({ cwd, sessionManager: SessionManager.open(file) });
+  try {
+    assert.equal(h.sentinel()?.source, "fork");
+    const state = h.workflowState();
+    assert.equal(state.run_id, "01RID.1");
+    assert.deepEqual(state.objective_node_claim, { objective: "7", node: "2.3" });
+    // The fork entry itself carries no claim — the visibility above is pure LWW inheritance.
+    const entries = h.session.sessionManager.getEntries() as unknown as {
+      customType?: string;
+      data?: Record<string, unknown>;
+    }[];
+    const forkEntry = entries.find(
+      (entry) => entry.customType === "perk:workflow-state" && entry.data?.run_id === "01RID.1",
+    );
+    assert.ok(forkEntry, "the fork arm appended its identity entry");
+    assert.ok(
+      !("objective_node_claim" in (forkEntry.data ?? {})),
+      "the fork arm writes no claim of its own",
+    );
+  } finally {
+    h.dispose();
+  }
+});
+
 test("fork: a refused child scratch redirect warns but still settles derived identity", async () => {
   const cwd = scaffoldRepo();
   const childRun = "01RID.1";

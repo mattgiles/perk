@@ -55,7 +55,9 @@ Select the next objective node and author a bounded plan (read-only). `NUMBER` i
 issue id, or the objective's **URL** (required — a cold session has no active objective); `--node`
 plans a specific node id instead of the next actionable one. Local-only; adds `--json`. Runs the
 hub's [pre-launch fast-forward](../cli.md#pre-launch-fast-forward-read-only-planningauthoring)
-before launch; `--no-sync` opts out.
+before launch (`--no-sync` opts out) — except on a **positioned** stacked launch (below), which
+runs in the predecessor's worktree instead of the main checkout and skips the fast-forward (the
+train reconstruction already fetched).
 
 For a **stacked** objective, node selection is **build-readiness- and handoff-derived** (a live
 delivery-train reconstruction): the single plannable candidate is the next unpublished layer in
@@ -76,8 +78,10 @@ child layer's planning session opens **in the predecessor's plan worktree**
 restore from `origin/plan-<pred>`), so the session explores the stack as implemented; the seed
 block names the checkout and any local drift/dirtiness. When no live head was observed (e.g. a
 landed predecessor whose branch was auto-deleted) planning stays at the repo root, and the seed
-says so. `--worktree NAME` selects only the directory under the worktree root (never plan
-identity or branch). `--dry-run` skips the readiness check (offline) and says so
+says so. `--worktree NAME` is live only on this positioned arm, where it selects the directory
+under the worktree root (never plan identity or branch); on every root launch — incremental,
+bottom layer, no observed live head — it is accepted but inert (objective plan runs at the repo
+root there). `--dry-run` skips the readiness check (offline) and says so
 (`"build_readiness": "unchecked (dry-run)"` + `"positioning": "unchecked (dry-run)"`).
 
 ### `perk objective create` (alias `new`)

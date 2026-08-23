@@ -99,7 +99,13 @@ test("landPr: objective node-done reports auto-reconciliation (no manual nudge)"
       stderr: "",
     }),
   } as unknown as ExtensionAPI;
-  const ctx = { cwd, hasUI: false, isIdle: () => true } as unknown as ExtensionContext;
+  const ctx = {
+    cwd,
+    hasUI: false,
+    isIdle: () => true,
+    // A readable (empty) branch: the planning-stage guard fails closed on an unreadable one.
+    sessionManager: { getBranch: () => [] },
+  } as unknown as ExtensionContext;
   const result = await landPr(piStub, ctx);
   const text = result.content[0]?.text ?? "";
   assert.match(text, /Objective #5 node\(s\) 1\.2 marked done/);
@@ -206,7 +212,13 @@ function stubLandCtx(cwd: string, stdout: string): [ExtensionAPI, ExtensionConte
   const piStub = {
     exec: async () => ({ code: 0, killed: false, stdout, stderr: "" }),
   } as unknown as ExtensionAPI;
-  const ctx = { cwd, hasUI: false, isIdle: () => true } as unknown as ExtensionContext;
+  const ctx = {
+    cwd,
+    hasUI: false,
+    isIdle: () => true,
+    // A readable (empty) branch: the planning-stage guard fails closed on an unreadable one.
+    sessionManager: { getBranch: () => [] },
+  } as unknown as ExtensionContext;
   return [piStub, ctx];
 }
 
@@ -412,7 +424,13 @@ test("landPr: a malformed objective is dropped, land still succeeds", async () =
   const piStub = {
     exec: async () => ({ code: 0, killed: false, stdout: malformedObjective, stderr: "" }),
   } as unknown as ExtensionAPI;
-  const ctx = { cwd, hasUI: false, isIdle: () => true } as unknown as ExtensionContext;
+  const ctx = {
+    cwd,
+    hasUI: false,
+    isIdle: () => true,
+    // A readable (empty) branch: the planning-stage guard fails closed on an unreadable one.
+    sessionManager: { getBranch: () => [] },
+  } as unknown as ExtensionContext;
   const result = await landPr(piStub, ctx);
   assert.ok(result.details.ok, "land still succeeds");
   assert.equal(result.details.objective, undefined, "the malformed objective is dropped");

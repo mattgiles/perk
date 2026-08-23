@@ -30,15 +30,21 @@ const PLANNING_STAGES = new Set(["plan", "objective-plan"]);
  * The planning-stage lifecycle-door refusal (the shared first check of the warm /submit,
  * /address, /land, and /learn doors): when this session's workflow-state `stage` is a planning
  * stage, return the refusal message directing the human at the fresh-session implement door;
- * `null` otherwise (non-planning stages — and stage-less sessions — are unaffected). Fail-open:
- * an unreadable branch reads as no stage — this is a hygiene refusal, not a validator.
+ * `null` otherwise (non-planning stages — and stage-less sessions — are unaffected). Fail-CLOSED
+ * on an unreadable branch: without the state this guard cannot prove the session is not a
+ * positioned planning session (whose cwd binding is the PREDECESSOR — the exact target it
+ * protects), so an unreadable read refuses rather than letting the door act.
  */
 export function planningStageRefusal(ctx: BranchSource, door: string): string | null {
   let stage: string | undefined;
   try {
     stage = rebuildWorkflowState(branchOf(ctx)).stage;
-  } catch {
-    return null;
+  } catch (error) {
+    return (
+      `${door} is unavailable: the session's workflow state could not be read ` +
+      `(${String(error)}), so this cannot be proven not to be a planning session — ` +
+      "retry, or implement the saved plan with `perk impl <N>` in a fresh session."
+    );
   }
   if (stage === undefined || !PLANNING_STAGES.has(stage)) return null;
   return (
