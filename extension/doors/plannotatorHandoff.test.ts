@@ -20,7 +20,9 @@ import {
   requestPlannotatorCodeReview,
   resolveReviewTarget,
   respondMessage,
+  routeBrowserRespond,
   routePrReviewOutcome,
+  stackRespondMessage,
   startPlannotatorBrowser,
   startPlannotatorPlanReview,
 } from "./plannotatorHandoff.ts";
@@ -414,6 +416,96 @@ test("respondMessage: non-handled arms map to null (routed via report, not injec
   assert.equal(respondMessage({ status: "unavailable", warning: "w" }), null);
   assert.equal(respondMessage({ status: "error", warning: "w" }), null);
   assert.equal(respondMessage({ status: "aborted" }), null);
+});
+
+// --- stackRespondMessage (the stack flow's mapper) ------------------------------------------------
+
+test("stackRespondMessage: exit → the same closed-without-submitting arm", () => {
+  const msg = stackRespondMessage({
+    status: "handled",
+    approved: false,
+    feedback: undefined,
+    annotationCount: 0,
+    annotations: [],
+    exit: true,
+  });
+  assert.match(msg ?? "", /closed the plannotator review without submitting/);
+  assert.match(msg ?? "", /how they want to proceed/);
+});
+
+test("stackRespondMessage: approved + no annotations → ask about per-PR COMMENT reviews", () => {
+  const msg = stackRespondMessage({
+    status: "handled",
+    approved: true,
+    feedback: undefined,
+    annotationCount: 0,
+    annotations: [],
+    exit: false,
+  });
+  assert.match(msg ?? "", /approved the stack review/);
+  assert.match(msg ?? "", /no attached PR/);
+  assert.match(msg ?? "", /per-PR COMMENT reviews/);
+  assert.match(msg ?? "", /perk posts only what the\s+human approves/i);
+  // The single-PR browser policy line must NOT leak in — the browser posted nothing here.
+  assert.doesNotMatch(msg ?? "", /request-changes verdict, which the UI cannot post/);
+});
+
+test("stackRespondMessage: annotations → combined-diff framing + the routing/posting protocol", () => {
+  const annotation = {
+    filePath: "src/a.ts",
+    lineStart: 3,
+    lineEnd: 3,
+    side: "new" as const,
+    text: "fix this",
+    source: "perk:correctness",
+  };
+  const msg = stackRespondMessage({
+    status: "handled",
+    approved: false,
+    feedback: "please address the notes",
+    annotationCount: 1,
+    annotations: [annotation],
+    exit: false,
+  });
+  assert.ok(msg?.startsWith("please address the notes"));
+  assert.ok(msg?.includes(JSON.stringify([annotation], null, 2)));
+  assert.match(msg ?? "", /COMBINED-DIFF coordinates/);
+  assert.match(msg ?? "", /routing \+ per-PR posting\s+protocol/);
+  assert.match(msg ?? "", /dry-run\s+ALL per-PR batches first/);
+  assert.match(msg ?? "", /bottom→top via `submit_pr_review`/);
+  assert.match(msg ?? "", /ALL GitHub posting is perk-side/);
+  // The single-PR "perk composes nothing by default" posting flip must NOT leak in.
+  assert.doesNotMatch(msg ?? "", /composes nothing by default/);
+});
+
+test("stackRespondMessage: non-handled arms map to null", () => {
+  assert.equal(stackRespondMessage({ status: "unavailable", warning: "w" }), null);
+  assert.equal(stackRespondMessage({ status: "error", warning: "w" }), null);
+  assert.equal(stackRespondMessage({ status: "aborted" }), null);
+});
+
+test("routeBrowserRespond: the injectable mapper routes the handled arm (default = respondMessage)", () => {
+  const sent: string[] = [];
+  const pi = { sendUserMessage: (m: string) => void sent.push(m) };
+  const ctx = {
+    hasUI: true,
+    ui: { notify: () => {} },
+    isIdle: () => true,
+  } as unknown as Parameters<typeof routeBrowserRespond>[1];
+  const handled: CodeReviewOutcome = {
+    status: "handled",
+    approved: true,
+    feedback: undefined,
+    annotationCount: 0,
+    annotations: [],
+    exit: false,
+  };
+  routeBrowserRespond(pi, ctx, handled, "scope", stackRespondMessage);
+  assert.equal(sent.length, 1);
+  assert.match(sent[0] ?? "", /approved the stack review/);
+  routeBrowserRespond(pi, ctx, handled, "scope");
+  assert.equal(sent.length, 2);
+  assert.match(sent[1] ?? "", /approved the code review in plannotator/);
 });
 
 // --- startPlannotatorBrowser (the composable browser-open core) ----------------------------------

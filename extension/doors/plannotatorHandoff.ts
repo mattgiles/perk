@@ -372,6 +372,47 @@ export function respondMessage(outcome: CodeReviewOutcome): string | null {
   return parts.join("\n\n");
 }
 
+/**
+ * The stack-flow respond → injection mapping (`/stack-review-browser`): the same arms as
+ * `respondMessage`, re-worded for the stack posting policy — a local-diff session has NO
+ * attached PR, so the browser posted nothing and ALL GitHub posting is perk-side after triage
+ * (per-PR, judgment-routed, human-approved). Returned annotations are treated as COMBINED-DIFF
+ * coordinates (stack base → top head).
+ */
+export function stackRespondMessage(outcome: CodeReviewOutcome): string | null {
+  if (outcome.status !== "handled") return null;
+  if (outcome.exit) {
+    return (
+      "The human closed the plannotator review without submitting — ask them how they want " +
+      "to proceed."
+    );
+  }
+  if (outcome.approved && outcome.annotations.length === 0) {
+    return (
+      "The human approved the stack review in plannotator (no annotations) — the review is " +
+      "complete. This local-diff session has no attached PR, so nothing was posted from the " +
+      "browser: ask the human whether they want per-PR COMMENT reviews posted (the routing + " +
+      "per-PR posting protocol via `submit_pr_review`) or nothing — perk posts only what the " +
+      "human approves."
+    );
+  }
+  const parts: string[] = [outcome.feedback ?? "The plannotator stack review returned."];
+  if (outcome.annotations.length > 0) {
+    parts.push(`\`\`\`json\n${JSON.stringify(outcome.annotations, null, 2)}\n\`\`\``);
+    parts.push(
+      "These annotations are in COMBINED-DIFF coordinates (stack base → top head): " +
+        "source-less ones are human-authored; `perk:*`-badged ones are your own findings " +
+        "returning. This local-diff session has no attached PR — nothing was posted from the " +
+        "browser, so ALL GitHub posting is perk-side: run the routing + per-PR posting " +
+        "protocol from the guidance (route each finding to the PR that introduced it over the " +
+        "per-PR diffs, sanity-check each quoted context against the target PR's diff, dry-run " +
+        "ALL per-PR batches first, then post bottom→top via `submit_pr_review`) — posting only " +
+        "what the human approves.",
+    );
+  }
+  return parts.join("\n\n");
+}
+
 /** The minimal message sink `routeBrowserRespond` needs (an `ExtensionAPI` slice). */
 export interface RespondSink {
   sendUserMessage(content: string, options?: { deliverAs?: "steer" | "followUp" }): void;
@@ -379,20 +420,24 @@ export interface RespondSink {
 
 /**
  * Route a settled PR-mode respond into the session (the idle-vs-streaming injection route),
- * shared by `/pr-review-browser`'s PR modes. `scope` is the invoking surface's report scope.
+ * shared by `/pr-review-browser`'s PR modes and `/stack-review-browser`. `scope` is the
+ * invoking surface's report scope; `messageFor` is the injectable respond → message mapper
+ * (default `respondMessage` — the single-PR posting contract; the stack flow supplies
+ * `stackRespondMessage`).
  */
 export function routeBrowserRespond(
   pi: RespondSink,
   ctx: ReportTarget & Pick<ExtensionContext, "isIdle">,
   out: CodeReviewOutcome,
   scope: string,
+  messageFor: (outcome: CodeReviewOutcome) => string | null = respondMessage,
 ): void {
   if (out.status === "unavailable" || out.status === "error") {
     // Degrade-mid-flow: the flow continues in-session (findings table; posting unchanged).
     report(ctx, scope, "error", out.warning, { alsoLog: true });
     return;
   }
-  const message = respondMessage(out);
+  const message = messageFor(out);
   if (message === null) return; // aborted: the turn was interrupted — no-op
   if (ctx.isIdle()) {
     pi.sendUserMessage(message);

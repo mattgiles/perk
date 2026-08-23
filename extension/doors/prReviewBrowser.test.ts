@@ -268,6 +268,29 @@ test("observer: a bridge settled error/unavailable → error + degrade + clear; 
   clearAnnotationSurface();
 });
 
+test("observer: scope + degradeNotice params override the defaults (the stack door's arm)", async () => {
+  const notifies: { message: string; severity?: string }[] = [];
+  const sent: { message: string; options?: { deliverAs?: string } }[] = [];
+  await observeBrowserReadiness(
+    {
+      sendUserMessage: (message: string, options?: { deliverAs?: "steer" | "followUp" }) => {
+        sent.push(options === undefined ? { message } : { message, options });
+      },
+    },
+    {
+      hasUI: true,
+      ui: { notify: (message: string, severity?: string) => notifies.push({ message, severity }) },
+      isIdle: () => true,
+    },
+    fakeStarted("timeout"),
+    { scope: "stack-review-browser", degradeNotice: "STACK DEGRADE NOTICE" },
+  );
+  assert.equal(notifies.length, 1);
+  assert.match(notifies[0]?.message ?? "", /stack-review-browser/);
+  assert.deepEqual(sent, [{ message: "STACK DEGRADE NOTICE" }]);
+  clearAnnotationSurface();
+});
+
 // --- the command flow through the harness --------------------------------------------------------
 
 const CHECKOUT_OK_JSON = JSON.stringify({
