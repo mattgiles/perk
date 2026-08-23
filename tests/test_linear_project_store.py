@@ -2015,6 +2015,43 @@ class TestLinearProjectAdoption:
                 id="i-1", identifier="ENG-1", url="u/ENG-1", title="Issue one", body="body one"
             ),
         )
+        # …but its presence marks the project as already adopted (the sentinel IS the
+        # authoritative objective identity — the re-adoption refusal's evidence).
+        assert src.has_objective_header is True
+
+    def test_read_objective_source_without_sentinel_has_no_header(self) -> None:
+        store, _ = _make_project_store(
+            {
+                "issues(first": [
+                    {
+                        "project": {
+                            "issues": _page(
+                                [
+                                    self._existing_issue(
+                                        uuid="i-1",
+                                        identifier="ENG-1",
+                                        title="Issue one",
+                                        body="body one",
+                                    )
+                                ]
+                            )
+                        }
+                    }
+                ],
+                "project(id": [
+                    {
+                        "project": {
+                            "id": "proj-1",
+                            "url": "p/url",
+                            "name": "My Project",
+                            "content": "OVERVIEW PROSE",
+                        }
+                    }
+                ],
+            }
+        )
+        src = store.read_objective_source(source_id="proj-1")
+        assert src is not None and src.has_objective_header is False
 
     def test_read_objective_source_absent_returns_none(self) -> None:
         store, _ = _make_project_store({"project(id": [_project_not_found()]})

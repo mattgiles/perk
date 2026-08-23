@@ -10,6 +10,7 @@ from pathlib import Path
 from click.testing import CliRunner
 
 from perk import github, objective, plan
+from perk.backends import issue_backend, resolve
 from perk.backends.github import engagement as gh_engagement
 from perk.backends.github import plans
 from perk.cli.cli import cli
@@ -195,6 +196,53 @@ def test_engagement_read_failure_is_fail_soft(monkeypatch, unborn_git_repo_facto
         assert result.exit_code == 0, result.output
         text = (Path(d) / _SCRATCH_REL).read_text(encoding="utf-8")
     assert "<untrusted_adopted_issue_engagement>" not in text
+
+
+def test_linear_backend_skips_the_github_auth_gate(monkeypatch, unborn_git_repo_factory):
+    # The auth gate is backend-conditional: a Linear-configured repo reaches backend resolution
+    # without ever probing `gh` auth (Linear auth is enforced at client construction).
+    def no_auth_probe():
+        raise AssertionError("check_auth must not run on the Linear arm")
+
+    monkeypatch.setattr(github, "check_auth", no_auth_probe)
+
+    class _LinearBackend:
+        backend_id = "linear"
+
+        def read_issue(self, *, issue_id):
+            return issue_backend.AdoptableIssue(
+                id=str(issue_id), url="u", title="t", body="b", state="OPEN"
+            )
+
+        def read_comments(self, *, issue_id):
+            return []
+
+        def read_description_edits(self, *, issue_id):
+            return []
+
+    monkeypatch.setattr(resolve, "resolve_issue_backend", lambda _root: _LinearBackend())
+    runner = CliRunner()
+    with runner.isolated_filesystem() as d:
+        _git_init(d, unborn_git_repo_factory)
+        perk_dir = Path(d) / ".perk"
+        perk_dir.mkdir(exist_ok=True)
+        (perk_dir / "config.toml").write_text('[issues]\nbackend = "linear"\n', encoding="utf-8")
+        result = runner.invoke(cli, ["plan", "from", "7", "--dry-run", "--json"])
+        assert result.exit_code == 0, result.output
+        assert json.loads(result.stdout)["success"] is True
+
+
+def test_github_backend_still_refuses_unauthed(monkeypatch, unborn_git_repo_factory):
+    monkeypatch.setattr(
+        github, "check_auth", lambda: github.AuthStatus(False, None, (), "not logged in")
+    )
+    runner = CliRunner()
+    with runner.isolated_filesystem() as d:
+        _git_init(d, unborn_git_repo_factory)
+        result = runner.invoke(cli, ["plan", "from", "7", "--dry-run", "--json"])
+        assert result.exit_code == 1
+        payload = json.loads(result.stdout)
+        assert payload["success"] is False and payload["error_type"] == "github_unauthed"
 
 
 def test_refuses_not_found(monkeypatch, unborn_git_repo_factory):

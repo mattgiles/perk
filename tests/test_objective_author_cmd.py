@@ -29,10 +29,15 @@ def _authed(monkeypatch) -> None:
 
 
 def _source(
-    *, prose: str = "the human overview", issues_=()
+    *, prose: str = "the human overview", issues_=(), has_objective_header: bool = False
 ) -> objective_store.AdoptableObjectiveSource:
     return objective_store.AdoptableObjectiveSource(
-        id="proj-1", url="p/url", title="Human Project", prose=prose, issues=tuple(issues_)
+        id="proj-1",
+        url="p/url",
+        title="Human Project",
+        prose=prose,
+        issues=tuple(issues_),
+        has_objective_header=has_objective_header,
     )
 
 
@@ -192,6 +197,23 @@ def test_refuses_already_an_objective(monkeypatch, unborn_git_repo_factory):
         assert "reconcile" in payload["message"]
 
 
+def test_refuses_readoption_when_the_store_reports_the_header(monkeypatch, unborn_git_repo_factory):
+    # The backend-honest arm: a Linear project whose objective identity rides the sentinel
+    # attachment (invisible to the prose check) is still refused as already adopted.
+    _authed(monkeypatch)
+    _stub(
+        monkeypatch,
+        store=_FakeStore(backend_id="linear", source=_source(has_objective_header=True)),
+    )
+    runner = CliRunner()
+    with runner.isolated_filesystem() as d:
+        _git_init(d, unborn_git_repo_factory)
+        result = runner.invoke(cli, ["objective", "author", "--from", "proj-1", "--json"])
+        assert result.exit_code == 1
+        payload = json.loads(result.stdout)
+        assert payload["error_type"] == "already_an_objective"
+
+
 def test_github_backend_refuses_a_plan_carrier(monkeypatch, unborn_git_repo_factory):
     # Wrong-kind door refusal (§8.30): a plan-header'd GitHub issue is never adoptable as an
     # objective — symmetric with `plan from`'s already_an_objective refusal.
@@ -243,6 +265,43 @@ def test_linear_backend_skips_open_check(monkeypatch, unborn_git_repo_factory):
         result = runner.invoke(cli, ["objective", "author", "--from", "proj-1", "--json"])
         assert result.exit_code == 0, result.output
     assert launched["handoff_extra"] == {"adopt_from": "proj-1"}
+
+
+def test_linear_backend_skips_the_github_auth_gate(monkeypatch, unborn_git_repo_factory):
+    # The auth gate is backend-conditional: a Linear-configured repo reaches store resolution
+    # without ever probing `gh` auth (Linear auth is enforced at store construction).
+    def no_auth_probe():
+        raise AssertionError("check_auth must not run on the Linear arm")
+
+    monkeypatch.setattr(github, "check_auth", no_auth_probe)
+    _stub(monkeypatch, store=_FakeStore(backend_id="linear", source=_source()))
+    runner = CliRunner()
+    with runner.isolated_filesystem() as d:
+        _git_init(d, unborn_git_repo_factory)
+        perk_dir = Path(d) / ".perk"
+        perk_dir.mkdir(exist_ok=True)
+        (perk_dir / "config.toml").write_text('[issues]\nbackend = "linear"\n', encoding="utf-8")
+        result = runner.invoke(
+            cli, ["objective", "author", "--from", "proj-1", "--dry-run", "--json"]
+        )
+        assert result.exit_code == 0, result.output
+        assert json.loads(result.stdout)["success"] is True
+
+
+def test_github_backend_still_refuses_unauthed(monkeypatch, unborn_git_repo_factory):
+    monkeypatch.setattr(
+        github, "check_auth", lambda: github.AuthStatus(False, None, (), "not logged in")
+    )
+    _stub(monkeypatch, store=_FakeStore(source=_source()))
+    runner = CliRunner()
+    with runner.isolated_filesystem() as d:
+        _git_init(d, unborn_git_repo_factory)
+        result = runner.invoke(
+            cli, ["objective", "author", "--from", "proj-1", "--dry-run", "--json"]
+        )
+        assert result.exit_code == 1
+        payload = json.loads(result.stdout)
+        assert payload["success"] is False and payload["error_type"] == "github_unauthed"
 
 
 def test_engagement_appended_and_points_seed(monkeypatch, unborn_git_repo_factory):

@@ -957,6 +957,7 @@ def _execute(
             base_cascaded=False,
             base_advanced=_base_advanced(train),
             affected=(),
+            adopted_node=request.adopt_node,
         )
 
     # Step 10: post-approval re-observation — the approval pause is arbitrary, so every

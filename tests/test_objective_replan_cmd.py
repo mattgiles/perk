@@ -183,6 +183,44 @@ def test_dry_run_json_materializes_and_does_not_launch(monkeypatch, unborn_git_r
         assert service.requests == [PrepareRequest(kind="replan", objective_id="42")]
 
 
+def test_linear_backend_skips_the_github_auth_gate(monkeypatch, unborn_git_repo_factory):
+    # The auth gate is backend-conditional: a Linear-configured repo reaches store resolution
+    # without ever probing `gh` auth (Linear auth is enforced at store construction).
+    def no_auth_probe():
+        raise AssertionError("check_auth must not run on the Linear arm")
+
+    store = _FakeStore(state=_state(_UNFINISHED_NODES))
+    store.backend_id = "linear"
+    monkeypatch.setattr(resolve, "resolve_objective_store", lambda _root: store)
+    service = _PrepareService(result=_replan_result(store._state))
+    monkeypatch.setattr(replan_cmd, "resolve_delivery", lambda _root: service)
+    monkeypatch.setattr(github, "check_auth", no_auth_probe)
+    runner = CliRunner()
+    with runner.isolated_filesystem() as d:
+        _git_init(d, unborn_git_repo_factory)
+        perk_dir = Path(d) / ".perk"
+        perk_dir.mkdir(exist_ok=True)
+        (perk_dir / "config.toml").write_text('[issues]\nbackend = "linear"\n', encoding="utf-8")
+        result = runner.invoke(cli, ["objective", "replan", "42", "--dry-run", "--json"])
+        assert result.exit_code == 0, result.output
+        assert json.loads(result.stdout)["success"] is True
+
+
+def test_github_backend_still_refuses_unauthed(monkeypatch, unborn_git_repo_factory):
+    store = _FakeStore(state=_state(_UNFINISHED_NODES))
+    _patch(monkeypatch, store)
+    monkeypatch.setattr(
+        github, "check_auth", lambda: github.AuthStatus(False, None, (), "not logged in")
+    )
+    runner = CliRunner()
+    with runner.isolated_filesystem() as d:
+        _git_init(d, unborn_git_repo_factory)
+        result = runner.invoke(cli, ["objective", "replan", "42", "--dry-run", "--json"])
+        assert result.exit_code == 1
+        payload = json.loads(result.stdout)
+        assert payload["success"] is False and payload["error_type"] == "github_unauthed"
+
+
 def test_real_launch_threads_supersedes_handoff_and_fresh_run_id(
     monkeypatch, unborn_git_repo_factory
 ):

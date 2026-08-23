@@ -16,7 +16,7 @@ from typing import Any
 
 import pytest
 
-from perk import github, objective
+from perk import github, objective, plan
 from perk.backends import engagement, objective_store
 from perk.backends.github import engagement as gh_engagement
 from perk.backends.github import objectives, plans
@@ -338,6 +338,23 @@ class TestGitHubDelegation:
         assert result == objective_store.AdoptableObjectiveSource(
             id="7", url="u7", title="Human title", prose="OVERVIEW", issues=()
         )
+        assert result.has_objective_header is False
+
+    def test_read_objective_source_sees_the_header_block(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        header = plan.render_metadata_block(
+            objective.OBJECTIVE_HEADER_KEY,
+            objective.render_header_block(objective.ObjectiveHeader(run_id="R", created="t")),
+        )
+        rec = _Recorder(
+            plans.IssueRead(
+                number=7, url="u7", title="t", body=f"prose\n\n{header}\n", state="OPEN"
+            )
+        )
+        monkeypatch.setattr(plans, "read_issue", rec)
+        result = GitHubObjectiveStore(tmp_path).read_objective_source(source_id="7")
+        assert result is not None and result.has_objective_header is True
 
     def test_read_objective_source_none_passthrough(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch

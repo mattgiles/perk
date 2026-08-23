@@ -215,7 +215,11 @@ def _author_from(
         if seed_file is not None:
             return _gather_from_file(repo_root, stage, path=seed_file, remote=remote)
 
-        require_github(ctx)  # every path reads the source backend up front
+        # Backend-conditional auth: only the GitHub backend needs a working `gh` here. The
+        # Linear arm's auth is enforced by `linear_client.client_from_env` (a typed
+        # missing-key error) at store construction.
+        if resolve.resolve_issue_backend_id(repo_root) == resolve.GITHUB_BACKEND_ID:
+            require_github(ctx)
 
         source_id = from_source.strip().lstrip("#").strip()
         if not source_id:
@@ -239,7 +243,10 @@ def _author_from(
                     f"Source {source_id} not found — cannot adopt it as an objective.",
                     error_type="adopt_not_found",
                 )
-            if plan.has_metadata_block(src.prose, "objective-header"):
+            # Backend-honest re-adoption refusal: the store's `has_objective_header` sees the
+            # identity wherever the backend keeps it (a Linear sentinel attachment is invisible
+            # to the prose check); the prose check stays as the belt for header-bearing bodies.
+            if src.has_objective_header or plan.has_metadata_block(src.prose, "objective-header"):
                 raise UserFacingCliError(
                     f"Source {source_id} is already a perk objective; reconcile it with "
                     f"`perk objective reconcile {source_id}` or plan its nodes normally.",

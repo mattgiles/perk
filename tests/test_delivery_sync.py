@@ -2422,6 +2422,15 @@ def test_top_layer_adoption_is_checkpoint_only_with_an_empty_push_set():
     assert world.persistence.outcomes[-1].role is EventRole.COMPLETED
 
 
+def test_declined_adoption_still_echoes_the_adopted_node():
+    # The declined arm carries adopted_node like every other returning arm — a consumer can
+    # tell WHAT was declined without re-deriving it from the request.
+    world = _adopt_middle_world()
+    result = world.sync(adopt_node="1.2", approve=lambda cascade: False)
+    assert result.declined is True and result.adopted_node == "1.2"
+    world.assert_nothing_journaled()
+
+
 def test_adopt_unclaimed_node_is_invalid_input_naming_the_claimed_ids():
     world = _adopt_middle_world()
     error = _sync_error(world, adopt_node="9.9")
