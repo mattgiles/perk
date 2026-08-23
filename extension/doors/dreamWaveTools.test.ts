@@ -238,6 +238,7 @@ const MANIFEST_DIGEST = "sha256:test-manifest-digest";
 function bundleSpies(
   opts: {
     clearFails?: boolean;
+    setFails?: boolean;
     writeThrows?: string;
     finalizeThrows?: string;
     drift?: string;
@@ -271,6 +272,7 @@ function bundleSpies(
       },
       set: (digest) => {
         events.push(`set:${digest}`);
+        return opts.setFails !== true;
       },
     },
     writeBundle: (path, content) => {
@@ -983,6 +985,34 @@ test("executeDreamWave: a finalize-write throw is the second io_error arm — ma
   );
 });
 
+test("executeDreamWave: a failed marker set is an honestly-incomplete OK aggregate, never io_error", async () => {
+  const manifest = TWO_LANE_MANIFEST();
+  const adapter = createMemoryWaveAdapter({
+    aggregates: [completeAnalystAggregate(), completeReducerAggregate()],
+  });
+  const spies = bundleSpies({ setFails: true });
+  const result = await executeDreamWave(adapter, target(), {
+    manifest,
+    manifestDigest: MANIFEST_DIGEST,
+    markers: spies.markers,
+    bracket: spies.bracket,
+    writeBundle: spies.writeBundle,
+    removeBundle: spies.removeBundle,
+  });
+  const details = result.details as { ok: boolean } & DreamWaveOk;
+  // The wave RAN (both waves + the finalize write landed) — the outcome is honest
+  // incompleteness with a named digest-marker failure entry, not the io_error fail arm.
+  assert.equal(details.ok, true);
+  assert.equal(details.complete, false);
+  assert.equal(details.analysis.complete, true);
+  assert.equal(details.reducers.complete, true);
+  const markerFailure = details.reducers.failures.find((f) => f.angle === "digest-marker");
+  assert.ok(markerFailure, "the digest-marker failure entry is present");
+  assert.match(markerFailure.detail, /marker append failed its read-back/);
+  assert.equal(spies.writes.length, 2, "the finalize write landed before the marker set");
+  assert.match(result.content[0]?.text ?? "", /INCOMPLETE/);
+});
+
 test("executeDreamWave: a drifted bracket skips the finalize AND the marker set", async () => {
   const manifest = TWO_LANE_MANIFEST();
   const adapter = createMemoryWaveAdapter({
@@ -1098,7 +1128,7 @@ test("executeDreamWave: a pre-existing stale bundle is removed before the wave (
   const result = await executeDreamWave(adapter, target(), {
     manifest,
     manifestDigest: MANIFEST_DIGEST,
-    markers: { clear: () => true, set: () => {} },
+    markers: { clear: () => true, set: () => true },
     bracket: () => ({ ok: true, detail: null }),
   });
   const details = result.details as { ok: boolean } & DreamWaveOk;

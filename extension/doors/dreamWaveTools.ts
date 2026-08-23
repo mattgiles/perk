@@ -131,12 +131,13 @@ function resultText(details: DreamWaveOk): string {
  * record) and returns whether the cleared state was VERIFIED (append + read-back) — a false
  * return stops the wave before any filesystem work or spawn, because proceeding over an
  * unverified invalidation could leave a prior bundle + prior digest pair recoverable; `set`
- * publishes the finalized bytes' digest and stays loud-but-non-fatal (a failed set leaves the
- * marker cleared by the entry clear, so recovery refuses — fail-closed, never silent). The
- * registered execute wires the production `appendWorkflowState` pair; tests inject fakes. */
+ * publishes the finalized bytes' digest and returns the append+read-back verification — a
+ * failed set makes the wave outcome honestly incomplete (the marker stays cleared by the
+ * entry clear, so recovery refuses — fail-closed, never silent). The registered execute wires
+ * the production `appendWorkflowState` pair; tests inject fakes. */
 export interface DreamBundleMarkers {
   clear(): boolean;
-  set(digest: string): void;
+  set(digest: string): boolean;
 }
 
 /**
@@ -175,7 +176,10 @@ export interface DreamBundleMarkers {
  *     undraftable), returning ok with `complete: false` and the bracket recorded;
  *  8. bracket ok ⇒ the finalize-in-place rewrite of the same fixed name; a throw ⇒ the second
  *     post-launch `io_error` fail arm (mirroring arm 5's extras); on success
- *     `markers.set(digest)` with the sha256 of the finalized bytes.
+ *     `markers.set(digest)` with the sha256 of the finalized bytes — a failed set (an
+ *     unverified append) makes the OK aggregate `complete: false` with a named
+ *     `digest-marker` failure entry (the wave ran; the outcome is honestly incomplete —
+ *     never the `io_error` fail arm), and the marker stays cleared so recovery refuses.
  */
 export async function executeDreamWave(
   adapter: WaveAdapter,
@@ -324,6 +328,7 @@ export async function executeDreamWave(
     // honest coverage reporting.
     bracket = opts.bracket();
   }
+  let markerSet = false;
   if (bracket?.ok === true) {
     // Finalize in place — the SAME fixed name gains the reducers section (never a second
     // file), then the digest marker publishes the finalized bytes for the recovery consumer.
@@ -344,13 +349,24 @@ export async function executeDreamWave(
         attempts,
       });
     }
-    // A failed marker append warns loudly via the seam's read-back check and leaves the
-    // marker cleared — recovery refuses (fail-closed); re-running the wave repairs it.
-    opts.markers.set(digestSessionData(finalized));
+    // A failed marker append (an unverified read-back) leaves the marker cleared by the
+    // entry clear — recovery refuses (fail-closed) — and the aggregate reports the outcome
+    // as honestly incomplete; re-running the wave repairs it.
+    markerSet = opts.markers.set(digestSessionData(finalized));
   }
 
+  const failures = [...reducers.failures];
+  if (bracket?.ok === true && !markerSet) {
+    failures.push({
+      angle: "digest-marker",
+      reason: "run-failed",
+      detail:
+        "dream_bundle_digest marker append failed its read-back — the marker stays cleared, " +
+        "so recovery refuses this bundle; re-run perk learn dream",
+    });
+  }
   const details: DreamWaveOk = {
-    complete: analysis.complete && reducers.complete && bracket?.ok === true,
+    complete: analysis.complete && reducers.complete && bracket?.ok === true && markerSet,
     analysis: analysisDetails,
     bracket,
     bundle: {
@@ -365,7 +381,7 @@ export async function executeDreamWave(
       skip_reason: null,
       complete: reducers.complete,
       reports: reducers.reports,
-      failures: reducers.failures,
+      failures,
     },
     attempts,
   };
@@ -444,8 +460,8 @@ export function registerDreamWave(pi: ExtensionAPI): void {
       const reducerModel = subagentModel(ctx.cwd, "dream-reducer");
       // The production digest-marker pair: the ordinary strict-append session-entry channel.
       // The boolean is the seam's verified append+read-back result — the execute core refuses
-      // the wave on an unverified CLEAR (fail-closed); a failed SET stays loud-but-non-fatal
-      // (the entry clear already invalidated, so recovery refuses).
+      // the wave on an unverified CLEAR (fail-closed); a failed SET makes the aggregate
+      // honestly incomplete (the entry clear already invalidated, so recovery refuses).
       const marker = (digest: string): boolean =>
         appendWorkflowState(pi, ctx, {
           data: { dream_bundle_digest: digest },
@@ -462,9 +478,7 @@ export function registerDreamWave(pi: ExtensionAPI): void {
         bracket: () => revalidationBracket(ctx.cwd, decoded.manifest.commit_sha),
         markers: {
           clear: () => marker(""),
-          set: (digest) => {
-            marker(digest);
-          },
+          set: (digest) => marker(digest),
         },
         ...(analystModel !== undefined ? { analystModel } : {}),
         ...(reducerModel !== undefined ? { reducerModel } : {}),
