@@ -1825,6 +1825,9 @@ def test_resume_base_cascade_restores_recorded_parent_edges():
     world.remote.update(
         {"plan-101": r1, "plan-102": _reb(P2, r1), "plan-103": _reb(P3, _reb(P2, r1))}
     )
+    # Resume must not consult the live base head — a legitimately advanced base never
+    # blocks concluding an already-effected cascade.
+    assert world.base_head != NEWBASE
     result = world.sync()
     assert result.resumed is True and result.base_cascaded is True
     assert world.persistence.checkpoints == [
@@ -2144,7 +2147,9 @@ def test_every_structural_blocker_code_refuses():
 
 def test_resume_inconsistent_base_payload_rows_fail_closed():
     # before.base and after.base_parent must be mutually consistent — an unvalidated
-    # base_parent would be persisted verbatim as the bottom layer's parent checkpoint.
+    # base_parent would be persisted verbatim as the bottom layer's parent checkpoint —
+    # and a shape-valid capture must still BIND to the fresh train's base branch (a
+    # stale/crafted capture under an unrelated branch name never supplies the checkpoint).
     good = _record()
     rows: list[dict] = [
         # A stray base_parent with no captured base.
@@ -2159,6 +2164,11 @@ def test_resume_inconsistent_base_payload_rows_fail_closed():
         # A malformed base capture (no sha).
         {
             "before": {**dict(good.before), "base": {"branch": "main"}},
+            "after": {**dict(good.after), "base_parent": NEWBASE},
+        },
+        # A shape-valid capture under the wrong branch — the train's base is "main".
+        {
+            "before": {**dict(good.before), "base": {"branch": "not-main", "sha": NEWBASE}},
             "after": {**dict(good.after), "base_parent": NEWBASE},
         },
     ]

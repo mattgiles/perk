@@ -7774,7 +7774,11 @@ the prepared record; the payload decode is STRICT (sync payloads are opaque at t
 envelope, so the decoder is the validation boundary): the parallel plans/branches/prs arrays
 must be structurally complete; `before.base` and `after.base_parent` must be mutually
 consistent (both absent, or a `{branch, sha}` capture with `base_parent == sha` — an
-unvalidated `base_parent` would be persisted verbatim as a parent checkpoint); the recorded
+unvalidated `base_parent` would be persisted verbatim as a parent checkpoint), and the
+captured `base.branch` must additionally equal the fresh train's base (a stale/crafted
+capture must never supply the bottom parent checkpoint under an unrelated branch name) —
+the remote base head is deliberately NOT required to remain at the captured SHA: a later
+legitimate base advance is a subsequent sync trigger, not a roll-forward blocker; the recorded
 stack must be `null` or exactly `{"members": [int, …]}`, may be `null` only for a
 single-layer cascade, and must END with exactly the affected PR run bottom→top; an ADOPT
 record must additionally carry the full `after.adopted` mapping (strict — a missing/partial

@@ -1608,9 +1608,10 @@ class SyncRecordFacts:
 
 def validate_sync_record(train: DeliveryTrain, record: PreparedRecord) -> SyncRecordFacts:
     """Strict decode + fresh-authority corroboration of a SYNC/ADOPT prepared record
-    (lineage, parallel-array shape, base/stack payload consistency, the ADOPT-kind
-    ``after.adopted`` field, contiguous plan slice, branches, PR numbers/bases re-derived
-    from the fresh train, full checkpoint pairs). Raises :class:`SyncError`
+    (lineage, parallel-array shape, base/stack payload consistency — the base capture also
+    bound to the fresh train's base branch — the ADOPT-kind ``after.adopted`` field,
+    contiguous plan slice, branches, PR numbers/bases re-derived from the fresh train, full
+    checkpoint pairs). Raises :class:`SyncError`
     (``sync_drift``) on ANY disagreement — a record the operation cannot account for is
     never concluded."""
     lineage = _require_lineage(train)
@@ -1623,7 +1624,7 @@ def validate_sync_record(train: DeliveryTrain, record: PreparedRecord) -> SyncRe
         )
     recorded = _decode_record(record)
     adopted_node = _decode_adopted(record)
-    base_parent = _decode_base(record)
+    base_parent = _decode_base(record, train.base)
     recorded_members = _recorded_members(record)
     matched = _corroborate_record(train, record, recorded)
     _corroborate_membership(record, recorded_members, matched)
@@ -1964,12 +1965,17 @@ def _decode_adopted(record: PreparedRecord) -> str | None:
     return node_id
 
 
-def _decode_base(record: PreparedRecord) -> str | None:
+def _decode_base(record: PreparedRecord, expected_base: str) -> str | None:
     """The validated base-cascade fields — ``before.base`` and ``after.base_parent`` must be
     MUTUALLY consistent: both absent (no base cascade), or a ``{branch, sha}`` capture with
     ``base_parent == sha``. Sync payloads are opaque at the journal-envelope layer, so any
     other shape fails closed (``sync_drift``) — an unvalidated ``base_parent`` would
-    otherwise be persisted verbatim as the bottom layer's parent checkpoint."""
+    otherwise be persisted verbatim as the bottom layer's parent checkpoint. A captured base
+    additionally BINDS to the reconstructed train's base branch — without that, a
+    stale/crafted payload could supply the bottom parent checkpoint under an unrelated branch
+    name. The remote base head is deliberately NOT required to remain at the captured SHA: a
+    later legitimate base advance stays a subsequent sync trigger rather than blocking the
+    conclusion of an already-effected cascade."""
     base = record.before.get("base")
     base_parent = record.after.get("base_parent")
     if base is None:
@@ -1990,6 +1996,13 @@ def _decode_base(record: PreparedRecord) -> str | None:
             "base payload",
             expected="a {branch, sha} capture with base_parent == sha",
             derived={"base": base, "base_parent": base_parent},
+        )
+    if branch != expected_base:
+        raise _resume_drift(
+            record.operation_id,
+            "base payload",
+            expected={"branch": branch, "sha": sha},
+            derived=expected_base,
         )
     return sha
 
