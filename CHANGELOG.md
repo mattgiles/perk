@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 <!-- As of 12a5a89 -->
 
+### Changed
+
+- `perk objective plan` now positions a stacked child layer's planning session in the predecessor's plan worktree whenever the delivery train observed a live remote parent head (validated reuse on this machine, or a checkpoint-validated restore from `origin/plan-<pred>`), so the session explores the stack as implemented; the seed's stacked-layer block names the checkout and any local drift, landed-and-deleted predecessors plan from the repo root honestly, and dry runs report `"positioning": "unchecked (dry-run)"`. Alongside it, `perk plan save` writes the plan-ref selector to the main checkout root (a worktree-cwd save never rebinds that worktree), cold objective-plan sessions inherit the objective-node claim (suppressing the implement-here exits), and the warm `/submit`, `/address`, `/land`, and `/learn` doors refuse in planning-stage sessions
+
 ### Added
 
 - The stamped stacked-delivery lifecycle is proven live end-to-end and fully taught: a real two-layer docs train drove publish → handoff stamp → the `node_not_handoff_ready` planning gate → the ready-time reconcile continuation (warm `/ready` and the `perk ready <PLAN>` wrapper) → the suspend hold and idempotent re-stamp → self-rewrite and cascade staleness with re-ready repair → the atomic objective landing (`docs/design/stacked-ready-handoff-dogfood.md`, **PASSED** 2026-08-22, zero defects; the five-family coherence audit found runtime surfaces in agreement). The train's own merged layers delivered the teaching: the stacked tutorial walks the continuation with real captured excerpts, the review and recovery how-tos gained the transient draft hold, stale-after-address, and a Handoff repair table, and the perk-expert stacked reference mirrors it all (79f303d2)

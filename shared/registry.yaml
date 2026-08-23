@@ -124,7 +124,7 @@ stages:
   - id: objective-plan
     summary: Select the next objective node and author a bounded plan (read-only).
     mode: read-only
-    worktree: none            # interactive planning, like plan — no branch yet
+    worktree: none            # interactive planning, like plan — no branch yet; the cold door overrides to a transient reuse stage for a stacked child layer with a live predecessor branch (§8.46)
     doors: { warm: true, cold_local: true, cold_remote: false }  # interactive local exploration
     run_id: { warm: keep, cold_local: mint, cold_remote: mint }
     command: objective plan   # P2.T10: dedicated cold door (perk objective plan) + /objective-plan

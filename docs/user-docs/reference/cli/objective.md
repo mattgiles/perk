@@ -70,8 +70,15 @@ stamped-vs-current heads when stale) with the copyable `perk ready <PLAN>` remed
 explicit `--node` must name the
 ready candidate. The plan seed then carries the layer's position and its verified predecessor
 context (branch + remote head; the already-fetched `origin/<parent>` is locally inspectable) —
-perk records no planning-time SHA. `--dry-run` skips the readiness check (offline) and says so
-(`"build_readiness": "unchecked (dry-run)"`).
+perk records no planning-time SHA. When the train observed a **live remote parent head**, a
+child layer's planning session opens **in the predecessor's plan worktree**
+(`.worktrees/plan-<pred>` — validated reuse when it exists here, else a checkpoint-validated
+restore from `origin/plan-<pred>`), so the session explores the stack as implemented; the seed
+block names the checkout and any local drift/dirtiness. When no live head was observed (e.g. a
+landed predecessor whose branch was auto-deleted) planning stays at the repo root, and the seed
+says so. `--worktree NAME` selects only the directory under the worktree root (never plan
+identity or branch). `--dry-run` skips the readiness check (offline) and says so
+(`"build_readiness": "unchecked (dry-run)"` + `"positioning": "unchecked (dry-run)"`).
 
 ### `perk objective create` (alias `new`)
 
