@@ -19,8 +19,10 @@ narrative: identity → data dirs → provenance → the read-only writer → GC
 - Every workflow-state write is stamped with the writing perk's version — "The `perk_version`
   vintage stamp".
 - TWO current-run resolvers exist ON PURPOSE with opposite degradation (`activeRunId` stamps a
-  fallback; `activeSessionRunId` degrades to null) — do not unify — "The accessor seam + the
-  two-resolver doctrine".
+  fallback; `activeSessionRunId` degrades to null) — do not unify; a null-degrading resolver
+  never feeds a refuse/allow gate — "The accessor seam + the two-resolver doctrine".
+- Multi-file trusted state chains digests through ONE workflow-state anchor; marker-clears are
+  verified invalidation — "Provenance pointers".
 - All `.perk/workflow/` writes route through the per-plane atomic seam; corruption has a DECODE
   stage before the parse stage (catch `UnicodeDecodeError` too) — "The atomic-write seam +
   corruption posture of `.perk/workflow/`".
@@ -84,6 +86,10 @@ There are intentionally **TWO** current-run resolvers in the extension with oppo
 Also: `list_dispatch_records` composes through `list_run_ids` (dirs-only enumeration) — any future
 stray-file-in-`runs/` semantics live in one place.
 
+A third grade for gates (#1992): **a null-degrading resolver is unsafe as input to a
+refuse/allow gate.** Gates that branch on presence/absence read one snapshot with error
+distinction and refuse `bad_state` on couldn't-read — "confirmed absent" ≠ "couldn't read".
+
 ## Provenance pointers
 
 - **The repo digest convention**: `sha256:<hex>` lowercase, computed by
@@ -117,6 +123,14 @@ stray-file-in-`runs/` semantics live in one place.
   generator; the rule stands). Storing an always-derivable flag forks the
   schema for nothing. Bonus: an empty `extractSteps` result deliberately covered both "missing" and
   "malformed" `## Steps` with one trigger — no new parser state.
+- **Chained digest authority for multi-file trusted state** (#1992): keep ONE trusted anchor in
+  workflow-state and chain each additional file's digest through the already-authenticated
+  artifact — the finalize step binds `manifest_digest` (the sha256 of the manifest bytes the
+  wave decoded) into the bundle; recovery verifies marker→bundle, then bundle→manifest. Echoed
+  identity FIELDS (paths/counts/bytes) are not authentication.
+- **Verified invalidation** (#1992): when a marker-clear is the mechanism that makes later
+  partial failures safe, the clear returns the verified append+read-back result, and an
+  unverified clear refuses BEFORE any filesystem work — otherwise the safety story is prose.
 
 ## The atomic-write seam + corruption posture of `.perk/workflow/`
 
@@ -235,6 +249,16 @@ Key policies:
   `/private/var/folders/…`, so JSON payloads carrying repo-rooted paths won't equal paths built
   from `runner.isolated_filesystem()`'s raw dir — `.resolve()` the tmp dir before constructing
   expected payload paths (same family as the worktree `.resolve()`-both-sides rule).
+- **The ordering-pin recipe through the real session-data seam** (#1922): empirically measure
+  how many branch reads one validated artifact read makes (a self-adapting probe, never a
+  hardcoded count), swap pointer + bytes TOGETHER at that boundary so both versions
+  digest-validate, invoke the executor directly so unrelated reads don't shift the boundary,
+  and mutation-proof by temporarily reversing the implementation.
+- **Persisted-format decode policy** (#1992): enforce key closure only at the levels the new
+  decoder authors (wrapper/entry — an unknown key refuses); reused row decoders stay the single
+  authority (whitelisted construction ignores extras); pin both halves. Shared persisted-format
+  fixtures are deliberately two-tier: one minimal shared encoding for consumers, richer fixtures
+  only in the suite about the format's failure surface.
 
 ## Sources
 

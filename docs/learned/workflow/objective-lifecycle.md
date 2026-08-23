@@ -18,6 +18,8 @@ and the authoring loop both carry non-obvious design decisions worth preserving.
   "The 'design-only node' pattern".
 - A PR that merges with the node's work incomplete gets a REMAINDER node, not a reopened one —
   "The remainder-node reconcile playbook".
+- No node deletion (`skipped` + a recorded decision is the removal record); census the CURRENT
+  roadmap before a plan-baked node-add — "Roadmap edit hygiene".
 - Out-of-order sibling landings can push a node past the objective's boundary line — handle it
   explicitly — "A node can outgrow the objective's boundary line".
 - Objective authoring mirrors the plan→save shape (draft → review → canonical save) — "The
@@ -202,6 +204,15 @@ out-of-order roadmaps, not a scope violation — provided it's handled honestly:
 - **Surface it in the plan; don't smuggle it.** Additive growth that a reviewer discovers from the
   diff (rather than the plan naming it) reads as scope creep even when it's forced — name the forcing
   sibling and the fidelity map up front.
+
+## Roadmap edit hygiene: no deletion, census-before-node-add, scope pins
+
+- **The roadmap has no node deletion** — `skipped` with the decision recorded in the description
+  is the canonical removal record (#2006).
+- **Before executing a plan-baked `node-add`, census the objective's CURRENT roadmap** for an
+  equivalent node — plans freeze roadmap state and go stale (#2006).
+- **Node-description craft:** when a node's scope input is an artifact that hasn't merged yet,
+  pin the file path AND the branch/PR in the node description (#2027).
 
 ## The objective authoring loop mirrors plan → save
 

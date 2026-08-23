@@ -11,33 +11,33 @@ with the grouped CLI) has its own craft. These are the durable rules from doing 
 
 ## Distillation
 
-- A roadmap node's `pr` field links the PLAN; the merge PR can differ — verify before citing —
-  "Roadmap `pr` field ≠ merge PR — verify before citing".
+- A roadmap node's `pr` field links the PLAN; the merge PR can differ — verify before citing.
 - Doc accuracy means grep the named symbols AND execute the doc's runnable examples — "The
-  doc-accuracy gate: grep symbols AND execute the doc's examples".
-- Sweeping a retired convention needs a symbol grep across the corpus, not a census of the files
-  you remember — "A retired-convention sweep needs a symbol grep, not a named-file census".
-- For never-adopted forward guidance, keep-and-annotate beats delete (the learning survives,
-  marked historical) — "Keep-and-annotate beats delete".
-- A keep-history pass can legitimately leave the stale-pointer advisory NONZERO: shed
-  cross-reference rows, keep narrative paths, record the count + rationale in the PR —
-  "Deliberate nonzero stale-pointer advisories" (current standing count: 0).
-- Sweep-step craft — check the mirrors, expect no-ops, look for neighbor staleness while
-  you're in the file — "Sweep-step craft: mirrors, no-ops, and neighbor staleness".
-- Distillation headers are derived content: verify each summary bullet against the current body
-  after every update — "docs/learned curation-batch craft".
-- Mirror drift is omission-shaped; pin a claim ledger before a move and compare every destination
-  against it — "Mirror and fact-drift reconciliation".
-- Volatile catalogs belong in source-verified reference surfaces, not how-to enumerations; same-
-  turn contract amendments come from shipped code — "Mirror and fact-drift reconciliation".
-- Source verification is a labeled substitute, never a live-pass claim; isolated docs-IA reviews
-  prove their own cold context — "Acceptance evidence craft".
-- Evidence gates re-derive state, bind records to a commit, and preserve only evidence commits
-  after certification — "Acceptance evidence craft".
-- Dogfood/manual evidence is a pre-submit blocker and must be recorded on the PR; prose-only gate
-  choreography is not enforcement — "Acceptance evidence craft".
-- Disposable remote proofs establish cleanup before mutation and prove absence afterward —
-  "Disposable-repo proof hygiene".
+  doc-accuracy gate".
+- A retired-convention sweep greps the whole corpus, never a named-file census; full CI is the
+  exit gate — "A retired-convention sweep needs a symbol grep".
+- Plans carry per-fact source ledgers (claim → anchor); audit findings are leads, not proofs;
+  every path re-resolves at edit time — "The truth-sweep recipe — per-fact source ledgers".
+- Frozen counts/ordinals/censuses/version stamps de-freeze by delegating to a source-owned
+  guard, derivation, or event stamp — never a refreshed number — "De-freeze taxonomy".
+- The keep-vs-correct unit is the sentence: correct instructive text in place, historicize
+  narration, "Resolved:" fixed residuals — "Correction shapes — the instruct-vs-narrate triage".
+- For never-adopted forward guidance, keep-and-annotate beats delete — "Keep-and-annotate beats
+  delete".
+- A keep-history pass can leave the stale-pointer advisory NONZERO; the `broken-doc-ref` family
+  holds an accepted ~19-row weighed floor — "Deliberate nonzero stale-pointer advisories".
+- Sweep-step craft: mirrors, expected no-ops, neighbor staleness — and multi-node sweeps pin
+  cross-node byte-preservation + disjoint file ownership — "Sweep-step craft".
+- Distillation headers are derived content; the docs-sync blast-radius table and the 12,288-byte
+  threshold are budgeting facts — "docs/learned curation-batch craft".
+- Mirror drift is omission-shaped; pin a claim ledger before a move; volatile catalogs live in
+  source-verified references — "Mirror and fact-drift reconciliation".
+- Validation records obsolete-mark in place with dated addenda; the dogfood-record genre is
+  settled (pre-committed protocol, per-criterion classification) — "Validation-record
+  reconciliation".
+- Source verification is a labeled substitute; gates re-derive and bind to one commit; dogfood
+  evidence is a pre-submit blocker; disposable remote proofs prove absence afterward —
+  "Acceptance evidence craft" / "Disposable-repo proof hygiene".
 
 ## Roadmap `pr` field ≠ merge PR — verify before citing
 
@@ -114,6 +114,44 @@ repoint as a mechanical substitution. A repoint to "file X's coverage of helper 
 X never names Y (it exercises the helper end-to-end without naming it); the fix describes the
 actual coverage shape.
 
+## The truth-sweep recipe — per-fact source ledgers
+
+- **A plan-carried per-fact source ledger makes execution mechanical.** Every corrective claim
+  in the plan maps to its file/symbol anchor, re-verified at planning time — the executor
+  applies edits instead of re-litigating truth. Confirmed across four consecutive docs-truth
+  nodes.
+- **Upstream audit findings (learn-dream reports) are leads, not proofs.** Independently
+  re-verify every corrective claim against current source before it enters the plan — a sweep
+  that transcribes an audit report reintroduces the exact drift class it exists to fix.
+- **Even a ledger-backed executor re-resolves every path it touches at edit time.** The
+  plan→implement window is enough for drift; the ledger de-risks the plan, it doesn't waive the
+  edit-time check.
+- **Bounded negative greps are the verification gate for retired spellings.** In a partitioned
+  objective the negative grep scopes to the node's owned docs ("no NEW findings"), with
+  cross-node hits recorded as a count + attribution rather than fixed out of scope.
+
+## De-freeze taxonomy — counts, ordinals, censuses, version stamps
+
+How to un-freeze prose that carries a number, an enumeration, or a version marker:
+
+- **Delegate a census to a source owner instead of refreshing the number.** A type-checked
+  binding or a guard test is a census CI re-derives; prose never is (#2012).
+- **Ordinals are counts in disguise.** "To add a third, …" becomes "to add a NEW …" (#2019).
+- **Three de-freeze shapes, keyed by what the frozen text was doing:** an *invariant claim* →
+  mint (or point at) an enforcement guard plus a derivation instruction; a *routing-aid
+  enumeration* → derivation-first, with the snapshot explicitly subordinate to the grep; a
+  *historic decision record* → keep verbatim plus ONE live-census-pointer paragraph. A
+  reconciliation node may legitimately ship one guard when the "census" is an invariant no test
+  owns (#2023).
+- **Version markers:** lineage stamps ("source-read at X") are drift magnets — prefer one
+  doc-level anchoring convention pinned to a code constant plus a doctor tripwire; version
+  numbers survive only as event stamps ("since X, behavior changed") (#2011). A baseline
+  re-stamp is an implicit re-assertion of every version-stamped fact — re-verify them all;
+  facts not re-verified keep their honest old stamps (#2009).
+- **Falsified universally-quantified absolutes** are fixed with a small dimensional matrix or a
+  mechanism-scoped claim plus the named standing exception — never a hedge, never a new frozen
+  census; advice phrased against a literal count dies with the count (#2012, #2010).
+
 ## Mirror and fact-drift reconciliation
 
 Mirror drift usually appears as an omission, not a contradiction. Lockstep edits propagate a
@@ -168,6 +206,11 @@ guidelines-doc patterns:
   supersession note to the old record's Status line — cross-annotated both ways; the new record's
   header states prior vs current coverage and re-examines standing residuals. Worked example:
   `docs/design/pr-review-doors-dogfood.md` superseding `docs/design/review-dogfood.md`.
+- **The dogfood-record genre is settled across factories** (#2006, #2027): Part A pre-committed
+  protocol, blocked-state disposition, probes-vs-attempts budget accounting, per-criterion
+  observed-live/offline-pinned/unobserved-not-passed classification, product-artifact-first
+  evidence, and era-correcting dated deviations in place of forced captures or defect calls.
+  Verdicts classify from artifacts/event projections, never the human's summary label.
 
 ### The production side: staging the record (the `review-dogfood.md` genre)
 
@@ -325,6 +368,45 @@ Guidance describing a pattern that was never built does not get deleted: prepend
 fiction — the same convention as the `> **Status (Node N.N)**` blocks used for sections whose
 reality grew past the text.
 
+## Correction shapes — the instruct-vs-narrate triage and its arms
+
+The unit of keep-vs-correct is the **sentence**: instructive sentences (paths, seam maps,
+recipes) are corrected in place; history narration keeps its text and gains a dated
+`> **Update**` supersession blockquote, a `Historical:` retitle, and past-tensing (#2007,
+#2008). The arms and their edge cases:
+
+- **A documented residual whose reality has since been fixed becomes a "Resolved:" note** — the
+  third arm beside correct-in-place and keep-and-annotate (#2025).
+- **Rationale succession.** Recast a falsified rationale as "the original motivation … / the
+  rationale that survives …" (#2017). A correction can stay right for a NEW reason — record the
+  history AND the new mechanism, and install one verbatim-consistent corrected reason
+  everywhere the falsified phrasing appears (#2011).
+- **"Mirrors how X does Y" docstrings** repoint to the one canonical record, never re-inline
+  the sibling's current behavior (#2017). **"Nothing calls this yet" claims** are deleted
+  outright — a caller inventory re-drifts identically (#2017). Historical narration must not
+  contradict current invariants (#2017).
+- **Over-generalized rules get a neutral rescope:** narrow the stated domain plus one factual
+  contrast sentence — never invent rationale for the excluded case (#2020). **A durable rule
+  outlives its expired exhibit:** time-scope the old exhibit, re-verify against a current one,
+  restate the rule unchanged; retire claims that silently vanished (#2020).
+- **When a mechanic splits into gate + execution,** document the named roles (the *whether* vs
+  the *how*) rather than deleting the "single path" claim; enumerating the gate's consumers is
+  part of the correction (#2020).
+- **Deleting a stale self-contradictory instruction requires a loss-freeness check:** trace each
+  durable fact inside the deleted text to a surviving owner first (#2009). When an audit claim
+  is DISPROVEN, encode the outcome as an explicit byte-preserve pin so a well-meaning executor
+  can't "modernize" correct guidance (#2009).
+- **Correcting a falsified safety claim means re-locating where the safety actually lives** —
+  the fact-fix may falsify a bundled rationale; sweep both (#2025).
+- **Falsified-phrase censuses span src docstrings, test docstrings, and learned-doc headings:**
+  grep the phrase repo-wide with per-hit truth checks, never blanket rewrites (#2017).
+- **Intra-doc self-contradictions resolve toward code truth** by historicizing at bullet
+  granularity; a heading rename is a lockstep set (the H2 + the Distillation quote + an inbound
+  cross-ref grep) (#2013). When a documented code anchor becomes a re-export, repoint to the
+  owner but keep one clause naming the re-export (#2013). A stale-pointer census classifies
+  lookalikes with recorded exclusions (#2013). Heading-stability as an explicit edit-spec
+  invariant is cheap and pays off in review (#2009).
+
 ## Deliberate nonzero stale-pointer advisories (`perk learn docs-check`)
 
 After a keep-history reconciliation, `perk learn docs-check`'s stale-pointer advisory can
@@ -339,6 +421,10 @@ module (`checkpoints.ts`, under the deleted extension checkpoints dir) cited in
 have deleted the learning. A later consolidation pass (PR #1687) reworded the citing passage and
 the standing count returned to 0 — the craft stands: paraphrase, don't quote, when naming such an
 instance (a verbatim path would add the naming doc to the advisory it documents).
+
+Post-#1973 the `broken-doc-ref` family sits at a **~19-row weighed-advisory floor** (deliberate
+example paths, cross-tree shorthands, history citations) — an accepted tail future runs weigh
+per-row, not a regression to churn (#2026).
 
 ## docs/learned curation-batch craft
 
@@ -373,6 +459,31 @@ Rules from running verbatim merge/deletion batches over the `docs/learned/` corp
   transcription produced actionable findings from all four review angles: outline drift, a
   newline-semantics seam, and header/body contradictions. Budget multi-angle review for large
   mechanical batches just as deliberately as for design changes.
+- **The docs-sync blast-radius table.** A `read_when` edit regenerates one index row only; a
+  frontmatter `title`/H1 edit changes NO generated surface; only cluster-membership/slug changes
+  move the ambient APPEND_SYSTEM block (#2025, #2007, #2008, #2022).
+- **The 12,288-byte distillation threshold** (`DISTILLATION_THRESHOLD_BYTES`,
+  `src/perk/learn/docs_sync.py`): estimate a doc's post-edit size and budget the born-bounded
+  Distillation opener in the plan when the edit will cross it (#2022).
+- **The `\uXXXX` escape-corruption class.** The docs/skills corpus is clean except
+  `learn-evidence-pipeline.md`'s intentional `\ud800` content line (a data-format example a
+  sweep must not "fix"); a recurrence guard was deliberately declined; re-derive corruption
+  counts at implementation time — node prose counts lie (#2016).
+- **Doc→doc repo-relative path pointers are a deterministic-detector blind spot** —
+  `git ls-files` per named path is the only net; the reconciliation craft doc itself drifted
+  this way (#2019).
+- **A dream overlap signal can legitimately resolve as cross-link-don't-merge** when the overlap
+  is generic/specific layering — one Cross-references row each way characterizing the division
+  of labor (#2019). Residual/coverage claims cite the authoritative record without restating
+  its detail (#2019).
+- **Chronicle → dated-record condensation.** Split a chronicle into a compact dated validation
+  record (real merge dates + issue/PR anchors) plus trimmed process craft; the relocation map is
+  the load-bearing artifact (promote misfiled mechanics out of "history"); a
+  heading-preservation gate plus internal repoints — including stale direction words
+  ("below"→"above") — make it safe (#2010).
+- **Delegation shape.** One-line pointers naming the counterpart's section anchor, only for
+  verified-present content; delegate incident specifics, keep the local discipline; after
+  delegating, every citing doc must land at most one hop from the moved content (#2022).
 
 ## Glossary growth must sweep the docs that *enumerate* the glossary
 
@@ -412,6 +523,26 @@ And the rename/retirement sweep scope — what a retirement's grep must actually
   publish regenerates the body from the plan) — until PR-body regions are splice-protected,
   record acceptance after the *final* publish, or re-verify it afterwards.
 
+### Multi-node sweeps — partitioned objectives and concurrent curation
+
+- **Cross-node byte-preservation pins.** When a sibling node distills/deletes content whose sole
+  surviving home is a doc this node revises, pin the dependency in both node descriptions and
+  declare the passages byte-identical + outside the sweep's blast radius, verified diff-shaped
+  (#2013).
+- **Rider sections follow the truth a node establishes, not the doc's cluster assignment** — a
+  heading rename plus its inbound cross-refs cannot straddle two PRs (#2020).
+- **Retain-in-place beats re-homing into a concurrently-planned sibling's file** — disjoint file
+  ownership between concurrent curation nodes is worth preserving (#2022).
+- **Same-class staleness is absorbed while in the file; a DIFFERENT defect class** (e.g.
+  encoding corruption vs fact staleness) **gets a uniform-preserving deferral to its own node**
+  (#2025).
+- **Claim sweeps cover `docs/learned/` and `docs/guiding-principles/`** — stale learned docs
+  actively fight sanctioned changes; amend them in the same PR (#2028). When behavior grows,
+  sweep worked examples, declared-shape docstrings, and tutorials (which must stay runnable
+  top-to-bottom), not just normative prose (#2029). Numbered step sequences are themselves
+  instructions: scope the whole sequence to one mode with an up-front callout carrying the other
+  mode's complete path (#2024).
+
 ## "Pure relocation / byte-identical" docstring claims expire on the first deliberate change
 
 When touching a module whose docstring asserts a relocation/byte-stability invariant, scoping
@@ -444,7 +575,8 @@ Three patterns from reconciling Objective #548's prose against its landed nodes:
   entry breaks the quantifier, qualify the claim in the same change. (b) Plan hard-count sweeps
   as **enumerated anchor lists**, not "fix the docstring" — a stale "three agent defs" count had
   replicated to three anchors (module docstring + two test files), and pre-locating all anchors
-  made the sweep trivial.
+  made the sweep trivial. The repair shapes for frozen counts/censuses/version stamps are
+  cataloged in "De-freeze taxonomy — counts, ordinals, censuses, version stamps" above.
 - **Check the *prior* node's landed-narrative paragraph, not only the current one.** When a per-node
   "Node X landed (PR #…)" narrative convention exists, a prior reconcile that updated only a node
   *description* (not the prose narrative) leaves a silent gap — #548's narrative had **skipped Node

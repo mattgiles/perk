@@ -150,7 +150,7 @@ shape (landed exactly as planned, zero deviations):
    `<cmd> > file` stays blocked even though the leading command is now safe).
 3. **`shared/contracts.md`** — amend the read-only-gate paragraph (same-turn contract discipline).
 4. **`docs/user-docs/reference/in-session/model-tools.md`** — the §"Structural read-only gate"
-   explanation (`reference/in-session.md` is only the surface-map page; the gate explanation
+   explanation (`docs/user-docs/reference/in-session.md` is only the surface-map page; the gate explanation
    lives in the model-tools reference).
 5. **This learned doc** — record the new entry as a command-keyed precedent.
 

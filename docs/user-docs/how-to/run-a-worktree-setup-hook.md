@@ -1,6 +1,6 @@
 ---
 title: "How to run a worktree setup hook"
-description: "Declare worktree setup commands once so every freshly created perk worktree starts with a ready environment."
+description: "Declare worktree setup commands once so every newly materialized perk worktree — fresh or restored, with marker-gated retry — starts with a ready environment."
 sidebar:
   order: 2120
 sidebarGroup: "Core workflow"

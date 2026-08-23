@@ -25,6 +25,8 @@ cluster: config-and-convergence
 - Environment checks need fixture coverage at their actual primitive, required-only filtering in
   every derived diagnostic, and remediation for absent and version-invalid arms — "The optional
   `EnvCheck` tier".
+- Drift-tripwire probes pin positive load-bearing literals, never removal messages; unprobeable
+  surfaces stay unprobed with an intent comment — "Marker-probe table craft".
 
 ## The split
 
@@ -351,6 +353,18 @@ and surfaced three reusable disciplines:
   **nullable and must NOT flip the report's `ok`** — project readiness runs only when
   `auth_ok && team_ok` (the same gate as doctor; both planes early-return on auth/team failure, so a
   degraded repo reports `project: None`).
+
+## Marker-probe table craft (#2005)
+
+Drift-tripwire probes over a borrowed/upstream surface (the doctor `subagent-compat` table):
+
+- **Never pin a probe to a removal/cutover message** — upstream restoring the capability erases
+  the marker and the probe warns on every later release. Pin POSITIVE load-bearing surface
+  literals the guidance depends on.
+- **When no stable literal distinguishes a compatible surface, deliberately leave it unprobed**
+  with an intent comment at the table site.
+- **The exact-pin test (version + one full row) is what forces bumps to be deliberate,
+  reviewed re-verifies.**
 
 ## Extending a report-only advisory warn silently flips fixture arms
 

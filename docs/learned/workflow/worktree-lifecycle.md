@@ -26,6 +26,8 @@ worktree-batch command.
   batched via the lenient runner — "Branch deletion is best-effort, forced, and batched".
 - Locate the MAIN checkout from inside a linked worktree via `main_worktree_root`
   (`--git-common-dir`, both return forms handled) — "The `main_worktree_root` primitive".
+- Under fail-closed checkout validation, test fixtures seed real worktrees (`git worktree add` +
+  `write_plan_ref`), never bare `mkdir` dirs — "Test-craft corollary".
 
 ## Worktree-candidate identification
 
@@ -267,6 +269,13 @@ overlay-aware `[worktree] setup` parser.
 Worktree lifecycle lives entirely in the Python plane. `wipe` is a plain CLI subcommand (not a stage),
 emits plain text (no `--json`), and matches the rest of the `wt` family — so no
 `contracts.md`/`registry.yaml` edit is needed (cli-vs-pi §2.2).
+
+## Test-craft corollary: bare `mkdir` fixtures no longer stand in for worktrees (#1740)
+
+Under fail-closed existing-checkout validation, a bare `mkdir` directory no longer passes for a
+worktree (a ~29-test fallout when the validation landed). Suites seed real registered + bound
+checkouts — `git worktree add` plus `write_plan_ref` — wherever a test needs an existing
+checkout.
 
 ## Test-harness gotcha: `.perk/` makes a bare test repo dirty
 

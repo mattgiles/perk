@@ -24,9 +24,15 @@ non-obvious behavioral facts and traps.
 - MDX marked regions use JSX comments, not the HTML comments used by Markdown; runtime censuses
   are set-equal to live authorities — "Docs↔runtime censuses and marked regions".
 - Starlight presentation work pins token consumers, cascade-layer behavior, container-query
-  geometry, exact keyed routes, and reduced motion — "Starlight CSS facts".
+  geometry, exact keyed routes, and reduced motion; ONE unlayered `.expressive-code` rule wins
+  both asymmetric EC theme arms — "Starlight CSS facts".
 - Full-corpus static accessibility combines jsdom axe-core with committed contrast math and
-  clause-by-clause accounting — "Static accessibility gates".
+  clause-by-clause accounting; tooltips bridge the hover gap — "Static accessibility gates".
+- CDP evidence harnesses: keyDown-with-text, bounded focus-trap walks, scrollbar-free capture,
+  manual `beforeprint`, ~1e-05s reduced motion — "Headless-Chrome CDP evidence-harness craft".
+- Rendered evidence rides `docs/planning/evidence-*/` on the PR branch + SHA-pinned URLs in a
+  durable PR comment, removed pre-merge; the operator's rendered look is the real gate —
+  "Process patterns".
 - Search tuning starts with index membership and token presence, then follows a bounded ladder;
   pagination is an edge-by-edge opt-in — "Pagefind" and "Pagination".
 - `.md`→`.mdx` keeps route identity stable but fans out across every source/inventory mirror;
@@ -125,6 +131,20 @@ gist-author and objective-author are warm-capable without such launchers, while 
 a context refresh rather than a warm stage door. Derive each displayed claim from the matching
 registry field rather than using warm capability as a proxy.
 
+Evidence-census additions (#1998, #1995, #2002):
+
+- **Evidence tables and guard counts derive from the full built corpus (`dist/**`)**, never
+  exhibit-page spot extraction.
+- **Frozen dated evidence tables need a scheduled membership-reconciliation step** — re-extract,
+  then reconcile as occurrence count + per-theme color-set equality against the recorded run
+  (per-row live-math guards cannot detect additions).
+- **Define hard contrast gates over the OBSERVABLE palette** — "unobservable + pre-existing
+  failure + strict improvement" is a legitimate recorded carve-out (a vendor's dead value must
+  not veto an improvement).
+- **Blueprint-section parsers are bounded on BOTH ends** (scan to the next heading, not EOF —
+  the next appended section is the trap), and `.astro` files join the value-exact loop (extract
+  the `<style>` body, reuse the CSS parser, pass media contexts).
+
 ## Starlight CSS facts
 
 - Starlight 0.41.7 sets no body font size. A custom property alone is dead configuration unless a
@@ -141,6 +161,24 @@ registry field rather than using warm capability as a proxy.
 - Under reduced motion, make an animation complete once with `animation-iteration-count: 1`.
   Setting it to zero can strand content in a pre-animation state.
 
+The Expressive Code cascade model (pin-tied at astro@7.2.1 + starlight@0.41.7) (#1998):
+
+- The two theme arms are **asymmetric**: dark custom-property values land on `:root` by
+  inheritance; light values land on the `.expressive-code` element inside
+  `@layer starlight.components` — so ONE plain unlayered `.expressive-code { --ec-… }` rule wins
+  in both themes.
+- The frame outer radius renders as inner radius + `--ec-brdWd` — bind via
+  `calc(… - var(--ec-brdWd))`. The frame body background needs
+  `--ec-frm-edBg`/`--ec-frm-trmBg` (base `--ec-codeBg` reaches only unframed `pre`).
+- `--ec-codeFg` is effectively non-observable (inline token span colors override it);
+  `--ec-gtrFg` rendered on zero built pages.
+
+Starlight article/shell facts (#1998): headings wrap in `.sl-heading-wrapper.level-h<N>` with
+the heading `display: inline` — target the WRAPPER for spacing/`text-wrap: balance` (plus the
+unwrapped `h1#_top`); header/sidebar/mobile-ToC hairlines all consume
+`--sl-color-hairline-shade` (defaults to `--sl-color-black`; one `:root` re-bind fixes all three
+edges on near-black themes).
+
 ## Static accessibility gates
 
 A deterministic static gate can run axe-core across the full built corpus in jsdom. Disable
@@ -152,6 +190,30 @@ need rendered/browser evidence.
 The jsdom dependency participates in the repo's `engine-strict=true` install. Before selecting a
 pin, compare its `engines` floor with the documented effective development floor; a semver-valid
 package can still make installation impossible on the supported dev runtime.
+
+Three interaction-layer additions (#1993):
+
+- **The hover-gap tooltip trap (WCAG SC 1.4.13):** a tooltip positioned with any gap is not
+  hoverable (`pointerleave` fires crossing the gap) — bridge with a CSS `::after` hit-area PLUS
+  controller logic treating a leave whose `relatedTarget` is the paired trigger/tooltip as a
+  crossing.
+- **jsdom ships no `window.matchMedia`** — name tests for what they exercise and stub the window
+  when the default path matters.
+- **Bound responsive-mode tables need one explicit CSS arm per row** (a threshold that touches
+  nothing silently doesn't exist), and guards pinning exact strings/geometry co-evolve with each
+  redesign round in the same commit.
+
+## Headless-Chrome CDP evidence-harness craft (#1995)
+
+- `rawKeyDown` without `text` doesn't activate a focused `<summary>` — use `keyDown`/`keyUp`
+  with the Enter/Space text payload.
+- Focus-trap walks stop the forward walk while focus is still in-region, and treat a 0-stop
+  reverse walk as failure.
+- Classic scrollbars steal ~15px of the emulated viewport — hide them in capture; union visible
+  tooltip rects into crops.
+- CDP print-media emulation doesn't fire `beforeprint` — dispatch it manually, re-assert DOM
+  state, then shoot.
+- Reduced-motion "zero" is ~1e-05s — probe with a ≤0.1ms threshold, never equality with 0.
 
 ## Pagefind search membership and tuning
 
@@ -247,6 +309,29 @@ facts that every mirror must reconcile.
 - An accepted red window between nodes (the corpus collection landing before the frontmatter
   migration) is workable only when loudly disclosed and the later node is barred from wiring the
   CI gate before it clears.
+- **The settled rendered-evidence protocol** (three clean uses: nodes 1.2/2.1/3.1 of the
+  docs-site objective) (#1995, #1993, #2002, #1998): binaries + disposable scripts live under
+  `docs/planning/evidence-<objective>-<node>/` on the PR branch ONLY → commit-SHA-pinned
+  `raw.githubusercontent.com` URLs posted in a durable PR comment (never the PR body — see
+  `workflow/prompt-carrier-layering.md` for the ownership law) → a final pre-merge commit
+  removes the directory → the merged tree carries only a dated design-record note + index row.
+  Waived/obsolete passes get explicit dated waiver rows quoting their directives. Residual: the
+  raw URLs pin commits reachable only via PR-branch history (GitHub object retention).
+- **Un-gated pre-merge choreography silently drops.** "Delete X before merge" is structurally
+  ungateable (X must exist during the PR's life) — host evidence off-branch or make cleanup +
+  posted-galleries a blocking land precondition; the saving layering is a durable in-repo record
+  that makes PR-surface evidence redundant by design (worked failure: ~20 MB of PNGs permanently
+  in main's history) (#2002).
+- **For visual work the operator's rendered look is the REAL gate** — byte-bound plan
+  copy/geometry are proposals; budget rendered-iteration rounds, hold contracts firmly and exact
+  copy loosely (#1993).
+- **The two-stage shape:** plan review approves value-exact candidate declarations + the
+  evidence protocol; the draft PR is the binding approval surface; pre-verify framework
+  internals at plan time against the pinned package and bind fallback branches with
+  pre-estimates (#1998, #2002).
+- **Toolchain flake:** the Vite optimizer can leave `docs/site/node_modules/.vite/deps_temp_*`
+  behind, failing `docs-check` with ENOTEMPTY — delete the stale dir and re-run (cache residue,
+  not a source defect) (#1994).
 
 ## Residuals
 

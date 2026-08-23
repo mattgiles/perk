@@ -31,7 +31,8 @@ launcher that emits its own JSON.
   on a miss, the chdir/exec race an ordinary `OSError` arm. Bounded scope: name-substitution is
   closed; the shebang-interpreter (`/usr/bin/env node`) PATH walk post-chdir remains a recorded
   residual — "Exec-launcher safety at path-probing seams: resolve the absolute executable path
-  BEFORE the chdir".
+  BEFORE the chdir" (bounded hardening plans enumerate that trust boundary up front; handoffs
+  are per-run artifacts — a re-run mints a fresh run_id + handoff).
 
 ## Build `argv` once, branch only on execute-vs-preview
 
@@ -80,7 +81,7 @@ is dropped. It is inert on `--remote` (the remote arm returns before prompt asse
 builds its own primer) and on resume `--dry-run` (that path returns before `launch_stage`).
 
 **Why the seam exists**: putting a path-specific notice into the parity-locked
-`stages/implement.md` prose (or assuming warm/remote assembly would carry it) would silently
+`prompts/stages/implement.md` prose (or assuming warm/remote assembly would carry it) would silently
 broaden behavior across all three render sites — the suffix seam is the correct home for
 caller-supplied, *path-scoped* additions. First caller: `perk plan resume`'s prior-work advisory
 (`prompts/common/resume-advisory.md`, wired in `src/perk/cli/commands/plan/resume_cmd.py`), gated
@@ -231,6 +232,13 @@ with a relative `PATH` entry still resolves within it (every shell command run t
 compromised — a shell-level pathology, the same residual class). Sanitizing/rewriting the
 operator's `PATH` is out of scope (a behavior change with its own hazards; a relative `PATH`
 entry is an operator-environment pathology).
+
+Plan-craft corollary (#2018): **bounded hardening plans enumerate the trust boundary up front**
+("closes X / cannot close Y — same pathology class"). The which-probe residuals above (the
+shebang-interpreter PATH walk; invocation-environment trust) stay recorded in `which_absolute`'s
+docstring AND here — any claim of closing them must revisit both records. And **handoffs are
+per-run artifacts**: a re-run reuses the materialized worktree but mints a fresh run_id +
+handoff, never resuming one.
 
 ## A shared `--worktree` option does not imply positioning for a `worktree: none` stage policy
 

@@ -30,6 +30,9 @@ accepted.
 - A journaled mutation classifies total-outcome by exact (status, body-state) pairs — a 5xx with
   a parseable body stays AMBIGUOUS — "The merge-async mutation — total-outcome classification +
   retry semantics".
+- Reads split by completeness contract — bounded browse vs full census; "every open X" readers
+  use `gh api --paginate --slurp` and fail closed on shape — "List-read completeness contracts
+  (label-scoped reads)".
 
 ## The five-function helper family — and why it's five, not four
 
@@ -284,6 +287,27 @@ shape for anything feeding a fail-closed consumer:
 
 Residual (both sections): the merge-async wire shapes and the readiness reads are
 hermetic/fake-proven; live-host behavior is unproven until a dogfood node.
+
+## List-read completeness contracts (label-scoped reads)
+
+The incident class first (#2003): **a truthful report over a silently truncated census is the
+most dangerous partial-failure shape** — any read whose contract says "every open X" is in this
+class the moment it uses a default-page list read. A first-page-only idempotency finder mints
+duplicates past ~30 open issues. The rules (#2003, #2004):
+
+- **Split reads by completeness contract, not endpoint.** *Bounded browse* (one default page,
+  membership beyond it not promised) vs *full census* (idempotency finders, learn/gist
+  inboxes). The fix kept two helpers so bounded callers had zero churn; the `find_plan_issue`
+  parameterization backs the learn/gist/objective finders.
+- **`gh api --paginate --slurp` is the exhaustive mechanism:** Link-header termination, one
+  subprocess (existing error handling intact), an array-of-page-arrays payload to flatten. It
+  needs gh ≥ 2.48.0 (documented-not-probed — an older gh fails loudly with `unknown flag`) and
+  is incompatible with `--jq`. Hand-rolled page loops over `gh api` are a smell.
+- **Census boundaries are fail-closed.** An unexpected slurp shape raises, and for an
+  authoritative census read empty stdout raises — only a genuinely parsed `[]` reads as empty.
+  The bounded browse keeps its tolerant `[]` fold.
+- **Latent same-class residual:** comment-list finders (`find_comment_id_by_marker`) stay
+  unpaginated past ~30 comments — a marker placed late in a long thread is exposed.
 
 ## Gateway purification by hoisting a backend-specific read to the consumer
 

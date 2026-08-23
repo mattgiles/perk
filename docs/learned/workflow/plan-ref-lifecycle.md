@@ -22,6 +22,11 @@ cluster: plan-lifecycle
   resolve-once-then-pin".
 - A replan REUSES branch `plan-<N>`: a closed-unmerged prior attempt's commits + closed PR arrive
   as the expected shape, not an anomaly — "A replan inherits its prior attempt's branch state".
+- Selection precedence is explicit PLAN › `--worktree` binding › invocation-root selector, with
+  selector writes main-root-only — "The two-roots rule".
+- A positioned planning save leaves TWO refs (predecessor binding + saved child);
+  `planningStageRefusal` is the structural guard — "The two-ref shape after a positioned
+  planning save".
 
 ## Two-role duality of `plan-ref.json`
 
@@ -216,6 +221,26 @@ handled code-side — submit reopens a reused CLOSED PR (loud note) and refuses 
 (see `workflow/github-gateway.md` for the `reopen_pr` guard). Expect the closed-PR-on-the-branch
 shape after a closed-unmerged attempt; let the submit guard handle it rather than manually deleting
 the branch.
+
+## The two-roots rule (#1740)
+
+Plan selection distinguishes the invocation root from the main root:
+
+- **Selection precedence:** explicit PLAN › explicit `--worktree` binding › invocation-root
+  selector.
+- **Selector writes, config, and canonical reads are main-root-only.** The positioner owns
+  binding materialization; launch authority is the directly resolved ref.
+- **A two-roots migration is done only when EVERY caller is normalized** — review caught
+  `plan resume`, the generated stage launchers, and `objective run` still anchored to the
+  invocation root after the named doors were fixed.
+
+## The two-ref shape after a positioned planning save (#1994)
+
+After a positioned planning session's approved save, the session holds TWO refs: the cwd binding
+(the PREDECESSOR) and the just-saved child on `active_plan_ref`. The structural answer is
+`planningStageRefusal` — the first check of warm `/submit`/`/address`/`/land`/`/learn`. Fork
+claim inheritance is deliberate (per-field LWW — a fork of a planning session is still that
+node's planning session); only the env-child adopt arm stays claim-free.
 
 ## Cross-references
 

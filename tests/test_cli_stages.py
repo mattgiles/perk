@@ -200,6 +200,41 @@ def test_plan_save_merged_json_routes_to_worker(git_repo):
     assert payload["dry_run"] is True
 
 
+def test_implement_explicit_plan_backend_failure_maps_github_error(git_repo, monkeypatch):
+    # The explicit-PLAN transport boundary: a backend transport failure out of the canonical
+    # selection maps to github_error, writes no selector, and launches nothing.
+    from perk import github
+    from perk.backends.github import plans
+    from perk.cli.ensure import UserFacingCliError
+    from perk.run import launch
+    from perk.state import cache
+
+    monkeypatch.setattr(
+        github, "check_auth", lambda: github.AuthStatus(True, "octocat", ("repo",), None)
+    )
+
+    def _boom(**_kwargs):
+        raise github.GitHubError("gh exploded")
+
+    monkeypatch.setattr(plans, "get_plan", _boom)
+    # An infra failure must propagate directly — never recovered into the PR-fallback probe.
+    monkeypatch.setattr(
+        github,
+        "get_pr",
+        lambda **_k: (_ for _ in ()).throw(AssertionError("probed the PR fallback")),
+    )
+    monkeypatch.setattr(
+        launch,
+        "launch_stage",
+        lambda **_k: (_ for _ in ()).throw(AssertionError("launched after a failed selection")),
+    )
+    result = CliRunner().invoke(cli, ["implement", "7"], obj=_ctx(git_repo), standalone_mode=False)
+    assert isinstance(result.exception, UserFacingCliError)
+    assert result.exception.error_type == "github_error"
+    assert "implement failed" in result.exception.format_message()
+    assert cache.read_plan_ref(git_repo) is None  # no selector write
+
+
 def test_implement_requires_plan_ref():
     # implement derives the worktree from the active plan-ref; with none, it asks for a plan.
     result = CliRunner().invoke(cli, ["implement"], obj=_ctx(Path("/repo")))

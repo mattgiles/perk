@@ -28,7 +28,10 @@ session-internals facts the consumers depend on.
 - `--render` is a deterministic pipeline — branch selection, boilerplate-drop, dedup, prune,
   truncation, split-by-budget at entry boundaries — "Session normalization / render".
 - The docs-harvest consumers build on the pure gather/partition core (lane-count decides
-  routing, never total docs) — "The harvest gather/partition core".
+  routing, never total docs; readability precedes membership; refuse-vs-filter lives in the
+  caller) — "The harvest gather/partition core".
+- Snapshot cleanliness proofs need status-clean + no index flags + two-sided set equality; strict
+  twins serve fail-closed boundaries — "The dream door's cleanliness census".
 - Session-derived packets pass iterative privacy gates (adversarial canaries; an unconfirmed
   repair is an explicit coverage limitation) — "Privacy gates for session-derived packets".
 
@@ -488,6 +491,34 @@ away; widening stays a one-constant edit.
 `invalid_from` is purely per-target (containment/existence); `no_harvest_docs` is purely "the
 union selected zero docs" — keeping them orthogonal removes any ambiguity about which error wins
 on mixed inputs.
+
+### Refusal ordering + refuse-vs-filter over the shared primitive
+
+- **Refusal ordering over never-raising scanners:** the primitive failure (readability) precedes
+  any derived classification (membership) — pinned as §8.59's "readability precedes
+  membership". Test the failure on the richest mode path: the registry-absent path bypassed the
+  buggy ordering entirely (#2001).
+- **Refuse-vs-filter is a caller-side posture split over one shared primitive**
+  (`eligible_learned_docs`): harvest keeps silent-filter semantics; dream derives its refusal by
+  diffing against the raw enumeration — the posture lives in the caller, not as a flag on the
+  primitive (#2001).
+
+## The dream door's cleanliness census
+
+- **`git status --porcelain` cleanliness proofs have three blind spots** — gitignored files,
+  assume-unchanged/skip-worktree index flags (probe `git ls-files -v` for lowercase/`S` tags),
+  and sparse checkouts (tracked files absent from disk). The census for any snapshot proof:
+  status-clean + no index flags + TWO-SIDED set equality between the filesystem enumeration and
+  the tracked set — each direction defends a different failure (#1990).
+- **Fail-open helpers must not serve fail-closed boundaries.** When two `None` causes need
+  different repair actions, grow a strict twin (`git.head_commit` raising `GitError` vs
+  `resolve_commit`'s fold-to-`None`) and document the split on both (#1990).
+- **Operational facts:** an open same-origin curation objective blocks `perk learn dream` with
+  `origin_conflict` by design until it completes. Dated calibration point — 66 docs / 13
+  clusters ⇒ 14 analyst lanes + 3 reducers, a ~15 min wave, and a 127 KB finalized bundle
+  against the 384 KB budget (#2006).
+- **Credential-smoke prompts must demand no punctuation** — an exact-match `READY` expectation
+  fails on `READY.` (#2006).
 
 ## Cross-references
 

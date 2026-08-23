@@ -58,6 +58,14 @@ Each shape below is a reusable pattern, with its landed exemplar:
   literal byte-identically in both suites with reciprocal comments pointing at each other —
   `tests/test_run_report.py` ↔ `extension/worker/worker.test.ts` (see
   `docs/learned/workflow/shared-contracts.md` for the general lockstep-literal pattern).
+- **One physical fixture file consumed by BOTH suites.** The strongest cross-plane invariance pin
+  shares the fixture bytes themselves — `tests/parity/dream_report_invariance.json`, with the
+  `{repeat, count}` expansion convention for oversize cases (#1996).
+
+Two-roots-era additions (#1740): `cli/plan_selection.select_plan` joins the
+`reconstruct_plan_ref` convergence sites; §8.38 row 5 covers the shared positioner plus the
+named local-worktree-vs-remote-in-place gesture difference; and the parity suite carries the
+explicit-ref arm.
 
 ## Name differences instead of forcing identity
 
@@ -73,7 +81,7 @@ Named difference #9 (contracts §8.38): **the resume prior-work advisory is
 worktree carries the advisory (via `launch_stage`'s augment-only `prompt_suffix` seam — see
 `cold-door-launch.md`); `perk plan implement`, the warm `/implement` handoff, and the remote
 worker never do (the worker resets to the `origin/plan-<N>` tip — committed work *is* its branch
-state), while `stages/implement.md` renders byte-identically across all paths.
+state), while `prompts/stages/implement.md` renders byte-identically across all paths.
 
 **Write execution-path scope into consumer-facing prose from the start.** When a behavior is
 deliberately path-scoped, every consumer-facing description — user docs, contracts consumer

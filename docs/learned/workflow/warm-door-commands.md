@@ -16,9 +16,10 @@ reveals.
 
 - Command/tool pairs are gated ASYMMETRICALLY in read-only sessions — a command can render while
   its sibling tool is filtered off — "The read-only tool-gating trap".
-- The sibling trap: a drive naming a tool the stage's scoping filtered away dead-ends the model —
-  "The stage-scoping sibling trap" (+ "Plan census: a new warm tool must name the toolGating
-  rows").
+- The sibling trap: a drive naming a tool the stage's scoping filtered away dead-ends the model;
+  widenings audit what becomes reachable, and zero-argument selector-dependent tools are never
+  exposed in unbound (main-root) sessions — "The stage-scoping sibling trap" (+ "Plan census: a
+  new warm tool must name the toolGating rows").
 - Warm handlers never do the durable work: they DRIVE the session (`pi.sendUserMessage` guidance
   + the binding suffix) — "Warm commands DRIVE the session; they don't dead-end or do work in
   the handler".
@@ -92,6 +93,13 @@ reachable — a plan param there could have been reviewed and saved *as a plan* 
 session; the fix routed both objective-authoring stages through the objective arm. Rule: a "no
 routing change" non-goal is settled by checking what the gating change makes **reachable**, not
 by intent — treat the dispatch audit as a mandatory plan step for stage-tools widenings.
+
+Two boundaries on the widening move itself (#2028): **zero-argument, selector-dependent tools
+must never be exposed in unbound (main-root) sessions** — the cached plan selector can point at
+a different plan than the one the session launched for. And when the drive-coverage scanner
+demands a tool, first ask whether the driven prompt should stop naming gesture tokens instead of
+widening the stage list — keep retry guidance on human-facing surfaces (the worker tail, drive
+warnings, launch stderr), not in machine-driven prompts.
 
 ## Plan census: a new warm tool must name the toolGating rows
 

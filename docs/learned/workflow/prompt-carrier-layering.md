@@ -49,6 +49,11 @@ bodies, and the door-suite tests (e.g. `extension/doors/prReviewTerminal.test.ts
 - **Carrier moves ripple beyond the amended sections** — grep `shared/contracts.md` for the old
   carrier identifiers (see `shared-contracts.md`'s same-turn-rule failure mode and its
   carrier-move corollary).
+- **The concrete §8.57 carrier map: one flow statement per session shape** (#1955) — the shared
+  plan-authoring context; the tombell REPLACE adapter carve-out; the three objective-author
+  launch variants (seed/adopt/file). The bound skill *recaps* rather than restates, and the
+  carrier inventory is verified against `planMode.ts` deferrals/`registerPlanMode` before
+  writing.
 - **One nudge per launch trigger is the delivery design:** a cold `command:<id>` binding
   intentionally suppresses the warm `stage:<id>` nudge (header dedup); base-skill reachability
   moves to explicit read-path cross-references *inside* the specialized skills.
@@ -75,7 +80,12 @@ bodies, and the door-suite tests (e.g. `extension/doors/prReviewTerminal.test.ts
 - **Do not use the PR body as an intermediate evidence carrier.** The submit flow in
   `src/perk/cli/commands/pr/submit_cmd.py` owns that body and recomposes it from the plan on every
   publish, so a manual append is erased by any later perk publish. An `/address` pass proved this
-  by wiping a twice-executed append. "Post-submit, next turn" steps are unreliable for the same
+  by wiping a twice-executed append. The verified mechanism scope (#2026, #1993): layer
+  publish/re-publish gestures (the submit and address paths) recompose the body via
+  `create_pr`/`update_pr_body`, while the `ready` gesture dispatches before body composition
+  (`src/perk/delivery/publish.py`). A plan-MANDATED record aimed at the PR body therefore
+  silently drops unless an explicit post-publish step exists — route mandated records to a
+  durable PR comment or the plan issue. "Post-submit, next turn" steps are unreliable for the same
   structural reason: `submit` and `finalize_address` terminate their turns, leaving the promised
   follow-up to compete with whatever happens next. Prefer, in order: re-derivable facts anchored
   to a commit SHA (re-measure the committed tree); a PR comment, which submit never recomposes; or

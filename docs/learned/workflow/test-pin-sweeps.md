@@ -92,6 +92,10 @@ branches are cross-wired. Bind each policy branch to its exact behavior: route s
 retain-and-report, every incomplete trigger and its stop, and the disclosure→recovery pairing —
 each gets its own assertion, not a shared vocabulary grep.
 
+And when prose changes from optional guidance to a mandatory obligation, a bare token pin
+survives a softening regression — pair it with a wrap-safe semantic pin on the mandatory framing
+(#1955).
+
 ## Inserting a test between tests — anchor the complete boundary (the F821 trap)
 
 Inserting a new test function *between* two existing tests with an `edit` `oldText` that stops at

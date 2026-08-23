@@ -28,6 +28,8 @@ a capability is a borrow at all.
   than a wider quasi-YAML parser — "The miniYaml reversal".
 - Borrow vetting checks singleton UI slots, headless behavior, maintenance/license, and Pi floors;
   repo non-mutation is the read-only bar — "Vetting" and "The read-only bar".
+- When upstream surfaces disagree, runtime tool description + code + changelog outrank packaged
+  skill/doc prose — "When upstream's own surfaces disagree".
 - Lazy install/restart, filter security limits, and attempted-vs-covered bookkeeping remain explicit
   residuals — "Residuals".
 
@@ -135,6 +137,13 @@ call `ctx.ui.setFooter`. Before borrowing, grep the candidate's **installed** so
 `setFooter` and other singleton UI slots — and note gitignored `.pi/npm/` defeats ripgrep
 evidence: use `--no-ignore` (or `grep -r`) under `.pi/npm/node_modules/`, or the grep comes back
 falsely empty.
+
+## When upstream's own surfaces disagree (#2005)
+
+When a borrowed package's packaged skill/doc prose contradicts its runtime behavior, the
+authority order is: the runtime tool description + the code + the changelog — never the packaged
+skill/doc prose. Verify guidance claims against what the installed version actually executes
+before pinning probes or writing perk-side guidance to them.
 
 ## The retirement recipe (thrice-affirmed)
 

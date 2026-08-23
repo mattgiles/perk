@@ -35,6 +35,9 @@ only the still-inline surfaces.
 - Offline testing: httpx `MockTransport` recipes + the scripted GraphQL fake — "Offline test
   recipes"; register more-specific query needles FIRST — "`_FakeLinear` insertion-order
   substring footgun".
+- `upload_file` is one resolver-owned method; strict marker parsing never strips first;
+  byte-identity across a lossy transcoder rejects its whole normalization domain — "File upload
+  + strict-parse boundary craft".
 - Historical: "Live-validation record (dated)" and "Live-spike process craft" carry the dated
   live-run evidence; the landed-arc sections (E2E lifecycle, GraphQL type-literacy,
   idiomatic-backend) chronicle their nodes.
@@ -862,6 +865,20 @@ The cancellation/doctor work over the project-backed store pinned the authority 
 - Residual: the projection, the state-bearing query, the attachment-only conditional writer, and
   the transfer path are **fake-proven only** — no authenticated live run yet. Remember this
   before trusting `--fix` against a real workspace.
+
+## File upload + strict-parse boundary craft (#1996)
+
+From the dream-companion artifact work:
+
+- **`LinearClient.upload_file` is one method owning reservation + signed-PUT choreography**,
+  computing size from the actual content bytes. A strategy hierarchy for one non-noop behavior
+  with one caller is over-structure — a resolver-owned function suffices.
+- **When byte-identity convergence spans a lossy transcoder, the invariance predicate rejects the
+  transcoder's ENTIRE normalization domain** (the full `str.splitlines()` set, mirrored in both
+  planes, parity-pinned) — or an immutable create-once record conflicts forever.
+- **Never `strip()` a body before strict marker-grammar parsing** — normalization-before-parse
+  converts corruption into false negatives.
+- **Untrusted-at-rest reads wrap read + decode + parse uniformly at the boundary.**
 
 ## Still-deferred register (trimmed)
 

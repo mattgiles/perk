@@ -653,6 +653,30 @@ def test_pr_ready_explicit_plan_not_found(monkeypatch):
     assert json.loads(result.stdout)["error_type"] == "plan_not_found"
 
 
+def test_pr_ready_explicit_plan_backend_failure_is_github_error(monkeypatch):
+    # The explicit-PLAN transport boundary: a backend transport failure out of the canonical
+    # selection maps to the typed github_error envelope, and no delivery is ever resolved
+    # (selection precedes every mutation).
+    _authed(monkeypatch)
+
+    def _boom(**_kwargs):
+        raise github.GitHubError("gh exploded")
+
+    monkeypatch.setattr(plans, "get_plan", _boom)
+    monkeypatch.setattr(
+        delivery,
+        "resolve_delivery",
+        lambda _root: (_ for _ in ()).throw(
+            AssertionError("delivery resolved after a failed selection")
+        ),
+    )
+    result = _run(monkeypatch, ["pr", "ready", "7", "--json"], write_ref=False)
+    assert result.exit_code == 1
+    payload = json.loads(result.stdout)
+    assert payload["error_type"] == "github_error"
+    assert "gh exploded" in payload["message"]
+
+
 def test_pr_ready_pr_url_selector_resolves_through_the_seam(monkeypatch):
     # A pasted .../pull/N URL selects canonically: the probe peels the plan-7 head, the
     # corroborating header (pr: 42) admits the selection, and ready proceeds on plan 7.

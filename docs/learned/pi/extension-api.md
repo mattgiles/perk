@@ -26,6 +26,10 @@ API contours an agent can't derive from the package's root type exports.
 - `pi.sendUserMessage` is void fire-and-forget — the PERSISTED session entry is the only
   delivery evidence (spy on the session instance to assert it offline) — its own section +
   "Asserting `pi.sendUserMessage` injection offline".
+- Abort outranks every resolved result: forward `opts.signal` and re-check `aborted` after EVERY
+  await — "`ctx.ui.editor` facts".
+- Seam-forwarding + sink tests never prove registration — "A new Pi registration needs a live
+  factory/harness assertion".
 - How pi resolves/loads a `git:`-package extension (clone root, package-manager internals) —
   "How pi loads a `git:`-package extension".
 - "Sources" pins the audited pi versions — re-verify these facts on version bumps.
@@ -139,7 +143,10 @@ newline, Esc resolves `undefined`, Ctrl+G opens `$EDITOR`. Two non-obvious conto
 
 - **It takes NO AbortSignal** (unlike `select`/`confirm`/`input`) — so a multi-dialog flow must
   check `signal?.aborted` *between* dialogs and let the aborted arm win over an in-flight dialog's
-  result.
+  result. The full discipline (#1922): forward `opts.signal` through structural UI slices and
+  re-check `signal?.aborted` after EVERY await — dialogs AND awaited openers — before
+  interpreting any resolved value (abort outranks every resolved result); pin the forwarding by
+  recording the dialog's options argument in the UI fake and asserting the exact signal.
 - **Key hints must ride the dialog *title*** — pi renders no other affordance for them.
 
 The editor-dialog UX (long-plan scrolling, the Ctrl+G round-trip) is automation-untested — pinned
@@ -150,6 +157,13 @@ only by the type contract; first real interactive use should confirm.
 When registering custom tools via `registerTool`, the execute result object returned by the handler MUST
 include a nested `details` object containing at least `ok: boolean` (e.g., `details: { ok: boolean, ... }`).
 This is required to satisfy the TypeScript compiler type constraints for `AgentToolResult`.
+
+## A new Pi registration needs a live factory/harness assertion (#1761)
+
+A seam-forwarding test plus sink tests do not prove `extension/index.ts` registered the
+implementation (the entry renderer was the caught instance) — every new Pi registration needs a
+live factory/harness assertion resolving through `ExtensionRunner` and exercising the registered
+implementation against a real appended entry.
 
 ## `onUpdate` partials are full results and mode-agnostic
 

@@ -13,34 +13,34 @@ history a future delivery/recovery node should not re-derive.
 
 ## Distillation
 
-- §8.42/§8.43 are normative; this doc carries the cross-cutting *why*. Which module owns which
-  piece of `src/perk/delivery/` (journal, persistence, graph, train/observe/stacks, sync,
-  transfer/recover, land/landing) — "The seam map".
+- §8.42/§8.43 are normative; this doc carries the cross-cutting *why*. Module ownership of
+  `src/perk/delivery/` — "The seam map"; `Delivery` from `resolve_delivery(repo_root)` is the
+  canonical operation boundary (compat seams deleted, retirement guard-pinned).
 - The naive "rescan → one retry → typed error" journal shape hides three append-discipline
   holes — "The three append-discipline holes".
-- Train reads enter through `Delivery.status` and reconstruct from stored facts plus fresh probes
-  without re-deriving membership — "The train read path (through `Delivery.status`)".
-- The stacked `/submit` publish operation has five posture traps (idempotency, retry, refetch,
-  checkpoint timing, …) — "The stacked `/submit` publish operation — five posture traps".
-- The sync cascade is transactional: isolated-worktree rebase candidates, journal-first, ONE
-  atomic leased multi-ref push, bounded settle, bottom→top checkpoints — "The transactional
-  sync-cascade invariants".
-- Landing readiness composes the reconstructed train + fresh per-PR observations under a
-  scalar-coherence rule, fail-closed — "Landing readiness (§8.55) — composition rules".
+- A second comment grammar on a shared carrier needs ONE routing dispatcher over EVERY scan
+  path, delimiter-derived allowlists, and `re.fullmatch` validators — "The ready-stamp grammar
+  beside the operation grammar".
+- Published helpers re-verify their contract over the whole domain; continuations announce only
+  after refusal arms accept; the ready-time pass is lease-free — "The handoff gate (§8.46) and
+  the ready continuation (§8.66)".
+- Train reads enter through `Delivery.status` and reconstruct from stored facts plus fresh
+  probes — "The train read path (through `Delivery.status`)".
+- The stacked `/submit` publish operation has five posture traps — "The stacked `/submit`
+  publish operation — five posture traps".
+- The sync cascade is transactional: journal-first, ONE atomic leased multi-ref push, bounded
+  settle, bottom→top checkpoints — "The transactional sync-cascade invariants".
+- Landing readiness composes the reconstructed train + fresh per-PR observations, fail-closed —
+  "Landing readiness (§8.55) — composition rules".
 - Interrupted-LAND recovery classifies from recorded operation identity + strict per-PR
-  observation, then drives evidence-based, at-least-once reconcile repair (roll-forward vs
-  abandon-with-proof vs accepted external prefix) — "Interrupted-LAND recovery (§8.51/§8.56) —
-  gotchas".
-- Recovery proves fresh product state in both terminal directions; cleanup residue is protocol
-  output — "Recovery proof is a fresh product-state proof, not a ref comparison (§8.51)".
-- "Residuals" is a flagged-ownership register (who owns each deferred edge), not current
-  behavior.
-- `Delivery` from `resolve_delivery(repo_root)` is the canonical operation boundary; nominal
-  aggregate ABCs own production adapters and `_fakes`; the reconstruction-era compatibility
-  seams are deleted (retirement guard-pinned) — "The seam map".
+  observation, then drives evidence-based reconcile repair — "Interrupted-LAND recovery
+  (§8.51/§8.56) — gotchas".
+- Recovery proves fresh product state in both terminal directions — "Recovery proof is a fresh
+  product-state proof, not a ref comparison (§8.51)".
+- "Residuals" is a flagged-ownership register, not current behavior.
 - Façade migrations use narrow internal Protocols, complete-or-nothing laziness, bounded error
-  subsets, explicit consent, real-runtime tests, and exact export cuts — "Façade-slice migration
-  pattern".
+  subsets, explicit consent, real-runtime tests, and exact export cuts — "Façade-slice
+  migration pattern".
 
 ## The seam map
 
@@ -88,6 +88,30 @@ All three were review-caught and are now §8.43 law — don't re-derive them:
    *share* a `delivery_lineage`, so the append must separately cross-check the record's
    `objective_id` against the objective being appended to — lineage alone lets an event claim
    preparation on the wrong objective and mislead recovery.
+
+## The ready-stamp grammar beside the operation grammar
+
+What adding a SECOND comment grammar (the ready stamp) to the operation journal's shared
+carrier taught (#2021, #1996):
+
+- **One routing dispatcher must cover EVERY scan path.** When a shared carrier gains a second
+  comment grammar, a single dispatcher (`parse_carrier_comment`, operation-marker precedence)
+  routes all scans — including the OLD grammar's rescans, where the fail-closed property
+  silently degrades otherwise (§8.43's symmetric rescan posture).
+- **Marker-embedded values take allowlists derived from the encoding's delimiters**
+  (`[A-Za-z0-9._-]+` — the HTML-comment `-->` is exactly the miss a denylist makes), with
+  vocabulary narrowing recorded as a contracts-typed refusal, never a silent skip. Residual:
+  roadmap node ids outside the allowlist can never stamp.
+- **Exact-shape validators guarding rendered/serialized output use `re.fullmatch`** — a `$`
+  anchor admits a trailing newline that can POST before read-back catches it.
+- **Pure-fact deterministic payloads trade away head-cycle recovery.** The A→B→A corner
+  re-stamps as `existed=True` and the layer stays stale until a genuinely new head — reviewed
+  and deliberately declined (an occurrence field would reintroduce non-reconstructable
+  provenance); callers surface the corner rather than silently no-op.
+- **The journal's persistence disciplines are a reusable discipline, not journal-specific
+  machinery.** Dual-encoding markers, dual-candidate byte-identity, complete-scan, and
+  rescan-one-retry ambiguity are now instantiated twice (the operation journal +
+  `src/perk/objective/dream_companion.py`).
 
 ## Graph contraction over a filtered node set hides cycles among the filtered-out nodes
 
@@ -348,8 +372,43 @@ durable distillations:
   from the reconstructed train; the session-scoped layer-context file is operational-only
   evidence. (A pristine clone still needs its own `npm ci` — the `worktree-node-modules` trap
   applies to clones too.)
+- **Recurring GitHub-side noise:** cascade-rewritten heads can carry a CANCELLED superseded
+  check-run beside the SUCCESS run at the same head — expect `optional_check_failed` noise in
+  landing dry-runs after a cascade and diagnose before treating it as real (#2027).
 
 The `PERK_DEV_STACKED_DELIVERY` development write gate was retired with the gate pass.
+
+## The handoff gate (§8.46) and the ready continuation (§8.66)
+
+- **Publishing a private helper makes its documented contract load-bearing.** Re-verify the
+  helper's documented invariants over the WHOLE input domain, not the slice its old callers
+  reached (the skipped-only-cycle hole in the deps walk, whose fix hardened `delivery_order`
+  too) (#2029).
+- **"Structurally ungated by construction" is pinned only at the real routing boundary** —
+  drive `Delivery.publish(kind="layer")` through the one internal route both `/submit` and the
+  address finalize reach, with the gated axis forced into every blocking state (#2029).
+- **When a contract says every blocked arm carries the shared blocker rows, the
+  defensive/unreachable arms are exactly where the envelope forks** — force each with a fixture
+  (#2029).
+- **Continuation sequencing:** announce a continuation only after its refusal arms accept — the
+  completing gesture reports stamp facts; the drive announces post-acceptance (#2028).
+  All-or-nothing decode cohorts are facts-only: presentation strings are derived from facts,
+  never load-bearing in the cohort (#2028). Guard validators are shaped by their real call
+  sites (the tail-append guard takes exactly `add_node`'s output; the delivery-order-prefix
+  check subsumes the resolved-edge comparison for that shape) (#2028).
+- **The ready-time pass has no lease.** It is bounded by the template's liveness stop,
+  head-drift reporting, skip-if-stale idempotence, and the store-enforced pending-only
+  tail-append arm; the post-land whole-train reconcile stays the truth pass (#2028).
+- **Post-mutation failures carry the completed mutation's facts in a typed error**
+  (`ReadyStampError` with `pr`/`was_draft`); order mutations so pure record construction
+  precedes the first mutation and typed refusals flip nothing (#2024).
+- **Dry-run honesty (two portable dogfood facts):** the plan door's dry-run keeps the OFFLINE
+  graph classification and can refuse `objective_in_flight` before the seed composes — the
+  reliable carrier of `build_readiness: "unchecked (dry-run)"` is
+  `perk objective run --dry-run`; the `stamped ≠ head` sha disclosure is candidate-scoped by
+  design (with no unplanned dependent, only the layer-line `handoff stale` axis shows) (#2027).
+  An offline dry-run must not claim to predict which online arm a real run takes — name both
+  (#2024).
 
 ## Landing readiness (§8.55) — composition rules
 

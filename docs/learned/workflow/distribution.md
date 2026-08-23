@@ -30,6 +30,8 @@ install (the mirror of the git-clone lifecycle, and the four places that mirror 
 - The extension wiring's reconcile discriminator flipped from PROTOCOL (git vs npm) to IDENTITY
   (perk's own package name) when both categories collapsed onto npm — "The git→npm
   extension-wiring flip".
+- `.pi/npm` drift breaks `npm ci --prefix .pi/npm`; repair with `npm install --prefix .pi/npm`
+  and re-run (environment-class) — "init/doctor/launch own the `@mgiles/perk` npm install".
 
 ## Version SSOT architecture
 
@@ -317,6 +319,10 @@ Mechanical reusables that DO transfer from the git lifecycle:
 - **`git checkout package-lock.json` before staging** when the only lockfile diff is `pi-ai` bin-path
   npm-normalization churn from `just ci` / setup (a recurring noise diff — see
   `toolchain/worktree-node-modules.md`).
+- **`.pi/npm` is a gitignored, pi-managed lazy-install root that drifts through ordinary pi
+  installs**, breaking `npm ci --prefix .pi/npm` — the standard repair is
+  `npm install --prefix .pi/npm`, then re-run. Environment-class, never attempt-consuming
+  (#2006).
 
 ## Cross-references
 
