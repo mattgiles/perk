@@ -1252,6 +1252,10 @@ def test_rebase_conflict_retains_residue_under_a_manifest():
     error = _sync_error(world)
     assert error.error_type == "rebase_conflict"
     assert "1.3" in str(error)
+    # The `for layer <node_id> ` token (trailing space) is load-bearing cross-plane (§8.49):
+    # the warm drive's corroborateSyncConflict keys its freshness check on it — a message
+    # rewrite that drops it silently disables the /objective-sync conflict drive.
+    assert "for layer 1.3 " in str(error)
     assert "no remote ref and no journal record" in str(error)
     # The guard DISARMED: temp refs + worktree retained, manifest written.
     manifest = world.manifests[LINEAGE]
@@ -2238,6 +2242,9 @@ def test_conflict_with_failed_manifest_write_stays_typed_and_cleans():
     world.manifest_write_override = boom
     error = _sync_error(world)
     assert error.error_type == "rebase_conflict"
+    # The load-bearing §8.49 freshness token (see corroborateSyncConflict): every
+    # rebase_conflict arm names the layer whose rebase actually stopped.
+    assert "for layer 1.3 " in str(error)
     assert "could not be written" in str(error) and "NOT retained" in str(error)
     assert world.manifests == {}
     world.assert_nothing_journaled()
@@ -2970,6 +2977,9 @@ def test_continue_new_higher_conflict_rewrites_the_manifest_same_operation():
     error = _continue_error(world)
     assert error.error_type == "rebase_conflict"
     assert "1.3" in str(error) and OP in str(error)
+    # The load-bearing §8.49 freshness token (see corroborateSyncConflict): the rewritten
+    # manifest and the message agree on the NEW conflict layer here.
+    assert "for layer 1.3 " in str(error)
     rewritten = world.manifests[LINEAGE]
     assert rewritten.operation_id == OP  # same operation, progress retained
     assert rewritten.conflict_node_id == "1.3"
@@ -3339,6 +3349,10 @@ def test_continue_new_conflict_rewrite_failure_stays_typed():
     assert error.error_type == "rebase_conflict"
     assert "could not be rewritten" in str(error)
     assert "previous snapshot stays retained" in str(error)
+    # The load-bearing §8.49 freshness token (see corroborateSyncConflict): the message names
+    # the NEW layer while the PRESERVED manifest still names the old one — that mismatch is
+    # exactly what keeps the warm drive report-only on this arm.
+    assert "for layer 1.3 " in str(error)
     # The last durable snapshot is rewrite #1 (1.2's candidate captured, 1.3 still pending).
     assert [layer.candidate_sha for layer in world.manifests[LINEAGE].layers] == [r1, x2, None]
     world.assert_nothing_journaled()

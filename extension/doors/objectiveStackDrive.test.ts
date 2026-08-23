@@ -12,14 +12,14 @@ import { test } from "node:test";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { resolverLockDir } from "../substrate/resolverLease.ts";
 import { rebuildWorkflowState } from "../substrate/workflowState.ts";
-import { CONFLICT_RESOLUTION_ATTEMPT_CAP } from "./submit.ts";
 import {
   corroborateSyncConflict,
   driveSyncConflictResolution,
+  type SyncConflictDispatch,
   stackAdopt,
   stackSync,
-  type SyncConflictDispatch,
 } from "./objectiveStack.ts";
+import { CONFLICT_RESOLUTION_ATTEMPT_CAP } from "./submit.ts";
 
 const OP = "01ARZ3NDEKTSV4RRFFQ69G5FAV";
 const LINEAGE = "01LIN";
@@ -250,7 +250,7 @@ test("corroborate: shell payloads in worktree_path never pass the containment", 
     `/tmp/../etc/sync-${OP}`,
     `relative/sync-${OP}`,
     `/tmp/$(open)/sync-${OP}`,
-    "/tmp/`open`/sync-" + OP,
+    `/tmp/\`open\`/sync-${OP}`,
   ]) {
     const payload = statusPayload(manifestHome());
     continuationOf(payload).worktree_path = worktree;

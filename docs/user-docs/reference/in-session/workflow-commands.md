@@ -228,16 +228,23 @@ match it refuses and asks for an explicit objective.
   pending conflict continuation, and orphaned residue. It works in read-only sessions.
 - **`/objective-sync [N]`**, **`/objective-recover [N]`**, and **`/objective-land [N]`** drive a
   preview-first flow and act through typed tools only after explicit approval. All three
-  soft-refuse while read-only because they mutate published branches or PRs.
+  soft-refuse while read-only because they mutate published branches or PRs. When a mutating
+  sync/continue stops on a rebase conflict, `/objective-sync` automatically dispatches the
+  `perk.conflict-resolver` subagent into the retained worktree (resolve-and-stop: the agent only
+  resolves — resuming the cascade stays your explicit gesture).
 
 Paired tools are non-terminating and strictly decoded; malformed or mutually exclusive fields
 refuse before the cold worker runs:
 
 - **`objective_stack_status`** `{objective?}` — read stack status.
-- **`objective_stack_sync`** `{objective?, base?, dry_run?, continue?, abort?}` — preview/cascade,
-  resume a human-resolved retained conflict, or discard it. `continue`/`abort` are mutually
-  exclusive and cannot combine with `base`/`dry_run`. Warnings include cleanup leftovers and their
-  recovery command.
+- **`objective_stack_sync`** `{objective?, base?, dry_run?, continue?, abort?, resolve?}` —
+  preview/cascade, resume a resolved retained conflict, discard it, or (on explicit request)
+  dispatch the conflict-resolver subagent into the retained worktree. `continue`/`abort` are
+  mutually exclusive and cannot combine with `base`/`dry_run`; `resolve` composes with nothing and
+  never reaches the cold worker. A mutating sync/continue that stops on a rebase conflict
+  auto-dispatches the resolver (bounded attempts, guarded by a machine-local resolver claim beside
+  the manifest); publication stays your explicit `continue`. Warnings include cleanup leftovers
+  and their recovery command.
 - **`objective_stack_adopt`** `{objective?, node, dry_run?, confirm?}` — adopt one manually pushed
   node head and cascade successors. Mutation requires `confirm: true` after preview.
 - **`objective_stack_recover`** `{objective?, operation?, dry_run?, abandon?, accept_prefix?,

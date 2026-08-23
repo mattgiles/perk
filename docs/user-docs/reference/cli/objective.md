@@ -357,8 +357,10 @@ mutates; composes with `--base` and `--adopt`); `--adopt NODE` accepts one layer
 **manually-pushed remote head** as the intended state and cascades the layers above it
 (refused as `adopt_blocked` when there is nothing to adopt, the remote edit rewrote the
 layer's ancestry, or the layer is also locally changed; `--adopt` × `--base` is refused);
-`--continue` resumes a conflict-stopped cascade **after you finish the rebase yourself** in
-the retained worktree (`git rebase --continue`) — perk never drives conflict resolution —
+`--continue` resumes a conflict-stopped cascade **after the rebase is finished** in the
+retained worktree — by you (`git rebase --continue`) or by the resolver subagent the warm
+`/objective-sync` door dispatches (the cold CLI never dispatches resolution; see the
+[in-session reference](../in-session/workflow-commands.md)) —
 revalidating every captured input (any mismatch is `continuation_stale` with the discard
 direction) and concluding the original interrupted operation; `--abort` discards the
 retained continuation (confirmation-gated — the prompt names exactly what will be deleted;

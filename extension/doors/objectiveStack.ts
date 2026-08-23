@@ -46,11 +46,7 @@ import { acquireResolverLease, resolverLockDir } from "../substrate/resolverLeas
 import { failFor, ok, type Result } from "../substrate/result.ts";
 import type { ToolGating } from "../substrate/toolGating.ts";
 import { booleanParam, idParam, paramsOf, stringParam } from "../substrate/toolParams.ts";
-import {
-  appendWorkflowState,
-  branchOf,
-  rebuildWorkflowState,
-} from "../substrate/workflowState.ts";
+import { appendWorkflowState, branchOf, rebuildWorkflowState } from "../substrate/workflowState.ts";
 import { report } from "../surfaces/report.ts";
 import { CONFLICT_RESOLUTION_ATTEMPT_CAP, resetConflictAttempts } from "./submit.ts";
 
@@ -958,7 +954,10 @@ export function corroborateSyncConflict(
         "path; dispatch the resolution by hand",
     );
   }
-  if (basename(manifestPath) !== `${lineage}.json` || basename(dirname(manifestPath)) !== "sync-continuations") {
+  if (
+    basename(manifestPath) !== `${lineage}.json` ||
+    basename(dirname(manifestPath)) !== "sync-continuations"
+  ) {
     return ineligible(
       "the continuation manifest path is not sync-continuations/<lineage>.json — refusing to " +
         "claim it; dispatch the resolution by hand",
