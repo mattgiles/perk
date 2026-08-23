@@ -138,6 +138,8 @@ def test_select_plan_not_found_is_typed(git_repo, monkeypatch):
     with pytest.raises(UserFacingCliError) as exc:
         select_plan(git_repo, "999")
     assert exc.value.error_type == "plan_not_found"
+    # The fallback's probe miss re-raised the ORIGINAL typed error verbatim.
+    assert "Plan issue #999 not found" in str(exc.value)
 
 
 def test_select_plan_headerless_issue_refuses_kind_mismatch(git_repo, monkeypatch):
@@ -348,15 +350,6 @@ def test_non_conforming_head_re_raises_the_original_on_the_fallback_arm(
     assert "Plan issue #888 not found" in str(exc.value)  # the original error, verbatim
 
 
-def test_fallback_missing_pr_re_raises_the_original(git_repo, monkeypatch):
-    _stub_plans(monkeypatch, {})
-    _stub_get_pr(monkeypatch, {999: None})
-    with pytest.raises(UserFacingCliError) as exc:
-        select_plan(git_repo, "999")
-    assert exc.value.error_type == "plan_not_found"
-    assert "Plan issue #999 not found" in str(exc.value)
-
-
 def test_fallback_probe_github_error_re_raises_the_original(git_repo, monkeypatch):
     _stub_plans(monkeypatch, {})
 
@@ -405,7 +398,10 @@ def test_selection_tier_failure_propagates_naming_the_peeled_plan(git_repo, monk
     assert calls == [888]
 
 
-def test_non_digit_id_never_probes(git_repo, monkeypatch):
+@pytest.mark.parametrize("selector", ["ENG-123", "²"])
+def test_non_ascii_digit_ids_never_probe(git_repo, monkeypatch, selector):
+    # Backend-native ids never probe — and neither do Unicode digit-alikes (`²`.isdigit() is
+    # True but int("²") raises): the ladder's ASCII gate keeps the miss typed, never a crash.
     class _FakeLinearBackend:
         backend_id = "linear"
 
@@ -415,7 +411,7 @@ def test_non_digit_id_never_probes(git_repo, monkeypatch):
     monkeypatch.setattr(resolve, "resolve_issue_backend", lambda root: _FakeLinearBackend())
     _no_probe(monkeypatch)
     with pytest.raises(UserFacingCliError) as exc:
-        select_plan(git_repo, "ENG-123")
+        select_plan(git_repo, selector)
     assert exc.value.error_type == "plan_not_found"
 
 

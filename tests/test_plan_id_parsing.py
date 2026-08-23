@@ -56,6 +56,15 @@ def test_github_pull_url_rejected() -> None:
         ("https://github.com/owner/repo/pull/888#frag", 888),
         # GHES-style host — keyed on the /pull/<N> path shape, not the host string.
         ("https://github.acme.com/o/r/pull/12", 12),
+        # The match anchors to the TERMINAL /pull/<N> route: a stray `pull` segment earlier
+        # in the path can never resolve a different number than the one the user sees…
+        ("https://github.com/pull/123/pull/888", 888),
+        # …and subpage URLs / non-terminal shapes are not PR selectors.
+        ("https://github.com/o/r/pull/888/files", None),
+        ("https://github.com/pull/123/issues/5", None),
+        # PR numbers are ASCII digits only: `²`.isdigit() is True but int("²") raises — the
+        # peeler must refuse, never crash.
+        ("https://github.com/o/r/pull/²", None),
         # Issue URLs, bare digits, and non-URLs are not PR selectors.
         ("https://github.com/owner/repo/issues/888", None),
         ("888", None),

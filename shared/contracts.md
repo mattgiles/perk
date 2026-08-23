@@ -316,8 +316,14 @@ The local cache tier — written and read by **both** the CLI (exterior) and the
     backend/canonical reads, and **all selector writes**). An explicit-plan launch invoked from
     inside a linked worktree updates only the main-checkout selector; selection never writes a
     worktree's durable binding (the two-role clobber hazard). Selection **precedence** is
-    fixed: an explicit positional plan id (one canonical backend read via
-    `perk.cli.plan_selection.select_plan`) › an explicit existing `--worktree`'s own binding ›
+    fixed: an explicit positional plan selector — plan id, issue URL, or the plan's PR
+    (number or `/pull/N` URL), resolved canonically via `perk.cli.plan_selection.select_plan`;
+    a PR selector resolves through GitHub `get_pr` to the `plan-<id>` head as the
+    **candidate**, then the selected plan's recorded `plan-header.pr` must corroborate the
+    supplied PR number (the PR tier is GitHub-universal for every backend), and a PR-resolved
+    selection costs at most two extra reads beyond the direct-id door's one canonical read
+    (the PR probe plus the peeled plan read — the bare-number fallback additionally spent the
+    initial miss) › an explicit existing `--worktree`'s own binding ›
     the invocation-root active selector — the cache is fallback only, and the resolved
     `PlanRef` is **launch authority**: it is passed directly into `launch_stage`/the `--remote`
     dispatch and never re-read from the mutable selector after selection. `--worktree NAME` is
@@ -326,8 +332,8 @@ The local cache tier — written and read by **both** the CLI (exterior) and the
   - **Positive plan identification (the kind guard).** Explicit-id selection at the four
     guarded doors — the four `select_plan` callers (`implement`, `pr address`/flat `address`,
     `pr ready`, `plan resume` — resume converged onto the seam) — refuses an existing issue
-    that carries **no
-    plan-header** (`PlanState.has_plan_header`, presence-only kind evidence from the backend's
+    that carries **no plan-header**
+    (`PlanState.has_plan_header`, presence-only kind evidence from the backend's
     own storage: body metadata blocks on GitHub, perk attachments on Linear — never a payload
     decode): typed `issue_kind_mismatch` via `plan_selection.require_plan_kind`. A GitHub
     objective-header'd issue names the right door (`perk objective plan <N>`); the hint is
@@ -339,10 +345,28 @@ The local cache tier — written and read by **both** the CLI (exterior) and the
     Linear plan-header attachment fails loud inside `get_plan`'s strict decode before
     selection ever classifies kind. A **both-headers** carrier still selects as a plan (its plan
     side can be legitimate mid-incident; `perk objective doctor`'s corruption check is the
-    both-headers surface, §8.54). `plan watch`/the positioner are explicitly **not**
+    both-headers surface, §8.54). Three PR-selector rules ride the same guard: (a) the
+    **PR-carrier guard** — a backend state whose **url** names a pull request refuses
+    `issue_kind_mismatch` *before* the header-presence kind guard (kind evidence for a PR
+    carrier is the url, never `has_plan_header`: GitHub's `gh issue view` resolves a PR
+    number to the PR itself, and a PR body embedding plan markdown could scan
+    header-positive; Linear yields the honest `get_plan → None` miss instead); (b) the
+    **bare-number fallback** — a digits-only selector that refuses as
+    `plan_not_found`/`issue_kind_mismatch` is re-probed exactly once as a PR (probe-tier
+    misses — no such PR, a non-conforming `plan-*` head, a probe transport failure —
+    re-raise the original typed error verbatim, preserving the GitHub objective right-door
+    hint; selection-tier failures — the peeled plan's own lookup/kind errors and the
+    corroboration refusal — behave identically on both arms and name the peeled plan);
+    (c) the **corroboration rule** — a PR-resolved selection requires the selected plan's
+    recorded `plan-header.pr` to equal the supplied PR number (the head branch is a naming
+    convention, never provenance — positive PR→plan evidence defeats stray/fork `plan-*`
+    branches and prior-attempt closed PRs), else typed `issue_kind_mismatch`. `plan
+    watch`/the positioner are explicitly **not**
     entry-guarded — their wrong-kind protection is the §8.4 merge-only write seam. `pr ready
     --dry-run` performs no backend read, so the offline preview classifies nothing (kind
-    included; the existing exception, kept).
+    included; the existing exception, kept) — it refuses a PR-URL selector
+    (`invalid_input`), and a bare PR number previews as a syntax-validated plan id only
+    (never validated identity).
 
 State keys (registry vocabulary): `cache.plan`, `cache.plan-ref`, `cache.scratch`,
 `cache.handoff`, `cache.markers`, `cache.session-data`.
@@ -3637,7 +3661,10 @@ everywhere — PRs are GitHub-universal. Concretely:
   the string shapes.
 - CLI plan/objective arguments parse through the shared opaque-id validators
   (`plan_selection.parse_plan_id` / `objective/shared.parse_objective_id`): strip `#`/whitespace;
-  reject only empty or worktree-unsafe ids (`/`, `.`, `..`) — no int parse. The supervisor's
+  reject only empty or worktree-unsafe ids (`/`, `.`, `..`) — no int parse, and `parse_plan_id`
+  stays PR-unaware (a `/pull/N` URL still refuses `invalid_input` there — the PR-selector
+  acceptance lives in `select_plan`: `pr_number_from_url` + the digits fallback, never the
+  parser, so direct `parse_plan_id` callers keep their id-only behavior). The supervisor's
   in-flight resolution treats any non-empty node `pr` backlink as the plan id.
 - Plan worktrees are `plan-<id>` for any id shape (`plan-ENG-123` exploits Linear's branch-name
   auto-link when the GitHub integration is installed); `worktree wipe` matches `^plan-(\S+)$`.
@@ -8418,8 +8445,9 @@ classification.
 **`/ready` delegates selected intent to Publish.** Selection remains command policy. Explicit
 input is parse-normalized even offline (a PR-URL selector skips the pure parser — offline
 `--dry-run` refuses it `invalid_input`, and a bare PR number previews as a syntax-validated plan
-id only) and a real run uses `select_plan(main_repo_root(...))` with
-its one canonical read (PR selectors included); the no-argument form reads the invoking checkout's `cache.plan-ref` and
+id only) and a real run uses `select_plan(main_repo_root(...))` — one canonical read for a
+direct id; a PR selector costs at most two extra reads (the PR probe plus the peeled plan
+read, §8.1); the no-argument form reads the invoking checkout's `cache.plan-ref` and
 performs its existing one plan read there. The command never writes a selector. From that selected
 snapshot it derives only plan id, header-wins `delivery=stacked|incremental`, and the stacked
 objective id, then calls one `Delivery.publish(PublishRequest(kind="ready", ...))`. Dry-run passes

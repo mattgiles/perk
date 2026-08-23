@@ -7,7 +7,8 @@ review happens on the draft layer PR, and after review + address the human runs 
 the handoff stamp at the exact verified published head — on draft AND non-draft PRs alike
 (mark-ready mechanics first, then the journal append). It is never routine post-submit
 choreography and never auto-run. The optional positional ``PLAN`` selects
-the plan canonically (one backend read via ``perk.cli.plan_selection.select_plan``) — ready
+the plan canonically (``perk.cli.plan_selection.select_plan`` — one backend read for a direct
+id; a PR selector adds the PR probe and peeled plan read) — ready
 needs no source files, so `perk pr ready 42` works from the repository root without requiring
 or creating a worktree; the no-argument form keeps reading the invoking checkout's own
 ``cache.plan-ref`` (inside a plan worktree, that worktree's binding). The command derives only the

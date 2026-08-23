@@ -76,7 +76,8 @@ aliases. Each opens a primed `pi` session and accepts `--worktree`, `--dry-run`,
 (dispatching only for the remotely runnable stages, `implement` and `address`).
 
 **Plan selection (one seam, fixed precedence).** The plan-selecting launchers resolve their plan
-from, in order: an explicit positional `PLAN` (canonical issue authority — one backend read; a
+from, in order: an explicit positional `PLAN` (canonical issue authority — one backend read for
+a direct id, while a PR selector adds the PR probe and the peeled plan read; a
 real launch also updates the **main-checkout** active-plan selector for later no-argument runs) ›
 an explicit existing `--worktree`'s own binding › the invoking checkout's active saved plan
 (inside a plan worktree, that worktree's own plan). `--worktree NAME` changes only the checkout

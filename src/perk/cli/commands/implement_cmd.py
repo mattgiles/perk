@@ -2,8 +2,9 @@
 
 Replaces the generic registry launcher for `implement` with a dedicated command that:
 
-- **accepts an optional PLAN issue number** — `perk implement 42` selects plan #42 (one
-  canonical backend read via `perk.cli.plan_selection.select_plan`), updates the **main-root**
+- **accepts an optional PLAN issue number** — `perk implement 42` selects plan #42 (the
+  canonical selection via `perk.cli.plan_selection.select_plan` — one backend read for a
+  direct id; a PR selector adds the PR probe and peeled plan read), updates the **main-root**
   selector on a real launch (a convenience for a later no-argument run — never a linked
   worktree's binding), and passes the resolved ref directly into the launch pipeline (the
   launch never re-reads that mutable cache write). Omit PLAN to implement the active saved
@@ -109,7 +110,7 @@ def implement(
         )
         return
 
-    # A plan id was given: one canonical backend read (selection happens BEFORE the
+    # A plan selector was given: one canonical selection (selection happens BEFORE the
     # local-vs-remote split, so --remote dispatches exactly the selected plan).
     require_github(ctx)
     # Banner first: head a real local launch with the banner BEFORE narrating the lookup wait

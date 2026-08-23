@@ -3,8 +3,9 @@
 ``address`` has **both** a launcher half (opens a primed pi session that runs the classify→fix→
 resolve loop) and the warm ``/address`` review flow, but **no deterministic worker** — so it is
 **launcher-only (L)**, not a :class:`~perk.cli.stages.MergedCommand`. This dedicated launcher
-carries the optional positional ``PLAN`` selector (one canonical backend read via
-``perk.cli.plan_selection.select_plan``; a real launch updates only the **main-root** selector
+carries the optional positional ``PLAN`` selector (the canonical selection via
+``perk.cli.plan_selection.select_plan`` — one backend read for a direct id; a PR selector
+adds the PR probe and peeled plan read; a real launch updates only the **main-root** selector
 and passes the resolved ref directly into the launch pipeline), the ``--worktree`` /
 ``--dry-run`` / ``--remote`` options, and the cold ``--preview`` flag (previously warm-only).
 
@@ -111,7 +112,7 @@ def address_launcher(
         )
         return
 
-    # A plan id was given: one canonical backend read (selection happens BEFORE the
+    # A plan selector was given: one canonical selection (selection happens BEFORE the
     # local-vs-remote split, so `perk address <id> --remote` dispatches exactly the selected
     # plan without re-reading the root cache).
     require_github(ctx)

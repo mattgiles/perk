@@ -1,8 +1,10 @@
 """Canonical CLI-level plan selection — the one selector seam every plan-selecting cold door
 uses (neutral: under ``perk/cli/``, not inside a command group).
 
-Owns the backend-agnostic id/URL parser (:func:`parse_plan_id`), the canonical one-read
-selection (:func:`select_plan` → :class:`SelectedPlan`), the positive plan-kind guard
+Owns the backend-agnostic id/URL parser (:func:`parse_plan_id`), the canonical selection
+(:func:`select_plan` → :class:`SelectedPlan` — one backend read for a direct id; a PR
+selector costs at most two extra reads: the PR probe plus the peeled plan read), the
+positive plan-kind guard
 (:func:`require_plan_kind` — typed errors: ``invalid_input`` / ``plan_not_found`` /
 ``issue_kind_mismatch``), and the **two-roots rule**
 (:func:`main_repo_root` / :func:`load_main_config`).
@@ -78,8 +80,10 @@ def load_main_config(main_root: Path) -> Config:
 
 @dataclass(frozen=True)
 class SelectedPlan:
-    """One canonical plan selection: the parsed id, the single backend read it performed, and
-    the reconstructed provider-agnostic ref every launch artifact consumes."""
+    """One canonical plan selection: the resolved id, the backend state of its one canonical
+    plan read (a PR selector spends up to two extra reads getting here — the PR probe plus
+    the peeled plan read), and the reconstructed provider-agnostic ref every launch artifact
+    consumes."""
 
     plan_id: str
     state: issue_backend.PlanState
@@ -135,8 +139,10 @@ def select_plan(main_root: Path, raw: str, *, what: str = "plan") -> SelectedPla
     if explicit_pr is not None:
         return _select_plan_via_pr(main_root, explicit_pr, what=what)
     plan_id = parse_plan_id(raw, what=what)
-    if not plan_id.isdigit():
-        # Backend-native ids (e.g. Linear's ENG-123) are never PR numbers — no probe.
+    if not _is_ascii_digits(plan_id):
+        # Backend-native ids (e.g. Linear's ENG-123) are never PR numbers — no probe. ASCII
+        # digits only: the opaque parser passes Unicode digit-alikes through, and they must
+        # not reach `int()`.
         return _select_plan_by_id(main_root, plan_id)
     try:
         return _select_plan_by_id(main_root, plan_id, narrate_miss=True)
@@ -299,14 +305,26 @@ def _id_from_url(raw: str) -> str | None:
     return None
 
 
+def _is_ascii_digits(value: str) -> bool:
+    """A safe precondition for ``int()``: non-empty ASCII ``0-9`` only.
+
+    Neither ``str.isdigit`` nor ``int()`` alone is that predicate — ``isdigit`` admits
+    characters ``int`` rejects (e.g. ``²``) and ``int`` accepts non-ASCII decimal digits — so
+    every PR-number conversion gates on this instead.
+    """
+    return bool(value) and value.isascii() and value.isdigit()
+
+
 def pr_number_from_url(raw: str) -> int | None:
     """Peel a GitHub/GHES ``.../pull/<digits>`` URL to its PR number — ``None`` otherwise.
 
-    Pure and offline, keyed on the path shape exactly like :func:`_id_from_url`'s
-    ``/issues/N`` arm (any non-Linear host; trailing slash/query/fragment tolerated).
-    ``None`` for non-URLs, bare digits, issue URLs, and every ``linear.app`` host (Linear has
-    no PR objects — the PR always lives on GitHub). Doubles as the **PR-carrier
-    discriminator** for backend-returned state urls (see :func:`_select_plan_by_id`).
+    Pure and offline. The match is anchored to the **terminal** ``/pull/<digits>`` route
+    (trailing slash/query/fragment tolerated via ``urlsplit`` + empty-segment filtering) so a
+    ``pull`` path segment elsewhere in the URL can never resolve a different number than the
+    one the user is looking at. ``None`` for non-URLs, bare digits, issue URLs, subpage URLs
+    (``.../pull/N/files``), and every ``linear.app`` host (Linear has no PR objects — the PR
+    always lives on GitHub). Doubles as the **PR-carrier discriminator** for backend-returned
+    state urls (see :func:`_select_plan_by_id`).
     """
     parts = urlsplit(raw.strip())
     if parts.scheme.lower() not in {"http", "https"}:
@@ -315,9 +333,8 @@ def pr_number_from_url(raw: str) -> int | None:
     if host == "linear.app" or host.endswith(".linear.app"):
         return None
     segments = [s for s in parts.path.split("/") if s]
-    for i, seg in enumerate(segments[:-1]):
-        if seg == "pull" and segments[i + 1].isdigit():
-            return int(segments[i + 1])
+    if len(segments) >= 2 and segments[-2] == "pull" and _is_ascii_digits(segments[-1]):
+        return int(segments[-1])
     return None
 
 
