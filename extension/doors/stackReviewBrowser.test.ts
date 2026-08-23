@@ -290,7 +290,10 @@ test("/stack-review-browser: headless → refusal; plannotator absent → the pi
     headless.dispose();
   }
 
-  const noPlannotator = await loadPerkSession({ cwd, env: { PERK_RUN_ID: "01RID", PERK_BIN: bin } });
+  const noPlannotator = await loadPerkSession({
+    cwd,
+    env: { PERK_RUN_ID: "01RID", PERK_BIN: bin },
+  });
   try {
     await noPlannotator.runCommandHandler("stack-review-browser", "77");
     assert.ok(
@@ -365,15 +368,7 @@ test("/stack-review-browser 77: objective argv, ONE guidance injection, the loca
   try {
     await h.runCommandHandler("stack-review-browser", "77 dig into CI");
     const argv = readFileSync(argvFile, "utf8").trim().split("\n");
-    assert.deepEqual(argv, [
-      "pr",
-      "review",
-      "checkout",
-      "--stack",
-      "--objective",
-      "77",
-      "--json",
-    ]);
+    assert.deepEqual(argv, ["pr", "review", "checkout", "--stack", "--objective", "77", "--json"]);
     assert.ok(
       h.notifies.some((n) =>
         n.includes(
@@ -476,7 +471,9 @@ function scaffoldStackLaunch(opts: { checkout?: boolean; binding?: boolean } = {
   cwd: string;
   checkoutPath: string;
 } {
-  const cwd = scaffoldRepo({ handoff: { runId: RUN_ID, mode: "read-write", stage: "stack-review" } });
+  const cwd = scaffoldRepo({
+    handoff: { runId: RUN_ID, mode: "read-write", stage: "stack-review" },
+  });
   const checkoutPath = join(cwd, "review-42");
   if (opts.checkout !== false) mkdirSync(checkoutPath, { recursive: true });
   const binding = {

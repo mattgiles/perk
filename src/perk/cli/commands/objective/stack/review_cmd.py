@@ -19,6 +19,7 @@ from pathlib import Path
 
 import click
 
+from perk.cli import completions
 from perk.cli.commands.objective.stack.shared import resolve_objective_id
 from perk.cli.commands.pr.review.checkout_cmd import StackMemberOut, stack_checkout
 from perk.cli.commands.pr.review.shared import review_worktree_name
@@ -89,7 +90,9 @@ def _preview_rows(stack: ResolvedStack) -> list[dict[str, object]]:
 
 
 @click.command("review", context_settings={"ignore_unknown_options": True})
-@click.argument("objective", required=False, default=None)
+@click.argument(
+    "objective", required=False, default=None, shell_complete=completions.complete_objective_id
+)
 @click.option(
     "--pr",
     "pr_target",

@@ -30,15 +30,12 @@ import { plannotatorPresent } from "./doors/plannotatorHandoff.ts";
 import { openPlanReviewSurface, registerPlanReviewBrowser } from "./doors/planReviewBrowser.ts";
 import { registerPrReview } from "./doors/prReview.ts";
 import { registerPrReviewBrowser } from "./doors/prReviewBrowser.ts";
-import {
-  registerOpenStackReview,
-  registerStackReviewBrowser,
-} from "./doors/stackReviewBrowser.ts";
 import { registerPrReviewDynamic } from "./doors/prReviewDynamic.ts";
 import { registerPrReviewTerminal } from "./doors/prReviewTerminal.ts";
 import { registerReady } from "./doors/ready.ts";
 import { registerReviewWaveTools } from "./doors/reviewWaveTools.ts";
 import { registerSelfcheck } from "./doors/selfcheck.ts";
+import { registerOpenStackReview, registerStackReviewBrowser } from "./doors/stackReviewBrowser.ts";
 import { registerSubmit } from "./doors/submit.ts";
 import { registerSubmitPrReview } from "./doors/submitPrReview.ts";
 import { registerGistAuthor } from "./factories/gistAuthor.ts";

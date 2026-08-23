@@ -47,6 +47,7 @@ These tools are registered by perk itself. Command-specific semantics live in
 | Human PR review | `start_review_wave` |
 | Human PR review | `collect_review_wave` |
 | Browser review | `push_annotations` |
+| Human PR review | `open_stack_review` |
 | Draft review | `start_draft_review_wave` |
 | Draft review | `collect_draft_review_wave` |
 | Verification | `run_ci` |

@@ -335,7 +335,9 @@ export function registerStackReviewBrowser(pi: ExtensionAPI): void {
         SCOPE,
         "info",
         `stack of ${data.stack.length} PRs (base ${data.stack_base_ref}, top #${data.pr})` +
-          (parsed.directive ? ` → adversarial reviewers (focus: ${parsed.directive})` : " → adversarial reviewers") +
+          (parsed.directive
+            ? ` → adversarial reviewers (focus: ${parsed.directive})`
+            : " → adversarial reviewers") +
           " → plannotator browser triage → judgment-routed per-PR posting",
       );
       await openStackBrowser(pi, ctx, {
@@ -379,7 +381,11 @@ export function decodeStackReviewBinding(raw: unknown): StackReviewBinding | nul
   const notes = decodeStringArray(b.notes ?? []);
   if (stack === null || notes === null) return null;
   if (typeof b.kind !== "string") return null;
-  if (b.objective_id !== null && b.objective_id !== undefined && typeof b.objective_id !== "string") {
+  if (
+    b.objective_id !== null &&
+    b.objective_id !== undefined &&
+    typeof b.objective_id !== "string"
+  ) {
     return null;
   }
   if (typeof b.base_ref !== "string" || b.base_ref === "") return null;
