@@ -350,6 +350,93 @@ def test_list_prs_for_branch_multiple_preserves_order(monkeypatch):
     assert prs[0].state == "CLOSED" and prs[1].state == "OPEN"
 
 
+def test_list_open_prs_for_base_argv_pin(monkeypatch):
+    # The base-filter mirror of list_prs_for_branch: `base=<branch>&state=open` on the list
+    # endpoint (no owner-qualified head filter — no `repo view owner` round trip).
+    rec = _GhDispatch([(_has("pulls", "GET"), _Proc(0, "[]"))])
+    monkeypatch.setattr(subprocess, "run", rec)
+    assert github.list_open_prs_for_base(base="plan-7", repo_root=ROOT) == ()
+    assert rec.calls == [
+        [
+            "api",
+            "repos/{owner}/{repo}/pulls",
+            "-X",
+            "GET",
+            "-f",
+            "base=plan-7",
+            "-f",
+            "state=open",
+        ]
+    ]
+
+
+def test_list_open_prs_for_base_parses_head_repo(monkeypatch):
+    pulls = [
+        {
+            "number": 5,
+            "html_url": "u/5",
+            "state": "open",
+            "draft": True,
+            "base": {"ref": "plan-7"},
+            "head": {"ref": "plan-8", "repo": {"full_name": "me/repo"}},
+        },
+        {
+            "number": 6,
+            "html_url": "u/6",
+            "state": "open",
+            "draft": False,
+            "base": {"ref": "plan-7"},
+            "head": {"ref": "fork-branch", "repo": {"full_name": "forker/repo"}},
+        },
+    ]
+    monkeypatch.setattr(
+        subprocess, "run", _GhDispatch([(_has("pulls", "GET"), _Proc(0, json.dumps(pulls)))])
+    )
+    prs_out = github.list_open_prs_for_base(base="plan-7", repo_root=ROOT)
+    assert [p.number for p in prs_out] == [5, 6]
+    assert prs_out[0].head_repo == "me/repo"
+    assert prs_out[1].head_repo == "forker/repo"
+
+
+def test_head_repo_defaults_empty(monkeypatch):
+    # A payload without head.repo (or without head at all) projects head_repo == "" — the
+    # "unavailable" arm the chain walk treats as indeterminate, and direct construction
+    # keeps the trailing-default recipe.
+    payload = {
+        "number": 42,
+        "html_url": "u/42",
+        "state": "open",
+        "draft": False,
+        "head": {"ref": "feature-x"},
+    }
+    monkeypatch.setattr(
+        subprocess, "run", _GhDispatch([(_has("pulls/42"), _Proc(0, json.dumps(payload)))])
+    )
+    pr = github.get_pr(number=42, repo_root=ROOT)
+    assert pr is not None and pr.head_repo == ""
+    assert (
+        github.PullRequest(number=1, url="u", is_draft=False, state="OPEN", existed=True).head_repo
+        == ""
+    )
+
+
+def test_get_pr_carries_head_repo(monkeypatch):
+    # The fork-identity fixture on the single-PR read: head.repo.full_name projects through
+    # (the chain walk's fork gate reads this off get_pr).
+    payload = {
+        "number": 43,
+        "html_url": "u/43",
+        "state": "open",
+        "draft": False,
+        "head": {"ref": "feature-y", "repo": {"full_name": "forker/repo"}},
+    }
+    monkeypatch.setattr(
+        subprocess, "run", _GhDispatch([(_has("pulls/43"), _Proc(0, json.dumps(payload)))])
+    )
+    pr = github.get_pr(number=43, repo_root=ROOT)
+    assert pr is not None and pr.head_repo == "forker/repo"
+
+
 def test_create_pr_idempotent_returns_existing_no_post(monkeypatch):
     existing = [{"number": 9, "html_url": "u/9", "state": "open", "draft": True}]
     rec = _GhDispatch(

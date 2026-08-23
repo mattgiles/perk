@@ -29,6 +29,9 @@ class PullRequest:
     base_ref: str = ""  # the PR's actual base branch (from REST `base.ref`); "" when synthetic
     head_ref: str = ""  # the PR's head branch name (from REST `head.ref`); "" when synthetic
     # or projected away (e.g. `create_pr`'s --jq projection omits `head`)
+    head_repo: str = ""  # the head repository's owner/name (REST `head.repo.full_name`);
+    # "" when unavailable. Branch names alone cannot distinguish a same-repo head from a
+    # fork head — the stack chain walk's fork gate reads this.
 
 
 @dataclass(frozen=True)
@@ -47,13 +50,20 @@ def _owner(repo_root: Path) -> str:
     return proc.stdout.strip()
 
 
+class _RepoObject(LenientParseModel):
+    """The nested ``repo`` object of a ref-carrying payload; only the identity is consumed."""
+
+    full_name: str = Field("", validation_alias=AliasChoices("full_name", "nameWithOwner"))
+
+
 class _RefObject(LenientParseModel):
     """A nested ref-carrying object (``base`` / ``head``) of a REST PR payload.
 
-    Only ``ref`` is consumed.
+    ``ref`` plus (for ``head``) the repository identity are consumed.
     """
 
     ref: str = ""
+    repo: _RepoObject | None = None
 
 
 class PullRequestModel(LenientParseModel):
@@ -81,6 +91,7 @@ class PullRequestModel(LenientParseModel):
         return "OPEN" if self.raw_state == "open" else "CLOSED"
 
     def to_domain(self, *, existed: bool) -> PullRequest:
+        head_repo = self.head.repo.full_name if self.head and self.head.repo else ""
         return PullRequest(
             number=self.number,
             url=self.url,
@@ -89,6 +100,7 @@ class PullRequestModel(LenientParseModel):
             existed=existed,
             base_ref=(self.base.ref if self.base else ""),
             head_ref=(self.head.ref if self.head else ""),
+            head_repo=head_repo,
         )
 
 
@@ -152,6 +164,30 @@ def list_prs_for_branch(*, branch: str, repo_root: Path) -> tuple[PullRequest, .
     if not isinstance(items, list) or not items:
         return ()
     with translate_validation_errors(_exec.GitHubError, source=f"list PRs for {branch!r}"):
+        return tuple(_pull_request(item, existed=True) for item in items)
+
+
+def list_open_prs_for_base(*, base: str, repo_root: Path) -> tuple[PullRequest, ...]:
+    """List all **open** PRs whose base branch is ``base`` (the base-filter mirror of
+    :func:`list_prs_for_branch`; ``base=<branch>&state=open``), parsed via the shared converter.
+
+    The stack chain walk's upward read: "which open PRs stack directly on this head branch?".
+    Raises ``GitHubError`` on an infra failure.
+    """
+    items = _exec._run_json(
+        _exec._rest_args(
+            "repos/{owner}/{repo}/pulls",
+            method="GET",
+            fields={"base": base, "state": "open"},
+        ),
+        what=f"failed to list open PRs based on {base!r}",
+        source="`gh api pulls`",
+        cwd=repo_root,
+        default="[]",
+    )
+    if not isinstance(items, list) or not items:
+        return ()
+    with translate_validation_errors(_exec.GitHubError, source=f"list open PRs based on {base!r}"):
         return tuple(_pull_request(item, existed=True) for item in items)
 
 
