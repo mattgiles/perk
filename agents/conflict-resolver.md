@@ -66,12 +66,15 @@ anything** — no rebase start, no push, no abort:
 
 4. **Verify after resolving.** Run the repo's check/test command if discoverable (e.g. `just ci`,
    or the project's tests) and confirm the tree builds and has **no** conflict markers left
-   (`grep -rn '<<<<<<<\|=======\|>>>>>>>'` across the changed files). Do not skip this.
+   (`grep -rn '<<<<<<<\|=======\|>>>>>>>'` across the changed files). Do not skip this. If the
+   checks fail and you cannot remedy the failure as part of the resolution, treat the conflict as
+   unresolvable (step 7) — **never push a failing tree**.
 
 5. **Continue the rebase to completion** with `GIT_EDITOR=true git rebase --continue`; commit
    **only** conflict resolutions (no unrelated changes).
 
-6. **Force-push** the resolved branch: `git push --force-with-lease`.
+6. **Force-push** the resolved branch: `git push --force-with-lease` — only after verification
+   passed.
 
 7. **If the conflicts cannot be resolved cleanly and correctly**, run `git rebase --abort` and
    report the blocker plainly — **do NOT force a bad resolution** and do not push a half-resolved
@@ -113,7 +116,8 @@ nothing more.
    resolve→add→continue loop until the rebase completes.
 
 4. **Verify after completion**: no conflict markers anywhere in the changed files; run the repo's
-   discoverable checks.
+   discoverable checks. If verification fails, stop and report **verification-failed** — leave
+   the finished worktree exactly as it stands and push nothing.
 
 5. **NEVER push in this mode** — publication is exclusively the human's
    `perk objective stack sync --continue` (the atomic leased multi-ref push re-proves topology
@@ -128,7 +132,11 @@ nothing more.
 
 **Open with the terminal outcome class**, exactly one of:
 
-- **completed** — the rebase finished and verification was run (state its result);
+- **completed** — the rebase finished and verification **passed** (name the checks you ran);
+- **verification-failed** — (retained mode) the rebase finished but verification failed (state
+  exactly what failed); nothing was pushed and the finished worktree stays in place for the
+  human to inspect (PR mode never uses this class — a verification failure there remedies or
+  aborts, per its step 4);
 - **stopped-before-mutation** — missing worktree / no rebase in progress / ambiguous task /
   context-fetch failure; nothing was touched;
 - **unresolvable-conflict** — the worktree is preserved mid-rebase;

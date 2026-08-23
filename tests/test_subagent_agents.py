@@ -85,27 +85,70 @@ def test_committed_mirrors_are_byte_identical_for_all_perk_agents():
         assert mirror.read_bytes() == _source_bytes(name)
 
 
+def _def_section(text, heading):
+    """One `## <heading>` section of an agent def, whitespace-normalized.
+
+    Section-scoping couples each pinned trigger/command to the mode that owns it — a
+    whole-file token census would stay green if the mode mapping were reversed.
+    """
+    match = re.search(
+        rf"^## {re.escape(heading)}\n(.*?)(?=^## |\Z)", text, re.MULTILINE | re.DOTALL
+    )
+    assert match, f"missing section: {heading}"
+    return " ".join(match.group(1).split())
+
+
 def test_conflict_resolver_def_is_mode_aware():
     text = _source_bytes("conflict-resolver").decode()
-    # The sentinel marker prefix (the cross-file mode-selection contract).
-    assert "RETAINED-CONTINUATION SENTINEL:" in text
-    compact = " ".join(text.split())
-    # Retained-mode context ladder: stack rung + single-PR fallback rung.
-    assert "perk pr review-context --pr <N> --stack --json" in compact
-    assert "perk pr review-context --pr <N> --json" in compact
-    # PR mode keeps flagless context inference.
-    assert "perk pr review-context --json" in compact
-    # Retained mode never publishes.
-    assert "NEVER push in this mode" in compact
-    # Abort exists only in PR-rebase mode; retained mode never aborts.
-    assert "Abort is **PR-mode-only**" in compact
-    assert "NEVER `git rebase --abort` in this mode" in compact
-    # The fail-closed gate: uncorroborated retained mode mutates nothing.
-    assert "stop and report without mutating anything" in compact
-    # The outcome-class vocabulary the dispatching session's gate keys on.
-    assert "Open with the terminal outcome class" in compact
-    for outcome in ("completed", "stopped-before-mutation", "unresolvable-conflict", "aborted"):
-        assert f"**{outcome}**" in compact
+
+    selection = _def_section(text, "Mode selection (fail-closed)")
+    # Sentinel presence selects retained mode (the cross-file marker-prefix contract)...
+    assert "Select **retained-continuation mode** iff a task-text line's" in selection
+    assert "first non-whitespace content begins with the exact marker prefix" in selection
+    assert "RETAINED-CONTINUATION SENTINEL:" in selection
+    # ...and absence selects the legacy PR-rebase default (flagless, no PR number required).
+    assert "Absence of the sentinel selects PR-rebase mode" in selection
+    assert "PR mode never requires a PR number" in selection
+    # The concrete corroboration probe guards the no-mutation branch.
+    assert "stop and report without mutating anything" in selection
+    assert "no rebase start, no push, no abort" in selection
+    assert "**no rebase in progress**" in selection
+    assert (
+        'test -d "$(git rev-parse --git-path rebase-merge)" || '
+        'test -d "$(git rev-parse --git-path rebase-apply)"' in selection
+    )
+
+    pr_mode = _def_section(text, "PR-rebase mode")
+    # PR mode keeps flagless context inference, pushes, and owns abort.
+    assert "perk pr review-context --json" in pr_mode
+    assert "git push --force-with-lease" in pr_mode
+    assert "git rebase --abort" in pr_mode
+    assert "Abort is **PR-mode-only**" in pr_mode
+
+    retained = _def_section(text, "Retained-continuation mode")
+    # The two-rung context ladder over the existing review-context surface.
+    assert "perk pr review-context --pr <N> --stack --json" in retained
+    assert "perk pr review-context --pr <N> --json" in retained
+    # Retained mode resumes (never restarts), never publishes, never discards.
+    assert "Never start a fresh rebase" in retained
+    assert "NEVER push in this mode" in retained
+    assert "NEVER `git rebase --abort` in this mode" in retained
+    assert "sync --continue" in retained
+    assert "sync --abort" in retained
+
+    report = _def_section(text, "Report")
+    # The outcome-class vocabulary the dispatching session's gate keys on — and
+    # completed requires *passing* verification, not merely a verification run.
+    assert "Open with the terminal outcome class" in report
+    assert "the rebase finished and verification **passed**" in report
+    for outcome in (
+        "completed",
+        "verification-failed",
+        "stopped-before-mutation",
+        "unresolvable-conflict",
+        "aborted",
+    ):
+        assert f"**{outcome}**" in report
 
 
 def test_continuation_dispatch_template_agrees_on_the_sentinel():
@@ -123,18 +166,33 @@ def test_continuation_dispatch_template_agrees_on_the_sentinel():
         template_text,
         re.MULTILINE,
     )
-    compact = " ".join(template_text.split())
-    # The child task opens with the worktree cd.
-    assert "`cd {{ worktree }}`" in compact
-    # The layer identity (retained mode requires the PR number).
-    assert "PR #{{ pr }}" in compact
-    # Continuation is gated on explicit human consent...
-    assert "{ objective: {{ objective }}, continue: true }" in compact
-    assert "await the human's explicit consent" in compact
-    # ...and withheld on every non-completed outcome class.
-    assert "ONLY a **completed** rebase" in compact
-    assert "EVERY other outcome" in compact
-    assert "withholds continuation" in compact
+
+    def step(n):
+        # One numbered dispatch step, whitespace-normalized — pinning inside the step that
+        # owns a token keeps the pin honest (the template's opening summary also names the
+        # PR, which must not satisfy the child-task requirement).
+        match = re.search(rf"^{n}\. (.*?)(?=^\d\. |\Z)", template_text, re.MULTILINE | re.DOTALL)
+        assert match, f"missing step {n}"
+        return " ".join(match.group(1).split())
+
+    # Step 2 is the child task: it opens with the worktree cd, carries the sentinel line,
+    # and names the PR number retained mode requires to proceed.
+    task = step(2)
+    assert "`cd {{ worktree }}`" in task
+    assert "RETAINED-CONTINUATION SENTINEL: resume the in-progress rebase in {{ worktree }}" in task
+    assert "PR #{{ pr }}" in task
+
+    # Step 3 gates continuation on explicit human consent, requires passing verification,
+    # and withholds on every non-completed outcome class (the def's vocabulary).
+    gate = step(3)
+    assert "ONLY a **completed** rebase (verification passed)" in gate
+    assert "await the human's explicit consent" in gate
+    assert "{ objective: {{ objective }}, continue: true }" in gate
+    assert "EVERY other outcome" in gate
+    assert "withholds continuation" in gate
+    for withheld in ("stopped-before-mutation", "unresolvable-conflict", "verification-failed"):
+        assert withheld in gate
+    assert "{ objective: {{ objective }}, abort: true }" in gate
 
 
 def test_second_run_is_idempotent(tmp_path):
