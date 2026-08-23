@@ -273,17 +273,19 @@ facts that every mirror must reconcile.
 
 ## npm-workspace + publish facts
 
-- `"workspaces": ["docs/site"]` makes every root `npm install`/`npm ci` (CI, `just setup`, the
-  worktree hook) install the site toolchain (~220 MB — accepted deliberately). Deps hoist to the
-  root `node_modules` with `docs/site` symlinked in; the root `.npmrc` `save-exact` governs
-  workspace pins; one root lockfile, no site lockfile.
+- Root `"workspaces"` — now `docs/site` **and** `tools/prose-review` (membership test-pinned:
+  `tests/test_packaging.py` asserts the exact list; trust the pin, not this prose) — makes every
+  root `npm install`/`npm ci` (CI, `just setup`, the worktree hook) install every workspace's
+  toolchain (the site's ~220 MB accepted deliberately). Deps hoist to the root `node_modules`
+  with each workspace symlinked in; the root `.npmrc` `save-exact` governs workspace pins; one
+  root lockfile, no per-workspace lockfiles.
 - **Three distinct Node floors — don't conflate:** the root `engines` = the published
   extension's *runtime* claim; the effective *dev install* floor = the strictest dev-dep engines
-  enforced by `engine-strict=true`; the workspace declares its own floor mirroring its
-  principal dep (verified against the installed package, not registry metadata).
+  enforced by `engine-strict=true`; the `docs/site` workspace declares its own floor mirroring
+  its principal dep (verified against the installed package, not registry metadata).
 - **Publish isolation is guarded on three independent surfaces:** the npm tarball (forbidden
   prefixes + the `files` allowlist + a pack-output assert), the Python wheel/sdist (a
-  member-name scan), and the workspace itself (`private: true`, no runtime `dependencies` key)
+  member-name scan), and each workspace itself (`private: true`, no runtime `dependencies` key)
   — each layer catches a different failure mode.
 
 ## Process patterns
@@ -293,13 +295,14 @@ facts that every mirror must reconcile.
   importantly, a scope-scoped row must reach every gate GitHub CI would run for that scope.
   Files selected by the docs row but by no code-suffix lint/typecheck glob — such as
   `docs/site/src/styles/tokens.css` and `tsconfig.json` — otherwise make an in-session docs-only
-  run skip Biome or tsc. The docs row therefore runs Biome over `docs/site` and the workspace
-  typecheck in addition to the docs check. When one guard's triggers span two scopes, invoke it
-  in both and accept the duplicate full-suite run rather than leaving either scoped run blind.
+  run skip Biome or tsc. The docs row therefore runs Biome over `docs/site` and the `docs/site`
+  workspace typecheck in addition to the docs check. When one guard's triggers span two scopes,
+  invoke it in both and accept the duplicate full-suite run rather than leaving either scoped
+  run blind.
 - **The integration gate is deliberately build-shaped.** Post-build checks live outside `src/`,
-  so the unit-test glob cannot run them without a built site; the workspace `check` script orders
-  build before tests. Its accepted cost is a full Astro build (roughly 30–60 seconds) in
-  `just test` and for every change matching the docs-check scope.
+  so the unit-test glob cannot run them without a built site; the `docs/site` workspace's
+  `check` script orders build before tests. Its accepted cost is a full Astro build (roughly
+  30–60 seconds) in `just test` and for every change matching the docs-check scope.
 - **Uncommitted, fully-reverted simulations as PR evidence** (a frontmatter simulation over the
   corpus, temp fixtures) work — teardown proven by `git status --porcelain`; review wants the
   evidence *on the PR itself*, and an /address pass re-runs items its fixes invalidated.

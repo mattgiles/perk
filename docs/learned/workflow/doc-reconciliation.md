@@ -24,8 +24,8 @@ with the grouped CLI) has its own craft. These are the durable rules from doing 
   narration, "Resolved:" fixed residuals — "Correction shapes — the instruct-vs-narrate triage".
 - For never-adopted forward guidance, keep-and-annotate beats delete — "Keep-and-annotate beats
   delete".
-- A keep-history pass can leave the stale-pointer advisory NONZERO; the `broken-doc-ref` family
-  holds an accepted ~19-row weighed floor — "Deliberate nonzero stale-pointer advisories".
+- A keep-history pass can leave the stale-pointer advisory NONZERO; the `broken-doc-ref` weighed
+  floor is sized fresh via `perk learn docs-check` — "Deliberate nonzero stale-pointer advisories".
 - Sweep-step craft: mirrors, expected no-ops, neighbor staleness — and multi-node sweeps pin
   cross-node byte-preservation + disjoint file ownership — "Sweep-step craft".
 - Distillation headers are derived content; the docs-sync blast-radius table and the 12,288-byte
@@ -422,9 +422,11 @@ have deleted the learning. A later consolidation pass (PR #1687) reworded the ci
 the standing count returned to 0 — the craft stands: paraphrase, don't quote, when naming such an
 instance (a verbatim path would add the naming doc to the advisory it documents).
 
-Post-#1973 the `broken-doc-ref` family sits at a **~19-row weighed-advisory floor** (deliberate
+Post-#1973 the `broken-doc-ref` family sits at a **deliberate weighed-advisory floor** (deliberate
 example paths, cross-tree shorthands, history citations) — an accepted tail future runs weigh
-per-row, not a regression to churn (#2026).
+per-row, not a regression to churn (#2026). The floor's size is a measurement, never a recorded
+fact: run `perk learn docs-check` and weigh the current `broken-doc-ref` rows — a count written
+here froze once and no substitute number replaces it.
 
 ## docs/learned curation-batch craft
 
