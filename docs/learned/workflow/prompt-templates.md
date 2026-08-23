@@ -351,7 +351,7 @@ How to relocate an inline prompt string literal onto a canonical template **with
 - **The single-arm subdirectory.** A conditional/early-return arm contributes **no template file and no
   golden** — only the rendering arm(s) do; branching stays in code (objective-read's `backend !=
   "linear" → ""`: github/other return `""` directly, no `github.md`/`other.md`, no `{% if %}`). Keep the
-  **subdirectory shape** (`common/objective-read/linear.md`) even with a single arm file, for path-shape
+  **subdirectory shape** (`prompts/common/objective-read/linear.md`) even with a single arm file, for path-shape
   consistency across the common-prompt arms — don't collapse to a flat single file.
 
 - **Demote-in-place a substring constant — check for other local consumers before deleting.** When

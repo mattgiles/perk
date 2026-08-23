@@ -80,7 +80,7 @@ is dropped. It is inert on `--remote` (the remote arm returns before prompt asse
 builds its own primer) and on resume `--dry-run` (that path returns before `launch_stage`).
 
 **Why the seam exists**: putting a path-specific notice into the parity-locked
-`stages/implement.md` prose (or assuming warm/remote assembly would carry it) would silently
+`prompts/stages/implement.md` prose (or assuming warm/remote assembly would carry it) would silently
 broaden behavior across all three render sites — the suffix seam is the correct home for
 caller-supplied, *path-scoped* additions. First caller: `perk plan resume`'s prior-work advisory
 (`prompts/common/resume-advisory.md`, wired in `src/perk/cli/commands/plan/resume_cmd.py`), gated

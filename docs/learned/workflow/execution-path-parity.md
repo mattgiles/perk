@@ -73,7 +73,7 @@ Named difference #9 (contracts §8.38): **the resume prior-work advisory is
 worktree carries the advisory (via `launch_stage`'s augment-only `prompt_suffix` seam — see
 `cold-door-launch.md`); `perk plan implement`, the warm `/implement` handoff, and the remote
 worker never do (the worker resets to the `origin/plan-<N>` tip — committed work *is* its branch
-state), while `stages/implement.md` renders byte-identically across all paths.
+state), while `prompts/stages/implement.md` renders byte-identically across all paths.
 
 **Write execution-path scope into consumer-facing prose from the start.** When a behavior is
 deliberately path-scoped, every consumer-facing description — user docs, contracts consumer

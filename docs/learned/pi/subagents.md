@@ -307,7 +307,7 @@ self-repo and consumers get byte-identical defs. Because `.pi/agents/perk/` is *
 The `subagent-engine` enumeration moved from `.pi/agents/*.md` to `.pi/agents/perk/*.md` (still
 informational; the `subagent-agents` convergence owns drift). The `[models.subagents]` config stays
 **fixed-key** (the `PERK_AGENTS` set only) — it does **not** configure user agents (those set `model:`
-in frontmatter; see `how-to/write-a-custom-subagent.md`).
+in frontmatter; see `docs/user-docs/how-to/write-a-custom-subagent.md`).
 
 ### Parent-passed routing tokens are an injection surface
 

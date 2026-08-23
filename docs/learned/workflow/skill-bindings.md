@@ -189,7 +189,7 @@ delivery is whole-directory sync, and the launch prompt naming the variant (e.g.
 
 **Confirmed again by a bundled upstream skill (#617):** the worktree skill-materialization
 (`materialize_skills`) symlinks the **whole skill dir per-skill**, so a skill's `references/` files
-(e.g. `ast-grep/references/rule_reference.md`) travel into worktrees **for free** — no manifest or
+(e.g. `.agents/skills/ast-grep/references/rule_reference.md`) travel into worktrees **for free** — no manifest or
 force-include entry. And **no skill is added to the wheel**: skills ship via the skills CLI, not a
 `pyproject` force-include. The `references:` zero-wiring property is not perk-skill-specific.
 

@@ -11,6 +11,33 @@ is broader than an empty source scan: realistic fixtures can also make a uniquen
 parity comparison, or negative case true by construction. The counter-move is to manufacture the
 condition that would make an incorrect implementation fail, then assert the full contract value.
 
+## Distillation
+
+- Wire every plausible fake target with a distinguishable value so a wrong-target read is loud —
+  "Default-miss fakes hide targeting errors".
+- Fakes never pick the safety posture: keep production fail-closed and repair the fakes — "Fakes
+  must not pick the safety posture".
+- Dedup/uniqueness claims need manufactured collisions under the exact contract key —
+  "Manufacture collisions for uniqueness and dedup claims".
+- Assert positive membership and full payloads; ordering/abort/byte-identity claims assert the
+  literal sequence, artifact survival, or raw bytes — "Assert payloads, not merely silence".
+- Write failure matrices from the boundary contract; each validation branch and each defensive
+  arm gets a forcing fixture — "Enumerate failure matrices from the contract".
+- Cover the whole declared surface: corrupt each NEW field individually, decode every enum arm,
+  pair cap+1 refusals with at-cap successes — "Parametrize the whole declared surface".
+- Capture the exact request each parity fake receives; discriminant-only assertions prove shape,
+  not routing — "Capture exact requests from parity fakes".
+- Discriminating inputs live inside the measured scope: shuffled order, astral characters,
+  multibyte bytes, distinct worktree roots — "Put discriminating inputs inside the measured
+  scope".
+- Negative-space checks prove a live selector, fail under an injected offender, and
+  mutation-proof by reverting only the temporary mutation — "Negative-space checks need floors
+  and mutation proofs".
+- Keep one real default path through the deepest seam; pin optional-seam composition via the
+  captured registration — "Keep one real default path and verify delegates".
+- Assert where values leave the subsystem, reading back through the production reconstruction
+  seam — "Assert where values leave the subsystem".
+
 ## Default-miss fakes hide targeting errors
 
 A fake backend whose unmapped key returns `None` makes a wrong-id read look like an ordinary miss.
@@ -22,6 +49,18 @@ normal lookup.
 This posture belongs in backend and delivery tests wherever target identity is the behavior under
 test. `workflow/issue-backend.md` records the backend form; delivery routing examples live in
 `tests/test_delivery_facade.py` and the delivery test family.
+
+## Fakes must not pick the safety posture
+
+- A guard first written fail-open because the test fakes lacked a seam is the tail wagging the
+  dog — keep production fail-closed and repair the fakes (give them a readable empty state)
+  (#1994).
+- When adding an environment probe to a hot path, grep-inventory every monkeypatch seam in the
+  plan so the hermeticity sweep is mechanical rather than discovered test-by-test (#2018).
+- A test dropped as "non-behavior-bearing" may have a behavior-bearing reframing — pin design
+  choices via observable behavior, not implementation echo (#2018).
+- Citing this doc doesn't apply it: for each invariant asserted, check the fixture would fail
+  the trivial/wrong implementation (#2000).
 
 ## Manufacture collisions for uniqueness and dedup claims
 
@@ -45,6 +84,19 @@ Source-adapter and workbench examples live in `tests/test_prose_review_source.py
 `tests/test_prose_review_checks.py`. For source scans, the sibling recipe is
 `workflow/source-scan-guards.md`.
 
+Four sharper payload rules:
+
+- Auth/network stubs record into the SAME shared event list as the other fakes, so
+  `events == []` genuinely proves zero network reach; ordering tests assert auth as the first
+  network event (#1996).
+- Ordering claims need order-recording seams asserting the literal sequence (e.g.
+  sync→head→gather), not call counts — and passthrough tests record what the seam receives
+  (#1990).
+- Prove "aborts before side effect X" with a would-be-mutated artifact's survival — a strictly
+  stronger proof than recorder absence (#2018).
+- "Byte-identical" tests compare bytes (raw stdout vs the exact expected serialization), never
+  top-level key sets (#2029).
+
 ## Enumerate failure matrices from the contract
 
 A fixture generator usually expresses only valid shapes. Deriving negative cases from it therefore
@@ -57,6 +109,15 @@ reason does not prove a DTO or HTTP route maps each one. Mirror the full matrix 
 route boundaries. `tests/test_prose_review_dto.py`, `tests/test_prose_review_web.py`, and
 `workflow/prose-review-workbench.md` carry the source-adapter instance.
 
+- A per-cause remediation matrix needs a parameterized test over EVERY wrapped exception type,
+  including subclass except-arm ordering (#2024).
+- Each new validation branch needs an otherwise-valid fixture that reaches exactly that branch,
+  asserted by exact message — an "invalid" fixture tripping an earlier branch never exercises
+  the new one (#2024).
+- Enumerate blocked/defensive arms and pin each with a forcing fixture, or prove-then-delete the
+  unreachable ones (#2029, #2021). Audit plan-time defensive-check inventories against what
+  production can actually pass (#2028).
+
 ## Parametrize the whole declared surface
 
 When a validator enumerates N fields, tests cover all N rather than one representative field. A
@@ -66,6 +127,16 @@ Build parameter rows from the contract's declared field set and pin its cardinal
 Assert full values instead of truthiness proxies. `assert result` cannot distinguish the expected
 non-empty reason, identifier, or count from an unrelated truthy fallback. The contract value is the
 oracle.
+
+- Partial-cohort tests corrupt each NEW field individually — a test that omits only a
+  pre-existing field stays green if the new fields drop out of the cohort (#2028).
+- Every decoder enum arm needs a positive decode case; pair every cap+1 refusal with an at-cap
+  success (#1999).
+- Exact-shape manifest tests live in the mode with maximal non-null structure, one non-empty row
+  per closed family (#2001).
+- "Every open X" claims need a more-than-one-page fixture AND negative argv pins on the bounded
+  readers (#2003); a single-candidate negative can't prove sweep continuation — follow a closed
+  match with an open one (#2004).
 
 ## Capture exact requests from parity fakes
 
@@ -89,6 +160,15 @@ milliseconds, or inclusive-versus-exclusive boundaries produce different asserte
 `workflow/source-scan-guards.md` applies this to multibyte byte thresholds and newline counting;
 that fixture design generalizes to every conversion proof.
 
+- Order pins need shuffled input (a fixture already in manifest order proves nothing), and
+  counters must be non-zero to pin pass-through (#1991).
+- Cap tests need astral characters — the discriminating assertion is
+  `part.length > CAP && codePointLength(part) <= CAP` on at least one part (#1991); byte-length
+  contracts need a multibyte fixture where `len(bytes) > len(str)` (#1996).
+- Root-anchoring tests are vacuous when invocation root == main root — use a linked worktree
+  with distinct roots plus a main-checkout-only marker asserting where the config was actually
+  loaded from (#2028).
+
 ## Negative-space checks need floors and mutation proofs
 
 "No forbidden thing exists" first proves that its selector discovered a meaningful corpus and known
@@ -99,6 +179,10 @@ repository invariant into an empty scan.
 
 `tests/test_explanation_boundary.py` demonstrates paired scanner directions, while
 `workflow/source-scan-guards.md` collects guard-specific non-vacuity techniques.
+
+Mutation-proof ordering pins by temporarily reversing the implementation and watching the pin
+fail — but never restore with `git checkout <file>` while carrying uncommitted work (a HEAD
+reset wipes it); snapshot/stash first and revert only the temporary mutation (#1922).
 
 ## Keep one real default path and verify delegates
 
@@ -111,6 +195,13 @@ Use monkeypatches to prove short circuits by making all substrate reads record o
 replacement for every integration path. `workflow/objective-delivery.md` records the façade
 migration version of this rule.
 
+- Stub the deepest real seam (the stdlib module singleton) and run the real delegation chain, so
+  unit tests double as thin integration tests (#2018).
+- Optional injected seams need a product-path composition pin — register with a recording fake,
+  inject a fake dep, and invoke the CAPTURED tool definition end-to-end; once a pure helper owns
+  the interaction matrix, keep integration tests to boundary behavior plus one smoke (#1922).
+- Built-output progressive-enhancement mounts need an explicit presence assertion (#1993).
+
 ## Assert where values leave the subsystem
 
 Renderer assertions cannot catch dispatch-time mutation. If a wrapper appends a suffix, drops a
@@ -120,6 +211,16 @@ content-bearing template arm.
 
 The binding-delivery example is in `workflow/skill-bindings.md` and
 `extension/substrate/bindingDelivery.test.ts`.
+
+- Choreography tests read writes back through the production reconstruction seam, never a
+  test-local reimplementation of the projection — a parallel derivation lets the write side and
+  read side drift while green (#2024).
+- A renderer has a "purity twin" obligation: it consumes only the composed value, never a module
+  constant that happens to match today (#1991).
+- A fresh implementation of a scanned read-back needs its own race pin — a sibling's race test
+  proves nothing about it (#2021).
+- Message-pin-preserving extraction: interpolate the `what` parameter exactly where the old
+  literal sat, so byte-identical message pins survive refactors (#2021).
 
 ## Review checklist
 
@@ -131,6 +232,22 @@ Before accepting a test claim, ask:
 3. Does the assertion pin the full payload/request, not only truthiness or absence of errors?
 4. Does a negative-space check prove its selector is live and fail under an injected offender?
 5. Is at least one production adapter/default path driven without replacing the seam under test?
+6. Did any fake's missing seam pick the production safety posture (fail-open) instead of being
+   repaired?
+7. Does every ordering/abort/byte-identity claim assert the literal sequence, artifact survival,
+   or raw bytes rather than counts, recorder absence, or key sets?
+8. Does each new validation branch have a fixture that reaches exactly it, and each
+   blocked/defensive arm a forcing fixture (or a proof it is unreachable)?
+9. Do cohort/enum/cap tests corrupt each NEW field individually, decode every enum arm
+   positively, and pair each cap+1 refusal with an at-cap success?
+10. Do order/cap/byte/root fixtures actually discriminate (shuffled input, astral characters,
+    multibyte bytes, distinct worktree roots)?
+11. Do read-back assertions flow through the production reconstruction seam, and does each fresh
+    scanned read-back carry its own race pin?
+12. Does the real default path drive the deepest seam end-to-end, with composition pinned via
+    the captured registration?
+13. Was every mutation proof restored by reverting only the temporary mutation (never
+    `git checkout <file>` over uncommitted work)?
 
 ## Cross-references
 
