@@ -17,7 +17,10 @@ lives in `src/perk/backends/objective_store.py` (the `Protocol`, frozen result d
 resolver-wired); the resolver is `src/perk/backends/resolve.py` (all originally one
 *perk/backends/objective_stores.py*, since carved apart). This doc preserves the patterns that
 generalize the issue-backend extraction to a second tier off the same monolith, plus the Phase-3
-node↔plan unification protocol.
+node↔plan unification protocol. The backend-neutral contract + consumer rules live here; the Linear
+project materialization and manifest-drift *mechanics* live in `linear-backend.md` (the
+Projects-substrate, `add_objective_node` project-store flow, and manifest-drift #609/#626
+sections) — this doc points there and never restates them.
 
 ## Distillation
 
@@ -236,11 +239,10 @@ lives*:
 
 - **GitHub + issue-backed Linear re-render the stored `objective-roadmap` block** — mirror
   `update_objective_node` verbatim, swapping the mutation to `objective.add_node`.
-- **The project store has no stored roadmap block, so an added node IS a new Linear issue.** Its flow:
-  compute the live roadmap → compute the `<phase>.<n>` id → enrich the phase name → ensure the phase
-  milestone → create the node-issue → create one blocking relation per `depends_on`. `comment_updated`
-  is therefore **always `False`** (no body-comment table to patch). The Linear-side mechanics live in
-  `linear-backend.md`.
+- **The project store has no stored roadmap block, so an added node IS a new Linear issue.**
+  `comment_updated` is therefore **always `False`** (no body-comment table to patch). The
+  Linear-side pipeline lives in `linear-backend.md`
+  (`### add_objective_node project-store flow (#614)`).
 
 ### The "no-surface, no-op" return-value pattern is a family
 
@@ -275,7 +277,7 @@ GitHub's `objective-roadmap` YAML block **already IS its manifest** (atomically 
 drift report), so the `detect/repair_objective_drift` methods carry real behavior **only**
 on the project store (which derives its roadmap live from node-issues — no baseline to diff) and no-op
 everywhere else — the same precedent as the no-op family above. Cross-ref `linear-backend.md` for the
-manifest's storage shape (a visible inline-code block in the project overview).
+manifest's storage shape.
 
 ## The manifest + drift-detection/repair design (#626)
 
@@ -288,8 +290,9 @@ The `objective-manifest` block (primitives in the `src/perk/objective/` package,
 pins each node's
 **id/slug/description + explicit `depends_on` (always a list)** plus a `phases` map of pinned
 milestone names. `status`/`pr` are **deliberately excluded** — they are live/observed, not identity.
-Parsing is **three-state**: absent / malformed / valid. The block lives in the overview **between**
-the `objective-header` block and the Reconcilable region, inline-code (Linear-safe). It is a **no-op
+Parsing is **three-state**: absent / malformed / valid. Where the manifest physically lives per
+backend is `linear-backend.md`'s territory (the manifest-drift #609/#626 + attachment-native #1355
+sections) — point, don't restate. It is a **no-op
 on GitHub + issue-backed stores** (their roadmap edits are atomic with the body → no divergence
 surface), extending the `save_node_plan→None` / `post_status_update→False` no-op family above.
 
@@ -478,7 +481,10 @@ reconcile via outcomes" discipline). The reconcile pass also disambiguated the l
   live project-backed store), `src/perk/backends/linear/objectives.py` (dormant) — the concrete
   stores; `src/perk/backends/resolve.py` — the resolver
 - `docs/learned/workflow/issue-backend.md` — the parallel issue-tier split off the same monolith
-- `docs/learned/workflow/linear-backend.md` — the Linear facade refactor + the project-backed store
+- `docs/learned/workflow/linear-backend.md` — the Linear facade refactor + the project-backed
+  store; owns all Linear project materialization + manifest-drift mechanics (the
+  Projects-substrate, `add_objective_node` project-store flow, and #609/#626 manifest-drift
+  sections)
 - `docs/learned/workflow/objective-lifecycle.md` — objective node status + the supervisor loop
 - `docs/learned/workflow/source-scan-guards.md` — the tier-guard asymmetry (which guard owns which set)
 - `docs/learned/workflow/config-tables.md` — the committed-only `[issues]` table the resolver reads
