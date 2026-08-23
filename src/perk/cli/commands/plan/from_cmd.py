@@ -132,7 +132,11 @@ def plan_from(
         if seed_file is not None:
             return _gather_from_file(repo_root, stage, path=seed_file, remote=remote)
 
-        require_github(ctx)  # every path reads the issue backend up front
+        # Backend-conditional auth: only the GitHub backend needs a working `gh` here. The
+        # Linear arm's auth is enforced by `linear_client.client_from_env` (a typed
+        # missing-key error) at backend construction.
+        if resolve.resolve_issue_backend_id(repo_root) == resolve.GITHUB_BACKEND_ID:
+            require_github(ctx)
 
         issue_id = parse_plan_id(issue, what="issue")
         # Resolve the run target up front so `--remote` on this local-only stage is rejected before

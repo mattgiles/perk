@@ -235,7 +235,11 @@ def replan_objective(
     """
 
     def gather(repo_root: Path, config: Config, stage: Stage) -> SeededLaunch:
-        require_github(ctx)  # every path reads the objective backend up front
+        # Backend-conditional auth: only the GitHub backend needs a working `gh` here. The
+        # Linear arm's auth is enforced by `linear_client.client_from_env` (a typed
+        # missing-key error) at store construction.
+        if resolve.resolve_issue_backend_id(repo_root) == resolve.GITHUB_BACKEND_ID:
+            require_github(ctx)
 
         objective_id = parse_objective_id(objective_arg)
         # Resolve the run target up front so `--remote` on this local-only stage is rejected before

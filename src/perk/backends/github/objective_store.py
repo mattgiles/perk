@@ -31,7 +31,7 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
 
-from perk import objective
+from perk import objective, plan
 from perk.backends import engagement, issue_backend, objective_store
 from perk.backends.github import engagement as gh_engagement
 from perk.backends.github import objectives, plans
@@ -120,6 +120,7 @@ class GitHubObjectiveStore:
             title=src.title,
             prose=src.body,
             issues=(),
+            has_objective_header=plan.has_metadata_block(src.body, objective.OBJECTIVE_HEADER_KEY),
         )
 
     def adopt_source_as_objective(

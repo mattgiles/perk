@@ -211,6 +211,7 @@ class LinearProjectObjectiveStore:
                 return None
             content = project.get("content")
             prose = _opt_str(content) or ""
+            rows = self._projects.project_issues_for_adoption(source_id)
             issues = tuple(
                 objective_store.AdoptableSourceIssue(
                     id=_require_str(issue.get("id"), "issue id"),
@@ -219,7 +220,7 @@ class LinearProjectObjectiveStore:
                     title=_require_str(issue.get("title"), "issue title"),
                     body=_require_str(issue.get("description"), "issue description"),
                 )
-                for issue in self._projects.project_issues_for_adoption(source_id)
+                for issue in rows
                 # A metadata sentinel is never an adoptable/mappable candidate.
                 if not attachments.has_perk_attachment(
                     _row_attachment_nodes(issue), kind=attachments.OBJECTIVE_HEADER_KIND
@@ -231,6 +232,10 @@ class LinearProjectObjectiveStore:
                 title=_require_str(project.get("name"), "project name"),
                 prose=prose,
                 issues=issues,
+                # The sentinel IS the authoritative objective identity on Linear (the overview
+                # prose carries no metadata block) — its presence marks an already-adopted
+                # project, computed from the already-fetched rows (zero extra queries).
+                has_objective_header=_sentinel_from_rows(rows) is not None,
             )
 
     def adopt_source_as_objective(

@@ -156,16 +156,15 @@ def init_perk(ctx: click.Context, *, force: bool, no_interactive: bool, as_json:
         report = run_init(force=force, interactive=interactive)
     except UserFacingCliError as exc:
         if as_json:
-            machine_output(
-                json.dumps(
-                    {
-                        "success": False,
-                        "error_type": exc.error_type or "invalid_input",
-                        "message": exc.format_message(),
-                    }
-                )
+            # The machine surface gets the FULL InitReportOut envelope even on an
+            # environment refusal (a supervisor consumes one shape, never two).
+            report = InitReport.env_failure(
+                error_type=exc.error_type or "invalid_settings",
+                message=exc.format_message(),
+                checks=[],
             )
-            ctx.exit(1)
+            machine_output(json.dumps(report_to_dict(report)))
+            ctx.exit(report.exit_code)
         raise
 
     emit(as_json=as_json, payload=report_to_dict(report), render=lambda: _render_human(report))

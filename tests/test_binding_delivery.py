@@ -84,6 +84,20 @@ def test_missing_transclude_target_warns_and_falls_back_to_nudge(tmp_path):
     assert "ghost-skill" in delivery.warnings[0]
 
 
+def test_undecodable_transclude_target_warns_and_falls_back_to_nudge(tmp_path):
+    # A present-but-unreadable target (non-UTF-8 bytes) degrades exactly like absence: pointer
+    # fallback + loud warning, never a crashed cold launch (parity with bindingDelivery.ts).
+    path = tmp_path / ".agents" / "skills" / "bad-bytes" / "SKILL.md"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(b"\xff\xfenot utf-8\n")
+    user = [_user("stage:save", "bad-bytes", "transclude")]
+    delivery = render_cold_bindings(user, tmp_path, "stage:save", defaults=_DEFAULTS)
+    assert delivery.text is not None
+    assert _pointer("bad-bytes") in delivery.text  # nudge fallback
+    assert len(delivery.warnings) == 1
+    assert "bad-bytes" in delivery.warnings[0]
+
+
 def test_shipped_default_is_delivered(tmp_path):
     # The shipped default IS now delivered (perk no longer hardcodes the nudge), so an
     # unbound launch at stage:implement renders the default pointer — the single delivery path.

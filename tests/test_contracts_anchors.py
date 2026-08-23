@@ -109,6 +109,39 @@ def test_every_code_citation_is_a_live_heading(
     assert not dangling, {"dangling_citations": dangling}
 
 
+# The banned provenance families (compiled regex, short reason). contracts.md is an
+# eternal-present spec: plan/objective/task provenance, decision-era Status blocks, and
+# concrete issue/PR numbers belong to git history, never the living contract. Live vocabulary
+# shared with code (T1/T3, the D1..D9 decision-arm names, Invariant 20, hop-N) is deliberately
+# NOT banned. No allowlist mechanism exists: a future legitimate hit is rephrased to a
+# placeholder, or this guard is amended under review.
+_PROVENANCE_FAMILIES: tuple[tuple[re.Pattern[str], str], ...] = (
+    (re.compile(r"node \d+\.\d+", re.IGNORECASE), "roadmap-node provenance (node N.M)"),
+    (re.compile(r"Objective #\d+"), "objective provenance (Objective #N)"),
+    (re.compile(r"[Pp]hase[-\s]\d"), "phase provenance (phase N)"),
+    (re.compile(r"P\d+\.T\d+"), "plan-task provenance (PN.TM)"),
+    (re.compile(r"\bQ\d+\b"), "question-number provenance (QN)"),
+    (re.compile(r"\bGap \d\b"), "gap-number provenance (Gap N)"),
+    (re.compile(r"(?<![A-Za-z])erk\b"), "standalone erk pointer (perk's ancestor)"),
+    (re.compile(r"\*\*Status"), "decision-era Status block"),
+    (re.compile(r"dogfood", re.IGNORECASE), "dogfood narration"),
+    (re.compile(r"#\d{3,}"), "concrete issue/PR number (use #<n> or a short placeholder)"),
+)
+
+
+def test_no_provenance_vocabulary() -> None:
+    # contracts.md stays eternal-present: no plan provenance survives an edit. Hits are
+    # reported as {line_number: (matched_token, line_excerpt)} so they are locatable.
+    hits: dict[int, tuple[str, str]] = {}
+    for number, line in enumerate(CONTRACTS.read_text(encoding="utf-8").splitlines(), 1):
+        for pattern, reason in _PROVENANCE_FAMILIES:
+            match = pattern.search(line)
+            if match is not None:
+                hits[number] = (f"{match.group(0)} ({reason})", line.strip()[:120])
+                break
+    assert not hits, hits
+
+
 def test_history_group_headings_are_live() -> None:
     # Cheap integrity: contracts-history.md groups its entries under `## §N.M · …`
     # headings; each such anchor must still be a live contracts.md heading.

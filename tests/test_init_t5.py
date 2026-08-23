@@ -1,5 +1,6 @@
 import json
 import subprocess
+from pathlib import Path
 from typing import cast
 
 from click.testing import CliRunner
@@ -364,6 +365,27 @@ def test_cli_json_not_a_repo(tmp_path):
         assert result.exit_code == 2
         payload = json.loads(result.stdout)
         assert payload["success"] is False and payload["error_type"] == "not_a_repo"
+
+
+def test_cli_json_invalid_settings_full_envelope(tmp_path, stub_env):
+    # A UserFacingCliError under --json still emits the FULL InitReportOut envelope (a
+    # supervisor consumes one shape, never a hand-rolled minimal object) and exits 1.
+    runner = CliRunner()
+    with runner.isolated_filesystem(temp_dir=tmp_path) as d:
+        _git_init(d)
+        pi_dir = Path(d) / ".pi"
+        pi_dir.mkdir()
+        (pi_dir / "settings.json").write_text("{ not json", encoding="utf-8")
+        result = runner.invoke(cli, ["init", "--json"])
+        assert result.exit_code == 1
+        payload = json.loads(result.stdout)
+        assert payload["success"] is False
+        assert payload["error_type"] == "invalid_settings"
+        assert payload["mode"] == "unknown"
+        assert "not valid JSON" in payload["message"]
+        assert payload["env"] == [] and payload["changes"] == [] and payload["warnings"] == []
+        assert payload["github"] is None and payload["linear"] is None
+        assert payload["handoff"] is None and payload["capabilities"] == []
 
 
 def test_cli_idempotent_second_run(tmp_path, stub_env):

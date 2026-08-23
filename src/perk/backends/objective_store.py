@@ -137,7 +137,10 @@ class AdoptableObjectiveSource:
     A Linear **Project** (and its issues) or a GitHub **issue**. ``prose`` is the overview/body
     (untrusted human DATA); ``issues`` are the project's existing issues (empty on GitHub). ``id``
     is opaque (a project UUID or a GitHub issue number stringified). The objective-tier twin of
-    ``IssueBackend.AdoptableIssue``.
+    ``IssueBackend.AdoptableIssue``. ``has_objective_header`` is True when the source already
+    carries perk's objective identity **wherever the backend stores it** (a GitHub body
+    metadata block; a Linear metadata-sentinel/header attachment) — the re-adoption refusal's
+    backend-honest presence check (the prose check alone cannot see attachment-borne metadata).
     """
 
     id: str
@@ -145,6 +148,7 @@ class AdoptableObjectiveSource:
     title: str
     prose: str
     issues: tuple[AdoptableSourceIssue, ...] = ()
+    has_objective_header: bool = False
 
 
 @dataclass(frozen=True)
