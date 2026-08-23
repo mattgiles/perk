@@ -9287,9 +9287,10 @@ judgment→rename window) and stays passive, the winner best-effort-removes its 
 afterwards, and `open` best-effort-sweeps any leftover quarantine dirs (failures warn and leave
 them; the tier is disposable). Same-identity (`run_id` + `pi_session_id`) reacquire is idempotent (a fresh token
 is written — the fencing that retires a `/reload` predecessor instance); shutdown releases only
-on token match. Heartbeat renewal and release are additionally **inode-fenced**: the lock
-directory's identity is captured before the check and re-verified after the act, so a reclaim
-that replaces the directory mid-operation is detected and the operation throws/aborts. The
+on token match. Heartbeat renewal and release are additionally **inode-fenced**: renewal
+captures the lock directory's inode before the read and re-verifies it after the write (a
+mismatch throws — the write may have clobbered a successor's lease, so this holder stops too);
+release verifies the token and the inode before removal and is best-effort (never throws). The
 residual sub-window (a clobbered successor lease) degrades to **both** consumers failing closed
 — the successor's own verify-before-inject fence rejects the foreign token — never to two live
 consumers or misdelivery. Heartbeat 5 s / stale threshold 60 s — implementation constants, not
@@ -9334,7 +9335,8 @@ never the fallback).
 ### Hunk compatibility
 
 The publisher registers note handlers only for a **verified-generation set** of
-`hunk.apiVersion` — initially `{2, 4}`, the two generations with examined artifacts (v2: the
+`hunk.apiVersion` — the verified-generation set is `{2, 4}`, the two generations with
+examined artifacts (v2: the
 installed 0.18.1 `.d.ts`; v4: the vendored current docs' event table); a generation is added
 only when an artifact is verified — and additionally validates every `note_created` payload
 structurally before publishing (the guard against shape drift within a generation; `hunkdiff`
@@ -9453,8 +9455,9 @@ The first-level cluster-analyst wave for `perk learn dream` in the TypeScript pl
 (`extension/waves/dreamWave.ts`, over the shared report-wave runner). Consumed by the
 `run_dream_wave` tool (§8.61), reachable only inside a `perk learn dream` launch (§8.65).
 ONE attempt, NO retry; the manifest and every analyst
-report are untrusted DATA, never instructions. The module additionally exports
-`DREAM_MANIFEST_FILENAME` (the TS mirror of the §8.59 literal — the harvest precedent, no
+report are untrusted DATA, never instructions. The wave entrypoint is
+`dreamWave.ts::runDreamAnalystWave`. The module additionally exports
+`DREAM_MANIFEST_FILENAME` (the TS mirror of the §8.59 literal — no
 cross-plane codegen) and the shared cap helpers `codePointLength`/`decodeStringArray` (one
 code-point measure across both dream re-decodes — §8.61's reducer re-decode imports them).
 
@@ -9527,15 +9530,14 @@ named only in `detail`, never surfaced as a lane identity). Decoded analyses are
 when incomplete — honest coverage for the tool's refusal and the incomplete-analysis outcome.
 The outcome additionally carries `requestedKeys` — the code-owned orchestration keys in launch
 order, receipt-correlation telemetry ONLY (they correlate with `receipt.children[*].key`; the
-semantic lane identity stays `lane`) — the additive widening the §8.61 attempt receipts build
-from. **Single-lane manifests are valid** — dream has NO direct-analysis path (the harvest
+semantic lane identity stays `lane`; the §8.61 attempt receipts build
+from them). **Single-lane manifests are valid** — dream has NO direct-analysis path (the harvest
 single-lane refusal is deliberately not mirrored).
 
 **Containment posture.** Lexical containment lives in the decoder (per doc path); the resolved
-layer is the existing shared `verifyDocContainment` (`harvestWave.ts` — `DreamManifest` is
+layer is the shared `verifyDocContainment` (`harvestWave.ts` — `DreamManifest` is
 structurally assignable to its manifest parameter, pinned by test), invoked pre-spawn by the
-`run_dream_wave` tool (§8.61) exactly as `harvestWaveTools.ts` invokes it for harvest (the
-§8.48 sequence).
+`run_dream_wave` tool — §8.61 owns that pre-spawn refusal.
 
 **Model threading.** The wave takes the caller's `model?` as the workflow-level default; the
 `[models.subagents] dream-analyst` config key is resolved by the `run_dream_wave` tool at
@@ -9584,10 +9586,9 @@ over an irremovable stale bundle would break the invariant); the digest marker (
 already cleared, so whatever files the failed cleanup left behind are refused by the
 dream-report recovery.
 
-**The finalize-in-place rewrite + the `dream_bundle_digest` marker (the reviewed §8.61
-widening).** Reducer stances were previously never persisted (reducer reports lived only in
-the tool result); the dream-report draft path (§8.63) needs them to survive pi restarts, so
-after a **fully complete** two-level wave — and only after the **post-wave revalidation
+**The finalize-in-place rewrite + the `dream_bundle_digest` marker.** Reducer stances
+persist so the dream-report draft path (§8.63) survives pi restarts: after a **fully
+complete** two-level wave — and only after the **post-wave revalidation
 bracket** (§8.65) passes: evaluated only when BOTH waves completed, BEFORE the finalize
 write; drift ⇒ NO finalize, NO marker set (the entry clear stands — the analyses-only shape
 is left behind and recovery refuses it, so a drifted wave is structurally undraftable), the
@@ -9632,9 +9633,11 @@ filesystem work or spawn — with the old digest possibly still live, proceeding
 removal would leave the prior bundle + prior digest PAIR recoverable as fresh, so the wave
 stops instead (no mutation happens, and the untouched prior finalized state remains exactly
 what it was). The marker seam is injected into the execute core (`markers: {clear, set}`;
-the registered tool wires the production `appendWorkflowState` pair); `set` stays
-loud-but-non-fatal — a failed set warns via the read-back check and leaves the marker
-cleared by the entry clear, so recovery refuses; re-running the wave repairs it. A
+the registered tool wires the production `appendWorkflowState` pair); `set` returns
+`appendWorkflowState`'s read-back boolean, and a failed set makes the wave outcome
+`complete: false` with a named `digest-marker` failure entry (the wave ran — the outcome is
+honestly incomplete, never the `io_error` fail arm); the marker stays
+cleared by the entry clear, so recovery refuses, and re-running the wave repairs it. A
 finalize-write throw is the SECOND post-launch `io_error` fail arm, mirroring the
 analyst-bundle arm's `{analyses, attempts}` extras retention (the message names the
 finalize).
@@ -9666,8 +9669,8 @@ the three non-negative-integer omission counters `stances_omitted`/`angle_findin
 
 **The stance vocabulary.** A stance is `endorse` or `challenge` with a required non-empty
 `reason` — there is deliberately **no abstain value**; `disposition` is a **defensive echo**
-of the analyst proposal being stanced (mismatch = malformed lane — the audit echoed-identity
-precedent); `evidence_checked` records what the selective verification actually touched (the
+of the analyst proposal being stanced (mismatch = malformed lane — the echoed-identity
+rule); `evidence_checked` records what the selective verification actually touched (the
 dream-report node's destructive evidence bar consumes it). **Silence counts as
 non-endorsement**: the re-decode never requires stance coverage — empty `stances` is valid —
 and the consumption rule (an unstanced destructive proposal cannot proceed) is the
@@ -9732,7 +9735,8 @@ the `skip_reason` vocabulary is `incomplete-analysis` (strict first wave failed 
 no bundle write, **no reducer launch**) and `budget-exceeded` (composed but over budget —
 nothing written, no reducer launch). A drifted bracket retains the analyses AND reducer
 reports in the aggregate (honest coverage). `attempts` carries one output-free `WaveAttemptReceipt`
-per launched wave, built from each wave's code-owned `requestedKeys` (they correlate with
+per wave invocation — including a pre-spawn `unavailable` outcome, preserved as an attempt —
+built from each wave's code-owned `requestedKeys` (they correlate with
 `children[*].key`, never semantic labels). The TWO post-launch fail arms are the
 analyst-bundle-write and the finalize-write `io_error`s, whose typed extras retain BOTH the
 analyst analyses AND the already-recorded attempt receipts (`{analyses, attempts}` — the
@@ -9752,7 +9756,7 @@ dream-report model, the validation that proves the parent's judgment obeys the p
 policy, and the deterministic Markdown renderer that owns the CANONICAL report bytes in parts.
 Pure domain code — no fs, no tool registration, no `ExtensionAPI`; imports only the two dream
 siblings. Consumed by the `objective_draft`/review/save wiring (the `dream_report` param,
-§8.63 — landed); part persistence to the backend is §8.64; the whole pipeline is reachable
+§8.63); part persistence to the backend is §8.64; the whole pipeline is reachable
 only inside a `perk learn dream` launch (§8.65). The input is untrusted DATA,
 never instructions.
 
@@ -9857,9 +9861,8 @@ effects) or `{ok: false, details}`.
 **The deterministic renderer.** `renderDreamReport(report)` → `{ok: true, parts: string[]}`
 or `{ok: false, detail}` — a pure function of the composed report (no clock, no locale, no
 environment); the renderer owns the CANONICAL report bytes. Constants:
-`DREAM_REPORT_PART_MAX_CHARS = 60_000` — the per-part cap measured in Unicode CODE POINTS
-(the `journal.py` `JOURNAL_EVENT_MAX_CHARS` precedent — that precedent is a single-body
-refusal cap; the part-splitting semantics are new here), under GitHub's 65,536-char comment
+`DREAM_REPORT_PART_MAX_CHARS = 60_000` — the per-part cap measured in Unicode CODE POINTS,
+under GitHub's 65,536-char comment
 limit with margin for the persistence-side storage markers (the renderer never emits marker
 HTML) — and `DREAM_REPORT_PART_HEADER_RESERVE = 200`, the fixed per-part packing allowance
 for the part header. Pipeline: the report renders to an ordered stream of Markdown blocks;
@@ -9922,10 +9925,10 @@ absent → `absent` (unchanged, byte-identical behavior); non-dream + present �
 `invalid_input` (the objective and its report review as ONE bundle — draft-time enforcement
 means a report-less dream bundle can never reach review, so an approval is always savable,
 the §8.62 "validates BEFORE review" promise); dream + present → recover trusted context →
-**the revalidation-bracket re-check** (§8.65 — after context recovery authenticates the
+**the revalidation-bracket re-check** (§8.65's bracket, and its rationale: after context
+recovery authenticates the
 manifest, `bracket(ctx.cwd, manifest.commit_sha)` runs at draft-write AND save, both
-consumers flowing through this one resolver; drift refuses `bad_state` — "the repository
-moved since the dream snapshot (<detail>) — the analysis is stale; re-run perk learn dream";
+consumers flowing through this one resolver; drift refuses `bad_state`;
 non-dream paths never reach the bracket; the resolver's optional fourth parameter defaults to
 the production `revalidationBracket`, injected only by tests) →
 `buildDreamReport(input, context)` → refuse on any failure, else yield the block. The gate
@@ -9978,8 +9981,8 @@ they are byte-compared (`JSON.stringify` equality) against the re-rendered parts
 (run-scratch drift or artifact tamper between draft-write and save) refuses `bad_state` with
 nothing saved and the read-only gate left on. The one `generated_at` stamp is what keeps the
 re-render deterministic. On success the parts cross to the Python save door through the
-run-scoped transfer file and are durably persisted as the report companion — **§8.64** (which
-superseded the original §8.63 deferral); no new cold-door flag exists.
+run-scoped transfer file and are durably persisted as the report companion in §8.64; no new
+cold-door flag exists.
 No new ok-details fields on either tool (the visible review bundle and the normal ok results
 already carry the signal). `STAGE_TOOLS`/`READ_ONLY_TOOLS` are untouched: `objective_draft`
 stays read-only-safe (the dream arm only READS run scratch; the marker rides the ordinary
@@ -9987,7 +9990,7 @@ session-entry channel), `objective_save` stays gate-excluded.
 
 ## §8.64 · Dream companion persistence + convergent save ordering
 
-The dream save's durable half (Objective #1892 Node 4.3): the run-scoped **transfer file**
+The dream save's durable half: the run-scoped **transfer file**
 carries the reviewed CANONICAL parts from the extension to the `perk objective create` save
 door; the door stamps `origin` (§8.24), re-checks the open-by-origin conflict, persists the
 parts as the immutable **dream report companion** on the objective's **report carrier**, and
@@ -10020,7 +10023,7 @@ part-invariance rule — before ANY network, the GitHub auth probe included (`re
 runs only after the offline refusal ladder, so a malformed transfer refuses `invalid_input`
 even unauthed — never masked by `github_unauthed`); an unreadable / invalid-UTF-8 transfer
 file refuses the same `invalid_input`, never a raw crash; (2) the existing stacked block stays byte-positioned (strict train validation +
-`Delivery.prepare` exactly where they run today — a dream+stacked save keeps the
+`Delivery.prepare` in their established positions — a dream+stacked save keeps the
 pre-persistence capability gate); (3) the **origin conflict re-check** immediately before
 create: `find_open_objective_by_origin(origin=LEARN_DREAM, exclude_run_id=<run id>)` — a
 returned ref refuses `error_type="origin_conflict"` naming the existing objective id + url;
@@ -10048,10 +10051,10 @@ Linear: the Project metadata sentinel's identifier. **Marker grammar** (dual-enc
 canonical HTML `<!-- perk:learn-dream-report:<run_id>:<i> -->`; the parser also accepts the
 inline-code rewrite `` `perk:learn-dream-report:<run_id>:<i>` ``. `<i>` is a canonical 1-based
 decimal (no leading zeros/signs — any other spelling in a marked comment is corruption).
-Marker-text detection is substring-based; a comment carrying the marker text MUST parse
-strictly (marker on the PHYSICAL first line — leading blank lines/indentation are corruption,
-never normalized away, for foreign-run comments identically; identity from the first line;
-marker-text count > 1 in one body = corruption; an edited marked comment = corruption); an
+Marker parsing is strict and fail-closed (the parser mechanics are `dream_companion.py`'s
+own): a comment carrying the marker text must parse exactly — any deviation (a non-first-line
+marker, an edited marked comment, a duplicate marker in one body) is corruption, for
+foreign-run comments identically; an
 unmarked comment is unrelated untrusted DATA. A comment body is `marker + blank line + part`. **Dual-candidate
 byte-identity:** a stored body converges iff byte-equal to the verbatim render OR the local
 transcode candidate (the marker-line inline-code rewrite derived by the same rule as
@@ -10091,9 +10094,7 @@ reservation headers + `Content-Type`) and returning the asset URL — → the ex
 canonical parts joined `"\n\n"` — verbatim, never transcoded (a file asset, not a comment).
 **Fail-loud** (part of the convergent sequence, never fail-open bookkeeping) — each boundary
 failure fails the save; retry converges. Uploaded assets are workspace-auth-gated (fine — the
-artifact serves workspace humans). Non-binding recorded intent: once `gh` grows general-file
-issue attachment (cli/cli#14194; today's preview `--attach` is images/video only), the GitHub
-arm may attach the rendered report file — a desire, not a promise.
+artifact serves workspace humans).
 
 **The `dream_report` header field.** `OBJECTIVE_HEADER_FIELDS` gains `dream_report` —
 merge-writable by design (recorded AFTER create per the activation-last ordering; `origin`
@@ -10131,43 +10132,41 @@ Cold-only (no warm `/learn-dream` door — an objective non-goal) and backend-li
 `require_github`, `backend_errors=()` — the only backend read is the origin guard below,
 wrapped explicitly.
 
-**The preflight (ordering, exact).** (1) the `--from` rejection above; (2)
+**The preflight (ordering, exact** — the rationale prose is `learn/dream_cmd.py`'s and the
+seed's**).** (1) the `--from` rejection above; (2)
 `launch.resolve_target(stage, remote)` — the local-only rejection before any side effect;
 (3) the gated launch banner; (4) the **`GitError → git_error` fail-closed boundary** opens —
-one `try/except git.GitError` around every git probe below (the `create_cmd.py` precedent):
-an unprovable probe (e.g. `git status` cannot run) becomes a typed `git_error` refusal, never
+one `try/except git.GitError` around every git probe below:
+an unprovable probe becomes a typed `git_error` refusal, never
 a traceback and never an assumed-clean snapshot; (4a) the ONE pre-gather guarded fast-forward
 (`_sync_main_checkout`, only when `not dry_run and not no_sync`; `run_seeded_door` gets
-`no_sync=True` unconditionally so the in-launch sync never fires — the harvest
+`no_sync=True` unconditionally so the in-launch sync never fires — the §8.48
 one-revision-boundary discipline); (4b) the **single SHA capture** — the STRICT resolver
-`git.head_commit` runs exactly ONCE per invocation: an UNBORN head (a `--verify --quiet`
-verification failure) refuses `invalid_input` ("commit once"), while any other probe failure
-raises `GitError` into the boundary's `git_error` arm — a broken probe never misreports as
-"commit once"; (4c) the **clean-checkout requirement** — `git.is_dirty` (untracked included)
-refuses the distinct type `dirty_checkout` (a distinct repair action: commit/stash); runs on
+`git.head_commit` runs exactly ONCE per invocation: an UNBORN head
+refuses `invalid_input` ("commit once"), while any other probe failure
+raises `GitError` into the boundary's `git_error` arm;
+(4c) the **clean-checkout requirement** — `git.is_dirty` (untracked included)
+refuses the distinct type `dirty_checkout`; runs on
 `--dry-run` too; (4d) the **index-flag refusal** — `git.index_flagged_paths` (any
-assume-unchanged or skip-worktree entry, the `ls-files -v` lowercase/`S` tags) refuses
+assume-unchanged or skip-worktree entry) refuses
 `invalid_input` naming the flagged paths (≤10 shown): either bit hides edits from
-`git status`, so 4c's proof would not be a proof (a sparse checkout is the common producer);
+`git status`, so 4c's proof would not be a proof;
 (5) the gather (`gather_dream`) — its §8.59 refusals pass through the door envelope
 unchanged; (6) the **tracked-corpus rule** (still inside the GitError boundary), BOTH
 directions — the gathered doc-path set must EQUAL the tracked learned corpus (the tracked
 `docs/learned/**/*.md` set minus the generated `index.md` — the `read_learned_docs`
-enumeration rule): gathered ⊆ tracked because `git status --porcelain` omits gitignored
-files, so an IGNORED doc could be gathered while the tree reports clean (refused
-`invalid_input` naming every offender as not reproducible from the stamped commit;
-plain-untracked docs already refused at 4c); tracked ⊆ gathered because the gather
-enumerates the FILESYSTEM, so a tracked doc absent from disk (a sparse/skip-worktree
-checkout) would silently narrow a "whole-corpus" audit (refused `invalid_input` naming every
-missing doc); (7)
+enumeration rule): gathered ⊆ tracked (an IGNORED doc can be gathered while the tree reports
+clean) and tracked ⊆ gathered (a tracked doc absent from a sparse/skip-worktree checkout
+would silently narrow a whole-corpus audit) — each direction refuses `invalid_input` naming
+every offender; (7)
 the **pre-launch active-origin guard** (real launch only — skipped entirely on `--dry-run`,
 which stays offline): `resolve_objective_store(repo_root)` +
 `find_open_objective_by_origin(origin=LEARN_DREAM, exclude_run_id=None)` wrapped in ONE
 `try/except (ObjectiveStoreError, IssueBackendError)` → `origin_lookup_failed` (**fail-closed**
 — the wrap covers the store resolution AND the lookup); a returned ref refuses
-`origin_conflict` naming `#<id>` + url ("complete or close it before dreaming again"); the
-guard runs BEFORE the run id is minted and before any scratch write (`exclude_run_id=None`
-because a freshly minted run can have no stored objective; the §8.64 save-time re-check owns
+`origin_conflict` naming the objective id + url; the
+guard runs BEFORE the run id is minted and before any scratch write (the §8.64 save-time
+re-check owns
 the current-run exclusion); (8) mint + `write_manifest` (`OSError` → `manifest_write_failed`);
 (9) the seed render — `stages/learn-dream.md` with exactly three string vars
 (`manifest_path`, `doc_count`, `lane_count`; lane ids/cluster names stay DATA in the
@@ -10237,7 +10236,8 @@ facts, never a session. The **TTY gate** requires BOTH `sys.stdin.isatty()` and
 `sys.stdout.isatty()` (the launch execs the full-screen pi TUI). The flat root alias `ready`
 binds the wrapper; `perk pr ready` keeps the worker object.
 
-**The pinned cold launch contract.** On a successful stacked stamp (an `existed=true` re-stamp
+**The pinned cold launch contract** (`pr/ready_cmd.py`). On a successful stacked stamp (an
+`existed=true` re-stamp
 included — re-running ready re-enters the pass), the wrapper resolves everything BEFORE emitting:
 it validates the evidence vocabulary (both diff-range endpoints — the stamped head and the
 stamp's `parent_checkpoint_sha` — against `journal.is_full_head_sha`), resolves the **borrowed
@@ -10256,7 +10256,8 @@ when nothing was emitted yet), a loud stderr line naming the standing stamp and 
 `perk ready <plan>` retry, exit 1 — a deliberate broad degrade boundary; the stamp is never
 rolled back.
 
-**The warm drive.** The warm `/ready` door decodes the stacked cohort all-or-nothing and
+**The warm drive** (`extension/doors/ready.ts` — the cold contract's parity twin). The warm
+`/ready` door decodes the stacked cohort all-or-nothing and
 **facts-only** — the six fields `objective`/`node`/`stamped_head`/`stamp_advanced`/`plan`/
 `parent_checkpoint`; the envelope's `reconcile_notice`/`reconcile_retry` presentation strings
 are deliberately NOT part of the cohort (the drive derives its own retry gesture from `plan`,
@@ -10314,8 +10315,8 @@ door maps it to `error_type: stacked_append_refused` with the errors plus the ro
 **Accepted residual concurrency.** No lease exists between the pass and LAND/planning — bounded
 deliberately by the liveness stop, head-drift reporting, skip-if-stale idempotence, and the
 tail-append guard; the post-land whole-train reconcile remains the final truth pass. The
-borrowed stage presents as `objective-save` in stage-keyed surfaces (the same trade the
-plan-borrowing factories accepted). The rendered pass guidance deliberately names NO
+borrowed stage presents as `objective-save` in stage-keyed surfaces. The rendered pass
+guidance deliberately names NO
 ready/land re-entry gesture: re-entry guidance lives on the human-facing surfaces (the worker
 tail, the drive warnings, the launch stderr), so the §8.40 objective-stage lists stay
 unwidened — the zero-argument `ready` tool must never ride an unbound main-root session where
