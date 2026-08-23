@@ -38,6 +38,9 @@ for exactly one goal.
 - [How to review a stacked PR train](./review-a-stacked-train.md) — review each layer of a
   stacked pull-request train on its incremental diff, leave feedback on any layer safely, and
   never merge a layer individually.
+- [How to review a PR stack in the browser](./review-a-stack-in-the-browser.md) — review a
+  whole stack (a perk train or any base-ref chain) in one combined-diff plannotator session
+  with `/stack-review-browser`, then post judgment-routed per-PR reviews.
 - [How to replan an open plan](./replan-an-open-plan.md) — re-author a saved-but-not-landed plan
   against the current codebase.
 - [How to adopt an existing issue as a plan](./adopt-an-existing-issue.md) — turn a pre-existing

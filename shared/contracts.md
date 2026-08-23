@@ -467,6 +467,7 @@ end of the section).
 | `last_review_batch` | object \| null | the last fully processed review batch, appended by `finalize_address` only after publication and thread resolution succeed: `{ pr, counts:{actionable,informational,praise,question}, resolved_thread_ids:[…], at:ISO }` |
 | `last_pr_review` | object \| null | the last `/pr-review` (or the experimental `/pr-review-dynamic`) outcome posted via the shared warm `post_pr_review` tool: `{ pr, verdict, angles, covered_angles, comment_count, mode, at:ISO }`; a recorded wave is PR-bound and single-use, and supplies authoritative ordered `angles` / schema-valid `covered_angles`; standalone posting before any valid wave uses caller-supplied angles for both (or `[]`); best-effort tier (the PR review is the canonical record) |
 | `last_review` | object \| null | the last review-door outcome posted via the warm `submit_pr_review` tool: `{ pr, event, comment_count, mode, at:ISO }`; best-effort tier (the submitted PR review is the canonical record) |
+| `review_posts` | array | the accumulating per-PR posting ledger of a stacked review: one `{ pr, event, at:ISO }` row per REAL `submit_pr_review` success, in posting order (read-rebuild-append — each write carries the whole list); the stack flow's partial-outcome/resume authority (confirmed rows are skipped, never replayed); best-effort tier |
 | `session_artifacts` | object \| null | per-name session-artifact provenance pointers `{run_id, name, path, digest, at}` (§8.1); appends carry the **whole merged map** (per-field LWW); strict-append tier |
 | `objective_node_claim` | object \| null | the objective node this session has claimed `planning` (`{ objective, node }`); written by the warm `objective_node` tool on a successful `planning` transition, cleared on a successful non-planning transition for the same node and after a successful node-linked plan save; best-effort tier (cheaply reconstructable; loud-but-non-fatal) |
 | `conflict_resolution_attempts` | number | the bounded conflict-resolution re-drive counter: incremented each time `/submit` drives the `perk.conflict-resolver` subagent on a definitively-unmergeable PR (cap `CONFLICT_RESOLUTION_ATTEMPT_CAP = 2`), reset to 0 on a clean submit; best-effort tier (cheaply reconstructable) |
@@ -579,6 +580,17 @@ the run's handoff blob — the field is the tool's **sole write-target authority
 boundary justifying its `READ_ONLY_TOOLS` carve-in: no model-relayed path exists, so a gated
 session cannot aim the writer anywhere). A session whose launch state lacks the field — i.e.
 every session that is not a claimed `audit judge` launch — is refused `bad_state`.
+
+**The stack-review launch binding (`stack_review`, §8.4).** The `perk objective stack review`
+cold door stashes `handoff_extra={"stack_review": {kind, objective_id, stack: [{pr, url,
+branch, head_sha, base_ref, node_id, plan_id}…], base_ref, base_sha, top_pr, checkout_path,
+notes, focus}}` — the checkout worker's **pinned snapshot** (§8.4), never re-resolved. The warm
+`open_stack_review` tool takes **no parameters** and recovers the blob through the rebuilt
+workflow-state `run_id` → the run's handoff (the `audit_bundle_dir` recovery shape); a
+missing/blank binding or a missing checkout dir is `bad_state`, headless is a typed refusal,
+and the tool is **single-use** per session. On success it opens the SAME browser-lifecycle core
+as the warm `/stack-review-browser` door and returns the rendered stack guidance as its ok
+text.
 
 **Progress tracking (checkpoints retired).** perk mints **no** progress state of its own: the
 checkpoint substrate is removed — the `perk:checkpoint` entry, the `## Steps` seeding machinery,
@@ -925,6 +937,13 @@ get_pr_review_context{ pr_number, branch, plan_body } -> PrReviewContext{ pr_num
     # `plan_body` null, clean `pr_not_found` arm). `--expected-pr <n>` stays on the active-plan,
     # plan-body-preserving arm and compares the branch-selected target before context fetch;
     # mismatch is `review_target_changed`. The two flags are mutually exclusive.
+    # `--pr <top> --stack` (the stacked reviewer-context arm; --stack requires --pr and
+    # excludes --expected-pr): re-resolves the chain from the given PR (a perk train IS a
+    # base-ref chain; the same cardinality/fork gates as checkout, so children and doors refuse
+    # consistently), keeps the top-level fields on the top PR (non-stack byte-identical), and
+    # adds stack:[{pr, base_ref, head_ref, title, body, diff, plan_body}] per-member sections
+    # (plan_body enriched for `plan-<N>` head branches) + combined_diff (the same refspec
+    # fetch as checkout — idempotent — then a local `git diff <base_sha> <top_sha>`).
 post_pr_review{ pr_number, summary, comments:[{path,line,body,side?}], event? } -> ReviewPostResult{ ok, mode, pr_number, comment_count }
     # ONE atomic review via POST .../pulls/{n}/reviews — comments + body + event land together or
     # not at all. `event` defaults to COMMENT (wire spelling: COMMENT|APPROVE|REQUEST_CHANGES) and
@@ -1026,6 +1045,26 @@ perk pr review checkout --pr <n> --json -> { success, error_type, message, path,
     # UNTRUSTED-CODE POSTURE (structural): the head is foreign code — the door NEVER runs
     # `[worktree] setup` and never installs anything (pinned by a structural spy test).
     # Errors: pr_not_found · github_error · git_error · not_a_repo (exit 2); exits 0/1/2.
+    # THE `--stack` ARM (the stacked-review hydration boundary, §8.4 stacked-PR review):
+    # `--stack --pr <n>` resolves the whole stack via the base-ref chain walk; `--stack
+    # --objective <id>` via the delivery train; bare `--stack` resolves the objective from the
+    # worktree plan-ref (`--pr`/`--objective` mutually exclusive under --stack; --objective
+    # without --stack is invalid_input). ONE fetch pins every member head (+ the stack base);
+    # post-fetch commit-topology validation FAIL-CLOSED before any worktree mutation (every
+    # predecessor head an ancestor of its successor; an indeterminate probe refuses too →
+    # stack_topology_broken); objective-arm recorded-vs-observed head drift appends a
+    # stack_notes row (warn, never refuse). The existing tail reuses verbatim at the TOP head
+    # (same review-<top> name → cleanup --pr <top> unchanged); base_sha =
+    # merge-base(origin/<stack base>, top head). Envelope: the single-PR fields describe the
+    # top PR + combined base (non-stack calls byte-compatible — no null stack keys) plus the
+    # PINNED SNAPSHOT: stack:[{pr, url, branch, head_sha, base_ref, node_id, plan_id}]
+    # bottom→top, stack_base_ref, stack_notes[] — every downstream consumer (guidance,
+    # handoff, posting narrative) reads THIS envelope; nothing re-resolves moving refs.
+    # Stack refusals (both resolution arms share the gates): not_a_stack (<2 open members —
+    # /pr-review-browser territory) · stack_too_deep (> STACK_REVIEW_MAX_MEMBERS = 20) ·
+    # fork_unsupported (cross-repo head, fail-closed on a blank identity) · ambiguous_stack
+    # (>1 open same-repo child on the upward walk) · not_stacked / stack_discontiguous /
+    # no_objective (objective arm) · stack_topology_broken (checkout).
 perk pr review cleanup --pr <n> --json -> { success, error_type, message, pr, path, removed }
     # Single-PR and idempotent: nothing to remove → success, removed:false, exit 0. Fully
     # offline (no GitHub calls). Removes a registered worktree (force) or an unregistered
@@ -1063,10 +1102,11 @@ perk pr review-submit --pr <n> --event <e> --batch <file> --json -> { success, e
 ```
 
 **The `submit_pr_review` warm tool** (`extension/doors/submitPrReview.ts`). The human-gated
-curated-posting surface both review doors ride — the doors register **no tools of their own**.
+curated-posting surface the review doors ride (`/pr-review-terminal`, `/pr-review-browser`,
+`/stack-review-browser`) — the doors register **no tools of their own**.
 Delegates to the `perk pr review-submit` cold worker above (the batch rides the run-scratch
 stdin channel); nothing perk-driven reaches GitHub before the human triage, and `gh` mutations /
-direct `perk pr review-submit` calls are forbidden on both doors:
+direct `perk pr review-submit` calls are forbidden on every door:
 
 - **Params (strict whole-batch decode — ANY malformed field ⇒ `bad_input`, nothing
   executed):** `{ pr: int, event: "approve"|"request-changes"|"comment", body: string
@@ -1101,8 +1141,21 @@ direct `perk pr review-submit` calls are forbidden on both doors:
   forbidden; the gate ladder applies unchanged), used ONLY for a `request-changes` verdict (the
   one verdict the UI cannot post) or on the human's explicit request, with the batch
   human-settled — never a perk-invented "remainder".
+- **Per-door posting ownership — the stack contract (§8.4 stacked-PR review):** the
+  local-diff plannotator session has NO attached PR, so the browser's platform-posting path
+  does not exist — ALL posting is perk-side after triage, through this tool: **one real call
+  per target PR** (a stack review posts one review per member PR), every per-PR batch dry-run
+  validated BEFORE any real post, real posts bottom→top, the per-PR gate ladder unchanged (N
+  formal posts = N confirms — accepted). Comment re-anchoring flips: in single-PR mode the
+  parent never re-anchors a child's finding; in stack mode the parent re-anchors combined-diff
+  findings into per-PR coordinates under the dry-run repair loop.
 - **`last_review`** (§8.3): `{ pr, event, comment_count, mode, at:ISO }`, appended best-effort
   with strict read-back on non-dry-run success only.
+- **`review_posts`** (§8.3): the accumulating per-PR ledger — one `{ pr, event, at:ISO }` row
+  appended per REAL success (read-rebuild-append, ordered; dry-runs and failures never write) —
+  the stack sequence's partial-outcome/resume authority: on any mid-sequence failure or decline
+  the flow STOPS, surfaces posted-vs-pending from the ledger, and on resume skips confirmed
+  rows, never replaying a posted review.
 
 **The `push_annotations` findings-delivery tool** (`extension/doors/annotationPush.ts`;
 perk-registered — census §8.40). The finding→annotation mechanics are CODE, not prompt
@@ -1419,6 +1472,82 @@ core), imported by this door and `/pr-review-terminal`'s active mode.
 - **Binding:** `command:pr-review-browser` → `perk-pr-review-browser` (nudge, §8.9), delivered
   on the
   foreign/active injections (the pre-PR mode injects nothing).
+
+### Stacked-PR review (`/stack-review-browser` + `perk objective stack review`)
+
+One browser review over an ENTIRE PR stack: one plannotator session on the combined diff (stack
+base → top head), one adversarial wave over that combined diff, then a judgment-routed posting
+step that posts per-PR reviews through `submit_pr_review` (the stack contract above). Every
+mechanical layer is a widening of an existing component — the checkout/context cold workers
+(the `--stack` arms above), the browser-open + lifecycle core, the adversarial wave — never a
+parallel rebuild.
+
+- **Resolution (wire facts only — `stack_resolve.py`, consumer tier):** two arms into one
+  `ResolvedStack` (members bottom→top, all OPEN, all same-repo heads; `base_ref` = the bottom
+  member's base; report-only `notes`): `resolve_stack_from_objective` (ONE `Delivery.status`
+  train read + one `get_pr` per member; ref-level linkage checked here → `stack_discontiguous`;
+  train blockers become notes — warn and proceed) and `resolve_stack_from_pr` (the base-ref
+  chain walk: down over OPEN same-repo PRs to the stack base, up via
+  `list_open_prs_for_base` — 0 = top, 1 = extend, >1 = `ambiguous_stack`). Resolution returns
+  NO commit SHAs — the checkout worker is the single hydration boundary and its envelope is the
+  pinned snapshot (the checkout `--stack` spec above). Cardinality/fork gates are shared by
+  both arms (`not_a_stack`, `stack_too_deep`, `fork_unsupported`).
+- **The combined-diff surface:** plannotator renders the diff itself — local mode
+  `{cwd: <top-head checkout>, diffType: "since-base", defaultBranch: "origin/<stack base>"}`.
+  The explicit base MUST be the remote-tracking ref the checkout materializes: plannotator
+  trusts an explicit value verbatim and degrades a failed merge-base to `HEAD` (an empty
+  review), so a bare branch name is a silent-failure trap.
+- **The warm `/stack-review-browser` door** (`extension/doors/stackReviewBrowser.ts`, SCOPE
+  `stack-review-browser`): a thin door over the SAME extracted browser-lifecycle core as
+  `/pr-review-browser` (`openReviewBrowserCore`: open → prime → readiness observation → respond
+  routing → surface clear → guidance injection), with the stack respond mapper
+  (`stackRespondMessage`: exit → the closed note; approved-with-no-annotations → ask the human
+  whether to post per-PR COMMENT reviews or nothing; annotations → inject with the
+  combined-diff-coordinates framing + the routing/posting protocol) and the stack degrade
+  notice (browser never ready → render findings in-session; the posting protocol never depended
+  on the browser). **Explicit, non-probing target grammar:** `[target] [focus note]` where a
+  bare number / `#n` / issue URL is an OBJECTIVE id by definition, `pr:<n>` / a PR URL is the
+  chain arm, and no target runs the ladder — the session's rebuilt `active_objective`, else the
+  worker's own `cache.plan-ref` arm, else the `no_objective` usage refusal naming the explicit
+  forms (a malformed `pr:` token is a usage error, never silently a focus note). Gates in
+  order: parse → `ctx.hasUI` → plannotator presence. Flow: the checkout `--stack` cold worker →
+  strict snapshot decode → the core → ONE guidance injection
+  (`prompts/stages/stack-review-browser/stack.md`, rendered with the snapshot table/notes —
+  shared verbatim with `open_stack_review`). The wave runs with `stack: true` — the lane-task
+  discriminator (children fetch `perk pr review-context --pr <top> --stack` and report in
+  COMBINED-DIFF coordinates; routing is the parent's job; without `stack`, lane tasks are
+  byte-identical to the single-PR wave). Streaming/`push_annotations`/collect/reconcile are the
+  browser door's contract unchanged. Cleanup: `perk pr review cleanup --pr <top>`.
+- **The cold launcher `perk objective stack review [OBJECTIVE] [--pr <n|url>] [--focus]`**
+  (seeded-door family): positional objective (default: the plan-ref-linked objective) → the
+  train arm; `--pr` → the chain arm (mutually exclusive). Typed refusals exit 1 before any
+  launch; notes render to stderr and proceed. A real run materializes the checkout via the SAME
+  `stack_checkout` implementation, then launches the dedicated `stack-review` registry stage
+  (isolated, read-write — deliberate parity with the warm door's posture — `worktree: none`,
+  cold-local only) with the two-sentence seed (`prompts/stages/stack-review/cold.md`: make ONE
+  `open_stack_review` call), `binding_trigger="command:stack-review-browser"`, and
+  `handoff_extra={"stack_review": <the pinned snapshot + focus>}` (§8.3). `--dry-run` is
+  SIDE-EFFECT-FREE: read-only resolution only — no fetch, no worktree mutation, no handoff
+  write, no launch; the preview carries the would-be checkout path, `base_sha: null` +
+  per-member `head_sha: null`, the build-once launch argv, and the handoff-blob preview with
+  the same nulls plus `dry_run: true`. Local-only by design (no `--remote`).
+  `open_stack_review` (parameterless, single-use, §8.3) recovers the snapshot and runs the same
+  core, returning the stack guidance as its ok text.
+- **Routing + per-PR posting (model judgment — no blame-attribution worker):** inputs are the
+  reconciled wave findings + returned browser annotations (both combined-diff coordinates), the
+  per-PR diffs from `review-context --stack`, and the snapshot's layer order. Default
+  disposition: fold each finding into the OWNING PR's review body; inline anchors only where
+  the location is straightforwardly identifiable in that PR's own diff; cross-cutting/
+  unplaceable findings fold into the most relevant PR's body. The posting protocol is the stack
+  contract on `submit_pr_review` above (dry-run ALL batches first → post bottom→top → the
+  `review_posts` ledger → stop on failure, skip-on-resume).
+- **Coordinate-integrity residual (accepted):** plannotator's header allows diff-mode switches
+  and annotations carry no diff-mode identity; the guidance treats returned annotations as
+  combined-diff coordinates and sanity-checks each quoted context against the target PR's diff
+  before anchoring, every anchor passes per-PR dry-run validation + the human gate — a
+  coincidentally-valid switched-view anchor remains a bounded residual (nothing auto-posts).
+  Snapshot-vs-live drift between checkout and posting is the same accepted TOCTOU posture as
+  the single-PR doors.
 
 ### PR-body craft ops (+ the submit self-checks)
 
@@ -1967,6 +2096,7 @@ perk's workflow skills are prompt-hidden; `transclude` exists for the user-bindi
 | `command:pr-review-dynamic` | `perk-pr-review-dynamic` | `nudge` |
 | `command:pr-review-terminal` | `perk-pr-review-terminal` | `nudge` |
 | `command:pr-review-browser` | `perk-pr-review-browser` | `nudge` |
+| `command:stack-review-browser` | `perk-pr-review-browser` | `nudge` |
 | `command:plan-review-browser` | `perk-plan-review-browser` | `nudge` |
 | `command:objective-review-browser` | `perk-objective-review-browser` | `nudge` |
 | `command:skills-create` | `perk-skill-author` | `nudge` |
@@ -5895,7 +6025,13 @@ sessions run GATED (read-only mode), where the gate-ON set governs, so the row e
 keys≡registry pin and the defensive gate-off arm; `run_audit_wave` also joins `PERK_TOOLS`
 and `READ_ONLY_TOOLS` (§8.3's carve-in — the write target is handoff-bound, never
 caller-supplied). `run_harvest_wave` and `run_dream_wave` likewise join `PERK_TOOLS` +
-`READ_ONLY_TOOLS` with NO stage row at all (cold-only, gate-on — §8.48/§8.61). **Scoped universe:
+`READ_ONLY_TOOLS` with NO stage row at all (cold-only, gate-on — §8.48/§8.61). The
+`stack-review` stage (§8.4 stacked-PR review) runs UNGATED (read-write — the warm-door parity
+posture), so its row IS the flow's tool authority: exactly the stack flow set —
+`ask_user_question`, `open_stack_review`, `start_review_wave`, `collect_review_wave`,
+`push_annotations`, `submit_pr_review`, the delegation family, and the research families;
+`open_stack_review` joins `PERK_TOOLS` (its one write target — the browser open — is
+handoff-bound, §8.3). **Scoped universe:
 `PERK_TOOLS ∪ BORROWED_TOOLS`** — perk's own name-keyed census plus the enumerated
 borrowed-package census (the web-provider union, pi-mono-linear's 25 tools, pi-subagents'
 delegation four, pi-fff's search names — both mode name-sets, `fffind`/`ffgrep`/`fff-multi-grep`

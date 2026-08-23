@@ -26,6 +26,7 @@ const EXPECTED: ReadonlyArray<readonly [string, string, string]> = [
   ["command:pr-review-dynamic", "perk-pr-review-dynamic", "nudge"],
   ["command:pr-review-terminal", "perk-pr-review-terminal", "nudge"],
   ["command:pr-review-browser", "perk-pr-review-browser", "nudge"],
+  ["command:stack-review-browser", "perk-pr-review-browser", "nudge"],
   ["command:plan-review-browser", "perk-plan-review-browser", "nudge"],
   ["command:objective-review-browser", "perk-objective-review-browser", "nudge"],
   ["command:skills-create", "perk-skill-author", "nudge"],

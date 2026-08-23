@@ -164,6 +164,37 @@ and adds:
   mapping, global dedupe, hold-and-retry, and source-scoped replacement. It refuses with
   `no_surface` outside a browser door opened by perk. *Non-terminating.*
 
+### `/stack-review-browser`
+
+Review an **entire PR stack** in one browser session over the combined diff (stack base → top
+head):
+
+```text
+/stack-review-browser [objective id|issue URL|pr:<n>|PR URL] [focus note]
+```
+
+A bare number, `#n`, or issue URL targets a perk **objective's delivery train**; `pr:<n>` or a
+PR URL walks the **base-ref chain** from any member PR (non-perk stacks included); with no
+target, the session's active objective, then the worktree plan-ref's linked objective, are
+tried in order. Single-PR targets refuse with a pointer at `/pr-review-browser`; forks, ambiguous
+chains, and stacks deeper than 20 members refuse typed. perk fetches every member head in one
+round trip, validates the commit topology fail-closed (a broken stack refuses before any
+checkout), checks out the **top** head detached at `review-<top>`, and opens plannotator on the
+combined diff. One adversarial wave reviews the combined diff (`stack: true` — reviewer children
+fetch per-member context with `perk pr review-context --pr <top> --stack`).
+
+**Posting is perk-side on this door** (the local-diff session has no attached PR, so there is no
+browser platform-posting): after triage, perk routes each finding to the PR that introduced it
+— body-level by default, inline only where straightforward — dry-run-validates **all** per-PR
+batches, then posts one review per member PR bottom→top through `submit_pr_review` (the gate
+ladder applies per call). Every real post appends a `{pr, event, at}` row to the `review_posts`
+ledger; a mid-sequence failure stops and surfaces posted-vs-pending, and a resume skips confirmed
+rows. Cleanup is `perk pr review cleanup --pr <top>`.
+
+The cold twin is [`perk objective stack review`](../cli/objective.md#perk-objective-stack-review-objective)
+— it materializes the same checkout and launches a dedicated session whose one
+**`open_stack_review`** call (parameterless, single-use) opens the same browser flow.
+
 ## Browser draft review
 
 Both draft doors review the exact validated artifact primed by the command. They never accept

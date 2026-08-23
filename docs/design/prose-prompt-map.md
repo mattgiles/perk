@@ -5,8 +5,8 @@ This is the readable projection of perk's living, workflow-first prose graph. It
 
 ## Coverage
 
-- **214** canonical source units
-- **723** logical fragments
+- **217** canonical source units
+- **730** logical fragments
 - **16** session shapes and **10** assemblies
 - **15** explicitly excluded candidates (policy-only; not displayed)
 - **0** validation findings
@@ -902,6 +902,8 @@ Automated, selector-driven, terminal, and browser PR-review families.
 | `markdown:prompts/stages/pr-review-terminal/foreign.md` | `launch` | `shipped` | [`prompts/stages/pr-review-terminal/foreign.md`](../../prompts/stages/pr-review-terminal/foreign.md) · `file` | — |
 | `markdown:prompts/stages/pr-review-terminal/local.md` | `launch` | `shipped` | [`prompts/stages/pr-review-terminal/local.md`](../../prompts/stages/pr-review-terminal/local.md) · `file` | — |
 | `markdown:prompts/stages/pr-review.md` | `launch` | `shipped` | [`prompts/stages/pr-review.md`](../../prompts/stages/pr-review.md) · `file` | pr-review.warm |
+| `markdown:prompts/stages/stack-review-browser/stack.md` | `launch` | `shipped` | [`prompts/stages/stack-review-browser/stack.md`](../../prompts/stages/stack-review-browser/stack.md) · `file` | — |
+| `markdown:prompts/stages/stack-review/cold.md` | `launch` | `shipped` | [`prompts/stages/stack-review/cold.md`](../../prompts/stages/stack-review/cold.md) · `file` | — |
 | `markdown:skills/perk-grill/SKILL.md` | `skill-detail` | `shipped` | [`skills/perk-grill/SKILL.md`](../../skills/perk-grill/SKILL.md) · `file` | — |
 | `markdown:skills/perk-objective-review-browser/SKILL.md` | `skill-detail` | `shipped` | [`skills/perk-objective-review-browser/SKILL.md`](../../skills/perk-objective-review-browser/SKILL.md) · `file` | — |
 | `markdown:skills/perk-plan-review-browser/SKILL.md` | `skill-detail` | `shipped` | [`skills/perk-plan-review-browser/SKILL.md`](../../skills/perk-plan-review-browser/SKILL.md) · `file` | — |
@@ -918,6 +920,7 @@ Automated, selector-driven, terminal, and browser PR-review families.
 | `typescript-model-call:extension/doors/prReviewTerminal.ts:module:sendUserMessage:1` | `tool-contract` | `shipped` | [`extension/doors/prReviewTerminal.ts`](../../extension/doors/prReviewTerminal.ts) · `symbol:module/call:sendUserMessage/1` | — |
 | `typescript-model-call:extension/waves/reportWave.ts:module:workflow-script:0` | `tool-contract` | `shipped` | [`extension/waves/reportWave.ts`](../../extension/waves/reportWave.ts) · `symbol:module/property:workflowScript/0` | — |
 | `typescript-tool:collect_review_wave` | `tool-contract` | `shipped` | [`extension/doors/reviewWaveTools.ts`](../../extension/doors/reviewWaveTools.ts) · `tool:collect_review_wave` | — |
+| `typescript-tool:open_stack_review` | `tool-contract` | `shipped` | [`extension/doors/stackReviewBrowser.ts`](../../extension/doors/stackReviewBrowser.ts) · `tool:open_stack_review` | — |
 | `typescript-tool:post_pr_review` | `tool-contract` | `shipped` | [`extension/doors/prReview.ts`](../../extension/doors/prReview.ts) · `tool:post_pr_review` | pr-review.warm |
 | `typescript-tool:push_annotations` | `tool-contract` | `shipped` | [`extension/doors/annotationPush.ts`](../../extension/doors/annotationPush.ts) · `tool:push_annotations` | — |
 | `typescript-tool:run_pr_review_dynamic_wave` | `tool-contract` | `shipped` | [`extension/doors/prReviewDynamic.ts`](../../extension/doors/prReviewDynamic.ts) · `tool:run_pr_review_dynamic_wave` | — |
@@ -958,6 +961,10 @@ Automated, selector-driven, terminal, and browser PR-review families.
   - `body` — Document body (`file-body`)
 - `markdown:prompts/stages/pr-review.md`
   - `body` — Document body (`file-body`)
+- `markdown:prompts/stages/stack-review-browser/stack.md`
+  - `body` — Document body (`file-body`)
+- `markdown:prompts/stages/stack-review/cold.md`
+  - `body` — Document body (`file-body`)
 - `markdown:skills/perk-grill/SKILL.md`
   - `frontmatter:description` — Discovery description (`frontmatter.description`)
   - `section:grilling-the-relentless-pre-review-interview` — Grilling (the relentless pre-review interview) (`heading:grilling-the-relentless-pre-review-interview`)
@@ -983,6 +990,7 @@ Automated, selector-driven, terminal, and browser PR-review families.
   - `section:reviewing-a-pr-in-the-plannotator-browser-the-pr-review-browser-door/the-annotation-mechanics-are-tool-owned` — The annotation mechanics are tool-owned (`heading:reviewing-a-pr-in-the-plannotator-browser-the-pr-review-browser-door/the-annotation-mechanics-are-tool-owned`)
   - `section:reviewing-a-pr-in-the-plannotator-browser-the-pr-review-browser-door/degraded-mode-loud-never-lossy` — Degraded mode (loud, never lossy) (`heading:reviewing-a-pr-in-the-plannotator-browser-the-pr-review-browser-door/degraded-mode-loud-never-lossy`)
   - `section:reviewing-a-pr-in-the-plannotator-browser-the-pr-review-browser-door/the-gates` — The gates (`heading:reviewing-a-pr-in-the-plannotator-browser-the-pr-review-browser-door/the-gates`)
+  - `section:reviewing-a-pr-in-the-plannotator-browser-the-pr-review-browser-door/stack-mode-stack-review-browser-perk-objective-stack-review` — Stack mode (`/stack-review-browser` + `perk objective stack review`) (`heading:reviewing-a-pr-in-the-plannotator-browser-the-pr-review-browser-door/stack-mode-stack-review-browser-perk-objective-stack-review`)
   - `section:reviewing-a-pr-in-the-plannotator-browser-the-pr-review-browser-door/untrusted-text-untrusted-code` — Untrusted text, untrusted code (`heading:reviewing-a-pr-in-the-plannotator-browser-the-pr-review-browser-door/untrusted-text-untrusted-code`)
 - `markdown:skills/perk-pr-review-dynamic/SKILL.md`
   - `frontmatter:description` — Discovery description (`frontmatter.description`)
@@ -1035,6 +1043,10 @@ Automated, selector-driven, terminal, and browser PR-review families.
   - `description` — description (`tool:collect_review_wave.description`)
   - `promptSnippet` — promptSnippet (`tool:collect_review_wave.promptSnippet`)
   - `promptGuidelines` — promptGuidelines (`tool:collect_review_wave.promptGuidelines`)
+- `typescript-tool:open_stack_review`
+  - `description` — description (`tool:open_stack_review.description`)
+  - `promptSnippet` — promptSnippet (`tool:open_stack_review.promptSnippet`)
+  - `promptGuidelines` — promptGuidelines (`tool:open_stack_review.promptGuidelines`)
 - `typescript-tool:post_pr_review`
   - `description` — description (`tool:post_pr_review.description`)
   - `promptSnippet` — promptSnippet (`tool:post_pr_review.promptSnippet`)
@@ -1079,6 +1091,7 @@ Automated, selector-driven, terminal, and browser PR-review families.
   - `parameters.properties.pr.description` — parameters.properties.pr.description (`tool:start_review_wave.parameters.properties.pr.description`)
   - `parameters.properties.worktree.description` — parameters.properties.worktree.description (`tool:start_review_wave.parameters.properties.worktree.description`)
   - `parameters.properties.directive.description` — parameters.properties.directive.description (`tool:start_review_wave.parameters.properties.directive.description`)
+  - `parameters.properties.stack.description` — parameters.properties.stack.description (`tool:start_review_wave.parameters.properties.stack.description`)
 - `typescript-tool:submit_pr_review`
   - `description` — description (`tool:submit_pr_review.description`)
   - `promptSnippet` — promptSnippet (`tool:submit_pr_review.promptSnippet`)
