@@ -39,7 +39,8 @@ node↔plan unification protocol.
   triggers the same-run-id upsert that rewrites the previous plan in place — "The same-run-id
   upsert trap".
 - `find_open_objective_by_origin` is exhaustive-or-raise (§8.24): never silently under-scan; the
-  dormant store raises rather than returning a falsely-authoritative `None` — "The origin
+  dormant store raises rather than returning a falsely-authoritative `None`; create-only header
+  fields are allowlist-omission-enforced and auto-carried across replan — "The origin
   lookup — exhaustive-or-raise".
 - The reviewed dream report persists as marker-keyed companion comments on the objective's
   `journal_carrier_id`, with the `dream_report` header reference recorded LAST as the completion
@@ -435,6 +436,16 @@ Two consumers, distinguished by `exclude_run_id`:
 - **The save-time conflict re-check** (`src/perk/cli/commands/objective/create_cmd.py`) passes
   `exclude_run_id=resolved_run_id` — the caller-exclusion that makes a single-ref API sound for
   conflict checks: excluding its own run means any returned ref IS a conflict.
+
+### Create-only header fields + replan closure (#2004)
+
+- **Create-only header fields are enforced by allowlist OMISSION**: `OBJECTIVE_HEADER_FIELDS`
+  LBYL-gates only incoming fields — the template for launch-owned provenance fields — and
+  render-only-when-set keeps existing objectives byte-identical.
+- **A guarded population must be closed under replan.** Supersede is close-old/create-new, so
+  any header field feeding an open-population guard needs store-side auto-carry of the validated
+  value into the successor — otherwise the guard's population silently loses members across
+  replans.
 
 ## The dream-companion flow
 

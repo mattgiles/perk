@@ -31,7 +31,8 @@ without changing output).
 - CRLF: Python's text-mode read normalizes newlines before jinja2, Node's does not — the TS
   renderer normalizes first — "The CRLF byte-parity hazard".
 - Parity testing is two-tier (contract-snapshot goldens + live cross-engine equality), replacing
-  prose-copy goldens — "Two-tier render-parity replaces the prose-copy golden bridge".
+  prose-copy goldens — "Two-tier render-parity replaces the prose-copy golden bridge"; flow
+  clauses need per-prompt semantic pins — "Seed prompts need their own semantic-contract test".
 - Moving an inline prompt literal onto a template without output change (single-plane prompts
   belong in `prompts/` too) — "The prompt-move pattern (the cornerstone)".
 - Python's canonical source-text entry point shares one loader-bound Environment with named
@@ -272,6 +273,13 @@ Mechanics:
   `worker.test.ts`, `objectivePlan.test.ts`) assert *which arm is selected*, never read goldens —
   unaffected by the split (only their "golden cases" comments needed rewording to "live-parity
   cases").
+
+## Seed prompts need their own semantic-contract test (#1990)
+
+Every new seed prompt needs its own semantic-contract test — the parity/grammar/budget suites
+prove render *mechanics*, never flow clauses. The pattern: whitespace-normalized pins over the
+captured real-launch prompt covering the single-call/no-retry rule and every incomplete/stop
+arm.
 
 ## The bare-import source-scan guard (the bare-clone invariant)
 

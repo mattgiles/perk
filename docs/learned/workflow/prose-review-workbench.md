@@ -17,7 +17,8 @@ adapters, wire protocol, and edit workspace evolve.
   no-websocket-route posture, rebuilds from disk, and has one `dist/` writer — "Launcher security
   and the development loop".
 - Catalog failures are fail-closed according to result trustworthiness; policy-definition errors
-  prevent discovery while registration-shape errors become typed findings — "Prose-map catalog
+  prevent discovery while registration-shape errors become typed findings; a new described param
+  moves multiple count pins (verify via the living-map check) — "Prose-map catalog
   governance".
 - Closed adapter vocabularies are exhaustive at domain/DTO/route boundaries; syntax validation
   precedes selectors and subprocess adapters are bounded — "Source-adapter contract craft".
@@ -75,6 +76,10 @@ Generated fragment ordering follows registry insertion order. Exact-output tests
 registry reorder are identifying a contract change, not formatter noise. The compile-time exhaustive
 policy registry in `tools/prose-map/catalog.ts` and its runtime unknown-field finding form the
 two-layer guard described in `workflow/source-scan-guards.md`.
+
+A governed tool gaining a described param moves multiple prose-map count pins at once (governed
+tools / TS fragments / discovery candidates) — verify with the living-map check, never assume
+the outcome (#1992).
 
 ## Source-adapter contract craft
 
