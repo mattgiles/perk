@@ -84,9 +84,11 @@ export interface WorkflowState {
    */
   dream_bundle_digest?: string;
   /**
-   * The bounded conflict-resolution re-drive counter (§8.3). Incremented each time
-   * `/submit` drives the `perk.conflict-resolver` subagent on a definitively-unmergeable PR;
-   * reset to 0 on a clean submit. Best-effort tier (cheaply reconstructable). Per-field LWW in
+   * The bounded conflict-resolution re-drive counter (§8.3). Incremented on each
+   * `perk.conflict-resolver` dispatch from EITHER warm surface — `/submit`'s PR-rebase drive on
+   * a definitively-unmergeable PR, or `/objective-sync`'s retained-continuation drive; reset to
+   * 0 on any clean completion (a clean submit; a clean non-declined mutating stack
+   * sync/continue/abort/adopt). Best-effort tier (cheaply reconstructable). Per-field LWW in
    * `rebuildWorkflowState` handles it with no rebuild change.
    */
   conflict_resolution_attempts?: number;

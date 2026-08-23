@@ -11,15 +11,22 @@
 //   - `objective_stack_status` / `objective_stack_sync` / `objective_stack_adopt` /
 //     `objective_stack_recover` / `objective_stack_land` — separately-typed tools (no broad
 //     action enum), strict tri-state param decode (refuse the whole call on any malformed
-//     field), non-terminating. Warm consent: the plain sync/continue/abort calls pass `--yes`
-//     (the human's gesture/driven approval is the consent); adopt (mutating),
-//     recover-with-abandon, and the mutating land additionally require `confirm: true`.
-//     Cold-envelope decodes are lenient/render-only.
+//     field), non-terminating. Warm consent: the plain sync/continue/abort/resolve calls pass
+//     `--yes` where they reach the cold door (the human's gesture/driven approval is the
+//     consent); adopt (mutating), recover-with-abandon, and the mutating land additionally
+//     require `confirm: true`. Cold-envelope decodes are lenient/render-only.
+//
+// Two warm drives live here: §8.56's reconcile drive (`driveStackReconcile`) and §8.51's sync
+// conflict drive (`driveSyncConflictResolution` — a mutating sync/continue refusing
+// `rebase_conflict` auto-dispatches the `perk.conflict-resolver` subagent into the retained
+// continuation worktree; `objective_stack_sync { resolve: true }` is the explicit-request twin).
 //
 // Objective inference everywhere: explicit param/argument → workflow `active_objective` →
 // plan-ref `objective_id` (the resolveReconcileObjective precedent); the warm layer always
 // passes the resolved objective explicitly to the cold door.
 
+import { rmSync } from "node:fs";
+import { basename, dirname } from "node:path";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { reconcileGuidance } from "../factories/objectivePlan.ts";
 import { bindingSuffix } from "../substrate/bindingDelivery.ts";
@@ -33,13 +40,19 @@ import {
   stringField,
 } from "../substrate/coldDoor.ts";
 import { registerPerkCommand } from "../substrate/command.ts";
-import { resolveIssueBackendId } from "../substrate/config.ts";
+import { resolveIssueBackendId, subagentModel } from "../substrate/config.ts";
 import { render } from "../substrate/prompts.ts";
+import { acquireResolverLease, resolverLockDir } from "../substrate/resolverLease.ts";
 import { failFor, ok, type Result } from "../substrate/result.ts";
 import type { ToolGating } from "../substrate/toolGating.ts";
 import { booleanParam, idParam, paramsOf, stringParam } from "../substrate/toolParams.ts";
-import { branchOf, rebuildWorkflowState } from "../substrate/workflowState.ts";
+import {
+  appendWorkflowState,
+  branchOf,
+  rebuildWorkflowState,
+} from "../substrate/workflowState.ts";
 import { report } from "../surfaces/report.ts";
+import { CONFLICT_RESOLUTION_ATTEMPT_CAP, resetConflictAttempts } from "./submit.ts";
 
 /** Every stack tool returns the same slim ok-details: the resolved objective the cold door was
  * driven with (the envelope itself is render-only — nothing persisted). */
@@ -193,9 +206,16 @@ export function renderStackStatus(payload: ColdJson): string {
         }`,
       );
     }
-    lines.push(
-      "  resume via objective_stack_sync { continue: true }, or discard via { abort: true }",
-    );
+    if (booleanField(continuation, "parseable") === true) {
+      lines.push(
+        "  resume via objective_stack_sync { continue: true }, discard via { abort: true }, or " +
+          "dispatch automated resolution via { resolve: true } (on explicit human request)",
+      );
+    } else {
+      lines.push(
+        "  resume via objective_stack_sync { continue: true }, or discard via { abort: true }",
+      );
+    }
   }
   const orphans = objectField(payload, "orphaned_residue");
   if (orphans !== undefined) {
@@ -468,9 +488,12 @@ interface SyncToolParams {
   dryRun: boolean;
   continue_: boolean;
   abort: boolean;
+  /** The warm-only explicit resolver dispatch (§8.51) — never reaches the cold door. */
+  resolve: boolean;
 }
 
-/** Strict decode + the §8.49 mode matrix (same as the CLI's): null = refuse the whole call. */
+/** Strict decode + the §8.49 mode matrix (same as the CLI's, plus the warm-only `resolve`,
+ * which composes with NOTHING): null = refuse the whole call. */
 function decodeSyncParams(params: unknown): SyncToolParams | null {
   const p = paramsOf(params);
   if (p === null) return null;
@@ -479,22 +502,28 @@ function decodeSyncParams(params: unknown): SyncToolParams | null {
   const dryRun = booleanParam(p, "dry_run");
   const continue_ = booleanParam(p, "continue");
   const abort = booleanParam(p, "abort");
+  const resolve = booleanParam(p, "resolve");
   if (objective === null || base === null || dryRun === null || continue_ === null) return null;
-  if (abort === null) return null;
+  if (abort === null || resolve === null) return null;
   const decoded: SyncToolParams = {
     objective: objective ?? undefined,
     base: base ?? false,
     dryRun: dryRun ?? false,
     continue_: continue_ ?? false,
     abort: abort ?? false,
+    resolve: resolve ?? false,
   };
+  if (decoded.resolve && (decoded.base || decoded.dryRun || decoded.continue_ || decoded.abort)) {
+    return null;
+  }
   if (decoded.continue_ && decoded.abort) return null;
   if ((decoded.continue_ || decoded.abort) && (decoded.base || decoded.dryRun)) return null;
   return decoded;
 }
 
 /** The sync argv by mode: continue/abort take no cascade flags; `--yes` rides every mutating
- * path (warm consent — the human's gesture/driven approval); a dry run passes no `--yes`. */
+ * path (warm consent — the human's gesture/driven approval); a dry run passes no `--yes`.
+ * Never reached with `resolve` — stackSync branches to the warm dispatcher first. */
 export function buildStackSyncArgs(objective: string, p: SyncToolParams): string[] {
   const args = ["objective", "stack", "sync", objective];
   if (p.continue_) {
@@ -631,7 +660,7 @@ async function stackStatus(
   return ok(renderStackStatus(r.data), { objective });
 }
 
-async function stackSync(
+export async function stackSync(
   pi: ExtensionAPI,
   ctx: ExtensionContext,
   p: SyncToolParams,
@@ -639,16 +668,34 @@ async function stackSync(
   const fail = failFor(ctx, "objective-sync", "objective_stack_sync");
   const objective = resolveStackObjective(p.objective, ctx);
   if (objective === null) return fail(NO_OBJECTIVE_MESSAGE, "no_objective");
+  if (p.resolve) {
+    // The warm-only explicit dispatch (§8.51): never calls the cold sync worker — the shared
+    // dispatch core corroborates against the CURRENT status projection (no freshness token;
+    // the human's explicit request is the trigger) and injects the resolver dispatch.
+    const outcome = await dispatchSyncResolver(pi, ctx, objective, null);
+    if (outcome.dispatched) {
+      return ok(
+        `conflict-resolution dispatch injected (attempt ${outcome.attempt} of ` +
+          `${CONFLICT_RESOLUTION_ATTEMPT_CAP})`,
+        { objective },
+      );
+    }
+    return fail(outcome.reason, outcome.errorType);
+  }
   const mode: SyncMode = p.continue_ ? "continue" : p.abort ? "abort" : "sync";
   const r = await runColdDoor<ColdJson>(pi, ctx, buildStackSyncArgs(objective, p), {
     label: "perk objective stack sync",
     decode: (payload) => payload,
   });
   if (!r.ok) return fail(r.message, r.errorType);
+  // Any clean, non-declined mutating completion re-opens the shared bounded conflict budget.
+  if (!p.dryRun && booleanField(r.data, "declined") !== true) {
+    resetConflictAttempts(pi, ctx, "objective-sync");
+  }
   return ok(renderSyncOutcome(r.data, mode), { objective });
 }
 
-async function stackAdopt(
+export async function stackAdopt(
   pi: ExtensionAPI,
   ctx: ExtensionContext,
   p: AdoptToolParams,
@@ -669,6 +716,9 @@ async function stackAdopt(
     decode: (payload) => payload,
   });
   if (!r.ok) return fail(r.message, r.errorType);
+  if (!p.dryRun && booleanField(r.data, "declined") !== true) {
+    resetConflictAttempts(pi, ctx, "objective-sync");
+  }
   return ok(renderSyncOutcome(r.data, "sync"), { objective });
 }
 
@@ -810,6 +860,306 @@ export function driveStackReconcile(
   }
 }
 
+// --- the sync conflict drive (contracts.md §8.51 — the second warm drive) ------------------------
+
+/** The ONE lineage predicate — the exact warm twin of the Python `_SAFE_LINEAGE_RE` vocabulary. */
+const LINEAGE_RE = /^[0-9A-Za-z][0-9A-Za-z_-]{0,63}$/;
+/** A canonical 26-char Crockford ULID operation id (`validated_targets`' shape, warm side). */
+const OPERATION_ULID_RE = /^[0-9A-HJKMNP-TV-Z]{26}$/;
+/**
+ * The shell-inert absolute-path vocabulary: no space, no shell metacharacter — the dispatch
+ * template renders an UNQUOTED `cd {{ worktree }}`, so containment here is what keeps the
+ * interpolation from ever becoming shell syntax. A legitimate-but-exotic worktree root (e.g.
+ * containing spaces) degrades to report-only — an accepted, recorded degradation.
+ */
+const SHELL_INERT_ABS_PATH_RE = /^\/[A-Za-z0-9._/-]+$/;
+const BRANCH_RE = /^[A-Za-z0-9._/-]{1,200}$/;
+
+function hasDotDotSegment(path: string): boolean {
+  return path.split("/").includes("..");
+}
+
+/** The sanitized dispatch facts — every string is whitelist-validated before it gets here. */
+export interface SyncConflictDispatch {
+  operationId: string;
+  manifestPath: string;
+  objective: string;
+  node: string;
+  branch: string;
+  pr: number;
+  worktree: string;
+}
+
+/**
+ * Corroborate a retained sync conflict against the fresh status projection (§8.51): the
+ * continuation facts, the refusal-message freshness token, lineage/worktree containment, the
+ * conflicting layer's identity, and the interpolation vocabularies. Fail-closed: any miss is
+ * ineligible with the specific reason. `refusalMessage === null` skips ONLY the freshness-token
+ * clause (the explicit `resolve` path — there is no refusal; the human's request against the
+ * CURRENT projection is the trigger).
+ */
+export function corroborateSyncConflict(
+  payload: ColdJson,
+  refusalMessage: string | null,
+): { eligible: true; dispatch: SyncConflictDispatch } | { eligible: false; reason: string } {
+  const ineligible = (reason: string) => ({ eligible: false as const, reason });
+  const continuation = objectField(payload, "continuation");
+  if (continuation === undefined) {
+    return ineligible(
+      "the status projection reports no pending continuation — nothing was retained (a failed " +
+        "manifest write cleans its residue); fix the underlying issue and rerun the sync",
+    );
+  }
+  if (booleanField(continuation, "parseable") !== true) {
+    return ineligible(
+      "the pending continuation manifest is UNPARSEABLE — automated resolution cannot " +
+        "corroborate it; discard the retained continuation via objective_stack_sync " +
+        "{ abort: true } and rerun the sync",
+    );
+  }
+  const operationId = stringField(continuation, "operation_id");
+  const node = stringField(continuation, "conflict_node_id");
+  const worktree = stringField(continuation, "worktree_path");
+  const manifestPath = stringField(continuation, "manifest_path");
+  if (
+    operationId === undefined ||
+    node === undefined ||
+    worktree === undefined ||
+    manifestPath === undefined
+  ) {
+    return ineligible(
+      "the pending continuation is missing operation/layer/path facts — resolve the rebase by " +
+        "hand in the retained worktree, or discard via objective_stack_sync { abort: true }",
+    );
+  }
+  if (!EVIDENCE_ID_RE.test(node)) {
+    return ineligible(
+      "the continuation's conflict node id falls outside the identifier vocabulary — refusing " +
+        "to dispatch; resolve by hand in the retained worktree",
+    );
+  }
+  // Freshness: every `rebase_conflict` arm names the layer whose rebase actually STOPPED as
+  // `for layer <node_id> ` (trailing space — `2.2` never matches `2.22`). On the continue-time
+  // failed-rewrite arm the PRESERVED manifest names the OLD layer while the message names the
+  // NEW one — the mismatch keeps the drive report-only over stale layer facts.
+  if (refusalMessage !== null && !refusalMessage.includes(`for layer ${node} `)) {
+    return ineligible(
+      `the refusal does not name the manifest's conflict layer ${node} — the retained ` +
+        "manifest may be a stale snapshot (a failed progress rewrite preserves the previous " +
+        "one); resolve the in-progress rebase by hand in the retained worktree, or discard via " +
+        "objective_stack_sync { abort: true }",
+    );
+  }
+  const train = objectField(payload, "train") ?? {};
+  const lineage = stringField(train, "delivery_lineage");
+  if (lineage === undefined || !LINEAGE_RE.test(lineage)) {
+    return ineligible(
+      "the train reports no vocabulary-valid delivery lineage — refusing to derive the claim " +
+        "path; dispatch the resolution by hand",
+    );
+  }
+  if (basename(manifestPath) !== `${lineage}.json` || basename(dirname(manifestPath)) !== "sync-continuations") {
+    return ineligible(
+      "the continuation manifest path is not sync-continuations/<lineage>.json — refusing to " +
+        "claim it; dispatch the resolution by hand",
+    );
+  }
+  if (!OPERATION_ULID_RE.test(operationId)) {
+    return ineligible(
+      "the continuation's operation id is not a canonical ULID — refusing to dispatch; resolve " +
+        "by hand in the retained worktree",
+    );
+  }
+  if (
+    !SHELL_INERT_ABS_PATH_RE.test(worktree) ||
+    hasDotDotSegment(worktree) ||
+    basename(worktree) !== `sync-${operationId}`
+  ) {
+    return ineligible(
+      "the retained worktree path falls outside the shell-inert containment vocabulary " +
+        "(absolute, sync-<operation-id>, no spaces or shell metacharacters) — dispatch the " +
+        "resolution by hand in the retained worktree the status names",
+    );
+  }
+  const layer = objectListField(train, "layers").find(
+    (row) => stringField(row, "node_id") === node,
+  );
+  if (layer === undefined) {
+    return ineligible(
+      "the conflicting layer is missing from the train projection — refusing to dispatch; " +
+        "inspect the train and resolve by hand",
+    );
+  }
+  const branch = stringField(layer, "branch");
+  const pr = numberField(layer, "pr_number");
+  if (branch === undefined || pr === undefined) {
+    return ineligible(
+      "the conflicting layer carries no branch/PR identity — the resolver's retained mode " +
+        "requires the PR; resolve by hand in the retained worktree",
+    );
+  }
+  if (!BRANCH_RE.test(branch) || branch.startsWith("/") || hasDotDotSegment(branch)) {
+    return ineligible(
+      "the conflicting layer's branch falls outside the interpolation vocabulary — refusing " +
+        "to dispatch; resolve by hand in the retained worktree",
+    );
+  }
+  // The redirect-resolved ACTIVE objective id — never the requested one (the
+  // driveStackReconcile rule): out-of-vocabulary → never drive.
+  const objective = stringField(objectField(payload, "objective") ?? {}, "id");
+  if (objective === undefined || !EVIDENCE_ID_RE.test(objective)) {
+    return ineligible(
+      "the projection's objective id falls outside the identifier vocabulary — refusing to " +
+        "dispatch; resolve by hand in the retained worktree",
+    );
+  }
+  return {
+    eligible: true,
+    dispatch: { operationId, manifestPath, objective, node, branch, pr, worktree },
+  };
+}
+
+/** Render the resolver dispatch (§8.57: the template is the canonical carrier of the dispatch
+ * procedure AND the completed-only outcome gate — no other surface re-carries them). */
+export function syncConflictResolutionGuidance(
+  dispatch: SyncConflictDispatch,
+  attempt: number,
+  cap: number,
+  model?: string,
+): string {
+  return render("stages/conflict-resolution-continuation.md", {
+    objective: dispatch.objective,
+    node: dispatch.node,
+    branch: dispatch.branch,
+    pr: String(dispatch.pr),
+    worktree: dispatch.worktree,
+    attempt: String(attempt),
+    cap: String(cap),
+    model: model ?? "",
+  });
+}
+
+type DispatchOutcome =
+  | { dispatched: true; attempt: number }
+  | {
+      dispatched: false;
+      errorType: "no_continuation" | "attempt_cap" | "resolver_busy" | "state_error";
+      reason: string;
+    };
+
+/**
+ * The shared dispatch core (auto-drive AND the explicit `resolve` request): re-read the status
+ * projection, corroborate, check the shared bounded cap, take the resolver claim, persist the
+ * verified increment (a precondition for injection — an unverifiable counter must never bypass
+ * the cap), then inject the rendered dispatch. Resolve-and-stop: nothing here publishes — the
+ * injected template owns the outcome gate and the human's `continue` stays the only publication
+ * gesture.
+ */
+export async function dispatchSyncResolver(
+  pi: ExtensionAPI,
+  ctx: ExtensionContext,
+  objective: string,
+  refusalMessage: string | null,
+): Promise<DispatchOutcome> {
+  const r = await runColdDoor<ColdJson>(
+    pi,
+    ctx,
+    ["objective", "stack", "status", objective, "--json"],
+    { label: "perk objective stack status", decode: (payload) => payload },
+  );
+  if (!r.ok) {
+    return {
+      dispatched: false,
+      errorType: "no_continuation",
+      reason: `the corroborating status re-read failed — ${r.message}`,
+    };
+  }
+  const corroborated = corroborateSyncConflict(r.data, refusalMessage);
+  if (!corroborated.eligible) {
+    return { dispatched: false, errorType: "no_continuation", reason: corroborated.reason };
+  }
+  const dispatch = corroborated.dispatch;
+  const attempts = rebuildWorkflowState(branchOf(ctx)).conflict_resolution_attempts ?? 0;
+  if (attempts >= CONFLICT_RESOLUTION_ATTEMPT_CAP) {
+    return {
+      dispatched: false,
+      errorType: "attempt_cap",
+      reason:
+        `the rebase conflict persists after ${attempts} resolution attempt(s) — resolve ` +
+        `manually in the retained worktree ${dispatch.worktree} (\`git rebase --continue\`), ` +
+        "then resume via objective_stack_sync { continue: true } or discard via { abort: true }.",
+    };
+  }
+  const lease = acquireResolverLease(dispatch.manifestPath, dispatch.operationId);
+  if (!lease.acquired) {
+    return {
+      dispatched: false,
+      errorType: lease.kind === "busy" ? "resolver_busy" : "state_error",
+      reason: lease.reason,
+    };
+  }
+  const next = attempts + 1;
+  const persisted = appendWorkflowState(pi, ctx, {
+    data: { conflict_resolution_attempts: next },
+    field: "conflict_resolution_attempts",
+    expected: next,
+    scope: "objective-sync",
+    failure: `conflict_resolution_attempts read-back failed (expected ${next})`,
+  });
+  if (!persisted) {
+    // The verified increment is a precondition for injection: without it the cap is
+    // unenforceable. We own the claim dir acquired in THIS call — best-effort remove it so the
+    // withheld dispatch does not leave a phantom holder behind.
+    try {
+      rmSync(resolverLockDir(dispatch.manifestPath), { recursive: true, force: true });
+    } catch {
+      // best-effort — residue self-heals via the lease's reclaim rules
+    }
+    return {
+      dispatched: false,
+      errorType: "state_error",
+      reason: "the attempt counter could not be persisted — dispatch withheld",
+    };
+  }
+  const model = subagentModel(ctx.cwd, "conflict-resolver");
+  const message =
+    syncConflictResolutionGuidance(dispatch, next, CONFLICT_RESOLUTION_ATTEMPT_CAP, model) +
+    bindingSuffix(ctx.cwd, "command:objective-sync");
+  if (ctx.isIdle()) {
+    pi.sendUserMessage(message);
+  } else {
+    pi.sendUserMessage(message, { deliverAs: "followUp" });
+  }
+  return { dispatched: true, attempt: next };
+}
+
+/**
+ * The auto-fire wrapper: a MUTATING sync/continue — never dry-run, never abort, never adopt —
+ * refusing `rebase_conflict` dispatches the resolver (the human's mutating gesture is the
+ * approval). Failure arms only report: the tool result already carries the `rebase_conflict`
+ * refusal, so a miss here must never mask it.
+ */
+export async function driveSyncConflictResolution(
+  pi: ExtensionAPI,
+  ctx: ExtensionContext,
+  objective: string,
+  mode: SyncMode,
+  dryRun: boolean,
+  details: StackResult["details"],
+): Promise<void> {
+  if (details.ok) return;
+  if (details.error_type !== "rebase_conflict") return;
+  if (dryRun) return;
+  if (mode !== "sync" && mode !== "continue") return;
+  const outcome = await dispatchSyncResolver(pi, ctx, objective, details.error);
+  if (outcome.dispatched) return;
+  if (outcome.errorType === "attempt_cap" || outcome.errorType === "state_error") {
+    report(ctx, "objective-sync", "error", outcome.reason, { alsoLog: true });
+  } else {
+    report(ctx, "objective-sync", "warning", outcome.reason);
+  }
+}
+
 // --- registration --------------------------------------------------------------------------------
 
 const STATUS_TOOL_GUIDELINES = [
@@ -818,7 +1168,8 @@ const STATUS_TOOL_GUIDELINES = [
 
 const SYNC_TOOL_GUIDELINES = [
   "Call objective_stack_sync only inside the /objective-sync flow: preview with dry_run: true, present the cascade to the human, and act (no dry_run) ONLY on explicit human approval.",
-  "The modes are mutually exclusive: continue resumes a human-resolved conflict continuation, abort discards it; neither composes with base/dry_run. perk never drives conflict resolution — the human finishes the rebase in the retained worktree first.",
+  "The modes are mutually exclusive: continue resumes a resolved conflict continuation, abort discards it, resolve dispatches the perk.conflict-resolver subagent into the retained worktree on explicit human request; none composes with base/dry_run.",
+  "A mutating sync/continue that stops on a rebase conflict auto-dispatches the resolver (bounded attempts); follow the injected dispatch instructions — they own the resume gate.",
 ];
 
 const ADOPT_TOOL_GUIDELINES = [
@@ -908,6 +1259,12 @@ export function registerObjectiveStack(pi: ExtensionAPI, gating: ToolGating): vo
           type: "boolean",
           description: "Discard the retained conflict continuation (worktree + temp refs).",
         },
+        resolve: {
+          type: "boolean",
+          description:
+            "Dispatch the conflict-resolver subagent into the retained continuation worktree " +
+            "(explicit human request; composes with no other mode).",
+        },
       },
     },
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
@@ -918,12 +1275,31 @@ export function registerObjectiveStack(pi: ExtensionAPI, gating: ToolGating): vo
           "objective-sync",
           "objective_stack_sync",
         )(
-          "objective_stack_sync takes { objective?, base?, dry_run?, continue?, abort? } — " +
-            "continue/abort are mutually exclusive and take no other mode flag",
+          "objective_stack_sync takes { objective?, base?, dry_run?, continue?, abort?, " +
+            "resolve? } — continue/abort are mutually exclusive and take no other mode flag; " +
+            "resolve composes with nothing",
           "bad_input",
         );
       }
-      return stackSync(pi, ctx, decoded);
+      const result = await stackSync(pi, ctx, decoded);
+      // The auto-fire drive (§8.51): after the tool result settles, a mutating sync/continue
+      // that refused `rebase_conflict` dispatches the resolver. Skipped for `resolve` (that IS
+      // the dispatch) and when no objective resolved (the fail was `no_objective`).
+      if (!decoded.resolve) {
+        const objective = resolveStackObjective(decoded.objective, ctx);
+        if (objective !== null) {
+          const mode: SyncMode = decoded.continue_ ? "continue" : decoded.abort ? "abort" : "sync";
+          await driveSyncConflictResolution(
+            pi,
+            ctx,
+            objective,
+            mode,
+            decoded.dryRun,
+            result.details,
+          );
+        }
+      }
+      return result;
     },
   });
 

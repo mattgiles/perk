@@ -141,6 +141,7 @@ test("guidance: preview-first, consent-gated, no hardcoded skill pointer", () =>
     "confirm: true",
     "continue: true",
     "abort: true",
+    "resolve: true",
     "explicit human approval",
   ]) {
     assert.ok(syncText.includes(needle), `sync guidance must include: ${needle}`);
@@ -212,6 +213,25 @@ test("decode: the sync mode matrix and mistyped fields refuse the whole call", a
       "bad_input",
     );
     await invokeExpectingFail(h, "objective_stack_sync", { dry_run: "yes" }, "bad_input");
+    // resolve composes with NOTHING — refused at the decode, before any cold-door exec.
+    await invokeExpectingFail(
+      h,
+      "objective_stack_sync",
+      { resolve: true, continue: true },
+      "bad_input",
+    );
+    await invokeExpectingFail(
+      h,
+      "objective_stack_sync",
+      { resolve: true, base: true },
+      "bad_input",
+    );
+    await invokeExpectingFail(
+      h,
+      "objective_stack_sync",
+      { resolve: true, dry_run: true },
+      "bad_input",
+    );
     await invokeExpectingFail(h, "objective_stack_status", { objective: [] }, "bad_input");
   } finally {
     h.dispose();
@@ -299,6 +319,7 @@ const SYNC_DEFAULTS = {
   dryRun: false,
   continue_: false,
   abort: false,
+  resolve: false,
 };
 
 test("argv: sync modes — --yes on mutating paths, absent on dry-run", () => {
@@ -635,6 +656,11 @@ test("renderStackStatus: train + operations + continuation + residue", () => {
   assert.match(text, /\[stack_drift\] drifted/);
   assert.match(text, /unresolved operation: 01OP \(sync, prepared 2026-01-01\)/);
   assert.match(text, /pending continuation: operation 01OP stopped on node 1\.2/);
+  // The parseable arm offers all three gestures, resolve explicitly human-requested.
+  assert.match(
+    text,
+    /resume via objective_stack_sync \{ continue: true \}, discard via \{ abort: true \}, or dispatch automated resolution via \{ resolve: true \} \(on explicit human request\)/,
+  );
   assert.match(text, /orphaned residue: 1 worktree\(s\), 0 ref\(s\)/);
 });
 
@@ -647,6 +673,12 @@ test("renderStackStatus: honors observed:false, the unparseable manifest, and no
   });
   assert.match(text, /Objective #7: objective #7 is incremental/);
   assert.match(text, /UNPARSEABLE manifest at \/m\/01L\.json/);
+  // The unparseable arm keeps only continue/abort — no automated-resolution offer.
+  assert.match(
+    text,
+    /resume via objective_stack_sync \{ continue: true \}, or discard via \{ abort: true \}/,
+  );
+  assert.doesNotMatch(text, /resolve: true/);
   assert.match(text, /orphaned residue: not observed — config unavailable/);
 });
 
