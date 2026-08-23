@@ -57,6 +57,14 @@ export interface WorkflowState {
    * `rebuildWorkflowState`, no rebuild change). The submitted PR review stays canonical.
    */
   last_review?: unknown;
+  /**
+   * The accumulating per-PR posting ledger of a stacked review (§8.3/§8.4): one
+   * `{pr, event, at}` row per REAL `submit_pr_review` success, ordered by posting time
+   * (read-rebuild-append — the whole list is re-appended each time). The resume authority for
+   * a partially-posted stack sequence: confirmed successes are skipped, never replayed.
+   * Best-effort tier (per-field LWW in `rebuildWorkflowState`, no rebuild change).
+   */
+  review_posts?: unknown;
   /** Session-artifact provenance pointers, keyed by artifact name (§8.3). */
   session_artifacts?: Record<string, SessionArtifactPointer> | null;
   /**

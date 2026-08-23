@@ -13,7 +13,12 @@ import type { ExecResult, ExtensionContext } from "@earendil-works/pi-coding-age
 import type { ExecHost } from "../substrate/coldDoor.ts";
 import type { BranchEntry, EntrySink } from "../substrate/workflowState.ts";
 import { fakePerk, loadPerkSession, scaffoldRepo } from "../testing/harness.ts";
-import { decodeSubmitParams, type SubmitCtx, submitPrReview } from "./submitPrReview.ts";
+import {
+  decodeSubmitParams,
+  reviewPostsOf,
+  type SubmitCtx,
+  submitPrReview,
+} from "./submitPrReview.ts";
 
 // --- compile-time satisfaction: the structural ctx slice can never drift from the SDK --------
 
@@ -215,6 +220,59 @@ test("submitPrReview: a real success appends last_review to the branch (strict r
   assert.equal(record?.mode, "review");
 });
 
+test("submitPrReview: real successes append ORDERED review_posts rows (the stack resume ledger)", async () => {
+  // The envelope carries no `pr`, so the record falls back to each call's own param.
+  const { pi, branch } = fakePi({
+    stdout: JSON.stringify({ success: true, event: "comment", mode: "review" }),
+  });
+  const { ctx } = fakeCtx({ branch });
+  await submitPrReview(pi, ctx, { pr: 41, event: "comment", body: "lower" });
+  await submitPrReview(pi, ctx, { pr: 42, event: "comment", body: "upper" });
+  const entries = branch.filter(
+    (e) =>
+      e.customType === "perk:workflow-state" &&
+      (e.data as { review_posts?: unknown })?.review_posts !== undefined,
+  );
+  assert.equal(entries.length, 2, "one ledger append per real success");
+  const rows = reviewPostsOf((entries[1]?.data as { review_posts?: unknown })?.review_posts);
+  // Read-rebuild-append: the second write carries the full ordered history — the resume
+  // reader sees every confirmed post and skips them, never replaying one.
+  assert.deepEqual(
+    rows.map((r) => r.pr),
+    [41, 42],
+  );
+  assert.ok(rows.every((r) => r.event === "comment" && typeof r.at === "string"));
+});
+
+test("submitPrReview: a dry-run and a failed submission never touch review_posts", async () => {
+  const dry = fakePi({ stdout: JSON.stringify({ success: true, dry_run: true, pr: 41 }) });
+  const dryCtx = fakeCtx({ branch: dry.branch });
+  await submitPrReview(dry.pi, dryCtx.ctx, { pr: 41, event: "comment", body: "x", dry_run: true });
+  assert.equal(dry.branch.length, 0, "no workflow-state writes on a dry run");
+
+  const failed = fakePi({
+    stdout: JSON.stringify({ success: false, error_type: "bad_batch", message: "nope" }),
+    code: 1,
+  });
+  const failedCtx = fakeCtx({ branch: failed.branch });
+  await submitPrReview(failed.pi, failedCtx.ctx, { pr: 41, event: "comment", body: "x" });
+  assert.equal(failed.branch.length, 0, "no ledger row for a failed post");
+});
+
+test("reviewPostsOf: tolerant re-narrow — malformed rows drop, order preserved", () => {
+  assert.deepEqual(reviewPostsOf(undefined), []);
+  assert.deepEqual(reviewPostsOf("junk"), []);
+  const rows = reviewPostsOf([
+    { pr: 41, event: "comment", at: "t1" },
+    { pr: "42", event: "comment", at: "t2" }, // malformed: dropped
+    { pr: 43, event: "request-changes", at: "t3" },
+  ]);
+  assert.deepEqual(rows, [
+    { pr: 41, event: "comment", at: "t1" },
+    { pr: 43, event: "request-changes", at: "t3" },
+  ]);
+});
+
 // --- submit_pr_review: end-to-end through the harness (offline fake perk) ----------------------
 
 test("tool: a comment submission succeeds, records last_review, and reports the count", async () => {
@@ -245,6 +303,12 @@ test("tool: a comment submission succeeds, records last_review, and reports the 
     assert.equal(rec?.event, "comment");
     assert.equal(rec?.comment_count, 2);
     assert.equal(rec?.mode, "review");
+    const posts = reviewPostsOf(h.workflowState().review_posts);
+    assert.deepEqual(
+      posts.map((r) => ({ pr: r.pr, event: r.event })),
+      [{ pr: 42, event: "comment" }],
+      "the real success also appends its review_posts ledger row",
+    );
   } finally {
     h.dispose();
   }
