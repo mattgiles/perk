@@ -44,7 +44,9 @@ GitHub and Linear and is added only once (re-saving never duplicates it).
 
 ### `perk plan resume PLAN`
 
-Resume `PLAN` (a plan issue id, or the plan's issue URL) at its current lifecycle stage, relaunching
+Resume `PLAN` (a plan issue id, the plan's issue URL — or the plan's **PR**: its number or
+pasted `.../pull/N` URL, resolved to the plan it records) at its current lifecycle stage,
+relaunching
 it with fresh context. perk classifies the plan's canonical state into its **next action**:
 
 | plan state | next action |

@@ -646,9 +646,71 @@ def test_pr_ready_explicit_stacked_plan_from_root(monkeypatch):
 def test_pr_ready_explicit_plan_not_found(monkeypatch):
     _authed(monkeypatch)
     monkeypatch.setattr(plans, "get_plan", lambda **k: None)
+    # Hermeticity: the digits miss reaches the seam's PR-fallback probe — fake a clean miss.
+    monkeypatch.setattr(github, "get_pr", lambda **k: None)
     result = _run(monkeypatch, ["pr", "ready", "999", "--json"], write_ref=False)
     assert result.exit_code == 1
     assert json.loads(result.stdout)["error_type"] == "plan_not_found"
+
+
+def test_pr_ready_pr_url_selector_resolves_through_the_seam(monkeypatch):
+    # A pasted .../pull/N URL selects canonically: the probe peels the plan-7 head, the
+    # corroborating header (pr: 42) admits the selection, and ready proceeds on plan 7.
+    _authed(monkeypatch)
+    _stub_plan(monkeypatch, header={"pr": 42})
+    monkeypatch.setattr(
+        github,
+        "get_pr",
+        lambda **k: github.PullRequest(
+            number=42, url="u/pr/42", is_draft=True, state="OPEN", existed=True, head_ref="plan-7"
+        ),
+    )
+    pr = github.PullRequest(number=42, url="u/pr/42", is_draft=True, state="OPEN", existed=True)
+    authority, requests = _bind_ready_delivery(monkeypatch, branch_pr=pr)
+    result = _run(
+        monkeypatch,
+        ["pr", "ready", "https://github.com/o/r/pull/42", "--json"],
+        write_ref=False,
+    )
+    assert result.exit_code == 0, result.output
+    data = json.loads(result.stdout)
+    assert data["success"] is True and data["was_draft"] is True
+    assert authority.calls == [("pr_for_branch", "plan-7"), ("mark_pr_ready", 42)]
+    assert requests == [delivery.PublishRequest(kind="ready", plan_id="7", delivery="incremental")]
+
+
+def test_pr_ready_dry_run_accepts_a_bare_number_as_a_plan_id_offline(monkeypatch):
+    # The deliberately ambiguous form: a raw digits-only selector (which a real run might
+    # resolve as a PR via the fallback) stays accepted offline and previews as a plan id —
+    # syntax validation only, with NO backend or GitHub read.
+    monkeypatch.setattr(
+        plans, "get_plan", lambda **k: (_ for _ in ()).throw(AssertionError("offline: no read"))
+    )
+    monkeypatch.setattr(
+        github, "get_pr", lambda **k: (_ for _ in ()).throw(AssertionError("offline: no probe"))
+    )
+    authority, requests = _bind_ready_delivery(monkeypatch)
+    result = _run(monkeypatch, ["pr", "ready", "1984", "--dry-run", "--json"], write_ref=False)
+    assert result.exit_code == 0, result.output
+    data = json.loads(result.stdout)
+    assert data["success"] is True and data["dry_run"] is True
+    assert requests == [delivery.PublishRequest(kind="ready", plan_id="1984", dry_run=True)]
+    assert authority.calls == []
+
+
+def test_pr_ready_dry_run_refuses_a_pr_url_selector(monkeypatch):
+    # The offline preview performs no backend read, so a PR URL cannot resolve to its plan —
+    # typed refusal (a BARE PR number is indistinguishable offline and previews as a plan id:
+    # syntax validation only, never validated identity).
+    result = _run(
+        monkeypatch,
+        ["pr", "ready", "https://github.com/o/r/pull/42", "--dry-run", "--json"],
+        write_ref=False,
+    )
+    assert result.exit_code == 1
+    data = json.loads(result.stdout)
+    assert data["error_type"] == "invalid_input"
+    assert "drop --dry-run" in data["message"]
 
 
 def test_pr_ready_explicit_plan_invalid_id_rejected_even_on_dry_run(monkeypatch):

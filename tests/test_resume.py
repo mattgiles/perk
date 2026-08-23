@@ -520,6 +520,9 @@ def test_closed_unmerged_pr_gates_on_pr_closed(monkeypatch):
 def test_plan_not_found_exits_1(monkeypatch, unborn_git_repo_factory):
     _authed(monkeypatch)
     monkeypatch.setattr(plans, "get_plan", lambda **k: None)
+    # Hermeticity: the digits miss reaches the seam's PR-fallback probe — fake a clean miss
+    # (the original typed error re-raises verbatim; no real `gh` subprocess).
+    monkeypatch.setattr(github, "get_pr", lambda **k: None)
     runner = CliRunner()
     with runner.isolated_filesystem() as d:
         _git_init(d, unborn_git_repo_factory)
@@ -538,12 +541,48 @@ def test_headerless_issue_refuses_kind_mismatch(monkeypatch, unborn_git_repo_fac
         "get_plan",
         lambda **k: plans.PlanState(number=63, url="u/63", title="T", header={}, pr=None),
     )
+    monkeypatch.setattr(github, "get_pr", lambda **k: None)  # hermetic fallback-probe miss
     runner = CliRunner()
     with runner.isolated_filesystem() as d:
         _git_init(d, unborn_git_repo_factory)
         result = runner.invoke(cli, ["plan", "resume", "63", "--json"])
         assert result.exit_code == 1
         assert json.loads(result.stdout)["error_type"] == "issue_kind_mismatch"
+
+
+def test_resume_by_bare_pr_number_resolves_the_recorded_plan(monkeypatch, unborn_git_repo_factory):
+    """`perk plan resume 55` where 55 is the plan's PR: the carrier guard refuses the
+    PR-shaped record, the fallback peels the plan-7 head, corroboration passes (plan 7
+    records pr 55), and resume classifies the peeled plan (gate arm — no launch)."""
+    _authed(monkeypatch)
+
+    def _get_plan(**kwargs):
+        if int(kwargs["number"]) == 55:  # the GitHub PR-carrier quirk
+            return plans.PlanState(
+                number=55, url="https://gh/o/r/pull/55", title="PR", header={}, pr=None
+            )
+        assert int(kwargs["number"]) == 7
+        return _state(header={"pr": 55}, pr=_pr("OPEN", is_draft=True))
+
+    monkeypatch.setattr(plans, "get_plan", _get_plan)
+    monkeypatch.setattr(
+        github,
+        "get_pr",
+        lambda **k: github.PullRequest(
+            number=55, url="u/pr/55", is_draft=True, state="OPEN", existed=True, head_ref="plan-7"
+        ),
+    )
+    monkeypatch.setattr(
+        launch, "launch_stage", lambda **k: (_ for _ in ()).throw(AssertionError("no launch"))
+    )
+    runner = CliRunner()
+    with runner.isolated_filesystem() as d:
+        _git_init(d, unborn_git_repo_factory)
+        result = runner.invoke(cli, ["plan", "resume", "55", "--json"])
+        assert result.exit_code == 0, result.output
+        data = json.loads(result.stdout)
+        assert data["plan"] == "7"  # the peeled plan, not the PR number
+        assert data["next_action"] == "ready_for_review"
 
 
 def test_backend_error_exits_1(monkeypatch, unborn_git_repo_factory):
@@ -592,7 +631,8 @@ def test_invalid_plan_id_exits_1(monkeypatch, unborn_git_repo_factory):
         # Ids are opaque strings now — only empty / path-unsafe ids are rejected up front.
         result = runner.invoke(cli, ["plan", "resume", "bad/id", "--json"])
         assert result.exit_code == 1
-        assert json.loads(result.output)["error_type"] == "invalid_input"
+        # Parse stdout: the banner heads the pre-selection narration on stderr.
+        assert json.loads(result.stdout)["error_type"] == "invalid_input"
 
 
 def test_not_a_repo_exits_2():

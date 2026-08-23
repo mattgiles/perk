@@ -62,7 +62,10 @@ untouched (the fields are null).
 Classify PR review feedback (in an isolated child), publish committed fixes, then resolve the
 threads — launcher-only (no merged `--json` worker; its warm finalizer runs `pr submit` before the
 unchanged `pr resolve-threads` mechanical half). `PLAN` is an optional plan issue id or pasted
-issue URL: it selects the plan canonically (one backend read), drives the launch directly, and on
+issue URL — or the plan's **PR**: its number or pasted `.../pull/N` URL, resolved to the plan it
+records (you're usually looking at the PR when you decide to address it; the PR's `plan-<id>`
+head names the candidate plan, and the plan's own recorded PR must corroborate it) — it selects
+the plan canonically, drives the launch directly, and on
 a real launch updates only the main-checkout selector; omit it to address the active saved plan
 (inside a plan worktree, that worktree's own binding). `perk address 1699 --remote` dispatches
 exactly the selected plan; `--worktree` + `--remote` is refused. A missing `plan-<id>` checkout
@@ -105,14 +108,20 @@ recorded stamp **unblocks planning of the layer's direct dependents** (the hando
 It is
 never routine post-submit choreography: supervisors and factories name it, they never run it.
 `PLAN` is an
-optional plan issue id or pasted issue URL: it selects the plan canonically with one backend
-read, so `perk pr ready 1699` works from the repository root — ready needs no source files, no
+optional plan issue id or pasted issue URL — or the plan's **PR**: its number or pasted
+`.../pull/N` URL, resolved to the plan it records — it selects the plan canonically,
+so `perk pr ready 1699` works from the repository root — ready needs no source files, no
 worktree, and never writes the active-plan selector; omitted, the invoking checkout's own saved
 plan is used (inside a plan worktree, that worktree's binding). An explicit `PLAN` naming an
 existing issue with no plan-header refuses typed (`issue_kind_mismatch`). `--dry-run` is an
 offline validation preview: it parse-checks an explicit `PLAN` and confirms a saved plan exists
 on the no-argument form, but performs no backend or GitHub read — no PR is resolved or marked,
-no stamp is appended (and nothing is kind-classified). For a stacked plan, the worker
+no stamp is appended (and nothing is kind-classified). Because the preview is offline it
+refuses a PR-URL selector (`invalid_input` — a PR cannot be resolved to its plan without a
+read; pass the plan issue id or drop `--dry-run`), and a **bare** PR number is
+indistinguishable offline, so it previews as a plan id — the offline preview is **syntax
+validation only, never validated identity** (a real run may resolve a different plan id via
+the PR fallback). For a stacked plan, the worker
 reconstructs the train and
 fetches the projection-correlated PR: the target must be exactly published; marking a draft also
 requires no unresolved operation and no structural train blocker (unrelated operational drift does

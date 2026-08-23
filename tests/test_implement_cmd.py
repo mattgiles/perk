@@ -91,6 +91,9 @@ def test_implement_with_plan_dry_run_does_not_write_or_launch(monkeypatch):
 def test_implement_plan_not_found_exits_1(monkeypatch):
     _authed(monkeypatch)
     monkeypatch.setattr(plans, "get_plan", lambda **k: None)
+    # Hermeticity: the digits miss reaches the seam's PR-fallback probe — fake a clean miss
+    # (the original typed error re-raises verbatim; no real `gh` subprocess).
+    monkeypatch.setattr(github, "get_pr", lambda **k: None)
     runner = CliRunner()
     with runner.isolated_filesystem() as d:
         _git_init(d)
@@ -111,6 +114,7 @@ def test_implement_objective_issue_refuses_kind_mismatch(monkeypatch):
             number=63, url="u/63", title="T", header={}, pr=None, has_objective_header=True
         ),
     )
+    monkeypatch.setattr(github, "get_pr", lambda **k: None)  # hermetic fallback-probe miss
     monkeypatch.setattr(
         launch, "launch_stage", lambda **k: (_ for _ in ()).throw(AssertionError("no launch"))
     )

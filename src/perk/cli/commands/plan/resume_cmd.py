@@ -1,10 +1,11 @@
 """`perk resume <plan>` — the cross-stage resume verb.
 
-Resolve any plan to its next action and act on it. Reads the plan from the issue backend
-(`IssueBackend.get_plan`), reconstructs the `cache.plan-ref`, classifies via the shared
-`resume.resolve_next_action` (contracts.md §8.37), then either launches the verdict's stage
-(reusing `launch_stage` — idempotent worktree + materialize + exec pi) or names the human gate
-without launching. Supervisor surface: `--json` to stdout, stable exit codes.
+Resolve any plan to its next action and act on it. Selects the plan canonically
+(`perk.cli.plan_selection.select_plan` — the one seam, PR selectors included), classifies via
+the shared `resume.resolve_next_action` (contracts.md §8.37), then either launches the
+verdict's stage (reusing `launch_stage` — idempotent worktree + materialize + exec pi) or
+names the human gate without launching. Supervisor surface: `--json` to stdout, stable exit
+codes.
 
 Exit codes: 0 resumed / nothing-to-resume · 1 invalid input / unauthed / plan-not-found /
 kind-mismatch (``issue_kind_mismatch`` — an existing issue with no plan-header) / op failure ·
@@ -16,18 +17,12 @@ import json
 import click
 
 from perk import github, plan
-from perk.backends import resolve
 from perk.backends.issue_backend import IssueBackendError
 from perk.cli import completions
 from perk.cli.context import require_github, require_repo
 from perk.cli.emit import fail
 from perk.cli.ensure import Ensure, UserFacingCliError
-from perk.cli.plan_selection import (
-    load_main_config,
-    main_repo_root,
-    parse_plan_id,
-    require_plan_kind,
-)
+from perk.cli.plan_selection import load_main_config, main_repo_root, select_plan
 from perk.github import GitHubError
 from perk.prompts import render
 from perk.run import launch, resume
@@ -62,13 +57,18 @@ def resume_cmd(
     remote: str | None,
     pi_args: tuple[str, ...],
 ) -> None:
-    """Resume PLAN (a plan issue id) at its current stage.
+    """Resume PLAN (a plan issue id, or the plan's PR) at its current stage.
+
+    \b
+    PLAN is a plan issue id (e.g. 42, #42, ENG-123, or the pasted issue URL) — or the plan's
+    PR: its number or pasted .../pull/N URL, resolved to the plan it records.
 
     \b
     Examples:
       perk plan resume 42            # resolve #42's stage and launch it (fresh context)
       perk plan resume 42 --dry-run  # print the resolved stage + launch plan, launch nothing
       perk plan resume https://github.com/o/r/issues/42   # paste the plan's URL instead of the id
+      perk plan resume https://github.com/o/r/pull/55     # …or the plan's PR (number or URL)
     """
     try:
         invocation_root = require_repo(ctx)
@@ -78,30 +78,22 @@ def resume_cmd(
         # worktree); resume has no cache-fallback read — the plan id is always explicit.
         main_root = main_repo_root(invocation_root)
         config = load_main_config(main_root)
-        plan_id = parse_plan_id(plan)
-        backend = resolve.resolve_issue_backend(main_root)
         # Banner first: head a real local launch with the banner BEFORE narrating the lookup wait.
         launch.print_launch_banner_gated(main_root, dry_run=dry_run, remote=remote)
-        # Narrate the backend lookup wait. The lookup runs on the dry-run path too (dry-run
-        # resolves the stage via this same read), so the narration is NOT gated on `dry_run`; the
-        # line goes to stderr, leaving the `--json` stdout payload byte-unchanged. The not-found
-        # raise escapes the step (dangling + the error text below).
-        with io_step(f"looking up plan #{plan_id}") as s:
-            state = backend.get_plan(issue_id=plan_id)
-            if state is None:
-                raise UserFacingCliError(
-                    f"Plan issue #{plan_id} not found", error_type="plan_not_found"
-                )
-            # Positive plan identification (contracts §8.1): a headerless issue must never bind
-            # and launch as a plan — refuse before reconstruction/classification.
-            require_plan_kind(state, plan_id, backend_id=backend.backend_id)
-            ref = resume.reconstruct_plan_ref(state, provider=backend.backend_id)
+        # The canonical selection (positive plan identification + PR selectors included). The
+        # lookup runs on the dry-run path too (dry-run resolves the stage via this same read),
+        # so it is NOT gated on `dry_run`; the narration goes to stderr, leaving the `--json`
+        # stdout payload byte-unchanged.
+        selected = select_plan(main_root, plan)
+        plan_id, state, ref = selected.plan_id, selected.state, selected.ref
+        # Narrate the classification's own network wait (the OPEN-non-draft arm reads the
+        # PR's review feedback).
+        with io_step(f"resolving the next stage for plan #{plan_id}"):
             next_action = resume.resolve_next_action(
                 state,
                 has_pending_learn=cache.has_marker(main_root, cache.PENDING_LEARN),
                 get_feedback=lambda n: github.get_pr_feedback(pr_number=n, repo_root=main_root),
             )
-            s.done(f"found plan #{plan_id}")
     except (IssueBackendError, GitHubError) as exc:
         fail(ctx, as_json=as_json, error_type="github_error", message=f"resume failed\n{exc}")
         return
