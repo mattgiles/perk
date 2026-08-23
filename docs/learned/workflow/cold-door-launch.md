@@ -132,8 +132,12 @@ in full to stderr before the abort on failure.
 - **Scope boundary:** the remote runner's `position_worktree` deliberately does **not** run the hook
   (CI env setup belongs to the GHA composite action) — a recorded non-goal. This is
   Python-plane-only (the TS extension never creates worktrees).
-- See `docs/learned/workflow/worktree-lifecycle.md` for the dry-run preview asymmetry that
-  governs the dry-run preview of this hook.
+- **Ownership (the one owning cross-reference):** this section owns the `[worktree] setup`
+  marker-lifecycle + execution prose (`run_pending_setup` / `run_worktree_setup`, the
+  `SETUP_PENDING` set/clear rules, the three consumers);
+  `docs/learned/workflow/worktree-lifecycle.md` §"The `[worktree] setup` hook and the dry-run
+  preview asymmetry" owns only the dry-run preview asymmetry and defers the marker/execution
+  mechanics here — route future marker-lifecycle edits to this doc first.
 
 ## `stage.worktree != "none"` is the canonical worktree-stage predicate
 
@@ -150,8 +154,10 @@ positioning time. Two compounding root causes:
 1. `.agents/skills/` is **gitignored** (the `skills managed runtime artifacts` block), so
    `git worktree add` — which checks out only *tracked* files — never carries it. A fresh worktree's
    `.agents/` has only the tracked `manifest.yaml`/`manifest.d/`.
-2. pi discovers `.agents/skills/` in cwd + ancestors **only up to the git repo root** (pi
-   `docs/skills.md`), and a linked worktree **is its own git root** — so pi never ascends to the
+2. pi discovers `.agents/skills/` in cwd + ancestors **only up to the git repo root** (pi's
+   installed package docs — `@earendil-works/pi-coding-agent/docs/skills.md` §Locations,
+   re-verified: "up to git repo root, or filesystem root when not in a repo"), and a linked
+   worktree **is its own git root** — so pi never ascends to the
    main repo's skills. The dangling skill-binding warnings (`bindingDelivery.ts` pointer fallback)
    are a *symptom* of this, not a separate bug.
 
