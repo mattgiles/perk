@@ -30,17 +30,19 @@ only the still-inline surfaces.
   markers" (+ the presence-check bug class beside it).
 - init/doctor readiness is ONE never-raising report-shaped probe with two consumers (doctor
   lookup-only vs init converge, split by `ensure_labels`) — "Readiness wiring (init/doctor)".
+- Issue mutations take the **bare boundary identifier** through the module-level
+  `_request_issue_mutation` wrapper — no resolve-on-demand layer (`uuid_for` deleted) —
+  "Bare-identifier mutations + the module-level mutation wrapper".
 - The project-backed objective store's live ops (node-issue materialization, milestone reuse,
   relations) — "Linear Projects substrate" + "Project-backed objective ops".
 - Offline testing: httpx `MockTransport` recipes + the scripted GraphQL fake — "Offline test
   recipes"; register more-specific query needles FIRST — "`_FakeLinear` insertion-order
-  substring footgun".
+  substring footgun"; the stateful-fake lifecycle discipline — "E2E lifecycle test craft".
 - `upload_file` is one resolver-owned method; strict marker parsing never strips first;
   byte-identity across a lossy transcoder rejects its whole normalization domain — "File upload
   + strict-parse boundary craft".
-- Historical: "Live-validation record (dated)" and "Live-spike process craft" carry the dated
-  live-run evidence; the landed-arc sections (E2E lifecycle, GraphQL type-literacy,
-  idiomatic-backend) chronicle their nodes.
+- Historical: "Live-validation record (dated)" + "Live-spike process craft" carry the dated
+  live-run evidence.
 
 ## Linear API facts (audited against official docs)
 
@@ -81,9 +83,9 @@ only the still-inline surfaces.
   *negative* ones: a not-found message under `RATELIMITED` (or with no code) **re-raises**; a
   generic `INPUT_ERROR` carrying a non-not-found message **re-raises**. Only the paired shape is
   swallowed.
-- Two reserved hardenings deliberately shipped as **documented deferrals, not edits** — RATELIMITED
-  fail-loud (kept) and `uuid_for` (kept, later collapsed — see the bare-identifier-mutations
-  section below) — the honest outcome of a gating observation that did not fire.
+- **An unfired gating observation ships as a documented deferral, not an edit** (#558, 2026-06:
+  RATELIMITED fail-loud kept; `uuid_for` kept, later collapsed — the bare-identifier-mutations
+  section below).
 
 ## Bare-identifier mutations + the module-level mutation wrapper (#562/#620)
 
@@ -259,37 +261,25 @@ gesture, never a `ManagedConvergence`.
 
 ## The env-first / config-fallback `client_from_env` seam + the worktree env bridge (#654)
 
-`client_from_env(env=None, *, repo_root: Path | None = None)` is **env-first** (stripped), then
-falls back to the `repo_root` `.perk/local.toml` `[linear] api_key` when env is blank. The
-`repo_root=None` default preserves every existing caller byte-for-byte. It is threaded at four
-in-process sites (`resolve_issue_backend`, `resolve_objective_store`, `doctor._linear_checks`,
-`init._linear_readiness`); a **fifth** site (`doctor._fix_linear_labels`) was intentionally left
-env-only (low impact; a future "config fallback everywhere" pass should thread it for symmetry).
-
-- **The worktree/gitignore bridge — corrected (#730).** A *gitignored* local config (then
-  `.pi/perk.local.toml`, now `.perk/local.toml`) IS honored from inside a linked worktree, but the
-  original "via the env-seed, **not** a file copy … the env-seed carries it" framing was only
-  *partially* true and masked a structural bug. Every worktree
-  cold-door funnels through `resolve_issue_backend(repo_root)` where `repo_root` is the **worktree**,
-  so `load_local_linear_api_key(worktree)` resolved a `<worktree>/.pi/perk.local.toml` that never
-  exists — the env-seed was the *only* bridge, and it does not fire on every path. The fix is a
-  **single reader correction**: `config.load_local_linear_api_key` now reads from
-  `git.main_worktree_root(repo_root) or repo_root` — i.e. directly from the **main checkout** — so
-  the gitignored Linear key is found from inside a linked worktree **independent of whether the
-  env-seed fired**. The one reader feeds both the cold-door `client_from_env` fallback *and* the
-  `launch_stage` env-seed, so both are repaired at once. The env-seed remains *a* bridge (it still
-  wins when env is set, because `client_from_env` is env-first) — it just no longer needs to be the
-  *only* one. See `docs/learned/workflow/worktree-lifecycle.md` for the `main_worktree_root`
-  primitive and `docs/learned/workflow/config-tables.md` for the reader shape.
-- **Gotcha — widening `client_from_env` broke 21 lifecycle tests.** Adding the `repo_root` kwarg
-  broke the shared fake `monkeypatch.setattr(linear, "client_from_env", lambda: ws)` with
-  `TypeError: unexpected keyword argument`. Fix: `lambda *a, **k: ws`. **Rule: when you widen a
-  function's signature, grep ALL `monkeypatch.setattr(..., "<fn>", lambda ...)` fakes of it and
-  loosen them to `*a, **k`.**
+- `client_from_env(env=None, *, repo_root: Path | None = None)` is **env-first** (stripped), then
+  falls back to the `repo_root` `.perk/local.toml` `[linear] api_key`; the `repo_root=None` default
+  keeps every pre-existing caller byte-identical (#654).
+- **The reader anchors to the main checkout** (#730): `config.load_local_linear_api_key` reads
+  `git.main_worktree_root(repo_root) or repo_root`, so the gitignored key is found from inside a
+  linked worktree **independent of whether the `launch_stage` env-seed fired** (#730 corrected the
+  partially-true "the env-seed carries it" framing that masked this). One reader feeds both the
+  cold-door fallback and the env-seed; the env-seed still wins when env is set. See
+  `docs/learned/workflow/worktree-lifecycle.md` for the `main_worktree_root` primitive.
+- Threaded at four in-process sites (`resolve_issue_backend`, `resolve_objective_store`,
+  `doctor._linear_checks`, `init._linear_readiness`); a **fifth** (`doctor._fix_linear_labels`)
+  deliberately stays env-only pending a "config fallback everywhere" symmetry pass.
+- **Signature-widening rule (#654)**: adding the `repo_root` kwarg broke 21 lifecycle tests faking
+  `monkeypatch.setattr(linear, "client_from_env", lambda: ws)`. When you widen a function's
+  signature, grep ALL `monkeypatch.setattr(..., "<fn>", lambda ...)` fakes of it and loosen them to
+  `lambda *a, **k`.
 - **Out of scope (flagged):** `LINEAR_AGENT_TOKEN` (a distinct secret; the `[linear]` table leaves
-  room for a future `agent_token` key, not added); `--remote` (returns before the local exec-env
-  block; the remote runner provides its own secrets); no TS-plane mirror (the TS extension reads no
-  Linear key — the `launch_stage` env-seed is the only bridge).
+  room for a future `agent_token` key, not added); `--remote` (the remote runner provides its own
+  secrets); no TS-plane mirror (the TS extension reads no Linear key).
 
 See `docs/learned/workflow/config-tables.md` for the local-only secret-fallback reader shape and
 `docs/learned/workflow/cold-door-launch.md` for the env-seed merge order at the launch seam.
@@ -328,20 +318,18 @@ Plus the MockTransport injection recipe for module-internal client construction:
 module's `LinearClient` symbol with a keyword-only factory that closes over a transport — records
 every request the emitters compose without touching emitter code or the real client class.
 
-## E2E lifecycle validation patterns (from the string-id work)
+## E2E lifecycle test craft
 
-- **Named GraphQL operations make substring-keyed fakes routable**: the UUID lookup is a named
-  operation — `query UuidForIssue($id: String!) { issue(id: $id) { id } }` — so both the scripted
-  fake and the stateful fake route it distinctly from generic `issue(id` reads. With
-  substring-keyed response dicts, **insertion order disambiguates** — the most specific needle
-  first.
-- **Read-seeding kills the extra mutation query**: every issue read seeds the identifier→UUID
-  cache, so the common read-then-mutate path costs zero extra requests; only cold mutations pay one
-  lookup.
-- **The stateful `FakeLinearWorkspace` discipline**: identifier-or-UUID tolerated on *reads* (the
-  documented `issue(id:)` tolerance), **UUIDs ONLY on mutations** — passing an identifier to a
-  mutation raises `Entity not found`, structurally pinning the `_uuid_for` discipline with no
-  explicit assertion. Page size 2 exercises the cursor loop on tiny data for free.
+- **Named GraphQL operations make substring-keyed fakes routable**: naming an operation gives the
+  substring-keyed fakes a distinct needle, and most-specific-needle-first insertion order does the
+  rest (historical exhibit: the resolution layer's `UuidForIssue` named op, deleted with the #562
+  collapse). Needle-ordering detail is owned by the two insertion-order sections below.
+- **The stateful `FakeLinearWorkspace` discipline**: the fake tolerates identifier-or-UUID on
+  reads AND mutations (the Mode 2 live finding, 2026-06-15) — there is no resolution layer to pin.
+  Lifecycle tests instead assert **no `UuidForIssue` query fires**
+  (`assert not _queries(fake, "UuidForIssue")`) and make mutation-id assertions with the boundary
+  identifier (the #562/#620 bare-identifier section above is the authority); junk ids still raise
+  `Entity not found` (`INPUT_ERROR`). Page size 2 exercises the cursor loop on tiny data for free.
 - **Late-bound `linear.client_from_env` monkeypatching** runs the whole real stack (resolver →
   `LinearIssueBackend` → real CLI commands) offline; only the GitHub PR tier needs the classic
   gateway fakes. **One shared workspace threading the entire lifecycle in a single test** catches
@@ -392,8 +380,7 @@ documented above (a third instance; see `shared-contracts.md`).
   non-linear) so the existing prompt is **byte-unchanged** (no churn) — achieved by injecting the
   clause *around* the existing punctuation (the clause carries a **leading space**), NOT by rewording
   the line. A naive `; mark` → `. Mark` rewrite churns the github arm; the guard is to **verify the
-  github-arm output is literally byte-identical** after the change (caught by re-reading the diff
-  intent, not a test).
+  github-arm output is literally byte-identical** after the change (no test pins it).
 - **Cold-vs-warm backend-source asymmetry is the load-bearing design call.** Cold has
   `store.backend_id` + `state.url` already in hand (free). Warm must resolve the backend from
   `resolveIssueBackendId(ctx.cwd)` (the committed `.perk/config.toml`, main-checkout-anchored —
@@ -429,75 +416,63 @@ documented above (a third instance; see `shared-contracts.md`).
 
 ## Live-validation record (dated)
 
-The live smoke gate ran **green** across every mode; the items the live runs did *not* answer live
-in the Still-deferred register below.
+The live smoke gate ran **green** across every mode — no backend defect, docs-only PRs; the items
+the live runs did *not* answer live in the Still-deferred register below.
 
-- **2026-06-15 — Modes 1 & 2 + the Projects spike (#554/#558/#564/#567; PRs
-  #553/#557/#561/#563/#565/#566): green, no backend defect, docs-only PRs.**
-  - **ProseMirror round-trip is CLEAN** — `find_metadata_block` survives a real Linear round-trip
-    for the plan-header (issue description), the plan-body (first comment), and the objective body
-    comment sentinels, with **no raw HTML / `<details>` artifacts**; a re-save **patches the body
-    comment in place** (comment count stays 1), confirming the form-preserving
-    `replace_metadata_block` path live. *(These round-trip facts predate #1355 — they proved the
-    inline model; the moved header/node/manifest kinds no longer ride bodies.)*
-  - **String `PER-*` identifiers flow through every `--json` envelope** end-to-end; the squash
-    footer is `Plan: PER-<n> — <url>` — closure is the explicit `close_issue` call, never a
-    merge-message magic word.
-  - The missing-entity observation — `issue(id:"PER-9999")` errors with the **generic**
-    `INPUT_ERROR` code, *not* a dedicated `NOT_FOUND` — seeded the paired not-found discriminator
-    (see the Not-found discrimination section above).
-
-### GitHub-integration coexistence (#564, 2026-06-15)
-
-The Linear GitHub integration links PRs as **attachments, not comments** — the linkback-tolerance
-concern is structurally moot, and the offline twin
-`test_foreign_linkback_comment_does_not_perturb_marker_scans` is *stricter* than reality. perk's
-`plan-PER-<n>` branch auto-links without Linear's branch template; on-land `close_issue` beside a
-Done-on-merge automation is a **same-state write** (no new state-history transition).
-**"Installed ≠ connected"**: the decisive isolation test is a control PR in `issue.branchName`'s
-canonical format — `team.gitAutomationStates` confirms automation *config*, and the App
-installation is not introspectable from a normal `gh` token.
-
-- **2026-06-16 — Mode 4, project-backed objective lifecycle (#621; PR #619): green.**
-  - **Find-by-run-id is idempotent** — the same UUID / `existed:true`, no duplicate milestones or
-    issues.
+- **2026-06-15 — Modes 1 & 2 + the Projects spike (#554/#558/#564/#567):**
+  - **ProseMirror round-trip is CLEAN** — `find_metadata_block` survives a real round-trip with no
+    raw-HTML artifacts; a re-save **patches the body comment in place** (count stays 1: the
+    form-preserving `replace_metadata_block` path, live). *(Predates #1355 — proved the inline
+    model.)*
+  - **String `PER-*` identifiers flow through every `--json` envelope** end-to-end; closure is the
+    explicit `close_issue` call, never a merge-message magic word.
+  - The generic-`INPUT_ERROR` missing-entity observation seeded the paired not-found
+    discriminator — see the Not-found discrimination section above.
+- **2026-06-16 — Mode 4, project-backed objective lifecycle (#621):**
+  - **Find-by-run-id is idempotent** (same UUID / `existed:true`, no duplicates); metadata
+    round-trips clean through create→reconcile; node↔plan unification creates **no new
+    `perk:plan` issue**.
   - **Project Updates post on create / land / reconcile**; **close** drives the Project to
-    `completed`; the node workflow-state mirror fires **both directions** (in-progress→started at
-    plan-save, done→completed on mark-done).
-  - **Metadata round-trip is clean through create→reconcile** with in-place re-save patching;
-    node↔plan unification creates **no new `perk:plan` issue**; no RATELIMITED at low volume.
-  - Also proven live here: `projectUpdateCreate`, `set_project_state`, `list_projects`,
+    `completed`; the node workflow-state mirror fires **both directions** (in-progress→started,
+    done→completed).
+  - Also proven live: `projectUpdateCreate`, `set_project_state`, `list_projects`,
     `_workflow_state_id`, and the #626 ops (`attach_issue_to_milestone`,
-    `project_issues_with_milestones`).
+    `project_issues_with_milestones`). No RATELIMITED at low volume.
   - **Setup gotchas** (running Linear from a GitHub-default repo): backend selection reads the
     **committed `.perk/config.toml` only** — a local overlay silently no-ops (see
     `config-tables.md`); use **`uv run perk`**, never a stale global install (see
     `toolchain/worktree-node-modules.md`); the doctor `linear` group appears only once committed
     config selects linear.
 
+### GitHub-integration coexistence (#564, 2026-06-15)
+
+- The Linear GitHub integration links PRs as **attachments, not comments** — the linkback-tolerance
+  concern is structurally moot (the offline twin
+  `test_foreign_linkback_comment_does_not_perturb_marker_scans` is *stricter* than reality); perk's
+  `plan-PER-<n>` branch auto-links without Linear's branch template; on-land `close_issue` beside a
+  Done-on-merge automation is a **same-state write**.
+- **"Installed ≠ connected"**: the decisive isolation test is a control PR in `issue.branchName`'s
+  canonical format — `team.gitAutomationStates` confirms automation *config*, and the App
+  installation is not introspectable from a normal `gh` token.
+
 ## Linear Projects substrate + `LinearProjectObjectiveStore` (now BUILT)
 
-Objective #548 Phase 3 built the project-backed objective store on top of the #567 spike substrate.
-The tier contract (dormant-contract → atomic-removal recipe, resolver, translate-CM) lives in
-`objective-store.md`; the Linear-specific mechanics are here. Built across Nodes 3.1–3.4 (PRs #579,
-#584/#585, #588, #594).
+The project-backed objective store was built on the #567 spike substrate (Objective #548 Phase 3,
+2026-06); the tier contract lives in `objective-store.md` — the Linear-specific mechanics are here.
 
 ### The substrate-home principle (the load-bearing #582/#586 lesson)
 
 **The only thing that should encapsulate Linear GraphQL client logic is `LinearClient`.** The op
 classes (`_LinearIssueOps`, `_LinearProjectOps`) must each register **only the client**, never one
-another. Shared machinery — team-id/uuid resolution + caches, pagination, the `_require_*`
+another. Shared machinery — team-id/viewer-id resolution + caches, pagination, the `_require_*`
 narrowing helpers, the not-found discriminator — belongs **on the client**.
 
-#582 landed the **opposite** (`_LinearProjectOps` composing `_LinearIssueOps`) as a **defect**, and
-the *why* it landed is the durable lesson: the plan's "Confirmed with the user" was manufactured by
-a leading confirm-this question asked *after* the user had given standing architectural guidance to
-the contrary. An implementer faithfully following a saved plan still ships the defect, so the error
-must be caught at **planning** time. **Durable: treat prior standing architectural guidance as
-load-bearing; don't re-litigate it with leading questions.** #586 corrected it (acknowledge-don't-
-revert: the node stayed `done`, its description rewritten to name the defect, the correction
-overloaded onto the next node via a `PREREQUISITE CORRECTION` block + a referenced
-`docs/planning/` context file).
+- **Treat prior standing architectural guidance as load-bearing; don't re-litigate it with leading
+  questions** (#582: a leading confirm-this question manufactured a plan-level "Confirmed with the
+  user" against the user's standing guidance, so a faithful implementer shipped the composition
+  defect — the error must be caught at planning time).
+- **Acknowledge-don't-revert** (#586): the defective node stayed `done` with its description
+  rewritten to name the defect; the correction was overloaded onto the next node.
 
 ### The re-homing recipe (#586)
 
@@ -515,15 +490,13 @@ delegated collaborator onto its client tier.
   classes pass their bound team_key). A single shared cache via the client beats op-class
   composition — it de-dupes when only one op class is in play.
 - **Decoupling over DRY:** symmetric client-only op classes inline a tiny mutation (e.g.
-  attach-issue-to-project) rather than reach a sibling; a public `cache_uuid(identifier, uuid)` seam
-  lets read paths seed the shared cache without touching a private attr.
+  attach-issue-to-project) rather than reach a sibling.
 
 ### `_create_issue` made label-optional
 
-Build `labelIds` into the input **only when non-None** — node-issues carry no perk label (they are
-discovered by project membership + the node block), and the change is byte-identical for every
-existing label-passing caller. Same conditional-key shape as the `project_id` / `milestone_id`
-additions (omit the key, never an explicit `null`).
+Build `labelIds` into the input **only when non-None** (node-issues carry no perk label — they are
+discovered by project membership + the node block); the same conditional-key shape as
+`project_id` / `milestone_id`: omit the key, never an explicit `null`.
 
 ### Project-backed `create_objective` shape (#586)
 
@@ -548,9 +521,9 @@ additions (omit the key, never an explicit `null`).
 ### Read + mutation surface (#589)
 
 - **`get_objective` reconstructs `depends_on` from blocking relations** — lossy: an explicit `()`
-  reads back as `None` (sequential inference then applies downstream). A passed node-issue UUID
-  still **re-resolves through the uuid lookup** because project-issue reads don't seed the uuid
-  cache (unlike create/find) — script that lookup in tests.
+  reads back as `None` (sequential inference then applies downstream). No identifier→UUID
+  resolution layer exists anywhere (the #562 collapse): the project store passes ids straight
+  through, and tests assert no `UuidForIssue` query fires.
 - **The node-status workflow-state mirror keeps a SEPARATE states cache** from the learn-close path
   (byte-stable), and **fails open** by swallowing the backend error (`LinearGraphQLError` is a
   subclass, so both a `success:false` payload AND a raised error are caught); a `None` state id is
@@ -608,72 +581,59 @@ inline literal fails validation; pass it via a typed `$input` variable.
   fallback in reserve.
 - **Milestone list order is NOT insertion order** — key phases by milestone **name**, never list
   position.
-- **`list_projects` query shape live-status:** offline-covered only at landing (the #567 spike
-  covered create/overview/milestone/attach/relation, not list-projects). If a later live run covers
-  it, reconcile this line; do NOT invent a result. No RATELIMITED at spike volume.
+- **`list_projects` was proven live 2026-06-16 (#621)** — see the Live-validation record above
+  (the #567 spike had covered create/overview/milestone/attach/relation, not list-projects). No
+  RATELIMITED at spike volume.
 
 ## Project-backed objective ops (Phase 4: Nodes 4.1–4.4)
 
-Objective #548 Phase 4 layered four additive enrichments onto `LinearProjectObjectiveStore` (the
-backend-aware seed prompts are in the Backend-aware-prompts section above; GitHub stays unchanged
-throughout). Built across Nodes 4.1–4.4 (PRs #599, #602, #605, #608) plus the `add_objective_node`
-surface (PR #613).
+Objective #548 Phase 4 layered four additive enrichments onto `LinearProjectObjectiveStore`
+(backend-aware seed prompts are in the Backend-aware-prompts section above; GitHub stayed
+unchanged throughout).
 
 ### `add_objective_node` project-store flow (#614)
 
-The project store materializes a node-**issue**, not a roadmap-block re-render (the
-re-render-vs-materialize split lives in `objective-store.md`). The live pipeline:
-`get_objective` (compute the live roadmap) → `objective.add_node` (compute `<phase>.<n>`) →
-`project_or_none(content)` for phase-name enrichment → `ensure_phase_milestone(known=None)` →
-`_create_issue(project_id, milestone_id)` → one `create_issue_relation` per `depends_on`.
-
-- **Crucial reuse:** the `known=None` branch of `ensure_phase_milestone` was pre-built by Node 4.3
-  *explicitly for a future add-node-to-an-existing-objective path* (its docstring says so) — this is
-  that caller. Load-bearing seam, not fiction.
-- Phase-name enrichment reads `### Phase N: name` from the overview prose (`enrich_phase_names`) and
-  falls back to `Phase N` (`phase_label`) when no header exists.
+The project store materializes a node-**issue**, not a roadmap-block re-render (the split lives in
+`objective-store.md`). Pipeline: `get_objective` → `objective.add_node` (compute `<phase>.<n>`) →
+`project_or_none(content)` (phase-name enrichment: `enrich_phase_names` reads `### Phase N: name`,
+falls back to `phase_label`) → `ensure_phase_milestone(known=None)` →
+`_create_issue(project_id, milestone_id)` → one `create_issue_relation` per `depends_on`. The
+`known=None` branch was pre-built (#606) *explicitly for this future add-node caller* (its
+docstring says so) — a load-bearing seam, not fiction.
 
 ### The id-collision `None` branch is genuinely UNREACHABLE via real inputs (#614)
 
-`add_node`'s id-collision `None` return is a defensive guard with no realistic trigger: any node
-already occupying the computed `<phase>.<n>` would carry a numeric suffix → be counted in `max_num`
-→ contradiction (new id = max+1). **Don't write a unit test forcing the impossible branch** —
-instead test the *gateway error mapping*: monkeypatch `objective.add_node` to return `None` and
-assert the `GitHubError`/`ObjectiveStoreError` "collision" message maps to the CLI `invalid_input`
-arm.
+`add_node`'s id-collision `None` return has no realistic trigger (any occupying node would be
+counted in `max_num` → contradiction). **Don't write a unit test forcing the impossible branch** —
+test the *gateway error mapping* instead: monkeypatch `objective.add_node` to return `None` and
+assert the "collision" message maps to the CLI `invalid_input` arm.
 
 ### `FakeLinear` add-node fixture gotchas (#614)
 
-- A single `add_objective_node` path issues **two** `project_or_none` reads (get_objective's + the
-  content-enrichment one) → supply a **2-element list** under the `project(id` key.
-- `_create_issue` triggers a team-id lookup → the fixture needs a `teams(filter` entry even for an
-  add-node test.
-- Reaffirms the substring-insertion-order footgun (register the more-specific needle first) — see
-  the `_FakeLinear` section above; don't re-explain.
+- One `add_objective_node` path issues **two** `project_or_none` reads → a 2-element list under the
+  `project(id` key.
+- `_create_issue` triggers a team-id lookup → the fixture needs a `teams(filter` entry.
+- Register the more-specific needle first — see the `_FakeLinear` section above.
 
 ### The phase→milestone seam: route an existing caller through a future seam without behavior change (#606)
 
-`ensure_phase_milestone(*, project_id, name, known=None)` is a load-bearing seam a *future* caller
-(add-node) reuses. To route the *current* (create-objective) caller through it **today without a
-behavior change**, seed that caller's `known` map **empty**: the lookup branch then never fires
-(every name a guaranteed miss → identical `create_project_milestone` sequence as the old blind loop,
-**no extra `projectMilestones` read**); the reusable value lives entirely in the `known is None`
-branch for the future caller. **Prove byte-equivalence with a *negative* assertion**
+`ensure_phase_milestone(*, project_id, name, known=None)` routed the current create-objective
+caller through the future add-node seam by seeding that caller's `known` map **empty** — the
+lookup branch never fires, so the mutation sequence is byte-equivalent to the old blind loop with
+**no extra `projectMilestones` read**. **Prove byte-equivalence with a *negative* assertion**
 (`assert not _queries(fake, "projectMilestones(")`), not output equality. **Name is the dedup key**
-(no phase-key→id registry); the phase-header-text-drift duplicate-milestone edge is deferred to the
-drift-repair node.
+(no phase-key→id registry); the phase-header-text-drift duplicate-milestone edge was deferred to
+the drift-repair node.
 
 ### Fail-open Project Updates (#606)
 
-`projectUpdateCreate` bodies come from **pure backend-neutral composers** (`src/perk/objective/render.py`)
-computed from counts the call site already holds → **no extra network reads**. Each call site wraps
-in `try/except`, logs a non-fatal stderr line (`... skipped (non-fatal): {exc}`), and **never
-changes the command result**; in `_reconcile_objective_on_land` the post lives in its own helper
-(`_post_landed_update`) so a failure can't discard already-marked node ids (same isolation as the
-existing close fail-open). `projectUpdateCreate(` does **not** substring-collide with `projectUpdate(`
-(next char `C`), but place the more-specific needle first defensively. `projectUpdateCreate` was
-offline-covered only at authoring — now **proven live** along with `set_project_state` /
-`list_projects` / `_workflow_state_id` (the Live-validation record above, #621).
+`projectUpdateCreate` bodies come from **pure backend-neutral composers**
+(`src/perk/objective/render.py`) computed from counts the call site already holds → **no extra
+network reads**. Each call site wraps in `try/except`, logs a non-fatal stderr line (`... skipped
+(non-fatal): {exc}`), and **never changes the command result**; in `_reconcile_objective_on_land`
+the post lives in its own helper (`_post_landed_update`) so a failure can't discard already-marked
+node ids. `projectUpdateCreate(` does not substring-collide with `projectUpdate(` (next char `C`),
+but place the more-specific needle first defensively.
 
 ### The manifest-drift architecture (#609) — for the follow-up implementer
 
@@ -755,35 +715,26 @@ for `/objective-reconcile` to flip. (Terse by design; the full reconciliation pa
 
 ## Idiomatic backend: attribution, labels, attachments, prose-first (#678)
 
-The Linear backend was made **idiomatic** — attribution, workspace-scoped labels, PR attachments,
-and a prose-first overview order. The durable craft:
-
-- **Attribution rides the single create bottleneck.** `assigneeId` placed once in `_create_issue_raw`
-  covers all issue creates; `leadId` + `startDate` once in `create_project` covers all projects — one
-  edit each, no per-caller threading (**the bottleneck is the leverage**). `viewer_id()` is a cached
-  resolver mirroring `team_id` memoization.
-- **Fake-init gotcha (recurring).** Both fakes subclass `LinearClient` **without** `super().__init__`,
-  so every new client cache must be seeded directly or the resolver raises `AttributeError`. The
-  coverage split: the scripted `_FakeLinear` **pre-seeds** the cache (create-path tests assert the
-  sentinel) while the stateful `FakeLinearWorkspace` leaves it `None` (exercises the real request
-  path).
-- **Workspace-scoped labels + the four→five ripple.** Dropping `teamId` from the label create input
-  makes labels workspace-scoped (safe — lookup was already unscoped). Adding a perk label is a **wide
-  ripple** (`_PERK_LABELS`, readiness count tests, doctor/init docstrings, contracts §, user docs) —
-  the #678 four→five expansion touched all of them; grep the readiness label-count comments and
-  count-asserts before touching the label set.
-- **Attachments + fail-open seam.** `attachmentCreate` is idempotent by URL (no id to track) → safe to
-  post on every PR stamp; wired fail-open into `update_plan_header` (catches
-  `(IssueBackendError, GitHubError, ValueError)` — the `ValueError` covers `int(pr_field)`). The
-  attachment is bookkeeping; it must never fail a header stamp.
-- **Prose-first reorder: reads are position-independent, one WRITE wasn't.** Reordering compose sites
-  to prose-then-blocks is safe because every read scans by marker; the one position-dependent write
-  (the manifest backfill insert point — the manifest has since moved to a sentinel-issue
-  attachment, #1355) had to flip from **before** the Reconcilable START marker to
-  **after** the Reconcilable END marker. The deferred collapsible-toggle: an unverified
-  externally-rendered wrapper risks literal-visible-token rendering + a lossy round-trip that breaks
-  marker-matching — ship the deterministic prose-first half, record the gated half as an explicit
-  decision point (**never guess-and-ship an unverified externally-rendered form**).
+- **The bottleneck is the leverage** (#678): `assigneeId` once in `_create_issue_raw` covers all
+  issue creates; `leadId` + `startDate` once in `create_project` covers all projects — no
+  per-caller threading. `viewer_id()` is a cached resolver mirroring `team_id` memoization.
+- **Fake-init cache seeding (recurring)**: both fakes subclass `LinearClient` **without**
+  `super().__init__`, so every new client cache must be seeded directly or the resolver raises
+  `AttributeError`; the scripted `_FakeLinear` pre-seeds, the stateful `FakeLinearWorkspace`
+  leaves it `None` (exercises the real request path).
+- **Adding a perk label is a wide ripple** (`_PERK_LABELS`, readiness count tests, doctor/init
+  docstrings, contracts §, user docs) — grep the readiness label-count comments and count-asserts
+  first. Labels are workspace-scoped (no `teamId` in the create input; lookup was already
+  unscoped).
+- **`attachmentCreate` is idempotent by URL** (no id to track) → safe to post on every PR stamp;
+  wired fail-open into `update_plan_header` (catches `(IssueBackendError, GitHubError,
+  ValueError)` — the `ValueError` covers `int(pr_field)`). Bookkeeping must never fail a header
+  stamp.
+- **Reads are position-independent (marker scans); one write wasn't**: the prose-first reorder
+  flipped the manifest backfill insert point from before the Reconcilable START marker to after
+  the END marker (the manifest has since moved to a sentinel-issue attachment, #1355). **Never
+  guess-and-ship an unverified externally-rendered form** — the collapsible-toggle wrapper shipped
+  as a recorded decision point, not a guess (a lossy round-trip would break marker-matching).
 
 ## Byte-stable sibling selection + `_is_entity_not_found` (#687)
 
@@ -797,30 +748,20 @@ discriminator (`_is_entity_not_found`) folds a missing issue/session → empty; 
 
 ## GraphQL type-literacy consolidation (Node 3.1, PR #731)
 
-The dignified-python audit's type-literacy node made the Linear backend package's call sites ride
-the `_opt_*`/`_require_*` narrowing helpers instead of raw `cast(` — the helper *definitions* in
-the client layer internalize the ty narrowing quirk — with **one standing exception**:
-`src/perk/backends/linear/agent.py::_parse_created_session` (the agent-session emitter) carries
-two direct `cast("dict[str, object]", …)` local narrowings. The confinement claim covers the
-helper-riding call sites, not a package-wide zero.
-The durable placement decisions:
-
-- **Substrate-home placement.** The *generic* narrowing helpers (`_opt_*`/`_require_*`) live in
-  `src/perk/backends/linear/client.py` (the lower client layer). The *domain* payload mapping — the one pilot
-  `TypedDict` plus its narrowing helper — lives in the package leaf
-  `src/perk/backends/linear/_helpers.py`, which **imports** the generics. Generic narrowing is
-  substrate; payload-shape knowledge is domain — keep them in their own tiers.
-- **The single `TypedDict` pilot.** The recurring 6-field issue selection
-  (`id identifier url title description state { type }`, shared by `backend.get_plan` /
-  `backend.read_issue`) became one `TypedDict` (`LinearIssueNode`) with a narrowing constructor that
-  runs the `_require_*` guards once. `description` stays `_opt_str` → `str | None` because Linear
-  leaves it unset on a description-less issue.
-- The generic `_opt_*`/`_require_*` detail and the disposition-matching rule live in `toolchain/ty.md`
-  (the lenient-twin section) — don't duplicate it here.
+- **Substrate-home placement** (#731): the *generic* narrowing helpers (`_opt_*`/`_require_*`)
+  live in the client layer (`src/perk/backends/linear/client.py`); the *domain* payload mapping
+  lives in the package leaf `src/perk/backends/linear/_helpers.py`, which **imports** the
+  generics. Generic narrowing is substrate; payload-shape knowledge is domain — keep them in
+  their own tiers.
+- **One standing exception**: `src/perk/backends/linear/agent.py::_parse_created_session` carries
+  two direct `cast("dict[str, object]", …)` local narrowings — the confinement claim covers the
+  helper-riding call sites, not a package-wide zero.
+- The generic `_opt_*`/`_require_*` detail and the disposition-matching rule live in
+  `toolchain/ty.md` (the lenient-twin section) — don't duplicate it here.
 
 ## Issue-tier boundary model (the `TypedDict` pilot retired)
 
-The Node-3.1 `LinearIssueNode` `TypedDict` pilot above was **retired** for a lenient response model
+The Node-3.1 `LinearIssueNode` `TypedDict` pilot (PR #731) was **retired** for a lenient response model
 (`LinearIssueNodeModel` + nested `_IssueStateNode` in `src/perk/backends/linear/_helpers.py`), mirroring
 the GitHub node-2.1 boundary→domain pattern. Because the one recurring selection
 (`id identifier url title description state{type}`) feeds **two** domain objects — `PlanState` via
@@ -901,14 +842,6 @@ mutation-acceptance items; what remains unobserved:
   in tests.
 - **#1355 clean break**: pre-#1355 Linear artifacts are invisible to reads — accepted as
   disposable dogfood data; no migration playbook exists if that assumption changes.
-
-## Sources
-
-- Issues #347, #356, #361, #370, #376, #389, #400 (PRs #344, #354, #359, #368, #375, #387, #399)
-- Live-smoke results: #554 (PR #553), #558 (PR #557), #564 (PRs #561/#563), #567 (PRs #565/#566),
-  and follow-up #562 (the deferred `_uuid_for` collapse)
-- Projects substrate + `LinearProjectObjectiveStore` (Objective #548 Phase 3): #571 (PR #569),
-  #575 (PR #574), #582 (PR #579), #586 (PRs #584/#585), #589 (PR #588), #595 (PR #594)
 
 ## Cross-references
 
