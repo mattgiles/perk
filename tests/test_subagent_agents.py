@@ -5,6 +5,8 @@ subdir, byte-for-byte from the bundled `agents/` sources, as a committed managed
 fresh delivery, idempotency, drift rewrite, stray pruning, and `apply=False` dry-run parity.
 """
 
+import re
+
 import yaml
 
 from perk import _resources
@@ -76,11 +78,63 @@ def test_review_angle_selector_treats_required_ponytail_as_already_present():
     assert "Never propose a custom angle solely for simplification, YAGNI" in compact
 
 
-def test_committed_reviewer_mirrors_are_byte_identical():
+def test_committed_mirrors_are_byte_identical_for_all_perk_agents():
     root = _resources.agents_dir().parent
-    for name in ("draft-reviewer", "pr-reviewer", "adversarial-reviewer"):
+    for name in PERK_AGENTS:
         mirror = root / ".pi" / "agents" / "perk" / f"{name}.md"
         assert mirror.read_bytes() == _source_bytes(name)
+
+
+def test_conflict_resolver_def_is_mode_aware():
+    text = _source_bytes("conflict-resolver").decode()
+    # The sentinel marker prefix (the cross-file mode-selection contract).
+    assert "RETAINED-CONTINUATION SENTINEL:" in text
+    compact = " ".join(text.split())
+    # Retained-mode context ladder: stack rung + single-PR fallback rung.
+    assert "perk pr review-context --pr <N> --stack --json" in compact
+    assert "perk pr review-context --pr <N> --json" in compact
+    # PR mode keeps flagless context inference.
+    assert "perk pr review-context --json" in compact
+    # Retained mode never publishes.
+    assert "NEVER push in this mode" in compact
+    # Abort exists only in PR-rebase mode; retained mode never aborts.
+    assert "Abort is **PR-mode-only**" in compact
+    assert "NEVER `git rebase --abort` in this mode" in compact
+    # The fail-closed gate: uncorroborated retained mode mutates nothing.
+    assert "stop and report without mutating anything" in compact
+    # The outcome-class vocabulary the dispatching session's gate keys on.
+    assert "Open with the terminal outcome class" in compact
+    for outcome in ("completed", "stopped-before-mutation", "unresolvable-conflict", "aborted"):
+        assert f"**{outcome}**" in compact
+
+
+def test_continuation_dispatch_template_agrees_on_the_sentinel():
+    template_text = (
+        _resources.prompts_dir() / "stages" / "conflict-resolution-continuation.md"
+    ).read_text(encoding="utf-8")
+    def_text = _source_bytes("conflict-resolver").decode()
+    # Cross-file byte agreement on the sentinel marker prefix.
+    marker = "RETAINED-CONTINUATION SENTINEL:"
+    assert marker in template_text
+    assert marker in def_text
+    # The full rendered sentinel line starts a line (column zero), not mere substring presence.
+    assert re.search(
+        r"^RETAINED-CONTINUATION SENTINEL: resume the in-progress rebase in \{\{ worktree \}\}$",
+        template_text,
+        re.MULTILINE,
+    )
+    compact = " ".join(template_text.split())
+    # The child task opens with the worktree cd.
+    assert "`cd {{ worktree }}`" in compact
+    # The layer identity (retained mode requires the PR number).
+    assert "PR #{{ pr }}" in compact
+    # Continuation is gated on explicit human consent...
+    assert "{ objective: {{ objective }}, continue: true }" in compact
+    assert "await the human's explicit consent" in compact
+    # ...and withheld on every non-completed outcome class.
+    assert "ONLY a **completed** rebase" in compact
+    assert "EVERY other outcome" in compact
+    assert "withholds continuation" in compact
 
 
 def test_second_run_is_idempotent(tmp_path):

@@ -5,8 +5,8 @@ This is the readable projection of perk's living, workflow-first prose graph. It
 
 ## Coverage
 
-- **217** canonical source units
-- **731** logical fragments
+- **218** canonical source units
+- **735** logical fragments
 - **16** session shapes and **10** assemblies
 - **15** explicitly excluded candidates (policy-only; not displayed)
 - **0** validation findings
@@ -582,7 +582,10 @@ Implement a plan, resolve conflicts, and maintain implementation-session discipl
 
 - `markdown:agents/conflict-resolver.md`
   - `frontmatter:description` — Discovery description (`frontmatter.description`)
-  - `section:what-you-do` — What you do (`heading:what-you-do`)
+  - `section:mode-selection-fail-closed` — Mode selection (fail-closed) (`heading:mode-selection-fail-closed`)
+  - `section:pr-rebase-mode` — PR-rebase mode (`heading:pr-rebase-mode`)
+  - `section:retained-continuation-mode` — Retained-continuation mode (`heading:retained-continuation-mode`)
+  - `section:report` — Report (`heading:report`)
 - `markdown:prompts/stages/conflict-resolution.md`
   - `body` — Document body (`file-body`)
 - `markdown:prompts/stages/implement.md`
@@ -698,6 +701,7 @@ Synchronize, recover, land, and reconcile multi-plan objective delivery.
 
 | Unit | Role | Audience | Canonical source | Consumed by |
 | --- | --- | --- | --- | --- |
+| `markdown:prompts/stages/conflict-resolution-continuation.md` | `launch` | `shipped` | [`prompts/stages/conflict-resolution-continuation.md`](../../prompts/stages/conflict-resolution-continuation.md) · `file` | — |
 | `markdown:prompts/stages/objective-land.md` | `control-guidance` | `shipped` | [`prompts/stages/objective-land.md`](../../prompts/stages/objective-land.md) · `file` | — |
 | `markdown:prompts/stages/objective-reconcile-ready.md` | `control-guidance` | `shipped` | [`prompts/stages/objective-reconcile-ready.md`](../../prompts/stages/objective-reconcile-ready.md) · `file` | — |
 | `markdown:prompts/stages/objective-reconcile.md` | `control-guidance` | `shipped` | [`prompts/stages/objective-reconcile.md`](../../prompts/stages/objective-reconcile.md) · `file` | — |
@@ -717,6 +721,8 @@ Synchronize, recover, land, and reconcile multi-plan objective delivery.
 <details>
 <summary>Logical fragments</summary>
 
+- `markdown:prompts/stages/conflict-resolution-continuation.md`
+  - `body` — Document body (`file-body`)
 - `markdown:prompts/stages/objective-land.md`
   - `body` — Document body (`file-body`)
 - `markdown:prompts/stages/objective-reconcile-ready.md`
