@@ -56,6 +56,51 @@ test("claim: fresh session with PERK_RUN_ID + handoff claims the run", async () 
   }
 });
 
+test("claim: an objective-plan handoff's node link persists objective_node_claim", async () => {
+  // The cold objective-plan door stashes objective_id/node_id in handoff_extra; the cold claim
+  // persists them as the objective_node_claim so the implement-here exits are structurally
+  // suppressed in cold factory sessions too (the warm `objective_node` tool never runs there).
+  const cwd = scaffoldRepo({
+    handoff: {
+      runId: "01RID",
+      mode: "read-only",
+      stage: "objective-plan",
+      extra: { objective_id: "7", node_id: "2.3" },
+    },
+  });
+  const h = await loadPerkSession({ cwd, env: { PERK_RUN_ID: "01RID" } });
+  try {
+    assert.deepEqual(h.workflowState().objective_node_claim, { objective: "7", node: "2.3" });
+  } finally {
+    h.dispose();
+  }
+});
+
+test("claim: blank or half-specified handoff node links persist no claim", async () => {
+  for (const extra of [
+    {},
+    { objective_id: "7" },
+    { node_id: "2.3" },
+    { objective_id: "  ", node_id: "2.3" },
+    { objective_id: "7", node_id: "" },
+    { objective_id: 7, node_id: 2.3 },
+  ]) {
+    const cwd = scaffoldRepo({
+      handoff: { runId: "01RID", mode: "read-only", stage: "objective-plan", extra },
+    });
+    const h = await loadPerkSession({ cwd, env: { PERK_RUN_ID: "01RID" } });
+    try {
+      assert.equal(
+        h.workflowState().objective_node_claim,
+        undefined,
+        `no claim for extra ${JSON.stringify(extra)}`,
+      );
+    } finally {
+      h.dispose();
+    }
+  }
+});
+
 for (const footerId of ["pi-bar-footer", "pi-status-footer", "pi-default"]) {
   test(`footer seam: a foreign [providers] footer = "${footerId}" selection vacates installPerkFooter`, async () => {
     // Install-site (runtime) vacating: under a non-`perk-footer` selection perk does NOT install
@@ -256,6 +301,8 @@ test("env-child: a consumed handoff makes an env-inherited session adopt, not re
       stage: "implement",
       consumed: true,
       piSessionId: "parent.jsonl",
+      // An adopted env-child must not inherit the parent handoff's node link either.
+      extra: { objective_id: "7", node_id: "2.3" },
     },
   });
   const parentPointer: SessionPointer = {
@@ -277,6 +324,7 @@ test("env-child: a consumed handoff makes an env-inherited session adopt, not re
     assert.equal(state.run_id, "01RID.1");
     assert.equal(state.predecessor, "01RID");
     assert.equal(state.stage, undefined);
+    assert.equal(state.objective_node_claim, undefined); // adopt never impersonates the claim
     assert.equal(state.perk_version, perkVersion());
     assert.equal(h.sentinel()?.source, "env-child");
     assert.ok(existsSync(runScratchDir(cwd, "01RID.1")), "the child's scratch was isolated");

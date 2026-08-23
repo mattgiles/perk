@@ -3,12 +3,25 @@
 // REAL git repo (gitInit). No LLM / network.
 
 import assert from "node:assert/strict";
+import { existsSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 import { test } from "node:test";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
-import type { PlanRef } from "../substrate/cache.ts";
+import { type PlanRef, readPlanRef, writePlanRef } from "../substrate/cache.ts";
 import type { WorkflowState } from "../substrate/workflowState.ts";
-import { gitInit, loadPerkSession, plantSession, scaffoldRepo } from "../testing/harness.ts";
-import { gateDecision, implementHandoffPrompt, planReadInstruction } from "./lifecycleGates.ts";
+import {
+  fakePerk,
+  gitInit,
+  loadPerkSession,
+  plantSession,
+  scaffoldRepo,
+} from "../testing/harness.ts";
+import {
+  gateDecision,
+  implementHandoffPrompt,
+  planningStageRefusal,
+  planReadInstruction,
+} from "./lifecycleGates.ts";
 
 const REF: PlanRef = {
   provider: "github",
@@ -206,6 +219,125 @@ test("/implement: outside an impl worktree via handler -> no newSession, points 
       h.notifies.some((n) => /cold-only/.test(n)),
       "pointed at the cold door",
     );
+  } finally {
+    h.dispose();
+  }
+});
+
+// --- the planning-stage lifecycle-door refusal --------------------------------------------
+
+test("planningStageRefusal: planning stages refuse; other/absent stages pass", () => {
+  const ctxFor = (stage?: string) => ({
+    sessionManager: {
+      getBranch: () => [
+        {
+          type: "custom",
+          customType: "perk:workflow-state",
+          data: { run_id: "01RID", ...(stage !== undefined ? { stage } : {}) },
+        },
+      ],
+    },
+  });
+  for (const stage of ["plan", "objective-plan"]) {
+    const message = planningStageRefusal(ctxFor(stage), "submit");
+    assert.ok(message !== null, `${stage} refuses`);
+    assert.match(message, /planning session/);
+    assert.match(message, /perk impl <N>/);
+    assert.match(message, new RegExp(stage));
+  }
+  for (const stage of ["implement", "address", "learn", undefined]) {
+    assert.equal(planningStageRefusal(ctxFor(stage), "submit"), null, `${stage} passes`);
+  }
+});
+
+test("lifecycle doors refuse in a planning session — the two-ref regression", async () => {
+  // The dangerous shape after an approved save in a positioned stacked planning session: the
+  // cwd binding is the PREDECESSOR (readPlanRef(ctx.cwd)) while active_plan_ref is the
+  // just-saved child. Every lifecycle door refuses BEFORE any cold-door delegation — the fake
+  // perk records zero invocations, so no door action can touch the predecessor.
+  const cwd = scaffoldRepo();
+  const predecessor: PlanRef = { ...REF, pr_id: "101", url: "u/101" };
+  const child: PlanRef = { ...REF, pr_id: "102", url: "u/102" };
+  writePlanRef(cwd, predecessor); // the positioned checkout's own durable binding
+  const argvFile = join(cwd, "cold-door-argv.txt");
+  const bin = fakePerk(cwd, { stdout: "{}", argvFile });
+  const file = plantSession(
+    cwd,
+    [
+      {
+        run_id: "01RID",
+        // Post-approval-save: the gate exited (read-write) but the stage stays objective-plan.
+        mode: "read-write",
+        stage: "objective-plan",
+        pi_session_id: "two-ref.jsonl",
+        active_plan_ref: child,
+      },
+    ],
+    { fileName: "two-ref.jsonl" },
+  );
+  const h = await loadPerkSession({
+    cwd,
+    env: { PERK_BIN: bin },
+    sessionManager: SessionManager.open(file),
+    mode: "print",
+  });
+  try {
+    for (const [tool, params] of [
+      ["submit", {}],
+      ["land", {}],
+      ["learn", {}],
+      ["finalize_address", { threads: [{ thread_id: "T1" }] }],
+    ] as const) {
+      const result = await h.invokeTool(tool, params);
+      const details = result.details as { ok: boolean; error_type?: string };
+      assert.equal(details.ok, false, `${tool} refused`);
+      assert.equal(details.error_type, "planning_session", `${tool} refusal is typed`);
+    }
+    await h.runCommandHandler("address", "");
+    await h.runCommandHandler("learn", "skip");
+    assert.ok(
+      h.notifyEvents.some(
+        (event) => event.severity === "warning" && /planning session/.test(event.message),
+      ),
+      "the command surfaces warned with the planning refusal",
+    );
+    assert.ok(!existsSync(argvFile), "no cold door was ever invoked");
+    // The predecessor's binding is byte-untouched.
+    assert.deepEqual(readPlanRef(cwd), predecessor);
+  } finally {
+    h.dispose();
+  }
+});
+
+test("lifecycle doors proceed in a non-planning session (stage implement)", async () => {
+  // The guard keys ONLY off the planning stages: an implement-stage session reaches the cold
+  // door as before (the fake perk is invoked; the failure surfaced is the fake's, not the
+  // planning refusal).
+  const cwd = scaffoldRepo();
+  const argvFile = join(cwd, "cold-door-argv.txt");
+  const bin = fakePerk(cwd, {
+    stdout: JSON.stringify({ success: false, error_type: "boom", message: "fake door" }),
+    code: 1,
+    argvFile,
+  });
+  const file = plantSession(
+    cwd,
+    [{ run_id: "01RID", mode: "read-write", stage: "implement", pi_session_id: "impl.jsonl" }],
+    { fileName: "impl.jsonl" },
+  );
+  const h = await loadPerkSession({
+    cwd,
+    env: { PERK_BIN: bin },
+    sessionManager: SessionManager.open(file),
+    mode: "print",
+  });
+  try {
+    const result = await h.invokeTool("submit", {});
+    const details = result.details as { ok: boolean; error_type?: string };
+    assert.equal(details.ok, false);
+    assert.notEqual(details.error_type, "planning_session");
+    assert.ok(existsSync(argvFile), "the cold door was reached");
+    assert.match(readFileSync(argvFile, "utf8"), /submit/);
   } finally {
     h.dispose();
   }

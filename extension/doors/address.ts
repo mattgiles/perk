@@ -46,6 +46,7 @@ import {
   runReviewClassifierWave,
 } from "../waves/reviewClassifierWave.ts";
 import { createRpcWaveAdapter } from "../waves/rpcAdapter.ts";
+import { planningStageRefusal } from "./lifecycleGates.ts";
 import { driveConflictResolution, type SubmitOk, submitPr } from "./submit.ts";
 
 export interface ThreadInput {
@@ -284,6 +285,10 @@ export async function finalizeAddress(
   params: ResolveParams,
 ): Promise<FinalizeAddressResult> {
   const fail = failFor<FinalizeAddressFailExtras>(ctx, "address", "finalize_address");
+  // Planning sessions never legitimately publish review fixes — the first check (a positioned
+  // stacked planning session's cwd binding is the PREDECESSOR).
+  const planningRefusal = planningStageRefusal(ctx, "address");
+  if (planningRefusal !== null) return fail(planningRefusal, "planning_session");
   if (params.threads.length === 0) {
     return fail("no threads to finalize (pass { threads: [{thread_id, comment?}] })", "bad_input");
   }
@@ -529,6 +534,12 @@ export function registerAddress(pi: ExtensionAPI): void {
       "Classify PR review feedback (isolated child) and resolve threads (submit → address). " +
       "Pass --preview to classify only (take no action).",
     handler: async (args, ctx) => {
+      // Planning sessions never legitimately run the review loop — the first check.
+      const planningRefusal = planningStageRefusal(ctx, "address");
+      if (planningRefusal !== null) {
+        report(ctx, "address", "warning", planningRefusal);
+        return;
+      }
       const preview = /(^|\s)--preview(\s|$)/.test(args ?? "");
       // `/address` needs an active plan-ref (the converged body carries the PR identity, and the
       // classifier child's `perk pr feedback` hard-errors `no_plan_ref` without one). Mirror the

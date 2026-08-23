@@ -578,6 +578,40 @@ test("first-party: a seeded node claim suppresses implement-here (the 3-option s
   );
 });
 
+test("first-party: the COLD-claim record suppresses implement-here too", async () => {
+  // The cold objective-plan claim (session_start persists objective_node_claim from the
+  // handoff's objective_id/node_id alongside run_id/mode/stage) reaches the same suppression:
+  // no 4th verdict in a cold factory session.
+  const cwd = scaffoldRepo();
+  const branch: unknown[] = [
+    stateEntry({
+      run_id: "01RID",
+      mode: "read-only",
+      stage: "objective-plan",
+      objective_node_claim: { objective: "7", node: "2.3" },
+    }),
+  ];
+  const ui = fakeUI({ editor: ["# The draft\n"], select: [SKIP_OPT] });
+  const ctx = headfulCtx(cwd, branch, ui);
+  assert.ok(
+    writeSessionArtifact(fakeSink(branch), ctx, PLAN_DRAFT_ARTIFACT, "# The draft\n"),
+    "the draft artifact landed",
+  );
+  const pi = fakeColdDoorPi(branch, { stdout: PLAN_JSON });
+  await executePlanReview(
+    pi,
+    ctx as unknown as ExtensionContext,
+    fakeGating(true),
+    cannedBridge(DENIED),
+    {},
+  );
+  assert.deepEqual(
+    ui.selects[0]?.options,
+    [APPROVE, DENY_OPT, SKIP_OPT],
+    "no implement-here option in a cold objective-plan session",
+  );
+});
+
 // --------------------------------------------------- runFirstPartyReview (the pure core arms)
 
 const noopWrite = (_plan: string): boolean => true;
