@@ -1,6 +1,6 @@
 """perk-owned dot-directory path construction (contracts.md §8.1).
 
-This is the **sole** construction site for the perk-owned dot-path families — the perk dir,
+This is the **sole** construction site for the perk-owned dot-path families —
 the config files (`config.toml`/`local.toml`), the required-perk-version pin, the
 committed managed-state file (`managed-state.toml`), the
 repo-authored skills dir, and the user-level `~/.perk` family (the last-seen-version
@@ -32,11 +32,6 @@ LEGACY_LOCAL_CONFIG_FILENAME = "perk.local.toml"
 # Forward-slash relative string for display f-strings (kept byte-consistent with
 # ``repo_skills_dir`` below — same `.perk/skills` literal text).
 REPO_SKILLS_REL = ".perk/skills"
-
-
-def perk_dir(root: Path) -> Path:
-    """The perk-owned dot-dir root (shared with Pi today)."""
-    return root / ".pi"
 
 
 def config_dir(root: Path) -> Path:

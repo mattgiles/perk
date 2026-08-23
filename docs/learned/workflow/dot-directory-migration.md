@@ -46,11 +46,13 @@ convention, **update BOTH the same turn** the topology changes.
 ## The centralized path seam (Node 1.1)
 
 Two per-plane leaf seams — `src/perk/substrate/paths.py` + `extension/substrate/paths.ts` — own
-construction of the perk-owned dot-path families: `perk_dir`, `config_dir`, `config_file`,
+construction of the perk-owned dot-path families: `config_dir`, `config_file`,
 `local_config_file`, `repo_skills_dir`, plus the filename constants `CONFIG_FILENAME`,
 `LOCAL_CONFIG_FILENAME`, `REPO_SKILLS_REL`. The **workflow** family stays in the established cache
 seam (`cache.workflow_dir` / `workflowDir`) — it was already centralized there — so the path
-guards allowlist BOTH `paths` and `cache`.
+guards allowlist BOTH `paths` and `cache`. The Pi-root helpers (`perk_dir`/`perkDir`, returning
+`<root>/.pi`) were deleted as dead code — zero callers on either plane, and the names contradicted
+the ownership contract (`.pi/` is a discovery namespace, not perk-owned).
 
 Establishing the redirectable seam **first** is what makes each later move-phase a localized edit:
 `config_dir` is the single config-family redirection point, and the file helpers

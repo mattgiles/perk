@@ -248,20 +248,24 @@ function resetConflictAttempts(pi: ExtensionAPI, ctx: ExtensionContext): void {
 
 /**
  * The follow-up guidance the warm `/submit` injects to dispatch the conflict-resolver (modeled on
- * `prReviewGuidance`). Pure + exported for offline tests. When `model` is set, the ONE
- * workflowScript call carries a workflow-level `model` default; otherwise the agent's default
- * model is used.
+ * `prReviewGuidance`). Pure + exported for offline tests. `worktree` is the plan worktree the
+ * child's task text pins with a concrete `cd <worktree>` command — a dispatched child otherwise
+ * has no cwd guarantee and can run its commands outside the plan worktree. When `model` is set,
+ * the ONE workflowScript call carries a workflow-level `model` default; otherwise the agent's
+ * default model is used.
  */
 export function conflictResolutionGuidance(
   base: string,
   attempt: number,
   cap: number,
+  worktree: string,
   model?: string,
 ): string {
   return render("stages/conflict-resolution.md", {
     base,
     attempt: String(attempt),
     cap: String(cap),
+    worktree,
     model: model ?? "",
   });
 }
@@ -304,7 +308,9 @@ export function driveConflictResolution(
   });
   const model = subagentModel(ctx.cwd, "conflict-resolver");
   const message =
-    conflictResolutionGuidance(base, next, CONFLICT_RESOLUTION_ATTEMPT_CAP, model) +
+    // `/submit` runs only in worktree-bound sessions (planning sessions are refused first), so
+    // the session cwd IS the plan worktree.
+    conflictResolutionGuidance(base, next, CONFLICT_RESOLUTION_ATTEMPT_CAP, ctx.cwd, model) +
     bindingSuffix(ctx.cwd, "command:submit");
   if (ctx.isIdle()) {
     // The `/submit` command path (idle): inject an immediate turn.

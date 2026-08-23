@@ -21,7 +21,8 @@
 // (soft `details.ok`, mirrors resolveReviewThreads). This is documented in shared/contracts.md §8.3.
 //
 // The review model is configurable via `[models.subagents] pr-reviewer` in `.perk/config.toml`; because
-// `subagents.agentOverrides` does NOT reach project agents, `run_pr_review_wave` applies that model
+// an `agentOverrides` model can never displace a perk def's frontmatter-pinned `model:` (the ≥0.52
+// custom-agent override path is a frontmatter-sensitive fill), `run_pr_review_wave` applies that model
 // as the wave's workflow-level `model` default applied to every lane (the agent's frontmatter model
 // is the default).
 //

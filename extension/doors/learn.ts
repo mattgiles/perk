@@ -13,8 +13,8 @@
 // it validates the angle selection in code (2–4 angles, `session-deviations` mandatory — the
 // §8.35 policy as tested implementation), derives the manifest path from the relayed
 // `bundle_dir`, resolves the analyst model from `[models.subagents] learn-analyst` (because
-// `subagents.agentOverrides` does NOT reach project agents, the model rides the wave as the
-// workflow-level `model` default), and runs 2–4 fresh-context `perk.learn-analyst` lanes through
+// an `agentOverrides` model can never displace the def's frontmatter-pinned `model:`, the model
+// rides the wave as the workflow-level `model` default), and runs 2–4 fresh-context `perk.learn-analyst` lanes through
 // `runLearnWave` (best-effort completeness: a failed analyst is an explicitly-reported skipped
 // angle). A wave-level failure soft-fails LOUDLY — never a silent fallback to model-authored
 // scripts; the guidance routes the parent to a single-context analysis of the bundle instead.
