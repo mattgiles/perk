@@ -27,6 +27,9 @@ This doc captures the repeatable recipe for both, because the ripple is wide and
   anti-drift mechanism".
 - A caller wanting laxer input than a shared validator DEFAULTS at its own new edge — never
   loosen the shared validator — "Default at the new edge, don't loosen a shared validator".
+- Contract sections are read literally: fenced JSON examples are valid JSON with concrete rows,
+  exceptions are exempted inline, and conditional fields name their exact carrying shapes —
+  "Prose-contract maintenance & objective hygiene".
 
 ## The six-seam recipe for a new parsed data file
 
@@ -88,6 +91,15 @@ authoring-family migration enumerated six sections; review still found stale car
 attributions in §8.10, §8.27, and §8.32). After a carrier move, grep `shared/contracts.md` for
 the old carrier identifiers — constant names, skill names, template paths. (Carrier-migration
 craft lives in `prompt-carrier-layering.md`.)
+
+Three rules for writing the section prose itself (#2001, #1997, #1990):
+
+- **Schema-bearing fenced JSON examples must be valid JSON with representative concrete rows** —
+  a decoder implementer reads them literally; key-only shorthand rows are a trap.
+- **Contract prose must exempt its own exceptions inline** — an opening "every post-launch
+  outcome is ok" must name the fail arm defined two paragraphs later.
+- **When a field is conditional across result shapes, name the exact shapes that carry it** —
+  never gesture at "earlier arms".
 
 ## Cross-plane envelope widenings must audit consumer gates
 

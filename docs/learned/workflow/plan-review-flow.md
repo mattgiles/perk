@@ -17,6 +17,11 @@ hit.
 - `plan_review` dispatch is backend-neutral: plannotator → the event-bus bridge; ANY other
   selection → the first-party `ctx.ui.editor` review (the default substrate) — "The
   backend-neutral review door".
+- Plannotator arms open an in-TUI launch chooser first (drafts-only + presence-probed; null
+  opener falls OPEN to the plain review; Esc picks plain, never cancels) — "The `plan_review`
+  launch chooser".
+- The docs/learned consult is first-stop-MANDATORY prose with `learned-docs-first-stop` audit
+  expectations behind it — "The `PLAN_AUTHORING_CONTEXT` nudge seam".
 - The review-surface LAW: review surfaces resolve artifact → param ONLY (never the transcript
   scrape save surfaces allow) — an approval auto-saves the reviewed bytes — "Asymmetric source
   tiering is the review-surface law".
@@ -147,11 +152,15 @@ guidance between the gather list and the executor paragraph.**
   (the constant's prose source) and an **additive** substring assertion in `planMode.test.ts`
   (the `planContextContent` test) — add one new `assert.match` to pin new content. (The
   `perk-plan` skill is the §8.57 detail tier, not an SSOT mirror — it points back at the flow.)
-- **Design rationale (a soft nudge, not a gate).** The read-only bash gate was a red herring (`read`
-  on `docs/learned/*.md` is always allowed); the gap was that nothing *instructed* consulting them. A
-  structural forcing-function (a required "learnings consulted" field) was rejected as
-  weakest-guarantee-for-most-cost; the "there may be nothing relevant … does not need to be grounded"
-  sentence keeps it a **check, not a grounding mandate.**
+- **The consult is first-stop-MANDATORY prose** ("Make `docs/learned/` your first stop … finding
+  nothing is fine; skipping the walk is not"), backed by two non-blocking deterministic audit
+  expectations (`learned-docs-first-stop` in perk-dev's session audit) — a mandatory consult,
+  not a grounding mandate (finding nothing stays fine) (#1955).
+- **Design history (#700 — born a soft nudge).** The read-only bash gate was a red herring (`read`
+  on `docs/learned/*.md` was always allowed); the gap was that nothing *instructed* consulting
+  them. A structural forcing-function (a required "learnings consulted" field) was rejected at
+  the time as weakest-guarantee-for-most-cost; the later hardening kept the prose surface and
+  added the audit expectations instead of a gate.
 
 ## First-party review mechanics
 
@@ -222,6 +231,19 @@ guidance between the gather list and the executor paragraph.**
   (`extension/doors/planReviewBrowser.ts`). Route/envelope/bind-order pins
   are at `@plannotator/pi-extension@0.26.4`; drift degrades loudly (readiness `timeout` /
   handshake `unavailable`), never silently.
+
+### The `plan_review` launch chooser (#1922)
+
+- **Plannotator arms open an in-TUI chooser before anything launches.** Eligibility is
+  drafts-only AND presence-probed, via injected `WaveLaunch` deps composed at the
+  `registerPlanReview` call site in `extension/index.ts` — the factory imports nothing from door
+  modules, breaking the value-import cycle (the browser door value-imports the review door).
+- **The wave choice delegates to the guidance-RETURNING door open cores** (the doors became thin
+  `sendUserMessage` wrappers) and returns a non-terminating `wave_launched` result carrying the
+  door guidance verbatim; the browser decision routes through the door's existing background
+  tasks.
+- **A null opener (a sync port-pick failure) falls OPEN to the plain blocking review**; Esc picks
+  the plain flavor, never cancels.
 
 ## Summoned background review doors — three race classes the blocking path doesn't have
 
