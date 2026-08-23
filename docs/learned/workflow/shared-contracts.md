@@ -145,14 +145,15 @@ facts**; single-plane narrative lives in the owning module's header docstring.
 - **Verify-docstring-coverage-then-delete.** Before cutting a narrative block from
   `shared/contracts.md`, verify the named owner module's header docstring carries the essentials
   (add a sentence there if not), then **delete the block outright** — git history is the archive;
-  there is no relocation into `contracts-history.md`. Headings/anchors are **never renamed or
+  there is no relocation anywhere (the former `contracts-history.md` changelog sibling was itself
+  retired). Headings/anchors are **never renamed or
   renumbered** (the diet deletes prose, never an anchor); a compact "owning modules" pointer list
   replaces the deleted narrative.
 - **The anchor-liveness guard** (`tests/test_contracts_anchors.py`) converts the `§8.x` citation
   network from convention into CI, in three directions: heading **uniqueness**; wide-corpus
   **liveness** (every heading is cited somewhere outside contracts.md — self-reference confers no
   liveness); code-corpus **validity** (code may cite only live headings; docs may deliberately
-  discuss absent numbers); plus contracts-history group integrity. **Gotcha:** the guard's own
+  discuss absent numbers). **Gotcha:** the guard's own
   docstring can't spell a deliberately-absent `§8.x` token or it flags itself — write "the skipped
   8.8" without the `§`. Second gotcha: the guard also fires **mid-implementation** when code
   cites a `§` heading that doesn't exist yet — when a plan schedules "amend contracts in the

@@ -54,7 +54,6 @@ NPM_TARBALL_EXPECTED: frozenset[str] = frozenset(
         "shared/bindings.yaml",
         "shared/providers.yaml",
         "shared/contracts.md",
-        "shared/contracts-history.md",
         "shared/README.md",
         "shared/schemas/contracts/registry.schema.json",
         "prompts/README.md",

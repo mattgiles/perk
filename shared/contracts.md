@@ -11,12 +11,7 @@ Three **parsed** contracts are siblings of this file: `registry.yaml` — the st
 graph, whose `state_keys` block is the canonical vocabulary referenced throughout this
 document — `bindings.yaml` — the skill-binding set (trigger→skill delivery), specified
 in §8.9 — and `providers.yaml` — the provider-selection supported set, specified in §8.10.
-Two more siblings: `contracts-history.md` (the chronological changelog, below) and
-`schemas/` (committed golden snapshots of the boundary models, §8.34).
-
-> **History.** The chronological landing-note changelog lives in the sibling
-> [`contracts-history.md`](./contracts-history.md), grouped by `§N.M` anchor; this file is the
-> compact current spec.
+One more sibling: `schemas/` (committed golden snapshots of the boundary models, §8.34).
 
 ---
 
