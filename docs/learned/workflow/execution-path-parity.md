@@ -58,6 +58,14 @@ Each shape below is a reusable pattern, with its landed exemplar:
   literal byte-identically in both suites with reciprocal comments pointing at each other —
   `tests/test_run_report.py` ↔ `extension/worker/worker.test.ts` (see
   `docs/learned/workflow/shared-contracts.md` for the general lockstep-literal pattern).
+- **One physical fixture file consumed by BOTH suites.** The strongest cross-plane invariance pin
+  shares the fixture bytes themselves — `tests/parity/dream_report_invariance.json`, with the
+  `{repeat, count}` expansion convention for oversize cases (#1996).
+
+Two-roots-era additions (#1740): `cli/plan_selection.select_plan` joins the
+`reconstruct_plan_ref` convergence sites; §8.38 row 5 covers the shared positioner plus the
+named local-worktree-vs-remote-in-place gesture difference; and the parity suite carries the
+explicit-ref arm.
 
 ## Name differences instead of forcing identity
 
