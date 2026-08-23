@@ -14,7 +14,8 @@ This doc captures the repeatable recipe for both, because the ripple is wide and
 ## Distillation
 
 - A new parsed `shared/` data file mirrors exactly six seams (data file, Python reader with
-  lenient parse + one findings vocabulary, TS reader on the vendored bounded YAML reader with
+  lenient parse (missing→findings, wrong-typed→domain error) + one findings vocabulary, TS reader
+  on the vendored bounded YAML reader with
   Python as the authoritative validator, …) — "The six-seam recipe for a new parsed data
   file".
 - A cross-plane behavior change amends `contracts.md` the SAME TURN; envelope population changes
@@ -38,11 +39,21 @@ third instances. To add a **new** parsed data file, mirror exactly these six sea
 no manifest edits):
 
 1. **Data file** `shared/<name>.yaml` with `schema_version: 1` + a documenting header comment.
-2. **Python reader** `src/perk/substrate/<name>.py` — `load_*` raises a dedicated `*Error` **only for structural
-   failures** (missing file / not a mapping / unsupported `schema_version`); `validate()` returns
-   `list[Issue]` and **never raises for content**. Reuse `Issue`/`FindingSeverity` from `src/perk/substrate/registry.py`
-   (one findings vocabulary — don't redefine). Parse leniently (coerce missing/ill-typed fields to
-   `""`) so the *validator*, not the parser, reports every shape problem in one place.
+2. **Python reader** `src/perk/substrate/<name>.py` — `load_*` raises a dedicated `*Error` for
+   **structural failures** (missing file / YAML parse failure / not a mapping / unsupported
+   `schema_version`) **and for wrong-typed stored fields**: parsing goes through a
+   `LenientParseModel` (`perk.boundary`), and a *present* field the lenient model cannot coerce to
+   its declared type (an int where a str belongs, a scalar where a list belongs) raises a
+   `ValidationError` translated into the domain error via `translate_validation_errors` at the
+   load boundary. A ***missing*** field defaults (`""`/`[]`/`{}`) and stays a **validator
+   finding**, as do all semantic checks (enum membership, duplicates, graph/vocabulary
+   consistency): `validate()` returns `list[Issue]` and **never raises for content**. Reuse
+   `Issue`/`FindingSeverity` from `src/perk/substrate/registry.py` (one findings vocabulary —
+   don't redefine). Lenient parsing otherwise survives: `extra="ignore"` drops unknown keys and
+   ordinary scalars coerce. To keep a shape problem on the findings path deliberately, type the
+   field so it *parses*: `str | None` makes an explicit YAML `null` read as missing
+   (`ProviderEntry.id`/`seam`), and `dict[str, Any]` defers inner-value checks to the validator
+   (`StageEntry.doors`/`run_id`).
 3. **TS reader** `extension/substrate/<name>.ts` — a thin structural parse via the **vendored bounded reader**
    `extension/substrate/miniYaml.ts` (scoped to perk's own files; throws loudly on any unsupported
    construct); throws on missing-file/wrong-shape only. **The Python plane is the authoritative
@@ -240,6 +251,8 @@ validator strict.
 - `shared/bindings.yaml` + `src/perk/substrate/bindings.py` + `extension/substrate/bindings.ts` — the second instance
 - `shared/providers.yaml` + `src/perk/substrate/providers.py` + `extension/substrate/providers.ts`
   — the third instance (the provider-selection supported set)
+- `src/perk/boundary.py` — `LenientParseModel`/`translate_validation_errors`, the boundary layer
+  behind seam 2's parse rule; craft in `docs/learned/workflow/pydantic-boundary-models.md`
 - `docs/learned/workflow/provider-seam.md` — the provider catalog's seam-specific application of
   this recipe (which seams exist, how each vacates; it cross-links back here)
 - `tests/test_packaging.py` — the wheel + npm-pack bundle assertions (the publish-surface guard)
