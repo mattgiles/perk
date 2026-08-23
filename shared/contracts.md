@@ -1,8 +1,7 @@
 # perk cross-plane contracts
 
 The language-neutral contracts both planes obey, authored once here and bundled into each
-build artifact. This document holds the numbered **prose contract sections** (`§8.1`–`§8.65`,
-non-contiguous: `§8.8` is skipped and `§8.6a` exists; no parser): the Python CLI (`perk`)
+build artifact. This document holds the numbered **prose contract sections** below: the Python CLI (`perk`)
 and the TS extension (`@mgiles/perk`) each implement one side, against the exact names/paths/
 fields pinned in each section. `perk doctor` verifies conformance. The numbering convention:
 section numbers are stable anchors, never renumbered; grep the existing headings before
@@ -15,20 +14,20 @@ in §8.9 — and `providers.yaml` — the provider-selection supported set, spec
 Two more siblings: `contracts-history.md` (the chronological changelog, below) and
 `schemas/` (committed golden snapshots of the boundary models, §8.34).
 
-> **History.** The chronological `Status (…)` landing-note changelog lives in the sibling
+> **History.** The chronological landing-note changelog lives in the sibling
 > [`contracts-history.md`](./contracts-history.md), grouped by `§N.M` anchor; this file is the
 > compact current spec.
 
 ---
 
-## §8.1 · `.perk/workflow/` layout (Q2)
+## §8.1 · `.perk/workflow/` layout
 
 The local cache tier — written and read by **both** the CLI (exterior) and the extension
 (interior). Fixed layout:
 
 ```
 .perk/workflow/
-├── plans/                  # materialized plan cache (canonical copy stays in GitHub)
+├── plans/                  # structural workflow subtree (the active plan snapshot is plan.md)
 ├── plan.md                 # cache.plan: the per-worktree plan snapshot for review fidelity (Python-only; transient)
 ├── plan-ref.json           # cache.plan-ref: the active plan->branch ref pointer (local mirror)
 ├── scratch/runs/<run_id>/  # per-run inter-process workflow files (diffs, generated bodies)
@@ -47,11 +46,13 @@ The local cache tier — written and read by **both** the CLI (exterior) and the
   does not exist yet at cold-door launch time). The keying `run_id` may be **CLI-minted**
   (cold launch, `perk/state/run_id.py`) or **extension-minted** (a warm session with no identity,
   §8.2 — `extension/substrate/runId.ts`); handoff blobs remain cold-launch-only.
-- **Handoff blob:** `{ run_id, stage, mode, consumed }` (+ `pi_session_id` once claimed). The
-  CLI's cold launch (`perk <stage>`, T4) writes it; the extension claims it on `session_start`
-  and sets `consumed: true` (§8.2). `stage` is the target stage id — the launched session's
-  interior *handler* acts on it (Phase 1); T4's extension reads only `mode`/`run_id`.
-- **Session-data accessor seam (Objective #339 Node 1.2).** The session data dir is
+- **Handoff blob:** only `run_id` and `consumed` are required; `stage`, `mode`,
+  `pi_session_id`, and the link-context fields are optional, and unknown extras round-trip
+  (forward-compatible — `cache.py::Handoff`/`HandoffModel`). The CLI's cold launch
+  (`perk <stage>`) writes it; the extension claims it on `session_start` and sets
+  `consumed: true` (§8.2). `stage` is the target stage id — the launched session's interior
+  *handler* acts on it, and the extension records and uses `stage`, `mode`, and `run_id`.
+- **Session-data accessor seam.** The session data dir is
   `scratch/runs/<run_id>/data/` — a dedicated subdir so run-scoped session artifacts never
   overlap perk machine records (`dispatch.json`, `events.ndjson`, `ci-*.md`) living directly in
   the run dir — created lazily on first write (`session_start` stays artifact-free). All
@@ -63,9 +64,9 @@ The local cache tier — written and read by **both** the CLI (exterior) and the
   plus a stderr warning, never an exception. Manual construction of the `scratch`/`runs` path
   segments outside the seam is forbidden and guard-tested in both planes
   (`extension/cacheGuard.test.ts`, `tests/test_cache_guard.py`). The dedicated
-  `cache.session-data` state key is now real (Node 2.1): it names the run-scoped session data
-  dir artifacts and is declared in `writes` by the read-only authoring stages — `plan`,
-  `objective-plan`, and `objective-author` (`cache.scratch` still names the broader substrate).
+  `cache.session-data` state key names the run-scoped session data dir artifacts and is
+  declared in `writes` by the read-only authoring stages — `plan`, `objective-plan`,
+  `objective-author`, and `gist-author` (`cache.scratch` names the broader substrate).
 
   **perk-owned dot-path construction seam.** Construction of the **perk-owned** dot-path
   families — the perk dir, the config files (`config.toml`/`local.toml`), the required-perk-version
@@ -76,9 +77,8 @@ The local cache tier — written and read by **both** the CLI (exterior) and the
   (`.perk/skills`), and the workflow dir — is confined to a per-plane seam: `perk/substrate/paths.py`
   + `extension/substrate/paths.ts` (perk dir / config / skills) plus `cache.workflow_dir` /
   `workflowDir` for the workflow family. Each family is independently redirectable from its single
-  helper (Objective #878 migrates them to `.perk/` one phase at a time). The **workflow family now
-  resolves to `.perk/workflow/`**. The **repo-skills family has moved**: it now resolves to
-  `.perk/skills` via `repo_skills_dir`. The **config family has moved**: it now resolves to
+  helper. The workflow family resolves to `.perk/workflow/`. The repo-skills family resolves to
+  `.perk/skills` via `repo_skills_dir`. The config family resolves to
   `.perk/config.toml` (committed) / `.perk/local.toml` (gitignored) on **both planes** —
   `config_dir`/`configDir` return `root/".perk"` and the filename constants are
   `config.toml`/`local.toml`. `.perk/config.toml` is the repo **initialization marker**: `perk init`
@@ -98,22 +98,23 @@ The local cache tier — written and read by **both** the CLI (exterior) and the
   `.pi/agents/`, `.pi/npm`, `.pi/APPEND_SYSTEM.md`, `~/.pi/agent`) are
   explicitly *not* perk-owned and stay hand-built at their Pi-native sites.
 
-  **The plan-draft file tool (Node 2.1).** The tool `plan_draft` (interior-only; no Python
-  twin) is the first session-data producer: it writes the working plan during read-only plan
-  authoring. It is allowlisted in `READ_ONLY_TOOLS` (`extension/substrate/toolGating.ts`) as a **narrow
-  structural carve-out**: the tool has no path/name parameter — the artifact name is the fixed
-  constant `plan-draft.md` (`PLAN_DRAFT_ARTIFACT`, `extension/factories/planDraft.ts`) and the path is
-  derived exclusively through the accessor seam (`writeSessionArtifact`: file + provenance
-  pointer) — so the only bytes it can ever write are the one working-plan artifact in the
-  current run's data dir (gitignored scratch); the gate's `tool_call` `edit`/`write`/bash
-  blocking is unchanged. Semantics: full rewrite per call, non-terminating, NOT a save —
-  `plan_save`/`/plan-save` remain the canonical GitHub persist surface. Failure taxonomy (soft
-  results, never throws): mistyped params → `bad_input`; empty/whitespace plan →
+  **The draft file tools (`plan_draft` / `objective_draft`).** Two interior-only session-data
+  producers (no Python twins) share one invariant set. Each is allowlisted in `READ_ONLY_TOOLS`
+  (`extension/substrate/toolGating.ts`) as a **narrow structural carve-out**: the tool has no
+  path/name parameter — the artifact name is a fixed constant and the path derives exclusively
+  through the accessor seam (`writeSessionArtifact`: file + provenance pointer) — so the only
+  bytes it can ever write are its one working artifact in the current run's data dir
+  (gitignored scratch); the gate's `tool_call` `edit`/`write`/bash blocking is unchanged.
+  Semantics: full rewrite per call, non-terminating, NOT a save — `plan_save`/`/plan-save` and
+  `objective_save`/`/objective-save` remain the canonical persist surfaces. Failure taxonomy
+  (soft results, never throws): mistyped params → `bad_input`; empty/whitespace payload →
   `invalid_input`; no session `run_id` → `no_run_id`; file-or-pointer write failure →
-  `write_failed`. Consumers read the draft only via `readSessionArtifact` (digest-validated,
-  fail-open).
+  `write_failed`. Consumers read a draft only via `readSessionArtifact` (digest-validated,
+  fail-open). `plan_draft` writes the working plan during read-only plan authoring to
+  `plan-draft.md` (`PLAN_DRAFT_ARTIFACT`, `extension/factories/planDraft.ts`); `objective_draft`'s
+  per-artifact differences are below.
 
-  **File-first plan save (Node 2.2).** Both save surfaces resolve their plan through one shared
+  **File-first plan save.** Both save surfaces resolve their plan through one shared
   resolver (`resolvePlanSource`, `extension/factories/planSave.ts`), in order: (1) the validated
   `plan-draft.md` artifact (`readSessionArtifact` — digest-validated, fail-open: no run_id / no
   pointer / fork run_id mismatch / missing file / digest mismatch all fall through); (2) the
@@ -126,13 +127,10 @@ The local cache tier — written and read by **both** the CLI (exterior) and the
   stay byte-stable) and the machine-readable `plan_source` (`"plan-draft" | "param" |
   "transcript" | null`) always lands in the tool's `details`.
 
-  **The objective-draft file tool (Objective #352 Node 2.1).** The tool `objective_draft`
-  (interior-only; no Python twin) is the objective-flavored twin of `plan_draft`: it writes the
-  working objective during read-only objective authoring. It is allowlisted in `READ_ONLY_TOOLS`
-  via the same structural carve-out argument (no path/name parameter; the artifact name is the
-  fixed constant `objective-draft.json` — `OBJECTIVE_DRAFT_ARTIFACT`,
-  `extension/factories/objectiveDraft.ts` — and the path derives exclusively through the accessor seam;
-  the gate's `edit`/`write`/bash blocking is unchanged). The artifact is a **single JSON file**
+  **The objective-draft file tool.** The tool `objective_draft` writes the working objective
+  during read-only objective authoring, under the shared draft-tool invariants above; its
+  artifact name is the fixed constant `objective-draft.json` (`OBJECTIVE_DRAFT_ARTIFACT`,
+  `extension/factories/objectiveDraft.ts`). The artifact is a **single JSON file**
   carrying `{schema_version: 1, title?, prose, roadmap}` — plus, in a `perk learn dream`
   session, the **tool-written** `dream_report` block `{input, generated_at, parts}` (§8.63;
   `readObjectiveDraft` refuses the WHOLE draft on a malformed block — deliberately stricter
@@ -141,15 +139,10 @@ The local cache tier — written and read by **both** the CLI (exterior) and the
   **verbatim** (node-shape validation stays with the Python plane at save time, the
   `parse_structured_roadmap` path; an empty roadmap is allowed — only creation rejects
   roadmap-free objectives). **The JSON is storage/transport only** — the human review surface
-  (node 2.2, Plannotator or the first-party editor) displays rendered markdown (the prose + a
+  (Plannotator or the first-party editor) displays rendered markdown (the prose + a
   markdown roadmap table; when the draft carries `dream_report`, the stored CANONICAL parts
   append as the final section — the render is the objective+report **approval bundle**,
-  §8.63) derived from the artifact, never raw JSON. Semantics: full rewrite per
-  call, non-terminating, NOT a save — `objective_save`/`/objective-save` remain the canonical
-  GitHub persist surface. Failure taxonomy (soft results, never throws): mistyped params →
-  `bad_input`; empty/whitespace prose → `invalid_input`; no session `run_id` → `no_run_id`;
-  file-or-pointer write failure → `write_failed`. Consumers read the draft only via
-  `readSessionArtifact` (digest-validated, fail-open). **The review surface (node 2.2, landed):**
+  §8.63) derived from the artifact, never raw JSON. **The review surface:**
   `plan_review` in an objective-authoring session (stage `objective-author` or
   `objective-save`) reviews the **rendered markdown** —
   `readObjectiveDraft` (fail-open validation over the artifact: stderr warning + `null` on
@@ -157,7 +150,7 @@ The local cache tier — written and read by **both** the CLI (exterior) and the
   `renderObjectiveDraft` (the prose plus a `## Roadmap` markdown table; a `Phase` column only
   when some node carries one; cells sanitized) — **never raw JSON, never the `plan` param,
   never the transcript**. No draft → soft-skip `reason: "no_objective_draft"` with an
-  `objective_draft` redirect. **The approval→save orchestration (node 2.3, landed):** an
+  `objective_draft` redirect. **The approval→save orchestration:** an
   APPROVED outcome wires into the `objectiveApprovalSave` seam (`extension/factories/objectiveSave.ts`,
   the objective sibling of `approvalSave`): the seam **re-reads the structured artifact at save
   time** (`readObjectiveDraft` — never the rendered markdown, never a param, never the
@@ -167,7 +160,7 @@ The local cache tier — written and read by **both** the CLI (exterior) and the
   directed. Title precedence: an explicit title wins; else the draft's `title`; else the cold
   door derives from the prose heading.
 
-  **Provenance (Node 1.3).** Session artifacts become *consumable* only via their
+  **Provenance.** Session artifacts become *consumable* only via their
   `session_artifacts` pointer in `perk:workflow-state` (§8.3) — a bare file on disk is never
   trusted. The digest convention is `sha256:<hex>` of the bytes **read back** from disk after
   the write. Validation derives the path from `run_id` + `name` through the accessor seam; the
@@ -181,17 +174,10 @@ The local cache tier — written and read by **both** the CLI (exterior) and the
   promises — missing file, digest mismatch — warn on stderr).
 - **Agent scratch.** `.perk/workflow/scratch/runs/<run_id>/agent/` is the run-owned directory for
   disposable command/model intermediates. Interior run-directory creation shares one hardened
-  boundary (`extension/substrate/cache.ts::ensureRunScratch`): before any write, `run_id` must be
-  one non-empty path segment (not `.`/`..`, with no `/`, `\\`, or NUL); every existing component
-  from the checkout's `.perk` child through the run root must be a real directory, never a symlink
-  or non-directory, and must have no group/world write bit; missing components are materialized in
-  order with an explicit maximum mode `0755` even under a permissive umask; and the run root's
-  realpath must equal the expected descendant of `realpath(cwd)` (a symlink above `cwd` remains
-  legal). All interior run-root writers use that boundary. `ensureAgentScratch` then applies the
-  same symlink/non-directory and resolved-containment checks to `agent/`, creates it as POSIX mode
-  `0700` from the outset, and re-applies `0700` on reuse. This is static redirected-path protection
-  and privacy from other OS users, not a defense against a concurrent process running as the same
-  user.
+  boundary — `extension/substrate/cache.ts::ensureRunScratch` + `ensureAgentScratch` own the
+  segment/symlink/mode/containment mechanics (static redirected-path protection and privacy from
+  other OS users, not a defense against a concurrent same-user process); the Python-plane scratch
+  accessors live in `src/perk/state/cache.py`.
 
   The extension provisions the directory before every eligible model turn and injects one hidden
   `customType: "perk:agent-scratch"` block naming the repository-relative current-run path. A
@@ -201,30 +187,12 @@ The local cache tier — written and read by **both** the CLI (exterior) and the
   `perk.objective-explorer`, `perk.pr-reviewer`, `perk.review-angle-selector`,
   `perk.review-classifier`). Main sessions, `perk.conflict-resolver`, and unknown/custom children
   remain eligible; absent generic foreign-agent metadata, inherited parent mode is the fallback.
-  Directory repair happens before prompt deduplication. The exact run-id/path-derived block is
-  deduplicated only inside the active post-compaction context window; context filtering keeps one
-  exact current-run **scratch custom block** and strips direct inherited/stale scratch custom blocks
-  (or all direct copies while ineligible), so a compacted-away block is re-injected. Compaction
-  summary prose is not a scratch custom block and may quote an older marker/path; it is deliberately
-  not redacted and is neither a live guidance delivery nor authoritative provenance. Only the
-  current-run direct block counts as live scratch guidance, and durable decisions still re-read the
-  canonical repository/backend source.
-  Because this is a universal pre-turn side effect that can become eligible after an in-session
-  read-only gate exit, every registry stage declares the existing `cache.scratch` key in `writes`.
-
-  A write-capable `/btw` side session receives the same rendered block once in its effective
-  appended system prompt after scratch custom messages are removed from its seed. Provisioning is
-  rechecked before every side-model prompt: deletion is repaired while reusing the session, and a
-  transition between unavailable and available scratch recreates the cached session so its
-  immutable prompt matches the current turn. The same gate that selects its tools excludes the
-  block from the read-only side-session shape; the tool-less summary shape also receives none.
-  Direct SDK read-only sessions remain unguided:
-  they load with `noExtensions: true` and the bounded `read`/`grep`/`find`/`ls` tool set. With no
-  settled run id the resolver is silent; an unsafe id or filesystem/permission failure injects no
-  path, warns through the report seam, and continues the turn. A failure is retried on later
-  eligible turns, with duplicate warnings suppressed per run within one extension activation and
-  suppression cleared after a successful retry. Fork/adopt run-root setup likewise reports and
-  continues after settling the derived workflow identity, without an unsafe fallback write.
+  Only the current-run direct block counts as live scratch guidance, and durable decisions still
+  re-read the canonical repository/backend source. Provisioning/dedup/repair and side-session
+  delivery mechanics live in the owning modules (`extension/substrate/cache.ts` and the context
+  filter). Because this is a universal pre-turn side effect that can become eligible after an
+  in-session read-only gate exit, every registry stage declares the existing `cache.scratch` key
+  in `writes`.
 
   The guidance asks agents to use descriptive non-colliding names instead of shared `/tmp` and to
   re-read canonical repository/backend sources before durable decisions. Agent scratch is never
@@ -240,9 +208,10 @@ The local cache tier — written and read by **both** the CLI (exterior) and the
   same directory + an atomic replace, so a concurrent writer can never tear a file (a reader sees
   either the old bytes or the new bytes, never a mix). Guard-tested in both planes
   (`tests/test_write_guard.py`, `extension/writeGuard.test.ts`): bare write APIs are banned
-  outside a justified allowlist of non-workflow writers. Two documented exemptions: the
-  **append-only** `events.ndjson` stream (O_APPEND appends cannot truncate-tear; whole-file
-  replace would introduce a read-modify-write race) and **existence-only markers** (Python
+  outside a justified allowlist of non-workflow writers. Documented exemptions: the
+  **append-only** NDJSON streams — `events.ndjson` plus the §8.58 hunk-watch
+  `outbox.ndjson`/`delivered.ndjson` (O_APPEND appends cannot truncate-tear; whole-file
+  replace would introduce a read-modify-write race) — and **existence-only markers** (Python
   `set_marker`'s `.touch()` carries no content; the TS `setMarker` is routed anyway — uniformity
   is free). Atomicity is **not** mutual exclusion — whole-file last-writer-wins between
   concurrent writers is the accepted residual (no locking/versioning). Corruption posture:
@@ -255,7 +224,8 @@ The local cache tier — written and read by **both** the CLI (exterior) and the
   not error semantics.
 - **GC is perk-owned:** prune `scratch/runs/<id>/` + `handoff/<id>.json` per two rules —
   **terminal-stage** (a *consumed* handoff whose `stage` has empty registry `successors`;
-  currently exactly `learn`, computed never hardcoded) ⇒ eligible regardless of age; and
+  currently `audit`, `gist-save`, `learn`, and `stack-review` — computed via
+  `src/perk/state/gc.py::terminal_stage_ids`, never hardcoded) ⇒ eligible regardless of age; and
   **age** (older than `max_age_days`, default **14**) ⇒ eligible. The age is the run's ULID
   self-date (`run_id` names self-date; fork suffixes strip via the base ULID), with the run
   dir's / handoff file's `st_mtime` as the fallback for stray non-ULID names. Warm-minted run
@@ -267,7 +237,7 @@ The local cache tier — written and read by **both** the CLI (exterior) and the
   check (a `warn` with remediation `perk state prune` whenever anything is prunable — **no
   `--fix` arm**: deletion is *exclusively* `perk state prune`) and the `perk state prune`
   command (alias `gc`; `--dry-run`/`--max-age-days`/`--json`). Policy home: `perk/state/gc.py`
-  (exterior-owned; no TS twin). (erk accumulated session dirs precisely because GC was undefined.)
+  (exterior-owned; no TS twin).
 - `.gitignore`: the **whole `.perk/workflow/` cache tree** is gitignored (a single
   `/.perk/workflow/` entry managed by `init`) — it is runtime/cache state, not durable source, so
   there is **no committed `.gitkeep`**; a fresh clone has no tracked workflow artifact. The
@@ -281,12 +251,12 @@ The local cache tier — written and read by **both** the CLI (exterior) and the
   when the target is absent; disposable scratch is left for the user to delete), and untracks
   legacy-committed `.pi-subagents/` artifacts (files kept on disk — a gitignore rule is inert for
   already-tracked files).
-- **`plan-ref.json` (`cache.plan-ref`, T2b):** the provider-agnostic plan-ref payload (§8.4)
+- **`plan-ref.json` (`cache.plan-ref`):** the provider-agnostic plan-ref payload (§8.4)
   written verbatim. One active ref per checkout/worktree (`.perk/workflow/` is per-checkout). The
-  **Python cold door** (`perk plan-save`) writes it on a real save; the **extension** reads it
+  **Python cold door** (`perk plan save`) writes it on a real save; the **extension** reads it
   on `session_start` to reconcile `active_plan_ref` (§8.3). The cross-plane contract is the
   *file* (`perk/state/cache.py` ↔ `extension/substrate/cache.ts`), not a shared module.
-  - **Selector vs binding duality (#43).** The file plays **two roles by checkout**. In the
+  - **Selector vs binding duality.** The file plays **two roles by checkout**. In the
     **repo root** it is a mutable **selector** — "the plan a no-arg cold `perk implement`
     consumes next" — written by `save`; the `worktree: none` stages (`plan`/`objective-plan`/
     `save`) run here (one effective-stage exception: a stacked child-layer `objective plan`
@@ -305,7 +275,7 @@ The local cache tier — written and read by **both** the CLI (exterior) and the
     `perk plan save` writes the selector via `main_repo_root(invocation root)`, so a
     worktree-cwd save (e.g. a positioned stacked planning session's approval save) updates the
     main-root selector and **never rebinds that worktree's own binding** — the launch-door
-    sentence's save-side twin, closing the #621 clobber-hazard class.
+    sentence's save-side twin, closing the selector-rebind clobber-hazard class.
   - **Two roots (the selection rule).** Every plan-selecting cold door (`implement`,
     `pr address`/flat `address`, `pr ready`, `plan resume`, `plan watch`, `objective run`) —
     and every generated stage launcher's config/positioning anchoring —
@@ -373,7 +343,7 @@ State keys (registry vocabulary): `cache.plan`, `cache.plan-ref`, `cache.scratch
 
 ---
 
-## §8.2 · The `PERK_RUN_ID` protocol (Q2)
+## §8.2 · The `PERK_RUN_ID` protocol
 
 `run_id` is a perk-minted **ULID** (time-sortable → trivial chronological ordering and
 "GC older than N" queries). It is simultaneously the **launch token**, the **cache key**
@@ -385,7 +355,7 @@ GitHub event blocks → worker logs.
 "pass control data to the extension at launch" flag. The CLI sets `PERK_RUN_ID=<ulid>` in the
 environment before `exec pi`; an initial message or `@file` would pollute LLM context.
 
-**Claim (on `session_start`)** — strict verified linkage (`Q3` establish-before-consume):
+**Claim (on `session_start`)** — strict verified linkage (establish-before-consume):
 1. read `process.env.PERK_RUN_ID`;
 2. load + verify `handoff/<run_id>.json` (read-back; on mismatch raise a hard, actionable
    error — never a silent `pass`). A handoff already **`consumed: true` by a *different* (or
@@ -419,10 +389,10 @@ so no cache read can prevent gate engagement — a session that already claimed
 readers (`src/perk/state/cache.py`) deliberately keep **raising** `CacheError` (launch-time
 fail-closed, exterior plane); the cross-plane contract is the *files*, not error semantics.
 
-**Optional handoff link context (`objective_id`/`node_id`, #78).** Beyond the claim fields, a
+**Optional handoff link context (`objective_id`/`node_id`).** Beyond the claim fields, a
 stage may stash extra keys in its handoff blob (the TS `Handoff` interface already carries
 `[key: string]: unknown`). `objective-plan` writes the `objective_id`/`node_id` it just marked
-`planning` so a later `perk plan-save` recovers the objective→node link **regardless of which save
+`planning` so a later `perk plan save` recovers the objective→node link **regardless of which save
 surface the model used** — the `plan_save` *tool* passes the link explicitly, but an
 approval-triggered `approvalSave` (and its `/plan-save` manual-failsafe invocation, which takes
 only an optional title) carries no link params at all; the warm `objective_node_claim` carrier
@@ -431,15 +401,14 @@ only an optional title) carries no link params at all; the warm `objective_node_
 handoff and defaults `objective_id`/`node_id` from it only when neither flag was passed (explicit
 flags always win; a non-objective handoff has no `objective_id`, so plain planning is unaffected).
 
-The same carrier ferries `consumed_learn` (#102). `learn-docs` launches a **read-only** plan-mode
+The same carrier ferries `consumed_learn`. `learn-docs` launches a **read-only** plan-mode
 session, where the `plan_save` *tool* is gated out (`toolGating.ts`); the save lands review-first
 through `approvalSave` (or the `/plan-save` failsafe), and only the `plan_save` tool's explicit
 `consumed_learn` param can carry the numbers warm — the handoff carrier makes the consume
 mechanism independent of which surface fired. The `learn-docs` cold door stashes them as
 `handoff_extra={"consumed_learn": […]}`, and
 `plan-save` recovers them (`_consumed_learn_from_handoff`) when `--consumed-learn` is absent
-(explicit flag wins; a non-factory handoff has no key, so plain planning is unaffected). This makes
-the consume mechanism independent of which save surface the model used. The warm
+(explicit flag wins; a non-factory handoff has no key, so plain planning is unaffected). The warm
 `/learn-docs`//`learn-code` doors refuse interactive hosts where the `plan_save` tool is not
 currently active (`pi.getActiveTools()` — the warm gather writes no handoff, so no other surface
 can carry the numbers); the cold doors are the factory path there. Headless invocations keep the
@@ -464,10 +433,12 @@ materialize-only behavior.
 **Mint doctrine (three-way).** A warm in-session *stage transition* **keeps** the `run_id`
 (matches the registry per-stage `run_id` policy); a *cold* relaunch **mints** a new `run_id`
 in the **Python plane** (`perk/state/run_id.py`) that **records its predecessor**, so resume/relaunch
-chains stay traceable; and a **warm session with no identity** (decideClaim's `none` arm — no
+chains stay traceable (one exception: `perk plan replan` reuses the original plan's `run_id` —
+`replan_cmd.py`'s `run_id_override` — so `plan_save` upserts on it); and a **warm session with no identity** (decideClaim's `none` arm — no
 branch `run_id`, no `PERK_RUN_ID`: ad-hoc `pi`, `pi --plan`) **mints its own ULID in the TS
 plane** (`extension/substrate/runId.ts`) on `session_start`, recording `{run_id, pi_session_id}`
-via the strict append seam (§8.3) — **no predecessor, no handoff, no disk artifacts**. Spawned
+via the strict append seam (§8.3) — **no predecessor, no handoff, and no normal workflow
+artifacts** (`PERK_SELFCHECK` markers exempt). Spawned
 subagent children arrive *with* the parent's leaked `PERK_RUN_ID` and take the **adopt** arm
 above (a derived `<run_id>.<n>`, not a mint). A **failed cold claim never falls back to a mint**
 (`PERK_RUN_ID` set but the handoff missing/mismatched stays a loud unclaimed error — minting
@@ -479,7 +450,7 @@ The Pi session UUID is kept as a **secondary handle** (needed for `SessionManage
 
 ---
 
-## §8.3 · The `perk:workflow-state` schema (Q1)
+## §8.3 · The `perk:workflow-state` schema
 
 The single namespaced session entry holding transient (tier-3) workflow state. This section pins
 the state record and the cross-plane delegated shapes (the TS-tool ↔ Python-CLI boundaries);
@@ -525,11 +496,10 @@ channel — tool-result `details` — is for state that *is* a tool's output; th
 stale after the user navigates the tree). Apply **per-field last-write-wins** so two tools
 writing different fields in the same turn don't clobber each other.
 
-**Subtlety borrowed from `plan-mode`:** when reconstructing state tied to a current
-execution, only re-scan entries **after** the marker that began it, so stale fields from a
-previous execution don't resurrect.
+**No execution-marker filter:** `rebuildWorkflowState()` scans every current-branch
+workflow-state entry and applies per-field LWW — there is no marker-scoped re-scan window.
 
-**Verified linkage tier (Q3):** the `run_id ↔ pi_session_id` mapping and `active_plan_ref`
+**Verified linkage tier:** the `run_id ↔ pi_session_id` mapping and `active_plan_ref`
 are **strict** (durable/cross-process → read-back + correct ordering); purely transient
 fields cheaply reconstructable on the next `session_start`/`session_tree` are
 best-effort-with-logging (never silently swallowed).
@@ -549,7 +519,7 @@ anywhere — gating alone fixes the leak.
 **Warm `/plan-save` direct linkage + the version-skew decode posture:** the in-session warm door
 appends `active_plan_ref` **directly** after a successful save (same strict read-back, idempotent
 by `(provider, pr_id)`), so the live session is linked without waiting for the next
-`session_start` — both writers feed the same LWW field. Its decode of the `perk plan-save --json`
+`session_start` — both writers feed the same LWW field. Its decode of the `perk plan save --json`
 payload is strict **only** on `plan_ref` (the field appended to workflow-state); the rendered
 issue id/url are derived from it and `existed`/`objective_node` are advisory — so a successful
 cold save can never be reported as a warm failure by render-only payload fields (the
@@ -628,15 +598,14 @@ and the tool is **single-use** per session. On success it opens the SAME browser
 as the warm `/stack-review-browser` door and returns the rendered stack guidance as its ok
 text.
 
-**Progress tracking (checkpoints retired).** perk mints **no** progress state of its own: the
-checkpoint substrate is removed — the `perk:checkpoint` entry, the `## Steps` seeding machinery,
-the `[WIP:n]`/`[DONE:n]` marker grammar, the generated checklist, `/checkpoints`, and the 📋
-widget/footer segment are all gone. Implementation progress is the borrowed `@juicesharp/rpiv-todo`
+**Progress tracking.** perk mints **no** progress state of its own: there is no checkpoint
+substrate — no `perk:checkpoint` entry, `## Steps` seeding machinery, `[WIP:n]`/`[DONE:n]`
+marker grammar, generated checklist, `/checkpoints`, or 📋 widget/footer segment.
+Implementation progress is the borrowed `@juicesharp/rpiv-todo`
 checklist, driven by prompt-carried discipline (the implement launch prompt + the `perk-implement`
 skill): the plan's `## Steps` list is the **initial seed of a dynamic, model-owned checklist** (one
-item per step, in order; the implementer derives its own short checklist for a prose plan) — an
-explicit **supersession of the P2.T2c decision** ("passive, plan-derived, never model-mutated"):
-the checklist is discipline, not enforcement. Historical `perk:checkpoint` entries render as
+item per step, in order; the implementer derives its own short checklist for a prose plan) —
+the checklist is discipline, not enforcement. Legacy `perk:checkpoint` entries render as
 generic custom entries (no renderer, no shim). The `perk` status slot is **single-value**
 (objective only) and keeps its RPC `setStatus` dual-publish.
 
@@ -671,8 +640,8 @@ generic custom entries (no renderer, no shim). The `perk` status slot is **singl
 
 State key (registry vocabulary): `session.workflow-state`.
 
-**Owning modules (single-plane interior mechanics).** The narrative detail this section once
-carried lives in the owning modules' headers: approval→save orchestration + plan-title
+**Owning modules (single-plane interior mechanics).** Single-plane interior mechanics live in
+the owning modules' headers: approval→save orchestration + plan-title
 generation (`extension/factories/planSave.ts` / `planTitle.ts` / `planReview.ts`; §8.23 keeps the
 review-backend contract); objective budget + threshold compaction
 (`extension/factories/objective.ts`); the objective authoring loop
@@ -696,7 +665,7 @@ owns the provider seams); in-process read-only child sessions
 
 ---
 
-## §8.4 · The GitHub gateway contract (Q9/Q10)
+## §8.4 · The GitHub gateway contract
 
 **One gateway contract, canonical in the Python plane** (`src/perk/github/` — the forge gateway:
 PR/CI/auth/review ops — plus `src/perk/backends/github/` — the issue/objective adapters). The TS
@@ -707,10 +676,11 @@ and `doctor` verifies conformance.
 **Durable invariants (all ops):**
 
 - **Idempotency is keyed on the header `run_id`**, discovered via the **LIST** endpoint (not the
-  eventually-consistent search index), create-then-return (`Q3` establish-before-record).
-- **REST `gh api`, not porcelain** — with two deliberate exceptions: review threads (GraphQL-only:
-  REST has no `isResolved` / `resolveReviewThread`) and `gh pr ready` (draft→ready is
-  GraphQL-only).
+  eventually-consistent search index), create-then-return (establish-before-record).
+- **Mutations are REST `gh api`, not porcelain** — with two deliberate exceptions: review
+  threads (GraphQL-only: REST has no `isResolved` / `resolveReviewThread`) and `gh pr ready`
+  (draft→ready is GraphQL-only). Reads use the porcelain queries (`gh auth status`,
+  `gh repo view`, `gh issue view`, `gh pr diff`, …).
 - **Labels are created lazily** by each gateway create-op on first use (perk never seeds labels
   in `init`).
 - **Mutations raise** on failure (the command boundary maps to `UserFacingCliError`); **lookups
@@ -749,7 +719,7 @@ update_plan_issue{ number, title, body_comment }    -> PlanUpdate{ number, body_
     #   (fallback: POST a fresh comment, body_updated:false) ; PATCH .../issues/{n} (-f title=)
 ```
 
-- **`perk plan-save` is an upsert keyed on `run_id`.** The *first* save with a `run_id` creates
+- **`perk plan save` is an upsert keyed on `run_id`.** The *first* save with a `run_id` creates
   the issue and posts the `plan-body` comment; a *re-save* with the same `run_id` updates the
   existing issue **in place** — `create_plan_issue` still dedups (never a second issue per
   `run_id`), then `update_plan_issue` PATCHes the `plan-body` comment with the revised markdown
@@ -758,7 +728,7 @@ update_plan_issue{ number, title, body_comment }    -> PlanUpdate{ number, body_
   back to a fresh POST so the body is never stranded. A re-save **additionally** merges the
   planning header fields (`objective_id`, `consumed_learn`) back into the existing `plan-header`
   via `update_plan_header` when provided — additive, so an omitted field is left intact (no
-  clobber of a previously linked objective/learn set, no reset of the submit-populated
+  clobber of an already linked objective/learn set, no reset of the submit-populated
   `branch`/`pr`/`lifecycle_stage`). The header write is fail-loud (this is the canonical save).
   `--json` carries a top-level `updated` (true on re-save); the warm `/plan-save` surfaces
   `details.updated` and an "Updated plan #N" message. A **node-linked** re-save
@@ -770,7 +740,7 @@ update_plan_issue{ number, title, body_comment }    -> PlanUpdate{ number, body_
   A null stored node stays allowed (legitimately links a standalone plan to a node); same-node
   and non-node-linked re-saves are untouched. The remedy is a fresh run ID per node (the guard
   is a backstop; fresh-run-id-per-node remains the correct scripting posture).
-- **`perk replan <plan>` re-authors an OPEN plan *in place*** — a dedicated cold door that
+- **`perk plan replan <plan>` re-authors an OPEN plan *in place*** — a dedicated cold door that
   re-launches the read-only `plan` stage with the target plan's **original `run_id`** (the
   documented exception to "cold mints `run_id`"), so the upsert rewrites the same issue and the
   `plan-header` (and thus the objective/node links) survives. The save lands review-first
@@ -795,7 +765,7 @@ update_plan_header{ issue, fields }                 -> PlanHeaderUpdate{ fields_
     # rejects unknown header keys (LBYL on the schema); submit sets branch/pr/lifecycle_stage=impl
     # MERGE-ONLY on both backends: refuses (before the dry-run return) when the backend's own
     # storage carries no plan-header for the issue — GitHub: no plan-header body block;
-    # Linear: no plan-header attachment (the old run_id-keyed creation fallback is gone).
+    # Linear: no plan-header attachment.
     # Plan-header creation is confined to create_plan_issue, §8.29 adoption, and the Linear
     # node-plan unification writer (save_node_plan). The refusal rides the backend error
     # channel (GitHubError/IssueBackendError ⇒ github_error at CLI boundaries) — an invariant
@@ -809,7 +779,7 @@ prepend_plan_callout{ issue, callout, command }     -> bool
     # idempotent on `command`; True iff a write occurred (False when already present / dry-run)
 get_plan{ number }                                  -> PlanState{ number, url, title, header, pr, state,
                                                                   has_plan_header, has_objective_header } | null
-    # gh issue view --json (+ pulls/{n} when the header carries pr); the `perk resume` read.
+    # gh issue view --json (+ pulls/{n} when the header carries pr); the `perk plan resume` read.
     # `state` is the issue's OPEN/CLOSED state (the `replan` OPEN guard reads it).
     # has_plan_header/has_objective_header: presence-only kind evidence from the body's own
     # metadata blocks (the §8.1 kind guard reads them); a malformed block still reads
@@ -828,68 +798,25 @@ merge_pr{ number, commit_message? }                 -> PullRequest (state MERGED
     # PUT .../pulls/{n}/merge (merge_method=squash); idempotent ("already merged" ⇒ success)
 ```
 
-- **`Closes #<issue>`** rides in the PR body so the squash-merge closes the plan issue;
-  `commit_message` repeats it belt-and-suspenders. Post-merge state is **derived from PR**, never
-  stored (Q8).
-- **`perk pr land` is a thin mapper over `Delivery.land`.** The command reconstructs the cached
-  plan-ref into one `LandRequest(kind="plan", plan_id, branch, objective_id, consumed_learn,
-  delivery_lineage, dry_run)` and makes exactly one
-  `resolve_delivery(repo_root).land(request)` call — never a consent callback: the plan
-  variant (and the objective dry-run) has no confirmation boundary and the façade rejects
-  one with `ValueError` (consent belongs to the objective mutation, §8.56). The flat
-  kind-guarded request family gives the plan-ref-derived intent fields
-  (`objective_id`/`consumed_learn`/`delivery_lineage`) dataclass defaults — an **accepted
-  residual**: their omission on a plan request is no longer construction-detectable,
-  mitigated because the header-half stacked refusal still protects every real run (only the
-  fully offline dry-run relies on the cached half) and the single production construction
-  site passes every field explicitly under exact-request pins; `plan_id`/`branch` omission
-  stays guard-detectable, and a plan request rejects `run_id` (objective-mutation-only). The
-  façade (engine:
-  `perk.delivery.land_plan`) owns refusal ordering, the mutation protocol, and the
-  finalization dispatch, and returns the strict kind↔detail `LandResult` (nested
-  `PrSummary`/`ObjectiveUpdate`/`LearnUpdate`/`Plan` records — the `--json` envelope maps them
-  field-for-field, byte-unchanged). Façade failures are the bounded `DeliveryError` vocabulary
-  with `phase="land"`: domain refusals (`stacked_plan`, `plan_not_found`, `no_pr`) carry
-  `origin="domain"` and render **bare**; infra failures translate to `github_error` with
-  `origin="github"` and keep the CLI's `PR land failed\n<detail>` prefix (no Git authority
-  call exists on this path, so no speculative `git_error` arm).
-- **Stacked lineage refuses before any mutation.** `Delivery.land` applies the §8.47 routing
-  discriminator — stacked ⟺ the request carries the cached ref's `delivery_lineage` OR the
-  fetched plan header does (**header wins**: a stale cached ref must not silently land a stacked
-  layer) — and refuses fail-closed (`stacked_plan`) before mark-ready/merge: stacked layers land
-  only as one atomic train, never individually. The cached half refuses **before** the dry-run
-  early return (`--dry-run` stays fully offline by contract — zero authority access before the
-  early return, pinned for GitHub and Linear configuration; the real run enforces the header
-  half).
-- **The pre-merge plan read is load-bearing.** Land reads the plan
-  (`DeliveryPersistence.get_plan`) right after the dry-run early-return, before any mutation: a
-  missing plan fails as `plan_not_found` (submit/ready's exact posture), the header feeds the
-  stacked discriminator, and the squash title/url ride the same read.
-- **Deepened squash commit message.** Land passes `merge_pr(commit_message=)` = plain
-  `"<plan title>\n\n<footer>"` composed façade-side from the **authoritative** `PlanState`
-  title/url + the persistence backend identity (`DeliveryPersistence.backend_id`): GitHub keeps
-  the `Closes #<issue>` footer, non-github backends the `Plan: <id> — <url>` line (fallback to
-  the bare footer on an empty title; one shared implementation with the stacked singleton —
-  `landing.squash_commit_message`). The PR's real `base_ref` is captured **before** the merge
-  (the synthetic merged `PullRequest` carries none; an idempotent re-land still sees it). Plain
-  text only — the second of the **two PR targets** (the GitHub HTML body is the other); HTML
-  never leaks into `git log`.
-- **Post-merge finalization is a package-internal delivery seam.** The four durable bookkeeping
-  effects (learn-state stamp §8.36 → explicit plan-issue close → objective reconciliation →
-  learn-issue consume) live in `perk.delivery.finalize.finalize_landed_plan` — **no public
-  export**; `Delivery.land` binds it through its private land runtime, and stacked
-  landing/recovery keep their module-path bindings. **Reconstructed inputs only**
-  (a narrow `LandedPlan` + the captured `pr_base` merge evidence), never the worktree cache, and
-  **convergent-final-state idempotency** over the four effects (never-downgrade stamp,
-  terminal-node skip, backend-idempotent re-closes; sub-steps may re-issue idempotent backend
-  calls — the contract is convergence, not zero repeat calls). `close_objective_on_complete=False`
-  (the stacked per-layer callers) still marks nodes and posts the honest computed update but
-  never calls `close_objective` — the aggregate objective close is that caller's obligation after
-  every layer verifies; incremental land keeps the default. Activity reporting (the Linear agent
-  "landed" emission) is worktree-session-scoped and **caller-owned** — it stays in `land_cmd.py`,
-  outside the façade; the pending-learn marker (worktree-cache state) likewise stays in the
-  caller (written after the façade call — the durable §8.36 stamp is the authority; the marker
-  is the local retry signal).
+- `commit_message` repeats the PR body's `Closes #<issue>` belt-and-suspenders (the closing
+  rule is stated once, under the submit path). Post-merge state is **derived from PR**, never
+  stored.
+- **`perk pr land` delegates to the delivery façade:** one plan-kind `LandRequest` from the
+  cached plan-ref, one `Delivery.land` delegation; the façade owns refusal ordering (the
+  stacked-lineage discriminator refuses `stacked_plan` fail-closed before any mutation — the
+  fetched header wins over the cached ref), the pre-merge plan read (`plan_not_found` on a
+  miss), the merge, and the finalization dispatch; the caller writes the pending-learn marker
+  and emits activity after success — see §8.36, §8.47, §8.56. `--dry-run` stays fully offline
+  (zero authority access before the early return). Compatibility: the flat kind-guarded request
+  family permits omitted `objective_id`/`consumed_learn`/`delivery_lineage` (dataclass
+  defaults); the production mapper supplies them explicitly, and `plan_id` + `branch` remain
+  required. Façade failures use the bounded `DeliveryError` vocabulary (§8.44) with
+  `phase="land"`. The squash commit message uses the shared `landing.squash_commit_message`
+  format (§8.56) — plain text, the second of the two PR targets, so HTML never leaks into
+  `git log`. Post-merge finalization is a package-internal delivery seam
+  (`perk.delivery.finalize.finalize_landed_plan` — reconstructed inputs only, with
+  convergent-final-state idempotency over the four durable effects: learn-state stamp §8.36 →
+  explicit plan-issue close → objective reconciliation → learn-issue consume).
 
 ### Learn ops
 
@@ -899,9 +826,10 @@ find_learn_issue{ run_id }                          -> PlanIssue | null
     # perk:learn (+ the learn-header block) so it CANNOT return the plan issue, which shares the
     # plan's run_id under the warm:keep learn stage. Implemented by parameterizing find_plan_issue
     # with label/header_key (the perk:plan/plan-header defaults preserved — no caller changes).
-create_learn_issue{ title, body, run_id, plan_number } -> PlanIssue{ number, url, existed }
+create_learn_issue{ title, body, run_id, plan_number, decision?, target? } -> PlanIssue{ number, url, existed }
     # lazy create_label("perk:learn"); idempotent via find_learn_issue (NOT find_plan_issue);
-    # renders a learn-header block { run_id, created, plan } into the body so the finder matches.
+    # renders a learn-header block { run_id, created, plan, decision?, target? } into the body
+    # so the finder matches (the optional captured classification rides the header).
 list_learn_issues{}                                 -> LearnIssueSummary[]{ number, title, url, body }
     # GET .../issues?labels=perk:learn&state=open (the find_plan_issue list call, label-scoped to
     # perk:learn). Returns every open learn issue's full body for the factory inbox — "every
@@ -926,8 +854,9 @@ close_and_label_consolidated{ issue }               -> bool
   canonical `learn_state: captured` (§8.36, strictly — before the marker clear), and clears
   `pending-learn`. The warm `/learn` orchestration, the evidence bundle, and the classification
   vocabulary are §8.35 (+ `extension/doors/learn.ts`); the canonical skip path is §8.36.
-- **The learned-docs/learn-code factories** consume the two list/close ops above; the factory
-  contract (partition, inbox, `consumed_learn`) is §8.35 +
+- **The learned-docs/learn-code factories** consume `list_learn_issues` only — `consumed_learn`
+  closure happens at land finalization (`delivery/finalize.py::_consume_learn_on_land`); the
+  factory contract (partition, inbox, `consumed_learn`) is §8.35 +
   `src/perk/cli/commands/learn/factory_common.py`.
 
 ### Review-loop ops (`/address` — GraphQL threads)
@@ -964,8 +893,8 @@ ops below:
 
 ```
 get_pr_review_context{ pr_number, branch, plan_body } -> PrReviewContext{ pr_number, base_ref, head_ref, title, body, diff, plan_body }
-    # Read-only. PR meta via `gh api pulls/{n}`, diff via `gh pr diff {n}`. The gateway no longer
-    # reads plan/issue state: `plan_body` is resolved backend-neutrally by the consumer
+    # Read-only. PR meta via `gh api pulls/{n}`, diff via `gh pr diff {n}`. The gateway reads
+    # no plan/issue state: `plan_body` is resolved backend-neutrally by the consumer
     # (`perk pr review-context`) — the materialized `cache.plan` mirror first, else
     # `IssueBackend.get_plan_body` via the resolver — and passed straight in (best-effort; null
     # lets the review run from the diff). What the spawned child runs.
@@ -1005,60 +934,29 @@ post_pr_review{ pr_number, summary, comments:[{path,line,body,side?}], event? } 
     # A recorded wave adds strict positive `expected_pr` to that batch; the CLI compares it with
     # the freshly resolved active PR before mutation (`review_target_changed` on drift). Dry-run
     # validates the field while remaining offline. Standalone batches omit it.
-add_pr_reaction{ pr_number }                        -> void
+add_pr_reaction{ pr_number }                        -> ReviewPostResult{ ok, mode: "reaction", pr_number, comment_count }
     # the clean-verdict 👍 (issues-reactions endpoint — idempotent on rerun); a hard error on
     # failure (mutations raise; nothing review-shaped is lost).
 ```
 
-The static `/pr-review` input remains 2–4 selected angles with `plan-fidelity` mandatory. After
-parameter decode the parent invalidates any older report state, resolves the active target once via
-`perk pr url --json`, and binds every child to that number. Its effective manifest is those angles
-followed by exactly one **required automatic** final `ponytail` lane, outside the input menu/cap.
-Every reviewer uses only `perk pr review-context --expected-pr <bound-number> --json`; target drift
-therefore yields no schema-valid report. Ponytail uses the same `perk.pr-reviewer` model, directive,
-timeout, and report schema family, with invocation-private `skill: "ponytail-review"` source-bound
-by the agent's exact package `skillPath`. Perk preflights package name, `pi.skills`, the exact
-readable skill file, and its frontmatter name. A failed preflight never dispatches/spawns that
-child; static report waves additionally omit it from rendered lane items. The keyed non-retryable
-`skill-unavailable` failure retains Ponytail in the logical attempted manifest and leaves it
-uncovered/incomplete; ordinary failed lanes retain the one bounded retry. No same-named
-project/user skill fallback is possible. A normalized result records the bound PR plus explicit
-effective attempted and covered arrays for §8.3's single-use post state.
-
-The experimental `/pr-review-dynamic` door shares the same PR-bound, single-use
-`post_pr_review`/`review-post` state — angle selection is delegated to a fresh
-`perk.review-angle-selector` lane and normalized in module-rendered code
-(`extension/waves/prReviewDynamicWave.ts`); the baseline
-`/pr-review` stays canonical. One Ponytail promise starts independently alongside plan-fidelity
-and the selector, never consumes selector output, and is appended last to `selection.effective`;
-`ponytail` is a reserved custom key and the lane remains outside the selector cap. The selector
-picks from the six-slug additional-angle allowlist
-(`correctness`/`tests`/`quality`/`api-design`/`code-organization`/`idioms` — the shared
-seven-angle vocabulary minus the structural `plan-fidelity`), capped at 3 additional angles
-(2–4 selectable lanes, the same window as `/pr-review`, plus automatic final Ponytail;
-`force_angles` takes 1–3 slugs, merged
-forced → picks → custom). The selector may additionally propose AT MOST ONE change-specific
-custom angle: validated deterministically in the module-rendered normalization (kebab-case slug
-3–32 chars, not a reserved lane key, whitespace-collapsed non-empty scope ≤ 300 chars; an
-invalid proposal degrades to no-custom, never a failed selector lane), its lane task built from
-a fixed scope-definition-only template (the one sanctioned exception to "reviewer tasks come
-only from the embedded vocabulary"), its per-item report schema locked to echo the custom slug,
-and the lane retryable through the per-lane `outputSchema` seam on `WaveLane`; the
-correctness+tests fallback fires only with zero valid picks AND no valid custom. Dynamic Ponytail
-uses the same source-bound preflight/non-retryable failure semantics as static review; its
-pre-launch receipt manifest is `plan-fidelity`, `angle-selector`, `ponytail`, and a pre-selection
-failure still records the deterministic attempted reviewer manifest `plan-fidelity`, `ponytail`.
-The selector, plan-fidelity, Ponytail, fixed/custom fan-out, and static retry tasks all carry the
-same parent-resolved expected PR. Both wave tools persist ordered attempt receipts in their
-tool-result details (observability only — §8.35's output-free receipt contract; completeness is
-unchanged).
-
-**Residual source-binding race.** Source-bound waves perform one exact-path preflight per pass and
-each Ponytail child makes the exact file/frontmatter check its first action. Perk cannot atomically
-pin upstream package name resolution between those reads; package files are assumed stable for the
-short pass. If a file changes or disappears after preflight, the child terminates without a
-schema-valid report, so Ponytail remains uncovered and the wave incomplete—never accepted as
-coverage from another source.
+The static `/pr-review` input is 2–4 selected angles with `plan-fidelity` mandatory; its
+effective manifest appends exactly one **required automatic** final source-bound `ponytail`
+lane outside the input menu/cap. Every reviewer uses only
+`perk pr review-context --expected-pr <bound-number> --json`, so target drift yields no
+schema-valid report; a normalized result records the bound PR plus explicit effective attempted
+and covered arrays for §8.3's single-use post state. The experimental `/pr-review-dynamic` door
+shares the same PR-bound, single-use `post_pr_review`/`review-post` state — angle selection is
+delegated to a fresh `perk.review-angle-selector` lane (which may additionally propose AT MOST
+ONE validated change-specific custom angle) and normalized in module-rendered code; the
+baseline `/pr-review` stays canonical. Ponytail coverage rides **one parent-side exact-path
+preflight before dispatch** (package name, `pi.skills`, the exact readable skill file, and its
+frontmatter name): a failed preflight never dispatches/spawns that lane — the keyed
+non-retryable `skill-unavailable` failure leaves it honestly uncovered, with no same-named
+project/user skill fallback — and a post-preflight package/skill change leaves the lane
+uncovered too (the child terminates without a schema-valid report; never accepted as coverage
+from another source). The full wave choreography (lane tasks, selector normalization, retry
+policy, attempt receipts) lives in §8.35/§8.57 and the extension wave modules
+(`extension/waves/prReviewWave.ts` / `prReviewDynamicWave.ts` / `ponytail.ts`).
 
 ### PR-review toolbox ops (checkout / cleanup / review-submit)
 
@@ -1133,8 +1031,8 @@ perk pr review-submit --pr <n> --event <e> --batch <file> --json -> { success, e
     # gh + auth (anchor validation fetches the diff): a deliberate, documented divergence.
     # Dry-run ADDITIONALLY predicts the own-PR 422 for formal events (before the diff fetch):
     # PR author == authenticated viewer ⇒ own_pr, nothing "submittable" — a validated batch must
-    # mean the real call can land (the first dogfood saw a human-approved review lost to the
-    # rejection). Fail-open when either login is unresolvable; the REAL path keeps GitHub as the
+    # mean the real call can land (a known own-PR formal event is rejected). Fail-open when
+    # either login is unresolvable; the REAL path keeps GitHub as the
     # authority (the gateway's OwnPrReviewError arm), and `comment` never runs the check.
     # A real run is ONE atomic review submission (comments + body + event) via the gateway's
     # event-aware ladder above — never a silent verdict drop; mode ∈
@@ -1153,7 +1051,9 @@ direct `perk pr review-submit` calls are forbidden on every door:
 - **Params (strict whole-batch decode — ANY malformed field ⇒ `bad_input`, nothing
   executed):** `{ pr: int, event: "approve"|"request-changes"|"comment", body: string
   (empty allowed — the cold door owns the event-conditioned body rule), comments?: [{path,
-  line:int, side?: LEFT|RIGHT, body}], dry_run?: bool }`.
+  line:int, side?: LEFT|RIGHT, body}], dry_run?: bool, allow_repost?: bool }`. One deliberate
+  cold/warm asymmetry: the cold batch tolerates an explicit `comments: null` (normalized to
+  `[]`); the warm strict decode rejects an explicit `null` as `bad_input`.
 - **The gate ladder:** the conversational explicit human go-ahead ALWAYS precedes any non-dry-run
   call (pinned in the tool guidelines + skills + templates); formal events (`approve`/
   `request-changes`) additionally get the structural gate — headless (`!ctx.hasUI`) → soft
@@ -1171,7 +1071,7 @@ direct `perk pr review-submit` calls are forbidden on every door:
   findings are never auto-posted; (2) on `/pr-review-terminal` this tool is the SOLE posting
   path (hunk has no GitHub posting; `gh` mutations and direct `perk pr review-submit` calls are
   forbidden); (3) the verdict lands last, atomically with the comments — never before them.
-- **Per-door posting ownership — the browser contract (the FLIPPED contract — the browser
+- **Per-door posting ownership — the browser posting contract (the browser
   surface's native posting IS the GitHub path):** (1) findings stream only into the local
   plannotator session (a UI surface on localhost, never GitHub) — nothing **perk-driven**
   reaches GitHub; (2) **plannotator's native platform-posting is THE GitHub path** — the human
@@ -1191,10 +1091,9 @@ direct `perk pr review-submit` calls are forbidden on every door:
   formal posts = N confirms — accepted). Comment re-anchoring flips: in single-PR mode the
   parent never re-anchors a child's finding; in stack mode the parent re-anchors combined-diff
   findings into per-PR coordinates under the dry-run repair loop.
-- **`last_review`** (§8.3): `{ pr, event, comment_count, mode, at:ISO }`, appended best-effort
-  with strict read-back on non-dry-run success only.
-- **`review_posts`** (§8.3): the accumulating per-PR ledger — one `{ pr, event, at:ISO }` row
-  appended per REAL success (read-rebuild-append, ordered; dry-runs and failures never write).
+- **`last_review` / `review_posts`** field shapes: §8.3. The posting invariants: `last_review`
+  appends best-effort with strict read-back on non-dry-run success only; `review_posts` appends
+  one ordered row per REAL success (dry-runs and failures never write).
   Skip-on-resume is TOOL-ENFORCED on row presence: a real post to a PR that already has a row
   refuses with `already_posted` (before the confirm and the cold-door mutation);
   `allow_repost: true` is the deliberate-second-review override. The ledger stays best-effort,
@@ -1303,8 +1202,8 @@ time). It registers **no tools of its own** — the fan-out pair (`start_review_
 posting rides `submit_pr_review` above with its gate ladder and description unchanged. Its terminal substrate
 — the door-common PR-token arg grammar (`parseReviewArgs`/`parseReviewDoorArgs`), the strict
 checkout decode, the `hunk --version` presence probe, and the R7 handoff — lives in
-`extension/doors/hunkHandoff.ts`/`prReviewTerminal.ts` (the browser door imports the door-common
-pieces; a neutral re-home is a deferred residual).
+`extension/doors/hunkHandoff.ts`/`prReviewTerminal.ts`: the shared parse helpers live in
+`hunkHandoff.ts`, imported by the browser door.
 
 - **Args:** `/pr-review-terminal [pr number|url] [focus note]` — both tokens optional
   (`parseReviewDoorArgs`). A leading
@@ -1474,7 +1373,7 @@ core), imported by this door and `/pr-review-terminal`'s active mode.
   closed-without-submitting ask; `handled`+approved+no annotations → the review-is-complete note
   (perk posts nothing; `submit_pr_review` offered only on explicit ask); `handled` otherwise →
   the feedback text + (when annotations exist) a fenced JSON block of the decoded annotations +
-  the flipped triage pointer (source-less = human-authored; `perk:*`-badged = perk's own
+  the browser-posting triage pointer (source-less = human-authored; `perk:*`-badged = perk's own
   findings returning; perk composes nothing by default — `submit_pr_review` ONLY for
   request-changes or on explicit request); `unavailable`/`error` → `report()` error, the flow
   continues in-session. Injection is idle → immediate, streaming → `followUp`. The decoded
@@ -1511,7 +1410,7 @@ core), imported by this door and `/pr-review-terminal`'s active mode.
   `routePrReviewOutcome` under the `pr-review-browser` scope (exit → the closed note, checked
   before the approved arm; approved → the approved note; feedback → an injected turn + the
   triage suffix when annotations exist).
-- **The posting flip applies to both PR modes** (the browser posting contract above):
+- **The browser posting contract applies to both PR modes** (above):
   native platform-posting from the UI is the GitHub path; perk composes nothing by default;
   `submit_pr_review` only for request-changes or on explicit request.
 - **Binding:** `command:pr-review-browser` → `perk-pr-review-browser` (nudge, §8.9), delivered
@@ -1578,9 +1477,10 @@ parallel rebuild.
   SIDE-EFFECT-FREE: read-only resolution only — no fetch, no worktree mutation, no handoff
   write, no launch; the preview carries the would-be checkout path, `base_sha: null` +
   per-member `head_sha: null`, the build-once launch argv, and the handoff-blob preview with
-  the same nulls plus `dry_run: true`. Local-only by design (no `--remote`).
-  `open_stack_review` (parameterless, single-use, §8.3) recovers the snapshot and runs the same
-  core, returning the stack guidance as its ok text.
+  the same nulls plus `dry_run: true`. Local-only by design: `--remote` is accepted by the
+  seeded-door interface and refused as `remote_blocked` before any resolution.
+  `open_stack_review` (parameterless, single-use; binding/decode in §8.3) recovers the snapshot
+  and runs the same core, returning the stack guidance as its ok text.
 - **Routing + per-PR posting (model judgment — no blame-attribution worker):** inputs are the
   reconciled wave findings + returned browser annotations (both combined-diff coordinates), the
   per-PR diffs from `review-context --stack`, and the snapshot's layer order. Default
@@ -1668,13 +1568,16 @@ validate_pr_body(body, *, pr_number)                -> string[]   (empty == vali
 `active_plan_ref` / `cache.plan-ref` is **provider-agnostic** from day one:
 
 ```
-{ provider: string,            # the resolved issue backend ("github" today — §8.21)
+{ provider: string,            # the resolved issue backend — "github" or "linear" (§8.21 is
+                               # the authority)
   pr_id: string,               # STRING (allows non-numeric ids like Jira "PROJ-123")
   url: string,                 # during planning: the plan issue url/id; branch/pr staged null
-  labels: string[],            # ["perk:plan"]
+  labels: string[],            # backend/storage metadata — standalone/adopted plans carry
+                               # "perk:plan"; unified Linear objective-node plans may carry none
   objective_id: string|null,   # the linked objective (opaque string id — §8.21)
   consumed_learn: string[],    # perk:learn issue ids a docs plan consolidates (closed on
                                # land) — opaque strings (§8.21)
+  delivery_lineage: string|null, # the stable delivery-train identity; null = incremental
   base: string|null }          # the pinned PR merge target / worktree start-point branch;
                                # null ⇒ fall back to the GitHub default branch
 ```
@@ -1688,7 +1591,8 @@ set below is the cross-backend contract either way:
 
 ```
 { run_id: string,              # the §8.2 run that created the plan (idempotency key)
-  lifecycle_stage: string,     # "planned" (Q8: collapses planned→impl; post-states from PR)
+  lifecycle_stage: string,     # "planned" at save, "impl" from submit on; terminal states are
+                               # derived from the PR, never stored
   branch: string|null,         # staged — populated at submit
   pr: string|null,             # staged — populated at submit
   created: string,             # ISO-8601 UTC
@@ -1735,10 +1639,10 @@ sets it** (after a successful merge) — **except for a learn-docs plan** (non-e
 `consumed_learn`), which is exempt from the land→learn cycle entirely (no marker;
 `learn_state: skipped` is stamped instead; the envelope's `pending_learn` reports which arm
 ran) — **`learn` clears it**. While present it signals the
-land→learn cycle is open and the worktree is not yet releasable. **Since §8.36** the marker is
-demoted to cache/friction-semaphore: the canonical post-merge learn state lives on the
-plan-header `learn_state` field, and the marker is only the local retry signal + the legacy
-resolution fallback (and the `worktree wipe` guard).
+land→learn cycle is open and the worktree is not yet releasable. The marker is a
+cache/friction-semaphore only: the canonical post-merge learn state lives on the plan-header
+`learn_state` field (§8.36); the marker is the local retry signal + the legacy resolution
+fallback (and the `worktree wipe` guard).
 
 ### Objective storage + the land-path reconciliation (compact)
 
@@ -1747,7 +1651,9 @@ mechanics live in `src/perk/objective/` + `src/perk/backends/github/objectives.p
 handlers in `src/perk/cli/commands/pr/land_cmd.py` (via `Delivery.land`) + the package-internal
 `src/perk/delivery/finalize.py`. The gateway-level facts:
 
-- **Storage blocks (perk-namespaced, schema 1).** An objective is an issue + first comment:
+- **Storage blocks (perk-namespaced, schema 1).** On GitHub (and the dormant issue-backed
+  Linear store — the live Linear arm is the project-backed store, §8.24), an objective is an
+  issue + first comment:
   `objective-header` (issue body — compact, queryable: `{ run_id, created, objective_comment_id,
   status, base }`), `objective-roadmap` (issue body — the **canonical** flat-node YAML
   frontmatter: `{ schema_version: "1", nodes: [ { id, slug, description, status, pr, depends_on?,
@@ -1772,15 +1678,15 @@ handlers in `src/perk/cli/commands/pr/land_cmd.py` (via `Delivery.land`) + the p
 State key (registry vocabulary): `github.objective` (the objective storage); `github.learn` (the
 learn issues).
 
-## §8.5 · The `init` machine surface (T5; cli-vs-pi §3.2)
+## §8.5 · The `init` machine surface (cli-vs-pi §3.2)
 
 `perk init` is a **supervisor surface**: human text → stderr, `--json` → stdout (one object),
 stable exit codes. The agent never parses it (it calls extension tools); the consumer is a
 process orchestrating sessions.
 
-**Exit codes.** `0` converged · `1` invalid input (`invalid_settings` / `invalid_config`) ·
+**Exit codes.** `0` converged · `1` invalid input (`invalid_settings`) ·
 `2` environment-not-ready (`not_a_repo` / `missing_tool` / `skills_conflict` /
-`skills_sync_failed` — see the skills-delivery substrate clause in §8.9). GitHub-unauthed is
+`skills_sync_failed` / `legacy_config` — see the skills-delivery substrate clause in §8.9). GitHub-unauthed is
 **non-fatal** in `init` (reported, exit 0); `github_unauthed` is reserved for the strict
 `require_github` path. On `skills_sync_failed` the report **preserves `changes`** (convergence
 already happened before the sync); `skills_conflict` short-circuits before any convergence
@@ -1799,12 +1705,13 @@ confirm, global default), and — when the committed backend is `linear` with a 
 resolves — a prompted, charset-guarded, auth-validated Linear API key persisted atomically
 (mode 0600) to the gitignored `.perk/local.toml` (the writer fails closed unless the target is
 provably untracked and gitignored — a secret never lands in a committable file). Gestures are
-**gap-driven** (a healthy host prompts for nothing — idempotency holds), and every **prompt and
-host/config mutation** runs ONLY when interactive: never under `--no-interactive`, a non-TTY
-stdin, **or `--json`** (a machine surface — no prompt or inherited-stdio child may interleave
-with the one stdout JSON object). One deliberate report-only exception: the git-identity
-**probe** runs on every *verified* init — non-interactive it never prompts or writes, degrading
-to the probe-side warning named below. `perk doctor` stays a non-interactive report/repair
+**gap-driven** (a healthy host prompts for nothing — idempotency holds), and every **onboarding
+prompt and onboarding host/local mutation** runs only when interactive — never under
+`--no-interactive`, a non-TTY stdin, **or `--json`** (a machine surface — no prompt or
+inherited-stdio child may interleave with the one stdout JSON object); repository convergence
+remains non-interactive. One deliberate report-only exception: the git-identity
+**probe** runs after a successful skills sync — non-interactive it never prompts or writes,
+degrading to the probe-side warning named below. `perk doctor` stays a non-interactive report/repair
 surface; init owns onboarding. **Compatibility posture
 (deliberately narrow):** stable = exit codes + the `--json` *field schema* + the gesture
 gating; changed values = the remediation strings (all modes; they carry exact install
@@ -1817,7 +1724,7 @@ declines/failures ride `warnings`.
 **`--json` object.**
 ```
 { success: bool, mode: "self"|"consumer"|"unknown", error_type: string|null, message: string|null,
-  env:     [ { name, ok, detail, remediation, optional } ], # tooling checks; `optional:true` entries
+  env:     [ { name, ok, detail, remediation } ],          # tooling checks; optional tools
                                                           #   (e.g. ast-grep) are non-fatal — present-or-
                                                           #   absent, never a `missing_tool` exit-2
   github:  { auth: { ok, user, scopes[], error },          # null when env-not-ready / verify skipped
@@ -1825,7 +1732,7 @@ declines/failures ride `warnings`.
   linear:  { ok, team, error,                              # null unless verify ran AND the committed
              readiness: { auth_ok, user, team_ok,          #   [issues] backend is "linear" (§8.21);
                           missing_labels[], created_labels[], error } | null,  # non-fatal like github
-             project: { projects_ok, projects_error,       # project-backed objective readiness (Node 4.2);
+             project: { projects_ok, projects_error,       # project-backed objective readiness;
                         missing_state_types[], states_error } | null },  # null unless auth_ok && team_ok; non-fatal
   capabilities: string[],                                  # the managed inventory (perk/convergence/capabilities.py)
   changes: string[],                                       # converged/seeded pieces ([] ⇒ already converged);
@@ -1840,33 +1747,32 @@ declines/failures ride `warnings`.
 ```
 
 The **post-init handoff** (`handoff`) is an *agent-readable* markdown at
-`.perk/workflow/post-init.md` (gitignored; regenerated each init) — distinct from the §8.1
-machine run-handoff JSON. It is the Phase-0 dogfood on-ramp.
+`.perk/workflow/post-init.md` (gitignored; written on successful init) — distinct from the §8.1
+machine run-handoff JSON.
 
 **Capability inventory.** `perk/convergence/capabilities.py` is the declared SSOT of what `init` manages
-(required-vs-optional + self-vs-consumer scope). Phase 0 ships an all-required set; `doctor`
-**(T6, implemented)** reuses it for health-check filtering (the inventory's `verify()` side). The
-installed-optional state file + `Capability` ABC are deferred until the first *optional*
-capability exists.
+(required-vs-optional + self-vs-consumer scope). The set is all-required; `doctor`
+reuses it for health-check filtering (the inventory's `verify()` side).
 
 ---
 
-## §8.6 · The `doctor` machine surface (T6; cli-vs-pi §3.2)
+## §8.6 · The `doctor` machine surface (cli-vs-pi §3.2)
 
 `perk doctor` is the **second** supervisor surface (the agent never parses it). It is `init`'s
 diagnostic twin: `init` converges *forward*, `doctor` **reports** coherence and `--fix` **repairs**
 drift. Managed-piece checks reuse `init`'s convergence helpers in **dry-run** (`apply=False`) — so
 init and doctor share one desired-state SSOT — and `--fix` runs the same helpers with `apply=True`.
-Shipped as a Click **group** (`invoke_without_command=True`) so the Phase-3 `doctor workflow`
-subgroup slots in without a breaking change.
+Shipped as a Click **group** (`invoke_without_command=True`); the `doctor workflow` subgroup
+registers under it.
 
 **Exit codes (report-don't-refuse, D5).** `0` healthy (warnings allowed) · `1` unhealthy (≥1
 failing check) · `2` `not_a_repo`. A **missing required tool is a failing check (exit 1)**, *not*
 exit 2 — doctor's job is to report tool problems, not refuse to run; only `not_a_repo` blocks.
 GitHub readiness is **non-fatal** (`warn`, never `fail`); doctor **never mutates** GitHub.
 
-**No silent pass.** A check that cannot be evaluated (a shell raised, a file is unreadable) reports
-`warn`/`info` with the reason in `detail` — never a silent `ok`.
+**No silent pass.** A check never silently reports `ok` when evaluation fails (a shell raised,
+a file is unreadable): required/bundled-artifact failures are `fail`; advisory probes may use
+`warn`/`info` with the reason in `detail`.
 
 **`--json` object.**
 ```
@@ -1897,44 +1803,46 @@ GitHub readiness is **non-fatal** (`warn`, never `fail`); doctor **never mutates
 (content-gated — the write lands on `fixed` only when the file is created/updated, keeping a
 second `--fix` at `fixed == []`).
 
-**Groups.** `environment` (tools; required tools missing = `fail`; optional tools (e.g. ast-grep)
-missing = `warn`) · `github` (auth/access; non-fatal `warn`) ·
-`linear` (verify-gated Linear readiness — auth/team/labels; present only when the committed
-`[issues] backend` is `"linear"`; warn-level, the github D3 mirror; `--fix` ensures the six perk
-labels — §8.21) · `runner` (remote-runner prereqs; report-only, non-fatal — §8.16) ·
-`package` (settings wiring + perk-package ref reconcile + the `extension-install` install-ownership
-check + the `required-perk-version` managed check over the committed `.perk/required-perk-version`
-pin + the report-only `cli-version` CLI-vs-repo-pin warning (warn, never fail) + the report-only
-`resource-overrides` probe over pi resource overrides that touch perk's own resources (warn, never
-fail, no `--fix` arm — §8.6a) + the report-only `subagent-compat` pi-subagents surface probe
-(installed version + source-file markers for the orchestration surfaces perk's guidance assumes;
-`info` when not installed; warn on divergence, never fail; no `--fix` arm — the package stays
-unpinned) + the report-only `ponytail-compat` exact package/`pi.skills`/two-skill-file/frontmatter
-probe (`info` when the lazy install is absent; warn on divergence, never fail; no `--fix` arm because
-operator pins are preserved; known-good remediation `npm:@dietrichgebert/ponytail@4.9.0` +
-`perk init` + session restart) + the report-only `subagent-bridge-config` check (reads
-`subagents.intercomBridge.mode` from the project `.pi/settings.json` and the user-global
-`~/.pi/agent/settings.json`; warns — never fails, no `--fix` arm — when either scope sets
-`"off"` or `"fork-only"`, either of which silently disables the supervisor channel perk's
-live-streaming review flows require);
-`--fix` also migrates a former git-clone consumer forward by removing the orphaned clone — §8.6a) ·
-`repository` (gitignore/agents blocks + config present/valid) ·
-`registry` (the registry self-check) · `skills` (the skills-CLI manifest fragment + the
-fail-level `skills-delivery` substrate check + the `repo-skills` repo-authored-skills fragment check
-— §8.9) · `bindings` / `providers` (rolled-up
-non-fatal config checks — §8.9/§8.10) · `issues` (the fail-level `[issues]` selection check:
-linear requires a committed `team` — §8.21) · `state` (the `.perk/workflow/` cache layout +
-handoff-blob integrity + the report-only `artifact-health` classification over the managed-state
-registry). Managed-piece checks are filtered by `capabilities.applicable(self_repo)`; infra checks
+**Groups.**
+
+- `environment` — tools; required tools missing = `fail`; optional tools (e.g. ast-grep)
+  missing = `warn`.
+- `github` — auth/access; non-fatal `warn`.
+- `linear` — verify-gated Linear readiness (auth/team/labels); present only when the committed
+  `[issues] backend` is `"linear"`; warn-level, the github D3 mirror; `--fix` ensures the six
+  perk labels (§8.21).
+- `runner` — remote-runner prereqs; report-only, non-fatal (§8.16).
+- `package` — the wiring/install/version surfaces: `settings-wiring`, `extension-install`, the
+  `required-perk-version` managed check, and the report-only probes `cli-version`
+  (CLI-vs-repo-pin warn), `resource-overrides` (pi overrides touching perk's own resources),
+  `subagent-compat` (the pi-subagents orchestration surfaces perk's guidance assumes; `info`
+  when not installed), `ponytail-compat` (exact package/`pi.skills`/skill-file/frontmatter;
+  known-good remediation `npm:@dietrichgebert/ponytail@4.9.0` + `perk init` + session restart),
+  and `subagent-bridge-config` (warns when either settings scope sets
+  `subagents.intercomBridge.mode` to `"off"`/`"fork-only"`, which silently disables the
+  supervisor channel the live-streaming review flows require) — all report-only probes warn at
+  worst and have no `--fix` arm. `--fix` also migrates a former git-clone consumer forward by
+  removing the orphaned clone. The full package-group contract is §8.6a.
+- `repository` — gitignore/agents blocks + config present/valid.
+- `registry` — the registry self-check.
+- `skills` — the skills-CLI manifest fragment + the fail-level `skills-delivery` substrate
+  check + the `repo-skills` repo-authored-skills fragment check (§8.9).
+- `bindings` / `providers` — rolled-up non-fatal config checks (§8.9/§8.10).
+- `issues` — the fail-level `[issues]` selection check: linear requires a committed `team`
+  (§8.21).
+- `state` — the `.perk/workflow/` cache layout + handoff-blob integrity + the report-only
+  `artifact-health` classification over the managed-state registry.
+
+Managed-piece checks are filtered by `capabilities.applicable(self_repo)`; infra checks
 always run. Human render (stderr) follows the three-way condensed rule per group (collapse a clean
 group; else expand only its failures/warnings); `--verbose` expands every check.
 
-### §8.6a · perk-package ref reconcile + the npm-install extension (#635/#639/#812)
+### §8.6a · perk-package ref reconcile + the npm-install extension
 
 Keeping a consumer's pi-loaded perk extension runnable rests on two invariants:
 
 - **perk's own extension is wired as an exact version-pinned `npm:@mgiles/perk` entry, reconciled
-  *forward*** (no longer purely append-only). `_desired_packages` emits `npm:@mgiles/perk@{__version__}`
+  *forward*.** `_desired_packages` emits `npm:@mgiles/perk@{__version__}`
   for a consumer (`_perk_npm_entry()`, mirroring the PyPI install pin SSOT in
   `workflow_artifacts.py`); the self-repo still wires `..`. `_merge_static_packages` rewrites perk's
   own `packages` entry **in place** (list position preserved) when its `@mgiles/perk` identity already
@@ -1950,8 +1858,8 @@ Keeping a consumer's pi-loaded perk extension runnable rests on two invariants:
   duplicate identities. Managed-state health canonicalizes a correctly filtered donor to npm
   identity while ignoring pin/metadata; any omitted or nonempty managed filter is drift. The in-body migration strips a
   repo's legacy **`git:` perk** entry (any ref, **any entry form** — by
-  `_package_identity == GIT_PACKAGE`, covering a user-rewritten object-form entry) so the flip from
-  the old git wiring converges; a user's unrelated `git:` packages are preserved. **Presence is
+  `_package_identity == GIT_PACKAGE`, covering a user-rewritten object-form entry) so a repo
+  carrying legacy `git:` entries converges; a user's unrelated `git:` packages are preserved. **Presence is
   computed by identity across ALL entry forms** (string entries and pi's object-form
   `{ "source": <spec>, **filter }` shape alike, via `_entry_spec`) — pi's `pi config -l` flow
   rewrites entries to object form to filter resources, and an unrecognized object-form entry would
@@ -1971,18 +1879,17 @@ Keeping a consumer's pi-loaded perk extension runnable rests on two invariants:
   heuristic — perk does not reimplement pi's filter-pattern semantics). The only conceivable
   `--fix` would strip user-chosen filters — hostile; the remediation tells the operator to review
   via `pi config -l` instead.
-- **perk owns the `@mgiles/perk` *npm install*, superseding pi's `git:`-clone extension lifecycle
-  (#812).**
-  Node 2.2 flipped perk's own extension to a pinned `npm:@mgiles/perk@{__version__}` settings entry; this
-  bullet makes init/doctor/launch **physically install** that pin. pi installs a missing
+- **perk owns the `@mgiles/perk` *npm install*.** perk's own extension is a pinned
+  `npm:@mgiles/perk@{__version__}` settings entry, and init/doctor/launch **physically install**
+  that pin. pi installs a missing
   project-scope `npm:` package lazily and **unlocked** at launch (`resolvePackageSources`) — a
-  missing/half-materialized race for `npm:` packages. The npm install path now **fully supersedes**
-  pi's `git:`-clone extension lifecycle, which is retired: the clone status/lock/materialize
-  primitives, the `extension-clone` doctor check, and the launch warm-clone are all removed. A
+  missing/half-materialized race for `npm:` packages. pi's `git:`-clone extension lifecycle is
+  unused: there are no clone status/lock/materialize primitives, no `extension-clone` doctor
+  check, and no launch warm-clone. A
   `doctor --fix` **migration** (`_remove_orphaned_git_clone`, in the `_MIGRATIONS` seam) carries a
   former git-clone consumer forward by `rmtree`-ing the orphaned `.pi/git/<host>/<path>` clone
   (filesystem-only, gitignored path; idempotent — a no-op once absent; a failed removal lands on
-  `fix_errors`, never swallowed). perk now owns the install end-to-end:
+  `fix_errors`, never swallowed). perk owns the install end-to-end:
   `materialize_extension_install` (init/doctor) reconciles the install **forward** —
   install-if-`absent` / reinstall-if-version-`mismatch` (the pinned `@mgiles/perk@{__version__}`,
   `npm install <pin> --prefix .pi/npm --legacy-peer-deps`, additive — borrowed entries untouched) —
@@ -1997,11 +1904,9 @@ Keeping a consumer's pi-loaded perk extension runnable rests on two invariants:
   `absent`/`mismatch` → **fail** (+`perk doctor --fix`, which install/reinstalls — perk init/doctor
   *own installing*), `present` → `ok`, `unverifiable` → `warn`, `self` → `info`.
   This is **install ownership**: presence + the *install-vs-pin* version comparison.
-- **Version-parity enforcement is complete (#838).** The *wired* pin is enforced by the
-  `settings-wiring` check (`_perk_npm_entry()` reconciled forward to `npm:@mgiles/perk@{__version__}`,
-  above) and the *installed* version by the `extension-install` check (install-vs-`__version__`
-  `mismatch` → fail), both against the running CLI's `perk.__version__` SSOT — **no third
-  `version-parity` doctor check** is added (it would only duplicate these). The only version perk
+- **Version parity.** The wired and installed pins are enforced by the checks above, both
+  against the running CLI's `perk.__version__` SSOT — **no third
+  `version-parity` doctor check** exists (it would only duplicate these). The only version perk
   cannot *statically* check is the **live loaded** extension at launch: pi can lazy-install / load a
   stale `npm:@mgiles/perk`, so the `@mgiles/perk` actually running may differ from the CLI that launched it.
   That runtime skew is surfaced by a **soft `session_start` drift signal**: the local launch seam
@@ -2013,7 +1918,7 @@ Keeping a consumer's pi-loaded perk extension runnable rests on two invariants:
   (it may re-emit on reload — acceptable for a soft warning); silent for ad-hoc `pi` (no env) and the
   self-repo (versions equal). Injected at the **local launch only** (the operator-facing path); the
   remote worker loads from the same pinned install and is headless, so it is deliberately out of
-  scope. `tests/test_packaging.py` now also guards the **wired + install pin lockstep** against the
+  scope. `tests/test_packaging.py` guards the **wired + install pin lockstep** against the
   version SSOT (`test_npm_pin_lockstep`: `_perk_npm_entry()` and `_pinned_spec()` both track
   `_pyproject_version()`), beyond the existing `__version__` `test_version_lockstep`.
 - **Two report-only CLI-vs-repo surfaces consume the committed pin.** Both compare
@@ -2038,18 +1943,13 @@ Keeping a consumer's pi-loaded perk extension runnable rests on two invariants:
   hooked right after the warning in the root group callback — warning first, notice second; both
   may appear). It consumes the **user-level max-seen store** `~/.perk/last-seen-version`
   (constructed only via `paths.user_perk_dir()`/`paths.last_seen_version_file()` — the one
-  perk-owned path outside the repo), not the committed pin. Semantics: max-seen — on the first
-  unsuppressed interactive run after an upgrade it records the new version **then** shows one
-  line pointing at `perk release-notes` (record-then-notice: an unrecordable store shows
-  nothing, or the notice would repeat); first-run and garbled stored content record silently;
-  an equal stored version is a no-op with no write; downgrades never lower the max seen. Its
-  suppression ladder is the warning's **shared six gates** (`_suppressed`: env opt-out · `CI` ·
-  non-TTY · `--version`/`--help` · `--json` · `run-worker`) with **no repo gate** — it fires
-  outside a git repo, like `perk release-notes` itself — and suppressed invocations perform
-  **no store I/O** (a machine run never consumes the notice). Failure posture: **silent
-  degrade** (any `OSError`/`Path.home()` failure → no-op, never a crash or a stderr report —
-  the store is a UX nicety with no remediation surface); accordingly there is **no doctor
-  check and no init convergence** for `~/.perk` (the store self-heals).
+  perk-owned path outside the repo), not the committed pin: on the first unsuppressed
+  interactive run after an upgrade it records the new version **then** shows one line pointing
+  at `perk release-notes` (record-then-notice — an unrecordable store shows nothing). Its
+  suppression ladder is the warning's **shared six gates** (`_suppressed`) with **no repo
+  gate**, and suppressed invocations perform **no store I/O**. Failure posture: silent degrade
+  (the store is a UX nicety; no doctor check, no init convergence — it self-heals). Max-seen
+  edge semantics: `version_check.py`.
 
 ---
 
@@ -2111,13 +2011,15 @@ from the ambient system prompt — `transclude` inlines the skill body. The same
 at one trigger and a transclude at another.
 
 **Skill visibility (prompt-hidden workflow skills):** perk's workflow skills — every shipped
-`perk-*` skill except `perk-expert` — ship `disable-model-invocation: true` in their frontmatter,
+`perk-*` skill except `perk-expert`, `perk-domain-modeling`, and `perk-grill` — ship
+`disable-model-invocation: true` in their frontmatter,
 so pi excludes them from every session's ambient `<available_skills>` system-prompt listing. This
 scopes **visibility only**: the on-disk body, its `references/` routing, and the `/skill:<name>`
 command all remain, and the worktree mirror keeps delivering every skill's files. Each door reaches
 its skill through the delivered pointer (a binding nudge or a seed-template line), which is why the
 pointer carries the read path. `perk-expert` (description-discovery IS its routing — no binding
-points at it) and `ast-grep` (general-purpose; nudged by the managed AGENTS.md block) stay ambient.
+points at it), `perk-domain-modeling`, `perk-grill`, and `ast-grep` (general-purpose; nudged by
+the managed AGENTS.md block) stay ambient.
 Older pi ignores unknown frontmatter keys, so the flag degrades gracefully (the skill simply stays
 visible).
 
@@ -2150,13 +2052,14 @@ perk's workflow skills are prompt-hidden; `transclude` exists for the user-bindi
 | `command:skills-create` | `perk-skill-author` | `nudge` |
 | `command:skills-refine` | `perk-skill-author` | `nudge` |
 
-**Validation depth (shape-only, registry-free):** the loaders/validators check that
-`schema_version == 1` (else a structural load error), each binding has a non-empty `skill`, a
+**Validation depth (shape-only, registry-free):** the Python loader rejects unsupported
+`schema_version` values (a structural load error); the TS reader is a thin structural parse.
+The validators check that each binding has a non-empty `skill`, a
 `mode ∈ {nudge, transclude}`, and a `trigger` that parses as `<kind>:<id>` with a known `kind` and a
 non-empty `<id>`, and that no `trigger` repeats. They do **not** check that a `stage:`/`command:`
 target actually exists — that cross-contract, target-existence validation is **`doctor`**'s job.
 
-**Resolver — `shipped-defaults ⊕ user-bindings` (Node 1.2, pure + unit-tested both planes):** a
+**Resolver — `shipped-defaults ⊕ user-bindings` (pure + unit-tested both planes):** a
 user **skill-binding overlay** is authored in `.perk/config.toml` as a `[[bindings]]` array-of-tables
 (`trigger`/`skill`/`mode` strings); `.perk/local.toml` overlays it with a **whole-array replace**
 (local wins — the local array supersedes the committed one entirely, never merged element-wise,
@@ -2171,47 +2074,47 @@ same trigger or **appends** at a new trigger, so the resolved set has **unique t
 construction**. A user binding is applied iff it is **shape-valid** (same shape-only checks above)
 AND its trigger was not already applied by an earlier user binding; otherwise it is dropped and its
 shape/`duplicate` `Issue` recorded in `issues` for loud-but-non-fatal surfacing. **Defaults are
-trusted** (not re-validated). The resolver remains registry-free: target-existence is still
-**`doctor`** (Node 3.1), never the resolver. No removal/disable syntax and no multi-skill-per-trigger
-co-delivery are defined yet.
+trusted** (not re-validated). The resolver is registry-free (target-existence stays with
+`doctor` — stated once under Validation depth). Removal/disable syntax and
+multi-skill-per-trigger co-delivery are unsupported.
 
-**Cold-door delivery (Node 2.3, Python plane):** `perk/substrate/binding_delivery.py`
+**Cold-door delivery (Python plane):** `perk/substrate/binding_delivery.py`
 (`render_cold_bindings(user_bindings, repo_root, trigger)`) renders the **full resolved** bindings
-(shipped defaults ⊕ the user overlay) whose trigger matches the launch — Node 2.3 deleted perk's
-hardcoded "Follow the … skill" strings, so the mechanism is now the **single delivery path** for
-perk's own nudges and the defaults are **no longer subtracted**. `launch_stage` appends that
-fragment to the initial prompt **only when there is one to augment** (D2): an **idle** launch (a
-stage with no `_initial_prompt` — today only `plan`) stays idle, so a binding **never synthesizes** a
+(shipped defaults ⊕ the user overlay) whose trigger matches the launch — the mechanism is the
+**single delivery path** for perk's own nudges (perk carries no hardcoded "Follow the … skill"
+strings) and the defaults are **never subtracted**. `launch_stage` appends that
+fragment to the initial prompt **only when there is one to augment**: an **idle** launch (a
+stage with no `_initial_prompt`) stays idle, so a binding **never synthesizes** a
 whole prompt and never auto-starts a turn; the idle stage's pointer is delivered **warm** by
 Mechanism A instead. The launch trigger is `stage:<stage.id>` by default; the `learn-docs` cold door
 (which borrows the `plan` stage) overrides it to `command:learn-docs` via `launch_stage`'s
 `binding_trigger` parameter, so it never fires `stage:plan`. The `objective-reconcile` CLI verb
 itself remains a non-launching **worker** (it rewrites the objective body, no initial prompt),
-but `command:objective-reconcile` now ALSO has a cold delivery surface: the `perk ready`
+but `command:objective-reconcile` also has a cold delivery surface: the `perk ready`
 continuation wrapper's seeded launch (§8.66, borrowing the `objective-save` stage) overrides
-`binding_trigger` to it — alongside the warm door where it always fired. `nudge` renders a ``Follow the
+`binding_trigger` to it — alongside the warm door. `nudge` renders a ``Follow the
 `<skill>` skill (read `.agents/skills/<skill>/SKILL.md`).`` pointer line (the read path is
 unconditional — no frontmatter read at render time; it is identical for visible and prompt-hidden
 skills alike); `transclude` inlines `.agents/skills/<skill>/SKILL.md` with its YAML
 frontmatter stripped, degrading to the nudge pointer with a **loud-but-non-fatal** warning when the
 file is absent/unreadable. Resolver `issues` and delivery `warnings` are surfaced loud-but-non-fatal
-on every launch and never block it. Target-existence remains **`doctor`** (Node 3.1).
+on every launch and never block it.
 
-**Warm-door delivery (Node 2.2/2.3, TS extension):** `extension/substrate/bindingDelivery.ts` is the in-session
+**Warm-door delivery (TS extension):** `extension/substrate/bindingDelivery.ts` is the in-session
 twin of the cold door. `resolvedBindings(cwd)` is the TS mirror of cold's `resolve_bindings(...)
-.bindings` — the **full resolved** overlay (defaults ⊕ user, no subtraction — Node 2.3), and
+.bindings` — the **full resolved** overlay (defaults ⊕ user, no subtraction), and
 `renderBindings(cwd, trigger)` / `bindingSuffix(cwd, trigger)` render exactly as the cold door does.
 It delivers at two **warm surfaces**: **Mechanism A** — a `before_agent_start` handler injects the
 launched **`stage:<id>`** bindings as a hidden (`display:false`) `perk:binding-context` message
 (mirroring `planMode.ts` / `objectiveAuthor.ts`). This is the delivery path for **`stage:plan`**'s
-`perk-plan` pointer (D6): a cold `perk plan` launches **idle** (no prompt to augment), so the one
-previously-ambient `plan` skill is now made **explicit** here. **Mechanism B** — `bindingSuffix` is
-appended into the guidance of **every** perk warm slash-command so each **self-delivers** its pointer
-(D5): `/address`→`stage:address`, `/learn`→`stage:learn`, `/objective-plan`→`stage:objective-plan`
+`perk-plan` pointer: a cold `perk plan` launches **idle** (no prompt to augment), so the `plan`
+skill pointer is delivered explicitly here. **Mechanism B** — `bindingSuffix` is
+appended into the guidance of **every** perk warm slash-command so each **self-delivers** its
+pointer: `/address`→`stage:address`, `/learn`→`stage:learn`, `/objective-plan`→`stage:objective-plan`
 (a warm `/objective-plan` run *outside* a `stage:objective-plan` session would otherwise get none
 from Mechanism A), `/objective-reconcile`→`command:objective-reconcile`, `/learn-docs`→
-`command:learn-docs`. Delivery is the **single path** for perk's own nudges (Node 2.3 deleted the
-hardcoded strings) and **never double-delivers**.
+`command:learn-docs`. Delivery is the **single path** for perk's own nudges
+and **never double-delivers**.
 
 The **cross-plane dedup marker is the render header itself** — `BINDING_HEADER` (TS) is pinned
 byte-for-byte to the cold `_HEADER` (Python) by a literal test in **both** planes. The cold door
@@ -2233,30 +2136,29 @@ prompts don't carry the header, so the prompt scan stays inert there). Mechanism
 narrower-than-`planMode` `context` strip removes a **stale** `perk:binding-context` custom (stage
 changed / overlay removed) while **never** stripping a user message that carries the header (a cold
 prompt legitimately does). Resolver shape `issues` are **not** surfaced warm (the cold launch + doctor
-own them); only the delivery `warnings` are loud-but-non-fatal: Mechanism A `console.error`s them,
-and **`bindingSuffix` (Mechanism B) now `console.error`s them too** (Node 3.1) — previously it
-degraded silently. The injection-time mirror is **skill-presence only** (the trigger is fixed at
-injection): the **`nudge`** path now warns when its skill is not installed under
+own them); only the delivery `warnings` are loud-but-non-fatal: Mechanism A and
+`bindingSuffix` (Mechanism B) both `console.error` them.
+The injection-time mirror is **skill-presence only** (the trigger is fixed at
+injection): the **`nudge`** path warns when its skill is not installed under
 `.agents/skills/<name>/SKILL.md` (mirroring the long-standing `transclude` warning), so every
 delivered binding whose skill is missing yields **exactly one** warning, in both planes — never
 silently delivered. Injection checks only user-originated skills (installed under `.agents/skills`),
 so it uses that path **only** (no self-repo fallback).
 
-**Validation (`doctor`, Node 3.1):** `perk doctor` adds one rolled-up, non-fatal **`bindings`**
+**Validation (`doctor`):** `perk doctor` has one rolled-up, non-fatal **`bindings`**
 check (`perk/convergence/doctor/checks.py::_bindings_check`) over the **full resolved set** (`resolve_bindings(user,
 defaults=load_bindings().bindings)`). It surfaces the resolver's dropped-user-binding `issues` plus,
 per delivered binding: **skill-presence** — the skill is installed under `.agents/skills/<name>/
 SKILL.md` (`bindings.is_skill_installed(root, skill)`), **strict on the delivery read path** in
 self-repo and consumer trees alike — the only path warm injection reads, so the committed
-self-repo `skills/<name>/SKILL.md` layout never substitutes (it once did, hiding a dangling
-injected pointer — the R3 blind spot). perk's own `perk-*` skills are
+self-repo `skills/<name>/SKILL.md` layout never substitutes. perk's own `perk-*` skills are
 delivered into `.agents/skills/` by the `skills` CLI in **both** self-repo and consumer trees (the
-Pi package no longer declares `pi.skills`, so Pi never discovers the package `skills/` dir) — and
+Pi package declares no `pi.skills`, so Pi never discovers the package `skills/` dir) — and
 **target-existence**
 — `stage:<id>` must be a `registry.load_registry().stage_ids()` member, and `command:<id>` must be in
 `DELIVERABLE_COMMAND_TARGETS = {objective-reconcile, learn-docs, learn-code, …}` (the only command triggers perk's
 delivery layer fires; a `command:<id>` outside it never fires). Every binding finding is a **`warn`**
-(loud-but-non-fatal, D1): `perk doctor` stays exit-0 over a binding misconfiguration — the
+(loud-but-non-fatal): `perk doctor` stays exit-0 over a binding misconfiguration — the
 `bindings` check owns user-binding *config* only. The delivery **substrate** (perk's own skills
 actually reaching `.agents/skills/`) is load-bearing and owned by the fail-level
 **`skills-delivery`** check below, not by `bindings`. A `BindingsError` on the *bundled* file is a `fail`
@@ -2264,7 +2166,7 @@ actually reaching `.agents/skills/`) is load-bearing and owned by the fail-level
 degrades to a warn note rather than failing (the registry/config checks own those failures). The
 check is report-only — no `--fix` for bindings.
 
-**Skills-delivery substrate (load-bearing; #289).** Skills delivery via the `skills` CLI is
+**Skills-delivery substrate (load-bearing).** Skills delivery via the `skills` CLI is
 **load-bearing**, not best-effort: a consumer where perk's skills cannot be materialized is a
 broken environment, surfaced at `init`/`doctor` time (never first at `perk plan` via the warm
 dangling-pointer warning, which stays a last-resort signal).
@@ -2277,13 +2179,15 @@ dangling-pointer warning, which stays a last-resort signal).
   auto-untracks (the migration is a human, per-repo task). A `GitError` during the probe degrades
   to *no* short-circuit — the fatal sync below fails loudly instead.
 - **Fatal sync:** any `skills init --cache=local` / `skills update --sync` failure (non-zero exit,
-  missing CLI, OSError, timeout) is fatal — `init` returns `skills_sync_failed` (exit 2) with the
+  OSError, timeout — an absent required CLI is rejected earlier as `missing_tool`) is fatal —
+  `init` returns `skills_sync_failed` (exit 2) with the
   failing command + first stderr lines in `message`, **preserving `changes`** (convergence already
   happened). After a successful sync, every `MANAGED_SKILL_NAMES` name must pass
   `bindings.is_skill_installed` — a sync that delivers nothing (e.g. an outdated `skills` CLI) is
-  the same fatal failure, never a silent pass. `MANAGED_SKILL_NAMES` is the verified set:
+  the same fatal failure, never a silent pass (`skills_sync_failed` covers sync-invocation and
+  post-sync delivery failures alike). `MANAGED_SKILL_NAMES` is the verified set:
   perk-authored skills (source `perk`) **plus** a set of required external skills. The managed
-  fragment now declares **multiple sources** — perk's own (`PERK_SKILL_SOURCE`) plus the required
+  fragment declares **multiple sources** — perk's own (`PERK_SKILL_SOURCE`) plus the required
   external sources (`REQUIRED_SKILL_SOURCES`: `astral`, `dagster`, `mattpocock`) — promoting those
   external skills from repo-specific to managed/required.
 - **`doctor` check:** a fail-level **`skills-delivery`** check (group `skills`, evaluated under
@@ -2328,8 +2232,8 @@ it runs beside `sync_skills` under `verify` only. **`.agents/manifest.yaml` is n
   fragment). Idempotent (`apply=True/False` compute the same change list).
 - **`perk init` posture:** the fragment is converged **before** `sync_skills` (so the skills CLI
   sees the declared source). Structural errors + untracked warnings are **non-fatal** — `init`
-  exits 0 and keeps converging, surfacing them on the new **`InitReport.warnings`** field (§8.5).
-  Only the sync-time remote `missing-skill` stays fatal (`skills_sync_failed`, exit 2).
+  exits 0 and keeps converging, surfacing them on the **`InitReport.warnings`** field (§8.5).
+  Sync-invocation and post-sync delivery failures stay fatal (`skills_sync_failed`, exit 2).
 - **`doctor` check:** a verify-gated **`repo-skills`** check (group `skills`, report-only, beside
   `skills-delivery`). First match wins: structural `errors` (bad SKILL.md / source-alias collision /
   no GitHub remote) → **`fail`**; on-disk fragment drift (incl. a stale fragment to prune) →
@@ -2356,7 +2260,7 @@ raising `ProvidersError` only for structural failures) and **`extension/substrat
 (`loadProviders` + the pure `resolveProviders`, returning `ResolvedProviders { plan, footer, web, issues }`
 with `issues` as **`string[]`** — the TS plane has no `Issue`/`FindingSeverity`). The Python plane is the
 authoritative validator. The
-design is locked in `docs/design/adapter-architecture.md` (Node 1.3), over
+design is locked in `docs/design/adapter-architecture.md`, over
 `docs/design/provider-contract.md` (the seven dimensions) and `docs/design/pluggability-taxonomy.md` (the C3 behavior-preserving
 default).
 
@@ -2375,38 +2279,31 @@ full YAML readers, it can carry the nested `package_filter` object that the narr
 reader cannot.
 
 **Shipped set:** the reference entry `perk-plan` (seam `plan`, `package: null` / `adapter: null` /
-`default: true`), plus **real** foreign plan entries. `tombell-plan` (→ `npm:@tombell/pi-plan`, `adapter:
-planAdapterTombell`) is a real, selectable plan provider (Node 2.3) — no longer illustrative.
-The **plan** seam is behavior-complete: perk vacates its surface at registration time + the adapter bridges the foreign one —
-see the Node 2.3 status note in contracts-history.md §8.10. There is **no askuser
-seam** anymore: it is **retired to a required borrow** — after the first-party tool's deletion the
-seam had exactly one selectable provider (nothing to select, the borrow-vs-seam criterion), so
-`ask_user_question` is the borrowed `@juicesharp/rpiv-ask-user-question` questionnaire, installed
-for every repo via `BORROWED_PACKAGES` and governed name-keyed by §8.40's borrowed census; the
-full seam history lives in the askuser status note in
-[`contracts-history.md`](./contracts-history.md) §8.10. There is **no todo seam** anymore
-either: it is likewise **retired to a required borrow** — after the seam had exactly one
-selectable provider (nothing to select, the borrow-vs-seam criterion), the checklist overlay is
+`default: true`), plus **real** foreign plan entries. On the **plan** seam, `tombell-plan`
+(→ `npm:@tombell/pi-plan`, `adapter: planAdapterTombell`) REPLACEs perk's plan surface (perk
+vacates at registration time + the adapter bridges the foreign one) and `plannotator-plan`
+AUGMENTs it (`shared/providers.yaml`, `extension/factories/planMode.ts`). There is **no askuser
+seam**: `ask_user_question` is a **required borrow** — the borrowed
+`@juicesharp/rpiv-ask-user-question` questionnaire, installed
+for every repo via `BORROWED_PACKAGES` and governed name-keyed by §8.40's borrowed census.
+There is **no todo seam** either: the checklist overlay is
 the borrowed `@juicesharp/rpiv-todo`, installed for every repo via `BORROWED_PACKAGES` and
 governed name-keyed by §8.40's borrowed census (the overlay is the **sole** checklist surface —
-perk's checkpoint substrate is removed); the full seam history lives in the todo status
-note in contracts-history.md §8.10. A second reference entry `perk-footer` (seam `footer`, `package: null` / `adapter: null` /
+perk mints no checkpoint substrate). The footer reference entry `perk-footer` (seam `footer`, `package: null` / `adapter: null` /
 `default: true`) plus **four** foreign/null footer providers — `powerline-footer` (→ `npm:pi-powerline-footer`),
-`pi-bar-footer` (→ `npm:pi-bar`), `pi-status-footer` (→ `npm:@tombell/pi-status`, #670), and
-`pi-default` (`package: null`, #670 — "install nothing / pi stock footer") — make the **footer** seam
+`pi-bar-footer` (→ `npm:pi-bar`), `pi-status-footer` (→ `npm:@tombell/pi-status`), and
+`pi-default` (`package: null` — "install nothing / pi stock footer") — make the **footer** seam
 an **interface seam** (vacate-only, `adapter: null`). `pi-status-footer` does **not** render
 extension statuses, so perk progress is not shown under it (accepted limitation). With these the
 footer is governed **exclusively** by `[providers] footer` — no footer outcome needs a manual
-`packages` edit. See the footer status note in contracts-history.md §8.10. A third reference entry `pi-web-access` (seam
+`packages` edit. The web reference entry `pi-web-access` (seam
 `web`, **`package: "npm:pi-web-access"`** — the only non-null-package default — / `adapter: null` /
 `default: true`) plus two **real** foreign web providers `ollama-web-search` (→ `npm:@ollama/pi-web-search`)
 and `juicesharp-web-tools` (→ `npm:@juicesharp/rpiv-web-tools`) make the **web** seam the **other
-interface seam** (vacate-only, `adapter: null`) — see the web status note in contracts-history.md §8.10. There is **no review
-seam**: a sixth seam (the DISPATCH posture — the selection picked which review surface a
-dispatching `/review` door drove) existed and is **retired** — the two surface-named review
+interface seam** (vacate-only, `adapter: null`). There is **no review
+seam**: the two surface-named review
 doors (`/pr-review-terminal` = hunk, `/pr-review-browser` = plannotator; §8.4) ARE the
-selection now (the command is the surface pick); the full seam history lives in the review-seam
-status note in contracts-history.md §8.10. What remains outside the seam machinery: the hunk
+selection (the command is the surface pick). What remains outside the seam machinery: the hunk
 CLI is an **external CLI** (npm `hunkdiff`, binary `hunk`), not a Pi package — `perk init`
 (verified) attempts a best-effort `npm install -g hunkdiff` **unconditionally** when the binary
 is absent (failure → a warning, never fatal), and doctor owns the warn-level **`review-cli`**
@@ -2419,15 +2316,13 @@ plannotator package `npm:@plannotator/pi-extension` is desired via the **plan** 
 (dict-keyed across every resolved seam) but its cross-seam instance retired with the seam. The
 **default** path (the reference providers) is unaffected and is the hard guarantee.
 
-**`cache.plan-ref.provider` is the issue backend, not the seam id.** Despite
-`docs/design/provider-contract.md` framing the `cache.plan-ref` `provider` field as the plan
-provider id, today it is the **issue backend** (`"github"`) — `perk/run/launch/prompts.py` branches on
-`provider == "github"`. The stamp sites (`plan_save_cmd.py` / `resume.py`'s
-`reconstruct_plan_ref` callers) no longer hardcode the `"github"` literal: the field is stamped
-from the **resolved issue backend's `backend_id`** (§8.21) — still the issue backend, still ≠
-the seam id. That "id == provider field" equivalence is aspirational; Node 2.2 does **not**
-restamp it (restamping would break `launch`'s backend branching). `cache.plan-ref` is
-untouched by the plan-seam deferral.
+**`cache.plan-ref.provider` is the issue backend, not the seam id.** The `cache.plan-ref`
+`provider` field is the **stamped issue-backend id** (`"github"` or `"linear"`); the plan-read
+helpers branch `github`/`linear`/`other`
+(`run/launch/prompts.py::_plan_read_instruction`). The stamp sites
+(`src/perk/cli/commands/plan/save_cmd.py` / `resume.py`'s `reconstruct_plan_ref` callers) stamp
+it from the **resolved issue backend's `backend_id`** (§8.21). The seam provider id and the
+stamped issue-backend id are distinct. `cache.plan-ref` is untouched by plan-seam selection.
 
 **Validation depth (shape-only, repo-free):** the loaders/validators check that
 `schema_version == 1` (else a structural load error), each provider has a non-empty unique `id`, a
@@ -2440,7 +2335,7 @@ one key per seam (`plan` / `footer` / `web`), values are **bare provider-id stri
 reader `parseTomlSubset` reads string values only; richer structure lives in `providers.yaml`).
 Both planes parse it raw (`perk/substrate/config.py` → `Config.providers`; `extension/substrate/config.ts` →
 `PerkConfig.providers`); resolution against the supported set is `init`/`doctor` in Python and the
-`extension/substrate/providers.ts` `resolveProviders` resolver in TS (added Node 2.2, consumed by `planMode`). An **absent table or absent key → the seam's
+`extension/substrate/providers.ts` `resolveProviders` resolver in TS (consumed by `planMode`). An **absent table or absent key → the seam's
 `default: true` provider** (zero behavior change, the no-config default). `local.toml` overlay
 wins (standard local-override precedence). The pure resolver
 `perk.substrate.providers.resolve_providers(selection, providers)` returns `ResolvedProviders { plan,
@@ -2474,15 +2369,15 @@ ignores the keys (the documented fail-safe posture, pinned by test on both plane
 perk launches inject the env default `PI_FFF_MODE=override` at **both spawn sites** (local
 `_exec_pi`, remote `_spawn_worker`) with operator env winning by merge order, so stage sessions
 get FFF as `find`/`grep` while warm/bare sessions keep pi-fff's additive default mode
-(`fffind`/`ffgrep`) — `npm:pi-web-access` is **no
-longer borrowed** (#529): it is the `web` seam's `default: true` provider, converged via the
-provider path (see the web status note in contracts-history.md §8.10), so a default repo still installs it but deselecting `web`
+(`fffind`/`ffgrep`) — `npm:pi-web-access` is **not
+borrowed**: it is the `web` seam's `default: true` provider, converged via the
+provider path, so a default repo still installs it but deselecting `web`
 removes it like any provider package —
 so it stays inside the `settings-wiring` `ManagedConvergence` (one desired-state SSOT — `doctor`
 dry-runs/fixes it for free). The **whole supported set** gives the *provider-managed identity set*
 (every non-null `package`'s npm/git identity) — the discriminator separating provider packages from
 borrowed and user-hand-added packages. The resolved selection gives the *desired foreign packages*.
-Unlike today's append-only convergence, provider wiring is **two-directional**: it **removes** any
+Unlike the append-only static-package layer, provider wiring is **two-directional**: it **removes** any
 existing `packages` entry whose identity is provider-managed but **not** desired (a deselect), and
 **adds** each desired foreign package in **object form** (`{ "source": <spec>, **package_filter }`,
 omitting the filter keys when absent). Entries outside the managed set (perk's own, borrowed, user)
@@ -2491,11 +2386,11 @@ tripwire) makes the provider and linear convergences a **no-op** — never a des
 config perk could not read (perk cannot know the selection it still names); surfacing defers to the
 config check, and the next init after the repair reconciles normally. **perk never filters its own package and never *creates* an object-form entry
 for it** (Invariant 2, re-worded — §8.6a: a user may rewrite perk's entry to object form via
-`pi config -l`; perk recognizes it and reconciles only its `source` pin, preserving the filters). **Resolved ambiguity (Node 1.3 step 4):** any `packages`
+`pi config -l`; perk recognizes it and reconciles only its `source` pin, preserving the filters). Any `packages`
 entry whose identity matches a provider's `package` is treated as **provider-managed** (removable
 when deselected); hand-adding a provider's package *without* selecting it is unsupported — a user
-who wants that package selects the provider via `[providers]`. The retired `@tombell/pi-plan`
-re-enters `packages` **only** when a selection names it.
+who wants that package selects the provider via `[providers]`. `@tombell/pi-plan`
+enters `packages` **only** when a selection names it.
 
 **Validation (`doctor`):** `perk doctor` adds one **`providers`** check (`perk/convergence/doctor/checks.py::
 _providers_check`). A `ProvidersError` on the *bundled* file is a `fail` (cannot occur in a healthy
@@ -2507,16 +2402,18 @@ package-wired / orphan check — that drift is owned by the `settings-wiring` ma
 (which `doctor` already dry-runs); `_providers_check` owns only what convergence cannot repair (an
 invalid bundled file, a selection naming a non-existent / wrong-seam provider).
 
-**`[compaction]` → `settings.json` `compaction` convergence (init-owned, #206):** a `[compaction]`
+**`[compaction]` → `settings.json` `compaction` convergence (init-owned):** a `[compaction]`
 table in `.perk/config.toml` tunes pi's **interactive** global auto-compaction for `perk <stage>`
 sessions by converging into the committed `.pi/settings.json` `compaction` object (pi reads that
-natively at session boot). It is **Python-plane-only** — the extension never reads it (pi consumes
-`settings.json` itself), so `extension/substrate/config.ts` is untouched. Three snake_case keys map to pi's
+natively at session boot). The committed-settings convergence is Python-plane-only (pi consumes
+`settings.json` itself); the extension reads only the runtime `[compaction] objective_threshold`
+key (`extension/substrate/config.ts`). Three snake_case keys map to pi's
 camelCase `settings.json` keys: `enabled`→`enabled`, `reserve_tokens`→`reserveTokens`,
 `keep_recent_tokens`→`keepRecentTokens`. Validation goes through a pydantic table model
-(`perk/substrate/config.py::CompactionTable`, read via `load_committed_compaction`): an ill-typed
-or non-positive value raises a `ConfigError` surfaced by doctor's `config` check (init convergence
-defers to that check); `reserve_tokens = true` is rejected explicitly (the bool-is-int gotcha —
+(`perk/substrate/config.py::CompactionTable`, read via `load_committed_compaction`): malformed
+TOML and ill-typed/non-positive values reach doctor's `config` check, while the convergence
+itself swallows them as empty (`_converge_compaction` — never a destructive write over a config
+perk could not read); `reserve_tokens = true` is rejected explicitly (the bool-is-int gotcha —
 it never reads as 1); absent keys still fall to pi defaults. The convergence composes inside
 `_converge_settings` (`load_committed_compaction` +
 `perk/convergence/init/settings.py::_converge_compaction`), so it stays in the `settings-wiring` `ManagedConvergence` —
@@ -2609,53 +2506,30 @@ seeded default is user-ownable after the seed — including it would misclassify
 survives init/doctor; a user-global `/settings` change does **not** durably override the project
 key (pi merges project settings over global).
 
-> **Interactive save discipline (as of Node 2.5 the present + `/plan-save` flow is
-> FALLBACK-ONLY on every interactive path — perk-plan included):** the prior
-> `PLAN_AUTHORING_CONTEXT` ending ("disable plan mode (/plan off), then call the plan_save
-> tool") was structurally broken — `/plan` is a user command the model cannot run, and the
-> `plan_save` tool is excluded from `READ_ONLY_TOOLS` (hidden while the gate is on). The
-> review-first discipline — keep the working draft current with `plan_draft`, call
-> `plan_review` when decision-complete, and an approval **auto-saves** via `approvalSave` — is
-> stated per §8.57's one-canonical-carrier map: the plan stage's mode context
-> (`PLAN_AUTHORING_CONTEXT`) carries it for the plan-stage shapes, the objective/gist
-> authoring **seeds** carry it per launch shape (`OBJECTIVE_AUTHORING_CONTEXT` is live state +
-> pointers only), the objective-plan factory guidance carries it on both planes (warm
-> `factoryGuidance` / cold `_seed_prompt`), adapter blocks carry only their provider's surface
-> delta (`PLAN_ADAPTER_PLANNOTATOR_CONTEXT` no longer restates the flow), and the stage skills
-> are the read-on-demand detail tier pointing back at it. Only when `plan_review` reports **skipped or unavailable**
-> (headless, dismissed, no surface) does the model **present the complete plan as its final
-> message and never attempt to save**; the **human** runs `/plan-save` (its
-> `extractPlanMarkdown` scrape is reliable by construction — the final message is the clean
-> plan; as of Node 2.2 `/plan-save` prefers the validated plan-draft artifact when one exists,
-> and the scrape is the demoted universal fallback). `PLAN_ADAPTER_TOMBELL_CONTEXT` also speaks
-> review-first — as §8.57's REPLACE-posture designated flow carrier (perk's mode context is
-> never injected under that selection); the present + `/plan-save` (artifact-preferred,
-> scrape-fallback) flow remains its
-> explicit **fail-open** arm — including when `@tombell/pi-plan`'s own interactive `/plan`
-> `setActiveTools` restriction hides `plan_draft`/`plan_review` from the tool set.
-> `savePlan()` / the `plan_save` tool / `/plan-save` are **untouched**. No orchestrated
-> **factory flow** instructs an autonomous `plan_save` tool call any longer:
-> **objective-plan** is review-first as of #352 Node 3.1 — the
-> approval-driven save recovers the node link from the `objective_node_claim` carrier, with
-> `plan_save`-with-both-ids demoted to the manual failsafe. The **learn factories**
-> (learn-docs/learn-code) are review-first too (their seeds + skills speak it): in the gated
-> read-only cold sessions the approval-driven save recovers `consumed_learn` from the cold
-> handoff carrier (→ §8.2), and `plan_save`-with-`consumed_learn` applies only where the tool
-> is active (warm read-write sessions — which write no handoff, so the explicit param is
-> load-bearing there). **replan** and **plan-from** are review-first too — their gated
-> read-only sessions land the save via `plan_review` approval (replan's approval-save updates
-> the existing plan in place via the `run_id` upsert — the original `run_id` rides the
-> session; plan-from's `adopt_from` link rides the handoff carrier), with `/plan-save` the
-> manual failsafe.
+> **Interactive save discipline (`/plan-save` is FALLBACK-ONLY on every interactive path —
+> perk-plan included):** the review-first discipline — keep the working draft current with
+> `plan_draft`, call `plan_review` when decision-complete, and an approval **auto-saves** via
+> `approvalSave` — is stated per §8.57's one-canonical-carrier map (§8.57 owns the carrier
+> inventory), and every orchestrated factory flow is review-first (none instructs an
+> autonomous `plan_save` tool call). Only when `plan_review` reports **skipped or
+> unavailable** (headless, dismissed, no surface) does the model **present the complete plan
+> as its final message and never attempt to save**; the **human** runs `/plan-save`
+> (artifact-preferred, transcript-scrape fallback). Provider-specific fallback deltas:
+> `PLAN_ADAPTER_TOMBELL_CONTEXT` speaks review-first as §8.57's REPLACE-posture designated
+> flow carrier (perk's mode context is never injected under that selection), and the present +
+> `/plan-save` flow remains its explicit **fail-open** arm — including when
+> `@tombell/pi-plan`'s own interactive `/plan` `setActiveTools` restriction hides
+> `plan_draft`/`plan_review` from the tool set; `PLAN_ADAPTER_PLANNOTATOR_CONTEXT` carries
+> only its provider's surface delta and never restates the flow.
 
-## §8.11 · The headless stage-drive worker contract (Node 1.2)
+## §8.11 · The headless stage-drive worker contract
 
 The **stage-drive primitive** (`extension/worker/worker.ts` `driveStage`) drives ONE read-write stage
 (`implement`/`address`) end-to-end on an **already-prepared** worktree, in-process via the SDK
-runtime factory, running the **same** `@mgiles/perk` extension package. It is the substrate Node 1.3
-(the structured event stream) and Node 4.1 (the e2e harness) consume. This section locks the
+runtime factory, running the **same** `@mgiles/perk` extension package. §8.12 (the structured
+event stream) and the worker harness consume it. This section locks the
 worker's inputs, determinism invariants, terminal-signal definition, and outcome shape (the full
-audit is `docs/design/headless-worker.md`, Node 1.1). The worker makes **no GitHub mutation of its
+audit is `docs/design/headless-worker.md`). The worker makes **no GitHub mutation of its
 own** — the stage's own tools (`submit`, `finalize_address`) delegate to the Python gateway
 exactly as in a warm session (§8.4/§8.52).
 
@@ -2663,39 +2537,38 @@ exactly as in a warm session (§8.4/§8.52).
 
 | input | shape | source |
 |---|---|---|
-| `worktree` | absolute path, already positioned | the cold-door/runner positioning (`perk/run/launch/__init__.py`), **not** the worker (Gap 7) |
+| `worktree` | absolute path, already positioned | the cold-door/runner positioning (`perk/run/launch/__init__.py`), **not** the worker |
 | `stage` | `"implement" \| "address"` | the only `doors.cold_remote: true` read-write stages (`shared/registry.yaml`) |
 | `run_id` | ULID, present as `PERK_RUN_ID` in env | minted by positioning; the worker **inherits** it and never re-mints |
 | handoff / plan-ref / plan-body | files under `<worktree>/.perk/workflow/` | materialized by positioning; the worker does not re-write them |
 | `initialPrompt` | string | re-derived by `initialPromptFor(stage, planRef)` — the TS twin of `perk/run/launch/prompts.py._implement_prompt`/`_address_prompt` (parity asserted reciprocally in `extension/worker/worker.test.ts` + `tests/test_worker_prompt_parity.py`); the prompt carries **no skill-binding suffix** — the worker's bindings arrive via §8.9 Mechanism A (the extension's `before_agent_start` injection, which fires because the handoff records the stage and no branch entry carries `BINDING_HEADER`); the injected content is byte-identical to the cold door's prompt suffix (`tests/test_binding_render_parity.py`; the named mechanism difference is §8.38 row 2) |
-| `model` + `auth` | `Model` + `AuthStorage`/`ModelRegistry` | explicit worker input, else env-var key resolution (`ANTHROPIC_API_KEY` etc., Gap 5); **no model ⇒ a fail-soft `failed`/`no_model` outcome, never a throw**. The workerMain shim resolves an explicit `--model` flag through pi's `resolveCliModel` (CLI parity: fuzzy matching, `provider/pattern`, a `:thinking` suffix — `resolveWorkerModel`); a parsed thinking level rides the additive `DriveStageOptions.thinkingLevel` input, applied at session creation (absent ⇒ the settings default) |
-| `budget` | `{ maxTurns, maxTokens, wallClockMs }` | worker input; the watchdog that drives abort (Gap 2) |
+| `model` / `thinkingLevel` / `modelRuntime` | optional `Model`, optional `ThinkingLevel`, optional `ModelRuntime` (default-created when absent) | explicit worker inputs (`worker.ts::DriveStageOptions`); **no model ⇒ a fail-soft `failed`/`no_model` outcome, never a throw**. The workerMain shim resolves an explicit `--model` flag through pi's `resolveCliModel` (CLI parity: fuzzy matching, `provider/pattern`, a `:thinking` suffix — `resolveWorkerModel`); a parsed thinking level rides `thinkingLevel`, applied at session creation (absent ⇒ the settings default) |
+| `budget` | `{ maxTurns, maxTokens, wallClockMs }` | worker input; the watchdog that drives abort |
 | `signal` | `AbortSignal` | external cancellation; OR'd with the budget watchdog |
 
 ### Determinism invariants (fixed by the worker; not caller-tunable)
 
-- **`cwd = worktree`, `agentDir = throwaway temp dir`** (Gap 4): the project tier **actually
-  resolves** the managed `.pi/settings.json` `packages` list — perk's `@mgiles/perk` **plus** the
+- **`cwd = worktree`, `agentDir = throwaway temp dir`**: the project tier resolves the managed
+  `.pi/settings.json` `packages` list — perk's `@mgiles/perk` **plus** the
   borrowed packages (`npm:pi-subagents` etc.), the same package set as a warm session — alongside
-  the managed `AGENTS.md`/`APPEND_SYSTEM.md`. Missing `npm:` packages **auto-install** into the
+  the managed `AGENTS.md`/`APPEND_SYSTEM.md`, while the user-global tier
+  (extensions/settings/skills/models/auth) stays locked out via the throwaway `agentDir` — the
+  isolation invariant; loader/install mechanics live in `extension/worker/worker.ts`. Missing
+  `npm:` packages **auto-install** into the
   project-scope root `.pi/npm` at session construction (an install failure throws → a loud
   `failed`/`drive_error` outcome; installs are skipped under `PI_OFFLINE`) — §8.14's composite
-  worker-deps step pre-installs the pinned `@mgiles/perk` there for consumers. The user-global tier
-  (extensions/settings/skills/models/auth) stays locked out via the throwaway `agentDir` (its
-  `settings.json` does not exist ⇒ an empty global tier). The `createAgentSessionServices` factory
-  builds the `DefaultResourceLoader` internally from `cwd`/`agentDir` — the runtime path does
-  **not** take a pre-built loader (recipe correction #1).
+  worker-deps step pre-installs the pinned `@mgiles/perk` there for consumers.
 - **Compaction-off + retry-off** via disk-layered settings — `SettingsManager.create(worktree,
   throwawayAgentDir)` + `applyOverrides({ compaction:{enabled:false}, retry:{enabled:false} })`
-  (Gap 3; the SDK's sanctioned "with overrides" shape). The overrides ride the **merged** settings
+  (the SDK's sanctioned "with overrides" shape). The overrides ride the **merged** settings
   view only (what the compaction/retry getters read); package resolution reads the per-scope raws,
   so the overrides cannot leak into it. **AND** the **no-active-objective invariant**: positioning
   never writes an `active_objective`, so `objective.ts`'s `turn_end` `ctx.compact` is inert.
   Together these kill both SDK auto-compaction and perk's threshold compaction. The worker must
   **never** call `/objective`/`objective_save` in the driven session.
-- **`ctx.hasUI === false`** (Gap 6): the session binds with `{ uiContext: undefined, mode: "json" }`,
+- **`ctx.hasUI === false`**: the session binds with `{ uiContext: undefined, mode: "json" }`,
   so every perk UI surface takes its headless `console.error` fallback.
-- **Rebind defensiveness** (Gap 1): the worker is built on `createAgentSessionRuntime` (the
+- **Rebind defensiveness**: the worker is built on `createAgentSessionRuntime` (the
   services/from-services factory), and a `bindAndSubscribe`/`rebind` helper re-binds the extension
   and re-attaches the terminal/budget listener after any runtime replacement — but `bindExtensions`
   is **still called explicitly** at startup (the factory only *loads* extensions; binding emits
@@ -2710,7 +2583,7 @@ The drive terminates on the **first** of:
 
 1. **Terminating-tool success** (the primary signal), observed via the `tool_execution_end`
    `result.details` captured by the subscribe listener: for `implement`, a successful `submit`
-   carrying a `pr` **AND `mergeable !== false`** (#556 — a definitively-unmergeable PR with
+   carrying a `pr` **AND `mergeable !== false`** (a definitively-unmergeable PR with
    unresolved merge conflicts is NOT complete; `mergeable: true`/`null`/absent all allow completion,
    fail-open) → `completed`/`submit_tool`; for `address`, `finalize_address` ok **and**
    `perk:workflow-state.last_review_batch` appended **and** the latest submit-bearing evidence is
@@ -2737,7 +2610,7 @@ well-formed `run_started`→`run_finished` pair. The check is presence-gated on 
 `extensionRunner` and deliberately does **not** require the `subagent` tool for `address` (the live
 subagent-under-worker smoke stays the carried risk below).
 
-### Outcome shape (frozen; **additive-stable** — 1.3 may add fields, existing fields keep meaning)
+### Outcome shape (frozen; **additive-stable** — fields may be added, existing fields keep meaning)
 
 ```jsonc
 {
@@ -2757,11 +2630,11 @@ reads/writes and provider `reasoning` breakdowns (subsets of `output` in pi-ai's
 are deliberately excluded from the sum.
 `error.summary` is a short, model-free synthesis capped via the `route-don't-relay`/double-delivery
 discipline (`capForModel`); the PR is extracted **directly from the captured terminal tool event**,
-not a new Python `find-pr-for-branch` JSON command. Node 1.3 surfaces this outcome as the run-event
-stream's terminal `run_finished` event (§8.12) — the same frozen object, carried in the structured
-channel.
+not a Python `find-pr-for-branch` JSON command. The run-event
+stream surfaces this outcome as its terminal `run_finished` event (§8.12) — the same frozen
+object, carried in the structured channel.
 
-> **Open dependency (carried risk).** The `address` drive's seeded prompt instructs the model to
+> **Current unverified dependency.** The `address` drive's seeded prompt instructs the model to
 > classify via ONE call to the flow-scoped **`classify_review_feedback`** tool, which runs the
 > `perk.review-classifier` child through the report-wave module (§8.35) over the pi-subagents v1
 > extension RPC — the report schema is a module constant (`REVIEW_CLASSIFIER_REPORT_SCHEMA`, the
@@ -2769,27 +2642,28 @@ channel.
 > `[models.subagents] review-classifier` model at execute time (the worktree's committed
 > `.perk/config.toml`, with the gitignored `.perk/local.toml` overlay anchored to the MAIN
 > checkout — a per-user override survives the cold worktree launch; nothing schema- or
-> model-shaped is prompt-transcribed). `pi-subagents` still loads in the
-> worker from the managed settings `packages` list (Gap 4 above) — the tool's RPC adapter rides
-> it. The **subagent-under-worker live smoke** stays an open dependency **deferred to the Phase-3
-> `doctor workflow`**: the fake-RPC e2e validates perk's adapter, not the real pi-subagents
-> workflow host under the headless worker, and the migration makes `classify_review_feedback`
-> mandatory before a worker `/address` can reach `finalize_address`; Node 1.2 does not prove it.
+> model-shaped is prompt-transcribed). `pi-subagents` loads in the
+> worker from the managed settings `packages` list (the isolation invariant above) — the tool's
+> RPC adapter rides
+> it. The **subagent-under-worker live smoke** remains unproven: the fake-RPC e2e validates
+> perk's adapter, not the real pi-subagents
+> workflow host under the headless worker, and `classify_review_feedback` is
+> mandatory before a worker `/address` can reach `finalize_address`.
 
-## §8.12 · The structured run-event stream (Node 1.3)
+## §8.12 · The structured run-event stream
 
 The headless stage-drive worker (§8.11) emits a **structured run-event stream** while it drives one
-`implement`/`address` stage to terminal. The stream is the *substrate* Node 2.3 (GitHub
-progress/terminal reporting) and Node 4.1 (the e2e worker harness) consume: it carries full ordered
+`implement`/`address` stage to terminal. The stream is the *substrate* the §8.15 reporter (GitHub
+progress/terminal reporting) and the worker harness consume: it carries full ordered
 run detail in a **structured channel**, while the surfaced `RunOutcome` (§8.11) stays bounded — the
-`route-don't-relay`/double-delivery discipline. This node is **purely additive** to §8.11: the
+`route-don't-relay`/double-delivery discipline. The stream is **purely additive** to §8.11: the
 `RunOutcome` shape is unchanged, and every surface is opt-in/fail-soft.
 
 ### The `RunEvent` union (additive-stable; keyed on `kind`)
 
 A small, JSON-serializable, **additive-stable** discriminated union. Every event carries a monotonic
 `seq` (0-based, +1 per emit) and `t` (elapsed ms from the drive's injected clock — the SAME basis as
-`RunOutcome.budget.elapsed_ms`). Future nodes may add variants/fields; existing ones keep meaning.
+`RunOutcome.budget.elapsed_ms`). Variants/fields may be added; existing ones keep meaning.
 
 ```jsonc
 { "kind": "run_started",  "seq": 0, "t": 0, "run_id": "<ULID>", "stage": "implement" | "address" }
@@ -2799,9 +2673,9 @@ A small, JSON-serializable, **additive-stable** discriminated union. Every event
 ```
 
 - **`run_started`** — emitted once at drive start (after a successful bind, before `session.prompt`).
-- **`step_marker`** — **deprecated / never emitted**: the `[WIP:n]`/`[DONE:n]` marker protocol was
-  removed with checkpoints, so nothing writes markers and the worker no longer scans for them. The
-  variant stays in the grammar (additive-stable; historical `events.ndjson` files may carry it).
+- **`step_marker`** — **deprecated / never emitted**: no `[WIP:n]`/`[DONE:n]` marker protocol
+  exists — nothing writes markers and the worker does not scan for them. The
+  variant stays in the grammar (additive-stable; legacy `events.ndjson` files may carry it).
   **Accepted loss:** headless runs have no granular per-step progress signal — the in-session todo
   checklist is `hasUI`-gated and perk adds **no foreign-payload coupling** (no scraping of the
   borrowed todo tool's payloads) to synthesize one.
@@ -2816,8 +2690,8 @@ A small, JSON-serializable, **additive-stable** discriminated union. Every event
 ### Dual delivery (the injectable sink seam)
 
 `RunEventSink = (event: RunEvent) => void`, injectable via `DriveStageDeps.eventSink`. This satisfies
-both consumers: Node 4.1 asserts events in-process via an injected array sink; Node 2.3 reads the
-durable file out-of-process.
+both consumers: the worker harness asserts events in-process via an injected array sink; the
+§8.15 reporter reads the durable file out-of-process.
 
 - **Default sink** (when `eventSink` is absent) = a run-scoped NDJSON **file** sink built from
   `opts.worktree` + the resolved `run_id` (`env.PERK_RUN_ID`, the same source `assembleOutcome`
@@ -2834,25 +2708,25 @@ durable file out-of-process.
 The structured channel carries the *narrative* (which tools ran + ok/fail, terminal
 outcome), **not** raw tool payloads (those already live in the session transcript). Per-event free
 text is capped at `EVENT_SUMMARY_CAP = 2 KiB`. The surfaced `RunOutcome` is unchanged and already
-bounded. The worker only *writes* the structured channel — **no GitHub mutation** here; surfacing it
-as PR comments/checks from the runner is Node 2.3 (Phase 2).
+bounded. The worker only *writes* the structured channel — **no GitHub mutation** here; §8.15
+owns surfacing it as PR comments from the runner.
 
 ---
 
-## §8.13 · Remote dispatch: the `Runner` contract + the dispatch record (Node 2.1)
+## §8.13 · Remote dispatch: the `Runner` contract + the dispatch record
 
 A `--remote` launch of a drivable stage (`implement`/`address`, the `doors.cold_remote:true`
-stages) is a **real drive** (it was `remote_not_driven` through P2.T8c). The Python plane mints a
+stages) is a **real drive**. The Python plane mints a
 perk `run_id`, **persists the `run_id → plan` linkage**, reads it back to verify, then **triggers**
-a runner that is discovered + matched back to the `run_id`. This node builds the dispatch driver
-(`perk/run/launch/remote.py` `_drive_remote_target`) + the runner library (`perk/run/runner.py`); the GitHub
-Actions workflow YAML it triggers is **Node 2.2** (named below, built there).
+a runner that is discovered + matched back to the `run_id`. The dispatch driver is
+`perk/run/launch/remote.py` `_drive_remote_target` + the runner library `perk/run/runner.py`; the GitHub
+Actions workflow YAML it triggers is the §8.14 managed artifact.
 
 ### The `Runner` contract (`perk/run/runner.py`)
 
-A runner-agnostic `typing.Protocol`. GitHub Actions is the first (and currently only)
-implementation; `select_runner(ref)` returns a `GitHubActionsRunner(ref)` for any ref today (the
-"keep future runners open" seam — the ref is recorded but not yet mapped to a runner *kind*).
+A runner-agnostic `typing.Protocol`. GitHub Actions is the only
+implementation; `select_runner(ref)` returns a `GitHubActionsRunner(ref)` for any ref (the
+"keep future runners open" seam — the ref is recorded, not mapped to a runner *kind*).
 
 ```python
 class Runner(Protocol):
@@ -2867,11 +2741,9 @@ class Runner(Protocol):
 - **`dispatch`** triggers the run and returns the **verified** handle (verified = the runner-side
   run was discovered and matched to `run_id`); it raises `RunnerError` on a trigger/discovery
   failure.
-- **`observe`/`cancel`/`retry`** operate on a previously-returned `RunHandle`. They are implemented (not
-  stubbed) so the contract is validated end-to-end and the supervisor nodes (3.1/3.2) consume
-  settled shapes — but the **supervisor command surfaces** (`perk workflow run list/cancel/retry`,
-  tables, correlation) are those later nodes' work, not this one (`list` is §8.17;
-  `cancel`/`retry` are §8.18). `retry` re-runs the existing run (same `run_ref`); `failed_only`
+- **`observe`/`cancel`/`retry`** operate on a previously-returned `RunHandle`; the
+  **supervisor command surfaces** over them are §8.17 (`perk workflow run list`) and §8.18
+  (`cancel`/`retry`). `retry` re-runs the existing run (same `run_ref`); `failed_only`
   re-runs only the failed jobs. `GitHubActionsRunner.retry` shells `github.rerun_workflow_run`
   (`gh run rerun [--failed]`), wrapping `github.GitHubError` as `RunnerError` exactly as `cancel`.
 - **`discover`** enumerates the runner's perk runs from the **canonical remote source**,
@@ -2950,11 +2822,12 @@ and so are pruned wholesale with the run dir by `perk state prune` / the `cache-
 1. Resolve the plan from `cache.plan-ref`; **no plan ⇒** `UserFacingCliError(no_plan_ref)` (a
    remote drive must not invent a plan).
 2. Mint `run_id` (a cold dispatch is a cold launch ⇒ mints).
-3. Resolve `base` = the default branch (best-effort; loud fallback to `"main"` on failure — never
-   silent).
+3. Resolve `base` = `plan_ref.base` when nonblank, else the default branch, else a loud
+   fallback to `"main"` — never silent.
 4. **`--dry-run` ⇒ a side-effect-free dispatch preview** (`success:true`, `dry_run:true`, an
    `inputs` preview; **no** persist, **no** trigger) — mirroring the local dry-run.
-5. **Persist** the `cache.DispatchCache` record (`status:"dispatching"`) via `cache.write_dispatch`, then
+5. **Persist** the `cache.Dispatch` record (read boundary `DispatchModel`;
+   `status:"dispatching"`) via `cache.write_dispatch`, then
    **read it back** and assert `run_id` + `plan_ref.pr_id` round-tripped; a mismatch raises a
    **hard** `UserFacingCliError(dispatch_state_unverified)` (never a silent `pass`).
 6. **Trigger** via the selected runner's `dispatch`. On `RunnerError`/`GitHubError`: rewrite the
@@ -2963,32 +2836,32 @@ and so are pruned wholesale with the run dir by `perk state prune` / the `cache-
    the critical verified linkage is step 5's). Surface a human line + a `--json`
    `{success, stage, run_id, runner, run_handle}` payload. Exit 0.
 
-The **error types**: `remote_not_driven` is **retired**; the new types are `no_plan_ref`,
-`dispatch_state_unverified`, `dispatch_failed`.
+The **error types**: `no_plan_ref`, `dispatch_state_unverified`, `dispatch_failed`.
 
-### The `workflow_dispatch` input contract (the Node 2.2 dependency)
+### The `workflow_dispatch` input contract
 
 `GitHubActionsRunner.dispatch` triggers a `workflow_dispatch` and then **verifies** the run by
 polling `repos/{owner}/{repo}/actions/workflows/<workflow>/runs` and matching the run whose
 `display_title`/`name` **contains the perk `run_id`** (exponential backoff `min(2**attempt, 8)`,
-`max_attempts=11`; a matched `skipped`/`cancelled` run or exhaustion ⇒ `GitHubError`). So Node 2.2
-**must** ship:
+`max_attempts=11`; a matched `skipped`/`cancelled` run or exhaustion ⇒ `GitHubError`). So the
+§8.14 managed workflow ships:
 
 - a workflow file named **`perk-run.yml`** (`runner.GITHUB_ACTIONS_WORKFLOW`);
 - typed `workflow_dispatch` inputs **`run_id`, `stage`, `plan`, `base`**;
-- a `run-name` that **embeds `${{ inputs.run_id }}`** so the dispatcher can verify-by-discovery
-  (the perk `run_id` unifies erk's separate `distinct_id`);
-- a per-plan `concurrency` group is recommended (mirroring erk's `implement-plan-${{ … }}`).
+- a `run-name` that **embeds `${{ inputs.run_id }}`** so the dispatcher can verify-by-discovery;
+- a per-plan `concurrency` group.
 
-Until 2.2 lands, a real `--remote` dispatch surfaces a clean `gh`-sourced "workflow not found"
+If the managed workflow is unavailable, a real `--remote` dispatch returns a clean `gh`-sourced
+"workflow not found"
 `dispatch_failed` (an honest failure, not a crash). The CI-side positioning (the worktree/handoff
-the worker consumes) is also Node 2.2's workflow; this node positions **nothing** locally.
+the worker consumes) belongs to the §8.14 workflow; the dispatch driver positions **nothing**
+locally.
 
-## §8.14 · The GitHub Actions runner artifact + the CI worker entrypoint (Node 2.2)
+## §8.14 · The GitHub Actions runner artifact + the CI worker entrypoint
 
 The runner side of §8.13's cold remote door: the **managed** GitHub Actions workflow the dispatcher
-triggers, plus the `perk run-worker` positioning entrypoint that workflow invokes. Both are built in
-this node; §8.13's "until 2.2 lands" caveat is reconciled by it.
+triggers, plus the `perk run-worker` positioning entrypoint that workflow invokes. Both are
+managed artifacts.
 
 ### The managed artifact (`perk/run/workflow_artifacts.py`)
 
@@ -2996,10 +2869,10 @@ Two perk-owned files, **managed by `perk init` and repaired by `perk doctor --fi
 `ManagedConvergence` in `init.managed_convergences()`, covering the `runner-workflow` capability —
 so `init` writes them and `doctor` verifies/repairs them through the one shared SSOT):
 
-- **`.github/workflows/perk-run.yml`** — the runner workflow. It honors §8.13's `workflow_dispatch`
-  input contract: a `run-name` embedding **`${{ inputs.run_id }}`** (verify-by-discovery); typed
-  inputs **`run_id`, `stage`, `plan`, `base`** (`base` is `required: true` with no default — the
-  dispatcher always sends it); a per-plan `concurrency` group `perk-run-${{ inputs.plan }}`. An
+- **`.github/workflows/perk-run.yml`** — the runner workflow. It honors §8.13's
+  `workflow_dispatch` input contract (the run-name embedding, the typed
+  `run_id`/`stage`/`plan`/`base` inputs — `base` is `required: true` with no default — and the
+  per-plan `concurrency` group `perk-run-${{ inputs.plan }}`), plus an
   additive **`smoke`** input (`required: false`, `default: "false"`, `type: string`) drives the
   doctor smoke short-circuit (§8.19): when `smoke == 'true'` the `drive` job runs only `Validate
   required secrets` + a `Smoke check` echo step and exits **success** — every subsequent step
@@ -3010,8 +2883,8 @@ so `init` writes them and `doctor` verifies/repairs them through the one shared 
   `drive` job validates required secrets — it fails fast when `PERK_GH_PAT` is missing **and** when
   **both** `ANTHROPIC_API_KEY` and `OPENAI_API_KEY` are empty (pre-empting the worker's late
   `no_model`) — checks out the repository, runs the composite setup, then `perk run-worker`.
-  **The workflow no longer positions the plan branch in shell**: the former "Check out the
-  plan branch" step relocated into `perk run-worker` (`position_branch`, §8.46) — one
+  **The workflow delegates plan-branch positioning to `perk run-worker`**
+  (`position_branch`, §8.46) — one
   pytest-testable implementation positions incremental (behavior-equivalent fetch-or-create:
   hard-reset to the remote tip when `origin/plan-<plan>` exists, else create from
   `origin/<base>`) and stacked plans alike. The `Drive the stage headlessly` step runs
@@ -3028,8 +2901,8 @@ so `init` writes them and `doctor` verifies/repairs them through the one shared 
   smoke runs write nothing and upload nothing). An opt-out repo variable `PERK_ENABLED=false` disables the job without
   removing the file. **Auth model:** checkout + push use the `PERK_GH_PAT` PAT, **not** `github.token` — a
   PAT-pushed commit triggers downstream CI (the implement drive commits + `submit` pushes);
-  `GITHUB_TOKEN`-pushed commits do not. This is a stated decision Node 2.4 inherited (the
-  `runner-workflow-permissions` check is advisory `info` because of this PAT-push model — §8.16).
+  `GITHUB_TOKEN`-pushed commits do not. The
+  `runner-workflow-permissions` check is advisory `info` because of this PAT-push model (§8.16).
 - **`.github/actions/perk-remote-setup/action.yml`** — the composite setup action: the two pinned
   toolchains (uv + Node 22), then perk (the exterior CLI — `--from . perk` for the self-repo,
   an exact-version-pinned PyPI install `uv tool install perk=={__version__}` for a consumer,
@@ -3054,13 +2927,13 @@ packaged data, so there is no wheel-data surface to guard.
 
 ### `perk run-worker` (the CI positioning + drive entrypoint, `perk/run/run_worker.py`)
 
-`perk run-worker --run-id --stage --plan [--base]` is the runner's positioning job (Gap 7), invoked
+`perk run-worker --run-id --stage --plan [--base]` is the runner's positioning job, invoked
 by the workflow on the plain repository checkout (cwd = the checkout = the worktree):
 
 1. Resolve a remotely-drivable stage (a `doors.cold_remote: true` stage) from the registry; else
    `UserFacingCliError(stage_not_drivable)`.
-2. Reconstruct the `cache.plan-ref` from the plan's GitHub state (`github.get_plan` +
-   `resume.reconstruct_plan_ref`); a missing plan ⇒ `plan_not_found`.
+2. Reconstruct the `cache.plan-ref` from the plan's backend state (the configured backend's
+   `get_plan` + `resume.reconstruct_plan_ref`); a missing plan ⇒ `plan_not_found`.
 3. **Position the plan branch** (`position_branch(repo_root, plan_ref, base)`, §8.46): an
    existing remote `plan-<N>` → checkout + hard-reset to the remote tip; absent + incremental
    → create from `origin/<base>`; absent + stacked → the readiness-gated parent-aware creation
@@ -3073,7 +2946,7 @@ by the workflow on the plain repository checkout (cwd = the checkout = the workt
    pointer would dangle. A delivery failure is **fatal** (`UserFacingCliError(skills_sync_failed)`)
    and pre-empts the worker spawn (and `report_started`) — the deliberate posture asymmetry vs the
    loud-but-non-fatal local worktree mirror (§8.38 named difference 2). The worker inherits the
-   prepared worktree and never re-writes it (the §B inputs table).
+   prepared worktree and never re-writes it.
 5. Resolve the Node worker entrypoint — `PERK_WORKER_ENTRY` override (`env`), else the self-repo
    `extension/workerMain.ts` (`self`), else the consumer npm install under
    `.pi/npm/node_modules/@mgiles/perk/` (`consumer-npm`), which is **staged**: the whole package is
@@ -3087,19 +2960,19 @@ by the workflow on the plain repository checkout (cwd = the checkout = the workt
    exit code** so the workflow step reflects the drive outcome.
 
 `run-worker` is a deterministic exterior command (no agentic reasoning): it positions and drives;
-model/auth resolution is the Node worker's job (env-var key resolution, Gap 5). `--base` is part of
+model/auth resolution is the Node worker's job (§8.11). `--base` is part of
 the §8.13 input contract and is **consumed** by `position_branch`'s incremental fresh-branch arm
-(§8.46). Reporting run progress/terminal status back into GitHub is
-**Node 2.3**; the runner's secrets/health checks (the `PERK_GH_PAT`/model-credential prereqs) are
-**Node 2.4** — the `perk doctor` `runner` check group (§8.16).
+(§8.46). Reporting run progress/terminal status back into GitHub is §8.15; the runner's
+secrets/health checks (the `PERK_GH_PAT`/model-credential prereqs) are
+the `perk doctor` `runner` check group (§8.16).
 
 ---
 
-## §8.15 · Remote run reporting back into GitHub (Node 2.3)
+## §8.15 · Remote run reporting back into GitHub
 
 The **runner-side** consumer of the §8.12 structured run-event stream + the §8.11 `RunOutcome`: when
 `perk run-worker` drives a stage remotely, it makes that run **observable on GitHub**. The worker
-itself never mutates GitHub (§8.12 is explicit — surfacing the stream is this node); the reporter is
+itself never mutates GitHub (§8.12 is explicit — surfacing the stream is the reporter's job); the reporter is
 a deterministic exterior task (no agentic reasoning) living in the Python plane (`perk/run/run_report.py`)
 and wired into `perk run-worker` (`perk/run/run_worker.py`).
 
@@ -3120,10 +2993,10 @@ reporting propagates.
 
 ### The surfaces
 
-- **One marker-keyed plan-issue comment per `run_id`.** The target is the **plan issue** (the
-  issue-canonical model — a perk plan *is* a GitHub issue; the implementation PR is referenced by
+- **One marker-keyed plan-issue comment per `run_id`.** The target is the **plan record**
+  selected by the configured issue backend (the implementation PR is referenced by
   URL when known). A single comment carrying the marker `<!-- perk:run-report:<run_id> -->` is
-  **upserted** started → terminal (`github.upsert_marked_comment` →
+  **upserted** started → terminal (the resolved backend's `upsert_marked_comment` →
   `find_comment_id_by_marker` PATCH-if-found, else POST), so the started note evolves into the
   terminal note (no two-comment spam; reruns are distinct `run_id`s). The plan issue is the only
   correlation anchor known at *started* time (for `implement` the PR does not exist until mid-drive).
@@ -3156,18 +3029,17 @@ No change to `.github/workflows/perk-run.yml` or `perk/run/workflow_artifacts.py
 
 ---
 
-## §8.16 · Remote-runner prerequisites: credential + permission health-checks (Node 2.4)
+## §8.16 · Remote-runner prerequisites: credential + permission health-checks
 
 The **pre-flight** twin of §8.14's execution-time `Validate required secrets` step: `perk doctor`'s
 diagnostic side surfaces a mis-configured runner (missing checkout/push PAT, missing model
 credential, restrictive workflow-permissions) **before** a `--remote` drive reaches CI, instead of
-letting the CI job fail at its validate step. This is perk's analogue of erk's
-`erk-queue-pat-secret` / `anthropic-api-secret` / `workflow-permissions` doctor checks, adapted to
+letting the CI job fail at its validate step. The checks are adapted to
 Pi (multi-provider model keys) and perk's `{owner}/{repo}` gateway convention.
 
 **Division of labor.** `init` *manages* the runner credentials by writing the managed workflow whose
-`Validate required secrets` step is the execution-time gate (§8.14, Node 2.2); `doctor` *health-checks*
-them ahead of time. perk init/doctor **never mutate** GitHub (Decision D2 — there is no
+`Validate required secrets` step is the execution-time gate (§8.14); `doctor` *health-checks*
+them ahead of time. perk init/doctor **never mutate** GitHub (there is no
 secret-setting command); each actionable finding instead carries an exact `gh` remediation string in
 `Check.remediation` (e.g. `gh secret set PERK_GH_PAT`).
 
@@ -3210,33 +3082,34 @@ GitHub-non-fatal rule. Order:
      cases** (advisory — perk pushes with a PAT, not `github.token`, so it does not block the
      runner); `can_approve_pull_request_reviews` false carries the PUT remediation; `None`→`info`.
 
-**Self-vs-consumer dual mode (D6).** The check *set* is identical for both repo kinds (the
+**Self-vs-consumer behavior.** The check *set* is identical for both repo kinds (D6 in
+`github_checks.py`: the
 `runner-workflow` capability is `scope="both"`); only the actionable-absent `detail` wording adapts —
-self: "expected on perk's own repo (perk dogfoods `--remote` drives)"; consumer: "required only if
+self: "expected on perk's own repo (perk exercises `--remote` drives on itself)"; consumer:
+"required only if
 you use `perk … --remote` drives". No new capability is added (report-only), so the
 `test_every_required_capability_has_a_doctor_check` coherence guard is unaffected.
 
-**Human render.** `runner` is added to `doctor_cmd._GROUP_ORDER` (after `github`) — a group absent
-from that tuple is invisible in human text (the `_GROUP_ORDER` trap); `--json` and the exit code
+**Human render.** `runner` is in `doctor/render.py::GROUP_ORDER` (after `github`) — a group absent
+from that tuple is invisible in human text (the `GROUP_ORDER` trap); `--json` and the exit code
 surface it regardless.
 
-**Node 3.3 reuse.** `_runner_checks` is a free function (not inlined) and the three reads are the
-**static** prereq layer that `perk doctor workflow` (Node 3.3) will compose with the
-managed-artifact-present check and the live-spawn CI smoke. Node 2.4 adds checks to the **bare**
-`perk doctor` run only; the `doctor workflow` subcommand is not built here.
+**Shared checks.** `_runner_checks` is a free function shared by bare `perk doctor` and
+`perk doctor workflow` (§8.19): the three reads are the **static** prereq layer the workflow
+subgroup composes with the managed-artifact-present check and the live-spawn CI smoke.
 
-## §8.17 · The supervisor read surface (`perk workflow run list`, Node 3.1)
+## §8.17 · The supervisor read surface (`perk workflow run list`)
 
 The first command in the `perk workflow run` group: a deterministic, **read-only** supervisor
 surface that enumerates runs from the **canonical GHA discovery** (§8.13's run-name record),
 merged with the local dispatch-record cache, correlating each `run_id ↔ plan ↔ PR`. It mutates
 nothing (no GitHub writes, no `.perk/workflow/` writes). `cancel`/`retry` (the `run` subgroup's
-mutating siblings) **shipped** in Node 3.2 — see §8.18.
+mutating siblings) are §8.18.
 
-### Command surface (`perk/cli/commands/workflow_cmd.py`)
+### Command surface (`perk/cli/commands/workflow/run/list_cmd.py`)
 
 - `perk workflow run list` (aliases `perk workflow run ls`, `perk wf run list`). The `workflow`
-  group (alias `wf`) holds the `run` subgroup so Node 3.2 extends the same subgroup.
+  group (alias `wf`) holds the `run` subgroup (§8.18 extends it).
 - A dev/CI/supervisor surface (like `perk objective`/`perk state`), **not** an agent affordance.
 - `--json` → a stable machine report on **stdout**; the human table → **stderr** (the cli-vs-pi
   §3.2 split). `--no-refresh` skips **all** GitHub reads (the cache-only view); `--limit N`
@@ -3245,11 +3118,11 @@ mutating siblings) **shipped** in Node 3.2 — see §8.18.
 ### Source of truth + the merge
 
 - **GitHub's run enumeration is the existence source.** When refreshing (the default), the command
-  fetches `discovery.discover_runs(root, limit=limit)` **once** (one enumeration replaces the old
-  per-record `observe` calls) and merges it with `cache.list_dispatch_records(root)` by `run_id`.
+  fetches `discovery.discover_runs(root, limit=limit)` **once** (one enumeration; no per-record
+  `observe` calls) and merges it with `cache.list_dispatch_records(root)` by `run_id`.
   The single-page bound applies: runs older than the newest `per_page` page surface via local
-  records only. Each row carries a `source` field:
-  - **`"both"`** — row fields from the local record (plan `url`, `objective_id` correlation, the
+  records only. Each row carries `plan.pr_id` + `plan.url` (`_row_to_dict`) and a `source` field:
+  - **`"both"`** — row fields from the local record (plan `url`, the
     precise `dispatched_at`, `error`); the `run` block from the `DiscoveredRun`
     (`run_ref`/`url`/`status`/`conclusion`) — no `observe` call.
   - **`"local"`** — failed/`dispatching` records or runs past the discovery page: the record row,
@@ -3276,8 +3149,8 @@ mutating siblings) **shipped** in Node 3.2 — see §8.18.
 ### Fail-soft overlay discipline
 
 Every live read is **best-effort**: the command does **not** call `require_github`. A discovery
-`RunnerError` degrades to an empty enumeration with a one-line stderr note — the local-cache view
-(exactly the old behavior). Each per-record read on a `local` row is wrapped — a
+`RunnerError` degrades to an empty enumeration with a one-line stderr note — the local-cache view.
+Each per-record read on a `local` row is wrapped — a
 `runner.RunnerError` degrades the `run` block to `null`; a `github.GitHubError` degrades the `pr`
 block to `null` — with a one-line stderr note, never raising and never changing the exit code (this
 is a read surface, not a gate). `--no-refresh` is the **cache-only** view: zero GitHub reads, local
@@ -3298,22 +3171,22 @@ records only (every row `source: "local"`, `pr`/`run` forced `null`).
 ```
 
 `refreshed = not no_refresh`; `pr`/`run` are `null` under `--no-refresh` or a failed/empty overlay.
-The top-level shape is unchanged from the pre-discovery surface; `source` is the per-row addition.
+`source` is the per-row provenance field.
 `success` is always `true` for a successful enumeration (even zero runs); only `require_repo` failing
 (`not_a_repo`) routes through `fail` (exit 2). No other error type is introduced.
 
 ### Human table (stderr)
 
 Plain, manually-aligned, newest-first columns
-`RUN_ID  STAGE  DISPATCH  RUN  CONCLUSION  PLAN  PR  AGE`. The full `run_id` (the supervisor copies
-it into Node 3.2's `cancel`/`retry`) is never truncated; the overlay columns show `-` when not
+`RUN_ID  STAGE  DISPATCH  RUN  CONCLUSION  PLAN  PR  AGE`. The full `run_id` is never truncated
+(the supervisor copies it into `cancel`/`retry`, §8.18); the overlay columns show `-` when not
 refreshed/unresolved; `AGE` is a compact relative age from `dispatched_at`. Columns are unchanged
 by the merge — a discovered-only row simply renders what it knows (plan column still `#<pr_id>`).
 A `failed` record's
 `error` is surfaced on an indented continuation line (the §8.13 "failed records kept for visibility"
 rule). Empty state prints `No dispatched runs found`.
 
-## §8.18 · The supervisor control surface (`perk workflow run cancel`/`retry`, Node 3.2)
+## §8.18 · The supervisor control surface (`perk workflow run cancel`/`retry`)
 
 The mutating control siblings of `list` (§8.17) in the same `perk workflow run` subgroup:
 deterministic, **no agentic reasoning** dev/CI/supervisor commands (not agent affordances).
@@ -3325,7 +3198,7 @@ deterministic, **no agentic reasoning** dev/CI/supervisor commands (not agent af
 Both take `--json` (stable machine report on **stdout**; human confirmation on **stderr**). The
 group/subgroup aliases (`wf`, `run`) apply; the commands themselves carry no aliases.
 
-### `<RUN_ID>` resolution (D1)
+### `<RUN_ID>` resolution
 
 `<RUN_ID>` is the **perk `run_id`** — the never-truncated `RUN_ID` the supervisor copies from
 `list` (§8.17). After `require_repo` + `require_github` (both commands *do* require auth — unlike
@@ -3349,14 +3222,13 @@ control a run it never dispatched):
 The resolved tuple's `record` slot is nullable (`Dispatch | None` — `None` for a discovered-only
 run); `cancel`/`retry` act only on the handle. The error vocabulary is unchanged — no new type.
 
-### No local mutation, no pre-gate (Corrections)
+### No local mutation or pre-gate
 
-- **Retry reuses the SAME run** — `gh run rerun` re-runs the existing run (same `run_ref`,
-  preserving the `run-name` that embeds the perk `run_id`), so the dispatch record and its
+- **Retry reuses the SAME run** (§8.13's retry mechanics), so the dispatch record and its
   `run_id ↔ plan ↔ PR` linkage stay valid. **No new ULID, no `cache.write_dispatch`.**
 - **Neither command mutates the dispatch record.** The record's `status` is the *dispatch-attempt*
   lifecycle; live run state is observed via `Runner.observe` (surfaced by `list`'s overlay). No
-  `.perk/workflow/` writes in this node.
+  `.perk/workflow/` writes on these commands.
 - **No pre-flight run-state gating.** The commands do not `observe` to decide cancellability/
   retryability — they pass through to gh and surface gh's own error (e.g. "cannot cancel a
   completed run") as a clean `cancel_failed`/`retry_failed`.
@@ -3375,15 +3247,16 @@ run); `cancel`/`retry` act only on the handle. The error vocabulary is unchanged
 
 `run_ref`/`runner`/`kind`/`url` come from the reconstructed `RunHandle`. Error types + exits:
 `not_a_repo` → 2; `github_unauthed`, `run_not_found`, `run_not_dispatched`, `cancel_failed`,
-`retry_failed`, `invalid_input` → 1. The only free text in a failure payload is gh's own error
-string (wrapped via `RunnerError`) — no model-authored interpretation.
+`retry_failed`, `invalid_input` → 1. Runner-operation failures carry gh's own error
+string (wrapped via `RunnerError`); lookup failures use command-generated messages
+(`resolve_target`) — no model-authored interpretation.
 
 ---
 
-## §8.19 · `perk doctor workflow` — static prereq checks + a live CI smoke (Node 3.3)
+## §8.19 · `perk doctor workflow` — static prereq checks + a live CI smoke
 
-The workflow-focused diagnostic twin: a Click **subgroup** on the `doctor` group (the reserved
-`invoked_subcommand` hook §8.6 left open). A dev/CI/supervisor surface, not an agent affordance. Bare
+The workflow-focused diagnostic twin: a Click **subgroup** on the `doctor` group (registered via
+the group's `invoked_subcommand` hook). A dev/CI/supervisor surface, not an agent affordance. Bare
 `perk doctor workflow` prints help; the two commands are `check` and `smoke-test [--wait]`. Both take
 `-v/--verbose` + `--json` (stable machine report on **stdout**; grouped human render to **stderr**).
 
@@ -3403,7 +3276,7 @@ Proves the genuinely CI-only prerequisites a static check cannot: that the manag
 **dispatchable**, the runner actually **starts a job**, and the secrets are **readable in the Actions
 context** (environment-protection rules can hide an existing secret). It does **not** exercise the
 composite setup or the worker/model drive — the `smoke=true` short-circuit keeps
-it universal and ~0-cost. A future "full" smoke is out of scope.
+it universal and ~0-cost.
 
 Flow: `require_repo` + `require_github`; run `workflow_checks` (rendered like `check`). **Gate (refuse
 → exit 1):** if the `github-auth` check is not `ok` → `github_unauthed`; if
@@ -3421,11 +3294,10 @@ stays a pure doctor diagnostic. Without `--wait`: print the run URL, **exit 0**.
 `success` → exit 0; any other conclusion → exit 1; **timeout → `cancel_smoke` (best-effort
 self-cancel) + exit 0** (inconclusive, not unhealthy).
 
-### No `cleanup` command (deviation from erk)
+### No `cleanup` command
 
-erk's `doctor_workflow` ships `check`/`smoke-test`/`cleanup` because its smoke opens a one-shot PR.
 perk's smoke creates nothing durable, so a `cleanup` would be fiction — only `check` + `smoke-test`
-are built; `smoke-test --wait` self-cancels its own in-flight run on a poll timeout (the sole real
+exist; `smoke-test --wait` self-cancels its own in-flight run on a poll timeout (the sole real
 leftover).
 
 ### `--json` payloads (stdout, stable)
@@ -3446,12 +3318,11 @@ leftover).
 Error types + exits: `not_a_repo` → 2; `github_unauthed`, `runner_disabled`, `smoke_dispatch_failed`
 → 1.
 
-## §8.20 · The capstone supervisor loop (`perk objective run`, Node 3.4)
+## §8.20 · The capstone supervisor loop (`perk objective run`)
 
-The **scheduler** on top of the §8.13 runner/discovery substrate and the §8.17/§8.18 read/control
-siblings: a **deterministic, no-agentic-reasoning** supervisor that advances an active objective's
-backlog as far as is autonomously safe, then pauses at the human land gate. `perk objective run
-<NUMBER>` (alias `obj r`) is a supervisor surface (cli-vs-pi §3.2): `--json` → stdout, human text →
+The **scheduler** on the §8.13 runner/discovery substrate and the §8.17/§8.18 read/control
+siblings: a **deterministic, no-agentic-reasoning** supervisor surface (cli-vs-pi §3.2) —
+`perk objective run <NUMBER>` (alias `obj r`): `--json` → stdout, human text →
 stderr, stable exits (`0` ok · `1` invalid/op-failure · `2` not-a-repo), `fail`/`UserFacingCliError`
 with a stable `error_type`.
 
@@ -3459,7 +3330,8 @@ with a stable `error_type`.
 
 Per invocation the supervisor does **one** thing: it selects the next in-flight node and dispatches
 the correct **remote** agentic stage (`implement`/`address`), or it pauses at a draft-PR /
-awaiting-review / planning-required / completion boundary, then exits. It **never lands** — ready+merge
+awaiting-review / planning-required / completion boundary, then exits. It **never lands** (the
+one statement of the invariant) — ready+merge
 stays the human/interactive `/land`, and a node reaches `done` only via that path's
 `_reconcile_objective_on_land`, which this loop merely *observes* (a `MERGED` PR ⇒
 `merged_pending_reconcile`). Landing must not route through `launch_stage`: a local stage `os.execvpe`s
@@ -3478,8 +3350,10 @@ into interactive pi and never returns, which would destroy the loop.
 
 ### Single-pass control flow (deterministic)
 
-1. `require_repo` + `require_config`; `require_github` unless `--dry-run`.
-2. `state = github.get_objective(NUMBER)`; `None` → `fail(objective_not_found)`.
+1. `require_repo`; config via `load_main_config(main_repo_root(...))`; `require_github` unless
+   `--dry-run`.
+2. `state = resolve_objective_store(repo_root).get_objective(objective_id=NUMBER)`; `None` →
+   `fail(objective_not_found)`.
 3. **Cumulative budget report** (always, before any action): enumerate
    `cache.list_dispatch_records`, keep records whose `plan_ref.objective_id` canonicalizes
    (`str(...).lstrip("#")`) to NUMBER, sum each `run_report.read_outcome` `budget`
@@ -3489,13 +3363,14 @@ into interactive pi and never returns, which would destroy the loop.
    enumeration — a fresh clone undercounts (stated, not silently implied).
 4. **Active-run gate** (skipped under `--dry-run`) — **discovery-first**, so the gate works from a
    fresh clone (no double-dispatch on a machine that never dispatched): one
-   `discovery.discover_runs(root, limit=100)` enumeration (replacing per-record `observe`s),
+   `discovery.discover_runs(root, limit=100)` enumeration (no per-record `observe`s),
    keeping `queued`/`in_progress` runs whose parsed plan id (`#`-stripped) matches one of the
    objective's **node plan backlinks** (`node.pr`, computed from the already-fetched objective
    state — dispatch always happens after plan save, so the backlink exists for any dispatched
    node plan); the newest match gates. On a discovery `RunnerError`/`GitHubError`: one stderr
-   note + the **legacy local-record loop** (a kept record with a `run_handle` whose fail-soft
-   `observe` returns `queued`/`in_progress`, newest-first) — offline/degraded behavior unchanged.
+   note + the **fail-soft local-record fallback** (a kept record with a `run_handle` whose
+   fail-soft `observe` returns `queued`/`in_progress`, newest-first) — the offline/degraded
+   view.
    Not `--wait` → `awaiting_run`, exit 0. `--wait` → poll the (possibly reconstructed) handle to
    `completed` (or timeout → `awaiting_run` + `timed_out:true`, exit 0), then **re-fetch the
    objective state + rebuild the graph** (the settled run may have advanced GitHub) and re-evaluate
@@ -3504,9 +3379,9 @@ into interactive pi and never returns, which would destroy the loop.
 
    | kind | condition | action | effect |
    |------|-----------|--------|--------|
-   | `complete` | every node terminal | `completed` | print the `(node→status→pr)` audit; unless `--dry-run`, `github.close_issue(NUMBER)` |
+   | `complete` | every node terminal | `completed` | print the `(node→status→pr)` audit; unless `--dry-run`, `store.close_objective(objective_id=NUMBER)` |
    | `blocked` | every remaining node blocked | `blocked` | pause |
-   | `plannable` | a resumable node is ready | `plan_required` | emit node + remediation `perk objective-plan <NUMBER> --node <id>` (the supervisor cannot plan — `objective-plan` is `cold_remote:false`) |
+   | `plannable` | a resumable node is ready | `plan_required` | emit node + remediation `perk objective plan <NUMBER> --node <id>` (the supervisor cannot plan — `objective-plan` is `cold_remote:false`) |
    | `in_flight` | a committed plan exists | (stage resolution ↓) | |
 
 ### In-flight stage resolution (`get_plan(node.pr)` → the shared §8.37 classifier)
@@ -3530,15 +3405,16 @@ implement is **complete** — never re-dispatch `implement` from a draft.
 
 ### The `needs_address` predicate
 
-Moved to the shared classifier module — spec in §8.37 (canonical import path `perk.run.resume`).
+`perk.run.resume` defines `needs_address` (§8.37).
 
 ### Remote dispatch mechanics
 
 `_dispatch_stage_remote` reconstructs the node's plan-ref via `resume.reconstruct_plan_ref` (preserving
-`objective_id` so the eventual human land reconciles the node), writes it to the **repo-root**
-`cache.plan-ref` (the seam `_drive_remote_target` reads — both `objective-plan`/`run` are `worktree:
-none`, so repo-root write ↔ repo-root read agree), then drives `launch.launch_stage(..., remote=...)`
-— capturing its machine output so the supervisor emits a **single** unified payload, surfacing the
+`objective_id` so the eventual human land reconciles the node), writes the **main-root** selector
+as a convenience, and passes the reconstructed ref **directly** into
+`launch.launch_stage(..., remote=...)` — the dispatch never re-reads the mutable selector
+(`_drive_remote_target` reads the selector only when no ref is supplied) — capturing its machine
+output so the supervisor emits a **single** unified payload, surfacing the
 minted `run_id`. Only `implement`/`address` (the `cold_remote:true` stages) are dispatchable here
 (`Ensure.invariant` guard; `resolve_target` is belt-and-suspenders).
 
@@ -3552,7 +3428,7 @@ timeout is **inconclusive, not unhealthy** (`awaiting_run` + `timed_out:true`, e
 
 ```jsonc
 { "success": true, "error_type": null,
-  "objective": "<id>",           // opaque string objective id (§8.21; Node 4.1)
+  "objective": "<id>",           // opaque string objective id (§8.21)
   "budget": { "runs": 0, "turns": 0, "tokens": 0, "elapsed_ms": 0 },
   "action": "dispatched" | "ready_for_review" | "awaiting_review" | "awaiting_run"
           | "plan_required" | "blocked" | "completed" | "merged_pending_reconcile" | "pr_closed"
@@ -3583,8 +3459,8 @@ records the handoff, never auto-run), and the shared `blockers` rows. Every stac
 `blockers` payload list of §8.46 `GateBlockerOut` rows (technical rows on the veto/technical
 arms, handoff rows on the handoff arm). The `no_candidate` graph fallback is gated too: when the
 graph classification yields plannable, the gate runs over the stacked train before
-`plan_required` (structurally unreachable today — an all-published train has no plannable graph
-node — but the promise holds by construction). `in_flight` dispatch stays ungated: an existing
+`plan_required` (an all-published train has no plannable graph
+node, so the arm is defensive — the promise holds by construction). `in_flight` dispatch stays ungated: an existing
 branch/worktree resumes by construction; a fresh start refuses inside execution Prepare.
 
 Error types + exits: `not_a_repo` → 2; `objective_not_found`, `github_error`, `dispatch_failed`
@@ -3594,19 +3470,19 @@ Error types + exits: `not_a_repo` → 2; `objective_not_found`, `github_error`, 
 
 ---
 
-## §8.21 · The issue-backend selection (`[issues]`, Objective #252 Nodes 1.3 + 2.4)
+## §8.21 · The issue-backend selection (`[issues]`)
 
 The issue-tracking tier (plan/learn/objective issues — `perk/backends/issue_backend.py`'s `IssueBackend`
-contract, Node 1.1; the `GitHubIssueBackend` adapter in `perk/backends/github/backend.py` + the resolver in `perk/backends/resolve.py`, Node 1.2;
-the `LinearIssueBackend` over the `perk/backends/linear/client.py` GraphQL client, Nodes 2.1–2.3, wired live in
-Node 2.4) is **backend-selectable** via one committed config table:
+contract; the `GitHubIssueBackend` adapter in `perk/backends/github/backend.py` + the resolver in `perk/backends/resolve.py`;
+the `LinearIssueBackend` over the `perk/backends/linear/client.py` GraphQL client) is
+**backend-selectable** via one committed config table:
 
-> **Note (Objective #548).** Objective storage is now its **own seam** — the objective-storage tier
+> **Note.** Objective storage is its **own seam** — the objective-storage tier
 > (`ObjectiveStore`, §8.24), distinct from the issue-tracking tier described here. It shares this
 > `[issues]` selection (`resolve_objective_store_id` re-exports `resolve_issue_backend_id` — an
 > objective and its plan/learn issues share one tracker), so the "plan/learn/objective issues" and
-> objective-id language throughout this section still resolves the same backend; the two tiers are
-> just no longer one Protocol.
+> objective-id language throughout this section still resolves the same backend; the two tiers
+> are separate Protocols.
 
 ```toml
 [issues]
@@ -3658,12 +3534,12 @@ requirement is missing: no committed `[issues] team` → remediation pointing at
 no/blank `LINEAR_API_KEY` → the hinted message from `client_from_env`. Construction is lazy (no
 network): the team key is bound and resolved to its UUID on first use.
 
-**The TS mirror is fail-safe and dormant** (`extension/substrate/config.ts::resolveIssueBackendId`):
+**The TS mirror is fail-safe** (`extension/substrate/config.ts::resolveIssueBackendId`):
 returns `"github" | "linear"`, falling back to `"github"` on absence/unknown value/any read or
-parse error — safe because the TS plane only *renders prompts*, never writes canonical issues. No
-TS consumer exists at this node; Node 3.1 (backend-aware prompt rendering) consumes it (mirrors
-the providers.ts Node-2.1 dormant-loader precedent). `PerkConfig` carries no `issues` field — an
-overlay-read shape would contradict the committed-only rule.
+parse error — safe because the TS plane only *renders prompts*, never writes canonical issues.
+Its consumers are `extension/doors/ready.ts`, `extension/factories/objectivePlan.ts`, and
+`extension/doors/objectiveStack.ts` (backend-aware prompt rendering). `PerkConfig` carries no
+`issues` field — an overlay-read shape would contradict the committed-only rule.
 
 **The `backend_id` discipline + the stamping rule.** The `IssueBackend` Protocol carries
 `backend_id: str` — the backend's id in the `[issues] backend` vocabulary, stamped **verbatim**
@@ -3711,7 +3587,7 @@ init/doctor probe — report-shaped, never raises; phases short-circuit auth →
   `unstarted/started/completed/canceled`, derived in lockstep); warn `workflow states not
   verified` on a probe error.
 
-The last two are the **project-backed objective readiness** probe (Node 4.2): both run **only
+The last two are the **project-backed objective readiness** probe: both run **only
 after** `linear-auth` + `linear-team` succeed, via a separate
 `linear.check_project_readiness(client, team_key)` call (report-shaped, never raises;
 reuses the client's cached team id — no auth/team re-probe). Non-fatal like the rest of the group.
@@ -3747,13 +3623,17 @@ unpinned plain-string entry is appended (bundled `linear` skill accepted wholesa
 unsupported). A malformed committed TOML is a **no-op** (never a destructive removal on an
 unreadable config — the provider-convergence posture); surfacing defers to the config check.
 
-**Backend-aware prompt rendering (Node 3.1).** Every plan-read prompt site branches on
+**Backend-aware prompt rendering.** Every plan-read prompt site branches on
 `cache.plan-ref.provider` via the per-plane helpers `perk/run/launch/prompts.py::_plan_read_instruction` and
 `extension/doors/lifecycleGates.ts::planReadInstruction` — byte-parity across planes, asserted by the
 paired parity suites (`tests/test_worker_prompt_parity.py` + `extension/worker/worker.test.ts`). The
-`linear` arm references the pi-mono-linear `linear_get_issue` + `linear_list_comments` tools (the
-plan body is the first comment — true under every backend's `create_plan_issue`) with an
-`open <url>` fallback; unknown providers keep the plain `open <url>` arm. Learn prompts
+`linear` arm references the pi-mono-linear `linear_get_issue` + `linear_list_comments` tools with
+an `open <url>` fallback; unknown providers keep the plain `open <url>` arm. The Linear plan-body
+rule is a **marker-bearing candidate search**, not a privileged first comment: `get_plan_body`
+scans the issue description, then every comment, returning the first text containing a decodable
+plan-body block; `update_plan_issue`/`adopt_issue_as_plan` find a marker-bearing comment or
+create one — on an adopted issue with prior comments the created plan-body comment need not be
+first (`LinearIssueBackend`). Learn prompts
 (`_learn_prompt`, `extension/doors/learn.ts::learnGuidance`) keep the `gh pr list --head plan-<pr_id>
 --state merged` merged-PR derivation under every backend — PRs are GitHub-universal.
 `extension/substrate/toolGating.ts::READ_ONLY_TOOLS` allowlists the 19 read-only `linear_*` tool names
@@ -3761,10 +3641,9 @@ unconditionally (foreign names are inert when the package is absent); the mutati
 tools (`linear_create_issue`, `linear_update_issue`, `linear_create_comment`, the two
 `linear_upload_file*`, `linear_configure_auth`) are deliberately excluded. The perk-implement and
 perk-learn skills carry per-backend `backends/` reference directories (`github`, `linear`),
-delivered by the whole-directory skills sync. Historical Status notes elsewhere quoting
-`gh issue view` (e.g. P1.T4c) are records — left untouched.
+delivered by the whole-directory skills sync.
 
-The **objective seed prompts** are backend-aware the same way (Node 4.1). The objective-plan cold
+The **objective seed prompts** are backend-aware the same way. The objective-plan cold
 seed (`perk/cli/commands/objective/plan_cmd.py::_seed_prompt`) and the warm guidance
 (`extension/factories/objectivePlan.ts::factoryGuidance` / `reconcileGuidance`) branch on the
 objective backend via the seam-rendered `objective_read_instruction` /
@@ -3787,7 +3666,7 @@ failure / missing url → the indirect form). The cold plane reads `store.backen
 `gh pr diff`/`gh pr view` is unchanged — PRs are GitHub-universal). `objective author` is excluded
 (no objective/Project exists at author time).
 
-**Opaque string issue ids at every machine boundary (Node 4.1).** Issue ids (plan / learn /
+**Opaque string issue ids at every machine boundary.** Issue ids (plan / learn /
 objective) are **opaque strings** end-to-end — GitHub's are numeric strings (`"42"`), Linear's
 are the human identifier (`"ENG-123"`; the verified mutations — `issueUpdate`/`commentCreate` —
 accept the identifier directly, live-verified at the Mode 2 smoke gate, so no identifier→UUID
@@ -3803,7 +3682,8 @@ everywhere — PRs are GitHub-universal. Concretely:
   and `learn.closed` carries string ids; `objective reconcile`'s `objective`/`comment_id` are
   strings; `learn docs --gather`'s `learn_numbers` carries string ids. TS decoders
   (`planSave.ts`/`learn.ts`/`land.ts`/`objectiveSave.ts`/`learnFactory.ts`) are lockstep-strict on
-  the string shapes.
+  the string shapes, with one tolerance: `learnFactory.ts::decodeGather` accepts legacy numeric
+  `learn_numbers` and normalizes them to strings.
 - CLI plan/objective arguments parse through the shared opaque-id validators
   (`plan_selection.parse_plan_id` / `objective/shared.parse_objective_id`): strip `#`/whitespace;
   reject only empty or worktree-unsafe ids (`/`, `.`, `..`) — no int parse, and `parse_plan_id`
@@ -3824,16 +3704,17 @@ everywhere — PRs are GitHub-universal. Concretely:
 - The live validation surface is `tests/test_linear_lifecycle.py` (the stateful
   `FakeLinearWorkspace` offline suite) plus the manual live smoke gate runbook.
 
-## §8.22 · Linear agent-session emission (Objective #252, Node 5.1 — stretch)
+## §8.22 · Linear agent-session emission
 
 An **opt-in, fail-soft, one-way** mirror of an implement run into Linear's Agents UI
 (`perk/backends/linear/agent.py` — Python-plane only; the warm TS doors delegate to the Python hooks, so
 there is no TS twin).
 
 - **The gate** (checked inside every emitter): the worktree's stamped
-  `cache.plan-ref.provider == "linear"` (the stamped provider, never config — the Node 3.1 rule)
-  **and** a non-empty **`LINEAR_AGENT_TOKEN`** env var. Without the token, behavior is
-  byte-identical to today (dormant by default; "additive only").
+  `cache.plan-ref.provider == "linear"` (the stamped provider, never config — the §8.21
+  stamping rule)
+  **and** a non-empty **`LINEAR_AGENT_TOKEN`** env var. Without the token, emission remains
+  disabled and additive-only.
 - **`LINEAR_AGENT_TOKEN` env contract**: an OAuth `actor=app` access token from a user-created
   Linear agent application — a personal `LINEAR_API_KEY` is rejected by Linear's agent API. Sent
   in the OAuth `Authorization: Bearer <token>` header form (`LinearClient(bearer=True)`;
@@ -3863,31 +3744,28 @@ there is no TS twin).
   never changes the
   host command's result/exit code/`--json` payload; it prints one loud-but-non-fatal stderr
   note (`perk linear-agent: <what> skipped (non-fatal): <exc>`). A programming error propagates.
-- **Known limits + deferrals** (flagged in the module docstring): GraphQL field signatures are
+- **Known limits:** GraphQL field signatures are
   substring-pinned offline and verified live only at the smoke gate; Linear marks sessions
-  `stale` ~30 min after the last activity (accepted, not mitigated); `perk address` emission,
-  the `agentSessionUpdate.plan` checklist, elicitation activities, retry/backoff, and any
-  webhook receiver (perk never *responds* to Linear prompts) are all deferred.
+  `stale` ~30 min after the last activity (accepted, not mitigated); unsupported: `perk address`
+  emission, the `agentSessionUpdate.plan` checklist, elicitation activities, retry/backoff, and
+  any webhook receiver — perk never *responds* to Linear prompts.
 
-## §8.23 · The file-first plan contract (the three plan backends; Objective #339)
+## §8.23 · The file-first plan contract (the three plan backends)
 
-A consolidation-by-reference of the file-first plan pipeline Phase 1–2 of Objective #339 built.
-The normative detail lives in §8.1 ("File-first plan save" + the `plan_draft` carve-out), §8.3
-(the `approvalSave` seam + the warm claim carrier), and §8.10 (the interactive save discipline) —
-with the plannotator/Node 2.5/2.6 Status blocks in contracts-history.md §8.10; this section is the
-one-stop current shape.
+A compact index of the file-first plan pipeline. The normative detail lives in §8.1 (the draft
+artifacts + "File-first plan save"), §8.3 (the `approvalSave` seam + the warm claim carrier),
+§8.57 (review-first carrier ownership), and §8.10 (provider deltas + the interactive save
+discipline); this section keeps the unique cross-cutting rules.
 
-- **The artifact.** The working plan lives in the session data dir as `plan-draft.md`
-  (`PLAN_DRAFT_ARTIFACT`, `extension/factories/planDraft.ts`), written **only** by the `plan_draft` tool
-  through the session-data accessor seam (`writeSessionArtifact`: file + provenance pointer in one
-  gesture), and consumable **only** via its validated provenance pointer
-  (`readSessionArtifact` — digest-validated, fail-open) (→ §8.1).
+- **The artifact + save resolution → §8.1.** The working plan lives in the session data dir as
+  `plan-draft.md`, written only by `plan_draft` through the accessor seam and consumable only
+  via its validated provenance pointer.
 - **The two resolution chains + the asymmetry law.** **Save** surfaces resolve
   artifact → `plan` param → transcript scrape (the universal fail-open last resort)
   (`resolvePlanSource`, → §8.1 "File-first plan save"). **Review** surfaces resolve
   artifact → param **only** — the transcript tier is excluded because an approval auto-saves the
-  reviewed bytes, and scraped conversation bytes must never be what gets approved (→ §8.10's
-  plannotator Status block).
+  reviewed bytes, and scraped conversation bytes must never be what gets approved. The browser
+  review doors tighten further to **validated artifact only**.
 - **The review door + the approval seam.** `plan_review` (in `READ_ONLY_TOOLS`; backend-neutral,
   `extension/factories/planReview.ts`) dispatches: plannotator-selected → the event-bus bridge; **any**
   other selection → the first-party `ctx.ui.editor` review. APPROVED (either backend) runs
@@ -3896,41 +3774,17 @@ one-stop current shape.
   optional title argument. Every `plan_review` arm carries the universal `details.ok` discriminant
   (`ok:false` + `error`/`error_type` on unavailable / save-failed / bad_input / no_plan /
   no_objective_draft; `ok:true` on verdicts and the sanctioned fail-open skips), so `tool_outcome`
-  run events classify it via `details.ok` rather than the `!isError` fallback.
-
-  **The launch chooser (the plannotator arms' wave opt-in).** The moment `plan_review`
-  dispatches to a plannotator arm on an **eligible** round — the injected `WaveLaunch` deps
-  present (the plannotator presence probe + the two door open cores, composed at the
-  `registerPlanReview` call site in `extension/index.ts`; the factory imports nothing from door
-  modules), plannotator loaded, and the review source a **validated draft artifact** (plan arm:
-  `source === "plan-draft"`; objective arm: a non-null raw `objective-draft.json` baseline
-  captured **before** the validated read — the door's fail-closed stale-guard ordering) — an
-  in-TUI chooser is shown BEFORE anything launches: "Browser review + reviewer wave" vs
-  "Browser review only". Shown **every** eligible round (no config key); Esc/dismiss selects the
-  plain flavor (the chooser picks a flavor, never cancels the review); **abort outranks Esc,
-  every dialog result, and the awaited opener** (`signal?.aborted` is checked at entry,
-  re-checked immediately after each awaited dialog before interpreting it, and re-checked after
-  the awaited open core — an interrupted turn never reports a launched wave). The wave choice collects an optional **trimmed**
-  custom review angle (Esc/blank ⇒ none) and delegates to the door-shared open core
-  (`openPlanReviewSurface` / `openObjectiveReviewSurface`), returning the **non-terminating**
-  `details.status: "wave_launched"` result (`subject: "objective"` on the objective arm)
-  carrying the door's guidance **verbatim** — the model launches the wave in the same turn, and
-  the human's browser decision routes back through the door's background decision task (stale
-  guards, degrade token, untrusted-feedback delimiting — all the door's existing code, shared
-  not duplicated). A **synchronous port-pick failure** (a null core return, loudly reported
-  there) falls **open** to the plain blocking review in the same call; an **asynchronous**
-  readiness degrade follows the door's existing loud degrade path and recovers through the next
-  `plan_review` round's chooser ("Browser review only" is one keystroke away — no forced-wave
-  mode exists). Ineligible rounds — a param-tier source, plannotator absent, no injected deps,
-  or the gist arm (no gist wave door exists) — keep today's plain blocking review silently.
+  run events classify it via `details.ok` rather than the `!isError` fallback. On an eligible
+  plannotator-arm round `plan_review` offers an in-TUI launch chooser ("Browser review + reviewer
+  wave" vs "Browser review only"); an ineligible round keeps the plain blocking review.
 - **The three backends.** All three speak review-first
-  (`plan_draft` → `plan_review` → auto-save on approval):
+  (`plan_draft` → `plan_review` → auto-save on approval); provider deltas are §8.10:
 
   | provider id | authoring context | review surface | fail-open arm |
   |---|---|---|---|
   | `perk-plan` | `PLAN_AUTHORING_CONTEXT` | first-party in-TUI review | present + `/plan-save` |
   | `plannotator-plan` | `PLAN_ADAPTER_PLANNOTATOR_CONTEXT` | browser bridge | present + `/plan-save` |
-  | `tombell-plan` | `PLAN_ADAPTER_TOMBELL_CONTEXT` (conditioned injection, Node 2.6) | first-party in-TUI review | present + `/plan-save` (incl. tombell's own interactive `/plan` `setActiveTools` restriction arm) |
+  | `tombell-plan` | `PLAN_ADAPTER_TOMBELL_CONTEXT` (conditioned injection) | first-party in-TUI review | present + `/plan-save` (incl. tombell's own interactive `/plan` `setActiveTools` restriction arm) |
 
   Under the plannotator selection the authoring context is **flavor-dispatched per stage** (one
   customType, three contents — §8.42's per-flavor marker dedup): the plan flavor by default, the
@@ -3940,22 +3794,19 @@ one-stop current shape.
 - **Plannotator "Direct Edits" (browser edits of the reviewed document).** Plannotator's
   plan-review browser lets the reviewer edit the reviewed document directly; the edits arrive as
   PROSE inside the existing `feedback` string, never a new envelope field — a `# Direct Edits`
-  section (heading + preamble + a ```` ```diff ```` fence containing a jsdiff
-  `createTwoFilesPatch(…, { context: 3 })` patch, `trimEnd()`'d, against the exact bytes perk
-  submitted), composed FIRST, with non-sentinel annotation feedback following after
-  `\n\n---\n\n` (format pin: plannotator `packages/editor/directEdits.ts`
-  `buildDirectEditsSection`/`composeFeedbackWithDirectEdits` @ v0.26.1 — prose, not a pinned
-  API). perk handles it asymmetrically per arm:
+  section (heading + preamble + a ```` ```diff ```` fence containing a unified patch against the
+  exact bytes perk submitted), composed first, with non-sentinel annotation feedback following.
+  The Direct Edits payload is a **prose compatibility format**; parse/apply/write-back failures
+  use the verbatim-save fallback with a warning. perk handles it asymmetrically per arm:
   - **Plan arm, APPROVE:** mechanical apply — strict extraction (`extractDirectEdits`,
     `extension/adapters/planAdapterPlannotator.ts`) → strict clean-apply (`applyUnifiedDiff`,
     `extension/substrate/unifiedDiff.ts`, a vendored zero-runtime-dep applier; null on any
     anomaly) → `writePlanDraft` write-back (reviewed bytes == artifact bytes == saved bytes) →
     save the EDITED bytes with `details.edited: true` and the annotation remainder as the only
-    surviving feedback. The **fail-open ladder**: no section → today's path byte-stable; a
+    surviving feedback. The **fail-open ladder**: no section → the plain save; a
     heading that cannot be parsed / applied / written back → the verbatim save plus a loud
     warning in the approved text and `details.direct_edits_applied: false` (the diff stays in
-    the surfaced feedback for a manual follow-up). Worst-case upstream format drift degrades to
-    exactly the pre-Direct-Edits behavior.
+    the surfaced feedback for a manual follow-up).
   - **Objective arm, APPROVE with a Direct Edits section:** NO save — the save seam re-reads the
     STRUCTURED draft, so rendered-markdown edits (roadmap-table rows included) cannot be folded
     back mechanically. The arm returns a NON-terminating revise round (`details.status:
@@ -3971,164 +3822,31 @@ one-stop current shape.
 
   The plan arm's mechanical apply is the exported `applyPlannotatorDirectEdits` helper
   (`extension/factories/planReview.ts`) — ONE apply path shared byte-identically by
-  `executePlanReview`'s plannotator arm and the `/plan-review-browser` door below.
+  `executePlanReview`'s plannotator arm and the `/plan-review-browser` door.
 
-- **The `/plan-review-browser` warm door** (`extension/doors/planReviewBrowser.ts`): the
-  summonable streaming draft review — from a plan-authoring session the human summons a
-  plannotator **plan-review** browser on the working plan draft, a **draft-reviewer wave**
-  streams phrase-anchored findings into it, and the browser decision routes through the
-  existing seams. Plannotator always, no provider dispatch (the surface-named command IS the
-  selection — the `/pr-review-browser` precedent); only the plannotator **presence** probe
-  gates it. The door registers no tools of its own.
-  - **Args:** `/plan-review-browser [custom angle text]` — the entire trimmed arg string is the
-    optional custom-angle definition (empty ⇒ no custom lane; no parse-failure arm).
-  - **Entry gates, in order (nothing executed on refusal, each a loud error):** headless
-    (`!ctx.hasUI` — the browser surface and the human are constitutive) → the plannotator
-    presence probe (the same refusal naming the fix) → the stage gate — the branch-LWW `stage`
-    must be one of `{plan, save, objective-plan}` (the three registry stages whose
-    `STAGE_TOOLS` carry `plan_draft`) → the draft resolve, **artifact ONLY**: the validated
-    `plan-draft.md` artifact (`readSessionArtifact`); null or blank → a loud `plan_draft`
-    redirect. No param tier, no transcript tier — the review-surface law tightened to
-    drafts-only (an approval auto-saves the reviewed bytes).
-  - **The deterministic plan-review open:** `startPlannotatorPlanReview`
-    (`plannotatorHandoff.ts`) — the plan flavor of the preset-`PLANNOTATOR_PORT` browser-open
-    core: free-port pick → env preset → the `plan-review` bridge request launched while the
-    var is set (plannotator binds the plan server before the handshake respond) → the
-    `GET /api/plan` readiness poll (plan-server-only — flavor-unique, can never false-positive
-    against a code-review server) → the prior env value ALWAYS restored when the poll ends. The
-    URL is deterministic the moment the port is picked, so the door primes its companions and
-    injects the guidance immediately, then ends its turn.
-  - **The shared open core:** the door's whole open path is the exported guidance-RETURNING
-    core `openPlanReviewSurface` (start the browser → prime both surfaces → the background
-    readiness + decision tasks → return the composed guidance string, or null on the loudly
-    reported port-pick failure); the command handler is a thin `sendUserMessage` wrapper, and
-    `plan_review`'s wave arm consumes the SAME core — one open path, byte-identical semantics
-    (the `applyPlannotatorDirectEdits` sharing precedent). The wave-arm guidance carries the
-    same `command:plan-review-browser` skill-binding suffix.
-  - **The dual prime/clear lifecycle:** the moment the port is picked the door primes BOTH
-    companion surfaces — `primeAnnotationSurface({mode: "plan", url})` (the `push_annotations`
-    plan mode, §8.4) and `primeDraftReviewContext({draftType: "plan", draft, custom?})`
-    (`extension/doors/draftReviewWaveTools.ts` — priming resets the pending-wave slot: a new
-    browser session supersedes everything). BOTH are cleared when the bridge settles AND on the
-    readiness-degrade arm (idempotent), so a late push refuses `no_surface` and a late wave
-    start refuses `no_draft_context`.
-  - **The draft wave (the `start_draft_review_wave`/`collect_draft_review_wave` tool pair over
-    `extension/waves/draftReviewWave.ts`):** the wave's inputs are **door-primed module
-    state**, never tool params — `start_draft_review_wave` takes ONLY `{angles}` (2–3 unique
-    slugs of `grounding`/`scope`/`decision-completeness`/`risk`, **none mandatory** — model
-    judgment) and refuses unprimed, so the model can never substitute a transcript/arbitrary
-    draft or invent a custom lane: reviewed bytes == browsed bytes == wave bytes by
-    construction. The **custom lane is the draft doors' user-input channel** (no `directive`
-    param exists), riding the primed context automatically as its own `custom` lane; the
-    surface handle is structurally unrepresentable in the wave (no URL parameter exists).
-    After selected lanes and the optional custom lane, the tool appends exactly one **required
-    automatic** final `ponytail` lane outside both menus/caps. It uses the same
-    `perk.draft-reviewer` model,
-    timeout, and report schema with invocation-private `skill: "ponytail"` source-bound by the
-    agent's exact package `skillPath`; package/file/frontmatter preflight failure omits only that
-    child, records non-retryable `skill-unavailable`, and leaves it in the requested manifest but
-    uncovered, with no same-name fallback. The child's first action rechecks the exact source;
-    post-preflight instability therefore yields no report and remains incomplete under the
-    residual source-race posture above. **Zero retries** — honest incompleteness surfaced to
-    the human (the uncovered lane(s) named, never papered over); a pending wave makes a second
-    start refuse `wave_active`; `collect_draft_review_wave` mirrors the PR pair (`no_wave` /
-    grace-raced `wave_running` with the pending wave retained / the typed aggregate `{complete,
-    covered, reports, failures}`, `covered` ordered across selected + optional custom + Ponytail).
-    The `[models.subagents] draft-reviewer` override is resolved by the tool at execute time (the
-    door reads no config); the per-call
-    signal is deliberately not threaded (the wave outlives the call; the module timeout is the
-    orphan insurance). Findings are the plan-mode `PlanFinding` shape (`{phrase, severity,
-    confidence, body}`), pushed phrase-byte-exact via `push_annotations` (streamed batches
-    provisional; per-lane finals ride `replace: true`).
-  - **Decision routing (the background decision task — the wait is open-ended, exactly the
-    model-called `plan_review` bridge semantics; a turn abort settles `aborted`):**
-    **APPROVE** → the **stale-draft guard** first (the browser wait is open-ended and the
-    session stays usable, so a concurrent `plan_draft` write can land meanwhile: the approval
-    proceeds only while the live artifact still carries the exact bytes captured at open —
-    mismatch/missing → a loud stale refusal, nothing saved, gate untouched; best-effort: it
-    closes the human-scale race, the check-to-save window is accepted) → the shared
-    `applyPlannotatorDirectEdits` mechanical apply (unchanged) → `approvalSave` (claim-carrier
-    recovery rides `approvalSave`→`savePlan` unchanged) → the `approvedSaveResult` composition
-    reported to the human (info on saved; a failed save is loud, leaves the gate read-only,
-    and names the `/plan-save` failsafe) AND injected to the model (idle → immediate,
-    streaming → followUp). **DENY** → model-mediated revise round: the feedback (Direct Edits
-    diff included) injected verbatim driving a `plan_draft` rewrite; the human re-runs
-    `/plan-review-browser` (or the model calls `plan_review`) for the next round — no auto
-    re-open. **Injected feedback is delimited untrusted DATA** on both arms
-    (`<untrusted_reviewer_feedback>` + a DATA-not-instructions note): browser feedback can
-    carry machine-generated annotation text (the wave's `perk:*` findings returning), and it
-    must never read as instructions after the gate may have come off.
-    **Unavailable/timeout** → the loud degrade: an error report plus a degrade notice injected
-    to the model (surface the wave's findings in-session; both surfaces cleared; the human
-    falls back to `plan_review`/`/plan-save`) — AND the degrade **invalidates the decision
-    task** (a shared door-session token): a bridge decision arriving after a degrade is
-    ignored loudly (a warning naming the ignored decision), never routed into a stale or
-    duplicate save.
-  - **Accepted edges (noted, not engineered around):** the concurrent double-open stale-clear
-    (a second `/plan-review-browser` re-primes; the first bridge's later settle clears the
-    second session's surfaces — the `/pr-review-browser` posture) and the early human decision
-    mid-wave (authoritative — the save proceeds; the cleared surface makes late pushes refuse
-    `no_surface`; a still-pending wave stays collectable).
-  - **Binding:** `command:plan-review-browser` → `perk-plan-review-browser` (nudge, §8.9),
-    delivered on the guidance injection.
+- **The two draft-review browser doors** (`/plan-review-browser` /
+  `/objective-review-browser`): the summonable streaming draft reviews — a plannotator
+  plan-review browser on the working draft (plan: the `plan-draft.md` bytes; objective: the
+  RENDERED markdown of the validated `objective-draft.json`, never raw JSON), a
+  **draft-reviewer wave** (`start_draft_review_wave`/`collect_draft_review_wave` over
+  `extension/waves/draftReviewWave.ts`) streaming phrase-anchored findings into it via
+  `push_annotations` (plan mode), and the browser decision routed through the existing
+  approval seams — the objective APPROVE arm applies the Direct-Edits carve-out above (a
+  revise round, nothing saved), and both doors save only when the live artifact still carries
+  the exact bytes captured at open (the stale guard). Door mechanics — the launch chooser,
+  port/readiness handling, wave lifecycle, abort ordering, stale guards, prime/clear
+  lifecycle, and the accepted concurrency behavior — live in the owning modules:
+  `extension/doors/planReviewBrowser.ts` + `extension/doors/objectiveReviewBrowser.ts` (over
+  `plannotatorHandoff.ts` + `draftReviewWaveTools.ts`). Bindings:
+  `command:plan-review-browser` → `perk-plan-review-browser`;
+  `command:objective-review-browser` → `perk-objective-review-browser` (nudge, §8.9).
 
-- **The `/objective-review-browser` warm door** (`extension/doors/objectiveReviewBrowser.ts`):
-  the objective twin of `/plan-review-browser` — from an objective-authoring session the human
-  summons a plannotator **plan-review** browser on the **rendered** working objective draft
-  (prose + the `**Delivery:**` line + the roadmap table), a **draft-reviewer wave** streams
-  phrase-anchored findings into it, and the browser decision routes through the existing
-  objective seams. Plannotator always, presence-probe-gated, no tools of its own — the same
-  door shape throughout, with the objective differences below.
-  - **Args:** `/objective-review-browser [custom angle text]` — the entire trimmed arg string
-    is the optional custom-angle definition (empty ⇒ no custom lane; no parse-failure arm).
-  - **Entry gates, in order (nothing executed on refusal, each a loud error):** headless
-    (`!ctx.hasUI`) → the plannotator presence probe (the same refusal naming the fix) → the
-    stage gate — the branch-LWW `stage` must be one of `{objective-author, objective-save}`
-    (the two registry stages whose `STAGE_TOOLS` carry `objective_draft`) → the draft resolve,
-    **validated artifact ONLY**: the raw `objective-draft.json` artifact
-    (`readSessionArtifact`; null/blank → a loud `objective_draft` redirect), then
-    `readObjectiveDraft` (null — malformed/invalid — → a loud `objective_draft` rewrite
-    refusal) and `renderObjectiveDraft` — the reviewed bytes are the RENDERED markdown, never
-    raw JSON, never a param, never the transcript. The raw artifact bytes captured at open are
-    the stale guard's baseline (the micro-window between the two reads is the accepted
-    check-to-open race — the plan door's check-to-save posture).
-  - **The deterministic plan-review open:** the same `startPlannotatorPlanReview` engine — the
-    `plan-review` bridge action carries the rendered objective as `planContent` (arbitrary
-    markdown bytes; no plan-specific validation). The door primes its companions and injects
-    the guidance immediately, then ends its turn.
-  - **The shared open core:** identical — the exported guidance-RETURNING core
-    `openObjectiveReviewSurface` with the command handler as a thin `sendUserMessage` wrapper;
-    `plan_review`'s objective wave arm consumes the SAME core — one open path, byte-identical
-    semantics — and the wave-arm guidance carries the same `command:objective-review-browser`
-    skill-binding suffix.
-  - **The dual prime/clear lifecycle:** identical — `primeAnnotationSurface({mode: "plan",
-    url})` + `primeDraftReviewContext({draftType: "objective", draft: rendered, custom?})`;
-    both cleared when the bridge settles AND on the readiness-degrade arm (idempotent).
-  - **Decision routing:** **APPROVE** → the **Direct-Edits carve-out FIRST** (nothing is saved
-    on that arm, so the stale guard is irrelevant there): an approval whose feedback opens a
-    `# Direct Edits` heading is a NON-terminating revise round — rendered-markdown edits
-    cannot be folded back into the structured `{prose, roadmap}` artifact mechanically, so
-    NOTHING is saved, the gate stays untouched, and the model folds the diff in via
-    `objective_draft` then re-reviews to confirm (`applyPlannotatorDirectEdits` is plan-only —
-    it writes `plan-draft.md` — and never runs here); then the **stale guard on the RAW
-    structured artifact bytes** captured at open (the save-authoritative surface — it catches
-    render-invisible changes like `base` or a node `slug`/`pr`/`comment`): mismatch/missing →
-    a loud stale refusal, nothing saved, gate untouched; then `objectiveApprovalSave` (⇒ D1a
-    gate exit on an ok save; a failed save is loud, leaves the gate read-only, and names the
-    `/objective-save` failsafe). **DENY** → the model-mediated `objective_draft` revise round
-    (the feedback, Direct Edits diff included, injected verbatim; the human re-runs the door or
-    the model calls `plan_review`). **Injected feedback is delimited untrusted DATA** on both
-    arms (the `<untrusted_reviewer_feedback>` wrapper + the DATA note). The degrade
-    invalidation token, the loud post-degrade decision ignore, and the accepted edges (the
-    double-open stale-clear; the early decision mid-wave) all carry over unchanged.
-  - **Binding:** `command:objective-review-browser` → `perk-objective-review-browser` (nudge,
-    §8.9), delivered on the guidance injection.
-
-- **Link/`consumed_learn` recovery carriers.** Approval-triggered saves carry **no model params**;
-  the **cold** `handoff_extra` carrier (→ §8.2) and the **warm** `objective_node_claim` carrier
-  (→ §8.3) recover `objective_id`/`node_id` with identical semantics — fill both-or-neither,
-  explicit values win outright (even one — never mixed), fail-open (a malformed carrier never
-  blocks a save). `consumed_learn` rides the cold handoff (`_consumed_learn_from_handoff`).
+- **Link/`consumed_learn` recovery carriers → §8.3.** Approval-triggered saves carry **no model
+  params**; the **cold** `handoff_extra` carrier (→ §8.2) and the **warm**
+  `objective_node_claim` carrier (→ §8.3) recover `objective_id`/`node_id` with identical
+  semantics — fill both-or-neither, explicit values win outright (even one — never mixed),
+  fail-open (a malformed carrier never blocks a save). `consumed_learn` rides the cold handoff
+  (`_consumed_learn_from_handoff`).
 
 - **The implement-here exit (the no-save path).** A sanctioned, HUMAN-ONLY exit from plan
   authoring for changes too small to warrant the full lifecycle: the read-only gate comes off
@@ -4169,13 +3887,11 @@ one-stop current shape.
   after an approved save a still-live positioned planning session holds TWO plan identities —
   the cwd binding (the predecessor, read via `readPlanRef(ctx.cwd)`) and the just-saved child on
   `active_plan_ref` — so a door invocation there could act on the predecessor; planning sessions
-  never legitimately run lifecycle doors (at the repo root the same invocation fails confusingly
-  today). Fail-CLOSED on an unreadable branch: an unreadable state cannot prove the session is
-  not a positioned planning session whose cwd binding is the predecessor — the guard refuses
+  never legitimately run lifecycle doors (at the repo root the same invocation fails
+  ambiguously). Fail-CLOSED on an unreadable branch: an unreadable state cannot prove the session
+  is not a positioned planning session whose cwd binding is the predecessor — the guard refuses
   rather than letting the door act.
 
-§8.10's per-node Status blocks remain the historical record of how each piece landed; this section
-is the consolidated **current** contract.
 
 ## §8.24 · The objective-storage tier (the `ObjectiveStore` seam; Objective #548)
 
