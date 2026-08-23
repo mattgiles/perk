@@ -648,6 +648,16 @@ def merge_base(repo: Path, a: str, b: str) -> str | None:
     return out.strip() or None
 
 
+def diff_range(repo: Path, base: str, head: str) -> str:
+    """The unified two-dot diff ``git diff <base> <head>`` (the combined stack-diff read).
+
+    Callers pass an exact already-computed merge-base SHA as ``base``, so the two-dot form
+    equals the three-dot merge-base diff they want. A generous timeout — a many-layer
+    combined diff can be large. Raises ``GitError`` on failure.
+    """
+    return _run(["diff", base, head], cwd=repo, timeout=60)
+
+
 def is_ancestor(repo: Path, ancestor: str, head: str) -> bool | None:
     """Whether ``ancestor`` is reachable from ``head`` in one Git invocation.
 

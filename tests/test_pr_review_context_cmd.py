@@ -289,3 +289,144 @@ def test_resolve_plan_body_falls_back_to_resolver_for_linear_id(monkeypatch, tmp
     ).to_domain()
     assert _resolve_plan_body(tmp_path, ref) == "# Linear plan body"
     assert seen["issue_id"] == "ENG-123"
+
+
+# --------------------------------------------------------------------- the --stack arm
+
+
+def _stack_members():
+    from perk.cli.commands.pr.review.stack_resolve import ResolvedStack, StackMember
+
+    members = (
+        StackMember(
+            pr_number=1,
+            url="u/1",
+            head_ref="plan-301",
+            base_ref="main",
+            head_repo="me/repo",
+            node_id="1.1",
+            plan_id="301",
+        ),
+        StackMember(
+            pr_number=2,
+            url="u/2",
+            head_ref="feat-b",
+            base_ref="plan-301",
+            head_repo="me/repo",
+            node_id=None,
+            plan_id=None,
+        ),
+    )
+    return ResolvedStack(
+        members=members, base_ref="main", kind="chain", objective_id=None, notes=()
+    )
+
+
+def _member_context(pr_number: int, head: str, base: str) -> github.PrReviewContext:
+    return github.PrReviewContext(
+        pr_number=pr_number,
+        base_ref=base,
+        head_ref=head,
+        title=f"title {pr_number}",
+        body=f"body {pr_number}",
+        diff=f"diff {pr_number}",
+        plan_body=None,
+    )
+
+
+def test_stack_context_sections_and_combined_diff(git_repo_with_remote, monkeypatch):
+    import perk.cli.commands.pr.review_context_cmd as review_context_cmd
+    from perk.substrate import git as git_mod
+
+    clone, _remote, _advance = git_repo_with_remote
+    # Two stacked heads pushed to refs/pull/<n>/head; the combined diff must contain both.
+    subprocess.run(["git", "checkout", "-qb", "plan-301"], cwd=clone, check=True)
+    (clone / "a.txt").write_text("a\n", encoding="utf-8")
+    subprocess.run(["git", "add", "."], cwd=clone, check=True)
+    subprocess.run(["git", "commit", "-qm", "a"], cwd=clone, check=True)
+    subprocess.run(["git", "push", "-q", "origin", "HEAD:refs/pull/1/head"], cwd=clone, check=True)
+    subprocess.run(["git", "checkout", "-qb", "feat-b"], cwd=clone, check=True)
+    (clone / "b.txt").write_text("b\n", encoding="utf-8")
+    subprocess.run(["git", "add", "."], cwd=clone, check=True)
+    subprocess.run(["git", "commit", "-qm", "b"], cwd=clone, check=True)
+    subprocess.run(["git", "push", "-q", "origin", "HEAD:refs/pull/2/head"], cwd=clone, check=True)
+    subprocess.run(["git", "checkout", "-q", "main"], cwd=clone, check=True)
+
+    monkeypatch.setattr(
+        review_context_cmd, "resolve_stack_from_pr", lambda repo_root, pr: _stack_members()
+    )
+    contexts = {
+        1: _member_context(1, "plan-301", "main"),
+        2: _member_context(2, "feat-b", "plan-301"),
+    }
+    monkeypatch.setattr(
+        github, "get_pr_review_context", lambda *, pr_number, **k: contexts[pr_number]
+    )
+
+    class _Backend:
+        def get_plan_body(self, *, issue_id: str) -> str:
+            assert issue_id == "301"
+            return "# Plan 301"
+
+    monkeypatch.setattr(
+        "perk.cli.commands.pr.review_context_cmd.resolve.resolve_issue_backend",
+        lambda _root: _Backend(),
+    )
+    monkeypatch.chdir(clone)
+
+    result = CliRunner().invoke(cli, ["pr", "review-context", "--pr", "2", "--stack", "--json"])
+    assert result.exit_code == 0, result.output
+    data = json.loads(result.stdout)
+    # Top-level fields describe the TOP PR.
+    assert data["pr"] == 2 and data["branch"] == "feat-b"
+    assert data["title"] == "title 2"
+    # Per-member sections, bottom→top; the plan-branch member is enriched.
+    assert [row["pr"] for row in data["stack"]] == [1, 2]
+    assert data["stack"][0]["plan_body"] == "# Plan 301"
+    assert data["stack"][1]["plan_body"] is None
+    # The combined base→top diff carries BOTH layers' changes.
+    assert "a.txt" in data["combined_diff"] and "b.txt" in data["combined_diff"]
+    # Temp refs are deleted after the read.
+    for n in (1, 2):
+        assert git_mod.resolve_commit(clone, f"refs/perk/review/{n}") is None
+
+
+def test_stack_requires_pr(git_repo, monkeypatch):
+    monkeypatch.chdir(git_repo)
+    result = CliRunner().invoke(cli, ["pr", "review-context", "--stack", "--json"])
+    assert result.exit_code == 1
+    assert json.loads(result.stdout)["error_type"] == "invalid_input"
+
+
+def test_stack_with_expected_pr_refused(git_repo, monkeypatch):
+    monkeypatch.chdir(git_repo)
+    result = CliRunner().invoke(
+        cli, ["pr", "review-context", "--stack", "--pr", "2", "--expected-pr", "2", "--json"]
+    )
+    assert result.exit_code == 1
+    assert json.loads(result.stdout)["error_type"] == "invalid_input"
+
+
+def test_non_stack_context_envelope_byte_identical(monkeypatch):
+    # The flagless envelope carries EXACTLY the original keys — no stack keys, not even nulls.
+    monkeypatch.setattr(github, "find_pr_for_branch", lambda **k: _open_pr())
+    monkeypatch.setattr(github, "get_pr_review_context", lambda **k: _context())
+    runner = CliRunner()
+    with runner.isolated_filesystem() as d:
+        _git_init(d)
+        cache.write_plan_ref(Path(d), plan.PlanRefModel.model_validate(_REF).to_domain())
+        result = runner.invoke(cli, ["pr", "review-context", "--json"])
+    assert result.exit_code == 0
+    assert list(json.loads(result.output).keys()) == [
+        "success",
+        "error_type",
+        "message",
+        "branch",
+        "pr",
+        "base_ref",
+        "head_ref",
+        "title",
+        "body",
+        "diff",
+        "plan_body",
+    ]
