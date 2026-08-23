@@ -31,6 +31,8 @@ history a future delivery/recovery node should not re-derive.
   observation, then drives evidence-based, at-least-once reconcile repair (roll-forward vs
   abandon-with-proof vs accepted external prefix) — "Interrupted-LAND recovery (§8.51/§8.56) —
   gotchas".
+- Recovery proves fresh product state in both terminal directions; cleanup residue is protocol
+  output — "Recovery proof is a fresh product-state proof, not a ref comparison (§8.51)".
 - "Residuals" is a flagged-ownership register (who owns each deferred edge), not current
   behavior.
 - `Delivery` from `resolve_delivery(repo_root)` is the canonical operation boundary; nominal
@@ -440,6 +442,28 @@ The `PERK_DEV_STACKED_DELIVERY` development write gate was retired with the gate
   mostly an audit — existing non-PUBLISHED skip arms already handled LANDED; the output was
   tests + comments pinning behavior, not code.
 
+## Recovery proof is a fresh product-state proof, not a ref comparison (§8.51)
+
+- **Fresh product-state proof before classification.** The generic recovery path establishes
+  fresh train identity/topology and structural authority before classifying. PUBLISH needs
+  complete, kind-specific proof in *both* terminal directions — branch, PR existence/absence and
+  exact facts, plus native-stack membership — never merely the recorded branch SHA. A resumed
+  continuation must prove the human-resolved candidate contains its recorded new parent and that
+  every captured parent edge still agrees with fresh checkpoints; a clean detached HEAD alone can
+  be a `rebase --abort`/reset state.
+- **Best-effort cleanup is still protocol output.** Residue lives in both the filesystem and
+  Git's worktree-admin inventory, so status/dry-run/recovery inspect stale registrations as well
+  as `sync-*` directories and temp refs. Every ref/worktree/prune/manifest-retirement failure
+  travels as structured result notes through cold JSON, the human CLI rendering, and every warm
+  outcome arm — a nominal success must not hide residue later recovery has to explain.
+  Cleanup-only abort takes a focused dependency bundle rather than constructing the full
+  synchronization machine.
+- **Pre-journal authority + no-op lease semantics.** A continuation manifest is a
+  containment-validated, progress-rewritten pointer to retained local state — authoritative only
+  until the prepared record is read back, and retired at that boundary. An unchanged adopted ref
+  cannot carry a server-side lease (Git omits no-op updates), so it is excluded from the push set
+  and covered by postcondition verification instead of a fictitious lease.
+
 ## Never-authoritative revision records need an immutability shape check
 
 A never-authoritative revision record (the `layer-context.json` parent-sha reader in
@@ -508,7 +532,10 @@ disjointness assertion; recorded in `docs/planning/stacked-prs/final-census.md`)
   manifest-protected orphan sweep (`recover.py`). TRANSFER routes fold-first before the train
   gates because its in-progress ownership writes intentionally make the predecessor train look
   structurally broken; corrupt/mixed transfer state stays report-only. The machine-local `flock`
-  in `oplock.py` serializes the mutating stack operations per machine (sync + recover + land).
+  in `oplock.py` serializes the mutating stack operations per machine (sync + recover + land) —
+  it intentionally does not serialize recovery across machines: operator quiescence remains a
+  prerequisite for cross-machine abandon/recover, and exact leases plus later drift checks
+  *detect* rather than prevent that overlap.
 - Widening the `accepted`-gated-to-`land` rule requires an explicit schema revision.
 - The build-readiness veto set is deliberately fail-closed and coarse — expect over-blocking
   pressure; the refinement lever is attribution (naming which veto fired), not loosening.
