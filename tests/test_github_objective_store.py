@@ -338,7 +338,7 @@ class TestGitHubDelegation:
         assert result == objective_store.AdoptableObjectiveSource(
             id="7", url="u7", title="Human title", prose="OVERVIEW", issues=()
         )
-        assert result.has_objective_header is False
+        assert result is not None and result.has_objective_header is False
 
     def test_read_objective_source_sees_the_header_block(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch

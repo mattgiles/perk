@@ -189,10 +189,11 @@ def test_linear_backend_skips_the_github_auth_gate(monkeypatch, unborn_git_repo_
     def no_auth_probe():
         raise AssertionError("check_auth must not run on the Linear arm")
 
-    store = _FakeStore(state=_state(_UNFINISHED_NODES))
+    state = _state(_UNFINISHED_NODES)
+    store = _FakeStore(state=state)
     store.backend_id = "linear"
     monkeypatch.setattr(resolve, "resolve_objective_store", lambda _root: store)
-    service = _PrepareService(result=_replan_result(store._state))
+    service = _PrepareService(result=_replan_result(state))
     monkeypatch.setattr(replan_cmd, "resolve_delivery", lambda _root: service)
     monkeypatch.setattr(github, "check_auth", no_auth_probe)
     runner = CliRunner()
