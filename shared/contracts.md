@@ -770,7 +770,7 @@ update_plan_header{ issue, fields }                 -> PlanHeaderUpdate{ fields_
     # node-plan unification writer (save_node_plan). The refusal rides the backend error
     # channel (GitHubError/IssueBackendError ⇒ github_error at CLI boundaries) — an invariant
     # violation of a later-lifecycle write, not a selection error. Malformed-but-present
-    # GitHub shapes keep today's behavior (presence is kind evidence either way): open+close
+    # GitHub shapes keep the presence-is-kind-evidence behavior: open+close
     # markers with unparseable YAML merge over {} (block replaced wholesale — an incidental
     # self-heal); an open marker with no close marker makes replace_metadata_block a no-op
     # (the write PATCHes an unchanged body while reporting fields updated).
@@ -2004,7 +2004,7 @@ the warm slash-command of that name). Use `command:<id>` **only** for commands w
 stage. This keeps the default set free of redundant stage+command pairs for one skill.
 
 **Binding model — `{ trigger, skill, mode }`:** `trigger` is the `<kind>:<id>` string; `skill` is a
-skill name (a `skills/*/` dir name today); `mode ∈ {nudge, transclude}` is **per-binding** —
+skill name (a `skills/*/` dir name); `mode ∈ {nudge, transclude}` is **per-binding** —
 `nudge` delivers a short pointer to follow the named skill — the pointer line carries the skill's
 read path (`.agents/skills/<skill>/SKILL.md`) unconditionally, so it works even for skills hidden
 from the ambient system prompt — `transclude` inlines the skill body. The same skill may be a nudge
@@ -5611,7 +5611,7 @@ dotted sections — fail-safe by construction, pinned by a non-interference test
    narrower frontmatter declaration;
 2. the skill's **`stages:` SKILL.md frontmatter** — the string `all`, or a list of registry
    stage ids (pi ignores unknown frontmatter fields, so the declaration is upstream-safe);
-3. **undeclared → `all`** (fail-open; an undeclared skill behaves like today).
+3. **undeclared → `all`** (fail-open: an undeclared skill is exposed to every stage).
 
 A skill is exposed to a launch iff its resolved value is `all` or contains the launch stage's id.
 An **explicit empty list** (`stages: []` or a `= []` config row) means exposed to **no** stage
