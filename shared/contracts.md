@@ -5895,10 +5895,10 @@ policy).
 `render_header_block` emits them **only when set** — deliberately unlike the 8 null-emitting
 base keys — so every existing objective and every fresh incremental create renders
 byte-identically to before. `delivery_lineage` is the stable ULID identity of the delivery
-train across supersession: minted at stacked authoring (`objective.mint_delivery_lineage()` —
-the cold door mints/copies and passes the final value down; writers persist what they are
-given, §8.45), copied by replan. Forward rule — now **enforced** by the §8.53 replan transfer
-(the only policy/base-changing surface): after first publication (a non-empty
+train across supersession: fresh creation mints it (`objective.mint_delivery_lineage()`, the
+cold door — `create_cmd.py`); `Delivery.transfer` copies-or-mints during supersession
+(`transfer.py`); writers persist the supplied value (§8.45). The §8.53 transfer (the only
+policy/base-changing surface) enforces the forward rule: after first publication (a non-empty
 checkpoint-claimed prefix) the delivery policy is **immutable** (`policy_immutable`) and the
 stored `base` is fixed (`base_immutable`).
 
@@ -5917,8 +5917,8 @@ keeps its single meaning — the ultimate integration target, **never** the imme
 parent. The checkpoint pair is written together only after publication verification (both may
 be absent pre-publication). Deliberately absent: `planned_against_parent_sha`, any native stack
 position, any per-plan copy of the policy. The cache plan-ref (`PlanRef`/`PlanRefModel`/
-`PlanRefOut`) has since grown exactly ONE nullable field for launch routing —
-`delivery_lineage` (§8.46; the deferred "later node's concern" this sentence originally named);
+`PlanRefOut`) has exactly ONE nullable routing field —
+`delivery_lineage` (§8.46);
 it routes, never decides — every decision reconstructs the train fresh.
 
 **Deterministic delivery order.** `objective.delivery_order(nodes)` is a pure derivation — a
@@ -5935,22 +5935,22 @@ contract): 2–100 **non-skipped** nodes (the one-node error points at saving a 
 instead), duplicate-id / unknown-dep / cycle errors — and **no DAG-shape constraint**: fan-out,
 fan-in, and independent nodes are all valid shapes.
 
-**Status.** The `DeliveryTrain` projection (§8.44) now **reads** every field above —
+**Current ownership.** The `DeliveryTrain` projection (§8.44) **reads** every field above —
 `delivery`/`delivery_lineage` via `delivery_policy`, the five stacked plan-header fields at
 the node↔plan join, and `delivery_order`/`validate_stacked_roadmap` as the canonical-order
 authority (with the 2–100 authoring bound deliberately filtered at runtime). The objective
-fields are now **written** by stacked authoring: the `objective create` cold door populates
+fields are **written** by stacked authoring: the `objective create` cold door populates
 `delivery`/`delivery_lineage` on both store write arms, behind the §8.45 validation +
 capability preflight; the TS plane carries the reviewed choice
 end-to-end (`objective_draft`/`objective_save` → `--delivery`). The **layer-identity trio**
-(`objective_node_id`/`delivery_lineage`/`predecessor_plan_id`) is now written at node-linked
+(`objective_node_id`/`delivery_lineage`/`predecessor_plan_id`) is written at node-linked
 plan save through `PrepareRequest(kind="plan_identity", mode=…)` (§8.46): Prepare owns the
 single objective read and returns the independently optional objective base plus nested
 `PlanIdentity {objective_node_id, delivery_lineage, predecessor_plan_id}`. Every header write arm
 receives all three identity fields; `PlanRef` remains deliberately narrower and stores **only**
 `delivery_lineage` as its routing field (no node/predecessor/schema growth). The checkpoint pair
-(`parent_checkpoint_sha`/`published_head_sha`) is written by the §8.47 publish operation —
-together, in one write, only after publication verification.
+(`parent_checkpoint_sha`/`published_head_sha`) is written by the §8.47 publish operation and by
+sync's `_complete` — together, in one write, only after publication verification.
 
 ## §8.45 · Stacked authoring: the reviewed delivery choice + capability preflight
 
@@ -5978,12 +5978,14 @@ facts and the seed instructs `delivery: stacked` without re-asking — the save 
 **Validation-at-save (stacked only), in the create cold door, in this order:** roadmap parse →
 `validate_stacked_roadmap` (errors verbatim under the existing `invalid_roadmap` error_type —
 including the one-node "save it as a standalone plan" message; a fan-out/fan-in DAG passes) →
-the `--adopt-from` refusal (`invalid_input`: in-place adoption of a stacked objective is
-deferred — no roadmap node owns it) → authoring Prepare (**skipped on `--dry-run`**, which stays
-offline and still validates the bounds) → the write gate (retired below) → the store mutation.
-Stored `base` semantics are unchanged. The CLI passes the stored base intent — explicit `--base`
-→ `[workflow] base` → `None` — to Prepare; optional-base trunk fallback now belongs to the
-façade and still yields the same effective probe base.
+the `--adopt-from` refusal (`invalid_input` — in-place adoption of a stacked objective is
+refused because no stacked adoption writer exists) → authoring Prepare (**skipped on
+`--dry-run`**, which stays
+offline and still validates the bounds) → the store mutation.
+Stored `base` keeps its single meaning (§8.42 — the ultimate integration target). The CLI
+passes the stored base intent — explicit `--base`
+→ `[workflow] base` → `None` — to Prepare; optional-base trunk fallback belongs to the
+façade and yields the same effective probe base.
 
 **The capability boundary** is
 `resolve_delivery(repo_root).prepare(PrepareRequest(kind="authoring",
@@ -6001,7 +6003,7 @@ honest expected-vs-observed detail:
 - **`native-stack`** — `stacks.stack_capability(repo_root)`: a GraphQL schema-introspection
   read (`__type(name: "PullRequest")` → a `stack` field exists). **Fail closed** (introspection
   failure / missing field ⇒ unavailable). Schema presence proves the API surface exists on the
-  host, **not** per-repository preview enrollment (the dogfood gate proves the rest).
+  host, **not** per-repository preview enrollment.
 - **`merge-rules`** — `stacks.base_merge_rules(repo_root, base)` → `MergeRules
   {squash_allowed, merge_queue_required}`: GraphQL `repository { squashMergeAllowed }` (squash
   direct merge must be allowed) + REST `GET repos/{owner}/{repo}/rules/branches/{base}` (any
@@ -6011,11 +6013,9 @@ honest expected-vs-observed detail:
 - **`remote-base`** — `git.remote_branch_head`: the observed remote base SHA. An absent remote
   base branch is a **failed check** (honest message), never a crash; without it the push
   probes are skipped.
-- **`atomic-push`** — one probe per push URL (`git.push_urls`; **all must pass**):
-  `git.probe_atomic_push` runs the no-op `git -c push.pushOption= push --atomic --dry-run
-  --no-verify --no-signed --no-follow-tags --recurse-submodules=no --porcelain <push-url>
-  <base_sha>:refs/heads/<base>` (network timeout 120s, `GIT_TERMINAL_PROMPT=0`; `GitError` on
-  failure). The detail states — on success AND failure — that the probe proves **server
+- **`atomic-push`** — one no-op atomic push probe per push URL (`git.push_urls`; **all must
+  pass**); the probe mechanics live in `substrate/git.py::probe_atomic_push`. The detail
+  states — on success AND failure — that the probe proves **server
   capability and authentication, not branch write permission**.
 
 Prepare aggregates independent failures: native stack, merge rules, and remote base are always
@@ -6023,18 +6023,14 @@ observed in order; push-URL resolution and one atomic probe per URL run only aft
 remote-base SHA, and all URLs must pass. The probes run against the Git/GitHub plane **regardless
 of issue backend** (GitHub is the universal PR plane even when objectives live on Linear).
 
-**The write gate (retired).** Stacked authoring shipped behind a development-only environment
-opt-in (a missing opt-in failed the save with a typed gated refusal) until the publication
-dogfood gate passed — a live three-layer train driven end-to-end in the designated dogfood
-repo, evidence in `docs/design/stacked-publication-dogfood.md` (2026-08-10). The gate passed
-and the opt-in was removed: a stacked save now proceeds directly from a passing capability
-preflight to the store mutation.
+**Stacked save gate.** A passing capability preflight proceeds directly to store mutation.
 
-**Lineage + the store arms.** The cold door computes the final `delivery_lineage` and passes it
-down: create mints (`objective.mint_delivery_lineage()`); supersede **copies-or-mints** (reuse
-the predecessor header's `delivery_lineage` when present — §8.42's "copied by replan" — else
-mint; an infra failure reading the predecessor fails the save rather than silently forking the
-train identity). `ObjectiveStore.create_objective` and `.supersede_objective` carry
+**Lineage + the store arms.** Lineage mirrors §8.42: fresh creation mints the final
+`delivery_lineage` in the cold door (`objective.mint_delivery_lineage()`); supersession lineage
+is computed by `Delivery.transfer` (copy-or-mint, `transfer.py` — the cold door passes no
+lineage in `TransferRequest`; an infra failure reading the predecessor fails the save rather
+than silently forking the train identity). `ObjectiveStore.create_objective` and
+`.supersede_objective` carry
 keyword-only `delivery`/`delivery_lineage` (defaulted `None`) on all three concrete stores,
 composed into the **initial** `ObjectiveHeader` atomically (never create-then-merge, which
 could crash between writes and persist a stacked-reviewed objective as incremental). `None`
@@ -6046,7 +6042,7 @@ widened (the door refuses the combination up front).
 **The journal.** A stacked delivery lineage's stack operations (§8.42's vocabulary) are recorded
 in an **append-only operation journal**: one strict, marked, schema-versioned comment per event,
 physically carried on the objective's **journal carrier** — GitHub: the objective issue's own
-comments; Linear: the Project **metadata sentinel issue**'s comments (§8.31's sentinel). Carrier
+comments; Linear: the Project **metadata sentinel issue**'s comments (§8.24's sentinel). Carrier
 resolution is the `ObjectiveStore.journal_carrier_id(objective_id)` store method: the issue-tier
 id of the carrier (usable with the matching `IssueBackend` comment ops), `None` when the
 objective is absent, a raise for a Linear project without a sentinel (a broken perk objective).
@@ -6070,8 +6066,8 @@ transfer prepares on the predecessor and keeps that operation's later events the
 
 **Records.** `schema_version` must be the literal `"1"`; payloads parse strictly
 (`extra="forbid"`; unknown kinds/roles reject; `operation_id` is a ULID). The event vocabulary is
-`prepared | accepted | completed | abandoned` (this intentionally supersedes the earlier
-per-effect `effect_observed` design — observable effects are re-read from the remote, never
+`prepared | accepted | completed | abandoned` — the four-role vocabulary (observable effects
+are re-read from the remote, never
 journaled one-by-one); operation kinds are `publish | sync | adopt | transfer | land`. The
 prepared payload is `schema_version, event, operation_id, operation_kind, delivery_lineage,
 objective_id, run_id, created, affected_plans, before, after` (declaration order load-bearing);
@@ -6157,11 +6153,10 @@ including the double-marker rule), so an operation whose opaque `before`/`after`
 *mentions* the stamp text (journaled user-authored prose) parses cleanly as an operation, never
 as a malformed stamp; only a body with no operation marker text and the stamp marker text parses
 under the stamp grammar; neither text → unrelated DATA. The reverse collision is structurally
-impossible: every stamp payload field is validated against the **marker-safe segment allowlist**
-(letters, digits, `.`, `_`, `-`) or is 40-hex, so a rendered stamp body can never contain the
-colon-carrying operation marker text — nor any character that would break either marker encoding
-(whitespace/backticks for the inline-code form; `<`/`>`/`!` whose embedded `-->` would terminate
-the HTML comment early). Every real segment shape fits the allowlist (numeric GitHub ids, Linear
+impossible: every stamp payload field is validated against the **marker-safe segment
+allowlist** or is 40-hex (the collision-proofing mechanics live in `journal.py`), so a rendered
+stamp body can never contain the colon-carrying operation marker text nor break either marker
+encoding. Every real segment shape fits the allowlist (numeric GitHub ids, Linear
 identifiers, ULID lineages, `<phase>.<n>` node ids); an exotic id that does not fit is a **typed
 refusal at construction and parse** — that layer simply cannot carry a stamp until its id
 conforms, loud and never a silently mangled marker.
@@ -6233,8 +6228,9 @@ to `update_objective_header` (lineage *minting* stays the authoring node's conce
 private roll-forward core instead uses its issue seam's generic `update_plan_header` once per
 atomic group: ownership (`objective_id` + `objective_node_id`), stacked identity
 (`delivery_lineage` + `predecessor_plan_id`, whose bottom value may be null), or all four explicit
-nulls when clearing stacked metadata. Read-before-write checks preserve idempotence; no
-transfer-only persistence wrappers remain.
+nulls when clearing stacked metadata. Read-before-write checks preserve idempotence; the
+generic `update_plan_header` seam is transfer's one persistence surface (no transfer-only
+wrappers exist).
 
 **Engagement exclusion.** Journal comments carry a `perk:*` sentinel in either encoding, so the
 existing engagement classifier (§8.25) classifies them `perk` and the engagement renderers drop
@@ -6242,10 +6238,11 @@ them — journal comments structurally never reach human-engagement inputs (pinn
 new renderer code). Import direction: `perk.delivery` imports the `perk.backends.*` contracts
 one-directionally; nothing in `perk/backends/` or `perk/github/` imports `perk.delivery`.
 
-**Status.** The read side is consumed: the `DeliveryTrain` projection (§8.44) folds the journal
-through `read_journal` and surfaces the first unresolved operation. No recovery engine, no
-lineage minting, no mutating consumer yet — those land with their owning nodes. The TS plane is
-deliberately untouched (no cross-plane consumer yet — mirroring §8.42's posture).
+**Current consumers.** The read side: the `DeliveryTrain` projection (§8.44) folds the journal
+through `read_journal` and surfaces the first unresolved operation. Recovery, lineage minting,
+and the journal-mutating operations are implemented through `Delivery`
+(recover/transfer/publish/sync/land). The TS stack surface renders status and drives the cold
+stack workers (`extension/doors/objectiveStack.ts`).
 
 ## §8.44 · The DeliveryTrain projection + stack status (read path)
 
@@ -6255,8 +6252,9 @@ authorities — the objective store (policy, lineage, roadmap), plan issues (lay
 checkpoints), the journal fold (§8.43), Git refs, and GitHub PR + native-stack state. The canonical
 repository-scoped APIs are `resolve_delivery(repo_root).status(StatusRequest(objective_id))`,
 one flat frozen `Delivery.prepare(PrepareRequest(...))` family,
-`Delivery.transfer(TransferRequest(...))`, `Delivery.publish(PublishRequest(...))`, and
-`Delivery.sync(SyncRequest(...), consent=...)`.
+`Delivery.transfer(TransferRequest(...))`, `Delivery.publish(PublishRequest(...))`,
+`Delivery.sync(SyncRequest(...), consent=...)`, `Delivery.recover(RecoverRequest(...))`, and
+`Delivery.land(LandRequest(...))`.
 The sync keyword is required at the call
 boundary: a caller must explicitly pass a callback or deliberately pass `None` for automation's
 auto-approval policy; omission can never silently select mutation consent. `resolve_delivery`
@@ -6300,8 +6298,8 @@ required nonblank objective. Cascade requires a nonblank journal `run_id`; optio
 `dry_run`, `adopt_node`, `trigger_plan_id`, and raw `trigger_run_id` obey this matrix: base and
 adoption are exclusive; a trigger plan composes with neither; trigger run requires trigger plan;
 dry run may compose with base, adoption, or trigger. Continue/abort carry no cascade field.
-`SyncResult` moves the existing flat operation result unchanged and deliberately has no new
-constructor combination guards: its additive historically reachable arms are enforced by the
+`SyncResult` is the flat operation result and deliberately has no
+constructor combination guards: its additive arms are enforced by the
 operation protocol, not a partial discriminator. Its frozen nested records are `Layer`, `Cascade`
 (the consent preview), and `AbortPreview`; these add no separate package-root names.
 
@@ -6319,8 +6317,10 @@ operation protocol, not a partial discriminator. Its frozen nested records are `
 
 `PublishResult {kind, plan_id, dry_run, layer?, ready?}` carries the canonical bare plan id and
 exactly one matching nested detail. `Ready {pr, was_draft, stamp?}` preserves the gateway PR and
-its pre-mutation draft fact; `stamp` is the optional nested `Stamp {record, existed}` detail (the
-§8.43 `ReadyStampRecord` carried as-is plus the append's idempotence fact) — present exactly on
+its pre-mutation draft fact; `stamp` is the optional nested `Stamp {record, existed,
+parent_checkpoint_sha}` detail (the
+§8.43 `ReadyStampRecord` carried as-is plus the append's idempotence fact and the verified
+layer's parent checkpoint) — present exactly on
 stacked ready success, `None` on incremental and dry-run alike (the enclosing `dry_run` flag
 distinguishes them), and constructor-validated absent on a dry run. `Layer` is exactly `{pr, branch, header_update, plan_embedded, pr_checked,
 parent_branch, operation_id, stack_number, stack_size, stack_position, parent_checkpoint_sha,
@@ -6343,14 +6343,10 @@ node/reason/skipped/context/handoff-blockers presence is shape-validated (contex
 train-derived `ready`; `handoff_blockers` — the blocking `TrainLayer`s in delivery order —
 exactly on `handoff_blocked`, which also carries `node`; the
 all-layers-published graph fallback may be `ready` without context). The package root exports
-`PublishRequest`, `PublishResult`, `TransferRequest`, and `TransferResult` but no publication or
-transfer core/runtime/error. Removing `DeliveryOperationFacts`, `LayerBodyFacts`,
-`PublicationError`, `PublicationResult`, `TrainRowFacts`, and `publish_layer` plus adding the two
-Transfer values left the exact 61-name `perk.delivery.__all__` of that era; the atomic
-objective-landing migration has since completed the cut to the **canonical surface** — now
-twenty-one names (`Delivery`, `resolve_delivery`, `DeliveryError`, the payload-carrying
-`ReadyStampError` the stacked ready arm raises, the three authority ABCs, and the seven
-request/result families) — every operation module, the journal/persistence machinery, and
+the **canonical surface** — twenty-one names (`Delivery`, `resolve_delivery`, `DeliveryError`,
+the payload-carrying `ReadyStampError` the stacked ready arm raises, the three authority ABCs,
+and the seven request/result families) — and no publication or transfer core/runtime/error;
+every operation module, the journal/persistence machinery, and
 the landing readiness/mutation internals are module-path-internal only.
 
 The façade composes three nominal ABC authorities, with each interface, real adapter, and owned
@@ -6378,24 +6374,21 @@ endpoint exists. The production
 backend-aligned objective store, issue backend, and `TrainPersistence` only on its first read,
 caches them only after backend identities agree, and keeps no partial cache after a failed attempt.
 The Git and GitHub adapters likewise store only constructor data and observe on method calls.
-Publication binds these same instances plus bound `status`/`sync` into private `_PublishContext`;
-private immutable `_PublishRuntime` owns only operation-id minting, clock, sleep, and PR-body
-validation. Transfer binds the same instances into private `TransferSeams` plus aggregate Git and
-GitHub authorities; recovery continues to compose `TransferSeams` directly. Its private runtime
-owns only the operation lock, operation-id minting, and clock. The bound-status bridge unwraps only
+Publication, transfer, and recovery bind these instances through private per-operation
+contexts/runtimes (module-internal; each capability belongs to one existing aggregate
+authority). The bound-status bridge unwraps only
 the exact reconstruction/store/issue/persistence causes expected by the shared transfer core.
 Cause-aware bridges around the status-oriented Git/GitHub reads unwrap only a
 `TrainReconstructionError` whose direct cause is the matching raw `GitError`/`GitHubError`; every
 other typed failure stays typed and fails closed. Both Publish dry-run arms return before every
 context method, so assignment-only resolution remains offline under GitHub and Linear config.
 
-For a new authority call whose consumer must record a failure and continue independent checks, the
+For an authority call whose consumer must record a failure and continue independent checks, the
 aggregate ABC owns frozen nested success/error discriminants: Git `PushUrlsResult`,
 `AtomicPushResult`, and `ProbeError`; GitHub `MergeRules` and `ProbeError`. Only the real adapter
 catches the expected substrate/gateway exception and converts it; fakes return constructor-seeded
 discriminants without catching programming errors. The existing terminal status methods retain
-their typed exceptions. No speculative subgateway split is warranted: each capability belongs to
-one existing aggregate authority, while narrow pure-core reader roles remain internal. There is no
+their typed exceptions. There is no
 dry-run authority implementation because objective-create dry run omits Prepare entirely.
 
 Import direction stays §8.43's: nothing in `perk/backends/` or `perk/github/` imports
@@ -6542,8 +6535,9 @@ journal **carrier** read, or `git fetch` is a status failure. At the pure-core s
 `DeliveryError` with the same message and stable `error_type` (`objective_not_found |
 invalid_delivery_policy | invalid_train | git_error | github_error |
 supersession_corruption`). The private status allowlist remains exactly those six even though
-`DeliveryError`'s façade-wide vocabulary is the bounded union of status, Prepare, Transfer,
-Publish, and sync codes.
+`DeliveryError`'s façade-wide vocabulary is the bounded union of the per-operation codes — the
+source-owned reference is `facade.py::_DELIVERY_ERROR_TYPES`, pinned by its guard test
+(`tests/test_delivery_facade.py`), never a frozen prose enumeration here.
 Prepare adds `capability_unsupported | invalid_input | missing_lineage |
 stacked_predecessor_missing | unknown_layer | node_not_build_ready | parent_missing |
 parent_unverified`. Expected
@@ -6553,17 +6547,9 @@ rather than silently widening status. Prepare reuses the status-owned
 trunk and remote-branch methods without changing their status messages: for a typed `git_error`
 wrapper it preserves the chained substrate `GitError` text when that guarded cause exists, else the
 wrapper text; a non-`git_error` reconstruction failure remains unexpected and propagates.
-`DeliveryError` additionally owns sync's bounded operation codes (`not_stacked`,
-`unresolved_operation`, `sync_conflict_pending`, `claimed_prefix_malformed`, `active_writer`,
-`dirty_worktree`, `writer_observation_unavailable`, `remote_drift`, `pr_drift`,
-`membership_drift`, `stale_parent`, `base_unobserved`, `multiple_push_urls`,
-`atomic_push_unsupported`, `rebase_conflict`, `push_rejected`, `sync_drift`,
-`postcondition_unverified`, `adopt_blocked`, `no_continuation`, `continuation_stale`,
-`continuation_invalid`, `rebase_in_progress`, `operation_in_progress`) and boundary codes
-`journal_corruption`, `journal_record_too_large`, and `invalid_config`. Publish/ready add only
-`delivery_error`, `stack_capability_lost`, `pr_already_merged`, `remote_settling_timeout`,
-`stack_registration_drift`, `stack_registration_failed`, `publication_drift`, `no_pr`,
-`pr_not_open`, `layer_not_published`, and `structural_blockers`; status's private subset remains
+`DeliveryError` additionally owns sync's bounded operation codes, the boundary codes
+(`journal_corruption`, `journal_record_too_large`, `invalid_config`), and the publish/ready
+codes — all enumerated in `_DELIVERY_ERROR_TYPES` (above); status's private subset remains
 exactly the six codes above.
 
 Every `DeliveryError` emitted by `Delivery.publish` carries a jointly-present constrained
@@ -6571,20 +6557,24 @@ Every `DeliveryError` emitted by `Delivery.publish` carries a jointly-present co
 both absent. Package-internal `PublicationError` and pure layer refusals become domain errors with
 their original code/message. Bound sync errors become `(cascade,delivery)`; bound layer status,
 objective-store/persistence/journal/reconstruction failures become `delivery_error/(layer,delivery)` except
-record-size, which preserves `journal_record_too_large`; raw exact-lease rejection and Git failures
+record-size, which preserves `journal_record_too_large` (a publish/ready-boundary mapping —
+§8.56 states land's deliberate non-translation); raw exact-lease rejection and Git failures
 become `(layer,git)`; raw GitHub/issue failures become `(layer,github)`. Ready's pure selection and
 reviewability refusals become `(ready,domain)`; a status reconstruction cause preserves its domain
 code/message, while backend/objective/persistence/journal and raw GitHub failures become
-`github_error/(ready,github)`. Unexpected exceptions are not wrapped. CLI presentation maps these
+`github_error/(ready,github)` — scoped to pre-stamp route/read failures: post-mark-ready append
+failures surface as `ready_stamp_failed` (`publish.py::_append_stamp`). Unexpected exceptions
+are not wrapped. CLI presentation maps these
 facts back to the established submit/ready prefixes and bytes.
 
-Only two reads
+Three reads
 degrade: the **preview** native-stack read (membership `unknown` + information
 `stack_read_unavailable`, never a blocker — but unverifiable membership still declassifies the
 affected layers' publication to drift: the information posture governs the *finding*, not the
-verification bar) and journal **corruption** (`JournalCorruptionError` → the
+verification bar), journal **corruption** (`JournalCorruptionError` → the
 `journal_corruption` blocker; unresolved-operation facts and ready-stamp handoff evidence
-report unknown). A superseded objective
+report unknown), and the tolerant **base-head** observation (a read failure / absent ref → the
+INFO `base_unobserved`, below). A superseded objective
 **redirects forward** along `superseded_by` (cycle guard + depth cap 50; breach ⇒
 `supersession_corruption`) to the active objective and reports `redirected_from`. An incremental
 objective short-circuits before fallback trunk detection, fetch, or any GitHub work into the
@@ -6604,13 +6594,15 @@ entries(first:100){nodes{position pullRequest{number}} pageInfo{hasNextPage}} }`
 is not a PR lookup miss returns `StackObservation(available=False)`, and every selected
 preview field (incl. `pageInfo.hasNextPage`) is required, so a malformed/partial preview shape
 degrades rather than partially parsing (exactness relies on OBSERVED non-truncation); a null
-`stack` with `available=True` means genuinely not stacked; `hasNextPage` ⇒ `truncated` (a perk
-train never exceeds 100 layers, so a bigger stack is never exact). Entries are sorted by
-`position` in the converter. `_graphql_proc`/`_graphql` live in `perk/github/_exec.py` (promoted from
-`reviews.py` when the second GraphQL call site appeared). Native membership over the projection:
-<2 published open PRs ⇒ `not_applicable`; ≥2 ⇒ read the stack through the bottom published PR
+`stack` with `available=True` means genuinely not stacked; `hasNextPage` ⇒ `truncated` (the
+2–100 authoring bound is not runtime-enforced — a runtime train may carry more layers; a
+preview stack above 100 entries is truncated and therefore never exact). Entries are sorted by
+`position` in the converter. `_graphql_proc`/`_graphql` live in `perk/github/_exec.py`.
+Native membership over the projection (`train.py::_observe_membership` — the population is the
+**checkpoint-bearing open PRs**):
+<2 checkpoint-bearing open PRs ⇒ `not_applicable`; ≥2 ⇒ read the stack through the bottom one
 — unavailable ⇒ `unknown` (information), null stack ⇒ `absent` + `stack_missing`, entries
-exactly the published PRs bottom→top (contiguous positions, no extras, not truncated) ⇒
+exactly those PRs bottom→top (contiguous positions, no extras, not truncated) ⇒
 `exact`, anything else ⇒ `divergent` + `stack_divergent`.
 
 **The base-head observation.** The projection additionally reads the objective base's LIVE
@@ -6647,10 +6639,12 @@ serialized as clean empty lists (the Config load is tolerant only in that it deg
 observation, never the command).
 
 **The cold worker.** `perk objective stack status [OBJECTIVE] [--json]`
-(`commands/objective/stack/`, the recursive group-dir template; the group carries `status` +
+(`commands/objective/stack/`, the recursive group-dir template; the group's delivery-operation
+subset is `status` +
 `sync` (§8.49) + `recover` (§8.51) + `land` (§8.55 dry-run readiness + §8.56 the landing
-mutation); the shared objective resolution and run-id resolution live in
-`stack/shared.py`). It is a migrated façade consumer: after objective-id resolution it constructs
+mutation) — the group also registers `review` (§8.4); the shared objective resolution and
+run-id resolution live in
+`stack/shared.py`). It is a façade consumer: after objective-id resolution it constructs
 one lazy repository service and makes one `Delivery.status(StatusRequest(...))` call; it never
 imports or assembles the pure reconstruction readers. Resolution: explicit argument → the plan
 worktree's `cache.plan-ref` `objective_id` → a typed `no_objective` refusal. A `DeliveryError`
@@ -6670,18 +6664,19 @@ the base observation
 above; the landed prefix is trailing additive growth, §8.51). Exit codes: **blockers found ⇒ exit
 0** (status is a successful *detection*, mirroring `objective doctor`'s report-vs-abort
 split); `1` = the typed failures above (+ `no_objective`, backend errors as `github_error`);
-`2` = not-a-repo. `--json` → stdout, human render → stderr (one line per layer bottom→top,
-then `blockers:`/`information:` sections, then the pending-continuation and orphaned-residue
-lines with their remediation hints; the incremental case prints the no-train explanation; a
+`2` = not-a-repo. `--json` → stdout, human render → stderr (per-layer lines bottom→top plus
+the readiness/planning-gate/active-operation, `blockers:`/`information:`,
+pending-continuation, and orphaned-residue lines with their remediation hints —
+`status_cmd.py::_render_human` owns the exact ordering, which is non-normative; the
+incremental case prints the no-train explanation; a
 dim `redirected from #N` note when redirected).
 
-**Status.** Read path only: this section mutates nothing remote. The capability probes (stack
-availability, direct-merge/queue rules, atomic-push dry-run) have since landed — §8.45 — and
-remain read-only (the dry-run push is a no-op); build-ready derivation now rides the
-projection (§8.46); suffix synchronization has since landed as its own operation (§8.49);
-recovery and the warm stack surface (`/objective-stack` + the typed stack tools) have since
-landed (§8.51); atomic landing has since landed (§8.55 readiness + §8.56 the mutation);
-doctor findings have since landed (§8.54, the unified drift-finding policy).
+**Scope.** Read path only: this section mutates nothing remote. The capability probes are
+§8.45 (read-only — the dry-run push is a no-op); build-ready derivation rides the
+projection (§8.46); suffix synchronization is §8.49;
+recovery and the warm stack surface (`/objective-stack` + the typed stack tools) are §8.51;
+atomic landing is §8.55 (readiness) + §8.56 (the mutation);
+the unified drift-finding policy is §8.54.
 
 ## §8.46 · Stacked build readiness + parent-aware execution
 
@@ -6689,8 +6684,9 @@ doctor findings have since landed (§8.54, the unified drift-finding policy).
 projection computes a frozen `BuildReadiness {next_node_id, ready, reason}` at the end of the
 pipeline and carries it on `DeliveryTrain.build_readiness`; repository consumers obtain that
 projection through `Delivery.status`, never by assembling the pure readers. `next_node_id` is the first
-layer in delivery order whose `publication` is not `PUBLISHED` (`None` when every layer is
-published, or the layer list is empty/all-skipped — the contiguous-prefix invariant makes the
+layer in delivery order whose `publication` is not `PUBLISHED` **or `LANDED`** (`None` when
+every layer is published or landed — the terminal reason reads "all layers published or
+landed" — or the layer list is empty/all-skipped; the contiguous-prefix invariant makes the
 candidate's predecessor published by construction; a violation is already a `prefix_gap`
 blocker). **The veto set is train-wide and fail-closed**: `ready` is `True` iff a candidate
 exists AND the train has **no BLOCKER findings** AND `unresolved_operation is None`; `reason`
@@ -6859,9 +6855,16 @@ observed fact, never a gate guarantee (the §8.46 handoff gate is satisfied by T
 dependencies whose branch may be deleted). The transport is one transient effective stage
 (`dataclasses.replace(stage, worktree="reuse")` — the stage **id never changes**, so
 handoff/stage-keyed behavior is untouched) plus the one positioner's existing bare-`plan_id`
-path: a checkout on this machine is **validated reuse** (no backend read); a missing checkout is
-the **checkpoint-validated restore** from `origin/plan-<pred>` (including the
-`layer-context.json` rewrite and the `setup-pending` marker). Positioning *failures* refuse
+path (the general positioning semantics are §8.38): a checkout on this machine is **validated
+reuse** (no backend read); a missing checkout is
+the **checkpoint-validated restore** from `origin/plan-<pred>` — the checkpoint pair is
+validated against the FETCHED tip before any materialization (the recorded
+`published_head_sha` must BE the remote tip and `parent_checkpoint_sha` must resolve and be an
+ancestor of it; a missing pair, a drifted publication, or a non-ancestor parent refuses
+`worktree_restore_failed`), then `layer-context.json` is rewritten from the fetched canonical
+header (`parent_sha` from the verified `parent_checkpoint_sha`; `parent_branch` from
+`predecessor_plan_id`, else the base) and the `setup-pending` marker set. Positioning
+*failures* refuse
 typed and fail-closed inside the positioner — there is no degrade-to-root failure fallback.
 Otherwise (bottom layer; a child with no observed live head — landed/deleted/unobserved) the
 session stays at the repo root and the DATA block says so honestly (a landed predecessor's code
@@ -6872,7 +6875,7 @@ unknown-state note when the fail-soft read-only probes fail (presentation only �
 bypass the positioner's typed refusals). `--worktree NAME` keeps implement-consistent semantics
 (directory selection only, validated by the shared `checked_name`). Dry runs never position (the
 stacked dry-run path skips Prepare) — the stacked dry-run payload says so
-(`"positioning": "unchecked (dry-run)"`); planning still records **no parent SHA**. A positioned
+(`"positioning": "unchecked (dry-run)"`). A positioned
 launch skips `_sync_main_checkout` by construction (the session does not consume the main
 checkout; Prepare's reconstruction already fetched).
 
@@ -6896,26 +6899,24 @@ stays unwritten. Dry-run output prints a best-effort notice when one exists and 
 reconstructor in lockstep). It only **routes** a launch into the stacked path — every decision
 still reconstructs the train fresh; the ref is never train-authoritative.
 
-**`LayerContext` is internal; execution Prepare is the sole fresh-start proof.** The frozen
-internal `LayerContext {objective_id, node_id, plan_id, delivery_lineage, predecessor_plan_id,
-base, parent_branch, branch}` and pure `derive_layer_context`/`require_ready_layer` core remain in
-`perk.delivery.layer`, but none is exported from `perk.delivery`. Both launch paths independently
-call `Delivery.prepare(PrepareRequest(kind="layer_start", mode="execution", plan_id,
-objective_id?))`; there is no launch wrapper. It refuses a missing objective id before lookup,
-performs one status reconstruction, rejects no-train, locates the plan layer, proves it is
-build-ready, then derives the context. Execution does not inspect `redirected_from`; the freshly
-reconstructed active train remains authoritative. The bottom layer uses objective base; a child
-requires predecessor identity/plan/branch.
+**Execution Prepare is the sole fresh-start proof.** Both launch paths independently call
+`Delivery.prepare(PrepareRequest(kind="layer_start", mode="execution", plan_id, objective_id?))`
+(the request/result shape is §8.44's); there is no launch wrapper. It refuses a missing
+objective id before lookup, performs one status reconstruction, rejects no-train, locates the
+plan layer, proves it is build-ready, then derives and returns the verified parent context/SHA —
+the internal `LayerContext` and the pure core live in `perk.delivery.layer` (module-internal;
+nothing is exported from `perk.delivery`). Execution does not inspect `redirected_from`; the
+freshly reconstructed active train remains authoritative. The bottom layer uses objective base;
+a child requires predecessor identity/plan/branch.
 
 Prepare next calls `DeliveryGit.fetch_refs` once for the exact parent branch,
 `remote_branch_sha(parent_branch)` once, then `resolve_commit(observed_sha)` once. A fetch or remote
 observation failure is `git_error`; an absent remote branch is `parent_missing`; an observed SHA
 that does not resolve locally is `parent_unverified`. No fallback is permitted: the result's
-nonblank `parent_sha` is the verified latest remote head, never a stored checkpoint. Deferred
-publication still calls callback-only `prepare_layer_start` internally; that core has no
-repository/global defaults.
+nonblank `parent_sha` is the verified latest remote head, never a stored checkpoint.
 
-**Local and remote creation consume the same result.** Local `resolve_worktree` runs execution
+**Local and remote creation consume the same result** (the gesture difference is §8.38 named
+difference 8). Local `resolve_worktree` runs execution
 Prepare immediately before `git worktree add … <parent_sha>`; remote `position_branch` runs it
 immediately before `git checkout -b plan-<N> <parent_sha>`. Neither path fetches or derives the
 parent independently. Both write the returned context and SHA to `layer-context.json`; commit
@@ -6924,13 +6925,8 @@ CLI refusal, and an explicit local `--base` remains `invalid_input`. Existing br
 `worktree: none`, resume, incremental creation, and stacked dry-run behavior are unchanged; the
 boundary governs fresh creation and never resets an active layer.
 
-**Status.** Everything here is inert for incremental objectives; stacked authoring and layer
-publication are supported (the §8.45 dogfood gate passed —
-`docs/design/stacked-publication-dogfood.md`; §8.47's `/submit` route writes the checkpoint
-pair); published-suffix synchronization is available explicitly (§8.49) and converges
-automatically from submit/address (§8.52); atomic landing is §8.56's contract — and
-`perk pr land` / `/land` still refuse stacked lineage before any mutation (stacked layers
-land only as one train).
+**Scope.** Everything here is inert for incremental objectives; `perk pr land` / `/land` refuse
+stacked lineage before any mutation — stacked layers land only as one train (§8.56).
 
 ## §8.47 · Stacked layer publication (/submit → the delivery publish operation)
 
@@ -6941,16 +6937,13 @@ lineage must not silently route incremental. The warm `/submit` door and its
 `perk pr submit --json` delegation are unchanged shapes; `--dry-run` stays FIRST and fully
 offline (no routing, byte-identical envelope). The incremental path is untouched — no
 reconstruction, byte-identical behavior (the additive envelope fields serialize as null).
-(The §8.45 development write gate, which this route reused while stacked delivery was under
-development, is retired — the dogfood gate passed.)
 
 **The publish operation** is
-`resolve_delivery(repo_root).publish(PublishRequest(kind="layer", ...))`; the private
+`resolve_delivery(repo_root).publish(PublishRequest(kind="layer", ...))` — the private
 `perk.delivery.publish._dispatch` engine is bound to the façade's three aggregate authorities and
-bound `status`/`sync` methods. Its immutable private runtime contains only clock/sleep/id minting
-and PR-body validation. Publication acquires no stack-operation lock. Automatic cascade calls the
-same façade's bound `sync`, whose dispatcher acquires the non-reentrant lock exactly once; there is
-no resolver or callback bundle inside publish.
+bound `status`/`sync` methods (the runtime internals are module-private). Publication acquires
+no stack-operation lock; automatic cascade calls the
+same façade's bound `sync`, whose dispatcher acquires the non-reentrant lock exactly once.
 
 For a real layer, the façade re-reads the current plan, requires only presence plus nonblank
 `objective_id` (never a fresh lineage-header gate), and best-effort reads its body (`IssueBackendError`
@@ -6965,12 +6958,12 @@ arm — the header run id is stamped at save). The protocol, in order:
 
 1. **Reconstruct** the train fresh through the bound `Delivery.status` using the plan header's
    `objective_id`; no train / plan not a layer → `not_stacked`.
-2. **Route on the checkpoint-claimed prefix before reading the publish journal fold.** Derive it
-   through §8.49's package-internal `derive_claimed_prefix` helper. If this plan is claimed and a claimed
+2. **Route on the checkpoint-claimed prefix before reading the publish journal fold** (the
+   claimed-prefix derivation and the never-route-on-`published_prefix_len` rule are §8.49's;
+   the route consumes its `derive_claimed_prefix` helper). If this plan is claimed and a claimed
    successor exists, delegate immediately to trigger-scoped synchronization (§8.52); sync owns the
-   journal routing for this arm, including unresolved SYNC/ADOPT and pending continuations. Never
-   route on `published_prefix_len`: operational drift may declassify a claimed successor and must
-   reach sync's typed preflight instead of silently selecting republish. Otherwise read the fold:
+   journal routing for this arm, including unresolved SYNC/ADOPT and pending continuations.
+   Otherwise read the fold:
    an unresolved PUBLISH whose `affected_plans` is exactly this plan → the resume path; any other
    unresolved operation → `unresolved_operation`.
 3. **Candidate gate outside the cascade arm**: the claimed top that is also the published top →
@@ -6980,9 +6973,10 @@ arm — the header run id is stamped at save). The protocol, in order:
    `stacks.stack_capability` must still hold → else `stack_capability_lost`. Checked twice:
    up front on the fresh route (position ≥ 2, before any effect — the cheap early refusal)
    AND at the create/append mutation seam itself (covering the resume and republish routes;
-   an already-converged membership never probes). **Recorded deviation (since discharged):**
-   the §8.45 atomic-push dry-run probe is NOT rerun — the single-ref exact-lease push fails
-   honestly on its own; the multi-ref atomic probe now lives in §8.49's sync preflight.
+   an already-converged membership never probes). The §8.45 atomic-push dry-run probe is NOT
+   rerun here — the single-ref exact-lease push fails honestly on its own; the split is:
+   `publish.py::_route` owns the layer capability check, and `sync.py::_check_capability` owns
+   the atomic multi-ref probe (§8.49).
 5. **Resolve facts**: `prepare_layer_start` fetches + verifies the LATEST parent head
    (`parent_sha`); the layer's own remote head is the exact lease observation
    (`before_branch_sha`, null = the absence lease); the local branch head is the candidate.
@@ -7163,7 +7157,7 @@ default. Census: `PERK_TOOLS` + `READ_ONLY_TOOLS`, deliberately NO `STAGE_TOOLS`
 coverage (harvest is cold-only and gate-on; the gate-ON set ignores stage lists). The seed
 teaches the fallback state table and names the tool for multi-lane manifests.
 
-**The partition rule** (by reference to the landed core, `perk/learn/harvest.py`): group by
+**The partition rule** (by reference to `perk/learn/harvest.py`): group by
 the first path component under `docs/learned/` (top-level docs → the literal `root`),
 path-sorted within a group, chunked at max 8 docs/lane (`MAX_LANE_DOCS`), stable 1-based
 `<category>-<n>` ids; single- vs multi-lane **routing** (direct analysis vs the wave) is
