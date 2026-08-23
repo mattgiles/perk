@@ -29,6 +29,8 @@ session-scoped guard-state patterns, and the wave test machinery worth reusing.
   flow-migration checklist (prompt mechanics → module-owned tool)".
 - Lane semantics: status ≠ validity ≠ coverage — a lane can complete with an invalid report, and
   coverage is per-angle — "Lane semantics — status ≠ validity ≠ coverage".
+- Size-budgeted renderers emit splittable per-line blocks (join-equivalent when unsplit);
+  oversize-unreachability claims are cap arithmetic — "Budgeted block-packing renderers".
 - Review posting uses one shared discriminated single-use state across static/dynamic doors, bound
   to one resolved PR and consumed only after successful mutation — "Session-scoped guard state".
 - Launch manifests preserve requested/runnable/preflight-failed lanes and required Ponytail
@@ -137,8 +139,12 @@ a flow-scoped tool predictably touches:
   drive-coverage guard forces it the moment the guidance names the tool, but catching it at plan
   time avoids the late scramble commit (see also `warm-door-commands.md`).
 
-Two adjacent lessons:
+Adjacent lessons:
 
+- **Dormant landings cite the def+wave atomicity precedent up front** — the dormant-first →
+  atomic-flip shape below is settled; plans should invoke it rather than re-derive it (#1999).
+- **Agent-def prose precision is behavioral** — near-miss phrasing (an empty array vs explicit
+  challenge rows) is a correctness bug, not a style nit (#1997).
 - **Retiring prompt discipline into code surfaces latent underspecification** rather than merely
   transcribing it — the annotation-push module had to *strengthen* semantics the browser-review
   curl cheat sheet never confronted (see `plan-review-flow.md`).
@@ -177,6 +183,23 @@ def requiring both "wrap any quoted draft text in delimiters" and "emit a bare b
 field" holds two representations of quoted draft text to contradictory rules — state the
 exception explicitly or the completion contract is unsatisfiable.
 
+## Budgeted block-packing renderers
+
+Rules for renderers that pack content into size-budgeted blocks (#1991, #2000, #1997):
+
+- **Any block whose size scales with input cardinality must be splittable** — emit aggregates as
+  per-line blocks sharing one group, byte-identical to the joined form when no split occurs
+  (prove join-equivalence first; split behavior falls out).
+- **"Structurally unreachable" oversize claims are arithmetic** over the admission caps on the
+  largest JOINED block, verified with a cap-conformant adversarial fixture the unfixed code
+  refuses.
+- **Redundant projections in composed reports invite divergence** — derive from rows, don't
+  re-project.
+- **Cleanup side effects in injected-effect execute cores get typed fail arms + failure-path
+  coverage**, even "can't-fail" removals.
+- **Encode subset vocabularies in the type** (`Exclude<…>`), not runtime filtering; cross-plane
+  string literals get a lockstep pin.
+
 ## Validate downstream identifier contracts at the render boundary, not only through test adapters
 
 The first live audit wave failed **all 15 lanes** because the memory and fake-RPC adapters never
@@ -191,6 +214,16 @@ test double but rejected by the real engine. The lessons:
   rather than live in the worker.
 - **But keep a live dogfood leg** — an upstream contract change can outrun the mirror; the guard
   proves conformance to the contract *as mirrored*, not to the live engine.
+- **Canonical-form enforcement pairs with normalized containment** — the decoder refuses any doc
+  path where `posix.normalize(path) !== path`, so byte-exact membership/dedup/self-target rules
+  operate on canonical identities (aliases otherwise coexist as two corpus members) (#1999).
+- **Bind the source path into the decoded artifact at decode time**
+  (`decodeDreamManifest(raw, manifestPath)` stamps it) — one authority pairing the validated
+  object with the file children read, never two independent params (#1999).
+- **Runner failures translate to a flow-specific shape** (a semantic lane id or null) —
+  orchestration keys appear only in detail fields (#1999).
+- **Lane planners stay module-private** — assert composition by parsing the injected adapter's
+  recorded spawn (#1999).
 
 ## A code-owned wave boundary needs contract-complete pins, not just happy-path fan-out tests
 
@@ -293,6 +326,11 @@ A prompt-surface or tool-schema change also updates the prose-graph projection i
 `docs/design/prose-prompt-map.md` and its pinned fragment total. Those count failures are
 intentional ripple detectors, not unrelated test churn.
 
+The registered-tool census has a fourth leg: the docs-site table
+`docs/user-docs/reference/in-session/model-tools.md`, guarded by
+`docs/site/src/in-session-reference.test.mjs` (set-equal to `PERK_TOOLS` and a live harness
+registration) — keep that guard in mind when registering tools (#1997).
+
 For start/collect wave pairs, `executionMode: "sequential"` remains the concurrency guard. Collect
 races the pending result against a bounded, environment-overridable grace to absorb the completion-
 event versus `subagent_wait` wake race. An unsettled result soft-fails while retaining pending; the
@@ -381,6 +419,10 @@ Instances:
 - The pre-digest recipe for foreign-seam nodes (read the unimportable dependency's source at plan
   time, pin the envelope as module constants, keep unversioned names advertised-not-pinned) is
   recorded in `pi/subagents.md` — cross-link, don't restate.
+- An advisory multi-angle review followed by an immediate land silently converts findings into
+  debt — route them explicitly (a follow-up node, or fold into the next node touching the
+  module; PR #1910 → plan #1912 is the worked instance). A clean plan-fidelity lane does not
+  mean a clean PR (#2000, #1991, #1999).
 
 ## Cross-references
 
