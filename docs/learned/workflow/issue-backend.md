@@ -151,6 +151,13 @@ Durable design decisions:
 - **`/pull/N` is deliberately REJECTED.** A PR number is a *different object* than the plan-issue —
   silently resolving it would be a wrong-object footgun. Reject it with an `invalid_input` URL
   message.
+  *(Since narrowed: the rejection now lives only in this pure parser tier — direct
+  `parse_plan_id` callers such as `plan replan`/`watch`/`from` and objective ids keep it —
+  while `select_plan` (the network-side seam behind `implement`/`address`/`ready`/`plan
+  resume`) accepts PR selectors (`pr_number_from_url` + a digits fallback) and resolves them
+  to the plan, guarded by corroboration against the plan's own recorded `plan-header.pr`. The
+  wrong-object footgun stays closed: resolution is never silent — the head branch is only a
+  candidate, and a non-corroborating PR refuses typed.)*
 - **The peeled id stays OPAQUE past the parser.** No backend-host validation: a GitHub URL pasted
   into a Linear repo extracts a token that the configured backend then fails with the normal
   not-found error. This keeps the parser pure / backend-agnostic and usable *before* backend

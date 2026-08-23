@@ -103,7 +103,10 @@ export `PI_FFF_MODE=tools-and-ui` (or any valid mode) to override.
 
 Do the work on a branch; requires fresh context (cold-only). `PLAN` is an optional plan issue id
 (`42`, `#42`, or `ENG-123`) — or the plan's **issue URL** (GitHub `.../issues/N`; Linear
-`.../issue/IDENT` or `.../project/SLUG`), which is peeled to the id; omit it to implement the active
+`.../issue/IDENT` or `.../project/SLUG`), which is peeled to the id — or the plan's **PR**: its
+number or pasted `.../pull/N` URL, resolved to the plan it records (the PR's `plan-<id>` head
+names the candidate plan, and the plan's own recorded PR must corroborate it); omit it to
+implement the active
 saved plan in this repo (selection precedence and the strict `--` pass-through grammar are above).
 An explicit `PLAN` drives the launch directly and updates only the main-checkout selector —
 invoked from inside a linked worktree it never rewrites that worktree's own binding. An existing

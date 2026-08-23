@@ -165,7 +165,10 @@ The shared offline `issues-backend` check validates selection before network rea
 
 Plans, learnings, plan-scoped gists, and objective-scoped gists are GitHub Issues. Writes lazily
 ensure their relevant `perk:*` labels. Numeric ids are commonly rendered `#42`; id-taking commands
-accept `.../issues/42` URLs but reject `.../pull/42` URLs.
+accept `.../issues/42` URLs. The plan-selecting doors (`implement`, `address`, `ready`,
+`plan resume`) also accept the plan's PR (`.../pull/42` URL or a bare number that only resolves
+as a PR), admitted only when the plan's recorded plan-header `pr` corroborates it; other
+id-taking commands still reject `.../pull/42` URLs.
 
 A GitHub objective is one Issue. The issue body owns the objective header and canonical roadmap;
 its first comment owns the rendered roadmap table and Reconcilable prose. Metadata remains readable

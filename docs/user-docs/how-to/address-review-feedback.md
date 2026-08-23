@@ -19,7 +19,10 @@ the spine — you only enter it when there is feedback.)
 1. **Open the session.** Stay in the submit/implement session if it is still live, or open a fresh
    one with cold [`perk address [PLAN]`](../reference/cli.md#perk-address-plan) (the stage
    launcher). From the repository root, `perk address 1699` selects the plan explicitly (id,
-   `#id`, or the pasted issue URL) — no need to `cd` anywhere first: a missing `plan-<id>`
+   `#id`, or the pasted issue URL) — and since you're usually looking at the **PR** when you
+   decide to address it, the PR itself is an accepted selector too: paste its `.../pull/N` URL
+   or its number, and perk resolves it to the plan it records. No need to `cd` anywhere first:
+   a missing `plan-<id>`
    worktree is restored from the plan's remote branch automatically. Omit the id inside a plan
    worktree to address that worktree's own plan. Arguments for `pi` go after a bare `--`, e.g.
    `perk address 1699 -- --model provider/model`.

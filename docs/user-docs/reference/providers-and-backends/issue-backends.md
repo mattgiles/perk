@@ -59,7 +59,13 @@ the rendered roadmap table and Reconcilable prose.
 Each write lazily ensures the relevant repository label, including the `perk:plan`, `perk:learn`,
 `perk:gist`, `perk:consolidated`, and objective labels. Issue identifiers are numeric and are often
 shown as `#42`. Commands that accept an issue or objective id also accept a GitHub
-`.../issues/42` URL; a `.../pull/42` URL is rejected because a pull request is a different object.
+`.../issues/42` URL. The plan-selecting doors (`implement`, `address`, `ready`, `plan resume`)
+additionally accept the plan's **PR** — a `.../pull/42` URL, or a bare number that only resolves
+as a PR: the PR's `plan-<id>` head branch names the candidate plan, and the selection is admitted
+only when that plan's own recorded PR (the plan-header `pr` field, stamped on submit)
+corroborates the supplied number — a stray or fork-authored `plan-*` branch can never route to
+the wrong plan. Elsewhere (objective ids, `plan replan`/`watch`/`from`), a `.../pull/42` URL is
+still rejected: a pull request is a different object than the issue those commands address.
 
 ### Metadata and lifecycle
 
