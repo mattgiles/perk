@@ -22,6 +22,7 @@ import click
 
 from perk import github
 from perk.boundary import OutputModel
+from perk.cli.commands.objective.stack.shared import resolve_objective_id
 from perk.cli.commands.pr.review.shared import (
     remove_review_worktree,
     review_temp_ref,
@@ -166,16 +167,14 @@ def _dispatch(
             "--pr and --objective are mutually exclusive under --stack",
             error_type="invalid_input",
         )
-    if pr_number is None and objective_id is None:
-        raise UserFacingCliError(
-            "--stack needs --pr <n> (chain walk) or --objective <id> (delivery train)",
-            error_type="invalid_input",
+    if pr_number is not None:
+        stack = resolve_stack_from_pr(repo_root, pr_number)
+    else:
+        # Bare `--stack` resolves the objective from the worktree's plan-ref (the
+        # `cache.plan-ref` arm); no linked objective is the typed `no_objective` refusal.
+        stack = resolve_stack_from_objective(
+            repo_root, resolve_objective_id(repo_root, objective_id)
         )
-    stack = (
-        resolve_stack_from_pr(repo_root, pr_number)
-        if pr_number is not None
-        else resolve_stack_from_objective(repo_root, objective_id or "")
-    )
     return stack_checkout(repo_root=repo_root, worktree_root=worktree_root, stack=stack)
 
 

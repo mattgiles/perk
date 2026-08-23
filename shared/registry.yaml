@@ -250,3 +250,18 @@ stages:
     writes: [session.workflow-state, cache.scratch]  # the claim append; run_audit_wave writes <bundle>/verdicts.json under scratch
     predecessors: []          # a deliberately isolated node — the dev-only audit component
     successors: []
+
+  - id: stack-review
+    summary: Review a stacked PR train in the plannotator browser with judgment-routed per-PR posting.
+    mode: read-write          # deliberate parity with the warm /stack-review-browser door — the
+                              # human is present and nothing auto-posts (contracts.md §8.4)
+    worktree: none            # runs in the invoking checkout; the review checkout is the
+                              # detached review-<top> worktree the cold door materialized
+    doors: { warm: false, cold_local: true, cold_remote: false }  # interactive browser flow — local-only by design
+    run_id: { warm: keep, cold_local: mint, cold_remote: mint }
+    command: objective stack review  # label — the dedicated cold door under the objective stack group
+    requires: []
+    reads: []
+    writes: [github.pr, github.review-threads, session.workflow-state, cache.scratch]  # per-PR review posting via submit_pr_review; the claim append; scratch
+    predecessors: []          # a deliberately isolated node — the stacked-review component
+    successors: []

@@ -34,6 +34,9 @@ DEDICATED_STAGES: frozenset[str] = frozenset(
         # The audit stage's dedicated door is `perk-dev audit judge` (dev-only, in the perk-dev
         # package) — there is deliberately no generic `perk audit` launcher.
         "audit",
+        # The stack-review stage's dedicated door is `perk objective stack review` — no generic
+        # `perk stack-review` launcher.
+        "stack-review",
     }
 )
 

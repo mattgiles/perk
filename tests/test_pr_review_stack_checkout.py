@@ -198,9 +198,11 @@ def test_stack_flag_combination_refusals(git_repo, monkeypatch):
     assert r.exit_code == 1
     assert json.loads(r.stdout)["error_type"] == "invalid_input"
 
+    # Bare --stack resolves the objective via the worktree plan-ref — none linked here, so
+    # the ladder ends in the typed no_objective refusal (never a silent guess).
     r = runner.invoke(cli, ["pr", "review", "checkout", "--stack", "--json"])
     assert r.exit_code == 1
-    assert json.loads(r.stdout)["error_type"] == "invalid_input"
+    assert json.loads(r.stdout)["error_type"] == "no_objective"
 
     r = runner.invoke(cli, ["pr", "review", "checkout", "--json"])
     assert r.exit_code == 1

@@ -162,6 +162,12 @@ export interface ReviewBrowserCoreOpts {
   degradeNotice?: string;
   /** The respond → injection mapper (default: `respondMessage` — the single-PR contract). */
   respondMessageFor?: (outcome: CodeReviewOutcome) => string | null;
+  /**
+   * Whether the core injects `guidance` as a user message at the end (default true — the warm
+   * doors). The `open_stack_review` tool passes false and returns the guidance as its ok text
+   * instead (the tool result is the seeded session's delivery channel).
+   */
+  injectGuidance?: boolean;
 }
 
 /**
@@ -183,7 +189,7 @@ export async function openReviewBrowserCore(
   pi: ExtensionAPI,
   ctx: ExtensionContext,
   opts: ReviewBrowserCoreOpts,
-): Promise<void> {
+): Promise<boolean> {
   let started: StartedBrowser;
   try {
     started = await startPlannotatorBrowser(pi.events, {
@@ -199,7 +205,7 @@ export async function openReviewBrowserCore(
       `could not pick a free local port for the plannotator review server: ${detail}`,
       { alsoLog: true },
     );
-    return;
+    return false;
   }
 
   primeAnnotationSurface({ mode: "review", url: started.url });
@@ -224,7 +230,8 @@ export async function openReviewBrowserCore(
     }
   })();
 
-  pi.sendUserMessage(opts.guidance);
+  if (opts.injectGuidance !== false) pi.sendUserMessage(opts.guidance);
+  return true;
 }
 
 /**
