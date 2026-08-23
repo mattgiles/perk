@@ -1,6 +1,6 @@
 ---
 name: perk-pr-review-browser
-description: Human-in-the-loop adversarial PR review on the plannotator browser surface. Use when reviewing a PR with /pr-review-browser.
+description: Human-in-the-loop adversarial PR review on the plannotator browser surface. Use when reviewing a PR with /pr-review-browser or a whole PR stack with /stack-review-browser.
 stages: []
 disable-model-invocation: true
 ---
@@ -122,6 +122,42 @@ is announced, never silent.
   blocking in-TUI confirm dialog showing the event and batch summary; declining posts nothing.
 - **Headless refuses formal events unconditionally** (`headless_formal_event`) — re-run
   interactively or use `event: comment`.
+
+## Stack mode (`/stack-review-browser` + `perk objective stack review`)
+
+The stacked twin of this door: ONE plannotator session over the **combined diff** (stack base →
+top head), one adversarial wave over that combined diff (`start_review_wave` with
+`stack: true` — children fetch `perk pr review-context --pr <top> --stack` and report in
+combined-diff coordinates), then a **judgment-routed posting step** you own. The launch guidance
+carries the full flow; these are the deltas from single-PR mode:
+
+- **The posting contract does NOT flip here.** The browser session is a local-diff session with
+  NO attached PR — plannotator's platform-posting path does not exist. ALL posting is perk-side
+  after triage, through `submit_pr_review`: **one real call per member PR**, bottom→top, the
+  gate ladder per call (N formal posts = N confirms — accepted).
+- **Routing is your judgment, not a worker.** Inputs: the reconciled findings + returned
+  browser annotations (both combined-diff coordinates), the per-PR diffs from
+  `review-context --stack`, and the snapshot's layer order. Fold each finding into the OWNING
+  PR's review body by default; add an inline anchor only when its location is straightforwardly
+  identifiable in that PR's own diff; cross-cutting/unplaceable findings fold into the most
+  relevant PR's body.
+- **Re-anchoring flips:** in single-PR mode you never re-anchor a child's finding; in stack
+  mode YOU re-anchor combined-diff findings into per-PR coordinates — validated by the per-PR
+  dry-run repair loop (dry-run ALL batches before ANY real post). Sanity-check each
+  annotation's quoted context against the target PR's diff before anchoring: the browser lets
+  the human switch diff views, and annotations carry no diff-mode identity.
+- **Partial-failure honesty:** every real success appends a `{pr, event, at}` row to the
+  `review_posts` workflow-state ledger, and the tool ENFORCES skip-on-resume — a real post to
+  a PR that already has a row refuses with `already_posted` (`allow_repost: true` is the
+  deliberate override, never a workaround). On any failure or decline mid-sequence, STOP and
+  surface posted-vs-pending from the ledger; the ledger is best-effort, so where a row is
+  MISSING verify posted-vs-pending against GitHub before re-posting — never replay a posted
+  review.
+- **Entry:** warm `/stack-review-browser [objective|pr:<n>|URL] [focus]` (bare numbers are
+  objective ids by definition), or the cold `perk objective stack review` launcher whose
+  session makes ONE parameterless `open_stack_review` call. Cleanup:
+  `perk pr review cleanup --pr <top>`. Degraded mode is unchanged — the posting protocol never
+  depended on the browser.
 
 ## Untrusted text, untrusted code
 

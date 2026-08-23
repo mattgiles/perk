@@ -35,6 +35,7 @@ import { registerPrReviewTerminal } from "./doors/prReviewTerminal.ts";
 import { registerReady } from "./doors/ready.ts";
 import { registerReviewWaveTools } from "./doors/reviewWaveTools.ts";
 import { registerSelfcheck } from "./doors/selfcheck.ts";
+import { registerOpenStackReview, registerStackReviewBrowser } from "./doors/stackReviewBrowser.ts";
 import { registerSubmit } from "./doors/submit.ts";
 import { registerSubmitPrReview } from "./doors/submitPrReview.ts";
 import { registerGistAuthor } from "./factories/gistAuthor.ts";
@@ -647,6 +648,12 @@ export default function (pi: ExtensionAPI) {
   // in the background (pre-PR it absorbs the since-base local browser review); posting is the
   // human's own platform-post from the UI, with `submit_pr_review` for request-changes only.
   registerPrReviewBrowser(pi);
+
+  // The warm `/stack-review-browser` door + its cold-launch twin (`open_stack_review`): the
+  // stacked-PR browser review over the combined base→top diff — one reviewer wave with
+  // `stack: true`, then judgment-routed per-PR posting through `submit_pr_review`.
+  registerStackReviewBrowser(pi);
+  registerOpenStackReview(pi);
 
   // The warm `/plan-review-browser` door: the summonable streaming draft review — the
   // plannotator plan-review browser on the working plan draft, draft reviewers streaming

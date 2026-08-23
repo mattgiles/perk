@@ -372,6 +372,57 @@ export function respondMessage(outcome: CodeReviewOutcome): string | null {
   return parts.join("\n\n");
 }
 
+/**
+ * The stack-flow respond → injection mapping (`/stack-review-browser`): the same arms as
+ * `respondMessage`, re-worded for the stack posting policy — a local-diff session has NO
+ * attached PR, so the browser posted nothing and ALL GitHub posting is perk-side after triage
+ * (per-PR, judgment-routed, human-approved). Returned annotations are treated as COMBINED-DIFF
+ * coordinates (stack base → top head).
+ */
+export function stackRespondMessage(outcome: CodeReviewOutcome): string | null {
+  if (outcome.status !== "handled") return null;
+  if (outcome.exit) {
+    return (
+      "The human closed the plannotator review without submitting — ask them how they want " +
+      "to proceed."
+    );
+  }
+  if (outcome.approved && outcome.annotations.length === 0) {
+    return (
+      "The human approved the stack review in plannotator (no annotations) — the review is " +
+      "complete. This local-diff session has no attached PR, so nothing was posted from the " +
+      "browser: ask the human whether they want per-PR COMMENT reviews posted (the routing + " +
+      "per-PR posting protocol via `submit_pr_review`) or nothing — perk posts only what the " +
+      "human approves."
+    );
+  }
+  const parts: string[] = [outcome.feedback ?? "The plannotator stack review returned."];
+  if (outcome.annotations.length > 0) {
+    parts.push(`\`\`\`json\n${JSON.stringify(outcome.annotations, null, 2)}\n\`\`\``);
+    parts.push(
+      "These annotations are in COMBINED-DIFF coordinates (stack base → top head): " +
+        "source-less ones are human-authored; `perk:*`-badged ones are your own findings " +
+        "returning. This local-diff session has no attached PR — nothing was posted from the " +
+        "browser, so ALL GitHub posting is perk-side: run the routing + per-PR posting " +
+        "protocol from the guidance (route each finding to the PR that introduced it over the " +
+        "per-PR diffs, sanity-check each quoted context against the target PR's diff, dry-run " +
+        "ALL per-PR batches first, then post bottom→top via `submit_pr_review`) — posting only " +
+        "what the human approves.",
+    );
+  } else {
+    // Feedback without annotations still needs the stack posting framing — the human may
+    // expect their words to reach GitHub, and nothing was posted from the browser.
+    parts.push(
+      "No annotations came back with this feedback. This local-diff session has no attached " +
+        "PR — nothing was posted from the browser, so any GitHub posting stays perk-side: if " +
+        "the feedback warrants per-PR reviews, run the guidance's routing + per-PR posting " +
+        "protocol (dry-run ALL per-PR batches first, then post bottom→top via " +
+        "`submit_pr_review`) — posting only what the human approves.",
+    );
+  }
+  return parts.join("\n\n");
+}
+
 /** The minimal message sink `routeBrowserRespond` needs (an `ExtensionAPI` slice). */
 export interface RespondSink {
   sendUserMessage(content: string, options?: { deliverAs?: "steer" | "followUp" }): void;
@@ -379,20 +430,24 @@ export interface RespondSink {
 
 /**
  * Route a settled PR-mode respond into the session (the idle-vs-streaming injection route),
- * shared by `/pr-review-browser`'s PR modes. `scope` is the invoking surface's report scope.
+ * shared by `/pr-review-browser`'s PR modes and `/stack-review-browser`. `scope` is the
+ * invoking surface's report scope; `messageFor` is the injectable respond → message mapper
+ * (default `respondMessage` — the single-PR posting contract; the stack flow supplies
+ * `stackRespondMessage`).
  */
 export function routeBrowserRespond(
   pi: RespondSink,
   ctx: ReportTarget & Pick<ExtensionContext, "isIdle">,
   out: CodeReviewOutcome,
   scope: string,
+  messageFor: (outcome: CodeReviewOutcome) => string | null = respondMessage,
 ): void {
   if (out.status === "unavailable" || out.status === "error") {
     // Degrade-mid-flow: the flow continues in-session (findings table; posting unchanged).
     report(ctx, scope, "error", out.warning, { alsoLog: true });
     return;
   }
-  const message = respondMessage(out);
+  const message = messageFor(out);
   if (message === null) return; // aborted: the turn was interrupted — no-op
   if (ctx.isIdle()) {
     pi.sendUserMessage(message);
@@ -539,18 +594,35 @@ async function startPlannotatorSurface<T>(
 
 /**
  * The composable code-review browser open: the engine with launch = the `code-review` bridge
- * request (the PR-mode payload `{prUrl, cwd}` byte-for-byte — plannotator's defaults, including
- * its own local checkout for Ask AI / Full-stack: deliberately NOT `useLocal: false`, the human
- * chose the full surface) and the `/api/diff` readiness route (`bridgePromise` is the single
- * respond — code-review has no handshake).
+ * request and the `/api/diff` readiness route (`bridgePromise` is the single respond —
+ * code-review has no handshake). PR mode passes `{prUrl, cwd}` — the payload stays
+ * byte-identical to the original shape because the optional local-mode fields (`diffType`,
+ * `defaultBranch`) render ONLY when defined (`requestPlannotatorCodeReview` builds the payload
+ * conditionally). The stack door supplies the local-mode trio
+ * `{cwd, diffType: "since-base", defaultBranch: "origin/<stack base>"}` instead of a PR URL.
+ * Plannotator's defaults are otherwise untouched (deliberately NOT `useLocal: false` — the
+ * human chose the full surface).
  */
 export async function startPlannotatorBrowser(
   bus: PlannotatorBus,
-  opts: { prUrl: string; cwd: string; signal?: AbortSignal },
+  opts: {
+    cwd: string;
+    prUrl?: string;
+    diffType?: string;
+    defaultBranch?: string;
+    signal?: AbortSignal;
+  },
   deps: StartBrowserDeps = {},
 ): Promise<StartedBrowser> {
   return await startPlannotatorSurface(
-    (signal) => requestPlannotatorCodeReview(bus, { prUrl: opts.prUrl, cwd: opts.cwd, signal }),
+    (signal) =>
+      requestPlannotatorCodeReview(bus, {
+        cwd: opts.cwd,
+        ...(opts.prUrl !== undefined ? { prUrl: opts.prUrl } : {}),
+        ...(opts.diffType !== undefined ? { diffType: opts.diffType } : {}),
+        ...(opts.defaultBranch !== undefined ? { defaultBranch: opts.defaultBranch } : {}),
+        ...(signal !== undefined ? { signal } : {}),
+      }),
     CODE_REVIEW_READINESS_PROBE_PATH,
     opts.signal,
     deps,

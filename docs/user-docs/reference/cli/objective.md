@@ -284,10 +284,11 @@ exit code conveys an unavailable train or an aborted repair (`1`) while the asse
 
 ### `perk objective stack`
 
-The stacked delivery-train worker subgroup: observe, synchronize, recover, and land an
+The stacked delivery-train worker subgroup: observe, synchronize, recover, land, and review an
 objective's stacked delivery train — `status` (report the reconstructed train), `sync` (the
 published-suffix cascade), `recover` (conclude-only recovery plus the orphaned-residue sweep),
-and `land` (the atomic landing mutation and its `--dry-run` readiness preview). Each verb is
+`land` (the atomic landing mutation and its `--dry-run` readiness preview), and `review` (the
+stacked-PR browser-review launcher). Each verb is
 detailed below; for the operational repair flow see
 [How to recover a stacked train](../../how-to/recover-a-stacked-train.md).
 
@@ -531,6 +532,33 @@ failures (`land_blocked` — the readiness report rides the failure, `land_faile
 foreign merge request exists for the top PR, `land_drift`, `confirmation_required`,
 `operation_in_progress`, `plan_not_found`, an incremental objective as `not_stacked`,
 reconstruction failures, `no_objective`); `2` = not-a-repo.
+
+### `perk objective stack review [OBJECTIVE]`
+
+Launch a **stacked-PR browser review**: one plannotator session over the train's combined diff
+(stack base → top head), one adversarial reviewer wave, and judgment-routed per-PR posting
+(launcher; the cold twin of the warm
+[`/stack-review-browser`](../in-session/review-and-authoring.md#stack-review-browser) door).
+
+`OBJECTIVE` is the objective id/URL (omitted, the worktree plan-ref's linked objective);
+`--pr <n|url>` instead walks the **base-ref chain** from any member PR — non-perk stacks
+included (mutually exclusive with the positional). `--focus TEXT` threads an operator focus
+note to the reviewers and the triage guidance. Resolution refusals are typed and exit `1`
+before any launch (`not_a_stack` — a single PR is `/pr-review-browser` territory,
+`stack_too_deep`, `fork_unsupported`, `ambiguous_stack`, `stack_cycle`, `not_stacked`,
+`stack_discontiguous`, `no_objective`); train blockers and drift observations are stderr
+notes that proceed.
+
+A real run materializes the combined-diff checkout through the same `--stack` checkout
+implementation as the warm door (one fetch, fail-closed topology validation, the top head at
+`review-<top>`), then launches the dedicated `stack-review` stage session seeded to make ONE
+`open_stack_review` call — the pinned stack snapshot rides the launch handoff, so the session
+never re-resolves the stack. Local-only by design (no `--remote` — the flow is an interactive
+browser session). `--dry-run` is **side-effect-free**: it resolves the stack read-only (no
+fetch, no checkout, no handoff write, no launch) and prints the launch plan plus the resolved
+stack table; the `--json` preview carries the would-be `checkout_path`, `base_sha: null` and
+per-member `head_sha: null` (not computable without the fetch), the launch `argv`, and the
+handoff-blob preview with the same nulls plus `dry_run: true`.
 
 ## Related
 

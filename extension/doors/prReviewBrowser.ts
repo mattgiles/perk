@@ -45,6 +45,7 @@ import { type ReportTarget, report } from "../surfaces/report.ts";
 import { clearAnnotationSurface, primeAnnotationSurface } from "./annotationPush.ts";
 import { type CheckoutOk, decodeCheckout } from "./hunkHandoff.ts";
 import {
+  type CodeReviewOutcome,
   decodePrUrl,
   LOCAL_REVIEW_DIFF_TYPE,
   plannotatorPresent,
@@ -95,8 +96,9 @@ export function prReviewBrowserGuidance(opts: PrReviewBrowserGuidanceOpts): stri
 /**
  * The degrade notice injected when the browser never comes up — the model renders the findings
  * in-session and runs the same triage conversationally; the posting contract is unchanged.
+ * Exported as the `openReviewBrowserCore` default (the stack door supplies its own).
  */
-const DEGRADE_NOTICE =
+export const DEGRADE_NOTICE =
   "The plannotator browser review is unavailable (the review server never became ready) — " +
   "degrade in-session: render the reviewers' reconciled findings as a table in your reply and " +
   "run the same triage loop conversationally. The annotation surface is cleared — " +
@@ -116,10 +118,13 @@ export async function observeBrowserReadiness(
   pi: RespondSink,
   ctx: ReportTarget & Pick<ExtensionContext, "isIdle">,
   started: StartedBrowser,
+  opts?: { scope?: string; degradeNotice?: string },
 ): Promise<void> {
+  const scope = opts?.scope ?? SCOPE;
+  const degradeNotice = opts?.degradeNotice ?? DEGRADE_NOTICE;
   const state = await started.readiness;
   if (state === "ready") {
-    report(ctx, SCOPE, "info", `plannotator is up at ${started.url} — browser opening`);
+    report(ctx, scope, "info", `plannotator is up at ${started.url} — browser opening`);
     return;
   }
   if (state === "aborted") return; // the turn was interrupted — no-op
@@ -129,71 +134,95 @@ export async function observeBrowserReadiness(
   }
   report(
     ctx,
-    SCOPE,
+    scope,
     "error",
     `the plannotator review server did not become ready at ${started.url} — the browser ` +
       "review is unavailable",
     { alsoLog: true },
   );
   if (ctx.isIdle()) {
-    pi.sendUserMessage(DEGRADE_NOTICE);
+    pi.sendUserMessage(degradeNotice);
   } else {
-    pi.sendUserMessage(DEGRADE_NOTICE, { deliverAs: "followUp" });
+    pi.sendUserMessage(degradeNotice, { deliverAs: "followUp" });
   }
   // Consistent with "render findings in-session": a post-degrade push_annotations refuses
   // loudly (`no_surface`). Idempotent beside the bridge-settle clear.
   clearAnnotationSurface();
 }
 
+/** The parameterized browser-lifecycle core's options (see `openReviewBrowserCore`). */
+export interface ReviewBrowserCoreOpts {
+  /** The invoking door's report scope. */
+  scope: string;
+  /** The `startPlannotatorBrowser` opts minus `signal` (the core threads `ctx.signal`). */
+  browserOpts: { cwd: string; prUrl?: string; diffType?: string; defaultBranch?: string };
+  /** The fully composed guidance to inject (binding suffix included by the caller). */
+  guidance: string;
+  /** The degrade notice for the browser-never-ready arm (default: the PR-mode notice). */
+  degradeNotice?: string;
+  /** The respond → injection mapper (default: `respondMessage` — the single-PR contract). */
+  respondMessageFor?: (outcome: CodeReviewOutcome) => string | null;
+  /**
+   * Whether the core injects `guidance` as a user message at the end (default true — the warm
+   * doors). The `open_stack_review` tool passes false and returns the guidance as its ok text
+   * instead (the tool result is the seeded session's delivery channel).
+   */
+  injectGuidance?: boolean;
+}
+
 /**
- * The shared PR-mode arm (foreign + active): start the browser open in the background, inject
- * the mode guidance immediately (the URL is deterministic once the port is picked), and return —
- * the readiness observation and the bridge respond both ride background tasks. While plannotator
- * sets up, its in-process `console.error` chatter re-routes through the TUI-safe report() seam
- * (the debounce restores once setup goes quiet, with the `finally` as a backstop).
+ * The full browser-lifecycle core, extracted from the PR-mode arm and parameterized for the
+ * stack door: start the browser open in the background, prime the annotation surface the
+ * moment the port is picked (push_annotations now serves this browser session), observe
+ * readiness in the background (degrade notice on never-ready), route the bridge respond
+ * through the injectable mapper, clear the surface on settle, and inject the guidance
+ * immediately (the URL is deterministic once the port is picked). While plannotator sets up,
+ * its in-process `console.error` chatter re-routes through the TUI-safe report() seam (the
+ * debounce restores once setup goes quiet, with the `finally` as a backstop).
+ *
+ * Accepted stale-clear edge (unchanged from the pre-extraction arm): a second browser door
+ * while this browser is still open re-primes (a new browser session supersedes everything),
+ * and THIS bridge's later settle would clear the second session's surface — rare and loud
+ * (the fixed-port EADDRINUSE caveat, contracts §8.4), noted, not engineered around.
  */
-async function openBrowserAndGuide(
+export async function openReviewBrowserCore(
   pi: ExtensionAPI,
   ctx: ExtensionContext,
-  opts: PrReviewBrowserGuidanceOpts,
-): Promise<void> {
+  opts: ReviewBrowserCoreOpts,
+): Promise<boolean> {
   let started: StartedBrowser;
   try {
     started = await startPlannotatorBrowser(pi.events, {
-      prUrl: opts.prUrl,
-      cwd: ctx.cwd,
+      ...opts.browserOpts,
       signal: ctx.signal,
     });
   } catch (error) {
     const detail = error instanceof Error ? error.message : String(error);
     report(
       ctx,
-      SCOPE,
+      opts.scope,
       "error",
       `could not pick a free local port for the plannotator review server: ${detail}`,
       { alsoLog: true },
     );
-    return;
+    return false;
   }
 
-  // Prime the annotation surface the moment the port is picked (the URL is deterministic — see
-  // the background-open header note): push_annotations now serves this browser session. Accepted
-  // stale-clear edge: a second /pr-review-browser while this browser is still open re-primes (a
-  // new browser session supersedes everything), and THIS bridge's later settle would clear the
-  // second session's surface — the overlap is already rare and loud (the fixed-port EADDRINUSE
-  // caveat, contracts §8.4), so it is noted, not engineered around.
   primeAnnotationSurface({ mode: "review", url: started.url });
 
-  void observeBrowserReadiness(pi, ctx, started);
+  void observeBrowserReadiness(pi, ctx, started, {
+    scope: opts.scope,
+    ...(opts.degradeNotice !== undefined ? { degradeNotice: opts.degradeNotice } : {}),
+  });
 
   void (async () => {
-    const interceptor = interceptConsoleError((line) => report(ctx, SCOPE, "info", line), {
+    const interceptor = interceptConsoleError((line) => report(ctx, opts.scope, "info", line), {
       // plannotator can pause up to ~4s between setup lines — keep the quiet window above that.
       quietMs: 6000,
     });
     try {
       const out = await started.bridgePromise;
-      routeBrowserRespond(pi, ctx, out, SCOPE);
+      routeBrowserRespond(pi, ctx, out, opts.scope, opts.respondMessageFor);
     } finally {
       // The browser session is over — drop the surface so a later push refuses (`no_surface`).
       clearAnnotationSurface();
@@ -201,7 +230,26 @@ async function openBrowserAndGuide(
     }
   })();
 
-  pi.sendUserMessage(prReviewBrowserGuidance(opts) + bindingSuffix(ctx.cwd, `command:${SCOPE}`));
+  if (opts.injectGuidance !== false) pi.sendUserMessage(opts.guidance);
+  return true;
+}
+
+/**
+ * The shared PR-mode arm (foreign + active): the extracted core with this door's values —
+ * PR-mode browser opts, the mode guidance + binding suffix, and the default degrade notice /
+ * respond mapper (the byte-stability of the pre-extraction behavior is proven by this door's
+ * untouched tests).
+ */
+async function openBrowserAndGuide(
+  pi: ExtensionAPI,
+  ctx: ExtensionContext,
+  opts: PrReviewBrowserGuidanceOpts,
+): Promise<void> {
+  await openReviewBrowserCore(pi, ctx, {
+    scope: SCOPE,
+    browserOpts: { prUrl: opts.prUrl, cwd: ctx.cwd },
+    guidance: prReviewBrowserGuidance(opts) + bindingSuffix(ctx.cwd, `command:${SCOPE}`),
+  });
 }
 
 // ------------------------------------------------------------------------ registration

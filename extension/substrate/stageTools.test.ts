@@ -12,6 +12,7 @@ import {
   objectiveSyncGuidance,
 } from "../doors/objectiveStack.ts";
 import { prReviewGuidance } from "../doors/prReview.ts";
+import { stackReviewGuidance } from "../doors/stackReviewBrowser.ts";
 import { reconcileGuidance } from "../factories/objectivePlan.ts";
 import {
   loadPerkSession,
@@ -626,6 +627,53 @@ const DRIVE_COVERAGE: readonly {
         pr_url: "https://example.test/pull/42",
         worktree: "/tmp/wt",
         directive: "focus",
+      }),
+  },
+  {
+    // The stacked-review door: registered globally but realistically lands in the worktree
+    // family (a warm mid-loop gesture) or the dedicated `perk objective stack review` launch
+    // session (where `open_stack_review` returns the same guidance).
+    drive: "stages/stack-review-browser/stack.md (/stack-review-browser + open_stack_review)",
+    stages: [...WORKTREE_STAGES, "stack-review"],
+    text: () =>
+      stackReviewGuidance({
+        topPr: 42,
+        checkout: "/tmp/review-42",
+        stackBase: "main",
+        members: [
+          {
+            pr: 41,
+            url: "https://example.test/pull/41",
+            branch: "plan-301",
+            head_sha: "a".repeat(40),
+            base_ref: "main",
+            node_id: "1.1",
+            plan_id: "301",
+          },
+          {
+            pr: 42,
+            url: "https://example.test/pull/42",
+            branch: "plan-302",
+            head_sha: "b".repeat(40),
+            base_ref: "plan-301",
+            node_id: null,
+            plan_id: null,
+          },
+        ],
+        notes: ["drift: PR #41 head moved"],
+        directive: "focus",
+      }),
+  },
+  {
+    // The stack-review cold seed: the launched session's initial prompt names the ONE
+    // open_stack_review call, so the tool must be active in the stack-review stage.
+    drive: "stages/stack-review/cold.md (perk objective stack review seed)",
+    stages: ["stack-review"],
+    text: () =>
+      render("stages/stack-review/cold.md", {
+        stack_phrase: "objective #77's delivery train",
+        member_count: "3",
+        top_pr: "42",
       }),
   },
   {

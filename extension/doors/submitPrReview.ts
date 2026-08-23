@@ -1,18 +1,22 @@
-// The warm `submit_pr_review` tool — the agent-driven curated-posting surface shared by the two
-// PR-review doors (`/pr-review-terminal`, `/pr-review-browser`).
+// The warm `submit_pr_review` tool — the agent-driven curated-posting surface shared by the
+// PR-review doors (`/pr-review-terminal`, `/pr-review-browser`, `/stack-review-browser`).
 //
 // `submit_pr_review` implements the per-door posting contract (contracts §8.4): nothing perk-
 // driven reaches GitHub before the human triage; ALL perk-side posting flows through this tool
 // on every door (`gh` mutations and direct `perk pr review-submit` calls are forbidden); the
 // verdict lands last, atomically with the comments. On the terminal door this tool is the sole
-// posting path. On the browser door the human platform-posts from the plannotator UI — that
-// native posting IS the GitHub path; perk composes nothing by default and posts only what the
-// human explicitly hands it (typically a request-changes verdict, which the UI cannot post). It
-// delegates to the Python cold door (`perk pr review-submit` — mutations canonical in Python)
-// via `runColdDoor` (the batch rides the run-scratch stdin channel), then appends `last_review`
-// to `perk:workflow-state`. The human gate splits: explicit conversational go-ahead ALWAYS
-// (pinned in the guidelines/skill); formal events (`approve`/`request-changes`) additionally get
-// the structural gate — headless refuses, interactive raises a blocking `ctx.ui.confirm`.
+// posting path. On the single-PR browser door the human platform-posts from the plannotator
+// UI — that native posting IS the GitHub path; perk composes nothing by default and posts only
+// what the human explicitly hands it (typically a request-changes verdict, which the UI cannot
+// post). On the stack door the local-diff session has NO attached PR, so ALL posting is
+// perk-side after triage: one real call per member PR, bottom→top, each under its own dry-run
+// anchor validation. It delegates to the Python cold door (`perk pr review-submit` — mutations
+// canonical in Python) via `runColdDoor` (the batch rides the run-scratch stdin channel), then
+// appends `last_review` AND the accumulating `review_posts` ledger row to `perk:workflow-state`
+// (the stack flow's resume authority — posted PRs are skipped, never replayed). The human gate
+// splits: explicit conversational go-ahead ALWAYS (pinned in the guidelines/skill); formal
+// events (`approve`/`request-changes`) additionally get the structural gate — headless refuses,
+// interactive raises a blocking `ctx.ui.confirm`.
 // `dry_run` is the anchor-repair loop: no gates, no record, nothing posted.
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
@@ -34,7 +38,12 @@ import {
   stringParam,
   type ToolParams,
 } from "../substrate/toolParams.ts";
-import { appendWorkflowState, type EntrySink } from "../substrate/workflowState.ts";
+import {
+  appendWorkflowState,
+  branchOf,
+  type EntrySink,
+  rebuildWorkflowState,
+} from "../substrate/workflowState.ts";
 import type { Severity } from "../surfaces/report.ts";
 
 // ------------------------------------------------------------------------ params
@@ -55,6 +64,7 @@ export interface SubmitParams {
   body: string;
   comments?: SubmitComment[];
   dry_run?: boolean;
+  allow_repost?: boolean;
 }
 
 /** Decode the optional `comments` array; null = present-but-malformed (whole-batch refusal). */
@@ -87,7 +97,7 @@ function decodeSubmitComments(p: ToolParams): SubmitComment[] | undefined | null
  * malformed field ⇒ null (whole-batch refusal). `pr` must be an int; `event` exactly one of the
  * three flag spellings; `body` a string (EMPTY ALLOWED — the cold door owns the event-conditioned
  * body rule and reports `bad_batch`); each `comments` row strict on
- * path/line(int)/side(LEFT|RIGHT)/body; `dry_run` a boolean.
+ * path/line(int)/side(LEFT|RIGHT)/body; `dry_run` and `allow_repost` booleans.
  */
 export function decodeSubmitParams(params: unknown): SubmitParams | null {
   const p = paramsOf(params);
@@ -102,9 +112,12 @@ export function decodeSubmitParams(params: unknown): SubmitParams | null {
   if (comments === null) return null;
   const dryRun = booleanParam(p, "dry_run");
   if (dryRun === null) return null;
+  const allowRepost = booleanParam(p, "allow_repost");
+  if (allowRepost === null) return null;
   const result: SubmitParams = { pr, event, body };
   if (comments !== undefined) result.comments = comments;
   if (dryRun !== undefined) result.dry_run = dryRun;
+  if (allowRepost !== undefined) result.allow_repost = allowRepost;
   return result;
 }
 
@@ -167,6 +180,42 @@ function decodeInvalidAnchors(payload: ColdJson): InvalidAnchor[] | null {
   return rows;
 }
 
+// ------------------------------------------------------------------------ the posting ledger
+
+/** One `review_posts` ledger row: a REAL submission that reached GitHub. */
+export interface ReviewPostRow {
+  pr: number;
+  event: string;
+  at: string;
+}
+
+/**
+ * Tolerant re-narrow of the rebuilt `review_posts` list (best-effort tier: a malformed row is
+ * dropped, never a refusal — the ledger only ever grows from this tool's own writes).
+ */
+export function reviewPostsOf(raw: unknown): ReviewPostRow[] {
+  if (!Array.isArray(raw)) return [];
+  const rows: ReviewPostRow[] = [];
+  for (const item of raw) {
+    const row = paramsOf(item);
+    if (row === null) continue;
+    if (typeof row.pr !== "number" || !Number.isInteger(row.pr)) continue;
+    if (typeof row.event !== "string" || typeof row.at !== "string") continue;
+    rows.push({ pr: row.pr, event: row.event, at: row.at });
+  }
+  return rows;
+}
+
+/** Ledger equality for the read-back verification (order-sensitive — posting order matters). */
+function reviewPostsEqual(rebuilt: unknown, expected: unknown): boolean {
+  const a = reviewPostsOf(rebuilt);
+  const b = reviewPostsOf(expected);
+  if (a.length !== b.length) return false;
+  return a.every(
+    (row, i) => row.pr === b[i]?.pr && row.event === b[i]?.event && row.at === b[i]?.at,
+  );
+}
+
 /** Flag spelling → the REST wire spelling shown in the human confirm. */
 const WIRE_EVENT: Record<ReviewEvent, string> = {
   approve: "APPROVE",
@@ -208,6 +257,27 @@ export async function submitPrReview(
   const fail = failFor(ctx, "review", "submit_pr_review");
   const dryRun = params.dry_run === true;
   const commentCount = params.comments?.length ?? 0;
+
+  // The enforced resume guard (before the confirm AND the cold-door mutation): a PR that
+  // already has a review_posts ledger row in this session is a confirmed success — a repeat
+  // real post is refused unless explicitly deliberate. A ledger row can only be MISSING
+  // spuriously (best-effort tier), never present spuriously — so the guard refuses on
+  // presence and stays silent on absence (a missing row still means: verify posted-vs-pending
+  // against GitHub before re-posting).
+  if (!dryRun && params.allow_repost !== true) {
+    const prior = reviewPostsOf(rebuildWorkflowState(branchOf(ctx)).review_posts).filter(
+      (row) => row.pr === params.pr,
+    );
+    const last = prior.at(-1);
+    if (last !== undefined) {
+      return fail(
+        `a ${last.event} review was already posted to PR #${params.pr} in this session ` +
+          `(review_posts row at ${last.at}) — on a stack resume skip this member; pass ` +
+          "allow_repost: true only for a deliberate second review of the same PR",
+        "already_posted",
+      );
+    }
+  }
 
   if (!dryRun && params.event !== "comment") {
     if (!ctx.hasUI) {
@@ -305,6 +375,21 @@ export async function submitPrReview(
     failure: "last_review read-back failed",
   });
 
+  // The accumulating per-PR ledger (read-rebuild-append): ordered rows, one per real success —
+  // the stack flow's partial-outcome/resume authority. Same best-effort tier as last_review.
+  const posts: ReviewPostRow[] = [
+    ...reviewPostsOf(rebuildWorkflowState(branchOf(ctx)).review_posts),
+    { pr: record.pr, event: params.event, at: record.at },
+  ];
+  appendWorkflowState(pi, ctx, {
+    data: { review_posts: posts },
+    field: "review_posts",
+    expected: posts,
+    scope: "review",
+    failure: "review_posts read-back failed",
+    equals: reviewPostsEqual,
+  });
+
   let text =
     `submitted ${params.event} review to PR #${record.pr} ` +
     `(${data.comment_count ?? commentCount} inline comment(s))`;
@@ -320,10 +405,10 @@ export async function submitPrReview(
 
 const TOOL_GUIDELINES = [
   "Call submit_pr_review only after the human triage has settled the batch AND the human has explicitly approved posting — nothing reaches GitHub before triage.",
-  "Validate first with dry_run: true and repair any reported anchors until validation passes; a dry-run never posts, never gates, and records nothing.",
-  "Make ONE real call: comments + body + event land atomically in a single review — the verdict never lands before the comments.",
+  "Validate first with dry_run: true and repair any reported anchors until validation passes; a dry-run never posts, never gates, and records nothing. A stack review dry-runs ALL per-PR batches before ANY real post.",
+  "Make ONE real call per target PR: comments + body + event land atomically in a single review — the verdict never lands before the comments. A stack review posts one review per member PR, bottom→top; each real success appends a {pr, event, at} row to the review_posts workflow-state ledger. The tool ENFORCES skip-on-resume: a real post to a PR that already has a ledger row is refused (already_posted) unless allow_repost: true — a deliberate second review only. A MISSING row is not proof of no post (the ledger is best-effort): verify posted-vs-pending against GitHub before re-posting.",
   "Formal events (approve / request-changes) additionally raise a blocking in-TUI confirm; headless sessions refuse them (use event: comment or re-run interactively).",
-  "All perk-side GitHub posting flows through this tool on both review doors — never post via gh or bash (direct perk pr review-submit calls are forbidden). On /pr-review-terminal this tool is the sole posting path; on /pr-review-browser the plannotator UI's native platform-posting is the human's own GitHub path, and perk posts only what the human explicitly hands it (typically a request-changes verdict).",
+  "All perk-side GitHub posting flows through this tool on every review door — never post via gh or bash (direct perk pr review-submit calls are forbidden). On /pr-review-terminal this tool is the sole posting path. On /pr-review-browser the plannotator UI's native platform-posting is the human's own GitHub path, and perk posts only what the human explicitly hands it (typically a request-changes verdict). On /stack-review-browser the local-diff session has NO attached PR, so ALL posting is perk-side after triage.",
 ];
 
 // ------------------------------------------------------------------------ registration
@@ -334,9 +419,12 @@ export function registerSubmitPrReview(pi: ExtensionAPI): void {
     name: "submit_pr_review",
     label: "Submit PR review",
     description:
-      "Submit the human-curated review-door outcome to the foreign PR as ONE atomic review " +
-      "(comments + body + event) via the perk cold door. dry_run validates the anchors without " +
-      "posting (the repair loop); a real submission records last_review in workflow-state.",
+      "Submit the human-curated review-door outcome to the target PR as ONE atomic review " +
+      "(comments + body + event) via the perk cold door — the posting surface of the " +
+      "/pr-review-terminal, /pr-review-browser, and /stack-review-browser doors (a stack " +
+      "review makes one real call per member PR). dry_run validates the anchors without " +
+      "posting (the repair loop); a real submission records last_review and appends the " +
+      "review_posts ledger row in workflow-state.",
     promptSnippet: "Submit the curated review batch to the PR",
     promptGuidelines: TOOL_GUIDELINES,
     executionMode: "sequential",
@@ -363,7 +451,9 @@ export function registerSubmitPrReview(pi: ExtensionAPI): void {
           type: "array",
           description:
             "The curated inline comments — human-authored or human-approved only, each anchored " +
-            "to a line in the PR diff (never re-anchor a child's finding).",
+            "to a line in the PR diff. Single-PR mode: never re-anchor a child's finding. Stack " +
+            "mode: the parent re-anchors combined-diff findings into per-PR coordinates under " +
+            "the dry-run loop.",
           items: {
             type: "object",
             additionalProperties: false,
@@ -385,6 +475,13 @@ export function registerSubmitPrReview(pi: ExtensionAPI): void {
           description:
             "Validate the batch + anchors without posting (the anchor-repair loop). No gates, " +
             "no last_review record.",
+        },
+        allow_repost: {
+          type: "boolean",
+          description:
+            "Deliberately post ANOTHER review to a PR that already has a review_posts ledger " +
+            "row in this session — the enforced resume guard refuses with already_posted " +
+            "otherwise. Never pass it to work around a stack-resume refusal.",
         },
       },
     },

@@ -187,6 +187,16 @@ and compares that number before fetching context. Drift fails `review_target_cha
 `--pr <n>` instead resolves an arbitrary PR plan-ref-free (`plan_body` is null; a nonexistent PR
 is `pr_not_found`). The two flags are mutually exclusive; values must be positive integers.
 
+`--pr <top> --stack` is the **stacked** reviewer-context arm (`--stack` requires `--pr` and
+excludes `--expected-pr`): it re-resolves the whole stack from the given PR via the base-ref
+chain walk (a perk train *is* a base-ref chain; the same single-PR/fork/depth refusals as the
+stack checkout, so reviewer children and the doors refuse consistently), keeps the top-level
+fields on the top PR, and adds per-member `stack[]` sections (`{pr, base_ref, head_ref, title,
+body, diff, plan_body}` — `plan_body` enriched for `plan-<N>` head branches) plus
+`combined_diff` (the base→top diff every stack reviewer works in, re-validated against the
+same fail-closed ancestry gate as the checkout and fetched through a per-invocation temp-ref
+namespace so concurrent reviewer lanes never collide).
+
 ### `perk pr review-post`
 
 Submit a `/pr-review` verdict to the active plan's PR. Reads the review from the required
@@ -249,6 +259,23 @@ Semantics:
 
 Review checkouts live outside the `plan-<N>` namespace, so `perk worktree wipe` never touches
 them; `perk worktree list` shows them and `perk worktree remove` is the manual fallback.
+
+**The `--stack` arm** checks out a whole PR stack for combined-diff review: `--stack --pr <n>`
+resolves the stack via the base-ref **chain walk** from any member PR; `--stack --objective
+<id>` via the objective's **delivery train**; bare `--stack` uses the worktree plan-ref's
+linked objective (`--pr`/`--objective` are mutually exclusive under `--stack`; `--objective`
+without `--stack` refuses). One fetch pins every member head plus the stack base; the commit
+topology is validated **fail-closed before any checkout** (every lower head must be an ancestor
+of the head above it — a violation or indeterminate probe is `stack_topology_broken`); the
+**top** head is checked out at `review-<top>` (so `cleanup --pr <top>` works unchanged) and
+`base_sha` becomes the merge-base of `origin/<stack base>` and the top head. The envelope adds
+the pinned snapshot: `stack[]` (`{pr, url, branch, head_sha, base_ref, node_id, plan_id}`,
+bottom→top) and `stack_notes[]` (resolution warnings + recorded-vs-observed head drift —
+warnings only); the top-level `base_ref` is the stack base. Typed refusals: `not_a_stack` (fewer than 2 open members — use the
+single-PR flow), `stack_too_deep` (over 20 members), `fork_unsupported`, `ambiguous_stack`
+(more than one open same-repo child), `stack_cycle` (the base-ref graph loops),
+`not_stacked`/`stack_discontiguous`/`no_objective`
+(objective arm), `stack_topology_broken`.
 
 ### `perk pr review cleanup`
 

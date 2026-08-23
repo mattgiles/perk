@@ -312,6 +312,9 @@ export const PERK_TOOLS: readonly string[] = [
   "collect_draft_review_wave",
   "run_ci",
   "submit",
+  // The stack-review launch-recovery tool (contracts.md §8.4): parameterless — the snapshot
+  // comes only from the `perk objective stack review` launch handoff.
+  "open_stack_review",
   // The stacked-delivery warm surface (contracts.md §8.51/§8.56): read + control tools over
   // the cold `objective stack` workers. Never in READ_ONLY_TOOLS — sync/adopt/recover/land
   // mutate published branches and PRs; the gated posture is the driving commands' soft
@@ -491,6 +494,19 @@ export const STAGE_TOOLS: Readonly<Record<string, readonly string[]>> = {
   // (read-only mode), where this list is inert; it exists for the keys≡registry pin and the
   // defensive gate-off arm.
   audit: ["ask_user_question", "run_audit_wave", ...RESEARCH_TOOLS],
+  // The stacked-PR browser-review launcher (`perk objective stack review`): exactly the flow
+  // set the stack.md guidance names — the launch-recovery tool, the review-wave pair, the
+  // annotation push, per-PR posting, delegation (the wave's relay loop), and research.
+  "stack-review": [
+    "ask_user_question",
+    "open_stack_review",
+    "start_review_wave",
+    "collect_review_wave",
+    "push_annotations",
+    "submit_pr_review",
+    ...SUBAGENT_TOOLS,
+    ...RESEARCH_TOOLS,
+  ],
 };
 
 /** The read-only marker / custom-message type injected into context while active. */

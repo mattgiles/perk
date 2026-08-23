@@ -175,6 +175,12 @@ routes:
     audience: shipped
     role: launch
     priority: 90
+  - id: prompt-stack-review
+    match: { paths: ["prompts/stages/stack-review/**", "prompts/stages/stack-review-browser/**"] }
+    capability: review.pr
+    audience: shipped
+    role: launch
+    priority: 90
   - id: prompt-address
     match: { paths: ["prompts/stages/address/**"] }
     capability: review.address

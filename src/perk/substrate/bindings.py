@@ -43,8 +43,10 @@ MODES: tuple[str, ...] = ("nudge", "transclude")
 # extension/doors/learnFactory.ts (`command:learn-docs`/`command:learn-code`), and
 # extension/doors/prReview.ts (`command:pr-review`),
 # extension/doors/prReviewDynamic.ts (`command:pr-review-dynamic`),
-# extension/doors/prReviewTerminal.ts (`command:pr-review-terminal`), and
-# extension/doors/prReviewBrowser.ts (`command:pr-review-browser`))
+# extension/doors/prReviewTerminal.ts (`command:pr-review-terminal`),
+# extension/doors/prReviewBrowser.ts (`command:pr-review-browser`), and
+# extension/doors/stackReviewBrowser.ts (`command:stack-review-browser` — also the
+# `perk objective stack review` cold launch's `binding_trigger=` override))
 # plus the cold `binding_trigger=` overrides in
 # perk/cli/commands/: `command:learn-docs`/`command:learn-code` (learn/factory_common.py),
 # `command:learn-harvest` (learn/harvest_cmd.py — cold-only, no warm call site),
@@ -67,6 +69,7 @@ DELIVERABLE_COMMAND_TARGETS: frozenset[str] = frozenset(
         "pr-review-dynamic",
         "pr-review-terminal",
         "pr-review-browser",
+        "stack-review-browser",
         "plan-review-browser",
         "objective-review-browser",
         "skills-create",

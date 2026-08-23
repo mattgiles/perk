@@ -39,6 +39,7 @@ export const sidebar = [
           "how-to/address-review-feedback",
           "how-to/review-a-foreign-pr",
           "how-to/review-a-stacked-train",
+          "how-to/review-a-stack-in-the-browser",
           "how-to/replan-an-open-plan",
           "how-to/adopt-an-existing-issue",
           "how-to/capture-a-gist",

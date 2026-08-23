@@ -109,7 +109,7 @@ an honest typed `capability_unsupported` refusal naming the exact expected-vs-ob
 
 ## The command surface
 
-Four cold commands under `perk objective stack`; `OBJECTIVE` is inferred from the current
+Five cold commands under `perk objective stack`; `OBJECTIVE` is inferred from the current
 plan worktree's linked objective when omitted.
 
 - **`perk objective stack status [OBJECTIVE]`** — read-only end to end: reconstructs the
@@ -152,6 +152,15 @@ plan worktree's linked objective when omitted.
   the objective close once every node is terminal. The honest unresolved outcomes —
   `pending` (the merge submission or poll did not conclude) and `unexpected_enqueued` (a
   merge queue took the request) — block further landing and conclude via `stack recover`.
+- **`perk objective stack review [OBJECTIVE|--pr <n|url>]`** — the stacked-PR browser-review
+  launcher (the cold twin of the warm `/stack-review-browser` door): resolves the train (or,
+  with `--pr`, any base-ref chain — non-perk stacks included), materializes the combined-diff
+  checkout (top head at `review-<top>`, fail-closed topology validation), and launches a
+  dedicated session whose one `open_stack_review` call opens plannotator on the combined
+  diff, runs one adversarial wave, and ends in judgment-routed **per-PR** posting through the
+  gated `submit_pr_review` tool (dry-run-all first, bottom→top, the `review_posts` resume
+  ledger). `--focus TEXT` threads an operator note; `--dry-run` is fully side-effect-free
+  (no fetch, no checkout, no handoff, no launch); local-only (no `--remote`).
 
 In-session, the same surface is four warm doors plus five tools (mutations stay canonical in
 the Python CLI — every tool delegates to the cold workers; the objective is inferred

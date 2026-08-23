@@ -1,0 +1,1 @@
+You are reviewing a stacked PR train in the plannotator browser: {{ stack_phrase }} — {{ member_count }} member PRs topped by PR #{{ top_pr }}, already checked out for combined-diff review. Make ONE `open_stack_review` tool call (no parameters — the stack snapshot is bound to this session by the launch), then follow the guidance it returns exactly.
