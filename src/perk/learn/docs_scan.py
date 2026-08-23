@@ -66,7 +66,10 @@ _MD_LINK_RE = re.compile(r"\[[^\]]*\]\(([^)]+)\)")
 _DOC_TOKEN_RE = re.compile(r"^(?P<path>[\w.][\w./-]*\.(?:md|mdx))(?:#\S*)?$")
 
 # Each kind's scan root — the third resolution base for backtick doc-path tokens (derived from the
-# existing root constants, no duplicated literals).
+# existing root constants, no duplicated literals). Invariant: this map is an UNGUARDED lookup on
+# the kind vocabulary, and the rich scan has no per-doc boundary around the broken-path detector —
+# adding a scan root/kind without extending this map raises KeyError out of the never-raise
+# advisory scan. Extend the map (or add a guard) in the same change.
 _KIND_SCAN_ROOTS = {
     "learned": _LEARNED_GLOB[0],
     "user-doc": _USER_DOCS_ROOT,

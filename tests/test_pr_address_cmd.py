@@ -207,6 +207,33 @@ def test_extra_pre_separator_token_is_a_usage_error_with_grammar_hint(git_repo):
     assert "before the first bare '--'" in result.output
 
 
+def test_explicit_id_backend_failure_maps_github_error_no_write_no_launch(git_repo, monkeypatch):
+    # The explicit-PLAN transport boundary: a backend transport failure out of the canonical
+    # selection maps to github_error, rewrites no selector, and launches nothing.
+    from perk.cli.ensure import UserFacingCliError
+
+    _seed(git_repo)
+    _authed(monkeypatch)
+    selector_before = cache.plan_ref_path(git_repo).read_bytes()
+
+    def _boom(**_kwargs):
+        raise github.GitHubError("gh exploded")
+
+    monkeypatch.setattr(plans, "get_plan", _boom)
+    monkeypatch.setattr(
+        launch,
+        "launch_stage",
+        lambda **_k: (_ for _ in ()).throw(AssertionError("launched after a failed selection")),
+    )
+    result = CliRunner().invoke(
+        cli, ["pr", "address", "7"], obj=_ctx(git_repo), standalone_mode=False
+    )
+    assert isinstance(result.exception, UserFacingCliError)
+    assert result.exception.error_type == "github_error"
+    assert "address failed" in result.exception.format_message()
+    assert cache.plan_ref_path(git_repo).read_bytes() == selector_before
+
+
 def test_id_vs_worktree_branch_disagreement_fails_before_launch(git_repo, monkeypatch):
     # Supplying both selectors requires exact agreement: id 7 against the plan-42 checkout
     # surfaces as the branch check (the checkout sits on plan-42, selection expects plan-7).

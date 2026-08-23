@@ -4170,7 +4170,9 @@ one-stop current shape.
   the cwd binding (the predecessor, read via `readPlanRef(ctx.cwd)`) and the just-saved child on
   `active_plan_ref` — so a door invocation there could act on the predecessor; planning sessions
   never legitimately run lifecycle doors (at the repo root the same invocation fails confusingly
-  today). Fail-open on an unreadable branch (a hygiene refusal, not a validator).
+  today). Fail-CLOSED on an unreadable branch: an unreadable state cannot prove the session is
+  not a positioned planning session whose cwd binding is the predecessor — the guard refuses
+  rather than letting the door act.
 
 §8.10's per-node Status blocks remain the historical record of how each piece landed; this section
 is the consolidated **current** contract.

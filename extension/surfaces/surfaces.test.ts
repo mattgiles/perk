@@ -684,6 +684,78 @@ test("reportDetailEntryRenderer strips terminal controls only from rendered rows
   ]);
 });
 
+// The display-sanitizer branch matrix. Policy pinned here (current behavior, no production
+// change): a TERMINATED control sequence/string is removed with the surrounding text preserved
+// byte-exact; an UNTERMINATED control string drops opener-through-end-of-input while preserving
+// all preceding text (dropping printable tail bytes is the safe arm — preserving them could
+// expose control payload); no control byte ever survives to the display projection. Any future
+// behavior change re-pins this matrix deliberately.
+test("reportDetailEntryRenderer sanitizer matrix: every opener/terminator family", () => {
+  const ESC = "\u001b";
+  const ST = `${ESC}\\`;
+  const stringFamilies = [
+    ["DCS", "P", "\u0090"],
+    ["SOS", "X", "\u0098"],
+    ["PM", "^", "\u009e"],
+    ["APC", "_", "\u009f"],
+  ] as const;
+  const cases: { name: string; input: string; expected: string }[] = [
+    // OSC — both openers (ESC ] and C1 0x9d) × all three terminators (BEL, ST, C1 0x9c).
+    { name: "OSC esc-open BEL", input: `pre${ESC}]0;title\u0007post`, expected: "prepost" },
+    { name: "OSC esc-open ST", input: `pre${ESC}]0;title${ST}post`, expected: "prepost" },
+    { name: "OSC esc-open C1 ST", input: `pre${ESC}]0;title\u009cpost`, expected: "prepost" },
+    { name: "OSC c1-open BEL", input: "pre\u009d0;title\u0007post", expected: "prepost" },
+    { name: "OSC c1-open ST", input: `pre\u009d0;title${ST}post`, expected: "prepost" },
+    { name: "OSC c1-open C1 ST", input: "pre\u009d0;title\u009cpost", expected: "prepost" },
+    // DCS/SOS/PM/APC — ESC + C1 openers × both valid terminators (ST, C1 0x9c).
+    ...stringFamilies.flatMap(([family, escOpener, c1Opener]) => [
+      {
+        name: `${family} esc-open ST`,
+        input: `pre${ESC}${escOpener}payload${ST}post`,
+        expected: "prepost",
+      },
+      {
+        name: `${family} esc-open C1 ST`,
+        input: `pre${ESC}${escOpener}payload\u009cpost`,
+        expected: "prepost",
+      },
+      { name: `${family} c1-open ST`, input: `pre${c1Opener}payload${ST}post`, expected: "prepost" },
+      {
+        name: `${family} c1-open C1 ST`,
+        input: `pre${c1Opener}payload\u009cpost`,
+        expected: "prepost",
+      },
+    ]),
+    // BEL terminates only OSC — inside a DCS it is payload, so the string runs unterminated.
+    { name: "DCS BEL is payload", input: `pre${ESC}Pdata\u0007post`, expected: "pre" },
+    // CSI — plain, params, intermediate bytes, private markers, and the C1 opener.
+    { name: "CSI plain", input: `pre${ESC}[2Jpost`, expected: "prepost" },
+    { name: "CSI params", input: `pre${ESC}[1;31mpost`, expected: "prepost" },
+    { name: "CSI intermediate", input: `pre${ESC}[0 qpost`, expected: "prepost" },
+    { name: "CSI private", input: `pre${ESC}[?25hpost`, expected: "prepost" },
+    { name: "CSI c1-open", input: "pre\u009b31mpost", expected: "prepost" },
+    // Single-character escapes: a direct final byte, and one intermediate then final.
+    { name: "ESC M", input: `pre${ESC}Mpost`, expected: "prepost" },
+    { name: "ESC 7", input: `pre${ESC}7post`, expected: "prepost" },
+    { name: "ESC ( B", input: `pre${ESC}(Bpost`, expected: "prepost" },
+    // Unterminated string openers: opener-through-end drops; preceding text survives byte-exact.
+    { name: "unterminated OSC esc-open", input: `keep${ESC}]0;title`, expected: "keep" },
+    { name: "unterminated OSC c1-open", input: "keep\u009d0;title", expected: "keep" },
+    ...stringFamilies.flatMap(([family, escOpener, c1Opener]) => [
+      { name: `unterminated ${family} esc-open`, input: `keep${ESC}${escOpener}data`, expected: "keep" },
+      { name: `unterminated ${family} c1-open`, input: `keep${c1Opener}data`, expected: "keep" },
+    ]),
+  ];
+  for (const { name, input, expected } of cases) {
+    const lines = renderMarker(
+      reportDetailEntryRenderer,
+      { text: input, severity: "info" },
+      { theme: plainTheme },
+    );
+    assert.deepEqual(lines, [expected], name);
+  }
+});
+
 test("reportDetailEntryRenderer rejects malformed data", () => {
   for (const data of [
     undefined,
