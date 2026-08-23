@@ -27,6 +27,8 @@ pi API facts, and test recipes those turns established.
   severity-filtered notify asserts, `node --test extension/*.test.ts` — "Harness recipes".
 - Vendoring a pi-tui-touching extension hits the dual-copy nominal-class clash + friends —
   "Vendoring a TS extension that touches pi-tui".
+- Display renderers sanitize the display projection (strip CSI/OSC/APC + unsafe controls),
+  never the persisted payloads — "Transcript rendering is an untrusted-output boundary".
 - Version pins ride inline in section headings ("verified against pi …") — re-verify on bumps.
 
 ## The surfaces module = `surfaces.ts` + `report.ts`
@@ -150,6 +152,14 @@ For drop-order / responsive rendering, don't snapshot specific widths. Sweep wid
 asserting (a) rank-monotonicity — if drop-rank r survives, every higher rank survives — and
 (b) never-exceed-width at every step; then assert the sweep actually exercised all ranks. This
 shape is robust to padding-math tweaks where width snapshots churn.
+
+## Transcript rendering is an untrusted-output boundary (#1761)
+
+ANSI-aware styling/width-truncation does not make persisted text terminal-safe. Display-only
+renderers validate the entry shape and strip CSI/OSC/APC + unsafe control bytes from the
+*display projection* while preserving persisted entries and tool-result payloads exactly.
+Hostile-control fixtures belong in the renderer test baseline — the threat model a PR review
+caught, not the happy path.
 
 ## Plan-fidelity micro-lesson
 

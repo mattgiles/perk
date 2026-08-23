@@ -17,12 +17,13 @@ curation semantics that entry prose and the schema can't express on their own.
 - Entry prose must mirror the enforcing surface's ACTUAL semantics (verify at the leniency
   level — the false-violation paths hide in the carve-outs) — "Expectation prose must mirror
   the enforcing surface's actual semantics, not its intent".
-- Applicability derives from the census's emitted trigger semantics, never hand-guessed —
-  "Derive catalog applicability from the census's emitted trigger semantics" (+ "The audit
-  census + vintage reckoning").
+- Applicability derives from the census's emitted trigger semantics — and from actual
+  prompt/binding delivery, never stage labels or hand-guessing — "Derive catalog applicability
+  from the census's emitted trigger semantics" (+ "The audit census + vintage reckoning").
 - A checker's failure mode is a FALSE VERDICT: on a live corpus, absence-shaped verdicts need a
   pending arm (`unchecked`, never definitive `violated`); presence-shaped violations stay
-  decisive — "Writing a session-audit checker — the false-verdict families".
+  decisive; path evidence needs repo containment (transcript args are spoofable) — "Writing a
+  session-audit checker — the false-verdict families".
 - Evidence-packet bounding: file adjacency ≠ causal adjacency — window over the `parentId` tree,
   descendant-restricted — "Bounding judgment-tier evidence packets".
 - The verdicts-write path: a strict wholesale consumer demands a per-record sanitizing producer
@@ -77,6 +78,11 @@ And treat any applicability **broadening** as a machinery-triage boundary: activ
 coverage can expose checker defects that the dormant state was masking (era-drifted classifier
 payloads were the shipped instance) — the fix required an era-aware checker plus a fresh live
 re-verification before the calibration was trustworthy again. Broadening is not a data-only edit.
+
+**Applicability follows actual prompt/binding delivery, not stage labels** (#1955): stage
+borrowers emit the same stage evidence but override `binding_trigger` — gate checkers on the
+delivered authoring-skill binding (a NUDGE/TRANSCLUDE scan), and name alternate carriers in the
+evidence prose.
 
 ## The audit census + vintage reckoning
 
@@ -149,6 +155,21 @@ test failure. The recurring families:
   (every parent index precedes its child).
 - **Catalog prose and this doc state one rule** — an `expectations.yaml` evidence-semantics
   amendment drags the matching bullet here in the same PR (that lockstep already fired once).
+
+Three constraints from the `learned-docs-first-stop` checkers (#1955):
+
+- **Untrusted path evidence needs repository containment, not substring/segment matching.**
+  Lexically normalize `.`/`..` (no filesystem access; a `..` past the path's own root is
+  unresolvable → reject), anchor relative paths to the repo root and absolute paths under the
+  session header's `cwd` (no header cwd ⇒ no absolute-path evidence) — transcript tool args are
+  spoofable data.
+- **The pending/`unchecked` arm's honest justification is id-pairing quirk uncertainty** (a
+  mismatched/foreign `toolCallId` leaves a physically-present result unpaired) — NEVER "the
+  result may still flush as an ancestor"; append-only JSONL forbids that. Write the docstring to
+  the real reason and pin it with a mismatched-id test.
+- **Live-corpus residue:** worktree-vs-main absolute reads grade `violated` when they resolve
+  outside the session cwd (accepted conservatism); shell `cd` inside bash commands is not
+  modeled; headerless/cwd-less sessions are excluded by census accounting before grading.
 
 Calibration leads for later checker work: the gate-policy plain copy (`gate_policy.py`) has no
 drift guard by decision; pinned string anchors drift as **false verdicts, not test failures**;

@@ -117,6 +117,12 @@ console-logged, so failures land in run logs even in a TUI. The reconciliation w
 single seam, cleaner than forking the API or forcing every caller onto one shape. **Always grep the
 actual call sites before trusting a one-line framing of "the idiom."**
 
+The reconciled report-routing law, stated once and hasUI-first (#1761): sinkless lifecycle
+contexts append no transcript-detail entry; tools retain complete Results; a headful RPC caller
+may mirror a complete diagnostic to stderr with `alsoLog`. Repeated charter prose must be
+reconciled against this canonical rule — docs checks cannot detect semantic contradictions
+between paragraphs.
+
 ## The de-prefixing trap when a seam owns the prefix
 
 `report()` owns the `perk: <scope> — ` prefix, so any migrated message that *embedded its own*
