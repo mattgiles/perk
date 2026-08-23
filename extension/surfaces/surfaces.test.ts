@@ -719,7 +719,11 @@ test("reportDetailEntryRenderer sanitizer matrix: every opener/terminator family
         input: `pre${ESC}${escOpener}payload\u009cpost`,
         expected: "prepost",
       },
-      { name: `${family} c1-open ST`, input: `pre${c1Opener}payload${ST}post`, expected: "prepost" },
+      {
+        name: `${family} c1-open ST`,
+        input: `pre${c1Opener}payload${ST}post`,
+        expected: "prepost",
+      },
       {
         name: `${family} c1-open C1 ST`,
         input: `pre${c1Opener}payload\u009cpost`,
@@ -742,7 +746,11 @@ test("reportDetailEntryRenderer sanitizer matrix: every opener/terminator family
     { name: "unterminated OSC esc-open", input: `keep${ESC}]0;title`, expected: "keep" },
     { name: "unterminated OSC c1-open", input: "keep\u009d0;title", expected: "keep" },
     ...stringFamilies.flatMap(([family, escOpener, c1Opener]) => [
-      { name: `unterminated ${family} esc-open`, input: `keep${ESC}${escOpener}data`, expected: "keep" },
+      {
+        name: `unterminated ${family} esc-open`,
+        input: `keep${ESC}${escOpener}data`,
+        expected: "keep",
+      },
       { name: `unterminated ${family} c1-open`, input: `keep${c1Opener}data`, expected: "keep" },
     ]),
   ];
