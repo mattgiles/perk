@@ -56,7 +56,7 @@ The in-session utility surface spans three families:
 
 - [Workflow commands](./in-session/workflow-commands.md#utility-commands--factories) covers
   `/ci`, `/commit-and-compact`, `/perk-selfcheck`, `/learn-docs`, and `/learn-code`.
-- [Review and authoring](./in-session/review-and-authoring.md) covers the six code-review and
+- [Review and authoring](./in-session/review-and-authoring.md) covers the seven code-review and
   draft-review commands and their companion tools.
 - [Model-facing tools](./in-session/model-tools.md) is the guarded index of every tool name,
   including read-only and stage-scoping behavior.

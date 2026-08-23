@@ -20,8 +20,11 @@ import {
 } from "../testing/harness.ts";
 import { executePushAnnotations, type FetchLike } from "./annotationPush.ts";
 import {
+  bindingBaseRef,
+  bindingTopPr,
   decodeStackCheckout,
   decodeStackReviewBinding,
+  executeOpenStackReview,
   parseStackReviewArgs,
   STACK_DEGRADE_NOTICE,
   type StackSnapshotRow,
@@ -139,7 +142,6 @@ const STACK_CHECKOUT_PAYLOAD = {
   base_sha: "0".repeat(40),
   base_ref: "main",
   stack: [ROW_A, ROW_B],
-  stack_base_ref: "main",
   stack_notes: ["drift: PR #41 head moved"],
 };
 
@@ -150,7 +152,7 @@ test("decodeStackCheckout: the full envelope decodes; missing stack fields refus
     decoded.stack.map((r) => r.pr),
     [41, 42],
   );
-  assert.equal(decoded.stack_base_ref, "main");
+  assert.equal(decoded.base_ref, "main", "base_ref IS the stack base on the stack envelope");
   assert.deepEqual(decoded.stack_notes, ["drift: PR #41 head moved"]);
   const { stack: _stack, ...noStack } = STACK_CHECKOUT_PAYLOAD;
   assert.equal(decodeStackCheckout(noStack as never), null);
@@ -169,25 +171,31 @@ test("decodeStackCheckout: the full envelope decodes; missing stack fields refus
   );
 });
 
-test("decodeStackReviewBinding: strict on every field; blank focus collapses to null", () => {
+test("decodeStackReviewBinding: every field REQUIRED; endpoints derive; blank focus → null", () => {
   const binding = {
-    kind: "objective",
-    objective_id: "77",
     stack: [ROW_A, ROW_B],
-    base_ref: "main",
-    base_sha: "0".repeat(40),
-    top_pr: 42,
     checkout_path: "/wt/review-42",
     notes: [],
     focus: "  ",
   };
   const decoded = decodeStackReviewBinding(binding);
   assert.ok(decoded !== null);
-  assert.equal(decoded.focus, null);
-  assert.equal(decoded.top_pr, 42);
+  assert.equal(decoded.focus, null, "a blank focus normalizes to null (no focus)");
+  assert.equal(bindingTopPr(decoded), 42, "top PR derives from the LAST ordered row");
+  assert.equal(bindingBaseRef(decoded), "main", "the stack base derives from the FIRST row");
+  assert.equal(decodeStackReviewBinding({ ...binding, focus: "dig in" })?.focus, "dig in");
+  assert.equal(decodeStackReviewBinding({ ...binding, focus: null })?.focus, null);
+  // Strictness: a missing or mistyped field — ANY of the four — refuses the whole decode.
   assert.equal(decodeStackReviewBinding({ ...binding, checkout_path: "" }), null);
   assert.equal(decodeStackReviewBinding({ ...binding, stack: [] }), null);
-  assert.equal(decodeStackReviewBinding({ ...binding, top_pr: "42" }), null);
+  const { stack: _s, ...noStack } = binding;
+  assert.equal(decodeStackReviewBinding(noStack), null);
+  const { notes: _n, ...noNotes } = binding;
+  assert.equal(decodeStackReviewBinding(noNotes), null, "absent notes is drift, not a default");
+  const { focus: _f, ...noFocus } = binding;
+  assert.equal(decodeStackReviewBinding(noFocus), null, "absent focus is drift, not a default");
+  assert.equal(decodeStackReviewBinding({ ...binding, focus: 7 }), null);
+  assert.equal(decodeStackReviewBinding({ ...binding, notes: ["x", 7] }), null);
   assert.equal(decodeStackReviewBinding(undefined), null);
 });
 
@@ -498,12 +506,7 @@ function scaffoldStackLaunch(opts: { checkout?: boolean; binding?: boolean } = {
   const checkoutPath = join(cwd, "review-42");
   if (opts.checkout !== false) mkdirSync(checkoutPath, { recursive: true });
   const binding = {
-    kind: "objective",
-    objective_id: "77",
     stack: [ROW_A, ROW_B],
-    base_ref: "main",
-    base_sha: "0".repeat(40),
-    top_pr: 42,
     checkout_path: checkoutPath,
     notes: ["drift: PR #41 head moved"],
     focus: "dig into CI",
@@ -626,4 +629,43 @@ test("open_stack_review: success returns the guidance as ok text; second call is
     await settleBridges(sink);
     h.dispose();
   }
+});
+
+test("executeOpenStackReview: a browser-open failure is browser_failed and keeps the latch closed", async () => {
+  // The execute core over the injected open seam (the port-pick failure surfaces as a false
+  // return from the shared open) — the real registration wires the same core to the tool.
+  const { cwd, checkoutPath } = scaffoldStackLaunch();
+  const branch = [{ type: "custom", customType: "perk:workflow-state", data: { run_id: RUN_ID } }];
+  const pi = {
+    getCommands: () => [{ name: "plannotator-review" }],
+  } as unknown as ExtensionAPI;
+  const ctx = {
+    cwd,
+    hasUI: true,
+    sessionManager: { getBranch: () => branch },
+    ui: { notify: () => {} },
+  } as unknown as Parameters<typeof executeOpenStackReview>[1];
+
+  const latch = { opened: false };
+  const opens: string[] = [];
+  const failed = await executeOpenStackReview(pi, ctx, latch, (_pi, _ctx, opts) => {
+    opens.push(opts.checkoutPath);
+    return Promise.resolve(false);
+  });
+  const failedDetails = failed.details as { ok: boolean; error_type?: string };
+  assert.equal(failedDetails.ok, false);
+  assert.equal(failedDetails.error_type, "browser_failed");
+  assert.match(failed.content[0]?.text ?? "", /could not start the plannotator review server/);
+  assert.deepEqual(opens, [checkoutPath], "the open was attempted with the bound checkout");
+  assert.equal(latch.opened, false, "a failed open never consumes the single-use latch");
+
+  // The failure is retryable: the SAME latch accepts a later successful open…
+  const succeeded = await executeOpenStackReview(pi, ctx, latch, () => Promise.resolve(true));
+  assert.equal((succeeded.details as { ok: boolean }).ok, true);
+  assert.equal(latch.opened, true);
+  // …and only then does single-use bite.
+  const third = await executeOpenStackReview(pi, ctx, latch, () => Promise.resolve(true));
+  const thirdDetails = third.details as { ok: boolean; error_type?: string };
+  assert.equal(thirdDetails.ok, false);
+  assert.equal(thirdDetails.error_type, "bad_state");
 });

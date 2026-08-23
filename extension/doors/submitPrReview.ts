@@ -64,6 +64,7 @@ export interface SubmitParams {
   body: string;
   comments?: SubmitComment[];
   dry_run?: boolean;
+  allow_repost?: boolean;
 }
 
 /** Decode the optional `comments` array; null = present-but-malformed (whole-batch refusal). */
@@ -96,7 +97,7 @@ function decodeSubmitComments(p: ToolParams): SubmitComment[] | undefined | null
  * malformed field ⇒ null (whole-batch refusal). `pr` must be an int; `event` exactly one of the
  * three flag spellings; `body` a string (EMPTY ALLOWED — the cold door owns the event-conditioned
  * body rule and reports `bad_batch`); each `comments` row strict on
- * path/line(int)/side(LEFT|RIGHT)/body; `dry_run` a boolean.
+ * path/line(int)/side(LEFT|RIGHT)/body; `dry_run` and `allow_repost` booleans.
  */
 export function decodeSubmitParams(params: unknown): SubmitParams | null {
   const p = paramsOf(params);
@@ -111,9 +112,12 @@ export function decodeSubmitParams(params: unknown): SubmitParams | null {
   if (comments === null) return null;
   const dryRun = booleanParam(p, "dry_run");
   if (dryRun === null) return null;
+  const allowRepost = booleanParam(p, "allow_repost");
+  if (allowRepost === null) return null;
   const result: SubmitParams = { pr, event, body };
   if (comments !== undefined) result.comments = comments;
   if (dryRun !== undefined) result.dry_run = dryRun;
+  if (allowRepost !== undefined) result.allow_repost = allowRepost;
   return result;
 }
 
@@ -254,6 +258,27 @@ export async function submitPrReview(
   const dryRun = params.dry_run === true;
   const commentCount = params.comments?.length ?? 0;
 
+  // The enforced resume guard (before the confirm AND the cold-door mutation): a PR that
+  // already has a review_posts ledger row in this session is a confirmed success — a repeat
+  // real post is refused unless explicitly deliberate. A ledger row can only be MISSING
+  // spuriously (best-effort tier), never present spuriously — so the guard refuses on
+  // presence and stays silent on absence (a missing row still means: verify posted-vs-pending
+  // against GitHub before re-posting).
+  if (!dryRun && params.allow_repost !== true) {
+    const prior = reviewPostsOf(rebuildWorkflowState(branchOf(ctx)).review_posts).filter(
+      (row) => row.pr === params.pr,
+    );
+    const last = prior.at(-1);
+    if (last !== undefined) {
+      return fail(
+        `a ${last.event} review was already posted to PR #${params.pr} in this session ` +
+          `(review_posts row at ${last.at}) — on a stack resume skip this member; pass ` +
+          "allow_repost: true only for a deliberate second review of the same PR",
+        "already_posted",
+      );
+    }
+  }
+
   if (!dryRun && params.event !== "comment") {
     if (!ctx.hasUI) {
       return fail(
@@ -381,7 +406,7 @@ export async function submitPrReview(
 const TOOL_GUIDELINES = [
   "Call submit_pr_review only after the human triage has settled the batch AND the human has explicitly approved posting — nothing reaches GitHub before triage.",
   "Validate first with dry_run: true and repair any reported anchors until validation passes; a dry-run never posts, never gates, and records nothing. A stack review dry-runs ALL per-PR batches before ANY real post.",
-  "Make ONE real call per target PR: comments + body + event land atomically in a single review — the verdict never lands before the comments. A stack review posts one review per member PR, bottom→top; each real success appends a {pr, event, at} row to the review_posts workflow-state ledger, and on resume the confirmed rows are skipped, never replayed.",
+  "Make ONE real call per target PR: comments + body + event land atomically in a single review — the verdict never lands before the comments. A stack review posts one review per member PR, bottom→top; each real success appends a {pr, event, at} row to the review_posts workflow-state ledger. The tool ENFORCES skip-on-resume: a real post to a PR that already has a ledger row is refused (already_posted) unless allow_repost: true — a deliberate second review only. A MISSING row is not proof of no post (the ledger is best-effort): verify posted-vs-pending against GitHub before re-posting.",
   "Formal events (approve / request-changes) additionally raise a blocking in-TUI confirm; headless sessions refuse them (use event: comment or re-run interactively).",
   "All perk-side GitHub posting flows through this tool on every review door — never post via gh or bash (direct perk pr review-submit calls are forbidden). On /pr-review-terminal this tool is the sole posting path. On /pr-review-browser the plannotator UI's native platform-posting is the human's own GitHub path, and perk posts only what the human explicitly hands it (typically a request-changes verdict). On /stack-review-browser the local-diff session has NO attached PR, so ALL posting is perk-side after triage.",
 ];
@@ -450,6 +475,13 @@ export function registerSubmitPrReview(pi: ExtensionAPI): void {
           description:
             "Validate the batch + anchors without posting (the anchor-repair loop). No gates, " +
             "no last_review record.",
+        },
+        allow_repost: {
+          type: "boolean",
+          description:
+            "Deliberately post ANOTHER review to a PR that already has a review_posts ledger " +
+            "row in this session — the enforced resume guard refuses with already_posted " +
+            "otherwise. Never pass it to work around a stack-resume refusal.",
         },
       },
     },

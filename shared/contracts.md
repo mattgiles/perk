@@ -467,7 +467,7 @@ end of the section).
 | `last_review_batch` | object \| null | the last fully processed review batch, appended by `finalize_address` only after publication and thread resolution succeed: `{ pr, counts:{actionable,informational,praise,question}, resolved_thread_ids:[…], at:ISO }` |
 | `last_pr_review` | object \| null | the last `/pr-review` (or the experimental `/pr-review-dynamic`) outcome posted via the shared warm `post_pr_review` tool: `{ pr, verdict, angles, covered_angles, comment_count, mode, at:ISO }`; a recorded wave is PR-bound and single-use, and supplies authoritative ordered `angles` / schema-valid `covered_angles`; standalone posting before any valid wave uses caller-supplied angles for both (or `[]`); best-effort tier (the PR review is the canonical record) |
 | `last_review` | object \| null | the last review-door outcome posted via the warm `submit_pr_review` tool: `{ pr, event, comment_count, mode, at:ISO }`; best-effort tier (the submitted PR review is the canonical record) |
-| `review_posts` | array | the accumulating per-PR posting ledger of a stacked review: one `{ pr, event, at:ISO }` row per REAL `submit_pr_review` success, in posting order (read-rebuild-append — each write carries the whole list); the stack flow's partial-outcome/resume authority (confirmed rows are skipped, never replayed); best-effort tier |
+| `review_posts` | array | the accumulating per-PR posting ledger of a stacked review: one `{ pr, event, at:ISO }` row per REAL `submit_pr_review` success, in posting order (read-rebuild-append — each write carries the whole list); best-effort tier with an asymmetric trust rule — a row can be MISSING spuriously (append failed after a real post) but never PRESENT spuriously, so `submit_pr_review` enforces skip-on-resume on presence (`already_posted` refusal; `allow_repost: true` is the deliberate override) while a missing row means verify posted-vs-pending against GitHub before re-posting |
 | `session_artifacts` | object \| null | per-name session-artifact provenance pointers `{run_id, name, path, digest, at}` (§8.1); appends carry the **whole merged map** (per-field LWW); strict-append tier |
 | `objective_node_claim` | object \| null | the objective node this session has claimed `planning` (`{ objective, node }`); written by the warm `objective_node` tool on a successful `planning` transition, cleared on a successful non-planning transition for the same node and after a successful node-linked plan save; best-effort tier (cheaply reconstructable; loud-but-non-fatal) |
 | `conflict_resolution_attempts` | number | the bounded conflict-resolution re-drive counter: incremented each time `/submit` drives the `perk.conflict-resolver` subagent on a definitively-unmergeable PR (cap `CONFLICT_RESOLUTION_ATTEMPT_CAP = 2`), reset to 0 on a clean submit; best-effort tier (cheaply reconstructable) |
@@ -582,9 +582,12 @@ session cannot aim the writer anywhere). A session whose launch state lacks the 
 every session that is not a claimed `audit judge` launch — is refused `bad_state`.
 
 **The stack-review launch binding (`stack_review`, §8.4).** The `perk objective stack review`
-cold door stashes `handoff_extra={"stack_review": {kind, objective_id, stack: [{pr, url,
-branch, head_sha, base_ref, node_id, plan_id}…], base_ref, base_sha, top_pr, checkout_path,
-notes, focus}}` — the checkout worker's **pinned snapshot** (§8.4), never re-resolved. The warm
+cold door stashes `handoff_extra={"stack_review": {stack: [{pr, url, branch, head_sha,
+base_ref, node_id, plan_id}…], checkout_path, notes, focus}}` — the checkout worker's
+**pinned snapshot** (§8.4), never re-resolved, carrying EXACTLY the four fields the tool
+consumes (every one required by the strict decode; the top PR and the stack base derive from
+the ordered rows — last row's `pr`, first row's `base_ref`; a blank `focus` normalizes to
+null). The warm
 `open_stack_review` tool takes **no parameters** and recovers the blob through the rebuilt
 workflow-state `run_id` → the run's handoff (the `audit_bundle_dir` recovery shape); a
 missing/blank binding or a missing checkout dir is `bad_state`, headless is a typed refusal,
@@ -942,8 +945,12 @@ get_pr_review_context{ pr_number, branch, plan_body } -> PrReviewContext{ pr_num
     # base-ref chain; the same cardinality/fork gates as checkout, so children and doors refuse
     # consistently), keeps the top-level fields on the top PR (non-stack byte-identical), and
     # adds stack:[{pr, base_ref, head_ref, title, body, diff, plan_body}] per-member sections
-    # (plan_body enriched for `plan-<N>` head branches) + combined_diff (the same refspec
-    # fetch as checkout — idempotent — then a local `git diff <base_sha> <top_sha>`).
+    # (plan_body enriched for `plan-<N>` head branches) + combined_diff: the member heads +
+    # stack base fetched into a PER-INVOCATION refs/perk/review-ctx/<token>/ namespace
+    # (concurrent reviewer lanes share one ref store — no shared temp ref is ever touched;
+    # deleted in a finally), the checkout worker's predecessor→successor ancestry gate
+    # re-validated fail-closed (stack_topology_broken — indeterminate probes refuse too),
+    # then a local `git diff <base_sha> <top_sha>`.
 post_pr_review{ pr_number, summary, comments:[{path,line,body,side?}], event? } -> ReviewPostResult{ ok, mode, pr_number, comment_count }
     # ONE atomic review via POST .../pulls/{n}/reviews — comments + body + event land together or
     # not at all. `event` defaults to COMMENT (wire spelling: COMMENT|APPROVE|REQUEST_CHANGES) and
@@ -1058,8 +1065,9 @@ perk pr review checkout --pr <n> --json -> { success, error_type, message, path,
     # merge-base(origin/<stack base>, top head). Envelope: the single-PR fields describe the
     # top PR + combined base (non-stack calls byte-compatible — no null stack keys) plus the
     # PINNED SNAPSHOT: stack:[{pr, url, branch, head_sha, base_ref, node_id, plan_id}]
-    # bottom→top, stack_base_ref, stack_notes[] — every downstream consumer (guidance,
-    # handoff, posting narrative) reads THIS envelope; nothing re-resolves moving refs.
+    # bottom→top and stack_notes[] (base_ref/base_sha ARE the combined-diff base — no
+    # duplicate stack-base field) — every downstream consumer (guidance, handoff, posting
+    # narrative) reads THIS envelope; nothing re-resolves moving refs.
     # Stack refusals (both resolution arms share the gates): not_a_stack (<2 open members —
     # /pr-review-browser territory) · stack_too_deep (> STACK_REVIEW_MAX_MEMBERS = 20) ·
     # fork_unsupported (cross-repo head, fail-closed on a blank identity) · ambiguous_stack
@@ -1153,10 +1161,13 @@ direct `perk pr review-submit` calls are forbidden on every door:
 - **`last_review`** (§8.3): `{ pr, event, comment_count, mode, at:ISO }`, appended best-effort
   with strict read-back on non-dry-run success only.
 - **`review_posts`** (§8.3): the accumulating per-PR ledger — one `{ pr, event, at:ISO }` row
-  appended per REAL success (read-rebuild-append, ordered; dry-runs and failures never write) —
-  the stack sequence's partial-outcome/resume authority: on any mid-sequence failure or decline
-  the flow STOPS, surfaces posted-vs-pending from the ledger, and on resume skips confirmed
-  rows, never replaying a posted review.
+  appended per REAL success (read-rebuild-append, ordered; dry-runs and failures never write).
+  Skip-on-resume is TOOL-ENFORCED on row presence: a real post to a PR that already has a row
+  refuses with `already_posted` (before the confirm and the cold-door mutation);
+  `allow_repost: true` is the deliberate-second-review override. The ledger stays best-effort,
+  so absence proves nothing: on any mid-sequence failure or decline the flow STOPS, surfaces
+  posted-vs-pending from the ledger, and where a row is missing verifies against GitHub before
+  re-posting — never replaying a confirmed review.
 
 **The `push_annotations` findings-delivery tool** (`extension/doors/annotationPush.ts`;
 perk-registered — census §8.40). The finding→annotation mechanics are CODE, not prompt
@@ -1521,8 +1532,10 @@ parallel rebuild.
   byte-identical to the single-PR wave). Streaming/`push_annotations`/collect/reconcile are the
   browser door's contract unchanged. Cleanup: `perk pr review cleanup --pr <top>`.
 - **The cold launcher `perk objective stack review [OBJECTIVE] [--pr <n|url>] [--focus]`**
-  (seeded-door family): positional objective (default: the plan-ref-linked objective) → the
-  train arm; `--pr` → the chain arm (mutually exclusive). Typed refusals exit 1 before any
+  (seeded-door family, minus the `--worktree`/`--no-sync` knobs — both would be no-ops on this
+  `worktree: none` read-write stage): positional objective (default: the plan-ref-linked
+  objective) → the train arm; `--pr` → the chain arm (mutually exclusive). Typed refusals exit
+  1 before any
   launch; notes render to stderr and proceed. A real run materializes the checkout via the SAME
   `stack_checkout` implementation, then launches the dedicated `stack-review` registry stage
   (isolated, read-write — deliberate parity with the warm door's posture — `worktree: none`,
@@ -1542,7 +1555,7 @@ parallel rebuild.
   the location is straightforwardly identifiable in that PR's own diff; cross-cutting/
   unplaceable findings fold into the most relevant PR's body. The posting protocol is the stack
   contract on `submit_pr_review` above (dry-run ALL batches first → post bottom→top → the
-  `review_posts` ledger → stop on failure, skip-on-resume).
+  `review_posts` ledger → stop on failure, tool-enforced skip-on-resume).
 - **Coordinate-integrity residual (accepted):** plannotator's header allows diff-mode switches
   and annotations carry no diff-mode identity; the guidance treats returned annotations as
   combined-diff coordinates and sanity-checks each quoted context against the target PR's diff

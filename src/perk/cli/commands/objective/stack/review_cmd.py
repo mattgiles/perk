@@ -28,7 +28,7 @@ from perk.cli.commands.pr.review.stack_resolve import (
     resolve_stack_from_objective,
     resolve_stack_from_pr,
 )
-from perk.cli.commands.seeded_door import SeededLaunch, run_seeded_door, seeded_door_options
+from perk.cli.commands.seeded_door import SeededLaunch, run_seeded_door
 from perk.cli.ensure import UserFacingCliError
 from perk.github import GitHubError
 from perk.prompts import render
@@ -105,12 +105,22 @@ def _preview_rows(stack: ResolvedStack) -> list[dict[str, object]]:
     default=None,
     help="Operator focus note threaded to the reviewers and the triage guidance (DATA).",
 )
-@seeded_door_options(
-    worktree_help="Ignored positioning override (stack review runs at repo root).",
-    dry_run_help="Resolve the stack and print the launch plan; no fetch, no checkout, "
-    "no handoff, no launch.",
-    remote_subject="stack review",
+@click.option(
+    "--dry-run",
+    is_flag=True,
+    help="Resolve the stack and print the launch plan; no fetch, no checkout, no handoff, "
+    "no launch.",
 )
+@click.option(
+    "--remote",
+    type=str,
+    default=None,
+    is_flag=False,
+    flag_value="",
+    help="Local (default) or a remote runner; stack review is local-only (cold_remote:false).",
+)
+@click.option("--json", "as_json", is_flag=True, help="Emit a machine-readable report to stdout.")
+@click.argument("pi_args", nargs=-1, type=click.UNPROCESSED)
 @click.pass_context
 def review_stack(
     ctx: click.Context,
@@ -118,11 +128,9 @@ def review_stack(
     objective: str | None,
     pr_target: str | None,
     focus: str | None,
-    worktree: str | None,
     dry_run: bool,
     remote: str | None,
     as_json: bool,
-    no_sync: bool,
     pi_args: tuple[str, ...],
 ) -> None:
     """Review a whole PR stack in the browser (combined diff + judgment-routed posting).
@@ -176,7 +184,7 @@ def review_stack(
                 repo_root=repo_root,
                 config=config,
                 request=launch.WorktreeRequest.for_stage(stage),
-                worktree=worktree,
+                worktree=None,
                 materialize=False,
             )
             argv = launch._build_argv(
@@ -194,17 +202,14 @@ def review_stack(
                     binding_trigger=_BINDING_TRIGGER,
                 ),
             )
+            # The blob mirrors the real launch's binding shape (below) plus the dry_run
+            # marker — top PR and stack base are DERIVED from the ordered rows in-session.
             handoff_preview: dict[str, object] = {
                 "stack_review": {
-                    "kind": stack.kind,
-                    "objective_id": stack.objective_id,
                     "stack": _preview_rows(stack),
-                    "base_ref": stack.base_ref,
-                    "base_sha": None,
-                    "top_pr": top.pr_number,
                     "checkout_path": str(would_path),
                     "notes": list(stack.notes),
-                    "focus": focus or "",
+                    "focus": focus,
                     "dry_run": True,
                 }
             }
@@ -268,31 +273,30 @@ def review_stack(
             dry_run_fields=(),
             dry_run_payload={},
             # The structural binding: `open_stack_review` recovers this pinned snapshot from
-            # the launch handoff — its SOLE stack authority (contracts.md §8.3/§8.4).
+            # the launch handoff — its SOLE stack authority (contracts.md §8.3/§8.4). Exactly
+            # the four fields the tool consumes: the top PR and the stack base are derived
+            # from the ordered rows (last row's pr; first row's base_ref), never duplicated.
             handoff_extra={
                 "stack_review": {
-                    "kind": stack.kind,
-                    "objective_id": stack.objective_id,
                     "stack": snapshot_rows,
-                    "base_ref": result.stack_base_ref or result.base_ref,
-                    "base_sha": result.base_sha,
-                    "top_pr": result.pr_number,
                     "checkout_path": str(result.path),
                     "notes": list(result.stack_notes),
-                    "focus": focus or "",
+                    "focus": focus,
                 }
             },
             binding_trigger=_BINDING_TRIGGER,
         )
 
+    # No `--worktree` / `--no-sync` knobs: the stage runs at repo root (worktree: none) and
+    # has no pre-launch main-checkout sync to skip — dead flags would be worse than none.
     run_seeded_door(
         ctx,
         stage_id="stack-review",
-        worktree=worktree,
+        worktree=None,
         dry_run=dry_run,
         remote=remote,
         as_json=as_json,
-        no_sync=no_sync,
+        no_sync=False,
         pi_args=pi_args,
         backend_errors=(GitHubError,),
         gather=gather,

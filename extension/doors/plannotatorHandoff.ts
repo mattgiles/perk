@@ -409,6 +409,16 @@ export function stackRespondMessage(outcome: CodeReviewOutcome): string | null {
         "ALL per-PR batches first, then post bottom→top via `submit_pr_review`) — posting only " +
         "what the human approves.",
     );
+  } else {
+    // Feedback without annotations still needs the stack posting framing — the human may
+    // expect their words to reach GitHub, and nothing was posted from the browser.
+    parts.push(
+      "No annotations came back with this feedback. This local-diff session has no attached " +
+        "PR — nothing was posted from the browser, so any GitHub posting stays perk-side: if " +
+        "the feedback warrants per-PR reviews, run the guidance's routing + per-PR posting " +
+        "protocol (dry-run ALL per-PR batches first, then post bottom→top via " +
+        "`submit_pr_review`) — posting only what the human approves.",
+    );
   }
   return parts.join("\n\n");
 }

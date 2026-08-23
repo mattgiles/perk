@@ -9,6 +9,7 @@ import json
 import subprocess
 from pathlib import Path
 
+import pytest
 from click.testing import CliRunner
 
 import perk.cli.commands.pr.review.checkout_cmd as checkout_cmd
@@ -41,7 +42,6 @@ def _member(pr: int, head: str, base: str, *, recorded: str | None = None) -> St
         url=f"u/{pr}",
         head_ref=head,
         base_ref=base,
-        head_repo="me/repo",
         node_id=None,
         plan_id=None,
         recorded_head_sha=recorded,
@@ -103,7 +103,7 @@ def test_stack_checkout_success_snapshot_envelope(git_repo_with_remote, monkeypa
     assert [row["pr"] for row in data["stack"]] == [1, 2, 3]
     assert [row["head_sha"] for row in data["stack"]] == [shas["a"], shas["b"], shas["c"]]
     assert [row["branch"] for row in data["stack"]] == ["feat-a", "feat-b", "feat-c"]
-    assert data["stack_base_ref"] == "main"
+    assert "stack_base_ref" not in data  # base_ref IS the stack base — no duplicate field
     assert data["stack_notes"] == []
     # The checkout is the TOP head at review-<top> (cleanup --pr <top> works unchanged).
     wt = Path(data["path"])
@@ -135,6 +135,38 @@ def test_stack_checkout_topology_broken_fails_closed(git_repo_with_remote, monke
     assert result.exit_code == 1
     assert json.loads(result.stdout)["error_type"] == "stack_topology_broken"
     assert not (clone / ".worktrees" / "review-2").exists()
+
+
+@pytest.mark.parametrize("verdict", [False, None])
+def test_stack_checkout_probe_false_or_indeterminate_preserves_existing_checkout(
+    git_repo_with_remote, monkeypatch, verdict
+):
+    # The topology gate treats an INDETERMINATE ancestry probe (None — e.g. the rev-list
+    # probe itself failed) exactly like a definite non-ancestor (False): fail closed BEFORE
+    # any worktree mutation. An existing review-<top> checkout from an earlier pass is
+    # preserved untouched — never removed or re-pointed on the refusal path.
+    clone, _remote, _advance = git_repo_with_remote
+    shas = _seed_linear_stack(clone)
+    members = [
+        _member(1, "feat-a", "main"),
+        _member(2, "feat-b", "feat-a"),
+        _member(3, "feat-c", "feat-b"),
+    ]
+    _wire_stack(monkeypatch, _stack(members))
+    monkeypatch.chdir(clone)
+
+    # An earlier, healthy pass materializes the checkout at the top head.
+    first = CliRunner().invoke(cli, ["pr", "review", "checkout", "--stack", "--pr", "2", "--json"])
+    assert first.exit_code == 0, first.output
+    wt = clone / ".worktrees" / "review-3"
+    assert wt.exists() and _sha(wt) == shas["c"]
+
+    monkeypatch.setattr(git, "is_ancestor", lambda *a, **k: verdict)
+    result = CliRunner().invoke(cli, ["pr", "review", "checkout", "--stack", "--pr", "2", "--json"])
+    assert result.exit_code == 1
+    assert json.loads(result.stdout)["error_type"] == "stack_topology_broken"
+    # The prior checkout survives byte-for-byte (same worktree, same pinned head).
+    assert wt.exists() and _sha(wt) == shas["c"]
 
 
 def test_stack_checkout_drift_note_warns_not_refuses(git_repo_with_remote, monkeypatch):
@@ -180,7 +212,7 @@ def test_stack_checkout_remote_tracking_only_base(git_repo_with_remote, monkeypa
     data = json.loads(result.stdout)
     assert data["base_sha"] == base_sha
     assert data["head_sha"] == top_sha
-    assert data["stack_base_ref"] == "stackbase"
+    assert data["base_ref"] == "stackbase"
 
 
 def test_stack_flag_combination_refusals(git_repo, monkeypatch):

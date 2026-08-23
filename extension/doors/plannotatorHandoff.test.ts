@@ -478,6 +478,22 @@ test("stackRespondMessage: annotations → combined-diff framing + the routing/p
   assert.doesNotMatch(msg ?? "", /composes nothing by default/);
 });
 
+test("stackRespondMessage: feedback without annotations still carries the posting framing", () => {
+  const msg = stackRespondMessage({
+    status: "handled",
+    approved: false,
+    feedback: "the naming is off across the stack",
+    annotationCount: 0,
+    annotations: [],
+    exit: false,
+  });
+  assert.ok(msg?.startsWith("the naming is off across the stack"));
+  assert.match(msg ?? "", /No annotations came back with this feedback/);
+  assert.match(msg ?? "", /nothing was posted from the browser/);
+  assert.match(msg ?? "", /bottom→top via `submit_pr_review`/);
+  assert.match(msg ?? "", /only what the human approves/);
+});
+
 test("stackRespondMessage: non-handled arms map to null", () => {
   assert.equal(stackRespondMessage({ status: "unavailable", warning: "w" }), null);
   assert.equal(stackRespondMessage({ status: "error", warning: "w" }), null);

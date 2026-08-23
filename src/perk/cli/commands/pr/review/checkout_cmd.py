@@ -72,11 +72,11 @@ class ReviewCheckoutResult:
     base_ref: str
     state: str  # feeds the human-render non-OPEN note only
     # Trailing defaulted growth — the `--stack` arm's pinned snapshot: `stack` is the ordered
-    # member table (empty for non-stack calls, whose envelope stays byte-compatible),
-    # `stack_base_ref` the combined-diff base branch, and `stack_notes` the report-only notes
-    # carrier (resolution warnings + checkout drift observations) both entry paths render from.
+    # member table (empty for non-stack calls, whose envelope stays byte-compatible) and
+    # `stack_notes` the report-only notes carrier (resolution warnings + checkout drift
+    # observations) both entry paths render from. On the stack arm `base_ref`/`base_sha` ARE
+    # the combined-diff base — no separate stack-base field.
     stack: tuple[StackCheckoutMember, ...] = ()
-    stack_base_ref: str | None = None
     stack_notes: tuple[str, ...] = ()
 
 
@@ -387,7 +387,6 @@ def stack_checkout(
             )
             for member, sha in zip(stack.members, head_shas, strict=True)
         ),
-        stack_base_ref=stack.base_ref,
         stack_notes=tuple(notes),
     )
 
@@ -502,7 +501,6 @@ class PrReviewStackCheckoutOut(PrReviewCheckoutOut):
     byte-compatible (no null stack keys)."""
 
     stack: tuple[StackMemberOut, ...]
-    stack_base_ref: str
     stack_notes: tuple[str, ...]
 
     @classmethod
@@ -511,7 +509,6 @@ class PrReviewStackCheckoutOut(PrReviewCheckoutOut):
         return cls(
             **base.model_dump(),
             stack=tuple(StackMemberOut.from_domain(m) for m in result.stack),
-            stack_base_ref=result.stack_base_ref or result.base_ref,
             stack_notes=result.stack_notes,
         )
 
@@ -530,7 +527,7 @@ def _render_human(result: ReviewCheckoutResult) -> None:
     if result.state != "OPEN":
         user_output(f"  note: PR is {result.state}")
     if result.stack:
-        user_output(f"  stack ({len(result.stack)} member(s), base {result.stack_base_ref}):")
+        user_output(f"  stack ({len(result.stack)} member(s), base {result.base_ref}):")
         for member in result.stack:
             user_output(
                 f"    #{member.pr_number} {member.branch} ← {member.base_ref} "

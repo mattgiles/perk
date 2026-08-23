@@ -57,8 +57,8 @@ whose commits don't actually stack is `stack_topology_broken` (sync the stack fi
    with your explicit go-ahead — posts one review per member PR, bottom→top, through the gated
    `submit_pr_review` tool (formal verdicts confirm per PR). Every real post is recorded in the
    `review_posts` ledger; if anything fails mid-sequence the flow stops, shows
-   posted-vs-pending, and a resume skips the already-posted PRs — a review is never posted
-   twice.
+   posted-vs-pending, and a resume skips the already-posted PRs (enforced — a repeat post to a
+   ledger-confirmed PR is refused) so a review is never posted twice.
 6. **Clean up.** `perk pr review cleanup --pr <top>` removes the stack checkout.
 
 If the browser never becomes ready, the flow degrades loudly to an in-session findings table —

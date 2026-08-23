@@ -18,6 +18,6 @@ Stack members (bottom→top):
    - Settle the per-PR batches and events with the human (typically COMMENT; request-changes where warranted), then:
      1. Build EVERY per-PR batch first, then **dry-run ALL batches before ANY real post** — one `submit_pr_review` call with `dry_run: true` per member PR; repair reported anchors until every batch validates.
      2. Post the real reviews **bottom→top**, one `submit_pr_review` call per PR (per-PR blocking confirm for formal events — N formal posts means N confirms; the gates are unchanged).
-     3. Each real success is recorded in the `review_posts` workflow-state ledger (the durable per-PR resume ledger).
-     4. On ANY failure or decline mid-sequence: **stop**, surface the partial outcome (posted vs pending, from `review_posts`), and on resume skip the confirmed successes — never replay a posted review.
+     3. Each real success is recorded in the `review_posts` workflow-state ledger, and `submit_pr_review` enforces skip-on-resume: a real post to a PR that already has a ledger row refuses with `already_posted` (`allow_repost: true` is the deliberate-second-review override — never a workaround for a resume refusal).
+     4. On ANY failure or decline mid-sequence: **stop** and surface the partial outcome (posted vs pending, from `review_posts`). The ledger is best-effort — a MISSING row is not proof nothing posted: verify posted-vs-pending against GitHub (`gh pr view`) before re-posting that member — never replay a posted review.
 8. Cleanup: run `perk pr review cleanup --pr {{ top_pr }}` via bash (idempotent, offline). Surface the terse per-PR confirmation — what was posted to each member PR vs skipped.

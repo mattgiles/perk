@@ -50,6 +50,16 @@ test("decodeSubmitParams accepts a full comment batch with sides and dry_run", (
   assert.equal(p?.dry_run, true);
 });
 
+test("decodeSubmitParams: allow_repost decodes strictly (boolean or absent)", () => {
+  const p = decodeSubmitParams({ pr: 1, event: "comment", body: "x", allow_repost: true });
+  assert.equal(p?.allow_repost, true);
+  assert.equal(decodeSubmitParams({ pr: 1, event: "comment", body: "x" })?.allow_repost, undefined);
+  assert.equal(
+    decodeSubmitParams({ pr: 1, event: "comment", body: "x", allow_repost: "yes" }),
+    null,
+  );
+});
+
 test("decodeSubmitParams rejects a bad event / missing pr / non-string body", () => {
   assert.equal(decodeSubmitParams({ pr: 1, event: "APPROVE", body: "" }), null);
   assert.equal(decodeSubmitParams({ pr: 1, event: "merge", body: "" }), null);
@@ -242,6 +252,47 @@ test("submitPrReview: real successes append ORDERED review_posts rows (the stack
     [41, 42],
   );
   assert.ok(rows.every((r) => r.event === "comment" && typeof r.at === "string"));
+});
+
+test("submitPrReview: the enforced resume guard — already_posted before exec AND confirm; dry-run and allow_repost pass", async () => {
+  const { pi, calls, branch } = fakePi({
+    stdout: JSON.stringify({ success: true, event: "comment", mode: "review" }),
+  });
+  const { ctx, confirms } = fakeCtx({ branch, confirmAnswer: true });
+  const first = await submitPrReview(pi, ctx, { pr: 41, event: "comment", body: "first" });
+  assert.equal(first.details.ok, true);
+  assert.equal(calls.length, 1);
+
+  // A repeat REAL post to the same PR refuses on the ledger row — before the cold-door
+  // mutation and before any formal-event confirm dialog.
+  const repeat = await submitPrReview(pi, ctx, { pr: 41, event: "approve", body: "again" });
+  assert.equal(repeat.details.ok, false);
+  if (!repeat.details.ok) assert.equal(repeat.details.error_type, "already_posted");
+  assert.equal(calls.length, 1, "the guard refuses BEFORE the cold-door mutation");
+  assert.equal(confirms.length, 0, "the guard refuses BEFORE the confirm dialog");
+
+  // The repair loop is never blocked: a dry-run against the same PR still validates.
+  const dry = await submitPrReview(pi, ctx, {
+    pr: 41,
+    event: "comment",
+    body: "again",
+    dry_run: true,
+  });
+  assert.equal(dry.details.ok, true);
+  assert.equal(calls.length, 2);
+
+  // The deliberate escape hatch: allow_repost posts a second review to the same PR.
+  const deliberate = await submitPrReview(pi, ctx, {
+    pr: 41,
+    event: "comment",
+    body: "again",
+    allow_repost: true,
+  });
+  assert.equal(deliberate.details.ok, true);
+  assert.equal(calls.length, 3);
+  // Another PR was never blocked.
+  const other = await submitPrReview(pi, ctx, { pr: 42, event: "comment", body: "upper" });
+  assert.equal(other.details.ok, true);
 });
 
 test("submitPrReview: a dry-run and a failed submission never touch review_posts", async () => {

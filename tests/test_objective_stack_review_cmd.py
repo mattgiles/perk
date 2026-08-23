@@ -26,7 +26,6 @@ def _member(pr: int, head: str, base: str) -> StackMember:
         url=f"https://github.com/o/r/pull/{pr}",
         head_ref=head,
         base_ref=base,
-        head_repo="o/r",
         node_id="1.1" if pr == 1 else None,
         plan_id="301" if pr == 1 else None,
     )
@@ -76,7 +75,6 @@ def _checkout_result(root: Path, *, notes: tuple[str, ...] = ()) -> ReviewChecko
                 plan_id=None,
             ),
         ),
-        stack_base_ref="main",
         stack_notes=notes,
     )
 
@@ -210,11 +208,12 @@ def test_dry_run_json_preview_pins_the_nulls_argv_and_handoff(git_repo, monkeypa
     # The argv vector is the build-once launch argv: pi + the seeded prompt last.
     assert data["argv"][0] == "pi"
     assert "open_stack_review" in data["argv"][-1]
-    # The handoff blob preview: the same nulls plus the dry_run marker.
+    # The handoff blob preview: the real binding's four keys plus the dry_run marker — the
+    # top PR / stack base are derived from the rows in-session, never carried redundantly.
     blob = data["handoff"]["stack_review"]
+    assert set(blob) == {"stack", "checkout_path", "notes", "focus", "dry_run"}
     assert blob["dry_run"] is True
-    assert blob["base_sha"] is None
-    assert blob["top_pr"] == 2
+    assert all(row["head_sha"] is None for row in blob["stack"])
     assert blob["focus"] == "dig in"
     assert blob["checkout_path"] == data["checkout_path"]
     # Nothing was written: no handoff file exists anywhere under the workflow dir.
@@ -267,19 +266,16 @@ def test_real_run_checks_out_then_launches_with_the_pinned_snapshot(git_repo, mo
     assert "objective #77's delivery train" in sink["prompt"]
     assert "2 member PRs topped by PR #2" in sink["prompt"]
     assert "open_stack_review" in sink["prompt"]
-    # The handoff snapshot is the CHECKOUT envelope (hydrated SHAs), not the wire facts.
+    # The handoff snapshot is the CHECKOUT envelope (hydrated SHAs), not the wire facts —
+    # exactly the four keys the in-session decoder requires (top/base derive from the rows).
     blob = sink["handoff_extra"]["stack_review"]
-    assert blob["kind"] == "objective"
-    assert blob["objective_id"] == "77"
-    assert blob["top_pr"] == 2
-    assert blob["base_ref"] == "main"
-    assert blob["base_sha"] == "0" * 40
+    assert set(blob) == {"stack", "checkout_path", "notes", "focus"}
     assert blob["checkout_path"].endswith("review-2")
     assert [row["pr"] for row in blob["stack"]] == [1, 2]
     assert [row["head_sha"] for row in blob["stack"]] == ["a" * 40, "b" * 40]
+    assert [row["base_ref"] for row in blob["stack"]] == ["main", "plan-301"]
     assert blob["notes"] == ["[w] blocker", "drift: PR #1 head moved"]
     assert blob["focus"] == "dig in"
-    assert "dry_run" not in blob
     # Notes render to stderr and proceed (resolution + checkout-time drift).
     assert "note: [w] blocker" in result.stderr
     assert "note: drift: PR #1 head moved" in result.stderr
@@ -307,9 +303,8 @@ def test_chain_arm_routes_via_resolve_stack_from_pr(git_repo, monkeypatch):
     assert result.exit_code == 0, result.output
     assert seen["pr"] == 2
     blob = sink["handoff_extra"]["stack_review"]
-    assert blob["kind"] == "chain"
-    assert blob["objective_id"] is None
-    assert blob["focus"] == ""
+    assert set(blob) == {"stack", "checkout_path", "notes", "focus"}
+    assert blob["focus"] is None
     assert "the base-ref chain around PR #2" in sink["prompt"]
 
 

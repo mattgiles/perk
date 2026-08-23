@@ -47,7 +47,6 @@ class StackMember:
     url: str
     head_ref: str
     base_ref: str
-    head_repo: str
     node_id: str | None
     plan_id: str | None
     recorded_head_sha: str | None = None
@@ -119,7 +118,6 @@ def _member_from_pr(pr: PullRequest) -> StackMember:
         url=pr.url,
         head_ref=pr.head_ref,
         base_ref=pr.base_ref,
-        head_repo=pr.head_repo,
         node_id=None,
         plan_id=None,
     )
@@ -256,7 +254,6 @@ def resolve_stack_from_objective(repo_root: Path, objective_id: str) -> Resolved
                 url=pr.url,
                 head_ref=pr.head_ref or (layer.branch or ""),
                 base_ref=pr.base_ref,
-                head_repo=pr.head_repo,
                 node_id=layer.node_id,
                 plan_id=layer.plan_id,
                 recorded_head_sha=layer.published_head_sha,

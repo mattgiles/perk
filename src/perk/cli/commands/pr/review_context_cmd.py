@@ -3,8 +3,11 @@
 Flagless, resolves the active plan's PR (from the local `cache.plan-ref`, exactly as `pr feedback`
 does); `--expected-pr <n>` keeps that active-plan path but fails if the branch-selected PR changed;
 with `--pr <n>`, resolves an arbitrary PR by number, plan-ref-free (the review doors' foreign-PR
-mode — no plan exists, so `plan_body` is null). Either way it gathers everything a
-fresh-context reviewer child needs (the diff, the PR title/body, and the plan body when one
+mode — the top-level `plan_body` is null on that single-PR arm). With `--pr <n> --stack` it
+gathers the whole stack containing that PR — per-member sections plus the combined base→top
+diff — and each member whose head is a plan branch (`plan-<id>`) IS enriched with its plan body
+(the resolver-fallback fetch; non-plan members carry null). Either way it gathers everything a
+fresh-context reviewer child needs (the diff, the PR title/body, and the plan body where one
 exists) and emits `--json`. Read-only — no GitHub mutation; the verbose payload is consumed by
 the spawned reviewer child so it never transits the parent session.
 
@@ -68,7 +71,8 @@ class PrReviewContextResult:
     "pr_number",
     type=int,
     default=None,
-    help="Resolve an arbitrary PR by number (plan-ref-free; plan_body is null).",
+    help="Resolve an arbitrary PR by number, plan-ref-free (top-level plan_body is null; "
+    "with --stack, plan-branch members are still enriched per member).",
 )
 @click.option(
     "--expected-pr",
@@ -100,7 +104,8 @@ def review_context_pr(
     the plan's worktree (it reads the local cache.plan-ref). With --pr N:
     an arbitrary PR by number, plan-ref-free (plan_body is null). With
     --pr N --stack: the whole PR stack containing N — per-member sections
-    plus the combined base→top diff.
+    plus the combined base→top diff, plan-branch members enriched with
+    their plan bodies.
     """
     try:
         repo_root = require_repo(ctx)

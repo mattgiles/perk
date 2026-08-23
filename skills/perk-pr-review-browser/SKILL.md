@@ -147,8 +147,11 @@ carries the full flow; these are the deltas from single-PR mode:
   annotation's quoted context against the target PR's diff before anchoring: the browser lets
   the human switch diff views, and annotations carry no diff-mode identity.
 - **Partial-failure honesty:** every real success appends a `{pr, event, at}` row to the
-  `review_posts` workflow-state ledger. On any failure or decline mid-sequence, STOP, surface
-  posted-vs-pending from the ledger, and on resume skip confirmed rows — never replay a posted
+  `review_posts` workflow-state ledger, and the tool ENFORCES skip-on-resume — a real post to
+  a PR that already has a row refuses with `already_posted` (`allow_repost: true` is the
+  deliberate override, never a workaround). On any failure or decline mid-sequence, STOP and
+  surface posted-vs-pending from the ledger; the ledger is best-effort, so where a row is
+  MISSING verify posted-vs-pending against GitHub before re-posting — never replay a posted
   review.
 - **Entry:** warm `/stack-review-browser [objective|pr:<n>|URL] [focus]` (bare numbers are
   objective ids by definition), or the cold `perk objective stack review` launcher whose

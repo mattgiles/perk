@@ -7,9 +7,9 @@ sidebar:
 
 # Review and authoring
 
-Six warm commands cover three distinct jobs: automated review that posts one reconciled result,
-human-triaged PR review in a terminal or browser, and browser review of plan/objective drafts before
-they are saved. Their companion tools are listed with each flow; the complete availability census
+Seven warm commands cover three distinct jobs: automated review that posts one reconciled result,
+human-triaged PR review in a terminal or browser (single PRs and whole stacks), and browser review
+of plan/objective drafts before they are saved. Their companion tools are listed with each flow; the complete availability census
 lives in [Model-facing tools](./model-tools.md).
 
 ## Automated PR review
@@ -189,7 +189,8 @@ browser platform-posting): after triage, perk routes each finding to the PR that
 batches, then posts one review per member PR bottom→top through `submit_pr_review` (the gate
 ladder applies per call). Every real post appends a `{pr, event, at}` row to the `review_posts`
 ledger; a mid-sequence failure stops and surfaces posted-vs-pending, and a resume skips confirmed
-rows. Cleanup is `perk pr review cleanup --pr <top>`.
+rows — tool-enforced: a repeat real post to a ledger-confirmed PR refuses with `already_posted`
+(`allow_repost: true` is the deliberate override). Cleanup is `perk pr review cleanup --pr <top>`.
 
 The cold twin is [`perk objective stack review`](../cli/objective.md#perk-objective-stack-review-objective)
 — it materializes the same checkout and launches a dedicated session whose one

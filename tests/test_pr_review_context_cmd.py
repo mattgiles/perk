@@ -303,7 +303,6 @@ def _stack_members():
             url="u/1",
             head_ref="plan-301",
             base_ref="main",
-            head_repo="me/repo",
             node_id="1.1",
             plan_id="301",
         ),
@@ -312,7 +311,6 @@ def _stack_members():
             url="u/2",
             head_ref="feat-b",
             base_ref="plan-301",
-            head_repo="me/repo",
             node_id=None,
             plan_id=None,
         ),
@@ -386,9 +384,76 @@ def test_stack_context_sections_and_combined_diff(git_repo_with_remote, monkeypa
     assert data["stack"][1]["plan_body"] is None
     # The combined base→top diff carries BOTH layers' changes.
     assert "a.txt" in data["combined_diff"] and "b.txt" in data["combined_diff"]
-    # Temp refs are deleted after the read.
-    for n in (1, 2):
-        assert git_mod.resolve_commit(clone, f"refs/perk/review/{n}") is None
+    # The per-invocation temp-ref namespace is fully cleaned up after the read — no ref
+    # under refs/perk/ survives (checkout's shared refs/perk/review/<n> names included:
+    # this worker must never touch them, or concurrent lanes would clobber each other).
+    listed = subprocess.run(
+        ["git", "for-each-ref", "refs/perk/", "--format=%(refname)"],
+        cwd=clone,
+        check=True,
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    assert listed.stdout.strip() == ""
+    assert git_mod.resolve_commit(clone, "refs/perk/review/2") is None
+
+
+def test_stack_context_topology_broken_refuses(git_repo_with_remote, monkeypatch):
+    # A successor head that does NOT descend from its predecessor head (e.g. a lower layer
+    # force-pushed after the upper branched) fails closed — never a "combined" diff that
+    # silently omits a layer. The temp namespace is still cleaned up on the failure path.
+    import perk.cli.commands.pr.review_context_cmd as review_context_cmd
+
+    clone, _remote, _advance = git_repo_with_remote
+    # Two SIBLING branches off main: PR 2's head does not contain PR 1's head.
+    subprocess.run(["git", "checkout", "-qb", "plan-301"], cwd=clone, check=True)
+    (clone / "a.txt").write_text("a\n", encoding="utf-8")
+    subprocess.run(["git", "add", "."], cwd=clone, check=True)
+    subprocess.run(["git", "commit", "-qm", "a"], cwd=clone, check=True)
+    subprocess.run(["git", "push", "-q", "origin", "HEAD:refs/pull/1/head"], cwd=clone, check=True)
+    subprocess.run(["git", "checkout", "-q", "main"], cwd=clone, check=True)
+    subprocess.run(["git", "checkout", "-qb", "feat-b"], cwd=clone, check=True)
+    (clone / "b.txt").write_text("b\n", encoding="utf-8")
+    subprocess.run(["git", "add", "."], cwd=clone, check=True)
+    subprocess.run(["git", "commit", "-qm", "b"], cwd=clone, check=True)
+    subprocess.run(["git", "push", "-q", "origin", "HEAD:refs/pull/2/head"], cwd=clone, check=True)
+    subprocess.run(["git", "checkout", "-q", "main"], cwd=clone, check=True)
+
+    monkeypatch.setattr(
+        review_context_cmd, "resolve_stack_from_pr", lambda repo_root, pr: _stack_members()
+    )
+    contexts = {
+        1: _member_context(1, "plan-301", "main"),
+        2: _member_context(2, "feat-b", "plan-301"),
+    }
+    monkeypatch.setattr(
+        github, "get_pr_review_context", lambda *, pr_number, **k: contexts[pr_number]
+    )
+
+    class _Backend:
+        def get_plan_body(self, *, issue_id: str) -> str:
+            return "# Plan 301"
+
+    monkeypatch.setattr(
+        "perk.cli.commands.pr.review_context_cmd.resolve.resolve_issue_backend",
+        lambda _root: _Backend(),
+    )
+    monkeypatch.chdir(clone)
+
+    result = CliRunner().invoke(cli, ["pr", "review-context", "--pr", "2", "--stack", "--json"])
+    assert result.exit_code != 0
+    data = json.loads(result.stdout)
+    assert data["error_type"] == "stack_topology_broken"
+    listed = subprocess.run(
+        ["git", "for-each-ref", "refs/perk/", "--format=%(refname)"],
+        cwd=clone,
+        check=True,
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    assert listed.stdout.strip() == ""
 
 
 def test_stack_requires_pr(git_repo, monkeypatch):

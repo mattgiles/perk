@@ -184,7 +184,9 @@ chain walk (a perk train *is* a base-ref chain; the same single-PR/fork/depth re
 stack checkout, so reviewer children and the doors refuse consistently), keeps the top-level
 fields on the top PR, and adds per-member `stack[]` sections (`{pr, base_ref, head_ref, title,
 body, diff, plan_body}` — `plan_body` enriched for `plan-<N>` head branches) plus
-`combined_diff` (the base→top diff every stack reviewer works in).
+`combined_diff` (the base→top diff every stack reviewer works in, re-validated against the
+same fail-closed ancestry gate as the checkout and fetched through a per-invocation temp-ref
+namespace so concurrent reviewer lanes never collide).
 
 ### `perk pr review-post`
 
@@ -259,8 +261,8 @@ of the head above it — a violation or indeterminate probe is `stack_topology_b
 **top** head is checked out at `review-<top>` (so `cleanup --pr <top>` works unchanged) and
 `base_sha` becomes the merge-base of `origin/<stack base>` and the top head. The envelope adds
 the pinned snapshot: `stack[]` (`{pr, url, branch, head_sha, base_ref, node_id, plan_id}`,
-bottom→top), `stack_base_ref`, and `stack_notes[]` (resolution warnings + recorded-vs-observed
-head drift — warnings only). Typed refusals: `not_a_stack` (fewer than 2 open members — use the
+bottom→top) and `stack_notes[]` (resolution warnings + recorded-vs-observed head drift —
+warnings only); the top-level `base_ref` is the stack base. Typed refusals: `not_a_stack` (fewer than 2 open members — use the
 single-PR flow), `stack_too_deep` (over 20 members), `fork_unsupported`, `ambiguous_stack`
 (more than one open same-repo child), `stack_cycle` (the base-ref graph loops),
 `not_stacked`/`stack_discontiguous`/`no_objective`

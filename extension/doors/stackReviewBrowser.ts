@@ -35,7 +35,7 @@ import { existsSync } from "node:fs";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { bindingSuffix } from "../substrate/bindingDelivery.ts";
 import { readHandoff } from "../substrate/cache.ts";
-import { type ColdJson, runColdDoor, stringField } from "../substrate/coldDoor.ts";
+import { type ColdJson, runColdDoor } from "../substrate/coldDoor.ts";
 import { registerPerkCommand } from "../substrate/command.ts";
 import { render } from "../substrate/prompts.ts";
 import { failFor, ok } from "../substrate/result.ts";
@@ -148,10 +148,10 @@ export interface StackSnapshotRow {
   plan_id: string | null;
 }
 
-/** The `perk pr review checkout --stack --json` ok-arm: the single-PR fields + the snapshot. */
+/** The `perk pr review checkout --stack --json` ok-arm: the single-PR fields + the snapshot
+ * (`base_ref` IS the combined-diff/stack base on the stack envelope — no separate field). */
 export interface StackCheckoutOk extends CheckoutOk {
   stack: StackSnapshotRow[];
-  stack_base_ref: string;
   stack_notes: string[];
 }
 
@@ -188,10 +188,9 @@ export function decodeStackCheckout(payload: ColdJson): StackCheckoutOk | null {
   const base = decodeCheckout(payload);
   if (base === null) return null;
   const stack = decodeSnapshotRows(payload.stack);
-  const stackBaseRef = stringField(payload, "stack_base_ref");
   const stackNotes = decodeStringArray(payload.stack_notes);
-  if (stack === null || stackBaseRef === undefined || stackNotes === null) return null;
-  return { ...base, stack, stack_base_ref: stackBaseRef, stack_notes: stackNotes };
+  if (stack === null || stackNotes === null) return null;
+  return { ...base, stack, stack_notes: stackNotes };
 }
 
 // ------------------------------------------------------------------------ guidance
@@ -370,7 +369,7 @@ export function registerStackReviewBrowser(pi: ExtensionAPI): void {
         ctx,
         SCOPE,
         "info",
-        `stack of ${data.stack.length} PRs (base ${data.stack_base_ref}, top #${data.pr})` +
+        `stack of ${data.stack.length} PRs (base ${data.base_ref}, top #${data.pr})` +
           (parsed.directive
             ? ` → adversarial reviewers (focus: ${parsed.directive})`
             : " → adversarial reviewers") +
@@ -378,12 +377,12 @@ export function registerStackReviewBrowser(pi: ExtensionAPI): void {
       );
       await openStackBrowser(pi, ctx, {
         checkoutPath: data.path,
-        stackBaseRef: data.stack_base_ref,
+        stackBaseRef: data.base_ref,
         guidance:
           stackReviewGuidance({
             topPr: data.pr,
             checkout: data.path,
-            stackBase: data.stack_base_ref,
+            stackBase: data.base_ref,
             members: data.stack,
             notes: data.stack_notes,
             ...(parsed.directive ? { directive: parsed.directive } : {}),
@@ -396,46 +395,45 @@ export function registerStackReviewBrowser(pi: ExtensionAPI): void {
 
 // ------------------------------------------------------------------------ the cold-launch tool
 
-/** The decoded `stack_review` launch binding (the launcher's `handoff_extra` blob). */
+/** The decoded `stack_review` launch binding (the launcher's `handoff_extra` blob) — exactly
+ * what the tool consumes: the pinned snapshot rows, the checkout path, the notes, and the
+ * focus. The top PR and the stack base are DERIVED from the ordered rows (last row's `pr`;
+ * first row's `base_ref`), never carried redundantly. */
 export interface StackReviewBinding {
-  kind: string;
-  objective_id: string | null;
   stack: StackSnapshotRow[];
-  base_ref: string;
-  base_sha: string;
-  top_pr: number;
   checkout_path: string;
   notes: string[];
   focus: string | null;
 }
 
-/** Strict decode of the handoff's `stack_review` blob; null on ANY drift (⇒ bad_state). */
+/** The derived stack endpoints (the binding's rows are ordered bottom→top, never empty). */
+export function bindingTopPr(binding: StackReviewBinding): number {
+  const top = binding.stack[binding.stack.length - 1];
+  return top === undefined ? 0 : top.pr;
+}
+
+export function bindingBaseRef(binding: StackReviewBinding): string {
+  return binding.stack[0]?.base_ref ?? "";
+}
+
+/**
+ * Strict decode of the handoff's `stack_review` blob; null on ANY drift (⇒ bad_state). Every
+ * field is REQUIRED — `stack` a non-empty row array, `checkout_path` a non-empty string,
+ * `notes` a string array, `focus` present as a string or null (the one normalization: a
+ * blank/whitespace-only focus string decodes to null — "no focus", matching the launcher's
+ * no-flag arm).
+ */
 export function decodeStackReviewBinding(raw: unknown): StackReviewBinding | null {
   if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return null;
   const b = raw as Record<string, unknown>;
   const stack = decodeSnapshotRows(b.stack);
-  const notes = decodeStringArray(b.notes ?? []);
+  const notes = decodeStringArray(b.notes);
   if (stack === null || notes === null) return null;
-  if (typeof b.kind !== "string") return null;
-  if (
-    b.objective_id !== null &&
-    b.objective_id !== undefined &&
-    typeof b.objective_id !== "string"
-  ) {
-    return null;
-  }
-  if (typeof b.base_ref !== "string" || b.base_ref === "") return null;
-  if (typeof b.base_sha !== "string") return null;
-  if (typeof b.top_pr !== "number" || !Number.isInteger(b.top_pr)) return null;
   if (typeof b.checkout_path !== "string" || b.checkout_path === "") return null;
-  if (b.focus !== null && b.focus !== undefined && typeof b.focus !== "string") return null;
+  if (!("focus" in b)) return null;
+  if (b.focus !== null && typeof b.focus !== "string") return null;
   return {
-    kind: b.kind,
-    objective_id: typeof b.objective_id === "string" ? b.objective_id : null,
     stack,
-    base_ref: b.base_ref,
-    base_sha: b.base_sha,
-    top_pr: b.top_pr,
     checkout_path: b.checkout_path,
     notes,
     focus: typeof b.focus === "string" && b.focus.trim() !== "" ? b.focus : null,
@@ -459,12 +457,98 @@ const TOOL_GUIDELINES = [
   "The tool is single-use per session; a bad_state failure means this session is not a stack-review launch (or the checkout is gone) — re-run perk objective stack review.",
 ];
 
+/** The single-use latch (registration-scoped state, injectable for the execute-core tests). */
+export interface OpenLatch {
+  opened: boolean;
+}
+
+/** The injectable browser-open seam (the execute-core tests force the failure arm). */
+type StackBrowserOpen = typeof openStackBrowser;
+
+/**
+ * The `open_stack_review` execute core (exported for direct tests — the `executeStartReviewWave`
+ * posture): every gate in registration order, then the shared browser open.
+ */
+export async function executeOpenStackReview(
+  pi: ExtensionAPI,
+  ctx: ExtensionContext,
+  latch: OpenLatch,
+  open: StackBrowserOpen = openStackBrowser,
+): Promise<ReturnType<typeof ok> | ReturnType<ReturnType<typeof failFor>>> {
+  const fail = failFor(ctx, "open_stack_review");
+  if (!ctx.hasUI) {
+    return fail(
+      "open_stack_review requires an interactive session — the plannotator browser " +
+        "surface and the human are constitutive",
+      "headless",
+    );
+  }
+  if (latch.opened) {
+    return fail(
+      "the stack review browser was already opened in this session (single-use) — " +
+        "continue the flow from the earlier guidance",
+      "bad_state",
+    );
+  }
+  // The structural binding: no param exists, so the ONLY reachable snapshot is the one the
+  // cold door bound into this session's launch handoff.
+  const binding = stackReviewBindingOf(ctx);
+  if (binding === null) {
+    return fail(
+      "no stack_review binding in this session's launch state — open_stack_review runs " +
+        "only inside a perk objective stack review session",
+      "bad_state",
+    );
+  }
+  if (!existsSync(binding.checkout_path)) {
+    return fail(
+      `the stack checkout is missing at '${binding.checkout_path}' — re-run perk ` +
+        "objective stack review",
+      "bad_state",
+    );
+  }
+  if (!plannotatorPresent(pi)) {
+    return fail(
+      "the plannotator extension is not loaded (its /plannotator-review command was not " +
+        "found) — select the plannotator plan provider, run `perk init`, then restart pi",
+      "plannotator_missing",
+    );
+  }
+  const guidance = stackReviewGuidance({
+    topPr: bindingTopPr(binding),
+    checkout: binding.checkout_path,
+    stackBase: bindingBaseRef(binding),
+    members: binding.stack,
+    notes: binding.notes,
+    ...(binding.focus !== null ? { directive: binding.focus } : {}),
+  });
+  const started = await open(pi, ctx, {
+    checkoutPath: binding.checkout_path,
+    stackBaseRef: bindingBaseRef(binding),
+    guidance,
+    injectGuidance: false,
+  });
+  if (!started) {
+    return fail(
+      "could not start the plannotator review server (no free local port) — see the " +
+        "error report",
+      "browser_failed",
+    );
+  }
+  latch.opened = true;
+  return ok(guidance, {
+    top_pr: bindingTopPr(binding),
+    checkout_path: binding.checkout_path,
+    member_count: binding.stack.length,
+  });
+}
+
 /**
  * Register the parameterless `open_stack_review` tool (the `run_audit_wave` posture) and reset
  * its single-use latch (a fresh registration is a fresh session).
  */
 export function registerOpenStackReview(pi: ExtensionAPI): void {
-  let opened = false;
+  const latch: OpenLatch = { opened: false };
 
   pi.registerTool({
     name: "open_stack_review",
@@ -483,72 +567,7 @@ export function registerOpenStackReview(pi: ExtensionAPI): void {
       properties: {},
     },
     async execute(_toolCallId, _params, _signal, _onUpdate, ctx) {
-      const fail = failFor(ctx, "open_stack_review");
-      if (!ctx.hasUI) {
-        return fail(
-          "open_stack_review requires an interactive session — the plannotator browser " +
-            "surface and the human are constitutive",
-          "headless",
-        );
-      }
-      if (opened) {
-        return fail(
-          "the stack review browser was already opened in this session (single-use) — " +
-            "continue the flow from the earlier guidance",
-          "bad_state",
-        );
-      }
-      // The structural binding: no param exists, so the ONLY reachable snapshot is the one the
-      // cold door bound into this session's launch handoff.
-      const binding = stackReviewBindingOf(ctx);
-      if (binding === null) {
-        return fail(
-          "no stack_review binding in this session's launch state — open_stack_review runs " +
-            "only inside a perk objective stack review session",
-          "bad_state",
-        );
-      }
-      if (!existsSync(binding.checkout_path)) {
-        return fail(
-          `the stack checkout is missing at '${binding.checkout_path}' — re-run perk ` +
-            "objective stack review",
-          "bad_state",
-        );
-      }
-      if (!plannotatorPresent(pi)) {
-        return fail(
-          "the plannotator extension is not loaded (its /plannotator-review command was not " +
-            "found) — select the plannotator plan provider, run `perk init`, then restart pi",
-          "plannotator_missing",
-        );
-      }
-      const guidance = stackReviewGuidance({
-        topPr: binding.top_pr,
-        checkout: binding.checkout_path,
-        stackBase: binding.base_ref,
-        members: binding.stack,
-        notes: binding.notes,
-        ...(binding.focus !== null ? { directive: binding.focus } : {}),
-      });
-      const started = await openStackBrowser(pi, ctx, {
-        checkoutPath: binding.checkout_path,
-        stackBaseRef: binding.base_ref,
-        guidance,
-        injectGuidance: false,
-      });
-      if (!started) {
-        return fail(
-          "could not start the plannotator review server (no free local port) — see the " +
-            "error report",
-          "browser_failed",
-        );
-      }
-      opened = true;
-      return ok(guidance, {
-        top_pr: binding.top_pr,
-        checkout_path: binding.checkout_path,
-        member_count: binding.stack.length,
-      });
+      return await executeOpenStackReview(pi, ctx, latch);
     },
   });
 }
