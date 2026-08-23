@@ -239,7 +239,7 @@ now three distinct vacating mechanisms plus two limit-case postures:
   (hard-fail on the Python plane, silent-ignore on the TS plane). A DISPATCH seam is therefore
   a **transitional** posture: it exists only while one door must serve N surfaces; when each
   surface earns its own command, the seam dissolves. Full history: the review-seam status note
-  in `shared/contracts-history.md` §8.10.
+  in the retired `shared/contracts-history.md` changelog — git history is the archive.
 
 ### footer is the SECOND interface seam (vacate-only, `adapter: null`)
 

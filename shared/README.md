@@ -24,9 +24,6 @@ Contents:
   `.perk/workflow/` layout, the `PERK_RUN_ID` protocol, the `perk:workflow-state`
   schema, and the GitHub gateway contract — were the original seed, not the current
   inventory.
-- **`contracts-history.md`** — the chronological `Status (…)` changelog sibling of the
-  prose spec, grouped by `§N.M` anchor (keeps `contracts.md` a compact current-spec
-  document).
 - **`schemas/`** — committed **golden snapshots** of perk's boundary models (the
   shared-YAML parse contracts, the machine batch inputs, and the `--json` output
   envelopes), generated from the Pydantic models in `perk/boundary.py` and grouped by
