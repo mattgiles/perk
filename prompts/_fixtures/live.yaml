@@ -231,12 +231,14 @@
     base: "main"
     attempt: "2"
     cap: "3"
+    worktree: "/tmp/worktrees/plan-42"
     model: ""
 - template: "stages/conflict-resolution.md"
   vars:
     base: "main"
     attempt: "2"
     cap: "3"
+    worktree: "/tmp/worktrees/plan-42"
     model: "google/gemini-3.5-flash"
 - template: "stages/objective-reconcile.md"
   vars:

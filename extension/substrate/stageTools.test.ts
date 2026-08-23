@@ -557,6 +557,7 @@ const DRIVE_COVERAGE: readonly {
         base: "main",
         attempt: "1",
         cap: "2",
+        worktree: "/tmp/wt",
         model: "test-model",
       }),
   },

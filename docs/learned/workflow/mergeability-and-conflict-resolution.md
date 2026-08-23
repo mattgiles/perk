@@ -136,7 +136,11 @@ correctly stopped — the task text hadn't pinned the worktree cwd, so the comma
 plan worktree. A retry whose task text opened with an explicit worktree-`cd` instruction
 succeeded (and the same explicit-cwd task text succeeded first-try in a later `finalize_address`
 publish step). Rule: resolver task text opens with the `cd <worktree>` command — a concrete
-command line, not a prose description of where to work.
+command line, not a prose description of where to work. The rule is now plumbed into the dispatch
+itself: `conflictResolutionGuidance` takes the plan worktree path (the session cwd — `/submit`
+runs only in worktree-bound sessions) and `stages/conflict-resolution.md` opens the child
+instruction with the concrete `cd {{ worktree }}` command, so the session no longer has to
+remember to author it.
 
 ## The rebase prose-lag trap — relocated symbols leave stale prose behind
 

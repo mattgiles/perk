@@ -179,49 +179,54 @@ test("submit tool: multiline push rejection stays complete without a transcript 
 // --- conflictResolutionGuidance (pure) -----------------------------------------------------------
 
 test("conflictResolutionGuidance spawns perk.conflict-resolver with a fresh context", () => {
-  const text = conflictResolutionGuidance("main", 1, 2);
+  const text = conflictResolutionGuidance("main", 1, 2, "/wt/plan-42");
   assert.match(text, /perk\.conflict-resolver/);
   assert.match(text, /context: "fresh"/);
 });
 
 test("conflictResolutionGuidance dispatches ONE foreground workflowScript one-child run", () => {
-  const text = conflictResolutionGuidance("main", 1, 2);
+  const text = conflictResolutionGuidance("main", 1, 2, "/wt/plan-42");
   assert.match(text, /workflowScript/);
   assert.match(text, /async: false/);
   assert.match(text, /runs\.run/);
 });
 
 test("conflictResolutionGuidance states the base branch and the clean+correct instruction", () => {
-  const text = conflictResolutionGuidance("develop", 1, 2);
+  const text = conflictResolutionGuidance("develop", 1, 2, "/wt/plan-42");
   assert.match(text, /`develop`/);
   assert.match(text, /\*\*clean\*\*/);
   assert.match(text, /\*\*correct\*\*/);
 });
 
 test("conflictResolutionGuidance notes the child reads its own plan/PR context", () => {
-  const text = conflictResolutionGuidance("main", 1, 2);
+  const text = conflictResolutionGuidance("main", 1, 2, "/wt/plan-42");
   assert.match(text, /perk pr review-context/);
   assert.match(text, /intent/);
 });
 
 test("conflictResolutionGuidance renders the attempt-of-cap text", () => {
-  const text = conflictResolutionGuidance("main", 2, 3);
+  const text = conflictResolutionGuidance("main", 2, 3, "/wt/plan-42");
   assert.match(text, /attempt 2 of 3/);
 });
 
+test("conflictResolutionGuidance pins the plan worktree with a concrete cd command", () => {
+  const text = conflictResolutionGuidance("main", 1, 2, "/wt/plan-42");
+  assert.match(text, /`cd \/wt\/plan-42`/);
+});
+
 test("conflictResolutionGuidance tells the model to re-/submit afterward", () => {
-  const text = conflictResolutionGuidance("main", 1, 2);
+  const text = conflictResolutionGuidance("main", 1, 2, "/wt/plan-42");
   assert.match(text, /`\/submit` again/);
 });
 
 test("conflictResolutionGuidance injects the configured model when set", () => {
-  const text = conflictResolutionGuidance("main", 1, 2, "anthropic/claude-opus-4");
+  const text = conflictResolutionGuidance("main", 1, 2, "/wt/plan-42", "anthropic/claude-opus-4");
   assert.match(text, /model: "anthropic\/claude-opus-4"/);
   assert.match(text, /\[models\.subagents\] conflict-resolver model/);
 });
 
 test("conflictResolutionGuidance omits the model override when unset", () => {
-  const text = conflictResolutionGuidance("main", 1, 2);
+  const text = conflictResolutionGuidance("main", 1, 2, "/wt/plan-42");
   assert.doesNotMatch(text, /model: "/);
   assert.match(text, /default model/);
 });
