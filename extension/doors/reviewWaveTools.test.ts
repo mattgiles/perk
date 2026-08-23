@@ -129,6 +129,37 @@ test("decodeStartReviewWaveParams accepts valid 2- and 3-angle selections (+ tri
   );
 });
 
+test("decodeStartReviewWaveParams: stack is an optional boolean — anything else refuses whole", () => {
+  assert.deepEqual(
+    decodeStartReviewWaveParams({
+      angles: ["claimed-intent", "tests"],
+      pr: 42,
+      worktree: "/abs/wt",
+      stack: true,
+    }),
+    { angles: ["claimed-intent", "tests"], pr: 42, worktree: "/abs/wt", stack: true },
+  );
+  assert.deepEqual(
+    decodeStartReviewWaveParams({
+      angles: ["claimed-intent", "tests"],
+      pr: 42,
+      worktree: "/abs/wt",
+      stack: false,
+    }),
+    { angles: ["claimed-intent", "tests"], pr: 42, worktree: "/abs/wt", stack: false },
+  );
+  // A mistyped stack refuses the WHOLE call — never a silent single-PR downgrade.
+  assert.equal(
+    decodeStartReviewWaveParams({
+      angles: ["claimed-intent", "tests"],
+      pr: 42,
+      worktree: "/abs/wt",
+      stack: "true",
+    }),
+    null,
+  );
+});
+
 test("decodeStartReviewWaveParams refuses out-of-bounds angle selections (whole refusal)", () => {
   assert.equal(decodeStartReviewWaveParams({ pr: 1, worktree: "/wt" }), null); // missing
   assert.equal(

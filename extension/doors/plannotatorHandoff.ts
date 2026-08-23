@@ -539,18 +539,35 @@ async function startPlannotatorSurface<T>(
 
 /**
  * The composable code-review browser open: the engine with launch = the `code-review` bridge
- * request (the PR-mode payload `{prUrl, cwd}` byte-for-byte — plannotator's defaults, including
- * its own local checkout for Ask AI / Full-stack: deliberately NOT `useLocal: false`, the human
- * chose the full surface) and the `/api/diff` readiness route (`bridgePromise` is the single
- * respond — code-review has no handshake).
+ * request and the `/api/diff` readiness route (`bridgePromise` is the single respond —
+ * code-review has no handshake). PR mode passes `{prUrl, cwd}` — the payload stays
+ * byte-identical to the original shape because the optional local-mode fields (`diffType`,
+ * `defaultBranch`) render ONLY when defined (`requestPlannotatorCodeReview` builds the payload
+ * conditionally). The stack door supplies the local-mode trio
+ * `{cwd, diffType: "since-base", defaultBranch: "origin/<stack base>"}` instead of a PR URL.
+ * Plannotator's defaults are otherwise untouched (deliberately NOT `useLocal: false` — the
+ * human chose the full surface).
  */
 export async function startPlannotatorBrowser(
   bus: PlannotatorBus,
-  opts: { prUrl: string; cwd: string; signal?: AbortSignal },
+  opts: {
+    cwd: string;
+    prUrl?: string;
+    diffType?: string;
+    defaultBranch?: string;
+    signal?: AbortSignal;
+  },
   deps: StartBrowserDeps = {},
 ): Promise<StartedBrowser> {
   return await startPlannotatorSurface(
-    (signal) => requestPlannotatorCodeReview(bus, { prUrl: opts.prUrl, cwd: opts.cwd, signal }),
+    (signal) =>
+      requestPlannotatorCodeReview(bus, {
+        cwd: opts.cwd,
+        ...(opts.prUrl !== undefined ? { prUrl: opts.prUrl } : {}),
+        ...(opts.diffType !== undefined ? { diffType: opts.diffType } : {}),
+        ...(opts.defaultBranch !== undefined ? { defaultBranch: opts.defaultBranch } : {}),
+        ...(signal !== undefined ? { signal } : {}),
+      }),
     CODE_REVIEW_READINESS_PROBE_PATH,
     opts.signal,
     deps,

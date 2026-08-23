@@ -22,7 +22,13 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { subagentModel } from "../substrate/config.ts";
 import { failFor, ok, type Result } from "../substrate/result.ts";
-import { numberParam, paramsOf, stringArrayParam, stringParam } from "../substrate/toolParams.ts";
+import {
+  booleanParam,
+  numberParam,
+  paramsOf,
+  stringArrayParam,
+  stringParam,
+} from "../substrate/toolParams.ts";
 import { type ReportTarget, report } from "../surfaces/report.ts";
 import {
   type AdversarialReviewAngle,
@@ -51,6 +57,7 @@ export interface StartReviewWaveParams {
   pr: number;
   worktree: string;
   directive?: string;
+  stack?: boolean;
 }
 
 /**
@@ -58,7 +65,8 @@ export interface StartReviewWaveParams {
  * tool-boundary seam; the `decodeWaveParams` whole-refusal posture): `angles` an array of 2–3
  * unique slugs from the four-slug allowlist with `claimed-intent` mandatory; `pr` a positive
  * integer; `worktree` a non-empty string; `directive` optional — decoded trimmed,
- * present-but-not-a-string or blank (empty/whitespace-only) ⇒ null. Any violation ⇒ null.
+ * present-but-not-a-string or blank (empty/whitespace-only) ⇒ null; `stack` an optional
+ * boolean (anything else ⇒ whole refusal). Any violation ⇒ null.
  */
 export function decodeStartReviewWaveParams(params: unknown): StartReviewWaveParams | null {
   const p = paramsOf(params);
@@ -83,11 +91,14 @@ export function decodeStartReviewWaveParams(params: unknown): StartReviewWavePar
   // dangling, contentless operator-focus suffix.
   const directive = rawDirective?.trim();
   if (directive !== undefined && directive.length === 0) return null;
+  const stack = booleanParam(p, "stack");
+  if (stack === null) return null;
   return {
     angles,
     pr,
     worktree,
     ...(directive !== undefined ? { directive } : {}),
+    ...(stack !== undefined ? { stack } : {}),
   };
 }
 
@@ -143,6 +154,7 @@ export async function executeStartReviewWave(
     pr: number;
     worktree: string;
     directive?: string;
+    stack?: boolean;
     model?: string;
     /** Test seam; production validates the exact source-bound Ponytail review skill. */
     requiredSkillPreflight?: WaveSpec["requiredSkillPreflight"];
@@ -161,6 +173,7 @@ export async function executeStartReviewWave(
     pr: opts.pr,
     worktree: opts.worktree,
     ...(opts.directive !== undefined ? { directive: opts.directive } : {}),
+    ...(opts.stack !== undefined ? { stack: opts.stack } : {}),
     ...(opts.model !== undefined ? { model: opts.model } : {}),
     ...(opts.requiredSkillPreflight !== undefined
       ? { requiredSkillPreflight: opts.requiredSkillPreflight }
@@ -349,6 +362,13 @@ export function registerReviewWaveTools(pi: ExtensionAPI): void {
             "The operator's free-form focus note, threaded to every reviewer as DATA " +
             "(emphasis within the assigned angle only).",
         },
+        stack: {
+          type: "boolean",
+          description:
+            "Stack mode (the /stack-review-browser flow): the lanes review the combined diff " +
+            "of the PR stack topped by `pr` at `worktree`, fetching membership via " +
+            "`perk pr review-context --pr <pr> --stack`.",
+        },
       },
     },
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
@@ -357,7 +377,8 @@ export function registerReviewWaveTools(pi: ExtensionAPI): void {
         return failFor(ctx, "start_review_wave")(
           "start_review_wave needs { angles: 2–3 unique slugs among " +
             "claimed-intent|correctness|tests|quality (claimed-intent mandatory), pr: positive " +
-            "integer, worktree: non-empty string, directive?: non-empty string }",
+            "integer, worktree: non-empty string, directive?: non-empty string, " +
+            "stack?: boolean }",
           "bad_input",
         );
       }

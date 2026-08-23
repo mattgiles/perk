@@ -70,6 +70,39 @@ test("buildAdversarialReviewLanes: key = label = slug, the fixed agent/phase, th
   ]);
 });
 
+test("buildAdversarialReviewLanes stack mode: per-key task pins + the no-stack byte-identity", () => {
+  // The stack discriminator swaps ONLY the subject sentence — the exact per-key pin proves the
+  // task names the stack top, the combined-diff framing, and the --stack context fetch, and
+  // still carries no URL/surface handle.
+  const lanes = buildAdversarialReviewLanes({
+    angles: TWO_ANGLES,
+    pr: 42,
+    worktree: "/abs/wt",
+    stack: true,
+  });
+  const subject =
+    "Review the PR stack topped by PR #42 (combined diff) at /abs/wt. " +
+    "Fetch context with `perk pr review-context --pr 42 --stack`.";
+  assert.deepEqual(
+    lanes.map((lane) => [lane.key, lane.task]),
+    [
+      ["claimed-intent", `Angle: claimed-intent. ${subject}`],
+      ["correctness", `Angle: correctness. ${subject}`],
+      ["ponytail", `Angle: ponytail. ${subject}`],
+    ],
+  );
+  // Without stack (absent OR false), tasks are byte-identical to the single-PR form.
+  const plain = buildAdversarialReviewLanes({ angles: TWO_ANGLES, pr: 42, worktree: "/abs/wt" });
+  const explicitFalse = buildAdversarialReviewLanes({
+    angles: TWO_ANGLES,
+    pr: 42,
+    worktree: "/abs/wt",
+    stack: false,
+  });
+  assert.deepEqual(explicitFalse, plain);
+  assert.equal(plain[0]?.task, "Angle: claimed-intent. Review PR #42 at /abs/wt.");
+});
+
 test("buildAdversarialReviewLanes appends ONE uniform directive suffix to EVERY lane task when set", () => {
   const lanes = buildAdversarialReviewLanes({
     angles: ["claimed-intent", "tests", "quality"],
@@ -182,6 +215,11 @@ test("the agent def completes via structured_output with the schema's four field
   for (const field of schema.required) {
     assert.match(def, new RegExp(`\`${field}\``), `the def must name the report field ${field}`);
   }
+  // The stack-mode paragraph stays in lockstep with the lane task's --stack pointer: the def
+  // must teach the --stack context fetch and combined-diff-coordinate reporting.
+  assert.match(def, /perk pr review-context --pr <n> --stack --json/);
+  assert.match(def, /\*\*combined-diff coordinates\*\*/);
+  assert.match(def, /routing findings to individual member PRs is the\s+parent's job/i);
   // The retired fenced-JSON completion form is explicitly rejected…
   assert.match(
     def,

@@ -480,6 +480,33 @@ test("startPlannotatorBrowser: probe never true → timeout, env RESTORED-BY-DEL
   }
 });
 
+test("startPlannotatorBrowser: local-mode fields render ONLY when defined (the stack shape)", async () => {
+  // The stack door's payload: {cwd, diffType, defaultBranch} — no prUrl key at all. The
+  // PR-mode byte-identity pin is the deepEqual above ({ cwd, prUrl } exactly).
+  const bus = fakeBus();
+  let seen: CodeReviewEnvelope | undefined;
+  bus.on("plannotator:request", (data) => {
+    seen = data as CodeReviewEnvelope;
+  });
+  const started = await startPlannotatorBrowser(
+    bus,
+    { cwd: "/checkout", diffType: "since-base", defaultBranch: "origin/main" },
+    {
+      pickFreePort: () => Promise.resolve(45007),
+      probe: () => Promise.resolve(true),
+      intervalMs: 1,
+      budgetMs: 10,
+      sleep: () => Promise.resolve(),
+    },
+  );
+  assert.equal(await started.readiness, "ready");
+  assert.deepEqual(seen?.payload, {
+    cwd: "/checkout",
+    diffType: "since-base",
+    defaultBranch: "origin/main",
+  });
+});
+
 test("startPlannotatorBrowser: early bridge settle stops the poll → bridge_settled", async () => {
   const bus = fakeBus();
   bus.on("plannotator:request", (data) => {
