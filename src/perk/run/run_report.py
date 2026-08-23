@@ -50,10 +50,14 @@ def read_outcome(repo_root: Path, run_id: str) -> dict[str, Any] | None:
 
     Reads the durable §8.12 stream out-of-process (the worker inherits stdio, so its stdout
     ``RunOutcome`` is not captured — the contract-sanctioned path is the events file). Fail-soft:
-    ``None`` when the file is missing, empty, or carries no ``run_finished``; a malformed line is
-    skipped, never raised.
+    ``None`` when the file is missing, empty, unreadable/undecodable, or carries no
+    ``run_finished``; a malformed line is skipped, never raised — reporting degrades to the
+    §8.15 no-outcome terminal note rather than failing the worker's exit path.
     """
-    text = cache.read_scratch(repo_root, run_id, "events.ndjson")
+    try:
+        text = cache.read_scratch(repo_root, run_id, "events.ndjson")
+    except (OSError, UnicodeDecodeError):
+        return None
     if not text:
         return None
     outcome: dict[str, Any] | None = None

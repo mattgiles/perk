@@ -94,6 +94,20 @@ def test_read_outcome_no_run_finished_is_none(tmp_path):
     assert run_report.read_outcome(tmp_path, "RID") is None
 
 
+def test_read_outcome_undecodable_file_fails_soft(tmp_path):
+    """A non-UTF-8 events file degrades to ``None`` — the terminal note reports the degraded
+    no-structured-outcome status instead of the reporting path raising."""
+    scratch = cache.run_scratch_dir(tmp_path, "RID")
+    scratch.mkdir(parents=True, exist_ok=True)
+    (scratch / "events.ndjson").write_bytes(b"\xff\xfe{ not utf-8 }\n")
+    outcome = run_report.read_outcome(tmp_path, "RID")
+    assert outcome is None
+    body = run_report.format_outcome(
+        run_id="RID", stage="implement", plan="7", run_url=None, outcome=outcome, exit_code=1
+    )
+    assert "no structured outcome on disk" in body
+
+
 # ----------------------------------------------------------------- format_started
 
 

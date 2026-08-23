@@ -95,11 +95,16 @@ def render_cold_bindings(
 
 
 def _read_skill_body(repo_root: Path, skill: str) -> str | None:
-    """Read ``.agents/skills/<skill>/SKILL.md`` (frontmatter stripped); ``None`` if absent."""
+    """Read ``.agents/skills/<skill>/SKILL.md`` (frontmatter stripped); ``None`` if absent or
+    unreadable — an undecodable/unreadable file degrades to the same pointer fallback as
+    absence (parity with ``bindingDelivery.ts::readSkillBody``), never a crashed launch."""
     path = repo_root / SKILLS_DIR / skill / SKILL_FILENAME
     if not path.is_file():
         return None
-    return _strip_frontmatter(path.read_text(encoding="utf-8"))
+    try:
+        return _strip_frontmatter(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError):
+        return None
 
 
 def _strip_frontmatter(text: str) -> str:
