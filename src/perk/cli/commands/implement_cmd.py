@@ -69,8 +69,9 @@ def implement(
     """Do the work on a branch (requires fresh context; cold-only).
 
     \b
-    PLAN is an optional plan issue id (e.g. 42, #42, ENG-123, or the pasted issue URL). Omit it
-    to implement the active saved plan: the no-argument form selects, in order, an explicit
+    PLAN is an optional plan issue id (e.g. 42, #42, ENG-123, or the pasted issue URL) — or
+    the plan's PR: its number or pasted .../pull/N URL, resolved to the plan it records. Omit
+    it to implement the active saved plan: the no-argument form selects, in order, an explicit
     EXISTING --worktree's own binding, else the invoking checkout's cache.plan-ref (inside a
     plan worktree that is the worktree's binding); a missing --worktree directory without PLAN
     is refused (it cannot invent a binding). An explicit PLAN is

@@ -52,6 +52,7 @@ from perk.cli.plan_selection import (
     load_main_config,
     main_repo_root,
     parse_plan_id,
+    pr_number_from_url,
     select_plan,
 )
 from perk.delivery import journal
@@ -108,12 +109,15 @@ def ready_pr(ctx: click.Context, *, plan: str | None, dry_run: bool, as_json: bo
     an ambiguous/transient append converges on an idempotent re-run.
 
     \b
-    PLAN is an optional plan issue id (e.g. 42, #42, ENG-123, or the pasted issue URL): pass it
-    to select the plan canonically (works from the repository root — ready needs no worktree);
-    omit it to read the invoking checkout's own cache.plan-ref (inside a plan worktree, that
-    worktree's binding). Typed failures (no_plan_ref, plan_not_found, issue_kind_mismatch,
-    no_pr, invalid_input) exit 1. Note: --dry-run performs no backend read, so the offline
-    preview classifies nothing (kind included).
+    PLAN is an optional plan issue id (e.g. 42, #42, ENG-123, or the pasted issue URL) — or
+    the plan's PR: its number or pasted .../pull/N URL, resolved to the plan it records. Pass
+    it to select the plan canonically (works from the repository root — ready needs no
+    worktree); omit it to read the invoking checkout's own cache.plan-ref (inside a plan
+    worktree, that worktree's binding). Typed failures (no_plan_ref, plan_not_found,
+    issue_kind_mismatch, no_pr, invalid_input) exit 1. Note: --dry-run performs no backend
+    read, so the offline preview classifies nothing (kind included) — it refuses a PR URL
+    selector, and a bare PR number previews as a syntax-validated plan id only (never
+    validated identity).
     """
     try:
         _repo_root, result = _execute_ready(ctx, plan=plan, dry_run=dry_run)
@@ -139,8 +143,18 @@ def _execute_ready(
     repo_root = require_repo(ctx)
     selected: SelectedPlan | None = None
     explicit_plan_id: str | None = None
-    if plan is not None:
+    if plan is not None and pr_number_from_url(plan) is None:
+        # A raw /pull/N URL must not die in the pure parser — select_plan owns PR selectors.
         explicit_plan_id = parse_plan_id(plan)
+    if dry_run and plan is not None and explicit_plan_id is None:
+        # The offline preview performs no backend read, so a PR URL cannot be resolved to its
+        # plan. (A BARE PR number is indistinguishable offline and previews as a plan id —
+        # the offline preview is syntax validation only, never validated identity.)
+        raise UserFacingCliError(
+            "--dry-run is offline and cannot resolve a PR URL to its plan — pass the plan "
+            "issue id, or drop --dry-run.",
+            error_type="invalid_input",
+        )
     if not dry_run:
         require_github(ctx)
         if plan is not None:
@@ -498,10 +512,12 @@ def ready_continuation(
     `perk ready PLAN` to retry the pass.
 
     \b
-    PLAN is an optional plan issue id (e.g. 42, #42, ENG-123, or the pasted issue URL): pass it
-    to select the plan canonically (works from the repository root — ready needs no worktree);
-    omit it to read the invoking checkout's own cache.plan-ref (inside a plan worktree, that
-    worktree's binding). Failure envelopes and exit codes match the worker exactly.
+    PLAN is an optional plan issue id (e.g. 42, #42, ENG-123, or the pasted issue URL) — or
+    the plan's PR: its number or pasted .../pull/N URL, resolved to the plan it records. Pass
+    it to select the plan canonically (works from the repository root — ready needs no
+    worktree); omit it to read the invoking checkout's own cache.plan-ref (inside a plan
+    worktree, that worktree's binding). Failure envelopes and exit codes match the worker
+    exactly.
     """
     try:
         repo_root, result = _execute_ready(ctx, plan=plan, dry_run=dry_run)
