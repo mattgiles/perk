@@ -18,9 +18,9 @@ install (the mirror of the git-clone lifecycle, and the four places that mirror 
 - The version SSOT is `pyproject.toml [project] version`; `perk.__version__` derives via
   `importlib.metadata` (installed → can go stale until `uv sync`); the three-way lockstep test
   guards npm/pyproject/`__version__` — "Version SSOT architecture".
-- KEEP hatchling: the wheel force-includes `shared/` → `perk/_shared` and `agents/` →
-  `perk/_agents`, which `uv_build` cannot express; uv's release commands are backend-agnostic —
-  "Build-backend decision — KEEP hatchling".
+- KEEP hatchling: the wheel force-includes top-level payloads into the package (census:
+  `pyproject.toml`'s force-include table), which `uv_build` cannot express; uv's release commands
+  are backend-agnostic — "Build-backend decision — KEEP hatchling".
 - One dual-plane `release.yml` publishes both packages — "The dual-plane `release.yml`
   workflow" (+ the layered local `perk-dev release-*` commands beside it).
 - Install pinning is three-way: machine surfaces pin `__version__`, human docs stay unpinned,
@@ -50,11 +50,12 @@ bump (Python + npm) is deliberately **two commands**; the lockstep test is what 
 ## Build-backend decision — KEEP hatchling, do NOT switch to `uv_build`
 
 This is the constraint that governs every future packaging node, so it is recorded as a decision, not
-just a fact: perk's wheel **force-includes** two top-level dirs into the package — `shared/` →
-`perk/_shared` and `agents/` → `perk/_agents` — via hatchling's force-include, guarded by the
-packaging suite (`tests/test_packaging.py`). `uv_build` cannot express this: it has **no wheel
-force-include**, and its `tool.uv.build-backend.data` keys are **fixed sysconfig slots** that cannot
-nest a payload at `site-packages/perk/_shared`. So hatchling stays.
+just a fact: perk's wheel **force-includes** top-level payloads into the package (e.g. `shared/` →
+`perk/_shared`, `agents/` → `perk/_agents`) via hatchling's force-include — the live census is
+`pyproject.toml`'s `[tool.hatch.build.targets.wheel.force-include]` table, mirrored by the
+per-payload packaging tests (`tests/test_packaging.py`). `uv_build` cannot express this: it has
+**no wheel force-include**, and its `tool.uv.build-backend.data` keys are **fixed sysconfig
+slots** that cannot nest a payload at `site-packages/perk/_shared`. So hatchling stays.
 
 Critically, the uv *release ergonomics* need nothing from `uv_build`: `uv build` / `uv publish` /
 `uv version` are all **backend-agnostic** and work fine over a hatchling backend. Reach for uv's
@@ -81,12 +82,13 @@ The member's `[project] version` is a static `0.0.0` placeholder — intentional
 tracked/version-bearing surface (no lockstep guard), because `perk-dev --version` reuses
 `perk.__version__` rather than carrying its own.
 
-**The prose-enforced reality (tech debt worth documenting):** the `--package perk` build pins and
-the `uv sync --all-packages` sync flag are **prose/comment-enforced, not test-enforced**. Reverting
-either fails only via a **downstream symptom** — dropping `--all-packages` surfaces as an import
-error in `tests/test_perk_dev_cli.py` (the pruned member is gone from the shared venv); dropping a
-`--package perk` pin surfaces as a leaked member caught by the exclusion tests — rather than a
-dedicated guard that names the reverted line. See `toolchain/uv-workspace-src-layout.md` for the
+**The direct guard:** the `--package perk` build pins and the `uv sync --all-packages` sync flag
+are pinned by a dedicated test that names each site —
+`tests/test_packaging.py::test_build_pins_and_all_packages_flag_present` asserts
+`uv build --package perk` in the justfile, `release.yml`, and `docs/release-checklist.md`, and
+`uv sync --all-packages` in the justfile and `ci.yml` — so reverting a pin fails the named line,
+not just a downstream symptom (a leaked member caught by the exclusion tests, or a `perk_dev`
+import error in `tests/test_perk_dev_cli.py`). See `toolchain/uv-workspace-src-layout.md` for the
 workspace/`src`-layout mechanics and the `--all-packages` member-pruning trap.
 
 ## The dual-plane `release.yml` workflow
