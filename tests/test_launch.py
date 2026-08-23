@@ -205,6 +205,64 @@ def test_implement_dry_run_json_carries_worktree_and_plan_ref(tmp_path, capsys):
     assert not (_config(tmp_path).worktree_root / "plan-42").exists()
 
 
+def test_launch_stage_forwards_bare_plan_id_to_the_positioner(tmp_path, monkeypatch, capsys):
+    # The bare-id passthrough (the `plan watch` twin): `launch_stage(plan_id=…)` reaches
+    # `resolve_worktree(plan_id=…)`, and a `worktree="reuse"`-replaced plan-family stage rides
+    # the existing pipeline (worktree-stage trust arg, restore-preview disposition) with no
+    # backend read on the dry-run preview.
+    captured: dict = {}
+    real = launch.resolve_worktree
+
+    def spy(**kwargs):
+        captured.update(kwargs)
+        return real(**kwargs)
+
+    monkeypatch.setattr(launch, "resolve_worktree", spy)
+    effective = dataclasses.replace(_stage("objective-plan"), worktree="reuse")
+    launch_stage(
+        repo_root=tmp_path,
+        config=_config(tmp_path),
+        stage=effective,
+        worktree=None,
+        dry_run=True,
+        remote=None,
+        pi_args=[],
+        plan_id="42",
+    )
+    assert captured["plan_id"] == "42"
+    data = json.loads(capsys.readouterr().out)
+    assert data["stage"] == "objective-plan"
+    assert data["worktree"].endswith("/plan-42")
+    assert data["disposition"] == "restore-remote"
+    # The effective stage is a worktree stage for this launch — project trust auto-approves.
+    assert "--approve" in data["argv"]
+    # A bare-id dry-run restore preview performs no canonical read — no plan_ref in the payload.
+    assert "plan_ref" not in data
+
+
+def test_launch_stage_default_passes_no_plan_id(tmp_path, monkeypatch, capsys):
+    # Every existing caller omits `plan_id` — the positioner sees None (byte-identical path).
+    captured: dict = {}
+    real = launch.resolve_worktree
+
+    def spy(**kwargs):
+        captured.update(kwargs)
+        return real(**kwargs)
+
+    monkeypatch.setattr(launch, "resolve_worktree", spy)
+    launch_stage(
+        repo_root=tmp_path,
+        config=_config(tmp_path),
+        stage=_stage("plan"),
+        worktree=None,
+        dry_run=True,
+        remote=None,
+        pi_args=[],
+    )
+    assert captured["plan_id"] is None
+    capsys.readouterr()
+
+
 def test_worktree_stage_auto_approves_and_respects_user_no_approve(tmp_path, capsys):
     # Worktree stages auto-inject `--approve` (perk launches its own managed checkout, so project
     # trust is implicit), but a user-passed `--no-approve` wins via pi's last-wins trust parsing.

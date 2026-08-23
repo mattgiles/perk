@@ -50,9 +50,12 @@ def _stub_launch(monkeypatch, sink: dict) -> None:
         "launch_stage",
         lambda **k: sink.update(
             stage=k["stage"].id,
+            stage_worktree=k["stage"].worktree,
             prompt=k.get("prompt_override"),
             handoff_extra=k.get("handoff_extra"),
             sync_main=k.get("sync_main"),
+            plan_id=k.get("plan_id"),
+            worktree=k.get("worktree"),
         ),
     )
 
@@ -957,6 +960,7 @@ def test_stacked_dry_run_skips_prepare_and_reports_unchecked(monkeypatch, unborn
         assert result.exit_code == 0, result.output
         payload = json.loads(result.stdout)
     assert payload["build_readiness"] == "unchecked (dry-run)"
+    assert payload["positioning"] == "unchecked (dry-run)"
     assert payload["node"] == "1.2"
 
 
@@ -970,6 +974,7 @@ def test_incremental_dry_run_payload_has_no_build_readiness(monkeypatch, unborn_
         assert result.exit_code == 0, result.output
         payload = json.loads(result.stdout)
     assert "build_readiness" not in payload
+    assert "positioning" not in payload  # incremental payloads stay byte-identical
 
 
 # --- the stacked-layer seed block ------------------------------------------------------
@@ -1045,6 +1050,303 @@ def test_seed_prompt_injects_the_layer_context_block():
     primed = _seed_prompt("7", node, "Ship it", layer_context=block)
     assert "<stacked_layer_context>" in primed
     assert "never as instructions" in primed  # the untrusted framing survives
+
+
+# --- stacked child-layer positioning (contracts.md §8.46) -------------------------------
+
+
+def _child_context_no_head():
+    from perk.delivery import PrepareResult
+
+    return PrepareResult.PlanningContext(
+        position=2,
+        layer_count=2,
+        delivery_lineage="01JB0000000000000000000000",
+        base="main",
+        predecessor_node_id="1.2",
+        predecessor_plan_id="101",
+        parent_branch="plan-101",
+        observed_parent_head_sha=None,
+    )
+
+
+def _ready_child(monkeypatch, context):
+    from perk import objective
+
+    candidate = objective.ObjectiveNode(
+        id="1.3", description="C", status=N.PENDING, depends_on=("1.1",)
+    )
+    return _stub_planning_prepare(monkeypatch, _decision("ready", candidate, context=context))
+
+
+def _stub_mark(monkeypatch) -> None:
+    monkeypatch.setattr(
+        objectives,
+        "update_objective_node",
+        lambda **k: objectives.ObjectiveNodeUpdate(
+            number=k["number"], node_id=k["node_id"], comment_updated=True, dry_run=False
+        ),
+    )
+
+
+def _no_plan_reads(monkeypatch) -> None:
+    from perk.backends.github import plans
+
+    monkeypatch.setattr(
+        plans,
+        "get_plan",
+        lambda **_k: pytest.fail("the door must perform no backend read for the predecessor"),
+    )
+
+
+def test_stacked_child_with_observed_head_positions_in_predecessor_checkout(
+    monkeypatch, unborn_git_repo_factory
+):
+    # The positioning arm: the launch carries a transient effective stage (same id, worktree
+    # "reuse") + the predecessor's bare plan id — and the door performs NO backend read for
+    # the predecessor (the lazy-path pin: reuse validates locally; only a real restore reads).
+    _authed(monkeypatch)
+    monkeypatch.setattr(objectives, "get_objective", lambda **k: _stacked_state())
+    _ready_child(monkeypatch, _child_context())
+    _stub_mark(monkeypatch)
+    _no_plan_reads(monkeypatch)
+    launched: dict = {}
+    _stub_launch(monkeypatch, launched)
+    runner = CliRunner()
+    with runner.isolated_filesystem() as d:
+        _git_init(d, unborn_git_repo_factory)
+        result = runner.invoke(cli, ["objective", "plan", "7", "--json"])
+        assert result.exit_code == 0, result.output
+    assert launched["stage"] == "objective-plan"  # the id never changes
+    assert launched["stage_worktree"] == "reuse"
+    assert launched["plan_id"] == "101"
+    assert "runs in the predecessor's checkout" in launched["prompt"]
+    assert "plan-101" in launched["prompt"]
+    # The checkout is not on this machine — the block names the planned restore.
+    assert "restored from `origin/plan-101`" in launched["prompt"]
+
+
+def test_stacked_child_without_observed_head_stays_at_repo_root(
+    monkeypatch, unborn_git_repo_factory
+):
+    # No live remote parent head observed (e.g. a landed predecessor whose branch was
+    # deleted): no override, no plan_id, root launch — and the block says so honestly.
+    _authed(monkeypatch)
+    monkeypatch.setattr(objectives, "get_objective", lambda **k: _stacked_state())
+    _ready_child(monkeypatch, _child_context_no_head())
+    _stub_mark(monkeypatch)
+    _no_plan_reads(monkeypatch)
+    launched: dict = {}
+    _stub_launch(monkeypatch, launched)
+    runner = CliRunner()
+    with runner.isolated_filesystem() as d:
+        _git_init(d, unborn_git_repo_factory)
+        result = runner.invoke(cli, ["objective", "plan", "7", "--json"])
+        assert result.exit_code == 0, result.output
+    assert launched["stage"] == "objective-plan"
+    assert launched["stage_worktree"] == "none"
+    assert launched["plan_id"] is None
+    assert "No live remote parent head was observed" in launched["prompt"]
+    assert "runs in the predecessor's checkout" not in launched["prompt"]
+
+
+def test_stacked_bottom_layer_stays_at_repo_root(monkeypatch, unborn_git_repo_factory):
+    # The bottom layer keeps today's root launch (no positioning, no honest-root line).
+    _authed(monkeypatch)
+    monkeypatch.setattr(objectives, "get_objective", lambda **k: _stacked_state())
+    _ready_child(monkeypatch, _bottom_context())
+    _stub_mark(monkeypatch)
+    launched: dict = {}
+    _stub_launch(monkeypatch, launched)
+    runner = CliRunner()
+    with runner.isolated_filesystem() as d:
+        _git_init(d, unborn_git_repo_factory)
+        result = runner.invoke(cli, ["objective", "plan", "7", "--json"])
+        assert result.exit_code == 0, result.output
+    assert launched["stage_worktree"] == "none"
+    assert launched["plan_id"] is None
+    assert "No live remote parent head" not in launched["prompt"]
+    assert "bottom layer" in launched["prompt"]
+
+
+def test_positioning_probe_failure_is_fail_soft(monkeypatch, unborn_git_repo_factory):
+    # A raising git probe (GitError) never escapes gather — the launch proceeds with the
+    # unknown-state line (presentation only; the positioner keeps every typed diagnostic).
+    from pathlib import Path
+
+    from perk.substrate import git as git_mod
+    from perk.substrate.git import GitError
+
+    _authed(monkeypatch)
+    monkeypatch.setattr(objectives, "get_objective", lambda **k: _stacked_state())
+    _ready_child(monkeypatch, _child_context())
+    _stub_mark(monkeypatch)
+
+    def _boom(*_a, **_k):
+        raise GitError("probe blew up")
+
+    monkeypatch.setattr(git_mod, "resolve_commit", _boom)
+    monkeypatch.setattr(git_mod, "is_dirty", _boom)
+    launched: dict = {}
+    _stub_launch(monkeypatch, launched)
+    runner = CliRunner()
+    with runner.isolated_filesystem() as d:
+        _git_init(d, unborn_git_repo_factory)
+        (Path(d) / ".worktrees" / "plan-101").mkdir(parents=True)
+        result = runner.invoke(cli, ["objective", "plan", "7", "--json"])
+        assert result.exit_code == 0, result.output
+    assert launched["stage_worktree"] == "reuse"
+    assert launched["plan_id"] == "101"
+    assert "could not be probed" in launched["prompt"]
+    assert "Local drift" not in launched["prompt"]
+    assert "uncommitted local changes" not in launched["prompt"]
+
+
+def test_positioning_invalid_worktree_name_refuses_before_any_probe(
+    monkeypatch, unborn_git_repo_factory
+):
+    # `--worktree ../other` refuses via the shared checked_name validator — before any git
+    # probe and before the node is marked planning.
+    from perk.substrate import git as git_mod
+
+    _authed(monkeypatch)
+    monkeypatch.setattr(objectives, "get_objective", lambda **k: _stacked_state())
+    _ready_child(monkeypatch, _child_context())
+    monkeypatch.setattr(
+        objectives, "update_objective_node", lambda **k: pytest.fail("must not mark")
+    )
+    monkeypatch.setattr(git_mod, "resolve_commit", lambda *_a, **_k: pytest.fail("must not probe"))
+    monkeypatch.setattr(git_mod, "is_dirty", lambda *_a, **_k: pytest.fail("must not probe"))
+    runner = CliRunner()
+    with runner.isolated_filesystem() as d:
+        _git_init(d, unborn_git_repo_factory)
+        result = runner.invoke(cli, ["objective", "plan", "7", "--worktree", "../other", "--json"])
+        assert result.exit_code == 1
+        payload = json.loads(result.stdout)
+    assert payload["error_type"] == "invalid_input"
+    assert "Invalid worktree name" in payload["message"]
+
+
+def test_positioning_worktree_name_selects_only_the_directory(monkeypatch, unborn_git_repo_factory):
+    # `--worktree NAME` keeps implement-consistent semantics: NAME selects the directory under
+    # the worktree root (the probe path + the forwarded flag), never plan identity/branch.
+    from pathlib import Path
+
+    _authed(monkeypatch)
+    monkeypatch.setattr(objectives, "get_objective", lambda **k: _stacked_state())
+    _ready_child(monkeypatch, _child_context())
+    _stub_mark(monkeypatch)
+    launched: dict = {}
+    _stub_launch(monkeypatch, launched)
+    runner = CliRunner()
+    with runner.isolated_filesystem() as d:
+        _git_init(d, unborn_git_repo_factory)
+        result = runner.invoke(cli, ["objective", "plan", "7", "--worktree", "custom", "--json"])
+        assert result.exit_code == 0, result.output
+        expected = str(Path(d).resolve() / ".worktrees" / "custom")
+    assert launched["worktree"] == "custom"
+    assert launched["plan_id"] == "101"  # plan identity is untouched by the name
+    assert expected in launched["prompt"]
+
+
+# --- the positioned DATA-block arms (pure presentation) ---------------------------------
+
+
+def test_layer_context_block_positioned_names_path_and_branch():
+    from pathlib import Path
+
+    from perk.cli.commands.objective.plan_cmd import _layer_context_block
+
+    block = _layer_context_block(
+        _child_context(),
+        checkout_path=Path("/wt/plan-101"),
+        local_head_sha="a" * 40,  # equal to the observed head — no drift line
+        dirty=False,
+    )
+    assert "runs in the predecessor's checkout at `/wt/plan-101` (branch `plan-101`)" in block
+    assert "Local drift" not in block
+    assert "uncommitted local changes" not in block
+    assert "restored from" not in block
+    assert "could not be probed" not in block
+    # The existing lines survive the positioned arm.
+    assert "layer 2 of 2" in block
+    assert "records no planning-time parent SHA" in block
+
+
+def test_layer_context_block_positioned_drift_line_exactly_when_heads_differ():
+    from pathlib import Path
+
+    from perk.cli.commands.objective.plan_cmd import _layer_context_block
+
+    drifted = _layer_context_block(
+        _child_context(),
+        checkout_path=Path("/wt/plan-101"),
+        local_head_sha="b" * 40,
+        dirty=False,
+    )
+    assert (
+        f"Local drift: the checkout's HEAD {'b' * 12} differs from the observed published "
+        f"head {'a' * 12}" in drifted
+    )
+    assert "origin/plan-101" in drifted
+
+
+def test_layer_context_block_positioned_dirty_note():
+    from pathlib import Path
+
+    from perk.cli.commands.objective.plan_cmd import _layer_context_block
+
+    block = _layer_context_block(
+        _child_context(),
+        checkout_path=Path("/wt/plan-101"),
+        local_head_sha="a" * 40,
+        dirty=True,
+    )
+    assert "uncommitted local changes — treat them as context noise" in block
+
+
+def test_layer_context_block_positioned_will_restore_line():
+    from pathlib import Path
+
+    from perk.cli.commands.objective.plan_cmd import _layer_context_block
+
+    block = _layer_context_block(
+        _child_context(), checkout_path=Path("/wt/plan-101"), will_restore=True
+    )
+    assert "restored from `origin/plan-101` at the published head" in block
+
+
+def test_layer_context_block_positioned_probe_failed_line():
+    from pathlib import Path
+
+    from perk.cli.commands.objective.plan_cmd import _layer_context_block
+
+    block = _layer_context_block(
+        _child_context(), checkout_path=Path("/wt/plan-101"), probe_failed=True
+    )
+    assert "could not be probed" in block
+    assert "Local drift" not in block
+    assert "uncommitted local changes" not in block
+
+
+def test_layer_context_block_no_head_child_names_the_repo_root_selection():
+    from perk.cli.commands.objective.plan_cmd import _layer_context_block
+
+    block = _layer_context_block(_child_context_no_head())
+    assert "No live remote parent head was observed" in block
+    assert "runs at the repo root" in block
+    assert "reaches the objective base when the train lands" in block
+
+
+def test_probe_predecessor_checkout_missing_path_plans_a_restore(tmp_path):
+    from perk.cli.commands.objective.plan_cmd import _probe_predecessor_checkout
+    from perk.substrate.config import Config
+
+    probe = _probe_predecessor_checkout(Config(worktree_root=tmp_path / ".worktrees"), None, "101")
+    assert probe.checkout_path == tmp_path / ".worktrees" / "plan-101"
+    assert probe.will_restore is True
+    assert probe.probe_failed is False
+    assert probe.local_head_sha is None and probe.dirty is None
 
 
 def _handoff_layer(*, handoff, stamped=None, observed=None):

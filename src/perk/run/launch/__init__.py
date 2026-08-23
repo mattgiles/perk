@@ -90,6 +90,7 @@ from perk.run.launch.worktree import (
     WorktreeRequest,
     _fetch_best_effort,
     _sync_main_checkout,
+    checked_name,
     resolve_base,
     resolve_plan_worktree_name,
     resolve_target,
@@ -192,6 +193,7 @@ def launch_stage(
     prompt_suffix: str | None = None,
     plan_ref: plan.PlanRef | None = None,
     plan_state: PlanState | None = None,
+    plan_id: str | None = None,
     invocation_root: Path | None = None,
 ) -> None:
     """Mint a run_id, write the handoff (+ plan-ref), position the worktree, and ``exec pi``.
@@ -248,6 +250,13 @@ def launch_stage(
     launch never re-reads the mutable root selector after selection. ``plan_state`` is the
     selection's already-fetched canonical state (spares a stacked restore its re-read).
 
+    ``plan_id``: the bare-id twin of ``plan_ref`` (the ``plan watch`` selection shape),
+    forwarded verbatim to ``resolve_worktree(plan_id=…)``: an existing checkout is validated
+    reuse with NO backend read; a missing checkout performs the one canonical read lazily on
+    the restore arm. The ``objective plan`` stacked child-layer arm is the one caller (it
+    positions the planning session in the predecessor's checkout); every other caller passes
+    ``None`` and is unaffected.
+
     ``invocation_root`` (defaults to ``repo_root``): the checkout the command was invoked from
     — the root the **no-argument cache fallback** reads (a launch inside a plan worktree selects
     that worktree's own plan). ``repo_root`` itself is the caller's positioning anchor (the
@@ -299,6 +308,7 @@ def launch_stage(
         invocation_root=invocation_root,
         selected_ref=plan_ref,
         plan_state=plan_state,
+        plan_id=plan_id,
     )
     ctx = _LaunchContext(
         repo_root=repo_root,
@@ -714,6 +724,7 @@ __all__ = [
     "_sync_main_checkout",
     "_warm_extension_install",
     "_write_session_handoff",
+    "checked_name",
     "launch_stage",
     "materialize_extensions",
     "materialize_plan_body",

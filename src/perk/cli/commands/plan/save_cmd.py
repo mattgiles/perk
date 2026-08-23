@@ -22,6 +22,7 @@ from perk.boundary import OutputModel
 from perk.cli.context import require_github, require_repo
 from perk.cli.emit import emit, fail
 from perk.cli.ensure import UserFacingCliError
+from perk.cli.plan_selection import main_repo_root
 from perk.delivery import DeliveryError, PrepareRequest, PrepareResult, resolve_delivery
 from perk.state import cache
 from perk.substrate.config import ConfigError, load_config
@@ -533,10 +534,14 @@ def _plan_save_impl(
         # path; every decision still reconstructs the train fresh.
         delivery_lineage=layer_identity.delivery_lineage if layer_identity else None,
     )
-    # Persist the ref as the cache.plan-ref pointer: the next session's
-    # reconciliation links it, and `implement` reads it. A dry run writes nothing.
+    # Persist the ref as the cache.plan-ref pointer (the mutable SELECTOR, §8.1): the next
+    # session's reconciliation links it, and `implement` reads it. Anchored to the MAIN
+    # checkout root — a worktree-cwd save (e.g. a positioned stacked planning session's
+    # approval save) updates the main-root selector and never rebinds that worktree's own
+    # durable plan-ref binding (the two-role clobber hazard). Root-invoked saves are
+    # byte-identical (main root == invocation root). A dry run writes nothing.
     if not dry_run:
-        cache.write_plan_ref(repo_root, plan_ref)
+        cache.write_plan_ref(main_repo_root(repo_root), plan_ref)
 
     # Commit the objective-node claim atomically: set the node→plan backlink AND advance
     # `planning → in_progress` in a single write. Fail-loud, non-fatal, idempotent on re-save

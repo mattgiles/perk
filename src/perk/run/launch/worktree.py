@@ -580,7 +580,7 @@ def resolve_worktree(
     elif worktree is not None:
         # An explicit --worktree without a plan id selects through the checkout's own binding
         # (read during validation below); a missing directory cannot invent a binding.
-        path = config.worktree_root / _checked_name(worktree)
+        path = config.worktree_root / checked_name(worktree)
         if not path.exists():
             raise UserFacingCliError(
                 f"Worktree not found: {path}\n"
@@ -618,7 +618,7 @@ def resolve_worktree(
         if selection.ref is not None
         else f"plan-{selection.plan_id}"
     )
-    name = _checked_name(worktree) if worktree is not None else branch
+    name = checked_name(worktree) if worktree is not None else branch
     path = config.worktree_root / name
 
     plan_base = selection.ref.base if selection.ref is not None else None
@@ -675,7 +675,7 @@ def resolve_worktree(
             selection = _Selection(ref=ref, plan_id=ref.pr_id, source=selection.source)
             branch = canonical_branch
             path = config.worktree_root / (
-                _checked_name(worktree) if worktree is not None else branch
+                checked_name(worktree) if worktree is not None else branch
             )
             if path.exists():
                 validated = _validate_existing_checkout(
@@ -712,7 +712,11 @@ def resolve_worktree(
     )
 
 
-def _checked_name(name: str) -> str:
+def checked_name(name: str) -> str:
+    """The one worktree-name validation boundary: reject anything unusable as a single path
+    segment under the managed worktree root (empty, dot-segments, ``/``-containing). Public so
+    a door's pre-launch probe path derivation goes through the SAME check the positioner
+    applies — an invalid ``--worktree`` can never make a probe inspect outside the root."""
     Ensure.invariant(
         "/" not in name and name not in ("", ".", ".."),
         f"Invalid worktree name '{name}' — no path separators.",
