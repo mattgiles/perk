@@ -19,13 +19,14 @@
   <svg
     role="img"
     data-variant="wide"
-    viewBox="0 0 736 516"
+    viewBox="0 0 736 552"
     aria-labelledby="perk-doors-wide-title perk-doors-wide-desc"
   >
     <title id="perk-doors-wide-title">Warm and cold door availability by stage</title>
     <desc id="perk-doors-wide-desc">
-      A thirteen-row matrix in registry order. Every stage has a cold-local door. Warm doors are
-      available for every stage except implement and the dev-only audit stage. Cold-remote doors
+      A fourteen-row matrix in registry order. Every stage has a cold-local door. Warm doors are
+      available for every stage except implement, the dev-only audit stage, and stack-review.
+      Cold-remote doors
       are available only for implement and address. Availability is written as yes or an em dash.
     </desc>
     <text class="column-heading stage-heading" x="16" y="28">Stage</text>
@@ -163,18 +164,29 @@
       <rect class="matrix-cell" x="572" y="472" width="162" height="32" rx="6" />
       <text class="cell-value" x="653" y="494">—</text>
     </g>
+    <g data-stage="stack-review" data-warm="false" data-cold-local="true" data-cold-remote="false">
+      <rect class="stage" x="2" y="508" width="246" height="32" rx="6" />
+      <text class="stage-label" x="16" y="530">○ stack-review</text>
+      <rect class="matrix-cell" x="252" y="508" width="154" height="32" rx="6" />
+      <text class="cell-value" x="329" y="530">—</text>
+      <rect class="matrix-cell" x="410" y="508" width="158" height="32" rx="6" />
+      <text class="cell-value" x="489" y="530">yes</text>
+      <rect class="matrix-cell" x="572" y="508" width="162" height="32" rx="6" />
+      <text class="cell-value" x="653" y="530">—</text>
+    </g>
   </svg>
 
   <svg
     role="img"
     data-variant="narrow"
-    viewBox="0 0 288 1536"
+    viewBox="0 0 288 1654"
     aria-labelledby="perk-doors-narrow-title perk-doors-narrow-desc"
   >
     <title id="perk-doors-narrow-title">Warm and cold door availability by stage (stacked)</title>
     <desc id="perk-doors-narrow-desc">
-      A stacked thirteen-row matrix in registry order. Every stage has a cold-local door. Warm
-      doors are available for every stage except implement and the dev-only audit stage.
+      A stacked fourteen-row matrix in registry order. Every stage has a cold-local door. Warm
+      doors are available for every stage except implement, the dev-only audit stage, and
+      stack-review.
       Cold-remote doors are available only for implement and address. Availability is written as
       yes or an em dash.
     </desc>
@@ -269,6 +281,13 @@
       <text class="door-label" x="16" y="1470">Warm</text><text class="door-value" x="268" y="1470">—</text>
       <text class="door-label" x="16" y="1496">Cold local</text><text class="door-value" x="268" y="1496">yes</text>
       <text class="door-label" x="16" y="1522">Cold remote</text><text class="door-value" x="268" y="1522">—</text>
+    </g>
+    <g data-stage="stack-review" data-warm="false" data-cold-local="true" data-cold-remote="false">
+      <rect class="stage" x="2" y="1538" width="284" height="108" rx="6" />
+      <text class="stage-label" x="16" y="1562">○ stack-review</text>
+      <text class="door-label" x="16" y="1588">Warm</text><text class="door-value" x="268" y="1588">—</text>
+      <text class="door-label" x="16" y="1614">Cold local</text><text class="door-value" x="268" y="1614">yes</text>
+      <text class="door-label" x="16" y="1640">Cold remote</text><text class="door-value" x="268" y="1640">—</text>
     </g>
   </svg>
 </figure>
