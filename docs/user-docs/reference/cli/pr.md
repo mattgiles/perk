@@ -262,7 +262,8 @@ the pinned snapshot: `stack[]` (`{pr, url, branch, head_sha, base_ref, node_id, 
 bottom→top), `stack_base_ref`, and `stack_notes[]` (resolution warnings + recorded-vs-observed
 head drift — warnings only). Typed refusals: `not_a_stack` (fewer than 2 open members — use the
 single-PR flow), `stack_too_deep` (over 20 members), `fork_unsupported`, `ambiguous_stack`
-(more than one open same-repo child), `not_stacked`/`stack_discontiguous`/`no_objective`
+(more than one open same-repo child), `stack_cycle` (the base-ref graph loops),
+`not_stacked`/`stack_discontiguous`/`no_objective`
 (objective arm), `stack_topology_broken`.
 
 ### `perk pr review cleanup`

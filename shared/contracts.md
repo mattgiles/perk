@@ -1063,8 +1063,9 @@ perk pr review checkout --pr <n> --json -> { success, error_type, message, path,
     # Stack refusals (both resolution arms share the gates): not_a_stack (<2 open members —
     # /pr-review-browser territory) · stack_too_deep (> STACK_REVIEW_MAX_MEMBERS = 20) ·
     # fork_unsupported (cross-repo head, fail-closed on a blank identity) · ambiguous_stack
-    # (>1 open same-repo child on the upward walk) · not_stacked / stack_discontiguous /
-    # no_objective (objective arm) · stack_topology_broken (checkout).
+    # (>1 open same-repo child on the upward walk) · stack_cycle (a revisited PR — the
+    # base-ref graph loops; never a "successful" end of the walk) · not_stacked /
+    # stack_discontiguous / no_objective (objective arm) · stack_topology_broken (checkout).
 perk pr review cleanup --pr <n> --json -> { success, error_type, message, pr, path, removed }
     # Single-PR and idempotent: nothing to remove → success, removed:false, exit 0. Fully
     # offline (no GitHub calls). Removes a registered worktree (force) or an unregistered
@@ -1488,7 +1489,8 @@ parallel rebuild.
   train read + one `get_pr` per member; ref-level linkage checked here → `stack_discontiguous`;
   train blockers become notes — warn and proceed) and `resolve_stack_from_pr` (the base-ref
   chain walk: down over OPEN same-repo PRs to the stack base, up via
-  `list_open_prs_for_base` — 0 = top, 1 = extend, >1 = `ambiguous_stack`). Resolution returns
+  `list_open_prs_for_base` — 0 = top, 1 = extend, >1 = `ambiguous_stack`; a revisited PR in
+  either direction is `stack_cycle` — the base-ref graph loops). Resolution returns
   NO commit SHAs — the checkout worker is the single hydration boundary and its envelope is the
   pinned snapshot (the checkout `--stack` spec above). Cardinality/fork gates are shared by
   both arms (`not_a_stack`, `stack_too_deep`, `fork_unsupported`).

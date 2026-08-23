@@ -61,6 +61,27 @@ test("grammar: bare numbers / #n / issue URLs are OBJECTIVE ids by definition", 
   });
 });
 
+test("grammar: backend-native ids and Linear issue/project URLs are OBJECTIVE ids too", () => {
+  assert.deepEqual(parseStackReviewArgs("ENG-123 dig in"), {
+    target: { kind: "objective", id: "ENG-123" },
+    directive: "dig in",
+  });
+  assert.deepEqual(parseStackReviewArgs("https://linear.app/acme/issue/SAV-888/some-title"), {
+    target: { kind: "objective", id: "SAV-888" },
+    directive: "",
+  });
+  assert.deepEqual(parseStackReviewArgs("https://linear.app/acme/project/proj-slug-1234"), {
+    target: { kind: "objective", id: "proj-slug-1234" },
+    directive: "",
+  });
+  // A non-Linear host with an /issue/ segment is NOT the Linear form (and not a GitHub
+  // /issues/N form either) — it falls through to the focus-note arm.
+  assert.deepEqual(parseStackReviewArgs("https://example.com/issue/ENG-1"), {
+    target: { kind: "auto" },
+    directive: "https://example.com/issue/ENG-1",
+  });
+});
+
 test("grammar: pr:<n> and PR URLs are the chain arm", () => {
   assert.deepEqual(parseStackReviewArgs("pr:148 dig in"), {
     target: { kind: "pr", pr: 148 },

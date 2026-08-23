@@ -68,11 +68,39 @@ export interface StackReviewArgs {
 /** Extracts the issue number from a GitHub issue URL (the objective-id URL form). */
 const ISSUE_URL_RE = /\/issues\/(\d+)(?:\/|$|#|\?)/;
 
+/** A backend-native objective id (Linear's `ENG-123` shape — the Python `parse_objective_id`
+ * ident grammar, mirrored so an explicit target never silently degrades to a focus note). */
+const NATIVE_ID_RE = /^[A-Za-z0-9]+-\d+$/;
+
+/** Peel a Linear issue/project URL down to its opaque objective id (null = not one). */
+function linearIdFromUrl(token: string): string | null {
+  let url: URL;
+  try {
+    url = new URL(token);
+  } catch {
+    return null;
+  }
+  if (url.protocol !== "http:" && url.protocol !== "https:") return null;
+  const host = url.hostname;
+  if (host !== "linear.app" && !host.endsWith(".linear.app")) return null;
+  const segments = url.pathname.split("/").filter((s) => s !== "");
+  for (let i = 0; i < segments.length - 1; i++) {
+    const seg = segments[i];
+    const next = segments[i + 1];
+    if (next === undefined) break;
+    if (seg === "issue" && NATIVE_ID_RE.test(next)) return next;
+    if (seg === "project") return next;
+  }
+  return null;
+}
+
 /**
- * Parse the explicit target grammar (pure, offline-tested). Bare numbers (and `#n` / issue
- * URLs) are OBJECTIVE ids by definition; the chain arm is `pr:<n>` or a PR URL. A first token
- * that is none of these makes the WHOLE string the focus note (target absent — the ladder).
- * Null only on a malformed `pr:` token (a usage failure, never silently a focus note).
+ * Parse the explicit target grammar (pure, offline-tested). Bare numbers (and `#n`,
+ * backend-native ids like `ENG-123`, GitHub issue URLs, and Linear issue/project URLs — the
+ * Python `parse_objective_id` grammar) are OBJECTIVE ids by definition; the chain arm is
+ * `pr:<n>` or a PR URL. A first token that is none of these makes the WHOLE string the focus
+ * note (target absent — the ladder). Null only on a malformed `pr:` token (a usage failure,
+ * never silently a focus note).
  */
 export function parseStackReviewArgs(args: string): StackReviewArgs | null {
   const trimmed = args.trim();
@@ -96,6 +124,13 @@ export function parseStackReviewArgs(args: string): StackReviewArgs | null {
   const issueUrl = first.match(ISSUE_URL_RE);
   if (issueUrl?.[1] !== undefined) {
     return { target: { kind: "objective", id: issueUrl[1] }, directive: rest };
+  }
+  const linearId = linearIdFromUrl(first);
+  if (linearId !== null) {
+    return { target: { kind: "objective", id: linearId }, directive: rest };
+  }
+  if (NATIVE_ID_RE.test(first)) {
+    return { target: { kind: "objective", id: first }, directive: rest };
   }
   return { target: { kind: "auto" }, directive: trimmed };
 }
@@ -252,9 +287,10 @@ export function registerStackReviewBrowser(pi: ExtensionAPI): void {
   registerPerkCommand(pi, SCOPE, {
     description:
       "Review a whole PR stack human-in-the-loop in the plannotator browser UI over the " +
-      "combined diff: no arg reviews the session/plan-ref objective's delivery train; a bare " +
-      "number/issue URL is an objective id; pr:<n> or a PR URL walks the base-ref chain. Any " +
-      "other text is a focus note. Posting is perk-side, judgment-routed per member PR.",
+      "combined diff: no arg reviews the session/plan-ref objective's delivery train; an " +
+      "objective id (42, #42, ENG-123) or issue/project URL targets that objective; pr:<n> or " +
+      "a PR URL walks the base-ref chain. Any other text is a focus note. Posting is " +
+      "perk-side, judgment-routed per member PR.",
     handler: async (args, ctx: ExtensionContext) => {
       // Entry gates, in order — nothing executed on refusal, each a loud error.
       const parsed = parseStackReviewArgs(args ?? "");

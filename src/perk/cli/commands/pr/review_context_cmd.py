@@ -13,6 +13,7 @@ Exit codes: 0 ok · 1 invalid input / no plan / no PR / op failure · 2 not-a-re
 """
 
 import re
+import uuid
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -22,7 +23,6 @@ from perk import github, plan
 from perk.backends import resolve
 from perk.backends.issue_backend import IssueBackendError
 from perk.boundary import OutputModel
-from perk.cli.commands.pr.review.shared import review_temp_ref
 from perk.cli.commands.pr.review.stack_resolve import ResolvedStack, resolve_stack_from_pr
 from perk.cli.context import require_repo
 from perk.cli.emit import emit, fail
@@ -255,14 +255,28 @@ def _stack_context(*, repo_root: Path, pr_number: int) -> PrReviewContextResult:
 
 
 def _combined_diff(repo_root: Path, stack: ResolvedStack) -> str:
-    """Fetch the member heads + the stack base (the checkout refspec build, idempotent) and
-    render the combined base→top diff locally. Temp refs are deleted best-effort after the
-    read (the checkout discipline)."""
+    """Fetch the member heads + the stack base into a PER-INVOCATION temp-ref namespace and
+    render the combined base→top diff locally, after re-validating the commit topology
+    fail-closed.
+
+    The private namespace matters: concurrent reviewer lanes all run this worker, and
+    worktrees share ONE ref store — a shared temp-ref name would let one lane delete or
+    clobber another's ref mid-read (nondeterministic ``git_error`` lane losses). The base
+    branch is fetched into the same namespace (never ``refs/remotes/origin/…``), so parallel
+    invocations touch no shared ref at all. The topology gate repeats the checkout worker's
+    rule because this worker is independently callable and a layer force-pushed after
+    checkout must not silently vanish from a "combined" diff. The namespace is deleted in a
+    ``finally`` (best-effort, like the checkout discipline)."""
+    namespace = f"refs/perk/review-ctx/{uuid.uuid4().hex[:12]}"
+
+    def ctx_ref(name: str) -> str:
+        return f"{namespace}/{name}"
+
     refspecs = [
-        f"+refs/pull/{member.pr_number}/head:{review_temp_ref(member.pr_number)}"
+        f"+refs/pull/{member.pr_number}/head:{ctx_ref(str(member.pr_number))}"
         for member in stack.members
     ]
-    refspecs.append(stack.base_ref)
+    refspecs.append(f"+refs/heads/{stack.base_ref}:{ctx_ref('base')}")
     try:
         git.fetch_refspecs(repo_root, refspecs)
     except GitError as exc:
@@ -271,31 +285,54 @@ def _combined_diff(repo_root: Path, stack: ResolvedStack) -> str:
             f"{stack.base_ref!r}\n{exc}",
             error_type="git_error",
         ) from exc
-    top_ref = review_temp_ref(stack.top.pr_number)
-    top_sha = git.resolve_commit(repo_root, top_ref)
-    if top_sha is None:
-        raise UserFacingCliError(
-            f"fetched PR head ref {top_ref} did not resolve to a commit", error_type="git_error"
-        )
-    base_sha = git.merge_base(repo_root, f"origin/{stack.base_ref}", top_sha)
-    if base_sha is None:
-        raise UserFacingCliError(
-            f"the stack top (PR #{stack.top.pr_number}) has no common ancestor with base "
-            f"branch {stack.base_ref!r}",
-            error_type="git_error",
-        )
     try:
-        diff = git.diff_range(repo_root, base_sha, top_sha)
-    except GitError as exc:
-        raise UserFacingCliError(
-            f"git diff failed for the combined stack diff\n{exc}", error_type="git_error"
-        ) from exc
-    for member in stack.members:
+        head_shas: list[str] = []
+        for member in stack.members:
+            sha = git.resolve_commit(repo_root, ctx_ref(str(member.pr_number)))
+            if sha is None:
+                raise UserFacingCliError(
+                    f"fetched PR head ref {ctx_ref(str(member.pr_number))} did not resolve "
+                    "to a commit",
+                    error_type="git_error",
+                )
+            head_shas.append(sha)
+        # The checkout worker's fail-closed topology gate, repeated at THIS read: every
+        # predecessor head must be an ancestor of its successor head, and an indeterminate
+        # probe refuses too — otherwise a broken stack would render a "combined" diff that
+        # silently omits layers.
+        for index in range(1, len(stack.members)):
+            pred, succ = stack.members[index - 1], stack.members[index]
+            verdict = git.is_ancestor(repo_root, head_shas[index - 1], head_shas[index])
+            if verdict is not True:
+                detail = (
+                    "is not an ancestor of" if verdict is False else "ancestry indeterminate for"
+                )
+                raise UserFacingCliError(
+                    f"stack topology broken: PR #{pred.pr_number} head "
+                    f"{head_shas[index - 1][:12]} {detail} PR #{succ.pr_number} head "
+                    f"{head_shas[index][:12]} — the combined diff would not contain every "
+                    "layer (sync the stack first).",
+                    error_type="stack_topology_broken",
+                )
+        base_sha = git.merge_base(repo_root, ctx_ref("base"), head_shas[-1])
+        if base_sha is None:
+            raise UserFacingCliError(
+                f"the stack top (PR #{stack.top.pr_number}) has no common ancestor with base "
+                f"branch {stack.base_ref!r}",
+                error_type="git_error",
+            )
         try:
-            git.delete_ref(repo_root, review_temp_ref(member.pr_number))
+            return git.diff_range(repo_root, base_sha, head_shas[-1])
         except GitError as exc:
-            log_warn(f"could not delete temp ref {review_temp_ref(member.pr_number)}: {exc}")
-    return diff
+            raise UserFacingCliError(
+                f"git diff failed for the combined stack diff\n{exc}", error_type="git_error"
+            ) from exc
+    finally:
+        for name in [str(member.pr_number) for member in stack.members] + ["base"]:
+            try:
+                git.delete_ref(repo_root, ctx_ref(name))
+            except GitError as exc:
+                log_warn(f"could not delete temp ref {ctx_ref(name)}: {exc}")
 
 
 def _plan_body_for_branch(repo_root: Path, head_ref: str) -> str | None:

@@ -132,9 +132,12 @@ def resolve_stack_from_pr(repo_root: Path, pr_number: int) -> ResolvedStack:
     branch — a merged/closed/missing/foreign lower PR ends the walk (that member's base is
     the stack base). Upward: repeatedly list the OPEN PRs based on the current head, filtered
     to same-repo heads — 0 is the top, 1 extends, more than 1 is the typed
-    ``ambiguous_stack`` refusal naming the candidates. Wire facts only; typed refusals
-    (`pr_not_found`, `pr_not_open`, `fork_unsupported`, `ambiguous_stack`, `not_a_stack`,
-    `stack_too_deep`) exit before any launch.
+    ``ambiguous_stack`` refusal naming the candidates. A candidate that is ALREADY in the
+    walked chain means the base-ref graph loops — the typed ``stack_cycle`` refusal, never a
+    "successful" end of the walk (a cycle can pass the checkout ancestry gate while the
+    chosen base renders an empty combined diff). Wire facts only; typed refusals
+    (`pr_not_found`, `pr_not_open`, `fork_unsupported`, `ambiguous_stack`, `stack_cycle`,
+    `not_a_stack`, `stack_too_deep`) exit before any launch.
     """
     start = github.get_pr(number=pr_number, repo_root=repo_root)
     if start is None:
@@ -153,17 +156,20 @@ def resolve_stack_from_pr(repo_root: Path, pr_number: int) -> ResolvedStack:
     seen = {start.number}
     down: list[PullRequest] = []
     current = start
-    # Both walks are bounded by the seen-set (a degenerate base-ref cycle ends the walk; the
-    # checkout topology gate catches any resulting broken shape) and by the member ceiling.
+    # Both walks are bounded by the member ceiling; a revisited PR is the typed cycle refusal
+    # below (never a "successful" end of the walk — the PR base graph is functional, so any
+    # base-ref loop is reachable by following bases down).
     while len(down) <= STACK_REVIEW_MAX_MEMBERS:
         lower = github.find_pr_for_branch(branch=current.base_ref, repo_root=repo_root)
-        if (
-            lower is None
-            or lower.state != "OPEN"
-            or lower.head_repo != home
-            or lower.number in seen
-        ):
+        if lower is None or lower.state != "OPEN" or lower.head_repo != home:
             break
+        if lower.number in seen:
+            raise UserFacingCliError(
+                f"Stack cycle: PR #{current.number}'s base branch {current.base_ref!r} is "
+                f"already-walked PR #{lower.number}'s head — the base-ref graph loops. Fix "
+                "the PR base branches, then re-run.",
+                error_type="stack_cycle",
+            )
         seen.add(lower.number)
         down.append(lower)
         current = lower
@@ -174,8 +180,18 @@ def resolve_stack_from_pr(repo_root: Path, pr_number: int) -> ResolvedStack:
         candidates = [
             p
             for p in github.list_open_prs_for_base(base=current.head_ref, repo_root=repo_root)
-            if p.head_repo == home and p.number not in seen
+            if p.head_repo == home
         ]
+        looped = [p for p in candidates if p.number in seen]
+        if looped:
+            # Defense in depth: a seen upward candidate is the same loop pathology (a PR has
+            # exactly one base, so it cannot legitimately reappear above the chain).
+            raise UserFacingCliError(
+                f"Stack cycle: PR #{looped[0].number} is based on already-walked branch "
+                f"{current.head_ref!r} — the base-ref graph loops. Fix the PR base branches, "
+                "then re-run.",
+                error_type="stack_cycle",
+            )
         if not candidates:
             break
         if len(candidates) > 1:

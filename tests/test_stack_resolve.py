@@ -221,9 +221,10 @@ def test_chain_walk_too_deep(monkeypatch):
     assert exc.value.error_type == "stack_too_deep"
 
 
-def test_chain_walk_base_ref_cycle_ends_walk(monkeypatch):
-    # A degenerate base-ref cycle (A↔B) cannot loop forever — the seen-set ends the walk and
-    # the two members still resolve.
+def test_chain_walk_base_ref_cycle_refused(monkeypatch):
+    # A base-ref cycle (A↔B) is a typed refusal, never a "successful" end of the walk: the
+    # cycle can pass the checkout ancestry gate while the chosen base (a member head) renders
+    # an empty combined diff.
     _wire_gateway(
         monkeypatch,
         [
@@ -231,8 +232,26 @@ def test_chain_walk_base_ref_cycle_ends_walk(monkeypatch):
             _pr(2, "feat-b", "feat-a"),
         ],
     )
-    stack = resolve_stack_from_pr(ROOT, 1)
-    assert len(stack.members) == 2
+    with pytest.raises(UserFacingCliError) as exc:
+        resolve_stack_from_pr(ROOT, 1)
+    assert exc.value.error_type == "stack_cycle"
+
+
+def test_chain_walk_three_member_cycle_refused_from_any_start(monkeypatch):
+    # The PR base graph is functional (one base per PR), so any loop is reachable by walking
+    # bases down — every member of the cycle refuses identically.
+    _wire_gateway(
+        monkeypatch,
+        [
+            _pr(1, "feat-a", "feat-c"),
+            _pr(2, "feat-b", "feat-a"),
+            _pr(3, "feat-c", "feat-b"),
+        ],
+    )
+    for start in (1, 2, 3):
+        with pytest.raises(UserFacingCliError) as exc:
+            resolve_stack_from_pr(ROOT, start)
+        assert exc.value.error_type == "stack_cycle"
 
 
 # --------------------------------------------------------------------- the objective arm

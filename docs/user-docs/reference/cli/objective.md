@@ -534,7 +534,7 @@ Launch a **stacked-PR browser review**: one plannotator session over the train's
 included (mutually exclusive with the positional). `--focus TEXT` threads an operator focus
 note to the reviewers and the triage guidance. Resolution refusals are typed and exit `1`
 before any launch (`not_a_stack` — a single PR is `/pr-review-browser` territory,
-`stack_too_deep`, `fork_unsupported`, `ambiguous_stack`, `not_stacked`,
+`stack_too_deep`, `fork_unsupported`, `ambiguous_stack`, `stack_cycle`, `not_stacked`,
 `stack_discontiguous`, `no_objective`); train blockers and drift observations are stderr
 notes that proceed.
 
