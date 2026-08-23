@@ -28,6 +28,7 @@ import { failFor, type OkDetails, ok, type Result } from "../substrate/result.ts
 import { captureSessionPointer } from "../substrate/sessionPointers.ts";
 import { appendWorkflowState, branchOf, rebuildWorkflowState } from "../substrate/workflowState.ts";
 import { report } from "../surfaces/report.ts";
+import { planningStageRefusal } from "./lifecycleGates.ts";
 
 /** The bounded conflict-resolution re-drive cap: drive the resolver at most this many times. */
 export const CONFLICT_RESOLUTION_ATTEMPT_CAP = 2;
@@ -166,6 +167,11 @@ function isUnmergeable(details: SubmitDetails): details is OkDetails<SubmitOk> {
  */
 export async function submitPr(pi: ExtensionAPI, ctx: ExtensionContext): Promise<SubmitResult> {
   const fail = failFor(ctx, "submit");
+
+  // Planning sessions never legitimately submit — the first check, before any cold-door
+  // delegation (a positioned stacked planning session's cwd binding is the PREDECESSOR).
+  const planningRefusal = planningStageRefusal(ctx, "submit");
+  if (planningRefusal !== null) return fail(planningRefusal, "planning_session");
 
   // Stamp this implement run id into the plan-header `impl_run_ids` linkage (contracts.md
   // §8.35) so a later/other session can resolve the implement session pointers cross-run.

@@ -225,6 +225,23 @@ def test_real_launch_threads_the_spec_through_launch_stage(monkeypatch, tmp_path
     assert "launching toy" in result.stderr
 
 
+def test_real_launch_forwards_stage_override_and_plan_id(monkeypatch, tmp_path):
+    # The stacked-positioning pair: `stage_override` replaces the launched stage (same id,
+    # replaced worktree policy) and `plan_id` passes through to launch_stage.
+    import dataclasses
+
+    captured: dict = {}
+    monkeypatch.setattr(launch, "launch_stage", lambda **k: captured.update(k))
+    effective = dataclasses.replace(stage_by_id("plan"), worktree="reuse")
+    spec = _spec(stage_override=effective, plan_id="101")
+    result = _invoke(_toy_door(lambda r, c, s: spec), ["--json"], tmp_path)
+    assert result.exit_code == 0
+    assert captured["stage"] is effective
+    assert captured["stage"].id == "plan"
+    assert captured["stage"].worktree == "reuse"
+    assert captured["plan_id"] == "101"
+
+
 def test_real_launch_prints_no_launch_note_without_json(monkeypatch, tmp_path):
     monkeypatch.setattr(launch, "launch_stage", lambda **k: None)
     result = _invoke(_toy_door(lambda r, c, s: _spec()), [], tmp_path)

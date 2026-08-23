@@ -153,6 +153,13 @@ the plan issue's canonical `perk:metadata-block:plan-header` (`gh issue view <N>
 `objective_id`, `base`, labels, `consumed_learn`), then `/submit` succeeds. **Lesson: never run a
 `plan save` for another plan inside an active worktree — it hijacks the active plan-ref.**
 
+> **Update (the selector-anchor fix shipped).** `_plan_save_impl` now writes the selector via
+> `cache.write_plan_ref(main_repo_root(repo_root), …)` (contracts §8.1), so a worktree-cwd save
+> updates the **main-root selector** and never touches the worktree's own binding — the hijack
+> mechanism above is closed (the account stays as the incident record). The remaining
+> worktree-cwd effect of a foreign save is selector churn at the main root, which self-heals at
+> the next save.
+
 ## Non-default `base` branch — resolve-once-then-pin (#636)
 
 - **Part 1 needed no code.** "Default = the repo's GitHub default" already resolves via

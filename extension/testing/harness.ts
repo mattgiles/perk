@@ -182,17 +182,26 @@ export function scaffoldRepo(
       stage?: string;
       consumed?: boolean;
       piSessionId?: string;
+      /** Extra handoff keys (the cold doors' `handoff_extra`, e.g. objective_id/node_id). */
+      extra?: Record<string, unknown>;
     };
   } = {},
 ): string {
   const cwd = mkdtempSync(join(tmpdir(), "perk-cwd-"));
   mkdirSync(join(workflowDir(cwd), "handoff"), { recursive: true });
   if (opts.handoff) {
-    const { runId, mode, stage, consumed, piSessionId } = opts.handoff;
+    const { runId, mode, stage, consumed, piSessionId, extra } = opts.handoff;
     writeFileSync(
       join(workflowDir(cwd), "handoff", `${runId}.json`),
       `${JSON.stringify(
-        { run_id: runId, consumed: consumed ?? false, mode, stage, pi_session_id: piSessionId },
+        {
+          run_id: runId,
+          consumed: consumed ?? false,
+          mode,
+          stage,
+          pi_session_id: piSessionId,
+          ...(extra ?? {}),
+        },
         null,
         2,
       )}\n`,

@@ -55,6 +55,14 @@ Planning and implementation are genuinely separate OS processes: planning runs i
 with `worktree: none` (minting `run_id_P`); implementation runs in a linked worktree (minting
 `run_id_I`). They must correlate so `/learn` can find both sessions.
 
+> **Update (stacked objective-plan positioning shipped).** "Planning runs in the main checkout"
+> is no longer universal: a stacked child-layer planning session is positioned in the
+> predecessor's plan worktree (contracts §8.46). Learn's gathering is unaffected —
+> `session-pointers.json` writes under the **main checkout** keyed by `run_id`
+> (`captureSessionPointer` resolves the main root), and learn gathers by pointer, never by a
+> worktree sweep; planning-session residue in the predecessor worktree is inert gitignored
+> scratch owned by `state gc`/`worktree wipe`.
+
 The chosen design makes the **plan-header the canonical cross-run linkage** (planning via the existing
 `run_id` field; implementation via a new submit-staged `impl_run_ids` field) and the **run cache the
 pointer store**, with **each run writing only its own record keyed by its own run_id**. The rejected

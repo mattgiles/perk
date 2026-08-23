@@ -293,6 +293,32 @@ def test_plan_save_writes_cache_plan_ref(monkeypatch, unborn_git_repo_factory):
     }
 
 
+def test_plan_save_worktree_cwd_writes_selector_to_main_root(monkeypatch, git_repo):
+    # The two-role regression: the selector write anchors to the MAIN checkout root, so a save
+    # invoked from inside a linked worktree (e.g. a positioned stacked planning session)
+    # updates the main-root selector and leaves the worktree's own plan-ref binding
+    # byte-untouched.
+    from perk.state import cache
+    from perk.substrate import git as git_mod
+
+    _authed(monkeypatch)
+    _stub_writes(monkeypatch)
+    wt = git_repo / ".worktrees" / "plan-9"
+    git_mod.worktree_add(git_repo, wt, branch="plan-9", create_branch=True)
+    binding = plan.PlanRef(provider="github", pr_id="9", url="u/9", labels=("perk:plan",))
+    cache.ensure_layout(wt)
+    cache.write_plan_ref(wt, binding)
+    binding_file = wt / ".perk" / "workflow" / "plan-ref.json"
+    before = binding_file.read_bytes()
+    (wt / "plan.md").write_text(PLAN, encoding="utf-8")
+    runner = CliRunner()
+    result = runner.invoke(plan_save, ["--plan-file", str(wt / "plan.md")], obj=PerkContext(cwd=wt))
+    assert result.exit_code == 0, result.output
+    saved = json.loads((git_repo / ".perk" / "workflow" / "plan-ref.json").read_text())
+    assert saved["pr_id"] == "123"  # the main-root selector took the save
+    assert binding_file.read_bytes() == before  # the worktree binding is never rebound
+
+
 def test_plan_save_stamps_provider_from_resolved_backend(monkeypatch, unborn_git_repo_factory):
     # The plan-ref provider is the resolved backend's `backend_id` (contracts.md §8.21), not a
     # hardcoded literal: a stub backend claiming "linear" must surface verbatim in the ref.

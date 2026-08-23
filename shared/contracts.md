@@ -289,7 +289,11 @@ The local cache tier — written and read by **both** the CLI (exterior) and the
   - **Selector vs binding duality (#43).** The file plays **two roles by checkout**. In the
     **repo root** it is a mutable **selector** — "the plan a no-arg cold `perk implement`
     consumes next" — written by `save`; the `worktree: none` stages (`plan`/`objective-plan`/
-    `save`) run here. In a **`plan-<N>` worktree** it is the durable **binding** — "this
+    `save`) run here (one effective-stage exception: a stacked child-layer `objective plan`
+    with a live observed parent head launches `objective-plan` through a transient
+    `worktree: "reuse"` replacement and runs in the **predecessor's** bound worktree — §8.46;
+    that checkout's binding is the predecessor's and is never rewritten by the session). In a
+    **`plan-<N>` worktree** it is the durable **binding** — "this
     worktree IS implementing plan #N" — materialized by the **positioner**
     (`launch.resolve_worktree`, which owns binding materialization: a fresh/restored checkout
     is bound immediately after checkout creation, and an existing checkout is only accepted
@@ -297,7 +301,11 @@ The local cache tier — written and read by **both** the CLI (exterior) and the
     (`implement`/`submit`/`address`/`land`/`learn`) run here. The selector is *not*
     canonical history (GitHub is); it self-heals at the next `save`. The extension must never
     let a stale **root selector** leak into a fresh planning session — hence the stage-gated
-    reconciliation in §8.3.
+    reconciliation in §8.3. **The save's selector write anchors to the main checkout root**:
+    `perk plan save` writes the selector via `main_repo_root(invocation root)`, so a
+    worktree-cwd save (e.g. a positioned stacked planning session's approval save) updates the
+    main-root selector and **never rebinds that worktree's own binding** — the launch-door
+    sentence's save-side twin, closing the #621 clobber-hazard class.
   - **Two roots (the selection rule).** Every plan-selecting cold door (`implement`,
     `pr address`/flat `address`, `pr ready`, `plan resume`, `plan watch`, `objective run`) —
     and every generated stage launcher's config/positioning anchoring —
@@ -468,7 +476,7 @@ end of the section).
 | `last_pr_review` | object \| null | the last `/pr-review` (or the experimental `/pr-review-dynamic`) outcome posted via the shared warm `post_pr_review` tool: `{ pr, verdict, angles, covered_angles, comment_count, mode, at:ISO }`; a recorded wave is PR-bound and single-use, and supplies authoritative ordered `angles` / schema-valid `covered_angles`; standalone posting before any valid wave uses caller-supplied angles for both (or `[]`); best-effort tier (the PR review is the canonical record) |
 | `last_review` | object \| null | the last review-door outcome posted via the warm `submit_pr_review` tool: `{ pr, event, comment_count, mode, at:ISO }`; best-effort tier (the submitted PR review is the canonical record) |
 | `session_artifacts` | object \| null | per-name session-artifact provenance pointers `{run_id, name, path, digest, at}` (§8.1); appends carry the **whole merged map** (per-field LWW); strict-append tier |
-| `objective_node_claim` | object \| null | the objective node this session has claimed `planning` (`{ objective, node }`); written by the warm `objective_node` tool on a successful `planning` transition, cleared on a successful non-planning transition for the same node and after a successful node-linked plan save; best-effort tier (cheaply reconstructable; loud-but-non-fatal) |
+| `objective_node_claim` | object \| null | the objective node this session has claimed `planning` (`{ objective, node }`); written by the warm `objective_node` tool on a successful `planning` transition **and by the cold claim** (`session_start` persists it from the claimed handoff's non-blank `objective_id`/`node_id` — the objective-plan cold door's `handoff_extra` — so implement-here suppression is structural in cold objective-plan sessions too), cleared on a successful non-planning transition for the same node and after a successful node-linked plan save; best-effort tier (cheaply reconstructable; loud-but-non-fatal) |
 | `conflict_resolution_attempts` | number | the bounded conflict-resolution re-drive counter: incremented each time `/submit` drives the `perk.conflict-resolver` subagent on a definitively-unmergeable PR (cap `CONFLICT_RESOLUTION_ATTEMPT_CAP = 2`), reset to 0 on a clean submit; best-effort tier (cheaply reconstructable) |
 | `dream_bundle_digest` | string | the dream-wave finalized-bundle digest marker (§8.61): `""` = invalidated (cleared unconditionally at wave entry, BEFORE the stale-bundle removal attempt — the invalidation record); `sha256:<hex>` = the digest of the current finalized run-scratch bundle bytes, set only after a successful finalize write; the §8.63 dream-report recovery refuses unless the marker is present, non-empty, and byte-matches the bundle just read; per-field LWW, no rebuild change |
 | `perk_version` | string | the running perk (extension) version, stamped when run identity is established (the claim/fork/adopt/mint arms, §8.2) — the session-audit **exact-vintage** basis (the key literal is the cross-plane coordination point; the read side is `perk-dev`'s audit corpus/vintage layer); omitted when only the `perkVersion()` failure sentinel is available; best-effort tier |
@@ -3973,8 +3981,23 @@ one-stop current shape.
   `/plan-save` can still create the canonical issue afterwards. **Objective-node carve-out**: in a
   node-claimed planning session (`objective_node_claim` present) the verdict is suppressed (back
   to the 3-option select) and the command refuses — a node-linked plan must always save (the node
-  advance and backlink depend on it). **Plannotator note**: the browser review's envelope returns
+  advance and backlink depend on it). The claim reaches cold objective-plan sessions too: the
+  cold claim persists `objective_node_claim` from the handoff's `objective_id`/`node_id` (§8.3),
+  so both exits are structurally suppressed there — essential once a stacked planning session is
+  positioned in the predecessor's checkout (§8.46), where an implement-here would edit the
+  published predecessor. **Plannotator note**: the browser review's envelope returns
   only approve/deny — the verdict is unreachable there; the command is the surface.
+
+  **Planning-stage lifecycle-door refusal** (the same family): the warm `/submit`, `/address`,
+  `/land`, and `/learn` doors (tool + command surfaces) run `planningStageRefusal`
+  (`extension/doors/lifecycleGates.ts`) as their first check — when the session's
+  workflow-state `stage` is a planning stage (`plan` / `objective-plan`) they refuse (typed
+  `planning_session`) and direct the human at `perk impl <N>` in a fresh session. Rationale:
+  after an approved save a still-live positioned planning session holds TWO plan identities —
+  the cwd binding (the predecessor, read via `readPlanRef(ctx.cwd)`) and the just-saved child on
+  `active_plan_ref` — so a door invocation there could act on the predecessor; planning sessions
+  never legitimately run lifecycle doors (at the repo root the same invocation fails confusingly
+  today). Fail-open on an unreadable branch (a hygiene refusal, not a validator).
 
 §8.10's per-node Status blocks remain the historical record of how each piece landed; this section
 is the consolidated **current** contract.
@@ -5660,7 +5683,7 @@ identity).
 | 2 | prompt generation (local vs worker) | canonical templates `prompts/stages/*` via the §8.31 render seam; `_implement_prompt`/`_address_prompt` ↔ `initialPromptFor` ↔ `implementHandoffPrompt`/`addressGuidance` | `tests/test_prompt_parity.py` (live cross-engine byte parity) + goldens; reciprocal substring suites `tests/test_worker_prompt_parity.py` ↔ `extension/worker/worker.test.ts`; binding-content byte parity `tests/test_binding_render_parity.py` (via `extension/testing/renderBindingsLive.ts`) |
 | 3 | submit side effects | one Python door, `perk pr submit --json`; the warm `submit` tool/`/submit` command delegate via `submitPr` (`extension/doors/submit.ts`), and the remote worker drives that same registered tool | `extension/worker/workerE2e.test.ts` (implement HAPPY drives the real tool through the real extension into a stubbed `PERK_BIN` router), `extension/doors/submit.test.ts`, `tests/test_pr_submit.py` |
 | 4 | address terminal criteria | `finalize_address` (`extension/doors/address.ts`) runs submit first, delegates its internal resolve half to `perk pr resolve-threads --json`, and appends `last_review_batch`; the worker requires finalizer success + that write + successful effective submit evidence with `mergeable !== false` | `workerE2e.test.ts` (address HAPPY binds both real door writes to classification), `worker.test.ts` `evaluateTerminal` matrix; post-address the supervisor re-classifies via row 1 |
-| 5 | plan-ref reconstruction + positioning | one function, `resume.reconstruct_plan_ref` — all reconstruction sites converge on it (`cli/plan_selection.py::select_plan` for the explicit-id doors, `plan/resume_cmd.py`, `objective/run_cmd.py`, `run/run_worker.py`, the positioner's restore arm); one validating selector/positioner, `launch.resolve_worktree` (see the positioning semantics below) used by every cold door needing a plan checkout (`implement`/`submit`/`address`/`land`/`learn`/`plan watch`); `run_worker.position_worktree` mirrors `launch_stage`'s positioning, and fresh stacked starts independently call the same execution `Delivery.prepare(PrepareRequest(kind="layer_start", mode="execution", …))` boundary (§8.46) from `resolve_worktree` and `run_worker.position_branch` | `tests/test_plan_ref_parity.py` (the save→reconstruct round trip + the `PlanRef` field census), `tests/test_plan_selection.py`, `tests/test_resume.py`, `tests/test_launch_restore.py` (the non-destructive restore matrix), `tests/test_run_worker.py::test_positioning_parity_local_launch_vs_remote_worker` (artifact byte parity, `run_id` excepted; the explicit-ref twin pins the direct-ref arm), `tests/test_run_worker.py::test_positioning_parity_stacked_local_create_vs_remote_position` (same start SHA + `layer-context.json` parity, timestamps excepted) |
+| 5 | plan-ref reconstruction + positioning | one function, `resume.reconstruct_plan_ref` — all reconstruction sites converge on it (`cli/plan_selection.py::select_plan` for the explicit-id doors, `plan/resume_cmd.py`, `objective/run_cmd.py`, `run/run_worker.py`, the positioner's restore arm); one validating selector/positioner, `launch.resolve_worktree` (see the positioning semantics below) used by every cold door needing a plan checkout (`implement`/`submit`/`address`/`land`/`learn`/`plan watch`, plus `objective plan`'s stacked child-layer arm — a bare-`plan_id` consumer through the transient effective `worktree: "reuse"` stage, §8.46); `run_worker.position_worktree` mirrors `launch_stage`'s positioning, and fresh stacked starts independently call the same execution `Delivery.prepare(PrepareRequest(kind="layer_start", mode="execution", …))` boundary (§8.46) from `resolve_worktree` and `run_worker.position_branch` | `tests/test_plan_ref_parity.py` (the save→reconstruct round trip + the `PlanRef` field census), `tests/test_plan_selection.py`, `tests/test_resume.py`, `tests/test_launch_restore.py` (the non-destructive restore matrix), `tests/test_run_worker.py::test_positioning_parity_local_launch_vs_remote_worker` (artifact byte parity, `run_id` excepted; the explicit-ref twin pins the direct-ref arm), `tests/test_run_worker.py::test_positioning_parity_stacked_local_create_vs_remote_position` (same start SHA + `layer-context.json` parity, timestamps excepted) |
 | 6 | run reporting | **remote-only by design**: `perk/run/run_report.py` derives the §8.15 plan-issue comments + job summary solely from the §8.12 events stream + exit code | `tests/test_run_report.py` (incl. the `RunOutcome` lockstep literals) ↔ `worker.test.ts` (the frozen `assembleOutcome` shapes) |
 
 ### Positioning semantics (`launch.resolve_worktree` — the one selector/positioner)
@@ -5683,7 +5706,8 @@ asymmetry). Selection precedence + the two roots are §8.1. The rest of the post
   `worktree_plan_mismatch`, and `worktree_unbound` (an existing checkout with no readable
   binding is **never silently rebound** — remediation is `git worktree remove`, then re-run).
   Valid reuse performs **no mutating or network git operation** (read-only probes only).
-  A **bare-id** selection (`plan watch`'s lazy arm) recomputes positioning from the
+  A **bare-id** selection (the lazy arm shared by `plan watch` and `objective plan`'s stacked
+  child-layer positioning, §8.46) recomputes positioning from the
   **canonical** id after its one lazy backend read — a backend-canonicalized selector (e.g.
   GitHub `007` → `7`) reuses/restores `plan-7`, never a parallel `plan-007`.
 - **Non-destructive restore (missing `reuse` checkouts only).** `submit`/`address`/`land`/
@@ -7024,6 +7048,31 @@ node/plan, its branch, and the status-observed remote head (the objective base f
 layer); a note that `origin/<parent branch>` is already fetched and locally inspectable; and the
 explicit statement that perk records **no planning-time parent SHA** — later movement of the
 predecessor/codebase is a normal implementation danger.
+
+**Stacked child-layer planning is positioned in the predecessor's checkout.** The cold
+`perk objective plan` door positions a stacked child-layer planning session in the predecessor's
+plan worktree **iff the planning Prepare observed a live remote parent head**
+(`PlanningContext.observed_parent_head_sha is not None`) — a *selection* rule keyed off the
+observed fact, never a gate guarantee (the §8.46 handoff gate is satisfied by TERMINAL/LANDED
+dependencies whose branch may be deleted). The transport is one transient effective stage
+(`dataclasses.replace(stage, worktree="reuse")` — the stage **id never changes**, so
+handoff/stage-keyed behavior is untouched) plus the one positioner's existing bare-`plan_id`
+path: a checkout on this machine is **validated reuse** (no backend read); a missing checkout is
+the **checkpoint-validated restore** from `origin/plan-<pred>` (including the
+`layer-context.json` rewrite and the `setup-pending` marker). Positioning *failures* refuse
+typed and fail-closed inside the positioner — there is no degrade-to-root failure fallback.
+Otherwise (bottom layer; a child with no observed live head — landed/deleted/unobserved) the
+session stays at the repo root and the DATA block says so honestly (a landed predecessor's code
+reaches the objective base when the train lands). The positioned arm's DATA block names the
+checkout (path + `plan-<pred>` branch), the planned restore when missing locally, an explicit
+local-drift line when the local HEAD ≠ the observed published head, a dirtiness note, or an
+unknown-state note when the fail-soft read-only probes fail (presentation only — probes never
+bypass the positioner's typed refusals). `--worktree NAME` keeps implement-consistent semantics
+(directory selection only, validated by the shared `checked_name`). Dry runs never position (the
+stacked dry-run path skips Prepare) — the stacked dry-run payload says so
+(`"positioning": "unchecked (dry-run)"`); planning still records **no parent SHA**. A positioned
+launch skips `_sync_main_checkout` by construction (the session does not consume the main
+checkout; Prepare's reconstruction already fetched).
 
 **Save-time layer identity.** `perk plan save` delegates its one objective read and identity
 policy to `PrepareRequest(kind="plan_identity")`: `mode=strict` only for a real node-linked save;

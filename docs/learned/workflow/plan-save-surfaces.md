@@ -105,11 +105,20 @@ bounded (session-tier, and recovery is fill-only when BOTH params are absent), b
 
 ### Fragile seam: handoff write/read locations must agree
 
-The recovery works **only because `objective-plan` is a `worktree: none` stage** — its session runs
-at repo root, so the handoff write (`write_handoff(repo_root, …)`) and the plan-save read
-(`read_handoff(repo_root, …)`) agree on location. If a future stage that ferries link context ran in
-a worktree, the locations would diverge and recovery would silently miss. **Tie any new
-`handoff_extra` consumer to the stage's `worktree` mode.**
+The recovery works **only because the write and read anchor to the same checkout** — the launch
+writes the handoff into the resolved session cwd (`_write_session_handoff` →
+`write_handoff(resolved.path, …)`), and plan-save reads it from its invocation root
+(`read_handoff(repo_root, …)`), which IS that cwd when the save runs inside the session. If a
+future consumer read from a different root than the launch wrote to, recovery would silently
+miss. **Tie any new `handoff_extra` consumer to the checkout the launch actually wrote.**
+
+> **Update (stacked objective-plan positioning shipped).** The original phrasing here — "works
+> only because `objective-plan` is a `worktree: none` stage running at repo root" — is now too
+> narrow: a stacked child-layer planning session is positioned in the **predecessor's plan
+> worktree** (contracts §8.46), and recovery still works because the handoff was written into
+> that same worktree (the invariant is write-root == read-root, not repo-root-ness). The cold
+> claim additionally persists `objective_node_claim` from the handoff's `objective_id`/`node_id`
+> (contracts §8.3), so cold factory sessions get the implement-here suppression too.
 
 ## The plan-source resolution chain
 

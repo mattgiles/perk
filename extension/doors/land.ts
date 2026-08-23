@@ -21,6 +21,7 @@ import {
 import { registerPerkCommand } from "../substrate/command.ts";
 import { failFor, ok, type Result } from "../substrate/result.ts";
 import { report } from "../surfaces/report.ts";
+import { planningStageRefusal } from "./lifecycleGates.ts";
 
 // Learn-consume skip reasons that are ordinary, not failures: non-factory plans carry no
 // `consumed_learn` (`no_consumed_learn`), and a dry run reports `dry_run`. Anything else surfaces.
@@ -131,6 +132,11 @@ function decodeLand(payload: ColdJson): LandPayload | null {
  */
 export async function landPr(pi: ExtensionAPI, ctx: ExtensionContext): Promise<LandResult> {
   const fail = failFor(ctx, "land");
+
+  // Planning sessions never legitimately land — the first check, before any cold-door
+  // delegation (a positioned stacked planning session's cwd binding is the PREDECESSOR).
+  const planningRefusal = planningStageRefusal(ctx, "land");
+  if (planningRefusal !== null) return fail(planningRefusal, "planning_session");
 
   const r = await runColdDoor<LandPayload>(pi, ctx, ["pr", "land", "--json"], {
     label: "perk pr land",

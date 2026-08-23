@@ -71,6 +71,35 @@ test("/implement-here: gate off -> warning, gate untouched, nothing injected", a
   }
 });
 
+test("/implement-here: a COLD objective-plan claim refuses (handoff-persisted node link)", async () => {
+  // The cold-claim channel: the objective-plan cold door's handoff_extra (objective_id/node_id)
+  // persists the objective_node_claim at session_start, so the no-save exit refuses in cold
+  // factory sessions too — with a positioned predecessor-checkout cwd it would otherwise edit
+  // the published predecessor checkout.
+  const cwd = scaffoldRepo({
+    handoff: {
+      runId: "01RID",
+      mode: "read-only",
+      stage: "objective-plan",
+      extra: { objective_id: "7", node_id: "2.3" },
+    },
+  });
+  const h = await loadPerkSession({ cwd, env: { PERK_RUN_ID: "01RID" } });
+  const injected = spyInjections(h);
+  try {
+    assert.deepEqual(h.workflowState().objective_node_claim, { objective: "7", node: "2.3" });
+    await h.runCommandHandler("implement-here", "");
+    assert.ok(
+      h.notifies.some((n) => n.includes("objective-node planning session")),
+      "refused with the objective carve-out",
+    );
+    assert.equal(h.workflowState().mode, "read-only", "the gate stays on");
+    assert.equal(injected.length, 0, "nothing injected");
+  } finally {
+    h.dispose();
+  }
+});
+
 test("/implement-here: a seeded node claim refuses; gate stays on, nothing injected", async () => {
   const cwd = scaffoldRepo();
   const file = plantSession(cwd, [

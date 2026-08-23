@@ -47,6 +47,14 @@ an honest typed `capability_unsupported` refusal naming the exact expected-vs-ob
   the `planning gated: …` lines when handoff-blocked. Publication, submit, address
   finalization, sync, recover, and re-ready are never handoff-gated; in-flight work resumes
   ungated (only a fresh layer start refuses).
+- **A child layer plans in the predecessor's checkout.** When the train observed a **live
+  remote parent head**, `perk objective plan` positions the child layer's read-only planning
+  session in the predecessor's plan worktree (`.worktrees/plan-<pred>` — validated reuse on
+  this machine, else a checkpoint-validated restore from `origin/plan-<pred>`), so the session
+  explores the stack as implemented rather than trunk; the seed's stacked-layer block names
+  the checkout plus any local drift/dirtiness. No live head observed (e.g. a landed
+  predecessor whose branch was auto-deleted) ⇒ planning stays at the repo root, said honestly
+  in the seed. Dry runs never position (`"positioning": "unchecked (dry-run)"`).
 - **The PR body is presentation, not authority.** perk inserts a `### This layer` section and
   a `### Train context` table into each layer PR's body; both are **non-authoritative** and
   refresh only at publication — the delivery train itself is the authority.

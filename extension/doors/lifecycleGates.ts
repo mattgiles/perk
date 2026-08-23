@@ -16,8 +16,43 @@ import type {
 import type { PlanRef } from "../substrate/cache.ts";
 import { registerPerkCommand } from "../substrate/command.ts";
 import { render } from "../substrate/prompts.ts";
-import { branchOf, rebuildWorkflowState } from "../substrate/workflowState.ts";
+import { type BranchSource, branchOf, rebuildWorkflowState } from "../substrate/workflowState.ts";
 import { report } from "../surfaces/report.ts";
+
+// The planning stages whose sessions never legitimately run lifecycle doors. After an approved
+// save, a still-live planning session holds TWO plan identities — the cwd binding (a positioned
+// stacked session's predecessor checkout, read via readPlanRef(ctx.cwd)) and the just-saved plan
+// on active_plan_ref — so a door invocation there could act on the predecessor. At the repo root
+// the same invocation fails confusingly today; the refusal is honest in both shapes.
+const PLANNING_STAGES = new Set(["plan", "objective-plan"]);
+
+/**
+ * The planning-stage lifecycle-door refusal (the shared first check of the warm /submit,
+ * /address, /land, and /learn doors): when this session's workflow-state `stage` is a planning
+ * stage, return the refusal message directing the human at the fresh-session implement door;
+ * `null` otherwise (non-planning stages — and stage-less sessions — are unaffected). Fail-CLOSED
+ * on an unreadable branch: without the state this guard cannot prove the session is not a
+ * positioned planning session (whose cwd binding is the PREDECESSOR — the exact target it
+ * protects), so an unreadable read refuses rather than letting the door act.
+ */
+export function planningStageRefusal(ctx: BranchSource, door: string): string | null {
+  let stage: string | undefined;
+  try {
+    stage = rebuildWorkflowState(branchOf(ctx)).stage;
+  } catch (error) {
+    return (
+      `${door} is unavailable: the session's workflow state could not be read ` +
+      `(${String(error)}), so this cannot be proven not to be a planning session — ` +
+      "retry, or implement the saved plan with `perk impl <N>` in a fresh session."
+    );
+  }
+  if (stage === undefined || !PLANNING_STAGES.has(stage)) return null;
+  return (
+    `${door} is unavailable in a planning session (stage ${stage}): a planning session can ` +
+    "hold two plan identities (its checkout's own binding and the just-saved plan) — " +
+    "implement the saved plan with `perk impl <N>` in a fresh session instead."
+  );
+}
 
 const DIRTY_MESSAGE = "uncommitted changes — commit or stash before switching/forking this stage.";
 const HANDOFF_DIRTY_MESSAGE =

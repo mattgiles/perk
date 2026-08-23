@@ -234,7 +234,12 @@ perk objective plan <N>
 
 perk selects node `1.2` even though layer 1 is only published, not merged — on a stacked
 train, a published-but-unmerged (reviewed and handoff-stamped) predecessor is exactly what
-the next layer builds on. Type:
+the next layer builds on. And because layer 1's branch is live on the remote, the planning
+session opens **in the predecessor's checkout** (`.worktrees/plan-<plan-1>`, restored from
+`origin/plan-<plan-1>` if it isn't on this machine) — the session's reads explore the stack
+as implemented, not trunk; the seed's stacked-layer block names the checkout and any local
+drift. (A landed predecessor whose branch GitHub deleted plans from the repo root instead —
+its code reaches the objective base when the train lands.) Type:
 
 > Plan node 1.2: add slug(text) to textkit.py, built on normalize() — join the normalized
 > words with hyphens.

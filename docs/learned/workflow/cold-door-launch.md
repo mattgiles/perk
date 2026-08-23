@@ -239,6 +239,17 @@ The resolver returns the invoking repo root *before* considering the supplied va
 checkout, not passing `--worktree`. Shared option factories can expose intentionally-inert
 options; don't assume an accepted flag positions the session.
 
+> **Update (the stacked objective-plan positioning shipped).** The registry policy is no longer
+> the whole story: every positioning gate keys off the **launched stage instance**, so a door
+> can position a registry-`worktree: none` stage by launching a transient *effective* stage —
+> `dataclasses.replace(stage, worktree="reuse")` (same id) — through `SeededLaunch.stage_override`
+> plus the positioner's bare-`plan_id` path. `perk objective plan`'s stacked child-layer arm does
+> exactly this (contracts §8.46): with a live observed remote parent head it positions in the
+> predecessor's `plan-<pred>` checkout, and its `--worktree` is live there (directory selection
+> via the shared `checked_name`). Bottom layers / no-observed-head children / incremental keep
+> the inert-flag behavior above. A deliberate consequence: `_sync_main_checkout` (gated on the
+> effective `worktree == "none"`) skips on positioned launches.
+
 ## Launch banner + worktree `.pi/npm` pre-staging (the exec-wall, applied two ways)
 
 **The exec-wall reaffirmed.** `launch_stage` ends in `os.execvpe` — perk *becomes* pi, so all

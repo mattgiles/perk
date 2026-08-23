@@ -260,6 +260,21 @@ export default function (pi: ExtensionAPI) {
       if (handoff === null || handoff.run_id !== decision.runId) {
         reportError(`handoff missing or mismatched for run ${decision.runId}`);
       } else {
+        // The objective-plan cold door's handoff_extra carries the node link
+        // (objective_id/node_id): persist it as the objective_node_claim so the implement-here
+        // exits are structurally suppressed in COLD objective-plan sessions too (the warm
+        // `objective_node` tool records the claim; a cold factory session never calls it — the
+        // door marked the node before launch). Blank/absent ids persist nothing; the claim
+        // clears on a successful node-linked save exactly as the warm-recorded one does.
+        const handoffObjective = handoff.objective_id;
+        const handoffNode = handoff.node_id;
+        const nodeClaim =
+          typeof handoffObjective === "string" &&
+          handoffObjective.trim() !== "" &&
+          typeof handoffNode === "string" &&
+          handoffNode.trim() !== ""
+            ? { objective: handoffObjective, node: handoffNode }
+            : undefined;
         const data: WorkflowState = {
           run_id: decision.runId,
           pi_session_id: currentSessionId ?? undefined,
@@ -268,6 +283,7 @@ export default function (pi: ExtensionAPI) {
           // Record the launched stage so the interior can tell e.g. objective-author from plan
           // (both are read-only) and inject the right authoring context (planMode vs objectiveAuthor).
           stage: handoff.stage,
+          ...(nodeClaim !== undefined ? { objective_node_claim: nodeClaim } : {}),
         };
         const okAppend = appendWorkflowState(pi, ctx, {
           data,

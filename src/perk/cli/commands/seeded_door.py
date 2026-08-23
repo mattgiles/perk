@@ -91,6 +91,12 @@ class SeededLaunch:
     ``dry_run_payload`` is the FULL ``--json`` dry-run payload — the door owns its keys and their
     order. ``dry_run_shows_seed`` gates the human dry-run's seed section (``objective plan`` and
     the learn factories' ``--gather`` suppress it).
+
+    ``stage_override``/``plan_id`` are the stacked-positioning pair (``objective plan``'s
+    child-layer arm): a transient effective stage (same id, replaced ``worktree`` policy)
+    launched in place of the registry stage, plus the bare plan id ``launch_stage`` forwards to
+    the positioner. Both default ``None`` — every other door is unaffected. The handoff still
+    records the same stage id (the override never changes ``stage.id``).
     """
 
     seed: str  # the prompt_override
@@ -102,6 +108,8 @@ class SeededLaunch:
     handoff_extra: dict[str, object] | None = None
     binding_trigger: str | None = None
     run_id_override: str | None = None
+    stage_override: Stage | None = None
+    plan_id: str | None = None
 
 
 def run_seeded_door(
@@ -161,7 +169,7 @@ def run_seeded_door(
     launch.launch_stage(
         repo_root=repo_root,
         config=config,
-        stage=stage,
+        stage=spec.stage_override or stage,
         worktree=worktree,
         dry_run=False,
         remote=remote,
@@ -171,4 +179,5 @@ def run_seeded_door(
         binding_trigger=spec.binding_trigger,
         run_id_override=spec.run_id_override,
         sync_main=not no_sync,
+        plan_id=spec.plan_id,
     )

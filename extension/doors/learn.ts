@@ -71,7 +71,7 @@ import {
   type WaveAttemptReceipt,
 } from "../waves/reportWave.ts";
 import { createRpcWaveAdapter } from "../waves/rpcAdapter.ts";
-import { planReadInstruction } from "./lifecycleGates.ts";
+import { planningStageRefusal, planReadInstruction } from "./lifecycleGates.ts";
 
 /** The ok-arm fields. */
 export interface LearnOk {
@@ -189,6 +189,12 @@ export async function learnDone(
 ): Promise<LearnResult> {
   const trimmed = (summary ?? "").trim();
   const fail = failFor(ctx, "learn");
+
+  // Planning sessions never legitimately run the learn cycle — the first check, before any
+  // cold-door delegation (a positioned stacked planning session's cwd binding is the
+  // PREDECESSOR).
+  const planningRefusal = planningStageRefusal(ctx, "learn");
+  if (planningRefusal !== null) return fail(planningRefusal, "planning_session");
 
   // No summary: record the deliberate skip canonically (the cold door stamps the plan-header and
   // clears the marker; the skip carries no classification, so `decision`/`target` are
@@ -567,6 +573,13 @@ export function registerLearn(pi: ExtensionAPI): void {
       "/learn skip records the skip on the plan and clears pending-learn; " +
       "/learn <text> captures the text verbatim.",
     handler: async (args, ctx) => {
+      // Planning sessions never legitimately run the learn cycle — the first check (the
+      // orchestrating bare-/learn arm below never reaches learnDone, so it needs its own gate).
+      const planningRefusal = planningStageRefusal(ctx, "learn");
+      if (planningRefusal !== null) {
+        report(ctx, "learn", "warning", planningRefusal);
+        return;
+      }
       const trimmed = (args ?? "").trim();
 
       // Explicit text (or `skip`): the existing learnDone path — capture verbatim / record skip.
