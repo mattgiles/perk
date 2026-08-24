@@ -12,7 +12,12 @@
 
 import type { WorkflowSession } from "../../session/workflowSession.ts";
 import { renderGistDraft, resumeGistDraft } from "./draft.ts";
-import { type GistApprovalSaveOutcome, type GistBackend, type GistGate, gistApprovalSave } from "./save.ts";
+import {
+  type GistApprovalSaveOutcome,
+  type GistBackend,
+  type GistGate,
+  gistApprovalSave,
+} from "./save.ts";
 
 /**
  * The reviewer's verdict on the rendered draft. `directEdits` is true when an approval carries

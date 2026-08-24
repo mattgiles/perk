@@ -290,7 +290,10 @@ export function writeSessionArtifactClassified(
   });
   if (!ok) {
     // already reported through the strict-append seam
-    return { status: "unverified", problem: `session_artifacts pointer read-back failed for ${name}` };
+    return {
+      status: "unverified",
+      problem: `session_artifacts pointer read-back failed for ${name}`,
+    };
   }
   return { status: "applied", path: written, pointer };
 }

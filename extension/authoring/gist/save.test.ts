@@ -3,15 +3,10 @@
 
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { openMemoryWorkflowSession } from "../../session/memoryWorkflowSession.ts";
 import type { MemoryWorkflowSession } from "../../session/memoryWorkflowSession.ts";
+import { openMemoryWorkflowSession } from "../../session/memoryWorkflowSession.ts";
 import { reviseGistDraft } from "./draft.ts";
-import {
-  type GistBackend,
-  type GistGate,
-  gistApprovalSave,
-  saveGist,
-} from "./save.ts";
+import { type GistBackend, type GistGate, gistApprovalSave, saveGist } from "./save.ts";
 
 const PROSE = "# Faster reviews\n\nWe would likely want review turnaround under a day.\n";
 
@@ -97,7 +92,11 @@ test("saveGist: an identity-less save is representable (runId null reaches the p
 });
 
 test("saveGist: a backend failure passes through typed", async () => {
-  const backend = fakeBackend({ status: "failed", message: "gh exploded", errorType: "github_error" });
+  const backend = fakeBackend({
+    status: "failed",
+    message: "gh exploded",
+    errorType: "github_error",
+  });
   const result = await saveGist({ prose: PROSE }, { backend, runId: "RID" });
   assert.deepEqual(result, { status: "failed", message: "gh exploded", errorType: "github_error" });
 });
@@ -147,7 +146,11 @@ test("gistApprovalSave: an explicit title overrides the draft title (the /gist-s
 });
 
 test("gistApprovalSave: a failed save leaves the gate on", async () => {
-  const backend = fakeBackend({ status: "failed", message: "gh exploded", errorType: "github_error" });
+  const backend = fakeBackend({
+    status: "failed",
+    message: "gh exploded",
+    errorType: "github_error",
+  });
   const gate = fakeGate(true);
   const outcome = await gistApprovalSave({ session: draftedSession(), backend, gate });
   assert.equal(outcome.status, "save-failed");
@@ -159,7 +162,11 @@ test("gistApprovalSave: a failed save leaves the gate on", async () => {
 
 test("gistApprovalSave: a save while already read-write never exits the gate", async () => {
   const gate = fakeGate(false);
-  const outcome = await gistApprovalSave({ session: draftedSession(), backend: fakeBackend(), gate });
+  const outcome = await gistApprovalSave({
+    session: draftedSession(),
+    backend: fakeBackend(),
+    gate,
+  });
   assert.equal(outcome.status, "saved");
   assert.ok(outcome.status === "saved");
   assert.equal(outcome.gateExited, false);
@@ -173,7 +180,13 @@ test("gistApprovalSave: gate released ONLY after the verified backend success en
   const backend: GistBackend = {
     async save() {
       order.push("backend");
-      return { status: "saved", id: "7", url: "https://gh/o/r/issues/7", existed: null, scope: null };
+      return {
+        status: "saved",
+        id: "7",
+        url: "https://gh/o/r/issues/7",
+        existed: null,
+        scope: null,
+      };
     },
   };
   const gate: GistGate = {

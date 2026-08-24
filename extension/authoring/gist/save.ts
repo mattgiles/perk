@@ -51,7 +51,11 @@ export async function saveGist(
     };
   }
   if (input.scope !== undefined && !(GIST_SCOPES as readonly string[]).includes(input.scope)) {
-    return { status: "failed", message: "scope must be plan or objective", errorType: "invalid_input" };
+    return {
+      status: "failed",
+      message: "scope must be plan or objective",
+      errorType: "invalid_input",
+    };
   }
   return deps.backend.save({
     prose,
@@ -71,7 +75,11 @@ export interface GistGate {
 export type GistApprovalSaveOutcome =
   | { status: "no-draft" }
   | { status: "saved"; save: Extract<SaveGistOutcome, { status: "saved" }>; gateExited: boolean }
-  | { status: "save-failed"; save: Extract<SaveGistOutcome, { status: "failed" }>; gateExited: false };
+  | {
+      status: "save-failed";
+      save: Extract<SaveGistOutcome, { status: "failed" }>;
+      gateExited: false;
+    };
 
 /**
  * The shared APPROVED-review → save orchestration (an APPROVED `plan_review` gist arm and the

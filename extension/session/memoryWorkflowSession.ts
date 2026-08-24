@@ -6,7 +6,11 @@
 
 import { digestSessionData, sessionArtifactNameProblem } from "../substrate/sessionData.ts";
 import type { SessionArtifactPointer } from "../substrate/workflowState.ts";
-import type { ReadArtifactResult, WorkflowSession, WriteArtifactResult } from "./workflowSession.ts";
+import type {
+  ReadArtifactResult,
+  WorkflowSession,
+  WriteArtifactResult,
+} from "./workflowSession.ts";
 
 /** The in-memory session plus its deterministic failure knobs (test-facing, side-effect free). */
 export interface MemoryWorkflowSession extends WorkflowSession {

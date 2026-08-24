@@ -234,9 +234,7 @@ for (const backing of [branchBacking(), memoryBacking()]) {
       h.inducePointerAppendFailure();
       const result = quietly(() => h.session.writeArtifact("draft.json", "x"));
       assert.equal(result.status, "unverified");
-      assert.ok(
-        result.status === "unverified" && /pointer read-back failed/.test(result.problem),
-      );
+      assert.ok(result.status === "unverified" && /pointer read-back failed/.test(result.problem));
       // The orphan bytes may exist, but without a pointer the artifact reads absent.
       assert.deepEqual(h.session.readArtifact("draft.json"), { status: "absent" });
     } finally {

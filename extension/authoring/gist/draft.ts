@@ -12,8 +12,8 @@
 // light: a gist is a problem-space statement of intent with no structured roadmap
 // (contracts.md §8.41).
 
-import type { SessionArtifactPointer } from "../../substrate/workflowState.ts";
 import type { WorkflowSession } from "../../session/workflowSession.ts";
+import type { SessionArtifactPointer } from "../../substrate/workflowState.ts";
 
 /** The registry stage id of the gist-authoring session (shared with planMode's defer check). */
 export const GIST_AUTHOR_STAGE = "gist-author";
@@ -38,7 +38,11 @@ export interface GistDraft {
  * the explicit literal; `title`/`scope` omitted when blank — byte-identical to what the artifact
  * always carried. Pure; never throws.
  */
-export function encodeGistDraft(draft: { prose: string; title?: string; scope?: GistScope }): string {
+export function encodeGistDraft(draft: {
+  prose: string;
+  title?: string;
+  scope?: GistScope;
+}): string {
   const title = draft.title?.trim();
   const payload = {
     schema_version: 1,

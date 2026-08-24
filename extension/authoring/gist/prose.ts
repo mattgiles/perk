@@ -44,4 +44,3 @@ export const GIST_SAVE_TOOL_GUIDELINES = [
   "Pass gist_save the statement-of-intent PROSE in `prose` — problem-focused, with at most high-level solution leanings; no implementation steps or roadmap.",
   "Pass gist_save's `scope` only once the consumption tier is settled (plan or objective); omit it to keep the pre-seeded/default scope.",
 ];
-

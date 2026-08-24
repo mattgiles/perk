@@ -3,11 +3,11 @@
 
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { openMemoryWorkflowSession } from "../../session/memoryWorkflowSession.ts";
 import type { MemoryWorkflowSession } from "../../session/memoryWorkflowSession.ts";
+import { openMemoryWorkflowSession } from "../../session/memoryWorkflowSession.ts";
 import { GIST_DRAFT_ARTIFACT, reviseGistDraft } from "./draft.ts";
-import type { GistBackend, GistGate } from "./save.ts";
 import { type GistDraftReviewer, type GistReviewOutcome, reviewGist } from "./review.ts";
+import type { GistBackend, GistGate } from "./save.ts";
 
 const PROSE = "The intent and the why.\n";
 
@@ -87,8 +87,17 @@ test("no draft → noDraft; the reviewer is never invoked", async () => {
 });
 
 test("the reviewer receives the RENDERED markdown, never raw JSON", async () => {
-  const reviewer = scriptedReviewer({ status: "denied", feedback: "needs work", reviewId: "rev-d" });
-  await reviewGist({ session: draftedSession(), reviewer, backend: fakeBackend(), gate: fakeGate() });
+  const reviewer = scriptedReviewer({
+    status: "denied",
+    feedback: "needs work",
+    reviewId: "rev-d",
+  });
+  await reviewGist({
+    session: draftedSession(),
+    reviewer,
+    backend: fakeBackend(),
+    gate: fakeGate(),
+  });
   assert.equal(reviewer.reviewed.length, 1);
   const rendered = String(reviewer.reviewed[0]);
   assert.match(rendered, /# Faster reviews/);
@@ -179,7 +188,11 @@ test("approved but the draft vanished between reads → approvedNoDraft (defensi
 test("denied / dismissed / aborted / unavailable pass through typed", async () => {
   const denied = await reviewGist({
     session: draftedSession(),
-    reviewer: scriptedReviewer({ status: "denied", feedback: "say what bounds it", reviewId: "rev-d" }),
+    reviewer: scriptedReviewer({
+      status: "denied",
+      feedback: "say what bounds it",
+      reviewId: "rev-d",
+    }),
     backend: fakeBackend(),
     gate: fakeGate(),
   });

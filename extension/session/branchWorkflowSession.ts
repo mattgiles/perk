@@ -11,7 +11,11 @@ import {
   writeSessionArtifactClassified,
 } from "../substrate/sessionData.ts";
 import type { EntrySink } from "../substrate/workflowState.ts";
-import type { OpenWorkflowSession, ReadArtifactResult, WriteArtifactResult } from "./workflowSession.ts";
+import type {
+  OpenWorkflowSession,
+  ReadArtifactResult,
+  WriteArtifactResult,
+} from "./workflowSession.ts";
 
 /**
  * Open the branch-backed session for the current context: `absent` without a `run_id` (a

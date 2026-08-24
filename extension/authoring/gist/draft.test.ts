@@ -2,8 +2,8 @@
 
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { openMemoryWorkflowSession } from "../../session/memoryWorkflowSession.ts";
 import type { MemoryWorkflowSession } from "../../session/memoryWorkflowSession.ts";
+import { openMemoryWorkflowSession } from "../../session/memoryWorkflowSession.ts";
 import {
   decodeGistDraft,
   encodeGistDraft,
@@ -73,7 +73,9 @@ test("decodeGistDraft: round-trips an encode; refuses malformed payloads with wa
 
 test("decodeGistDraft: blank title dropped; an unknown scope degrades to absent", () => {
   assert.deepEqual(
-    decodeGistDraft(JSON.stringify({ schema_version: 1, title: "   ", scope: "banana", prose: PROSE })),
+    decodeGistDraft(
+      JSON.stringify({ schema_version: 1, title: "   ", scope: "banana", prose: PROSE }),
+    ),
     { prose: PROSE },
   );
 });
@@ -137,7 +139,10 @@ test("revise: seam refusal → rejected/write_refused; pointer failure → unver
   assert.equal(rejected.status, "rejected");
   assert.ok(rejected.status === "rejected");
   assert.equal(rejected.reason, "write_refused");
-  assert.equal(rejected.problem, `could not write the ${GIST_DRAFT_ARTIFACT} artifact (see warnings)`);
+  assert.equal(
+    rejected.problem,
+    `could not write the ${GIST_DRAFT_ARTIFACT} artifact (see warnings)`,
+  );
 
   const orphaned = memorySession();
   orphaned.failNextPointerAppend();
