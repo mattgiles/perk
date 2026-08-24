@@ -8,9 +8,12 @@ cluster: pi-extension
 
 ## No in-file `@`-transclusion
 
-Pi context files (`AGENTS.md`, `.pi/SYSTEM.md`, `.pi/APPEND_SYSTEM.md`) load **verbatim** — `@file`
-is only a CLI message-arg prefix, not interpreted inside context files. Consequence: you cannot
-`@`-reference a catalog from `.pi/APPEND_SYSTEM.md`; the reference would appear as literal text.
+Pi context files load **verbatim** — `AGENTS.md` plus the `SYSTEM.md` (replaces the system prompt)
+/ `APPEND_SYSTEM.md` (appends to it) kinds Pi's resource loader reads from a project `.pi/` dir or
+the global `~/.pi/agent/` — this repo carries only the append kind, `.pi/APPEND_SYSTEM.md` (the
+live ambient carrier). `@file` is only a CLI message-arg prefix, not interpreted inside context
+files. Consequence: you cannot `@`-reference a catalog from `.pi/APPEND_SYSTEM.md`; the reference
+would appear as literal text.
 
 ## Ambient index must be a real two-layer split
 

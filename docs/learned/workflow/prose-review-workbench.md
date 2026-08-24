@@ -74,8 +74,9 @@ decision without turning the catalog into a general schema system.
 
 Generated fragment ordering follows registry insertion order. Exact-output tests that change after a
 registry reorder are identifying a contract change, not formatter noise. The compile-time exhaustive
-policy registry in `tools/prose-map/catalog.ts` and its runtime unknown-field finding form the
-two-layer guard described in `workflow/source-scan-guards.md`.
+policy registry in `tools/prose-map/selector.ts` (`TOOL_FIELD_POLICIES`, `satisfies`-pinned against
+the SDK tool type) and its runtime unknown-field finding form the two-layer guard described in
+`workflow/source-scan-guards.md`.
 
 A governed tool gaining a described param moves multiple prose-map count pins at once (governed
 tools / TS fragments / discovery candidates) — verify with the living-map check, never assume
@@ -141,6 +142,8 @@ AST location columns are UTF-8 byte offsets, while `tokenize` columns are Unicod
 positions. Preserve one line-start table and provide explicit conversions in each direction. After
 an edit, recomposition of untouched prefix, replacement, and untouched suffix is the cheap
 corruption invariant. The owning implementation is
+`packages/perk-dev/src/perk_dev/prose_review/source_adapter/python.py`; the shared name predicate
+both discovery and resolution consume stays in
 `packages/perk-dev/src/perk_dev/prose_map/python.py`.
 
 Finally, `ast.parse` success does not prove compilability. Run `compile(...)` as a non-executing

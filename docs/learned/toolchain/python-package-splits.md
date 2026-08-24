@@ -194,11 +194,11 @@ these are the new edges).
 
 - **The package-organization north-star (the durable rule, now without its doc).** This split arc was
   governed by a `perk/`-layering north-star — six governing principles, a reconciliation of known
-  asymmetries, a target tree, and a staged A–D reorg roadmap. The planning doc that captured it
-  (`docs/planning/package-organization.md`) was later **removed with the rest of `docs/planning/`**,
-  so there is no live pointer to chase. The durable rule outlives the doc: **a `perk/` reorg should
-  consult the established layering (the existing package structure + the codebase-design deep-module
-  vocabulary) rather than re-deriving it ad hoc.**
+  asymmetries, a target tree, and a staged A–D reorg roadmap. The planning doc that captured it was
+  later removed in the stray-docs cleanup (PR #762, 2026-06) — `docs/planning/` itself survives, but
+  the north-star doc has no live pointer to chase. The durable rule outlives the doc: **a `perk/`
+  reorg should consult the established layering (the existing package structure + the
+  codebase-design deep-module vocabulary) rather than re-deriving it ad hoc.**
 
 The gateway-purification refinement from this same relocation arc lives in
 `workflow/github-gateway.md` (hoisting a backend-specific read out of a neutral gateway into the
