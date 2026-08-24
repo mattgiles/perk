@@ -174,9 +174,10 @@ not the mirror. The `perk-remote-setup` composite installs the `skills` CLI (`go
 source — its release binaries are darwin-only), and `run_worker.position_worktree` runs the same
 `sync_skills` gesture `perk init` uses against the checkout's committed manifests
 (`_deliver_skills`). Posture is **fatal** at both tiers (a failed install fails the job; a failed
-sync raises `skills_sync_failed` before the worker spawns) — deliberately diverging from the
-loud-but-non-fatal local mirror, because remotely nobody sees a warning (contracts §8.38 named
-difference 2). Cross-ref `remote-runner.md`.
+sync raises `skills_sync_failed` before the worker spawns) — matching the equally load-bearing
+local `perk init` sync; the deliberate divergence is only vs the loud-but-non-fatal
+launch-positioning **mirror** (`materialize_skills`), because remotely nobody sees a warning
+(contracts §8.38 named difference 2). Cross-ref `remote-runner.md`.
 
 ## Skills `references:` frontmatter + subdirectory routing needs no wiring
 
@@ -266,16 +267,25 @@ symlink swap) — otherwise the mirror pins main's cache commit and the in-branc
 silently NOT live in the dogfood session, defeating the point of dogfooding from the branch
 worktree.
 
-### Severity = `warn`, never `fail` (tied to a real lifecycle fact)
+### Severity = `warn`, never `fail` (report-only config ownership + the verify-gating lifecycle fact)
 
-Missing-skill / unknown-target findings are **`warn`** so `perk doctor` stays exit-0 — not cosmetic:
-`skills sync` is best-effort/non-fatal and is skipped under `run_init(verify=False)`, so a freshly-
-inited test repo (and any consumer who hasn't run `skills sync` yet) legitimately has no
-`.agents/skills/perk-*`. A `fail` would break `tests/test_doctor.py::test_healthy_after_init` and
-exit-1 a real consumer for a benign state. Only a `BindingsError` on the **bundled** file is `fail`
-("Reinstall perk" — impossible in a healthy install; mirrors `_registry_check`).
-`RegistryError`/bad-TOML mid-check degrade to a warn *note* (those failures are owned by the
-registry/config checks — don't double-fail).
+Missing-skill / unknown-target findings are **`warn`** so `perk doctor` stays exit-0 — not
+cosmetic, for two reasons. **Ownership (the primary leg):** `_bindings_check` owns user-binding
+*config* validation and is report-only (no `--fix` arm) + warn-level (D1) by design;
+delivery-substrate health — missing managed skills after a failed or never-run sync — is owned by
+the **fail-level**, verify-gated `_skills_delivery_check`, so a `fail` here would double-fail a
+substrate finding the delivery check already owns. **The lifecycle fact:** the sync is
+load-bearing *when it runs* (fatal `skills_sync_failed`, exit 2 — locally in `run_init`, remotely
+pre-spawn), but it is **verify-gated** — skipped under `run_init(verify=False)` — while
+`_bindings_check` is offline and NOT verify-gated, so a freshly-inited unit-test repo (and any
+consumer before their first verified init/sync) legitimately shows missing
+`.agents/skills/perk-*` to the bindings check; a `fail` would break
+`tests/test_doctor.py::test_healthy_after_init` and exit-1 a real consumer for a benign state.
+Only a `BindingsError` on the **bundled** file is `fail` ("Reinstall perk" — impossible in a
+healthy install; mirrors `_registry_check`). `RegistryError`/bad-TOML mid-check degrade to a warn
+*note* (those failures are owned by the registry/config checks — the same don't-double-fail
+discipline as the substrate ownership above). The per-CLI load-bearing-vs-best-effort posture
+spectrum lives in `init-external-cli.md`.
 
 ### `DELIVERABLE_COMMAND_TARGETS` is the command-trigger vocabulary
 
