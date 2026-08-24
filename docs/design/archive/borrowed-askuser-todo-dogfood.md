@@ -67,7 +67,7 @@ probe's bound perk extension would try to claim that run id (a loud but harmless
 `workflow-state linkage error` — see proc-1 in the defect log). Delete the script afterwards.
 
 ```ts
-// Throwaway headless probe (docs/design/borrowed-askuser-todo-dogfood.md, leg 2). Not committed.
+// Throwaway headless probe (docs/design/archive/borrowed-askuser-todo-dogfood.md, leg 2). Not committed.
 // Mirrors extension/worker/worker.ts::defaultCreateRuntime — run from the MAIN checkout root.
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";

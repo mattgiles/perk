@@ -314,7 +314,7 @@ catch a miss; the batch owns the sweep.)
 **Batch B** (node 2.3): U3 + U4 — burden **19,776**; 2 units, 2 source docs deleted; edits
 `workflow/learn-evidence-pipeline.md`, `workflow/plan-factories.md`; **plus the
 inbound-reference repoints**: `workflow/cold-door-launch.md` and
-`docs/design/learn-harvest-dogfood.md` (same backticked-path caveat as Batch A).
+`docs/design/archive/learn-harvest-dogfood.md` (same backticked-path caveat as Batch A).
 
 Balance: 19,776 / 18,237 = **1.08** ≤ 1.5 ✓ (no forcing unit).
 

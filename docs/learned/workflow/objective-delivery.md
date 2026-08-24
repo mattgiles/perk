@@ -348,7 +348,7 @@ invariants below are the ones a naive port of publish's posture would get wrong:
 
 ## What the live stacked-publication dogfood gate proved
 
-The full record is `docs/design/stacked-publication-dogfood.md` — point, don't restate. The
+The full record is `docs/design/archive/stacked-publication-dogfood.md` — point, don't restate. The
 durable distillations:
 
 - **Two layers never exercise append**: stack-create first fires at layer 2, append at layer 3 —

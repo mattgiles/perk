@@ -42,9 +42,9 @@ regression-testable:
 - **Imperative (proven live on both worker-entry paths):** the live
   `plan → dispatch → checkout → setup → drive → report` chain completed real remote `implement`
   and `address` runs end-to-end through perk's own doors on the self-repo (2026-07-04 — the
-  procedure + captured evidence are `docs/design/remote-runner-e2e-dogfood.md`), and on the
+  procedure + captured evidence are `docs/design/archive/remote-runner-e2e-dogfood.md`), and on the
   consumer path (2026-07-06 — the staged `consumer-npm` entry in a scratch consumer repo on the
-  released distributions; `docs/design/remote-runner-consumer-dogfood.md`). Both proofs are
+  released distributions; `docs/design/archive/remote-runner-consumer-dogfood.md`). Both proofs are
   point-in-time — there is no recurring CI-gated live E2E.
 
 **The cross-cutting lesson (from #176):** a managed CI artifact's string-template body is
@@ -220,7 +220,7 @@ runtime deps and `--legacy-peer-deps` skips peers, so without the SDK's real dep
 import set stays open (anchor: `src/perk/run/workflow_artifacts.py::_WORKER_DEPS_CONSUMER`; `_NPM_NAME =
 NPM_PACKAGE.removeprefix("npm:")` derives from the same settings SSOT). Self-repo keeps `npm ci`.
 The path stayed labeled execution-untested until the 2026-07-06 consumer dogfood proved it live
-(`docs/design/remote-runner-consumer-dogfood.md`) — the durable rule stands: a realized-but-
+(`docs/design/archive/remote-runner-consumer-dogfood.md`) — the durable rule stands: a realized-but-
 unverified path must never be presented as proven.
 
 **Grep ALL contracts mentions when reconciling.** Retiring the deferral needed a **third** §8.14 site

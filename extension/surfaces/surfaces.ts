@@ -412,7 +412,7 @@ export function formatBudgetLine(args: { tokens: number; elapsedMs: number }): s
 }
 
 // --- display-only transcript entry renderers -----------------------------------------------------
-// The audit §2.3 verdict (docs/design/pi-adoption-audit.md): perk's custom-entry families are
+// The audit §2.3 verdict (docs/design/archive/pi-adoption-audit.md): perk's custom-entry families are
 // display-only. Most render as durable one-line transition markers; report detail is the generic
 // full-diagnostic family and always renders every logical row. Renderer BODIES live here (a
 // transcript renderer IS a rich-UI surface the surfaces module owns); registration is wiring at the

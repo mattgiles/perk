@@ -506,7 +506,7 @@ hold-until-handshake, and the skip-silently fallback are all guidance — tests 
 guidance-string **presence**, never behavior. **The first live run is the integration test.**
 The live-run watch axes — all four **confirmed live** across the three streaming browser doors
 (2026-08-10; the per-leg timestamps and verbatim tool results are in
-`docs/design/streaming-doors-dogfood.md`):
+`docs/design/archive/streaming-doors-dogfood.md`):
 
 - (a) do batches actually deliver on each wait-expiry (the steer-on-tool-return mechanic) —
   **confirmed**: every leg's first batch injected at the exact 30s-wait expiry, later batches

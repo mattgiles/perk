@@ -178,7 +178,7 @@ journey without making deterministic workers secretly agentic.
   > Boundaries. The live-read surfaces are `perk objective next`/`show`/`stack status` (and
   > `show` degrades a failed live read as `readiness unchecked (<error>)` rather than
   > pretending). The coherence audit lives in
-  > `docs/design/stacked-ready-handoff-dogfood.md`.
+  > `docs/design/archive/stacked-ready-handoff-dogfood.md`.
 
 The command-line pass is broader than the ready command itself. Every surface that claims to know
 the next objective action must consume the same readiness truth:

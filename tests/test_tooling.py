@@ -36,7 +36,7 @@ def test_prek_ruff_rev_matches_pyproject_floor():
     assert {"ruff-check", "ruff-format"} <= hook_ids, hook_ids
 
 
-# The dignified-python §1.9 subprocess discipline (docs/design/dignified-convergence.md):
+# The dignified-python §1.9 subprocess discipline (docs/design/archive/dignified-convergence.md):
 # every `subprocess.run(...)` lives inside one of these sanctioned wrapper functions
 # (module stem, function name), and passes explicit `check=` and `timeout=` keywords.
 # `perk.substrate.proc.run_captured` is the ONE captured primitive (every captured facade

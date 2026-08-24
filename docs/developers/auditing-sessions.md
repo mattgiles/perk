@@ -85,7 +85,7 @@ agent.
 
    For a full calibration pass—including the degradation-arm checklist and the
    machinery-fixes-first sequence—follow the procedure in
-   [`docs/design/session-audit-dogfood.md`](../design/session-audit-dogfood.md).
+   [`docs/design/archive/session-audit-dogfood.md`](../design/archive/session-audit-dogfood.md).
 
 ---
 

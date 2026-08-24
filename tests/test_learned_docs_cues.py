@@ -150,6 +150,6 @@ def test_committed_ambient_routing_block_is_measurable_and_within_budget():
     assert observed <= AMBIENT_ROUTING_BLOCK_MAX_BYTES, (
         f"the committed ambient routing block is {observed} bytes — over the "
         f"{AMBIENT_ROUTING_BLOCK_MAX_BYTES}-byte budget; curate/compress the routing inputs "
-        "(the curation playbook is `docs/design/learned-curation-map.md`), or reset the budget "
-        "constant in an ordinary human-reviewed code change justified in its PR"
+        "(the curation playbook is `docs/design/archive/learned-curation-map.md`), or reset "
+        "the budget constant in an ordinary human-reviewed code change justified in its PR"
     )

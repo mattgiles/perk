@@ -6,7 +6,7 @@ cluster: knowledge-stewardship
 
 # Reconciling drifted docs against the converged codebase
 
-A docs-only reconciliation (e.g. bringing `docs/guiding-principles/python-cli-guidelines.md` back in line
+A docs-only reconciliation (e.g. bringing `docs/design/first-principles/python-cli-guidelines.md` back in line
 with the grouped CLI) has its own craft. These are the durable rules from doing one for real.
 
 ## Distillation
@@ -57,10 +57,10 @@ sweeps in the first reconciliation that checked.
 ## A retired-convention sweep needs a symbol grep, not a named-file census
 
 When a change retires a convention/symbol spelling, grep the retired symbol/phrase across **ALL
-prose surfaces** (`docs/learned/`, `docs/guiding-principles/`, `shared/contracts.md`, user docs)
+prose surfaces** (`docs/learned/`, `docs/design/first-principles/`, `shared/contracts.md`, user docs)
 rather than hand-enumerating the files to update. The `fail()`/`EXIT_FOR_TYPE` consolidation
 updated the learned docs it knew about but missed 4 stale references in a third file
-(`docs/guiding-principles/python-cli-guidelines.md`) that only multi-angle PR review caught —
+(`docs/design/first-principles/python-cli-guidelines.md`) that only multi-angle PR review caught —
 cross-linked docs mirror each other's conventions, so a named-file census undercounts by
 construction.
 
@@ -205,7 +205,7 @@ guidelines-doc patterns:
   retired/replaced, author a NEW record for the new flow and prepend a dated keep-and-annotate
   supersession note to the old record's Status line — cross-annotated both ways; the new record's
   header states prior vs current coverage and re-examines standing residuals. Worked example:
-  `docs/design/pr-review-doors-dogfood.md` superseding `docs/design/review-dogfood.md`.
+  `docs/design/archive/pr-review-doors-dogfood.md` superseding `docs/design/archive/review-dogfood.md`.
 - **The dogfood-record genre is settled across factories** (#2006, #2027): Part A pre-committed
   protocol, blocked-state disposition, probes-vs-attempts budget accounting, per-criterion
   observed-live/offline-pinned/unobserved-not-passed classification, product-artifact-first
@@ -221,13 +221,13 @@ one from a dogfood run:
   deterministic cold saves + headless implement drives for the planned warm authoring/review
   flow proves cold persistence + warm publication, *not* the warm authoring UX — the record
   must state that scope distinction explicitly (instance:
-  `docs/design/stacked-publication-dogfood.md`).
+  `docs/design/archive/stacked-publication-dogfood.md`).
 - **Staged sacrificial scratch PRs with planted signal are a strong dogfood substrate.** An
   own-authored PR that plants *undisclosed* defects — a workflow-file exfil, a wrong-package defect,
   a body-injection line — gives the run a **measurable scorecard** (did the machinery catch 3/3?),
   and **closing it unmerged** (branch deleted) keeps the whole procedure **repeatable**. A dogfood
   record split into *Part A: the repeatable procedure* + *Part B: the captured evidence + defect
-  log* is the shape that survives re-runs. Record instance: `docs/design/review-dogfood.md`.
+  log* is the shape that survives re-runs. Record instance: `docs/design/archive/review-dogfood.md`.
 - **A dogfood gate's tuning scope *emerges* — plan the loop, not the fixes.** You cannot enumerate
   the fixes up front; the plan can only promise "tune from what the runs surface." The real
   deliverable is the **defect log**, with each fix evidence-traced back to a logged row. Don't author
@@ -249,7 +249,7 @@ one from a dogfood run:
 - **Capture-if-fired is a reusable degrade posture.** Never force degrade arms with hooks or
   test-only flags: an arm that fires naturally during the run is recorded with verbatim tool
   results; an arm that never fires is recorded as offline-pinned — **naming the exact pin
-  suites** — plus a named residual. Record instance: `docs/design/streaming-doors-dogfood.md`
+  suites** — plus a named residual. Record instance: `docs/design/archive/streaming-doors-dogfood.md`
   (hold-and-accumulate, readiness degrade, and wave incompleteness never fired; the pin suites
   are named per arm).
 - **Verify preconditions against the full committed config + effective child metadata — never
@@ -538,7 +538,7 @@ And the rename/retirement sweep scope — what a retirement's grep must actually
 - **Same-class staleness is absorbed while in the file; a DIFFERENT defect class** (e.g.
   encoding corruption vs fact staleness) **gets a uniform-preserving deferral to its own node**
   (#2025).
-- **Claim sweeps cover `docs/learned/` and `docs/guiding-principles/`** — stale learned docs
+- **Claim sweeps cover `docs/learned/` and `docs/design/first-principles/`** — stale learned docs
   actively fight sanctioned changes; amend them in the same PR (#2028). When behavior grows,
   sweep worked examples, declared-shape docstrings, and tutorials (which must stay runnable
   top-to-bottom), not just normative prose (#2029). Numbered step sequences are themselves
@@ -555,7 +555,7 @@ deliberate addition since: …"; instance: `src/perk/objective/render.py`).
 
 When a principle doc's covered surface grows 10x, first test whether its *classification
 criterion* still sorts everything correctly. The "narrow `--json` list" principle in
-`docs/guiding-principles/cli-vs-pi.md` survived the surface growing from four commands to every cold
+`docs/design/first-principles/cli-vs-pi.md` survived the surface growing from four commands to every cold
 worker/door plus a second machine consumer — because both consumers are still *machines that
 launch perk*. When the criterion still classifies correctly, an additive status note suffices;
 don't touch the principle itself.
@@ -616,7 +616,7 @@ Three patterns from reconciling Objective #548's prose against its landed nodes:
 
 ## Cross-references
 
-- `docs/guiding-principles/python-cli-guidelines.md`, `docs/guiding-principles/cli-vs-pi.md` — the reconciled docs and
+- `docs/design/first-principles/python-cli-guidelines.md`, `docs/design/first-principles/cli-vs-pi.md` — the reconciled docs and
   their status-note conventions
 - `docs/learned/workflow/objective-lifecycle.md` — the roadmap whose `pr` field carries plan
   issues, and the remainder-node reconcile playbook for PRs that merged with work incomplete

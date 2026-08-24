@@ -42,7 +42,7 @@ Ordinary implementation that applies these decisions does not require reconcilia
 - [`docs-site-blueprint.md`](./docs-site-blueprint.md) remains authoritative for reader IA, routes,
   sidebar ownership/order, the five `replace` dispositions, migration intent, and acceptance
   matrices. Visual treatment may not alter those decisions.
-- [`docs-site-bridge-spike.md`](./docs-site-bridge-spike.md) remains authoritative for the external
+- [`docs-site-bridge-spike.md`](./archive/docs-site-bridge-spike.md) remains authoritative for the external
   content-tree bridge and exact Astro/Starlight pair. This record uses that bridge without
   re-selecting it.
 

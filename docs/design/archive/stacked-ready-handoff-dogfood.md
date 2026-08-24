@@ -93,10 +93,10 @@ changed (expected no-op).
 ### File-ownership boundary
 
 The train owns `docs/user-docs/` and `skills/perk-expert/`. This node's PR owns
-`docs/design/stacked-ready-handoff-dogfood.md` (this record), the evidence-fill annotation files
-(`docs/design/stacked-delivery-dogfood.md`'s Status line;
+`docs/design/archive/stacked-ready-handoff-dogfood.md` (this record), the evidence-fill annotation files
+(`docs/design/archive/stacked-delivery-dogfood.md`'s Status line;
 `docs/learned/workflow/objective-delivery.md` conditionally — a stated no-op is legitimate),
-`docs/planning/stamp-stacked-objective-nodes-ready.md` (the A4 seed annotation, committed with
+`docs/planning/archive/stamp-stacked-objective-nodes-ready.md` (the A4 seed annotation, committed with
 this scaffold), `docs/index.md`, and `CHANGELOG.md`. No overlap. The train's layers add no
 CHANGELOG entries; this PR's ONE `[Unreleased]` entry is written at evidence-fill time to match
 the actual verdict (never pre-claimed).
@@ -183,7 +183,7 @@ perk ready <p>`.
 | `perk pr ready --dry-run` | offline selection-validation only: "no backend or GitHub read, no delivery classification, so it cannot predict which arm a real run would take. Nothing is resolved, marked, or stamped"; human render mirrors it | `ready_cmd.py` (worker `--dry-run` help + `_render_human`) | yes | agrees |
 | `perk ready --dry-run` | the wrapper adds "no launch" to the same offline honesty; never launches | `ready_cmd.py::ready_continuation` | yes | agrees |
 | `stack land --dry-run` | the LIVE read-only readiness verdict + complete land plan ("Assess landing readiness and render the complete dry-run land plan (read-only)") | `stack/land_cmd.py` | yes | agrees — each dry-run surface honestly names what it did and did not check; `show`'s `readiness unchecked (<error>)` degrade uses the same "unchecked" vocabulary for a failed live read |
-| the design seed | `docs/planning/stamp-stacked-objective-nodes-ready.md` asks dry-runs to "perform the required live, read-only projection" — shipped behavior deliberately reports `unchecked (dry-run)` (objective #1951's human-approved cut) | the seed's Cold-door ergonomics bullet | **no** (a superseded design claim, not a runtime defect) | keep-and-annotate → the A4 dated Status note (this PR) |
+| the design seed | `docs/planning/archive/stamp-stacked-objective-nodes-ready.md` asks dry-runs to "perform the required live, read-only projection" — shipped behavior deliberately reports `unchecked (dry-run)` (objective #1951's human-approved cut) | the seed's Cold-door ergonomics bullet | **no** (a superseded design claim, not a runtime defect) | keep-and-annotate → the A4 dated Status note (this PR) |
 
 #### Family 4 — warm-door
 
@@ -392,7 +392,7 @@ delivery_lineage: 01M0NJ5ASVYS4VMBEWXXVJNXRA
   "node 1 / node 2" — the same id-shape drift the prior gate accepted; slugs
   `user-docs-ready-continuation` / `perk-expert-mirror` (the spec pinned none). Two findability
   nits: the census pointer in 1.1(d) names the matrix but not its file path
-  (`docs/design/stacked-ready-handoff-dogfood.md` — and NOTE: the record lives on this PR's
+  (`docs/design/archive/stacked-ready-handoff-dogfood.md` — and NOTE: the record lives on this PR's
   branch `plan-1978`, not yet on main, so the train's planning sessions must be pointed at
   PR #1979 to read it); and node 1.2's description does not itself name the census source —
   acceptable: 1.2 mirrors "node 1.1's canonical content", so the census reaches it

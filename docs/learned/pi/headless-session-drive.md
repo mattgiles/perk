@@ -164,7 +164,7 @@ Building the emitter hit a tsc gotcha — `Omit<RunEvent, "seq"|"t">` collapses 
 
 `ModelRegistry.getAvailable()` sorts **alphabetically**, so `[0]` is the *oldest* model of the
 first provider — not a sensible default. On the first live remote run this picked a since-removed
-dated Haiku and the drive 404'd on turn 1 (defect B7 in `docs/design/remote-runner-e2e-dogfood.md`;
+dated Haiku and the drive 404'd on turn 1 (defect B7 in `docs/design/archive/remote-runner-e2e-dogfood.md`;
 the workflow-level story is in `docs/learned/workflow/remote-runner.md`).
 
 The correct shape: pass `model: undefined` to `createAgentSessionFromServices`/`createAgentSession`.
@@ -287,7 +287,7 @@ check the root export list before importing a Pi type by name; mirror/derive dee
 - `docs/learned/pi/context-system.md` — the read-only child it inverts
 - `docs/learned/toolchain/biome.md` — the TS-stripping / Biome gotchas + the distributive-`Omit` gotcha hit building the emitter
 - `docs/learned/toolchain/worktree-node-modules.md` — worktree SDK resolution + the stale-global smoke trap
-- `docs/design/pi-adoption-audit.md` — the complete 0.80.5-verified adoption inventory + follow-up
+- `docs/design/archive/pi-adoption-audit.md` — the complete 0.80.5-verified adoption inventory + follow-up
   groupings; future pi-adoption planners should seed from its §4 table rather than re-auditing
-- `docs/design/borrowed-askuser-todo-dogfood.md` — the validation record that live-proved the
+- `docs/design/archive/borrowed-askuser-todo-dogfood.md` — the validation record that live-proved the
   zero-config borrowed-built-in reality (and the probe recipe with the env-leak guard applied)

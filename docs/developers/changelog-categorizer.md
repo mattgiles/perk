@@ -148,7 +148,7 @@ Generated / managed artifacts perk delivers into consumer repos:
   plumbing.
 - **Learned-doc maintenance** — `docs/learned/`.
 - **Release tooling itself** — `packages/perk-dev/`, version bumps, CHANGELOG housekeeping.
-- **Internal / design docs** — `docs/design/`, `docs/planning/`, `docs/guiding-principles/`.
+- **Internal / design docs** — `docs/design/`, `docs/planning/`.
 - **CI-only workflow changes** — except the *delivered* perk-run / remote artifacts listed under
   [Potentially user-facing](#potentially-user-facing-verify-before-deciding).
 

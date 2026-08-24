@@ -61,7 +61,7 @@ self-documents (e.g. askuser's foreign tool did via its own `promptGuidelines`).
 you write an adapter at all. An artifact seam needs a bridge shim (the produced contract must reach
 downstream consumers); an interface seam's contract *is* the foreign tool, so vacating is the whole
 job. (Per-file mechanics of the askuser instance live in
-`docs/design/provider-smoke-juicesharp-ask-user.md`.)
+`docs/design/archive/provider-smoke-juicesharp-ask-user.md`.)
 
 ## The substrate is the third cross-plane parsed-YAML contract
 
@@ -247,7 +247,7 @@ Like askuser, footer produces **no durable artifact** → `adapter: null`, no sh
 no-bridge claim holds because of a **decoupling**: perk's `perk` `setStatus` slot (via
 `createPerkStatus`; since Objective #1416 single-value — objective only, the checkpoints segment
 died with the since-deleted checkpoints module; the surviving record is
-`docs/design/checkpoints-rpiv-todo-comparison.md`) publishes progress **independently of
+`docs/design/archive/checkpoints-rpiv-todo-comparison.md`) publishes progress **independently of
 footer ownership** — the **powerline-class** foreign footers (`pi-powerline-footer`, `pi-bar`)
 render extension statuses, so **footer ownership ≠ status publishing**. perk's objective
 progress reaches *those* foreign footers automatically; the bridge is automatic, not authored. The
@@ -345,9 +345,11 @@ intended owner. See `docs/learned/workflow/borrowed-packages.md`.
   `READ_ONLY_TOOLS` (so a foreign web tool is allowlisted by shared name), but
   `SDK_READ_ONLY_TOOLS` (`extension/worker/readOnlySession.ts`) is **deliberately unchanged** —
   headless children never run foreign web tools.
-- **`docs/planning/` was retired → `docs/design/`.** Any plan still referencing `docs/planning/`
-  should redirect to `docs/design/` (provider census docs now live as
-  `docs/design/provider-smoke-*.md`).
+- **`docs/planning/` was retired → `docs/design/` (historical — since reversed).** At the time of
+  the seam work the planning tree had been folded into `docs/design/`; the docs-tree taxonomy has
+  since restored `docs/planning/` as the canonical planning home (the placement rules live in
+  `docs/index.md`), and the provider census docs now live as
+  `docs/design/archive/provider-smoke-*.md`.
 
 ## The reusable mirror shape (proven on both seams)
 
@@ -629,7 +631,7 @@ guarantee in every mode — with the one novelty that the **web default's `packa
 - `extension/surfaces/footerProvider.ts` — `isPerkFooterReferenceSelected` (the install-site/runtime footer vacating, keyed off `ctx.cwd`)
 - `extension/index.ts` — the `session_start` install site that gates `installPerkFooter` on `isPerkFooterReferenceSelected(ctx.cwd)`
 - `docs/learned/workflow/borrowed-packages.md` — the borrow-ban footer-clobber rule reconciled vs a selected footer provider; the live home of the two required borrows the askuser/todo seams retired to
-- `docs/design/provider-smoke-juicesharp-ask-user.md` — the askuser per-file mechanics + recorded select/deselect smoke
+- `docs/design/archive/provider-smoke-juicesharp-ask-user.md` — the askuser per-file mechanics + recorded select/deselect smoke
 - `extension/substrate/providers.ts` — `resolveProviders`, `PERK_PLAN_PROVIDER_ID`
 - `src/perk/substrate/providers.py` — `resolve_providers`, `ProvidersError`
 - `src/perk/run/launch/prompts.py` — the `provider == "github"` backend branch

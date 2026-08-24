@@ -216,7 +216,7 @@ payload census — append prompt, context files, skills section, tool definition
 `custom_message` branch context. It is report-only and emits derived identifiers/counts/chars
 only (never raw text, matching `pi/extension-api.md`'s `getSystemPromptOptions` sensitivity
 note), with a stable line grammar that later
-audits diff against; the committed baseline is `docs/design/context-payload-baseline.md`.
+audits diff against; the committed baseline is `docs/design/archive/context-payload-baseline.md`.
 
 This made `<!-- BEGIN perk managed -->` a **cross-plane string contract**:
 `src/perk/convergence/init/blocks.py` (`AGENTS_BEGIN`, facade-re-exported) writes it,

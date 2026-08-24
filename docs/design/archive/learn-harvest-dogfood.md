@@ -439,7 +439,7 @@ root cause before `/submit`:
 ```bash
 uv run perk objective node-add 1538 --phase 3 --depends-on 3.1 \
   --description "<bounded remediation and re-verification>" \
-  --comment "learn-harvest dogfood D<n>; docs/design/learn-harvest-dogfood.md" --json
+  --comment "learn-harvest dogfood D<n>; docs/design/archive/learn-harvest-dogfood.md" --json
 ```
 
 One successor may cover multiple D-rows only when the record demonstrates one shared root

@@ -16,7 +16,7 @@ sweep — never silently omitted.
 
 Audit sources: the `dignified-python` skill (core + `references/checklists.md`,
 `references/module-design.md`, `subprocess.md`, `references/advanced/*`),
-[python-cli-guidelines.md](../guiding-principles/python-cli-guidelines.md), AGENTS.md's
+[python-cli-guidelines.md](../first-principles/python-cli-guidelines.md), AGENTS.md's
 dignified-python bullet, and the erk prior art in the erk repo (§4). All anchors are
 durable (function/class names), never line numbers. The sweeps are **behavior-preserving**: every
 backlog item below is a refactor, a mechanical fix, or a recorded verdict — no semantic change.
