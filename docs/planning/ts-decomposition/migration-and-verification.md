@@ -112,6 +112,10 @@ This is a verification inventory, not a target contribution catalog.
 Run the existing focused TypeScript tests and source guards. Store no generated
 baseline in production unless it becomes a maintained test input.
 
+> **Status (Objective #2083):** the upstream maturity ledger is deferred to the
+> follow-up application-host cutover objective — do not freeze it in this
+> objective.
+
 Freeze an upstream maturity ledger beside the implementation baseline. Record
 the Pi commit, maturity label, public reachability, upstream CI state, and
 supported-host status for values/lists, format-4 context, durable drive, usage,

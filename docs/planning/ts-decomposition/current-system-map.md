@@ -1,8 +1,10 @@
 # Current TypeScript system map
 
-> **Snapshot:** Perk commit `3f7f84c9`, inspected 2026-08-23. This document
+> **Snapshot:** Perk commit `95ff7cc7`, inspected 2026-08-24. This document
 > describes the current `extension/` implementation. It is evidence for
-> [the decomposition decision](memo.md), not a target contract.
+> [the decomposition decision](memo.md), not a target contract. The refresh
+> commits themselves are docs-only changes under `docs/` and do not invalidate
+> the `extension/` facts measured at the stamped commit.
 
 The upstream comparison is frozen separately in
 [`upcoming-pi-changes-memo.md`](../upcoming-pi-changes-memo.md). This map uses
@@ -63,16 +65,16 @@ with tests. Counts are evidence at this commit, not architectural constants.
 
 | Measure | Current value |
 | --- | ---: |
-| Production TypeScript files | 101 |
-| Production lines | 37,310 |
-| Relative import/re-export declarations | 518 |
-| Distinct resolved local source-to-target edges | 517 |
+| Production TypeScript files | 102 |
+| Production lines | 38,063 |
+| Relative import/re-export declarations | 521 |
+| Distinct resolved local source-to-target edges | 520 |
 | Files importing a Pi package | 56 |
 | Pi import declarations | 61 |
 | Files with runtime Pi imports | 9 |
 | `pi.registerTool(...)` calls | 37 across 25 files |
 | `registerPerkCommand(...)` calls | 29 |
-| Effective feature commands | 30, including direct `/btw` |
+| Effective feature commands | 31, including direct `/btw` |
 | `pi.registerFlag(...)` calls | 2 |
 | `pi.registerShortcut(...)` calls | 1 |
 | `pi.on(...)` calls | 33 across 14 files |
@@ -81,8 +83,13 @@ with tests. Counts are evidence at this commit, not architectural constants.
 
 There are two source call sites for `pi.registerCommand(...)`: the shared
 command helper and the direct `/btw` registration. Counting those two sites as
-two commands would be wrong. The helper expands to 29 feature registrations,
-and `/btw` makes the effective total 30.
+two commands would be wrong. The helper's 29 source call sites also do not map
+one-to-one onto commands: the learn-factory door's single call site
+(`doors/learnFactory.ts`) is invoked twice at composition — once per kind
+(`/learn-docs`, `/learn-code`) — so the helper registers 30 runtime commands,
+and `/btw` makes the effective total 31. (The previous snapshot recorded 30
+effective commands; that was an undercount of the same code shape, not drift —
+both learn-factory invocations already existed at `3f7f84c9`.)
 
 The nine runtime Pi importers are `selfcheck.ts`, `planTitle.ts`,
 `structuredOutput.ts`, `surfaces.ts`, both `/btw` files, both worker
@@ -121,10 +128,10 @@ here concerns only the context and state projections consumed by `extension/`.
 
 | Current directory | Files | Lines | Present role |
 | --- | ---: | ---: | --- |
-| `doors/` | 27 | 12,436 | Commands, tools, delivery, review, and learning flows |
+| `doors/` | 27 | 12,824 | Commands, tools, delivery, review, and learning flows |
 | `waves/` | 16 | 7,124 | Wave engine, adapters, manifests, and reducers |
+| `substrate/` | 28 | 5,893 | State, config, resources, paths, registration, and result helpers |
 | `factories/` | 15 | 5,562 | Gist, plan, and objective authoring |
-| `substrate/` | 27 | 5,528 | State, config, resources, paths, registration, and result helpers |
 | `vendor/` | 3 | 1,689 | `/btw` and whimsical host extensions |
 | `hunkFeedback/` | 4 | 1,582 | Hunk inbox, receiver, storage, and publisher |
 | `worker/` | 2 | 1,193 | SDK stage drive and read-only child execution |
@@ -142,17 +149,18 @@ execution, providers, and result projection.
 
 | Edge | Imports |
 | --- | ---: |
-| `doors → substrate` | 149 |
+| `doors → substrate` | 150 |
 | `factories → substrate` | 77 |
 | `doors → waves` | 31 |
-| `substrate → substrate` | 29 |
+| `substrate → substrate` | 30 |
 | `doors → surfaces` | 27 |
 | `root → doors` | 26 |
-| `doors → doors` | 24 |
+| `doors → doors` | 25 |
 | `waves → waves` | 23 |
 | `factories → factories` | 21 |
 | `root → factories` | 13 |
 | `factories → surfaces` | 11 |
+| `root → substrate` | 10 |
 | `doors → factories` | 10 |
 
 The pattern is feature behavior reaching sideways and downward into many
@@ -166,7 +174,7 @@ delivery form, not ownership.
 | --- | ---: | --- |
 | `surfaces/report.ts` | 45 | Many flows depend on a structural Pi-shaped report target |
 | `substrate/workflowState.ts` | 40 | State, context, identity, and persistence are shared directly |
-| `substrate/cache.ts` | 28 | Workflow layout and artifacts are broadly visible |
+| `substrate/cache.ts` | 29 | Workflow layout and artifacts are broadly visible |
 | `substrate/command.ts` | 25 | Registration and presentation pass through one helper |
 | `substrate/prompts.ts` | 25 | Prompt rendering is common infrastructure |
 | `substrate/result.ts` | 24 | Pi result projection is visible in feature code |
@@ -193,6 +201,7 @@ reported.
 | `doors/address.ts` | 15 | Registration, review wave, Python call, state, and presentation |
 | `doors/objectiveReviewBrowser.ts` | 15 | Provider interaction, wave, draft/save policy, and presentation |
 | `doors/learn.ts` | 14 | Capture, waves, artifacts, state, exterior calls, and results |
+| `doors/objectiveStack.ts` | 14 | Stack read/drive tools, exterior calls, state, and presentation |
 | `doors/planReviewBrowser.ts` | 14 | Provider interaction, wave, drafts, state, and presentation |
 | `factories/objectivePlan.ts` | 14 | Selection, exterior calls, claim, gating, prompts, and lifecycle |
 
@@ -214,6 +223,21 @@ The plan-review cycle is an ownership inversion. Provider-neutral authoring
 policy should depend on a `DraftReviewer` role. The Plannotator adapter should
 implement that role and be supplied at composition.
 
+### Later-node premise confirmations (Node 1.1)
+
+Four premises later decomposition nodes build on were re-verified at the
+stamped commit. All four pass:
+
+| Premise (consumer) | Result at `95ff7cc7` |
+| --- | --- |
+| The `substrate/config.ts ⇄ substrate/bindings.ts` cycle exists exactly at `bindings.ts`'s type-only `import type { TomlScalar } from "./config.ts"` edge (Node 1.2) | **Pass** — `bindings.ts` carries that type-only import; `config.ts` imports `parseUserBindings` and `SkillBinding` (runtime) from `bindings.ts` |
+| `runReadOnlyChild()` / `createReadOnlySession()` in `worker/readOnlySession.ts` have no production caller (Node 3.1) | **Pass** — production code imports only the model-visible capping helpers (`capForModel` in `worker/worker.ts`; `capForModel` + `DEFAULT_MODEL_VISIBLE_CAP` in `doors/ciExecutor.ts`); the only other reference is a comment |
+| The `factories/planReview.ts ⇄ adapters/planAdapterPlannotator.ts` cycle exists via the adapter's type-only `import type { ReviewOutcome }` edge (Node 4.1) | **Pass** — the adapter carries `import type { ReviewOutcome } from "../factories/planReview.ts"`; `planReview.ts` value-imports the adapter |
+| The two door modules with module-level pending slots are `doors/reviewWaveTools.ts` and `doors/draftReviewWaveTools.ts` (Node 5.1) | **Pass** — both carry a module-scope `let pending`; `doors/commitCompact.ts`'s `pending` is function-scoped. (Other module-scope slots exist — `doors/annotationPush.ts`'s surface/ledger state, `doors/prReview.ts`'s `reviewWaveState`, `doors/draftReviewWaveTools.ts`'s `context` — but the *pending-wave* slots are exactly the two named) |
+
+A failed confirmation here would be material drift for the objective roadmap
+and must be surfaced for reconciliation, never absorbed.
+
 ## Binding topology
 
 Registrations are distributed across feature leaves rather than concentrated
@@ -228,7 +252,11 @@ behind feature interfaces. Current tool definitions can include:
 Commands have their own string argument and completion contract. Flags,
 shortcuts, and hooks have still different forms. These facts do not support a
 single contribution shape. They support explicit Pi adapters that preserve
-each host form while calling typed feature operations.
+each host form while calling typed feature operations. The frozen
+per-registration detail — one row per tool, command, flag, shortcut, and
+hook, with the nine binding facts — lives in
+[`binding-inventory.md`](binding-inventory.md), stamped at the same commit as
+this map.
 
 The placement and meaning of model-facing prose are different concerns.
 Features should own the relevant Prose units, Prompt concerns, audience, and
@@ -276,7 +304,7 @@ a universal Perk application object.
 ## Workflow state and Prompt evidence
 
 [`workflowState.ts`](../../../extension/substrate/workflowState.ts) is a
-341-line mixed module with 40 importers. It owns or exposes:
+343-line mixed module with 40 importers. It owns or exposes:
 
 - the `WorkflowState` record and artifact pointers;
 - branch-entry structural mirrors and `branchOf()` casting;
@@ -464,6 +492,15 @@ Useful migration assets already exist:
   paths; and
 - worker unit and end-to-end tests.
 
+Run fresh at the stamped commit: `extension/surfacesGuard.test.ts` passes
+(2/2 — it confines rich-UI calls (`ctx.ui.*`, `setStatus`/`setWidget`/
+`setFooter`/`setWorkingMessage`, `pi.registerEntryRenderer`) and
+`@earendil-works/pi-tui` imports to the surfaces module, with `vendor/btw/`
+the one named exception); the six other source guards
+(`bareImportGuard`, `cacheGuard`, `coldDoorGuard`, `pathsGuard`,
+`piAiCompatGuard`, `writeGuard`) pass 7/7; and the packaging suite
+(`tests/test_packaging.py`) passes 19/19.
+
 The weakness is primary test surface. Many feature tests call `register*`,
 synthesize Pi contexts, and inspect callbacks because registration is the only
 public route.
@@ -486,6 +523,12 @@ behavior, and surfaces.
 - tests and `extension/testing/` are excluded from the npm tarball;
 - TypeScript uses bundler resolution and explicit `.ts` imports; and
 - the Python runner resolves `extension/workerMain.ts` by path.
+
+An `npm pack --dry-run` at the stamped commit packs 219 entries: the 102
+production files under `extension/`, 84 under `prompts/`, 31 under `shared/`,
+plus `README.md` and `package.json`. The `pi.extensions` entrypoint is
+`./extension/index.ts`; `dependencies` is absent (zero runtime dependencies);
+the only workspaces are `docs/site` and `tools/prose-review`.
 
 These facts favor one in-tree logical decomposition. Multiple npm packages
 would add build, install, resolution, and compatibility work without an
