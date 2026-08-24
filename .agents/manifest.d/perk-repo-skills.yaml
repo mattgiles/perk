@@ -8,3 +8,5 @@ skills:
     name: copy-docs-to-markdown
   - source: perk-perk
     name: dignified-pydantic
+  - source: perk-perk
+    name: dignified-typescript
