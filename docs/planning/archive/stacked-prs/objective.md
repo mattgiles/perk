@@ -826,7 +826,7 @@ absent metadata follows the existing paths rather than a new compatibility branc
 > (PRs #1701/#1705/#1708), including lower-layer feedback + suffix cascade, second-clone
 > implementation, atomic merge-async, deliberate death after `accepted`, second-clone
 > `all_after` recovery, close/reconcile, and clean residue. Evidence:
-> `docs/design/stacked-delivery-dogfood.md`.
+> `docs/design/archive/stacked-delivery-dogfood.md`.
 
 Complete the cohesive user experience: tutorials for authoring and daily work, reviewer guidance,
 the four-command CLI reference, warm-door reference, recovery decision tables, limitations, and

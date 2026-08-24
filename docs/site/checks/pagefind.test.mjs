@@ -9,7 +9,7 @@ import { corpusRoute, listCorpusFiles } from "../src/remark-rewrite-corpus-links
 
 // The ten-query relevance matrix over the built Pagefind index (the blueprint §7 search
 // acceptance matrix, encoded verbatim), plus the authoring-governance exclusion sentinel.
-// Transport is the spike-proven pattern (docs/design/docs-site-bridge-spike.md criterion 7):
+// Transport is the spike-proven pattern (docs/design/archive/docs-site-bridge-spike.md criterion 7):
 // the Pagefind bundle loads its index chunks via fetch(), which cannot read bare file paths
 // in Node, so `dist/` is served over a loopback HTTP server and
 // `pagefind.options({ basePath })` points at it. Ranking comes from the shared module

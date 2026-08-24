@@ -54,7 +54,7 @@ from perk.github._exec import GitHubError
 # Schema introspection: does this GitHub host's `PullRequest` type expose the native-stack
 # `stack` field? Presence proves the API SURFACE exists on the host — not per-repository
 # preview enrollment (the end-to-end proof was the dogfood gate:
-# docs/design/stacked-publication-dogfood.md).
+# docs/design/archive/stacked-publication-dogfood.md).
 STACK_CAPABILITY_QUERY = """query {
   __type(name: "PullRequest") {
     fields {

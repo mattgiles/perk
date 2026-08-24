@@ -49,9 +49,12 @@ and is owned by `perk init` — never hand-edit between its markers).*
   self-contained mirror.
 - **Where decisions are recorded.** Day-to-day decisions → the plan issue's `## Assumptions`;
   cross-plane behavior → `shared/contracts.md` (same turn); a design decision worth a durable
-  standalone record → a `docs/design/*.md` note (indexed in `docs/index.md` when table-worthy);
-  durable cross-cutting learnings reach `docs/learned/` only via `/learn` — never authored ad
-  hoc. This is the routing map the `perk-domain-modeling` skill's discovery step lands on.
+  standalone record → a `docs/design/*.md` note (indexed in `docs/index.md` when
+  table-worthy) — dogfood/spike/evidence records are authored directly into
+  `docs/design/archive/` (the archive location is the status signal); durable cross-cutting
+  learnings reach `docs/learned/` only via `/learn` — never authored ad hoc. The full
+  docs-tree taxonomy lives in `docs/index.md`. This is the routing map the
+  `perk-domain-modeling` skill's discovery step lands on.
 - **Comments express intent, not provenance.** Comments and docstrings carry the *why* +
   invariants + gotchas — never plan history or a restatement of the code. Strip plan-provenance
   breadcrumbs (`Node X.Y`, `Phase N`, `P#.T#`, `Q#`, `Objective #N`, bare issue/PR `#N`,

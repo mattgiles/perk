@@ -226,7 +226,7 @@ shell-level safety, not textual output checks:
 ## The decided command taxonomy (Objective #495)
 
 Objective #495 decides a single CLI taxonomy and writes it down. The **canonical SSOT is
-[`python-cli-guidelines.md` §11](../../guiding-principles/python-cli-guidelines.md)** — §11 owns the
+[`python-cli-guidelines.md` §11](../../design/first-principles/python-cli-guidelines.md)** — §11 owns the
 *what* (which commands exist, naming, the launcher/worker merge, the mapping table); this playbook
 stays the structural *how-to*. Summary of the decided shape:
 
@@ -500,7 +500,7 @@ only the `pi.exec` argv arrays in the extension change.
 
 ## Residuals
 
-- `docs/guiding-principles/python-cli-guidelines.md` has been reconciled against the grouped
+- `docs/design/first-principles/python-cli-guidelines.md` has been reconciled against the grouped
   surface (Objective #225, node 5.1) — its §8.1 now documents the group-dir template and
   cross-links this doc as the detailed playbook. Its §11 is now the **decided-taxonomy SSOT**
   (Objective #495, node 1.1) — the canonical *what* for the merge model, flat aliases, mapping

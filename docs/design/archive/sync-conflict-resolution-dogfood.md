@@ -33,7 +33,7 @@ in the pre-committed content note, routed to the train's own workflow).
 objective #2040 ("Learned-corpus curation — 2026-08 dream audit"), a 10-layer stacked docs
 train genuinely stalled behind a main advance whose commits rewrote regions a layer edits — no
 conflict is manufactured; the recovery is wanted for its own sake. This record's PR owns three
-files (`docs/design/sync-conflict-resolution-dogfood.md`, `docs/index.md`, `CHANGELOG.md`) —
+files (`docs/design/archive/sync-conflict-resolution-dogfood.md`, `docs/index.md`, `CHANGELOG.md`) —
 disjoint from the train's `docs/learned/**` by construction.
 
 ## Part A — the repeatable protocol

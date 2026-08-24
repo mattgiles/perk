@@ -5,7 +5,7 @@ This audit covers model-facing prompt language currently embedded in the Python 
 status messages, and test fixture prose unless the text is also used as model guidance.
 
 **Status:** superseded historical snapshot. The generated
-[`prose-prompt-map.md`](./prose-prompt-map.md) and its authored YAML graph are the living source of
+[`prose-prompt-map.md`](../prose-prompt-map.md) and its authored YAML graph are the living source of
 truth; this audit remains only as the predecessor record of the extraction work it proposed. It
 also predates later deletions and additions, including removal of the `juicesharp-todo.md` adapter.
 

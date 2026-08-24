@@ -13,7 +13,7 @@ bound.
 
 This tree is the documentation for the **operator** — someone using perk on their own
 repository. It is never for perk contributors: perk's internal research and planning record
-lives in [`docs/guiding-principles/`](../guiding-principles/), [`docs/design/`](../design/),
+lives in [`docs/design/first-principles/`](../design/first-principles/), [`docs/design/`](../design/),
 and [`shared/contracts.md`](../../shared/contracts.md), and is never duplicated here. (Links
 from this file are unswept — it sits outside the routed corpus.)
 

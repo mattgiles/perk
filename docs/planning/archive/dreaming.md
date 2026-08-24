@@ -67,7 +67,7 @@ That judgment belongs in a reviewed agent workflow.
 
 ### Ad hoc curation does not scale
 
-The prior `docs/design/learned-curation-map.md` exercise established a sound manual method:
+The prior `docs/design/archive/learned-curation-map.md` exercise established a sound manual method:
 
 - freeze a coherent snapshot;
 - inventory every doc;

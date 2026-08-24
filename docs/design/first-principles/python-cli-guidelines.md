@@ -12,7 +12,7 @@ which paid for them in production.
 > `perk/cli/ensure.py` (`UserFacingCliError` + `Ensure`), and `perk/output.py`
 > (`user_output`/`machine_output`/`user_confirm`). Tooling is uv-only on Python 3.13 (see
 > the repo `justfile`). The detailed structure playbook for group work is
-> [docs/learned/workflow/cli-command-groups.md](../learned/workflow/cli-command-groups.md).
+> [docs/learned/workflow/cli-command-groups.md](../../learned/workflow/cli-command-groups.md).
 
 ---
 
@@ -418,7 +418,7 @@ Narrate the wait wherever the wait happens; never gate the narration on a flag t
 ## 8. Command groups & the machine surface
 
 > The detailed playbook (folds, byte-compat discipline, the parity smoke, test patterns) is
-> [docs/learned/workflow/cli-command-groups.md](../learned/workflow/cli-command-groups.md).
+> [docs/learned/workflow/cli-command-groups.md](../../learned/workflow/cli-command-groups.md).
 
 ### 8.1 Structure & naming
 
@@ -573,7 +573,7 @@ This section is the **single source of truth** for the `perk` CLI command taxono
 Objective #495 (node 1.1). It is the canonical taxonomy, **fully enacted** across nodes 1.1–4.1.
 §1–§10 describe *how* to build a command; this section decides *which* commands exist, how
 they are named, and how the launcher/worker halves merge. The structural how-to lives in the
-[cli-command-groups playbook](../learned/workflow/cli-command-groups.md); §11 owns the *what*.
+[cli-command-groups playbook](../../learned/workflow/cli-command-groups.md); §11 owns the *what*.
 
 > **Status: fully enacted.** The taxonomy below is live in the code. The dormant substrate (the
 > merge factory, the flat-alias mechanism, sectioned group help) landed in node 2.1; the objective

@@ -162,10 +162,10 @@ faithfully. Docs-only.
 
 The train owns `docs/user-docs/`, `docs/site/src/sidebar.mjs`,
 `docs/design/docs-site-blueprint.md`, `skills/perk-expert/`. This node's PR owns
-`docs/design/stacked-delivery-dogfood.md` (this record), the evidence-fill annotation files
-(`docs/design/stacked-publication-dogfood.md` Status,
+`docs/design/archive/stacked-delivery-dogfood.md` (this record), the evidence-fill annotation files
+(`docs/design/archive/stacked-publication-dogfood.md` Status,
 `docs/learned/workflow/objective-delivery.md`,
-`docs/planning/stacked-prs/failure-hardening-audit.md`), `docs/index.md`, `CHANGELOG.md`.
+`docs/planning/archive/stacked-prs/failure-hardening-audit.md`), `docs/index.md`, `CHANGELOG.md`.
 No overlap. The train's layers add no CHANGELOG entries; this PR's ONE `[Unreleased]` entry is
 written at evidence-fill time to match the actual verdict (never pre-claimed).
 
@@ -399,9 +399,9 @@ per lineage).
    landing as docs-only commits on this record's branch after each phase.
 3. **Evidence-fill close:** the cross-annotations (dated keep-and-annotate notes on
    `stacked-publication-dogfood.md`'s Status, `docs/learned/workflow/objective-delivery.md`,
-   `docs/planning/stacked-prs/failure-hardening-audit.md`, plus the sweep re-grep — `6\.2`,
+   `docs/planning/archive/stacked-prs/failure-hardening-audit.md`, plus the sweep re-grep — `6\.2`,
    "deferred", "live wire" — across `docs/learned/`, `docs/design/`,
-   `docs/planning/stacked-prs/`, `shared/contracts.md`, `docs/user-docs/`, annotating every hit
+   `docs/planning/archive/stacked-prs/`, `shared/contracts.md`, `docs/user-docs/`, annotating every hit
    this gate settles; a no-op is a legitimate, stated outcome) + the CHANGELOG entry + the
    Verdict section; final `run_ci` attested in this record; `perk pr ready` this PR; finish
    with warm **`/land`** from this plan's session — `finalize_landed_plan` marks node 6.2 done
@@ -840,7 +840,7 @@ The warm session therefore made real, correctly-bounded reconciliation writes �
 ### Evidence-fill reconciliation sweep (2026-08-13)
 
 The pinned broad re-grep (`6\.2|deferred|live wire`) ran over updated `origin/main` across
-`docs/learned/`, `docs/design/`, `docs/planning/stacked-prs/`, `shared/contracts.md`, and
+`docs/learned/`, `docs/design/`, `docs/planning/archive/stacked-prs/`, `shared/contracts.md`, and
 `docs/user-docs/` (111 raw hits; every hit triaged, not mechanically rewritten):
 
 - **Settled pointers annotated:** the prior publication record's Status; the objective-delivery
@@ -887,7 +887,7 @@ has its durable machine half in this record.
   Coverage for the remote arm: node 6.1's hermetic positioning-parity suite
   (`tests/test_run_worker.py`), the cross-machine lane
   (`tests/test_delivery_cross_machine.py`), and the live non-stacked remote e2e dogfood records
-  (`docs/design/remote-runner-e2e-dogfood.md`). Terminology discipline: this record claims
+  (`docs/design/archive/remote-runner-e2e-dogfood.md`). Terminology discipline: this record claims
   fresh-checkout / durable-authority independence only — never host-level "cross-machine"
   independence.
 - **Retained sync conflict did not fire.** The real address cascade was clean; the

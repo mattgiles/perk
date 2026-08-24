@@ -134,7 +134,7 @@ rebuild + render, no re-seed.)
   null-prototype object (`String(Object.create(null))`) — not reachable when the arg is always
   pi-core's proxy error, but a general caution for any such utility.
 - The checkpoints-specific charter survey is **not** duplicated here — it lives in
-  `docs/design/checkpoints-rpiv-todo-comparison.md`.
+  `docs/design/archive/checkpoints-rpiv-todo-comparison.md`.
 
 ## `ctx.ui.editor` facts (pi 0.84.1)
 
@@ -423,5 +423,5 @@ a consumer loading *no* tools or *months-old* code:
   `headfulUIContext` gap
 - `docs/learned/workflow/session-data.md` — the run-id lifecycle behind the `PERK_RUN_ID` leak
 - `docs/learned/workflow/plan-review-flow.md` — the `ctx.ui.editor` consumer + its testing split
-- `docs/design/context-payload-baseline.md` — the committed payload-census baseline these
+- `docs/design/archive/context-payload-baseline.md` — the committed payload-census baseline these
   measurement surfaces produced

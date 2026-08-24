@@ -177,7 +177,7 @@ _PERK_INSTALL_CONSUMER = f"uv tool install perk=={__version__}"
 # unpinned `@earendil-works/pi-coding-agent` spec (tracking the same evergreen pi as the global
 # install above) brings its real deps — pi-ai, pi-tui, typebox — closing the worker's bare-import
 # set via node_modules walking from the staged entry (`run_worker._stage_consumer_entry`). Proven
-# live in `docs/design/remote-runner-consumer-dogfood.md` (defects B-pre-c/B8).
+# live in `docs/design/archive/remote-runner-consumer-dogfood.md` (defects B-pre-c/B8).
 _WORKER_DEPS_SELF = "npm ci"
 _WORKER_DEPS_CONSUMER = (
     f"npm install {_NPM_NAME}@{__version__} @earendil-works/pi-coding-agent"

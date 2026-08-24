@@ -3,7 +3,7 @@
 ## Purpose and evidence contract
 
 The executable-content walkthrough matrix in
-[`docs-site-blueprint.md` §7](./docs-site-blueprint.md#7-acceptance-matrices) is the contract
+[`docs-site-blueprint.md` §7](../docs-site-blueprint.md#7-acceptance-matrices) is the contract
 for this record. Each live row records its starting state, dated identifiers, expected result,
 observed outcome, and cleanup. Secret values never appear: evidence names credential keys and
 whether they were present only.

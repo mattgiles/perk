@@ -124,7 +124,7 @@
 
   The TypeScript interior should only provide warm doors and decode these Python worker
   results, following today’s submit/land delegation pattern. Stack mechanics span sessions and
-  worktrees, so the repo’s own docs/guiding-principles/cli-vs-pi.md place them squarely in the
+  worktrees, so the repo’s own docs/design/first-principles/cli-vs-pi.md place them squarely in the
   exterior.
 
   ## End-to-end workflow

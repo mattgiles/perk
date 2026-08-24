@@ -82,7 +82,7 @@ READ_WHEN_MAX_CHARS = 200
 
 # Gate #1: the whole-block budget on the COMMITTED ambient routing region in
 # `.pi/APPEND_SYSTEM.md` — raw bytes between the markers, excluding the marker strings and the
-# one marker-owned line ending at each edge (see `docs/design/learned-curation-map.md`, the
+# one marker-owned line ending at each edge (see `docs/design/archive/learned-curation-map.md`, the
 # ambient-tier prediction/actual/budget section). Derivation is fixed from the recorded
 # post-restructure actual, not the current block: 3,583 bytes * 1.25 = 4,478.75, rounded up to
 # the next 1,024-byte boundary = 5 * 1,024 = 5,120. A reset is an ordinary human-reviewed code
@@ -106,21 +106,22 @@ CLUSTER_ROLLUP_MAX_CHARS = 160
 _CLUSTER_ID_RE = re.compile(r"^[a-z0-9]+(-[a-z0-9]+)*$")
 
 # The distillation-first contract for big learned docs (the curation playbook is
-# `docs/design/learned-curation-map.md`): a doc strictly over this raw byte size must open with
-# its `## Distillation` header (gate #4); the raw size itself stays an advisory note.
+# `docs/design/archive/learned-curation-map.md`): a doc strictly over this raw byte size must
+# open with its `## Distillation` header (gate #4); the raw size itself stays an advisory note.
 DISTILLATION_THRESHOLD_BYTES = 12_288
 
 # The header extent's line ceiling — heading line included, interior blank lines included,
-# trailing blank separator lines excluded (see `docs/design/learned-curation-map.md`).
+# trailing blank separator lines excluded (see `docs/design/archive/learned-curation-map.md`).
 DISTILLATION_MAX_LINES = 30
 
 # The containment window: the extent's last 1-indexed WHOLE-FILE line number (frontmatter
 # included — exactly what `read` sees) must be within it, so `read` with `limit: 80` always
-# captures the full header (see `docs/design/learned-curation-map.md`).
+# captures the full header (see `docs/design/archive/learned-curation-map.md`).
 DISTILLATION_WINDOW_LINES = 80
 
 # The exact heading: a line's content after stripping trailing whitespace. When (malformed)
-# duplicates exist, the earliest such line governs (see `docs/design/learned-curation-map.md`).
+# duplicates exist, the earliest such line governs (see the curation playbook,
+# `docs/design/archive/learned-curation-map.md`).
 DISTILLATION_HEADING = "## Distillation"
 
 # The distillation section's terminator: the next H1/H2 line (`###`+ subsections count as

@@ -1,7 +1,7 @@
 # Dogfood: the §2.6.3 cache-visibility measurement protocol
 
 Validation record (the `review-dogfood.md` / `remote-runner-e2e-dogfood.md` genre) for the
-prompt-cache measurement protocol of `docs/design/pi-adoption-audit.md` §2.6.3, folding in the
+prompt-cache measurement protocol of `docs/design/archive/pi-adoption-audit.md` §2.6.3, folding in the
 §3.10 read-only-child cache-affinity observation. Part A is the repeatable procedure; Part B is
 the captured evidence + defect log. The deliverable is the **defect log** — any per-turn
 recurring miss traced to an unconditional context strip is *filed* as a GitHub issue, never fixed

@@ -64,7 +64,7 @@ feature's delivery lifetime is model-context-bound.
 An adjacent timing fact: slash commands do **not** fire `before_agent_start`, and a command
 handler reads the branch **as of the last completed turn**. A fresh session therefore shows 0–1
 copies of each injected context, and per-turn growth is observable only after completed turns.
-The payload census in `docs/design/context-payload-baseline.md` established the original growth;
+The payload census in `docs/design/archive/context-payload-baseline.md` established the original growth;
 the active-window scan bounds copies in the live context while still permitting delivery after
 compaction.
 

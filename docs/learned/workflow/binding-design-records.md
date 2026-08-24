@@ -9,8 +9,8 @@ cluster: knowledge-stewardship
 A *binding* design record (a blueprint or spike whose decisions later work must honor) has its own
 authoring craft, distilled from the docs-site records
 (`docs/design/docs-site-blueprint.md`, `docs/design/docs-site-visual-blueprint.md`,
-`docs/design/docs-site-bridge-spike.md`) and the curation map
-(`docs/design/learned-curation-map.md`). Only the cross-cutting record-authoring patterns live
+`docs/design/archive/docs-site-bridge-spike.md`) and the curation map
+(`docs/design/archive/learned-curation-map.md`). Only the cross-cutting record-authoring patterns live
 here — the docs-site–specific discoveries stay bound in those committed records; reuse rather
 than re-derive.
 
@@ -81,4 +81,4 @@ plan leaves an internally contradictory binding record.
 - `docs/learned/workflow/doc-reconciliation.md` — the curation-batch measurement rules
   (SHA-stamped, mechanically-derived tables) and the record-completeness bar
 - `docs/design/docs-site-blueprint.md`, `docs/design/docs-site-visual-blueprint.md`,
-  `docs/design/docs-site-bridge-spike.md` — the binding records this craft was distilled from
+  `docs/design/archive/docs-site-bridge-spike.md` — the binding records this craft was distilled from

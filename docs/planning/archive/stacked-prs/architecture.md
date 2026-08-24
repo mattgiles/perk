@@ -805,7 +805,7 @@ The cold CLI namespace reflects the domain split:
 > atomically merged a 3-layer train, the land worker was deliberately SIGKILLed after its
 > journaled `accepted` event, and second-clone `stack recover` classified `all_after` and
 > converged finalization, close, and reconcile evidence. See
-> `docs/design/stacked-delivery-dogfood.md`. Branch-protection and external-prefix arms remain
+> `docs/design/archive/stacked-delivery-dogfood.md`. Branch-protection and external-prefix arms remain
 > capture-if-fired/hermetic-only; the core live-wire gap is closed.
 
 An explicit objective argument wins; otherwise only the active plan/worktree may supply it. Perk

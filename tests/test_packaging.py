@@ -297,7 +297,7 @@ def test_docs_site_publish_isolation():
     # The docs-site workspace is dev-only tooling: private, zero runtime deps, exact-pinned.
     # Two pin classes share the literal below — either way, any drift fails here:
     # - The shell/font pins (@astrojs/*, astro, @fontsource*) are design-bound by
-    #   docs/design/docs-site-bridge-spike.md + docs/design/docs-site-visual-blueprint.md;
+    #   docs/design/archive/docs-site-bridge-spike.md + docs/design/docs-site-visual-blueprint.md;
     #   moving one requires an explicit objective reconciliation (the records' shared rule).
     # - axe-core/jsdom are dev-only, plan-selected accessibility tooling (the static a11y gate
     #   in docs/site/checks/a11y.test.mjs) under the objective's "accessibility-test tool

@@ -24,7 +24,7 @@ const HOW_TO_GROUPS = [
   "Providers & backends",
 ];
 
-/** Collection id for a corpus file (docs/design/docs-site-bridge-spike.md slug facts). */
+/** Collection id for a corpus file (docs/design/archive/docs-site-bridge-spike.md slug facts). */
 function slugOf(file) {
   const stem = path
     .relative(corpusDir, file)

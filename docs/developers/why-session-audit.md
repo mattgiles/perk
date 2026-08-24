@@ -107,7 +107,7 @@ choices.
 The first live dogfood pass demonstrated that discipline: all eight entries were triaged, four
 were sharpened against real evidence, and none were culled. The point is not that catalog entries
 are permanent; it is that each one must continue to earn its place. The full calibration record
-is [`docs/design/session-audit-dogfood.md`](../design/session-audit-dogfood.md).
+is [`docs/design/archive/session-audit-dogfood.md`](../design/archive/session-audit-dogfood.md).
 
 ---
 

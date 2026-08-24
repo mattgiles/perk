@@ -223,7 +223,7 @@ uv run perk-dev audit attribution .perk/workflow/scratch/context-baseline-2/impl
 ```
 
 `--json` emits one envelope with a `sessions` array in argument order. The baseline record this
-verb instruments is [`docs/design/context-payload-baseline-2.md`](../design/context-payload-baseline-2.md).
+verb instruments is [`docs/design/archive/context-payload-baseline-2.md`](../design/archive/context-payload-baseline-2.md).
 
 ### `perk-dev audit fold`
 
@@ -276,6 +276,6 @@ echoed-identity mismatch degrades honestly instead of poisoning the whole bundle
 ## Related records
 
 - [`shared/contracts.md` §8.50](../../shared/contracts.md) — authoritative judge → wave → fold contract.
-- [`docs/design/session-audit-dogfood.md`](../design/session-audit-dogfood.md) — live calibration record and degradation-arm checklist.
+- [`docs/design/archive/session-audit-dogfood.md`](../design/archive/session-audit-dogfood.md) — live calibration record and degradation-arm checklist.
 - [`docs/learned/workflow/session-audit-expectations.md`](../learned/workflow/session-audit-expectations.md) — catalog curation and checker semantics.
 - [`docs/user-docs/reference/configuration/models-and-compaction.md#modelssubagents`](../user-docs/reference/configuration/models-and-compaction.md#modelssubagents) — `[models.subagents] session-auditor` model key.

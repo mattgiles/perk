@@ -8,7 +8,7 @@ itself stays — it documents *why* the foreign design won. Originally: durable 
 (plan #502). Surveys `@juicesharp/rpiv-todo`'s
 implementation against perk's first-party "todo" surface — the **checkpoints** system — and records
 the one charter-compatible robustness idea adopted plus the rejected ideas, so this evaluation does
-not get re-litigated. See also `docs/design/provider-smoke-juicesharp-todo.md` (the foreign-adapter
+not get re-litigated. See also `docs/design/archive/provider-smoke-juicesharp-todo.md` (the foreign-adapter
 coexistence smoke) and the P2.T2c checkpoints block in `shared/contracts.md`.
 
 ## The two designs

@@ -6,7 +6,7 @@ cluster: code-migration
 
 # Moving TS modules: the two-commit mv + sweep recipe
 
-The operational layer over `docs/design/extension-layout.md` Decision 2, validated end-to-end by
+The operational layer over `docs/design/archive/extension-layout.md` Decision 2, validated end-to-end by
 the `extension/doors/` tranche (PR #436). The recipe: one **pure-mv commit** (only `git mv`, no
 content edits), then one **import-sweep commit** (path rewrites + the formatter pass). The facts
 below are what a repeat tranche needs and need not re-derive.
@@ -79,6 +79,6 @@ fix didn't drop nested tests.
 
 ## Cross-references
 
-- `docs/design/extension-layout.md` — Decision 2 (the layout this recipe executes)
+- `docs/design/archive/extension-layout.md` — Decision 2 (the layout this recipe executes)
 - `docs/learned/toolchain/biome.md` — the import reorder + the `--write` diff-review discipline
 - `docs/learned/toolchain/worktree-node-modules.md` — fresh-worktree npm ci before tsc/node --test

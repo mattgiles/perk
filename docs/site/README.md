@@ -307,7 +307,7 @@ the extension dev deps; there is no separate lockfile here.
 Three committed records bind this shell's decisions; changing a bound value requires an
 explicit objective reconciliation (their shared reconciliation rule):
 
-- [`docs/design/docs-site-bridge-spike.md`](../design/docs-site-bridge-spike.md) — the exact
+- [`docs/design/archive/docs-site-bridge-spike.md`](../design/archive/docs-site-bridge-spike.md) — the exact
   `astro@7.2.1` + `@astrojs/starlight@0.41.7` pair and the external content-tree bridge
   (applied by node 2.2). It also names `@astrojs/markdown-remark` as a direct dependency here
   because node 2.2's unified processor imports it.

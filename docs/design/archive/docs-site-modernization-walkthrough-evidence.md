@@ -4,7 +4,7 @@
 
 This is the integrated hardening rerun assigned by Objective #1898 node 3.1. It records the
 finished docs site, not the first rendered proof, against the binding
-[`docs-site-visual-blueprint.md`](./docs-site-visual-blueprint.md). The run covers the complete
+[`docs-site-visual-blueprint.md`](../docs-site-visual-blueprint.md). The run covers the complete
 rendered matrix, diagram no-JS/print/keyboard/reduced-motion behavior, fresh WCAG contrast math,
 and a §1–§12 blueprint↔artifact agreement sweep.
 

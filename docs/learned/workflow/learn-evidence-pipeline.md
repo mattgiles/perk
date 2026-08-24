@@ -405,7 +405,7 @@ the docs-plan analyst can do cleanup-first + UPDATE-vs-NEW placement. Three cros
   real corpus before committing the rules. (This is the principle that governs a doc-cleanup
   judgment call: fix present-tense mechanics pointers, leave narrative history — see
   `cold-door-launch.md`'s stale-pointer cleanup.) The backtick doc-token widening repeated the
-  method: at the dream-dogfood audit (`docs/design/learn-dream-dogfood.md`, objective #1926, commit
+  method: at the dream-dogfood audit (`docs/design/archive/learn-dream-dogfood.md`, objective #1926, commit
   `5c3b5058`) the deterministic scan was blind to the analysts' verified stale `docs/planning/…`
   backtick refs, and a live-corpus acceptance survey of every backtick `.md`/`.mdx` token (326
   doc/token pairs) produced the two suppressions — skip slashless tokens, add the scan-root
