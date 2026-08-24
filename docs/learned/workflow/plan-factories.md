@@ -106,14 +106,12 @@ constants directly).
 A *seeded cold door* is a launcher command with one orchestration shape: **parse → resolve backend
 state up front (the read-only session it launches cannot be trusted to) → materialize untrusted
 DATA into a scratch/inbox file → `--dry-run`/`--json` supervisor report → `launch_stage` with a
-seeded prompt**. The family census is **the set of `run_seeded_door` callers** — grep under
-`src/perk/cli/commands/` (the `seeded_door.py` module docstring names the family); the grep is
-the authority, the names below a derived snapshot. Currently: `plan from`/`plan replan`,
-`objective plan`/`objective replan`/`objective author --from`, and the four learn doors
-(`learn docs`/`learn code`/`learn harvest`/`learn dream`), delegating from `plan/from_cmd.py`,
-`plan/replan_cmd.py`, `objective/author_cmd.py`, `objective/plan_cmd.py`,
-`objective/replan_cmd.py`, `learn/factory_common.py`, `learn/harvest_cmd.py`, and
-`learn/dream_cmd.py`. The shared seam is `src/perk/cli/commands/seeded_door.py`.
+seeded prompt**. The family census is **the set of `run_seeded_door` callers** — derive it fresh
+every time: `grep -rn 'run_seeded_door(' src/perk/cli/commands/`, minus the definition in
+`seeded_door.py`. No caller roster survives in this doc: a snapshot recorded here froze and
+silently omitted the later-added `objective stack review` door — deleted rather than refreshed
+(a caller inventory re-drifts identically). The shared seam is
+`src/perk/cli/commands/seeded_door.py`.
 
 ### Three exports, one contract
 
