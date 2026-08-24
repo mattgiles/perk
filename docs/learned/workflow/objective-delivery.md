@@ -21,23 +21,22 @@ history a future delivery/recovery node should not re-derive.
 - A second comment grammar on a shared carrier needs ONE routing dispatcher over EVERY scan
   path, delimiter-derived allowlists, and `re.fullmatch` validators — "The ready-stamp grammar
   beside the operation grammar".
-- Published helpers re-verify their contract over the whole domain; continuations announce only
-  after refusal arms accept; the ready-time pass is lease-free — "The handoff gate (§8.46) and
-  the ready continuation (§8.66)".
+- Published helpers re-verify their contract over the whole domain; decode cohorts are
+  facts-only; pure record construction precedes the first mutation — "The handoff gate (§8.46)
+  and the ready continuation (§8.66)".
 - Train reads enter through `Delivery.status` and reconstruct from stored facts plus fresh
   probes — "The train read path (through `Delivery.status`)".
 - The stacked `/submit` publish operation has five posture traps — "The stacked `/submit`
   publish operation — five posture traps".
 - The sync cascade is transactional: journal-first, ONE atomic leased multi-ref push, bounded
   settle, bottom→top checkpoints — "The transactional sync-cascade invariants".
-- Landing readiness composes the reconstructed train + fresh per-PR observations, fail-closed —
+- Landing readiness composes the train as authority, fail-closed — never re-deriving blockers —
   "Landing readiness (§8.55) — composition rules".
-- Interrupted-LAND recovery classifies from recorded operation identity + strict per-PR
-  observation, then drives evidence-based reconcile repair — "Interrupted-LAND recovery
-  (§8.51/§8.56) — gotchas".
+- Interrupted-LAND gotchas: the neutral-module rule, evidence-gated closes, producer/consumer
+  firing gates — "Interrupted-LAND recovery (§8.51/§8.56) — gotchas".
 - Recovery proves fresh product state in both terminal directions — "Recovery proof is a fresh
   product-state proof, not a ref comparison (§8.51)".
-- "Residuals" is a flagged-ownership register, not current behavior.
+- "Residual proof bounds" is the register of open proof bounds (dated one-liners).
 - Façade migrations use narrow internal Protocols, complete-or-nothing laziness, bounded error
   subsets, explicit consent, real-runtime tests, and exact export cuts — "Façade-slice
   migration pattern".
@@ -209,14 +208,11 @@ push. Pin the complete argv + timeout (`src/perk/substrate/git.py` /
 
 ### Notes for future planners
 
-- The `pr_wrong_head` blocker: open PRs corroborate their head ref/OID against the layer branch
-  and the observed/recorded head; a mismatch disqualifies publication. The base-ref comparison
-  runs *before* the terminal MERGED/CLOSED arms, so a merged-into-wrong-base PR still reports
-  `pr_wrong_base`.
-- Residual (discharged): the preview stack shapes were fixture-proven only until a production
-  stacked train existed — a production stacked train (three layers, create + append) ran live at
-  the stacked-publication dogfood gate. The tolerant read (`available=False`) remains the
-  designed containment if the live preview drifts.
+- The PR head/base corroboration blockers and their ordering before the terminal MERGED/CLOSED
+  arms are §8.44's.
+- Residual (discharged 2026-08-13): the preview-stack fixture-only bound was discharged live at
+  the stacked-publication dogfood gate; the tolerant read (`available=False`) remains the
+  designed containment.
 
 ## Façade-slice migration pattern
 
@@ -359,24 +355,20 @@ durable distillations:
   a live proof needs ≥3 layers to cover both native REST mutations.
 - **Capability preflight is host-schema evidence only; per-repo enrollment is proven by the
   first stack-create mutation itself** — design a blocked disposition for its failure.
-- **The warm `/submit` envelope is never publication evidence** — the decoder now surfaces a
-  lenient cascade `operation` summary (id, no-op, affected count, notes), but the objective issue's
-  prepared→completed journal remains the operation authority; corroborate PR facts with `gh pr
-  view` and train facts with `perk objective stack status --json`. Headless implement exit-0 proves
-  nothing either.
+- **The warm `/submit` envelope is never publication evidence** — the journal is the operation
+  authority; corroborate PR facts with `gh pr view` and train facts with `perk objective stack
+  status --json`. Headless implement exit-0 proves nothing either.
 - **A read-back failure after the mutation took effect converges by rescan, not re-mutation** —
   re-running `/submit` rescans the durable journal and converges idempotently (exactly one
   prepared/completed pair, no duplicate PR or stack membership).
-- **Parent-aware execution works from durable authorities** — a pristine clone with no
-  worktrees/local stack metadata/dispatch cache derived the parent branch at its published SHA
-  from the reconstructed train; the session-scoped layer-context file is operational-only
-  evidence. (A pristine clone still needs its own `npm ci` — the `worktree-node-modules` trap
-  applies to clones too.)
+- **A pristine clone still needs its own `npm ci`** — the `worktree-node-modules` trap applies
+  to clones too.
 - **Recurring GitHub-side noise:** cascade-rewritten heads can carry a CANCELLED superseded
   check-run beside the SUCCESS run at the same head — expect `optional_check_failed` noise in
   landing dry-runs after a cascade and diagnose before treating it as real (#2027).
 
-The `PERK_DEV_STACKED_DELIVERY` development write gate was retired with the gate pass.
+The `PERK_DEV_STACKED_DELIVERY` development write gate was retired at the gate pass
+(2026-08-13); the code grep is clean.
 
 ## The handoff gate (§8.46) and the ready continuation (§8.66)
 
@@ -390,25 +382,21 @@ The `PERK_DEV_STACKED_DELIVERY` development write gate was retired with the gate
 - **When a contract says every blocked arm carries the shared blocker rows, the
   defensive/unreachable arms are exactly where the envelope forks** — force each with a fixture
   (#2029).
-- **Continuation sequencing:** announce a continuation only after its refusal arms accept — the
-  completing gesture reports stamp facts; the drive announces post-acceptance (#2028).
-  All-or-nothing decode cohorts are facts-only: presentation strings are derived from facts,
-  never load-bearing in the cohort (#2028). Guard validators are shaped by their real call
+- **All-or-nothing decode cohorts are facts-only:** presentation strings are derived from
+  facts, never load-bearing in the cohort; guard validators are shaped by their real call
   sites (the tail-append guard takes exactly `add_node`'s output; the delivery-order-prefix
-  check subsumes the resolved-edge comparison for that shape) (#2028).
-- **The ready-time pass has no lease.** It is bounded by the template's liveness stop,
-  head-drift reporting, skip-if-stale idempotence, and the store-enforced pending-only
-  tail-append arm; the post-land whole-train reconcile stays the truth pass (#2028).
-- **Post-mutation failures carry the completed mutation's facts in a typed error**
-  (`ReadyStampError` with `pr`/`was_draft`); order mutations so pure record construction
-  precedes the first mutation and typed refusals flip nothing (#2024).
-- **Dry-run honesty (two portable dogfood facts):** the plan door's dry-run keeps the OFFLINE
+  check subsumes the resolved-edge comparison for that shape) (#2028). The continuation's
+  announce-after-refusal-arms sequencing is §8.66's.
+- The ready-time pass's lease-free bounded mechanics are §8.66's.
+- **Order mutations so pure record construction precedes the first mutation**; typed refusals
+  flip nothing, and a post-mutation failure carries the completed mutation's facts in the
+  typed error (#2024). The `ReadyStampError` field shape is §8.66's.
+- **Dry-run honesty (portable dogfood facts):** the plan door's dry-run keeps the OFFLINE
   graph classification and can refuse `objective_in_flight` before the seed composes — the
   reliable carrier of `build_readiness: "unchecked (dry-run)"` is
   `perk objective run --dry-run`; the `stamped ≠ head` sha disclosure is candidate-scoped by
-  design (with no unplanned dependent, only the layer-line `handoff stale` axis shows) (#2027).
-  An offline dry-run must not claim to predict which online arm a real run takes — name both
-  (#2024).
+  design (#2027). An offline dry-run must not claim to predict which online arm a real run
+  takes — name both (#2024).
 
 ## Landing readiness (§8.55) — composition rules
 
@@ -418,16 +406,12 @@ The `PERK_DEV_STACKED_DELIVERY` development write gate was retired with the gate
   import.** The shared fail-closed remote-writer seam moved to a dependency-leaf
   `delivery/writers.py` (with compatibility re-exports) because `land → sync → observe → land`
   would cycle — trace the chain before placing the module, not after the import error.
-- **Readiness composes the train as authority.** Blockers, unresolved operations, and membership
-  are never re-derived; readiness freshly observes only landing-specific facts, and maps every
-  enrichment read failure to a *specific* fail-closed blocker (can't-verify ⇒ not-ready) while
-  the report still renders. Train blockers veto even `NOTHING_TO_LAND`.
-- **Publication completeness has two authority axes** — per-layer publication status AND the
-  projection's published-prefix length; an internally-inconsistent projection gets a train-wide
-  fail-closed finding, not a per-layer patch-up.
-- **Independent fail-closed vetoes, deduped agreeing findings** — scalar observations and
-  GitHub's aggregate each block independently (so contradictory wire states never pass), but
-  agreeing reports coalesce to one blocker rather than stacking duplicates.
+- **Readiness composes the train as authority, fail-closed.** Blockers, unresolved operations,
+  and membership are never re-derived, and every enrichment read failure maps to a *specific*
+  fail-closed blocker (can't-verify ⇒ not-ready). Dispositions, blocker composition, and the
+  publication-completeness authority axes are §8.55's.
+- **Independent fail-closed vetoes, deduped agreeing findings** — independent vetoes so
+  contradictory wire states never pass; agreeing reports coalesce to one blocker.
 
 ## Cancellation + doctor drift diagnostics
 
@@ -459,26 +443,15 @@ The `PERK_DEV_STACKED_DELIVERY` development write gate was retired with the gate
   `landing.py` cannot import each other without a cycle; there is deliberately no `landing.py`
   re-export. Durable shape: a delivery-plane artifact needed by both train and landing gets its
   own neutral module.
-- **Deferred close on a non-durable `completed` append.** Finalization still runs when the
-  `completed` append fails after verification, but the aggregate objective close is **deferred**
-  until a later run converges the journal — closing before the completion is durable would
-  assemble EMPTY reconcile evidence and permanently suppress the reconcile drive (contracts
-  §8.51/§8.56). Rule: any close that gates an evidence-bearing drive waits for the evidence's
-  durable record.
-- **LANDED is a coverage-gated classification.** Only a prepared⋈completed LAND join with exact
-  node/plan/PR identity + recorded-head == `published_head_sha` + fresh merged corroboration
-  classifies LANDED; merged PRs without journal coverage stay drift. The suppression set (the
-  `pr_wrong_base` retarget arm, deleted-branch `checkpoint_drift`, membership NOT_APPLICABLE)
-  applies only in the corroborated arm.
-- **The no-handle async crash window.** An async prepared record without an `accepted` handle may
-  have a live untracked merge job — monotonic-only posture until the 24h merge-request lifetime
-  elapses; `external_prefix` acceptance additionally requires every remainder PR OPEN at its
-  recorded head. A naive (non-UTC) `created` timestamp must classify `in_flight`, never crash
-  the age gate.
-- **Finalization convergence re-runs the idempotent finalizer for every journal-covered
-  corroborated layer.** Plan-close/node-terminal is not a completeness proxy (it cannot observe
-  learn-stamp/consume effects); close transitions assemble reconcile evidence from a fresh full
-  journal fold; the reconcile drive is honestly at-least-once.
+- **Any close that gates an evidence-bearing drive waits for the evidence's durable record**
+  (§8.51/§8.56 own the deferred-close mechanics).
+- LANDED's coverage-gated classification (join identity, corroboration, the suppression set) is
+  §8.56's.
+- **The timestamp trap:** a naive (non-UTC) `created` timestamp must classify `in_flight`,
+  never crash the age gate; the no-handle crash-window/`external_prefix` mechanics are
+  §8.51/§8.56's.
+- **Plan-close/node-terminal is not a completeness proxy** — it cannot observe
+  learn-stamp/consume effects; the finalization-convergence mechanics are §8.51/§8.56's.
 - **A producer widening must meet the consumer's firing gate.** Recover's close-then-evidence
   repair truthfully returns `objective_closed: false` when re-emitting evidence for an already
   closed objective. The TypeScript consumer in `extension/doors/objectiveStack.ts` therefore
@@ -493,35 +466,23 @@ The `PERK_DEV_STACKED_DELIVERY` development write gate was retired with the gate
   closed, journal-complete stacked objective may emit the same evidence again. This is safe only
   because objective reconcile is idempotent; the producer frequency and consumer idempotency are
   one load-bearing design, not independent implementation details (`src/perk/delivery/recover.py`).
-- **Recovery-hardening patterns from review:** dry-run recovery previews run fresh corroboration
-  *before* preview generation; the reconcile hint carries the resolved objective id + a
-  `completed_without_merge` arm; drive messages delimit journal-derived strings as untrusted
-  DATA.
+- **Recovery-hardening kernels from review:** fresh corroboration runs *before* preview
+  generation; journal-derived strings are delimited as untrusted DATA.
 - **Budgeting note:** a "full consumer sweep" over `LayerPublication.PUBLISHED` consumers was
   mostly an audit — existing non-PUBLISHED skip arms already handled LANDED; the output was
   tests + comments pinning behavior, not code.
 
 ## Recovery proof is a fresh product-state proof, not a ref comparison (§8.51)
 
-- **Fresh product-state proof before classification.** The generic recovery path establishes
-  fresh train identity/topology and structural authority before classifying. PUBLISH needs
-  complete, kind-specific proof in *both* terminal directions — branch, PR existence/absence and
-  exact facts, plus native-stack membership — never merely the recorded branch SHA. A resumed
-  continuation must prove the human-resolved candidate contains its recorded new parent and that
-  every captured parent edge still agrees with fresh checkpoints; a clean detached HEAD alone can
-  be a `rebase --abort`/reset state.
+- **Fresh product-state proof before classification:** complete, kind-specific proof in *both*
+  terminal directions, never merely the recorded branch SHA — and a clean detached HEAD alone
+  can be a `rebase --abort`/reset state. The PUBLISH/continuation proof enumeration is §8.51's.
 - **Best-effort cleanup is still protocol output.** Residue lives in both the filesystem and
-  Git's worktree-admin inventory, so status/dry-run/recovery inspect stale registrations as well
-  as `sync-*` directories and temp refs. Every ref/worktree/prune/manifest-retirement failure
-  travels as structured result notes through cold JSON, the human CLI rendering, and every warm
-  outcome arm — a nominal success must not hide residue later recovery has to explain.
-  Cleanup-only abort takes a focused dependency bundle rather than constructing the full
-  synchronization machine.
-- **Pre-journal authority + no-op lease semantics.** A continuation manifest is a
-  containment-validated, progress-rewritten pointer to retained local state — authoritative only
-  until the prepared record is read back, and retired at that boundary. An unchanged adopted ref
-  cannot carry a server-side lease (Git omits no-op updates), so it is excluded from the push set
-  and covered by postcondition verification instead of a fictitious lease.
+  Git's worktree-admin inventory; every cleanup failure travels as structured notes through
+  every outcome arm — a nominal success must not hide residue later recovery has to explain.
+- **No-op lease semantics:** an unchanged adopted ref cannot carry a server-side lease (Git
+  omits no-op updates) — postcondition verification covers it, not a fictitious lease. The
+  continuation manifest's authority-boundary mechanics are §8.51's.
 
 ## Never-authoritative revision records need an immutability shape check
 
@@ -570,75 +531,41 @@ anything else.
 
 ## Residual proof bounds (façade operation slices already landed)
 
-The façade slices through status, prepare, transfer, publish, sync, recover, and land are current
-behavior, not deferred design. The remaining bullets are proof bounds or future schema edges;
-internal train reconstruction lives behind the façade, and the reconstruction-era compatibility
-chain is gone (retirement pinned by `tests/test_delivery_facade.py`'s `_RETIRED_EXPORTS`
-disjointness assertion; recorded in `docs/planning/stacked-prs/final-census.md`).
+The façade slices (status/prepare/transfer/publish/sync/recover/land) are current behavior; the
+bullets below are open proof bounds and future schema edges.
 
 - `before`/`after`/`observed` are opaque validated mappings — kind-specific shapes belong to the
   operation nodes; only the envelope is pinned.
 - Linear's comment-size limit is undocumented — the shared 60,000-char cap assumes it is ≥ that.
-- The recovery engine has since landed (`perk objective stack recover`, contracts §8.51):
-  conclude-only — kind-specific classification against fresh authority (SYNC/ADOPT via sync's
-  shared record core in `sync.py`; PUBLISH via `publish.classify_publish_record`; TRANSFER via
-  its strict predecessor-carried manifest + corroborated run-id successor; LAND via
-  `landing.classify_land_record` — the recorded handle/mode plus strict per-PR observation),
-  automatic all-after
-  SYNC/ADOPT/TRANSFER/LAND roll-forward, confirmed all-before abandon-with-proof, the
-  confirmed `--accept-prefix` breach for an externally merged LAND prefix, the idempotent
-  finalization-convergence pass, and the
-  manifest-protected orphan sweep (`recover.py`). TRANSFER routes fold-first before the train
-  gates because its in-progress ownership writes intentionally make the predecessor train look
-  structurally broken; corrupt/mixed transfer state stays report-only. The machine-local `flock`
-  in `oplock.py` serializes the mutating stack operations per machine (sync + recover + land) —
-  it intentionally does not serialize recovery across machines: operator quiescence remains a
-  prerequisite for cross-machine abandon/recover, and exact leases plus later drift checks
-  *detect* rather than prevent that overlap.
+- The recovery engine landed (`perk objective stack recover`) — §8.51 owns
+  classification/roll-forward/abandon.
+- Durable why: TRANSFER routes fold-first because its in-progress ownership writes intentionally
+  make the predecessor train look structurally broken.
+- Durable bound: the machine-local `flock` (`oplock.py`) serializes sync/recover/land per
+  machine only — cross-machine overlap is detected (leases + drift checks), not prevented;
+  operator quiescence stays a prerequisite.
 - Widening the `accepted`-gated-to-`land` rule requires an explicit schema revision.
 - The build-readiness veto set is deliberately fail-closed and coarse — expect over-blocking
   pressure; the refinement lever is attribution (naming which veto fired), not loosening.
 - The session-scoped layer-context file is never authoritative.
-- The live stacked remote-runner arm remains deliberately unrun. The final dogfood gate
-  (2026-08-13) explicitly permitted **second clone OR remote runner** and passed through the
-  second-clone arm, proving fresh-checkout / durable-authority independence on one host. Remote
-  positioning remains pinned by `tests/test_run_worker.py`, the cross-machine lane in
-  `tests/test_delivery_cross_machine.py`, and the live non-stacked remote e2e records — never
-  misstate the second-clone proof as host-level cross-machine independence.
-- Published-suffix sync has since landed (`perk objective stack sync`, contracts §8.49),
-  including its control surface: `--dry-run`, `--adopt NODE`, and conflict `--continue`/
-  `--abort` (a retained conflict is cleared through those verbs, not by hand); the warm
-  `/objective-stack`/`/objective-sync`/`/objective-recover` doors + four typed stack tools
-  ride §8.51. Automatic propagation from submit/address has since landed (§8.52): only the
-  invoking plan's committed head is a local source; successor candidates start from verified
-  published heads.
-- The sync cascade's live-proof envelope widened on 2026-08-13: real lower-layer feedback on
-  PR #1701 flowed through `finalize_address`, and one trigger-scoped SYNC operation atomically
-  rewrote the three GitHub branches/PR heads under exact leases; the PR settle + thread resolve
-  completed and `stack status` returned clean/exact. This proves real GitHub auth + atomic
-  multi-ref acceptance for an unprotected base. A retained rebase conflict did not fire (the
-  `--continue`/`--abort` arms remain hermetic-pinned), and branch-protection acceptance remains
-  unproven live — those narrower claims must not be inferred from the pass.
-- Atomic landing has since landed (`perk objective stack land` / `/objective-land`, contracts
-  §8.56; the operation seam is `src/perk/delivery/landing.py` — a thin consumer of the §8.55
-  readiness core `land.py`, the §8.43 journal, and `finalize.py`). `perk pr land` / `/land`
-  still refuse stacked lineage fail-closed (`stacked_plan`, before any mutation — cache ref OR
-  plan header, header wins): stacked layers land only as one atomic train. Interrupted-LAND
-  recovery has since landed (§8.51's LAND arm — `stack recover` concludes LAND rows, landed
-  layers classify terminal in the train, and a close drives `/objective-reconcile` with
-  journal-assembled evidence).
-- **Live landing complement (2026-08-13):** the final dogfood gate proved GitHub merge-async on
-  a real 3-layer train. An out-of-process watcher SIGKILLed the cold land worker after the
-  durable `accepted` event and before its poll observed a terminal state; all PRs merged
-  server-side, then `stack recover` from a second clone probed the handle `merged`, classified
-  `all_after`, completed the SAME operation, finalized all layers, converged the GitHub
-  objective close, and emitted complete reconcile evidence consumed by the warm door. This
-  also proves the GitHub store's `ObjectiveState.state` lifecycle read live. Still
-  capture-if-fired/hermetic only: post-partial-merge / external-prefix composition, the
-  breach→`sync --base`→`land` route, retained conflicts, and lifecycle reads for the non-GitHub
-  stores. CI remains hermetic. When the *final* completed record is undecodable,
-  `final_base_sha` comes from the last successfully decoded record — evidence marked partial
-  with a loud note.
+- The live stacked remote-runner arm remains deliberately unrun; the 2026-08-13 gate passed
+  through the second-clone arm (fresh-checkout/durable-authority independence on one host) —
+  never misstate that as host-level cross-machine independence; remote positioning stays pinned
+  by `tests/test_run_worker.py` + `tests/test_delivery_cross_machine.py`.
+- Published-suffix sync, the warm stack doors, and automatic propagation from submit/address
+  landed — §8.49/§8.51/§8.52 own the control surface.
+- Sync live proof (2026-08-13): real GitHub auth + atomic multi-ref acceptance proven for an
+  unprotected base; the retained-conflict arms stay hermetic-pinned; branch-protection
+  acceptance remains unproven live.
+- Atomic landing, the stacked `pr land`/`/land` refusal, and interrupted-LAND recovery landed —
+  §8.55/§8.56/§8.51 own it (including the stacked-lineage fail-closed refusal).
+- Live landing complement (2026-08-13): merge-async proved live on a real 3-layer train (SIGKILL
+  after durable `accepted`; second-clone `stack recover` completed the SAME operation and
+  emitted complete reconcile evidence; the GitHub store's `ObjectiveState.state` lifecycle read
+  proved live) — still capture-if-fired/hermetic-only: post-partial-merge/external-prefix
+  composition, the breach→`sync --base`→`land` route, retained conflicts, and non-GitHub
+  lifecycle reads; an undecodable final record yields `final_base_sha` from the last decoded
+  record, evidence marked partial.
 
 ## Cross-references
 
