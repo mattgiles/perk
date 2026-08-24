@@ -1,6 +1,6 @@
 # Dogfood: the warm sync-conflict drive (Objective #2071, Node 3.1)
 
-**Status: IN PROGRESS (scaffold committed 2026-08-23; Part B not yet executed).** This
+**Status: PASSED 2026-08-23** (run journal-stamped 2026-08-24T03:50–03:51Z). This
 validation record (the settled dogfood-record genre —
 `docs/learned/workflow/doc-reconciliation.md` § "Validation-record reconciliation": Part A the
 pre-committed repeatable protocol, Part B the dated captured evidence + defect log) proves the
@@ -8,8 +8,10 @@ pre-committed repeatable protocol, Part B the dated captured evidence + defect l
 commits `ba6da6c5` #2073, `2a79595f` #2075, `9c7ef426` #2077) **live on the real backlog**:
 objective #2040's stalled base cascade, recovered end-to-end through the warm
 retained-continuation drive. Happy path only — every failure arm stays offline-pinned in the
-hermetic suites (§ Offline-pinned arms), referenced and never exercised live. The overall
-verdict is written at evidence-fill time from the § Verdict criteria — never before.
+hermetic suites (§ Offline-pinned arms), referenced and never exercised live. **Overall
+verdict: PASS — all five criteria (C1–C5) observed live on the first attempt; the defect log
+is empty** (five named non-defect observations; the layer-4 semantic contradiction is recorded
+in the pre-committed content note, routed to the train's own workflow).
 
 **What this record proves** (the three landed pieces, driven as one loop):
 
@@ -229,54 +231,231 @@ blocker).
 
 ## Part B — the captured evidence
 
-> **Not yet executed — filled at evidence time.** Every section below is a shell until the
-> live run completes; the Status header stays IN PROGRESS until then.
+> **Execution COMPLETE (2026-08-23 local; journal timestamps 2026-08-24Z).** Step 0 and the
+> durable captures ran from the executor's shell; the human drove every gesture (approval,
+> consent) in the interactive repo-root session, pasting the transcript excerpts inlined
+> below. Scratch captures lived in `/tmp/sync-dogfood-2040-2026-08-23/` (disposable); every
+> decisive excerpt is inlined here.
 
 ### Provenance rows
 
-*Filled at evidence time:* main-checkout SHA at the run, `npm ci` freshness, the resolver
-model that actually ran.
+| Fact | Observed |
+|---|---|
+| Driving checkout | `~/dev/github/mattgiles/perk` (repo root, main checkout), `git rev-parse HEAD` → `9c7ef426d60f74d81d36adb4b6b874030b967774` (includes #2077), `git status --short` empty |
+| Extension freshness | `npm ci` run 2026-08-23 immediately before the driving session (allow-scripts advisory only) |
+| Resolver model | committed `[models.subagents] conflict-resolver = "openai/gpt-5.6-luna"`; confirmed from the child run's `_meta.json`: `model: openai/gpt-5.6-luna` |
+| Driver split | held — the human ran the gestures; the executor captured the durable halves and authored this record from them |
 
-### Step 0 — preconditions
+### Step 0 — preconditions (captured 2026-08-23, executor shell, worktree at `9c7ef426`)
 
-*Filled at evidence time:* the train-health status read; the conflict-reality dry-run
-refusal.
+- **Train health** (`perk objective stack status 2040 --json`): `unresolved_operation: null`,
+  `continuation: null`, 10/10 layers `published`/`synced`/`exact` with `writer: active`
+  (claimed), orphaned residue none; exactly ONE information row — `base_advanced`
+  (`0c724e43…` → `9c7ef426…`, remediation `perk objective stack sync 2040 --base`). No
+  dirty-worktree cleanup was needed.
+- **Conflict-reality precheck** (cold `perk objective stack sync 2040 --base --dry-run
+  --json`, exit 1) — the premise held, verbatim:
+
+  ```json
+  {"success": false, "error_type": "rebase_conflict", "message": "the candidate rebase for
+  layer 4 ('plan-2054' onto a0c043b944caa0e884d69bc4786ce4d999d08cfe) hit a conflict — this
+  was a dry-run preview, so nothing was retained; a real sync would retain the conflicted
+  worktree here under a continuation manifest"}
+  ```
+
+  The `for layer 4 ` freshness token present; `sync-continuations/` still empty afterwards
+  (nothing retained); **no warm-route hint on the dry-run arm** — correct by design (the
+  hint rides only resolution-real refusals), the by-omission half of the node-2.2 capture.
+- **Pre-run remote heads** captured (all 10 train branches at their published heads — the
+  same SHAs the status read reports); this closes the zero-publication chain end to end
+  (§ S4).
 
 ### S1 — the warm cascade
 
-*Filled at evidence time:* the preview, the approval, the mutating call.
+Executed 2026-08-23 (operator, interactive `pi` at the repo root). `/objective-sync 2040`;
+the human asked for the base advance verbatim: "advance the stack onto current main —
+cascade with the base advance". The door previewed per its own guidance —
+`objective_stack_status`, then `objective_stack_sync { dry_run: true, base: true }` — and
+the preview refused typed `rebase_conflict` at layer 4 ("…this was a dry-run preview, so
+nothing was retained…"), which the session presented honestly with the expected real-run
+consequences before asking for approval. The human approved: "yes — run the real mutating
+sync with the base advance" → the mutating `objective_stack_sync { objective: 2040,
+base: true }` call (the approved call IS the consent). *Benign note:* preview rebase
+candidates mint fresh commit SHAs per run (the cold precheck's `onto a0c043b9…`, the warm
+preview's `onto ba0778b3…`, the real run's `onto 500b5b0a…` — same content, fresh
+committer stamps).
 
 ### S2 — the conflict stop
 
-*Filled at evidence time:* the verbatim refusal (freshness token + warm-route hint), the
-manifest bytes, snapshot A.
+The mutating call refused typed `rebase_conflict` (operator capture, verbatim — the tool
+result in the driving session):
+
+> the candidate rebase **for layer 4** ('plan-2054' onto
+> 500b5b0ab214bd8ea3794e7289f34ad81be52e98) hit a conflict — the conflicted worktree is
+> retained at `/Users/mattgiles/dev/github/mattgiles/perk/.worktrees/sync-01M0RW2HS3VSWG1T8GN2R2JVYH`
+> under the continuation manifest
+> `/Users/mattgiles/dev/github/mattgiles/perk/.perk/workflow/sync-continuations/01M0QDMWFE5E5P918WFFYZE9FR.json`;
+> no remote ref and no journal record was created. Resolve the conflict in the retained
+> worktree (`git rebase --continue`) and run `perk objective stack sync --continue`, or
+> discard it with `perk objective stack sync --abort`. **Automated resolution is available
+> from a read-write perk session: run `/objective-sync 2040` — on your approval it
+> dispatches the conflict resolver into the retained worktree and hands publication back to
+> you.**
+
+The §8.49 `for layer 4 ` freshness token AND the appended node-2.2 warm-route hint, both on
+the resolution-real arm exactly as pinned. **The continuation manifest** (bytes captured
+pre-continue): `operation_id: 01M0RW2HS3VSWG1T8GN2R2JVYH`, `objective_id: '2040'`, the
+lineage, `run_id: 01M0Q8AEJGDZC89F6Q651AN2T5` (the driving session), `include_base: true`,
+`captured_base_head: 9c7ef426…` (= main at approval), `conflict_node_id: 4`, created
+`2026-08-24T03:12:32Z`; layers 1–3 carry their rebased `candidate_sha`s
+(`587b3e01…`/`c7bffb00…`/`500b5b0a…`), layer 4 `candidate_sha: null` with
+`new_parent_edge: 500b5b0a…`, layers 5–10 `new_parent_edge: null` (unreached). **Remote-heads
+snapshot A**: all 10 train branches at their original published heads — byte-identical to the
+pre-run Step-0 heads. *(Operator-timing note: A was captured after the resolver child had
+already finished — still pre-continue; the chain pre-run == A == B keeps the
+zero-publication closure exact.)*
 
 ### S3 — the drive fires
 
-*Filled at evidence time:* the injected dispatch, the child dispatch call, the resolver
-report (terminal outcome class first).
+- **The auto-dispatch** (operator capture — the injected message, arriving immediately after
+  the refusal with no human gesture in between): "perk /objective-sync — objective #2040's
+  stack cascade stopped on a rebase conflict in layer 4 (branch plan-2054, PR #2055); the
+  conflicted worktree was retained. **This is attempt 1 of 2.**" — the rendered
+  `conflict-resolution-continuation.md` carrying: the ONE-`subagent`-call workflowScript
+  recipe (`async: false`, `context: "fresh"`, `model: "openai/gpt-5.6-luna"` — the
+  configured `[models.subagents]` value, named as such), the task text opening with the
+  concrete `cd /Users/…/.worktrees/sync-01M0RW2HS3VSWG1T8GN2R2JVYH` command, the column-zero
+  `RETAINED-CONTINUATION SENTINEL: resume the in-progress rebase in …` line, the layer
+  identity (node 4, branch plan-2054, PR #2055), and the completed-only outcome gate with
+  the never-unprompted `continue` consent rule. The rendered "attempt 1 of 2" IS the
+  persisted verified increment (the dispatch injects only after the counter write reads
+  back).
+- **The child run**: one `subagent` workflowScript dispatch, foreground, 1 lane
+  (`perk.conflict-resolver [fresh] (gpt-5.6-luna)`), 42 tool uses, 3m35s. **The report opens
+  with the terminal outcome class** — verbatim head of the child's output artifact:
+
+  ```text
+  completed
+
+  Mode: retained-continuation
+  Resolved files: `docs/learned/workflow/dot-directory-migration.md`
+  Resolve→add→continue rounds: 1
+  ```
+
+  …followed by the resolution summary ("kept the canonical deletion of `perk_dir`/`perkDir`
+  while applying the incoming triad-scope and workflow-cache exception edits"), "Rebase
+  completed at `e5b805d3`; the worktree is clean with no rebase in progress. **No push was
+  performed**; the human resumes with `sync --continue`.", and the verification table
+  (10 learned-doc cue tests passed; `perk learn docs-check` passed with stale pointers 0;
+  conflict-marker scan + `git diff-tree --check` clean; the mergeability doc at 12,262 bytes
+  under the 12,288 limit; no staged/uncommitted files).
+- **Retained-mode facts, independently verified read-only in the worktree** (executor,
+  pre-continue): rebase COMPLETE (no `rebase-merge` dir), clean tree, HEAD =
+  `e5b805d3850d0418dcee09cdb2e0a3bf8c0e47bc` sitting atop `500b5b0a…` (the layer-3
+  candidate = layer 4's manifest `new_parent_edge` exactly); the worktree was never aborted
+  (it survived intact until S5's continue consumed it). No fresh rebase: the child resumed
+  the in-progress one (1 resolve→add→continue round on the single conflicted file).
+- **Late supervisor progress echoes** arrived after the child had completed; the driving
+  session correctly held (presented the completed outcome, did NOT call `continue` on its
+  own) — the consent rule observed under a mild race (a non-defect observation below).
 
 ### S4 — zero-publication check
 
-*Filled at evidence time:* snapshot B vs A.
+Snapshot B (pre-continue, executor shell): **byte-identical to snapshot A** (`diff` empty
+over all `refs/heads/plan-*`), and both equal the pre-run Step-0 heads — across the entire
+stop + resolve window, no remote ref moved.
 
 ### S5 — the human continue
 
-*Filled at evidence time:* the consent gesture, the `continue: true` call and its result.
+Explicit consent in-session ("yes — resume the cascade: continue") → `objective_stack_sync
+{ objective: 2040, continue: true }` → completed: "The cascade resumed and completed —
+operation 01M0RW2HS3VSWG1T8GN2R2JVYH is done", all 10 layers republished (the session's
+before→after table matches the journal's observed set below), "The continuation worktree
+and manifest were consumed by the completed operation." No new conflict on continue — the
+S2–S5 loop ran once (1 dispatch of the cap's 2).
 
 ### S6 — clean at the new anchor
 
-*Filled at evidence time:* snapshot C, the journal SYNC record, the terminal status read.
+- **Snapshot C** (post-continue): vs B, **exactly 10 refs changed — the train branches
+  only**, one atomic multi-ref change to `587b3e01…` (plan-2041), `c7bffb00…` (plan-2045),
+  `500b5b0a…` (plan-2050), `e5b805d3…` (plan-2054, the conflict-resolved head), `9dc76039…`
+  (plan-2056), `be66f0c6…` (plan-2058), `d6ca9ad5…` (plan-2062), `3b40582a…` (plan-2064),
+  `637f0ba3…` (plan-2067), `c39d1af8…` (plan-2069). Layers 1–3 landed at the manifest's
+  candidate SHAs exactly.
+- **The journal SYNC record** (issue #2040, the durable authority): operation
+  `01M0RW2HS3VSWG1T8GN2R2JVYH`, `prepared` `2026-08-24T03:50:57Z` (before: base `main` @
+  `9c7ef426…`; the 10 branches + 10 PRs at their original heads) → `completed`
+  `2026-08-24T03:51:28Z` (observed: the 10 branches AND the 10 PR heads at the new SHAs
+  above) — one operation, concluded; `run_id` = the driving session's.
+- **Terminal train read** (`perk objective stack status 2040 --json`): `unresolved_operation:
+  null`, `continuation: null`, **information rows EMPTY** (`base_advanced` GONE — main never
+  moved mid-run, so the benign-deviation arm stayed unfired), `observed_base_head_sha:
+  9c7ef426…` = layer 1's new `parent_checkpoint_sha` = the manifest's `captured_base_head`
+  exactly (the base anchor IS the main head captured at approval); all 10 layers
+  `published`/`synced`/`ready`/`exact` at the new checkpoints; orphaned residue none.
+- **Local residue**: the retained worktree gone, the manifest consumed, no
+  `refs/perk/sync/*` temp refs remain — the one leftover is the designed
+  `…json.resolver-lock` claim dir (below).
 
-### Content note — the layer-4 semantic resolution
+### Content note — the layer-4 semantic resolution (observed, not gated)
 
-*Filled at evidence time:* how the resolver judged the "Unmet as of 2026-08" contradiction
-(observed, per § Gate criteria stay mechanical).
+- **The textual conflict was ONE file, not the predicted two.**
+  `docs/learned/workflow/dot-directory-migration.md` conflicted; the resolver judged the
+  semantic contradiction **correctly**: it kept the new base's truth (main's `c247a931`
+  paragraph — `perk_dir`/`perkDir` deleted as dead code) over the layer's stale rewrite of
+  the same paragraph ("still returning `.pi` … currently caller-less"), while preserving
+  the layer's three non-conflicting hunks (distillation header, `_MIGRATIONS` triad scope,
+  workflow-cache exception) — verified by diffing the resolved commit against its parent.
+- **`docs/learned/workflow/mergeability-and-conflict-resolution.md` auto-merged** — git
+  never stopped on it (main's sentence extends the paragraph's last line; the layer's
+  paragraph inserts after it), so the resolver was never asked to judge it. The rebased
+  layer-4 content therefore now carries the semantic contradiction verbatim: main's "The
+  rule is now plumbed into the dispatch itself…" immediately followed by the layer's
+  "*Unmet as of 2026-08 (dream audit):* the shipped resolver task text does not implement
+  this rule…" — a claim this very run's S3 capture disproves live (the injected dispatch
+  DID open with the concrete `cd` command). **Disposition:** a content observation per
+  § Gate criteria stay mechanical — not a resolver defect (no conflict was presented to it)
+  and not a gate criterion; the stale claim is the layer's own authored content, made false
+  by the base advance, and its fix is an ordinary layer-4 amend owned by the #2040 train's
+  own curation workflow (this record's PR does not touch the train's files).
 
 ### Defect log
 
-*Filled at evidence time* (possibly empty, plus named non-defect observations).
+**No defects.** Five named **non-defect observations**:
+
+1. **One conflicted file, not two (S2/S3):** the predicted profile said two; the
+   mergeability doc auto-merged (adjacent, non-overlapping textual edits). A
+   profile-prediction deviation, not a criterion — and the auto-merge is what routed the
+   semantic contradiction into the content note above.
+2. **Preview candidates mint fresh SHAs per run (Step 0/S1):** the cold precheck, the warm
+   preview, and the real run each reported a different `onto <sha>` for the same layer-3
+   candidate content — rebase re-commits with fresh committer stamps; benign.
+3. **The consumed operation leaves the resolver-lock dir**
+   (`01M0QDMWFE5E5P918WFFYZE9FR.json.resolver-lock` beside the deleted manifest): designed —
+   the claim is deliberately never released on dispatch and self-heals via the
+   reclaimability predicate (operation consumed ⇒ reclaimable;
+   `extension/substrate/resolverLease.ts` header). The status door's residue sweep reports
+   none — correctly, this is not orphaned residue.
+4. **Late snapshot-A capture (S2):** operator timing — A was taken post-resolve rather than
+   at the stop; closure restored exactly by pre-run == A == B (and the refusal itself
+   attests "no remote ref … was created" at the stop).
+5. **Late supervisor progress echoes (S3):** two child progress notifications rendered
+   after the workflow call had already returned; the driving session correctly treated them
+   as stale echoes and held for consent — the completed-only gate was never at risk.
 
 ### Verdicts
 
-*Filled at evidence time:* the C1–C5 matrix, classified from artifacts/event projections.
+Derived from the artifacts and event projections above — never from the human's summary
+label.
+
+| Criterion | Verdict | Surviving evidence |
+|---|---|---|
+| **C1** — the warm arm fired | **PASS (observed-live)** | the injected dispatch arrived unprompted on the human-approved mutating cascade's corroborated `rebase_conflict` stop (S2 refusal → S3 injection, no human gesture between); the rendered "attempt 1 of 2" is the persisted verified increment |
+| **C2** — retained-mode resolution to `completed` | **PASS (observed-live)** | the child report opens `completed` / `Mode: retained-continuation` / 1 resolve→add→continue round; verification table passed; the worktree independently verified rebase-complete, clean, HEAD `e5b805d3` — never aborted, no fresh rebase |
+| **C3** — zero resolver-driven publication | **PASS (observed-live)** | pre-run == snapshot A == snapshot B (byte-identical); the report records "No push was performed"; the ONLY remote mutation is S5's single atomic 10-ref push, journal-recorded as operation `01M0RW2HS3VSWG1T8GN2R2JVYH` |
+| **C4** — the explicit human continue | **PASS (observed-live)** | consent gesture in-session, then `continue: true`; the session withheld continuation until asked (including across the late-echo race) |
+| **C5** — clean at the new anchor | **PASS (observed-live)** | terminal status: no continuation, no unresolved operations, no information rows, all 10 layers at the new checkpoints, base anchor = the approval-captured main head `9c7ef426…` |
+
+**Overall: PASS** — all five criteria observed live on the first attempt; no criterion
+classified offline-pinned or unobserved-not-passed; the offline-pinned failure arms stand
+referenced in Part A, none fired.
