@@ -13,7 +13,7 @@ fixtures, real clones, real leases) composed with stateful fake backends. Live w
 and are deliberately absent from this ledger.
 
 > **Live complement (2026-08-13):** node 6.2's
-> [`stacked-delivery-dogfood.md`](../../design/stacked-delivery-dogfood.md) **PASSED**. Real
+> [`stacked-delivery-dogfood.md`](../../../design/stacked-delivery-dogfood.md) **PASSED**. Real
 > GitHub accepted the 3-layer stack merge; an out-of-process journal watcher SIGKILLed the land
 > worker after `accepted` and before terminal observation (the L3 boundary); cold recover from
 > a second clone classified `all_after` and rolled the original operation forward through

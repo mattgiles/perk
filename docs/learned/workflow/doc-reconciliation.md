@@ -491,7 +491,7 @@ Rules from running verbatim merge/deletion batches over the `docs/learned/` corp
 
 Adding terms to a glossary/vocabulary section leaves stale any prose that presents it as an
 exhaustive enumerated list (instance: `CONTEXT.md` § Objective delivery vs
-`docs/planning/stacked-prs/objective.md`) — grep for *enumerating* prose, not just citations, in
+`docs/planning/archive/stacked-prs/objective.md`) — grep for *enumerating* prose, not just citations, in
 the same turn.
 
 ## Sweep-step craft: mirrors, no-ops, and neighbor staleness
