@@ -58,15 +58,12 @@
 // exit → a TERMINATING result; a failed save is non-terminating, leaves the gate read-only, and
 // directs the human `/objective-save` failsafe.
 //
-// THE GIST ARM: a gist-author session (read-only, stage `gist-author`) routes through
-// `executeGistReview` the same way — the reviewed bytes are the RENDERED gist draft
-// (`readGistDraft` + `renderGistDraft`, gistDraft.ts), first-party VIEW-ONLY, implement-here
-// never offered, APPROVED → the `gistApprovalSave` seam (gistSave.ts), no draft soft-skips with
-// `reason: "no_gist_draft"`. Plannotator approve-with-Direct-Edits mirrors the objective arm:
-// the save seam re-reads the STRUCTURED gist artifact, so rendered edits cannot be folded back
-// mechanically — the arm SKIPS the save and returns one model-mediated revise round (fold each
-// hunk into the matching `gist_draft` field — title heading → `title`, `Scope:` line → `scope`,
-// prose → `prose` — then re-review to confirm).
+// THE GIST ARM is INJECTED: a gist-author session (read-only, stage `gist-author`) dispatches
+// to the required `gistArm` parameter — composed in index.ts from the v1 gist installer
+// (`pi/v1/gist.ts`, `runGistReviewV1`), which reuses this module's exported subject machinery
+// (`ReviewSubject`, `subjectReviewOutcomeResult`, `approvedSubjectSaveResult`, `verdictsFor`,
+// `skipResult`, `runFirstPartyReview`). One-directional: `pi/v1` imports this module's exports;
+// this module never imports `pi/` — the injection breaks what would otherwise be a cycle.
 //
 // INVARIANTS HELD: never calls `setActiveTools`, never registers a `tool_call` handler, never
 // restamps `cache.plan-ref.provider`. The door composes the gate AND the save EXCLUSIVELY
@@ -80,15 +77,13 @@ import {
   hasDirectEditsHeading,
   isPlannotatorPlanSelected,
 } from "../adapters/planAdapterPlannotator.ts";
+import { GIST_AUTHOR_STAGE } from "../authoring/gist/draft.ts";
 import type { Result } from "../substrate/result.ts";
 import { readSessionArtifact } from "../substrate/sessionData.ts";
 import type { ToolGating } from "../substrate/toolGating.ts";
 import { paramsOf, stringParam } from "../substrate/toolParams.ts";
 import { applyUnifiedDiff } from "../substrate/unifiedDiff.ts";
 import { branchOf, rebuildWorkflowState } from "../substrate/workflowState.ts";
-import { GIST_AUTHOR_STAGE } from "./gistAuthor.ts";
-import { readGistDraft, renderGistDraft } from "./gistDraft.ts";
-import { type GistApprovalSaveOutcome, gistApprovalSave } from "./gistSave.ts";
 import { implementHereExit, implementHereGuidance } from "./implementHere.ts";
 import { OBJECTIVE_AUTHOR_STAGE } from "./objectiveAuthor.ts";
 import {
@@ -121,7 +116,7 @@ export type ReviewOutcome =
   | { status: "implement-here"; reviewId: string }
   | { status: "completed"; approved: boolean; feedback?: string; reviewId: string };
 
-interface ToolResult {
+export interface ToolResult {
   content: { type: "text"; text: string }[];
   details: Record<string, unknown>;
   terminate?: boolean;
@@ -129,11 +124,11 @@ interface ToolResult {
 
 /**
  * The subject descriptor parameterizing the shared renderer cores below — the plan and objective
- * review arms render the same outcome shapes, differing only in these fields. Module-private on
- * purpose: nothing outside this module needs it (both execute arms live here), and a third review
- * subject would land here too, constructing its own descriptor and reusing the cores.
+ * review arms (in this module) and the injected gist arm (`pi/v1/gist.ts`) render the same
+ * outcome shapes, differing only in these fields. Exported so an externally-owned review subject
+ * constructs its own descriptor and reuses the cores.
  */
-interface ReviewSubject {
+export interface ReviewSubject {
   /** The display noun in every rendered text ("plan" / "objective"). */
   noun: string;
   /** The lowercase present-the-work phrase (dismissed / implement-here arms). */
@@ -174,21 +169,10 @@ const OBJECTIVE_SUBJECT: ReviewSubject = {
   noSourceError: "no objective draft resolved",
 };
 
-const GIST_SUBJECT: ReviewSubject = {
-  noun: "gist",
-  present: "the complete gist to the user",
-  presentUnavailable: "the complete gist to the user",
-  implementHereWhere: "on the gist path",
-  draftTool: "gist_draft",
-  failsafeCmd: "/gist-save",
-  detailsExtra: { subject: "gist" },
-  noSourceError: "no gist draft resolved",
-};
-
 const SKIP_TEXT =
   "no interactive review surface available — present the complete plan to the user in your next message.";
 
-function skipResult(): ToolResult {
+export function skipResult(): ToolResult {
   return { content: [{ type: "text", text: SKIP_TEXT }], details: { ok: true, status: "skipped" } };
 }
 
@@ -201,7 +185,10 @@ function skipResult(): ToolResult {
  * skip — the human declined to decide, so the present-the-work + manual-failsafe discipline
  * applies.
  */
-function subjectReviewOutcomeResult(subject: ReviewSubject, outcome: ReviewOutcome): ToolResult {
+export function subjectReviewOutcomeResult(
+  subject: ReviewSubject,
+  outcome: ReviewOutcome,
+): ToolResult {
   switch (outcome.status) {
     case "unavailable":
       return {
@@ -288,7 +275,7 @@ export function reviewOutcomeResult(outcome: ReviewOutcome): ToolResult {
  * widens to `Result<object>`: the core reads only `content[0]?.text` and the `details.ok`
  * discriminant (+ `details.error` on the fail arm), passing `details` through opaquely.
  */
-type SubjectSaveOutcome =
+export type SubjectSaveOutcome =
   | { status: "no-source" }
   | { status: "saved" | "save-failed"; result: Result<object>; gateExited: boolean };
 
@@ -306,7 +293,7 @@ type SubjectSaveOutcome =
  * The `no-source` arm is defensively unreachable (the reviewed source is always
  * non-blank) but maps to the save-failed shape rather than throwing.
  */
-function approvedSubjectSaveResult(
+export function approvedSubjectSaveResult(
   subject: ReviewSubject,
   outcome: Extract<ReviewOutcome, { status: "completed" }>,
   save: SubjectSaveOutcome,
@@ -593,7 +580,11 @@ export interface PlanReviewUI {
  * stays a standalone constant on purpose — the no-save exit is plan-arm-only by contract
  * (§8.23), never part of the descriptor.
  */
-function verdictsFor(subject: ReviewSubject): { approve: string; deny: string; skip: string } {
+export function verdictsFor(subject: ReviewSubject): {
+  approve: string;
+  deny: string;
+  skip: string;
+} {
   return {
     approve: "Approve — auto-save to GitHub",
     deny: "Deny — send feedback for revision",
@@ -876,153 +867,20 @@ export async function executeObjectiveReview(
   return objectiveReviewOutcomeResult(outcome);
 }
 
-// ------------------------------------------------------------------------ the gist review arm
-
-const GIST_REVIEW_EDITOR_TITLE =
-  "Gist review (view only — edits are not saved) — Enter: continue to verdict · Esc: skip · " +
-  "Ctrl+G: $EDITOR";
+// ------------------------------------------------------------------------- the execute core
 
 /**
- * Map a non-approved gist review outcome into the model-facing tool result (exported for the
- * offline tests) — the gist-flavored sibling of `objectiveReviewOutcomeResult`, delegating to
- * `subjectReviewOutcomeResult` with `GIST_SUBJECT`. Every arm carries `details.subject: "gist"`;
- * the texts redirect to `gist_draft` / `/gist-save`. The execute path routes approved outcomes
- * to `approvedGistSaveResult` first, so `completed` renders DENIED here.
+ * The injected gist review arm's shape (structural on purpose — this module imports NOTHING
+ * from `pi/`): index.ts composes it from the v1 gist installer (`runGistReviewV1`), and the
+ * gist stage dispatch below calls it with this module's bridge + gating.
  */
-export function gistReviewOutcomeResult(outcome: ReviewOutcome): ToolResult {
-  return subjectReviewOutcomeResult(GIST_SUBJECT, outcome);
-}
-
-/**
- * Map an APPROVED gist review outcome + the `gistApprovalSave` outcome into the model-facing
- * tool result (exported for the offline tests) — the gist sibling of
- * `approvedObjectiveSaveResult`, delegating to `approvedSubjectSaveResult` with `GIST_SUBJECT`
- * and no opts (the gist path reviews only the rendered draft, view-only — no
- * `paramMismatch`/`edited`).
- */
-export function approvedGistSaveResult(
-  outcome: Extract<ReviewOutcome, { status: "completed" }>,
-  save: GistApprovalSaveOutcome,
-): ToolResult {
-  return approvedSubjectSaveResult(
-    GIST_SUBJECT,
-    outcome,
-    save.status === "no-draft" ? { status: "no-source" } : save,
-  );
-}
-
-/**
- * The gist review arm, mirroring `executeObjectiveReview`'s shape with the rendered gist draft
- * as the SOLE review source (never the `plan` param, never the transcript). First-party reviews
- * run VIEW-ONLY (edits are never written back; deny+feedback is the change channel); the
- * implement-here verdict is never offered (a gist is not implementable — it has no strategy).
- * An APPROVED outcome wires into the `gistApprovalSave` seam (re-read the artifact → `saveGist`
- * → D1a gate exit → terminating); every other outcome maps via `gistReviewOutcomeResult`. ONE
- * carve-out (plannotator only, mirroring the objective arm): an approval whose feedback opens a
- * Direct Edits section SKIPS the save — rendered edits cannot be folded back into the
- * structured draft mechanically — and returns a NON-terminating revise round with the gate
- * untouched (fold each hunk into the matching `gist_draft` field, re-review to confirm); perk
- * never saves a gist the reviewer explicitly edited away from.
- */
-export async function executeGistReview(
+export type GistReviewArm = (
   pi: ExtensionAPI,
   ctx: ExtensionContext,
   gating: ToolGating,
   bridge: { review(plan: string, signal?: AbortSignal): Promise<ReviewOutcome> },
   signal?: AbortSignal,
-): Promise<ToolResult> {
-  // 1. Headless → soft skip (fail-open; never wedges CI/supervisor runs on an interactive UI).
-  if (!ctx.hasUI) return skipResult();
-  // 2. The draft artifact is the sole review source — no draft → soft skip with the gist_draft
-  //    redirect.
-  const draft = readGistDraft(ctx);
-  if (draft === null) {
-    return {
-      content: [
-        {
-          type: "text",
-          text:
-            "no gist draft to review — write the working gist with gist_draft (the " +
-            "statement-of-intent prose), then call plan_review again.",
-        },
-      ],
-      details: {
-        ok: false,
-        error: "no gist draft to review — write it with gist_draft first",
-        error_type: "no_gist_draft",
-        status: "skipped",
-        reason: "no_gist_draft",
-      },
-    };
-  }
-  // 3. The reviewed bytes are the RENDERED markdown (title + scope + prose) — never raw JSON.
-  const rendered = renderGistDraft(draft);
-  // 4. Backend dispatch (mirrors the objective path): plannotator-selected → the bridge; ANY
-  //    other selection → the first-party editor, view-only.
-  const sig = signal ?? ctx.signal;
-  let outcome: ReviewOutcome;
-  if (isPlannotatorPlanSelected(ctx.cwd)) {
-    outcome = await bridge.review(rendered, sig);
-    // APPROVE + Direct Edits (browser edits of the RENDERED markdown), checked BEFORE the
-    // approved-save routing (the approved-first discipline; mirrors the objective arm): the
-    // save seam re-reads the STRUCTURED artifact, so rendered edits cannot be folded back
-    // without model judgment. Skip the save, keep the gate read-only, and route ONE revise
-    // round: the model folds each hunk into the matching `gist_draft` field, then re-reviews
-    // to confirm. The heading check suffices (extraction success is irrelevant here — the diff
-    // goes to the model verbatim either way).
-    if (
-      outcome.status === "completed" &&
-      outcome.approved &&
-      outcome.feedback !== undefined &&
-      hasDirectEditsHeading(outcome.feedback)
-    ) {
-      return {
-        content: [
-          {
-            type: "text",
-            text:
-              "gist APPROVED with direct browser edits — these cannot be auto-applied to the " +
-              "structured draft, so nothing was saved. Fold each Direct Edits hunk below into " +
-              "the matching gist_draft field (a `# <title>` heading hunk → title, a `Scope:` " +
-              "line hunk → scope, prose hunks → prose), then call plan_review again to " +
-              `confirm.\n\nReviewer feedback:\n${outcome.feedback}`,
-          },
-        ],
-        details: {
-          ok: true,
-          status: "revise",
-          reason: "direct_edits",
-          approved: true,
-          feedback: outcome.feedback,
-          reviewId: outcome.reviewId,
-          subject: "gist",
-        },
-      };
-    }
-  } else {
-    const fp = await runFirstPartyReview({
-      ui: ctx.ui,
-      plan: rendered,
-      writeDraft: () => true, // unreachable under viewOnly — the branch is skipped
-      signal: sig,
-      editorTitle: GIST_REVIEW_EDITOR_TITLE,
-      verdicts: verdictsFor(GIST_SUBJECT),
-      viewOnly: true,
-    });
-    outcome = fp.outcome;
-  }
-  // 5. An APPROVED decision (either backend) wires into the gistApprovalSave seam (the artifact
-  //    is re-read at save time — never the rendered bytes; auto-save → D1a gate exit →
-  //    terminating result); everything else maps via gistReviewOutcomeResult. Approved-first
-  //    routing: gistReviewOutcomeResult's completed case renders DENIED.
-  if (outcome.status === "completed" && outcome.approved) {
-    const save = await gistApprovalSave(pi, ctx, gating);
-    return approvedGistSaveResult(outcome, save);
-  }
-  return gistReviewOutcomeResult(outcome);
-}
-
-// ------------------------------------------------------------------------- the execute core
+) => Promise<ToolResult>;
 
 /**
  * The `plan_review` execute core, extracted pure-over-its-seams (the bridge, the gating, the
@@ -1038,6 +896,7 @@ export async function executePlanReview(
   ctx: ExtensionContext,
   gating: ToolGating,
   bridge: { review(plan: string, signal?: AbortSignal): Promise<ReviewOutcome> },
+  gistArm: GistReviewArm,
   params: unknown,
   signal?: AbortSignal,
   wave?: WaveLaunch,
@@ -1075,7 +934,7 @@ export async function executePlanReview(
     return executeObjectiveReview(pi, ctx, gating, bridge, signal ?? ctx.signal, wave);
   }
   if (launchedStage === GIST_AUTHOR_STAGE) {
-    return executeGistReview(pi, ctx, gating, bridge, signal ?? ctx.signal);
+    return gistArm(pi, ctx, gating, bridge, signal ?? ctx.signal);
   }
   // 2. Headless → soft skip (fail-open; never wedges CI/supervisor runs on an interactive UI).
   if (!ctx.hasUI) return skipResult();
@@ -1189,10 +1048,16 @@ export async function executePlanReview(
  * Register `plan_review` — perk's universal review door. In READ_ONLY_TOOLS so it is callable
  * INSIDE plan mode (the whole point — review happens before the gate ever comes off). Fail-open
  * everywhere: headless / dismissed / backend-unavailable all soft-skip so authoring never wedges.
+ * `gistArm` is the injected gist review arm (index.ts composes it from the v1 gist installer);
  * `wave` is the injected wave-launch deps (index.ts composes them from the door open cores);
  * absent ⇒ the chooser never appears and every path is byte-stable.
  */
-export function registerPlanReview(pi: ExtensionAPI, gating: ToolGating, wave?: WaveLaunch): void {
+export function registerPlanReview(
+  pi: ExtensionAPI,
+  gating: ToolGating,
+  gistArm: GistReviewArm,
+  wave?: WaveLaunch,
+): void {
   const bridge = createPlannotatorBridge(pi.events);
 
   pi.registerTool({
@@ -1231,7 +1096,7 @@ export function registerPlanReview(pi: ExtensionAPI, gating: ToolGating, wave?: 
       },
     },
     async execute(_toolCallId, params, signal, _onUpdate, ctx) {
-      return executePlanReview(pi, ctx, gating, bridge, params, signal, wave);
+      return executePlanReview(pi, ctx, gating, bridge, gistArm, params, signal, wave);
     },
   });
 }

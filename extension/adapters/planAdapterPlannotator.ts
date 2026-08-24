@@ -51,7 +51,7 @@
 
 import { randomUUID } from "node:crypto";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { GIST_AUTHOR_STAGE } from "../factories/gistAuthor.ts";
+import { GIST_AUTHOR_STAGE } from "../authoring/gist/draft.ts";
 import { OBJECTIVE_AUTHOR_STAGE } from "../factories/objectiveAuthor.ts";
 import { OBJECTIVE_SAVE_STAGE } from "../factories/objectiveSave.ts";
 import { resolvedPlanProviderId } from "../factories/planMode.ts";
@@ -59,7 +59,12 @@ import { resolvedPlanProviderId } from "../factories/planMode.ts";
 import type { ReviewOutcome } from "../factories/planReview.ts";
 import { render } from "../substrate/prompts.ts";
 import { PLANNOTATOR_PLAN_PROVIDER_ID } from "../substrate/providers.ts";
-import { branchCarries, branchOf, rebuildWorkflowState } from "../substrate/workflowState.ts";
+import {
+  activeContextWindow,
+  branchCarries,
+  branchOf,
+  rebuildWorkflowState,
+} from "../substrate/workflowState.ts";
 
 /** The plannotator plan-adapter bridge customType (distinct from planMode's `perk:plan-context`). */
 export const PLAN_ADAPTER_PLANNOTATOR_CONTEXT_TYPE = "perk:plan-adapter-plannotator";
@@ -315,15 +320,18 @@ export function registerPlanAdapterPlannotator(pi: ExtensionAPI): void {
           : PLAN_ADAPTER_PLANNOTATOR_CONTEXT;
     // Once-only PER FLAVOR: the dedup key is the flavor's marker (not the shared customType), so
     // a stage change still delivers the missing flavor while a prior copy of another flavor
-    // sits on the branch. Injected customs persist, so a live copy suppresses re-injection;
-    // compaction dropping it makes the scan come up clean and the next turn re-injects.
+    // sits on the branch. Injected customs persist, so a live copy suppresses re-injection.
+    // The GIST flavor scans the COMPACTION-ACTIVE window (the whole gist flow re-injects
+    // coherently after compaction, matching the gist-author context); the plan/objective
+    // flavors keep the whole-branch scan until their feature slice migrates them.
     const marker =
       flavor === "objective"
         ? OBJECTIVE_ADAPTER_PLANNOTATOR_MARKER
         : flavor === "gist"
           ? GIST_ADAPTER_PLANNOTATOR_MARKER
           : PLAN_ADAPTER_PLANNOTATOR_MARKER;
-    if (branchCarries(branch, marker)) return;
+    const scanned = flavor === "gist" ? activeContextWindow(branch) : branch;
+    if (branchCarries(scanned, marker)) return;
     return {
       message: {
         customType: PLAN_ADAPTER_PLANNOTATOR_CONTEXT_TYPE,

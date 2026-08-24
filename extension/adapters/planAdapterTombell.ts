@@ -35,7 +35,7 @@
 //     stages bind only to the provider-agnostic plan-ref and are unchanged.
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { GIST_AUTHOR_STAGE } from "../factories/gistAuthor.ts";
+import { GIST_AUTHOR_STAGE } from "../authoring/gist/draft.ts";
 import { OBJECTIVE_AUTHOR_STAGE } from "../factories/objectiveAuthor.ts";
 import { resolvedPlanProviderId } from "../factories/planMode.ts";
 import { render } from "../substrate/prompts.ts";

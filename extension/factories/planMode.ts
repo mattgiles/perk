@@ -31,6 +31,7 @@
 //     handler-time deferral alone is insufficient once the foreign package is loaded).
 
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { GIST_AUTHOR_STAGE } from "../authoring/gist/draft.ts";
 import { registerPerkCommand } from "../substrate/command.ts";
 import { loadPerkConfig } from "../substrate/config.ts";
 import { render } from "../substrate/prompts.ts";
@@ -46,7 +47,6 @@ import { report } from "../surfaces/report.ts";
 // `Key` via the surfaces re-export (keybinding vocabulary, not rich UI) — keeps pi-tui imports
 // structurally confined to the surfaces module (the surfacesGuard pi-tui import rule).
 import { Key } from "../surfaces/surfaces.ts";
-import { GIST_AUTHOR_STAGE } from "./gistAuthor.ts";
 import { OBJECTIVE_AUTHOR_STAGE } from "./objectiveAuthor.ts";
 
 /** The plan-authoring context customType (distinct from the gate's `perk:mode-context`). */

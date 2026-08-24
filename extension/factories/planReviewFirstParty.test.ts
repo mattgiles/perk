@@ -17,6 +17,7 @@ import { PLAN_DRAFT_ARTIFACT } from "./planDraft.ts";
 import {
   approvedSaveResult,
   executePlanReview,
+  type GistReviewArm,
   type PlanReviewUI,
   type ReviewOutcome,
   reviewOutcomeResult,
@@ -30,6 +31,11 @@ function selectPlanProvider(cwd: string, id: string): void {
 }
 
 // ------------------------------------------------------------------------------ shared fakes
+
+/** The injected gist arm — throws on invocation: these tests never run the gist stage. */
+const noGistArm: GistReviewArm = async () => {
+  throw new Error("the gist arm must not be invoked outside the gist stage");
+};
 
 const PLAN_JSON = JSON.stringify({
   success: true,
@@ -188,6 +194,7 @@ test("execute: no draft + no param NEVER reviews the transcript -> skipped/no_pl
     ctx as unknown as ExtensionContext,
     fakeGating(true),
     bridge,
+    noGistArm,
     {},
   );
   const details = result.details as {
@@ -223,6 +230,7 @@ test("execute: the artifact wins over a differing param; the ignored param is fl
       ctx as unknown as ExtensionContext,
       fakeGating(true),
       bridge,
+      noGistArm,
       { plan: "# A different param plan" },
     );
     assert.deepEqual(bridge.reviewed, ["# The draft\n"], "the artifact bytes were reviewed");
@@ -252,6 +260,7 @@ test("execute: approved (bridge) -> auto-save runs, gate exits, result terminate
       ctx as unknown as ExtensionContext,
       gating,
       cannedBridge(APPROVED),
+      noGistArm,
       {},
     );
     const argv = argvs[0] ?? [];
@@ -296,6 +305,7 @@ test("execute: approved but the save fails -> non-terminating, gate stays on, /p
       ctx as unknown as ExtensionContext,
       gating,
       cannedBridge(APPROVED),
+      noGistArm,
       {},
     );
     assert.equal(result.terminate, undefined, "a failed auto-save never terminates");
@@ -332,6 +342,7 @@ test("first-party approve, no edits -> approvalSave runs with the reviewed bytes
       ctx as unknown as ExtensionContext,
       gating,
       cannedBridge(DENIED),
+      noGistArm,
       {},
     );
     assert.equal(result.terminate, true, "a saved approval terminates the turn");
@@ -377,6 +388,7 @@ test("first-party approve with edits -> write-back to the draft, edited bytes sa
       ctx as unknown as ExtensionContext,
       fakeGating(true),
       cannedBridge(DENIED),
+      noGistArm,
       {},
     );
     assert.equal(
@@ -417,6 +429,7 @@ test("first-party: a failed edit write-back aborts the review fail-open, nothing
     ctx as unknown as ExtensionContext,
     fakeGating(true),
     cannedBridge(DENIED),
+    noGistArm,
     { plan: "# Param plan" },
   );
   const wbDetails = result.details as { ok?: boolean; status?: string; error_type?: string };
@@ -445,6 +458,7 @@ test("first-party deny + feedback -> DENIED text with the feedback + plan_draft 
     ctx as unknown as ExtensionContext,
     fakeGating(true),
     cannedBridge(APPROVED),
+    noGistArm,
     { plan: "# Param plan" },
   );
   const text = String(result.content[0]?.text);
@@ -468,6 +482,7 @@ test("first-party: editor dismissed (Esc) -> skipped/dismissed, no verdict, no s
     ctx as unknown as ExtensionContext,
     fakeGating(true),
     cannedBridge(APPROVED),
+    noGistArm,
     { plan: "# Param plan" },
   );
   const details = result.details as { ok?: boolean; status?: string; reason?: string };
@@ -498,6 +513,7 @@ test("first-party implement-here -> gate exited, NON-terminating guidance result
     ctx as unknown as ExtensionContext,
     gating,
     cannedBridge(DENIED),
+    noGistArm,
     {},
   );
   assert.deepEqual(
@@ -535,6 +551,7 @@ test("first-party edited then implement-here -> the final reviewed bytes are inl
     ctx as unknown as ExtensionContext,
     fakeGating(true),
     cannedBridge(DENIED),
+    noGistArm,
     {},
   );
   assert.equal(
@@ -569,6 +586,7 @@ test("first-party: a seeded node claim suppresses implement-here (the 3-option s
     ctx as unknown as ExtensionContext,
     fakeGating(true),
     cannedBridge(DENIED),
+    noGistArm,
     {},
   );
   assert.deepEqual(
@@ -603,6 +621,7 @@ test("first-party: the COLD-claim record suppresses implement-here too", async (
     ctx as unknown as ExtensionContext,
     fakeGating(true),
     cannedBridge(DENIED),
+    noGistArm,
     {},
   );
   assert.deepEqual(

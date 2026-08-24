@@ -19,6 +19,7 @@ import {
   approvedObjectiveSaveResult,
   executeObjectiveReview,
   executePlanReview,
+  type GistReviewArm,
   objectiveReviewOutcomeResult,
   type PlanReviewUI,
   type ReviewOutcome,
@@ -30,6 +31,11 @@ function selectPlanProvider(cwd: string, id: string): void {
 }
 
 // ------------------------------------------------------------------------------ shared fakes
+
+/** The injected gist arm — throws on invocation: these tests never run the gist stage. */
+const noGistArm: GistReviewArm = async () => {
+  throw new Error("the gist arm must not be invoked outside the gist stage");
+};
 
 const PLAN_JSON = JSON.stringify({
   success: true,
@@ -213,6 +219,7 @@ test("objective arm: no draft -> skipped/no_objective_draft, no backend invoked"
     ctx as unknown as ExtensionContext,
     fakeGating(true),
     bridge,
+    noGistArm,
     { plan: "# A plan param (never a source here)" },
   );
   const details = result.details as {
@@ -247,6 +254,7 @@ test("objective-save stage: plan_review routes to the objective arm too (never t
     ctx as unknown as ExtensionContext,
     fakeGating(true),
     bridge,
+    noGistArm,
     { plan: "# A plan param (never a source here)" },
   );
   const details = result.details as { status?: string; reason?: string };
@@ -269,6 +277,7 @@ test("objective arm: plannotator selected -> the bridge receives the RENDERED ma
     ctx as unknown as ExtensionContext,
     fakeGating(true),
     bridge,
+    noGistArm,
     {},
   );
   assert.equal(bridge.reviewed.length, 1, "the bridge reviewed once");
@@ -300,6 +309,7 @@ test("objective arm: default selection -> first-party VIEW-ONLY; approval auto-s
     ctx as unknown as ExtensionContext,
     gating,
     bridge,
+    noGistArm,
     {},
   );
   assert.equal(bridge.reviewed.length, 0, "the plannotator bridge was never invoked");
@@ -356,6 +366,7 @@ test("objective arm: approved but the cold door fails -> non-terminating, gate s
     ctx as unknown as ExtensionContext,
     gating,
     cannedBridge(DENIED),
+    noGistArm,
     {},
   );
   assert.equal(result.terminate, undefined, "a failed auto-save never terminates");
@@ -386,6 +397,7 @@ test("objective arm: approved via the plannotator bridge -> the same seam path s
     ctx as unknown as ExtensionContext,
     gating,
     bridge,
+    noGistArm,
     {},
   );
   assert.equal(bridge.reviewed.length, 1, "the bridge reviewed the RENDERED markdown");
@@ -416,6 +428,7 @@ test("objective arm: denied + feedback -> objective_draft redirect, no save", as
     ctx as unknown as ExtensionContext,
     fakeGating(true),
     cannedBridge(APPROVED),
+    noGistArm,
     {},
   );
   const text = String(result.content[0]?.text);
@@ -455,6 +468,7 @@ test("objective arm: mistyped plan param still -> bad_input (decode-first order 
     ctx as unknown as ExtensionContext,
     fakeGating(true),
     bridge,
+    noGistArm,
     { plan: 5 },
   );
   const details = result.details as {
@@ -637,6 +651,7 @@ test("objective arm: approved via the bridge + Direct Edits -> NO save, non-term
     ctx as unknown as ExtensionContext,
     gating,
     bridge,
+    noGistArm,
     {},
   );
   assert.equal(bridge.reviewed.length, 1, "the bridge reviewed the rendered draft");
@@ -680,6 +695,7 @@ test("objective arm: approved via the bridge + a heading-only broken section sti
       reviewId: "rev-ode2",
       feedback: "# Direct Edits\n\nthe fence never arrived",
     }),
+    noGistArm,
     {},
   );
   assert.equal(argvs.length, 0, "no save");
