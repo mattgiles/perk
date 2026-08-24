@@ -7258,7 +7258,19 @@ manifest-less) `sync-*` residue is inert until `recover`'s orphan sweep (§8.51)
 2. **Continuation gate**: any manifest for this lineage → `sync_conflict_pending` (the
    message names the manifest path and the retained worktree; clearing is manual until the
    continue/abort surface). An unparseable manifest is treated as PRESENT — fail closed,
-   never a fresh cascade over retained residue.
+   never a fresh cascade over retained residue. The PARSEABLE-manifest refusal additionally
+   appends the copyable **warm-route hint** as its final sentence — `/objective-sync
+   <objective>` with the redirect-resolved train objective id, worded to the §8.51 consent
+   posture ("on your approval": the session offers resolution and dispatches only on
+   explicit request, from a read-write session) — appended only when the id fullmatches the
+   command-safe vocabulary `[A-Za-z0-9][A-Za-z0-9._-]{0,63}` AND the parsed manifest names
+   this train's objective (`manifest.objective_id == train.objective_id`); on either miss
+   the whole sentence is omitted — never an id-less command, and never a route that can
+   only end in the downstream mismatch refusal. The unparseable arm stays abort-only
+   (automated resolution cannot corroborate an unparseable manifest). The gate's REFUSAL
+   itself never verifies manifest↔train identity — mismatch refusal stays downstream
+   (`--continue` → `continuation_invalid`; the warm resolve corroboration goes
+   report-only).
 3. **Journal route** — a separate fresh journal read (the §8.43 fold is the single routing
    authority; the projection's `unresolved_operations` summary is status color only). An
    unresolved SYNC **or ADOPT** on this lineage → the resume path — routing is
@@ -7318,6 +7330,16 @@ manifest-less) `sync-*` residue is inert until `recover`'s orphan sweep (§8.51)
    manifest (naming the OLD conflict layer) while the message names the NEW one, and the token
    mismatch is what keeps the warm drive report-only there. Pinned by the sync conflict-arm
    tests; rewriting these messages without the token silently disables the warm drive.
+   The **fresh-retained** and **continue-retained** messages (the resolution-real arms)
+   append the same copyable warm-route hint as the step-2 gate as their final sentence —
+   the `for layer <node_id> ` token precedes it and stays load-bearing (the hint sentence
+   never contains the token). The dry-run and fresh-write-failure arms deliberately do NOT
+   advertise automated resolution — nothing is retained there. The continue-time
+   rewrite-failure arm retains state (the PREVIOUS durable manifest and the mid-rebase
+   worktree) but does not advertise it either: that state cannot be freshly corroborated
+   for automated dispatch — the preserved manifest names the OLD conflict layer (the token
+   mismatch above) — so its remedy stays the filesystem. No headless flag is advertised
+   anywhere — none exists; the cold CLI never dispatches resolution.
 9. **Approval gate**: the ordered `SyncResult.Cascade` (per-ref before→after, node ids, PR numbers,
    base facts) → the `approve` callback (`None` = auto-approve). Declined → the guard
    cleans; the declined result returns — no journal record, nothing mutated.

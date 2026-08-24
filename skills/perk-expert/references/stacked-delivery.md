@@ -132,7 +132,9 @@ plan worktree's linked objective when omitted.
   layer's manually-pushed remote head and cascade above it), `--dry-run` (preview, nothing
   mutates), and `--continue`/`--abort` (resume or discard a retained rebase-conflict
   continuation — the rebase is finished first, by you or by the resolver subagent the warm
-  `/objective-sync` door dispatches; the cold CLI never dispatches resolution). The
+  `/objective-sync` door dispatches; the cold CLI never dispatches resolution, and the
+  retained-conflict refusals themselves name that session route with a copyable
+  `/objective-sync <objective>` hint). The
   cascade is computed in an isolated disposable worktree, rendered for **confirmation**,
   journaled, and pushed as **ONE atomic multi-ref push** under exact per-ref leases (every
   ref moves or none does). Typed refusals before anything is pushed: out-of-band drift
