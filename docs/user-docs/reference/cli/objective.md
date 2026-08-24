@@ -395,6 +395,10 @@ conflict** stops the cascade with the conflicted worktree deliberately **retaine
 continuation manifest (`.perk/workflow/sync-continuations/<lineage>.json`); nothing was
 pushed or journaled at that point, and a fresh sync refuses (`sync_conflict_pending`) until
 you resume it (`--continue`) or discard it (`--abort`). A dry-run conflict retains nothing.
+The retained-conflict refusal and the `sync_conflict_pending` gate carry the copyable
+session route: in a read-write session, `/objective-sync` offers automated resolution and
+dispatches the conflict resolver into the retained worktree on your approval, handing
+publication back to you — the cold CLI never dispatches resolution.
 
 Exit codes: `0` = success — including the honest **no-op** ("nothing to synchronize", with a
 `--base` hint when the base has advanced), a **declined** confirmation, a `--dry-run`

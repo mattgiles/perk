@@ -8,6 +8,7 @@ immutable private runtime.
 """
 
 import itertools
+import re
 import time
 import tomllib
 from collections.abc import Callable, Mapping, Sequence
@@ -58,6 +59,34 @@ from perk.substrate import git as git_mod
 # mismatch classifies as drift.
 _SETTLE_ATTEMPTS = 5
 _SETTLE_DELAY_SECONDS = 2.0
+
+# The warm-route hint's id confinement: the copyable hint is a command, so the interpolated
+# objective id must be command-safe — start alphanumeric (an option-shaped token like
+# `--json` or a `.`/`..` segment can never render) and stay inside the warm corroboration
+# vocabulary (`[A-Za-z0-9._-]`, 64-char cap), which covers every real id shape (numeric
+# GitHub ids, Linear `ENG-7`).
+_HINT_ID_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}")
+
+
+def _warm_route_hint(objective_id: str) -> str | None:
+    """The copyable warm-route sentence the resolution-real conflict refusals append.
+
+    Warm-route-only by design: the cold CLI never dispatches resolution and no headless
+    flag exists. "On your approval" is the landed consent posture (§8.51) — a pre-existing
+    continuation is dispatched only on explicit human request, and the drives soft-refuse
+    in a read-only session. The sentence must never contain the ``for layer `` token —
+    §8.49 freshness stays upstream in the message. A non-conforming id returns ``None``
+    and the caller appends nothing: fail-closed omission, never an id-less command
+    (objective inference in an arbitrary session is conditional and could select a
+    different objective).
+    """
+    if _HINT_ID_RE.fullmatch(objective_id) is None:
+        return None
+    return (
+        "Automated resolution is available from a read-write perk session: run "
+        f"`/objective-sync {objective_id}` — on your approval it dispatches the conflict "
+        "resolver into the retained worktree and hands publication back to you."
+    )
 
 
 class SyncError(DeliveryError):
@@ -275,7 +304,7 @@ def _synchronize(
     train = _status_train(context, request.objective_id)
     lineage = _require_lineage(train)
     refuse_structural_blockers(train)
-    _gate_continuation(context, lineage)
+    _gate_continuation(context, lineage, objective_id=train.objective_id)
     fold = context.persistence.read_journal(train.objective_id)
     if fold.unresolved:
         op = fold.unresolved[0]
@@ -346,10 +375,14 @@ def refuse_structural_blockers(train: DeliveryTrain) -> None:
         )
 
 
-def _gate_continuation(context: _SyncContext, lineage: str) -> None:
+def _gate_continuation(context: _SyncContext, lineage: str, *, objective_id: str) -> None:
     """The fail-closed conflict gate: ANY manifest for this lineage — parseable or not —
     refuses a fresh cascade over retained residue (the remedies are ``sync --continue`` /
-    ``sync --abort``)."""
+    ``sync --abort``). The parseable arm additionally appends the warm-route hint with the
+    redirect-resolved train ``objective_id`` — route advice only: the gate does not verify
+    manifest↔train identity (``--continue`` refuses a mismatch as ``continuation_invalid``;
+    the warm resolve corroboration goes report-only), and the unparseable arm stays
+    abort-only (automated resolution cannot corroborate an unparseable manifest)."""
     pending = context.runtime.pending_continuation(context.repo_root, lineage)
     if pending is None:
         return
@@ -360,14 +393,17 @@ def _gate_continuation(context: _SyncContext, lineage: str) -> None:
             "discard it with `perk objective stack sync --abort`",
             error_type="sync_conflict_pending",
         )
-    raise SyncError(
+    message = (
         f"operation {pending.manifest.operation_id} stopped mid-conflict on node "
         f"{pending.manifest.conflict_node_id}: the conflicted worktree is retained at "
         f"{pending.manifest.worktree_path} under the manifest {pending.path} — resolve the "
         "conflict there and run `perk objective stack sync --continue`, or discard the "
-        "retained state with `perk objective stack sync --abort`",
-        error_type="sync_conflict_pending",
+        "retained state with `perk objective stack sync --abort`"
     )
+    hint = _warm_route_hint(objective_id)
+    if hint is not None:
+        message = f"{message}. {hint}"
+    raise SyncError(message, error_type="sync_conflict_pending")
 
 
 @dataclass(frozen=True)
@@ -1196,19 +1232,20 @@ def _calculate_candidates(
                         "rerun sync.",
                         error_type="rebase_conflict",
                     ) from write_exc
-                raise _ConflictRetained(
-                    SyncError(
-                        f"the candidate rebase for layer {layer.node_id} "
-                        f"({layer.branch!r} onto {new_parent}) hit a conflict — the "
-                        f"conflicted worktree is retained at {worktree} under the "
-                        f"continuation manifest {path}; no remote ref and no journal record "
-                        "was created. Resolve the conflict in the retained worktree "
-                        "(`git rebase --continue`) and run "
-                        "`perk objective stack sync --continue`, or discard it with "
-                        "`perk objective stack sync --abort`.",
-                        error_type="rebase_conflict",
-                    )
+                message = (
+                    f"the candidate rebase for layer {layer.node_id} "
+                    f"({layer.branch!r} onto {new_parent}) hit a conflict — the "
+                    f"conflicted worktree is retained at {worktree} under the "
+                    f"continuation manifest {path}; no remote ref and no journal record "
+                    "was created. Resolve the conflict in the retained worktree "
+                    "(`git rebase --continue`) and run "
+                    "`perk objective stack sync --continue`, or discard it with "
+                    "`perk objective stack sync --abort`."
                 )
+                hint = _warm_route_hint(objective_id)
+                if hint is not None:
+                    message = f"{message} {hint}"
+                raise _ConflictRetained(SyncError(message, error_type="rebase_conflict"))
             candidate = outcome.head_sha
         sync.git.update_ref(temp_ref, candidate)
         candidates.append(candidate)
@@ -2338,14 +2375,17 @@ def _continue(
                             "and rerun `perk objective stack sync --continue`",
                             error_type="rebase_conflict",
                         ) from write_exc
-                    raise SyncError(
+                    message = (
                         f"the candidate rebase for layer {layer.node_id} ({layer.branch!r} "
                         f"onto {new_parent}) hit a NEW conflict — the conflicted worktree "
                         f"stays retained at {targets.worktree} under the manifest {path} "
                         f"(same operation {manifest.operation_id}); resolve and rerun "
-                        "`perk objective stack sync --continue`",
-                        error_type="rebase_conflict",
+                        "`perk objective stack sync --continue`"
                     )
+                    hint = _warm_route_hint(train.objective_id)
+                    if hint is not None:
+                        message = f"{message}. {hint}"
+                    raise SyncError(message, error_type="rebase_conflict")
                 candidate = outcome.head_sha
             sync.git.update_ref(layer.candidate_temp_ref, candidate)
             layers_list[pos] = replace(layer, new_parent_edge=new_parent, candidate_sha=candidate)

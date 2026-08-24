@@ -1257,6 +1257,10 @@ def test_rebase_conflict_retains_residue_under_a_manifest():
     # rewrite that drops it silently disables the /objective-sync conflict drive.
     assert "for layer 1.3 " in str(error)
     assert "no remote ref and no journal record" in str(error)
+    # Cross-plane lockstep: the appended warm-route sentence names the warm command id
+    # registered in extension/doors/objectiveStack.ts and the landed consent posture
+    # ("on your approval").
+    assert "`/objective-sync 500`" in str(error)
     # The guard DISARMED: temp refs + worktree retained, manifest written.
     manifest = world.manifests[LINEAGE]
     assert manifest.conflict_node_id == "1.3"
@@ -1296,6 +1300,10 @@ def test_continuation_gate_refuses_a_fresh_sync():
     assert error.error_type == "sync_conflict_pending"
     assert "/wt/sync-OP" in str(error)  # names the retained worktree
     assert "sync-continuations" in str(error)  # …and the manifest path
+    # Cross-plane lockstep: the appended warm-route sentence names the warm command id
+    # registered in extension/doors/objectiveStack.ts and the landed consent posture
+    # ("on your approval").
+    assert "`/objective-sync 500`" in str(error)
     world.assert_nothing_journaled()
 
 
@@ -1305,6 +1313,22 @@ def test_unparseable_manifest_still_gates():
     error = _sync_error(world)
     assert error.error_type == "sync_conflict_pending"
     assert "could not be parsed" in str(error)
+    # Deliberately abort-only: automated resolution cannot corroborate an unparseable
+    # manifest, so this arm never advertises it.
+    assert "/objective-sync" not in str(error)
+
+
+def test_warm_route_hint_confines_the_objective_id():
+    # Conforming ids interpolate into the copyable command (numeric GitHub ids, Linear keys).
+    for good in ("500", "ENG-7"):
+        hint = sync._warm_route_hint(good)
+        assert hint is not None
+        assert f"`/objective-sync {good}`" in hint
+    # Non-conforming ids fail closed to omission — never an id-less command, and the raw
+    # input never reaches any returned text: option-shaped tokens, dot segments, the
+    # 64-char cap, the empty string, and whitespace/metacharacter ids.
+    for bad in ("--json", ".", "..", "a" * 65, "", "7; rm -rf"):
+        assert sync._warm_route_hint(bad) is None
 
 
 def test_cross_lineage_manifest_does_not_gate():
@@ -2246,6 +2270,9 @@ def test_conflict_with_failed_manifest_write_stays_typed_and_cleans():
     # rebase_conflict arm names the layer whose rebase actually stopped.
     assert "for layer 1.3 " in str(error)
     assert "could not be written" in str(error) and "NOT retained" in str(error)
+    # Deliberately no warm-route hint: retention failed, so there is nothing for automated
+    # resolution to resolve — the remedy is the filesystem.
+    assert "/objective-sync" not in str(error)
     assert world.manifests == {}
     world.assert_nothing_journaled()
     world.assert_guard_cleaned()  # guard NOT disarmed: temp refs + worktree removed
@@ -2329,6 +2356,9 @@ def test_dry_run_conflict_retains_nothing():
     error = _sync_error(world, dry_run=True)
     assert error.error_type == "rebase_conflict"
     assert "dry-run preview" in str(error) and "nothing was retained" in str(error)
+    # Deliberately no warm-route hint: nothing is retained, so automated resolution
+    # cannot fire here.
+    assert "/objective-sync" not in str(error)
     assert world.manifests == {}  # NO manifest write
     world.assert_nothing_journaled()
     world.assert_guard_cleaned()  # the guard stayed armed
@@ -2980,6 +3010,10 @@ def test_continue_new_higher_conflict_rewrites_the_manifest_same_operation():
     # The load-bearing §8.49 freshness token (see corroborateSyncConflict): the rewritten
     # manifest and the message agree on the NEW conflict layer here.
     assert "for layer 1.3 " in str(error)
+    # Cross-plane lockstep: the appended warm-route sentence names the warm command id
+    # registered in extension/doors/objectiveStack.ts and the landed consent posture
+    # ("on your approval").
+    assert "`/objective-sync 500`" in str(error)
     rewritten = world.manifests[LINEAGE]
     assert rewritten.operation_id == OP  # same operation, progress retained
     assert rewritten.conflict_node_id == "1.3"
@@ -3349,6 +3383,9 @@ def test_continue_new_conflict_rewrite_failure_stays_typed():
     assert error.error_type == "rebase_conflict"
     assert "could not be rewritten" in str(error)
     assert "previous snapshot stays retained" in str(error)
+    # Deliberately no warm-route hint: the durable manifest still names the OLD conflict
+    # layer, so the warm drive stays report-only on this arm — the remedy is the filesystem.
+    assert "/objective-sync" not in str(error)
     # The load-bearing §8.49 freshness token (see corroborateSyncConflict): the message names
     # the NEW layer while the PRESERVED manifest still names the old one — that mismatch is
     # exactly what keeps the warm drive report-only on this arm.
