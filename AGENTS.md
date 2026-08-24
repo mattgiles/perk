@@ -14,7 +14,7 @@ This repo is wired for the **perk** plan-oriented workflow on Pi.
 - **Prefer ast-grep for code search.** Structural/AST queries go through `ast-grep` (see the
   `ast-grep` skill); plain `grep` stays fine for literal text.
 
-perk version: 3.1.0
+perk version: 3.2.0
 <!-- END perk managed -->
 
 ## Developing perk

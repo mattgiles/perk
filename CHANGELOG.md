@@ -7,16 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-<!-- As of 12a5a89 -->
+<!-- As of 2f69487 -->
+
+## [3.2.0] - 2026-08-24
 
 ### Changed
 
-- `perk objective plan` now positions a stacked child layer's planning session in the predecessor's plan worktree whenever the delivery train observed a live remote parent head (validated reuse on this machine, or a checkpoint-validated restore from `origin/plan-<pred>`), so the session explores the stack as implemented; the seed's stacked-layer block names the checkout and any local drift, landed-and-deleted predecessors plan from the repo root honestly, and dry runs report `"positioning": "unchecked (dry-run)"`. Alongside it, `perk plan save` writes the plan-ref selector to the main checkout root (a worktree-cwd save never rebinds that worktree), cold objective-plan sessions inherit the objective-node claim (suppressing the implement-here exits), and the warm `/submit`, `/address`, `/land`, and `/learn` doors refuse in planning-stage sessions (7993ff2e)
+- `perk objective plan` now positions a stacked child layer's planning session in the predecessor's plan worktree whenever the delivery train observed a live remote parent head (validated reuse on this machine, or a checkpoint-validated restore from `origin/plan-<pred>`), so the session explores the stack as implemented; the seed's stacked-layer block names the checkout and any local drift, landed-and-deleted predecessors plan from the repo root honestly, and dry runs report `"positioning": "unchecked (dry-run)"`. Alongside it, `perk plan save` writes the plan-ref selector to the main checkout root (a worktree-cwd save never rebinds that worktree), cold objective-plan sessions inherit the objective-node claim (suppressing the implement-here exits), and the warm `/submit`, `/address`, `/land`, and `/learn` doors refuse in planning-stage sessions
+- Make `docs/learned/` the required first gathering stop for plan and objective-authoring sessions, while treating a no-match result as valid; session audit now verifies that the consult occurred before review
 
 ### Added
 
-- The automated sync-conflict resolution loop is proven live end-to-end on real backlog: objective #2040's stalled 10-layer docs train was recovered through the warm `/objective-sync` drive — the human-approved base cascade stopped on the predicted layer-4 rebase conflict (retained worktree + manifest, the freshness token, the copyable warm-route hint), the auto-dispatched retained-continuation resolver completed the rebase with verification and zero publication, and one explicit human continue republished all 10 layers in a single atomic journaled push (`docs/design/sync-conflict-resolution-dogfood.md`, **PASSED** 2026-08-23, zero defects; every failure arm stays offline-pinned in the hermetic suites) (34a7af9f)
-- The stamped stacked-delivery lifecycle is proven live end-to-end and fully taught: a real two-layer docs train drove publish → handoff stamp → the `node_not_handoff_ready` planning gate → the ready-time reconcile continuation (warm `/ready` and the `perk ready <PLAN>` wrapper) → the suspend hold and idempotent re-stamp → self-rewrite and cascade staleness with re-ready repair → the atomic objective landing (`docs/design/stacked-ready-handoff-dogfood.md`, **PASSED** 2026-08-22, zero defects; the five-family coherence audit found runtime surfaces in agreement). The train's own merged layers delivered the teaching: the stacked tutorial walks the continuation with real captured excerpts, the review and recovery how-tos gained the transient draft hold, stale-after-address, and a Handoff repair table, and the perk-expert stacked reference mirrors it all (79f303d2)
+- The automated sync-conflict resolution loop is proven live end-to-end on real backlog: objective #2040's stalled 10-layer docs train was recovered through the warm `/objective-sync` drive — the human-approved base cascade stopped on the predicted layer-4 rebase conflict (retained worktree + manifest, the freshness token, the copyable warm-route hint), the auto-dispatched retained-continuation resolver completed the rebase with verification and zero publication, and one explicit human continue republished all 10 layers in a single atomic journaled push (`docs/design/sync-conflict-resolution-dogfood.md`, **PASSED** 2026-08-23, zero defects; every failure arm stays offline-pinned in the hermetic suites)
+- The stamped stacked-delivery lifecycle is proven live end-to-end and fully taught: a real two-layer docs train drove publish → handoff stamp → the `node_not_handoff_ready` planning gate → the ready-time reconcile continuation (warm `/ready` and the `perk ready <PLAN>` wrapper) → the suspend hold and idempotent re-stamp → self-rewrite and cascade staleness with re-ready repair → the atomic objective landing (`docs/design/stacked-ready-handoff-dogfood.md`, **PASSED** 2026-08-22, zero defects; the five-family coherence audit found runtime surfaces in agreement). The train's own merged layers delivered the teaching: the stacked tutorial walks the continuation with real captured excerpts, the review and recovery how-tos gained the transient draft hold, stale-after-address, and a Handoff repair table, and the perk-expert stacked reference mirrors it all
+- Add stack-wide browser review: `/stack-review-browser` and `perk objective stack review` render a delivery train or foreign base-ref chain as one combined diff, run one adversarial reviewer wave, and—with explicit approval—route one deduplicated review to each member PR
+- Allow `perk implement`, `perk plan resume`, `perk address`, and `perk ready` to accept a plan's PR number or pasted pull-request URL, resolving it back to the canonical plan before launch
+
+### Fixed
+
+- Detect stale learned-doc path references inside Markdown backtick spans, including `.mdx` targets, so `perk learn docs-check` no longer misses inline-code links
+- Resolve the `pi` and Hunk executables to absolute paths before entering a worktree, refuse a missing Pi CLI with a typed error, and report chdir/exec failures without a traceback
+- Run `/submit`'s conflict resolver in the plan worktree before rebasing, preventing fresh child sessions from resolving or pushing from the wrong checkout
+- Linear: let plan and objective authoring plus objective replanning authenticate through Linear without requiring `gh`, and refuse re-adopting projects whose objective identity lives in an attachment
+- Bind recovered stack-sync base-cascade records to the train's actual base branch, refusing stale or crafted records instead of persisting the wrong lower-layer checkpoint
+- Make failure boundaries report honestly: `perk init --json` keeps its full report envelope on environment errors, unreadable run-event or skill files degrade safely, and a failed dream digest marker makes the wave incomplete
 
 ## [3.1.0] - 2026-08-20
 
