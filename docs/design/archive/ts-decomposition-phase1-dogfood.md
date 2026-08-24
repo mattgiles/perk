@@ -25,14 +25,19 @@ Executed **2026-08-24** in the implementation worktree, against the branch under
   loads the perk extension from the invoking checkout via the worktree's `.pi/settings.json`
   `".."` package entry, so every session ran this branch's extension).
 
-**Honesty framing (the headless/interactive split):** the plan's recipe prescribes interactive
-sessions for both arms. The automatable observables (the `perk:plan-context` injection bytes,
-the overlay read, tool gating, provider *resolution*) were captured by the headless probes —
-which bind the identical extension from the identical checkout through the identical
-`session_start` path; the one `hasUI`-gated observable (the footer actually *rendering* /
-vacating, `extension/index.ts`'s `ctx.hasUI && isPerkFooterReferenceSelected(ctx.cwd)` install
-site) was observed by the human in the three interactive launches recorded below. No arm was
-skipped; no observation is inferred-only.
+**Honesty framing (the headless/interactive split — an operator-approved deviation):** the
+plan's recipe prescribes interactive sessions for both arms; the implement session cannot launch
+an interactive TUI. Before executing the gate, the executor put the fork to the operator as a
+structured question (options: hybrid / fully-headless / fully-interactive-by-human), and the
+operator explicitly chose the **hybrid** execution: the automatable observables (the
+`perk:plan-context` injection bytes, the overlay read, tool gating, provider *resolution*) were
+captured by the headless probes — which bind the identical extension from the identical checkout
+through the identical `session_start` path — while the one `hasUI`-gated observable (the footer
+actually *rendering* / vacating, `extension/index.ts`'s
+`ctx.hasUI && isPerkFooterReferenceSelected(ctx.cwd)` install site) was observed by the human in
+the three interactive launches recorded below. The deviation is recorded on the plan issue
+(#2091, the assumptions addendum comment). No arm was skipped; no observation is inferred-only,
+and every observable named by the plan's arms was captured in one of the two session shapes.
 
 ## Preflight (step 0)
 

@@ -4,22 +4,28 @@
 // `bareImportGuard.test.ts` and package.json `files`); `vendor/` is included. Edges are the
 // relative import specifiers each file carries — extracted with `ts.preProcessFile` (a real lexer:
 // static imports, `import type`, `export … from`, string-literal dynamic `import()`, `require()`;
-// comments and string text correctly ignored) and resolved by plain path join (every repo import
-// carries an explicit `.ts` extension). TYPE-ONLY EDGES COUNT — a type-only import is still a
+// comments and string text correctly ignored) and resolved by plain path join. Every resolved
+// relative target MUST be a scanned production file (repo imports carry explicit `.ts`
+// extensions) — an unresolvable specifier (e.g. extensionless `./b`) is a guard failure, never a
+// silent phantom node. TYPE-ONLY EDGES COUNT — a type-only import is still a
 // dependency-direction fact (the config↔bindings cycle this guard was born after was type-only).
 //
 // The rules:
 //   A. No production import cycles beyond the frozen `KNOWN_CYCLES` baseline (exact + shrink-only:
 //      a stale entry fails, so the baseline can only burn down).
-//   B. Stable mechanisms never import features: `substrate/`, `waves/`, `worker/` have no edge
-//      into the feature-policy homes — current (`doors/`, `factories/`, `adapters/`) or future
-//      (`authoring/`, `delivery/`, `codeReview/`, `learning/`) — beyond the one ratcheted
-//      allowlist entry. Mechanisms take dependencies as parameters; feature policy calls
-//      mechanisms, never the reverse. (`surfaces/` is the sanctioned rendering seam, not a
-//      feature home — mechanism→surfaces edges stay allowed.)
-//   C. The `extension/` top-level directory census is frozen set-exactly. ANY new directory fails
-//      until the directory-creating slice registers it (see `KNOWN_TOP_LEVEL_DIRS`) — the
-//      activation ratchet that forces every future home through this guard.
+//   B. Stable mechanisms never import features: the mechanism homes — current (`substrate/`,
+//      `waves/`, `worker/`) or future (`config/`, `execution/`, `session/` — the
+//      module-contracts ownership map's stable layer) — have no edge into the feature-policy
+//      homes — current (`doors/`, `factories/`, `adapters/`) or future (`authoring/`,
+//      `delivery/`, `codeReview/`, `learning/`) — beyond the one ratcheted allowlist entry.
+//      Mechanisms take dependencies as parameters; feature policy calls mechanisms, never the
+//      reverse. (`surfaces/` is the sanctioned rendering seam, not a feature home —
+//      mechanism→surfaces edges stay allowed.)
+//   C. The `extension/` top-level directory census is set-exact. `KNOWN_TOP_LEVEL_DIRS` is
+//      FROZEN (this guard's birth census — never append); ANY new directory fails until the
+//      directory-creating slice registers it in `ANCHORED_DIRS` with ≥1 in-directory production
+//      `.ts` anchor in the scanned corpus — the activation ratchet that forces every future
+//      home through this guard.
 //
 // DEFERRED RULES (no corpus yet; Rule C forces the activating slice to touch this file):
 //   - "Features never import Pi" and "features never import RPC wire" (`waves/rpcAdapter.ts`) —
@@ -39,7 +45,7 @@
 // package.json runtime `dependencies` stay empty).
 
 import assert from "node:assert/strict";
-import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
 import ts from "typescript";
@@ -51,8 +57,13 @@ const KNOWN_CYCLES: string[][] = [
   ["adapters/planAdapterPlannotator.ts", "factories/planReview.ts"],
 ];
 
-/** The stable-mechanism homes (Rule B sources). */
-const MECHANISM_HOMES = ["substrate/", "waves/", "worker/"];
+/**
+ * The stable-mechanism homes (Rule B sources) — current (`substrate/`, `waves/`, `worker/`) and
+ * future (`config/`, `execution/`, `session/`, the stable layer of the module-contracts
+ * ownership map). The future homes are cheap literals: the rule covers them from the day they
+ * appear.
+ */
+const MECHANISM_HOMES = ["config/", "execution/", "session/", "substrate/", "waves/", "worker/"];
 
 /**
  * The feature-policy homes (Rule B banned targets) — current and future. The future homes are
@@ -75,11 +86,14 @@ const MECHANISM_EDGE_ALLOWLIST: Array<{ from: string; to: string }> = [
   { from: "worker/worker.ts", to: "doors/lifecycleGates.ts" },
 ];
 
-// The frozen extension/ top-level directory census. ANY new directory fails this guard until the
-// directory-creating slice (a) adds it here, (b) registers ≥1 known-anchor file in ANCHORED_DIRS,
-// and (c) wires the target rules that apply to it (see the header's deferral note). Removing a
-// directory updates the census in the same change — the standing rule ("every directory-creating
-// slice adds or refreshes a known-anchor assertion"), as structure.
+// The FROZEN extension/ top-level directory census — the directories that existed when this
+// guard was born. NEVER append here: ANY new directory fails this guard until the
+// directory-creating slice (a) registers it in ANCHORED_DIRS with ≥1 known-anchor file INSIDE
+// the new directory (a production `.ts` in the scanned corpus), and (b) wires the target rules
+// that apply to it (see the header's deferral note) — so a future home can never become
+// expected anchor-free. Removing a directory updates the census in the same change — the
+// standing rule ("every directory-creating slice adds or refreshes a known-anchor assertion"),
+// as structure.
 const KNOWN_TOP_LEVEL_DIRS = [
   "adapters",
   "doors",
@@ -92,7 +106,10 @@ const KNOWN_TOP_LEVEL_DIRS = [
   "waves",
   "worker",
 ];
-const ANCHORED_DIRS: Record<string, string[]> = {}; // future homes register here as they appear
+// Future homes register here as they appear: dir → ≥1 in-directory production `.ts` anchor
+// (checkDirCensus rejects an empty list, an out-of-directory anchor, and an anchor missing from
+// the scanned corpus).
+const ANCHORED_DIRS: Record<string, string[]> = {};
 
 /** Every imported/re-exported module specifier `ts.preProcessFile` lexes from the source text. */
 function extractSpecifiers(sourceText: string): string[] {
@@ -104,17 +121,33 @@ function resolveRelative(fromFile: string, spec: string): string {
   return path.posix.normalize(path.posix.join(path.posix.dirname(fromFile), spec));
 }
 
-/** Build the relative-import edge map: file → sorted unique extension-relative targets. */
-function buildEdges(files: string[], read: (file: string) => string): Map<string, string[]> {
+/**
+ * Build the relative-import edge map: file → sorted unique extension-relative targets. Every
+ * relative specifier must resolve to a file in the scanned corpus: an extensionless specifier
+ * (`./b`) would otherwise mint a phantom node (`b` ≠ `b.ts`) invisible to cycle detection, so
+ * unresolvable specifiers are reported in `unresolved`, never silently edged or dropped.
+ */
+function buildEdges(
+  files: string[],
+  read: (file: string) => string,
+): { edges: Map<string, string[]>; unresolved: string[] } {
+  const corpus = new Set(files);
   const edges = new Map<string, string[]>();
+  const unresolved: string[] = [];
   for (const file of files) {
     const targets = new Set<string>();
     for (const spec of extractSpecifiers(read(file))) {
-      if (spec.startsWith(".")) targets.add(resolveRelative(file, spec));
+      if (!spec.startsWith(".")) continue;
+      const resolved = resolveRelative(file, spec);
+      if (corpus.has(resolved)) {
+        targets.add(resolved);
+      } else {
+        unresolved.push(`${file}: "${spec}" → ${resolved}`);
+      }
     }
     edges.set(file, [...targets].sort());
   }
-  return edges;
+  return { edges, unresolved };
 }
 
 /**
@@ -219,27 +252,38 @@ function checkDirection(
 }
 
 /**
- * Census rule: live top-level dirs must equal `known ∪ keys(anchored)` set-exactly, and every
- * registered anchor file must exist.
+ * Census rule: live top-level dirs must equal `frozen ∪ keys(anchored)` set-exactly; the frozen
+ * census and the anchored registrations never overlap (a new directory registers ONLY in
+ * `ANCHORED_DIRS` — the frozen list never grows); and every anchored dir carries ≥1 anchor,
+ * each an in-directory `.ts` file present in the scanned corpus — so a future home can neither
+ * become expected anchor-free nor satisfy its floor with a file outside itself.
  */
 function checkDirCensus(
   liveDirs: string[],
-  known: string[],
+  frozen: string[],
   anchored: Record<string, string[]>,
-  anchorExists: (anchor: string) => boolean,
-): { unknown: string[]; stale: string[]; missingAnchors: string[] } {
-  const expected = new Set([...known, ...Object.keys(anchored)]);
+  anchorInCorpus: (anchor: string) => boolean,
+): { unknown: string[]; stale: string[]; overlap: string[]; anchorIssues: string[] } {
+  const expected = new Set([...frozen, ...Object.keys(anchored)]);
   const live = new Set(liveDirs);
-  const missingAnchors: string[] = [];
+  const anchorIssues: string[] = [];
   for (const [dir, anchors] of Object.entries(anchored)) {
+    if (anchors.length === 0) {
+      anchorIssues.push(`${dir}: no anchor files registered (≥1 required)`);
+    }
     for (const anchor of anchors) {
-      if (!anchorExists(anchor)) missingAnchors.push(`${dir}: ${anchor}`);
+      if (!anchor.startsWith(`${dir}/`)) {
+        anchorIssues.push(`${dir}: anchor ${anchor} is not inside the directory`);
+      } else if (!anchor.endsWith(".ts") || !anchorInCorpus(anchor)) {
+        anchorIssues.push(`${dir}: anchor ${anchor} is not a scanned production .ts file`);
+      }
     }
   }
   return {
     unknown: [...live].filter((dir) => !expected.has(dir)).sort(),
     stale: [...expected].filter((dir) => !live.has(dir)).sort(),
-    missingAnchors,
+    overlap: frozen.filter((dir) => Object.hasOwn(anchored, dir)).sort(),
+    anchorIssues,
   };
 }
 
@@ -270,11 +314,11 @@ function liveTopLevelDirs(): string[] {
 }
 
 /** One scan shared by the production assertions (the controls build their own inputs). */
-let scanned: { files: string[]; edges: Map<string, string[]> } | undefined;
-function scan(): { files: string[]; edges: Map<string, string[]> } {
+let scanned: { files: string[]; edges: Map<string, string[]>; unresolved: string[] } | undefined;
+function scan(): { files: string[]; edges: Map<string, string[]>; unresolved: string[] } {
   if (scanned === undefined) {
     const files = productionFiles();
-    scanned = { files, edges: buildEdges(files, readProductionFile) };
+    scanned = { files, ...buildEdges(files, readProductionFile) };
   }
   return scanned;
 }
@@ -286,6 +330,16 @@ function formatCycles(cycles: string[][]): string {
 // ---------------------------------------------------------------------------------------------
 // Production assertions
 // ---------------------------------------------------------------------------------------------
+
+test("every relative import resolves to a scanned production file (explicit .ts targets)", () => {
+  assert.deepEqual(
+    scan().unresolved,
+    [],
+    "relative import specifier(s) that do not resolve to a scanned production file — an " +
+      "unresolved (e.g. extensionless) specifier would mint a phantom graph node invisible to " +
+      "cycle detection. Use an explicit ./path.ts specifier to a production file.",
+  );
+});
 
 test("Rule A: no production import cycles beyond the frozen baseline", () => {
   const { unexpected, stale } = compareCycles(findCycles(scan().edges), KNOWN_CYCLES);
@@ -327,19 +381,19 @@ test("Rule B: stable mechanisms never import features (one ratcheted allowlist e
 });
 
 test("Rule C: the extension/ top-level directory census is set-exact", () => {
-  const { unknown, stale, missingAnchors } = checkDirCensus(
+  const { unknown, stale, overlap, anchorIssues } = checkDirCensus(
     liveTopLevelDirs(),
     KNOWN_TOP_LEVEL_DIRS,
     ANCHORED_DIRS,
-    (anchor) => existsSync(path.join(import.meta.dirname, anchor)),
+    (anchor) => scan().files.includes(anchor),
   );
   assert.deepEqual(
     unknown,
     [],
     `unregistered extension/ top-level director(y/ies): ${unknown.join(", ")}\n` +
-      "The directory-creating slice must (a) add it to KNOWN_TOP_LEVEL_DIRS, (b) register a " +
-      "known-anchor file in ANCHORED_DIRS, and (c) wire the target rules that apply to it " +
-      "(see this guard's header deferral note).",
+      "The directory-creating slice must (a) register it in ANCHORED_DIRS with ≥1 in-directory " +
+      "known-anchor production file, and (b) wire the target rules that apply to it (see this " +
+      "guard's header deferral note). KNOWN_TOP_LEVEL_DIRS is frozen — never append to it.",
   );
   assert.deepEqual(
     stale,
@@ -347,7 +401,13 @@ test("Rule C: the extension/ top-level directory census is set-exact", () => {
     `census entr(y/ies) with no live directory: ${stale.join(", ")} — ` +
       "update the census in the same change that removed the directory.",
   );
-  assert.deepEqual(missingAnchors, [], "ANCHORED_DIRS anchor file(s) missing");
+  assert.deepEqual(
+    overlap,
+    [],
+    "director(y/ies) in BOTH the frozen census and ANCHORED_DIRS — a new directory registers " +
+      "only in ANCHORED_DIRS; the frozen census never grows.",
+  );
+  assert.deepEqual(anchorIssues, [], "ANCHORED_DIRS anchor issue(s)");
 });
 
 // ---------------------------------------------------------------------------------------------
@@ -493,35 +553,127 @@ test("control 6: direction-rule fixtures (violation, allowlisted, stale, future 
   );
 });
 
-test("control 7: census fixtures (unknown dir, stale entry, missing anchor, present anchor)", () => {
-  const known = ["alpha", "beta"];
+test("control 7: census fixtures (unknown, stale, overlap, anchor floor, valid entry)", () => {
+  const frozen = ["alpha", "beta"];
+  const inCorpus = (anchor: string) => anchor === "gamma/anchor.ts";
 
-  const unknown = checkDirCensus(["alpha", "beta", "gamma"], known, {}, () => true);
+  const unknown = checkDirCensus(["alpha", "beta", "gamma"], frozen, {}, inCorpus);
   assert.deepEqual(unknown.unknown, ["gamma"], "an unknown extra top-level dir must fail");
 
-  const stale = checkDirCensus(["alpha"], known, {}, () => true);
+  const stale = checkDirCensus(["alpha"], frozen, {}, inCorpus);
   assert.deepEqual(stale.stale, ["beta"], "a census entry with no live dir must fail");
 
-  const missingAnchor = checkDirCensus(
-    ["alpha", "beta", "gamma"],
-    known,
-    { gamma: ["gamma/anchor.ts"] },
-    () => false,
+  const overlap = checkDirCensus(
+    ["alpha", "beta"],
+    frozen,
+    { beta: ["beta/anchor.ts"] },
+    () => true,
   );
-  assert.deepEqual(missingAnchor.missingAnchors, ["gamma: gamma/anchor.ts"]);
-  assert.deepEqual(missingAnchor.unknown, [], "an anchored dir is a registered dir");
-
-  const anchored = checkDirCensus(
-    ["alpha", "beta", "gamma"],
-    known,
-    { gamma: ["gamma/anchor.ts"] },
-    (anchor) => anchor === "gamma/anchor.ts",
-  );
-  assert.deepEqual(anchored.unknown, []);
-  assert.deepEqual(anchored.stale, []);
   assert.deepEqual(
-    anchored.missingAnchors,
-    [],
-    "an anchored entry with the anchor present must pass",
+    overlap.overlap,
+    ["beta"],
+    "a dir in both the frozen census and ANCHORED_DIRS must fail",
   );
+
+  const emptyAnchors = checkDirCensus(["alpha", "beta", "gamma"], frozen, { gamma: [] }, inCorpus);
+  assert.deepEqual(
+    emptyAnchors.anchorIssues,
+    ["gamma: no anchor files registered (≥1 required)"],
+    "an empty anchor registration must fail — a future dir can never become expected anchor-free",
+  );
+  assert.deepEqual(emptyAnchors.unknown, [], "an anchored dir is a registered dir");
+
+  const outsideAnchor = checkDirCensus(
+    ["alpha", "beta", "gamma"],
+    frozen,
+    { gamma: ["alpha/anchor.ts"] },
+    () => true,
+  );
+  assert.deepEqual(
+    outsideAnchor.anchorIssues,
+    ["gamma: anchor alpha/anchor.ts is not inside the directory"],
+    "an anchor outside its registered directory must fail",
+  );
+
+  const uncorpusedAnchor = checkDirCensus(
+    ["alpha", "beta", "gamma"],
+    frozen,
+    { gamma: ["gamma/missing.ts"] },
+    inCorpus,
+  );
+  assert.deepEqual(
+    uncorpusedAnchor.anchorIssues,
+    ["gamma: anchor gamma/missing.ts is not a scanned production .ts file"],
+    "an anchor absent from the scanned corpus must fail",
+  );
+
+  const valid = checkDirCensus(
+    ["alpha", "beta", "gamma"],
+    frozen,
+    { gamma: ["gamma/anchor.ts"] },
+    inCorpus,
+  );
+  assert.deepEqual(valid.unknown, []);
+  assert.deepEqual(valid.stale, []);
+  assert.deepEqual(valid.overlap, []);
+  assert.deepEqual(
+    valid.anchorIssues,
+    [],
+    "a registered dir with a valid in-directory corpus anchor must pass",
+  );
+});
+
+test("control 8: every contractual Rule B prefix bites (literal, array-independent)", () => {
+  // Literal contract lists, deliberately independent of the arrays under test: deleting an entry
+  // from MECHANISM_HOMES/FEATURE_HOMES fails the deepEqual pins below, and each pair is proven
+  // to actually match through checkDirection — so silently weakening either array is caught.
+  const sources = ["config/", "execution/", "session/", "substrate/", "waves/", "worker/"];
+  const targets = [
+    "adapters/",
+    "authoring/",
+    "codeReview/",
+    "delivery/",
+    "doors/",
+    "factories/",
+    "learning/",
+  ];
+  assert.deepEqual(MECHANISM_HOMES, sources, "MECHANISM_HOMES drifted from the contract list");
+  assert.deepEqual(FEATURE_HOMES, targets, "FEATURE_HOMES drifted from the contract list");
+  for (const source of sources) {
+    for (const target of targets) {
+      const { violations } = checkDirection(
+        new Map([[`${source}x.ts`, [`${target}y.ts`]]]),
+        MECHANISM_HOMES,
+        FEATURE_HOMES,
+        [],
+      );
+      assert.deepEqual(
+        violations,
+        [{ from: `${source}x.ts`, to: `${target}y.ts` }],
+        `the ${source} → ${target} pair must be flagged`,
+      );
+    }
+  }
+});
+
+test("control 9: an extensionless relative import is reported, never a phantom-node bypass", () => {
+  // The discriminating case: a.ts → "./b" (extensionless), b.ts → "./a.ts". Without corpus
+  // resolution the cycle would thread through a phantom `b` node and vanish from Tarjan's view;
+  // with it, the unresolvable specifier is a reported failure.
+  const lax = buildEdges(["a.ts", "b.ts"], (file) =>
+    file === "a.ts" ? 'import { x } from "./b";' : 'import { y } from "./a.ts";',
+  );
+  assert.deepEqual(
+    lax.unresolved,
+    ['a.ts: "./b" → b'],
+    "the extensionless specifier must be reported",
+  );
+  assert.deepEqual(findCycles(lax.edges), [], "the phantom edge must not fabricate a cycle");
+
+  // The properly-extensioned twin IS the cycle — resolution, not detection, was the gap.
+  const strict = buildEdges(["a.ts", "b.ts"], (file) =>
+    file === "a.ts" ? 'import { x } from "./b.ts";' : 'import { y } from "./a.ts";',
+  );
+  assert.deepEqual(strict.unresolved, []);
+  assert.deepEqual(findCycles(strict.edges), [["a.ts", "b.ts"]]);
 });
