@@ -1,5 +1,7 @@
 # Releasing perk
 
+This page is a **how-to guide**: the maintainer release policy and the recurring release runbook.
+
 Maintainer-facing release policy + runbook for perk's two published planes:
 
 - **`perk`** — the Python CLI, published to PyPI.
@@ -124,7 +126,7 @@ Entries accrue between releases via a facts → classify → review → apply �
    since the `<!-- As of <hash> -->` marker. It applies **no** judgment beyond dropping the two
    lockfiles.
 2. **Classify** — an agent (or the maintainer) turns those facts into a reviewed changelog
-   proposal following [`docs/release/changelog-categorizer.md`](./release/changelog-categorizer.md),
+   proposal following [`docs/developers/changelog-categorizer.md`](./changelog-categorizer.md),
    which owns *all* inclusion/exclusion and categorization judgment (the user-visibility test, the
    pinned categories, roll-up, backend qualifiers, confidence flags) and pins the proposal-JSON
    output shape.

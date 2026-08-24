@@ -395,7 +395,7 @@ class ChangelogCheckOut(OutputModel):
 
 
 class ProposalEntryModel(StrictInputModel):
-    """One proposal entry as pinned by ``docs/release/changelog-categorizer.md``.
+    """One proposal entry as pinned by ``docs/developers/changelog-categorizer.md``.
 
     ``confidence`` / ``backend`` are review metadata — part of the pinned shape but unused by
     apply; optional so a hand-authored apply-only proposal may omit them.

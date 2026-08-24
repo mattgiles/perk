@@ -71,7 +71,7 @@ a **belt-and-suspenders** guarantee, three layers deep:
 
 - **Pin `--package perk` at every `uv build` site** so the build only ever produces the `perk`
   distribution, never the member: `.github/workflows/release.yml`, the `justfile` `build` recipe,
-  and `docs/release-checklist.md`.
+  and `docs/developers/release-checklist.md`.
 - **`classifiers = ["Private :: Do Not Upload"]`** on the member's `[project]` — the PyPI-honored
   marker that rejects an accidental upload.
 - **Standing packaging tests** assert the member is absent from perk's published **wheel and
@@ -85,7 +85,7 @@ tracked/version-bearing surface (no lockstep guard), because `perk-dev --version
 **The direct guard:** the `--package perk` build pins and the `uv sync --all-packages` sync flag
 are pinned by a dedicated test that names each site —
 `tests/test_packaging.py::test_build_pins_and_all_packages_flag_present` asserts
-`uv build --package perk` in the justfile, `release.yml`, and `docs/release-checklist.md`, and
+`uv build --package perk` in the justfile, `release.yml`, and `docs/developers/release-checklist.md`, and
 `uv sync --all-packages` in the justfile and `ci.yml` — so reverting a pin fails the named line,
 not just a downstream symptom (a leaked member caught by the exclusion tests, or a `perk_dev`
 import error in `tests/test_perk_dev_cli.py`). See `toolchain/uv-workspace-src-layout.md` for the
@@ -136,7 +136,7 @@ The local release preflight is three **layered** commands in `packages/perk-dev/
   (never silently no-op, never move a tag).
 
 `publish-check` composes them (release-check + gh-auth + origin-tag probe + release-build — the
-one-command pre-tag preflight); `docs/releasing.md` / `docs/release-checklist.md` already prefer
+one-command pre-tag preflight); `docs/developers/releasing.md` / `docs/developers/release-checklist.md` already prefer
 these commands over hand-run equivalents.
 
 ## Release-pipeline validation risks (what only a real release exercises)

@@ -224,7 +224,7 @@ def test_build_pins_and_all_packages_flag_present():
     build_sites = {
         "justfile": REPO_ROOT / "justfile",
         "release.yml": REPO_ROOT / ".github/workflows/release.yml",
-        "release-checklist.md": REPO_ROOT / "docs/release-checklist.md",
+        "release-checklist.md": REPO_ROOT / "docs/developers/release-checklist.md",
     }
     for label, path in build_sites.items():
         assert "uv build --package perk" in path.read_text(encoding="utf-8"), (
