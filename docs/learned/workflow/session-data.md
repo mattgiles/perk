@@ -16,8 +16,9 @@ narrative: identity → data dirs → provenance → the read-only writer → GC
 - Warm sessions mint a hand-rolled ULID in `session_start`'s `none` arm (NOT `decideClaim`);
   cross-plane validity is proven by grammar, not subprocess; the mint append is
   loud-but-non-fatal — "Warm run_id minting".
-- Every workflow-state write is stamped with the writing perk's version — "The `perk_version`
-  vintage stamp".
+- The perk version is stamped into workflow-state at **run-identity establishment** (the four
+  identity arms — claim/fork/adopt/mint); ordinary state appends carry no stamp — "The
+  `perk_version` vintage stamp".
 - TWO current-run resolvers exist ON PURPOSE with opposite degradation (`activeRunId` stamps a
   fallback; `activeSessionRunId` degrades to null) — do not unify; a null-degrading resolver
   never feeds a refuse/allow gate — "The accessor seam + the two-resolver doctrine".

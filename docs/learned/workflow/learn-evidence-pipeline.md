@@ -77,8 +77,11 @@ per-process self-keyed record over cross-process writes.
 
 `impl_run_ids` is submit-staged exactly like `branch`/`pr` (empty at save, union-merged at `/submit`),
 so a new staged field is just a `PLAN_HEADER_FIELDS` frozenset entry plus a
-`PlanHeader`/`PlanHeaderOut`/`from_domain` triple — no per-backend logic. The new `PlanHeaderOut` field
-must be declared **last** (stored-YAML byte order is load-bearing for re-save). See
+`PlanHeader`/`PlanHeaderOut`/`from_domain` triple — no per-backend logic. A new `PlanHeaderOut`
+field is appended at the **tail of the declaration order** — stored-YAML byte order is load-bearing
+for re-save: `impl_run_ids` is declared last *among the base fields*, and the stacked-delivery
+fields (contracts §8.42) follow as the final block, each stripped when `None` so pre-growth headers
+stay byte-identical (`plan.py`'s own field comments state the invariant). See
 `plan-save-surfaces.md`.
 
 ## The shared-main-checkout carrier + the TS twin

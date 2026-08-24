@@ -21,8 +21,9 @@ repo-wide archaeology dig.
   "The centralized path seam".
 - The family guard is a regression backstop + consumer-census oracle, never completeness — "The
   source-scan guard is a backstop"; sweeps need three grep forms — "Path-root sweeps".
-- Forward-only idempotent doctor migrations: move / identical-drop / conflict-retain, with the
-  deep-compare gotchas — "The `_MIGRATIONS` filesystem-migration pattern".
+- Forward-only idempotent doctor migrations: the move/identical-drop/conflict-retain triad
+  (repo-skills, config) — the workflow-cache move keeps a present target — with the deep-compare
+  gotchas — "The `_MIGRATIONS` filesystem-migration pattern".
 - Dogfooding a gitignored cache-root move forces same-turn worktree-binding + gitignore
   reconverge — "BIGGEST: dogfooding a gitignored cache-root move".
 - All three families ship under `.perk/`, with live doctor migrations and guard/SSOT pointers —
@@ -98,11 +99,16 @@ exercising the failure path.
 ## The `_MIGRATIONS` filesystem-migration pattern (Nodes 3.1, 4.1)
 
 Forward-only, filesystem-only (no network), idempotent (`([],[])` once the legacy root is gone).
-Per-child triad:
+Per-child triad (the repo-skills + config shape):
 
 - **move** when the target is absent (`shutil.move`);
 - **drop** the redundant legacy copy when it is byte-identical to the target;
 - **report a conflict and LEAVE IN PLACE** when they differ — errors ride `fix_errors`, loud.
+
+The **workflow-cache** migration deliberately deviates: it moves its two root mirrors
+(`plan-ref.json`/`agent-session.json`) **only when the target is absent** and otherwise keeps the
+present target (never clobber a live target — no identical-drop, no conflict arm), pinned by
+`tests/test_doctor.py::test_migrate_legacy_workflow_cache_keeps_present_target`.
 
 `rmdir` the legacy root only when it is empty. The skills/workflow migrations write legacy paths as
 **frozen flat-string literals** (`Path(".pi/skills")`, `root / ".pi/workflow"`), while the
@@ -211,8 +217,10 @@ paths survive only as the seam's `legacy_*` helpers, never read by config reader
 **workflow cache** at `.perk/workflow/` (`cache.workflow_dir` / `workflowDir`), and **repo
 skills** at `.perk/skills/` (`REPO_SKILLS_REL`). The doctor migrations are live —
 `src/perk/convergence/doctor/fixes.py::_MIGRATIONS` includes `_migrate_legacy_workflow_cache`,
-`_migrate_legacy_repo_skills`, and `_migrate_legacy_config`, each following the
-move/identical-drop/conflict-retain triad above. Enforcement: `tests/test_paths_guard.py` +
+`_migrate_legacy_repo_skills`, and `_migrate_legacy_config` — the repo-skills and config
+migrations follow the move/identical-drop/conflict-retain triad above, while
+`_migrate_legacy_workflow_cache` moves its two root mirrors only when the target is absent (a
+present target is kept). Enforcement: `tests/test_paths_guard.py` +
 `extension/pathsGuard.test.ts`; the layout SSOT is
 `docs/user-docs/reference/configuration/repository-layout.md`.
 

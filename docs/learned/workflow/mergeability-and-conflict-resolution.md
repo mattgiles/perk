@@ -142,6 +142,12 @@ runs only in worktree-bound sessions) and `stages/conflict-resolution.md` opens 
 instruction with the concrete `cd {{ worktree }}` command, so the session no longer has to
 remember to author it.
 
+*Unmet as of 2026-08 (dream audit):* the shipped resolver task text does not implement this rule —
+`prompts/stages/conflict-resolution.md` (rendered by
+`extension/doors/submit.ts::conflictResolutionGuidance`) contains no `cd` command, and
+`agents/conflict-resolver.md` declares same-worktree execution in prose only. The rule stands as
+the defensive requirement for authored task text.
+
 ## The rebase prose-lag trap — relocated symbols leave stale prose behind
 
 After any rebase that adapts to a relocated module/symbol, **grep the old dotted path as text**.

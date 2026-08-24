@@ -100,12 +100,13 @@ bodies, and the door-suite tests (e.g. `extension/doors/prReviewTerminal.test.ts
 ## Residuals
 
 - §8.57's byte ceilings landed in `tests/test_prompt_surface_budgets.py` (skill ambient
-  descriptions + committed template files), but skill-body *content* pins remain **partial** —
-  exactly the five §8.57-rewritten skills in `tests/test_skill_semantic_contracts.py`
-  (`perk-learn`, `perk-learn-docs`, `perk-learn-code`, `perk-implement`, `perk-address`) plus
-  `perk-learn-harvest`'s dedicated test. The ceilings gate ambient descriptions and committed
-  template files only — they never measure a skill *body* — so body drift in the other perk
-  skills remains wholly CI-inert (no body-size guard exists).
+  descriptions + committed template files), but skill-body *content* pins remain **partial**: the
+  live census of pinned bodies is `tests/test_skill_semantic_contracts.py` (read the test file —
+  it now covers review-skill bodies beyond the original five §8.57-rewritten skills) plus
+  `perk-learn-harvest`'s dedicated pin
+  (`tests/test_learn_harvest_cmd.py::test_skill_semantic_contract`). The ceilings gate ambient
+  descriptions and committed template files only — they never measure a skill *body* — so body
+  drift in any skill outside those pins remains CI-inert (no body-size guard exists).
 
 ## Cross-references
 
