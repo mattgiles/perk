@@ -60,10 +60,13 @@ non-obvious rules an agent can't derive from any single file.
 - **Custom agents** (user/project/package sources): `applyCustomAgentOverrides` →
   `applyCustomAgentOverride`, a **frontmatter-sensitive fill** — an override never displaces a
   field the def's own frontmatter sets (`agentHasFrontmatterField` over the recorded frontmatter
-  set). Exceptions: `description` always applies; `disabled` applies only when the def didn't set
-  it; `model` fills only when frontmatter has no `model` (and clears `modelSource`); `tools`
-  fills only when frontmatter has no `tools`. A project-scope override's presence
-  **short-circuits** the user-scope override entirely (checked first, no merge).
+  set). Exceptions: `description` always applies; `disabled` always applies — custom defs cannot
+  set it in frontmatter, so a project override's `disabled` replaces a user one; `model` fills
+  only when frontmatter has no `model` (and clears `modelSource`); `tools` fills only when
+  frontmatter has no `tools`. Scopes layer **user-then-project** (since 0.54.0, #1348): the user
+  override fills first, then the project override fills over the result — project fields win
+  without dropping user-only fields (the project scope no longer preempts the user scope
+  outright; before 0.54.0 a project override's presence skipped the user override entirely).
 
 Before 0.52, overrides reached builtins only (this doc's prior absolute).
 
@@ -99,8 +102,9 @@ fragment forced).
 A committed frontmatter `model` default + a **top-level workflow-level `model` on the one
 `subagent` workflowScript call** (a default flowing onto every lane — single-child runs included;
 public direct `{agent, task}` is a real top-level spawn shape again since the 0.49 restoration,
-and a top-level `model` on such a call still works because the conversion spreads non-child
-params as workflow defaults — the workflow-level-`model` knob guidance itself stands).
+and a top-level `model` on such a call still works — the native single-child path consumes it
+directly (`resolveEffectiveSubagentModel`) — the workflow-level-`model` knob guidance itself
+stands).
 `/pr-review`'s `run_pr_review_wave` tool reads `[models.subagents] pr-reviewer` from
 `.perk/config.toml` (overlaid by `.perk/local.toml` for per-user override) and the wave module
 applies it as the wave's workflow-level `model` default — **no committed-file churn**. (An
@@ -294,8 +298,8 @@ thing that ever drifted was this doc's hard counts, hence the listing-without-a-
 
 A `PERK_AGENTS` SSOT tuple drives a content convergence (`_converge_subagent_agents`) that delivers
 each def **byte-for-byte** into the perk-owned `.pi/agents/perk/` subdir and **prunes stray `*.md`
-inside that subdir** (perk owns the WHOLE subdir; it never touches anything outside it, e.g. a user's
-own `.pi/agents/mine.md`). It computes the **identical change-list for `apply=True`/`apply=False`**
+inside that subdir** (perk owns the WHOLE subdir; it never touches anything outside it — e.g. a
+hypothetical user-owned `.pi/agents/<mine>.md` is out of its reach). It computes the **identical change-list for `apply=True`/`apply=False`**
 (the managed-convergence invariant) and is the auto-generated `subagent-agents` doctor check. There
 is **no `self_repo` param** (unlike the skills sibling): the resolver works in both install modes, so
 self-repo and consumers get byte-identical defs. Because `.pi/agents/perk/` is **committed
@@ -347,7 +351,9 @@ The reviewer rubric is **entirely** in the agent **system prompt** — SSOT `age
 editing the source, **re-run `perk init`** to reconverge and commit **both** copies byte-identical
 (the init-idempotency + doctor `subagent-agents` checks expect consistency). **Stale-path gotcha:**
 the materialized copy is the `perk/`-namespaced `.pi/agents/perk/pr-reviewer.md`, **not** the old
-`.pi/agents/pr-reviewer.md` the skill once cited — grep for the stale path when touching agent docs.
+`.pi/agents/pr-reviewer.md` the skill once cited — a deliberately dead path kept byte-exact here
+(it must stay greppable as the warning's subject; the docs-check broken-path flag on it is the
+accepted intentional residual). Grep for the stale path when touching agent docs.
 
 ### Two `perk init` worktree gotchas (reality, not aspiration)
 
@@ -453,15 +459,14 @@ parent loop shape:
   (`extension/waves/learnWave.ts` → `runReportWave`, behind `run_learn_wave`) — an async
   RPC-spawned all-settled `runs.all` whose script the module renders, with engine-validated
   structured reports instead of fenced JSON. **Update:**
-  pi-subagents 0.49.0 (#1059) RESTORED public direct `{agent, task}` single-child execution —
-  `normalizePublicSubagentExecution` now converts it into a generated one-child
-  `runs.run("main", …)` workflowScript (the child gets `output: true` by default; the remaining
-  top-level params — `model`, `context`, etc. — ride as workflow defaults; with
-  `asyncByDefault: false` the converted run stays synchronous when `async` is omitted, 0.52.0
-  #1257) — so `workflowScript` remains the sole MULTI-agent orchestration surface while direct
-  `{agent, task}` is the idiomatic one-child shape (sugar over the same workflow path —
-  streaming/receipts identical by construction; upstream's own tool description teaches this
-  split, while some packaged upstream skill prose still lags it). perk's code-owned wave spawns
+  pi-subagents 0.49.0 (#1059) RESTORED public direct `{agent, task}` single-child execution. It
+  is a **native structured single-child mode, not a generated workflowScript conversion**:
+  `normalizePublicSubagentExecution` validates and passes `{agent, task}` through (trimming
+  `agent`, defaulting `output: true`), and the executor dispatches it as mode `single`; public
+  structured single-child calls stay synchronous when `asyncByDefault: false` and `async` is
+  omitted (0.52.0 #1257). So `workflowScript` remains the sole MULTI-agent orchestration surface
+  while direct `{agent, task}` is the idiomatic one-child shape (upstream's own tool description
+  teaches this split). perk's code-owned wave spawns
   are unaffected; `conflict-resolver`'s explicit-return one-child workflowScript stays
   deliberate (perk controls the compact `{key, ok, error, output}` projection).
 
@@ -633,9 +638,9 @@ are the drift tripwire):
   `events.asyncComplete` is the ADVERTISED async-complete channel name (currently
   `"subagent:async-complete"`); perk's adapter takes it from ping rather than pinning it.
 - **RPC `spawn` is async-only** (`async: false` ⇒ `invalid_params`); params go through
-  `normalizePublicSubagentExecution`, which since 0.49 ACCEPTS a direct `{agent, task}` and
-  converts it onto the workflow path — never rejected (a prior "rejected" claim here was
-  stale). perk's adapter always sends workflowScript, so nothing perk-side changes.
+  `normalizePublicSubagentExecution`, which since 0.49 ACCEPTS a direct `{agent, task}` —
+  normalized as structured single-child execution, never rejected (a prior "rejected" claim
+  here was stale). perk's adapter always sends workflowScript, so nothing perk-side changes.
   The success `data.details` carries `asyncId` + `asyncDir` identifying the detached run.
 - **The async-complete event** payload spreads the result-file data plus `runId`/`triggerTurn`;
   match a spawned run via `asyncDir` (fall back to `id` — both optional, at least one present).
