@@ -212,6 +212,40 @@ or worker concerns.
 
 ### Changes
 
+> **Status (Objective #2083, Node 2.1):** implemented with context evidence kept
+> NARROW, per the objective's accepted design rule — context evidence stays
+> narrow until proven; the richer `PromptEvidence` value is admitted only when
+> format-4 lands or a migrated flow demonstrably needs more than the narrow
+> checks — which supersedes this section's `PromptEvidence` bullet (kept below
+> as history). Outcomes recorded at implementation:
+>
+> - The prompt-evidence verification list below narrows accordingly for this
+>   phase: direct provenance, quoted-summary rejection, and the fallback window
+>   are covered by the active-window injection tests (`pi/v1/gist.test.ts`,
+>   `adapters/planAdapterPlannotator.test.ts`); order, wrong-audience, and
+>   explicit-unavailable projection are deferred WITH the `PromptEvidence`
+>   value they describe (they verify fields only that value carries).
+> - The node's "identity/kind" deliverable is realized as `runId` plus the
+>   adapter-side stage routing; "verified state ops" is the strict pointer
+>   append inside `WorkflowSession.writeArtifact`; the context-evidence
+>   deliverable is realized as the inlined active-window marker-check
+>   discipline in the injectors (no premature evidence module).
+> - Two interior-only behavior deltas, both test-pinned: (1) the gist-owned
+>   injections (the gist-authoring context and the plannotator GIST review
+>   flavor) dedup on the compaction-active window, so they re-inject after a
+>   compaction drops the prior copy; (2) byte-identical artifact rewrites
+>   short-circuit as `unchanged` through the shared classified core — no fresh
+>   pointer is appended — for all three draft tools.
+> - The thin `writeSessionArtifact`/`readSessionArtifact` wrappers in
+>   `substrate/sessionData.ts` survive this phase (the plan/objective draft
+>   tools still call them); the phase that migrates the last caller deletes
+>   them (last-caller-migrates).
+> - Both guard rules Phase 1 deferred are activated here
+>   (`extension/importDirectionGuard.test.ts` Rules D and E): `authoring/` and
+>   `session/` never import Pi, the RPC wire, or `surfaces/`; Pi registration
+>   is confined to `pi/`, the composition roots, and the frozen shrink-only
+>   legacy census.
+
 - Create `authoring/gist/` around one-entry typed use cases, beginning with the
   actual save/review path rather than an area-wide `GistAuthoring` object.
 - Introduce a gist-specific reviewer role only if its production and
@@ -221,7 +255,8 @@ or worker concerns.
 - Classify every migrated state field by authority, history, fork behavior,
   model visibility, verification tier, and artifact relationship.
 - Add the v1 context adapter needed to produce `PromptEvidence` for the gist
-  Session shape and Prompt concerns.
+  Session shape and Prompt concerns. *(Superseded — see this phase's status
+  note above.)*
 - Keep Prose-unit meaning and ordering in authoring; let the v1 adapter place
   those units in current Pi fields.
 - Add a named v1 gist installer with the existing schema, execution policy,

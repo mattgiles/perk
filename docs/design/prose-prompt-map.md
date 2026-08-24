@@ -142,10 +142,10 @@ Draft, review, save, and adopt lightweight statements of intent.
 | `markdown:prompts/contexts/gist-authoring.md` | `launch` | `shipped` | [`prompts/contexts/gist-authoring.md`](../../prompts/contexts/gist-authoring.md) · `file` | gist.cold |
 | `markdown:prompts/stages/gist-author/seed.md` | `launch` | `shipped` | [`prompts/stages/gist-author/seed.md`](../../prompts/stages/gist-author/seed.md) · `file` | gist.cold |
 | `markdown:skills/perk-gist-author/SKILL.md` | `skill-detail` | `shipped` | [`skills/perk-gist-author/SKILL.md`](../../skills/perk-gist-author/SKILL.md) · `file` | gist.cold |
-| `typescript-model-call:extension/factories/gistAuthor.ts:module:before-agent-start:0` | `control-guidance` | `shipped` | [`extension/factories/gistAuthor.ts`](../../extension/factories/gistAuthor.ts) · `symbol:module/event:before_agent_start/0` | — |
-| `typescript-model-call:extension/factories/gistSave.ts:module:sendUserMessage:0` | `control-guidance` | `shipped` | [`extension/factories/gistSave.ts`](../../extension/factories/gistSave.ts) · `symbol:module/call:sendUserMessage/0` | — |
-| `typescript-tool:gist_draft` | `control-guidance` | `shipped` | [`extension/factories/gistDraft.ts`](../../extension/factories/gistDraft.ts) · `tool:gist_draft` | — |
-| `typescript-tool:gist_save` | `control-guidance` | `shipped` | [`extension/factories/gistSave.ts`](../../extension/factories/gistSave.ts) · `tool:gist_save` | — |
+| `typescript-model-call:extension/pi/v1/gist.ts:module:before-agent-start:0` | `control-guidance` | `shipped` | [`extension/pi/v1/gist.ts`](../../extension/pi/v1/gist.ts) · `symbol:module/event:before_agent_start/0` | — |
+| `typescript-model-call:extension/pi/v1/gist.ts:module:sendUserMessage:0` | `control-guidance` | `shipped` | [`extension/pi/v1/gist.ts`](../../extension/pi/v1/gist.ts) · `symbol:module/call:sendUserMessage/0` | — |
+| `typescript-tool:gist_draft` | `control-guidance` | `shipped` | [`extension/pi/v1/gist.ts`](../../extension/pi/v1/gist.ts) · `tool:gist_draft` | — |
+| `typescript-tool:gist_save` | `control-guidance` | `shipped` | [`extension/pi/v1/gist.ts`](../../extension/pi/v1/gist.ts) · `tool:gist_save` | — |
 
 <details>
 <summary>Logical fragments</summary>
@@ -163,9 +163,9 @@ Draft, review, save, and adopt lightweight statements of intent.
   - `section:authoring-a-perk-gist-the-gist-author-stage/saving-draft-review-approval-auto-saves` — Saving: draft → review → approval auto-saves (`heading:authoring-a-perk-gist-the-gist-author-stage/saving-draft-review-approval-auto-saves`)
   - `section:authoring-a-perk-gist-the-gist-author-stage/the-consumption-story` — The consumption story (`heading:authoring-a-perk-gist-the-gist-author-stage/the-consumption-story`)
   - `section:authoring-a-perk-gist-the-gist-author-stage/never-delegate-boundaries` — Never-delegate boundaries (`heading:authoring-a-perk-gist-the-gist-author-stage/never-delegate-boundaries`)
-- `typescript-model-call:extension/factories/gistAuthor.ts:module:before-agent-start:0`
+- `typescript-model-call:extension/pi/v1/gist.ts:module:before-agent-start:0`
   - `handler` — before_agent_start injected context (`symbol:module/event:before_agent_start/0/handler`)
-- `typescript-model-call:extension/factories/gistSave.ts:module:sendUserMessage:0`
+- `typescript-model-call:extension/pi/v1/gist.ts:module:sendUserMessage:0`
   - `argument:0` — sendUserMessage model-facing argument (`symbol:module/call:sendUserMessage/0/argument:0`)
 - `typescript-tool:gist_draft`
   - `description` — description (`tool:gist_draft.description`)

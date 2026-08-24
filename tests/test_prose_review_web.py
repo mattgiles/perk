@@ -2509,7 +2509,7 @@ def test_assembly_render_returns_typed_layer_failures_with_ordered_siblings(
     ]
     review = payload["layers"][4]
     assert review["content_kind"] == "source-fragments"
-    assert len(review["parts"]) == 8
+    assert len(review["parts"]) == 9
     assert review["presentation"]["presence"] == "varies"
     assert review["presentation"]["presence_label"] == (
         "Presence varies by session shape or runtime."

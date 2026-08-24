@@ -675,7 +675,7 @@ def test_guarded_assembly_render_round_trips_workspace_buffers_over_real_http(
     assert [part["fragment"]["id"] for part in review_layer["parts"]] == [
         fragment.id for fragment in review_unit.candidate.fragments
     ]
-    assert len(review_layer["parts"]) == 8
+    assert len(review_layer["parts"]) == 9
     assert "Present the unsaved buffer plan" in review_layer["parts"][0]["text"]
     for part in review_layer["parts"]:
         assert part["text"]

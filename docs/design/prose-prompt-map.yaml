@@ -384,7 +384,7 @@ routes:
     role: adapter
     priority: 80
   - id: ts-gist
-    match: { paths: ["extension/factories/gist*.ts"] }
+    match: { paths: ["extension/authoring/gist/**", "extension/pi/v1/gist.ts"] }
     capability: intent.gist
     audience: shipped
     role: control-guidance

@@ -495,7 +495,7 @@ test("gist-author context dedups against a prior copy in the LIVE window (once-o
   }
 });
 
-test("gist-author context RE-INJECTS when compaction drops the prior copy (behavior delta 1)", async () => {
+test("gist-author context RE-INJECTS when compaction drops the prior copy", async () => {
   const cwd = scaffoldRepo();
   const file = plantRawSession(cwd, [
     {

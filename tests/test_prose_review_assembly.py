@@ -821,7 +821,7 @@ def test_real_plan_authoring_renders_all_six_authored_layers(
     review_unit = real_snapshot.get_unit("typescript-tool:plan_review")
     assert review_unit is not None
     assert [part.fragment for part in review.parts] == list(review_unit.candidate.fragments)
-    assert len(review.parts) == 8
+    assert len(review.parts) == 9
     review_source = (ROOT / review_unit.candidate.path).read_text(encoding="utf-8")
     for part in review.parts:
         assert part.text
