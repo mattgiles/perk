@@ -16,6 +16,18 @@ support policy permits its removal.
 This is a planning document. It does not authorize a behavioral change by
 itself.
 
+## Reading guide
+
+Read this memo first for the architectural decision, then use the companion
+documents for the evidence, contracts, and execution plan:
+
+1. [`current-system-map.md`](current-system-map.md) records the current
+   TypeScript topology and the evidence behind the decision.
+2. [`module-contracts.md`](module-contracts.md) defines the target ownership,
+   dependency direction, and important TypeScript interfaces.
+3. [`migration-and-verification.md`](migration-and-verification.md) sequences
+   the migration and defines its verification and dogfood gates.
+
 ## Decision
 
 Organize the extension around typed feature modules, then adapt those features
@@ -409,7 +421,7 @@ The migration must not:
 - defer all deletion to a final cleanup phase.
 
 The detailed order and gates live in
-`migration-and-verification.md`.
+[`migration-and-verification.md`](migration-and-verification.md).
 
 ## Success criteria
 
