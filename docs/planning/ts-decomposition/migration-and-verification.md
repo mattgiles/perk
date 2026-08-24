@@ -157,6 +157,13 @@ Make the desired import direction enforceable and break the current
 
 ### Changes
 
+> **Status (Objective #2083, Node 1.2):** the "move configuration parsing …
+> under `config/`" change is deferred by the objective roadmap until a feature
+> slice needs narrow views — this node breaks the cycle in place (`bindings.ts`
+> no longer imports config vocabulary) and lands the guards below via an
+> activation ratchet; the registration-confinement guard activates when `pi/`
+> appears.
+
 - Add source guards for the target rules as target directories appear:
   - features cannot import Pi runtime or TUI APIs;
   - features cannot import RPC wire types;
