@@ -286,6 +286,75 @@ test("per-flavor dedup: a prior PLAN-flavor copy does not suppress the OBJECTIVE
   }
 });
 
+test("active-window escalation: the GIST flavor re-injects post-compaction; the PLAN flavor does not", async () => {
+  // The gist flavor dedups on the compaction-active window, so a compaction that drops the live
+  // copy re-delivers it; the plan flavor keeps the whole-branch scan (one copy per session).
+  const plant = (cwd: string, stage: string, marker: string, fileName: string) =>
+    plantRawSession(
+      cwd,
+      [
+        {
+          custom: {
+            type: "perk:workflow-state",
+            data: { run_id: "01RID", mode: "read-only", stage },
+          },
+        },
+        {
+          custom: {
+            type: PLAN_ADAPTER_PLANNOTATOR_CONTEXT_TYPE,
+            data: { content: `${marker}\nprior copy` },
+          },
+        },
+        { assistant: "recent work that survives compaction" },
+      ],
+      { fileName },
+    );
+
+  const gistCwd = scaffoldRepo();
+  selectPlannotator(gistCwd);
+  const gistFile = plant(gistCwd, "gist-author", "[GIST ADAPTER: PLANNOTATOR]", "gist.jsonl");
+  const gistSessions = SessionManager.open(gistFile);
+  const gistKept = gistSessions.getEntries().at(-1)?.id;
+  assert.ok(gistKept !== undefined);
+  gistSessions.appendCompaction("summary without a live bridge copy", gistKept, 100);
+  const gistH = await loadPerkSession({
+    cwd: gistCwd,
+    sessionManager: gistSessions,
+    env: { PERK_RUN_ID: undefined },
+  });
+  try {
+    const injected = await gistH.emitBeforeAgentStart();
+    const bridge = injected.filter((m) => m.customType === PLAN_ADAPTER_PLANNOTATOR_CONTEXT_TYPE);
+    assert.equal(bridge.length, 1, "the gist flavor re-injects after compaction dropped it");
+    assert.equal(String(bridge[0]?.content), GIST_ADAPTER_PLANNOTATOR_CONTEXT);
+  } finally {
+    gistH.dispose();
+  }
+
+  const planCwd = scaffoldRepo();
+  selectPlannotator(planCwd);
+  const planFile = plant(planCwd, "plan", "[PLAN ADAPTER: PLANNOTATOR]", "plan.jsonl");
+  const planSessions = SessionManager.open(planFile);
+  const planKept = planSessions.getEntries().at(-1)?.id;
+  assert.ok(planKept !== undefined);
+  planSessions.appendCompaction("summary without a live bridge copy", planKept, 100);
+  const planH = await loadPerkSession({
+    cwd: planCwd,
+    sessionManager: planSessions,
+    env: { PERK_RUN_ID: undefined },
+  });
+  try {
+    const injected = await planH.emitBeforeAgentStart();
+    assert.equal(
+      injected.some((m) => m.customType === PLAN_ADAPTER_PLANNOTATOR_CONTEXT_TYPE),
+      false,
+      "the plan flavor keeps whole-branch dedup — no post-compaction re-injection",
+    );
+  } finally {
+    planH.dispose();
+  }
+});
+
 test("default selection: shim injects nothing and strips a stale bridge marker", async () => {
   const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-only", stage: "plan" } });
   const h = await loadPerkSession({
