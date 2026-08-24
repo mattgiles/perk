@@ -26,19 +26,24 @@
 //      directory-creating slice registers it in `ANCHORED_DIRS` with ≥1 in-directory production
 //      `.ts` anchor in the scanned corpus — the activation ratchet that forces every future
 //      home through this guard.
-//
-// DEFERRED RULES (no corpus yet; Rule C forces the activating slice to touch this file):
-//   - "Features never import Pi" and "features never import RPC wire" (`waves/rpcAdapter.ts`) —
-//     implemented by the slice that creates the first feature directory. Two facts that slice
-//     must honor: (a) the rule is a DIRECT-SPECIFIER ban (`@earendil-works/*`; the RPC transport
-//     module) — it cannot catch Pi vocabulary arriving through a local re-export (the existing
-//     sanctioned pattern: `surfaces/surfaces.ts` re-exports `Key` from `@earendil-works/pi-tui`
-//     and `factories/planMode.ts` consumes it), so the activating slice must pair the direct-edge
-//     scan with a decision on re-export seams (census the sanctioned ones or add a taint-style
-//     walk), with its own non-vacuity controls; (b) an empty first corpus needs the known-anchor
-//     floor from `ANCHORED_DIRS`.
-//   - "Pi registration only in approved adapter/composition files" — activates when `pi/` is
-//     created; a frozen ~40-file allowlist today would churn in every node while proving nothing.
+//   D. Features never import Pi or the RPC wire: `PI_FREE_HOMES` (`authoring/`, `session/`)
+//      carry no `@earendil-works/*` specifier, no edge to `waves/rpcAdapter.ts`, and no edge
+//      into `surfaces/` (the report shape these homes need is re-exported through
+//      `substrate/sessionData.ts`, so a surfaces edge is never necessary). This is a
+//      DIRECT-SPECIFIER ban (type-only edges count): it cannot catch Pi vocabulary arriving
+//      through a local re-export, and NO re-export seam is sanctioned for these homes — the
+//      sanctioned `surfaces/surfaces.ts` re-export pattern serves the feature-policy homes
+//      (e.g. `factories/planMode.ts`), never the pure ones; adding a seam is a reviewed edit to
+//      this rule, not a loophole. The known-anchor floor: the rule must visit ≥1 file per home.
+//   E. Pi registration only in approved adapter/composition files: every production file whose
+//      source carries a registration token (`pi.registerTool(` / `pi.registerCommand(` /
+//      `pi.registerFlag(` / `pi.registerShortcut(` / `pi.registerEntryRenderer(` / `pi.on(` /
+//      `registerPerkCommand(` — whitespace-tolerant, word-bounded; `substrate/command.ts`'s
+//      definition site is a legacy entry like any other) must be under the `pi/` home, be
+//      `index.ts`/`workerMain.ts`, or sit in `LEGACY_REGISTRANTS` — frozen from the
+//      activation-day census, shrink-only via the stale arm (the census only burns down as
+//      registrations migrate into `pi/`). A LOCATION ratchet, not a runtime
+//      single-registration proof — the dogfood gate carries the runtime observation.
 //
 // Test-only `typescript` import: the guard lexes with the exact-pinned `typescript` devDependency;
 // production sources gain no imports (`bareImportGuard.test.ts` scans production files only, and
@@ -90,7 +95,7 @@ const MECHANISM_EDGE_ALLOWLIST: Array<{ from: string; to: string }> = [
 // guard was born. NEVER append here: ANY new directory fails this guard until the
 // directory-creating slice (a) registers it in ANCHORED_DIRS with ≥1 known-anchor file INSIDE
 // the new directory (a production `.ts` in the scanned corpus), and (b) wires the target rules
-// that apply to it (see the header's deferral note) — so a future home can never become
+// that apply to it (Rules B/D/E as they fit) — so a future home can never become
 // expected anchor-free. Removing a directory updates the census in the same change — the
 // standing rule ("every directory-creating slice adds or refreshes a known-anchor assertion"),
 // as structure.
@@ -109,7 +114,83 @@ const KNOWN_TOP_LEVEL_DIRS = [
 // Future homes register here as they appear: dir → ≥1 in-directory production `.ts` anchor
 // (checkDirCensus rejects an empty list, an out-of-directory anchor, and an anchor missing from
 // the scanned corpus).
-const ANCHORED_DIRS: Record<string, string[]> = {};
+const ANCHORED_DIRS: Record<string, string[]> = {
+  authoring: ["authoring/gist/draft.ts"],
+  pi: ["pi/v1/gist.ts"],
+  session: ["session/workflowSession.ts"],
+};
+
+/**
+ * The Pi-free homes (Rule D sources): typed features and the session seam. Direct-specifier
+ * bans — `@earendil-works/*`, the RPC transport module, and the `surfaces/` rendering seam —
+ * with NO sanctioned re-export seams for these homes (see the header).
+ */
+const PI_FREE_HOMES = ["authoring/", "session/"];
+
+/**
+ * Rule E's registration tokens: whitespace-tolerant (a registration split across lines still
+ * matches), word-bounded (`api.on(`, `pi.online(`, `registerPerkCommandFoo(` never match).
+ * `pi.on(` rides the repo-wide `pi` parameter convention for `ExtensionAPI` — an alias would
+ * surface at review as a missed registration against the frozen census.
+ */
+const REGISTRATION_TOKEN =
+  /\bpi\s*\.\s*(?:registerTool|registerCommand|registerFlag|registerShortcut|registerEntryRenderer|on)\s*\(|\bregisterPerkCommand\s*\(/;
+
+/** Rule E's approved registrars: the Pi adapter home + the two composition roots. */
+const APPROVED_REGISTRAR_PREFIXES = ["pi/"];
+const APPROVED_REGISTRAR_FILES = ["index.ts", "workerMain.ts"];
+
+// The activation-day registration census (Rule E) — every production file that carried a
+// registration token when the rule activated, frozen as literals and SHRINK-ONLY via the stale
+// arm: a file that stops registering leaves the census in the same change, and no new file may
+// join it (new registrations go under `pi/`). The three deleted gist factories left the census
+// in the activating change itself — the first burn-down.
+const LEGACY_REGISTRANTS = [
+  "adapters/planAdapterPlannotator.ts",
+  "adapters/planAdapterTombell.ts",
+  "doors/address.ts",
+  "doors/annotationPush.ts",
+  "doors/auditWaveTools.ts",
+  "doors/ciExecutor.ts",
+  "doors/commitCompact.ts",
+  "doors/draftReviewWaveTools.ts",
+  "doors/dreamWaveTools.ts",
+  "doors/harvestWaveTools.ts",
+  "doors/land.ts",
+  "doors/learn.ts",
+  "doors/learnFactory.ts",
+  "doors/lifecycleGates.ts",
+  "doors/objectiveReviewBrowser.ts",
+  "doors/objectiveStack.ts",
+  "doors/planReviewBrowser.ts",
+  "doors/prReview.ts",
+  "doors/prReviewBrowser.ts",
+  "doors/prReviewDynamic.ts",
+  "doors/prReviewTerminal.ts",
+  "doors/ready.ts",
+  "doors/reviewWaveTools.ts",
+  "doors/selfcheck.ts",
+  "doors/stackReviewBrowser.ts",
+  "doors/submit.ts",
+  "doors/submitPrReview.ts",
+  "factories/implementHere.ts",
+  "factories/objective.ts",
+  "factories/objectiveAuthor.ts",
+  "factories/objectiveDraft.ts",
+  "factories/objectivePlan.ts",
+  "factories/objectiveSave.ts",
+  "factories/planDraft.ts",
+  "factories/planMode.ts",
+  "factories/planReview.ts",
+  "factories/planSave.ts",
+  "substrate/agentScratch.ts",
+  "substrate/bindingDelivery.ts",
+  "substrate/command.ts",
+  "substrate/toolGating.ts",
+  "surfaces/surfaces.ts",
+  "vendor/btw/btw.ts",
+  "vendor/whimsical/whimsical.ts",
+];
 
 /** Every imported/re-exported module specifier `ts.preProcessFile` lexes from the source text. */
 function extractSpecifiers(sourceText: string): string[] {
@@ -249,6 +330,65 @@ function checkDirection(
   }
   const stale = allowlist.filter((entry) => !matched.has(edgeKey(entry)));
   return { violations, stale };
+}
+
+/**
+ * Feature-purity rule (Rule D): for every file under a Pi-free home, flag any direct
+ * `@earendil-works/*` specifier, any relative edge resolving to `waves/rpcAdapter.ts`, and any
+ * relative edge resolving into `surfaces/`. Direct-specifier semantics on the SAME lexer as the
+ * edge map — type-only imports count. `visited` carries the per-home file count for the
+ * known-anchor floor (an empty home would otherwise pass vacuously).
+ */
+function checkFeaturePurity(
+  files: string[],
+  read: (file: string) => string,
+  homes: string[],
+): { violations: string[]; visited: Map<string, number> } {
+  const visited = new Map<string, number>(homes.map((home) => [home, 0]));
+  const violations: string[] = [];
+  for (const file of files) {
+    const home = homes.find((prefix) => file.startsWith(prefix));
+    if (home === undefined) continue;
+    visited.set(home, (visited.get(home) ?? 0) + 1);
+    for (const spec of extractSpecifiers(read(file))) {
+      if (spec.startsWith("@earendil-works/")) {
+        violations.push(`${file}: "${spec}" (direct Pi import)`);
+        continue;
+      }
+      if (!spec.startsWith(".")) continue;
+      const resolved = resolveRelative(file, spec);
+      if (resolved === "waves/rpcAdapter.ts") {
+        violations.push(`${file}: "${spec}" → ${resolved} (RPC wire)`);
+      } else if (resolved.startsWith("surfaces/")) {
+        violations.push(`${file}: "${spec}" → ${resolved} (surfaces seam)`);
+      }
+    }
+  }
+  return { violations, visited };
+}
+
+/**
+ * Registration-confinement rule (Rule E): `matched` = every file whose source carries a
+ * registration token; `violations` = matched files outside `approvedPrefixes ∪ approvedFiles ∪
+ * legacy`; `stale` = legacy entries that no longer register (the shrink-only arm).
+ */
+function checkRegistrationConfinement(
+  files: string[],
+  read: (file: string) => string,
+  approvedPrefixes: string[],
+  approvedFiles: string[],
+  legacy: string[],
+): { matched: string[]; violations: string[]; stale: string[] } {
+  const matched = files.filter((file) => REGISTRATION_TOKEN.test(read(file)));
+  const matchedSet = new Set(matched);
+  const violations = matched.filter(
+    (file) =>
+      !approvedPrefixes.some((prefix) => file.startsWith(prefix)) &&
+      !approvedFiles.includes(file) &&
+      !legacy.includes(file),
+  );
+  const stale = legacy.filter((file) => !matchedSet.has(file));
+  return { matched, violations, stale };
 }
 
 /**
@@ -392,8 +532,8 @@ test("Rule C: the extension/ top-level directory census is set-exact", () => {
     [],
     `unregistered extension/ top-level director(y/ies): ${unknown.join(", ")}\n` +
       "The directory-creating slice must (a) register it in ANCHORED_DIRS with ≥1 in-directory " +
-      "known-anchor production file, and (b) wire the target rules that apply to it (see this " +
-      "guard's header deferral note). KNOWN_TOP_LEVEL_DIRS is frozen — never append to it.",
+      "known-anchor production file, and (b) wire the target rules that apply to it (Rules " +
+      "B/D/E as they fit). KNOWN_TOP_LEVEL_DIRS is frozen — never append to it.",
   );
   assert.deepEqual(
     stale,
@@ -408,6 +548,55 @@ test("Rule C: the extension/ top-level directory census is set-exact", () => {
       "only in ANCHORED_DIRS; the frozen census never grows.",
   );
   assert.deepEqual(anchorIssues, [], "ANCHORED_DIRS anchor issue(s)");
+});
+
+test("Rule D: Pi-free homes never import Pi, the RPC wire, or surfaces", () => {
+  const { violations, visited } = checkFeaturePurity(
+    scan().files,
+    readProductionFile,
+    PI_FREE_HOMES,
+  );
+  assert.deepEqual(
+    violations,
+    [],
+    "Pi/RPC/surfaces import(s) from a Pi-free home: typed features and the session seam take " +
+      "Pi-shaped dependencies as parameters (ports), never as imports. Invert the edge — do NOT " +
+      "add a re-export seam (none is sanctioned for these homes; see this guard's header).",
+  );
+  for (const home of PI_FREE_HOMES) {
+    assert.ok(
+      (visited.get(home) ?? 0) >= 1,
+      `Rule D visited no files under ${home} — the rule is vacuous for that home`,
+    );
+  }
+});
+
+test("Rule E: Pi registration only in approved adapter/composition files (frozen census)", () => {
+  const { matched, violations, stale } = checkRegistrationConfinement(
+    scan().files,
+    readProductionFile,
+    APPROVED_REGISTRAR_PREFIXES,
+    APPROVED_REGISTRAR_FILES,
+    LEGACY_REGISTRANTS,
+  );
+  // Positive extraction proof: the scan must SEE the v1 installer's registrations — a token
+  // regex that stopped matching real registrations would otherwise pass vacuously.
+  assert.ok(
+    matched.includes("pi/v1/gist.ts"),
+    "the registration scan missed pi/v1/gist.ts — the token extraction is broken",
+  );
+  assert.deepEqual(
+    violations,
+    [],
+    "registration token(s) outside the approved registrars: new registrations live under pi/ " +
+      "(the adapter home) or the composition roots — LEGACY_REGISTRANTS is frozen and never grows.",
+  );
+  assert.deepEqual(
+    stale,
+    [],
+    "stale LEGACY_REGISTRANTS entr(y/ies) with no live registration token — the census is " +
+      "shrink-only: delete the entry in the same change that migrated or removed the registration.",
+  );
 });
 
 // ---------------------------------------------------------------------------------------------
@@ -676,4 +865,68 @@ test("control 9: an extensionless relative import is reported, never a phantom-n
   );
   assert.deepEqual(strict.unresolved, []);
   assert.deepEqual(findCycles(strict.edges), [["a.ts", "b.ts"]]);
+});
+
+test("control 10: feature-purity fixtures (Pi specifier, RPC edge, surfaces edge, clean file, visit floor)", () => {
+  const corpus = ["authoring/x.ts", "session/y.ts", "authoring/clean.ts", "factories/allowed.ts"];
+  const sources: Record<string, string> = {
+    "authoring/x.ts": 'import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";',
+    "session/y.ts":
+      'import { call } from "../waves/rpcAdapter.ts";\nimport { report } from "../surfaces/report.ts";',
+    "authoring/clean.ts": 'import { helper } from "../substrate/sessionData.ts";',
+    // Outside the Pi-free homes: a factories/ Pi import is Rule-D-invisible by design.
+    "factories/allowed.ts": 'import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";',
+  };
+  const { violations, visited } = checkFeaturePurity(
+    corpus,
+    (file) => sources[file] ?? "",
+    PI_FREE_HOMES,
+  );
+  assert.deepEqual(violations, [
+    'authoring/x.ts: "@earendil-works/pi-coding-agent" (direct Pi import)',
+    'session/y.ts: "../waves/rpcAdapter.ts" → waves/rpcAdapter.ts (RPC wire)',
+    'session/y.ts: "../surfaces/report.ts" → surfaces/report.ts (surfaces seam)',
+  ]);
+  assert.equal(visited.get("authoring/"), 2, "both authoring/ files visited");
+  assert.equal(visited.get("session/"), 1, "the session/ file visited");
+  const empty = checkFeaturePurity(
+    ["factories/allowed.ts"],
+    (file) => sources[file] ?? "",
+    PI_FREE_HOMES,
+  );
+  assert.equal(empty.visited.get("authoring/"), 0, "an unvisited home reads 0 — the floor bites");
+});
+
+test("control 11: registration-confinement fixtures (violation, approved, legacy, stale, word bounds)", () => {
+  const sources: Record<string, string> = {
+    "substrate/rogue.ts": 'pi.registerTool({ name: "rogue" });',
+    "pi/v1/fine.ts": 'pi.registerCommand({ name: "fine" });',
+    "index.ts": 'pi.on("session_start", handler);',
+    "doors/legacy.ts": "registerPerkCommand(pi, spec);",
+    "substrate/quiet.ts": "export const nothing = 1;",
+    // Word-bound + whitespace-tolerance probes:
+    "substrate/nearMiss.ts":
+      'api.on("x", h); pi.online(1); registerPerkCommandFoo(2); spi.registerTool(3);',
+    "substrate/split.ts": 'pi\n  .registerTool (\n    { name: "split" });',
+  };
+  const corpus = Object.keys(sources).sort();
+  const read = (file: string) => sources[file] ?? "";
+  const { matched, violations, stale } = checkRegistrationConfinement(
+    corpus,
+    read,
+    APPROVED_REGISTRAR_PREFIXES,
+    APPROVED_REGISTRAR_FILES,
+    ["doors/legacy.ts", "doors/gone.ts"],
+  );
+  assert.deepEqual(
+    matched,
+    ["doors/legacy.ts", "index.ts", "pi/v1/fine.ts", "substrate/rogue.ts", "substrate/split.ts"],
+    "whitespace-split registrations match; word-bound near-misses never do",
+  );
+  assert.deepEqual(
+    violations,
+    ["substrate/rogue.ts", "substrate/split.ts"],
+    "a registration outside pi//composition/legacy must fail",
+  );
+  assert.deepEqual(stale, ["doors/gone.ts"], "a legacy entry with no live token must fail");
 });
