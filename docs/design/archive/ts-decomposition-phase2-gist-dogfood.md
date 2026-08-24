@@ -105,45 +105,61 @@ the state and artifact read back **through `WorkflowSession`**, as the gate dema
    exactly once, the bind reported no duplicate-registration errors, and the injected contexts
    appeared exactly once each — the v1 installer is the only gist binding the session loaded.
 
-## Arm 2 — interactive authoring/review/save (human) — **PENDING**
+## Arm 2 — interactive authoring/review/save (human) — executed 2026-08-24
 
-To be executed by the operator from this worktree (`cd .worktrees/plan-2094 && perk gist
-author`): draft via `gist_draft`, review via `plan_review` (first-party view-only editor or the
-plannotator browser), APPROVE → the auto-save creates a real `perk:gist` issue. Observables to
-record here when executed:
+The operator ran `perk gist author` interactively from this worktree (run
+`01M0V0JT54T1YAEEW1SEXVDSX4`, handoff claimed — `consumed: true` + the session's
+`pi_session_id` recorded) and authored a **real, substantive gist** (a TAB-completion statement
+of intent), reviewed and APPROVED it, and the auto-save created the real backend issue.
+Observed outcomes — operator-reported and corroborated against the persisted session state:
 
-- the saved issue id/url (+ `existed: false`);
-- the gate transition observed **only after** the verified save (the session flips read-only →
-  read-write on the saved arm; a failed save leaves the gate on);
-- the review outcome shape (approve verdict, the relayed save text with the consumption hint);
-- the post-compaction re-injection observable **if a compaction occurs** (not fabricated
-  otherwise; the behavior is test-pinned in `pi/v1/gist.test.ts` +
-  `adapters/planAdapterPlannotator.test.ts`).
+- **Saved issue:** [#2096](https://github.com/mattgiles/perk/issues/2096) — `perk:gist` label,
+  `gist-header` carrying `run_id: 01M0V0JT54T1YAEEW1SEXVDSX4` + `scope: plan`. The review
+  relay read verbatim: `gist APPROVED by reviewer.` / `Saved gist 2096 →
+  https://github.com/mattgiles/perk/issues/2096` / `Consume with: perk plan from 2096` (the
+  consumption hint rode the relayed save text).
+- **Gate transition only after the verified save** (operator-observed live; corroborated from
+  the session's `perk:workflow-state` entries): the claim (`mode: read-only`,
+  `stage: gist-author`) → TWO `gist-draft.json` pointer appends (the revision loop — digests
+  `sha256:a874f…` then `sha256:95560…`, the reviewed draft) → exactly ONE `{"mode":
+  "read-write"}` entry, appended with the saved approval; no flip appears anywhere before the
+  save.
+- **Same injection census as the probe:** the session carried one `perk:mode-context`, one
+  GIST-flavored `perk:plan-adapter-plannotator`, and one `perk:gist-author-context`
+  `custom_message` each.
+- **No compaction occurred** (operator-reported), so the post-compaction re-injection
+  observable was **not exercised live** — not fabricated here; the behavior is test-pinned in
+  `pi/v1/gist.test.ts` + `adapters/planAdapterPlannotator.test.ts`.
 
 ## Skipped arms
 
-- **Post-compaction re-injection (live):** not exercised in the headless probe (no compaction
-  occurred in the short probe session); covered by the harness pins (a planted compaction entry
-  → re-injection) and eligible for live observation in Arm 2 if a compaction happens.
-- **Gate transition after verified save (live):** deliberately reserved for Arm 2 — a headless
-  save would create a throwaway real backend issue; the seam is test-pinned
-  (`authoring/gist/save.test.ts` D1a cases, `pi/v1/gist.test.ts` command/arm cases).
+- **Post-compaction re-injection (live):** not exercised in either arm (no compaction occurred
+  in either session); covered by the harness pins (a planted compaction entry → re-injection).
+  Recorded as not-observed rather than fabricated.
 
 ## Defect log
 
-Empty so far — every headless observation matched the expected behavior; no product defects
+Empty — every observation in both arms matched the expected behavior; no product defects
 surfaced. (The probe script's first branch-inspection pass mis-filtered `type: "custom"` for the
 injected `type: "custom_message"` entries — a probe bug, corrected by offline inspection of the
 persisted session file; not a product defect.)
 
-## Cleanup — **PENDING**
+## Cleanup — executed 2026-08-24
 
-- The probe's run residue (handoff `01M0V04AFK81QH4A4GHBMBSQAE.json`, the scratch run dir, the
-  probe session file) is git-invisible local state; swept after Arm 2 completes.
-- **Planned close (the two-step sequence):** after Arm 2 saves the dogfood gist, the gist issue
-  is closed with a comment pointing at this record; the close is verified, and this record is
-  amended with the observed close/comment outcome in a follow-up commit — the final CI/ready
-  stamp runs on that head.
+- The probe's run residue was swept after Arm 2 completed: handoff
+  `01M0V04AFK81QH4A4GHBMBSQAE.json`, the probe's scratch run dir, the probe session file, and
+  the (never-created) `.perk-dogfood-gist-probe` path all removed; the working tree stayed
+  clean throughout (all residue was git-invisible local state). The interactive run's residue
+  is ordinary local run state (its artifact's canonical outcome now lives in issue #2096).
+- **The planned close — an operator-approved deviation, executed as a comment-without-close:**
+  the plan's cleanup step prescribed closing the dogfood gist issue. Arm 2 produced a
+  *genuine, keepable* statement of intent, and a gist is consumable only while OPEN — so the
+  executor put the fork to the operator, who chose to **keep #2096 open** as a live gist. The
+  evidence-linkage half of the step was kept: a comment pointing at this record (and naming
+  the deviation) was posted —
+  <https://github.com/mattgiles/perk/issues/2096#issuecomment-5402971607> — and the issue was
+  verified still OPEN with the comment in place. This record's amendment (this commit) is the
+  follow-up commit the two-step sequence requires; the final CI stamp runs on this head.
 
 ## Claim → evidence checklist
 
@@ -155,6 +171,6 @@ persisted session file; not a product defect.)
 | `gist_draft` works under the gate; artifact + pointer land | Arm 1: `ok: true` details while `mode=read-only`; pointer digest recorded |
 | State/artifacts read back through `WorkflowSession` | Arm 1: `openBranchWorkflowSession` → `opened` / `found`; four-way digest agreement |
 | Exactly one v1 binding active (two ways) | Arm 1: Rule E location ratchet + the runtime census |
-| Real gist authored/reviewed/saved; issue id/url | **PENDING — Arm 2 (human)** |
-| Gate transition only after verified save (live) | **PENDING — Arm 2 (human)**; test-pinned meanwhile |
-| Dogfood issue closed, record amended | **PENDING — the planned close above** |
+| Real gist authored/reviewed/saved; issue id/url | Arm 2: [#2096](https://github.com/mattgiles/perk/issues/2096) (`perk:gist`, `scope: plan`); verbatim approve/save/consume relay |
+| Gate transition only after verified save (live) | Arm 2: operator-observed; ONE `{"mode": "read-write"}` state entry after the save, none before |
+| Dogfood issue closed, record amended | Deviation (operator-approved): #2096 kept OPEN as genuine intent; linkage comment posted + verified; record amended in the follow-up commit |
