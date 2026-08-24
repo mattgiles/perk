@@ -562,6 +562,21 @@ const DRIVE_COVERAGE: readonly {
       }),
   },
   {
+    drive: "stages/conflict-resolution-continuation.md (sync conflict drive + resolve mode)",
+    stages: WORKTREE_STAGES,
+    text: () =>
+      render("stages/conflict-resolution-continuation.md", {
+        objective: "5",
+        node: "2.1",
+        branch: "plan-42",
+        pr: "42",
+        worktree: "/tmp/wt",
+        attempt: "1",
+        cap: "2",
+        model: "test-model",
+      }),
+  },
+  {
     drive: "stages/address/preview.md",
     stages: WORKTREE_STAGES,
     text: () =>

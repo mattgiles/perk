@@ -469,7 +469,7 @@ end of the section).
 | `review_posts` | array | the accumulating per-PR posting ledger of a stacked review: one `{ pr, event, at:ISO }` row per REAL `submit_pr_review` success, in posting order (read-rebuild-append — each write carries the whole list); best-effort tier with an asymmetric trust rule — a row can be MISSING spuriously (append failed after a real post) but never PRESENT spuriously, so `submit_pr_review` enforces skip-on-resume on presence (`already_posted` refusal; `allow_repost: true` is the deliberate override) while a missing row means verify posted-vs-pending against GitHub before re-posting |
 | `session_artifacts` | object \| null | per-name session-artifact provenance pointers `{run_id, name, path, digest, at}` (§8.1); appends carry the **whole merged map** (per-field LWW); strict-append tier |
 | `objective_node_claim` | object \| null | the objective node this session has claimed `planning` (`{ objective, node }`); written by the warm `objective_node` tool on a successful `planning` transition **and by the cold claim** (`session_start` persists it from the claimed handoff's non-blank `objective_id`/`node_id` — the objective-plan cold door's `handoff_extra` — so implement-here suppression is structural in cold objective-plan sessions too), cleared on a successful non-planning transition for the same node and after a successful node-linked plan save; best-effort tier (cheaply reconstructable; loud-but-non-fatal) |
-| `conflict_resolution_attempts` | number | the bounded conflict-resolution re-drive counter: incremented each time `/submit` drives the `perk.conflict-resolver` subagent on a definitively-unmergeable PR (cap `CONFLICT_RESOLUTION_ATTEMPT_CAP = 2`), reset to 0 on a clean submit; best-effort tier (cheaply reconstructable) |
+| `conflict_resolution_attempts` | number | the bounded conflict-resolution re-drive counter: incremented on each `perk.conflict-resolver` dispatch from EITHER warm surface — `/submit`'s PR-rebase drive on a definitively-unmergeable PR, or `/objective-sync`'s retained-continuation drive (§8.51) — (cap `CONFLICT_RESOLUTION_ATTEMPT_CAP = 2`, shared); reset to 0 on any clean mutating completion (a clean submit; a clean non-declined mutating stack sync/continue/abort/adopt); best-effort tier (cheaply reconstructable) |
 | `dream_bundle_digest` | string | the dream-wave finalized-bundle digest marker (§8.61): `""` = invalidated (cleared unconditionally at wave entry, BEFORE the stale-bundle removal attempt — the invalidation record); `sha256:<hex>` = the digest of the current finalized run-scratch bundle bytes, set only after a successful finalize write; the §8.63 dream-report recovery refuses unless the marker is present, non-empty, and byte-matches the bundle just read; per-field LWW, no rebuild change |
 | `perk_version` | string | the running perk (extension) version, stamped when run identity is established (the claim/fork/adopt/mint arms, §8.2) — the session-audit **exact-vintage** basis (the key literal is the cross-plane coordination point; the read side is `perk-dev`'s audit corpus/vintage layer); omitted when only the `perkVersion()` failure sentinel is available; best-effort tier |
 
@@ -7310,7 +7310,14 @@ manifest-less) `sync-*` residue is inert until `recover`'s orphan sweep (§8.51)
    remote ref and no journal record was created; the conflicted worktree state is retained).
    A manifest WRITE failure keeps the guard armed — residue is cleaned, nothing is retained
    — and still classifies as `rebase_conflict` inside the typed boundary (the message says
-   retention failed and why).
+   retention failed and why). **The refusal-message layer token is load-bearing**: every
+   `rebase_conflict` retention/failure message — fresh-retained, fresh-write-failed, dry-run,
+   continue-retained, continue-rewrite-failed — names the layer whose rebase actually stopped
+   as `for layer <node_id>` (trailing space). §8.51's warm freshness corroboration keys on
+   that exact token: the continue-time failed-rewrite arm preserves the PREVIOUS durable
+   manifest (naming the OLD conflict layer) while the message names the NEW one, and the token
+   mismatch is what keeps the warm drive report-only there. Pinned by the sync conflict-arm
+   tests; rewriting these messages without the token silently disables the warm drive.
 9. **Approval gate**: the ordered `SyncResult.Cascade` (per-ref before→after, node ids, PR numbers,
    base facts) → the `approve` callback (`None` = auto-approve). Declined → the guard
    cleans; the declined result returns — no journal record, nothing mutated.
@@ -7467,9 +7474,10 @@ resolved — a planted symlink cannot redirect the deletion), and every candidat
 EXACTLY `refs/perk/sync/<operation_id>/<branch>` for a recorded branch. A hostile or
 corrupted manifest can therefore name nothing outside the operation's own residue.
 
-**`--continue` (resume the human-resolved conflict).** perk never drives conflict
-resolution: the human finishes the rebase in the retained worktree (`git rebase --continue`)
-first; `--continue` then (1) loads the manifest (`no_continuation` when none;
+**`--continue` (resume the resolved conflict).** The rebase in the retained worktree is
+finished first — by the human (`git rebase --continue`) OR by the child the §8.51 warm
+resolver drive dispatches; COLD perk never dispatches resolution, and publication stays the
+human's `--continue` either way; `--continue` then (1) loads the manifest (`no_continuation` when none;
 unparseable → the typed direction to `--abort`), validates containment (above), and checks
 the manifest belongs to this objective/lineage (`continuation_invalid`); (2) revalidates the
 retained world — worktree present (missing → `continuation_stale`), no rebase still in
@@ -8075,7 +8083,8 @@ headless stderr mirror) — the mutating stack tools never join `READ_ONLY_TOOLS
 separately-typed tools** (strict tri-state decode via `toolParams.ts` — refuse the whole
 call on any malformed field; non-terminating; no broad action enum):
 `objective_stack_status {objective?}`; `objective_stack_sync {objective?, base?, dry_run?,
-continue?, abort?}` (the CLI's mode matrix enforced in the decode); `objective_stack_adopt
+continue?, abort?, resolve?}` (the CLI's mode matrix enforced in the decode; `resolve` is
+WARM-ONLY — no cold argv, composes with nothing); `objective_stack_adopt
 {objective?, node, dry_run?, confirm?}` (`node` required); `objective_stack_recover
 {objective?, operation?, dry_run?, abandon?, accept_prefix?, confirm?}` (the CLI's flag
 matrix enforced in the decode); `objective_stack_land {objective?,
@@ -8090,8 +8099,56 @@ resolved objective explicitly to the cold door. **Gating census**: the five tool
 `PERK_TOOLS` and the worktree-family stage lists (`WORKTREE_STAGE_TOOLS` — explicit repair
 from implement/address sessions and §8.52's converged workflow); the three drive rows join
 the drive-coverage guard. No registry stage is added — the warm commands are
-globally-registered doors/drivers (the `ready` non-stage pattern). The one warm drive is
-§8.56's reconcile drive (`driveStackReconcile`); the landing mutation itself is §8.56's.
+globally-registered doors/drivers (the `ready` non-stage pattern).
+
+**The sync conflict drive** (`driveSyncConflictResolution` / the shared `dispatchSyncResolver`
+core in `objectiveStack.ts`). **Eligibility (fail-closed, narrow)**: a human-approved MUTATING
+`objective_stack_sync` call — mode sync or continue; never `dry_run`, never `abort`, never the
+adopt tool — refusing `rebase_conflict`, corroborated by RE-READING the status projection:
+a `parseable: true` continuation carrying operation/layer/path facts; the §8.49
+`for layer <node_id> ` refusal-message freshness token (the continue-time failed-rewrite arm
+preserves the PREVIOUS manifest and mismatches — report-only); a vocabulary-valid
+`train.delivery_lineage` whose `sync-continuations/<lineage>.json` shape the manifest path
+matches; `validated_targets`-shaped worktree containment re-established on the warm side (a
+canonical 26-char Crockford ULID operation id, an absolute `…/sync-<operation_id>` worktree
+path inside a shell-inert vocabulary — the dispatch template's `cd` renders unquoted, so an
+exotic root degrades to report-only); the conflicting layer present in `train.layers[]` with
+BOTH branch and PR number; and every interpolated identifier whitelist-validated (the
+`driveStackReconcile` rule — the redirect-resolved projection `objective.id`, never the
+requested one). Dry-run conflicts, manifest write/rewrite failures, and unparseable manifests
+report only (unparseable adds the `abort` discard direction). **The shared counter**:
+`conflict_resolution_attempts` (§8.3) with `/submit`'s cap, incremented per dispatch under the
+VERIFIED-increment precondition — an unpersistable counter withholds the injection (typed
+`state_error`) and releases this call's claim through the token-fenced quarantine-verify
+release (a successor's raced-in claim is never deleted), never bypasses the cap; reset on any
+clean non-declined mutating stack sync/continue/abort/adopt completion. **The resolver
+claim**: a machine-local lock dir beside the manifest (`<manifest>.resolver-lock`,
+`extension/substrate/resolverLease.ts`) holding `{schema: 1, pid, operation_id, token}` (the
+token is the per-acquisition ownership fence, rotated on every (re)acquire) — honestly a
+SESSION claim, never child-lifecycle-bound (`pi.sendUserMessage` is fire-and-forget), so there
+is no dispatch-time release: same-pid contention is an idempotent reacquire rewriting the
+current operation id; reclaim triggers on holder-pid death, a consumed operation (recorded id
+≠ current), or an aged corrupt/missing lease (lock-dir mtime past `RECLAIM_GRACE_MS`), via
+quarantine-rename + post-rename re-judgment on the MOVED state (a claim that changed since
+the judgment and probes alive, or a lease-less dir still inside the grace window, is renamed
+back — a raced-in claim is never stolen, whatever operation it names; only the unchanged
+judged-stale state, a dead raced-in holder, or an aged lease-less dir proceeds) + ONE
+fresh-acquire retry; a live same-operation foreign holder is the typed `resolver_busy`
+(naming pid, path, remediation). Error posture: a missing or malformed lease is DATA (it
+routes to the reclaim rules) and expected race disappearances (ENOENT on read/stat/rename,
+EEXIST on mkdir) are contention; every OTHER claim/lease filesystem failure is the typed
+`state_error` — never a fabricated busy/reclaim judgment. **Dispatch** renders
+`prompts/stages/conflict-resolution-continuation.md` (§8.57's canonical carrier of the
+dispatch procedure AND the completed-only outcome gate) + the binding suffix, idle-immediate
+else followUp. **Resolve-and-stop**: nothing automated publishes — the human's explicit
+`continue` stays the only publication gesture. **The pre-existing-continuation offer**:
+`objective_stack_sync {resolve: true}` runs the SAME core minus the freshness token (no
+refusal exists; the explicit human request against the current projection is the trigger) and
+returns ok or the typed fail (`no_continuation` / `attempt_cap` / `resolver_busy` /
+`state_error` — warm-local vocabulary, never emitted by the cold door); the offer lives in the
+status render + the seed, and the model calls it ONLY on explicit human request. The two warm
+drives here are §8.56's reconcile drive (`driveStackReconcile`) and this §8.51 sync conflict
+drive; the landing mutation itself is §8.56's.
 
 ## §8.52 · Workflow convergence (automatic propagation, finalization, supervision, and reviewability)
 

@@ -119,7 +119,7 @@ Per-agent model overrides for each perk-owned project agent.
 | `pr-reviewer` | string (model id) | _(agent frontmatter default)_ | Model for the PR-reviewer agent. |
 | `review-classifier` | string (model id) | _(agent frontmatter default)_ | Model for the review-classifier agent, consumed by `classify_review_feedback` at execute time. |
 | `objective-explorer` | string (model id) | _(agent frontmatter default)_ | Model for the objective-explorer agent, consumed by `explore_objective_node` at execute time. |
-| `conflict-resolver` | string (model id) | _(agent frontmatter default)_ | Model for the conflict-resolver agent spawned by `/submit` when it detects merge conflicts. |
+| `conflict-resolver` | string (model id) | _(agent frontmatter default)_ | Model for the conflict-resolver agent spawned by `/submit` on merge conflicts and by `/objective-sync`'s retained-continuation drive. |
 | `learn-analyst` | string (model id) | _(agent frontmatter default)_ | Model for the learn-analyst agent used by `/learn` to analyze a landed plan's session evidence. |
 | `adversarial-reviewer` | string (model id) | _(agent frontmatter default)_ | Model for the adversarial-reviewer agent spawned by `/pr-review-terminal` and `/pr-review-browser`. |
 | `review-angle-selector` | string (model id) | _(agent frontmatter default)_ | Model for the bounded change-profile classifier used by the experimental dynamic-review flow. |

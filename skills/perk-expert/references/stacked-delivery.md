@@ -131,7 +131,8 @@ plan worktree's linked objective when omitted.
   `--base` (re-anchor the train onto the advanced objective base), `--adopt NODE` (accept one
   layer's manually-pushed remote head and cascade above it), `--dry-run` (preview, nothing
   mutates), and `--continue`/`--abort` (resume or discard a retained rebase-conflict
-  continuation — you finish the rebase yourself; perk never drives conflict resolution). The
+  continuation — the rebase is finished first, by you or by the resolver subagent the warm
+  `/objective-sync` door dispatches; the cold CLI never dispatches resolution). The
   cascade is computed in an isolated disposable worktree, rendered for **confirmation**,
   journaled, and pushed as **ONE atomic multi-ref push** under exact per-ref leases (every
   ref moves or none does). Typed refusals before anything is pushed: out-of-band drift
@@ -190,7 +191,7 @@ row:
 
 | Symptom | First move | Conclusion |
 |---|---|---|
-| A fresh sync refuses `sync_conflict_pending` (a rebase conflict stopped a cascade; the refusal names the retained worktree + manifest) | Finish the rebase yourself in the retained worktree (`git rebase --continue`) — perk never drives conflict resolution | `stack sync --continue` revalidates the captured inputs and concludes the cascade; `stack sync --abort` discards the retained continuation (confirmation-gated) |
+| A fresh sync refuses `sync_conflict_pending` (a rebase conflict stopped a cascade; the refusal names the retained worktree + manifest) | In a session, `/objective-sync` auto-dispatches the `perk.conflict-resolver` subagent into the retained worktree (or on request: `objective_stack_sync { resolve: true }`); finishing the rebase yourself (`git rebase --continue`) stays valid — the cold CLI never dispatches resolution | `stack sync --continue` revalidates the captured inputs and concludes the cascade (publication stays your gesture); `stack sync --abort` discards the retained continuation (confirmation-gated) |
 | An unresolved PUBLISH operation (a crashed `/submit`) | `stack recover --dry-run` | Recover only **reports** PUBLISH — re-run `/submit`; publish's own resume owns the conclusion |
 | An unresolved SYNC or ADOPT operation | `stack recover` | `all_after` rolls forward automatically; a proven `all_before` is abandoned under confirmed `--abandon`; `mixed` only reports — investigate by hand |
 | An unresolved TRANSFER (an interrupted stacked replan — planning refuses and names the predecessor) | `stack recover <old-objective-id>` — run it against the **predecessor** objective id the refusal names | A corroborating successor rolls forward to completion; an absent successor is abandoned under confirmed `--abandon`; `mixed` reports |

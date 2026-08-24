@@ -30,7 +30,12 @@ import { appendWorkflowState, branchOf, rebuildWorkflowState } from "../substrat
 import { report } from "../surfaces/report.ts";
 import { planningStageRefusal } from "./lifecycleGates.ts";
 
-/** The bounded conflict-resolution re-drive cap: drive the resolver at most this many times. */
+/**
+ * The bounded conflict-resolution re-drive cap: drive the resolver at most this many times.
+ * The counter behind it (`conflict_resolution_attempts`) is SHARED with `/objective-sync`'s
+ * retained-continuation conflict drive (objectiveStack.ts) — submit- and sync-episode attempts
+ * deliberately share one bound, reset on any clean completion of either surface.
+ */
 export const CONFLICT_RESOLUTION_ATTEMPT_CAP = 2;
 
 /** The ok-arm fields — the structured `details` surface doubles as branch-safe persisted state. */
@@ -209,7 +214,7 @@ export async function submitPr(pi: ExtensionAPI, ctx: ExtensionContext): Promise
   const conflicted = r.data.mergeable === false;
   // Reset the counter on every clean (or undetermined) submit — idempotent; keeps a later
   // independent conflict bounded fresh.
-  if (r.data.mergeable !== false) resetConflictAttempts(pi, ctx);
+  if (r.data.mergeable !== false) resetConflictAttempts(pi, ctx, "submit");
   // Automatic-cascade facts supersede the generic stacked suffix. A malformed operation block was
   // dropped by the lenient decoder, so it falls back to the pre-existing stack wording.
   const deliverySuffix =
@@ -233,15 +238,23 @@ export async function submitPr(pi: ExtensionAPI, ctx: ExtensionContext): Promise
   return ok(message, r.data, { terminate: true });
 }
 
-/** Reset `conflict_resolution_attempts` to 0 (idempotent: a no-op when already 0/absent). */
-function resetConflictAttempts(pi: ExtensionAPI, ctx: ExtensionContext): void {
+/**
+ * Reset `conflict_resolution_attempts` to 0 (idempotent: a no-op when already 0/absent). The
+ * counter is shared across the two warm conflict drives, so `scope` names the TRUE resetting
+ * surface for failure reports — `/submit` passes "submit", the stack door "objective-sync".
+ */
+export function resetConflictAttempts(
+  pi: ExtensionAPI,
+  ctx: ExtensionContext,
+  scope: string,
+): void {
   const attempts = rebuildWorkflowState(branchOf(ctx)).conflict_resolution_attempts ?? 0;
   if (attempts === 0) return;
   appendWorkflowState(pi, ctx, {
     data: { conflict_resolution_attempts: 0 },
     field: "conflict_resolution_attempts",
     expected: 0,
-    scope: "submit",
+    scope,
     failure: "conflict_resolution_attempts reset read-back failed (expected 0)",
   });
 }
@@ -277,7 +290,8 @@ export function conflictResolutionGuidance(
  * `followUp` user message is a separate deliberate new turn. Short-circuits (sends nothing) unless
  * the submit succeeded with a definitively-unmergeable PR. Bounded by
  * `CONFLICT_RESOLUTION_ATTEMPT_CAP` via the `conflict_resolution_attempts` field: past the cap it
- * surfaces the unresolved conflict loudly instead of looping.
+ * surfaces the unresolved conflict loudly instead of looping. The counter is shared with
+ * `/objective-sync`'s retained-continuation conflict drive.
  */
 export function driveConflictResolution(
   pi: ExtensionAPI,
