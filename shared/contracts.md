@@ -8119,17 +8119,25 @@ requested one). Dry-run conflicts, manifest write/rewrite failures, and unparsea
 report only (unparseable adds the `abort` discard direction). **The shared counter**:
 `conflict_resolution_attempts` (§8.3) with `/submit`'s cap, incremented per dispatch under the
 VERIFIED-increment precondition — an unpersistable counter withholds the injection (typed
-`state_error`), never bypasses the cap; reset on any clean non-declined mutating stack
-sync/continue/abort/adopt completion. **The resolver claim**: a machine-local lock dir beside
-the manifest (`<manifest>.resolver-lock`, `extension/substrate/resolverLease.ts`) holding
-`{schema: 1, pid, operation_id}` — honestly a SESSION claim, never child-lifecycle-bound
-(`pi.sendUserMessage` is fire-and-forget), so there is no explicit release: same-pid contention
-is an idempotent reacquire rewriting the current operation id; reclaim triggers on holder-pid
-death, a consumed operation (recorded id ≠ current), or an aged corrupt/missing lease
-(lock-dir mtime past `RECLAIM_GRACE_MS`), via quarantine-rename + post-rename re-check (a
-moved claim that proves fresh is renamed back — never stolen) + ONE fresh-acquire retry; a
-live same-operation foreign holder is the typed `resolver_busy` (naming pid, path,
-remediation); claim/lease fs failures are the typed `state_error`. **Dispatch** renders
+`state_error`) and releases this call's claim through the token-fenced quarantine-verify
+release (a successor's raced-in claim is never deleted), never bypasses the cap; reset on any
+clean non-declined mutating stack sync/continue/abort/adopt completion. **The resolver
+claim**: a machine-local lock dir beside the manifest (`<manifest>.resolver-lock`,
+`extension/substrate/resolverLease.ts`) holding `{schema: 1, pid, operation_id, token}` (the
+token is the per-acquisition ownership fence, rotated on every (re)acquire) — honestly a
+SESSION claim, never child-lifecycle-bound (`pi.sendUserMessage` is fire-and-forget), so there
+is no dispatch-time release: same-pid contention is an idempotent reacquire rewriting the
+current operation id; reclaim triggers on holder-pid death, a consumed operation (recorded id
+≠ current), or an aged corrupt/missing lease (lock-dir mtime past `RECLAIM_GRACE_MS`), via
+quarantine-rename + post-rename re-judgment on the MOVED state (a claim that changed since
+the judgment and probes alive, or a lease-less dir still inside the grace window, is renamed
+back — a raced-in claim is never stolen, whatever operation it names; only the unchanged
+judged-stale state, a dead raced-in holder, or an aged lease-less dir proceeds) + ONE
+fresh-acquire retry; a live same-operation foreign holder is the typed `resolver_busy`
+(naming pid, path, remediation). Error posture: a missing or malformed lease is DATA (it
+routes to the reclaim rules) and expected race disappearances (ENOENT on read/stat/rename,
+EEXIST on mkdir) are contention; every OTHER claim/lease filesystem failure is the typed
+`state_error` — never a fabricated busy/reclaim judgment. **Dispatch** renders
 `prompts/stages/conflict-resolution-continuation.md` (§8.57's canonical carrier of the
 dispatch procedure AND the completed-only outcome gate) + the binding suffix, idle-immediate
 else followUp. **Resolve-and-stop**: nothing automated publishes — the human's explicit

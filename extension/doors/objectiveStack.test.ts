@@ -4,7 +4,7 @@
 // (fakePerk via PERK_BIN; a REAL bound AgentSession via the T1 harness).
 
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { chmodSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
@@ -1367,6 +1367,115 @@ test("delegation: the confirmed land's close injects the reconcile drive exactly
     assert.equal(injected.length, 1, "exactly one drive injection");
     assert.match(injected[0] ?? "", /reconcile objective #7/i);
     assert.match(injected[0] ?? "", /BEGIN UNTRUSTED DATA/);
+  } finally {
+    h.dispose();
+  }
+});
+
+// --- the sync conflict drive through the REGISTERED tool (the execute composition point) --------
+
+const DRIVE_OP = "01ARZ3NDEKTSV4RRFFQ69G5FAV";
+
+/** A stack-routing fake perk: routes on the third argv token (sync vs status) and appends each
+ * call's full argv as one line — the smoke tests assert the exact cold-door sequence. */
+function fakeStackPerk(
+  cwd: string,
+  opts: { sync?: { json: string; code: number }; status: string; argvFile: string },
+): string {
+  const path = join(cwd, "fake-stack-perk.sh");
+  const q = (value: string) => value.replace(/'/g, "'\\''");
+  const syncArm = opts.sync
+    ? `  sync) printf '%s' '${q(opts.sync.json)}'; exit ${opts.sync.code} ;;\n`
+    : "";
+  writeFileSync(
+    path,
+    `#!/usr/bin/env bash\nprintf '%s\\n' "$*" >> '${q(opts.argvFile)}'\ncase "$3" in\n${syncArm}` +
+      `  status) printf '%s' '${q(opts.status)}'; exit 0 ;;\n` +
+      `  *) >&2 echo "unexpected subcommand: $*"; exit 2 ;;\nesac\n`,
+    "utf8",
+  );
+  chmodSync(path, 0o755);
+  return path;
+}
+
+/** A corroborating status projection whose manifest path lives under `cwd`. */
+function driveStatusJson(cwd: string): string {
+  mkdirSync(join(cwd, "sync-continuations"), { recursive: true });
+  return JSON.stringify({
+    success: true,
+    objective: { id: "7", url: "https://x/7", redirected_from: null },
+    train: {
+      base: "main",
+      delivery_lineage: "01LIN",
+      published_prefix_len: 1,
+      layers: [{ node_id: "2.1", branch: "plan-91", pr_number: 91, publication: "published" }],
+    },
+    continuation: {
+      operation_id: DRIVE_OP,
+      conflict_node_id: "2.1",
+      adopted_node: null,
+      created: "2026-01-01",
+      worktree_path: `/tmp/worktrees/sync-${DRIVE_OP}`,
+      manifest_path: join(cwd, "sync-continuations", "01LIN.json"),
+      parseable: true,
+    },
+    orphaned_residue: { observed: true, reason: null, worktrees: [], refs: [] },
+  });
+}
+
+test("registered tool: a mutating sync refusing rebase_conflict auto-drives ONE dispatch", async () => {
+  const cwd = scaffoldRepo();
+  const argvFile = join(cwd, "argv.txt");
+  const bin = fakeStackPerk(cwd, {
+    sync: {
+      json: JSON.stringify({
+        success: false,
+        error_type: "rebase_conflict",
+        message: "the candidate rebase for layer 2.1 ('plan-91' onto abc) hit a conflict",
+      }),
+      code: 1,
+    },
+    status: driveStatusJson(cwd),
+    argvFile,
+  });
+  const h = await loadPerkSession({ cwd, env: { PERK_RUN_ID: undefined, PERK_BIN: bin } });
+  const injected = spyInjections(h);
+  try {
+    const result = await h.invokeTool("objective_stack_sync", { objective: "7" });
+    const details = result.details as { ok: boolean; error_type?: string };
+    assert.equal(details.ok, false, "the tool result still carries the refusal");
+    assert.equal(details.error_type, "rebase_conflict");
+    assert.deepEqual(
+      readFileSync(argvFile, "utf8").trim().split("\n"),
+      ["objective stack sync 7 --yes --json", "objective stack status 7 --json"],
+      "the mutating sync is followed by exactly the corroborating status re-read",
+    );
+    assert.equal(injected.length, 1, "exactly one dispatch injection");
+    assert.match(injected[0] ?? "", /RETAINED-CONTINUATION SENTINEL/);
+    assert.match(injected[0] ?? "", /perk\.conflict-resolver/);
+  } finally {
+    h.dispose();
+  }
+});
+
+test("registered tool: resolve dispatches without ever reaching the cold sync mutation", async () => {
+  const cwd = scaffoldRepo();
+  const argvFile = join(cwd, "argv.txt");
+  // No sync route at all: reaching the mutation worker would exit 2 and fail the corroboration.
+  const bin = fakeStackPerk(cwd, { status: driveStatusJson(cwd), argvFile });
+  const h = await loadPerkSession({ cwd, env: { PERK_RUN_ID: undefined, PERK_BIN: bin } });
+  const injected = spyInjections(h);
+  try {
+    const result = await h.invokeTool("objective_stack_sync", { objective: "7", resolve: true });
+    assert.equal((result.details as { ok: boolean }).ok, true);
+    assert.match(result.content[0]?.text ?? "", /dispatch injected \(attempt 1 of 2\)/);
+    assert.deepEqual(
+      readFileSync(argvFile, "utf8").trim().split("\n"),
+      ["objective stack status 7 --json"],
+      "the status re-read is the ONLY cold call",
+    );
+    assert.equal(injected.length, 1, "exactly one dispatch injection");
+    assert.match(injected[0] ?? "", /RETAINED-CONTINUATION SENTINEL/);
   } finally {
     h.dispose();
   }

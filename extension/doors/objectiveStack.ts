@@ -25,7 +25,6 @@
 // plan-ref `objective_id` (the resolveReconcileObjective precedent); the warm layer always
 // passes the resolved objective explicitly to the cold door.
 
-import { rmSync } from "node:fs";
 import { basename, dirname } from "node:path";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { reconcileGuidance } from "../factories/objectivePlan.ts";
@@ -42,7 +41,7 @@ import {
 import { registerPerkCommand } from "../substrate/command.ts";
 import { resolveIssueBackendId, subagentModel } from "../substrate/config.ts";
 import { render } from "../substrate/prompts.ts";
-import { acquireResolverLease, resolverLockDir } from "../substrate/resolverLease.ts";
+import { acquireResolverLease, releaseResolverClaim } from "../substrate/resolverLease.ts";
 import { failFor, ok, type Result } from "../substrate/result.ts";
 import type { ToolGating } from "../substrate/toolGating.ts";
 import { booleanParam, idParam, paramsOf, stringParam } from "../substrate/toolParams.ts";
@@ -484,7 +483,8 @@ interface SyncToolParams {
   dryRun: boolean;
   continue_: boolean;
   abort: boolean;
-  /** The warm-only explicit resolver dispatch (§8.51) — never reaches the cold door. */
+  /** The warm-only explicit resolver dispatch (§8.51) — never reaches the cold sync
+   * mutation worker (its only cold call is the corroborating status re-read). */
   resolve: boolean;
 }
 
@@ -1107,13 +1107,9 @@ export async function dispatchSyncResolver(
   });
   if (!persisted) {
     // The verified increment is a precondition for injection: without it the cap is
-    // unenforceable. We own the claim dir acquired in THIS call — best-effort remove it so the
-    // withheld dispatch does not leave a phantom holder behind.
-    try {
-      rmSync(resolverLockDir(dispatch.manifestPath), { recursive: true, force: true });
-    } catch {
-      // best-effort — residue self-heals via the lease's reclaim rules
-    }
+    // unenforceable. Release the claim acquired in THIS call so the withheld dispatch leaves
+    // no phantom holder — token-fenced, so a successor's raced-in claim is never deleted.
+    releaseResolverClaim(dispatch.manifestPath, lease.token);
     return {
       dispatched: false,
       errorType: "state_error",
@@ -1227,10 +1223,12 @@ export function registerObjectiveStack(pi: ExtensionAPI, gating: ToolGating): vo
     label: "Objective stack sync",
     description:
       "Synchronize an objective's published stack after an amend or base advance: preview " +
-      "(dry_run), cascade, resume a human-resolved conflict continuation (continue), or " +
-      "discard it (abort). Modes are mutually exclusive. Delegates to the perk cold door; " +
-      "call mutating modes only on explicit human approval.",
-    promptSnippet: "Cascade-sync the objective's published stack (preview/continue/abort modes)",
+      "(dry_run), cascade, resume a resolved conflict continuation (continue), discard it " +
+      "(abort), or dispatch the conflict-resolver subagent into the retained worktree " +
+      "(resolve, on explicit human request). Modes are mutually exclusive. Delegates to the " +
+      "perk cold door; call mutating modes only on explicit human approval.",
+    promptSnippet:
+      "Cascade-sync the objective's published stack (preview/continue/abort/resolve modes)",
     promptGuidelines: SYNC_TOOL_GUIDELINES,
     executionMode: "sequential",
     parameters: {
@@ -1252,7 +1250,8 @@ export function registerObjectiveStack(pi: ExtensionAPI, gating: ToolGating): vo
         continue: {
           type: "boolean",
           description:
-            "Resume the retained conflict continuation (after the human finished the rebase).",
+            "Resume the retained conflict continuation (after the rebase was finished — by " +
+            "the human or by the dispatched resolver; publication stays the human's call).",
         },
         abort: {
           type: "boolean",

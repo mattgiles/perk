@@ -241,7 +241,7 @@ refuse before the cold worker runs:
   preview/cascade, resume a resolved retained conflict, discard it, or (on explicit request)
   dispatch the conflict-resolver subagent into the retained worktree. `continue`/`abort` are
   mutually exclusive and cannot combine with `base`/`dry_run`; `resolve` composes with nothing and
-  never reaches the cold worker. A mutating sync/continue that stops on a rebase conflict
+  never reaches the cold sync mutation (its only cold call is the corroborating status re-read). A mutating sync/continue that stops on a rebase conflict
   auto-dispatches the resolver (bounded attempts, guarded by a machine-local resolver claim beside
   the manifest); publication stays your explicit `continue`. Warnings include cleanup leftovers
   and their recovery command.

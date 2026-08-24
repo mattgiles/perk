@@ -5,8 +5,8 @@ This is the readable projection of perk's living, workflow-first prose graph. It
 
 ## Coverage
 
-- **218** canonical source units
-- **735** logical fragments
+- **220** canonical source units
+- **738** logical fragments
 - **16** session shapes and **10** assemblies
 - **15** explicitly excluded candidates (policy-only; not displayed)
 - **0** validation findings
@@ -712,6 +712,8 @@ Synchronize, recover, land, and reconcile multi-plan objective delivery.
 | `typescript-model-call:extension/doors/objectiveStack.ts:module:sendUserMessage:2` | `tool-contract` | `shipped` | [`extension/doors/objectiveStack.ts`](../../extension/doors/objectiveStack.ts) · `symbol:module/call:sendUserMessage/2` | — |
 | `typescript-model-call:extension/doors/objectiveStack.ts:module:sendUserMessage:3` | `tool-contract` | `shipped` | [`extension/doors/objectiveStack.ts`](../../extension/doors/objectiveStack.ts) · `symbol:module/call:sendUserMessage/3` | — |
 | `typescript-model-call:extension/doors/objectiveStack.ts:module:sendUserMessage:4` | `tool-contract` | `shipped` | [`extension/doors/objectiveStack.ts`](../../extension/doors/objectiveStack.ts) · `symbol:module/call:sendUserMessage/4` | — |
+| `typescript-model-call:extension/doors/objectiveStack.ts:module:sendUserMessage:5` | `tool-contract` | `shipped` | [`extension/doors/objectiveStack.ts`](../../extension/doors/objectiveStack.ts) · `symbol:module/call:sendUserMessage/5` | — |
+| `typescript-model-call:extension/doors/objectiveStack.ts:module:sendUserMessage:6` | `tool-contract` | `shipped` | [`extension/doors/objectiveStack.ts`](../../extension/doors/objectiveStack.ts) · `symbol:module/call:sendUserMessage/6` | — |
 | `typescript-tool:objective_stack_adopt` | `tool-contract` | `shipped` | [`extension/doors/objectiveStack.ts`](../../extension/doors/objectiveStack.ts) · `tool:objective_stack_adopt` | — |
 | `typescript-tool:objective_stack_land` | `tool-contract` | `shipped` | [`extension/doors/objectiveStack.ts`](../../extension/doors/objectiveStack.ts) · `tool:objective_stack_land` | — |
 | `typescript-tool:objective_stack_recover` | `tool-contract` | `shipped` | [`extension/doors/objectiveStack.ts`](../../extension/doors/objectiveStack.ts) · `tool:objective_stack_recover` | — |
@@ -743,6 +745,10 @@ Synchronize, recover, land, and reconcile multi-plan objective delivery.
   - `argument:0` — sendUserMessage model-facing argument (`symbol:module/call:sendUserMessage/3/argument:0`)
 - `typescript-model-call:extension/doors/objectiveStack.ts:module:sendUserMessage:4`
   - `argument:0` — sendUserMessage model-facing argument (`symbol:module/call:sendUserMessage/4/argument:0`)
+- `typescript-model-call:extension/doors/objectiveStack.ts:module:sendUserMessage:5`
+  - `argument:0` — sendUserMessage model-facing argument (`symbol:module/call:sendUserMessage/5/argument:0`)
+- `typescript-model-call:extension/doors/objectiveStack.ts:module:sendUserMessage:6`
+  - `argument:0` — sendUserMessage model-facing argument (`symbol:module/call:sendUserMessage/6/argument:0`)
 - `typescript-tool:objective_stack_adopt`
   - `description` — description (`tool:objective_stack_adopt.description`)
   - `promptSnippet` — promptSnippet (`tool:objective_stack_adopt.promptSnippet`)
@@ -782,6 +788,7 @@ Synchronize, recover, land, and reconcile multi-plan objective delivery.
   - `parameters.properties.dry_run.description` — parameters.properties.dry_run.description (`tool:objective_stack_sync.parameters.properties.dry_run.description`)
   - `parameters.properties.continue.description` — parameters.properties.continue.description (`tool:objective_stack_sync.parameters.properties.continue.description`)
   - `parameters.properties.abort.description` — parameters.properties.abort.description (`tool:objective_stack_sync.parameters.properties.abort.description`)
+  - `parameters.properties.resolve.description` — parameters.properties.resolve.description (`tool:objective_stack_sync.parameters.properties.resolve.description`)
 
 </details>
 

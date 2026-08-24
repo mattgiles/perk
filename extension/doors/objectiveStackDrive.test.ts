@@ -360,6 +360,23 @@ test("drive: a status re-read without a continuation → warning, no message, no
   );
 });
 
+test("drive: at cap-minus-one → the SECOND allowed dispatch succeeds and persists 2 of 2", async () => {
+  // The boundary the refusal test alone cannot pin: an off-by-one that permitted only one
+  // attempt would still refuse at the cap — prove attempt 2 actually dispatches.
+  const home = manifestHome();
+  const { pi, ctx, messages, entries } = world({
+    stdout: JSON.stringify(statusPayload(home)),
+    attempts: CONFLICT_RESOLUTION_ATTEMPT_CAP - 1,
+  });
+  await driveSyncConflictResolution(pi, ctx, "7", "sync", false, CONFLICT_FAIL);
+  assert.equal(messages.length, 1);
+  assert.match(
+    messages[0]?.content ?? "",
+    new RegExp(`attempt ${CONFLICT_RESOLUTION_ATTEMPT_CAP} of ${CONFLICT_RESOLUTION_ATTEMPT_CAP}`),
+  );
+  assert.equal(attemptsOf(entries), CONFLICT_RESOLUTION_ATTEMPT_CAP);
+});
+
 test("drive: at the cap → loud error, no dispatch, counter unchanged", async () => {
   const home = manifestHome();
   const { pi, ctx, messages, entries, notifications } = world({
@@ -383,7 +400,7 @@ test("drive: a foreign live same-op claim → busy warning naming the pid, no in
   mkdirSync(lock, { recursive: true });
   writeFileSync(
     join(lock, "lease.json"),
-    `${JSON.stringify({ schema: 1, pid: 1, operation_id: OP })}\n`,
+    `${JSON.stringify({ schema: 1, pid: 1, operation_id: OP, token: "t-1" })}\n`,
     "utf8",
   );
   const { pi, ctx, messages, entries, notifications } = world({
@@ -575,7 +592,7 @@ test("resolve: a foreign live same-op claim → a typed resolver_busy fail", asy
   mkdirSync(lock, { recursive: true });
   writeFileSync(
     join(lock, "lease.json"),
-    `${JSON.stringify({ schema: 1, pid: 1, operation_id: OP })}\n`,
+    `${JSON.stringify({ schema: 1, pid: 1, operation_id: OP, token: "t-1" })}\n`,
     "utf8",
   );
   const { pi, ctx, messages } = world({ stdout: JSON.stringify(statusPayload(home)) });

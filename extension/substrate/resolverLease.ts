@@ -2,7 +2,7 @@
 // sync-continuation operation, taken by the warm dispatcher right before it injects the resolver
 // dispatch. It is honestly NOT a child-lifecycle-bound lock — `pi.sendUserMessage` is
 // fire-and-forget and the extension never observes the dispatched child's start or finish — so
-// there is deliberately NO explicit release. The claim self-heals instead, via the
+// there is deliberately NO explicit release on dispatch. The claim self-heals instead, via the
 // reclaimability predicate: the holder pid is dead, the recorded operation was consumed (a fresh
 // conflict minted a new operation id), or the lease is missing/corrupt and the lock dir has aged
 // past `RECLAIM_GRACE_MS`. The accepted residual: a live session's claim on a still-pending SAME
@@ -11,10 +11,18 @@
 //
 // Reclaim mechanics mirror `hunkFeedback/store.ts::acquireLease` (the interleaving-safe recipe):
 // judge reclaimability → quarantine-RENAME the observed lock dir to a unique name (rename is
-// atomic, so two reclaimers can never both delete a successor) → post-rename re-check (a moved
-// claim that proves fresh is renamed back — a fresh foreign claim is NEVER stolen) → ONE
-// fresh-acquire retry → best-effort quarantine removal; a lost retry is an honest busy. Deletion
-// only ever targets our own quarantine dir or our own same-call acquisition.
+// atomic, so two reclaimers can never both delete a successor) → post-rename re-judgment on the
+// MOVED state (a claim that changed since the judgment, or whose lease is missing/corrupt but
+// still inside the grace window, is renamed back — a raced-in claim is NEVER stolen, whatever
+// operation it names) → ONE fresh-acquire retry → best-effort quarantine removal; a lost retry
+// is an honest busy. Deletion only ever targets our own quarantine dir or our own same-call
+// acquisition, and the explicit withheld-dispatch release is token-fenced through its own
+// quarantine-verify (`releaseResolverClaim`).
+//
+// Error posture: a MISSING or MALFORMED lease is DATA (it routes to the reclaim rules), and the
+// expected race disappearances (ENOENT on read/stat/rename, EEXIST on mkdir) are contention —
+// every OTHER filesystem failure propagates to the typed `io_error` arm, never a fabricated
+// busy/reclaim judgment.
 
 import { randomBytes } from "node:crypto";
 import { mkdirSync, readFileSync, renameSync, rmSync, statSync } from "node:fs";
@@ -33,7 +41,7 @@ export function resolverLockDir(manifestPath: string): string {
 }
 
 export type LeaseAcquisition =
-  | { acquired: true }
+  | { acquired: true; token: string }
   | { acquired: false; kind: "busy" | "io_error"; reason: string };
 
 /** Deterministic-interleave seams for the reclaim-race tests — never set in production. */
@@ -44,37 +52,94 @@ export interface AcquireRaceHooks {
   afterQuarantine?(): void;
 }
 
+/** The raw fs operations the claim touches — injectable ONLY for deterministic fault tests. */
+export interface LeaseFsOps {
+  /** Non-recursive mkdir: EEXIST is the contention signal. */
+  mkdir(path: string): void;
+  /** utf8 read. */
+  readFile(path: string): string;
+  /** Atomic lease write (temp + rename — the atomicWriteFileSync discipline). */
+  writeLease(path: string, content: string): void;
+  rename(from: string, to: string): void;
+  /** Recursive, force. */
+  rm(path: string): void;
+  statMtimeMs(path: string): number;
+}
+
+const REAL_FS: LeaseFsOps = {
+  mkdir: (path) => mkdirSync(path),
+  readFile: (path) => readFileSync(path, "utf8"),
+  writeLease: (path, content) => atomicWriteFileSync(path, content),
+  rename: (from, to) => renameSync(from, to),
+  rm: (path) => rmSync(path, { recursive: true, force: true }),
+  statMtimeMs: (path) => statSync(path).mtimeMs,
+};
+
 interface ResolverLease {
   schema: 1;
   pid: number;
   operation_id: string;
+  /** The per-acquisition ownership fence: rotated on every (re)acquire; release verifies it. */
+  token: string;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function readLease(lockDir: string): ResolverLease | null {
+function errorCode(error: unknown): string | undefined {
+  return (error as NodeJS.ErrnoException).code;
+}
+
+/**
+ * Read the lease as DATA: a missing file or malformed/mis-shaped content is `null` (the
+ * corrupt/missing reclaim rules own it). Any OTHER read failure (EACCES, EIO, EISDIR, …) is a
+ * genuine I/O failure and THROWS so the caller's typed `io_error` arm reports it honestly.
+ */
+function readLease(fs: LeaseFsOps, lockDir: string): ResolverLease | null {
+  let raw: string;
   try {
-    const parsed: unknown = JSON.parse(readFileSync(join(lockDir, "lease.json"), "utf8"));
-    if (
-      isRecord(parsed) &&
-      parsed.schema === 1 &&
-      typeof parsed.pid === "number" &&
-      Number.isInteger(parsed.pid) &&
-      typeof parsed.operation_id === "string"
-    ) {
-      return parsed as unknown as ResolverLease;
-    }
-    return null;
+    raw = fs.readFile(join(lockDir, "lease.json"));
+  } catch (error) {
+    if (errorCode(error) === "ENOENT") return null;
+    throw error;
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
   } catch {
     return null;
   }
+  if (
+    isRecord(parsed) &&
+    parsed.schema === 1 &&
+    typeof parsed.pid === "number" &&
+    Number.isInteger(parsed.pid) &&
+    typeof parsed.operation_id === "string" &&
+    typeof parsed.token === "string"
+  ) {
+    return parsed as unknown as ResolverLease;
+  }
+  return null;
 }
 
-function leaseBytes(pid: number, operationId: string): string {
-  const lease: ResolverLease = { schema: 1, pid, operation_id: operationId };
+/** The lock dir's mtime, or -Infinity when it vanished (ENOENT — a racing reclaim finished);
+ * any other stat failure throws to the typed `io_error` arm. */
+function lockDirBasisMs(fs: LeaseFsOps, path: string): number {
+  try {
+    return fs.statMtimeMs(path);
+  } catch (error) {
+    if (errorCode(error) === "ENOENT") return Number.NEGATIVE_INFINITY;
+    throw error;
+  }
+}
+
+function leaseBytes(lease: ResolverLease): string {
   return `${JSON.stringify(lease)}\n`;
+}
+
+function mintToken(): string {
+  return randomBytes(8).toString("hex");
 }
 
 /** Liveness probe: ESRCH = dead; EPERM (a foreign-uid process) and success both count alive. */
@@ -83,34 +148,43 @@ function defaultIsAlive(pid: number): boolean {
     process.kill(pid, 0);
     return true;
   } catch (error) {
-    return (error as NodeJS.ErrnoException).code !== "ESRCH";
+    return errorCode(error) !== "ESRCH";
   }
 }
 
 /**
- * Atomic non-recursive `mkdir` (EEXIST = contention) + the first lease write. Returns true on
- * acquisition, false on contention; throws on any other fs failure — after best-effort removing
- * the dir THIS call created (we own it; any surviving residue self-heals via the aged-corrupt
- * reclaim rule).
+ * Atomic non-recursive `mkdir` (EEXIST = contention) + the first lease write. Returns the fresh
+ * token on acquisition, null on contention; throws on any other fs failure — after best-effort
+ * removing the dir THIS call created (we own it; any surviving residue self-heals via the
+ * aged-corrupt reclaim rule).
  */
-function tryFreshAcquire(lockDir: string, pid: number, operationId: string): boolean {
+function tryFreshAcquire(
+  fs: LeaseFsOps,
+  lockDir: string,
+  pid: number,
+  operationId: string,
+): string | null {
   try {
-    mkdirSync(lockDir);
+    fs.mkdir(lockDir);
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "EEXIST") return false;
+    if (errorCode(error) === "EEXIST") return null;
     throw error;
   }
+  const token = mintToken();
   try {
-    atomicWriteFileSync(join(lockDir, "lease.json"), leaseBytes(pid, operationId));
+    fs.writeLease(
+      join(lockDir, "lease.json"),
+      leaseBytes({ schema: 1, pid, operation_id: operationId, token }),
+    );
   } catch (error) {
     try {
-      rmSync(lockDir, { recursive: true, force: true });
+      fs.rm(lockDir);
     } catch {
       // best-effort — the corrupt-lease reclaim rule collects it once it ages
     }
     throw error;
   }
-  return true;
+  return token;
 }
 
 function busyHolder(pid: number, lockDir: string): string {
@@ -120,13 +194,26 @@ function busyHolder(pid: number, lockDir: string): string {
   );
 }
 
+function busyUnidentified(lockDir: string): string {
+  return (
+    `an unidentified holder claims the resolver lock at ${lockDir} (lease unreadable, ` +
+    "created recently) — retry shortly, or remove the lock dir if it is provably stale"
+  );
+}
+
+function sameLease(a: ResolverLease, b: ResolverLease | null): boolean {
+  return b !== null && a.pid === b.pid && a.operation_id === b.operation_id && a.token === b.token;
+}
+
 /**
  * Acquire the resolver claim for `operationId` on the continuation at `manifestPath`. Never
- * throws: every filesystem failure is caught and returned as `kind: "io_error"`. Same-pid
- * contention is an idempotent REACQUIRE that rewrites `lease.json` with the CURRENT operation id
- * (a continue-time NEW conflict reuses the same operation id — the original dispatching session
- * re-claims; it never routes through reclaim). `pid`/`isAlive`/`now`/`hooks` are injectable for
- * deterministic tests.
+ * throws: every genuine filesystem failure is caught and returned as `kind: "io_error"` (the
+ * expected race disappearances are classified inline — see the module doc). Same-pid contention
+ * is an idempotent REACQUIRE that rewrites `lease.json` with the CURRENT operation id and a
+ * fresh token (a continue-time NEW conflict reuses the same operation id — the original
+ * dispatching session re-claims; it never routes through reclaim). On success the returned
+ * `token` is the ownership fence a withheld dispatch passes to `releaseResolverClaim`.
+ * `pid`/`isAlive`/`now`/`hooks`/`fs` are injectable for deterministic tests.
  */
 export function acquireResolverLease(
   manifestPath: string,
@@ -136,88 +223,90 @@ export function acquireResolverLease(
     isAlive?: (pid: number) => boolean;
     now?: () => number;
     hooks?: AcquireRaceHooks;
+    fs?: Partial<LeaseFsOps>;
   },
 ): LeaseAcquisition {
   const pid = opts?.pid ?? process.pid;
   const isAlive = opts?.isAlive ?? defaultIsAlive;
   const now = opts?.now ?? Date.now;
   const hooks = opts?.hooks ?? {};
+  const fs: LeaseFsOps = { ...REAL_FS, ...(opts?.fs ?? {}) };
   const lockDir = resolverLockDir(manifestPath);
   try {
-    if (tryFreshAcquire(lockDir, pid, operationId)) return { acquired: true };
+    const fresh = tryFreshAcquire(fs, lockDir, pid, operationId);
+    if (fresh !== null) return { acquired: true, token: fresh };
 
-    const lease = readLease(lockDir);
-    if (lease !== null && lease.pid === pid) {
-      // Same pid: reacquire, not reclaim — rewrite with the current operation id.
-      atomicWriteFileSync(join(lockDir, "lease.json"), leaseBytes(pid, operationId));
-      return { acquired: true };
+    const observed = readLease(fs, lockDir);
+    if (observed !== null && observed.pid === pid) {
+      // Same pid: reacquire, not reclaim — rewrite with the current operation id + fresh token.
+      const token = mintToken();
+      fs.writeLease(
+        join(lockDir, "lease.json"),
+        leaseBytes({ schema: 1, pid, operation_id: operationId, token }),
+      );
+      return { acquired: true, token };
     }
 
     // Reclaimability: dead holder / consumed operation / aged corrupt-or-missing lease.
-    if (lease !== null) {
-      if (isAlive(lease.pid) && lease.operation_id === operationId) {
-        return { acquired: false, kind: "busy", reason: busyHolder(lease.pid, lockDir) };
+    if (observed !== null) {
+      if (isAlive(observed.pid) && observed.operation_id === operationId) {
+        return { acquired: false, kind: "busy", reason: busyHolder(observed.pid, lockDir) };
       }
-    } else {
-      // Corrupt/missing lease.json: age on the lock dir's mtime. A vanished dir (a racing
-      // reclaim finished between EEXIST and stat) counts old — the retry below settles it.
-      let basisMs = Number.NEGATIVE_INFINITY;
-      try {
-        basisMs = statSync(lockDir).mtimeMs;
-      } catch {
-        // keep the -Infinity basis
-      }
-      if (now() - basisMs < RECLAIM_GRACE_MS) {
-        return {
-          acquired: false,
-          kind: "busy",
-          reason:
-            `an unidentified holder claims the resolver lock at ${lockDir} (lease unreadable, ` +
-            "created recently) — retry shortly, or remove the lock dir if it is provably stale",
-        };
-      }
+    } else if (now() - lockDirBasisMs(fs, lockDir) < RECLAIM_GRACE_MS) {
+      // Corrupt/missing lease.json inside the grace window (a winner may sit between its
+      // mkdir and first write) — busy; a vanished dir counts old and the retry settles it.
+      return { acquired: false, kind: "busy", reason: busyUnidentified(lockDir) };
     }
 
-    // Reclaim: quarantine-rename → post-rename re-check → ONE fresh-acquire retry.
+    // Reclaim: quarantine-rename → post-rename re-judgment → ONE fresh-acquire retry.
     hooks.beforeQuarantine?.();
     const quarantine = `${lockDir}.stale-${pid.toString(36)}-${randomBytes(4).toString("hex")}`;
     let renamed = false;
     try {
-      renameSync(lockDir, quarantine);
+      fs.rename(lockDir, quarantine);
       renamed = true;
-    } catch {
-      renamed = false; // a competing reclaimer moved it first — still take the one retry
+    } catch (error) {
+      // ENOENT = a competing reclaimer moved it first — still take the one retry. Any other
+      // rename failure is genuine I/O and must not masquerade as contention.
+      if (errorCode(error) !== "ENOENT") throw error;
+      renamed = false;
     }
     if (renamed) {
-      // Between our judgment and the rename a competitor may have COMPLETED a full
-      // reclaim+reacquire — the dir we moved would then hold a FRESH foreign live claim on
-      // THIS operation, not the stale state we judged. Restore it and report busy: a fresh
-      // foreign claim is never stolen.
-      const moved = readLease(quarantine);
-      const movedFresh =
-        moved !== null &&
-        moved.pid !== pid &&
-        isAlive(moved.pid) &&
-        moved.operation_id === operationId;
-      if (movedFresh) {
+      // Post-rename re-judgment on the MOVED state: between our judgment and the rename a
+      // competitor may have installed a successor claim (any operation id — never assume the
+      // one we are acquiring), or a winner may sit inside its mkdir↔first-write window (a
+      // young dir with no lease yet). Neither is ours to take: restore and report busy. Only
+      // the unchanged judged-stale state, a dead raced-in holder, or an AGED lease-less dir
+      // proceeds to the retry.
+      const moved = readLease(fs, quarantine);
+      let busyReason: string | null = null;
+      if (moved !== null) {
+        if (!sameLease(moved, observed) && isAlive(moved.pid)) {
+          busyReason = busyHolder(moved.pid, lockDir);
+        }
+      } else if (now() - lockDirBasisMs(fs, quarantine) < RECLAIM_GRACE_MS) {
+        // rename preserves mtime — the moved dir's age is the original dir's age.
+        busyReason = busyUnidentified(lockDir);
+      }
+      if (busyReason !== null) {
         try {
-          renameSync(quarantine, lockDir);
+          fs.rename(quarantine, lockDir);
         } catch {
           // the name was retaken meanwhile — leave the quarantine; it self-heals as residue
         }
-        return { acquired: false, kind: "busy", reason: busyHolder(moved.pid, lockDir) };
+        return { acquired: false, kind: "busy", reason: busyReason };
       }
     }
     hooks.afterQuarantine?.();
-    const retried = tryFreshAcquire(lockDir, pid, operationId);
+    const retried = tryFreshAcquire(fs, lockDir, pid, operationId);
     if (renamed) {
       try {
-        rmSync(quarantine, { recursive: true, force: true });
+        fs.rm(quarantine);
       } catch {
         // best-effort — a leftover quarantine dir is inert
       }
     }
-    if (retried) return { acquired: true };
+    if (retried !== null) return { acquired: true, token: retried };
     return {
       acquired: false,
       kind: "busy",
@@ -231,5 +320,44 @@ export function acquireResolverLease(
       kind: "io_error",
       reason: `resolver-claim filesystem failure at ${lockDir}: ${String(error)}`,
     };
+  }
+}
+
+/**
+ * Release THIS call's claim — the withheld-dispatch cleanup (a verified-increment failure must
+ * not leave a phantom holder). Token-fenced through a quarantine-verify: the claim is renamed
+ * to a private name first (atomic — a successor installed at the canonical path is never
+ * touched), verified against `token`, and deleted only when it proved ours; anything else is
+ * renamed back. Best-effort and never throws: leftover residue self-heals via the reclaim
+ * rules.
+ */
+export function releaseResolverClaim(
+  manifestPath: string,
+  token: string,
+  opts?: { fs?: Partial<LeaseFsOps> },
+): void {
+  const fs: LeaseFsOps = { ...REAL_FS, ...(opts?.fs ?? {}) };
+  const lockDir = resolverLockDir(manifestPath);
+  const quarantine = `${lockDir}.release-${process.pid.toString(36)}-${randomBytes(4).toString("hex")}`;
+  try {
+    try {
+      fs.rename(lockDir, quarantine);
+    } catch (error) {
+      if (errorCode(error) === "ENOENT") return; // nothing to release
+      throw error;
+    }
+    const moved = readLease(fs, quarantine);
+    if (moved !== null && moved.token === token) {
+      fs.rm(quarantine);
+      return;
+    }
+    // Not ours (a successor raced in) — put it back untouched.
+    try {
+      fs.rename(quarantine, lockDir);
+    } catch {
+      // the name was retaken meanwhile — leave the quarantine; it self-heals as residue
+    }
+  } catch {
+    // best-effort — a leftover claim/quarantine goes stale and is reclaimed by the next acquire
   }
 }
