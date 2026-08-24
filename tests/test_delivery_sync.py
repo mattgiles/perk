@@ -639,11 +639,15 @@ class _World:
         trigger_run_id: str | None = None,
         approve: Callable[[SyncResult.Cascade], bool] | None = None,
         run_id: str = "01RUN",
+        objective_id: str = OBJECTIVE,
     ) -> SyncResult:
+        # `objective_id` may be a request ALIAS: the fake reconstruction always resolves to
+        # the OBJECTIVE projection id (modelling redirect resolution), so a divergent
+        # request id proves message interpolation reads the train, never the request.
         return self._invoke(
             SyncRequest(
                 mode="cascade",
-                objective_id=OBJECTIVE,
+                objective_id=objective_id,
                 run_id=run_id,
                 include_base=include_base,
                 dry_run=dry_run,
@@ -658,9 +662,10 @@ class _World:
         self,
         *,
         approve: Callable[[SyncResult.Cascade], bool] | None = None,
+        objective_id: str = OBJECTIVE,
     ) -> SyncResult:
         return self._invoke(
-            SyncRequest(mode="continue", objective_id=OBJECTIVE),
+            SyncRequest(mode="continue", objective_id=objective_id),
             approve,
         )
 
@@ -1249,7 +1254,9 @@ def test_atomic_push_unsupported():
 def test_rebase_conflict_retains_residue_under_a_manifest():
     world = _amended_middle_world()
     world.rebase_conflicts.add((P3, C2))  # layer 1.3's transplant conflicts
-    error = _sync_error(world)
+    # The request carries an ALIAS id: the hint must interpolate the redirect-resolved
+    # train id, never the raw request id.
+    error = _sync_error(world, objective_id="REQUEST-ALIAS")
     assert error.error_type == "rebase_conflict"
     assert "1.3" in str(error)
     # The `for layer <node_id> ` token (trailing space) is load-bearing cross-plane (§8.49):
@@ -1259,8 +1266,9 @@ def test_rebase_conflict_retains_residue_under_a_manifest():
     assert "no remote ref and no journal record" in str(error)
     # Cross-plane lockstep: the appended warm-route sentence names the warm command id
     # registered in extension/doors/objectiveStack.ts and the landed consent posture
-    # ("on your approval").
+    # ("on your approval") — with the TRAIN's projection id, not the request alias.
     assert "`/objective-sync 500`" in str(error)
+    assert "REQUEST-ALIAS" not in str(error)
     # The guard DISARMED: temp refs + worktree retained, manifest written.
     manifest = world.manifests[LINEAGE]
     assert manifest.conflict_node_id == "1.3"
@@ -1296,14 +1304,43 @@ def test_continuation_gate_refuses_a_fresh_sync():
         worktree_path="/wt/sync-OP",
         created="2026-01-01T00:00:00Z",
     )
-    error = _sync_error(world)
+    # The request carries an ALIAS id: the hint must interpolate the redirect-resolved
+    # train id, never the raw request id.
+    error = _sync_error(world, objective_id="REQUEST-ALIAS")
     assert error.error_type == "sync_conflict_pending"
     assert "/wt/sync-OP" in str(error)  # names the retained worktree
     assert "sync-continuations" in str(error)  # …and the manifest path
     # Cross-plane lockstep: the appended warm-route sentence names the warm command id
     # registered in extension/doors/objectiveStack.ts and the landed consent posture
-    # ("on your approval").
+    # ("on your approval") — with the TRAIN's projection id, not the request alias.
     assert "`/objective-sync 500`" in str(error)
+    assert "REQUEST-ALIAS" not in str(error)
+    world.assert_nothing_journaled()
+
+
+def test_continuation_gate_hint_requires_manifest_train_identity():
+    # A foreign/stale manifest (same lineage, different objective — e.g. a predecessor
+    # objective's continuation surviving a transfer) still GATES identically, but the
+    # warm-route hint is suppressed: the hinted route could only end in the downstream
+    # mismatch refusal (`--continue` → continuation_invalid; warm corroboration →
+    # report-only), so advertising it would be false.
+    world = _amended_middle_world()
+    world.manifests[LINEAGE] = continuation.ContinuationManifest(
+        operation_id=mint_operation_id(),
+        objective_id="777",
+        delivery_lineage=LINEAGE,
+        run_id="01RUN",
+        include_base=False,
+        captured_base_head=None,
+        layers=(),
+        conflict_node_id="1.3",
+        worktree_path="/wt/sync-OP",
+        created="2026-01-01T00:00:00Z",
+    )
+    error = _sync_error(world)
+    assert error.error_type == "sync_conflict_pending"
+    assert "/wt/sync-OP" in str(error) and "sync-continuations" in str(error)
+    assert "/objective-sync" not in str(error)
     world.assert_nothing_journaled()
 
 
@@ -1319,13 +1356,22 @@ def test_unparseable_manifest_still_gates():
 
 
 def test_warm_route_hint_confines_the_objective_id():
-    # Conforming ids interpolate into the copyable command (numeric GitHub ids, Linear keys).
-    for good in ("500", "ENG-7"):
+    # The full sentence is contract: the copyable command, the read-write qualification,
+    # the approval-dependent dispatch, and the publication handback — pinned exactly so a
+    # wording drift that overclaims (e.g. unconditional dispatch) fails here.
+    assert sync._warm_route_hint("500") == (
+        "Automated resolution is available from a read-write perk session: run "
+        "`/objective-sync 500` — on your approval it dispatches the conflict "
+        "resolver into the retained worktree and hands publication back to you."
+    )
+    # Conforming ids interpolate into the copyable command (numeric GitHub ids, Linear
+    # keys, the 64-char boundary of the cap).
+    for good in ("500", "ENG-7", "a" * 64):
         hint = sync._warm_route_hint(good)
         assert hint is not None
         assert f"`/objective-sync {good}`" in hint
     # Non-conforming ids fail closed to omission — never an id-less command, and the raw
-    # input never reaches any returned text: option-shaped tokens, dot segments, the
+    # input never reaches any returned text: option-shaped tokens, dot segments, over the
     # 64-char cap, the empty string, and whitespace/metacharacter ids.
     for bad in ("--json", ".", "..", "a" * 65, "", "7; rm -rf"):
         assert sync._warm_route_hint(bad) is None
@@ -3004,7 +3050,9 @@ def test_continue_new_higher_conflict_rewrites_the_manifest_same_operation():
     world.worktree_heads[WT] = x2
     world.ancestry.add((r1, x2))  # the resolved HEAD contains the recorded new parent
     world.rebase_conflicts.add((P3, x2))  # the NEXT layer's transplant now conflicts
-    error = _continue_error(world)
+    # The request carries an ALIAS id: the hint must interpolate the redirect-resolved
+    # train id, never the raw request id.
+    error = _continue_error(world, objective_id="REQUEST-ALIAS")
     assert error.error_type == "rebase_conflict"
     assert "1.3" in str(error) and OP in str(error)
     # The load-bearing §8.49 freshness token (see corroborateSyncConflict): the rewritten
@@ -3012,8 +3060,9 @@ def test_continue_new_higher_conflict_rewrites_the_manifest_same_operation():
     assert "for layer 1.3 " in str(error)
     # Cross-plane lockstep: the appended warm-route sentence names the warm command id
     # registered in extension/doors/objectiveStack.ts and the landed consent posture
-    # ("on your approval").
+    # ("on your approval") — with the TRAIN's projection id, not the request alias.
     assert "`/objective-sync 500`" in str(error)
+    assert "REQUEST-ALIAS" not in str(error)
     rewritten = world.manifests[LINEAGE]
     assert rewritten.operation_id == OP  # same operation, progress retained
     assert rewritten.conflict_node_id == "1.3"

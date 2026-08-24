@@ -379,10 +379,14 @@ def _gate_continuation(context: _SyncContext, lineage: str, *, objective_id: str
     """The fail-closed conflict gate: ANY manifest for this lineage — parseable or not —
     refuses a fresh cascade over retained residue (the remedies are ``sync --continue`` /
     ``sync --abort``). The parseable arm additionally appends the warm-route hint with the
-    redirect-resolved train ``objective_id`` — route advice only: the gate does not verify
-    manifest↔train identity (``--continue`` refuses a mismatch as ``continuation_invalid``;
-    the warm resolve corroboration goes report-only), and the unparseable arm stays
-    abort-only (automated resolution cannot corroborate an unparseable manifest)."""
+    redirect-resolved train ``objective_id`` — but only when the manifest names this
+    train's objective: a foreign/stale manifest (e.g. a predecessor objective's
+    continuation surviving on the same lineage) suppresses the hint, because the hinted
+    route could only end in the downstream mismatch refusal. The refusal itself is
+    unchanged either way — mismatch REFUSAL stays downstream (``--continue`` →
+    ``continuation_invalid``; the warm resolve corroboration goes report-only) — and the
+    unparseable arm stays abort-only (automated resolution cannot corroborate an
+    unparseable manifest)."""
     pending = context.runtime.pending_continuation(context.repo_root, lineage)
     if pending is None:
         return
@@ -400,7 +404,7 @@ def _gate_continuation(context: _SyncContext, lineage: str, *, objective_id: str
         "conflict there and run `perk objective stack sync --continue`, or discard the "
         "retained state with `perk objective stack sync --abort`"
     )
-    hint = _warm_route_hint(objective_id)
+    hint = _warm_route_hint(objective_id) if pending.manifest.objective_id == objective_id else None
     if hint is not None:
         message = f"{message}. {hint}"
     raise SyncError(message, error_type="sync_conflict_pending")
