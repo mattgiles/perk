@@ -1,5 +1,7 @@
 # Changelog categorizer instruction
 
+This page is **reference** documentation: the canonical categorizer instruction.
+
 The canonical, maintained instruction a classifying agent (or a maintainer working by hand)
 follows to turn the deterministic facts from `perk-dev changelog-commits` into a **reviewed**
 changelog proposal.
@@ -11,7 +13,7 @@ interactive agent or a future subagent can follow it verbatim.
 ## Placement in the release workflow
 
 This doc is one step in the CHANGELOG accrual loop documented in
-[`docs/releasing.md`](../releasing.md) ("CHANGELOG discipline"):
+[`docs/developers/releasing.md`](./releasing.md) ("CHANGELOG discipline"):
 
 ```
 perk-dev changelog-commits  →  classify (this doc)  →  human reviews  →  apply + advance marker  →  changelog-check
@@ -22,7 +24,7 @@ perk-dev changelog-commits  →  classify (this doc)  →  human reviews  →  a
 entry as a bullet under its `### <category>` subsection of `[Unreleased]` (stamping the primary
 commit's short hash as the ` (hash)` token) and advances the `<!-- As of <hash> -->` marker to the
 proposal's `head_commit`. `--dry-run` prints the intended new `[Unreleased]` section without
-writing anything (see [`docs/releasing.md`](../releasing.md)).
+writing anything (see [`docs/developers/releasing.md`](./releasing.md)).
 
 The classifier's whole job is the middle box: **facts in, a reviewed proposal out.** It never
 mutates `CHANGELOG.md` and never advances the `<!-- As of <hash> -->` marker — those belong to

@@ -44,7 +44,7 @@ jobs:
           echo "release version agreed: $expected"
 
       # Deliberate inline duplicate of the pinned release-header grammar
-      # (`## [X.Y.Z] - YYYY-MM-DD`, docs/releasing.md changelog discipline) — stdlib-only
+      # (`## [X.Y.Z] - YYYY-MM-DD`, docs/developers/releasing.md changelog discipline) — stdlib-only
       # python3, matching this job's tomllib step above. Promote to a perk-dev verb only
       # if a third consumer appears.
       - name: Assert the changelog was rolled for the tagged version
@@ -205,7 +205,7 @@ jobs:
       - uses: actions/checkout@v4
 
       # Deliberate inline duplicate of the pinned release-header grammar
-      # (`## [X.Y.Z] - YYYY-MM-DD`, docs/releasing.md changelog discipline) — stdlib-only
+      # (`## [X.Y.Z] - YYYY-MM-DD`, docs/developers/releasing.md changelog discipline) — stdlib-only
       # python3, matching validate-release-versions' gate. Slices the tagged version's
       # changelog section into release-notes.md; a missing header is defense-in-depth
       # (the validate gate makes it unreachable on this path).

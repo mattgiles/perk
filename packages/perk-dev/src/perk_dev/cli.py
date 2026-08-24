@@ -358,7 +358,7 @@ def publish_check(ctx: click.Context, *, allow_dirty: bool) -> None:
     A pure composition of the existing verbs (cheap \u2192 expensive, fail-fast) plus two
     additions of its own: a ``gh auth status`` check and a best-effort origin-tag incident
     preflight (warn-only \u2014 a tag already on origin is a legitimate mid-release state;
-    the incident runbook in docs/releasing.md owns the judgment).
+    the incident runbook in docs/developers/releasing.md owns the judgment).
     """
     root = repo_root(Path.cwd())
     if root is None:
@@ -410,7 +410,7 @@ def publish_check(ctx: click.Context, *, allow_dirty: bool) -> None:
         user_output(
             click.style("warning: ", fg="yellow")
             + f"tag {tag_name} already exists on origin \u2014 mid-release or a publish "
-            'incident; see docs/releasing.md \u2192 "Incident handling"'
+            'incident; see docs/developers/releasing.md \u2192 "Incident handling"'
         )
 
     try:
@@ -418,7 +418,7 @@ def publish_check(ctx: click.Context, *, allow_dirty: bool) -> None:
     except build.BuildError as exc:
         fail(ctx, as_json=False, error_type=exc.error_type, message=exc.message)
         return
-    user_output("publish-check OK \u2014 ready to tag (see docs/releasing.md)")
+    user_output("publish-check OK \u2014 ready to tag (see docs/developers/releasing.md)")
 
 
 @cli.command("release-tag")

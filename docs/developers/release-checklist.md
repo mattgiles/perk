@@ -1,5 +1,7 @@
 # Release Checklist
 
+This page is a **how-to guide**: the one-time publishing setup plus the pre-release rehearsal.
+
 This is the **one-time publishing setup** a maintainer performs once — accounts, package names,
 the npm scope + token, GitHub environments, PyPI/TestPyPI trusted publishers — plus the
 **pre-release rehearsal**. Recurring releases live in
