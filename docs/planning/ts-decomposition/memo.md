@@ -4,7 +4,7 @@
 
 This memo is the current architecture proposal for decomposing the TypeScript in
 `extension/`. It replaces the TypeScript topology proposed in
-`docs/future-proofing-decomposition.md`; it does not supersede that document's
+`docs/planning/future-proofing-decomposition.md`; it does not supersede that document's
 broader product or workflow principles.
 
 The proposal is future-first with respect to the Pi programming model described

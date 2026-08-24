@@ -3,7 +3,7 @@
 > **Status:** proposed ground-up replacement for the design currently recorded in
 > [#1408](https://github.com/mattgiles/perk/issues/1408). This document is the canonical product
 > objective.
-> The older `docs/planning/stacked-prs.md` and `docs/planning/stacked-pr-recommendations.md` are
+> The older `docs/planning/archive/stacked-prs.md` and `docs/planning/archive/stacked-pr-recommendations.md` are
 > research inputs, not specifications; this directory supersedes them wherever they disagree.
 > Node numbering/scope follows the live Objective #1431 roadmap where they disagree (Phase 5 was
 > re-split at planning time: 5.1 finalization-extraction + the land refusal, 5.2 readiness,
@@ -15,7 +15,7 @@ Read this objective together with two durable companions:
 - [Stacked delivery architecture](architecture.md) defines the authorities, stored facts,
   operation protocols, recovery behavior, and command ownership that make the product contract
   implementable.
-- The repository [objective-delivery glossary](../../../CONTEXT.md#objective-delivery) defines the
+- The repository [objective-delivery glossary](../../../../CONTEXT.md#objective-delivery) defines the
   canonical language used here—incremental delivery, stacked delivery, delivery train, layer,
   published prefix, delivery lineage, delivery order, predecessor layer, parent checkpoint,
   published-head checkpoint, and dynamic singleton.
@@ -44,7 +44,7 @@ This is an objective delivery policy, not a new kind of plan, a special branch t
 around the `gh stack` extension, or a second objective scheduler.
 
 The terms in this section are domain terms, not convenient synonyms; use the
-[objective-delivery glossary](../../../CONTEXT.md#objective-delivery) when interpreting the rest of
+[objective-delivery glossary](../../../../CONTEXT.md#objective-delivery) when interpreting the rest of
 the objective.
 
 ## Why this belongs at the objective level
@@ -651,7 +651,7 @@ updates; the final documentation node is a cohesive usability pass, not a dumpin
 #### 1.1 — Delivery domain
 
 Use the canonical language in the
-[objective-delivery glossary](../../../CONTEXT.md#objective-delivery) and add the domain contracts
+[objective-delivery glossary](../../../../CONTEXT.md#objective-delivery) and add the domain contracts
 for objective delivery policy, delivery lineage, node identity on plans, stable predecessor-plan identity,
 parent and published-head checkpoints, and deterministic topological train order. Define strict
 2–100-node validation without constraining the roadmap DAG. Preserve absent-field compatibility

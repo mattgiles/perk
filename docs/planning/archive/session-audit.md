@@ -391,14 +391,14 @@ Do not create the follow-up issues or fixes during the audit.
 4. Run Wave 2 specialists independently over the same frozen evidence contracts.
 5. Run the orchestration specialist and independent verifier in Wave 3; reconcile double-coding and
    disputed findings.
-6. Synthesize a final `docs/planning/session-audit-report.md` without raw transcript data, then run
+6. Synthesize a final `docs/planning/archive/session-audit-report.md` without raw transcript data, then run
    the leakage/reproducibility checks below.
 7. Delete the private scratch corpus only after the human accepts the report; report exactly what was
    removed and retain no committed raw-session derivative.
 
 ## Final report shape
 
-`docs/planning/session-audit-report.md` should contain:
+`docs/planning/archive/session-audit-report.md` should contain:
 
 1. Executive summary: the strongest evidence-backed strengths, weaknesses, and instrumentation gaps.
 2. Corpus and methodology: snapshot date, cohorts/eras, counts, exclusions, missingness, sampling,

@@ -19,8 +19,8 @@
 
   ## What went exceptionally well
 
-  The implementation honored the canonical docs/planning/stacked-prs/objective.md:23 and docs/
-  planning/stacked-prs/architecture.md:33:
+  The implementation honored the canonical docs/planning/archive/stacked-prs/objective.md:23
+  and docs/planning/archive/stacked-prs/architecture.md:33:
 
   - Stacking remained an objective policy coordinating ordinary plans.
   - Durable truth is reconstructable without local stack metadata.

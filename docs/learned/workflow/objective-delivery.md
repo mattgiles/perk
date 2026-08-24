@@ -68,7 +68,7 @@ constructs its transfer/recover seams directly in `facade.py` (binding
 `_reconstruct_train_status` for roll-forward), and train reconstruction survives only as the
 package-internal `train.reconstruct_train` (no out-of-package caller, retired from the export
 ledger). The retirement is guard-pinned by `tests/test_delivery_facade.py`'s `_RETIRED_EXPORTS`
-disjointness assertion and recorded in `docs/planning/stacked-prs/final-census.md`. New callers
+disjointness assertion and recorded in `docs/planning/archive/stacked-prs/final-census.md`. New callers
 start at `Delivery`. Operation work still depends on §8.43's exact journal semantics — amend the
 contract with behavior changes rather than bypassing the façade.
 

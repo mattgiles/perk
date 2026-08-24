@@ -27,7 +27,7 @@ low-level class/file layout.
 | **External atomicity breach** | An observed manual contiguous-prefix merge that put only part of a train into the objective base. | A successful perk landing. |
 
 These terms are recorded in the repository's
-[objective-delivery glossary](../../../CONTEXT.md#objective-delivery). The glossary carries only
+[objective-delivery glossary](../../../../CONTEXT.md#objective-delivery). The glossary carries only
 domain meanings; field names, APIs, and recovery algorithms remain in contracts and code.
 
 ## One deep module

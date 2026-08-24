@@ -123,7 +123,7 @@ outside the package and `test_public_export_cut_is_exact` passes (the exact root
 every per-node cut). **Test retirement**: the `tests/` grep's only hits are the sanctioned ones
 above. **Docs**: `shared/contracts.md` §8.42–§8.56 (+ the §8.4 land record) and
 `architecture.md` describe the final façade state. Two reproducible greps over
-`shared/contracts.md` + `docs/planning/stacked-prs/architecture.md`, with every expected hit
+`shared/contracts.md` + `docs/planning/archive/stacked-prs/architecture.md`, with every expected hit
 classified:
 
 - Stale-migration wording — `grep -n "temporary export\|until Node\|unmigrated\|temporarily

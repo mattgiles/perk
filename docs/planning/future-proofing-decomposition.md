@@ -6,7 +6,7 @@
 
 ## Context
 
-The [upcoming Pi changes memo](planning/upcoming-pi-changes-memo.md) identifies several change
+The [upcoming Pi changes memo](upcoming-pi-changes-memo.md) identifies several change
 axes that are likely to arrive on different schedules:
 
 - extension-v1 registration and lifecycle may eventually give way to application hosts and
@@ -59,7 +59,7 @@ objects or transport mechanics.
 
 ### Two planes, one contract
 
-The existing [shared contract source](../shared/README.md) remains the only bridge between the
+The existing [shared contract source](../../shared/README.md) remains the only bridge between the
 Python exterior and TypeScript interior. It owns serialized or parsed vocabulary such as stage
 IDs, run identity, provider selection, bindings, input/output envelopes, and other facts both
 planes must interpret identically.
@@ -146,7 +146,7 @@ declarations and one pass-through adapter is shallow and should not exist.
 
 ### 1. Shared cross-plane contracts
 
-**Current home:** [`shared/`](../shared/README.md)
+**Current home:** [`shared/`](../../shared/README.md)
 
 **Owns:**
 
@@ -209,9 +209,9 @@ must not import a concrete adapter.
 
 **Candidate current sources:**
 
-- [`extension/substrate/workflowState.ts`](../extension/substrate/workflowState.ts)
-- [`extension/substrate/sessionData.ts`](../extension/substrate/sessionData.ts)
-- [`extension/substrate/sessionPointers.ts`](../extension/substrate/sessionPointers.ts)
+- [`extension/substrate/workflowState.ts`](../../extension/substrate/workflowState.ts)
+- [`extension/substrate/sessionData.ts`](../../extension/substrate/sessionData.ts)
+- [`extension/substrate/sessionPointers.ts`](../../extension/substrate/sessionPointers.ts)
 - binding/context dedup logic that depends on live session state
 
 **Owns:**
@@ -257,10 +257,10 @@ is a storage implementation, not a new definition of Perk workflow semantics.
 
 **Candidate current sources:**
 
-- [`extension/worker/worker.ts`](../extension/worker/worker.ts)
-- [`extension/worker/readOnlySession.ts`](../extension/worker/readOnlySession.ts)
+- [`extension/worker/worker.ts`](../../extension/worker/worker.ts)
+- [`extension/worker/readOnlySession.ts`](../../extension/worker/readOnlySession.ts)
 - the deep report-wave runner in
-  [`extension/waves/reportWave.ts`](../extension/waves/reportWave.ts)
+  [`extension/waves/reportWave.ts`](../../extension/waves/reportWave.ts)
 - run-event normalization and budget/terminal classification
 
 This library can contain several deep modules with separate interfaces:
@@ -302,7 +302,7 @@ interface WaveRunner {
 - lane-backed wave execution; and
 - remote attach/event projection.
 
-The existing [`WaveAdapter`](../extension/waves/reportWave.ts) is a proven internal seam: it has
+The existing [`WaveAdapter`](../../extension/waves/reportWave.ts) is a proven internal seam: it has
 memory and RPC adapters plus one shared behavioral suite. Callers should continue to use the
 deep `runReportWave()` interface rather than learning `ping`, `spawn`, completion races, stop,
 and aggregate-file mechanics.
@@ -316,9 +316,9 @@ They should not become the new library's external interface.
 
 **Candidate current sources:**
 
-- [`extension/surfaces/report.ts`](../extension/surfaces/report.ts)
+- [`extension/surfaces/report.ts`](../../extension/surfaces/report.ts)
 - pure formatting and presentation models from
-  [`extension/surfaces/surfaces.ts`](../extension/surfaces/surfaces.ts)
+  [`extension/surfaces/surfaces.ts`](../../extension/surfaces/surfaces.ts)
 - review-interaction models currently embedded in browser/terminal doors
 
 **Owns:**
@@ -356,7 +356,7 @@ structurally mirrors Pi and should become an internal adapter detail as the modu
 
 **Current sources:**
 
-- [`extension/index.ts`](../extension/index.ts)
+- [`extension/index.ts`](../../extension/index.ts)
 - registration-only portions of doors and factories;
 - Pi event-bus and context translation;
 - current UI adapter implementation; and
@@ -378,8 +378,8 @@ should enforce that rule.
 **Working name:** `perk-exterior`
 
 Most of `src/perk` is stable relative to the Pi work. Existing deep modules such as
-[`IssueBackend`](../src/perk/backends/issue_backend.py) and
-[`Delivery`](../src/perk/delivery/facade.py) should remain intact.
+[`IssueBackend`](../../src/perk/backends/issue_backend.py) and
+[`Delivery`](../../src/perk/delivery/facade.py) should remain intact.
 
 The exterior application library owns:
 
@@ -430,7 +430,7 @@ and host mode. It should not be a serialized copy of today's Pi settings file.
 
 **Candidate current sources:**
 
-- [`src/perk/learn/session_jsonl.py`](../src/perk/learn/session_jsonl.py)
+- [`src/perk/learn/session_jsonl.py`](../../src/perk/learn/session_jsonl.py)
 - branch normalization and audit projection;
 - session-pointer reading; and
 - evidence models consumed by learn/audit behavior.
