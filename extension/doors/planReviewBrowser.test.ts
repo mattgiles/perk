@@ -12,8 +12,8 @@ import { join } from "node:path";
 import { test } from "node:test";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
-import { PLAN_DRAFT_ARTIFACT } from "../factories/planDraft.ts";
-import type { ReviewOutcome } from "../factories/planReview.ts";
+import { PLAN_DRAFT_ARTIFACT } from "../authoring/plan/draft.ts";
+import type { ReviewOutcome } from "../pi/v1/review.ts";
 import { sessionDataDir } from "../substrate/cache.ts";
 import {
   digestSessionData,

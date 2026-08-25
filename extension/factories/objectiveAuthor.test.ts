@@ -8,13 +8,13 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
+import { PLAN_CONTEXT_TYPE } from "../authoring/plan/prose.ts";
 import { loadPerkSession, plantRawSession, scaffoldRepo } from "../testing/harness.ts";
 import {
   OBJECTIVE_AUTHOR_CONTEXT_TYPE,
   OBJECTIVE_AUTHORING_CONTEXT,
   objectiveAuthoringContextContent,
 } from "./objectiveAuthor.ts";
-import { PLAN_CONTEXT_TYPE } from "./planMode.ts";
 
 const ADDENDUM_TOML = '[workflow]\nplan_authoring = "House rule: cite a file path per change."\n';
 

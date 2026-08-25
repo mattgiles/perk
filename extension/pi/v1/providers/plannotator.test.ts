@@ -7,27 +7,28 @@
 // path, and the per-review result-listener lifecycle (disposed via the `bus.on` unsubscribe).
 // Fully offline: the fake plannotator is a test listener on an event bus that calls
 // `respond(...)` and emits `plannotator:review-result`. The `plan_review` TOOL (dispatch, soft
-// skips, the approved→save arm) is tested in planReview.test.ts. See planAdapterPlannotator.ts.
+// skips, the approved→save arm) is tested in planReview.test.ts. See plannotator.ts.
 
 import assert from "node:assert/strict";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
-import { PLAN_CONTEXT_TYPE } from "../factories/planMode.ts";
-import { reviewOutcomeResult } from "../factories/planReview.ts";
-import { loadPerkSession, plantRawSession, scaffoldRepo } from "../testing/harness.ts";
+import { PLAN_CONTEXT_TYPE } from "../../../authoring/plan/prose.ts";
+import { loadPerkSession, plantRawSession, scaffoldRepo } from "../../../testing/harness.ts";
+import { reviewOutcomeResult } from "../planReview.ts";
 import {
   createPlannotatorBridge,
   extractDirectEdits,
   GIST_ADAPTER_PLANNOTATOR_CONTEXT,
   hasDirectEditsHeading,
-  isPlannotatorPlanSelected,
   OBJECTIVE_ADAPTER_PLANNOTATOR_CONTEXT,
   PLAN_ADAPTER_PLANNOTATOR_CONTEXT_TYPE,
+  PLANNOTATOR_HANDSHAKE_TIMEOUT_MS,
   type PlannotatorBus,
   requestPlannotatorPlanReview,
-} from "./planAdapterPlannotator.ts";
+} from "./plannotator.ts";
+import { isPlannotatorPlanSelected } from "./selection.ts";
 
 function selectPlannotator(cwd: string): void {
   mkdirSync(join(cwd, ".perk"), { recursive: true });
@@ -286,9 +287,10 @@ test("per-flavor dedup: a prior PLAN-flavor copy does not suppress the OBJECTIVE
   }
 });
 
-test("active-window escalation: the GIST flavor re-injects post-compaction; the PLAN flavor does not", async () => {
-  // The gist flavor dedups on the compaction-active window, so a compaction that drops the live
-  // copy re-delivers it; the plan flavor keeps the whole-branch scan (one copy per session).
+test("active-window dedup: the GIST and PLAN flavors re-inject post-compaction; OBJECTIVE does not", async () => {
+  // The gist AND plan flavors dedup on the compaction-active window (contracts §8.31), so a
+  // compaction that drops the live copy re-delivers each; the objective flavor keeps the
+  // whole-branch scan (one copy per session) until the objective flows migrate.
   const plant = (cwd: string, stage: string, marker: string, fileName: string) =>
     plantRawSession(
       cwd,
@@ -345,13 +347,39 @@ test("active-window escalation: the GIST flavor re-injects post-compaction; the 
   });
   try {
     const injected = await planH.emitBeforeAgentStart();
+    const bridge = injected.filter((m) => m.customType === PLAN_ADAPTER_PLANNOTATOR_CONTEXT_TYPE);
+    assert.equal(bridge.length, 1, "the plan flavor re-injects after compaction dropped it");
+    assert.match(String(bridge[0]?.content), /\[PLAN ADAPTER: PLANNOTATOR\]/);
+  } finally {
+    planH.dispose();
+  }
+
+  const objCwd = scaffoldRepo();
+  selectPlannotator(objCwd);
+  const objFile = plant(
+    objCwd,
+    "objective-author",
+    "[OBJECTIVE ADAPTER: PLANNOTATOR]",
+    "obj.jsonl",
+  );
+  const objSessions = SessionManager.open(objFile);
+  const objKept = objSessions.getEntries().at(-1)?.id;
+  assert.ok(objKept !== undefined);
+  objSessions.appendCompaction("summary without a live bridge copy", objKept, 100);
+  const objH = await loadPerkSession({
+    cwd: objCwd,
+    sessionManager: objSessions,
+    env: { PERK_RUN_ID: undefined },
+  });
+  try {
+    const injected = await objH.emitBeforeAgentStart();
     assert.equal(
       injected.some((m) => m.customType === PLAN_ADAPTER_PLANNOTATOR_CONTEXT_TYPE),
       false,
-      "the plan flavor keeps whole-branch dedup — no post-compaction re-injection",
+      "the objective flavor keeps whole-branch dedup — no post-compaction re-injection",
     );
   } finally {
-    planH.dispose();
+    objH.dispose();
   }
 });
 
@@ -518,6 +546,96 @@ test("bridge: an already-aborted signal short-circuits before emitting", async (
   const outcome = await createPlannotatorBridge(bus).review("# A plan", controller.signal);
   assert.deepEqual(outcome, { status: "aborted" });
   assert.equal(emitted, false, "no request emitted after an abort");
+});
+
+// ------------------------------------- adversarial payload narrowing + emit containment
+
+test("bridge: a malformed handshake payload degrades to the invalid-response arm (no throw)", async () => {
+  for (const payload of [null, "handled", 42, ["handled"]]) {
+    const bus = fakeBus();
+    bus.on("plannotator:request", (data) => {
+      (data as RequestEnvelope).respond(payload);
+    });
+    const outcome = await createPlannotatorBridge(bus).review("# A plan");
+    assert.equal(outcome.status, "unavailable");
+    assert.match((outcome as { warning: string }).warning, /an invalid response/);
+  }
+});
+
+test("bridge: an adversarial handshake getter is contained (fail-open, never a throw)", async () => {
+  const bus = fakeBus();
+  bus.on("plannotator:request", (data) => {
+    const trap = Object.defineProperty({}, "status", {
+      get() {
+        throw new Error("adversarial getter");
+      },
+      enumerable: true,
+    });
+    (data as RequestEnvelope).respond(trap);
+  });
+  const outcome = await createPlannotatorBridge(bus).review("# A plan");
+  assert.equal(outcome.status, "unavailable");
+  assert.match((outcome as { warning: string }).warning, /an invalid response/);
+});
+
+test("bridge: malformed decision payloads are ignored; a later well-formed decision resolves", async () => {
+  const bus = fakeBus();
+  bus.on("plannotator:request", (data) => {
+    (data as RequestEnvelope).respond({
+      status: "handled",
+      result: { status: "pending", reviewId: "rev-m" },
+    });
+    setTimeout(() => {
+      bus.emit("plannotator:review-result", null);
+      bus.emit("plannotator:review-result", "approved");
+      bus.emit("plannotator:review-result", { approved: true }); // no reviewId
+      bus.emit(
+        "plannotator:review-result",
+        Object.defineProperty({}, "reviewId", {
+          get() {
+            throw new Error("adversarial getter");
+          },
+          enumerable: true,
+        }),
+      );
+      bus.emit("plannotator:review-result", { reviewId: "rev-m", approved: true });
+    }, 10);
+  });
+  const outcome = await createPlannotatorBridge(bus).review("# A plan");
+  assert.deepEqual(outcome, { status: "completed", approved: true, reviewId: "rev-m" });
+});
+
+test("bridge: a non-boolean approved narrows to false; blank feedback is dropped", async () => {
+  const bus = fakeBus();
+  bus.on("plannotator:request", (data) => {
+    (data as RequestEnvelope).respond({
+      status: "handled",
+      result: { status: "pending", reviewId: "rev-n" },
+    });
+    setTimeout(() => {
+      bus.emit("plannotator:review-result", {
+        reviewId: "rev-n",
+        approved: "yes",
+        feedback: "   ",
+      });
+    }, 10);
+  });
+  const outcome = await createPlannotatorBridge(bus).review("# A plan");
+  assert.deepEqual(outcome, { status: "completed", approved: false, reviewId: "rev-n" });
+});
+
+test("bridge: a synchronous emit throw is contained as unavailable (timer cleaned up)", async () => {
+  const bus = fakeBus();
+  bus.on("plannotator:request", () => {
+    throw new Error("foreign handler exploded");
+  });
+  const before = Date.now();
+  const outcome = await createPlannotatorBridge(bus).review("# A plan");
+  assert.equal(outcome.status, "unavailable");
+  assert.match((outcome as { warning: string }).warning, /foreign handler exploded/);
+  // Deterministic containment: the unavailable arm resolves immediately (never parked on the
+  // 5s handshake timer — the cleared-timer proof without reaching into Node internals).
+  assert.ok(Date.now() - before < PLANNOTATOR_HANDSHAKE_TIMEOUT_MS / 2);
 });
 
 // ------------------------------------------- the per-review result-listener lifecycle

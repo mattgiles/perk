@@ -16,8 +16,7 @@ import {
   GIST_DRAFT_TOOL_GUIDELINES,
   GIST_SAVE_TOOL_GUIDELINES,
 } from "../../authoring/gist/prose.ts";
-import { PLAN_CONTEXT_TYPE } from "../../factories/planMode.ts";
-import type { PlanReviewUI, ReviewOutcome } from "../../factories/planReview.ts";
+import { PLAN_CONTEXT_TYPE } from "../../authoring/plan/prose.ts";
 import { sessionDataDir } from "../../substrate/cache.ts";
 import {
   digestSessionData,
@@ -41,6 +40,7 @@ import {
   installGistBindings,
   runGistReviewV1,
 } from "./gist.ts";
+import type { PlanReviewUI, ReviewOutcome } from "./review.ts";
 
 const PROSE = "# Faster reviews\n\nWe would likely want review turnaround under a day.\n";
 
