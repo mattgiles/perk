@@ -1,77 +1,129 @@
-// Fully-offline coverage for the private SDK adapter's owned helpers: token accumulation
-// (applyEvent), the drive-session handle's bind/rebind structural contract, and the model/auth
-// resolution pair (resolveAuth over the nominal selection; resolveWorkerModel with the injected
-// stub runtime — deterministic, no ModelRuntime.create host reads). The seam-side policy and the
-// drive orchestration are covered in stageExecution.test.ts. See sdkAdapter.ts.
+// Fully-offline coverage for the private SDK adapter's owned helpers: the SDK→perk event
+// translation (translateEvent), the drive-session handle's bind/rebind structural contract, and
+// the model/auth resolution pair (resolveAuth over the nominal selection; resolveWorkerModel
+// with the injected stub runtime — deterministic, no ModelRuntime.create host reads). The
+// seam-side policy fold and the drive orchestration are covered in stageExecution.test.ts.
 
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
-  applyEvent,
   createDriveSession,
   type DriveEvent,
   type DriveSessionLike,
-  freshCounters,
   resolveAuth,
   resolveWorkerModel,
+  type StageEvent,
+  translateEvent,
   WorkerModelSelection,
 } from "./sdkAdapter.ts";
 
-// --- pure: applyEvent ---------------------------------------------------------------------------
+// --- pure: translateEvent -------------------------------------------------------------------------
 
-test("applyEvent: counts turns, sums assistant tokens, captures terminal tool details + model error", () => {
-  const c = freshCounters();
-  applyEvent(c, {
-    type: "turn_end",
-    message: { role: "assistant", usage: { input: 10, output: 5 } },
+test("translateEvent: turn_end → turn_ended with the clamped input+output sum", () => {
+  assert.deepEqual(
+    translateEvent({
+      type: "turn_end",
+      message: { role: "assistant", usage: { input: 10, output: 5 } },
+    }),
+    { kind: "turn_ended", freshTokens: 15 },
+  );
+  // Negative components clamp to 0; absent usage sums to 0.
+  assert.deepEqual(
+    translateEvent({
+      type: "turn_end",
+      message: { role: "assistant", usage: { input: 3, output: -9 } },
+    }),
+    { kind: "turn_ended", freshTokens: 3 },
+  );
+  assert.deepEqual(translateEvent({ type: "turn_end", message: { role: "assistant" } }), {
+    kind: "turn_ended",
+    freshTokens: 0,
   });
-  applyEvent(c, {
-    type: "turn_end",
-    message: { role: "assistant", usage: { input: 3, output: -9 } },
-  });
-  assert.equal(c.turns, 2);
-  assert.equal(c.tokens, 18); // 15 + 3 (negative output clamped to 0)
-
-  applyEvent(c, {
-    type: "tool_execution_end",
-    toolName: "submit",
-    result: { details: { ok: true, pr: { number: 1, url: "u" } } },
-  });
-  assert.deepEqual(c.submitDetails, { ok: true, pr: { number: 1, url: "u" } });
-
-  applyEvent(c, {
-    type: "tool_execution_end",
-    toolName: "finalize_address",
-    result: { details: { ok: true, submit: { mergeable: false } } },
-  });
-  assert.deepEqual(c.finalizeDetails, { ok: true, submit: { mergeable: false } });
-  assert.deepEqual(c.submitDetails, { ok: true, mergeable: false });
-
-  // A later standalone clean submit is the effective mergeability evidence.
-  applyEvent(c, {
-    type: "tool_execution_end",
-    toolName: "submit",
-    result: { details: { ok: true, mergeable: true } },
-  });
-  assert.deepEqual(c.submitDetails, { ok: true, mergeable: true });
-
-  applyEvent(c, {
-    type: "message_end",
-    message: { role: "assistant", stopReason: "error", errorMessage: "net" },
-  });
-  assert.deepEqual(c.modelError, { message: "net" });
 });
 
-test("applyEvent: usage.reasoning is NOT summed — it is a subset of output on every pi-ai provider", () => {
+test("translateEvent: usage.reasoning is NOT summed — it is a subset of output on every pi-ai provider", () => {
   // The double-count pin: pi-ai normalizes `reasoning` as a breakdown already inside `output`
   // (anthropic thinking_tokens, google thoughtsTokenCount, openai reasoning_tokens — verified
-  // @ 0.80.5), so the budget sum stays `input + output` exactly.
-  const c = freshCounters();
-  applyEvent(c, {
-    type: "turn_end",
-    message: { role: "assistant", usage: { input: 10, output: 20, reasoning: 15 } },
-  });
-  assert.equal(c.tokens, 30);
+  // @ 0.80.5), so the fresh-work sum stays `input + output` exactly.
+  assert.deepEqual(
+    translateEvent({
+      type: "turn_end",
+      message: { role: "assistant", usage: { input: 10, output: 20, reasoning: 15 } },
+    }),
+    { kind: "turn_ended", freshTokens: 30 },
+  );
+});
+
+test("translateEvent: tool_execution_end → tool_ended (details.ok wins, !isError fallback, error text)", () => {
+  assert.deepEqual(
+    translateEvent({
+      type: "tool_execution_end",
+      toolName: "submit",
+      result: { details: { ok: true, pr: { number: 1, url: "u" } } },
+    }),
+    {
+      kind: "tool_ended",
+      tool: "submit",
+      ok: true,
+      details: { ok: true, pr: { number: 1, url: "u" } },
+      errorText: null,
+    },
+  );
+  // No details.ok boolean → fall back to !isError; no details block → null.
+  assert.deepEqual(
+    translateEvent({ type: "tool_execution_end", toolName: "read", isError: false }),
+    { kind: "tool_ended", tool: "read", ok: true, details: null, errorText: null },
+  );
+  // Failure carries pre-cap error text: details.error → string result → generic fallback.
+  assert.deepEqual(
+    translateEvent({
+      type: "tool_execution_end",
+      toolName: "submit",
+      isError: true,
+      result: { details: { ok: false, error: "boom" } },
+    }),
+    {
+      kind: "tool_ended",
+      tool: "submit",
+      ok: false,
+      details: { ok: false, error: "boom" },
+      errorText: "boom",
+    },
+  );
+  assert.deepEqual(
+    translateEvent({ type: "tool_execution_end", toolName: "bash", isError: true }),
+    {
+      kind: "tool_ended",
+      tool: "bash",
+      ok: false,
+      details: null,
+      errorText: "tool bash failed",
+    },
+  );
+});
+
+test("translateEvent: assistant message_end with stopReason error → model_errored; others → null", () => {
+  assert.deepEqual(
+    translateEvent({
+      type: "message_end",
+      message: { role: "assistant", stopReason: "error", errorMessage: "net" },
+    }),
+    { kind: "model_errored", message: "net" },
+  );
+  assert.deepEqual(
+    translateEvent({ type: "message_end", message: { role: "assistant", stopReason: "error" } }),
+    { kind: "model_errored", message: "model error" },
+  );
+  // Non-error message_end, non-assistant roles, and unobserved event types translate to null.
+  assert.equal(
+    translateEvent({ type: "message_end", message: { role: "assistant", stopReason: "stop" } }),
+    null,
+  );
+  assert.equal(
+    translateEvent({ type: "message_end", message: { role: "user", stopReason: "error" } }),
+    null,
+  );
+  assert.equal(translateEvent({ type: "agent_settled" }), null);
 });
 
 // --- the drive-session handle: bind/rebind structural --------------------------------------------
@@ -110,7 +162,7 @@ class FakeSession implements DriveSessionLike {
 }
 
 test("createDriveSession: rebindIfReplaced unsubscribes the prior listener (no double-count) and re-binds", async () => {
-  const counters = freshCounters();
+  const seen: StageEvent[] = [];
   const turn = (emit: (e: DriveEvent) => void) =>
     emit({ type: "turn_end", message: { role: "assistant" } });
   const s1 = new FakeSession(turn);
@@ -119,7 +171,7 @@ test("createDriveSession: rebindIfReplaced unsubscribes the prior listener (no d
     session: s1,
     dispose() {},
   };
-  const handle = createDriveSession(runtime, (e) => applyEvent(counters, e));
+  const handle = createDriveSession(runtime, (e) => seen.push(e));
   await handle.bind();
   assert.equal(await handle.rebindIfReplaced(), false, "an unchanged session never rebinds");
 
@@ -127,12 +179,22 @@ test("createDriveSession: rebindIfReplaced unsubscribes the prior listener (no d
   assert.equal(await handle.rebindIfReplaced(), true, "a replaced session rebinds");
   // s1's listener is detached: driving s1 must NOT reach the (single) listener.
   await s1.prompt();
-  assert.equal(counters.turns, 0, "prior listener was unsubscribed on rebind");
-  // The live binding is s2: driving it reaches the listener exactly once.
+  assert.equal(seen.length, 0, "prior listener was unsubscribed on rebind");
+  // The live binding is s2: driving it reaches the listener exactly once — translated.
   await s2.prompt();
-  assert.equal(counters.turns, 1, "only the live session's listener fires");
+  assert.deepEqual(seen, [{ kind: "turn_ended", freshTokens: 0 }]);
   assert.equal(s1.bindCalls, 1);
   assert.equal(s2.bindCalls, 1);
+  await handle.dispose();
+});
+
+test("createDriveSession: abort is idempotent — repeated trips launch exactly one SDK abort", async () => {
+  const session = new FakeSession(() => {});
+  const handle = createDriveSession({ session, dispose() {} }, () => {});
+  handle.abort();
+  handle.abort();
+  handle.abort();
+  assert.equal(session.abortCalls, 1, "later aborts are no-ops once one is retained");
   await handle.dispose();
 });
 
@@ -229,17 +291,4 @@ test("resolveWorkerModel: '' ≡ omitted (the documented bare `--model` CLI tole
   assert.equal(r.selection.thinkingLevel, undefined);
   assert.equal(r.selection.modelRuntime, runtime);
   assert.equal(r.warning, undefined);
-});
-
-test("resolveWorkerModel: the discriminated variants carry no contradictory state", async () => {
-  // ok:true ALWAYS carries a selection; ok:false NEVER does (and always carries an error).
-  const ok = await resolveWorkerModel("sonnet", stubRuntime([SONNET]));
-  assert.ok(ok.ok);
-  assert.ok(ok.selection instanceof WorkerModelSelection);
-  assert.ok(!("error" in ok), "ok:true carries no error field");
-
-  const failed = await resolveWorkerModel("totally-unknown-model-zzz", stubRuntime([SONNET]));
-  assert.equal(failed.ok, false);
-  assert.ok(!("selection" in failed), "ok:false carries no selection field");
-  assert.ok((failed as { error: string }).error.length > 0);
 });

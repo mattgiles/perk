@@ -386,7 +386,7 @@ without committing an action twice.
 
 ### Phase 2: deepen the Pi worker
 
-- Refactor `worker.ts` from stage-only driving to first-party run recipes.
+- Refactor `stageExecution.ts` from stage-only driving to first-party run recipes.
 - Add the fail-closed SDK policy UI with RPC semantics.
 - Implement and test recommended single/multi-select, complaint/re-prompt, and unknown-dialog halt.
 - Normalize terminal outcomes and diagnostics.

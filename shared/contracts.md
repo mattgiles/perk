@@ -2526,11 +2526,13 @@ worker's inputs, determinism invariants, terminal-signal definition, and outcome
 audit is `docs/design/headless-worker.md`). The worker makes **no GitHub mutation of its
 own** — the stage's own tools (`submit`, `finalize_address`) delegate to the Python gateway
 exactly as in a warm session (§8.4/§8.52). The seam is **SDK-confined**: session construction,
-raw session events, prompt/abort ownership, and token accumulation live in the private SDK
-adapter (`extension/worker/sdkAdapter.ts` — the seam's only production importer of the SDK; the
-seam drives the session solely through the adapter's drive-session handle), and `workerMain.ts`
-imports **no SDK** — it consumes only the seam (guard-enforced:
-`extension/importDirectionGuard.test.ts` Rule F).
+raw session events, and prompt/abort ownership live in the private SDK adapter
+(`extension/worker/sdkAdapter.ts` — the seam's only production importer of the SDK; the seam
+drives the session solely through the adapter's drive-session handle, whose listener receives a
+small perk-owned drive-event union translated at the boundary — raw SDK events never cross it),
+all policy folding (budget counters, terminal capture, outcome classification) stays in the seam
+over that union, and `workerMain.ts` imports **no SDK** — it consumes only the seam
+(guard-enforced: `extension/importDirectionGuard.test.ts` Rule F).
 
 ### Inputs (the prepared-worktree contract)
 

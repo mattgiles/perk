@@ -14,12 +14,14 @@
 //
 // Budget semantics: `budget.tokens` counts FRESH WORK only — assistant `input + output` per
 // `turn_end`. Cache reads/writes and the provider `reasoning` breakdown (a subset of `output` in
-// pi-ai's normalization) are excluded by design; see the adapter's `applyEvent`.
+// pi-ai's normalization) are excluded by design; see the adapter's `StageEvent.freshTokens`.
 //
 // CONFINEMENT: this seam's caller surface carries no SDK shapes. Every `@earendil-works` import
-// AND the session-drive mechanics (construction, raw events, prompt/abort, token accumulation)
-// live in the private `./sdkAdapter.ts` — the seam drives the session only through the adapter's
-// drive-session handle, and the one opaque model input (`StageRunOptions.model`) is the
+// AND the session-drive mechanics (construction, raw events, prompt/abort) live in the private
+// `./sdkAdapter.ts` — the seam drives the session only through the adapter's drive-session
+// handle, whose listener receives the perk-owned `StageEvent` union (the adapter translates raw
+// SDK events at the boundary; ALL policy folding — budget counters, terminal capture, outcome —
+// happens here on perk shapes). The one opaque model input (`StageRunOptions.model`) is the
 // adapter-minted nominal `WorkerModelSelection` (see the adapter header for the exact — narrow —
 // opacity guarantee: an import-edge ban plus nominal minting, nothing stronger). `workerMain.ts`
 // imports ONLY this seam (guard Rule F) and carries zero SDK imports.
@@ -32,16 +34,12 @@ import { planReadInstruction, render } from "../substrate/prompts.ts";
 import { captureSessionPointer } from "../substrate/sessionPointers.ts";
 import { rebuildWorkflowState } from "../substrate/workflowState.ts";
 import {
-  applyEvent,
   createDriveSession,
-  type DriveCounters,
-  type DriveEvent,
   type DriveRuntimeLike,
   type DriveSessionHandle,
   defaultCreateRuntime,
-  detailsOf,
-  freshCounters,
   resolveAuth,
+  type StageEvent,
   type WorkerModelSelection,
 } from "./sdkAdapter.ts";
 
@@ -49,7 +47,7 @@ export type {
   DriveEvent,
   DriveRuntimeLike,
   DriveSessionLike,
-  ResolvedWorkerModel,
+  StageEvent,
   WorkerModelSelection,
 } from "./sdkAdapter.ts";
 // Re-exports so `workerMain.ts` (and the harness tier) import ONLY the seam.
@@ -169,6 +167,53 @@ export interface TerminalVerdict {
 }
 
 // --- pure helpers (offline-testable) ------------------------------------------------------------
+
+/** Mutable counters/captures the drive's policy fold accumulates over the run. */
+export interface DriveCounters {
+  turns: number;
+  tokens: number;
+  /** Latest submit-bearing evidence (standalone submit or the nested finalizer submit). */
+  submitDetails: Record<string, unknown> | null;
+  finalizeDetails: Record<string, unknown> | null;
+  modelError: { message: string } | null;
+}
+
+export function freshCounters(): DriveCounters {
+  return { turns: 0, tokens: 0, submitDetails: null, finalizeDetails: null, modelError: null };
+}
+
+/**
+ * Fold one perk-owned drive event into the running counters (pure) — the seam's policy fold over
+ * the adapter's translated `StageEvent` union. Counts turns and fresh-work tokens (the sum is
+ * adapter-computed; see `StageEvent`'s `freshTokens` doc for the reasoning-subset exclusion),
+ * captures the `submit`/`finalize_address` terminal tool details, and records a post-acceptance
+ * model error.
+ */
+export function applyStageEvent(counters: DriveCounters, event: StageEvent): void {
+  if (event.kind === "turn_ended") {
+    counters.turns += 1;
+    counters.tokens += event.freshTokens;
+    return;
+  }
+  if (event.kind === "tool_ended") {
+    if (event.tool === "submit") counters.submitDetails = event.details;
+    else if (event.tool === "finalize_address") {
+      counters.finalizeDetails = event.details;
+      // A finalizer carries the submit that immediately preceded resolution. Recording it into the
+      // same latest-evidence slot means a later standalone submit naturally supersedes it after a
+      // conflict-resolver re-drive.
+      const nestedSubmit = event.details?.submit;
+      if (nestedSubmit && typeof nestedSubmit === "object" && !Array.isArray(nestedSubmit)) {
+        // The finalizer only exposes this nested block after submit succeeded; restore the
+        // success marker stripped from its nested public shape so a later failed standalone
+        // submit cannot accidentally satisfy the address completion predicate.
+        counters.submitDetails = { ok: true, ...(nestedSubmit as Record<string, unknown>) };
+      }
+    }
+    return;
+  }
+  counters.modelError = { message: event.message };
+}
 
 /** True when the budget watchdog should trip from the current counters. */
 export function budgetTripped(counters: DriveCounters, budget: DriveBudget): boolean {
@@ -325,32 +370,19 @@ export function assembleOutcome(args: {
 // --- run-event helpers (offline-testable) ---------------------------------------------
 
 /**
- * Compute a `tool_outcome` `{ tool, ok, summary }` from a `tool_execution_end` `DriveEvent` (pure).
- * `ok` = `details.ok === true` when the result carries a `details.ok` boolean, else `!isError`.
- * `summary` is `null` on success and, on failure, a capped (route-don't-relay) synthesis of the
- * tool's error message — never the raw tool result.
+ * Compute a `tool_outcome` `{ tool, ok, summary }` from a translated `tool_ended` event (pure).
+ * `summary` is `null` on success and, on failure, a capped (route-don't-relay) rendering of the
+ * adapter's pre-cap error text — never the raw tool result.
  */
-export function toolOutcomeOf(event: DriveEvent): {
+export function toolOutcomeOf(event: Extract<StageEvent, { kind: "tool_ended" }>): {
   tool: string;
   ok: boolean;
   summary: string | null;
 } {
-  const details = detailsOf(event.result);
-  const ok = typeof details?.ok === "boolean" ? details.ok === true : !event.isError;
-  let summary: string | null = null;
-  if (!ok) {
-    const raw = toolErrorMessage(event);
-    summary = capForModel(raw, EVENT_SUMMARY_CAP).shown;
-  }
-  return { tool: event.toolName ?? "", ok, summary };
-}
-
-/** Best-effort error text for a failed tool (details.error | result string | a generic fallback). */
-function toolErrorMessage(event: DriveEvent): string {
-  const details = detailsOf(event.result);
-  if (details && typeof details.error === "string" && details.error) return details.error;
-  if (typeof event.result === "string" && event.result) return event.result;
-  return `tool ${event.toolName ?? ""} failed`;
+  const summary = event.ok
+    ? null
+    : capForModel(event.errorText ?? `tool ${event.tool} failed`, EVENT_SUMMARY_CAP).shown;
+  return { tool: event.tool, ok: event.ok, summary };
 }
 
 /**
@@ -477,11 +509,11 @@ export async function runStage(
   let terminationReason: "natural" | "budget" | "abort" = "natural";
   let settled = false;
   let handle: DriveSessionHandle | null = null;
-  const listener = (event: DriveEvent): void => {
-    applyEvent(counters, event);
-    if (event.type === "turn_end") {
+  const listener = (event: StageEvent): void => {
+    applyStageEvent(counters, event);
+    if (event.kind === "turn_ended") {
       if (budgetTripped(counters, opts.budget)) trip("budget");
-    } else if (event.type === "tool_execution_end") {
+    } else if (event.kind === "tool_ended") {
       const o = toolOutcomeOf(event);
       emitter.emit({ kind: "tool_outcome", tool: o.tool, ok: o.ok, summary: o.summary });
     }

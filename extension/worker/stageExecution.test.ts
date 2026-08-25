@@ -1,10 +1,10 @@
 // Fully-offline coverage for the stage-execution seam: the pure policy helpers
-// (evaluateTerminal/assembleOutcome/initialPromptFor), the budget/abort watchdog and the
-// happy-path drive via an INJECTED runtime (no model turn / network ever), the seam's
+// (applyStageEvent/evaluateTerminal/assembleOutcome/initialPromptFor), the budget/abort watchdog
+// and the happy-path drive via an INJECTED runtime (no model turn / network ever), the seam's
 // never-throws contract under adversarial fakes, the cross-plane prompt-parity invariant
 // (reciprocal of tests/test_worker_prompt_parity.py), and the Gap-4 verification (a throwaway
 // agentDir still loads + binds the project `@mgiles/perk` extension, with the `session_start`
-// claim engaging). The adapter-owned helpers (applyEvent, the drive-session handle,
+// claim engaging). The adapter-owned helpers (translateEvent, the drive-session handle,
 // resolveAuth/resolveWorkerModel) are covered in sdkAdapter.test.ts. See stageExecution.ts.
 
 import assert from "node:assert/strict";
@@ -16,9 +16,10 @@ import type { PlanRef } from "../substrate/cache.ts";
 import { planRefPath, runEventsPath, workflowDir } from "../substrate/cache.ts";
 import { readSessionPointers } from "../substrate/sessionPointers.ts";
 import { loadPerkSession, scaffoldRepo } from "../testing/harness.ts";
-// The nominal model token + counters are adapter-owned; tests mint/build them deliberately.
-import { freshCounters, WorkerModelSelection } from "./sdkAdapter.ts";
+// The nominal model token is adapter-owned; tests mint it deliberately.
+import { WorkerModelSelection } from "./sdkAdapter.ts";
 import {
+  applyStageEvent,
   assembleOutcome,
   budgetTripped,
   createEventEmitter,
@@ -26,6 +27,7 @@ import {
   type DriveRuntimeLike,
   type DriveSessionLike,
   evaluateTerminal,
+  freshCounters,
   initialPromptFor,
   initialPromptForWorktree,
   missingTerminatingTool,
@@ -52,6 +54,50 @@ const samplePlanRef: PlanRef = {
   labels: [],
   objective_id: "137",
 };
+
+// --- pure: applyStageEvent — the seam's policy fold over the adapter's translated events --------
+
+test("applyStageEvent: counts turns/tokens, captures terminal tool details + model error", () => {
+  const c = freshCounters();
+  applyStageEvent(c, { kind: "turn_ended", freshTokens: 15 });
+  applyStageEvent(c, { kind: "turn_ended", freshTokens: 3 });
+  assert.equal(c.turns, 2);
+  assert.equal(c.tokens, 18);
+
+  applyStageEvent(c, {
+    kind: "tool_ended",
+    tool: "submit",
+    ok: true,
+    details: { ok: true, pr: { number: 1, url: "u" } },
+    errorText: null,
+  });
+  assert.deepEqual(c.submitDetails, { ok: true, pr: { number: 1, url: "u" } });
+
+  // A finalizer's nested submit lands in the same latest-evidence slot with the ok marker
+  // restored (the finalizer only exposes the block after submit succeeded).
+  applyStageEvent(c, {
+    kind: "tool_ended",
+    tool: "finalize_address",
+    ok: true,
+    details: { ok: true, submit: { mergeable: false } },
+    errorText: null,
+  });
+  assert.deepEqual(c.finalizeDetails, { ok: true, submit: { mergeable: false } });
+  assert.deepEqual(c.submitDetails, { ok: true, mergeable: false });
+
+  // A later standalone clean submit is the effective mergeability evidence.
+  applyStageEvent(c, {
+    kind: "tool_ended",
+    tool: "submit",
+    ok: true,
+    details: { ok: true, mergeable: true },
+    errorText: null,
+  });
+  assert.deepEqual(c.submitDetails, { ok: true, mergeable: true });
+
+  applyStageEvent(c, { kind: "model_errored", message: "net" });
+  assert.deepEqual(c.modelError, { message: "net" });
+});
 
 // --- pure: evaluateTerminal ---------------------------------------------------------------------
 
@@ -527,7 +573,8 @@ test("runStage: maxTurns budget trips → budget_exhausted/budget + abort called
   );
   assert.equal(outcome.status, "budget_exhausted");
   assert.equal(outcome.terminal_signal, "budget");
-  assert.ok(session.abortCalls >= 1);
+  // 3 post-trip turn_ends each re-trip → the handle's idempotent abort fires exactly once.
+  assert.equal(session.abortCalls, 1);
 });
 
 test("runStage: maxTokens budget trips → budget_exhausted", async () => {
@@ -779,34 +826,34 @@ test("Gap-4: a bound perk session registers the worker's terminal tools and clai
 
 // --- pure: toolOutcomeOf ------------------------------------------------------------------------
 
-test("toolOutcomeOf: ok via details.ok, fallback to !isError, capped error summary", () => {
+test("toolOutcomeOf: null summary on success, capped error summary on failure", () => {
   assert.deepEqual(
     toolOutcomeOf({
-      type: "tool_execution_end",
-      toolName: "submit",
-      result: { details: { ok: true } },
+      kind: "tool_ended",
+      tool: "submit",
+      ok: true,
+      details: { ok: true },
+      errorText: null,
     }),
     { tool: "submit", ok: true, summary: null },
   );
-  // No details.ok boolean → fall back to !isError.
-  assert.deepEqual(
-    toolOutcomeOf({ type: "tool_execution_end", toolName: "read", isError: false }),
-    {
-      tool: "read",
-      ok: true,
-      summary: null,
-    },
-  );
   const bigErr = "x".repeat(5000);
   const out = toolOutcomeOf({
-    type: "tool_execution_end",
-    toolName: "submit",
-    isError: true,
-    result: { details: { ok: false, error: bigErr } },
+    kind: "tool_ended",
+    tool: "submit",
+    ok: false,
+    details: { ok: false, error: bigErr },
+    errorText: bigErr,
   });
   assert.equal(out.ok, false);
   assert.ok(out.summary && out.summary.length < bigErr.length, "summary is capped");
   assert.ok(out.summary?.includes("[Output truncated"), "carries the truncation notice");
+  // Defensive fallback: a failed tool with no error text still yields a named summary.
+  assert.equal(
+    toolOutcomeOf({ kind: "tool_ended", tool: "bash", ok: false, details: null, errorText: null })
+      .summary,
+    "tool bash failed",
+  );
 });
 
 // --- createEventEmitter -------------------------------------------------------------------------

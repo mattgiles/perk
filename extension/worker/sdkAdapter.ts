@@ -1,8 +1,9 @@
 // The PRIVATE SDK adapter behind the stage-execution seam (contracts.md §8.11).
 //
 // Every `@earendil-works/*` import on the drive path lives HERE — construction, raw session
-// events, prompt/abort ownership, and token accumulation are adapter-confined so the seam
-// (`stageExecution.ts`) carries no SDK vocabulary on its caller surface. The only production
+// events (translated at the boundary into the perk-owned `StageEvent` union), and prompt/abort
+// ownership are adapter-confined so the seam (`stageExecution.ts`) carries no SDK vocabulary on
+// its caller surface and folds policy (budget, terminal capture, outcome) over perk shapes only. The only production
 // importer is the seam itself (enforced by `extension/importDirectionGuard.test.ts` Rule F);
 // tests import this module deliberately (to mint `WorkerModelSelection` and drive the handle).
 //
@@ -76,7 +77,7 @@ export interface DriveRuntimeLike {
 }
 
 /** Extract a tool's `details` object from a captured `tool_execution_end.result`; null if absent. */
-export function detailsOf(result: unknown): Record<string, unknown> | null {
+function detailsOf(result: unknown): Record<string, unknown> | null {
   if (result && typeof result === "object" && "details" in result) {
     const details = (result as { details: unknown }).details;
     if (details && typeof details === "object") return details as Record<string, unknown>;
@@ -84,105 +85,82 @@ export function detailsOf(result: unknown): Record<string, unknown> | null {
   return null;
 }
 
-// --- token accumulation --------------------------------------------------------------------------
+// --- the perk-owned drive-event union -------------------------------------------------------------
 
-/** Mutable counters/captures the subscribe listener accumulates over the drive. */
-export interface DriveCounters {
-  turns: number;
-  tokens: number;
-  /** Latest submit-bearing evidence (standalone submit or the nested finalizer submit). */
-  submitDetails: Record<string, unknown> | null;
-  finalizeDetails: Record<string, unknown> | null;
-  modelError: { message: string } | null;
-}
+/**
+ * The perk-owned drive event union — the ONLY event vocabulary that crosses the handle boundary
+ * to the seam. The adapter translates raw SDK session events into these (`translateEvent`); all
+ * policy folding (budget counters, terminal capture, outcome classification) stays in the seam,
+ * so SDK event-shape churn is absorbed here and never reaches stage policy.
+ */
+export type StageEvent =
+  | {
+      kind: "turn_ended";
+      /**
+       * Fresh-work tokens for the turn: assistant `input + output` ONLY. `usage.reasoning` is a
+       * provider-reported breakdown that is a **subset of `output`** on every pi-ai provider that
+       * populates it (anthropic `thinking_tokens`, google `thoughtsTokenCount` folded into
+       * `output`, openai `reasoning_tokens` inside completion/output tokens — verified @ pi-ai
+       * 0.80.5), so it is deliberately EXCLUDED: adding it would double-count.
+       */
+      freshTokens: number;
+    }
+  | {
+      kind: "tool_ended";
+      tool: string;
+      /** `details.ok` when the result carries the boolean, else `!isError`. */
+      ok: boolean;
+      /** The tool's structured `details` block (perk tools' result shape), null when absent. */
+      details: Record<string, unknown> | null;
+      /** Pre-cap error text for a failed tool (null when `ok`); the seam applies its cap. */
+      errorText: string | null;
+    }
+  | { kind: "model_errored"; message: string };
 
-export function freshCounters(): DriveCounters {
-  return { turns: 0, tokens: 0, submitDetails: null, finalizeDetails: null, modelError: null };
+/** Best-effort error text for a failed tool (details.error | result string | a generic fallback). */
+function toolErrorMessage(event: DriveEvent): string {
+  const details = detailsOf(event.result);
+  if (details && typeof details.error === "string" && details.error) return details.error;
+  if (typeof event.result === "string" && event.result) return event.result;
+  return `tool ${event.toolName ?? ""} failed`;
 }
 
 /**
- * Fold one agent-session event into the running counters (pure). Counts `turn_end` turns, sums
- * assistant token usage (the `sumAssistantTokens` pattern in objective.ts), captures the `submit`
- * /`finalize_address` terminal tool details, and records a post-acceptance model error
- * (assistant `message_end` with `stopReason:"error"`, surfaced with retry off — audit §B #4).
- *
- * The token sum is `input + output` ONLY: `usage.reasoning` is a subset of `output` on every
- * pi-ai provider that reports it (see the `DriveEvent.usage` doc), so summing it would
- * double-count.
+ * Translate one raw agent-session event into the perk-owned union (pure); `null` for event types
+ * the drive does not observe. This is the entire SDK-event vocabulary the drive consumes: turn
+ * completion (with the fresh-work token sum — the `sumAssistantTokens` pattern in objective.ts),
+ * tool completion (with the parsed `details` block and pre-cap error text), and a
+ * post-acceptance model error (assistant `message_end` with `stopReason:"error"`, surfaced with
+ * retry off — audit §B #4).
  */
-export function applyEvent(counters: DriveCounters, event: DriveEvent): void {
+export function translateEvent(event: DriveEvent): StageEvent | null {
   if (event.type === "turn_end") {
-    counters.turns += 1;
     const usage = event.message?.usage;
-    if (usage) counters.tokens += Math.max(0, usage.input ?? 0) + Math.max(0, usage.output ?? 0);
-    return;
+    const freshTokens = usage ? Math.max(0, usage.input ?? 0) + Math.max(0, usage.output ?? 0) : 0;
+    return { kind: "turn_ended", freshTokens };
   }
   if (event.type === "tool_execution_end") {
-    if (event.toolName === "submit") counters.submitDetails = detailsOf(event.result);
-    else if (event.toolName === "finalize_address") {
-      const details = detailsOf(event.result);
-      counters.finalizeDetails = details;
-      // A finalizer carries the submit that immediately preceded resolution. Recording it into the
-      // same latest-evidence slot means a later standalone submit naturally supersedes it after a
-      // conflict-resolver re-drive.
-      const nestedSubmit = details?.submit;
-      if (nestedSubmit && typeof nestedSubmit === "object" && !Array.isArray(nestedSubmit)) {
-        // The finalizer only exposes this nested block after submit succeeded; restore the
-        // success marker stripped from its nested public shape so a later failed standalone
-        // submit cannot accidentally satisfy the address completion predicate.
-        counters.submitDetails = { ok: true, ...(nestedSubmit as Record<string, unknown>) };
-      }
-    }
-    return;
+    const details = detailsOf(event.result);
+    const ok = typeof details?.ok === "boolean" ? details.ok === true : !event.isError;
+    return {
+      kind: "tool_ended",
+      tool: event.toolName ?? "",
+      ok,
+      details,
+      errorText: ok ? null : toolErrorMessage(event),
+    };
   }
-  if (event.type === "message_end") {
-    if (event.message?.role === "assistant" && event.message.stopReason === "error") {
-      counters.modelError = { message: event.message.errorMessage ?? "model error" };
-    }
+  if (
+    event.type === "message_end" &&
+    event.message?.role === "assistant" &&
+    event.message.stopReason === "error"
+  ) {
+    return { kind: "model_errored", message: event.message.errorMessage ?? "model error" };
   }
+  return null;
 }
 
 // --- the drive-session handle --------------------------------------------------------------------
-
-/**
- * The adapter's private drive-session handle: the seam's ONLY window onto the live session.
- * Bind/subscribe, prompt, abort ownership, defensive rebind, and guarded disposal live behind it —
- * the seam never touches `.session`/`.sessionManager`/`.extensionRunner` members directly. The
- * handle is private to the confined pair (seam ↔ adapter), never a public interface; the seam's
- * fake-session injection seam (`deps.createRuntime` returning `DriveRuntimeLike`) is unchanged.
- */
-export interface DriveSessionHandle {
-  /** Headless bind + subscribe on the runtime's current session. */
-  bind(): Promise<void>;
-  /** The single driving prompt. */
-  prompt(text: string): Promise<void>;
-  /**
-   * OWNED: fires `session.abort()` on the runtime's live session, retains the promise, and logs
-   * a rejection fail-soft — the rejection is never unhandled; `dispose()` drains it.
-   */
-  abort(): void;
-  /**
-   * The defensive-rebind arm: when the runtime replaced its session mid-drive, unsubscribe the
-   * prior listener, bind + subscribe the replacement, and return true (`false` = unchanged). A
-   * replacement is not expected on the happy path (the prompt instructs `/submit`, never
-   * `/implement`; `lifecycleGates.newSession` is `hasUI`-guarded; objective compaction is inert
-   * with no active objective) — the seam logs an observed rebind loudly.
-   */
-  rebindIfReplaced(): Promise<boolean>;
-  /** Preflight read (null when the session exposes no `extensionRunner`). */
-  registeredToolNames(): string[] | null;
-  /** §8.35 pointer-capture read. */
-  sessionFile(): string | null;
-  /** `sessionManager.getBranch()` for the seam's terminal classification. */
-  workflowBranch(): unknown[];
-  /**
-   * Guarded cleanup: unsubscribe (caught) → runtime dispose (caught) → drain the retained abort
-   * promise (caught). NEVER throws — a throwing unsubscribe or a rejecting `runtime.dispose()`
-   * can no longer replace the seam's already-computed `RunOutcome` (the never-throws contract,
-   * contracts.md §8.11, holds under adversarial fakes).
-   */
-  dispose(): Promise<void>;
-}
 
 /** The binding the worker applies to every (re)bound session: headless (`hasUI === false`). */
 function headlessBinding(): {
@@ -198,56 +176,89 @@ function headlessBinding(): {
 }
 
 /**
- * Create the drive-session handle over an already-created runtime. `listener` is the seam's
- * policy fold — raw `DriveEvent`s cross the handle boundary only through it. Rebinding
- * unsubscribes the prior listener first so events are never double-counted.
+ * Create the drive-session handle over an already-created runtime — the seam's ONLY window onto
+ * the live session. Bind/subscribe, prompt, abort ownership, defensive rebind, and guarded
+ * disposal live behind it; the seam never touches `.session`/`.sessionManager`/`.extensionRunner`
+ * members directly. `listener` is the seam's policy fold and receives only the perk-owned
+ * `StageEvent` union — raw `DriveEvent`s are translated at this boundary and never cross it.
+ * Rebinding unsubscribes the prior raw listener first so events are never double-counted. The
+ * handle is private to the confined pair (seam ↔ adapter); the seam's fake-session injection
+ * seam (`deps.createRuntime` returning `DriveRuntimeLike`) is unchanged.
  */
 export function createDriveSession(
   runtime: DriveRuntimeLike,
-  listener: (event: DriveEvent) => void,
-): DriveSessionHandle {
+  listener: (event: StageEvent) => void,
+) {
   const binding = headlessBinding();
   let bound: DriveSessionLike = runtime.session;
   let unsubscribe: (() => void) | null = null;
   let retainedAbort: Promise<void> | null = null;
+  const rawListener = (event: DriveEvent): void => {
+    const translated = translateEvent(event);
+    if (translated !== null) listener(translated);
+  };
 
   async function bindTo(target: DriveSessionLike): Promise<void> {
     if (unsubscribe) unsubscribe();
     await target.bindExtensions(binding);
-    unsubscribe = target.subscribe(listener);
+    unsubscribe = target.subscribe(rawListener);
     bound = target;
   }
 
   return {
+    /** Headless bind + subscribe on the runtime's current session. */
     async bind(): Promise<void> {
       await bindTo(runtime.session);
     },
+    /** The single driving prompt. */
     async prompt(text: string): Promise<void> {
       await bound.prompt(text);
     },
+    /**
+     * OWNED + IDEMPOTENT: fires `session.abort()` on the runtime's live session exactly once —
+     * the drive can trip repeatedly (every post-trip `turn_ended` re-calls this), but later
+     * calls are no-ops, so no abort work can outlive `dispose()`'s drain. The rejection has an
+     * owner: the logging catch attaches immediately (never unhandled), and the caught chain is
+     * retained so `dispose()` drains it before returning.
+     */
     abort(): void {
-      // The rejection has an owner: the logging catch attaches immediately (never unhandled),
-      // and the caught chain is retained so dispose() drains it before returning.
+      if (retainedAbort !== null) return;
       retainedAbort = runtime.session.abort().catch((err) => {
         console.error(`perk worker: session.abort() rejected — ${String(err)}`);
       });
     },
+    /**
+     * The defensive-rebind arm: when the runtime replaced its session mid-drive, unsubscribe the
+     * prior listener, bind + subscribe the replacement, and return true (`false` = unchanged). A
+     * replacement is not expected on the happy path (the prompt instructs `/submit`, never
+     * `/implement`; `lifecycleGates.newSession` is `hasUI`-guarded; objective compaction is
+     * inert with no active objective) — the seam logs an observed rebind loudly.
+     */
     async rebindIfReplaced(): Promise<boolean> {
       if (runtime.session === bound) return false;
       await bindTo(runtime.session);
       return true;
     },
+    /** Preflight read (null when the session exposes no `extensionRunner`). */
     registeredToolNames(): string[] | null {
       const runner = bound.extensionRunner;
       if (!runner) return null;
       return runner.getAllRegisteredTools().map((t) => t.definition.name);
     },
+    /** §8.35 pointer-capture read. */
     sessionFile(): string | null {
       return bound.sessionManager.getSessionFile?.() ?? null;
     },
+    /** `sessionManager.getBranch()` for the seam's terminal classification. */
     workflowBranch(): unknown[] {
       return bound.sessionManager.getBranch();
     },
+    /**
+     * Guarded cleanup: unsubscribe (caught) → runtime dispose (caught) → drain the retained
+     * abort promise (caught). NEVER throws — a throwing unsubscribe or a rejecting
+     * `runtime.dispose()` can never replace the seam's already-computed `RunOutcome` (the
+     * never-throws contract, contracts.md §8.11, holds under adversarial fakes).
+     */
     async dispose(): Promise<void> {
       try {
         unsubscribe?.();
@@ -266,6 +277,12 @@ export function createDriveSession(
   };
 }
 
+/**
+ * The handle's nameable type, derived from its sole factory (no duplicate interface to drift):
+ * the object literal above carries the per-method contracts.
+ */
+export type DriveSessionHandle = ReturnType<typeof createDriveSession>;
+
 // --- model/auth (Gap 5), unified around one nominal type ------------------------------------------
 
 /**
@@ -276,32 +293,27 @@ export function createDriveSession(
  * this adapter-owned surface only.
  */
 export class WorkerModelSelection {
+  // The ONE `#private` field supplies the nominal guarantee; the payload rides ordinary readonly
+  // fields. (Constructor parameter properties would be smaller still, but node's type-stripping
+  // test runner rejects non-erasable TS syntax.)
   readonly #modelRuntime: ModelRuntime;
-  readonly #model: Model<Api> | undefined;
-  readonly #thinkingLevel: ThinkingLevel | undefined;
+  /** The EXPLICIT model only; `undefined` defers the pick to the SDK at session creation. */
+  readonly model: Model<Api> | undefined;
+  /**
+   * Thinking level parsed from the `--model <pattern>:<level>` suffix (`resolveWorkerModel`).
+   * `undefined` ⇒ the SDK's settings-default resolution — unchanged behavior.
+   */
+  readonly thinkingLevel: ThinkingLevel | undefined;
 
   constructor(modelRuntime: ModelRuntime, model?: Model<Api>, thinkingLevel?: ThinkingLevel) {
     this.#modelRuntime = modelRuntime;
-    this.#model = model;
-    this.#thinkingLevel = thinkingLevel;
+    this.model = model;
+    this.thinkingLevel = thinkingLevel;
   }
 
   /** The canonical model/auth runtime (pi 0.84 `ModelRuntime`). */
   get modelRuntime(): ModelRuntime {
     return this.#modelRuntime;
-  }
-
-  /** The EXPLICIT model only; `undefined` defers the pick to the SDK at session creation. */
-  get model(): Model<Api> | undefined {
-    return this.#model;
-  }
-
-  /**
-   * Thinking level parsed from the `--model <pattern>:<level>` suffix (`resolveWorkerModel`).
-   * `undefined` ⇒ the SDK's settings-default resolution — unchanged behavior.
-   */
-  get thinkingLevel(): ThinkingLevel | undefined {
-    return this.#thinkingLevel;
   }
 }
 
@@ -389,16 +401,41 @@ export async function resolveAuth(
  * `DefaultResourceLoader` internally from `cwd`/`agentDir` (recipe correction #1).
  *
  * Adapter-owned inputs only (`worktree` + the nominal selection): no seam type appears in the
- * signature, so a reverse seam←adapter type edge is impossible by construction. The returned
- * runtime wraps `dispose()` to also best-effort remove the throwaway `mkdtempSync` agentDir
- * (fail-soft `rm`; a removal failure logs and never affects the outcome) — the isolation
- * invariant is untouched: removal happens only at dispose.
+ * signature, so a reverse seam←adapter type edge is impossible by construction. The throwaway
+ * `mkdtempSync` agentDir is best-effort removed (fail-soft `rm`; a removal failure logs and
+ * never affects the outcome) at exactly two moments — dispose, and a construction failure that
+ * would otherwise orphan it — the isolation invariant is untouched: no removal while the
+ * session lives.
  */
 export async function defaultCreateRuntime(
   worktree: string,
   selection: WorkerModelSelection,
 ): Promise<DriveRuntimeLike> {
   const agentDir = mkdtempSync(join(tmpdir(), "perk-worker-agent-"));
+  const removeAgentDir = (): void => {
+    try {
+      rmSync(agentDir, { recursive: true, force: true });
+    } catch (err) {
+      console.error(`perk worker: throwaway agentDir removal failed — ${String(err)}`);
+    }
+  };
+  try {
+    return await constructRuntime(worktree, selection, agentDir, removeAgentDir);
+  } catch (err) {
+    // Construction failed before the disposer-wrapping runtime existed — without this arm every
+    // failed worker invocation would leak its `perk-worker-agent-*` directory.
+    removeAgentDir();
+    throw err;
+  }
+}
+
+/** The construction body behind `defaultCreateRuntime`'s failure-cleanup guard. */
+async function constructRuntime(
+  worktree: string,
+  selection: WorkerModelSelection,
+  agentDir: string,
+  removeAgentDir: () => void,
+): Promise<DriveRuntimeLike> {
   const settingsManager = SettingsManager.create(worktree, agentDir);
   settingsManager.applyOverrides({ compaction: { enabled: false }, retry: { enabled: false } });
   const factory: CreateAgentSessionRuntimeFactory = async (factoryOpts) => {
@@ -450,11 +487,7 @@ export async function defaultCreateRuntime(
       } finally {
         // Close the throwaway-agentDir leak at the one safe moment (post-dispose); a removal
         // failure logs and never affects the outcome.
-        try {
-          rmSync(agentDir, { recursive: true, force: true });
-        } catch (err) {
-          console.error(`perk worker: throwaway agentDir removal failed — ${String(err)}`);
-        }
+        removeAgentDir();
       }
     },
   };
