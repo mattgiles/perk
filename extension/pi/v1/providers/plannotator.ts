@@ -1,34 +1,40 @@
 // The SECOND 3rd-party plan adapter — and the first with the AUGMENT posture. A perk-owned shim
 // that enables `@plannotator/pi-extension` as a REAL, selectable plan provider: unlike the tombell
 // adapter (REPLACE posture — perk's plan surface fully vacates), plannotator AUGMENTS perk's plan
-// flow. perk's `/plan` mode, authoring injection, and read-only gate STAY (planMode skips only the
-// `--plan` flag + `Ctrl+Alt+P` shortcut — the two real registration collisions).
+// flow. perk's `/plan` mode, authoring injection, and read-only gate STAY (the plan installer
+// skips only the `--plan` flag + `Ctrl+Alt+P` shortcut — the two real registration collisions).
 //
-// INJECTION + BRIDGE ONLY: the `plan_review` TOOL lives in `extension/factories/planReview.ts`
-// (perk's backend-neutral review door); this module is the injection-only adapter shape. It owns
+// INJECTION + BRIDGE ONLY: the `plan_review` TOOL lives in `pi/v1/plan.ts` (perk's
+// backend-neutral review door); this module is the injection-only adapter shape. It owns
 // (1) the plannotator review-step authoring context (injected while the gate is active AND
-// plannotator is selected — THREE content flavors, one customType, each once-only: branch-scan
-// dedup'd on the flavor's marker: the plan bridge context, the objective flavor when the stage
-// is `objective-author` or `objective-save` (both objective stages route to the objective
+// plannotator is selected — THREE content flavors, one customType, each once-only:
+// scan-dedup'd on the flavor's marker: the plan bridge context, the objective flavor when the
+// stage is `objective-author` or `objective-save` (both objective stages route to the objective
 // review arm), or the gist flavor when the stage is `gist-author`) and (2) the pure
 // event-bus bridge
 // (`requestPlannotatorPlanReview`; `createPlannotatorBridge` is its thin structural wrapper)
-// that planReview.ts dispatches to when plannotator is the selected plan provider and the
+// that the review door dispatches to when plannotator is the selected plan provider and the
 // plan-review browser open (plannotatorHandoff.ts) launches. The bridge speaks plannotator's
 // published `plannotator:request` event API (in-process `pi.events` bus); the decision wait is
 // a per-review `plannotator:review-result` listener disposed via the unsubscribe pi's
 // `EventBus.on` returns.
 //
+// BRIDGE HARDENING (fail-open by construction): the handshake/decision payloads arrive as
+// `unknown` from a foreign package — every load-bearing field is narrowed by a contained parser
+// (an adversarial getter or malformed shape degrades to the documented `unavailable`/ignored
+// arms, never a throw), and a synchronous `bus.emit` throw is contained with deterministic
+// timer cleanup. The well-formed lifecycle is byte-identical.
+//
 // INERT BY DEFAULT. The shim is ALWAYS registered in index.ts but the injection fires only when
 // the resolved `[providers] plan` selection is `plannotator-plan` (read fresh per-event, same
-// shape as planMode/planAdapterTombell). On any other selection the context handler only strips
-// its own stale marker — zero behavior change on the default path.
+// shape as the plan installer / tombell adapter). On any other selection the context handler
+// only strips its own stale marker — zero behavior change on the default path.
 //
 // INVARIANTS HELD: never calls `setActiveTools`, never registers a `tool_call` handler, never
 // restamps `cache.plan-ref.provider` (stays `"github"`). The adapter is INJECTION-ONLY again
 // (Invariant 1: composes, never owns) — the review tool, the `approvalSave` composition, and the
-// gate exit all live behind planReview.ts's seams; the injection's gate-active check reads the
-// persisted `perk:workflow-state.mode`, the gate's own state twin.
+// gate exit all live behind the plan installer's seams; the injection's gate-active check reads
+// the persisted `perk:workflow-state.mode`, the gate's own state twin.
 //
 // EVENT ENVELOPE (pinned against `@plannotator/pi-extension@0.20.0`, `plannotator-events.ts` —
 // verified unchanged through 0.26.1):
@@ -51,22 +57,22 @@
 
 import { randomUUID } from "node:crypto";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { GIST_AUTHOR_STAGE } from "../authoring/gist/draft.ts";
-import { OBJECTIVE_AUTHOR_STAGE } from "../factories/objectiveAuthor.ts";
-import { OBJECTIVE_SAVE_STAGE } from "../factories/objectiveSave.ts";
-import { resolvedPlanProviderId } from "../factories/planMode.ts";
-// Type-only (erased at runtime — no cycle): the outcome vocabulary lives with the review door.
-import type { ReviewOutcome } from "../factories/planReview.ts";
-import { render } from "../substrate/prompts.ts";
-import { PLANNOTATOR_PLAN_PROVIDER_ID } from "../substrate/providers.ts";
+import { GIST_AUTHOR_STAGE } from "../../../authoring/gist/draft.ts";
+import { OBJECTIVE_AUTHOR_STAGE } from "../../../factories/objectiveAuthor.ts";
+import { OBJECTIVE_SAVE_STAGE } from "../../../factories/objectiveSave.ts";
+import { render } from "../../../substrate/prompts.ts";
 import {
   activeContextWindow,
   branchCarries,
   branchOf,
   rebuildWorkflowState,
-} from "../substrate/workflowState.ts";
+} from "../../../substrate/workflowState.ts";
+// Type-only (erased at runtime — no cycle): the outcome vocabulary lives with the shared
+// review-surface machinery.
+import type { ReviewOutcome } from "../review.ts";
+import { isPlannotatorPlanSelected } from "./selection.ts";
 
-/** The plannotator plan-adapter bridge customType (distinct from planMode's `perk:plan-context`). */
+/** The plannotator plan-adapter bridge customType (distinct from the `perk:plan-context`). */
 export const PLAN_ADAPTER_PLANNOTATOR_CONTEXT_TYPE = "perk:plan-adapter-plannotator";
 const PLAN_ADAPTER_PLANNOTATOR_MARKER = "[PLAN ADAPTER: PLANNOTATOR]";
 const OBJECTIVE_ADAPTER_PLANNOTATOR_MARKER = "[OBJECTIVE ADAPTER: PLANNOTATOR]";
@@ -113,11 +119,6 @@ export const GIST_ADAPTER_PLANNOTATOR_CONTEXT = render("contexts/adapters/planno
   marker: GIST_ADAPTER_PLANNOTATOR_MARKER,
 });
 
-/** Whether the foreign `plannotator-plan` provider is the selected plan provider for `cwd`. */
-export function isPlannotatorPlanSelected(cwd: string): boolean {
-  return resolvedPlanProviderId(cwd) === PLANNOTATOR_PLAN_PROVIDER_ID;
-}
-
 // ------------------------------------------------------------------ the event-bus bridge core
 
 /** The minimal `pi.events` surface the bridge needs (mirrors pi's EventBus, whose `on` returns an unsubscribe function). */
@@ -133,10 +134,60 @@ interface HandshakeResponse {
   result?: { status?: string; reviewId?: string };
 }
 
-/** The human decision arriving on `plannotator:review-result`. */
-interface ReviewDecision {
-  approved: boolean;
-  feedback?: string;
+/**
+ * Narrow the foreign `respond` payload to the load-bearing handshake fields — contained: an
+ * adversarial getter/malformed shape degrades to `{}` (the downstream "invalid response" arm),
+ * never a throw; well-typed fields pass through byte-identically.
+ */
+function parseHandshakeResponse(response: unknown): HandshakeResponse {
+  try {
+    if (typeof response !== "object" || response === null) return {};
+    const record = response as Record<string, unknown>;
+    const status = record.status;
+    const error = record.error;
+    const result = record.result;
+    let narrowedResult: { status?: string; reviewId?: string } | undefined;
+    if (typeof result === "object" && result !== null) {
+      const r = result as Record<string, unknown>;
+      const resultStatus = r.status;
+      const reviewId = r.reviewId;
+      narrowedResult = {
+        ...(typeof resultStatus === "string" ? { status: resultStatus } : {}),
+        ...(typeof reviewId === "string" ? { reviewId } : {}),
+      };
+    }
+    return {
+      ...(typeof status === "string" ? { status } : {}),
+      ...(typeof error === "string" ? { error } : {}),
+      ...(narrowedResult !== undefined ? { result: narrowedResult } : {}),
+    };
+  } catch {
+    return {};
+  }
+}
+
+/**
+ * Narrow a foreign `plannotator:review-result` payload to the load-bearing decision fields —
+ * contained: an adversarial getter/malformed shape degrades to `null` (ignored, the wait
+ * continues), never a throw.
+ */
+function parseReviewDecision(
+  data: unknown,
+): { reviewId: string; approved: boolean; feedback?: string } | null {
+  try {
+    if (typeof data !== "object" || data === null) return null;
+    const record = data as Record<string, unknown>;
+    const reviewId = record.reviewId;
+    if (typeof reviewId !== "string") return null;
+    const feedback = record.feedback;
+    return {
+      reviewId,
+      approved: record.approved === true,
+      ...(typeof feedback === "string" && feedback.trim() ? { feedback } : {}),
+    };
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -145,7 +196,9 @@ interface ReviewDecision {
  * `action: "plan-review"`, await the bounded `respond` handshake, then await the human decision
  * on a PER-REVIEW `plannotator:review-result` listener — filtered on the handshake's `reviewId`
  * and disposed via the unsubscribe `bus.on` returns when the decision arrives or the turn
- * aborts. Pure over the bus → unit-testable offline with a fake plannotator listener.
+ * aborts. Pure over the bus → unit-testable offline with a fake plannotator listener. Fail-open
+ * end to end: a synchronous `emit` throw (a throwing foreign handler) is contained with the
+ * handshake timer cleared, and malformed payloads degrade per the parsers above.
  */
 export async function requestPlannotatorPlanReview(
   bus: PlannotatorBus,
@@ -161,12 +214,22 @@ export async function requestPlannotatorPlanReview(
     respondResolve = resolve;
   });
   const timer = setTimeout(() => respondResolve("timeout" as never), handshakeTimeoutMs());
-  bus.emit("plannotator:request", {
-    requestId,
-    action: "plan-review",
-    payload: { planContent: plan, origin: "perk" },
-    respond: (response: unknown) => respondResolve(response as HandshakeResponse),
-  });
+  try {
+    bus.emit("plannotator:request", {
+      requestId,
+      action: "plan-review",
+      payload: { planContent: plan, origin: "perk" },
+      respond: (response: unknown) => respondResolve(parseHandshakeResponse(response)),
+    });
+  } catch (error) {
+    // A synchronous throw from a foreign handler must not leak the handshake timer or reject a
+    // fail-open path — contain it as the unavailable arm.
+    clearTimeout(timer);
+    return {
+      status: "unavailable",
+      warning: `plannotator review request failed: ${String(error)}`,
+    };
+  }
   const response = await handshake;
   clearTimeout(timer);
 
@@ -209,13 +272,14 @@ export async function requestPlannotatorPlanReview(
     };
     const onAbort = (): void => finish({ status: "aborted" });
     const unsubscribe = bus.on("plannotator:review-result", (data) => {
-      const d = data as { reviewId?: unknown; approved?: unknown; feedback?: unknown };
-      if (d?.reviewId !== reviewId) return;
-      const decision: ReviewDecision = {
-        approved: d.approved === true,
-        feedback: typeof d.feedback === "string" && d.feedback.trim() ? d.feedback : undefined,
-      };
-      finish({ status: "completed", reviewId, ...decision });
+      const decision = parseReviewDecision(data);
+      if (decision === null || decision.reviewId !== reviewId) return;
+      finish({
+        status: "completed",
+        reviewId,
+        approved: decision.approved,
+        ...(decision.feedback !== undefined ? { feedback: decision.feedback } : {}),
+      });
     });
     signal?.addEventListener("abort", onAbort, { once: true });
   });
@@ -223,7 +287,7 @@ export async function requestPlannotatorPlanReview(
 
 /**
  * Create the plannotator bridge over an event bus — the thin structural slice
- * (`{ review(plan, signal) }`) that `registerPlanReview` injects into the review door; the body
+ * (`{ review(plan, signal) }`) that the plan installer injects into the review door; the body
  * lives in `requestPlannotatorPlanReview`.
  */
 export function createPlannotatorBridge(bus: PlannotatorBus): {
@@ -287,13 +351,13 @@ export function extractDirectEdits(feedback: string): { diff: string; remainder?
 // ----------------------------------------------------------------------------- registration
 
 /**
- * Register the plannotator plan adapter: the augment-posture authoring-context injection, inert
+ * Install the plannotator plan adapter: the augment-posture authoring-context injection, inert
  * unless `[providers] plan = "plannotator-plan"`. INJECTION-ONLY (Invariant 1: composes, never
- * owns) — the `plan_review` tool lives in planReview.ts (the backend-neutral review door), which
- * dispatches to this module's bridge when plannotator is selected; the adapter itself never
- * arbitrates tools and needs no gating.
+ * owns) — the `plan_review` tool lives in the plan installer (the backend-neutral review door),
+ * which dispatches to this module's bridge when plannotator is selected; the adapter itself
+ * never arbitrates tools and needs no gating.
  */
-export function registerPlanAdapterPlannotator(pi: ExtensionAPI): void {
+export function installPlannotatorPlanAdapter(pi: ExtensionAPI): void {
   // Inject the bridge context while the read-only gate is active AND plannotator is selected.
   // Three content flavors, one customType: an objective-authoring session (also read-only —
   // BOTH objective stages: `plan_review` routes objective-author AND objective-save to the
@@ -321,16 +385,16 @@ export function registerPlanAdapterPlannotator(pi: ExtensionAPI): void {
     // Once-only PER FLAVOR: the dedup key is the flavor's marker (not the shared customType), so
     // a stage change still delivers the missing flavor while a prior copy of another flavor
     // sits on the branch. Injected customs persist, so a live copy suppresses re-injection.
-    // The GIST flavor scans the COMPACTION-ACTIVE window (the whole gist flow re-injects
-    // coherently after compaction, matching the gist-author context); the plan/objective
-    // flavors keep the whole-branch scan until their feature slice migrates them.
+    // The GIST and PLAN flavors scan the COMPACTION-ACTIVE window (each flow re-injects
+    // coherently after compaction, matching its authoring context — contracts §8.31); the
+    // objective flavor keeps the whole-branch scan until its feature slice migrates it.
     const marker =
       flavor === "objective"
         ? OBJECTIVE_ADAPTER_PLANNOTATOR_MARKER
         : flavor === "gist"
           ? GIST_ADAPTER_PLANNOTATOR_MARKER
           : PLAN_ADAPTER_PLANNOTATOR_MARKER;
-    const scanned = flavor === "gist" ? activeContextWindow(branch) : branch;
+    const scanned = flavor === "objective" ? branch : activeContextWindow(branch);
     if (branchCarries(scanned, marker)) return;
     return {
       message: {

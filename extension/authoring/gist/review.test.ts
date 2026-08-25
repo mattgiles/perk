@@ -12,9 +12,7 @@ import type { GistBackend, GistGate } from "./save.ts";
 const PROSE = "The intent and the why.\n";
 
 function memorySession(runId = "RID"): MemoryWorkflowSession {
-  const opened = openMemoryWorkflowSession({ runId });
-  if (opened.status !== "opened") throw new Error("unreachable");
-  return opened.session;
+  return openMemoryWorkflowSession({ runId });
 }
 
 function draftedSession(): MemoryWorkflowSession {

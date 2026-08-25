@@ -7,8 +7,6 @@
 import { existsSync, mkdirSync } from "node:fs";
 import { basename, join } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { registerPlanAdapterPlannotator } from "./adapters/planAdapterPlannotator.ts";
-import { registerPlanAdapterTombell } from "./adapters/planAdapterTombell.ts";
 import { registerAddress } from "./doors/address.ts";
 import { registerAnnotationPushTool } from "./doors/annotationPush.ts";
 import { registerAuditWave } from "./doors/auditWaveTools.ts";
@@ -38,18 +36,16 @@ import { registerSelfcheck } from "./doors/selfcheck.ts";
 import { registerOpenStackReview, registerStackReviewBrowser } from "./doors/stackReviewBrowser.ts";
 import { registerSubmit } from "./doors/submit.ts";
 import { registerSubmitPrReview } from "./doors/submitPrReview.ts";
-import { registerImplementHere } from "./factories/implementHere.ts";
 import { registerObjective } from "./factories/objective.ts";
 import { registerObjectiveAuthor } from "./factories/objectiveAuthor.ts";
 import { registerObjectiveDraft } from "./factories/objectiveDraft.ts";
 import { registerObjectivePlan } from "./factories/objectivePlan.ts";
 import { registerObjectiveSave } from "./factories/objectiveSave.ts";
-import { registerPlanDraft } from "./factories/planDraft.ts";
-import { registerPlanMode } from "./factories/planMode.ts";
-import { registerPlanReview } from "./factories/planReview.ts";
-import { registerPlanSave } from "./factories/planSave.ts";
 import { createHunkFeedbackReceiver } from "./hunkFeedback/receiver.ts";
-import { installGistBindings, runGistReviewV1 } from "./pi/v1/gist.ts";
+import { installGistBindings } from "./pi/v1/gist.ts";
+import { installPlanBindings } from "./pi/v1/plan.ts";
+import { installPlannotatorPlanAdapter } from "./pi/v1/providers/plannotator.ts";
+import { installTombellPlanAdapter } from "./pi/v1/providers/tombell.ts";
 import { createAgentScratchProvisioner, registerAgentScratch } from "./substrate/agentScratch.ts";
 import { registerBindingDelivery } from "./substrate/bindingDelivery.ts";
 import {
@@ -146,40 +142,37 @@ export default function (pi: ExtensionAPI) {
   // turn, via the headless-no-op `setWorkingMessage` surfaces seam. Always on, no config toggle.
   registerWhimsical(pi);
 
-  // perk-owned plan mode: the `/plan` + Ctrl+Alt+P + `--plan` toggle surface over the
-  // read-only gate, plus the plan-authoring context injection. perk owns plan mode end-to-end now (the
-  // borrowed `@tombell/pi-plan` is retired).
-  registerPlanMode(pi, gating);
+  // The v1 plan installer: perk-owned plan mode (the `/plan` + Ctrl+Alt+P + `--plan` toggle
+  // surface over the read-only gate, plus the plan-authoring context injection — this call
+  // sits at the frozen hooks-ordering slot the mode surface always held), the
+  // `plan_draft`/`plan_save` tools, the `/plan-save` + `/implement-here` commands, and
+  // `plan_review` — perk's UNIVERSAL review door (plannotator-selected → the event-bus bridge;
+  // ANY other selection → the first-party in-TUI editor review). Takes `gating` to toggle plan
+  // mode and to COMPOSE the approval→save seam (auto-save → D1a gate exit) — Invariant 1 holds:
+  // the surfaces compose the gate through the seams, never own it. The injected wave-launch
+  // deps power the plannotator launch chooser (§8.23): the presence probe + the two door open
+  // cores are composed HERE so the pi/v1 review arms import nothing from door modules (the
+  // value-import cycle break — planReviewBrowser.ts value-imports the review arms).
+  installPlanBindings(pi, gating, {
+    present: () => plannotatorPresent(pi),
+    plan: (ctx, opts) => openPlanReviewSurface(pi, ctx, gating, opts),
+    objective: (ctx, opts) => openObjectiveReviewSurface(pi, ctx, gating, opts),
+  });
 
   // The first 3rd-party plan adapter: a perk-owned, injection-only bridge that re-enables
   // `@tombell/pi-plan` as a real plan provider. Always registered, but INERT unless
   // `[providers] plan = "tombell-plan"`; it directs the foreign free-form prose `/plan` surface into
   // perk's canonical `plan_save` → `cache.plan-ref` contract. It needs no `gating` (Invariant 1: the
   // read-only gate stays perk's, engaged by the cold-door launch — the shim never arbitrates tools).
-  registerPlanAdapterTombell(pi);
+  installTombellPlanAdapter(pi);
 
   // The second 3rd-party plan adapter — AUGMENT posture: `@plannotator/pi-extension` contributes
-  // its browser plan-review UI while perk's plan surface + gate stay (planMode skips only
-  // `--plan`/`Ctrl+Alt+P` under this selection). Always registered, but INERT unless
-  // `[providers] plan = "plannotator-plan"`. Injection-only — the `plan_review`
-  // tool moved to planReview.ts (below), which dispatches to this adapter's event-bus bridge
-  // when plannotator is selected.
-  registerPlanAdapterPlannotator(pi);
-
-  // `plan_review`, perk's UNIVERSAL review door: plannotator-selected → the event-bus
-  // bridge; ANY other selection → the first-party in-TUI editor review. It takes `gating` only to
-  // COMPOSE the approvalSave seam on an APPROVED review (auto-save → D1a gate exit) — Invariant 1
-  // holds: the door composes the gate through the seam, never owns it. The gist review arm is
-  // composed HERE from the v1 gist installer (runGistReviewV1) so planReview.ts imports nothing
-  // from pi/ (one-directional pi/v1 → factories). The injected wave-launch
-  // deps power the plannotator launch chooser (§8.23): the presence probe + the two door open
-  // cores are composed HERE so planReview.ts imports nothing from door modules (the value-import
-  // cycle break — planReviewBrowser.ts already value-imports planReview.ts).
-  registerPlanReview(pi, gating, runGistReviewV1, {
-    present: () => plannotatorPresent(pi),
-    plan: (ctx, opts) => openPlanReviewSurface(pi, ctx, gating, opts),
-    objective: (ctx, opts) => openObjectiveReviewSurface(pi, ctx, gating, opts),
-  });
+  // its browser plan-review UI while perk's plan surface + gate stay (the plan installer skips
+  // only `--plan`/`Ctrl+Alt+P` under this selection). Always registered, but INERT unless
+  // `[providers] plan = "plannotator-plan"`. Injection-only — the `plan_review` tool lives in
+  // the plan installer (above), which dispatches to this adapter's event-bus bridge when
+  // plannotator is selected.
+  installPlannotatorPlanAdapter(pi);
 
   // Objective-author context injection (the objective mirror of plan mode's authoring
   // half). Keyed off (read-only gate AND stage === objective-author); planMode defers to it.
@@ -563,20 +556,6 @@ export default function (pi: ExtensionAPI) {
       writeT3Sentinel(ctx.cwd, "tree", state, ctx.mode ?? null);
     }
   });
-
-  // Warm door: the `plan_save` tool + `/plan-save` command. Takes `gating`:
-  // a successful command-path save exits read-only mode (the read-only → read-write boundary).
-  registerPlanSave(pi, gating);
-
-  // The `/implement-here` command: the human-only no-save exit from plan mode (§8.23) —
-  // implement the reviewed draft in-session, no issue created. Composes the gate through the
-  // implementHereExit seam; no model tool is registered (machine-unreachable by construction).
-  registerImplementHere(pi, gating);
-
-  // The `plan_draft` working-draft file tool. Registered in the factory so it
-  // exists before the gate snapshots tools; its name is in READ_ONLY_TOOLS (the structural
-  // session-data carve-out), so it survives plan mode.
-  registerPlanDraft(pi);
 
   // The `objective_draft` working-objective file tool (the plan_draft twin).
   registerObjectiveDraft(pi);

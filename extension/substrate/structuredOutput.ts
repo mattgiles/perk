@@ -10,7 +10,7 @@
 //     the returned tool-call arguments against a TypeBox schema.
 // Both report failure via a soft `{ ok:false, error }` outcome — no throws ever reach the caller, so
 // every consumer can stay fail-safe with a deterministic fallback. The first consumer is
-// `extension/factories/planTitle.ts` (LLM-generated plan-issue titles).
+// `extension/pi/v1/planTitle.ts` (LLM-generated plan-issue titles).
 
 import {
   type Api,

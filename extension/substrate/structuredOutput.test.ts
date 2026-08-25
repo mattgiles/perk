@@ -13,7 +13,7 @@ import {
   Type,
 } from "@earendil-works/pi-ai";
 import { registerFauxProvider } from "@earendil-works/pi-ai/compat";
-import { generatePlanTitle } from "../factories/planTitle.ts";
+import { generatePlanTitle } from "../pi/v1/planTitle.ts";
 import { completeStructured, type ModelAuthContext, resolveModelAuth } from "./structuredOutput.ts";
 
 const Schema = Type.Object({

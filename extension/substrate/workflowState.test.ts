@@ -12,7 +12,9 @@ import {
   decideClaim,
   deriveForkRunId,
   type EntrySink,
+  nodeClaimsEqual,
   planRefsEqual,
+  readNodeClaim,
   rebuildWorkflowState,
   resolveRunStage,
   WORKFLOW_STATE_TYPE,
@@ -395,4 +397,42 @@ test("deriveForkRunId: increments past existing siblings", () => {
   mkdirSync(join(runs, "01RID.2"), { recursive: true });
   assert.equal(deriveForkRunId("01RID", dir), "01RID.3");
   assert.equal(deriveForkRunId("01OTHER", dir), "01OTHER.1");
+});
+
+// --- nodeClaimsEqual / readNodeClaim (pure units) -------------------------------------------
+
+test("nodeClaimsEqual: structural objective+node identity; absent equals only absent", () => {
+  const a = { objective: "7", node: "1.2" };
+  assert.equal(nodeClaimsEqual(a, { objective: "7", node: "1.2" }), true);
+  assert.equal(nodeClaimsEqual(a, { objective: "7", node: "1.3" }), false);
+  assert.equal(nodeClaimsEqual(a, { objective: "8", node: "1.2" }), false);
+  assert.equal(nodeClaimsEqual(a, null), false);
+  assert.equal(nodeClaimsEqual(null, null), true);
+  assert.equal(nodeClaimsEqual(undefined, null), true);
+});
+
+test("readNodeClaim: rebuilt claim, fail-open on malformed/missing", () => {
+  const src = (data: unknown): { sessionManager: { getBranch(): unknown[] } } => ({
+    sessionManager: {
+      getBranch: () => [{ type: "custom", customType: "perk:workflow-state", data }],
+    },
+  });
+  assert.deepEqual(readNodeClaim(src({ objective_node_claim: { objective: "7", node: "1.2" } })), {
+    objective: "7",
+    node: "1.2",
+  });
+  assert.equal(readNodeClaim(src({})), null);
+  assert.equal(readNodeClaim(src({ objective_node_claim: null })), null);
+  assert.equal(readNodeClaim(src({ objective_node_claim: { objective: 7, node: "1.2" } })), null);
+  assert.equal(readNodeClaim(src({ objective_node_claim: { objective: "7", node: "" } })), null);
+  assert.equal(
+    readNodeClaim({
+      sessionManager: {
+        getBranch: () => {
+          throw new Error("boom");
+        },
+      },
+    }),
+    null,
+  );
 });

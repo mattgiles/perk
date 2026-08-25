@@ -5,7 +5,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { type Api, fauxAssistantMessage, fauxToolCall, type Model } from "@earendil-works/pi-ai";
 import { registerFauxProvider } from "@earendil-works/pi-ai/compat";
-import type { ModelAuthContext } from "../substrate/structuredOutput.ts";
+import type { ModelAuthContext } from "../../substrate/structuredOutput.ts";
 import { generatePlanTitle, llmTitlesEnabled, sanitizeTitle } from "./planTitle.ts";
 
 test("sanitizeTitle: strips a leading heading marker", () => {

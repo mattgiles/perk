@@ -122,12 +122,12 @@ export type ReviseGistDraftResult =
 /**
  * Rewrite the working gist draft (a whole-value replacement) through the session seam.
  * Diagnostic precedence preserved: blank prose is refused FIRST, missing identity second
- * (`session: null` — an identity-less caller is representable without a session), then the
- * verified artifact write. Never throws.
+ * (the identity-optional session classifies `runId: null` — an identity-less caller still
+ * opens), then the verified artifact write. Never throws.
  */
 export function reviseGistDraft(
   input: { prose: string; title?: string; scope?: GistScope },
-  session: WorkflowSession | null,
+  session: WorkflowSession,
 ): ReviseGistDraftResult {
   if (!input.prose.trim()) {
     return {
@@ -136,7 +136,7 @@ export function reviseGistDraft(
       problem: "no gist prose to write (pass the full working draft)",
     };
   }
-  if (session === null) {
+  if (session.runId === null) {
     return {
       status: "rejected",
       reason: "no_identity",

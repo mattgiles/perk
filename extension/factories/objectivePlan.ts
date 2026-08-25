@@ -47,10 +47,11 @@ import {
 } from "../substrate/toolParams.ts";
 import {
   appendWorkflowState,
-  type BranchSource,
   branchOf,
+  nodeClaimsEqual,
+  type ObjectiveNodeClaim,
+  readNodeClaim,
   rebuildWorkflowState,
-  type WorkflowState,
 } from "../substrate/workflowState.ts";
 import { type ReportTarget, report } from "../surfaces/report.ts";
 import {
@@ -90,38 +91,6 @@ export interface ObjectiveNodeOk {
 }
 
 export type ObjectiveNodeResult = Result<ObjectiveNodeOk>;
-
-type ObjectiveNodeClaim = NonNullable<WorkflowState["objective_node_claim"]>;
-
-/** Structural claim equality (objective + node match); absent compares equal only to absent. */
-export function nodeClaimsEqual(
-  a: WorkflowState["objective_node_claim"] | undefined,
-  b: WorkflowState["objective_node_claim"] | undefined,
-): boolean {
-  const an = a ?? null;
-  const bn = b ?? null;
-  if (an === null || bn === null) return an === bn;
-  return an.objective === bn.objective && an.node === bn.node;
-}
-
-/** The rebuilt `objective_node_claim`, read fail-open (malformed/throwing branch → null). */
-export function readNodeClaim(ctx: BranchSource): ObjectiveNodeClaim | null {
-  try {
-    const claim = rebuildWorkflowState(branchOf(ctx)).objective_node_claim ?? null;
-    if (
-      claim !== null &&
-      typeof claim.objective === "string" &&
-      claim.objective !== "" &&
-      typeof claim.node === "string" &&
-      claim.node !== ""
-    ) {
-      return claim;
-    }
-    return null;
-  } catch {
-    return null;
-  }
-}
 
 /**
  * Record/clear the warm node-link carrier after a SUCCESSFUL `objective_node`

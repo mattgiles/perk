@@ -12,7 +12,7 @@ import {
   completeStructured,
   type ModelAuthContext,
   resolveModelAuth,
-} from "../substrate/structuredOutput.ts";
+} from "../../substrate/structuredOutput.ts";
 
 /** The structured result schema. `StringEnum` (not `Type.Enum`) per pi-ai's Google-compat guidance. */
 const PlanTitleSchema = Type.Object({

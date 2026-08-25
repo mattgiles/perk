@@ -220,6 +220,39 @@ export function appendWorkflowState<K extends keyof WorkflowState>(
   }
 }
 
+/** The warm node-link carrier's non-null shape (the `objective_node_claim` field). */
+export type ObjectiveNodeClaim = NonNullable<WorkflowState["objective_node_claim"]>;
+
+/** Structural claim equality (objective + node match); absent compares equal only to absent. */
+export function nodeClaimsEqual(
+  a: WorkflowState["objective_node_claim"] | undefined,
+  b: WorkflowState["objective_node_claim"] | undefined,
+): boolean {
+  const an = a ?? null;
+  const bn = b ?? null;
+  if (an === null || bn === null) return an === bn;
+  return an.objective === bn.objective && an.node === bn.node;
+}
+
+/** The rebuilt `objective_node_claim`, read fail-open (malformed/throwing branch → null). */
+export function readNodeClaim(ctx: BranchSource): ObjectiveNodeClaim | null {
+  try {
+    const claim = rebuildWorkflowState(branchOf(ctx)).objective_node_claim ?? null;
+    if (
+      claim !== null &&
+      typeof claim.objective === "string" &&
+      claim.objective !== "" &&
+      typeof claim.node === "string" &&
+      claim.node !== ""
+    ) {
+      return claim;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Equality by identity (provider + pr_id) — the plan-ref dedup key. Two refs to
  * the same plan are equal even if other fields drift; absent compares equal only to absent.
