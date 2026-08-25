@@ -22,7 +22,7 @@
 // continuation worktree; `objective_stack_sync { resolve: true }` is the explicit-request twin).
 //
 // Objective inference everywhere: explicit param/argument → workflow `active_objective` →
-// plan-ref `objective_id` (the resolveReconcileObjective precedent); the warm layer always
+// plan-ref `objective_id` (the /objective-reconcile three-tier precedent); the warm layer always
 // passes the resolved objective explicitly to the cold door.
 
 import { basename, dirname } from "node:path";

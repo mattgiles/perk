@@ -1,20 +1,16 @@
-// The objective planning feature ops over the memory session + deterministic fake backends:
-// the completion-audit gate matrix (incl. the length boundary), the no-change refusal, the
+// The objective planning feature op over the memory session + a deterministic fake backend:
+// the completion-audit gate matrix (incl. the length boundary), the no-change refusal, and the
 // warm claim-carrier maintenance through the seam (record on planning / clear on other
 // statuses / untouched on pr-or-description-only, with the claimChange arms via the memory
-// knobs), the thin reconcile/add-node passthroughs, and the reconcile three-tier resolution.
+// knobs).
 
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { openMemoryWorkflowSession } from "../../session/memoryWorkflowSession.ts";
 import {
-  addObjectiveNode,
   isNonTrivialAudit,
   MIN_AUDIT_LENGTH,
   type ObjectiveNodeBackend,
-  type ObjectiveReconcileBackend,
-  reconcileObjective,
-  resolveReconcileObjective,
   transitionObjectiveNode,
 } from "./planning.ts";
 
@@ -213,93 +209,4 @@ test("transition: claimChange rides the seam's unverified/rejected arms verbatim
   );
   assert.equal(second.status === "ok" && second.claimChange?.status, "rejected");
   assert.equal(rejected.nodeClaim(), null);
-});
-
-// --- reconcile / add-node (thin typed passthroughs) ------------------------------------------
-
-function fakeReconcileBackend(): {
-  backend: ObjectiveReconcileBackend;
-  reconciles: unknown[];
-  added: unknown[];
-} {
-  const reconciles: unknown[] = [];
-  const added: unknown[] = [];
-  return {
-    backend: {
-      reconcile: (req) => {
-        reconciles.push(req);
-        return Promise.resolve({ status: "ok", updated: true });
-      },
-      addNode: (req) => {
-        added.push(req);
-        return Promise.resolve({ status: "ok", node: "2.4", commentUpdated: false });
-      },
-    },
-    reconciles,
-    added,
-  };
-}
-
-test("reconcileObjective / addObjectiveNode: typed passthrough — requests verbatim, results verbatim", async () => {
-  const { backend, reconciles, added } = fakeReconcileBackend();
-  assert.deepEqual(await reconcileObjective({ objective: "7", prose: "New prose." }, { backend }), {
-    status: "ok",
-    updated: true,
-  });
-  assert.deepEqual(reconciles, [{ objective: "7", prose: "New prose." }]);
-
-  const input = {
-    objective: "7",
-    phase: 2,
-    description: "harden retries",
-    status: "pending" as const,
-    slug: "retries",
-    depends_on: ["2.1"],
-    comment: "flagged by the PR",
-  };
-  assert.deepEqual(await addObjectiveNode(input, { backend }), {
-    status: "ok",
-    node: "2.4",
-    commentUpdated: false,
-  });
-  assert.deepEqual(added, [input]);
-});
-
-test("reconcileObjective / addObjectiveNode: failed backends pass through verbatim", async () => {
-  const failing: ObjectiveReconcileBackend = {
-    reconcile: () =>
-      Promise.resolve({ status: "failed", message: "no such objective", errorType: "not_found" }),
-    addNode: () =>
-      Promise.resolve({ status: "failed", message: "stacked tail only", errorType: "bad_state" }),
-  };
-  assert.deepEqual(await reconcileObjective({ objective: "7", prose: "p" }, { backend: failing }), {
-    status: "failed",
-    message: "no such objective",
-    errorType: "not_found",
-  });
-  assert.deepEqual(
-    await addObjectiveNode({ objective: "7", phase: 1, description: "d" }, { backend: failing }),
-    { status: "failed", message: "stacked tail only", errorType: "bad_state" },
-  );
-});
-
-// --- resolveReconcileObjective (the three tiers) ----------------------------------------------
-
-test("resolveReconcileObjective: explicit → active → plan-ref → null", () => {
-  assert.equal(
-    resolveReconcileObjective({ explicit: "9", active: "7", planRefObjective: "5" }),
-    "9",
-  );
-  assert.equal(
-    resolveReconcileObjective({ explicit: null, active: "7", planRefObjective: "5" }),
-    "7",
-  );
-  assert.equal(
-    resolveReconcileObjective({ explicit: null, active: null, planRefObjective: "5" }),
-    "5",
-  );
-  assert.equal(
-    resolveReconcileObjective({ explicit: null, active: null, planRefObjective: null }),
-    null,
-  );
 });

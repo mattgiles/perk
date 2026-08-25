@@ -14,11 +14,14 @@
 // (the report slice rides `SessionArtifactCtx`, re-exported via `substrate/sessionData.ts` —
 // this module never imports `surfaces/`).
 //
-// `deriveForkRunId`'s sibling scan and `decideClaim`'s env-child handoff probe stay
-// substrate-direct (`substrate/cache.ts` — Pi-free): the decision logic is byte-identical to
-// its `substrate/workflowState.ts` ancestry.
+// ONE handoff authority: every handoff/run-id read — the claim arm's, `decideClaim`'s
+// env-child probe, `resolveRunStage`'s stage lookup, and `deriveForkRunId`'s sibling scan —
+// flows through the injected reads (`SessionIdentityReads`, the read slice of
+// `SessionIdentityPorts`), so the lifecycle is genuinely independent of the cache backing and
+// the fakes never touch disk. The decision logic is byte-identical to its
+// `substrate/workflowState.ts` ancestry.
 
-import { type Handoff, listRunIds, readHandoff } from "../substrate/cache.ts";
+import type { Handoff } from "../substrate/cache.ts";
 import type { SessionArtifactCtx } from "../substrate/sessionData.ts";
 import {
   type AppendWorkflowStateOpts,
@@ -32,13 +35,25 @@ import {
 } from "../substrate/workflowState.ts";
 
 /**
- * Derive a fork-child run_id: `<parent>.<n>` where `n` is the max existing sibling + 1
- * (scanning `scratch/runs/`), else 1.
+ * The exterior reads the lifecycle's decision tier needs — the read slice of
+ * `SessionIdentityPorts` (production bound to `substrate/cache.ts` by `index.ts`; the test
+ * suites bind fakes).
  */
-export function deriveForkRunId(parentRunId: string, cwd: string): string {
+export interface SessionIdentityReads {
+  /** The cold-launch handoff blob for `runId`, or null (missing/unreadable). */
+  readHandoff(runId: string): Handoff | null;
+  /** The existing run ids under `scratch/runs/` (the fork/adopt sibling-derivation scan). */
+  listRunIds(): string[];
+}
+
+/**
+ * Derive a fork-child run_id: `<parent>.<n>` where `n` is the max existing sibling + 1
+ * (over the `scratch/runs/` scan), else 1.
+ */
+export function deriveForkRunId(parentRunId: string, runIds: Iterable<string>): string {
   const prefix = `${parentRunId}.`;
   let max = 0;
-  for (const id of listRunIds(cwd)) {
+  for (const id of runIds) {
     if (!id.startsWith(prefix)) continue;
     const segment = id.slice(prefix.length).split(".")[0] ?? "";
     const n = Number.parseInt(segment, 10);
@@ -74,7 +89,10 @@ export type ClaimDecision =
  * impersonate the launched stage; LWW restores fork/none state instead). The stage gates whether
  * `session_start` reconciles `cache.plan-ref` into `active_plan_ref`.
  */
-export function resolveRunStage(decision: ClaimDecision, cwd: string): string | null {
+export function resolveRunStage(
+  decision: ClaimDecision,
+  reads: Pick<SessionIdentityReads, "readHandoff">,
+): string | null {
   const runId =
     decision.action === "claim"
       ? decision.runId
@@ -82,7 +100,7 @@ export function resolveRunStage(decision: ClaimDecision, cwd: string): string | 
         ? decision.state.run_id
         : null;
   if (runId === undefined || runId === null) return null;
-  const stage = readHandoff(cwd, runId)?.stage;
+  const stage = reads.readHandoff(runId)?.stage;
   return typeof stage === "string" && stage !== "" ? stage : null;
 }
 
@@ -99,14 +117,14 @@ export function decideClaim(args: {
   state: WorkflowState;
   currentSessionId: string | null;
   envRunId: string | null;
-  cwd: string;
+  reads: SessionIdentityReads;
 }): ClaimDecision {
-  const { state, currentSessionId, envRunId, cwd } = args;
+  const { state, currentSessionId, envRunId, reads } = args;
   if (state.run_id !== undefined) {
     if (state.pi_session_id === undefined || state.pi_session_id === currentSessionId) {
       return { action: "keep", source: "session", state };
     }
-    const childRunId = deriveForkRunId(state.run_id, cwd);
+    const childRunId = deriveForkRunId(state.run_id, reads.listRunIds());
     return { action: "fork", source: "fork", childRunId, parentRunId: state.run_id, state };
   }
   if (envRunId !== null && envRunId !== "") {
@@ -119,7 +137,7 @@ export function decideClaim(args: {
     // absent/corrupt/mismatched handoff (the loud unclaimed error), unconsumed (the normal cold
     // claim), or consumed by THIS session (idempotent re-claim after lost branch state) — stays
     // the claim arm.
-    const handoff = readHandoff(cwd, envRunId);
+    const handoff = reads.readHandoff(envRunId);
     if (
       handoff !== null &&
       handoff.run_id === envRunId &&
@@ -129,7 +147,7 @@ export function decideClaim(args: {
       return {
         action: "adopt",
         source: "env-child",
-        childRunId: deriveForkRunId(envRunId, cwd),
+        childRunId: deriveForkRunId(envRunId, reads.listRunIds()),
         parentRunId: envRunId,
         mode: handoff.mode,
       };
@@ -169,9 +187,7 @@ export function branchSessionStateStore(
 }
 
 /** The exterior effects the lifecycle needs — production bound in `index.ts`, fakes in tests. */
-export interface SessionIdentityPorts {
-  /** The cold-launch handoff blob for `runId`, or null (missing/unreadable). */
-  readHandoff(runId: string): Handoff | null;
+export interface SessionIdentityPorts extends SessionIdentityReads {
   /** Mark the handoff consumed (establish-before-consume: called only after a verified claim). */
   markHandoffConsumed(runId: string, opts: { piSessionId?: string }): void;
   /** Isolate the derived child's run scratch root (a throw is tolerated — warned, not fatal). */
@@ -227,7 +243,7 @@ export interface EstablishIdentityOutcome {
 export function establishSessionIdentity(
   store: SessionStateStore,
   ports: SessionIdentityPorts,
-  input: { currentSessionId: string | null; envRunId: string | null; cwd: string },
+  input: { currentSessionId: string | null; envRunId: string | null },
 ): EstablishIdentityOutcome {
   const problems: string[] = [];
   const warnings: string[] = [];
@@ -236,7 +252,7 @@ export function establishSessionIdentity(
     state: store.rebuild(),
     currentSessionId,
     envRunId: input.envRunId,
-    cwd: input.cwd,
+    reads: ports,
   });
   const stamp = ports.versionStamp;
 

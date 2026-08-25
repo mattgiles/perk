@@ -47,6 +47,7 @@ import {
   DREAM_REPORT_PARAM_SCHEMA,
   DREAM_REPORT_TRANSFER_FILENAME,
   decodeObjectiveSaveParams,
+  installObjectiveAuthoringBindings,
   objectiveApprovalSaveV1,
   ROADMAP_PARAM_SCHEMA,
 } from "./objectiveAuthoring.ts";
@@ -1217,6 +1218,51 @@ test("objective-authoring marker is stripped from context when not authoring", a
   } finally {
     h.dispose();
   }
+});
+
+test("the context hook pair is fail-open on a THROWING branch read (delta 6)", async () => {
+  // The "never throws" contract must hold structurally even when `sessionManager.getBranch()`
+  // itself throws — not just when the state rebuild does: the injection stays inert and the
+  // strip hygiene still removes a stale objective-authoring marker without rejecting.
+  const handlers = new Map<string, (event: unknown, ctx: unknown) => Promise<unknown>>();
+  const pi = {
+    on(event: string, handler: (event: unknown, ctx: unknown) => Promise<unknown>) {
+      handlers.set(event, handler);
+    },
+    registerTool() {},
+    registerCommand() {},
+  } as unknown as ExtensionAPI;
+  installObjectiveAuthoringBindings(pi, fakeGating(true));
+  const ctx = {
+    cwd: scaffoldRepo(),
+    sessionManager: {
+      getBranch(): unknown[] {
+        throw new Error("adversarial branch read");
+      },
+    },
+  };
+
+  const inject = handlers.get("before_agent_start");
+  assert.ok(inject !== undefined);
+  assert.equal(await inject({}, ctx), undefined, "the injection stays inert — no throw");
+
+  const strip = handlers.get("context");
+  assert.ok(strip !== undefined);
+  const result = (await strip(
+    {
+      messages: [
+        { customType: OBJECTIVE_AUTHOR_CONTEXT_TYPE, content: "[OBJECTIVE AUTHORING]\nstale" },
+        { role: "user", content: "a normal message" },
+      ],
+    },
+    ctx,
+  )) as { messages: { customType?: string; content?: unknown }[] };
+  assert.equal(
+    result.messages.some((m) => m.customType === OBJECTIVE_AUTHOR_CONTEXT_TYPE),
+    false,
+    "the stale objective-authoring marker is still stripped",
+  );
+  assert.equal(result.messages.length, 1, "the normal message survives");
 });
 
 // --- registration parity (the baseline-exact metadata pins) --------------------------------------

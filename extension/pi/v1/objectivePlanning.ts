@@ -20,16 +20,10 @@
 
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import {
-  type AddObjectiveNodeInput,
-  addObjectiveNode,
   NODE_STATUSES,
   type NodeStatus,
   type ObjectiveNodeBackend,
   type ObjectiveNodeInput,
-  type ObjectiveReconcileBackend,
-  type ReconcileObjectiveInput,
-  reconcileObjective,
-  resolveReconcileObjective,
   transitionObjectiveNode,
 } from "../../authoring/objective/planning.ts";
 import { factoryGuidance, reconcileGuidance } from "../../authoring/objective/prose.ts";
@@ -92,6 +86,23 @@ export function decodeObjectiveNodeParams(params: unknown): ObjectiveNodeInput |
   const audit = stringParam(p, "audit");
   if (pr === null || description === null || audit === null) return null;
   return { objective, node, status, pr, description, audit };
+}
+
+/** The typed `reconcile_objective` input (`objective` is the opaque §8.21 string id). */
+export interface ReconcileObjectiveInput {
+  objective: string;
+  prose: string;
+}
+
+/** The typed `add_objective_node` input (the decoder owns `phase`'s positive-integer rule). */
+export interface AddObjectiveNodeInput {
+  objective: string;
+  phase: number;
+  description: string;
+  status?: NodeStatus;
+  slug?: string;
+  depends_on?: string[];
+  comment?: string;
 }
 
 /**
@@ -259,43 +270,56 @@ function coldDoorObjectiveNodeBackend(
 }
 
 /**
- * The production `ObjectiveReconcileBackend` over the two cold doors. The reconcile prose rides
- * the substrate's run-scratch stdin channel (pi.exec has no stdin) as `--body <path>`.
+ * The `reconcile_objective` cold-door write: rewrite the objective's Reconcilable prose region
+ * (the roadmap table + Immutable notes are never touched). The prose rides the substrate's
+ * run-scratch stdin channel (pi.exec has no stdin) as `--body <path>`. Never throws.
  */
-function coldDoorReconcileBackend(
+async function reconcileViaColdDoor(
   pi: ExtensionAPI,
   ctx: ExtensionContext,
-): ObjectiveReconcileBackend {
-  return {
-    async reconcile(req) {
-      const r = await runColdDoor<{ updated: boolean }>(
-        pi,
-        ctx,
-        ["objective", "reconcile", req.objective, "--json"],
-        {
-          label: "perk objective reconcile",
-          decode: decodeReconcile,
-          stdin: {
-            flag: "--body",
-            content: req.prose,
-            filename: `objective-reconcile-${Date.now()}.md`,
-          },
-        },
-      );
-      if (!r.ok) return { status: "failed", message: r.message, errorType: r.errorType };
-      return { status: "ok", updated: r.data.updated };
+  req: ReconcileObjectiveInput,
+): Promise<
+  { status: "ok"; updated: boolean } | { status: "failed"; message: string; errorType: string }
+> {
+  const r = await runColdDoor<{ updated: boolean }>(
+    pi,
+    ctx,
+    ["objective", "reconcile", req.objective, "--json"],
+    {
+      label: "perk objective reconcile",
+      decode: decodeReconcile,
+      stdin: {
+        flag: "--body",
+        content: req.prose,
+        filename: `objective-reconcile-${Date.now()}.md`,
+      },
     },
-    async addNode(req) {
-      const r = await runColdDoor<{ node_id: string; comment_updated: boolean }>(
-        pi,
-        ctx,
-        buildAddObjectiveNodeArgs(req),
-        { label: "perk objective node-add", decode: decodeAddObjectiveNode },
-      );
-      if (!r.ok) return { status: "failed", message: r.message, errorType: r.errorType };
-      return { status: "ok", node: r.data.node_id, commentUpdated: r.data.comment_updated };
-    },
-  };
+  );
+  if (!r.ok) return { status: "failed", message: r.message, errorType: r.errorType };
+  return { status: "ok", updated: r.data.updated };
+}
+
+/**
+ * The `add_objective_node` cold-door write: insert a NEW roadmap node (auto-assigned
+ * `<phase>.<n>`); the decoder's positive-integer `phase` rule is the single validation
+ * authority. Never throws.
+ */
+async function addNodeViaColdDoor(
+  pi: ExtensionAPI,
+  ctx: ExtensionContext,
+  req: AddObjectiveNodeInput,
+): Promise<
+  | { status: "ok"; node: string; commentUpdated: boolean }
+  | { status: "failed"; message: string; errorType: string }
+> {
+  const r = await runColdDoor<{ node_id: string; comment_updated: boolean }>(
+    pi,
+    ctx,
+    buildAddObjectiveNodeArgs(req),
+    { label: "perk objective node-add", decode: decodeAddObjectiveNode },
+  );
+  if (!r.ok) return { status: "failed", message: r.message, errorType: r.errorType };
+  return { status: "ok", node: r.data.node_id, commentUpdated: r.data.comment_updated };
 }
 
 // ------------------------------------------------------------------ the explore wave (adapter-tier)
@@ -571,9 +595,7 @@ export function installObjectivePlanningBindings(pi: ExtensionAPI, gating: ToolG
           "reconcile_objective",
         )("reconcile_objective needs { objective: <id>, prose: <string> }", "bad_input");
       }
-      const outcome = await reconcileObjective(decoded, {
-        backend: coldDoorReconcileBackend(pi, ctx),
-      });
+      const outcome = await reconcileViaColdDoor(pi, ctx, decoded);
       if (outcome.status === "failed") {
         return failFor(
           ctx,
@@ -637,9 +659,7 @@ export function installObjectivePlanningBindings(pi: ExtensionAPI, gating: ToolG
           "bad_input",
         );
       }
-      const outcome = await addObjectiveNode(decoded, {
-        backend: coldDoorReconcileBackend(pi, ctx),
-      });
+      const outcome = await addNodeViaColdDoor(pi, ctx, decoded);
       if (outcome.status === "failed") {
         return failFor(
           ctx,
@@ -660,13 +680,12 @@ export function installObjectivePlanningBindings(pi: ExtensionAPI, gating: ToolG
       "Reconcile an objective's roadmap prose against a merged PR (post-land). Pass an objective " +
       "number (else the active objective, else the just-landed plan's objective).",
     handler: async (args, ctx) => {
-      // The three-tier resolution is the feature's pure function; the adapter supplies the
-      // reads (command-arg parse, the seam's active_objective, the plan-ref).
-      const objective = resolveReconcileObjective({
-        explicit: parseCommandArgs(args ?? "").number,
-        active: activeObjective(pi, ctx),
-        planRefObjective: planRefObjective(ctx),
-      });
+      // The three-tier resolution, LAZY on purpose: the explicit command arg, then the seam's
+      // active_objective, and only when BOTH are absent the just-landed plan's objective from
+      // the plan-ref — `readPlanRef` warns loudly on a corrupt cache, so an explicitly-targeted
+      // command must never read (and surface) that unrelated fallback state.
+      const objective =
+        parseCommandArgs(args ?? "").number ?? activeObjective(pi, ctx) ?? planRefObjective(ctx);
       if (objective === null) {
         report(
           ctx,

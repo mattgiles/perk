@@ -1,7 +1,7 @@
 // The objective planning feature: the roadmap-node → plan-generation policy — the bounded
 // node-transition operation (with the completion-audit gate and the warm node-claim carrier
-// maintenance), the reconcile/add-node write ops over their exterior port, and the
-// `/objective-reconcile` three-tier objective resolution as a pure function.
+// maintenance). The reconcile/add-node writes carry no feature policy beyond their decoders,
+// so they live adapter-tier in pi/v1/objectivePlanning.ts (direct cold-door calls — no port).
 //
 // The completion-audit gate is a property of the MODEL-FACING boundary only — NOT an invariant
 // on the node-`done` state: the canonical `perk objective node --status done` (human/CI cold
@@ -121,82 +121,4 @@ export async function transitionObjectiveNode(
         : deps.session.apply({ kind: "clear-node-claim", claim });
   }
   return { status: "ok", commentUpdated: transitioned.commentUpdated, claimChange };
-}
-
-/** The typed `reconcile_objective` input (`objective` is the opaque §8.21 string id). */
-export interface ReconcileObjectiveInput {
-  objective: string;
-  prose: string;
-}
-
-/** The typed `add_objective_node` input (the decoder owns `phase`'s positive-integer rule). */
-export interface AddObjectiveNodeInput {
-  objective: string;
-  phase: number;
-  description: string;
-  status?: NodeStatus;
-  slug?: string;
-  depends_on?: string[];
-  comment?: string;
-}
-
-/** The narrow exterior port the reconcile-pass writes flow through (the cold doors in pi/v1). */
-export interface ObjectiveReconcileBackend {
-  reconcile(
-    req: ReconcileObjectiveInput,
-  ): Promise<
-    { status: "ok"; updated: boolean } | { status: "failed"; message: string; errorType: string }
-  >;
-  addNode(
-    req: AddObjectiveNodeInput,
-  ): Promise<
-    | { status: "ok"; node: string; commentUpdated: boolean }
-    | { status: "failed"; message: string; errorType: string }
-  >;
-}
-
-/**
- * The `reconcile_objective` write: rewrite the objective's Reconcilable prose region (the
- * roadmap table + Immutable notes are never touched). A thin typed op — the backend owns the
- * transport (the prose rides the cold door's stdin channel). Never throws.
- */
-export async function reconcileObjective(
-  input: ReconcileObjectiveInput,
-  deps: { backend: ObjectiveReconcileBackend },
-): Promise<
-  { status: "ok"; updated: boolean } | { status: "failed"; message: string; errorType: string }
-> {
-  return deps.backend.reconcile(input);
-}
-
-/**
- * The `add_objective_node` write: insert a NEW roadmap node (auto-assigned `<phase>.<n>`).
- * A thin typed op — the decoder's positive-integer `phase` rule is the single validation
- * authority. Never throws.
- */
-export async function addObjectiveNode(
-  input: AddObjectiveNodeInput,
-  deps: { backend: ObjectiveReconcileBackend },
-): Promise<
-  | { status: "ok"; node: string; commentUpdated: boolean }
-  | { status: "failed"; message: string; errorType: string }
-> {
-  return deps.backend.addNode(input);
-}
-
-/**
- * Resolve the objective id for `/objective-reconcile` via three tiers: the explicit command
- * arg, the active objective from workflow-state, then the just-landed plan's `objective_id`
- * from the plan-ref (so the post-land path works even when `active_objective` is unset). Pure —
- * the adapter supplies the reads (command-arg parse, `session.activeObjective()`,
- * `readPlanRef`). Returns `null` when none resolves.
- */
-export function resolveReconcileObjective(tiers: {
-  explicit: string | null;
-  active: string | null;
-  planRefObjective: string | null;
-}): string | null {
-  if (tiers.explicit !== null) return tiers.explicit;
-  if (tiers.active !== null) return tiers.active;
-  return tiers.planRefObjective;
 }

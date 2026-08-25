@@ -5,11 +5,11 @@
 // extraction preserved behavior end-to-end); here we prove the operation itself over fakes.
 
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { type Handoff, handoffPath, workflowDir } from "../substrate/cache.ts";
+import type { Handoff } from "../substrate/cache.ts";
 import type { SessionArtifactCtx } from "../substrate/sessionData.ts";
 import {
   type EntrySink,
@@ -23,42 +23,47 @@ import {
   establishSessionIdentity,
   resolveRunStage,
   type SessionIdentityPorts,
+  type SessionIdentityReads,
   type SessionStateStore,
 } from "./lifecycle.ts";
 
-/** Plant a handoff blob (optionally carrying `stage`/`consumed`/claim fields) for claim tests. */
-function plantHandoff(
+/** A handoff blob (optionally carrying `stage`/`consumed`/claim fields) for the claim tests. */
+function handoffBlob(
   runId: string,
   stage?: string,
   opts: { consumed?: boolean; piSessionId?: string; mode?: string } = {},
-): string {
-  const cwd = mkdtempSync(join(tmpdir(), "perk-stage-"));
-  mkdirSync(join(workflowDir(cwd), "handoff"), { recursive: true });
-  writeFileSync(
-    handoffPath(cwd, runId),
-    `${JSON.stringify(
-      {
-        run_id: runId,
-        consumed: opts.consumed ?? false,
-        stage,
-        mode: opts.mode,
-        pi_session_id: opts.piSessionId,
-      },
-      null,
-      2,
-    )}\n`,
-    "utf8",
-  );
-  return cwd;
+): Handoff {
+  return {
+    run_id: runId,
+    consumed: opts.consumed ?? false,
+    stage,
+    mode: opts.mode,
+    pi_session_id: opts.piSessionId,
+  };
+}
+
+/** Deterministic `SessionIdentityReads` — the decision tier never touches disk. */
+function fakeReads(
+  opts: { handoff?: Handoff | null; runIds?: string[] } = {},
+): SessionIdentityReads {
+  return {
+    readHandoff: () => opts.handoff ?? null,
+    listRunIds: () => opts.runIds ?? [],
+  };
 }
 
 test("decideClaim: cold env claim when no prior state", () => {
-  const d = decideClaim({ state: {}, currentSessionId: "s1", envRunId: "01RID", cwd: "/x" });
+  const d = decideClaim({
+    state: {},
+    currentSessionId: "s1",
+    envRunId: "01RID",
+    reads: fakeReads(),
+  });
   assert.deepEqual(d, { action: "claim", source: "env", runId: "01RID" });
 });
 
 test("decideClaim: none when no state and no env", () => {
-  const d = decideClaim({ state: {}, currentSessionId: "s1", envRunId: null, cwd: "/x" });
+  const d = decideClaim({ state: {}, currentSessionId: "s1", envRunId: null, reads: fakeReads() });
   assert.equal(d.action, "none");
 });
 
@@ -67,19 +72,18 @@ test("decideClaim: keep (reload) when pi_session_id matches the current session"
     state: { run_id: "01RID", pi_session_id: "s1" },
     currentSessionId: "s1",
     envRunId: null,
-    cwd: "/x",
+    reads: fakeReads(),
   });
   assert.equal(d.action, "keep");
   assert.equal(d.source, "session");
 });
 
 test("decideClaim: fork when run_id was inherited from a different session", () => {
-  const dir = mkdtempSync(join(tmpdir(), "perk-ws-"));
   const d = decideClaim({
     state: { run_id: "01RID", pi_session_id: "parent" },
     currentSessionId: "child",
     envRunId: null,
-    cwd: dir,
+    reads: fakeReads(),
   });
   assert.equal(d.action, "fork");
   if (d.action === "fork") {
@@ -89,12 +93,14 @@ test("decideClaim: fork when run_id was inherited from a different session", () 
 });
 
 test("decideClaim: a consumed handoff claimed by a DIFFERENT session adopts a child identity", () => {
-  const cwd = plantHandoff("01RID", "implement", {
-    consumed: true,
-    piSessionId: "parent.jsonl",
-    mode: "read-write",
+  const reads = fakeReads({
+    handoff: handoffBlob("01RID", "implement", {
+      consumed: true,
+      piSessionId: "parent.jsonl",
+      mode: "read-write",
+    }),
   });
-  const d = decideClaim({ state: {}, currentSessionId: "child.jsonl", envRunId: "01RID", cwd });
+  const d = decideClaim({ state: {}, currentSessionId: "child.jsonl", envRunId: "01RID", reads });
   assert.deepEqual(d, {
     action: "adopt",
     source: "env-child",
@@ -105,8 +111,10 @@ test("decideClaim: a consumed handoff claimed by a DIFFERENT session adopts a ch
 });
 
 test("decideClaim: a consumed handoff with NO recorded pi_session_id adopts (unrecorded claimer)", () => {
-  const cwd = plantHandoff("01RID", "implement", { consumed: true, mode: "read-only" });
-  const d = decideClaim({ state: {}, currentSessionId: "child.jsonl", envRunId: "01RID", cwd });
+  const reads = fakeReads({
+    handoff: handoffBlob("01RID", "implement", { consumed: true, mode: "read-only" }),
+  });
+  const d = decideClaim({ state: {}, currentSessionId: "child.jsonl", envRunId: "01RID", reads });
   assert.equal(d.action, "adopt");
   if (d.action === "adopt") {
     assert.equal(d.childRunId, "01RID.1");
@@ -115,91 +123,94 @@ test("decideClaim: a consumed handoff with NO recorded pi_session_id adopts (unr
 });
 
 test("decideClaim: a consumed handoff claimed by the CURRENT session re-claims (idempotent)", () => {
-  const cwd = plantHandoff("01RID", "implement", { consumed: true, piSessionId: "me.jsonl" });
-  const d = decideClaim({ state: {}, currentSessionId: "me.jsonl", envRunId: "01RID", cwd });
+  const reads = fakeReads({
+    handoff: handoffBlob("01RID", "implement", { consumed: true, piSessionId: "me.jsonl" }),
+  });
+  const d = decideClaim({ state: {}, currentSessionId: "me.jsonl", envRunId: "01RID", reads });
   assert.deepEqual(d, { action: "claim", source: "env", runId: "01RID" });
 });
 
 test("decideClaim: an unconsumed handoff stays the normal cold claim", () => {
-  const cwd = plantHandoff("01RID", "implement", { consumed: false });
-  const d = decideClaim({ state: {}, currentSessionId: "child.jsonl", envRunId: "01RID", cwd });
+  const reads = fakeReads({ handoff: handoffBlob("01RID", "implement", { consumed: false }) });
+  const d = decideClaim({ state: {}, currentSessionId: "child.jsonl", envRunId: "01RID", reads });
   assert.deepEqual(d, { action: "claim", source: "env", runId: "01RID" });
 });
 
 test("decideClaim: adopt derives past existing siblings", () => {
-  const cwd = plantHandoff("01RID", "implement", { consumed: true, piSessionId: "parent.jsonl" });
-  mkdirSync(join(cwd, ".perk", "workflow", "scratch", "runs", "01RID.1"), { recursive: true });
-  const d = decideClaim({ state: {}, currentSessionId: "child.jsonl", envRunId: "01RID", cwd });
+  const reads = fakeReads({
+    handoff: handoffBlob("01RID", "implement", { consumed: true, piSessionId: "parent.jsonl" }),
+    runIds: ["01RID.1"],
+  });
+  const d = decideClaim({ state: {}, currentSessionId: "child.jsonl", envRunId: "01RID", reads });
   assert.equal(d.action, "adopt");
   if (d.action === "adopt") assert.equal(d.childRunId, "01RID.2");
 });
 
 test("resolveRunStage: adopt carries no launched stage", () => {
-  const cwd = plantHandoff("01RID", "implement", { consumed: true, piSessionId: "parent.jsonl" });
-  const d = decideClaim({ state: {}, currentSessionId: "child.jsonl", envRunId: "01RID", cwd });
+  const reads = fakeReads({
+    handoff: handoffBlob("01RID", "implement", { consumed: true, piSessionId: "parent.jsonl" }),
+  });
+  const d = decideClaim({ state: {}, currentSessionId: "child.jsonl", envRunId: "01RID", reads });
   assert.equal(d.action, "adopt");
-  assert.equal(resolveRunStage(d, cwd), null);
+  assert.equal(resolveRunStage(d, reads), null);
 });
 
 test("resolveRunStage: claim reads the stage from the run's handoff", () => {
-  const cwd = plantHandoff("01RID", "implement");
-  const d = decideClaim({ state: {}, currentSessionId: "s1", envRunId: "01RID", cwd });
-  assert.equal(resolveRunStage(d, cwd), "implement");
+  const reads = fakeReads({ handoff: handoffBlob("01RID", "implement") });
+  const d = decideClaim({ state: {}, currentSessionId: "s1", envRunId: "01RID", reads });
+  assert.equal(resolveRunStage(d, reads), "implement");
 });
 
 test("resolveRunStage: claim with a stage-less handoff is null", () => {
-  const cwd = plantHandoff("01RID");
-  const d = decideClaim({ state: {}, currentSessionId: "s1", envRunId: "01RID", cwd });
+  const reads = fakeReads({ handoff: handoffBlob("01RID") });
+  const d = decideClaim({ state: {}, currentSessionId: "s1", envRunId: "01RID", reads });
   assert.equal(d.action, "claim");
-  assert.equal(resolveRunStage(d, cwd), null);
+  assert.equal(resolveRunStage(d, reads), null);
 });
 
 test("resolveRunStage: keep reads the stage from the kept run's handoff", () => {
-  const cwd = plantHandoff("01RID", "submit");
+  const reads = fakeReads({ handoff: handoffBlob("01RID", "submit") });
   const d = decideClaim({
     state: { run_id: "01RID", pi_session_id: "s1" },
     currentSessionId: "s1",
     envRunId: null,
-    cwd,
+    reads,
   });
   assert.equal(d.action, "keep");
-  assert.equal(resolveRunStage(d, cwd), "submit");
+  assert.equal(resolveRunStage(d, reads), "submit");
 });
 
 test("resolveRunStage: keep with no handoff file is null", () => {
-  const cwd = mkdtempSync(join(tmpdir(), "perk-stage-"));
+  const reads = fakeReads();
   const d = decideClaim({
     state: { run_id: "01RID", pi_session_id: "s1" },
     currentSessionId: "s1",
     envRunId: null,
-    cwd,
+    reads,
   });
   assert.equal(d.action, "keep");
-  assert.equal(resolveRunStage(d, cwd), null);
+  assert.equal(resolveRunStage(d, reads), null);
 });
 
 test("resolveRunStage: fork and none carry no launched stage", () => {
-  const cwd = plantHandoff("01RID", "implement");
+  const reads = fakeReads({ handoff: handoffBlob("01RID", "implement") });
   const fork = decideClaim({
     state: { run_id: "01RID", pi_session_id: "parent" },
     currentSessionId: "child",
     envRunId: null,
-    cwd,
+    reads,
   });
   assert.equal(fork.action, "fork");
-  assert.equal(resolveRunStage(fork, cwd), null);
-  const none = decideClaim({ state: {}, currentSessionId: "s1", envRunId: null, cwd });
+  assert.equal(resolveRunStage(fork, reads), null);
+  const none = decideClaim({ state: {}, currentSessionId: "s1", envRunId: null, reads });
   assert.equal(none.action, "none");
-  assert.equal(resolveRunStage(none, cwd), null);
+  assert.equal(resolveRunStage(none, reads), null);
 });
 
 test("deriveForkRunId: increments past existing siblings", () => {
-  const dir = mkdtempSync(join(tmpdir(), "perk-fork-"));
-  const runs = join(dir, ".perk", "workflow", "scratch", "runs");
-  mkdirSync(join(runs, "01RID.1"), { recursive: true });
-  mkdirSync(join(runs, "01RID.2"), { recursive: true });
-  assert.equal(deriveForkRunId("01RID", dir), "01RID.3");
-  assert.equal(deriveForkRunId("01OTHER", dir), "01OTHER.1");
+  const runIds = ["01RID.1", "01RID.2", "unrelated"];
+  assert.equal(deriveForkRunId("01RID", runIds), "01RID.3");
+  assert.equal(deriveForkRunId("01OTHER", runIds), "01OTHER.1");
 });
 
 // --- establishSessionIdentity over BOTH stores ---------------------------------------------------
@@ -305,6 +316,7 @@ function memoryStoreBacking(): StoreBacking {
 /** Deterministic `SessionIdentityPorts` with observation channels. */
 function fakePorts(opts: {
   handoff?: Handoff | null;
+  runIds?: string[];
   scratchThrows?: boolean;
   mintedId?: string;
   stamp?: string | undefined;
@@ -318,6 +330,7 @@ function fakePorts(opts: {
   return {
     ports: {
       readHandoff: () => opts.handoff ?? null,
+      listRunIds: () => opts.runIds ?? [],
       markHandoffConsumed: (runId, o) => {
         consumed.push({ runId, ...o });
       },
@@ -354,7 +367,6 @@ for (const backing of [branchStoreBacking(), memoryStoreBacking()]) {
     const outcome = establishSessionIdentity(h.store, ports, {
       currentSessionId: "me.jsonl",
       envRunId: "01RID",
-      cwd,
     });
     assert.equal(outcome.arm, "claimed");
     assert.equal(h.appends.length, 1);
@@ -387,7 +399,6 @@ for (const backing of [branchStoreBacking(), memoryStoreBacking()]) {
     const outcome = establishSessionIdentity(h.store, ports, {
       currentSessionId: "me.jsonl",
       envRunId: "01RID",
-      cwd,
     });
     assert.equal(outcome.arm, "claimed");
     assert.deepEqual(h.appends[0]?.objective_node_claim, { objective: "7", node: "1.1" });
@@ -408,7 +419,6 @@ for (const backing of [branchStoreBacking(), memoryStoreBacking()]) {
       const outcome = establishSessionIdentity(h.store, ports, {
         currentSessionId: "me.jsonl",
         envRunId: "01RID",
-        cwd,
       });
       assert.equal(outcome.arm, "claimed");
       assert.equal(h.appends[0] !== undefined && "objective_node_claim" in h.appends[0], false);
@@ -423,7 +433,6 @@ for (const backing of [branchStoreBacking(), memoryStoreBacking()]) {
       const outcome = establishSessionIdentity(h.store, ports, {
         currentSessionId: "me.jsonl",
         envRunId: "01RID",
-        cwd,
       });
       assert.equal(outcome.arm, "unclaimed");
       assert.deepEqual(outcome.problems, ["handoff missing or mismatched for run 01RID"]);
@@ -444,7 +453,6 @@ for (const backing of [branchStoreBacking(), memoryStoreBacking()]) {
       establishSessionIdentity(h.store, ports, {
         currentSessionId: "me.jsonl",
         envRunId: "01RID",
-        cwd,
       }),
     );
     assert.equal(outcome.arm, "unclaimed");
@@ -463,7 +471,6 @@ for (const backing of [branchStoreBacking(), memoryStoreBacking()]) {
     const outcome = establishSessionIdentity(h.store, ports, {
       currentSessionId: "child.jsonl",
       envRunId: null,
-      cwd,
     });
     assert.equal(outcome.arm, "forked");
     assert.equal(h.appends.length, 1);
@@ -487,7 +494,6 @@ for (const backing of [branchStoreBacking(), memoryStoreBacking()]) {
     const outcome = establishSessionIdentity(h.store, ports, {
       currentSessionId: "child.jsonl",
       envRunId: null,
-      cwd,
     });
     assert.equal(outcome.arm, "forked");
     assert.deepEqual(outcome.warnings, [
@@ -497,18 +503,21 @@ for (const backing of [branchStoreBacking(), memoryStoreBacking()]) {
   });
 
   test(`${backing.label}: adopt — inherited mode, no stage impersonation, never re-consumes`, () => {
-    // decideClaim probes the DISK handoff for env-child detection — plant a consumed one.
-    const cwd = plantHandoff("01RID", "implement", {
-      consumed: true,
-      piSessionId: "parent.jsonl",
-      mode: "read-write",
-    });
+    // decideClaim's env-child probe reads the SAME injected port as the claim arm — a consumed
+    // handoff claimed by a different session routes to adopt.
+    const cwd = mkdtempSync(join(tmpdir(), "perk-lifecycle-"));
     const h = backing.make(cwd, []);
-    const { ports, consumed, scratched } = fakePorts({ scratchThrows: true });
+    const { ports, consumed, scratched } = fakePorts({
+      handoff: handoffBlob("01RID", "implement", {
+        consumed: true,
+        piSessionId: "parent.jsonl",
+        mode: "read-write",
+      }),
+      scratchThrows: true,
+    });
     const outcome = establishSessionIdentity(h.store, ports, {
       currentSessionId: "child.jsonl",
       envRunId: "01RID",
-      cwd,
     });
     assert.equal(outcome.arm, "adopted");
     assert.deepEqual(h.appends[0], {
@@ -537,7 +546,6 @@ for (const backing of [branchStoreBacking(), memoryStoreBacking()]) {
     const outcome = establishSessionIdentity(minted.store, ports, {
       currentSessionId: "me.jsonl",
       envRunId: null,
-      cwd,
     });
     assert.equal(outcome.arm, "minted");
     assert.deepEqual(minted.appends[0], {
@@ -553,7 +561,6 @@ for (const backing of [branchStoreBacking(), memoryStoreBacking()]) {
       establishSessionIdentity(failed.store, fakePorts({ mintedId: "01MINT" }).ports, {
         currentSessionId: "me.jsonl",
         envRunId: null,
-        cwd,
       }),
     );
     assert.equal(failedOutcome.arm, "unclaimed");
@@ -569,7 +576,6 @@ for (const backing of [branchStoreBacking(), memoryStoreBacking()]) {
     const outcome = establishSessionIdentity(h.store, ports, {
       currentSessionId: "me.jsonl",
       envRunId: null,
-      cwd,
     });
     assert.equal(outcome.arm, "kept");
     assert.equal(h.appends.length, 0, "reload-generation reconstruction IS the LWW rebuild");

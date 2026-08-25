@@ -54,6 +54,7 @@ import { registerBindingDelivery } from "./substrate/bindingDelivery.ts";
 import {
   atomicWriteFileSync,
   ensureRunScratch,
+  listRunIds,
   markHandoffConsumed,
   readHandoff,
   readPlanRef,
@@ -247,17 +248,21 @@ export default function (pi: ExtensionAPI) {
     // and renders the outcome's per-arm problems/warnings with the exact report scopes the
     // arms always used. The strict appends keep reporting read-back failures through the
     // strict-append seam's own loudness channel.
-    const identity = establishSessionIdentity(
-      branchSessionStateStore(pi, ctx),
-      {
-        readHandoff: (runId) => readHandoff(ctx.cwd, runId),
-        markHandoffConsumed: (runId, opts) => markHandoffConsumed(ctx.cwd, runId, opts),
-        ensureRunScratch: (runId) => ensureRunScratch(ctx.cwd, runId),
-        mintRunId,
-        versionStamp: stamp,
+    const identityPorts = {
+      readHandoff: (runId: string) => readHandoff(ctx.cwd, runId),
+      listRunIds: () => listRunIds(ctx.cwd),
+      markHandoffConsumed: (runId: string, opts: { piSessionId?: string }) =>
+        markHandoffConsumed(ctx.cwd, runId, opts),
+      ensureRunScratch: (runId: string) => {
+        ensureRunScratch(ctx.cwd, runId);
       },
-      { currentSessionId, envRunId: process.env.PERK_RUN_ID ?? null, cwd: ctx.cwd },
-    );
+      mintRunId,
+      versionStamp: stamp,
+    };
+    const identity = establishSessionIdentity(branchSessionStateStore(pi, ctx), identityPorts, {
+      currentSessionId,
+      envRunId: process.env.PERK_RUN_ID ?? null,
+    });
     for (const problem of identity.problems) reportError(problem);
     for (const warning of identity.warnings) {
       report(ctx, "run scratch", "warning", warning, { alsoLog: true });
@@ -296,7 +301,7 @@ export default function (pi: ExtensionAPI) {
     // run_id claim so the run is settled first; the two append independent LWW fields.
     // Reload/fork/tree (no launched stage) rely on the LWW rebuild — never re-read the file.
     const linked = rebuildWorkflowState(branchEntries()).active_plan_ref ?? null;
-    const runStage = resolveRunStage(decision, ctx.cwd);
+    const runStage = resolveRunStage(decision, identityPorts);
     // Registry-missing is permissive when a stage is present, to preserve implement linkage.
     const consumesPlanRef =
       runStage !== null && (registry === null || stageConsumesPlanRef(registry, runStage));

@@ -11,7 +11,7 @@ import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import { test } from "node:test";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { writePlanRef } from "../../substrate/cache.ts";
+import { planRefPath, writePlanRef } from "../../substrate/cache.ts";
 import { fakePerk, loadPerkSession, scaffoldRepo, spyInjections } from "../../testing/harness.ts";
 import {
   explorerLaneTask,
@@ -1170,6 +1170,35 @@ test("/objective-reconcile with no arg resolves through the plan-ref third tier"
       "the plan-ref objective resolved (third tier)",
     );
   } finally {
+    h.dispose();
+  }
+});
+
+test("/objective-reconcile tier resolution is LAZY — an explicit id never reads the plan-ref", async () => {
+  // `readPlanRef` warns loudly on a corrupt cache; an explicitly-targeted command must never
+  // read (and surface) that unrelated fallback state, so the tiers short-circuit.
+  const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
+  writeFileSync(planRefPath(cwd), "not json {", "utf8");
+  const h = await loadPerkSession({ cwd, env: { PERK_RUN_ID: "01RID" } });
+  spyInjections(h);
+  const errors: string[] = [];
+  const original = console.error;
+  console.error = (...args: unknown[]) => {
+    errors.push(args.map(String).join(" "));
+  };
+  try {
+    await h.invokeCommand("objective-reconcile", "7");
+    assert.ok(
+      h.notifies.some((n) => /#7/.test(n)),
+      "the explicit id resolved (first tier)",
+    );
+    assert.equal(
+      errors.some((e) => e.includes("unreadable plan-ref")),
+      false,
+      "the corrupt plan-ref cache was never read — the tiers short-circuit lazily",
+    );
+  } finally {
+    console.error = original;
     h.dispose();
   }
 });

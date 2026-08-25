@@ -247,36 +247,35 @@ export async function executeObjectiveReview(
   // 1. Headless → soft skip (fail-open; never wedges CI/supervisor runs on an interactive UI).
   if (!ctx.hasUI) return skipResult();
   const sig = signal ?? ctx.signal;
-  // 2. The wave arm's stale-guard baseline is captured BEFORE the validated read below (the
-  //    objective door's fail-closed ordering): the rendered bytes always derive from a read at
+  // 2. The wave arm's stale-guard baseline is captured BEFORE any validated read (the
+  //    objective door's fail-closed ordering): the reviewed bytes always derive from a read at
   //    or after this baseline, so a concurrent objective_draft write between the two reads makes
   //    the browsed render NEWER than the baseline and routeObjectiveReviewDecision's existing
   //    guard refuses the approval — the reverse order would fail open (approve unreviewed
   //    bytes). Raw artifact bytes on purpose: the save-authoritative surface catches
   //    render-invisible changes.
   const baseline = readSessionArtifact(ctx, OBJECTIVE_DRAFT_ARTIFACT);
-  // 3. The draft artifact is the sole review source — no draft → soft skip with the
-  //    objective_draft redirect. (The feature op re-resumes at review time — one extra
-  //    validated read, no observable delta; the reviewed bytes are still the draft at review.)
   const session = openBranchWorkflowSession(pi, ctx);
-  const draft = resumeObjectiveDraft(session);
-  if (draft === null) return noObjectiveDraftResult();
-  // 4. The reviewed bytes are the RENDERED markdown (prose + roadmap table) — never raw JSON.
-  const rendered = renderObjectiveDraft(draft);
-  // 5. Backend dispatch (mirrors the plan path): plannotator-selected → the bridge; ANY other
-  //    selection → the first-party editor, view-only.
+  // 3. Backend dispatch (mirrors the plan path): plannotator-selected → the bridge; ANY other
+  //    selection → the first-party editor, view-only. The draft resume/render is owned by the
+  //    feature op (step 4) — only the wave arm needs the rendered bytes up front.
   let reviewer: ObjectiveDraftReviewer;
   if (isPlannotatorPlanSelected(ctx.cwd)) {
     // The launch chooser (contracts.md §8.23): every eligible round the human picks with/without
     // the streamed reviewer wave BEFORE anything launches. Eligibility is drafts-only — the wave
     // door stale-guards the raw artifact baseline, so a null baseline keeps the plain path
-    // (silently: there is no forced mode to warn about).
-    if (wave?.present() && baseline !== null) {
+    // (silently: there is no forced mode to warn about). An unresolvable draft (raw bytes
+    // present but invalid) also skips the wave arm — the plain review below reports the
+    // no-draft skip through the feature op.
+    const draft = wave?.present() && baseline !== null ? resumeObjectiveDraft(session) : null;
+    if (draft !== null && baseline !== null) {
       const choice = await chooseReviewLaunch(ctx.ui, "Objective", sig);
       if (choice.launch === "aborted") return objectiveReviewOutcomeResult({ status: "aborted" });
       if (choice.launch === "wave") {
-        const guidance = await wave.objective(ctx, {
-          rendered,
+        const guidance = await wave?.objective(ctx, {
+          // The reviewed bytes are the RENDERED markdown (prose + roadmap table) — never raw
+          // JSON.
+          rendered: renderObjectiveDraft(draft),
           artifactRaw: baseline.content,
           ...(choice.custom !== undefined ? { custom: choice.custom } : {}),
         });
@@ -284,7 +283,9 @@ export async function executeObjectiveReview(
         // never report a successful launch (the door's own bridge abort handling settles the
         // background tasks and clears the primed surfaces).
         if (sig?.aborted) return objectiveReviewOutcomeResult({ status: "aborted" });
-        if (guidance !== null) return waveLaunchedResult(OBJECTIVE_SUBJECT, guidance);
+        if (guidance !== undefined && guidance !== null) {
+          return waveLaunchedResult(OBJECTIVE_SUBJECT, guidance);
+        }
         // null = the synchronous port-pick failure (already loudly reported inside the core) —
         // fall open to the plain blocking review in the same call: the review never wedges.
       }
@@ -293,11 +294,13 @@ export async function executeObjectiveReview(
   } else {
     reviewer = firstPartyObjectiveReviewer(ctx);
   }
-  // 6. The feature op owns the routing (resume → render → review → the abort checkpoint →
-  //    route): APPROVED wires into the approval→save seam (the STRUCTURED artifact is re-read
-  //    at save time — never the rendered bytes; auto-save → D1a gate exit → terminating
-  //    result); Direct Edits is the no-save revise round; everything else maps via
-  //    objectiveReviewOutcomeResult. Approved-first routing: the completed case renders DENIED.
+  // 4. The feature op owns the routing (resume → render → review → the abort checkpoint →
+  //    route): a missing/invalid draft is its `noDraft` arm (rendered below as the soft skip
+  //    with the objective_draft redirect); APPROVED wires into the approval→save seam (the
+  //    STRUCTURED artifact is re-read at save time — never the rendered bytes; auto-save → D1a
+  //    gate exit → terminating result); Direct Edits is the no-save revise round; everything
+  //    else maps via objectiveReviewOutcomeResult. Approved-first routing: the completed case
+  //    renders DENIED.
   const result = await reviewObjectiveDraft(
     { session, reviewer, approvalSave: () => objectiveApprovalSaveV1(pi, ctx, gating) },
     sig,

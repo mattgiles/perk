@@ -296,9 +296,9 @@ function dreamGateFor(
 /**
  * The production approval→save dependency bag (the `planSaveDepsFor` mirror): session via the
  * branch backing, the cold-door backend, the gate slice, and the ctx-bound dream-gate resolver.
- * Exported for the review arm + the browser door (composition churn stays import-path-only).
+ * The review arm + the browser door consume the composed `objectiveApprovalSaveV1` instead.
  */
-export function objectiveSaveDepsFor(
+function objectiveSaveDepsFor(
   pi: ExtensionAPI,
   ctx: ExtensionContext,
   gating: ToolGating,
@@ -381,9 +381,21 @@ export async function objectiveApprovalSaveV1(
 }
 
 /**
+ * The fail-open branch read for the two context hooks: a throwing `getBranch()` reports the
+ * empty branch, so the handlers' "never throws" contract holds structurally — the injection
+ * stays inert (an empty branch is never objective-authoring) and the strip hygiene proceeds.
+ */
+function safeBranchOf(ctx: ExtensionContext): readonly BranchEntry[] {
+  try {
+    return branchOf(ctx);
+  } catch {
+    return [];
+  }
+}
+
+/**
  * Whether the current branch is an objective-author session (read-only gate AND stage match).
- * Fail-open: a throwing branch read reports false — the injection stays inert and the strip
- * hygiene proceeds (the handlers' "never throws" contract holds structurally).
+ * Fail-open: a throwing state rebuild reports false.
  */
 function isObjectiveAuthoring(gating: ToolGating, branch: readonly BranchEntry[]): boolean {
   if (!gating.isActive()) return false;
@@ -420,7 +432,7 @@ export function installObjectiveAuthoringBindings(pi: ExtensionAPI, gating: Tool
   // stage === objective-author). Dedup on the COMPACTION-ACTIVE window: a live copy suppresses
   // re-injection; compaction dropping it from model context re-injects on the next turn.
   pi.on("before_agent_start", async (_event, ctx) => {
-    const branch = branchOf(ctx);
+    const branch = safeBranchOf(ctx);
     if (!isObjectiveAuthoring(gating, branch)) return;
     if (branchCarries(activeContextWindow(branch), OBJECTIVE_AUTHOR_MARKER)) return;
     return {
@@ -436,7 +448,7 @@ export function installObjectiveAuthoringBindings(pi: ExtensionAPI, gating: Tool
   // authoring (gate off, or the stage moved on) so it never lingers — the same hygiene planMode
   // applies.
   pi.on("context", async (event, ctx) => {
-    const branch = branchOf(ctx);
+    const branch = safeBranchOf(ctx);
     if (isObjectiveAuthoring(gating, branch)) return;
     return {
       messages: event.messages.filter((m) => {
