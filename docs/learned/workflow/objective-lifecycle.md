@@ -240,12 +240,12 @@ artifact, `plan_review` renders + reviews it, and an APPROVED verdict auto-saves
   reviewed `base` (target branch), the reviewed `delivery` choice (§8.45; a shared enum property
   keeps `objective_draft` and `objective_save` from drifting), and the gated `dream_report` block
   (§8.63 — `resolveDreamReportGate` validates at draft-write time; the approval save re-reads the
-  artifact and forwards the block, `extension/factories/objectiveSave.ts`)); the digest is
+  artifact and forwards the block, `extension/authoring/objective/save.ts`)); the digest is
   computed over the **serialized JSON**, not the prose; and the roadmap rides verbatim as
   `unknown[]` — node-shape validation stays with the Python plane at save time. JSON is
   storage/transport only; the human review surface renders markdown from it.
-- **Renderers live with the artifact owner, not the consumer.** `extension/factories/objectiveDraft.ts`
-  exports both the reader (`readObjectiveDraft` — fail-open validation, warn+null on bad
+- **Renderers live with the artifact owner, not the consumer.** `extension/authoring/objective/draft.ts`
+  exports both the reader (`resumeObjectiveDraft` — fail-open validation, warn+null on bad
   JSON/shape/schema_version/blank prose) and the markdown renderer (`renderObjectiveDraft`).
   That keeps `planReview → objectiveDraft` cycle-free: the draft module never imports review
   modules. `schema_version` is the consumer branch point — consumers must validate/branch on it
@@ -368,7 +368,7 @@ existing `plan_required` fallback on a malformed/non-numeric id.
 - `docs/learned/workflow/cold-door-launch.md` — the composition + testing mechanics the supervisor relies on
 - `shared/contracts.md` §8.20 — the capstone supervisor loop contract (verdict→action mapping);
   §8.37 — the shared classifier spec (parity pinned by `tests/test_next_action_parity.py`)
-- `extension/factories/objectiveAuthor.ts` + `perk` objective-author/save stages — the authoring loop
+- `extension/pi/v1/objectiveAuthoring.ts` + `perk` objective-author/save stages — the authoring loop
 - `docs/learned/workflow/plan-save-surfaces.md` — the node→plan link carrier + re-save discipline
 - `docs/learned/pi/context-injection.md` — the `stage`-field disambiguation of shared-mode stages
 - `docs/learned/workflow/plan-ref-lifecycle.md` — the fail-open on-land bookkeeping shape

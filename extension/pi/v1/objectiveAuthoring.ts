@@ -408,35 +408,6 @@ const SAVE_TOOL_GUIDELINES = [
   'Each objective_save roadmap node needs a stable `id` (e.g. "1.1") and a `description`; `status` defaults to pending. Use `depends_on` for explicit ordering.',
 ];
 
-/** The shared draft/save parameter schema (one literal — the two tools cannot drift). */
-const OBJECTIVE_TOOL_PARAMETERS = {
-  type: "object",
-  additionalProperties: false,
-  required: ["prose"],
-  properties: {
-    prose: {
-      type: "string",
-      description: "The objective prose (the why, the design, the boundaries/non-goals).",
-    },
-    title: {
-      type: "string",
-      description: "Optional objective title (defaults to the prose's first heading).",
-    },
-    base: {
-      type: "string",
-      description:
-        "Optional target branch for this objective's plans (omit to use the repo default).",
-    },
-    delivery: DELIVERY_PARAM_SCHEMA,
-    dream_report: DREAM_REPORT_PARAM_SCHEMA,
-    roadmap: {
-      type: "array",
-      description: "The structured roadmap: a JSON array of nodes. Never hand-write roadmap YAML.",
-      items: ROADMAP_PARAM_SCHEMA,
-    },
-  },
-} as const;
-
 /**
  * Install every objective-authoring Pi binding: the objective-authoring context hook pair (the
  * frozen hooks-ordering slot index.ts calls this at — planMode.ts defers when the stage is
@@ -498,9 +469,39 @@ export function installObjectiveAuthoringBindings(pi: ExtensionAPI, gating: Tool
       "Persist the working objective draft (prose + structured roadmap) to the session data dir (full rewrite)",
     promptGuidelines: DRAFT_TOOL_GUIDELINES,
     executionMode: "sequential",
-    parameters: OBJECTIVE_TOOL_PARAMETERS,
+    parameters: {
+      type: "object",
+      additionalProperties: false,
+      required: ["prose"],
+      properties: {
+        prose: {
+          type: "string",
+          description: "The objective prose (the why, the design, the boundaries/non-goals).",
+        },
+        title: {
+          type: "string",
+          description: "Optional objective title (defaults to the prose's first heading).",
+        },
+        base: {
+          type: "string",
+          description:
+            "Optional target branch for this objective's plans (omit to use the repo default).",
+        },
+        delivery: DELIVERY_PARAM_SCHEMA,
+        dream_report: DREAM_REPORT_PARAM_SCHEMA,
+        roadmap: {
+          type: "array",
+          description:
+            "The structured roadmap: a JSON array of nodes. Never hand-write roadmap YAML.",
+          items: ROADMAP_PARAM_SCHEMA,
+        },
+      },
+    },
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-      // The shared param contract: the same decode as `objective_save`, so the two cannot drift.
+      // The shared param contract: the same decode as `objective_save`, so the two cannot
+      // drift. (The parameter literals are duplicated at both registration sites on purpose —
+      // the prose-review workbench needs in-place literals — and pinned identical by the
+      // registration baselines.)
       const decoded = decodeObjectiveSaveParams(params);
       if (decoded === null) {
         return failFor(
@@ -552,7 +553,34 @@ export function installObjectiveAuthoringBindings(pi: ExtensionAPI, gating: Tool
     promptSnippet: "Save the decision-complete objective + roadmap to GitHub (terminates the turn)",
     promptGuidelines: SAVE_TOOL_GUIDELINES,
     executionMode: "sequential",
-    parameters: OBJECTIVE_TOOL_PARAMETERS,
+    parameters: {
+      type: "object",
+      additionalProperties: false,
+      required: ["prose"],
+      properties: {
+        prose: {
+          type: "string",
+          description: "The objective prose (the why, the design, the boundaries/non-goals).",
+        },
+        title: {
+          type: "string",
+          description: "Optional objective title (defaults to the prose's first heading).",
+        },
+        base: {
+          type: "string",
+          description:
+            "Optional target branch for this objective's plans (omit to use the repo default).",
+        },
+        delivery: DELIVERY_PARAM_SCHEMA,
+        dream_report: DREAM_REPORT_PARAM_SCHEMA,
+        roadmap: {
+          type: "array",
+          description:
+            "The structured roadmap: a JSON array of nodes. Never hand-write roadmap YAML.",
+          items: ROADMAP_PARAM_SCHEMA,
+        },
+      },
+    },
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
       const decoded = decodeObjectiveSaveParams(params);
       if (decoded === null) {

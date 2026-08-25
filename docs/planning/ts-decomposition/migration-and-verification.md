@@ -389,8 +389,9 @@ the session lifecycle required by each new caller.
 >   became optional (`runId: string | null`, the open-result union deleted) because the
 >   identity-less save legally links `active_plan_ref` on branch-backed appends.
 > - **`pi/v1/objectiveReview.ts` is the objective review arm's stable adapter home** (relocated
->   intact ahead of items 3–5; it still imports the objective feature modules from
->   `factories/` — the sanctioned pi/v1 → factories direction until node 4.2).
+>   intact ahead of items 3–5; its transitional imports from `factories/` were the sanctioned
+>   pi/v1 → factories direction until node 4.2 — realized: node 4.2 reshaped it into a thin
+>   adapter over the feature ops and the direction closed with `factories/`' deletion).
 > - **Replanning migrated by construction** — `perk plan replan` launches an ordinary
 >   `stage: plan` session; no replan-specific TS path exists.
 > - **Five declared interior deltas** (test-pinned, contracts amended same-turn): plan-owned
@@ -403,6 +404,41 @@ the session lifecycle required by each new caller.
 >   in-place arrays (identifier indirection is an unsupported source shape), and the
 >   `/implement-here` handler body lives in `planReview.ts` so the installer file stays fully
 >   fragment-resolvable (the workbench's editable exemplar).
+>
+> **Status (Objective #2083, Node 4.2):** the three objective flows (items 3–5) landed as one
+> slice — `extension/authoring/objective/{draft,save,review,planning,prose,dreamReportGate}.ts`
+> (Pi-free feature ops with their own result unions + reviewer/backend ports; no shared
+> authoring protocol) + `extension/pi/v1/{objective,objectiveAuthoring,objectivePlanning}.ts`
+> (named installers + cold-door backend adapters + decode/render), and `pi/v1/objectiveReview.ts`
+> reshaped into a thin adapter over `reviewObjectiveDraft`; **`extension/factories/` was deleted
+> whole** (the two non-flow stragglers rode along: `objective.ts` → `pi/v1/objective.ts`,
+> `objectiveDreamReport.ts` → `authoring/objective/dreamReportGate.ts`). Realized-shape notes:
+>
+> - **The session identity lifecycle extracted** as `session/lifecycle.ts::establishSessionIdentity`
+>   (the claim/fork/adopt/mint/keep arms as one named Pi-free operation over `SessionStateStore`
+>   + `SessionIdentityPorts`, two backings; `decideClaim`/`deriveForkRunId`/`resolveRunStage`
+>   moved in from `substrate/workflowState.ts`); `index.ts` keeps adapter wiring (input
+>   gathering, per-arm report rendering, downstream gate/stage sync) — the outcome union carries
+>   the arm + decision + problems/warnings. The pre-existing harness suite
+>   (`extension/sessionLifecycle.test.ts`) stayed assertion-identical as the extraction parity
+>   proof. A full `installSessionLifecycle` hook installer was deliberately NOT built.
+> - **The change union grew two proven variants** (`record-node-claim` — idempotent, an equal
+>   re-claim short-circuits `unchanged`; `link-objective`) plus the `activeObjective()` read
+>   (retiring two duplicate private helpers).
+> - **`explore_objective_node` stayed adapter-tier** (wave mechanics + Result rendering, no
+>   feature policy — it lives in `pi/v1/objectivePlanning.ts`, not `authoring/`).
+> - **Six declared interior deltas** (test-pinned, contracts amended same-turn): objective-owned
+>   injections joined the compaction-active window; idempotent re-claims; seam-owned
+>   claim/linkage warning strings; `writeSessionArtifact` deleted (last caller migrated;
+>   `readSessionArtifact` survives for the browser doors' raw baselines); whitespace-only
+>   `title`/`base` trim-or-omit on the direct save path; `isObjectiveAuthoring` fail-open
+>   hardening.
+> - **Decode-once-at-the-edge realized**: typed feature inputs deleted the census'd redundant
+>   re-validations and the `addObjectiveNode` decoder/core asymmetry; dead public types did not
+>   re-emerge.
+> - **Still no `PromptEvidence` module** (the 2.1 narrow-until-proven rule): context-evidence
+>   coverage (live-copy suppression / post-compaction re-injection / quoting-summary /
+>   reconstructed-context) is realized as inlined marker checks per migrated injection.
 
 Migrate in this order unless refreshed dependency evidence changes the graph:
 

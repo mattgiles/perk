@@ -90,9 +90,10 @@ choice.
 
 The handoff carrier covers **cold** sessions; warm sessions got the matching half: the
 `objective_node_claim` carrier in `perk:workflow-state`, written on a successful `planning`
-transition by the `objective_node` tool (`extension/factories/objectivePlan.ts`; the claim decode +
-equality helpers live in `extension/substrate/workflowState.ts`, typed over the structural
-`BranchSource` slice so the session seam and the save feature import them with no module cycle),
+transition by the `objective_node` tool (`extension/authoring/objective/planning.ts`, through the
+session seam's `record-node-claim` change; the claim decode + equality helpers live in
+`extension/substrate/workflowState.ts`, typed over the structural `BranchSource` slice so the
+session seam and the save feature import them with no module cycle),
 cleared on a non-planning transition for the same node or after a successful node-linked save
 matching the FULL claim identity (objective + node) keyed off the cold door's *reported* node. Both planes implement **identical semantics**:
 explicit values win outright (even one — never mixed), fill both-or-neither, fail-open (a malformed
@@ -239,7 +240,8 @@ on-land step is fail-open and only prints on success, a stale header broke the w
 - `shared/contracts.md` §8.23 — the consolidated file-first plan contract (the three backends)
 - `extension/authoring/plan/source.ts` — `resolvePlanSource`; `extension/authoring/plan/save.ts` —
   `savePlan`/`planApprovalSave`; `extension/pi/v1/plan.ts` — the `approvalSave` seam + the save rendering
-- `extension/factories/objectivePlan.ts` — the `objective_node_claim` writer + claim helpers
+- `extension/authoring/objective/planning.ts` — the warm `objective_node_claim` writer (via the
+  session seam); `extension/session/lifecycle.ts` — the cold-claim carrier arm
 - `docs/learned/workflow/plan-review-flow.md` — the review-side tiering + the approvalSave seam
 - `docs/learned/pi/tool-param-decode.md` — the fallback-chain optionality flip
 - `src/perk/cli/commands/plan/save_cmd.py` — `_link_from_handoff`, the re-save merge via `update_plan_header`

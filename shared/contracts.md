@@ -97,7 +97,8 @@ The local cache tier — written and read by **both** the CLI (exterior) and the
   producers (no Python twins) share one invariant set. Each is allowlisted in `READ_ONLY_TOOLS`
   (`extension/substrate/toolGating.ts`) as a **narrow structural carve-out**: the tool has no
   path/name parameter — the artifact name is a fixed constant and the path derives exclusively
-  through the accessor seam (`writeSessionArtifact`: file + provenance pointer) — so the only
+  through the accessor seam (the `WorkflowSession` artifact write: file + provenance pointer,
+  `writeSessionArtifactClassified` underneath) — so the only
   bytes it can ever write are its one working artifact in the current run's data dir
   (gitignored scratch); the gate's `tool_call` `edit`/`write`/bash blocking is unchanged.
   Semantics: full rewrite per call, non-terminating, NOT a save — `plan_save`/`/plan-save` and
@@ -125,10 +126,10 @@ The local cache tier — written and read by **both** the CLI (exterior) and the
   **The objective-draft file tool.** The tool `objective_draft` writes the working objective
   during read-only objective authoring, under the shared draft-tool invariants above; its
   artifact name is the fixed constant `objective-draft.json` (`OBJECTIVE_DRAFT_ARTIFACT`,
-  `extension/factories/objectiveDraft.ts`). The artifact is a **single JSON file**
+  `extension/authoring/objective/draft.ts`). The artifact is a **single JSON file**
   carrying `{schema_version: 1, title?, prose, roadmap}` — plus, in a `perk learn dream`
   session, the **tool-written** `dream_report` block `{input, generated_at, parts}` (§8.63;
-  `readObjectiveDraft` refuses the WHOLE draft on a malformed block — deliberately stricter
+  `resumeObjectiveDraft` refuses the WHOLE draft on a malformed block — deliberately stricter
   than the lenient junk→absent `base`/`delivery` handling, because silently dropping a
   malformed report is exactly what §8.63 forbids) — the structured roadmap rides
   **verbatim** (node-shape validation stays with the Python plane at save time, the
@@ -140,15 +141,15 @@ The local cache tier — written and read by **both** the CLI (exterior) and the
   §8.63) derived from the artifact, never raw JSON. **The review surface:**
   `plan_review` in an objective-authoring session (stage `objective-author` or
   `objective-save`) reviews the **rendered markdown** —
-  `readObjectiveDraft` (fail-open validation over the artifact: stderr warning + `null` on
+  `resumeObjectiveDraft` (fail-open validation over the artifact: stderr warning + `null` on
   malformed JSON / non-object payload / wrong `schema_version` / blank prose) +
   `renderObjectiveDraft` (the prose plus a `## Roadmap` markdown table; a `Phase` column only
   when some node carries one; cells sanitized) — **never raw JSON, never the `plan` param,
   never the transcript**. No draft → soft-skip `reason: "no_objective_draft"` with an
   `objective_draft` redirect. **The approval→save orchestration:** an
-  APPROVED outcome wires into the `objectiveApprovalSave` seam (`extension/factories/objectiveSave.ts`,
+  APPROVED outcome wires into the `objectiveApprovalSave` seam (`extension/authoring/objective/save.ts`,
   the objective sibling of `approvalSave`): the seam **re-reads the structured artifact at save
-  time** (`readObjectiveDraft` — never the rendered markdown, never a param, never the
+  time** (`resumeObjectiveDraft` — never the rendered markdown, never a param, never the
   transcript) → `saveObjective` → D1a gate exit on a successful save (snapshot
   `gating.isActive()` before the save) → a **terminating** result; a failed save is
   non-terminating, the gate stays read-only, and the human `/objective-save` failsafe is
@@ -468,7 +469,7 @@ end of the section).
 | `last_review` | object \| null | the last review-door outcome posted via the warm `submit_pr_review` tool: `{ pr, event, comment_count, mode, at:ISO }`; best-effort tier (the submitted PR review is the canonical record) |
 | `review_posts` | array | the accumulating per-PR posting ledger of a stacked review: one `{ pr, event, at:ISO }` row per REAL `submit_pr_review` success, in posting order (read-rebuild-append — each write carries the whole list); best-effort tier with an asymmetric trust rule — a row can be MISSING spuriously (append failed after a real post) but never PRESENT spuriously, so `submit_pr_review` enforces skip-on-resume on presence (`already_posted` refusal; `allow_repost: true` is the deliberate override) while a missing row means verify posted-vs-pending against GitHub before re-posting |
 | `session_artifacts` | object \| null | per-name session-artifact provenance pointers `{run_id, name, path, digest, at}` (§8.1); appends carry the **whole merged map** (per-field LWW); strict-append tier |
-| `objective_node_claim` | object \| null | the objective node this session has claimed `planning` (`{ objective, node }`); written by the warm `objective_node` tool on a successful `planning` transition **and by the cold claim** (`session_start` persists it from the claimed handoff's non-blank `objective_id`/`node_id` — the objective-plan cold door's `handoff_extra` — so implement-here suppression is structural in cold objective-plan sessions too), cleared on a successful non-planning transition for the same node and after a successful node-linked plan save (the save-path clear matches the **full claim identity** — objective **and** node — so a save linked elsewhere never clobbers an unrelated standing claim); best-effort tier (cheaply reconstructable; loud-but-non-fatal) |
+| `objective_node_claim` | object \| null | the objective node this session has claimed `planning` (`{ objective, node }`); written by the warm `objective_node` tool on a successful `planning` transition (idempotent — a re-claim equal to the live claim appends nothing) **and by the cold claim** (`session_start` persists it from the claimed handoff's non-blank `objective_id`/`node_id` — the objective-plan cold door's `handoff_extra` — so implement-here suppression is structural in cold objective-plan sessions too), cleared on a successful non-planning transition for the same node and after a successful node-linked plan save (the save-path clear matches the **full claim identity** — objective **and** node — so a save linked elsewhere never clobbers an unrelated standing claim); best-effort tier (cheaply reconstructable; loud-but-non-fatal) |
 | `conflict_resolution_attempts` | number | the bounded conflict-resolution re-drive counter: incremented on each `perk.conflict-resolver` dispatch from EITHER warm surface — `/submit`'s PR-rebase drive on a definitively-unmergeable PR, or `/objective-sync`'s retained-continuation drive (§8.51) — (cap `CONFLICT_RESOLUTION_ATTEMPT_CAP = 2`, shared); reset to 0 on any clean mutating completion (a clean submit; a clean non-declined mutating stack sync/continue/abort/adopt); best-effort tier (cheaply reconstructable) |
 | `dream_bundle_digest` | string | the dream-wave finalized-bundle digest marker (§8.61): `""` = invalidated (cleared unconditionally at wave entry, BEFORE the stale-bundle removal attempt — the invalidation record); `sha256:<hex>` = the digest of the current finalized run-scratch bundle bytes, set only after a successful finalize write; the §8.63 dream-report recovery refuses unless the marker is present, non-empty, and byte-matches the bundle just read; per-field LWW, no rebuild change |
 | `perk_version` | string | the running perk (extension) version, stamped when run identity is established (the claim/fork/adopt/mint arms, §8.2) — the session-audit **exact-vintage** basis (the key literal is the cross-plane coordination point; the read side is `perk-dev`'s audit corpus/vintage layer); omitted when only the `perkVersion()` failure sentinel is available; best-effort tier |
@@ -566,7 +567,7 @@ one live copy; compaction dropping the copy makes the scan come up clean and the
 `before_agent_start` naturally re-injects — and **strips** it from `context` when off. The allowlist is restored on both `session_start` and `session_tree` (re-sync
 from the rebuilt `mode`). **Fail-closed:** a failed state-rebuild never opens the gate, and
 `tool_call` blocks on any internal error. The `enter(ctx?)`/`exit(ctx?)` surface is the API the
-interior consumers (plan mode, the factories, the CI executor) compose — the gate is the single
+interior consumers (plan mode, the authoring installers, the CI executor) compose — the gate is the single
 read-only authority. Beside the gate, the same rebuild points apply **stage-scoped active tools**
 keyed off the `stage` field (§8.40) — fail-open where the gate is fail-closed.
 
@@ -639,11 +640,16 @@ State key (registry vocabulary): `session.workflow-state`.
 the owning modules' headers: approval→save orchestration + plan-title
 generation (`extension/authoring/plan/save.ts` / `extension/pi/v1/plan.ts` / `planTitle.ts` /
 `planReview.ts`; §8.23 keeps the review-backend contract); objective budget + threshold compaction
-(`extension/factories/objective.ts`); the objective authoring loop
-(`extension/factories/objectiveAuthor.ts` / `objectiveSave.ts`; §8.23/§8.24 own the save/store
-contracts); the objective plan factory + node-lifecycle selection
-(`extension/factories/objectivePlan.ts`, `src/perk/objective/`; §8.24); objective reconciliation
+(`extension/pi/v1/objective.ts`); the objective authoring loop
+(`extension/pi/v1/objectiveAuthoring.ts` / `extension/authoring/objective/save.ts`; §8.23/§8.24
+own the save/store contracts); the objective plan factory + node-lifecycle selection
+(`extension/pi/v1/objectivePlanning.ts` / `extension/authoring/objective/planning.ts`,
+`src/perk/objective/`; §8.24); objective reconciliation
 (the reconcile modules + `skills/perk-objective-reconcile/`; the land-path facts stay in §8.4);
+the session identity lifecycle — the §8.2 claim/fork/adopt/mint/keep arms as one named operation
+(`extension/session/lifecycle.ts::establishSessionIdentity`; `extension/index.ts` keeps the
+adapter wiring: gathering inputs, rendering the per-arm reports, and the downstream gate/stage
+sync);
 session-lifecycle gates + the warm `/implement` handoff (`extension/doors/lifecycleGates.ts`,
 `extension/pi/v1/planReview.ts`'s implement-here seam); status/footer rendering detail
 (`extension/surfaces/surfaces.ts`,
@@ -2100,7 +2106,7 @@ twin of the cold door. `resolvedBindings(cwd)` is the TS mirror of cold's `resol
 `renderBindings(cwd, trigger)` / `bindingSuffix(cwd, trigger)` render exactly as the cold door does.
 It delivers at two **warm surfaces**: **Mechanism A** — a `before_agent_start` handler injects the
 launched **`stage:<id>`** bindings as a hidden (`display:false`) `perk:binding-context` message
-(mirroring the plan-mode injection in `pi/v1/plan.ts` / `objectiveAuthor.ts`). This is the delivery path for **`stage:plan`**'s
+(mirroring the plan-mode injection in `pi/v1/plan.ts` / `pi/v1/objectiveAuthoring.ts`). This is the delivery path for **`stage:plan`**'s
 `perk-plan` pointer: a cold `perk plan` launches **idle** (no prompt to augment), so the `plan`
 skill pointer is delivered explicitly here. **Mechanism B** — `bindingSuffix` is
 appended into the guidance of **every** perk warm slash-command so each **self-delivers** its
@@ -3542,7 +3548,7 @@ network): the team key is bound and resolved to its UUID on first use.
 **The TS mirror is fail-safe** (`extension/substrate/config.ts::resolveIssueBackendId`):
 returns `"github" | "linear"`, falling back to `"github"` on absence/unknown value/any read or
 parse error — safe because the TS plane only *renders prompts*, never writes canonical issues.
-Its consumers are `extension/doors/ready.ts`, `extension/factories/objectivePlan.ts`, and
+Its consumers are `extension/doors/ready.ts`, `extension/authoring/objective/prose.ts`, and
 `extension/doors/objectiveStack.ts` (backend-aware prompt rendering). `PerkConfig` carries no
 `issues` field — an overlay-read shape would contradict the committed-only rule.
 
@@ -3650,12 +3656,12 @@ delivered by the whole-directory skills sync.
 
 The **objective seed prompts** are backend-aware the same way. The objective-plan cold
 seed (`perk/cli/commands/objective/plan_cmd.py::_seed_prompt`) and the warm guidance
-(`extension/factories/objectivePlan.ts::factoryGuidance` / `reconcileGuidance`) branch on the
+(`extension/authoring/objective/prose.ts::factoryGuidance` / `reconcileGuidance`) branch on the
 objective backend via the seam-rendered `objective_read_instruction` /
 `objectiveReadInstruction` helpers (cross-plane byte-parity owned by
 the `objective-read-*` golden cases — `tests/test_prompts.py` +
 `extension/substrate/prompts.test.ts` — with per-plane selection tests in
-`tests/test_objective_prompt_parity.py` + `extension/factories/objectivePlan.test.ts`; see §8.31).
+`tests/test_objective_prompt_parity.py` + `extension/authoring/objective/prose.test.ts`; see §8.31).
 The helper returns a **supplemental** clause appended to the
 existing `perk objective show <id>` step (never a replacement): the `linear` arm references the
 Linear **Project URL** + the read-only `linear_get_issue` / `linear_list_comments` tools (an
@@ -3686,7 +3692,7 @@ everywhere — PRs are GitHub-universal. Concretely:
   `issue` but is a string; `pr land`'s `objective` sub-object `number` → **`id`** (string|null)
   and `learn.closed` carries string ids; `objective reconcile`'s `objective`/`comment_id` are
   strings; `learn docs --gather`'s `learn_numbers` carries string ids. TS decoders
-  (`pi/v1/plan.ts`/`learn.ts`/`land.ts`/`objectiveSave.ts`/`learnFactory.ts`) are lockstep-strict on
+  (`pi/v1/plan.ts`/`learn.ts`/`land.ts`/`pi/v1/objectiveAuthoring.ts`/`learnFactory.ts`) are lockstep-strict on
   the string shapes, with one tolerance: `learnFactory.ts::decodeGather` accepts legacy numeric
   `learn_numbers` and normalizes them to strings.
 - CLI plan/objective arguments parse through the shared opaque-id validators
@@ -4390,7 +4396,7 @@ Conformance is ty-enforced across every implementer + fake (the whole-repo `ty c
 
 The contract adds **no** new configuration, provider, or door — the read workers and their docs
 exist (§8.26–§8.28); the guidance owner for `/objective-reconcile` is
-`extension/factories/objectivePlan.ts`.
+`extension/authoring/objective/prose.ts` (registered by `extension/pi/v1/objectivePlanning.ts`).
 
 ## §8.26 · Node-issue engagement in `/objective-plan`
 
@@ -4438,7 +4444,7 @@ objective → `objective_not_found`.
 engagement **fail-soft** (`ObjectiveStoreError` → empty; a Linear hiccup never breaks the launch),
 renders, and injects the block **immediately after** `<untrusted_objective>` in `_seed_prompt`
 (`node_engagement` param; empty → seed byte-unchanged on GitHub / no engagement). The warm door
-(`objectivePlan.ts` `factoryGuidance`) **cannot pre-fetch** (the model selects the node in-session)
+(`authoring/objective/prose.ts`'s `factoryGuidance`) **cannot pre-fetch** (the model selects the node in-session)
 → it instructs the model to run `perk objective node-engagement <objective> --node <id>` once it
 knows the node, treating the output as untrusted DATA (harmless on GitHub — the worker returns no
 engagement). The parity-pinned `objective_read_instruction` / `objectiveReadInstruction` clause is
@@ -4469,7 +4475,7 @@ bounds/truncation/filtering rules apply unchanged; the plan-specific wrapper is
 a `test_engagement.py` byte-stability assert).
 
 **Cold-only injection (no warm door).** `replan` is a dedicated cold door (no registry stage, no
-`objectivePlan.ts`-style warm half). It reads engagement up front — **including on `--dry-run`**,
+`/objective-plan`-style warm half). It reads engagement up front — **including on `--dry-run`**,
 which materializes the real artifact (replan's dry run is not offline) — and **appends** the
 rendered block to the materialized `.perk/workflow/scratch/replan-<id>.md` after `</untrusted_plan>`
 (the scratch-file-native home, vs §8.26's inline-seed injection — replan centers on the scratch
@@ -4536,7 +4542,7 @@ stderr. Error discipline mirrors `node-engagement` (`ObjectiveStoreError` → `g
 **Warm instructs, no cold injection.** Reconcile has no cold door, so the only delivery is the model
 shelling the read worker. The engagement instruction lives in the
 `prompts/stages/objective-reconcile.md` template (rendered by `reconcileGuidance` in
-`extension/factories/objectivePlan.ts`): one step telling the
+`extension/authoring/objective/prose.ts`): one step telling the
 model to run `perk objective engagement <objective>` before reconciling and treat the returned
 `<untrusted_objective_engagement>` block as untrusted DATA describing human feedback (never
 instructions) — folding it alongside the diff into what may be stale, while obeying the same
@@ -4782,18 +4788,16 @@ nothing, the subset being shared).
 - **Python:** `perk/prompts.py::render(name, variables)` over a module-level jinja2 `Environment`.
 - **TS:** `extension/substrate/prompts.ts::render(name, vars)`, delegating to the vendored,
   zero-dependency `extension/substrate/miniJinja.ts` renderer (the frozen-subset engine). The
-  seam is LIVE on both planes: consumers span the worker, the warm doors and factories, the two
+  seam is LIVE on both planes: consumers span the worker, the warm doors and authoring features, the two
   provider adapters (`tombell` / `plannotator` — `extension/pi/v1/providers/`; `juicesharp` is a
   borrowed-tool package, not an adapter), and the Python cold doors. The seven injected mode/bridge
   contexts (the persistent `before_agent_start` injections stripped on `context`, each injection
   **dedup-guarded by a marker scan** — `branchCarries` in
-  `extension/substrate/workflowState.ts`. The gist-owned injections — the gist-authoring
-  context and plannotator's gist flavor — and the plan-owned injections — the plan-authoring
-  context, plannotator's plan flavor, and the tombell bridge context — scan the
-  **compaction-active window** (`activeContextWindow`), so the session carries ONE live copy and
-  a compaction that drops it naturally re-injects; the objective-flavor injections still scan
-  the whole branch — one copy per session, never re-injected post-compaction (they migrate with
-  the objective slice)) live under
+  `extension/substrate/workflowState.ts`. Every flow-owned injection — the gist-authoring
+  context and plannotator's gist flavor, the plan-authoring context, plannotator's plan flavor,
+  the tombell bridge context, the objective-authoring context, and plannotator's objective
+  flavor — scans the **compaction-active window** (`activeContextWindow`), so the session
+  carries ONE live copy and a compaction that drops it naturally re-injects) live under
   `prompts/contexts/` — the mode contexts at the top level, the adapter bridges under
   `prompts/contexts/adapters/` — with each module's identity marker passed as the `{{ marker }}`
   render var (never a template literal), so the marker the strip handler scans for cannot drift
@@ -5971,7 +5975,8 @@ sync's `_complete` — together, in one write, only after publication verificati
 
 **The choice is typed end-to-end; storage stays absent-for-incremental.** `objective_draft` and
 `objective_save` share an optional strict `delivery` enum param (`"incremental" | "stacked"` —
-`DELIVERY_PARAM_SCHEMA`/`DeliveryChoice` in `objectiveDraft.ts`; junk → `bad_input`, mirroring
+`DELIVERY_PARAM_SCHEMA` in `pi/v1/objectiveAuthoring.ts`, `DeliveryChoice` in
+`authoring/objective/draft.ts`; junk → `bad_input`, mirroring
 `base`'s tri-state decode). The value rides the `objective-draft.json` artifact (schema_version
 stays 1 — an additive optional field; a junk artifact value recovers as absent) and forwards
 verbatim as `perk objective create --delivery <choice>` from `saveObjective` and the
@@ -10000,16 +10005,17 @@ objective path stays **byte-identical** without the field.
 
 **The shared param vocabulary.** `objective_draft` and `objective_save` both carry an
 optional `dream_report` parameter embedding the §8.62 `DREAM_REPORT_INPUT_SCHEMA` by
-identifier as `DREAM_REPORT_PARAM_SCHEMA` (`extension/factories/objectiveDraft.ts` — the leaf
-owning the shared vocabulary, the `DELIVERY_PARAM_SCHEMA`/`ROADMAP_PARAM_SCHEMA` pattern)
+identifier as `DREAM_REPORT_PARAM_SCHEMA` (`extension/pi/v1/objectiveAuthoring.ts` — the one
+module registering both tools, owning the shared vocabulary alongside
+`DELIVERY_PARAM_SCHEMA`/`ROADMAP_PARAM_SCHEMA`)
 plus the gate description ("required inside a dream session, refused outside one"). The
 shared `decodeObjectiveSaveParams` decodes it as a tri-state plain object (absent →
 `undefined`, present-but-not-a-plain-object → strict-fail); deep validation stays with the
 gate resolver.
 
 **The ONE gate resolver.** `resolveDreamReportGate(ctx, input, generatedAt)`
-(`extension/factories/objectiveDreamReport.ts`) implements the whole matrix ONCE — both
-`writeObjectiveDraft` and `saveObjective` consume its typed outcome
+(`extension/authoring/objective/dreamReportGate.ts`) implements the whole matrix ONCE — both
+`reviseObjectiveDraft` and `saveObjective` consume its typed outcome
 (`absent` | `block` | `refuse{errorType, detail}`); no parallel branch/message
 implementations. "Dream session" is detected structurally, exactly like `run_dream_wave`: the
 session's claimed `run_id` + the existence of `runScratchDir(run_id)/dream-manifest.json` (no
@@ -10050,9 +10056,9 @@ context is `{manifest, analyses, reducers, run_id, generated_at}`.
 
 **The artifact block.** A valid dream draft stores `dream_report: {input, generated_at,
 parts}` in `objective-draft.json` — **tool-written only** (the model never writes the
-artifact): `writeObjectiveDraft` runs the gate, stamps `generated_at` ONCE
+artifact): `reviseObjectiveDraft` runs the gate, stamps `generated_at` ONCE
 (`new Date().toISOString()`), and stores the validated input beside the rendered CANONICAL
-parts. `readObjectiveDraft` validates the block via `decodeDreamReportBlock` (a plain-object
+parts. `resumeObjectiveDraft` validates the block via `decodeDreamReportBlock` (a plain-object
 `input`, a non-blank `generated_at`, a non-empty all-string `parts`) and refuses the WHOLE
 draft on a malformed block (warn + `null`) — deliberately stricter than the lenient
 junk→absent handling of `base`/`delivery` (§8.1).
@@ -10061,7 +10067,7 @@ junk→absent handling of `base`/`delivery` (§8.1).
 (`trimEnd()` + `"\n\n"` + `parts.join("\n\n")` + `"\n"`; the parts carry their own
 `# Dream report — <run_id>` headers), so the review surfaces need ZERO plumbing:
 `plan_review`'s objective arm and the browser door both review via
-`readObjectiveDraft` + `renderObjectiveDraft`, the browser's stale-draft guard covers the
+`resumeObjectiveDraft` + `renderObjectiveDraft`, the browser's stale-draft guard covers the
 report bytes for free (it compares raw artifact bytes), and DENY routes the ordinary
 full-redraft `objective_draft` loop (no new machinery).
 
@@ -10094,7 +10100,7 @@ door success only). The producing session is the `perk learn dream` launch (§8.
 **The transfer file.** `dream-report-transfer.json`, run-scoped scratch
 (`run_scratch_dir(root, run_id)`), filename constant mirrored in both planes
 (`perk.learn.dream_companion.DREAM_REPORT_TRANSFER_FILENAME` ↔
-`extension/factories/objectiveSave.ts` — parity-pinned): `{schema_version: "1", run_id, parts}`.
+`extension/pi/v1/objectiveAuthoring.ts` — parity-pinned): `{schema_version: "1", run_id, parts}`.
 Written atomically by `saveObjective` on the dream arm only — after the gate yields `block`
 (and after the approval-path byte-compare), BEFORE the cold door; a write throw is the soft
 `errorType: "scratch_failed"` failure (the `runColdDoor` stdin-staging precedent) — the cold

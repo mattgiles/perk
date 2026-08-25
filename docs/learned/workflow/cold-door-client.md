@@ -32,7 +32,7 @@ narrowing helpers, and the migration playbook that keeps door tests green.
 Every warm door that shells to a Python `--json` cold door delegates through `runColdDoor`,
 enforced by the source-scan guard `extension/coldDoorGuard.test.ts` (no `PERK_BIN` reference and
 no perk exec outside `substrate/coldDoor.ts`). The live consumer census is **derived, never
-listed** — grep `runColdDoor` imports under `extension/doors/` + `extension/factories/` (this
+listed** — grep `runColdDoor` imports under `extension/doors/` + `extension/pi/v1/` (this
 census froze once at "nine" and drifted). No per-door `activeRunId` copies remain (the stamp
 fallback is uniformly `cold-door-<ts>`). **A new warm door that shells to a Python `--json` cold
 door MUST consume the substrate — hand-rolled exec/parse is a regression, not a style choice.**

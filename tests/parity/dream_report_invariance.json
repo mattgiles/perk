@@ -1,5 +1,5 @@
 {
-  "comment": "The cross-plane parity fixture for the dream-report part-invariance rule (contracts.md §8.64). Consumed by BOTH tests/test_dream_companion.py (Python validate_report_parts) and extension/factories/objectiveDreamReport.test.ts (the TS reportPartInvarianceViolations mirror) — one shared set, the execution-path parity discipline. An `invalid` entry carries either a literal `part` or a `{repeat, count}` expansion (for the oversize case).",
+  "comment": "The cross-plane parity fixture for the dream-report part-invariance rule (contracts.md §8.64). Consumed by BOTH tests/test_dream_companion.py (Python validate_report_parts) and extension/authoring/objective/dreamReportGate.test.ts (the TS reportPartInvarianceViolations mirror) — one shared set, the execution-path parity discipline. An `invalid` entry carries either a literal `part` or a `{repeat, count}` expansion (for the oversize case).",
   "run_id": "01PARITYRUN000000000000000",
   "valid": [
     "# Dream report — plain markdown\n\nWith **bold**, `inline code`, and a\n\n```yaml\nfenced: block\n```\n",

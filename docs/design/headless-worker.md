@@ -69,7 +69,7 @@ anchored to real symbols.
   calls `ctx.newSession(...)`. But (a) it is **headless-guarded** — it requires `ctx.hasUI` for the
   confirm/handoff and otherwise logs to stderr and returns (`"a fresh-context /implement handoff
   needs an interactive session"`), and (b) the worker's seeded prompt instructs `/submit`, never
-  `/implement`. Objective budget compaction uses `ctx.compact(...)` (`extension/objective.ts`
+  `/implement`. Objective budget compaction uses `ctx.compact(...)` (`extension/pi/v1/objective.ts`
   `turn_end`), which is **in-place and does NOT replace the session**. So replacement is not
   expected on the happy path.
 - **Resolution (1.2):** the worker is built on
@@ -100,7 +100,7 @@ anchored to real symbols.
   pi-internal `ctx.signal` chain.
 - **Resolution (1.2):** the worker constructs an `AbortController`; the budget watchdog (max turns
   from `turn_end` counting, token budget from `ctx.getContextUsage()`/usage summation à la
-  `extension/objective.ts` `sumAssistantTokens`, and a wall-clock timeout) aborts it; the worker
+  `extension/pi/v1/objective.ts` `sumAssistantTokens`, and a wall-clock timeout) aborts it; the worker
   `await session.abort()` and returns `status: "aborted"` or `status: "budget_exhausted"` (Gap 7).
   Abort is **hard** (does not wait for the terminating tool). The contract (§B) documents that perk's
   already-`ctx.signal`-aware tools (`submit`, `finalize_address`, `run_ci`) propagate the
@@ -118,11 +118,11 @@ anchored to real symbols.
   post-acceptance model/network error surfaces through the event/message stream (not
   `preflightResult(false)`, which fires only for pre-acceptance preflight rejection).
 - **The gap — the objective-compaction bypass:** the settings flag does **not** govern perk's own
-  threshold compaction. `extension/objective.ts`'s `turn_end` handler calls `ctx.compact(...)`
+  threshold compaction. `extension/pi/v1/objective.ts`'s `turn_end` handler calls `ctx.compact(...)`
   directly (the `trigger-compact.ts` pattern), bypassing `SettingsManager.compaction.enabled`. Left
   unaddressed, an active objective in the drive session would re-introduce non-determinism.
 - **Verified-safe resolution:** that handler is **inert unless an objective is active** — its first
-  line is `if (activeObjective(ctx) === null) return;` (verified in `extension/objective.ts`).
+  line is `if (activeObjective(ctx) === null) return;` (verified in `extension/pi/v1/objective.ts`).
   `active_objective` is set **only** by `/objective <id>` and the `objective_save` tool — **never**
   by the `implement`/`address` cold-door positioning (`perk/launch.py` writes only
   `{stage, mode, …handoff_extra}` to the handoff; it sets no objective field). So a prepared

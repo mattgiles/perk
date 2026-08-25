@@ -2,7 +2,7 @@
 
 The objective-read clause is rendered by a shared helper per plane:
 ``perk/cli/commands/objective/shared.py::objective_read_instruction`` (cold) and its TS twin
-``extension/factories/objectivePlan.ts::objectiveReadInstruction`` (warm), both sharing the wording
+``extension/authoring/objective/prose.ts::objectiveReadInstruction`` (warm), sharing the wording
 in ``prompts/common/objective-read/linear.md`` via the render seam (contracts.md §8.31). Cross-plane
 byte-parity is now owned by the ``objective-read-*`` live-parity cases
 (``tests/test_prompt_parity.py``); the tests here are per-plane SELECTION tests proving the

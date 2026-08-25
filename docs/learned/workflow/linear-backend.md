@@ -369,11 +369,11 @@ every request the emitters compose without touching emitter code or the real cli
 Objective seed prompts gained their own backend-aware read clause, mirroring the plan-read precedent:
 one parity-pinned helper per plane — `objective_read_instruction` (Python,
 `src/perk/cli/commands/objective/shared.py`) ↔ byte-identical `objectiveReadInstruction` (TS,
-`extension/factories/objectivePlan.ts`) — appended as a **supplemental clause** to the existing
+`extension/authoring/objective/prose.ts`) — appended as a **supplemental clause** to the existing
 `perk objective show <id>` step in the three objective seed prompts (cold `_seed_prompt`, warm
 `factoryGuidance` + `reconcileGuidance`). Byte-parity is pinned by a paired `OBJECTIVE_LINEAR_SUBSTRINGS`
 lockstep substring list in `tests/test_objective_prompt_parity.py` ↔
-`extension/factories/objectivePlan.test.ts` — the **same `LINEAR_READ_SUBSTRINGS` discipline**
+`extension/authoring/objective/prose.test.ts` — the **same `LINEAR_READ_SUBSTRINGS` discipline**
 documented above (a third instance; see `shared-contracts.md`).
 
 - **The supplemental-clause pattern beats replacement.** The helper returns `""` for github (and any
