@@ -1,5 +1,5 @@
 // A deliberately strict unified-diff applier for the plannotator "Direct Edits" feedback only
-// (`extension/adapters/planAdapterPlannotator.ts` extracts the ```diff fence; the plan arm of
+// (`extension/pi/v1/providers/plannotator.ts` extracts the ```diff fence; the plan arm of
 // `plan_review` applies it to the exact draft bytes it submitted) — this is NOT a general-purpose
 // patch tool.
 //
