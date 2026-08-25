@@ -36,13 +36,11 @@ import { registerSelfcheck } from "./doors/selfcheck.ts";
 import { registerOpenStackReview, registerStackReviewBrowser } from "./doors/stackReviewBrowser.ts";
 import { registerSubmit } from "./doors/submit.ts";
 import { registerSubmitPrReview } from "./doors/submitPrReview.ts";
-import { registerObjectiveAuthor } from "./factories/objectiveAuthor.ts";
-import { registerObjectiveDraft } from "./factories/objectiveDraft.ts";
 import { registerObjectivePlan } from "./factories/objectivePlan.ts";
-import { registerObjectiveSave } from "./factories/objectiveSave.ts";
 import { createHunkFeedbackReceiver } from "./hunkFeedback/receiver.ts";
 import { installGistBindings } from "./pi/v1/gist.ts";
 import { installObjectiveBindings } from "./pi/v1/objective.ts";
+import { installObjectiveAuthoringBindings } from "./pi/v1/objectiveAuthoring.ts";
 import { installPlanBindings } from "./pi/v1/plan.ts";
 import { installPlannotatorPlanAdapter } from "./pi/v1/providers/plannotator.ts";
 import { installTombellPlanAdapter } from "./pi/v1/providers/tombell.ts";
@@ -177,9 +175,12 @@ export default function (pi: ExtensionAPI) {
   // plannotator is selected.
   installPlannotatorPlanAdapter(pi);
 
-  // Objective-author context injection (the objective mirror of plan mode's authoring
-  // half). Keyed off (read-only gate AND stage === objective-author); planMode defers to it.
-  registerObjectiveAuthor(pi, gating);
+  // The v1 objective-authoring installer: the objective-author context hook pair (this call
+  // sits at the frozen hooks-ordering slot the injection always held — keyed off (read-only
+  // gate AND stage === objective-author); planMode defers to it), plus the
+  // `objective_draft`/`objective_save` tools and the `/objective-save` command (registration is
+  // name-keyed — only the hooks ordering is frozen).
+  installObjectiveAuthoringBindings(pi, gating);
 
   // The v1 gist installer: the gist-authoring context hook pair (this call sits at the frozen
   // hooks-ordering slot the injection always held; planMode defers to it too), plus the
@@ -450,9 +451,6 @@ export default function (pi: ExtensionAPI) {
     }
   });
 
-  // The `objective_draft` working-objective file tool (the plan_draft twin).
-  registerObjectiveDraft(pi);
-
   // Lifecycle gates: the dirty-repo switch/fork guard + the guard-only `/implement`.
   registerLifecycleGates(pi);
 
@@ -552,10 +550,6 @@ export default function (pi: ExtensionAPI) {
   // (clean/read-only trees compact immediately; no commit → no compaction or continuation).
   // Human-only — no tool twin.
   registerCommitAndCompact(pi, gating);
-
-  // The warm `objective_save` door: the `objective_save` tool + `/objective-save` command
-  // (the objective mirror of plan-save). Takes `gating` for the read-only → read-write boundary.
-  registerObjectiveSave(pi, gating);
 
   // The objective plan factory's warm transition surface: the `objective_node` bounded
   // tool (delegates to the Python cold door; `status:"done"` requires a completion audit) + the
