@@ -443,15 +443,13 @@ parser's structural assumptions.
 
 ### 6. SDK-driven headless workers
 
-[`extension/worker/worker.ts`](../../extension/worker/worker.ts) drives `implement` and `address`
+[`extension/worker/stageExecution.ts`](../../extension/worker/stageExecution.ts) (with its
+private SDK adapter [`extension/worker/sdkAdapter.ts`](../../extension/worker/sdkAdapter.ts))
+drives `implement` and `address`
 without a human TUI. It directly creates coding-agent SDK session services and a model runtime,
 loads extensions, installs a headless binding, prompts the session, listens to events, tracks
 turn/token/wall-clock budgets, aborts on a tripped budget or external signal, checks terminating
 tools, records session pointers, and emits Perk run events.
-
-[`extension/worker/readOnlySession.ts`](../../extension/worker/readOnlySession.ts) creates
-isolated, read-only child SDK sessions for bounded analysis. Perk also uses these sessions as a
-substrate for multi-angle agent waves.
 
 These implementations compensate for current SDK lifecycle gaps in a deliberate, tested way.
 They are also the Perk code most likely to benefit from a stable durable drive API.
@@ -826,9 +824,9 @@ These principles constrain later plans without selecting one now:
   to session-file linkage
 - [`src/perk/learn/session_jsonl.py`](../../src/perk/learn/session_jsonl.py) — independent v3
   session parser
-- [`extension/worker/worker.ts`](../../extension/worker/worker.ts) — bounded SDK headless drive
-- [`extension/worker/readOnlySession.ts`](../../extension/worker/readOnlySession.ts) — isolated
-  read-only child sessions
+- [`extension/worker/stageExecution.ts`](../../extension/worker/stageExecution.ts) +
+  [`extension/worker/sdkAdapter.ts`](../../extension/worker/sdkAdapter.ts) — bounded SDK
+  headless drive
 - [`src/perk/run/run_worker.py`](../../src/perk/run/run_worker.py) — exterior remote worker
 - [`extension/surfaces/`](../../extension/surfaces) — UI/headless boundary
 - [`deepen-headless-execution/memo.md`](deepen-headless-execution/memo.md) — existing headless

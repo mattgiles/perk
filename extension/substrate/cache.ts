@@ -15,7 +15,7 @@
 // `atomicWriteFileSync` (temp file in the same directory + atomic rename) so a concurrent
 // writer can never tear a file — a reader sees either the old bytes or the new bytes, never a
 // mix (guard-tested by writeGuard.test.ts). The exemptions are the append-only NDJSON streams
-// — the worker's `events.ndjson` (worker/worker.ts) and the §8.58 hunk-watch `outbox.ndjson` /
+// — the worker's `events.ndjson` (worker/stageExecution.ts) and the §8.58 hunk-watch `outbox.ndjson` /
 // `delivered.ndjson` (hunkFeedback/perkFeedback.ts / hunkFeedback/store.ts) — where O_APPEND
 // appends cannot truncate-tear and whole-file replace would introduce a read-modify-write race
 // between independent processes. Atomicity is not mutual exclusion — whole-file

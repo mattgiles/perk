@@ -649,8 +649,7 @@ session-lifecycle gates + the warm `/implement` handoff (`extension/doors/lifecy
 (`extension/surfaces/surfaces.ts`,
 `docs/design/tui-charter.md`); plan mode + the plan provider deferral
 (`extension/factories/planMode.ts`; §8.10
-owns the provider seams); in-process read-only child sessions
-(`extension/worker/readOnlySession.ts`); the read-only CI executor
+owns the provider seams); the read-only CI executor
 (`extension/doors/ciExecutor.ts`); the spawned delegation seam + `/address` + `/pr-review` + `/pr-review-dynamic` + `/pr-review-terminal` + `/pr-review-browser`
 (`extension/doors/address.ts` / `prReview.ts` / `prReviewDynamic.ts` / `prReviewTerminal.ts` /
 `prReviewBrowser.ts` / `submitPrReview.ts` / `hunkHandoff.ts` / `plannotatorHandoff.ts`, `agents/*.md`, `skills/perk-address/` /
@@ -2519,14 +2518,19 @@ key (pi merges project settings over global).
 
 ## §8.11 · The headless stage-drive worker contract
 
-The **stage-drive primitive** (`extension/worker/worker.ts` `driveStage`) drives ONE read-write stage
+The **stage-drive primitive** (`extension/worker/stageExecution.ts` `runStage`) drives ONE read-write stage
 (`implement`/`address`) end-to-end on an **already-prepared** worktree, in-process via the SDK
 runtime factory, running the **same** `@mgiles/perk` extension package. §8.12 (the structured
 event stream) and the worker harness consume it. This section locks the
 worker's inputs, determinism invariants, terminal-signal definition, and outcome shape (the full
 audit is `docs/design/headless-worker.md`). The worker makes **no GitHub mutation of its
 own** — the stage's own tools (`submit`, `finalize_address`) delegate to the Python gateway
-exactly as in a warm session (§8.4/§8.52).
+exactly as in a warm session (§8.4/§8.52). The seam is **SDK-confined**: session construction,
+raw session events, prompt/abort ownership, and token accumulation live in the private SDK
+adapter (`extension/worker/sdkAdapter.ts` — the seam's only production importer of the SDK; the
+seam drives the session solely through the adapter's drive-session handle), and `workerMain.ts`
+imports **no SDK** — it consumes only the seam (guard-enforced:
+`extension/importDirectionGuard.test.ts` Rule F).
 
 ### Inputs (the prepared-worktree contract)
 
@@ -2536,8 +2540,8 @@ exactly as in a warm session (§8.4/§8.52).
 | `stage` | `"implement" \| "address"` | the only `doors.cold_remote: true` read-write stages (`shared/registry.yaml`) |
 | `run_id` | ULID, present as `PERK_RUN_ID` in env | minted by positioning; the worker **inherits** it and never re-mints |
 | handoff / plan-ref / plan-body | files under `<worktree>/.perk/workflow/` | materialized by positioning; the worker does not re-write them |
-| `initialPrompt` | string | re-derived by `initialPromptFor(stage, planRef)` — the TS twin of `perk/run/launch/prompts.py._implement_prompt`/`_address_prompt` (parity asserted reciprocally in `extension/worker/worker.test.ts` + `tests/test_worker_prompt_parity.py`); the prompt carries **no skill-binding suffix** — the worker's bindings arrive via §8.9 Mechanism A (the extension's `before_agent_start` injection, which fires because the handoff records the stage and no branch entry carries `BINDING_HEADER`); the injected content is byte-identical to the cold door's prompt suffix (`tests/test_binding_render_parity.py`; the named mechanism difference is §8.38 row 2) |
-| `model` / `thinkingLevel` / `modelRuntime` | optional `Model`, optional `ThinkingLevel`, optional `ModelRuntime` (default-created when absent) | explicit worker inputs (`worker.ts::DriveStageOptions`); **no model ⇒ a fail-soft `failed`/`no_model` outcome, never a throw**. The workerMain shim resolves an explicit `--model` flag through pi's `resolveCliModel` (CLI parity: fuzzy matching, `provider/pattern`, a `:thinking` suffix — `resolveWorkerModel`); a parsed thinking level rides `thinkingLevel`, applied at session creation (absent ⇒ the settings default) |
+| `initialPrompt` | string | re-derived by `initialPromptFor(stage, planRef)` — the TS twin of `perk/run/launch/prompts.py._implement_prompt`/`_address_prompt` (parity asserted reciprocally in `extension/worker/stageExecution.test.ts` + `tests/test_worker_prompt_parity.py`); the prompt carries **no skill-binding suffix** — the worker's bindings arrive via §8.9 Mechanism A (the extension's `before_agent_start` injection, which fires because the handoff records the stage and no branch entry carries `BINDING_HEADER`); the injected content is byte-identical to the cold door's prompt suffix (`tests/test_binding_render_parity.py`; the named mechanism difference is §8.38 row 2) |
+| `model` | optional `WorkerModelSelection` — an **opaque nominal token** (`#private` fields; structurally unforgeable) minted only by `resolveWorkerModel` in the **private SDK adapter** (`worker/sdkAdapter.ts`); it carries the `ModelRuntime` (default-created when the flag is absent) plus the optional explicit model and parsed thinking level | explicit worker input (`stageExecution.ts::StageRunOptions`); **no available model ⇒ a fail-soft `failed`/`no_model` outcome, never a throw** (same semantics as before). The workerMain shim resolves an explicit `--model` flag through pi's `resolveCliModel` (CLI parity: fuzzy matching, `provider/pattern`, a `:thinking` suffix — `resolveWorkerModel`, re-exported through the seam); a parsed thinking level rides the selection, applied at session creation (absent ⇒ the settings default) |
 | `budget` | `{ maxTurns, maxTokens, wallClockMs }` | worker input; the watchdog that drives abort |
 | `signal` | `AbortSignal` | external cancellation; OR'd with the budget watchdog |
 
@@ -2548,7 +2552,7 @@ exactly as in a warm session (§8.4/§8.52).
   borrowed packages (`npm:pi-subagents` etc.), the same package set as a warm session — alongside
   the managed `AGENTS.md`/`APPEND_SYSTEM.md`, while the user-global tier
   (extensions/settings/skills/models/auth) stays locked out via the throwaway `agentDir` — the
-  isolation invariant; loader/install mechanics live in `extension/worker/worker.ts`. Missing
+  isolation invariant; loader/install mechanics live in `extension/worker/sdkAdapter.ts`. Missing
   `npm:` packages **auto-install** into the
   project-scope root `.pi/npm` at session construction (an install failure throws → a loud
   `failed`/`drive_error` outcome; installs are skipped under `PI_OFFLINE`) — §8.14's composite
@@ -2564,7 +2568,9 @@ exactly as in a warm session (§8.4/§8.52).
 - **`ctx.hasUI === false`**: the session binds with `{ uiContext: undefined, mode: "json" }`,
   so every perk UI surface takes its headless `console.error` fallback.
 - **Rebind defensiveness**: the worker is built on `createAgentSessionRuntime` (the
-  services/from-services factory), and a `bindAndSubscribe`/`rebind` helper re-binds the extension
+  services/from-services factory), and the adapter's **drive-session handle**
+  (`sdkAdapter.ts::createDriveSession` — which also owns bind/subscribe, the driving prompt,
+  abort with an owned rejection, and guarded never-throws disposal) re-binds the extension
   and re-attaches the terminal/budget listener after any runtime replacement — but `bindExtensions`
   is **still called explicitly** at startup (the factory only *loads* extensions; binding emits
   `session_start` and runs perk's claim path). A mid-drive replacement is **not expected** on the
@@ -2684,7 +2690,7 @@ A small, JSON-serializable, **additive-stable** discriminated union. Every event
 
 ### Dual delivery (the injectable sink seam)
 
-`RunEventSink = (event: RunEvent) => void`, injectable via `DriveStageDeps.eventSink`. This satisfies
+`RunEventSink = (event: RunEvent) => void`, injectable via `StageRunDeps.eventSink`. This satisfies
 both consumers: the worker harness asserts events in-process via an injected array sink; the
 §8.15 reporter reads the durable file out-of-process.
 
@@ -3620,8 +3626,8 @@ unreadable config — the provider-convergence posture); surfacing defers to the
 
 **Backend-aware prompt rendering.** Every plan-read prompt site branches on
 `cache.plan-ref.provider` via the per-plane helpers `perk/run/launch/prompts.py::_plan_read_instruction` and
-`extension/doors/lifecycleGates.ts::planReadInstruction` — byte-parity across planes, asserted by the
-paired parity suites (`tests/test_worker_prompt_parity.py` + `extension/worker/worker.test.ts`). The
+`extension/substrate/prompts.ts::planReadInstruction` — byte-parity across planes, asserted by the
+paired parity suites (`tests/test_worker_prompt_parity.py` + `extension/worker/stageExecution.test.ts`). The
 `linear` arm references the pi-mono-linear `linear_get_issue` + `linear_list_comments` tools with
 an `open <url>` fallback; unknown providers keep the plain `open <url>` arm. The Linear plan-body
 rule is a **marker-bearing candidate search**, not a privileged first comment: `get_plan_body`
@@ -5126,7 +5132,7 @@ ISO-8601 }`. Each run is **self-keyed**: it writes ONLY under its OWN `run_id`, 
 the slots it owns (planning runs → `planning.*`; implement runs → `implementation.*`). The four
 class/site slots are always present (null when unset) so a read-modify-write merges trivially.
 `main` vs `worker` is distinguished by **capture site** (deterministic), not by inspection: the
-interior `session_start` writes `.main`, the headless `worker.driveStage` writes `.worker`, and
+interior `session_start` writes `.main`, the headless stage-execution seam's `runStage` writes `.worker`, and
 the `/submit` warm door additionally captures `.main` at `impl_run_ids`-stamping time (so a
 submitted run resolves `found` regardless of its launched stage). The interior capture is
 **claimer-only and first-write-wins** (a foreign-session overwrite is skipped with a loud stderr
@@ -5490,11 +5496,11 @@ identity).
 | # | surface | shared implementation | enforced by |
 |---|---|---|---|
 | 1 | next-action resolution | `resume.resolve_next_action` (§8.37) — consumed by `plan resume` and the `objective run` supervisor (incl. its remote dispatch arm) | `tests/test_next_action_parity.py` (verdict **and** stage-selection equality across both dry-runs), `tests/test_resume.py` |
-| 2 | prompt generation (local vs worker) | canonical templates `prompts/stages/*` via the §8.31 render seam; `_implement_prompt`/`_address_prompt` ↔ `initialPromptFor` ↔ `implementHandoffPrompt`/`addressGuidance` | `tests/test_prompt_parity.py` (live cross-engine byte parity) + goldens; reciprocal substring suites `tests/test_worker_prompt_parity.py` ↔ `extension/worker/worker.test.ts`; binding-content byte parity `tests/test_binding_render_parity.py` (via `extension/testing/renderBindingsLive.ts`) |
-| 3 | submit side effects | one Python door, `perk pr submit --json`; the warm `submit` tool/`/submit` command delegate via `submitPr` (`extension/doors/submit.ts`), and the remote worker drives that same registered tool | `extension/worker/workerE2e.test.ts` (implement HAPPY drives the real tool through the real extension into a stubbed `PERK_BIN` router), `extension/doors/submit.test.ts`, `tests/test_pr_submit.py` |
-| 4 | address terminal criteria | `finalize_address` (`extension/doors/address.ts`) runs submit first, delegates its internal resolve half to `perk pr resolve-threads --json`, and appends `last_review_batch`; the worker requires finalizer success + that write + successful effective submit evidence with `mergeable !== false` | `workerE2e.test.ts` (address HAPPY binds both real door writes to classification), `worker.test.ts` `evaluateTerminal` matrix; post-address the supervisor re-classifies via row 1 |
+| 2 | prompt generation (local vs worker) | canonical templates `prompts/stages/*` via the §8.31 render seam; `_implement_prompt`/`_address_prompt` ↔ `initialPromptFor` ↔ `implementHandoffPrompt`/`addressGuidance` | `tests/test_prompt_parity.py` (live cross-engine byte parity) + goldens; reciprocal substring suites `tests/test_worker_prompt_parity.py` ↔ `extension/worker/stageExecution.test.ts`; binding-content byte parity `tests/test_binding_render_parity.py` (via `extension/testing/renderBindingsLive.ts`) |
+| 3 | submit side effects | one Python door, `perk pr submit --json`; the warm `submit` tool/`/submit` command delegate via `submitPr` (`extension/doors/submit.ts`), and the remote worker drives that same registered tool | `extension/worker/stageExecutionE2e.test.ts` (implement HAPPY drives the real tool through the real extension into a stubbed `PERK_BIN` router), `extension/doors/submit.test.ts`, `tests/test_pr_submit.py` |
+| 4 | address terminal criteria | `finalize_address` (`extension/doors/address.ts`) runs submit first, delegates its internal resolve half to `perk pr resolve-threads --json`, and appends `last_review_batch`; the worker requires finalizer success + that write + successful effective submit evidence with `mergeable !== false` | `stageExecutionE2e.test.ts` (address HAPPY binds both real door writes to classification), `stageExecution.test.ts` `evaluateTerminal` matrix; post-address the supervisor re-classifies via row 1 |
 | 5 | plan-ref reconstruction + positioning | one function, `resume.reconstruct_plan_ref` — all reconstruction sites converge on it; one validating selector/positioner, `launch.resolve_worktree` (the positioning semantics below), used by every cold door needing a plan checkout; `run_worker.position_worktree` mirrors `launch_stage`'s positioning, and fresh stacked starts independently call the same execution `Delivery.prepare` boundary (§8.46) from `resolve_worktree` and `run_worker.position_branch` | `tests/test_plan_ref_parity.py` (the save→reconstruct round trip + the `PlanRef` field census), `tests/test_plan_selection.py`, `tests/test_resume.py`, `tests/test_launch_restore.py` (the non-destructive restore matrix), `tests/test_run_worker.py::test_positioning_parity_local_launch_vs_remote_worker` (artifact byte parity, `run_id` excepted; the explicit-ref twin pins the direct-ref arm), `tests/test_run_worker.py::test_positioning_parity_stacked_local_create_vs_remote_position` (same start SHA + `layer-context.json` parity, timestamps excepted) |
-| 6 | run reporting | **remote-only by design**: `perk/run/run_report.py` derives the §8.15 plan-issue comments + job summary solely from the §8.12 events stream + exit code | `tests/test_run_report.py` (incl. the `RunOutcome` lockstep literals) ↔ `worker.test.ts` (the frozen `assembleOutcome` shapes) |
+| 6 | run reporting | **remote-only by design**: `perk/run/run_report.py` derives the §8.15 plan-issue comments + job summary solely from the §8.12 events stream + exit code | `tests/test_run_report.py` (incl. the `RunOutcome` lockstep literals) ↔ `stageExecution.test.ts` (the frozen `assembleOutcome` shapes) |
 
 ### Positioning semantics (`launch.resolve_worktree` — the one selector/positioner)
 

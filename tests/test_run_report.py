@@ -228,7 +228,7 @@ def test_format_step_summary_degraded_when_none():
 # ----------------------------------------------------------------- RunOutcome lockstep
 
 # LOCKSTEP LITERALS (contracts.md §8.11/§8.38): these two RunOutcome shapes are pinned
-# byte-identically in extension/worker/worker.test.ts ("assembleOutcome: completed has
+# byte-identically in extension/worker/stageExecution.test.ts ("assembleOutcome: completed has
 # error:null and the frozen shape" / "assembleOutcome: a failure carries a capped
 # error.summary") — the TS emitter and this Python reporter share no schema, so the shared
 # literal is the tripwire: a TS field rename breaks these tests instead of silently degrading

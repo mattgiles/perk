@@ -443,7 +443,7 @@ export default function (pi: ExtensionAPI) {
 
     // Implementation session pointer (contracts.md §8.35): an implement session self-keys its own
     // session file into the shared main checkout so a later/other session resolves it cross-run.
-    // The headless worker's inner session lands here too (.main); driveStage records the matching
+    // The headless worker's inner session lands here too (.main); runStage records the matching
     // .worker. A forked implement session inherits the parent's launched stage + threads the
     // inherited parent session id as fork provenance. Best-effort + non-fatal (carrier warns).
     // First-write-wins (`preserveForeign`): this is the corroborated shadowing defect site — the

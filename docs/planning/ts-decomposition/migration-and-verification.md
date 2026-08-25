@@ -299,6 +299,35 @@ execution substrate.
 
 ### Changes
 
+> **Status (Objective #2083, Node 3.1):** the confinement landed as a **rename +
+> private SDK adapter + drive-session handle**, not the `StageRunner` protocol
+> this section sketches (the protocol stays deferred with the durable-drive
+> adapter; the node is mechanism-confinement only — "no new runner protocol").
+> The stamped current-system-map stays as-stamped; this note is the
+> reconciliation. Outcomes recorded at implementation:
+>
+> - `worker/worker.ts` → `worker/stageExecution.ts` (`driveStage` → `runStage`;
+>   `DriveStageOptions`/`DriveStageDeps` → `StageRunOptions`/`StageRunDeps`); the
+>   caller surface carries no SDK shapes — the SDK-typed model triple collapsed
+>   into one opaque nominal `WorkerModelSelection`, and every `@earendil-works`
+>   import on the drive path (construction, raw events, prompt/abort, token
+>   accumulation) lives in the private `worker/sdkAdapter.ts` (the bind manager
+>   grew into its drive-session handle). `workerMain.ts` keeps its name (the
+>   §8.14 cross-plane entry pin) and imports no SDK.
+> - `workerMain.ts` is enforced as the only execution root by the new import
+>   guard Rule F (exact-set inbound `worker/` edges + the SDK-specifier census);
+>   the one `MECHANISM_EDGE_ALLOWLIST` entry died with the worker→doors edge —
+>   `planReadInstruction` was absorbed into the `substrate/prompts.ts` render
+>   seam.
+> - The dead read-only runner (`readOnlySession.ts`) was deleted whole on
+>   refreshed no-caller evidence; the model-visible capping helpers moved to
+>   `substrate/modelVisible.ts`.
+> - Observable behavior is byte-preserved (the kept fake-session policy suite +
+>   six-scenario E2E + cross-plane lockstep/parity suites are the proof); three
+>   test-pinned non-observable hardenings landed: abort-rejection ownership,
+>   cleanup-error precedence under the seam's never-throws contract, and
+>   dispose-time throwaway-agentDir removal.
+
 - Define `StageRunner.run` around registered stage identity, Prompt assembly,
   terminating-tool requirements, budgets, workflow run events, pointers,
   cancellation, and `StageRunOutcome`.

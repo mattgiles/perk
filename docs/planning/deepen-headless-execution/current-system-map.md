@@ -81,7 +81,7 @@ should not reproduce cascade mechanics.
 
 ### SDK worker
 
-[`extension/worker/worker.ts`](../../../extension/worker/worker.ts) already embeds Pi through its
+[`extension/worker/stageExecution.ts`](../../../extension/worker/stageExecution.ts) already embeds Pi through its
 SDK. It creates a session with project resources, excludes global resources, disables automatic
 retry and compaction, enforces budgets, and watches for stage-specific terminal tool calls.
 

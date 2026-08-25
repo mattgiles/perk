@@ -427,3 +427,24 @@ The structured run-event stream shipped as a **purely additive** layer over the 
 **Still deferred, as planned:** GitHub progress/terminal reporting (Node 2.3), the live e2e worker
 harness that asserts these events end-to-end (Node 4.1), remote dispatch / the runner (2.1/2.2), and
 the `address`-path subagent-under-worker live smoke (open-#6, Phase-3 `doctor workflow`).
+
+---
+
+## Outcomes (Node 3.1 — stage-execution confinement; landed)
+
+*Additive reconciliation note; the audit body above is the historical record and is not rewritten —
+paths and symbol names in it are as-of-audit.*
+
+The worker's landed shape moved behind a confined seam (Objective #2083, contracts §8.11):
+
+- `extension/worker/worker.ts` → **`extension/worker/stageExecution.ts`**; `driveStage` →
+  **`runStage`**; `DriveStageOptions`/`DriveStageDeps` → `StageRunOptions`/`StageRunDeps`. The
+  SDK-typed `model`/`thinkingLevel`/`modelRuntime` input triple collapsed into one opaque nominal
+  `WorkerModelSelection`.
+- Every `@earendil-works` import on the drive path — construction (`defaultCreateRuntime`),
+  raw session events, prompt/abort, token accumulation — lives in the **private
+  `extension/worker/sdkAdapter.ts`** (the `createBindManager` rebind manager grew into its
+  drive-session handle). `workerMain.ts` keeps its name (the §8.14 entry pin) and imports no SDK.
+- The read-only child runner this audit contrasted against (`readOnlySession.ts` —
+  `createReadOnlySession`/`runReadOnlyChild`) was **deleted as dead code**; its model-visible
+  capping helpers live on in `extension/substrate/modelVisible.ts`.

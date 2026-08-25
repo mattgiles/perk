@@ -144,7 +144,7 @@ workflow inputs; a Fly or Cloudflare worker adapter may translate the same inten
 
 ### 4. Generalize the session interior around bounded recipes
 
-The existing [`worker.ts`](../../extension/worker/worker.ts) is already the right foundation: it
+The existing [`stageExecution.ts`](../../extension/worker/stageExecution.ts) is already the right foundation: it
 uses Pi's SDK, retains project resources while excluding global resources, disables ambient retry
 and compaction, enforces budgets, and recognizes terminal tools. Its current type only permits
 `implement | address`.
