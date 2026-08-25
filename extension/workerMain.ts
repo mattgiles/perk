@@ -1,24 +1,25 @@
 // The runnable entrypoint shim for the headless stage-drive worker.
 //
-// A THIN CLI over `driveStage`. It does NO positioning, dispatch, or model fiction — positioning is
-// the cold-door/runner's job (Gap 7): this shim consumes a PREPARED worktree (handoff/plan-ref/plan-
-// body already materialized, `PERK_RUN_ID` already in the env) and FAILS CLOSED if `PERK_RUN_ID` is
-// absent (it never mints). It resolves the model/auth headlessly (env-var key resolution, Gap 5),
-// re-derives the seeded prompt from the worktree's `cache.plan-ref`, wires SIGINT/SIGTERM to an
-// AbortController, drives the stage, prints the `RunOutcome` JSON to stdout (a human summary to
-// stderr), and exits 0 on `completed` else non-zero. Runs as `.ts` under node 22 type-stripping.
+// A THIN CLI over the stage-execution seam's `runStage`. It does NO positioning, dispatch, or
+// model fiction — positioning is the cold-door/runner's job (Gap 7): this shim consumes a PREPARED
+// worktree (handoff/plan-ref/plan-body already materialized, `PERK_RUN_ID` already in the env) and
+// FAILS CLOSED if `PERK_RUN_ID` is absent (it never mints). It resolves the model/auth headlessly
+// (env-var key resolution, Gap 5) through the seam-re-exported `resolveWorkerModel` — this file
+// imports ONLY the seam and carries ZERO SDK imports (guard Rule F) — re-derives the seeded prompt
+// from the worktree's `cache.plan-ref`, wires SIGINT/SIGTERM to an AbortController, drives the
+// stage, prints the `RunOutcome` JSON to stdout (a human summary to stderr), and exits 0 on
+// `completed` else non-zero. Runs as `.ts` under node 22 type-stripping.
 
 import { argv, env, exit, stderr, stdout } from "node:process";
-import { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import { runEventsPath, workflowDir } from "./substrate/cache.ts";
 import {
   type DriveBudget,
   type DriveStage,
-  driveStage,
   initialPromptForWorktree,
   type RunOutcome,
   resolveWorkerModel,
-} from "./worker/worker.ts";
+  runStage,
+} from "./worker/stageExecution.ts";
 
 /** Documented defaults for the budget watchdog (overridable via flags). */
 const DEFAULT_BUDGET: DriveBudget = {
@@ -98,10 +99,10 @@ async function main(): Promise<number> {
   // Headless auth/model (Gap 5): env-var key resolution; an explicit `--model` resolves with
   // pi's CLI semantics (fuzzy matching, `provider/pattern`, a `:thinking` suffix —
   // `resolveWorkerModel`), else the SDK's default resolution at session creation (settings
-  // default → pi's per-provider defaults → first available) — the deferral is unchanged.
-  const modelRuntime = await ModelRuntime.create();
-  const resolved = resolveWorkerModel(parsed.model, modelRuntime);
-  if (resolved.error) {
+  // default → pi's per-provider defaults → first available) — the deferral is unchanged. The
+  // warning is printed only when proceeding (an `ok: false` exits before it).
+  const resolved = await resolveWorkerModel(parsed.model);
+  if (!resolved.ok) {
     stderr.write(`perk worker: ${resolved.error}\n`);
     return 2;
   }
@@ -114,13 +115,11 @@ async function main(): Promise<number> {
 
   let outcome: RunOutcome;
   try {
-    outcome = await driveStage({
+    outcome = await runStage({
       worktree: parsed.worktree,
       stage: parsed.stage,
       initialPrompt,
-      model: resolved.model,
-      thinkingLevel: resolved.thinkingLevel,
-      modelRuntime,
+      model: resolved.selection,
       budget: parsed.budget,
       signal: controller.signal,
     });

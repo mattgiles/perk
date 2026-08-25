@@ -1,9 +1,11 @@
-// Fully-offline coverage for the headless stage-drive primitive: the pure helpers
-// (evaluateTerminal/assembleOutcome/applyEvent/initialPromptFor), the budget/abort watchdog and the
-// happy-path drive via an INJECTED runtime (no model turn / network ever), the bind/rebind
-// structural contract, the cross-plane prompt-parity invariant (reciprocal of
-// tests/test_worker_prompt_parity.py), and the Gap-4 verification (a throwaway agentDir still loads
-// + binds the project `@mgiles/perk` extension, with the `session_start` claim engaging). See worker.ts.
+// Fully-offline coverage for the stage-execution seam: the pure policy helpers
+// (evaluateTerminal/assembleOutcome/initialPromptFor), the budget/abort watchdog and the
+// happy-path drive via an INJECTED runtime (no model turn / network ever), the seam's
+// never-throws contract under adversarial fakes, the cross-plane prompt-parity invariant
+// (reciprocal of tests/test_worker_prompt_parity.py), and the Gap-4 verification (a throwaway
+// agentDir still loads + binds the project `@mgiles/perk` extension, with the `session_start`
+// claim engaging). The adapter-owned helpers (applyEvent, the drive-session handle,
+// resolveAuth/resolveWorkerModel) are covered in sdkAdapter.test.ts. See stageExecution.ts.
 
 import assert from "node:assert/strict";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -14,27 +16,23 @@ import type { PlanRef } from "../substrate/cache.ts";
 import { planRefPath, runEventsPath, workflowDir } from "../substrate/cache.ts";
 import { readSessionPointers } from "../substrate/sessionPointers.ts";
 import { loadPerkSession, scaffoldRepo } from "../testing/harness.ts";
+// The nominal model token + counters are adapter-owned; tests mint/build them deliberately.
+import { freshCounters, WorkerModelSelection } from "./sdkAdapter.ts";
 import {
-  applyEvent,
   assembleOutcome,
   budgetTripped,
-  createBindManager,
   createEventEmitter,
-  type DriveCounters,
   type DriveEvent,
   type DriveRuntimeLike,
   type DriveSessionLike,
-  driveStage,
   evaluateTerminal,
-  freshCounters,
   initialPromptFor,
   initialPromptForWorktree,
   missingTerminatingTool,
   type RunEvent,
-  resolveAuth,
-  resolveWorkerModel,
+  runStage,
   toolOutcomeOf,
-} from "./worker.ts";
+} from "./stageExecution.ts";
 
 // The cross-plane prompt-parity invariant: these substrings MUST appear in BOTH the TS
 // `initialPromptFor` output and the Python `perk/run/launch.py` prompts. The same literals live in
@@ -290,62 +288,7 @@ test("assembleOutcome: run_id falls back to PERK_RUN_ID then ''", () => {
   }
 });
 
-// --- pure: applyEvent ---------------------------------------------------------------------------
-
-test("applyEvent: counts turns, sums assistant tokens, captures terminal tool details + model error", () => {
-  const c = freshCounters();
-  applyEvent(c, {
-    type: "turn_end",
-    message: { role: "assistant", usage: { input: 10, output: 5 } },
-  });
-  applyEvent(c, {
-    type: "turn_end",
-    message: { role: "assistant", usage: { input: 3, output: -9 } },
-  });
-  assert.equal(c.turns, 2);
-  assert.equal(c.tokens, 18); // 15 + 3 (negative output clamped to 0)
-
-  applyEvent(c, {
-    type: "tool_execution_end",
-    toolName: "submit",
-    result: { details: { ok: true, pr: { number: 1, url: "u" } } },
-  });
-  assert.deepEqual(c.submitDetails, { ok: true, pr: { number: 1, url: "u" } });
-
-  applyEvent(c, {
-    type: "tool_execution_end",
-    toolName: "finalize_address",
-    result: { details: { ok: true, submit: { mergeable: false } } },
-  });
-  assert.deepEqual(c.finalizeDetails, { ok: true, submit: { mergeable: false } });
-  assert.deepEqual(c.submitDetails, { ok: true, mergeable: false });
-
-  // A later standalone clean submit is the effective mergeability evidence.
-  applyEvent(c, {
-    type: "tool_execution_end",
-    toolName: "submit",
-    result: { details: { ok: true, mergeable: true } },
-  });
-  assert.deepEqual(c.submitDetails, { ok: true, mergeable: true });
-
-  applyEvent(c, {
-    type: "message_end",
-    message: { role: "assistant", stopReason: "error", errorMessage: "net" },
-  });
-  assert.deepEqual(c.modelError, { message: "net" });
-});
-
-test("applyEvent: usage.reasoning is NOT summed — it is a subset of output on every pi-ai provider", () => {
-  // The double-count pin: pi-ai normalizes `reasoning` as a breakdown already inside `output`
-  // (anthropic thinking_tokens, google thoughtsTokenCount, openai reasoning_tokens — verified
-  // @ 0.80.5), so the budget sum stays `input + output` exactly.
-  const c = freshCounters();
-  applyEvent(c, {
-    type: "turn_end",
-    message: { role: "assistant", usage: { input: 10, output: 20, reasoning: 15 } },
-  });
-  assert.equal(c.tokens, 30);
-});
+// --- pure: budgetTripped ------------------------------------------------------------------------
 
 test("budgetTripped: trips on turns OR tokens", () => {
   const budget = { maxTurns: 3, maxTokens: 100, wallClockMs: 1000 };
@@ -416,7 +359,7 @@ const baseBudget = { maxTurns: 100, maxTokens: 1_000_000, wallClockMs: 60_000 };
 
 // --- drive: happy path via injected runtime -----------------------------------------------------
 
-test("driveStage: implement happy path → completed with pr, disposes, never throws", async () => {
+test("runStage: implement happy path → completed with pr, disposes, never throws", async () => {
   const session = new FakeSession((emit) => {
     emit({ type: "turn_end", message: { role: "assistant", usage: { input: 10, output: 5 } } });
     emit({
@@ -426,13 +369,12 @@ test("driveStage: implement happy path → completed with pr, disposes, never th
     });
   });
   const runtime = fakeRuntime(session);
-  const outcome = await driveStage(
+  const outcome = await runStage(
     {
       worktree: "/tmp/wt",
       stage: "implement",
       initialPrompt: "go",
       budget: baseBudget,
-      model: {} as never,
     },
     { createRuntime: async () => runtime, now: () => 1000 },
   );
@@ -445,88 +387,6 @@ test("driveStage: implement happy path → completed with pr, disposes, never th
   assert.equal(runtime.disposed, true);
 });
 
-// --- pure: resolveAuth — the model pick is deferred to the SDK ----------------------------------
-
-function resolveAuthOpts(model: unknown, available: unknown[]): Parameters<typeof resolveAuth>[0] {
-  return {
-    worktree: "/tmp/wt",
-    stage: "implement",
-    initialPrompt: "go",
-    budget: baseBudget,
-    model: model as never,
-    modelRuntime: { getAvailableSnapshot: () => available } as never,
-  };
-}
-
-test("resolveAuth: an explicit model passes through untouched", async () => {
-  const explicit = { provider: "anthropic", id: "claude-sonnet-4-5" };
-  const r = await resolveAuth(resolveAuthOpts(explicit, []));
-  assert.ok(r);
-  assert.equal(r.model, explicit);
-});
-
-test("resolveAuth: no explicit model → model stays undefined (the SDK picks at session creation)", async () => {
-  // The availability snapshot sorts alphabetically, so pre-pinning [0] would select the OLDEST
-  // model of the first provider (a since-removed dated claude-3-5-haiku pin 404'd a remote drive).
-  const r = await resolveAuth(
-    resolveAuthOpts(undefined, [{ id: "claude-3-5-haiku-20241022" }, { id: "claude-sonnet-4-5" }]),
-  );
-  assert.ok(r);
-  assert.equal(r.model, undefined);
-});
-
-test("resolveAuth: no explicit model and an empty catalogue → null (the no_model fail-fast)", async () => {
-  assert.equal(await resolveAuth(resolveAuthOpts(undefined, [])), null);
-});
-
-// --- pure: resolveWorkerModel — `--model` resolves with pi's CLI semantics ----------------------
-
-// `resolveCliModel` consults `getModels()` + `hasConfiguredAuth()` (NOT the availability
-// snapshot): unauthenticated models resolve by design, matching an interactive pi launch.
-const SONNET = { provider: "anthropic", id: "claude-sonnet-4-5" };
-const HAIKU = { provider: "anthropic", id: "claude-haiku-4-5" };
-
-function stubRuntime(models: unknown[]): Parameters<typeof resolveWorkerModel>[1] {
-  return { getModels: () => models, hasConfiguredAuth: () => true } as never;
-}
-
-test("resolveWorkerModel: exact provider/id resolves", () => {
-  const r = resolveWorkerModel("anthropic/claude-sonnet-4-5", stubRuntime([SONNET, HAIKU]));
-  assert.equal(r.model, SONNET);
-  assert.equal(r.thinkingLevel, undefined);
-  assert.equal(r.warning, undefined);
-  assert.equal(r.error, undefined);
-});
-
-test("resolveWorkerModel: a bare partial id resolves (fuzzy matching parity)", () => {
-  const r = resolveWorkerModel("sonnet", stubRuntime([SONNET, HAIKU]));
-  assert.equal(r.model, SONNET);
-  assert.equal(r.error, undefined);
-});
-
-test("resolveWorkerModel: a `:thinking` suffix yields the model + the parsed level", () => {
-  const r = resolveWorkerModel("anthropic/claude-sonnet-4-5:high", stubRuntime([SONNET, HAIKU]));
-  assert.equal(r.model, SONNET);
-  assert.equal(r.thinkingLevel, "high");
-  assert.equal(r.error, undefined);
-});
-
-test("resolveWorkerModel: an unknown pattern ⇒ error set, model undefined (fail-fast, never guess)", () => {
-  const r = resolveWorkerModel("totally-unknown-model-zzz", stubRuntime([SONNET, HAIKU]));
-  assert.equal(r.model, undefined);
-  assert.equal(typeof r.error, "string");
-});
-
-test("resolveWorkerModel: undefined raw ⇒ all-undefined (the SDK default-resolution deferral)", () => {
-  const r = resolveWorkerModel(undefined, stubRuntime([SONNET]));
-  assert.deepEqual(r, {
-    model: undefined,
-    thinkingLevel: undefined,
-    warning: undefined,
-    error: undefined,
-  });
-});
-
 // --- pure: missingTerminatingTool + drive: the terminating-tool preflight -----------------------
 
 test("missingTerminatingTool: names the stage's terminating tool when absent, null when present", () => {
@@ -537,7 +397,7 @@ test("missingTerminatingTool: names the stage's terminating tool when absent, nu
   assert.equal(missingTerminatingTool("address", ["finalize_address"]), null);
 });
 
-test("driveStage: preflight — zero registered tools → fast no_extension_tools failure, no prompt", async () => {
+test("runStage: preflight — zero registered tools → fast no_extension_tools failure, no prompt", async () => {
   let promptRan = false;
   const session = new FakeSession(() => {
     promptRan = true;
@@ -545,13 +405,12 @@ test("driveStage: preflight — zero registered tools → fast no_extension_tool
   session.extensionRunner = { getAllRegisteredTools: () => [] };
   const runtime = fakeRuntime(session);
   const events: RunEvent[] = [];
-  const outcome = await driveStage(
+  const outcome = await runStage(
     {
       worktree: "/tmp/wt",
       stage: "implement",
       initialPrompt: "go",
       budget: baseBudget,
-      model: {} as never,
     },
     { createRuntime: async () => runtime, now: () => 1000, eventSink: (e) => events.push(e) },
   );
@@ -570,7 +429,7 @@ test("driveStage: preflight — zero registered tools → fast no_extension_tool
   );
 });
 
-test("driveStage: preflight — the terminating tool present → the drive proceeds to completion", async () => {
+test("runStage: preflight — the terminating tool present → the drive proceeds to completion", async () => {
   const session = new FakeSession((emit) => {
     emit({
       type: "tool_execution_end",
@@ -581,13 +440,12 @@ test("driveStage: preflight — the terminating tool present → the drive proce
   session.extensionRunner = {
     getAllRegisteredTools: () => [{ definition: { name: "submit" } }],
   };
-  const outcome = await driveStage(
+  const outcome = await runStage(
     {
       worktree: "/tmp/wt",
       stage: "implement",
       initialPrompt: "go",
       budget: baseBudget,
-      model: {} as never,
     },
     { createRuntime: async () => fakeRuntime(session), now: () => 1000 },
   );
@@ -595,7 +453,7 @@ test("driveStage: preflight — the terminating tool present → the drive proce
   assert.equal(outcome.terminal_signal, "submit_tool");
 });
 
-test("driveStage: implement records the implementation/worker session pointer", async () => {
+test("runStage: implement records the implementation/worker session pointer", async () => {
   const wt = mkdtempSync(join(tmpdir(), "perk-worker-cap-"));
   const session = new FakeSession((emit) => {
     emit({
@@ -608,13 +466,12 @@ test("driveStage: implement records the implementation/worker session pointer", 
   const saved = process.env.PERK_RUN_ID;
   process.env.PERK_RUN_ID = "01RID_I";
   try {
-    await driveStage(
+    await runStage(
       {
         worktree: wt,
         stage: "implement",
         initialPrompt: "go",
         budget: baseBudget,
-        model: {} as never,
       },
       { createRuntime: async () => fakeRuntime(session), now: () => 1000 },
     );
@@ -631,20 +488,19 @@ test("driveStage: implement records the implementation/worker session pointer", 
   }
 });
 
-test("driveStage: a non-implement stage records no worker pointer", async () => {
+test("runStage: a non-implement stage records no worker pointer", async () => {
   const wt = mkdtempSync(join(tmpdir(), "perk-worker-cap-"));
   const session = new FakeSession(() => {});
   session.sessionFile = "/sessions/addr.jsonl";
   const saved = process.env.PERK_RUN_ID;
   process.env.PERK_RUN_ID = "01RID_A";
   try {
-    await driveStage(
+    await runStage(
       {
         worktree: wt,
         stage: "address",
         initialPrompt: "go",
         budget: baseBudget,
-        model: {} as never,
       },
       { createRuntime: async () => fakeRuntime(session), now: () => 1000 },
     );
@@ -656,17 +512,16 @@ test("driveStage: a non-implement stage records no worker pointer", async () => 
   }
 });
 
-test("driveStage: maxTurns budget trips → budget_exhausted/budget + abort called", async () => {
+test("runStage: maxTurns budget trips → budget_exhausted/budget + abort called", async () => {
   const session = new FakeSession((emit) => {
     for (let i = 0; i < 5; i++) emit({ type: "turn_end", message: { role: "assistant" } });
   });
-  const outcome = await driveStage(
+  const outcome = await runStage(
     {
       worktree: "/tmp/wt",
       stage: "implement",
       initialPrompt: "go",
       budget: { ...baseBudget, maxTurns: 2 },
-      model: {} as never,
     },
     { createRuntime: async () => fakeRuntime(session) },
   );
@@ -675,36 +530,34 @@ test("driveStage: maxTurns budget trips → budget_exhausted/budget + abort call
   assert.ok(session.abortCalls >= 1);
 });
 
-test("driveStage: maxTokens budget trips → budget_exhausted", async () => {
+test("runStage: maxTokens budget trips → budget_exhausted", async () => {
   const session = new FakeSession((emit) => {
     emit({ type: "turn_end", message: { role: "assistant", usage: { input: 60, output: 60 } } });
     emit({ type: "turn_end", message: { role: "assistant", usage: { input: 60, output: 60 } } });
   });
-  const outcome = await driveStage(
+  const outcome = await runStage(
     {
       worktree: "/tmp/wt",
       stage: "implement",
       initialPrompt: "go",
       budget: { ...baseBudget, maxTokens: 100 },
-      model: {} as never,
     },
     { createRuntime: async () => fakeRuntime(session) },
   );
   assert.equal(outcome.status, "budget_exhausted");
 });
 
-test("driveStage: an external abort signal → aborted/external_abort + abort called", async () => {
+test("runStage: an external abort signal → aborted/external_abort + abort called", async () => {
   const controller = new AbortController();
   controller.abort();
   const session = new FakeSession(() => {});
-  const outcome = await driveStage(
+  const outcome = await runStage(
     {
       worktree: "/tmp/wt",
       stage: "implement",
       initialPrompt: "go",
       budget: baseBudget,
       signal: controller.signal,
-      model: {} as never,
     },
     { createRuntime: async () => fakeRuntime(session) },
   );
@@ -713,17 +566,16 @@ test("driveStage: an external abort signal → aborted/external_abort + abort ca
   assert.ok(session.abortCalls >= 1);
 });
 
-test("driveStage: a wall-clock timeout trips → budget_exhausted", async () => {
+test("runStage: a wall-clock timeout trips → budget_exhausted", async () => {
   const session = new FakeSession(async () => {
     await new Promise((r) => setTimeout(r, 40));
   });
-  const outcome = await driveStage(
+  const outcome = await runStage(
     {
       worktree: "/tmp/wt",
       stage: "implement",
       initialPrompt: "go",
       budget: { ...baseBudget, wallClockMs: 1 },
-      model: {} as never,
     },
     { createRuntime: async () => fakeRuntime(session) },
   );
@@ -731,39 +583,108 @@ test("driveStage: a wall-clock timeout trips → budget_exhausted", async () => 
   assert.equal(outcome.terminal_signal, "budget");
 });
 
-test("driveStage: no model available → failed/no_model, never throws", async () => {
-  // Inject an empty runtime so the path is deterministic regardless of the dev machine's
-  // ambient provider keys (resolveAuth returns null when the availability snapshot is empty).
+test("runStage: no model available → failed/no_model, never throws", async () => {
+  // Build the nominal selection around an empty-snapshot stub runtime so the path is
+  // deterministic regardless of the dev machine's ambient provider keys (resolveAuth returns
+  // null when the availability snapshot is empty and no explicit model rides the selection).
   const emptyRuntime = { getAvailableSnapshot: () => [] } as never;
-  const outcome = await driveStage({
+  const outcome = await runStage({
     worktree: "/tmp/wt",
     stage: "implement",
     initialPrompt: "go",
     budget: baseBudget,
-    modelRuntime: emptyRuntime,
+    model: new WorkerModelSelection(emptyRuntime),
   });
   assert.equal(outcome.status, "failed");
   assert.equal(outcome.error?.type, "no_model");
 });
 
-// --- bind/rebind structural ---------------------------------------------------------------------
+// --- the never-throws contract under adversarial fakes (contracts.md §8.11) ---------------------
 
-test("createBindManager: a rebind unsubscribes the prior listener (no double-count) and re-binds", async () => {
-  const counters: DriveCounters = freshCounters();
-  const manager = createBindManager({}, (e) => applyEvent(counters, e));
-  const s1 = new FakeSession((emit) => emit({ type: "turn_end", message: { role: "assistant" } }));
-  const s2 = new FakeSession((emit) => emit({ type: "turn_end", message: { role: "assistant" } }));
-  await manager.bind(s1);
-  await manager.bind(s2); // rebind: must unsubscribe s1's listener first
-  // s1's listener is detached: driving s1 must NOT reach the (single) listener.
-  await s1.prompt();
-  assert.equal(counters.turns, 0, "prior listener was unsubscribed on rebind");
-  // The live binding is s2: driving it reaches the listener exactly once.
-  await s2.prompt();
-  assert.equal(counters.turns, 1, "only the live session's listener fires");
-  assert.equal(s1.bindCalls, 1);
-  assert.equal(s2.bindCalls, 1);
-  manager.dispose();
+test("runStage: a rejecting session.abort() on a budget trip — frozen outcome, no unhandled rejection", async () => {
+  // The abort rejection now has an owner (the adapter handle retains + logs it): the trip's
+  // frozen budget_exhausted outcome must still return, and the rejection must never surface as
+  // an unhandled rejection (the process-level listener would fail this test loudly).
+  const unhandled: unknown[] = [];
+  const onUnhandled = (reason: unknown): void => {
+    unhandled.push(reason);
+  };
+  process.on("unhandledRejection", onUnhandled);
+  const savedErr = console.error;
+  console.error = () => {};
+  try {
+    const session = new FakeSession((emit) => {
+      for (let i = 0; i < 3; i++) emit({ type: "turn_end", message: { role: "assistant" } });
+    });
+    session.abort = async () => {
+      session.abortCalls++;
+      throw new Error("abort exploded");
+    };
+    const outcome = await runStage(
+      {
+        worktree: "/tmp/wt",
+        stage: "implement",
+        initialPrompt: "go",
+        budget: { ...baseBudget, maxTurns: 1 },
+      },
+      { createRuntime: async () => fakeRuntime(session) },
+    );
+    assert.equal(outcome.status, "budget_exhausted");
+    assert.equal(outcome.terminal_signal, "budget");
+    assert.ok(session.abortCalls >= 1, "abort was fired");
+    // Give the loop a tick so a would-be unhandled rejection has surfaced before we assert.
+    await new Promise((r) => setImmediate(r));
+    assert.deepEqual(unhandled, [], "the abort rejection must never go unhandled");
+  } finally {
+    console.error = savedErr;
+    process.off("unhandledRejection", onUnhandled);
+  }
+});
+
+test("runStage: a throwing unsubscribe + rejecting runtime.dispose() cannot replace the outcome", async () => {
+  // The cleanup-error-precedence pin: an already-computed RunOutcome survives a finally-arm
+  // failure — the guarded dispose catches both, and the runtime dispose is still ATTEMPTED
+  // after the unsubscribe threw.
+  const savedErr = console.error;
+  console.error = () => {};
+  try {
+    const session = new FakeSession((emit) => {
+      emit({
+        type: "tool_execution_end",
+        toolName: "submit",
+        result: { details: { ok: true, pr: { number: 5, url: "https://x/pr/5" } } },
+      });
+    });
+    session.subscribe = (listener) => {
+      (session as unknown as { listeners: ((e: DriveEvent) => void)[] }).listeners.push(listener);
+      return () => {
+        throw new Error("unsubscribe exploded");
+      };
+    };
+    let disposeAttempted = false;
+    const runtime: DriveRuntimeLike = {
+      session,
+      async dispose(): Promise<void> {
+        disposeAttempted = true;
+        throw new Error("dispose exploded");
+      },
+    };
+    const outcome = await runStage(
+      {
+        worktree: "/tmp/wt",
+        stage: "implement",
+        initialPrompt: "go",
+        budget: baseBudget,
+      },
+      { createRuntime: async () => runtime },
+    );
+    assert.equal(outcome.status, "completed", "the computed outcome survives cleanup failures");
+    assert.equal(outcome.terminal_signal, "submit_tool");
+    assert.deepEqual(outcome.pr, { number: 5, url: "https://x/pr/5" });
+    assert.equal(disposeAttempted, true, "runtime dispose was still attempted");
+  } finally {
+    console.error = savedErr;
+  }
 });
 
 // --- prompt parity (reciprocal of tests/test_worker_prompt_parity.py) ---------------------------
@@ -919,11 +840,11 @@ test("createEventEmitter: monotonic seq, t from the injected clock, fail-soft on
   assert.doesNotThrow(() => thrower.emit({ kind: "step_marker", marker: "done", step: 1 }));
 });
 
-// --- driveStage with an injected array sink -----------------------------------------------------
+// --- runStage with an injected array sink -----------------------------------------------------
 
 const eventBudget = { maxTurns: 100, maxTokens: 1_000_000, wallClockMs: 60_000 };
 
-test("driveStage: a happy implement run emits run_started → tool_outcome(submit) → run_finished", async () => {
+test("runStage: a happy implement run emits run_started → tool_outcome(submit) → run_finished", async () => {
   const events: RunEvent[] = [];
   const session = new FakeSession((emit) => {
     emit({ type: "turn_end", message: { role: "assistant", usage: { input: 1, output: 1 } } });
@@ -933,13 +854,12 @@ test("driveStage: a happy implement run emits run_started → tool_outcome(submi
       result: { details: { ok: true, pr: { number: 7, url: "https://x/pr/7" } } },
     });
   });
-  const outcome = await driveStage(
+  const outcome = await runStage(
     {
       worktree: "/tmp/wt",
       stage: "implement",
       initialPrompt: "go",
       budget: eventBudget,
-      model: {} as never,
     },
     {
       createRuntime: async () => fakeRuntime(session),
@@ -965,7 +885,7 @@ test("driveStage: a happy implement run emits run_started → tool_outcome(submi
   assert.equal(finished.outcome.status, "completed");
 });
 
-test("driveStage: assistant prose carrying [WIP:1]/[DONE:1] emits no step_marker events (deprecated)", async () => {
+test("runStage: assistant prose carrying [WIP:1]/[DONE:1] emits no step_marker events (deprecated)", async () => {
   const events: RunEvent[] = [];
   // Hoisted const: `content` is no longer a `DriveEvent` field, so a plain object (not a typed
   // literal) carries the marker-laden prose past structural typing without a cast.
@@ -981,13 +901,12 @@ test("driveStage: assistant prose carrying [WIP:1]/[DONE:1] emits no step_marker
       result: { details: { ok: true, pr: { number: 1, url: "u" } } },
     });
   });
-  await driveStage(
+  await runStage(
     {
       worktree: "/tmp/wt",
       stage: "implement",
       initialPrompt: "go",
       budget: eventBudget,
-      model: {} as never,
     },
     {
       createRuntime: async () => fakeRuntime(session),
@@ -1002,18 +921,17 @@ test("driveStage: assistant prose carrying [WIP:1]/[DONE:1] emits no step_marker
   );
 });
 
-test("driveStage: a budget trip emits a terminal run_finished(budget_exhausted)", async () => {
+test("runStage: a budget trip emits a terminal run_finished(budget_exhausted)", async () => {
   const events: RunEvent[] = [];
   const session = new FakeSession((emit) => {
     emit({ type: "turn_end", message: { role: "assistant" } });
   });
-  await driveStage(
+  await runStage(
     {
       worktree: "/tmp/wt",
       stage: "implement",
       initialPrompt: "go",
       budget: { maxTurns: 1, maxTokens: 1_000_000, wallClockMs: 60_000 },
-      model: {} as never,
     },
     { createRuntime: async () => fakeRuntime(session), eventSink: (e) => events.push(e) },
   );
@@ -1022,20 +940,19 @@ test("driveStage: a budget trip emits a terminal run_finished(budget_exhausted)"
   assert.equal(finished.outcome.status, "budget_exhausted");
 });
 
-test("driveStage: an external abort emits a terminal run_finished(aborted)", async () => {
+test("runStage: an external abort emits a terminal run_finished(aborted)", async () => {
   const events: RunEvent[] = [];
   const controller = new AbortController();
   const session = new FakeSession(async () => {
     controller.abort();
     await new Promise((r) => setTimeout(r, 1));
   });
-  await driveStage(
+  await runStage(
     {
       worktree: "/tmp/wt",
       stage: "implement",
       initialPrompt: "go",
       budget: eventBudget,
-      model: {} as never,
       signal: controller.signal,
     },
     { createRuntime: async () => fakeRuntime(session), eventSink: (e) => events.push(e) },
@@ -1044,15 +961,15 @@ test("driveStage: an external abort emits a terminal run_finished(aborted)", asy
   assert.equal(finished.outcome.status, "aborted");
 });
 
-test("driveStage: the no_model early return still emits run_started + run_finished(failed/no_model)", async () => {
+test("runStage: the no_model early return still emits run_started + run_finished(failed/no_model)", async () => {
   const events: RunEvent[] = [];
-  await driveStage(
+  await runStage(
     {
       worktree: "/tmp/wt",
       stage: "implement",
       initialPrompt: "go",
       budget: eventBudget,
-      modelRuntime: { getAvailableSnapshot: () => [] } as never,
+      model: new WorkerModelSelection({ getAvailableSnapshot: () => [] } as never),
     },
     { eventSink: (e) => events.push(e) },
   );
@@ -1069,13 +986,13 @@ test("driveStage: the no_model early return still emits run_started + run_finish
 
 // --- default file sink (NDJSON under the gitignored run scratch dir) -----------------------------
 
-test("driveStage: with no eventSink + a set run_id writes parseable NDJSON to runEventsPath", async () => {
+test("runStage: with no eventSink + a set run_id writes parseable NDJSON to runEventsPath", async () => {
   const worktree = mkdtempSync(join(tmpdir(), "perk-worker-events-"));
   const runId = "01JEVENTSTREAMTESTRUNID00000";
   const prior = process.env.PERK_RUN_ID;
   process.env.PERK_RUN_ID = runId;
   try {
-    // Hoisted like the negative driveStage test: marker-laden prose, no `content` field on
+    // Hoisted like the negative runStage test: marker-laden prose, no `content` field on
     // `DriveEvent` anymore.
     const markerTurn = { type: "turn_end", message: { role: "assistant", content: "[WIP:1]" } };
     const session = new FakeSession((emit) => {
@@ -1086,13 +1003,12 @@ test("driveStage: with no eventSink + a set run_id writes parseable NDJSON to ru
         result: { details: { ok: true, pr: { number: 9, url: "u" } } },
       });
     });
-    await driveStage(
+    await runStage(
       {
         worktree,
         stage: "implement",
         initialPrompt: "go",
         budget: eventBudget,
-        model: {} as never,
       },
       { createRuntime: async () => fakeRuntime(session) },
     );
@@ -1107,7 +1023,7 @@ test("driveStage: with no eventSink + a set run_id writes parseable NDJSON to ru
   }
 });
 
-test("driveStage: with an empty run_id writes nothing (the no-op default sink)", async () => {
+test("runStage: with an empty run_id writes nothing (the no-op default sink)", async () => {
   const worktree = mkdtempSync(join(tmpdir(), "perk-worker-noevents-"));
   const prior = process.env.PERK_RUN_ID;
   delete process.env.PERK_RUN_ID;
@@ -1115,13 +1031,12 @@ test("driveStage: with an empty run_id writes nothing (the no-op default sink)",
     const session = new FakeSession((emit) => {
       emit({ type: "turn_end", message: { role: "assistant" } });
     });
-    await driveStage(
+    await runStage(
       {
         worktree,
         stage: "implement",
         initialPrompt: "go",
         budget: eventBudget,
-        model: {} as never,
       },
       { createRuntime: async () => fakeRuntime(session) },
     );
