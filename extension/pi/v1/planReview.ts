@@ -228,6 +228,50 @@ export function implementHereResult(
 }
 
 /**
+ * The `/implement-here` command body (the registration stays in `plan.ts`; the handler lives
+ * HERE, next to the seam it composes — and so the `sendUserMessage` call sites stay out of the
+ * installer file, whose registration prose the prose-review workbench edits through the
+ * TypeScript source adapter's whole-file validation). Three arms: (1) an objective-node
+ * planning session refuses — an implement-here would strand the node in `planning` (the claim
+ * is only cleared by a node-linked save or a non-planning transition); gate untouched, nothing
+ * injected. (2) Nothing to exit — the command's meaning is *exiting plan mode without saving*.
+ * (3) Gate off → instruct the model. No inlined plan: the model authored the draft in its own
+ * context (the review-path edited-bytes inlining is `implementHereResult`'s arm).
+ */
+export async function runImplementHereCommand(
+  pi: ExtensionAPI,
+  ctx: ExtensionContext,
+  gating: ToolGating,
+): Promise<void> {
+  if (readNodeClaim(ctx) !== null) {
+    report(
+      ctx,
+      "implement-here",
+      "warning",
+      "this is an objective-node planning session — a node-linked plan must be saved " +
+        "(the node advance and backlink depend on it). Use plan_review / /plan-save instead.",
+    );
+    return;
+  }
+  if (!gating.isActive()) {
+    report(
+      ctx,
+      "implement-here",
+      "warning",
+      "not in plan mode — nothing to exit; just ask the model to implement.",
+    );
+    return;
+  }
+  implementHereExit(ctx, gating);
+  const message = implementHereGuidance(ctx.cwd, {});
+  if (ctx.isIdle()) {
+    pi.sendUserMessage(message);
+  } else {
+    pi.sendUserMessage(message, { deliverAs: "followUp" });
+  }
+}
+
+/**
  * The defensive refusal arm (the feature's gate-safety invariant surfacing): an implement-here
  * verdict reached the execute path in an objective-node planning session — a node-linked plan
  * must save (the node advance and backlink depend on it). Loud, NON-terminating: nothing saved,

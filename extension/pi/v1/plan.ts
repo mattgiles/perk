@@ -42,10 +42,7 @@ import { GIST_AUTHOR_STAGE } from "../../authoring/gist/draft.ts";
 import { PLAN_DRAFT_ARTIFACT, revisePlanDraft } from "../../authoring/plan/draft.ts";
 import {
   PLAN_CONTEXT_TYPE,
-  PLAN_DRAFT_TOOL_GUIDELINES,
   PLAN_MARKER,
-  PLAN_REVIEW_TOOL_GUIDELINES,
-  PLAN_SAVE_TOOL_GUIDELINES,
   planAuthoringContextContent,
 } from "../../authoring/plan/prose.ts";
 import {
@@ -84,21 +81,19 @@ import {
   activeContextWindow,
   branchCarries,
   branchOf,
-  readNodeClaim,
   rebuildWorkflowState,
 } from "../../substrate/workflowState.ts";
 import { report, type Severity } from "../../surfaces/report.ts";
 // `Key` via the surfaces re-export (keybinding vocabulary, not rich UI) — keeps pi-tui imports
 // structurally confined to the surfaces module (the surfacesGuard pi-tui import rule).
 import { Key } from "../../surfaces/surfaces.ts";
-import { generatePlanTitle } from "./planTitle.ts";
 import {
   type ApprovalSaveOutcome,
   executePlanReview,
-  implementHereExit,
-  implementHereGuidance,
   type PlanReviewV1Deps,
+  runImplementHereCommand,
 } from "./planReview.ts";
+import { generatePlanTitle } from "./planTitle.ts";
 import { createPlannotatorBridge } from "./providers/plannotator.ts";
 import { resolvedPlanProviderId } from "./providers/selection.ts";
 import type { WaveLaunch } from "./review.ts";
@@ -447,7 +442,13 @@ export function installPlanBindings(pi: ExtensionAPI, gating: ToolGating, wave?:
       "provenance pointer. The only sanctioned write surface while read-only. NOT a save — " +
       "plan_save//plan-save still persist the plan to GitHub.",
     promptSnippet: "Persist the working plan draft to the session data dir (full rewrite)",
-    promptGuidelines: PLAN_DRAFT_TOOL_GUIDELINES,
+    // Registration prose stays INLINE (not a prose.ts constant): the prose-review workbench
+    // edits these arrays through the TypeScript source adapter, which needs literal in-place
+    // values — an identifier indirection is an unsupported source shape there.
+    promptGuidelines: [
+      "Call plan_draft to persist the current working draft as you author or revise the plan; pass the FULL plan markdown each time (it rewrites the whole draft).",
+      "plan_draft never saves to GitHub and never ends the turn — plan_save//plan-save remain the canonical save surface.",
+    ],
     executionMode: "sequential",
     parameters: {
       type: "object",
@@ -506,7 +507,12 @@ export function installPlanBindings(pi: ExtensionAPI, gating: ToolGating, wave?:
       "Persist the current plan to GitHub as the canonical perk plan and link this session to it. " +
       "Terminating: ends the turn on save. Call only when the plan is decision-complete.",
     promptSnippet: "Save the decision-complete plan to GitHub (terminates the turn)",
-    promptGuidelines: PLAN_SAVE_TOOL_GUIDELINES,
+    promptGuidelines: [
+      "Use plan_save only after the plan is decision-complete and the user has agreed; it creates the canonical GitHub plan and ends the turn.",
+      "Keep the working draft current with plan_draft — the validated plan-draft artifact is what plan_save saves; the `plan` parameter is only a fallback when no draft exists. Never reference line numbers — use durable anchors (function names, behavioral descriptions, structural locations).",
+      "Pass plan_save's consumed_learn (the gathered perk:learn issue ids) only from the learned-docs factory — it links the issues the docs plan consolidates so /land closes + labels them.",
+      "When saving an objective-factory plan, pass plan_save BOTH objective_id and node_id — this links the node to the plan and advances it planning → in_progress (no separate backlink call).",
+    ],
     executionMode: "sequential",
     parameters: {
       type: "object",
@@ -648,40 +654,10 @@ export function installPlanBindings(pi: ExtensionAPI, gating: ToolGating, wave?:
     description:
       "Exit plan mode WITHOUT saving an issue and implement the current plan draft in this " +
       "session (the human-owned lightweight path).",
-    handler: async (_args, ctx) => {
-      // 1. Objective-node planning sessions must save: an implement-here would strand the node in
-      //    `planning` (the claim is only cleared by a node-linked save or a non-planning
-      //    transition). Gate untouched, nothing injected.
-      if (readNodeClaim(ctx) !== null) {
-        report(
-          ctx,
-          "implement-here",
-          "warning",
-          "this is an objective-node planning session — a node-linked plan must be saved " +
-            "(the node advance and backlink depend on it). Use plan_review / /plan-save instead.",
-        );
-        return;
-      }
-      // 2. Nothing to exit: the command's meaning is *exiting plan mode without saving*.
-      if (!gating.isActive()) {
-        report(
-          ctx,
-          "implement-here",
-          "warning",
-          "not in plan mode — nothing to exit; just ask the model to implement.",
-        );
-        return;
-      }
-      // 3. Gate off → instruct the model. No inlined plan: the model authored the draft in its
-      //    own context (the review-path edited-bytes inlining lives in planReview.ts).
-      implementHereExit(ctx, gating);
-      const message = implementHereGuidance(ctx.cwd, {});
-      if (ctx.isIdle()) {
-        pi.sendUserMessage(message);
-      } else {
-        pi.sendUserMessage(message, { deliverAs: "followUp" });
-      }
-    },
+    // The handler body lives in planReview.ts (next to the seam it composes — and so the
+    // sendUserMessage call sites stay out of this installer file, whose registration prose the
+    // prose-review workbench edits through the whole-file-validating TypeScript adapter).
+    handler: async (_args, ctx) => runImplementHereCommand(pi, ctx, gating),
   });
 
   // ---------------------------------------------------------------- the plan_review tool
@@ -703,7 +679,14 @@ export function installPlanBindings(pi: ExtensionAPI, gating: ToolGating, wave?:
       "decision routes back automatically. No-op skip when the session is headless or the " +
       "review is dismissed.",
     promptSnippet: "Request a human review of the working plan draft",
-    promptGuidelines: PLAN_REVIEW_TOOL_GUIDELINES,
+    promptGuidelines: [
+      "Keep the working draft current with plan_draft — the validated plan-draft artifact is what plan_review reviews AND auto-saves; the plan param is only a fallback when no draft exists.",
+      "Call plan_review only when the plan is decision-complete.",
+      "On a DENIED review, revise per the feedback, rewrite the draft with plan_draft, then call plan_review again.",
+      "On an APPROVED plan_review, the plan is auto-saved and the turn ends — never re-dump the plan as a final message and never tell the user to run /plan-save; relay the save outcome instead.",
+      "On a wave_launched result (the human opted into the reviewer wave), follow the returned guidance in the same turn — launch the wave and relay its findings; the human's browser decision routes back automatically, so never re-call plan_review while that browser review is open.",
+      "If plan_review reports it was skipped or unavailable (headless, dismissed), fall back to presenting the complete plan; the human runs /plan-save (the manual failsafe).",
+    ],
     executionMode: "sequential",
     parameters: {
       type: "object",

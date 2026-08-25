@@ -18,9 +18,6 @@ import { PLAN_DRAFT_ARTIFACT } from "../../authoring/plan/draft.ts";
 import {
   PLAN_AUTHORING_CONTEXT,
   PLAN_CONTEXT_TYPE,
-  PLAN_DRAFT_TOOL_GUIDELINES,
-  PLAN_REVIEW_TOOL_GUIDELINES,
-  PLAN_SAVE_TOOL_GUIDELINES,
   planAuthoringContextContent,
 } from "../../authoring/plan/prose.ts";
 import { sessionDataDir } from "../../substrate/cache.ts";
@@ -524,11 +521,6 @@ test("registration parity: the plan surface metadata is byte-exact vs the frozen
     assert.deepEqual(h.registeredCommand("plan"), BASELINE_PLAN_COMMAND);
     assert.deepEqual(h.registeredCommand("plan-save"), BASELINE_PLAN_SAVE_COMMAND);
     assert.deepEqual(h.registeredCommand("implement-here"), BASELINE_IMPLEMENT_HERE_COMMAND);
-    // The live constants still feed the registration (a second, independent equality: if the
-    // installer stopped consuming the prose module, this catches the decoupling).
-    assert.deepEqual(BASELINE_PLAN_DRAFT.promptGuidelines, PLAN_DRAFT_TOOL_GUIDELINES);
-    assert.deepEqual(BASELINE_PLAN_SAVE.promptGuidelines, PLAN_SAVE_TOOL_GUIDELINES);
-    assert.deepEqual(BASELINE_PLAN_REVIEW.promptGuidelines, PLAN_REVIEW_TOOL_GUIDELINES);
   } finally {
     h.dispose();
   }

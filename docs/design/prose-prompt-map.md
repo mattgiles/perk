@@ -6,7 +6,7 @@ This is the readable projection of perk's living, workflow-first prose graph. It
 ## Coverage
 
 - **218** canonical source units
-- **736** logical fragments
+- **740** logical fragments
 - **16** session shapes and **10** assemblies
 - **15** explicitly excluded candidates (policy-only; not displayed)
 - **0** validation findings
@@ -431,12 +431,10 @@ Explore, draft, adopt, review, and save a bounded implementation plan.
 | `markdown:skills/perk-replan/SKILL.md` | `skill-detail` | `shipped` | [`skills/perk-replan/SKILL.md`](../../skills/perk-replan/SKILL.md) · `file` | — |
 | `python-symbol:src/perk/cli/commands/plan/from_cmd.py:_render_source_issue` | `context` | `shipped` | [`src/perk/cli/commands/plan/from_cmd.py`](../../src/perk/cli/commands/plan/from_cmd.py) · `symbol:_render_source_issue` | — |
 | `python-symbol:src/perk/cli/seed_file.py:render_seed_file_scratch` | `context` | `shipped` | [`src/perk/cli/seed_file.py`](../../src/perk/cli/seed_file.py) · `symbol:render_seed_file_scratch` | — |
-| `typescript-model-call:extension/factories/implementHere.ts:module:sendUserMessage:0` | `tool-contract` | `shipped` | [`extension/factories/implementHere.ts`](../../extension/factories/implementHere.ts) · `symbol:module/call:sendUserMessage/0` | — |
-| `typescript-model-call:extension/factories/implementHere.ts:module:sendUserMessage:1` | `tool-contract` | `shipped` | [`extension/factories/implementHere.ts`](../../extension/factories/implementHere.ts) · `symbol:module/call:sendUserMessage/1` | — |
-| `typescript-model-call:extension/factories/planMode.ts:module:before-agent-start:0` | `tool-contract` | `shipped` | [`extension/factories/planMode.ts`](../../extension/factories/planMode.ts) · `symbol:module/event:before_agent_start/0` | — |
-| `typescript-symbol:extension/factories/planTitle.ts:module:complete-structured` | `tool-contract` | `shipped` | [`extension/factories/planTitle.ts`](../../extension/factories/planTitle.ts) · `symbol:module/call:completeStructured` | — |
-| `typescript-tool:plan_draft` | `tool-contract` | `shipped` | [`extension/factories/planDraft.ts`](../../extension/factories/planDraft.ts) · `tool:plan_draft` | plan.cold, plan.warm |
-| `typescript-tool:plan_save` | `tool-contract` | `shipped` | [`extension/factories/planSave.ts`](../../extension/factories/planSave.ts) · `tool:plan_save` | — |
+| `typescript-model-call:extension/pi/v1/plan.ts:module:before-agent-start:0` | `tool-contract` | `shipped` | [`extension/pi/v1/plan.ts`](../../extension/pi/v1/plan.ts) · `symbol:module/event:before_agent_start/0` | — |
+| `typescript-symbol:extension/pi/v1/planTitle.ts:module:complete-structured` | `tool-contract` | `shipped` | [`extension/pi/v1/planTitle.ts`](../../extension/pi/v1/planTitle.ts) · `symbol:module/call:completeStructured` | — |
+| `typescript-tool:plan_draft` | `tool-contract` | `shipped` | [`extension/pi/v1/plan.ts`](../../extension/pi/v1/plan.ts) · `tool:plan_draft` | plan.cold, plan.warm |
+| `typescript-tool:plan_save` | `tool-contract` | `shipped` | [`extension/pi/v1/plan.ts`](../../extension/pi/v1/plan.ts) · `tool:plan_save` | — |
 
 <details>
 <summary>Logical fragments</summary>
@@ -479,13 +477,9 @@ Explore, draft, adopt, review, and save a bounded implementation plan.
   - `symbol:_render_source_issue` — Render source issue (`symbol:_render_source_issue`)
 - `python-symbol:src/perk/cli/seed_file.py:render_seed_file_scratch`
   - `symbol:render_seed_file_scratch` — Render seed file scratch (`symbol:render_seed_file_scratch`)
-- `typescript-model-call:extension/factories/implementHere.ts:module:sendUserMessage:0`
-  - `argument:0` — sendUserMessage model-facing argument (`symbol:module/call:sendUserMessage/0/argument:0`)
-- `typescript-model-call:extension/factories/implementHere.ts:module:sendUserMessage:1`
-  - `argument:0` — sendUserMessage model-facing argument (`symbol:module/call:sendUserMessage/1/argument:0`)
-- `typescript-model-call:extension/factories/planMode.ts:module:before-agent-start:0`
+- `typescript-model-call:extension/pi/v1/plan.ts:module:before-agent-start:0`
   - `handler` — before_agent_start injected context (`symbol:module/event:before_agent_start/0/handler`)
-- `typescript-symbol:extension/factories/planTitle.ts:module:complete-structured`
+- `typescript-symbol:extension/pi/v1/planTitle.ts:module:complete-structured`
   - `toolDescription` — completeStructured toolDescription (`symbol:module/call:completeStructured/toolDescription`)
   - `system` — completeStructured system (`symbol:module/call:completeStructured/system`)
   - `instruction` — completeStructured instruction (`symbol:module/call:completeStructured/instruction`)
@@ -493,12 +487,16 @@ Explore, draft, adopt, review, and save a bounded implementation plan.
 - `typescript-tool:plan_draft`
   - `description` — description (`tool:plan_draft.description`)
   - `promptSnippet` — promptSnippet (`tool:plan_draft.promptSnippet`)
-  - `promptGuidelines` — promptGuidelines (`tool:plan_draft.promptGuidelines`)
+  - `promptGuidelines.0` — promptGuidelines item 1 (`tool:plan_draft.promptGuidelines.0`)
+  - `promptGuidelines.1` — promptGuidelines item 2 (`tool:plan_draft.promptGuidelines.1`)
   - `parameters.properties.plan.description` — parameters.properties.plan.description (`tool:plan_draft.parameters.properties.plan.description`)
 - `typescript-tool:plan_save`
   - `description` — description (`tool:plan_save.description`)
   - `promptSnippet` — promptSnippet (`tool:plan_save.promptSnippet`)
-  - `promptGuidelines` — promptGuidelines (`tool:plan_save.promptGuidelines`)
+  - `promptGuidelines.0` — promptGuidelines item 1 (`tool:plan_save.promptGuidelines.0`)
+  - `promptGuidelines.1` — promptGuidelines item 2 (`tool:plan_save.promptGuidelines.1`)
+  - `promptGuidelines.2` — promptGuidelines item 3 (`tool:plan_save.promptGuidelines.2`)
+  - `promptGuidelines.3` — promptGuidelines item 4 (`tool:plan_save.promptGuidelines.3`)
   - `parameters.properties.plan.description` — parameters.properties.plan.description (`tool:plan_save.parameters.properties.plan.description`)
   - `parameters.properties.title.description` — parameters.properties.title.description (`tool:plan_save.parameters.properties.title.description`)
   - `parameters.properties.objective_id.description` — parameters.properties.objective_id.description (`tool:plan_save.parameters.properties.objective_id.description`)
@@ -802,8 +800,6 @@ Human and agent review surfaces for gists, objectives, and plans.
 | `markdown:prompts/contexts/adapters/tombell-plan.md` | `adapter` | `shipped` | [`prompts/contexts/adapters/tombell-plan.md`](../../prompts/contexts/adapters/tombell-plan.md) · `file` | — |
 | `markdown:prompts/stages/objective-review-browser.md` | `adapter` | `shipped` | [`prompts/stages/objective-review-browser.md`](../../prompts/stages/objective-review-browser.md) · `file` | — |
 | `markdown:prompts/stages/plan-review-browser.md` | `adapter` | `shipped` | [`prompts/stages/plan-review-browser.md`](../../prompts/stages/plan-review-browser.md) · `file` | — |
-| `typescript-model-call:extension/adapters/planAdapterPlannotator.ts:module:before-agent-start:0` | `adapter` | `shipped` | [`extension/adapters/planAdapterPlannotator.ts`](../../extension/adapters/planAdapterPlannotator.ts) · `symbol:module/event:before_agent_start/0` | — |
-| `typescript-model-call:extension/adapters/planAdapterTombell.ts:module:before-agent-start:0` | `adapter` | `shipped` | [`extension/adapters/planAdapterTombell.ts`](../../extension/adapters/planAdapterTombell.ts) · `symbol:module/event:before_agent_start/0` | — |
 | `typescript-model-call:extension/doors/objectiveReviewBrowser.ts:module:sendUserMessage:0` | `tool-contract` | `shipped` | [`extension/doors/objectiveReviewBrowser.ts`](../../extension/doors/objectiveReviewBrowser.ts) · `symbol:module/call:sendUserMessage/0` | — |
 | `typescript-model-call:extension/doors/objectiveReviewBrowser.ts:module:sendUserMessage:1` | `tool-contract` | `shipped` | [`extension/doors/objectiveReviewBrowser.ts`](../../extension/doors/objectiveReviewBrowser.ts) · `symbol:module/call:sendUserMessage/1` | — |
 | `typescript-model-call:extension/doors/objectiveReviewBrowser.ts:module:sendUserMessage:2` | `tool-contract` | `shipped` | [`extension/doors/objectiveReviewBrowser.ts`](../../extension/doors/objectiveReviewBrowser.ts) · `symbol:module/call:sendUserMessage/2` | — |
@@ -818,8 +814,12 @@ Human and agent review surfaces for gists, objectives, and plans.
 | `typescript-model-call:extension/doors/plannotatorHandoff.ts:module:sendUserMessage:1` | `tool-contract` | `shipped` | [`extension/doors/plannotatorHandoff.ts`](../../extension/doors/plannotatorHandoff.ts) · `symbol:module/call:sendUserMessage/1` | — |
 | `typescript-model-call:extension/doors/plannotatorHandoff.ts:module:sendUserMessage:2` | `tool-contract` | `shipped` | [`extension/doors/plannotatorHandoff.ts`](../../extension/doors/plannotatorHandoff.ts) · `symbol:module/call:sendUserMessage/2` | — |
 | `typescript-model-call:extension/doors/plannotatorHandoff.ts:module:sendUserMessage:3` | `tool-contract` | `shipped` | [`extension/doors/plannotatorHandoff.ts`](../../extension/doors/plannotatorHandoff.ts) · `symbol:module/call:sendUserMessage/3` | — |
+| `typescript-model-call:extension/pi/v1/planReview.ts:module:sendUserMessage:0` | `tool-contract` | `shipped` | [`extension/pi/v1/planReview.ts`](../../extension/pi/v1/planReview.ts) · `symbol:module/call:sendUserMessage/0` | — |
+| `typescript-model-call:extension/pi/v1/planReview.ts:module:sendUserMessage:1` | `tool-contract` | `shipped` | [`extension/pi/v1/planReview.ts`](../../extension/pi/v1/planReview.ts) · `symbol:module/call:sendUserMessage/1` | — |
+| `typescript-model-call:extension/pi/v1/providers/plannotator.ts:module:before-agent-start:0` | `adapter` | `shipped` | [`extension/pi/v1/providers/plannotator.ts`](../../extension/pi/v1/providers/plannotator.ts) · `symbol:module/event:before_agent_start/0` | — |
+| `typescript-model-call:extension/pi/v1/providers/tombell.ts:module:before-agent-start:0` | `adapter` | `shipped` | [`extension/pi/v1/providers/tombell.ts`](../../extension/pi/v1/providers/tombell.ts) · `symbol:module/event:before_agent_start/0` | — |
 | `typescript-tool:collect_draft_review_wave` | `tool-contract` | `shipped` | [`extension/doors/draftReviewWaveTools.ts`](../../extension/doors/draftReviewWaveTools.ts) · `tool:collect_draft_review_wave` | — |
-| `typescript-tool:plan_review` | `tool-contract` | `shipped` | [`extension/factories/planReview.ts`](../../extension/factories/planReview.ts) · `tool:plan_review` | plan.cold, plan.warm |
+| `typescript-tool:plan_review` | `tool-contract` | `shipped` | [`extension/pi/v1/plan.ts`](../../extension/pi/v1/plan.ts) · `tool:plan_review` | plan.cold, plan.warm |
 | `typescript-tool:start_draft_review_wave` | `tool-contract` | `shipped` | [`extension/doors/draftReviewWaveTools.ts`](../../extension/doors/draftReviewWaveTools.ts) · `tool:start_draft_review_wave` | — |
 
 <details>
@@ -837,10 +837,6 @@ Human and agent review surfaces for gists, objectives, and plans.
   - `body` — Document body (`file-body`)
 - `markdown:prompts/stages/plan-review-browser.md`
   - `body` — Document body (`file-body`)
-- `typescript-model-call:extension/adapters/planAdapterPlannotator.ts:module:before-agent-start:0`
-  - `handler` — before_agent_start injected context (`symbol:module/event:before_agent_start/0/handler`)
-- `typescript-model-call:extension/adapters/planAdapterTombell.ts:module:before-agent-start:0`
-  - `handler` — before_agent_start injected context (`symbol:module/event:before_agent_start/0/handler`)
 - `typescript-model-call:extension/doors/objectiveReviewBrowser.ts:module:sendUserMessage:0`
   - `argument:0` — sendUserMessage model-facing argument (`symbol:module/call:sendUserMessage/0/argument:0`)
 - `typescript-model-call:extension/doors/objectiveReviewBrowser.ts:module:sendUserMessage:1`
@@ -869,6 +865,14 @@ Human and agent review surfaces for gists, objectives, and plans.
   - `argument:0` — sendUserMessage model-facing argument (`symbol:module/call:sendUserMessage/2/argument:0`)
 - `typescript-model-call:extension/doors/plannotatorHandoff.ts:module:sendUserMessage:3`
   - `argument:0` — sendUserMessage model-facing argument (`symbol:module/call:sendUserMessage/3/argument:0`)
+- `typescript-model-call:extension/pi/v1/planReview.ts:module:sendUserMessage:0`
+  - `argument:0` — sendUserMessage model-facing argument (`symbol:module/call:sendUserMessage/0/argument:0`)
+- `typescript-model-call:extension/pi/v1/planReview.ts:module:sendUserMessage:1`
+  - `argument:0` — sendUserMessage model-facing argument (`symbol:module/call:sendUserMessage/1/argument:0`)
+- `typescript-model-call:extension/pi/v1/providers/plannotator.ts:module:before-agent-start:0`
+  - `handler` — before_agent_start injected context (`symbol:module/event:before_agent_start/0/handler`)
+- `typescript-model-call:extension/pi/v1/providers/tombell.ts:module:before-agent-start:0`
+  - `handler` — before_agent_start injected context (`symbol:module/event:before_agent_start/0/handler`)
 - `typescript-tool:collect_draft_review_wave`
   - `description` — description (`tool:collect_draft_review_wave.description`)
   - `promptSnippet` — promptSnippet (`tool:collect_draft_review_wave.promptSnippet`)
