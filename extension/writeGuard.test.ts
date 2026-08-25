@@ -3,8 +3,8 @@
 // temp file in the same directory + atomic rename) so a concurrent writer can never tear a
 // `.perk/workflow/` file. Bare fs write APIs are banned outside a small per-API allowlist:
 // the seam's own body (cache.ts), clipboard.ts (a fresh private mkdtemp dir — unshared by
-// construction), and the append-only NDJSON streams — worker.ts's `events.ndjson` plus the
-// §8.58 hunk-watch `outbox.ndjson`/`delivered.ndjson` (O_APPEND appends cannot truncate-tear,
+// construction), and the append-only NDJSON streams — the stage-execution seam's `events.ndjson`
+// plus the §8.58 hunk-watch `outbox.ndjson`/`delivered.ndjson` (O_APPEND appends cannot truncate-tear,
 // and whole-file replace would introduce a read-modify-write race between independent
 // processes). A textual backstop, not a completeness proof (see
 // docs/learned/workflow/source-scan-guards.md). The Python twin is tests/test_write_guard.py.
@@ -27,12 +27,12 @@ const RULES: { api: string; pattern: RegExp; allowed: string[] }[] = [
   {
     api: "appendFileSync(",
     pattern: /\bappendFileSync\(/,
-    // worker.ts: the append-only `events.ndjson` stream. hunkFeedback/store.ts (the receiver's
-    // `delivered.ndjson`) and hunkFeedback/perkFeedback.ts (the standalone bundled publisher's
-    // `outbox.ndjson`) are the §8.58 append-only NDJSON streams — same O_APPEND rationale:
-    // appends cannot truncate-tear, and whole-file replace would introduce a read-modify-write
-    // race between the two independent processes.
-    allowed: ["worker/worker.ts", "hunkFeedback/store.ts", "hunkFeedback/perkFeedback.ts"],
+    // worker/stageExecution.ts: the append-only `events.ndjson` stream. hunkFeedback/store.ts
+    // (the receiver's `delivered.ndjson`) and hunkFeedback/perkFeedback.ts (the standalone
+    // bundled publisher's `outbox.ndjson`) are the §8.58 append-only NDJSON streams — same
+    // O_APPEND rationale: appends cannot truncate-tear, and whole-file replace would introduce
+    // a read-modify-write race between the two independent processes.
+    allowed: ["worker/stageExecution.ts", "hunkFeedback/store.ts", "hunkFeedback/perkFeedback.ts"],
   },
   { api: "writeFile(", pattern: /\bwriteFile\(/, allowed: [] },
   { api: "appendFile(", pattern: /\bappendFile\(/, allowed: [] },
@@ -103,11 +103,11 @@ test("file writes go through the atomic seam (atomicWriteFileSync in substrate/c
     "substrate/cache.ts no longer matches writeFileSync( — guard is vacuous",
   );
   const workerSource = stripComments(
-    readFileSync(path.join(import.meta.dirname, "worker", "worker.ts"), "utf8"),
+    readFileSync(path.join(import.meta.dirname, "worker", "stageExecution.ts"), "utf8"),
   );
   assert.ok(
     /\bappendFileSync\(/.test(workerSource),
-    "worker/worker.ts no longer matches appendFileSync( — guard is vacuous",
+    "worker/stageExecution.ts no longer matches appendFileSync( — guard is vacuous",
   );
 
   const violations = violationsOf(files);
