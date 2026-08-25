@@ -32,7 +32,7 @@ import {
 } from "../testing/harness.ts";
 import { OBJECTIVE_BUDGET_TYPE } from "./objective.ts";
 import { OBJECTIVE_DRAFT_ARTIFACT } from "./objectiveDraft.ts";
-import { resolveDreamReportGate } from "./objectiveDreamReport.ts";
+import { resolveDreamReportGate } from "../authoring/objective/dreamReportGate.ts";
 import {
   DREAM_REPORT_TRANSFER_FILENAME,
   objectiveApprovalSave,

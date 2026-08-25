@@ -47,7 +47,7 @@ import {
   decodeDreamReportBlock,
   type ObjectiveDreamReportBlock,
   resolveDreamReportGate,
-} from "./objectiveDreamReport.ts";
+} from "../authoring/objective/dreamReportGate.ts";
 
 /** The reviewed objective delivery choice (contracts §8.45). */
 export type DeliveryChoice = "incremental" | "stacked";

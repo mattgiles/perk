@@ -1,8 +1,8 @@
 // The `dream_report` gate for the objective draft/review/save path (contracts.md §8.63).
 //
-// ONE resolver implements the whole gate matrix — `writeObjectiveDraft` (objectiveDraft.ts)
-// and `saveObjective` (objectiveSave.ts) both consume its typed outcome, so no parallel
-// branch/message implementation can drift. "Dream session" is detected structurally, exactly
+// ONE resolver implements the whole gate matrix — `reviseObjectiveDraft` (draft.ts) and
+// `saveObjective` (save.ts) both consume its typed outcome, so no parallel branch/message
+// implementation can drift. "Dream session" is detected structurally, exactly
 // like `run_dream_wave` (doors/dreamWaveTools.ts): the session's claimed `run_id` plus the
 // existence of the run-scoped dream manifest (no claimed run counts as non-dream). The gate is
 // fail-closed in BOTH directions: a dream session refuses a report-less objective (the
@@ -20,21 +20,21 @@
 // consumers flow through the one resolver; drift refuses `bad_state` (the analysis is stale).
 //
 // Imports only the dream wave siblings, the substrate seams, and node builtins — cycle-free
-// (nothing in `waves/` imports factories) and loadable under `node --test`.
+// (nothing in `waves/` imports `authoring/`) and loadable under `node --test`.
 
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { runScratchDir } from "../substrate/cache.ts";
-import { revalidationBracket } from "../substrate/git.ts";
-import { digestSessionData, type SessionDataCtx } from "../substrate/sessionData.ts";
-import { branchOf, rebuildWorkflowState, type WorkflowState } from "../substrate/workflowState.ts";
-import { DREAM_ANALYSES_FILENAME, decodeFinalizedDreamBundle } from "../waves/dreamReducerWave.ts";
-import { buildDreamReport, type DreamReportContext } from "../waves/dreamReport.ts";
+import { runScratchDir } from "../../substrate/cache.ts";
+import { revalidationBracket } from "../../substrate/git.ts";
+import { digestSessionData, type SessionDataCtx } from "../../substrate/sessionData.ts";
+import { branchOf, rebuildWorkflowState, type WorkflowState } from "../../substrate/workflowState.ts";
+import { DREAM_ANALYSES_FILENAME, decodeFinalizedDreamBundle } from "../../waves/dreamReducerWave.ts";
+import { buildDreamReport, type DreamReportContext } from "../../waves/dreamReport.ts";
 import {
   codePointLength,
   DREAM_MANIFEST_FILENAME,
   decodeDreamManifest,
-} from "../waves/dreamWave.ts";
+} from "../../waves/dreamWave.ts";
 
 /**
  * The shared part-invariance + size rule's comment-body cap (contracts §8.64) — the full

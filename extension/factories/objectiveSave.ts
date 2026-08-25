@@ -41,7 +41,7 @@ import {
   ROADMAP_PARAM_SCHEMA,
   readObjectiveDraft,
 } from "./objectiveDraft.ts";
-import { resolveDreamReportGate } from "./objectiveDreamReport.ts";
+import { resolveDreamReportGate } from "../authoring/objective/dreamReportGate.ts";
 
 /** The `objective-save` registry stage id (the objectiveAuthor.ts constant's sibling). */
 export const OBJECTIVE_SAVE_STAGE = "objective-save";

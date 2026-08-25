@@ -37,7 +37,7 @@ import {
   renderObjectiveDraft,
   writeObjectiveDraft,
 } from "./objectiveDraft.ts";
-import type { ObjectiveDreamReportBlock } from "./objectiveDreamReport.ts";
+import type { ObjectiveDreamReportBlock } from "../authoring/objective/dreamReportGate.ts";
 
 const PROSE = "# Conform objective planning\n\nThe why, the design, the boundaries.\n";
 const ROADMAP = [
