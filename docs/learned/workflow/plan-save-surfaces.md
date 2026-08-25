@@ -90,10 +90,11 @@ choice.
 
 The handoff carrier covers **cold** sessions; warm sessions got the matching half: the
 `objective_node_claim` carrier in `perk:workflow-state`, written on a successful `planning`
-transition by the `objective_node` tool (`extension/factories/objectivePlan.ts` — the claim helpers live
-there, typed over the structural `BranchSource` slice so `planSave.ts` imports them with no module
-cycle), cleared on a non-planning transition for the same node or after a successful node-linked
-save keyed off the cold door's *reported* node. Both planes implement **identical semantics**:
+transition by the `objective_node` tool (`extension/factories/objectivePlan.ts`; the claim decode +
+equality helpers live in `extension/substrate/workflowState.ts`, typed over the structural
+`BranchSource` slice so the session seam and the save feature import them with no module cycle),
+cleared on a non-planning transition for the same node or after a successful node-linked save
+matching the FULL claim identity (objective + node) keyed off the cold door's *reported* node. Both planes implement **identical semantics**:
 explicit values win outright (even one — never mixed), fill both-or-neither, fail-open (a malformed
 carrier never blocks a save).
 
@@ -122,7 +123,7 @@ miss. **Tie any new `handoff_extra` consumer to the checkout the launch actually
 
 ## The plan-source resolution chain
 
-`resolvePlanSource` in `extension/factories/planSave.ts` resolves the plan to save as: validated plan-draft
+`resolvePlanSource` in `extension/authoring/plan/source.ts` resolves the plan to save as: validated plan-draft
 artifact → `plan` param → transcript scrape → null. The artifact tier needs `run_id`; the param
 tier doesn't. Success messages annotate **only the NEW sources** (` · plan source: plan-draft
 artifact`/`transcript`) — the param path stays byte-identical by design, so existing tests and
@@ -236,7 +237,8 @@ on-land step is fail-open and only prints on success, a stale header broke the w
 ## Cross-references
 
 - `shared/contracts.md` §8.23 — the consolidated file-first plan contract (the three backends)
-- `extension/factories/planSave.ts` — `resolvePlanSource`, `savePlan`, the `approvalSave` seam
+- `extension/authoring/plan/source.ts` — `resolvePlanSource`; `extension/authoring/plan/save.ts` —
+  `savePlan`/`planApprovalSave`; `extension/pi/v1/plan.ts` — the `approvalSave` seam + the save rendering
 - `extension/factories/objectivePlan.ts` — the `objective_node_claim` writer + claim helpers
 - `docs/learned/workflow/plan-review-flow.md` — the review-side tiering + the approvalSave seam
 - `docs/learned/pi/tool-param-decode.md` — the fallback-chain optionality flip

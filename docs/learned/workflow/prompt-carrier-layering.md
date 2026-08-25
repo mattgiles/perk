@@ -52,7 +52,7 @@ bodies, and the door-suite tests (e.g. `extension/doors/prReviewTerminal.test.ts
 - **The concrete §8.57 carrier map: one flow statement per session shape** (#1955) — the shared
   plan-authoring context; the tombell REPLACE adapter carve-out; the three objective-author
   launch variants (seed/adopt/file). The bound skill *recaps* rather than restates, and the
-  carrier inventory is verified against `planMode.ts` deferrals/`registerPlanMode` before
+  carrier inventory is verified against `pi/v1/plan.ts` deferrals/`installPlanMode` before
   writing.
 - **One nudge per launch trigger is the delivery design:** a cold `command:<id>` binding
   intentionally suppresses the warm `stage:<id>` nudge (header dedup); base-skill reachability
@@ -60,7 +60,7 @@ bodies, and the door-suite tests (e.g. `extension/doors/prReviewTerminal.test.ts
 - **Closed: the REPLACE-posture flow-carrier claim is pinned by one generic seeded-plan-shape
   proof.** The adapter is shape-blind (it reads only the rebuilt workflow state's mode/stage
   plus branch markers), every pointer-carrying seeded door presents the identical
-  `{mode: read-only, stage: plan}` state, and `planAdapterTombell.test.ts`'s gate-active case
+  `{mode: read-only, stage: plan}` state, and `pi/v1/providers/tombell.test.ts`'s gate-active case
   (injection + flow content) plus dedup case (once-only) exercise exactly that state, with the
   objective-plan control arm pinning the exception set at exactly
   `{objective-author, gist-author}`. One generic shape test beats per-door lookalike fixtures

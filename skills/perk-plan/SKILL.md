@@ -112,7 +112,7 @@ commitments. Describe scope through the concrete edits themselves; let the work 
 Line numbers drift as code changes and cause implementation failures. **Never** reference a line
 number in a plan step. Use **durable anchors** instead:
 
-- ✅ **Function / class names** — "Update `savePlan()` in `extension/factories/planSave.ts`"
+- ✅ **Function / class names** — "Update `savePlan()` in `extension/authoring/plan/save.ts`"
 - ✅ **Behavioral descriptions** — "Add a read-back check before appending the linkage"
 - ✅ **Structural locations** — "In the `save` stage descriptor in `shared/registry.yaml`, add …"
 - ✅ **File + context** — "In the `session_start` handler in `extension/index.ts`, after the run_id claim"

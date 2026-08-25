@@ -106,11 +106,11 @@ The local cache tier — written and read by **both** the CLI (exterior) and the
   `invalid_input`; no session `run_id` → `no_run_id`; file-or-pointer write failure →
   `write_failed`. Consumers read a draft only via `readSessionArtifact` (digest-validated,
   fail-open). `plan_draft` writes the working plan during read-only plan authoring to
-  `plan-draft.md` (`PLAN_DRAFT_ARTIFACT`, `extension/factories/planDraft.ts`); `objective_draft`'s
+  `plan-draft.md` (`PLAN_DRAFT_ARTIFACT`, `extension/authoring/plan/draft.ts`); `objective_draft`'s
   per-artifact differences are below.
 
   **File-first plan save.** Both save surfaces resolve their plan through one shared
-  resolver (`resolvePlanSource`, `extension/factories/planSave.ts`), in order: (1) the validated
+  resolver (`resolvePlanSource`, `extension/authoring/plan/source.ts`), in order: (1) the validated
   `plan-draft.md` artifact (`readSessionArtifact` — digest-validated, fail-open: no run_id / no
   pointer / fork run_id mismatch / missing file / digest mismatch all fall through); (2) the
   explicit `plan` param (tool only — now **optional** in the `plan_save` schema); (3) the
@@ -468,7 +468,7 @@ end of the section).
 | `last_review` | object \| null | the last review-door outcome posted via the warm `submit_pr_review` tool: `{ pr, event, comment_count, mode, at:ISO }`; best-effort tier (the submitted PR review is the canonical record) |
 | `review_posts` | array | the accumulating per-PR posting ledger of a stacked review: one `{ pr, event, at:ISO }` row per REAL `submit_pr_review` success, in posting order (read-rebuild-append — each write carries the whole list); best-effort tier with an asymmetric trust rule — a row can be MISSING spuriously (append failed after a real post) but never PRESENT spuriously, so `submit_pr_review` enforces skip-on-resume on presence (`already_posted` refusal; `allow_repost: true` is the deliberate override) while a missing row means verify posted-vs-pending against GitHub before re-posting |
 | `session_artifacts` | object \| null | per-name session-artifact provenance pointers `{run_id, name, path, digest, at}` (§8.1); appends carry the **whole merged map** (per-field LWW); strict-append tier |
-| `objective_node_claim` | object \| null | the objective node this session has claimed `planning` (`{ objective, node }`); written by the warm `objective_node` tool on a successful `planning` transition **and by the cold claim** (`session_start` persists it from the claimed handoff's non-blank `objective_id`/`node_id` — the objective-plan cold door's `handoff_extra` — so implement-here suppression is structural in cold objective-plan sessions too), cleared on a successful non-planning transition for the same node and after a successful node-linked plan save; best-effort tier (cheaply reconstructable; loud-but-non-fatal) |
+| `objective_node_claim` | object \| null | the objective node this session has claimed `planning` (`{ objective, node }`); written by the warm `objective_node` tool on a successful `planning` transition **and by the cold claim** (`session_start` persists it from the claimed handoff's non-blank `objective_id`/`node_id` — the objective-plan cold door's `handoff_extra` — so implement-here suppression is structural in cold objective-plan sessions too), cleared on a successful non-planning transition for the same node and after a successful node-linked plan save (the save-path clear matches the **full claim identity** — objective **and** node — so a save linked elsewhere never clobbers an unrelated standing claim); best-effort tier (cheaply reconstructable; loud-but-non-fatal) |
 | `conflict_resolution_attempts` | number | the bounded conflict-resolution re-drive counter: incremented on each `perk.conflict-resolver` dispatch from EITHER warm surface — `/submit`'s PR-rebase drive on a definitively-unmergeable PR, or `/objective-sync`'s retained-continuation drive (§8.51) — (cap `CONFLICT_RESOLUTION_ATTEMPT_CAP = 2`, shared); reset to 0 on any clean mutating completion (a clean submit; a clean non-declined mutating stack sync/continue/abort/adopt); best-effort tier (cheaply reconstructable) |
 | `dream_bundle_digest` | string | the dream-wave finalized-bundle digest marker (§8.61): `""` = invalidated (cleared unconditionally at wave entry, BEFORE the stale-bundle removal attempt — the invalidation record); `sha256:<hex>` = the digest of the current finalized run-scratch bundle bytes, set only after a successful finalize write; the §8.63 dream-report recovery refuses unless the marker is present, non-empty, and byte-matches the bundle just read; per-field LWW, no rebuild change |
 | `perk_version` | string | the running perk (extension) version, stamped when run identity is established (the claim/fork/adopt/mint arms, §8.2) — the session-audit **exact-vintage** basis (the key literal is the cross-plane coordination point; the read side is `perk-dev`'s audit corpus/vintage layer); omitted when only the `perkVersion()` failure sentinel is available; best-effort tier |
@@ -637,18 +637,18 @@ State key (registry vocabulary): `session.workflow-state`.
 
 **Owning modules (single-plane interior mechanics).** Single-plane interior mechanics live in
 the owning modules' headers: approval→save orchestration + plan-title
-generation (`extension/factories/planSave.ts` / `planTitle.ts` / `planReview.ts`; §8.23 keeps the
-review-backend contract); objective budget + threshold compaction
+generation (`extension/authoring/plan/save.ts` / `extension/pi/v1/plan.ts` / `planTitle.ts` /
+`planReview.ts`; §8.23 keeps the review-backend contract); objective budget + threshold compaction
 (`extension/factories/objective.ts`); the objective authoring loop
 (`extension/factories/objectiveAuthor.ts` / `objectiveSave.ts`; §8.23/§8.24 own the save/store
 contracts); the objective plan factory + node-lifecycle selection
 (`extension/factories/objectivePlan.ts`, `src/perk/objective/`; §8.24); objective reconciliation
 (the reconcile modules + `skills/perk-objective-reconcile/`; the land-path facts stay in §8.4);
 session-lifecycle gates + the warm `/implement` handoff (`extension/doors/lifecycleGates.ts`,
-`extension/factories/implementHere.ts`); status/footer rendering detail
+`extension/pi/v1/planReview.ts`'s implement-here seam); status/footer rendering detail
 (`extension/surfaces/surfaces.ts`,
 `docs/design/tui-charter.md`); plan mode + the plan provider deferral
-(`extension/factories/planMode.ts`; §8.10
+(`extension/pi/v1/plan.ts`; §8.10
 owns the provider seams); the read-only CI executor
 (`extension/doors/ciExecutor.ts`); the spawned delegation seam + `/address` + `/pr-review` + `/pr-review-dynamic` + `/pr-review-terminal` + `/pr-review-browser`
 (`extension/doors/address.ts` / `prReview.ts` / `prReviewDynamic.ts` / `prReviewTerminal.ts` /
@@ -2100,7 +2100,7 @@ twin of the cold door. `resolvedBindings(cwd)` is the TS mirror of cold's `resol
 `renderBindings(cwd, trigger)` / `bindingSuffix(cwd, trigger)` render exactly as the cold door does.
 It delivers at two **warm surfaces**: **Mechanism A** — a `before_agent_start` handler injects the
 launched **`stage:<id>`** bindings as a hidden (`display:false`) `perk:binding-context` message
-(mirroring `planMode.ts` / `objectiveAuthor.ts`). This is the delivery path for **`stage:plan`**'s
+(mirroring the plan-mode injection in `pi/v1/plan.ts` / `objectiveAuthor.ts`). This is the delivery path for **`stage:plan`**'s
 `perk-plan` pointer: a cold `perk plan` launches **idle** (no prompt to augment), so the `plan`
 skill pointer is delivered explicitly here. **Mechanism B** — `bindingSuffix` is
 appended into the guidance of **every** perk warm slash-command so each **self-delivers** its
@@ -2127,7 +2127,7 @@ injected custom and the cold prompt both carry the header → idempotent across 
 compaction drops the original from the active window it **re-delivers** (its ongoing value — later
 prompts don't carry the header, so the prompt scan stays inert there). Mechanism B is a one-shot
 `sendUserMessage` suffix at an invocation distinct from any cold launch, so it cannot auto-double. A
-narrower-than-`planMode` `context` strip removes a **stale** `perk:binding-context` custom (stage
+narrower-than-plan-mode `context` strip removes a **stale** `perk:binding-context` custom (stage
 changed / overlay removed) while **never** stripping a user message that carries the header (a cold
 prompt legitimately does). Resolver shape `issues` are **not** surfaced warm (the cold launch + doctor
 own them); only the delivery `warnings` are loud-but-non-fatal: Mechanism A and
@@ -2276,7 +2276,8 @@ reader cannot.
 `default: true`), plus **real** foreign plan entries. On the **plan** seam, `tombell-plan`
 (→ `npm:@tombell/pi-plan`, `adapter: planAdapterTombell`) REPLACEs perk's plan surface (perk
 vacates at registration time + the adapter bridges the foreign one) and `plannotator-plan`
-AUGMENTs it (`shared/providers.yaml`, `extension/factories/planMode.ts`). There is **no askuser
+AUGMENTs it (`shared/providers.yaml`, `extension/pi/v1/plan.ts` +
+`extension/pi/v1/providers/selection.ts`). There is **no askuser
 seam**: `ask_user_question` is a **required borrow** — the borrowed
 `@juicesharp/rpiv-ask-user-question` questionnaire, installed
 for every repo via `BORROWED_PACKAGES` and governed name-keyed by §8.40's borrowed census.
@@ -2329,7 +2330,8 @@ one key per seam (`plan` / `footer` / `web`), values are **bare provider-id stri
 reader `parseTomlSubset` reads string values only; richer structure lives in `providers.yaml`).
 Both planes parse it raw (`perk/substrate/config.py` → `Config.providers`; `extension/substrate/config.ts` →
 `PerkConfig.providers`); resolution against the supported set is `init`/`doctor` in Python and the
-`extension/substrate/providers.ts` `resolveProviders` resolver in TS (consumed by `planMode`). An **absent table or absent key → the seam's
+`extension/substrate/providers.ts` `resolveProviders` resolver in TS (consumed by
+`pi/v1/providers/selection.ts`). An **absent table or absent key → the seam's
 `default: true` provider** (zero behavior change, the no-config default). `local.toml` overlay
 wins (standard local-override precedence). The pure resolver
 `perk.substrate.providers.resolve_providers(selection, providers)` returns `ResolvedProviders { plan,
@@ -3684,7 +3686,7 @@ everywhere — PRs are GitHub-universal. Concretely:
   `issue` but is a string; `pr land`'s `objective` sub-object `number` → **`id`** (string|null)
   and `learn.closed` carries string ids; `objective reconcile`'s `objective`/`comment_id` are
   strings; `learn docs --gather`'s `learn_numbers` carries string ids. TS decoders
-  (`planSave.ts`/`learn.ts`/`land.ts`/`objectiveSave.ts`/`learnFactory.ts`) are lockstep-strict on
+  (`pi/v1/plan.ts`/`learn.ts`/`land.ts`/`objectiveSave.ts`/`learnFactory.ts`) are lockstep-strict on
   the string shapes, with one tolerance: `learnFactory.ts::decodeGather` accepts legacy numeric
   `learn_numbers` and normalizes them to strings.
 - CLI plan/objective arguments parse through the shared opaque-id validators
@@ -3770,9 +3772,12 @@ discipline); this section keeps the unique cross-cutting rules.
   reviewed bytes, and scraped conversation bytes must never be what gets approved. The browser
   review doors tighten further to **validated artifact only**.
 - **The review door + the approval seam.** `plan_review` (in `READ_ONLY_TOOLS`; backend-neutral,
-  `extension/factories/planReview.ts`) dispatches: plannotator-selected → the event-bus bridge; **any**
-  other selection → the first-party `ctx.ui.editor` review. APPROVED (either backend) runs
-  `approvalSave` (`extension/factories/planSave.ts`): save → D1a gate exit on success (→ §8.3). The
+  `extension/pi/v1/planReview.ts`; the objective arm's home is `extension/pi/v1/objectiveReview.ts`)
+  dispatches: plannotator-selected → the event-bus bridge; **any**
+  other selection → the first-party `ctx.ui.editor` review. APPROVED (either backend) runs the
+  shared approval→save orchestration — the feature op `planApprovalSave`
+  (`extension/authoring/plan/save.ts`), adapter-composed as `approvalSave`
+  (`extension/pi/v1/plan.ts`): save → D1a gate exit on success (→ §8.3). The
   `/plan-save` command is the **manual failsafe** invocation of the same seam, taking only an
   optional title argument. Every `plan_review` arm carries the universal `details.ok` discriminant
   (`ok:false` + `error`/`error_type` on unavailable / save-failed / bad_input / no_plan /
@@ -3802,9 +3807,10 @@ discipline); this section keeps the unique cross-cutting rules.
   The Direct Edits payload is a **prose compatibility format**; parse/apply/write-back failures
   use the verbatim-save fallback with a warning. perk handles it asymmetrically per arm:
   - **Plan arm, APPROVE:** mechanical apply — strict extraction (`extractDirectEdits`,
-    `extension/adapters/planAdapterPlannotator.ts`) → strict clean-apply (`applyUnifiedDiff`,
+    `extension/pi/v1/providers/plannotator.ts`) → strict clean-apply (`applyUnifiedDiff`,
     `extension/substrate/unifiedDiff.ts`, a vendored zero-runtime-dep applier; null on any
-    anomaly) → `writePlanDraft` write-back (reviewed bytes == artifact bytes == saved bytes) →
+    anomaly) → the draft write-back through the session seam (reviewed bytes == artifact bytes
+    == saved bytes) →
     save the EDITED bytes with `details.edited: true` and the annotation remainder as the only
     surviving feedback. The **fail-open ladder**: no section → the plain save; a
     heading that cannot be parsed / applied / written back → the verbatim save plus a loud
@@ -3824,7 +3830,7 @@ discipline); this section keeps the unique cross-cutting rules.
     for the `plan_draft`/`objective_draft`/`gist_draft` rewrite.
 
   The plan arm's mechanical apply is the exported `applyPlannotatorDirectEdits` helper
-  (`extension/factories/planReview.ts`) — ONE apply path shared byte-identically by
+  (`extension/pi/v1/planReview.ts`) — ONE apply path shared byte-identically by
   `executePlanReview`'s plannotator arm and the `/plan-review-browser` door.
 
 - **The two draft-review browser doors** (`/plan-review-browser` /
@@ -3855,8 +3861,9 @@ discipline); this section keeps the unique cross-cutting rules.
   authoring for changes too small to warrant the full lifecycle: the read-only gate comes off
   **without** an issue-backend save, and the model is instructed to implement the reviewed draft
   directly in the current session/checkout — edits only; git gestures (commit/branch/push) stay
-  with the human. Two surfaces (`extension/factories/implementHere.ts` + the plan arm of
-  `planReview.ts`), both machine-unreachable (no model tool exists — a verdict select or a
+  with the human. Two surfaces (the `/implement-here` command + the plan arm's 4th verdict —
+  both composed over `extension/pi/v1/planReview.ts`'s implement-here seam), both
+  machine-unreachable (no model tool exists — a verdict select or a
   human-run command; the model can never choose to skip the backend on its own):
   1. the **4th first-party verdict** — the plan arm's `ctx.ui.select` offers
      "Implement here — no issue saved" between approve and deny; selecting it routes (before the
@@ -4776,15 +4783,17 @@ nothing, the subset being shared).
 - **TS:** `extension/substrate/prompts.ts::render(name, vars)`, delegating to the vendored,
   zero-dependency `extension/substrate/miniJinja.ts` renderer (the frozen-subset engine). The
   seam is LIVE on both planes: consumers span the worker, the warm doors and factories, the two
-  provider adapters (`tombell` / `plannotator` — `extension/adapters/`; `juicesharp` is a
+  provider adapters (`tombell` / `plannotator` — `extension/pi/v1/providers/`; `juicesharp` is a
   borrowed-tool package, not an adapter), and the Python cold doors. The seven injected mode/bridge
   contexts (the persistent `before_agent_start` injections stripped on `context`, each injection
   **dedup-guarded by a marker scan** — `branchCarries` in
   `extension/substrate/workflowState.ts`. The gist-owned injections — the gist-authoring
-  context and plannotator's gist flavor — scan the **compaction-active window**
-  (`activeContextWindow`), so the session carries ONE live copy and a compaction that drops it
-  naturally re-injects; the remaining injections scan the whole branch — one copy per session,
-  never re-injected post-compaction) live under
+  context and plannotator's gist flavor — and the plan-owned injections — the plan-authoring
+  context, plannotator's plan flavor, and the tombell bridge context — scan the
+  **compaction-active window** (`activeContextWindow`), so the session carries ONE live copy and
+  a compaction that drops it naturally re-injects; the objective-flavor injections still scan
+  the whole branch — one copy per session, never re-injected post-compaction (they migrate with
+  the objective slice)) live under
   `prompts/contexts/` — the mode contexts at the top level, the adapter bridges under
   `prompts/contexts/adapters/` — with each module's identity marker passed as the `{{ marker }}`
   render var (never a template literal), so the marker the strip handler scans for cannot drift

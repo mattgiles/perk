@@ -25,7 +25,7 @@ on the first `content` block of `type === "toolCall"`.
   has a pre-existing limitation: it forwards apiKey/headers/env but has **no `baseUrl` option**,
   so a credential-resolved endpoint is silently dropped on old hosts — the dispatch path is the
   fix. Either path validates the returned tool call.
-- `extension/factories/planTitle.ts` is the first consumer: it **feature-detects**
+- `extension/pi/v1/planTitle.ts` is the first consumer: it **feature-detects**
   `registry.complete` (`typeof … === "function"` — absent on older hosts, never assumed) and
   wraps it as `dispatch`.
 
@@ -69,7 +69,7 @@ faux tool call with `stopReason: "toolUse"`), drive the code, assert, then unreg
   `PERK_NO_LLM`.
 - The faux model is typed `Model<string>`; cast it for the `Model<Api>` parameter.
 
-`extension/factories/planTitle.test.ts` is the worked example (the harness code is not reproduced here).
+`extension/pi/v1/planTitle.test.ts` is the worked example (the harness code is not reproduced here).
 
 ## Residual
 
@@ -95,7 +95,7 @@ them:
 ## Cross-references
 
 - `extension/substrate/structuredOutput.ts` — `resolveModelAuth`, `completeStructured`
-- `extension/factories/planTitle.ts` — first consumer + the `PERK_NO_LLM` gate
-- `extension/factories/planTitle.test.ts` — the faux-provider offline test
+- `extension/pi/v1/planTitle.ts` — first consumer + the `PERK_NO_LLM` gate
+- `extension/pi/v1/planTitle.test.ts` — the faux-provider offline test
 - `docs/learned/pi/extension-api.md` — the broader extension API surface
 - `docs/learned/toolchain/worktree-node-modules.md` — resolving the installed SDK in a worktree

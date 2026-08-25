@@ -162,7 +162,7 @@ The full producer→consumer recipe, composed from the rules proven above and in
 (`plan_draft` → `resolvePlanSource` is the end-to-end precedent):
 
 1. **Producer**: a fixed artifact-name constant (the `PLAN_DRAFT_ARTIFACT` precedent,
-   `extension/factories/planDraft.ts`); write only via `writeSessionArtifact` (file + provenance pointer in
+   `extension/authoring/plan/draft.ts`); write only via `writeSessionArtifact` (file + provenance pointer in
    one gesture); pointer appends carry the **whole merged map** (per-field LWW — see "Provenance
    pointers" above); a `null` return ⇒ not consumable, even if the file visibly exists.
 2. **Read-only writer** (only if the producer must run under the gate) — the carve-out recipe

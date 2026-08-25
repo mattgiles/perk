@@ -370,11 +370,11 @@ chain.
 
 ## Cross-references
 
-- `extension/factories/planSave.ts` — `savePlan`, the three-way `nodeLink` render, the "one text field, two
+- `extension/authoring/plan/save.ts` (`savePlan`) + `extension/pi/v1/plan.ts` (the three-way `nodeLink` render), the "one text field, two
   doors" shape
 - `extension/factories/objectiveSave.ts` — the on-ramp / drive-the-session conversion (dead `extractObjectiveMarkdown`)
 - `extension/substrate/toolGating.ts` — `READ_ONLY_TOOLS`, the gate that hides non-carved-in custom tools (all write tools) but not commands
-- `extension/factories/planMode.ts` — `/plan off` / `Ctrl+Alt+P` (the gate is a user gesture, not a turn action)
+- `extension/pi/v1/plan.ts` — `/plan off` / `Ctrl+Alt+P` (the gate is a user gesture, not a turn action)
 - `docs/learned/workflow/plan-save-surfaces.md` — the two-surface fidelity gap + `handoff_extra` carrier
 - `docs/learned/workflow/objective-lifecycle.md` — the authoring/save loop the driving commands feed
 - `docs/learned/workflow/skill-bindings.md` — `bindingSuffix` (the skill pointer the guidance rides)

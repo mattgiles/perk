@@ -82,11 +82,12 @@ like `Config.user_bindings` — resolution/validation happens downstream, not at
 When a foreign provider is selected, only the **owned authoring surface** steps aside; the
 **produced-contract landing** stays always-registered. For the plan seam:
 
-- **`planMode.ts` defers** — the `/plan` toggle, `Ctrl+Alt+P`, the `--plan` entry, and the
-  `perk:plan-context` injection all guard on the selection.
-- **`planSave.ts` never defers** — `savePlan`, the `plan_save` tool, `/plan-save`, and the read-only
-  tool-gate are seam-shared substrate (see the SEAM-SHARED SUBSTRATE doc-comment at the top of
-  `planSave.ts`).
+- **The plan-mode surface defers** (`installPlanMode`, `pi/v1/plan.ts`) — the `/plan` toggle,
+  `Ctrl+Alt+P`, the `--plan` entry, and the `perk:plan-context` injection all guard on the
+  selection.
+- **The save substrate never defers** — `savePlan` (`authoring/plan/save.ts`), the `plan_save`
+  tool, `/plan-save`, and the read-only tool-gate are seam-shared substrate (adapter-architecture
+  Invariant 1).
 
 The substrate is what a foreign adapter bridges **to**: a foreign plan surface produces a
 decision-complete plan and hands it to `plan_save` → `cache.plan-ref`. Deferring the substrate would
@@ -132,7 +133,7 @@ kinds of node.
   `--plan` entry, so a silent early-return inside each handler is enough.
 - A **foreign-adapter node** (plan seam Node 2.3 with `@tombell/pi-plan`; the analogous todo seam
   Node 3.2 with `@juicesharp/rpiv-todo`) must **escalate to registration-time vacating**: resolve the
-  selection **once at factory time** (`registerPlanMode` reads `resolvedPlanProviderId(process.cwd())`)
+  selection **once at factory time** (`installPlanMode` reads `resolvedPlanProviderId(process.cwd())`)
   and, under a foreign selection, **register nothing** — no flag, no command, no shortcut, no
   `session_start --plan` entry, no `before_agent_start` injection, no `context` strip. The whole
   registration body is gated once; the per-handler guards then become **redundant and are removed**.
@@ -157,7 +158,7 @@ The (since-retired) askuser interface seam confirmed the general decision rule a
 load order**. The foreign `ask_user_question` tool shares perk's exact tool name, so `askuser` mirrors
 the **plan seam's registration-time vacating** (resolve once at factory-time `process.cwd()`,
 early-return before `registerTool` under a foreign selection — `registerAskUser` wiring stays a single
-unconditional call, gating lives inside, like `registerPlanMode`), **not** the todo seam's runtime
+unconditional call, gating lives inside, like `installPlanMode`), **not** the todo seam's runtime
 deferral. Generalized:
 
 - **command-name collision ⇒ registration-time vacating** (plan: `/plan`; askuser: the
@@ -205,7 +206,7 @@ now three distinct vacating mechanisms plus two limit-case postures:
   time. It collides **by name**: commands are `:N`-suffixed, tools replace by non-deterministic
   extension load order. perk must resolve the selection **once at factory time** and **register
   nothing** under a foreign selection (the whole registration body is gated; per-handler guards
-  become redundant). See `registerPlanMode` (`registerAskUser` was the second instance, since
+  become redundant). See `installPlanMode` (`registerAskUser` was the second instance, since
   deleted).
 - **Install-site / runtime vacating, keyed off `ctx.cwd`** (footer — **the new third mechanism**) —
   perk installs its footer with `installPerkFooter` **inside the `session_start` event handler**
@@ -215,7 +216,7 @@ now three distinct vacating mechanisms plus two limit-case postures:
   last-wins slot, not a named registration), so the guard isn't about suffixing — it's about not
   clobbering the foreign footer's slot. **Easier test tier:** because `ctx.cwd` flows through the
   event, footer's helper + install-gating tests need **no `process.chdir`** (unlike the factory-time
-  `process.cwd()` reads in `registerAskUser` / `registerPlanMode` tests, which must chdir into the
+  `process.cwd()` reads in `registerAskUser` / `installPlanMode` tests, which must chdir into the
   scaffold before bind). The `ctx.cwd`-keyed tier is the easier one to test — see the chdir-requirement
   section.
 - **Runtime deferral** (historically todo) — the surface was always *registered* but stood down at
@@ -358,14 +359,15 @@ A reference provider defers by adding two exported helpers — `resolved<Seam>Pr
 `isPerk<X>ReferenceSelected(cwd)` — read **fresh per-event** (no static state). Event handlers
 (`session_start` / `session_tree` / `turn_end`) early-return **silently**; the user-facing command
 (`/plan`, `/checkpoints`) **announces** the deferral headless-safe (`ctx.ui.notify` else
-`console.error`). The two instances were `extension/factories/planMode.ts` (plan seam, live) and
+`console.error`). The two instances were the plan-mode installer (plan seam, live — today
+`extension/pi/v1/plan.ts` + `extension/pi/v1/providers/selection.ts`) and
 the checkpoints module (todo seam — deleted with the seam, Objective #1416) — the
 same shape on both, which is why a future seam can copy it. (This is the concrete reuse of the per-event fail-safe consumption described below, not a
 separate mechanism.)
 
 ## The adapter shim is injection-only (Invariant 1)
 
-`extension/adapters/planAdapterTombell.ts` is **always registered** but inert unless `[providers] plan =
+`extension/pi/v1/providers/tombell.ts` is **always registered** but inert unless `[providers] plan =
 "tombell-plan"`. Its sole effect is to inject a hidden `perk:plan-adapter-tombell` context (mirroring
 `planMode` / `objectiveAuthor` hygiene: inject on `before_agent_start`, strip the stale marker on
 `context`). It **never** registers a `tool_call` handler, never calls `setActiveTools`, never touches
@@ -384,7 +386,7 @@ foreign-adapter work should reuse:
 
 - **Foreign-package persisted state as a gating signal (the state-twin read).** An adapter can
   condition behavior on a foreign extension's persisted session state by scanning the branch for
-  its custom entries — `isTombellPlanModeEnabled` (`extension/adapters/planAdapterTombell.ts`) reads
+  its custom entries — `isTombellPlanModeEnabled` (`extension/pi/v1/providers/tombell.ts`) reads
   `@tombell/pi-plan`'s `plan-mode-state` entries: latest-wins (a later `enabled: false` defeats an
   earlier `true`, mirroring tombell's own `session_start` rebuild), defensive false on
   missing/malformed. This extends the gate's state-twin doctrine (read the persisted
@@ -419,11 +421,11 @@ illustrative filter from a plan.
 
 ## Testing factory-time-cwd deferral — the chdir requirement
 
-`registerPlanMode` reads `process.cwd()` **when the extension factory runs** (at bind). The
+`installPlanMode` reads `process.cwd()` **when the extension factory runs** (at bind). The
 `loadPerkSession` harness takes a `cwd` option but **does not chdir the process** — so a scaffolded
 temp repo carrying a foreign selection is invisible to factory-time resolution unless the test does
 `const saved = process.cwd(); process.chdir(cwd)` *before* `loadPerkSession` and restores it in a
-`finally` (see `planMode.test.ts`). By contrast, **runtime-guard deferral keyed off `ctx.cwd`** (the
+`finally` (see `pi/v1/plan.test.ts`). By contrast, **runtime-guard deferral keyed off `ctx.cwd`** (the
 shim's injection/strip, and the since-deleted `checkpoints.test.ts`) needs **no** chdir — the cwd
 flows through the event `ctx`. That asymmetry is *why* runtime-guard deferral is the easier tier to test: pick the
 chdir pattern only for factory-time-cwd resolution, and the `ctx.cwd` pattern for everything keyed
@@ -431,9 +433,10 @@ off the event.
 
 ## Runtime config consumption is per-event and fail-safe
 
-The deferral guards read config **per-event from `ctx.cwd`** (`resolvedPlanProviderId(cwd)` /
-`isPerkPlanReferenceSelected(cwd)` in `planMode.ts`), with no static state — mirroring how
-`planContextContent(ctx.cwd)` is read in `before_agent_start`. The whole resolve is wrapped in
+The deferral guards read config **per-event from `ctx.cwd`** (`resolvedPlanProviderId(cwd)` in
+`pi/v1/providers/selection.ts`; the dead `isPerkPlanReferenceSelected` twin was deleted with the
+plan-flow migration), with no static state — mirroring how the plan-authoring injection reads
+`loadPerkConfig(ctx.cwd).planAuthoring` in `before_agent_start`. The whole resolve is wrapped in
 try/catch returning `PERK_PLAN_PROVIDER_ID`, so a corrupt bundled provider set can **never** disable
 perk's own plan mode. The injection guard stacks this as a *second* defer condition alongside the
 pre-existing objective-author-stage check.
@@ -471,7 +474,7 @@ file, or a selection naming a non-existent / wrong-seam provider. See
 
 The Node 3.1 status note (`shared/contracts.md`) + the since-deleted
 checkpoints module both forward-assumed
-the todo adapter would add registration-time vacating "mirroring `registerPlanMode`." That was
+the todo adapter would add registration-time vacating "mirroring `installPlanMode`." That was
 **wrong for the todo seam.** The plan seam needed registration-time vacating *only* because perk and
 `@tombell/pi-plan` both register the identically-named `/plan` command — Pi suffixes duplicate names
 (`/plan:1`, `/plan:2`), so handler-time deferral alone is ambiguous once the foreign package loads.
@@ -531,10 +534,10 @@ The third real provider, `plannotator-plan`, introduced a posture the catalog ha
 **augment** — perk's plan surface stays live and the provider adds a human review step
 (`plan_review`, bridged to the plannotator browser UI). Mechanics worth keeping:
 
-- `registerPlanMode` now has a **three-tier branch**: full (perk's own provider), **partial-vacate**
+- `installPlanMode` now has a **three-tier branch**: full (perk's own provider), **partial-vacate**
   (augment — perk keeps the surface, drops only the pieces the provider replaces), and full-vacate
   (a replace-posture foreign provider). Augment-vs-replace posture is **per-provider judgment keyed
-  on the id constant inside `registerPlanMode`**, not new catalog vocabulary — generalize the
+  on the id constant inside `installPlanMode`**, not new catalog vocabulary — generalize the
   posture into `providers.yaml` only when a third augment-style provider appears.
 - **An always-registered shim can key behavior off the gate without holding the controller** by
   reading the persisted workflow-state mode (`rebuildWorkflowState(branchOf(ctx)).mode ===
@@ -603,7 +606,7 @@ generalizes to any vacate-only tool registration.)* The harness exposes `registe
 **not** `registeredTools()`. Since `registerAskUser`
 only called `pi.registerTool`, the clean test was a minimal recording fake `pi`
 (`{ registerTool(t){ names.push(t.name) } }`) driven with the chdir-before-bind pattern from
-`planMode.test.ts`: write `.pi/perk.toml`, save + `process.chdir(cwd)`, assert `[]` (foreign selected)
+`pi/v1/plan.test.ts`'s deferral cases: write `.pi/perk.toml`, save + `process.chdir(cwd)`, assert `[]` (foreign selected)
 vs `["ask_user_question"]` (reference), restore cwd in `finally`.
 
 ## Residual / interim limitation
@@ -625,9 +628,9 @@ guarantee in every mode — with the one novelty that the **web default's `packa
 
 ## Cross-references
 
-- `extension/factories/planMode.ts` — the owned plan-authoring surface that defers
-- `extension/adapters/planAdapterTombell.ts` — the injection-only plan adapter shim (always registered, inert by default)
-- `extension/factories/planSave.ts` — the seam-shared substrate that never defers
+- `extension/pi/v1/plan.ts` (+ `extension/pi/v1/providers/selection.ts`) — the owned plan-authoring surface that defers
+- `extension/pi/v1/providers/tombell.ts` — the injection-only plan adapter shim (always registered, inert by default)
+- `extension/authoring/plan/save.ts` + `extension/pi/v1/plan.ts` — the seam-shared save substrate that never defers
 - `extension/surfaces/footerProvider.ts` — `isPerkFooterReferenceSelected` (the install-site/runtime footer vacating, keyed off `ctx.cwd`)
 - `extension/index.ts` — the `session_start` install site that gates `installPerkFooter` on `isPerkFooterReferenceSelected(ctx.cwd)`
 - `docs/learned/workflow/borrowed-packages.md` — the borrow-ban footer-clobber rule reconciled vs a selected footer provider; the live home of the two required borrows the askuser/todo seams retired to
