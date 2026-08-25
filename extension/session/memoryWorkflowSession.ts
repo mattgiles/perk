@@ -38,6 +38,8 @@ export interface MemoryWorkflowSession extends WorkflowSession {
   failNextApplyVerification(): void;
   /** Seed/replace the live node claim (the lifecycle write stays outside the seam). */
   setNodeClaim(claim: { objective: string; node: string } | null): void;
+  /** Seed/replace the live active objective (the `/objective` raw-append path's twin). */
+  setActiveObjective(objective: string | null): void;
   /** The live linked plan-ref (test observation of the `link-plan-ref` effect). */
   linkedPlanRef(): PlanRef | null;
 }
@@ -51,12 +53,14 @@ export function openMemoryWorkflowSession(opts: {
   runId: string | null;
   nodeClaim?: { objective: string; node: string } | null;
   activePlanRef?: PlanRef | null;
+  activeObjective?: string | null;
 }): MemoryWorkflowSession {
   const runId = opts.runId;
   const contents = new Map<string, string>();
   const pointers = new Map<string, SessionArtifactPointer>();
   let claim = opts.nodeClaim ?? null;
   let activePlanRef = opts.activePlanRef ?? null;
+  let activeObjective = opts.activeObjective ?? null;
   let failWrite = false;
   let failPointerAppend = false;
   let failApply = false;
@@ -90,11 +94,17 @@ export function openMemoryWorkflowSession(opts: {
     setNodeClaim(next: { objective: string; node: string } | null) {
       claim = next;
     },
+    setActiveObjective(next: string | null) {
+      activeObjective = next;
+    },
     linkedPlanRef() {
       return activePlanRef;
     },
     nodeClaim() {
       return claim;
+    },
+    activeObjective() {
+      return activeObjective;
     },
     readArtifact(name: string): ReadArtifactResult {
       if (runId === null) return { status: "absent" }; // no identity — silent, branchable
@@ -192,6 +202,41 @@ export function openMemoryWorkflowSession(opts: {
             return {
               status: "unverified",
               problem: `objective_node_claim clear read-back failed for node ${change.claim.node}`,
+            };
+          }
+          return { status: "applied" };
+        }
+        case "record-node-claim": {
+          // The idempotent re-claim short-circuit (an equal claim rebuilds identically).
+          if (nodeClaimsEqual(claim, change.claim)) return { status: "unchanged" };
+          if (failApply) {
+            failApply = false;
+            return { status: "rejected", problem: "workflow-state append refused (induced)" };
+          }
+          claim = change.claim;
+          if (failApplyVerification) {
+            failApplyVerification = false;
+            return {
+              status: "unverified",
+              problem:
+                `objective_node_claim read-back failed for #${change.claim.objective} node ` +
+                change.claim.node,
+            };
+          }
+          return { status: "applied" };
+        }
+        case "link-objective": {
+          if (activeObjective === change.objective) return { status: "unchanged" };
+          if (failApply) {
+            failApply = false;
+            return { status: "rejected", problem: "workflow-state append refused (induced)" };
+          }
+          activeObjective = change.objective;
+          if (failApplyVerification) {
+            failApplyVerification = false;
+            return {
+              status: "unverified",
+              problem: `active_objective read-back failed for #${change.objective}`,
             };
           }
           return { status: "applied" };

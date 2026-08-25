@@ -4,8 +4,11 @@
 // applied (pointer recorded + read-back roundtrip), the unchanged short-circuit, rejected
 // (invalid name, io refusal), unverified (pointer-append failure), the read tiers (found /
 // absent — no pointer, cross-run fork pointer / invalid — missing file, digest mismatch), and
-// the workflow-state ops (`nodeClaim()` + `apply()`: applied / unchanged / unverified /
-// rejected / non-matching claim / same-node-different-objective / no-identity).
+// the workflow-state ops (`nodeClaim()`/`activeObjective()` reads + `apply()` over all four
+// change variants: applied / unchanged / unverified / rejected / non-matching claim /
+// same-node-different-objective / no-identity). Branch-only seam-level cases prove the
+// fork/reload reconstruction shapes (identity + claims + active_objective rebuild from the
+// persisted branch; a fork-derived child reads the parent's artifacts as absent).
 
 import assert from "node:assert/strict";
 import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
@@ -60,6 +63,7 @@ interface SessionHarness {
 interface HarnessOpts {
   nodeClaim?: { objective: string; node: string };
   activePlanRef?: PlanRef;
+  activeObjective?: string;
 }
 
 interface Backing {
@@ -114,6 +118,9 @@ function branchBacking(): Backing {
       }
       if (opts.activePlanRef !== undefined) {
         branch.push(stateEntry({ active_plan_ref: opts.activePlanRef }));
+      }
+      if (opts.activeObjective !== undefined) {
+        branch.push(stateEntry({ active_objective: opts.activeObjective }));
       }
       let dropAppends = false;
       let throwNextAppend = false;
@@ -191,6 +198,7 @@ function memoryBacking(): Backing {
         runId,
         ...(opts.nodeClaim !== undefined ? { nodeClaim: opts.nodeClaim } : {}),
         ...(opts.activePlanRef !== undefined ? { activePlanRef: opts.activePlanRef } : {}),
+        ...(opts.activeObjective !== undefined ? { activeObjective: opts.activeObjective } : {}),
       });
       return {
         session,
@@ -459,6 +467,124 @@ for (const backing of [branchBacking(), memoryBacking()]) {
     }
   });
 
+  test(`${backing.label}: activeObjective — snapshot read (present, absent)`, () => {
+    const withObjective = backing.harness("RID", { activeObjective: "7" });
+    const without = backing.harness("RID");
+    try {
+      assert.equal(withObjective.session.activeObjective(), "7");
+      assert.equal(without.session.activeObjective(), null);
+    } finally {
+      withObjective.dispose();
+      without.dispose();
+    }
+  });
+
+  test(`${backing.label}: apply record-node-claim — applied, verified via the named read`, () => {
+    const h = backing.harness("RID");
+    try {
+      assert.deepEqual(h.session.apply({ kind: "record-node-claim", claim: CLAIM }), {
+        status: "applied",
+      });
+      assert.deepEqual(h.session.nodeClaim(), CLAIM);
+      // A DIFFERENT claim applies again (replaces the live one).
+      const other = { objective: "9", node: "3.2" };
+      assert.deepEqual(h.session.apply({ kind: "record-node-claim", claim: other }), {
+        status: "applied",
+      });
+      assert.deepEqual(h.session.nodeClaim(), other);
+    } finally {
+      h.dispose();
+    }
+  });
+
+  test(`${backing.label}: apply record-node-claim — an equal live claim short-circuits unchanged`, () => {
+    // The idempotent re-claim (a re-append "refresh" carries no semantic payload: the claim
+    // has no timestamp and rebuilds identically).
+    const h = backing.harness("RID", { nodeClaim: CLAIM });
+    try {
+      assert.deepEqual(h.session.apply({ kind: "record-node-claim", claim: { ...CLAIM } }), {
+        status: "unchanged",
+      });
+      assert.deepEqual(h.session.nodeClaim(), CLAIM);
+    } finally {
+      h.dispose();
+    }
+  });
+
+  test(`${backing.label}: apply record-node-claim — a read-back miss classifies unverified`, () => {
+    const h = backing.harness("RID");
+    try {
+      h.induceApplyVerificationFailure();
+      const result = quietly(() => h.session.apply({ kind: "record-node-claim", claim: CLAIM }));
+      assert.equal(result.status, "unverified");
+      assert.ok(
+        result.status === "unverified" &&
+          /objective_node_claim read-back failed/.test(result.problem),
+      );
+    } finally {
+      h.dispose();
+    }
+  });
+
+  test(`${backing.label}: apply record-node-claim — a refusal before any effect is rejected`, () => {
+    const h = backing.harness("RID");
+    try {
+      h.induceApplyRefusal();
+      const result = quietly(() => h.session.apply({ kind: "record-node-claim", claim: CLAIM }));
+      assert.equal(result.status, "rejected");
+      assert.equal(h.session.nodeClaim(), null, "a rejected record lands nothing");
+    } finally {
+      h.dispose();
+    }
+  });
+
+  test(`${backing.label}: apply link-objective — applied, then unchanged on the same id`, () => {
+    const h = backing.harness("RID");
+    try {
+      assert.deepEqual(h.session.apply({ kind: "link-objective", objective: "7" }), {
+        status: "applied",
+      });
+      assert.equal(h.session.activeObjective(), "7");
+      assert.deepEqual(h.session.apply({ kind: "link-objective", objective: "7" }), {
+        status: "unchanged",
+      });
+      // A different objective applies again (LWW).
+      assert.deepEqual(h.session.apply({ kind: "link-objective", objective: "9" }), {
+        status: "applied",
+      });
+      assert.equal(h.session.activeObjective(), "9");
+    } finally {
+      h.dispose();
+    }
+  });
+
+  test(`${backing.label}: apply link-objective — a read-back miss classifies unverified`, () => {
+    const h = backing.harness("RID");
+    try {
+      h.induceApplyVerificationFailure();
+      const result = quietly(() => h.session.apply({ kind: "link-objective", objective: "7" }));
+      assert.equal(result.status, "unverified");
+      assert.ok(
+        result.status === "unverified" &&
+          /active_objective read-back failed for #7/.test(result.problem),
+      );
+    } finally {
+      h.dispose();
+    }
+  });
+
+  test(`${backing.label}: apply link-objective — a refusal before any effect is rejected`, () => {
+    const h = backing.harness("RID");
+    try {
+      h.induceApplyRefusal();
+      const result = quietly(() => h.session.apply({ kind: "link-objective", objective: "7" }));
+      assert.equal(result.status, "rejected");
+      assert.equal(h.session.activeObjective(), null, "a rejected link lands nothing");
+    } finally {
+      h.dispose();
+    }
+  });
+
   test(`${backing.label}: apply — a refusal before any effect classifies rejected`, () => {
     const h = backing.harness("RID", { nodeClaim: CLAIM });
     try {
@@ -475,3 +601,58 @@ for (const backing of [branchBacking(), memoryBacking()]) {
     }
   });
 }
+
+// --- seam-level fork/reload reconstruction (branch backing only: the persisted branch IS the
+// --- reconstruction source; the memory backing has no branch to reopen) --------------------------
+
+test("branch: a reopen over a fork-appended branch derives the child identity and isolates artifacts", () => {
+  // The reload/fork shape: the seam re-derives everything from the persisted branch content,
+  // never from in-memory state. A fork entry re-keys run identity; the parent's artifact
+  // pointers now belong to a foreign run and read `absent` (designed isolation, silent).
+  const cwd = mkdtempSync(join(tmpdir(), "workflow-session-fork-"));
+  try {
+    const branch: unknown[] = [stateEntry({ run_id: "RID" })];
+    const sink: EntrySink = {
+      appendEntry: (customType, data) => branch.push({ type: "custom", customType, data }),
+    };
+    const parent = openBranchWorkflowSession(sink, reportableCtx(cwd, branch));
+    assert.equal(parent.runId, "RID");
+    assert.equal(parent.writeArtifact("draft.json", "parent bytes").status, "applied");
+
+    // The fork arm appends the derived identity (predecessor + child run_id) to the SAME branch.
+    branch.push(stateEntry({ run_id: "RID.1", predecessor: "RID" }));
+
+    // A fresh open over the same persisted branch reconstructs the CHILD identity.
+    const child = openBranchWorkflowSession(sink, reportableCtx(cwd, branch));
+    assert.equal(child.runId, "RID.1");
+    assert.deepEqual(child.readArtifact("draft.json"), { status: "absent" });
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+test("branch: a reload-shaped reopen reconstructs runId, claims, and activeObjective", () => {
+  // The reload shape: a fresh session object over the same persisted branch (no in-memory
+  // carry-over) rebuilds every named read from branch content alone.
+  const cwd = mkdtempSync(join(tmpdir(), "workflow-session-reload-"));
+  try {
+    const branch: unknown[] = [
+      stateEntry({ run_id: "RID", mode: "read-only" }),
+      stateEntry({ objective_node_claim: CLAIM }),
+      stateEntry({ active_objective: "7" }),
+    ];
+    const sink: EntrySink = {
+      appendEntry: (customType, data) => branch.push({ type: "custom", customType, data }),
+    };
+    const first = openBranchWorkflowSession(sink, reportableCtx(cwd, branch));
+    assert.equal(first.writeArtifact("draft.json", "v1").status, "applied");
+
+    const reopened = openBranchWorkflowSession(sink, reportableCtx(cwd, branch));
+    assert.equal(reopened.runId, "RID");
+    assert.deepEqual(reopened.nodeClaim(), CLAIM);
+    assert.equal(reopened.activeObjective(), "7");
+    assert.deepEqual(reopened.readArtifact("draft.json"), { status: "found", content: "v1" });
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
