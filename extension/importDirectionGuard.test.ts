@@ -179,7 +179,6 @@ const LEGACY_REGISTRANTS = [
   "doors/stackReviewBrowser.ts",
   "doors/submit.ts",
   "doors/submitPrReview.ts",
-  "factories/objective.ts",
   "factories/objectiveAuthor.ts",
   "factories/objectiveDraft.ts",
   "factories/objectivePlan.ts",

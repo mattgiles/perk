@@ -14,6 +14,8 @@ import {
   type ExtensionContext,
   SessionManager,
 } from "@earendil-works/pi-coding-agent";
+import { resolveDreamReportGate } from "../authoring/objective/dreamReportGate.ts";
+import { OBJECTIVE_BUDGET_TYPE } from "../pi/v1/objective.ts";
 import { type SessionDataCtx, writeSessionArtifact } from "../substrate/sessionData.ts";
 import type { ToolGating } from "../substrate/toolGating.ts";
 import {
@@ -30,9 +32,7 @@ import {
   scaffoldRepo,
   spyInjections,
 } from "../testing/harness.ts";
-import { OBJECTIVE_BUDGET_TYPE } from "./objective.ts";
 import { OBJECTIVE_DRAFT_ARTIFACT } from "./objectiveDraft.ts";
-import { resolveDreamReportGate } from "../authoring/objective/dreamReportGate.ts";
 import {
   DREAM_REPORT_TRANSFER_FILENAME,
   objectiveApprovalSave,

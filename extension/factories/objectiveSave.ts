@@ -17,6 +17,8 @@
 
 import { join } from "node:path";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { resolveDreamReportGate } from "../authoring/objective/dreamReportGate.ts";
+import { OBJECTIVE_BUDGET_TYPE } from "../pi/v1/objective.ts";
 import { bindingSuffix } from "../substrate/bindingDelivery.ts";
 import { atomicWriteFileSync, ensureRunScratch } from "../substrate/cache.ts";
 import {
@@ -32,7 +34,6 @@ import { failFor, ok, type Result } from "../substrate/result.ts";
 import type { ToolGating } from "../substrate/toolGating.ts";
 import { appendWorkflowState, branchOf, rebuildWorkflowState } from "../substrate/workflowState.ts";
 import { report, type Severity } from "../surfaces/report.ts";
-import { OBJECTIVE_BUDGET_TYPE } from "./objective.ts";
 import {
   DELIVERY_PARAM_SCHEMA,
   type DeliveryChoice,
@@ -41,7 +42,6 @@ import {
   ROADMAP_PARAM_SCHEMA,
   readObjectiveDraft,
 } from "./objectiveDraft.ts";
-import { resolveDreamReportGate } from "../authoring/objective/dreamReportGate.ts";
 
 /** The `objective-save` registry stage id (the objectiveAuthor.ts constant's sibling). */
 export const OBJECTIVE_SAVE_STAGE = "objective-save";

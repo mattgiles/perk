@@ -31,6 +31,11 @@
 
 import { relative } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import {
+  decodeDreamReportBlock,
+  type ObjectiveDreamReportBlock,
+  resolveDreamReportGate,
+} from "../authoring/objective/dreamReportGate.ts";
 import { failFor, ok, type Result } from "../substrate/result.ts";
 import {
   activeSessionRunId,
@@ -43,11 +48,6 @@ import { arrayParam, objectParam, paramsOf, stringParam } from "../substrate/too
 import type { EntrySink } from "../substrate/workflowState.ts";
 import type { ReportTarget } from "../surfaces/report.ts";
 import { DREAM_REPORT_INPUT_SCHEMA } from "../waves/dreamReport.ts";
-import {
-  decodeDreamReportBlock,
-  type ObjectiveDreamReportBlock,
-  resolveDreamReportGate,
-} from "../authoring/objective/dreamReportGate.ts";
 
 /** The reviewed objective delivery choice (contracts §8.45). */
 export type DeliveryChoice = "incremental" | "stacked";

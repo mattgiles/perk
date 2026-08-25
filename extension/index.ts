@@ -36,13 +36,13 @@ import { registerSelfcheck } from "./doors/selfcheck.ts";
 import { registerOpenStackReview, registerStackReviewBrowser } from "./doors/stackReviewBrowser.ts";
 import { registerSubmit } from "./doors/submit.ts";
 import { registerSubmitPrReview } from "./doors/submitPrReview.ts";
-import { registerObjective } from "./factories/objective.ts";
 import { registerObjectiveAuthor } from "./factories/objectiveAuthor.ts";
 import { registerObjectiveDraft } from "./factories/objectiveDraft.ts";
 import { registerObjectivePlan } from "./factories/objectivePlan.ts";
 import { registerObjectiveSave } from "./factories/objectiveSave.ts";
 import { createHunkFeedbackReceiver } from "./hunkFeedback/receiver.ts";
 import { installGistBindings } from "./pi/v1/gist.ts";
+import { installObjectiveBindings } from "./pi/v1/objective.ts";
 import { installPlanBindings } from "./pi/v1/plan.ts";
 import { installPlannotatorPlanAdapter } from "./pi/v1/providers/plannotator.ts";
 import { installTombellPlanAdapter } from "./pi/v1/providers/tombell.ts";
@@ -545,7 +545,7 @@ export default function (pi: ExtensionAPI) {
   // The objective substrate: `/objective` set/clear, budget accounting, threshold
   // compaction, all keyed off the now-live `active_objective`. Inert when no objective is active.
   // (The deterministic objective mechanics live in the Python plane: `perk objective …`.)
-  registerObjective(pi, perkStatus);
+  installObjectiveBindings(pi, perkStatus);
 
   // The warm `/commit-and-compact` utility door: drive a commit of the work so far, compact once
   // a successful outcome is known, then completion-gate an automatic evidence-first continuation

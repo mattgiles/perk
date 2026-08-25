@@ -9,6 +9,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
+import type { ObjectiveDreamReportBlock } from "../authoring/objective/dreamReportGate.ts";
 import { sessionDataDir } from "../substrate/cache.ts";
 import {
   digestSessionData,
@@ -37,7 +38,6 @@ import {
   renderObjectiveDraft,
   writeObjectiveDraft,
 } from "./objectiveDraft.ts";
-import type { ObjectiveDreamReportBlock } from "../authoring/objective/dreamReportGate.ts";
 
 const PROSE = "# Conform objective planning\n\nThe why, the design, the boundaries.\n";
 const ROADMAP = [

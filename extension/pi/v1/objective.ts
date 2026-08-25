@@ -22,9 +22,11 @@
 // best-effort and never throw (logged-not-thrown).
 
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { registerPerkCommand } from "../substrate/command.ts";
-import { loadPerkConfig } from "../substrate/config.ts";
-import { branchOf, rebuildWorkflowState, WORKFLOW_STATE_TYPE } from "../substrate/workflowState.ts";
+import { openBranchWorkflowSession } from "../../session/branchWorkflowSession.ts";
+import { type ColdJson, objectField, runColdDoor, stringField } from "../../substrate/coldDoor.ts";
+import { registerPerkCommand } from "../../substrate/command.ts";
+import { loadPerkConfig } from "../../substrate/config.ts";
+import { type BranchEntry, branchOf, WORKFLOW_STATE_TYPE } from "../../substrate/workflowState.ts";
 import {
   formatBudgetLine,
   MARK_OBJECTIVE,
@@ -32,7 +34,7 @@ import {
   type PerkStatusHandle,
   registerTranscriptRenderer,
   report,
-} from "../surfaces/surfaces.ts";
+} from "../../surfaces/surfaces.ts";
 
 /** The dedicated budget/activation session entry type (kept off `perk:workflow-state`). */
 export const OBJECTIVE_BUDGET_TYPE = "perk:objective-budget";
@@ -41,10 +43,7 @@ export const OBJECTIVE_BUDGET_TYPE = "perk:objective-budget";
 export const DEFAULT_COMPACT_THRESHOLD = 0.8;
 
 /** A branch entry as seen by the budget scan: a custom marker OR an assistant message. */
-interface ScanEntry {
-  type: string;
-  customType?: string;
-  data?: { objective_id?: string; activated_at?: string };
+interface ScanEntry extends BranchEntry {
   message?: { role?: string; usage?: { input?: number; output?: number } };
 }
 
@@ -108,7 +107,7 @@ export function rebuildBudget(branch: readonly ScanEntry[], now: number): Budget
 
 /** True when context usage has crossed the compaction threshold (pure; tolerant of unknowns). */
 export function shouldCompact(
-  usage: { percent: number | null; tokens: number | null } | undefined,
+  usage: { percent: number | null } | undefined,
   threshold: number,
 ): boolean {
   if (!usage || usage.percent === null) return false;
@@ -118,16 +117,14 @@ export function shouldCompact(
 // --- the controller -----------------------------------------------------------------------------
 
 function scanBranchOf(ctx: ExtensionContext): ScanEntry[] {
-  return ctx.sessionManager.getBranch() as unknown as ScanEntry[];
+  // `branchOf` owns the typed accessor; the scan only ADDS the optional assistant-message
+  // shape, so no round-trip through `unknown` is needed (field presence is checked locally).
+  return branchOf(ctx) as ScanEntry[];
 }
 
-function activeObjective(ctx: ExtensionContext): string | null {
-  try {
-    const state = rebuildWorkflowState(branchOf(ctx));
-    return state.active_objective ?? null;
-  } catch {
-    return null;
-  }
+/** The rebuilt `active_objective`, read through the session seam (fail-open null). */
+function activeObjective(pi: ExtensionAPI, ctx: ExtensionContext): string | null {
+  return openBranchWorkflowSession(pi, ctx).activeObjective();
 }
 
 /**
@@ -135,10 +132,10 @@ function activeObjective(ctx: ExtensionContext): string | null {
  * widget is retired; the value carries id + tokens + elapsed). Headless-safe:
  * the handle no-ops without UI.
  */
-function renderStatus(ctx: ExtensionContext, status: PerkStatusHandle): void {
+function renderStatus(pi: ExtensionAPI, ctx: ExtensionContext, status: PerkStatusHandle): void {
   if (!ctx.hasUI) return;
   try {
-    const active = activeObjective(ctx);
+    const active = activeObjective(pi, ctx);
     if (active === null) {
       status.set(ctx, undefined);
       return;
@@ -164,7 +161,7 @@ function objectiveCommand(
   const arg = args.trim();
   try {
     if (arg === "") {
-      const active = activeObjective(ctx);
+      const active = activeObjective(pi, ctx);
       const budget = rebuildBudget(scanBranchOf(ctx), Date.now());
       const message =
         active === null
@@ -176,7 +173,7 @@ function objectiveCommand(
 
     if (arg === "clear") {
       pi.appendEntry(WORKFLOW_STATE_TYPE, { active_objective: null });
-      renderStatus(ctx, status);
+      renderStatus(pi, ctx, status);
       report(ctx, "objective", "info", "cleared the active objective.");
       return;
     }
@@ -187,7 +184,7 @@ function objectiveCommand(
       objective_id: arg,
       activated_at: new Date().toISOString(),
     });
-    renderStatus(ctx, status);
+    renderStatus(pi, ctx, status);
     report(ctx, "objective", "info", `activated objective ${arg} (budget tracking started).`);
   } catch (error) {
     reportError(ctx, `command failed: ${error}`);
@@ -195,37 +192,58 @@ function objectiveCommand(
 }
 
 /**
- * Register the objective substrate: `/objective` command, budget accounting (session_start /
- * session_tree / agent_settled), and threshold compaction (turn_end). All inert when no objective
- * is active; never throws.
+ * Fetch the objective's URL via `perk objective show <id> --json` (reading `objective.url`).
+ * Lenient: returns "" on any failure / missing url — `runColdDoor` is a soft-result seam and
+ * never throws (the seed prompt's step-1 `perk objective show <id>` step surfaces the URL
+ * anyway). Only called for the linear backend (github needs no clause → no fetch). Exported for
+ * the warm drives that compose the same backend-aware read clause (the ready-time reconcile
+ * drive in `doors/ready.ts`).
  */
-export function registerObjective(pi: ExtensionAPI, status: PerkStatusHandle): void {
+export async function fetchObjectiveUrl(
+  pi: ExtensionAPI,
+  ctx: ExtensionContext,
+  objectiveId: string,
+): Promise<string> {
+  const r = await runColdDoor<string>(pi, ctx, ["objective", "show", objectiveId, "--json"], {
+    label: "perk objective show",
+    decode: (payload: ColdJson) =>
+      stringField(objectField(payload, "objective") ?? {}, "url") ?? "",
+  });
+  return r.ok ? r.data : "";
+}
+
+/**
+ * Install the objective substrate bindings: `/objective` command, budget accounting
+ * (session_start / session_tree / agent_settled), and threshold compaction (turn_end). All
+ * inert when no objective is active; never throws.
+ */
+export function installObjectiveBindings(pi: ExtensionAPI, status: PerkStatusHandle): void {
   // Transcript marker for `perk:objective-budget` activations (audit §2.3): renderer body in
   // surfaces.ts, registration = wiring, feature-detect inside the seam (pre-0.80.4 hosts stay
   // inert). Also covers objectiveSave.ts's appends — registration is per entry TYPE.
   registerTranscriptRenderer(pi, OBJECTIVE_BUDGET_TYPE, objectiveBudgetEntryRenderer);
 
   pi.on("session_start", async (_event, ctx) => {
-    renderStatus(ctx, status);
+    renderStatus(pi, ctx, status);
   });
 
   pi.on("session_tree", async (_event, ctx) => {
-    renderStatus(ctx, status);
+    renderStatus(pi, ctx, status);
   });
 
   pi.on("agent_settled", async (_event, ctx) => {
     // Recompute the budget after each settled run (stateless rebuild from the branch).
-    renderStatus(ctx, status);
+    renderStatus(pi, ctx, status);
   });
 
   pi.on("turn_end", async (_event, ctx) => {
     try {
-      if (activeObjective(ctx) === null) return; // inert unless an objective is active
+      if (activeObjective(pi, ctx) === null) return; // inert unless an objective is active
       const threshold =
         loadPerkConfig(ctx.cwd).objectiveCompactThreshold ?? DEFAULT_COMPACT_THRESHOLD;
       const usage = ctx.getContextUsage();
       if (!shouldCompact(usage, threshold)) return;
-      const active = activeObjective(ctx);
+      const active = activeObjective(pi, ctx);
       ctx.compact({
         customInstructions:
           `Preserve the active perk objective (${active}) and its budget context. ` +
@@ -234,7 +252,7 @@ export function registerObjective(pi: ExtensionAPI, status: PerkStatusHandle): v
           console.error(`perk: objective compaction failed — ${error}`);
         },
         onComplete: () => {
-          renderStatus(ctx, status);
+          renderStatus(pi, ctx, status);
         },
       });
     } catch (error) {
