@@ -27,10 +27,10 @@
 import { appendFileSync } from "node:fs";
 import { env } from "node:process";
 import { ensureRunScratch, type PlanRef, readPlanRef, runEventsPath } from "../substrate/cache.ts";
+import { capForModel } from "../substrate/modelVisible.ts";
 import { planReadInstruction, render } from "../substrate/prompts.ts";
 import { captureSessionPointer } from "../substrate/sessionPointers.ts";
 import { rebuildWorkflowState } from "../substrate/workflowState.ts";
-import { capForModel } from "./readOnlySession.ts";
 import {
   applyEvent,
   createDriveSession,
