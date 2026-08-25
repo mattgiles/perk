@@ -20,12 +20,15 @@ import {
 } from "./save.ts";
 
 /**
- * The reviewer's verdict on the rendered draft. `directEdits` is true when an approval carries
- * reviewer edits of the rendered markdown (the backend adapter translates its own vocabulary —
- * e.g. plannotator's `# Direct Edits` feedback section — into this flag).
+ * The reviewer's verdict on the rendered draft. An approval carrying reviewer edits of the
+ * rendered markdown is its OWN variant (`approvedDirectEdits`) with `feedback` required — the
+ * edits ARE the feedback, so an edits-without-feedback value is unrepresentable and can never
+ * fall through to the save path. The backend adapter translates its own vocabulary (e.g.
+ * plannotator's `# Direct Edits` feedback section) into this variant.
  */
 export type GistReviewOutcome =
-  | { status: "approved"; feedback?: string; reviewId?: string; directEdits: boolean }
+  | { status: "approved"; feedback?: string; reviewId?: string }
+  | { status: "approvedDirectEdits"; feedback: string; reviewId?: string }
   | { status: "denied"; feedback?: string; reviewId?: string }
   | { status: "dismissed" }
   | { status: "aborted" }
@@ -77,14 +80,18 @@ export async function reviewGist(
   if (draft === null) return { status: "noDraft" };
   const rendered = renderGistDraft(draft);
   const outcome = await deps.reviewer.review(rendered, signal);
+  if (outcome.status === "approvedDirectEdits") {
+    return {
+      status: "directEditsRevise",
+      feedback: outcome.feedback,
+      ...(outcome.reviewId !== undefined ? { reviewId: outcome.reviewId } : {}),
+    };
+  }
   if (outcome.status === "approved") {
     const carried = {
       ...(outcome.feedback !== undefined ? { feedback: outcome.feedback } : {}),
       ...(outcome.reviewId !== undefined ? { reviewId: outcome.reviewId } : {}),
     };
-    if (outcome.directEdits && outcome.feedback !== undefined) {
-      return { status: "directEditsRevise", ...carried, feedback: outcome.feedback };
-    }
     const save = await gistApprovalSave({
       session: deps.session,
       backend: deps.backend,

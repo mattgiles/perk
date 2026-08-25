@@ -110,10 +110,15 @@ export interface PerkSession {
    */
   registeredTool(name: string): {
     name: string;
+    label: string;
     description: string;
     parameters: unknown;
+    promptSnippet?: string;
     promptGuidelines?: string[];
+    executionMode?: string;
   } | null;
+  /** A registered command's declared surface (invocation name + description) — the byte pin twin. */
+  registeredCommand(name: string): { name: string; description?: string } | null;
   /** Fire `session_tree` by navigating to an entry. */
   navigateTo(entryId: string): Promise<void>;
   /** Invoke an extension command headlessly (no model turn). */
@@ -643,9 +648,20 @@ export async function loadPerkSession(opts: {
       if (!def) return null;
       return {
         name: def.name,
+        label: def.label,
         description: def.description,
         parameters: def.parameters as unknown,
+        ...(def.promptSnippet !== undefined ? { promptSnippet: def.promptSnippet } : {}),
         ...(def.promptGuidelines !== undefined ? { promptGuidelines: def.promptGuidelines } : {}),
+        ...(def.executionMode !== undefined ? { executionMode: def.executionMode as string } : {}),
+      };
+    },
+    registeredCommand(name: string) {
+      const command = session.extensionRunner.getCommand(name);
+      if (!command) return null;
+      return {
+        name: command.invocationName,
+        ...(command.description !== undefined ? { description: command.description } : {}),
       };
     },
     async navigateTo(entryId: string) {

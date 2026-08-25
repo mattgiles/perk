@@ -28,10 +28,13 @@ export interface GistBackend {
   }): Promise<GistBackendSaveResult>;
 }
 
-/** The save outcome: the backend facts, or a typed refusal/failure (message bytes caller-facing). */
-export type SaveGistOutcome =
-  | { status: "saved"; id: string; url: string; existed: boolean | null; scope: string | null }
-  | { status: "failed"; message: string; errorType: string };
+/**
+ * The save outcome: the backend facts, or a typed refusal/failure (message bytes caller-facing).
+ * Deliberately the SAME union as the backend result — `saveGist` adds the local validation
+ * refusals on the shared `failed` variant and otherwise returns the backend value unchanged, so
+ * a second hand-mirrored vocabulary would only invite drift. Alias, not copy.
+ */
+export type SaveGistOutcome = GistBackendSaveResult;
 
 /**
  * The single save operation both surfaces call: validate the prose/scope (the exact refusals the

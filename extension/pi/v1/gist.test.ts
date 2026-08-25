@@ -35,7 +35,12 @@ import {
   scaffoldRepo,
   spyInjections,
 } from "../../testing/harness.ts";
-import { decodeGistSaveParams, gistSaveGuidance, runGistReviewV1 } from "./gist.ts";
+import {
+  decodeGistSaveParams,
+  gistSaveGuidance,
+  installGistBindings,
+  runGistReviewV1,
+} from "./gist.ts";
 
 const PROSE = "# Faster reviews\n\nWe would likely want review turnaround under a day.\n";
 
@@ -77,40 +82,101 @@ test("decodeGistSaveParams: a present scope outside the enum strict-fails", () =
 
 // --- registration parity (the baseline-exact metadata pins) -----------------------------------
 
-test("registration parity: gist_draft + gist_save metadata and /gist-save registered", async () => {
+// The frozen registration baseline — BYTE-EXACT literals carried from the deleted factory
+// registrations (extension/factories/gistDraft.ts / gistSave.ts at the pre-migration head).
+// Deliberately literal in the test (never imported constants): metadata drift in the prose
+// constants or the installer must fail here.
+const BASELINE_PARAMETERS = {
+  type: "object",
+  additionalProperties: false,
+  required: ["prose"],
+  properties: {
+    prose: {
+      type: "string",
+      description:
+        "The gist prose (the problem-space intent: what we want, why it matters, what " +
+        "bounds it, and any high-level solution leanings — no implementation steps).",
+    },
+    title: {
+      type: "string",
+      description: "Optional gist title (defaults to the prose's first heading).",
+    },
+    scope: {
+      type: "string",
+      enum: ["plan", "objective"],
+      description:
+        "Optional consumption tier: plan (plan-sized intent) or objective (objective-sized).",
+    },
+  },
+};
+
+const BASELINE_GIST_DRAFT = {
+  name: "gist_draft",
+  label: "Gist draft",
+  description:
+    "Write (or overwrite) the working gist draft — the statement-of-intent prose + an " +
+    "optional scope hint — to the session data dir and record its provenance pointer. The " +
+    "only sanctioned write surface while read-only. NOT a save — gist_save//gist-save still " +
+    "persist the gist to the issue backend.",
+  parameters: BASELINE_PARAMETERS,
+  promptSnippet:
+    "Persist the working gist draft (statement-of-intent prose) to the session data dir (full rewrite)",
+  promptGuidelines: [
+    "Call gist_draft to persist the current working gist as you author or revise it; pass the FULL prose each time (it rewrites the whole draft).",
+    "gist_draft never saves to the issue backend and never ends the turn — gist_save//gist-save remain the canonical save surface.",
+    "Pass gist_draft's `scope` only once the consumption tier is settled: `plan` for plan-sized intent, `objective` for objective-sized intent.",
+  ],
+  executionMode: "sequential",
+};
+
+const BASELINE_GIST_SAVE = {
+  name: "gist_save",
+  label: "Save gist",
+  description:
+    "Persist a drafted gist (a statement of intent) to the issue backend as a tracked " +
+    "perk:gist. Terminating: ends the turn on save. Call only when the gist says what it " +
+    "means.",
+  parameters: BASELINE_PARAMETERS,
+  promptSnippet: "Save the converged gist to the issue backend (terminates the turn)",
+  promptGuidelines: [
+    "Use gist_save only after the gist says what it means; it creates the tracked gist in the issue backend and ends the turn.",
+    "Pass gist_save the statement-of-intent PROSE in `prose` — problem-focused, with at most high-level solution leanings; no implementation steps or roadmap.",
+    "Pass gist_save's `scope` only once the consumption tier is settled (plan or objective); omit it to keep the pre-seeded/default scope.",
+  ],
+  executionMode: "sequential",
+};
+
+const BASELINE_GIST_SAVE_COMMAND = {
+  name: "gist-save",
+  description:
+    "Save the working gist draft to the issue backend — the manual failsafe for the " +
+    "approval→save flow (artifact-first; drives the save only when no draft exists).",
+};
+
+test("registration parity: gist_draft + gist_save + /gist-save metadata is byte-exact vs the frozen baseline", async () => {
   const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
   const h = await loadPerkSession({ cwd, env: { PERK_RUN_ID: "01RID" }, headful: false });
   try {
-    const draft = h.registeredTool("gist_draft");
-    assert.ok(draft, "gist_draft registered");
-    assert.match(draft.description, /^Write \(or overwrite\) the working gist draft/);
-    assert.match(draft.description, /NOT a save — gist_save\/\/gist-save still/);
-    assert.deepEqual(draft.promptGuidelines, GIST_DRAFT_TOOL_GUIDELINES);
-    const draftParams = draft.parameters as {
-      additionalProperties?: boolean;
-      required?: string[];
-      properties?: Record<string, { enum?: string[] }>;
-    };
-    assert.equal(draftParams.additionalProperties, false);
-    assert.deepEqual(draftParams.required, ["prose"]);
-    assert.deepEqual(Object.keys(draftParams.properties ?? {}), ["prose", "title", "scope"]);
-    assert.deepEqual(draftParams.properties?.scope?.enum, [...GIST_SCOPES]);
-
-    const save = h.registeredTool("gist_save");
-    assert.ok(save, "gist_save registered");
-    assert.match(save.description, /^Persist a drafted gist \(a statement of intent\)/);
-    assert.match(save.description, /Terminating: ends the turn on save\./);
-    assert.deepEqual(save.promptGuidelines, GIST_SAVE_TOOL_GUIDELINES);
-    const saveParams = save.parameters as {
-      additionalProperties?: boolean;
-      required?: string[];
-      properties?: Record<string, { enum?: string[] }>;
-    };
-    assert.equal(saveParams.additionalProperties, false);
-    assert.deepEqual(saveParams.required, ["prose"]);
-    assert.deepEqual(saveParams.properties?.scope?.enum, [...GIST_SCOPES]);
-
-    assert.ok(h.registeredCommands().includes("gist-save"), "the /gist-save command registered");
+    assert.deepEqual(
+      h.registeredTool("gist_draft"),
+      BASELINE_GIST_DRAFT,
+      "the COMPLETE gist_draft registration surface must match the frozen baseline byte-exactly",
+    );
+    assert.deepEqual(
+      h.registeredTool("gist_save"),
+      BASELINE_GIST_SAVE,
+      "the COMPLETE gist_save registration surface must match the frozen baseline byte-exactly",
+    );
+    assert.deepEqual(
+      h.registeredCommand("gist-save"),
+      BASELINE_GIST_SAVE_COMMAND,
+      "the /gist-save command surface must match the frozen baseline byte-exactly",
+    );
+    // The live constants still feed the registration (a second, independent equality: if the
+    // installer stopped consuming the prose module, this catches the decoupling).
+    assert.deepEqual(BASELINE_GIST_DRAFT.promptGuidelines, GIST_DRAFT_TOOL_GUIDELINES);
+    assert.deepEqual(BASELINE_GIST_SAVE.promptGuidelines, GIST_SAVE_TOOL_GUIDELINES);
+    assert.deepEqual(BASELINE_PARAMETERS.properties.scope.enum, [...GIST_SCOPES]);
   } finally {
     h.dispose();
   }
@@ -394,6 +460,110 @@ test("command: /gist-save with a draft but a failing cold door → error report,
   } finally {
     h.dispose();
   }
+});
+
+// --- absent identity (the offline v1 bindings over an identity-less branch) --------------------
+//
+// The harness cannot reach this arm: a warm session with no identity MINTS a run_id at
+// session_start, so `openSession` is always `opened` there. These cases install the REAL v1
+// bindings on a capturing fake `pi` and invoke the captured execute/handler over a branch with
+// no `run_id` — the production identity-less arms, exercised directly.
+
+interface CapturedToolSpec {
+  name: string;
+  execute: (
+    toolCallId: string,
+    params: unknown,
+    signal: undefined,
+    onUpdate: undefined,
+    ctx: unknown,
+  ) => Promise<{ content: { text?: string }[]; details: Record<string, unknown> }>;
+}
+
+function installOffline(opts: { stdout: string; argvs: string[][]; sent: string[] }): {
+  tools: Map<string, CapturedToolSpec>;
+  commands: Map<string, (args: string, ctx: unknown) => Promise<void>>;
+  gating: ReturnType<typeof fakeGating>;
+} {
+  const tools = new Map<string, CapturedToolSpec>();
+  const commands = new Map<string, (args: string, ctx: unknown) => Promise<void>>();
+  const gating = fakeGating(true);
+  const pi = {
+    on() {},
+    registerTool(spec: CapturedToolSpec) {
+      tools.set(spec.name, spec);
+    },
+    registerCommand(
+      name: string,
+      spec: { handler: (args: string, ctx: unknown) => Promise<void> },
+    ) {
+      commands.set(name, spec.handler);
+    },
+    sendUserMessage(text: string) {
+      opts.sent.push(text);
+    },
+    appendEntry() {},
+    async exec(_cmd: string, args: string[]) {
+      opts.argvs.push(args);
+      return { stdout: opts.stdout, stderr: "", code: 0, killed: false };
+    },
+  } as unknown as Parameters<typeof installGistBindings>[0];
+  installGistBindings(pi, gating);
+  return { tools, commands, gating };
+}
+
+test("absent identity: gist_draft refuses blank prose BEFORE missing identity (the adapter mapping)", async () => {
+  const cwd = scaffoldRepo();
+  const { tools } = installOffline({ stdout: CREATE_JSON, argvs: [], sent: [] });
+  const draftTool = tools.get("gist_draft");
+  assert.ok(draftTool, "gist_draft captured");
+  const ctx = headfulCtx(cwd, []); // no workflow-state entry — no run_id
+
+  const blank = await draftTool.execute("t1", { prose: "  \n" }, undefined, undefined, ctx);
+  assert.equal(blank.details.ok, false);
+  assert.equal(blank.details.error_type, "invalid_input", "blank prose wins the precedence");
+  assert.equal(blank.details.error, "no gist prose to write (pass the full working draft)");
+
+  const noIdentity = await draftTool.execute("t2", { prose: "# X" }, undefined, undefined, ctx);
+  assert.equal(noIdentity.details.ok, false);
+  assert.equal(noIdentity.details.error_type, "no_run_id", "the no_identity → no_run_id mapping");
+  assert.equal(
+    noIdentity.details.error,
+    "session has no run_id — cannot write the gist-draft artifact",
+  );
+});
+
+test("absent identity: gist_save still saves — the cold door argv simply omits --run-id", async () => {
+  const cwd = scaffoldRepo();
+  const argvs: string[][] = [];
+  const { tools } = installOffline({ stdout: CREATE_JSON, argvs, sent: [] });
+  const saveTool = tools.get("gist_save");
+  assert.ok(saveTool, "gist_save captured");
+  const result = await saveTool.execute(
+    "t1",
+    { prose: PROSE },
+    undefined,
+    undefined,
+    headfulCtx(cwd, []),
+  );
+  assert.equal(result.details.ok, true, "an identity-less save keeps working");
+  assert.equal(argvs.length, 1, "the cold door ran once");
+  assert.equal(argvs[0]?.includes("--run-id"), false, "no --run-id without identity");
+});
+
+test("absent identity: /gist-save falls to the drive fallback (openSession absent)", async () => {
+  const cwd = scaffoldRepo();
+  const argvs: string[][] = [];
+  const sent: string[] = [];
+  const { commands, gating } = installOffline({ stdout: CREATE_JSON, argvs, sent });
+  const handler = commands.get("gist-save");
+  assert.ok(handler, "/gist-save captured");
+  await handler("Driven title", headfulCtx(cwd, []));
+  assert.equal(argvs.length, 0, "no cold-door save was attempted (no session to re-read)");
+  assert.equal(gating.exits, 1, "the gate exits for the driven turn");
+  assert.equal(sent.length, 1, "exactly one drive injection");
+  assert.match(String(sent[0]), /gist_save/);
+  assert.match(String(sent[0]), /title: "Driven title"/, "the title override rides the drive");
 });
 
 // --- pure helpers -------------------------------------------------------------------------------

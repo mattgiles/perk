@@ -7,7 +7,7 @@
 // feature-owned prose units in Pi fields.
 //
 // Provider vocabulary is translated AT the adapter: plannotator's `# Direct Edits` feedback
-// convention becomes the feature's `directEdits` flag here, and the first-party editor review
+// convention becomes the feature's `approvedDirectEdits` variant here, and the first-party editor review
 // runs through `factories/planReview.ts`'s exported subject machinery (a one-directional
 // `pi/v1 → factories` import; the arm is injected into `registerPlanReview`, so no cycle).
 //
@@ -482,9 +482,10 @@ function noGistDraftResult(): ToolResult {
 /**
  * Translate a review-door outcome (`ReviewOutcome`) into the feature's `GistReviewOutcome`.
  * Plannotator's vocabulary is translated here: an approval whose feedback OPENS with the
- * `# Direct Edits` heading sets `directEdits` (the heading check suffices — the diff goes to
- * the model verbatim either way). The `implement-here` arm is unreachable on the gist path
- * (neither reviewer offers it) and maps defensively to `dismissed`.
+ * `# Direct Edits` heading becomes the `approvedDirectEdits` variant (the heading check
+ * suffices — the diff goes to the model verbatim either way; the variant requires the feedback,
+ * so the edits can never be dropped on the save path). The `implement-here` arm is unreachable
+ * on the gist path (neither reviewer offers it) and maps defensively to `dismissed`.
  */
 function gistOutcomeOf(outcome: ReviewOutcome): GistReviewOutcome {
   switch (outcome.status) {
@@ -494,11 +495,10 @@ function gistOutcomeOf(outcome: ReviewOutcome): GistReviewOutcome {
         reviewId: outcome.reviewId,
       };
       if (outcome.approved) {
-        return {
-          status: "approved",
-          ...carried,
-          directEdits: outcome.feedback !== undefined && hasDirectEditsHeading(outcome.feedback),
-        };
+        if (outcome.feedback !== undefined && hasDirectEditsHeading(outcome.feedback)) {
+          return { status: "approvedDirectEdits", feedback: outcome.feedback, ...carried };
+        }
+        return { status: "approved", ...carried };
       }
       return { status: "denied", ...carried };
     }

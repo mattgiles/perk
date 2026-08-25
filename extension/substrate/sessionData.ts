@@ -195,22 +195,37 @@ export function sessionArtifactNameProblem(name: string): string | null {
 }
 
 /**
+ * Accept a persisted pointer only when it is SHAPE-SOUND: branch data is cast, never validated
+ * (`rebuildWorkflowState` trusts entry data), so a malformed session entry can put `null` — or
+ * anything else — where a pointer belongs. The cores dereference only `run_id` + `digest`
+ * (`path` is always derived, `name` is the map key), so those are the fields the shape check
+ * demands; anything unsound reads as "no pointer" and never throws.
+ */
+function soundPointer(candidate: unknown): SessionArtifactPointer | null {
+  if (typeof candidate !== "object" || candidate === null) return null;
+  const pointer = candidate as Partial<SessionArtifactPointer>;
+  if (typeof pointer.run_id !== "string" || typeof pointer.digest !== "string") return null;
+  return pointer as SessionArtifactPointer;
+}
+
+/**
  * The currently-recorded pointer for `name` when it is VALID for this run and matches the
  * on-disk bytes (quiet: the unchanged-short-circuit probe must never emit the read tier's
- * rewind warnings — a stale/broken state simply fails the probe and the write proceeds).
+ * rewind warnings — a stale/broken/malformed state simply fails the probe and the write
+ * proceeds).
  */
 function currentValidPointer(
   ctx: SessionDataCtx,
   runId: string,
   name: string,
 ): { path: string; pointer: SessionArtifactPointer; diskDigest: string } | null {
-  let pointer: SessionArtifactPointer | undefined;
+  let pointer: SessionArtifactPointer | null;
   try {
-    pointer = rebuildWorkflowState(branchOf(ctx)).session_artifacts?.[name];
+    pointer = soundPointer(rebuildWorkflowState(branchOf(ctx)).session_artifacts?.[name]);
   } catch {
     return null;
   }
-  if (pointer === undefined || pointer.run_id !== runId) return null;
+  if (pointer === null || pointer.run_id !== runId) return null;
   const path = join(sessionDataDir(ctx.cwd, runId), name);
   let disk: string;
   try {
@@ -311,13 +326,13 @@ export function readSessionArtifactClassified(
 ): SessionArtifactReadResult {
   const runId = activeSessionRunId(ctx);
   if (runId === null) return { status: "absent" };
-  let pointer: SessionArtifactPointer | undefined;
+  let pointer: SessionArtifactPointer | null;
   try {
-    pointer = rebuildWorkflowState(branchOf(ctx)).session_artifacts?.[name];
+    pointer = soundPointer(rebuildWorkflowState(branchOf(ctx)).session_artifacts?.[name]);
   } catch {
     return { status: "absent" };
   }
-  if (pointer === undefined) return { status: "absent" };
+  if (pointer === null) return { status: "absent" }; // no pointer — or a malformed one (no provenance)
   if (pointer.run_id !== runId) return { status: "absent" }; // fork isolation — by design, silent
 
   const path = join(sessionDataDir(ctx.cwd, runId), name);

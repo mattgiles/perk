@@ -498,6 +498,36 @@ test("unchanged short-circuit: a byte-identical rewrite appends NO fresh pointer
   }
 });
 
+test("malformed persisted pointer: the write probe and the read classify — never throw", () => {
+  // Branch data is cast, not validated: a malformed session entry can put null (or any
+  // non-pointer value) where a pointer belongs. The write's unchanged probe must treat it as
+  // "no current pointer" (the write proceeds and REPLACES it); the read must classify `absent`.
+  const cwd = tempCwd();
+  try {
+    for (const malformed of [null, "not-a-pointer", 7, { run_id: 42 }, { digest: "sha" }]) {
+      const branch: unknown[] = [
+        runIdEntry("RID"),
+        {
+          type: "custom",
+          customType: WORKFLOW_STATE_TYPE,
+          data: { session_artifacts: { "draft.md": malformed } },
+        },
+      ];
+      const ctx = reportableCtx(cwd, branch);
+      const read = readSessionArtifactClassified(ctx, "draft.md");
+      assert.equal(read.status, "absent", `read classifies (${JSON.stringify(malformed)})`);
+
+      const written = writeSessionArtifactClassified(fakeSink(branch), ctx, "draft.md", "fresh");
+      assert.equal(written.status, "applied", `write proceeds (${JSON.stringify(malformed)})`);
+      const repaired = rebuildWorkflowState(branchOfArr(branch)).session_artifacts?.["draft.md"];
+      assert.equal(repaired?.run_id, "RID", "the malformed pointer was replaced by a sound one");
+      rmSync(join(cwd, ".perk"), { recursive: true, force: true });
+    }
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
 test("classified write: name validation rejects before any effect", () => {
   const cwd = tempCwd();
   try {

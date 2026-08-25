@@ -101,9 +101,15 @@ the state and artifact read back **through `WorkflowSession`**, as the gate dema
    slice) scans the production corpus for registration tokens — `pi/v1/gist.ts` is the only
    `pi/` registrar, the frozen `LEGACY_REGISTRANTS` census admits no gist file (the three
    deleted gist factories never joined it), and the census is shrink-only.
-2. *Runtime observation:* the live session's model-visible census (above) carries `gist_draft`
-   exactly once, the bind reported no duplicate-registration errors, and the injected contexts
-   appeared exactly once each — the v1 installer is the only gist binding the session loaded.
+2. *Runtime observation — the registered census* (strengthened on review: the model-visible
+   list above is gate-filtered, so it cannot count what the gate hides): a bind-only probe over
+   the same construction enumerated the extension runner's REGISTERED surface
+   (`getAllRegisteredTools()` / `getRegisteredCommands()`) after a real `bindExtensions` in
+   this worktree — 49 tools and 63 commands total, with `gist_draft registrations: 1`,
+   `gist_save registrations: 1`, `gist-save command registrations: 1`, `duplicate tool names
+   anywhere: none`, and both gist tools sourced from this worktree's `extension/index.ts`
+   (the composition root that installs `pi/v1/gist.ts`'s bindings). Exactly one v1 gist
+   binding, counted at the registration surface itself.
 
 ## Arm 2 — interactive authoring/review/save (human) — executed 2026-08-24
 
@@ -127,6 +133,9 @@ Observed outcomes — operator-reported and corroborated against the persisted s
 - **Same injection census as the probe:** the session carried one `perk:mode-context`, one
   GIST-flavored `perk:plan-adapter-plannotator`, and one `perk:gist-author-context`
   `custom_message` each.
+- **The deviation's plan-side record:** the keep-open choice is recorded on the plan issue as
+  an assumptions-addendum comment (the Phase-1 precedent) —
+  <https://github.com/mattgiles/perk/issues/2094#issuecomment-5403289252>.
 - **No compaction occurred** (operator-reported), so the post-compaction re-injection
   observable was **not exercised live** — not fabricated here; the behavior is test-pinned in
   `pi/v1/gist.test.ts` + `adapters/planAdapterPlannotator.test.ts`.

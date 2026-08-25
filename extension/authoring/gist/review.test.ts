@@ -71,7 +71,6 @@ function fakeGate(active = true): GistGate & { exits: number } {
 const APPROVED: GistReviewOutcome = {
   status: "approved",
   reviewId: "rev-a",
-  directEdits: false,
 };
 
 test("no draft → noDraft; the reviewer is never invoked", async () => {
@@ -147,10 +146,9 @@ test("approved + direct edits → the revise round: NO save, gate untouched", as
   const result = await reviewGist({
     session: draftedSession(),
     reviewer: scriptedReviewer({
-      status: "approved",
+      status: "approvedDirectEdits",
       feedback: "# Direct Edits\n\n…the diff…",
       reviewId: "rev-de",
-      directEdits: true,
     }),
     backend,
     gate,
