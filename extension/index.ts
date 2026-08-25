@@ -36,11 +36,11 @@ import { registerSelfcheck } from "./doors/selfcheck.ts";
 import { registerOpenStackReview, registerStackReviewBrowser } from "./doors/stackReviewBrowser.ts";
 import { registerSubmit } from "./doors/submit.ts";
 import { registerSubmitPrReview } from "./doors/submitPrReview.ts";
-import { registerObjectivePlan } from "./factories/objectivePlan.ts";
 import { createHunkFeedbackReceiver } from "./hunkFeedback/receiver.ts";
 import { installGistBindings } from "./pi/v1/gist.ts";
 import { installObjectiveBindings } from "./pi/v1/objective.ts";
 import { installObjectiveAuthoringBindings } from "./pi/v1/objectiveAuthoring.ts";
+import { installObjectivePlanningBindings } from "./pi/v1/objectivePlanning.ts";
 import { installPlanBindings } from "./pi/v1/plan.ts";
 import { installPlannotatorPlanAdapter } from "./pi/v1/providers/plannotator.ts";
 import { installTombellPlanAdapter } from "./pi/v1/providers/tombell.ts";
@@ -556,7 +556,7 @@ export default function (pi: ExtensionAPI) {
   // `/objective-plan` command (select the next node and author a bounded plan). The command now
   // enters the read-only gate on invocation (parity with the cold door's `mode: read-only`
   // handoff; exit stays with plan_save / `/plan` off) — hence `gating`.
-  registerObjectivePlan(pi, gating);
+  installObjectivePlanningBindings(pi, gating);
 
   // The learned-docs plan factory's warm surface: the `/learn-docs` command gathers open
   // perk:learn issues into an inbox (via the `perk learn docs --gather` cold door) and injects the
