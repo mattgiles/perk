@@ -29,8 +29,20 @@ import {
   type ObjectiveDreamReportBlock,
 } from "./dreamReportGate.ts";
 
+/**
+ * The reviewed objective delivery vocabulary (contracts §8.45) — the ONE authority every
+ * layer derives from: the `DeliveryChoice` union, the tool schema's enum, and the decoder's
+ * narrowing all read these values, so a new variant cannot drift between them.
+ */
+export const DELIVERY_CHOICES = ["incremental", "stacked"] as const;
+
 /** The reviewed objective delivery choice (contracts §8.45). */
-export type DeliveryChoice = "incremental" | "stacked";
+export type DeliveryChoice = (typeof DELIVERY_CHOICES)[number];
+
+/** Whether `value` is a member of the §8.45 delivery vocabulary (the decoder's narrowing). */
+export function isDeliveryChoice(value: string): value is DeliveryChoice {
+  return (DELIVERY_CHOICES as readonly string[]).includes(value);
+}
 
 /** The fixed working-objective artifact name (one JSON file: prose + the structured roadmap). */
 export const OBJECTIVE_DRAFT_ARTIFACT = "objective-draft.json";
@@ -210,7 +222,7 @@ export function resumeObjectiveDraft(session: WorkflowSession): ObjectiveDraft |
     typeof payload.title === "string" && payload.title.trim() ? payload.title : undefined;
   const base = typeof payload.base === "string" && payload.base.trim() ? payload.base : undefined;
   const delivery =
-    payload.delivery === "incremental" || payload.delivery === "stacked"
+    typeof payload.delivery === "string" && isDeliveryChoice(payload.delivery)
       ? payload.delivery
       : undefined;
   let dreamReport: ObjectiveDreamReportBlock | undefined;

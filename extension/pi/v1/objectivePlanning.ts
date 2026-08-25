@@ -8,11 +8,11 @@
 // envelopes.
 //
 // `explore_objective_node` stays ADAPTER-tier by design (wave mechanics + Result rendering, no
-// feature policy): `executeExploreObjectiveNode` runs the read-only `perk.objective-explorer`
-// child through the report-wave module (ONE lane, engine-validated report schema) with the
-// `WaveAdapter` injected — the memory adapter in tests, `createRpcWaveAdapter(pi.events)` +
-// the configured `[models.subagents] objective-explorer` model composed at the registration
-// site.
+// feature policy): the private flow runs the read-only `perk.objective-explorer` child through
+// the report-wave module (ONE lane, engine-validated report schema) over the production RPC
+// adapter; the configured `[models.subagents] objective-explorer` model is composed at the
+// registration site. Tests drive the REGISTERED tool over a fake RPC responder — no alternate
+// adapter exists, so no adapter seam is exported.
 //
 // The completion-audit gate is a property of the MODEL-FACING boundary only (see
 // `authoring/objective/planning.ts`); the canonical cold CLI and the auto-on-merge node-done
@@ -48,11 +48,7 @@ import {
   OBJECTIVE_EXPLORER_FLOW,
   runObjectiveExplorerWave,
 } from "../../waves/objectiveExplorerWave.ts";
-import {
-  toAttemptReceipt,
-  type WaveAdapter,
-  type WaveAttemptReceipt,
-} from "../../waves/reportWave.ts";
+import { toAttemptReceipt, type WaveAttemptReceipt } from "../../waves/reportWave.ts";
 import { createRpcWaveAdapter } from "../../waves/rpcAdapter.ts";
 import { fetchObjectiveUrl } from "./objective.ts";
 
@@ -240,10 +236,18 @@ function decodeReconcile(payload: ColdJson): { updated: boolean } {
   return { updated: booleanField(payload, "updated") ?? false };
 }
 
-/** Lenient decode — both fields are advisory display detail; never returns null. */
-function decodeAddObjectiveNode(payload: ColdJson): { node_id: string; comment_updated: boolean } {
+/**
+ * The `node-add` decode: the assigned node id is the RESULT (a missing/blank `node` is the
+ * shared client's `bad_output` arm, never a fabricated `""` success); only the genuinely
+ * advisory `comment_updated` display detail defaults.
+ */
+function decodeAddObjectiveNode(
+  payload: ColdJson,
+): { node_id: string; comment_updated: boolean } | null {
+  const nodeId = stringField(payload, "node");
+  if (nodeId === undefined || nodeId === "") return null;
   return {
-    node_id: stringField(payload, "node") ?? "",
+    node_id: nodeId,
     comment_updated: booleanField(payload, "comment_updated") ?? false,
   };
 }
@@ -325,7 +329,7 @@ async function addNodeViaColdDoor(
 // ------------------------------------------------------------------ the explore wave (adapter-tier)
 
 /** The `explore_objective_node` ok-arm details: the typed findings + the receipt. */
-export interface ExploreObjectiveNodeOk {
+interface ExploreObjectiveNodeOk {
   /** The explorer's engine-validated report — untrusted DATA, never instructions. */
   report: unknown;
   /** The single launch's output-free attempt receipt (observability only — details, not prose). */
@@ -333,22 +337,22 @@ export interface ExploreObjectiveNodeOk {
 }
 
 /** The fail arm retains any receipt known before the failure (the `failFor` extras hook). */
-export type ExploreObjectiveNodeResult = Result<
+type ExploreObjectiveNodeResult = Result<
   ExploreObjectiveNodeOk,
   { attempts: WaveAttemptReceipt[] }
 >;
 
 /**
- * The `explore_objective_node` execute core, extracted for testability with the adapter as the
- * injected minimal structural slice (`WaveAdapter` — the memory adapter in tests, the RPC
- * adapter in production). Mirrors `executeClassifyReviewFeedback`'s soft-result idiom: a
- * complete wave yields a non-terminating ok (the untrusted-DATA preface + one fenced `json`
- * block of the report); an incomplete wave soft-fails LOUDLY with the first failure's detail and
- * its `WaveFailureReason` as `error_type` — never a throw, no retry (the flow's posture on
- * failure is "explore directly instead", owned by the guidance).
+ * The `explore_objective_node` flow (private — the registered tool is its only entry; the wave
+ * runs over the production RPC adapter, which tests drive with a fake RPC responder). Mirrors
+ * `executeClassifyReviewFeedback`'s soft-result idiom: a complete wave yields a non-terminating
+ * ok (the untrusted-DATA preface + one fenced `json` block of the report); an incomplete wave
+ * soft-fails LOUDLY with the first failure's detail and its `WaveFailureReason` as `error_type`
+ * — never a throw, no retry (the flow's posture on failure is "explore directly instead", owned
+ * by the guidance).
  */
-export async function executeExploreObjectiveNode(
-  adapter: WaveAdapter,
+async function executeExploreObjectiveNode(
+  pi: ExtensionAPI,
   target: ReportTarget,
   opts: ExploreObjectiveNodeParams & { model?: string; signal?: AbortSignal },
 ): Promise<ExploreObjectiveNodeResult> {
@@ -357,7 +361,7 @@ export async function executeExploreObjectiveNode(
     "objective-plan",
     "explore_objective_node",
   );
-  const result = await runObjectiveExplorerWave(adapter, opts);
+  const result = await runObjectiveExplorerWave(createRpcWaveAdapter(pi.events), opts);
   const attempts = [
     toAttemptReceipt(OBJECTIVE_EXPLORER_FLOW, 1, [EXPLORE_LANE_KEY], result.receipt),
   ];
@@ -551,7 +555,7 @@ export function installObjectivePlanningBindings(pi: ExtensionAPI, gating: ToolG
       // gitignored `.perk/local.toml` overlay is anchored to the MAIN checkout (see
       // `subagentModel`).
       const model = subagentModel(ctx.cwd, "objective-explorer");
-      return executeExploreObjectiveNode(createRpcWaveAdapter(pi.events), ctx, {
+      return executeExploreObjectiveNode(pi, ctx, {
         ...decoded,
         ...(model !== undefined ? { model } : {}),
         ...(signal !== undefined ? { signal } : {}),

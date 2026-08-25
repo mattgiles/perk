@@ -10072,10 +10072,12 @@ report bytes for free (it compares raw artifact bytes), and DENY routes the ordi
 full-redraft `objective_draft` loop (no new machinery).
 
 **Save-time re-validation.** `saveObjective` accepts `dream_report` as ONE carrier with two
-sources: the direct tool path wraps only a PRESENT decoded value as `{input}` (the save
-stamps `generated_at`; an `{input: undefined}` carrier is never constructed — presence is the
-`opts.dream_report === undefined` boundary); the approval path (`objectiveApprovalSave`)
-passes the artifact block through whole — stored stamp AND stored parts. Before the cold-door
+sources, modeled as a discriminated union (a partial "reviewed" bag cannot compile): the
+direct tool path wraps only a PRESENT decoded value as the `direct` arm's raw `input` (the
+save stamps `generated_at`; a direct arm is never constructed for an absent value — presence
+is the `input.dream_report === undefined` boundary); the approval path
+(`objectiveApprovalSave`) passes the artifact block through whole as the `reviewed` arm —
+stored stamp AND stored parts. Before the cold-door
 call the gate re-runs against freshly recovered context, and when stored parts are present
 they are byte-compared (`JSON.stringify` equality) against the re-rendered parts — a mismatch
 (run-scratch drift or artifact tamper between draft-write and save) refuses `bad_state` with

@@ -426,7 +426,21 @@ the session lifecycle required by each new caller.
 >   re-claim short-circuits `unchanged`; `link-objective`) plus the `activeObjective()` read
 >   (retiring two duplicate private helpers).
 > - **`explore_objective_node` stayed adapter-tier** (wave mechanics + Result rendering, no
->   feature policy — it lives in `pi/v1/objectivePlanning.ts`, not `authoring/`).
+>   feature policy — it lives in `pi/v1/objectivePlanning.ts`, not `authoring/`); its planned
+>   injected `WaveAdapter` seam was subsequently DELETED under review (one caller, no alternate
+>   adapter ever bound — tests drive the registered tool over a fake RPC responder), so the
+>   flow is a private function over the production RPC adapter.
+> - **Reconciliation stayed adapter-tier — a deliberate review-driven deviation** from the
+>   planned `reconcileObjective`/`addObjectiveNode` feature ops + `ObjectiveReconcileBackend`
+>   port + pure `resolveReconcileObjective`: as built, those were zero-policy passthroughs over
+>   a single production adapter (the planned "thin typed ops" carried NO feature decisions once
+>   decode-once typed the inputs), and the first review round deleted them as unearned
+>   abstraction. The reconcile/add-node writes are two private cold-door functions in
+>   `pi/v1/objectivePlanning.ts`, and the three-tier resolution is lazy null-coalescing at the
+>   `/objective-reconcile` handler. The feature-tier policy that DID earn `authoring/` — the
+>   node-transition audit gate + claim semantics (`objectiveNodeTransition`) — lives there.
+>   Should a second reconcile backend appear, the port earns its way back per the plan's own
+>   "after two real callers share an invariant" rule.
 > - **Six declared interior deltas** (test-pinned, contracts amended same-turn): objective-owned
 >   injections joined the compaction-active window; idempotent re-claims; seam-owned
 >   claim/linkage warning strings; `writeSessionArtifact` deleted (last caller migrated;
@@ -439,9 +453,12 @@ the session lifecycle required by each new caller.
 > - **Still no `PromptEvidence` module** (the 2.1 narrow-until-proven rule): context-evidence
 >   coverage (live-copy suppression / post-compaction re-injection / quoting-summary /
 >   reconstructed-context) is realized as inlined marker checks per migrated injection.
-> - **The Phase-4 dogfood gate is PENDING** (not silently omitted): it runs against the stacked
->   layer after review — a real objective authoring-or-review path driven by the migrated flow,
->   then a reload + fork of the resulting session — and its evidence record is authored into
+> - **The Phase-4 dogfood gate is PENDING** (not silently omitted) — and its post-review
+>   sequencing is the PLAN's own: the plan runs the gate from the train worktree after the
+>   implementation + verification gates ("the dogfood gate + evidence record + stack sync
+>   follow"), its first arm IS node 5.1's planning session driven on this branch (which cannot
+>   precede this layer's review), and its interactive deny→revise/approve→save arms are the
+>   human's run. The evidence record is authored into
 >   `docs/design/archive/ts-decomposition-phase4-dogfood.md` at gate time (the phase-1/2/3
 >   record genre). Phase 5 must not start before that record exists.
 

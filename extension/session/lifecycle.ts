@@ -211,16 +211,27 @@ export type SessionIdentityArm = "claimed" | "kept" | "forked" | "adopted" | "mi
  * `arm === "minted" ? "mint" : decision.source`), the decision itself, and the per-arm
  * problems/warnings the caller renders with today's exact report scopes ("workflow-state
  * linkage error" `{alsoLog: true}`; "run scratch" warnings).
+ *
+ * A discriminated union on `arm`, correlating each settled arm with exactly the decision that
+ * can produce it: an impossible pair (e.g. `forked` carrying a claim decision) does not
+ * compile, and narrowing on `arm` proves the decision's fields. `unclaimed` is the shared
+ * failure arm of the two strict-append paths — a failed cold claim (`action: "claim"`) or a
+ * failed mint (`action: "none"`); the correlated decision says which.
  */
-export interface EstablishIdentityOutcome {
-  arm: SessionIdentityArm;
+export type EstablishIdentityOutcome = {
   resolved: WorkflowState;
-  decision: ClaimDecision;
   /** Caller-rendered with scope "workflow-state linkage error" (`{alsoLog: true}`). */
   problems: string[];
   /** Caller-rendered with scope "run scratch" (`{alsoLog: true}`). */
   warnings: string[];
-}
+} & (
+  | { arm: "claimed"; decision: Extract<ClaimDecision, { action: "claim" }> }
+  | { arm: "kept"; decision: Extract<ClaimDecision, { action: "keep" }> }
+  | { arm: "forked"; decision: Extract<ClaimDecision, { action: "fork" }> }
+  | { arm: "adopted"; decision: Extract<ClaimDecision, { action: "adopt" }> }
+  | { arm: "minted"; decision: Extract<ClaimDecision, { action: "none" }> }
+  | { arm: "unclaimed"; decision: Extract<ClaimDecision, { action: "claim" | "none" }> }
+);
 
 /**
  * Establish the session's run identity — the four `session_start` arms as one named operation:
@@ -325,13 +336,10 @@ export function establishSessionIdentity(
       perk_version: stamp,
     };
     store.append(data);
-    return {
-      arm: decision.action === "fork" ? "forked" : "adopted",
-      resolved: data,
-      decision,
-      problems,
-      warnings,
-    };
+    if (decision.action === "fork") {
+      return { arm: "forked", resolved: data, decision, problems, warnings };
+    }
+    return { arm: "adopted", resolved: data, decision, problems, warnings };
   }
 
   if (decision.action === "none") {

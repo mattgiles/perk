@@ -235,7 +235,7 @@ test("save: a gate refusal fails with the resolver's detail/errorType; backend n
     detail: "dream_report is only valid inside a perk learn dream session",
   });
   const outcome = await saveObjective(
-    { prose: PROSE, dream_report: { input: { rows: [] } } },
+    { prose: PROSE, dream_report: { source: "direct", input: { rows: [] } } },
     { session, backend, resolveDreamGate: gate.resolveDreamGate },
   );
   assert.deepEqual(outcome, {
@@ -274,9 +274,12 @@ test("save: the approval path's stored stamp keeps the comparison deterministic;
     {
       prose: PROSE,
       dream_report: {
-        input: DREAM_BLOCK.input,
-        generated_at: DREAM_BLOCK.generated_at,
-        parts: [...DREAM_BLOCK.parts],
+        source: "reviewed",
+        block: {
+          input: DREAM_BLOCK.input,
+          generated_at: DREAM_BLOCK.generated_at,
+          parts: [...DREAM_BLOCK.parts],
+        },
       },
     },
     { session, backend, resolveDreamGate: gate.resolveDreamGate },
@@ -294,9 +297,12 @@ test("save: stored-parts mismatch refuses bad_state; nothing saved", async () =>
     {
       prose: PROSE,
       dream_report: {
-        input: DREAM_BLOCK.input,
-        generated_at: DREAM_BLOCK.generated_at,
-        parts: ["# Dream report — RID\n\nTAMPERED\n"],
+        source: "reviewed",
+        block: {
+          input: DREAM_BLOCK.input,
+          generated_at: DREAM_BLOCK.generated_at,
+          parts: ["# Dream report — RID\n\nTAMPERED\n"],
+        },
       },
     },
     { session, backend, resolveDreamGate: gate.resolveDreamGate },
@@ -315,7 +321,7 @@ test("save: the direct tool path (no stored parts) skips the byte-compare; parts
   const { backend, requests } = fakeBackend();
   const gate = scriptedGate({ kind: "block", block: DREAM_BLOCK });
   const outcome = await saveObjective(
-    { prose: PROSE, dream_report: { input: DREAM_BLOCK.input } },
+    { prose: PROSE, dream_report: { source: "direct", input: DREAM_BLOCK.input } },
     { session, backend, resolveDreamGate: gate.resolveDreamGate },
   );
   assert.equal(outcome.status, "saved");

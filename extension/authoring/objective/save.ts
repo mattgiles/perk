@@ -17,7 +17,7 @@
 import type { WorkflowChangeResult, WorkflowSession } from "../../session/workflowSession.ts";
 import type { DeliveryChoice } from "./draft.ts";
 import { resumeObjectiveDraft } from "./draft.ts";
-import type { DreamReportGateOutcome } from "./dreamReportGate.ts";
+import type { DreamReportGateOutcome, ObjectiveDreamReportBlock } from "./dreamReportGate.ts";
 
 /** The backend save facts (`id` is the opaque string objective id — contracts §8.21). */
 export type ObjectiveBackendSaveResult =
@@ -42,6 +42,16 @@ export interface ObjectiveBackend {
   }): Promise<ObjectiveBackendSaveResult>;
 }
 
+/**
+ * The §8.63 dream-report carrier's two proven sources, as a discriminated union so a partial
+ * "reviewed" bag cannot compile: the direct tool path supplies only the raw `input` (the save
+ * stamps `generated_at` fresh); the approval path passes the reviewed artifact block through
+ * WHOLE — stored stamp AND stored parts (byte-compared against the fresh re-render).
+ */
+export type DreamReportCarrier =
+  | { source: "direct"; input: unknown }
+  | { source: "reviewed"; block: ObjectiveDreamReportBlock };
+
 /** The typed save input — decode owns the shape at the tool boundary (pi/v1). */
 export interface SaveObjectiveInput {
   prose: string;
@@ -49,12 +59,7 @@ export interface SaveObjectiveInput {
   roadmap?: unknown[];
   base?: string;
   delivery?: DeliveryChoice;
-  /**
-   * ONE carrier with two sources (§8.63): the direct tool path supplies `{input}` and the save
-   * stamps `generated_at`; the approval path passes the artifact block through whole — stored
-   * stamp AND stored parts (byte-compared against the fresh re-render).
-   */
-  dream_report?: { input: unknown; generated_at?: string; parts?: string[] };
+  dream_report?: DreamReportCarrier;
 }
 
 /**
@@ -111,18 +116,23 @@ export async function saveObjective(
   const title = input.title?.trim() || undefined;
   const base = input.base?.trim() || undefined;
 
-  const generatedAt = input.dream_report?.generated_at ?? new Date().toISOString();
+  const carrier = input.dream_report;
+  const generatedAt =
+    carrier?.source === "reviewed" ? carrier.block.generated_at : new Date().toISOString();
   const gate =
-    input.dream_report === undefined
+    carrier === undefined
       ? deps.resolveDreamGate(undefined, generatedAt)
-      : deps.resolveDreamGate(input.dream_report.input, generatedAt);
+      : deps.resolveDreamGate(
+          carrier.source === "reviewed" ? carrier.block.input : carrier.input,
+          generatedAt,
+        );
   if (gate.kind === "refuse") {
     return { status: "failed", message: gate.detail, errorType: gate.errorType };
   }
-  if (gate.kind === "block" && input.dream_report?.parts !== undefined) {
+  if (gate.kind === "block" && carrier?.source === "reviewed") {
     // The approval path: the reviewed (stored) parts must byte-match the re-render against
     // freshly recovered context.
-    if (JSON.stringify(gate.block.parts) !== JSON.stringify(input.dream_report.parts)) {
+    if (JSON.stringify(gate.block.parts) !== JSON.stringify(carrier.block.parts)) {
       return {
         status: "failed",
         message: "the reviewed report no longer matches the wave state — re-draft and re-review",
@@ -203,7 +213,9 @@ export async function objectiveApprovalSave(
       roadmap: draft.roadmap,
       ...(draft.base !== undefined ? { base: draft.base } : {}),
       ...(draft.delivery !== undefined ? { delivery: draft.delivery } : {}),
-      ...(draft.dream_report !== undefined ? { dream_report: draft.dream_report } : {}),
+      ...(draft.dream_report !== undefined
+        ? { dream_report: { source: "reviewed" as const, block: draft.dream_report } }
+        : {}),
     },
     deps,
   );

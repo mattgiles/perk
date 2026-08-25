@@ -38,8 +38,6 @@ export interface MemoryWorkflowSession extends WorkflowSession {
   failNextApplyVerification(): void;
   /** Seed/replace the live node claim (the lifecycle write stays outside the seam). */
   setNodeClaim(claim: { objective: string; node: string } | null): void;
-  /** Seed/replace the live active objective (the `/objective` raw-append path's twin). */
-  setActiveObjective(objective: string | null): void;
   /** The live linked plan-ref (test observation of the `link-plan-ref` effect). */
   linkedPlanRef(): PlanRef | null;
 }
@@ -93,9 +91,6 @@ export function openMemoryWorkflowSession(opts: {
     },
     setNodeClaim(next: { objective: string; node: string } | null) {
       claim = next;
-    },
-    setActiveObjective(next: string | null) {
-      activeObjective = next;
     },
     linkedPlanRef() {
       return activePlanRef;

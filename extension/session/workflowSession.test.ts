@@ -657,38 +657,92 @@ test("branch: a reload-shaped reopen reconstructs runId, claims, and activeObjec
   }
 });
 
-test("branch: a record-node-claim read-back miss reports LOUDLY under the objective-plan scope", () => {
-  // The seam owns the append's report scope (the caller passes none): a headless read-back
-  // miss must surface as `perk: objective-plan — …` on stderr — not stay quiet, and not
-  // drift to another scope. Captured (not silenced) so the exact line is pinned.
-  const cwd = mkdtempSync(join(tmpdir(), "workflow-session-scope-"));
+test("branch: activeObjective() is fail-open — malformed state and a throwing branch read null", () => {
+  // The read's contract includes the boundary error paths: a non-string/blank rebuilt value
+  // and a THROWING `getBranch()` must both read null (never a throw to the caller).
+  const cwd = mkdtempSync(join(tmpdir(), "workflow-session-fail-open-"));
   try {
-    const branch: unknown[] = [stateEntry({ run_id: "RID" })];
-    let dropAppends = false;
-    const sink: EntrySink = {
-      appendEntry: (customType, data) => {
-        if (dropAppends) return; // dropped on the floor — the read-back proof misses
-        branch.push({ type: "custom", customType, data });
-      },
-    };
-    const session = openBranchWorkflowSession(sink, reportableCtx(cwd, branch));
-    const lines: string[] = [];
-    const original = console.error;
-    console.error = (...args: unknown[]) => {
-      lines.push(args.map(String).join(" "));
-    };
-    let result: ReturnType<typeof session.apply>;
-    try {
-      dropAppends = true;
-      result = session.apply({ kind: "record-node-claim", claim: CLAIM });
-    } finally {
-      console.error = original;
+    const sink: EntrySink = { appendEntry: () => {} };
+    for (const malformed of [7, "", { id: "7" }, ["7"], null]) {
+      const branch: unknown[] = [
+        stateEntry({ run_id: "RID" }),
+        stateEntry({ active_objective: malformed }),
+      ];
+      const session = openBranchWorkflowSession(sink, reportableCtx(cwd, branch));
+      assert.equal(session.activeObjective(), null, JSON.stringify(malformed));
     }
-    assert.equal(result.status, "unverified");
-    assert.deepEqual(lines, [
-      "perk: objective-plan — objective_node_claim read-back failed for #7 node 1.1",
-    ]);
+    const throwing = openBranchWorkflowSession(sink, {
+      cwd,
+      sessionManager: {
+        getBranch(): unknown[] {
+          throw new Error("adversarial branch read");
+        },
+      },
+      hasUI: false,
+      ui: { notify() {} },
+    });
+    assert.equal(throwing.activeObjective(), null, "a throwing branch read is fail-open");
   } finally {
     rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+test("branch: a read-back miss reports LOUDLY under each change's seam-owned scope", () => {
+  // The seam owns each append's report scope (the caller passes none): a headless read-back
+  // miss must surface as `perk: <scope> — <failure>` on stderr — not stay quiet, and not
+  // drift to another scope. Captured (not silenced) so the exact line per change is pinned:
+  // record-node-claim → objective-plan, clear-node-claim → plan-save (the existing seam
+  // warning the clearing path emits), link-objective → objective-save.
+  const cases: {
+    seed: Record<string, unknown> | null;
+    change: Parameters<WorkflowSession["apply"]>[0];
+    expected: string;
+  }[] = [
+    {
+      seed: null,
+      change: { kind: "record-node-claim", claim: CLAIM },
+      expected: "perk: objective-plan — objective_node_claim read-back failed for #7 node 1.1",
+    },
+    {
+      seed: { objective_node_claim: CLAIM },
+      change: { kind: "clear-node-claim", claim: CLAIM },
+      expected: "perk: plan-save — objective_node_claim clear read-back failed for node 1.1",
+    },
+    {
+      seed: null,
+      change: { kind: "link-objective", objective: "7" },
+      expected: "perk: objective-save — active_objective read-back failed for #7",
+    },
+  ];
+  for (const { seed, change, expected } of cases) {
+    const cwd = mkdtempSync(join(tmpdir(), "workflow-session-scope-"));
+    try {
+      const branch: unknown[] = [stateEntry({ run_id: "RID" })];
+      if (seed !== null) branch.push(stateEntry(seed));
+      let dropAppends = false;
+      const sink: EntrySink = {
+        appendEntry: (customType, data) => {
+          if (dropAppends) return; // dropped on the floor — the read-back proof misses
+          branch.push({ type: "custom", customType, data });
+        },
+      };
+      const session = openBranchWorkflowSession(sink, reportableCtx(cwd, branch));
+      const lines: string[] = [];
+      const original = console.error;
+      console.error = (...args: unknown[]) => {
+        lines.push(args.map(String).join(" "));
+      };
+      let result: ReturnType<typeof session.apply>;
+      try {
+        dropAppends = true;
+        result = session.apply(change);
+      } finally {
+        console.error = original;
+      }
+      assert.equal(result.status, "unverified", expected);
+      assert.deepEqual(lines, [expected]);
+    } finally {
+      rmSync(cwd, { recursive: true, force: true });
+    }
   }
 });

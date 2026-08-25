@@ -258,20 +258,54 @@ test("resume: happy path round-trips a revise", () => {
   });
 });
 
-test("resume: malformed payloads warn + null", () => {
-  for (const [label, content] of [
-    ["malformed JSON", "{ not json"],
-    ["non-object payload", '["an", "array"]\n'],
-    ["wrong schema_version", JSON.stringify({ schema_version: 2, prose: PROSE, roadmap: [] })],
-    ["blank prose", JSON.stringify({ schema_version: 1, prose: "  \n", roadmap: [] })],
-    ["missing prose", JSON.stringify({ schema_version: 1, roadmap: [] })],
+/** Capture console.error lines for the duration of `fn` (the reader's diagnostic contract). */
+function capturingStderr<T>(fn: () => T): { value: T; lines: string[] } {
+  const lines: string[] = [];
+  const original = console.error;
+  console.error = (...args: unknown[]) => {
+    lines.push(args.map(String).join(" "));
+  };
+  try {
+    return { value: fn(), lines };
+  } finally {
+    console.error = original;
+  }
+}
+
+test("resume: malformed payloads null with the exact byte-stable warning line", () => {
+  // The diagnostic contract is part of the reader's behavior: each failure names the artifact,
+  // the reason, and the refusal — deleting or misrouting a warning must fail this pin, not
+  // just the null return.
+  for (const [content, expected] of [
+    ["{ not json", "perk: warning: objective-draft.json is not valid JSON — refusing the draft"],
+    [
+      '["an", "array"]\n',
+      "perk: warning: objective-draft.json is not a JSON object — refusing the draft",
+    ],
+    [
+      JSON.stringify({ schema_version: 2, prose: PROSE, roadmap: [] }),
+      "perk: warning: objective-draft.json has an unsupported schema_version (2) — refusing the draft",
+    ],
+    [
+      JSON.stringify({ schema_version: "one", prose: PROSE, roadmap: [] }),
+      'perk: warning: objective-draft.json has an unsupported schema_version ("one") — refusing the draft',
+    ],
+    [
+      JSON.stringify({ schema_version: 1, prose: "  \n", roadmap: [] }),
+      "perk: warning: objective-draft.json has no prose — refusing the draft",
+    ],
+    [
+      JSON.stringify({ schema_version: 1, roadmap: [] }),
+      "perk: warning: objective-draft.json has no prose — refusing the draft",
+    ],
   ] as const) {
-    const draft = quietly(() => resumeObjectiveDraft(plantedSession(content)));
-    assert.equal(draft, null, label);
+    const { value, lines } = capturingStderr(() => resumeObjectiveDraft(plantedSession(content)));
+    assert.equal(value, null, expected);
+    assert.deepEqual(lines, [expected]);
   }
 });
 
-test("resume: a malformed dream_report block refuses the WHOLE draft (warn + null)", () => {
+test("resume: a malformed dream_report block refuses the WHOLE draft (exact warning + null)", () => {
   for (const dreamReport of [
     "nope",
     { input: "not-an-object", generated_at: "2026-01-01T00:00:00Z", parts: ["p"] },
@@ -282,8 +316,15 @@ test("resume: a malformed dream_report block refuses the WHOLE draft (warn + nul
     const session = plantedSession(
       JSON.stringify({ schema_version: 1, dream_report: dreamReport, prose: PROSE, roadmap: [] }),
     );
-    const draft = quietly(() => resumeObjectiveDraft(session));
-    assert.equal(draft, null, JSON.stringify(dreamReport));
+    const { value, lines } = capturingStderr(() => resumeObjectiveDraft(session));
+    assert.equal(value, null, JSON.stringify(dreamReport));
+    assert.deepEqual(
+      lines,
+      [
+        "perk: warning: objective-draft.json carries a malformed dream_report block — refusing the draft",
+      ],
+      JSON.stringify(dreamReport),
+    );
   }
 });
 

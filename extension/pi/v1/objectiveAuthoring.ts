@@ -22,8 +22,10 @@
 import { join } from "node:path";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import {
-  type DeliveryChoice,
+  DELIVERY_CHOICES,
+  isDeliveryChoice,
   OBJECTIVE_DRAFT_ARTIFACT,
+  type ObjectiveDraftInput,
   reviseObjectiveDraft,
 } from "../../authoring/objective/draft.ts";
 import {
@@ -74,21 +76,13 @@ import { OBJECTIVE_BUDGET_TYPE } from "./objective.ts";
 
 // ------------------------------------------------------------------- the tool-boundary decode
 
-/** The decoded `objective_save` tool params (shared with `objective_draft`). */
-export interface ObjectiveSaveParams {
-  prose: string;
-  title?: string;
-  roadmap?: unknown[];
-  /** The objective's target branch; omitted to use the repo default. */
-  base?: string;
-  /** The reviewed delivery choice; omitted ⇒ incremental (the §8.42 absence rule). */
-  delivery?: DeliveryChoice;
-  /**
-   * The dream-report input (perk learn dream only — §8.63); deep validation is the gate
-   * resolver's, so the decode keeps it opaque beyond the plain-object shape.
-   */
-  dream_report?: unknown;
-}
+/**
+ * The decoded `objective_save` tool params (shared with `objective_draft`) — an ALIAS of the
+ * feature's draft input, not a second handwritten contract: the tool boundary decodes exactly
+ * the shape the feature operations consume (`dream_report` stays opaque here — deep validation
+ * is the gate resolver's; the save path wraps it as its `{input}` carrier arm).
+ */
+export type ObjectiveSaveParams = ObjectiveDraftInput;
 
 /**
  * The `delivery` enum property, shared between `objective_save` and `objective_draft` so the
@@ -97,7 +91,7 @@ export interface ObjectiveSaveParams {
  */
 export const DELIVERY_PARAM_SCHEMA = {
   type: "string",
-  enum: ["incremental", "stacked"],
+  enum: DELIVERY_CHOICES,
   description:
     "The reviewed delivery choice — ask the human explicitly (incremental is the recommended " +
     "default: each plan lands independently; stacked lands ALL non-skipped roadmap nodes as " +
@@ -179,7 +173,7 @@ export function decodeObjectiveSaveParams(params: unknown): ObjectiveSaveParams 
     return null;
   }
   // The delivery enum is strict beyond `string`: an off-enum value is present-but-mistyped.
-  if (delivery !== undefined && delivery !== "incremental" && delivery !== "stacked") return null;
+  if (delivery !== undefined && !isDeliveryChoice(delivery)) return null;
   return { prose: prose ?? "", title, roadmap, base, delivery, dream_report: dreamReport };
 }
 
@@ -605,13 +599,15 @@ export function installObjectiveAuthoringBindings(pi: ExtensionAPI, gating: Tool
           "bad_input",
         );
       }
-      // The direct tool path wraps ONLY a present decoded value as the `{input}` carrier (the
-      // save stamps generated_at); no stored parts, so no byte-compare on this path.
+      // The direct tool path wraps ONLY a present decoded value as the union's `direct` arm
+      // (the save stamps generated_at); no stored parts, so no byte-compare on this path.
       const { dream_report, ...rest } = decoded;
       const save = await saveObjective(
         {
           ...rest,
-          ...(dream_report !== undefined ? { dream_report: { input: dream_report } } : {}),
+          ...(dream_report !== undefined
+            ? { dream_report: { source: "direct" as const, input: dream_report } }
+            : {}),
         },
         objectiveSaveDepsFor(pi, ctx, gating),
       );

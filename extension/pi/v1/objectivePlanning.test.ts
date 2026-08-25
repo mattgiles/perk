@@ -241,6 +241,28 @@ test("tool: add_objective_node delegates the node-add argv (with optionals)", as
   }
 });
 
+test("tool: add_objective_node — a success payload MISSING the node id fails bad_output", async () => {
+  // The assigned node id is the result: version-skewed output without `node` must surface as
+  // the shared client's bad_output arm, never as a fabricated empty-id success.
+  const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
+  const bin = fakePerk(cwd, {
+    stdout: JSON.stringify({ success: true, error_type: null, comment_updated: false }),
+  });
+  const h = await loadPerkSession({ cwd, env: { PERK_RUN_ID: "01RID", PERK_BIN: bin } });
+  try {
+    const result = await h.invokeTool("add_objective_node", {
+      objective: 7,
+      phase: 2,
+      description: "Newly emerged work",
+    });
+    const details = result.details as { ok: boolean; error_type?: string };
+    assert.equal(details.ok, false);
+    assert.equal(details.error_type, "bad_output");
+  } finally {
+    h.dispose();
+  }
+});
+
 test("tool: add_objective_node — a failing worker fails loud-but-soft (no throw)", async () => {
   const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
   const bin = fakePerk(cwd, { stdout: "", code: 1 });
@@ -1168,6 +1190,37 @@ test("/objective-reconcile with no arg resolves through the plan-ref third tier"
     assert.ok(
       h.notifies.some((n) => /#42/.test(n)),
       "the plan-ref objective resolved (third tier)",
+    );
+  } finally {
+    h.dispose();
+  }
+});
+
+test("/objective-reconcile with no arg prefers the ACTIVE objective over a conflicting plan-ref", async () => {
+  // The middle tier: the session's `active_objective` (read through the seam's
+  // `activeObjective()`) outranks the plan-ref fallback — broken seam wiring or inverted
+  // precedence must fail here, not land silently.
+  const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
+  writePlanRef(cwd, {
+    provider: "github",
+    pr_id: "7",
+    url: "u/7",
+    labels: ["perk:plan"],
+    objective_id: "42",
+  });
+  const h = await loadPerkSession({ cwd, env: { PERK_RUN_ID: "01RID" } });
+  spyInjections(h);
+  try {
+    await h.invokeCommand("objective", "55");
+    await h.invokeCommand("objective-reconcile");
+    assert.ok(
+      h.notifies.some((n) => /#55/.test(n)),
+      "the active objective resolved (second tier)",
+    );
+    assert.equal(
+      h.notifies.some((n) => /#42/.test(n)),
+      false,
+      "the plan-ref third tier never outranks the active objective",
     );
   } finally {
     h.dispose();
