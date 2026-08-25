@@ -2,9 +2,10 @@
 // (`activeSessionRunId`), artifact ops delegating to `substrate/sessionData.ts`'s classified
 // cores — one artifact-discipline implementation, two consumers (this seam + the legacy
 // null-collapsing wrappers) — and the workflow-state ops delegating to the strict-append seam
-// (`appendWorkflowState`) with the exact scope/failure strings the plan-save surfaces always
-// used (the append helper's loud `report()` warning path is unchanged and remains the loudness
-// channel). The reporting slice arrives through `SessionArtifactCtx`, so this module never
+// (`appendWorkflowStateClassified`) with the exact scope/failure strings the plan-save surfaces
+// always used (the append helper's loud `report()` warning path is unchanged and remains the
+// loudness channel; its classification IS the seam's change vocabulary — `rejected` only on a
+// proven refusal-before-effect). The reporting slice arrives through `SessionArtifactCtx`, so this module never
 // imports `surfaces/`.
 
 import {
@@ -14,7 +15,7 @@ import {
   writeSessionArtifactClassified,
 } from "../substrate/sessionData.ts";
 import {
-  appendWorkflowState,
+  appendWorkflowStateClassified,
   branchOf,
   type EntrySink,
   nodeClaimsEqual,
@@ -76,35 +77,32 @@ export function openBranchWorkflowSession(
           if (planRefsEqual(rebuildWorkflowState(branchOf(source)).active_plan_ref ?? null, ref)) {
             return { status: "unchanged" };
           }
-          const failure = `plan-ref read-back failed for ${ref.provider}:${ref.pr_id}`;
-          const ok = appendWorkflowState(sink, source, {
+          // The classified strict-append distinguishes a PROVEN refusal-before-effect (the
+          // append threw and the rebuilt field never changed — `rejected`) from a read-back
+          // miss (`unverified`: an append may have landed unproven); its report() path stays
+          // the loudness channel. `ClassifiedAppend` IS the seam's change vocabulary.
+          return appendWorkflowStateClassified(sink, source, {
             data: { active_plan_ref: ref },
             field: "active_plan_ref",
             expected: ref,
             scope: "plan-save",
-            failure,
+            failure: `plan-ref read-back failed for ${ref.provider}:${ref.pr_id}`,
             equals: planRefsEqual,
           });
-          // appendWorkflowState never distinguishes refused-before-effect from a read-back
-          // miss (both are its loud false), so the branch backing classifies every failure
-          // `unverified` — the honest arm: an append may have landed unproven.
-          return ok ? { status: "applied" } : { status: "unverified", problem: failure };
         }
         case "clear-node-claim": {
           const claim = change.claim;
           // Never clobber an unrelated claim: clear only when the LIVE claim matches BOTH
           // fields (same-node/different-objective stays untouched).
           if (!nodeClaimsEqual(readNodeClaim(source), claim)) return { status: "unchanged" };
-          const failure = `objective_node_claim clear read-back failed for node ${claim.node}`;
-          const ok = appendWorkflowState(sink, source, {
+          return appendWorkflowStateClassified(sink, source, {
             data: { objective_node_claim: null },
             field: "objective_node_claim",
             expected: null,
             scope: "plan-save",
-            failure,
+            failure: `objective_node_claim clear read-back failed for node ${claim.node}`,
             equals: nodeClaimsEqual,
           });
-          return ok ? { status: "applied" } : { status: "unverified", problem: failure };
         }
       }
     },

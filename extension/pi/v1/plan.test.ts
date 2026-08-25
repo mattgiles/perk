@@ -1549,6 +1549,47 @@ test("approvalSave: reviewedPlan fallback saves while read-only → gate exited"
   });
 });
 
+test("approvalSave: an identity-less save omits --run-id; the save and linkage still land", async () => {
+  // The real composition (planSaveDepsFor → coldDoorPlanBackend → the actual argv assembly)
+  // over a branch with NO run_id: the identity-less arm must stay legal end to end — the argv
+  // omits `--run-id` entirely (never `--run-id null`), the save succeeds, and the branch-backed
+  // `active_plan_ref` linkage still appends (workflow-state ops are identity-independent).
+  await withNoLlm(async () => {
+    const cwd = mkdtempSync(join(tmpdir(), "approval-save-test-"));
+    try {
+      const branch: unknown[] = [];
+      const argvs: string[][] = [];
+      const pi = fakeApprovalPi(branch, { stdout: PLAN_JSON, argvs });
+      const ctx = reportableCtx(cwd, branch) as unknown as ExtensionContext;
+      const gating = fakeGating(true);
+      const outcome = await approvalSave(pi, ctx, gating, { reviewedPlan: "# Reviewed plan" });
+      assert.equal(outcome.status, "saved");
+      const argv = argvs[0] ?? [];
+      assert.deepEqual(argv.slice(0, 3), ["plan", "save", "--json"]);
+      assert.equal(argv.includes("--run-id"), false, "the identity-less argv omits --run-id");
+      assert.equal(argv.includes("null"), false, "no stringified null rides the argv");
+      const linked = rebuildWorkflowState(
+        branch as Parameters<typeof rebuildWorkflowState>[0],
+      ).active_plan_ref;
+      assert.deepEqual(
+        linked,
+        {
+          provider: "github",
+          pr_id: "42",
+          url: "https://gh/o/r/issues/42",
+          labels: ["perk:plan"],
+          objective_id: null,
+          base: undefined,
+        },
+        "the identity-less save still links active_plan_ref on the branch",
+      );
+      assert.equal(gating.exits, 1, "the D1a gate exit still fires on the verified save");
+    } finally {
+      rmSync(cwd, { recursive: true, force: true });
+    }
+  });
+});
+
 test("approvalSave: a successful save while already read-write never exits the gate", async () => {
   await withNoLlm(async () => {
     const cwd = mkdtempSync(join(tmpdir(), "approval-save-test-"));

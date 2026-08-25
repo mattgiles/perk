@@ -24,7 +24,6 @@ import {
   hasDirectEditsHeading,
   OBJECTIVE_ADAPTER_PLANNOTATOR_CONTEXT,
   PLAN_ADAPTER_PLANNOTATOR_CONTEXT_TYPE,
-  PLANNOTATOR_HANDSHAKE_TIMEOUT_MS,
   type PlannotatorBus,
   requestPlannotatorPlanReview,
 } from "./plannotator.ts";
@@ -605,37 +604,99 @@ test("bridge: malformed decision payloads are ignored; a later well-formed decis
   assert.deepEqual(outcome, { status: "completed", approved: true, reviewId: "rev-m" });
 });
 
-test("bridge: a non-boolean approved narrows to false; blank feedback is dropped", async () => {
+test("bridge: a malformed approved field never completes the review — the wait stays pending", async () => {
+  // The narrowing contract: a decision is a human verdict, so a matching reviewId with a
+  // missing / non-boolean / adversarial-getter `approved` is a MALFORMED payload — ignored
+  // (never coerced into a premature DENY); a later well-formed decision still completes.
   const bus = fakeBus();
   bus.on("plannotator:request", (data) => {
     (data as RequestEnvelope).respond({
       status: "handled",
       result: { status: "pending", reviewId: "rev-n" },
     });
-    setTimeout(() => {
-      bus.emit("plannotator:review-result", {
-        reviewId: "rev-n",
-        approved: "yes",
-        feedback: "   ",
-      });
-    }, 10);
   });
-  const outcome = await createPlannotatorBridge(bus).review("# A plan");
-  assert.deepEqual(outcome, { status: "completed", approved: false, reviewId: "rev-n" });
+  const bridge = createPlannotatorBridge(bus);
+  const pending = bridge.review("# A plan");
+  let settled = false;
+  void pending.then(() => {
+    settled = true;
+  });
+  await new Promise((resolve) => setTimeout(resolve, 5));
+  bus.emit("plannotator:review-result", { reviewId: "rev-n" }); // approved missing
+  bus.emit("plannotator:review-result", { reviewId: "rev-n", approved: "yes" }); // non-boolean
+  bus.emit("plannotator:review-result", { reviewId: "rev-n", approved: 1 }); // non-boolean
+  bus.emit(
+    "plannotator:review-result",
+    Object.defineProperty({ reviewId: "rev-n" }, "approved", {
+      get() {
+        throw new Error("adversarial approved getter");
+      },
+      enumerable: true,
+    }),
+  );
+  await new Promise((resolve) => setTimeout(resolve, 5));
+  assert.equal(settled, false, "malformed decisions are ignored — the review stays pending");
+  assert.equal(
+    (bus.handlers.get("plannotator:review-result") ?? []).length,
+    1,
+    "the per-review listener is still live after the malformed payloads",
+  );
+  bus.emit("plannotator:review-result", { reviewId: "rev-n", approved: true, feedback: "   " });
+  const outcome = await pending;
+  // Blank feedback is still dropped on the well-formed decision.
+  assert.deepEqual(outcome, { status: "completed", approved: true, reviewId: "rev-n" });
 });
 
-test("bridge: a synchronous emit throw is contained as unavailable (timer cleaned up)", async () => {
+test("bridge: a synchronous emit throw is contained as unavailable (timer actually cancelled)", async (t) => {
+  // Deterministic timer observation: record every setTimeout handle the bridge allocates and
+  // every clearTimeout it issues — deleting the emit-throw arm's `clearTimeout` fails HERE
+  // (an elapsed-time bound cannot see a still-scheduled 5s timer).
+  const setSpy = t.mock.method(globalThis, "setTimeout");
+  const clearSpy = t.mock.method(globalThis, "clearTimeout");
   const bus = fakeBus();
   bus.on("plannotator:request", () => {
     throw new Error("foreign handler exploded");
   });
-  const before = Date.now();
   const outcome = await createPlannotatorBridge(bus).review("# A plan");
   assert.equal(outcome.status, "unavailable");
   assert.match((outcome as { warning: string }).warning, /foreign handler exploded/);
-  // Deterministic containment: the unavailable arm resolves immediately (never parked on the
-  // 5s handshake timer — the cleared-timer proof without reaching into Node internals).
-  assert.ok(Date.now() - before < PLANNOTATOR_HANDSHAKE_TIMEOUT_MS / 2);
+  const allocated = setSpy.mock.calls.map((c) => c.result);
+  assert.equal(allocated.length, 1, "the bridge allocated exactly the handshake timer");
+  const clearedHandles = clearSpy.mock.calls.map((c) => c.arguments[0]);
+  assert.ok(
+    clearedHandles.includes(allocated[0]),
+    "the handshake timer was cancelled on the emit-throw arm",
+  );
+});
+
+test("bridge: a turn abort DURING the handshake wait settles aborted promptly (timer cancelled)", async (t) => {
+  // The pending handshake is connected to cancellation: plannotator never invokes `respond`,
+  // the turn aborts, and the bridge settles `aborted` immediately — never parked on the
+  // handshake timeout — with the timer deterministically cancelled and the abort listener
+  // removed (observed via the signal's listener effect: a second abort is inert).
+  const setSpy = t.mock.method(globalThis, "setTimeout");
+  const clearSpy = t.mock.method(globalThis, "clearTimeout");
+  const bus = fakeBus();
+  let sawRequest = false;
+  bus.on("plannotator:request", () => {
+    sawRequest = true; // never responds — the handshake stays pending
+  });
+  const controller = new AbortController();
+  const pending = createPlannotatorBridge(bus).review("# A plan", controller.signal);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(sawRequest, true, "the request was emitted before the abort");
+  controller.abort();
+  const outcome = await pending;
+  assert.deepEqual(outcome, { status: "aborted" });
+  const bridgeTimer = setSpy.mock.calls
+    .map((c) => c.result)
+    .find((handle) => !clearSpy.mock.calls.some((c) => c.arguments[0] === handle));
+  assert.equal(bridgeTimer, undefined, "every allocated timer was cancelled on the abort path");
+  assert.equal(
+    (bus.handlers.get("plannotator:review-result") ?? []).length,
+    0,
+    "no decision listener was ever registered on the aborted-handshake path",
+  );
 });
 
 // ------------------------------------------- the per-review result-listener lifecycle

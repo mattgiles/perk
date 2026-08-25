@@ -188,35 +188,70 @@ export interface EntrySink {
 export function appendWorkflowState<K extends keyof WorkflowState>(
   sink: EntrySink,
   source: BranchSource & ReportTarget,
-  opts: {
-    /** The entry payload — may carry extra fields beyond the verified one (the claim record). */
-    data: WorkflowState;
-    /** The field verified on read-back. */
-    field: K;
-    /** The value the rebuilt field must equal. */
-    expected: WorkflowState[K];
-    /** report() scope, e.g. "plan-save", "workflow-state linkage error". */
-    scope: string;
-    /** The mismatch message (byte-preserved per site). */
-    failure: string;
-    /** Comparator; default: (a, b) => Object.is(a ?? null, b ?? null). */
-    equals?: (rebuilt: WorkflowState[K] | undefined, expected: WorkflowState[K]) => boolean;
-  },
+  opts: AppendWorkflowStateOpts<K>,
 ): boolean {
+  return appendWorkflowStateClassified(sink, source, opts).status === "applied";
+}
+
+/** The strict-append options (shared by the boolean and classified entry points). */
+export interface AppendWorkflowStateOpts<K extends keyof WorkflowState> {
+  /** The entry payload — may carry extra fields beyond the verified one (the claim record). */
+  data: WorkflowState;
+  /** The field verified on read-back. */
+  field: K;
+  /** The value the rebuilt field must equal. */
+  expected: WorkflowState[K];
+  /** report() scope, e.g. "plan-save", "workflow-state linkage error". */
+  scope: string;
+  /** The mismatch message (byte-preserved per site). */
+  failure: string;
+  /** Comparator; default: (a, b) => Object.is(a ?? null, b ?? null). */
+  equals?: (rebuilt: WorkflowState[K] | undefined, expected: WorkflowState[K]) => boolean;
+}
+
+/**
+ * The classified strict-append outcome. `rejected` is PROVEN refusal-before-effect: the append
+ * threw AND the rebuilt field is still not the expected value, so no entry landed. `unverified`
+ * means an effect may have landed unproven — the append returned but the read-back missed, or
+ * the post-throw rebuild itself failed.
+ */
+export type ClassifiedAppend =
+  | { status: "applied" }
+  | { status: "rejected"; problem: string }
+  | { status: "unverified"; problem: string };
+
+/**
+ * The classified sibling of `appendWorkflowState` (same report discipline — every failure arm
+ * reports loudly before returning). The extra classification work happens only on failure
+ * paths: a throwing `appendEntry` is re-checked against the rebuilt branch — a field still not
+ * equal to `expected` proves the entry never landed (`rejected`, the refusal-before-effect arm
+ * the session seam surfaces); a field that DOES equal `expected` landed despite the throw (the
+ * read-back is the proof authority — `applied`); a rebuild failure stays honest (`unverified`).
+ */
+export function appendWorkflowStateClassified<K extends keyof WorkflowState>(
+  sink: EntrySink,
+  source: BranchSource & ReportTarget,
+  opts: AppendWorkflowStateOpts<K>,
+): ClassifiedAppend {
   const equals =
     opts.equals ??
     ((a: WorkflowState[K] | undefined, b: WorkflowState[K]) => Object.is(a ?? null, b ?? null));
   try {
     sink.appendEntry(WORKFLOW_STATE_TYPE, opts.data);
     const rebuilt = rebuildWorkflowState(branchOf(source))[opts.field];
-    if (equals(rebuilt, opts.expected)) return true;
+    if (equals(rebuilt, opts.expected)) return { status: "applied" };
     report(source, opts.scope, "error", opts.failure, { alsoLog: true });
-    return false;
+    return { status: "unverified", problem: opts.failure };
   } catch (error) {
-    report(source, opts.scope, "error", `${String(opts.field)} append threw — ${String(error)}`, {
-      alsoLog: true,
-    });
-    return false;
+    const problem = `${String(opts.field)} append threw — ${String(error)}`;
+    report(source, opts.scope, "error", problem, { alsoLog: true });
+    try {
+      const rebuilt = rebuildWorkflowState(branchOf(source))[opts.field];
+      if (equals(rebuilt, opts.expected)) return { status: "applied" };
+      return { status: "rejected", problem };
+    } catch {
+      return { status: "unverified", problem };
+    }
   }
 }
 

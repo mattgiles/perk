@@ -133,11 +133,15 @@ export interface PerkSession {
     args?: string,
   ): Promise<{ newSessionCalls: { parentSession?: string }[]; seeded: string[] }>;
   /** Invoke a registered tool's `execute` directly with a synthesized ctx. `opts.onUpdate`
-   * captures streamed partial results (pi's `onUpdate` channel). */
+   * captures streamed partial results (pi's `onUpdate` channel); `opts.ui` overlays scripted
+   * dialog answers (select/input/editor) on the recording UI — the recording surfaces stay. */
   invokeTool(
     name: string,
     params: unknown,
-    opts?: { onUpdate?: (partial: { content: { text?: string }[]; details: unknown }) => void },
+    opts?: {
+      onUpdate?: (partial: { content: { text?: string }[]; details: unknown }) => void;
+      ui?: Record<string, unknown>;
+    },
   ): Promise<{ content: { text?: string }[]; details: unknown; terminate?: boolean }>;
   /** Fire a `tool_call` event through the runner; returns the gating verdict (block/reason). */
   emitToolCall(
@@ -727,6 +731,7 @@ export async function loadPerkSession(opts: {
       params: unknown,
       toolOpts?: {
         onUpdate?: (partial: { content: { text?: string }[]; details: unknown }) => void;
+        ui?: Record<string, unknown>;
       },
     ) {
       const tool = session.extensionRunner
@@ -737,7 +742,10 @@ export async function loadPerkSession(opts: {
         cwd,
         hasUI: headful,
         mode: (opts.mode ?? "print") as ExtensionMode,
-        ui: headfulUIContext(notifies),
+        ui: {
+          ...(headfulUIContext(notifies) as unknown as Record<string, unknown>),
+          ...(toolOpts?.ui ?? {}),
+        },
         sessionManager: session.sessionManager,
         signal: undefined,
         isIdle: () => true,

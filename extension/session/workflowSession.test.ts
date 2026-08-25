@@ -44,8 +44,8 @@ interface SessionHarness {
   inducePointerAppendFailure(): void;
   /** Make the NEXT apply fail its read-back proof (unverified). */
   induceApplyVerificationFailure(): void;
-  /** Make the NEXT apply refuse before any effect (rejected) — null when unreachable. */
-  induceApplyRefusal: (() => void) | null;
+  /** Make the NEXT apply refuse before any effect (rejected). */
+  induceApplyRefusal(): void;
   /** After a successful write of `name`: make its stored bytes mismatch the pointer (invalid). */
   corrupt(name: string): void;
   /** After a successful write of `name`: drop its stored bytes, keep the pointer (invalid). */
@@ -116,8 +116,13 @@ function branchBacking(): Backing {
         branch.push(stateEntry({ active_plan_ref: opts.activePlanRef }));
       }
       let dropAppends = false;
+      let throwNextAppend = false;
       const sink: EntrySink = {
         appendEntry: (customType, data) => {
+          if (throwNextAppend) {
+            throwNextAppend = false;
+            throw new Error("append refused (induced)");
+          }
           if (dropAppends) {
             dropAppends = false;
             return;
@@ -143,9 +148,11 @@ function branchBacking(): Backing {
         induceApplyVerificationFailure() {
           dropAppends = true;
         },
-        // Unreachable on the branch backing: appendWorkflowState folds every failure into its
-        // loud false, so the honest classification is always `unverified`.
-        induceApplyRefusal: null,
+        // A throwing append whose rebuilt field never changed is the PROVEN
+        // refusal-before-effect — the classified strict-append maps it to `rejected`.
+        induceApplyRefusal() {
+          throwNextAppend = true;
+        },
         corrupt(name) {
           writeFileSync(join(sessionDataDir(cwd, runId ?? ""), name), "rewound bytes", "utf8");
         },
@@ -452,20 +459,15 @@ for (const backing of [branchBacking(), memoryBacking()]) {
     }
   });
 
-  test(`${backing.label}: apply — a refusal before any effect classifies rejected (where reachable)`, () => {
+  test(`${backing.label}: apply — a refusal before any effect classifies rejected`, () => {
     const h = backing.harness("RID", { nodeClaim: CLAIM });
     try {
-      if (h.induceApplyRefusal === null) {
-        // The branch backing folds every append failure into the honest `unverified` tier —
-        // rejected is unreachable there by construction (documented, not papered over).
-        return;
-      }
       h.induceApplyRefusal();
-      const linked = h.session.apply({ kind: "link-plan-ref", ref: planRef("42") });
+      const linked = quietly(() => h.session.apply({ kind: "link-plan-ref", ref: planRef("42") }));
       assert.equal(linked.status, "rejected");
       assert.equal(h.linkedPlanRef(), null, "a rejected apply lands nothing");
-      if (h.induceApplyRefusal !== null) h.induceApplyRefusal();
-      const cleared = h.session.apply({ kind: "clear-node-claim", claim: CLAIM });
+      h.induceApplyRefusal();
+      const cleared = quietly(() => h.session.apply({ kind: "clear-node-claim", claim: CLAIM }));
       assert.equal(cleared.status, "rejected");
       assert.deepEqual(h.session.nodeClaim(), CLAIM, "a rejected clear preserves the claim");
     } finally {

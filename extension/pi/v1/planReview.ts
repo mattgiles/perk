@@ -63,17 +63,22 @@ import {
   type ReviewPlanDraftResult,
   reviewPlanDraft,
 } from "../../authoring/plan/review.ts";
-import type { PlanApprovalSaveDeps, SavePlanOutcome } from "../../authoring/plan/save.ts";
-import { resolvePlanSource } from "../../authoring/plan/source.ts";
+import type {
+  ObjectiveNodeLink,
+  PlanApprovalSaveDeps,
+  SavePlanOutcome,
+} from "../../authoring/plan/save.ts";
+import { type PlanSource, resolvePlanSource } from "../../authoring/plan/source.ts";
 import { OBJECTIVE_AUTHOR_STAGE } from "../../factories/objectiveAuthor.ts";
 import { OBJECTIVE_SAVE_STAGE } from "../../factories/objectiveSave.ts";
 import { openBranchWorkflowSession } from "../../session/branchWorkflowSession.ts";
 import type { WorkflowSession } from "../../session/workflowSession.ts";
 import { bindingSuffix } from "../../substrate/bindingDelivery.ts";
+import type { PlanRef } from "../../substrate/cache.ts";
 import type { Result } from "../../substrate/result.ts";
 import type { ToolGating } from "../../substrate/toolGating.ts";
 import { paramsOf, stringParam } from "../../substrate/toolParams.ts";
-import { branchOf, readNodeClaim, rebuildWorkflowState } from "../../substrate/workflowState.ts";
+import { branchOf, rebuildWorkflowState } from "../../substrate/workflowState.ts";
 import { report } from "../../surfaces/report.ts";
 import { runGistReviewV1 } from "./gist.ts";
 import { executeObjectiveReview } from "./objectiveReview.ts";
@@ -99,6 +104,26 @@ export interface PlanReviewBridge {
   review(plan: string, signal?: AbortSignal): Promise<ReviewOutcome>;
 }
 
+/** The warm-door ok-arm fields — the `details` surface doubles as branch-safe persisted state. */
+export interface PlanSaveOk {
+  /** `issue.id` is the opaque string issue id (GitHub "42", Linear "ENG-123") — §8.21. */
+  issue: { id: string; url: string };
+  plan_ref: PlanRef;
+  cached: boolean;
+  existed: boolean | null;
+  updated: boolean;
+  objective_node: ObjectiveNodeLink | null;
+  plan_source: PlanSource | null;
+}
+
+/**
+ * The rendered save result every plan-save surface returns (AgentToolResult has no `isError`;
+ * failure is signaled via `details.ok`). Declared HERE with the `renderSave` port it types (the
+ * concrete shape must stay visible through `approvalSave` — callers narrow `details.ok` and read
+ * `objective_node` WITHOUT assertions); the one production renderer lives in `plan.ts`.
+ */
+export type SaveResult = Result<PlanSaveOk>;
+
 /**
  * The injected production dependency bag (built by `plan.ts`'s `planSaveDepsFor` — the ONE
  * composition point; declared HERE so `plan.ts` imports the port and the graph stays acyclic):
@@ -107,7 +132,7 @@ export interface PlanReviewBridge {
  */
 export interface PlanReviewV1Deps extends PlanApprovalSaveDeps {
   /** Render a feature `SavePlanOutcome` as the warm-door SaveResult (byte-stable messages). */
-  renderSave(save: SavePlanOutcome): Result<object>;
+  renderSave(save: SavePlanOutcome): SaveResult;
 }
 
 // ---------------------------------------------------------------------- plan-flavor mappers
@@ -128,7 +153,7 @@ export function reviewOutcomeResult(outcome: ReviewOutcome): ToolResult {
  */
 export type ApprovalSaveOutcome =
   | { status: "no-plan" }
-  | { status: "saved" | "save-failed"; result: Result<object>; gateExited: boolean };
+  | { status: "saved" | "save-failed"; result: SaveResult; gateExited: boolean };
 
 /**
  * Map an APPROVED review outcome + the `approvalSave` outcome into the model-facing tool result
@@ -243,7 +268,9 @@ export async function runImplementHereCommand(
   ctx: ExtensionContext,
   gating: ToolGating,
 ): Promise<void> {
-  if (readNodeClaim(ctx) !== null) {
+  // The claim read rides the session seam (the one workflow-state owner) — the command has no
+  // injected deps bag, so it opens the branch-backed session the production composition uses.
+  if (openBranchWorkflowSession(pi, ctx).nodeClaim() !== null) {
     report(
       ctx,
       "implement-here",
@@ -517,7 +544,9 @@ export async function runPlanReviewV1(
   );
   if (src === null) return noPlanResult();
   const sig = signal ?? ctx.signal;
-  const nodeClaimed = readNodeClaim(ctx) !== null;
+  // The claim read rides the injected session (the seam owns workflow-state reads — another
+  // backing must never disagree with a raw branch read here).
+  const nodeClaimed = deps.session.nodeClaim() !== null;
   // 3. Backend dispatch: plannotator-selected → the event-bus bridge; ANY other selection
   //    (perk-plan, tombell, unknown ids) → the first-party in-TUI editor review.
   let reviewer: PlanDraftReviewer;

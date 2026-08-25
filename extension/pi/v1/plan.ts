@@ -52,11 +52,7 @@ import {
   type SavePlanOutcome,
   savePlan,
 } from "../../authoring/plan/save.ts";
-import {
-  extractPlanMarkdown,
-  type PlanSource,
-  resolvePlanSource,
-} from "../../authoring/plan/source.ts";
+import { extractPlanMarkdown, resolvePlanSource } from "../../authoring/plan/source.ts";
 import { OBJECTIVE_AUTHOR_STAGE } from "../../factories/objectiveAuthor.ts";
 import { openBranchWorkflowSession } from "../../session/branchWorkflowSession.ts";
 import type { PlanRef } from "../../substrate/cache.ts";
@@ -73,7 +69,7 @@ import { loadPerkConfig } from "../../substrate/config.ts";
 // Re-resolved here (not imported from providers/selection.ts) would drift — import the probe
 // and compare against the provider registry ids at install time.
 import { PERK_PLAN_PROVIDER_ID, PLANNOTATOR_PLAN_PROVIDER_ID } from "../../substrate/providers.ts";
-import { failFor, ok, type Result } from "../../substrate/result.ts";
+import { failFor, ok } from "../../substrate/result.ts";
 import { captureSessionPointer } from "../../substrate/sessionPointers.ts";
 import type { ToolGating } from "../../substrate/toolGating.ts";
 import { idArrayParam, paramsOf, stringParam } from "../../substrate/toolParams.ts";
@@ -92,6 +88,7 @@ import {
   executePlanReview,
   type PlanReviewV1Deps,
   runImplementHereCommand,
+  type SaveResult,
 } from "./planReview.ts";
 import { generatePlanTitle } from "./planTitle.ts";
 import { createPlannotatorBridge } from "./providers/plannotator.ts";
@@ -151,21 +148,6 @@ export function decodePlanSaveParams(params: unknown): PlanSaveParams | null {
 }
 
 // -------------------------------------------------------------- the cold-door backend adapter
-
-/** The ok-arm fields — the `details` surface doubles as branch-safe persisted state. */
-export interface PlanSaveOk {
-  /** `issue.id` is the opaque string issue id (GitHub "42", Linear "ENG-123") — §8.21. */
-  issue: { id: string; url: string };
-  plan_ref: PlanRef;
-  cached: boolean;
-  existed: boolean | null;
-  updated: boolean;
-  objective_node: ObjectiveNodeLink | null;
-  plan_source: PlanSource | null;
-}
-
-/** A tool result patch (AgentToolResult has no `isError`; failure is signaled via details.ok). */
-export type SaveResult = Result<PlanSaveOk>;
 
 /**
  * The decoded `perk plan save --json` payload slice the warm door consumes. Decode policy
@@ -632,7 +614,9 @@ export function installPlanBindings(pi: ExtensionAPI, gating: ToolGating, wave?:
       // saved) — but it MUST surface (the silent-partial-failure fix), in headless runs too.
       const result = outcome.result;
       const message = result.content[0]?.text ?? "plan-save done";
-      const details = result.details as SaveResult["details"];
+      // `SaveResult` flows through `approvalSave` concretely — `details.ok` narrows the union,
+      // so the node-link severity read is typed (no assertion).
+      const details = result.details;
       const severity: Severity = !details.ok
         ? "error"
         : details.objective_node?.linked === false

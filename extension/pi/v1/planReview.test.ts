@@ -17,6 +17,7 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 import { SessionManager } from "@earendil-works/pi-coding-agent";
 import { GIST_DRAFT_ARTIFACT } from "../../authoring/gist/draft.ts";
 import { PLAN_DRAFT_ARTIFACT } from "../../authoring/plan/draft.ts";
+import { PLANNOTATOR_REVIEW_COMMAND } from "../../doors/plannotatorHandoff.ts";
 import { OBJECTIVE_DRAFT_ARTIFACT } from "../../factories/objectiveDraft.ts";
 import {
   readSessionArtifact,
@@ -1679,4 +1680,84 @@ test("installPlanBindings: the injected wave deps thread through the registered 
   assert.deepEqual(wave.planCalls, [{ draft: CHOOSER_DRAFT }], "the registered wave deps ran");
   assert.equal(result?.details.status, "wave_launched");
   assert.equal(result?.content[0]?.text, "PLAN WAVE GUIDANCE", "the opener's guidance returned");
+});
+
+test("index.ts composition: the REAL root wiring reaches wave_launched through plan_review", async () => {
+  // The end-to-end pin the direct-injection tests above cannot give: the harness loads the REAL
+  // extension root (index.ts), so the wave deps observed here are the ones index.ts composes —
+  // deleting `installPlanBindings`'s third argument at the root turns this into the plain
+  // plannotator review (no chooser, no wave_launched) and fails these asserts. The fake
+  // plannotator extension supplies presence (the `plannotator-review` command), completes the
+  // handshake, and immediately DENIES — so the REAL `openPlanReviewSurface` open core runs —
+  // port pick included — and every background task (decision routing, readiness observer)
+  // settles on its silent arm without a browser or a server.
+  const cwd = scaffoldRepo();
+  selectPlanProvider(cwd, "plannotator-plan");
+  const selects: { title: string; options: string[] }[] = [];
+  const h = await loadPerkSession({
+    cwd,
+    env: { PERK_RUN_ID: undefined },
+    sessionManager: SessionManager.inMemory(cwd),
+    extraExtensions: [
+      (pi) => {
+        pi.registerCommand(PLANNOTATOR_REVIEW_COMMAND, {
+          description: "fake plannotator (presence probe target)",
+          handler: async () => {},
+        });
+        pi.events.on("plannotator:request", (data) => {
+          const req = data as { respond?: (r: unknown) => void };
+          req.respond?.({ status: "handled", result: { status: "pending", reviewId: "rev-root" } });
+          setTimeout(() => {
+            pi.events.emit("plannotator:review-result", {
+              reviewId: "rev-root",
+              approved: false,
+              feedback: "root-pin deny",
+            });
+          }, 0);
+        });
+      },
+    ],
+  });
+  try {
+    // The draft artifact is the wave-eligibility requirement (drafts-only chooser).
+    const written = await h.invokeTool("plan_draft", { plan: "# The composed plan\n" });
+    assert.equal((written.details as { ok?: boolean }).ok, true, "the draft landed");
+    const result = await h.invokeTool(
+      "plan_review",
+      {},
+      {
+        ui: {
+          select: async (title: string, options: string[]) => {
+            selects.push({ title, options });
+            return options.find((o) => /reviewer wave/.test(o));
+          },
+          input: async () => undefined,
+        },
+      },
+    );
+    assert.equal(selects.length, 1, "the launch chooser appeared (wave deps present at the root)");
+    assert.ok(
+      selects[0]?.options.some((o) => /reviewer wave/.test(o)),
+      "the chooser offered the wave flavor",
+    );
+    const details = result.details as { ok?: boolean; status?: string };
+    assert.equal(details.status, "wave_launched", "the root-composed wave deps launched");
+    assert.equal(details.ok, true);
+    assert.match(
+      String(result.content[0]?.text),
+      /review/i,
+      "the door's real guidance text returned through the tool",
+    );
+    // The real door's background decision task routes the deny — wait for its info report so no
+    // task touches the disposed session after the test ends.
+    for (let i = 0; i < 40 && !h.notifies.some((n) => /DENIED/.test(n)); i++) {
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    }
+    assert.ok(
+      h.notifies.some((n) => /DENIED/.test(n)),
+      "the browser decision routed through the real door's background task",
+    );
+  } finally {
+    h.dispose();
+  }
 });

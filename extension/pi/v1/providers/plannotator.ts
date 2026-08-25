@@ -169,7 +169,9 @@ function parseHandshakeResponse(response: unknown): HandshakeResponse {
 /**
  * Narrow a foreign `plannotator:review-result` payload to the load-bearing decision fields —
  * contained: an adversarial getter/malformed shape degrades to `null` (ignored, the wait
- * continues), never a throw.
+ * continues), never a throw. `approved` must be an actual boolean: a decision is a human
+ * verdict, so a missing/mistyped approval field makes the whole payload malformed (ignored) —
+ * it must never coerce into a DENY that completes a live review.
  */
 function parseReviewDecision(
   data: unknown,
@@ -179,10 +181,12 @@ function parseReviewDecision(
     const record = data as Record<string, unknown>;
     const reviewId = record.reviewId;
     if (typeof reviewId !== "string") return null;
+    const approved = record.approved;
+    if (typeof approved !== "boolean") return null;
     const feedback = record.feedback;
     return {
       reviewId,
-      approved: record.approved === true,
+      approved,
       ...(typeof feedback === "string" && feedback.trim() ? { feedback } : {}),
     };
   } catch {
@@ -198,7 +202,8 @@ function parseReviewDecision(
  * and disposed via the unsubscribe `bus.on` returns when the decision arrives or the turn
  * aborts. Pure over the bus → unit-testable offline with a fake plannotator listener. Fail-open
  * end to end: a synchronous `emit` throw (a throwing foreign handler) is contained with the
- * handshake timer cleared, and malformed payloads degrade per the parsers above.
+ * handshake timer + abort listener cleared, a turn abort settles the PENDING handshake promptly
+ * (never parked on the timeout), and malformed payloads degrade per the parsers above.
  */
 export async function requestPlannotatorPlanReview(
   bus: PlannotatorBus,
@@ -208,12 +213,21 @@ export async function requestPlannotatorPlanReview(
   if (signal?.aborted) return { status: "aborted" };
 
   // 1. Emit the request and await the immediate `respond` handshake (bounded — fail-open).
+  //    Every handshake exit — respond, timeout, emit throw, turn abort — clears the timer and
+  //    the abort listener deterministically (the promise's first settle wins; later respond
+  //    calls are inert).
   const requestId = randomUUID();
-  let respondResolve: (response: HandshakeResponse) => void = () => {};
-  const handshake = new Promise<HandshakeResponse | "timeout">((resolve) => {
+  let respondResolve: (response: HandshakeResponse | "timeout" | "aborted") => void = () => {};
+  const handshake = new Promise<HandshakeResponse | "timeout" | "aborted">((resolve) => {
     respondResolve = resolve;
   });
-  const timer = setTimeout(() => respondResolve("timeout" as never), handshakeTimeoutMs());
+  const timer = setTimeout(() => respondResolve("timeout"), handshakeTimeoutMs());
+  const onHandshakeAbort = (): void => respondResolve("aborted");
+  signal?.addEventListener("abort", onHandshakeAbort, { once: true });
+  const settleHandshake = (): void => {
+    clearTimeout(timer);
+    signal?.removeEventListener("abort", onHandshakeAbort);
+  };
   try {
     bus.emit("plannotator:request", {
       requestId,
@@ -222,17 +236,18 @@ export async function requestPlannotatorPlanReview(
       respond: (response: unknown) => respondResolve(parseHandshakeResponse(response)),
     });
   } catch (error) {
-    // A synchronous throw from a foreign handler must not leak the handshake timer or reject a
-    // fail-open path — contain it as the unavailable arm.
-    clearTimeout(timer);
+    // A synchronous throw from a foreign handler must not leak the handshake timer/abort
+    // listener or reject a fail-open path — contain it as the unavailable arm.
+    settleHandshake();
     return {
       status: "unavailable",
       warning: `plannotator review request failed: ${String(error)}`,
     };
   }
   const response = await handshake;
-  clearTimeout(timer);
+  settleHandshake();
 
+  if (response === "aborted") return { status: "aborted" };
   if (response === "timeout") {
     return {
       status: "unavailable",
@@ -254,8 +269,9 @@ export async function requestPlannotatorPlanReview(
     };
   }
 
-  // A turn aborted DURING the handshake wait must not wedge: `addEventListener("abort", …)` on
-  // an already-aborted signal never fires, so re-check before registering the decision wait.
+  // Belt for the unlistened gap between the handshake settling and the decision wait
+  // registering: `addEventListener("abort", …)` on an already-aborted signal never fires, so
+  // re-check before registering the decision listener.
   if (signal?.aborted) return { status: "aborted" };
 
   // 2. Await the human decision (no timeout — the reviewer takes as long as they take), but
