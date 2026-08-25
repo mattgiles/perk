@@ -1,1 +1,1 @@
-This file validates the Phase-3 worker gate.
+This file exercises the Phase-3 worker gate.
