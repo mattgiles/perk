@@ -110,6 +110,33 @@ test("tool: objective_save delegates, links active_objective + seeds budget mark
   }
 });
 
+test("tool: a same-id re-save does NOT re-append the budget activation marker", async () => {
+  // The seam's `unchanged` linkage IS the historical `linked !== objectiveId` guard: when the
+  // live active_objective already equals the saved id, no fresh activation marker may land
+  // (a re-append would silently reset the budget window to "now").
+  const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
+  const bin = fakePerk(cwd, { stdout: CREATE_JSON });
+  const h = await loadPerkSession({ cwd, env: { PERK_RUN_ID: "01RID", PERK_BIN: bin } });
+  try {
+    const first = await h.invokeTool("objective_save", {
+      prose: PROSE,
+      roadmap: [{ id: "1.1", description: "first" }],
+    });
+    assert.equal((first.details as { ok: boolean }).ok, true);
+    const second = await h.invokeTool("objective_save", {
+      prose: PROSE,
+      roadmap: [{ id: "1.1", description: "first" }],
+    });
+    assert.equal((second.details as { ok: boolean }).ok, true);
+    assert.equal(h.workflowState().active_objective, "7");
+    const entries = h.session.sessionManager.getEntries() as unknown as BudgetEntry[];
+    const markers = entries.filter((e) => e.customType === OBJECTIVE_BUDGET_TYPE);
+    assert.equal(markers.length, 1, "the re-save must not seed a second activation marker");
+  } finally {
+    h.dispose();
+  }
+});
+
 test("tool: objective_save passes the structured roadmap as --roadmap <json>", async () => {
   const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
   const argvFile = `${cwd}/argv.txt`;

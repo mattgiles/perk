@@ -656,3 +656,39 @@ test("branch: a reload-shaped reopen reconstructs runId, claims, and activeObjec
     rmSync(cwd, { recursive: true, force: true });
   }
 });
+
+test("branch: a record-node-claim read-back miss reports LOUDLY under the objective-plan scope", () => {
+  // The seam owns the append's report scope (the caller passes none): a headless read-back
+  // miss must surface as `perk: objective-plan — …` on stderr — not stay quiet, and not
+  // drift to another scope. Captured (not silenced) so the exact line is pinned.
+  const cwd = mkdtempSync(join(tmpdir(), "workflow-session-scope-"));
+  try {
+    const branch: unknown[] = [stateEntry({ run_id: "RID" })];
+    let dropAppends = false;
+    const sink: EntrySink = {
+      appendEntry: (customType, data) => {
+        if (dropAppends) return; // dropped on the floor — the read-back proof misses
+        branch.push({ type: "custom", customType, data });
+      },
+    };
+    const session = openBranchWorkflowSession(sink, reportableCtx(cwd, branch));
+    const lines: string[] = [];
+    const original = console.error;
+    console.error = (...args: unknown[]) => {
+      lines.push(args.map(String).join(" "));
+    };
+    let result: ReturnType<typeof session.apply>;
+    try {
+      dropAppends = true;
+      result = session.apply({ kind: "record-node-claim", claim: CLAIM });
+    } finally {
+      console.error = original;
+    }
+    assert.equal(result.status, "unverified");
+    assert.deepEqual(lines, [
+      "perk: objective-plan — objective_node_claim read-back failed for #7 node 1.1",
+    ]);
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});

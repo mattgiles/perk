@@ -226,7 +226,8 @@ for structured data, delegate to the Python cold door, link the session, termina
 Once `plan` and `objective-author` both run read-only, the interior must know *which* — context
 injection can no longer key off the read-only gate alone. A `stage` field on `perk:workflow-state` is
 persisted at **cold claim** from the handoff blob; `planMode` defers when `stage ===
-"objective-author"` and `objectiveAuthor.ts` injects instead (exactly one authoring context present).
+"objective-author"` and `objectiveAuthoring.ts` injects instead (exactly one authoring context
+present).
 This stage-field disambiguation pattern is detailed in `pi/context-injection.md`.
 
 ### The review-first authoring loop's artifact mechanics

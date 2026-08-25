@@ -110,7 +110,7 @@ read-only stages coexist (`plan` vs `objective-author`), the interior must know 
 gate alone is ambiguous. The fix: a `stage` field on `perk:workflow-state`, persisted at **cold
 claim** from the handoff blob (the handoff already carried `stage` for plan-ref reconciliation, but
 it was never written into workflow-state). Then context injection keys on `(gate AND stage)`:
-`planMode` defers when `stage === "objective-author"` and `objectiveAuthor.ts` injects instead —
+`planMode` defers when `stage === "objective-author"` and `objectiveAuthoring.ts` injects instead —
 exactly one authoring context present.
 
 **Pattern:** when stages share a `mode`, persist the stage id so context injection can be keyed on

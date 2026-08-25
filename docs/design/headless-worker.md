@@ -195,8 +195,8 @@ anchored to real symbols.
   `extension/index.ts` records `ctx.mode ?? null` as `run_mode` and guards the load notify with
   `ctx.hasUI`; every UI call across the extension is `ctx.hasUI`-guarded with a `console.error`
   fallback (verified in `address.ts`, `submit.ts`, `land.ts`, `learn.ts`, `objective.ts`,
-  `checkpoints.ts`, `planMode.ts`, `lifecycleGates.ts`, `objectivePlan.ts`, `objectiveSave.ts`,
-  `learnDocs.ts`, `ready.ts`, `selfcheck.ts`). The session-lifecycle linkage error path is
+  `checkpoints.ts`, `planMode.ts`, `lifecycleGates.ts`, `objectivePlanning.ts`,
+  `objectiveAuthoring.ts`, `learnDocs.ts`, `ready.ts`, `selfcheck.ts`). The session-lifecycle linkage error path is
   explicitly headless-safe (`extension/index.ts` `reportError`; test `sessionLifecycle.test.ts` "a
   missing handoff is reported, not thrown"). The CI executor **fails closed headless**
   (`decideCiScope` → `"refuse"` when `!hasUI && !flag`).

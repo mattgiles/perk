@@ -3,13 +3,15 @@
 
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { SessionManager } from "@earendil-works/pi-coding-agent";
+import { type ExtensionAPI, SessionManager } from "@earendil-works/pi-coding-agent";
 import type { PlanRef } from "../../substrate/cache.ts";
 import { type BranchEntry, branchOf, type WorkflowState } from "../../substrate/workflowState.ts";
+import { createPerkStatus } from "../../surfaces/surfaces.ts";
 import { loadPerkSession, plantSession, scaffoldRepo } from "../../testing/harness.ts";
 import {
   DEFAULT_COMPACT_THRESHOLD,
   findBudgetMarker,
+  installObjectiveBindings,
   OBJECTIVE_BUDGET_TYPE,
   rebuildBudget,
   shouldCompact,
@@ -165,6 +167,26 @@ test("session_tree rebuild preserves the budget marker", async () => {
   } finally {
     h.dispose();
   }
+});
+
+test("installObjectiveBindings registers all four budget lifecycle hooks", () => {
+  // The budget substrate is hook-driven: status renders on session_start / session_tree /
+  // agent_settled and threshold compaction fires on turn_end. Losing any one silently degrades
+  // the accounting, so the installer's hook set is pinned structurally.
+  const hooked: string[] = [];
+  const pi = {
+    on(event: string) {
+      hooked.push(event);
+    },
+    registerCommand() {},
+  } as unknown as ExtensionAPI;
+  installObjectiveBindings(pi, createPerkStatus());
+  assert.deepEqual([...hooked].sort(), [
+    "agent_settled",
+    "session_start",
+    "session_tree",
+    "turn_end",
+  ]);
 });
 
 // --- registration parity (the baseline-exact metadata pin) ---------------------------------------

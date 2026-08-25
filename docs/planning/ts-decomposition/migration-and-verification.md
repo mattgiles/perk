@@ -439,6 +439,11 @@ the session lifecycle required by each new caller.
 > - **Still no `PromptEvidence` module** (the 2.1 narrow-until-proven rule): context-evidence
 >   coverage (live-copy suppression / post-compaction re-injection / quoting-summary /
 >   reconstructed-context) is realized as inlined marker checks per migrated injection.
+> - **The Phase-4 dogfood gate is PENDING** (not silently omitted): it runs against the stacked
+>   layer after review — a real objective authoring-or-review path driven by the migrated flow,
+>   then a reload + fork of the resulting session — and its evidence record is authored into
+>   `docs/design/archive/ts-decomposition-phase4-dogfood.md` at gate time (the phase-1/2/3
+>   record genre). Phase 5 must not start before that record exists.
 
 Migrate in this order unless refreshed dependency evidence changes the graph:
 

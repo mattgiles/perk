@@ -54,7 +54,7 @@ prose*, so `/plan-save` resolves the validated `plan-draft` artifact → param �
 (`resolvePlanSource`, `planSave.ts`) — the scrape is legitimate because prose can live in one
 assistant message. An *objective's roadmap is structured data* that can never be scraped from a
 message — so `/objective-save` resolves **only** the validated structured `objective_draft`
-artifact (`objectiveApprovalSave`, `objectiveSave.ts`); with no draft present the command
+artifact (`objectiveApprovalSave`, `authoring/objective/save.ts`); with no draft present the command
 performs no write and drives the structured save instead. If a command can neither carry nor
 recover the payload, it must not half-write.
 
@@ -252,8 +252,8 @@ tool) auto-drives `/objective-reconcile` instead of printing a copy-pasteable nu
   what `/objective-reconcile` injects — rather than sending literal `"/objective-reconcile #5"` text.
   Avoids relying on slash-command expansion of an injected message and skips redundant re-resolution
   (the land result already carries `objective.number`). Required exporting the previously
-  module-private `reconcileGuidance` from `objectivePlan.ts` (no circular import: `objectivePlan.ts`
-  does not import `land.ts`).
+  module-private `reconcileGuidance` (now in `authoring/objective/prose.ts` — no circular import:
+  the prose module does not import `land.ts`).
 - **Keep the pure-impl function drive-free.** `landPr` merges / sets-marker / builds text and
   returns; the drive lives in a *separate* exported helper called by both `execute` and the command
   handler — preserving the pure function as directly unit-testable. The drive condition mirrors the
@@ -358,7 +358,7 @@ When converting away from a scrape-based command, **delete the now-dead scrape h
 affordance contradicts "the command never scrapes"; tsc/Biome catch the orphaned import. And when a
 command's behavior flips, the surfaces that *describe* it drift together and must be corrected in the
 same turn: `shared/contracts.md`, the in-session context constant (e.g. `OBJECTIVE_AUTHORING_CONTEXT`
-in `objectiveAuthor.ts`), and the owning `SKILL.md`.
+in `authoring/objective/prose.ts`), and the owning `SKILL.md`.
 
 ## Diagnosis meta-lesson
 
