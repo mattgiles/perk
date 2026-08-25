@@ -17,8 +17,6 @@
 // on the next turn even though the historical entry still sits on the branch.
 
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { hasDirectEditsHeading } from "./providers/plannotator.ts";
-import { isPlannotatorPlanSelected } from "./providers/selection.ts";
 import {
   GIST_AUTHOR_STAGE,
   GIST_DRAFT_ARTIFACT,
@@ -45,16 +43,6 @@ import {
   type SaveGistOutcome,
   saveGist,
 } from "../../authoring/gist/save.ts";
-import {
-  approvedSubjectSaveResult,
-  type ReviewOutcome,
-  type ReviewSubject,
-  runFirstPartyReview,
-  skipResult,
-  subjectReviewOutcomeResult,
-  type ToolResult,
-  verdictsFor,
-} from "./review.ts";
 import { openBranchWorkflowSession } from "../../session/branchWorkflowSession.ts";
 import type { WorkflowSession } from "../../session/workflowSession.ts";
 import { bindingSuffix } from "../../substrate/bindingDelivery.ts";
@@ -79,6 +67,18 @@ import {
   rebuildWorkflowState,
 } from "../../substrate/workflowState.ts";
 import { report, type Severity } from "../../surfaces/report.ts";
+import { hasDirectEditsHeading } from "./providers/plannotator.ts";
+import { isPlannotatorPlanSelected } from "./providers/selection.ts";
+import {
+  approvedSubjectSaveResult,
+  type ReviewOutcome,
+  type ReviewSubject,
+  runFirstPartyReview,
+  skipResult,
+  subjectReviewOutcomeResult,
+  type ToolResult,
+  verdictsFor,
+} from "./review.ts";
 
 // ------------------------------------------------------------------- the tool-boundary decode
 

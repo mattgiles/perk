@@ -371,5 +371,3 @@ test("tool: pr-only with no prior claim writes none", async () => {
     h.dispose();
   }
 });
-
-
