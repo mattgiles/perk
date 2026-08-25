@@ -21,7 +21,7 @@ import { sessionDataDir } from "../../substrate/cache.ts";
 import {
   digestSessionData,
   type SessionDataCtx,
-  writeSessionArtifact,
+  writeSessionArtifactClassified,
 } from "../../substrate/sessionData.ts";
 import type { ToolGating } from "../../substrate/toolGating.ts";
 import { type EntrySink, WORKFLOW_STATE_TYPE } from "../../substrate/workflowState.ts";
@@ -41,6 +41,17 @@ import {
   runGistReviewV1,
 } from "./gist.ts";
 import type { PlanReviewUI, ReviewOutcome } from "./review.ts";
+
+/** The retired production write wrapper, kept as a TEST fixture (plant artifact + pointer). */
+function writeSessionArtifact(
+  sink: Parameters<typeof writeSessionArtifactClassified>[0],
+  ctx: Parameters<typeof writeSessionArtifactClassified>[1],
+  name: string,
+  content: string,
+): string | null {
+  const result = writeSessionArtifactClassified(sink, ctx, name, content);
+  return result.status === "applied" || result.status === "unchanged" ? result.path : null;
+}
 
 const PROSE = "# Faster reviews\n\nWe would likely want review turnaround under a day.\n";
 

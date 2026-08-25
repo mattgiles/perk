@@ -110,7 +110,6 @@ const MECHANISM_EDGE_ALLOWLIST: Array<{ from: string; to: string }> = [];
 // as structure.
 const KNOWN_TOP_LEVEL_DIRS = [
   "doors",
-  "factories",
   "hunkFeedback",
   "substrate",
   "surfaces",
@@ -179,10 +178,6 @@ const LEGACY_REGISTRANTS = [
   "doors/stackReviewBrowser.ts",
   "doors/submit.ts",
   "doors/submitPrReview.ts",
-  "factories/objectiveAuthor.ts",
-  "factories/objectiveDraft.ts",
-  "factories/objectivePlan.ts",
-  "factories/objectiveSave.ts",
   "substrate/agentScratch.ts",
   "substrate/bindingDelivery.ts",
   "substrate/command.ts",
@@ -616,7 +611,7 @@ test("Rule E: Pi registration only in approved adapter/composition files (frozen
   );
   // Positive extraction proof: the scan must SEE the v1 installers' registrations — a token
   // regex that stopped matching real registrations would otherwise pass vacuously.
-  for (const installer of ["pi/v1/gist.ts", "pi/v1/plan.ts"]) {
+  for (const installer of ["pi/v1/gist.ts", "pi/v1/plan.ts", "pi/v1/objectivePlanning.ts"]) {
     assert.ok(
       matched.includes(installer),
       `the registration scan missed ${installer} — the token extraction is broken`,

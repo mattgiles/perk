@@ -22,7 +22,7 @@ import { PLANNOTATOR_REVIEW_COMMAND } from "../../doors/plannotatorHandoff.ts";
 import {
   readSessionArtifact,
   type SessionDataCtx,
-  writeSessionArtifact,
+  writeSessionArtifactClassified,
 } from "../../substrate/sessionData.ts";
 import type { ToolGating } from "../../substrate/toolGating.ts";
 import { type EntrySink, WORKFLOW_STATE_TYPE } from "../../substrate/workflowState.ts";
@@ -38,6 +38,17 @@ import {
   reviewOutcomeResult,
 } from "./planReview.ts";
 import type { PlanReviewUI, ReviewLaunchUI, ReviewOutcome, WaveLaunch } from "./review.ts";
+
+/** The retired production write wrapper, kept as a TEST fixture (plant artifact + pointer). */
+function writeSessionArtifact(
+  sink: Parameters<typeof writeSessionArtifactClassified>[0],
+  ctx: Parameters<typeof writeSessionArtifactClassified>[1],
+  name: string,
+  content: string,
+): string | null {
+  const result = writeSessionArtifactClassified(sink, ctx, name, content);
+  return result.status === "applied" || result.status === "unchanged" ? result.path : null;
+}
 
 function selectPlanProvider(cwd: string, id: string): void {
   mkdirSync(join(cwd, ".perk"), { recursive: true });

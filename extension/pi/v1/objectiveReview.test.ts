@@ -8,15 +8,15 @@ import { join } from "node:path";
 import { test } from "node:test";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { OBJECTIVE_DRAFT_ARTIFACT } from "../../authoring/objective/draft.ts";
-import type {
-  ObjectiveApprovalSaveOutcome,
-  ObjectiveSaveResult,
-} from "../../factories/objectiveSave.ts";
-import { type SessionDataCtx, writeSessionArtifact } from "../../substrate/sessionData.ts";
+import {
+  type SessionDataCtx,
+  writeSessionArtifactClassified,
+} from "../../substrate/sessionData.ts";
 import type { ToolGating } from "../../substrate/toolGating.ts";
 import { type EntrySink, WORKFLOW_STATE_TYPE } from "../../substrate/workflowState.ts";
 import type { ReportTarget } from "../../surfaces/report.ts";
 import { scaffoldRepo } from "../../testing/harness.ts";
+import type { ObjectiveApprovalSaveV1Outcome, ObjectiveSaveResult } from "./objectiveAuthoring.ts";
 import {
   approvedObjectiveSaveResult,
   executeObjectiveReview,
@@ -25,6 +25,17 @@ import {
 import { planSaveDepsFor } from "./plan.ts";
 import { executePlanReview, type PlanReviewV1Deps } from "./planReview.ts";
 import type { PlanReviewUI, ReviewOutcome } from "./review.ts";
+
+/** The retired production write wrapper, kept as a TEST fixture (plant artifact + pointer). */
+function writeSessionArtifact(
+  sink: Parameters<typeof writeSessionArtifactClassified>[0],
+  ctx: Parameters<typeof writeSessionArtifactClassified>[1],
+  name: string,
+  content: string,
+): string | null {
+  const result = writeSessionArtifactClassified(sink, ctx, name, content);
+  return result.status === "applied" || result.status === "unchanged" ? result.path : null;
+}
 
 function selectPlanProvider(cwd: string, id: string): void {
   mkdirSync(join(cwd, ".perk"), { recursive: true });
@@ -551,7 +562,7 @@ const OBJECTIVE_APPROVED_FB: Extract<ReviewOutcome, { status: "completed" }> = {
   feedback: "phase 3 can shrink",
 };
 
-function okObjectiveSave(gateExited: boolean): ObjectiveApprovalSaveOutcome {
+function okObjectiveSave(gateExited: boolean): ObjectiveApprovalSaveV1Outcome {
   const result: ObjectiveSaveResult = {
     content: [{ type: "text", text: "Saved objective #7 → https://gh/o/r/issues/7" }],
     details: {
@@ -564,7 +575,7 @@ function okObjectiveSave(gateExited: boolean): ObjectiveApprovalSaveOutcome {
   return { status: "saved", result, gateExited };
 }
 
-function failedObjectiveSave(): ObjectiveApprovalSaveOutcome {
+function failedObjectiveSave(): ObjectiveApprovalSaveV1Outcome {
   const result: ObjectiveSaveResult = {
     content: [{ type: "text", text: "objective-save failed: gh exploded" }],
     details: { ok: false, error: "gh exploded", error_type: "github_error" },

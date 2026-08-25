@@ -22,7 +22,7 @@ import {
 } from "../../authoring/plan/prose.ts";
 import { sessionDataDir } from "../../substrate/cache.ts";
 import type { SessionDataCtx } from "../../substrate/sessionData.ts";
-import { digestSessionData, writeSessionArtifact } from "../../substrate/sessionData.ts";
+import { digestSessionData, writeSessionArtifactClassified } from "../../substrate/sessionData.ts";
 import { readSessionPointers } from "../../substrate/sessionPointers.ts";
 import type { ToolGating } from "../../substrate/toolGating.ts";
 import type { BranchEntry, EntrySink } from "../../substrate/workflowState.ts";
@@ -38,6 +38,17 @@ import {
 } from "../../testing/harness.ts";
 import { approvalSave, decodePlanDraftParams, decodePlanSaveParams } from "./plan.ts";
 import { implementHereGuidance } from "./planReview.ts";
+
+/** The retired production write wrapper, kept as a TEST fixture (plant artifact + pointer). */
+function writeSessionArtifact(
+  sink: Parameters<typeof writeSessionArtifactClassified>[0],
+  ctx: Parameters<typeof writeSessionArtifactClassified>[1],
+  name: string,
+  content: string,
+): string | null {
+  const result = writeSessionArtifactClassified(sink, ctx, name, content);
+  return result.status === "applied" || result.status === "unchanged" ? result.path : null;
+}
 
 const PLAN_MD = "# Add retry\n\n## Summary\nAdd retry to the gateway.\n";
 const DRAFT_MD = "# Draft plan\n\n## Summary\nThe validated working draft.\n";

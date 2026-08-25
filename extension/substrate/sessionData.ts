@@ -17,7 +17,7 @@
 // Provenance doctrine (contracts §8.1/§8.3) — the pointer makes it consumable:
 // - A session artifact is *consumable* only via its `session_artifacts` pointer
 //   ({run_id, name, path, digest, at}) in the rebuilt `perk:workflow-state`. A bare file on
-//   disk is never trusted: `writeSessionArtifact` returns a path only once BOTH the file and
+//   disk is never trusted: a write returns a path only once BOTH the file and
 //   the pointer landed; `readSessionArtifact` validates the on-disk bytes against the rebuilt
 //   pointer and fails open to `null` when validation refuses.
 // - Validation always derives the path from `run_id` + `name` through the seam; the recorded
@@ -31,9 +31,10 @@
 //
 // One artifact-discipline implementation: the classified cores (`writeSessionArtifactClassified`
 // / `readSessionArtifactClassified`) own the full write→read-back→digest→pointer-append and
-// pointer-validated-read algorithms; `writeSessionArtifact`/`readSessionArtifact` are thin
-// null-collapsing wrappers for the callers that predate the `session/` WorkflowSession seam
-// (which delegates to the same cores) — the wrappers die when their last caller migrates.
+// pointer-validated-read algorithms; `readSessionArtifact` is the one surviving thin
+// null-collapsing wrapper for the read-side callers that predate the `session/` WorkflowSession
+// seam (which delegates to the same cores) — it dies when its last caller migrates (the
+// write-side wrapper already did).
 //
 // Imports only node builtins + cache.ts + workflowState.ts + report.ts so the module stays
 // loadable under `node --test`; accepts a minimal structural ctx (`BranchSource & { cwd }`).
@@ -354,27 +355,11 @@ export function readSessionArtifactClassified(
 }
 
 /**
- * Write a session artifact AND record its provenance pointer in `perk:workflow-state` — the
- * null-collapsing wrapper over `writeSessionArtifactClassified` for callers that predate the
- * WorkflowSession seam (it dies when its last caller migrates). Returns the absolute path when
- * the artifact is *fully recorded* (`applied`, or the byte-identical `unchanged` short-circuit);
- * `null` on any failure — the core has already warned. Never throws.
- */
-export function writeSessionArtifact(
-  sink: EntrySink,
-  ctx: SessionArtifactCtx,
-  name: string,
-  content: string,
-): string | null {
-  const result = writeSessionArtifactClassified(sink, ctx, name, content);
-  return result.status === "applied" || result.status === "unchanged" ? result.path : null;
-}
-
-/**
  * Read a session artifact through its provenance pointer — the null-collapsing wrapper over
  * `readSessionArtifactClassified` for callers that predate the WorkflowSession seam (it dies
- * when its last caller migrates): `absent` and `invalid` both collapse to `null` (the core has
- * already warned on the loud tier). Never throws.
+ * when its last caller migrates — the write-side twin already died when the objective draft,
+ * its last producer, moved onto the session seam): `absent` and `invalid` both collapse to
+ * `null` (the core has already warned on the loud tier). Never throws.
  */
 export function readSessionArtifact(
   ctx: SessionDataCtx,

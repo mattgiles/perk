@@ -22,7 +22,7 @@ import { sessionDataDir } from "../../substrate/cache.ts";
 import {
   digestSessionData,
   type SessionDataCtx,
-  writeSessionArtifact,
+  writeSessionArtifactClassified,
 } from "../../substrate/sessionData.ts";
 import type { ToolGating } from "../../substrate/toolGating.ts";
 import {
@@ -50,6 +50,17 @@ import {
   objectiveApprovalSaveV1,
   ROADMAP_PARAM_SCHEMA,
 } from "./objectiveAuthoring.ts";
+
+/** The retired production write wrapper, kept as a TEST fixture (plant artifact + pointer). */
+function writeSessionArtifact(
+  sink: Parameters<typeof writeSessionArtifactClassified>[0],
+  ctx: Parameters<typeof writeSessionArtifactClassified>[1],
+  name: string,
+  content: string,
+): string | null {
+  const result = writeSessionArtifactClassified(sink, ctx, name, content);
+  return result.status === "applied" || result.status === "unchanged" ? result.path : null;
+}
 
 const CREATE_JSON = JSON.stringify({
   success: true,
