@@ -54,7 +54,7 @@ import {
 } from "../substrate/coldDoor.ts";
 import { registerPerkCommand } from "../substrate/command.ts";
 import { subagentModel } from "../substrate/config.ts";
-import { render } from "../substrate/prompts.ts";
+import { planReadInstruction, render } from "../substrate/prompts.ts";
 import { failFor, ok, type Result } from "../substrate/result.ts";
 import { arrayParam, paramsOf, stringParam } from "../substrate/toolParams.ts";
 import { branchOf, rebuildWorkflowState } from "../substrate/workflowState.ts";
@@ -71,7 +71,7 @@ import {
   type WaveAttemptReceipt,
 } from "../waves/reportWave.ts";
 import { createRpcWaveAdapter } from "../waves/rpcAdapter.ts";
-import { planningStageRefusal, planReadInstruction } from "./lifecycleGates.ts";
+import { planningStageRefusal } from "./lifecycleGates.ts";
 
 /** The ok-arm fields. */
 export interface LearnOk {

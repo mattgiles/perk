@@ -26,9 +26,8 @@
 
 import { appendFileSync } from "node:fs";
 import { env } from "node:process";
-import { planReadInstruction } from "../doors/lifecycleGates.ts";
 import { ensureRunScratch, type PlanRef, readPlanRef, runEventsPath } from "../substrate/cache.ts";
-import { render } from "../substrate/prompts.ts";
+import { planReadInstruction, render } from "../substrate/prompts.ts";
 import { captureSessionPointer } from "../substrate/sessionPointers.ts";
 import { rebuildWorkflowState } from "../substrate/workflowState.ts";
 import { capForModel } from "./readOnlySession.ts";
