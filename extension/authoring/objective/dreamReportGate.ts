@@ -27,8 +27,15 @@ import { dirname, join } from "node:path";
 import { runScratchDir } from "../../substrate/cache.ts";
 import { revalidationBracket } from "../../substrate/git.ts";
 import { digestSessionData, type SessionDataCtx } from "../../substrate/sessionData.ts";
-import { branchOf, rebuildWorkflowState, type WorkflowState } from "../../substrate/workflowState.ts";
-import { DREAM_ANALYSES_FILENAME, decodeFinalizedDreamBundle } from "../../waves/dreamReducerWave.ts";
+import {
+  branchOf,
+  rebuildWorkflowState,
+  type WorkflowState,
+} from "../../substrate/workflowState.ts";
+import {
+  DREAM_ANALYSES_FILENAME,
+  decodeFinalizedDreamBundle,
+} from "../../waves/dreamReducerWave.ts";
 import { buildDreamReport, type DreamReportContext } from "../../waves/dreamReport.ts";
 import {
   codePointLength,
