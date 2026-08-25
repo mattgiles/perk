@@ -58,8 +58,10 @@
 import { randomUUID } from "node:crypto";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { GIST_AUTHOR_STAGE } from "../../../authoring/gist/draft.ts";
-import { OBJECTIVE_AUTHOR_STAGE } from "../../../factories/objectiveAuthor.ts";
-import { OBJECTIVE_SAVE_STAGE } from "../../../factories/objectiveSave.ts";
+import {
+  OBJECTIVE_AUTHOR_STAGE,
+  OBJECTIVE_SAVE_STAGE,
+} from "../../../authoring/objective/prose.ts";
 import { render } from "../../../substrate/prompts.ts";
 import {
   activeContextWindow,
@@ -401,17 +403,15 @@ export function installPlannotatorPlanAdapter(pi: ExtensionAPI): void {
     // Once-only PER FLAVOR: the dedup key is the flavor's marker (not the shared customType), so
     // a stage change still delivers the missing flavor while a prior copy of another flavor
     // sits on the branch. Injected customs persist, so a live copy suppresses re-injection.
-    // The GIST and PLAN flavors scan the COMPACTION-ACTIVE window (each flow re-injects
-    // coherently after compaction, matching its authoring context — contracts §8.31); the
-    // objective flavor keeps the whole-branch scan until its feature slice migrates it.
+    // ALL flavors scan the COMPACTION-ACTIVE window (each flow re-injects coherently after
+    // compaction, matching its authoring context — contracts §8.31).
     const marker =
       flavor === "objective"
         ? OBJECTIVE_ADAPTER_PLANNOTATOR_MARKER
         : flavor === "gist"
           ? GIST_ADAPTER_PLANNOTATOR_MARKER
           : PLAN_ADAPTER_PLANNOTATOR_MARKER;
-    const scanned = flavor === "objective" ? branch : activeContextWindow(branch);
-    if (branchCarries(scanned, marker)) return;
+    if (branchCarries(activeContextWindow(branch), marker)) return;
     return {
       message: {
         customType: PLAN_ADAPTER_PLANNOTATOR_CONTEXT_TYPE,

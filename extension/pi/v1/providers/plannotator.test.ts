@@ -286,10 +286,11 @@ test("per-flavor dedup: a prior PLAN-flavor copy does not suppress the OBJECTIVE
   }
 });
 
-test("active-window dedup: the GIST and PLAN flavors re-inject post-compaction; OBJECTIVE does not", async () => {
-  // The gist AND plan flavors dedup on the compaction-active window (contracts §8.31), so a
-  // compaction that drops the live copy re-delivers each; the objective flavor keeps the
-  // whole-branch scan (one copy per session) until the objective flows migrate.
+test("active-window dedup: ALL THREE flavors re-inject post-compaction", async () => {
+  // Every flavor dedups on the compaction-active window (contracts §8.31), so a compaction
+  // that drops the live copy re-delivers each — the objective flavor migrated with its
+  // feature slice. Each arm is a fresh load over a persisted branch (the reload shape:
+  // dedup keys off branch content, never in-memory state).
   const plant = (cwd: string, stage: string, marker: string, fileName: string) =>
     plantRawSession(
       cwd,
@@ -364,7 +365,13 @@ test("active-window dedup: the GIST and PLAN flavors re-inject post-compaction; 
   const objSessions = SessionManager.open(objFile);
   const objKept = objSessions.getEntries().at(-1)?.id;
   assert.ok(objKept !== undefined);
-  objSessions.appendCompaction("summary without a live bridge copy", objKept, 100);
+  // The summary QUOTES the marker — quoted prose is not a live block (activeContextWindow
+  // excludes compaction entries), so it must not suppress the re-injection.
+  objSessions.appendCompaction(
+    "summary quoting [OBJECTIVE ADAPTER: PLANNOTATOR] is not a live copy",
+    objKept,
+    100,
+  );
   const objH = await loadPerkSession({
     cwd: objCwd,
     sessionManager: objSessions,
@@ -372,13 +379,47 @@ test("active-window dedup: the GIST and PLAN flavors re-inject post-compaction; 
   });
   try {
     const injected = await objH.emitBeforeAgentStart();
+    const bridge = injected.filter((m) => m.customType === PLAN_ADAPTER_PLANNOTATOR_CONTEXT_TYPE);
+    assert.equal(bridge.length, 1, "the objective flavor re-injects after compaction dropped it");
+    assert.equal(String(bridge[0]?.content), OBJECTIVE_ADAPTER_PLANNOTATOR_CONTEXT);
+  } finally {
+    objH.dispose();
+  }
+});
+
+test("active-window dedup: a live retained OBJECTIVE copy still suppresses on a reconstructed load", async () => {
+  // The reload shape over a fork/reopen: a fresh load over the same persisted branch still
+  // suppresses while the copy is live in the active window.
+  const cwd = scaffoldRepo();
+  selectPlannotator(cwd);
+  const file = plantRawSession(cwd, [
+    {
+      custom: {
+        type: "perk:workflow-state",
+        data: { run_id: "01RID", mode: "read-only", stage: "objective-author" },
+      },
+    },
+    {
+      custom: {
+        type: PLAN_ADAPTER_PLANNOTATOR_CONTEXT_TYPE,
+        data: { content: "[OBJECTIVE ADAPTER: PLANNOTATOR]\nprior copy" },
+      },
+    },
+  ]);
+  const h = await loadPerkSession({
+    cwd,
+    sessionManager: SessionManager.open(file),
+    env: { PERK_RUN_ID: undefined },
+  });
+  try {
+    const injected = await h.emitBeforeAgentStart();
     assert.equal(
       injected.some((m) => m.customType === PLAN_ADAPTER_PLANNOTATOR_CONTEXT_TYPE),
       false,
-      "the objective flavor keeps whole-branch dedup — no post-compaction re-injection",
+      "a live copy in the active window suppresses re-injection",
     );
   } finally {
-    objH.dispose();
+    h.dispose();
   }
 });
 

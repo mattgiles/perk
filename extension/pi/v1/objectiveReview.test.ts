@@ -7,7 +7,7 @@ import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { OBJECTIVE_DRAFT_ARTIFACT } from "../../factories/objectiveDraft.ts";
+import { OBJECTIVE_DRAFT_ARTIFACT } from "../../authoring/objective/draft.ts";
 import type {
   ObjectiveApprovalSaveOutcome,
   ObjectiveSaveResult,

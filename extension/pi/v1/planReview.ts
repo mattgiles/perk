@@ -55,6 +55,7 @@
 
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { GIST_AUTHOR_STAGE } from "../../authoring/gist/draft.ts";
+import { OBJECTIVE_AUTHOR_STAGE, OBJECTIVE_SAVE_STAGE } from "../../authoring/objective/prose.ts";
 import { resumePlanDraft, revisePlanDraft } from "../../authoring/plan/draft.ts";
 import {
   applyReviewerEdits,
@@ -69,8 +70,6 @@ import type {
   SavePlanOutcome,
 } from "../../authoring/plan/save.ts";
 import { type PlanSource, resolvePlanSource } from "../../authoring/plan/source.ts";
-import { OBJECTIVE_AUTHOR_STAGE } from "../../factories/objectiveAuthor.ts";
-import { OBJECTIVE_SAVE_STAGE } from "../../factories/objectiveSave.ts";
 import { openBranchWorkflowSession } from "../../session/branchWorkflowSession.ts";
 import type { WorkflowSession } from "../../session/workflowSession.ts";
 import { bindingSuffix } from "../../substrate/bindingDelivery.ts";

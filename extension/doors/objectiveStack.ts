@@ -27,7 +27,7 @@
 
 import { basename, dirname } from "node:path";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { reconcileGuidance } from "../factories/objectivePlan.ts";
+import { reconcileGuidance } from "../authoring/objective/prose.ts";
 import { bindingSuffix } from "../substrate/bindingDelivery.ts";
 import { readPlanRef } from "../substrate/cache.ts";
 import {

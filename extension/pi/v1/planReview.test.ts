@@ -16,9 +16,9 @@ import { test } from "node:test";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
 import { GIST_DRAFT_ARTIFACT } from "../../authoring/gist/draft.ts";
+import { OBJECTIVE_DRAFT_ARTIFACT } from "../../authoring/objective/draft.ts";
 import { PLAN_DRAFT_ARTIFACT } from "../../authoring/plan/draft.ts";
 import { PLANNOTATOR_REVIEW_COMMAND } from "../../doors/plannotatorHandoff.ts";
-import { OBJECTIVE_DRAFT_ARTIFACT } from "../../factories/objectiveDraft.ts";
 import {
   readSessionArtifact,
   type SessionDataCtx,

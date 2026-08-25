@@ -2,7 +2,7 @@
 // from an objective-authoring session the human summons a plannotator PLAN-REVIEW browser on
 // the RENDERED working objective draft (prose + roadmap table), a draft-reviewer wave streams
 // phrase-anchored findings into that browser via `push_annotations`, and the browser decision
-// routes through the existing objective seams: APPROVE → `objectiveApprovalSave` (the D1a gate
+// routes through the existing objective seams: APPROVE → `objectiveApprovalSaveV1` (the D1a gate
 // exit rides the seam); DENY → a model-mediated `objective_draft` revision round. Plannotator
 // always, no provider dispatch (the surface-named command IS the selection — the
 // `/plan-review-browser` precedent); only the plannotator PRESENCE probe gates it.
@@ -16,7 +16,7 @@
 // never run on this path.
 //
 // ARTIFACT-FIRST, DRAFTS ONLY: the reviewed bytes are the RENDERED validated
-// `objective-draft.json` artifact (`readObjectiveDraft` + `renderObjectiveDraft`) — no param
+// `objective-draft.json` artifact (`resumeObjectiveDraft` + `renderObjectiveDraft`) — no param
 // tier, no transcript tier, never raw JSON (the review-surface law; JSON is storage only).
 // Stage-gated to the two registry stages whose STAGE_TOOLS carry `objective_draft`
 // ({objective-author, objective-save}); anything else refuses loudly.
@@ -42,13 +42,14 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import {
   OBJECTIVE_DRAFT_ARTIFACT,
-  readObjectiveDraft,
   renderObjectiveDraft,
-} from "../factories/objectiveDraft.ts";
-import { objectiveApprovalSave } from "../factories/objectiveSave.ts";
+  resumeObjectiveDraft,
+} from "../authoring/objective/draft.ts";
+import { objectiveApprovalSaveV1 } from "../pi/v1/objectiveAuthoring.ts";
 import { approvedObjectiveSaveResult } from "../pi/v1/objectiveReview.ts";
 import { hasDirectEditsHeading } from "../pi/v1/providers/plannotator.ts";
 import type { ReviewOutcome } from "../pi/v1/review.ts";
+import { openBranchWorkflowSession } from "../session/branchWorkflowSession.ts";
 import { bindingSuffix } from "../substrate/bindingDelivery.ts";
 import { registerPerkCommand } from "../substrate/command.ts";
 import { interceptConsoleError } from "../substrate/consoleCapture.ts";
@@ -195,7 +196,7 @@ const FEEDBACK_DATA_NOTE =
  * - `completed && approved`, no Direct Edits → the STALE-DRAFT GUARD on the RAW structured
  *   artifact bytes captured at open (the save-authoritative surface — it catches
  *   render-invisible changes like `base` or a node `slug`/`pr`/`comment`): mismatch/missing →
- *   a loud stale refusal, nothing saved, gate untouched; then `objectiveApprovalSave` (the D1a
+ *   a loud stale refusal, nothing saved, gate untouched; then `objectiveApprovalSaveV1` (the D1a
  *   gate exit rides the seam) → the `approvedObjectiveSaveResult` composition (its `terminate`
  *   is tool-path-only — ignored here), reported (info on saved, error on save-failed with the
  *   `/objective-save` failsafe named) AND injected to the model — with the feedback delimited
@@ -281,7 +282,7 @@ export async function routeObjectiveReviewDecision(
     // APPROVE: the shared objective approval→save seam (re-reads the STRUCTURED artifact →
     // saveObjective → D1a gate exit on an ok save). The reviewer feedback inside the composed
     // text is delimited as untrusted DATA before it is injected.
-    const save = await objectiveApprovalSave(pi, ctx, gating);
+    const save = await objectiveApprovalSaveV1(pi, ctx, gating);
     const delimited =
       out.feedback !== undefined ? { ...out, feedback: delimitFeedback(out.feedback) } : out;
     const result = approvedObjectiveSaveResult(delimited, save);
@@ -513,7 +514,7 @@ export function registerObjectiveReviewBrowser(pi: ExtensionAPI, gating: ToolGat
       // The validated read (digest-checked, schema-checked; the reader already warned on the
       // null arm). The micro-window between the raw read above and this re-read is the accepted
       // check-to-open race — the same posture as the plan door's check-to-save window.
-      const draft = readObjectiveDraft(ctx);
+      const draft = resumeObjectiveDraft(openBranchWorkflowSession(pi, ctx));
       if (draft === null) {
         report(
           ctx,
