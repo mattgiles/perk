@@ -9,8 +9,22 @@ import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { handoffPath, workflowDir } from "../substrate/cache.ts";
-import { decideClaim, deriveForkRunId, resolveRunStage } from "./lifecycle.ts";
+import { type Handoff, handoffPath, workflowDir } from "../substrate/cache.ts";
+import type { SessionArtifactCtx } from "../substrate/sessionData.ts";
+import {
+  type EntrySink,
+  WORKFLOW_STATE_TYPE,
+  type WorkflowState,
+} from "../substrate/workflowState.ts";
+import {
+  branchSessionStateStore,
+  decideClaim,
+  deriveForkRunId,
+  establishSessionIdentity,
+  resolveRunStage,
+  type SessionIdentityPorts,
+  type SessionStateStore,
+} from "./lifecycle.ts";
 
 /** Plant a handoff blob (optionally carrying `stage`/`consumed`/claim fields) for claim tests. */
 function plantHandoff(
@@ -187,3 +201,381 @@ test("deriveForkRunId: increments past existing siblings", () => {
   assert.equal(deriveForkRunId("01RID", dir), "01RID.3");
   assert.equal(deriveForkRunId("01OTHER", dir), "01OTHER.1");
 });
+
+// --- establishSessionIdentity over BOTH stores ---------------------------------------------------
+//
+// The branch store is the production `branchSessionStateStore` (live branch array + a
+// no-op-notify ctx); the memory store is a knobbed fake. Each proves the same arm matrix:
+// claim (with/without the handoff node-claim carrier; blank/half ids persist no claim),
+// unclaimed (missing/mismatched handoff; a failed read-back does NOT consume), fork (derived
+// child + tolerated scratch warning), adopt (no stage impersonation, inherited mode, never
+// re-consumes), mint (verified; a failed read-back leaves the session unidentified), and
+// keep (NO append, no version backfill).
+
+interface StoreHarness {
+  store: SessionStateStore;
+  /** Every appended entry payload, in order (the observation channel). */
+  appends: WorkflowState[];
+  /** Make the NEXT verified append miss its read-back (`unverified`). */
+  induceReadBackMiss(): void;
+}
+
+interface StoreBacking {
+  label: string;
+  make(cwd: string, initial: WorkflowState[]): StoreHarness;
+}
+
+function branchStoreBacking(): StoreBacking {
+  return {
+    label: "branch store",
+    make(cwd, initial) {
+      const branch: unknown[] = initial.map((data) => ({
+        type: "custom",
+        customType: WORKFLOW_STATE_TYPE,
+        data,
+      }));
+      const appends: WorkflowState[] = [];
+      let dropNext = false;
+      const sink: EntrySink = {
+        appendEntry: (customType, data) => {
+          appends.push(data as WorkflowState);
+          if (dropNext) {
+            dropNext = false;
+            return; // dropped on the floor — the read-back proof misses
+          }
+          branch.push({ type: "custom", customType, data });
+        },
+      };
+      const ctx: SessionArtifactCtx = {
+        cwd,
+        sessionManager: { getBranch: () => branch },
+        hasUI: false,
+        ui: { notify() {} },
+      };
+      return {
+        store: branchSessionStateStore(sink, ctx),
+        appends,
+        induceReadBackMiss: () => {
+          dropNext = true;
+        },
+      };
+    },
+  };
+}
+
+function memoryStoreBacking(): StoreBacking {
+  return {
+    label: "memory store",
+    make(_cwd, initial) {
+      const state: WorkflowState = {};
+      const merge = (data: WorkflowState) => {
+        for (const [key, value] of Object.entries(data)) {
+          if (value !== undefined) (state as Record<string, unknown>)[key] = value;
+        }
+      };
+      for (const data of initial) merge(data);
+      const appends: WorkflowState[] = [];
+      let failNext = false;
+      return {
+        store: {
+          rebuild: () => ({ ...state }),
+          append: (data) => {
+            appends.push(data);
+            merge(data);
+          },
+          appendVerified: (opts) => {
+            appends.push(opts.data);
+            if (failNext) {
+              failNext = false;
+              return { status: "unverified", problem: opts.failure };
+            }
+            merge(opts.data);
+            return { status: "applied" };
+          },
+        },
+        appends,
+        induceReadBackMiss: () => {
+          failNext = true;
+        },
+      };
+    },
+  };
+}
+
+/** Deterministic `SessionIdentityPorts` with observation channels. */
+function fakePorts(opts: {
+  handoff?: Handoff | null;
+  scratchThrows?: boolean;
+  mintedId?: string;
+  stamp?: string | undefined;
+}): {
+  ports: SessionIdentityPorts;
+  consumed: { runId: string; piSessionId?: string }[];
+  scratched: string[];
+} {
+  const consumed: { runId: string; piSessionId?: string }[] = [];
+  const scratched: string[] = [];
+  return {
+    ports: {
+      readHandoff: () => opts.handoff ?? null,
+      markHandoffConsumed: (runId, o) => {
+        consumed.push({ runId, ...o });
+      },
+      ensureRunScratch: (runId) => {
+        if (opts.scratchThrows === true) throw new Error("scratch refused");
+        scratched.push(runId);
+      },
+      mintRunId: () => opts.mintedId ?? "01MINTED",
+      versionStamp: "stamp" in opts ? opts.stamp : "1.2.3",
+    },
+    consumed,
+    scratched,
+  };
+}
+
+/** Capture console.error for the duration of `fn` (the strict seam's loud failure channel). */
+function quietly<T>(fn: () => T): T {
+  const original = console.error;
+  console.error = () => {};
+  try {
+    return fn();
+  } finally {
+    console.error = original;
+  }
+}
+
+for (const backing of [branchStoreBacking(), memoryStoreBacking()]) {
+  test(`${backing.label}: claim — one combined verified entry, consumed only after success`, () => {
+    const cwd = mkdtempSync(join(tmpdir(), "perk-lifecycle-"));
+    const h = backing.make(cwd, []);
+    const { ports, consumed } = fakePorts({
+      handoff: { run_id: "01RID", consumed: false, mode: "read-only", stage: "objective-author" },
+    });
+    const outcome = establishSessionIdentity(h.store, ports, {
+      currentSessionId: "me.jsonl",
+      envRunId: "01RID",
+      cwd,
+    });
+    assert.equal(outcome.arm, "claimed");
+    assert.equal(h.appends.length, 1);
+    assert.deepEqual(h.appends[0], {
+      run_id: "01RID",
+      pi_session_id: "me.jsonl",
+      mode: "read-only",
+      perk_version: "1.2.3",
+      stage: "objective-author",
+    });
+    assert.deepEqual(outcome.resolved, h.appends[0]);
+    assert.deepEqual(consumed, [{ runId: "01RID", piSessionId: "me.jsonl" }]);
+    assert.deepEqual(outcome.problems, []);
+    assert.deepEqual(outcome.warnings, []);
+  });
+
+  test(`${backing.label}: claim — the handoff node link rides as the objective_node_claim carrier`, () => {
+    const cwd = mkdtempSync(join(tmpdir(), "perk-lifecycle-"));
+    const h = backing.make(cwd, []);
+    const { ports } = fakePorts({
+      handoff: {
+        run_id: "01RID",
+        consumed: false,
+        mode: "read-only",
+        stage: "plan",
+        objective_id: "7",
+        node_id: "1.1",
+      },
+    });
+    const outcome = establishSessionIdentity(h.store, ports, {
+      currentSessionId: "me.jsonl",
+      envRunId: "01RID",
+      cwd,
+    });
+    assert.equal(outcome.arm, "claimed");
+    assert.deepEqual(h.appends[0]?.objective_node_claim, { objective: "7", node: "1.1" });
+  });
+
+  test(`${backing.label}: claim — blank or half-specified handoff ids persist NO claim`, () => {
+    for (const extra of [
+      { objective_id: "  ", node_id: "1.1" },
+      { objective_id: "7" },
+      { node_id: "1.1" },
+      { objective_id: "7", node_id: "" },
+    ]) {
+      const cwd = mkdtempSync(join(tmpdir(), "perk-lifecycle-"));
+      const h = backing.make(cwd, []);
+      const { ports } = fakePorts({
+        handoff: { run_id: "01RID", consumed: false, ...extra },
+      });
+      const outcome = establishSessionIdentity(h.store, ports, {
+        currentSessionId: "me.jsonl",
+        envRunId: "01RID",
+        cwd,
+      });
+      assert.equal(outcome.arm, "claimed");
+      assert.equal(h.appends[0] !== undefined && "objective_node_claim" in h.appends[0], false);
+    }
+  });
+
+  test(`${backing.label}: claim — a missing or mismatched handoff is unclaimed (never mints)`, () => {
+    for (const handoff of [null, { run_id: "01OTHER", consumed: false }]) {
+      const cwd = mkdtempSync(join(tmpdir(), "perk-lifecycle-"));
+      const h = backing.make(cwd, []);
+      const { ports, consumed } = fakePorts({ handoff });
+      const outcome = establishSessionIdentity(h.store, ports, {
+        currentSessionId: "me.jsonl",
+        envRunId: "01RID",
+        cwd,
+      });
+      assert.equal(outcome.arm, "unclaimed");
+      assert.deepEqual(outcome.problems, ["handoff missing or mismatched for run 01RID"]);
+      assert.deepEqual(outcome.resolved, {});
+      assert.equal(h.appends.length, 0);
+      assert.equal(consumed.length, 0);
+    }
+  });
+
+  test(`${backing.label}: claim — a failed read-back is unclaimed and does NOT consume`, () => {
+    const cwd = mkdtempSync(join(tmpdir(), "perk-lifecycle-"));
+    const h = backing.make(cwd, []);
+    const { ports, consumed } = fakePorts({
+      handoff: { run_id: "01RID", consumed: false, mode: "read-only" },
+    });
+    h.induceReadBackMiss();
+    const outcome = quietly(() =>
+      establishSessionIdentity(h.store, ports, {
+        currentSessionId: "me.jsonl",
+        envRunId: "01RID",
+        cwd,
+      }),
+    );
+    assert.equal(outcome.arm, "unclaimed");
+    assert.equal(consumed.length, 0, "establish-before-consume: unverified claim never consumes");
+    assert.deepEqual(outcome.resolved, {});
+    // no problems of its own — the strict-append seam already reported through its channel
+    assert.deepEqual(outcome.problems, []);
+  });
+
+  test(`${backing.label}: fork — derived child identity, inherited mode, honest-tier append`, () => {
+    const cwd = mkdtempSync(join(tmpdir(), "perk-lifecycle-"));
+    const h = backing.make(cwd, [
+      { run_id: "01RID", pi_session_id: "parent.jsonl", mode: "read-only" },
+    ]);
+    const { ports, consumed, scratched } = fakePorts({});
+    const outcome = establishSessionIdentity(h.store, ports, {
+      currentSessionId: "child.jsonl",
+      envRunId: null,
+      cwd,
+    });
+    assert.equal(outcome.arm, "forked");
+    assert.equal(h.appends.length, 1);
+    assert.deepEqual(h.appends[0], {
+      run_id: "01RID.1",
+      pi_session_id: "child.jsonl",
+      predecessor: "01RID",
+      mode: "read-only",
+      perk_version: "1.2.3",
+    });
+    assert.deepEqual(scratched, ["01RID.1"]);
+    assert.equal(consumed.length, 0);
+    assert.deepEqual(outcome.warnings, []);
+    assert.equal(outcome.resolved.run_id, "01RID.1");
+  });
+
+  test(`${backing.label}: fork — a scratch failure is a warning; identity still settles`, () => {
+    const cwd = mkdtempSync(join(tmpdir(), "perk-lifecycle-"));
+    const h = backing.make(cwd, [{ run_id: "01RID", pi_session_id: "parent.jsonl" }]);
+    const { ports } = fakePorts({ scratchThrows: true });
+    const outcome = establishSessionIdentity(h.store, ports, {
+      currentSessionId: "child.jsonl",
+      envRunId: null,
+      cwd,
+    });
+    assert.equal(outcome.arm, "forked");
+    assert.deepEqual(outcome.warnings, [
+      "could not create fork run root for 01RID.1: Error: scratch refused",
+    ]);
+    assert.equal(h.appends.length, 1, "the derived-identity append still lands");
+  });
+
+  test(`${backing.label}: adopt — inherited mode, no stage impersonation, never re-consumes`, () => {
+    // decideClaim probes the DISK handoff for env-child detection — plant a consumed one.
+    const cwd = plantHandoff("01RID", "implement", {
+      consumed: true,
+      piSessionId: "parent.jsonl",
+      mode: "read-write",
+    });
+    const h = backing.make(cwd, []);
+    const { ports, consumed, scratched } = fakePorts({ scratchThrows: true });
+    const outcome = establishSessionIdentity(h.store, ports, {
+      currentSessionId: "child.jsonl",
+      envRunId: "01RID",
+      cwd,
+    });
+    assert.equal(outcome.arm, "adopted");
+    assert.deepEqual(h.appends[0], {
+      run_id: "01RID.1",
+      pi_session_id: "child.jsonl",
+      predecessor: "01RID",
+      mode: "read-write",
+      perk_version: "1.2.3",
+    });
+    assert.equal(
+      h.appends[0] !== undefined && "stage" in h.appends[0] && h.appends[0].stage !== undefined,
+      false,
+      "adopt never impersonates the launched stage",
+    );
+    assert.equal(consumed.length, 0, "adopt never re-consumes the handoff");
+    assert.deepEqual(scratched, []);
+    assert.deepEqual(outcome.warnings, [
+      "could not create adopted run root for 01RID.1: Error: scratch refused",
+    ]);
+  });
+
+  test(`${backing.label}: mint — verified append; a failed read-back leaves the session unidentified`, () => {
+    const cwd = mkdtempSync(join(tmpdir(), "perk-lifecycle-"));
+    const minted = backing.make(cwd, []);
+    const { ports } = fakePorts({ mintedId: "01MINT" });
+    const outcome = establishSessionIdentity(minted.store, ports, {
+      currentSessionId: "me.jsonl",
+      envRunId: null,
+      cwd,
+    });
+    assert.equal(outcome.arm, "minted");
+    assert.deepEqual(minted.appends[0], {
+      run_id: "01MINT",
+      pi_session_id: "me.jsonl",
+      perk_version: "1.2.3",
+    });
+    assert.equal(outcome.resolved.run_id, "01MINT");
+
+    const failed = backing.make(cwd, []);
+    failed.induceReadBackMiss();
+    const failedOutcome = quietly(() =>
+      establishSessionIdentity(failed.store, fakePorts({ mintedId: "01MINT" }).ports, {
+        currentSessionId: "me.jsonl",
+        envRunId: null,
+        cwd,
+      }),
+    );
+    assert.equal(failedOutcome.arm, "unclaimed");
+    assert.equal(failedOutcome.resolved.run_id, undefined, "re-mints next session_start");
+  });
+
+  test(`${backing.label}: keep (reload) — NO append, no version backfill`, () => {
+    const cwd = mkdtempSync(join(tmpdir(), "perk-lifecycle-"));
+    const h = backing.make(cwd, [
+      { run_id: "01RID", pi_session_id: "me.jsonl", mode: "read-only" },
+    ]);
+    const { ports, consumed, scratched } = fakePorts({});
+    const outcome = establishSessionIdentity(h.store, ports, {
+      currentSessionId: "me.jsonl",
+      envRunId: null,
+      cwd,
+    });
+    assert.equal(outcome.arm, "kept");
+    assert.equal(h.appends.length, 0, "reload-generation reconstruction IS the LWW rebuild");
+    assert.equal(outcome.resolved.run_id, "01RID");
+    assert.equal(outcome.resolved.perk_version, undefined, "no version backfill (§8.3)");
+    assert.equal(consumed.length, 0);
+    assert.deepEqual(scratched, []);
+  });
+}
