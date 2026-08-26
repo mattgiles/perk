@@ -4,13 +4,13 @@
 // workflowScripts) and returns immediately so the parent can hold the
 // `subagent_wait({timeoutMs})` relay loop open while the children stream phrase-anchored
 // finding batches; `collect_draft_review_wave` drains the settled result into the typed
-// aggregate for reconciliation. Mirrors `reviewWaveTools.ts`'s shape (own pending slot; a
+// aggregate for reconciliation. Mirrors `pi/v1/codeReview/reviewWave.ts`'s shape (own pending slot; a
 // generic extraction waits for the rule of three).
 //
 // THE DOOR-PRIMED CONTEXT (the trust posture difference from the PR pair): the wave's inputs —
 // the draft under review, its type, and the optional human-supplied custom-angle definition —
 // are REGISTRATION-OWNED STATE primed by the door (the `primeAnnotationSurface` discipline,
-// sibling of `annotationPush.ts`'s surface handle), never tool params: one
+// sibling of `pi/v1/providers/annotations.ts`'s surface handle), never tool params: one
 // `DraftReviewWaveState` instance per activation, created in `index.ts` and threaded to the two
 // browser doors and this tool pair. `start_draft_review_wave` takes ONLY `{angles}` and refuses
 // unprimed (`no_draft_context`), so the model can never substitute a transcript/arbitrary draft
@@ -60,7 +60,7 @@ export interface DraftReviewContext {
 
 /**
  * The draft pair's per-activation state: the ONE pending (launched, uncollected) draft-review
- * wave (the `reviewWaveTools.ts` pending-slot mirror — `start_draft_review_wave` refuses while
+ * wave (the `pi/v1/codeReview/reviewWave.ts` pending-slot mirror — `start_draft_review_wave` refuses while
  * it is set, and `collect_draft_review_wave` drains it; `keys` includes the `custom` lane when
  * one was primed — the covered computation needs it) PLUS the door-primed context slot (same
  * defect class, same lifetime — one browser session's inputs, superseded by the next prime).
@@ -322,7 +322,7 @@ const COLLECT_TOOL_GUIDELINES = [
  * Register the draft-review-wave tool pair over the activation-owned state (created fresh in
  * `index.ts` and shared with the two browser doors — a fresh activation IS the reset: no wave
  * pending, no context primed, and two bound sessions in one process never share a slot). Wired
- * in `extension/index.ts` beside `registerReviewWaveTools`; flow-scoped via the door-primed
+ * in `extension/index.ts` beside `installReviewWaveBindings`; flow-scoped via the door-primed
  * context + the pending-wave guard in the execute cores.
  */
 export function registerDraftReviewWaveTools(pi: ExtensionAPI, state: DraftReviewWaveState): void {

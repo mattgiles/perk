@@ -14,7 +14,7 @@
 // learn the review surface — enforced by construction, pinned by the suite.
 //
 // Driven live by the registered `start_review_wave` / `collect_review_wave` tool pair
-// (`extension/doors/reviewWaveTools.ts`); the `agents/adversarial-reviewer.md` def completes via
+// (`extension/pi/v1/codeReview/reviewWave.ts`); the `agents/adversarial-reviewer.md` def completes via
 // the `structured_output` tool this wave's `outputSchema` injects per lane.
 
 import { PONYTAIL_REVIEW_SKILL } from "./ponytail.ts";

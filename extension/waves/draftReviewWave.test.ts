@@ -1,7 +1,7 @@
 // The draft-review wave entrypoint's suite: lane construction (the exact task bytes — angle
 // opener + draft-type line + the untrusted-wrapped draft and NOTHING else, so the surface handle
 // AND the PR doors' directive are provably absent — plus the custom lane's flagged-DATA
-// definition), the verdict-free report-schema pin (the forward-binding to `annotationPush.ts`'s
+// definition), the verdict-free report-schema pin (the forward-binding to `pi/v1/providers/annotations.ts`'s
 // `PlanFinding` shape), the agent def's completion-contract agreement with that schema, and the
 // non-blocking start over the in-memory adapter (spawn contract, strict completeness, the
 // wave-level failure arm, zero retries by construction — one spawn, ever).
@@ -189,7 +189,7 @@ test("DRAFT_REVIEW_REPORT_SCHEMA finding rows: the plan-mode PlanFinding shape, 
     }
   ).properties.findings.items;
   assert.equal(findings.additionalProperties, false);
-  // The forward-binding to `annotationPush.ts`'s `PlanFinding` (`PLAN_FINDING_KEYS`): reports
+  // The forward-binding to `pi/v1/providers/annotations.ts`'s `PlanFinding` (`PLAN_FINDING_KEYS`): reports
   // feed `push_annotations` plan-mode without reshaping. `phrase` is required-nullable (a global
   // finding keeps `phrase: null`).
   assert.deepEqual(findings.required, ["phrase", "severity", "confidence", "body"]);

@@ -428,7 +428,7 @@ routes:
     role: tool-contract
     priority: 90
   - id: ts-pr-review
-    match: { paths: ["extension/doors/*Review*.ts", "extension/doors/reviewWaveTools.ts", "extension/doors/annotationPush.ts", "extension/doors/submitPrReview.ts", "extension/waves/**"] }
+    match: { paths: ["extension/doors/*Review*.ts", "extension/codeReview/**", "extension/pi/v1/codeReview/**", "extension/pi/v1/providers/annotations.ts", "extension/waves/**"] }
     capability: review.pr
     audience: shipped
     role: tool-contract

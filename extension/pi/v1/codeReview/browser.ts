@@ -2,7 +2,7 @@
 // review — plannotator always, no provider dispatch (the surface-named command IS the selection).
 //
 // Three modes, keyed off the arg parse + the active-PR resolution ladder (the parse is IMPORTED
-// from prReviewTerminal.ts — one function ⇒ identical arg semantics by construction):
+// from terminal.ts — one function ⇒ identical arg semantics by construction):
 //   foreign — `/pr-review-browser <pr|url> [focus]`: the detached `perk pr review checkout`, the
 //             browser opened in the background on the PR URL, the async adversarial-reviewer
 //             fan-out with per-angle annotation waves streamed to the local plannotator server.

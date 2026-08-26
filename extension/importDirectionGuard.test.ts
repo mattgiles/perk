@@ -163,8 +163,9 @@ const APPROVED_REGISTRAR_FILES = ["index.ts", "workerMain.ts"];
 // edge to `waves/rpcAdapter.ts` — the wave registration sites (each constructs its adapter
 // at its execute site; construction threading was considered and dropped at review). SHRINK-ONLY
 // intent: entries leave as flows migrate behind typed operations; no new file may join without
-// operator confirmation — the `pi/v1/codeReview/` successors joined under the node-5.2 plan's
-// approval (the code-review flows' registration sites moved wholesale into the adapter home).
+// operator confirmation — the `pi/v1/codeReview/` successors joined under the approved
+// code-review migration plan (the operator confirmation: the flows' registration sites moved
+// wholesale into the adapter home, swapping their door entries).
 const RPC_ADAPTER_IMPORTERS = [
   "doors/address.ts",
   "doors/auditWaveTools.ts",

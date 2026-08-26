@@ -19,7 +19,7 @@
 // focus-note semantics deliberately do not carry over — the custom lane IS the draft doors'
 // user-input channel.
 //
-// The finding rows are deliberately identical to `annotationPush.ts`'s `PlanFinding` shape
+// The finding rows are deliberately identical to `pi/v1/providers/annotations.ts`'s `PlanFinding` shape
 // (`{phrase, severity, confidence, body}`), so draft reports feed `push_annotations` plan-mode
 // without reshaping; the `agents/draft-reviewer.md` def completes via the `structured_output`
 // tool this wave's `outputSchema` injects per lane.
@@ -60,7 +60,7 @@ export function isDraftReviewAngle(value: string): value is DraftReviewAngle {
  * DELIBERATELY NO VERDICT FIELD — the human adjudicates every finding in the browser, so there
  * is no clean/actionable derivation to make consistent (the `ADVERSARIAL_REVIEW_REPORT_SCHEMA`
  * rationale). The `angle` enum includes `custom` (the custom lane echoes it). Finding rows are
- * the forward-bound plan-mode `PlanFinding` shape (`annotationPush.ts`'s `PLAN_FINDING_KEYS`):
+ * the forward-bound plan-mode `PlanFinding` shape (`pi/v1/providers/annotations.ts`'s `PLAN_FINDING_KEYS`):
  * `phrase` is required-nullable (the byte-exact draft span, or `null` for a global finding),
  * and the severity/confidence enums match the agent def's triage tags. The `phrase` string arm
  * requires a non-whitespace character (`pattern` applies only to string instances, so `null`

@@ -919,20 +919,20 @@ Automated, selector-driven, terminal, and browser PR-review families.
 | `markdown:skills/perk-pr-review-browser/SKILL.md` | `skill-detail` | `shipped` | [`skills/perk-pr-review-browser/SKILL.md`](../../skills/perk-pr-review-browser/SKILL.md) · `file` | — |
 | `markdown:skills/perk-pr-review-terminal/SKILL.md` | `skill-detail` | `shipped` | [`skills/perk-pr-review-terminal/SKILL.md`](../../skills/perk-pr-review-terminal/SKILL.md) · `file` | — |
 | `markdown:skills/perk-pr-review/SKILL.md` | `skill-detail` | `shipped` | [`skills/perk-pr-review/SKILL.md`](../../skills/perk-pr-review/SKILL.md) · `file` | pr-review.warm |
-| `typescript-model-call:extension/doors/prReview.ts:module:sendUserMessage:0` | `tool-contract` | `shipped` | [`extension/doors/prReview.ts`](../../extension/doors/prReview.ts) · `symbol:module/call:sendUserMessage/0` | — |
-| `typescript-model-call:extension/doors/prReviewBrowser.ts:module:sendUserMessage:0` | `tool-contract` | `shipped` | [`extension/doors/prReviewBrowser.ts`](../../extension/doors/prReviewBrowser.ts) · `symbol:module/call:sendUserMessage/0` | — |
-| `typescript-model-call:extension/doors/prReviewBrowser.ts:module:sendUserMessage:1` | `tool-contract` | `shipped` | [`extension/doors/prReviewBrowser.ts`](../../extension/doors/prReviewBrowser.ts) · `symbol:module/call:sendUserMessage/1` | — |
-| `typescript-model-call:extension/doors/prReviewBrowser.ts:module:sendUserMessage:2` | `tool-contract` | `shipped` | [`extension/doors/prReviewBrowser.ts`](../../extension/doors/prReviewBrowser.ts) · `symbol:module/call:sendUserMessage/2` | — |
-| `typescript-model-call:extension/doors/prReviewTerminal.ts:module:sendUserMessage:0` | `tool-contract` | `shipped` | [`extension/doors/prReviewTerminal.ts`](../../extension/doors/prReviewTerminal.ts) · `symbol:module/call:sendUserMessage/0` | — |
-| `typescript-model-call:extension/doors/prReviewTerminal.ts:module:sendUserMessage:1` | `tool-contract` | `shipped` | [`extension/doors/prReviewTerminal.ts`](../../extension/doors/prReviewTerminal.ts) · `symbol:module/call:sendUserMessage/1` | — |
+| `typescript-model-call:extension/pi/v1/codeReview/automated.ts:module:sendUserMessage:0` | `tool-contract` | `shipped` | [`extension/pi/v1/codeReview/automated.ts`](../../extension/pi/v1/codeReview/automated.ts) · `symbol:module/call:sendUserMessage/0` | — |
+| `typescript-model-call:extension/pi/v1/codeReview/browser.ts:module:sendUserMessage:0` | `tool-contract` | `shipped` | [`extension/pi/v1/codeReview/browser.ts`](../../extension/pi/v1/codeReview/browser.ts) · `symbol:module/call:sendUserMessage/0` | — |
+| `typescript-model-call:extension/pi/v1/codeReview/browser.ts:module:sendUserMessage:1` | `tool-contract` | `shipped` | [`extension/pi/v1/codeReview/browser.ts`](../../extension/pi/v1/codeReview/browser.ts) · `symbol:module/call:sendUserMessage/1` | — |
+| `typescript-model-call:extension/pi/v1/codeReview/browser.ts:module:sendUserMessage:2` | `tool-contract` | `shipped` | [`extension/pi/v1/codeReview/browser.ts`](../../extension/pi/v1/codeReview/browser.ts) · `symbol:module/call:sendUserMessage/2` | — |
+| `typescript-model-call:extension/pi/v1/codeReview/terminal.ts:module:sendUserMessage:0` | `tool-contract` | `shipped` | [`extension/pi/v1/codeReview/terminal.ts`](../../extension/pi/v1/codeReview/terminal.ts) · `symbol:module/call:sendUserMessage/0` | — |
+| `typescript-model-call:extension/pi/v1/codeReview/terminal.ts:module:sendUserMessage:1` | `tool-contract` | `shipped` | [`extension/pi/v1/codeReview/terminal.ts`](../../extension/pi/v1/codeReview/terminal.ts) · `symbol:module/call:sendUserMessage/1` | — |
 | `typescript-model-call:extension/waves/transport.ts:module:workflow-script:0` | `tool-contract` | `shipped` | [`extension/waves/transport.ts`](../../extension/waves/transport.ts) · `symbol:module/property:workflowScript/0` | — |
-| `typescript-tool:collect_review_wave` | `tool-contract` | `shipped` | [`extension/doors/reviewWaveTools.ts`](../../extension/doors/reviewWaveTools.ts) · `tool:collect_review_wave` | — |
-| `typescript-tool:open_stack_review` | `tool-contract` | `shipped` | [`extension/doors/stackReviewBrowser.ts`](../../extension/doors/stackReviewBrowser.ts) · `tool:open_stack_review` | — |
-| `typescript-tool:post_pr_review` | `tool-contract` | `shipped` | [`extension/doors/prReview.ts`](../../extension/doors/prReview.ts) · `tool:post_pr_review` | pr-review.warm |
-| `typescript-tool:push_annotations` | `tool-contract` | `shipped` | [`extension/doors/annotationPush.ts`](../../extension/doors/annotationPush.ts) · `tool:push_annotations` | — |
-| `typescript-tool:run_pr_review_wave` | `tool-contract` | `shipped` | [`extension/doors/prReview.ts`](../../extension/doors/prReview.ts) · `tool:run_pr_review_wave` | pr-review.warm |
-| `typescript-tool:start_review_wave` | `tool-contract` | `shipped` | [`extension/doors/reviewWaveTools.ts`](../../extension/doors/reviewWaveTools.ts) · `tool:start_review_wave` | — |
-| `typescript-tool:submit_pr_review` | `tool-contract` | `shipped` | [`extension/doors/submitPrReview.ts`](../../extension/doors/submitPrReview.ts) · `tool:submit_pr_review` | — |
+| `typescript-tool:collect_review_wave` | `tool-contract` | `shipped` | [`extension/pi/v1/codeReview/reviewWave.ts`](../../extension/pi/v1/codeReview/reviewWave.ts) · `tool:collect_review_wave` | — |
+| `typescript-tool:open_stack_review` | `tool-contract` | `shipped` | [`extension/pi/v1/codeReview/stack.ts`](../../extension/pi/v1/codeReview/stack.ts) · `tool:open_stack_review` | — |
+| `typescript-tool:post_pr_review` | `tool-contract` | `shipped` | [`extension/pi/v1/codeReview/automated.ts`](../../extension/pi/v1/codeReview/automated.ts) · `tool:post_pr_review` | pr-review.warm |
+| `typescript-tool:push_annotations` | `tool-contract` | `shipped` | [`extension/pi/v1/providers/annotations.ts`](../../extension/pi/v1/providers/annotations.ts) · `tool:push_annotations` | — |
+| `typescript-tool:run_pr_review_wave` | `tool-contract` | `shipped` | [`extension/pi/v1/codeReview/automated.ts`](../../extension/pi/v1/codeReview/automated.ts) · `tool:run_pr_review_wave` | pr-review.warm |
+| `typescript-tool:start_review_wave` | `tool-contract` | `shipped` | [`extension/pi/v1/codeReview/reviewWave.ts`](../../extension/pi/v1/codeReview/reviewWave.ts) · `tool:start_review_wave` | — |
+| `typescript-tool:submit_pr_review` | `tool-contract` | `shipped` | [`extension/pi/v1/codeReview/submit.ts`](../../extension/pi/v1/codeReview/submit.ts) · `tool:submit_pr_review` | — |
 
 <details>
 <summary>Logical fragments</summary>
@@ -1015,17 +1015,17 @@ Automated, selector-driven, terminal, and browser PR-review families.
   - `section:automated-pr-review-the-pr-review-door/configuring-the-review-model` — Configuring the review model (`heading:automated-pr-review-the-pr-review-door/configuring-the-review-model`)
   - `section:automated-pr-review-the-pr-review-door/untrusted-text-discipline` — Untrusted-text discipline (`heading:automated-pr-review-the-pr-review-door/untrusted-text-discipline`)
   - `section:automated-pr-review-the-pr-review-door/tuning-the-review` — Tuning the review (`heading:automated-pr-review-the-pr-review-door/tuning-the-review`)
-- `typescript-model-call:extension/doors/prReview.ts:module:sendUserMessage:0`
+- `typescript-model-call:extension/pi/v1/codeReview/automated.ts:module:sendUserMessage:0`
   - `argument:0` — sendUserMessage model-facing argument (`symbol:module/call:sendUserMessage/0/argument:0`)
-- `typescript-model-call:extension/doors/prReviewBrowser.ts:module:sendUserMessage:0`
+- `typescript-model-call:extension/pi/v1/codeReview/browser.ts:module:sendUserMessage:0`
   - `argument:0` — sendUserMessage model-facing argument (`symbol:module/call:sendUserMessage/0/argument:0`)
-- `typescript-model-call:extension/doors/prReviewBrowser.ts:module:sendUserMessage:1`
+- `typescript-model-call:extension/pi/v1/codeReview/browser.ts:module:sendUserMessage:1`
   - `argument:0` — sendUserMessage model-facing argument (`symbol:module/call:sendUserMessage/1/argument:0`)
-- `typescript-model-call:extension/doors/prReviewBrowser.ts:module:sendUserMessage:2`
+- `typescript-model-call:extension/pi/v1/codeReview/browser.ts:module:sendUserMessage:2`
   - `argument:0` — sendUserMessage model-facing argument (`symbol:module/call:sendUserMessage/2/argument:0`)
-- `typescript-model-call:extension/doors/prReviewTerminal.ts:module:sendUserMessage:0`
+- `typescript-model-call:extension/pi/v1/codeReview/terminal.ts:module:sendUserMessage:0`
   - `argument:0` — sendUserMessage model-facing argument (`symbol:module/call:sendUserMessage/0/argument:0`)
-- `typescript-model-call:extension/doors/prReviewTerminal.ts:module:sendUserMessage:1`
+- `typescript-model-call:extension/pi/v1/codeReview/terminal.ts:module:sendUserMessage:1`
   - `argument:0` — sendUserMessage model-facing argument (`symbol:module/call:sendUserMessage/1/argument:0`)
 - `typescript-model-call:extension/waves/transport.ts:module:workflow-script:0`
   - `workflowScript` — Subagent workflow script (`symbol:module/property:workflowScript/0`)

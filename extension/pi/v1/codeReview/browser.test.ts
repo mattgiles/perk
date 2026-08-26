@@ -3,7 +3,7 @@
 // active-PR resolution / injection run against a REAL bound session via the T1 harness, OFFLINE
 // (a fake `perk` stands in for the cold doors, and a fake plannotator extension registers the
 // presence-probe command + a bus listener that stands in for the browser). The arg parse is
-// `parseReviewDoorArgs` — pinned in prReviewTerminal.test.ts, not re-pinned here.
+// `parseReviewDoorArgs` — pinned in terminal.test.ts, not re-pinned here.
 
 import assert from "node:assert/strict";
 import { existsSync } from "node:fs";

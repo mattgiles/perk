@@ -474,8 +474,9 @@ end of the section).
 | `dream_bundle_digest` | string | the dream-wave finalized-bundle digest marker (§8.61): `""` = invalidated (cleared unconditionally at wave entry, BEFORE the stale-bundle removal attempt — the invalidation record); `sha256:<hex>` = the digest of the current finalized run-scratch bundle bytes, set only after a successful finalize write; the §8.63 dream-report recovery refuses unless the marker is present, non-empty, and byte-matches the bundle just read; per-field LWW, no rebuild change |
 | `perk_version` | string | the running perk (extension) version, stamped when run identity is established (the claim/fork/adopt/mint arms, §8.2) — the session-audit **exact-vintage** basis (the key literal is the cross-plane coordination point; the read side is `perk-dev`'s audit corpus/vintage layer); omitted when only the `perkVersion()` failure sentinel is available; best-effort tier |
 
-Automated PR-review postability is session-local interior state, not an appended workflow-state
-field: `null` permits the backwards-compatible standalone post; valid wave input
+Automated PR-review postability is PER-ACTIVATION interior state (one holder per installer
+activation — two bound sessions in one process never share/clobber it), not an appended
+workflow-state field: `null` permits the backwards-compatible standalone post; valid wave input
 moves immediately to `pending` before target resolution (`review_wave_unavailable` on either
 verdict); every normalized outcome records `{pr, complete, attempted, covered}`; one successful
 post consumes it (`review_wave_consumed` thereafter). Bad wave input preserves the prior state.
@@ -657,8 +658,8 @@ session-lifecycle gates + the warm `/implement` handoff (`extension/doors/lifecy
 (`extension/pi/v1/plan.ts`; §8.10
 owns the provider seams); the read-only CI executor
 (`extension/doors/ciExecutor.ts`); the spawned delegation seam + `/address` + `/pr-review` + `/pr-review-terminal` + `/pr-review-browser`
-(`extension/doors/address.ts` / `prReview.ts` / `prReviewTerminal.ts` /
-`prReviewBrowser.ts` / `submitPrReview.ts` / `hunkHandoff.ts` / `plannotatorHandoff.ts`, `agents/*.md`, `skills/perk-address/` /
+(`extension/doors/address.ts` / `extension/pi/v1/codeReview/automated.ts` / `terminal.ts` /
+`browser.ts` / `submit.ts` / `checkout.ts` / `extension/doors/plannotatorHandoff.ts`, `agents/*.md`, `skills/perk-address/` /
 `perk-pr-review/` / `perk-pr-review-terminal/` / `perk-pr-review-browser/`; the gateway op shapes stay in §8.4); the conflict-resolution drive
 (`extension/doors/submit.ts`; the probe contract stays in §8.4).
 
@@ -1037,7 +1038,8 @@ perk pr review-submit --pr <n> --event <e> --batch <file> --json -> { success, e
     # (exit 2); exits 0/1/2.
 ```
 
-**The `submit_pr_review` warm tool** (`extension/doors/submitPrReview.ts`). The human-gated
+**The `submit_pr_review` warm tool** (`extension/pi/v1/codeReview/submit.ts`, over the
+`codeReview/submission.ts` feature operation). The human-gated
 curated-posting surface the review doors ride (`/pr-review-terminal`, `/pr-review-browser`,
 `/stack-review-browser`) — the doors register **no tools of their own**.
 Delegates to the `perk pr review-submit` cold worker above (the batch rides the run-scratch
@@ -1089,7 +1091,10 @@ direct `perk pr review-submit` calls are forbidden on every door:
   findings into per-PR coordinates under the dry-run repair loop.
 - **`last_review` / `review_posts`** field shapes: §8.3. The posting invariants: `last_review`
   appends best-effort with strict read-back on non-dry-run success only; `review_posts` appends
-  one ordered row per REAL success (dry-runs and failures never write).
+  one ordered row per REAL success (dry-runs and failures never write). Both writes ride the
+  session seam's change union (`record-review` then `append-review-post` — BOTH always
+  attempted, in that order, classifications ignored); the seam is the sole read-back-warning
+  reporter, and the resume guard reads the ledger through the seam's fail-open `reviewPosts()`.
   Skip-on-resume is TOOL-ENFORCED on row presence: a real post to a PR that already has a row
   refuses with `already_posted` (before the confirm and the cold-door mutation);
   `allow_repost: true` is the deliberate-second-review override. The ledger stays best-effort,
@@ -1097,11 +1102,14 @@ direct `perk pr review-submit` calls are forbidden on every door:
   posted-vs-pending from the ledger, and where a row is missing verifies against GitHub before
   re-posting — never replaying a confirmed review.
 
-**The `push_annotations` findings-delivery tool** (`extension/doors/annotationPush.ts`;
+**The `push_annotations` findings-delivery tool** (`extension/pi/v1/providers/annotations.ts`;
 perk-registered — census §8.40). The finding→annotation mechanics are CODE, not prompt
 discipline: the model hands the tool finding batches (one angle per call, findings passed
 straight through) and never composes annotation HTTP. FLOW-SCOPED via the door-primed surface
-handle: the browser door primes it on a PR-mode open with the deterministic URL (the
+handle on PER-ACTIVATION state (`createAnnotationState()`, created once per activation and
+threaded to the installer and every priming door — two bound sessions in one process never
+share/clobber a surface or ledger): the browser door primes it on a PR-mode open with the
+deterministic URL (the
 preset-`PLANNOTATOR_PORT` mechanism below) and clears it on bridge settle AND on the
 readiness-degrade arm — the model never relays or sees the URL (the result prose never echoes
 it), and outside a door-opened flow the tool refuses `no_surface`. The primed mode selects the
@@ -1188,7 +1196,7 @@ prompt; the contracts pin the output shape, not the judgment rubric.
   tier than `pr-reviewer` for security-sensitive untrusted-code review). A legacy
   `guest-reviewer` key is silently ignored on both planes (`extra="ignore"` — no tripwire).
 
-**The `/pr-review-terminal` warm door** (`extension/doors/prReviewTerminal.ts`). The TERMINAL
+**The `/pr-review-terminal` warm door** (`extension/pi/v1/codeReview/terminal.ts`). The TERMINAL
 entry into human-in-the-loop adversarial PR review — hunk always, **no provider dispatch** (the
 surface-named command IS the selection; it never reads `[providers]` — or config at all: the
 `[models.subagents] adversarial-reviewer` override is resolved by `start_review_wave` at execute
@@ -1197,8 +1205,8 @@ time). It registers **no tools of its own** — the fan-out pair (`start_review_
 posting rides `submit_pr_review` above with its gate ladder and description unchanged. Its terminal substrate
 — the door-common PR-token arg grammar (`parseReviewArgs`/`parseReviewDoorArgs`), the strict
 checkout decode, the `hunk --version` presence probe, and the R7 handoff — lives in
-`extension/doors/hunkHandoff.ts`/`prReviewTerminal.ts`: the shared parse helpers live in
-`hunkHandoff.ts`, imported by the browser door.
+`extension/pi/v1/codeReview/checkout.ts`/`terminal.ts`: the shared parse helpers live in
+`checkout.ts`, imported by the browser door.
 
 - **Args:** `/pr-review-terminal [pr number|url] [focus note]` — both tokens optional
   (`parseReviewDoorArgs`). A leading
@@ -1216,7 +1224,7 @@ checkout decode, the `hunk --version` presence probe, and the R7 handoff — liv
   `prompts/stages/pr-review-terminal/foreign.md` (the untrusted-foreign-code posture, the triage
   loop, the posting contract, and the `perk pr review cleanup` step).
 - **The streaming fan-out (foreign + active; the CODE-owned wave —
-  `extension/doors/reviewWaveTools.ts` over `extension/waves/adversarialReviewWave.ts`):** the
+  `extension/pi/v1/codeReview/reviewWave.ts` over `extension/waves/adversarialReviewWave.ts`):** the
   guidance instructs ONE **`start_review_wave`** call — `{angles, pr, worktree, directive?}`
   (2–3 unique angle slugs, `claimed-intent` mandatory), the `pr`/`worktree` relayed verbatim
   from the guidance and the operator focus passed verbatim as `directive` — and the tool renders
@@ -1264,7 +1272,7 @@ checkout decode, the `hunk --version` presence probe, and the R7 handoff — liv
   the stale local ref, keeping the door usable offline), then `merge-base(HEAD, origin/<branch>)`.
   Null ⇒ a loud error naming the pass-a-PR fallback; nothing launched or injected.
 - **The R7 launch handoff (door-side, fail-soft, non-blocking — `handleHunkLaunch` in
-  `extension/doors/hunkHandoff.ts`, report-scope-parameterized):** every mode hands off
+  `extension/pi/v1/codeReview/checkout.ts`, report-scope-parameterized):** every mode hands off
   `hunk diff <sha12> --agent-notes` (agent notes visible in hunk immediately) in the mode's
   worktree (foreign: the checkout; active/pre-PR: `ctx.cwd`). The door does not merely print the
   launch command — it (a) copies `cd <worktree> && hunk diff <sha12> --agent-notes` to the OS
@@ -1311,22 +1319,23 @@ checkout decode, the `hunk --version` presence probe, and the R7 handoff — liv
   on every
   injection — all three modes (the skill's hunk cheat sheets serve the pre-PR read-back too).
 
-**The `/pr-review-browser` warm door** (`extension/doors/prReviewBrowser.ts`). The BROWSER entry
+**The `/pr-review-browser` warm door** (`extension/pi/v1/codeReview/browser.ts`). The BROWSER entry
 into human-in-the-loop adversarial PR review — plannotator always, **no provider dispatch** (the
 surface-named command IS the selection; it never reads `[providers]` — or config at all: the
 `[models.subagents] adversarial-reviewer` override is resolved by `start_review_wave` at execute
 time). It registers **no tools of its own** — the fan-out pair and the door-primed
 `push_annotations` (above) are perk-registered globally (census §8.40), and perk-side posting
 rides `submit_pr_review` with its gate ladder unchanged. The door owns the `push_annotations`
-surface-handle lifecycle: `primeAnnotationSurface({mode: "review", url})` the moment a PR-mode
-browser open picks the port; `clearAnnotationSurface()` when the bridge settles AND on the
+surface-handle lifecycle over the threaded per-activation annotation state:
+`primeAnnotationSurface(state, {mode: "review", url})` the moment a PR-mode
+browser open picks the port; `clearAnnotationSurface(state)` when the bridge settles AND on the
 readiness-degrade arm (both clears idempotent; a post-degrade push refuses `no_surface`). The
 local (pre-PR) mode never primes. Accepted concurrent double-open edge: a second
 `/pr-review-browser` while the first browser is open re-primes (a new browser session supersedes
 everything), and the first bridge's later settle would clear the second session's surface —
 rare and loud already (the fixed-port EADDRINUSE caveat below), noted, not engineered around.
 Its shared substrate lives in
-`extension/doors/plannotatorHandoff.ts` (the `hunkHandoff.ts` mirror — the pinned `code-review`
+`extension/doors/plannotatorHandoff.ts` (the `checkout.ts` mirror — the pinned `code-review`
 envelope, the presence probe, the active-PR ladder, the respond routing, and the browser-open
 core), imported by this door and `/pr-review-terminal`'s active mode.
 
@@ -1437,7 +1446,7 @@ parallel rebuild.
   The explicit base MUST be the remote-tracking ref the checkout materializes: plannotator
   trusts an explicit value verbatim and degrades a failed merge-base to `HEAD` (an empty
   review), so a bare branch name is a silent-failure trap.
-- **The warm `/stack-review-browser` door** (`extension/doors/stackReviewBrowser.ts`, SCOPE
+- **The warm `/stack-review-browser` door** (`extension/pi/v1/codeReview/stack.ts`, SCOPE
   `stack-review-browser`): a thin door over the SAME extracted browser-lifecycle core as
   `/pr-review-browser` (`openReviewBrowserCore`: open → prime → readiness observation → respond
   routing → surface clear → guidance injection), with the stack respond mapper

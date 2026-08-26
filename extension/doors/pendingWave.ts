@@ -1,5 +1,5 @@
 // The per-registration pending-wave state the launch/collect door pairs share
-// (`reviewWaveTools.ts` + `draftReviewWaveTools.ts`): plain state objects owned by registration
+// (`pi/v1/codeReview/reviewWave.ts` + `draftReviewWaveTools.ts`): plain state objects owned by registration
 // closures and threaded as explicit parameters — deliberately NO interface/factory protocol and
 // no controller abstraction. One shared collect function races the pending result against the
 // bounded grace; everything else (error prose, aggregate shaping, warnings) stays with each
