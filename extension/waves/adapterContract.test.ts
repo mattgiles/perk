@@ -12,6 +12,12 @@ import { basename, join } from "node:path";
 import { test } from "node:test";
 import { createMemoryWaveAdapter } from "./memoryAdapter.ts";
 import {
+  createRpcWaveAdapter,
+  WAVE_RPC_PROTOCOL_VERSION,
+  WAVE_RPC_REPLY_EVENT_PREFIX,
+  WAVE_RPC_REQUEST_EVENT,
+} from "./rpcAdapter.ts";
+import {
   WAVE_ACCEPTANCE,
   type WaveAdapter,
   type WaveBus,
@@ -20,12 +26,6 @@ import {
   type WaveRunHandle,
   type WaveSpawnParams,
 } from "./transport.ts";
-import {
-  createRpcWaveAdapter,
-  WAVE_RPC_PROTOCOL_VERSION,
-  WAVE_RPC_REPLY_EVENT_PREFIX,
-  WAVE_RPC_REQUEST_EVENT,
-} from "./rpcAdapter.ts";
 
 interface StagedAggregate {
   state: string;

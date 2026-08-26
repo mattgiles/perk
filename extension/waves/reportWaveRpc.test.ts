@@ -10,8 +10,8 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { createFakeSubagents, waveScriptItems } from "../testing/fakeSubagents.ts";
-import { createRpcWaveAdapter } from "./rpcAdapter.ts";
 import { runReportWave, startReportWave, type WaveSpec } from "./reportWave.ts";
+import { createRpcWaveAdapter } from "./rpcAdapter.ts";
 import { WAVE_ACCEPTANCE, type WaveBus } from "./transport.ts";
 
 /** A synchronous in-memory bus (the adapter-contract suite's shape). */

@@ -80,7 +80,10 @@ export function createDraftReviewWaveState(): DraftReviewWaveState {
  * slot too — a new browser session supersedes everything (the `primeAnnotationSurface`
  * discipline).
  */
-export function primeDraftReviewContext(state: DraftReviewWaveState, next: DraftReviewContext): void {
+export function primeDraftReviewContext(
+  state: DraftReviewWaveState,
+  next: DraftReviewContext,
+): void {
   state.context = {
     draftType: next.draftType,
     draft: next.draft,

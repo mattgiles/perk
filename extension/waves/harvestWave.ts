@@ -268,7 +268,10 @@ function laneTask(id: string, manifestPath: string): string {
 }
 
 /** Build the wave lanes: one `perk.harvest-analyst` lane per manifest lane, keyed by lane id. */
-export function buildHarvestLanes(manifest: HarvestManifest, manifestPath: string): ReportAssignment[] {
+export function buildHarvestLanes(
+  manifest: HarvestManifest,
+  manifestPath: string,
+): ReportAssignment[] {
   return manifest.lanes.map((lane) => ({
     key: lane.id,
     label: lane.id,

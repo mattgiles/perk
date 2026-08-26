@@ -17,7 +17,12 @@ import {
   type FakeSubagents,
   waveScriptItems,
 } from "../testing/fakeSubagents.ts";
-import { loadPerkSession, type PerkSession, scaffoldRepo } from "../testing/harness.ts";
+import {
+  loadPerkSession,
+  type PerkSession,
+  scaffoldRepo,
+  spyInjections,
+} from "../testing/harness.ts";
 
 /** The shared fake in dynamic mode, watermarking every report with the session's marker. */
 function markedFake(marker: string): FakeSubagents {
@@ -135,12 +140,20 @@ function fakePlannotator(sink: FakePlannotatorSink): (pi: ExtensionAPI) => void 
   };
 }
 
-/** Settle a session's bridge (DENY) so its readiness poll ends, then await the env restore. */
-async function settleBridge(sink: FakePlannotatorSink): Promise<void> {
+/**
+ * Settle a session's bridge (DENY) so its readiness poll ends, and wait for the decision
+ * task's OWN completion signal — the injected deny turn — before the caller disposes (the
+ * process-global port restore alone is a weak barrier with two concurrent doors).
+ */
+async function settleBridge(sink: FakePlannotatorSink, injected: string[]): Promise<void> {
   sink.emitDecision({ reviewId: "r-1", approved: false, feedback: "settle" });
   const start = Date.now();
-  while ("PLANNOTATOR_PORT" in process.env) {
+  while (!injected.some((m) => m.includes("DENIED"))) {
     if (Date.now() - start > 5000) break; // bounded — never hang a test on cleanup
+    await new Promise((r) => setTimeout(r, 25));
+  }
+  while ("PLANNOTATOR_PORT" in process.env) {
+    if (Date.now() - start > 5000) break;
     await new Promise((r) => setTimeout(r, 25));
   }
 }
@@ -171,6 +184,8 @@ test("two sessions share no draft-review context: each wave receives its own pri
     env: { PERK_RUN_ID: "01RID" },
     extraExtensions: [fakePlannotator(sinkB), fakeB.extension],
   });
+  const injectedA = spyInjections(hA);
+  const injectedB = spyInjections(hB);
   try {
     await hA.invokeTool("plan_draft", { plan: PLAN_DRAFT });
     await hA.runCommandHandler("plan-review-browser", "");
@@ -219,8 +234,8 @@ test("two sessions share no draft-review context: each wave receives its own pri
       "draft B",
     );
   } finally {
-    await settleBridge(sinkA);
-    await settleBridge(sinkB);
+    await settleBridge(sinkA, injectedA);
+    await settleBridge(sinkB, injectedB);
     hA.dispose();
     hB.dispose();
   }

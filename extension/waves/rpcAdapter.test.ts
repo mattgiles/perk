@@ -8,7 +8,6 @@ import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { WAVE_ACCEPTANCE, type WaveBus, type WaveSpawnParams } from "./transport.ts";
 import {
   createRpcWaveAdapter,
   WAVE_RPC_PING_TIMEOUT_MS,
@@ -17,6 +16,7 @@ import {
   WAVE_RPC_REPLY_TIMEOUT_MS,
   WAVE_RPC_REQUEST_EVENT,
 } from "./rpcAdapter.ts";
+import { WAVE_ACCEPTANCE, type WaveBus, type WaveSpawnParams } from "./transport.ts";
 
 /** A synchronous fake bus that additionally exposes live handler counts per channel. */
 function createFakeBus(): WaveBus & { handlerCount(channel: string): number } {

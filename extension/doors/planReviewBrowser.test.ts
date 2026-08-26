@@ -622,20 +622,13 @@ test("open: a post-degrade decision is ignored loudly (never routed into a save)
   } as unknown as ExtensionContext;
 
   // probe:false + a tiny budget → the readiness poll times out → the degrade arm fires.
-  await openPlanReviewAndGuide(
-    pi,
-    ctx,
-    fakeGating(true),
-    { draft: "# The draft\n" },
-    draftReview,
-    {
-      pickFreePort: async () => 45002,
-      probe: async () => false,
-      intervalMs: 1,
-      budgetMs: 3,
-      sleep: async () => {},
-    },
-  );
+  await openPlanReviewAndGuide(pi, ctx, fakeGating(true), { draft: "# The draft\n" }, draftReview, {
+    pickFreePort: async () => 45002,
+    probe: async () => false,
+    intervalMs: 1,
+    budgetMs: 3,
+    sleep: async () => {},
+  });
   const start = Date.now();
   while (
     !injected.some((m) => m.includes("plan-review browser is unavailable")) &&

@@ -8,8 +8,8 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
-import { createMemoryWaveAdapter } from "./memoryAdapter.ts";
 import { waveScriptItems } from "../testing/fakeSubagents.ts";
+import { createMemoryWaveAdapter } from "./memoryAdapter.ts";
 import {
   EXPLORE_ASSIGNMENT_KEY,
   explorerLaneTask,

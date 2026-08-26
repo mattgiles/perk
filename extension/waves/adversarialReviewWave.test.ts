@@ -37,7 +37,11 @@ function okEntry(key: string): unknown {
 // -------------------------------------------------------------------------- lane construction
 
 test("buildAdversarialReviewAssignments: key = label = slug, the fixed agent/phase, the exact task line", () => {
-  const lanes = buildAdversarialReviewAssignments({ angles: TWO_ANGLES, pr: 42, worktree: "/abs/wt" });
+  const lanes = buildAdversarialReviewAssignments({
+    angles: TWO_ANGLES,
+    pr: 42,
+    worktree: "/abs/wt",
+  });
   // The exact byte pin proves the task names the angle, the PR, and the worktree — and nothing
   // else: no URL, no port, no surface handle (the builder has no parameter to carry one).
   assert.deepEqual(lanes, [
@@ -92,7 +96,11 @@ test("buildAdversarialReviewAssignments stack mode: per-key task pins + the no-s
     ],
   );
   // Without stack (absent OR false), tasks are byte-identical to the single-PR form.
-  const plain = buildAdversarialReviewAssignments({ angles: TWO_ANGLES, pr: 42, worktree: "/abs/wt" });
+  const plain = buildAdversarialReviewAssignments({
+    angles: TWO_ANGLES,
+    pr: 42,
+    worktree: "/abs/wt",
+  });
   const explicitFalse = buildAdversarialReviewAssignments({
     angles: TWO_ANGLES,
     pr: 42,

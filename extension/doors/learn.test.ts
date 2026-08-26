@@ -503,7 +503,10 @@ test("tool: run_learn_wave end-to-end over the RPC seam — typed reports + expl
     { key: "session-deviations", ok: true, error: null, report },
     { key: "existing-docs", ok: false, error: "analyst crashed", report: null },
   ];
-  const h = await loadPerkSession({ cwd, extraExtensions: [fakeSubagentsRpc(aggregate).extension] });
+  const h = await loadPerkSession({
+    cwd,
+    extraExtensions: [fakeSubagentsRpc(aggregate).extension],
+  });
   try {
     const result = await h.invokeTool("run_learn_wave", {
       bundle_dir: bundleDir,

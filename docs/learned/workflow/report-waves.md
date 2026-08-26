@@ -18,9 +18,10 @@ session-scoped guard-state patterns, and the wave test machinery worth reusing.
 
 ## Distillation
 
-- Wave mechanics are CODE, module-owned: `reportWave.ts` is the core; the per-flow entrypoints
-  and their tools/postures are catalogued in "Orientation" (upstream pi-subagents mechanics live
-  in `pi/subagents.md`, not here).
+- Wave mechanics are CODE, module-owned: `reportWave.ts` is the logical core over the confined
+  transport tier (`transport.ts`); the per-flow entrypoints and their tools/postures are
+  catalogued in "Orientation" (upstream pi-subagents mechanics live in `pi/subagents.md`, not
+  here).
 - Every wave spawn carries the fixed contract incl. the explicit acceptance disable
   (`acceptance: {level: "none"}`) — "The fixed spawn contract carries an explicit acceptance
   disable".
@@ -40,10 +41,23 @@ session-scoped guard-state patterns, and the wave test machinery worth reusing.
 
 ## Orientation
 
-`extension/waves/reportWave.ts` is the operational core. The blocking runner
-(`runReportWave`/`runWaveScript`) is re-expressed as start + await over the **start/settle split**
-(`startWaveScript`/`startReportWave`). `rpcAdapter.ts` is the live pi-subagents v1 RPC adapter;
-`memoryAdapter.ts` is the first-class test double. The flow entrypoints:
+`extension/waves/reportWave.ts` is the LOGICAL core — `ReportAssignment` (the renamed
+`WaveLane`; `WaveSpec.assignments`), normalization, the runner, and the caller-facing failure
+union — over the transport tier in `waves/transport.ts`: the adapter seam (`WaveAdapter`,
+`WaveSpawnParams`, `WAVE_ACCEPTANCE`), the script tier (`startWaveScript`/`runWaveScript`,
+`WAVE_TIMEOUT_MS`), receipt primitives, and the transport failure vocabulary
+(`WaveRunFailureReason` — the six wave-level reasons, a structural SUBSET of the logical tier's
+`WaveFailureReason`, so script failures flow up with zero runtime mapping and a lane-level
+reason on a script-run failure is unrepresentable). The blocking runner (`runReportWave`) is
+re-expressed as start + await over the **start/settle split** (`startWaveScript`/
+`startReportWave`); `renderWaveScript` + assignment validation are module-private — script text
+is invisible outside `waves/`, so renderer assertions observe the spawned `workflowScript`
+through the adapter seam. `rpcAdapter.ts` is the live pi-subagents v1 RPC adapter;
+`memoryAdapter.ts` is the first-class test double. Callers import ONLY `reportWave.ts` (its one
+sanctioned `WaveAdapter` type re-export is the injection seam) plus `rpcAdapter.ts` at the ten
+registration sites — guard Rule G (`extension/importDirectionGuard.test.ts`) pins that exact
+importer set, bans outside edges into `transport.ts`/`memoryAdapter.ts`, and censuses raw
+`WAVE_RPC_`/channel tokens (tests included). The flow entrypoints:
 
 - `prReviewWave.ts` — `/pr-review`'s bounded-retry wave behind the `run_pr_review_wave` tool.
 - `learnWave.ts` — `/learn`'s analyst fan-out behind `run_learn_wave` (best-effort, no retry).
@@ -111,8 +125,8 @@ row is the drift tripwire.
 
 `start*` returns a handle plus a `result` promise that **never rejects** — every arm normalizes —
 so a detached/uncollected run can never become an unhandled rejection. The blocking form is start
-+ await result: ONE operational core, applied at two levels (script: `startWaveScript`; lane:
-`startReportWave`). Discipline details: the completion subscription is released exactly on settle;
++ await result: ONE operational core, applied at two levels (script: `transport.ts`'s
+`startWaveScript`; assignment: `reportWave.ts`'s `startReportWave`). Discipline details: the completion subscription is released exactly on settle;
 pre-spawn failures unsubscribe immediately and return the same failure/receipt values the blocking
 runner reported.
 
@@ -331,10 +345,18 @@ The registered-tool census has a fourth leg: the docs-site table
 `docs/site/src/in-session-reference.test.mjs` (set-equal to `PERK_TOOLS` and a live harness
 registration) — keep that guard in mind when registering tools (#1997).
 
-For start/collect wave pairs, `executionMode: "sequential"` remains the concurrency guard. Collect
-races the pending result against a bounded, environment-overridable grace to absorb the completion-
-event versus `subagent_wait` wake race. An unsettled result soft-fails while retaining pending; the
-module timeout eventually settles a stuck run and a later collect drains it.
+For start/collect wave pairs, `executionMode: "sequential"` remains the concurrency guard — and
+the pending slot is PER-REGISTRATION closure state, never module-global: `doors/pendingWave.ts`
+owns the plain `PendingWaveState` shape + the one shared `collectPending` (deliberately no
+interface/factory protocol), threaded as an explicit parameter into the execute cores (the draft
+pair's primed `DraftReviewWaveState.context` rides the same object, created in `index.ts` and
+threaded to the tool pair AND both browser doors). Collect races the pending result against a
+bounded, environment-overridable grace (`PERK_WAVE_COLLECT_GRACE_MS`) to absorb the completion-
+event versus `subagent_wait` wake race. An unsettled result soft-fails while retaining pending;
+the module timeout eventually settles a stuck run and a later collect drains it. The clear is
+identity-guarded: a supersede landing during an in-flight collect's await never erases the NEW
+pending wave (pinned in `doors/pendingWave.test.ts`; two-session isolation in
+`doors/waveIsolation.test.ts`).
 
 ## Deliberate non-behaviors need regression pins
 
@@ -358,10 +380,15 @@ Instances:
 - **Delivery ordering rides a macrotask** — see the comment at the `setTimeout(..., 0)` site in
   `memoryAdapter.ts` (a microtask would still beat the awaiting continuation, silently converting
   the default ordering arm into the race arm).
-- **The fake pi-subagents RPC responder on `pi.events`** (`extension/doors/prReview.test.ts`)
-  answers `ping`/`spawn` with the v1 envelope, writes a terminal `status.json` into a mkdtemp
-  `asyncDir`, emits the completion event, and sinks spawn params — the offline e2e pattern for
-  any RPC-launched wave.
+- **The shared fake pi-subagents responder** (`extension/testing/fakeSubagents.ts`):
+  `createFakeSubagents(plans)` answers `ping`/`spawn` with the v1 envelope, writes a terminal
+  `status.json` into a mkdtemp `asyncDir`, delivers completions (per-spawn `delivery:
+  "auto" | "manual" | "never"` knobs — `manual` + `emit` drive correlation tests; `never` + a
+  tiny `timeoutMs` drives timeout→stop), sinks spawn params (`spawns`) and stop requests
+  (`stops`), and computes script-derived aggregates via the `executeScript` plan hook — the
+  offline e2e pattern for any RPC-launched wave (bind via the harness's `extraExtensions` or
+  `attach` on a bare fake bus; ten door/pi suites ride it). `waveScriptItems` is the shared
+  `runs.all(`-slice parser (a failed parse throws, never a silent empty list).
 - **The render-then-execute pattern** for dynamic in-script logic
   (`prReviewDynamicWave.test.ts`, `prReviewDynamic.test.ts`): the module renders deterministic JS
   (all dynamic data `JSON.stringify`-embedded); unit tests execute the rendered script via the
@@ -399,9 +426,10 @@ Instances:
 
 ## Watch items / residuals
 
-- Three suites parse the module-rendered script by slicing between `runs.all(` and `);\nreturn` —
-  a renderer output-shape change breaks them loudly but widely (consider a shared parse helper at
-  a fourth consumer).
+- The module-rendered script's `runs.all(` … `);\nreturn` shape is parsed by ONE shared helper
+  (`testing/fakeSubagents.ts`'s `waveScriptItems`, adopted at the thirteen former slice sites) —
+  a renderer output-shape change now fails loudly in one place (the dynamic wave's `const TASKS`
+  slice and rendered-script execution stay bespoke single-consumer idioms).
 - The review-wave pair (and the draft pair) HAVE now run against real pi-subagents — the
   2026-08-10 live dogfood of the three streaming browser doors
   (`docs/design/archive/streaming-doors-dogfood.md`: streaming cadence, dedupe, `replace` reshape,
@@ -433,8 +461,10 @@ Instances:
   `learnWave.ts`
 - `docs/learned/workflow/plan-review-flow.md` — the annotation-push module (the sibling
   prompt-discipline-into-code migration)
-- `extension/waves/reportWave.ts` (+ `rpcAdapter.ts`, `memoryAdapter.ts`) — the operational core
-  and its adapters
+- `extension/waves/reportWave.ts` (the logical tier) + `waves/transport.ts` (the confined
+  transport tier) + `rpcAdapter.ts`, `memoryAdapter.ts` — the operational core and its adapters
+- `extension/testing/fakeSubagents.ts` — the shared fake responder + `waveScriptItems`
+- `extension/doors/pendingWave.ts` — the per-registration pending-wave state + `collectPending`
 - `extension/waves/prReviewWave.ts`, `learnWave.ts`, `prReviewDynamicWave.ts`,
   `adversarialReviewWave.ts`, `draftReviewWave.ts`, `reviewClassifierWave.ts`,
   `objectiveExplorerWave.ts`, `auditWave.ts`, `harvestWave.ts`, `dreamWave.ts`,

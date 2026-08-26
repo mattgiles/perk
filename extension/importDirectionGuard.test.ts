@@ -54,6 +54,17 @@
 //      file under `worker/`, ONLY the adapter may carry an `@earendil-works/*` specifier
 //      (type edges count) — and it must carry ≥ 1 (the positive floor: the SDK vocabulary
 //      provably lives in the adapter and the extractor still sees package specifiers).
+//   G. Report-wave transport confinement: the production files outside `waves/` with an edge
+//      to `waves/rpcAdapter.ts` are EXACTLY the ten wave registration sites (set-exact both
+//      directions; shrink-only intent — the census only burns down as registrations migrate);
+//      no production file outside `waves/` has an edge into the interior transport modules
+//      (`waves/transport.ts`, `waves/memoryAdapter.ts` — callers reach the wave mechanism
+//      through `waves/reportWave.ts`'s logical tier and its one sanctioned `WaveAdapter`
+//      re-export); and outside `waves/` + `testing/`, NO file — tests included — carries a
+//      raw RPC token (`WAVE_RPC_*` word-bounded, so the public `PERK_WAVE_RPC_PING_MS` env
+//      knob never matches) or a `subagents:rpc:v1` channel literal. Positive floor:
+//      `waves/rpcAdapter.ts` itself carries ≥ 1 of each. This guard file is the one documented
+//      census self-exemption (it necessarily names the tokens it polices).
 //
 // Test-only `typescript` import: the guard lexes with the exact-pinned `typescript` devDependency;
 // production sources gain no imports (`bareImportGuard.test.ts` scans production files only, and
@@ -146,6 +157,34 @@ const REGISTRATION_TOKEN =
 /** Rule E's approved registrars: the Pi adapter home + the two composition roots. */
 const APPROVED_REGISTRAR_PREFIXES = ["pi/"];
 const APPROVED_REGISTRAR_FILES = ["index.ts", "workerMain.ts"];
+
+// Rule G's adapter-construction census: the exact production files outside `waves/` allowed an
+// edge to `waves/rpcAdapter.ts` — the ten wave registration sites (each constructs its adapter
+// at its execute site; construction threading was considered and dropped at review). SHRINK-ONLY
+// intent: entries leave as flows migrate behind typed operations; no new file may join without
+// operator confirmation.
+const RPC_ADAPTER_IMPORTERS = [
+  "doors/address.ts",
+  "doors/auditWaveTools.ts",
+  "doors/draftReviewWaveTools.ts",
+  "doors/dreamWaveTools.ts",
+  "doors/harvestWaveTools.ts",
+  "doors/learn.ts",
+  "doors/prReview.ts",
+  "doors/prReviewDynamic.ts",
+  "doors/reviewWaveTools.ts",
+  "pi/v1/objectivePlanning.ts",
+];
+
+/** Rule G's interior transport modules: importable only from inside `waves/`. */
+const TRANSPORT_INTERIOR = ["waves/memoryAdapter.ts", "waves/transport.ts"];
+
+/**
+ * Rule G's raw-transport tokens: the RPC constant prefix — WORD-BOUNDED, so the public
+ * `PERK_WAVE_RPC_PING_MS` env knob (its `WAVE` is preceded by a word character) never
+ * matches — and the raw v1 channel literal.
+ */
+const TRANSPORT_TOKEN = /\bWAVE_RPC_|subagents:rpc:v1/;
 
 // The activation-day registration census (Rule E) — every production file that carried a
 // registration token when the rule activated, frozen as literals and SHRINK-ONLY via the stale
@@ -422,6 +461,49 @@ function workerConfinement(
 }
 
 /**
+ * Report-wave transport confinement (Rule G) computations — deliberately Rule-G-specific,
+ * shared by the production assertions and their mutation controls so the controls exercise the
+ * SAME comparison logic. `rpcImporters` = every production file outside `waves/` with an edge
+ * to `waves/rpcAdapter.ts` (compared set-exactly against `RPC_ADAPTER_IMPORTERS`, both
+ * directions); `interiorEdges` = every production edge from outside `waves/` into the interior
+ * transport modules.
+ */
+function transportConfinement(edges: Map<string, string[]>): {
+  rpcImporters: string[];
+  interiorEdges: string[];
+} {
+  const rpcImporters: string[] = [];
+  const interiorEdges: string[] = [];
+  for (const [from, targets] of edges) {
+    if (from.startsWith("waves/")) continue;
+    for (const to of targets) {
+      if (to === "waves/rpcAdapter.ts") rpcImporters.push(from);
+      if (TRANSPORT_INTERIOR.includes(to)) interiorEdges.push(`${from} → ${to}`);
+    }
+  }
+  return { rpcImporters: rpcImporters.sort(), interiorEdges: interiorEdges.sort() };
+}
+
+/**
+ * Rule G's token census: every `file:line: match` where a census file carries a raw transport
+ * token. Raw text matching (no comment stripping): a comment naming a raw channel outside
+ * `waves/` is itself leakage the census exists to catch.
+ */
+function checkTransportTokens(files: string[], read: (file: string) => string): string[] {
+  const violations: string[] = [];
+  for (const file of files) {
+    const lines = read(file).split("\n");
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
+      if (line === undefined) continue;
+      const match = TRANSPORT_TOKEN.exec(line);
+      if (match) violations.push(`${file}:${i + 1}: ${match[0]}`);
+    }
+  }
+  return violations;
+}
+
+/**
  * Census rule: live top-level dirs must equal `frozen ∪ keys(anchored)` set-exactly; the frozen
  * census and the anchored registrations never overlap (a new directory registers ONLY in
  * `ANCHORED_DIRS` — the frozen list never grows); and every anchored dir carries ≥1 anchor,
@@ -474,6 +556,27 @@ function productionFiles(): string[] {
 
 function readProductionFile(file: string): string {
   return readFileSync(path.join(import.meta.dirname, file), "utf8");
+}
+
+/**
+ * Rule G's token-census corpus: every `.ts` under extension/ — TESTS INCLUDED — except
+ * `waves/` (where transport vocabulary lives), `testing/` (the shared fake responder implements
+ * the envelope), and this guard file itself (the one documented self-exemption: it necessarily
+ * names the tokens it polices).
+ */
+function tokenCensusFiles(): string[] {
+  const guardFile = path.basename(import.meta.filename);
+  const entries = readdirSync(import.meta.dirname, { recursive: true }) as string[];
+  return entries
+    .map((entry) => entry.split(path.sep).join("/"))
+    .filter(
+      (entry) =>
+        entry.endsWith(".ts") &&
+        !entry.startsWith("waves/") &&
+        !entry.startsWith("testing/") &&
+        entry !== guardFile,
+    )
+    .sort();
 }
 
 function liveTopLevelDirs(): string[] {
@@ -663,6 +766,49 @@ test("Rule F: worker-plane confinement (exact edges; SDK specifiers only in the 
     ["worker/sdkAdapter.ts"],
     "across workerMain.ts + worker/*, only worker/sdkAdapter.ts may carry an " +
       "@earendil-works/* specifier (type edges count) — and it must carry at least one.",
+  );
+});
+
+test("Rule G: report-wave transport confinement (exact importers; interior ban; token census)", () => {
+  const { rpcImporters, interiorEdges } = transportConfinement(scan().edges);
+  // (1) Exact-set both directions: the ten registration sites — which double as the live-edge
+  // non-vacuity floor (an empty scan or a dropped edge map could never produce exactly these).
+  assert.deepEqual(
+    rpcImporters,
+    [...RPC_ADAPTER_IMPORTERS].sort(),
+    "the production files outside waves/ importing waves/rpcAdapter.ts must be exactly the " +
+      "ten wave registration sites — the census is shrink-only: a site that stops constructing " +
+      "its adapter leaves the census in the same change, and no new file may join it.",
+  );
+  // (2) The interior ban: callers reach the wave mechanism through reportWave.ts's logical
+  // tier (and its one sanctioned WaveAdapter re-export) — never the transport tier directly.
+  assert.deepEqual(
+    interiorEdges,
+    [],
+    "production edge(s) from outside waves/ into the interior transport modules " +
+      "(waves/transport.ts, waves/memoryAdapter.ts): import the logical tier " +
+      "(waves/reportWave.ts) instead — transport types are confined by design.",
+  );
+  // (3) The token census, tests included: no raw RPC channel/envelope vocabulary outside
+  // waves/ + testing/ (test doubles ride testing/fakeSubagents.ts, not hand-rolled envelopes).
+  const censusFiles = tokenCensusFiles();
+  assert.ok(
+    censusFiles.some((file) => file.endsWith(".test.ts")),
+    "the token census saw no test files — the census corpus is misaimed",
+  );
+  assert.deepEqual(
+    checkTransportTokens(censusFiles, readProductionFile),
+    [],
+    "raw transport token(s) outside waves/ + testing/: drive the fake responder through " +
+      "testing/fakeSubagents.ts instead of naming WAVE_RPC_* constants or the raw " +
+      "subagents:rpc:v1 channel.",
+  );
+  // (4) The positive floor: the adapter itself must carry both token families — a rotted
+  // regex or a renamed channel would otherwise leave the census vacuous.
+  const adapterSource = readProductionFile("waves/rpcAdapter.ts");
+  assert.ok(
+    /\bWAVE_RPC_/.test(adapterSource) && adapterSource.includes("subagents:rpc:v1"),
+    "waves/rpcAdapter.ts no longer carries the censused tokens — the census is vacuous",
   );
 });
 
@@ -1037,4 +1183,60 @@ test("control 12: Rule F mutation fixtures (foreign edge into the seam; a seam S
     ["worker/sdkAdapter.ts", "worker/stageExecution.ts"],
     "the synthetic seam SDK specifier was NOT flagged by the census",
   );
+});
+
+test("control 13: Rule G mutation fixtures (11th importer; interior edge; token word bounds)", () => {
+  // A synthetic 11th importer, threaded through the SAME comparison logic as the production
+  // assertion, must break the exact-set.
+  const mutated = new Map([...scan().edges].map(([file, targets]) => [file, [...targets]]));
+  mutated.set("doors/rogue.ts", ["waves/rpcAdapter.ts"]);
+  const { rpcImporters } = transportConfinement(mutated);
+  assert.ok(
+    rpcImporters.includes("doors/rogue.ts"),
+    "the synthetic 11th rpcAdapter importer was NOT seen",
+  );
+  assert.notDeepEqual(
+    rpcImporters,
+    [...RPC_ADAPTER_IMPORTERS].sort(),
+    "the exact-set comparison must fail once an unregistered importer exists",
+  );
+  // The other direction: a census entry whose live edge died must ALSO break the exact-set.
+  const shrunk = new Map([...scan().edges].map(([file, targets]) => [file, [...targets]]));
+  shrunk.set(
+    "doors/address.ts",
+    (shrunk.get("doors/address.ts") ?? []).filter((to) => to !== "waves/rpcAdapter.ts"),
+  );
+  assert.notDeepEqual(
+    transportConfinement(shrunk).rpcImporters,
+    [...RPC_ADAPTER_IMPORTERS].sort(),
+    "a stale census entry (no live edge) must fail the exact-set — the census is shrink-only",
+  );
+
+  // A synthetic interior-transport edge must be flagged.
+  const interior = transportConfinement(
+    new Map([["doors/x.ts", ["waves/transport.ts", "waves/memoryAdapter.ts"]]]),
+  );
+  assert.deepEqual(interior.interiorEdges, [
+    "doors/x.ts → waves/memoryAdapter.ts",
+    "doors/x.ts → waves/transport.ts",
+  ]);
+  // …while waves/-interior edges to the same modules are never flagged (the home is exempt).
+  const interiorOk = transportConfinement(
+    new Map([["waves/reportWave.ts", ["waves/transport.ts"]]]),
+  );
+  assert.deepEqual(interiorOk.interiorEdges, []);
+
+  // Token word bounds: raw constants and the raw channel literal match; the PUBLIC
+  // PERK_WAVE_RPC_PING_MS env knob (code or comment) never does.
+  const sources: Record<string, string> = {
+    "doors/rawConstant.test.ts": 'import { WAVE_RPC_REQUEST_EVENT } from "../waves/rpcAdapter.ts";',
+    "doors/rawChannel.ts": 'pi.events.emit("subagents:rpc:v1:request", envelope);',
+    "doors/knob.test.ts":
+      '// pin PERK_WAVE_RPC_PING_MS small\nconst env = { PERK_WAVE_RPC_PING_MS: "20" };',
+  };
+  const violations = checkTransportTokens(Object.keys(sources).sort(), (f) => sources[f] ?? "");
+  assert.deepEqual(violations, [
+    "doors/rawChannel.ts:1: subagents:rpc:v1",
+    "doors/rawConstant.test.ts:1: WAVE_RPC_",
+  ]);
 });

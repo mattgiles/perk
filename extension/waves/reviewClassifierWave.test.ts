@@ -9,15 +9,15 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
-import { createMemoryWaveAdapter } from "./memoryAdapter.ts";
-import { WAVE_ACCEPTANCE } from "./transport.ts";
 import { waveScriptItems } from "../testing/fakeSubagents.ts";
+import { createMemoryWaveAdapter } from "./memoryAdapter.ts";
 import {
   CLASSIFY_ASSIGNMENT_KEY,
   REVIEW_CLASSIFIER_FLOW,
   REVIEW_CLASSIFIER_REPORT_SCHEMA,
   runReviewClassifierWave,
 } from "./reviewClassifierWave.ts";
+import { WAVE_ACCEPTANCE } from "./transport.ts";
 
 /** A schema-shaped classification (the engine already validated it — shape only matters here). */
 function classifierReport(): unknown {
