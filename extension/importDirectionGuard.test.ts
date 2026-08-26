@@ -209,7 +209,6 @@ const LEGACY_REGISTRANTS = [
   "doors/planReviewBrowser.ts",
   "doors/ready.ts",
   "doors/selfcheck.ts",
-  "doors/stackReviewBrowser.ts",
   "doors/submit.ts",
   "substrate/agentScratch.ts",
   "substrate/bindingDelivery.ts",

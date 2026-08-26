@@ -10,15 +10,15 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
 import { type ExtensionAPI, SessionManager } from "@earendil-works/pi-coding-agent";
-import { createAnnotationState } from "../pi/v1/providers/annotations.ts";
-import { workflowDir } from "../substrate/cache.ts";
+import { workflowDir } from "../../../substrate/cache.ts";
 import {
   fakePerk,
   loadPerkSession,
   plantSession,
   scaffoldRepo,
   spyInjections,
-} from "../testing/harness.ts";
+} from "../../../testing/harness.ts";
+import { createAnnotationState } from "../providers/annotations.ts";
 import {
   bindingBaseRef,
   bindingTopPr,
@@ -29,7 +29,7 @@ import {
   STACK_DEGRADE_NOTICE,
   type StackSnapshotRow,
   stackReviewGuidance,
-} from "./stackReviewBrowser.ts";
+} from "./stack.ts";
 
 /** Probe the SESSION's annotation state through the registered tool (the harness flows). */
 async function sessionSurfacePrimed(h: {
