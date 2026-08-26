@@ -10,6 +10,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
 import { type ExtensionAPI, SessionManager } from "@earendil-works/pi-coding-agent";
+import { createAnnotationState } from "../pi/v1/providers/annotations.ts";
 import { workflowDir } from "../substrate/cache.ts";
 import {
   fakePerk,
@@ -18,7 +19,6 @@ import {
   scaffoldRepo,
   spyInjections,
 } from "../testing/harness.ts";
-import { executePushAnnotations, type FetchLike } from "./annotationPush.ts";
 import {
   bindingBaseRef,
   bindingTopPr,
@@ -31,20 +31,12 @@ import {
   stackReviewGuidance,
 } from "./stackReviewBrowser.ts";
 
-/** Probe the annotation surface: `findings: []` with nothing held makes NO fetch (pure probe). */
-async function surfacePrimed(): Promise<boolean> {
-  const never: FetchLike = async () => {
-    throw new Error("the probe must not fetch");
-  };
-  const target = { hasUI: false, ui: undefined } as unknown as Parameters<
-    typeof executePushAnnotations
-  >[0];
-  const result = await executePushAnnotations(
-    target,
-    { angle: "probe", findings: [] },
-    { fetchLike: never },
-  );
-  return result.details.ok;
+/** Probe the SESSION's annotation state through the registered tool (the harness flows). */
+async function sessionSurfacePrimed(h: {
+  invokeTool(name: string, params: unknown): Promise<{ details: unknown }>;
+}): Promise<boolean> {
+  const result = await h.invokeTool("push_annotations", { angle: "probe", findings: [] });
+  return (result.details as { ok: boolean }).ok;
 }
 
 // --- parseStackReviewArgs (the explicit target grammar) ------------------------------------------
@@ -422,13 +414,13 @@ test("/stack-review-browser 77: objective argv, ONE guidance injection, the loca
       diffType: "since-base",
       defaultBranch: "origin/main",
     });
-    assert.equal(await surfacePrimed(), true, "the surface is primed after the open");
+    assert.equal(await sessionSurfacePrimed(h), true, "the surface is primed after the open");
     await settleBridges(sink);
     const start = Date.now();
-    while ((await surfacePrimed()) && Date.now() - start < 5000) {
+    while ((await sessionSurfacePrimed(h)) && Date.now() - start < 5000) {
       await new Promise((r) => setTimeout(r, 25));
     }
-    assert.equal(await surfacePrimed(), false, "the bridge settle clears the surface");
+    assert.equal(await sessionSurfacePrimed(h), false, "the bridge settle clears the surface");
   } finally {
     await settleBridges(sink);
     h.dispose();
@@ -648,10 +640,16 @@ test("executeOpenStackReview: a browser-open failure is browser_failed and keeps
 
   const latch = { opened: false };
   const opens: string[] = [];
-  const failed = await executeOpenStackReview(pi, ctx, latch, (_pi, _ctx, opts) => {
-    opens.push(opts.checkoutPath);
-    return Promise.resolve(false);
-  });
+  const failed = await executeOpenStackReview(
+    pi,
+    ctx,
+    latch,
+    createAnnotationState(),
+    (_pi, _ctx, _annotations, opts) => {
+      opens.push(opts.checkoutPath);
+      return Promise.resolve(false);
+    },
+  );
   const failedDetails = failed.details as { ok: boolean; error_type?: string };
   assert.equal(failedDetails.ok, false);
   assert.equal(failedDetails.error_type, "browser_failed");
@@ -660,11 +658,15 @@ test("executeOpenStackReview: a browser-open failure is browser_failed and keeps
   assert.equal(latch.opened, false, "a failed open never consumes the single-use latch");
 
   // The failure is retryable: the SAME latch accepts a later successful open…
-  const succeeded = await executeOpenStackReview(pi, ctx, latch, () => Promise.resolve(true));
+  const succeeded = await executeOpenStackReview(pi, ctx, latch, createAnnotationState(), () =>
+    Promise.resolve(true),
+  );
   assert.equal((succeeded.details as { ok: boolean }).ok, true);
   assert.equal(latch.opened, true);
   // …and only then does single-use bite.
-  const third = await executeOpenStackReview(pi, ctx, latch, () => Promise.resolve(true));
+  const third = await executeOpenStackReview(pi, ctx, latch, createAnnotationState(), () =>
+    Promise.resolve(true),
+  );
   const thirdDetails = third.details as { ok: boolean; error_type?: string };
   assert.equal(thirdDetails.ok, false);
   assert.equal(thirdDetails.error_type, "bad_state");

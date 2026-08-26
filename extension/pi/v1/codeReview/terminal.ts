@@ -15,17 +15,22 @@
 // Every launch carries `--agent-notes` so pushed findings are visible in hunk immediately.
 // Hunk-sink mechanics and arg semantics are unchanged (`parseReviewDoorArgs` untouched).
 //
-// The door registers NO tools — the fan-out pair is registered globally
-// (`registerReviewWaveTools`) and posting reuses `submit_pr_review` (registered by
-// `registerSubmitPrReview`), whose gate ladder (contracts §8.4) applies unchanged.
+// The door registers NO tools — the fan-out pair is installed globally
+// (`installReviewWaveBindings`) and posting reuses `submit_pr_review` (installed by
+// `installCuratedSubmissionBindings`), whose gate ladder (contracts §8.4) applies unchanged.
 
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { bindingSuffix } from "../substrate/bindingDelivery.ts";
-import { runColdDoor } from "../substrate/coldDoor.ts";
-import { registerPerkCommand } from "../substrate/command.ts";
-import { sinceBaseSha } from "../substrate/git.ts";
-import { render } from "../substrate/prompts.ts";
-import { report } from "../surfaces/report.ts";
+import {
+  decodePrUrl,
+  planRefBaseOf,
+  resolveReviewTarget,
+} from "../../../doors/plannotatorHandoff.ts";
+import { bindingSuffix } from "../../../substrate/bindingDelivery.ts";
+import { runColdDoor } from "../../../substrate/coldDoor.ts";
+import { registerPerkCommand } from "../../../substrate/command.ts";
+import { sinceBaseSha } from "../../../substrate/git.ts";
+import { render } from "../../../substrate/prompts.ts";
+import { report } from "../../../surfaces/report.ts";
 import {
   type CheckoutOk,
   decodeCheckout,
@@ -33,8 +38,7 @@ import {
   handleHunkLaunch,
   hunkPresent,
   parseReviewArgs,
-} from "./hunkHandoff.ts";
-import { decodePrUrl, planRefBaseOf, resolveReviewTarget } from "./plannotatorHandoff.ts";
+} from "./checkout.ts";
 
 /** The door's report scope — also the `command:<id>` binding trigger id. */
 const SCOPE = "pr-review-terminal";
@@ -103,8 +107,8 @@ export function prReviewTerminalGuidance(opts: PrReviewTerminalGuidanceOpts): st
 
 // ------------------------------------------------------------------------ registration
 
-/** Register the warm `/pr-review-terminal` command (no tools — posting rides submit_pr_review). */
-export function registerPrReviewTerminal(pi: ExtensionAPI): void {
+/** Install the warm `/pr-review-terminal` command (no tools — posting rides submit_pr_review). */
+export function installPrReviewTerminalBindings(pi: ExtensionAPI): void {
   registerPerkCommand(pi, SCOPE, {
     description:
       "Review a PR human-in-the-loop in the hunk terminal TUI: no arg reviews the active " +

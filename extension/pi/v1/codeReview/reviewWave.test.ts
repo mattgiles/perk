@@ -12,22 +12,22 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { PERK_TOOLS, STAGE_TOOLS } from "../substrate/toolGating.ts";
+import { type PendingWaveState, WAVE_COLLECT_GRACE_MS } from "../../../doors/pendingWave.ts";
+import { PERK_TOOLS, STAGE_TOOLS } from "../../../substrate/toolGating.ts";
 import {
   createFakeSubagents,
   type FakeSubagents,
   waveScriptItems,
-} from "../testing/fakeSubagents.ts";
-import { fakePerk, loadPerkSession, scaffoldRepo } from "../testing/harness.ts";
-import type { AdversarialReviewAngle } from "../waves/adversarialReviewWave.ts";
-import { createMemoryWaveAdapter } from "../waves/memoryAdapter.ts";
-import { type PendingWaveState, WAVE_COLLECT_GRACE_MS } from "./pendingWave.ts";
+} from "../../../testing/fakeSubagents.ts";
+import { fakePerk, loadPerkSession, scaffoldRepo } from "../../../testing/harness.ts";
+import type { AdversarialReviewAngle } from "../../../waves/adversarialReviewWave.ts";
+import { createMemoryWaveAdapter } from "../../../waves/memoryAdapter.ts";
 import {
   decodeStartReviewWaveParams,
   executeCollectReviewWave,
   executeStartReviewWave as executeStartReviewWaveBase,
-  registerReviewWaveTools,
-} from "./reviewWaveTools.ts";
+  installReviewWaveBindings,
+} from "./reviewWave.ts";
 
 const TWO_ANGLES: AdversarialReviewAngle[] = ["claimed-intent", "correctness"];
 const PREFLIGHT_OK = async () => ({ ok: true }) as const;
@@ -427,7 +427,7 @@ test("WAVE_COLLECT_GRACE_MS: the module default with the env override (the waveT
 
 // --- registration -----------------------------------------------------------------------------
 
-test("registerReviewWaveTools registers exactly the two tools over registration-owned state", async () => {
+test("installReviewWaveBindings registers exactly the two tools over registration-owned state", async () => {
   // Seed a pending wave in a SEPARATE test-owned slot through the core…
   const seeded = freshState();
   const { target } = fakeTarget();
@@ -441,7 +441,7 @@ test("registerReviewWaveTools registers exactly the two tools over registration-
 
   // …then a registration owns its OWN fresh closure slot: its collect sees no wave.
   const { pi, tools } = fakePi();
-  registerReviewWaveTools(pi);
+  installReviewWaveBindings(pi);
   assert.deepEqual(
     [...tools.keys()].sort(),
     ["collect_review_wave", "start_review_wave"],
@@ -484,7 +484,7 @@ test("the review-wave pair is in the tool census (PERK_TOOLS + every worktree st
 
 test("registered start_review_wave: a bad selection decodes to bad_input before any spawn", async () => {
   const { pi, tools } = fakePi();
-  registerReviewWaveTools(pi);
+  installReviewWaveBindings(pi);
   const def = tools.get("start_review_wave");
   assert.ok(def);
   const { target, notified } = fakeTarget();

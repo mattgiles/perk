@@ -39,6 +39,11 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 import { PLAN_DRAFT_ARTIFACT } from "../authoring/plan/draft.ts";
 import { approvalSave } from "../pi/v1/plan.ts";
 import { applyPlannotatorDirectEdits, approvedSaveResult } from "../pi/v1/planReview.ts";
+import {
+  type AnnotationState,
+  clearAnnotationSurface,
+  primeAnnotationSurface,
+} from "../pi/v1/providers/annotations.ts";
 import type { ReviewOutcome } from "../pi/v1/review.ts";
 import { bindingSuffix } from "../substrate/bindingDelivery.ts";
 import { registerPerkCommand } from "../substrate/command.ts";
@@ -48,7 +53,6 @@ import { readSessionArtifact } from "../substrate/sessionData.ts";
 import type { ToolGating } from "../substrate/toolGating.ts";
 import { branchOf, rebuildWorkflowState } from "../substrate/workflowState.ts";
 import { type ReportTarget, report } from "../surfaces/report.ts";
-import { clearAnnotationSurface, primeAnnotationSurface } from "./annotationPush.ts";
 import {
   clearDraftReviewContext,
   type DraftReviewWaveState,
@@ -124,6 +128,7 @@ export async function observePlanReviewReadiness(
   ctx: ReportTarget & Pick<ExtensionContext, "isIdle">,
   started: StartedSurface<ReviewOutcome>,
   draftReview: DraftReviewWaveState,
+  annotations: AnnotationState,
   session?: PlanReviewDoorSession,
 ): Promise<void> {
   const state = await started.readiness;
@@ -153,7 +158,7 @@ export async function observePlanReviewReadiness(
   // loudly (`no_surface`) and a post-degrade start_draft_review_wave refuses
   // `no_draft_context`. Idempotent beside the decision task's clears. The session flag makes
   // the degrade authoritative for the decision task too — a later bridge decision is ignored.
-  clearAnnotationSurface();
+  clearAnnotationSurface(annotations);
   clearDraftReviewContext(draftReview);
   if (session !== undefined) session.degraded = true;
 }
@@ -309,6 +314,7 @@ export async function openPlanReviewSurface(
   gating: ToolGating,
   opts: { draft: string; custom?: string },
   draftReview: DraftReviewWaveState,
+  annotations: AnnotationState,
   deps: StartBrowserDeps = {},
 ): Promise<string | null> {
   let started: StartedSurface<ReviewOutcome>;
@@ -334,7 +340,7 @@ export async function openPlanReviewSurface(
   // browser session in plan mode, and the draft-review wave reviews exactly the browsed bytes
   // (reviewed bytes == browsed bytes == wave bytes). Priming resets any pending wave — a new
   // browser session supersedes everything (the accepted double-open edge in the header).
-  primeAnnotationSurface({ mode: "plan", url: started.url });
+  primeAnnotationSurface(annotations, { mode: "plan", url: started.url });
   primeDraftReviewContext(draftReview, {
     draftType: "plan",
     draft: opts.draft,
@@ -345,7 +351,7 @@ export async function openPlanReviewSurface(
   // routes a post-degrade decision through the save path (a readiness false-negative must not
   // let a late approval auto-save after the human followed the fallback).
   const session: PlanReviewDoorSession = { degraded: false };
-  void observePlanReviewReadiness(pi, ctx, started, draftReview, session);
+  void observePlanReviewReadiness(pi, ctx, started, draftReview, annotations, session);
 
   // The decision task: the wait is open-ended (exactly the model-called `plan_review` bridge
   // semantics — a turn abort settles `aborted` via the bridge's abort handling).
@@ -375,7 +381,7 @@ export async function openPlanReviewSurface(
       // The browser session is over — drop both surfaces so a late push refuses (`no_surface`)
       // and a late wave start refuses (`no_draft_context`). Idempotent beside the degrade-arm
       // clears; an early decision mid-wave leaves a still-pending wave collectable.
-      clearAnnotationSurface();
+      clearAnnotationSurface(annotations);
       clearDraftReviewContext(draftReview);
       interceptor.restore();
     }
@@ -406,9 +412,18 @@ export async function openPlanReviewAndGuide(
   gating: ToolGating,
   opts: { draft: string; custom?: string },
   draftReview: DraftReviewWaveState,
+  annotations: AnnotationState,
   deps: StartBrowserDeps = {},
 ): Promise<void> {
-  const guidance = await openPlanReviewSurface(pi, ctx, gating, opts, draftReview, deps);
+  const guidance = await openPlanReviewSurface(
+    pi,
+    ctx,
+    gating,
+    opts,
+    draftReview,
+    annotations,
+    deps,
+  );
   if (guidance !== null) pi.sendUserMessage(guidance);
 }
 
@@ -419,6 +434,7 @@ export function registerPlanReviewBrowser(
   pi: ExtensionAPI,
   gating: ToolGating,
   draftReview: DraftReviewWaveState,
+  annotations: AnnotationState,
 ): void {
   registerPerkCommand(pi, SCOPE, {
     description:
@@ -483,6 +499,7 @@ export function registerPlanReviewBrowser(
           ...(custom.length > 0 ? { custom } : {}),
         },
         draftReview,
+        annotations,
       );
     },
   });

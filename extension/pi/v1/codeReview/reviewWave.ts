@@ -20,22 +20,27 @@
 // construction.
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { subagentModel } from "../substrate/config.ts";
-import { failFor, ok, type Result } from "../substrate/result.ts";
+import {
+  collectGraceMs,
+  collectPending,
+  type PendingWaveState,
+} from "../../../doors/pendingWave.ts";
+import { subagentModel } from "../../../substrate/config.ts";
+import { failFor, ok, type Result } from "../../../substrate/result.ts";
 import {
   booleanParam,
   numberParam,
   paramsOf,
   stringArrayParam,
   stringParam,
-} from "../substrate/toolParams.ts";
-import { type ReportTarget, report } from "../surfaces/report.ts";
+} from "../../../substrate/toolParams.ts";
+import { type ReportTarget, report } from "../../../surfaces/report.ts";
 import {
   type AdversarialReviewAngle,
   isAdversarialReviewAngle,
   startAdversarialReviewWave,
-} from "../waves/adversarialReviewWave.ts";
-import { preflightPonytailSkill } from "../waves/ponytail.ts";
+} from "../../../waves/adversarialReviewWave.ts";
+import { preflightPonytailSkill } from "../../../waves/ponytail.ts";
 import {
   toAttemptReceipt,
   type WaveAdapter,
@@ -44,9 +49,8 @@ import {
   type WaveLaunchManifest,
   type WaveReport,
   type WaveSpec,
-} from "../waves/reportWave.ts";
-import { createRpcWaveAdapter } from "../waves/rpcAdapter.ts";
-import { collectGraceMs, collectPending, type PendingWaveState } from "./pendingWave.ts";
+} from "../../../waves/reportWave.ts";
+import { createRpcWaveAdapter } from "../../../waves/rpcAdapter.ts";
 
 const MANDATORY_ANGLE: AdversarialReviewAngle = "claimed-intent";
 
@@ -274,12 +278,12 @@ const COLLECT_TOOL_GUIDELINES = [
 ];
 
 /**
- * Register the review-wave tool pair over a registration-owned pending-wave state (the fresh
+ * Install the review-wave tool pair over a registration-owned pending-wave state (the fresh
  * closure IS the reset — no wave can be pending in a new session, and two bound sessions in one
  * process never share a slot). Wired in `extension/index.ts` beside the review-door
  * registrations; flow-scoped via the pending-wave guard in the execute cores.
  */
-export function registerReviewWaveTools(pi: ExtensionAPI): void {
+export function installReviewWaveBindings(pi: ExtensionAPI): void {
   const state: PendingWaveState<string> = { pending: null };
 
   pi.registerTool({

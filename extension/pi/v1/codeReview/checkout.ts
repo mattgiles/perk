@@ -1,14 +1,18 @@
-// The hunk terminal-review substrate serving `/pr-review-terminal`: the strict
+// The neutral shared checkout/PR-token substrate serving the code-review doors: the strict
 // `perk pr review checkout` decode, the `hunk --version` presence probe, and the R7 launch
 // handoff (clipboard copy + terminal auto-launch raced against a soft deadline) — plus the
 // door-common PR-token arg grammar (`parseReviewArgs`) that `/pr-review-browser` also consumes
-// via `parseReviewDoorArgs`. Re-homing the door-common pieces to a neutral module is a deferred
-// residual (accepted — no code moves yet).
+// via `parseReviewDoorArgs`. Its only consumers are the `pi/v1/codeReview/` siblings.
 
-import { copyToClipboard } from "../substrate/clipboard.ts";
-import { type ColdJson, type ExecHost, numberField, stringField } from "../substrate/coldDoor.ts";
-import { LAUNCH_SURFACE, launchInTerminal } from "../substrate/terminalLaunch.ts";
-import { type ReportTarget, report } from "../surfaces/report.ts";
+import { copyToClipboard } from "../../../substrate/clipboard.ts";
+import {
+  type ColdJson,
+  type ExecHost,
+  numberField,
+  stringField,
+} from "../../../substrate/coldDoor.ts";
+import { LAUNCH_SURFACE, launchInTerminal } from "../../../substrate/terminalLaunch.ts";
+import { type ReportTarget, report } from "../../../surfaces/report.ts";
 
 /** The install hint for the absent hunk binary — the exact `HUNK_INSTALL_HINT` wording
  * (src/perk/convergence/init/review_cli.py). */

@@ -172,8 +172,8 @@ const RPC_ADAPTER_IMPORTERS = [
   "doors/dreamWaveTools.ts",
   "doors/harvestWaveTools.ts",
   "doors/learn.ts",
-  "doors/reviewWaveTools.ts",
   "pi/v1/codeReview/automated.ts",
+  "pi/v1/codeReview/reviewWave.ts",
   "pi/v1/objectivePlanning.ts",
 ];
 
@@ -194,7 +194,6 @@ const TRANSPORT_TOKEN = /\bWAVE_RPC_|subagents:rpc:v1/;
 // in the activating change itself — the first burn-down.
 const LEGACY_REGISTRANTS = [
   "doors/address.ts",
-  "doors/annotationPush.ts",
   "doors/auditWaveTools.ts",
   "doors/ciExecutor.ts",
   "doors/commitCompact.ts",
@@ -208,10 +207,7 @@ const LEGACY_REGISTRANTS = [
   "doors/objectiveReviewBrowser.ts",
   "doors/objectiveStack.ts",
   "doors/planReviewBrowser.ts",
-  "doors/prReviewBrowser.ts",
-  "doors/prReviewTerminal.ts",
   "doors/ready.ts",
-  "doors/reviewWaveTools.ts",
   "doors/selfcheck.ts",
   "doors/stackReviewBrowser.ts",
   "doors/submit.ts",

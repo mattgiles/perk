@@ -1,11 +1,14 @@
-// The flow-scoped annotation-push tool for the plannotator review surfaces: `push_annotations`
-// owns the finding→annotation mechanics the browser-review guidance used to run as prompt
-// discipline — the mapping onto plannotator's `/api/external-annotations` contract, the dedupe
-// ledger, the hold-and-accumulate retry, and the source-scoped replace — for BOTH plannotator
-// modes (review: line-anchored; plan: phrase-anchored drafts). The model hands the tool finding
-// batches; it never composes annotation HTTP.
+// The flow-scoped annotation-push provider for the plannotator review surfaces:
+// `push_annotations` owns the finding→annotation mechanics the browser-review guidance used to
+// run as prompt discipline — the mapping onto plannotator's `/api/external-annotations`
+// contract, the dedupe ledger, the hold-and-accumulate retry, and the source-scoped replace —
+// for BOTH plannotator modes (review: line-anchored; plan: phrase-anchored drafts). The model
+// hands the tool finding batches; it never composes annotation HTTP.
 //
-// The surface handle is FLOW-SCOPED MODULE STATE, never a tool param: the door primes
+// The surface handle is PER-ACTIVATION STATE (`createAnnotationState()` — created once in
+// `extension/index.ts` and threaded to this installer plus every priming door: the PR/stack
+// review doors in review mode, the plan/objective review doors in plan mode — the
+// `draftReviewWave` threading pattern), never a tool param: the door primes
 // `primeAnnotationSurface` the moment the browser open picks the port and clears it when the
 // bridge settles, so the model neither relays nor sees the URL (the result prose never echoes
 // it). The primed mode selects the finding shape the strict decode enforces.
@@ -27,21 +30,21 @@
 // the owning source later releases the anchor — so independent per-angle replaces cannot
 // silently lose a finding to replace ordering.
 //
-// Registered in `extension/index.ts`; FLOW-SCOPED via the door-primed surface handle — the
+// Installed from `extension/index.ts`; FLOW-SCOPED via the door-primed surface handle — the
 // browser door primes it the moment the browser open picks the port and clears it on bridge
 // settle AND on the readiness-degrade arm, so `push_annotations` refuses loudly (`no_surface`)
 // outside a door-opened flow.
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { failFor, ok, type Result } from "../substrate/result.ts";
+import { failFor, ok, type Result } from "../../../substrate/result.ts";
 import {
   arrayParam,
   booleanParam,
   paramsOf,
   stringParam,
   type ToolParams,
-} from "../substrate/toolParams.ts";
-import type { ReportTarget } from "../surfaces/report.ts";
+} from "../../../substrate/toolParams.ts";
+import type { ReportTarget } from "../../../surfaces/report.ts";
 
 // ------------------------------------------------------------------------ the surface handle
 
@@ -54,12 +57,7 @@ export interface AnnotationSurface {
   url: string;
 }
 
-// --- module state (flow-scoped; reset on prime/clear/register) --------------------------------
-
-let surface: AnnotationSurface | null = null;
-
-/** The dedupe ledger: anchor key → its owning source (+ the captured id, on a confirmed 2xx). */
-let ledger = new Map<string, { source: string; id?: string }>();
+// --- per-activation state (flow-scoped; reset on prime/clear/create) ---------------------------
 
 /**
  * One held unit: a mapped batch awaiting a reachable server. A `replace: true` unit re-runs the
@@ -73,36 +71,45 @@ interface HeldBatch {
   items: MappedAnnotation[];
 }
 
-/** The FIFO held queue — unbounded by design; its lifetime is one browser session. */
-let held: HeldBatch[] = [];
-
 /**
- * The retained cross-source duplicate candidates (anchor key → the skipped item): recorded when
- * a FINAL (replace) batch's anchor is skipped because another source owns it, promoted when a
- * later replace releases that anchor — the union of the angles' final batches survives any
- * replace order. Streamed (non-replace) duplicates stay plain skips: they are provisional, and
- * the angle's final batch re-supplies anything that matters.
+ * One activation's annotation-push state: the door-primed surface handle, the dedupe ledger
+ * (anchor key → its owning source + the captured id on a confirmed 2xx), the FIFO held queue
+ * (unbounded by design; its lifetime is one browser session), and the retained cross-source
+ * duplicate candidates (recorded when a FINAL (replace) batch's anchor is skipped because
+ * another source owns it, promoted when a later replace releases that anchor — the union of
+ * the angles' final batches survives any replace order; streamed (non-replace) duplicates stay
+ * plain skips). Mutated only through this module's functions.
  */
-let alternates = new Map<string, MappedAnnotation>();
+export interface AnnotationState {
+  surface: AnnotationSurface | null;
+  ledger: Map<string, { source: string; id?: string }>;
+  held: HeldBatch[];
+  alternates: Map<string, MappedAnnotation>;
+}
+
+/** Create one activation's annotation-push state (all-clear — no surface primed). */
+export function createAnnotationState(): AnnotationState {
+  return { surface: null, ledger: new Map(), held: [], alternates: new Map() };
+}
 
 /**
  * Prime the surface for a new browser session (door-owned; called when the browser open picks
  * the port). Resets the ledger, the held queue, and the captured ids — a new browser session
  * supersedes everything.
  */
-export function primeAnnotationSurface(next: AnnotationSurface): void {
-  surface = { mode: next.mode, url: next.url.replace(/\/+$/, "") };
-  ledger = new Map();
-  held = [];
-  alternates = new Map();
+export function primeAnnotationSurface(state: AnnotationState, next: AnnotationSurface): void {
+  state.surface = { mode: next.mode, url: next.url.replace(/\/+$/, "") };
+  state.ledger = new Map();
+  state.held = [];
+  state.alternates = new Map();
 }
 
 /** Drop the surface (door-owned; called when the bridge settles). Resets all session state. */
-export function clearAnnotationSurface(): void {
-  surface = null;
-  ledger = new Map();
-  held = [];
-  alternates = new Map();
+export function clearAnnotationSurface(state: AnnotationState): void {
+  state.surface = null;
+  state.ledger = new Map();
+  state.held = [];
+  state.alternates = new Map();
 }
 
 // ------------------------------------------------------------------------ params + decode
@@ -531,18 +538,18 @@ function sourceTally(tally: Tally, source: string): { pushed: number; cleared: n
   return entry;
 }
 
-function heldCount(): number {
-  return held.reduce((sum, batch) => sum + batch.items.length, 0);
+function heldCount(state: AnnotationState): number {
+  return state.held.reduce((sum, batch) => sum + batch.items.length, 0);
 }
 
-function heldCarries(key: string): boolean {
-  return held.some((batch) => batch.items.some((item) => item.key === key));
+function heldCarries(state: AnnotationState, key: string): boolean {
+  return state.held.some((batch) => batch.items.some((item) => item.key === key));
 }
 
 /** The sources with a held (pending) replace unit — their ledger entries are slated for deletion. */
-function pendingClearSources(): Set<string> {
+function pendingClearSources(state: AnnotationState): Set<string> {
   const sources = new Set<string>();
-  for (const batch of held) {
+  for (const batch of state.held) {
     if (batch.replace) sources.add(batch.source);
   }
   return sources;
@@ -561,6 +568,7 @@ function pendingClearSources(): Set<string> {
  *   against the settled state after the queue flushes.
  */
 function dedupe(
+  state: AnnotationState,
   items: MappedAnnotation[],
   tally: Tally,
   opts?: { recordAlternates?: boolean; unstableSources?: Set<string> },
@@ -568,12 +576,12 @@ function dedupe(
   const novel: MappedAnnotation[] = [];
   const seen = new Set<string>();
   for (const item of items) {
-    const owner = ledger.get(item.key);
+    const owner = state.ledger.get(item.key);
     const ownerVetoes = owner !== undefined && !(opts?.unstableSources?.has(owner.source) ?? false);
-    if (ownerVetoes || heldCarries(item.key) || seen.has(item.key)) {
+    if (ownerVetoes || heldCarries(state, item.key) || seen.has(item.key)) {
       tally.skipped.push(item.key);
       if (opts?.recordAlternates && ownerVetoes && owner !== undefined) {
-        if (owner.source !== item.source) alternates.set(item.key, item);
+        if (owner.source !== item.source) state.alternates.set(item.key, item);
       }
       continue;
     }
@@ -598,6 +606,7 @@ type UnitOutcome =
  * once the delete succeeded.
  */
 async function sendUnit(
+  state: AnnotationState,
   fetchLike: FetchLike,
   url: string,
   unit: HeldBatch,
@@ -611,23 +620,23 @@ async function sendUnit(
     }
     tally.deleted += del.removed;
     sourceTally(tally, unit.source).cleared += del.removed;
-    for (const [key, entry] of ledger) {
-      if (entry.source === unit.source) ledger.delete(key);
+    for (const [key, entry] of state.ledger) {
+      if (entry.source === unit.source) state.ledger.delete(key);
     }
     // This final batch supersedes the source's earlier retained candidates.
-    for (const [key, alt] of alternates) {
-      if (alt.source === unit.source) alternates.delete(key);
+    for (const [key, alt] of state.alternates) {
+      if (alt.source === unit.source) state.alternates.delete(key);
     }
   }
-  let items = dedupe(unit.items, tally, { recordAlternates: unit.replace });
+  let items = dedupe(state, unit.items, tally, { recordAlternates: unit.replace });
   if (unit.replace) {
     // Promote retained candidates for anchors this replace just released: a cross-source
     // duplicate skipped from another source's final batch re-posts under ITS source, so the
     // union of final batches survives any replace order.
-    for (const [key, alt] of alternates) {
-      if (!ledger.has(key) && !heldCarries(key) && !items.some((i) => i.key === key)) {
+    for (const [key, alt] of state.alternates) {
+      if (!state.ledger.has(key) && !heldCarries(state, key) && !items.some((i) => i.key === key)) {
         items = [...items, alt];
-        alternates.delete(key);
+        state.alternates.delete(key);
       }
     }
   }
@@ -649,7 +658,7 @@ async function sendUnit(
     const item = items[i];
     if (item !== undefined) {
       // Per-item source: a promoted alternate stays owned by its original angle.
-      ledger.set(item.key, { source: item.source, ...(id !== undefined ? { id } : {}) });
+      state.ledger.set(item.key, { source: item.source, ...(id !== undefined ? { id } : {}) });
       sourceTally(tally, item.source).pushed += 1;
     }
   }
@@ -659,7 +668,7 @@ async function sendUnit(
 }
 
 /** The ok prose: per-source counts, skipped anchors, held state — never the surface URL. */
-function summarize(tally: Tally): string {
+function summarize(state: AnnotationState, tally: Tally): string {
   const parts: string[] = [];
   for (const [source, counts] of tally.bySource) {
     const bits: string[] = [];
@@ -674,10 +683,10 @@ function summarize(tally: Tally): string {
   }
   // Batch-count keyed, NOT finding-count keyed: a held zero-item pure clear is a pending
   // operation that must surface the retry guidance too.
-  if (held.length > 0) {
-    const clears = held.filter((batch) => batch.replace).length;
+  if (state.held.length > 0) {
+    const clears = state.held.filter((batch) => batch.replace).length;
     text +=
-      ` ${held.length} batch(es) held (${heldCount()} finding(s)` +
+      ` ${state.held.length} batch(es) held (${heldCount(state)} finding(s)` +
       `${clears > 0 ? `, ${clears} pending source clear(s)` : ""}) — the annotation server is ` +
       "not reachable yet (never a degrade: the door reports readiness itself). Call " +
       "push_annotations again on your next wait-loop return (findings: [] is the pure retry).";
@@ -707,11 +716,13 @@ const BAD_INPUT_BY_MODE: Readonly<Record<AnnotationMode, string>> = {
  * on an HTTP error).
  */
 export async function executePushAnnotations(
+  state: AnnotationState,
   target: ReportTarget,
   params: unknown,
   deps?: AnnotationPushDeps,
 ): Promise<Result<PushAnnotationsOk, PushFailExtras>> {
   const fail = failFor<PushFailExtras>(target, "push_annotations");
+  const surface = state.surface;
   if (surface === null) {
     return fail(
       "no annotation surface is primed — push_annotations only works inside a door-opened " +
@@ -729,12 +740,12 @@ export async function executePushAnnotations(
   const tally: Tally = { pushed: 0, deleted: 0, ids: [], skipped: [], bySource: new Map() };
 
   const okResult = (): Result<PushAnnotationsOk, PushFailExtras> =>
-    ok(summarize(tally), {
+    ok(summarize(state, tally), {
       mode: decoded.mode,
       pushed: tally.pushed,
       skipped: tally.skipped,
-      held: heldCount(),
-      held_batches: held.length,
+      held: heldCount(state),
+      held_batches: state.held.length,
       deleted: tally.deleted,
       ids: tally.ids,
     });
@@ -753,7 +764,7 @@ export async function executePushAnnotations(
         server_error: outcome.serverError,
         dropped_source: outcome.dropped.source,
         dropped_count: outcome.dropped.items.length,
-        held: heldCount(),
+        held: heldCount(state),
       },
     );
 
@@ -762,7 +773,7 @@ export async function executePushAnnotations(
   // out of held plain batches item-wise (a requeued batch can carry promoted alternates of
   // OTHER sources — those must survive).
   if (decoded.replace) {
-    held = held
+    state.held = state.held
       .map((batch) =>
         batch.replace
           ? batch
@@ -776,16 +787,16 @@ export async function executePushAnnotations(
   const mapped = mapFindings(decoded.mode, decoded.angle, decoded.findings);
 
   // Flush the held queue FIFO first.
-  while (held.length > 0) {
-    const batch = held[0];
+  while (state.held.length > 0) {
+    const batch = state.held[0];
     if (batch === undefined) break;
-    held = held.slice(1);
-    const outcome = await sendUnit(fetchLike, url, batch, tally);
+    state.held = state.held.slice(1);
+    const outcome = await sendUnit(state, fetchLike, url, batch, tally);
     if (outcome.kind === "network") {
       // The server is not up yet: re-hold the unit at the front, hold the new batch at the
       // back, and return ok — retrying is the model's next wait-loop return.
-      if (outcome.requeue !== null) held = [outcome.requeue, ...held];
-      holdNewBatch(decoded.replace, source, mapped, tally);
+      if (outcome.requeue !== null) state.held = [outcome.requeue, ...state.held];
+      holdNewBatch(state, decoded.replace, source, mapped, tally);
       return okResult();
     }
     if (outcome.kind === "rejected") {
@@ -799,9 +810,9 @@ export async function executePushAnnotations(
   // authoritative). A plain empty batch was the pure retry — nothing left to send.
   if (mapped.length > 0 || decoded.replace) {
     const unit: HeldBatch = { source, replace: decoded.replace, items: mapped };
-    const outcome = await sendUnit(fetchLike, url, unit, tally);
+    const outcome = await sendUnit(state, fetchLike, url, unit, tally);
     if (outcome.kind === "network") {
-      if (outcome.requeue !== null) held = [...held, outcome.requeue];
+      if (outcome.requeue !== null) state.held = [...state.held, outcome.requeue];
       return okResult();
     }
     if (outcome.kind === "rejected") {
@@ -819,17 +830,18 @@ export async function executePushAnnotations(
  * against the settled state on flush).
  */
 function holdNewBatch(
+  state: AnnotationState,
   replace: boolean,
   source: string,
   mapped: MappedAnnotation[],
   tally: Tally,
 ): void {
   if (replace) {
-    held = [...held, { source, replace: true, items: mapped }];
+    state.held = [...state.held, { source, replace: true, items: mapped }];
     return;
   }
-  const novel = dedupe(mapped, tally, { unstableSources: pendingClearSources() });
-  if (novel.length > 0) held = [...held, { source, replace: false, items: novel }];
+  const novel = dedupe(state, mapped, tally, { unstableSources: pendingClearSources(state) });
+  if (novel.length > 0) state.held = [...state.held, { source, replace: false, items: novel }];
 }
 
 // ------------------------------------------------------------------------ registration
@@ -843,13 +855,11 @@ const TOOL_GUIDELINES = [
 ];
 
 /**
- * Register the flow-scoped `push_annotations` tool and reset ALL module state (a fresh
- * registration is a fresh session). Wired in `extension/index.ts`; the browser door owns the
- * prime/clear lifecycle of the surface handle above.
+ * Install the flow-scoped `push_annotations` tool over the threaded per-activation state.
+ * Wired in `extension/index.ts`; the browser doors own the prime/clear lifecycle of the surface
+ * handle above (the same state instance is threaded to them).
  */
-export function registerAnnotationPushTool(pi: ExtensionAPI): void {
-  clearAnnotationSurface();
-
+export function installAnnotationBindings(pi: ExtensionAPI, state: AnnotationState): void {
   pi.registerTool({
     name: "push_annotations",
     label: "Push annotations",
@@ -918,7 +928,7 @@ export function registerAnnotationPushTool(pi: ExtensionAPI): void {
       },
     },
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-      return executePushAnnotations(ctx, params);
+      return executePushAnnotations(state, ctx, params);
     },
   });
 }

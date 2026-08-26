@@ -10,31 +10,46 @@ import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { writePlanRef } from "../substrate/cache.ts";
-import { fakePerk, loadPerkSession, scaffoldRepo, spyInjections } from "../testing/harness.ts";
+import type { CodeReviewOutcome, StartedBrowser } from "../../../doors/plannotatorHandoff.ts";
+import { writePlanRef } from "../../../substrate/cache.ts";
 import {
-  clearAnnotationSurface,
+  fakePerk,
+  loadPerkSession,
+  scaffoldRepo,
+  spyInjections,
+} from "../../../testing/harness.ts";
+import {
+  type AnnotationState,
+  createAnnotationState,
   executePushAnnotations,
   type FetchLike,
   primeAnnotationSurface,
-} from "./annotationPush.ts";
-import type { CodeReviewOutcome, StartedBrowser } from "./plannotatorHandoff.ts";
-import { observeBrowserReadiness, prReviewBrowserGuidance } from "./prReviewBrowser.ts";
+} from "../providers/annotations.ts";
+import { observeBrowserReadiness, prReviewBrowserGuidance } from "./browser.ts";
 
-/** Probe the annotation surface: `findings: []` with nothing held makes NO fetch (pure probe). */
-async function surfacePrimed(): Promise<boolean> {
+/** Probe an annotation state: `findings: []` with nothing held makes NO fetch (pure probe). */
+async function surfacePrimed(state: AnnotationState): Promise<boolean> {
   const never: FetchLike = async () => {
     throw new Error("the probe must not fetch");
   };
   const target = { hasUI: false, ui: undefined } as unknown as Parameters<
     typeof executePushAnnotations
-  >[0];
+  >[1];
   const result = await executePushAnnotations(
+    state,
     target,
     { angle: "probe", findings: [] },
     { fetchLike: never },
   );
   return result.details.ok;
+}
+
+/** Probe the SESSION's annotation state through the registered tool (the harness flows). */
+async function sessionSurfacePrimed(h: {
+  invokeTool(name: string, params: unknown): Promise<{ details: unknown }>;
+}): Promise<boolean> {
+  const result = await h.invokeTool("push_annotations", { angle: "probe", findings: [] });
+  return (result.details as { ok: boolean }).ok;
 }
 
 // --- prReviewBrowserGuidance ---------------------------------------------------------------------
@@ -188,7 +203,7 @@ function fakeStarted(
 
 async function observe(
   started: StartedBrowser,
-  opts?: { idle?: boolean },
+  opts?: { idle?: boolean; annotations?: AnnotationState },
 ): Promise<{
   notifies: { message: string; severity?: string }[];
   sent: { message: string; options?: { deliverAs?: string } }[];
@@ -207,6 +222,7 @@ async function observe(
       isIdle: () => opts?.idle ?? true,
     },
     started,
+    opts?.annotations ?? createAnnotationState(),
   );
   return { notifies, sent };
 }
@@ -220,8 +236,9 @@ test("observer: ready → the info note naming the URL, nothing injected", async
 });
 
 test("observer: timeout → a loud error + the degrade notice (idle → immediate) + the surface clear", async () => {
-  primeAnnotationSurface({ mode: "review", url: "http://127.0.0.1:45001" });
-  const { notifies, sent } = await observe(fakeStarted("timeout"));
+  const annotations = createAnnotationState();
+  primeAnnotationSurface(annotations, { mode: "review", url: "http://127.0.0.1:45001" });
+  const { notifies, sent } = await observe(fakeStarted("timeout"), { annotations });
   assert.equal(notifies.length, 1);
   assert.equal(notifies[0]?.severity, "error");
   assert.match(notifies[0]?.message ?? "", /did not become ready at http:\/\/127\.0\.0\.1:45001/);
@@ -231,7 +248,11 @@ test("observer: timeout → a loud error + the degrade notice (idle → immediat
   assert.match(sent[0]?.message ?? "", /push_annotations` now refuses \(`no_surface`\)/);
   assert.match(sent[0]?.message ?? "", /perk composes nothing by default/);
   assert.equal(sent[0]?.options, undefined, "idle ⇒ an immediate turn");
-  assert.equal(await surfacePrimed(), false, "the degrade arm clears the annotation surface");
+  assert.equal(
+    await surfacePrimed(annotations),
+    false,
+    "the degrade arm clears the annotation surface",
+  );
 });
 
 test("observer: timeout while streaming → the degrade notice rides followUp", async () => {
@@ -241,31 +262,42 @@ test("observer: timeout while streaming → the degrade notice rides followUp", 
 });
 
 test("observer: a bridge settled error/unavailable → error + degrade + clear; handled/aborted → silent", async () => {
-  primeAnnotationSurface({ mode: "review", url: "http://127.0.0.1:45001" });
+  const annotations = createAnnotationState();
+  primeAnnotationSurface(annotations, { mode: "review", url: "http://127.0.0.1:45001" });
   const degraded = await observe(
     fakeStarted("bridge_settled", { status: "error", warning: "boom" }),
+    { annotations },
   );
   assert.equal(degraded.notifies.length, 1);
   assert.equal(degraded.notifies[0]?.severity, "error");
   assert.equal(degraded.sent.length, 1, "the degrade notice is injected");
-  assert.equal(await surfacePrimed(), false, "the error-settle degrade clears the surface");
+  assert.equal(
+    await surfacePrimed(annotations),
+    false,
+    "the error-settle degrade clears the surface",
+  );
 
   // The non-degrade arms never touch the surface (the door's own lifecycle owns clearing).
-  primeAnnotationSurface({ mode: "review", url: "http://127.0.0.1:45001" });
-  const handled = await observe(fakeStarted("bridge_settled", HANDLED));
+  primeAnnotationSurface(annotations, { mode: "review", url: "http://127.0.0.1:45001" });
+  const handled = await observe(fakeStarted("bridge_settled", HANDLED), { annotations });
   assert.equal(handled.notifies.length, 0, "the respond routing owns the handled arm");
   assert.equal(handled.sent.length, 0);
-  assert.equal(await surfacePrimed(), true, "the handled arm never clears");
+  assert.equal(await surfacePrimed(annotations), true, "the handled arm never clears");
 
-  const aborted = await observe(fakeStarted("bridge_settled", { status: "aborted" }));
+  const aborted = await observe(fakeStarted("bridge_settled", { status: "aborted" }), {
+    annotations,
+  });
   assert.equal(aborted.notifies.length, 0);
   assert.equal(aborted.sent.length, 0);
 
-  const turnAborted = await observe(fakeStarted("aborted"));
+  const turnAborted = await observe(fakeStarted("aborted"), { annotations });
   assert.equal(turnAborted.notifies.length, 0, "an aborted turn stays silent");
   assert.equal(turnAborted.sent.length, 0);
-  assert.equal(await surfacePrimed(), true, "aborted/handled arms leave the surface primed");
-  clearAnnotationSurface();
+  assert.equal(
+    await surfacePrimed(annotations),
+    true,
+    "aborted/handled arms leave the surface primed",
+  );
 });
 
 test("observer: scope + degradeNotice params override the defaults (the stack door's arm)", async () => {
@@ -283,12 +315,12 @@ test("observer: scope + degradeNotice params override the defaults (the stack do
       isIdle: () => true,
     },
     fakeStarted("timeout"),
+    createAnnotationState(),
     { scope: "stack-review-browser", degradeNotice: "STACK DEGRADE NOTICE" },
   );
   assert.equal(notifies.length, 1);
   assert.match(notifies[0]?.message ?? "", /stack-review-browser/);
   assert.deepEqual(sent, [{ message: "STACK DEGRADE NOTICE" }]);
-  clearAnnotationSurface();
 });
 
 // --- the command flow through the harness --------------------------------------------------------
@@ -512,16 +544,20 @@ test("/pr-review-browser <pr>: foreign success injects ONE URL-free guidance, pr
       "PLANNOTATOR_PORT preset at emit time (the door-held deterministic port)",
     );
     // The PR-mode open primed the annotation surface for push_annotations…
-    assert.equal(await surfacePrimed(), true, "the surface is primed after the PR-mode open");
+    assert.equal(
+      await sessionSurfacePrimed(h),
+      true,
+      "the surface is primed after the PR-mode open",
+    );
     const marker = pointer("perk-pr-review-browser");
     assert.equal(text.split(marker).length - 1, 1, "exactly one command:pr-review-browser pointer");
     // …and the bridge settle clears it (the background task's finally).
     await settleBridges(sink);
     const start = Date.now();
-    while ((await surfacePrimed()) && Date.now() - start < 5000) {
+    while ((await sessionSurfacePrimed(h)) && Date.now() - start < 5000) {
       await new Promise((r) => setTimeout(r, 25));
     }
-    assert.equal(await surfacePrimed(), false, "the bridge settle clears the surface");
+    assert.equal(await sessionSurfacePrimed(h), false, "the bridge settle clears the surface");
   } finally {
     await settleBridges(sink);
     h.dispose();
@@ -601,7 +637,11 @@ test("/pr-review-browser (no arg, no PR yet): the local since-base bridge, NO in
       "the local payload pins {cwd, diffType, defaultBranch} and omits prUrl",
     );
     assert.equal(sink.envAtEmit[0], undefined, "no port dance — PLANNOTATOR_PORT never preset");
-    assert.equal(await surfacePrimed(), false, "the local (pre-PR) mode never primes the surface");
+    assert.equal(
+      await sessionSurfacePrimed(h),
+      false,
+      "the local (pre-PR) mode never primes the surface",
+    );
 
     // The respond routes under the new scope: exit-before-approved (closed ≠ approved).
     sink.envelopes[0]?.respond({ status: "handled", result: { approved: false, exit: true } });
