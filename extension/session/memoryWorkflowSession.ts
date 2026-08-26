@@ -13,6 +13,7 @@ import {
   type SessionArtifactPointer,
 } from "../substrate/workflowState.ts";
 import type {
+  PrReviewRecord,
   ReadArtifactResult,
   ReviewPostRow,
   ReviewSubmissionRecord,
@@ -44,6 +45,8 @@ export interface MemoryWorkflowSession extends WorkflowSession {
   linkedPlanRef(): PlanRef | null;
   /** The live `last_review` record (test observation of the `record-review` effect). */
   lastReviewRecord(): ReviewSubmissionRecord | null;
+  /** The live `last_pr_review` record (test observation of the `record-pr-review` effect). */
+  lastPrReviewRecord(): PrReviewRecord | null;
 }
 
 /**
@@ -65,6 +68,7 @@ export function openMemoryWorkflowSession(opts: {
   let activePlanRef = opts.activePlanRef ?? null;
   let activeObjective = opts.activeObjective ?? null;
   let lastReview: ReviewSubmissionRecord | null = null;
+  let lastPrReview: PrReviewRecord | null = null;
   const reviewPosts: ReviewPostRow[] = [...(opts.reviewPosts ?? [])];
   let failWrite = false;
   let failPointerAppend = false;
@@ -104,6 +108,9 @@ export function openMemoryWorkflowSession(opts: {
     },
     lastReviewRecord() {
       return lastReview;
+    },
+    lastPrReviewRecord() {
+      return lastPrReview;
     },
     nodeClaim() {
       return claim;
@@ -246,6 +253,19 @@ export function openMemoryWorkflowSession(opts: {
               status: "unverified",
               problem: `active_objective read-back failed for #${change.objective}`,
             };
+          }
+          return { status: "applied" };
+        }
+        case "record-pr-review": {
+          // No pre-read/dedupe by design: applied/unverified/rejected only at runtime.
+          if (failApply) {
+            failApply = false;
+            return { status: "rejected", problem: "workflow-state append refused (induced)" };
+          }
+          lastPrReview = change.record;
+          if (failApplyVerification) {
+            failApplyVerification = false;
+            return { status: "unverified", problem: "last_pr_review read-back failed" };
           }
           return { status: "applied" };
         }

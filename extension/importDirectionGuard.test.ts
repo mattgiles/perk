@@ -55,7 +55,7 @@
 //      (type edges count) — and it must carry ≥ 1 (the positive floor: the SDK vocabulary
 //      provably lives in the adapter and the extractor still sees package specifiers).
 //   G. Report-wave transport confinement: the production files outside `waves/` with an edge
-//      to `waves/rpcAdapter.ts` are EXACTLY the ten wave registration sites (set-exact both
+//      to `waves/rpcAdapter.ts` are EXACTLY the nine wave registration sites (set-exact both
 //      directions; shrink-only intent — the census only burns down as registrations migrate);
 //      no production file outside `waves/` has an edge into the interior transport modules
 //      (`waves/transport.ts`, `waves/memoryAdapter.ts` — callers reach the wave mechanism
@@ -160,10 +160,11 @@ const APPROVED_REGISTRAR_PREFIXES = ["pi/"];
 const APPROVED_REGISTRAR_FILES = ["index.ts", "workerMain.ts"];
 
 // Rule G's adapter-construction census: the exact production files outside `waves/` allowed an
-// edge to `waves/rpcAdapter.ts` — the ten wave registration sites (each constructs its adapter
+// edge to `waves/rpcAdapter.ts` — the wave registration sites (each constructs its adapter
 // at its execute site; construction threading was considered and dropped at review). SHRINK-ONLY
 // intent: entries leave as flows migrate behind typed operations; no new file may join without
-// operator confirmation.
+// operator confirmation — the `pi/v1/codeReview/` successors joined under the node-5.2 plan's
+// approval (the code-review flows' registration sites moved wholesale into the adapter home).
 const RPC_ADAPTER_IMPORTERS = [
   "doors/address.ts",
   "doors/auditWaveTools.ts",
@@ -171,8 +172,8 @@ const RPC_ADAPTER_IMPORTERS = [
   "doors/dreamWaveTools.ts",
   "doors/harvestWaveTools.ts",
   "doors/learn.ts",
-  "doors/prReview.ts",
   "doors/reviewWaveTools.ts",
+  "pi/v1/codeReview/automated.ts",
   "pi/v1/objectivePlanning.ts",
 ];
 
@@ -207,7 +208,6 @@ const LEGACY_REGISTRANTS = [
   "doors/objectiveReviewBrowser.ts",
   "doors/objectiveStack.ts",
   "doors/planReviewBrowser.ts",
-  "doors/prReview.ts",
   "doors/prReviewBrowser.ts",
   "doors/prReviewTerminal.ts",
   "doors/ready.ts",
@@ -780,7 +780,7 @@ test("Rule G: report-wave transport confinement (exact importers; interior ban; 
     rpcImporters,
     [...RPC_ADAPTER_IMPORTERS].sort(),
     "the production files outside waves/ importing waves/rpcAdapter.ts must be exactly the " +
-      "ten wave registration sites — the census is shrink-only: a site that stops constructing " +
+      "nine wave registration sites — the census is shrink-only: a site that stops constructing " +
       "its adapter leaves the census in the same change, and no new file may join it.",
   );
   // (2) The interior ban: callers reach the wave mechanism through reportWave.ts's logical
@@ -1193,15 +1193,15 @@ test("control 12: Rule F mutation fixtures (foreign edge into the seam; a seam S
   );
 });
 
-test("control 13: Rule G mutation fixtures (11th importer; interior edge; token word bounds)", () => {
-  // A synthetic 11th importer, threaded through the SAME comparison logic as the production
+test("control 13: Rule G mutation fixtures (extra importer; interior edge; token word bounds)", () => {
+  // A synthetic extra importer, threaded through the SAME comparison logic as the production
   // assertion, must break the exact-set.
   const mutated = new Map([...scan().edges].map(([file, targets]) => [file, [...targets]]));
   mutated.set("doors/rogue.ts", ["waves/rpcAdapter.ts"]);
   const { rpcImporters } = transportConfinement(mutated);
   assert.ok(
     rpcImporters.includes("doors/rogue.ts"),
-    "the synthetic 11th rpcAdapter importer was NOT seen",
+    "the synthetic extra rpcAdapter importer was NOT seen",
   );
   assert.notDeepEqual(
     rpcImporters,

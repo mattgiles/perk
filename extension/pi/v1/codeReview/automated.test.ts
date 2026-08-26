@@ -1,23 +1,31 @@
-// Tests for the warm `/pr-review` door. The pure `prReviewGuidance` + the two strict decodes
-// (`decodeWaveParams`, `decodePostParams`) are pinned directly; the `run_pr_review_wave` flow
-// tool (over a fake pi-subagents RPC responder on pi.events), the `post_pr_review` delegation +
-// clean guard, and the command/tool registration + headless safety are exercised against a REAL
-// bound session via the T1 harness, OFFLINE (a fake `perk` stands in for the GitHub mutation, so
-// no LLM / network / gh / Python is invoked). The wave mechanics themselves are pinned in
-// `extension/waves/prReviewWave.test.ts` — the guidance here carries judgment only.
+// Adapter tests for the automated-review installer. The pure `prReviewGuidance` + the two
+// strict decodes (`decodeWaveParams`, `decodePostParams`) are pinned directly; the
+// `run_pr_review_wave` flow tool (over a fake pi-subagents RPC responder on pi.events), the
+// `post_pr_review` delegation + clean guard, and the command/tool registration + headless
+// safety are exercised against a REAL bound session via the T1 harness, OFFLINE (a fake `perk`
+// stands in for the GitHub mutation, so no LLM / network / gh / Python is invoked). The wave
+// mechanics themselves are pinned in `extension/waves/prReviewWave.test.ts`; the state-machine
+// POLICY matrix lives in `codeReview/automated.test.ts` over deterministic fakes —
+// malformed-input-preserves-state is pinned HERE, behaviorally through the tools (the typed
+// feature op cannot receive malformed input by construction).
 
 import assert from "node:assert/strict";
 import { mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
-import { runScratchDir } from "../substrate/cache.ts";
+import { runScratchDir } from "../../../substrate/cache.ts";
 import {
   createFakeSubagents,
   type FakeSubagents,
   waveScriptItems,
-} from "../testing/fakeSubagents.ts";
-import { fakePerk, fakePerkRouter, loadPerkSession, scaffoldRepo } from "../testing/harness.ts";
-import { decodePostParams, decodeWaveParams, prReviewGuidance } from "./prReview.ts";
+} from "../../../testing/fakeSubagents.ts";
+import {
+  fakePerk,
+  fakePerkRouter,
+  loadPerkSession,
+  scaffoldRepo,
+} from "../../../testing/harness.ts";
+import { decodePostParams, decodeWaveParams, prReviewGuidance } from "./automated.ts";
 
 // --- prReviewGuidance: judgment-bearing inputs over the flow-scoped wave tool ----------------
 
@@ -421,6 +429,32 @@ test("tool: a new target-resolution failure invalidates prior evidence for both 
       const post = await h.invokeTool("post_pr_review", { verdict, summary: "old evidence" });
       assert.equal((post.details as { error_type?: string }).error_type, "review_wave_unavailable");
     }
+  } finally {
+    h.dispose();
+  }
+});
+
+test("tool: bad post input does not touch the state — the next post behaves per the prior state", async () => {
+  const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
+  installPonytailReviewSkill(cwd);
+  const bin = fakePerkRouter(cwd, {
+    "pr url": { json: PR_URL_JSON },
+    "pr review-post": { json: JSON.parse(CLEAN_JSON) },
+  });
+  const h = await loadPerkSession({
+    cwd,
+    env: { PERK_RUN_ID: "01RID", PERK_BIN: bin },
+    extraExtensions: [prReviewFake().extension],
+  });
+  try {
+    await h.invokeTool("run_pr_review_wave", { angles: ["plan-fidelity", "tests"] });
+    const bad = await h.invokeTool("post_pr_review", { summary: "missing verdict" });
+    assert.equal((bad.details as { error_type?: string }).error_type, "bad_input");
+    // The refusal preserved the recorded state: a valid clean post still lands and consumes it.
+    const posted = await h.invokeTool("post_pr_review", { verdict: "clean", summary: "clean" });
+    assert.equal((posted.details as { ok: boolean }).ok, true);
+    const duplicate = await h.invokeTool("post_pr_review", { verdict: "clean", summary: "dup" });
+    assert.equal((duplicate.details as { error_type?: string }).error_type, "review_wave_consumed");
   } finally {
     h.dispose();
   }

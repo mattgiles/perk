@@ -31,6 +31,7 @@
 // | `active_plan_ref` | seam (`apply({kind:"link-plan-ref"})`) | the save surfaces — warm `savePlan` appends after a verified cold-door save; the Python cold door + the stage-gated session_start reconciliation (index.ts, substrate-direct) are the other writers | current value (LWW) | inherit (fork entries never touch it; the branch LWW carries the parent's) | permitted (save results render the ref; the footer/status probe reads it) | strict read-back (append → rebuild → `planRefsEqual`) | none (mirrors the exterior plan issue / `cache.plan-ref`; not a session artifact) |
 // | `objective_node_claim` | seam (`nodeClaim()` read + `apply({kind:"record-node-claim"})` + `apply({kind:"clear-node-claim"})`) | the interior RECORDS it on a verified `planning` transition (`transitionObjectiveNode`) and CLEARS it on a verified non-planning transition / node-linked save — both through the seam; the cold-claim write lives in `session/lifecycle.ts`'s claim arm (the objective-plan handoff carrier) | current value until cleared (a null append clears) | inherit (fork entries omit it — a fork continues the same node's planning session); adopt never impersonates it | permitted (claim recovery + the implement-here refusal surface it) | strict read-back on record + clear (append → rebuild → `nodeClaimsEqual`) | none |
 // | `active_objective` | seam (`activeObjective()` read + `apply({kind:"link-objective"})`) | the save surfaces (`saveObjective`'s post-save linkage) + the `/objective` command's set/clear (pi/v1/objective.ts) | current value (LWW; explicit null clears) | inherit (fork entries never touch it; the branch LWW carries the parent's) | permitted (save results render the id; the budget status reads it) | strict read-back on the seam path (append → rebuild → string equality); the `/objective` command path stays a raw LWW append — stated honestly | none |
+// | `last_pr_review` | seam (`apply({kind:"record-pr-review"})`) | session interior — the automated post surface (`post_pr_review`) | current value (LWW) | inherit (via LWW) | permitted (tool results render it) | strict read-back on the seam path (seam-reported warning, never a tool failure) | none |
 // | `last_review` | seam (`apply({kind:"record-review"})`) | session interior — the curated-submission post surface (`submit_pr_review`) | current value (LWW) | inherit (via LWW) | permitted (tool results render it) | strict read-back on the seam path (seam-reported warning, never a tool failure) | none |
 // | `review_posts` | seam (`reviewPosts()` read + `apply({kind:"append-review-post"})`) | session interior — the curated-submission post surface (one row per REAL success; the stack flow's resume authority) | append-only list (read-rebuild-append — each write carries the whole ordered list) | inherit (via LWW) | permitted (the resume guard's refusal names the prior row) | strict read-back on the seam path (order-sensitive `reviewPostsEqual`; seam-reported warning, never a tool failure) | none |
 // | `stage` | adapter-read (hook/dispatch routing; NOT seam-backed this slice) | exterior handoff, recorded at cold claim | current value | **inherit** (the fork entry omits `stage`; LWW retains the parent's — deliberate, contracts §8.40); only **adopt** never impersonates the launched stage | permitted (drives routing) | best effort | none |
@@ -65,6 +66,22 @@ export type WriteArtifactResult =
   | { status: "unchanged"; pointer: SessionArtifactPointer }
   | { status: "unverified"; problem: SessionProblem }
   | { status: "rejected"; problem: SessionProblem };
+
+/**
+ * The last automated `/pr-review` outcome (`last_pr_review`, contracts §8.3): exactly the
+ * record the `post_pr_review` post surface constructs on a real success. After a recorded wave,
+ * `angles` is the authoritative attempted manifest and `covered_angles` its schema-valid
+ * subset; standalone posts use the caller's angles for both.
+ */
+export interface PrReviewRecord {
+  pr: number;
+  verdict: "clean" | "actionable";
+  angles: readonly string[];
+  covered_angles: readonly string[];
+  comment_count: number | null;
+  mode: string | null;
+  at: string;
+}
 
 /**
  * The last curated review-door outcome (`last_review`, contracts §8.3): exactly the record the
@@ -134,6 +151,12 @@ export type WorkflowChange =
   | { kind: "record-node-claim"; claim: { objective: string; node: string } }
   /** Link the live session to a saved objective: append `active_objective` iff it differs. */
   | { kind: "link-objective"; objective: string }
+  /**
+   * Record the last automated `/pr-review` outcome: ONE `last_pr_review` append (LWW), strict
+   * read-back. No pre-read, no dedupe (same runtime invariant as `record-review`:
+   * `applied`/`unverified`/`rejected` only).
+   */
+  | { kind: "record-pr-review"; record: PrReviewRecord }
   /**
    * Record the last curated review-door outcome: ONE `last_review` append (LWW), strict
    * read-back. No pre-read, no dedupe — the `already_posted` resume guard is feature-op policy

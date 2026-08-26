@@ -25,6 +25,7 @@ import {
 import { openBranchWorkflowSession } from "./branchWorkflowSession.ts";
 import { openMemoryWorkflowSession } from "./memoryWorkflowSession.ts";
 import {
+  type PrReviewRecord,
   type ReviewPostRow,
   type ReviewSubmissionRecord,
   reviewPostsOf,
@@ -53,6 +54,16 @@ const REVIEW_RECORD: ReviewSubmissionRecord = {
 
 const POST_ROW: ReviewPostRow = { pr: 42, event: "comment", at: "2026-01-01T00:00:00Z" };
 
+const PR_REVIEW_RECORD: PrReviewRecord = {
+  pr: 42,
+  verdict: "actionable",
+  angles: ["plan-fidelity", "tests", "ponytail"],
+  covered_angles: ["plan-fidelity", "tests", "ponytail"],
+  comment_count: 2,
+  mode: "review",
+  at: "2026-01-01T00:00:00Z",
+};
+
 /** The per-backing harness: one session plus deterministic ways to reach every arm. */
 interface SessionHarness {
   session: WorkflowSession;
@@ -74,6 +85,8 @@ interface SessionHarness {
   linkedPlanRef(): PlanRef | null;
   /** The rebuilt/live `last_review` record (observation of the record-review effect). */
   lastReview(): ReviewSubmissionRecord | null;
+  /** The rebuilt/live `last_pr_review` record (observation of the record-pr-review effect). */
+  lastPrReview(): PrReviewRecord | null;
   dispose(): void;
 }
 
@@ -205,6 +218,12 @@ function branchBacking(): Backing {
           ).last_review;
           return (value ?? null) as ReviewSubmissionRecord | null;
         },
+        lastPrReview() {
+          const value = rebuildWorkflowState(
+            branch as Parameters<typeof rebuildWorkflowState>[0],
+          ).last_pr_review;
+          return (value ?? null) as PrReviewRecord | null;
+        },
         dispose() {
           if (lockedPerkDir) chmodSync(perkDir, 0o755);
           rmSync(cwd, { recursive: true, force: true });
@@ -239,6 +258,7 @@ function memoryBacking(): Backing {
         disown: (name) => session.disownPointer(name),
         linkedPlanRef: () => session.linkedPlanRef(),
         lastReview: () => session.lastReviewRecord(),
+        lastPrReview: () => session.lastPrReviewRecord(),
         dispose() {},
       };
     },
@@ -614,6 +634,43 @@ for (const backing of [branchBacking(), memoryBacking()]) {
     }
   });
 
+  test(`${backing.label}: apply record-pr-review — applied; a repeat identical record applies AGAIN (no unchanged)`, () => {
+    const h = backing.harness("RID");
+    try {
+      assert.deepEqual(h.session.apply({ kind: "record-pr-review", record: PR_REVIEW_RECORD }), {
+        status: "applied",
+      });
+      assert.deepEqual(h.lastPrReview(), PR_REVIEW_RECORD);
+      assert.deepEqual(
+        h.session.apply({ kind: "record-pr-review", record: { ...PR_REVIEW_RECORD } }),
+        { status: "applied" },
+      );
+    } finally {
+      h.dispose();
+    }
+  });
+
+  test(`${backing.label}: apply record-pr-review — unverified on a read-back miss; rejected lands nothing`, () => {
+    const h = backing.harness("RID");
+    try {
+      h.induceApplyVerificationFailure();
+      const miss = quietly(() =>
+        h.session.apply({ kind: "record-pr-review", record: PR_REVIEW_RECORD }),
+      );
+      assert.equal(miss.status, "unverified");
+      assert.ok(
+        miss.status === "unverified" && /last_pr_review read-back failed/.test(miss.problem),
+      );
+      h.induceApplyRefusal();
+      const refused = quietly(() =>
+        h.session.apply({ kind: "record-pr-review", record: PR_REVIEW_RECORD }),
+      );
+      assert.equal(refused.status, "rejected");
+    } finally {
+      h.dispose();
+    }
+  });
+
   test(`${backing.label}: apply record-review — applied; a repeat identical record applies AGAIN (no unchanged)`, () => {
     // No pre-read/deep-equal short-circuit by design: the resume guard is feature-op policy
     // upstream, so the seam never emits `unchanged` for this variant (runtime invariant).
@@ -859,6 +916,11 @@ test("branch: a read-back miss reports LOUDLY under each change's seam-owned sco
       seed: null,
       change: { kind: "link-objective", objective: "7" },
       expected: "perk: objective-save — active_objective read-back failed for #7",
+    },
+    {
+      seed: null,
+      change: { kind: "record-pr-review", record: PR_REVIEW_RECORD },
+      expected: "perk: pr-review — last_pr_review read-back failed",
     },
     {
       seed: null,

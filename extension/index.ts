@@ -29,7 +29,6 @@ import {
 import { registerObjectiveStack } from "./doors/objectiveStack.ts";
 import { plannotatorPresent } from "./doors/plannotatorHandoff.ts";
 import { openPlanReviewSurface, registerPlanReviewBrowser } from "./doors/planReviewBrowser.ts";
-import { registerPrReview } from "./doors/prReview.ts";
 import { registerPrReviewBrowser } from "./doors/prReviewBrowser.ts";
 import { registerPrReviewTerminal } from "./doors/prReviewTerminal.ts";
 import { registerReady } from "./doors/ready.ts";
@@ -38,6 +37,7 @@ import { registerSelfcheck } from "./doors/selfcheck.ts";
 import { registerOpenStackReview, registerStackReviewBrowser } from "./doors/stackReviewBrowser.ts";
 import { registerSubmit } from "./doors/submit.ts";
 import { createHunkFeedbackReceiver } from "./hunkFeedback/receiver.ts";
+import { installAutomatedReviewBindings } from "./pi/v1/codeReview/automated.ts";
 import { installCuratedSubmissionBindings } from "./pi/v1/codeReview/submit.ts";
 import { installGistBindings } from "./pi/v1/gist.ts";
 import { installObjectiveBindings } from "./pi/v1/objective.ts";
@@ -493,7 +493,7 @@ export default function (pi: ExtensionAPI) {
 
   // The warm `/pr-review` door: automated code review in a FRESH, isolated subagent that
   // POSTS its review to the PR (the deliberate departure from /address's read-only-child rule).
-  registerPrReview(pi);
+  installAutomatedReviewBindings(pi);
 
   // The warm `submit_pr_review` tool: the human-gated curated-posting surface both review
   // doors ride (contracts §8.4) — neither door registers tools of its own.

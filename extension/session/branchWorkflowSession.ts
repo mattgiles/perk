@@ -157,6 +157,17 @@ export function openBranchWorkflowSession(
             failure: `active_objective read-back failed for #${objective}`,
           });
         }
+        case "record-pr-review": {
+          // No pre-read/dedupe by design (the single-use wave state is feature-op policy
+          // upstream): at runtime this yields applied/unverified/rejected only.
+          return appendWorkflowStateClassified(sink, source, {
+            data: { last_pr_review: change.record },
+            field: "last_pr_review",
+            expected: change.record,
+            scope: "pr-review",
+            failure: "last_pr_review read-back failed",
+          });
+        }
         case "record-review": {
           // No pre-read/dedupe by design (the resume guard is feature-op policy upstream): at
           // runtime this yields applied/unverified/rejected only.

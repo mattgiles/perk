@@ -1,7 +1,7 @@
 // The pr-review `WaveSpec`-building entrypoint over the shared report-wave runner: the flow's
 // angle vocabulary, the per-assignment report schema, and the ONE bounded retry are module-owned,
 // tested implementation here — reached through the flow-scoped `run_pr_review_wave` tool
-// (`extension/doors/prReview.ts`), never model-authored prompt mechanics.
+// (`extension/pi/v1/codeReview/automated.ts`), never model-authored prompt mechanics.
 //
 // Retry policy (one bounded retry, ever):
 // - assignment-level failures ⇒ retry ONLY the failed assignments;
