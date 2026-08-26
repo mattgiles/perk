@@ -481,7 +481,7 @@ test("tool: run_learn_wave bad_input arms (params, manifest, angle policy)", asy
 
 /** The shared fake pi-subagents responder over one staged complete aggregate. */
 function fakeSubagentsRpc(aggregate: unknown[]): FakeSubagents {
-  return createFakeSubagents([{ aggregate: { state: "complete", value: aggregate } }]);
+  return createFakeSubagents([{ value: aggregate }]);
 }
 
 test("tool: run_learn_wave end-to-end over the RPC seam — typed reports + explicit skipped angles", async () => {

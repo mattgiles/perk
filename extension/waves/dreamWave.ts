@@ -897,9 +897,9 @@ export async function runDreamAnalystWave(
   for (const waveReport of result.reports) {
     const lane = byKey.get(waveReport.key);
     if (lane === undefined) {
-      // Unreachable without upstream drift (normalizeLanes only yields requested keys), but a
-      // defensive named failure beats a crash on an untrusted aggregate. The raw key rides the
-      // detail only — it is not a lane identity.
+      // Unreachable without upstream drift (normalizeAssignments only yields requested
+      // keys), but a defensive named failure beats a crash on an untrusted aggregate. The raw
+      // key rides the detail only — it is not a lane identity.
       decodeFailures += 1;
       failures.push({
         lane: null,

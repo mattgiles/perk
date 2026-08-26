@@ -373,9 +373,7 @@ function scaffoldDreamRepo(opts: { manifest?: string | false } = {}): {
 
 /** The shared fake pi-subagents responder with a PER-SPAWN aggregate FIFO (the two-wave door). */
 function fakeSubagentsRpc(aggregates: unknown[][]): FakeSubagents {
-  return createFakeSubagents(
-    aggregates.map((value) => ({ aggregate: { state: "complete", value } })),
-  );
+  return createFakeSubagents(aggregates.map((value) => ({ value })));
 }
 
 async function refusalArm(

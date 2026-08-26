@@ -227,7 +227,7 @@ test("composeDreamBundle: deterministic bytes, identity echoes, manifest lane or
   assert.equal(bundle.doc_count, 3);
   assert.equal(bundle.total_bytes, 350);
   // The ordering pin: a complete wave's analyses are already in manifest lane order (the
-  // runner's spec.lanes-order normalization + buildDreamLanes' manifest-order plan), so the
+  // runner's spec.assignments-order normalization + buildDreamLanes' manifest-order plan), so the
   // serialized lanes carry that order — no re-sort layer exists.
   assert.deepEqual(
     bundle.lanes.map((lane) => lane.lane),

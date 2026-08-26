@@ -160,7 +160,7 @@ test("census: run_harvest_wave rides PERK_TOOLS + READ_ONLY_TOOLS and NO stage l
 
 /** The shared fake pi-subagents responder over one staged complete aggregate. */
 function fakeSubagentsRpc(aggregate: unknown[]): FakeSubagents {
-  return createFakeSubagents([{ aggregate: { state: "complete", value: aggregate } }]);
+  return createFakeSubagents([{ value: aggregate }]);
 }
 
 async function refusalArm(

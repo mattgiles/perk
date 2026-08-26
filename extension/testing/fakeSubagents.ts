@@ -34,14 +34,16 @@ import {
 
 /** One spawn's scripted behavior (FIFO across spawns; the last entry repeats). */
 export interface FakeSpawnPlan {
-  /** The durable aggregate written to the run's `status.json` (default: complete + empty). */
-  aggregate?: { state: string; error?: string; value: unknown };
+  /**
+   * The `workflow.value` written to the run's `status.json` (default: `[]`). The fake always
+   * writes a COMPLETE status — runner-level failure states are the memory adapter's job.
+   */
+  value?: unknown;
   /** Completion delivery mode; default `"auto"` (the post-reply macrotask). */
   delivery?: "auto" | "manual" | "never";
   /**
    * Dynamic mode: the test-supplied script evaluator (the AsyncFunction-over-fake-`runs`
-   * idiom); the returned value becomes the aggregate's `workflow.value` (state `"complete"`),
-   * superseding `aggregate`.
+   * idiom); the returned value becomes the aggregate's `workflow.value`, superseding `value`.
    */
   executeScript?: (script: string) => Promise<unknown>;
 }
@@ -55,8 +57,8 @@ interface FakeBus {
 export interface FakeSubagents {
   /** Bind as a pi extension factory (the harness's `extraExtensions` slot). */
   extension: (pi: ExtensionAPI) => void;
-  /** Bind to a bare fake bus (the runner-over-real-RPC-adapter suites); returns unsubscribe. */
-  attach(bus: FakeBus): () => void;
+  /** Bind to a bare fake bus (the runner-over-real-RPC-adapter suites). One bus per fake. */
+  attach(bus: FakeBus): void;
   /** The sunk spawn params, in spawn order. */
   spawns: Array<Record<string, unknown>>;
   /** The recorded stop requests, in order. */
@@ -67,27 +69,16 @@ export interface FakeSubagents {
   emit(payload: Record<string, unknown>): void;
 }
 
-export function createFakeSubagents(
-  plans: FakeSpawnPlan[] = [],
-  opts: { asyncCompleteEvent?: string; methods?: string[] } = {},
-): FakeSubagents {
-  const asyncCompleteEvent = opts.asyncCompleteEvent ?? "subagent:async-complete";
-  const methods = opts.methods ?? [
-    "ping",
-    "status",
-    "spawn",
-    "steer",
-    "interrupt",
-    "stop",
-    "resume",
-  ];
+const ASYNC_COMPLETE_EVENT = "subagent:async-complete";
+
+export function createFakeSubagents(plans: FakeSpawnPlan[] = []): FakeSubagents {
   const spawns: Array<Record<string, unknown>> = [];
   const stops: Array<{ id: string }> = [];
-  const buses: FakeBus[] = [];
-  const launched: ({ asyncId: string; asyncDir: string; state: string } | undefined)[] = [];
+  let bound: FakeBus | null = null;
+  const launched: ({ asyncId: string; asyncDir: string } | undefined)[] = [];
 
   const emit = (payload: Record<string, unknown>): void => {
-    for (const bus of buses) bus.emit(asyncCompleteEvent, payload);
+    bound?.emit(ASYNC_COMPLETE_EVENT, payload);
   };
 
   const complete = (index: number): void => {
@@ -95,7 +86,7 @@ export function createFakeSubagents(
     if (run === undefined) {
       throw new Error(`fakeSubagents: spawn ${index} has not launched (no completion to deliver)`);
     }
-    emit({ id: run.asyncId, asyncDir: run.asyncDir, state: run.state });
+    emit({ id: run.asyncId, asyncDir: run.asyncDir, state: "complete" });
   };
 
   const handleRequest = (bus: FakeBus, raw: unknown): void => {
@@ -117,9 +108,9 @@ export function createFakeSubagents(
         success: true,
         data: {
           version: WAVE_RPC_PROTOCOL_VERSION,
-          methods,
+          methods: ["ping", "spawn", "stop"],
           capabilities: { asyncSpawn: true },
-          events: { asyncComplete: asyncCompleteEvent },
+          events: { asyncComplete: ASYNC_COMPLETE_EVENT },
           session: {},
         },
       });
@@ -133,13 +124,10 @@ export function createFakeSubagents(
       // Async on purpose: the dynamic mode awaits the evaluator, and the reply must follow the
       // durable status.json write (the real responder's ordering).
       void (async () => {
-        const aggregate =
+        const value =
           plan.executeScript !== undefined
-            ? {
-                state: "complete",
-                value: await plan.executeScript(String(params.workflowScript ?? "")),
-              }
-            : (plan.aggregate ?? { state: "complete", value: [] as unknown[] });
+            ? await plan.executeScript(String(params.workflowScript ?? ""))
+            : (plan.value ?? ([] as unknown[]));
         const asyncDir = mkdtempSync(join(tmpdir(), "perk-fake-subagents-"));
         const asyncId = basename(asyncDir);
         writeFileSync(
@@ -147,13 +135,12 @@ export function createFakeSubagents(
           JSON.stringify({
             runId: asyncId,
             mode: "workflow",
-            state: aggregate.state,
+            state: "complete",
             startedAt: 0,
-            ...(aggregate.error !== undefined ? { error: aggregate.error } : {}),
-            workflow: { value: aggregate.value },
+            workflow: { value },
           }),
         );
-        launched[index] = { asyncId, asyncDir, state: aggregate.state };
+        launched[index] = { asyncId, asyncDir };
         reply({
           success: true,
           data: { text: "Started async run.", details: { asyncId, asyncDir } },
@@ -178,14 +165,10 @@ export function createFakeSubagents(
     });
   };
 
-  const attach = (bus: FakeBus): (() => void) => {
-    buses.push(bus);
-    const off = bus.on(WAVE_RPC_REQUEST_EVENT, (raw) => handleRequest(bus, raw));
-    return () => {
-      off();
-      const at = buses.indexOf(bus);
-      if (at >= 0) buses.splice(at, 1);
-    };
+  const attach = (bus: FakeBus): void => {
+    if (bound !== null) throw new Error("fakeSubagents: already attached (one bus per fake)");
+    bound = bus;
+    bus.on(WAVE_RPC_REQUEST_EVENT, (raw) => handleRequest(bus, raw));
   };
 
   return {

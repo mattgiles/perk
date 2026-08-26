@@ -367,7 +367,7 @@ test("executeAuditWave: a throwing write is the io_error arm with the lanes atta
 
 /** The shared fake pi-subagents responder over one staged complete aggregate. */
 function fakeSubagentsRpc(aggregate: unknown[]): FakeSubagents {
-  return createFakeSubagents([{ aggregate: { state: "complete", value: aggregate } }]);
+  return createFakeSubagents([{ value: aggregate }]);
 }
 
 test("tool e2e: the bound bundle dir is the write target; spawn params sink the auditor contract", async () => {

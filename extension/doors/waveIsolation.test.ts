@@ -141,21 +141,28 @@ function fakePlannotator(sink: FakePlannotatorSink): (pi: ExtensionAPI) => void 
 }
 
 /**
- * Settle a session's bridge (DENY) so its readiness poll ends, and wait for the decision
- * task's OWN completion signal — the injected deny turn — before the caller disposes (the
- * process-global port restore alone is a weak barrier with two concurrent doors).
+ * Settle ONE session's bridge (DENY) and wait for both of its background tasks to end: the
+ * decision task (its own completion signal — the injected deny turn) and the readiness poll
+ * (its exit is observable as the `PLANNOTATOR_PORT` restore — `expectedPort` names the value
+ * the poll's `finally` puts back). The two concurrent doors NEST their save/restore of that
+ * process-global (B saved A's port as its prior value), so the caller settles in REVERSE open
+ * order — B first (restores A's port), then A (restores absence) — leaving the env clean and
+ * provably no poll still running at dispose.
  */
-async function settleBridge(sink: FakePlannotatorSink, injected: string[]): Promise<void> {
+async function settleDoor(
+  sink: FakePlannotatorSink,
+  injected: string[],
+  expectedPort: string | undefined,
+): Promise<void> {
   sink.emitDecision({ reviewId: "r-1", approved: false, feedback: "settle" });
   const start = Date.now();
-  while (!injected.some((m) => m.includes("DENIED"))) {
+  const done = (): boolean =>
+    injected.some((m) => m.includes("DENIED")) && process.env.PLANNOTATOR_PORT === expectedPort;
+  while (!done()) {
     if (Date.now() - start > 5000) break; // bounded — never hang a test on cleanup
     await new Promise((r) => setTimeout(r, 25));
   }
-  while ("PLANNOTATOR_PORT" in process.env) {
-    if (Date.now() - start > 5000) break;
-    await new Promise((r) => setTimeout(r, 25));
-  }
+  assert.ok(done(), "the door's decision task and readiness poll both ended");
 }
 
 const PLAN_DRAFT = "# The session-A plan draft\n\nStep one.\n";
@@ -186,9 +193,12 @@ test("two sessions share no draft-review context: each wave receives its own pri
   });
   const injectedA = spyInjections(hA);
   const injectedB = spyInjections(hB);
+  const priorPort = process.env.PLANNOTATOR_PORT;
+  let portA: string | undefined;
   try {
     await hA.invokeTool("plan_draft", { plan: PLAN_DRAFT });
     await hA.runCommandHandler("plan-review-browser", "");
+    portA = process.env.PLANNOTATOR_PORT; // A's preset — the prior value B's poll will restore
     await hB.invokeTool("objective_draft", {
       prose: OBJECTIVE_PROSE,
       title: "Ship retries",
@@ -234,8 +244,13 @@ test("two sessions share no draft-review context: each wave receives its own pri
       "draft B",
     );
   } finally {
-    await settleBridge(sinkA, injectedA);
-    await settleBridge(sinkB, injectedB);
+    // Reverse open order: B's poll restores A's port, then A's restores the original absence.
+    await settleDoor(sinkB, injectedB, portA);
+    await settleDoor(sinkA, injectedA, priorPort);
+    // Belt-and-braces: the polls' restores are verified above; put back the pre-test value even
+    // if a bounded wait broke out early.
+    if (priorPort === undefined) delete process.env.PLANNOTATOR_PORT;
+    else process.env.PLANNOTATOR_PORT = priorPort;
     hA.dispose();
     hB.dispose();
   }

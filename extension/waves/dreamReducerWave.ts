@@ -93,7 +93,7 @@ export interface DreamProposal {
  * lanes carrying the re-decoded compact analyst reports (pretty-printed JSON + trailing
  * newline; `bytes` = UTF-8 `Buffer.byteLength`). Caller preconditions (discharged by the door
  * and NOT re-checked here): the first wave was COMPLETE, so `analyses` covers the manifest's
- * lanes exactly and is already in manifest lane order — the runner normalizes to `spec.lanes`
+ * lanes exactly and is already in manifest lane order — the runner normalizes to `spec.assignments`
  * order, `buildDreamLanes` plans in manifest order, and `decodeDreamAnalystReport` normalizes
  * each report's docs to manifest lane-doc order, so no re-sort layer exists here.
  */
