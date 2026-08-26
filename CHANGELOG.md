@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 <!-- As of 2f69487 -->
 
+### Removed
+
+- Retire the experimental `/pr-review-dynamic` flow wholesale: the command, the `run_pr_review_dynamic_wave` tool, the `perk.review-angle-selector` agent, the `perk-pr-review-dynamic` skill, the `[models.subagents] review-angle-selector` config key, and the `command:pr-review-dynamic` binding row are all removed — the canonical `/pr-review` (parent-picked angles) is unchanged
+
 ## [3.2.0] - 2026-08-24
 
 ### Changed

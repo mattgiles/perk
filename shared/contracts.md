@@ -180,7 +180,7 @@ The local cache tier — written and read by **both** the CLI (exterior) and the
   context is eligible unless branch-LWW workflow mode is explicitly `read-only` or
   `PI_SUBAGENT_CHILD_AGENT` names one of perk's report-only children (`perk.adversarial-reviewer`,
   `perk.draft-reviewer`, `perk.dream-analyst`, `perk.dream-reducer`, `perk.harvest-analyst`, `perk.learn-analyst`,
-  `perk.objective-explorer`, `perk.pr-reviewer`, `perk.review-angle-selector`,
+  `perk.objective-explorer`, `perk.pr-reviewer`,
   `perk.review-classifier`). Main sessions, `perk.conflict-resolver`, and unknown/custom children
   remain eligible; absent generic foreign-agent metadata, inherited parent mode is the fallback.
   Only the current-run direct block counts as live scratch guidance, and durable decisions still
@@ -465,7 +465,7 @@ end of the section).
 | `active_plan_ref` | object \| null | the provider-agnostic plan ref (§8.4); null during early `plan` |
 | `active_objective` | string \| null | the active objective id (`/objective <id>` sets it, `/objective clear` nulls it) |
 | `last_review_batch` | object \| null | the last fully processed review batch, appended by `finalize_address` only after publication and thread resolution succeed: `{ pr, counts:{actionable,informational,praise,question}, resolved_thread_ids:[…], at:ISO }` |
-| `last_pr_review` | object \| null | the last `/pr-review` (or the experimental `/pr-review-dynamic`) outcome posted via the shared warm `post_pr_review` tool: `{ pr, verdict, angles, covered_angles, comment_count, mode, at:ISO }`; a recorded wave is PR-bound and single-use, and supplies authoritative ordered `angles` / schema-valid `covered_angles`; standalone posting before any valid wave uses caller-supplied angles for both (or `[]`); best-effort tier (the PR review is the canonical record) |
+| `last_pr_review` | object \| null | the last `/pr-review` outcome posted via the shared warm `post_pr_review` tool: `{ pr, verdict, angles, covered_angles, comment_count, mode, at:ISO }`; a recorded wave is PR-bound and single-use, and supplies authoritative ordered `angles` / schema-valid `covered_angles`; standalone posting before any valid wave uses caller-supplied angles for both (or `[]`); best-effort tier (the PR review is the canonical record) |
 | `last_review` | object \| null | the last review-door outcome posted via the warm `submit_pr_review` tool: `{ pr, event, comment_count, mode, at:ISO }`; best-effort tier (the submitted PR review is the canonical record) |
 | `review_posts` | array | the accumulating per-PR posting ledger of a stacked review: one `{ pr, event, at:ISO }` row per REAL `submit_pr_review` success, in posting order (read-rebuild-append — each write carries the whole list); best-effort tier with an asymmetric trust rule — a row can be MISSING spuriously (append failed after a real post) but never PRESENT spuriously, so `submit_pr_review` enforces skip-on-resume on presence (`already_posted` refusal; `allow_repost: true` is the deliberate override) while a missing row means verify posted-vs-pending against GitHub before re-posting |
 | `session_artifacts` | object \| null | per-name session-artifact provenance pointers `{run_id, name, path, digest, at}` (§8.1); appends carry the **whole merged map** (per-field LWW); strict-append tier |
@@ -475,7 +475,7 @@ end of the section).
 | `perk_version` | string | the running perk (extension) version, stamped when run identity is established (the claim/fork/adopt/mint arms, §8.2) — the session-audit **exact-vintage** basis (the key literal is the cross-plane coordination point; the read side is `perk-dev`'s audit corpus/vintage layer); omitted when only the `perkVersion()` failure sentinel is available; best-effort tier |
 
 Automated PR-review postability is session-local interior state, not an appended workflow-state
-field: `null` permits the backwards-compatible standalone post; valid static/dynamic wave input
+field: `null` permits the backwards-compatible standalone post; valid wave input
 moves immediately to `pending` before target resolution (`review_wave_unavailable` on either
 verdict); every normalized outcome records `{pr, complete, attempted, covered}`; one successful
 post consumes it (`review_wave_consumed` thereafter). Bad wave input preserves the prior state.
@@ -656,10 +656,10 @@ session-lifecycle gates + the warm `/implement` handoff (`extension/doors/lifecy
 `docs/design/tui-charter.md`); plan mode + the plan provider deferral
 (`extension/pi/v1/plan.ts`; §8.10
 owns the provider seams); the read-only CI executor
-(`extension/doors/ciExecutor.ts`); the spawned delegation seam + `/address` + `/pr-review` + `/pr-review-dynamic` + `/pr-review-terminal` + `/pr-review-browser`
-(`extension/doors/address.ts` / `prReview.ts` / `prReviewDynamic.ts` / `prReviewTerminal.ts` /
+(`extension/doors/ciExecutor.ts`); the spawned delegation seam + `/address` + `/pr-review` + `/pr-review-terminal` + `/pr-review-browser`
+(`extension/doors/address.ts` / `prReview.ts` / `prReviewTerminal.ts` /
 `prReviewBrowser.ts` / `submitPrReview.ts` / `hunkHandoff.ts` / `plannotatorHandoff.ts`, `agents/*.md`, `skills/perk-address/` /
-`perk-pr-review/` / `perk-pr-review-dynamic/` / `perk-pr-review-terminal/` / `perk-pr-review-browser/`; the gateway op shapes stay in §8.4); the conflict-resolution drive
+`perk-pr-review/` / `perk-pr-review-terminal/` / `perk-pr-review-browser/`; the gateway op shapes stay in §8.4); the conflict-resolution drive
 (`extension/doors/submit.ts`; the probe contract stays in §8.4).
 
 
@@ -944,19 +944,15 @@ effective manifest appends exactly one **required automatic** final source-bound
 lane outside the input menu/cap. Every reviewer uses only
 `perk pr review-context --expected-pr <bound-number> --json`, so target drift yields no
 schema-valid report; a normalized result records the bound PR plus explicit effective attempted
-and covered arrays for §8.3's single-use post state. The experimental `/pr-review-dynamic` door
-shares the same PR-bound, single-use `post_pr_review`/`review-post` state — angle selection is
-delegated to a fresh `perk.review-angle-selector` lane (which may additionally propose AT MOST
-ONE validated change-specific custom angle) and normalized in module-rendered code; the
-baseline `/pr-review` stays canonical. Ponytail coverage rides **one parent-side exact-path
+and covered arrays for §8.3's single-use post state. Ponytail coverage rides **one parent-side exact-path
 preflight before dispatch** (package name, `pi.skills`, the exact readable skill file, and its
 frontmatter name): a failed preflight never dispatches/spawns that lane — the keyed
 non-retryable `skill-unavailable` failure leaves it honestly uncovered, with no same-named
 project/user skill fallback — and a post-preflight package/skill change leaves the lane
 uncovered too (the child terminates without a schema-valid report; never accepted as coverage
-from another source). The full wave choreography (lane tasks, selector normalization, retry
+from another source). The full wave choreography (lane tasks, retry
 policy, attempt receipts) lives in §8.35/§8.57 and the extension wave modules
-(`extension/waves/prReviewWave.ts` / `prReviewDynamicWave.ts` / `ponytail.ts`).
+(`extension/waves/prReviewWave.ts` / `ponytail.ts`).
 
 ### PR-review toolbox ops (checkout / cleanup / review-submit)
 
@@ -1152,8 +1148,7 @@ prompt; the contracts pin the output shape, not the judgment rubric.
   the detached read-only head worktree (the checkout above). The child fetches its own context
   via `perk pr review-context --pr <n> --json` (`plan_body` may be null).
 - **Angles** (one per spawn; the adversarial selectable menu is exactly these four —
-  `pr-reviewer`'s autonomous menu is wider, seven fixed angles plus the dynamic flow's custom
-  lane): `claimed-intent` (the PR text's claims checked against the diff, plus a first-class hunt
+  `pr-reviewer`'s autonomous menu is wider, seven fixed angles): `claimed-intent` (the PR text's claims checked against the diff, plus a first-class hunt
   for **undisclosed scope**; the parent always includes this angle) · `correctness` (incl. the
   untrusted-code supply-chain axes: CI/workflow edits, dependency pins, install/build scripts,
   secrets handling, obfuscated code) · `tests` (adequacy by reasoning only) · `quality`. Every
@@ -2043,7 +2038,6 @@ perk's workflow skills are prompt-hidden; `transclude` exists for the user-bindi
 | `command:learn-harvest` | `perk-learn-harvest` | `nudge` |
 | `command:learn-dream` | `perk-learn-dream` | `nudge` |
 | `command:pr-review` | `perk-pr-review` | `nudge` |
-| `command:pr-review-dynamic` | `perk-pr-review-dynamic` | `nudge` |
 | `command:pr-review-terminal` | `perk-pr-review-terminal` | `nudge` |
 | `command:pr-review-browser` | `perk-pr-review-browser` | `nudge` |
 | `command:stack-review-browser` | `perk-pr-review-browser` | `nudge` |
@@ -5355,7 +5349,7 @@ attempt (a failed lane and its relaunch stay distinguishable). `status.json.work
 remains the SOLE authority for reports and completeness; receipt absence (an identity-only
 completion) never changes a verdict, completeness, retry selection, or mutation decision —
 receipts are write-only correlation telemetry. The flow tools (`run_learn_wave`,
-`run_harvest_wave`, `run_dream_wave`, `run_pr_review_wave`, `run_pr_review_dynamic_wave`, and the single-lane
+`run_harvest_wave`, `run_dream_wave`, `run_pr_review_wave`, and the single-lane
 `classify_review_feedback` / `explore_objective_node`) persist `attempts` in their structured
 tool-result details only (never the model-facing prose); a wave-level soft-failure retains any
 receipt known before the failure in its fail details.

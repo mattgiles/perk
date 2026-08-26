@@ -143,12 +143,6 @@
 - template: "stages/pr-review.md"
   vars:
     directive: "have one reviewer focus on the dignified-python skill"
-- template: "stages/pr-review-dynamic.md"
-  vars:
-    directive: ""
-- template: "stages/pr-review-dynamic.md"
-  vars:
-    directive: "have one reviewer focus on the dignified-python skill"
 - template: "stages/pr-review-terminal/foreign.md"
   vars:
     pr: "148"

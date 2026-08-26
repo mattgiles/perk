@@ -304,7 +304,7 @@ routes:
     priority: 80
 
   - id: agent-review
-    match: { paths: ["agents/*review*.md", "agents/review-angle-selector.md"] }
+    match: { paths: ["agents/*review*.md"] }
     capability: review.pr
     audience: shipped
     role: subagent-instruction

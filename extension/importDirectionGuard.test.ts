@@ -171,7 +171,6 @@ const RPC_ADAPTER_IMPORTERS = [
   "doors/harvestWaveTools.ts",
   "doors/learn.ts",
   "doors/prReview.ts",
-  "doors/prReviewDynamic.ts",
   "doors/reviewWaveTools.ts",
   "pi/v1/objectivePlanning.ts",
 ];
@@ -209,7 +208,6 @@ const LEGACY_REGISTRANTS = [
   "doors/planReviewBrowser.ts",
   "doors/prReview.ts",
   "doors/prReviewBrowser.ts",
-  "doors/prReviewDynamic.ts",
   "doors/prReviewTerminal.ts",
   "doors/ready.ts",
   "doors/reviewWaveTools.ts",

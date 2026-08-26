@@ -42,7 +42,6 @@ MODES: tuple[str, ...] = ("nudge", "transclude")
 # extension/factories/objectivePlan.ts + extension/doors/land.ts (`command:objective-reconcile`),
 # extension/doors/learnFactory.ts (`command:learn-docs`/`command:learn-code`), and
 # extension/doors/prReview.ts (`command:pr-review`),
-# extension/doors/prReviewDynamic.ts (`command:pr-review-dynamic`),
 # extension/doors/prReviewTerminal.ts (`command:pr-review-terminal`),
 # extension/doors/prReviewBrowser.ts (`command:pr-review-browser`), and
 # extension/doors/stackReviewBrowser.ts (`command:stack-review-browser` — also the
@@ -66,7 +65,6 @@ DELIVERABLE_COMMAND_TARGETS: frozenset[str] = frozenset(
         "learn-harvest",
         "learn-dream",
         "pr-review",
-        "pr-review-dynamic",
         "pr-review-terminal",
         "pr-review-browser",
         "stack-review-browser",

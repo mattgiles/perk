@@ -48,7 +48,7 @@ export interface PerkConfig {
   /**
    * The agent-keyed `[models.subagents]` table: a per-agent model override for each perk-owned
    * project agent (`pr-reviewer`, `review-classifier`, `objective-explorer`, `conflict-resolver`,
-   * `learn-analyst`, `adversarial-reviewer`, `review-angle-selector`, `draft-reviewer`,
+   * `learn-analyst`, `adversarial-reviewer`, `draft-reviewer`,
    * `harvest-analyst` — consumed by `run_harvest_wave` at execute time — `dream-analyst` and
    * `dream-reducer` — consumed by `run_dream_wave` at execute time — and the
    * dev-only `session-auditor`, whose def is repo-local to perk's own repository
@@ -75,7 +75,6 @@ export interface PerkConfig {
     "conflict-resolver"?: string;
     "learn-analyst"?: string;
     "adversarial-reviewer"?: string;
-    "review-angle-selector"?: string;
     "draft-reviewer"?: string;
     "harvest-analyst"?: string;
     "dream-analyst"?: string;
@@ -328,7 +327,6 @@ const SUBAGENT_KEYS = [
   "conflict-resolver",
   "learn-analyst",
   "adversarial-reviewer",
-  "review-angle-selector",
   "draft-reviewer",
   "harvest-analyst",
   "dream-analyst",

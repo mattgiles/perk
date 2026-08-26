@@ -306,7 +306,6 @@ default.
 | `conflict-resolver` | string (model id) | _(frontmatter default)_ |
 | `learn-analyst` | string (model id) | _(frontmatter default)_ |
 | `adversarial-reviewer` | string (model id) | _(frontmatter default)_ |
-| `review-angle-selector` | string (model id) | _(frontmatter default)_ |
 | `draft-reviewer` | string (model id) | _(frontmatter default)_ |
 | `harvest-analyst` | string (model id) | _(frontmatter default)_ |
 | `dream-analyst` | string (model id) | _(frontmatter default)_ — consumed by the `run_dream_wave` tool at execute time |

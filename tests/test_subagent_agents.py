@@ -70,14 +70,6 @@ def test_reviewer_defs_source_bind_only_the_exact_ponytail_skill_paths():
         assert "must not emit a second, standalone Ponytail finding" in compact
 
 
-def test_review_angle_selector_treats_required_ponytail_as_already_present():
-    compact = " ".join(_source_bytes("review-angle-selector").decode().split())
-    assert "exactly one required automatic Ponytail lane regardless of your selection" in compact
-    assert "Never select or duplicate Ponytail" in compact
-    assert "never solely for simplification/YAGNI" in compact
-    assert "Never propose a custom angle solely for simplification, YAGNI" in compact
-
-
 def test_committed_mirrors_are_byte_identical_for_all_perk_agents():
     root = _resources.agents_dir().parent
     for name in PERK_AGENTS:

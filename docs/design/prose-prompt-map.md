@@ -5,8 +5,8 @@ This is the readable projection of perk's living, workflow-first prose graph. It
 
 ## Coverage
 
-- **218** canonical source units
-- **740** logical fragments
+- **213** canonical source units
+- **723** logical fragments
 - **16** session shapes and **10** assemblies
 - **15** explicitly excluded candidates (policy-only; not displayed)
 - **0** validation findings
@@ -904,11 +904,9 @@ Automated, selector-driven, terminal, and browser PR-review families.
 | `markdown:agents/adversarial-reviewer.md` | `subagent-instruction` | `shipped` | [`agents/adversarial-reviewer.md`](../../agents/adversarial-reviewer.md) · `file` | — |
 | `markdown:agents/draft-reviewer.md` | `subagent-instruction` | `shipped` | [`agents/draft-reviewer.md`](../../agents/draft-reviewer.md) · `file` | — |
 | `markdown:agents/pr-reviewer.md` | `subagent-instruction` | `shipped` | [`agents/pr-reviewer.md`](../../agents/pr-reviewer.md) · `file` | pr-review.child |
-| `markdown:agents/review-angle-selector.md` | `subagent-instruction` | `shipped` | [`agents/review-angle-selector.md`](../../agents/review-angle-selector.md) · `file` | — |
 | `markdown:agents/review-classifier.md` | `subagent-instruction` | `shipped` | [`agents/review-classifier.md`](../../agents/review-classifier.md) · `file` | — |
 | `markdown:prompts/stages/pr-review-browser/active.md` | `launch` | `shipped` | [`prompts/stages/pr-review-browser/active.md`](../../prompts/stages/pr-review-browser/active.md) · `file` | — |
 | `markdown:prompts/stages/pr-review-browser/foreign.md` | `launch` | `shipped` | [`prompts/stages/pr-review-browser/foreign.md`](../../prompts/stages/pr-review-browser/foreign.md) · `file` | — |
-| `markdown:prompts/stages/pr-review-dynamic.md` | `launch` | `shipped` | [`prompts/stages/pr-review-dynamic.md`](../../prompts/stages/pr-review-dynamic.md) · `file` | — |
 | `markdown:prompts/stages/pr-review-terminal/active.md` | `launch` | `shipped` | [`prompts/stages/pr-review-terminal/active.md`](../../prompts/stages/pr-review-terminal/active.md) · `file` | — |
 | `markdown:prompts/stages/pr-review-terminal/foreign.md` | `launch` | `shipped` | [`prompts/stages/pr-review-terminal/foreign.md`](../../prompts/stages/pr-review-terminal/foreign.md) · `file` | — |
 | `markdown:prompts/stages/pr-review-terminal/local.md` | `launch` | `shipped` | [`prompts/stages/pr-review-terminal/local.md`](../../prompts/stages/pr-review-terminal/local.md) · `file` | — |
@@ -919,14 +917,12 @@ Automated, selector-driven, terminal, and browser PR-review families.
 | `markdown:skills/perk-objective-review-browser/SKILL.md` | `skill-detail` | `shipped` | [`skills/perk-objective-review-browser/SKILL.md`](../../skills/perk-objective-review-browser/SKILL.md) · `file` | — |
 | `markdown:skills/perk-plan-review-browser/SKILL.md` | `skill-detail` | `shipped` | [`skills/perk-plan-review-browser/SKILL.md`](../../skills/perk-plan-review-browser/SKILL.md) · `file` | — |
 | `markdown:skills/perk-pr-review-browser/SKILL.md` | `skill-detail` | `shipped` | [`skills/perk-pr-review-browser/SKILL.md`](../../skills/perk-pr-review-browser/SKILL.md) · `file` | — |
-| `markdown:skills/perk-pr-review-dynamic/SKILL.md` | `skill-detail` | `shipped` | [`skills/perk-pr-review-dynamic/SKILL.md`](../../skills/perk-pr-review-dynamic/SKILL.md) · `file` | — |
 | `markdown:skills/perk-pr-review-terminal/SKILL.md` | `skill-detail` | `shipped` | [`skills/perk-pr-review-terminal/SKILL.md`](../../skills/perk-pr-review-terminal/SKILL.md) · `file` | — |
 | `markdown:skills/perk-pr-review/SKILL.md` | `skill-detail` | `shipped` | [`skills/perk-pr-review/SKILL.md`](../../skills/perk-pr-review/SKILL.md) · `file` | pr-review.warm |
 | `typescript-model-call:extension/doors/prReview.ts:module:sendUserMessage:0` | `tool-contract` | `shipped` | [`extension/doors/prReview.ts`](../../extension/doors/prReview.ts) · `symbol:module/call:sendUserMessage/0` | — |
 | `typescript-model-call:extension/doors/prReviewBrowser.ts:module:sendUserMessage:0` | `tool-contract` | `shipped` | [`extension/doors/prReviewBrowser.ts`](../../extension/doors/prReviewBrowser.ts) · `symbol:module/call:sendUserMessage/0` | — |
 | `typescript-model-call:extension/doors/prReviewBrowser.ts:module:sendUserMessage:1` | `tool-contract` | `shipped` | [`extension/doors/prReviewBrowser.ts`](../../extension/doors/prReviewBrowser.ts) · `symbol:module/call:sendUserMessage/1` | — |
 | `typescript-model-call:extension/doors/prReviewBrowser.ts:module:sendUserMessage:2` | `tool-contract` | `shipped` | [`extension/doors/prReviewBrowser.ts`](../../extension/doors/prReviewBrowser.ts) · `symbol:module/call:sendUserMessage/2` | — |
-| `typescript-model-call:extension/doors/prReviewDynamic.ts:module:sendUserMessage:0` | `tool-contract` | `shipped` | [`extension/doors/prReviewDynamic.ts`](../../extension/doors/prReviewDynamic.ts) · `symbol:module/call:sendUserMessage/0` | — |
 | `typescript-model-call:extension/doors/prReviewTerminal.ts:module:sendUserMessage:0` | `tool-contract` | `shipped` | [`extension/doors/prReviewTerminal.ts`](../../extension/doors/prReviewTerminal.ts) · `symbol:module/call:sendUserMessage/0` | — |
 | `typescript-model-call:extension/doors/prReviewTerminal.ts:module:sendUserMessage:1` | `tool-contract` | `shipped` | [`extension/doors/prReviewTerminal.ts`](../../extension/doors/prReviewTerminal.ts) · `symbol:module/call:sendUserMessage/1` | — |
 | `typescript-model-call:extension/waves/transport.ts:module:workflow-script:0` | `tool-contract` | `shipped` | [`extension/waves/transport.ts`](../../extension/waves/transport.ts) · `symbol:module/property:workflowScript/0` | — |
@@ -934,7 +930,6 @@ Automated, selector-driven, terminal, and browser PR-review families.
 | `typescript-tool:open_stack_review` | `tool-contract` | `shipped` | [`extension/doors/stackReviewBrowser.ts`](../../extension/doors/stackReviewBrowser.ts) · `tool:open_stack_review` | — |
 | `typescript-tool:post_pr_review` | `tool-contract` | `shipped` | [`extension/doors/prReview.ts`](../../extension/doors/prReview.ts) · `tool:post_pr_review` | pr-review.warm |
 | `typescript-tool:push_annotations` | `tool-contract` | `shipped` | [`extension/doors/annotationPush.ts`](../../extension/doors/annotationPush.ts) · `tool:push_annotations` | — |
-| `typescript-tool:run_pr_review_dynamic_wave` | `tool-contract` | `shipped` | [`extension/doors/prReviewDynamic.ts`](../../extension/doors/prReviewDynamic.ts) · `tool:run_pr_review_dynamic_wave` | — |
 | `typescript-tool:run_pr_review_wave` | `tool-contract` | `shipped` | [`extension/doors/prReview.ts`](../../extension/doors/prReview.ts) · `tool:run_pr_review_wave` | pr-review.warm |
 | `typescript-tool:start_review_wave` | `tool-contract` | `shipped` | [`extension/doors/reviewWaveTools.ts`](../../extension/doors/reviewWaveTools.ts) · `tool:start_review_wave` | — |
 | `typescript-tool:submit_pr_review` | `tool-contract` | `shipped` | [`extension/doors/submitPrReview.ts`](../../extension/doors/submitPrReview.ts) · `tool:submit_pr_review` | — |
@@ -951,9 +946,6 @@ Automated, selector-driven, terminal, and browser PR-review families.
 - `markdown:agents/pr-reviewer.md`
   - `frontmatter:description` — Discovery description (`frontmatter.description`)
   - `section:what-you-do` — What you do (`heading:what-you-do`)
-- `markdown:agents/review-angle-selector.md`
-  - `frontmatter:description` — Discovery description (`frontmatter.description`)
-  - `section:what-you-do` — What you do (`heading:what-you-do`)
 - `markdown:agents/review-classifier.md`
   - `frontmatter:description` — Discovery description (`frontmatter.description`)
   - `section:what-you-do` — What you do (`heading:what-you-do`)
@@ -961,8 +953,6 @@ Automated, selector-driven, terminal, and browser PR-review families.
 - `markdown:prompts/stages/pr-review-browser/active.md`
   - `body` — Document body (`file-body`)
 - `markdown:prompts/stages/pr-review-browser/foreign.md`
-  - `body` — Document body (`file-body`)
-- `markdown:prompts/stages/pr-review-dynamic.md`
   - `body` — Document body (`file-body`)
 - `markdown:prompts/stages/pr-review-terminal/active.md`
   - `body` — Document body (`file-body`)
@@ -1003,15 +993,6 @@ Automated, selector-driven, terminal, and browser PR-review families.
   - `section:reviewing-a-pr-in-the-plannotator-browser-the-pr-review-browser-door/the-gates` — The gates (`heading:reviewing-a-pr-in-the-plannotator-browser-the-pr-review-browser-door/the-gates`)
   - `section:reviewing-a-pr-in-the-plannotator-browser-the-pr-review-browser-door/stack-mode-stack-review-browser-perk-objective-stack-review` — Stack mode (`/stack-review-browser` + `perk objective stack review`) (`heading:reviewing-a-pr-in-the-plannotator-browser-the-pr-review-browser-door/stack-mode-stack-review-browser-perk-objective-stack-review`)
   - `section:reviewing-a-pr-in-the-plannotator-browser-the-pr-review-browser-door/untrusted-text-untrusted-code` — Untrusted text, untrusted code (`heading:reviewing-a-pr-in-the-plannotator-browser-the-pr-review-browser-door/untrusted-text-untrusted-code`)
-- `markdown:skills/perk-pr-review-dynamic/SKILL.md`
-  - `frontmatter:description` — Discovery description (`frontmatter.description`)
-  - `section:selector-driven-pr-review-the-experimental-pr-review-dynamic-door` — Selector-driven PR review (the experimental `/pr-review-dynamic` door) (`heading:selector-driven-pr-review-the-experimental-pr-review-dynamic-door`)
-  - `section:selector-driven-pr-review-the-experimental-pr-review-dynamic-door/why-delegate-selection` — Why delegate selection (`heading:selector-driven-pr-review-the-experimental-pr-review-dynamic-door/why-delegate-selection`)
-  - `section:selector-driven-pr-review-the-experimental-pr-review-dynamic-door/what-the-tool-owns-module-rendered-never-yours` — What the tool owns (module-rendered, never yours) (`heading:selector-driven-pr-review-the-experimental-pr-review-dynamic-door/what-the-tool-owns-module-rendered-never-yours`)
-  - `section:selector-driven-pr-review-the-experimental-pr-review-dynamic-door/custom-angles` — Custom angles (`heading:selector-driven-pr-review-the-experimental-pr-review-dynamic-door/custom-angles`)
-  - `section:selector-driven-pr-review-the-experimental-pr-review-dynamic-door/your-judgment` — Your judgment (`heading:selector-driven-pr-review-the-experimental-pr-review-dynamic-door/your-judgment`)
-  - `section:selector-driven-pr-review-the-experimental-pr-review-dynamic-door/configuring-the-models` — Configuring the models (`heading:selector-driven-pr-review-the-experimental-pr-review-dynamic-door/configuring-the-models`)
-  - `section:selector-driven-pr-review-the-experimental-pr-review-dynamic-door/untrusted-text-discipline` — Untrusted-text discipline (`heading:selector-driven-pr-review-the-experimental-pr-review-dynamic-door/untrusted-text-discipline`)
 - `markdown:skills/perk-pr-review-terminal/SKILL.md`
   - `frontmatter:description` — Discovery description (`frontmatter.description`)
   - `section:reviewing-a-pr-in-the-hunk-terminal-the-pr-review-terminal-door` — Reviewing a PR in the hunk terminal (the `/pr-review-terminal` door) (`heading:reviewing-a-pr-in-the-hunk-terminal-the-pr-review-terminal-door`)
@@ -1042,8 +1023,6 @@ Automated, selector-driven, terminal, and browser PR-review families.
   - `argument:0` — sendUserMessage model-facing argument (`symbol:module/call:sendUserMessage/1/argument:0`)
 - `typescript-model-call:extension/doors/prReviewBrowser.ts:module:sendUserMessage:2`
   - `argument:0` — sendUserMessage model-facing argument (`symbol:module/call:sendUserMessage/2/argument:0`)
-- `typescript-model-call:extension/doors/prReviewDynamic.ts:module:sendUserMessage:0`
-  - `argument:0` — sendUserMessage model-facing argument (`symbol:module/call:sendUserMessage/0/argument:0`)
 - `typescript-model-call:extension/doors/prReviewTerminal.ts:module:sendUserMessage:0`
   - `argument:0` — sendUserMessage model-facing argument (`symbol:module/call:sendUserMessage/0/argument:0`)
 - `typescript-model-call:extension/doors/prReviewTerminal.ts:module:sendUserMessage:1`
@@ -1082,12 +1061,6 @@ Automated, selector-driven, terminal, and browser PR-review families.
   - `parameters.properties.findings.items.properties.phrase.description` — parameters.properties.findings.items.properties.phrase.description (`tool:push_annotations.parameters.properties.findings.items.properties.phrase.description`)
   - `parameters.properties.findings.items.properties.body.description` — parameters.properties.findings.items.properties.body.description (`tool:push_annotations.parameters.properties.findings.items.properties.body.description`)
   - `parameters.properties.replace.description` — parameters.properties.replace.description (`tool:push_annotations.parameters.properties.replace.description`)
-- `typescript-tool:run_pr_review_dynamic_wave`
-  - `description` — description (`tool:run_pr_review_dynamic_wave.description`)
-  - `promptSnippet` — promptSnippet (`tool:run_pr_review_dynamic_wave.promptSnippet`)
-  - `promptGuidelines` — promptGuidelines (`tool:run_pr_review_dynamic_wave.promptGuidelines`)
-  - `parameters.properties.directive.description` — parameters.properties.directive.description (`tool:run_pr_review_dynamic_wave.parameters.properties.directive.description`)
-  - `parameters.properties.force_angles.description` — parameters.properties.force_angles.description (`tool:run_pr_review_dynamic_wave.parameters.properties.force_angles.description`)
 - `typescript-tool:run_pr_review_wave`
   - `description` — description (`tool:run_pr_review_wave.description`)
   - `promptSnippet` — promptSnippet (`tool:run_pr_review_wave.promptSnippet`)
