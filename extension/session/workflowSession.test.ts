@@ -24,7 +24,12 @@ import {
 } from "../substrate/workflowState.ts";
 import { openBranchWorkflowSession } from "./branchWorkflowSession.ts";
 import { openMemoryWorkflowSession } from "./memoryWorkflowSession.ts";
-import type { WorkflowSession } from "./workflowSession.ts";
+import {
+  type ReviewPostRow,
+  type ReviewSubmissionRecord,
+  reviewPostsOf,
+  type WorkflowSession,
+} from "./workflowSession.ts";
 
 function planRef(prId: string): PlanRef {
   return {
@@ -37,6 +42,16 @@ function planRef(prId: string): PlanRef {
 }
 
 const CLAIM = { objective: "7", node: "1.1" };
+
+const REVIEW_RECORD: ReviewSubmissionRecord = {
+  pr: 42,
+  event: "comment",
+  comment_count: 2,
+  mode: "review",
+  at: "2026-01-01T00:00:00Z",
+};
+
+const POST_ROW: ReviewPostRow = { pr: 42, event: "comment", at: "2026-01-01T00:00:00Z" };
 
 /** The per-backing harness: one session plus deterministic ways to reach every arm. */
 interface SessionHarness {
@@ -57,6 +72,8 @@ interface SessionHarness {
   disown(name: string): void;
   /** The rebuilt/live `active_plan_ref` (observation of the link effect). */
   linkedPlanRef(): PlanRef | null;
+  /** The rebuilt/live `last_review` record (observation of the record-review effect). */
+  lastReview(): ReviewSubmissionRecord | null;
   dispose(): void;
 }
 
@@ -64,6 +81,7 @@ interface HarnessOpts {
   nodeClaim?: { objective: string; node: string };
   activePlanRef?: PlanRef;
   activeObjective?: string;
+  reviewPosts?: ReviewPostRow[];
 }
 
 interface Backing {
@@ -122,6 +140,9 @@ function branchBacking(): Backing {
       if (opts.activeObjective !== undefined) {
         branch.push(stateEntry({ active_objective: opts.activeObjective }));
       }
+      if (opts.reviewPosts !== undefined) {
+        branch.push(stateEntry({ review_posts: opts.reviewPosts }));
+      }
       let dropAppends = false;
       let throwNextAppend = false;
       const sink: EntrySink = {
@@ -178,6 +199,12 @@ function branchBacking(): Backing {
               .active_plan_ref ?? null
           );
         },
+        lastReview() {
+          const value = rebuildWorkflowState(
+            branch as Parameters<typeof rebuildWorkflowState>[0],
+          ).last_review;
+          return (value ?? null) as ReviewSubmissionRecord | null;
+        },
         dispose() {
           if (lockedPerkDir) chmodSync(perkDir, 0o755);
           rmSync(cwd, { recursive: true, force: true });
@@ -199,6 +226,7 @@ function memoryBacking(): Backing {
         ...(opts.nodeClaim !== undefined ? { nodeClaim: opts.nodeClaim } : {}),
         ...(opts.activePlanRef !== undefined ? { activePlanRef: opts.activePlanRef } : {}),
         ...(opts.activeObjective !== undefined ? { activeObjective: opts.activeObjective } : {}),
+        ...(opts.reviewPosts !== undefined ? { reviewPosts: opts.reviewPosts } : {}),
       });
       return {
         session,
@@ -210,6 +238,7 @@ function memoryBacking(): Backing {
         dropFile: (name) => session.dropContent(name),
         disown: (name) => session.disownPointer(name),
         linkedPlanRef: () => session.linkedPlanRef(),
+        lastReview: () => session.lastReviewRecord(),
         dispose() {},
       };
     },
@@ -585,6 +614,84 @@ for (const backing of [branchBacking(), memoryBacking()]) {
     }
   });
 
+  test(`${backing.label}: apply record-review — applied; a repeat identical record applies AGAIN (no unchanged)`, () => {
+    // No pre-read/deep-equal short-circuit by design: the resume guard is feature-op policy
+    // upstream, so the seam never emits `unchanged` for this variant (runtime invariant).
+    const h = backing.harness("RID");
+    try {
+      assert.deepEqual(h.session.apply({ kind: "record-review", record: REVIEW_RECORD }), {
+        status: "applied",
+      });
+      assert.deepEqual(h.lastReview(), REVIEW_RECORD);
+      assert.deepEqual(h.session.apply({ kind: "record-review", record: { ...REVIEW_RECORD } }), {
+        status: "applied",
+      });
+    } finally {
+      h.dispose();
+    }
+  });
+
+  test(`${backing.label}: apply record-review — unverified on a read-back miss; rejected lands nothing`, () => {
+    const h = backing.harness("RID");
+    try {
+      h.induceApplyVerificationFailure();
+      const miss = quietly(() => h.session.apply({ kind: "record-review", record: REVIEW_RECORD }));
+      assert.equal(miss.status, "unverified");
+      assert.ok(miss.status === "unverified" && /last_review read-back failed/.test(miss.problem));
+      h.induceApplyRefusal();
+      const refused = quietly(() =>
+        h.session.apply({ kind: "record-review", record: REVIEW_RECORD }),
+      );
+      assert.equal(refused.status, "rejected");
+    } finally {
+      h.dispose();
+    }
+  });
+
+  test(`${backing.label}: apply append-review-post — ordered rows; an identical row appends AGAIN (no dedupe)`, () => {
+    const h = backing.harness("RID", { reviewPosts: [{ pr: 41, event: "comment", at: "t0" }] });
+    try {
+      assert.deepEqual(h.session.apply({ kind: "append-review-post", row: POST_ROW }), {
+        status: "applied",
+      });
+      assert.deepEqual(h.session.reviewPosts(), [{ pr: 41, event: "comment", at: "t0" }, POST_ROW]);
+      // No dedupe: the same row appends again (the resume guard lives upstream).
+      assert.deepEqual(h.session.apply({ kind: "append-review-post", row: { ...POST_ROW } }), {
+        status: "applied",
+      });
+      assert.equal(h.session.reviewPosts().length, 3);
+    } finally {
+      h.dispose();
+    }
+  });
+
+  test(`${backing.label}: apply append-review-post — unverified on a read-back miss; rejected preserves the ledger`, () => {
+    const h = backing.harness("RID", { reviewPosts: [{ pr: 41, event: "comment", at: "t0" }] });
+    try {
+      h.induceApplyVerificationFailure();
+      const miss = quietly(() => h.session.apply({ kind: "append-review-post", row: POST_ROW }));
+      assert.equal(miss.status, "unverified");
+      assert.ok(miss.status === "unverified" && /review_posts read-back failed/.test(miss.problem));
+      h.induceApplyRefusal();
+      const refused = quietly(() => h.session.apply({ kind: "append-review-post", row: POST_ROW }));
+      assert.equal(refused.status, "rejected");
+    } finally {
+      h.dispose();
+    }
+  });
+
+  test(`${backing.label}: reviewPosts — snapshot read (seeded, empty)`, () => {
+    const seeded = backing.harness("RID", { reviewPosts: [POST_ROW] });
+    const empty = backing.harness("RID");
+    try {
+      assert.deepEqual(seeded.session.reviewPosts(), [POST_ROW]);
+      assert.deepEqual(empty.session.reviewPosts(), []);
+    } finally {
+      seeded.dispose();
+      empty.dispose();
+    }
+  });
+
   test(`${backing.label}: apply — a refusal before any effect classifies rejected`, () => {
     const h = backing.harness("RID", { nodeClaim: CLAIM });
     try {
@@ -687,6 +794,46 @@ test("branch: activeObjective() is fail-open — malformed state and a throwing 
   }
 });
 
+test("reviewPostsOf: tolerant re-narrow — malformed rows drop, order preserved", () => {
+  assert.deepEqual(reviewPostsOf(undefined), []);
+  assert.deepEqual(reviewPostsOf("junk"), []);
+  const rows = reviewPostsOf([
+    { pr: 41, event: "comment", at: "t1" },
+    { pr: "42", event: "comment", at: "t2" }, // malformed: dropped
+    { pr: 43, event: "request-changes", at: "t3" },
+  ]);
+  assert.deepEqual(rows, [
+    { pr: 41, event: "comment", at: "t1" },
+    { pr: 43, event: "request-changes", at: "t3" },
+  ]);
+});
+
+test("branch: reviewPosts() is fail-open — malformed rows drop; a throwing branch reads []", () => {
+  const cwd = mkdtempSync(join(tmpdir(), "workflow-session-review-posts-"));
+  try {
+    const sink: EntrySink = { appendEntry: () => {} };
+    const branch: unknown[] = [
+      stateEntry({ run_id: "RID" }),
+      stateEntry({ review_posts: [{ pr: 41, event: "comment", at: "t1" }, "junk", { pr: 1.5 }] }),
+    ];
+    const session = openBranchWorkflowSession(sink, reportableCtx(cwd, branch));
+    assert.deepEqual(session.reviewPosts(), [{ pr: 41, event: "comment", at: "t1" }]);
+    const throwing = openBranchWorkflowSession(sink, {
+      cwd,
+      sessionManager: {
+        getBranch(): unknown[] {
+          throw new Error("adversarial branch read");
+        },
+      },
+      hasUI: false,
+      ui: { notify() {} },
+    });
+    assert.deepEqual(throwing.reviewPosts(), [], "a throwing branch read is fail-open");
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
 test("branch: a read-back miss reports LOUDLY under each change's seam-owned scope", () => {
   // The seam owns each append's report scope (the caller passes none): a headless read-back
   // miss must surface as `perk: <scope> — <failure>` on stderr — not stay quiet, and not
@@ -712,6 +859,16 @@ test("branch: a read-back miss reports LOUDLY under each change's seam-owned sco
       seed: null,
       change: { kind: "link-objective", objective: "7" },
       expected: "perk: objective-save — active_objective read-back failed for #7",
+    },
+    {
+      seed: null,
+      change: { kind: "record-review", record: REVIEW_RECORD },
+      expected: "perk: review — last_review read-back failed",
+    },
+    {
+      seed: null,
+      change: { kind: "append-review-post", row: POST_ROW },
+      expected: "perk: review — review_posts read-back failed",
     },
   ];
   for (const { seed, change, expected } of cases) {

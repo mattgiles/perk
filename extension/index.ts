@@ -37,8 +37,8 @@ import { registerReviewWaveTools } from "./doors/reviewWaveTools.ts";
 import { registerSelfcheck } from "./doors/selfcheck.ts";
 import { registerOpenStackReview, registerStackReviewBrowser } from "./doors/stackReviewBrowser.ts";
 import { registerSubmit } from "./doors/submit.ts";
-import { registerSubmitPrReview } from "./doors/submitPrReview.ts";
 import { createHunkFeedbackReceiver } from "./hunkFeedback/receiver.ts";
+import { installCuratedSubmissionBindings } from "./pi/v1/codeReview/submit.ts";
 import { installGistBindings } from "./pi/v1/gist.ts";
 import { installObjectiveBindings } from "./pi/v1/objective.ts";
 import { installObjectiveAuthoringBindings } from "./pi/v1/objectiveAuthoring.ts";
@@ -497,7 +497,7 @@ export default function (pi: ExtensionAPI) {
 
   // The warm `submit_pr_review` tool: the human-gated curated-posting surface both review
   // doors ride (contracts §8.4) — neither door registers tools of its own.
-  registerSubmitPrReview(pi);
+  installCuratedSubmissionBindings(pi);
 
   // The flow-scoped review-wave pair (`start_review_wave`/`collect_review_wave`) both human
   // review doors drive: non-blocking adversarial-review launch + the typed collect, flow-scoped

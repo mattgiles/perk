@@ -134,6 +134,7 @@ const KNOWN_TOP_LEVEL_DIRS = [
 // the scanned corpus).
 const ANCHORED_DIRS: Record<string, string[]> = {
   authoring: ["authoring/gist/draft.ts"],
+  codeReview: ["codeReview/submission.ts"],
   pi: ["pi/v1/gist.ts"],
   session: ["session/workflowSession.ts"],
 };
@@ -143,7 +144,7 @@ const ANCHORED_DIRS: Record<string, string[]> = {
  * bans — `@earendil-works/*`, the RPC transport module, and the `surfaces/` rendering seam —
  * with NO sanctioned re-export seams for these homes (see the header).
  */
-const PI_FREE_HOMES = ["authoring/", "session/"];
+const PI_FREE_HOMES = ["authoring/", "codeReview/", "session/"];
 
 /**
  * Rule E's registration tokens: whitespace-tolerant (a registration split across lines still
@@ -214,7 +215,6 @@ const LEGACY_REGISTRANTS = [
   "doors/selfcheck.ts",
   "doors/stackReviewBrowser.ts",
   "doors/submit.ts",
-  "doors/submitPrReview.ts",
   "substrate/agentScratch.ts",
   "substrate/bindingDelivery.ts",
   "substrate/command.ts",
@@ -712,7 +712,12 @@ test("Rule E: Pi registration only in approved adapter/composition files (frozen
   );
   // Positive extraction proof: the scan must SEE the v1 installers' registrations — a token
   // regex that stopped matching real registrations would otherwise pass vacuously.
-  for (const installer of ["pi/v1/gist.ts", "pi/v1/plan.ts", "pi/v1/objectivePlanning.ts"]) {
+  for (const installer of [
+    "pi/v1/codeReview/submit.ts",
+    "pi/v1/gist.ts",
+    "pi/v1/plan.ts",
+    "pi/v1/objectivePlanning.ts",
+  ]) {
     assert.ok(
       matched.includes(installer),
       `the registration scan missed ${installer} — the token extraction is broken`,
@@ -1086,6 +1091,7 @@ test("control 10: feature-purity fixtures (Pi specifier, RPC edge, surfaces edge
     "session/y.ts",
     "authoring/clean.ts",
     "authoring/adapterEdge.ts",
+    "codeReview/z.ts",
     "factories/allowed.ts",
   ];
   const sources: Record<string, string> = {
@@ -1095,6 +1101,8 @@ test("control 10: feature-purity fixtures (Pi specifier, RPC edge, surfaces edge
     "authoring/clean.ts": 'import { helper } from "../substrate/sessionData.ts";',
     // The Rule-D pi/ arm: a feature importing the Pi adapter home must be caught.
     "authoring/adapterEdge.ts": 'import { installPlanBindings } from "../pi/v1/plan.ts";',
+    // The codeReview/ home is covered from the day it appeared (all four violation shapes bite).
+    "codeReview/z.ts": 'import type { ExtensionContext } from "@earendil-works/pi-coding-agent";',
     // Outside the Pi-free homes: a factories/ Pi import is Rule-D-invisible by design.
     "factories/allowed.ts": 'import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";',
   };
@@ -1108,9 +1116,11 @@ test("control 10: feature-purity fixtures (Pi specifier, RPC edge, surfaces edge
     'session/y.ts: "../waves/rpcAdapter.ts" → waves/rpcAdapter.ts (RPC wire)',
     'session/y.ts: "../surfaces/report.ts" → surfaces/report.ts (surfaces seam)',
     'authoring/adapterEdge.ts: "../pi/v1/plan.ts" → pi/v1/plan.ts (Pi adapter home)',
+    'codeReview/z.ts: "@earendil-works/pi-coding-agent" (direct Pi import)',
   ]);
   assert.equal(visited.get("authoring/"), 3, "all three authoring/ files visited");
   assert.equal(visited.get("session/"), 1, "the session/ file visited");
+  assert.equal(visited.get("codeReview/"), 1, "the codeReview/ file visited");
   const empty = checkFeaturePurity(
     ["factories/allowed.ts"],
     (file) => sources[file] ?? "",

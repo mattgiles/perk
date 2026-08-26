@@ -1,8 +1,10 @@
-// Tests for the warm `submit_pr_review` tool. The pure `decodeSubmitParams` is pinned directly;
-// the tool's delegation + outcomes run against a REAL bound session via the T1 harness, OFFLINE
-// (a fake `perk` stands in for the cold door — no LLM / network / gh / Python). The formal-event
-// confirm gate is exercised through the exported `submitPrReview` core with structural fakes
-// (the coldDoor.test.ts idiom) because the harness UI context carries no `confirm`.
+// Adapter tests for the `submit_pr_review` installer: the pure `decodeSubmitParams` is pinned
+// directly; the production `ReviewSubmitter` cold-door composition runs over an in-memory exec
+// recorder (argv + staged-batch pins); the `FormalEventGate` production is pinned with a
+// structural fake ctx; the registered tool's delegation + outcomes run against a REAL bound
+// session via the T1 harness, OFFLINE (a fake `perk` stands in for the cold door — no LLM /
+// network / gh / Python). The gate-ladder POLICY matrix lives in
+// `codeReview/submission.test.ts` over deterministic fakes.
 
 import assert from "node:assert/strict";
 import { existsSync, mkdtempSync, readFileSync } from "node:fs";
@@ -10,19 +12,19 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import type { ExecResult, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import type { ExecHost } from "../substrate/coldDoor.ts";
-import type { BranchEntry, EntrySink } from "../substrate/workflowState.ts";
-import { fakePerk, loadPerkSession, scaffoldRepo } from "../testing/harness.ts";
+import { reviewPostsOf } from "../../../session/workflowSession.ts";
+import type { ExecHost } from "../../../substrate/coldDoor.ts";
+import { fakePerk, loadPerkSession, scaffoldRepo } from "../../../testing/harness.ts";
 import {
+  createColdDoorReviewSubmitter,
   decodeSubmitParams,
-  reviewPostsOf,
-  type SubmitCtx,
-  submitPrReview,
-} from "./submitPrReview.ts";
+  formalEventGateFor,
+  type SubmitGateCtx,
+} from "./submit.ts";
 
 // --- compile-time satisfaction: the structural ctx slice can never drift from the SDK --------
 
-const _c: SubmitCtx = {} as ExtensionContext;
+const _c: SubmitGateCtx = {} as ExtensionContext;
 void _c;
 
 // --- decodeSubmitParams: strict decode (a GitHub mutation — whole-batch refusal) ---------------
@@ -87,7 +89,33 @@ test("decodeSubmitParams rejects a malformed comment row (whole-batch refusal)",
   assert.equal(decodeSubmitParams({ ...base, dry_run: "yes" }), null);
 });
 
-// --- submitPrReview gates + delegation (structural fakes — the coldDoor.test.ts idiom) ---------
+// --- the FormalEventGate production (structural fake ctx) ---------------------------------------
+
+test("formalEventGateFor: hasUI selects the arm; interactive wraps ctx.ui.confirm", async () => {
+  assert.deepEqual(
+    formalEventGateFor({ hasUI: false, ui: { notify() {}, confirm: () => Promise.resolve(true) } }),
+    {
+      kind: "headless",
+    },
+  );
+  const confirms: { title: string; message: string }[] = [];
+  const gate = formalEventGateFor({
+    hasUI: true,
+    ui: {
+      notify() {},
+      confirm(title: string, message: string) {
+        confirms.push({ title, message });
+        return Promise.resolve(false);
+      },
+    },
+  });
+  assert.equal(gate.kind, "interactive");
+  assert.ok(gate.kind === "interactive");
+  assert.equal(await gate.confirm("Q?", "S"), false);
+  assert.deepEqual(confirms, [{ title: "Q?", message: "S" }]);
+});
+
+// --- the ReviewSubmitter production (in-memory exec recorder) ------------------------------------
 
 const SUBMIT_OK_JSON = JSON.stringify({
   success: true,
@@ -100,108 +128,49 @@ const SUBMIT_OK_JSON = JSON.stringify({
   comment_count: 2,
 });
 
-interface FakePi {
-  pi: ExecHost & EntrySink;
+/** A fake `pi` exec host recording calls and returning a scripted result. */
+function fakeExec(result: Partial<ExecResult>): {
+  pi: ExecHost;
   calls: { command: string; args: string[] }[];
-  branch: BranchEntry[];
-}
-
-/** A fake `pi` recording exec calls (scripted result) and appending entries onto the branch. */
-function fakePi(result: Partial<ExecResult> | Error): FakePi {
+} {
   const calls: { command: string; args: string[] }[] = [];
-  const branch: BranchEntry[] = [];
   return {
     calls,
-    branch,
     pi: {
       exec: (command: string, args: string[]) => {
         calls.push({ command, args });
-        if (result instanceof Error) return Promise.reject(result);
         return Promise.resolve({ stdout: "", stderr: "", code: 0, killed: false, ...result });
       },
-      appendEntry: (customType: string, data?: unknown) => {
-        branch.push({ type: "custom", customType, data: data as Record<string, unknown> });
-      },
     },
   };
 }
 
-/** A fake SubmitCtx with a recorded, scripted confirm dialog. */
-function fakeCtx(opts: { branch: BranchEntry[]; hasUI?: boolean; confirmAnswer?: boolean }): {
-  ctx: SubmitCtx;
-  confirms: { title: string; message: string }[];
-} {
-  const confirms: { title: string; message: string }[] = [];
-  const ctx: SubmitCtx = {
+function coldCtx(): { cwd: string; sessionManager: { getBranch(): unknown[] } } {
+  return {
     cwd: mkdtempSync(join(tmpdir(), "submit-pr-review-test-")),
-    sessionManager: { getBranch: () => opts.branch },
-    hasUI: opts.hasUI ?? true,
-    ui: {
-      notify: () => {},
-      confirm: (title: string, message: string) => {
-        confirms.push({ title, message });
-        return Promise.resolve(opts.confirmAnswer ?? true);
-      },
-    },
+    sessionManager: { getBranch: () => [] },
   };
-  return { ctx, confirms };
 }
 
-test("submitPrReview: a formal event raises the confirm (wire event + count); declined → no exec", async () => {
-  const { pi, calls, branch } = fakePi({ stdout: SUBMIT_OK_JSON });
-  const { ctx, confirms } = fakeCtx({ branch, confirmAnswer: false });
-  const result = await submitPrReview(pi, ctx, {
-    pr: 42,
-    event: "request-changes",
-    body: "needs work\nsecond line",
-    comments: [{ path: "a.ts", line: 12, body: "fix" }],
-  });
-  assert.equal(result.details.ok, false);
-  if (!result.details.ok) assert.equal(result.details.error_type, "user_declined");
-  assert.equal(confirms.length, 1);
-  assert.match(confirms[0]?.title ?? "", /Post REQUEST_CHANGES review to PR #42\?/);
-  assert.match(confirms[0]?.message ?? "", /1 inline comment\(s\)/);
-  assert.match(confirms[0]?.message ?? "", /needs work/);
-  assert.doesNotMatch(confirms[0]?.message ?? "", /second line/);
-  assert.equal(calls.length, 0, "nothing executed on decline");
-});
-
-test("submitPrReview: an accepted confirm proceeds to the cold door", async () => {
-  const { pi, calls, branch } = fakePi({ stdout: SUBMIT_OK_JSON });
-  const { ctx, confirms } = fakeCtx({ branch, confirmAnswer: true });
-  const result = await submitPrReview(pi, ctx, { pr: 42, event: "approve", body: "" });
-  assert.equal(confirms.length, 1);
-  assert.equal(calls.length, 1);
-  assert.equal(result.details.ok, true);
-});
-
-test("submitPrReview: a comment event never confirms", async () => {
-  const { pi, calls, branch } = fakePi({ stdout: SUBMIT_OK_JSON });
-  const { ctx, confirms } = fakeCtx({ branch });
-  await submitPrReview(pi, ctx, { pr: 42, event: "comment", body: "advisory" });
-  assert.equal(confirms.length, 0);
-  assert.equal(calls.length, 1);
-});
-
-test("submitPrReview: dry_run bypasses the confirm AND the headless gate; argv carries --dry-run", async () => {
-  const { pi, calls, branch } = fakePi({ stdout: SUBMIT_OK_JSON });
-  const { ctx, confirms } = fakeCtx({ branch, hasUI: false });
-  const result = await submitPrReview(pi, ctx, {
-    pr: 42,
-    event: "approve",
-    body: "",
-    dry_run: true,
-  });
-  assert.equal(confirms.length, 0);
-  assert.equal(result.details.ok, true);
-  assert.ok(calls[0]?.args.includes("--dry-run"), "argv carries --dry-run");
-});
-
-test("submitPrReview: the argv shape + the staged batch file (the stdin channel at argv END)", async () => {
-  const { pi, calls, branch } = fakePi({ stdout: SUBMIT_OK_JSON });
-  const { ctx } = fakeCtx({ branch });
+test("submitter: the argv shape + the staged batch file (the stdin channel at argv END)", async () => {
+  const { pi, calls } = fakeExec({ stdout: SUBMIT_OK_JSON });
+  const submitter = createColdDoorReviewSubmitter(pi, coldCtx());
   const comments = [{ path: "a.ts", line: 12, side: "RIGHT" as const, body: "fix" }];
-  await submitPrReview(pi, ctx, { pr: 42, event: "comment", body: "overall", comments });
+  const outcome = await submitter.submit({
+    pr: 42,
+    event: "comment",
+    body: "overall",
+    comments,
+    dryRun: false,
+  });
+  assert.ok(outcome.ok);
+  assert.deepEqual(outcome.ok ? outcome.data : null, {
+    dry_run: false,
+    pr: 42,
+    event: "comment",
+    mode: "review",
+    comment_count: 2,
+  });
   const args = calls[0]?.args ?? [];
   assert.deepEqual(args.slice(0, 7), [
     "pr",
@@ -217,116 +186,79 @@ test("submitPrReview: the argv shape + the staged batch file (the stdin channel 
   assert.equal(staged, `${JSON.stringify({ body: "overall", comments }, null, 2)}\n`);
 });
 
-test("submitPrReview: a real success appends last_review to the branch (strict read-back)", async () => {
-  const { pi, branch } = fakePi({ stdout: SUBMIT_OK_JSON });
-  const { ctx } = fakeCtx({ branch });
-  const result = await submitPrReview(pi, ctx, { pr: 42, event: "comment", body: "overall" });
-  assert.equal(result.details.ok, true);
-  const entry = branch.find((e) => e.customType === "perk:workflow-state");
-  const record = (entry?.data as { last_review?: Record<string, unknown> })?.last_review;
-  assert.equal(record?.pr, 42);
-  assert.equal(record?.event, "comment");
-  assert.equal(record?.comment_count, 2);
-  assert.equal(record?.mode, "review");
+test("submitter: dryRun rides the argv as --dry-run; the batch omits comments when absent", async () => {
+  const { pi, calls } = fakeExec({ stdout: SUBMIT_OK_JSON });
+  const submitter = createColdDoorReviewSubmitter(pi, coldCtx());
+  await submitter.submit({ pr: 42, event: "approve", body: "", dryRun: true });
+  const args = calls[0]?.args ?? [];
+  assert.ok(args.includes("--dry-run"), "argv carries --dry-run");
+  const staged = readFileSync(args[args.length - 1] ?? "", "utf8");
+  assert.equal(staged, `${JSON.stringify({ body: "" }, null, 2)}\n`);
 });
 
-test("submitPrReview: real successes append ORDERED review_posts rows (the stack resume ledger)", async () => {
-  // The envelope carries no `pr`, so the record falls back to each call's own param.
-  const { pi, branch } = fakePi({
-    stdout: JSON.stringify({ success: true, event: "comment", mode: "review" }),
-  });
-  const { ctx } = fakeCtx({ branch });
-  await submitPrReview(pi, ctx, { pr: 41, event: "comment", body: "lower" });
-  await submitPrReview(pi, ctx, { pr: 42, event: "comment", body: "upper" });
-  const entries = branch.filter(
-    (e) =>
-      e.customType === "perk:workflow-state" &&
-      (e.data as { review_posts?: unknown })?.review_posts !== undefined,
-  );
-  assert.equal(entries.length, 2, "one ledger append per real success");
-  const rows = reviewPostsOf((entries[1]?.data as { review_posts?: unknown })?.review_posts);
-  // Read-rebuild-append: the second write carries the full ordered history — the resume
-  // reader sees every confirmed post and skips them, never replaying one.
-  assert.deepEqual(
-    rows.map((r) => r.pr),
-    [41, 42],
-  );
-  assert.ok(rows.every((r) => r.event === "comment" && typeof r.at === "string"));
-});
-
-test("submitPrReview: the enforced resume guard — already_posted before exec AND confirm; dry-run and allow_repost pass", async () => {
-  const { pi, calls, branch } = fakePi({
-    stdout: JSON.stringify({ success: true, event: "comment", mode: "review" }),
-  });
-  const { ctx, confirms } = fakeCtx({ branch, confirmAnswer: true });
-  const first = await submitPrReview(pi, ctx, { pr: 41, event: "comment", body: "first" });
-  assert.equal(first.details.ok, true);
-  assert.equal(calls.length, 1);
-
-  // A repeat REAL post to the same PR refuses on the ledger row — before the cold-door
-  // mutation and before any formal-event confirm dialog.
-  const repeat = await submitPrReview(pi, ctx, { pr: 41, event: "approve", body: "again" });
-  assert.equal(repeat.details.ok, false);
-  if (!repeat.details.ok) assert.equal(repeat.details.error_type, "already_posted");
-  assert.equal(calls.length, 1, "the guard refuses BEFORE the cold-door mutation");
-  assert.equal(confirms.length, 0, "the guard refuses BEFORE the confirm dialog");
-
-  // The repair loop is never blocked: a dry-run against the same PR still validates.
-  const dry = await submitPrReview(pi, ctx, {
-    pr: 41,
-    event: "comment",
-    body: "again",
-    dry_run: true,
-  });
-  assert.equal(dry.details.ok, true);
-  assert.equal(calls.length, 2);
-
-  // The deliberate escape hatch: allow_repost posts a second review to the same PR.
-  const deliberate = await submitPrReview(pi, ctx, {
-    pr: 41,
-    event: "comment",
-    body: "again",
-    allow_repost: true,
-  });
-  assert.equal(deliberate.details.ok, true);
-  assert.equal(calls.length, 3);
-  // Another PR was never blocked.
-  const other = await submitPrReview(pi, ctx, { pr: 42, event: "comment", body: "upper" });
-  assert.equal(other.details.ok, true);
-});
-
-test("submitPrReview: a dry-run and a failed submission never touch review_posts", async () => {
-  const dry = fakePi({ stdout: JSON.stringify({ success: true, dry_run: true, pr: 41 }) });
-  const dryCtx = fakeCtx({ branch: dry.branch });
-  await submitPrReview(dry.pi, dryCtx.ctx, { pr: 41, event: "comment", body: "x", dry_run: true });
-  assert.equal(dry.branch.length, 0, "no workflow-state writes on a dry run");
-
-  const failed = fakePi({
-    stdout: JSON.stringify({ success: false, error_type: "bad_batch", message: "nope" }),
+test("submitter: bad_anchors with decodable invalid[] yields the typed repair arm", async () => {
+  const { pi } = fakeExec({
+    stdout: JSON.stringify({
+      success: false,
+      error_type: "bad_anchors",
+      message: "1 of 2 comment anchor(s) not in the PR diff — repair and retry",
+      invalid: [{ index: 0, path: "a.ts", line: 999, side: "RIGHT", reason: "line not in diff" }],
+    }),
     code: 1,
   });
-  const failedCtx = fakeCtx({ branch: failed.branch });
-  await submitPrReview(failed.pi, failedCtx.ctx, { pr: 41, event: "comment", body: "x" });
-  assert.equal(failed.branch.length, 0, "no ledger row for a failed post");
+  const submitter = createColdDoorReviewSubmitter(pi, coldCtx());
+  const outcome = await submitter.submit({ pr: 42, event: "comment", body: "b", dryRun: true });
+  assert.ok(!outcome.ok && outcome.kind === "bad_anchors");
+  if (!outcome.ok && outcome.kind === "bad_anchors") {
+    assert.deepEqual(outcome.invalid, [
+      { index: 0, path: "a.ts", line: 999, side: "RIGHT", reason: "line not in diff" },
+    ]);
+    assert.equal(outcome.message, "1 of 2 comment anchor(s) not in the PR diff — repair and retry");
+  }
 });
 
-test("reviewPostsOf: tolerant re-narrow — malformed rows drop, order preserved", () => {
-  assert.deepEqual(reviewPostsOf(undefined), []);
-  assert.deepEqual(reviewPostsOf("junk"), []);
-  const rows = reviewPostsOf([
-    { pr: 41, event: "comment", at: "t1" },
-    { pr: "42", event: "comment", at: "t2" }, // malformed: dropped
-    { pr: 43, event: "request-changes", at: "t3" },
-  ]);
-  assert.deepEqual(rows, [
-    { pr: 41, event: "comment", at: "t1" },
-    { pr: 43, event: "request-changes", at: "t3" },
-  ]);
+test("submitter: a malformed invalid[] payload degrades to the failed arm (never a half table)", async () => {
+  const { pi } = fakeExec({
+    stdout: JSON.stringify({
+      success: false,
+      error_type: "bad_anchors",
+      message: "anchors rejected",
+      invalid: [{ index: "zero", path: "a.ts" }],
+    }),
+    code: 1,
+  });
+  const submitter = createColdDoorReviewSubmitter(pi, coldCtx());
+  const outcome = await submitter.submit({ pr: 42, event: "comment", body: "b", dryRun: true });
+  assert.deepEqual(outcome, {
+    ok: false,
+    kind: "failed",
+    message: "anchors rejected",
+    errorType: "bad_anchors",
+  });
+});
+
+test("submitter: a structured fail envelope passes message + error_type through the failed arm", async () => {
+  const { pi } = fakeExec({
+    stdout: JSON.stringify({
+      success: false,
+      error_type: "github_unauthed",
+      message: "gh is not authenticated",
+    }),
+    code: 1,
+  });
+  const submitter = createColdDoorReviewSubmitter(pi, coldCtx());
+  const outcome = await submitter.submit({ pr: 7, event: "comment", body: "b", dryRun: false });
+  assert.deepEqual(outcome, {
+    ok: false,
+    kind: "failed",
+    message: "gh is not authenticated",
+    errorType: "github_unauthed",
+  });
 });
 
 // --- submit_pr_review: end-to-end through the harness (offline fake perk) ----------------------
 
-test("tool: a comment submission succeeds, records last_review, and reports the count", async () => {
+test("tool: a comment submission succeeds, records last_review + the review_posts row", async () => {
   const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
   const bin = fakePerk(cwd, { stdout: SUBMIT_OK_JSON });
   const h = await loadPerkSession({ cwd, env: { PERK_RUN_ID: "01RID", PERK_BIN: bin } });
@@ -359,6 +291,50 @@ test("tool: a comment submission succeeds, records last_review, and reports the 
       posts.map((r) => ({ pr: r.pr, event: r.event })),
       [{ pr: 42, event: "comment" }],
       "the real success also appends its review_posts ledger row",
+    );
+  } finally {
+    h.dispose();
+  }
+});
+
+test("tool: the enforced resume guard — already_posted on a repeat; dry-run and allow_repost pass", async () => {
+  const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
+  // The envelope carries no `pr`, so each record falls back to its own call's param.
+  const bin = fakePerk(cwd, {
+    stdout: JSON.stringify({ success: true, event: "comment", mode: "review" }),
+  });
+  const h = await loadPerkSession({ cwd, env: { PERK_RUN_ID: "01RID", PERK_BIN: bin } });
+  try {
+    const first = await h.invokeTool("submit_pr_review", { pr: 41, event: "comment", body: "x" });
+    assert.equal((first.details as { ok: boolean }).ok, true);
+
+    const repeat = await h.invokeTool("submit_pr_review", { pr: 41, event: "comment", body: "y" });
+    const repeatDetails = repeat.details as { ok: boolean; error_type?: string };
+    assert.equal(repeatDetails.ok, false);
+    assert.equal(repeatDetails.error_type, "already_posted");
+
+    // The repair loop is never blocked: a dry-run against the same PR still validates.
+    const dry = await h.invokeTool("submit_pr_review", {
+      pr: 41,
+      event: "comment",
+      body: "y",
+      dry_run: true,
+    });
+    assert.equal((dry.details as { ok: boolean }).ok, true);
+
+    // The deliberate escape hatch: allow_repost posts a second review to the same PR.
+    const deliberate = await h.invokeTool("submit_pr_review", {
+      pr: 41,
+      event: "comment",
+      body: "y",
+      allow_repost: true,
+    });
+    assert.equal((deliberate.details as { ok: boolean }).ok, true);
+    // Ordered ledger rows: read-rebuild-append carries the whole history.
+    const posts = reviewPostsOf(h.workflowState().review_posts);
+    assert.deepEqual(
+      posts.map((r) => r.pr),
+      [41, 41],
     );
   } finally {
     h.dispose();
