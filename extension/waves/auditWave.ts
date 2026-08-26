@@ -16,7 +16,12 @@
 // lanes and degrade honestly (`lane-failed`, named detail) instead of grading the wrong
 // transcript.
 
-import { runReportWave, type WaveAdapter, type WaveLane, type WaveResult } from "./reportWave.ts";
+import {
+  type ReportAssignment,
+  runReportWave,
+  type WaveAdapter,
+  type WaveResult,
+} from "./reportWave.ts";
 
 /**
  * The per-lane auditor verdict schema (the workflow-level `outputSchema`): closed shape, all
@@ -150,7 +155,7 @@ export function decodeAuditManifest(raw: unknown): AuditManifest {
 export interface PlannedAuditLane {
   key: string;
   pair: AuditManifestPair;
-  lane: WaveLane;
+  lane: ReportAssignment;
 }
 
 /** The lane plan over one manifest: dispatched lanes + the honest degrade buckets. */
@@ -301,7 +306,7 @@ export async function runAuditWave(
     adapter,
     {
       flow: "audit",
-      lanes: plan.planned.map((p) => p.lane),
+      assignments: plan.planned.map((p) => p.lane),
       outputSchema: AUDIT_VERDICT_SCHEMA,
       completeness: "best-effort",
       ...(opts.model !== undefined ? { model: opts.model } : {}),

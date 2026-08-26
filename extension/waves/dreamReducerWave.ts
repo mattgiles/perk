@@ -23,12 +23,8 @@ import {
   decodeDreamAnalystReport,
   decodeStringArray,
 } from "./dreamWave.ts";
-import {
-  runReportWave,
-  type WaveAdapter,
-  type WaveFailureReason,
-  type WaveScriptReceipt,
-} from "./reportWave.ts";
+import { runReportWave, type WaveAdapter, type WaveFailureReason } from "./reportWave.ts";
+import type { WaveScriptReceipt } from "./transport.ts";
 
 /**
  * The three fixed reducer angles — FIXED ORDER everywhere: the lane identities
@@ -649,7 +645,7 @@ export async function runDreamReducerWave(
     adapter,
     {
       flow: "dream-reducer",
-      lanes: DREAM_REDUCER_ANGLES.map((angle) => ({
+      assignments: DREAM_REDUCER_ANGLES.map((angle) => ({
         key: angle,
         label: angle,
         agent: "perk.dream-reducer",

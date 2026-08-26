@@ -13,7 +13,7 @@ import type {
   WavePing,
   WaveRunHandle,
   WaveSpawnParams,
-} from "./reportWave.ts";
+} from "./transport.ts";
 
 export interface MemoryWaveAdapterConfig {
   /** The ping outcome; null exercises the unavailable arm. Defaults to a valid ping. */

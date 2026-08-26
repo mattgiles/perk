@@ -1,12 +1,18 @@
 // The `/learn` flow's per-flow wave entrypoint over the shared report-wave runner: the analyst
 // fan-out as CODE. It owns the four learn angles, the analyst report schema, the tool-enforced
-// angle policy (2–4 angles, `session-deviations` mandatory), and the lane/task composition —
-// delegating spawn/timeout/aggregate mechanics to `runReportWave` under the `best-effort`
-// completeness policy (a failed analyst is an explicitly-reported skipped angle, never a failed
-// pass). Analyst reports come back as engine-validated structured output (the workflow-level
-// `outputSchema` → the injected `structured_output` tool), replacing fenced-JSON scraping.
+// angle policy (2–4 angles, `session-deviations` mandatory), and the assignment/task
+// composition — delegating spawn/timeout/aggregate mechanics to `runReportWave` under the
+// `best-effort` completeness policy (a failed analyst is an explicitly-reported skipped angle,
+// never a failed pass). Analyst reports come back as engine-validated structured output (the
+// workflow-level `outputSchema` → the injected `structured_output` tool), replacing fenced-JSON
+// scraping.
 
-import { runReportWave, type WaveAdapter, type WaveLane, type WaveResult } from "./reportWave.ts";
+import {
+  type ReportAssignment,
+  runReportWave,
+  type WaveAdapter,
+  type WaveResult,
+} from "./reportWave.ts";
 
 /** The four learn angles; `session-deviations` is the mandatory member of every selection. */
 export const LEARN_ANGLES = [
@@ -103,12 +109,16 @@ export function angleSelectionError(selections: LearnAngleSelection[]): string |
 }
 
 /**
- * Compose one lane's task text IN CODE (the prompt-drift-proof half of the migration): the
- * assigned angle, the absolute manifest path (read first), the bundle dir, and the parent's
+ * Compose one assignment's task text IN CODE (the prompt-drift-proof half of the migration):
+ * the assigned angle, the absolute manifest path (read first), the bundle dir, and the parent's
  * optional emphasis appended verbatim. Deliberately short — the angle rubric lives in the agent
  * def, not the task.
  */
-function laneTask(selection: LearnAngleSelection, manifestPath: string, bundleDir: string): string {
+function assignmentTask(
+  selection: LearnAngleSelection,
+  manifestPath: string,
+  bundleDir: string,
+): string {
   const base =
     `angle: ${selection.angle} — analyze ONLY this angle. ` +
     `Read the evidence-bundle manifest FIRST: ${manifestPath} (bundle dir: ${bundleDir}). ` +
@@ -118,11 +128,11 @@ function laneTask(selection: LearnAngleSelection, manifestPath: string, bundleDi
 }
 
 /**
- * Run the learn analyst wave: one `perk.learn-analyst` lane per selected angle over the shared
- * evidence bundle, `best-effort` completeness (lane failure = a skipped angle; only a wave-level
- * failure makes the result incomplete). Assumes a validated selection — the `run_learn_wave` tool
- * runs `angleSelectionError` first; `renderWaveScript`'s programmer-error throws (empty/duplicate
- * keys) remain the backstop.
+ * Run the learn analyst wave: one `perk.learn-analyst` child per selected angle over the shared
+ * evidence bundle, `best-effort` completeness (assignment failure = a skipped angle; only a
+ * wave-level failure makes the result incomplete). Assumes a validated selection — the
+ * `run_learn_wave` tool runs `angleSelectionError` first; the runner's programmer-error throws
+ * (empty/duplicate keys) remain the backstop.
  */
 export async function runLearnWave(
   adapter: WaveAdapter,
@@ -134,18 +144,18 @@ export async function runLearnWave(
   },
   signal?: AbortSignal,
 ): Promise<WaveResult> {
-  const lanes: WaveLane[] = opts.selections.map((selection) => ({
+  const assignments: ReportAssignment[] = opts.selections.map((selection) => ({
     key: selection.angle,
     label: selection.angle,
     agent: "perk.learn-analyst",
     phase: "learn",
-    task: laneTask(selection, opts.manifestPath, opts.bundleDir),
+    task: assignmentTask(selection, opts.manifestPath, opts.bundleDir),
   }));
   return await runReportWave(
     adapter,
     {
       flow: "learn",
-      lanes,
+      assignments,
       outputSchema: LEARN_ANALYST_REPORT_SCHEMA,
       completeness: "best-effort",
       ...(opts.model !== undefined ? { model: opts.model } : {}),

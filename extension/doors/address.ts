@@ -41,7 +41,7 @@ import {
   type WaveAttemptReceipt,
 } from "../waves/reportWave.ts";
 import {
-  CLASSIFY_LANE_KEY,
+  CLASSIFY_ASSIGNMENT_KEY,
   REVIEW_CLASSIFIER_FLOW,
   runReviewClassifierWave,
 } from "../waves/reviewClassifierWave.ts";
@@ -393,7 +393,7 @@ export async function executeClassifyReviewFeedback(
   );
   const result = await runReviewClassifierWave(adapter, opts);
   const attempts = [
-    toAttemptReceipt(REVIEW_CLASSIFIER_FLOW, 1, [CLASSIFY_LANE_KEY], result.receipt),
+    toAttemptReceipt(REVIEW_CLASSIFIER_FLOW, 1, [CLASSIFY_ASSIGNMENT_KEY], result.receipt),
   ];
   if (!result.complete) {
     const failure = result.failures[0];

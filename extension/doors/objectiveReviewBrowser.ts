@@ -59,7 +59,11 @@ import type { ToolGating } from "../substrate/toolGating.ts";
 import { branchOf, rebuildWorkflowState } from "../substrate/workflowState.ts";
 import { type ReportTarget, report } from "../surfaces/report.ts";
 import { clearAnnotationSurface, primeAnnotationSurface } from "./annotationPush.ts";
-import { clearDraftReviewContext, primeDraftReviewContext } from "./draftReviewWaveTools.ts";
+import {
+  clearDraftReviewContext,
+  type DraftReviewWaveState,
+  primeDraftReviewContext,
+} from "./draftReviewWaveTools.ts";
 import {
   plannotatorPresent,
   type RespondSink,
@@ -131,6 +135,7 @@ export async function observeObjectiveReviewReadiness(
   pi: RespondSink,
   ctx: ReportTarget & Pick<ExtensionContext, "isIdle">,
   started: StartedSurface<ReviewOutcome>,
+  draftReview: DraftReviewWaveState,
   session?: ObjectiveReviewDoorSession,
 ): Promise<void> {
   const state = await started.readiness;
@@ -161,7 +166,7 @@ export async function observeObjectiveReviewReadiness(
   // `no_draft_context`. Idempotent beside the decision task's clears. The session flag makes
   // the degrade authoritative for the decision task too — a later bridge decision is ignored.
   clearAnnotationSurface();
-  clearDraftReviewContext();
+  clearDraftReviewContext(draftReview);
   if (session !== undefined) session.degraded = true;
 }
 
@@ -347,6 +352,7 @@ export async function openObjectiveReviewSurface(
   ctx: ExtensionContext,
   gating: ToolGating,
   opts: { rendered: string; artifactRaw: string; custom?: string },
+  draftReview: DraftReviewWaveState,
   deps: StartBrowserDeps = {},
 ): Promise<string | null> {
   let started: StartedSurface<ReviewOutcome>;
@@ -376,7 +382,7 @@ export async function openObjectiveReviewSurface(
   // browsed bytes == wave bytes — all the RENDERED markdown). Priming resets any pending wave —
   // a new browser session supersedes everything (the accepted double-open edge in the header).
   primeAnnotationSurface({ mode: "plan", url: started.url });
-  primeDraftReviewContext({
+  primeDraftReviewContext(draftReview, {
     draftType: "objective",
     draft: opts.rendered,
     ...(opts.custom !== undefined ? { custom: opts.custom } : {}),
@@ -386,7 +392,7 @@ export async function openObjectiveReviewSurface(
   // routes a post-degrade decision through the save path (a readiness false-negative must not
   // let a late approval auto-save after the human followed the fallback).
   const session: ObjectiveReviewDoorSession = { degraded: false };
-  void observeObjectiveReviewReadiness(pi, ctx, started, session);
+  void observeObjectiveReviewReadiness(pi, ctx, started, draftReview, session);
 
   // The decision task: the wait is open-ended (exactly the model-called `plan_review` bridge
   // semantics — a turn abort settles `aborted` via the bridge's abort handling).
@@ -417,7 +423,7 @@ export async function openObjectiveReviewSurface(
       // and a late wave start refuses (`no_draft_context`). Idempotent beside the degrade-arm
       // clears; an early decision mid-wave leaves a still-pending wave collectable.
       clearAnnotationSurface();
-      clearDraftReviewContext();
+      clearDraftReviewContext(draftReview);
       interceptor.restore();
     }
   })();
@@ -447,16 +453,21 @@ export async function openObjectiveReviewAndGuide(
   ctx: ExtensionContext,
   gating: ToolGating,
   opts: { rendered: string; artifactRaw: string; custom?: string },
+  draftReview: DraftReviewWaveState,
   deps: StartBrowserDeps = {},
 ): Promise<void> {
-  const guidance = await openObjectiveReviewSurface(pi, ctx, gating, opts, deps);
+  const guidance = await openObjectiveReviewSurface(pi, ctx, gating, opts, draftReview, deps);
   if (guidance !== null) pi.sendUserMessage(guidance);
 }
 
 // ------------------------------------------------------------------------ registration
 
 /** Register the warm `/objective-review-browser` command (no tools — the companions are global). */
-export function registerObjectiveReviewBrowser(pi: ExtensionAPI, gating: ToolGating): void {
+export function registerObjectiveReviewBrowser(
+  pi: ExtensionAPI,
+  gating: ToolGating,
+  draftReview: DraftReviewWaveState,
+): void {
   registerPerkCommand(pi, SCOPE, {
     description:
       "Review the working objective draft (prose + roadmap) human-in-the-loop in the " +
@@ -529,11 +540,17 @@ export function registerObjectiveReviewBrowser(pi: ExtensionAPI, gating: ToolGat
       // The entire trimmed arg string is the optional custom-angle definition (no parse-failure
       // arm — any text is a valid lens definition).
       const custom = (args ?? "").trim();
-      await openObjectiveReviewAndGuide(pi, ctx, gating, {
-        rendered,
-        artifactRaw: artifact.content,
-        ...(custom.length > 0 ? { custom } : {}),
-      });
+      await openObjectiveReviewAndGuide(
+        pi,
+        ctx,
+        gating,
+        {
+          rendered,
+          artifactRaw: artifact.content,
+          ...(custom.length > 0 ? { custom } : {}),
+        },
+        draftReview,
+      );
     },
   });
 }

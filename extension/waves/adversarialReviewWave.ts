@@ -9,9 +9,9 @@
 // during triage (an `ok: false` lane is reported, never papered over), so the pr-review
 // bounded-retry policy does not carry over.
 //
-// The surface handle (URL/port) is STRUCTURALLY UNREPRESENTABLE: `buildAdversarialReviewLanes`
-// has no URL parameter at all, so the children can never learn the review surface — enforced by
-// construction, pinned by the suite.
+// The surface handle (URL/port) is STRUCTURALLY UNREPRESENTABLE:
+// `buildAdversarialReviewAssignments` has no URL parameter at all, so the children can never
+// learn the review surface — enforced by construction, pinned by the suite.
 //
 // Driven live by the registered `start_review_wave` / `collect_review_wave` tool pair
 // (`extension/doors/reviewWaveTools.ts`); the `agents/adversarial-reviewer.md` def completes via
@@ -19,10 +19,10 @@
 
 import { PONYTAIL_REVIEW_SKILL } from "./ponytail.ts";
 import {
+  type ReportAssignment,
   type ReportWaveStart,
   startReportWave,
   type WaveAdapter,
-  type WaveLane,
   type WaveSpec,
 } from "./reportWave.ts";
 
@@ -91,9 +91,9 @@ export const ADVERSARIAL_REVIEW_REPORT_SCHEMA = {
 };
 
 /**
- * Build the reviewer lanes for a selection: key = label = slug, the fixed agent/phase, and a
- * task naming the angle, the PR number, and the head-worktree path — AND NOTHING ELSE: no URL
- * parameter exists, so the surface handle is unrepresentable by construction (the children
+ * Build the reviewer assignments for a selection: key = label = slug, the fixed agent/phase,
+ * and a task naming the angle, the PR number, and the head-worktree path — AND NOTHING ELSE: no
+ * URL parameter exists, so the surface handle is unrepresentable by construction (the children
  * re-derive everything else themselves via `perk pr review-context`).
  *
  * `stack` is a DISCRIMINATOR, not a member array: with `stack: true` the task names the stack
@@ -101,16 +101,16 @@ export const ADVERSARIAL_REVIEW_REPORT_SCHEMA = {
  * children learn the authoritative ordered membership from the context worker, never from
  * relayed prose. Without it, tasks are byte-identical to the single-PR form.
  */
-export function buildAdversarialReviewLanes(opts: {
+export function buildAdversarialReviewAssignments(opts: {
   angles: AdversarialReviewAngle[];
   pr: number;
   worktree: string;
   directive?: string;
   stack?: boolean;
-}): WaveLane[] {
-  // ONE uniform suffix on every lane (the `buildPrReviewLanes` byte-posture): the parent's
-  // judgment lever stays angle selection — the directive never re-scopes a lane, it only sets
-  // emphasis inside the assigned angle.
+}): ReportAssignment[] {
+  // ONE uniform suffix on every assignment (the `buildPrReviewAssignments` byte-posture): the
+  // parent's judgment lever stays angle selection — the directive never re-scopes an angle, it
+  // only sets emphasis inside the assigned angle.
   const suffix =
     opts.directive === undefined
       ? ""
@@ -121,14 +121,14 @@ export function buildAdversarialReviewLanes(opts: {
       ? `Review the PR stack topped by PR #${opts.pr} (combined diff) at ${opts.worktree}. ` +
         `Fetch context with \`perk pr review-context --pr ${opts.pr} --stack\`.`
       : `Review PR #${opts.pr} at ${opts.worktree}.`;
-  const lanes: WaveLane[] = opts.angles.map((angle) => ({
+  const assignments: ReportAssignment[] = opts.angles.map((angle) => ({
     key: angle,
     label: angle,
     agent: "perk.adversarial-reviewer",
     phase: "review",
     task: `${ADVERSARIAL_REVIEW_ANGLES[angle]} ${subject}${suffix}`,
   }));
-  lanes.push({
+  assignments.push({
     key: "ponytail",
     label: "ponytail",
     agent: "perk.adversarial-reviewer",
@@ -137,7 +137,7 @@ export function buildAdversarialReviewLanes(opts: {
     skill: "ponytail-review",
     requiredSkill: PONYTAIL_REVIEW_SKILL,
   });
-  return lanes;
+  return assignments;
 }
 
 export interface AdversarialReviewWaveOptions {
@@ -161,8 +161,8 @@ export interface AdversarialReviewWaveOptions {
 }
 
 /**
- * Start the adversarial-review wave NON-BLOCKING (the streaming sibling): build the lanes from
- * the angle vocabulary and launch under the strict completeness policy — zero retries, so an
+ * Start the adversarial-review wave NON-BLOCKING (the streaming sibling): build the assignments
+ * from the angle vocabulary and launch under the strict completeness policy — zero retries, so an
  * uncovered angle stays an honest, human-visible incompleteness. Returns the `startReportWave`
  * outcome: the run handle + never-rejecting `result` on success, or the normalized launch
  * failure.
@@ -175,7 +175,7 @@ export async function startAdversarialReviewWave(
     adapter,
     {
       flow: "adversarial-review",
-      lanes: buildAdversarialReviewLanes({
+      assignments: buildAdversarialReviewAssignments({
         angles: opts.angles,
         pr: opts.pr,
         worktree: opts.worktree,
