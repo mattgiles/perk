@@ -18,12 +18,12 @@ import {
   WAVE_ACCEPTANCE,
   WAVE_TIMEOUT_MS,
   type WaveChildReceipt,
-  type WaveLane,
+  type ReportAssignment,
   type WaveScriptSpec,
   type WaveSpec,
 } from "./reportWave.ts";
 
-const LANES: WaveLane[] = [
+const ASSIGNMENTS: ReportAssignment[] = [
   {
     key: "plan-fidelity",
     agent: "perk.pr-reviewer",
@@ -42,7 +42,7 @@ const LANES: WaveLane[] = [
 function makeSpec(overrides: Partial<WaveSpec> = {}): WaveSpec {
   return {
     flow: "pr-review",
-    lanes: LANES,
+    assignments: ASSIGNMENTS,
     outputSchema: { type: "object", properties: { verdict: { type: "string" } } },
     completeness: "strict",
     timeoutMs: 5_000,
@@ -75,7 +75,7 @@ test("renderWaveScript pins the exact two-lane script", () => {
   }
 ]);
 return reports.map(({key, ok, error, structuredOutput}) => ({key, ok, error: error ?? null, report: structuredOutput ?? null}));`;
-  assert.equal(renderWaveScript(LANES), expected);
+  assert.equal(renderWaveScript(ASSIGNMENTS), expected);
 });
 
 test("renderWaveScript keeps hostile task text inside the array literal", () => {
@@ -219,8 +219,8 @@ test("runReportWave: spawn params carry the fixed module contract + spec fields"
 });
 
 test("runReportWave: failed required-skill preflight skips only that lane and stays uncovered", async () => {
-  const lanes: WaveLane[] = [
-    LANES[0] as WaveLane,
+  const assignments: ReportAssignment[] = [
+    ASSIGNMENTS[0] as ReportAssignment,
     {
       key: "ponytail",
       agent: "perk.pr-reviewer",
@@ -239,7 +239,7 @@ test("runReportWave: failed required-skill preflight skips only that lane and st
   const result = await runReportWave(
     adapter,
     makeSpec({
-      lanes,
+      assignments,
       requiredSkillPreflight: async () => {
         preflights++;
         return { ok: false, detail: "exact Ponytail source missing" };
@@ -258,7 +258,7 @@ test("runReportWave: failed required-skill preflight skips only that lane and st
   const attempt = toAttemptReceipt(
     "pr-review",
     1,
-    lanes.map((lane) => lane.key),
+    assignments.map((assignment) => assignment.key),
     result.receipt,
   );
   assert.deepEqual(attempt.requestedKeys, ["plan-fidelity", "ponytail"]);
@@ -290,7 +290,7 @@ test("runReportWave: a failed lane is incomplete under strict, complete under be
 });
 
 test("runReportWave: Ponytail preflight success without a report stays uncovered", async () => {
-  const ponytail: WaveLane = {
+  const ponytail: ReportAssignment = {
     key: "ponytail",
     agent: "perk.pr-reviewer",
     task: "review minimally",
@@ -309,7 +309,7 @@ test("runReportWave: Ponytail preflight success without a report stays uncovered
   const result = await runReportWave(
     adapter,
     makeSpec({
-      lanes: [LANES[0] as WaveLane, ponytail],
+      assignments: [ASSIGNMENTS[0] as ReportAssignment, ponytail],
       requiredSkillPreflight: async () => ({ ok: true }),
     }),
   );
@@ -519,7 +519,7 @@ test("runReportWave: duplicate lane keys throw (programmer error, never normaliz
     runReportWave(
       adapter,
       makeSpec({
-        lanes: [
+        assignments: [
           { key: "same", agent: "a", task: "t1" },
           { key: "same", agent: "a", task: "t2" },
         ],
@@ -729,7 +729,7 @@ test("receipt data never alters complete/reports/failures (behavior parity)", as
 function makeScriptSpec(overrides: Partial<WaveScriptSpec> = {}): WaveScriptSpec {
   return {
     flow: "adversarial-review",
-    workflowScript: renderWaveScript(LANES),
+    workflowScript: renderWaveScript(ASSIGNMENTS),
     outputSchema: { type: "object", properties: { angle: { type: "string" } } },
     timeoutMs: 5_000,
     ...overrides,
@@ -944,8 +944,8 @@ test("startReportWave: the launch-failure arm returns an already-settled normali
 });
 
 test("startReportWave: launch reports ordered partial preflight omissions truthfully", async () => {
-  const lanes: WaveLane[] = [
-    LANES[0] as WaveLane,
+  const assignments: ReportAssignment[] = [
+    ASSIGNMENTS[0] as ReportAssignment,
     {
       key: "ponytail",
       agent: "perk.pr-reviewer",
@@ -962,7 +962,7 @@ test("startReportWave: launch reports ordered partial preflight omissions truthf
       },
     }),
     makeSpec({
-      lanes,
+      assignments,
       requiredSkillPreflight: async () => ({
         ok: false,
         detail: "exact Ponytail source missing",
@@ -986,7 +986,7 @@ test("startReportWave: launch reports ordered partial preflight omissions truthf
 });
 
 test("startReportWave: all preflight-skipped returns unavailable without a synthetic wave failure", async () => {
-  const lanes: WaveLane[] = ["ponytail-first", "ponytail-second"].map((key) => ({
+  const assignments: ReportAssignment[] = ["ponytail-first", "ponytail-second"].map((key) => ({
     key,
     agent: "perk.pr-reviewer",
     task: "review minimally",
@@ -997,7 +997,7 @@ test("startReportWave: all preflight-skipped returns unavailable without a synth
   const start = await startReportWave(
     adapter,
     makeSpec({
-      lanes,
+      assignments,
       requiredSkillPreflight: async () => ({
         ok: false,
         detail: "exact Ponytail source missing",
@@ -1006,7 +1006,7 @@ test("startReportWave: all preflight-skipped returns unavailable without a synth
   );
   assert.equal(start.ok, false);
   if (start.ok) return;
-  const failures = lanes.map((lane) => ({
+  const failures = assignments.map((assignment) => ({
     key: lane.key,
     reason: "skill-unavailable" as const,
     detail: "exact Ponytail source missing",
@@ -1045,7 +1045,7 @@ test("startReportWave: duplicate lane keys throw (programmer error preserved)", 
     startReportWave(
       createMemoryWaveAdapter({}),
       makeSpec({
-        lanes: [
+        assignments: [
           { key: "same", agent: "a", task: "t1" },
           { key: "same", agent: "a", task: "t2" },
         ],
