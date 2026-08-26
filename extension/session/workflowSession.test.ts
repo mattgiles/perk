@@ -891,6 +891,39 @@ test("branch: reviewPosts() is fail-open — malformed rows drop; a throwing bra
   }
 });
 
+test("branch: append-review-post FAILS CLOSED when the prior ledger cannot be rebuilt", () => {
+  // The read-modify-write asymmetry: the public reviewPosts() read stays fail-open (above),
+  // but the append path must never treat a throwing branch as an empty prior ledger — a
+  // successful append over that would LWW-erase every earlier confirmed post and let the
+  // resume guard permit duplicate GitHub reviews.
+  const cwd = mkdtempSync(join(tmpdir(), "workflow-session-review-posts-closed-"));
+  try {
+    const appends: unknown[] = [];
+    const sink: EntrySink = {
+      appendEntry: (customType, data) => appends.push({ customType, data }),
+    };
+    const throwing = openBranchWorkflowSession(sink, {
+      cwd,
+      sessionManager: {
+        getBranch(): unknown[] {
+          throw new Error("adversarial branch read");
+        },
+      },
+      hasUI: false,
+      ui: { notify() {} },
+    });
+    const result = throwing.apply({ kind: "append-review-post", row: POST_ROW });
+    assert.equal(result.status, "rejected");
+    assert.ok(
+      result.status === "rejected" &&
+        /refusing to append over an unknown ledger/.test(result.problem),
+    );
+    assert.equal(appends.length, 0, "the refusal lands before any append effect");
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
 test("branch: a read-back miss reports LOUDLY under each change's seam-owned scope", () => {
   // The seam owns each append's report scope (the caller passes none): a headless read-back
   // miss must surface as `perk: <scope> — <failure>` on stderr — not stay quiet, and not

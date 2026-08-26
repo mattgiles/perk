@@ -380,7 +380,12 @@ test("tool: run_pr_review_wave end-to-end happy path; a following clean post is 
       angles: ["plan-fidelity", "quality"],
     });
     assert.equal((post.details as { ok: boolean }).ok, true);
-    assert.equal(latestReviewBatch(cwd).expected_pr, 42);
+    // The COMPLETE staged cold-door batch (angles are record-side, never a batch field).
+    assert.deepEqual(latestReviewBatch(cwd), {
+      verdict: "clean",
+      summary: "clean",
+      expected_pr: 42,
+    });
     const duplicate = await h.invokeTool("post_pr_review", {
       verdict: "clean",
       summary: "duplicate",
@@ -395,6 +400,50 @@ test("tool: run_pr_review_wave end-to-end happy path; a following clean post is 
     };
     assert.deepEqual(record.angles, ["plan-fidelity", "quality", "ponytail"]);
     assert.deepEqual(record.covered_angles, ["plan-fidelity", "quality", "ponytail"]);
+  } finally {
+    h.dispose();
+  }
+});
+
+test("tool: the execute callback's AbortSignal reaches the real wave (cancellation forwarding)", async () => {
+  // Adapter-level, through the REGISTERED tool definition: the harness threads a real
+  // AbortSignal into the execute callback, and the only path it can take to the observed
+  // outcome is createRpcChangeReviewer → runPrReviewWave's opts.signal (the fake responder is
+  // bound and healthy — an un-forwarded signal would spawn and cover all three lanes).
+  const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
+  installPonytailReviewSkill(cwd);
+  const bin = fakePerkRouter(cwd, { "pr url": { json: PR_URL_JSON } });
+  const fake = prReviewFake();
+  const h = await loadPerkSession({
+    cwd,
+    env: { PERK_RUN_ID: "01RID", PERK_BIN: bin },
+    extraExtensions: [fake.extension],
+  });
+  try {
+    const controller = new AbortController();
+    controller.abort();
+    const result = await h.invokeTool(
+      "run_pr_review_wave",
+      { angles: ["plan-fidelity", "tests"] },
+      { signal: controller.signal },
+    );
+    const details = result.details as {
+      ok: boolean;
+      complete?: boolean;
+      covered?: string[];
+      failures?: { key: string | null; reason: string; detail: string }[];
+      attempts?: { state: string }[];
+    };
+    assert.equal(details.ok, true, "cancellation normalizes into the outcome, never a throw");
+    assert.equal(details.complete, false);
+    assert.deepEqual(details.covered, []);
+    assert.equal(details.failures?.[0]?.reason, "cancelled");
+    assert.match(details.failures?.[0]?.detail ?? "", /cancelled before launch/);
+    assert.equal(details.attempts?.[0]?.state, "cancelled");
+    assert.equal(fake.spawns.length, 0, "an aborted wave never spawns");
+    // The cancelled pass still recorded an incomplete outcome — the clean guard holds.
+    const clean = await h.invokeTool("post_pr_review", { verdict: "clean", summary: "clean" });
+    assert.equal((clean.details as { error_type?: string }).error_type, "incomplete_coverage");
   } finally {
     h.dispose();
   }
@@ -614,12 +663,21 @@ test("tool: post_pr_review delegates an actionable batch, records last_pr_review
       verdict: "actionable",
       summary: "two issues",
       comments: [{ path: "a.ts", line: 12, body: "fix" }],
+      fyi: ["a nit"],
       angles: ["plan-fidelity", "correctness"],
     });
     const details = result.details as { ok: boolean; comment_count?: number; verdict?: string };
     assert.equal(details.ok, true);
     assert.equal(details.comment_count, 2);
-    assert.equal(latestReviewBatch(cwd).expected_pr, undefined);
+    // The COMPLETE staged cold-door batch: every reconciled field survives the tool→feature→
+    // publisher handoff (a dropped summary/comments/fyi would otherwise post silently thin);
+    // standalone posts omit expected_pr.
+    assert.deepEqual(latestReviewBatch(cwd), {
+      verdict: "actionable",
+      summary: "two issues",
+      comments: [{ path: "a.ts", line: 12, body: "fix" }],
+      fyi: ["a nit"],
+    });
     const rec = h.workflowState().last_pr_review as {
       pr?: number;
       verdict?: string;

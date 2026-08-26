@@ -7,7 +7,7 @@ sidebar:
 
 # Review and authoring
 
-Seven warm commands cover three distinct jobs: automated review that posts one reconciled result,
+Six warm commands cover three distinct jobs: automated review that posts one reconciled result,
 human-triaged PR review in a terminal or browser (single PRs and whole stacks), and browser review
 of plan/objective drafts before they are saved. Their companion tools are listed with each flow; the complete availability census
 lives in [Model-facing tools](./model-tools.md).
@@ -39,8 +39,8 @@ may still post with the incomplete-coverage note. An optional free-form focus no
 command and steers emphasis without removing plan fidelity or changing the 2–4 selected-angle
 limit.
 
-Before spawning, the parent resolves the active PR once. The selector and every reviewer/retry
-read context only through `perk pr review-context --expected-pr <that-number> --json`; target drift
+Before spawning, the parent resolves the active PR once. Every reviewer lane and retry
+reads context only through `perk pr review-context --expected-pr <that-number> --json`; target drift
 fails the lane. The resulting outcome is single-use and mutation-bound: starting any new valid pass
 invalidates older evidence immediately, target-resolution failure leaves posting unavailable, and
 one successful post consumes the record. Duplicate posts fail `review_wave_consumed`; pending

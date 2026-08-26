@@ -578,6 +578,14 @@ move code-review policy behind typed operations.
 >   skill, config key, and binding row are gone across both planes; the canonical `/pr-review`
 >   is unchanged. `waves/prReviewWave.test.ts` stayed byte-untouched (the wave-policy parity
 >   proof).
+> - **The Phase-5 dogfood gate is PENDING at this layer's review** (not silently omitted) — the
+>   plan's own closing sequence runs the live arms (`/pr-review` + `/pr-review-terminal`,
+>   through the migrated operations) post-review from the train worktree (a fresh session must
+>   load this branch's extension), then lands the evidence record at
+>   `docs/design/archive/ts-decomposition-phase5-dogfood.md` as one docs-only commit with only
+>   the tip's handoff-ready stamp re-run — the Phase-4 closing precedent. The evidence binds to
+>   the final tested SHA, so the arms deliberately follow the review-fix commits, never precede
+>   them. Phase 6 must not start before that record exists.
 
 ### Changes
 

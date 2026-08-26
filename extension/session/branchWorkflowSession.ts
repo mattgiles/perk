@@ -181,8 +181,24 @@ export function openBranchWorkflowSession(
         }
         case "append-review-post": {
           // Read-rebuild-append: each write carries the whole ordered list (the resume reader
-          // sees every confirmed post); order-sensitive read-back.
-          const posts: ReviewPostRow[] = [...readReviewPosts(source), change.row];
+          // sees every confirmed post); order-sensitive read-back. The rebuild here is
+          // FAIL-CLOSED — deliberately NOT the fail-open `reviewPosts()` read: appending over
+          // an unrebuildable ledger would LWW-overwrite every earlier confirmed post with a
+          // one-row list, and the resume guard would then permit duplicate GitHub reviews.
+          // Refusing before any effect keeps the asymmetric trust rule intact (a row may be
+          // MISSING spuriously, never PRESENT spuriously — and never erased by a write).
+          let prior: ReviewPostRow[];
+          try {
+            prior = reviewPostsOf(rebuildWorkflowState(branchOf(source)).review_posts);
+          } catch (error) {
+            return {
+              status: "rejected",
+              problem:
+                "review_posts ledger rebuild failed — refusing to append over an unknown " +
+                `ledger: ${String(error)}`,
+            };
+          }
+          const posts: ReviewPostRow[] = [...prior, change.row];
           return appendWorkflowStateClassified(sink, source, {
             data: { review_posts: posts },
             field: "review_posts",

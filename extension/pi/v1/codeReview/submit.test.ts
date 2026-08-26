@@ -29,9 +29,10 @@ void _c;
 
 // --- decodeSubmitParams: strict decode (a GitHub mutation — whole-batch refusal) ---------------
 
-test("decodeSubmitParams accepts a minimal approve (empty body, no comments)", () => {
+test("decodeSubmitParams accepts a minimal approve (empty body, no comments; defaults applied)", () => {
   const p = decodeSubmitParams({ pr: 42, event: "approve", body: "" });
-  assert.deepEqual(p, { pr: 42, event: "approve", body: "" });
+  // The decoder returns the normalized feature input directly — absent booleans default false.
+  assert.deepEqual(p, { pr: 42, event: "approve", body: "", dryRun: false, allowRepost: false });
 });
 
 test("decodeSubmitParams accepts a full comment batch with sides and dry_run", () => {
@@ -49,13 +50,13 @@ test("decodeSubmitParams accepts a full comment batch with sides and dry_run", (
   assert.equal(p?.comments?.length, 2);
   assert.equal(p?.comments?.[0]?.side, undefined);
   assert.equal(p?.comments?.[1]?.side, "LEFT");
-  assert.equal(p?.dry_run, true);
+  assert.equal(p?.dryRun, true);
 });
 
-test("decodeSubmitParams: allow_repost decodes strictly (boolean or absent)", () => {
+test("decodeSubmitParams: allow_repost decodes strictly (boolean or absent ⇒ false)", () => {
   const p = decodeSubmitParams({ pr: 1, event: "comment", body: "x", allow_repost: true });
-  assert.equal(p?.allow_repost, true);
-  assert.equal(decodeSubmitParams({ pr: 1, event: "comment", body: "x" })?.allow_repost, undefined);
+  assert.equal(p?.allowRepost, true);
+  assert.equal(decodeSubmitParams({ pr: 1, event: "comment", body: "x" })?.allowRepost, false);
   assert.equal(
     decodeSubmitParams({ pr: 1, event: "comment", body: "x", allow_repost: "yes" }),
     null,
@@ -488,6 +489,73 @@ test("tool: headless + a formal event refuses (headless_formal_event), nothing e
     assert.equal(details.ok, false);
     assert.equal(details.error_type, "headless_formal_event");
     assert.equal(existsSync(argvFile), false, "the cold door was never executed");
+  } finally {
+    h.dispose();
+  }
+});
+
+test("tool: the registered definition pins the model-facing contract (schema + gating guidance)", async () => {
+  // The REGISTERED metadata/schema is authored independently of the strict decode — pin it so a
+  // dropped property, drifted required set, or lost gating guideline cannot pass silently (the
+  // harness's execute calls bypass model-side schema enforcement).
+  const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
+  const h = await loadPerkSession({ cwd, env: { PERK_RUN_ID: "01RID" }, headful: false });
+  try {
+    const tool = h.registeredTool("submit_pr_review");
+    assert.ok(tool);
+    assert.equal(tool.label, "Submit PR review");
+    assert.equal(tool.executionMode, "sequential");
+    assert.equal(tool.promptSnippet, "Submit the curated review batch to the PR");
+    assert.match(tool.description, /ONE atomic review/);
+    assert.match(tool.description, /review_posts ledger row/);
+    const params = tool.parameters as {
+      type: string;
+      additionalProperties: boolean;
+      required: string[];
+      properties: {
+        pr: { type: string };
+        event: { type: string; enum: string[] };
+        body: { type: string };
+        comments: {
+          type: string;
+          items: {
+            additionalProperties: boolean;
+            required: string[];
+            properties: { side: { enum: string[] } };
+          };
+        };
+        dry_run: { type: string };
+        allow_repost: { type: string; description: string };
+      };
+    };
+    assert.equal(params.type, "object");
+    assert.equal(params.additionalProperties, false);
+    assert.deepEqual(params.required, ["pr", "event", "body"]);
+    assert.deepEqual(Object.keys(params.properties).sort(), [
+      "allow_repost",
+      "body",
+      "comments",
+      "dry_run",
+      "event",
+      "pr",
+    ]);
+    assert.equal(params.properties.pr.type, "number");
+    assert.deepEqual(params.properties.event.enum, ["approve", "request-changes", "comment"]);
+    assert.equal(params.properties.body.type, "string");
+    assert.equal(params.properties.comments.type, "array");
+    assert.equal(params.properties.comments.items.additionalProperties, false);
+    assert.deepEqual(params.properties.comments.items.required, ["path", "line", "body"]);
+    assert.deepEqual(params.properties.comments.items.properties.side.enum, ["LEFT", "RIGHT"]);
+    assert.equal(params.properties.dry_run.type, "boolean");
+    assert.equal(params.properties.allow_repost.type, "boolean");
+    assert.match(params.properties.allow_repost.description, /already_posted/);
+    // The gate-ladder guidance is part of the registered surface (model-facing discipline).
+    const guidelines = tool.promptGuidelines ?? [];
+    assert.ok(guidelines.some((g) => g.includes("human has explicitly approved posting")));
+    assert.ok(guidelines.some((g) => g.includes("dry_run: true")));
+    assert.ok(guidelines.some((g) => g.includes("ENFORCES skip-on-resume")));
+    assert.ok(guidelines.some((g) => g.includes("blocking in-TUI confirm")));
+    assert.ok(guidelines.some((g) => g.includes("never post via gh or bash")));
   } finally {
     h.dispose();
   }

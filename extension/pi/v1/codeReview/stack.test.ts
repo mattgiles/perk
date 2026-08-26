@@ -610,6 +610,9 @@ test("open_stack_review: success returns the guidance as ok text; second call is
       diffType: "since-base",
       defaultBranch: "origin/main",
     });
+    // The cold launch primes THIS activation's threaded annotation state (a fresh/wrong state
+    // here would leave push_annotations refusing no_surface while the browser sits open).
+    assert.equal(await sessionSurfacePrimed(h), true, "the open primed the annotation surface");
 
     const second = await h.invokeTool("open_stack_review", {});
     const secondDetails = second.details as { ok: boolean; error_type?: string };
@@ -617,6 +620,14 @@ test("open_stack_review: success returns the guidance as ok text; second call is
     assert.equal(secondDetails.error_type, "bad_state");
     assert.match(second.content[0]?.text ?? "", /single-use/);
     assert.equal(sink.envelopes.length, 1, "no second bridge");
+
+    // The same settle discipline as the warm door: the bridge settle clears the surface.
+    await settleBridges(sink);
+    const start = Date.now();
+    while ((await sessionSurfacePrimed(h)) && Date.now() - start < 5000) {
+      await new Promise((r) => setTimeout(r, 25));
+    }
+    assert.equal(await sessionSurfacePrimed(h), false, "the bridge settle cleared the surface");
   } finally {
     await settleBridges(sink);
     h.dispose();

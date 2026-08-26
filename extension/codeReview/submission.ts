@@ -98,15 +98,19 @@ export type FormalEventGate =
 
 // ------------------------------------------------------------------------ the result union
 
-/** The enumerated curated-submission outcome; every arm carries its policy-owned message text. */
+/**
+ * The enumerated curated-submission outcome; every arm carries its policy-owned message text
+ * (the refusal arms carry ONLY the message — the prior-row / invalid-anchor detail is already
+ * rendered into it, and no production caller reads it structurally).
+ */
 export type SubmitCuratedOutcome =
-  | { kind: "already_posted"; prior: ReviewPostRow; message: string }
+  | { kind: "already_posted"; message: string }
   | { kind: "headless_formal_event"; message: string }
   | { kind: "user_declined"; message: string }
-  | { kind: "bad_anchors"; invalid: InvalidAnchor[]; message: string }
+  | { kind: "bad_anchors"; message: string }
   | { kind: "submit_failed"; message: string; errorType: string }
   | { kind: "dry_run_ok"; data: SubmitOk }
-  | { kind: "posted"; data: SubmitOk; record: ReviewSubmissionRecord; row: ReviewPostRow };
+  | { kind: "posted"; data: SubmitOk; record: ReviewSubmissionRecord };
 
 /** Flag spelling → the REST wire spelling shown in the human confirm. */
 const WIRE_EVENT: Record<ReviewEvent, string> = {
@@ -149,7 +153,6 @@ export async function submitCuratedReview(
     if (last !== undefined) {
       return {
         kind: "already_posted",
-        prior: last,
         message:
           `a ${last.event} review was already posted to PR #${input.pr} in this session ` +
           `(review_posts row at ${last.at}) — on a stack resume skip this member; pass ` +
@@ -201,7 +204,6 @@ export async function submitCuratedReview(
         .join("\n");
       return {
         kind: "bad_anchors",
-        invalid: outcome.invalid,
         message: `${outcome.message}\n${table}\nrepair these anchors and re-run with dry_run: true`,
       };
     }
@@ -223,5 +225,5 @@ export async function submitCuratedReview(
   const row: ReviewPostRow = { pr: record.pr, event: input.event, at: record.at };
   deps.session.apply({ kind: "record-review", record });
   deps.session.apply({ kind: "append-review-post", row });
-  return { kind: "posted", data: outcome.data, record, row };
+  return { kind: "posted", data: outcome.data, record };
 }

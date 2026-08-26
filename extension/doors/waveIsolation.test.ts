@@ -12,6 +12,12 @@ import { mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import {
+  createAnnotationState,
+  executePushAnnotations,
+  type FetchLike,
+  primeAnnotationSurface,
+} from "../pi/v1/providers/annotations.ts";
 import { runScratchDir } from "../substrate/cache.ts";
 import {
   createFakeSubagents,
@@ -454,4 +460,114 @@ test("two sessions share no annotation-push state (prime/clear isolate per activ
     hA.dispose();
     hB.dispose();
   }
+});
+
+// --- the annotation push: per-activation LEDGER/HELD/ALTERNATES isolation (behavioral) ---------
+
+/** A minimal scriptable endpoint (the annotations.test.ts fakeEndpoint shape, sized to here). */
+function annotationEndpoint(): {
+  fetchLike: FetchLike;
+  posts: { source: string; count: number }[];
+  setDown(down: boolean): void;
+} {
+  const posts: { source: string; count: number }[] = [];
+  let down = false;
+  let seq = 0;
+  const fetchLike: FetchLike = async (_url, init) => {
+    if (down) throw new Error("connect ECONNREFUSED 127.0.0.1");
+    if (init.method === "DELETE") {
+      return { ok: true, status: 200, text: async () => JSON.stringify({ ok: true, removed: 1 }) };
+    }
+    const batch = JSON.parse(init.body ?? "{}") as { annotations: { source?: string }[] };
+    posts.push({ source: batch.annotations[0]?.source ?? "", count: batch.annotations.length });
+    const ids = batch.annotations.map(() => `id-${++seq}`);
+    return { ok: true, status: 201, text: async () => JSON.stringify({ ids }) };
+  };
+  return {
+    fetchLike,
+    posts,
+    setDown(next: boolean) {
+      down = next;
+    },
+  };
+}
+
+/** A quiet ReportTarget (the endpoint outcomes are asserted through details, not notifies). */
+const QUIET_TARGET = { hasUI: false, ui: { notify() {} } };
+
+interface PushDetails {
+  ok: boolean;
+  pushed?: number;
+  skipped?: string[];
+  held?: number;
+  held_batches?: number;
+}
+
+test("two activations share no annotation ledger/held/alternates state (behavioral)", async () => {
+  // Two per-activation states over their own endpoints — a regression that moved only the
+  // surface into AnnotationState (leaving the dedupe ledger, the held queue, or the retained
+  // alternates module-global) passes the prime/clear probe test above but fails here.
+  const s1 = createAnnotationState();
+  const s2 = createAnnotationState();
+  const e1 = annotationEndpoint();
+  const e2 = annotationEndpoint();
+  primeAnnotationSurface(s1, { mode: "review", url: "http://127.0.0.1:7771" });
+  primeAnnotationSurface(s2, { mode: "review", url: "http://127.0.0.1:7772" });
+  const finding = {
+    path: "src/a.ts",
+    line: 3,
+    severity: "major",
+    confidence: "high",
+    body: "off-by-one",
+  };
+  const push = (
+    state: ReturnType<typeof createAnnotationState>,
+    endpoint: ReturnType<typeof annotationEndpoint>,
+    params: unknown,
+  ) => executePushAnnotations(state, QUIET_TARGET, params, { fetchLike: endpoint.fetchLike });
+
+  // LEDGER isolation: the same anchor posts in BOTH activations (a shared ledger would skip
+  // the second); the within-activation re-push is the skip (the contrast pin).
+  const first = await push(s1, e1, { angle: "tests", findings: [finding] });
+  assert.equal((first.details as PushDetails).pushed, 1);
+  const other = await push(s2, e2, { angle: "tests", findings: [finding] });
+  assert.equal((other.details as PushDetails).pushed, 1, "s2's ledger never saw s1's anchor");
+  assert.deepEqual((other.details as PushDetails).skipped, []);
+  const repeat = await push(s1, e1, { angle: "tests", findings: [finding] });
+  assert.equal((repeat.details as PushDetails).pushed, 0);
+  assert.equal((repeat.details as PushDetails).skipped?.length, 1, "s1's own dedupe still holds");
+
+  // ALTERNATES isolation: both activations retain a cross-source duplicate (perk:tests owns
+  // the anchor in each ledger); s1's release promotes ONLY s1's retained alternate — s2's
+  // stays retained (a shared alternates map would have been drained by s1's release).
+  const dupe = await push(s1, e1, { angle: "quality", findings: [finding], replace: true });
+  assert.equal((dupe.details as PushDetails).skipped?.length, 1, "s1 retains the alternate");
+  const s2Dupe = await push(s2, e2, { angle: "quality", findings: [finding], replace: true });
+  assert.equal((s2Dupe.details as PushDetails).skipped?.length, 1, "s2 retains ITS OWN alternate");
+  const release = await push(s1, e1, { angle: "tests", findings: [], replace: true });
+  assert.equal((release.details as PushDetails).ok, true);
+  assert.equal((release.details as PushDetails).pushed, 1, "s1's release promoted s1's alternate");
+  assert.ok(
+    e1.posts.some((p) => p.source === "perk:quality" && p.count === 1),
+    "the promoted alternate posts under its own angle in s1",
+  );
+  assert.equal(s1.alternates.size, 0, "s1's promotion consumed s1's candidate");
+  assert.equal(
+    s2.alternates.size,
+    1,
+    "s2 retains ITS OWN alternate — s1's release never drains it",
+  );
+
+  // HELD-QUEUE isolation: s1's unreachable endpoint holds its batch; the same anchor still
+  // posts through s2 (a shared held queue would veto it or flush s1's batch through e2), and
+  // s2's successful call drains nothing of s1's queue.
+  const heldFinding = { ...finding, path: "src/b.ts" };
+  e1.setDown(true);
+  const held = await push(s1, e1, { angle: "quality", findings: [heldFinding] });
+  assert.equal((held.details as PushDetails).held, 1);
+  assert.equal((held.details as PushDetails).held_batches, 1);
+  const unaffected = await push(s2, e2, { angle: "quality", findings: [heldFinding] });
+  assert.equal((unaffected.details as PushDetails).pushed, 1, "s2 never carries s1's held work");
+  assert.equal((unaffected.details as PushDetails).held, 0);
+  assert.equal(s1.held.length, 1, "s2's flush drained nothing of s1's queue");
 });

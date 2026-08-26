@@ -77,7 +77,7 @@ capabilities:
   - id: review.pr
     parent: review
     label: Pull-request review
-    summary: Automated, selector-driven, terminal, and browser PR-review families.
+    summary: Automated, terminal, and browser PR-review families.
   - id: review.address
     parent: review
     label: Addressing feedback

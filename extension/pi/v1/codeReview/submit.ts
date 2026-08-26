@@ -13,7 +13,6 @@ import {
   type CuratedSubmission,
   type FormalEventGate,
   type InvalidAnchor,
-  type ReviewEvent,
   type ReviewSubmitOutcome,
   type ReviewSubmitter,
   type SubmitBatch,
@@ -45,15 +44,6 @@ import type { Severity } from "../../../surfaces/report.ts";
 
 // ------------------------------------------------------------------------ params
 
-export interface SubmitParams {
-  pr: number;
-  event: ReviewEvent;
-  body: string;
-  comments?: SubmitComment[];
-  dry_run?: boolean;
-  allow_repost?: boolean;
-}
-
 /** Decode the optional `comments` array; null = present-but-malformed (whole-batch refusal). */
 function decodeSubmitComments(p: ToolParams): SubmitComment[] | undefined | null {
   const raw = arrayParam(p, "comments");
@@ -79,14 +69,16 @@ function decodeSubmitComments(p: ToolParams): SubmitComment[] | undefined | null
 }
 
 /**
- * Strict-decode unknown tool-call params into `SubmitParams` (the tool-boundary seam). Mirrors
- * `decodePostParams`: submitting a guessed/partial review is a durable GitHub mutation, so ANY
- * malformed field ⇒ null (whole-batch refusal). `pr` must be an int; `event` exactly one of the
- * three flag spellings; `body` a string (EMPTY ALLOWED — the cold door owns the event-conditioned
- * body rule and reports `bad_batch`); each `comments` row strict on
- * path/line(int)/side(LEFT|RIGHT)/body; `dry_run` and `allow_repost` booleans.
+ * Strict-decode unknown tool-call params straight into the normalized `CuratedSubmission`
+ * feature input (the tool-boundary seam — no intermediate wire DTO: the two boolean defaults
+ * are applied here, absent ⇒ false). Mirrors `decodePostParams`: submitting a guessed/partial
+ * review is a durable GitHub mutation, so ANY malformed field ⇒ null (whole-batch refusal).
+ * `pr` must be an int; `event` exactly one of the three flag spellings; `body` a string (EMPTY
+ * ALLOWED — the cold door owns the event-conditioned body rule and reports `bad_batch`); each
+ * `comments` row strict on path/line(int)/side(LEFT|RIGHT)/body; `dry_run` and `allow_repost`
+ * booleans.
  */
-export function decodeSubmitParams(params: unknown): SubmitParams | null {
+export function decodeSubmitParams(params: unknown): CuratedSubmission | null {
   const p = paramsOf(params);
   if (p === null) return null;
   const pr = numberParam(p, "pr");
@@ -101,10 +93,14 @@ export function decodeSubmitParams(params: unknown): SubmitParams | null {
   if (dryRun === null) return null;
   const allowRepost = booleanParam(p, "allow_repost");
   if (allowRepost === null) return null;
-  const result: SubmitParams = { pr, event, body };
+  const result: CuratedSubmission = {
+    pr,
+    event,
+    body,
+    dryRun: dryRun === true,
+    allowRepost: allowRepost === true,
+  };
   if (comments !== undefined) result.comments = comments;
-  if (dryRun !== undefined) result.dry_run = dryRun;
-  if (allowRepost !== undefined) result.allow_repost = allowRepost;
   return result;
 }
 
@@ -347,20 +343,12 @@ export function installCuratedSubmissionBindings(pi: ExtensionAPI): void {
           "bad_input",
         );
       }
-      const input: CuratedSubmission = {
-        pr: decoded.pr,
-        event: decoded.event,
-        body: decoded.body,
-        ...(decoded.comments !== undefined ? { comments: decoded.comments } : {}),
-        dryRun: decoded.dry_run === true,
-        allowRepost: decoded.allow_repost === true,
-      };
-      const outcome = await submitCuratedReview(input, {
+      const outcome = await submitCuratedReview(decoded, {
         submitter: createColdDoorReviewSubmitter(pi, ctx),
         gate: formalEventGateFor(ctx),
         session: openBranchWorkflowSession(pi, ctx),
       });
-      return renderSubmitOutcome(fail, input, outcome);
+      return renderSubmitOutcome(fail, decoded, outcome);
     },
   });
 }

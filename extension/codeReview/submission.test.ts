@@ -171,7 +171,7 @@ test("the resume guard refuses a repeat real post BEFORE the confirm and the sub
   });
   assert.equal(outcome.kind, "already_posted");
   assert.ok(outcome.kind === "already_posted");
-  assert.deepEqual(outcome.prior, { pr: 41, event: "comment", at: "2026-01-01T00:00:00Z" });
+  // The prior row's identity is user-visible evidence IN the message (no structural payload).
   assert.equal(
     outcome.message,
     "a comment review was already posted to PR #41 in this session " +
@@ -208,7 +208,7 @@ test("the guard refuses on the LAST matching ledger row (absence stays silent)",
     session: s,
   });
   assert.equal(outcome.kind, "already_posted");
-  assert.ok(outcome.kind === "already_posted" && outcome.prior.at === "t2");
+  assert.ok(outcome.kind === "already_posted" && /review_posts row at t2/.test(outcome.message));
 });
 
 test("bad_anchors renders the per-comment repair table into the policy message", async () => {
@@ -229,7 +229,7 @@ test("bad_anchors renders the per-comment repair table into the policy message",
   });
   assert.equal(outcome.kind, "bad_anchors");
   assert.ok(outcome.kind === "bad_anchors");
-  assert.deepEqual(outcome.invalid, invalid);
+  // The repair detail is user-visible IN the rendered table (no structural payload).
   assert.equal(
     outcome.message,
     "1 of 2 comment anchor(s) not in the PR diff — repair and retry\n" +
@@ -286,9 +286,9 @@ test("a real success applies record-review then append-review-post, in order", a
   assert.equal(outcome.record.comment_count, 2);
   assert.equal(outcome.record.mode, "review");
   assert.ok(!Number.isNaN(Date.parse(outcome.record.at)));
-  assert.deepEqual(outcome.row, { pr: 42, event: "comment", at: outcome.record.at });
   assert.deepEqual(s.lastReviewRecord(), outcome.record);
-  assert.deepEqual(s.reviewPosts(), [outcome.row]);
+  // The ledger-row session effect mirrors the record's pr/at (the row is not a return payload).
+  assert.deepEqual(s.reviewPosts(), [{ pr: 42, event: "comment", at: outcome.record.at }]);
 });
 
 test("the record falls back to the input pr and nulls when the envelope omits fields", async () => {

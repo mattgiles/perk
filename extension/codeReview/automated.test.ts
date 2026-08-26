@@ -250,7 +250,7 @@ test("an actionable post over an incomplete recorded wave still lands (coverage 
   assert.deepEqual(state.current, { state: "consumed" });
 });
 
-test("a recorded post threads expected_pr; success records last_pr_review and consumes", async () => {
+test("a recorded post threads the COMPLETE batch; success records last_pr_review and consumes", async () => {
   const state: ReviewPassHolder = {
     current: {
       state: "recorded",
@@ -261,9 +261,19 @@ test("a recorded post threads expected_pr; success records last_pr_review and co
     },
   };
   const deps = publishDeps(state);
-  const result = await publishAutomatedReview(post(), deps);
+  const comments = [{ path: "a.ts", line: 12, body: "fix this" }];
+  const fyi = ["a nit"];
+  const result = await publishAutomatedReview(post({ comments, fyi }), deps);
   assert.ok(result.kind === "posted");
-  assert.equal(deps.batches[0]?.expectedPr, 42, "the recorded wave binds the mutation");
+  // The WHOLE publisher batch — dropping summary/comments/fyi in the handoff would post a
+  // review without its findings while every field-by-field pin stayed green.
+  assert.deepEqual(deps.batches[0], {
+    verdict: "actionable",
+    summary: "issues",
+    comments,
+    fyi,
+    expectedPr: 42,
+  });
   assert.equal(result.record.pr, 42);
   assert.equal(result.record.verdict, "actionable");
   assert.deepEqual(result.record.angles, ["plan-fidelity", "tests", "ponytail"]);

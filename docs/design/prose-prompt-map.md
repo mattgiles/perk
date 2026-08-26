@@ -897,7 +897,7 @@ Human and agent review surfaces for gists, objectives, and plans.
 
 ### Pull-request review
 
-Automated, selector-driven, terminal, and browser PR-review families.
+Automated, terminal, and browser PR-review families.
 
 | Unit | Role | Audience | Canonical source | Consumed by |
 | --- | --- | --- | --- | --- |
