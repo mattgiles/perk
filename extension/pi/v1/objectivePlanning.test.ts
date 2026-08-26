@@ -6,22 +6,20 @@
 // unit-tested separately below.
 
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { basename, join } from "node:path";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { test } from "node:test";
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { planRefPath, writePlanRef } from "../../substrate/cache.ts";
+import {
+  createFakeSubagents,
+  type FakeSubagents,
+  waveScriptItems,
+} from "../../testing/fakeSubagents.ts";
 import { fakePerk, loadPerkSession, scaffoldRepo, spyInjections } from "../../testing/harness.ts";
 import {
   explorerLaneTask,
   OBJECTIVE_EXPLORER_REPORT_SCHEMA,
 } from "../../waves/objectiveExplorerWave.ts";
-import {
-  WAVE_RPC_PROTOCOL_VERSION,
-  WAVE_RPC_REPLY_EVENT_PREFIX,
-  WAVE_RPC_REQUEST_EVENT,
-} from "../../waves/rpcAdapter.ts";
 import {
   buildAddObjectiveNodeArgs,
   buildObjectiveNodeArgs,
@@ -693,11 +691,6 @@ test("decodeExploreParams: trim-then-refuse matrix (whitespace-only arms refuse 
   assert.equal(decodeExploreParams({ node: "2.3", description: "x", focus: "   " }), null);
 });
 
-/** The spawn params the fake responder observes (the tool-boundary threading assertions). */
-interface SpawnSink {
-  spawns: { workflowScript?: string; model?: string; outputSchema?: unknown }[];
-}
-
 /** A schema-valid explorer report the fake responder answers with. */
 const EXPLORER_REPORT = {
   node: "2.3",
@@ -709,81 +702,21 @@ const EXPLORER_REPORT = {
 };
 
 /**
- * A fake pi-subagents responder bound as a bus peer (the prReview.test.ts pattern): answers
- * ping/spawn on `pi.events` with the v1 envelope, writes a terminal `status.json` carrying one
- * schema-valid explorer report per lane into a real temp `asyncDir`, and emits the advertised
- * completion event. Each spawn's params land in `sink` ("pin the glue").
+ * The shared fake pi-subagents responder in dynamic mode: answer each lane in the
+ * module-rendered script with the schema-valid explorer report. Offline like everything here.
  */
-function fakeSubagentsResponder(sink: SpawnSink): (pi: ExtensionAPI) => void {
-  return (pi) => {
-    pi.events.on(WAVE_RPC_REQUEST_EVENT, (raw) => {
-      const request = raw as {
-        requestId: string;
-        method: string;
-        params?: { workflowScript?: string; model?: string; outputSchema?: unknown };
-      };
-      const reply = (payload: Record<string, unknown>): void => {
-        pi.events.emit(`${WAVE_RPC_REPLY_EVENT_PREFIX}${request.requestId}`, {
-          version: WAVE_RPC_PROTOCOL_VERSION,
-          requestId: request.requestId,
-          method: request.method,
-          ...payload,
-        });
-      };
-      if (request.method === "ping") {
-        reply({
-          success: true,
-          data: {
-            version: WAVE_RPC_PROTOCOL_VERSION,
-            methods: ["ping", "status", "spawn", "steer", "interrupt", "stop", "resume"],
-            capabilities: { asyncSpawn: true },
-            events: { asyncComplete: "subagent:async-complete" },
-            session: {},
-          },
-        });
-        return;
-      }
-      if (request.method === "spawn") {
-        if (request.params !== undefined) sink.spawns.push(request.params);
-        const script = request.params?.workflowScript ?? "";
-        const start = script.indexOf("runs.all(") + "runs.all(".length;
-        const end = script.indexOf(");\nreturn");
-        const lanes = JSON.parse(script.slice(start, end)) as Array<{ key: string }>;
-        const asyncDir = mkdtempSync(join(tmpdir(), "perk-explore-e2e-"));
-        writeFileSync(
-          join(asyncDir, "status.json"),
-          JSON.stringify({
-            runId: basename(asyncDir),
-            mode: "workflow",
-            state: "complete",
-            startedAt: 0,
-            workflow: {
-              value: lanes.map(({ key }) => ({
-                key,
-                ok: true,
-                error: null,
-                report: EXPLORER_REPORT,
-              })),
-            },
-          }),
-        );
-        reply({
-          success: true,
-          data: { text: "Started async run.", details: { asyncId: basename(asyncDir), asyncDir } },
-        });
-        pi.events.emit("subagent:async-complete", {
-          id: basename(asyncDir),
-          asyncDir,
-          state: "complete",
-        });
-        return;
-      }
-      reply({
-        success: false,
-        error: { code: "not_found", message: `fake responder rejects ${request.method}` },
-      });
-    });
-  };
+function explorerFake(): FakeSubagents {
+  return createFakeSubagents([
+    {
+      executeScript: async (script) =>
+        waveScriptItems(script).map(({ key }) => ({
+          key,
+          ok: true,
+          error: null,
+          report: EXPLORER_REPORT,
+        })),
+    },
+  ]);
 }
 
 test("tool: explore_objective_node end-to-end — trimmed params in the task, model threads, flow receipt", async () => {
@@ -795,11 +728,11 @@ test("tool: explore_objective_node end-to-end — trimmed params in the task, mo
     '[models.subagents]\nobjective-explorer = "test-explorer-model"\n',
     "utf8",
   );
-  const sink: SpawnSink = { spawns: [] };
+  const fake = explorerFake();
   const h = await loadPerkSession({
     cwd,
     env: { PERK_RUN_ID: "01RID" },
-    extraExtensions: [fakeSubagentsResponder(sink)],
+    extraExtensions: [fake.extension],
   });
   try {
     const result = await h.invokeTool("explore_objective_node", {
@@ -827,13 +760,14 @@ test("tool: explore_objective_node end-to-end — trimmed params in the task, mo
     assert.match(text, /```json/);
     // Pin the glue: the configured model and the module-owned schema reached the actual spawn,
     // and the TRIMMED params entered the code-owned lane task.
-    assert.equal(sink.spawns.length, 1);
-    assert.equal(sink.spawns[0]?.model, "test-explorer-model");
-    assert.deepEqual(sink.spawns[0]?.outputSchema, OBJECTIVE_EXPLORER_REPORT_SCHEMA);
-    const script = sink.spawns[0]?.workflowScript ?? "";
-    const lanes = JSON.parse(
-      script.slice(script.indexOf("runs.all(") + "runs.all(".length, script.indexOf(");\nreturn")),
-    ) as Array<{ key: string; agent: string; task: string }>;
+    assert.equal(fake.spawns.length, 1);
+    assert.equal(fake.spawns[0]?.model, "test-explorer-model");
+    assert.deepEqual(fake.spawns[0]?.outputSchema, OBJECTIVE_EXPLORER_REPORT_SCHEMA);
+    const lanes = waveScriptItems(String(fake.spawns[0]?.workflowScript ?? "")) as Array<{
+      key: string;
+      agent: string;
+      task: string;
+    }>;
     assert.equal(lanes[0]?.agent, "perk.objective-explorer");
     assert.equal(
       lanes[0]?.task,
@@ -846,11 +780,11 @@ test("tool: explore_objective_node end-to-end — trimmed params in the task, mo
 
 test("tool: explore_objective_node — bad input refuses whole before any spawn", async () => {
   const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
-  const sink: SpawnSink = { spawns: [] };
+  const fake = explorerFake();
   const h = await loadPerkSession({
     cwd,
     env: { PERK_RUN_ID: "01RID" },
-    extraExtensions: [fakeSubagentsResponder(sink)],
+    extraExtensions: [fake.extension],
   });
   try {
     for (const params of [
@@ -864,7 +798,7 @@ test("tool: explore_objective_node — bad input refuses whole before any spawn"
       assert.equal(details.ok, false);
       assert.equal(details.error_type, "bad_input");
     }
-    assert.equal(sink.spawns.length, 0, "no spawn on a refused decode");
+    assert.equal(fake.spawns.length, 0, "no spawn on a refused decode");
   } finally {
     h.dispose();
   }

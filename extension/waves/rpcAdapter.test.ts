@@ -8,7 +8,7 @@ import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { WAVE_ACCEPTANCE, type WaveBus, type WaveSpawnParams } from "./reportWave.ts";
+import { WAVE_ACCEPTANCE, type WaveBus, type WaveSpawnParams } from "./transport.ts";
 import {
   createRpcWaveAdapter,
   WAVE_RPC_PING_TIMEOUT_MS,

@@ -10,9 +10,10 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
 import { createMemoryWaveAdapter } from "./memoryAdapter.ts";
-import { WAVE_ACCEPTANCE } from "./reportWave.ts";
+import { WAVE_ACCEPTANCE } from "./transport.ts";
+import { waveScriptItems } from "../testing/fakeSubagents.ts";
 import {
-  CLASSIFY_LANE_KEY,
+  CLASSIFY_ASSIGNMENT_KEY,
   REVIEW_CLASSIFIER_FLOW,
   REVIEW_CLASSIFIER_REPORT_SCHEMA,
   runReviewClassifierWave,
@@ -31,7 +32,7 @@ function classifierReport(): unknown {
 function okAggregate(): { state: string; value: unknown } {
   return {
     state: "complete",
-    value: [{ key: CLASSIFY_LANE_KEY, ok: true, error: null, report: classifierReport() }],
+    value: [{ key: CLASSIFY_ASSIGNMENT_KEY, ok: true, error: null, report: classifierReport() }],
   };
 }
 
@@ -107,7 +108,7 @@ test("runReviewClassifierWave: ONE lane with the fixed flow/key/agent/task, modu
   assert.equal(result.complete, true);
   assert.deepEqual(
     result.reports.map((r) => r.key),
-    [CLASSIFY_LANE_KEY],
+    [CLASSIFY_ASSIGNMENT_KEY],
   );
   assert.equal(adapter.calls.spawn.length, 1);
   const spawn = adapter.calls.spawn[0];
@@ -121,10 +122,7 @@ test("runReviewClassifierWave: ONE lane with the fixed flow/key/agent/task, modu
   assert.equal(spawn.timeoutMs, 1_234);
   // The single lane, byte-pinned: the fixed code-owned task carries NOTHING model-relayed
   // (the child fetches the feedback itself via `perk pr feedback --json`).
-  const script = spawn.workflowScript;
-  const start = script.indexOf("runs.all(") + "runs.all(".length;
-  const end = script.indexOf(");\nreturn");
-  const items = JSON.parse(script.slice(start, end)) as unknown[];
+  const items = waveScriptItems(spawn.workflowScript);
   assert.deepEqual(items, [
     {
       key: "classify",
@@ -150,7 +148,7 @@ test("runReviewClassifierWave: a failed lane is incomplete under strict (no retr
     aggregate: {
       state: "complete",
       value: [
-        { key: CLASSIFY_LANE_KEY, ok: false, error: "perk pr feedback failed", report: null },
+        { key: CLASSIFY_ASSIGNMENT_KEY, ok: false, error: "perk pr feedback failed", report: null },
       ],
     },
   });
@@ -158,7 +156,7 @@ test("runReviewClassifierWave: a failed lane is incomplete under strict (no retr
   assert.equal(result.complete, false);
   assert.deepEqual(result.reports, []);
   assert.deepEqual(result.failures, [
-    { key: CLASSIFY_LANE_KEY, reason: "lane-failed", detail: "perk pr feedback failed" },
+    { key: CLASSIFY_ASSIGNMENT_KEY, reason: "lane-failed", detail: "perk pr feedback failed" },
   ]);
   assert.equal(adapter.calls.spawn.length, 1);
 });

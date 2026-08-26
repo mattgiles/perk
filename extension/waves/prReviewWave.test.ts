@@ -5,9 +5,10 @@
 
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { waveScriptItems } from "../testing/fakeSubagents.ts";
 import { createMemoryWaveAdapter } from "./memoryAdapter.ts";
 import {
-  buildPrReviewLanes,
+  buildPrReviewAssignments,
   directiveSuffix,
   isPrReviewAngle,
   PR_REVIEW_ANGLES,
@@ -47,7 +48,7 @@ function failedEntry(key: string, error: string): unknown {
   return { key, ok: false, error, report: null };
 }
 
-/** Parse the lane items back out of a rendered wave script (the reportWave.test.ts idiom). */
+/** Parse the lane items back out of a rendered wave script (the shared slice helper). */
 function laneItemsOf(script: string): Array<{
   key: string;
   agent: string;
@@ -56,10 +57,7 @@ function laneItemsOf(script: string): Array<{
   phase?: string;
   skill?: string;
 }> {
-  const start = script.indexOf("runs.all(") + "runs.all(".length;
-  const end = script.indexOf(");\nreturn");
-  assert.notEqual(end, -1, "script lost its `);` + return tail");
-  return JSON.parse(script.slice(start, end)) as Array<{
+  return waveScriptItems(script) as Array<{
     key: string;
     agent: string;
     task: string;
@@ -191,10 +189,10 @@ test("isPrReviewAngle narrows the seven slugs and rejects prototype names", () =
   assert.equal(isPrReviewAngle("toString"), false);
 });
 
-test("directiveSuffix is byte-identical to the suffix buildPrReviewLanes appends (and empty unset)", () => {
+test("directiveSuffix is byte-identical to the suffix buildPrReviewAssignments appends (and empty unset)", () => {
   assert.equal(directiveSuffix(undefined), "");
   const directive = "focus on the decode edges";
-  const [lane] = buildPrReviewLanes(["plan-fidelity"], 42, directive);
+  const [lane] = buildPrReviewAssignments(["plan-fidelity"], 42, directive);
   assert.ok(lane);
   assert.equal(
     lane.task,

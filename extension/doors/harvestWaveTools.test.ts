@@ -12,6 +12,7 @@ import { test } from "node:test";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { runScratchDir } from "../substrate/cache.ts";
 import { PERK_TOOLS, READ_ONLY_TOOLS, STAGE_TOOLS } from "../substrate/toolGating.ts";
+import { createFakeSubagents, type FakeSubagents } from "../testing/fakeSubagents.ts";
 import { loadPerkSession, scaffoldRepo } from "../testing/harness.ts";
 import {
   HARVEST_MANIFEST_FILENAME,
@@ -19,7 +20,6 @@ import {
   type HarvestManifest,
 } from "../waves/harvestWave.ts";
 import { createMemoryWaveAdapter } from "../waves/memoryAdapter.ts";
-import { WAVE_RPC_REPLY_EVENT_PREFIX, WAVE_RPC_REQUEST_EVENT } from "../waves/rpcAdapter.ts";
 import {
   executeHarvestWave,
   type HarvestLaneReport,
@@ -158,45 +158,9 @@ test("census: run_harvest_wave rides PERK_TOOLS + READ_ONLY_TOOLS and NO stage l
 
 // ----------------------------------------------------------- the pre-spawn refusal ladder
 
-/** The fake pi-subagents RPC responder (the doors/learn.test.ts pattern). */
-function fakeSubagentsRpc(
-  aggregate: unknown[],
-  spawns: Record<string, unknown>[] = [],
-): (pi: ExtensionAPI) => void {
-  return (pi) => {
-    pi.events.on(WAVE_RPC_REQUEST_EVENT, (raw) => {
-      const req = raw as { requestId?: unknown; method?: unknown };
-      const reply = (payload: Record<string, unknown>): void => {
-        pi.events.emit(`${WAVE_RPC_REPLY_EVENT_PREFIX}${String(req.requestId)}`, {
-          version: 1,
-          requestId: req.requestId,
-          method: req.method,
-          ...payload,
-        });
-      };
-      if (req.method === "ping") {
-        reply({
-          success: true,
-          data: {
-            capabilities: { asyncSpawn: true },
-            methods: ["ping", "spawn", "stop"],
-            events: { asyncComplete: "subagent:async-complete" },
-          },
-        });
-        return;
-      }
-      if (req.method === "spawn") {
-        spawns.push((raw as { params?: unknown }).params as Record<string, unknown>);
-        const asyncDir = scaffoldRepo();
-        writeFileSync(
-          join(asyncDir, "status.json"),
-          JSON.stringify({ state: "complete", workflow: { value: aggregate } }),
-        );
-        reply({ success: true, data: { text: "ok", details: { asyncId: "wave-1", asyncDir } } });
-        pi.events.emit("subagent:async-complete", { id: "wave-1", asyncDir });
-      }
-    });
-  };
+/** The shared fake pi-subagents responder over one staged complete aggregate. */
+function fakeSubagentsRpc(aggregate: unknown[]): FakeSubagents {
+  return createFakeSubagents([{ aggregate: { state: "complete", value: aggregate } }]);
 }
 
 async function refusalArm(
@@ -204,11 +168,11 @@ async function refusalArm(
   params: unknown,
   opts: { env?: Record<string, string | undefined> } = {},
 ): Promise<{ text: string; error_type?: string; spawns: Record<string, unknown>[] }> {
-  const spawns: Record<string, unknown>[] = [];
+  const fake = fakeSubagentsRpc([]);
   const h = await loadPerkSession({
     cwd,
     env: { PERK_RUN_ID: RUN_ID, ...(opts.env ?? {}) },
-    extraExtensions: [fakeSubagentsRpc([], spawns)],
+    extraExtensions: [fake.extension],
   });
   try {
     const result = await h.invokeTool("run_harvest_wave", params);
@@ -217,7 +181,7 @@ async function refusalArm(
     return {
       text: result.content[0]?.text ?? "",
       ...(details.error_type !== undefined ? { error_type: details.error_type } : {}),
-      spawns,
+      spawns: fake.spawns,
     };
   } finally {
     h.dispose();
@@ -591,11 +555,11 @@ test("tool e2e: typed reports flow through, and the configured model rides the s
     },
     { key: "workflow-1", ok: false, error: "analyst crashed", report: null },
   ];
-  const spawns: Record<string, unknown>[] = [];
+  const fake = fakeSubagentsRpc(aggregate);
   const h = await loadPerkSession({
     cwd,
     env: { PERK_RUN_ID: RUN_ID },
-    extraExtensions: [fakeSubagentsRpc(aggregate, spawns)],
+    extraExtensions: [fake.extension],
   });
   try {
     const result = await h.invokeTool("run_harvest_wave", { manifest_path: manifestPath });
@@ -613,8 +577,8 @@ test("tool e2e: typed reports flow through, and the configured model rides the s
       [["workflow-1", "lane-failed"]],
     );
     // The "pin the glue" rule: the configured model reaches the real spawn params.
-    assert.equal(spawns.length, 1);
-    const spawn = spawns[0] as { workflowScript?: string; model?: string };
+    assert.equal(fake.spawns.length, 1);
+    const spawn = fake.spawns[0] as { workflowScript?: string; model?: string };
     assert.equal(spawn.model, "faux/harvester-model");
     assert.match(spawn.workflowScript ?? "", /perk\.harvest-analyst/);
     assert.ok(spawn.workflowScript?.includes(manifestPath), "the task carries the BOUND path");

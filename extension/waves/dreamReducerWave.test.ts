@@ -12,6 +12,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
+import { waveScriptItems } from "../testing/fakeSubagents.ts";
 import {
   composeDreamBundle,
   DREAM_ANALYSES_FILENAME,
@@ -192,10 +193,13 @@ function reducerReportOf(
 function spawnedLaneItems(
   script: string,
 ): { key: string; agent: string; task: string; label: string; phase?: string }[] {
-  const start = script.indexOf("runs.all(") + "runs.all(".length;
-  const end = script.indexOf(");\nreturn");
-  assert.ok(start > "runs.all(".length - 1 && end > start, "the rendered script shape");
-  return JSON.parse(script.slice(start, end));
+  return waveScriptItems(script) as {
+    key: string;
+    agent: string;
+    task: string;
+    label: string;
+    phase?: string;
+  }[];
 }
 
 // -------------------------------------------------------------------------- the bundle

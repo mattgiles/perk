@@ -10,6 +10,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join, sep } from "node:path";
 import { test } from "node:test";
+import { waveScriptItems } from "../testing/fakeSubagents.ts";
 import {
   DREAM_ANALYST_CAPS,
   DREAM_ANALYST_REPORT_SCHEMA,
@@ -120,10 +121,13 @@ function decoded(raw: unknown, manifestPath: string = MANIFEST_PATH): DreamManif
 function spawnedLaneItems(
   script: string,
 ): { key: string; agent: string; task: string; label: string; phase?: string }[] {
-  const start = script.indexOf("runs.all(") + "runs.all(".length;
-  const end = script.indexOf(");\nreturn");
-  assert.ok(start > "runs.all(".length - 1 && end > start, "the rendered script shape");
-  return JSON.parse(script.slice(start, end));
+  return waveScriptItems(script) as {
+    key: string;
+    agent: string;
+    task: string;
+    label: string;
+    phase?: string;
+  }[];
 }
 
 const CORPUS = new Set([...LANE_ONE_DOCS, "docs/learned/workflow/report-waves.md"]);

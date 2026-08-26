@@ -21,6 +21,7 @@ import { runScratchDir } from "../substrate/cache.ts";
 import { digestSessionData } from "../substrate/sessionData.ts";
 import { PERK_TOOLS, READ_ONLY_TOOLS, STAGE_TOOLS } from "../substrate/toolGating.ts";
 import { dreamRepoCommit, initDreamRepo } from "../testing/dreamFixtures.ts";
+import { createFakeSubagents, type FakeSubagents } from "../testing/fakeSubagents.ts";
 import { loadPerkSession, scaffoldRepo } from "../testing/harness.ts";
 import {
   composeDreamBundle,
@@ -36,7 +37,6 @@ import {
   decodeDreamManifest,
 } from "../waves/dreamWave.ts";
 import { createMemoryWaveAdapter } from "../waves/memoryAdapter.ts";
-import { WAVE_RPC_REPLY_EVENT_PREFIX, WAVE_RPC_REQUEST_EVENT } from "../waves/rpcAdapter.ts";
 import {
   type DreamBundleMarkers,
   type DreamWaveOk,
@@ -371,60 +371,23 @@ function scaffoldDreamRepo(opts: { manifest?: string | false } = {}): {
   return { cwd, manifestPath };
 }
 
-/** The fake pi-subagents RPC responder with a PER-SPAWN aggregate FIFO (the two-wave door). */
-function fakeSubagentsRpc(
-  aggregates: unknown[][],
-  spawns: Record<string, unknown>[] = [],
-): (pi: ExtensionAPI) => void {
-  return (pi) => {
-    let spawnCount = 0;
-    pi.events.on(WAVE_RPC_REQUEST_EVENT, (raw) => {
-      const req = raw as { requestId?: unknown; method?: unknown };
-      const reply = (payload: Record<string, unknown>): void => {
-        pi.events.emit(`${WAVE_RPC_REPLY_EVENT_PREFIX}${String(req.requestId)}`, {
-          version: 1,
-          requestId: req.requestId,
-          method: req.method,
-          ...payload,
-        });
-      };
-      if (req.method === "ping") {
-        reply({
-          success: true,
-          data: {
-            capabilities: { asyncSpawn: true },
-            methods: ["ping", "spawn", "stop"],
-            events: { asyncComplete: "subagent:async-complete" },
-          },
-        });
-        return;
-      }
-      if (req.method === "spawn") {
-        spawns.push((raw as { params?: unknown }).params as Record<string, unknown>);
-        const aggregate = aggregates[spawnCount] ?? [];
-        spawnCount += 1;
-        const asyncId = `wave-${spawnCount}`;
-        const asyncDir = scaffoldRepo();
-        writeFileSync(
-          join(asyncDir, "status.json"),
-          JSON.stringify({ state: "complete", workflow: { value: aggregate } }),
-        );
-        reply({ success: true, data: { text: "ok", details: { asyncId, asyncDir } } });
-        pi.events.emit("subagent:async-complete", { id: asyncId, asyncDir });
-      }
-    });
-  };
+/** The shared fake pi-subagents responder with a PER-SPAWN aggregate FIFO (the two-wave door). */
+function fakeSubagentsRpc(aggregates: unknown[][]): FakeSubagents {
+  return createFakeSubagents(
+    aggregates.map((value) => ({ aggregate: { state: "complete", value } })),
+  );
 }
 
 async function refusalArm(
   cwd: string,
   opts: { env?: Record<string, string | undefined> } = {},
 ): Promise<{ text: string; error_type?: string; spawns: Record<string, unknown>[] }> {
-  const spawns: Record<string, unknown>[] = [];
+  const fake = fakeSubagentsRpc([]);
+  const spawns = fake.spawns;
   const h = await loadPerkSession({
     cwd,
     env: { PERK_RUN_ID: RUN_ID, ...(opts.env ?? {}) },
-    extraExtensions: [fakeSubagentsRpc([], spawns)],
+    extraExtensions: [fake.extension],
   });
   try {
     const result = await h.invokeTool("run_dream_wave", {});
@@ -1185,11 +1148,12 @@ test("tool e2e: both configured models ride their wave's spawn; analyst complete
     error: null,
     report: reducerReportOf(angle),
   }));
-  const spawns: Record<string, unknown>[] = [];
+  const fake = fakeSubagentsRpc([analystAggregate, reducerAggregate]);
+  const spawns = fake.spawns;
   const h = await loadPerkSession({
     cwd,
     env: { PERK_RUN_ID: RUN_ID },
-    extraExtensions: [fakeSubagentsRpc([analystAggregate, reducerAggregate], spawns)],
+    extraExtensions: [fake.extension],
   });
   try {
     const result = await h.invokeTool("run_dream_wave", {});
@@ -1277,7 +1241,7 @@ test("tool e2e: repository drift during the wave is caught by the REAL default b
   const h = await loadPerkSession({
     cwd,
     env: { PERK_RUN_ID: RUN_ID },
-    extraExtensions: [fakeSubagentsRpc([analystAggregate, reducerAggregate])],
+    extraExtensions: [fakeSubagentsRpc([analystAggregate, reducerAggregate]).extension],
   });
   try {
     const result = await h.invokeTool("run_dream_wave", {});

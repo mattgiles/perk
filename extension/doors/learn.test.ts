@@ -3,15 +3,13 @@
 // the marker-clear. Driven through a REAL bound AgentSession via the T1 harness.
 
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { markerPath, PENDING_LEARN, setMarker, writePlanRef } from "../substrate/cache.ts";
+import { createFakeSubagents, type FakeSubagents } from "../testing/fakeSubagents.ts";
 import { fakePerk, loadPerkSession, scaffoldRepo } from "../testing/harness.ts";
 import { createMemoryWaveAdapter } from "../waves/memoryAdapter.ts";
-import { WAVE_RPC_REPLY_EVENT_PREFIX, WAVE_RPC_REQUEST_EVENT } from "../waves/rpcAdapter.ts";
 import { executeLearnWave, learnGuidance, learnOrchestrateGuidance } from "./learn.ts";
 
 const PLAN_REF = {
@@ -481,50 +479,9 @@ test("tool: run_learn_wave bad_input arms (params, manifest, angle policy)", asy
   }
 });
 
-/**
- * A fake pi-subagents RPC responder (the fakePlannotator pattern): answers ping with the
- * advertised capabilities, answers spawn by materializing a durable status.json aggregate in a
- * temp asyncDir, then emits the async-complete event. Captured spawn params land in `spawns`.
- */
-function fakeSubagentsRpc(
-  aggregate: unknown[],
-  spawns: Record<string, unknown>[] = [],
-): (pi: ExtensionAPI) => void {
-  return (pi) => {
-    pi.events.on(WAVE_RPC_REQUEST_EVENT, (raw) => {
-      const req = raw as { requestId?: unknown; method?: unknown };
-      const reply = (payload: Record<string, unknown>): void => {
-        pi.events.emit(`${WAVE_RPC_REPLY_EVENT_PREFIX}${String(req.requestId)}`, {
-          version: 1,
-          requestId: req.requestId,
-          method: req.method,
-          ...payload,
-        });
-      };
-      if (req.method === "ping") {
-        reply({
-          success: true,
-          data: {
-            capabilities: { asyncSpawn: true },
-            methods: ["ping", "spawn", "stop"],
-            events: { asyncComplete: "subagent:async-complete" },
-          },
-        });
-        return;
-      }
-      if (req.method === "spawn") {
-        const params = (raw as { params?: unknown }).params;
-        spawns.push(params as Record<string, unknown>);
-        const asyncDir = mkdtempSync(join(tmpdir(), "perk-learn-wave-"));
-        writeFileSync(
-          join(asyncDir, "status.json"),
-          JSON.stringify({ state: "complete", workflow: { value: aggregate } }),
-        );
-        reply({ success: true, data: { text: "ok", details: { asyncId: "wave-1", asyncDir } } });
-        pi.events.emit("subagent:async-complete", { id: "wave-1", asyncDir });
-      }
-    });
-  };
+/** The shared fake pi-subagents responder over one staged complete aggregate. */
+function fakeSubagentsRpc(aggregate: unknown[]): FakeSubagents {
+  return createFakeSubagents([{ aggregate: { state: "complete", value: aggregate } }]);
 }
 
 test("tool: run_learn_wave end-to-end over the RPC seam — typed reports + explicit skipped angles", async () => {
@@ -546,7 +503,7 @@ test("tool: run_learn_wave end-to-end over the RPC seam — typed reports + expl
     { key: "session-deviations", ok: true, error: null, report },
     { key: "existing-docs", ok: false, error: "analyst crashed", report: null },
   ];
-  const h = await loadPerkSession({ cwd, extraExtensions: [fakeSubagentsRpc(aggregate)] });
+  const h = await loadPerkSession({ cwd, extraExtensions: [fakeSubagentsRpc(aggregate).extension] });
   try {
     const result = await h.invokeTool("run_learn_wave", {
       bundle_dir: bundleDir,
@@ -578,7 +535,7 @@ test("tool: run_learn_wave end-to-end over the RPC seam — typed reports + expl
     assert.equal(attempt?.flow, "learn");
     assert.equal(attempt?.attempt, 1);
     assert.deepEqual(attempt?.requestedKeys, ["session-deviations", "existing-docs"]);
-    assert.equal(attempt?.runId, "wave-1");
+    assert.match(String(attempt?.runId), /^perk-fake-subagents-/, "the spawned run's identity");
     assert.equal(attempt?.state, "complete");
     assert.deepEqual(attempt?.children, []);
     const text = result.content[0]?.text ?? "";
@@ -605,17 +562,17 @@ test("tool: run_learn_wave resolves [models.subagents] learn-analyst onto the wa
     { key: "session-deviations", ok: false, error: "x", report: null },
     { key: "existing-docs", ok: false, error: "x", report: null },
   ];
-  const spawns: Record<string, unknown>[] = [];
-  const h = await loadPerkSession({ cwd, extraExtensions: [fakeSubagentsRpc(aggregate, spawns)] });
+  const fake = fakeSubagentsRpc(aggregate);
+  const h = await loadPerkSession({ cwd, extraExtensions: [fake.extension] });
   try {
     const result = await h.invokeTool("run_learn_wave", {
       bundle_dir: bundleDir,
       angles: TWO_ANGLES,
     });
     assert.equal((result.details as { ok: boolean }).ok, true);
-    assert.equal(spawns.length, 1);
+    assert.equal(fake.spawns.length, 1);
     assert.equal(
-      spawns[0]?.model,
+      fake.spawns[0]?.model,
       "faux/analyst-model",
       "the configured analyst model must ride the spawn as the workflow-level default",
     );

@@ -9,14 +9,15 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
 import { createMemoryWaveAdapter } from "./memoryAdapter.ts";
+import { waveScriptItems } from "../testing/fakeSubagents.ts";
 import {
-  EXPLORE_LANE_KEY,
+  EXPLORE_ASSIGNMENT_KEY,
   explorerLaneTask,
   OBJECTIVE_EXPLORER_FLOW,
   OBJECTIVE_EXPLORER_REPORT_SCHEMA,
   runObjectiveExplorerWave,
 } from "./objectiveExplorerWave.ts";
-import { WAVE_ACCEPTANCE } from "./reportWave.ts";
+import { WAVE_ACCEPTANCE } from "./transport.ts";
 
 /** A schema-shaped explorer report (the engine already validated it — shape only matters here). */
 function explorerReport(): unknown {
@@ -33,7 +34,7 @@ function explorerReport(): unknown {
 function okAggregate(): { state: string; value: unknown } {
   return {
     state: "complete",
-    value: [{ key: EXPLORE_LANE_KEY, ok: true, error: null, report: explorerReport() }],
+    value: [{ key: EXPLORE_ASSIGNMENT_KEY, ok: true, error: null, report: explorerReport() }],
   };
 }
 
@@ -124,7 +125,7 @@ test("runObjectiveExplorerWave: ONE lane with the fixed flow/key/agent, module c
   assert.equal(result.complete, true);
   assert.deepEqual(
     result.reports.map((r) => r.key),
-    [EXPLORE_LANE_KEY],
+    [EXPLORE_ASSIGNMENT_KEY],
   );
   assert.equal(adapter.calls.spawn.length, 1);
   const spawn = adapter.calls.spawn[0];
@@ -136,10 +137,7 @@ test("runObjectiveExplorerWave: ONE lane with the fixed flow/key/agent, module c
   assert.equal(spawn.outputSchema, OBJECTIVE_EXPLORER_REPORT_SCHEMA);
   assert.equal(spawn.model, "anthropic/claude-haiku-4-5");
   assert.equal(spawn.timeoutMs, 1_234);
-  const script = spawn.workflowScript;
-  const start = script.indexOf("runs.all(") + "runs.all(".length;
-  const end = script.indexOf(");\nreturn");
-  const items = JSON.parse(script.slice(start, end)) as unknown[];
+  const items = waveScriptItems(spawn.workflowScript);
   assert.deepEqual(items, [
     {
       key: "explore",
@@ -164,7 +162,7 @@ test("runObjectiveExplorerWave: a failed lane is incomplete under strict (no ret
   const adapter = createMemoryWaveAdapter({
     aggregate: {
       state: "complete",
-      value: [{ key: EXPLORE_LANE_KEY, ok: false, error: "explorer exploded", report: null }],
+      value: [{ key: EXPLORE_ASSIGNMENT_KEY, ok: false, error: "explorer exploded", report: null }],
     },
   });
   const result = await runObjectiveExplorerWave(adapter, {
@@ -174,7 +172,7 @@ test("runObjectiveExplorerWave: a failed lane is incomplete under strict (no ret
   assert.equal(result.complete, false);
   assert.deepEqual(result.reports, []);
   assert.deepEqual(result.failures, [
-    { key: EXPLORE_LANE_KEY, reason: "lane-failed", detail: "explorer exploded" },
+    { key: EXPLORE_ASSIGNMENT_KEY, reason: "lane-failed", detail: "explorer exploded" },
   ]);
   assert.equal(adapter.calls.spawn.length, 1);
 });

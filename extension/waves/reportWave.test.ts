@@ -1,5 +1,6 @@
 // The report-wave module's own suite: the exact rendered-script pin (the tested workflowScript
-// is the node's headline artifact), the hostile-task embedding proof, and the full runner
+// is the node's headline artifact — observed through the adapter seam's spawn params, since the
+// renderer is module-private), the hostile-task embedding proof, and the full runner
 // normalization matrix driven through the in-memory adapter — every `WaveFailureReason` arm plus
 // both completeness policies, with zero event buses, child processes, or temp dirs. The attempt
 // receipts get their own matrix: one receipt per terminal arm, lane-agent enrichment, and the
@@ -7,21 +8,25 @@
 
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { createMemoryWaveAdapter } from "./memoryAdapter.ts";
+import { waveScriptItems } from "../testing/fakeSubagents.ts";
+import { createMemoryWaveAdapter, type MemoryWaveAdapter } from "./memoryAdapter.ts";
 import { PONYTAIL_CORE_SKILL } from "./ponytail.ts";
 import {
-  renderWaveScript,
+  type ReportAssignment,
   runReportWave,
   startReportWave,
-  startWaveScript,
   toAttemptReceipt,
-  WAVE_ACCEPTANCE,
-  WAVE_TIMEOUT_MS,
-  type WaveChildReceipt,
-  type ReportAssignment,
-  type WaveScriptSpec,
   type WaveSpec,
 } from "./reportWave.ts";
+import {
+  startWaveScript,
+  WAVE_ACCEPTANCE,
+  WAVE_TIMEOUT_MS,
+  type WaveAdapter,
+  type WaveChildReceipt,
+  type WaveCompletion,
+  type WaveScriptSpec,
+} from "./transport.ts";
 
 const ASSIGNMENTS: ReportAssignment[] = [
   {
@@ -55,10 +60,8 @@ function okEntry(key: string, report: unknown): unknown {
   return { key, ok: true, error: null, report };
 }
 
-// ------------------------------------------------------------------------------ the renderer
-
-test("renderWaveScript pins the exact two-lane script", () => {
-  const expected = `const reports = await runs.all([
+/** The exact rendered script for `ASSIGNMENTS` — the module's headline artifact, byte-pinned. */
+const TWO_ASSIGNMENT_SCRIPT = `const reports = await runs.all([
   {
     "key": "plan-fidelity",
     "agent": "perk.pr-reviewer",
@@ -75,40 +78,57 @@ test("renderWaveScript pins the exact two-lane script", () => {
   }
 ]);
 return reports.map(({key, ok, error, structuredOutput}) => ({key, ok, error: error ?? null, report: structuredOutput ?? null}));`;
-  assert.equal(renderWaveScript(ASSIGNMENTS), expected);
+
+const PREFLIGHT_OK = async (): Promise<{ ok: true }> => ({ ok: true });
+
+/**
+ * Render through the seam: the renderer is module-private, so the script bytes are observed the
+ * only way production can — as the spawned `workflowScript` on the adapter's spawn params.
+ */
+async function renderedScript(overrides: Partial<WaveSpec>): Promise<string> {
+  const adapter = createMemoryWaveAdapter({ aggregate: { state: "complete", value: [] } });
+  await runReportWave(adapter, makeSpec({ completeness: "best-effort", ...overrides }));
+  const script = adapter.calls.spawn[0]?.workflowScript;
+  assert.ok(script !== undefined, "the wave spawned no script");
+  return script;
+}
+
+// ---------------------------------------------------- the rendered script (through the seam)
+
+test("the wave renders the exact two-assignment script", async () => {
+  assert.equal(await renderedScript({}), TWO_ASSIGNMENT_SCRIPT);
 });
 
-test("renderWaveScript keeps hostile task text inside the array literal", () => {
+test("the rendered script keeps hostile task text inside the array literal", async () => {
   const hostile = `end"}]); process.exit(1); //\n\`rm -rf ~\` \${process.env.HOME} \\" done`;
-  const script = renderWaveScript([
-    { key: "hostile", agent: "perk.pr-reviewer", task: hostile },
-    { key: "tame", agent: "perk.pr-reviewer", task: "review calmly" },
-  ]);
+  const script = await renderedScript({
+    assignments: [
+      { key: "hostile", agent: "perk.pr-reviewer", task: hostile },
+      { key: "tame", agent: "perk.pr-reviewer", task: "review calmly" },
+    ],
+  });
   // The array literal is exactly the JSON between `runs.all(` and the closing `);` before the
   // return line — parse it back and prove the hostile text arrived intact as DATA.
-  const start = script.indexOf("runs.all(") + "runs.all(".length;
-  const end = script.indexOf(");\nreturn");
-  assert.notEqual(end, -1, "script lost its `);` + return tail");
-  const items = JSON.parse(script.slice(start, end)) as Array<{ key: string; task: string }>;
+  const items = waveScriptItems(script) as Array<{ key: string; task: string }>;
   assert.equal(items.length, 2);
   assert.equal(items[0]?.task, hostile);
   assert.equal(items[1]?.task, "review calmly");
 });
 
-test("renderWaveScript renders a per-lane outputSchema on exactly the lanes that carry one", () => {
+test("the rendered script carries a per-assignment outputSchema on exactly the assignments that carry one", async () => {
   const laneSchema = { type: "object", properties: { angle: { enum: ["custom-scope"] } } };
-  const script = renderWaveScript([
-    {
-      key: "custom-scope",
-      agent: "perk.pr-reviewer",
-      task: "review the scope",
-      outputSchema: laneSchema,
-    },
-    { key: "plain", agent: "perk.pr-reviewer", task: "review plainly" },
-  ]);
-  const start = script.indexOf("runs.all(") + "runs.all(".length;
-  const end = script.indexOf(");\nreturn");
-  const items = JSON.parse(script.slice(start, end)) as Array<Record<string, unknown>>;
+  const script = await renderedScript({
+    assignments: [
+      {
+        key: "custom-scope",
+        agent: "perk.pr-reviewer",
+        task: "review the scope",
+        outputSchema: laneSchema,
+      },
+      { key: "plain", agent: "perk.pr-reviewer", task: "review plainly" },
+    ],
+  });
+  const items = waveScriptItems(script);
   assert.deepEqual(items[0]?.outputSchema, laneSchema);
   assert.equal(
     "outputSchema" in (items[1] ?? {}),
@@ -117,40 +137,48 @@ test("renderWaveScript renders a per-lane outputSchema on exactly the lanes that
   );
 });
 
-test("renderWaveScript serializes opted-in skill but never required-skill metadata", () => {
-  const script = renderWaveScript([
-    {
-      key: "ponytail",
-      agent: "perk.pr-reviewer",
-      task: "review minimally",
-      skill: "ponytail",
-      requiredSkill: PONYTAIL_CORE_SKILL,
-    },
-    { key: "plain", agent: "perk.pr-reviewer", task: "review plainly" },
-  ]);
-  const start = script.indexOf("runs.all(") + "runs.all(".length;
-  const end = script.indexOf(");\nreturn");
-  const items = JSON.parse(script.slice(start, end)) as Array<Record<string, unknown>>;
+test("the rendered script serializes opted-in skill but never required-skill metadata", async () => {
+  const script = await renderedScript({
+    assignments: [
+      {
+        key: "ponytail",
+        agent: "perk.pr-reviewer",
+        task: "review minimally",
+        skill: "ponytail",
+        requiredSkill: PONYTAIL_CORE_SKILL,
+      },
+      { key: "plain", agent: "perk.pr-reviewer", task: "review plainly" },
+    ],
+    requiredSkillPreflight: PREFLIGHT_OK,
+  });
+  const items = waveScriptItems(script);
   assert.equal(items[0]?.skill, "ponytail");
   assert.equal("requiredSkill" in (items[0] ?? {}), false);
   assert.equal("skill" in (items[1] ?? {}), false);
 });
 
-test("renderWaveScript throws on duplicate lane keys and empty lanes", () => {
-  assert.throws(
-    () =>
-      renderWaveScript([
-        { key: "same", agent: "a", task: "t1" },
-        { key: "same", agent: "a", task: "t2" },
-      ]),
+test("the wave throws on duplicate assignment keys and empty assignments", async () => {
+  await assert.rejects(
+    runReportWave(
+      createMemoryWaveAdapter({}),
+      makeSpec({
+        assignments: [
+          { key: "same", agent: "a", task: "t1" },
+          { key: "same", agent: "a", task: "t2" },
+        ],
+      }),
+    ),
     /duplicate lane key 'same'/,
   );
-  assert.throws(() => renderWaveScript([]), /at least one lane/);
+  await assert.rejects(
+    runReportWave(createMemoryWaveAdapter({}), makeSpec({ assignments: [] })),
+    /at least one lane/,
+  );
 });
 
-test("renderWaveScript rejects lane keys outside the pi-subagents run-key contract", () => {
+test("the wave rejects assignment keys outside the pi-subagents run-key contract", async () => {
   // The upstream pattern is enforced only inside the live workflow worker, where an invalid
-  // key fails the WHOLE wave at dispatch (`run-failed`) — the renderer must reject it up
+  // key fails the WHOLE wave at dispatch (`run-failed`) — the wave must reject it up
   // front as a programmer error instead.
   for (const bad of [
     "has@at",
@@ -159,15 +187,69 @@ test("renderWaveScript rejects lane keys outside the pi-subagents run-key contra
     "",
     `x${"y".repeat(128)}`, // 129 chars
   ]) {
-    assert.throws(
-      () => renderWaveScript([{ key: bad, agent: "a", task: "t" }]),
+    await assert.rejects(
+      runReportWave(
+        createMemoryWaveAdapter({}),
+        makeSpec({ assignments: [{ key: bad, agent: "a", task: "t" }] }),
+      ),
       /violates the pi-subagents run-key contract|at least one lane/,
     );
   }
   // Boundary: 128 chars of the allowed charset passes.
   const maxKey = `k${"a".repeat(125)}.z`;
   assert.equal(maxKey.length, 128);
-  assert.match(renderWaveScript([{ key: maxKey, agent: "a", task: "t" }]), /runs\.all/);
+  assert.match(
+    await renderedScript({ assignments: [{ key: maxKey, agent: "a", task: "t" }] }),
+    /runs\.all/,
+  );
+});
+
+test("startReportWave validates the whole manifest BEFORE any preflight runs", async () => {
+  // A malformed manifest is a programmer error even when a required skill would have been
+  // partitioned out — the preflight spy must never fire.
+  let preflights = 0;
+  const spy = async (): Promise<{ ok: true }> => {
+    preflights++;
+    return { ok: true };
+  };
+  await assert.rejects(
+    startReportWave(
+      createMemoryWaveAdapter({}),
+      makeSpec({
+        assignments: [
+          {
+            key: "same",
+            agent: "a",
+            task: "t1",
+            skill: "ponytail",
+            requiredSkill: PONYTAIL_CORE_SKILL,
+          },
+          { key: "same", agent: "a", task: "t2" },
+        ],
+        requiredSkillPreflight: spy,
+      }),
+    ),
+    /duplicate lane key 'same'/,
+  );
+  await assert.rejects(
+    startReportWave(
+      createMemoryWaveAdapter({}),
+      makeSpec({
+        assignments: [
+          {
+            key: "bad@key",
+            agent: "a",
+            task: "t",
+            skill: "ponytail",
+            requiredSkill: PONYTAIL_CORE_SKILL,
+          },
+        ],
+        requiredSkillPreflight: spy,
+      }),
+    ),
+    /violates the pi-subagents run-key contract/,
+  );
+  assert.equal(preflights, 0);
 });
 
 // -------------------------------------------------------------------------- the runner matrix
@@ -207,7 +289,7 @@ test("runReportWave: spawn params carry the fixed module contract + spec fields"
   await runReportWave(adapter, spec);
   assert.equal(adapter.calls.spawn.length, 1);
   assert.deepEqual(adapter.calls.spawn[0], {
-    workflowScript: renderWaveScript(spec.lanes),
+    workflowScript: TWO_ASSIGNMENT_SCRIPT,
     async: true,
     mission: false,
     context: "fresh",
@@ -729,7 +811,7 @@ test("receipt data never alters complete/reports/failures (behavior parity)", as
 function makeScriptSpec(overrides: Partial<WaveScriptSpec> = {}): WaveScriptSpec {
   return {
     flow: "adversarial-review",
-    workflowScript: renderWaveScript(ASSIGNMENTS),
+    workflowScript: TWO_ASSIGNMENT_SCRIPT,
     outputSchema: { type: "object", properties: { angle: { type: "string" } } },
     timeoutMs: 5_000,
     ...overrides,
@@ -848,6 +930,83 @@ test("startWaveScript: a completion arriving before the spawn reply still settle
   assert.equal(result.ok, true);
   if (!result.ok) return;
   assert.deepEqual(result.value, value);
+});
+
+test("startWaveScript: a FOREIGN completion is ignored; only the matching identity settles", async () => {
+  const value = [okEntry("plan-fidelity", { angle: "plan-fidelity" })];
+  const adapter = createMemoryWaveAdapter({
+    completion: false,
+    aggregate: { state: "complete", value },
+  });
+  const start = await startWaveScript(adapter, makeScriptSpec());
+  assert.equal(start.ok, true);
+  if (!start.ok) return;
+  // Another run on the same channel completes first — the wave must NOT settle on it.
+  adapter.emitCompletion({ asyncId: "foreign-run", asyncDir: "/memory/foreign-run" });
+  assert.equal(await settlesWithin(start.result, 30), false);
+  adapter.emitCompletion({ asyncId: start.handle.asyncId, asyncDir: start.handle.asyncDir });
+  const result = await start.result;
+  assert.equal(result.ok, true);
+  if (!result.ok) return;
+  assert.deepEqual(result.value, value);
+});
+
+/** Wrap an adapter's `onComplete` with an active-subscription counter (no adapter API growth). */
+function countingSubscriptions(adapter: MemoryWaveAdapter): {
+  adapter: WaveAdapter;
+  active(): number;
+} {
+  let active = 0;
+  const wrapped: WaveAdapter = {
+    ...adapter,
+    onComplete(handler: (completion: WaveCompletion) => void): () => void {
+      const off = adapter.onComplete(handler);
+      active++;
+      let released = false;
+      return () => {
+        if (!released) {
+          released = true;
+          active--;
+        }
+        off();
+      };
+    },
+  };
+  return { adapter: wrapped, active: () => active };
+}
+
+test("the runner releases its completion subscription on every settle arm", async () => {
+  // Normal completion.
+  const normal = countingSubscriptions(
+    createMemoryWaveAdapter({
+      aggregate: {
+        state: "complete",
+        value: [
+          okEntry("plan-fidelity", { verdict: "clean" }),
+          okEntry("correctness", { verdict: "clean" }),
+        ],
+      },
+    }),
+  );
+  await runReportWave(normal.adapter, makeSpec());
+  assert.equal(normal.active(), 0);
+
+  // Timeout.
+  const timedOut = countingSubscriptions(createMemoryWaveAdapter({ completion: false }));
+  await runReportWave(timedOut.adapter, makeSpec({ timeoutMs: 20 }));
+  assert.equal(timedOut.active(), 0);
+
+  // Post-launch cancel.
+  const cancelled = countingSubscriptions(createMemoryWaveAdapter({ completion: false }));
+  const controller = new AbortController();
+  setTimeout(() => controller.abort(), 10);
+  await runReportWave(cancelled.adapter, makeSpec(), controller.signal);
+  assert.equal(cancelled.active(), 0);
+
+  // Pre-spawn failure: the runner subscribes before spawning, so a rejected spawn must release.
+  const spawnFailed = countingSubscriptions(createMemoryWaveAdapter({ spawnError: "no session" }));
+  await runReportWave(spawnFailed.adapter, makeSpec());
+  assert.equal(spawnFailed.active(), 0);
 });
 
 test("startWaveScript: result RESOLVES (never rejects) on every post-spawn failure arm", async () => {
@@ -1007,7 +1166,7 @@ test("startReportWave: all preflight-skipped returns unavailable without a synth
   assert.equal(start.ok, false);
   if (start.ok) return;
   const failures = assignments.map((assignment) => ({
-    key: lane.key,
+    key: assignment.key,
     reason: "skill-unavailable" as const,
     detail: "exact Ponytail source missing",
   }));

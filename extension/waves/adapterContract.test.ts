@@ -19,7 +19,7 @@ import {
   type WaveCompletion,
   type WaveRunHandle,
   type WaveSpawnParams,
-} from "./reportWave.ts";
+} from "./transport.ts";
 import {
   createRpcWaveAdapter,
   WAVE_RPC_PROTOCOL_VERSION,

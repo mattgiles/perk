@@ -10,6 +10,7 @@
 
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { waveScriptItems } from "../testing/fakeSubagents.ts";
 import { createMemoryWaveAdapter } from "./memoryAdapter.ts";
 import {
   buildCustomLaneTask,
@@ -987,9 +988,7 @@ test("runner: lane-level failure — the retry is a STATIC runs.all carrying exa
   // byte-identical reviewer lanes (vocabulary + uniform directive suffix), the reviewer model as
   // the workflow-level default.
   assert.match(retrySpawn.workflowScript, /^const reports = await runs\.all\(/);
-  const start = retrySpawn.workflowScript.indexOf("runs.all(") + "runs.all(".length;
-  const end = retrySpawn.workflowScript.indexOf(");\nreturn");
-  const items = JSON.parse(retrySpawn.workflowScript.slice(start, end)) as Array<{
+  const items = waveScriptItems(retrySpawn.workflowScript) as Array<{
     key: string;
     task: string;
   }>;
@@ -1042,11 +1041,7 @@ test("runner: a failed custom lane retries statically with the byte-identical ta
   const retrySpawn = adapter.calls.spawn[1];
   assert.ok(retrySpawn);
   assert.match(retrySpawn.workflowScript, /^const reports = await runs\.all\(/);
-  const start = retrySpawn.workflowScript.indexOf("runs.all(") + "runs.all(".length;
-  const end = retrySpawn.workflowScript.indexOf(");\nreturn");
-  const items = JSON.parse(retrySpawn.workflowScript.slice(start, end)) as Array<
-    Record<string, unknown>
-  >;
+  const items = waveScriptItems(retrySpawn.workflowScript);
   assert.deepEqual(
     items.map((item) => item.key),
     ["cache-invalidation"],
@@ -1098,11 +1093,7 @@ test("runner: a mixed fixed+custom failure retries both in ONE static wave", asy
   assert.equal(adapter.calls.spawn.length, 2);
   const retrySpawn = adapter.calls.spawn[1];
   assert.ok(retrySpawn);
-  const start = retrySpawn.workflowScript.indexOf("runs.all(") + "runs.all(".length;
-  const end = retrySpawn.workflowScript.indexOf(");\nreturn");
-  const items = JSON.parse(retrySpawn.workflowScript.slice(start, end)) as Array<
-    Record<string, unknown>
-  >;
+  const items = waveScriptItems(retrySpawn.workflowScript);
   assert.deepEqual(
     items.map((item) => item.key),
     ["correctness", "cache-invalidation"],
