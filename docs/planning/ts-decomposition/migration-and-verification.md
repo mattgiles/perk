@@ -881,8 +881,8 @@ and process mechanics in the Python exterior and adapters.
 >     (`delivery/ci.ts` 367, `pi/v1/delivery/ci.ts` 539, `pi/v1/delivery/stackStatus.ts` 237,
 >     `substrate/workflowState.ts` +34, `substrate/coldDoor.ts` +20, objectiveStack rewiring
 >     +35, index +9, review +2); whole-change production net **+217** against the ≤ 0 target.
->     **Named excess classes** (each against a plan-named new invariant; requires explicit
->     operator acceptance before merge — flagged in the PR): the typed `CiRunOutcome`/
+>     **Named excess classes** (each against a plan-named new invariant; operator-accepted
+>     on this node): the typed `CiRunOutcome`/
 >     `CiCheckOutcome` union + the adapter's union→wire mapping (~90); the typed progress
 >     union + deep-copy emission + sink-failure ownership + the adapter's ticker translation
 >     (~100); the two port seams + their production composition (~25). Zero policy/behavior
@@ -917,6 +917,12 @@ and process mechanics in the Python exterior and adapters.
 >   read-only session) + one run-all `run_ci` through the reloaded migrated executor ride the
 >   Step-7 gate; the full Phase-7 dogfood gate closes at node 7.5. The Phase-5/6 dogfood
 >   records are this layer's HARD submission gate (no waiver) — re-checked at `/submit`.
+>   Operator decision at implementation close: the Phase-5/6 gates RUN from the `plan-2114`
+>   train worktree (the migrated review/learning flows' live extension; the Phase-5 legs
+>   against its real open PR #2115), with BOTH records committed on THIS layer — trading the
+>   designed own-layer placement for no published-layer amend, no handoff re-stamp, and no
+>   cascade; the gate's operative requirement (the records exist in this layer's synchronized
+>   ancestry) is satisfied as written.
 
 ### Changes
 
