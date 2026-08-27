@@ -409,13 +409,18 @@ test("judgeAuditBundle: a packetized pair without packet_path degrades (defensiv
 test("judgeAuditBundle: the write matrix — report / lane-failed / malformed / echo-mismatch / out-of-vocab / collision, in deterministic manifest order", async () => {
   const twinA = pair(GRILL, "twin.jsonl", { session_path: "/sessions/enc-a/twin.jsonl" });
   const twinB = pair(GRILL, "twin.jsonl", { session_path: "/sessions/enc-b/twin.jsonl" });
+  // The manifest INTERLEAVES the collision twins between dispatchable pairs, so a reducer that
+  // retained degrades in their manifest positions (instead of appending them after the planned
+  // lanes) would produce a different sequence — the order pin below discriminates.
   const m = manifest([
     {
       id: GRILL,
       pairs: [
         pair(GRILL, "ok.jsonl"),
+        twinA,
         pair(GRILL, "failed.jsonl"),
         pair(GRILL, "malformed.jsonl"),
+        twinB,
         pair(GRILL, "mismatch.jsonl"),
         pair(GRILL, "vocab.jsonl"),
         pair(GRILL, "skipped.jsonl", {
@@ -423,24 +428,15 @@ test("judgeAuditBundle: the write matrix — report / lane-failed / malformed / 
           packet_path: null,
           detail: "over budget",
         }),
-        twinA,
-        twinB,
       ],
     },
   ]);
   const adapter = createMemoryWaveAdapter({
     aggregate: {
       state: "complete",
+      // The aggregate is SHUFFLED relative to the lane plan: a reducer that iterated aggregate
+      // order (instead of projecting planned lanes in manifest order) would fail the pin.
       value: [
-        { key: laneKey(1), ok: true, error: null, report: report("ok.jsonl") },
-        { key: laneKey(2), ok: false, error: "auditor crashed", report: null },
-        { key: laneKey(3), report: [] }, // no boolean ok → malformed-report
-        {
-          key: laneKey(4),
-          ok: true,
-          error: null,
-          report: report("mismatch.jsonl", { session_basename: "other.jsonl" }),
-        },
         {
           key: laneKey(5),
           ok: true,
@@ -449,6 +445,15 @@ test("judgeAuditBundle: the write matrix — report / lane-failed / malformed / 
           // validate() rejects unknown vocabulary wholesale.
           report: report("vocab.jsonl", { verdict: "guilty" }),
         },
+        { key: laneKey(3), report: [] }, // no boolean ok → malformed-report
+        { key: laneKey(1), ok: true, error: null, report: report("ok.jsonl") },
+        {
+          key: laneKey(4),
+          ok: true,
+          error: null,
+          report: report("mismatch.jsonl", { session_basename: "other.jsonl" }),
+        },
+        { key: laneKey(2), ok: false, error: "auditor crashed", report: null },
       ],
     },
   });
@@ -545,6 +550,91 @@ test("judgeAuditBundle: the write matrix — report / lane-failed / malformed / 
       detail: "over budget",
     },
   ]);
+});
+
+test("judgeAuditBundle: the sanitizer rejects each out-of-vocabulary field independently", async () => {
+  // Every report below is otherwise valid and corrupts exactly ONE field, so deleting any one
+  // of the sanitizer's independent checks (confidence, rationale, citations shape, citation
+  // integrality, the expectation_id echo) turns exactly one expected lane green — no fixture
+  // is rejected earlier by aggregate normalization.
+  const m = manifest([
+    {
+      id: GRILL,
+      pairs: [
+        pair(GRILL, "conf.jsonl"),
+        pair(GRILL, "rat.jsonl"),
+        pair(GRILL, "cit-shape.jsonl"),
+        pair(GRILL, "cit-frac.jsonl"),
+        pair(GRILL, "echo.jsonl"),
+      ],
+    },
+  ]);
+  const adapter = createMemoryWaveAdapter({
+    aggregate: {
+      state: "complete",
+      value: [
+        {
+          key: laneKey(1),
+          ok: true,
+          error: null,
+          report: report("conf.jsonl", { confidence: "certain" }),
+        },
+        { key: laneKey(2), ok: true, error: null, report: report("rat.jsonl", { rationale: 42 }) },
+        {
+          key: laneKey(3),
+          ok: true,
+          error: null,
+          report: report("cit-shape.jsonl", { citations: "2, 4" }),
+        },
+        {
+          key: laneKey(4),
+          ok: true,
+          error: null,
+          report: report("cit-frac.jsonl", { citations: [2, 4.5] }),
+        },
+        {
+          key: laneKey(5),
+          ok: true,
+          error: null,
+          // The basename echoes correctly — only the expectation id mismatches (the write-matrix
+          // mismatch case corrupts only the basename, so this arm pins the OTHER identity check).
+          report: report("echo.jsonl", { expectation_id: "other.expectation" }),
+        },
+      ],
+    },
+  });
+  const writer = recordingWriter();
+  const outcome = assertWritten(
+    await judgeAuditBundle(adapter, {
+      bundleDir: BUNDLE_DIR,
+      manifest: m,
+      writeVerdicts: writer.write,
+    }),
+  );
+  assert.deepEqual(outcome.wave, { complete: true });
+  const vocabDetail = "auditor report fields are outside the verdict schema vocabulary";
+  assert.deepEqual(
+    writtenVerdicts(writer.files).lanes.map((l) => [l.session_basename, l.status, l.detail]),
+    [
+      ["conf.jsonl", "malformed-report", vocabDetail],
+      ["rat.jsonl", "malformed-report", vocabDetail],
+      ["cit-shape.jsonl", "malformed-report", vocabDetail],
+      ["cit-frac.jsonl", "malformed-report", vocabDetail],
+      [
+        "echo.jsonl",
+        "lane-failed",
+        `echoed identity mismatch: report claims other.expectation × echo.jsonl, lane graded ` +
+          `${GRILL} × echo.jsonl`,
+      ],
+    ],
+  );
+  // No corrupted field leaks into a written record — the verdict fields stay null-and-empty.
+  for (const lane of writtenVerdicts(writer.files).lanes) {
+    assert.equal(lane.verdict, null);
+    assert.equal(lane.confidence, null);
+    assert.deepEqual(lane.citations, []);
+    assert.equal(lane.rationale, null);
+  }
 });
 
 // -------------------------------------------------------------------- the wave-level failure

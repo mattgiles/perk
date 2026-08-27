@@ -105,8 +105,9 @@ export async function executeAuditWave(
 
 /** Recover the cold door's `audit_bundle_dir` binding: rebuilt workflow-state run_id → the
  * run's handoff blob (the save surfaces' `consumed_learn` recovery seam). Null when absent —
- * i.e. in every session that is not a claimed `perk-dev audit judge` launch. */
-export function auditBundleDirOf(ctx: ExtensionContext): string | null {
+ * i.e. in every session that is not a claimed `perk-dev audit judge` launch. Module-private:
+ * its only caller is the registration below (tests reach it through the installed tool). */
+function auditBundleDirOf(ctx: ExtensionContext): string | null {
   const runId = rebuildWorkflowState(branchOf(ctx)).run_id;
   if (runId === undefined || runId === "") return null;
   const bundleDir = readHandoff(ctx.cwd, runId)?.audit_bundle_dir;

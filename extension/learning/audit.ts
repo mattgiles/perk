@@ -31,11 +31,10 @@
 
 import { join } from "node:path";
 import {
+  type AssignmentFailure,
   type ReportAssignment,
   runReportWave,
   type WaveAdapter,
-  type WaveFailure,
-  type WaveFailureReason,
   type WaveLevelFailureReason,
   type WaveResult,
 } from "../waves/reportWave.ts";
@@ -195,12 +194,6 @@ interface AuditLanePlan {
   skipped: AuditManifestPair[];
 }
 
-/** Join the bundle dir and a manifest-relative packet path (POSIX-style — the manifest writes
- * forward-slash relative paths and the doors run on POSIX). */
-function absolutePacketPath(bundleDir: string, packetPath: string): string {
-  return bundleDir.endsWith("/") ? `${bundleDir}${packetPath}` : `${bundleDir}/${packetPath}`;
-}
-
 /**
  * Compose one lane's task text IN CODE: the expectation id + session, the catalog's
  * evidence/violation prose, the ABSOLUTE packet path, the untrusted-DATA framing, and the
@@ -286,7 +279,8 @@ function buildAuditLanes(manifest: AuditManifest, bundleDir: string): AuditLaneP
           label: `${pair.expectation_id}@${pair.session_path}`,
           agent: "perk-dev.session-auditor",
           phase: "audit",
-          task: laneTask(expectation, pair, absolutePacketPath(bundleDir, pair.packet_path)),
+          // The packet path is manifest-relative (forward slashes; the doors run on POSIX).
+          task: laneTask(expectation, pair, join(bundleDir, pair.packet_path)),
         },
       });
     }
@@ -378,32 +372,16 @@ function integerArrayOf(value: unknown): number[] | null {
   return integers;
 }
 
-/**
- * Narrow a null-key failure's reason to the wave-level subset. The transport contract already
- * guarantees `key === null` failures carry exactly that vocabulary; the switch expresses the
- * guarantee structurally (excluding the assignment-level reasons) instead of trusting a cast —
- * an assignment-level reason here is unreachable and normalizes defensively.
- */
-function waveLevelReason(reason: WaveFailureReason): WaveLevelFailureReason {
-  switch (reason) {
-    case "lane-failed":
-    case "skill-unavailable":
-    case "malformed-report":
-    case "missing-lane":
-      return "run-failed";
-    default:
-      return reason;
-  }
-}
-
 /** Correlate the wave result into the typed status: the found `key === null` failure IS the
- * incompleteness (under `best-effort`, one exists exactly when the wave is incomplete). */
+ * incompleteness (under `best-effort`, one exists exactly when the wave is incomplete), and the
+ * discriminated `WaveFailure` union already pins a null-key failure's reason to the wave-level
+ * subset — no local re-narrowing. */
 function waveStatusOf(result: WaveResult): AuditWaveStatus {
   const failure = result.failures.find((f) => f.key === null);
   if (failure === undefined) return { complete: true };
   return {
     complete: false,
-    failure: { reason: waveLevelReason(failure.reason), detail: failure.detail },
+    failure: { reason: failure.reason, detail: failure.detail },
   };
 }
 
@@ -488,7 +466,7 @@ function assembleLanes(
   result: WaveResult,
 ): AuditVerdictLane[] {
   const reportsByKey = new Map(result.reports.map((r) => [r.key, r.report]));
-  const failuresByKey = new Map<string, WaveFailure>();
+  const failuresByKey = new Map<string, AssignmentFailure>();
   for (const failure of result.failures) {
     if (failure.key !== null) failuresByKey.set(failure.key, failure);
   }
