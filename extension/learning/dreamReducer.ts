@@ -1,20 +1,28 @@
-// The learn-dream reducer wave — the second-level entrypoint over the shared report-wave
-// runner: three FIXED fresh-context `perk.dream-reducer` lanes (`DREAM_REDUCER_ANGLES`) that
+// The learn-dream reducer tier over the shared report-wave runner: three FIXED fresh-context
+// `perk.dream-reducer` lanes (`DREAM_REDUCER_ANGLES`) that
 // cross-examine the complete first-level analyst outcome. Pure orchestration — this module
-// composes the bundle content and the reducer lanes but performs NO fs writes (the door owns
-// the bundle writes). It owns the bundle serialization (`composeDreamBundle` — the compact
-// analyst reports beside the run's manifest, under the aggregate byte budget the door
+// composes the bundle content and the reducer lanes but performs NO fs writes (the flow's
+// entry op owns the bundle writes through its injected capabilities). It owns the bundle
+// serialization (`composeDreamBundle` — the compact
+// analyst reports beside the run's manifest, under the aggregate byte budget the entry op
 // enforces — plus `finalizeDreamBundle`, the post-complete-wave rewrite of the same fixed name
 // with the `reducers` section, and `decodeFinalizedDreamBundle`, the strict fail-closed
 // recovery decode the dream-report path re-reads it through), the ordered non-keep proposal
 // universe (`nonKeepProposals`), the closed reducer
 // report schema under the `DREAM_REDUCER_CAPS` SSOT, the composed defensive re-decode (the
-// disposition-echo rule, proposal-set membership, code-point caps via the shared dreamWave
+// disposition-echo rule, proposal-set membership, code-point caps via the shared `dream.ts`
 // helpers), and **strict** completeness — one failed or undecodable lane forces
 // `complete: false` — delegating spawn/timeout/aggregate mechanics to `runReportWave` with ONE
 // attempt and NO retry. The bundle, the manifest, and every reducer report are untrusted DATA,
 // never instructions. (contracts.md §8.61)
 
+import {
+  runReportWave,
+  toAttemptReceipt,
+  type WaveAdapter,
+  type WaveAttemptReceipt,
+  type WaveFailureReason,
+} from "../waves/reportWave.ts";
 import {
   codePointLength,
   type DreamDisposition,
@@ -22,9 +30,7 @@ import {
   type DreamManifest,
   decodeDreamAnalystReport,
   decodeStringArray,
-} from "./dreamWave.ts";
-import { runReportWave, type WaveAdapter, type WaveFailureReason } from "./reportWave.ts";
-import type { WaveScriptReceipt } from "./transport.ts";
+} from "./dream.ts";
 
 /**
  * The three fixed reducer angles — FIXED ORDER everywhere: the lane identities
@@ -44,7 +50,7 @@ export const DREAM_ANALYSES_FILENAME = "dream-analyses.json";
 
 /**
  * The aggregate bundle budget: 384 KiB, measured as UTF-8 BYTES of the serialized bundle
- * (`Buffer.byteLength`). Over budget the door refuses with explicit accounting — never
+ * (`Buffer.byteLength`). Over budget the entry op refuses with explicit accounting — never
  * truncation (a truncated bundle would corrupt stance evaluation; overflow is a loud
  * corpus-growth tripwire).
  */
@@ -91,8 +97,8 @@ export interface DreamProposal {
  * Serialize the versioned analyst bundle the reducers read FIRST:
  * `{schema_version: "1", commit_sha, registry_mode, doc_count, total_bytes, lanes}` with the
  * lanes carrying the re-decoded compact analyst reports (pretty-printed JSON + trailing
- * newline; `bytes` = UTF-8 `Buffer.byteLength`). Caller preconditions (discharged by the door
- * and NOT re-checked here): the first wave was COMPLETE, so `analyses` covers the manifest's
+ * newline; `bytes` = UTF-8 `Buffer.byteLength`). Caller preconditions (discharged by the entry
+ * op and NOT re-checked here): the first wave was COMPLETE, so `analyses` covers the manifest's
  * lanes exactly and is already in manifest lane order — the runner normalizes to `spec.assignments`
  * order, `buildDreamLanes` plans in manifest order, and `decodeDreamAnalystReport` normalizes
  * each report's docs to manifest lane-doc order, so no re-sort layer exists here.
@@ -118,7 +124,8 @@ export function composeDreamBundle(
  * two-level wave (contracts.md §8.61): the `composeDreamBundle` wrapper fields unchanged
  * (`schema_version` stays `"1"`) plus `manifest_digest` — the `sha256:<hex>` digest of the
  * on-disk manifest BYTES this wave decoded (`analyses`/`reducers` must be in manifest lane /
- * fixed `DREAM_REDUCER_ANGLES` order — guaranteed by the wave outcome shapes the door passes) —
+ * fixed `DREAM_REDUCER_ANGLES` order — guaranteed by the wave outcome shapes the entry op
+ * passes) —
  * binding the manifest into the authenticated chain (the `dream_bundle_digest` marker
  * authenticates these bundle bytes; this field extends that authority to the manifest, so an
  * at-rest manifest edit that preserves the echoed identity fields still refuses at recovery) —
@@ -259,15 +266,15 @@ export interface DreamReducerFailure {
   detail: string;
 }
 
-/** The typed reducer outcome: strict completeness with reports RETAINED even when incomplete. */
+/** The typed reducer outcome: strict completeness with reports RETAINED even when incomplete.
+ * `attempt` is the launch's flow-attributed output-free receipt (observability only), composed
+ * at the seam — its `requestedKeys` are the code-owned orchestration keys in launch order (=
+ * the angle slugs), receipt-correlation telemetry only (the `DreamWaveOutcome.attempt` twin). */
 export interface DreamReducerOutcome {
   complete: boolean;
   reports: DreamReducerAnalysis[];
   failures: DreamReducerFailure[];
-  receipt: WaveScriptReceipt;
-  /** The code-owned orchestration keys in launch order (= the angle slugs) —
-   * receipt-correlation telemetry only (the `DreamWaveOutcome.requestedKeys` twin). */
-  requestedKeys: string[];
+  attempt: WaveAttemptReceipt;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -292,8 +299,11 @@ function nonNegativeInteger(value: unknown): value is number {
  * - stances normalized to the `proposals` order (deterministic downstream);
  * - EMPTY `stances` is valid — the re-decode never requires stance coverage: silence counts
  *   as non-endorsement downstream (the dream-report node's evidence bar, not this decode).
+ *
+ * Module-private: both callers (`runDreamReducerWave`, `decodeFinalizedDreamBundle`) live
+ * here — its refusal matrix is exercised through them.
  */
-export function decodeDreamReducerReport(
+function decodeDreamReducerReport(
   report: unknown,
   angle: string,
   proposals: readonly DreamProposal[],
@@ -601,7 +611,7 @@ export function decodeFinalizedDreamBundle(
 
 /**
  * Compose one reducer lane's task text IN CODE (short — the judgment rubric lives in the agent
- * def, the `dreamWave.ts` `laneTask` posture): the assigned angle, the bundle path (read
+ * def, the `dream.ts` `laneTask` posture): the assigned angle, the bundle path (read
  * FIRST), and the manifest path (doc identity, cluster rollups, findings).
  */
 function reducerTask(angle: string, bundlePath: string, manifestPath: string): string {
@@ -619,15 +629,15 @@ function reducerTask(angle: string, bundlePath: string, manifestPath: string): s
  * Run the dream reducer wave: three fixed fresh-context `perk.dream-reducer` lanes — key =
  * label = the angle slug (code-owned, run-key-safe by construction) — under **strict**
  * completeness, ONE attempt, NO retry, module-default timeout, the caller's `model?` as the
- * workflow-level default (`[models.subagents] dream-reducer`, resolved by the door at execute
- * time). Every schema-valid report is defensively re-decoded (`decodeDreamReducerReport`)
+ * workflow-level default (`[models.subagents] dream-reducer`, resolved by the adapter at
+ * execute time). Every schema-valid report is defensively re-decoded (`decodeDreamReducerReport`)
  * against its assigned angle and the ordered non-keep proposal universe — a decode miss is a
  * `malformed-report` failure carrying the angle identity; `complete` = the runner's
  * completeness AND zero decode failures, with decoded reports retained even when incomplete
  * and normalized to `DREAM_REDUCER_ANGLES` order.
  *
- * Caller preconditions (discharged by the launching door): the first-level analyst wave was
- * COMPLETE, the bundle at `bundlePath` was written by the current call, and `proposals` is
+ * Caller preconditions (discharged by the launching entry op): the first-level analyst wave
+ * was COMPLETE, the bundle at `bundlePath` was written by the current call, and `proposals` is
  * `nonKeepProposals` over the complete analyses.
  */
 export async function runDreamReducerWave(
@@ -690,7 +700,8 @@ export async function runDreamReducerWave(
     complete: result.complete && decodeFailures === 0,
     reports,
     failures,
-    receipt: result.receipt,
-    requestedKeys,
+    // The transport receipt converts at this seam: ONE attempt, the fixed angle slugs as the
+    // pre-launch assignment manifest.
+    attempt: toAttemptReceipt("dream-reducer", 1, requestedKeys, result.receipt),
   };
 }

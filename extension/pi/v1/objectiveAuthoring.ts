@@ -47,6 +47,7 @@ import {
   type SaveObjectiveOutcome,
   saveObjective,
 } from "../../authoring/objective/save.ts";
+import { DREAM_REPORT_INPUT_SCHEMA } from "../../learning/dreamReport.ts";
 import { openBranchWorkflowSession } from "../../session/branchWorkflowSession.ts";
 import type { WorkflowSession } from "../../session/workflowSession.ts";
 import { bindingSuffix } from "../../substrate/bindingDelivery.ts";
@@ -71,7 +72,6 @@ import {
   rebuildWorkflowState,
 } from "../../substrate/workflowState.ts";
 import { report, type Severity } from "../../surfaces/report.ts";
-import { DREAM_REPORT_INPUT_SCHEMA } from "../../waves/dreamReport.ts";
 import { OBJECTIVE_BUDGET_TYPE } from "./objective.ts";
 
 // ------------------------------------------------------------------- the tool-boundary decode

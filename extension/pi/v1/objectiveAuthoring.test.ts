@@ -18,6 +18,7 @@ import { OBJECTIVE_DRAFT_ARTIFACT } from "../../authoring/objective/draft.ts";
 import { resolveDreamReportGate } from "../../authoring/objective/dreamReportGate.ts";
 import { OBJECTIVE_AUTHOR_CONTEXT_TYPE } from "../../authoring/objective/prose.ts";
 import { PLAN_CONTEXT_TYPE } from "../../authoring/plan/prose.ts";
+import { DREAM_REPORT_INPUT_SCHEMA } from "../../learning/dreamReport.ts";
 import { sessionDataDir } from "../../substrate/cache.ts";
 import {
   digestSessionData,
@@ -40,7 +41,6 @@ import {
   scaffoldRepo,
   spyInjections,
 } from "../../testing/harness.ts";
-import { DREAM_REPORT_INPUT_SCHEMA } from "../../waves/dreamReport.ts";
 import { OBJECTIVE_BUDGET_TYPE } from "./objective.ts";
 import {
   DELIVERY_PARAM_SCHEMA,

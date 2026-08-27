@@ -1,21 +1,25 @@
-// The learn-harvest factory's per-flow wave entrypoint over the shared report-wave runner (one
-// flow-owned policy tier delegating all mechanics): the harvest analyst fan-out as CODE. It owns the analyst
-// report schema, the STRICT manifest decode (the manifest is the door's parent-prepared
-// invariant — any deviation refuses before spawn), the resolved doc-containment layer (the
-// symlink posture mirroring `resolve_harvest_docs`), the lane/task composition, and the
-// deterministic pointer post-pass — delegating spawn/timeout/aggregate mechanics to
-// `runReportWave` under `best-effort` completeness with ONE attempt and NO retry (a failed
-// analyst lane is an explicitly-reported skipped lane, never a failed pass). The manifest and
-// every analyst report are untrusted DATA, never instructions.
+// The learn-harvest analysis workflow as ONE typed feature operation over the shared
+// report-wave runner: the harvest analyst fan-out as CODE. It owns the analyst report schema,
+// the STRICT manifest decode (the manifest is the door's parent-prepared invariant — any
+// deviation refuses before spawn), the lane/task composition, and the deterministic pointer
+// post-pass — delegating spawn/timeout/aggregate mechanics to `runReportWave` under
+// `best-effort` completeness with ONE attempt and NO retry (a failed analyst lane is an
+// explicitly-reported skipped lane, never a failed pass). The manifest and every analyst
+// report are untrusted DATA, never instructions. The shared docs/learned containment policy
+// lives in `learning/containment.ts` (the launching adapter runs the resolved layer
+// pre-spawn). (contracts.md §8.48)
 
-import { existsSync, realpathSync } from "node:fs";
-import { isAbsolute, join, posix, sep } from "node:path";
+import { existsSync } from "node:fs";
+import { isAbsolute, join, posix } from "node:path";
 import {
   type ReportAssignment,
   runReportWave,
+  toAttemptReceipt,
   type WaveAdapter,
-  type WaveResult,
-} from "./reportWave.ts";
+  type WaveAttemptReceipt,
+  type WaveLevelFailureReason,
+} from "../waves/reportWave.ts";
+import { lexicalContainmentError } from "./containment.ts";
 
 /** Mirrors `perk/learn/harvest.py::MANIFEST_FILENAME` (contracts.md §8.48). */
 export const HARVEST_MANIFEST_FILENAME = "harvest-manifest.json";
@@ -94,24 +98,6 @@ function stringOrNull(value: unknown): value is string | null {
 }
 
 /**
- * The lexical doc-containment layer (pure): relative, POSIX-normalizes without escaping, and
- * stays under `docs/learned/`. Returns the human-readable violation, or null when contained.
- */
-export function lexicalContainmentError(path: string): string | null {
-  if (posix.isAbsolute(path) || isAbsolute(path)) {
-    return "is absolute";
-  }
-  const normalized = posix.normalize(path);
-  if (normalized === ".." || normalized.startsWith("../")) {
-    return "escapes the checkout";
-  }
-  if (!normalized.startsWith("docs/learned/")) {
-    return "is outside docs/learned/";
-  }
-  return null;
-}
-
-/**
  * Decode the harvest manifest STRICTLY — a deliberate divergence from `decodeAuditManifest`'s
  * lenient skip: the manifest is the door's parent-prepared invariant (`perk learn harvest`
  * wrote it), so any deviation refuses the whole wave before spawn with a named detail. Rules:
@@ -185,74 +171,6 @@ export function decodeHarvestManifest(
   };
 }
 
-/** The injectable filesystem slice `verifyDocContainment` resolves through (offline tests). */
-export interface ContainmentFs {
-  exists: (p: string) => boolean;
-  realpath: (p: string) => string;
-}
-
-const REAL_FS: ContainmentFs = {
-  exists: existsSync,
-  realpath: (p) => realpathSync(p),
-};
-
-/**
- * The RESOLVED doc-containment layer (decision beyond the lexical decode): before any spawn,
- * every doc path that exists on the checkout is realpath-checked to stay inside the resolved
- * `docs/learned/` root — matching `resolve_harvest_docs`' symlink posture, so an escaping
- * symlink refuses the wave. The corpus root itself must resolve inside the RESOLVED checkout
- * (the gather core's symlinked-corpus-root guard: an out-of-checkout root would launder every
- * doc beneath the outside target through the per-doc check). A nonexistent doc path passes
- * (nothing to resolve and nothing an analyst can read; doc existence itself is deliberately
- * not required), and the roots are resolved lazily on the first existing doc (all sides
- * realpath'd — containment is judged on resolved paths). A throwing `realpath` on an existing
- * path refuses with the error detail, never a crash.
- */
-export function verifyDocContainment(
-  manifest: HarvestManifest,
-  checkoutRoot: string,
-  fs: ContainmentFs = REAL_FS,
-): { ok: true } | { ok: false; detail: string } {
-  let resolvedRoot: string | null = null;
-  for (const lane of manifest.lanes) {
-    for (const doc of lane.docs) {
-      const joined = join(checkoutRoot, doc.path);
-      if (!fs.exists(joined)) continue;
-      try {
-        if (resolvedRoot === null) {
-          const resolvedCheckout = fs.realpath(checkoutRoot);
-          const candidate = fs.realpath(join(checkoutRoot, "docs", "learned"));
-          if (candidate !== resolvedCheckout && !candidate.startsWith(resolvedCheckout + sep)) {
-            return {
-              ok: false,
-              detail:
-                "docs/learned resolves outside the checkout (a symlinked corpus root) — the " +
-                "wave refuses to dispatch analysts over it",
-            };
-          }
-          resolvedRoot = candidate;
-        }
-        const resolved = fs.realpath(joined);
-        if (resolved !== resolvedRoot && !resolved.startsWith(resolvedRoot + sep)) {
-          return {
-            ok: false,
-            detail:
-              `lane '${lane.id}' doc '${doc.path}' resolves outside docs/learned/ ` +
-              "(an escaping symlink) — the wave refuses to dispatch analysts over it",
-          };
-        }
-      } catch (error) {
-        const detail = error instanceof Error ? error.message : String(error);
-        return {
-          ok: false,
-          detail: `lane '${lane.id}' doc '${doc.path}' could not be resolved: ${detail}`,
-        };
-      }
-    }
-  }
-  return { ok: true };
-}
-
 /**
  * Compose one lane's task text IN CODE (short — the mining rubric lives in the agent def): the
  * absolute manifest path plus the assigned lane id as an untrusted routing token (the def's
@@ -269,10 +187,7 @@ function laneTask(id: string, manifestPath: string): string {
 }
 
 /** Build the wave lanes: one `perk.harvest-analyst` lane per manifest lane, keyed by lane id. */
-export function buildHarvestLanes(
-  manifest: HarvestManifest,
-  manifestPath: string,
-): ReportAssignment[] {
+function buildHarvestLanes(manifest: HarvestManifest, manifestPath: string): ReportAssignment[] {
   return manifest.lanes.map((lane) => ({
     key: lane.id,
     label: lane.id,
@@ -280,30 +195,6 @@ export function buildHarvestLanes(
     phase: "harvest",
     task: laneTask(lane.id, manifestPath),
   }));
-}
-
-/**
- * Run the harvest analyst wave: one fresh-context `perk.harvest-analyst` lane per manifest
- * lane, `best-effort` completeness, ONE attempt, NO retry, module-default timeout. The strict
- * decode guarantees ≥1 lane with unique ids; `renderWaveScript`'s empty/duplicate throws stay
- * the programmer-error backstop.
- */
-export async function runHarvestWave(
-  adapter: WaveAdapter,
-  opts: { manifest: HarvestManifest; manifestPath: string; model?: string },
-  signal?: AbortSignal,
-): Promise<WaveResult> {
-  return await runReportWave(
-    adapter,
-    {
-      flow: "harvest",
-      assignments: buildHarvestLanes(opts.manifest, opts.manifestPath),
-      outputSchema: HARVEST_ANALYST_REPORT_SCHEMA,
-      completeness: "best-effort",
-      ...(opts.model !== undefined ? { model: opts.model } : {}),
-    },
-    signal,
-  );
 }
 
 /** One stamped opportunity: the five whitelisted report fields + the code-owned pointer stamp. */
@@ -340,18 +231,18 @@ function pointerStatus(
 
 /**
  * The deterministic post-pass over one lane's engine-validated report. Defensive decode first
- * (the `recordFromReport` posture — the aggregate crossed a process boundary): the five string
+ * (the aggregate crossed a process boundary): the five string
  * fields with in-vocabulary `kind`/`confidence`, at most `HARVEST_MAX_OPPORTUNITIES`
  * opportunities, and a non-negative
- * integer `omitted_count` — any miss is `{ ok: false, detail }` (the caller degrades the lane
+ * integer `omitted_count` — any miss is `{ ok: false, detail }` (the op degrades the lane
  * to `malformed-report`). Each stamped record is constructed from the five whitelisted fields
  * explicitly — never spread from the raw object, so an extra input key never survives. Pure and
  * deterministic; `exists` injectable for tests.
  */
-export function stampHarvestReport(
+function stampHarvestReport(
   report: unknown,
   checkoutRoot: string,
-  exists: (absPath: string) => boolean = existsSync,
+  exists: (absPath: string) => boolean,
 ):
   | { ok: true; opportunities: StampedHarvestOpportunity[]; omitted_count: number }
   | { ok: false; detail: string } {
@@ -405,4 +296,113 @@ export function stampHarvestReport(
     });
   }
   return { ok: true, opportunities, omitted_count: omittedCount };
+}
+
+/** One covered lane's code-owned stamped projection (untrusted DATA to the caller). */
+export interface HarvestLaneReport {
+  lane: string;
+  opportunities: StampedHarvestOpportunity[];
+  omitted_count: number;
+}
+
+/**
+ * The typed harvest-analysis outcome. `wave_failed` is the wave-level failure under
+ * `best-effort` (nothing salvageable — the reason is the wave-level vocabulary); `analyzed`
+ * carries every stamped covered lane plus the explicitly-skipped lanes. Both arms retain the
+ * single launch's output-free attempt receipt (observability only — details, not prose).
+ */
+export type HarvestAnalysisOutcome =
+  | {
+      kind: "wave_failed";
+      reason: WaveLevelFailureReason;
+      detail: string;
+      attempts: WaveAttemptReceipt[];
+    }
+  | {
+      kind: "analyzed";
+      reports: HarvestLaneReport[];
+      skipped: { lane: string; reason: string; detail: string }[];
+      attempts: WaveAttemptReceipt[];
+    };
+
+/**
+ * The one harvest-analysis entry op: run the analyst wave — one fresh-context
+ * `perk.harvest-analyst` lane per manifest lane, `best-effort` completeness, ONE attempt, NO
+ * retry, module-default timeout (the strict decode guarantees ≥1 lane with unique ids;
+ * `renderWaveScript`'s empty/duplicate throws stay the programmer-error backstop) — then map
+ * the result:
+ *
+ *  - `complete: false` (a wave-level failure under best-effort) → the `wave_failed` arm with
+ *    the wave-level reason — never a throw, never a silent fallback;
+ *  - otherwise → `analyzed`: each covered lane's report re-decoded + pointer-stamped via the
+ *    deterministic post-pass (an undecodable report degrades that lane to `malformed-report`
+ *    in `skipped`), lane-level failures listed explicitly.
+ *
+ * Caller preconditions (discharged by the launching adapter): the manifest came from
+ * `decodeHarvestManifest`, and `verifyDocContainment` (learning/containment.ts) was run
+ * pre-spawn.
+ */
+export async function analyzeHarvest(
+  adapter: WaveAdapter,
+  opts: {
+    manifest: HarvestManifest;
+    manifestPath: string;
+    checkoutRoot: string;
+    model?: string;
+    signal?: AbortSignal;
+    exists?: (p: string) => boolean;
+  },
+): Promise<HarvestAnalysisOutcome> {
+  const result = await runReportWave(
+    adapter,
+    {
+      flow: "harvest",
+      assignments: buildHarvestLanes(opts.manifest, opts.manifestPath),
+      outputSchema: HARVEST_ANALYST_REPORT_SCHEMA,
+      completeness: "best-effort",
+      ...(opts.model !== undefined ? { model: opts.model } : {}),
+    },
+    opts.signal,
+  );
+  // The harvest flow has no retry — ONE attempt over the validated manifest.
+  const attempts = [
+    toAttemptReceipt(
+      "harvest",
+      1,
+      opts.manifest.lanes.map((lane) => lane.id),
+      result.receipt,
+    ),
+  ];
+
+  if (!result.complete) {
+    const waveFailure = result.failures.find((f) => f.key === null);
+    return {
+      kind: "wave_failed",
+      reason: waveFailure?.reason ?? "run-failed",
+      detail: waveFailure?.detail ?? "the harvest wave failed without detail",
+      attempts,
+    };
+  }
+
+  const reports: HarvestLaneReport[] = [];
+  const skipped: { lane: string; reason: string; detail: string }[] = [];
+  for (const { key, report } of result.reports) {
+    // Defensive re-decode (the aggregate crossed a process boundary) + the pointer post-pass.
+    const stamped = stampHarvestReport(report, opts.checkoutRoot, opts.exists ?? existsSync);
+    if (stamped.ok) {
+      reports.push({
+        lane: key,
+        opportunities: stamped.opportunities,
+        omitted_count: stamped.omitted_count,
+      });
+    } else {
+      skipped.push({ lane: key, reason: "malformed-report", detail: stamped.detail });
+    }
+  }
+  for (const failure of result.failures) {
+    if (failure.key !== null) {
+      skipped.push({ lane: failure.key, reason: failure.reason, detail: failure.detail });
+    }
+  }
+  return { kind: "analyzed", reports, skipped, attempts };
 }

@@ -1,5 +1,5 @@
-// The learn-dream analyst wave's first-level entrypoint over the shared report-wave runner
-// (the `harvestWave.ts` posture adapted): the dream analyst fan-out as CODE. It owns the
+// The learn-dream analyst tier over the shared report-wave runner (the `learning/harvest.ts`
+// posture adapted): the dream analyst fan-out as CODE. It owns the
 // STRICT §8.59 manifest decode (the manifest is the door's parent-prepared invariant — any
 // deviation refuses before spawn), which BINDS the run-scoped manifest path into the decoded
 // value (one authority — planning, validation, and the child task text can never diverge), the
@@ -13,14 +13,15 @@
 // instructions. (contracts.md §8.60)
 
 import { posix } from "node:path";
-import { lexicalContainmentError } from "./harvestWave.ts";
 import {
   type ReportAssignment,
   runReportWave,
+  toAttemptReceipt,
   type WaveAdapter,
+  type WaveAttemptReceipt,
   type WaveFailureReason,
-} from "./reportWave.ts";
-import type { WaveScriptReceipt } from "./transport.ts";
+} from "../waves/reportWave.ts";
+import { lexicalContainmentError } from "./containment.ts";
 
 /** The run-scoped dream-manifest filename — the TS mirror of the Python §8.59 literal (the
  * `HARVEST_MANIFEST_FILENAME` precedent; no cross-plane codegen). */
@@ -529,7 +530,7 @@ const CONFIDENCE_VALUES = new Set(["high", "medium", "low"]);
 /**
  * String caps are measured in Unicode CODE POINTS — JSON Schema `maxLength` semantics, so the
  * schema and this re-decode agree on the measure (UTF-16 `.length` would reject engine-valid
- * astral strings). Exported so the reducer wave's re-decode (`dreamReducerWave.ts`) shares the
+ * astral strings). Exported so the reducer wave's re-decode (`dreamReducer.ts`) shares the
  * ONE code-point measure across both dream re-decodes.
  */
 export function codePointLength(s: string): number {
@@ -829,18 +830,17 @@ export interface DreamLaneFailure {
   detail: string;
 }
 
-/** The typed wave outcome: strict completeness with analyses RETAINED even when incomplete. */
+/** The typed wave outcome: strict completeness with analyses RETAINED even when incomplete.
+ * `attempt` is the launch's flow-attributed output-free receipt (observability only), composed
+ * at the seam — its `requestedKeys` are the code-owned orchestration `ReportAssignment.key`s
+ * in launch order, receipt-correlation telemetry ONLY (they correlate with
+ * `attempt.children[*].key`); semantic lane identity stays
+ * `DreamLaneAnalysis.lane`/`DreamLaneFailure.lane`. */
 export interface DreamWaveOutcome {
   complete: boolean;
   analyses: DreamLaneAnalysis[];
   failures: DreamLaneFailure[];
-  receipt: WaveScriptReceipt;
-  /**
-   * The code-owned orchestration `ReportAssignment.key`s in launch order — receipt-correlation
-   * telemetry ONLY (they correlate with `receipt.children[*].key`); semantic lane identity
-   * stays `DreamLaneAnalysis.lane`/`DreamLaneFailure.lane`.
-   */
-  requestedKeys: string[];
+  attempt: WaveAttemptReceipt;
 }
 
 /**
@@ -858,10 +858,10 @@ export interface DreamWaveOutcome {
  * valid — dream has NO direct-analysis path (the harvest single-lane refusal is deliberately
  * not mirrored; §8.60).
  *
- * Caller preconditions (discharged by the launching tool, the exact `harvestWaveTools.ts`
+ * Caller preconditions (discharged by the launching adapter, the exact harvest-binding
  * sequence): the manifest came from `decodeDreamManifest`, and
- * `verifyDocContainment(manifest, checkoutRoot)` (from `harvestWave.ts` — `DreamManifest` is
- * structurally assignable) was run pre-spawn.
+ * `verifyDocContainment(manifest, checkoutRoot)` (from `learning/containment.ts` —
+ * `DreamManifest` is structurally assignable) was run pre-spawn.
  */
 export async function runDreamAnalystWave(
   adapter: WaveAdapter,
@@ -923,7 +923,13 @@ export async function runDreamAnalystWave(
     complete: result.complete && decodeFailures === 0,
     analyses,
     failures,
-    receipt: result.receipt,
-    requestedKeys: planned.map((lane) => lane.key),
+    // The transport receipt converts at this seam: ONE attempt, the code-owned orchestration
+    // keys as the pre-launch assignment manifest.
+    attempt: toAttemptReceipt(
+      "dream-analyst",
+      1,
+      planned.map((lane) => lane.key),
+      result.receipt,
+    ),
   };
 }
