@@ -3,8 +3,9 @@
 // STRICT §8.59 manifest decode (the manifest is the door's parent-prepared invariant — any
 // deviation refuses before spawn), which BINDS the run-scoped manifest path into the decoded
 // value (one authority — planning, validation, and the child task text can never diverge), the
-// code-owned run-key-safe orchestration keys (the `auditWave.ts` pattern — producer lane ids
-// are deliberately NOT run-key-bounded), the closed analyst report schema under the
+// code-owned run-key-safe orchestration keys (opaque `<sanitized id>.<ordinal>` slugs with the
+// semantic identity riding labels/code-owned metadata — producer lane ids are deliberately NOT
+// run-key-bounded), the closed analyst report schema under the
 // `DREAM_ANALYST_CAPS` SSOT, the composed defensive re-decode (corpus-membership merge/overlap
 // rules), and **strict** completeness — one failed or undecodable lane forces
 // `complete: false` — delegating spawn/timeout/aggregate mechanics to `runReportWave` with ONE
@@ -346,7 +347,8 @@ interface PlannedDreamLane {
 }
 
 /**
- * Compose one lane's run-key-safe orchestration key (the `auditWave.ts` pattern): the
+ * Compose one lane's run-key-safe orchestration key — an opaque slug whose uniqueness lives in
+ * the ordinal, never in the semantic id: the
  * sanitized manifest lane id (invalid runs → `-`, leading non-alnum stripped, stem clamped)
  * plus a global 1-based ordinal. Uniqueness lives in the ordinal; the SEMANTIC lane id rides
  * the lane `label` and `PlannedDreamLane.laneId`, never the key — producer lane ids

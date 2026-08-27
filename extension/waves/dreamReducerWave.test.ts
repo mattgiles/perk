@@ -1006,7 +1006,8 @@ test("the dream-reducer def agrees with the report schema — fields, stances, c
   const def = readFileSync(defPath, "utf8");
   const flat = def.replace(/\s+/g, " ");
   // Frontmatter: the runtime name perk.dream-reducer, the stronger-tier default model, and
-  // the read-only isolation posture (the auditWaveTools.test.ts precedent) — these fields
+  // the read-only isolation posture (read-only tools, replaced system prompt, no inherited
+  // context/skills) — these fields
   // define the reducer's identity and execution behavior, so they are pinned exactly.
   assert.match(def, /^name: dream-reducer$/m);
   assert.match(def, /^package: perk$/m);

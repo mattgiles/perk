@@ -1,5 +1,5 @@
-// The learn-harvest factory's per-flow wave entrypoint over the shared report-wave runner (the
-// `learnWave.ts`/`auditWave.ts` shape): the harvest analyst fan-out as CODE. It owns the analyst
+// The learn-harvest factory's per-flow wave entrypoint over the shared report-wave runner (one
+// flow-owned policy tier delegating all mechanics): the harvest analyst fan-out as CODE. It owns the analyst
 // report schema, the STRICT manifest decode (the manifest is the door's parent-prepared
 // invariant — any deviation refuses before spawn), the resolved doc-containment layer (the
 // symlink posture mirroring `resolve_harvest_docs`), the lane/task composition, and the
@@ -35,7 +35,8 @@ export const HARVEST_MAX_OPPORTUNITIES = 5;
  * The per-lane analyst report schema (the workflow-level `outputSchema`): closed shape,
  * all-required, enums, `maxItems: HARVEST_MAX_OPPORTUNITIES` + `omitted_count` (the def's
  * report contract). No if/then
- * conditionals — the learnWave/auditWave salvage rule under `best-effort` completeness. No
+ * conditionals — the salvage rule under `best-effort` completeness (a salvageable report beats
+ * a failed lane; cross-field invariants are enforced by the consumer, never the schema). No
  * `pattern` constraints on `pointer`: the post-pass is total over any string pointer, and the
  * parent re-reads every pointer anyway.
  */

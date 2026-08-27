@@ -672,6 +672,42 @@ mechanics.
 >   record was this node's start precondition; the operator waived it explicitly on the plan
 >   issue (the 5.1 precedent) — the record remains owed on the train before 6.3's gate.
 
+> **Status (Objective #2083, Node 6.2):** the session-audit judgment workflow landed —
+> realized-shape notes:
+>
+> - **Behavior moved**: the `run_audit_wave` registration, the pre-launch `bad_state` arms,
+>   the zero-lane short-circuit, the sanitize-before-write discipline, the `io_error` arm, and
+>   the result renders — behavior-preserving against contracts §8.50 (semantic JSON parity for
+>   verdicts.json; exact-text parity for the rendered result + details). The two old modules
+>   (`waves/auditWave.ts`, `doors/auditWaveTools.ts`) + their test files were deleted whole in
+>   the same change (index import and guard census entries included).
+> - **The typed feature op** in the Pi-free `extension/learning/audit.ts` home (one flow = one
+>   module): `judgeAuditBundle` — the one entry op owning schema → decode → lane plan → wave →
+>   sanitize → reduce → persist — with the **relocated** function-shaped `writeVerdicts`
+>   capability (the write the door's execute core already injected) and the **correlated**
+>   `AuditWaveStatus` (incomplete ⇔ the wave-level failure rides the status — the
+>   incomplete-but-unexplained state is unrepresentable). The export surface is deliberately
+>   narrow: lane planners and sanitizers stay module-private; `AuditVerdictLane` became a
+>   wire-identical discriminated union with type-predicate narrowing (no casts).
+> - **The zero-lane receipt fabrication was deleted deliberately**: the old wave entrypoint
+>   synthesized a `complete` receipt solely to satisfy its return shape; no audit consumer
+>   reads receipts, so the internalized op skips the wave entirely on the zero-lane path.
+> - **The mechanism-tier ride-along**: `waves/reportWave.ts` now re-exports the transport
+>   tier's wave-level reason subset as `WaveLevelFailureReason` alongside `WaveAdapter` — the
+>   sanctioned type-only seam grew one name; guard Rule G's interior ban is unchanged.
+> - **Pi adapter** (`pi/v1/learning/audit.ts`): the registration with a COMPLETE
+>   frozen-baseline deepEqual pin, the `auditBundleDirOf` workflow-state binding, adapter/model
+>   resolution at the execute site, and the thin Result-rendering `executeAuditWave` core — now
+>   pinned with exact-text renders for two representative arms. New feature-suite pins:
+>   mid-flight + pre-aborted cancellation (run stopped, verdicts still written) and the
+>   deterministic full-sequence reduction order.
+> - **WorkflowSession / PromptEvidence changes**: NONE — the `audit_bundle_dir` handoff
+>   binding and the `audit` registry stage are untouched.
+> - **Dogfood**: none for this node — the audit path has live evidence
+>   (`docs/design/archive/session-audit-dogfood.md`) and externally observable behavior is
+>   preserved; the Phase-6 gate rides node 6.3, and the outstanding Phase-5 dogfood record
+>   **must close before 6.3 starts**.
+
 ### Changes
 
 Migrate one workflow at a time:
