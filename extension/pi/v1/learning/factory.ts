@@ -1,7 +1,8 @@
 // hop-2 — the two learn plan factories' warm transition surfaces: the `/learn-docs` and
 // `/learn-code` commands (the warm twins of the `perk learn docs` / `perk learn code` cold
-// doors). One shared register parameterized by a kind config — mirroring the Python plane's
-// `factory_common.py` (`LearnFactoryKind` + `DOCS_FACTORY`/`CODE_FACTORY` + `run_factory`).
+// doors). One shared register parameterized by the `learning/routing.ts` kind vocabulary —
+// mirroring the Python plane's `factory_common.py` (`LearnFactoryKind` +
+// `DOCS_FACTORY`/`CODE_FACTORY` + `run_factory`).
 //
 // Each door DELEGATES the gather to the Python plane (`perk learn <kind> --gather --json` via the
 // shared cold-door client `runColdDoor` — gate-safe, not subject to the read-only bash allowlist),
@@ -22,53 +23,13 @@
 // cannot occur, so the guard is interactive-only).
 
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { bindingSuffix } from "../substrate/bindingDelivery.ts";
-import { type ColdJson, runColdDoor, stringField } from "../substrate/coldDoor.ts";
-import { registerPerkCommand } from "../substrate/command.ts";
-import { render } from "../substrate/prompts.ts";
-import { branchOf, rebuildWorkflowState } from "../substrate/workflowState.ts";
-import { report } from "../surfaces/report.ts";
-
-/**
- * The per-door parameter bundle shared by the two warm learn-factory doors (the TS twin of the
- * frozen `LearnFactoryKind` dataclass). `subcommand` derives the cold argv, the `runColdDoor`
- * label, and the headless log tail; `seedTemplate` and `bindingTrigger` stay explicit so the
- * strings remain greppable against `prompts/stages/` and `shared/bindings.yaml`.
- */
-export interface LearnFactoryDoorKind {
-  /** The command id and `report()` scope. */
-  readonly name: string;
-  /** The cold-door verb under `perk learn`. */
-  readonly subcommand: string;
-  readonly seedTemplate: string;
-  readonly bindingTrigger: string;
-  /** The `registerPerkCommand` description. */
-  readonly description: string;
-  /** The gentle `no_learn_issues` warning. */
-  readonly emptyMessage: string;
-}
-
-export const DOCS_DOOR: LearnFactoryDoorKind = {
-  name: "learn-docs",
-  subcommand: "docs",
-  seedTemplate: "stages/learn-docs.md",
-  bindingTrigger: "command:learn-docs",
-  description:
-    "Start the learned-docs plan factory: gather open perk:learn issues into an inbox and author " +
-    "a docs/learned consolidation plan.",
-  emptyMessage: "nothing to consolidate (no open perk:learn issues).",
-};
-
-export const CODE_DOOR: LearnFactoryDoorKind = {
-  name: "learn-code",
-  subcommand: "code",
-  seedTemplate: "stages/learn-code.md",
-  bindingTrigger: "command:learn-code",
-  description:
-    "Start the learn-code plan factory: gather pre-stamped SHOULD_BE_CODE perk:learn issues into " +
-    "an inbox and author a plan routing each into its real code home.",
-  emptyMessage: "nothing to route into code (no SHOULD_BE_CODE perk:learn issues).",
-};
+import { learnFactoryGuidance } from "../../../learning/prose.ts";
+import { CODE_FACTORY, DOCS_FACTORY, type LearnFactoryKind } from "../../../learning/routing.ts";
+import { bindingSuffix } from "../../../substrate/bindingDelivery.ts";
+import { type ColdJson, runColdDoor, stringField } from "../../../substrate/coldDoor.ts";
+import { registerPerkCommand } from "../../../substrate/command.ts";
+import { branchOf, rebuildWorkflowState } from "../../../substrate/workflowState.ts";
+import { report } from "../../../surfaces/report.ts";
 
 /** The decoded `perk learn <kind> --gather --json` payload slice the warm door consumes. */
 export interface LearnGatherPayload {
@@ -92,23 +53,8 @@ export function decodeGather(payload: ColdJson): LearnGatherPayload | null {
   return { inbox_path: inboxPath, learn_numbers: numbers.map((n) => String(n)) };
 }
 
-/**
- * The seed guidance the warm door injects to start the factory loop (the per-kind skill pointer
- * rides the skill-binding suffix — not hardcoded here). Pure + exported for offline tests.
- */
-export function learnFactoryGuidance(
-  kind: LearnFactoryDoorKind,
-  inboxPath: string,
-  learnNumbers: string[],
-): string {
-  return render(kind.seedTemplate, {
-    inbox_path: inboxPath,
-    num_list: learnNumbers.join(", "),
-  });
-}
-
 /** Register one warm learn-factory door: the `/<kind.name>` command (no model tool). */
-export function registerLearnFactoryDoor(pi: ExtensionAPI, kind: LearnFactoryDoorKind): void {
+function registerLearnFactoryDoor(pi: ExtensionAPI, kind: LearnFactoryKind): void {
   registerPerkCommand(pi, kind.name, {
     description: kind.description,
     handler: async (_args, ctx: ExtensionContext) => {
@@ -167,4 +113,11 @@ export function registerLearnFactoryDoor(pi: ExtensionAPI, kind: LearnFactoryDoo
       );
     },
   });
+}
+
+/** Install both warm learn-factory doors (`/learn-docs`, `/learn-code`) from the kind vocabulary. */
+export function installLearnFactoryBindings(pi: ExtensionAPI): void {
+  for (const kind of [DOCS_FACTORY, CODE_FACTORY]) {
+    registerLearnFactoryDoor(pi, kind);
+  }
 }

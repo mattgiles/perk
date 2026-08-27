@@ -27,8 +27,8 @@
 //      directory-creating slice registers it in `ANCHORED_DIRS` with ≥1 in-directory production
 //      `.ts` anchor in the scanned corpus — the activation ratchet that forces every future
 //      home through this guard.
-//   D. Features never import Pi or the RPC wire: `PI_FREE_HOMES` (`authoring/`, `session/`)
-//      carry no `@earendil-works/*` specifier, no edge to `waves/rpcAdapter.ts`, no edge
+//   D. Features never import Pi or the RPC wire: `PI_FREE_HOMES` (`authoring/`, `codeReview/`,
+//      `learning/`, `session/`) carry no `@earendil-works/*` specifier, no edge to `waves/rpcAdapter.ts`, no edge
 //      into `surfaces/` (the report shape these homes need is re-exported through
 //      `substrate/sessionData.ts`, so a surfaces edge is never necessary), and no edge into
 //      `pi/` (the module-contracts law: the adapter imports the feature, never the reverse).
@@ -135,6 +135,7 @@ const KNOWN_TOP_LEVEL_DIRS = [
 const ANCHORED_DIRS: Record<string, string[]> = {
   authoring: ["authoring/gist/draft.ts"],
   codeReview: ["codeReview/submission.ts"],
+  learning: ["learning/capture.ts"],
   pi: ["pi/v1/gist.ts"],
   session: ["session/workflowSession.ts"],
 };
@@ -144,7 +145,7 @@ const ANCHORED_DIRS: Record<string, string[]> = {
  * bans — `@earendil-works/*`, the RPC transport module, and the `surfaces/` rendering seam —
  * with NO sanctioned re-export seams for these homes (see the header).
  */
-const PI_FREE_HOMES = ["authoring/", "codeReview/", "session/"];
+const PI_FREE_HOMES = ["authoring/", "codeReview/", "learning/", "session/"];
 
 /**
  * Rule E's registration tokens: whitespace-tolerant (a registration split across lines still
@@ -163,8 +164,8 @@ const APPROVED_REGISTRAR_FILES = ["index.ts", "workerMain.ts"];
 // edge to `waves/rpcAdapter.ts` — the wave registration sites (each constructs its adapter
 // at its execute site; construction threading was considered and dropped at review). SHRINK-ONLY
 // intent: entries leave as flows migrate behind typed operations; no new file may join without
-// operator confirmation — the `pi/v1/codeReview/` successors joined under the approved
-// code-review migration plan (the operator confirmation: the flows' registration sites moved
+// operator confirmation — the `pi/v1/codeReview/` and `pi/v1/learning/` successors joined under
+// their approved migration plans (the operator confirmation: the flows' registration sites moved
 // wholesale into the adapter home, swapping their door entries).
 const RPC_ADAPTER_IMPORTERS = [
   "doors/address.ts",
@@ -172,9 +173,9 @@ const RPC_ADAPTER_IMPORTERS = [
   "doors/draftReviewWaveTools.ts",
   "doors/dreamWaveTools.ts",
   "doors/harvestWaveTools.ts",
-  "doors/learn.ts",
   "pi/v1/codeReview/automated.ts",
   "pi/v1/codeReview/reviewWave.ts",
+  "pi/v1/learning/learn.ts",
   "pi/v1/objectivePlanning.ts",
 ];
 
@@ -202,8 +203,6 @@ const LEGACY_REGISTRANTS = [
   "doors/dreamWaveTools.ts",
   "doors/harvestWaveTools.ts",
   "doors/land.ts",
-  "doors/learn.ts",
-  "doors/learnFactory.ts",
   "doors/lifecycleGates.ts",
   "doors/objectiveReviewBrowser.ts",
   "doors/objectiveStack.ts",
@@ -1088,6 +1087,7 @@ test("control 10: feature-purity fixtures (Pi specifier, RPC edge, surfaces edge
     "authoring/clean.ts",
     "authoring/adapterEdge.ts",
     "codeReview/z.ts",
+    "learning/w.ts",
     "factories/allowed.ts",
   ];
   const sources: Record<string, string> = {
@@ -1099,6 +1099,8 @@ test("control 10: feature-purity fixtures (Pi specifier, RPC edge, surfaces edge
     "authoring/adapterEdge.ts": 'import { installPlanBindings } from "../pi/v1/plan.ts";',
     // The codeReview/ home is covered from the day it appeared (all four violation shapes bite).
     "codeReview/z.ts": 'import type { ExtensionContext } from "@earendil-works/pi-coding-agent";',
+    // The learning/ home cannot pass Rule D vacuously: a surfaces-seam edge from it must bite.
+    "learning/w.ts": 'import { report } from "../surfaces/report.ts";',
     // Outside the Pi-free homes: a factories/ Pi import is Rule-D-invisible by design.
     "factories/allowed.ts": 'import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";',
   };
@@ -1113,10 +1115,12 @@ test("control 10: feature-purity fixtures (Pi specifier, RPC edge, surfaces edge
     'session/y.ts: "../surfaces/report.ts" → surfaces/report.ts (surfaces seam)',
     'authoring/adapterEdge.ts: "../pi/v1/plan.ts" → pi/v1/plan.ts (Pi adapter home)',
     'codeReview/z.ts: "@earendil-works/pi-coding-agent" (direct Pi import)',
+    'learning/w.ts: "../surfaces/report.ts" → surfaces/report.ts (surfaces seam)',
   ]);
   assert.equal(visited.get("authoring/"), 3, "all three authoring/ files visited");
   assert.equal(visited.get("session/"), 1, "the session/ file visited");
   assert.equal(visited.get("codeReview/"), 1, "the codeReview/ file visited");
+  assert.equal(visited.get("learning/"), 1, "the learning/ file visited");
   const empty = checkFeaturePurity(
     ["factories/allowed.ts"],
     (file) => sources[file] ?? "",
