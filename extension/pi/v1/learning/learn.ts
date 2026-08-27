@@ -44,6 +44,12 @@ import { join } from "node:path";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { planningStageRefusal } from "../../../doors/lifecycleGates.ts";
 import {
+  LEARN_ANGLES,
+  learnManifestPath,
+  parseAngleSelections,
+  runLearnAnalystWave,
+} from "../../../learning/analystWave.ts";
+import {
   CAPTURED_DECISIONS,
   type CapturedDecision,
   finishLearn,
@@ -51,12 +57,6 @@ import {
   type LearnBackend,
   type PendingLearnMarker,
 } from "../../../learning/capture.ts";
-import {
-  LEARN_ANGLES,
-  learnManifestPath,
-  parseAngleSelections,
-  runLearnAnalystWave,
-} from "../../../learning/analystWave.ts";
 import { learnGuidance, learnOrchestrateGuidance } from "../../../learning/prose.ts";
 import { decideLearnLaunch } from "../../../learning/routing.ts";
 import { bindingSuffix } from "../../../substrate/bindingDelivery.ts";

@@ -119,7 +119,10 @@ export function parseAngleSelections(
     selections.push({ angle, ...(emphasis !== undefined ? { emphasis } : {}) });
   }
   if (!seen.has(MANDATORY_ANGLE)) {
-    return { ok: false, message: `the '${MANDATORY_ANGLE}' angle is mandatory — always include it` };
+    return {
+      ok: false,
+      message: `the '${MANDATORY_ANGLE}' angle is mandatory — always include it`,
+    };
   }
   return { ok: true, selections };
 }
