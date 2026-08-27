@@ -29,14 +29,15 @@ import { basename, dirname } from "node:path";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { reconcileGuidance } from "../authoring/objective/prose.ts";
 import { bindingSuffix } from "../substrate/bindingDelivery.ts";
-import { readPlanRef } from "../substrate/cache.ts";
 import {
   booleanField,
   type ColdJson,
   numberField,
   objectField,
+  objectListField,
   runColdDoor,
   stringField,
+  stringListField,
 } from "../substrate/coldDoor.ts";
 import { registerPerkCommand } from "../substrate/command.ts";
 import { resolveIssueBackendId, subagentModel } from "../substrate/config.ts";
@@ -45,7 +46,14 @@ import { acquireResolverLease, releaseResolverClaim } from "../substrate/resolve
 import { failFor, ok, type Result } from "../substrate/result.ts";
 import type { ToolGating } from "../substrate/toolGating.ts";
 import { booleanParam, idParam, paramsOf, stringParam } from "../substrate/toolParams.ts";
-import { appendWorkflowState, branchOf, rebuildWorkflowState } from "../substrate/workflowState.ts";
+import {
+  appendWorkflowState,
+  branchOf,
+  parseStackObjectiveArg,
+  rebuildWorkflowState,
+  resolveStackObjective,
+  STACK_NO_OBJECTIVE_MESSAGE,
+} from "../substrate/workflowState.ts";
 import { report } from "../surfaces/report.ts";
 import { CONFLICT_RESOLUTION_ATTEMPT_CAP, resetConflictAttempts } from "./submit.ts";
 
@@ -53,61 +61,11 @@ import { CONFLICT_RESOLUTION_ATTEMPT_CAP, resetConflictAttempts } from "./submit
  * driven with (the envelope itself is render-only — nothing persisted). */
 export type StackResult = Result<{ objective: string }>;
 
-const NO_OBJECTIVE_MESSAGE =
-  "no objective given and none active or linked — pass the objective explicitly.";
-
 const GATED_REFUSAL =
   "stack sync/recovery/landing mutates published branches and PRs — finish or exit the " +
   "read-only session first.";
 
-// --- objective inference (explicit → active_objective → plan-ref) -------------------------------
-
-/** The first command-arg token as the explicit objective (leading `#` stripped); null if none. */
-function parseObjectiveArg(args: string): string | null {
-  const token = args.trim().split(/\s+/)[0]?.replace(/^#/, "") ?? "";
-  return token.length > 0 ? token : null;
-}
-
-/** The three-tier objective resolution shared by every stack tool + command. */
-export function resolveStackObjective(
-  explicit: string | undefined,
-  ctx: ExtensionContext,
-): string | null {
-  if (explicit !== undefined && explicit.length > 0) return explicit;
-  try {
-    const active = rebuildWorkflowState(branchOf(ctx)).active_objective;
-    if (active !== undefined && active !== null) return active;
-  } catch {
-    // fall through to the plan-ref tier
-  }
-  try {
-    return readPlanRef(ctx.cwd)?.objective_id ?? null;
-  } catch {
-    return null;
-  }
-}
-
 // --- lenient render helpers (the cold envelopes are render-only DATA) ----------------------------
-
-/** Lenient object-list field: a non-array (or any non-object element) contributes nothing. */
-function objectListField(payload: ColdJson, key: string): ColdJson[] {
-  const value = payload[key];
-  if (!Array.isArray(value)) return [];
-  const out: ColdJson[] = [];
-  for (const item of value) {
-    if (typeof item === "object" && item !== null && !Array.isArray(item)) {
-      out.push(item as ColdJson);
-    }
-  }
-  return out;
-}
-
-/** Lenient string-list field: non-string elements are dropped. */
-function stringListField(payload: ColdJson, key: string): string[] {
-  const value = payload[key];
-  if (!Array.isArray(value)) return [];
-  return value.filter((item): item is string => typeof item === "string");
-}
 
 function findingLines(train: ColdJson, key: string): string[] {
   const rows = objectListField(train, key);
@@ -645,7 +603,7 @@ async function stackStatus(
 ): Promise<StackResult> {
   const fail = failFor(ctx, "objective-stack", "objective_stack_status");
   const objective = resolveStackObjective(objectiveParam, ctx);
-  if (objective === null) return fail(NO_OBJECTIVE_MESSAGE, "no_objective");
+  if (objective === null) return fail(STACK_NO_OBJECTIVE_MESSAGE, "no_objective");
   const r = await runColdDoor<ColdJson>(
     pi,
     ctx,
@@ -663,7 +621,7 @@ export async function stackSync(
 ): Promise<StackResult> {
   const fail = failFor(ctx, "objective-sync", "objective_stack_sync");
   const objective = resolveStackObjective(p.objective, ctx);
-  if (objective === null) return fail(NO_OBJECTIVE_MESSAGE, "no_objective");
+  if (objective === null) return fail(STACK_NO_OBJECTIVE_MESSAGE, "no_objective");
   if (p.resolve) {
     // The warm-only explicit dispatch (§8.51): never calls the cold sync worker — the shared
     // dispatch core corroborates against the CURRENT status projection (no freshness token;
@@ -706,7 +664,7 @@ export async function stackAdopt(
     );
   }
   const objective = resolveStackObjective(p.objective, ctx);
-  if (objective === null) return fail(NO_OBJECTIVE_MESSAGE, "no_objective");
+  if (objective === null) return fail(STACK_NO_OBJECTIVE_MESSAGE, "no_objective");
   const r = await runColdDoor<ColdJson>(pi, ctx, buildStackAdoptArgs(objective, p), {
     label: "perk objective stack sync --adopt",
     decode: (payload) => payload,
@@ -739,7 +697,7 @@ async function stackRecover(
     );
   }
   const objective = resolveStackObjective(p.objective, ctx);
-  if (objective === null) return fail(NO_OBJECTIVE_MESSAGE, "no_objective");
+  if (objective === null) return fail(STACK_NO_OBJECTIVE_MESSAGE, "no_objective");
   const r = await runColdDoor<ColdJson>(pi, ctx, buildStackRecoverArgs(objective, p), {
     label: "perk objective stack recover",
     decode: (payload) => payload,
@@ -763,7 +721,7 @@ async function stackLand(
     );
   }
   const objective = resolveStackObjective(p.objective, ctx);
-  if (objective === null) return fail(NO_OBJECTIVE_MESSAGE, "no_objective");
+  if (objective === null) return fail(STACK_NO_OBJECTIVE_MESSAGE, "no_objective");
   const r = await runColdDoor<ColdJson>(pi, ctx, buildStackLandArgs(objective, p), {
     label: "perk objective stack land",
     decode: (payload) => payload,
@@ -1457,9 +1415,9 @@ export function registerObjectiveStack(pi: ExtensionAPI, gating: ToolGating): vo
       "Show an objective's stacked delivery train (status, operations, continuation, residue). " +
       "Pass an objective number (else the active objective, else the plan-ref's).",
     handler: async (args, ctx) => {
-      const objective = resolveStackObjective(parseObjectiveArg(args ?? "") ?? undefined, ctx);
+      const objective = resolveStackObjective(parseStackObjectiveArg(args ?? "") ?? undefined, ctx);
       if (objective === null) {
-        report(ctx, "objective-stack", "warning", NO_OBJECTIVE_MESSAGE);
+        report(ctx, "objective-stack", "warning", STACK_NO_OBJECTIVE_MESSAGE);
         return;
       }
       const r = await runColdDoor<ColdJson>(
@@ -1485,9 +1443,9 @@ export function registerObjectiveStack(pi: ExtensionAPI, gating: ToolGating): vo
         report(ctx, "objective-sync", "warning", GATED_REFUSAL);
         return;
       }
-      const objective = resolveStackObjective(parseObjectiveArg(args ?? "") ?? undefined, ctx);
+      const objective = resolveStackObjective(parseStackObjectiveArg(args ?? "") ?? undefined, ctx);
       if (objective === null) {
-        report(ctx, "objective-sync", "warning", NO_OBJECTIVE_MESSAGE);
+        report(ctx, "objective-sync", "warning", STACK_NO_OBJECTIVE_MESSAGE);
         return;
       }
       report(ctx, "objective-sync", "info", `#${objective}`);
@@ -1507,9 +1465,9 @@ export function registerObjectiveStack(pi: ExtensionAPI, gating: ToolGating): vo
         report(ctx, "objective-recover", "warning", GATED_REFUSAL);
         return;
       }
-      const objective = resolveStackObjective(parseObjectiveArg(args ?? "") ?? undefined, ctx);
+      const objective = resolveStackObjective(parseStackObjectiveArg(args ?? "") ?? undefined, ctx);
       if (objective === null) {
-        report(ctx, "objective-recover", "warning", NO_OBJECTIVE_MESSAGE);
+        report(ctx, "objective-recover", "warning", STACK_NO_OBJECTIVE_MESSAGE);
         return;
       }
       report(ctx, "objective-recover", "info", `#${objective}`);
@@ -1529,9 +1487,9 @@ export function registerObjectiveStack(pi: ExtensionAPI, gating: ToolGating): vo
         report(ctx, "objective-land", "warning", GATED_REFUSAL);
         return;
       }
-      const objective = resolveStackObjective(parseObjectiveArg(args ?? "") ?? undefined, ctx);
+      const objective = resolveStackObjective(parseStackObjectiveArg(args ?? "") ?? undefined, ctx);
       if (objective === null) {
-        report(ctx, "objective-land", "warning", NO_OBJECTIVE_MESSAGE);
+        report(ctx, "objective-land", "warning", STACK_NO_OBJECTIVE_MESSAGE);
         return;
       }
       report(ctx, "objective-land", "info", `#${objective}`);

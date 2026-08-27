@@ -306,6 +306,40 @@ export function activePlanRef(source: { cwd: string } & BranchSource): PlanRef |
   }
 }
 
+/** The shared no-objective refusal every stack surface emits (soft fail / warning text). */
+export const STACK_NO_OBJECTIVE_MESSAGE =
+  "no objective given and none active or linked — pass the objective explicitly.";
+
+/** The first command-arg token as the explicit objective (leading `#` stripped); null if none. */
+export function parseStackObjectiveArg(args: string): string | null {
+  const token = args.trim().split(/\s+/)[0]?.replace(/^#/, "") ?? "";
+  return token.length > 0 ? token : null;
+}
+
+/**
+ * The three-tier stack-objective resolution shared by every stack tool + command: an explicit
+ * id wins; else the branch-rebuilt `active_objective`; else the worktree plan-ref's
+ * `objective_id`. Each fallible tier fails open to the next; null when nothing resolves.
+ * Structural + Pi-free: `ExtensionContext` satisfies the slice.
+ */
+export function resolveStackObjective(
+  explicit: string | undefined,
+  source: { cwd: string } & BranchSource,
+): string | null {
+  if (explicit !== undefined && explicit.length > 0) return explicit;
+  try {
+    const active = rebuildWorkflowState(branchOf(source)).active_objective;
+    if (active !== undefined && active !== null) return active;
+  } catch {
+    // fall through to the plan-ref tier
+  }
+  try {
+    return readPlanRef(source.cwd)?.objective_id ?? null;
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Equality by identity (provider + pr_id) — the plan-ref dedup key. Two refs to
  * the same plan are equal even if other fields drift; absent compares equal only to absent.

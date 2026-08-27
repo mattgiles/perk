@@ -16,6 +16,7 @@ import {
   planRefsEqual,
   readNodeClaim,
   rebuildWorkflowState,
+  resolveStackObjective,
   WORKFLOW_STATE_TYPE,
 } from "./workflowState.ts";
 
@@ -359,4 +360,51 @@ test("activePlanRef: a throwing getBranch is fail-open → null", () => {
     },
   };
   assert.equal(activePlanRef(source), null);
+});
+
+// --- resolveStackObjective (the shared three-tier stack-objective resolution) --------------------
+
+const STACK_REF: PlanRef = { ...WORKTREE_REF, objective_id: "137" };
+
+test("resolveStackObjective: explicit wins over active_objective and the plan-ref", () => {
+  const cwd = mkdtempSync(join(tmpdir(), "perk-rso-"));
+  writePlanRef(cwd, STACK_REF);
+  const source = {
+    cwd,
+    sessionManager: { getBranch: () => [ws({ active_objective: "9" })] },
+  };
+  assert.equal(resolveStackObjective("42", source), "42");
+  // An empty explicit never wins — it falls through to the branch tier.
+  assert.equal(resolveStackObjective("", source), "9");
+});
+
+test("resolveStackObjective: active_objective beats the plan-ref; the plan-ref is last", () => {
+  const cwd = mkdtempSync(join(tmpdir(), "perk-rso-"));
+  writePlanRef(cwd, STACK_REF);
+  const withActive = {
+    cwd,
+    sessionManager: { getBranch: () => [ws({ active_objective: "9" })] },
+  };
+  assert.equal(resolveStackObjective(undefined, withActive), "9");
+  const withoutActive = { cwd, sessionManager: { getBranch: () => [] } };
+  assert.equal(resolveStackObjective(undefined, withoutActive), "137");
+});
+
+test("resolveStackObjective: a throwing branch read fails open to the plan-ref tier", () => {
+  const cwd = mkdtempSync(join(tmpdir(), "perk-rso-"));
+  writePlanRef(cwd, STACK_REF);
+  const source = {
+    cwd,
+    sessionManager: {
+      getBranch: (): unknown[] => {
+        throw new Error("boom");
+      },
+    },
+  };
+  assert.equal(resolveStackObjective(undefined, source), "137");
+});
+
+test("resolveStackObjective: nothing resolves → null", () => {
+  const cwd = mkdtempSync(join(tmpdir(), "perk-rso-"));
+  assert.equal(resolveStackObjective(undefined, { cwd, sessionManager: { getBranch: () => [] } }), null);
 });

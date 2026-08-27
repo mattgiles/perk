@@ -99,6 +99,26 @@ export function objectField(payload: ColdJson, key: string): ColdJson | undefine
   return value as ColdJson;
 }
 
+/** Lenient object-list field: a non-array (or any non-object element) contributes nothing. */
+export function objectListField(payload: ColdJson, key: string): ColdJson[] {
+  const value = payload[key];
+  if (!Array.isArray(value)) return [];
+  const out: ColdJson[] = [];
+  for (const item of value) {
+    if (typeof item === "object" && item !== null && !Array.isArray(item)) {
+      out.push(item as ColdJson);
+    }
+  }
+  return out;
+}
+
+/** Lenient string-list field: non-string elements are dropped. */
+export function stringListField(payload: ColdJson, key: string): string[] {
+  const value = payload[key];
+  if (!Array.isArray(value)) return [];
+  return value.filter((item): item is string => typeof item === "string");
+}
+
 /** Best-effort parse of stdout into a plain object; null on anything else. */
 function parseObject(stdout: string): ColdJson | null {
   let parsed: unknown;
