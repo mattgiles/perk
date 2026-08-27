@@ -6,7 +6,7 @@ This is the readable projection of perk's living, workflow-first prose graph. It
 ## Coverage
 
 - **213** canonical source units
-- **723** logical fragments
+- **726** logical fragments
 - **16** session shapes and **10** assemblies
 - **15** explicitly excluded candidates (policy-only; not displayed)
 - **0** validation findings
@@ -1306,7 +1306,8 @@ Capture learnings and route them into documentation, code, or harvested objectiv
 - `typescript-tool:learn`
   - `description` — description (`tool:learn.description`)
   - `promptSnippet` — promptSnippet (`tool:learn.promptSnippet`)
-  - `promptGuidelines` — promptGuidelines (`tool:learn.promptGuidelines`)
+  - `promptGuidelines.0` — promptGuidelines item 1 (`tool:learn.promptGuidelines.0`)
+  - `promptGuidelines.1` — promptGuidelines item 2 (`tool:learn.promptGuidelines.1`)
   - `parameters.properties.summary.description` — parameters.properties.summary.description (`tool:learn.parameters.properties.summary.description`)
   - `parameters.properties.decision.description` — parameters.properties.decision.description (`tool:learn.parameters.properties.decision.description`)
   - `parameters.properties.target.description` — parameters.properties.target.description (`tool:learn.parameters.properties.target.description`)
@@ -1322,7 +1323,9 @@ Capture learnings and route them into documentation, code, or harvested objectiv
 - `typescript-tool:run_learn_wave`
   - `description` — description (`tool:run_learn_wave.description`)
   - `promptSnippet` — promptSnippet (`tool:run_learn_wave.promptSnippet`)
-  - `promptGuidelines` — promptGuidelines (`tool:run_learn_wave.promptGuidelines`)
+  - `promptGuidelines.0` — promptGuidelines item 1 (`tool:run_learn_wave.promptGuidelines.0`)
+  - `promptGuidelines.1` — promptGuidelines item 2 (`tool:run_learn_wave.promptGuidelines.1`)
+  - `promptGuidelines.2` — promptGuidelines item 3 (`tool:run_learn_wave.promptGuidelines.2`)
   - `parameters.properties.bundle_dir.description` — parameters.properties.bundle_dir.description (`tool:run_learn_wave.parameters.properties.bundle_dir.description`)
   - `parameters.properties.angles.description` — parameters.properties.angles.description (`tool:run_learn_wave.parameters.properties.angles.description`)
   - `parameters.properties.angles.items.properties.emphasis.description` — parameters.properties.angles.items.properties.emphasis.description (`tool:run_learn_wave.parameters.properties.angles.items.properties.emphasis.description`)
