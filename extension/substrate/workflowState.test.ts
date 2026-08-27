@@ -1,7 +1,11 @@
 import assert from "node:assert/strict";
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { test } from "node:test";
-import type { PlanRef } from "./cache.ts";
+import { type PlanRef, writePlanRef } from "./cache.ts";
 import {
+  activePlanRef,
   appendWorkflowState,
   appendWorkflowStateClassified,
   type BranchEntry,
@@ -309,4 +313,50 @@ test("readNodeClaim: rebuilt claim, fail-open on malformed/missing", () => {
     }),
     null,
   );
+});
+
+// --- activePlanRef (the shared worktree-first plan-ref resolution) ------------------------------
+
+const WORKTREE_REF: PlanRef = {
+  provider: "github",
+  pr_id: "42",
+  url: "https://gh/o/r/issues/42",
+  labels: ["perk:plan"],
+  objective_id: null,
+};
+
+const BRANCH_REF: PlanRef = { ...WORKTREE_REF, pr_id: "7", url: "https://gh/o/r/issues/7" };
+
+test("activePlanRef: the worktree plan-ref wins over a branch-carried one", () => {
+  const cwd = mkdtempSync(join(tmpdir(), "perk-apr-"));
+  writePlanRef(cwd, WORKTREE_REF);
+  const source = {
+    cwd,
+    sessionManager: { getBranch: () => [ws({ active_plan_ref: BRANCH_REF })] },
+  };
+  assert.deepEqual(activePlanRef(source), WORKTREE_REF);
+});
+
+test("activePlanRef: no worktree file → the rebuilt branch active_plan_ref", () => {
+  const cwd = mkdtempSync(join(tmpdir(), "perk-apr-"));
+  const source = {
+    cwd,
+    sessionManager: { getBranch: () => [ws({ active_plan_ref: BRANCH_REF })] },
+  };
+  assert.deepEqual(activePlanRef(source), BRANCH_REF);
+  // A branch that carries no linkage resolves null (not undefined).
+  assert.equal(activePlanRef({ cwd, sessionManager: { getBranch: () => [] } }), null);
+});
+
+test("activePlanRef: a throwing getBranch is fail-open → null", () => {
+  const cwd = mkdtempSync(join(tmpdir(), "perk-apr-"));
+  const source = {
+    cwd,
+    sessionManager: {
+      getBranch: (): unknown[] => {
+        throw new Error("boom");
+      },
+    },
+  };
+  assert.equal(activePlanRef(source), null);
 });
