@@ -8,7 +8,6 @@ import { existsSync, mkdirSync } from "node:fs";
 import { basename, join } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { registerAddress } from "./doors/address.ts";
-import { registerCiExecutor } from "./doors/ciExecutor.ts";
 import { registerCommitAndCompact } from "./doors/commitCompact.ts";
 import {
   createDraftReviewWaveState,
@@ -33,6 +32,7 @@ import { installReviewWaveBindings } from "./pi/v1/codeReview/reviewWave.ts";
 import { installStackReviewBindings } from "./pi/v1/codeReview/stack.ts";
 import { installCuratedSubmissionBindings } from "./pi/v1/codeReview/submit.ts";
 import { installPrReviewTerminalBindings } from "./pi/v1/codeReview/terminal.ts";
+import { installCiBindings } from "./pi/v1/delivery/ci.ts";
 import { installGistBindings } from "./pi/v1/gist.ts";
 import { installAuditBindings } from "./pi/v1/learning/audit.ts";
 import { installDreamBindings } from "./pi/v1/learning/dream.ts";
@@ -553,7 +553,7 @@ export default function (pi: ExtensionAPI) {
 
   // The read-only CI executor: the `run_ci` tool + `/ci` command + `--allow-project-ci`
   // flag. Runs the project's `[ci]` named checks deterministically and reports (never fixes/loops).
-  registerCiExecutor(pi);
+  installCiBindings(pi);
 
   // The objective substrate: `/objective` set/clear, budget accounting, threshold
   // compaction, all keyed off the now-live `active_objective`. Inert when no objective is active.

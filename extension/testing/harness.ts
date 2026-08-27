@@ -135,7 +135,8 @@ export interface PerkSession {
   /** Invoke a registered tool's `execute` directly with a synthesized ctx. `opts.onUpdate`
    * captures streamed partial results (pi's `onUpdate` channel); `opts.ui` overlays scripted
    * dialog answers (select/input/editor) on the recording UI — the recording surfaces stay;
-   * `opts.signal` rides the execute callback's AbortSignal slot (cancellation-threading pins). */
+   * `opts.signal` rides the execute callback's AbortSignal slot and `opts.ctxSignal` lands on
+   * `ctx.signal` (cancellation-threading pins for both sourcing conventions). */
   invokeTool(
     name: string,
     params: unknown,
@@ -143,6 +144,7 @@ export interface PerkSession {
       onUpdate?: (partial: { content: { text?: string }[]; details: unknown }) => void;
       ui?: Record<string, unknown>;
       signal?: AbortSignal;
+      ctxSignal?: AbortSignal;
     },
   ): Promise<{ content: { text?: string }[]; details: unknown; terminate?: boolean }>;
   /** Fire a `tool_call` event through the runner; returns the gating verdict (block/reason). */
@@ -735,6 +737,9 @@ export async function loadPerkSession(opts: {
         onUpdate?: (partial: { content: { text?: string }[]; details: unknown }) => void;
         ui?: Record<string, unknown>;
         signal?: AbortSignal;
+        /** Placed on `ctx.signal` (production tools source cancellation from the context, not
+         * the execute callback's signal slot — this knob exercises that path). */
+        ctxSignal?: AbortSignal;
       },
     ) {
       const tool = session.extensionRunner
@@ -750,7 +755,7 @@ export async function loadPerkSession(opts: {
           ...(toolOpts?.ui ?? {}),
         },
         sessionManager: session.sessionManager,
-        signal: undefined,
+        signal: toolOpts?.ctxSignal,
         isIdle: () => true,
       } as unknown as Parameters<typeof tool.definition.execute>[4];
       const result = await tool.definition.execute(
