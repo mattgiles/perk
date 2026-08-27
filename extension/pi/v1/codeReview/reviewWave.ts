@@ -118,7 +118,7 @@ export type StartReviewWaveResult = Result<StartReviewWaveOk, { attempts: WaveAt
 /**
  * The `start_review_wave` execute core, extracted for testability with the session's
  * pending-wave state, the adapter, and the report target as injected structural slices (the
- * `executeLearnWave` pattern; `state` is the per-registration slot — `start_review_wave`
+ * `runLearnAnalystWave` (learning/analystWave.ts) pattern; `state` is the per-registration slot — `start_review_wave`
  * refuses while it holds a wave, `collect_review_wave` drains it). Assumes DECODED params
  * (the registered tool runs `decodeStartReviewWaveParams` first) and a caller-resolved `model`.
  * Launch failure (the pre-spawn `ok: false` arm — `unavailable`/`spawn-failed`/`cancelled`) is a

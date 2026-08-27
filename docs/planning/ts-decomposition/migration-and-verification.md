@@ -641,6 +641,37 @@ alone.
 Give learning one coherent home while reusing `ReportWave` only for execution
 mechanics.
 
+> **Status (Objective #2083, Node 6.1):** learn capture + the learn-docs/learn-code routing
+> landed — realized-shape notes:
+>
+> - **Behavior moved**: `learn`, `run_learn_wave`, `/learn`, `/learn-docs`, `/learn-code` —
+>   registrations, prompts, guards, the marker mirror, and the wave policy — behavior-preserving
+>   against the frozen binding inventory. The three old modules (`doors/learn.ts`,
+>   `doors/learnFactory.ts`, `waves/learnWave.ts`) + five test files were deleted whole in the
+>   same change (index imports and guard census entries included).
+> - **Typed feature operations** in the Pi-free `extension/learning/` home: `finishLearn`
+>   (capture.ts — the capture/skip state policy; marker cleared only on verified backend
+>   success), `runLearnAnalystWave` + `parseAngleSelections` (analystWave.ts — angle policy,
+>   report schema with enums DERIVED from `LEARN_ANGLES`/`CAPTURED_DECISIONS`, assignment
+>   composition, best-effort outcome mapping), `decideLearnLaunch` + the factory-kind vocabulary
+>   (routing.ts — the `factory_common.py` twin), and the guidance renders (prose.ts).
+> - **Seams introduced**: `LearnBackend` + `PendingLearnMarker` (production adapters over
+>   `runColdDoor`/cache markers in `pi/v1/learning/learn.ts`; deterministic fakes in the feature
+>   suite). `WaveAdapter` reused, not introduced; `decideLearnLaunch` stays a concrete function
+>   (no speculative gather port). `activePlanRef` moved to `substrate/workflowState.ts` as the
+>   shared structural seam — `doors/address.ts`'s duplicate died two nodes early.
+> - **Pi adapters** (`pi/v1/learning/learn.ts` + `factory.ts`): registrations with COMPLETE
+>   frozen-baseline deepEqual pins, strict tool-boundary decodes, the planning-stage +
+>   `plan_save` host guards, `subagentModel` resolution, RPC adapter construction at the execute
+>   site, prompt placement + binding suffixes, Result rendering, headless stderr arms.
+>   Cancellation is unchanged and now feature-pinned: the tool signal threads into the wave; an
+>   abort settles `cancelled` (normalized, never a throw).
+> - **WorkflowSession / PromptEvidence changes**: NONE — learn state stays plan-header (§8.36)
+>   + the local marker. No upstream facility admitted.
+> - **Dogfood**: none for this node — the Phase-6 gate rides node 6.3. The Phase-5 dogfood
+>   record was this node's start precondition; the operator waived it explicitly on the plan
+>   issue (the 5.1 precedent) — the record remains owed on the train before 6.3's gate.
+
 ### Changes
 
 Migrate one workflow at a time:

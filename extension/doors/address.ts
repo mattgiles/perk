@@ -375,7 +375,7 @@ export type ClassifyReviewFeedbackResult = Result<
 /**
  * The `classify_review_feedback` execute core, extracted for testability with the adapter as the
  * injected minimal structural slice (`WaveAdapter` — the memory adapter in tests, the RPC
- * adapter in production). Mirrors `executeLearnWave`'s soft-result idiom: a complete wave yields
+ * adapter in production). Mirrors `runLearnAnalystWave`'s soft-result idiom: a complete wave yields
  * a non-terminating ok (the untrusted-DATA preface + one fenced `json` block of the report); an
  * incomplete wave soft-fails LOUDLY with the first failure's detail and its `WaveFailureReason`
  * as `error_type` — never a throw, never a silent fallback, no retry (the flow's posture is

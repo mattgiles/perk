@@ -1,6 +1,6 @@
 // Tests for the review-wave tool pair (registered live in `extension/index.ts`). The strict
 // decoder is pinned directly; the start/collect execute cores are driven through the injected
-// in-memory adapter (the `executeLearnWave` test posture — no session needed); registration +
+// in-memory adapter (the `runLearnAnalystWave` test posture — no session needed); registration +
 // the real tool-boundary threading (config model → spawn, decode refusal, launch → collect
 // round-trip) run against a REAL bound session via the T1 harness (the harness binds perk's
 // extension, so the pair is present) with a fake pi-subagents RPC responder on pi.events.

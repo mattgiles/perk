@@ -59,7 +59,7 @@ function report(basename: string, overrides: Record<string, unknown> = {}): unkn
   };
 }
 
-/** The ReportTarget fake (mirrors learn.test.ts's executeLearnWave target). */
+/** The ReportTarget fake (the learn wave tool's execute-core posture — now runLearnAnalystWave, learning/analystWave.ts). */
 function target(): { hasUI: boolean; ui: { notify: (m: string) => void } } {
   return { hasUI: true, ui: { notify: () => {} } };
 }
