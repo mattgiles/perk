@@ -40,14 +40,33 @@ import {
 } from "./dreamReducer.ts";
 
 /** The first-level analysis section every aggregate arm carries. */
-interface DreamAnalysisSection {
-  complete: boolean;
+interface AnalysisSection<C extends boolean> {
+  complete: C;
   analyses: DreamLaneAnalysis[];
   failures: DreamLaneFailure[];
 }
 
+/** The reducer section on the two pre-launch skip arms. */
+interface SkippedReducers<R extends "incomplete-analysis" | "budget-exceeded"> {
+  launched: false;
+  skip_reason: R;
+  complete: false;
+  reports: [];
+  failures: [];
+}
+
+/** The reducer section after a launch (failures only when the wave stayed incomplete — plus
+ * the synthetic `digest-marker` entry on the failed-marker-set arm). */
+interface LaunchedReducers<C extends boolean, F extends DreamReducerFailure[] | []> {
+  launched: true;
+  skip_reason: null;
+  complete: C;
+  reports: DreamReducerAnalysis[];
+  failures: F;
+}
+
 /** The written-bundle accounting (the happy write: in budget, `overflow_bytes` pinned 0). */
-interface DreamBundleWritten {
+interface WrittenBundle {
   path: string;
   written: true;
   bytes: number;
@@ -55,128 +74,69 @@ interface DreamBundleWritten {
   overflow_bytes: 0;
 }
 
-/** The aggregate arm behind an incomplete first wave: no bundle, no bracket, no reducers. */
-export interface DreamAggregateIncompleteAnalysis {
-  complete: false;
-  analysis: DreamAnalysisSection & { complete: false };
-  bracket: null;
-  bundle: null;
-  reducers: {
-    launched: false;
-    skip_reason: "incomplete-analysis";
-    complete: false;
-    reports: [];
-    failures: [];
-  };
-  attempts: WaveAttemptReceipt[];
-}
-
-/** The over-budget arm: explicit `{bytes, budget_bytes, overflow_bytes}` accounting, nothing
- * written, no reducer launch (the loud corpus-growth tripwire — never truncation). */
-export interface DreamAggregateBudgetExceeded {
-  complete: false;
-  analysis: DreamAnalysisSection & { complete: true };
-  bracket: null;
-  bundle: {
-    path: string;
-    written: false;
-    bytes: number;
-    budget_bytes: number;
-    overflow_bytes: number;
-  };
-  reducers: {
-    launched: false;
-    skip_reason: "budget-exceeded";
-    complete: false;
-    reports: [];
-    failures: [];
-  };
-  attempts: WaveAttemptReceipt[];
-}
-
-/** The incomplete-reducer-wave arm: the analyses-only bundle stays behind with a cleared
- * marker (the finalized decode refuses it); the bracket is never evaluated. */
-export interface DreamAggregateReducersIncomplete {
-  complete: false;
-  analysis: DreamAnalysisSection & { complete: true };
-  bracket: null;
-  bundle: DreamBundleWritten;
-  reducers: {
-    launched: true;
-    skip_reason: null;
-    complete: false;
-    reports: DreamReducerAnalysis[];
-    failures: DreamReducerFailure[];
-  };
-  attempts: WaveAttemptReceipt[];
-}
-
-/** The drifted-bracket arm: both waves completed, but the repository moved off the stamped
- * snapshot — the finalize and the marker set are skipped (structurally undraftable). */
-export interface DreamAggregateBracketDrift {
-  complete: false;
-  analysis: DreamAnalysisSection & { complete: true };
-  bracket: { ok: false; detail: string | null };
-  bundle: DreamBundleWritten;
-  reducers: {
-    launched: true;
-    skip_reason: null;
-    complete: true;
-    reports: DreamReducerAnalysis[];
-    failures: [];
-  };
-  attempts: WaveAttemptReceipt[];
-}
-
-/** The failed-marker-set arm: the wave ran and the finalize landed, but the digest append
- * failed its read-back — honestly incomplete with the synthetic `digest-marker` failure entry
- * (the marker stays cleared, so recovery refuses; re-running the wave repairs it). */
-export interface DreamAggregateMarkerSetFailed {
-  complete: false;
-  analysis: DreamAnalysisSection & { complete: true };
-  bracket: { ok: true; detail: string | null };
-  bundle: DreamBundleWritten;
-  reducers: {
-    launched: true;
-    skip_reason: null;
-    complete: true;
-    reports: DreamReducerAnalysis[];
-    failures: DreamReducerFailure[];
-  };
-  attempts: WaveAttemptReceipt[];
-}
-
-/** The fully-complete arm: both waves, an in-budget write, a passing bracket, the finalized
- * rewrite, and a verified marker set. */
-export interface DreamAggregateComplete {
-  complete: true;
-  analysis: DreamAnalysisSection & { complete: true };
-  bracket: { ok: true; detail: string | null };
-  bundle: DreamBundleWritten;
-  reducers: {
-    launched: true;
-    skip_reason: null;
-    complete: true;
-    reports: DreamReducerAnalysis[];
-    failures: [];
-  };
-  attempts: WaveAttemptReceipt[];
-}
-
 /**
  * The typed normalized aggregate — a discriminated union of the real post-launch arms over the
  * exact wire fields (`complete`, `bundle` null/`written`, `bracket` null/`ok`, the
  * `reducers.skip_reason` literals), each arm constructed at exactly one policy site, so
  * contradictory combinations (e.g. `complete: true` with `bracket: null`) are unrepresentable
- * while the serialized JSON stays byte-identical to the flat aggregate shape.
+ * while the serialized JSON stays byte-identical to the flat aggregate shape. Arms in policy
+ * order: incomplete first wave (no bundle, no bracket, no reducers) · over-budget (explicit
+ * accounting, nothing written — the loud corpus-growth tripwire, never truncation) ·
+ * incomplete reducer wave (the analyses-only bundle stays behind with a cleared marker) ·
+ * bracket drift (both waves done; finalize + marker set skipped — structurally undraftable) ·
+ * failed marker set (finalize landed; the unverified append is the synthetic `digest-marker`
+ * failure — honestly incomplete) · complete.
  */
-export type DreamAnalysisAggregate =
-  | DreamAggregateIncompleteAnalysis
-  | DreamAggregateBudgetExceeded
-  | DreamAggregateReducersIncomplete
-  | DreamAggregateBracketDrift
-  | DreamAggregateMarkerSetFailed
-  | DreamAggregateComplete;
+export type DreamAnalysisAggregate = { attempts: WaveAttemptReceipt[] } & (
+  | {
+      complete: false;
+      analysis: AnalysisSection<false>;
+      bracket: null;
+      bundle: null;
+      reducers: SkippedReducers<"incomplete-analysis">;
+    }
+  | {
+      complete: false;
+      analysis: AnalysisSection<true>;
+      bracket: null;
+      bundle: {
+        path: string;
+        written: false;
+        bytes: number;
+        budget_bytes: number;
+        overflow_bytes: number;
+      };
+      reducers: SkippedReducers<"budget-exceeded">;
+    }
+  | {
+      complete: false;
+      analysis: AnalysisSection<true>;
+      bracket: null;
+      bundle: WrittenBundle;
+      reducers: LaunchedReducers<false, DreamReducerFailure[]>;
+    }
+  | {
+      complete: false;
+      analysis: AnalysisSection<true>;
+      bracket: { ok: false; detail: string | null };
+      bundle: WrittenBundle;
+      reducers: LaunchedReducers<true, []>;
+    }
+  | {
+      complete: false;
+      analysis: AnalysisSection<true>;
+      bracket: { ok: true; detail: string | null };
+      bundle: WrittenBundle;
+      reducers: LaunchedReducers<true, DreamReducerFailure[]>;
+    }
+  | {
+      complete: true;
+      analysis: AnalysisSection<true>;
+      bracket: { ok: true; detail: string | null };
+      bundle: WrittenBundle;
+      reducers: LaunchedReducers<true, []>;
+    }
+);
 
 /**
  * The typed dream-analysis outcome: ONE `io_failed` arm for every io site — the unverified
@@ -198,36 +158,10 @@ export type DreamAnalysisOutcome =
  * capability REQUIRED (the compiler walks every call site to an explicit choice; the adapter
  * wires production seams, tests inject fakes). Caller preconditions: the manifest came from
  * `decodeDreamManifest` and `verifyDocContainment` was run (the registered tool's pre-spawn
- * ladder). Sequence:
- *
- *  1. `markBundleDigest("")` FIRST, unconditionally — any new attempt invalidates prior
- *     finalized state BEFORE the filesystem is touched (the invalidation record: a failed
- *     removal below leaves prior files behind, but recovery refuses them); a clear that cannot
- *     be VERIFIED (a false return) refuses `io_failed` before any filesystem work or spawn —
- *     proceeding could leave a prior bundle+digest pair recoverable as fresh;
- *  2. entry-time bundle removal — the current-attempt-only invariant: the fixed name exists
- *     iff the CURRENT call wrote it, so the incomplete/over-budget arms can never leave a
- *     stale prior bundle contradicting the returned aggregate, and after a write `io_failed`
- *     the target is absent (the atomic temp+rename never landed); a removal failure refuses
- *     `io_failed` before any spawn (empty `{analyses, attempts}`);
- *  3. the strict analyst wave; incomplete ⇒ the `incomplete-analysis` aggregate arm — no
- *     write, no reducer launch (marker stays cleared);
- *  4. compose + budget-check the bundle BEFORE reducer task composition; over budget ⇒ the
- *     `budget-exceeded` arm with explicit `{bytes, budget_bytes, overflow_bytes}` accounting —
- *     nothing written, no reducer launch;
- *  5. the analyst-bundle write; a throw ⇒ `io_failed` retaining `{analyses, attempts}`;
- *  6. the reducer wave over the written bundle; an incomplete reducer wave leaves the
- *     analyses-only bundle and a cleared marker (the finalized decode refuses it anyway);
- *  7. only when BOTH waves completed: the revalidation bracket (`opts.bracket()` — production
- *     wires `revalidationBracket` against the manifest's stamped `commit_sha`) runs BEFORE the
- *     finalize write; drift ⇒ skip the finalize write AND the marker set (the entry clear
- *     stands — recovery refuses the analyses-only bundle, so a drifted wave is structurally
- *     undraftable), returning the `bracket-drift` arm;
- *  8. bracket ok ⇒ the finalize-in-place rewrite of the same fixed name; a throw ⇒ `io_failed`
- *     (mirroring arm 5's retention); on success `markBundleDigest(digest)` with the sha256 of
- *     the finalized bytes — a failed set (an unverified append) is the `marker-set-failed`
- *     arm with a named `digest-marker` failure entry (the wave ran; the outcome is honestly
- *     incomplete — never `io_failed`), and the marker stays cleared so recovery refuses.
+ * ladder). The ordered sequence and each step's invariant are commented at their policy sites
+ * below: verified marker clear → entry-time bundle removal → the strict analyst wave → the
+ * budget check before reducer composition → the analyst-bundle write → the reducer wave → the
+ * §8.65 bracket (only after BOTH waves) → the finalize-in-place rewrite → the marker set.
  */
 export async function analyzeDream(
   adapter: WaveAdapter,
@@ -360,7 +294,7 @@ export async function analyzeDream(
       attempts,
     };
   }
-  const bundleDetails: DreamBundleWritten = {
+  const bundleDetails: WrittenBundle = {
     path: bundlePath,
     written: true,
     bytes,
