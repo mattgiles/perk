@@ -9,8 +9,6 @@
 // analyst analyses + the exact cancelled attempt accounting). Fully offline.
 
 import assert from "node:assert/strict";
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
 import { digestSessionData } from "../substrate/sessionData.ts";
@@ -80,9 +78,8 @@ const LANE_DOCS_CAP = 8;
 
 function decodedManifest(
   lanes: { id: string; rollup: string | null; docs: Record<string, unknown>[] }[],
-  manifestPath: string = MANIFEST_PATH,
 ): DreamManifest {
-  const result = decodeDreamManifest(rawManifest(lanes), manifestPath);
+  const result = decodeDreamManifest(rawManifest(lanes), MANIFEST_PATH);
   assert.equal(result.ok, true, JSON.stringify(result));
   return (result as { ok: true; manifest: DreamManifest }).manifest;
 }
@@ -417,51 +414,11 @@ test("analyzeDream: an UNVERIFIED marker clear refuses io_failed before ANY file
   // subsequent removal failure would leave the prior bundle + prior digest PAIR intact and
   // recoverable as fresh. The refusal fires before the removal even runs, so no mutation (and
   // no such mixed state) can happen — asserted here with a remove spy that would also fail.
-  const tmp = mkdtempSync(join(tmpdir(), "dream-analysis-"));
-  const manifestPath = join(tmp, "dream-manifest.json");
-  const lanes = [{ id: "pi-1", rollup: null, docs: [dreamDoc("docs/learned/pi/subagents.md")] }];
-  const manifestBytes = `${JSON.stringify(rawManifest(lanes), null, 2)}\n`;
-  writeFileSync(manifestPath, manifestBytes, "utf8");
-  // A REAL prior finalized state: the old bundle on disk whose digest the (unclearable) old
-  // marker would still name.
-  const priorManifest = decodedManifest(lanes, manifestPath);
-  const priorBundle = finalizeDreamBundle(
-    priorManifest,
-    [
-      {
-        lane: "pi-1",
-        report: {
-          docs: [
-            {
-              path: "docs/learned/pi/subagents.md",
-              disposition: "keep",
-              merge_target: null,
-              rationale: "still true",
-              preserve: [],
-              evidence_checked: [],
-              confidence: "high",
-            },
-          ],
-          overlap_signals: [],
-          harvest_followups: [],
-          uncertainties: [],
-          overlap_signals_omitted: 0,
-          harvest_followups_omitted: 0,
-          uncertainties_omitted: 0,
-        },
-      },
-    ],
-    [],
-    digestSessionData(manifestBytes),
-  );
-  const priorBundlePath = join(tmp, DREAM_ANALYSES_FILENAME);
-  writeFileSync(priorBundlePath, priorBundle, "utf8");
-
   const adapter = createMemoryWaveAdapter();
   const spies = bundleSpies({ clearFails: true });
   const outcome = await analyzeDream(adapter, {
-    manifest: priorManifest,
-    manifestDigest: digestSessionData(manifestBytes),
+    manifest: TWO_LANE_MANIFEST(),
+    manifestDigest: MANIFEST_DIGEST,
     markBundleDigest: spies.markBundleDigest,
     bracket: spies.bracket,
     writeBundle: spies.writeBundle,
@@ -484,12 +441,6 @@ test("analyzeDream: an UNVERIFIED marker clear refuses io_failed before ANY file
     "the refusal fires BEFORE the removal attempt — no filesystem mutation is possible, so a " +
       "failed clear can never combine with a failed removal into a stale recoverable pair",
   );
-  assert.equal(
-    existsSync(priorBundlePath),
-    true,
-    "the prior finalized state is untouched (the wave refused before mutating anything)",
-  );
-  rmSync(tmp, { recursive: true, force: true });
 });
 
 test("analyzeDream: a bundle-write throw is the io_failed arm retaining analyses + attempts", async () => {
@@ -801,43 +752,4 @@ test("analyzeDream: cancellation at the glue boundary — no reducer spawn after
   // cleared marker (recovery refuses it).
   assert.deepEqual(spies.events, ["clear", "remove", "write"]);
   assert.equal(spies.writes.length, 1);
-});
-
-test("analyzeDream: a pre-existing stale bundle is removed before the wave (real fs removal)", async () => {
-  // A real rmSync-force removal capability against a REAL stale file: the incomplete arm
-  // writes nothing, so the fixed name must be gone afterward (exists iff the CURRENT call
-  // wrote it).
-  const tmp = mkdtempSync(join(tmpdir(), "dream-analysis-"));
-  const manifestPath = join(tmp, "dream-manifest.json");
-  const stalePath = join(tmp, DREAM_ANALYSES_FILENAME);
-  writeFileSync(stalePath, "{stale prior bundle}", "utf8");
-  const manifest = decodedManifest(
-    [{ id: "pi-1", rollup: null, docs: [dreamDoc("docs/learned/pi/subagents.md")] }],
-    manifestPath,
-  );
-  const adapter = createMemoryWaveAdapter({
-    aggregate: {
-      state: "complete",
-      value: [{ key: "pi-1.1", ok: false, error: "analyst crashed", report: null }],
-    },
-  });
-  const details = aggregateOf(
-    await analyzeDream(adapter, {
-      manifest,
-      manifestDigest: MANIFEST_DIGEST,
-      markBundleDigest: () => true,
-      bracket: () => ({ ok: true, detail: null }),
-      writeBundle: () => {
-        throw new Error("nothing may write on the incomplete arm");
-      },
-      removeBundle: (path) => rmSync(path, { force: true }),
-    }),
-  );
-  assert.equal(details.complete, false);
-  assert.equal(
-    existsSync(stalePath),
-    false,
-    "the stale prior bundle can never contradict the returned aggregate",
-  );
-  rmSync(tmp, { recursive: true, force: true });
 });

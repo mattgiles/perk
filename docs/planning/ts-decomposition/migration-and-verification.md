@@ -758,7 +758,7 @@ mechanics.
 >     extraction and the two adapters (headers, the `LanedDocs` seam). Zero policy/behavior
 >     code grew; the predicted swamping deletion never existed because the trivial guards
 >     stay flow-private by operator decision, so no large duplication remained to delete.
->   - Test LOC: 6,524 (six suites) → 6,982 (seven suites), net +458 — the added pins are
+>   - Test LOC: 6,524 (six suites) → 6,985 (seven suites), net +461 — the added pins are
 >     frozen registration baselines, cancellation arms, exact-text renders, and
 >     serialized-key-order guards.
 >   - Files: 6 production modules + 6 suites deleted; 8 production modules + 7 suites added.
