@@ -406,5 +406,8 @@ test("resolveStackObjective: a throwing branch read fails open to the plan-ref t
 
 test("resolveStackObjective: nothing resolves → null", () => {
   const cwd = mkdtempSync(join(tmpdir(), "perk-rso-"));
-  assert.equal(resolveStackObjective(undefined, { cwd, sessionManager: { getBranch: () => [] } }), null);
+  assert.equal(
+    resolveStackObjective(undefined, { cwd, sessionManager: { getBranch: () => [] } }),
+    null,
+  );
 });
