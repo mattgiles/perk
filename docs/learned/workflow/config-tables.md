@@ -204,7 +204,7 @@ worktree setup), unsafe for config that lands in a committed file or picks a can
 ## The `[[ci.checks]]` execution contract and change-scoped gating (#490)
 
 Each `[[ci.checks]]` row may carry an optional `glob`; when present, the check is **skipped**
-unless a changed file matches it. The cross-cutting facts below are what the `ciExecutor.ts` /
+unless a changed file matches it. The cross-cutting facts below are what the `delivery/ci.ts` /
 `parseCiChecks` code can't tell you on its own.
 
 ### The concurrent execution contract
@@ -223,7 +223,7 @@ no git work.
 When widening a single-key exact-match lookup into a delimiter-split multi-key selector, audit
 what the old exact match silently tolerated — or reject those inputs explicitly at the boundary.
 Two concrete regressions from widening `only` to a comma list, both fixed and regression-tested
-in `extension/doors/ciExecutor.ts`'s `runCiChecks` suite:
+in `extension/delivery/ci.ts`'s `runCiChecks` suite:
 
 - **Delimiter-containing names became unselectable** — the config boundary accepts any nonblank
   name, including one containing `,`; the old selector matched it exactly. Fix pattern: try an
@@ -232,7 +232,7 @@ in `extension/doors/ciExecutor.ts`'s `runCiChecks` suite:
   (newly concurrent, racing on the same scratch target). Fix pattern: each requested name selects
   the **first declared row** (the pre-concurrency `find` semantics).
 
-`extension/doors/ciExecutor.test.ts` is the reusable example of proof-grade concurrency tests: a
+`extension/delivery/ci.test.ts` is the reusable example of proof-grade concurrency tests: a
 start/end ordering log (all starts before any end) plus a causal deferred-resolution gate — no
 timers — and a shared-`AbortSignal` propagation test that settles fail-closed.
 
@@ -312,7 +312,7 @@ so a `glob = "*.py"` row can run only the Python toolchain.
 ## Two consumption models
 
 - **Interior gate (`[trust]`).** Consumed at runtime by a TS gate — `decideCiScope` in
-  `extension/doors/ciExecutor.ts`. The session must honor it live.
+  `extension/delivery/ci.ts`. The session must honor it live.
 - **init convergence (`[compaction]`).** Converged by `init` into `settings.json`, which pi reads
   natively at boot. No extension change is even possible here: the interactive pi CLI builds its
   `SettingsManager` *before* extensions load, so the extension can never set
@@ -399,7 +399,8 @@ launched session's model; the remote runner is unaffected.
 ## Cross-references
 
 - `extension/substrate/config.ts` — `parseTomlSubset` (the scalar-subset TS parser); `parseCiChecks` (`[[ci.checks]]` → `CiCheck[]`)
-- `extension/doors/ciExecutor.ts` — `decideCiScope` (the `[ci] trusted` interior gate); `changedFiles`/`matchesGlob`/skip plumbing (the `[[ci.checks]]` glob gating)
+- `extension/delivery/ci.ts` — `decideCiScope` (the `[ci] trusted` interior gate); the glob-match/skip plumbing (the `[[ci.checks]]` glob gating)
+- `extension/pi/v1/delivery/ci.ts` — `changedFiles` (the changed-set observation the glob gate consumes)
 - `src/perk/substrate/config.py` — the pydantic table models (`ConfigFileModel`, `CompactionTable`,
   `WorktreeTable`, …); `load_committed_compaction`, `load_committed_issues_backend` (the
   committed-only reads)

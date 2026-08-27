@@ -832,6 +832,92 @@ the migrated paths, producing and validating real artifacts.
 Concentrate session-interior delivery policy while keeping Git, GitHub, Linear,
 and process mechanics in the Python exterior and adapters.
 
+> **Status (Objective #2083, Node 7.1):** the first delivery slices landed — the stack-status
+> read + CI execution — realized-shape notes:
+>
+> - **Behavior moved**: `run_ci` + `/ci` + `--allow-project-ci` (registrations byte-identical,
+>   frozen-baseline deepEqual pins incl. the flag via the bound runner's `getFlags()`), and
+>   `objective_stack_status` + `/objective-stack` — behavior-preserving against the frozen
+>   binding inventory (wire payloads, refusal/confirm texts, render prose, and gating all
+>   unchanged; `READ_ONLY_TOOLS` untouched). `doors/ciExecutor.ts` + its suite were deleted
+>   whole in the same change (index import and guard census entries included);
+>   `doors/objectiveStack.ts` survives with exactly the mutating family.
+> - **CI is the feature; status is adapter-tier.** `extension/delivery/ci.ts` is the one
+>   Pi-free feature op (`runCiChecks` — selection incl. exact-name-before-comma-split and
+>   first-duplicate-row, declared-order concurrent execution, change-scoped glob gating with
+>   compute-once + fail-open-null, never-throw per-check folding, route-don't-relay scratch)
+>   returning the typed `CiRunOutcome` union (`not_configured`/`invalid_selection`/`completed`;
+>   `executed` carries no `passed` — derived, so a contradiction is unrepresentable) with the
+>   delivery-specific typed progress union (`run_started`/`check_settled`, ordered deep-copied
+>   snapshots, sink-failure ownership incl. async-rejecting sinks). The stack-status slice was
+>   realized **adapter-only** (`pi/v1/delivery/stackStatus.ts`) — a deliberate narrowing of the
+>   roadmap's "semantic operations" wording for this slice: the read is pure decode + render +
+>   delegation with zero policy (the 4.2 zero-policy precedent), so no feature op was built.
+>   Readiness and CI share no abstraction.
+> - **Semantic ports** (each with one production adapter + deterministic fakes):
+>   `RunConfiguredCheck` ("run this configured check") and `ObserveChangedFiles` ("changed
+>   files vs trunk, `null` = unknown") — the `bash -lc` runner and the git trunk-detection
+>   composition (`changedFiles`) live in `pi/v1/delivery/ci.ts`; "load checks" is the adapter
+>   passing the validated `PerkConfig.ci.checks` view inward (no config port). The wire
+>   vocabulary (`CiReport`/`CiCheckResult`/`CiResult`), the private union→wire mapping, the
+>   glyph renders, the 1s unref'd elapsed ticker, and the scope gate + `ctx.ui.confirm` +
+>   per-activation `ApprovalLatch` all live in the adapter; refusals (`project_ci_unconfirmed`)
+>   and `bad_input` never enter the feature union. No exported execute core — the
+>   confirm/decline/latch and cancellation arms are tested through the REGISTERED tool (the
+>   harness gained additive `ctx.signal` + scripted-confirm knobs).
+> - **Substrate moves**: the shared stack-objective trio to `substrate/workflowState.ts`
+>   (`resolveStackObjective`/`parseStackObjectiveArg`/`STACK_NO_OBJECTIVE_MESSAGE`, message
+>   text byte-identical; re-typed off Pi to a structural `BranchSource` slice) and the lenient
+>   list helpers (`objectListField`/`stringListField`) to `substrate/coldDoor.ts`;
+>   `coldDoor.test.ts` gained the missing `ctx.signal`→`pi.exec` cancellation pin.
+>   `findingLines` stays a deliberate two-copy module-private helper (status render + the
+>   surviving `renderLandOutcome`) per the cold-door doctrine — consolidation rides the land
+>   migration. The `/objective-stack` command's duplicated inline cold-door call was deleted
+>   (both surfaces share one status read).
+> - **WorkflowSession / PromptEvidence / gating changes**: NONE.
+> - **Accounting ledger** (recalculated at the implementation-time parent head `84906a8c`):
+>   - Production LOC: 1,026 deleted (−755 `doors/ciExecutor.ts`, −265 the objectiveStack
+>     status portion, −4 index, −2 review-comment re-anchor) → 1,243 added
+>     (`delivery/ci.ts` 367, `pi/v1/delivery/ci.ts` 539, `pi/v1/delivery/stackStatus.ts` 237,
+>     `substrate/workflowState.ts` +34, `substrate/coldDoor.ts` +20, objectiveStack rewiring
+>     +35, index +9, review +2); whole-change production net **+217** against the ≤ 0 target.
+>     **Named excess classes** (each against a plan-named new invariant; requires explicit
+>     operator acceptance before merge — flagged in the PR): the typed `CiRunOutcome`/
+>     `CiCheckOutcome` union + the adapter's union→wire mapping (~90); the typed progress
+>     union + deep-copy emission + sink-failure ownership + the adapter's ticker translation
+>     (~100); the two port seams + their production composition (~25). Zero policy/behavior
+>     code grew; the status slice itself is ≈ net-zero (−230 door / +237 adapter).
+>   - Test LOC: 1,644 deleted → 2,339 added, net +695 — the new arms are the frozen
+>     registration baselines (tool + command + flag), the union→wire mapping pins,
+>     confirm-accept/latch + confirm-decline, the pre-aborted `ctx.signal` arm, progress
+>     snapshot isolation + async-rejecting-sink containment, the port-signal pins, the
+>     coldDoor signal pin, and the list-helper + resolver unit rows.
+>   - Files: +7 (`delivery/ci.ts` + test, `pi/v1/delivery/ci.ts` + test,
+>     `pi/v1/delivery/stackStatus.ts` + test, `testing/objectiveStackFixtures.ts`), −2
+>     (`doors/ciExecutor.ts` + test).
+>   - Export ledger — **Retired**: `registerCiExecutor`, `CiExec`, `RunCiOpts`, `RunCiDeps`
+>     (incl. the never-used `decideScope` override), the test-only `cap` option; privatized:
+>     `runOneCheck`, `ciScratchPath`, `matchesGlob`, `stackStatus`. **Renamed**:
+>     `ExecOutcome` → `CiExecOutcome` (feature); `NO_OBJECTIVE_MESSAGE` →
+>     `STACK_NO_OBJECTIVE_MESSAGE`, `parseObjectiveArg` → `parseStackObjectiveArg`
+>     (substrate). **Relocated**: `decideCiScope`/`CiScope` + `runCiChecks` (feature,
+>     reshaped return); `CiReport`/`CiCheckResult`/`CiResult` + `renderCiProse` +
+>     `renderCiProgress` (readonly-widened param) + `changedFiles` (CI adapter);
+>     `renderStackStatus` (status adapter); `resolveStackObjective` +
+>     `objectListField`/`stringListField` (substrate). **Newly introduced**: `CiRunOutcome`,
+>     `CiCheckOutcome`, `CiProgressState`/`CiProgressEntry`/`CiProgressEvent`,
+>     `RunConfiguredCheck`, `ObserveChangedFiles`, reshaped `RunCiChecksOpts`/
+>     `RunCiChecksDeps`, `installCiBindings`, `installStackStatusBindings` — every added
+>     export has a production importer or is a frozen-baseline/exported-core test surface.
+>   - Deletion test: gutting `delivery/ci.ts` hollows the CI adapter — `pi/v1/delivery/ci.ts`
+>     imports the scope policy, the runner op, both unions, and both ports; selection,
+>     ordering, glob gating, fail-closed recovery, and progress semantics all vanish, leaving
+>     only registration + render shells. Verified by the import graph.
+> - **Dogfood**: the cheap migrated-status read (`/objective-stack 2083` from a fresh
+>   read-only session) + one run-all `run_ci` through the reloaded migrated executor ride the
+>   Step-7 gate; the full Phase-7 dogfood gate closes at node 7.5. The Phase-5/6 dogfood
+>   records are this layer's HARD submission gate (no waiver) — re-checked at `/submit`.
+
 ### Changes
 
 Migrate in effect-sized slices:

@@ -657,7 +657,7 @@ session-lifecycle gates + the warm `/implement` handoff (`extension/doors/lifecy
 `docs/design/tui-charter.md`); plan mode + the plan provider deferral
 (`extension/pi/v1/plan.ts`; §8.10
 owns the provider seams); the read-only CI executor
-(`extension/doors/ciExecutor.ts`); the spawned delegation seam + `/address` + `/pr-review` + `/pr-review-terminal` + `/pr-review-browser`
+(`extension/pi/v1/delivery/ci.ts` over the `extension/delivery/ci.ts` feature op); the spawned delegation seam + `/address` + `/pr-review` + `/pr-review-terminal` + `/pr-review-browser`
 (`extension/doors/address.ts` / `extension/pi/v1/codeReview/automated.ts` / `terminal.ts` /
 `browser.ts` / `submit.ts` / `checkout.ts` / `extension/doors/plannotatorHandoff.ts`, `agents/*.md`, `skills/perk-address/` /
 `perk-pr-review/` / `perk-pr-review-terminal/` / `perk-pr-review-browser/`; the gateway op shapes stay in §8.4); the conflict-resolution drive
@@ -6265,8 +6265,9 @@ one-directionally; nothing in `perk/backends/` or `perk/github/` imports `perk.d
 **Current consumers.** The read side: the `DeliveryTrain` projection (§8.44) folds the journal
 through `read_journal` and surfaces the first unresolved operation. Recovery, lineage minting,
 and the journal-mutating operations are implemented through `Delivery`
-(recover/transfer/publish/sync/land). The TS stack surface renders status and drives the cold
-stack workers (`extension/doors/objectiveStack.ts`).
+(recover/transfer/publish/sync/land). The TS stack surface renders status
+(`extension/pi/v1/delivery/stackStatus.ts`) and drives the cold stack workers
+(`extension/doors/objectiveStack.ts`).
 
 ## §8.44 · The DeliveryTrain projection + stack status (read path)
 
@@ -8117,7 +8118,8 @@ hint on close-with-evidence. Exit
 discipline: 0 = successful classification/report/no-op/actions (including declined and
 `selection_required`), 1 = typed refusals + infra failures, 2 = not-a-repo.
 
-**The warm stack surface** (`extension/doors/objectiveStack.ts`; mutations stay canonical in
+**The warm stack surface** (the mutating family in `extension/doors/objectiveStack.ts`, the
+status read in `extension/pi/v1/delivery/stackStatus.ts`; mutations stay canonical in
 Python — every tool delegates through the cold door). **Four commands**: `/objective-stack
 [N]` is a direct read door (exec `stack status --json`, render the train + operations +
 continuation + residue honoring `observed: false`; decode fully lenient/render-only —

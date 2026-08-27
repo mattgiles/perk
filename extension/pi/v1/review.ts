@@ -355,7 +355,7 @@ export function waveLaunchedResult(subject: ReviewSubject, guidance: string): To
 
 // ----------------------------------------------------------------- the first-party review core
 
-/** The minimal structural `ctx.ui` subset the first-party review needs (the ciExecutor.ts pure-core + injected-fakes recipe). */
+/** The minimal structural `ctx.ui` subset the first-party review needs (the pure-core + injected-fakes recipe, e.g. pi/v1/delivery/ci.ts). */
 export interface PlanReviewUI {
   editor(title: string, prefill?: string): Promise<string | undefined>;
   select(
@@ -391,7 +391,7 @@ const REVIEW_EDITOR_TITLE =
 const DENY_FEEDBACK_TITLE = "Deny feedback (optional) — Enter to send";
 
 /**
- * The first-party in-TUI review core, pure over injected seams (the ciExecutor.ts pure-core + injected-fakes recipe) — fully
+ * The first-party in-TUI review core, pure over injected seams (the pure-core + injected-fakes recipe, e.g. pi/v1/delivery/ci.ts) — fully
  * offline-testable. Flow: (1) display the plan in the editor dialog (Esc = dismissed; the human
  * may edit, incl. via Ctrl+G/$EDITOR); (2) a non-blank edit differing from the displayed plan is
  * written back to the draft BEFORE the verdict (reviewed bytes == artifact bytes == saved bytes;
