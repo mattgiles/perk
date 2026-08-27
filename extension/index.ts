@@ -33,6 +33,7 @@ import { installStackReviewBindings } from "./pi/v1/codeReview/stack.ts";
 import { installCuratedSubmissionBindings } from "./pi/v1/codeReview/submit.ts";
 import { installPrReviewTerminalBindings } from "./pi/v1/codeReview/terminal.ts";
 import { installCiBindings } from "./pi/v1/delivery/ci.ts";
+import { installStackStatusBindings } from "./pi/v1/delivery/stackStatus.ts";
 import { installGistBindings } from "./pi/v1/gist.ts";
 import { installAuditBindings } from "./pi/v1/learning/audit.ts";
 import { installDreamBindings } from "./pi/v1/learning/dream.ts";
@@ -493,6 +494,10 @@ export default function (pi: ExtensionAPI) {
   // `gating` for the driving commands' gate-on soft refusal (stack sync/recovery mutates
   // published branches; the stack tools never join READ_ONLY_TOOLS).
   registerObjectiveStack(pi, gating);
+
+  // The stacked-delivery status read: the `objective_stack_status` tool + the `/objective-stack`
+  // command (read-only end to end — the command works gate-on; the tool stays gate-off).
+  installStackStatusBindings(pi);
 
   // The warm `/address` review loop: the submit-then-resolve `finalize_address` tool + `/address`
   // command. Classify-then-act (the verbose feedback fetch + classification runs in an isolated
