@@ -23,8 +23,8 @@
 // `result` promise carrying the back half (completion wait, best-effort stop on timeout/cancel,
 // aggregate read, receipt assembly, unsubscribe-on-settle); `runWaveScript` is that start +
 // await. `startReportWave`/`runReportWave` are the assignment-level pair over the same split.
-// The blocking runner is live under the per-flow entrypoints (`prReviewWave.ts`,
-// `learnWave.ts`); the streaming sibling serves flows whose parent must return from
+// The blocking runner is live under the per-flow entrypoints (`prReviewWave.ts` and the typed
+// feature ops in `learning/`); the streaming sibling serves flows whose parent must return from
 // the launch and hold a model-held `subagent_wait` relay loop open (`adversarialReviewWave.ts`,
 // behind the `start_review_wave`/`collect_review_wave` pair).
 //
@@ -52,11 +52,18 @@ import {
 } from "./transport.ts";
 
 /**
- * The module's ONE deliberate transport re-export: the injection seam callers need for
- * execute-core signatures (an adapter is constructed at each registration site and threaded
- * in). Nothing else crosses — callers never name run handles, spawn params, or script types.
+ * The module's deliberate transport re-exports — the SANCTIONED seam, nothing else crosses
+ * (callers never name run handles, spawn params, or script types):
+ * - `WaveAdapter`: the injection seam callers need for execute-core signatures (an adapter is
+ *   constructed at each registration site and threaded in).
+ * - `WaveLevelFailureReason`: the wave-level reason subset (`key === null` failures carry
+ *   exactly this vocabulary), named at the logical seam so flows can type a correlated
+ *   wave status without reaching into transport.
  */
-export type { WaveAdapter } from "./transport.ts";
+export type {
+  WaveAdapter,
+  WaveRunFailureReason as WaveLevelFailureReason,
+} from "./transport.ts";
 
 /** One assignment of a report wave: a fresh-context, report-only child under a stable domain key. */
 export interface ReportAssignment {

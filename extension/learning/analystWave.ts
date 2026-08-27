@@ -7,8 +7,8 @@
 // back as engine-validated structured output (the workflow-level `outputSchema` → the injected
 // `structured_output` tool).
 //
-// Pi-free by construction: the `WaveAdapter` injection seam (reportWave's one sanctioned
-// transport re-export) is the only mechanism edge; the adapter constructs and threads it.
+// Pi-free by construction: the `WaveAdapter` injection seam (one of reportWave's sanctioned
+// transport re-exports) is the only mechanism edge; the adapter constructs and threads it.
 
 import { join } from "node:path";
 import {
