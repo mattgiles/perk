@@ -13,6 +13,10 @@
 
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import {
+  parseStackObjectiveArg,
+  STACK_NO_OBJECTIVE_MESSAGE,
+} from "../../../delivery/stackObjective.ts";
+import {
   booleanField,
   type ColdJson,
   numberField,
@@ -25,11 +29,7 @@ import {
 import { registerPerkCommand } from "../../../substrate/command.ts";
 import { failFor, ok, type Result } from "../../../substrate/result.ts";
 import { idParam, paramsOf } from "../../../substrate/toolParams.ts";
-import {
-  parseStackObjectiveArg,
-  resolveStackObjective,
-  STACK_NO_OBJECTIVE_MESSAGE,
-} from "../../../substrate/workflowState.ts";
+import { resolveStackObjective } from "../../../substrate/workflowState.ts";
 import { report } from "../../../surfaces/report.ts";
 
 // A deliberate module-private copy: the surviving `renderLandOutcome` (doors/objectiveStack.ts)

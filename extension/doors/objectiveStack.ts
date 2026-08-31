@@ -27,6 +27,7 @@
 import { basename, dirname } from "node:path";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { reconcileGuidance } from "../authoring/objective/prose.ts";
+import { parseStackObjectiveArg, STACK_NO_OBJECTIVE_MESSAGE } from "../delivery/stackObjective.ts";
 import { bindingSuffix } from "../substrate/bindingDelivery.ts";
 import {
   booleanField,
@@ -48,10 +49,8 @@ import { booleanParam, idParam, paramsOf, stringParam } from "../substrate/toolP
 import {
   appendWorkflowState,
   branchOf,
-  parseStackObjectiveArg,
   rebuildWorkflowState,
   resolveStackObjective,
-  STACK_NO_OBJECTIVE_MESSAGE,
 } from "../substrate/workflowState.ts";
 import { report } from "../surfaces/report.ts";
 import { CONFLICT_RESOLUTION_ATTEMPT_CAP, resetConflictAttempts } from "./submit.ts";

@@ -306,16 +306,6 @@ export function activePlanRef(source: { cwd: string } & BranchSource): PlanRef |
   }
 }
 
-/** The shared no-objective refusal every stack surface emits (soft fail / warning text). */
-export const STACK_NO_OBJECTIVE_MESSAGE =
-  "no objective given and none active or linked — pass the objective explicitly.";
-
-/** The first command-arg token as the explicit objective (leading `#` stripped); null if none. */
-export function parseStackObjectiveArg(args: string): string | null {
-  const token = args.trim().split(/\s+/)[0]?.replace(/^#/, "") ?? "";
-  return token.length > 0 ? token : null;
-}
-
 /**
  * The three-tier stack-objective resolution shared by every stack tool + command: an explicit
  * id wins; else the branch-rebuilt `active_objective`; else the worktree plan-ref's

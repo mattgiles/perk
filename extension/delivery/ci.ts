@@ -313,7 +313,8 @@ export async function runCiChecks(
   // synchronously), a `run_started` emission before any launch, one `check_settled` per
   // executed-check completion. Every emission deep-copies the entries — a retained earlier
   // event never mutates, and a sink mutating its received entries cannot affect later events
-  // or the outcome. Progress is cosmetic: a throwing or async-rejecting sink is contained.
+  // or the outcome. Progress is cosmetic: a throwing sink is contained (the callback
+  // contract is synchronous `void`).
   const onProgress = deps.onProgress;
   const states = selected.map((check): { name: string; state: CiProgressState } => ({
     name: check.name,
@@ -322,17 +323,10 @@ export async function runCiChecks(
   const emit = (kind: CiProgressEvent["kind"]): void => {
     if (!onProgress) return;
     try {
-      const entries = states.map((entry) => ({ name: entry.name, state: entry.state }));
-      const result = onProgress({ kind, entries }) as unknown;
-      if (
-        typeof result === "object" &&
-        result !== null &&
-        typeof (result as PromiseLike<unknown>).then === "function"
-      ) {
-        // A sink that (despite the void type) returned a thenable must not leak an
-        // unhandled rejection into the run's process.
-        Promise.resolve(result as PromiseLike<unknown>).then(undefined, () => {});
-      }
+      onProgress({
+        kind,
+        entries: states.map((entry) => ({ name: entry.name, state: entry.state })),
+      });
     } catch {
       // Progress must never break the run.
     }

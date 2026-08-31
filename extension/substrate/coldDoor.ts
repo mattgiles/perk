@@ -103,13 +103,9 @@ export function objectField(payload: ColdJson, key: string): ColdJson | undefine
 export function objectListField(payload: ColdJson, key: string): ColdJson[] {
   const value = payload[key];
   if (!Array.isArray(value)) return [];
-  const out: ColdJson[] = [];
-  for (const item of value) {
-    if (typeof item === "object" && item !== null && !Array.isArray(item)) {
-      out.push(item as ColdJson);
-    }
-  }
-  return out;
+  return value.filter(
+    (item): item is ColdJson => typeof item === "object" && item !== null && !Array.isArray(item),
+  );
 }
 
 /** Lenient string-list field: non-string elements are dropped. */
