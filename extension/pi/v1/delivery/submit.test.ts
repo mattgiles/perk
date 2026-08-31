@@ -360,17 +360,18 @@ test("argv: a planted run id rides as an adjacent --run-id flag pair", async () 
   }
 });
 
-test("argv: no run id ⇒ no --run-id flag", async () => {
-  const cwd = scaffoldRepo();
-  const argvFile = join(cwd, "argv.txt");
-  const bin = fakePerk(cwd, { stdout: submitJson(), argvFile });
-  const h = await loadPerkSession({ cwd, env: { PERK_RUN_ID: undefined, PERK_BIN: bin } });
-  try {
-    await h.invokeTool("submit", {});
-    assert.deepEqual(readFileSync(argvFile, "utf8").trim().split("\n"), ["pr", "submit", "--json"]);
-  } finally {
-    h.dispose();
-  }
+test("argv: no branch run id ⇒ no --run-id flag", async () => {
+  // A LOADED warm session always mints a run id (the identity-less arm), so the absent-run-id
+  // wire is pinned through the production deps over a branch with no run_id entry.
+  const argvs: string[][] = [];
+  const { pi, ctx } = world({ stdout: submitJson() });
+  (pi as unknown as { exec: unknown }).exec = async (_bin: string, args: string[]) => {
+    argvs.push(args);
+    return { code: 0, killed: false, stdout: submitJson(), stderr: "" };
+  };
+  const outcome = await submitChange(publishDepsFor(pi, ctx));
+  assert.equal(outcome.kind, "published");
+  assert.deepEqual(argvs, [["pr", "submit", "--json"]]);
 });
 
 // --- counter behaviors through the production deps --------------------------------------------
@@ -726,12 +727,8 @@ test("submit tool e2e: at the cap ⇒ loud report, no drive, counter unchanged",
   try {
     await h.invokeTool("submit", {});
     assert.equal(injected.length, 0, "no further drive past the cap");
-    assert.ok(
-      h.notifyEvents.some(
-        (event) =>
-          event.severity === "error" && /merge conflicts persist after 2/.test(event.message),
-      ),
-    );
+    // invokeTool's ctx shares the message-only notify capture (not the severity-tagged array).
+    assert.ok(h.notifies.some((message) => /merge conflicts persist after 2/.test(message)));
     assert.equal(h.workflowState().conflict_resolution_attempts, CONFLICT_RESOLUTION_ATTEMPT_CAP);
   } finally {
     h.dispose();

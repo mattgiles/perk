@@ -327,7 +327,7 @@ export function routePrReviewOutcome(
     return;
   }
   const message = out.feedback + (out.annotationCount > 0 ? TRIAGE_SUFFIX : "");
-  // Inject the feedback as a real turn (the submit.ts driveConflictResolution pattern): an
+  // Inject the feedback as a real turn (the delivery submit driveConflictFollowUp pattern): an
   // immediate turn when idle, else delivered after the current streaming batch.
   if (ctx.isIdle()) {
     pi.sendUserMessage(message);

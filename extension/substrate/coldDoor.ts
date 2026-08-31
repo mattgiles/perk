@@ -8,7 +8,7 @@
 //
 // A door consumes it as:
 //
-//   const r = await runColdDoor<SubmitOk>(pi, ctx, ["pr", "submit", "--json"], {
+//   const r = await runColdDoor<PublishedChange>(pi, ctx, ["pr", "submit", "--json"], {
 //     label: "perk pr submit",
 //     decode,
 //   });
