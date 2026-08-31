@@ -95,10 +95,9 @@ and "painted itself into a corner" before centralizing — start with the single
 
 ## The warm-door reactive drive (now `extension/pi/v1/delivery/submit.ts`)
 
-The drive (originally `driveConflictResolution`; since the delivery migration split into the
-Pi-free decision `extension/delivery/submit.ts::decideConflictFollowUp` + the adapter translation
-`extension/pi/v1/delivery/submit.ts::driveConflictFollowUp`) is modeled **exactly** on `land.ts`'s
-`driveReconcileAfterLand`:
+The drive (once `driveConflictResolution`; now the Pi-free decision `decideConflictFollowUp` in
+`extension/delivery/submit.ts` + the translation `driveConflictFollowUp`) is modeled **exactly**
+on `land.ts`'s `driveReconcileAfterLand`:
 
 - **Short-circuit** unless `details.ok && mergeable === false`; `conflicts[]` is advisory and may
   be empty when path parsing loses a definitive conflict verdict.
@@ -115,12 +114,8 @@ Pi-free decision `extension/delivery/submit.ts::decideConflictFollowUp` + the ad
   successful submit decode to `null` (`mergeable` is a tri-state read; a malformed `conflicts` →
   `[]`). See `cold-door-client.md` for the advisory-decode tier this rides.
 - **TS gotcha**: a boolean helper like `isUnmergeable(details)` does **NOT** narrow the `Result`
-  union — make it a **type guard** (`details is OkDetails<SubmitOk>`). (Historical: the delivery
-  migration replaced the guard with a typed `ConflictFollowUp` outcome union.)
-
-Cross-reference `warm-door-commands.md` for the `terminate` + `followUp` composition and the
-drive-helper test shape (the drive can no longer be harness-routed via `invokeTool` — split into a
-pure-impl unit test + drive-helper decision/delivery spy tests).
+  union — make it a **type guard** (`details is OkDetails<SubmitOk>`). (Historical — the migrated
+  decide returns a typed outcome union.)
 
 ## The conflict-resolver subagent (first write-capable + context-inheriting)
 
@@ -196,8 +191,7 @@ don't drift" discipline).
 ## Cross-references
 
 - `src/perk/substrate/git.py` — the `git merge-tree --write-tree` probe, `MergeProbe.mergeable`
-- `extension/delivery/submit.ts` — `decideConflictFollowUp`, the bounded re-drive cap (decision)
-- `extension/pi/v1/delivery/submit.ts` — `driveConflictFollowUp`, the delivery translation
+- `extension/delivery/submit.ts` + `pi/v1/delivery/submit.ts` — decide + drive, the re-drive cap
 - `extension/doors/land.ts` — `driveReconcileAfterLand`, the shape the drive mirrors
 - `extension/worker/worker.ts` — `evaluateTerminal`'s `mergeable !== false` implement bar
 - `agents/conflict-resolver.md` — the write-capable + context-inheriting agent def
