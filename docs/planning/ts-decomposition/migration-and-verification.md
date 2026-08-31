@@ -1051,12 +1051,22 @@ and process mechanics in the Python exterior and adapters.
 >     pointer ordering, and verified-success recording all vanish, leaving registration +
 >     decode + render shells. Verified by the import graph (both installers import the ops,
 >     the unions, and the ports).
-> - **Dogfood (Step-8 protocol)**: PROVISIONAL — pending live observation. This layer's own
->   publication must ride the migrated `pi/v1/delivery/submit.ts` (`/submit` after `/reload`,
->   evidence appended here in the same pass); an address pass on this PR, if one happens,
->   rides the migrated `classify_review_feedback` → `finalize_address` loop and its evidence
->   is appended in that pass — never claimed prematurely. The full Phase-7 dogfood gate
->   closes at node 7.5.
+> - **Dogfood (Step-8 protocol)**: live proof #1 observed (2026-08-31): this layer's own
+>   publication rode the MIGRATED `pi/v1/delivery/submit.ts` — a fresh headless session
+>   (`pi --mode json -p`, env-leak guard applied, extension loaded from this worktree at
+>   `32e1a185`) invoked the REGISTERED `submit` tool, which opened draft PR #2123
+>   ("Opened draft PR #2123 → …/pull/2123 (plan embedded) (stack #2093, layer 13/13)",
+>   `base: "plan-2116"`, `mergeable: true`) — and the details carried `issue: "2122"` as the
+>   opaque STRING id: D3 observed live (the retired decode dropped the field). The final-head
+>   re-publish rides the implementing session's terminating `submit` tool — that session's
+>   in-memory binding predates the migration (loaded at session start; a warm session cannot
+>   reload itself), which is exactly the byte-parity the wire baselines pin; the migrated
+>   binding's live publication is proof #1 above. The PR-body accounting-ledger append
+>   (Step 8.5) is the immediate NEXT gesture after that terminating submit (its body
+>   regeneration is the plan's named residual; this committed note is the durable ledger
+>   copy). An address pass on this PR, if one happens, rides the migrated
+>   `classify_review_feedback` → `finalize_address` loop and its evidence is appended in that
+>   pass — never claimed prematurely. The full Phase-7 dogfood gate closes at node 7.5.
 
 ### Changes
 
