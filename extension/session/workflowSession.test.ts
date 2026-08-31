@@ -744,9 +744,12 @@ for (const backing of [branchBacking(), memoryBacking()]) {
     // feature-op policy upstream, so the seam never emits `unchanged` for this variant.
     const h = backing.harness("RID");
     try {
-      assert.deepEqual(h.session.apply({ kind: "record-review-batch", record: REVIEW_BATCH_RECORD }), {
-        status: "applied",
-      });
+      assert.deepEqual(
+        h.session.apply({ kind: "record-review-batch", record: REVIEW_BATCH_RECORD }),
+        {
+          status: "applied",
+        },
+      );
       // The persisted shape is pinned byte-exactly (the wire twin of the recorded batch).
       assert.deepEqual(h.lastReviewBatch(), {
         pr: 42,

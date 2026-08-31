@@ -479,7 +479,10 @@ test("setConflictAttempts: a failed reset read-back uses the reset failure text"
   const { entries, notifications, source } = fakeWorld();
   entries.push(ws({ conflict_resolution_attempts: 1 }));
   const dropping: EntrySink = { appendEntry: () => {} };
-  assert.equal(setConflictAttempts(dropping, source, { attempts: 0, scope: "objective-sync" }), false);
+  assert.equal(
+    setConflictAttempts(dropping, source, { attempts: 0, scope: "objective-sync" }),
+    false,
+  );
   assert.deepEqual(notifications, [
     "perk: objective-sync — conflict_resolution_attempts reset read-back failed (expected 0)",
   ]);
