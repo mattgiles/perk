@@ -256,6 +256,43 @@ export function appendWorkflowStateClassified<K extends keyof WorkflowState>(
   }
 }
 
+/**
+ * The rebuilt `conflict_resolution_attempts` counter, read WITHOUT a catch: a throwing
+ * `getBranch()` propagates — unreadable bounding state is never treated as proven zero (the
+ * load-bearing failure path both conflict drives rely on). A READABLE but malformed persisted
+ * value (non-integer, negative, string, object, null, absent) narrows to 0.
+ */
+export function conflictResolutionAttempts(source: BranchSource): number {
+  const value = rebuildWorkflowState(branchOf(source)).conflict_resolution_attempts;
+  if (typeof value === "number" && Number.isInteger(value) && value >= 0) return value;
+  return 0;
+}
+
+/**
+ * The checked `conflict_resolution_attempts` write: equal-value short-circuit (no append) →
+ * `true`; otherwise the strict-read-back boolean from `appendWorkflowState` (its loud report
+ * path is the loudness channel). The counter is shared across the two warm conflict drives, so
+ * `scope` names the TRUE writing surface for failure reports — `/submit` passes "submit", the
+ * stack door "objective-sync".
+ */
+export function setConflictAttempts(
+  sink: EntrySink,
+  source: BranchSource & ReportTarget,
+  opts: { attempts: number; scope: string },
+): boolean {
+  if (conflictResolutionAttempts(source) === opts.attempts) return true;
+  return appendWorkflowState(sink, source, {
+    data: { conflict_resolution_attempts: opts.attempts },
+    field: "conflict_resolution_attempts",
+    expected: opts.attempts,
+    scope: opts.scope,
+    failure:
+      opts.attempts === 0
+        ? "conflict_resolution_attempts reset read-back failed (expected 0)"
+        : `conflict_resolution_attempts read-back failed (expected ${opts.attempts})`,
+  });
+}
+
 /** The warm node-link carrier's non-null shape (the `objective_node_claim` field). */
 export type ObjectiveNodeClaim = NonNullable<WorkflowState["objective_node_claim"]>;
 

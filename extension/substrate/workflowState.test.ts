@@ -11,12 +11,14 @@ import {
   type BranchEntry,
   branchCarries,
   branchOf,
+  conflictResolutionAttempts,
   type EntrySink,
   nodeClaimsEqual,
   planRefsEqual,
   readNodeClaim,
   rebuildWorkflowState,
   resolveStackObjective,
+  setConflictAttempts,
   WORKFLOW_STATE_TYPE,
 } from "./workflowState.ts";
 
@@ -410,4 +412,75 @@ test("resolveStackObjective: nothing resolves → null", () => {
     resolveStackObjective(undefined, { cwd, sessionManager: { getBranch: () => [] } }),
     null,
   );
+});
+
+// --- conflictResolutionAttempts / setConflictAttempts (the checked counter seam) ------------------
+
+test("conflictResolutionAttempts: a non-negative integer passes through", () => {
+  for (const value of [0, 1, 2, 7]) {
+    const source = {
+      sessionManager: { getBranch: () => [ws({ conflict_resolution_attempts: value })] },
+    };
+    assert.equal(conflictResolutionAttempts(source), value);
+  }
+});
+
+test("conflictResolutionAttempts: a readable but malformed value narrows to 0", () => {
+  for (const malformed of [undefined, null, "2", 1.5, -1, { n: 2 }, [2], true]) {
+    const source = {
+      sessionManager: { getBranch: () => [ws({ conflict_resolution_attempts: malformed })] },
+    };
+    assert.equal(conflictResolutionAttempts(source), 0, JSON.stringify(malformed) ?? "undefined");
+  }
+  assert.equal(conflictResolutionAttempts({ sessionManager: { getBranch: () => [] } }), 0);
+});
+
+test("conflictResolutionAttempts: a throwing branch read propagates (no catch)", () => {
+  const source = {
+    sessionManager: {
+      getBranch: (): unknown[] => {
+        throw new Error("adversarial branch read");
+      },
+    },
+  };
+  assert.throws(() => conflictResolutionAttempts(source), /adversarial branch read/);
+});
+
+test("setConflictAttempts: a verified append returns true", () => {
+  const { entries, sink, source } = fakeWorld();
+  entries.push(ws({ conflict_resolution_attempts: 1 }));
+  assert.equal(setConflictAttempts(sink, source, { attempts: 2, scope: "submit" }), true);
+  assert.equal(rebuildWorkflowState(entries).conflict_resolution_attempts, 2);
+});
+
+test("setConflictAttempts: an equal value short-circuits true and appends nothing", () => {
+  const { entries, sink, source } = fakeWorld();
+  entries.push(ws({ conflict_resolution_attempts: 1 }));
+  const before = entries.length;
+  assert.equal(setConflictAttempts(sink, source, { attempts: 1, scope: "submit" }), true);
+  assert.equal(entries.length, before, "the short-circuit appends nothing");
+  // The absent/0 pair short-circuits too (a reset over a clean branch is a no-op).
+  const clean = fakeWorld();
+  assert.equal(setConflictAttempts(clean.sink, clean.source, { attempts: 0, scope: "s" }), true);
+  assert.equal(clean.entries.length, 0);
+});
+
+test("setConflictAttempts: a failed read-back returns false with the increment failure text", () => {
+  const { entries, notifications, source } = fakeWorld();
+  entries.push(ws({ conflict_resolution_attempts: 1 }));
+  const dropping: EntrySink = { appendEntry: () => {} };
+  assert.equal(setConflictAttempts(dropping, source, { attempts: 2, scope: "submit" }), false);
+  assert.deepEqual(notifications, [
+    "perk: submit — conflict_resolution_attempts read-back failed (expected 2)",
+  ]);
+});
+
+test("setConflictAttempts: a failed reset read-back uses the reset failure text", () => {
+  const { entries, notifications, source } = fakeWorld();
+  entries.push(ws({ conflict_resolution_attempts: 1 }));
+  const dropping: EntrySink = { appendEntry: () => {} };
+  assert.equal(setConflictAttempts(dropping, source, { attempts: 0, scope: "objective-sync" }), false);
+  assert.deepEqual(notifications, [
+    "perk: objective-sync — conflict_resolution_attempts reset read-back failed (expected 0)",
+  ]);
 });
