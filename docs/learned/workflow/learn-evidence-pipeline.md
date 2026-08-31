@@ -107,7 +107,8 @@ Four best-effort, **loud-but-non-fatal** (never throw) TS capture sites:
 - `savePlan` → `planning/main`,
 - `index.ts` `session_start` → `implementation/main` (claimer-only, first-write-wins),
 - worker `driveStage` → `implementation/worker`,
-- the `/submit` warm door (`submitPr`) → `implementation/main` at `impl_run_ids`-stamping time
+- the `/submit` warm door (the publish operation, `extension/delivery/submit.ts::publishVerified`
+  over `publishDepsFor`) → `implementation/main` at `impl_run_ids`-stamping time
   (first-write-wins) — any run id entering the linkage gets its pointer captured in the same
   gesture, so an address/warm session that submits resolves `found` instead of `missing`.
 
@@ -133,7 +134,7 @@ different session is not claimable — the child adopts a derived `<run_id>.<n>`
 `mode`, never consumes/captures/impersonates the stage), the **first-write-wins guard**
 (`preserveForeign` on the interior + submit-door captures — a foreign overwrite is skipped with a
 loud stderr warning, so any future shadow vector surfaces instead of silently corrupting
-evidence), and the **submit-door capture** in `submitPr` (closing the `missing` half: a submitted
+evidence), and the **submit-side capture** in the publish operation (closing the `missing` half: a submitted
 run's pointer is captured where its `impl_run_ids` linkage is created). Records written by
 already-landed runs are not repaired — `/learn` on old plans may still see shadowed pointers.
 

@@ -133,7 +133,11 @@ def test_verify_missing_expected_names_offenders():
 
 @pytest.mark.parametrize(
     "forbidden",
-    ["extension/testing/helper.ts", "extension/doors/submit.test.ts", "agents/pr-reviewer.md"],
+    [
+        "extension/testing/helper.ts",
+        "extension/pi/v1/delivery/submit.test.ts",
+        "agents/pr-reviewer.md",
+    ],
 )
 def test_verify_forbidden_present_names_offenders(forbidden):
     paths = set(build.NPM_TARBALL_EXPECTED) | {forbidden}

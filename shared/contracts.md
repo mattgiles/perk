@@ -658,10 +658,10 @@ session-lifecycle gates + the warm `/implement` handoff (`extension/doors/lifecy
 (`extension/pi/v1/plan.ts`; §8.10
 owns the provider seams); the read-only CI executor
 (`extension/pi/v1/delivery/ci.ts` over the `extension/delivery/ci.ts` feature op); the spawned delegation seam + `/address` + `/pr-review` + `/pr-review-terminal` + `/pr-review-browser`
-(`extension/doors/address.ts` / `extension/pi/v1/codeReview/automated.ts` / `terminal.ts` /
+(`extension/pi/v1/delivery/address.ts` / `extension/pi/v1/codeReview/automated.ts` / `terminal.ts` /
 `browser.ts` / `submit.ts` / `checkout.ts` / `extension/doors/plannotatorHandoff.ts`, `agents/*.md`, `skills/perk-address/` /
 `perk-pr-review/` / `perk-pr-review-terminal/` / `perk-pr-review-browser/`; the gateway op shapes stay in §8.4); the conflict-resolution drive
-(`extension/doors/submit.ts`; the probe contract stays in §8.4).
+(`extension/pi/v1/delivery/submit.ts`; the probe contract stays in §8.4).
 
 
 ---
@@ -5516,8 +5516,8 @@ identity).
 |---|---|---|---|
 | 1 | next-action resolution | `resume.resolve_next_action` (§8.37) — consumed by `plan resume` and the `objective run` supervisor (incl. its remote dispatch arm) | `tests/test_next_action_parity.py` (verdict **and** stage-selection equality across both dry-runs), `tests/test_resume.py` |
 | 2 | prompt generation (local vs worker) | canonical templates `prompts/stages/*` via the §8.31 render seam; `_implement_prompt`/`_address_prompt` ↔ `initialPromptFor` ↔ `implementHandoffPrompt`/`addressGuidance` | `tests/test_prompt_parity.py` (live cross-engine byte parity) + goldens; reciprocal substring suites `tests/test_worker_prompt_parity.py` ↔ `extension/worker/stageExecution.test.ts`; binding-content byte parity `tests/test_binding_render_parity.py` (via `extension/testing/renderBindingsLive.ts`) |
-| 3 | submit side effects | one Python door, `perk pr submit --json`; the warm `submit` tool/`/submit` command delegate via `submitPr` (`extension/doors/submit.ts`), and the remote worker drives that same registered tool | `extension/worker/stageExecutionE2e.test.ts` (implement HAPPY drives the real tool through the real extension into a stubbed `PERK_BIN` router), `extension/doors/submit.test.ts`, `tests/test_pr_submit.py` |
-| 4 | address terminal criteria | `finalize_address` (`extension/doors/address.ts`) runs submit first, delegates its internal resolve half to `perk pr resolve-threads --json`, and appends `last_review_batch`; the worker requires finalizer success + that write + successful effective submit evidence with `mergeable !== false` | `stageExecutionE2e.test.ts` (address HAPPY binds both real door writes to classification), `stageExecution.test.ts` `evaluateTerminal` matrix; post-address the supervisor re-classifies via row 1 |
+| 3 | submit side effects | one Python door, `perk pr submit --json`; the warm `submit` tool/`/submit` command delegate via `extension/delivery/submit.ts::submitChange` behind `extension/pi/v1/delivery/submit.ts`, and the remote worker drives that same registered tool | `extension/worker/stageExecutionE2e.test.ts` (implement HAPPY drives the real tool through the real extension into a stubbed `PERK_BIN` router), `extension/pi/v1/delivery/submit.test.ts`, `tests/test_pr_submit.py` |
+| 4 | address terminal criteria | `finalize_address` (`extension/delivery/address.ts::finalizeAddress` behind `extension/pi/v1/delivery/address.ts`) runs submit first, delegates its resolve half to `perk pr resolve-threads --json`, and appends `last_review_batch`; the worker requires finalizer success + that write + successful effective submit evidence with `mergeable !== false` | `stageExecutionE2e.test.ts` (address HAPPY binds both real door writes to classification), `stageExecution.test.ts` `evaluateTerminal` matrix; post-address the supervisor re-classifies via row 1 |
 | 5 | plan-ref reconstruction + positioning | one function, `resume.reconstruct_plan_ref` — all reconstruction sites converge on it; one validating selector/positioner, `launch.resolve_worktree` (the positioning semantics below), used by every cold door needing a plan checkout; `run_worker.position_worktree` mirrors `launch_stage`'s positioning, and fresh stacked starts independently call the same execution `Delivery.prepare` boundary (§8.46) from `resolve_worktree` and `run_worker.position_branch` | `tests/test_plan_ref_parity.py` (the save→reconstruct round trip + the `PlanRef` field census), `tests/test_plan_selection.py`, `tests/test_resume.py`, `tests/test_launch_restore.py` (the non-destructive restore matrix), `tests/test_run_worker.py::test_positioning_parity_local_launch_vs_remote_worker` (artifact byte parity, `run_id` excepted; the explicit-ref twin pins the direct-ref arm), `tests/test_run_worker.py::test_positioning_parity_stacked_local_create_vs_remote_position` (same start SHA + `layer-context.json` parity, timestamps excepted) |
 | 6 | run reporting | **remote-only by design**: `perk/run/run_report.py` derives the §8.15 plan-issue comments + job summary solely from the §8.12 events stream + exit code | `tests/test_run_report.py` (incl. the `RunOutcome` lockstep literals) ↔ `stageExecution.test.ts` (the frozen `assembleOutcome` shapes) |
 
@@ -5587,9 +5587,10 @@ asymmetry). Selection precedence + the two roots are §8.1. The rest of the post
    `skills_sync_failed` — §8.14 step 4). Binding *content* parity is unchanged either way.
 3. **`address --preview` is local-only.** The classify-only preview flag exists on the
    warm/cold-local doors; the remote worker always renders the action template.
-4. **The `--run-id` impl-run stamp + the conflict-resolver drive need a session.** `submitPr`
+4. **The `--run-id` impl-run stamp + the conflict-resolver drive need a session.** The delivery
+   submit operation (`submitChange`)
    stamps the implement run (workflow-state `run_id`) and drives conflict resolution
-   (`driveConflictResolution`) only where a session exists (warm + worker); a bare shell
+   (`driveConflictFollowUp`) only where a session exists (warm + worker); a bare shell
    `perk pr submit` *reports* `mergeable`/`conflicts` without driving resolution.
 5. **Terminal classification is worker-only.** Only the headless worker machine-classifies a
    stage terminal (`evaluateTerminal`); warm/cold-local stages end with the human observing the
@@ -7107,7 +7108,7 @@ objective's carrier; the stack is its own authority). `PrSubmitOut` gains additi
 `delivery` (`"stacked"`), `stack {number, size, position}`, `operation_id`, and the §8.52
 cascade-only `operation` block (all null on incremental); the envelope's `base` carries the PR's
 real merge target — the parent branch — so the warm door's conflict-resolver rebases onto the
-parent. `extension/doors/submit.ts` decodes the fields leniently (malformed → absent,
+parent. `extension/pi/v1/delivery/submit.ts` decodes the fields leniently (malformed → absent,
 never a sunk decode) and appends a short stack/cascade suffix to the success message. The stacked PR
 body inserts two sections between the plan link and the `<details>` embed — `### This layer`
 (one informational disclaimer: the delivery train is authoritative; the body refreshes only
@@ -8268,14 +8269,18 @@ Incremental submit remains independent of config.
 
 **`finalize_address` is the only model-facing address finalizer.** Parameters remain
 `{threads:[{thread_id, comment?}], pr?, counts?}`. After the parent commits its own fixes, the tool
-runs `submitPr` first for both incremental and stacked plans; only success enters the unchanged
-internal `resolveReviewThreads` core and Python `perk pr resolve-threads` cold door. Submit failure
+runs the shared publish operation (`extension/delivery/submit.ts` composed by
+`extension/pi/v1/delivery/address.ts`) first for both incremental and stacked plans; only success
+enters the resolve step (`extension/delivery/address.ts::finalizeAddress`) and its Python
+`perk pr resolve-threads` cold door. Submit failure
 is non-terminating, preserves its error type, and guarantees threads were not resolved. A partial or
 failed resolve is non-terminating and always carries the successful submit facts. When the cold door
 returns valid per-thread rows, the failure also carries those rows plus `retry_threads`: successful
 rows are omitted, replies positively reported as posted are stripped, and a requested row missing
 from the report is retried without its reply because the posting outcome is unknown. An absent or
-malformed result payload carries no per-thread claim and instructs inspection before a retry. Full
+malformed result payload carries no per-thread claim and instructs inspection before a retry.
+Full success means corroborated per-thread success: a nominal-success envelope whose rows fail to
+corroborate every requested thread is treated as a partial failure and records nothing. Full
 success appends `last_review_batch`, returns nested submit + resolve facts, drives the same bounded
 conflict-resolution follow-up as `submit`, and terminates. The headless address-success
 predicate is §8.11/§8.38's. The address stage registry rows include `github.plan`,

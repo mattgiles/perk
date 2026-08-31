@@ -630,11 +630,11 @@ Validate, publish, and prepare changes for review and landing.
 | --- | --- | --- | --- | --- |
 | `typescript-model-call:extension/doors/ready.ts:module:sendUserMessage:0` | `tool-contract` | `shipped` | [`extension/doors/ready.ts`](../../extension/doors/ready.ts) · `symbol:module/call:sendUserMessage/0` | — |
 | `typescript-model-call:extension/doors/ready.ts:module:sendUserMessage:1` | `tool-contract` | `shipped` | [`extension/doors/ready.ts`](../../extension/doors/ready.ts) · `symbol:module/call:sendUserMessage/1` | — |
-| `typescript-model-call:extension/doors/submit.ts:module:sendUserMessage:0` | `tool-contract` | `shipped` | [`extension/doors/submit.ts`](../../extension/doors/submit.ts) · `symbol:module/call:sendUserMessage/0` | — |
-| `typescript-model-call:extension/doors/submit.ts:module:sendUserMessage:1` | `tool-contract` | `shipped` | [`extension/doors/submit.ts`](../../extension/doors/submit.ts) · `symbol:module/call:sendUserMessage/1` | — |
+| `typescript-model-call:extension/pi/v1/delivery/submit.ts:module:sendUserMessage:0` | `tool-contract` | `shipped` | [`extension/pi/v1/delivery/submit.ts`](../../extension/pi/v1/delivery/submit.ts) · `symbol:module/call:sendUserMessage/0` | — |
+| `typescript-model-call:extension/pi/v1/delivery/submit.ts:module:sendUserMessage:1` | `tool-contract` | `shipped` | [`extension/pi/v1/delivery/submit.ts`](../../extension/pi/v1/delivery/submit.ts) · `symbol:module/call:sendUserMessage/1` | — |
 | `typescript-tool:ready` | `tool-contract` | `shipped` | [`extension/doors/ready.ts`](../../extension/doors/ready.ts) · `tool:ready` | — |
 | `typescript-tool:run_ci` | `tool-contract` | `shipped` | [`extension/pi/v1/delivery/ci.ts`](../../extension/pi/v1/delivery/ci.ts) · `tool:run_ci` | — |
-| `typescript-tool:submit` | `tool-contract` | `shipped` | [`extension/doors/submit.ts`](../../extension/doors/submit.ts) · `tool:submit` | — |
+| `typescript-tool:submit` | `tool-contract` | `shipped` | [`extension/pi/v1/delivery/submit.ts`](../../extension/pi/v1/delivery/submit.ts) · `tool:submit` | — |
 
 <details>
 <summary>Logical fragments</summary>
@@ -643,9 +643,9 @@ Validate, publish, and prepare changes for review and landing.
   - `argument:0` — sendUserMessage model-facing argument (`symbol:module/call:sendUserMessage/0/argument:0`)
 - `typescript-model-call:extension/doors/ready.ts:module:sendUserMessage:1`
   - `argument:0` — sendUserMessage model-facing argument (`symbol:module/call:sendUserMessage/1/argument:0`)
-- `typescript-model-call:extension/doors/submit.ts:module:sendUserMessage:0`
+- `typescript-model-call:extension/pi/v1/delivery/submit.ts:module:sendUserMessage:0`
   - `argument:0` — sendUserMessage model-facing argument (`symbol:module/call:sendUserMessage/0/argument:0`)
-- `typescript-model-call:extension/doors/submit.ts:module:sendUserMessage:1`
+- `typescript-model-call:extension/pi/v1/delivery/submit.ts:module:sendUserMessage:1`
   - `argument:0` — sendUserMessage model-facing argument (`symbol:module/call:sendUserMessage/1/argument:0`)
 - `typescript-tool:ready`
   - `description` — description (`tool:ready.description`)
@@ -1128,9 +1128,9 @@ Classify review feedback, fix actionable items, publish, and resolve.
 | `markdown:prompts/stages/address/action.md` | `launch` | `shipped` | [`prompts/stages/address/action.md`](../../prompts/stages/address/action.md) · `file` | address.cold, address.warm |
 | `markdown:prompts/stages/address/preview.md` | `launch` | `shipped` | [`prompts/stages/address/preview.md`](../../prompts/stages/address/preview.md) · `file` | — |
 | `markdown:skills/perk-address/SKILL.md` | `skill-detail` | `shipped` | [`skills/perk-address/SKILL.md`](../../skills/perk-address/SKILL.md) · `file` | address.cold, address.warm |
-| `typescript-model-call:extension/doors/address.ts:module:sendUserMessage:0` | `tool-contract` | `shipped` | [`extension/doors/address.ts`](../../extension/doors/address.ts) · `symbol:module/call:sendUserMessage/0` | — |
-| `typescript-tool:classify_review_feedback` | `tool-contract` | `shipped` | [`extension/doors/address.ts`](../../extension/doors/address.ts) · `tool:classify_review_feedback` | address.cold, address.warm |
-| `typescript-tool:finalize_address` | `tool-contract` | `shipped` | [`extension/doors/address.ts`](../../extension/doors/address.ts) · `tool:finalize_address` | address.cold, address.warm |
+| `typescript-model-call:extension/pi/v1/delivery/address.ts:module:sendUserMessage:0` | `tool-contract` | `shipped` | [`extension/pi/v1/delivery/address.ts`](../../extension/pi/v1/delivery/address.ts) · `symbol:module/call:sendUserMessage/0` | — |
+| `typescript-tool:classify_review_feedback` | `tool-contract` | `shipped` | [`extension/pi/v1/delivery/address.ts`](../../extension/pi/v1/delivery/address.ts) · `tool:classify_review_feedback` | address.cold, address.warm |
+| `typescript-tool:finalize_address` | `tool-contract` | `shipped` | [`extension/pi/v1/delivery/address.ts`](../../extension/pi/v1/delivery/address.ts) · `tool:finalize_address` | address.cold, address.warm |
 
 <details>
 <summary>Logical fragments</summary>
@@ -1147,7 +1147,7 @@ Classify review feedback, fix actionable items, publish, and resolve.
   - `section:addressing-review-feedback-the-address-loop/plan-file-mode` — Plan File Mode (`heading:addressing-review-feedback-the-address-loop/plan-file-mode`)
   - `section:addressing-review-feedback-the-address-loop/untrusted-text-discipline` — Untrusted-text discipline (`heading:addressing-review-feedback-the-address-loop/untrusted-text-discipline`)
   - `section:addressing-review-feedback-the-address-loop/never-delegate-boundaries` — Never-delegate boundaries (`heading:addressing-review-feedback-the-address-loop/never-delegate-boundaries`)
-- `typescript-model-call:extension/doors/address.ts:module:sendUserMessage:0`
+- `typescript-model-call:extension/pi/v1/delivery/address.ts:module:sendUserMessage:0`
   - `argument:0` — sendUserMessage model-facing argument (`symbol:module/call:sendUserMessage/0/argument:0`)
 - `typescript-tool:classify_review_feedback`
   - `description` — description (`tool:classify_review_feedback.description`)
