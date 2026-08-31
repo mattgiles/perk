@@ -922,7 +922,14 @@ and process mechanics in the Python exterior and adapters.
 >   against its real open PR #2115), with BOTH records committed on THIS layer — trading the
 >   designed own-layer placement for no published-layer amend, no handoff re-stamp, and no
 >   cascade; the gate's operative requirement (the records exist in this layer's synchronized
->   ancestry) is satisfied as written.
+>   ancestry) is satisfied as written — both records landed (`f10b7cf1` Phase 5, `19a9545b`
+>   Phase 6; the Phase-5 terminal leg also surfaced the pre-existing stacked-layer active-arm
+>   scoping gap, filed as #2117). Step-7 evidence (2026-08-31, fresh sessions in this worktree
+>   at `19a9545b`): `/ci` run-all through the LIVE migrated executor → "all checks passed"
+>   (the command's one-line human summary — the verbose report remains the `run_ci` tool's
+>   model-facing output, the unchanged split); `/objective-stack 2083` from a fresh `pi --plan`
+>   (gate-on) session rendered the full 16-layer train (published prefix 11/16, next
+>   build-ready 7.1) — the migrated read-only door works end to end under the gate.
 
 ### Changes
 
