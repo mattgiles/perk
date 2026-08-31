@@ -28,6 +28,7 @@ import { basename, dirname } from "node:path";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { reconcileGuidance } from "../authoring/objective/prose.ts";
 import { parseStackObjectiveArg, STACK_NO_OBJECTIVE_MESSAGE } from "../delivery/stackObjective.ts";
+import { CONFLICT_RESOLUTION_ATTEMPT_CAP } from "../delivery/submit.ts";
 import { bindingSuffix } from "../substrate/bindingDelivery.ts";
 import {
   booleanField,
@@ -47,13 +48,11 @@ import { failFor, ok, type Result } from "../substrate/result.ts";
 import type { ToolGating } from "../substrate/toolGating.ts";
 import { booleanParam, idParam, paramsOf, stringParam } from "../substrate/toolParams.ts";
 import {
-  appendWorkflowState,
-  branchOf,
-  rebuildWorkflowState,
+  conflictResolutionAttempts,
   resolveStackObjective,
+  setConflictAttempts,
 } from "../substrate/workflowState.ts";
 import { report } from "../surfaces/report.ts";
-import { CONFLICT_RESOLUTION_ATTEMPT_CAP, resetConflictAttempts } from "./submit.ts";
 
 /** Every stack tool returns the same slim ok-details: the resolved objective the cold door was
  * driven with (the envelope itself is render-only — nothing persisted). */
@@ -517,7 +516,7 @@ export async function stackSync(
   if (!r.ok) return fail(r.message, r.errorType);
   // Any clean, non-declined mutating completion re-opens the shared bounded conflict budget.
   if (!p.dryRun && booleanField(r.data, "declined") !== true) {
-    resetConflictAttempts(pi, ctx, "objective-sync");
+    setConflictAttempts(pi, ctx, { attempts: 0, scope: "objective-sync" });
   }
   return ok(renderSyncOutcome(r.data, mode), { objective });
 }
@@ -544,7 +543,7 @@ export async function stackAdopt(
   });
   if (!r.ok) return fail(r.message, r.errorType);
   if (!p.dryRun && booleanField(r.data, "declined") !== true) {
-    resetConflictAttempts(pi, ctx, "objective-sync");
+    setConflictAttempts(pi, ctx, { attempts: 0, scope: "objective-sync" });
   }
   return ok(renderSyncOutcome(r.data, "sync"), { objective });
 }
@@ -909,7 +908,7 @@ export async function dispatchSyncResolver(
     return { dispatched: false, errorType: "no_continuation", reason: corroborated.reason };
   }
   const dispatch = corroborated.dispatch;
-  const attempts = rebuildWorkflowState(branchOf(ctx)).conflict_resolution_attempts ?? 0;
+  const attempts = conflictResolutionAttempts(ctx);
   if (attempts >= CONFLICT_RESOLUTION_ATTEMPT_CAP) {
     return {
       dispatched: false,
@@ -929,13 +928,7 @@ export async function dispatchSyncResolver(
     };
   }
   const next = attempts + 1;
-  const persisted = appendWorkflowState(pi, ctx, {
-    data: { conflict_resolution_attempts: next },
-    field: "conflict_resolution_attempts",
-    expected: next,
-    scope: "objective-sync",
-    failure: `conflict_resolution_attempts read-back failed (expected ${next})`,
-  });
+  const persisted = setConflictAttempts(pi, ctx, { attempts: next, scope: "objective-sync" });
   if (!persisted) {
     // The verified increment is a precondition for injection: without it the cap is
     // unenforceable. Release the claim acquired in THIS call so the withheld dispatch leaves
