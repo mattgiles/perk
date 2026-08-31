@@ -97,7 +97,6 @@ export type FinalizeAddressOutcome =
       change: PublishedChange;
       results: ThreadResultRow[];
       resolvedThreadIds: string[];
-      record: ReviewBatchRecord;
       conflict: ConflictFollowUp;
     };
 
@@ -110,7 +109,9 @@ type ThreadFate =
 /**
  * The one correlation pass: requested ids deduped by FIRST occurrence; the row lookup is built
  * `new Map(rows.map(...))` so a duplicate row's LAST observation wins (today's exact
- * precedence). Rows for never-requested ids are ignored.
+ * precedence — safe on the partial/retry path, where the envelope already failed; the ok-arm
+ * corroboration guard additionally refuses contradictory duplicates via `contradictedIds`).
+ * Rows for never-requested ids are ignored.
  */
 function correlateFates(
   requested: ThreadInput[],
@@ -133,17 +134,40 @@ function correlateFates(
 }
 
 /**
+ * Requested ids whose rows DISAGREE on `success` (version-skew evidence). A contradictory
+ * duplicate must never corroborate a nominal success — last-row precedence would erase the
+ * failure observation before the guard runs — so the ok-arm treats these as uncorroborated
+ * and retries them with the reply stripped (both the resolve and the reply outcome are
+ * unknowable from contradictory evidence).
+ */
+function contradictedIds(requested: ThreadInput[], rows: ThreadResultRow[]): Set<string> {
+  const requestedIds = new Set(requested.map((input) => input.thread_id));
+  const lastSuccess = new Map<string, boolean>();
+  const contradicted = new Set<string>();
+  for (const row of rows) {
+    if (!requestedIds.has(row.thread_id)) continue;
+    const prior = lastSuccess.get(row.thread_id);
+    if (prior !== undefined && prior !== row.success) contradicted.add(row.thread_id);
+    lastSuccess.set(row.thread_id, row.success);
+  }
+  return contradicted;
+}
+
+/**
  * The only safe automatic retry batch, derived from the fates: resolved threads are omitted; a
  * reply is retained ONLY on a positive not-posted report (`failed` with `replyPosted: false`);
- * an `unknown` fate is outcome-unknown, so its reply is stripped rather than risked twice.
+ * an `unknown` fate is outcome-unknown, so its reply is stripped rather than risked twice. A
+ * `contradicted` id (ok-arm only) is likewise outcome-unknown: retried with the reply stripped.
  */
 function retryFromFates(
   fates: Map<string, { input: ThreadInput; fate: ThreadFate }>,
+  contradicted: Set<string> = new Set(),
 ): ThreadInput[] {
   const retry: ThreadInput[] = [];
-  for (const { input, fate } of fates.values()) {
-    if (fate.kind === "resolved") continue;
-    if (fate.kind === "failed" && !fate.replyPosted && input.comment !== undefined) {
+  for (const [id, { input, fate }] of fates) {
+    const effective: ThreadFate = contradicted.has(id) ? { kind: "unknown" } : fate;
+    if (effective.kind === "resolved") continue;
+    if (effective.kind === "failed" && !effective.replyPosted && input.comment !== undefined) {
       retry.push({ thread_id: input.thread_id, comment: input.comment });
     } else {
       retry.push({ thread_id: input.thread_id });
@@ -230,20 +254,24 @@ export async function finalizeAddress(
   }
 
   // The ok-arm corroboration guard: a nominal-success envelope must corroborate EVERY requested
-  // thread (missing/failed/duplicate-conflicting rows under version skew route to partial —
+  // thread (missing/failed/duplicate-CONTRADICTING rows under version skew route to partial —
   // nothing recorded, nothing termination-eligible).
-  const uncorroborated = [...fates.values()].filter(({ fate }) => fate.kind !== "resolved").length;
+  const contradicted = contradictedIds(input.threads, rows);
+  const uncorroborated = [...fates.entries()].filter(
+    ([id, { fate }]) => fate.kind !== "resolved" || contradicted.has(id),
+  ).length;
   if (uncorroborated > 0) {
+    const guardRetry = retryFromFates(fates, contradicted);
     const resolveMessage = `the resolve report did not corroborate ${uncorroborated} requested thread(s)`;
     return {
       kind: "published_partial",
       change,
       resolveMessage,
-      message: resolveFailedMessage(resolveMessage, retryThreads.length > 0),
+      message: resolveFailedMessage(resolveMessage, guardRetry.length > 0),
       errorType: "partial_failure",
       results: rows,
       resolvedThreadIds,
-      retryThreads,
+      retryThreads: guardRetry,
     };
   }
 
@@ -262,7 +290,6 @@ export async function finalizeAddress(
     change,
     results: rows,
     resolvedThreadIds,
-    record,
     conflict: decideConflictFollowUp(change, deps.attempts),
   };
 }

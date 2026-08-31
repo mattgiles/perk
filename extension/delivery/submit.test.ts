@@ -45,7 +45,6 @@ function deps(opts: {
   attempt: PublishAttempt;
   runId?: string | null;
   attempts?: ConflictAttempts;
-  pointerResult?: boolean;
 }) {
   const calls: string[] = [];
   const d: PublishDeps = {
@@ -53,12 +52,9 @@ function deps(opts: {
       calls.push(`publish(${runId === null ? "null" : runId})`);
       return opts.attempt;
     },
-    runId: opts.runId === undefined ? "01RID" : opts.runId,
-    recordImplementationPointer: () => {
-      calls.push("pointer");
-      // A returns-false-shaped fake: the capability reports its own failures and the op never
-      // inspects a result (void contract) — this stays observable only through `calls`.
-      void opts.pointerResult;
+    readRunId: () => (opts.runId === undefined ? "01RID" : opts.runId),
+    recordImplementationPointer: (runId) => {
+      calls.push(`pointer(${runId})`);
     },
     attempts: opts.attempts ?? fakeAttempts().attempts,
   };
@@ -85,7 +81,7 @@ test("publishVerified: verified clean success records the pointer once and reset
   const { d, calls } = deps({ attempt: { ok: true, change: CHANGE }, attempts: rec.attempts });
   const attempt = await publishVerified(d);
   assert.equal(attempt.ok, true);
-  assert.deepEqual(calls, ["publish(01RID)", "pointer"]);
+  assert.deepEqual(calls, ["publish(01RID)", "pointer(01RID)"], "the pointer receives the read id");
   assert.deepEqual(rec.writes, [0], "reset-on-clean");
 });
 
@@ -124,10 +120,15 @@ test("publishVerified: a conflicted publish never resets", async () => {
   assert.deepEqual(rec.writes, []);
 });
 
-test("publishVerified: a returns-false pointer fake leaves the outcome untouched", async () => {
-  const { d } = deps({ attempt: { ok: true, change: CHANGE }, pointerResult: false });
-  const attempt = await publishVerified(d);
-  assert.equal(attempt.ok, true, "the capability owns its own failure reporting");
+test("publishVerified: a throwing readRunId propagates BEFORE the external publish", async () => {
+  // The load-bearing failure path (contracts §8.35 parity): an unreadable branch must abort the
+  // publish — never silently drop the run-id stamp and publish anyway.
+  const { d, calls } = deps({ attempt: { ok: true, change: CHANGE } });
+  d.readRunId = () => {
+    throw new Error("branch unreadable");
+  };
+  await assert.rejects(() => publishVerified(d), /branch unreadable/);
+  assert.deepEqual(calls, [], "the publish port was never invoked");
 });
 
 // --- decideConflictFollowUp -----------------------------------------------------------------

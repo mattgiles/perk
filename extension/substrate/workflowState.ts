@@ -269,9 +269,11 @@ export function conflictResolutionAttempts(source: BranchSource): number {
 }
 
 /**
- * The checked `conflict_resolution_attempts` write: equal-value short-circuit (no append) →
- * `true`; otherwise the strict-read-back boolean from `appendWorkflowState` (its loud report
- * path is the loudness channel). The counter is shared across the two warm conflict drives, so
+ * The checked `conflict_resolution_attempts` write: a non-integer/negative value is refused
+ * loudly (`false`, no append — the reader narrows such values to 0, so persisting one would
+ * silently reopen the budget); equal-value short-circuit (no append) → `true`; otherwise the
+ * strict-read-back boolean from `appendWorkflowState` (its loud report path is the loudness
+ * channel). The counter is shared across the two warm conflict drives, so
  * `scope` names the TRUE writing surface for failure reports — `/submit` passes "submit", the
  * stack door "objective-sync".
  */
@@ -280,6 +282,20 @@ export function setConflictAttempts(
   source: BranchSource & ReportTarget,
   opts: { attempts: number; scope: string },
 ): boolean {
+  // The write seam enforces the same invariant the reader narrows by: persisting a value the
+  // reader would coerce to 0 would silently reopen the conflict budget on the next read, so an
+  // invalid write is refused loudly instead of persisted (invalid counter states are
+  // unrepresentable through this seam).
+  if (!Number.isInteger(opts.attempts) || opts.attempts < 0) {
+    report(
+      source,
+      opts.scope,
+      "warning",
+      `refused an invalid conflict_resolution_attempts write (${opts.attempts}) — the counter is a non-negative integer`,
+      { alsoLog: true },
+    );
+    return false;
+  }
   if (conflictResolutionAttempts(source) === opts.attempts) return true;
   return appendWorkflowState(sink, source, {
     data: { conflict_resolution_attempts: opts.attempts },

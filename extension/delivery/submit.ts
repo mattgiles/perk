@@ -75,12 +75,14 @@ export type ConflictFollowUp =
 
 export interface PublishDeps {
   publish: PublishChange;
-  /** Adapter-supplied with today's throwing-read parity (a throwing run-id read fails BEFORE
-   * publication); `""` ⇒ `null`. */
-  runId: string | null;
+  /** The adapter's DIRECT run-id read, invoked at publish time — AFTER any pre-effect refusal
+   * (the finalize empty-batch check) but BEFORE the external call, so a throwing branch read
+   * still fails before publication (today's parity); `""` ⇒ `null` is the adapter's job. */
+  readRunId: () => string | null;
   /** CONTRACT: never throws; owns its own failure reporting (production:
-   * `captureSessionPointer` — best-effort + non-fatal, a successful publish must stand). */
-  recordImplementationPointer: () => void;
+   * `captureSessionPointer` — best-effort + non-fatal, a successful publish must stand).
+   * Receives the run id `readRunId` returned for this publish. */
+  recordImplementationPointer: (runId: string) => void;
   attempts: ConflictAttempts;
 }
 
@@ -97,9 +99,10 @@ export type SubmitChangeOutcome =
  * unchecked — today's posture; the seam warns loudly on a read-back miss.
  */
 export async function publishVerified(deps: PublishDeps): Promise<PublishAttempt> {
-  const attempt = await deps.publish({ runId: deps.runId });
+  const runId = deps.readRunId();
+  const attempt = await deps.publish({ runId });
   if (!attempt.ok) return attempt;
-  if (deps.runId !== null) deps.recordImplementationPointer();
+  if (runId !== null) deps.recordImplementationPointer(runId);
   if (attempt.change.mergeable !== false && deps.attempts.read() !== 0) {
     deps.attempts.write(0);
   }

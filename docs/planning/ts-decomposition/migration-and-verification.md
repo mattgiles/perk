@@ -986,9 +986,17 @@ and process mechanics in the Python exterior and adapters.
 >   `stringField` (the opaque string id `PrSubmitOut.issue: str` actually sends; the old
 >   `numberField` never matched — details silently dropped it); one documented baseline delta
 >   with a both-ways regression pair. **D4** — `--run-id` sourcing stays parity via the DIRECT
->   throwing `rebuildWorkflowState(branchOf(ctx)).run_id` read at the adapter (fails BEFORE
->   publication, exactly as before); recorded because review caught the `activeSessionRunId`
->   near-miss (it catches, and would silently drop the stamp).
+>   throwing `rebuildWorkflowState(branchOf(ctx)).run_id` read at the adapter, invoked lazily
+>   at publish time (`PublishDeps.readRunId`): a throwing branch read still fails BEFORE the
+>   external call, while the finalize empty-batch refusal keeps firing first — the
+>   pre-migration order (the review's address pass caught the eager-read regression); recorded
+>   also because review caught the `activeSessionRunId` near-miss (it catches, and would
+>   silently drop the stamp). Post-review hardenings beyond the plan's four: the ok-arm
+>   corroboration guard additionally refuses CONTRADICTORY duplicate rows (rows disagreeing on
+>   `success` never corroborate; the retry strips their replies — last-row precedence remains
+>   only on the partial/retry path), and `setConflictAttempts` refuses a non-integer/negative
+>   write loudly (the reader narrows such values to 0, so persisting one would silently reopen
+>   the budget — invalid counter states are now unrepresentable through the seam).
 > - **Declined hardening (recorded)**: the submit-path drive-despite-unverified-increment
 >   posture is deliberately preserved (parity; the seam's loud warning is the mitigation) —
 >   pinned by the unverified-increment parity test; the sync path's withhold-and-release stays
@@ -1003,27 +1011,34 @@ and process mechanics in the Python exterior and adapters.
 >   `record-review-batch` (`last_review_batch`, LWW, strict read-back, scope "address",
 >   classification ignored by the op; persisted shape byte-identical; the memory backing
 >   gained a `lastReviewBatchRecord()` observer).
-> - **Accounting ledger** (computed from the layer diff at implementation close):
->   - Production LOC: 928 deleted (−373 `doors/submit.ts`, −555 `doors/address.ts`) → 1,229
->     added (`delivery/submit.ts` 144, `delivery/address.ts` 268, `pi/v1/delivery/submit.ts`
->     367, `pi/v1/delivery/address.ts` 450) plus seams (+37 substrate, +57 session) − 7
->     objectiveStack dedupe + 1 comment re-anchor wrap; whole-change production net **+389**
->     against the ≤ 0 target. **Named excess classes** (each against a plan-named invariant;
->     for operator acceptance at review): the typed outcome unions + action ports + the
->     composition factory across the two feature modules (+412 feature-tier, of which the
->     adapter tier shrank −111 — the fate correlation, D1's guard, retry-unrepresentable
+> - **Accounting ledger** (recomputed after the review-address pass):
+>   - Production LOC: 928 deleted (−373 `doors/submit.ts`, −555 `doors/address.ts`) → 1,264
+>     added (`delivery/submit.ts` 147, `delivery/address.ts` 295, `pi/v1/delivery/submit.ts`
+>     372, `pi/v1/delivery/address.ts` 450) plus seams (+53 substrate, +57 session) − 7
+>     objectiveStack dedupe + 1 comment re-anchor wrap; whole-change production net **+440**
+>     against the ≤ 0 target. **Named excess classes** (each against a plan-named invariant):
+>     the typed outcome unions + action ports + the composition factory across the two feature
+>     modules (+447 feature-tier, of which the adapter tier shrank −106 — the fate
+>     correlation, D1's guard incl. the contradictory-duplicate refusal, retry-unrepresentable
 >     states, and the ordering/atomicity policy now live once, Pi-free, deletion-testable);
->     the D2 checked counter seam (+37); the `record-review-batch` session variant across
->     seam + two backings (+57). Zero new policy surface beyond the plan's named deltas.
+>     the D2 checked counter seam + its invalid-write refusal (+53); the
+>     `record-review-batch` session variant across seam + two backings (+57). Zero new policy
+>     surface beyond the plan's named deltas + the two review-pass hardenings above. The
+>     plan-required operator acceptance of this named ledger rides the PR review gate: the
+>     ledger is posted on PR #2123 (body + review thread) and the human's approval of that PR
+>     IS the recorded acceptance gesture — merge does not proceed without it.
 >   - Test LOC: 1,028 deleted (−547 `doors/submit.test.ts`, −481 `doors/address.test.ts`) →
->     2,097 added across the four new suites (`delivery/submit.test.ts` 235,
->     `delivery/address.test.ts` 306, `pi/v1/delivery/submit.test.ts` 770,
->     `pi/v1/delivery/address.test.ts` 786) + 70 session-suite rows + 76 substrate rows − 2
->     guard — net +1,213: the new arms are the full-details wire baselines, the D1 matrix,
->     conflicting-duplicate rows, the unverified-increment parity pin, the counter narrowing
->     matrix, both order pins (submit-before-resolve argv; report-before-drive), the
->     notes-on-failure regression, the never-burn-an-attempt e2e, the both-reports pin, and
->     the session-recording failure arms.
+>     2,201 added across the four new suites (`delivery/submit.test.ts` 236,
+>     `delivery/address.test.ts` 359, `pi/v1/delivery/submit.test.ts` 789,
+>     `pi/v1/delivery/address.test.ts` 817) + 70 session-suite rows + 93 substrate rows + 5
+>     harness (the `fullArgvFile` wire-pin knob) − 2 guard — net +1,339: the new arms are the
+>     full-details wire baselines, the D1 matrix incl. contradictory duplicates, the
+>     unverified-increment parity pin, the counter narrowing + invalid-write matrix, the
+>     order pins (submit-before-resolve argv; record-before-decision full event traces;
+>     report-before-drive), the resolve `--batch` wire pin (flag adjacency + exact staged
+>     rows), the throwing-run-id-read abort pins (feature + adapter), the notes-on-failure
+>     regression, the never-burn-an-attempt e2e, the both-reports pin, and the
+>     session-recording failure arms.
 >   - Files: +8 / −4; touched: `objectiveStack.ts`, `objectiveStackDrive.test.ts`,
 >     `index.ts`, `importDirectionGuard.test.ts`, the session trio, `workflowState.ts` +
 >     test, four comment re-anchors (`coldDoor.ts`, `plannotatorHandoff.ts`,
@@ -1040,12 +1055,16 @@ and process mechanics in the Python exterior and adapters.
 >     `SubmitChangeOutcome`, `publishVerified`, `decideConflictFollowUp`, `submitChange`,
 >     `ResolveThreads`/`ResolveThreadsAttempt`, `AddressFinalization`, `FinalizeAddressDeps`/
 >     `FinalizeAddressOutcome`, `finalizeAddress`, `installSubmitBindings`/
->     `installAddressBindings`, `createChangePublisher`, `publishDepsFor`,
->     `conflictAttemptsFor`, `renderPublishedMessage`, `driveConflictFollowUp`,
+>     `installAddressBindings`, `publishDepsFor` (carrying the lazy `readRunId` port),
+>     `renderPublishedMessage`, `driveConflictFollowUp`,
 >     `conflictResolutionAttempts`/`setConflictAttempts` (substrate), `ReviewBatchRecord`/
->     `ReviewBatchCounts` + the `record-review-batch` variant (session). The ThreadFate type
->     is module-private (NOT exported). Every added export has a production importer or is a
->     frozen-baseline/exported-core test surface.
+>     `ReviewBatchCounts` + the `record-review-batch` variant (session). Module-private by
+>     review: `createChangePublisher` + `conflictAttemptsFor` (every production consumer
+>     composes through `publishDepsFor` — the one-composition invariant is structural), the
+>     ThreadFate type, and the completed outcome no longer carries the applied
+>     `ReviewBatchRecord` (no production reader — the memory observer is the test seam).
+>     Every added export has a production importer or is a frozen-baseline/exported-core test
+>     surface.
 >   - Deletion test: gutting the two feature modules hollows both installers — ordering,
 >     atomicity, corroboration, retry derivation, the bounded decision, reset-on-clean,
 >     pointer ordering, and verified-success recording all vanish, leaving registration +
@@ -1061,12 +1080,19 @@ and process mechanics in the Python exterior and adapters.
 >   re-publish rides the implementing session's terminating `submit` tool — that session's
 >   in-memory binding predates the migration (loaded at session start; a warm session cannot
 >   reload itself), which is exactly the byte-parity the wire baselines pin; the migrated
->   binding's live publication is proof #1 above. The PR-body accounting-ledger append
->   (Step 8.5) is the immediate NEXT gesture after that terminating submit (its body
->   regeneration is the plan's named residual; this committed note is the durable ledger
->   copy). An address pass on this PR, if one happens, rides the migrated
->   `classify_review_feedback` → `finalize_address` loop and its evidence is appended in that
->   pass — never claimed prematurely. The full Phase-7 dogfood gate closes at node 7.5.
+>   binding's live publication is proof #1 above. Live proof #2 (2026-08-31, the
+>   review-address pass on PR #2123's 13-thread multi-angle review): the post-address final
+>   head was re-published through the MIGRATED submit binding from a second fresh headless
+>   session — Step 8.4 satisfied on the migrated door. The address loop itself
+>   (classify → fix → finalize) ran live end-to-end in the implementing session, whose
+>   in-memory bindings predate the migration (byte-parity-pinned by the wire baselines); a
+>   live observation of the migrated `pi/v1/delivery/address.ts` bindings stays honestly
+>   unclaimed — it rides a future address pass from a fresh session (or the 7.5 full-phase
+>   dogfood). The PR-body accounting-ledger append + read-back (Step 8.5) was performed in
+>   the address pass after the final-head submit; the terminating `finalize_address`
+>   re-publish that closes the pass regenerates the body (the plan's named residual —
+>   re-append rides the next gesture; this committed note is the durable ledger copy). The
+>   full Phase-7 dogfood gate closes at 7.5.
 
 ### Changes
 

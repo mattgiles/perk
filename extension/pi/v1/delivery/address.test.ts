@@ -352,6 +352,37 @@ test("finalize_address submits before resolving, records the batch, and terminat
   }
 });
 
+test("the resolve batch channel: --batch + the exact serialized rows (omitted comment ⇒ null)", async () => {
+  // Pin the WIRE, not just the subcommand order: the full resolve argv (the staged --batch flag
+  // adjacency) and the staged batch file's exact JSON rows — a dropped channel or a wrong
+  // serialization breaks the real thread mutation even while route-key pins stay green.
+  const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
+  const fullArgvFile = join(cwd, "full-argv.txt");
+  const bin = fakePerkRouter(cwd, routes(), { fullArgvFile });
+  const h = await loadPerkSession({ cwd, env: { PERK_RUN_ID: "01RID", PERK_BIN: bin } });
+  try {
+    const result = await h.invokeTool("finalize_address", {
+      threads: [{ thread_id: "PRRT_1", comment: "Fixed" }, { thread_id: "PRRT_2" }],
+    });
+    assert.equal((result.details as { ok: boolean }).ok, true);
+    const invocations = readFileSync(fullArgvFile, "utf8")
+      .trim()
+      .split("\n")
+      .map((line) => line.split("\t").filter((arg) => arg !== ""));
+    assert.equal(invocations.length, 2, "submit then resolve");
+    const resolveArgv = invocations[1] ?? [];
+    assert.deepEqual(resolveArgv.slice(0, 4), ["pr", "resolve-threads", "--json", "--batch"]);
+    const batchPath = resolveArgv[4] ?? "";
+    assert.match(batchPath, /resolve-batch-\d+\.json$/);
+    assert.deepEqual(JSON.parse(readFileSync(batchPath, "utf8")), [
+      { thread_id: "PRRT_1", comment: "Fixed" },
+      { thread_id: "PRRT_2", comment: null },
+    ]);
+  } finally {
+    h.dispose();
+  }
+});
+
 test("finalize_address re-drives a definitive conflict without parsed paths", async () => {
   const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
   const submit = { ...SUBMIT_PAYLOAD, mergeable: false, conflicts: [] };

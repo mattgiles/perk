@@ -38,12 +38,19 @@ function world(opts: {
   resolve?: ResolveThreadsAttempt;
   attemptsValue?: number;
 }) {
+  // ONE shared recorder across every port INCLUDING the conflict-attempts capability, so the
+  // ordering pins can see the decision itself (attempts.read/attempts.write ride `calls`), not
+  // merely the ports around it.
   const calls: string[] = [];
   const writes: number[] = [];
   const session = openMemoryWorkflowSession({ runId: "01RID" });
   const attempts: ConflictAttempts = {
-    read: () => opts.attemptsValue ?? 0,
+    read() {
+      calls.push("attempts.read");
+      return opts.attemptsValue ?? 0;
+    },
     write(next: number) {
+      calls.push(`attempts.write(${next})`);
       writes.push(next);
       return true;
     },
@@ -53,7 +60,7 @@ function world(opts: {
       calls.push("publish");
       return opts.publish ?? { ok: true, change: CHANGE };
     },
-    runId: "01RID",
+    readRunId: () => "01RID",
     recordImplementationPointer: () => calls.push("pointer"),
     attempts,
     resolve: async () => {
@@ -87,6 +94,17 @@ test("empty batch refuses before any port with the exact text", async () => {
   assert.deepEqual(calls, [], "no ports invoked");
 });
 
+test("empty batch refuses even when the run-id read would throw (pre-effect ordering)", async () => {
+  // The regression the review caught: dependency acquisition must stay lazy so the deliberately
+  // throwing run-id read can never preempt the stable bad_input refusal on an empty batch.
+  const { deps } = world({});
+  deps.readRunId = () => {
+    throw new Error("branch unreadable");
+  };
+  const outcome = await finalizeAddress(deps, { threads: [] });
+  assert.equal(outcome.kind, "empty_batch");
+});
+
 test("publish failure ⇒ not_published with both messages; resolver NEVER invoked, no session/counter activity", async () => {
   const { deps, calls, writes, session } = world({
     publish: { ok: false, message: "drift", errorType: "remote_drift" },
@@ -115,7 +133,16 @@ test("corroborated success: publish → resolve → apply → decide order pin �
     batch({ thread_id: "PRRT_1", comment: "Fixed" }, { thread_id: "PRRT_2" }),
   );
   assert.ok(outcome.kind === "completed");
-  assert.deepEqual(calls, ["publish", "pointer", "resolve", "apply(record-review-batch)"]);
+  // The clean arm's full event trace: verified-success updates (pointer; the reset check reads
+  // once and short-circuits on a clean counter), then resolve → apply; a clean change's
+  // decision emits NO counter events — nothing follows the record.
+  assert.deepEqual(calls, [
+    "publish",
+    "pointer",
+    "attempts.read",
+    "resolve",
+    "apply(record-review-batch)",
+  ]);
   assert.deepEqual(outcome.resolvedThreadIds, ["PRRT_1", "PRRT_2"]);
   assert.deepEqual(outcome.conflict, { kind: "none" });
   const record = session.lastReviewBatchRecord();
@@ -123,7 +150,6 @@ test("corroborated success: publish → resolve → apply → decide order pin �
   assert.deepEqual(record?.counts, { actionable: 1 });
   assert.deepEqual(record?.resolved_thread_ids, ["PRRT_1", "PRRT_2"]);
   assert.ok(!Number.isNaN(Date.parse(record?.at ?? "")));
-  assert.deepEqual(outcome.record, record);
 });
 
 test("conflicted publish + resolve ok ⇒ the decision runs only after corroborated resolve", async () => {
@@ -136,7 +162,16 @@ test("conflicted publish + resolve ok ⇒ the decision runs only after corrobora
   assert.ok(outcome.kind === "completed");
   assert.deepEqual(outcome.conflict, { kind: "drive", base: "main", attempt: 1, cap: 2 });
   assert.deepEqual(writes, [1], "one increment, decided after resolve success");
-  assert.equal(calls.indexOf("resolve") < calls.indexOf("apply(record-review-batch)"), true);
+  // The conflicted arm's full trace pins record-before-decision: EVERY conflict-decision event
+  // (the decision's read + increment write) lands strictly AFTER apply(record-review-batch).
+  assert.deepEqual(calls, [
+    "publish",
+    "pointer",
+    "resolve",
+    "apply(record-review-batch)",
+    "attempts.read",
+    "attempts.write(1)",
+  ]);
 });
 
 test("conflicted publish + resolve failure ⇒ NO counter activity (never burn an attempt)", async () => {
@@ -181,6 +216,24 @@ test("retry derivation: success omitted; positive not-posted keeps the reply; po
   assert.deepEqual(outcome.resolvedThreadIds, ["A"]);
   assert.equal(outcome.errorType, "partial_failure");
   assert.match(outcome.message, /only details\.retry_threads/);
+});
+
+test("D1: a success envelope with CONTRADICTORY duplicate rows ⇒ partial, retry stripped, no record", async () => {
+  // Version-skew evidence: rows for A disagree on `success` (false then true — last-wins would
+  // erase the failure observation). The corroboration guard refuses it: nothing recorded,
+  // nothing termination-eligible, and A is retried WITHOUT its reply (outcome unknowable).
+  const { deps, writes, session } = world({
+    resolve: { ok: true, rows: rowsOf(["A", false, true], ["A", true, false]) },
+  });
+  const outcome = await finalizeAddress(deps, batch({ thread_id: "A", comment: "stripped" }));
+  assert.ok(outcome.kind === "published_partial");
+  assert.equal(
+    outcome.resolveMessage,
+    "the resolve report did not corroborate 1 requested thread(s)",
+  );
+  assert.deepEqual(outcome.retryThreads, [{ thread_id: "A" }]);
+  assert.equal(session.lastReviewBatchRecord(), null, "nothing recorded on contradiction");
+  assert.deepEqual(writes, [], "no conflict decision on an uncorroborated success");
 });
 
 test("requested dupes dedupe by FIRST occurrence; conflicting duplicate ROWS ⇒ last wins", async () => {

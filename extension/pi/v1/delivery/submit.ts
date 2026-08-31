@@ -145,9 +145,10 @@ function decodeSubmit(payload: ColdJson): PublishedChange | null {
  * seam. On decode success it ALSO reports each `operation.notes` row as a scope-"submit"
  * warning (today's timing: after publish success, before anything downstream — including before
  * resolve on the address path). It reports NOTHING on failure — the callers own failure
- * loudness, keeping the standalone submit path single-report.
+ * loudness, keeping the standalone submit path single-report. Module-private: every production
+ * consumer composes through `publishDepsFor` (the one-composition invariant is structural).
  */
-export function createChangePublisher(pi: ExtensionAPI, ctx: ExtensionContext): PublishChange {
+function createChangePublisher(pi: ExtensionAPI, ctx: ExtensionContext): PublishChange {
   return async ({ runId }) => {
     const args = ["pr", "submit", "--json"];
     if (runId !== null) args.push("--run-id", runId);
@@ -164,8 +165,9 @@ export function createChangePublisher(pi: ExtensionAPI, ctx: ExtensionContext): 
 }
 
 /** The shared-counter capability over the checked substrate seam (scope "submit" — the true
- * writing surface for both submit-surface writers). `ctx` IS the `BranchSource`. */
-export function conflictAttemptsFor(pi: ExtensionAPI, ctx: ExtensionContext): ConflictAttempts {
+ * writing surface for both submit-surface writers). `ctx` IS the `BranchSource`.
+ * Module-private: consumed only through `publishDepsFor`. */
+function conflictAttemptsFor(pi: ExtensionAPI, ctx: ExtensionContext): ConflictAttempts {
   return {
     read: () => conflictResolutionAttempts(ctx),
     write: (next) => setConflictAttempts(pi, ctx, { attempts: next, scope: "submit" }),
@@ -175,17 +177,20 @@ export function conflictAttemptsFor(pi: ExtensionAPI, ctx: ExtensionContext): Co
 /**
  * The one production `PublishDeps` composition (the address installer extends it — the
  * one-production-adapter invariant is structural). The run id rides the DIRECT throwing read
- * (`rebuildWorkflowState(branchOf(ctx)).run_id ?? ""` — a throwing branch read fails BEFORE
- * publication, exactly today; deliberately NOT `activeSessionRunId`, which catches and would
- * silently drop the stamp). Stamping the id into the plan-header `impl_run_ids` linkage
- * (contracts §8.35) mirrors planSave's `--run-id` thread; absent run_id ⇒ omit (bare-stamp
- * untouched).
+ * (`rebuildWorkflowState(branchOf(ctx)).run_id ?? ""` — deliberately NOT `activeSessionRunId`,
+ * which catches and would silently drop the stamp), invoked lazily at publish time so a
+ * throwing branch read still fails BEFORE the external call while the finalize empty-batch
+ * refusal keeps firing first (the pre-migration order). Stamping the id into the plan-header
+ * `impl_run_ids` linkage (contracts §8.35) mirrors planSave's `--run-id` thread; absent run_id
+ * ⇒ omit (bare-stamp untouched).
  */
 export function publishDepsFor(pi: ExtensionAPI, ctx: ExtensionContext): PublishDeps {
-  const runId = rebuildWorkflowState(branchOf(ctx)).run_id ?? "";
   return {
     publish: createChangePublisher(pi, ctx),
-    runId: runId === "" ? null : runId,
+    readRunId: () => {
+      const runId = rebuildWorkflowState(branchOf(ctx)).run_id ?? "";
+      return runId === "" ? null : runId;
+    },
     // Capture `implementation/main` at the moment the run id enters `impl_run_ids` (contracts
     // §8.35): any run id stamped into the linkage gets its pointer captured in the same
     // gesture. This covers address/warm sessions that submit — which the stage-gated
@@ -194,7 +199,7 @@ export function publishDepsFor(pi: ExtensionAPI, ctx: ExtensionContext): Publish
     // refresh; `preserveForeign` guarantees it can never clobber a different session's pointer.
     // Best-effort + non-fatal like every capture site (a successful submit must stand) — the
     // never-throws capability contract.
-    recordImplementationPointer: () => {
+    recordImplementationPointer: (runId) => {
       captureSessionPointer({
         cwd: ctx.cwd,
         runId,

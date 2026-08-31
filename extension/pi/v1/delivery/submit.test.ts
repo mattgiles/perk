@@ -360,6 +360,25 @@ test("argv: a planted run id rides as an adjacent --run-id flag pair", async () 
   }
 });
 
+test("a throwing branch read aborts BEFORE publication (the load-bearing D4 failure path)", async () => {
+  // The production deps' run-id read is the DIRECT throwing read — an unreadable branch must
+  // never silently drop the stamp and publish anyway. The cold door is provably never reached.
+  const execs: string[][] = [];
+  const { pi, ctx } = world({ stdout: submitJson() });
+  (pi as unknown as { exec: unknown }).exec = async (_bin: string, args: string[]) => {
+    execs.push(args);
+    return { code: 0, killed: false, stdout: submitJson(), stderr: "" };
+  };
+  (ctx as unknown as { sessionManager: unknown }).sessionManager = {
+    getBranch: () => {
+      throw new Error("branch unreadable");
+    },
+    getSessionFile: () => null,
+  };
+  await assert.rejects(() => submitChange(publishDepsFor(pi, ctx)), /branch unreadable/);
+  assert.deepEqual(execs, [], "the cold-door publisher was never invoked");
+});
+
 test("argv: no branch run id ⇒ no --run-id flag", async () => {
   // A LOADED warm session always mints a run id (the identity-less arm), so the absent-run-id
   // wire is pinned through the production deps over a branch with no run_id entry.

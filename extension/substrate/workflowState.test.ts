@@ -465,6 +465,23 @@ test("setConflictAttempts: an equal value short-circuits true and appends nothin
   assert.equal(clean.entries.length, 0);
 });
 
+test("setConflictAttempts: an invalid value is refused loudly — false, NO append", () => {
+  // The write seam enforces the reader's invariant: persisting a value the reader narrows to 0
+  // would silently reopen the conflict budget — invalid states are unrepresentable through the
+  // seam.
+  for (const invalid of [-1, 1.5, Number.NaN]) {
+    const { entries, notifications, sink, source } = fakeWorld();
+    entries.push(ws({ conflict_resolution_attempts: 1 }));
+    const before = entries.length;
+    assert.equal(setConflictAttempts(sink, source, { attempts: invalid, scope: "submit" }), false);
+    assert.equal(entries.length, before, `nothing appended for ${invalid}`);
+    assert.deepEqual(notifications, [
+      `perk: submit — refused an invalid conflict_resolution_attempts write (${invalid}) — ` +
+        "the counter is a non-negative integer",
+    ]);
+  }
+});
+
 test("setConflictAttempts: a failed read-back returns false with the increment failure text", () => {
   const { entries, notifications, source } = fakeWorld();
   entries.push(ws({ conflict_resolution_attempts: 1 }));
