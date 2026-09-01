@@ -7,13 +7,11 @@ import { test } from "node:test";
 import { type ExtensionAPI, SessionManager } from "@earendil-works/pi-coding-agent";
 import { reconcileGuidance } from "../authoring/objective/prose.ts";
 import { commitAndCompactContinuation, commitAndCompactGuidance } from "../doors/commitCompact.ts";
-import {
-  objectiveLandGuidance,
-  objectiveRecoverGuidance,
-  objectiveSyncGuidance,
-} from "../doors/objectiveStack.ts";
 import { prReviewGuidance } from "../pi/v1/codeReview/automated.ts";
 import { stackReviewGuidance } from "../pi/v1/codeReview/stack.ts";
+import { objectiveLandGuidance } from "../pi/v1/delivery/stackLand.ts";
+import { objectiveRecoverGuidance } from "../pi/v1/delivery/stackRecover.ts";
+import { objectiveSyncGuidance } from "../pi/v1/delivery/stackSync.ts";
 import {
   loadPerkSession,
   type PerkSession,
