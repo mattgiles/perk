@@ -8,7 +8,6 @@ import { existsSync, mkdirSync } from "node:fs";
 import { basename, join } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { registerAddress } from "./doors/address.ts";
-import { registerCiExecutor } from "./doors/ciExecutor.ts";
 import { registerCommitAndCompact } from "./doors/commitCompact.ts";
 import {
   createDraftReviewWaveState,
@@ -33,6 +32,8 @@ import { installReviewWaveBindings } from "./pi/v1/codeReview/reviewWave.ts";
 import { installStackReviewBindings } from "./pi/v1/codeReview/stack.ts";
 import { installCuratedSubmissionBindings } from "./pi/v1/codeReview/submit.ts";
 import { installPrReviewTerminalBindings } from "./pi/v1/codeReview/terminal.ts";
+import { installCiBindings } from "./pi/v1/delivery/ci.ts";
+import { installStackStatusBindings } from "./pi/v1/delivery/stackStatus.ts";
 import { installGistBindings } from "./pi/v1/gist.ts";
 import { installAuditBindings } from "./pi/v1/learning/audit.ts";
 import { installDreamBindings } from "./pi/v1/learning/dream.ts";
@@ -488,11 +489,15 @@ export default function (pi: ExtensionAPI) {
   registerLand(pi);
   installLearnBindings(pi);
 
-  // The warm stacked-delivery surface (§8.51): `/objective-stack` (read) +
-  // `/objective-sync`/`/objective-recover` (drives) + the four typed stack tools. Takes
+  // The warm stacked-delivery mutating surface (§8.51): the `/objective-sync`/
+  // `/objective-recover`/`/objective-land` drives + the four typed stack tools. Takes
   // `gating` for the driving commands' gate-on soft refusal (stack sync/recovery mutates
   // published branches; the stack tools never join READ_ONLY_TOOLS).
   registerObjectiveStack(pi, gating);
+
+  // The stacked-delivery status read: the `objective_stack_status` tool + the `/objective-stack`
+  // command (read-only end to end — the command works gate-on; the tool stays gate-off).
+  installStackStatusBindings(pi);
 
   // The warm `/address` review loop: the submit-then-resolve `finalize_address` tool + `/address`
   // command. Classify-then-act (the verbose feedback fetch + classification runs in an isolated
@@ -553,7 +558,7 @@ export default function (pi: ExtensionAPI) {
 
   // The read-only CI executor: the `run_ci` tool + `/ci` command + `--allow-project-ci`
   // flag. Runs the project's `[ci]` named checks deterministically and reports (never fixes/loops).
-  registerCiExecutor(pi);
+  installCiBindings(pi);
 
   // The objective substrate: `/objective` set/clear, budget accounting, threshold
   // compaction, all keyed off the now-live `active_objective`. Inert when no objective is active.

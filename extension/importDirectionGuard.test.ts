@@ -136,6 +136,7 @@ const KNOWN_TOP_LEVEL_DIRS = [
 const ANCHORED_DIRS: Record<string, string[]> = {
   authoring: ["authoring/gist/draft.ts"],
   codeReview: ["codeReview/submission.ts"],
+  delivery: ["delivery/ci.ts"],
   learning: ["learning/capture.ts"],
   pi: ["pi/v1/gist.ts"],
   session: ["session/workflowSession.ts"],
@@ -146,7 +147,7 @@ const ANCHORED_DIRS: Record<string, string[]> = {
  * bans — `@earendil-works/*`, the RPC transport module, and the `surfaces/` rendering seam —
  * with NO sanctioned re-export seams for these homes (see the header).
  */
-const PI_FREE_HOMES = ["authoring/", "codeReview/", "learning/", "session/"];
+const PI_FREE_HOMES = ["authoring/", "codeReview/", "delivery/", "learning/", "session/"];
 
 /**
  * Rule E's registration tokens: whitespace-tolerant (a registration split across lines still
@@ -197,7 +198,6 @@ const TRANSPORT_TOKEN = /\bWAVE_RPC_|subagents:rpc:v1/;
 // in the activating change itself — the first burn-down.
 const LEGACY_REGISTRANTS = [
   "doors/address.ts",
-  "doors/ciExecutor.ts",
   "doors/commitCompact.ts",
   "doors/draftReviewWaveTools.ts",
   "doors/land.ts",

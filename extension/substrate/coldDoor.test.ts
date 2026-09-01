@@ -18,8 +18,10 @@ import {
   nullableStringField,
   numberField,
   objectField,
+  objectListField,
   runColdDoor,
   stringField,
+  stringListField,
 } from "./coldDoor.ts";
 import { WORKFLOW_STATE_TYPE } from "./workflowState.ts";
 
@@ -458,4 +460,45 @@ test("activeRunId stamps a fallback when the run_id is empty or absent", () => {
   assert.match(activeRunId(fakeCtx("/tmp", [])), /^cold-door-\d+$/);
   const branch = [{ type: "custom", customType: WORKFLOW_STATE_TYPE, data: { run_id: "" } }];
   assert.match(activeRunId(fakeCtx("/tmp", branch)), /^cold-door-\d+$/);
+});
+
+test("objectListField accepts object elements only; a non-array field contributes nothing", () => {
+  const payload: ColdJson = {
+    rows: [{ a: 1 }, "junk", 7, null, [1], { b: 2 }],
+    notList: { a: 1 },
+    n: 7,
+  };
+  assert.deepEqual(objectListField(payload, "rows"), [{ a: 1 }, { b: 2 }]);
+  assert.deepEqual(objectListField(payload, "notList"), []);
+  assert.deepEqual(objectListField(payload, "n"), []);
+  assert.deepEqual(objectListField(payload, "absent"), []);
+});
+
+test("stringListField drops non-string elements; a non-array field contributes nothing", () => {
+  const payload: ColdJson = { notes: ["a", 1, null, "b", {}], notList: "a" };
+  assert.deepEqual(stringListField(payload, "notes"), ["a", "b"]);
+  assert.deepEqual(stringListField(payload, "notList"), []);
+  assert.deepEqual(stringListField(payload, "absent"), []);
+});
+
+// --- cancellation threading ----------------------------------------------------------------------
+
+test("runColdDoor forwards ctx.signal into pi.exec options (the exact instance)", async () => {
+  const ac = new AbortController();
+  const { host, calls } = fakeExec({ stdout: '{"success": true}' });
+  const ctx: ColdDoorCtx = {
+    cwd: tempCwd(),
+    sessionManager: { getBranch: () => [] },
+    signal: ac.signal,
+  };
+  const r = await runColdDoor(host, ctx, ["land", "--json"], {
+    label: "perk land",
+    decode: decodeAll,
+  });
+  assert.equal(r.ok, true);
+  assert.equal(
+    calls[0]?.options?.signal,
+    ac.signal,
+    "the exact ctx.signal instance must reach pi.exec",
+  );
 });

@@ -8,8 +8,8 @@ cluster: toolchain-gotchas
 
 Two failure families from testing timer-driven and streamed-progress code with `node:test`, both
 resolved deterministically — no real-time sleeps, no timeouts. Source pointer: the run-CI
-progress work in `extension/doors/ciExecutor.ts` and its interval/`onUpdate` tests in
-`extension/doors/ciExecutor.test.ts`.
+progress work in `extension/delivery/ci.ts` and its interval/`onUpdate` tests in
+`extension/pi/v1/delivery/ci.test.ts`.
 
 ## Interval lifecycle needs deterministic coverage, not real-time luck
 

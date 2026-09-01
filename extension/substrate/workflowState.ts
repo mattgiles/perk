@@ -307,6 +307,30 @@ export function activePlanRef(source: { cwd: string } & BranchSource): PlanRef |
 }
 
 /**
+ * The three-tier stack-objective resolution shared by every stack tool + command: an explicit
+ * id wins; else the branch-rebuilt `active_objective`; else the worktree plan-ref's
+ * `objective_id`. Each fallible tier fails open to the next; null when nothing resolves.
+ * Structural + Pi-free: `ExtensionContext` satisfies the slice.
+ */
+export function resolveStackObjective(
+  explicit: string | undefined,
+  source: { cwd: string } & BranchSource,
+): string | null {
+  if (explicit !== undefined && explicit.length > 0) return explicit;
+  try {
+    const active = rebuildWorkflowState(branchOf(source)).active_objective;
+    if (active !== undefined && active !== null) return active;
+  } catch {
+    // fall through to the plan-ref tier
+  }
+  try {
+    return readPlanRef(source.cwd)?.objective_id ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Equality by identity (provider + pr_id) — the plan-ref dedup key. Two refs to
  * the same plan are equal even if other fields drift; absent compares equal only to absent.
  */

@@ -6,7 +6,7 @@ This is the readable projection of perk's living, workflow-first prose graph. It
 ## Coverage
 
 - **213** canonical source units
-- **733** logical fragments
+- **738** logical fragments
 - **16** session shapes and **10** assemblies
 - **15** explicitly excluded candidates (policy-only; not displayed)
 - **0** validation findings
@@ -633,7 +633,7 @@ Validate, publish, and prepare changes for review and landing.
 | `typescript-model-call:extension/doors/submit.ts:module:sendUserMessage:0` | `tool-contract` | `shipped` | [`extension/doors/submit.ts`](../../extension/doors/submit.ts) · `symbol:module/call:sendUserMessage/0` | — |
 | `typescript-model-call:extension/doors/submit.ts:module:sendUserMessage:1` | `tool-contract` | `shipped` | [`extension/doors/submit.ts`](../../extension/doors/submit.ts) · `symbol:module/call:sendUserMessage/1` | — |
 | `typescript-tool:ready` | `tool-contract` | `shipped` | [`extension/doors/ready.ts`](../../extension/doors/ready.ts) · `tool:ready` | — |
-| `typescript-tool:run_ci` | `tool-contract` | `shipped` | [`extension/doors/ciExecutor.ts`](../../extension/doors/ciExecutor.ts) · `tool:run_ci` | — |
+| `typescript-tool:run_ci` | `tool-contract` | `shipped` | [`extension/pi/v1/delivery/ci.ts`](../../extension/pi/v1/delivery/ci.ts) · `tool:run_ci` | — |
 | `typescript-tool:submit` | `tool-contract` | `shipped` | [`extension/doors/submit.ts`](../../extension/doors/submit.ts) · `tool:submit` | — |
 
 <details>
@@ -654,7 +654,12 @@ Validate, publish, and prepare changes for review and landing.
 - `typescript-tool:run_ci`
   - `description` — description (`tool:run_ci.description`)
   - `promptSnippet` — promptSnippet (`tool:run_ci.promptSnippet`)
-  - `promptGuidelines` — promptGuidelines (`tool:run_ci.promptGuidelines`)
+  - `promptGuidelines.0` — promptGuidelines item 1 (`tool:run_ci.promptGuidelines.0`)
+  - `promptGuidelines.1` — promptGuidelines item 2 (`tool:run_ci.promptGuidelines.1`)
+  - `promptGuidelines.2` — promptGuidelines item 3 (`tool:run_ci.promptGuidelines.2`)
+  - `promptGuidelines.3` — promptGuidelines item 4 (`tool:run_ci.promptGuidelines.3`)
+  - `promptGuidelines.4` — promptGuidelines item 5 (`tool:run_ci.promptGuidelines.4`)
+  - `promptGuidelines.5` — promptGuidelines item 6 (`tool:run_ci.promptGuidelines.5`)
   - `parameters.properties.check.description` — parameters.properties.check.description (`tool:run_ci.parameters.properties.check.description`)
 - `typescript-tool:submit`
   - `description` — description (`tool:submit.description`)
@@ -709,7 +714,7 @@ Synchronize, recover, land, and reconcile multi-plan objective delivery.
 | `typescript-tool:objective_stack_adopt` | `tool-contract` | `shipped` | [`extension/doors/objectiveStack.ts`](../../extension/doors/objectiveStack.ts) · `tool:objective_stack_adopt` | — |
 | `typescript-tool:objective_stack_land` | `tool-contract` | `shipped` | [`extension/doors/objectiveStack.ts`](../../extension/doors/objectiveStack.ts) · `tool:objective_stack_land` | — |
 | `typescript-tool:objective_stack_recover` | `tool-contract` | `shipped` | [`extension/doors/objectiveStack.ts`](../../extension/doors/objectiveStack.ts) · `tool:objective_stack_recover` | — |
-| `typescript-tool:objective_stack_status` | `tool-contract` | `shipped` | [`extension/doors/objectiveStack.ts`](../../extension/doors/objectiveStack.ts) · `tool:objective_stack_status` | — |
+| `typescript-tool:objective_stack_status` | `tool-contract` | `shipped` | [`extension/pi/v1/delivery/stackStatus.ts`](../../extension/pi/v1/delivery/stackStatus.ts) · `tool:objective_stack_status` | — |
 | `typescript-tool:objective_stack_sync` | `tool-contract` | `shipped` | [`extension/doors/objectiveStack.ts`](../../extension/doors/objectiveStack.ts) · `tool:objective_stack_sync` | — |
 
 <details>
@@ -769,7 +774,7 @@ Synchronize, recover, land, and reconcile multi-plan objective delivery.
 - `typescript-tool:objective_stack_status`
   - `description` — description (`tool:objective_stack_status.description`)
   - `promptSnippet` — promptSnippet (`tool:objective_stack_status.promptSnippet`)
-  - `promptGuidelines` — promptGuidelines (`tool:objective_stack_status.promptGuidelines`)
+  - `promptGuidelines.0` — promptGuidelines item 1 (`tool:objective_stack_status.promptGuidelines.0`)
   - `parameters.properties.objective.description` — parameters.properties.objective.description (`tool:objective_stack_status.parameters.properties.objective.description`)
 - `typescript-tool:objective_stack_sync`
   - `description` — description (`tool:objective_stack_sync.description`)

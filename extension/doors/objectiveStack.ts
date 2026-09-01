@@ -1,20 +1,19 @@
-// The warm stacked-delivery surface (contracts.md §8.51/§8.56): four commands + five typed
-// model tools over the Python cold workers (`perk objective stack status|sync|recover|land` —
-// mutations canonical in Python).
+// The warm stacked-delivery MUTATING surface (contracts.md §8.51/§8.56): three commands + four
+// typed model tools over the Python cold workers (`perk objective stack sync|recover|land` —
+// mutations canonical in Python). The read-only status pair (`objective_stack_status` +
+// `/objective-stack`) lives in pi/v1/delivery/stackStatus.ts.
 //
-//   - `/objective-stack [N]` — a direct read door: exec the status worker, render the train
-//     projection. Works in every session, including gate-on (read-only end to end).
 //   - `/objective-sync [N]` / `/objective-recover [N]` / `/objective-land [N]` —
 //     drive-the-session commands: inject the preview-first guidance naming the typed tools.
 //     Gate-on posture: soft-refuse (notify + inject nothing) — stack sync/recovery/landing
 //     mutates published branches and PRs, and the mutating tools never join READ_ONLY_TOOLS.
-//   - `objective_stack_status` / `objective_stack_sync` / `objective_stack_adopt` /
-//     `objective_stack_recover` / `objective_stack_land` — separately-typed tools (no broad
-//     action enum), strict tri-state param decode (refuse the whole call on any malformed
-//     field), non-terminating. Warm consent: the plain sync/continue/abort/resolve calls pass
-//     `--yes` where they reach the cold door (the human's gesture/driven approval is the
-//     consent); adopt (mutating), recover-with-abandon, and the mutating land additionally
-//     require `confirm: true`. Cold-envelope decodes are lenient/render-only.
+//   - `objective_stack_sync` / `objective_stack_adopt` / `objective_stack_recover` /
+//     `objective_stack_land` — separately-typed tools (no broad action enum), strict tri-state
+//     param decode (refuse the whole call on any malformed field), non-terminating. Warm
+//     consent: the plain sync/continue/abort/resolve calls pass `--yes` where they reach the
+//     cold door (the human's gesture/driven approval is the consent); adopt (mutating),
+//     recover-with-abandon, and the mutating land additionally require `confirm: true`.
+//     Cold-envelope decodes are lenient/render-only.
 //
 // Two warm drives live here: §8.56's reconcile drive (`driveStackReconcile`) and §8.51's sync
 // conflict drive (`driveSyncConflictResolution` — a mutating sync/continue refusing
@@ -28,15 +27,17 @@
 import { basename, dirname } from "node:path";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { reconcileGuidance } from "../authoring/objective/prose.ts";
+import { parseStackObjectiveArg, STACK_NO_OBJECTIVE_MESSAGE } from "../delivery/stackObjective.ts";
 import { bindingSuffix } from "../substrate/bindingDelivery.ts";
-import { readPlanRef } from "../substrate/cache.ts";
 import {
   booleanField,
   type ColdJson,
   numberField,
   objectField,
+  objectListField,
   runColdDoor,
   stringField,
+  stringListField,
 } from "../substrate/coldDoor.ts";
 import { registerPerkCommand } from "../substrate/command.ts";
 import { resolveIssueBackendId, subagentModel } from "../substrate/config.ts";
@@ -45,7 +46,12 @@ import { acquireResolverLease, releaseResolverClaim } from "../substrate/resolve
 import { failFor, ok, type Result } from "../substrate/result.ts";
 import type { ToolGating } from "../substrate/toolGating.ts";
 import { booleanParam, idParam, paramsOf, stringParam } from "../substrate/toolParams.ts";
-import { appendWorkflowState, branchOf, rebuildWorkflowState } from "../substrate/workflowState.ts";
+import {
+  appendWorkflowState,
+  branchOf,
+  rebuildWorkflowState,
+  resolveStackObjective,
+} from "../substrate/workflowState.ts";
 import { report } from "../surfaces/report.ts";
 import { CONFLICT_RESOLUTION_ATTEMPT_CAP, resetConflictAttempts } from "./submit.ts";
 
@@ -53,62 +59,15 @@ import { CONFLICT_RESOLUTION_ATTEMPT_CAP, resetConflictAttempts } from "./submit
  * driven with (the envelope itself is render-only — nothing persisted). */
 export type StackResult = Result<{ objective: string }>;
 
-const NO_OBJECTIVE_MESSAGE =
-  "no objective given and none active or linked — pass the objective explicitly.";
-
 const GATED_REFUSAL =
   "stack sync/recovery/landing mutates published branches and PRs — finish or exit the " +
   "read-only session first.";
 
-// --- objective inference (explicit → active_objective → plan-ref) -------------------------------
-
-/** The first command-arg token as the explicit objective (leading `#` stripped); null if none. */
-function parseObjectiveArg(args: string): string | null {
-  const token = args.trim().split(/\s+/)[0]?.replace(/^#/, "") ?? "";
-  return token.length > 0 ? token : null;
-}
-
-/** The three-tier objective resolution shared by every stack tool + command. */
-export function resolveStackObjective(
-  explicit: string | undefined,
-  ctx: ExtensionContext,
-): string | null {
-  if (explicit !== undefined && explicit.length > 0) return explicit;
-  try {
-    const active = rebuildWorkflowState(branchOf(ctx)).active_objective;
-    if (active !== undefined && active !== null) return active;
-  } catch {
-    // fall through to the plan-ref tier
-  }
-  try {
-    return readPlanRef(ctx.cwd)?.objective_id ?? null;
-  } catch {
-    return null;
-  }
-}
-
 // --- lenient render helpers (the cold envelopes are render-only DATA) ----------------------------
 
-/** Lenient object-list field: a non-array (or any non-object element) contributes nothing. */
-function objectListField(payload: ColdJson, key: string): ColdJson[] {
-  const value = payload[key];
-  if (!Array.isArray(value)) return [];
-  const out: ColdJson[] = [];
-  for (const item of value) {
-    if (typeof item === "object" && item !== null && !Array.isArray(item)) {
-      out.push(item as ColdJson);
-    }
-  }
-  return out;
-}
-
-/** Lenient string-list field: non-string elements are dropped. */
-function stringListField(payload: ColdJson, key: string): string[] {
-  const value = payload[key];
-  if (!Array.isArray(value)) return [];
-  return value.filter((item): item is string => typeof item === "string");
-}
-
+// A deliberate module-private copy: the migrated status render (pi/v1/delivery/stackStatus.ts)
+// keeps the other one — the cold-door doctrine's two-copy rule; consolidation happens when the
+// land family migrates.
 function findingLines(train: ColdJson, key: string): string[] {
   const rows = objectListField(train, key);
   if (rows.length === 0) return [];
@@ -116,116 +75,6 @@ function findingLines(train: ColdJson, key: string): string[] {
     `${key}:`,
     ...rows.map((f) => `  - [${stringField(f, "code") ?? "?"}] ${stringField(f, "message") ?? ""}`),
   ];
-}
-
-/** Render the `stack status --json` envelope (train + operations + continuation + residue) —
- * fully lenient: a missing/mistyped field degrades that line, never the render. */
-export function renderStackStatus(payload: ColdJson): string {
-  const lines: string[] = [];
-  const id = stringField(objectField(payload, "objective") ?? {}, "id") ?? "?";
-  const noTrain = stringField(payload, "no_train");
-  if (noTrain !== undefined) lines.push(`Objective #${id}: ${noTrain}`);
-  const train = objectField(payload, "train");
-  if (train !== undefined) {
-    const layers = objectListField(train, "layers");
-    const landedLen = numberField(train, "landed_prefix_len") ?? 0;
-    const landedNote = landedLen > 0 ? `, landed ${landedLen}` : "";
-    lines.push(
-      `Objective #${id}: stacked delivery train (base ${stringField(train, "base") ?? "?"}, ` +
-        `published prefix ${numberField(train, "published_prefix_len") ?? "?"}/${layers.length}` +
-        `${landedNote})`,
-    );
-    layers.forEach((layer, index) => {
-      const parts = [stringField(layer, "node_id") ?? "?"];
-      parts.push(stringField(layer, "branch") ?? "no branch");
-      const pr = numberField(layer, "pr_number");
-      if (pr !== undefined) parts.push(`pr #${pr}`);
-      parts.push(`[${stringField(layer, "publication") ?? "?"}]`);
-      const handoff = stringField(layer, "handoff");
-      if (handoff !== undefined && handoff !== "not_applicable") parts.push(`handoff ${handoff}`);
-      lines.push(`  ${index + 1}. ${parts.join(" ")}`);
-    });
-    const readiness = objectField(train, "next_build_ready");
-    if (readiness !== undefined) {
-      if (booleanField(readiness, "ready") === true) {
-        lines.push(`  next build-ready: ${stringField(readiness, "node_id") ?? "?"}`);
-      } else {
-        lines.push(`  build blocked: ${stringField(readiness, "reason") ?? "?"}`);
-      }
-    }
-    // The additive planning_gate block (contracts §8.46): render the handoff rows from their
-    // pinned fields only — leniently (missing/mistyped fields degrade, never reject); the
-    // technical rows already ride the build-blocked line/findings.
-    const gate = objectField(train, "planning_gate");
-    if (gate !== undefined && booleanField(gate, "ready") !== true) {
-      const gatedNode = stringField(gate, "node_id") ?? "?";
-      for (const row of objectListField(gate, "blockers")) {
-        if (stringField(row, "kind") !== "handoff") continue;
-        const state = stringField(row, "handoff_state") ?? "?";
-        let detail =
-          `${stringField(row, "dependency_node_id") ?? "?"} ` +
-          `(plan #${stringField(row, "plan") ?? "?"}, PR #${numberField(row, "pr") ?? "?"}) — ` +
-          state;
-        const stamped = stringField(row, "stamped_head");
-        const current = stringField(row, "current_head");
-        if (state === "stale" && stamped !== undefined && current !== undefined) {
-          detail += `; stamped ${stamped.slice(0, 12)} ≠ head ${current.slice(0, 12)}`;
-        }
-        const remediation = stringField(row, "remediation") ?? "?";
-        lines.push(
-          `  planning gated: ${gatedNode} waits on ${detail}; record the handoff: ${remediation}`,
-        );
-      }
-    }
-    lines.push(...findingLines(train, "blockers"));
-    lines.push(...findingLines(train, "information"));
-  }
-  for (const op of objectListField(payload, "operations")) {
-    lines.push(
-      `unresolved operation: ${stringField(op, "operation_id") ?? "?"} ` +
-        `(${stringField(op, "kind") ?? "?"}, prepared ${stringField(op, "prepared_created") ?? "?"})`,
-    );
-  }
-  const continuation = objectField(payload, "continuation");
-  if (continuation !== undefined) {
-    if (booleanField(continuation, "parseable") === true) {
-      lines.push(
-        `pending continuation: operation ${stringField(continuation, "operation_id") ?? "?"} ` +
-          `stopped on node ${stringField(continuation, "conflict_node_id") ?? "?"} ` +
-          `(worktree ${stringField(continuation, "worktree_path") ?? "?"})`,
-      );
-    } else {
-      lines.push(
-        `pending continuation: UNPARSEABLE manifest at ${
-          stringField(continuation, "manifest_path") ?? "?"
-        }`,
-      );
-    }
-    if (booleanField(continuation, "parseable") === true) {
-      lines.push(
-        "  resume via objective_stack_sync { continue: true }, discard via { abort: true }, or " +
-          "dispatch automated resolution via { resolve: true } (on explicit human request)",
-      );
-    } else {
-      lines.push(
-        "  resume via objective_stack_sync { continue: true }, or discard via { abort: true }",
-      );
-    }
-  }
-  const orphans = objectField(payload, "orphaned_residue");
-  if (orphans !== undefined) {
-    const worktrees = stringListField(orphans, "worktrees");
-    const refs = stringListField(orphans, "refs");
-    if (booleanField(orphans, "observed") === false) {
-      lines.push(`orphaned residue: not observed — ${stringField(orphans, "reason") ?? "?"}`);
-    } else if (worktrees.length > 0 || refs.length > 0) {
-      lines.push(
-        `orphaned residue: ${worktrees.length} worktree(s), ${refs.length} ref(s) — ` +
-          "sweep via objective_stack_recover",
-      );
-    }
-  }
-  return lines.length > 0 ? lines.join("\n") : `Objective #${id}: empty status report`;
 }
 
 /** The sync-tool invocation mode (which control flags the call carried) — decline wording and
@@ -638,24 +487,6 @@ export function buildStackLandArgs(objective: string, p: LandToolParams): string
 
 // --- the tool implementations (delegate, render, never throw) ------------------------------------
 
-async function stackStatus(
-  pi: ExtensionAPI,
-  ctx: ExtensionContext,
-  objectiveParam: string | undefined,
-): Promise<StackResult> {
-  const fail = failFor(ctx, "objective-stack", "objective_stack_status");
-  const objective = resolveStackObjective(objectiveParam, ctx);
-  if (objective === null) return fail(NO_OBJECTIVE_MESSAGE, "no_objective");
-  const r = await runColdDoor<ColdJson>(
-    pi,
-    ctx,
-    ["objective", "stack", "status", objective, "--json"],
-    { label: "perk objective stack status", decode: (payload) => payload },
-  );
-  if (!r.ok) return fail(r.message, r.errorType);
-  return ok(renderStackStatus(r.data), { objective });
-}
-
 export async function stackSync(
   pi: ExtensionAPI,
   ctx: ExtensionContext,
@@ -663,7 +494,7 @@ export async function stackSync(
 ): Promise<StackResult> {
   const fail = failFor(ctx, "objective-sync", "objective_stack_sync");
   const objective = resolveStackObjective(p.objective, ctx);
-  if (objective === null) return fail(NO_OBJECTIVE_MESSAGE, "no_objective");
+  if (objective === null) return fail(STACK_NO_OBJECTIVE_MESSAGE, "no_objective");
   if (p.resolve) {
     // The warm-only explicit dispatch (§8.51): never calls the cold sync worker — the shared
     // dispatch core corroborates against the CURRENT status projection (no freshness token;
@@ -706,7 +537,7 @@ export async function stackAdopt(
     );
   }
   const objective = resolveStackObjective(p.objective, ctx);
-  if (objective === null) return fail(NO_OBJECTIVE_MESSAGE, "no_objective");
+  if (objective === null) return fail(STACK_NO_OBJECTIVE_MESSAGE, "no_objective");
   const r = await runColdDoor<ColdJson>(pi, ctx, buildStackAdoptArgs(objective, p), {
     label: "perk objective stack sync --adopt",
     decode: (payload) => payload,
@@ -739,7 +570,7 @@ async function stackRecover(
     );
   }
   const objective = resolveStackObjective(p.objective, ctx);
-  if (objective === null) return fail(NO_OBJECTIVE_MESSAGE, "no_objective");
+  if (objective === null) return fail(STACK_NO_OBJECTIVE_MESSAGE, "no_objective");
   const r = await runColdDoor<ColdJson>(pi, ctx, buildStackRecoverArgs(objective, p), {
     label: "perk objective stack recover",
     decode: (payload) => payload,
@@ -763,7 +594,7 @@ async function stackLand(
     );
   }
   const objective = resolveStackObjective(p.objective, ctx);
-  if (objective === null) return fail(NO_OBJECTIVE_MESSAGE, "no_objective");
+  if (objective === null) return fail(STACK_NO_OBJECTIVE_MESSAGE, "no_objective");
   const r = await runColdDoor<ColdJson>(pi, ctx, buildStackLandArgs(objective, p), {
     label: "perk objective stack land",
     decode: (payload) => payload,
@@ -1157,10 +988,6 @@ export async function driveSyncConflictResolution(
 
 // --- registration --------------------------------------------------------------------------------
 
-const STATUS_TOOL_GUIDELINES = [
-  "objective_stack_status is read-only — call it freely to inspect the delivery train, unresolved operations, pending continuations, and orphaned residue (objective inferred when omitted).",
-];
-
 const SYNC_TOOL_GUIDELINES = [
   "Call objective_stack_sync only inside the /objective-sync flow: preview with dry_run: true, present the cascade to the human, and act (no dry_run) ONLY on explicit human approval.",
   "The modes are mutually exclusive: continue resumes a resolved conflict continuation, abort discards it, resolve dispatches the perk.conflict-resolver subagent into the retained worktree on explicit human request; none composes with base/dry_run.",
@@ -1182,42 +1009,8 @@ const LAND_TOOL_GUIDELINES = [
   "Never loop retries. A pending or unexpected_enqueued outcome means the LAND operation is UNRESOLVED — report it and stop (never re-submit); once the merge settles or expires, /objective-recover (objective_stack_recover) classifies it against fresh authority and concludes it.",
 ];
 
-/** Register the warm stacked-delivery surface: five typed tools + four commands. */
+/** Register the warm stacked-delivery mutating surface: four typed tools + three commands. */
 export function registerObjectiveStack(pi: ExtensionAPI, gating: ToolGating): void {
-  pi.registerTool({
-    name: "objective_stack_status",
-    label: "Objective stack status",
-    description:
-      "Report an objective's stacked delivery train: layers, publication states, build " +
-      "readiness, unresolved operations, pending continuation, and orphaned sync residue. " +
-      "Read-only (delegates to the perk cold door).",
-    promptSnippet: "Report the objective's stacked delivery train (read-only)",
-    promptGuidelines: STATUS_TOOL_GUIDELINES,
-    executionMode: "sequential",
-    parameters: {
-      type: "object",
-      additionalProperties: false,
-      properties: {
-        objective: {
-          type: ["string", "number"],
-          description: "The objective issue id (inferred from the session when omitted).",
-        },
-      },
-    },
-    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-      const p = paramsOf(params);
-      const objective = p === null ? null : idParam(p, "objective");
-      if (p === null || objective === null) {
-        return failFor(
-          ctx,
-          "objective-stack",
-          "objective_stack_status",
-        )("objective_stack_status takes { objective?: <id> }", "bad_input");
-      }
-      return stackStatus(pi, ctx, objective);
-    },
-  });
-
   pi.registerTool({
     name: "objective_stack_sync",
     label: "Objective stack sync",
@@ -1452,30 +1245,6 @@ export function registerObjectiveStack(pi: ExtensionAPI, gating: ToolGating): vo
     },
   });
 
-  registerPerkCommand(pi, "objective-stack", {
-    description:
-      "Show an objective's stacked delivery train (status, operations, continuation, residue). " +
-      "Pass an objective number (else the active objective, else the plan-ref's).",
-    handler: async (args, ctx) => {
-      const objective = resolveStackObjective(parseObjectiveArg(args ?? "") ?? undefined, ctx);
-      if (objective === null) {
-        report(ctx, "objective-stack", "warning", NO_OBJECTIVE_MESSAGE);
-        return;
-      }
-      const r = await runColdDoor<ColdJson>(
-        pi,
-        ctx,
-        ["objective", "stack", "status", objective, "--json"],
-        { label: "perk objective stack status", decode: (payload) => payload },
-      );
-      if (!r.ok) {
-        report(ctx, "objective-stack", "error", r.message, { alsoLog: true });
-        return;
-      }
-      report(ctx, "objective-stack", "info", renderStackStatus(r.data));
-    },
-  });
-
   registerPerkCommand(pi, "objective-sync", {
     description:
       "Drive a stack sync: preview the cascade, present it, act via the typed stack tools on " +
@@ -1485,9 +1254,9 @@ export function registerObjectiveStack(pi: ExtensionAPI, gating: ToolGating): vo
         report(ctx, "objective-sync", "warning", GATED_REFUSAL);
         return;
       }
-      const objective = resolveStackObjective(parseObjectiveArg(args ?? "") ?? undefined, ctx);
+      const objective = resolveStackObjective(parseStackObjectiveArg(args ?? "") ?? undefined, ctx);
       if (objective === null) {
-        report(ctx, "objective-sync", "warning", NO_OBJECTIVE_MESSAGE);
+        report(ctx, "objective-sync", "warning", STACK_NO_OBJECTIVE_MESSAGE);
         return;
       }
       report(ctx, "objective-sync", "info", `#${objective}`);
@@ -1507,9 +1276,9 @@ export function registerObjectiveStack(pi: ExtensionAPI, gating: ToolGating): vo
         report(ctx, "objective-recover", "warning", GATED_REFUSAL);
         return;
       }
-      const objective = resolveStackObjective(parseObjectiveArg(args ?? "") ?? undefined, ctx);
+      const objective = resolveStackObjective(parseStackObjectiveArg(args ?? "") ?? undefined, ctx);
       if (objective === null) {
-        report(ctx, "objective-recover", "warning", NO_OBJECTIVE_MESSAGE);
+        report(ctx, "objective-recover", "warning", STACK_NO_OBJECTIVE_MESSAGE);
         return;
       }
       report(ctx, "objective-recover", "info", `#${objective}`);
@@ -1529,9 +1298,9 @@ export function registerObjectiveStack(pi: ExtensionAPI, gating: ToolGating): vo
         report(ctx, "objective-land", "warning", GATED_REFUSAL);
         return;
       }
-      const objective = resolveStackObjective(parseObjectiveArg(args ?? "") ?? undefined, ctx);
+      const objective = resolveStackObjective(parseStackObjectiveArg(args ?? "") ?? undefined, ctx);
       if (objective === null) {
-        report(ctx, "objective-land", "warning", NO_OBJECTIVE_MESSAGE);
+        report(ctx, "objective-land", "warning", STACK_NO_OBJECTIVE_MESSAGE);
         return;
       }
       report(ctx, "objective-land", "info", `#${objective}`);
