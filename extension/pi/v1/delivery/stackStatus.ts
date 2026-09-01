@@ -3,7 +3,8 @@
 // (read-only end to end — the command works in every session, including gate-on; the tool stays
 // deliberately gate-off, documented in toolGating.ts). Pure decoding + rendering + delegation —
 // no feature operation backs this slice (zero-policy passthrough); the mutating stack family
-// (sync/adopt/recover/land + drives) lives in doors/objectiveStack.ts.
+// lives in the sibling adapters (stackSync.ts / stackRecover.ts / stackLand.ts over the
+// `delivery/` feature ops, with the shared drive helpers in stackDrive.ts).
 //
 // Objective inference: explicit param/argument → workflow `active_objective` → plan-ref
 // `objective_id` (`resolveStackObjective`); the warm layer always passes the resolved objective
@@ -32,10 +33,9 @@ import { idParam, paramsOf } from "../../../substrate/toolParams.ts";
 import { resolveStackObjective } from "../../../substrate/workflowState.ts";
 import { report } from "../../../surfaces/report.ts";
 
-// A deliberate module-private copy: the surviving `renderLandOutcome` (doors/objectiveStack.ts)
-// keeps the other one — the cold-door doctrine's two-copy rule; consolidation happens when the
-// land family migrates.
-function findingLines(train: ColdJson, key: string): string[] {
+/** The lenient finding-row render shared with the landing readiness preview
+ * (stackLand.ts imports it — the ONE copy; the door-era duplicate died with the door). */
+export function findingLines(train: ColdJson, key: string): string[] {
   const rows = objectListField(train, key);
   if (rows.length === 0) return [];
   return [

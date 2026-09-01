@@ -402,6 +402,43 @@ test("finalize_address re-drives a definitive conflict without parsed paths", as
   }
 });
 
+test("D1: a dropped attempt increment WITHHOLDS the address-surface dispatch (loud, no drive)", async () => {
+  // The surface-uniform withhold posture through the REGISTERED address finalizer: session
+  // appends are silently dropped, so the verified increment fails its read-back — the
+  // decision is `withheld` and the shared translation reports the exact scope-"submit" bytes
+  // (parity with the exhausted arm) instead of driving.
+  const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
+  const submit = { ...SUBMIT_PAYLOAD, mergeable: false, conflicts: ["a.py"] };
+  const bin = fakePerkRouter(cwd, routes({ json: RESOLVE_PAYLOAD }, submit));
+  const h = await loadPerkSession({ cwd, env: { PERK_RUN_ID: "01RID", PERK_BIN: bin } });
+  const injected = spyInjections(h);
+  const sm = h.session.sessionManager as unknown as {
+    appendCustomEntry: (customType: string, data?: unknown) => string;
+  };
+  const realAppend = sm.appendCustomEntry.bind(sm);
+  sm.appendCustomEntry = (customType: string, data?: unknown) =>
+    customType === "perk:workflow-state" ? "dropped" : realAppend(customType, data);
+  try {
+    const result = await h.invokeTool("finalize_address", {
+      threads: [{ thread_id: "PRRT_1" }, { thread_id: "PRRT_2" }],
+    });
+    assert.equal((result.details as { ok: boolean }).ok, true, "the finalize itself stands");
+    assert.deepEqual(injected, [], "an unverifiable counter never bypasses the cap");
+    assert.ok(
+      h.notifies.some((m) =>
+        m.includes(
+          "conflict-resolution dispatch withheld — the attempt counter could not be persisted " +
+            "(an unverifiable counter must never bypass the cap); resolve manually (rebase onto " +
+            "`main` and push), then re-run /submit.",
+        ),
+      ),
+      `expected the exact withheld report; got: ${JSON.stringify(h.notifies)}`,
+    );
+  } finally {
+    h.dispose();
+  }
+});
+
 test("a resolve failure never burns a conflict attempt (decide only after full success)", async () => {
   const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
   const submit = { ...SUBMIT_PAYLOAD, mergeable: false, conflicts: ["a.py"] };

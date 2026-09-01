@@ -381,5 +381,5 @@ chain.
 - `docs/learned/workflow/skill-bindings.md` — `bindingSuffix` (the skill pointer the guidance rides)
 - `docs/learned/pi/context-injection.md` — the conditional inject-and-strip lifecycle
 - `docs/learned/pi/subagents.md` — the spawn-fresh-context driving shape `/pr-review` uses
-- `extension/doors/land.ts` — `landPr` (drive-free) + the separate drive helper; the terminating-drive case
+- `extension/pi/v1/delivery/land.ts` — `landPr` (drive-free) + the separate drive helper; the terminating-drive case
 - `docs/learned/workflow/mergeability-and-conflict-resolution.md` — `/submit`'s conflict drive (the sub-result-gated + capped reactive drive)

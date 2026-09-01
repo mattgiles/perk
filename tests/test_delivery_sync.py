@@ -1265,7 +1265,7 @@ def test_rebase_conflict_retains_residue_under_a_manifest():
     assert "for layer 1.3 " in str(error)
     assert "no remote ref and no journal record" in str(error)
     # Cross-plane lockstep: the appended warm-route sentence names the warm command id
-    # registered in extension/doors/objectiveStack.ts and the landed consent posture
+    # registered in extension/pi/v1/delivery/stackSync.ts and the landed consent posture
     # ("on your approval") — with the TRAIN's projection id, not the request alias.
     assert "`/objective-sync 500`" in str(error)
     assert "REQUEST-ALIAS" not in str(error)
@@ -1311,7 +1311,7 @@ def test_continuation_gate_refuses_a_fresh_sync():
     assert "/wt/sync-OP" in str(error)  # names the retained worktree
     assert "sync-continuations" in str(error)  # …and the manifest path
     # Cross-plane lockstep: the appended warm-route sentence names the warm command id
-    # registered in extension/doors/objectiveStack.ts and the landed consent posture
+    # registered in extension/pi/v1/delivery/stackSync.ts and the landed consent posture
     # ("on your approval") — with the TRAIN's projection id, not the request alias.
     assert "`/objective-sync 500`" in str(error)
     assert "REQUEST-ALIAS" not in str(error)
@@ -3059,7 +3059,7 @@ def test_continue_new_higher_conflict_rewrites_the_manifest_same_operation():
     # manifest and the message agree on the NEW conflict layer here.
     assert "for layer 1.3 " in str(error)
     # Cross-plane lockstep: the appended warm-route sentence names the warm command id
-    # registered in extension/doors/objectiveStack.ts and the landed consent posture
+    # registered in extension/pi/v1/delivery/stackSync.ts and the landed consent posture
     # ("on your approval") — with the TRAIN's projection id, not the request alias.
     assert "`/objective-sync 500`" in str(error)
     assert "REQUEST-ALIAS" not in str(error)

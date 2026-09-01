@@ -176,7 +176,7 @@ in `pi/tool-param-decode.md`, already cross-referenced below.)
 GitHub keeps `Closes #N` in the squash body byte-identically; non-github backends get a
 `Plan: <id> — <url>` line plus an explicit fail-open `close_issue` (surfaced as the
 `plan_issue_closed` envelope field). **Branch on `backend_id`, never on id shape.** Known gap:
-`extension/doors/land.ts` ignores `plan_issue_closed`, so the warm `/land` message doesn't mention the
+`extension/pi/v1/delivery/land.ts` ignores `plan_issue_closed`, so the warm `/land` message doesn't mention the
 explicit close under Linear. Also: the GitHub envelope renames (`issue.number`→`issue.id` etc.)
 are **deliberately breaking** for external `perk … --json` consumers; contracts §8.21 is the
 canonical record.

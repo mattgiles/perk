@@ -199,10 +199,8 @@ const TRANSPORT_TOKEN = /\bWAVE_RPC_|subagents:rpc:v1/;
 const LEGACY_REGISTRANTS = [
   "doors/commitCompact.ts",
   "doors/draftReviewWaveTools.ts",
-  "doors/land.ts",
   "doors/lifecycleGates.ts",
   "doors/objectiveReviewBrowser.ts",
-  "doors/objectiveStack.ts",
   "doors/planReviewBrowser.ts",
   "doors/selfcheck.ts",
   "substrate/agentScratch.ts",

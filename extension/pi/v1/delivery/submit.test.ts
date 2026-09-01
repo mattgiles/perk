@@ -701,6 +701,27 @@ test("driveConflictFollowUp: exhausted ⇒ no drive, loud report", () => {
   ]);
 });
 
+test("driveConflictFollowUp: withheld ⇒ no drive, loud exact-bytes report", () => {
+  // The D1 surface-uniform withhold posture's translation: the unpersisted increment is
+  // reported loudly under scope "submit" (both consumers — submit AND address — translate
+  // through this one function) and nothing is injected.
+  const { pi, ctx, messages } = world();
+  const lines: string[] = [];
+  const original = console.error;
+  console.error = (...args: unknown[]) => lines.push(args.map(String).join(" "));
+  try {
+    driveConflictFollowUp(pi, ctx, { kind: "withheld", base: "main" });
+  } finally {
+    console.error = original;
+  }
+  assert.equal(messages.length, 0, "a withheld dispatch injects nothing");
+  assert.deepEqual(lines, [
+    "perk: submit — conflict-resolution dispatch withheld — the attempt counter could not be " +
+      "persisted (an unverifiable counter must never bypass the cap); resolve manually " +
+      "(rebase onto `main` and push), then re-run /submit.",
+  ]);
+});
+
 test("scaffoldRepo cwd: drive reads config without throwing", () => {
   const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
   const { pi, ctx, messages } = world({ cwd });
@@ -722,6 +743,32 @@ test("submit tool e2e: a conflicted submit drives the resolver and increments th
     assert.equal(injected.length, 1);
     assert.match(injected[0] ?? "", /perk\.conflict-resolver/);
     assert.equal(h.workflowState().conflict_resolution_attempts, 1);
+  } finally {
+    h.dispose();
+  }
+});
+
+test("submit tool e2e: a dropped increment WITHHOLDS the dispatch (loud, no drive)", async () => {
+  // D1 through the REGISTERED tool: session appends are silently dropped, so the verified
+  // increment fails its read-back — the decision is `withheld`, reported loudly, no injection.
+  const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
+  const bin = fakePerk(cwd, { stdout: submitJson({ mergeable: false, conflicts: ["a.py"] }) });
+  const h = await loadPerkSession({ cwd, env: { PERK_RUN_ID: "01RID", PERK_BIN: bin } });
+  const injected = spyInjections(h);
+  const sm = h.session.sessionManager as unknown as {
+    appendCustomEntry: (customType: string, data?: unknown) => string;
+  };
+  const realAppend = sm.appendCustomEntry.bind(sm);
+  sm.appendCustomEntry = (customType: string, data?: unknown) =>
+    customType === "perk:workflow-state" ? "dropped" : realAppend(customType, data);
+  try {
+    const result = await h.invokeTool("submit", {});
+    assert.equal((result.details as { ok: boolean }).ok, true, "the publish itself stands");
+    assert.deepEqual(injected, [], "an unverifiable counter never bypasses the cap");
+    assert.ok(
+      h.notifies.some((m) => /conflict-resolution dispatch withheld/.test(m)),
+      `expected the withheld report; got: ${JSON.stringify(h.notifies)}`,
+    );
   } finally {
     h.dispose();
   }

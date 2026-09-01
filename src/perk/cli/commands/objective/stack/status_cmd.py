@@ -168,7 +168,11 @@ class TrainOut(OutputModel):
 class ContinuationOut(OutputModel):
     """This lineage's pending sync-continuation manifest (contracts.md §8.44/§8.49) — a
     machine-local CLI-side observation. ``parseable: false`` rows carry nulls for every
-    field the unreadable file cannot account for."""
+    field the unreadable file cannot account for. ``targets_contained`` is additive trailing
+    growth (§8.44/§8.51): whether the manifest's named targets pass the canonical
+    ``continuation.validated_targets`` containment validation against the configured worktree
+    root — the warm conflict dispatch requires it ``true`` (version skew fails closed: an
+    older CLI omits the field and the warm side refuses to dispatch)."""
 
     operation_id: str | None
     conflict_node_id: str | None
@@ -177,6 +181,7 @@ class ContinuationOut(OutputModel):
     worktree_path: str | None
     manifest_path: str
     parseable: bool
+    targets_contained: bool = False
 
 
 class OrphanedResidueOut(OutputModel):
@@ -257,7 +262,26 @@ class ObjectiveStackStatusOut(OutputModel):
 # --- the machine-local CLI-side observations (§8.44 detailed status) ---
 
 
-def _observe_continuation(repo_root: Path, result: StatusResult) -> ContinuationOut | None:
+def _targets_contained(ctx: click.Context, manifest: continuation.ContinuationManifest) -> bool:
+    """Whether the manifest's named targets pass the canonical containment validation
+    (``continuation.validated_targets`` against the configured worktree root — the same seam
+    continue/abort trust as deletion authority). Fail-closed and tolerant: a config read
+    failure, a filesystem resolution failure, or any containment violation reports ``False``
+    — status stays read-only and never raises on a local observation."""
+    try:
+        worktree_root = require_config(ctx).worktree_root
+    except UserFacingCliError:
+        return False
+    try:
+        continuation.validated_targets(manifest, worktree_root)
+    except (continuation.ContainmentViolation, OSError):
+        return False
+    return True
+
+
+def _observe_continuation(
+    ctx: click.Context, repo_root: Path, result: StatusResult
+) -> ContinuationOut | None:
     """This lineage's pending continuation manifest, read tolerantly (status stays read-only
     and never fails on a local observation)."""
     status = result.train
@@ -282,6 +306,7 @@ def _observe_continuation(repo_root: Path, result: StatusResult) -> Continuation
             worktree_path=None,
             manifest_path=str(pending.path),
             parseable=False,
+            targets_contained=False,
         )
     return ContinuationOut(
         operation_id=manifest.operation_id,
@@ -291,6 +316,7 @@ def _observe_continuation(repo_root: Path, result: StatusResult) -> Continuation
         worktree_path=manifest.worktree_path,
         manifest_path=str(pending.path),
         parseable=True,
+        targets_contained=_targets_contained(ctx, manifest),
     )
 
 
@@ -460,7 +486,7 @@ def status_stack(ctx: click.Context, *, objective: str | None, as_json: bool) ->
             message=exc.format_message(),
         )
         return
-    continuation_out = _observe_continuation(repo_root, status)
+    continuation_out = _observe_continuation(ctx, repo_root, status)
     orphaned_residue = _observe_orphans(ctx, repo_root)
     payload = ObjectiveStackStatusOut.from_domain(
         status, continuation_out=continuation_out, orphaned_residue=orphaned_residue

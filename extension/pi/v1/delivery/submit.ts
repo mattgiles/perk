@@ -263,11 +263,13 @@ export function conflictResolutionGuidance(
 }
 
 /**
- * Translate the feature op's bounded conflict decision into the warm-door driving pattern
- * (modeled on `driveReconcileAfterLand`): `none` ⇒ nothing; `exhausted` ⇒ the loud at-cap
- * report (surface the unresolved conflict instead of looping); `drive` ⇒ inject the rendered
- * guidance. The terminating `submit` tool stays terminating — a `followUp` user message is a
- * separate deliberate new turn.
+ * Translate the feature op's bounded conflict decision into the warm-door driving pattern:
+ * `none` ⇒ nothing; `exhausted` ⇒ the loud at-cap report (surface the unresolved conflict
+ * instead of looping); `withheld` ⇒ the loud unpersisted-increment report (an unverifiable
+ * counter must never bypass the cap — NO injection); `drive` ⇒ inject the rendered guidance.
+ * Scope "submit" for every arm — both consumers (submit AND address) report through it, parity
+ * with the shared `exhausted` wording. The terminating `submit` tool stays terminating — a
+ * `followUp` user message is a separate deliberate new turn.
  */
 export function driveConflictFollowUp(
   pi: ExtensionAPI,
@@ -282,6 +284,18 @@ export function driveConflictFollowUp(
       "error",
       `merge conflicts persist after ${followUp.attempts} resolution attempt(s) — resolve manually ` +
         `(rebase onto \`${followUp.base}\` and push), then re-run /submit.`,
+      { alsoLog: true },
+    );
+    return;
+  }
+  if (followUp.kind === "withheld") {
+    report(
+      ctx,
+      "submit",
+      "error",
+      "conflict-resolution dispatch withheld — the attempt counter could not be persisted (an " +
+        "unverifiable counter must never bypass the cap); resolve manually (rebase onto " +
+        `\`${followUp.base}\` and push), then re-run /submit.`,
       { alsoLog: true },
     );
     return;

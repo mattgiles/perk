@@ -12,13 +12,13 @@ import {
   createDraftReviewWaveState,
   registerDraftReviewWaveTools,
 } from "./doors/draftReviewWaveTools.ts";
-import { registerLand } from "./doors/land.ts";
+
 import { registerLifecycleGates } from "./doors/lifecycleGates.ts";
 import {
   openObjectiveReviewSurface,
   registerObjectiveReviewBrowser,
 } from "./doors/objectiveReviewBrowser.ts";
-import { registerObjectiveStack } from "./doors/objectiveStack.ts";
+
 import { plannotatorPresent } from "./doors/plannotatorHandoff.ts";
 import { openPlanReviewSurface, registerPlanReviewBrowser } from "./doors/planReviewBrowser.ts";
 import { registerSelfcheck } from "./doors/selfcheck.ts";
@@ -31,8 +31,12 @@ import { installCuratedSubmissionBindings } from "./pi/v1/codeReview/submit.ts";
 import { installPrReviewTerminalBindings } from "./pi/v1/codeReview/terminal.ts";
 import { installAddressBindings } from "./pi/v1/delivery/address.ts";
 import { installCiBindings } from "./pi/v1/delivery/ci.ts";
+import { installLandBindings } from "./pi/v1/delivery/land.ts";
 import { installReadyBindings } from "./pi/v1/delivery/ready.ts";
+import { installStackLandBindings } from "./pi/v1/delivery/stackLand.ts";
+import { installStackRecoverBindings } from "./pi/v1/delivery/stackRecover.ts";
 import { installStackStatusBindings } from "./pi/v1/delivery/stackStatus.ts";
+import { installStackSyncBindings } from "./pi/v1/delivery/stackSync.ts";
 import { installSubmitBindings } from "./pi/v1/delivery/submit.ts";
 import { installGistBindings } from "./pi/v1/gist.ts";
 import { installAuditBindings } from "./pi/v1/learning/audit.ts";
@@ -484,16 +488,19 @@ export default function (pi: ExtensionAPI) {
   // the ready-time pass into a read-only session (contracts.md §8.66).
   installReadyBindings(pi, gating);
 
-  // Warm doors: `land` merges + sets pending-learn; the v1 learn installer (the `learn` +
+  // Warm bindings: `land` merges + sets pending-learn; the v1 learn installer (the `learn` +
   // `run_learn_wave` tools and the `/learn` command over the `learning/` feature ops) clears it.
-  registerLand(pi);
+  installLandBindings(pi);
   installLearnBindings(pi);
 
   // The warm stacked-delivery mutating surface (§8.51): the `/objective-sync`/
-  // `/objective-recover`/`/objective-land` drives + the four typed stack tools. Takes
-  // `gating` for the driving commands' gate-on soft refusal (stack sync/recovery mutates
-  // published branches; the stack tools never join READ_ONLY_TOOLS).
-  registerObjectiveStack(pi, gating);
+  // `/objective-recover`/`/objective-land` drives + the four typed stack tools over the
+  // `delivery/stackConflict.ts` + `delivery/stackReconcile.ts` feature ops. Takes `gating` for
+  // the driving commands' gate-on soft refusal (stack sync/recovery mutates published
+  // branches; the stack tools never join READ_ONLY_TOOLS).
+  installStackSyncBindings(pi, gating);
+  installStackRecoverBindings(pi, gating);
+  installStackLandBindings(pi, gating);
 
   // The stacked-delivery status read: the `objective_stack_status` tool + the `/objective-stack`
   // command (read-only end to end — the command works gate-on; the tool stays gate-off).

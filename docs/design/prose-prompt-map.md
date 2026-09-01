@@ -5,8 +5,8 @@ This is the readable projection of perk's living, workflow-first prose graph. It
 
 ## Coverage
 
-- **213** canonical source units
-- **738** logical fragments
+- **211** canonical source units
+- **736** logical fragments
 - **16** session shapes and **10** assemblies
 - **15** explicitly excluded candidates (policy-only; not displayed)
 - **0** validation findings
@@ -674,16 +674,16 @@ Merge changes and drive their immediate post-merge handoffs.
 
 | Unit | Role | Audience | Canonical source | Consumed by |
 | --- | --- | --- | --- | --- |
-| `typescript-model-call:extension/doors/land.ts:module:sendUserMessage:0` | `tool-contract` | `shipped` | [`extension/doors/land.ts`](../../extension/doors/land.ts) · `symbol:module/call:sendUserMessage/0` | — |
-| `typescript-model-call:extension/doors/land.ts:module:sendUserMessage:1` | `tool-contract` | `shipped` | [`extension/doors/land.ts`](../../extension/doors/land.ts) · `symbol:module/call:sendUserMessage/1` | — |
-| `typescript-tool:land` | `tool-contract` | `shipped` | [`extension/doors/land.ts`](../../extension/doors/land.ts) · `tool:land` | — |
+| `typescript-model-call:extension/pi/v1/delivery/land.ts:module:sendUserMessage:0` | `tool-contract` | `shipped` | [`extension/pi/v1/delivery/land.ts`](../../extension/pi/v1/delivery/land.ts) · `symbol:module/call:sendUserMessage/0` | — |
+| `typescript-model-call:extension/pi/v1/delivery/land.ts:module:sendUserMessage:1` | `tool-contract` | `shipped` | [`extension/pi/v1/delivery/land.ts`](../../extension/pi/v1/delivery/land.ts) · `symbol:module/call:sendUserMessage/1` | — |
+| `typescript-tool:land` | `tool-contract` | `shipped` | [`extension/pi/v1/delivery/land.ts`](../../extension/pi/v1/delivery/land.ts) · `tool:land` | — |
 
 <details>
 <summary>Logical fragments</summary>
 
-- `typescript-model-call:extension/doors/land.ts:module:sendUserMessage:0`
+- `typescript-model-call:extension/pi/v1/delivery/land.ts:module:sendUserMessage:0`
   - `argument:0` — sendUserMessage model-facing argument (`symbol:module/call:sendUserMessage/0/argument:0`)
-- `typescript-model-call:extension/doors/land.ts:module:sendUserMessage:1`
+- `typescript-model-call:extension/pi/v1/delivery/land.ts:module:sendUserMessage:1`
   - `argument:0` — sendUserMessage model-facing argument (`symbol:module/call:sendUserMessage/1/argument:0`)
 - `typescript-tool:land`
   - `description` — description (`tool:land.description`)
@@ -704,18 +704,16 @@ Synchronize, recover, land, and reconcile multi-plan objective delivery.
 | `markdown:prompts/stages/objective-reconcile.md` | `control-guidance` | `shipped` | [`prompts/stages/objective-reconcile.md`](../../prompts/stages/objective-reconcile.md) · `file` | — |
 | `markdown:prompts/stages/objective-recover.md` | `control-guidance` | `shipped` | [`prompts/stages/objective-recover.md`](../../prompts/stages/objective-recover.md) · `file` | — |
 | `markdown:prompts/stages/objective-sync.md` | `control-guidance` | `shipped` | [`prompts/stages/objective-sync.md`](../../prompts/stages/objective-sync.md) · `file` | — |
-| `typescript-model-call:extension/doors/objectiveStack.ts:module:sendUserMessage:0` | `tool-contract` | `shipped` | [`extension/doors/objectiveStack.ts`](../../extension/doors/objectiveStack.ts) · `symbol:module/call:sendUserMessage/0` | — |
-| `typescript-model-call:extension/doors/objectiveStack.ts:module:sendUserMessage:1` | `tool-contract` | `shipped` | [`extension/doors/objectiveStack.ts`](../../extension/doors/objectiveStack.ts) · `symbol:module/call:sendUserMessage/1` | — |
-| `typescript-model-call:extension/doors/objectiveStack.ts:module:sendUserMessage:2` | `tool-contract` | `shipped` | [`extension/doors/objectiveStack.ts`](../../extension/doors/objectiveStack.ts) · `symbol:module/call:sendUserMessage/2` | — |
-| `typescript-model-call:extension/doors/objectiveStack.ts:module:sendUserMessage:3` | `tool-contract` | `shipped` | [`extension/doors/objectiveStack.ts`](../../extension/doors/objectiveStack.ts) · `symbol:module/call:sendUserMessage/3` | — |
-| `typescript-model-call:extension/doors/objectiveStack.ts:module:sendUserMessage:4` | `tool-contract` | `shipped` | [`extension/doors/objectiveStack.ts`](../../extension/doors/objectiveStack.ts) · `symbol:module/call:sendUserMessage/4` | — |
-| `typescript-model-call:extension/doors/objectiveStack.ts:module:sendUserMessage:5` | `tool-contract` | `shipped` | [`extension/doors/objectiveStack.ts`](../../extension/doors/objectiveStack.ts) · `symbol:module/call:sendUserMessage/5` | — |
-| `typescript-model-call:extension/doors/objectiveStack.ts:module:sendUserMessage:6` | `tool-contract` | `shipped` | [`extension/doors/objectiveStack.ts`](../../extension/doors/objectiveStack.ts) · `symbol:module/call:sendUserMessage/6` | — |
-| `typescript-tool:objective_stack_adopt` | `tool-contract` | `shipped` | [`extension/doors/objectiveStack.ts`](../../extension/doors/objectiveStack.ts) · `tool:objective_stack_adopt` | — |
-| `typescript-tool:objective_stack_land` | `tool-contract` | `shipped` | [`extension/doors/objectiveStack.ts`](../../extension/doors/objectiveStack.ts) · `tool:objective_stack_land` | — |
-| `typescript-tool:objective_stack_recover` | `tool-contract` | `shipped` | [`extension/doors/objectiveStack.ts`](../../extension/doors/objectiveStack.ts) · `tool:objective_stack_recover` | — |
+| `typescript-model-call:extension/pi/v1/delivery/stackDrive.ts:module:sendUserMessage:0` | `tool-contract` | `shipped` | [`extension/pi/v1/delivery/stackDrive.ts`](../../extension/pi/v1/delivery/stackDrive.ts) · `symbol:module/call:sendUserMessage/0` | — |
+| `typescript-model-call:extension/pi/v1/delivery/stackDrive.ts:module:sendUserMessage:1` | `tool-contract` | `shipped` | [`extension/pi/v1/delivery/stackDrive.ts`](../../extension/pi/v1/delivery/stackDrive.ts) · `symbol:module/call:sendUserMessage/1` | — |
+| `typescript-model-call:extension/pi/v1/delivery/stackDrive.ts:module:sendUserMessage:2` | `tool-contract` | `shipped` | [`extension/pi/v1/delivery/stackDrive.ts`](../../extension/pi/v1/delivery/stackDrive.ts) · `symbol:module/call:sendUserMessage/2` | — |
+| `typescript-model-call:extension/pi/v1/delivery/stackSync.ts:module:sendUserMessage:0` | `tool-contract` | `shipped` | [`extension/pi/v1/delivery/stackSync.ts`](../../extension/pi/v1/delivery/stackSync.ts) · `symbol:module/call:sendUserMessage/0` | — |
+| `typescript-model-call:extension/pi/v1/delivery/stackSync.ts:module:sendUserMessage:1` | `tool-contract` | `shipped` | [`extension/pi/v1/delivery/stackSync.ts`](../../extension/pi/v1/delivery/stackSync.ts) · `symbol:module/call:sendUserMessage/1` | — |
+| `typescript-tool:objective_stack_adopt` | `tool-contract` | `shipped` | [`extension/pi/v1/delivery/stackSync.ts`](../../extension/pi/v1/delivery/stackSync.ts) · `tool:objective_stack_adopt` | — |
+| `typescript-tool:objective_stack_land` | `tool-contract` | `shipped` | [`extension/pi/v1/delivery/stackLand.ts`](../../extension/pi/v1/delivery/stackLand.ts) · `tool:objective_stack_land` | — |
+| `typescript-tool:objective_stack_recover` | `tool-contract` | `shipped` | [`extension/pi/v1/delivery/stackRecover.ts`](../../extension/pi/v1/delivery/stackRecover.ts) · `tool:objective_stack_recover` | — |
 | `typescript-tool:objective_stack_status` | `tool-contract` | `shipped` | [`extension/pi/v1/delivery/stackStatus.ts`](../../extension/pi/v1/delivery/stackStatus.ts) · `tool:objective_stack_status` | — |
-| `typescript-tool:objective_stack_sync` | `tool-contract` | `shipped` | [`extension/doors/objectiveStack.ts`](../../extension/doors/objectiveStack.ts) · `tool:objective_stack_sync` | — |
+| `typescript-tool:objective_stack_sync` | `tool-contract` | `shipped` | [`extension/pi/v1/delivery/stackSync.ts`](../../extension/pi/v1/delivery/stackSync.ts) · `tool:objective_stack_sync` | — |
 
 <details>
 <summary>Logical fragments</summary>
@@ -732,20 +730,16 @@ Synchronize, recover, land, and reconcile multi-plan objective delivery.
   - `body` — Document body (`file-body`)
 - `markdown:prompts/stages/objective-sync.md`
   - `body` — Document body (`file-body`)
-- `typescript-model-call:extension/doors/objectiveStack.ts:module:sendUserMessage:0`
+- `typescript-model-call:extension/pi/v1/delivery/stackDrive.ts:module:sendUserMessage:0`
   - `argument:0` — sendUserMessage model-facing argument (`symbol:module/call:sendUserMessage/0/argument:0`)
-- `typescript-model-call:extension/doors/objectiveStack.ts:module:sendUserMessage:1`
+- `typescript-model-call:extension/pi/v1/delivery/stackDrive.ts:module:sendUserMessage:1`
   - `argument:0` — sendUserMessage model-facing argument (`symbol:module/call:sendUserMessage/1/argument:0`)
-- `typescript-model-call:extension/doors/objectiveStack.ts:module:sendUserMessage:2`
+- `typescript-model-call:extension/pi/v1/delivery/stackDrive.ts:module:sendUserMessage:2`
   - `argument:0` — sendUserMessage model-facing argument (`symbol:module/call:sendUserMessage/2/argument:0`)
-- `typescript-model-call:extension/doors/objectiveStack.ts:module:sendUserMessage:3`
-  - `argument:0` — sendUserMessage model-facing argument (`symbol:module/call:sendUserMessage/3/argument:0`)
-- `typescript-model-call:extension/doors/objectiveStack.ts:module:sendUserMessage:4`
-  - `argument:0` — sendUserMessage model-facing argument (`symbol:module/call:sendUserMessage/4/argument:0`)
-- `typescript-model-call:extension/doors/objectiveStack.ts:module:sendUserMessage:5`
-  - `argument:0` — sendUserMessage model-facing argument (`symbol:module/call:sendUserMessage/5/argument:0`)
-- `typescript-model-call:extension/doors/objectiveStack.ts:module:sendUserMessage:6`
-  - `argument:0` — sendUserMessage model-facing argument (`symbol:module/call:sendUserMessage/6/argument:0`)
+- `typescript-model-call:extension/pi/v1/delivery/stackSync.ts:module:sendUserMessage:0`
+  - `argument:0` — sendUserMessage model-facing argument (`symbol:module/call:sendUserMessage/0/argument:0`)
+- `typescript-model-call:extension/pi/v1/delivery/stackSync.ts:module:sendUserMessage:1`
+  - `argument:0` — sendUserMessage model-facing argument (`symbol:module/call:sendUserMessage/1/argument:0`)
 - `typescript-tool:objective_stack_adopt`
   - `description` — description (`tool:objective_stack_adopt.description`)
   - `promptSnippet` — promptSnippet (`tool:objective_stack_adopt.promptSnippet`)

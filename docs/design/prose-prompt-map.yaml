@@ -452,13 +452,13 @@ routes:
     role: tool-contract
     priority: 85
   - id: ts-land
-    match: { paths: ["extension/doors/land.ts"] }
+    match: { paths: ["extension/pi/v1/delivery/land.ts"] }
     capability: delivery.land
     audience: shipped
     role: tool-contract
     priority: 85
   - id: ts-objective-delivery
-    match: { paths: ["extension/doors/objectiveStack.ts", "extension/pi/v1/delivery/stackStatus.ts"] }
+    match: { paths: ["extension/pi/v1/delivery/stackStatus.ts", "extension/pi/v1/delivery/stackSync.ts", "extension/pi/v1/delivery/stackRecover.ts", "extension/pi/v1/delivery/stackLand.ts", "extension/pi/v1/delivery/stackDrive.ts"] }
     capability: delivery.objective
     audience: shipped
     role: tool-contract

@@ -466,6 +466,85 @@ def test_pending_continuation_block_and_next_steps(monkeypatch):
     assert "sync --continue" in human.stderr and "sync --abort" in human.stderr
 
 
+def test_contained_continuation_targets_report_true(monkeypatch):
+    # The manifest's worktree resolves to exactly `<configured worktree_root>/sync-<op>` —
+    # the canonical `validated_targets` containment passes and the envelope reports it.
+    # The fixture's operation id is NOT a canonical Crockford ULID (it carries an `O`), so
+    # the contained arm needs a genuinely valid one.
+    def plant(root: Path) -> None:
+        op = "01JQP0000000000000000000AA"
+        worktree = root / ".worktrees" / f"sync-{op}"
+        worktree.mkdir(parents=True)
+        continuation.write_manifest(
+            root,
+            replace(_manifest(), operation_id=op, worktree_path=str(worktree)),
+        )
+
+    result, _ = _invoke(
+        ["objective", "stack", "status", "1431", "--json"],
+        monkeypatch=monkeypatch,
+        result=_train(),
+        setup=plant,
+    )
+    payload = json.loads(result.stdout)
+    block = payload["continuation"]
+    assert block["parseable"] is True
+    assert block["targets_contained"] is True
+
+
+def test_symlinked_continuation_worktree_reports_targets_contained_false(monkeypatch):
+    # A symlink planted at the expected worktree location resolves elsewhere — the
+    # containment validation refuses it and the observation fails closed (never raises).
+    # The operation id is a canonical ULID on purpose: the ULID check precedes the path
+    # check, so an invalid id would short-circuit and leave the symlink arm unexercised.
+    def plant(root: Path) -> None:
+        op = "01JQP0000000000000000000AA"
+        outside = root / "elsewhere"
+        outside.mkdir(parents=True)
+        worktrees = root / ".worktrees"
+        worktrees.mkdir(parents=True)
+        (worktrees / f"sync-{op}").symlink_to(outside)
+        continuation.write_manifest(
+            root,
+            replace(
+                _manifest(),
+                operation_id=op,
+                worktree_path=str(worktrees / f"sync-{op}"),
+            ),
+        )
+
+    result, _ = _invoke(
+        ["objective", "stack", "status", "1431", "--json"],
+        monkeypatch=monkeypatch,
+        result=_train(),
+        setup=plant,
+    )
+    payload = json.loads(result.stdout)
+    block = payload["continuation"]
+    assert block["parseable"] is True
+    assert block["targets_contained"] is False
+
+
+def test_foreign_and_relative_continuation_worktrees_report_targets_contained_false(monkeypatch):
+    # A foreign absolute parent and a relative path both fall outside the configured
+    # worktree root — `targets_contained` is false while the row itself stays parseable.
+    # Canonical ULID + matching basename on purpose: only the containment arm may refuse.
+    op = "01JQP0000000000000000000AA"
+    for worktree_path in (f"/wt/sync-{op}", f"rel/sync-{op}"):
+        result, _ = _invoke(
+            ["objective", "stack", "status", "1431", "--json"],
+            monkeypatch=monkeypatch,
+            result=_train(),
+            setup=lambda root, wt=worktree_path: continuation.write_manifest(
+                root, replace(_manifest(), operation_id=op, worktree_path=wt)
+            ),
+        )
+        payload = json.loads(result.stdout)
+        block = payload["continuation"]
+        assert block["parseable"] is True
+        assert block["targets_contained"] is False, worktree_path
+
+
 def test_unparseable_continuation_row_carries_nulls(monkeypatch):
     def plant(root: Path) -> None:
         path = continuation.manifest_path(root, "01JB0000000000000000000000")
@@ -481,6 +560,7 @@ def test_unparseable_continuation_row_carries_nulls(monkeypatch):
     payload = json.loads(result.stdout)
     block = payload["continuation"]
     assert block["parseable"] is False
+    assert block["targets_contained"] is False
     assert block["operation_id"] is None and block["worktree_path"] is None
     assert block["manifest_path"].endswith("01JB0000000000000000000000.json")
     # An unparseable manifest ALSO fires the sweep classifier's fail-safe: the residue

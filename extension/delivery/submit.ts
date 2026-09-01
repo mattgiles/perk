@@ -62,16 +62,40 @@ export interface ConflictAttempts {
 /**
  * The bounded conflict-resolution re-drive cap: drive the resolver at most this many times.
  * The counter behind it (`conflict_resolution_attempts`) is SHARED with `/objective-sync`'s
- * retained-continuation conflict drive (doors/objectiveStack.ts) — submit- and sync-episode
+ * retained-continuation conflict drive (delivery/stackConflict.ts) — submit- and sync-episode
  * attempts deliberately share one bound, reset on any clean completion of either surface.
  */
 export const CONFLICT_RESOLUTION_ATTEMPT_CAP = 2;
+
+/** The budget read: room for one more attempt (carrying the next attempt number), or spent. */
+export type ConflictBudget =
+  | { kind: "available"; next: number; cap: number }
+  | { kind: "exhausted"; attempts: number };
+
+/**
+ * The ONE cap/read comparison both conflict surfaces share (the submit/address decision here,
+ * the stack dispatch pipeline in `delivery/stackConflict.ts`). Deliberately read-only — the
+ * stack path interleaves its resolver claim between this inspect and its strict
+ * `attempts.write(next)`, whose read-back boolean each consumer passes through UNSOFTENED (a
+ * `false` means the counter is unverifiable, and an unverifiable counter must never bypass
+ * the cap — both consumers withhold the dispatch on it). A throwing counter read propagates
+ * (the 7.2-pinned load-bearing failure arm on the submit path; the stack pipeline's total
+ * boundary translates it to `state_error`).
+ */
+export function inspectConflictBudget(attempts: ConflictAttempts): ConflictBudget {
+  const n = attempts.read();
+  if (n >= CONFLICT_RESOLUTION_ATTEMPT_CAP) return { kind: "exhausted", attempts: n };
+  return { kind: "available", next: n + 1, cap: CONFLICT_RESOLUTION_ATTEMPT_CAP };
+}
 
 /** The bounded conflict follow-up decision (surface translation stays adapter-side). */
 export type ConflictFollowUp =
   | { kind: "none" }
   | { kind: "drive"; base: string; attempt: number; cap: number }
-  | { kind: "exhausted"; base: string; attempts: number };
+  | { kind: "exhausted"; base: string; attempts: number }
+  /** The increment could not be persisted-and-verified — the dispatch is withheld (an
+   * unverifiable counter must never bypass the cap; surface-uniform with the stack path). */
+  | { kind: "withheld"; base: string };
 
 export interface PublishDeps {
   publish: PublishChange;
@@ -111,11 +135,11 @@ export async function publishVerified(deps: PublishDeps): Promise<PublishAttempt
 
 /**
  * The bounded conflict follow-up decision for a published change: mergeable (or undetermined) ⇒
- * `none`; definitively unmergeable under the cap ⇒ `drive` (the increment is written first —
- * its boolean is deliberately NOT gating: today's submit surface proceeds on an unverified
- * increment with the seam's loud warning as the mitigation; the sync path's
- * withhold-and-release stays the stricter posture, both pinned); at the cap ⇒ `exhausted`
- * (no write).
+ * `none`; at the cap ⇒ `exhausted` (no write); definitively unmergeable under the cap ⇒ the
+ * verified increment gates the drive — a `false` commit ⇒ `withheld` (the surface-uniform
+ * withhold posture: an unverifiable counter must never bypass the cap; the adapter reports
+ * loudly, no dispatch). A THROWING counter read/write still propagates — the 7.2-pinned
+ * load-bearing failure arm; only the `false` return changed posture.
  */
 export function decideConflictFollowUp(
   change: PublishedChange,
@@ -123,10 +147,10 @@ export function decideConflictFollowUp(
 ): ConflictFollowUp {
   if (change.mergeable !== false) return { kind: "none" };
   const base = change.base ?? "";
-  const n = attempts.read();
-  if (n >= CONFLICT_RESOLUTION_ATTEMPT_CAP) return { kind: "exhausted", base, attempts: n };
-  attempts.write(n + 1);
-  return { kind: "drive", base, attempt: n + 1, cap: CONFLICT_RESOLUTION_ATTEMPT_CAP };
+  const budget = inspectConflictBudget(attempts);
+  if (budget.kind === "exhausted") return { kind: "exhausted", base, attempts: budget.attempts };
+  if (!attempts.write(budget.next)) return { kind: "withheld", base };
+  return { kind: "drive", base, attempt: budget.next, cap: budget.cap };
 }
 
 /**

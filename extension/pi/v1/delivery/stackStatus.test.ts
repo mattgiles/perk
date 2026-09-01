@@ -3,7 +3,7 @@
 // precedence through the registered tool, the lenient `renderStackStatus` render, and the two
 // `/objective-stack` command arms (gate-on multiline success + multiline failure). Fully offline
 // (fakePerk via PERK_BIN; a REAL bound AgentSession via the T1 harness). The mutating stack
-// family's suite stays in doors/objectiveStack.test.ts.
+// family's suites stay in stackSync.test.ts / stackRecover.test.ts / stackLand.test.ts.
 
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
