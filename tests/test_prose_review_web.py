@@ -733,7 +733,7 @@ def test_typescript_enclosing_symbol_fragment_is_editable_through_source_endpoin
     repo: Path,
 ) -> None:
     unit = snapshot.get_unit(
-        "typescript-model-call:extension/adapters/planAdapterPlannotator.ts:module:before-agent-start:0"
+        "typescript-model-call:extension/pi/v1/providers/plannotator.ts:module:before-agent-start:0"
     )
     assert unit is not None
     fragment = snapshot.get_fragment(unit.candidate.id, "handler")
@@ -1021,7 +1021,7 @@ def test_typescript_read_and_save_share_one_app_scoped_helper_slot(
         (
             "typescript-tool:plan_review",
             "description",
-            (ROOT / "extension/factories/planReview.ts")
+            (ROOT / "extension/pi/v1/plan.ts")
             .read_text(encoding="utf-8")
             .replace("Present the plan", "Present the browser plan", 1),
             "browser plan",
@@ -2324,8 +2324,7 @@ GIST_FILES = (
 PLAN_AUTHORING_FILES = (
     "prompts/contexts/plan-authoring.md",
     "skills/perk-plan/SKILL.md",
-    "extension/factories/planDraft.ts",
-    "extension/factories/planReview.ts",
+    "extension/pi/v1/plan.ts",
 )
 
 
@@ -2479,6 +2478,19 @@ def test_assembly_render_returns_typed_layer_failures_with_ordered_siblings(
     snapshot: CatalogSnapshot, repo: Path
 ) -> None:
     _populate_sources(repo, PLAN_AUTHORING_FILES)
+    # Synthesize the failure: swap plan_draft's first guideline literal for an identifier in
+    # the trust-root copy (an indirection is an unsupported source shape), so the render
+    # produces a typed failure layer in place while every sibling stays rendered.
+    installer = repo / "extension/pi/v1/plan.ts"
+    installer_text = installer.read_text(encoding="utf-8")
+    draft_guideline = (
+        '"Call plan_draft to persist the current working draft as you author or revise the '
+        'plan; pass the FULL plan markdown each time (it rewrites the whole draft)."'
+    )
+    assert installer_text.count(draft_guideline) == 1
+    installer.write_text(
+        installer_text.replace(draft_guideline, "PLAN_DRAFT_GUIDELINE_0", 1), encoding="utf-8"
+    )
     response = _client(snapshot, repo).post(
         "/api/assembly/render",
         headers={web.CSRF_HEADER: TOKEN},
@@ -2486,8 +2498,6 @@ def test_assembly_render_returns_typed_layer_failures_with_ordered_siblings(
     )
     assert response.status_code == 200
     payload = response.json()
-    # plan_draft's promptGuidelines is indirect in the current source: a typed failure
-    # layer in place, every sibling (including the eight-part review tool) preserved.
     assert [layer["type"] for layer in payload["layers"]] == [
         "boundary",
         "owned",
@@ -2500,7 +2510,7 @@ def test_assembly_render_returns_typed_layer_failures_with_ordered_siblings(
     assert failure["unit"]["id"] == "typescript-tool:plan_draft"
     assert failure["problems"] == [
         {
-            "fragment": {"id": "promptGuidelines", "label": "promptGuidelines"},
+            "fragment": {"id": "promptGuidelines.0", "label": "promptGuidelines item 1"},
             "reason": "unsupported-source-shape",
             "detail": (
                 "A catalog fragment resolves to a source shape that cannot be extracted safely."
@@ -2756,7 +2766,7 @@ def test_busy_helper_slot_from_an_unlocked_projection_is_a_typed_render_failure(
     monkeypatch.setattr(typescript_adapter_module, "run_checked", blocked)
     client = _client(snapshot, repo)
     projection_responses: list[Response] = []
-    text = (ROOT / "extension/factories/planReview.ts").read_text(encoding="utf-8")
+    text = (ROOT / "extension/pi/v1/plan.ts").read_text(encoding="utf-8")
 
     def project() -> None:
         projection_responses.append(

@@ -1,7 +1,7 @@
 // The minimal TS config port. Mirrors `perk/substrate/config.py`'s overlay: read
 // `.perk/config.toml` (committed) overlaid by `.perk/local.toml` (gitignored, local wins). The only
 // setting consumed today is an optional `[workflow]` plan-authoring addendum, appended into the
-// `perk:plan-context` injection (extension/factories/planMode.ts) when present.
+// `perk:plan-context` injection (extension/pi/v1/plan.ts) when present.
 //
 // Deliberately dependency-free: rather than pull a runtime TOML dependency into the published
 // extension, this reads the narrow TOML subset perk actually uses — `[section]` headers +

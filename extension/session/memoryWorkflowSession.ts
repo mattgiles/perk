@@ -1,13 +1,21 @@
 // The deterministic in-memory WorkflowSession backing (the waves-memory-adapter precedent: a
 // production file so feature tests need no filesystem or branch fixtures). It mirrors the
 // classified cores' arms exactly — same name validation, same unchanged short-circuit, same
-// rejected/unverified split — with deterministic failure knobs so the shared interface suite
-// reaches every arm without permission tricks or fake sinks.
+// rejected/unverified split, same no-identity classification (`runId: null` ⇒ artifact writes
+// reject, reads read `absent`; the state ops still work) — with deterministic failure knobs so
+// the shared interface suite reaches every arm without permission tricks or fake sinks.
 
+import type { PlanRef } from "../substrate/cache.ts";
 import { digestSessionData, sessionArtifactNameProblem } from "../substrate/sessionData.ts";
-import type { SessionArtifactPointer } from "../substrate/workflowState.ts";
+import {
+  nodeClaimsEqual,
+  planRefsEqual,
+  type SessionArtifactPointer,
+} from "../substrate/workflowState.ts";
 import type {
   ReadArtifactResult,
+  WorkflowChange,
+  WorkflowChangeResult,
   WorkflowSession,
   WriteArtifactResult,
 } from "./workflowSession.ts";
@@ -24,27 +32,35 @@ export interface MemoryWorkflowSession extends WorkflowSession {
   dropContent(name: string): void;
   /** Re-key the pointer to a foreign run (the silent `absent` fork-isolation arm). */
   disownPointer(name: string): void;
+  /** Refuse the NEXT `apply` before any effect (the `rejected` arm — nothing lands). */
+  failNextApply(): void;
+  /** Land the NEXT `apply` but fail its read-back proof (the `unverified` arm). */
+  failNextApplyVerification(): void;
+  /** Seed/replace the live node claim (the lifecycle write stays outside the seam). */
+  setNodeClaim(claim: { objective: string; node: string } | null): void;
+  /** The live linked plan-ref (test observation of the `link-plan-ref` effect). */
+  linkedPlanRef(): PlanRef | null;
 }
 
-/** The memory open union — assignable to `OpenWorkflowSession`, with the knob-bearing session. */
-export type OpenMemoryWorkflowSession =
-  | { status: "opened"; session: MemoryWorkflowSession }
-  | { status: "absent" };
-
 /**
- * Open an in-memory session: `absent` when `runId` is null (mirroring an identity-less branch),
- * else an opened session over a private content + pointer map.
+ * Open an in-memory session over a private content + pointer map and workflow-state twin —
+ * ALWAYS opens (`runId: null` mirrors an identity-less branch: artifact writes reject, reads
+ * read `absent`, the state ops keep working).
  */
 export function openMemoryWorkflowSession(opts: {
   runId: string | null;
-}): OpenMemoryWorkflowSession {
+  nodeClaim?: { objective: string; node: string } | null;
+  activePlanRef?: PlanRef | null;
+}): MemoryWorkflowSession {
   const runId = opts.runId;
-  if (runId === null) return { status: "absent" };
-
   const contents = new Map<string, string>();
   const pointers = new Map<string, SessionArtifactPointer>();
+  let claim = opts.nodeClaim ?? null;
+  let activePlanRef = opts.activePlanRef ?? null;
   let failWrite = false;
   let failPointerAppend = false;
+  let failApply = false;
+  let failApplyVerification = false;
 
   const session: MemoryWorkflowSession = {
     runId,
@@ -65,7 +81,23 @@ export function openMemoryWorkflowSession(opts: {
       const pointer = pointers.get(name);
       if (pointer !== undefined) pointers.set(name, { ...pointer, run_id: `${runId}.foreign` });
     },
+    failNextApply() {
+      failApply = true;
+    },
+    failNextApplyVerification() {
+      failApplyVerification = true;
+    },
+    setNodeClaim(next: { objective: string; node: string } | null) {
+      claim = next;
+    },
+    linkedPlanRef() {
+      return activePlanRef;
+    },
+    nodeClaim() {
+      return claim;
+    },
     readArtifact(name: string): ReadArtifactResult {
+      if (runId === null) return { status: "absent" }; // no identity — silent, branchable
       const pointer = pointers.get(name);
       if (pointer === undefined) return { status: "absent" };
       if (pointer.run_id !== runId) return { status: "absent" }; // fork isolation — silent
@@ -84,6 +116,13 @@ export function openMemoryWorkflowSession(opts: {
     writeArtifact(name: string, content: string): WriteArtifactResult {
       const nameProblem = sessionArtifactNameProblem(name);
       if (nameProblem !== null) return { status: "rejected", problem: nameProblem };
+      if (runId === null) {
+        // The no-identity classification (mirrors the classified write core's refusal).
+        return {
+          status: "rejected",
+          problem: "session has no run_id — session artifacts need identity",
+        };
+      }
 
       // The unchanged short-circuit (same probe as the branch backing: a valid current pointer
       // whose stored digest equals the new content's — quiet, no fresh pointer).
@@ -122,6 +161,43 @@ export function openMemoryWorkflowSession(opts: {
       pointers.set(name, pointer);
       return { status: "applied", pointer };
     },
+    apply(change: WorkflowChange): WorkflowChangeResult {
+      switch (change.kind) {
+        case "link-plan-ref": {
+          if (planRefsEqual(activePlanRef, change.ref)) return { status: "unchanged" };
+          if (failApply) {
+            failApply = false;
+            return { status: "rejected", problem: "workflow-state append refused (induced)" };
+          }
+          activePlanRef = change.ref;
+          if (failApplyVerification) {
+            failApplyVerification = false;
+            return {
+              status: "unverified",
+              problem: `plan-ref read-back failed for ${change.ref.provider}:${change.ref.pr_id}`,
+            };
+          }
+          return { status: "applied" };
+        }
+        case "clear-node-claim": {
+          // Never clobber an unrelated claim: both fields must match the live claim.
+          if (!nodeClaimsEqual(claim, change.claim)) return { status: "unchanged" };
+          if (failApply) {
+            failApply = false;
+            return { status: "rejected", problem: "workflow-state append refused (induced)" };
+          }
+          claim = null;
+          if (failApplyVerification) {
+            failApplyVerification = false;
+            return {
+              status: "unverified",
+              problem: `objective_node_claim clear read-back failed for node ${change.claim.node}`,
+            };
+          }
+          return { status: "applied" };
+        }
+      }
+    },
   };
-  return { status: "opened", session };
+  return session;
 }

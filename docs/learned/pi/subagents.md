@@ -663,7 +663,7 @@ are the drift tripwire):
   per-request reply subscriptions are cleanly disposed. The plannotator plan-review bridge now
   rides the same mechanic: it disposes a per-review `plannotator:review-result` listener via
   the unsubscribe `EventBus.on` returns (`requestPlannotatorPlanReview` in
-  `extension/adapters/planAdapterPlannotator.ts`; `createPlannotatorBridge` is its thin
+  `extension/pi/v1/providers/plannotator.ts`; `createPlannotatorBridge` is its thin
   wrapper).
 
 ## Parent-prepare large evidence lanes

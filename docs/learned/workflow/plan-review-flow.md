@@ -41,15 +41,18 @@ hit.
 
 ## The backend-neutral review door
 
-`plan_review` lives in `extension/factories/planReview.ts` — moved out of the plannotator adapter. Dispatch:
+`plan_review` lives in `extension/pi/v1/planReview.ts` — moved out of the plannotator adapter. Dispatch:
 plannotator-selected → the event-bus bridge; **ANY other selection** (including tombell/unknown) →
 the first-party `ctx.ui.editor` review. The first-party path is the *default substrate*, not a
 fallback of last resort — Node 2.6 (tombell) is only an injected-contract re-aim on top of it.
 
-The cycle-break that made the move possible: `planReview.ts` imports the bridge as a **value** from
-`planAdapterPlannotator.ts`; the adapter imports `ReviewOutcome` *type-only* back — erased at
-runtime, no cycle. This is the general recipe whenever a vocabulary type moves to a new owning
-module that the old module still references (see `pi/extension-seams.md`).
+The cycle-break that made the move possible (historical: the type-only edge era): `planReview.ts`
+imported the bridge as a **value** from the plannotator adapter while the adapter imported
+`ReviewOutcome` *type-only* back — erased at runtime, no runtime cycle. The general recipe
+whenever a vocabulary type moves to a new owning module that the old module still references
+(see `pi/extension-seams.md`). The plan-flow migration to `authoring/plan/` + `pi/v1/` later
+dissolved even the type-only edge: `ReviewOutcome` now lives in the shared leaf
+`extension/pi/v1/review.ts`, which imports no provider adapter and no feature module.
 
 ## Asymmetric source tiering is the review-surface law
 
@@ -62,7 +65,8 @@ than fall through to the scrape.
 
 ## The approvalSave seam owns the gate exit
 
-`approvalSave` in `extension/factories/planSave.ts` is the single approval→save orchestration: artifact-first
+`approvalSave` in `extension/pi/v1/plan.ts` (the adapter twin over the feature op
+`planApprovalSave`, `extension/authoring/plan/save.ts`) is the single approval→save orchestration: artifact-first
 `resolvePlanSource` → `savePlan` → D1a gate exit on success. Review backends call it and must
 **NOT** call `gating.enter/exit` themselves — the seam snapshots `isActive()` pre-save and exits
 only on success. A `no-plan` outcome saves nothing and leaves the gate untouched; callers render
@@ -136,8 +140,9 @@ make residual drift easy to miss:
 ## The `PLAN_AUTHORING_CONTEXT` nudge seam (#700)
 
 The "consult learnings before planning" nudge is a concrete instance of the authoring-guidance prose
-above. `PLAN_AUTHORING_CONTEXT` (exported in `extension/factories/planMode.ts`) is built into the
-final injection by `planContextContent(cwd)`, which appends the optional `[workflow] plan_authoring`
+above. `PLAN_AUTHORING_CONTEXT` (exported in `extension/authoring/plan/prose.ts`) is built into the
+final injection by `planAuthoringContextContent(addendum)` (pure; the installer passes
+`loadPerkConfig(cwd).planAuthoring`), which appends the optional `[workflow] plan_authoring`
 config addendum. The prose itself now lives in `prompts/contexts/plan-authoring.md` (the constant
 remains the exported render product, with the marker passed as a render var) — the edit lockstep's
 first surface is the **template**, not an inline literal. Fixed shape: `[PLAN AUTHORING]` marker → the "Gather before you plan" four-category
@@ -149,8 +154,8 @@ guidance between the gather list and the executor paragraph.**
   prompts (`PLAN_ADAPTER_TOMBELL_CONTEXT` / `PLAN_ADAPTER_PLANNOTATOR_CONTEXT`) are **SEPARATE**,
   already diverge, and have **no byte-parity test** — they need their own edit if mirrored.
 - **Lockstep for editing this constant:** the `prompts/contexts/plan-authoring.md` template
-  (the constant's prose source) and an **additive** substring assertion in `planMode.test.ts`
-  (the `planContextContent` test) — add one new `assert.match` to pin new content. (The
+  (the constant's prose source) and an **additive** substring assertion in `pi/v1/plan.test.ts`
+  (the `planAuthoringContextContent` test) — add one new `assert.match` to pin new content. (The
   `perk-plan` skill is the §8.57 detail tier, not an SSOT mirror — it points back at the flow.)
 - **The consult is first-stop-MANDATORY prose** ("Make `docs/learned/` your first stop … finding
   nothing is fine; skipping the walk is not"), backed by two non-blocking deterministic audit
@@ -179,9 +184,9 @@ guidance between the gather list and the executor paragraph.**
   `packages/editor/directEdits.ts` @ v0.26.1 — a version-pinned prose contract, re-verify on
   plannotator upgrades.
 - **The per-arm asymmetry.** Plan arm on APPROVE: mechanical apply — `extractDirectEdits` (strict
-  fence parse, `extension/adapters/planAdapterPlannotator.ts`) → `applyUnifiedDiff`
+  fence parse, `extension/pi/v1/providers/plannotator.ts`) → `applyUnifiedDiff`
   (`extension/substrate/unifiedDiff.ts` — the THIRD vendored zero-runtime-dep engine after
-  miniYaml/miniJinja; returns null on any anomaly) → `writePlanDraft` write-back → save the
+  miniYaml/miniJinja; returns null on any anomaly) → the session draft write-back → save the
   EDITED bytes with `edited: true` and remainder-only feedback. Objective arm on APPROVE with a
   Direct Edits section: **no save** — the save seam re-reads the STRUCTURED draft, so
   rendered-markdown edits can't fold back mechanically; instead a non-terminating revise round
@@ -213,7 +218,7 @@ guidance between the gather list and the executor paragraph.**
   shaped entry-`signal.aborted`-check → `await` something → register an abort listener must
   **re-check `aborted` at the registration point** — the entry check does not cover the await
   window, and the listener will not retro-fire. In the bridge
-  (`extension/adapters/planAdapterPlannotator.ts`) this wedged the open-ended decision wait
+  (`extension/pi/v1/providers/plannotator.ts`) this wedged the open-ended decision wait
   forever when an abort landed during the bounded handshake await; the re-check is pinned by its
   "an abort during the pending handshake registers no listener" test (PR #1459).
 - **Planning corollary:** a "byte-stable refactor" claim is intent, not proof — restructuring
@@ -236,8 +241,8 @@ guidance between the gather list and the executor paragraph.**
 
 - **Plannotator arms open an in-TUI chooser before anything launches.** Eligibility is
   drafts-only AND presence-probed, via injected `WaveLaunch` deps composed at the
-  `registerPlanReview` call site in `extension/index.ts` — the factory imports nothing from door
-  modules, breaking the value-import cycle (the browser door value-imports the review door).
+  `installPlanBindings` call site in `extension/index.ts` — the review arm imports nothing from
+  door modules, breaking the value-import cycle (the browser door value-imports the review door).
 - **The wave choice delegates to the guidance-RETURNING door open cores** (the doors became thin
   `sendUserMessage` wrappers) and returns a non-terminating `wave_launched` result carrying the
   door guidance verbatim; the browser decision routes through the door's existing background
@@ -305,10 +310,10 @@ trigger**.
 - **Type injected dependencies as the minimal structural slice** (e.g. `{ review(plan, signal) }`),
   not the concrete bridge — a recording fake bridge (canned `ReviewOutcome` + a reviewed-plans
   capture) collapses bus + envelope + timers per test.
-- An in-memory `exec` recorder (the planSave.test.ts `fakeApprovalPi` recipe, with `PERK_NO_LLM=1`
+- An in-memory `exec` recorder (the pi/v1/plan.test.ts `fakeApprovalPi` recipe, with `PERK_NO_LLM=1`
   pinned per-test) asserts cold-door argv (`plan-save`/`--json`/`--plan-file`) fully offline — no
   scaffolded fake binary, no harness session.
-- **Forcing a `writePlanDraft` failure:** a branch with no `run_id` fails the artifact-tier
+- **Forcing a draft write-back failure:** a branch with no `run_id` fails the artifact-tier
   write-back (`no_run_id`) while a `plan` *param* still resolves as the review source (the artifact
   tier needs run_id; the param tier doesn't) — a clean lever for the write-back-failure arm.
 - **Prompt-rewrite testing discipline:** design negative asserts *together with* the replacement
@@ -417,10 +422,11 @@ detected only at push time as `push_rejected` — loud but late, by design.
 ## Cross-references
 
 - `shared/contracts.md` §8.23 — the consolidated file-first plan contract (the three backends)
-- `extension/factories/planReview.ts` — the door, `executePlanReview`, the first-party review
-- `extension/factories/planSave.ts` — `approvalSave`, `resolvePlanSource`, `savePlan`
+- `extension/pi/v1/planReview.ts` — the door, `executePlanReview`, the first-party review
+- `extension/pi/v1/plan.ts` — `approvalSave` + the save rendering; `extension/authoring/plan/save.ts` —
+  `savePlan`/`planApprovalSave`; `extension/authoring/plan/source.ts` — `resolvePlanSource`
 - `extension/substrate/unifiedDiff.ts` — the strict vendored unified-diff applier (Direct Edits)
-- `extension/adapters/planAdapterPlannotator.ts` — `extractDirectEdits`, the Direct Edits format pin
+- `extension/pi/v1/providers/plannotator.ts` — `extractDirectEdits`, the Direct Edits format pin
 - `docs/learned/workflow/plan-save-surfaces.md` — the save-side source resolution + recovery carrier
 - `docs/learned/workflow/provider-seam.md` — the plannotator augment-posture provider
 - `docs/learned/pi/extension-api.md` — `ctx.ui.editor` facts + the `headfulUIContext` gap

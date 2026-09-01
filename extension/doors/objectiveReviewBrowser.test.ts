@@ -13,7 +13,7 @@ import { test } from "node:test";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
 import { OBJECTIVE_DRAFT_ARTIFACT, renderObjectiveDraft } from "../factories/objectiveDraft.ts";
-import type { ReviewOutcome } from "../factories/planReview.ts";
+import type { ReviewOutcome } from "../pi/v1/review.ts";
 import { sessionDataDir } from "../substrate/cache.ts";
 import {
   digestSessionData,

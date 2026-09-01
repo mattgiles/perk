@@ -6,13 +6,16 @@ import { test } from "node:test";
 import { handoffPath, type PlanRef, workflowDir } from "./cache.ts";
 import {
   appendWorkflowState,
+  appendWorkflowStateClassified,
   type BranchEntry,
   branchCarries,
   branchOf,
   decideClaim,
   deriveForkRunId,
   type EntrySink,
+  nodeClaimsEqual,
   planRefsEqual,
+  readNodeClaim,
   rebuildWorkflowState,
   resolveRunStage,
   WORKFLOW_STATE_TYPE,
@@ -375,6 +378,61 @@ test("appendWorkflowState: never throws — a throwing sink reports and returns 
   assert.ok(notifications[0]?.includes("disk full"));
 });
 
+test("appendWorkflowStateClassified: a throwing sink whose field never changed is rejected", () => {
+  const { notifications, source } = fakeWorld();
+  const throwingSink: EntrySink = {
+    appendEntry: () => {
+      throw new Error("append refused");
+    },
+  };
+  const result = appendWorkflowStateClassified(throwingSink, source, {
+    data: { run_id: "01RID" },
+    field: "run_id",
+    expected: "01RID",
+    scope: "workflow-state linkage error",
+    failure: "read-back failed for run 01RID",
+  });
+  // Proven refusal-before-effect: the entry never landed (the rebuilt field is unchanged).
+  assert.equal(result.status, "rejected");
+  assert.ok(result.status === "rejected" && /run_id append threw/.test(result.problem));
+  assert.equal(notifications.length, 1, "the failure arm still reports loudly");
+});
+
+test("appendWorkflowStateClassified: a throw AFTER the entry landed classifies applied", () => {
+  const { entries, notifications, source } = fakeWorld();
+  const landsThenThrows: EntrySink = {
+    appendEntry: (customType, data) => {
+      entries.push({ type: "custom", customType, data: data as Record<string, unknown> });
+      throw new Error("late explosion");
+    },
+  };
+  const result = appendWorkflowStateClassified(landsThenThrows, source, {
+    data: { run_id: "01RID" },
+    field: "run_id",
+    expected: "01RID",
+    scope: "workflow-state linkage error",
+    failure: "read-back failed for run 01RID",
+  });
+  // The read-back is the proof authority: the rebuilt field matches, so the change landed.
+  assert.equal(result.status, "applied");
+  assert.equal(notifications.length, 1, "the throw is still reported (loud, non-fatal)");
+});
+
+test("appendWorkflowStateClassified: a dropped write (read-back miss) stays unverified", () => {
+  const { notifications, source } = fakeWorld();
+  const droppingSink: EntrySink = { appendEntry: () => {} };
+  const result = appendWorkflowStateClassified(droppingSink, source, {
+    data: { run_id: "01RID" },
+    field: "run_id",
+    expected: "01RID",
+    scope: "workflow-state linkage error",
+    failure: "read-back failed for run 01RID",
+  });
+  assert.equal(result.status, "unverified");
+  assert.ok(result.status === "unverified" && /read-back failed/.test(result.problem));
+  assert.equal(notifications.length, 1);
+});
+
 test("appendWorkflowState: multi-field data verifies only the named field", () => {
   const { notifications, sink, source } = fakeWorld();
   const ok = appendWorkflowState(sink, source, {
@@ -395,4 +453,42 @@ test("deriveForkRunId: increments past existing siblings", () => {
   mkdirSync(join(runs, "01RID.2"), { recursive: true });
   assert.equal(deriveForkRunId("01RID", dir), "01RID.3");
   assert.equal(deriveForkRunId("01OTHER", dir), "01OTHER.1");
+});
+
+// --- nodeClaimsEqual / readNodeClaim (pure units) -------------------------------------------
+
+test("nodeClaimsEqual: structural objective+node identity; absent equals only absent", () => {
+  const a = { objective: "7", node: "1.2" };
+  assert.equal(nodeClaimsEqual(a, { objective: "7", node: "1.2" }), true);
+  assert.equal(nodeClaimsEqual(a, { objective: "7", node: "1.3" }), false);
+  assert.equal(nodeClaimsEqual(a, { objective: "8", node: "1.2" }), false);
+  assert.equal(nodeClaimsEqual(a, null), false);
+  assert.equal(nodeClaimsEqual(null, null), true);
+  assert.equal(nodeClaimsEqual(undefined, null), true);
+});
+
+test("readNodeClaim: rebuilt claim, fail-open on malformed/missing", () => {
+  const src = (data: unknown): { sessionManager: { getBranch(): unknown[] } } => ({
+    sessionManager: {
+      getBranch: () => [{ type: "custom", customType: "perk:workflow-state", data }],
+    },
+  });
+  assert.deepEqual(readNodeClaim(src({ objective_node_claim: { objective: "7", node: "1.2" } })), {
+    objective: "7",
+    node: "1.2",
+  });
+  assert.equal(readNodeClaim(src({})), null);
+  assert.equal(readNodeClaim(src({ objective_node_claim: null })), null);
+  assert.equal(readNodeClaim(src({ objective_node_claim: { objective: 7, node: "1.2" } })), null);
+  assert.equal(readNodeClaim(src({ objective_node_claim: { objective: "7", node: "" } })), null);
+  assert.equal(
+    readNodeClaim({
+      sessionManager: {
+        getBranch: () => {
+          throw new Error("boom");
+        },
+      },
+    }),
+    null,
+  );
 });

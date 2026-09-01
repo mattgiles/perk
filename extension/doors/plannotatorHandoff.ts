@@ -59,9 +59,10 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 import {
   type PlannotatorBus,
   requestPlannotatorPlanReview,
-} from "../adapters/planAdapterPlannotator.ts";
-// Type-only (erased at runtime — no cycle): the outcome vocabulary lives with the review door.
-import type { ReviewOutcome } from "../factories/planReview.ts";
+} from "../pi/v1/providers/plannotator.ts";
+// Type-only (erased at runtime — no cycle): the outcome vocabulary lives with the shared
+// review-surface machinery.
+import type { ReviewOutcome } from "../pi/v1/review.ts";
 import { readPlanRef } from "../substrate/cache.ts";
 import {
   type ColdDoorResult,

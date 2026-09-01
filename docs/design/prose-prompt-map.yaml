@@ -378,7 +378,7 @@ routes:
     priority: 90
 
   - id: ts-adapters
-    match: { paths: ["extension/adapters/**"] }
+    match: { paths: ["extension/pi/v1/providers/**"] }
     capability: review.drafts
     audience: shipped
     role: adapter
@@ -402,13 +402,21 @@ routes:
     role: tool-contract
     priority: 75
   - id: ts-plan-review
-    match: { paths: ["extension/factories/planReview.ts", "extension/doors/planReviewBrowser.ts", "extension/doors/objectiveReviewBrowser.ts", "extension/doors/plannotatorHandoff.ts", "extension/doors/draftReviewWaveTools.ts"] }
+    match: { paths: ["extension/pi/v1/planReview.ts", "extension/pi/v1/objectiveReview.ts", "extension/pi/v1/review.ts", "extension/doors/planReviewBrowser.ts", "extension/doors/objectiveReviewBrowser.ts", "extension/doors/plannotatorHandoff.ts", "extension/doors/draftReviewWaveTools.ts"] }
+    capability: review.drafts
+    audience: shipped
+    role: tool-contract
+    priority: 90
+  - id: ts-plan-review-tool
+    # The plan_review registration rides pi/v1/plan.ts (the one installer), so the review
+    # door's tool unit is routed by unit id, not by the shared installer path.
+    match: { ids: ["typescript-tool:plan_review"] }
     capability: review.drafts
     audience: shipped
     role: tool-contract
     priority: 90
   - id: ts-plan
-    match: { paths: ["extension/factories/plan*.ts", "extension/factories/implementHere.ts"] }
+    match: { paths: ["extension/pi/v1/plan.ts", "extension/pi/v1/planTitle.ts", "extension/authoring/plan/**"] }
     capability: planning.plan
     audience: shipped
     role: tool-contract

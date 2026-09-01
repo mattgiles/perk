@@ -122,7 +122,7 @@ deterministic node-claim via a workflow-state field) was deliberately out of sco
 > **Update (the deterministic node-claim shipped):** the claim carrier now exists as
 > `objective_node_claim` on workflow state (`extension/substrate/workflowState.ts`). The planning
 > claim recorded in-session is what the approval-driven save reads — explicit tool-arg ids win
-> outright — and the claim clears on a successful save (`extension/factories/planSave.ts`). The
+> outright — and the claim clears on a successful save (`extension/authoring/plan/save.ts`). The
 > residual-risk narrative above is the history that motivated it.
 
 ## The "design-only node" pattern (#609)

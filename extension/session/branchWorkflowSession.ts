@@ -1,8 +1,12 @@
 // The branch/file WorkflowSession backing: identity from the rebuilt `perk:workflow-state`
 // (`activeSessionRunId`), artifact ops delegating to `substrate/sessionData.ts`'s classified
 // cores — one artifact-discipline implementation, two consumers (this seam + the legacy
-// null-collapsing wrappers). The reporting slice arrives through `SessionArtifactCtx`, so this
-// module never imports `surfaces/`.
+// null-collapsing wrappers) — and the workflow-state ops delegating to the strict-append seam
+// (`appendWorkflowStateClassified`) with the exact scope/failure strings the plan-save surfaces
+// always used (the append helper's loud `report()` warning path is unchanged and remains the
+// loudness channel; its classification IS the seam's change vocabulary — `rejected` only on a
+// proven refusal-before-effect). The reporting slice arrives through `SessionArtifactCtx`, so this module never
+// imports `surfaces/`.
 
 import {
   activeSessionRunId,
@@ -10,52 +14,97 @@ import {
   type SessionArtifactCtx,
   writeSessionArtifactClassified,
 } from "../substrate/sessionData.ts";
-import type { EntrySink } from "../substrate/workflowState.ts";
+import {
+  appendWorkflowStateClassified,
+  branchOf,
+  type EntrySink,
+  nodeClaimsEqual,
+  planRefsEqual,
+  readNodeClaim,
+  rebuildWorkflowState,
+} from "../substrate/workflowState.ts";
 import type {
-  OpenWorkflowSession,
   ReadArtifactResult,
-  WriteArtifactResult,
+  WorkflowChange,
+  WorkflowChangeResult,
+  WorkflowSession,
 } from "./workflowSession.ts";
 
 /**
- * Open the branch-backed session for the current context: `absent` without a `run_id` (a
- * session exists only with identity). Artifact ops re-derive validation state from the live
- * branch per call — the classified cores own the digest/pointer discipline.
+ * Open the branch-backed session for the current context — ALWAYS opens; `runId: null` is the
+ * identity-less arm (the classified artifact cores refuse writes and read `absent` without a
+ * run_id; the workflow-state ops are branch-backed and identity-independent). Artifact ops
+ * re-derive validation state from the live branch per call — the classified cores own the
+ * digest/pointer discipline.
  */
 export function openBranchWorkflowSession(
   sink: EntrySink,
   source: SessionArtifactCtx,
-): OpenWorkflowSession {
-  const runId = activeSessionRunId(source);
-  if (runId === null) return { status: "absent" };
+): WorkflowSession {
   return {
-    status: "opened",
-    session: {
-      runId,
-      readArtifact(name: string): ReadArtifactResult {
-        const result = readSessionArtifactClassified(source, name);
-        switch (result.status) {
-          case "found":
-            return { status: "found", content: result.content };
-          case "absent":
-            return { status: "absent" };
-          case "invalid":
-            return { status: "invalid", problem: result.problem };
+    runId: activeSessionRunId(source),
+    readArtifact(name: string): ReadArtifactResult {
+      const result = readSessionArtifactClassified(source, name);
+      switch (result.status) {
+        case "found":
+          return { status: "found", content: result.content };
+        case "absent":
+          return { status: "absent" };
+        case "invalid":
+          return { status: "invalid", problem: result.problem };
+      }
+    },
+    writeArtifact(name: string, content: string) {
+      const result = writeSessionArtifactClassified(sink, source, name, content);
+      switch (result.status) {
+        case "applied":
+          return { status: "applied", pointer: result.pointer };
+        case "unchanged":
+          return { status: "unchanged", pointer: result.pointer };
+        case "unverified":
+          return { status: "unverified", problem: result.problem };
+        case "rejected":
+          return { status: "rejected", problem: result.problem };
+      }
+    },
+    nodeClaim() {
+      return readNodeClaim(source);
+    },
+    apply(change: WorkflowChange): WorkflowChangeResult {
+      switch (change.kind) {
+        case "link-plan-ref": {
+          const ref = change.ref;
+          if (planRefsEqual(rebuildWorkflowState(branchOf(source)).active_plan_ref ?? null, ref)) {
+            return { status: "unchanged" };
+          }
+          // The classified strict-append distinguishes a PROVEN refusal-before-effect (the
+          // append threw and the rebuilt field never changed — `rejected`) from a read-back
+          // miss (`unverified`: an append may have landed unproven); its report() path stays
+          // the loudness channel. `ClassifiedAppend` IS the seam's change vocabulary.
+          return appendWorkflowStateClassified(sink, source, {
+            data: { active_plan_ref: ref },
+            field: "active_plan_ref",
+            expected: ref,
+            scope: "plan-save",
+            failure: `plan-ref read-back failed for ${ref.provider}:${ref.pr_id}`,
+            equals: planRefsEqual,
+          });
         }
-      },
-      writeArtifact(name: string, content: string): WriteArtifactResult {
-        const result = writeSessionArtifactClassified(sink, source, name, content);
-        switch (result.status) {
-          case "applied":
-            return { status: "applied", pointer: result.pointer };
-          case "unchanged":
-            return { status: "unchanged", pointer: result.pointer };
-          case "unverified":
-            return { status: "unverified", problem: result.problem };
-          case "rejected":
-            return { status: "rejected", problem: result.problem };
+        case "clear-node-claim": {
+          const claim = change.claim;
+          // Never clobber an unrelated claim: clear only when the LIVE claim matches BOTH
+          // fields (same-node/different-objective stays untouched).
+          if (!nodeClaimsEqual(readNodeClaim(source), claim)) return { status: "unchanged" };
+          return appendWorkflowStateClassified(sink, source, {
+            data: { objective_node_claim: null },
+            field: "objective_node_claim",
+            expected: null,
+            scope: "plan-save",
+            failure: `objective_node_claim clear read-back failed for node ${claim.node}`,
+            equals: nodeClaimsEqual,
+          });
         }
-      },
+      }
     },
   };
 }

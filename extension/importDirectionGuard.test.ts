@@ -28,14 +28,16 @@
 //      `.ts` anchor in the scanned corpus — the activation ratchet that forces every future
 //      home through this guard.
 //   D. Features never import Pi or the RPC wire: `PI_FREE_HOMES` (`authoring/`, `session/`)
-//      carry no `@earendil-works/*` specifier, no edge to `waves/rpcAdapter.ts`, and no edge
+//      carry no `@earendil-works/*` specifier, no edge to `waves/rpcAdapter.ts`, no edge
 //      into `surfaces/` (the report shape these homes need is re-exported through
-//      `substrate/sessionData.ts`, so a surfaces edge is never necessary). This is a
-//      DIRECT-SPECIFIER ban (type-only edges count): it cannot catch Pi vocabulary arriving
-//      through a local re-export, and NO re-export seam is sanctioned for these homes — the
-//      sanctioned `surfaces/surfaces.ts` re-export pattern serves the feature-policy homes
-//      (e.g. `factories/planMode.ts`), never the pure ones; adding a seam is a reviewed edit to
-//      this rule, not a loophole. The known-anchor floor: the rule must visit ≥1 file per home.
+//      `substrate/sessionData.ts`, so a surfaces edge is never necessary), and no edge into
+//      `pi/` (the module-contracts law: the adapter imports the feature, never the reverse).
+//      This is a DIRECT-SPECIFIER ban (type-only edges count): it cannot catch Pi vocabulary
+//      arriving through a local re-export, and NO re-export seam is sanctioned for these
+//      homes — the sanctioned `surfaces/surfaces.ts` re-export pattern serves the
+//      feature-policy homes (e.g. `pi/v1/plan.ts`), never the pure ones; adding a seam is a
+//      reviewed edit to this rule, not a loophole. The known-anchor floor: the rule must
+//      visit ≥1 file per home.
 //   E. Pi registration only in approved adapter/composition files: every production file whose
 //      source carries a registration token (`pi.registerTool(` / `pi.registerCommand(` /
 //      `pi.registerFlag(` / `pi.registerShortcut(` / `pi.registerEntryRenderer(` / `pi.on(` /
@@ -63,12 +65,12 @@ import path from "node:path";
 import { test } from "node:test";
 import ts from "typescript";
 
-// Removed by Node 4.1 (the plan-review feature slice). Its closing edge is type-only
-// (`import type { ReviewOutcome }`), so this entry's stale arm doubles as a live positive control
-// that type-only extraction works: if type edges were dropped, the entry would match nothing.
-const KNOWN_CYCLES: string[][] = [
-  ["adapters/planAdapterPlannotator.ts", "factories/planReview.ts"],
-];
+// EMPTY — and ratcheted (shrink-only): the last entry (`adapters/planAdapterPlannotator.ts ⇄
+// factories/planReview.ts`) died when the plan flow migrated to `authoring/plan/` + `pi/v1/`
+// (the review-outcome vocabulary now lives in the leaf `pi/v1/review.ts`). Any future entry
+// requires operator confirmation and names the node that owns its removal. Type-only edge
+// extraction keeps its own live positive control in control 1.
+const KNOWN_CYCLES: string[][] = [];
 
 /**
  * The stable-mechanism homes (Rule B sources) — current (`substrate/`, `waves/`, `worker/`) and
@@ -107,7 +109,6 @@ const MECHANISM_EDGE_ALLOWLIST: Array<{ from: string; to: string }> = [];
 // standing rule ("every directory-creating slice adds or refreshes a known-anchor assertion"),
 // as structure.
 const KNOWN_TOP_LEVEL_DIRS = [
-  "adapters",
   "doors",
   "factories",
   "hunkFeedback",
@@ -153,8 +154,6 @@ const APPROVED_REGISTRAR_FILES = ["index.ts", "workerMain.ts"];
 // join it (new registrations go under `pi/`). The three deleted gist factories left the census
 // in the activating change itself — the first burn-down.
 const LEGACY_REGISTRANTS = [
-  "adapters/planAdapterPlannotator.ts",
-  "adapters/planAdapterTombell.ts",
   "doors/address.ts",
   "doors/annotationPush.ts",
   "doors/auditWaveTools.ts",
@@ -180,16 +179,11 @@ const LEGACY_REGISTRANTS = [
   "doors/stackReviewBrowser.ts",
   "doors/submit.ts",
   "doors/submitPrReview.ts",
-  "factories/implementHere.ts",
   "factories/objective.ts",
   "factories/objectiveAuthor.ts",
   "factories/objectiveDraft.ts",
   "factories/objectivePlan.ts",
   "factories/objectiveSave.ts",
-  "factories/planDraft.ts",
-  "factories/planMode.ts",
-  "factories/planReview.ts",
-  "factories/planSave.ts",
   "substrate/agentScratch.ts",
   "substrate/bindingDelivery.ts",
   "substrate/command.ts",
@@ -368,6 +362,10 @@ function checkFeaturePurity(
         violations.push(`${file}: "${spec}" → ${resolved} (RPC wire)`);
       } else if (resolved.startsWith("surfaces/")) {
         violations.push(`${file}: "${spec}" → ${resolved} (surfaces seam)`);
+      } else if (resolved.startsWith("pi/")) {
+        // The module-contracts law: features never import Pi adapters — the adapter imports
+        // the feature, injecting Pi-shaped dependencies through ports.
+        violations.push(`${file}: "${spec}" → ${resolved} (Pi adapter home)`);
       }
     }
   }
@@ -617,12 +615,14 @@ test("Rule E: Pi registration only in approved adapter/composition files (frozen
     APPROVED_REGISTRAR_FILES,
     LEGACY_REGISTRANTS,
   );
-  // Positive extraction proof: the scan must SEE the v1 installer's registrations — a token
+  // Positive extraction proof: the scan must SEE the v1 installers' registrations — a token
   // regex that stopped matching real registrations would otherwise pass vacuously.
-  assert.ok(
-    matched.includes("pi/v1/gist.ts"),
-    "the registration scan missed pi/v1/gist.ts — the token extraction is broken",
-  );
+  for (const installer of ["pi/v1/gist.ts", "pi/v1/plan.ts"]) {
+    assert.ok(
+      matched.includes(installer),
+      `the registration scan missed ${installer} — the token extraction is broken`,
+    );
+  }
   assert.deepEqual(
     violations,
     [],
@@ -692,11 +692,11 @@ test("control 1: corpus + edge-map floors and known anchors", () => {
     (edges.get("substrate/config.ts") ?? []).includes("substrate/bindings.ts"),
     "edge map missed the live runtime edge substrate/config.ts → substrate/bindings.ts",
   );
-  // Explicit type-extraction floor, independent of the Rule A stale arm: this live edge is a
-  // type-only import (`import type { ReviewOutcome }`).
+  // Explicit type-extraction floor: this live edge is a type-only import
+  // (`import type { ReviewOutcome }`) — if type edges were dropped, this would match nothing.
   assert.ok(
-    (edges.get("adapters/planAdapterPlannotator.ts") ?? []).includes("factories/planReview.ts"),
-    "edge map missed the live type-only edge adapters/planAdapterPlannotator.ts → factories/planReview.ts",
+    (edges.get("doors/plannotatorHandoff.ts") ?? []).includes("pi/v1/review.ts"),
+    "edge map missed the live type-only edge doors/plannotatorHandoff.ts → pi/v1/review.ts",
   );
 });
 
@@ -943,12 +943,20 @@ test("control 9: an extensionless relative import is reported, never a phantom-n
 });
 
 test("control 10: feature-purity fixtures (Pi specifier, RPC edge, surfaces edge, clean file, visit floor)", () => {
-  const corpus = ["authoring/x.ts", "session/y.ts", "authoring/clean.ts", "factories/allowed.ts"];
+  const corpus = [
+    "authoring/x.ts",
+    "session/y.ts",
+    "authoring/clean.ts",
+    "authoring/adapterEdge.ts",
+    "factories/allowed.ts",
+  ];
   const sources: Record<string, string> = {
     "authoring/x.ts": 'import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";',
     "session/y.ts":
       'import { call } from "../waves/rpcAdapter.ts";\nimport { report } from "../surfaces/report.ts";',
     "authoring/clean.ts": 'import { helper } from "../substrate/sessionData.ts";',
+    // The Rule-D pi/ arm: a feature importing the Pi adapter home must be caught.
+    "authoring/adapterEdge.ts": 'import { installPlanBindings } from "../pi/v1/plan.ts";',
     // Outside the Pi-free homes: a factories/ Pi import is Rule-D-invisible by design.
     "factories/allowed.ts": 'import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";',
   };
@@ -961,8 +969,9 @@ test("control 10: feature-purity fixtures (Pi specifier, RPC edge, surfaces edge
     'authoring/x.ts: "@earendil-works/pi-coding-agent" (direct Pi import)',
     'session/y.ts: "../waves/rpcAdapter.ts" → waves/rpcAdapter.ts (RPC wire)',
     'session/y.ts: "../surfaces/report.ts" → surfaces/report.ts (surfaces seam)',
+    'authoring/adapterEdge.ts: "../pi/v1/plan.ts" → pi/v1/plan.ts (Pi adapter home)',
   ]);
-  assert.equal(visited.get("authoring/"), 2, "both authoring/ files visited");
+  assert.equal(visited.get("authoring/"), 3, "all three authoring/ files visited");
   assert.equal(visited.get("session/"), 1, "the session/ file visited");
   const empty = checkFeaturePurity(
     ["factories/allowed.ts"],

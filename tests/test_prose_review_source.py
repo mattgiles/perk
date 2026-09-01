@@ -720,7 +720,7 @@ def test_project_source_uses_supplied_text_for_every_family_without_canonical_re
     assert python_source.before + python_source.focus + python_source.after == python_text
 
     typescript_text = (
-        (ROOT / "extension/factories/planReview.ts")
+        (ROOT / "extension/pi/v1/plan.ts")
         .read_text(encoding="utf-8")
         .replace("Present the plan", "Present the browser-edited plan", 1)
     )
@@ -1518,7 +1518,7 @@ def test_every_real_typescript_fragment_is_batch_covered_through_the_python_adap
             selectors.append(routed_fragment.fragment.selector)
             total += 1
 
-    assert total == 289
+    assert total == 293
     adapter = _typescript_adapter()
     for relative, selectors in selectors_by_path.items():
         text = (ROOT / relative).read_text(encoding="utf-8")

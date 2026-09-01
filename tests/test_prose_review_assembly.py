@@ -807,14 +807,18 @@ def test_real_plan_authoring_renders_all_six_authored_layers(
     assert skill.content_kind == "raw-source"
     assert skill.parts[0].text == (ROOT / "skills/perk-plan/SKILL.md").read_text(encoding="utf-8")
 
-    # plan_draft's promptGuidelines is an indirect identifier in the current source: the
-    # whole authored layer is one typed failure while every sibling stays rendered.
-    assert isinstance(draft, FailedAssemblyLayer)
-    assert [
-        (problem.reason, problem.fragment and problem.fragment.id) for problem in draft.problems
-    ] == [
-        ("unsupported-source-shape", "promptGuidelines"),
-    ]
+    # Every registration prose unit is a literal in-place value in the installer source (the
+    # workbench-editable shape), so BOTH optional tool layers render as ordered fragments.
+    assert isinstance(draft, RenderedOwnedLayer)
+    assert draft.content_kind == "source-fragments"
+    draft_unit = real_snapshot.get_unit("typescript-tool:plan_draft")
+    assert draft_unit is not None
+    assert [part.fragment for part in draft.parts] == list(draft_unit.candidate.fragments)
+    assert len(draft.parts) == 5
+    draft_source = (ROOT / draft_unit.candidate.path).read_text(encoding="utf-8")
+    for part in draft.parts:
+        assert part.text
+        assert part.text in draft_source
 
     assert isinstance(review, RenderedOwnedLayer)
     assert review.content_kind == "source-fragments"

@@ -40,14 +40,15 @@
 //    collectable (the wave module's timeout is the orphan insurance).
 
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { hasDirectEditsHeading } from "../adapters/planAdapterPlannotator.ts";
 import {
   OBJECTIVE_DRAFT_ARTIFACT,
   readObjectiveDraft,
   renderObjectiveDraft,
 } from "../factories/objectiveDraft.ts";
 import { objectiveApprovalSave } from "../factories/objectiveSave.ts";
-import { approvedObjectiveSaveResult, type ReviewOutcome } from "../factories/planReview.ts";
+import { approvedObjectiveSaveResult } from "../pi/v1/objectiveReview.ts";
+import { hasDirectEditsHeading } from "../pi/v1/providers/plannotator.ts";
+import type { ReviewOutcome } from "../pi/v1/review.ts";
 import { bindingSuffix } from "../substrate/bindingDelivery.ts";
 import { registerPerkCommand } from "../substrate/command.ts";
 import { interceptConsoleError } from "../substrate/consoleCapture.ts";

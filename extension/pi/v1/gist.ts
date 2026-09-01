@@ -8,8 +8,8 @@
 //
 // Provider vocabulary is translated AT the adapter: plannotator's `# Direct Edits` feedback
 // convention becomes the feature's `approvedDirectEdits` variant here, and the first-party editor review
-// runs through `factories/planReview.ts`'s exported subject machinery (a one-directional
-// `pi/v1 → factories` import; the arm is injected into `registerPlanReview`, so no cycle).
+// runs through the shared review-surface machinery (`pi/v1/review.ts` — the leaf every review
+// arm composes; the review door's stage dispatcher imports this module's arm directly).
 //
 // The gist-authoring injection dedups on the COMPACTION-ACTIVE window
 // (`branchCarries(activeContextWindow(branch), marker)` — the bindingDelivery composition): a
@@ -17,10 +17,6 @@
 // on the next turn even though the historical entry still sits on the branch.
 
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import {
-  hasDirectEditsHeading,
-  isPlannotatorPlanSelected,
-} from "../../adapters/planAdapterPlannotator.ts";
 import {
   GIST_AUTHOR_STAGE,
   GIST_DRAFT_ARTIFACT,
@@ -47,16 +43,6 @@ import {
   type SaveGistOutcome,
   saveGist,
 } from "../../authoring/gist/save.ts";
-import {
-  approvedSubjectSaveResult,
-  type ReviewOutcome,
-  type ReviewSubject,
-  runFirstPartyReview,
-  skipResult,
-  subjectReviewOutcomeResult,
-  type ToolResult,
-  verdictsFor,
-} from "../../factories/planReview.ts";
 import { openBranchWorkflowSession } from "../../session/branchWorkflowSession.ts";
 import type { WorkflowSession } from "../../session/workflowSession.ts";
 import { bindingSuffix } from "../../substrate/bindingDelivery.ts";
@@ -81,6 +67,18 @@ import {
   rebuildWorkflowState,
 } from "../../substrate/workflowState.ts";
 import { report, type Severity } from "../../surfaces/report.ts";
+import { hasDirectEditsHeading } from "./providers/plannotator.ts";
+import { isPlannotatorPlanSelected } from "./providers/selection.ts";
+import {
+  approvedSubjectSaveResult,
+  type ReviewOutcome,
+  type ReviewSubject,
+  runFirstPartyReview,
+  skipResult,
+  subjectReviewOutcomeResult,
+  type ToolResult,
+  verdictsFor,
+} from "./review.ts";
 
 // ------------------------------------------------------------------- the tool-boundary decode
 
@@ -201,10 +199,9 @@ function gistSaveResultOf(ctx: ExtensionContext, save: SaveGistOutcome): GistSav
 
 // ------------------------------------------------------------------------- adapter plumbing
 
-/** Open the branch-backed session; `null` when the context carries no run identity. */
-function openSession(pi: ExtensionAPI, ctx: ExtensionContext): WorkflowSession | null {
-  const opened = openBranchWorkflowSession(pi, ctx);
-  return opened.status === "opened" ? opened.session : null;
+/** Open the branch-backed session (always opens; `runId: null` is the identity-less arm). */
+function openSession(pi: ExtensionAPI, ctx: ExtensionContext): WorkflowSession {
+  return openBranchWorkflowSession(pi, ctx);
 }
 
 /** The narrow gate slice the feature releases (D1a: exit only after a verified save). */
@@ -399,7 +396,7 @@ export function installGistBindings(pi: ExtensionAPI, gating: ToolGating): void 
       }
       const save = await saveGist(decoded, {
         backend: coldDoorGistBackend(pi, ctx),
-        runId: openSession(pi, ctx)?.runId ?? null,
+        runId: openSession(pi, ctx).runId,
       });
       return gistSaveResultOf(ctx, save);
     },
@@ -415,20 +412,20 @@ export function installGistBindings(pi: ExtensionAPI, gating: ToolGating): void 
       // gate exit lives in the seam). The legacy drive-the-session behavior is kept as the
       // NO-DRAFT fallback — gists have no transcript scrape by design, so a draftless session
       // still needs a working save path.
+      // The session always opens (identity-optional): an identity-less session reads the
+      // draft `absent` → the no-draft fallback below, exactly the old open-absent branch.
       const session = openSession(pi, ctx);
-      if (session !== null) {
-        const outcome = await gistApprovalSave(
-          { session, backend: coldDoorGistBackend(pi, ctx), gate: gateFor(gating, ctx) },
-          { title },
-        );
-        if (outcome.status !== "no-draft") {
-          // Saved or save-failed: relay the save message (which carries the consumption hint).
-          const result = gistSaveResultOf(ctx, outcome.save);
-          const message = result.content[0]?.text ?? "gist-save done";
-          const severity: Severity = result.details.ok ? "info" : "error";
-          report(ctx, "gist-save", severity, message);
-          return;
-        }
+      const outcome = await gistApprovalSave(
+        { session, backend: coldDoorGistBackend(pi, ctx), gate: gateFor(gating, ctx) },
+        { title },
+      );
+      if (outcome.status !== "no-draft") {
+        // Saved or save-failed: relay the save message (which carries the consumption hint).
+        const result = gistSaveResultOf(ctx, outcome.save);
+        const message = result.content[0]?.text ?? "gist-save done";
+        const severity: Severity = result.details.ok ? "info" : "error";
+        report(ctx, "gist-save", severity, message);
+        return;
       }
       // Exit the read-only gate so the gist_save tool (excluded from READ_ONLY_TOOLS) becomes
       // reachable on the driven turn, then drive the turn (mirrors /objective-save).
@@ -574,8 +571,9 @@ export async function runGistReviewV1(
   // Headless → soft skip (fail-open; never wedges CI/supervisor runs on an interactive UI).
   if (!ctx.hasUI) return skipResult();
   const sig = signal ?? ctx.signal;
+  // The session always opens (identity-optional): an identity-less session reads the draft
+  // `absent`, so `reviewGist` classifies `noDraft` — the same rendered redirect as before.
   const session = openSession(pi, ctx);
-  if (session === null) return noGistDraftResult();
   const reviewer = isPlannotatorPlanSelected(ctx.cwd)
     ? plannotatorGistReviewer(bridge)
     : firstPartyGistReviewer(ctx);

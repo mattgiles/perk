@@ -45,9 +45,7 @@ function fakeGate(active: boolean): GistGate & { exits: number } {
 }
 
 function memorySession(runId = "RID"): MemoryWorkflowSession {
-  const opened = openMemoryWorkflowSession({ runId });
-  if (opened.status !== "opened") throw new Error("unreachable");
-  return opened.session;
+  return openMemoryWorkflowSession({ runId });
 }
 
 // --- saveGist --------------------------------------------------------------------------------------

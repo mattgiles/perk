@@ -77,7 +77,7 @@ def test_tool_query_matches_unit_id_and_tool_name(index: tuple[SearchEntry, ...]
 
 
 def test_path_query_matches_source_path(index: tuple[SearchEntry, ...]) -> None:
-    results = search(index, "factories/planReview.ts")
+    results = search(index, "pi/v1/plan.ts")
     hits = _unit_hits(results.hits, "typescript-tool:plan_review")
     assert len(hits) == 1
     assert hits[0].matched == ("source-path",)

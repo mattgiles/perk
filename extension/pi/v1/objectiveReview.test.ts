@@ -1,29 +1,30 @@
-// Split from planReview.test.ts: the objective review arm plus the
-// objectiveReviewOutcomeResult / approvedObjectiveSaveResult pure mappers. A sibling
-// file so Node's --test cross-file parallelism runs it as its own child process.
+// The objective review arm plus the objectiveReviewOutcomeResult / approvedObjectiveSaveResult
+// pure mappers (relocated intact with the arm's stable pi/v1 home). A sibling file so Node's
+// --test cross-file parallelism runs it as its own child process.
 
 import assert from "node:assert/strict";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { type SessionDataCtx, writeSessionArtifact } from "../substrate/sessionData.ts";
-import type { ToolGating } from "../substrate/toolGating.ts";
-import type { EntrySink } from "../substrate/workflowState.ts";
-import { WORKFLOW_STATE_TYPE } from "../substrate/workflowState.ts";
-import type { ReportTarget } from "../surfaces/report.ts";
-import { scaffoldRepo } from "../testing/harness.ts";
-import { OBJECTIVE_DRAFT_ARTIFACT } from "./objectiveDraft.ts";
-import type { ObjectiveApprovalSaveOutcome, ObjectiveSaveResult } from "./objectiveSave.ts";
+import { OBJECTIVE_DRAFT_ARTIFACT } from "../../factories/objectiveDraft.ts";
+import type {
+  ObjectiveApprovalSaveOutcome,
+  ObjectiveSaveResult,
+} from "../../factories/objectiveSave.ts";
+import { type SessionDataCtx, writeSessionArtifact } from "../../substrate/sessionData.ts";
+import type { ToolGating } from "../../substrate/toolGating.ts";
+import { type EntrySink, WORKFLOW_STATE_TYPE } from "../../substrate/workflowState.ts";
+import type { ReportTarget } from "../../surfaces/report.ts";
+import { scaffoldRepo } from "../../testing/harness.ts";
 import {
   approvedObjectiveSaveResult,
   executeObjectiveReview,
-  executePlanReview,
-  type GistReviewArm,
   objectiveReviewOutcomeResult,
-  type PlanReviewUI,
-  type ReviewOutcome,
-} from "./planReview.ts";
+} from "./objectiveReview.ts";
+import { planSaveDepsFor } from "./plan.ts";
+import { executePlanReview, type PlanReviewV1Deps } from "./planReview.ts";
+import type { PlanReviewUI, ReviewOutcome } from "./review.ts";
 
 function selectPlanProvider(cwd: string, id: string): void {
   mkdirSync(join(cwd, ".perk"), { recursive: true });
@@ -32,10 +33,14 @@ function selectPlanProvider(cwd: string, id: string): void {
 
 // ------------------------------------------------------------------------------ shared fakes
 
-/** The injected gist arm — throws on invocation: these tests never run the gist stage. */
-const noGistArm: GistReviewArm = async () => {
-  throw new Error("the gist arm must not be invoked outside the gist stage");
-};
+/**
+ * The plan-arm deps bag the dispatcher signature requires — these tests never reach the plan
+ * arm (every case routes to the objective arm or the decode skip), so the production
+ * composition over the fakes satisfies dispatch without ever being exercised.
+ */
+function stubDeps(pi: ExtensionAPI, ctx: SessionDataCtx & ReportTarget): PlanReviewV1Deps {
+  return planSaveDepsFor(pi, ctx as unknown as ExtensionContext, fakeGating(false));
+}
 
 const PLAN_JSON = JSON.stringify({
   success: true,
@@ -219,7 +224,7 @@ test("objective arm: no draft -> skipped/no_objective_draft, no backend invoked"
     ctx as unknown as ExtensionContext,
     fakeGating(true),
     bridge,
-    noGistArm,
+    stubDeps(pi, ctx),
     { plan: "# A plan param (never a source here)" },
   );
   const details = result.details as {
@@ -254,7 +259,7 @@ test("objective-save stage: plan_review routes to the objective arm too (never t
     ctx as unknown as ExtensionContext,
     fakeGating(true),
     bridge,
-    noGistArm,
+    stubDeps(pi, ctx),
     { plan: "# A plan param (never a source here)" },
   );
   const details = result.details as { status?: string; reason?: string };
@@ -277,7 +282,7 @@ test("objective arm: plannotator selected -> the bridge receives the RENDERED ma
     ctx as unknown as ExtensionContext,
     fakeGating(true),
     bridge,
-    noGistArm,
+    stubDeps(pi, ctx),
     {},
   );
   assert.equal(bridge.reviewed.length, 1, "the bridge reviewed once");
@@ -309,7 +314,7 @@ test("objective arm: default selection -> first-party VIEW-ONLY; approval auto-s
     ctx as unknown as ExtensionContext,
     gating,
     bridge,
-    noGistArm,
+    stubDeps(pi, ctx),
     {},
   );
   assert.equal(bridge.reviewed.length, 0, "the plannotator bridge was never invoked");
@@ -366,7 +371,7 @@ test("objective arm: approved but the cold door fails -> non-terminating, gate s
     ctx as unknown as ExtensionContext,
     gating,
     cannedBridge(DENIED),
-    noGistArm,
+    stubDeps(pi, ctx),
     {},
   );
   assert.equal(result.terminate, undefined, "a failed auto-save never terminates");
@@ -397,7 +402,7 @@ test("objective arm: approved via the plannotator bridge -> the same seam path s
     ctx as unknown as ExtensionContext,
     gating,
     bridge,
-    noGistArm,
+    stubDeps(pi, ctx),
     {},
   );
   assert.equal(bridge.reviewed.length, 1, "the bridge reviewed the RENDERED markdown");
@@ -428,7 +433,7 @@ test("objective arm: denied + feedback -> objective_draft redirect, no save", as
     ctx as unknown as ExtensionContext,
     fakeGating(true),
     cannedBridge(APPROVED),
-    noGistArm,
+    stubDeps(pi, ctx),
     {},
   );
   const text = String(result.content[0]?.text);
@@ -468,7 +473,7 @@ test("objective arm: mistyped plan param still -> bad_input (decode-first order 
     ctx as unknown as ExtensionContext,
     fakeGating(true),
     bridge,
-    noGistArm,
+    stubDeps(pi, ctx),
     { plan: 5 },
   );
   const details = result.details as {
@@ -651,7 +656,7 @@ test("objective arm: approved via the bridge + Direct Edits -> NO save, non-term
     ctx as unknown as ExtensionContext,
     gating,
     bridge,
-    noGistArm,
+    stubDeps(pi, ctx),
     {},
   );
   assert.equal(bridge.reviewed.length, 1, "the bridge reviewed the rendered draft");
@@ -695,7 +700,7 @@ test("objective arm: approved via the bridge + a heading-only broken section sti
       reviewId: "rev-ode2",
       feedback: "# Direct Edits\n\nthe fence never arrived",
     }),
-    noGistArm,
+    stubDeps(pi, ctx),
     {},
   );
   assert.equal(argvs.length, 0, "no save");

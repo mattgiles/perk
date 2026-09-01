@@ -375,6 +375,35 @@ the session lifecycle required by each new caller.
 
 ### Changes
 
+> **Status (Objective #2083, Node 4.1):** the plan flow (items 1–2) landed as one slice —
+> `extension/authoring/plan/{draft,source,save,review,prose}.ts` (Pi-free feature ops) +
+> `extension/pi/v1/{plan,planReview,planTitle,review,objectiveReview}.ts` and
+> `extension/pi/v1/providers/{selection,plannotator,tombell}.ts` (named installers + provider
+> adapters + the shared review-surface machinery); `factories/plan*.ts`,
+> `factories/implementHere.ts`, and the whole `adapters/` directory were deleted with the slice.
+> Realized-shape notes against this spec:
+>
+> - **The session grew `apply(WorkflowChange)` WITHOUT snapshot payloads** on the
+>   `applied`/`unchanged` arms (nothing consumes them — narrow until proven), a closed
+>   2-variant union (`link-plan-ref`, `clear-node-claim`) plus the `nodeClaim()` read; identity
+>   became optional (`runId: string | null`, the open-result union deleted) because the
+>   identity-less save legally links `active_plan_ref` on branch-backed appends.
+> - **`pi/v1/objectiveReview.ts` is the objective review arm's stable adapter home** (relocated
+>   intact ahead of items 3–5; it still imports the objective feature modules from
+>   `factories/` — the sanctioned pi/v1 → factories direction until node 4.2).
+> - **Replanning migrated by construction** — `perk plan replan` launches an ordinary
+>   `stage: plan` session; no replan-specific TS path exists.
+> - **Five declared interior deltas** (test-pinned, contracts amended same-turn): plan-owned
+>   injections dedup over the compaction-active window; dead exports deleted
+>   (`isPlanModeActive`, `isPerkPlanReferenceSelected`); claim-clear matches the full claim
+>   identity (objective + node); plannotator bridge payload narrowing + emit-throw containment;
+>   `extractPlanMarkdown` record-guard narrowing (fail-open null, never a throw).
+> - **Registration prose stays inline at the `pi/v1/plan.ts` registration sites** (not
+>   `prose.ts` constants): the prose-review workbench's TypeScript source adapter needs literal
+>   in-place arrays (identifier indirection is an unsupported source shape), and the
+>   `/implement-here` handler body lives in `planReview.ts` so the installer file stays fully
+>   fragment-resolvable (the workbench's editable exemplar).
+
 Migrate in this order unless refreshed dependency evidence changes the graph:
 
 1. plan authoring and replanning;

@@ -186,7 +186,7 @@ read-only tools.
 
 ## Registration-time `process.cwd()` config reads make harness tests host-repo-sensitive
 
-`registerPlanMode` (and any seam reading committed config at factory/registration time) resolves
+`installPlanMode` (and any seam reading committed config at factory/registration time) resolves
 from `process.cwd()`, **not** the harness `cwd` option. Dogfooding config commits to the perk repo
 itself (e.g. `[providers] plan = "plannotator-plan"` in `.pi/perk.toml`) then silently vacate
 flags/commands inside test runs — the host repo's committed config leaks into the suite.

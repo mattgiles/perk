@@ -34,7 +34,7 @@ const RESULTS: SearchResults = {
       unit: {
         id: "typescript-tool:plan_review",
         kind: "typescript-tool",
-        path: "extension/factories/planReview.ts",
+        path: "extension/pi/v1/plan.ts",
       },
       matched: ["unit-id", "source-path", "tool-name"],
     },

@@ -118,7 +118,7 @@ exactly one authoring context present.
 
 ## Cross-references
 
-- `extension/factories/planMode.ts`, `extension/factories/objectiveAuthor.ts` — the two read-only authoring injectors
+- `extension/pi/v1/plan.ts` (plan mode), `extension/factories/objectiveAuthor.ts` — the two read-only authoring injectors
 - `extension/substrate/bindingDelivery.ts` — the narrowest strip (own custom type only)
 - `extension/substrate/workflowState.ts` — `branchCarries` plus the compaction-aware `activeContextWindow`
 - `docs/learned/pi/extension-api.md` — the every-call `context` event + injected-message persistence

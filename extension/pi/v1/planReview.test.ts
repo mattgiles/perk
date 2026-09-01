@@ -1,13 +1,13 @@
-// The backend-neutral `plan_review` review door: the tool-boundary soft skips
-// (bad_input / objective-author / headless / no_plan), the file-first resolution (artifact →
-// param, NEVER transcript), the backend DISPATCH (plannotator-selected → the event-bus bridge;
-// ANY other selection → the first-party in-TUI editor review), the first-party flow (display →
-// optional edit write-back via writePlanDraft → approve/deny/skip verdict → deny-feedback
-// editor; Esc anywhere = fail-open skip), the approved→approvalSave arm (either backend), and
-// the pure mappers. Fully offline: a fake UI drives the first-party dialogs, a recording bridge
-// stands in for plannotator, and a fake pi returns the canned cold-door payload (the
-// planSave.test.ts recipe; scaffoldRepo for provider selection — planAdapterPlannotator.test.ts's
-// scaffold recipe). See planReview.ts.
+// The backend-neutral `plan_review` review door: the tool-boundary soft skips (bad_input /
+// headless / no_plan), the file-first resolution (artifact → param, NEVER transcript), the
+// backend DISPATCH (plannotator-selected → the event-bus bridge; ANY other selection → the
+// first-party in-TUI editor review), the first-party flow (display → optional edit write-back
+// via the session seam → approve/deny/skip verdict → deny-feedback editor; Esc anywhere =
+// fail-open skip), the approved→save arm (either backend), the plannotator Direct-Edits arms,
+// the launch chooser, the gist/objective stage routing, and the plan-flavor mappers. Fully
+// offline: a fake UI drives the first-party dialogs, a recording bridge stands in for
+// plannotator, and a fake pi returns the canned cold-door payload — the deps bag is the REAL
+// production composition (`planSaveDepsFor`) over those fakes. See planReview.ts.
 
 import assert from "node:assert/strict";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
@@ -15,31 +15,29 @@ import { join } from "node:path";
 import { test } from "node:test";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
-import { GIST_DRAFT_ARTIFACT } from "../authoring/gist/draft.ts";
+import { GIST_DRAFT_ARTIFACT } from "../../authoring/gist/draft.ts";
+import { PLAN_DRAFT_ARTIFACT } from "../../authoring/plan/draft.ts";
+import { PLANNOTATOR_REVIEW_COMMAND } from "../../doors/plannotatorHandoff.ts";
+import { OBJECTIVE_DRAFT_ARTIFACT } from "../../factories/objectiveDraft.ts";
 import {
   readSessionArtifact,
   type SessionDataCtx,
   writeSessionArtifact,
-} from "../substrate/sessionData.ts";
-import type { ToolGating } from "../substrate/toolGating.ts";
-import type { EntrySink } from "../substrate/workflowState.ts";
-import { WORKFLOW_STATE_TYPE } from "../substrate/workflowState.ts";
-import type { ReportTarget } from "../surfaces/report.ts";
-import { loadPerkSession, scaffoldRepo } from "../testing/harness.ts";
-import { OBJECTIVE_DRAFT_ARTIFACT } from "./objectiveDraft.ts";
-import { PLAN_DRAFT_ARTIFACT } from "./planDraft.ts";
+} from "../../substrate/sessionData.ts";
+import type { ToolGating } from "../../substrate/toolGating.ts";
+import { type EntrySink, WORKFLOW_STATE_TYPE } from "../../substrate/workflowState.ts";
+import type { ReportTarget } from "../../surfaces/report.ts";
+import { loadPerkSession, scaffoldRepo } from "../../testing/harness.ts";
+import { executeObjectiveReview } from "./objectiveReview.ts";
+import { installPlanBindings, planSaveDepsFor } from "./plan.ts";
 import {
   applyPlannotatorDirectEdits,
-  chooseReviewLaunch,
-  executeObjectiveReview,
+  approvedSaveResult,
   executePlanReview,
-  type GistReviewArm,
-  type PlanReviewUI,
-  type ReviewLaunchUI,
-  type ReviewOutcome,
-  registerPlanReview,
-  type WaveLaunch,
+  type PlanReviewV1Deps,
+  reviewOutcomeResult,
 } from "./planReview.ts";
+import type { PlanReviewUI, ReviewLaunchUI, ReviewOutcome, WaveLaunch } from "./review.ts";
 
 function selectPlanProvider(cwd: string, id: string): void {
   mkdirSync(join(cwd, ".perk"), { recursive: true });
@@ -47,11 +45,6 @@ function selectPlanProvider(cwd: string, id: string): void {
 }
 
 // ------------------------------------------------------------------------------ shared fakes
-
-/** The injected gist arm — throws on invocation: these tests never run the gist stage. */
-const noGistArm: GistReviewArm = async () => {
-  throw new Error("the gist arm must not be invoked outside the gist stage");
-};
 
 const PLAN_JSON = JSON.stringify({
   success: true,
@@ -67,6 +60,12 @@ const PLAN_JSON = JSON.stringify({
   },
   cached: true,
   dry_run: false,
+});
+
+const FAIL_ENVELOPE = JSON.stringify({
+  success: false,
+  error_type: "github_error",
+  message: "gh exploded",
 });
 
 /** A recording bridge: captures the reviewed bytes, returns the canned outcome. */
@@ -112,6 +111,15 @@ function fakeColdDoorPi(
       return { stdout: opts.stdout, stderr: "", code: opts.code ?? 0, killed: false };
     },
   } as unknown as ExtensionAPI;
+}
+
+/** The production deps bag over the fakes — the ONE composition point, exercised as shipped. */
+function depsFor(
+  pi: ExtensionAPI,
+  ctx: SessionDataCtx & ReportTarget,
+  gating: ToolGating,
+): PlanReviewV1Deps {
+  return planSaveDepsFor(pi, ctx as unknown as ExtensionContext, gating);
 }
 
 /** A recording first-party UI: scripted editor/select/input answers, captured prompts + opts. */
@@ -175,6 +183,22 @@ function fakeSink(branch: unknown[]): EntrySink {
 
 function stateEntry(data: Record<string, unknown>): unknown {
   return { type: "custom", customType: WORKFLOW_STATE_TYPE, data };
+}
+
+function assistantEntry(text: string): unknown {
+  return { type: "message", message: { role: "assistant", content: text } };
+}
+
+/** Run `fn` with PERK_NO_LLM pinned on (deterministic: no title generation path). */
+async function withNoLlm(fn: () => Promise<void>): Promise<void> {
+  const prev = process.env.PERK_NO_LLM;
+  process.env.PERK_NO_LLM = "1";
+  try {
+    await fn();
+  } finally {
+    if (prev === undefined) delete process.env.PERK_NO_LLM;
+    else process.env.PERK_NO_LLM = prev;
+  }
 }
 
 const APPROVED: ReviewOutcome = { status: "completed", approved: true, reviewId: "rev-a" };
@@ -281,6 +305,37 @@ test("plan_review: mistyped plan -> skipped with reason bad_input", async () => 
 
 // ------------------------------------------------------------ the backend dispatch (execute)
 
+test("execute: no draft + no param NEVER reviews the transcript -> skipped/no_plan", async () => {
+  const cwd = scaffoldRepo();
+  const branch: unknown[] = [stateEntry({ run_id: "RID" }), assistantEntry("# Scraped plan")];
+  const ui = fakeUI({});
+  const ctx = headfulCtx(cwd, branch, ui);
+  const bridge = cannedBridge(APPROVED);
+  const pi = fakeColdDoorPi(branch, { stdout: PLAN_JSON });
+  const gating = fakeGating(true);
+  const result = await executePlanReview(
+    pi,
+    ctx as unknown as ExtensionContext,
+    gating,
+    bridge,
+    depsFor(pi, ctx, gating),
+    {},
+  );
+  const details = result.details as {
+    ok?: boolean;
+    status?: string;
+    reason?: string;
+    error_type?: string;
+  };
+  assert.equal(details.status, "skipped");
+  assert.equal(details.reason, "no_plan");
+  assert.equal(details.ok, false);
+  assert.equal(details.error_type, "no_plan");
+  assert.equal(ui.editors.length, 0, "no first-party dialog opened");
+  assert.equal(bridge.reviewed.length, 0, "the bridge never reviewed the transcript");
+  assert.match(String(result.content[0]?.text), /plan_draft/);
+});
+
 test("dispatch: plannotator selected -> the bridge runs, the first-party UI is never invoked", async () => {
   const cwd = scaffoldRepo();
   selectPlanProvider(cwd, "plannotator-plan");
@@ -289,12 +344,13 @@ test("dispatch: plannotator selected -> the bridge runs, the first-party UI is n
   const ctx = headfulCtx(cwd, branch, ui);
   const bridge = cannedBridge(DENIED);
   const pi = fakeColdDoorPi(branch, { stdout: PLAN_JSON });
+  const gating = fakeGating(true);
   const result = await executePlanReview(
     pi,
     ctx as unknown as ExtensionContext,
-    fakeGating(true),
+    gating,
     bridge,
-    noGistArm,
+    depsFor(pi, ctx, gating),
     { plan: "# Param plan" },
   );
   assert.deepEqual(bridge.reviewed, ["# Param plan"], "the bridge reviewed the bytes");
@@ -314,12 +370,13 @@ test("dispatch: default perk-plan selection -> first-party runs with the draft b
   );
   const bridge = cannedBridge(APPROVED);
   const pi = fakeColdDoorPi(branch, { stdout: PLAN_JSON });
+  const gating = fakeGating(true);
   await executePlanReview(
     pi,
     ctx as unknown as ExtensionContext,
-    fakeGating(true),
+    gating,
     bridge,
-    noGistArm,
+    depsFor(pi, ctx, gating),
     {},
   );
   assert.equal(bridge.reviewed.length, 0, "the plannotator bridge was never invoked");
@@ -338,12 +395,13 @@ test("dispatch: a foreign non-plannotator selection (tombell) -> first-party run
   const ctx = headfulCtx(cwd, branch, ui);
   const bridge = cannedBridge(APPROVED);
   const pi = fakeColdDoorPi(branch, { stdout: PLAN_JSON });
+  const gating = fakeGating(true);
   const result = await executePlanReview(
     pi,
     ctx as unknown as ExtensionContext,
-    fakeGating(true),
+    gating,
     bridge,
-    noGistArm,
+    depsFor(pi, ctx, gating),
     { plan: "# Param plan" },
   );
   assert.equal(bridge.reviewed.length, 0, "the plannotator bridge was never invoked");
@@ -353,19 +411,478 @@ test("dispatch: a foreign non-plannotator selection (tombell) -> first-party run
   assert.equal(details.reason, "dismissed");
 });
 
-// ------------------------------------------- the plannotator Direct Edits arm (plan subject)
+// --------------------------------- the plannotator execute path (byte-stable)
 
-/** Run `fn` with PERK_NO_LLM pinned on (deterministic: no title generation path). */
-async function withNoLlm(fn: () => Promise<void>): Promise<void> {
-  const prev = process.env.PERK_NO_LLM;
-  process.env.PERK_NO_LLM = "1";
-  try {
-    await fn();
-  } finally {
-    if (prev === undefined) delete process.env.PERK_NO_LLM;
-    else process.env.PERK_NO_LLM = prev;
-  }
-}
+test("execute: the artifact wins over a differing param; the ignored param is flagged", async () => {
+  await withNoLlm(async () => {
+    const cwd = scaffoldRepo();
+    selectPlanProvider(cwd, "plannotator-plan");
+    const branch: unknown[] = [stateEntry({ run_id: "RID" })];
+    const ctx = headfulCtx(cwd, branch);
+    assert.ok(
+      writeSessionArtifact(fakeSink(branch), ctx, PLAN_DRAFT_ARTIFACT, "# The draft\n"),
+      "the draft artifact landed",
+    );
+    const bridge = cannedBridge(APPROVED);
+    const pi = fakeColdDoorPi(branch, { stdout: PLAN_JSON });
+    const gating = fakeGating(true);
+    const result = await executePlanReview(
+      pi,
+      ctx as unknown as ExtensionContext,
+      gating,
+      bridge,
+      depsFor(pi, ctx, gating),
+      { plan: "# A different param plan" },
+    );
+    assert.deepEqual(bridge.reviewed, ["# The draft\n"], "the artifact bytes were reviewed");
+    assert.match(String(result.content[0]?.text), /APPROVED/);
+    assert.match(
+      String(result.content[0]?.text),
+      /differing plan param ignored — the validated draft was reviewed and saved/,
+    );
+  });
+});
+
+test("execute: approved (bridge) -> auto-save runs, gate exits, result terminates", async () => {
+  await withNoLlm(async () => {
+    const cwd = scaffoldRepo();
+    selectPlanProvider(cwd, "plannotator-plan");
+    const branch: unknown[] = [stateEntry({ run_id: "RID", mode: "read-only" })];
+    const ctx = headfulCtx(cwd, branch);
+    assert.ok(
+      writeSessionArtifact(fakeSink(branch), ctx, PLAN_DRAFT_ARTIFACT, "# The draft\n"),
+      "the draft artifact landed",
+    );
+    const argvs: string[][] = [];
+    const pi = fakeColdDoorPi(branch, { stdout: PLAN_JSON, argvs });
+    const gating = fakeGating(true);
+    const result = await executePlanReview(
+      pi,
+      ctx as unknown as ExtensionContext,
+      gating,
+      cannedBridge(APPROVED),
+      depsFor(pi, ctx, gating),
+      {},
+    );
+    const argv = argvs[0] ?? [];
+    assert.deepEqual(
+      argv.slice(0, 2),
+      ["plan", "save"],
+      "the cold door ran the merged `perk plan save`",
+    );
+    assert.ok(argv.includes("--json"), "json mode");
+    assert.ok(argv.includes("--plan-file"), "the plan rode the stdin channel");
+    assert.equal(result.terminate, true, "a saved approval terminates the turn");
+    const details = result.details as {
+      ok?: boolean;
+      saved?: boolean;
+      gateExited?: boolean;
+      edited?: boolean;
+    };
+    assert.equal(details.ok, true);
+    assert.equal(details.saved, true);
+    assert.equal(details.gateExited, true);
+    assert.equal(details.edited, undefined, "no edited flag on the bridge path");
+    assert.equal(gating.exits, 1, "the gate was exited once (via the approval-save seam)");
+    assert.match(String(result.content[0]?.text), /Saved plan #42/);
+    assert.doesNotMatch(String(result.content[0]?.text), /human edits were written back/);
+  });
+});
+
+test("execute: approved but the save fails -> non-terminating, gate stays on, /plan-save failsafe", async () => {
+  await withNoLlm(async () => {
+    const cwd = scaffoldRepo();
+    selectPlanProvider(cwd, "plannotator-plan");
+    const branch: unknown[] = [stateEntry({ run_id: "RID", mode: "read-only" })];
+    const ctx = headfulCtx(cwd, branch);
+    assert.ok(
+      writeSessionArtifact(fakeSink(branch), ctx, PLAN_DRAFT_ARTIFACT, "# The draft\n"),
+      "the draft artifact landed",
+    );
+    const pi = fakeColdDoorPi(branch, { stdout: FAIL_ENVELOPE, code: 1 });
+    const gating = fakeGating(true);
+    const result = await executePlanReview(
+      pi,
+      ctx as unknown as ExtensionContext,
+      gating,
+      cannedBridge(APPROVED),
+      depsFor(pi, ctx, gating),
+      {},
+    );
+    assert.equal(result.terminate, undefined, "a failed auto-save never terminates");
+    const details = result.details as { ok?: boolean; saved?: boolean; error_type?: string };
+    assert.equal(details.ok, false);
+    assert.equal(details.error_type, "save_failed");
+    assert.equal(details.saved, false);
+    assert.equal(gating.exits, 0, "the gate stays on");
+    const text = String(result.content[0]?.text);
+    assert.match(text, /APPROVED/);
+    assert.match(text, /auto-save FAILED/);
+    assert.match(text, /gh exploded/);
+    assert.match(text, /\/plan-save/);
+  });
+});
+
+// ------------------------------------------- the first-party execute path (approve/deny/edit)
+
+test("first-party approve, no edits -> the approval save runs with the reviewed bytes, terminating", async () => {
+  await withNoLlm(async () => {
+    const cwd = scaffoldRepo();
+    const branch: unknown[] = [stateEntry({ run_id: "RID", mode: "read-only" })];
+    const ui = fakeUI({ editor: ["# The draft\n"], select: [APPROVE] });
+    const ctx = headfulCtx(cwd, branch, ui);
+    assert.ok(
+      writeSessionArtifact(fakeSink(branch), ctx, PLAN_DRAFT_ARTIFACT, "# The draft\n"),
+      "the draft artifact landed",
+    );
+    const argvs: string[][] = [];
+    const pi = fakeColdDoorPi(branch, { stdout: PLAN_JSON, argvs });
+    const gating = fakeGating(true);
+    const result = await executePlanReview(
+      pi,
+      ctx as unknown as ExtensionContext,
+      gating,
+      cannedBridge(DENIED),
+      depsFor(pi, ctx, gating),
+      {},
+    );
+    assert.equal(result.terminate, true, "a saved approval terminates the turn");
+    const details = result.details as {
+      ok?: boolean;
+      saved?: boolean;
+      gateExited?: boolean;
+      edited?: boolean;
+    };
+    assert.equal(details.ok, true);
+    assert.equal(details.saved, true);
+    assert.equal(details.gateExited, true);
+    assert.equal(details.edited, undefined, "no edit -> no edited flag");
+    assert.equal(gating.exits, 1);
+    const planFile = argvs[0]?.[argvs[0].indexOf("--plan-file") + 1];
+    assert.ok(planFile, "the plan rode the stdin channel");
+    assert.equal(
+      readFileSync(planFile, "utf8"),
+      "# The draft",
+      "the reviewed bytes were saved (savePlan trims)",
+    );
+    assert.doesNotMatch(String(result.content[0]?.text), /human edits were written back/);
+  });
+});
+
+test("first-party approve with edits -> write-back to the draft, edited bytes saved + flagged", async () => {
+  await withNoLlm(async () => {
+    const cwd = scaffoldRepo();
+    const branch: unknown[] = [stateEntry({ run_id: "RID", mode: "read-only" })];
+    const ui = fakeUI({ editor: ["# The draft, edited by the human\n"], select: [APPROVE] });
+    const ctx = headfulCtx(cwd, branch, ui);
+    const drafted = writeSessionArtifact(
+      fakeSink(branch),
+      ctx,
+      PLAN_DRAFT_ARTIFACT,
+      "# The draft\n",
+    );
+    assert.ok(drafted, "the draft artifact landed");
+    const argvs: string[][] = [];
+    const pi = fakeColdDoorPi(branch, { stdout: PLAN_JSON, argvs });
+    const gating = fakeGating(true);
+    const result = await executePlanReview(
+      pi,
+      ctx as unknown as ExtensionContext,
+      gating,
+      cannedBridge(DENIED),
+      depsFor(pi, ctx, gating),
+      {},
+    );
+    assert.equal(
+      readFileSync(drafted, "utf8"),
+      "# The draft, edited by the human\n",
+      "the edits were written back to the draft artifact BEFORE the verdict",
+    );
+    const planFile = argvs[0]?.[argvs[0].indexOf("--plan-file") + 1];
+    assert.ok(planFile, "the plan rode the stdin channel");
+    assert.equal(
+      readFileSync(planFile, "utf8"),
+      "# The draft, edited by the human",
+      "the approval save received the edited bytes (savePlan trims)",
+    );
+    const details = result.details as { ok?: boolean; edited?: boolean; saved?: boolean };
+    assert.equal(details.ok, true);
+    assert.equal(details.edited, true);
+    assert.equal(details.saved, true);
+    assert.match(
+      String(result.content[0]?.text),
+      /human edits were written back to the draft and saved/,
+    );
+  });
+});
+
+test("first-party: a failed edit write-back aborts the review fail-open, nothing saved", async () => {
+  // No run_id ⇒ the draft write rejects (no identity); the plan param is the reviewed source (no
+  // artifact needs a run_id to resolve), so the review reaches the editor — then the edit
+  // write-back fails and the review aborts BEFORE any verdict.
+  const cwd = scaffoldRepo();
+  const branch: unknown[] = [stateEntry({})];
+  const ui = fakeUI({ editor: ["# Edited\n"], select: [APPROVE] });
+  const ctx = headfulCtx(cwd, branch, ui);
+  const argvs: string[][] = [];
+  const pi = fakeColdDoorPi(branch, { stdout: PLAN_JSON, argvs });
+  const gating = fakeGating(true);
+  const result = await executePlanReview(
+    pi,
+    ctx as unknown as ExtensionContext,
+    gating,
+    cannedBridge(DENIED),
+    depsFor(pi, ctx, gating),
+    { plan: "# Param plan" },
+  );
+  const wbDetails = result.details as { ok?: boolean; status?: string; error_type?: string };
+  assert.equal(wbDetails.status, "unavailable");
+  assert.equal(wbDetails.ok, false);
+  assert.equal(wbDetails.error_type, "unavailable");
+  const text = String(result.content[0]?.text);
+  assert.match(text, /WARNING/);
+  assert.match(text, /could not write the edited draft back/);
+  assert.equal(ui.selects.length, 0, "the verdict prompt never opened");
+  assert.equal(argvs.length, 0, "the approval save was never called");
+});
+
+test("first-party deny + feedback -> DENIED text with the feedback + plan_draft redirect, no save", async () => {
+  const cwd = scaffoldRepo();
+  const branch: unknown[] = [stateEntry({ run_id: "RID" })];
+  const ui = fakeUI({
+    editor: ["# Param plan", "step 3 is underspecified"],
+    select: [DENY_OPT],
+  });
+  const ctx = headfulCtx(cwd, branch, ui);
+  const argvs: string[][] = [];
+  const pi = fakeColdDoorPi(branch, { stdout: PLAN_JSON, argvs });
+  const gating = fakeGating(true);
+  const result = await executePlanReview(
+    pi,
+    ctx as unknown as ExtensionContext,
+    gating,
+    cannedBridge(APPROVED),
+    depsFor(pi, ctx, gating),
+    { plan: "# Param plan" },
+  );
+  const text = String(result.content[0]?.text);
+  assert.match(text, /DENIED/);
+  assert.match(text, /rewrite the working draft with plan_draft/);
+  assert.match(text, /step 3 is underspecified/);
+  assert.equal((result.details as { ok?: boolean }).ok, true, "a deny is a successful review");
+  assert.equal(argvs.length, 0, "no save on a deny");
+  assert.equal(ui.editors[1]?.title.includes("Deny feedback"), true);
+});
+
+test("first-party: editor dismissed (Esc) -> skipped/dismissed, no verdict, no save", async () => {
+  const cwd = scaffoldRepo();
+  const branch: unknown[] = [stateEntry({ run_id: "RID" })];
+  const ui = fakeUI({ editor: [undefined] });
+  const ctx = headfulCtx(cwd, branch, ui);
+  const argvs: string[][] = [];
+  const pi = fakeColdDoorPi(branch, { stdout: PLAN_JSON, argvs });
+  const gating = fakeGating(true);
+  const result = await executePlanReview(
+    pi,
+    ctx as unknown as ExtensionContext,
+    gating,
+    cannedBridge(APPROVED),
+    depsFor(pi, ctx, gating),
+    { plan: "# Param plan" },
+  );
+  const details = result.details as { ok?: boolean; status?: string; reason?: string };
+  assert.equal(details.status, "skipped");
+  assert.equal(details.reason, "dismissed");
+  assert.equal(details.ok, true, "a dismissal is a sanctioned fail-open skip");
+  assert.match(String(result.content[0]?.text), /\/plan-save \(the manual failsafe\)/);
+  assert.equal(ui.selects.length, 0, "the verdict prompt never opened");
+  assert.equal(argvs.length, 0, "no save");
+});
+
+// ------------------------------------------- the first-party implement-here verdict (§8.23)
+
+test("first-party implement-here -> gate exited, NON-terminating guidance result, no save", async () => {
+  const cwd = scaffoldRepo();
+  const branch: unknown[] = [stateEntry({ run_id: "RID", mode: "read-only" })];
+  const ui = fakeUI({ editor: ["# The draft\n"], select: [IMPLEMENT_HERE] });
+  const ctx = headfulCtx(cwd, branch, ui);
+  assert.ok(
+    writeSessionArtifact(fakeSink(branch), ctx, PLAN_DRAFT_ARTIFACT, "# The draft\n"),
+    "the draft artifact landed",
+  );
+  const argvs: string[][] = [];
+  const pi = fakeColdDoorPi(branch, { stdout: PLAN_JSON, argvs });
+  const gating = fakeGating(true);
+  const result = await executePlanReview(
+    pi,
+    ctx as unknown as ExtensionContext,
+    gating,
+    cannedBridge(DENIED),
+    depsFor(pi, ctx, gating),
+    {},
+  );
+  assert.deepEqual(
+    ui.selects[0]?.options,
+    [APPROVE, IMPLEMENT_HERE, DENY_OPT, SKIP_OPT],
+    "the 4-option select, implement-here adjacent to approve",
+  );
+  assert.equal(result.terminate, undefined, "implement-here never terminates");
+  assert.equal(gating.exits, 1, "the gate exited via the implement-here seam");
+  assert.equal(argvs.length, 0, "NO save — no cold door invoked");
+  const details = result.details as Record<string, unknown>;
+  assert.equal(details.ok, true);
+  assert.equal(details.status, "implement-here");
+  assert.equal(details.saved, false);
+  assert.equal(details.gateExited, true);
+  assert.ok(details.reviewId, "a reviewId was minted");
+  assert.equal(details.edited, undefined, "no edit -> the edited key is absent");
+  const text = String(result.content[0]?.text);
+  assert.match(text, /IMPLEMENT HERE/);
+  assert.match(text, /Do NOT commit, branch, or push/);
+  assert.match(text, /\/plan-save can still create the canonical issue later/);
+  assert.doesNotMatch(text, /implement THESE final bytes/, "no inlined plan without edits");
+});
+
+test("first-party edited then implement-here -> the final reviewed bytes are inlined", async () => {
+  const cwd = scaffoldRepo();
+  const branch: unknown[] = [stateEntry({ run_id: "RID", mode: "read-only" })];
+  const ui = fakeUI({ editor: ["# The draft, edited by the human\n"], select: [IMPLEMENT_HERE] });
+  const ctx = headfulCtx(cwd, branch, ui);
+  const drafted = writeSessionArtifact(fakeSink(branch), ctx, PLAN_DRAFT_ARTIFACT, "# The draft\n");
+  assert.ok(drafted, "the draft artifact landed");
+  const pi = fakeColdDoorPi(branch, { stdout: PLAN_JSON });
+  const gating = fakeGating(true);
+  const result = await executePlanReview(
+    pi,
+    ctx as unknown as ExtensionContext,
+    gating,
+    cannedBridge(DENIED),
+    depsFor(pi, ctx, gating),
+    {},
+  );
+  assert.equal(
+    readFileSync(drafted, "utf8"),
+    "# The draft, edited by the human\n",
+    "the edits were still written back to the draft BEFORE the verdict",
+  );
+  const text = String(result.content[0]?.text);
+  assert.match(text, /The human edited the plan during review; implement THESE final bytes:/);
+  assert.match(text, /# The draft, edited by the human/);
+  assert.equal((result.details as { edited?: boolean }).edited, true);
+});
+
+test("first-party: a seeded node claim suppresses implement-here (the 3-option select)", async () => {
+  const cwd = scaffoldRepo();
+  const branch: unknown[] = [
+    stateEntry({
+      run_id: "RID",
+      mode: "read-only",
+      objective_node_claim: { objective: "115", node: "1.2" },
+    }),
+  ];
+  const ui = fakeUI({ editor: ["# The draft\n"], select: [SKIP_OPT] });
+  const ctx = headfulCtx(cwd, branch, ui);
+  assert.ok(
+    writeSessionArtifact(fakeSink(branch), ctx, PLAN_DRAFT_ARTIFACT, "# The draft\n"),
+    "the draft artifact landed",
+  );
+  const pi = fakeColdDoorPi(branch, { stdout: PLAN_JSON });
+  const gating = fakeGating(true);
+  await executePlanReview(
+    pi,
+    ctx as unknown as ExtensionContext,
+    gating,
+    cannedBridge(DENIED),
+    depsFor(pi, ctx, gating),
+    {},
+  );
+  assert.deepEqual(
+    ui.selects[0]?.options,
+    [APPROVE, DENY_OPT, SKIP_OPT],
+    "no implement-here option in an objective-node planning session",
+  );
+});
+
+test("first-party: the COLD-claim record suppresses implement-here too", async () => {
+  // The cold objective-plan claim (session_start persists objective_node_claim from the
+  // handoff's objective_id/node_id alongside run_id/mode/stage) reaches the same suppression:
+  // no 4th verdict in a cold factory session.
+  const cwd = scaffoldRepo();
+  const branch: unknown[] = [
+    stateEntry({
+      run_id: "01RID",
+      mode: "read-only",
+      stage: "objective-plan",
+      objective_node_claim: { objective: "7", node: "2.3" },
+    }),
+  ];
+  const ui = fakeUI({ editor: ["# The draft\n"], select: [SKIP_OPT] });
+  const ctx = headfulCtx(cwd, branch, ui);
+  assert.ok(
+    writeSessionArtifact(fakeSink(branch), ctx, PLAN_DRAFT_ARTIFACT, "# The draft\n"),
+    "the draft artifact landed",
+  );
+  const pi = fakeColdDoorPi(branch, { stdout: PLAN_JSON });
+  const gating = fakeGating(true);
+  await executePlanReview(
+    pi,
+    ctx as unknown as ExtensionContext,
+    gating,
+    cannedBridge(DENIED),
+    depsFor(pi, ctx, gating),
+    {},
+  );
+  assert.deepEqual(
+    ui.selects[0]?.options,
+    [APPROVE, DENY_OPT, SKIP_OPT],
+    "no implement-here option in a cold objective-plan session",
+  );
+});
+
+test("bridge implement-here under a node claim -> the REFUSED arm (the structural backstop)", async () => {
+  // The UX layer suppresses the verdict, but a bridge outcome can still carry implement-here —
+  // the feature's `allowImplementHere: false` refusal must hold: nothing saved, gate untouched,
+  // a loud non-terminating warning.
+  const cwd = scaffoldRepo();
+  selectPlanProvider(cwd, "plannotator-plan");
+  const branch: unknown[] = [
+    stateEntry({
+      run_id: "RID",
+      mode: "read-only",
+      objective_node_claim: { objective: "115", node: "1.2" },
+    }),
+  ];
+  const ctx = headfulCtx(cwd, branch);
+  assert.ok(
+    writeSessionArtifact(fakeSink(branch), ctx, PLAN_DRAFT_ARTIFACT, "# The draft\n"),
+    "the draft artifact landed",
+  );
+  const argvs: string[][] = [];
+  const pi = fakeColdDoorPi(branch, { stdout: PLAN_JSON, argvs });
+  const gating = fakeGating(true);
+  const result = await executePlanReview(
+    pi,
+    ctx as unknown as ExtensionContext,
+    gating,
+    cannedBridge({ status: "implement-here", reviewId: "rev-ih" }),
+    depsFor(pi, ctx, gating),
+    {},
+  );
+  assert.equal(result.terminate, undefined, "the refusal never terminates");
+  assert.equal(gating.exits, 0, "the gate stays on");
+  assert.equal(argvs.length, 0, "nothing saved");
+  const details = result.details as Record<string, unknown>;
+  assert.equal(details.ok, false);
+  assert.equal(details.error_type, "implement_here_refused");
+  assert.equal(details.status, "skipped");
+  assert.equal(details.reason, "implement_here_refused");
+  const text = String(result.content[0]?.text);
+  assert.match(text, /WARNING: implement-here refused/);
+  assert.match(text, /objective-node planning session/);
+  assert.match(text, /approve the plan via plan_review or ask the user to run \/plan-save/);
+});
+
+// ------------------------------------------- the plannotator Direct Edits arm (plan subject)
 
 const DE_BASE = "# The draft\n\nStep one.\nStep two.\n";
 const DE_PATCHED = "# The draft\n\nStep one (edited by reviewer).\nStep two.\n";
@@ -425,7 +942,7 @@ test("plannotator approve + Direct Edits -> applied, written back, edited bytes 
       ctx as unknown as ExtensionContext,
       gating,
       cannedBridge(outcome),
-      noGistArm,
+      depsFor(pi, ctx, gating),
       {},
     );
     assert.equal(
@@ -453,7 +970,7 @@ test("plannotator approve + Direct Edits -> applied, written back, edited bytes 
     assert.match(text, /Also add a rollback note\./, "the annotation remainder is surfaced");
     assert.doesNotMatch(text, /# Direct Edits/, "the applied diff never renders as guidance");
     assert.doesNotMatch(text, /```diff/);
-    assert.equal(gating.exits, 1, "the gate exited via the approvalSave seam");
+    assert.equal(gating.exits, 1, "the gate exited via the approval-save seam");
   });
 });
 
@@ -471,7 +988,7 @@ test("plannotator approve + edits-only Direct Edits -> no remainder, no reviewer
       ctx as unknown as ExtensionContext,
       gating,
       cannedBridge(outcome),
-      noGistArm,
+      depsFor(pi, ctx, gating),
       {},
     );
     assert.equal(readFileSync(drafted, "utf8"), DE_PATCHED, "edits written back");
@@ -502,7 +1019,7 @@ test("plannotator approve + unapplyable Direct Edits -> verbatim save + loud war
       ctx as unknown as ExtensionContext,
       gating,
       cannedBridge(outcome),
-      noGistArm,
+      depsFor(pi, ctx, gating),
       {},
     );
     assert.equal(readFileSync(drafted, "utf8"), "# A different draft\n", "the draft is untouched");
@@ -539,7 +1056,7 @@ test("plannotator approve + heading but unparseable section -> verbatim save + w
       ctx as unknown as ExtensionContext,
       gating,
       cannedBridge(outcome),
-      noGistArm,
+      depsFor(pi, ctx, gating),
       {},
     );
     assert.equal(readFileSync(drafted, "utf8"), DE_BASE, "the draft is untouched");
@@ -551,9 +1068,9 @@ test("plannotator approve + heading but unparseable section -> verbatim save + w
 
 test("plannotator approve + Direct Edits + failed write-back -> verbatim save + warning", async () => {
   await withNoLlm(async () => {
-    // No run_id ⇒ the draft artifact tier is unreadable AND writePlanDraft fails (no_run_id);
-    // the plan param is the reviewed source, the diff applies cleanly, but the write-back
-    // failure must fall open to the verbatim path (never save bytes the artifact doesn't carry).
+    // No run_id ⇒ the draft artifact tier is unreadable AND the draft write rejects; the plan
+    // param is the reviewed source, the diff applies cleanly, but the write-back failure must
+    // fall open to the verbatim path (never save bytes the artifact doesn't carry).
     const cwd = scaffoldRepo();
     selectPlanProvider(cwd, "plannotator-plan");
     const branch: unknown[] = [stateEntry({})];
@@ -566,12 +1083,13 @@ test("plannotator approve + Direct Edits + failed write-back -> verbatim save + 
       reviewId: "rev-de5",
       feedback: DE_SECTION,
     };
+    const gating = fakeGating(true);
     const result = await executePlanReview(
       pi,
       ctx as unknown as ExtensionContext,
-      fakeGating(true),
+      gating,
       cannedBridge(outcome),
-      noGistArm,
+      depsFor(pi, ctx, gating),
       { plan: DE_BASE },
     );
     const argv = argvs[0] ?? [];
@@ -601,7 +1119,7 @@ test("plannotator approve + ordinary feedback -> byte-stable (no edits machinery
       ctx as unknown as ExtensionContext,
       gating,
       cannedBridge(outcome),
-      noGistArm,
+      depsFor(pi, ctx, gating),
       {},
     );
     assert.equal(readFileSync(drafted, "utf8"), DE_BASE, "the draft is untouched");
@@ -633,7 +1151,7 @@ test("plannotator deny + Direct Edits -> feedback passes through untouched (mode
     ctx as unknown as ExtensionContext,
     gating,
     cannedBridge(outcome),
-    noGistArm,
+    depsFor(pi, ctx, gating),
     {},
   );
   assert.equal(readFileSync(drafted, "utf8"), DE_BASE, "deny never mutates the draft");
@@ -772,7 +1290,7 @@ test("chooser: eligible round offers the two launch flavors; 'Browser review onl
     s.ctx as unknown as ExtensionContext,
     s.gating,
     bridge,
-    noGistArm,
+    depsFor(s.pi, s.ctx, s.gating),
     {},
     undefined,
     wave,
@@ -798,7 +1316,7 @@ test("chooser: the wave choice -> opener runs (trimmed custom), non-terminating 
     s.ctx as unknown as ExtensionContext,
     s.gating,
     bridge,
-    noGistArm,
+    depsFor(s.pi, s.ctx, s.gating),
     {},
     undefined,
     wave,
@@ -825,7 +1343,7 @@ test("chooser: a null opener return (port-pick failure) -> falls through to the 
     s.ctx as unknown as ExtensionContext,
     s.gating,
     bridge,
-    noGistArm,
+    depsFor(s.pi, s.ctx, s.gating),
     {},
     undefined,
     wave,
@@ -844,12 +1362,14 @@ test("chooser: param-tier source -> no chooser, plain review (the drafts-only la
   const ctx = headfulCtx(cwd, branch, ui);
   const wave = fakeWave({});
   const bridge = cannedBridge(DENIED);
+  const pi = fakeColdDoorPi(branch, { stdout: PLAN_JSON });
+  const gating = fakeGating(true);
   await executePlanReview(
-    fakeColdDoorPi(branch, { stdout: PLAN_JSON }),
+    pi,
     ctx as unknown as ExtensionContext,
-    fakeGating(true),
+    gating,
     bridge,
-    noGistArm,
+    depsFor(pi, ctx, gating),
     { plan: "# Param plan" },
     undefined,
     wave,
@@ -868,7 +1388,7 @@ test("chooser: present() false OR wave undefined -> no chooser, byte-stable plai
       s.ctx as unknown as ExtensionContext,
       s.gating,
       bridge,
-      noGistArm,
+      depsFor(s.pi, s.ctx, s.gating),
       {},
       undefined,
       wave,
@@ -879,9 +1399,9 @@ test("chooser: present() false OR wave undefined -> no chooser, byte-stable plai
 });
 
 test("chooser: an abort landing during the awaited opener -> aborted, never wave_launched", async () => {
-  // The one execute-level abort smoke (the dialog-by-dialog precedence matrix lives in the
-  // chooseReviewLaunch unit test below): the turn is interrupted while the opener is in flight
-  // — the resolved guidance must never be reported as a successful launch.
+  // The one execute-level abort smoke (the dialog-by-dialog precedence matrix lives in
+  // review.test.ts's chooseReviewLaunch unit): the turn is interrupted while the opener is in
+  // flight — the resolved guidance must never be reported as a successful launch.
   const controller = new AbortController();
   const s = chooserScaffold({ select: [LAUNCH_WAVE], input: [undefined] });
   const wave = fakeWave({});
@@ -896,7 +1416,7 @@ test("chooser: an abort landing during the awaited opener -> aborted, never wave
     s.ctx as unknown as ExtensionContext,
     s.gating,
     bridge,
-    noGistArm,
+    depsFor(s.pi, s.ctx, s.gating),
     {},
     controller.signal,
     wave,
@@ -1028,7 +1548,13 @@ test("objective wave arm: a null opener return (port-pick failure) -> falls thro
   assert.match(String(result.content[0]?.text), /DENIED/);
 });
 
-test("gist stage: routes to the INJECTED gist arm (plan param ignored; no chooser; no plan path)", async () => {
+// ------------------------------------------------------------- the gist stage routing (direct)
+
+test("gist stage: routes to runGistReviewV1 (plan param ignored; no chooser; no plan path)", async () => {
+  // The injected-arm indirection died with the factories home — `pi/v1` siblings import
+  // directly, so the routing pin observes the REAL gist arm: plannotator selected + a gist
+  // draft planted ⇒ the bridge reviews the RENDERED gist markdown and the result carries the
+  // gist subject key; the plan param never becomes a source and the plan chooser never opens.
   const cwd = scaffoldRepo();
   selectPlanProvider(cwd, "plannotator-plan");
   const branch: unknown[] = [
@@ -1049,108 +1575,48 @@ test("gist stage: routes to the INJECTED gist arm (plan param ignored; no choose
   const bridge = cannedBridge(DENIED);
   const gating = fakeGating(true);
   const pi = fakeColdDoorPi(branch, { stdout: PLAN_JSON });
-  const armCalls: { bridge: unknown; gating: unknown }[] = [];
-  const observingArm: GistReviewArm = async (armPi, _armCtx, armGating, armBridge) => {
-    armCalls.push({ bridge: armBridge, gating: armGating });
-    assert.equal(armPi, pi, "the arm receives the door's pi");
-    return { content: [{ type: "text", text: "ARM RESULT" }], details: { ok: true } };
-  };
   const result = await executePlanReview(
     pi,
     ctx as unknown as ExtensionContext,
     gating,
     bridge,
-    observingArm,
+    depsFor(pi, ctx, gating),
     { plan: "# A plan param (never a source here)" },
     undefined,
     wave,
   );
-  assert.equal(armCalls.length, 1, "the injected arm was called exactly once");
-  assert.equal(armCalls[0]?.bridge, bridge, "the door's bridge is threaded into the arm");
-  assert.equal(armCalls[0]?.gating, gating, "the door's gating is threaded into the arm");
-  assert.equal(result.content[0]?.text, "ARM RESULT", "the arm's result is returned verbatim");
+  assert.equal(bridge.reviewed.length, 1, "the gist arm's bridge review ran");
+  assert.match(bridge.reviewed[0] ?? "", /A gist\./, "the RENDERED gist draft was reviewed");
+  assert.doesNotMatch(bridge.reviewed[0] ?? "", /never a source here/, "the plan param ignored");
+  const details = result.details as { subject?: string; status?: string };
+  assert.equal(details.subject, "gist", "the gist subject key rides the result");
+  assert.equal(details.status, "completed");
   assert.equal(ui.selects.length, 0, "no chooser on the gist stage");
   assert.equal(wave.planCalls.length, 0);
   assert.equal(wave.objectiveCalls.length, 0);
-  assert.equal(bridge.reviewed.length, 0, "the plan path never ran");
 });
 
-// ----------------------------------------------------------- chooseReviewLaunch (unit, pure ui)
+// -------------------------------------------------------- the plan-flavor mapper delegations
 
-test("chooseReviewLaunch: Esc arms, trim behavior, and every abort re-check point", async () => {
-  // Esc at the select -> plain (the flavor choice, never a cancel).
-  {
-    const ui = fakeUI({ select: [undefined] });
-    assert.deepEqual(await chooseReviewLaunch(ui, "Plan"), { launch: "plain" });
-  }
-  // The plain pick -> plain; no input dialog.
-  {
-    const ui = fakeUI({ select: [LAUNCH_PLAIN] });
-    assert.deepEqual(await chooseReviewLaunch(ui, "Plan"), { launch: "plain" });
-    assert.equal(ui.inputs.length, 0);
-  }
-  // The wave pick + a padded custom -> trimmed custom; the caller's signal is FORWARDED to
-  // both dialogs (a dropped signal would leave a real pending dialog un-dismissable on abort).
-  {
-    const controller = new AbortController();
-    const ui = fakeUI({ select: [LAUNCH_WAVE], input: ["  the angle  "] });
-    assert.deepEqual(await chooseReviewLaunch(ui, "Objective", controller.signal), {
-      launch: "wave",
-      custom: "the angle",
-    });
-    assert.equal(ui.selects[0]?.title, "Objective review launch", "the subject noun titles it");
-    assert.equal(ui.selects[0]?.opts?.signal, controller.signal, "the select gets the signal");
-    assert.equal(ui.inputs[0]?.opts?.signal, controller.signal, "the input gets the signal");
-  }
-  // The wave pick + blank/Esc input -> wave with NO custom key.
-  for (const typed of ["   ", undefined]) {
-    const ui = fakeUI({ select: [LAUNCH_WAVE], input: [typed] });
-    const choice = await chooseReviewLaunch(ui, "Plan");
-    assert.equal(choice.launch, "wave");
-    assert.equal("custom" in choice, false);
-  }
-  // Abort at entry: no dialog is ever opened.
-  {
-    const controller = new AbortController();
-    controller.abort();
-    const ui = fakeUI({ select: [LAUNCH_WAVE] });
-    assert.deepEqual(await chooseReviewLaunch(ui, "Plan", controller.signal), {
-      launch: "aborted",
-    });
-    assert.equal(ui.selects.length, 0);
-  }
-  // Abort landing during the select outranks the resolved selection.
-  {
-    const controller = new AbortController();
-    const ui = fakeUI({});
-    ui.select = async (title: string, options: string[]) => {
-      ui.selects.push({ title, options });
-      controller.abort();
-      return LAUNCH_WAVE;
-    };
-    assert.deepEqual(await chooseReviewLaunch(ui, "Plan", controller.signal), {
-      launch: "aborted",
-    });
-    assert.equal(ui.inputs.length, 0, "the input is never reached");
-  }
-  // Abort landing during the input outranks the resolved text.
-  {
-    const controller = new AbortController();
-    const ui = fakeUI({ select: [LAUNCH_WAVE] });
-    ui.input = async (title: string) => {
-      ui.inputs.push({ title });
-      controller.abort();
-      return "typed text";
-    };
-    assert.deepEqual(await chooseReviewLaunch(ui, "Plan", controller.signal), {
-      launch: "aborted",
-    });
-  }
+test("reviewOutcomeResult/approvedSaveResult: the plan-flavor delegations hold (thin pins)", () => {
+  // The full mapper-arm matrix lives in review.test.ts (the subject cores); these pin the
+  // plan-flavor delegation — including the no-plan → no-source discriminant mapping.
+  const dismissed = reviewOutcomeResult({ status: "dismissed" });
+  assert.match(String(dismissed.content[0]?.text), /plan review dismissed/);
+  assert.deepEqual(dismissed.details, { ok: true, status: "skipped", reason: "dismissed" });
+
+  const noPlan = approvedSaveResult(
+    { status: "completed", approved: true, reviewId: "rev-f" },
+    { status: "no-plan" },
+    { paramMismatch: false },
+  );
+  assert.match(String(noPlan.content[0]?.text), /auto-save FAILED \(no plan source resolved\)/);
+  assert.equal((noPlan.details as { save?: unknown }).save, null);
 });
 
 // ---------------------------------------------------------------- the registration pins
 
-/** A recording fake pi capturing `registerTool` definitions (events stubbed for the bridge). */
+/** A recording fake pi capturing `registerTool` definitions (everything else stubbed). */
 interface RegisteredToolDef {
   name?: string;
   description?: string;
@@ -1175,36 +1641,123 @@ function recordingPi(defs: RegisteredToolDef[]): ExtensionAPI {
     registerTool(def: unknown) {
       defs.push(def as RegisteredToolDef);
     },
+    registerCommand() {},
+    registerFlag() {},
+    registerShortcut() {},
+    getFlag() {
+      return false;
+    },
+    on() {},
+    appendEntry() {},
+    async exec() {
+      return { stdout: PLAN_JSON, stderr: "", code: 0, killed: false };
+    },
+    sendUserMessage() {},
   } as unknown as ExtensionAPI;
 }
 
-test("registerPlanReview: the tool description + a guideline name the wave arm (wave_launched)", () => {
-  const defs: RegisteredToolDef[] = [];
-  registerPlanReview(recordingPi(defs), fakeGating(true), noGistArm);
-  const def = defs.find((d) => d.name === "plan_review");
-  assert.ok(def, "plan_review registered");
-  assert.match(String(def?.description), /reviewer wave/, "the description names the wave arm");
-  assert.match(String(def?.description), /wave_launched/, "…and the result status");
-  assert.ok(
-    (def?.promptGuidelines ?? []).some((g) => g.includes("wave_launched")),
-    "a guideline covers the wave_launched follow-through",
-  );
-});
-
-test("registerPlanReview: the injected wave deps thread through the registered tool (composition pin)", async () => {
+test("installPlanBindings: the injected wave deps thread through the registered tool (composition pin)", async () => {
   // The wave param is optional, so a dropped index.ts composition (or a registration that
   // forgets to forward it into execute) would compile and leave the direct-injection tests
   // green while the chooser never appears in the product — invoke the CAPTURED tool definition
   // with the deps injected at registration to pin the forwarding end-to-end.
+  const s = chooserScaffold({ select: [LAUNCH_WAVE], input: [undefined] });
   const defs: RegisteredToolDef[] = [];
   const wave = fakeWave({});
-  registerPlanReview(recordingPi(defs), fakeGating(true), noGistArm, wave);
+  // installPlanMode resolves the provider from process.cwd() at registration time — point it at
+  // the plannotator-selected scaffold so the host repo's config never skews the tier.
+  const savedCwd = process.cwd();
+  process.chdir((s.ctx as { cwd: string }).cwd);
+  try {
+    installPlanBindings(recordingPi(defs), fakeGating(true), wave);
+  } finally {
+    process.chdir(savedCwd);
+  }
   const def = defs.find((d) => d.name === "plan_review");
   assert.ok(def?.execute, "plan_review registered with an execute");
-  const s = chooserScaffold({ select: [LAUNCH_WAVE], input: [undefined] });
   const result = await def?.execute?.("t1", {}, undefined, undefined, s.ctx);
   assert.equal(s.ui.selects.length, 1, "the chooser fired through the registered tool");
   assert.deepEqual(wave.planCalls, [{ draft: CHOOSER_DRAFT }], "the registered wave deps ran");
   assert.equal(result?.details.status, "wave_launched");
   assert.equal(result?.content[0]?.text, "PLAN WAVE GUIDANCE", "the opener's guidance returned");
+});
+
+test("index.ts composition: the REAL root wiring reaches wave_launched through plan_review", async () => {
+  // The end-to-end pin the direct-injection tests above cannot give: the harness loads the REAL
+  // extension root (index.ts), so the wave deps observed here are the ones index.ts composes —
+  // deleting `installPlanBindings`'s third argument at the root turns this into the plain
+  // plannotator review (no chooser, no wave_launched) and fails these asserts. The fake
+  // plannotator extension supplies presence (the `plannotator-review` command), completes the
+  // handshake, and immediately DENIES — so the REAL `openPlanReviewSurface` open core runs —
+  // port pick included — and every background task (decision routing, readiness observer)
+  // settles on its silent arm without a browser or a server.
+  const cwd = scaffoldRepo();
+  selectPlanProvider(cwd, "plannotator-plan");
+  const selects: { title: string; options: string[] }[] = [];
+  const h = await loadPerkSession({
+    cwd,
+    env: { PERK_RUN_ID: undefined },
+    sessionManager: SessionManager.inMemory(cwd),
+    extraExtensions: [
+      (pi) => {
+        pi.registerCommand(PLANNOTATOR_REVIEW_COMMAND, {
+          description: "fake plannotator (presence probe target)",
+          handler: async () => {},
+        });
+        pi.events.on("plannotator:request", (data) => {
+          const req = data as { respond?: (r: unknown) => void };
+          req.respond?.({ status: "handled", result: { status: "pending", reviewId: "rev-root" } });
+          setTimeout(() => {
+            pi.events.emit("plannotator:review-result", {
+              reviewId: "rev-root",
+              approved: false,
+              feedback: "root-pin deny",
+            });
+          }, 0);
+        });
+      },
+    ],
+  });
+  try {
+    // The draft artifact is the wave-eligibility requirement (drafts-only chooser).
+    const written = await h.invokeTool("plan_draft", { plan: "# The composed plan\n" });
+    assert.equal((written.details as { ok?: boolean }).ok, true, "the draft landed");
+    const result = await h.invokeTool(
+      "plan_review",
+      {},
+      {
+        ui: {
+          select: async (title: string, options: string[]) => {
+            selects.push({ title, options });
+            return options.find((o) => /reviewer wave/.test(o));
+          },
+          input: async () => undefined,
+        },
+      },
+    );
+    assert.equal(selects.length, 1, "the launch chooser appeared (wave deps present at the root)");
+    assert.ok(
+      selects[0]?.options.some((o) => /reviewer wave/.test(o)),
+      "the chooser offered the wave flavor",
+    );
+    const details = result.details as { ok?: boolean; status?: string };
+    assert.equal(details.status, "wave_launched", "the root-composed wave deps launched");
+    assert.equal(details.ok, true);
+    assert.match(
+      String(result.content[0]?.text),
+      /review/i,
+      "the door's real guidance text returned through the tool",
+    );
+    // The real door's background decision task routes the deny — wait for its info report so no
+    // task touches the disposed session after the test ends.
+    for (let i = 0; i < 40 && !h.notifies.some((n) => /DENIED/.test(n)); i++) {
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    }
+    assert.ok(
+      h.notifies.some((n) => /DENIED/.test(n)),
+      "the browser decision routed through the real door's background task",
+    );
+  } finally {
+    h.dispose();
+  }
 });

@@ -370,8 +370,8 @@ the worker.
 
 When changing any `runColdDoor`/`pi.exec` argv leading token, **grep ALL `extension/**/*.test.ts`
 for the literal token**, not just the obvious factory test. The plan fold's `["plan","save"]`
-respelling broke `planReview.test.ts`, which asserted `argv[0] === "plan-save"` via the approval→save
-(`approvalSave`) path — not just `planSave.test.ts`. Prefer asserting `argv.slice(0,2)` deepEqual
+respelling broke the plan-review suite (today `pi/v1/planReview.test.ts`), which asserted `argv[0] === "plan-save"` via the approval→save
+(`approvalSave`) path — not just the save suite. Prefer asserting `argv.slice(0,2)` deepEqual
 over the bare leading token.
 
 ### Merged-command worker tests must invoke the worker OBJECT directly

@@ -6,7 +6,7 @@ import { parseUnitInspect, type UnitInspect } from "./src/inspect.ts";
 const INSPECT: UnitInspect = {
   id: "typescript-tool:plan_review",
   kind: "typescript-tool",
-  path: "extension/factories/planReview.ts",
+  path: "extension/pi/v1/plan.ts",
   selector: "tool:plan_review",
   audience: "shipped",
   role: "tool-contract",

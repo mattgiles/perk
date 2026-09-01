@@ -1,20 +1,39 @@
 // The shared WorkflowSession interface suite, parameterized over BOTH backings (branch/file and
-// in-memory) — every classification arm is reached on each: identity, applied (pointer recorded +
-// read-back roundtrip), the unchanged short-circuit, rejected (invalid name, io refusal), open →
-// absent without identity, unverified (pointer-append failure), and the read tiers (found /
-// absent — no pointer, cross-run fork pointer / invalid — missing file, digest mismatch).
+// in-memory) — every classification arm is reached on each: identity (including the
+// identity-less always-open arm: artifact writes reject, reads read absent, state ops work),
+// applied (pointer recorded + read-back roundtrip), the unchanged short-circuit, rejected
+// (invalid name, io refusal), unverified (pointer-append failure), the read tiers (found /
+// absent — no pointer, cross-run fork pointer / invalid — missing file, digest mismatch), and
+// the workflow-state ops (`nodeClaim()` + `apply()`: applied / unchanged / unverified /
+// rejected / non-matching claim / same-node-different-objective / no-identity).
 
 import assert from "node:assert/strict";
 import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { sessionDataDir } from "../substrate/cache.ts";
+import { type PlanRef, sessionDataDir } from "../substrate/cache.ts";
 import type { SessionArtifactCtx } from "../substrate/sessionData.ts";
-import { type EntrySink, WORKFLOW_STATE_TYPE } from "../substrate/workflowState.ts";
+import {
+  type EntrySink,
+  rebuildWorkflowState,
+  WORKFLOW_STATE_TYPE,
+} from "../substrate/workflowState.ts";
 import { openBranchWorkflowSession } from "./branchWorkflowSession.ts";
 import { openMemoryWorkflowSession } from "./memoryWorkflowSession.ts";
-import type { OpenWorkflowSession, WorkflowSession } from "./workflowSession.ts";
+import type { WorkflowSession } from "./workflowSession.ts";
+
+function planRef(prId: string): PlanRef {
+  return {
+    provider: "github",
+    pr_id: prId,
+    url: `https://github.com/o/r/issues/${prId}`,
+    labels: ["perk:plan"],
+    objective_id: null,
+  };
+}
+
+const CLAIM = { objective: "7", node: "1.1" };
 
 /** The per-backing harness: one session plus deterministic ways to reach every arm. */
 interface SessionHarness {
@@ -23,25 +42,36 @@ interface SessionHarness {
   induceWriteRefusal(): void;
   /** Make the NEXT writeArtifact land its bytes but fail the pointer proof (unverified). */
   inducePointerAppendFailure(): void;
+  /** Make the NEXT apply fail its read-back proof (unverified). */
+  induceApplyVerificationFailure(): void;
+  /** Make the NEXT apply refuse before any effect (rejected). */
+  induceApplyRefusal(): void;
   /** After a successful write of `name`: make its stored bytes mismatch the pointer (invalid). */
   corrupt(name: string): void;
   /** After a successful write of `name`: drop its stored bytes, keep the pointer (invalid). */
   dropFile(name: string): void;
   /** After a successful write of `name`: make its pointer belong to a foreign run (absent). */
   disown(name: string): void;
+  /** The rebuilt/live `active_plan_ref` (observation of the link effect). */
+  linkedPlanRef(): PlanRef | null;
   dispose(): void;
+}
+
+interface HarnessOpts {
+  nodeClaim?: { objective: string; node: string };
+  activePlanRef?: PlanRef;
 }
 
 interface Backing {
   label: string;
-  open(runId: string | null): OpenWorkflowSession;
-  harness(runId: string): SessionHarness;
+  open(runId: string | null): WorkflowSession;
+  harness(runId: string | null, opts?: HarnessOpts): SessionHarness;
 }
 
-// --- the branch/file backing fixtures ---------------------------------------------------------
+// --- the branch/file backing fixtures ----------------------------------------------------------
 
-function runIdEntry(runId: string): unknown {
-  return { type: "custom", customType: WORKFLOW_STATE_TYPE, data: { run_id: runId } };
+function stateEntry(data: Record<string, unknown>): unknown {
+  return { type: "custom", customType: WORKFLOW_STATE_TYPE, data };
 }
 
 /** A `SessionArtifactCtx` over a live branch array (headless, notify is a no-op). */
@@ -70,18 +100,29 @@ function branchBacking(): Backing {
     label: "branch",
     open(runId) {
       const cwd = mkdtempSync(join(tmpdir(), "workflow-session-open-"));
-      const branch: unknown[] = runId === null ? [] : [runIdEntry(runId)];
+      const branch: unknown[] = runId === null ? [] : [stateEntry({ run_id: runId })];
       const sink: EntrySink = {
         appendEntry: (customType, data) => branch.push({ type: "custom", customType, data }),
       };
       return openBranchWorkflowSession(sink, reportableCtx(cwd, branch));
     },
-    harness(runId) {
+    harness(runId, opts = {}) {
       const cwd = mkdtempSync(join(tmpdir(), "workflow-session-test-"));
-      const branch: unknown[] = [runIdEntry(runId)];
+      const branch: unknown[] = runId === null ? [] : [stateEntry({ run_id: runId })];
+      if (opts.nodeClaim !== undefined) {
+        branch.push(stateEntry({ objective_node_claim: opts.nodeClaim }));
+      }
+      if (opts.activePlanRef !== undefined) {
+        branch.push(stateEntry({ active_plan_ref: opts.activePlanRef }));
+      }
       let dropAppends = false;
+      let throwNextAppend = false;
       const sink: EntrySink = {
         appendEntry: (customType, data) => {
+          if (throwNextAppend) {
+            throwNextAppend = false;
+            throw new Error("append refused (induced)");
+          }
           if (dropAppends) {
             dropAppends = false;
             return;
@@ -90,10 +131,7 @@ function branchBacking(): Backing {
         },
       };
       const ctx = reportableCtx(cwd, branch);
-      const opened = openBranchWorkflowSession(sink, ctx);
-      assert.equal(opened.status, "opened");
-      const session = opened.status === "opened" ? opened.session : null;
-      assert.ok(session);
+      const session = openBranchWorkflowSession(sink, ctx);
       const perkDir = join(cwd, ".perk");
       let lockedPerkDir = false;
       return {
@@ -107,17 +145,31 @@ function branchBacking(): Backing {
         inducePointerAppendFailure() {
           dropAppends = true;
         },
+        induceApplyVerificationFailure() {
+          dropAppends = true;
+        },
+        // A throwing append whose rebuilt field never changed is the PROVEN
+        // refusal-before-effect — the classified strict-append maps it to `rejected`.
+        induceApplyRefusal() {
+          throwNextAppend = true;
+        },
         corrupt(name) {
-          writeFileSync(join(sessionDataDir(cwd, runId), name), "rewound bytes", "utf8");
+          writeFileSync(join(sessionDataDir(cwd, runId ?? ""), name), "rewound bytes", "utf8");
         },
         dropFile(name) {
-          rmSync(join(sessionDataDir(cwd, runId), name));
+          rmSync(join(sessionDataDir(cwd, runId ?? ""), name));
         },
         disown(name) {
           void name;
           // A fork child inherits the parent's pointer entries under a derived run_id: every
           // pointer on the branch now belongs to a foreign run.
-          branch.push(runIdEntry(`${runId}.1`));
+          branch.push(stateEntry({ run_id: `${runId}.1` }));
+        },
+        linkedPlanRef() {
+          return (
+            rebuildWorkflowState(branch as Parameters<typeof rebuildWorkflowState>[0])
+              .active_plan_ref ?? null
+          );
         },
         dispose() {
           if (lockedPerkDir) chmodSync(perkDir, 0o755);
@@ -134,18 +186,22 @@ function memoryBacking(): Backing {
     open(runId) {
       return openMemoryWorkflowSession({ runId });
     },
-    harness(runId) {
-      const opened = openMemoryWorkflowSession({ runId });
-      assert.equal(opened.status, "opened");
-      const session = opened.status === "opened" ? opened.session : null;
-      assert.ok(session);
+    harness(runId, opts = {}) {
+      const session = openMemoryWorkflowSession({
+        runId,
+        ...(opts.nodeClaim !== undefined ? { nodeClaim: opts.nodeClaim } : {}),
+        ...(opts.activePlanRef !== undefined ? { activePlanRef: opts.activePlanRef } : {}),
+      });
       return {
         session,
         induceWriteRefusal: () => session.failNextWrite(),
         inducePointerAppendFailure: () => session.failNextPointerAppend(),
+        induceApplyVerificationFailure: () => session.failNextApplyVerification(),
+        induceApplyRefusal: () => session.failNextApply(),
         corrupt: (name) => session.corruptContent(name),
         dropFile: (name) => session.dropContent(name),
         disown: (name) => session.disownPointer(name),
+        linkedPlanRef: () => session.linkedPlanRef(),
         dispose() {},
       };
     },
@@ -155,11 +211,29 @@ function memoryBacking(): Backing {
 // --- the shared suite --------------------------------------------------------------------------
 
 for (const backing of [branchBacking(), memoryBacking()]) {
-  test(`${backing.label}: open without identity → absent; with identity → runId`, () => {
-    assert.deepEqual(backing.open(null), { status: "absent" });
-    const opened = backing.open("RID");
-    assert.equal(opened.status, "opened");
-    assert.equal(opened.status === "opened" && opened.session.runId, "RID");
+  test(`${backing.label}: always opens — identity-less runId is null; with identity → runId`, () => {
+    assert.equal(backing.open(null).runId, null);
+    assert.equal(backing.open("RID").runId, "RID");
+  });
+
+  test(`${backing.label}: no identity — artifact writes reject, reads read absent, state ops work`, () => {
+    const h = backing.harness(null, { nodeClaim: CLAIM });
+    try {
+      const written = quietly(() => h.session.writeArtifact("draft.json", "v1"));
+      assert.equal(written.status, "rejected");
+      assert.ok(written.status === "rejected" && /no run_id/.test(written.problem));
+      assert.deepEqual(h.session.readArtifact("draft.json"), { status: "absent" });
+      // State ops are branch-backed and identity-independent (the identity-less save arm).
+      assert.deepEqual(h.session.nodeClaim(), CLAIM);
+      const linked = h.session.apply({ kind: "link-plan-ref", ref: planRef("42") });
+      assert.deepEqual(linked, { status: "applied" });
+      assert.deepEqual(h.linkedPlanRef(), planRef("42"));
+      const cleared = h.session.apply({ kind: "clear-node-claim", claim: CLAIM });
+      assert.deepEqual(cleared, { status: "applied" });
+      assert.equal(h.session.nodeClaim(), null);
+    } finally {
+      h.dispose();
+    }
   });
 
   test(`${backing.label}: applied — pointer recorded, read-back roundtrips`, () => {
@@ -272,6 +346,130 @@ for (const backing of [branchBacking(), memoryBacking()]) {
       const rewound = quietly(() => h.session.readArtifact("rewound.json"));
       assert.equal(rewound.status, "invalid");
       assert.ok(rewound.status === "invalid" && /digest mismatch/.test(rewound.problem));
+    } finally {
+      h.dispose();
+    }
+  });
+
+  test(`${backing.label}: nodeClaim — snapshot read (present, absent)`, () => {
+    const withClaim = backing.harness("RID", { nodeClaim: CLAIM });
+    const without = backing.harness("RID");
+    try {
+      assert.deepEqual(withClaim.session.nodeClaim(), CLAIM);
+      assert.equal(without.session.nodeClaim(), null);
+    } finally {
+      withClaim.dispose();
+      without.dispose();
+    }
+  });
+
+  test(`${backing.label}: apply link-plan-ref — applied, then unchanged on the same identity`, () => {
+    const h = backing.harness("RID");
+    try {
+      assert.deepEqual(h.session.apply({ kind: "link-plan-ref", ref: planRef("42") }), {
+        status: "applied",
+      });
+      assert.deepEqual(h.linkedPlanRef(), planRef("42"));
+      // Same (provider, pr_id) identity → unchanged, even when other fields drift.
+      assert.deepEqual(
+        h.session.apply({
+          kind: "link-plan-ref",
+          ref: { ...planRef("42"), labels: ["perk:plan", "drifted"] },
+        }),
+        { status: "unchanged" },
+      );
+      // A different plan applies again.
+      assert.deepEqual(h.session.apply({ kind: "link-plan-ref", ref: planRef("43") }), {
+        status: "applied",
+      });
+      assert.deepEqual(h.linkedPlanRef(), planRef("43"));
+    } finally {
+      h.dispose();
+    }
+  });
+
+  test(`${backing.label}: apply link-plan-ref — a read-back miss classifies unverified`, () => {
+    const h = backing.harness("RID");
+    try {
+      h.induceApplyVerificationFailure();
+      const result = quietly(() => h.session.apply({ kind: "link-plan-ref", ref: planRef("42") }));
+      assert.equal(result.status, "unverified");
+      assert.ok(result.status === "unverified" && /plan-ref read-back failed/.test(result.problem));
+    } finally {
+      h.dispose();
+    }
+  });
+
+  test(`${backing.label}: apply clear-node-claim — applied on a both-field match, verified`, () => {
+    const h = backing.harness("RID", { nodeClaim: CLAIM });
+    try {
+      assert.deepEqual(h.session.apply({ kind: "clear-node-claim", claim: CLAIM }), {
+        status: "applied",
+      });
+      assert.equal(h.session.nodeClaim(), null);
+    } finally {
+      h.dispose();
+    }
+  });
+
+  test(`${backing.label}: apply clear-node-claim — no live claim / non-matching claim ⇒ unchanged`, () => {
+    const none = backing.harness("RID");
+    const other = backing.harness("RID", { nodeClaim: { objective: "7", node: "2.9" } });
+    try {
+      assert.deepEqual(none.session.apply({ kind: "clear-node-claim", claim: CLAIM }), {
+        status: "unchanged",
+      });
+      assert.deepEqual(other.session.apply({ kind: "clear-node-claim", claim: CLAIM }), {
+        status: "unchanged",
+      });
+      assert.deepEqual(other.session.nodeClaim(), { objective: "7", node: "2.9" });
+    } finally {
+      none.dispose();
+      other.dispose();
+    }
+  });
+
+  test(`${backing.label}: apply clear-node-claim — same node, DIFFERENT objective is preserved`, () => {
+    // A save linked to objective B node 1.1 must never clear objective A's standing 1.1 claim.
+    const h = backing.harness("RID", { nodeClaim: { objective: "7", node: "1.1" } });
+    try {
+      const result = h.session.apply({
+        kind: "clear-node-claim",
+        claim: { objective: "9", node: "1.1" },
+      });
+      assert.deepEqual(result, { status: "unchanged" });
+      assert.deepEqual(h.session.nodeClaim(), { objective: "7", node: "1.1" });
+    } finally {
+      h.dispose();
+    }
+  });
+
+  test(`${backing.label}: apply clear-node-claim — a read-back miss classifies unverified`, () => {
+    const h = backing.harness("RID", { nodeClaim: CLAIM });
+    try {
+      h.induceApplyVerificationFailure();
+      const result = quietly(() => h.session.apply({ kind: "clear-node-claim", claim: CLAIM }));
+      assert.equal(result.status, "unverified");
+      assert.ok(
+        result.status === "unverified" &&
+          /objective_node_claim clear read-back failed/.test(result.problem),
+      );
+    } finally {
+      h.dispose();
+    }
+  });
+
+  test(`${backing.label}: apply — a refusal before any effect classifies rejected`, () => {
+    const h = backing.harness("RID", { nodeClaim: CLAIM });
+    try {
+      h.induceApplyRefusal();
+      const linked = quietly(() => h.session.apply({ kind: "link-plan-ref", ref: planRef("42") }));
+      assert.equal(linked.status, "rejected");
+      assert.equal(h.linkedPlanRef(), null, "a rejected apply lands nothing");
+      h.induceApplyRefusal();
+      const cleared = quietly(() => h.session.apply({ kind: "clear-node-claim", claim: CLAIM }));
+      assert.equal(cleared.status, "rejected");
+      assert.deepEqual(h.session.nodeClaim(), CLAIM, "a rejected clear preserves the claim");
     } finally {
       h.dispose();
     }

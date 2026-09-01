@@ -15,11 +15,8 @@ import {
 
 const PROSE = "# Faster reviews\n\nWe would likely want review turnaround under a day.\n";
 
-function memorySession(runId = "RID"): MemoryWorkflowSession {
-  const opened = openMemoryWorkflowSession({ runId });
-  assert.equal(opened.status, "opened");
-  if (opened.status !== "opened") throw new Error("unreachable");
-  return opened.session;
+function memorySession(runId: string | null = "RID"): MemoryWorkflowSession {
+  return openMemoryWorkflowSession({ runId });
 }
 
 /** Capture console.error calls for the duration of `fn` (silences the loud refusal warnings). */
@@ -92,13 +89,13 @@ test("renderGistDraft: title heading + Scope line + prose; both optional", () =>
 // --- reviseGistDraft -------------------------------------------------------------------------------
 
 test("revise: diagnostic precedence — blank prose rejects BEFORE missing identity", () => {
-  const blankFirst = reviseGistDraft({ prose: "  \n" }, null);
+  const blankFirst = reviseGistDraft({ prose: "  \n" }, memorySession(null));
   assert.equal(blankFirst.status, "rejected");
   assert.ok(blankFirst.status === "rejected");
   assert.equal(blankFirst.reason, "blank_prose");
   assert.equal(blankFirst.problem, "no gist prose to write (pass the full working draft)");
 
-  const noIdentity = reviseGistDraft({ prose: PROSE }, null);
+  const noIdentity = reviseGistDraft({ prose: PROSE }, memorySession(null));
   assert.equal(noIdentity.status, "rejected");
   assert.ok(noIdentity.status === "rejected");
   assert.equal(noIdentity.reason, "no_identity");

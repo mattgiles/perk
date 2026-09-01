@@ -3,13 +3,13 @@
 // `/plan` surface to perk's canonical produced contract (`plan_save` → `cache.plan-ref`).
 //
 // INERT BY DEFAULT. This shim is ALWAYS registered in index.ts but does nothing unless the resolved
-// `[providers] plan` selection is `tombell-plan` (read fresh per-event, same shape as planMode). On
-// any non-tombell selection it injects nothing and only strips its own stale marker — zero behavior
-// change on the default path.
+// `[providers] plan` selection is `tombell-plan` (read fresh per-event, same shape as the plan
+// installer). On any non-tombell selection it injects nothing and only strips its own stale
+// marker — zero behavior change on the default path.
 //
 // WHAT IT DOES (and does NOT do):
-//   - It injects a hidden (`display:false`, once-only: branch-scan dedup'd on the marker)
-//     `perk:plan-adapter-tombell` context that tells the model
+//   - It injects a hidden (`display:false`, once-only: scan-dedup'd on the marker over the
+//     compaction-active window) `perk:plan-adapter-tombell` context that tells the model
 //     the foreign `/plan` surface authors a FREE-FORM PROSE plan, and directs it through perk's
 //     review-first discipline: keep the draft current with `plan_draft`, then call
 //     `plan_review` — which (for any non-plannotator selection, tombell included) runs the
@@ -22,8 +22,8 @@
 //     it applies when the review reports skipped/unavailable, or when `@tombell/pi-plan`'s own
 //     interactive `/plan` `setActiveTools` restriction hides `plan_draft`/`plan_review` from the
 //     tool set. `/plan-save` prefers the validated draft artifact and falls back to the
-//     `extractPlanMarkdown` transcript scrape (planSave.ts) — no new save machinery; the shim
-//     only directs flow.
+//     `extractPlanMarkdown` transcript scrape (authoring/plan/source.ts) — no new save
+//     machinery; the shim only directs flow.
 //   - It does NOT own, replace, or duplicate the read-only gate (Invariant 1) and NEVER calls
 //     `setActiveTools` / registers a `tool_call` handler. The read-only tier during foreign planning
 //     comes from (a) perk's gate, already engaged by the cold-door launch (session_start →
@@ -35,19 +35,19 @@
 //     stages bind only to the provider-agnostic plan-ref and are unchanged.
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { GIST_AUTHOR_STAGE } from "../authoring/gist/draft.ts";
-import { OBJECTIVE_AUTHOR_STAGE } from "../factories/objectiveAuthor.ts";
-import { resolvedPlanProviderId } from "../factories/planMode.ts";
-import { render } from "../substrate/prompts.ts";
-import { TOMBELL_PLAN_PROVIDER_ID } from "../substrate/providers.ts";
+import { GIST_AUTHOR_STAGE } from "../../../authoring/gist/draft.ts";
+import { OBJECTIVE_AUTHOR_STAGE } from "../../../factories/objectiveAuthor.ts";
+import { render } from "../../../substrate/prompts.ts";
 import {
+  activeContextWindow,
   type BranchEntry,
   branchCarries,
   branchOf,
   rebuildWorkflowState,
-} from "../substrate/workflowState.ts";
+} from "../../../substrate/workflowState.ts";
+import { isTombellPlanSelected } from "./selection.ts";
 
-/** The tombell plan-adapter bridge customType (distinct from planMode's `perk:plan-context`). */
+/** The tombell plan-adapter bridge customType (distinct from the `perk:plan-context`). */
 export const PLAN_ADAPTER_TOMBELL_CONTEXT_TYPE = "perk:plan-adapter-tombell";
 const PLAN_ADAPTER_TOMBELL_MARKER = "[PLAN ADAPTER: TOMBELL]";
 
@@ -61,11 +61,6 @@ const PLAN_ADAPTER_TOMBELL_MARKER = "[PLAN ADAPTER: TOMBELL]";
 export const PLAN_ADAPTER_TOMBELL_CONTEXT = render("contexts/adapters/tombell-plan.md", {
   marker: PLAN_ADAPTER_TOMBELL_MARKER,
 });
-
-/** Whether the foreign `tombell-plan` provider is the selected plan provider for `cwd`. */
-export function isTombellPlanSelected(cwd: string): boolean {
-  return resolvedPlanProviderId(cwd) === TOMBELL_PLAN_PROVIDER_ID;
-}
 
 /**
  * Whether @tombell/pi-plan's own plan mode is enabled, per the latest `plan-mode-state` custom
@@ -83,10 +78,10 @@ export function isTombellPlanModeEnabled(branch: readonly BranchEntry[]): boolea
 }
 
 /**
- * Register the tombell plan adapter: an injection-only bridge, inert unless `[providers] plan =
+ * Install the tombell plan adapter: an injection-only bridge, inert unless `[providers] plan =
  * "tombell-plan"`. It NEVER touches tool gating / setActiveTools (Invariant 1) and never throws.
  */
-export function registerPlanAdapterTombell(pi: ExtensionAPI): void {
+export function installTombellPlanAdapter(pi: ExtensionAPI): void {
   // Inject the bridge context while the foreign tombell-plan provider is selected AND a plan
   // authoring mode is on — perk's read-only gate (per the persisted `perk:workflow-state.mode`,
   // the gate's state twin — never the gate object) OR tombell's own persisted `plan-mode-state`
@@ -99,9 +94,10 @@ export function registerPlanAdapterTombell(pi: ExtensionAPI): void {
     const state = rebuildWorkflowState(branch);
     if (state.stage === OBJECTIVE_AUTHOR_STAGE || state.stage === GIST_AUTHOR_STAGE) return;
     if (state.mode !== "read-only" && !isTombellPlanModeEnabled(branch)) return;
-    // Once-only: injected customs persist to the branch, so a live copy suppresses re-injection;
-    // compaction dropping it makes the scan come up clean and the next turn re-injects.
-    if (branchCarries(branch, PLAN_ADAPTER_TOMBELL_MARKER)) return;
+    // Once-only: the dedup scans the COMPACTION-ACTIVE window (contracts §8.31) — a live copy
+    // suppresses re-injection; compaction dropping it from model context re-injects on the next
+    // turn even though the historical entry still sits on the branch.
+    if (branchCarries(activeContextWindow(branch), PLAN_ADAPTER_TOMBELL_MARKER)) return;
     return {
       message: {
         customType: PLAN_ADAPTER_TOMBELL_CONTEXT_TYPE,
@@ -112,7 +108,8 @@ export function registerPlanAdapterTombell(pi: ExtensionAPI): void {
   });
 
   // Strip the stale bridge marker from context when tombell-plan is no longer selected (same
-  // hygiene planMode/objectiveAuthor/toolGating apply), so it never lingers across a deselect.
+  // hygiene the plan installer/objectiveAuthor/toolGating apply), so it never lingers across a
+  // deselect.
   pi.on("context", async (event, ctx) => {
     if (isTombellPlanSelected(ctx.cwd)) return;
     return {

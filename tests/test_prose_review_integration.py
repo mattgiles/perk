@@ -44,12 +44,12 @@ ROOT = Path(__file__).parents[1]
 PYTHON_UNIT_ID = "python-symbol:packages/perk-dev/src/perk_dev/audit/bounding.py:_PREAMBLE"
 PYTHON_SOURCE_PATH = Path("packages/perk-dev/src/perk_dev/audit/bounding.py")
 TYPESCRIPT_UNIT_ID = "typescript-tool:plan_review"
-TYPESCRIPT_SOURCE_PATH = Path("extension/factories/planReview.ts")
+TYPESCRIPT_SOURCE_PATH = Path("extension/pi/v1/plan.ts")
 # The complete plan-authoring assembly needs these additional canonical files under the
-# fixture trust root (planReview.ts is already copied above for the source round trips).
+# fixture trust root (plan.ts — the one installer carrying the plan_draft AND plan_review
+# tool units — is already copied above for the source round trips).
 PLAN_CONTEXT_PATH = Path("prompts/contexts/plan-authoring.md")
 PLAN_SKILL_PATH = Path("skills/perk-plan/SKILL.md")
-PLAN_DRAFT_PATH = Path("extension/factories/planDraft.ts")
 CSP = (
     "default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; "
     "connect-src 'self'; img-src 'self'; font-src 'self'; base-uri 'none'; "
@@ -109,7 +109,7 @@ def server(tmp_path_factory: pytest.TempPathFactory) -> Iterator[_RunningServer]
     typescript_source = trust_root / TYPESCRIPT_SOURCE_PATH
     typescript_source.parent.mkdir(parents=True)
     typescript_source.write_bytes((ROOT / TYPESCRIPT_SOURCE_PATH).read_bytes())
-    for relative in (PLAN_CONTEXT_PATH, PLAN_SKILL_PATH, PLAN_DRAFT_PATH):
+    for relative in (PLAN_CONTEXT_PATH, PLAN_SKILL_PATH):
         target = trust_root / relative
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_bytes((ROOT / relative).read_bytes())
@@ -610,7 +610,6 @@ def test_guarded_assembly_render_round_trips_workspace_buffers_over_real_http(
         for relative in (
             PLAN_CONTEXT_PATH,
             PLAN_SKILL_PATH,
-            PLAN_DRAFT_PATH,
             TYPESCRIPT_SOURCE_PATH,
         )
     }
@@ -650,7 +649,7 @@ def test_guarded_assembly_render_round_trips_workspace_buffers_over_real_http(
         "boundary",
         "owned",
         "owned",
-        "failure",
+        "owned",
         "owned",
         "boundary",
     ]
