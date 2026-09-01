@@ -1094,6 +1094,113 @@ and process mechanics in the Python exterior and adapters.
 >   re-append rides the next gesture; this committed note is the durable ledger copy). The
 >   full Phase-7 dogfood gate closes at 7.5.
 
+> **Status (Objective #2083, Node 7.3):** slice 5 landed — the ready + handoff transitions
+> (`ready`, `/ready`, and the ready-time reconcile continuation, contracts.md §8.66) —
+> realized-shape notes:
+>
+> - **Behavior moved**: `doors/ready.ts` wholesale, behind the Pi-free feature op
+>   `extension/delivery/ready.ts::readyChange` (one entry: the exterior effect first, then the
+>   exhaustive route classification, then — on the stamped-with-cohort path ONLY — the
+>   continuation decision) with the named installer `pi/v1/delivery/ready.ts`
+>   (`installReadyBindings` + the exported `driveReadyContinuation` translation).
+>   `doors/ready.ts` + `doors/ready.test.ts` deleted whole in the same node (Rule E burn-down).
+>   Registration surfaces frozen-baseline pinned byte-identical; every load-bearing arm carries
+>   a full-details WIRE baseline captured from the OLD door pre-deletion (byte-exact
+>   `assert.deepEqual` on the JSON round-trip, optional-key absence semantics included —
+>   verified byte-identical against the pre-migration capture before the suites were written).
+>   Message/warning texts byte-identical; SHA-bound ready semantics untouched (no warm `stale`
+>   arm — a cascade-staled stamp is repaired Python-side by re-running ready).
+> - **Correlated facts + mint-only evidence (the named invariants)**: the `ReadyFacts` union
+>   (`incremental` with `stacked` false-vs-absent preserved for the wire /
+>   `stacked_unverified` / `stacked`) makes a cohort without the stacked routing fact — or a
+>   dropped cohort masquerading as incremental — unrepresentable, and each `ReadyOutcome` arm
+>   is constrained to its matching variant (compile-time-negative pinned). The drive arm
+>   carries ONLY the nominal `ReadyDriveEvidence` (an unexported class with a `#private` field;
+>   type-only export — the WorkerModelSelection precedent), minted by `readyChange` from the
+>   SAME facts value the arm carries, strictly after the strict evidence vocabulary passed
+>   (`^[A-Za-z0-9._-]{1,64}$` ids; `^[0-9a-f]{40}$` both endpoints; integer PR). The arm order
+>   is pinned: gate refusal BEFORE evidence validation (today's order); `retryPlan` carries the
+>   safe-interpolation policy (`null` ⇒ the `<plan>` placeholder).
+> - **Action-specific port, one production composition**: `MarkReady` (production =
+>   `createReadyMarker` — the `perk pr ready --json` cold-door composition; module-private,
+>   composed only through the module-private `readyDepsFor`); the gate read is the injected
+>   `sessionReadOnly` capability, read ONLY on the stamped-with-cohort path (the three negative
+>   arms are throwing-sentinel pinned). No WorkflowSession writes exist on this path and none
+>   were added. `driveReadyContinuation` is exhaustive over the outcome AND the nested
+>   continuation with `never` checks (no catch-all default — union growth breaks the adapter
+>   at typecheck time); it stays exported solely because the streaming `followUp` branch is
+>   unreachable through the idle harness (its production importer is the installer itself).
+>   `readyDepsFor`/`renderReadyMessage`/`createReadyMarker` and the details builder are
+>   module-private (review-settled; composed behavior proven through the registered bindings
+>   via `spyInjections`).
+> - **Accounting ledger** (final numbers; operator acceptance rides the PR-approval gesture —
+>   the 7.1/6.3 named-invariant escape hatch):
+>   - Production LOC (recomputed after the review-address pass): 281 deleted
+>     (`doors/ready.ts`) → 515 added (`delivery/ready.ts` 193, `pi/v1/delivery/ready.ts` 322);
+>     whole-change production net **+234** against the plan's ~+110 estimate and its ~+150
+>     re-examination bar — re-examined before submit: the excess is the two named invariant
+>     classes, not padding — (1) the correlated facts variants + their outcome-arm constraints
+>     + the mint-only nominal evidence class (three variant interfaces, the `#private` brand,
+>     the double never-checked exhaustive switches); (2) the `MarkReady` port + the
+>     wire-identical details rebuild the split itself requires (the door built details
+>     implicitly from one decode shape). Zero new policy surface; comment-carried intent
+>     preserved per AGENTS.
+>   - Test LOC (recomputed): 492 deleted (`doors/ready.test.ts`) → 825 added
+>     (`delivery/ready.test.ts` 269, `pi/v1/delivery/ready.test.ts` 556) — net +333: the new
+>     arms are the feature-tier fake-deps suite (ordering, the three throwing-sentinel gate
+>     pins, gate-before-evidence, the relocated INVALID_EVIDENCE matrix with per-row retryPlan,
+>     evidence minting + the post-mint mutation-immunity pin, the compile-time negatives), the
+>     frozen registration baselines, the full-details wire baselines incl. the six-field
+>     cohort-drop matrix and BOTH incremental forms (the legacy absent-`stacked` form and the
+>     current worker's explicit `stacked: false` + null-cohort form), the
+>     `["pr","ready","--json"]` argv pin, the exact refusal-warning bytes through registered
+>     surfaces (the read-only arm via a read-only-scaffolded `/ready` — exactly production's
+>     gesture), the full-cohort integration pin (ONE injected drive with the pinned range +
+>     binding suffix), and the report-before-drive order pin.
+>   - **Review-address hardening (PR #2125)**: `ReadyDriveEvidence` snapshots the validated
+>     PRIMITIVES at mint time instead of retaining the caller-reachable `ReadyHandoff` object
+>     — post-validation mutation of `facts.handoff` can no longer reach the drive render
+>     (aliasing closed; mutation-immunity pinned in the feature suite).
+>   - **Declined simplifications (recorded, from the ponytail lane)**: (a) deleting
+>     `ReadyDriveEvidence` and driving from the stamped facts — declined: the mint-only
+>     nominal evidence IS the plan-settled resolution of the validated-drive invariant (the
+>     stamped facts carry the RAW decoded cohort, not proof of validation; the snapshot
+>     hardening above strengthens exactly this boundary); (b) collapsing `ReadyOutcome.kind`
+>     into `facts.route` — declined: the outcome vocabulary names transition outcomes (incl.
+>     `failed`, which has no facts route) while the route names the wire's routing facts; the
+>     plan settled the honest-arm vocabulary, and `readyChange`'s classification switch is the
+>     ONE conversion point.
+>   - Files: +4 / −2; touched: `index.ts`, `importDirectionGuard.test.ts` (census burn-down),
+>     `pi/v1/objective.ts` (comment re-anchor), `substrate/stageTools.test.ts` (DRIVE_COVERAGE
+>     label + comment), `shared/contracts.md` (two re-anchors, no behavior amendment),
+>     `prose-prompt-map.yaml` + regenerated `prose-prompt-map.md`,
+>     `first-principles/python-cli-guidelines.md` (one additional stale anchor found in
+>     implementation), this note.
+>   - Export ledger — **Retired**: `registerReady`, `markReady`, `driveReadyReconcile`,
+>     `ReadyResult`, `ReadyDetails`, the `ReadyOk` name (no compatibility re-exports).
+>     **Relocated**: `ReadyHandoff` (verbatim). **Newly introduced**: `ReadyPr`, `ReadyFacts`,
+>     `MarkReady`, `MarkReadyAttempt`, `ReadyDeps`, `ReadyOutcome`, `ReadyContinuation`,
+>     `ReadyDriveEvidence` (type-only), `readyChange` (feature); `installReadyBindings`,
+>     `driveReadyContinuation` (adapter). Every added export has a production importer or is
+>     the one exported-core test seam.
+>   - Deletion test: gutting `delivery/ready.ts` hollows the installer — outcome
+>     classification, the SHA-bound evidence verification, evidence minting, the gate-refusal
+>     ordering, the safe-retry policy, and the session-transition decision all vanish, leaving
+>     registration + decode + render shells that can decide nothing. Verified by the import
+>     graph (the installer imports the op, the unions, and the port).
+> - **Live-proof closeout protocol** (review-settled — no new gate, no waiver; the Phase-4/5
+>   evidence-only-commit precedent): (1) implementation lands; review + address complete; the
+>   final head is published via `/submit`. (2) The human runs `perk ready <plan>` from a fresh
+>   session in the train worktree — the MIGRATED binding performs the stamp + reconcile drive:
+>   that is the recorded live observation (session id, observed stamp facts, the drive entry),
+>   bound to that intermediate published head (intermediate-head proof explicitly acceptable).
+>   (3) The observation lands as ONE docs-only evidence commit appended to this note. (4) The
+>   tip's handoff stamp is re-run (`perk ready <plan>` again) — the idempotent re-stamp
+>   converges on the new head and re-enters the reconcile pass; this protocol statement is the
+>   recording, so the re-stamp needs no further evidence. The layer cannot finish with
+>   uncommitted evidence or a stale stamp; the definitive `run_ci` remains the pre-submit one.
+>   The full Phase-7 dogfood gate closes at 7.5.
+
 ### Changes
 
 Migrate in effect-sized slices:
