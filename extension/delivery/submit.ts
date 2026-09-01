@@ -74,25 +74,18 @@ export type ConflictBudget =
 
 /**
  * The ONE cap/read comparison both conflict surfaces share (the submit/address decision here,
- * the stack dispatch pipeline in `delivery/stackConflict.ts`). Two-phase on purpose — the
- * stack path interleaves its resolver claim between inspect and commit. A throwing counter
- * read propagates (the 7.2-pinned load-bearing failure arm on the submit path; the stack
- * pipeline's total boundary translates it to `state_error`).
+ * the stack dispatch pipeline in `delivery/stackConflict.ts`). Deliberately read-only — the
+ * stack path interleaves its resolver claim between this inspect and its strict
+ * `attempts.write(next)`, whose read-back boolean each consumer passes through UNSOFTENED (a
+ * `false` means the counter is unverifiable, and an unverifiable counter must never bypass
+ * the cap — both consumers withhold the dispatch on it). A throwing counter read propagates
+ * (the 7.2-pinned load-bearing failure arm on the submit path; the stack pipeline's total
+ * boundary translates it to `state_error`).
  */
 export function inspectConflictBudget(attempts: ConflictAttempts): ConflictBudget {
   const n = attempts.read();
   if (n >= CONFLICT_RESOLUTION_ATTEMPT_CAP) return { kind: "exhausted", attempts: n };
   return { kind: "available", next: n + 1, cap: CONFLICT_RESOLUTION_ATTEMPT_CAP };
-}
-
-/**
- * The strict-write step of the shared budget transition: persist the inspected `next` attempt.
- * The seam's strict read-back boolean passes through UNSOFTENED — a `false` means the counter
- * is unverifiable, and an unverifiable counter must never bypass the cap (both consumers
- * withhold the dispatch on it).
- */
-export function commitConflictAttempt(attempts: ConflictAttempts, next: number): boolean {
-  return attempts.write(next);
 }
 
 /** The bounded conflict follow-up decision (surface translation stays adapter-side). */
@@ -156,7 +149,7 @@ export function decideConflictFollowUp(
   const base = change.base ?? "";
   const budget = inspectConflictBudget(attempts);
   if (budget.kind === "exhausted") return { kind: "exhausted", base, attempts: budget.attempts };
-  if (!commitConflictAttempt(attempts, budget.next)) return { kind: "withheld", base };
+  if (!attempts.write(budget.next)) return { kind: "withheld", base };
   return { kind: "drive", base, attempt: budget.next, cap: budget.cap };
 }
 

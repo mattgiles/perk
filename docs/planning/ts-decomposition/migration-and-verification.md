@@ -1222,8 +1222,8 @@ and process mechanics in the Python exterior and adapters.
 >   re-runnable).
 > - **Named behavior deltas (D1–D6; contracts amended in the same change)**: **D1** (the one
 >   ordinary-path change, operator-approved) — the conflict-resolver dispatch on BOTH warm
->   surfaces now rides the ONE two-phase budget transition
->   (`inspectConflictBudget`/`commitConflictAttempt`), and an unverified counter increment
+>   surfaces now rides the ONE shared `inspectConflictBudget` cap read + each consumer's
+>   strict verified `attempts.write`, and an unverified counter increment
 >   (strict read-back `false`) WITHHOLDS the dispatch with a loud report instead of driving
 >   (§8.3's surface-uniform withhold posture; the submit/address throwing-read arm stays
 >   load-bearing). **D2** — cross-plane: `ContinuationOut.targets_contained` (Python,
@@ -1244,44 +1244,52 @@ and process mechanics in the Python exterior and adapters.
 >   credential-free https reconstruction (`href === raw`), else `?`/`""`.
 > - **Accounting ledger** (final numbers; operator acceptance rides the PR-approval gesture —
 >   the 7.1–7.3 named-invariant escape hatch):
->   - Production TS LOC: 1,557 deleted → 1,993 added in new files (`delivery/stackConflict.ts`
->     359, `delivery/stackReconcile.ts` 163; adapters: `stackSync.ts` 549, `stackRecover.ts`
->     265, `stackLand.ts` 223, `stackDrive.ts` 122, `land.ts` 312) + amendments net +52
->     (`delivery/submit.ts` +31, `pi/v1/delivery/submit.ts` +14, `index.ts` +7,
->     `stackStatus.ts` ±0) — whole-change production net **+488** against the plan's ≤ +300
+>   - Production TS LOC (recomputed after the review-address pass): 1,557 deleted → 1,999
+>     added in new files (`delivery/stackConflict.ts` 363, `delivery/stackReconcile.ts` 165;
+>     adapters: `stackSync.ts` 549, `stackRecover.ts` 265, `stackLand.ts` 223, `stackDrive.ts`
+>     120, `land.ts` 314) + amendments net +45
+>     (`delivery/submit.ts` +24, `pi/v1/delivery/submit.ts` +14, `index.ts` +7,
+>     `stackStatus.ts` ±0) — whole-change production net **+487** against the plan's ≤ +300
 >     bar. Re-examined before submit: the excess is the four named invariant classes, not
 >     padding — (1) the typed dispatch pipeline (the closed `SyncResolutionOutcome` union, the
 >     three injected ports, the token-fenced withhold-and-release, D1/D5's
 >     withhold/total-boundary arms) replacing the door's inline best-effort dispatch core;
 >     (2) the mint-only sanitized evidence class + D2/D6's gates (the door sanitized inline at
->     render time with no mint boundary); (3) the shared two-phase budget transition and its
->     two consumers; (4) the split's explicit wire-identical details rebuilds + the
+>     render time with no mint boundary); (3) the shared budget inspect + the strict
+>     verified-write discipline at its two consumers; (4) the split's explicit wire-identical
+>     details rebuilds + the
 >     render/argv/decode separation the door built implicitly from one decode shape. Offsets
 >     banked as planned: the land feature layer dropped (adapter-only), the `findingLines`
 >     door copy consolidated into the `stackStatus.ts` export, three command registrations
 >     collapsed into `registerStackDrivingCommand`, representative-not-exhaustive goldens.
 >     Python production: +26 (`status_cmd.py` — D2). Zero new policy surface; comment-carried
 >     intent preserved per AGENTS.
->   - Test LOC: 2,271 deleted (`doors/objectiveStack.test.ts` 1,162,
->     `doors/objectiveStackDrive.test.ts` 618, `doors/land.test.ts` 491) → 3,274 added in new
->     suites (`stackConflict.test.ts` 491, `stackReconcile.test.ts` 201, `stackSync.test.ts`
+>   - Test LOC (recomputed): 2,271 deleted (`doors/objectiveStack.test.ts` 1,162,
+>     `doors/objectiveStackDrive.test.ts` 618, `doors/land.test.ts` 491) → 3,300 added in new
+>     suites (`stackConflict.test.ts` 504, `stackReconcile.test.ts` 207, `stackSync.test.ts`
 >     921, `stackRecover.test.ts` 451, `stackLand.test.ts` 460, `stackDrive.test.ts` 225,
->     `land.test.ts` 525) + amendments +114 (`delivery/submit.test.ts` +34 D1 flip,
+>     `land.test.ts` 532) + amendments +104 (`delivery/submit.test.ts` +24 D1 flip,
 >     `pi/v1/delivery/submit.test.ts` +47 + `address.test.ts` +37 e2e withheld pins,
 >     `stageTools.test.ts` −2 repoint, `importDirectionGuard.test.ts` −2 census) — TS net
->     +1,117: the new arms are the feature-tier port suites (ordering trace, cap boundaries,
+>     +1,133: the new arms are the feature-tier port suites (ordering trace, cap boundaries,
 >     withhold-and-release, the D5 throwing matrix, the D6 URL/PR mint matrix, snapshot
 >     immunity + compile-time negatives), the frozen registration + representative wire
->     baselines, and the D1/D3/D4 changed-arm baselines captured new. Python tests: +74
+>     baselines, the D1/D3/D4 changed-arm baselines captured new, and the option-shaped-id
+>     refusal arms. Python tests: +80
 >     (`test_objective_stack_cmd.py` — the three D2 arms + the unparseable-row assertion).
 >   - Files: +7 production TS, +7 test suites; −5 (2 doors + 3 door suites); 1 Python
 >     production file amended.
 >   - Export ledger — **Retired**: `registerObjectiveStack`, `registerLand`,
 >     `dispatchSyncResolver`/`driveSyncConflictResolution` (reshaped into
 >     `decideSyncResolution` + the adapter's `runSyncResolution` translation), `StackResult`
->     (door shape), `LandResult`/`LandDetails` (door shapes) — no compatibility re-exports.
+>     (door shape), `LandResult`/`LandDetails`/`LandOk` (door shapes), and `landPr`
+>     (privatized — the handler core survives module-private in `pi/v1/delivery/land.ts`,
+>     proven through the registered tool) — no compatibility re-exports.
 >     **Relocated**: the renders (`renderSyncOutcome`/`renderRecoverOutcome`/
->     `renderLandOutcome` + `withSyncNotes` module-private), the argv builders
+>     `renderLandOutcome` + `withSyncNotes` module-private), the module-private envelope
+>     decode helpers (the sync/adopt/recover/stack-land decodes and per-plan land's
+>     `decodeLand`/`decodeObjective`/`decodeLearn`, each into its adapter module — land's
+>     advisory pair reshaped three-state per D4), the argv builders
 >     (`buildStackSyncArgs`/`buildStackAdoptArgs`/`buildStackRecoverArgs`/
 >     `buildStackLandArgs`), the guidance renderers (`objectiveSyncGuidance`/
 >     `objectiveRecoverGuidance`/`objectiveLandGuidance`/`syncConflictResolutionGuidance`),
@@ -1289,7 +1297,7 @@ and process mechanics in the Python exterior and adapters.
 >     `ObjectiveLandUpdate`/`LearnConsumeUpdate`, `driveReconcileAfterLand`,
 >     `driveStackReconcile` (→ `stackDrive.ts`, evidence-typed), `evidenceLines` +
 >     `findingLines` (named adapter exports). **Newly introduced**:
->     `ConflictBudget`/`inspectConflictBudget`/`commitConflictAttempt` + the `withheld` arm
+>     `ConflictBudget`/`inspectConflictBudget` + the `withheld` arm
 >     (feature, shared); `SyncResolutionOutcome`/`SyncResolutionDeps`/`ResolverClaim`/
 >     `decideSyncResolution`/`autoDispatchEligible`/`settleSyncEpisode` (feature);
 >     `decideStackReconcile` + `StackReconcileEvidence` (type-only) +
@@ -1307,6 +1315,23 @@ and process mechanics in the Python exterior and adapters.
 >     adapter intentionally carries zero migrated policy — the decision content lives in the
 >     cold plane). Verified by the import graph (the installers import the ops, the unions,
 >     and the ports).
+>   - **Review-address hardening (PR #2127)**: the three PR-new id vocabularies
+>     (`stackConflict.ts::ID_RE`, `stackReconcile.ts::EVIDENCE_ID_RE`,
+>     `land.ts::OBJECTIVE_ID_RE`) and `BRANCH_RE` became alphanumeric-first — ids/branches
+>     reach unquoted CLI-argument positions in injected guidance/dispatch text, so an
+>     option-shaped `-`-leading value (e.g. `--help`) is now out of vocabulary (refusal arms
+>     pinned). The three negative D2 containment tests were repaired to use a canonical ULID
+>     (the fixture id's Crockford-invalid `O` made them vacuous — the ULID check
+>     short-circuited before the path/symlink arms). `commitConflictAttempt` (a policy-free
+>     pass-through) was inlined as each consumer's direct `attempts.write`; the unused
+>     `objectiveArgErr` registrar option was deleted.
+>   - **Declined simplifications (recorded, from the ponytail lane)**: replacing
+>     `StackReconcileEvidence` (the nominal `#private`-branded, frozen mint) with a plain
+>     readonly object — declined: the mint-only nominal evidence IS the plan-settled D6
+>     resolution (the 7.3 `ReadyDriveEvidence` precedent — the exported `driveStackReconcile`
+>     structurally cannot receive unsanitized evidence, where a structural type would accept
+>     any forged object; the freeze is the snapshot-immunity half, pinned in the feature
+>     suite).
 > - **Live-proof closeout protocol** (plan-settled — the 7.3 shape): (1) implementation lands;
 >   review + address complete; the final head is published via `/submit`. (2) From a fresh
 >   session in the train worktree on the final head, run `/objective-stack 2083`,

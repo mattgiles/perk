@@ -31,8 +31,10 @@ import { report } from "../../../surfaces/report.ts";
 const BENIGN_LEARN_SKIPS = new Set(["no_consumed_learn", "dry_run"]);
 
 /** The marker-safe id vocabulary the reconcile drive requires of the objective id — the
- * interpolated guidance is a steering message, so an out-of-vocabulary id never drives. */
-const OBJECTIVE_ID_RE = /^[A-Za-z0-9._-]{1,64}$/;
+ * interpolated guidance is a steering message rendering the id as an unquoted CLI argument,
+ * so an out-of-vocabulary id never drives and an option-shaped `-`-leading id never passes
+ * (alphanumeric-first). */
+const OBJECTIVE_ID_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
 
 export interface ObjectiveLandUpdate {
   /** Opaque string objective id (GitHub "5", Linear "ENG-5") — §8.21. */

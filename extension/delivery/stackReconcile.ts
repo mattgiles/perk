@@ -29,8 +29,10 @@ import {
 
 /** The identifier vocabulary for evidence interpolation (objective/node/plan ids) —
  * whitelist validation doubles as control-character/line-break exclusion, so a poisoned
- * journal string can never break out of its evidence row. */
-const EVIDENCE_ID_RE = /^[A-Za-z0-9._-]{1,64}$/;
+ * journal string can never break out of its evidence row. Alphanumeric-first: the objective
+ * id renders as an unquoted CLI argument in the injected guidance, so an option-shaped
+ * `-`-leading id (or a dotfile-shaped one) never passes. */
+const EVIDENCE_ID_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
 const EVIDENCE_SHA_RE = /^[0-9a-fA-F]{4,64}$/;
 /** The printable-https vocabulary the minted URL must reconstruct into. */
 const PRINTABLE_HTTPS_RE = /^https:\/\/[\x21-\x7e]+$/;

@@ -98,8 +98,6 @@ export function registerStackDrivingCommand(
   opts: {
     name: string;
     description: string;
-    /** The no-objective soft-refusal text (defaults to the shared stack message). */
-    objectiveArgErr?: string;
     guidance: (objective: string) => string;
   },
 ): void {
@@ -112,7 +110,7 @@ export function registerStackDrivingCommand(
       }
       const objective = resolveStackObjective(parseStackObjectiveArg(args ?? "") ?? undefined, ctx);
       if (objective === null) {
-        report(ctx, opts.name, "warning", opts.objectiveArgErr ?? STACK_NO_OBJECTIVE_MESSAGE);
+        report(ctx, opts.name, "warning", STACK_NO_OBJECTIVE_MESSAGE);
         return;
       }
       report(ctx, opts.name, "info", `#${objective}`);

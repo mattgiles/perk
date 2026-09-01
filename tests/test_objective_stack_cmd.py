@@ -495,15 +495,22 @@ def test_contained_continuation_targets_report_true(monkeypatch):
 def test_symlinked_continuation_worktree_reports_targets_contained_false(monkeypatch):
     # A symlink planted at the expected worktree location resolves elsewhere — the
     # containment validation refuses it and the observation fails closed (never raises).
+    # The operation id is a canonical ULID on purpose: the ULID check precedes the path
+    # check, so an invalid id would short-circuit and leave the symlink arm unexercised.
     def plant(root: Path) -> None:
-        op = "01JOP0000000000000000000AA"
+        op = "01JQP0000000000000000000AA"
         outside = root / "elsewhere"
         outside.mkdir(parents=True)
         worktrees = root / ".worktrees"
         worktrees.mkdir(parents=True)
         (worktrees / f"sync-{op}").symlink_to(outside)
         continuation.write_manifest(
-            root, replace(_manifest(), worktree_path=str(worktrees / f"sync-{op}"))
+            root,
+            replace(
+                _manifest(),
+                operation_id=op,
+                worktree_path=str(worktrees / f"sync-{op}"),
+            ),
         )
 
     result, _ = _invoke(
@@ -521,16 +528,15 @@ def test_symlinked_continuation_worktree_reports_targets_contained_false(monkeyp
 def test_foreign_and_relative_continuation_worktrees_report_targets_contained_false(monkeypatch):
     # A foreign absolute parent and a relative path both fall outside the configured
     # worktree root — `targets_contained` is false while the row itself stays parseable.
-    for worktree_path in (
-        "/wt/sync-01JOP0000000000000000000AA",
-        "rel/sync-01JOP0000000000000000000AA",
-    ):
+    # Canonical ULID + matching basename on purpose: only the containment arm may refuse.
+    op = "01JQP0000000000000000000AA"
+    for worktree_path in (f"/wt/sync-{op}", f"rel/sync-{op}"):
         result, _ = _invoke(
             ["objective", "stack", "status", "1431", "--json"],
             monkeypatch=monkeypatch,
             result=_train(),
             setup=lambda root, wt=worktree_path: continuation.write_manifest(
-                root, replace(_manifest(), worktree_path=wt)
+                root, replace(_manifest(), operation_id=op, worktree_path=wt)
             ),
         )
         payload = json.loads(result.stdout)

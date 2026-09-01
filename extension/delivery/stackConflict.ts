@@ -32,7 +32,7 @@ import {
   stringField,
 } from "../substrate/coldDoor.ts";
 import type { LeaseAcquisition } from "../substrate/resolverLease.ts";
-import { type ConflictAttempts, commitConflictAttempt, inspectConflictBudget } from "./submit.ts";
+import { type ConflictAttempts, inspectConflictBudget } from "./submit.ts";
 
 /** The sync-tool invocation mode (which control flags the call carried) — decline wording and
  * the completion verb depend on it, and the flags do not fully disambiguate the envelope.
@@ -47,8 +47,9 @@ export type SyncMode = "sync" | "continue" | "abort";
 
 /** The identifier vocabulary for node/objective ids — whitelist validation doubles as
  * control-character/line-break exclusion, so a poisoned projection string can never break out
- * of the injected dispatch. */
-const ID_RE = /^[A-Za-z0-9._-]{1,64}$/;
+ * of the injected dispatch. Alphanumeric-first: ids reach unquoted CLI-argument positions in
+ * the dispatch template, so an option-shaped `-`-leading id never passes. */
+const ID_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
 /** The ONE lineage predicate — the exact warm twin of the Python `_SAFE_LINEAGE_RE` vocabulary. */
 const LINEAGE_RE = /^[0-9A-Za-z][0-9A-Za-z_-]{0,63}$/;
 /** A canonical 26-char Crockford ULID operation id (`validated_targets`' shape, warm side). */
@@ -60,7 +61,9 @@ const OPERATION_ULID_RE = /^[0-9A-HJKMNP-TV-Z]{26}$/;
  * containing spaces) degrades to report-only — an accepted, recorded degradation.
  */
 const SHELL_INERT_ABS_PATH_RE = /^\/[A-Za-z0-9._/-]+$/;
-const BRANCH_RE = /^[A-Za-z0-9._/-]{1,200}$/;
+/** Branch names interpolate as unquoted git arguments — alphanumeric-first (option-shaped
+ * `-`-leading refs are refused; git itself rejects them, so nothing legitimate is lost). */
+const BRANCH_RE = /^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$/;
 
 function hasDotDotSegment(path: string): boolean {
   return path.split("/").includes("..");
@@ -336,10 +339,11 @@ export async function decideSyncResolution(
       };
     }
     held = { manifestPath: dispatch.manifestPath, token: lease.token };
-    if (!commitConflictAttempt(deps.attempts, budget.next)) {
-      // The verified increment is a precondition for dispatch: without it the cap is
-      // unenforceable. Release the claim acquired in THIS call so the withheld dispatch leaves
-      // no phantom holder — token-fenced, so a successor's raced-in claim is never deleted.
+    if (!deps.attempts.write(budget.next)) {
+      // The seam's strict read-back boolean passes through unsoftened: the verified increment
+      // is a precondition for dispatch — without it the cap is unenforceable. Release the
+      // claim acquired in THIS call so the withheld dispatch leaves no phantom holder —
+      // token-fenced, so a successor's raced-in claim is never deleted.
       releaseQuietly(deps.claim, held);
       held = null;
       return {

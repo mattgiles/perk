@@ -9,7 +9,6 @@ import { test } from "node:test";
 import {
   CONFLICT_RESOLUTION_ATTEMPT_CAP,
   type ConflictAttempts,
-  commitConflictAttempt,
   decideConflictFollowUp,
   inspectConflictBudget,
   type PublishAttempt,
@@ -153,15 +152,6 @@ test("inspectConflictBudget: at (and past) the cap ⇒ exhausted with the observ
     const rec = fakeAttempts({ value: n });
     assert.deepEqual(inspectConflictBudget(rec.attempts), { kind: "exhausted", attempts: n });
   }
-});
-
-test("commitConflictAttempt: the seam's strict read-back boolean passes through unsoftened", () => {
-  const ok = fakeAttempts({ writeResult: true });
-  assert.equal(commitConflictAttempt(ok.attempts, 1), true);
-  assert.deepEqual(ok.writes, [1]);
-  const miss = fakeAttempts({ writeResult: false });
-  assert.equal(commitConflictAttempt(miss.attempts, 2), false);
-  assert.deepEqual(miss.writes, [2]);
 });
 
 // --- decideConflictFollowUp -----------------------------------------------------------------
