@@ -3552,7 +3552,7 @@ network): the team key is bound and resolved to its UUID on first use.
 **The TS mirror is fail-safe** (`extension/substrate/config.ts::resolveIssueBackendId`):
 returns `"github" | "linear"`, falling back to `"github"` on absence/unknown value/any read or
 parse error — safe because the TS plane only *renders prompts*, never writes canonical issues.
-Its consumers are `extension/doors/ready.ts`, `extension/authoring/objective/prose.ts`, and
+Its consumers are `extension/pi/v1/delivery/ready.ts`, `extension/authoring/objective/prose.ts`, and
 `extension/doors/objectiveStack.ts` (backend-aware prompt rendering). `PerkConfig` carries no
 `issues` field — an overlay-read shape would contradict the committed-only rule.
 
@@ -10369,15 +10369,16 @@ when nothing was emitted yet), a loud stderr line naming the standing stamp and 
 `perk ready <plan>` retry, exit 1 — a deliberate broad degrade boundary; the stamp is never
 rolled back.
 
-**The warm drive** (`extension/doors/ready.ts` — the cold contract's parity twin). The warm
-`/ready` door decodes the stacked cohort all-or-nothing and
+**The warm drive** (the feature op `extension/delivery/ready.ts` + its installer
+`extension/pi/v1/delivery/ready.ts` — the cold contract's parity twin). The warm
+`/ready` surface decodes the stacked cohort all-or-nothing and
 **facts-only** — the six fields `objective`/`node`/`stamped_head`/`stamp_advanced`/`plan`/
 `parent_checkpoint`; the envelope's `reconcile_notice`/`reconcile_retry` presentation strings
 are deliberately NOT part of the cohort (the drive derives its own retry gesture from `plan`,
 so missing presentation data can never suppress a valid continuation) — and passes the worker's
 `stacked` routing fact through so a malformed cohort is distinguishable from an incremental
 result. The stamp gesture's own report carries stamp facts only; the continuation is announced
-by the drive, and only once its refusal arms have accepted. `driveReadyReconcile` fires on
+by the drive, and only once its refusal arms have accepted. `driveReadyContinuation` fires on
 every successful stacked stamp (`existed=true` included) and injects the SAME rendered template
 (TS render twin) plus the `command:objective-reconcile` binding suffix — idle sessions get an
 immediate turn, streaming sessions `deliverAs: "followUp"` (the land precedent). The refusal

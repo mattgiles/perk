@@ -628,20 +628,20 @@ Validate, publish, and prepare changes for review and landing.
 
 | Unit | Role | Audience | Canonical source | Consumed by |
 | --- | --- | --- | --- | --- |
-| `typescript-model-call:extension/doors/ready.ts:module:sendUserMessage:0` | `tool-contract` | `shipped` | [`extension/doors/ready.ts`](../../extension/doors/ready.ts) · `symbol:module/call:sendUserMessage/0` | — |
-| `typescript-model-call:extension/doors/ready.ts:module:sendUserMessage:1` | `tool-contract` | `shipped` | [`extension/doors/ready.ts`](../../extension/doors/ready.ts) · `symbol:module/call:sendUserMessage/1` | — |
+| `typescript-model-call:extension/pi/v1/delivery/ready.ts:module:sendUserMessage:0` | `tool-contract` | `shipped` | [`extension/pi/v1/delivery/ready.ts`](../../extension/pi/v1/delivery/ready.ts) · `symbol:module/call:sendUserMessage/0` | — |
+| `typescript-model-call:extension/pi/v1/delivery/ready.ts:module:sendUserMessage:1` | `tool-contract` | `shipped` | [`extension/pi/v1/delivery/ready.ts`](../../extension/pi/v1/delivery/ready.ts) · `symbol:module/call:sendUserMessage/1` | — |
 | `typescript-model-call:extension/pi/v1/delivery/submit.ts:module:sendUserMessage:0` | `tool-contract` | `shipped` | [`extension/pi/v1/delivery/submit.ts`](../../extension/pi/v1/delivery/submit.ts) · `symbol:module/call:sendUserMessage/0` | — |
 | `typescript-model-call:extension/pi/v1/delivery/submit.ts:module:sendUserMessage:1` | `tool-contract` | `shipped` | [`extension/pi/v1/delivery/submit.ts`](../../extension/pi/v1/delivery/submit.ts) · `symbol:module/call:sendUserMessage/1` | — |
-| `typescript-tool:ready` | `tool-contract` | `shipped` | [`extension/doors/ready.ts`](../../extension/doors/ready.ts) · `tool:ready` | — |
+| `typescript-tool:ready` | `tool-contract` | `shipped` | [`extension/pi/v1/delivery/ready.ts`](../../extension/pi/v1/delivery/ready.ts) · `tool:ready` | — |
 | `typescript-tool:run_ci` | `tool-contract` | `shipped` | [`extension/pi/v1/delivery/ci.ts`](../../extension/pi/v1/delivery/ci.ts) · `tool:run_ci` | — |
 | `typescript-tool:submit` | `tool-contract` | `shipped` | [`extension/pi/v1/delivery/submit.ts`](../../extension/pi/v1/delivery/submit.ts) · `tool:submit` | — |
 
 <details>
 <summary>Logical fragments</summary>
 
-- `typescript-model-call:extension/doors/ready.ts:module:sendUserMessage:0`
+- `typescript-model-call:extension/pi/v1/delivery/ready.ts:module:sendUserMessage:0`
   - `argument:0` — sendUserMessage model-facing argument (`symbol:module/call:sendUserMessage/0/argument:0`)
-- `typescript-model-call:extension/doors/ready.ts:module:sendUserMessage:1`
+- `typescript-model-call:extension/pi/v1/delivery/ready.ts:module:sendUserMessage:1`
   - `argument:0` — sendUserMessage model-facing argument (`symbol:module/call:sendUserMessage/1/argument:0`)
 - `typescript-model-call:extension/pi/v1/delivery/submit.ts:module:sendUserMessage:0`
   - `argument:0` — sendUserMessage model-facing argument (`symbol:module/call:sendUserMessage/0/argument:0`)

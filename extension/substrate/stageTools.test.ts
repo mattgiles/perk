@@ -493,11 +493,11 @@ const DRIVE_COVERAGE: readonly {
   {
     // The ready→reconcile continuation drive (contracts.md §8.66): fires wherever a stacked
     // `/ready` can succeed — the same stage set as the reconcile drive above (the pass uses
-    // the same reconcile trio). Gate-active sessions are covered by the drive's own
-    // gating.isActive() refusal, not by this list. The template deliberately names NO
+    // the same reconcile trio). Gate-active sessions are covered by the feature op's own
+    // gate refusal (the injected sessionReadOnly capability), not by this list. The template deliberately names NO
     // ready/land re-entry gesture (re-entry guidance lives on the human-facing surfaces), so
     // this row passes without widening the objective-stage lists.
-    drive: "driveReadyReconcile (stages/objective-reconcile-ready.md)",
+    drive: "driveReadyContinuation (stages/objective-reconcile-ready.md)",
     stages: [...WORKTREE_STAGES, "objective-author", "objective-save", "objective-plan"],
     text: () =>
       render("stages/objective-reconcile-ready.md", {

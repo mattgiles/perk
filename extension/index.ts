@@ -21,7 +21,6 @@ import {
 import { registerObjectiveStack } from "./doors/objectiveStack.ts";
 import { plannotatorPresent } from "./doors/plannotatorHandoff.ts";
 import { openPlanReviewSurface, registerPlanReviewBrowser } from "./doors/planReviewBrowser.ts";
-import { registerReady } from "./doors/ready.ts";
 import { registerSelfcheck } from "./doors/selfcheck.ts";
 import { createHunkFeedbackReceiver } from "./hunkFeedback/receiver.ts";
 import { installAutomatedReviewBindings } from "./pi/v1/codeReview/automated.ts";
@@ -32,6 +31,7 @@ import { installCuratedSubmissionBindings } from "./pi/v1/codeReview/submit.ts";
 import { installPrReviewTerminalBindings } from "./pi/v1/codeReview/terminal.ts";
 import { installAddressBindings } from "./pi/v1/delivery/address.ts";
 import { installCiBindings } from "./pi/v1/delivery/ci.ts";
+import { installReadyBindings } from "./pi/v1/delivery/ready.ts";
 import { installStackStatusBindings } from "./pi/v1/delivery/stackStatus.ts";
 import { installSubmitBindings } from "./pi/v1/delivery/submit.ts";
 import { installGistBindings } from "./pi/v1/gist.ts";
@@ -479,10 +479,10 @@ export default function (pi: ExtensionAPI) {
   // Warm door: the `submit` tool + `/submit` command.
   installSubmitBindings(pi);
 
-  // The warm `ready` door: the deliberate draft→ready review gate (submit keeps draft).
-  // Takes `gating`: the warm ready→reconcile continuation refuses (loudly) to drive the
-  // ready-time pass into a read-only session (contracts.md §8.66).
-  registerReady(pi, gating);
+  // The warm ready + handoff bindings: the deliberate draft→ready review gate (submit keeps
+  // draft). Takes `gating`: the warm ready→reconcile continuation refuses (loudly) to drive
+  // the ready-time pass into a read-only session (contracts.md §8.66).
+  installReadyBindings(pi, gating);
 
   // Warm doors: `land` merges + sets pending-learn; the v1 learn installer (the `learn` +
   // `run_learn_wave` tools and the `/learn` command over the `learning/` feature ops) clears it.

@@ -197,7 +197,7 @@ function objectiveCommand(
  * never throws (the seed prompt's step-1 `perk objective show <id>` step surfaces the URL
  * anyway). Only called for the linear backend (github needs no clause → no fetch). Exported for
  * the warm drives that compose the same backend-aware read clause (the ready-time reconcile
- * drive in `doors/ready.ts`).
+ * drive in `pi/v1/delivery/ready.ts`).
  */
 export async function fetchObjectiveUrl(
   pi: ExtensionAPI,

@@ -783,7 +783,7 @@ Asserted by `tests/test_cli_help_sections.py`.
 **Correction 1 — `pr ready` is worker-only (W), not L+W.** The objective's target tree marks
 `pr ready` as L+W, but `ready` is **not a registry stage** and has no generated launcher. Today
 `ready` is only the pr-group worker `perk pr ready` (dual-surface `--dry-run`/`--json`) plus the
-warm `/ready` door (`extension/doors/ready.ts`) that shells `["pr","ready","--json"]`. So the
+warm `/ready` bindings (`extension/pi/v1/delivery/ready.ts`) that shell `["pr","ready","--json"]`. So the
 genuinely merged (L+W) commands are **`pr submit`, `pr land`, and `plan save` only**; `pr ready`
 stays **worker-only (W)**. §11.5 and §11.6 annotate `pr ready` as **W**.
 
