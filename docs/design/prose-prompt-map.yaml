@@ -476,7 +476,7 @@ routes:
     role: context
     priority: 100
   - id: ts-session
-    match: { paths: ["extension/doors/commitCompact.ts", "extension/doors/lifecycleGates.ts", "extension/substrate/bindingDelivery.ts", "extension/substrate/toolGating.ts"] }
+    match: { paths: ["extension/pi/v1/delivery/commitCompact.ts", "extension/doors/lifecycleGates.ts", "extension/substrate/bindingDelivery.ts", "extension/substrate/toolGating.ts"] }
     capability: foundation.session
     audience: shipped
     role: context

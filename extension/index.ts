@@ -7,7 +7,6 @@
 import { existsSync, mkdirSync } from "node:fs";
 import { basename, join } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { registerCommitAndCompact } from "./doors/commitCompact.ts";
 import {
   createDraftReviewWaveState,
   registerDraftReviewWaveTools,
@@ -31,6 +30,7 @@ import { installCuratedSubmissionBindings } from "./pi/v1/codeReview/submit.ts";
 import { installPrReviewTerminalBindings } from "./pi/v1/codeReview/terminal.ts";
 import { installAddressBindings } from "./pi/v1/delivery/address.ts";
 import { installCiBindings } from "./pi/v1/delivery/ci.ts";
+import { installCommitCompactBindings } from "./pi/v1/delivery/commitCompact.ts";
 import { installLandBindings } from "./pi/v1/delivery/land.ts";
 import { installReadyBindings } from "./pi/v1/delivery/ready.ts";
 import { installStackLandBindings } from "./pi/v1/delivery/stackLand.ts";
@@ -576,7 +576,7 @@ export default function (pi: ExtensionAPI) {
   // a successful outcome is known, then completion-gate an automatic evidence-first continuation
   // (clean/read-only trees compact immediately; no commit → no compaction or continuation).
   // Human-only — no tool twin.
-  registerCommitAndCompact(pi, gating);
+  installCommitCompactBindings(pi, gating);
 
   // The objective plan factory's warm transition surface: the `objective_node` bounded
   // tool (delegates to the Python cold door; `status:"done"` requires a completion audit) + the

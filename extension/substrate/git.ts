@@ -97,6 +97,17 @@ export function headSha(cwd: string): string | null {
 }
 
 /**
+ * The symbolic branch pointer HEAD names (`git symbolic-ref -q HEAD`, e.g. `refs/heads/main`)
+ * — resolvable even for an UNBORN branch (no commits yet), which is what the one caller uses it
+ * for: discriminating "unborn" from "unreadable" when `headSha` returns null. A detached HEAD
+ * fails here (null), but there `headSha` already succeeds. **Fail-open**: null on any failure
+ * (not a repo, git missing), never throws.
+ */
+export function symbolicHead(cwd: string): string | null {
+  return git(cwd, ["symbolic-ref", "-q", "HEAD"]);
+}
+
+/**
  * Whether the working tree has anything uncommitted (`git status --porcelain`). Untracked files
  * count as dirty — deliberate: the model decides whether they belong in a commit. **Fail-open to
  * null** on any failure (not a repo, git missing) — callers must NOT conflate null with clean.

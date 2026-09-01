@@ -197,7 +197,6 @@ const TRANSPORT_TOKEN = /\bWAVE_RPC_|subagents:rpc:v1/;
 // join it (new registrations go under `pi/`). The three deleted gist factories left the census
 // in the activating change itself — the first burn-down.
 const LEGACY_REGISTRANTS = [
-  "doors/commitCompact.ts",
   "doors/draftReviewWaveTools.ts",
   "doors/lifecycleGates.ts",
   "doors/objectiveReviewBrowser.ts",
