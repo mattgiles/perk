@@ -2,7 +2,7 @@
 // review — plannotator always, no provider dispatch (the surface-named command IS the selection).
 //
 // Three modes, keyed off the arg parse + the active-PR resolution ladder (the parse is IMPORTED
-// from prReviewTerminal.ts — one function ⇒ identical arg semantics by construction):
+// from terminal.ts — one function ⇒ identical arg semantics by construction):
 //   foreign — `/pr-review-browser <pr|url> [focus]`: the detached `perk pr review checkout`, the
 //             browser opened in the background on the PR URL, the async adversarial-reviewer
 //             fan-out with per-angle annotation waves streamed to the local plannotator server.
@@ -30,20 +30,13 @@
 //
 // THE COMPANION TOOLS: the reviewer fan-out is the globally registered `start_review_wave` /
 // `collect_review_wave` pair, and the annotation delivery is the globally registered
-// `push_annotations` tool PRIMED BY THIS DOOR (`primeAnnotationSurface` on a PR-mode open,
-// cleared on bridge settle and on the readiness-degrade arm — the model never sees the URL).
+// `push_annotations` tool PRIMED BY THIS DOOR (`primeAnnotationSurface` over the threaded
+// per-activation annotation state on a PR-mode open, cleared on bridge settle and on the
+// readiness-degrade arm — the model never sees the URL).
 // The door still registers NO tools of its own; perk-side posting reuses `submit_pr_review`
-// (registered by `registerSubmitPrReview`). The local (pre-PR) mode never primes.
+// (installed by `installCuratedSubmissionBindings`). The local (pre-PR) mode never primes.
 
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { bindingSuffix } from "../substrate/bindingDelivery.ts";
-import { runColdDoor } from "../substrate/coldDoor.ts";
-import { registerPerkCommand } from "../substrate/command.ts";
-import { interceptConsoleError } from "../substrate/consoleCapture.ts";
-import { render } from "../substrate/prompts.ts";
-import { type ReportTarget, report } from "../surfaces/report.ts";
-import { clearAnnotationSurface, primeAnnotationSurface } from "./annotationPush.ts";
-import { type CheckoutOk, decodeCheckout } from "./hunkHandoff.ts";
 import {
   type CodeReviewOutcome,
   decodePrUrl,
@@ -57,8 +50,20 @@ import {
   routePrReviewOutcome,
   type StartedBrowser,
   startPlannotatorBrowser,
-} from "./plannotatorHandoff.ts";
-import { parseReviewDoorArgs } from "./prReviewTerminal.ts";
+} from "../../../doors/plannotatorHandoff.ts";
+import { bindingSuffix } from "../../../substrate/bindingDelivery.ts";
+import { runColdDoor } from "../../../substrate/coldDoor.ts";
+import { registerPerkCommand } from "../../../substrate/command.ts";
+import { interceptConsoleError } from "../../../substrate/consoleCapture.ts";
+import { render } from "../../../substrate/prompts.ts";
+import { type ReportTarget, report } from "../../../surfaces/report.ts";
+import {
+  type AnnotationState,
+  clearAnnotationSurface,
+  primeAnnotationSurface,
+} from "../providers/annotations.ts";
+import { type CheckoutOk, decodeCheckout } from "./checkout.ts";
+import { parseReviewDoorArgs } from "./terminal.ts";
 
 /** The door's report scope — also the `command:<id>` binding trigger id. */
 const SCOPE = "pr-review-browser";
@@ -118,6 +123,7 @@ export async function observeBrowserReadiness(
   pi: RespondSink,
   ctx: ReportTarget & Pick<ExtensionContext, "isIdle">,
   started: StartedBrowser,
+  annotations: AnnotationState,
   opts?: { scope?: string; degradeNotice?: string },
 ): Promise<void> {
   const scope = opts?.scope ?? SCOPE;
@@ -147,7 +153,7 @@ export async function observeBrowserReadiness(
   }
   // Consistent with "render findings in-session": a post-degrade push_annotations refuses
   // loudly (`no_surface`). Idempotent beside the bridge-settle clear.
-  clearAnnotationSurface();
+  clearAnnotationSurface(annotations);
 }
 
 /** The parameterized browser-lifecycle core's options (see `openReviewBrowserCore`). */
@@ -188,6 +194,7 @@ export interface ReviewBrowserCoreOpts {
 export async function openReviewBrowserCore(
   pi: ExtensionAPI,
   ctx: ExtensionContext,
+  annotations: AnnotationState,
   opts: ReviewBrowserCoreOpts,
 ): Promise<boolean> {
   let started: StartedBrowser;
@@ -208,9 +215,9 @@ export async function openReviewBrowserCore(
     return false;
   }
 
-  primeAnnotationSurface({ mode: "review", url: started.url });
+  primeAnnotationSurface(annotations, { mode: "review", url: started.url });
 
-  void observeBrowserReadiness(pi, ctx, started, {
+  void observeBrowserReadiness(pi, ctx, started, annotations, {
     scope: opts.scope,
     ...(opts.degradeNotice !== undefined ? { degradeNotice: opts.degradeNotice } : {}),
   });
@@ -225,7 +232,7 @@ export async function openReviewBrowserCore(
       routeBrowserRespond(pi, ctx, out, opts.scope, opts.respondMessageFor);
     } finally {
       // The browser session is over — drop the surface so a later push refuses (`no_surface`).
-      clearAnnotationSurface();
+      clearAnnotationSurface(annotations);
       interceptor.restore();
     }
   })();
@@ -243,9 +250,10 @@ export async function openReviewBrowserCore(
 async function openBrowserAndGuide(
   pi: ExtensionAPI,
   ctx: ExtensionContext,
+  annotations: AnnotationState,
   opts: PrReviewBrowserGuidanceOpts,
 ): Promise<void> {
-  await openReviewBrowserCore(pi, ctx, {
+  await openReviewBrowserCore(pi, ctx, annotations, {
     scope: SCOPE,
     browserOpts: { prUrl: opts.prUrl, cwd: ctx.cwd },
     guidance: prReviewBrowserGuidance(opts) + bindingSuffix(ctx.cwd, `command:${SCOPE}`),
@@ -254,8 +262,11 @@ async function openBrowserAndGuide(
 
 // ------------------------------------------------------------------------ registration
 
-/** Register the warm `/pr-review-browser` command (no tools — posting rides submit_pr_review). */
-export function registerPrReviewBrowser(pi: ExtensionAPI): void {
+/** Install the warm `/pr-review-browser` command (no tools — posting rides submit_pr_review). */
+export function installPrReviewBrowserBindings(
+  pi: ExtensionAPI,
+  annotations: AnnotationState,
+): void {
   registerPerkCommand(pi, SCOPE, {
     description:
       "Review a PR human-in-the-loop in the plannotator browser UI: no arg reviews the active " +
@@ -317,7 +328,7 @@ export function registerPrReviewBrowser(pi: ExtensionAPI): void {
             ? `PR #${parsed.pr} → adversarial reviewers (focus: ${parsed.directive}) → plannotator browser triage → you post from the browser`
             : `PR #${parsed.pr} → adversarial reviewers → plannotator browser triage → you post from the browser`,
         );
-        await openBrowserAndGuide(pi, ctx, {
+        await openBrowserAndGuide(pi, ctx, annotations, {
           mode: "foreign",
           pr: parsed.pr,
           prUrl: checkout.data.url,
@@ -355,7 +366,7 @@ export function registerPrReviewBrowser(pi: ExtensionAPI): void {
             ? `PR #${target.number} (active worktree) → adversarial reviewers (focus: ${parsed.directive}) → plannotator browser triage → you post from the browser`
             : `PR #${target.number} (active worktree) → adversarial reviewers → plannotator browser triage → you post from the browser`,
         );
-        await openBrowserAndGuide(pi, ctx, {
+        await openBrowserAndGuide(pi, ctx, annotations, {
           mode: "active",
           pr: target.number,
           prUrl: target.prUrl,

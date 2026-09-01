@@ -10,20 +10,25 @@ import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { test } from "node:test";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { PERK_TOOLS, STAGE_TOOLS } from "../substrate/toolGating.ts";
-import { loadPerkSession, scaffoldRepo } from "../testing/harness.ts";
+import { PERK_TOOLS, STAGE_TOOLS } from "../../../substrate/toolGating.ts";
+import { loadPerkSession, scaffoldRepo } from "../../../testing/harness.ts";
 import {
   clearAnnotationSurface,
+  createAnnotationState,
   decodePushAnnotationsParams,
   executePushAnnotations,
   type FetchLike,
   type FetchResponseLike,
+  installAnnotationBindings,
   mapFindings,
   type PlanFinding,
   primeAnnotationSurface,
   type ReviewFinding,
-  registerAnnotationPushTool,
-} from "./annotationPush.ts";
+} from "./annotations.ts";
+
+// The execute-core tests share ONE state instance — every test primes at its start, and a
+// prime fully resets the ledger/held/alternates (exactly the per-session semantics).
+const state = createAnnotationState();
 
 // --- fixtures ----------------------------------------------------------------------------------
 
@@ -429,10 +434,11 @@ test("mapFindings plan mode: COMMENT-with-originalText vs GLOBAL_COMMENT", () =>
 // --- executePushAnnotations: the execute core over the injected fetchLike -----------------------
 
 test("execute: unprimed → no_surface; bad params → bad_input — no fetch either way", async () => {
-  clearAnnotationSurface();
+  clearAnnotationSurface(state);
   const { target, notified } = fakeTarget();
   const endpoint = fakeEndpoint();
   const unprimed = await executePushAnnotations(
+    state,
     target,
     { angle: "tests", findings: [reviewFinding()] },
     { fetchLike: endpoint.fetchLike },
@@ -446,8 +452,9 @@ test("execute: unprimed → no_surface; bad params → bad_input — no fetch ei
   );
 
   // The primed mode selects the refusal shape (surface check precedes decode).
-  primeAnnotationSurface({ mode: "review", url: URL_BASE });
+  primeAnnotationSurface(state, { mode: "review", url: URL_BASE });
   const badReview = await executePushAnnotations(
+    state,
     target,
     { angle: "tests", findings: [planFinding()] },
     { fetchLike: endpoint.fetchLike },
@@ -456,8 +463,9 @@ test("execute: unprimed → no_surface; bad params → bad_input — no fetch ei
   assert.match(badReview.content[0]?.text ?? "", /review-mode/);
   assert.equal(endpoint.calls.length, 0, "decode-before-side-effect");
 
-  primeAnnotationSurface({ mode: "plan", url: URL_BASE });
+  primeAnnotationSurface(state, { mode: "plan", url: URL_BASE });
   const badPlan = await executePushAnnotations(
+    state,
     target,
     { angle: "tests", findings: [reviewFinding()] },
     { fetchLike: endpoint.fetchLike },
@@ -468,10 +476,11 @@ test("execute: unprimed → no_surface; bad params → bad_input — no fetch ei
 });
 
 test("execute: a push is ONE POST with the exact batch body; 201 ids captured in details", async () => {
-  primeAnnotationSurface({ mode: "review", url: `${URL_BASE}/` }); // trailing slash normalized
+  primeAnnotationSurface(state, { mode: "review", url: `${URL_BASE}/` }); // trailing slash normalized
   const { target } = fakeTarget();
   const endpoint = fakeEndpoint();
   const result = await executePushAnnotations(
+    state,
     target,
     {
       angle: "tests",
@@ -517,10 +526,11 @@ test("execute: a push is ONE POST with the exact batch body; 201 ids captured in
 });
 
 test("execute: dedupe skips pushed anchors — same angle, cross-angle, and intra-batch", async () => {
-  primeAnnotationSurface({ mode: "review", url: URL_BASE });
+  primeAnnotationSurface(state, { mode: "review", url: URL_BASE });
   const { target } = fakeTarget();
   const endpoint = fakeEndpoint();
   await executePushAnnotations(
+    state,
     target,
     { angle: "tests", findings: [reviewFinding()] },
     { fetchLike: endpoint.fetchLike },
@@ -529,6 +539,7 @@ test("execute: dedupe skips pushed anchors — same angle, cross-angle, and intr
 
   // Re-push of a pushed anchor: skipped, no POST, still ok (skipped, never refused).
   const repush = await executePushAnnotations(
+    state,
     target,
     { angle: "tests", findings: [reviewFinding({ body: "reworded duplicate" })] },
     { fetchLike: endpoint.fetchLike },
@@ -543,6 +554,7 @@ test("execute: dedupe skips pushed anchors — same angle, cross-angle, and intr
   // Cross-angle collision: an anchor pushed under one source is never re-pushed under another;
   // intra-batch duplicates collapse too.
   const cross = await executePushAnnotations(
+    state,
     target,
     {
       angle: "quality",
@@ -564,12 +576,13 @@ test("execute: dedupe skips pushed anchors — same angle, cross-angle, and intr
 });
 
 test("execute: a network failure holds the batch (ok, never a degrade); [] flushes FIFO", async () => {
-  primeAnnotationSurface({ mode: "review", url: URL_BASE });
+  primeAnnotationSurface(state, { mode: "review", url: URL_BASE });
   const { target, notified } = fakeTarget();
   const endpoint = fakeEndpoint();
   endpoint.setDown(true);
 
   const heldOne = await executePushAnnotations(
+    state,
     target,
     { angle: "tests", findings: [reviewFinding()] },
     { fetchLike: endpoint.fetchLike },
@@ -590,6 +603,7 @@ test("execute: a network failure holds the batch (ok, never a degrade); [] flush
 
   // A second batch queues behind (FIFO); a held anchor dedupes (not re-held).
   const heldTwo = await executePushAnnotations(
+    state,
     target,
     {
       angle: "quality",
@@ -605,6 +619,7 @@ test("execute: a network failure holds the batch (ok, never a degrade); [] flush
   // The server comes up: an empty-findings call is the pure retry — FIFO order pinned.
   endpoint.setDown(false);
   const flushed = await executePushAnnotations(
+    state,
     target,
     { angle: "tests", findings: [] },
     { fetchLike: endpoint.fetchLike },
@@ -625,6 +640,7 @@ test("execute: a network failure holds the batch (ok, never a degrade); [] flush
 
   // The flushed anchors are in the ledger now: re-pushing them skips.
   const repush = await executePushAnnotations(
+    state,
     target,
     { angle: "tests", findings: [reviewFinding()] },
     { fetchLike: endpoint.fetchLike },
@@ -633,11 +649,12 @@ test("execute: a network failure holds the batch (ok, never a degrade); [] flush
 });
 
 test("execute: an HTTP rejection is the loud push_rejected — the batch is NOT held", async () => {
-  primeAnnotationSurface({ mode: "review", url: URL_BASE });
+  primeAnnotationSurface(state, { mode: "review", url: URL_BASE });
   const { target, notified } = fakeTarget();
   const endpoint = fakeEndpoint();
   endpoint.failNext("POST", 400, "annotations[0] missing required field");
   const result = await executePushAnnotations(
+    state,
     target,
     { angle: "tests", findings: [reviewFinding()] },
     { fetchLike: endpoint.fetchLike },
@@ -653,6 +670,7 @@ test("execute: an HTTP rejection is the loud push_rejected — the batch is NOT 
   assert.ok(notified.some((n) => n.severity === "error"));
   // Nothing held: a following pure-retry call makes no fetch at all.
   const idle = await executePushAnnotations(
+    state,
     target,
     { angle: "tests", findings: [] },
     { fetchLike: endpoint.fetchLike },
@@ -662,16 +680,18 @@ test("execute: an HTTP rejection is the loud push_rejected — the batch is NOT 
 });
 
 test("execute: a 400 mid-flush drops only the rejected batch and retains the rest", async () => {
-  primeAnnotationSurface({ mode: "review", url: URL_BASE });
+  primeAnnotationSurface(state, { mode: "review", url: URL_BASE });
   const { target } = fakeTarget();
   const endpoint = fakeEndpoint();
   endpoint.setDown(true);
   await executePushAnnotations(
+    state,
     target,
     { angle: "tests", findings: [reviewFinding()] },
     { fetchLike: endpoint.fetchLike },
   );
   await executePushAnnotations(
+    state,
     target,
     { angle: "quality", findings: [reviewFinding({ path: "src/q.ts", line: 7 })] },
     { fetchLike: endpoint.fetchLike },
@@ -679,6 +699,7 @@ test("execute: a 400 mid-flush drops only the rejected batch and retains the res
   endpoint.setDown(false);
   endpoint.failNext("POST", 400, "drifted");
   const rejected = await executePushAnnotations(
+    state,
     target,
     { angle: "tests", findings: [] },
     { fetchLike: endpoint.fetchLike },
@@ -691,6 +712,7 @@ test("execute: a 400 mid-flush drops only the rejected batch and retains the res
 
   // The retained batch flushes on the next call.
   const flushed = await executePushAnnotations(
+    state,
     target,
     { angle: "tests", findings: [] },
     { fetchLike: endpoint.fetchLike },
@@ -706,10 +728,11 @@ test("execute: a 400 mid-flush drops only the rejected batch and retains the res
 });
 
 test("execute: replace is DELETE-then-POST — angle ledger cleared, other angles' anchors skip", async () => {
-  primeAnnotationSurface({ mode: "review", url: URL_BASE });
+  primeAnnotationSurface(state, { mode: "review", url: URL_BASE });
   const { target } = fakeTarget();
   const endpoint = fakeEndpoint({ removed: 2 });
   await executePushAnnotations(
+    state,
     target,
     {
       angle: "tests",
@@ -718,6 +741,7 @@ test("execute: replace is DELETE-then-POST — angle ledger cleared, other angle
     { fetchLike: endpoint.fetchLike },
   );
   await executePushAnnotations(
+    state,
     target,
     { angle: "quality", findings: [reviewFinding({ path: "src/q.ts", line: 7 })] },
     { fetchLike: endpoint.fetchLike },
@@ -727,6 +751,7 @@ test("execute: replace is DELETE-then-POST — angle ledger cleared, other angle
   // Reconcile re-shapes the tests angle: the previously-pushed anchor re-pushes after the
   // source-scoped clear; the other angle's anchor skips (its annotations are untouchable).
   const replaced = await executePushAnnotations(
+    state,
     target,
     {
       angle: "tests",
@@ -761,6 +786,7 @@ test("execute: replace is DELETE-then-POST — angle ledger cleared, other angle
   // replace + findings: [] is a pure source clear — DELETE only, no POST.
   endpoint.calls.length = 0;
   const cleared = await executePushAnnotations(
+    state,
     target,
     { angle: "tests", findings: [], replace: true },
     { fetchLike: endpoint.fetchLike },
@@ -773,6 +799,7 @@ test("execute: replace is DELETE-then-POST — angle ledger cleared, other angle
 
   // …and the cleared anchor is re-pushable (the angle's ledger entries went with the clear).
   const repushed = await executePushAnnotations(
+    state,
     target,
     { angle: "tests", findings: [reviewFinding()] },
     { fetchLike: endpoint.fetchLike },
@@ -781,16 +808,18 @@ test("execute: replace is DELETE-then-POST — angle ledger cleared, other angle
 });
 
 test("execute: a DELETE network failure holds the WHOLE replace unit (retried together)", async () => {
-  primeAnnotationSurface({ mode: "review", url: URL_BASE });
+  primeAnnotationSurface(state, { mode: "review", url: URL_BASE });
   const { target } = fakeTarget();
   const endpoint = fakeEndpoint({ removed: 1 });
   await executePushAnnotations(
+    state,
     target,
     { angle: "tests", findings: [reviewFinding()] },
     { fetchLike: endpoint.fetchLike },
   );
   endpoint.setDown(true);
   const heldUnit = await executePushAnnotations(
+    state,
     target,
     { angle: "tests", findings: [reviewFinding({ body: "reconciled" })], replace: true },
     { fetchLike: endpoint.fetchLike },
@@ -802,6 +831,7 @@ test("execute: a DELETE network failure holds the WHOLE replace unit (retried to
   endpoint.setDown(false);
   endpoint.calls.length = 0;
   const flushed = await executePushAnnotations(
+    state,
     target,
     { angle: "tests", findings: [] },
     { fetchLike: endpoint.fetchLike },
@@ -818,10 +848,11 @@ test("execute: a DELETE network failure holds the WHOLE replace unit (retried to
 });
 
 test("execute: plan-mode batches post the COMMENT/GLOBAL_COMMENT shapes", async () => {
-  primeAnnotationSurface({ mode: "plan", url: URL_BASE });
+  primeAnnotationSurface(state, { mode: "plan", url: URL_BASE });
   const { target } = fakeTarget();
   const endpoint = fakeEndpoint();
   const result = await executePushAnnotations(
+    state,
     target,
     { angle: "scope", findings: [planFinding(), planFinding({ phrase: null, body: "global" })] },
     { fetchLike: endpoint.fetchLike },
@@ -846,26 +877,29 @@ test("execute: plan-mode batches post the COMMENT/GLOBAL_COMMENT shapes", async 
 });
 
 test("execute: re-priming resets the ledger and the held queue (a new session supersedes)", async () => {
-  primeAnnotationSurface({ mode: "review", url: URL_BASE });
+  primeAnnotationSurface(state, { mode: "review", url: URL_BASE });
   const { target } = fakeTarget();
   const endpoint = fakeEndpoint();
   await executePushAnnotations(
+    state,
     target,
     { angle: "tests", findings: [reviewFinding()] },
     { fetchLike: endpoint.fetchLike },
   );
   endpoint.setDown(true);
   await executePushAnnotations(
+    state,
     target,
     { angle: "quality", findings: [reviewFinding({ path: "src/q.ts", line: 7 })] },
     { fetchLike: endpoint.fetchLike },
   );
   endpoint.setDown(false);
 
-  primeAnnotationSurface({ mode: "review", url: URL_BASE });
+  primeAnnotationSurface(state, { mode: "review", url: URL_BASE });
   endpoint.calls.length = 0;
   // The held batch is gone (no flush POST) and the pushed anchor re-pushes.
   const repush = await executePushAnnotations(
+    state,
     target,
     { angle: "tests", findings: [reviewFinding()] },
     { fetchLike: endpoint.fetchLike },
@@ -882,13 +916,14 @@ test("execute: re-priming resets the ledger and the held queue (a new session su
 });
 
 test("execute: POST success is the contract's 201 exactly — a non-201 2xx is push_rejected", async () => {
-  primeAnnotationSurface({ mode: "review", url: URL_BASE });
+  primeAnnotationSurface(state, { mode: "review", url: URL_BASE });
   const { target } = fakeTarget();
   const endpoint = fakeEndpoint();
   // A 200-with-body answer is endpoint drift, not success — recording anchors against it would
   // suppress the retries drift needs to surface.
   endpoint.failNext("POST", 200, "drifted endpoint");
   const drifted = await executePushAnnotations(
+    state,
     target,
     { angle: "tests", findings: [reviewFinding()] },
     { fetchLike: endpoint.fetchLike },
@@ -900,6 +935,7 @@ test("execute: POST success is the contract's 201 exactly — a non-201 2xx is p
   assert.equal(details.held, 0);
   // Nothing was recorded in the ledger: the same anchor re-pushes (and succeeds on a real 201).
   const repush = await executePushAnnotations(
+    state,
     target,
     { angle: "tests", findings: [reviewFinding()] },
     { fetchLike: endpoint.fetchLike },
@@ -909,16 +945,18 @@ test("execute: POST success is the contract's 201 exactly — a non-201 2xx is p
 });
 
 test("execute: a network-failed pure clear stays a visible pending operation", async () => {
-  primeAnnotationSurface({ mode: "review", url: URL_BASE });
+  primeAnnotationSurface(state, { mode: "review", url: URL_BASE });
   const { target } = fakeTarget();
   const endpoint = fakeEndpoint({ removed: 1 });
   await executePushAnnotations(
+    state,
     target,
     { angle: "tests", findings: [reviewFinding()] },
     { fetchLike: endpoint.fetchLike },
   );
   endpoint.setDown(true);
   const heldClear = await executePushAnnotations(
+    state,
     target,
     { angle: "tests", findings: [], replace: true },
     { fetchLike: endpoint.fetchLike },
@@ -935,6 +973,7 @@ test("execute: a network-failed pure clear stays a visible pending operation", a
   endpoint.setDown(false);
   endpoint.calls.length = 0;
   const retried = await executePushAnnotations(
+    state,
     target,
     { angle: "tests", findings: [] },
     { fetchLike: endpoint.fetchLike },
@@ -949,16 +988,18 @@ test("execute: a network-failed pure clear stays a visible pending operation", a
 });
 
 test("execute: a new batch never dedupes against a ledger entry a held clear is about to remove", async () => {
-  primeAnnotationSurface({ mode: "review", url: URL_BASE });
+  primeAnnotationSurface(state, { mode: "review", url: URL_BASE });
   const { target } = fakeTarget();
   const endpoint = fakeEndpoint({ removed: 1 });
   await executePushAnnotations(
+    state,
     target,
     { angle: "tests", findings: [reviewFinding()] },
     { fetchLike: endpoint.fetchLike },
   );
   endpoint.setDown(true);
   await executePushAnnotations(
+    state,
     target,
     { angle: "tests", findings: [], replace: true },
     { fetchLike: endpoint.fetchLike },
@@ -970,6 +1011,7 @@ test("execute: a new batch never dedupes against a ledger entry a held clear is 
   // FIRST, then the new batch dedupes against the settled (cleared) ledger — the finding posts
   // instead of being silently lost to the stale entry.
   const repush = await executePushAnnotations(
+    state,
     target,
     { angle: "tests", findings: [reviewFinding()] },
     { fetchLike: endpoint.fetchLike },
@@ -985,16 +1027,18 @@ test("execute: a new batch never dedupes against a ledger entry a held clear is 
 });
 
 test("execute: hold-time dedupe carves out sources with a pending held clear", async () => {
-  primeAnnotationSurface({ mode: "review", url: URL_BASE });
+  primeAnnotationSurface(state, { mode: "review", url: URL_BASE });
   const { target } = fakeTarget();
   const endpoint = fakeEndpoint({ removed: 1 });
   await executePushAnnotations(
+    state,
     target,
     { angle: "tests", findings: [reviewFinding()] },
     { fetchLike: endpoint.fetchLike },
   );
   endpoint.setDown(true);
   await executePushAnnotations(
+    state,
     target,
     { angle: "tests", findings: [], replace: true },
     { fetchLike: endpoint.fetchLike },
@@ -1002,6 +1046,7 @@ test("execute: hold-time dedupe carves out sources with a pending held clear", a
   // Still down: another angle supplies the same anchor. The stale (unstable) ledger entry must
   // not veto it at hold time — it is held, then deduped for real at flush time.
   const heldCross = await executePushAnnotations(
+    state,
     target,
     { angle: "quality", findings: [reviewFinding({ body: "quality's take" })] },
     { fetchLike: endpoint.fetchLike },
@@ -1014,6 +1059,7 @@ test("execute: hold-time dedupe carves out sources with a pending held clear", a
   endpoint.setDown(false);
   endpoint.calls.length = 0;
   const flushed = await executePushAnnotations(
+    state,
     target,
     { angle: "quality", findings: [] },
     { fetchLike: endpoint.fetchLike },
@@ -1028,17 +1074,19 @@ test("execute: hold-time dedupe carves out sources with a pending held clear", a
 });
 
 test("execute: cross-source duplicates in final batches are retained and promoted, never lost", async () => {
-  primeAnnotationSurface({ mode: "review", url: URL_BASE });
+  primeAnnotationSurface(state, { mode: "review", url: URL_BASE });
   const { target } = fakeTarget();
   const endpoint = fakeEndpoint();
   // Streamed: tests owns anchor X.
   await executePushAnnotations(
+    state,
     target,
     { angle: "tests", findings: [reviewFinding()] },
     { fetchLike: endpoint.fetchLike },
   );
   // quality's FINAL batch also carries X: skipped (tests owns it) but RETAINED as a candidate.
   const qualityFinal = await executePushAnnotations(
+    state,
     target,
     {
       angle: "quality",
@@ -1056,6 +1104,7 @@ test("execute: cross-source duplicates in final batches are retained and promote
   // candidate is promoted in the same POST — the union of final batches survives the order.
   endpoint.calls.length = 0;
   const testsFinal = await executePushAnnotations(
+    state,
     target,
     { angle: "tests", findings: [reviewFinding({ path: "src/t.ts", line: 9 })], replace: true },
     { fetchLike: endpoint.fetchLike },
@@ -1079,6 +1128,7 @@ test("execute: cross-source duplicates in final batches are retained and promote
 
   // Ownership transferred: the anchor now dedupes against quality.
   const repush = await executePushAnnotations(
+    state,
     target,
     { angle: "correctness", findings: [reviewFinding()] },
     { fetchLike: endpoint.fetchLike },
@@ -1087,11 +1137,12 @@ test("execute: cross-source duplicates in final batches are retained and promote
 });
 
 test("execute: a DELETE HTTP rejection is push_rejected — the replace unit is dropped", async () => {
-  primeAnnotationSurface({ mode: "review", url: URL_BASE });
+  primeAnnotationSurface(state, { mode: "review", url: URL_BASE });
   const { target } = fakeTarget();
   const endpoint = fakeEndpoint();
   endpoint.failNext("DELETE", 500, "boom");
   const result = await executePushAnnotations(
+    state,
     target,
     { angle: "tests", findings: [reviewFinding()], replace: true },
     { fetchLike: endpoint.fetchLike },
@@ -1104,6 +1155,7 @@ test("execute: a DELETE HTTP rejection is push_rejected — the replace unit is 
   assert.equal(details.held, 0);
   // Nothing held: the pure retry makes no fetch.
   const idle = await executePushAnnotations(
+    state,
     target,
     { angle: "tests", findings: [] },
     { fetchLike: endpoint.fetchLike },
@@ -1113,21 +1165,24 @@ test("execute: a DELETE HTTP rejection is push_rejected — the replace unit is 
 });
 
 test("execute: a replace supersedes the angle's held work (units and items), sparing other sources", async () => {
-  primeAnnotationSurface({ mode: "review", url: URL_BASE });
+  primeAnnotationSurface(state, { mode: "review", url: URL_BASE });
   const { target } = fakeTarget();
   const endpoint = fakeEndpoint();
   endpoint.setDown(true);
   await executePushAnnotations(
+    state,
     target,
     { angle: "tests", findings: [reviewFinding()] },
     { fetchLike: endpoint.fetchLike },
   ); // held: tests [X]
   await executePushAnnotations(
+    state,
     target,
     { angle: "quality", findings: [reviewFinding({ path: "src/q.ts", line: 7 })] },
     { fetchLike: endpoint.fetchLike },
   ); // held: tests [X], quality [Q]
   const replaced = await executePushAnnotations(
+    state,
     target,
     { angle: "tests", findings: [reviewFinding({ path: "src/t.ts", line: 9 })], replace: true },
     { fetchLike: endpoint.fetchLike },
@@ -1139,6 +1194,7 @@ test("execute: a replace supersedes the angle's held work (units and items), spa
   endpoint.setDown(false);
   endpoint.calls.length = 0;
   const flushed = await executePushAnnotations(
+    state,
     target,
     { angle: "tests", findings: [] },
     { fetchLike: endpoint.fetchLike },
@@ -1157,16 +1213,18 @@ test("execute: a replace supersedes the angle's held work (units and items), spa
 });
 
 test("execute: a POST network failure after a successful DELETE holds only the post remainder", async () => {
-  primeAnnotationSurface({ mode: "review", url: URL_BASE });
+  primeAnnotationSurface(state, { mode: "review", url: URL_BASE });
   const { target } = fakeTarget();
   const endpoint = fakeEndpoint({ removed: 1 });
   await executePushAnnotations(
+    state,
     target,
     { angle: "tests", findings: [reviewFinding()] },
     { fetchLike: endpoint.fetchLike },
   );
   endpoint.setDown(true, "POST");
   const partial = await executePushAnnotations(
+    state,
     target,
     { angle: "tests", findings: [reviewFinding({ body: "reconciled" })], replace: true },
     { fetchLike: endpoint.fetchLike },
@@ -1180,6 +1238,7 @@ test("execute: a POST network failure after a successful DELETE holds only the p
   endpoint.setDown(false);
   endpoint.calls.length = 0;
   const flushed = await executePushAnnotations(
+    state,
     target,
     { angle: "tests", findings: [] },
     { fetchLike: endpoint.fetchLike },
@@ -1194,12 +1253,25 @@ test("execute: a POST network failure after a successful DELETE holds only the p
 
 // --- registration --------------------------------------------------------------------------------
 
-/** A captured-`registerTool` fake pi (the module never touches anything else at register time). */
+/** One registered tool def, execute included (the module never touches anything else). */
+interface CapturedTool {
+  promptGuidelines?: string[];
+  executionMode?: string;
+  execute(
+    toolCallId: string,
+    params: unknown,
+    signal: undefined,
+    onUpdate: undefined,
+    ctx: unknown,
+  ): Promise<{ details: unknown }>;
+}
+
+/** A captured-`registerTool` fake pi (the module never touches anything else at install time). */
 function fakePi(): {
   pi: ExtensionAPI;
-  tools: Map<string, { promptGuidelines?: string[]; executionMode?: string }>;
+  tools: Map<string, CapturedTool>;
 } {
-  const tools = new Map<string, { promptGuidelines?: string[]; executionMode?: string }>();
+  const tools = new Map<string, CapturedTool>();
   const pi = {
     registerTool(def: { name: string }) {
       tools.set(def.name, def as never);
@@ -1208,10 +1280,10 @@ function fakePi(): {
   return { pi, tools };
 }
 
-test("registerAnnotationPushTool registers exactly the one tool and resets ALL module state", async () => {
-  primeAnnotationSurface({ mode: "review", url: URL_BASE });
+test("installAnnotationBindings registers exactly the one tool; a fresh state starts unprimed", async () => {
+  const local = createAnnotationState();
   const { pi, tools } = fakePi();
-  registerAnnotationPushTool(pi);
+  installAnnotationBindings(pi, local);
   assert.deepEqual([...tools.keys()], ["push_annotations"]);
   const def = tools.get("push_annotations");
   // Sequential execution is load-bearing for the ledger ordering (dedupe reads-then-writes).
@@ -1222,10 +1294,10 @@ test("registerAnnotationPushTool registers exactly the one tool and resets ALL m
   assert.match(guidelines, /replace: true/);
   assert.match(guidelines, /never a degrade/);
 
-  // A fresh registration is a fresh session: the primed surface is gone.
+  // A fresh activation is a fresh session: nothing is primed until a door primes it.
   const { target } = fakeTarget();
-  const result = await executePushAnnotations(target, { angle: "tests", findings: [] });
-  assert.equal((result.details as FailDetails).error_type, "no_surface");
+  const unprimed = await executePushAnnotations(local, target, { angle: "tests", findings: [] });
+  assert.equal((unprimed.details as FailDetails).error_type, "no_surface");
 });
 
 test("push_annotations is in the tool census (PERK_TOOLS + every worktree stage list)", () => {
@@ -1285,19 +1357,36 @@ async function startAnnotationServer(): Promise<{
   };
 }
 
-test("tool: boundary refusals + one full round trip over the real default fetch", async () => {
+test("registered tool: a real bound session starts unprimed (per-activation state)", async () => {
   const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
   const h = await loadPerkSession({ cwd, env: { PERK_RUN_ID: "01RID" } });
-  const server = await startAnnotationServer();
   try {
-    // Unprimed: the loud no_surface refusal (registration reset any prior surface).
+    // Unprimed: the loud no_surface refusal (only a door open primes the session's state).
     const unprimed = await h.invokeTool("push_annotations", { angle: "tests", findings: [] });
     assert.equal((unprimed.details as FailDetails).error_type, "no_surface");
+  } finally {
+    h.dispose();
+  }
+});
 
-    primeAnnotationSurface({ mode: "review", url: server.url });
+test("tool: boundary refusals + one full round trip over the real default fetch", async () => {
+  const local = createAnnotationState();
+  const { pi, tools } = fakePi();
+  installAnnotationBindings(pi, local);
+  const tool = tools.get("push_annotations");
+  assert.ok(tool);
+  const { target } = fakeTarget();
+  const invoke = (params: unknown) => tool.execute("t1", params, undefined, undefined, target);
+  const server = await startAnnotationServer();
+  try {
+    // Unprimed: the loud no_surface refusal.
+    const unprimed = await invoke({ angle: "tests", findings: [] });
+    assert.equal((unprimed.details as FailDetails).error_type, "no_surface");
+
+    primeAnnotationSurface(local, { mode: "review", url: server.url });
 
     // The boundary decode refusal (strict, whole-batch).
-    const bad = await h.invokeTool("push_annotations", {
+    const bad = await invoke({
       angle: "tests",
       findings: [{ severity: "major", confidence: "high", body: "no path/line keys" }],
     });
@@ -1305,7 +1394,7 @@ test("tool: boundary refusals + one full round trip over the real default fetch"
     assert.equal(server.requests.length, 0);
 
     // The round trip: default-fetch POST → 201 ids captured; replace → the DELETE query string.
-    const pushed = await h.invokeTool("push_annotations", {
+    const pushed = await invoke({
       angle: "demo",
       findings: [{ path: "src/a.ts", line: 3, severity: "major", confidence: "high", body: "b" }],
     });
@@ -1315,11 +1404,7 @@ test("tool: boundary refusals + one full round trip over the real default fetch"
     assert.equal(server.requests[0]?.method, "POST");
     assert.equal(server.requests[0]?.url, "/api/external-annotations");
 
-    const cleared = await h.invokeTool("push_annotations", {
-      angle: "demo",
-      findings: [],
-      replace: true,
-    });
+    const cleared = await invoke({ angle: "demo", findings: [], replace: true });
     assert.equal((cleared.details as OkDetails).deleted, 1);
     const del = server.requests[1];
     assert.equal(del?.method, "DELETE");
@@ -1327,8 +1412,7 @@ test("tool: boundary refusals + one full round trip over the real default fetch"
     assert.equal(parsed.pathname, "/api/external-annotations");
     assert.equal(parsed.searchParams.get("source"), "perk:demo");
   } finally {
-    clearAnnotationSurface();
+    clearAnnotationSurface(local);
     await server.close();
-    h.dispose();
   }
 });

@@ -122,7 +122,6 @@ Per-agent model overrides for each perk-owned project agent.
 | `conflict-resolver` | string (model id) | _(agent frontmatter default)_ | Model for the conflict-resolver agent spawned by `/submit` on merge conflicts and by `/objective-sync`'s retained-continuation drive. |
 | `learn-analyst` | string (model id) | _(agent frontmatter default)_ | Model for the learn-analyst agent used by `/learn` to analyze a landed plan's session evidence. |
 | `adversarial-reviewer` | string (model id) | _(agent frontmatter default)_ | Model for the adversarial-reviewer agent spawned by `/pr-review-terminal` and `/pr-review-browser`. |
-| `review-angle-selector` | string (model id) | _(agent frontmatter default)_ | Model for the bounded change-profile classifier used by the experimental dynamic-review flow. |
 | `draft-reviewer` | string (model id) | _(agent frontmatter default)_ | Model for streamed draft review from `/plan-review-browser` and `/objective-review-browser`. |
 | `harvest-analyst` | string (model id) | _(agent frontmatter default)_ | Model for each `docs/learned` mining lane in `perk learn harvest`. |
 | `dream-analyst` | string (model id) | _(agent frontmatter default)_ | Model for each `docs/learned` cluster-audit lane in `perk learn dream`'s analyst wave, consumed by `run_dream_wave` at execute time. |

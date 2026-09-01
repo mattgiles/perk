@@ -77,7 +77,7 @@ capabilities:
   - id: review.pr
     parent: review
     label: Pull-request review
-    summary: Automated, selector-driven, terminal, and browser PR-review families.
+    summary: Automated, terminal, and browser PR-review families.
   - id: review.address
     parent: review
     label: Addressing feedback
@@ -304,7 +304,7 @@ routes:
     priority: 80
 
   - id: agent-review
-    match: { paths: ["agents/*review*.md", "agents/review-angle-selector.md"] }
+    match: { paths: ["agents/*review*.md"] }
     capability: review.pr
     audience: shipped
     role: subagent-instruction
@@ -428,7 +428,7 @@ routes:
     role: tool-contract
     priority: 90
   - id: ts-pr-review
-    match: { paths: ["extension/doors/*Review*.ts", "extension/doors/reviewWaveTools.ts", "extension/doors/annotationPush.ts", "extension/doors/submitPrReview.ts", "extension/waves/**"] }
+    match: { paths: ["extension/doors/*Review*.ts", "extension/codeReview/**", "extension/pi/v1/codeReview/**", "extension/pi/v1/providers/annotations.ts", "extension/waves/**"] }
     capability: review.pr
     audience: shipped
     role: tool-contract

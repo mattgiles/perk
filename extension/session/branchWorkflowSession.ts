@@ -23,12 +23,24 @@ import {
   readNodeClaim,
   rebuildWorkflowState,
 } from "../substrate/workflowState.ts";
-import type {
-  ReadArtifactResult,
-  WorkflowChange,
-  WorkflowChangeResult,
-  WorkflowSession,
+import {
+  type ReadArtifactResult,
+  type ReviewPostRow,
+  reviewPostsEqual,
+  reviewPostsOf,
+  type WorkflowChange,
+  type WorkflowChangeResult,
+  type WorkflowSession,
 } from "./workflowSession.ts";
+
+/** The rebuilt `review_posts` ledger, read fail-open (malformed rows drop; a throwing branch ⇒ []). */
+function readReviewPosts(source: SessionArtifactCtx): ReviewPostRow[] {
+  try {
+    return reviewPostsOf(rebuildWorkflowState(branchOf(source)).review_posts);
+  } catch {
+    return [];
+  }
+}
 
 /** The rebuilt `active_objective`, read fail-open (malformed/throwing branch ⇒ null). */
 function readActiveObjective(source: SessionArtifactCtx): string | null {
@@ -82,6 +94,9 @@ export function openBranchWorkflowSession(
     },
     activeObjective() {
       return readActiveObjective(source);
+    },
+    reviewPosts() {
+      return readReviewPosts(source);
     },
     apply(change: WorkflowChange): WorkflowChangeResult {
       switch (change.kind) {
@@ -140,6 +155,57 @@ export function openBranchWorkflowSession(
             expected: objective,
             scope: "objective-save",
             failure: `active_objective read-back failed for #${objective}`,
+          });
+        }
+        case "record-pr-review": {
+          // No pre-read/dedupe by design (the single-use wave state is feature-op policy
+          // upstream): at runtime this yields applied/unverified/rejected only.
+          return appendWorkflowStateClassified(sink, source, {
+            data: { last_pr_review: change.record },
+            field: "last_pr_review",
+            expected: change.record,
+            scope: "pr-review",
+            failure: "last_pr_review read-back failed",
+          });
+        }
+        case "record-review": {
+          // No pre-read/dedupe by design (the resume guard is feature-op policy upstream): at
+          // runtime this yields applied/unverified/rejected only.
+          return appendWorkflowStateClassified(sink, source, {
+            data: { last_review: change.record },
+            field: "last_review",
+            expected: change.record,
+            scope: "review",
+            failure: "last_review read-back failed",
+          });
+        }
+        case "append-review-post": {
+          // Read-rebuild-append: each write carries the whole ordered list (the resume reader
+          // sees every confirmed post); order-sensitive read-back. The rebuild here is
+          // FAIL-CLOSED — deliberately NOT the fail-open `reviewPosts()` read: appending over
+          // an unrebuildable ledger would LWW-overwrite every earlier confirmed post with a
+          // one-row list, and the resume guard would then permit duplicate GitHub reviews.
+          // Refusing before any effect keeps the asymmetric trust rule intact (a row may be
+          // MISSING spuriously, never PRESENT spuriously — and never erased by a write).
+          let prior: ReviewPostRow[];
+          try {
+            prior = reviewPostsOf(rebuildWorkflowState(branchOf(source)).review_posts);
+          } catch (error) {
+            return {
+              status: "rejected",
+              problem:
+                "review_posts ledger rebuild failed — refusing to append over an unknown " +
+                `ledger: ${String(error)}`,
+            };
+          }
+          const posts: ReviewPostRow[] = [...prior, change.row];
+          return appendWorkflowStateClassified(sink, source, {
+            data: { review_posts: posts },
+            field: "review_posts",
+            expected: posts,
+            scope: "review",
+            failure: "review_posts read-back failed",
+            equals: reviewPostsEqual,
           });
         }
       }

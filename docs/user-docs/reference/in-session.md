@@ -46,7 +46,7 @@ by the family that explains them rather than by whichever stage happens to expos
 | Objectives | `/objective`, `/objective-plan`, `/objective-reconcile`, `/objective-save`, `/objective-stack`, `/objective-sync`, `/objective-recover`, `/objective-land` | [Workflow commands](./in-session/workflow-commands.md#objective-doors-warm) |
 | Gists | `/gist-save` | [Workflow commands](./in-session/workflow-commands.md#gist-doors-warm) |
 | Utility and factories | `/ci`, `/commit-and-compact`, `/perk-selfcheck`, `/learn-docs`, `/learn-code` | [Workflow commands](./in-session/workflow-commands.md#utility-commands--factories) |
-| Review and authoring | `/pr-review`, `/pr-review-dynamic`, `/pr-review-terminal`, `/pr-review-browser`, `/stack-review-browser`, `/plan-review-browser`, `/objective-review-browser` | [Review and authoring](./in-session/review-and-authoring.md) |
+| Review and authoring | `/pr-review`, `/pr-review-terminal`, `/pr-review-browser`, `/stack-review-browser`, `/plan-review-browser`, `/objective-review-browser` | [Review and authoring](./in-session/review-and-authoring.md) |
 | Ancillary human-only | `/btw` | [Ancillary in-session features](#ancillary-in-session-features) |
 <!-- END perk command census -->
 
@@ -56,7 +56,7 @@ The in-session utility surface spans three families:
 
 - [Workflow commands](./in-session/workflow-commands.md#utility-commands--factories) covers
   `/ci`, `/commit-and-compact`, `/perk-selfcheck`, `/learn-docs`, and `/learn-code`.
-- [Review and authoring](./in-session/review-and-authoring.md) covers the seven code-review and
+- [Review and authoring](./in-session/review-and-authoring.md) covers the six code-review and
   draft-review commands and their companion tools.
 - [Model-facing tools](./in-session/model-tools.md) is the guarded index of every tool name,
   including read-only and stage-scoping behavior.

@@ -8,7 +8,6 @@ import { existsSync, mkdirSync } from "node:fs";
 import { basename, join } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { registerAddress } from "./doors/address.ts";
-import { registerAnnotationPushTool } from "./doors/annotationPush.ts";
 import { registerAuditWave } from "./doors/auditWaveTools.ts";
 import { registerCiExecutor } from "./doors/ciExecutor.ts";
 import { registerCommitAndCompact } from "./doors/commitCompact.ts";
@@ -29,22 +28,22 @@ import {
 import { registerObjectiveStack } from "./doors/objectiveStack.ts";
 import { plannotatorPresent } from "./doors/plannotatorHandoff.ts";
 import { openPlanReviewSurface, registerPlanReviewBrowser } from "./doors/planReviewBrowser.ts";
-import { registerPrReview } from "./doors/prReview.ts";
-import { registerPrReviewBrowser } from "./doors/prReviewBrowser.ts";
-import { registerPrReviewDynamic } from "./doors/prReviewDynamic.ts";
-import { registerPrReviewTerminal } from "./doors/prReviewTerminal.ts";
 import { registerReady } from "./doors/ready.ts";
-import { registerReviewWaveTools } from "./doors/reviewWaveTools.ts";
 import { registerSelfcheck } from "./doors/selfcheck.ts";
-import { registerOpenStackReview, registerStackReviewBrowser } from "./doors/stackReviewBrowser.ts";
 import { registerSubmit } from "./doors/submit.ts";
-import { registerSubmitPrReview } from "./doors/submitPrReview.ts";
 import { createHunkFeedbackReceiver } from "./hunkFeedback/receiver.ts";
+import { installAutomatedReviewBindings } from "./pi/v1/codeReview/automated.ts";
+import { installPrReviewBrowserBindings } from "./pi/v1/codeReview/browser.ts";
+import { installReviewWaveBindings } from "./pi/v1/codeReview/reviewWave.ts";
+import { installStackReviewBindings } from "./pi/v1/codeReview/stack.ts";
+import { installCuratedSubmissionBindings } from "./pi/v1/codeReview/submit.ts";
+import { installPrReviewTerminalBindings } from "./pi/v1/codeReview/terminal.ts";
 import { installGistBindings } from "./pi/v1/gist.ts";
 import { installObjectiveBindings } from "./pi/v1/objective.ts";
 import { installObjectiveAuthoringBindings } from "./pi/v1/objectiveAuthoring.ts";
 import { installObjectivePlanningBindings } from "./pi/v1/objectivePlanning.ts";
 import { installPlanBindings } from "./pi/v1/plan.ts";
+import { createAnnotationState, installAnnotationBindings } from "./pi/v1/providers/annotations.ts";
 import { installPlannotatorPlanAdapter } from "./pi/v1/providers/plannotator.ts";
 import { installTombellPlanAdapter } from "./pi/v1/providers/tombell.ts";
 import {
@@ -154,6 +153,12 @@ export default function (pi: ExtensionAPI) {
   // creating it before any registration is order-safe.
   const draftReviewWave = createDraftReviewWaveState();
 
+  // The annotation-push per-activation state: ONE instance serves the `push_annotations`
+  // installer and every priming door — the PR/stack review doors (review mode) and the
+  // plan/objective review doors (plan mode) — per activation, never per process (the
+  // `draftReviewWave` threading pattern).
+  const annotations = createAnnotationState();
+
   // The v1 plan installer: perk-owned plan mode (the `/plan` + Ctrl+Alt+P + `--plan` toggle
   // surface over the read-only gate, plus the plan-authoring context injection — this call
   // sits at the frozen hooks-ordering slot the mode surface always held), the
@@ -167,8 +172,9 @@ export default function (pi: ExtensionAPI) {
   // value-import cycle break — planReviewBrowser.ts value-imports the review arms).
   installPlanBindings(pi, gating, {
     present: () => plannotatorPresent(pi),
-    plan: (ctx, opts) => openPlanReviewSurface(pi, ctx, gating, opts, draftReviewWave),
-    objective: (ctx, opts) => openObjectiveReviewSurface(pi, ctx, gating, opts, draftReviewWave),
+    plan: (ctx, opts) => openPlanReviewSurface(pi, ctx, gating, opts, draftReviewWave, annotations),
+    objective: (ctx, opts) =>
+      openObjectiveReviewSurface(pi, ctx, gating, opts, draftReviewWave, annotations),
   });
 
   // The first 3rd-party plan adapter: a perk-owned, injection-only bridge that re-enables
@@ -494,22 +500,16 @@ export default function (pi: ExtensionAPI) {
 
   // The warm `/pr-review` door: automated code review in a FRESH, isolated subagent that
   // POSTS its review to the PR (the deliberate departure from /address's read-only-child rule).
-  registerPrReview(pi);
-
-  // The EXPERIMENTAL warm `/pr-review-dynamic` door: the selector-driven sibling — angle
-  // selection delegated to a fresh perk.review-angle-selector lane, normalized in
-  // module-rendered code; posting shares /pr-review's post_pr_review + clean guard. The
-  // baseline /pr-review stays canonical; promotion/retire is a later dogfood's call.
-  registerPrReviewDynamic(pi);
+  installAutomatedReviewBindings(pi);
 
   // The warm `submit_pr_review` tool: the human-gated curated-posting surface both review
   // doors ride (contracts §8.4) — neither door registers tools of its own.
-  registerSubmitPrReview(pi);
+  installCuratedSubmissionBindings(pi);
 
   // The flow-scoped review-wave pair (`start_review_wave`/`collect_review_wave`) both human
   // review doors drive: non-blocking adversarial-review launch + the typed collect, flow-scoped
   // via the session's pending-wave guard.
-  registerReviewWaveTools(pi);
+  installReviewWaveBindings(pi);
   registerAuditWave(pi);
   registerHarvestWave(pi);
   registerDreamWave(pi);
@@ -522,34 +522,33 @@ export default function (pi: ExtensionAPI) {
   // The door-primed browser annotation tool (`push_annotations`): the browser door primes the
   // surface handle on open and clears it on settle/degrade — the tool refuses outside a
   // door-opened flow.
-  registerAnnotationPushTool(pi);
+  installAnnotationBindings(pi, annotations);
 
   // The warm `/pr-review-terminal` door: the terminal review entry — hunk always, no provider
   // dispatch (the command IS the selection); posting rides `submit_pr_review` above.
-  registerPrReviewTerminal(pi);
+  installPrReviewTerminalBindings(pi);
 
   // The warm `/pr-review-browser` door: the browser review entry — plannotator always, opened
   // in the background (pre-PR it absorbs the since-base local browser review); posting is the
   // human's own platform-post from the UI, with `submit_pr_review` for request-changes only.
-  registerPrReviewBrowser(pi);
+  installPrReviewBrowserBindings(pi, annotations);
 
   // The warm `/stack-review-browser` door + its cold-launch twin (`open_stack_review`): the
   // stacked-PR browser review over the combined base→top diff — one reviewer wave with
   // `stack: true`, then judgment-routed per-PR posting through `submit_pr_review`.
-  registerStackReviewBrowser(pi);
-  registerOpenStackReview(pi);
+  installStackReviewBindings(pi, annotations);
 
   // The warm `/plan-review-browser` door: the summonable streaming draft review — the
   // plannotator plan-review browser on the working plan draft, draft reviewers streaming
   // phrase-anchored findings in; APPROVE auto-saves via the approvalSave seam, DENY returns a
   // model-mediated revision round.
-  registerPlanReviewBrowser(pi, gating, draftReviewWave);
+  registerPlanReviewBrowser(pi, gating, draftReviewWave, annotations);
 
   // The warm `/objective-review-browser` door: the summonable streaming objective-draft review
   // — the plannotator plan-review browser on the RENDERED working objective draft, draft
   // reviewers streaming phrase-anchored findings in; APPROVE auto-saves via the
   // objectiveApprovalSave seam, Direct Edits = a model-mediated revise round (never auto-saved).
-  registerObjectiveReviewBrowser(pi, gating, draftReviewWave);
+  registerObjectiveReviewBrowser(pi, gating, draftReviewWave, annotations);
 
   // The read-only CI executor: the `run_ci` tool + `/ci` command + `--allow-project-ci`
   // flag. Runs the project's `[ci]` named checks deterministically and reports (never fixes/loops).

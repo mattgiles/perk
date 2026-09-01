@@ -23,10 +23,15 @@ import { execFileSync } from "node:child_process";
 import { chmodSync, existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
-import { writePlanRef } from "../substrate/cache.ts";
-import { REPORT_DETAIL_TYPE } from "../surfaces/surfaces.ts";
-import { fakePerk, loadPerkSession, scaffoldRepo, spyInjections } from "../testing/harness.ts";
-import { parseReviewDoorArgs, prReviewTerminalGuidance } from "./prReviewTerminal.ts";
+import { writePlanRef } from "../../../substrate/cache.ts";
+import { REPORT_DETAIL_TYPE } from "../../../surfaces/surfaces.ts";
+import {
+  fakePerk,
+  loadPerkSession,
+  scaffoldRepo,
+  spyInjections,
+} from "../../../testing/harness.ts";
+import { parseReviewDoorArgs, prReviewTerminalGuidance } from "./terminal.ts";
 
 // --- parseReviewDoorArgs -----------------------------------------------------------------
 

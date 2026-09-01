@@ -55,7 +55,7 @@
 //      (type edges count) — and it must carry ≥ 1 (the positive floor: the SDK vocabulary
 //      provably lives in the adapter and the extractor still sees package specifiers).
 //   G. Report-wave transport confinement: the production files outside `waves/` with an edge
-//      to `waves/rpcAdapter.ts` are EXACTLY the ten wave registration sites (set-exact both
+//      to `waves/rpcAdapter.ts` are EXACTLY the nine wave registration sites (set-exact both
 //      directions; shrink-only intent — the census only burns down as registrations migrate);
 //      no production file outside `waves/` has an edge into the interior transport modules
 //      (`waves/transport.ts`, `waves/memoryAdapter.ts` — callers reach the wave mechanism
@@ -134,6 +134,7 @@ const KNOWN_TOP_LEVEL_DIRS = [
 // the scanned corpus).
 const ANCHORED_DIRS: Record<string, string[]> = {
   authoring: ["authoring/gist/draft.ts"],
+  codeReview: ["codeReview/submission.ts"],
   pi: ["pi/v1/gist.ts"],
   session: ["session/workflowSession.ts"],
 };
@@ -143,7 +144,7 @@ const ANCHORED_DIRS: Record<string, string[]> = {
  * bans — `@earendil-works/*`, the RPC transport module, and the `surfaces/` rendering seam —
  * with NO sanctioned re-export seams for these homes (see the header).
  */
-const PI_FREE_HOMES = ["authoring/", "session/"];
+const PI_FREE_HOMES = ["authoring/", "codeReview/", "session/"];
 
 /**
  * Rule E's registration tokens: whitespace-tolerant (a registration split across lines still
@@ -159,10 +160,12 @@ const APPROVED_REGISTRAR_PREFIXES = ["pi/"];
 const APPROVED_REGISTRAR_FILES = ["index.ts", "workerMain.ts"];
 
 // Rule G's adapter-construction census: the exact production files outside `waves/` allowed an
-// edge to `waves/rpcAdapter.ts` — the ten wave registration sites (each constructs its adapter
+// edge to `waves/rpcAdapter.ts` — the wave registration sites (each constructs its adapter
 // at its execute site; construction threading was considered and dropped at review). SHRINK-ONLY
 // intent: entries leave as flows migrate behind typed operations; no new file may join without
-// operator confirmation.
+// operator confirmation — the `pi/v1/codeReview/` successors joined under the approved
+// code-review migration plan (the operator confirmation: the flows' registration sites moved
+// wholesale into the adapter home, swapping their door entries).
 const RPC_ADAPTER_IMPORTERS = [
   "doors/address.ts",
   "doors/auditWaveTools.ts",
@@ -170,9 +173,8 @@ const RPC_ADAPTER_IMPORTERS = [
   "doors/dreamWaveTools.ts",
   "doors/harvestWaveTools.ts",
   "doors/learn.ts",
-  "doors/prReview.ts",
-  "doors/prReviewDynamic.ts",
-  "doors/reviewWaveTools.ts",
+  "pi/v1/codeReview/automated.ts",
+  "pi/v1/codeReview/reviewWave.ts",
   "pi/v1/objectivePlanning.ts",
 ];
 
@@ -193,7 +195,6 @@ const TRANSPORT_TOKEN = /\bWAVE_RPC_|subagents:rpc:v1/;
 // in the activating change itself — the first burn-down.
 const LEGACY_REGISTRANTS = [
   "doors/address.ts",
-  "doors/annotationPush.ts",
   "doors/auditWaveTools.ts",
   "doors/ciExecutor.ts",
   "doors/commitCompact.ts",
@@ -207,16 +208,9 @@ const LEGACY_REGISTRANTS = [
   "doors/objectiveReviewBrowser.ts",
   "doors/objectiveStack.ts",
   "doors/planReviewBrowser.ts",
-  "doors/prReview.ts",
-  "doors/prReviewBrowser.ts",
-  "doors/prReviewDynamic.ts",
-  "doors/prReviewTerminal.ts",
   "doors/ready.ts",
-  "doors/reviewWaveTools.ts",
   "doors/selfcheck.ts",
-  "doors/stackReviewBrowser.ts",
   "doors/submit.ts",
-  "doors/submitPrReview.ts",
   "substrate/agentScratch.ts",
   "substrate/bindingDelivery.ts",
   "substrate/command.ts",
@@ -714,7 +708,12 @@ test("Rule E: Pi registration only in approved adapter/composition files (frozen
   );
   // Positive extraction proof: the scan must SEE the v1 installers' registrations — a token
   // regex that stopped matching real registrations would otherwise pass vacuously.
-  for (const installer of ["pi/v1/gist.ts", "pi/v1/plan.ts", "pi/v1/objectivePlanning.ts"]) {
+  for (const installer of [
+    "pi/v1/codeReview/submit.ts",
+    "pi/v1/gist.ts",
+    "pi/v1/plan.ts",
+    "pi/v1/objectivePlanning.ts",
+  ]) {
     assert.ok(
       matched.includes(installer),
       `the registration scan missed ${installer} — the token extraction is broken`,
@@ -777,7 +776,7 @@ test("Rule G: report-wave transport confinement (exact importers; interior ban; 
     rpcImporters,
     [...RPC_ADAPTER_IMPORTERS].sort(),
     "the production files outside waves/ importing waves/rpcAdapter.ts must be exactly the " +
-      "ten wave registration sites — the census is shrink-only: a site that stops constructing " +
+      "nine wave registration sites — the census is shrink-only: a site that stops constructing " +
       "its adapter leaves the census in the same change, and no new file may join it.",
   );
   // (2) The interior ban: callers reach the wave mechanism through reportWave.ts's logical
@@ -1088,6 +1087,7 @@ test("control 10: feature-purity fixtures (Pi specifier, RPC edge, surfaces edge
     "session/y.ts",
     "authoring/clean.ts",
     "authoring/adapterEdge.ts",
+    "codeReview/z.ts",
     "factories/allowed.ts",
   ];
   const sources: Record<string, string> = {
@@ -1097,6 +1097,8 @@ test("control 10: feature-purity fixtures (Pi specifier, RPC edge, surfaces edge
     "authoring/clean.ts": 'import { helper } from "../substrate/sessionData.ts";',
     // The Rule-D pi/ arm: a feature importing the Pi adapter home must be caught.
     "authoring/adapterEdge.ts": 'import { installPlanBindings } from "../pi/v1/plan.ts";',
+    // The codeReview/ home is covered from the day it appeared (all four violation shapes bite).
+    "codeReview/z.ts": 'import type { ExtensionContext } from "@earendil-works/pi-coding-agent";',
     // Outside the Pi-free homes: a factories/ Pi import is Rule-D-invisible by design.
     "factories/allowed.ts": 'import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";',
   };
@@ -1110,9 +1112,11 @@ test("control 10: feature-purity fixtures (Pi specifier, RPC edge, surfaces edge
     'session/y.ts: "../waves/rpcAdapter.ts" → waves/rpcAdapter.ts (RPC wire)',
     'session/y.ts: "../surfaces/report.ts" → surfaces/report.ts (surfaces seam)',
     'authoring/adapterEdge.ts: "../pi/v1/plan.ts" → pi/v1/plan.ts (Pi adapter home)',
+    'codeReview/z.ts: "@earendil-works/pi-coding-agent" (direct Pi import)',
   ]);
   assert.equal(visited.get("authoring/"), 3, "all three authoring/ files visited");
   assert.equal(visited.get("session/"), 1, "the session/ file visited");
+  assert.equal(visited.get("codeReview/"), 1, "the codeReview/ file visited");
   const empty = checkFeaturePurity(
     ["factories/allowed.ts"],
     (file) => sources[file] ?? "",
@@ -1185,15 +1189,15 @@ test("control 12: Rule F mutation fixtures (foreign edge into the seam; a seam S
   );
 });
 
-test("control 13: Rule G mutation fixtures (11th importer; interior edge; token word bounds)", () => {
-  // A synthetic 11th importer, threaded through the SAME comparison logic as the production
+test("control 13: Rule G mutation fixtures (extra importer; interior edge; token word bounds)", () => {
+  // A synthetic extra importer, threaded through the SAME comparison logic as the production
   // assertion, must break the exact-set.
   const mutated = new Map([...scan().edges].map(([file, targets]) => [file, [...targets]]));
   mutated.set("doors/rogue.ts", ["waves/rpcAdapter.ts"]);
   const { rpcImporters } = transportConfinement(mutated);
   assert.ok(
     rpcImporters.includes("doors/rogue.ts"),
-    "the synthetic 11th rpcAdapter importer was NOT seen",
+    "the synthetic extra rpcAdapter importer was NOT seen",
   );
   assert.notDeepEqual(
     rpcImporters,

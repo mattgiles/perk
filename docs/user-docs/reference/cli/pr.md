@@ -181,7 +181,7 @@ this command directly.
 
 ### `perk pr review-context`
 
-Fetch PR review context (read-only). Automated active-plan selector/reviewer tasks use
+Fetch PR review context (read-only). Automated active-plan reviewer tasks use
 `--expected-pr <n>`: it preserves the active plan snapshot/body, resolves the plan branch's PR,
 and compares that number before fetching context. Drift fails `review_target_changed`.
 `--pr <n>` instead resolves an arbitrary PR plan-ref-free (`plan_body` is null; a nonexistent PR

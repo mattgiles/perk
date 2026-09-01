@@ -13,6 +13,13 @@ import { test } from "node:test";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
 import { OBJECTIVE_DRAFT_ARTIFACT, renderObjectiveDraft } from "../authoring/objective/draft.ts";
+import {
+  clearAnnotationSurface,
+  createAnnotationState,
+  executePushAnnotations,
+  type FetchLike,
+  primeAnnotationSurface,
+} from "../pi/v1/providers/annotations.ts";
 import type { ReviewOutcome } from "../pi/v1/review.ts";
 import { sessionDataDir } from "../substrate/cache.ts";
 import {
@@ -33,12 +40,6 @@ import {
   spyInjections,
 } from "../testing/harness.ts";
 import { createMemoryWaveAdapter } from "../waves/memoryAdapter.ts";
-import {
-  clearAnnotationSurface,
-  executePushAnnotations,
-  type FetchLike,
-  primeAnnotationSurface,
-} from "./annotationPush.ts";
 import {
   clearDraftReviewContext,
   createDraftReviewWaveState,
@@ -74,8 +75,9 @@ async function annotationMode(): Promise<string | null> {
   };
   const target = { hasUI: false, ui: undefined } as unknown as Parameters<
     typeof executePushAnnotations
-  >[0];
+  >[1];
   const result = await executePushAnnotations(
+    annotations,
     target,
     { angle: "probe", findings: [] },
     { fetchLike: never },
@@ -86,6 +88,9 @@ async function annotationMode(): Promise<string | null> {
 
 /** The suite-owned draft-review state, threaded exactly where index.ts threads its own. */
 const draftReview = createDraftReviewWaveState();
+
+/** The suite-owned annotation state, threaded exactly where index.ts threads its own. */
+const annotations = createAnnotationState();
 
 /** Probe the draft-review context: a ping-null start is `unavailable` iff a context is primed. */
 async function draftContextPrimed(): Promise<boolean> {
@@ -99,6 +104,13 @@ async function draftContextPrimed(): Promise<boolean> {
     },
   );
   return (result.details as { error_type?: string }).error_type !== "no_draft_context";
+}
+
+/** Probe the SESSION's annotation state through the registered tool (null = unprimed). */
+async function sessionAnnotationMode(h: PerkSession): Promise<string | null> {
+  const result = await h.invokeTool("push_annotations", { angle: "probe", findings: [] });
+  if (!(result.details as { ok: boolean }).ok) return null;
+  return (result.details as { mode?: string }).mode ?? null;
 }
 
 /**
@@ -215,13 +227,14 @@ async function observe(
     },
     started,
     draftReview,
+    annotations,
   );
   return { notifies, sent };
 }
 
 /** Prime BOTH door surfaces (the pre-degrade state). */
 function primeBoth(): void {
-  primeAnnotationSurface({ mode: "plan", url: "http://127.0.0.1:45001" });
+  primeAnnotationSurface(annotations, { mode: "plan", url: "http://127.0.0.1:45001" });
   primeDraftReviewContext(draftReview, { draftType: "objective", draft: "# The objective\n" });
 }
 
@@ -234,7 +247,7 @@ test("observer: ready → the info note naming the URL, nothing injected, surfac
   assert.equal(notifies[0]?.severity, "info");
   assert.equal(await annotationMode(), "plan", "the ready arm never clears");
   assert.equal(await draftContextPrimed(), true);
-  clearAnnotationSurface();
+  clearAnnotationSurface(annotations);
   clearDraftReviewContext(draftReview);
 });
 
@@ -288,7 +301,7 @@ test("observer: bridge settled unavailable → degrade + clear; completed/aborte
   assert.equal(turnAborted.notifies.length, 0, "an aborted turn stays silent");
   assert.equal(turnAborted.sent.length, 0);
   assert.equal(await annotationMode(), "plan", "aborted arms leave the surfaces primed");
-  clearAnnotationSurface();
+  clearAnnotationSurface(annotations);
   clearDraftReviewContext(draftReview);
 });
 
@@ -699,6 +712,7 @@ test("open: a post-degrade decision is ignored loudly (never routed into a save)
     fakeGating(true),
     { rendered: RENDERED, artifactRaw: DRAFT_PAYLOAD },
     draftReview,
+    annotations,
     {
       pickFreePort: async () => 45002,
       probe: async () => false,
@@ -778,6 +792,7 @@ test("open core: primes BOTH surfaces (plan mode + objective draft type), RETURN
     fakeGating(false),
     { rendered: RENDERED, artifactRaw: DRAFT_PAYLOAD, custom: "check the dependency story" },
     draftReview,
+    annotations,
     {
       pickFreePort: async () => 45001,
       probe: async () => true,
@@ -945,7 +960,7 @@ test("/objective-review-browser: headless → the headless-specific refusal, not
     );
     assert.equal(injected.length, 0, "nothing injected");
     assert.equal(sink.envelopes.length, 0, "no bridge emitted");
-    assert.equal(await annotationMode(), null, "no surface primed");
+    assert.equal(await sessionAnnotationMode(h), null, "no surface primed");
     assert.equal(await sessionDraftContextPrimed(h), false, "no context primed");
   } finally {
     h.dispose();
@@ -1136,10 +1151,10 @@ test("/objective-review-browser: harness APPROVE — the command's artifact read
     assert.equal(h.workflowState().mode, "read-write", "the gate exited on the ok save");
     // The settle clears both companion surfaces.
     const settleStart = Date.now();
-    while ((await annotationMode()) !== null && Date.now() - settleStart < 5000) {
+    while ((await sessionAnnotationMode(h)) !== null && Date.now() - settleStart < 5000) {
       await new Promise((r) => setTimeout(r, 25));
     }
-    assert.equal(await annotationMode(), null, "the settle clears the annotation surface");
+    assert.equal(await sessionAnnotationMode(h), null, "the settle clears the annotation surface");
     assert.equal(await sessionDraftContextPrimed(h), false, "…and the draft-review context");
   } finally {
     await settleBridges(sink);
@@ -1196,16 +1211,20 @@ test("/objective-review-browser: happy path — RENDERED bytes to the bridge, bo
     assert.doesNotMatch(sink.envelopes[0]?.payload.planContent ?? "", /schema_version/);
     assert.match(sink.envAtEmit[0] ?? "", /^\d+$/, "PLANNOTATOR_PORT preset at emit time");
     // Both companion surfaces primed.
-    assert.equal(await annotationMode(), "plan", "the annotation surface is primed in plan mode");
+    assert.equal(
+      await sessionAnnotationMode(h),
+      "plan",
+      "the annotation surface is primed in plan mode",
+    );
     assert.equal(await sessionDraftContextPrimed(h), true, "the draft-review context is primed");
 
     // The human DENIES: the feedback injects a revision turn and both surfaces clear.
     sink.emitDecision({ reviewId: "r-1", approved: false, feedback: "tighten node 1.1" });
     const start = Date.now();
-    while ((await annotationMode()) !== null && Date.now() - start < 5000) {
+    while ((await sessionAnnotationMode(h)) !== null && Date.now() - start < 5000) {
       await new Promise((r) => setTimeout(r, 25));
     }
-    assert.equal(await annotationMode(), null, "the settle clears the annotation surface");
+    assert.equal(await sessionAnnotationMode(h), null, "the settle clears the annotation surface");
     assert.equal(await sessionDraftContextPrimed(h), false, "…and the draft-review context");
     assert.ok(
       injected.some((m) => m.includes("DENIED") && m.includes("tighten node 1.1")),

@@ -1,23 +1,31 @@
-// Tests for the warm `/pr-review` door. The pure `prReviewGuidance` + the two strict decodes
-// (`decodeWaveParams`, `decodePostParams`) are pinned directly; the `run_pr_review_wave` flow
-// tool (over a fake pi-subagents RPC responder on pi.events), the `post_pr_review` delegation +
-// clean guard, and the command/tool registration + headless safety are exercised against a REAL
-// bound session via the T1 harness, OFFLINE (a fake `perk` stands in for the GitHub mutation, so
-// no LLM / network / gh / Python is invoked). The wave mechanics themselves are pinned in
-// `extension/waves/prReviewWave.test.ts` — the guidance here carries judgment only.
+// Adapter tests for the automated-review installer. The pure `prReviewGuidance` + the two
+// strict decodes (`decodeWaveParams`, `decodePostParams`) are pinned directly; the
+// `run_pr_review_wave` flow tool (over a fake pi-subagents RPC responder on pi.events), the
+// `post_pr_review` delegation + clean guard, and the command/tool registration + headless
+// safety are exercised against a REAL bound session via the T1 harness, OFFLINE (a fake `perk`
+// stands in for the GitHub mutation, so no LLM / network / gh / Python is invoked). The wave
+// mechanics themselves are pinned in `extension/waves/prReviewWave.test.ts`; the state-machine
+// POLICY matrix lives in `codeReview/automated.test.ts` over deterministic fakes —
+// malformed-input-preserves-state is pinned HERE, behaviorally through the tools (the typed
+// feature op cannot receive malformed input by construction).
 
 import assert from "node:assert/strict";
 import { mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
-import { runScratchDir } from "../substrate/cache.ts";
+import { runScratchDir } from "../../../substrate/cache.ts";
 import {
   createFakeSubagents,
   type FakeSubagents,
   waveScriptItems,
-} from "../testing/fakeSubagents.ts";
-import { fakePerk, fakePerkRouter, loadPerkSession, scaffoldRepo } from "../testing/harness.ts";
-import { decodePostParams, decodeWaveParams, prReviewGuidance } from "./prReview.ts";
+} from "../../../testing/fakeSubagents.ts";
+import {
+  fakePerk,
+  fakePerkRouter,
+  loadPerkSession,
+  scaffoldRepo,
+} from "../../../testing/harness.ts";
+import { decodePostParams, decodeWaveParams, prReviewGuidance } from "./automated.ts";
 
 // --- prReviewGuidance: judgment-bearing inputs over the flow-scoped wave tool ----------------
 
@@ -372,7 +380,12 @@ test("tool: run_pr_review_wave end-to-end happy path; a following clean post is 
       angles: ["plan-fidelity", "quality"],
     });
     assert.equal((post.details as { ok: boolean }).ok, true);
-    assert.equal(latestReviewBatch(cwd).expected_pr, 42);
+    // The COMPLETE staged cold-door batch (angles are record-side, never a batch field).
+    assert.deepEqual(latestReviewBatch(cwd), {
+      verdict: "clean",
+      summary: "clean",
+      expected_pr: 42,
+    });
     const duplicate = await h.invokeTool("post_pr_review", {
       verdict: "clean",
       summary: "duplicate",
@@ -387,6 +400,50 @@ test("tool: run_pr_review_wave end-to-end happy path; a following clean post is 
     };
     assert.deepEqual(record.angles, ["plan-fidelity", "quality", "ponytail"]);
     assert.deepEqual(record.covered_angles, ["plan-fidelity", "quality", "ponytail"]);
+  } finally {
+    h.dispose();
+  }
+});
+
+test("tool: the execute callback's AbortSignal reaches the real wave (cancellation forwarding)", async () => {
+  // Adapter-level, through the REGISTERED tool definition: the harness threads a real
+  // AbortSignal into the execute callback, and the only path it can take to the observed
+  // outcome is createRpcChangeReviewer → runPrReviewWave's opts.signal (the fake responder is
+  // bound and healthy — an un-forwarded signal would spawn and cover all three lanes).
+  const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
+  installPonytailReviewSkill(cwd);
+  const bin = fakePerkRouter(cwd, { "pr url": { json: PR_URL_JSON } });
+  const fake = prReviewFake();
+  const h = await loadPerkSession({
+    cwd,
+    env: { PERK_RUN_ID: "01RID", PERK_BIN: bin },
+    extraExtensions: [fake.extension],
+  });
+  try {
+    const controller = new AbortController();
+    controller.abort();
+    const result = await h.invokeTool(
+      "run_pr_review_wave",
+      { angles: ["plan-fidelity", "tests"] },
+      { signal: controller.signal },
+    );
+    const details = result.details as {
+      ok: boolean;
+      complete?: boolean;
+      covered?: string[];
+      failures?: { key: string | null; reason: string; detail: string }[];
+      attempts?: { state: string }[];
+    };
+    assert.equal(details.ok, true, "cancellation normalizes into the outcome, never a throw");
+    assert.equal(details.complete, false);
+    assert.deepEqual(details.covered, []);
+    assert.equal(details.failures?.[0]?.reason, "cancelled");
+    assert.match(details.failures?.[0]?.detail ?? "", /cancelled before launch/);
+    assert.equal(details.attempts?.[0]?.state, "cancelled");
+    assert.equal(fake.spawns.length, 0, "an aborted wave never spawns");
+    // The cancelled pass still recorded an incomplete outcome — the clean guard holds.
+    const clean = await h.invokeTool("post_pr_review", { verdict: "clean", summary: "clean" });
+    assert.equal((clean.details as { error_type?: string }).error_type, "incomplete_coverage");
   } finally {
     h.dispose();
   }
@@ -421,6 +478,32 @@ test("tool: a new target-resolution failure invalidates prior evidence for both 
       const post = await h.invokeTool("post_pr_review", { verdict, summary: "old evidence" });
       assert.equal((post.details as { error_type?: string }).error_type, "review_wave_unavailable");
     }
+  } finally {
+    h.dispose();
+  }
+});
+
+test("tool: bad post input does not touch the state — the next post behaves per the prior state", async () => {
+  const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
+  installPonytailReviewSkill(cwd);
+  const bin = fakePerkRouter(cwd, {
+    "pr url": { json: PR_URL_JSON },
+    "pr review-post": { json: JSON.parse(CLEAN_JSON) },
+  });
+  const h = await loadPerkSession({
+    cwd,
+    env: { PERK_RUN_ID: "01RID", PERK_BIN: bin },
+    extraExtensions: [prReviewFake().extension],
+  });
+  try {
+    await h.invokeTool("run_pr_review_wave", { angles: ["plan-fidelity", "tests"] });
+    const bad = await h.invokeTool("post_pr_review", { summary: "missing verdict" });
+    assert.equal((bad.details as { error_type?: string }).error_type, "bad_input");
+    // The refusal preserved the recorded state: a valid clean post still lands and consumes it.
+    const posted = await h.invokeTool("post_pr_review", { verdict: "clean", summary: "clean" });
+    assert.equal((posted.details as { ok: boolean }).ok, true);
+    const duplicate = await h.invokeTool("post_pr_review", { verdict: "clean", summary: "dup" });
+    assert.equal((duplicate.details as { error_type?: string }).error_type, "review_wave_consumed");
   } finally {
     h.dispose();
   }
@@ -580,12 +663,21 @@ test("tool: post_pr_review delegates an actionable batch, records last_pr_review
       verdict: "actionable",
       summary: "two issues",
       comments: [{ path: "a.ts", line: 12, body: "fix" }],
+      fyi: ["a nit"],
       angles: ["plan-fidelity", "correctness"],
     });
     const details = result.details as { ok: boolean; comment_count?: number; verdict?: string };
     assert.equal(details.ok, true);
     assert.equal(details.comment_count, 2);
-    assert.equal(latestReviewBatch(cwd).expected_pr, undefined);
+    // The COMPLETE staged cold-door batch: every reconciled field survives the tool→feature→
+    // publisher handoff (a dropped summary/comments/fyi would otherwise post silently thin);
+    // standalone posts omit expected_pr.
+    assert.deepEqual(latestReviewBatch(cwd), {
+      verdict: "actionable",
+      summary: "two issues",
+      comments: [{ path: "a.ts", line: 12, body: "fix" }],
+      fyi: ["a nit"],
+    });
     const rec = h.workflowState().last_pr_review as {
       pr?: number;
       verdict?: string;

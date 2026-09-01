@@ -183,7 +183,7 @@ function waveTimeoutMs(): number {
 
 /** The judgment-bearing pieces a script run needs (the assignment-free slice of `WaveSpec`). */
 export interface WaveScriptSpec {
-  /** Flow name for error detail/trace (e.g. "pr-review-dynamic"). */
+  /** Flow name for error detail/trace (e.g. "pr-review"). */
   flow: string;
   /** The complete, module-rendered workflowScript (never model-authored). */
   workflowScript: string;

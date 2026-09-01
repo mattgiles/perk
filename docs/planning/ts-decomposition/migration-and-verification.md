@@ -453,14 +453,11 @@ the session lifecycle required by each new caller.
 > - **Still no `PromptEvidence` module** (the 2.1 narrow-until-proven rule): context-evidence
 >   coverage (live-copy suppression / post-compaction re-injection / quoting-summary /
 >   reconstructed-context) is realized as inlined marker checks per migrated injection.
-> - **The Phase-4 dogfood gate is PENDING** (not silently omitted) — and its post-review
->   sequencing is the PLAN's own: the plan runs the gate from the train worktree after the
->   implementation + verification gates ("the dogfood gate + evidence record + stack sync
->   follow"), its first arm IS node 5.1's planning session driven on this branch (which cannot
->   precede this layer's review), and its interactive deny→revise/approve→save arms are the
->   human's run. The evidence record is authored into
->   `docs/design/archive/ts-decomposition-phase4-dogfood.md` at gate time (the phase-1/2/3
->   record genre). Phase 5 must not start before that record exists.
+> - **The Phase-4 dogfood gate is CLOSED** — the evidence record is committed at
+>   `docs/design/archive/ts-decomposition-phase4-dogfood.md` (`f03ee7ff`), complete with no
+>   skipped arms; it also set the closing precedent later phases reuse (the evidence record
+>   lands on the train tip as one docs-only commit with only the tip's handoff-ready stamp
+>   re-run).
 
 Migrate in this order unless refreshed dependency evidence changes the graph:
 
@@ -549,8 +546,46 @@ move code-review policy behind typed operations.
 >   structurally assignable, zero runtime mapping, and a lane-level reason on a script-run
 >   failure is now unrepresentable.
 > - Node 5.2 owns the rest: code-review typed operations, the post-state machines
->   (`doors/prReview.ts`, `doors/annotationPush.ts`), and the phase dogfood gate (the live
+>   (the automated post state, the annotation-push state), and the phase dogfood gate (the live
 >   pi-subagents leg — the offline runner-over-real-RPC integration landed in 5.1).
+>
+> **Status (Objective #2083, Node 5.2):** the code-review half landed — realized-shape notes:
+>
+> - **The code-review flows sit behind typed feature operations** in the Pi-free
+>   `extension/codeReview/` home: `submission.ts` (the curated-submission op over
+>   `ReviewSubmitter` + the discriminated `FormalEventGate` + `WorkflowSession`) and
+>   `automated.ts` (`runAutomatedReview`/`publishAutomatedReview` over `ReviewTargetResolver` +
+>   `ChangeReviewer` + `ReviewPublisher`). `ChangeReviewOutcome` is a type-only alias of
+>   `PrReviewWaveOutcome` — never a second hand-mirrored vocabulary — and the finding shapes
+>   stay deliberately distinct per flow (no lossy generic finding).
+> - **The nine door modules moved wholesale**: six `pi/v1/codeReview/` installers
+>   (`automated.ts`, `submit.ts`, `reviewWave.ts`, `terminal.ts`, `browser.ts`, `stack.ts`) +
+>   the checkout helper (`checkout.ts`) + one provider (`pi/v1/providers/annotations.ts`).
+>   Rule E's census burned down by all eight door registrants; Rule G swapped the door entries
+>   for their successors (net 10 → 9). Adapter construction stays at execute sites (the 5.1
+>   precedent).
+> - **The last two module-global post-state machines became per-activation state**: the
+>   automated review-pass state is a plain `ReviewPassHolder` owned by the installer (the two
+>   feature ops own every transition); the annotation-push surface/ledger/held/alternates
+>   became `createAnnotationState()`, created once in `index.ts` and threaded to the installer
+>   and every priming door (`waveIsolation.test.ts` pins two-activation isolation for both).
+> - **Session records ride the seam**: `WorkflowSession` grew three ordinary single-append
+>   changes (`record-pr-review`/`record-review`/`append-review-post`) plus the fail-open
+>   `reviewPosts()` read; the seam owns the record types and the read-back loudness; the review
+>   posting paths and the stack door's two reads lost all direct `workflowState.ts` access.
+> - **The experimental `/pr-review-dynamic` flow was retired wholesale** (operator-approved
+>   deviation from the node text, settled at plan time): the command, tool, selector agent,
+>   skill, config key, and binding row are gone across both planes; the canonical `/pr-review`
+>   is unchanged. `waves/prReviewWave.test.ts` stayed byte-untouched (the wave-policy parity
+>   proof).
+> - **The Phase-5 dogfood gate is PENDING at this layer's review** (not silently omitted) — the
+>   plan's own closing sequence runs the live arms (`/pr-review` + `/pr-review-terminal`,
+>   through the migrated operations) post-review from the train worktree (a fresh session must
+>   load this branch's extension), then lands the evidence record at
+>   `docs/design/archive/ts-decomposition-phase5-dogfood.md` as one docs-only commit with only
+>   the tip's handoff-ready stamp re-run — the Phase-4 closing precedent. The evidence binds to
+>   the final tested SHA, so the arms deliberately follow the review-fix commits, never precede
+>   them. Phase 6 must not start before that record exists.
 
 ### Changes
 

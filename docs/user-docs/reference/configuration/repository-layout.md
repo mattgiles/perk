@@ -51,7 +51,7 @@ and does not intercept shell, read, or search paths.
 Eligibility follows the current session posture. An explicitly read-only workflow receives no
 block. Neither do perk's report-only children: `perk.adversarial-reviewer`, `perk.draft-reviewer`,
 `perk.dream-analyst`, `perk.dream-reducer`, `perk.harvest-analyst`, `perk.learn-analyst`, `perk.objective-explorer`,
-`perk.pr-reviewer`, `perk.review-angle-selector`, and `perk.review-classifier`. Main write-capable sessions, the
+`perk.pr-reviewer`, and `perk.review-classifier`. Main write-capable sessions, the
 write-capable `perk.conflict-resolver`, remote workers, and unknown/custom children remain eligible.
 A read-write `/btw` side session gets the same current-run guidance and rechecks provisioning
 before every side-model prompt; its read-only and summary shapes do not. Direct SDK-created

@@ -7,7 +7,7 @@ sidebar:
 
 # Review and authoring
 
-Seven warm commands cover three distinct jobs: automated review that posts one reconciled result,
+Six warm commands cover three distinct jobs: automated review that posts one reconciled result,
 human-triaged PR review in a terminal or browser (single PRs and whole stacks), and browser review
 of plan/objective drafts before they are saved. Their companion tools are listed with each flow; the complete availability census
 lives in [Model-facing tools](./model-tools.md).
@@ -39,8 +39,8 @@ may still post with the incomplete-coverage note. An optional free-form focus no
 command and steers emphasis without removing plan fidelity or changing the 2–4 selected-angle
 limit.
 
-Before spawning, the parent resolves the active PR once. The selector and every reviewer/retry
-read context only through `perk pr review-context --expected-pr <that-number> --json`; target drift
+Before spawning, the parent resolves the active PR once. Every reviewer lane and retry
+reads context only through `perk pr review-context --expected-pr <that-number> --json`; target drift
 fails the lane. The resulting outcome is single-use and mutation-bound: starting any new valid pass
 invalidates older evidence immediately, target-resolution failure leaves posting unavailable, and
 one successful post consumes the record. Duplicate posts fail `review_wave_consumed`; pending
@@ -60,35 +60,6 @@ Companion tools:
   (including Ponytail), while `covered_angles` contains only successful schema-valid coverage.
   The PR comes from the cold-door result; callers never supply one. A standalone call before any
   valid wave uses caller-supplied angles for both fields. *Non-terminating.*
-
-### `/pr-review-dynamic`
-
-**Experimental.** This sibling delegates additional-angle selection to a fresh
-`perk.review-angle-selector` lane that runs concurrently with mandatory plan fidelity and an
-independent automatic Ponytail reviewer. Module code normalizes the selector output: fixed angles
-come only from `correctness|tests|quality|api-design|code-organization|idioms`, unknown and
-duplicate entries are dropped, forced angles run first, and at most three additional lanes survive.
-Ponytail is reserved from selector/custom output, stays outside that cap, and appears last in
-`selection.effective`. A failed, low-confidence, or empty valid selection falls back to correctness
-plus tests without affecting Ponytail.
-
-The selector may propose one change-specific custom angle. Module code accepts only a non-reserved
-3–32 character kebab-case slug and a whitespace-collapsed scope of at most 300 characters, and only
-when it fits under the lane cap. Fixed-angle reviewers never see selector output; the custom lane
-sees only its validated scope. Reconciliation and the incomplete-clean guard are the same as
-`/pr-review`.
-
-A free-form note rides `directive`; when it explicitly names fixed angles, the parent passes them
-as `force_angles` instead. Companion tool:
-
-- **`run_pr_review_dynamic_wave`** — run the selector-driven workflow with optional `directive`
-  and 1–3 optional forced fixed angles, run the independent source-bound Ponytail lane, apply one
-  bounded retry to retryable reviewer failures, and return `{ complete, covered, retried, reports,
-  failures, selection }`. Selection metadata is in-session data and is never posted. Ponytail uses
-  the same reviewer model/directive/report family; an exact-source failure remains uncovered and
-  incomplete rather than falling back. *Non-terminating.*
-
-The shared `post_pr_review` tool posts the reconciled result.
 
 ## Human-triaged PR review
 

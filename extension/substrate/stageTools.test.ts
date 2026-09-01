@@ -12,8 +12,8 @@ import {
   objectiveRecoverGuidance,
   objectiveSyncGuidance,
 } from "../doors/objectiveStack.ts";
-import { prReviewGuidance } from "../doors/prReview.ts";
-import { stackReviewGuidance } from "../doors/stackReviewBrowser.ts";
+import { prReviewGuidance } from "../pi/v1/codeReview/automated.ts";
+import { stackReviewGuidance } from "../pi/v1/codeReview/stack.ts";
 import {
   loadPerkSession,
   type PerkSession,

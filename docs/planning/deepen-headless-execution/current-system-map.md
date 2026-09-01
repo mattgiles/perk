@@ -111,7 +111,7 @@ The headless path should reuse the wave core, not automate the browser door. The
 deliberately has findings rather than an approval verdict, so unattended execution needs an
 explicit adjudication step that disposes every finding and records why the plan was approved.
 
-Likewise, [`prReview.ts`](../../../extension/doors/prReview.ts) already runs the fixed review wave,
+Likewise, [`pi/v1/codeReview/automated.ts`](../../../extension/pi/v1/codeReview/automated.ts) already runs the fixed review wave,
 posts the resulting GitHub review, and stores `last_pr_review` in transient workflow state. The
 canonical GitHub review is durable evidence, but neither it nor transient workflow state is a
 reliable receipt for the policy “one review round in this objective execution, even if address

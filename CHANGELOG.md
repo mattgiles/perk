@@ -9,6 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 <!-- As of 2f69487 -->
 
+### Changed
+
+- The code-review flows move behind typed feature operations in the Pi-free `extension/codeReview/` home with named `pi/v1/codeReview/` installers (curated submission, fixed automated review, the terminal/browser human doors, and the Delivery-train stack door), and the last two module-global post-state machines — the automated review-pass record and the annotation-push surface/ledger — become per-activation state, so two bound sessions in one process never share or clobber review state; the review posting paths' session records (`last_pr_review`, `last_review`, `review_posts`) now ride the `WorkflowSession` seam — runtime behavior, tool schemas, and result texts are otherwise unchanged (03b5383a)
+
+### Fixed
+
+- `submit_pr_review`'s `review_posts` ledger append now fails closed when the prior ledger cannot be rebuilt from the session branch — previously a throwing branch read was treated as an empty ledger, so a subsequent successful append could silently erase earlier confirmed stack-review rows and let the resume guard permit duplicate GitHub reviews (eb5740df)
+
+### Removed
+
+- Retire the experimental `/pr-review-dynamic` flow wholesale: the command, the `run_pr_review_dynamic_wave` tool, the `perk.review-angle-selector` agent, the `perk-pr-review-dynamic` skill, the `[models.subagents] review-angle-selector` config key, and the `command:pr-review-dynamic` binding row are all removed — the canonical `/pr-review` (parent-picked angles) is unchanged (1822ff39)
+
 ## [3.2.0] - 2026-08-24
 
 ### Changed

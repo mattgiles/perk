@@ -33,21 +33,23 @@
 
 import { existsSync } from "node:fs";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { bindingSuffix } from "../substrate/bindingDelivery.ts";
-import { readHandoff } from "../substrate/cache.ts";
-import { type ColdJson, runColdDoor } from "../substrate/coldDoor.ts";
-import { registerPerkCommand } from "../substrate/command.ts";
-import { render } from "../substrate/prompts.ts";
-import { failFor, ok } from "../substrate/result.ts";
-import { branchOf, rebuildWorkflowState } from "../substrate/workflowState.ts";
-import { report } from "../surfaces/report.ts";
-import { type CheckoutOk, decodeCheckout, PR_URL_RE } from "./hunkHandoff.ts";
 import {
   LOCAL_REVIEW_DIFF_TYPE,
   plannotatorPresent,
   stackRespondMessage,
-} from "./plannotatorHandoff.ts";
-import { openReviewBrowserCore } from "./prReviewBrowser.ts";
+} from "../../../doors/plannotatorHandoff.ts";
+import { openBranchWorkflowSession } from "../../../session/branchWorkflowSession.ts";
+import type { WorkflowSession } from "../../../session/workflowSession.ts";
+import { bindingSuffix } from "../../../substrate/bindingDelivery.ts";
+import { readHandoff } from "../../../substrate/cache.ts";
+import { type ColdJson, runColdDoor } from "../../../substrate/coldDoor.ts";
+import { registerPerkCommand } from "../../../substrate/command.ts";
+import { render } from "../../../substrate/prompts.ts";
+import { failFor, ok } from "../../../substrate/result.ts";
+import { report } from "../../../surfaces/report.ts";
+import type { AnnotationState } from "../providers/annotations.ts";
+import { openReviewBrowserCore } from "./browser.ts";
+import { type CheckoutOk, decodeCheckout, PR_URL_RE } from "./checkout.ts";
 
 /** The door's report scope — also the `command:<id>` binding trigger id. */
 const SCOPE = "stack-review-browser";
@@ -256,6 +258,7 @@ export const STACK_DEGRADE_NOTICE =
 async function openStackBrowser(
   pi: ExtensionAPI,
   ctx: ExtensionContext,
+  annotations: AnnotationState,
   opts: {
     checkoutPath: string;
     stackBaseRef: string;
@@ -263,7 +266,7 @@ async function openStackBrowser(
     injectGuidance: boolean;
   },
 ): Promise<boolean> {
-  return await openReviewBrowserCore(pi, ctx, {
+  return await openReviewBrowserCore(pi, ctx, annotations, {
     scope: SCOPE,
     browserOpts: {
       cwd: opts.checkoutPath,
@@ -282,7 +285,7 @@ async function openStackBrowser(
 // ------------------------------------------------------------------------ the warm door
 
 /** Register the warm `/stack-review-browser` command (posting rides submit_pr_review). */
-export function registerStackReviewBrowser(pi: ExtensionAPI): void {
+function registerStackReviewBrowser(pi: ExtensionAPI, annotations: AnnotationState): void {
   registerPerkCommand(pi, SCOPE, {
     description:
       "Review a whole PR stack human-in-the-loop in the plannotator browser UI over the " +
@@ -330,10 +333,10 @@ export function registerStackReviewBrowser(pi: ExtensionAPI): void {
       } else if (parsed.target.kind === "objective") {
         argv.push("--objective", parsed.target.id);
       } else {
-        // The no-target ladder: the session's active objective, passed EXPLICITLY; else the
-        // worker's own cache.plan-ref arm (bare --stack).
-        const active = rebuildWorkflowState(branchOf(ctx)).active_objective;
-        if (typeof active === "string" && active.trim() !== "") {
+        // The no-target ladder: the session's active objective (the seam's fail-open read),
+        // passed EXPLICITLY; else the worker's own cache.plan-ref arm (bare --stack).
+        const active = openBranchWorkflowSession(pi, ctx).activeObjective();
+        if (active !== null && active.trim() !== "") {
           argv.push("--objective", active.trim());
         }
       }
@@ -375,7 +378,7 @@ export function registerStackReviewBrowser(pi: ExtensionAPI): void {
             : " → adversarial reviewers") +
           " → plannotator browser triage → judgment-routed per-PR posting",
       );
-      await openStackBrowser(pi, ctx, {
+      await openStackBrowser(pi, ctx, annotations, {
         checkoutPath: data.path,
         stackBaseRef: data.base_ref,
         guidance:
@@ -440,12 +443,15 @@ export function decodeStackReviewBinding(raw: unknown): StackReviewBinding | nul
   };
 }
 
-/** Recover the launch binding: rebuilt workflow-state run_id → the run's handoff blob (the
+/** Recover the launch binding: the session seam's run identity → the run's handoff blob (the
  * `audit_bundle_dir` recovery seam). Null when absent — i.e. in every session that is not a
  * claimed `perk objective stack review` launch. */
-export function stackReviewBindingOf(ctx: ExtensionContext): StackReviewBinding | null {
-  const runId = rebuildWorkflowState(branchOf(ctx)).run_id;
-  if (runId === undefined || runId === "") return null;
+export function stackReviewBindingOf(
+  ctx: ExtensionContext,
+  session: WorkflowSession,
+): StackReviewBinding | null {
+  const runId = session.runId;
+  if (runId === null || runId === "") return null;
   const raw = readHandoff(ctx.cwd, runId)?.stack_review;
   if (raw === undefined) return null;
   return decodeStackReviewBinding(raw);
@@ -473,6 +479,7 @@ export async function executeOpenStackReview(
   pi: ExtensionAPI,
   ctx: ExtensionContext,
   latch: OpenLatch,
+  annotations: AnnotationState,
   open: StackBrowserOpen = openStackBrowser,
 ): Promise<ReturnType<typeof ok> | ReturnType<ReturnType<typeof failFor>>> {
   const fail = failFor(ctx, "open_stack_review");
@@ -491,8 +498,9 @@ export async function executeOpenStackReview(
     );
   }
   // The structural binding: no param exists, so the ONLY reachable snapshot is the one the
-  // cold door bound into this session's launch handoff.
-  const binding = stackReviewBindingOf(ctx);
+  // cold door bound into this session's launch handoff (the branch session constructed at the
+  // execute site — identity through the seam, never a direct state read).
+  const binding = stackReviewBindingOf(ctx, openBranchWorkflowSession(pi, ctx));
   if (binding === null) {
     return fail(
       "no stack_review binding in this session's launch state — open_stack_review runs " +
@@ -522,7 +530,7 @@ export async function executeOpenStackReview(
     notes: binding.notes,
     ...(binding.focus !== null ? { directive: binding.focus } : {}),
   });
-  const started = await open(pi, ctx, {
+  const started = await open(pi, ctx, annotations, {
     checkoutPath: binding.checkout_path,
     stackBaseRef: bindingBaseRef(binding),
     guidance,
@@ -544,10 +552,10 @@ export async function executeOpenStackReview(
 }
 
 /**
- * Register the parameterless `open_stack_review` tool (the `run_audit_wave` posture) and reset
- * its single-use latch (a fresh registration is a fresh session).
+ * Register the parameterless `open_stack_review` tool (the `run_audit_wave` posture) over a
+ * registration-owned single-use latch (a fresh activation is a fresh session).
  */
-export function registerOpenStackReview(pi: ExtensionAPI): void {
+function registerOpenStackReview(pi: ExtensionAPI, annotations: AnnotationState): void {
   const latch: OpenLatch = { opened: false };
 
   pi.registerTool({
@@ -567,7 +575,17 @@ export function registerOpenStackReview(pi: ExtensionAPI): void {
       properties: {},
     },
     async execute(_toolCallId, _params, _signal, _onUpdate, ctx) {
-      return await executeOpenStackReview(pi, ctx, latch);
+      return await executeOpenStackReview(pi, ctx, latch, annotations);
     },
   });
+}
+
+/**
+ * Install the Delivery-train review surface: the warm `/stack-review-browser` door + its
+ * cold-launch twin (`open_stack_review`). Takes the threaded per-activation annotation state —
+ * both openers prime it through `openReviewBrowserCore`.
+ */
+export function installStackReviewBindings(pi: ExtensionAPI, annotations: AnnotationState): void {
+  registerStackReviewBrowser(pi, annotations);
+  registerOpenStackReview(pi, annotations);
 }

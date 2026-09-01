@@ -31,7 +31,6 @@ export const REPORT_ONLY_CHILD_AGENTS = [
   "perk.learn-analyst",
   "perk.objective-explorer",
   "perk.pr-reviewer",
-  "perk.review-angle-selector",
   "perk.review-classifier",
 ] as const;
 

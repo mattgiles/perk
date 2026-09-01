@@ -134,13 +134,15 @@ export interface PerkSession {
   ): Promise<{ newSessionCalls: { parentSession?: string }[]; seeded: string[] }>;
   /** Invoke a registered tool's `execute` directly with a synthesized ctx. `opts.onUpdate`
    * captures streamed partial results (pi's `onUpdate` channel); `opts.ui` overlays scripted
-   * dialog answers (select/input/editor) on the recording UI — the recording surfaces stay. */
+   * dialog answers (select/input/editor) on the recording UI — the recording surfaces stay;
+   * `opts.signal` rides the execute callback's AbortSignal slot (cancellation-threading pins). */
   invokeTool(
     name: string,
     params: unknown,
     opts?: {
       onUpdate?: (partial: { content: { text?: string }[]; details: unknown }) => void;
       ui?: Record<string, unknown>;
+      signal?: AbortSignal;
     },
   ): Promise<{ content: { text?: string }[]; details: unknown; terminate?: boolean }>;
   /** Fire a `tool_call` event through the runner; returns the gating verdict (block/reason). */
@@ -732,6 +734,7 @@ export async function loadPerkSession(opts: {
       toolOpts?: {
         onUpdate?: (partial: { content: { text?: string }[]; details: unknown }) => void;
         ui?: Record<string, unknown>;
+        signal?: AbortSignal;
       },
     ) {
       const tool = session.extensionRunner
@@ -753,7 +756,7 @@ export async function loadPerkSession(opts: {
       const result = await tool.definition.execute(
         `tc-${name}`,
         params as never,
-        undefined,
+        toolOpts?.signal as Parameters<typeof tool.definition.execute>[2],
         toolOpts?.onUpdate as Parameters<typeof tool.definition.execute>[3],
         ctx,
       );

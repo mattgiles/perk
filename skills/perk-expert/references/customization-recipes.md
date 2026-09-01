@@ -15,7 +15,7 @@ that session.
      `submit`, `address`, `land`, `learn`.
    - `command:<id>` binds a command that is **not** a registry stage. These command targets have
      a delivery surface: `objective-reconcile`, `objective-replan`, `replan`, `learn-docs`,
-     `learn-code`, `learn-harvest`, `learn-dream`, `pr-review`, `pr-review-dynamic`, `pr-review-terminal`,
+     `learn-code`, `learn-harvest`, `learn-dream`, `pr-review`, `pr-review-terminal`,
      `pr-review-browser`, `plan-review-browser`, `objective-review-browser`, `skills-create`,
      `skills-refine`. A `command:<id>` outside that set validates but **never fires**. When a
      command is also a registry stage, bind `stage:<id>`.
@@ -65,7 +65,7 @@ to perk's subagents (frontmatter/`[models.subagents]` own those).
 
 Fixed-key table — affects only perk's own agents (`pr-reviewer`, `review-classifier`,
 `objective-explorer`, `conflict-resolver`, `learn-analyst`, `adversarial-reviewer`,
-`review-angle-selector`, `draft-reviewer`, `harvest-analyst`, `dream-analyst`,
+`draft-reviewer`, `harvest-analyst`, `dream-analyst`,
 `dream-reducer`, plus the dev-only
 `session-auditor` — dormant in consumer repos). An absent key uses
 the agent's frontmatter default.

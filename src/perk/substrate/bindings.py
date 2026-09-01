@@ -41,11 +41,10 @@ MODES: tuple[str, ...] = ("nudge", "transclude")
 # deliverable command triggers are the Mechanism-B call sites (`bindingSuffix` in
 # extension/factories/objectivePlan.ts + extension/doors/land.ts (`command:objective-reconcile`),
 # extension/doors/learnFactory.ts (`command:learn-docs`/`command:learn-code`), and
-# extension/doors/prReview.ts (`command:pr-review`),
-# extension/doors/prReviewDynamic.ts (`command:pr-review-dynamic`),
-# extension/doors/prReviewTerminal.ts (`command:pr-review-terminal`),
-# extension/doors/prReviewBrowser.ts (`command:pr-review-browser`), and
-# extension/doors/stackReviewBrowser.ts (`command:stack-review-browser` — also the
+# extension/pi/v1/codeReview/automated.ts (`command:pr-review`),
+# extension/pi/v1/codeReview/terminal.ts (`command:pr-review-terminal`),
+# extension/pi/v1/codeReview/browser.ts (`command:pr-review-browser`), and
+# extension/pi/v1/codeReview/stack.ts (`command:stack-review-browser` — also the
 # `perk objective stack review` cold launch's `binding_trigger=` override))
 # plus the cold `binding_trigger=` overrides in
 # perk/cli/commands/: `command:learn-docs`/`command:learn-code` (learn/factory_common.py),
@@ -66,7 +65,6 @@ DELIVERABLE_COMMAND_TARGETS: frozenset[str] = frozenset(
         "learn-harvest",
         "learn-dream",
         "pr-review",
-        "pr-review-dynamic",
         "pr-review-terminal",
         "pr-review-browser",
         "stack-review-browser",

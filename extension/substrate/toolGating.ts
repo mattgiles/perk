@@ -303,7 +303,6 @@ export const PERK_TOOLS: readonly string[] = [
   "finalize_address",
   "explore_objective_node",
   "run_pr_review_wave",
-  "run_pr_review_dynamic_wave",
   "submit_pr_review",
   "start_review_wave",
   "collect_review_wave",
@@ -362,7 +361,6 @@ const WORKTREE_STAGE_TOOLS: readonly string[] = [
   "finalize_address",
   "post_pr_review",
   "run_pr_review_wave",
-  "run_pr_review_dynamic_wave",
   "submit_pr_review",
   // The human review doors' companion tools (/pr-review-terminal, /pr-review-browser): the
   // review-wave pair + the door-primed annotation push. The plan-stage widening landed via the

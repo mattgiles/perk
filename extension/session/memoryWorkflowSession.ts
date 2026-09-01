@@ -13,7 +13,10 @@ import {
   type SessionArtifactPointer,
 } from "../substrate/workflowState.ts";
 import type {
+  PrReviewRecord,
   ReadArtifactResult,
+  ReviewPostRow,
+  ReviewSubmissionRecord,
   WorkflowChange,
   WorkflowChangeResult,
   WorkflowSession,
@@ -40,6 +43,10 @@ export interface MemoryWorkflowSession extends WorkflowSession {
   setNodeClaim(claim: { objective: string; node: string } | null): void;
   /** The live linked plan-ref (test observation of the `link-plan-ref` effect). */
   linkedPlanRef(): PlanRef | null;
+  /** The live `last_review` record (test observation of the `record-review` effect). */
+  lastReviewRecord(): ReviewSubmissionRecord | null;
+  /** The live `last_pr_review` record (test observation of the `record-pr-review` effect). */
+  lastPrReviewRecord(): PrReviewRecord | null;
 }
 
 /**
@@ -52,6 +59,7 @@ export function openMemoryWorkflowSession(opts: {
   nodeClaim?: { objective: string; node: string } | null;
   activePlanRef?: PlanRef | null;
   activeObjective?: string | null;
+  reviewPosts?: ReviewPostRow[];
 }): MemoryWorkflowSession {
   const runId = opts.runId;
   const contents = new Map<string, string>();
@@ -59,6 +67,9 @@ export function openMemoryWorkflowSession(opts: {
   let claim = opts.nodeClaim ?? null;
   let activePlanRef = opts.activePlanRef ?? null;
   let activeObjective = opts.activeObjective ?? null;
+  let lastReview: ReviewSubmissionRecord | null = null;
+  let lastPrReview: PrReviewRecord | null = null;
+  const reviewPosts: ReviewPostRow[] = [...(opts.reviewPosts ?? [])];
   let failWrite = false;
   let failPointerAppend = false;
   let failApply = false;
@@ -95,11 +106,20 @@ export function openMemoryWorkflowSession(opts: {
     linkedPlanRef() {
       return activePlanRef;
     },
+    lastReviewRecord() {
+      return lastReview;
+    },
+    lastPrReviewRecord() {
+      return lastPrReview;
+    },
     nodeClaim() {
       return claim;
     },
     activeObjective() {
       return activeObjective;
+    },
+    reviewPosts() {
+      return [...reviewPosts];
     },
     readArtifact(name: string): ReadArtifactResult {
       if (runId === null) return { status: "absent" }; // no identity — silent, branchable
@@ -233,6 +253,44 @@ export function openMemoryWorkflowSession(opts: {
               status: "unverified",
               problem: `active_objective read-back failed for #${change.objective}`,
             };
+          }
+          return { status: "applied" };
+        }
+        case "record-pr-review": {
+          // No pre-read/dedupe by design: applied/unverified/rejected only at runtime.
+          if (failApply) {
+            failApply = false;
+            return { status: "rejected", problem: "workflow-state append refused (induced)" };
+          }
+          lastPrReview = change.record;
+          if (failApplyVerification) {
+            failApplyVerification = false;
+            return { status: "unverified", problem: "last_pr_review read-back failed" };
+          }
+          return { status: "applied" };
+        }
+        case "record-review": {
+          // No pre-read/dedupe by design: applied/unverified/rejected only at runtime.
+          if (failApply) {
+            failApply = false;
+            return { status: "rejected", problem: "workflow-state append refused (induced)" };
+          }
+          lastReview = change.record;
+          if (failApplyVerification) {
+            failApplyVerification = false;
+            return { status: "unverified", problem: "last_review read-back failed" };
+          }
+          return { status: "applied" };
+        }
+        case "append-review-post": {
+          if (failApply) {
+            failApply = false;
+            return { status: "rejected", problem: "workflow-state append refused (induced)" };
+          }
+          reviewPosts.push(change.row);
+          if (failApplyVerification) {
+            failApplyVerification = false;
+            return { status: "unverified", problem: "review_posts read-back failed" };
           }
           return { status: "applied" };
         }

@@ -205,7 +205,6 @@ class SubagentsTable(LenientParseModel):
     conflict_resolver: StrippedStr = Field(default=None, alias="conflict-resolver")
     learn_analyst: StrippedStr = Field(default=None, alias="learn-analyst")
     adversarial_reviewer: StrippedStr = Field(default=None, alias="adversarial-reviewer")
-    review_angle_selector: StrippedStr = Field(default=None, alias="review-angle-selector")
     draft_reviewer: StrippedStr = Field(default=None, alias="draft-reviewer")
     harvest_analyst: StrippedStr = Field(default=None, alias="harvest-analyst")
     dream_analyst: StrippedStr = Field(default=None, alias="dream-analyst")
@@ -451,7 +450,6 @@ class ConfigFileModel(LenientParseModel):
                 ("conflict-resolver", self.models.subagents.conflict_resolver),
                 ("learn-analyst", self.models.subagents.learn_analyst),
                 ("adversarial-reviewer", self.models.subagents.adversarial_reviewer),
-                ("review-angle-selector", self.models.subagents.review_angle_selector),
                 ("draft-reviewer", self.models.subagents.draft_reviewer),
                 ("harvest-analyst", self.models.subagents.harvest_analyst),
                 ("dream-analyst", self.models.subagents.dream_analyst),

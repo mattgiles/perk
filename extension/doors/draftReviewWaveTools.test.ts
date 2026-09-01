@@ -1,5 +1,5 @@
 // Tests for the draft-review wave tool pair (registered live in `extension/index.ts`; the
-// `reviewWaveTools.test.ts` mirror). The strict decoder is pinned directly; the start/collect
+// `pi/v1/codeReview/reviewWave.test.ts` mirror). The strict decoder is pinned directly; the start/collect
 // execute cores are driven through the injected in-memory adapter over door-primed module
 // state; registration + the real tool-boundary threading (config model → spawn, decode refusal,
 // launch → collect round-trip) run against a REAL bound session via the T1 harness with a fake

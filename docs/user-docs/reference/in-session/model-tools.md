@@ -42,7 +42,6 @@ These tools are registered by perk itself. Command-specific semantics live in
 | Address loop | `finalize_address` |
 | Objective workflow | `explore_objective_node` |
 | Automated review | `run_pr_review_wave` |
-| Automated review | `run_pr_review_dynamic_wave` |
 | Human PR review | `submit_pr_review` |
 | Human PR review | `start_review_wave` |
 | Human PR review | `collect_review_wave` |
