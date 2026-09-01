@@ -1,37 +1,18 @@
-// The dream report module's suite (the dreamWave/dreamReducerWave matrix shape): the
-// schema↔caps lockstep + the single-line rule + code-point cap measurement, the context
+// The dream report module's suite (the dream/dreamReducer matrix shape), exercised entirely
+// through the ONE exported entry (`buildDreamReport` — it returns both the typed report and
+// the rendered parts, and its Refusal shape carries the validator's details): the schema↔caps
+// lockstep + the single-line rule + code-point cap measurement, the context
 // re-verification refusals (complete waves only), the fail-fast structural decode, the
 // collected semantic rules (path-set equality, downgrade-only, the destructive evidence bar,
 // merge-target survival/acyclicity, the exact unit partition + node cap, surviving follow-up
 // destinations, no-quota predicted effects), the two-stage bounded error collection, and the
 // deterministic renderer (byte equality, the pinned full-fixture snapshot, part splitting
-// with table-header re-emission, sanitization, the oversize defensive arm). Fully offline.
+// with table-header re-emission, sanitization, the oversize defensive arm). The module's
+// caps/constants are private: this suite pins them through the local `CAPS`/threshold mirrors
+// (the schema lockstep + the rendered refusal details keep the mirrors honest). Fully offline.
 
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import {
-  DREAM_REDUCER_ANGLES,
-  type DreamReducerAnalysis,
-  type DreamReducerAngle,
-  type DreamStance,
-  type DreamStanceDisposition,
-} from "./dreamReducerWave.ts";
-import {
-  buildDreamReport,
-  DREAM_REPORT_CAPS,
-  DREAM_REPORT_INPUT_SCHEMA,
-  DREAM_REPORT_MAX_ROADMAP_NODES,
-  DREAM_REPORT_MAX_VALIDATION_DETAILS,
-  DREAM_REPORT_PART_HEADER_RESERVE,
-  DREAM_REPORT_PART_MAX_CHARS,
-  DREAM_REPORT_SCHEMA_VERSION,
-  type DreamReport,
-  type DreamReportContext,
-  type DreamReportInput,
-  type DreamReportInputRow,
-  renderDreamReport,
-  validateDreamReport,
-} from "./dreamReport.ts";
 import {
   codePointLength,
   DREAM_DISPOSITIONS,
@@ -40,7 +21,72 @@ import {
   type DreamLaneAnalysis,
   type DreamManifest,
   decodeDreamManifest,
-} from "./dreamWave.ts";
+} from "./dream.ts";
+import {
+  DREAM_REDUCER_ANGLES,
+  type DreamReducerAnalysis,
+  type DreamReducerAngle,
+  type DreamStance,
+  type DreamStanceDisposition,
+} from "./dreamReducer.ts";
+import {
+  buildDreamReport,
+  DREAM_REPORT_INPUT_SCHEMA,
+  type DreamReport,
+  type DreamReportContext,
+} from "./dreamReport.ts";
+
+// ------------------------------------------- the local mirrors of the module-private pins
+
+/** The pinned values of the module-private `DREAM_REPORT_CAPS` SSOT — the schema-lockstep
+ * test compares the exported input schema against this mirror, so a silent cap retune in the
+ * module still trips the suite. */
+const CAPS = {
+  rows: 512,
+  rowRationaleChars: 300,
+  fallbackReasonChars: 300,
+  uncertainties: 12,
+  uncertaintyChars: 300,
+  selectedUnits: 64,
+  overflowUnits: 64,
+  unitTitleChars: 150,
+  unitDocs: 32,
+  unitRationaleChars: 400,
+  unitNodeChars: 32,
+  harvestFollowups: 12,
+  followupTitleChars: 150,
+  followupPointerChars: 250,
+  followupEvidenceChars: 250,
+  followupDestinationChars: 400,
+  predictedNoteChars: 300,
+} as const;
+
+/** The module-private thresholds, mirrored: each is pinned behaviorally below (the rendered
+ * part sizes, the snapshot's schema_version, the refusal details' literal 12/25 caps). */
+const SCHEMA_VERSION = "1";
+const PART_MAX_CHARS = 60_000;
+const MAX_ROADMAP_NODES = 12;
+const MAX_VALIDATION_DETAILS = 25;
+
+/** One final per-doc disposition row (the module-private input shape, mirrored). */
+interface DreamReportInputRow {
+  path: string;
+  disposition: DreamDisposition;
+  merge_target: string | null;
+  rationale: string;
+  fallback_reason: string | null;
+}
+
+/** The model-supplied input shape (module-private in the feature — `buildDreamReport` takes
+ * `unknown`; mirrored here so the fixture builders stay typed). */
+interface DreamReportInput {
+  rows: DreamReportInputRow[];
+  uncertainties: string[];
+  selected_units: { title: string; roadmap_node: string; docs: string[]; rationale: string }[];
+  overflow_units: { title: string; docs: string[]; rationale: string }[];
+  harvest_followups: { title: string; destination: string; pointer: string; evidence: string }[];
+  predicted_effects: { docs_after: number; bytes_after: number; note: string | null };
+}
 
 const MANIFEST_PATH = "/abs/scratch/runs/RUN/dream-manifest.json";
 const RUN_ID = "01RUNDREAM";
@@ -275,11 +321,11 @@ function inputFor(
   );
   const nonKeep = rows.filter((row) => row.disposition !== "keep").map((row) => row.path);
   const selectedUnits: DreamReportInput["selected_units"] = [];
-  for (let start = 0; start < nonKeep.length; start += DREAM_REPORT_CAPS.unitDocs) {
+  for (let start = 0; start < nonKeep.length; start += CAPS.unitDocs) {
     selectedUnits.push({
       title: `Unit ${selectedUnits.length + 1}`,
       roadmap_node: "1.1",
-      docs: nonKeep.slice(start, start + DREAM_REPORT_CAPS.unitDocs),
+      docs: nonKeep.slice(start, start + CAPS.unitDocs),
       rationale: "bundled",
     });
   }
@@ -421,7 +467,7 @@ function fixtureInput(): DreamReportInput {
 }
 
 function refusalDetails(input: unknown, context: DreamReportContext): string[] {
-  const result = validateDreamReport(input, context);
+  const result = buildDreamReport(input, context);
   assert.equal(result.ok, false, `expected a refusal, got: ${JSON.stringify(result)}`);
   return (result as { ok: false; details: string[] }).details;
 }
@@ -434,7 +480,7 @@ function expectFailFast(input: unknown, context: DreamReportContext, detail: Reg
 }
 
 function validReport(input: DreamReportInput, context: DreamReportContext): DreamReport {
-  const result = validateDreamReport(input, context);
+  const result = buildDreamReport(input, context);
   assert.equal(result.ok, true, JSON.stringify(result));
   return (result as { ok: true; report: DreamReport }).report;
 }
@@ -442,7 +488,7 @@ function validReport(input: DreamReportInput, context: DreamReportContext): Drea
 // ------------------------------------------------------------- the schema↔caps lockstep
 
 test("DREAM_REPORT_INPUT_SCHEMA: closed shape, required-completeness, enums, caps SSOT", () => {
-  const caps = DREAM_REPORT_CAPS;
+  const caps = CAPS;
   const schema = DREAM_REPORT_INPUT_SCHEMA as {
     additionalProperties: boolean;
     required: string[];
@@ -538,14 +584,6 @@ test("DREAM_REPORT_INPUT_SCHEMA: closed shape, required-completeness, enums, cap
   });
 });
 
-test("the pinned constants: part cap/reserve, schema version, node cap, detail cap", () => {
-  assert.equal(DREAM_REPORT_SCHEMA_VERSION, "1");
-  assert.equal(DREAM_REPORT_PART_MAX_CHARS, 60_000);
-  assert.equal(DREAM_REPORT_PART_HEADER_RESERVE, 200);
-  assert.equal(DREAM_REPORT_MAX_ROADMAP_NODES, 12);
-  assert.equal(DREAM_REPORT_MAX_VALIDATION_DETAILS, 25);
-});
-
 // ------------------------------------------------------- the context re-verification
 
 test("context re-verification refuses fail-fast: run identity, lane coverage, reducer angles", () => {
@@ -595,7 +633,7 @@ test("context re-verification refuses fail-fast: run identity, lane coverage, re
 // --------------------------------------------------------- the structural decode (fail-fast)
 
 test("structural decode: each arm fails fast with its named detail", () => {
-  const caps = DREAM_REPORT_CAPS;
+  const caps = CAPS;
   const context = contextFor(fixtureManifest());
   const base = (): DreamReportInput => inputFor(context);
   const row = (): DreamReportInputRow => ({
@@ -793,14 +831,11 @@ test("the single-line rule: \\r/\\n and other C0 controls refuse with a named de
 });
 
 test("string caps are measured in Unicode code points (astral)", () => {
-  const caps = DREAM_REPORT_CAPS;
+  const caps = CAPS;
   const context = contextFor(fixtureManifest());
   const astral = "😀".repeat(caps.rowRationaleChars);
   assert.ok(astral.length > caps.rowRationaleChars, "sanity: UTF-16 exceeds the cap");
-  const pass = validateDreamReport(
-    inputFor(context, { [DOC_CTX]: { rationale: astral } }),
-    context,
-  );
+  const pass = buildDreamReport(inputFor(context, { [DOC_CTX]: { rationale: astral } }), context);
   assert.equal(pass.ok, true, "exactly N astral code points passes");
   expectFailFast(
     inputFor(context, { [DOC_CTX]: { rationale: `${astral}😀` } }),
@@ -993,7 +1028,7 @@ test("the destructive evidence bar: both gates must endorse; ANY challenge block
 
   // Both gate angles endorse, no challenge — the destructive final passes.
   const endorsed = contextFor(manifest, proposals);
-  assert.equal(validateDreamReport(inputFor(endorsed), endorsed).ok, true);
+  assert.equal(buildDreamReport(inputFor(endorsed), endorsed).ok, true);
 
   // One gate silent — silence is non-endorsement.
   const silentGate = contextFor(manifest, proposals, { "currency-accuracy": [] });
@@ -1021,7 +1056,7 @@ test("the destructive evidence bar: both gates must endorse; ANY challenge block
       fallback_reason: "the architecture challenge blocks the merge",
     },
   });
-  assert.equal(validateDreamReport(downgraded, challenged).ok, true);
+  assert.equal(buildDreamReport(downgraded, challenged).ok, true);
 });
 
 // ------------------------------------------------------- merge-target survival (D6)
@@ -1164,7 +1199,7 @@ test("units: many-to-one node mapping passes; 13 DISTINCT nodes refuse", () => {
       ],
     },
   );
-  assert.equal(validateDreamReport(shared, context).ok, true);
+  assert.equal(buildDreamReport(shared, context).ok, true);
 
   // Thirteen DISTINCT nodes exceed the review-time selection cap.
   const bigManifest = genManifest(13);
@@ -1185,7 +1220,7 @@ test("units: many-to-one node mapping passes; 13 DISTINCT nodes refuse", () => {
     },
   );
   assert.deepEqual(refusalDetails(thirteenNodes, bigContext), [
-    `selected units name 13 distinct roadmap nodes — the cap is ${DREAM_REPORT_MAX_ROADMAP_NODES}`,
+    `selected units name 13 distinct roadmap nodes — the cap is ${MAX_ROADMAP_NODES}`,
   ]);
 });
 
@@ -1203,7 +1238,7 @@ test("units: overflow-only reports pass; the zero-unit all-keep report passes (n
       overflow_units: [{ title: "Later", docs: [DOC_CTX, DOC_SUB], rationale: "deferred" }],
     },
   );
-  assert.equal(validateDreamReport(overflowOnly, context).ok, true);
+  assert.equal(buildDreamReport(overflowOnly, context).ok, true);
 
   const allKeep = contextFor(manifest);
   const noAction = validReport(inputFor(allKeep), allKeep);
@@ -1233,7 +1268,7 @@ test("harvest follow-ups must cite surviving destinations (doc or cluster)", () 
     {},
     { harvest_followups: [followup(DOC_CTX), followup(DOC_SUB), followup("pi-extension")] },
   );
-  assert.equal(validateDreamReport(pass, surviving).ok, true);
+  assert.equal(buildDreamReport(pass, surviving).ok, true);
 
   // A retired doc destination refuses; its dead cluster refuses too (its only member died).
   const retiring = contextFor(manifest, { [DOC_WAVES]: { disposition: "retire" } });
@@ -1336,14 +1371,14 @@ test("collection is bounded: >25 violations truncate with the synthetic count de
   );
   const input = inputFor(context, Object.fromEntries(paths.map((p) => [p, { rationale: "" }])));
   const details = refusalDetails(input, context);
-  assert.equal(details.length, DREAM_REPORT_MAX_VALIDATION_DETAILS + 1);
+  assert.equal(details.length, MAX_VALIDATION_DETAILS + 1);
   assert.equal(details[0], "row 'docs/learned/gen/doc-000.md' rationale must be non-empty");
-  for (const detail of details.slice(0, DREAM_REPORT_MAX_VALIDATION_DETAILS)) {
+  for (const detail of details.slice(0, MAX_VALIDATION_DETAILS)) {
     assert.match(detail, /rationale must be non-empty/);
   }
   assert.equal(
-    details[DREAM_REPORT_MAX_VALIDATION_DETAILS],
-    `…and 5 more validation detail(s) omitted (cap ${DREAM_REPORT_MAX_VALIDATION_DETAILS})`,
+    details[MAX_VALIDATION_DETAILS],
+    `…and 5 more validation detail(s) omitted (cap ${MAX_VALIDATION_DETAILS})`,
   );
 });
 
@@ -1364,7 +1399,7 @@ test("the composed report joins validated input with injected context (manifest 
   const { report, parts } = result as { ok: true; report: DreamReport; parts: string[] };
 
   assert.deepEqual(report.snapshot, {
-    schema_version: DREAM_REPORT_SCHEMA_VERSION,
+    schema_version: SCHEMA_VERSION,
     run_id: RUN_ID,
     generated_at: GENERATED_AT,
     commit_sha: "abc123",
@@ -1469,18 +1504,17 @@ test("the composed report joins validated input with injected context (manifest 
     "the composed report is JSON-serializable",
   );
 
-  // validateDreamReport shares the composed-report shape; buildDreamReport adds the parts.
-  const validated = validateDreamReport(shuffledInput(), context);
-  assert.deepEqual((validated as { ok: true; report: DreamReport }).report, report);
+  // The composed report is deterministic: a second build over the same input agrees.
+  const rebuilt = buildDreamReport(shuffledInput(), context);
+  assert.deepEqual((rebuilt as { ok: true; report: DreamReport }).report, report);
   assert.equal(parts.length, 1);
 });
 
 // ------------------------------------------------------------------- the renderer
 
-test("renderDreamReport: repeated calls yield byte-identical parts", () => {
-  const report = validReport(fixtureInput(), fixtureContext());
-  const first = renderDreamReport(report);
-  const second = renderDreamReport(report);
+test("the renderer: repeated builds yield byte-identical parts", () => {
+  const first = buildDreamReport(fixtureInput(), fixtureContext());
+  const second = buildDreamReport(fixtureInput(), fixtureContext());
   assert.equal(first.ok, true);
   assert.deepEqual(first, second);
 });
@@ -1611,16 +1645,15 @@ const PINNED_PART = `# Dream report — 01RUNDREAM
 _Predictions are not quotas._
 `;
 
-test("renderDreamReport: the pinned full-fixture snapshot", () => {
-  const report = validReport(fixtureInput(), fixtureContext());
-  const rendered = renderDreamReport(report);
-  assert.equal(rendered.ok, true, JSON.stringify(rendered));
+test("the renderer: the pinned full-fixture snapshot", () => {
+  const rendered = buildDreamReport(fixtureInput(), fixtureContext());
+  assert.equal(rendered.ok, true, JSON.stringify(rendered).slice(0, 400));
   const parts = (rendered as { ok: true; parts: string[] }).parts;
   assert.equal(parts.length, 1);
   assert.equal(parts[0], PINNED_PART);
 });
 
-test("renderDreamReport: part splitting under the code-point cap with header re-emission", () => {
+test("the renderer: part splitting under the code-point cap with header re-emission", () => {
   const docCount = 200;
   const manifest = genManifest(docCount);
   const paths = manifestPaths(manifest);
@@ -1640,19 +1673,12 @@ test("renderDreamReport: part splitting under the code-point cap with header re-
   const parts = (result as { ok: true; parts: string[] }).parts;
   assert.ok(parts.length >= 2, `expected a split, got ${parts.length} part(s)`);
   for (const part of parts) {
-    assert.ok(
-      codePointLength(part) <= DREAM_REPORT_PART_MAX_CHARS,
-      "every part stays under the code-point cap",
-    );
+    assert.ok(codePointLength(part) <= PART_MAX_CHARS, "every part stays under the code-point cap");
   }
   // The discriminating pin: packing measured in UTF-16 units would split earlier and never
   // produce a part whose UTF-16 length exceeds the cap while its code-point length fits.
   assert.ok(
-    parts.some(
-      (part) =>
-        part.length > DREAM_REPORT_PART_MAX_CHARS &&
-        codePointLength(part) <= DREAM_REPORT_PART_MAX_CHARS,
-    ),
+    parts.some((part) => part.length > PART_MAX_CHARS && codePointLength(part) <= PART_MAX_CHARS),
     "the part cap is measured in code points, not UTF-16 units",
   );
   assert.ok(parts[0]?.startsWith(`# Dream report — ${RUN_ID}\n\n`), "the first part's header");
@@ -1677,7 +1703,7 @@ test("renderDreamReport: part splitting under the code-point cap with header re-
   assert.match(continuation[4] ?? "", /^\| docs\/learned\/gen\/doc-\d{3}\.md \|/);
 });
 
-test("renderDreamReport: injected pipes/newlines sanitize in cells and bullets", () => {
+test("the renderer: injected pipes/newlines sanitize in cells and bullets", () => {
   const manifest = fixtureManifest();
   const context = contextFor(
     manifest,
@@ -1702,7 +1728,7 @@ test("renderDreamReport: injected pipes/newlines sanitize in cells and bullets",
   );
 });
 
-test("renderDreamReport: an oversized bullet-list section splits at line boundaries", () => {
+test("the renderer: an oversized bullet-list section splits at line boundaries", () => {
   // A cap-conformant report whose §7 uncertainty bullets alone (35 lanes × 6 × ~310 code
   // points ≈ 65K) exceed the packing budget — rendered as ONE joined block this exact input
   // hits the oversize refusal; per-line grouping splits it at bullet boundaries instead.
@@ -1725,10 +1751,7 @@ test("renderDreamReport: an oversized bullet-list section splits at line boundar
   const parts = (result as { ok: true; parts: string[] }).parts;
   assert.ok(parts.length >= 2, `expected a split inside §7, got ${parts.length} part(s)`);
   for (const part of parts) {
-    assert.ok(
-      codePointLength(part) <= DREAM_REPORT_PART_MAX_CHARS,
-      "every part stays under the code-point cap",
-    );
+    assert.ok(codePointLength(part) <= PART_MAX_CHARS, "every part stays under the code-point cap");
   }
   const text = parts.join("\n");
   assert.equal(
@@ -1743,7 +1766,7 @@ test("renderDreamReport: an oversized bullet-list section splits at line boundar
   );
 });
 
-test("renderDreamReport: a final-keep fallback renders its stances in §6 exactly once", () => {
+test("the renderer: a final-keep fallback renders its stances in §6 exactly once", () => {
   // A destructive proposal (both gates endorsing) downgraded to final keep with a fallback
   // reason: the doc never reaches §5, and its injected stances render under §6 — the
   // exactly-once §5-or-§6 rule.
@@ -1781,16 +1804,16 @@ test("renderDreamReport: a final-keep fallback renders its stances in §6 exactl
   }
 });
 
-test("renderDreamReport: a single oversize block refuses (never truncates)", () => {
-  const report = validReport(fixtureInput(), fixtureContext());
-  const mutated: DreamReport = JSON.parse(JSON.stringify(report));
-  (mutated.rows[0] as { analyst_rationale: string }).analyst_rationale = "x".repeat(
-    DREAM_REPORT_PART_MAX_CHARS,
-  );
-  const result = renderDreamReport(mutated);
+test("the renderer: a single oversize block refuses (never truncates)", () => {
+  // INJECTED (trusted-context) prose is not cap-bounded, so an oversized analyst rationale
+  // reaches the renderer's defensive arm through the one entry: the §5 evidence bullet block
+  // for the non-keep doc exceeds the packing budget in a single block.
+  const context = fixtureContext();
+  const analysis = context.analyses[0] as DreamLaneAnalysis;
+  (analysis.report.docs[0] as { rationale: string }).rationale = "x".repeat(PART_MAX_CHARS);
+  const result = buildDreamReport(fixtureInput(), context);
   assert.equal(result.ok, false);
-  assert.match(
-    (result as { ok: false; detail: string }).detail,
-    /exceeds the part packing budget .* refusing to truncate/,
-  );
+  const details = (result as { ok: false; details: string[] }).details;
+  assert.equal(details.length, 1, "the renderer's single-detail arm wraps into one detail");
+  assert.match(details[0] as string, /exceeds the part packing budget .* refusing to truncate/);
 });

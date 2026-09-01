@@ -6,7 +6,7 @@ This is the readable projection of perk's living, workflow-first prose graph. It
 ## Coverage
 
 - **213** canonical source units
-- **728** logical fragments
+- **733** logical fragments
 - **16** session shapes and **10** assemblies
 - **15** explicitly excluded candidates (policy-only; not displayed)
 - **0** validation findings
@@ -1217,8 +1217,8 @@ Capture learnings and route them into documentation, code, or harvested objectiv
 | `typescript-model-call:extension/pi/v1/learning/learn.ts:module:sendUserMessage:0` | `tool-contract` | `shipped` | [`extension/pi/v1/learning/learn.ts`](../../extension/pi/v1/learning/learn.ts) · `symbol:module/call:sendUserMessage/0` | — |
 | `typescript-model-call:extension/pi/v1/learning/learn.ts:module:sendUserMessage:1` | `tool-contract` | `shipped` | [`extension/pi/v1/learning/learn.ts`](../../extension/pi/v1/learning/learn.ts) · `symbol:module/call:sendUserMessage/1` | — |
 | `typescript-tool:learn` | `tool-contract` | `shipped` | [`extension/pi/v1/learning/learn.ts`](../../extension/pi/v1/learning/learn.ts) · `tool:learn` | — |
-| `typescript-tool:run_dream_wave` | `tool-contract` | `shipped` | [`extension/doors/dreamWaveTools.ts`](../../extension/doors/dreamWaveTools.ts) · `tool:run_dream_wave` | — |
-| `typescript-tool:run_harvest_wave` | `tool-contract` | `shipped` | [`extension/doors/harvestWaveTools.ts`](../../extension/doors/harvestWaveTools.ts) · `tool:run_harvest_wave` | — |
+| `typescript-tool:run_dream_wave` | `tool-contract` | `shipped` | [`extension/pi/v1/learning/dream.ts`](../../extension/pi/v1/learning/dream.ts) · `tool:run_dream_wave` | — |
+| `typescript-tool:run_harvest_wave` | `tool-contract` | `shipped` | [`extension/pi/v1/learning/harvest.ts`](../../extension/pi/v1/learning/harvest.ts) · `tool:run_harvest_wave` | — |
 | `typescript-tool:run_learn_wave` | `tool-contract` | `shipped` | [`extension/pi/v1/learning/learn.ts`](../../extension/pi/v1/learning/learn.ts) · `tool:run_learn_wave` | learn.cold, learn.warm |
 
 <details>
@@ -1314,11 +1314,16 @@ Capture learnings and route them into documentation, code, or harvested objectiv
 - `typescript-tool:run_dream_wave`
   - `description` — description (`tool:run_dream_wave.description`)
   - `promptSnippet` — promptSnippet (`tool:run_dream_wave.promptSnippet`)
-  - `promptGuidelines` — promptGuidelines (`tool:run_dream_wave.promptGuidelines`)
+  - `promptGuidelines.0` — promptGuidelines item 1 (`tool:run_dream_wave.promptGuidelines.0`)
+  - `promptGuidelines.1` — promptGuidelines item 2 (`tool:run_dream_wave.promptGuidelines.1`)
+  - `promptGuidelines.2` — promptGuidelines item 3 (`tool:run_dream_wave.promptGuidelines.2`)
 - `typescript-tool:run_harvest_wave`
   - `description` — description (`tool:run_harvest_wave.description`)
   - `promptSnippet` — promptSnippet (`tool:run_harvest_wave.promptSnippet`)
-  - `promptGuidelines` — promptGuidelines (`tool:run_harvest_wave.promptGuidelines`)
+  - `promptGuidelines.0` — promptGuidelines item 1 (`tool:run_harvest_wave.promptGuidelines.0`)
+  - `promptGuidelines.1` — promptGuidelines item 2 (`tool:run_harvest_wave.promptGuidelines.1`)
+  - `promptGuidelines.2` — promptGuidelines item 3 (`tool:run_harvest_wave.promptGuidelines.2`)
+  - `promptGuidelines.3` — promptGuidelines item 4 (`tool:run_harvest_wave.promptGuidelines.3`)
   - `parameters.properties.manifest_path.description` — parameters.properties.manifest_path.description (`tool:run_harvest_wave.parameters.properties.manifest_path.description`)
 - `typescript-tool:run_learn_wave`
   - `description` — description (`tool:run_learn_wave.description`)

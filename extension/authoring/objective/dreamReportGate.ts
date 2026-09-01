@@ -3,7 +3,7 @@
 // ONE resolver implements the whole gate matrix — `reviseObjectiveDraft` (draft.ts) and
 // `saveObjective` (save.ts) both consume its typed outcome, so no parallel branch/message
 // implementation can drift. "Dream session" is detected structurally, exactly
-// like `run_dream_wave` (doors/dreamWaveTools.ts): the session's claimed `run_id` plus the
+// like `run_dream_wave` (pi/v1/learning/dream.ts): the session's claimed `run_id` plus the
 // existence of the run-scoped dream manifest (no claimed run counts as non-dream). The gate is
 // fail-closed in BOTH directions: a dream session refuses a report-less objective (the
 // objective and its report review as ONE bundle — an approval is always savable), and a
@@ -24,6 +24,16 @@
 
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
+import {
+  codePointLength,
+  DREAM_MANIFEST_FILENAME,
+  decodeDreamManifest,
+} from "../../learning/dream.ts";
+import {
+  DREAM_ANALYSES_FILENAME,
+  decodeFinalizedDreamBundle,
+} from "../../learning/dreamReducer.ts";
+import { buildDreamReport, type DreamReportContext } from "../../learning/dreamReport.ts";
 import { runScratchDir } from "../../substrate/cache.ts";
 import { revalidationBracket } from "../../substrate/git.ts";
 import { digestSessionData, type SessionDataCtx } from "../../substrate/sessionData.ts";
@@ -32,16 +42,6 @@ import {
   rebuildWorkflowState,
   type WorkflowState,
 } from "../../substrate/workflowState.ts";
-import {
-  DREAM_ANALYSES_FILENAME,
-  decodeFinalizedDreamBundle,
-} from "../../waves/dreamReducerWave.ts";
-import { buildDreamReport, type DreamReportContext } from "../../waves/dreamReport.ts";
-import {
-  codePointLength,
-  DREAM_MANIFEST_FILENAME,
-  decodeDreamManifest,
-} from "../../waves/dreamWave.ts";
 
 /**
  * The shared part-invariance + size rule's comment-body cap (contracts §8.64) — the full

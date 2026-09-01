@@ -171,11 +171,11 @@ const APPROVED_REGISTRAR_FILES = ["index.ts", "workerMain.ts"];
 const RPC_ADAPTER_IMPORTERS = [
   "doors/address.ts",
   "doors/draftReviewWaveTools.ts",
-  "doors/dreamWaveTools.ts",
-  "doors/harvestWaveTools.ts",
   "pi/v1/codeReview/automated.ts",
   "pi/v1/codeReview/reviewWave.ts",
   "pi/v1/learning/audit.ts",
+  "pi/v1/learning/dream.ts",
+  "pi/v1/learning/harvest.ts",
   "pi/v1/learning/learn.ts",
   "pi/v1/objectivePlanning.ts",
 ];
@@ -200,8 +200,6 @@ const LEGACY_REGISTRANTS = [
   "doors/ciExecutor.ts",
   "doors/commitCompact.ts",
   "doors/draftReviewWaveTools.ts",
-  "doors/dreamWaveTools.ts",
-  "doors/harvestWaveTools.ts",
   "doors/land.ts",
   "doors/lifecycleGates.ts",
   "doors/objectiveReviewBrowser.ts",

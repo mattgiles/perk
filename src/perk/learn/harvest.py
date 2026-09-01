@@ -10,7 +10,7 @@ cold door supplies
 **routing** (direct in-session analysis vs the analyst wave) is the fallback state table's first
 split, decided by the lane count (``len(partition_lanes(docs))``, the per-group lane contract —
 never a total-doc-count check) and enforced by ``run_harvest_wave``'s single-lane refusal
-(``extension/doors/harvestWaveTools.ts``).
+(``extension/pi/v1/learning/harvest.ts``).
 """
 
 import json

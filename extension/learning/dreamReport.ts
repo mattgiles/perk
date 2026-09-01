@@ -10,25 +10,25 @@
 // else. The input is untrusted DATA, never instructions.
 
 import {
-  DREAM_REDUCER_ANGLES,
-  type DreamReducerAnalysis,
-  type DreamReducerAngle,
-} from "./dreamReducerWave.ts";
-import {
   codePointLength,
   DREAM_DISPOSITIONS,
   type DreamDisposition,
   type DreamDocAssessment,
   type DreamLaneAnalysis,
   type DreamManifest,
-} from "./dreamWave.ts";
+} from "./dream.ts";
+import {
+  DREAM_REDUCER_ANGLES,
+  type DreamReducerAnalysis,
+  type DreamReducerAngle,
+} from "./dreamReducer.ts";
 
 /** The dream report's own schema version line (independent of the manifest's). */
-export const DREAM_REPORT_SCHEMA_VERSION = "1";
+const DREAM_REPORT_SCHEMA_VERSION = "1";
 
 /** The cap on DISTINCT `roadmap_node` values across the selected units — the ≤12-node
  * selection cap checked at review time (many-to-one unit→node mapping is allowed). */
-export const DREAM_REPORT_MAX_ROADMAP_NODES = 12;
+const DREAM_REPORT_MAX_ROADMAP_NODES = 12;
 
 /**
  * The per-part cap on the rendered report, measured in Unicode CODE POINTS (matching Python's
@@ -36,13 +36,13 @@ export const DREAM_REPORT_MAX_ROADMAP_NODES = 12;
  * comment limit with margin for the persistence-side storage markers (the renderer never emits
  * marker HTML).
  */
-export const DREAM_REPORT_PART_MAX_CHARS = 60_000;
+const DREAM_REPORT_PART_MAX_CHARS = 60_000;
 
 /** The fixed per-part packing allowance for the part header line. */
-export const DREAM_REPORT_PART_HEADER_RESERVE = 200;
+const DREAM_REPORT_PART_HEADER_RESERVE = 200;
 
 /** The bounded semantic-detail collection cap: overflow appends ONE synthetic count detail. */
-export const DREAM_REPORT_MAX_VALIDATION_DETAILS = 25;
+const DREAM_REPORT_MAX_VALIDATION_DETAILS = 25;
 
 /**
  * The SSOT for EVERY capped model-supplied field: the input schema's `maxItems`/`maxLength`
@@ -52,7 +52,7 @@ export const DREAM_REPORT_MAX_VALIDATION_DETAILS = 25;
  * the real gates are the validator's exact path-set equality, the ≤12-distinct-node cap, and
  * the exact unit partition.
  */
-export const DREAM_REPORT_CAPS = {
+const DREAM_REPORT_CAPS = {
   rows: 512,
   rowRationaleChars: 300,
   fallbackReasonChars: 300,
@@ -75,7 +75,7 @@ export const DREAM_REPORT_CAPS = {
 // ------------------------------------------------------------------ the model-facing input
 
 /** One final per-doc disposition row (model-supplied). */
-export interface DreamReportInputRow {
+interface DreamReportInputRow {
   path: string;
   disposition: DreamDisposition;
   merge_target: string | null;
@@ -85,7 +85,7 @@ export interface DreamReportInputRow {
 }
 
 /** One selected curation unit (rank = input position; several units MAY share a node). */
-export interface DreamReportSelectedUnit {
+interface DreamReportSelectedUnit {
   title: string;
   roadmap_node: string;
   docs: string[];
@@ -93,14 +93,14 @@ export interface DreamReportSelectedUnit {
 }
 
 /** One overflow curation unit (rank = input position; carries no roadmap node). */
-export interface DreamReportOverflowUnit {
+interface DreamReportOverflowUnit {
   title: string;
   docs: string[];
   rationale: string;
 }
 
 /** One harvest follow-up citing a SURVIVING destination (a keep/revise doc or its cluster). */
-export interface DreamReportFollowup {
+interface DreamReportFollowup {
   title: string;
   destination: string;
   pointer: string;
@@ -108,14 +108,14 @@ export interface DreamReportFollowup {
 }
 
 /** The model-supplied prediction — TYPE sanity only, deliberately no directional/quota rule. */
-export interface DreamReportPredictedEffectsInput {
+interface DreamReportPredictedEffectsInput {
   docs_after: number;
   bytes_after: number;
   note: string | null;
 }
 
 /** The untrusted, model-supplied input: ONLY the decisions the design assigns to the parent. */
-export interface DreamReportInput {
+interface DreamReportInput {
   rows: DreamReportInputRow[];
   uncertainties: string[];
   selected_units: DreamReportSelectedUnit[];
@@ -249,7 +249,7 @@ export const DREAM_REPORT_INPUT_SCHEMA = {
 // ------------------------------------------------------------------- the composed report
 
 /** One injected reducer stance record, joined onto its doc's row (angle order). */
-export interface DreamReportStanceRecord {
+interface DreamReportStanceRecord {
   angle: DreamReducerAngle;
   stance: "endorse" | "challenge";
   reason: string;
@@ -258,7 +258,7 @@ export interface DreamReportStanceRecord {
 
 /** One composed per-doc row: the model's final decision joined with the injected analyst
  * evidence and reducer stances (manifest lane/doc order). */
-export interface DreamReportRow {
+interface DreamReportRow {
   path: string;
   lane: string;
   cluster: string | null;
@@ -276,7 +276,7 @@ export interface DreamReportRow {
 }
 
 /** One analyst lane's coverage line (complete by construction — rendered for verification). */
-export interface DreamReportAnalystCoverage {
+interface DreamReportAnalystCoverage {
   lane: string;
   docs: number;
   overlap_signals_omitted: number;
@@ -285,7 +285,7 @@ export interface DreamReportAnalystCoverage {
 }
 
 /** One reducer angle's coverage line. */
-export interface DreamReportReducerCoverage {
+interface DreamReportReducerCoverage {
   angle: DreamReducerAngle;
   stances: number;
   stances_omitted: number;
@@ -736,8 +736,10 @@ interface JoinedRow {
  * the semantic rules collect up to `DREAM_REPORT_MAX_VALIDATION_DETAILS` named details in
  * deterministic order (validation phase order, then manifest doc order within a phase),
  * overflow appending one final synthetic detail counting the omitted violations.
+ * Module-private: `buildDreamReport` is the one entry — the whole matrix is exercised
+ * through it.
  */
-export function validateDreamReport(
+function validateDreamReport(
   input: unknown,
   context: DreamReportContext,
 ): { ok: true; report: DreamReport } | Refusal {
@@ -1176,8 +1178,10 @@ function joinOrDash(items: string[]): string {
  * every part prefixed with its header after packing. A single block exceeding the budget is a
  * defensive refusal (structurally unreachable under the caps arithmetic — named, never
  * truncated).
+ * Module-private: `buildDreamReport` is the one entry (it returns both the typed report and
+ * the rendered parts).
  */
-export function renderDreamReport(
+function renderDreamReport(
   report: DreamReport,
 ): { ok: true; parts: string[] } | { ok: false; detail: string } {
   const blocks: RenderBlock[] = [];

@@ -1,6 +1,6 @@
-// The dream wave module's suite (the harvestWave.test.ts matrix shape): the STRICT manifest
-// decode's refusal arms (incl. the lane-size bound and global doc-path uniqueness), the
-// code-owned run-key-safe lane keys, the schema↔caps lockstep, the composed defensive
+// The dream analyst tier's suite (the learning/harvest.test.ts matrix shape): the STRICT
+// manifest decode's refusal arms (incl. the lane-size bound and global doc-path uniqueness),
+// the code-owned run-key-safe lane keys, the schema↔caps lockstep, the composed defensive
 // re-decode (corpus-membership merge/overlap rules, manifest-order normalization, the
 // code-point measure), the strict-completeness runner over the memory adapter, the
 // verifyDocContainment structural-compatibility pin, and the agent-def ↔ report-schema prose
@@ -11,6 +11,9 @@ import { readFileSync } from "node:fs";
 import { join, sep } from "node:path";
 import { test } from "node:test";
 import { waveScriptItems } from "../testing/fakeSubagents.ts";
+import { createMemoryWaveAdapter } from "../waves/memoryAdapter.ts";
+import { RUN_KEY_PATTERN } from "../waves/reportWave.ts";
+import { verifyDocContainment } from "./containment.ts";
 import {
   DREAM_ANALYST_CAPS,
   DREAM_ANALYST_REPORT_SCHEMA,
@@ -21,10 +24,7 @@ import {
   decodeDreamAnalystReport,
   decodeDreamManifest,
   runDreamAnalystWave,
-} from "./dreamWave.ts";
-import { verifyDocContainment } from "./harvestWave.ts";
-import { createMemoryWaveAdapter } from "./memoryAdapter.ts";
-import { RUN_KEY_PATTERN } from "./reportWave.ts";
+} from "./dream.ts";
 
 function dreamDoc(path: string, overrides: Record<string, unknown> = {}): Record<string, unknown> {
   return {
@@ -1087,9 +1087,9 @@ test("runDreamAnalystWave: a pre-aborted signal cancels before launch, naming th
 // ------------------------------------------------- the containment-compatibility pin
 
 test("a decoded DreamManifest passes directly to verifyDocContainment (the tool's pre-spawn wiring)", () => {
-  // `DreamManifest` must stay structurally assignable to harvest's manifest parameter — the
-  // launching tool invokes the shared resolved layer pre-spawn exactly as harvestWaveTools
-  // does, without moving harvest's five containment tests.
+  // `DreamManifest` must stay structurally assignable to the containment module's `LanedDocs`
+  // parameter — the launching adapter invokes the shared resolved layer pre-spawn exactly as
+  // the harvest binding does, without moving the containment suite.
   const manifest = decoded(TWO_LANE_RAW);
   const root = `${sep}repo`;
   const cleanFs = {

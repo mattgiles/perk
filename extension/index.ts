@@ -14,8 +14,6 @@ import {
   createDraftReviewWaveState,
   registerDraftReviewWaveTools,
 } from "./doors/draftReviewWaveTools.ts";
-import { registerDreamWave } from "./doors/dreamWaveTools.ts";
-import { registerHarvestWave } from "./doors/harvestWaveTools.ts";
 import { registerLand } from "./doors/land.ts";
 import { registerLifecycleGates } from "./doors/lifecycleGates.ts";
 import {
@@ -37,7 +35,9 @@ import { installCuratedSubmissionBindings } from "./pi/v1/codeReview/submit.ts";
 import { installPrReviewTerminalBindings } from "./pi/v1/codeReview/terminal.ts";
 import { installGistBindings } from "./pi/v1/gist.ts";
 import { installAuditBindings } from "./pi/v1/learning/audit.ts";
+import { installDreamBindings } from "./pi/v1/learning/dream.ts";
 import { installLearnFactoryBindings } from "./pi/v1/learning/factory.ts";
+import { installHarvestBindings } from "./pi/v1/learning/harvest.ts";
 import { installLearnBindings } from "./pi/v1/learning/learn.ts";
 import { installObjectiveBindings } from "./pi/v1/objective.ts";
 import { installObjectiveAuthoringBindings } from "./pi/v1/objectiveAuthoring.ts";
@@ -512,8 +512,8 @@ export default function (pi: ExtensionAPI) {
   // via the session's pending-wave guard.
   installReviewWaveBindings(pi);
   installAuditBindings(pi);
-  registerHarvestWave(pi);
-  registerDreamWave(pi);
+  installHarvestBindings(pi);
+  installDreamBindings(pi);
 
   // The flow-scoped draft-review-wave pair (`start_draft_review_wave`/
   // `collect_draft_review_wave`) the draft-review door drives: non-blocking draft-review

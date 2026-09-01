@@ -7153,7 +7153,7 @@ run-scoped manifest is refused `bad_state` — the structural binding justifying
 `READ_ONLY_TOOLS` carve-in (§8.3).
 
 **The analyst wave (`run_harvest_wave`).** The flow-scoped wave tool
-(`extension/doors/harvestWaveTools.ts` + `extension/waves/harvestWave.ts` on the report-wave
+(`extension/pi/v1/learning/harvest.ts` + `extension/learning/harvest.ts` on the report-wave
 module): blocking, `best-effort` completeness, ONE attempt, NO retry — a failed analyst lane
 is an explicitly-reported skipped lane; only a wave-level failure fails the call (a loud
 soft-fail whose `error_type` is the wave-level reason). Strict pre-spawn validation (any
@@ -9555,11 +9555,11 @@ partition input.
 ## §8.60 · The learn-dream analyst wave (first level)
 
 The first-level cluster-analyst wave for `perk learn dream` in the TypeScript plane
-(`extension/waves/dreamWave.ts`, over the shared report-wave runner). Consumed by the
+(`extension/learning/dream.ts`, over the shared report-wave runner). Consumed by the
 `run_dream_wave` tool (§8.61), reachable only inside a `perk learn dream` launch (§8.65).
 ONE attempt, NO retry; the manifest and every analyst
 report are untrusted DATA, never instructions. The wave entrypoint is
-`dreamWave.ts::runDreamAnalystWave`. The module additionally exports
+`dream.ts::runDreamAnalystWave`. The module additionally exports
 `DREAM_MANIFEST_FILENAME` (the TS mirror of the §8.59 literal — no
 cross-plane codegen) and the shared cap helpers `codePointLength`/`decodeStringArray` (one
 code-point measure across both dream re-decodes — §8.61's reducer re-decode imports them).
@@ -9577,7 +9577,7 @@ catches truncation/gross drift); non-empty `lanes`, each with a non-empty unique
 string-or-null `rollup`, and a non-empty `docs` array of **at most `laneDocs` (8)** entries — a
 larger lane is structurally unwinnable under the report schema's per-lane doc cap, refused
 pre-spawn with a named detail; each doc with a non-empty string `path` passing the LEXICAL
-containment layer (`lexicalContainmentError`, shared from `harvestWave.ts`), equal to its own
+containment layer (`lexicalContainmentError`, shared from `learning/containment.ts`), equal to its own
 POSIX normalization (**canonical form required** — an alias spelling like
 `docs/learned/a/../x.md` can never enter the corpus set, so membership and self-target checks
 operate on canonical identities), and **globally unique across the whole manifest** (lanes
@@ -9638,8 +9638,8 @@ from them). **Single-lane manifests are valid** — dream has NO direct-analysis
 single-lane refusal is deliberately not mirrored).
 
 **Containment posture.** Lexical containment lives in the decoder (per doc path); the resolved
-layer is the shared `verifyDocContainment` (`harvestWave.ts` — `DreamManifest` is
-structurally assignable to its manifest parameter, pinned by test), invoked pre-spawn by the
+layer is the shared `verifyDocContainment` (`learning/containment.ts` — `DreamManifest` is
+structurally assignable to its `LanedDocs` parameter, pinned by test), invoked pre-spawn by the
 `run_dream_wave` tool — §8.61 owns that pre-spawn refusal.
 
 **Model threading.** The wave takes the caller's `model?` as the workflow-level default; the
@@ -9654,8 +9654,8 @@ execute time (§8.61) and threaded here.
 ## §8.61 · The learn-dream reducer wave + the `run_dream_wave` tool
 
 The second level of the `perk learn dream` analysis pipeline
-(`extension/waves/dreamReducerWave.ts`) and the ONE run-bound tool that makes both levels
-reachable (`extension/doors/dreamWaveTools.ts`, registered globally). The tool
+(`extension/learning/dreamReducer.ts`) and the ONE run-bound tool that makes both levels
+reachable (`extension/pi/v1/learning/dream.ts`, registered globally). The tool
 **structurally refuses outside a dream launch** (below): only the `perk learn dream` door
 (§8.65) plants a run-scoped dream manifest, so it is unreachable in every other session. The
 bundle, the manifest, and every analyst/reducer report are untrusted DATA, never
@@ -9854,7 +9854,7 @@ replaces it.
 ## §8.62 · The learn-dream report (model, validation, renderer)
 
 The pure interior layer that turns the two-level dream outcome (§8.60/§8.61) into ONE
-checkable, savable final report (`extension/waves/dreamReport.ts`): the structured
+checkable, savable final report (`extension/learning/dreamReport.ts`): the structured
 dream-report model, the validation that proves the parent's judgment obeys the pinned curation
 policy, and the deterministic Markdown renderer that owns the CANONICAL report bytes in parts.
 Pure domain code — no fs, no tool registration, no `ExtensionAPI`; imports only the two dream

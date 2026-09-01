@@ -13,20 +13,20 @@
 import { execFileSync } from "node:child_process";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { runScratchDir } from "../substrate/cache.ts";
-import { digestSessionData } from "../substrate/sessionData.ts";
-import {
-  DREAM_ANALYSES_FILENAME,
-  DREAM_REDUCER_ANGLES,
-  type DreamReducerAnalysis,
-  finalizeDreamBundle,
-} from "../waves/dreamReducerWave.ts";
 import {
   DREAM_MANIFEST_FILENAME,
   type DreamLaneAnalysis,
   type DreamManifest,
   decodeDreamManifest,
-} from "../waves/dreamWave.ts";
+} from "../learning/dream.ts";
+import {
+  DREAM_ANALYSES_FILENAME,
+  DREAM_REDUCER_ANGLES,
+  type DreamReducerAnalysis,
+  finalizeDreamBundle,
+} from "../learning/dreamReducer.ts";
+import { runScratchDir } from "../substrate/cache.ts";
+import { digestSessionData } from "../substrate/sessionData.ts";
 
 /** The one corpus doc (final disposition keep). */
 export const DREAM_FIXTURE_DOC = "docs/learned/pi/subagents.md";

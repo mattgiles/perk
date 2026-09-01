@@ -434,7 +434,7 @@ routes:
     role: tool-contract
     priority: 85
   - id: ts-learn
-    match: { paths: ["extension/learning/*.ts", "extension/pi/v1/learning/*.ts", "extension/doors/harvestWaveTools.ts", "extension/doors/dreamWaveTools.ts"] }
+    match: { paths: ["extension/learning/*.ts", "extension/pi/v1/learning/*.ts"] }
     capability: knowledge.learn
     audience: shipped
     role: tool-contract

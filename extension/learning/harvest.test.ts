@@ -1,25 +1,28 @@
-// The harvest wave module's suite: schema pins, the STRICT manifest decode's refusal arms, the
-// resolved doc-containment layer (injected fs), lane composition identity, the deterministic
-// pointer post-pass (injected exists), the memory-adapter spawn contract, and the agent-def ↔
-// report-schema prose lockstep pin (+ the delivered `.pi/agents/perk/` mirror). Fully offline.
+// The harvest feature op's suite: schema pins, the STRICT manifest decode's refusal arms, the
+// shared resolved doc-containment layer (injected fs), and the `analyzeHarvest` entry op over
+// the memory adapter — lane/task composition via the recorded spawn, the deterministic pointer
+// post-pass (injected exists), the malformed-report lane degrades, and the wave-level failure
+// arm. Lane planning and the pointer stamp are module-private, so those matrices are exercised
+// through the one entry op. The agent-def ↔ report-schema prose lockstep pin (+ the delivered
+// `.pi/agents/perk/` mirror) rides along. Fully offline.
 
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join, sep } from "node:path";
 import { test } from "node:test";
+import { waveScriptItems } from "../testing/fakeSubagents.ts";
+import { createMemoryWaveAdapter } from "../waves/memoryAdapter.ts";
+import { verifyDocContainment } from "./containment.ts";
 import {
-  buildHarvestLanes,
+  analyzeHarvest,
   decodeHarvestManifest,
   HARVEST_ANALYST_REPORT_SCHEMA,
   HARVEST_KINDS,
   HARVEST_MANIFEST_FILENAME,
   HARVEST_MAX_OPPORTUNITIES,
+  type HarvestAnalysisOutcome,
   type HarvestManifest,
-  runHarvestWave,
-  stampHarvestReport,
-  verifyDocContainment,
-} from "./harvestWave.ts";
-import { createMemoryWaveAdapter } from "./memoryAdapter.ts";
+} from "./harvest.ts";
 
 function doc(
   path: string,
@@ -41,6 +44,23 @@ function decoded(raw: unknown): HarvestManifest {
   const result = decodeHarvestManifest(raw);
   assert.equal(result.ok, true, `expected a valid manifest: ${JSON.stringify(result)}`);
   return (result as { ok: true; manifest: HarvestManifest }).manifest;
+}
+
+const MANIFEST_PATH = "/abs/scratch/runs/RUN/harvest-manifest.json";
+
+/** Run `analyzeHarvest` and narrow to the `analyzed` arm (the matrices' common path). */
+async function analyzed(
+  adapter: Parameters<typeof analyzeHarvest>[0],
+  opts: Omit<Parameters<typeof analyzeHarvest>[1], "manifestPath" | "checkoutRoot"> &
+    Partial<Pick<Parameters<typeof analyzeHarvest>[1], "manifestPath" | "checkoutRoot">>,
+): Promise<Extract<HarvestAnalysisOutcome, { kind: "analyzed" }>> {
+  const outcome = await analyzeHarvest(adapter, {
+    manifestPath: MANIFEST_PATH,
+    checkoutRoot: "/checkout",
+    ...opts,
+  });
+  assert.equal(outcome.kind, "analyzed", JSON.stringify(outcome));
+  return outcome as Extract<HarvestAnalysisOutcome, { kind: "analyzed" }>;
 }
 
 // ---------------------------------------------------------------------------- schema pins
@@ -312,7 +332,7 @@ test("verifyDocContainment: containment is judged on RESOLVED paths (a relocated
 
 // --------------------------------------------------------------------- lane composition
 
-test("buildHarvestLanes: per-key identity — every lane's task opens with its own id", () => {
+test("analyzeHarvest: per-key lane identity — every lane's task opens with its own id (via the adapter)", async () => {
   const manifest = decoded(
     manifestOf([
       { id: "pi-1", docs: [doc("docs/learned/pi/a.md")] },
@@ -320,8 +340,19 @@ test("buildHarvestLanes: per-key identity — every lane's task opens with its o
       { id: "workflow-2", docs: [doc("docs/learned/workflow/c.md")] },
     ]),
   );
-  const manifestPath = "/abs/scratch/runs/RUN/harvest-manifest.json";
-  const lanes = buildHarvestLanes(manifest, manifestPath);
+  const adapter = createMemoryWaveAdapter();
+  await analyzeHarvest(adapter, {
+    manifest,
+    manifestPath: MANIFEST_PATH,
+    checkoutRoot: "/checkout",
+  });
+  const lanes = waveScriptItems(adapter.calls.spawn[0]?.workflowScript ?? "") as {
+    key: string;
+    label: string;
+    agent: string;
+    phase?: string;
+    task: string;
+  }[];
   assert.deepEqual(
     lanes.map((l) => l.key),
     ["pi-1", "workflow-1", "workflow-2"],
@@ -334,7 +365,7 @@ test("buildHarvestLanes: per-key identity — every lane's task opens with its o
       lane.task.startsWith(`Lane: ${lane.key}\n`),
       `the task must open with the lane's OWN id (got: ${lane.task.slice(0, 40)})`,
     );
-    assert.ok(lane.task.includes(`Read the harvest manifest FIRST: ${manifestPath}`));
+    assert.ok(lane.task.includes(`Read the harvest manifest FIRST: ${MANIFEST_PATH}`));
     assert.ok(lane.task.includes(`Your assigned lane id is "${lane.key}"`));
     assert.match(lane.task, /untrusted routing token/);
     assert.match(lane.task, /matches it byte-exact/);
@@ -345,7 +376,32 @@ test("buildHarvestLanes: per-key identity — every lane's task opens with its o
 
 // ------------------------------------------------------------------ the pointer post-pass
 
-test("stampHarvestReport: the pointer stamp matrix (injected exists)", () => {
+function opportunity(pointer: string, overrides: Record<string, unknown> = {}): unknown {
+  return {
+    title: "t",
+    kind: "bug-risk",
+    pointer,
+    evidence: "e",
+    confidence: "high",
+    ...overrides,
+  };
+}
+
+/** One-lane-covered aggregate: `pi-1` carries `report`, `workflow-1` fails (best-effort). */
+function aggregateWith(report: unknown): {
+  state: string;
+  value: unknown;
+} {
+  return {
+    state: "complete",
+    value: [
+      { key: "pi-1", ok: true, error: null, report },
+      { key: "workflow-1", ok: false, error: "analyst crashed", report: null },
+    ],
+  };
+}
+
+test("analyzeHarvest: the pointer stamp matrix (injected exists)", async () => {
   const root = `${sep}repo`;
   const existing = new Set([
     join(root, "src/perk/cli.py"),
@@ -353,76 +409,74 @@ test("stampHarvestReport: the pointer stamp matrix (injected exists)", () => {
     join(root, "docs/learned/pi/subagents.md"),
   ]);
   const exists = (p: string) => existing.has(p);
-  const opp = (pointer: string) => ({
-    title: "t",
-    kind: "bug-risk",
-    pointer,
-    evidence: "e",
-    confidence: "high",
-  });
   const report = {
     opportunities: [
-      opp("src/perk/cli.py"),
-      opp("extension/index.ts::registerHarvestWave"),
-      opp("src/perk/gone.py"),
-      opp("/etc/passwd"),
-      opp("../escape"),
+      opportunity("src/perk/cli.py"),
+      opportunity("extension/index.ts::installHarvestBindings"),
+      opportunity("src/perk/gone.py"),
+      opportunity("/etc/passwd"),
+      opportunity("../escape"),
     ],
     omitted_count: 2,
   };
-  const result = stampHarvestReport(report, root, exists);
-  assert.equal(result.ok, true);
-  const stamped = (result as { ok: true; opportunities: { pointer_status: string }[] })
-    .opportunities;
+  const outcome = await analyzed(createMemoryWaveAdapter({ aggregate: aggregateWith(report) }), {
+    manifest: decoded(TWO_LANE_RAW),
+    checkoutRoot: root,
+    exists,
+  });
+  const laneReport = outcome.reports[0];
+  assert.equal(laneReport?.lane, "pi-1");
   assert.deepEqual(
-    stamped.map((o) => o.pointer_status),
+    laneReport?.opportunities.map((o) => o.pointer_status),
     ["resolved", "resolved", "unresolved", "unresolved", "unresolved"],
   );
-  assert.equal((result as { ok: true; omitted_count: number }).omitted_count, 2);
+  assert.equal(laneReport?.omitted_count, 2);
 
   // Empty-path `::Symbol` is unresolved; a `./`-prefixed path normalizes and resolves.
-  const edge = stampHarvestReport(
-    { opportunities: [opp("::Symbol"), opp("./docs/learned/pi/subagents.md")], omitted_count: 0 },
-    root,
-    exists,
+  const edge = await analyzed(
+    createMemoryWaveAdapter({
+      aggregate: aggregateWith({
+        opportunities: [opportunity("::Symbol"), opportunity("./docs/learned/pi/subagents.md")],
+        omitted_count: 0,
+      }),
+    }),
+    { manifest: decoded(TWO_LANE_RAW), checkoutRoot: root, exists },
   );
-  assert.equal(edge.ok, true);
   assert.deepEqual(
-    (edge as { ok: true; opportunities: { pointer_status: string }[] }).opportunities.map(
-      (o) => o.pointer_status,
-    ),
+    edge.reports[0]?.opportunities.map((o) => o.pointer_status),
     ["unresolved", "resolved"],
   );
 });
 
-test("stampHarvestReport: existence is checked on the path segment before the FIRST ::", () => {
+test("analyzeHarvest: existence is checked on the path segment before the FIRST ::", async () => {
   const root = `${sep}repo`;
   const seen: string[] = [];
   const exists = (p: string) => {
     seen.push(p);
     return true;
   };
-  const result = stampHarvestReport(
-    {
-      opportunities: [
-        {
-          title: "t",
-          kind: "elegance",
-          pointer: "a/b.py::C::method",
-          evidence: "e",
-          confidence: "low",
-        },
-      ],
-      omitted_count: 0,
-    },
-    root,
-    exists,
+  const outcome = await analyzed(
+    createMemoryWaveAdapter({
+      aggregate: aggregateWith({
+        opportunities: [
+          {
+            title: "t",
+            kind: "elegance",
+            pointer: "a/b.py::C::method",
+            evidence: "e",
+            confidence: "low",
+          },
+        ],
+        omitted_count: 0,
+      }),
+    }),
+    { manifest: decoded(TWO_LANE_RAW), checkoutRoot: root, exists },
   );
-  assert.equal(result.ok, true);
+  assert.equal(outcome.reports[0]?.opportunities[0]?.pointer_status, "resolved");
   assert.deepEqual(seen, [join(root, "a/b.py")], "the segment before the FIRST :: only");
 });
 
-test("stampHarvestReport: malformed-report arms each refuse with a detail", () => {
+test("analyzeHarvest: malformed-report arms each degrade the lane with a named detail", async () => {
   const good = {
     title: "t",
     kind: "bug-risk",
@@ -431,7 +485,9 @@ test("stampHarvestReport: malformed-report arms each refuse with a detail", () =
     confidence: "high",
   };
   const arms: { report: unknown; detail: RegExp }[] = [
-    { report: "nope", detail: /not an object/ },
+    // A non-object report is caught by the runner's own aggregate normalization — the lane
+    // still degrades to malformed-report before the stamp ever runs.
+    { report: "nope", detail: /carries a non-object report \(string\)/ },
     { report: { opportunities: [good] }, detail: /omitted_count is not a non-negative integer/ },
     {
       report: { opportunities: [good], omitted_count: -1 },
@@ -455,6 +511,10 @@ test("stampHarvestReport: malformed-report arms each refuse with a detail", () =
       detail: /outside the report schema vocabulary/,
     },
     {
+      report: { opportunities: [null], omitted_count: 0 },
+      detail: /an analyst opportunity is not an object/,
+    },
+    {
       // Cap+1 otherwise-valid opportunities — the over-cap arm (derived from the constant).
       report: {
         opportunities: Array.from({ length: HARVEST_MAX_OPPORTUNITIES + 1 }, () => ({ ...good })),
@@ -466,33 +526,37 @@ test("stampHarvestReport: malformed-report arms each refuse with a detail", () =
     },
   ];
   for (const arm of arms) {
-    const result = stampHarvestReport(arm.report, "/repo", () => true);
-    assert.equal(result.ok, false, `must refuse: ${JSON.stringify(arm.report)}`);
-    assert.match((result as { detail: string }).detail, arm.detail);
+    const outcome = await analyzed(
+      createMemoryWaveAdapter({ aggregate: aggregateWith(arm.report) }),
+      { manifest: decoded(TWO_LANE_RAW), exists: () => true },
+    );
+    assert.deepEqual(outcome.reports, [], `must degrade: ${JSON.stringify(arm.report)}`);
+    assert.equal(outcome.skipped[0]?.lane, "pi-1");
+    assert.equal(outcome.skipped[0]?.reason, "malformed-report");
+    assert.match(outcome.skipped[0]?.detail ?? "", arm.detail);
   }
 });
 
-test("stampHarvestReport: stamped records carry exactly the six whitelisted keys", () => {
-  const result = stampHarvestReport(
-    {
-      opportunities: [
-        {
-          title: "t",
-          kind: "simplification",
-          pointer: "src/x.py",
-          evidence: "e",
-          confidence: "medium",
-          smuggled: "an extra input key",
-        },
-      ],
-      omitted_count: 0,
-    },
-    "/repo",
-    () => true,
+test("analyzeHarvest: stamped records carry exactly the six whitelisted keys", async () => {
+  const outcome = await analyzed(
+    createMemoryWaveAdapter({
+      aggregate: aggregateWith({
+        opportunities: [
+          {
+            title: "t",
+            kind: "simplification",
+            pointer: "src/x.py",
+            evidence: "e",
+            confidence: "medium",
+            smuggled: "an extra input key",
+          },
+        ],
+        omitted_count: 0,
+      }),
+    }),
+    { manifest: decoded(TWO_LANE_RAW), exists: () => true },
   );
-  assert.equal(result.ok, true);
-  const record = (result as unknown as { ok: true; opportunities: Record<string, unknown>[] })
-    .opportunities[0];
+  const record = outcome.reports[0]?.opportunities[0] as unknown as Record<string, unknown>;
   assert.deepEqual(Object.keys(record ?? {}).sort(), [
     "confidence",
     "evidence",
@@ -503,9 +567,9 @@ test("stampHarvestReport: stamped records carry exactly the six whitelisted keys
   ]);
 });
 
-// ---------------------------------------------------------------------------- the runner
+// ---------------------------------------------------------------------------- the entry op
 
-test("runHarvestWave: the spawn contract over the memory adapter (schema, best-effort, model)", async () => {
+test("analyzeHarvest: the spawn contract over the memory adapter (schema, best-effort, model)", async () => {
   const manifest = decoded(TWO_LANE_RAW);
   const report = { opportunities: [], omitted_count: 0 };
   const adapter = createMemoryWaveAdapter({
@@ -517,19 +581,20 @@ test("runHarvestWave: the spawn contract over the memory adapter (schema, best-e
       ],
     },
   });
-  const result = await runHarvestWave(adapter, {
-    manifest,
-    manifestPath: "/abs/harvest-manifest.json",
-    model: "faux/analyst",
-  });
-  assert.equal(result.complete, true, "best-effort: a lane failure never fails the wave");
-  assert.deepEqual(result.reports, [{ key: "pi-1", report }]);
-  assert.equal(result.failures.length, 1);
-  assert.deepEqual(result.failures[0], {
-    key: "workflow-1",
-    reason: "lane-failed",
-    detail: "analyst crashed",
-  });
+  const outcome = await analyzed(adapter, { manifest, model: "faux/analyst" });
+  assert.deepEqual(
+    outcome.reports,
+    [{ lane: "pi-1", opportunities: [], omitted_count: 0 }],
+    "best-effort: a lane failure never fails the analysis",
+  );
+  assert.deepEqual(outcome.skipped, [
+    { lane: "workflow-1", reason: "lane-failed", detail: "analyst crashed" },
+  ]);
+  // ONE attempt receipt, flow-attributed, with the pre-launch assignment manifest.
+  assert.equal(outcome.attempts.length, 1);
+  assert.equal(outcome.attempts[0]?.flow, "harvest");
+  assert.equal(outcome.attempts[0]?.attempt, 1);
+  assert.deepEqual(outcome.attempts[0]?.requestedKeys, ["pi-1", "workflow-1"]);
 
   assert.equal(adapter.calls.spawn.length, 1);
   const spawn = adapter.calls.spawn[0];
@@ -543,24 +608,29 @@ test("runHarvestWave: the spawn contract over the memory adapter (schema, best-e
   assert.match(spawn?.workflowScript ?? "", /"workflow-1"/);
 });
 
-test("runHarvestWave: the unavailable arm is a wave-level failure (complete: false)", async () => {
+test("analyzeHarvest: the unavailable arm is wave_failed carrying the attempt receipt", async () => {
   const manifest = decoded(TWO_LANE_RAW);
   const adapter = createMemoryWaveAdapter({ ping: null });
-  const result = await runHarvestWave(adapter, {
+  const outcome = await analyzeHarvest(adapter, {
     manifest,
-    manifestPath: "/abs/harvest-manifest.json",
+    manifestPath: MANIFEST_PATH,
+    checkoutRoot: "/checkout",
   });
-  assert.equal(result.complete, false);
-  assert.equal(result.failures[0]?.key, null);
-  assert.equal(result.failures[0]?.reason, "unavailable");
+  assert.equal(outcome.kind, "wave_failed");
+  const failed = outcome as Extract<HarvestAnalysisOutcome, { kind: "wave_failed" }>;
+  assert.equal(failed.reason, "unavailable");
+  assert.match(failed.detail, /report-wave capabilities/);
+  assert.equal(failed.attempts.length, 1);
+  assert.equal(failed.attempts[0]?.flow, "harvest");
+  assert.equal(failed.attempts[0]?.state, "unavailable");
+  assert.deepEqual(failed.attempts[0]?.requestedKeys, ["pi-1", "workflow-1"]);
 });
 
 // ------------------------------------------------------- the agent-def lockstep pin
 
 test("the harvest-analyst def agrees with the report schema — structured_output completion, no fenced JSON", () => {
   // The wave fails any lane without a schema-valid structured_output call, so the def and
-  // HARVEST_ANALYST_REPORT_SCHEMA must agree (the adversarialReviewWave.test.ts pattern; the
-  // deferral node 2.1 parked on this node).
+  // HARVEST_ANALYST_REPORT_SCHEMA must agree (the adversarialReviewWave.test.ts pattern).
   const defPath = join(import.meta.dirname, "..", "..", "agents", "harvest-analyst.md");
   const def = readFileSync(defPath, "utf8");
   const schema = HARVEST_ANALYST_REPORT_SCHEMA as {

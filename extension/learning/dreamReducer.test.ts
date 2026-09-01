@@ -1,18 +1,28 @@
-// The dream reducer wave module's suite (the dreamWave.test.ts matrix shape): the bundle
+// The dream reducer tier's suite (the learning/dream.test.ts matrix shape): the bundle
 // serialization (deterministic bytes, identity echoes, UTF-8 byte measurement, the ONE
 // happy-path ordering pin), the finalized-bundle round-trip + the strict recovery decode (the
 // closed-wrapper/whitelist-projected-row unknown-key policy, both sides), the ordered non-keep
 // proposal universe, the schema↔caps lockstep,
 // the composed defensive re-decode (the angle/disposition echo rules, proposal membership,
-// code-point caps, whitelisted construction), the strict-completeness runner over the memory
-// adapter (fixed angle lanes, requestedKeys, model/signal forwarding), and the agent-def ↔
-// report-schema prose lockstep pin (+ the delivered `.pi/agents/perk/` mirror). Fully offline.
+// code-point caps, whitelisted construction — the row decoder is module-private, so its
+// refusal matrix is exercised through `runDreamReducerWave` over the memory adapter and
+// through `decodeFinalizedDreamBundle`), the strict-completeness runner over the memory
+// adapter (fixed angle lanes, the attempt receipt, model/signal forwarding), and the agent-def
+// ↔ report-schema prose lockstep pin (+ the delivered `.pi/agents/perk/` mirror). Fully offline.
 
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
 import { waveScriptItems } from "../testing/fakeSubagents.ts";
+import { createMemoryWaveAdapter } from "../waves/memoryAdapter.ts";
+import { RUN_KEY_PATTERN } from "../waves/reportWave.ts";
+import {
+  type DreamDocAssessment,
+  type DreamLaneAnalysis,
+  type DreamManifest,
+  decodeDreamManifest,
+} from "./dream.ts";
 import {
   composeDreamBundle,
   DREAM_ANALYSES_FILENAME,
@@ -22,22 +32,14 @@ import {
   DREAM_REDUCER_REPORT_SCHEMA,
   type DreamProposal,
   type DreamReducerAnalysis,
+  type DreamReducerOutcome,
   type DreamReducerReport,
   type DreamStance,
-  decodeDreamReducerReport,
   decodeFinalizedDreamBundle,
   finalizeDreamBundle,
   nonKeepProposals,
   runDreamReducerWave,
-} from "./dreamReducerWave.ts";
-import {
-  type DreamDocAssessment,
-  type DreamLaneAnalysis,
-  type DreamManifest,
-  decodeDreamManifest,
-} from "./dreamWave.ts";
-import { createMemoryWaveAdapter } from "./memoryAdapter.ts";
-import { RUN_KEY_PATTERN } from "./reportWave.ts";
+} from "./dreamReducer.ts";
 
 const MANIFEST_PATH = "/abs/scratch/runs/RUN/dream-manifest.json";
 const BUNDLE_PATH = `/abs/scratch/runs/RUN/${DREAM_ANALYSES_FILENAME}`;
@@ -615,7 +617,37 @@ test("DREAM_REDUCER_ANGLES are run-key-safe by construction (code-owned lane key
 
 // ----------------------------------------------------------------- the defensive re-decode
 
-test("decodeDreamReducerReport: a fully-populated report round-trips WITHOUT the echoed angle", () => {
+/** Run the reducer wave with `report` on the FIRST angle's lane (the other two valid-empty) —
+ * the row decoder is module-private, so its matrix drives through the wave's re-decode. */
+async function reducedWith(report: unknown): Promise<DreamReducerOutcome> {
+  const adapter = createMemoryWaveAdapter({
+    aggregate: {
+      state: "complete",
+      value: [
+        { key: DREAM_REDUCER_ANGLES[0], ok: true, error: null, report },
+        {
+          key: DREAM_REDUCER_ANGLES[1],
+          ok: true,
+          error: null,
+          report: reducerReportOf(DREAM_REDUCER_ANGLES[1]),
+        },
+        {
+          key: DREAM_REDUCER_ANGLES[2],
+          ok: true,
+          error: null,
+          report: reducerReportOf(DREAM_REDUCER_ANGLES[2]),
+        },
+      ],
+    },
+  });
+  return await runDreamReducerWave(adapter, {
+    manifestPath: MANIFEST_PATH,
+    bundlePath: BUNDLE_PATH,
+    proposals: PROPOSALS,
+  });
+}
+
+test("the re-decode: a fully-populated report round-trips WITHOUT the echoed angle", async () => {
   const raw = reducerReportOf(ANGLE, {
     // Rows deliberately in REVERSED proposal order, one with a smuggled extra key.
     stances: [
@@ -628,9 +660,10 @@ test("decodeDreamReducerReport: a fully-populated report round-trips WITHOUT the
     angle_findings_omitted: 2,
     uncertainties_omitted: 3,
   });
-  const result = decodeDreamReducerReport(raw, ANGLE, PROPOSALS);
-  assert.equal(result.ok, true, JSON.stringify(result));
-  const report = (result as { ok: true; report: DreamReducerReport }).report;
+  const outcome = await reducedWith(raw);
+  assert.equal(outcome.complete, true, JSON.stringify(outcome.failures));
+  assert.equal(outcome.reports[0]?.angle, ANGLE);
+  const report = outcome.reports[0]?.report as DreamReducerReport;
   assert.deepEqual(
     Object.keys(report).sort(),
     [
@@ -661,41 +694,39 @@ test("decodeDreamReducerReport: a fully-populated report round-trips WITHOUT the
   assert.equal(report.uncertainties_omitted, 3);
 });
 
-test("decodeDreamReducerReport: empty stances is VALID (silence = non-endorsement downstream)", () => {
-  const result = decodeDreamReducerReport(reducerReportOf(), ANGLE, PROPOSALS);
-  assert.equal(result.ok, true, JSON.stringify(result));
-  assert.deepEqual((result as { ok: true; report: DreamReducerReport }).report.stances, []);
+test("the re-decode: empty stances is VALID (silence = non-endorsement downstream)", async () => {
+  const outcome = await reducedWith(reducerReportOf());
+  assert.equal(outcome.complete, true, JSON.stringify(outcome.failures));
+  assert.deepEqual(outcome.reports[0]?.report.stances, []);
 });
 
-test("decodeDreamReducerReport: string caps are measured in Unicode code points", () => {
+test("the re-decode: string caps are measured in Unicode code points", async () => {
   const astral = "😀".repeat(DREAM_REDUCER_CAPS.stanceReasonChars);
   assert.ok(astral.length > DREAM_REDUCER_CAPS.stanceReasonChars, "sanity: UTF-16 exceeds the cap");
-  const pass = decodeDreamReducerReport(
+  const pass = await reducedWith(
     reducerReportOf(ANGLE, {
       stances: [stanceRow("docs/learned/pi/context-injection.md", { reason: astral })],
     }),
-    ANGLE,
-    PROPOSALS,
   );
-  assert.equal(pass.ok, true, "exactly N astral code points passes");
-  const fail = decodeDreamReducerReport(
+  assert.equal(pass.complete, true, "exactly N astral code points passes");
+  const fail = await reducedWith(
     reducerReportOf(ANGLE, {
       stances: [stanceRow("docs/learned/pi/context-injection.md", { reason: `${astral}😀` })],
     }),
-    ANGLE,
-    PROPOSALS,
   );
-  assert.equal(fail.ok, false, "N+1 code points fails");
+  assert.equal(fail.complete, false, "N+1 code points fails");
   assert.match(
-    (fail as { detail: string }).detail,
+    fail.failures[0]?.detail ?? "",
     new RegExp(`exceeds ${DREAM_REDUCER_CAPS.stanceReasonChars} code points`),
   );
 });
 
-test("decodeDreamReducerReport: each refusal arm carries its named detail", () => {
+test("the re-decode: each refusal arm degrades the lane with its named detail", async () => {
   const over = (n: number, s = "x") => Array.from({ length: n }, () => s);
   const arms: { report: unknown; detail: RegExp }[] = [
-    { report: "nope", detail: /not an object/ },
+    // A non-object report is caught by the runner's own aggregate normalization — the lane
+    // still degrades to malformed-report before the row decoder ever runs.
+    { report: "nope", detail: /carries a non-object report \(string\)/ },
     {
       report: reducerReportOf("currency-accuracy"),
       detail: /echoes angle "currency-accuracy", lane assigned 'consolidation-preservation'/,
@@ -828,9 +859,11 @@ test("decodeDreamReducerReport: each refusal arm carries its named detail", () =
     },
   ];
   for (const arm of arms) {
-    const result = decodeDreamReducerReport(arm.report, ANGLE, PROPOSALS);
-    assert.equal(result.ok, false, `must refuse: ${JSON.stringify(arm.report)}`);
-    assert.match((result as { detail: string }).detail, arm.detail);
+    const outcome = await reducedWith(arm.report);
+    assert.equal(outcome.complete, false, `must refuse: ${JSON.stringify(arm.report)}`);
+    assert.equal(outcome.failures[0]?.angle, ANGLE, "the failure carries the angle identity");
+    assert.equal(outcome.failures[0]?.reason, "malformed-report");
+    assert.match(outcome.failures[0]?.detail ?? "", arm.detail);
   }
 });
 
@@ -860,7 +893,10 @@ test("runDreamReducerWave: three fixed lanes — key = label = angle slug, the t
   });
   assert.equal(outcome.complete, true);
   assert.deepEqual(outcome.failures, []);
-  assert.deepEqual(outcome.requestedKeys, [...DREAM_REDUCER_ANGLES]);
+  // ONE flow-attributed attempt receipt with the fixed angle slugs as the pre-launch manifest.
+  assert.equal(outcome.attempt.flow, "dream-reducer");
+  assert.equal(outcome.attempt.attempt, 1);
+  assert.deepEqual(outcome.attempt.requestedKeys, [...DREAM_REDUCER_ANGLES]);
   assert.deepEqual(
     outcome.reports.map((r) => r.angle),
     [...DREAM_REDUCER_ANGLES],
@@ -981,7 +1017,7 @@ test("runDreamReducerWave: the unavailable arm is a wave-level failure (angle: n
   assert.deepEqual(outcome.reports, []);
   assert.equal(outcome.failures[0]?.angle, null, "a wave-level failure carries angle: null");
   assert.equal(outcome.failures[0]?.reason, "unavailable");
-  assert.deepEqual(outcome.requestedKeys, [...DREAM_REDUCER_ANGLES]);
+  assert.deepEqual(outcome.attempt.requestedKeys, [...DREAM_REDUCER_ANGLES]);
 });
 
 test("runDreamReducerWave: a pre-aborted signal cancels before launch, naming the flow", async () => {

@@ -708,6 +708,85 @@ mechanics.
 >   preserved; the Phase-6 gate rides node 6.3, and the outstanding Phase-5 dogfood record
 >   **must close before 6.3 starts**.
 
+> **Status (Objective #2083, Node 6.3):** the harvest + dream workflows landed in `learning/`
+> — realized-shape notes:
+>
+> - **Behavior moved**: `run_harvest_wave` + `run_dream_wave` — registrations (byte-identical
+>   metadata), the pre-spawn/pre-launch refusal ladders, and the two-level dream
+>   ordering/recovery policy (verified marker clear → stale-bundle removal → strict analyst
+>   wave → budget check → bundle write → reducer wave → §8.65 bracket → finalize-in-place →
+>   marker set) — behavior-preserving against contracts §8.48/§8.59–§8.62/§8.65 (error
+>   vocabulary, result texts, and serialized wire shapes pinned exact). The six old modules
+>   (`waves/harvestWave.ts`, `waves/dreamWave.ts`, `waves/dreamReducerWave.ts`,
+>   `waves/dreamReport.ts`, `doors/harvestWaveTools.ts`, `doors/dreamWaveTools.ts`) + six test
+>   files were deleted whole in the same change (index imports and guard census entries
+>   included; **zero `waves/` production edits** — `reportWave.ts` reused as-is).
+> - **Typed feature ops** in the Pi-free `extension/learning/` home: `analyzeHarvest`
+>   (harvest.ts — lane planning, the wave, pointer stamping, the malformed-report lane
+>   degrade; outcome `wave_failed`/`analyzed` carrying `WaveAttemptReceipt`s) and
+>   `analyzeDream` (dreamAnalysis.ts — the two-level policy above dream.ts/dreamReducer.ts;
+>   ONE `io_failed` arm for all four io sites plus the `DreamAnalysisAggregate` union of the
+>   six real post-launch arms, discriminated on the exact wire fields so contradictory
+>   combinations are unrepresentable while serialization stays byte-identical).
+>   `containment.ts` is the one cross-flow consolidation (the structural `LanedDocs` view
+>   keeps it a leaf); the dream runners now return `attempt: WaveAttemptReceipt` (no
+>   `WaveScriptReceipt` in any learning signature); `dreamReport.ts`'s export surface shrank
+>   to `buildDreamReport`/`DreamReportContext`/`DREAM_REPORT_INPUT_SCHEMA` (+ referenced
+>   types).
+> - **Pi adapters** (`pi/v1/learning/harvest.ts` + `dream.ts`):
+>   `installHarvestBindings`/`installDreamBindings` with COMPLETE frozen-baseline deepEqual
+>   registration pins, inlined guideline literals, production capability wiring
+>   (`digestSessionData`, the one `appendWorkflowState`-backed `markBundleDigest` closure,
+>   `revalidationBracket`, `atomicWriteFileSync`, force `rmSync`), `subagentModel` resolution
+>   at the execute site, and the exported thin execute cores
+>   (`executeHarvestWave`/`executeDreamWave`) mapping the typed outcomes to Results. New
+>   feature-level pin: the glue-boundary cancellation rule — an abort between the waves
+>   issues NO reducer spawn, with exact cancelled-attempt accounting.
+> - **WorkflowSession / PromptEvidence / gating changes**: NONE — both tools keep
+>   `PERK_TOOLS` + `READ_ONLY_TOOLS` membership and no stage list; `dream_bundle_digest`
+>   semantics unchanged.
+> - **Accounting ledger** (recalculated at the implementation-time parent head `d316e843`):
+>   - Production LOC: 4,295 deleted (the six modules) → 4,515 added across the eight
+>     successors (`learning/containment.ts` 104, `learning/harvest.ts` 408,
+>     `learning/dream.ts` 935, `learning/dreamReducer.ts` 707, `learning/dreamReport.ts`
+>     1,498, `learning/dreamAnalysis.ts` 435, `pi/v1/learning/harvest.ts` 225,
+>     `pi/v1/learning/dream.ts` 203); whole-change production net **+220** (rewiring
+>     included). **Named invariant for the growth** (operator-accepted on this node): every
+>     added line beyond the verbatim moves is the plan-named new semantics-bearing code — the
+>     two typed outcome unions and the REQUIRED capability seams on
+>     `analyzeHarvest`/`analyzeDream` — plus the module-split overhead of the containment
+>     extraction and the two adapters (headers, the `LanedDocs` seam). Zero policy/behavior
+>     code grew; the predicted swamping deletion never existed because the trivial guards
+>     stay flow-private by operator decision, so no large duplication remained to delete.
+>   - Test LOC: 6,524 (six suites) → 6,985 (seven suites), net +461 — the added pins are
+>     frozen registration baselines, cancellation arms, exact-text renders, and
+>     serialized-key-order guards.
+>   - Files: 6 production modules + 6 suites deleted; 8 production modules + 7 suites added.
+>   - Export ledger — **Retired** (deleted or privatized): `registerHarvestWave`,
+>     `registerDreamWave`, `runHarvestWave`, `buildHarvestLanes`, `stampHarvestReport`,
+>     `validateDreamReport`, `renderDreamReport`, `decodeDreamReducerReport`, the
+>     dream-report caps/constants + input component types. **Relocated**: the containment
+>     trio (`lexicalContainmentError`/`verifyDocContainment`/`ContainmentFs`), the harvest +
+>     dream manifest decoders/schemas/caps/filenames,
+>     `codePointLength`/`decodeStringArray`/`decodeDreamAnalystReport`,
+>     `runDreamAnalystWave`/`runDreamReducerWave` (outcomes now carry
+>     `attempt: WaveAttemptReceipt`), the bundle serializers
+>     (`composeDreamBundle`/`finalizeDreamBundle`/`decodeFinalizedDreamBundle`/
+>     `nonKeepProposals`), `buildDreamReport`/`DreamReportContext`/
+>     `DREAM_REPORT_INPUT_SCHEMA`, `executeHarvestWave`/`executeDreamWave`. **Newly
+>     introduced**: `analyzeHarvest` + `HarvestAnalysisOutcome`, `analyzeDream` +
+>     `DreamAnalysisOutcome`/`DreamAnalysisAggregate`, `LanedDocs`,
+>     `installHarvestBindings`/`installDreamBindings`.
+>   - Deletion test: stripping `learning/harvest.ts` / `learning/dreamAnalysis.ts` guts both
+>     adapters (`pi/v1/learning/harvest.ts` imports the decoder + op + schema;
+>     `pi/v1/learning/dream.ts` imports `analyzeDream` + the decode surface) — verified by
+>     the import graph.
+> - **Dogfood**: the Phase-6 gate (Arms A/B/C) rides this node post-review from the train
+>   worktree — to be recorded in `docs/design/archive/ts-decomposition-phase6-dogfood.md`.
+>   The Step-0 Phase-5 evidence debt was decoupled by operator decision at implementation
+>   start ("proceed with 6.3 now; Step 0 handled separately") — the Phase-5 record remains
+>   owed on the train and must close before the Phase-6 gate runs.
+
 ### Changes
 
 Migrate one workflow at a time:
