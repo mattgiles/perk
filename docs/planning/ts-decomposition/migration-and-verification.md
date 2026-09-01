@@ -1342,6 +1342,168 @@ and process mechanics in the Python exterior and adapters.
 >   baselines, and the objective's own eventual recover/land runs through these migrated
 >   bindings by construction — stated honestly. The full Phase-7 dogfood gate closes at 7.5.
 
+> **Status (Objective #2083, Node 7.5):** slice 7 landed — `/commit-and-compact` migrated behind
+> a typed delivery operation; the LAST delivery door deleted; the closing sweep + final
+> structural ledger recorded. This node closes the Phase-7 dogfood gate AND the objective's
+> closing gate — via the ordered closeout protocol below, with NO waiver. Realized-shape notes:
+>
+> - **Behavior moved**: `doors/commitCompact.ts` (250) + its suite (507) deleted whole in the
+>   same node (the last Rule E delivery-door burn-down; no forwarding exports —
+>   `CommitCompactIo` and its `Severity` edge retired outright, no compatibility shape). The
+>   policy tier became the Pi-free feature op `extension/delivery/commitCompact.ts`
+>   (`startCommitAndCompact`/`settleCommitAndCompact` over the closed
+>   `CommitCompactStart`/`CommitCompactSettle` unions and the observations-only
+>   `CommitCompactDeps` — the read-only gate rides a plain parameter; the invocation arm order,
+>   fail-safe posture, observation ordering, pending mint, and settle gate all live here) under
+>   the named installer `pi/v1/delivery/commitCompact.ts` (`installCommitCompactBindings` — the
+>   `installReadyBindings` shape) at the SAME `index.ts` call position (after
+>   `installObjectiveBindings`, whose `agent_settled` handler must register first). Command
+>   registration metadata frozen-baseline pinned (deepEqual; description byte-identical; a
+>   command-only door has no tool-JSON wire, so the baselines are registration metadata + text
+>   byte pins — stated honestly); all SIX report messages byte-identical; both `prompts/`
+>   templates, `prompts/_fixtures/live.yaml`, `tests/test_prompt_parity.py`, and `toolGating.ts`
+>   byte-untouched. The drive arm assigns the pending record ONLY after the guidance send — a
+>   throwing send leaves the slot unset (phantom-record regression pinned).
+> - **Named interior behavior deltas (warm-plane only — no contracts section exists for this
+>   door, so NO `shared/contracts.md` amendment; below the user-docs surface)**:
+>   - **D1 — discriminated HEAD baseline (fail-safe closure)**: the pending record now carries
+>     `HeadBaseline` = `sha | unborn | unprovable` instead of `headSha`'s conflated null. The
+>     production probe (module-private in the installer, over `substrate/git.ts`, fail-open):
+>     `rev-parse HEAD` ok → `sha`; else a resolvable `symbolic-ref -q HEAD` (an unborn branch
+>     pointer — the new `substrate/git.ts::symbolicHead`) → `unborn`; else `unprovable`. An
+>     `unprovable` baseline still DRIVES the commit (committing is always safe) but the settle
+>     arm SKIPS compaction with ONE new recorded warning ("the pre-commit HEAD could not be
+>     captured — compaction skipped; run /compact to compact anyway."). Regression pins: the
+>     start-unreadable/settle-readable case skips (through the registered paths, via a
+>     malformed-`.git/HEAD` scratch repo); the true unborn arm still compacts on the first
+>     commit.
+>   - **D2 — trust-fenced committed-arm compaction instructions**: `compactInstructions` now
+>     fences the raw `git log --oneline` listing (repository-controlled text) in the same
+>     `<commit-evidence>` + untrusted-DATA demotion framing the continuation template uses —
+>     the committed-arm instruction bytes changed (recorded); every other instruction/report/
+>     continuation surface is byte-identical. Pinned with a hostile commit-subject assertion
+>     (exactly once, confined to the fence) + the `(commit list unavailable)` arm, observed as
+>     exact `customInstructions` bytes through the deferCompaction seam — no test-only export.
+>   - **Narrowed safety claim (behavior-preserving, now stated honestly)**: the settle gate
+>     proves a NEW COMMIT (HEAD movement as range evidence), NOT end-state cleanliness — a
+>     commit that leaves the tree dirty still compacts BY DESIGN (regression-pinned); no
+>     ancestry check added.
+> - **Prose home**: adapter-side — the feature returns typed decisions carrying data only.
+>   Exactly two prose exports remain (`commitAndCompactGuidance`,
+>   `commitAndCompactContinuation`), exported SOLELY because `stageTools.test.ts`
+>   DRIVE_COVERAGE (a production-guard census) imports them — recorded as guard seams.
+>   `DIRECT_COMPACT_INSTRUCTIONS`, `compactInstructions`, and `activeSessionPlanRef` went
+>   module-private (`activeSessionPlanRef` relocated verbatim: session-tier authority, full
+>   shape validation, fail-open null, NO worktree-cache fallback — proven through registered
+>   paths: valid linkage → targeted continuation; per-field LWW; cache-ref-only → generic;
+>   malformed → generic). Prose map re-keyed (`ts-session` → the adapter path; both
+>   `module:sendUserMessage` units, indices 0/1) and regenerated.
+> - **Accounting** (vs predecessor head `5fc3eb45`, numstat): production net **+57** — under
+>   the +60 hard bar via the three named invariant classes (the typed outcome unions + the
+>   Pi-free deps seam; D1's discriminated baseline; D2's trust fence); operator acceptance
+>   rides the PR-approval gesture. Detail: door −250; feature +93; adapter +204;
+>   `substrate/git.ts` +9 (`symbolicHead`); sweep/index ±1s. Test net **+471** (door suite
+>   −507; feature suite +225 — recording fakes, zero-git-read sentinels, the full D1 settle
+>   matrix, compile-time negatives; adapter suite +736 — registered paths over a REAL bound
+>   AgentSession with real `agent_settled` emission through the extension runner). Files:
+>   production +2/−1, tests +2/−1.
+> - **Export ledger**: **removed** — `registerCommitAndCompact`, `CommitCompactIo` (+ the
+>   `Severity` edge), the door's exported `activeSessionPlanRef`, `DIRECT_COMPACT_INSTRUCTIONS`,
+>   `compactInstructions`, `PendingCompact`(door shape). **Newly introduced** — `HeadBaseline`,
+>   `PendingCompact` (baseline-shaped), `CommitCompactCompletion`, `CommitCompactDeps`,
+>   `CommitCompactStart`, `CommitCompactSettle`, `startCommitAndCompact`,
+>   `settleCommitAndCompact` (feature); `installCommitCompactBindings` (adapter);
+>   `substrate/git.ts::symbolicHead` (production-consumed by the installer's probe).
+>   **Relocated** — `commitAndCompactGuidance` + `commitAndCompactContinuation` (door →
+>   adapter; guard seams). **Privatized (sweep)** — `substrate/git.ts::indexHidesChanges`
+>   (`revalidationBracket`'s default flags probe is the one consumer; its direct test rows
+>   re-routed through the bracket — real-repo assume-unchanged arm added, the null arm already
+>   rode the `probes` seam), `doors/pendingWave.ts::WAVE_COLLECT_GRACE_MS` (tests re-anchored on
+>   `collectGraceMs()` + the `PERK_WAVE_COLLECT_GRACE_MS` env knob),
+>   `doors/plannotatorHandoff.ts::pickFreePort` (internal default; the injectable
+>   `deps.pickFreePort` hook untouched). Every added export has a production importer or a
+>   recorded guard-seam role.
+> - **Sweep dispositions (kept + recorded, no churn)**: `substrate/coldDoor.ts::activeRunId`
+>   KEPT untouched — live production behavior (`runColdDoor`'s stdin staging), a
+>   `shared/contracts.md`-anchored name, and a documented deliberate export
+>   (`docs/learned/workflow/cold-door-client.md`); recorded as a deliberate seam. Also kept:
+>   the signature-participating contract types (`ColdDoorOpts`, `ExecHost`, `LaunchVia`,
+>   `LaunchRequest`, `ConsoleErrorSink`, `ConsoleErrorInterceptor`, `AgentScratchBlock`,
+>   `PendingWave`) and the deliberate test seams / Phase-8 residue (`resolveTerminalLaunch`,
+>   `resolveClipboardScript`, `respondMessage`, `PLANNOTATOR_REVIEW_COMMAND`, the
+>   readiness-probe constants/paths, the agentScratch helpers, the prior-node exported-core
+>   seams across `pi/`).
+> - **Observed drift, reconciled**: the opt-in prose-plane census pin
+>   (`tools/prose-map/selector.test.ts` candidate count) was STALE at implementation start —
+>   pinned 98 while the true census was 96 (node 7.4's door deletions removed 9 model-call
+>   units and added 7, net −2, without running the opt-in suites). This node is count-neutral
+>   (2 door units out, 2 adapter units in); the pin was reconciled to 96 here
+>   (test-pin-sweep discipline).
+> - **Final structural ledger** (measured at this node's head; selectors pinned: production =
+>   `extension/**/*.ts` minus `*.test.ts` minus `testing/`, `vendor/` split out; edges =
+>   `from "."`-relative import lines; Pi importers = `@earendil-works` import declarations):
+>   - Production: **136 files / 42,348 LOC** incl. `vendor/` (133 / 40,659 excl.; vendor = 3
+>     files / 1,689). Tests: **143 files / 67,342 LOC**. Vs the 1.1 baseline (102 files /
+>     ~38,100): +34 files / +~4,200 LOC — the honest narrative: the decomposition ADDED
+>     structure (feature ops + adapters + the session/authoring/codeReview/learning/delivery
+>     homes) while deleting every delivery door; the growth is typed seams and guard census
+>     surface, not duplicated policy.
+>   - Import edges: **629** relative-import lines (628 at plan time; the door's 8 became the
+>     feature's 0 + the adapter's 9). Cycles: **ZERO** (guard-enforced, `KNOWN_CYCLES` empty).
+>   - Pi importers: **52** — the expected importer-neutral move (the deleted door's Pi import
+>     replaced by the new adapter's).
+>   - Registrations vs the inventory headline, location-shifted not grown: 36 `registerTool`
+>     (after 5.2's `/pr-review-dynamic` retirement) + 26 `registerPerkCommand` call sites (+1
+>     definition site in `substrate/command.ts`) + 2 `registerCommand` + 2 flags + 1 shortcut
+>     + 33 `pi.on` sites (+1 comment mention).
+>   - Remaining legacy modules, complete — the 7 surviving `doors/` modules:
+>     `draftReviewWaveTools` (draft-review wave tools — the plannotator draft-review lanes),
+>     `lifecycleGates` (session lifecycle fork/switch gates + dirty-repo guard),
+>     `objectiveReviewBrowser` (the objective-draft review browser door), `pendingWave` (the
+>     shared pending-wave state + collect race), `plannotatorHandoff` (the plannotator
+>     browser-handoff mechanics), `planReviewBrowser` (the plan-draft review browser door),
+>     `selfcheck` (the session-wiring verifier). Post-burn-down Rule E census residue (12
+>     entries): the five door registrants (`draftReviewWaveTools`, `lifecycleGates`,
+>     `objectiveReviewBrowser`, `planReviewBrowser`, `selfcheck` — `pendingWave` +
+>     `plannotatorHandoff` carry no registration tokens), `substrate/agentScratch.ts` (scratch
+>     provisioning + its flag), `substrate/bindingDelivery.ts` (Mechanism A injection),
+>     `substrate/command.ts` (the `registerPerkCommand` definition site),
+>     `substrate/toolGating.ts` (the gate's `before_agent_start` hook), `surfaces/surfaces.ts`
+>     (the sanctioned rich-UI module's entry renderers), `vendor/btw/btw.ts` +
+>     `vendor/whimsical/whimsical.ts` (borrowed packages, the named exception).
+> - **Recorded deferrals**: Phase 8 — application-host adapters; migrating the 7 surviving
+>   doors + the browser/wave mechanisms behind typed operations. The kept deliberate seams
+>   (sweep items above). The ONE remaining full-branch `branchCarries` consumer —
+>   `substrate/toolGating.ts` (the learned doc `pi/context-injection.md` overstates the
+>   residue; reconciling it rides `/learn`, not this node). The 7.3 + 7.4 live-proof closeouts
+>   were PENDING at this node's implementation start (their docs-only evidence commits are not
+>   yet on the train) — surfaced to the operator; each rides its own node's protocol before
+>   this node's gate closes.
+> - **Ordered closeout protocol** (the definitive Phase-7 + objective gate — NO waiver; each
+>   arm from a fresh session in the train worktree on the migrated head; session ids +
+>   observed renders recorded; if ANY train head changes after step 3, steps 3–5 re-run on the
+>   new head — the "definitive" labels attach to the LAST run): (1) implementation lands;
+>   review + address complete; interim publications ride `/submit`. (2) **Arm E FIRST** — the
+>   final base-absorbing sync: warm `objective_stack_sync` `{objective: "2083", dry_run: true}`
+>   preview then `{objective: "2083", base: true}` through the MIGRATED stackSync binding (a
+>   bare no-base sync does NOT satisfy this arm). (3) **Docs tail + arm D** — with the drafted
+>   `docs/design/archive/ts-decomposition-phase7-dogfood.md` (also the objective's closing-gate
+>   record) as the REAL dirty tree, a fresh session runs `/commit-and-compact` through the
+>   MIGRATED binding: the driven commit IS the evidence commit; compaction + the evidence-first
+>   continuation observed live; arm D's observed bytes append to THIS note as the second,
+>   final docs-only commit (the docs tail is these ≤ 2 docs-only commits — no code changes, no
+>   published-layer amend, no cascade). (4) **Arm A** — ONE definitive run-all `run_ci` at the
+>   final head through the migrated CI binding, green. (5) **Arm B then C** — publish the
+>   final head through the migrated `submit` binding from a fresh session; the human runs
+>   `perk ready <this plan>` (the MIGRATED ready binding performs the SHA-bound stamp and
+>   drives the §8.66 ready-time reconcile continuation; the tip re-stamp converges
+>   idempotently).
+> - **Deletion test (verified by the import graph)**: gutting `delivery/commitCompact.ts`
+>   hollows the adapter — arm selection, the fail-safe posture, observation ordering, the D1
+>   baseline discipline, the settle gate, and the pending mint all vanish, leaving
+>   registration + render shells that can decide nothing (the installer's switches only
+>   translate the feature's closed unions to effects).
+
 ### Changes
 
 Migrate in effect-sized slices:
