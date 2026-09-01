@@ -7737,8 +7737,8 @@ string|null, citations: int[], rationale: string|null, detail: string}]}` — `s
 `citations: []` on non-`report` statuses; `detail` carries the failure diagnosis (empty on
 `report`).
 
-**The wave + the `run_audit_wave` tool** (`extension/waves/auditWave.ts` +
-`extension/doors/auditWaveTools.ts`). **No parameters** — the bundle dir comes ONLY from the
+**The wave + the `run_audit_wave` tool** (`extension/learning/audit.ts` +
+`extension/pi/v1/learning/audit.ts`). **No parameters** — the bundle dir comes ONLY from the
 launch state (§8.3's `audit_bundle_dir` binding); missing/blank binding or a missing
 `manifest.json`/`deterministic.json` → pre-launch `bad_state` (nothing written). One lane per
 **packetized** pair, keyed `<sanitized expectation id>.<ordinal>` (run-key-safe under

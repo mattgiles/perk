@@ -440,7 +440,7 @@ routes:
     role: tool-contract
     priority: 85
   - id: ts-audit
-    match: { paths: ["extension/doors/auditWaveTools.ts"] }
+    match: { paths: ["extension/pi/v1/learning/audit.ts"] }
     capability: knowledge.audit
     audience: self-development
     role: tool-contract

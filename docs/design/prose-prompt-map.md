@@ -6,7 +6,7 @@ This is the readable projection of perk's living, workflow-first prose graph. It
 ## Coverage
 
 - **213** canonical source units
-- **726** logical fragments
+- **728** logical fragments
 - **16** session shapes and **10** assemblies
 - **15** explicitly excluded candidates (policy-only; not displayed)
 - **0** validation findings
@@ -1362,7 +1362,7 @@ Judge self-development session evidence with isolated auditor workflows.
 | --- | --- | --- | --- | --- |
 | `markdown:prompts/stages/audit.md` | `launch` | `self-development` | [`prompts/stages/audit.md`](../../prompts/stages/audit.md) · `file` | — |
 | `python-symbol:packages/perk-dev/src/perk_dev/audit/bounding.py:_PREAMBLE` | `context` | `self-development` | [`packages/perk-dev/src/perk_dev/audit/bounding.py`](../../packages/perk-dev/src/perk_dev/audit/bounding.py) · `symbol:_PREAMBLE` | — |
-| `typescript-tool:run_audit_wave` | `tool-contract` | `self-development` | [`extension/doors/auditWaveTools.ts`](../../extension/doors/auditWaveTools.ts) · `tool:run_audit_wave` | — |
+| `typescript-tool:run_audit_wave` | `tool-contract` | `self-development` | [`extension/pi/v1/learning/audit.ts`](../../extension/pi/v1/learning/audit.ts) · `tool:run_audit_wave` | — |
 
 <details>
 <summary>Logical fragments</summary>
@@ -1374,7 +1374,9 @@ Judge self-development session evidence with isolated auditor workflows.
 - `typescript-tool:run_audit_wave`
   - `description` — description (`tool:run_audit_wave.description`)
   - `promptSnippet` — promptSnippet (`tool:run_audit_wave.promptSnippet`)
-  - `promptGuidelines` — promptGuidelines (`tool:run_audit_wave.promptGuidelines`)
+  - `promptGuidelines.0` — promptGuidelines item 1 (`tool:run_audit_wave.promptGuidelines.0`)
+  - `promptGuidelines.1` — promptGuidelines item 2 (`tool:run_audit_wave.promptGuidelines.1`)
+  - `promptGuidelines.2` — promptGuidelines item 3 (`tool:run_audit_wave.promptGuidelines.2`)
 
 </details>
 

@@ -59,8 +59,9 @@
 //      directions; shrink-only intent — the census only burns down as registrations migrate);
 //      no production file outside `waves/` has an edge into the interior transport modules
 //      (`waves/transport.ts`, `waves/memoryAdapter.ts` — callers reach the wave mechanism
-//      through `waves/reportWave.ts`'s logical tier and its one sanctioned `WaveAdapter`
-//      re-export); and outside `waves/` + `testing/`, NO file — tests included — carries a
+//      through `waves/reportWave.ts`'s logical tier and its sanctioned type-only re-exports
+//      (`WaveAdapter`, `WaveLevelFailureReason`)); and outside `waves/` + `testing/`, NO
+//      file — tests included — carries a
 //      raw RPC token (`WAVE_RPC_*` word-bounded, so the public `PERK_WAVE_RPC_PING_MS` env
 //      knob never matches) or a `subagents:rpc:v1` channel literal. Positive floor:
 //      `waves/rpcAdapter.ts` itself carries ≥ 1 of each. This guard file is the one documented
@@ -169,12 +170,12 @@ const APPROVED_REGISTRAR_FILES = ["index.ts", "workerMain.ts"];
 // wholesale into the adapter home, swapping their door entries).
 const RPC_ADAPTER_IMPORTERS = [
   "doors/address.ts",
-  "doors/auditWaveTools.ts",
   "doors/draftReviewWaveTools.ts",
   "doors/dreamWaveTools.ts",
   "doors/harvestWaveTools.ts",
   "pi/v1/codeReview/automated.ts",
   "pi/v1/codeReview/reviewWave.ts",
+  "pi/v1/learning/audit.ts",
   "pi/v1/learning/learn.ts",
   "pi/v1/objectivePlanning.ts",
 ];
@@ -196,7 +197,6 @@ const TRANSPORT_TOKEN = /\bWAVE_RPC_|subagents:rpc:v1/;
 // in the activating change itself — the first burn-down.
 const LEGACY_REGISTRANTS = [
   "doors/address.ts",
-  "doors/auditWaveTools.ts",
   "doors/ciExecutor.ts",
   "doors/commitCompact.ts",
   "doors/draftReviewWaveTools.ts",
@@ -779,7 +779,8 @@ test("Rule G: report-wave transport confinement (exact importers; interior ban; 
       "its adapter leaves the census in the same change, and no new file may join it.",
   );
   // (2) The interior ban: callers reach the wave mechanism through reportWave.ts's logical
-  // tier (and its one sanctioned WaveAdapter re-export) — never the transport tier directly.
+  // tier (and its sanctioned type-only re-exports — WaveAdapter, WaveLevelFailureReason) —
+  // never the transport tier directly.
   assert.deepEqual(
     interiorEdges,
     [],

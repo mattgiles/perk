@@ -142,7 +142,9 @@ test("an incomplete pass records complete: false and derives the loud-warning fi
       complete: false,
       covered: ["plan-fidelity"],
       failures: [
-        { key: "tests", reason: "timeout", detail: "no report" },
+        // A keyed failure carries an assignment-level reason by type (the discriminated
+        // WaveFailure union makes a wave-level reason on a keyed lane unrepresentable).
+        { key: "tests", reason: "lane-failed", detail: "no report" },
         { key: null, reason: "run-failed", detail: "boom" },
       ],
     }),
@@ -151,7 +153,7 @@ test("an incomplete pass records complete: false and derives the loud-warning fi
   assert.ok(result.kind === "reviewed");
   assert.deepEqual(result.incompleteWarning, {
     uncovered: ["tests", "ponytail"],
-    reasons: "tests: timeout — no report; wave: run-failed — boom",
+    reasons: "tests: lane-failed — no report; wave: run-failed — boom",
   });
   assert.ok(state.current?.state === "recorded" && state.current.complete === false);
 });

@@ -23,8 +23,8 @@
 // `result` promise carrying the back half (completion wait, best-effort stop on timeout/cancel,
 // aggregate read, receipt assembly, unsubscribe-on-settle); `runWaveScript` is that start +
 // await. `startReportWave`/`runReportWave` are the assignment-level pair over the same split.
-// The blocking runner is live under the per-flow entrypoints (`prReviewWave.ts`,
-// `learnWave.ts`); the streaming sibling serves flows whose parent must return from
+// The blocking runner is live under the per-flow entrypoints (`prReviewWave.ts` and the typed
+// feature ops in `learning/`); the streaming sibling serves flows whose parent must return from
 // the launch and hold a model-held `subagent_wait` relay loop open (`adversarialReviewWave.ts`,
 // behind the `start_review_wave`/`collect_review_wave` pair).
 //
@@ -52,11 +52,18 @@ import {
 } from "./transport.ts";
 
 /**
- * The module's ONE deliberate transport re-export: the injection seam callers need for
- * execute-core signatures (an adapter is constructed at each registration site and threaded
- * in). Nothing else crosses — callers never name run handles, spawn params, or script types.
+ * The module's deliberate transport re-exports — the SANCTIONED seam, nothing else crosses
+ * (callers never name run handles, spawn params, or script types):
+ * - `WaveAdapter`: the injection seam callers need for execute-core signatures (an adapter is
+ *   constructed at each registration site and threaded in).
+ * - `WaveLevelFailureReason`: the wave-level reason subset (`key === null` failures carry
+ *   exactly this vocabulary), named at the logical seam so flows can type a correlated
+ *   wave status without reaching into transport.
  */
-export type { WaveAdapter } from "./transport.ts";
+export type {
+  WaveAdapter,
+  WaveRunFailureReason as WaveLevelFailureReason,
+} from "./transport.ts";
 
 /** One assignment of a report wave: a fresh-context, report-only child under a stable domain key. */
 export interface ReportAssignment {
@@ -116,27 +123,46 @@ export interface WaveReport {
   report: unknown;
 }
 
+/** The assignment-level failure reasons this tier produces during normalization/preflight —
+ * always keyed by the assignment they blame. */
+export type AssignmentFailureReason =
+  | "lane-failed" // assignment resolved ok: false / null report
+  | "skill-unavailable" // exact required-skill source failed preflight (non-retryable)
+  | "malformed-report" // aggregate entry for this key has unusable shape
+  | "missing-lane"; // expected key absent from the aggregate
+
 /**
  * The caller-facing failure vocabulary: the transport tier's wave-level subset
  * (`WaveRunFailureReason` — always `key: null`) widened with the assignment-level reasons this
  * tier produces during normalization. The subset union keeps the split one-directional with
- * zero runtime mapping, and makes an assignment-level reason on a script-run failure
- * unrepresentable.
+ * zero runtime mapping.
  */
-export type WaveFailureReason =
-  | WaveRunFailureReason
-  | "lane-failed" // assignment resolved ok: false / null report (assignment-level)
-  | "skill-unavailable" // exact required-skill source failed preflight (assignment-level, non-retryable)
-  | "malformed-report" // aggregate entry for this key has unusable shape (assignment-level)
-  | "missing-lane"; // expected key absent from the aggregate (assignment-level)
+export type WaveFailureReason = WaveRunFailureReason | AssignmentFailureReason;
 
-export interface WaveFailure {
-  /** The assignment key, or null for wave-level failures. */
-  key: string | null;
-  reason: WaveFailureReason;
+/** A wave-level failure: the whole run failed, so there is no assignment to blame — the same
+ * record shape as the transport tier's `WaveRunFailure` (script failures flow upward with zero
+ * runtime mapping). */
+export interface WaveLevelFailure {
+  key: null;
+  reason: WaveRunFailureReason;
   /** Human-readable diagnosis (error strings routed here, never re-thrown). */
   detail: string;
 }
+
+/** An assignment-level failure, keyed by the assignment it blames. */
+export interface AssignmentFailure {
+  key: string;
+  reason: AssignmentFailureReason;
+  detail: string;
+}
+
+/**
+ * One wave failure — a DISCRIMINATED union on `key`: `key === null` narrows the reason to
+ * exactly the wave-level subset (and a string key to the assignment-level reasons), so a
+ * wave-level failure carrying an assignment reason — or vice versa — is unrepresentable and
+ * every flow inherits the correlation without reimplementing transport knowledge.
+ */
+export type WaveFailure = WaveLevelFailure | AssignmentFailure;
 
 export interface WaveResult {
   complete: boolean;
@@ -241,7 +267,7 @@ function renderWaveScript(assignments: ReportAssignment[]): string {
 // ------------------------------------------------------------------------------- the runner
 
 function waveFailure(
-  reason: WaveFailureReason,
+  reason: WaveRunFailureReason,
   detail: string,
   receipt: WaveScriptReceipt,
 ): WaveResult {

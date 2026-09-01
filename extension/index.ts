@@ -8,7 +8,6 @@ import { existsSync, mkdirSync } from "node:fs";
 import { basename, join } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { registerAddress } from "./doors/address.ts";
-import { registerAuditWave } from "./doors/auditWaveTools.ts";
 import { registerCiExecutor } from "./doors/ciExecutor.ts";
 import { registerCommitAndCompact } from "./doors/commitCompact.ts";
 import {
@@ -37,6 +36,7 @@ import { installStackReviewBindings } from "./pi/v1/codeReview/stack.ts";
 import { installCuratedSubmissionBindings } from "./pi/v1/codeReview/submit.ts";
 import { installPrReviewTerminalBindings } from "./pi/v1/codeReview/terminal.ts";
 import { installGistBindings } from "./pi/v1/gist.ts";
+import { installAuditBindings } from "./pi/v1/learning/audit.ts";
 import { installLearnFactoryBindings } from "./pi/v1/learning/factory.ts";
 import { installLearnBindings } from "./pi/v1/learning/learn.ts";
 import { installObjectiveBindings } from "./pi/v1/objective.ts";
@@ -511,7 +511,7 @@ export default function (pi: ExtensionAPI) {
   // review doors drive: non-blocking adversarial-review launch + the typed collect, flow-scoped
   // via the session's pending-wave guard.
   installReviewWaveBindings(pi);
-  registerAuditWave(pi);
+  installAuditBindings(pi);
   registerHarvestWave(pi);
   registerDreamWave(pi);
 
