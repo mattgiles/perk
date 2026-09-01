@@ -2,7 +2,7 @@
   "$defs": {
     "ContinuationOut": {
       "additionalProperties": false,
-      "description": "This lineage's pending sync-continuation manifest (contracts.md \u00a78.44/\u00a78.49) \u2014 a\nmachine-local CLI-side observation. ``parseable: false`` rows carry nulls for every\nfield the unreadable file cannot account for.",
+      "description": "This lineage's pending sync-continuation manifest (contracts.md \u00a78.44/\u00a78.49) \u2014 a\nmachine-local CLI-side observation. ``parseable: false`` rows carry nulls for every\nfield the unreadable file cannot account for. ``targets_contained`` is additive trailing\ngrowth (\u00a78.44/\u00a78.51): whether the manifest's named targets pass the canonical\n``continuation.validated_targets`` containment validation against the configured worktree\nroot \u2014 the warm conflict dispatch requires it ``true`` (version skew fails closed: an\nolder CLI omits the field and the warm side refuses to dispatch).",
       "properties": {
         "operation_id": {
           "anyOf": [
@@ -65,6 +65,11 @@
         },
         "parseable": {
           "title": "Parseable",
+          "type": "boolean"
+        },
+        "targets_contained": {
+          "default": false,
+          "title": "Targets Contained",
           "type": "boolean"
         }
       },

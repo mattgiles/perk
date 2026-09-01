@@ -6652,7 +6652,12 @@ train must never depend on another machine's residue): (a) this lineage's pendin
 continuation manifest (§8.49), read tolerantly — a malformed lineage or unreadable directory
 reports no pending continuation, and an unparseable manifest file reports a
 `parseable: false` row (nulls for every field the unreadable file cannot account for) rather
-than being hidden; (b) the orphaned-sync-residue observation through recover's shared
+than being hidden; a parseable row additionally carries `targets_contained` — whether the
+manifest's named targets pass the canonical `continuation.validated_targets` containment
+validation against the configured worktree root (computed tolerantly: a config read failure,
+a filesystem resolution failure, or any `ContainmentViolation` reports `false`; unparseable
+rows carry `false`) — the §8.51 warm conflict dispatch requires it `true`, so version skew
+fails closed (an older CLI omits the field and the warm side refuses to dispatch); (b) the orphaned-sync-residue observation through recover's shared
 classifier (§8.51), **fail-honest**: a Config-load or git/fs read failure — and the
 classifier's own unparseable-manifest skip — reports `observed: false` plus the reason;
 `observed: true` with empty lists means *genuinely clean*. This status-only path calls the
@@ -6682,7 +6687,8 @@ operations[], continuation|null, orphaned_residue}` — the last three are the a
 detailed-status growth: `operations` mirrors `unresolved_operations`
 (`{operation_id, kind, prepared_created}` each), `continuation` is the manifest observation
 (`{operation_id|null, conflict_node_id|null, adopted_node|null, created|null,
-worktree_path|null, manifest_path, parseable}`), `orphaned_residue` is the honest residue
+worktree_path|null, manifest_path, parseable, targets_contained}` — `targets_contained`
+is trailing additive growth, defaulting `false`), `orphaned_residue` is the honest residue
 block (`{observed, reason|null, worktrees[], refs[]}`). `train` carries `{delivery_lineage,
 base, published_prefix_len, layers[], unresolved_operation|null, blockers[], information[],
 next_build_ready, observed_base_head_sha, landed_prefix_len}` (the readiness block, §8.46;
@@ -8159,7 +8165,11 @@ globally-registered doors/drivers (the `ready` non-stage pattern).
 core in `objectiveStack.ts`). **Eligibility (fail-closed, narrow)**: a human-approved MUTATING
 `objective_stack_sync` call — mode sync or continue; never `dry_run`, never `abort`, never the
 adopt tool — refusing `rebase_conflict`, corroborated by RE-READING the status projection:
-a `parseable: true` continuation carrying operation/layer/path facts; the §8.49
+a `parseable: true` continuation carrying operation/layer/path facts AND
+`targets_contained: true` (the cold projection's canonical `validated_targets` containment,
+§8.44 — absent (an older cold CLI) or `false` is ineligible with a reason naming the
+update/abort remediation, so a poisoned or symlinked manifest worktree can never mint a
+dispatch and version skew fails closed); the §8.49
 `for layer <node_id> ` refusal-message freshness token (the continue-time failed-rewrite arm
 preserves the PREVIOUS manifest and mismatches — report-only); a vocabulary-valid
 `train.delivery_lineage` whose `sync-continuations/<lineage>.json` shape the manifest path
