@@ -96,6 +96,27 @@ export function headSha(cwd: string): string | null {
   return git(cwd, ["rev-parse", "HEAD"]);
 }
 
+/** Whether HEAD is a positively-PROVEN unborn branch pointer: `symbolic-ref -q HEAD` resolves
+ * AND `for-each-ref` proves the pointed-to ref ABSENT (an exit-0 run, empty output). `false` =
+ * the ref EXISTS (a failing `headSha` read was transient, not unborn); **fail-open to null**
+ * when either probe fails outright — callers must never read null as unborn. Own `execFileSync`
+ * for the second probe: `git()` conflates empty output (absence — meaningful here) with
+ * failure. */
+export function unbornHead(cwd: string): boolean | null {
+  const pointer = git(cwd, ["symbolic-ref", "-q", "HEAD"]);
+  if (pointer === null) return null;
+  try {
+    const out = execFileSync("git", ["for-each-ref", "--format=%(refname)", pointer], {
+      cwd,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+    });
+    return out.trim() === "";
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Whether the working tree has anything uncommitted (`git status --porcelain`). Untracked files
  * count as dirty — deliberate: the model decides whether they belong in a commit. **Fail-open to
@@ -122,9 +143,11 @@ export function worktreeDirty(cwd: string): boolean | null {
  * `git status --porcelain`, so a status-based cleanliness proof over a flagged index is not a
  * proof. **Fail-open to null** on any failure (not a repo, git missing) — callers must NOT
  * conflate null with "no flags". Own `execFileSync` rather than the `git()` helper: `git()`
- * conflates empty output (an empty index — meaningful here) with failure.
+ * conflates empty output (an empty index — meaningful here) with failure. Module-private:
+ * `revalidationBracket`'s default flags probe is the one consumer (tests reach the arms through
+ * the bracket — real-repo flag arms — and its `probes` seam for the null arm).
  */
-export function indexHidesChanges(cwd: string): boolean | null {
+function indexHidesChanges(cwd: string): boolean | null {
   try {
     const out = execFileSync("git", ["ls-files", "-v"], {
       cwd,

@@ -6,9 +6,12 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { type ExtensionAPI, SessionManager } from "@earendil-works/pi-coding-agent";
 import { reconcileGuidance } from "../authoring/objective/prose.ts";
-import { commitAndCompactContinuation, commitAndCompactGuidance } from "../doors/commitCompact.ts";
 import { prReviewGuidance } from "../pi/v1/codeReview/automated.ts";
 import { stackReviewGuidance } from "../pi/v1/codeReview/stack.ts";
+import {
+  commitAndCompactContinuation,
+  commitAndCompactGuidance,
+} from "../pi/v1/delivery/commitCompact.ts";
 import { objectiveLandGuidance } from "../pi/v1/delivery/stackLand.ts";
 import { objectiveRecoverGuidance } from "../pi/v1/delivery/stackRecover.ts";
 import { objectiveSyncGuidance } from "../pi/v1/delivery/stackSync.ts";

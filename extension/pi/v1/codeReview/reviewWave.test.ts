@@ -12,7 +12,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { type PendingWaveState, WAVE_COLLECT_GRACE_MS } from "../../../doors/pendingWave.ts";
+import { collectGraceMs, type PendingWaveState } from "../../../doors/pendingWave.ts";
 import { PERK_TOOLS, STAGE_TOOLS } from "../../../substrate/toolGating.ts";
 import {
   createFakeSubagents,
@@ -399,8 +399,8 @@ test("executeCollectReviewWave: an incomplete wave is an ok result with the loud
   );
 });
 
-test("WAVE_COLLECT_GRACE_MS: the module default with the env override (the waveTimeoutMs idiom)", async () => {
-  assert.equal(WAVE_COLLECT_GRACE_MS, 15_000);
+test("collectGraceMs: the module default with the env override (the waveTimeoutMs idiom)", async () => {
+  assert.equal(collectGraceMs(), 15_000, "the module default before any env override");
   const state = freshState();
   const { target } = fakeTarget();
   const adapter = createMemoryWaveAdapter({ completion: false });

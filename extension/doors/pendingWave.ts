@@ -19,7 +19,7 @@ import type { WaveResult } from "../waves/reportWave.ts";
  * long enough to absorb the completion-event-vs-`subagent_wait` wake race, short enough that an
  * early call never stalls the relay loop. Overridable for tests via PERK_WAVE_COLLECT_GRACE_MS.
  */
-export const WAVE_COLLECT_GRACE_MS = 15_000;
+const WAVE_COLLECT_GRACE_MS = 15_000;
 
 /** One knob, shared by the review-wave AND draft-review-wave collect cores (one env override). */
 export function collectGraceMs(): number {

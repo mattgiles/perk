@@ -73,9 +73,9 @@ Read-only posture, continuation, compaction, and shared lifecycle guidance.
 | `python-symbol:src/perk/backends/engagement.py:render_node_engagement` | `context` | `shipped` | [`src/perk/backends/engagement.py`](../../src/perk/backends/engagement.py) · `symbol:render_node_engagement` | — |
 | `python-symbol:src/perk/backends/engagement.py:render_objective_engagement` | `context` | `shipped` | [`src/perk/backends/engagement.py`](../../src/perk/backends/engagement.py) · `symbol:render_objective_engagement` | — |
 | `python-symbol:src/perk/backends/engagement.py:render_plan_engagement` | `context` | `shipped` | [`src/perk/backends/engagement.py`](../../src/perk/backends/engagement.py) · `symbol:render_plan_engagement` | — |
-| `typescript-model-call:extension/doors/commitCompact.ts:module:sendUserMessage:0` | `context` | `shipped` | [`extension/doors/commitCompact.ts`](../../extension/doors/commitCompact.ts) · `symbol:module/call:sendUserMessage/0` | — |
-| `typescript-model-call:extension/doors/commitCompact.ts:module:sendUserMessage:1` | `context` | `shipped` | [`extension/doors/commitCompact.ts`](../../extension/doors/commitCompact.ts) · `symbol:module/call:sendUserMessage/1` | — |
 | `typescript-model-call:extension/doors/lifecycleGates.ts:module:sendUserMessage:0` | `context` | `shipped` | [`extension/doors/lifecycleGates.ts`](../../extension/doors/lifecycleGates.ts) · `symbol:module/call:sendUserMessage/0` | — |
+| `typescript-model-call:extension/pi/v1/delivery/commitCompact.ts:module:sendUserMessage:0` | `context` | `shipped` | [`extension/pi/v1/delivery/commitCompact.ts`](../../extension/pi/v1/delivery/commitCompact.ts) · `symbol:module/call:sendUserMessage/0` | — |
+| `typescript-model-call:extension/pi/v1/delivery/commitCompact.ts:module:sendUserMessage:1` | `context` | `shipped` | [`extension/pi/v1/delivery/commitCompact.ts`](../../extension/pi/v1/delivery/commitCompact.ts) · `symbol:module/call:sendUserMessage/1` | — |
 | `typescript-model-call:extension/substrate/bindingDelivery.ts:module:before-agent-start:0` | `context` | `shipped` | [`extension/substrate/bindingDelivery.ts`](../../extension/substrate/bindingDelivery.ts) · `symbol:module/event:before_agent_start/0` | — |
 | `typescript-model-call:extension/substrate/toolGating.ts:module:before-agent-start:0` | `context` | `shipped` | [`extension/substrate/toolGating.ts`](../../extension/substrate/toolGating.ts) · `symbol:module/event:before_agent_start/0` | — |
 
@@ -100,12 +100,12 @@ Read-only posture, continuation, compaction, and shared lifecycle guidance.
   - `symbol:render_objective_engagement` — Render objective engagement (`symbol:render_objective_engagement`)
 - `python-symbol:src/perk/backends/engagement.py:render_plan_engagement`
   - `symbol:render_plan_engagement` — Render plan engagement (`symbol:render_plan_engagement`)
-- `typescript-model-call:extension/doors/commitCompact.ts:module:sendUserMessage:0`
-  - `argument:0` — sendUserMessage model-facing argument (`symbol:module/call:sendUserMessage/0/argument:0`)
-- `typescript-model-call:extension/doors/commitCompact.ts:module:sendUserMessage:1`
-  - `argument:0` — sendUserMessage model-facing argument (`symbol:module/call:sendUserMessage/1/argument:0`)
 - `typescript-model-call:extension/doors/lifecycleGates.ts:module:sendUserMessage:0`
   - `argument:0` — sendUserMessage model-facing argument (`symbol:module/call:sendUserMessage/0/argument:0`)
+- `typescript-model-call:extension/pi/v1/delivery/commitCompact.ts:module:sendUserMessage:0`
+  - `argument:0` — sendUserMessage model-facing argument (`symbol:module/call:sendUserMessage/0/argument:0`)
+- `typescript-model-call:extension/pi/v1/delivery/commitCompact.ts:module:sendUserMessage:1`
+  - `argument:0` — sendUserMessage model-facing argument (`symbol:module/call:sendUserMessage/1/argument:0`)
 - `typescript-model-call:extension/substrate/bindingDelivery.ts:module:before-agent-start:0`
   - `handler` — before_agent_start injected context (`symbol:module/event:before_agent_start/0/handler`)
 - `typescript-model-call:extension/substrate/toolGating.ts:module:before-agent-start:0`
