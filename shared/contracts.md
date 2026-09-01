@@ -470,7 +470,7 @@ end of the section).
 | `review_posts` | array | the accumulating per-PR posting ledger of a stacked review: one `{ pr, event, at:ISO }` row per REAL `submit_pr_review` success, in posting order (read-rebuild-append — each write carries the whole list; the append-path rebuild FAILS CLOSED: an unrebuildable branch refuses the append rather than LWW-erasing earlier confirmed rows, while the plain ledger READ stays fail-open); best-effort tier with an asymmetric trust rule — a row can be MISSING spuriously (append failed after a real post) but never PRESENT spuriously, so `submit_pr_review` enforces skip-on-resume on presence (`already_posted` refusal; `allow_repost: true` is the deliberate override) while a missing row means verify posted-vs-pending against GitHub before re-posting |
 | `session_artifacts` | object \| null | per-name session-artifact provenance pointers `{run_id, name, path, digest, at}` (§8.1); appends carry the **whole merged map** (per-field LWW); strict-append tier |
 | `objective_node_claim` | object \| null | the objective node this session has claimed `planning` (`{ objective, node }`); written by the warm `objective_node` tool on a successful `planning` transition (idempotent — a re-claim equal to the live claim appends nothing) **and by the cold claim** (`session_start` persists it from the claimed handoff's non-blank `objective_id`/`node_id` — the objective-plan cold door's `handoff_extra` — so implement-here suppression is structural in cold objective-plan sessions too), cleared on a successful non-planning transition for the same node and after a successful node-linked plan save (the save-path clear matches the **full claim identity** — objective **and** node — so a save linked elsewhere never clobbers an unrelated standing claim); best-effort tier (cheaply reconstructable; loud-but-non-fatal) |
-| `conflict_resolution_attempts` | number | the bounded conflict-resolution re-drive counter: incremented on each `perk.conflict-resolver` dispatch from EITHER warm surface — `/submit`'s PR-rebase drive on a definitively-unmergeable PR, or `/objective-sync`'s retained-continuation drive (§8.51) — (cap `CONFLICT_RESOLUTION_ATTEMPT_CAP = 2`, shared); reset to 0 on any clean mutating completion (a clean submit; a clean non-declined mutating stack sync/continue/abort/adopt); best-effort tier (cheaply reconstructable) |
+| `conflict_resolution_attempts` | number | the bounded conflict-resolution re-drive counter: incremented on each `perk.conflict-resolver` dispatch from EITHER warm surface — `/submit`'s PR-rebase drive on a definitively-unmergeable PR, or `/objective-sync`'s retained-continuation drive (§8.51) — (cap `CONFLICT_RESOLUTION_ATTEMPT_CAP = 2`, shared, through the ONE two-phase budget transition `inspectConflictBudget`/`commitConflictAttempt` in `delivery/submit.ts`); the increment is persisted-and-verified BEFORE any dispatch on BOTH surfaces — an unverified write (strict read-back `false`) WITHHOLDS the dispatch with a loud report (the surface-uniform withhold posture; a THROWING read/write still propagates on the submit/address path — the pinned load-bearing failure arm — while the stack pipeline's total boundary translates it to `state_error`); reset to 0 on any clean mutating completion (a clean submit; a clean non-declined mutating stack sync/continue/abort/adopt); best-effort tier (cheaply reconstructable) |
 | `dream_bundle_digest` | string | the dream-wave finalized-bundle digest marker (§8.61): `""` = invalidated (cleared unconditionally at wave entry, BEFORE the stale-bundle removal attempt — the invalidation record); `sha256:<hex>` = the digest of the current finalized run-scratch bundle bytes, set only after a successful finalize write; the §8.63 dream-report recovery refuses unless the marker is present, non-empty, and byte-matches the bundle just read; per-field LWW, no rebuild change |
 | `perk_version` | string | the running perk (extension) version, stamped when run identity is established (the claim/fork/adopt/mint arms, §8.2) — the session-audit **exact-vintage** basis (the key literal is the cross-plane coordination point; the read side is `perk-dev`'s audit corpus/vintage layer); omitted when only the `perkVersion()` failure sentinel is available; best-effort tier |
 
@@ -1533,7 +1533,10 @@ validate_pr_body(body, *, pr_number)                -> string[]   (empty == vali
   `null` undetermined), and `conflicts[]` (the conflicted paths). The probe is **fail-open**: an
   unresolvable base or any `merge-tree` exit other than 0/1 yields `mergeable: null` and never
   changes submit's exit code — the warm-door conflict-resolver drive (§8.3's owning-modules list)
-  fires only on a **definitive** `mergeable: false`. `--dry-run` stays fully offline. The submit
+  fires only on a **definitive** `mergeable: false`, under the cap, and only on a
+  persisted-and-verified attempt increment (an unverified increment withholds the dispatch
+  with a loud report — §8.3's surface-uniform withhold posture; at the cap the loud
+  resolve-manually report fires instead). `--dry-run` stays fully offline. The submit
   still **succeeds mechanically** (exit 0) when conflicts are present — mergeability is reported
   separately, not an op failure.
 - **`pr check`.** `perk pr submit` runs `validate_pr_body` as a **post-write self-check** and
@@ -3552,8 +3555,8 @@ network): the team key is bound and resolved to its UUID on first use.
 **The TS mirror is fail-safe** (`extension/substrate/config.ts::resolveIssueBackendId`):
 returns `"github" | "linear"`, falling back to `"github"` on absence/unknown value/any read or
 parse error — safe because the TS plane only *renders prompts*, never writes canonical issues.
-Its consumers are `extension/pi/v1/delivery/ready.ts`, `extension/authoring/objective/prose.ts`, and
-`extension/doors/objectiveStack.ts` (backend-aware prompt rendering). `PerkConfig` carries no
+Its consumers are `extension/pi/v1/delivery/ready.ts`, `extension/pi/v1/objectivePlanning.ts`, and
+`extension/pi/v1/delivery/stackDrive.ts` (backend-aware prompt rendering). `PerkConfig` carries no
 `issues` field — an overlay-read shape would contradict the committed-only rule.
 
 **The `backend_id` discipline + the stamping rule.** The `IssueBackend` Protocol carries
@@ -3696,7 +3699,7 @@ everywhere — PRs are GitHub-universal. Concretely:
   `issue` but is a string; `pr land`'s `objective` sub-object `number` → **`id`** (string|null)
   and `learn.closed` carries string ids; `objective reconcile`'s `objective`/`comment_id` are
   strings; `learn docs --gather`'s `learn_numbers` carries string ids. TS decoders
-  (`pi/v1/plan.ts`/`pi/v1/learning/learn.ts`/`land.ts`/`pi/v1/objectiveAuthoring.ts`/`pi/v1/learning/factory.ts`) are lockstep-strict on
+  (`pi/v1/plan.ts`/`pi/v1/learning/learn.ts`/`pi/v1/delivery/land.ts`/`pi/v1/objectiveAuthoring.ts`/`pi/v1/learning/factory.ts`) are lockstep-strict on
   the string shapes, with one tolerance: `pi/v1/learning/factory.ts::decodeGather` accepts legacy numeric
   `learn_numbers` and normalizes them to strings.
 - CLI plan/objective arguments parse through the shared opaque-id validators
@@ -5402,7 +5405,14 @@ preserved on re-save).
    exempt from the land→learn cycle; the envelope carries `pending_learn: false`); every other
    plan gets the set-marker + `pending` stamp (`pending_learn: true`). The warm `/land`
    mirrors the envelope's `pending_learn` (lenient decode — missing/mistyped defaults to `true`
-   under version skew, degrading to the legacy marker + `/learn` nudge). **Never-downgrade
+   under version skew, degrading to the legacy marker + `/learn` nudge); its marker write is
+   GUARDED — a caught filesystem failure never erases the verified land result: the success
+   report gains a loud run-`/learn` warning line and the result (and its reconcile drive)
+   stands. The warm `objective`/`learn` advisory sub-objects decode three-state
+   (absent/malformed/present): a malformed sub-object is dropped from the details (the merge
+   already succeeded) but reported as a loud state-UNVERIFIED warning line, never silently;
+   the reconcile drive additionally requires the objective id to pass the marker-safe id
+   vocabulary (the id is interpolated into a steering message). **Never-downgrade
    guard**: an existing `captured`/`skipped` is kept (an idempotent re-land after `/learn` must not
    resurrect a done plan) and returned as the effective state. **Fail-open loud** (the on-land
    secondary-bookkeeping shape): never raises on an expected backend failure
@@ -6268,7 +6278,7 @@ through `read_journal` and surfaces the first unresolved operation. Recovery, li
 and the journal-mutating operations are implemented through `Delivery`
 (recover/transfer/publish/sync/land). The TS stack surface renders status
 (`extension/pi/v1/delivery/stackStatus.ts`) and drives the cold stack workers
-(`extension/doors/objectiveStack.ts`).
+(`extension/pi/v1/delivery/stackSync.ts` / `stackRecover.ts` / `stackLand.ts`).
 
 ## §8.44 · The DeliveryTrain projection + stack status (read path)
 
@@ -8125,8 +8135,11 @@ hint on close-with-evidence. Exit
 discipline: 0 = successful classification/report/no-op/actions (including declined and
 `selection_required`), 1 = typed refusals + infra failures, 2 = not-a-repo.
 
-**The warm stack surface** (the mutating family in `extension/doors/objectiveStack.ts`, the
-status read in `extension/pi/v1/delivery/stackStatus.ts`; mutations stay canonical in
+**The warm stack surface** (the mutating family in `extension/pi/v1/delivery/stackSync.ts` /
+`stackRecover.ts` / `stackLand.ts` over the Pi-free feature ops `extension/delivery/
+stackConflict.ts` + `stackReconcile.ts`, with the shared drive/render/registrar helpers in
+`extension/pi/v1/delivery/stackDrive.ts`; the status read in
+`extension/pi/v1/delivery/stackStatus.ts`; mutations stay canonical in
 Python — every tool delegates through the cold door). **Four commands**: `/objective-stack
 [N]` is a direct read door (exec `stack status --json`, render the train + operations +
 continuation + residue honoring `observed: false`; decode fully lenient/render-only —
@@ -8161,8 +8174,10 @@ from implement/address sessions and §8.52's converged workflow); the three driv
 the drive-coverage guard. No registry stage is added — the warm commands are
 globally-registered doors/drivers (the `ready` non-stage pattern).
 
-**The sync conflict drive** (`driveSyncConflictResolution` / the shared `dispatchSyncResolver`
-core in `objectiveStack.ts`). **Eligibility (fail-closed, narrow)**: a human-approved MUTATING
+**The sync conflict drive** (the `autoDispatchEligible` firing rule + the shared
+`decideSyncResolution` pipeline in `delivery/stackConflict.ts`; the production port
+compositions, rendering, and injection in `pi/v1/delivery/stackSync.ts`).
+**Eligibility (fail-closed, narrow)**: a human-approved MUTATING
 `objective_stack_sync` call — mode sync or continue; never `dry_run`, never `abort`, never the
 adopt tool — refusing `rebase_conflict`, corroborated by RE-READING the status projection:
 a `parseable: true` continuation carrying operation/layer/path facts AND
@@ -8185,7 +8200,13 @@ report only (unparseable adds the `abort` discard direction). **The shared count
 VERIFIED-increment precondition — an unpersistable counter withholds the injection (typed
 `state_error`) and releases this call's claim through the token-fenced quarantine-verify
 release (a successor's raced-in claim is never deleted), never bypasses the cap; reset on any
-clean non-declined mutating stack sync/continue/abort/adopt completion. **The resolver
+clean non-declined mutating stack sync/continue/abort/adopt completion (the reset itself is
+never-throws — a thrown or unverified reset write degrades to a loud stale-counter warning,
+never a failure of the verified cold completion). **The total exception boundary**: every
+thrown port failure inside the dispatch pipeline — a throwing projection read, claim port, or
+counter read/write — translates to the typed `state_error` arm (reason prefixed
+`conflict-dispatch state failure:`), releasing this call's claim when one was acquired; the
+closed outcome union is honest and nothing escapes as an unhandled tool rejection. **The resolver
 claim**: a machine-local lock dir beside the manifest (`<manifest>.resolver-lock`,
 `extension/substrate/resolverLease.ts`) holding `{schema: 1, pid, operation_id, token}` (the
 token is the per-acquisition ownership fence, rotated on every (re)acquire) — honestly a
@@ -9195,7 +9216,9 @@ plan or blockers, act ONLY on explicit human approval, report `pending`/
 `PERK_TOOLS` and the worktree-family stage lists; the drive row joins the drive-coverage
 guard; envelopes render leniently (render-only DATA).
 
-**The reconcile drive.** `driveStackReconcile` (`objectiveStack.ts`, mirroring `land.ts`'s
+**The reconcile drive.** `driveStackReconcile` (the `decideStackReconcile` gate + the
+mint-only sanitized-evidence snapshot in `delivery/stackReconcile.ts`; the render + injection
+in `pi/v1/delivery/stackDrive.ts`, mirroring `pi/v1/delivery/land.ts`'s
 `driveReconcileAfterLand`) fires after a successful mutating `objective_stack_land` or
 `objective_stack_recover` call whose envelope carries
 `reconcile_evidence.layers.length ≥ 1` — **evidence presence** is the gate, never
@@ -9209,10 +9232,14 @@ requested one; backend via the command's own resolution, url from the payload) +
 evidence block composed from `reconcile_evidence` (per-layer diff identities +
 diff-recovery instructions — prefer `gh pr diff <n>`, fallback pull-ref fetch + `git diff`)
 + the binding suffix. The journal-originated strings are untrusted DATA injected into a
-steering message, so they are whitelist-sanitized: ids/SHAs must match their vocabularies
-(which excludes control characters and line breaks — out-of-vocabulary values render `?`),
-an out-of-vocabulary `objective.id` refuses the drive entirely, and the block is delimited
-BEGIN/END UNTRUSTED DATA with a never-obey directive. Idle → `sendUserMessage`; streaming →
+steering message, so they are whitelist-sanitized AT MINT TIME into a nominal evidence
+snapshot (post-decision payload mutation cannot reach the drive render): ids/SHAs must match
+their vocabularies (which excludes control characters and line breaks — out-of-vocabulary
+values render `?`), a layer PR renders only as a positive safe integer (else `?`), the
+objective `url` is minted only when it parses as a credential-free `https:` URL whose
+reconstructed `href` equals the raw printable input (else `""` — a parser-repaired url is
+refused, never laundered), an out-of-vocabulary `objective.id` refuses the drive entirely,
+and the block is delimited BEGIN/END UNTRUSTED DATA with a never-obey directive. Idle → `sendUserMessage`; streaming →
 `deliverAs: "followUp"`. The guarantee is honestly **at-least-once** (machine-local lock +
 idempotent backend close cannot prove exactly-once cross-machine); the reconcile pass
 itself is idempotent ("skip if nothing stale").
