@@ -13,7 +13,7 @@ import {
   ADVERSARIAL_REVIEW_ANGLES,
   ADVERSARIAL_REVIEW_REPORT_SCHEMA,
   type AdversarialReviewAngle,
-  buildAdversarialReviewLanes,
+  buildAdversarialReviewAssignments,
   isAdversarialReviewAngle,
   startAdversarialReviewWave,
 } from "./adversarialReviewWave.ts";
@@ -36,8 +36,12 @@ function okEntry(key: string): unknown {
 
 // -------------------------------------------------------------------------- lane construction
 
-test("buildAdversarialReviewLanes: key = label = slug, the fixed agent/phase, the exact task line", () => {
-  const lanes = buildAdversarialReviewLanes({ angles: TWO_ANGLES, pr: 42, worktree: "/abs/wt" });
+test("buildAdversarialReviewAssignments: key = label = slug, the fixed agent/phase, the exact task line", () => {
+  const lanes = buildAdversarialReviewAssignments({
+    angles: TWO_ANGLES,
+    pr: 42,
+    worktree: "/abs/wt",
+  });
   // The exact byte pin proves the task names the angle, the PR, and the worktree — and nothing
   // else: no URL, no port, no surface handle (the builder has no parameter to carry one).
   assert.deepEqual(lanes, [
@@ -70,11 +74,11 @@ test("buildAdversarialReviewLanes: key = label = slug, the fixed agent/phase, th
   ]);
 });
 
-test("buildAdversarialReviewLanes stack mode: per-key task pins + the no-stack byte-identity", () => {
+test("buildAdversarialReviewAssignments stack mode: per-key task pins + the no-stack byte-identity", () => {
   // The stack discriminator swaps ONLY the subject sentence — the exact per-key pin proves the
   // task names the stack top, the combined-diff framing, and the --stack context fetch, and
   // still carries no URL/surface handle.
-  const lanes = buildAdversarialReviewLanes({
+  const lanes = buildAdversarialReviewAssignments({
     angles: TWO_ANGLES,
     pr: 42,
     worktree: "/abs/wt",
@@ -92,8 +96,12 @@ test("buildAdversarialReviewLanes stack mode: per-key task pins + the no-stack b
     ],
   );
   // Without stack (absent OR false), tasks are byte-identical to the single-PR form.
-  const plain = buildAdversarialReviewLanes({ angles: TWO_ANGLES, pr: 42, worktree: "/abs/wt" });
-  const explicitFalse = buildAdversarialReviewLanes({
+  const plain = buildAdversarialReviewAssignments({
+    angles: TWO_ANGLES,
+    pr: 42,
+    worktree: "/abs/wt",
+  });
+  const explicitFalse = buildAdversarialReviewAssignments({
     angles: TWO_ANGLES,
     pr: 42,
     worktree: "/abs/wt",
@@ -103,8 +111,8 @@ test("buildAdversarialReviewLanes stack mode: per-key task pins + the no-stack b
   assert.equal(plain[0]?.task, "Angle: claimed-intent. Review PR #42 at /abs/wt.");
 });
 
-test("buildAdversarialReviewLanes appends ONE uniform directive suffix to EVERY lane task when set", () => {
-  const lanes = buildAdversarialReviewLanes({
+test("buildAdversarialReviewAssignments appends ONE uniform directive suffix to EVERY lane task when set", () => {
+  const lanes = buildAdversarialReviewAssignments({
     angles: ["claimed-intent", "tests", "quality"],
     pr: 7,
     worktree: "/abs/wt",

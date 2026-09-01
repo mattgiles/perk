@@ -9,33 +9,38 @@
 import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { basename, join } from "node:path";
+import { join } from "node:path";
 import { test } from "node:test";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { PERK_TOOLS, STAGE_TOOLS } from "../substrate/toolGating.ts";
+import {
+  createFakeSubagents,
+  type FakeSubagents,
+  waveScriptItems,
+} from "../testing/fakeSubagents.ts";
 import { fakePerk, loadPerkSession, scaffoldRepo } from "../testing/harness.ts";
 import type { AdversarialReviewAngle } from "../waves/adversarialReviewWave.ts";
 import { createMemoryWaveAdapter } from "../waves/memoryAdapter.ts";
-import {
-  WAVE_RPC_PROTOCOL_VERSION,
-  WAVE_RPC_REPLY_EVENT_PREFIX,
-  WAVE_RPC_REQUEST_EVENT,
-} from "../waves/rpcAdapter.ts";
+import { type PendingWaveState, WAVE_COLLECT_GRACE_MS } from "./pendingWave.ts";
 import {
   decodeStartReviewWaveParams,
   executeCollectReviewWave,
   executeStartReviewWave as executeStartReviewWaveBase,
   registerReviewWaveTools,
-  WAVE_COLLECT_GRACE_MS,
 } from "./reviewWaveTools.ts";
 
 const TWO_ANGLES: AdversarialReviewAngle[] = ["claimed-intent", "correctness"];
 const PREFLIGHT_OK = async () => ({ ok: true }) as const;
 const executeStartReviewWave = (...args: Parameters<typeof executeStartReviewWaveBase>) =>
-  executeStartReviewWaveBase(args[0], args[1], {
-    ...args[2],
+  executeStartReviewWaveBase(args[0], args[1], args[2], {
+    ...args[3],
     requiredSkillPreflight: PREFLIGHT_OK,
   });
+
+/** A fresh per-test pending-wave slot (what a registration owns in its closure). */
+function freshState(): PendingWaveState<string> {
+  return { pending: null };
+}
 
 /** A schema-valid aggregate entry as the rendered script's projection produces it. */
 function okEntry(key: string): unknown {
@@ -93,11 +98,6 @@ function fakePi(): {
     },
   } as unknown as ExtensionAPI;
   return { pi, tools };
-}
-
-/** Reset the module's pending-wave state (a fresh registration is a fresh session). */
-function resetState(): void {
-  registerReviewWaveTools(fakePi().pi);
 }
 
 const START_OPTS = { angles: TWO_ANGLES, pr: 42, worktree: "/abs/wt" };
@@ -224,7 +224,7 @@ test("decodeStartReviewWaveParams refuses a missing/empty worktree and a blank d
 // --- the execute cores over the injected memory adapter --------------------------------------
 
 test("executeStartReviewWave: happy path stores the pending wave and returns the run handle", async () => {
-  resetState();
+  const state = freshState();
   const { target } = fakeTarget();
   const adapter = createMemoryWaveAdapter({
     aggregate: {
@@ -232,7 +232,7 @@ test("executeStartReviewWave: happy path stores the pending wave and returns the
       value: [okEntry("claimed-intent"), okEntry("correctness"), okEntry("ponytail")],
     },
   });
-  const result = await executeStartReviewWave(adapter, target, START_OPTS);
+  const result = await executeStartReviewWave(state, adapter, target, START_OPTS);
   assert.equal(result.details.ok, true);
   const details = result.details as {
     asyncId?: string;
@@ -252,22 +252,23 @@ test("executeStartReviewWave: happy path stores the pending wave and returns the
   assert.match(text, /collect_review_wave/);
 
   // The pending wave is stored: a second start refuses with wave_active…
-  const second = await executeStartReviewWave(adapter, target, START_OPTS);
+  const second = await executeStartReviewWave(state, adapter, target, START_OPTS);
   assert.equal(second.details.ok, false);
   assert.equal((second.details as { error_type?: string }).error_type, "wave_active");
   assert.match(second.content[0]?.text ?? "", /collect_review_wave first/);
 
   // …and collect drains it (clearing pending — a following collect is no_wave).
-  const collected = await executeCollectReviewWave(target);
+  const collected = await executeCollectReviewWave(state, target);
   assert.equal(collected.details.ok, true);
-  const drained = await executeCollectReviewWave(target);
+  const drained = await executeCollectReviewWave(state, target);
   assert.equal((drained.details as { error_type?: string }).error_type, "no_wave");
 });
 
 test("executeStartReviewWave: a launch failure soft-fails with the wave reason and the attempt receipt", async () => {
-  resetState();
+  const state = freshState();
   const { target, notified } = fakeTarget();
   const unavailable = await executeStartReviewWave(
+    state,
     createMemoryWaveAdapter({ ping: null }),
     target,
     START_OPTS,
@@ -291,6 +292,7 @@ test("executeStartReviewWave: a launch failure soft-fails with the wave reason a
   );
   // A failed launch leaves nothing pending — the next start is not wave_active.
   const spawnFailed = await executeStartReviewWave(
+    state,
     createMemoryWaveAdapter({ spawnError: "no session" }),
     target,
     START_OPTS,
@@ -300,9 +302,9 @@ test("executeStartReviewWave: a launch failure soft-fails with the wave reason a
 });
 
 test("executeCollectReviewWave: no_wave without a launch; wave_running retains the pending wave", async () => {
-  resetState();
+  const state = freshState();
   const { target } = fakeTarget();
-  const none = await executeCollectReviewWave(target);
+  const none = await executeCollectReviewWave(state, target);
   assert.equal(none.details.ok, false);
   assert.equal((none.details as { error_type?: string }).error_type, "no_wave");
   assert.match(none.content[0]?.text ?? "", /start_review_wave/);
@@ -316,16 +318,16 @@ test("executeCollectReviewWave: no_wave without a launch; wave_running retains t
       value: [okEntry("claimed-intent"), okEntry("correctness"), okEntry("ponytail")],
     },
   });
-  const start = await executeStartReviewWave(adapter, target, START_OPTS);
+  const start = await executeStartReviewWave(state, adapter, target, START_OPTS);
   assert.equal(start.details.ok, true);
-  const running = await executeCollectReviewWave(target, { graceMs: 20 });
+  const running = await executeCollectReviewWave(state, target, { graceMs: 20 });
   assert.equal(running.details.ok, false);
   assert.equal((running.details as { error_type?: string }).error_type, "wave_running");
   assert.match(running.content[0]?.text ?? "", /keep looping subagent_wait/);
 
   // Once the run completes, the retained wave collects normally.
   adapter.emitCompletion({ asyncId: "wave-async-1", asyncDir: "/memory/wave-async-1" });
-  const collected = await executeCollectReviewWave(target, { graceMs: 1_000 });
+  const collected = await executeCollectReviewWave(state, target, { graceMs: 1_000 });
   assert.equal(collected.details.ok, true);
   const details = collected.details as {
     complete?: boolean;
@@ -359,7 +361,7 @@ test("executeCollectReviewWave: no_wave without a launch; wave_running retains t
 });
 
 test("executeCollectReviewWave: an incomplete wave is an ok result with the loud warning", async () => {
-  resetState();
+  const state = freshState();
   const { target, notified } = fakeTarget();
   const adapter = createMemoryWaveAdapter({
     aggregate: {
@@ -371,8 +373,8 @@ test("executeCollectReviewWave: an incomplete wave is an ok result with the loud
       ],
     },
   });
-  await executeStartReviewWave(adapter, target, START_OPTS);
-  const collected = await executeCollectReviewWave(target);
+  await executeStartReviewWave(state, adapter, target, START_OPTS);
+  const collected = await executeCollectReviewWave(state, target);
   assert.equal(collected.details.ok, true, "honest incompleteness is an ok result, never a throw");
   const details = collected.details as {
     complete?: boolean;
@@ -399,7 +401,7 @@ test("executeCollectReviewWave: an incomplete wave is an ok result with the loud
 
 test("WAVE_COLLECT_GRACE_MS: the module default with the env override (the waveTimeoutMs idiom)", async () => {
   assert.equal(WAVE_COLLECT_GRACE_MS, 15_000);
-  resetState();
+  const state = freshState();
   const { target } = fakeTarget();
   const adapter = createMemoryWaveAdapter({ completion: false });
   // Bound the never-completing wave's module timeout so its timer never outlives the test
@@ -407,12 +409,12 @@ test("WAVE_COLLECT_GRACE_MS: the module default with the env override (the waveT
   process.env.PERK_WAVE_TIMEOUT_MS = "200";
   process.env.PERK_WAVE_COLLECT_GRACE_MS = "20";
   try {
-    await executeStartReviewWave(adapter, target, START_OPTS);
+    await executeStartReviewWave(state, adapter, target, START_OPTS);
     // No injected graceMs: the env override keeps the never-completing wave from stalling 15s.
-    const running = await executeCollectReviewWave(target);
+    const running = await executeCollectReviewWave(state, target);
     assert.equal((running.details as { error_type?: string }).error_type, "wave_running");
     // After the module timeout fires, the retained wave drains into the timeout failure.
-    const drained = await executeCollectReviewWave(target, { graceMs: 2_000 });
+    const drained = await executeCollectReviewWave(state, target, { graceMs: 2_000 });
     assert.equal(drained.details.ok, true);
     const details = drained.details as { complete?: boolean; failures?: { reason: string }[] };
     assert.equal(details.complete, false);
@@ -420,15 +422,14 @@ test("WAVE_COLLECT_GRACE_MS: the module default with the env override (the waveT
   } finally {
     delete process.env.PERK_WAVE_TIMEOUT_MS;
     delete process.env.PERK_WAVE_COLLECT_GRACE_MS;
-    resetState();
   }
 });
 
 // --- registration -----------------------------------------------------------------------------
 
-test("registerReviewWaveTools registers exactly the two tools and resets the pending state", async () => {
-  // Seed a pending wave through the core…
-  resetState();
+test("registerReviewWaveTools registers exactly the two tools over registration-owned state", async () => {
+  // Seed a pending wave in a SEPARATE test-owned slot through the core…
+  const seeded = freshState();
   const { target } = fakeTarget();
   const adapter = createMemoryWaveAdapter({
     aggregate: {
@@ -436,9 +437,9 @@ test("registerReviewWaveTools registers exactly the two tools and resets the pen
       value: [okEntry("claimed-intent"), okEntry("correctness"), okEntry("ponytail")],
     },
   });
-  await executeStartReviewWave(adapter, target, START_OPTS);
+  await executeStartReviewWave(seeded, adapter, target, START_OPTS);
 
-  // …then a fresh registration wipes it (a fresh registration is a fresh session).
+  // …then a registration owns its OWN fresh closure slot: its collect sees no wave.
   const { pi, tools } = fakePi();
   registerReviewWaveTools(pi);
   assert.deepEqual(
@@ -446,13 +447,19 @@ test("registerReviewWaveTools registers exactly the two tools and resets the pen
     ["collect_review_wave", "start_review_wave"],
     "exactly the two flow-scoped tools",
   );
-  const cleared = await executeCollectReviewWave(target);
-  assert.equal((cleared.details as { error_type?: string }).error_type, "no_wave");
-
-  // Both promptGuidelines carry the relay-loop discipline.
   const startDef = tools.get("start_review_wave");
   const collectDef = tools.get("collect_review_wave");
   assert.ok(startDef && collectDef);
+  const ctx = { cwd: mkdtempSync(join(tmpdir(), "perk-rwt-")), ...target };
+  const cleared = (await collectDef.execute("tc", {}, undefined, undefined, ctx)) as {
+    details: { error_type?: string };
+  };
+  assert.equal(cleared.details.error_type, "no_wave");
+  // …and the seeded slot is untouched by the registration (no shared module state).
+  const collected = await executeCollectReviewWave(seeded, target);
+  assert.equal(collected.details.ok, true);
+
+  // Both promptGuidelines carry the relay-loop discipline.
   // Sequential execution is load-bearing for the one-pending-wave invariant: concurrent starts
   // could both pass the `pending === null` check before either stores the launched wave.
   assert.equal(startDef.executionMode, "sequential");
@@ -500,11 +507,6 @@ test("registered start_review_wave: a bad selection decodes to bad_input before 
 
 // --- the registered pair end-to-end (real session, fake RPC responder) ------------------------
 
-/** The spawn params the fake responder observes (the tool-boundary threading assertions). */
-interface SpawnSink {
-  spawns: { workflowScript?: string; model?: string; outputSchema?: unknown }[];
-}
-
 function installPonytailReviewSkill(cwd: string): void {
   const root = join(cwd, ".pi", "npm", "node_modules", "@dietrichgebert", "ponytail");
   const skillDir = join(root, "skills", "ponytail-review");
@@ -518,83 +520,22 @@ function installPonytailReviewSkill(cwd: string): void {
 }
 
 /**
- * A fake pi-subagents responder bound as a bus peer (the prReview.test.ts idiom): answers
- * ping/spawn on `pi.events` with the v1 envelope, writes a terminal `status.json` carrying one
- * schema-valid adversarial report per lane into a real temp `asyncDir`, and emits the advertised
- * completion event. Offline like everything here.
+ * The shared fake pi-subagents responder in dynamic mode: parse the module-rendered script's
+ * lane keys and answer each with a schema-valid adversarial report. Offline like everything
+ * here.
  */
-function fakeSubagentsResponder(sink: SpawnSink): (pi: ExtensionAPI) => void {
-  return (pi) => {
-    pi.events.on(WAVE_RPC_REQUEST_EVENT, (raw) => {
-      const request = raw as {
-        requestId: string;
-        method: string;
-        params?: { workflowScript?: string; model?: string; outputSchema?: unknown };
-      };
-      const reply = (payload: Record<string, unknown>): void => {
-        pi.events.emit(`${WAVE_RPC_REPLY_EVENT_PREFIX}${request.requestId}`, {
-          version: WAVE_RPC_PROTOCOL_VERSION,
-          requestId: request.requestId,
-          method: request.method,
-          ...payload,
-        });
-      };
-      if (request.method === "ping") {
-        reply({
-          success: true,
-          data: {
-            version: WAVE_RPC_PROTOCOL_VERSION,
-            methods: ["ping", "status", "spawn", "steer", "interrupt", "stop", "resume"],
-            capabilities: { asyncSpawn: true },
-            events: { asyncComplete: "subagent:async-complete" },
-            session: {},
-          },
-        });
-        return;
-      }
-      if (request.method === "spawn") {
-        if (request.params !== undefined) sink.spawns.push(request.params);
-        // Parse the module-rendered script's lane keys and answer each with a schema-valid report.
-        const script = request.params?.workflowScript ?? "";
-        const start = script.indexOf("runs.all(") + "runs.all(".length;
-        const end = script.indexOf(");\nreturn");
-        const lanes = JSON.parse(script.slice(start, end)) as Array<{ key: string }>;
-        const asyncDir = mkdtempSync(join(tmpdir(), "perk-review-wave-e2e-"));
-        writeFileSync(
-          join(asyncDir, "status.json"),
-          JSON.stringify({
-            runId: basename(asyncDir),
-            mode: "workflow",
-            state: "complete",
-            startedAt: 0,
-            workflow: {
-              value: lanes.map(({ key }) => ({
-                key,
-                ok: true,
-                error: null,
-                report: { angle: key, summary: `${key} looks sound`, findings: [], fyi: [] },
-              })),
-            },
-          }),
-        );
-        reply({
-          success: true,
-          data: { text: "Started async run.", details: { asyncId: basename(asyncDir), asyncDir } },
-        });
-        // Emitted right after the reply — the runner subscribed before spawn and buffers.
-        pi.events.emit("subagent:async-complete", {
-          id: basename(asyncDir),
-          asyncDir,
-          state: "complete",
-        });
-        return;
-      }
-      reply({
-        success: false,
-        error: { code: "not_found", message: `fake responder rejects ${request.method}` },
-      });
-    });
-  };
+function adversarialFake(): FakeSubagents {
+  return createFakeSubagents([
+    {
+      executeScript: async (script) =>
+        waveScriptItems(script).map(({ key }) => ({
+          key,
+          ok: true,
+          error: null,
+          report: { angle: key, summary: `${String(key)} looks sound`, findings: [], fyi: [] },
+        })),
+    },
+  ]);
 }
 
 test("tools: start_review_wave threads the configured model + directive; collect drains the aggregate", async () => {
@@ -608,11 +549,11 @@ test("tools: start_review_wave threads the configured model + directive; collect
     "utf8",
   );
   const bin = fakePerk(cwd, { stdout: "{}" });
-  const sink: SpawnSink = { spawns: [] };
+  const fake = adversarialFake();
   const h = await loadPerkSession({
     cwd,
     env: { PERK_RUN_ID: "01RID", PERK_BIN: bin },
-    extraExtensions: [fakeSubagentsResponder(sink)],
+    extraExtensions: [fake.extension],
   });
   try {
     const started = await h.invokeTool("start_review_wave", {
@@ -635,12 +576,14 @@ test("tools: start_review_wave threads the configured model + directive; collect
     });
     // The tool-boundary threading pins: the configured model and the directive both reached the
     // actual spawn (config → execute → startAdversarialReviewWave → adapter).
-    assert.equal(sink.spawns.length, 1);
-    assert.equal(sink.spawns[0]?.model, "test-adv-model");
-    const script = sink.spawns[0]?.workflowScript ?? "";
-    const lanes = JSON.parse(
-      script.slice(script.indexOf("runs.all(") + "runs.all(".length, script.indexOf(");\nreturn")),
-    ) as Array<{ key: string; agent: string; task: string; skill?: string }>;
+    assert.equal(fake.spawns.length, 1);
+    assert.equal(fake.spawns[0]?.model, "test-adv-model");
+    const lanes = waveScriptItems(String(fake.spawns[0]?.workflowScript ?? "")) as Array<{
+      key: string;
+      agent: string;
+      task: string;
+      skill?: string;
+    }>;
     assert.deepEqual(
       lanes.map((lane) => lane.key),
       ["claimed-intent", "quality", "ponytail"],
@@ -672,11 +615,11 @@ test("tools: start_review_wave threads the configured model + directive; collect
 
 test("tools: missing exact Ponytail skill omits only that child and collects explicit incomplete coverage", async () => {
   const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
-  const sink: SpawnSink = { spawns: [] };
+  const fake = adversarialFake();
   const h = await loadPerkSession({
     cwd,
     env: { PERK_RUN_ID: "01RID" },
-    extraExtensions: [fakeSubagentsResponder(sink)],
+    extraExtensions: [fake.extension],
   });
   try {
     const started = await h.invokeTool("start_review_wave", {
@@ -703,8 +646,8 @@ test("tools: missing exact Ponytail skill omits only that child and collects exp
     assert.match(startText, /workflow accepted with 2\/3 post-preflight runnable lane/);
     assert.match(startText, /Preflight skipped: ponytail: skill-unavailable/);
     assert.doesNotMatch(startText, /ponytail.*launched/i);
-    assert.equal(sink.spawns.length, 1);
-    const script = sink.spawns[0]?.workflowScript ?? "";
+    assert.equal(fake.spawns.length, 1);
+    const script = String(fake.spawns[0]?.workflowScript ?? "");
     assert.doesNotMatch(script, /"key":\s*"ponytail"/, "Ponytail never reaches runs.all");
     assert.match(script, /"key":\s*"claimed-intent"/);
     assert.match(script, /"key":\s*"correctness"/);
@@ -738,11 +681,11 @@ test("tools: missing exact Ponytail skill omits only that child and collects exp
 test("tools: start_review_wave ignores an already-aborted per-call signal (the wave outlives the call)", async () => {
   const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
   installPonytailReviewSkill(cwd);
-  const sink: SpawnSink = { spawns: [] };
+  const fake = adversarialFake();
   const h = await loadPerkSession({
     cwd,
     env: { PERK_RUN_ID: "01RID" },
-    extraExtensions: [fakeSubagentsResponder(sink)],
+    extraExtensions: [fake.extension],
   });
   try {
     const tool = h.session.extensionRunner
@@ -772,7 +715,7 @@ test("tools: start_review_wave ignores an already-aborted per-call signal (the w
     const startDetails = started.details as { ok: boolean; asyncId?: string };
     assert.equal(startDetails.ok, true, "an aborted signal must not become a cancelled launch");
     assert.ok(startDetails.asyncId);
-    assert.equal(sink.spawns.length, 1, "the wave really spawned");
+    assert.equal(fake.spawns.length, 1, "the wave really spawned");
     // …and the detached wave outlives the aborted call: it stays pending and collectable.
     const collected = await h.invokeTool("collect_review_wave", {});
     const details = collected.details as { ok: boolean; complete?: boolean; covered?: string[] };

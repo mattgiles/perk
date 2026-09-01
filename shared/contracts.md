@@ -9663,7 +9663,7 @@ decode-time-bound `manifest.manifestPath`, never a second `runScratchDir` deriva
 versioned shape: `{schema_version: "1", commit_sha, registry_mode, doc_count, total_bytes,
 lanes: [{lane, report}]}` — the identity fields echo the manifest; `lanes` carries the
 re-decoded compact analyst reports **in manifest lane order** (an already-guaranteed invariant
-of the runner's `spec.lanes`-order normalization + `buildDreamLanes`' manifest-order plan + the
+of the runner's `spec.assignments`-order normalization + `buildDreamLanes`' manifest-order plan + the
 re-decode's doc-order normalization — no re-sort layer). Deterministic serialization
 (pretty-printed JSON + trailing newline). The aggregate budget:
 `DREAM_BUNDLE_BUDGET_BYTES = 393216` (384 KiB), measured as **UTF-8 bytes** of the serialized

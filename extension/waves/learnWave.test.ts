@@ -6,6 +6,7 @@
 
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { waveScriptItems } from "../testing/fakeSubagents.ts";
 import {
   angleSelectionError,
   LEARN_ANALYST_REPORT_SCHEMA,
@@ -108,9 +109,7 @@ test("runLearnWave: the composed task carries the manifest path, bundle dir, and
     ],
   });
   const script = adapter.calls.spawn[0]?.workflowScript ?? "";
-  const start = script.indexOf("runs.all(") + "runs.all(".length;
-  const end = script.indexOf(");\nreturn");
-  const items = JSON.parse(script.slice(start, end)) as Array<{ key: string; task: string }>;
+  const items = waveScriptItems(script) as Array<{ key: string; task: string }>;
   const deviations = items.find((i) => i.key === "session-deviations");
   assert.ok(deviations !== undefined);
   assert.match(deviations.task, /angle: session-deviations/);

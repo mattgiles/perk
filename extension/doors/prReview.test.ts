@@ -7,18 +7,16 @@
 // `extension/waves/prReviewWave.test.ts` — the guidance here carries judgment only.
 
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { basename, join } from "node:path";
+import { mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { test } from "node:test";
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { runScratchDir } from "../substrate/cache.ts";
-import { fakePerk, fakePerkRouter, loadPerkSession, scaffoldRepo } from "../testing/harness.ts";
 import {
-  WAVE_RPC_PROTOCOL_VERSION,
-  WAVE_RPC_REPLY_EVENT_PREFIX,
-  WAVE_RPC_REQUEST_EVENT,
-} from "../waves/rpcAdapter.ts";
+  createFakeSubagents,
+  type FakeSubagents,
+  waveScriptItems,
+} from "../testing/fakeSubagents.ts";
+import { fakePerk, fakePerkRouter, loadPerkSession, scaffoldRepo } from "../testing/harness.ts";
 import { decodePostParams, decodeWaveParams, prReviewGuidance } from "./prReview.ts";
 
 // --- prReviewGuidance: judgment-bearing inputs over the flow-scoped wave tool ----------------
@@ -210,11 +208,6 @@ test("decodePostParams rejects a missing/invalid verdict or summary", () => {
 
 // --- run_pr_review_wave: the flow tool over a fake pi-subagents RPC responder ----------------
 
-/** The spawn params the fake responder observes (the tool-boundary threading assertions). */
-interface SpawnSink {
-  spawns: { workflowScript?: string; model?: string; outputSchema?: unknown }[];
-}
-
 function installPonytailReviewSkill(cwd: string): void {
   const root = join(cwd, ".pi", "npm", "node_modules", "@dietrichgebert", "ponytail");
   const skillDir = join(root, "skills", "ponytail-review");
@@ -228,84 +221,21 @@ function installPonytailReviewSkill(cwd: string): void {
 }
 
 /**
- * A fake pi-subagents responder bound as a bus peer (the fakePlannotator pattern): answers
- * ping/spawn on `pi.events` with the v1 envelope, writes a terminal `status.json` carrying one
- * schema-valid report per lane into a real temp `asyncDir`, and emits the advertised completion
- * event. Each spawn's params land in `sink` so tests can pin what the tool threaded onto the
- * wave (configured model, directive-suffixed lane tasks). Offline like everything here.
+ * The shared fake pi-subagents responder in dynamic mode: parse the module-rendered script's
+ * lane keys and answer each with a schema-valid clean report. Offline like everything here.
  */
-function fakeSubagentsResponder(sink: SpawnSink): (pi: ExtensionAPI) => void {
-  return (pi) => {
-    pi.events.on(WAVE_RPC_REQUEST_EVENT, (raw) => {
-      const request = raw as {
-        requestId: string;
-        method: string;
-        params?: { workflowScript?: string; model?: string; outputSchema?: unknown };
-      };
-      const reply = (payload: Record<string, unknown>): void => {
-        pi.events.emit(`${WAVE_RPC_REPLY_EVENT_PREFIX}${request.requestId}`, {
-          version: WAVE_RPC_PROTOCOL_VERSION,
-          requestId: request.requestId,
-          method: request.method,
-          ...payload,
-        });
-      };
-      if (request.method === "ping") {
-        reply({
-          success: true,
-          data: {
-            version: WAVE_RPC_PROTOCOL_VERSION,
-            methods: ["ping", "status", "spawn", "steer", "interrupt", "stop", "resume"],
-            capabilities: { asyncSpawn: true },
-            events: { asyncComplete: "subagent:async-complete" },
-            session: {},
-          },
-        });
-        return;
-      }
-      if (request.method === "spawn") {
-        if (request.params !== undefined) sink.spawns.push(request.params);
-        // Parse the module-rendered script's lane keys and answer each with a schema-valid report.
-        const script = request.params?.workflowScript ?? "";
-        const start = script.indexOf("runs.all(") + "runs.all(".length;
-        const end = script.indexOf(");\nreturn");
-        const lanes = JSON.parse(script.slice(start, end)) as Array<{ key: string }>;
-        const asyncDir = mkdtempSync(join(tmpdir(), "perk-pr-review-e2e-"));
-        writeFileSync(
-          join(asyncDir, "status.json"),
-          JSON.stringify({
-            runId: basename(asyncDir),
-            mode: "workflow",
-            state: "complete",
-            startedAt: 0,
-            workflow: {
-              value: lanes.map(({ key }) => ({
-                key,
-                ok: true,
-                error: null,
-                report: { angle: key, verdict: "clean", findings: [], fyi: [] },
-              })),
-            },
-          }),
-        );
-        reply({
-          success: true,
-          data: { text: "Started async run.", details: { asyncId: basename(asyncDir), asyncDir } },
-        });
-        // Emitted right after the reply — the runner subscribed before spawn and buffers.
-        pi.events.emit("subagent:async-complete", {
-          id: basename(asyncDir),
-          asyncDir,
-          state: "complete",
-        });
-        return;
-      }
-      reply({
-        success: false,
-        error: { code: "not_found", message: `fake responder rejects ${request.method}` },
-      });
-    });
-  };
+function prReviewFake(): FakeSubagents {
+  return createFakeSubagents([
+    {
+      executeScript: async (script) =>
+        waveScriptItems(script).map(({ key }) => ({
+          key,
+          ok: true,
+          error: null,
+          report: { angle: key, verdict: "clean", findings: [], fyi: [] },
+        })),
+    },
+  ]);
 }
 
 const PR_URL_JSON = {
@@ -367,11 +297,11 @@ test("tool: run_pr_review_wave end-to-end happy path; a following clean post is 
     "pr url": { json: PR_URL_JSON },
     "pr review-post": { json: JSON.parse(CLEAN_JSON) },
   });
-  const sink: SpawnSink = { spawns: [] };
+  const fake = prReviewFake();
   const h = await loadPerkSession({
     cwd,
     env: { PERK_RUN_ID: "01RID", PERK_BIN: bin },
-    extraExtensions: [fakeSubagentsResponder(sink)],
+    extraExtensions: [fake.extension],
   });
   try {
     const result = await h.invokeTool("run_pr_review_wave", {
@@ -421,12 +351,13 @@ test("tool: run_pr_review_wave end-to-end happy path; a following clean post is 
     assert.equal(text.includes("attempts"), false, "receipts never enter the model-facing prose");
     // The tool-boundary threading pins: the configured model and the operator directive both
     // reached the actual spawn (config → execute → runPrReviewWave → adapter).
-    assert.equal(sink.spawns.length, 1);
-    assert.equal(sink.spawns[0]?.model, "test-wave-model");
-    const script = sink.spawns[0]?.workflowScript ?? "";
-    const lanes = JSON.parse(
-      script.slice(script.indexOf("runs.all(") + "runs.all(".length, script.indexOf(");\nreturn")),
-    ) as Array<{ key: string; task: string; skill?: string }>;
+    assert.equal(fake.spawns.length, 1);
+    assert.equal(fake.spawns[0]?.model, "test-wave-model");
+    const lanes = waveScriptItems(String(fake.spawns[0]?.workflowScript ?? "")) as Array<{
+      key: string;
+      task: string;
+      skill?: string;
+    }>;
     assert.equal(lanes.length, 3);
     for (const lane of lanes) {
       assert.match(lane.task, /Operator focus \(DATA from the human/);
@@ -465,11 +396,10 @@ test("tool: a new target-resolution failure invalidates prior evidence for both 
   const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
   installPonytailReviewSkill(cwd);
   fakePerkRouter(cwd, { "pr url": { json: PR_URL_JSON } });
-  const sink: SpawnSink = { spawns: [] };
   const h = await loadPerkSession({
     cwd,
     env: { PERK_RUN_ID: "01RID", PERK_BIN: join(cwd, "fake-perk.sh") },
-    extraExtensions: [fakeSubagentsResponder(sink)],
+    extraExtensions: [prReviewFake().extension],
   });
   try {
     const recorded = await h.invokeTool("run_pr_review_wave", {
@@ -506,7 +436,7 @@ test("tool: bad wave input does not discard a prior recorded outcome", async () 
   const h = await loadPerkSession({
     cwd,
     env: { PERK_RUN_ID: "01RID", PERK_BIN: bin },
-    extraExtensions: [fakeSubagentsResponder({ spawns: [] })],
+    extraExtensions: [prReviewFake().extension],
   });
   try {
     await h.invokeTool("run_pr_review_wave", { angles: ["plan-fidelity", "tests"] });
@@ -536,7 +466,7 @@ test("tool: mutation target drift returns stale_review_wave and invalidates the 
   const h = await loadPerkSession({
     cwd,
     env: { PERK_RUN_ID: "01RID", PERK_BIN: bin },
-    extraExtensions: [fakeSubagentsResponder({ spawns: [] })],
+    extraExtensions: [prReviewFake().extension],
   });
   try {
     await h.invokeTool("run_pr_review_wave", { angles: ["plan-fidelity", "tests"] });
@@ -565,7 +495,7 @@ test("tool: a transient post failure retains the same recorded outcome for retry
   const h = await loadPerkSession({
     cwd,
     env: { PERK_RUN_ID: "01RID", PERK_BIN: join(cwd, "fake-perk.sh") },
-    extraExtensions: [fakeSubagentsResponder({ spawns: [] })],
+    extraExtensions: [prReviewFake().extension],
   });
   try {
     await h.invokeTool("run_pr_review_wave", { angles: ["plan-fidelity", "tests"] });

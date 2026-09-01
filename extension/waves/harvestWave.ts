@@ -10,7 +10,12 @@
 
 import { existsSync, realpathSync } from "node:fs";
 import { isAbsolute, join, posix, sep } from "node:path";
-import { runReportWave, type WaveAdapter, type WaveLane, type WaveResult } from "./reportWave.ts";
+import {
+  type ReportAssignment,
+  runReportWave,
+  type WaveAdapter,
+  type WaveResult,
+} from "./reportWave.ts";
 
 /** Mirrors `perk/learn/harvest.py::MANIFEST_FILENAME` (contracts.md §8.48). */
 export const HARVEST_MANIFEST_FILENAME = "harvest-manifest.json";
@@ -263,7 +268,10 @@ function laneTask(id: string, manifestPath: string): string {
 }
 
 /** Build the wave lanes: one `perk.harvest-analyst` lane per manifest lane, keyed by lane id. */
-export function buildHarvestLanes(manifest: HarvestManifest, manifestPath: string): WaveLane[] {
+export function buildHarvestLanes(
+  manifest: HarvestManifest,
+  manifestPath: string,
+): ReportAssignment[] {
   return manifest.lanes.map((lane) => ({
     key: lane.id,
     label: lane.id,
@@ -288,7 +296,7 @@ export async function runHarvestWave(
     adapter,
     {
       flow: "harvest",
-      lanes: buildHarvestLanes(opts.manifest, opts.manifestPath),
+      assignments: buildHarvestLanes(opts.manifest, opts.manifestPath),
       outputSchema: HARVEST_ANALYST_REPORT_SCHEMA,
       completeness: "best-effort",
       ...(opts.model !== undefined ? { model: opts.model } : {}),

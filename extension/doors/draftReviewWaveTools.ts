@@ -9,12 +9,14 @@
 //
 // THE DOOR-PRIMED CONTEXT (the trust posture difference from the PR pair): the wave's inputs —
 // the draft under review, its type, and the optional human-supplied custom-angle definition —
-// are MODULE STATE primed by the door (the `primeAnnotationSurface` discipline, sibling of
-// `annotationPush.ts`'s surface handle), never tool params. `start_draft_review_wave` takes
-// ONLY `{angles}` and refuses unprimed (`no_draft_context`), so the model can never substitute
-// a transcript/arbitrary draft or invent a custom lane: reviewed bytes == browsed bytes ==
-// wave bytes by construction. There is likewise no `pr`/`worktree`/`directive` param — the
-// custom lane IS the draft doors' user-input channel, and it rides the primed context.
+// are REGISTRATION-OWNED STATE primed by the door (the `primeAnnotationSurface` discipline,
+// sibling of `annotationPush.ts`'s surface handle), never tool params: one
+// `DraftReviewWaveState` instance per activation, created in `index.ts` and threaded to the two
+// browser doors and this tool pair. `start_draft_review_wave` takes ONLY `{angles}` and refuses
+// unprimed (`no_draft_context`), so the model can never substitute a transcript/arbitrary draft
+// or invent a custom lane: reviewed bytes == browsed bytes == wave bytes by construction. There
+// is likewise no `pr`/`worktree`/`directive` param — the custom lane IS the draft doors'
+// user-input channel, and it rides the primed context.
 //
 // ZERO retries — deliberate (the draft doors' honest-incompleteness contract; the pr-review
 // bounded-retry policy does not carry over). Failure posture: LOUD soft-fail with the attempt
@@ -39,16 +41,14 @@ import {
   type WaveFailure,
   type WaveLaunchManifest,
   type WaveReport,
-  type WaveResult,
-  type WaveRunHandle,
   type WaveSpec,
 } from "../waves/reportWave.ts";
 import { createRpcWaveAdapter } from "../waves/rpcAdapter.ts";
-import { collectGraceMs } from "./reviewWaveTools.ts";
+import { collectGraceMs, collectPending, type PendingWaveState } from "./pendingWave.ts";
 
 // ------------------------------------------------------------------ the door-primed context
 
-/** The door-primed draft-review inputs (module state — never tool params). */
+/** The door-primed draft-review inputs (registration-owned state — never tool params). */
 export interface DraftReviewContext {
   /** The draft kind under review (the wave lane tasks are parameterized on it). */
   draftType: "plan" | "objective";
@@ -58,19 +58,21 @@ export interface DraftReviewContext {
   custom?: string;
 }
 
-let context: DraftReviewContext | null = null;
-
 /**
- * The session's ONE pending (launched, uncollected) draft-review wave (the `reviewWaveTools.ts`
- * pending-slot mirror): `start_draft_review_wave` refuses while it is set, and
- * `collect_draft_review_wave` clears it on settle. `laneKeys` includes the `custom` lane when
- * one was primed — the covered computation needs it.
+ * The draft pair's per-activation state: the ONE pending (launched, uncollected) draft-review
+ * wave (the `reviewWaveTools.ts` pending-slot mirror — `start_draft_review_wave` refuses while
+ * it is set, and `collect_draft_review_wave` drains it; `keys` includes the `custom` lane when
+ * one was primed — the covered computation needs it) PLUS the door-primed context slot (same
+ * defect class, same lifetime — one browser session's inputs, superseded by the next prime).
  */
-let pending: {
-  laneKeys: string[];
-  handle: WaveRunHandle;
-  result: Promise<WaveResult>;
-} | null = null;
+export interface DraftReviewWaveState extends PendingWaveState<string> {
+  context: DraftReviewContext | null;
+}
+
+/** Create a fresh draft-review state (plain object — no Pi calls; safe anywhere in activation). */
+export function createDraftReviewWaveState(): DraftReviewWaveState {
+  return { pending: null, context: null };
+}
 
 /**
  * Prime the draft-review context for a new browser session (door-owned; called beside
@@ -78,18 +80,24 @@ let pending: {
  * slot too — a new browser session supersedes everything (the `primeAnnotationSurface`
  * discipline).
  */
-export function primeDraftReviewContext(next: DraftReviewContext): void {
-  context = {
+export function primeDraftReviewContext(
+  state: DraftReviewWaveState,
+  next: DraftReviewContext,
+): void {
+  state.context = {
     draftType: next.draftType,
     draft: next.draft,
     ...(next.custom !== undefined ? { custom: next.custom } : {}),
   };
-  pending = null;
+  state.pending = null;
 }
 
-/** Drop the context (door-owned; called when the bridge settles AND on the degrade arm). */
-export function clearDraftReviewContext(): void {
-  context = null;
+/**
+ * Drop the context (door-owned; called when the bridge settles AND on the degrade arm). A
+ * launched wave stays collectable — only the primed inputs die with the browser session.
+ */
+export function clearDraftReviewContext(state: DraftReviewWaveState): void {
+  state.context = null;
 }
 
 // ------------------------------------------------------------------------ params + decode
@@ -144,14 +152,16 @@ export type StartDraftReviewWaveResult = Result<
 >;
 
 /**
- * The `start_draft_review_wave` execute core, extracted for testability with the adapter and
- * report target as injected structural slices (the `executeStartReviewWave` mirror). Assumes
- * DECODED params and a caller-resolved `model`. An unprimed context is a loud soft-fail
- * (`no_draft_context` — the door primes the draft under review); a launch failure (the
- * pre-spawn `ok: false` arm) is a loud soft-fail whose `error_type` is the wave failure reason;
- * success stores the pending wave and returns the run handle so the parent holds the relay loop.
+ * The `start_draft_review_wave` execute core, extracted for testability with the
+ * per-registration state, the adapter, and the report target as injected structural slices
+ * (the `executeStartReviewWave` mirror). Assumes DECODED params and a caller-resolved `model`.
+ * An unprimed context is a loud soft-fail (`no_draft_context` — the door primes the draft under
+ * review); a launch failure (the pre-spawn `ok: false` arm) is a loud soft-fail whose
+ * `error_type` is the wave failure reason; success stores the pending wave and returns the run
+ * handle so the parent holds the relay loop.
  */
 export async function executeStartDraftReviewWave(
+  state: DraftReviewWaveState,
   adapter: WaveAdapter,
   target: ReportTarget,
   opts: {
@@ -162,6 +172,7 @@ export async function executeStartDraftReviewWave(
   },
 ): Promise<StartDraftReviewWaveResult> {
   const fail = failFor<{ attempts: WaveAttemptReceipt[] }>(target, "start_draft_review_wave");
+  const context = state.context;
   if (context === null) {
     return fail(
       "no draft-review context is primed — run /plan-review-browser or /objective-review-browser " +
@@ -169,17 +180,13 @@ export async function executeStartDraftReviewWave(
       "no_draft_context",
     );
   }
-  if (pending !== null) {
+  if (state.pending !== null) {
     return fail(
       "a draft-review wave is already running/uncollected — call collect_draft_review_wave first",
       "wave_active",
     );
   }
-  const laneKeys = [
-    ...opts.angles,
-    ...(context.custom !== undefined ? ["custom"] : []),
-    "ponytail",
-  ];
+  const keys = [...opts.angles, ...(context.custom !== undefined ? ["custom"] : []), "ponytail"];
   const start = await startDraftReviewWave(adapter, {
     angles: opts.angles,
     draftType: context.draftType,
@@ -197,14 +204,14 @@ export async function executeStartDraftReviewWave(
       start.result.failures.find((f) => f.key === null) ??
       start.launch.preflightFailures[0] ??
       start.result.failures[0];
-    const attempts = [toAttemptReceipt("draft-review", 1, laneKeys, start.result.receipt)];
+    const attempts = [toAttemptReceipt("draft-review", 1, keys, start.result.receipt)];
     return fail(
       failure?.detail ?? "the draft-review wave failed to launch without detail",
       failure?.reason ?? "spawn-failed",
       { attempts },
     );
   }
-  pending = { laneKeys, handle: start.handle, result: start.result };
+  state.pending = { keys: [...keys], result: start.result };
   const skipped = start.launch.preflightFailures
     .map((failure) => `${failure.key}: ${failure.reason} — ${failure.detail}`)
     .join("; ");
@@ -232,38 +239,28 @@ export interface CollectDraftReviewWaveOk {
   attempts: WaveAttemptReceipt[];
 }
 
-const STILL_RUNNING = Symbol("draft-wave-still-running");
-
 /**
- * The `collect_draft_review_wave` execute core (`graceMs` injectable for tests; the
- * `executeCollectReviewWave` mirror). No pending wave ⇒ `no_wave`; unsettled after the grace ⇒
- * `wave_running` with the pending wave RETAINED; settled ⇒ clear the pending wave and return the
- * typed aggregate — an incomplete wave stays an ok result carrying `complete: false` plus a
- * loud warning naming the uncovered lane(s) (honest incompleteness for the human triage, never
- * papered over — zero retries by design).
+ * The `collect_draft_review_wave` execute core over the per-registration state (`graceMs`
+ * injectable for tests; the `executeCollectReviewWave` mirror). No pending wave ⇒ `no_wave`;
+ * unsettled after the grace ⇒ `wave_running` with the pending wave RETAINED; settled ⇒ the
+ * shared identity-guarded drain returns the typed aggregate — an incomplete wave stays an ok
+ * result carrying `complete: false` plus a loud warning naming the uncovered lane(s) (honest
+ * incompleteness for the human triage, never papered over — zero retries by design).
  */
 export async function executeCollectDraftReviewWave(
+  state: DraftReviewWaveState,
   target: ReportTarget,
   opts?: { graceMs?: number },
 ): Promise<Result<CollectDraftReviewWaveOk>> {
   const fail = failFor(target, "collect_draft_review_wave");
-  if (pending === null) {
+  const collected = await collectPending(state, opts?.graceMs ?? collectGraceMs());
+  if (collected.kind === "none") {
     return fail(
       "no draft-review wave is running — launch one with start_draft_review_wave",
       "no_wave",
     );
   }
-  const wave = pending;
-  const graceMs = opts?.graceMs ?? collectGraceMs();
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  const raced = await Promise.race([
-    wave.result,
-    new Promise<typeof STILL_RUNNING>((resolve) => {
-      timer = setTimeout(() => resolve(STILL_RUNNING), graceMs);
-    }),
-  ]);
-  clearTimeout(timer);
-  if (raced === STILL_RUNNING) {
+  if (collected.kind === "running") {
     // Pending is RETAINED — the wave's bound is the module-owned timeout, and a later collect
     // drains whatever it settles into.
     return fail(
@@ -271,16 +268,15 @@ export async function executeCollectDraftReviewWave(
       "wave_running",
     );
   }
-  pending = null;
-  const result = raced;
+  const { keys, result } = collected;
   // Covered keys in lane order (the reports already normalize in lane order).
   const reportKeys = new Set(result.reports.map((r) => r.key));
-  const covered = wave.laneKeys.filter((lane) => reportKeys.has(lane));
-  const attempts = [toAttemptReceipt("draft-review", 1, wave.laneKeys, result.receipt)];
+  const covered = keys.filter((lane) => reportKeys.has(lane));
+  const attempts = [toAttemptReceipt("draft-review", 1, [...keys], result.receipt)];
   if (!result.complete) {
     // Loud degrade — the human sees the uncovered lane(s) during triage, never a papered-over
     // partial review (zero retries by design).
-    const uncovered = wave.laneKeys.filter((lane) => !reportKeys.has(lane));
+    const uncovered = keys.filter((lane) => !reportKeys.has(lane));
     const reasons = result.failures
       .map((f) => `${f.key ?? "wave"}: ${f.reason} — ${f.detail}`)
       .join("; ");
@@ -293,7 +289,7 @@ export async function executeCollectDraftReviewWave(
   }
   const headline =
     `Draft-review wave ${result.complete ? "complete" : "INCOMPLETE"}: covered ` +
-    `${covered.length}/${wave.laneKeys.length} lane(s).`;
+    `${covered.length}/${keys.length} lane(s).`;
   const aggregate = {
     complete: result.complete,
     covered,
@@ -323,15 +319,13 @@ const COLLECT_TOOL_GUIDELINES = [
 ];
 
 /**
- * Register the draft-review-wave tool pair and reset the session's pending-wave AND primed
- * context state (a fresh registration is a fresh session). Wired in `extension/index.ts` beside
- * `registerReviewWaveTools`; flow-scoped via the door-primed context + the pending-wave guard.
+ * Register the draft-review-wave tool pair over the activation-owned state (created fresh in
+ * `index.ts` and shared with the two browser doors — a fresh activation IS the reset: no wave
+ * pending, no context primed, and two bound sessions in one process never share a slot). Wired
+ * in `extension/index.ts` beside `registerReviewWaveTools`; flow-scoped via the door-primed
+ * context + the pending-wave guard in the execute cores.
  */
-export function registerDraftReviewWaveTools(pi: ExtensionAPI): void {
-  // A fresh registration is a fresh session — no wave pending, no context primed.
-  pending = null;
-  context = null;
-
+export function registerDraftReviewWaveTools(pi: ExtensionAPI, state: DraftReviewWaveState): void {
   pi.registerTool({
     name: "start_draft_review_wave",
     label: "Start draft review wave",
@@ -382,7 +376,7 @@ export function registerDraftReviewWaveTools(pi: ExtensionAPI): void {
       // The per-call `signal` is deliberately NOT threaded into the wave: the wave outlives the
       // tool call by design (the parent returns and holds the relay loop); its bound is the
       // module-owned timeout (the spawned `timeoutMs` is the orphan insurance).
-      return executeStartDraftReviewWave(createRpcWaveAdapter(pi.events), ctx, {
+      return executeStartDraftReviewWave(state, createRpcWaveAdapter(pi.events), ctx, {
         ...decoded,
         ...(model !== undefined ? { model } : {}),
         requiredSkillPreflight: (requirement) => preflightPonytailSkill(requirement, ctx.cwd),
@@ -406,7 +400,7 @@ export function registerDraftReviewWaveTools(pi: ExtensionAPI): void {
       properties: {},
     },
     async execute(_toolCallId, _params, _signal, _onUpdate, ctx) {
-      return executeCollectDraftReviewWave(ctx);
+      return executeCollectDraftReviewWave(state, ctx);
     },
   });
 }

@@ -43,11 +43,10 @@ import {
   type WaveFailure,
   type WaveLaunchManifest,
   type WaveReport,
-  type WaveResult,
-  type WaveRunHandle,
   type WaveSpec,
 } from "../waves/reportWave.ts";
 import { createRpcWaveAdapter } from "../waves/rpcAdapter.ts";
+import { collectGraceMs, collectPending, type PendingWaveState } from "./pendingWave.ts";
 
 const MANDATORY_ANGLE: AdversarialReviewAngle = "claimed-intent";
 
@@ -102,32 +101,6 @@ export function decodeStartReviewWaveParams(params: unknown): StartReviewWavePar
   };
 }
 
-/**
- * The grace `collect_review_wave` allows a not-yet-settled wave before soft-failing
- * `wave_running`: long enough to absorb the completion-event-vs-`subagent_wait` wake race,
- * short enough that an early call never stalls the relay loop. Overridable for tests via
- * PERK_WAVE_COLLECT_GRACE_MS.
- */
-export const WAVE_COLLECT_GRACE_MS = 15_000;
-
-/** One knob, shared by the review-wave AND draft-review-wave collect cores (one env override). */
-export function collectGraceMs(): number {
-  const raw = Number(process.env.PERK_WAVE_COLLECT_GRACE_MS ?? "");
-  return Number.isFinite(raw) && raw > 0 ? raw : WAVE_COLLECT_GRACE_MS;
-}
-
-/**
- * The session's ONE pending (launched, uncollected) review wave (the `lastWave` session-scoped
- * precedent in `prReview.ts`): `start_review_wave` refuses while it is set, and
- * `collect_review_wave` clears it on settle. `registerReviewWaveTools` resets it — a fresh
- * registration is a fresh session.
- */
-let pending: {
-  angles: string[];
-  handle: WaveRunHandle;
-  result: Promise<WaveResult>;
-} | null = null;
-
 /** The `start_review_wave` ok-arm details (the relay-loop handle the parent waits on). */
 export interface StartReviewWaveOk {
   asyncId: string;
@@ -139,14 +112,17 @@ export interface StartReviewWaveOk {
 export type StartReviewWaveResult = Result<StartReviewWaveOk, { attempts: WaveAttemptReceipt[] }>;
 
 /**
- * The `start_review_wave` execute core, extracted for testability with the adapter and report
- * target as injected structural slices (the `executeLearnWave` pattern). Assumes DECODED params
+ * The `start_review_wave` execute core, extracted for testability with the session's
+ * pending-wave state, the adapter, and the report target as injected structural slices (the
+ * `executeLearnWave` pattern; `state` is the per-registration slot — `start_review_wave`
+ * refuses while it holds a wave, `collect_review_wave` drains it). Assumes DECODED params
  * (the registered tool runs `decodeStartReviewWaveParams` first) and a caller-resolved `model`.
  * Launch failure (the pre-spawn `ok: false` arm — `unavailable`/`spawn-failed`/`cancelled`) is a
  * loud soft-fail whose `error_type` is the wave failure reason; success stores the pending wave
  * and returns the run handle so the parent holds the relay loop.
  */
 export async function executeStartReviewWave(
+  state: PendingWaveState<string>,
   adapter: WaveAdapter,
   target: ReportTarget,
   opts: {
@@ -161,7 +137,7 @@ export async function executeStartReviewWave(
   },
 ): Promise<StartReviewWaveResult> {
   const fail = failFor<{ attempts: WaveAttemptReceipt[] }>(target, "start_review_wave");
-  if (pending !== null) {
+  if (state.pending !== null) {
     return fail(
       "a review wave is already running/uncollected — call collect_review_wave first",
       "wave_active",
@@ -195,7 +171,7 @@ export async function executeStartReviewWave(
       { attempts },
     );
   }
-  pending = { angles: effectiveAngles, handle: start.handle, result: start.result };
+  state.pending = { keys: [...effectiveAngles], result: start.result };
   const skipped = start.launch.preflightFailures
     .map((failure) => `${failure.key}: ${failure.reason} — ${failure.detail}`)
     .join("; ");
@@ -223,34 +199,25 @@ export interface CollectReviewWaveOk {
   attempts: WaveAttemptReceipt[];
 }
 
-const STILL_RUNNING = Symbol("wave-still-running");
-
 /**
- * The `collect_review_wave` execute core (`graceMs` injectable for tests). No pending wave ⇒
- * `no_wave`; unsettled after the grace ⇒ `wave_running` with the pending wave RETAINED; settled
- * ⇒ clear the pending wave and return the typed aggregate — an incomplete wave stays an ok
- * result carrying `complete: false` plus a loud warning naming the uncovered angle(s) (honest
- * incompleteness for the human triage, never papered over).
+ * The `collect_review_wave` execute core over the per-registration state (`graceMs` injectable
+ * for tests). No pending wave ⇒ `no_wave`; unsettled after the grace ⇒ `wave_running` with the
+ * pending wave RETAINED; settled ⇒ the shared identity-guarded drain returns the typed
+ * aggregate — an incomplete wave stays an ok result carrying `complete: false` plus a loud
+ * warning naming the uncovered angle(s) (honest incompleteness for the human triage, never
+ * papered over).
  */
 export async function executeCollectReviewWave(
+  state: PendingWaveState<string>,
   target: ReportTarget,
   opts?: { graceMs?: number },
 ): Promise<Result<CollectReviewWaveOk>> {
   const fail = failFor(target, "collect_review_wave");
-  if (pending === null) {
+  const collected = await collectPending(state, opts?.graceMs ?? collectGraceMs());
+  if (collected.kind === "none") {
     return fail("no review wave is running — launch one with start_review_wave", "no_wave");
   }
-  const wave = pending;
-  const graceMs = opts?.graceMs ?? collectGraceMs();
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  const raced = await Promise.race([
-    wave.result,
-    new Promise<typeof STILL_RUNNING>((resolve) => {
-      timer = setTimeout(() => resolve(STILL_RUNNING), graceMs);
-    }),
-  ]);
-  clearTimeout(timer);
-  if (raced === STILL_RUNNING) {
+  if (collected.kind === "running") {
     // Pending is RETAINED — the wave's bound is the module-owned timeout, and a later collect
     // drains whatever it settles into.
     return fail(
@@ -258,16 +225,15 @@ export async function executeCollectReviewWave(
       "wave_running",
     );
   }
-  pending = null;
-  const result = raced;
-  // Covered keys in angle-selection order (the reports already normalize in lane order).
+  const { keys: angles, result } = collected;
+  // Covered keys in angle-selection order (the reports already normalize in assignment order).
   const reportKeys = new Set(result.reports.map((r) => r.key));
-  const covered = wave.angles.filter((angle) => reportKeys.has(angle));
-  const attempts = [toAttemptReceipt("adversarial-review", 1, wave.angles, result.receipt)];
+  const covered = angles.filter((angle) => reportKeys.has(angle));
+  const attempts = [toAttemptReceipt("adversarial-review", 1, [...angles], result.receipt)];
   if (!result.complete) {
     // Loud degrade — the human sees the uncovered angle(s) during triage, never a papered-over
     // partial review.
-    const uncovered = wave.angles.filter((angle) => !reportKeys.has(angle));
+    const uncovered = angles.filter((angle) => !reportKeys.has(angle));
     const reasons = result.failures
       .map((f) => `${f.key ?? "wave"}: ${f.reason} — ${f.detail}`)
       .join("; ");
@@ -280,7 +246,7 @@ export async function executeCollectReviewWave(
   }
   const headline =
     `Review wave ${result.complete ? "complete" : "INCOMPLETE"}: covered ` +
-    `${covered.length}/${wave.angles.length} angle(s).`;
+    `${covered.length}/${angles.length} angle(s).`;
   const aggregate = {
     complete: result.complete,
     covered,
@@ -308,13 +274,13 @@ const COLLECT_TOOL_GUIDELINES = [
 ];
 
 /**
- * Register the review-wave tool pair and reset the session's pending-wave state (a fresh
- * registration is a fresh session). Wired in `extension/index.ts` beside the review-door
- * registrations; flow-scoped via the pending-wave guard above.
+ * Register the review-wave tool pair over a registration-owned pending-wave state (the fresh
+ * closure IS the reset — no wave can be pending in a new session, and two bound sessions in one
+ * process never share a slot). Wired in `extension/index.ts` beside the review-door
+ * registrations; flow-scoped via the pending-wave guard in the execute cores.
  */
 export function registerReviewWaveTools(pi: ExtensionAPI): void {
-  // A fresh registration is a fresh session — no wave can be pending.
-  pending = null;
+  const state: PendingWaveState<string> = { pending: null };
 
   pi.registerTool({
     name: "start_review_wave",
@@ -388,7 +354,7 @@ export function registerReviewWaveTools(pi: ExtensionAPI): void {
       // The per-call `signal` is deliberately NOT threaded into the wave: the wave outlives the
       // tool call by design (the parent returns and holds the relay loop); its bound is the
       // module-owned timeout (the spawned `timeoutMs` is the orphan insurance).
-      return executeStartReviewWave(createRpcWaveAdapter(pi.events), ctx, {
+      return executeStartReviewWave(state, createRpcWaveAdapter(pi.events), ctx, {
         ...decoded,
         ...(model !== undefined ? { model } : {}),
         requiredSkillPreflight: (requirement) => preflightPonytailSkill(requirement, ctx.cwd),
@@ -412,7 +378,7 @@ export function registerReviewWaveTools(pi: ExtensionAPI): void {
       properties: {},
     },
     async execute(_toolCallId, _params, _signal, _onUpdate, ctx) {
-      return executeCollectReviewWave(ctx);
+      return executeCollectReviewWave(state, ctx);
     },
   });
 }

@@ -1,8 +1,9 @@
 // The objective-plan factory's OPTIONAL explore step as a per-flow wave entrypoint over the
-// shared report-wave runner: the ONE `perk.objective-explorer` lane as CODE. The explorer report
-// schema was previously a shared prompt include the parent model had to hand-transcribe onto a
-// borrowed `subagent` call (the same prompt-drift risk the /address classify step carried); this
-// module makes the schema and the lane/task composition module constants, delegating
+// shared report-wave runner: the ONE `perk.objective-explorer` assignment as CODE. The explorer
+// report schema was previously a shared prompt include the parent model had to hand-transcribe
+// onto a borrowed `subagent` call (the same prompt-drift risk the /address classify step
+// carried); this module makes the schema and the assignment/task composition module constants,
+// delegating
 // spawn/timeout/aggregate mechanics to `runReportWave` under the `strict` completeness policy.
 // No retry — the flow's posture on failure is "explore directly instead" (guidance-owned).
 // `node`/`description`/`focus` are model-relayed and embedded in the code-owned task as
@@ -13,12 +14,12 @@ import { runReportWave, type WaveAdapter, type WaveResult } from "./reportWave.t
 /** The flow name — feeds `WaveSpec.flow` AND the door's `toAttemptReceipt` call. */
 export const OBJECTIVE_EXPLORER_FLOW = "objective-explorer";
 
-/** The single lane's stable key. */
-export const EXPLORE_LANE_KEY = "explore";
+/** The single assignment's stable key. */
+export const EXPLORE_ASSIGNMENT_KEY = "explore";
 
 /**
  * The explorer report schema (the workflow-level `outputSchema` — the engine injects a
- * `structured_output` tool and fails the lane on a missing/invalid report): closed shapes, all
+ * `structured_output` tool and fails the assignment on a missing/invalid report): closed shapes, all
  * six root keys required. Same vocabulary as the `perk.objective-explorer` agent def's report
  * contract (the def↔schema lockstep test).
  */
@@ -73,9 +74,9 @@ export interface ObjectiveExplorerWaveOptions {
 }
 
 /**
- * Compose the single lane's task text IN CODE (the prompt-drift-proof half of the migration):
- * the node id + the fenced untrusted node text, plus the optional focus. The agent def requires
- * the node id and a description of the work to reach the child.
+ * Compose the single assignment's task text IN CODE (the prompt-drift-proof half of the
+ * migration): the node id + the fenced untrusted node text, plus the optional focus. The agent
+ * def requires the node id and a description of the work to reach the child.
  */
 export function explorerLaneTask(node: string, description: string, focus?: string): string {
   return [
@@ -89,9 +90,9 @@ export function explorerLaneTask(node: string, description: string, focus?: stri
 }
 
 /**
- * Run the objective-explorer wave: ONE fresh-context `perk.objective-explorer` lane over the
- * code-owned task, `strict` completeness, no retry, module-default timeout. Returns the runner's
- * `WaveResult` unchanged — the only projection lives in the tool.
+ * Run the objective-explorer wave: ONE fresh-context `perk.objective-explorer` assignment over
+ * the code-owned task, `strict` completeness, no retry, module-default timeout. Returns the
+ * runner's `WaveResult` unchanged — the only projection lives in the tool.
  */
 export async function runObjectiveExplorerWave(
   adapter: WaveAdapter,
@@ -101,10 +102,10 @@ export async function runObjectiveExplorerWave(
     adapter,
     {
       flow: OBJECTIVE_EXPLORER_FLOW,
-      lanes: [
+      assignments: [
         {
-          key: EXPLORE_LANE_KEY,
-          label: EXPLORE_LANE_KEY,
+          key: EXPLORE_ASSIGNMENT_KEY,
+          label: EXPLORE_ASSIGNMENT_KEY,
           agent: "perk.objective-explorer",
           phase: "objective-plan",
           task: explorerLaneTask(opts.node, opts.description, opts.focus),

@@ -23,12 +23,8 @@ import {
   decodeDreamAnalystReport,
   decodeStringArray,
 } from "./dreamWave.ts";
-import {
-  runReportWave,
-  type WaveAdapter,
-  type WaveFailureReason,
-  type WaveScriptReceipt,
-} from "./reportWave.ts";
+import { runReportWave, type WaveAdapter, type WaveFailureReason } from "./reportWave.ts";
+import type { WaveScriptReceipt } from "./transport.ts";
 
 /**
  * The three fixed reducer angles — FIXED ORDER everywhere: the lane identities
@@ -97,7 +93,7 @@ export interface DreamProposal {
  * lanes carrying the re-decoded compact analyst reports (pretty-printed JSON + trailing
  * newline; `bytes` = UTF-8 `Buffer.byteLength`). Caller preconditions (discharged by the door
  * and NOT re-checked here): the first wave was COMPLETE, so `analyses` covers the manifest's
- * lanes exactly and is already in manifest lane order — the runner normalizes to `spec.lanes`
+ * lanes exactly and is already in manifest lane order — the runner normalizes to `spec.assignments`
  * order, `buildDreamLanes` plans in manifest order, and `decodeDreamAnalystReport` normalizes
  * each report's docs to manifest lane-doc order, so no re-sort layer exists here.
  */
@@ -649,7 +645,7 @@ export async function runDreamReducerWave(
     adapter,
     {
       flow: "dream-reducer",
-      lanes: DREAM_REDUCER_ANGLES.map((angle) => ({
+      assignments: DREAM_REDUCER_ANGLES.map((angle) => ({
         key: angle,
         label: angle,
         agent: "perk.dream-reducer",

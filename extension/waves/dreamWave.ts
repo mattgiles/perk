@@ -14,12 +14,12 @@
 import { posix } from "node:path";
 import { lexicalContainmentError } from "./harvestWave.ts";
 import {
+  type ReportAssignment,
   runReportWave,
   type WaveAdapter,
   type WaveFailureReason,
-  type WaveLane,
-  type WaveScriptReceipt,
 } from "./reportWave.ts";
+import type { WaveScriptReceipt } from "./transport.ts";
 
 /** The run-scoped dream-manifest filename — the TS mirror of the Python §8.59 literal (the
  * `HARVEST_MANIFEST_FILENAME` precedent; no cross-plane codegen). */
@@ -342,7 +342,7 @@ interface PlannedDreamLane {
   key: string;
   laneId: string;
   docPaths: string[];
-  lane: WaveLane;
+  lane: ReportAssignment;
 }
 
 /**
@@ -834,7 +834,7 @@ export interface DreamWaveOutcome {
   failures: DreamLaneFailure[];
   receipt: WaveScriptReceipt;
   /**
-   * The code-owned orchestration `WaveLane.key`s in launch order — receipt-correlation
+   * The code-owned orchestration `ReportAssignment.key`s in launch order — receipt-correlation
    * telemetry ONLY (they correlate with `receipt.children[*].key`); semantic lane identity
    * stays `DreamLaneAnalysis.lane`/`DreamLaneFailure.lane`.
    */
@@ -875,7 +875,7 @@ export async function runDreamAnalystWave(
     adapter,
     {
       flow: "dream-analyst",
-      lanes: planned.map((p) => p.lane),
+      assignments: planned.map((p) => p.lane),
       outputSchema: DREAM_ANALYST_REPORT_SCHEMA,
       completeness: "strict",
       ...(opts.model !== undefined ? { model: opts.model } : {}),
@@ -897,9 +897,9 @@ export async function runDreamAnalystWave(
   for (const waveReport of result.reports) {
     const lane = byKey.get(waveReport.key);
     if (lane === undefined) {
-      // Unreachable without upstream drift (normalizeLanes only yields requested keys), but a
-      // defensive named failure beats a crash on an untrusted aggregate. The raw key rides the
-      // detail only — it is not a lane identity.
+      // Unreachable without upstream drift (normalizeAssignments only yields requested
+      // keys), but a defensive named failure beats a crash on an untrusted aggregate. The raw
+      // key rides the detail only — it is not a lane identity.
       decodeFailures += 1;
       failures.push({
         lane: null,

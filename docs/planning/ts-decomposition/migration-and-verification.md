@@ -521,6 +521,37 @@ without losing verified state or Prompt evidence.
 Hide execution vocabulary behind the already-proven report-wave mechanism and
 move code-review policy behind typed operations.
 
+> **Status (Objective #2083, Node 5.1):** the transport-confinement half landed — realized-shape
+> notes against the sketch below:
+>
+> - **The `ReportWave.start/collect/run` + opaque `ReportWaveRef` interface is SUPERSEDED, not
+>   built** — the kept public shape is `startReportWave`/`runReportWave` over the `WaveAdapter`
+>   seam (handle + never-rejecting `result` promise). Confinement was realized as a two-tier
+>   module split instead: `waves/transport.ts` owns the adapter seam, script tier, and receipt
+>   primitives; `waves/reportWave.ts` keeps the logical tier (`ReportAssignment`, normalization,
+>   the runner) with ONE sanctioned `WaveAdapter` type re-export; `renderWaveScript`/validation
+>   went module-private. Guard Rule G (`extension/importDirectionGuard.test.ts`) enforces the
+>   exact ten rpcAdapter importers, bans outside edges into `waves/transport.ts` +
+>   `waves/memoryAdapter.ts`, and censuses raw `WAVE_RPC_`/channel tokens (tests included).
+> - **Adapter construction stays at the ten execute sites** — composition-root threading was
+>   considered and dropped at review (churn without operational gain); the confinement proof is
+>   the guard's exact-set pin, not construction placement.
+> - **The rename is core-scoped**: `WaveLane` → `ReportAssignment` (`WaveSpec.assignments`) plus
+>   caller identifiers that directly name the report-wave unit; the harvest/audit/dream flow
+>   vocabulary ("lane" as the §8.48/§8.50/§8.59–8.61 persisted-schema term) is deferred to
+>   nodes 5.2/6.x, and every runtime literal stayed byte-identical.
+> - **Pending state is per-registration**, not per wave instance: plain state objects owned by
+>   registration closures (`doors/pendingWave.ts`'s `PendingWaveState` + one shared
+>   `collectPending` with the identity-guarded clear), threaded as explicit parameters. The
+>   draft door's module-global `context` slot rode the same fix (`DraftReviewWaveState`).
+> - **The transport failure vocabulary settled as a subset union**: transport-tier
+>   `WaveRunFailureReason` (the six wave-level reasons) ⊆ logical-tier `WaveFailureReason` —
+>   structurally assignable, zero runtime mapping, and a lane-level reason on a script-run
+>   failure is now unrepresentable.
+> - Node 5.2 owns the rest: code-review typed operations, the post-state machines
+>   (`doors/prReview.ts`, `doors/annotationPush.ts`), and the phase dogfood gate (the live
+>   pi-subagents leg — the offline runner-over-real-RPC integration landed in 5.1).
+
 ### Changes
 
 - Define the public `ReportWave.start`, `collect`, and `run` interface with

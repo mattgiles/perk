@@ -33,7 +33,7 @@ import type {
   WavePing,
   WaveRunHandle,
   WaveSpawnParams,
-} from "./reportWave.ts";
+} from "./transport.ts";
 
 /** The pinned v1 request channel (pi-subagents `SUBAGENT_RPC_REQUEST_EVENT`). */
 export const WAVE_RPC_REQUEST_EVENT = "subagents:rpc:v1:request";

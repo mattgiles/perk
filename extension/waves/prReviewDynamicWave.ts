@@ -46,8 +46,8 @@ import {
   preflightPonytailSkill,
 } from "./ponytail.ts";
 import {
-  buildPonytailReviewLane,
-  buildPrReviewLanes,
+  buildPonytailReviewAssignment,
+  buildPrReviewAssignments,
   directiveSuffix,
   isPrReviewAngle,
   PR_REVIEW_ANGLES,
@@ -56,19 +56,22 @@ import {
   reviewTargetSuffix,
 } from "./prReviewWave.ts";
 import {
-  normalizeLanes,
+  normalizeAssignments,
+  type ReportAssignment,
   runReportWave,
-  runWaveScript,
   toAttemptReceipt,
   type WaveAdapter,
   type WaveAttemptReceipt,
   type WaveFailure,
-  type WaveFailureReason,
-  type WaveLane,
   type WaveReport,
-  type WaveScriptReceipt,
   type WaveSpec,
 } from "./reportWave.ts";
+import {
+  runWaveScript,
+  type WaveRunFailure,
+  type WaveRunFailureReason,
+  type WaveScriptReceipt,
+} from "./transport.ts";
 
 /** The additional-angle vocabulary (plan-fidelity is structural — never selectable/removable). */
 export type AdditionalPrReviewAngle = Exclude<PrReviewAngle, "plan-fidelity">;
@@ -215,7 +218,7 @@ export interface DynamicReviewScriptOptions {
 /**
  * Build the selector lane's task: a fixed classification instruction (the agent def owns the
  * rubric), plus — as DATA — the forced angles when present and the same uniform operator-focus
- * suffix `buildPrReviewLanes` appends to reviewer lanes.
+ * suffix `buildPrReviewAssignments` appends to reviewer lanes.
  */
 function buildSelectorTask(
   pr: number,
@@ -251,13 +254,13 @@ function buildSelectorTask(
  * reviewer default.
  */
 export function renderDynamicReviewScript(opts: DynamicReviewScriptOptions): string {
-  // Byte-identical reviewer tasks to the static flow: the map is built by the SAME lane builder
-  // (vocabulary + the uniform directive suffix) over all seven angles.
-  const lanes = buildPrReviewLanes([...ALL_ANGLES], opts.pr, opts.directive);
-  const ponytailLane = buildPonytailReviewLane(opts.pr, opts.directive);
+  // Byte-identical reviewer tasks to the static flow: the map is built by the SAME assignment
+  // builder (vocabulary + the uniform directive suffix) over all seven angles.
+  const assignments = buildPrReviewAssignments([...ALL_ANGLES], opts.pr, opts.directive);
+  const ponytailAssignment = buildPonytailReviewAssignment(opts.pr, opts.directive);
   const tasks = Object.fromEntries([
-    ...lanes.map((lane) => [lane.key, lane.task]),
-    [ponytailLane.key, ponytailLane.task],
+    ...assignments.map((assignment) => [assignment.key, assignment.task]),
+    [ponytailAssignment.key, ponytailAssignment.task],
   ]);
   const suffix = directiveSuffix(opts.directive);
   const selectorItem = {
@@ -445,7 +448,7 @@ export interface PrReviewDynamicOutcome {
 }
 
 /** The wave-level failure reasons worth one full dynamic re-run (transient, not deterministic). */
-const RETRYABLE_WAVE_REASONS: ReadonlySet<WaveFailureReason> = new Set([
+const RETRYABLE_WAVE_REASONS: ReadonlySet<WaveRunFailureReason> = new Set([
   "spawn-failed",
   "timeout",
   "run-failed",
@@ -550,7 +553,7 @@ const DYNAMIC_REQUESTED_KEYS: readonly string[] = ["plan-fidelity", "angle-selec
 
 /**
  * Enrich receipt children's `agent` via the module's deterministic mapping (the dynamic
- * script's lane keys are not `WaveLane`s the shared runner can enrich from): the selector key
+ * script's lane keys are not `ReportAssignment`s the shared runner can enrich from): the selector key
  * → the selector agent; EVERY other key → the reviewer agent — the module owns the script, so
  * every non-selector lane is a reviewer (this covers runtime custom slugs a fixed-angle check
  * cannot know).
@@ -575,7 +578,7 @@ type DynamicRun =
       failures: WaveFailure[];
       receipt: WaveScriptReceipt;
     }
-  | { kind: "wave-failure"; failure: WaveFailure; receipt: WaveScriptReceipt };
+  | { kind: "wave-failure"; failure: WaveRunFailure; receipt: WaveScriptReceipt };
 
 async function runDynamicOnce(
   adapter: WaveAdapter,
@@ -616,7 +619,7 @@ async function runDynamicOnce(
   const runnableKeys = parsed.selection.effective.filter(
     (key) => key !== "ponytail" || ponytailCheck.ok,
   );
-  const { reports, failures } = normalizeLanes(runnableKeys, parsed.lanes);
+  const { reports, failures } = normalizeAssignments(runnableKeys, parsed.lanes);
   if (!ponytailCheck.ok) {
     failures.push({
       key: "ponytail",
@@ -654,10 +657,10 @@ function outcomeOf(
 /**
  * Run the dynamic review wave: render + run the ONE dynamic script (concurrent plan-fidelity +
  * selector, in-script normalization, in-script fan-out), defensively re-validate the returned
- * `{selection, lanes}`, normalize per effective lane key under the STRICT completeness policy,
- * and apply the ONE bounded retry: failed lanes only via a static `runReportWave` (the selector
- * is never re-run), or one full dynamic re-run on a retryable wave-level failure (its selection
- * supersedes), or none on `unavailable`/`cancelled`.
+ * `{selection, lanes}`, normalize per effective key under the STRICT completeness policy, and
+ * apply the ONE bounded retry: failed assignments only via a static `runReportWave` (the
+ * selector is never re-run), or one full dynamic re-run on a retryable wave-level failure (its
+ * selection supersedes), or none on `unavailable`/`cancelled`.
  */
 export async function runPrReviewDynamicWave(
   adapter: WaveAdapter,
@@ -724,8 +727,8 @@ export async function runPrReviewDynamicWave(
   ];
   if (retryKeys.length === 0) return firstOutcome;
 
-  const retryLanes: WaveLane[] = [
-    ...buildPrReviewLanes(retryAngles, opts.pr, opts.directive),
+  const retryAssignments: ReportAssignment[] = [
+    ...buildPrReviewAssignments(retryAngles, opts.pr, opts.directive),
     ...(customRetry !== null
       ? [
           {
@@ -741,13 +744,13 @@ export async function runPrReviewDynamicWave(
           },
         ]
       : []),
-    ...(ponytailRetry ? [buildPonytailReviewLane(opts.pr, opts.directive)] : []),
+    ...(ponytailRetry ? [buildPonytailReviewAssignment(opts.pr, opts.directive)] : []),
   ];
   const staticRetry = await runReportWave(
     adapter,
     {
       flow: "pr-review-dynamic",
-      lanes: retryLanes,
+      assignments: retryAssignments,
       outputSchema: PR_REVIEW_REPORT_SCHEMA,
       completeness: "strict",
       ...(opts.reviewerModel !== undefined ? { model: opts.reviewerModel } : {}),

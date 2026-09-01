@@ -13,8 +13,8 @@
 // during triage (an `ok: false` lane is reported, never papered over), so the pr-review
 // bounded-retry policy does not carry over.
 //
-// The surface handle (URL/port) is STRUCTURALLY UNREPRESENTABLE: `buildDraftReviewLanes` has no
-// URL parameter at all, so the children can never learn the review surface — enforced by
+// The surface handle (URL/port) is STRUCTURALLY UNREPRESENTABLE: `buildDraftReviewAssignments`
+// has no URL parameter at all, so the children can never learn the review surface — enforced by
 // construction, pinned by the suite. There is likewise NO `directive` parameter: the PR doors'
 // focus-note semantics deliberately do not carry over — the custom lane IS the draft doors'
 // user-input channel.
@@ -26,10 +26,10 @@
 
 import { PONYTAIL_CORE_SKILL } from "./ponytail.ts";
 import {
+  type ReportAssignment,
   type ReportWaveStart,
   startReportWave,
   type WaveAdapter,
-  type WaveLane,
   type WaveSpec,
 } from "./reportWave.ts";
 
@@ -108,22 +108,23 @@ function laneTaskTail(draftType: "plan" | "objective", draft: string): string {
 }
 
 /**
- * Build the reviewer lanes for a selection: key = label = slug, the fixed agent/phase, and a
- * task carrying the angle opener, the draft type, and the `<untrusted_draft>`-wrapped rendered
- * draft — AND NOTHING ELSE: no URL parameter exists (the surface handle is unrepresentable by
- * construction) and no `directive` parameter exists (the custom lane is the user-input channel).
- * When `custom` is supplied, one additional lane (key = label = `"custom"`) carries the
- * human-supplied angle definition as flagged DATA. The builder stays permissive about lane
- * count — angle-selection policy (2–3 picked + optional custom) is the door/tool's concern.
+ * Build the reviewer assignments for a selection: key = label = slug, the fixed agent/phase,
+ * and a task carrying the angle opener, the draft type, and the `<untrusted_draft>`-wrapped
+ * rendered draft — AND NOTHING ELSE: no URL parameter exists (the surface handle is
+ * unrepresentable by construction) and no `directive` parameter exists (the custom lane is the
+ * user-input channel). When `custom` is supplied, one additional assignment (key = label =
+ * `"custom"`) carries the human-supplied angle definition as flagged DATA. The builder stays
+ * permissive about assignment count — angle-selection policy (2–3 picked + optional custom) is
+ * the door/tool's concern.
  */
-export function buildDraftReviewLanes(opts: {
+export function buildDraftReviewAssignments(opts: {
   angles: DraftReviewAngle[];
   custom?: string;
   draftType: "plan" | "objective";
   draft: string;
-}): WaveLane[] {
+}): ReportAssignment[] {
   const tail = laneTaskTail(opts.draftType, opts.draft);
-  const lanes: WaveLane[] = opts.angles.map((angle) => ({
+  const assignments: ReportAssignment[] = opts.angles.map((angle) => ({
     key: angle,
     label: angle,
     agent: "perk.draft-reviewer",
@@ -131,7 +132,7 @@ export function buildDraftReviewLanes(opts: {
     task: `${DRAFT_REVIEW_ANGLES[angle]}\n${tail}`,
   }));
   if (opts.custom !== undefined) {
-    lanes.push({
+    assignments.push({
       key: CUSTOM_LANE_KEY,
       label: CUSTOM_LANE_KEY,
       agent: "perk.draft-reviewer",
@@ -141,7 +142,7 @@ export function buildDraftReviewLanes(opts: {
         `for this lane): ${opts.custom}\n${tail}`,
     });
   }
-  lanes.push({
+  assignments.push({
     key: "ponytail",
     label: "ponytail",
     agent: "perk.draft-reviewer",
@@ -150,7 +151,7 @@ export function buildDraftReviewLanes(opts: {
     skill: "ponytail",
     requiredSkill: PONYTAIL_CORE_SKILL,
   });
-  return lanes;
+  return assignments;
 }
 
 export interface DraftReviewWaveOptions {
@@ -172,8 +173,8 @@ export interface DraftReviewWaveOptions {
 }
 
 /**
- * Start the draft-review wave NON-BLOCKING (the streaming sibling): build the lanes from the
- * angle vocabulary and launch under the strict completeness policy — zero retries, so an
+ * Start the draft-review wave NON-BLOCKING (the streaming sibling): build the assignments from
+ * the angle vocabulary and launch under the strict completeness policy — zero retries, so an
  * uncovered angle stays an honest, human-visible incompleteness. Returns the `startReportWave`
  * outcome: the run handle + never-rejecting `result` on success, or the normalized launch
  * failure.
@@ -186,7 +187,7 @@ export async function startDraftReviewWave(
     adapter,
     {
       flow: "draft-review",
-      lanes: buildDraftReviewLanes({
+      assignments: buildDraftReviewAssignments({
         angles: opts.angles,
         draftType: opts.draftType,
         draft: opts.draft,

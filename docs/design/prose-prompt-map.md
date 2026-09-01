@@ -929,7 +929,7 @@ Automated, selector-driven, terminal, and browser PR-review families.
 | `typescript-model-call:extension/doors/prReviewDynamic.ts:module:sendUserMessage:0` | `tool-contract` | `shipped` | [`extension/doors/prReviewDynamic.ts`](../../extension/doors/prReviewDynamic.ts) · `symbol:module/call:sendUserMessage/0` | — |
 | `typescript-model-call:extension/doors/prReviewTerminal.ts:module:sendUserMessage:0` | `tool-contract` | `shipped` | [`extension/doors/prReviewTerminal.ts`](../../extension/doors/prReviewTerminal.ts) · `symbol:module/call:sendUserMessage/0` | — |
 | `typescript-model-call:extension/doors/prReviewTerminal.ts:module:sendUserMessage:1` | `tool-contract` | `shipped` | [`extension/doors/prReviewTerminal.ts`](../../extension/doors/prReviewTerminal.ts) · `symbol:module/call:sendUserMessage/1` | — |
-| `typescript-model-call:extension/waves/reportWave.ts:module:workflow-script:0` | `tool-contract` | `shipped` | [`extension/waves/reportWave.ts`](../../extension/waves/reportWave.ts) · `symbol:module/property:workflowScript/0` | — |
+| `typescript-model-call:extension/waves/transport.ts:module:workflow-script:0` | `tool-contract` | `shipped` | [`extension/waves/transport.ts`](../../extension/waves/transport.ts) · `symbol:module/property:workflowScript/0` | — |
 | `typescript-tool:collect_review_wave` | `tool-contract` | `shipped` | [`extension/doors/reviewWaveTools.ts`](../../extension/doors/reviewWaveTools.ts) · `tool:collect_review_wave` | — |
 | `typescript-tool:open_stack_review` | `tool-contract` | `shipped` | [`extension/doors/stackReviewBrowser.ts`](../../extension/doors/stackReviewBrowser.ts) · `tool:open_stack_review` | — |
 | `typescript-tool:post_pr_review` | `tool-contract` | `shipped` | [`extension/doors/prReview.ts`](../../extension/doors/prReview.ts) · `tool:post_pr_review` | pr-review.warm |
@@ -1048,7 +1048,7 @@ Automated, selector-driven, terminal, and browser PR-review families.
   - `argument:0` — sendUserMessage model-facing argument (`symbol:module/call:sendUserMessage/0/argument:0`)
 - `typescript-model-call:extension/doors/prReviewTerminal.ts:module:sendUserMessage:1`
   - `argument:0` — sendUserMessage model-facing argument (`symbol:module/call:sendUserMessage/1/argument:0`)
-- `typescript-model-call:extension/waves/reportWave.ts:module:workflow-script:0`
+- `typescript-model-call:extension/waves/transport.ts:module:workflow-script:0`
   - `workflowScript` — Subagent workflow script (`symbol:module/property:workflowScript/0`)
 - `typescript-tool:collect_review_wave`
   - `description` — description (`tool:collect_review_wave.description`)

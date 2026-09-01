@@ -12,6 +12,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
+import { waveScriptItems } from "../testing/fakeSubagents.ts";
 import {
   composeDreamBundle,
   DREAM_ANALYSES_FILENAME,
@@ -192,10 +193,13 @@ function reducerReportOf(
 function spawnedLaneItems(
   script: string,
 ): { key: string; agent: string; task: string; label: string; phase?: string }[] {
-  const start = script.indexOf("runs.all(") + "runs.all(".length;
-  const end = script.indexOf(");\nreturn");
-  assert.ok(start > "runs.all(".length - 1 && end > start, "the rendered script shape");
-  return JSON.parse(script.slice(start, end));
+  return waveScriptItems(script) as {
+    key: string;
+    agent: string;
+    task: string;
+    label: string;
+    phase?: string;
+  }[];
 }
 
 // -------------------------------------------------------------------------- the bundle
@@ -223,7 +227,7 @@ test("composeDreamBundle: deterministic bytes, identity echoes, manifest lane or
   assert.equal(bundle.doc_count, 3);
   assert.equal(bundle.total_bytes, 350);
   // The ordering pin: a complete wave's analyses are already in manifest lane order (the
-  // runner's spec.lanes-order normalization + buildDreamLanes' manifest-order plan), so the
+  // runner's spec.assignments-order normalization + buildDreamLanes' manifest-order plan), so the
   // serialized lanes carry that order — no re-sort layer exists.
   assert.deepEqual(
     bundle.lanes.map((lane) => lane.lane),

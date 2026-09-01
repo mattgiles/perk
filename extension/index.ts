@@ -12,7 +12,10 @@ import { registerAnnotationPushTool } from "./doors/annotationPush.ts";
 import { registerAuditWave } from "./doors/auditWaveTools.ts";
 import { registerCiExecutor } from "./doors/ciExecutor.ts";
 import { registerCommitAndCompact } from "./doors/commitCompact.ts";
-import { registerDraftReviewWaveTools } from "./doors/draftReviewWaveTools.ts";
+import {
+  createDraftReviewWaveState,
+  registerDraftReviewWaveTools,
+} from "./doors/draftReviewWaveTools.ts";
 import { registerDreamWave } from "./doors/dreamWaveTools.ts";
 import { registerHarvestWave } from "./doors/harvestWaveTools.ts";
 import { registerLand } from "./doors/land.ts";
@@ -144,6 +147,13 @@ export default function (pi: ExtensionAPI) {
   // turn, via the headless-no-op `setWorkingMessage` surfaces seam. Always on, no config toggle.
   registerWhimsical(pi);
 
+  // The draft-review pair's per-activation state: ONE instance serves the `plan_review` wave
+  // arm (via the closures below), the two draft-review browser doors, and the
+  // `start_draft_review_wave`/`collect_draft_review_wave` tool pair — per activation, never per
+  // process (two bound sessions in one process share nothing). Plain object construction, so
+  // creating it before any registration is order-safe.
+  const draftReviewWave = createDraftReviewWaveState();
+
   // The v1 plan installer: perk-owned plan mode (the `/plan` + Ctrl+Alt+P + `--plan` toggle
   // surface over the read-only gate, plus the plan-authoring context injection — this call
   // sits at the frozen hooks-ordering slot the mode surface always held), the
@@ -157,8 +167,8 @@ export default function (pi: ExtensionAPI) {
   // value-import cycle break — planReviewBrowser.ts value-imports the review arms).
   installPlanBindings(pi, gating, {
     present: () => plannotatorPresent(pi),
-    plan: (ctx, opts) => openPlanReviewSurface(pi, ctx, gating, opts),
-    objective: (ctx, opts) => openObjectiveReviewSurface(pi, ctx, gating, opts),
+    plan: (ctx, opts) => openPlanReviewSurface(pi, ctx, gating, opts, draftReviewWave),
+    objective: (ctx, opts) => openObjectiveReviewSurface(pi, ctx, gating, opts, draftReviewWave),
   });
 
   // The first 3rd-party plan adapter: a perk-owned, injection-only bridge that re-enables
@@ -507,7 +517,7 @@ export default function (pi: ExtensionAPI) {
   // The flow-scoped draft-review-wave pair (`start_draft_review_wave`/
   // `collect_draft_review_wave`) the draft-review door drives: non-blocking draft-review
   // launch over the door-primed context + the typed collect.
-  registerDraftReviewWaveTools(pi);
+  registerDraftReviewWaveTools(pi, draftReviewWave);
 
   // The door-primed browser annotation tool (`push_annotations`): the browser door primes the
   // surface handle on open and clears it on settle/degrade — the tool refuses outside a
@@ -533,13 +543,13 @@ export default function (pi: ExtensionAPI) {
   // plannotator plan-review browser on the working plan draft, draft reviewers streaming
   // phrase-anchored findings in; APPROVE auto-saves via the approvalSave seam, DENY returns a
   // model-mediated revision round.
-  registerPlanReviewBrowser(pi, gating);
+  registerPlanReviewBrowser(pi, gating, draftReviewWave);
 
   // The warm `/objective-review-browser` door: the summonable streaming objective-draft review
   // — the plannotator plan-review browser on the RENDERED working objective draft, draft
   // reviewers streaming phrase-anchored findings in; APPROVE auto-saves via the
   // objectiveApprovalSave seam, Direct Edits = a model-mediated revise round (never auto-saved).
-  registerObjectiveReviewBrowser(pi, gating);
+  registerObjectiveReviewBrowser(pi, gating, draftReviewWave);
 
   // The read-only CI executor: the `run_ci` tool + `/ci` command + `--allow-project-ci`
   // flag. Runs the project's `[ci]` named checks deterministically and reports (never fixes/loops).

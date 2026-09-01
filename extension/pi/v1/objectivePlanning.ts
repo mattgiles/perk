@@ -44,7 +44,7 @@ import {
 } from "../../substrate/toolParams.ts";
 import { type ReportTarget, report } from "../../surfaces/report.ts";
 import {
-  EXPLORE_LANE_KEY,
+  EXPLORE_ASSIGNMENT_KEY,
   OBJECTIVE_EXPLORER_FLOW,
   runObjectiveExplorerWave,
 } from "../../waves/objectiveExplorerWave.ts";
@@ -363,7 +363,7 @@ async function executeExploreObjectiveNode(
   );
   const result = await runObjectiveExplorerWave(createRpcWaveAdapter(pi.events), opts);
   const attempts = [
-    toAttemptReceipt(OBJECTIVE_EXPLORER_FLOW, 1, [EXPLORE_LANE_KEY], result.receipt),
+    toAttemptReceipt(OBJECTIVE_EXPLORER_FLOW, 1, [EXPLORE_ASSIGNMENT_KEY], result.receipt),
   ];
   if (!result.complete) {
     const failure = result.failures[0];

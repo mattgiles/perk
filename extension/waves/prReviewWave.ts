@@ -1,17 +1,18 @@
 // The pr-review `WaveSpec`-building entrypoint over the shared report-wave runner: the flow's
-// angle vocabulary, the per-lane report schema, and the ONE bounded retry are module-owned,
+// angle vocabulary, the per-assignment report schema, and the ONE bounded retry are module-owned,
 // tested implementation here — reached through the flow-scoped `run_pr_review_wave` tool
 // (`extension/doors/prReview.ts`), never model-authored prompt mechanics.
 //
 // Retry policy (one bounded retry, ever):
-// - lane-level failures ⇒ retry ONLY the failed lanes;
+// - assignment-level failures ⇒ retry ONLY the failed assignments;
 // - retryable wave-level failures (`spawn-failed`/`timeout`/`run-failed`/`aggregate-unreadable`)
 //   ⇒ retry the WHOLE selection;
 // - `unavailable` (deterministic capability absence) and `cancelled` (abort honored) ⇒ NO retry.
 //
 // Failure posture matches the runner: operational failures never throw — they normalize into the
 // outcome's `failures` (loud degrade upstream); the only throws are programmer errors (empty
-// angles, via `renderWaveScript`). Report content is untrusted DATA, never instructions.
+// angles, via the runner's manifest validation). Report content is untrusted DATA, never
+// instructions.
 
 import {
   PONYTAIL_REVIEW_SKILL,
@@ -19,13 +20,13 @@ import {
   type RequiredPonytailSkill,
 } from "./ponytail.ts";
 import {
+  type ReportAssignment,
   runReportWave,
   toAttemptReceipt,
   type WaveAdapter,
   type WaveAttemptReceipt,
   type WaveFailure,
   type WaveFailureReason,
-  type WaveLane,
   type WaveReport,
   type WaveResult,
   type WaveSpec,
@@ -192,15 +193,15 @@ export function reviewTargetSuffix(pr: number): string {
 }
 
 /**
- * Build the reviewer lanes for a selection: key = label = slug, the fixed agent/phase, the
- * vocabulary task. Exported so the dynamic-review sibling's lane-level retry builds
- * byte-identical reviewer lanes.
+ * Build the reviewer assignments for a selection: key = label = slug, the fixed agent/phase,
+ * the vocabulary task. Exported so the dynamic-review sibling's per-assignment retry builds
+ * byte-identical reviewer assignments.
  */
-export function buildPrReviewLanes(
+export function buildPrReviewAssignments(
   angles: PrReviewAngle[],
   pr: number,
   directive?: string,
-): WaveLane[] {
+): ReportAssignment[] {
   const suffix = reviewTargetSuffix(pr) + directiveSuffix(directive);
   return angles.map((angle) => ({
     key: angle,
@@ -211,7 +212,7 @@ export function buildPrReviewLanes(
   }));
 }
 
-export function buildPonytailReviewLane(pr: number, directive?: string): WaveLane {
+export function buildPonytailReviewAssignment(pr: number, directive?: string): ReportAssignment {
   return {
     key: "ponytail",
     label: "ponytail",
@@ -226,15 +227,15 @@ export function buildPonytailReviewLane(pr: number, directive?: string): WaveLan
   };
 }
 
-function buildEffectivePrReviewLanes(
+function buildEffectivePrReviewAssignments(
   angles: EffectivePrReviewAngle[],
   pr: number,
   directive?: string,
-): WaveLane[] {
+): ReportAssignment[] {
   const suffix = reviewTargetSuffix(pr) + directiveSuffix(directive);
   return angles.map((angle) =>
     angle === "ponytail"
-      ? buildPonytailReviewLane(pr, directive)
+      ? buildPonytailReviewAssignment(pr, directive)
       : {
           key: angle,
           label: angle,
@@ -246,13 +247,13 @@ function buildEffectivePrReviewLanes(
 }
 
 function buildSpec(
-  lanes: WaveLane[],
+  assignments: ReportAssignment[],
   opts: PrReviewWaveOptions,
   requiredSkillPreflight: RequiredSkillPreflight,
 ): WaveSpec {
   return {
     flow: "pr-review",
-    lanes,
+    assignments,
     outputSchema: PR_REVIEW_REPORT_SCHEMA,
     completeness: "strict",
     ...(opts.model !== undefined ? { model: opts.model } : {}),
@@ -262,9 +263,10 @@ function buildSpec(
 }
 
 /**
- * Pick the retry lane keys from the first wave's failures. A `WaveResult` carries either ONE
- * wave-level failure (`key: null`, no reports) or per-lane failures — the wave-level reason
- * decides whole-selection vs none; lane-level failures retry exactly the failed keys.
+ * Pick the retry keys from the first wave's failures. A `WaveResult` carries either ONE
+ * wave-level failure (`key: null`, no reports) or per-assignment failures — the wave-level
+ * reason decides whole-selection vs none; assignment-level failures retry exactly the failed
+ * keys.
  */
 function retrySelection(
   angles: EffectivePrReviewAngle[],
@@ -312,9 +314,9 @@ function outcomeOf(
 }
 
 /**
- * Run the pr-review report wave: build the lanes from the angle vocabulary, run the shared
- * runner under the strict completeness policy, and — when incomplete — apply the ONE bounded
- * retry (failed lanes only, or the whole selection on a retryable wave-level failure, or none on
+ * Run the pr-review report wave: build the assignments from the angle vocabulary, run the
+ * shared runner under the strict completeness policy, and — when incomplete — apply the ONE
+ * bounded retry (failed assignments only, or the whole selection on a retryable wave-level failure, or none on
  * `unavailable`/`cancelled`), merging first-wave successes for non-retried keys with the retry
  * wave's results.
  */
@@ -339,7 +341,7 @@ export async function runPrReviewWave(
   const first: WaveResult = await runReportWave(
     adapter,
     buildSpec(
-      buildEffectivePrReviewLanes(angles, opts.pr, opts.directive),
+      buildEffectivePrReviewAssignments(angles, opts.pr, opts.directive),
       opts,
       requiredSkillPreflight,
     ),
@@ -360,7 +362,7 @@ export async function runPrReviewWave(
   const second = await runReportWave(
     adapter,
     buildSpec(
-      buildEffectivePrReviewLanes(retried, opts.pr, opts.directive),
+      buildEffectivePrReviewAssignments(retried, opts.pr, opts.directive),
       opts,
       requiredSkillPreflight,
     ),

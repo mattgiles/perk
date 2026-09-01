@@ -11,6 +11,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { workflowDir } from "../substrate/cache.ts";
+import { createFakeSubagents, type FakeSubagents } from "../testing/fakeSubagents.ts";
 import { loadPerkSession, scaffoldRepo } from "../testing/harness.ts";
 import {
   AUDIT_VERDICT_SCHEMA,
@@ -18,7 +19,6 @@ import {
   type AuditManifestPair,
 } from "../waves/auditWave.ts";
 import { createMemoryWaveAdapter } from "../waves/memoryAdapter.ts";
-import { WAVE_RPC_REPLY_EVENT_PREFIX, WAVE_RPC_REQUEST_EVENT } from "../waves/rpcAdapter.ts";
 import { type AuditVerdictLane, executeAuditWave, registerAuditWave } from "./auditWaveTools.ts";
 
 const GRILL = "plan.grill-before-review";
@@ -365,45 +365,9 @@ test("executeAuditWave: a throwing write is the io_error arm with the lanes atta
 
 // ----------------------------------------------------------------- the fake-RPC e2e
 
-/** The fake pi-subagents RPC responder (the doors/learn.test.ts pattern). */
-function fakeSubagentsRpc(
-  aggregate: unknown[],
-  spawns: Record<string, unknown>[] = [],
-): (pi: ExtensionAPI) => void {
-  return (pi) => {
-    pi.events.on(WAVE_RPC_REQUEST_EVENT, (raw) => {
-      const req = raw as { requestId?: unknown; method?: unknown };
-      const reply = (payload: Record<string, unknown>): void => {
-        pi.events.emit(`${WAVE_RPC_REPLY_EVENT_PREFIX}${String(req.requestId)}`, {
-          version: 1,
-          requestId: req.requestId,
-          method: req.method,
-          ...payload,
-        });
-      };
-      if (req.method === "ping") {
-        reply({
-          success: true,
-          data: {
-            capabilities: { asyncSpawn: true },
-            methods: ["ping", "spawn", "stop"],
-            events: { asyncComplete: "subagent:async-complete" },
-          },
-        });
-        return;
-      }
-      if (req.method === "spawn") {
-        spawns.push((raw as { params?: unknown }).params as Record<string, unknown>);
-        const asyncDir = scaffoldRepo();
-        writeFileSync(
-          join(asyncDir, "status.json"),
-          JSON.stringify({ state: "complete", workflow: { value: aggregate } }),
-        );
-        reply({ success: true, data: { text: "ok", details: { asyncId: "wave-1", asyncDir } } });
-        pi.events.emit("subagent:async-complete", { id: "wave-1", asyncDir });
-      }
-    });
-  };
+/** The shared fake pi-subagents responder over one staged complete aggregate. */
+function fakeSubagentsRpc(aggregate: unknown[]): FakeSubagents {
+  return createFakeSubagents([{ value: aggregate }]);
 }
 
 test("tool e2e: the bound bundle dir is the write target; spawn params sink the auditor contract", async () => {
@@ -415,11 +379,11 @@ test("tool e2e: the bound bundle dir is the write target; spawn params sink the 
     "utf8",
   );
   const aggregate = [{ key: laneKey(1), ok: true, error: null, report: report("s1.jsonl") }];
-  const spawns: Record<string, unknown>[] = [];
+  const fake = fakeSubagentsRpc(aggregate);
   const h = await loadPerkSession({
     cwd,
     env: { PERK_RUN_ID: RUN_ID },
-    extraExtensions: [fakeSubagentsRpc(aggregate, spawns)],
+    extraExtensions: [fake.extension],
   });
   try {
     const result = await h.invokeTool("run_audit_wave", {});
@@ -437,8 +401,8 @@ test("tool e2e: the bound bundle dir is the write target; spawn params sink the 
     assert.equal(readVerdicts(bundleDir).lanes[0]?.status, "report");
 
     // Spawn contract: the auditor agent + the configured model + the packet-path task.
-    assert.equal(spawns.length, 1);
-    const spawn = spawns[0] as { workflowScript?: string; model?: string };
+    assert.equal(fake.spawns.length, 1);
+    const spawn = fake.spawns[0] as { workflowScript?: string; model?: string };
     assert.equal(spawn.model, "faux/auditor-model");
     assert.match(spawn.workflowScript ?? "", /perk-dev\.session-auditor/);
     assert.match(

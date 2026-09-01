@@ -9,17 +9,11 @@
 // `extension/waves/prReviewDynamicWave.test.ts` — the guidance here carries judgment only.
 
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { basename, join } from "node:path";
+import { mkdirSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { test } from "node:test";
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { createFakeSubagents, type FakeSubagents } from "../testing/fakeSubagents.ts";
 import { fakePerkRouter, loadPerkSession, scaffoldRepo } from "../testing/harness.ts";
-import {
-  WAVE_RPC_PROTOCOL_VERSION,
-  WAVE_RPC_REPLY_EVENT_PREFIX,
-  WAVE_RPC_REQUEST_EVENT,
-} from "../waves/rpcAdapter.ts";
 import { decodeDynamicWaveParams, prReviewDynamicGuidance } from "./prReviewDynamic.ts";
 
 const AsyncFunction = Object.getPrototypeOf(async () => {}).constructor as new (
@@ -146,22 +140,22 @@ function installPonytailReviewSkill(cwd: string): void {
 }
 
 interface DynamicSink {
-  spawns: { workflowScript?: string; model?: string; outputSchema?: unknown }[];
   runCalls: { key: string; params: Record<string, unknown> }[];
   allBatches: Record<string, unknown>[][];
 }
 
 /**
- * A fake pi-subagents responder that EVALUATES the received module-rendered `workflowScript`
- * with a scripted fake `runs` global (the selector resolves a schema-valid report — selecting
- * `quality` unless overridden; reviewer lanes resolve clean reports) and writes the script's
- * ACTUAL return into the run's `status.json` — the full render→execute→aggregate round-trip,
- * offline.
+ * The shared fake pi-subagents responder in `executeScript` mode: EVALUATE the received
+ * module-rendered `workflowScript` with a scripted fake `runs` global (the selector resolves a
+ * schema-valid report — selecting `quality` unless overridden; reviewer lanes resolve clean
+ * reports) — the script's ACTUAL return becomes the durable aggregate: the full
+ * render→execute→aggregate round-trip, offline. Spawn params land on the returned
+ * `FakeSubagents.spawns`.
  */
 function fakeDynamicResponder(
   sink: DynamicSink,
   selectorReport?: Record<string, unknown>,
-): (pi: ExtensionAPI) => void {
+): FakeSubagents {
   const cleanReport = (key: string): Record<string, unknown> => ({
     angle: key,
     verdict: "clean",
@@ -201,73 +195,12 @@ function fakeDynamicResponder(
       );
     },
   };
-  return (pi) => {
-    pi.events.on(WAVE_RPC_REQUEST_EVENT, (raw) => {
-      const request = raw as {
-        requestId: string;
-        method: string;
-        params?: { workflowScript?: string; model?: string; outputSchema?: unknown };
-      };
-      const reply = (payload: Record<string, unknown>): void => {
-        pi.events.emit(`${WAVE_RPC_REPLY_EVENT_PREFIX}${request.requestId}`, {
-          version: WAVE_RPC_PROTOCOL_VERSION,
-          requestId: request.requestId,
-          method: request.method,
-          ...payload,
-        });
-      };
-      if (request.method === "ping") {
-        reply({
-          success: true,
-          data: {
-            version: WAVE_RPC_PROTOCOL_VERSION,
-            methods: ["ping", "status", "spawn", "steer", "interrupt", "stop", "resume"],
-            capabilities: { asyncSpawn: true },
-            events: { asyncComplete: "subagent:async-complete" },
-            session: {},
-          },
-        });
-        return;
-      }
-      if (request.method === "spawn") {
-        if (request.params !== undefined) sink.spawns.push(request.params);
-        const script = request.params?.workflowScript ?? "";
-        // EVALUATE the module-rendered script — the real normalization + fan-out code runs here.
-        void (async () => {
-          const fn = new AsyncFunction("runs", script);
-          const value = await fn(fakeRuns);
-          const asyncDir = mkdtempSync(join(tmpdir(), "perk-pr-review-dynamic-e2e-"));
-          writeFileSync(
-            join(asyncDir, "status.json"),
-            JSON.stringify({
-              runId: basename(asyncDir),
-              mode: "workflow",
-              state: "complete",
-              startedAt: 0,
-              workflow: { value },
-            }),
-          );
-          reply({
-            success: true,
-            data: {
-              text: "Started async run.",
-              details: { asyncId: basename(asyncDir), asyncDir },
-            },
-          });
-          pi.events.emit("subagent:async-complete", {
-            id: basename(asyncDir),
-            asyncDir,
-            state: "complete",
-          });
-        })();
-        return;
-      }
-      reply({
-        success: false,
-        error: { code: "not_found", message: `fake responder rejects ${request.method}` },
-      });
-    });
-  };
+  return createFakeSubagents([
+    {
+      // EVALUATE the module-rendered script — the real normalization + fan-out code runs here.
+      executeScript: async (script) => await new AsyncFunction("runs", script)(fakeRuns),
+    },
+  ]);
 }
 
 const PR_URL_JSON = {
@@ -305,11 +238,12 @@ test("tool: run_pr_review_dynamic_wave end-to-end — models per-item, aggregate
     "pr url": { json: PR_URL_JSON },
     "pr review-post": { json: JSON.parse(CLEAN_JSON) },
   });
-  const sink: DynamicSink = { spawns: [], runCalls: [], allBatches: [] };
+  const sink: DynamicSink = { runCalls: [], allBatches: [] };
+  const fake = fakeDynamicResponder(sink);
   const h = await loadPerkSession({
     cwd,
     env: { PERK_RUN_ID: "01RID", PERK_BIN: bin },
-    extraExtensions: [fakeDynamicResponder(sink)],
+    extraExtensions: [fake.extension],
   });
   try {
     const result = await h.invokeTool("run_pr_review_dynamic_wave", {
@@ -369,9 +303,9 @@ test("tool: run_pr_review_dynamic_wave end-to-end — models per-item, aggregate
     assert.match(text, /untrusted DATA/);
     assert.equal(text.includes("attempts"), false, "receipts never enter the model-facing prose");
     // Spawn-boundary pins: the reviewer schema is the workflow-level default, NO top-level model.
-    assert.equal(sink.spawns.length, 1);
-    assert.equal(sink.spawns[0]?.model, undefined);
-    assert.match(JSON.stringify(sink.spawns[0]?.outputSchema), /"angle"/);
+    assert.equal(fake.spawns.length, 1);
+    assert.equal(fake.spawns[0]?.model, undefined);
+    assert.match(JSON.stringify(fake.spawns[0]?.outputSchema), /"angle"/);
     // Per-item pins from the EVALUATED script: the selector carries its own schema + model, the
     // reviewer lanes carry the pr-reviewer model, and the directive threads to every task.
     const selector = sink.runCalls.find((call) => call.key === "angle-selector");
@@ -420,7 +354,7 @@ test("tool: a new dynamic target-resolution failure invalidates prior evidence f
   const h = await loadPerkSession({
     cwd,
     env: { PERK_RUN_ID: "01RID", PERK_BIN: join(cwd, "fake-perk.sh") },
-    extraExtensions: [fakeDynamicResponder({ spawns: [], runCalls: [], allBatches: [] })],
+    extraExtensions: [fakeDynamicResponder({ runCalls: [], allBatches: [] }).extension],
   });
   try {
     const recorded = await h.invokeTool("run_pr_review_dynamic_wave", {});
@@ -450,7 +384,7 @@ test("tool: a selector-proposed custom angle rides the dynamic wave end-to-end",
     "pr url": { json: PR_URL_JSON },
     "pr review-post": { json: JSON.parse(CLEAN_JSON) },
   });
-  const sink: DynamicSink = { spawns: [], runCalls: [], allBatches: [] };
+  const sink: DynamicSink = { runCalls: [], allBatches: [] };
   const h = await loadPerkSession({
     cwd,
     env: { PERK_RUN_ID: "01RID", PERK_BIN: bin },
@@ -463,7 +397,7 @@ test("tool: a selector-proposed custom angle rides the dynamic wave end-to-end",
         confidence: "high",
         custom_angle_slug: "cache-invalidation",
         custom_angle_scope: "staleness of the new memoization layer",
-      }),
+      }).extension,
     ],
   });
   try {

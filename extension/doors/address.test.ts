@@ -3,12 +3,15 @@
 // OFFLINE: a routed fake `perk` stands in for both Python cold-door mutations.
 
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { basename, join } from "node:path";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { test } from "node:test";
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { type PlanRef, writePlanRef } from "../substrate/cache.ts";
+import {
+  createFakeSubagents,
+  type FakeSubagents,
+  waveScriptItems,
+} from "../testing/fakeSubagents.ts";
 import {
   fakePerkRouter,
   loadPerkSession,
@@ -16,11 +19,6 @@ import {
   spyInjections,
 } from "../testing/harness.ts";
 import { REVIEW_CLASSIFIER_REPORT_SCHEMA } from "../waves/reviewClassifierWave.ts";
-import {
-  WAVE_RPC_PROTOCOL_VERSION,
-  WAVE_RPC_REPLY_EVENT_PREFIX,
-  WAVE_RPC_REQUEST_EVENT,
-} from "../waves/rpcAdapter.ts";
 import { addressGuidance, decodeResolveParams } from "./address.ts";
 
 const REF: PlanRef = {
@@ -355,11 +353,6 @@ test("finalize_address: mistyped counts → bad_input, no exec", async () => {
 
 // --- classify_review_feedback: the flow tool over a fake pi-subagents RPC responder -------------
 
-/** The spawn params the fake responder observes (the tool-boundary threading assertions). */
-interface SpawnSink {
-  spawns: { workflowScript?: string; model?: string; outputSchema?: unknown }[];
-}
-
 /** A schema-valid classification the fake responder answers with. */
 const CLASSIFICATION = {
   pr: 42,
@@ -377,81 +370,21 @@ const CLASSIFICATION = {
 };
 
 /**
- * A fake pi-subagents responder bound as a bus peer (the prReview.test.ts pattern): answers
- * ping/spawn on `pi.events` with the v1 envelope, writes a terminal `status.json` carrying one
- * schema-valid classification per lane into a real temp `asyncDir`, and emits the advertised
- * completion event. Each spawn's params land in `sink` ("pin the glue").
+ * The shared fake pi-subagents responder in dynamic mode: answer each lane in the
+ * module-rendered script with the schema-valid classification. Offline like everything here.
  */
-function fakeSubagentsResponder(sink: SpawnSink): (pi: ExtensionAPI) => void {
-  return (pi) => {
-    pi.events.on(WAVE_RPC_REQUEST_EVENT, (raw) => {
-      const request = raw as {
-        requestId: string;
-        method: string;
-        params?: { workflowScript?: string; model?: string; outputSchema?: unknown };
-      };
-      const reply = (payload: Record<string, unknown>): void => {
-        pi.events.emit(`${WAVE_RPC_REPLY_EVENT_PREFIX}${request.requestId}`, {
-          version: WAVE_RPC_PROTOCOL_VERSION,
-          requestId: request.requestId,
-          method: request.method,
-          ...payload,
-        });
-      };
-      if (request.method === "ping") {
-        reply({
-          success: true,
-          data: {
-            version: WAVE_RPC_PROTOCOL_VERSION,
-            methods: ["ping", "status", "spawn", "steer", "interrupt", "stop", "resume"],
-            capabilities: { asyncSpawn: true },
-            events: { asyncComplete: "subagent:async-complete" },
-            session: {},
-          },
-        });
-        return;
-      }
-      if (request.method === "spawn") {
-        if (request.params !== undefined) sink.spawns.push(request.params);
-        const script = request.params?.workflowScript ?? "";
-        const start = script.indexOf("runs.all(") + "runs.all(".length;
-        const end = script.indexOf(");\nreturn");
-        const lanes = JSON.parse(script.slice(start, end)) as Array<{ key: string }>;
-        const asyncDir = mkdtempSync(join(tmpdir(), "perk-address-e2e-"));
-        writeFileSync(
-          join(asyncDir, "status.json"),
-          JSON.stringify({
-            runId: basename(asyncDir),
-            mode: "workflow",
-            state: "complete",
-            startedAt: 0,
-            workflow: {
-              value: lanes.map(({ key }) => ({
-                key,
-                ok: true,
-                error: null,
-                report: CLASSIFICATION,
-              })),
-            },
-          }),
-        );
-        reply({
-          success: true,
-          data: { text: "Started async run.", details: { asyncId: basename(asyncDir), asyncDir } },
-        });
-        pi.events.emit("subagent:async-complete", {
-          id: basename(asyncDir),
-          asyncDir,
-          state: "complete",
-        });
-        return;
-      }
-      reply({
-        success: false,
-        error: { code: "not_found", message: `fake responder rejects ${request.method}` },
-      });
-    });
-  };
+function classifierFake(): FakeSubagents {
+  return createFakeSubagents([
+    {
+      executeScript: async (script) =>
+        waveScriptItems(script).map(({ key }) => ({
+          key,
+          ok: true,
+          error: null,
+          report: CLASSIFICATION,
+        })),
+    },
+  ]);
 }
 
 test("tool: classify_review_feedback end-to-end — configured model threads, flow receipt, ok projection", async () => {
@@ -463,11 +396,11 @@ test("tool: classify_review_feedback end-to-end — configured model threads, fl
     '[models.subagents]\nreview-classifier = "test-classifier-model"\n',
     "utf8",
   );
-  const sink: SpawnSink = { spawns: [] };
+  const fake = classifierFake();
   const h = await loadPerkSession({
     cwd,
     env: { PERK_RUN_ID: "01RID" },
-    extraExtensions: [fakeSubagentsResponder(sink)],
+    extraExtensions: [fake.extension],
   });
   try {
     const result = await h.invokeTool("classify_review_feedback", {});
@@ -491,10 +424,10 @@ test("tool: classify_review_feedback end-to-end — configured model threads, fl
     assert.match(text, /```json/);
     assert.match(text, /"thread_id": "PRRT_1"/);
     // Pin the glue: the configured model and the module-owned schema reached the actual spawn.
-    assert.equal(sink.spawns.length, 1);
-    assert.equal(sink.spawns[0]?.model, "test-classifier-model");
-    assert.deepEqual(sink.spawns[0]?.outputSchema, REVIEW_CLASSIFIER_REPORT_SCHEMA);
-    const script = sink.spawns[0]?.workflowScript ?? "";
+    assert.equal(fake.spawns.length, 1);
+    assert.equal(fake.spawns[0]?.model, "test-classifier-model");
+    assert.deepEqual(fake.spawns[0]?.outputSchema, REVIEW_CLASSIFIER_REPORT_SCHEMA);
+    const script = String(fake.spawns[0]?.workflowScript ?? "");
     assert.match(script, /"agent": "perk\.review-classifier"/);
     assert.match(script, /Fetch \+ classify the review feedback on this plan's PR\./);
   } finally {

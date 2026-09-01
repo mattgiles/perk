@@ -11,7 +11,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
 import {
-  buildDraftReviewLanes,
+  buildDraftReviewAssignments,
   DRAFT_REVIEW_REPORT_SCHEMA,
   type DraftReviewAngle,
   isDraftReviewAngle,
@@ -36,8 +36,8 @@ function okEntry(key: string): unknown {
 
 // -------------------------------------------------------------------------- lane construction
 
-test("buildDraftReviewLanes: key = label = slug, the fixed agent/phase, the exact task bytes", () => {
-  const lanes = buildDraftReviewLanes({
+test("buildDraftReviewAssignments: key = label = slug, the fixed agent/phase, the exact task bytes", () => {
+  const lanes = buildDraftReviewAssignments({
     angles: TWO_ANGLES,
     draftType: "plan",
     draft: "# The draft",
@@ -75,8 +75,8 @@ test("buildDraftReviewLanes: key = label = slug, the fixed agent/phase, the exac
   ]);
 });
 
-test("buildDraftReviewLanes: the custom lane appears iff `custom` is supplied, carrying the flagged-DATA definition", () => {
-  const withoutCustom = buildDraftReviewLanes({
+test("buildDraftReviewAssignments: the custom lane appears iff `custom` is supplied, carrying the flagged-DATA definition", () => {
+  const withoutCustom = buildDraftReviewAssignments({
     angles: ["grounding"],
     draftType: "objective",
     draft: "body",
@@ -86,7 +86,7 @@ test("buildDraftReviewLanes: the custom lane appears iff `custom` is supplied, c
     ["grounding", "ponytail"],
   );
 
-  const lanes = buildDraftReviewLanes({
+  const lanes = buildDraftReviewAssignments({
     angles: ["grounding"],
     custom: "check the rollout ordering against the release calendar",
     draftType: "objective",
@@ -110,8 +110,8 @@ test("buildDraftReviewLanes: the custom lane appears iff `custom` is supplied, c
   });
 });
 
-test("buildDraftReviewLanes: every lane task embeds the draft type and the untrusted-wrapped draft", () => {
-  const lanes = buildDraftReviewLanes({
+test("buildDraftReviewAssignments: every lane task embeds the draft type and the untrusted-wrapped draft", () => {
+  const lanes = buildDraftReviewAssignments({
     angles: ["grounding", "scope", "decision-completeness", "risk"],
     custom: "a lens",
     draftType: "objective",
