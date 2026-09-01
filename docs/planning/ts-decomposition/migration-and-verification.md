@@ -1342,10 +1342,14 @@ and process mechanics in the Python exterior and adapters.
 >   baselines, and the objective's own eventual recover/land runs through these migrated
 >   bindings by construction — stated honestly. The full Phase-7 dogfood gate closes at 7.5.
 
-> **Status (Objective #2083, Node 7.5):** slice 7 landed — `/commit-and-compact` migrated behind
-> a typed delivery operation; the LAST delivery door deleted; the closing sweep + final
-> structural ledger recorded. This node closes the Phase-7 dogfood gate AND the objective's
-> closing gate — via the ordered closeout protocol below, with NO waiver. Realized-shape notes:
+> **Status (Objective #2083, Node 7.5):** slice 7 implementation landed — `/commit-and-compact`
+> migrated behind a typed delivery operation; the LAST delivery door deleted; the closing sweep
+> recorded. The Phase-7 dogfood gate AND the objective's closing gate close AT this node but are
+> **NOT YET CLOSED at this writing**: closure happens only when the ordered closeout protocol
+> below completes (NO waiver) — its arms, the Phase-7 dogfood record, and arm D's observed bytes
+> land as the closeout's docs-only commits appended to this note, and the ledger below (measured
+> at the implementation head) re-measures at the actual final head if any train head moves.
+> Realized-shape notes:
 >
 > - **Behavior moved**: `doors/commitCompact.ts` (250) + its suite (507) deleted whole in the
 >   same node (the last Rule E delivery-door burn-down; no forwarding exports —
@@ -1362,15 +1366,20 @@ and process mechanics in the Python exterior and adapters.
 >   command-only door has no tool-JSON wire, so the baselines are registration metadata + text
 >   byte pins — stated honestly); all SIX report messages byte-identical; both `prompts/`
 >   templates, `prompts/_fixtures/live.yaml`, `tests/test_prompt_parity.py`, and `toolGating.ts`
->   byte-untouched. The drive arm assigns the pending record ONLY after the guidance send — a
->   throwing send leaves the slot unset (phantom-record regression pinned).
+>   byte-untouched. Pending-record discipline (review-hardened): EVERY invocation supersedes
+>   the one-shot slot up front (a stale baseline never survives a clean/read-only/skip/failed
+>   reinvocation into a later settle), and the drive arm re-arms it ONLY after the guidance
+>   send — a throwing send leaves the slot unset (phantom-record + supersession pins).
 > - **Named interior behavior deltas (warm-plane only — no contracts section exists for this
 >   door, so NO `shared/contracts.md` amendment; below the user-docs surface)**:
 >   - **D1 — discriminated HEAD baseline (fail-safe closure)**: the pending record now carries
 >     `HeadBaseline` = `sha | unborn | unprovable` instead of `headSha`'s conflated null. The
 >     production probe (module-private in the installer, over `substrate/git.ts`, fail-open):
->     `rev-parse HEAD` ok → `sha`; else a resolvable `symbolic-ref -q HEAD` (an unborn branch
->     pointer — the new `substrate/git.ts::symbolicHead`) → `unborn`; else `unprovable`. An
+>     `rev-parse HEAD` ok → `sha`; else `unborn` ONLY on the new
+>     `substrate/git.ts::unbornHead` positive absence proof (`symbolic-ref -q HEAD` resolves AND
+>     `for-each-ref` proves the pointed-to ref absent — exit-0, empty output; review-hardened: a
+>     resolvable pointer whose ref EXISTS is a transient read failure, never unborn); else
+>     `unprovable`. An
 >     `unprovable` baseline still DRIVES the commit (committing is always safe) but the settle
 >     arm SKIPS compaction with ONE new recorded warning ("the pre-commit HEAD could not be
 >     captured — compaction skipped; run /compact to compact anyway."). Regression pins: the
@@ -1379,11 +1388,14 @@ and process mechanics in the Python exterior and adapters.
 >     commit.
 >   - **D2 — trust-fenced committed-arm compaction instructions**: `compactInstructions` now
 >     fences the raw `git log --oneline` listing (repository-controlled text) in the same
->     `<commit-evidence>` + untrusted-DATA demotion framing the continuation template uses —
->     the committed-arm instruction bytes changed (recorded); every other instruction/report/
->     continuation surface is byte-identical. Pinned with a hostile commit-subject assertion
->     (exactly once, confined to the fence) + the `(commit list unavailable)` arm, observed as
->     exact `customInstructions` bytes through the deferCompaction seam — no test-only export.
+>     `<commit-evidence>` + untrusted-DATA demotion framing the continuation template uses, with
+>     fence-delimiter neutralization (review-hardened: `fenceSafe` escapes `commit-evidence>`
+>     tag text inside the listing at BOTH prose sites — the instructions and the continuation
+>     render — so a closing-tag commit subject cannot escape the fence) — the committed-arm
+>     instruction bytes changed (recorded); every other instruction/report/continuation surface
+>     is byte-identical apart from the escaping. Pinned with hostile commit-subject + closing-tag
+>     injection assertions, observed as exact `customInstructions` bytes through the
+>     deferCompaction seam — no test-only export.
 >   - **Narrowed safety claim (behavior-preserving, now stated honestly)**: the settle gate
 >     proves a NEW COMMIT (HEAD movement as range evidence), NOT end-state cleanliness — a
 >     commit that leaves the tree dirty still compacts BY DESIGN (regression-pinned); no
@@ -1396,24 +1408,28 @@ and process mechanics in the Python exterior and adapters.
 >   module-private (`activeSessionPlanRef` relocated verbatim: session-tier authority, full
 >   shape validation, fail-open null, NO worktree-cache fallback — proven through registered
 >   paths: valid linkage → targeted continuation; per-field LWW; cache-ref-only → generic;
->   malformed → generic). Prose map re-keyed (`ts-session` → the adapter path; both
+>   malformed → generic; throwing branch read → generic). Prose map re-keyed (`ts-session` → the adapter path; both
 >   `module:sendUserMessage` units, indices 0/1) and regenerated.
-> - **Accounting** (vs predecessor head `5fc3eb45`, numstat): production net **+57** — under
->   the +60 hard bar via the three named invariant classes (the typed outcome unions + the
->   Pi-free deps seam; D1's discriminated baseline; D2's trust fence); operator acceptance
->   rides the PR-approval gesture. Detail: door −250; feature +93; adapter +204;
->   `substrate/git.ts` +9 (`symbolicHead`); sweep/index ±1s. Test net **+471** (door suite
+> - **Accounting** (vs predecessor head `5fc3eb45`, numstat): production net **+85** — the
+>   planned migration measured **+57** at review time (under the +60 hard bar); the review pass
+>   then mandated **+28** of hardening squarely inside the three named invariant classes (the
+>   typed outcome unions' exhaustive settle translation; D1's positive unborn proof +
+>   supersession discipline; D2's fence-delimiter escaping) — cutting reviewer-required
+>   fail-safe code to fit the bar would game the metric, so the overage is REPORTED, not hidden;
+>   operator acceptance rides the PR-approval gesture. Detail: door −250; feature +93; adapter
+>   +218; `substrate/git.ts` +26 (`unbornHead`); sweep/index ±1s. Test net **+670** (door suite
 >   −507; feature suite +225 — recording fakes, zero-git-read sentinels, the full D1 settle
->   matrix, compile-time negatives; adapter suite +736 — registered paths over a REAL bound
->   AgentSession with real `agent_settled` emission through the extension runner). Files:
->   production +2/−1, tests +2/−1.
+>   matrix, compile-time negatives; adapter suite +932 — registered paths over a REAL bound
+>   AgentSession with real `agent_settled` emission through the extension runner, incl. the
+>   supersession, settle-containment, and fence-injection regressions). Files: production
+>   +2/−1, tests +2/−1.
 > - **Export ledger**: **removed** — `registerCommitAndCompact`, `CommitCompactIo` (+ the
 >   `Severity` edge), the door's exported `activeSessionPlanRef`, `DIRECT_COMPACT_INSTRUCTIONS`,
 >   `compactInstructions`, `PendingCompact`(door shape). **Newly introduced** — `HeadBaseline`,
 >   `PendingCompact` (baseline-shaped), `CommitCompactCompletion`, `CommitCompactDeps`,
 >   `CommitCompactStart`, `CommitCompactSettle`, `startCommitAndCompact`,
 >   `settleCommitAndCompact` (feature); `installCommitCompactBindings` (adapter);
->   `substrate/git.ts::symbolicHead` (production-consumed by the installer's probe).
+>   `substrate/git.ts::unbornHead` (production-consumed by the installer's probe).
 >   **Relocated** — `commitAndCompactGuidance` + `commitAndCompactContinuation` (door →
 >   adapter; guard seams). **Privatized (sweep)** — `substrate/git.ts::indexHidesChanges`
 >   (`revalidationBracket`'s default flags probe is the one consumer; its direct test rows
@@ -1442,8 +1458,8 @@ and process mechanics in the Python exterior and adapters.
 > - **Final structural ledger** (measured at this node's head; selectors pinned: production =
 >   `extension/**/*.ts` minus `*.test.ts` minus `testing/`, `vendor/` split out; edges =
 >   `from "."`-relative import lines; Pi importers = `@earendil-works` import declarations):
->   - Production: **136 files / 42,348 LOC** incl. `vendor/` (133 / 40,659 excl.; vendor = 3
->     files / 1,689). Tests: **143 files / 67,342 LOC**. Vs the 1.1 baseline (102 files /
+>   - Production: **136 files / 42,376 LOC** incl. `vendor/` (133 / 40,687 excl.; vendor = 3
+>     files / 1,689). Tests: **143 files / 67,541 LOC**. Vs the 1.1 baseline (102 files /
 >     ~38,100): +34 files / +~4,200 LOC — the honest narrative: the decomposition ADDED
 >     structure (feature ops + adapters + the session/authoring/codeReview/learning/delivery
 >     homes) while deleting every delivery door; the growth is typed seams and guard census

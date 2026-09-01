@@ -13,7 +13,7 @@ import {
   headSha,
   revalidationBracket,
   sinceBaseSha,
-  symbolicHead,
+  unbornHead,
   worktreeDirty,
 } from "./git.ts";
 
@@ -76,22 +76,25 @@ test("headSha: the current sha in a repo, null outside one (fail-open)", () => {
   assert.equal(headSha(norepo), null);
 });
 
-test("symbolicHead: a branch pointer resolves (unborn included); detached and non-repo do not", () => {
+test("unbornHead: positive absence proof only — born false, unborn true, detached/non-repo null", () => {
   const { cwd, baseSha } = scratchRepo();
-  assert.ok(symbolicHead(cwd)?.startsWith("refs/heads/"), "a born branch pointer resolves");
+  // A born branch: the pointer resolves AND the ref exists — NOT unborn (so a transient
+  // `headSha` failure on a born branch can never read as unborn; the D1 discrimination).
+  assert.equal(unbornHead(cwd), false);
   const g = (...args: string[]) =>
     execFileSync("git", args, { cwd, stdio: ["ignore", "ignore", "ignore"] });
+  // HEAD switched to a never-born branch in a repo WITH other refs: positively proven absent.
+  g("symbolic-ref", "HEAD", "refs/heads/ghost");
+  assert.equal(headSha(cwd), null, "sanity: the unborn pointer has no sha");
+  assert.equal(unbornHead(cwd), true, "absence of the pointed-to ref is the unborn proof");
+  g("symbolic-ref", "HEAD", "refs/heads/main");
   g("checkout", "-q", "--detach", baseSha);
-  assert.equal(symbolicHead(cwd), null, "a detached HEAD is not a branch pointer");
+  assert.equal(unbornHead(cwd), null, "a detached HEAD is not a branch pointer");
   const unborn = mkdtempSync(join(tmpdir(), "perk-git-unborn-"));
   execFileSync("git", ["init", "-q"], { cwd: unborn, stdio: "ignore" });
-  assert.ok(
-    symbolicHead(unborn)?.startsWith("refs/heads/"),
-    "an unborn branch pointer resolves — the D1 unborn-vs-unprovable discriminator",
-  );
-  assert.equal(headSha(unborn), null, "sanity: the unborn HEAD has no sha");
+  assert.equal(unbornHead(unborn), true, "a fresh init is unborn (no refs at all)");
   const norepo = mkdtempSync(join(tmpdir(), "perk-git-norepo-"));
-  assert.equal(symbolicHead(norepo), null);
+  assert.equal(unbornHead(norepo), null);
 });
 
 test("worktreeDirty: false on a clean tree, true when dirty, null outside a repo", () => {

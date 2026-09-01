@@ -96,11 +96,25 @@ export function headSha(cwd: string): string | null {
   return git(cwd, ["rev-parse", "HEAD"]);
 }
 
-/** The symbolic branch pointer HEAD names (`git symbolic-ref -q HEAD`) — resolvable even for
- * an UNBORN branch, so callers can discriminate "unborn" from "unreadable" when `headSha` is
- * null (a detached HEAD fails here, but there `headSha` succeeds). **Fail-open**: null. */
-export function symbolicHead(cwd: string): string | null {
-  return git(cwd, ["symbolic-ref", "-q", "HEAD"]);
+/** Whether HEAD is a positively-PROVEN unborn branch pointer: `symbolic-ref -q HEAD` resolves
+ * AND `for-each-ref` proves the pointed-to ref ABSENT (an exit-0 run, empty output). `false` =
+ * the ref EXISTS (a failing `headSha` read was transient, not unborn); **fail-open to null**
+ * when either probe fails outright — callers must never read null as unborn. Own `execFileSync`
+ * for the second probe: `git()` conflates empty output (absence — meaningful here) with
+ * failure. */
+export function unbornHead(cwd: string): boolean | null {
+  const pointer = git(cwd, ["symbolic-ref", "-q", "HEAD"]);
+  if (pointer === null) return null;
+  try {
+    const out = execFileSync("git", ["for-each-ref", "--format=%(refname)", pointer], {
+      cwd,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+    });
+    return out.trim() === "";
+  } catch {
+    return null;
+  }
 }
 
 /**
