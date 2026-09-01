@@ -454,7 +454,7 @@ The `PERK_DEV_STACKED_DELIVERY` development write gate was retired at the gate p
   learn-stamp/consume effects; the finalization-convergence mechanics are §8.51/§8.56's.
 - **A producer widening must meet the consumer's firing gate.** Recover's close-then-evidence
   repair truthfully returns `objective_closed: false` when re-emitting evidence for an already
-  closed objective. The TypeScript consumer in `extension/doors/objectiveStack.ts` therefore
+  closed objective. The TypeScript consumer in `extension/pi/v1/delivery/stackDrive.ts` therefore
   gates `driveStackReconcile` on evidence presence, not the close-transition flag. Widening what a
   producer populates while its consumer tests another field is dead code by construction.
 - **Removing one condition transfers its safety burden.** Once the drive stopped requiring

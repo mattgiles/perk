@@ -242,7 +242,7 @@ delegating to an existing cold door:
   `activeRunId`
 - `extension/substrate/coldDoor.test.ts` — the client mechanics pins + the compile-time `ExecHost` drift check
 - `extension/coldDoorGuard.test.ts` — the mandatory-delegation source-scan guard
-- `extension/doors/land.ts` — the advisory-drop + three-way-narrow exemplar
+- `extension/pi/v1/delivery/land.ts` — the advisory-drop + three-way-narrow exemplar
 - `extension/pi/v1/plan.ts` — `decodePlanSave`, the derive-don't-decode exemplar
 - `extension/pi/v1/delivery/address.ts` — the fail-arm payload re-narrowing exemplar
 - `docs/learned/workflow/warm-door-commands.md` — a warm door must render every cold-door outcome;

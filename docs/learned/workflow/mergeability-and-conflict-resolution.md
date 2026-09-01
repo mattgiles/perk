@@ -192,7 +192,7 @@ don't drift" discipline).
 
 - `src/perk/substrate/git.py` — the `git merge-tree --write-tree` probe, `MergeProbe.mergeable`
 - `extension/delivery/submit.ts` + `pi/v1/delivery/submit.ts` — decide + drive, the re-drive cap
-- `extension/doors/land.ts` — `driveReconcileAfterLand`, the shape the drive mirrors
+- `extension/pi/v1/delivery/land.ts` — `driveReconcileAfterLand`, the shape the drive mirrors
 - `extension/worker/worker.ts` — `evaluateTerminal`'s `mergeable !== false` implement bar
 - `agents/conflict-resolver.md` — the write-capable + context-inheriting agent def
 - `docs/learned/workflow/warm-door-commands.md` — the terminate+followUp composition, the

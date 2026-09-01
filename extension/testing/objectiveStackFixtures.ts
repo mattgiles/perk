@@ -1,5 +1,6 @@
 // The two stack-local fixtures shared by the stacked-delivery suites (the mutating family in
-// doors/objectiveStack.test.ts and the status door in pi/v1/delivery/stackStatus.test.ts).
+// pi/v1/delivery/stackSync|stackRecover|stackLand.test.ts and the status read in
+// pi/v1/delivery/stackStatus.test.ts).
 // `fakePerk`/`plantSession` stay in testing/harness.ts and `writePlanRef` in substrate/cache.ts —
 // import those from their real homes.
 
