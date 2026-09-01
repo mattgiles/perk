@@ -38,9 +38,6 @@ import { registerSelfcheck } from "./doors/selfcheck.ts";
 import { registerOpenStackReview, registerStackReviewBrowser } from "./doors/stackReviewBrowser.ts";
 import { registerSubmit } from "./doors/submit.ts";
 import { registerSubmitPrReview } from "./doors/submitPrReview.ts";
-import { registerGistAuthor } from "./factories/gistAuthor.ts";
-import { registerGistDraft } from "./factories/gistDraft.ts";
-import { registerGistSave } from "./factories/gistSave.ts";
 import { registerImplementHere } from "./factories/implementHere.ts";
 import { registerObjective } from "./factories/objective.ts";
 import { registerObjectiveAuthor } from "./factories/objectiveAuthor.ts";
@@ -52,6 +49,7 @@ import { registerPlanMode } from "./factories/planMode.ts";
 import { registerPlanReview } from "./factories/planReview.ts";
 import { registerPlanSave } from "./factories/planSave.ts";
 import { createHunkFeedbackReceiver } from "./hunkFeedback/receiver.ts";
+import { installGistBindings, runGistReviewV1 } from "./pi/v1/gist.ts";
 import { createAgentScratchProvisioner, registerAgentScratch } from "./substrate/agentScratch.ts";
 import { registerBindingDelivery } from "./substrate/bindingDelivery.ts";
 import {
@@ -171,11 +169,13 @@ export default function (pi: ExtensionAPI) {
   // `plan_review`, perk's UNIVERSAL review door: plannotator-selected → the event-bus
   // bridge; ANY other selection → the first-party in-TUI editor review. It takes `gating` only to
   // COMPOSE the approvalSave seam on an APPROVED review (auto-save → D1a gate exit) — Invariant 1
-  // holds: the door composes the gate through the seam, never owns it. The injected wave-launch
+  // holds: the door composes the gate through the seam, never owns it. The gist review arm is
+  // composed HERE from the v1 gist installer (runGistReviewV1) so planReview.ts imports nothing
+  // from pi/ (one-directional pi/v1 → factories). The injected wave-launch
   // deps power the plannotator launch chooser (§8.23): the presence probe + the two door open
   // cores are composed HERE so planReview.ts imports nothing from door modules (the value-import
   // cycle break — planReviewBrowser.ts already value-imports planReview.ts).
-  registerPlanReview(pi, gating, {
+  registerPlanReview(pi, gating, runGistReviewV1, {
     present: () => plannotatorPresent(pi),
     plan: (ctx, opts) => openPlanReviewSurface(pi, ctx, gating, opts),
     objective: (ctx, opts) => openObjectiveReviewSurface(pi, ctx, gating, opts),
@@ -185,9 +185,11 @@ export default function (pi: ExtensionAPI) {
   // half). Keyed off (read-only gate AND stage === objective-author); planMode defers to it.
   registerObjectiveAuthor(pi, gating);
 
-  // Gist-author context injection (the gist mirror). Keyed off (read-only gate AND
-  // stage === gist-author); planMode defers to it too.
-  registerGistAuthor(pi, gating);
+  // The v1 gist installer: the gist-authoring context hook pair (this call sits at the frozen
+  // hooks-ordering slot the injection always held; planMode defers to it too), plus the
+  // `gist_draft`/`gist_save` tools and the `/gist-save` command (registration is name-keyed —
+  // only the hooks ordering is frozen).
+  installGistBindings(pi, gating);
   let sharedOk = false;
   try {
     sharedDir();
@@ -579,9 +581,6 @@ export default function (pi: ExtensionAPI) {
   // The `objective_draft` working-objective file tool (the plan_draft twin).
   registerObjectiveDraft(pi);
 
-  // The `gist_draft` working-gist file tool (the third draft carve-out).
-  registerGistDraft(pi);
-
   // Lifecycle gates: the dirty-repo switch/fork guard + the guard-only `/implement`.
   registerLifecycleGates(pi);
 
@@ -685,9 +684,6 @@ export default function (pi: ExtensionAPI) {
   // The warm `objective_save` door: the `objective_save` tool + `/objective-save` command
   // (the objective mirror of plan-save). Takes `gating` for the read-only → read-write boundary.
   registerObjectiveSave(pi, gating);
-
-  // The warm `gist_save` door: the `gist_save` tool + `/gist-save` command (the gist mirror).
-  registerGistSave(pi, gating);
 
   // The objective plan factory's warm transition surface: the `objective_node` bounded
   // tool (delegates to the Python cold door; `status:"done"` requires a completion audit) + the

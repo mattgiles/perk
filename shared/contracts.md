@@ -4771,9 +4771,12 @@ nothing, the subset being shared).
   provider adapters (`tombell` / `plannotator` — `extension/adapters/`; `juicesharp` is a
   borrowed-tool package, not an adapter), and the Python cold doors. The seven injected mode/bridge
   contexts (the persistent `before_agent_start` injections stripped on `context`, each injection
-  **dedup-guarded by a branch scan on its marker** — `branchCarries` in
-  `extension/substrate/workflowState.ts` — so a session carries ONE live copy of each context;
-  compaction dropping a copy naturally re-injects it) live under
+  **dedup-guarded by a marker scan** — `branchCarries` in
+  `extension/substrate/workflowState.ts`. The gist-owned injections — the gist-authoring
+  context and plannotator's gist flavor — scan the **compaction-active window**
+  (`activeContextWindow`), so the session carries ONE live copy and a compaction that drops it
+  naturally re-injects; the remaining injections scan the whole branch — one copy per session,
+  never re-injected post-compaction) live under
   `prompts/contexts/` — the mode contexts at the top level, the adapter bridges under
   `prompts/contexts/adapters/` — with each module's identity marker passed as the `{{ marker }}`
   render var (never a template literal), so the marker the strip handler scans for cannot drift

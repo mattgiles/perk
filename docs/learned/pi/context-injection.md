@@ -55,11 +55,13 @@ flavor even while the other flavor is active. Distinctive markers still matter: 
 live tool result quoting one can false-positive, at which point a typed message-entry scan is the
 escalation.
 
-`bindingDelivery` is the first active-window adopter. ToolGating's mode context, planMode,
-objectiveAuthor, gistAuthor, and the plannotator/tombell plan bridges still pass the full branch
-to `branchCarries`; whether each needs post-compaction re-injection remains unaudited. Do not
-infer that their current behavior is intentional. Escalate to `activeContextWindow` when the
-feature's delivery lifetime is model-context-bound.
+`bindingDelivery` is the first active-window adopter; the gist-owned injections (the
+gist-authoring context in `extension/pi/v1/gist.ts` and plannotator's gist flavor) migrated to
+the same pattern. ToolGating's mode context, planMode, objectiveAuthor, and the
+plannotator/tombell plan bridges still pass the full branch to `branchCarries`; whether each
+needs post-compaction re-injection remains unaudited. Do not infer that their current behavior
+is intentional. Escalate to `activeContextWindow` when the feature's delivery lifetime is
+model-context-bound.
 
 An adjacent timing fact: slash commands do **not** fire `before_agent_start`, and a command
 handler reads the branch **as of the last completed turn**. A fresh session therefore shows 0–1

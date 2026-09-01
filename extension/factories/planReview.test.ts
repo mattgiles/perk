@@ -15,6 +15,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
+import { GIST_DRAFT_ARTIFACT } from "../authoring/gist/draft.ts";
 import {
   readSessionArtifact,
   type SessionDataCtx,
@@ -25,7 +26,6 @@ import type { EntrySink } from "../substrate/workflowState.ts";
 import { WORKFLOW_STATE_TYPE } from "../substrate/workflowState.ts";
 import type { ReportTarget } from "../surfaces/report.ts";
 import { loadPerkSession, scaffoldRepo } from "../testing/harness.ts";
-import { GIST_DRAFT_ARTIFACT } from "./gistDraft.ts";
 import { OBJECTIVE_DRAFT_ARTIFACT } from "./objectiveDraft.ts";
 import { PLAN_DRAFT_ARTIFACT } from "./planDraft.ts";
 import {
@@ -33,6 +33,7 @@ import {
   chooseReviewLaunch,
   executeObjectiveReview,
   executePlanReview,
+  type GistReviewArm,
   type PlanReviewUI,
   type ReviewLaunchUI,
   type ReviewOutcome,
@@ -46,6 +47,11 @@ function selectPlanProvider(cwd: string, id: string): void {
 }
 
 // ------------------------------------------------------------------------------ shared fakes
+
+/** The injected gist arm — throws on invocation: these tests never run the gist stage. */
+const noGistArm: GistReviewArm = async () => {
+  throw new Error("the gist arm must not be invoked outside the gist stage");
+};
 
 const PLAN_JSON = JSON.stringify({
   success: true,
@@ -288,6 +294,7 @@ test("dispatch: plannotator selected -> the bridge runs, the first-party UI is n
     ctx as unknown as ExtensionContext,
     fakeGating(true),
     bridge,
+    noGistArm,
     { plan: "# Param plan" },
   );
   assert.deepEqual(bridge.reviewed, ["# Param plan"], "the bridge reviewed the bytes");
@@ -307,7 +314,14 @@ test("dispatch: default perk-plan selection -> first-party runs with the draft b
   );
   const bridge = cannedBridge(APPROVED);
   const pi = fakeColdDoorPi(branch, { stdout: PLAN_JSON });
-  await executePlanReview(pi, ctx as unknown as ExtensionContext, fakeGating(true), bridge, {});
+  await executePlanReview(
+    pi,
+    ctx as unknown as ExtensionContext,
+    fakeGating(true),
+    bridge,
+    noGistArm,
+    {},
+  );
   assert.equal(bridge.reviewed.length, 0, "the plannotator bridge was never invoked");
   assert.equal(ui.editors.length, 1, "the editor dialog opened once");
   assert.equal(ui.editors[0]?.prefill, "# The draft\n", "the draft bytes were displayed");
@@ -329,6 +343,7 @@ test("dispatch: a foreign non-plannotator selection (tombell) -> first-party run
     ctx as unknown as ExtensionContext,
     fakeGating(true),
     bridge,
+    noGistArm,
     { plan: "# Param plan" },
   );
   assert.equal(bridge.reviewed.length, 0, "the plannotator bridge was never invoked");
@@ -410,6 +425,7 @@ test("plannotator approve + Direct Edits -> applied, written back, edited bytes 
       ctx as unknown as ExtensionContext,
       gating,
       cannedBridge(outcome),
+      noGistArm,
       {},
     );
     assert.equal(
@@ -455,6 +471,7 @@ test("plannotator approve + edits-only Direct Edits -> no remainder, no reviewer
       ctx as unknown as ExtensionContext,
       gating,
       cannedBridge(outcome),
+      noGistArm,
       {},
     );
     assert.equal(readFileSync(drafted, "utf8"), DE_PATCHED, "edits written back");
@@ -485,6 +502,7 @@ test("plannotator approve + unapplyable Direct Edits -> verbatim save + loud war
       ctx as unknown as ExtensionContext,
       gating,
       cannedBridge(outcome),
+      noGistArm,
       {},
     );
     assert.equal(readFileSync(drafted, "utf8"), "# A different draft\n", "the draft is untouched");
@@ -521,6 +539,7 @@ test("plannotator approve + heading but unparseable section -> verbatim save + w
       ctx as unknown as ExtensionContext,
       gating,
       cannedBridge(outcome),
+      noGistArm,
       {},
     );
     assert.equal(readFileSync(drafted, "utf8"), DE_BASE, "the draft is untouched");
@@ -552,6 +571,7 @@ test("plannotator approve + Direct Edits + failed write-back -> verbatim save + 
       ctx as unknown as ExtensionContext,
       fakeGating(true),
       cannedBridge(outcome),
+      noGistArm,
       { plan: DE_BASE },
     );
     const argv = argvs[0] ?? [];
@@ -581,6 +601,7 @@ test("plannotator approve + ordinary feedback -> byte-stable (no edits machinery
       ctx as unknown as ExtensionContext,
       gating,
       cannedBridge(outcome),
+      noGistArm,
       {},
     );
     assert.equal(readFileSync(drafted, "utf8"), DE_BASE, "the draft is untouched");
@@ -612,6 +633,7 @@ test("plannotator deny + Direct Edits -> feedback passes through untouched (mode
     ctx as unknown as ExtensionContext,
     gating,
     cannedBridge(outcome),
+    noGistArm,
     {},
   );
   assert.equal(readFileSync(drafted, "utf8"), DE_BASE, "deny never mutates the draft");
@@ -750,6 +772,7 @@ test("chooser: eligible round offers the two launch flavors; 'Browser review onl
     s.ctx as unknown as ExtensionContext,
     s.gating,
     bridge,
+    noGistArm,
     {},
     undefined,
     wave,
@@ -775,6 +798,7 @@ test("chooser: the wave choice -> opener runs (trimmed custom), non-terminating 
     s.ctx as unknown as ExtensionContext,
     s.gating,
     bridge,
+    noGistArm,
     {},
     undefined,
     wave,
@@ -801,6 +825,7 @@ test("chooser: a null opener return (port-pick failure) -> falls through to the 
     s.ctx as unknown as ExtensionContext,
     s.gating,
     bridge,
+    noGistArm,
     {},
     undefined,
     wave,
@@ -824,6 +849,7 @@ test("chooser: param-tier source -> no chooser, plain review (the drafts-only la
     ctx as unknown as ExtensionContext,
     fakeGating(true),
     bridge,
+    noGistArm,
     { plan: "# Param plan" },
     undefined,
     wave,
@@ -842,6 +868,7 @@ test("chooser: present() false OR wave undefined -> no chooser, byte-stable plai
       s.ctx as unknown as ExtensionContext,
       s.gating,
       bridge,
+      noGistArm,
       {},
       undefined,
       wave,
@@ -869,6 +896,7 @@ test("chooser: an abort landing during the awaited opener -> aborted, never wave
     s.ctx as unknown as ExtensionContext,
     s.gating,
     bridge,
+    noGistArm,
     {},
     controller.signal,
     wave,
@@ -1000,7 +1028,7 @@ test("objective wave arm: a null opener return (port-pick failure) -> falls thro
   assert.match(String(result.content[0]?.text), /DENIED/);
 });
 
-test("gist arm: never sees a chooser (no gist wave door exists)", async () => {
+test("gist stage: routes to the INJECTED gist arm (plan param ignored; no chooser; no plan path)", async () => {
   const cwd = scaffoldRepo();
   selectPlanProvider(cwd, "plannotator-plan");
   const branch: unknown[] = [
@@ -1019,19 +1047,32 @@ test("gist arm: never sees a chooser (no gist wave door exists)", async () => {
   );
   const wave = fakeWave({});
   const bridge = cannedBridge(DENIED);
-  await executePlanReview(
-    fakeColdDoorPi(branch, { stdout: PLAN_JSON }),
+  const gating = fakeGating(true);
+  const pi = fakeColdDoorPi(branch, { stdout: PLAN_JSON });
+  const armCalls: { bridge: unknown; gating: unknown }[] = [];
+  const observingArm: GistReviewArm = async (armPi, _armCtx, armGating, armBridge) => {
+    armCalls.push({ bridge: armBridge, gating: armGating });
+    assert.equal(armPi, pi, "the arm receives the door's pi");
+    return { content: [{ type: "text", text: "ARM RESULT" }], details: { ok: true } };
+  };
+  const result = await executePlanReview(
+    pi,
     ctx as unknown as ExtensionContext,
-    fakeGating(true),
+    gating,
     bridge,
-    {},
+    observingArm,
+    { plan: "# A plan param (never a source here)" },
     undefined,
     wave,
   );
-  assert.equal(ui.selects.length, 0, "no chooser on the gist arm");
+  assert.equal(armCalls.length, 1, "the injected arm was called exactly once");
+  assert.equal(armCalls[0]?.bridge, bridge, "the door's bridge is threaded into the arm");
+  assert.equal(armCalls[0]?.gating, gating, "the door's gating is threaded into the arm");
+  assert.equal(result.content[0]?.text, "ARM RESULT", "the arm's result is returned verbatim");
+  assert.equal(ui.selects.length, 0, "no chooser on the gist stage");
   assert.equal(wave.planCalls.length, 0);
   assert.equal(wave.objectiveCalls.length, 0);
-  assert.equal(bridge.reviewed.length, 1, "the plain gist bridge review ran");
+  assert.equal(bridge.reviewed.length, 0, "the plan path never ran");
 });
 
 // ----------------------------------------------------------- chooseReviewLaunch (unit, pure ui)
@@ -1139,7 +1180,7 @@ function recordingPi(defs: RegisteredToolDef[]): ExtensionAPI {
 
 test("registerPlanReview: the tool description + a guideline name the wave arm (wave_launched)", () => {
   const defs: RegisteredToolDef[] = [];
-  registerPlanReview(recordingPi(defs), fakeGating(true));
+  registerPlanReview(recordingPi(defs), fakeGating(true), noGistArm);
   const def = defs.find((d) => d.name === "plan_review");
   assert.ok(def, "plan_review registered");
   assert.match(String(def?.description), /reviewer wave/, "the description names the wave arm");
@@ -1157,7 +1198,7 @@ test("registerPlanReview: the injected wave deps thread through the registered t
   // with the deps injected at registration to pin the forwarding end-to-end.
   const defs: RegisteredToolDef[] = [];
   const wave = fakeWave({});
-  registerPlanReview(recordingPi(defs), fakeGating(true), wave);
+  registerPlanReview(recordingPi(defs), fakeGating(true), noGistArm, wave);
   const def = defs.find((d) => d.name === "plan_review");
   assert.ok(def?.execute, "plan_review registered with an execute");
   const s = chooserScaffold({ select: [LAUNCH_WAVE], input: [undefined] });

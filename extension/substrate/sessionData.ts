@@ -29,6 +29,12 @@
 //   RELOAD/COMPACTION ⇒ same run_id ⇒ pointer + dir persist. CONCURRENT SESSIONS ⇒ run_id
 //   keying isolates dirs and pointers alike — validation never crosses run_ids.
 //
+// One artifact-discipline implementation: the classified cores (`writeSessionArtifactClassified`
+// / `readSessionArtifactClassified`) own the full write→read-back→digest→pointer-append and
+// pointer-validated-read algorithms; `writeSessionArtifact`/`readSessionArtifact` are thin
+// null-collapsing wrappers for the callers that predate the `session/` WorkflowSession seam
+// (which delegates to the same cores) — the wrappers die when their last caller migrates.
+//
 // Imports only node builtins + cache.ts + workflowState.ts + report.ts so the module stays
 // loadable under `node --test`; accepts a minimal structural ctx (`BranchSource & { cwd }`).
 
@@ -50,6 +56,13 @@ import {
 export interface SessionDataCtx extends BranchSource {
   cwd: string;
 }
+
+/**
+ * The composed context the artifact WRITE core needs (`SessionDataCtx` for paths/branch +
+ * `ReportTarget` for the strict-append seam's loud failure reporting). Exported so `session/`
+ * consumes the reporting slice THROUGH this seam without importing `surfaces/` directly.
+ */
+export type SessionArtifactCtx = SessionDataCtx & ReportTarget;
 
 /**
  * The current session's run_id from the rebuilt workflow-state; `null` when the session has no
@@ -145,30 +158,130 @@ function artifactMapsEqual(
 }
 
 /**
- * Write a session artifact AND record its provenance pointer in `perk:workflow-state`.
- * Returns the absolute written path only when the artifact is *fully recorded* (file written,
- * read back, digested, pointer strict-appended); `null` on any failure — the seam/module has
- * already warned, and an orphan file (pointer-append failure) is gitignored scratch for the
- * GC to prune. Never throws.
+ * The classified write outcome. `applied`/`unchanged` are the consumable arms (file + pointer
+ * agree); `rejected` means the write was refused BEFORE any effect landed; `unverified` means an
+ * effect may have landed (an orphan file, an unproven pointer) but the read-back proof failed —
+ * the artifact is NOT consumable (gitignored scratch for the GC to prune).
  */
-export function writeSessionArtifact(
+export type SessionArtifactWriteResult =
+  | { status: "applied"; path: string; pointer: SessionArtifactPointer }
+  | { status: "unchanged"; path: string; pointer: SessionArtifactPointer }
+  | { status: "unverified"; problem: string }
+  | { status: "rejected"; problem: string };
+
+/**
+ * The classified read outcome. `absent` is the silent, branchable tier (no identity / no
+ * pointer / a cross-run fork pointer — designed isolation); `invalid` is the loud tier (a
+ * pointer whose file is missing, unreadable, or digest-mismatched — rewind/tamper; the core has
+ * already warned on stderr).
+ */
+export type SessionArtifactReadResult =
+  | { status: "found"; path: string; content: string }
+  | { status: "absent" }
+  | { status: "invalid"; problem: string };
+
+/**
+ * Validate a session-artifact name at the seam: non-empty, no path separators (the artifact
+ * name keys the pointer map and joins under the run's data dir — a separator would escape it).
+ * Returns the problem string, or `null` when the name is safe. Shared with the in-memory
+ * WorkflowSession backing so both backings refuse identically.
+ */
+export function sessionArtifactNameProblem(name: string): string | null {
+  if (name.trim() === "") return "session artifact name is empty";
+  if (name.includes("/") || name.includes("\\")) {
+    return `session artifact name ${JSON.stringify(name)} carries a path separator`;
+  }
+  return null;
+}
+
+/**
+ * Accept a persisted pointer only when it is SHAPE-SOUND: branch data is cast, never validated
+ * (`rebuildWorkflowState` trusts entry data), so a malformed session entry can put `null` — or
+ * anything else — where a pointer belongs. The cores dereference only `run_id` + `digest`
+ * (`path` is always derived, `name` is the map key), so those are the fields the shape check
+ * demands; anything unsound reads as "no pointer" and never throws.
+ */
+function soundPointer(candidate: unknown): SessionArtifactPointer | null {
+  if (typeof candidate !== "object" || candidate === null) return null;
+  const pointer = candidate as Partial<SessionArtifactPointer>;
+  if (typeof pointer.run_id !== "string" || typeof pointer.digest !== "string") return null;
+  return pointer as SessionArtifactPointer;
+}
+
+/**
+ * The currently-recorded pointer for `name` when it is VALID for this run and matches the
+ * on-disk bytes (quiet: the unchanged-short-circuit probe must never emit the read tier's
+ * rewind warnings — a stale/broken/malformed state simply fails the probe and the write
+ * proceeds).
+ */
+function currentValidPointer(
+  ctx: SessionDataCtx,
+  runId: string,
+  name: string,
+): { path: string; pointer: SessionArtifactPointer; diskDigest: string } | null {
+  let pointer: SessionArtifactPointer | null;
+  try {
+    pointer = soundPointer(rebuildWorkflowState(branchOf(ctx)).session_artifacts?.[name]);
+  } catch {
+    return null;
+  }
+  if (pointer === null || pointer.run_id !== runId) return null;
+  const path = join(sessionDataDir(ctx.cwd, runId), name);
+  let disk: string;
+  try {
+    disk = readFileSync(path, "utf8");
+  } catch {
+    return null;
+  }
+  const diskDigest = digestSessionData(disk);
+  if (diskDigest !== pointer.digest) return null;
+  return { path, pointer, diskDigest };
+}
+
+/**
+ * The classified artifact-write core: validate the name → the unchanged short-circuit (a valid
+ * current pointer whose on-disk digest equals the new content's → no write, no append) → atomic
+ * file write → read-back + digest → merged-map strict-append. Every failure tier keeps its
+ * existing stderr warning; never throws.
+ */
+export function writeSessionArtifactClassified(
   sink: EntrySink,
-  ctx: SessionDataCtx & ReportTarget,
+  ctx: SessionArtifactCtx,
   name: string,
   content: string,
-): string | null {
+): SessionArtifactWriteResult {
+  const nameProblem = sessionArtifactNameProblem(name);
+  if (nameProblem !== null) return { status: "rejected", problem: nameProblem };
+
+  const runId = activeSessionRunId(ctx);
+  if (runId === null) {
+    return {
+      status: "rejected",
+      problem: "session has no run_id — session artifacts need identity",
+    };
+  }
+
+  // The unchanged short-circuit: a byte-identical rewrite is a no-op (no write, no fresh
+  // pointer entry) — the recorded pointer already proves exactly these bytes.
+  const current = currentValidPointer(ctx, runId, name);
+  if (current !== null && current.diskDigest === digestSessionData(content)) {
+    return { status: "unchanged", path: current.path, pointer: current.pointer };
+  }
+
   const written = writeSessionData(ctx, name, content);
-  if (written === null) return null; // already warned; never point at an unwritten file
+  if (written === null) {
+    // already warned; never point at an unwritten file
+    return { status: "rejected", problem: `could not write session data ${name} (see warnings)` };
+  }
 
   // Digest the bytes as read back from disk — catches encoding/disk surprises.
   const readBack = readSessionData(ctx, name);
   if (readBack === null) {
-    console.error(`perk: warning: session artifact ${written} unreadable after write`);
-    return null;
+    const problem = `session artifact ${written} unreadable after write`;
+    console.error(`perk: warning: ${problem}`);
+    return { status: "unverified", problem };
   }
 
-  const runId = activeSessionRunId(ctx);
-  if (runId === null) return null; // unreachable after a successful write; belt-and-braces
   const pointer: SessionArtifactPointer = {
     run_id: runId,
     name,
@@ -190,42 +303,83 @@ export function writeSessionArtifact(
     failure: `session_artifacts pointer read-back failed for ${name}`,
     equals: artifactMapsEqual,
   });
-  return ok ? written : null;
+  if (!ok) {
+    // already reported through the strict-append seam
+    return {
+      status: "unverified",
+      problem: `session_artifacts pointer read-back failed for ${name}`,
+    };
+  }
+  return { status: "applied", path: written, pointer };
 }
 
 /**
- * Read a session artifact through its provenance pointer; fail-open `null` when validation
- * refuses. Tiering: no identity / no pointer / run_id mismatch (the designed fork-isolation
- * path) → silent `null`; pointer matches but the file is absent, unreadable, or its digest
- * differs (rewind, tamper) → stderr warning + `null`. The path is always DERIVED from
- * `run_id` + `name` via the seam — `pointer.path` is never dereferenced. Never throws.
+ * The classified artifact-read core: no identity / no pointer / a cross-run pointer (fork
+ * isolation) → `absent` (silent by design); a pointer whose file is missing, unreadable, or
+ * digest-mismatched (rewind, tamper) → `invalid` with the stderr warning. The path is always
+ * DERIVED from `run_id` + `name` via the seam — `pointer.path` is never dereferenced. Never
+ * throws.
  */
-export function readSessionArtifact(
+export function readSessionArtifactClassified(
   ctx: SessionDataCtx,
   name: string,
-): { path: string; content: string } | null {
+): SessionArtifactReadResult {
   const runId = activeSessionRunId(ctx);
-  if (runId === null) return null;
-  let pointer: SessionArtifactPointer | undefined;
+  if (runId === null) return { status: "absent" };
+  let pointer: SessionArtifactPointer | null;
   try {
-    pointer = rebuildWorkflowState(branchOf(ctx)).session_artifacts?.[name];
+    pointer = soundPointer(rebuildWorkflowState(branchOf(ctx)).session_artifacts?.[name]);
   } catch {
-    return null;
+    return { status: "absent" };
   }
-  if (pointer === undefined) return null;
-  if (pointer.run_id !== runId) return null; // fork / concurrent isolation — by design, silent
+  if (pointer === null) return { status: "absent" }; // no pointer — or a malformed one (no provenance)
+  if (pointer.run_id !== runId) return { status: "absent" }; // fork isolation — by design, silent
 
   const path = join(sessionDataDir(ctx.cwd, runId), name);
   const content = readSessionData(ctx, name);
   if (content === null) {
     console.error(`perk: warning: session artifact ${name} has a pointer but no file at ${path}`);
-    return null;
+    return { status: "invalid", problem: `session artifact ${name} has a pointer but no file` };
   }
   if (digestSessionData(content) !== pointer.digest) {
     console.error(
       `perk: warning: session artifact ${path} digest mismatch (rewound or modified) — refusing`,
     );
-    return null;
+    return {
+      status: "invalid",
+      problem: `session artifact ${name} digest mismatch (rewound or modified)`,
+    };
   }
-  return { path, content };
+  return { status: "found", path, content };
+}
+
+/**
+ * Write a session artifact AND record its provenance pointer in `perk:workflow-state` — the
+ * null-collapsing wrapper over `writeSessionArtifactClassified` for callers that predate the
+ * WorkflowSession seam (it dies when its last caller migrates). Returns the absolute path when
+ * the artifact is *fully recorded* (`applied`, or the byte-identical `unchanged` short-circuit);
+ * `null` on any failure — the core has already warned. Never throws.
+ */
+export function writeSessionArtifact(
+  sink: EntrySink,
+  ctx: SessionArtifactCtx,
+  name: string,
+  content: string,
+): string | null {
+  const result = writeSessionArtifactClassified(sink, ctx, name, content);
+  return result.status === "applied" || result.status === "unchanged" ? result.path : null;
+}
+
+/**
+ * Read a session artifact through its provenance pointer — the null-collapsing wrapper over
+ * `readSessionArtifactClassified` for callers that predate the WorkflowSession seam (it dies
+ * when its last caller migrates): `absent` and `invalid` both collapse to `null` (the core has
+ * already warned on the loud tier). Never throws.
+ */
+export function readSessionArtifact(
+  ctx: SessionDataCtx,
+  name: string,
+): { path: string; content: string } | null {
+  const result = readSessionArtifactClassified(ctx, name);
+  return result.status === "found" ? { path: result.path, content: result.content } : null;
 }

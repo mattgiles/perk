@@ -21,9 +21,12 @@ import {
   digestSessionData,
   ensureSessionDataDir,
   readSessionArtifact,
+  readSessionArtifactClassified,
   readSessionData,
   type SessionDataCtx,
+  sessionArtifactNameProblem,
   writeSessionArtifact,
+  writeSessionArtifactClassified,
   writeSessionData,
 } from "./sessionData.ts";
 import { type EntrySink, rebuildWorkflowState, WORKFLOW_STATE_TYPE } from "./workflowState.ts";
@@ -444,3 +447,174 @@ test("missing file despite a pointer ⇒ warn + null", () => {
 function branchOfArr(branch: unknown[]) {
   return branch as Parameters<typeof rebuildWorkflowState>[0];
 }
+
+// --- the classified cores -----------------------------------------------------------------------
+
+test("classified write: applied carries the recorded pointer + absolute path", () => {
+  const cwd = tempCwd();
+  try {
+    const branch: unknown[] = [runIdEntry("RID")];
+    const ctx = reportableCtx(cwd, branch);
+    const result = writeSessionArtifactClassified(fakeSink(branch), ctx, "draft.md", "hello");
+    assert.equal(result.status, "applied");
+    assert.ok(result.status === "applied");
+    assert.equal(result.path, join(sessionDataDir(cwd, "RID"), "draft.md"));
+    assert.deepEqual(
+      rebuildWorkflowState(branchOfArr(branch)).session_artifacts?.["draft.md"],
+      result.pointer,
+    );
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+test("unchanged short-circuit: a byte-identical rewrite appends NO fresh pointer entry", () => {
+  const cwd = tempCwd();
+  try {
+    const branch: unknown[] = [runIdEntry("RID")];
+    const ctx = reportableCtx(cwd, branch);
+    const sink = fakeSink(branch);
+    const first = writeSessionArtifactClassified(sink, ctx, "draft.md", "same");
+    assert.equal(first.status, "applied");
+    const afterFirst = branch.length;
+
+    const second = writeSessionArtifactClassified(sink, ctx, "draft.md", "same");
+    assert.equal(second.status, "unchanged");
+    assert.ok(first.status === "applied" && second.status === "unchanged");
+    assert.equal(second.path, first.path);
+    assert.deepEqual(second.pointer, first.pointer, "the recorded pointer is returned as-is");
+    assert.equal(branch.length, afterFirst, "no fresh pointer entry appended");
+
+    // The wrapper collapses unchanged to the same non-null path (callers keep their contract).
+    assert.equal(writeSessionArtifact(sink, ctx, "draft.md", "same"), first.path);
+    assert.equal(branch.length, afterFirst);
+
+    // Different bytes end the short-circuit: a fresh pointer lands.
+    const third = writeSessionArtifactClassified(sink, ctx, "draft.md", "changed");
+    assert.equal(third.status, "applied");
+    assert.equal(branch.length, afterFirst + 1);
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+test("malformed persisted pointer: the write probe and the read classify — never throw", () => {
+  // Branch data is cast, not validated: a malformed session entry can put null (or any
+  // non-pointer value) where a pointer belongs. The write's unchanged probe must treat it as
+  // "no current pointer" (the write proceeds and REPLACES it); the read must classify `absent`.
+  const cwd = tempCwd();
+  try {
+    for (const malformed of [null, "not-a-pointer", 7, { run_id: 42 }, { digest: "sha" }]) {
+      const branch: unknown[] = [
+        runIdEntry("RID"),
+        {
+          type: "custom",
+          customType: WORKFLOW_STATE_TYPE,
+          data: { session_artifacts: { "draft.md": malformed } },
+        },
+      ];
+      const ctx = reportableCtx(cwd, branch);
+      const read = readSessionArtifactClassified(ctx, "draft.md");
+      assert.equal(read.status, "absent", `read classifies (${JSON.stringify(malformed)})`);
+
+      const written = writeSessionArtifactClassified(fakeSink(branch), ctx, "draft.md", "fresh");
+      assert.equal(written.status, "applied", `write proceeds (${JSON.stringify(malformed)})`);
+      const repaired = rebuildWorkflowState(branchOfArr(branch)).session_artifacts?.["draft.md"];
+      assert.equal(repaired?.run_id, "RID", "the malformed pointer was replaced by a sound one");
+      rmSync(join(cwd, ".perk"), { recursive: true, force: true });
+    }
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+test("classified write: name validation rejects before any effect", () => {
+  const cwd = tempCwd();
+  try {
+    const branch: unknown[] = [runIdEntry("RID")];
+    const ctx = reportableCtx(cwd, branch);
+    for (const name of ["", "  ", "a/b.md", "a\\b.md"]) {
+      const result = writeSessionArtifactClassified(fakeSink(branch), ctx, name, "x");
+      assert.equal(result.status, "rejected", `name ${JSON.stringify(name)}`);
+      assert.notEqual(sessionArtifactNameProblem(name), null);
+    }
+    assert.equal(branch.length, 1, "nothing appended");
+    assert.deepEqual(readdirSync(cwd), [], "nothing on disk");
+    assert.equal(sessionArtifactNameProblem("draft.md"), null);
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+test("classified write: no identity → rejected; pointer-append failure → unverified", () => {
+  const cwd = tempCwd();
+  try {
+    const bare: unknown[] = [];
+    const noIdentity = writeSessionArtifactClassified(
+      fakeSink(bare),
+      reportableCtx(cwd, bare),
+      "draft.md",
+      "x",
+    );
+    assert.equal(noIdentity.status, "rejected");
+
+    const branch: unknown[] = [runIdEntry("RID")];
+    const droppingSink: EntrySink = { appendEntry: () => {} };
+    let result: ReturnType<typeof writeSessionArtifactClassified> | undefined;
+    const warnings = captureStderr(() => {
+      result = writeSessionArtifactClassified(
+        droppingSink,
+        reportableCtx(cwd, branch),
+        "draft.md",
+        "x",
+      );
+    });
+    assert.equal(result?.status, "unverified");
+    assert.ok(warnings.some((line) => line.includes("pointer read-back failed")));
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+test("classified read: found / absent (no pointer, cross-run) / invalid (missing, rewound)", () => {
+  const cwd = tempCwd();
+  try {
+    const branch: unknown[] = [runIdEntry("RID")];
+    const ctx = reportableCtx(cwd, branch);
+    const sink = fakeSink(branch);
+
+    assert.deepEqual(readSessionArtifactClassified(ctx, "draft.md"), { status: "absent" });
+
+    assert.equal(writeSessionArtifactClassified(sink, ctx, "draft.md", "v1").status, "applied");
+    const found = readSessionArtifactClassified(ctx, "draft.md");
+    assert.equal(found.status, "found");
+    assert.ok(found.status === "found" && found.content === "v1");
+
+    // Cross-run (fork) pointer → silent absent.
+    const forked = reportableCtx(cwd, [...branch, runIdEntry("RID.1")]);
+    const warnings = captureStderr(() => {
+      assert.deepEqual(readSessionArtifactClassified(forked, "draft.md"), { status: "absent" });
+    });
+    assert.deepEqual(warnings, [], "fork isolation stays silent");
+
+    // Rewind (digest mismatch) → invalid, loud.
+    writeFileSync(join(sessionDataDir(cwd, "RID"), "draft.md"), "v2-on-disk", "utf8");
+    let rewound: ReturnType<typeof readSessionArtifactClassified> | undefined;
+    const rewoundWarnings = captureStderr(() => {
+      rewound = readSessionArtifactClassified(ctx, "draft.md");
+    });
+    assert.equal(rewound?.status, "invalid");
+    assert.ok(rewoundWarnings.some((line) => line.includes("digest mismatch")));
+
+    // Missing file → invalid, loud.
+    rmSync(join(sessionDataDir(cwd, "RID"), "draft.md"));
+    let missing: ReturnType<typeof readSessionArtifactClassified> | undefined;
+    const missingWarnings = captureStderr(() => {
+      missing = readSessionArtifactClassified(ctx, "draft.md");
+    });
+    assert.equal(missing?.status, "invalid");
+    assert.ok(missingWarnings.some((line) => line.includes("has a pointer but no file")));
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
