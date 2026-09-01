@@ -1,14 +1,17 @@
 // Direct feature tests for the change-publication operation (delivery/submit.ts): ordering and
 // atomicity via call-order recorders over fake ports — pre-effect failure (no session-side
-// activity), verified success (pointer + reset-on-clean), the bounded conflict decision, and
-// the deliberately unchecked-increment submit-surface posture. OFFLINE — no Pi, no cold door.
+// activity), verified success (pointer + reset-on-clean), the shared budget transition
+// (inspect/commit), and the bounded conflict decision with the surface-uniform withhold
+// posture. OFFLINE — no Pi, no cold door.
 
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
   CONFLICT_RESOLUTION_ATTEMPT_CAP,
   type ConflictAttempts,
+  commitConflictAttempt,
   decideConflictFollowUp,
+  inspectConflictBudget,
   type PublishAttempt,
   type PublishDeps,
   type PublishedChange,
@@ -131,6 +134,36 @@ test("publishVerified: a throwing readRunId propagates BEFORE the external publi
   assert.deepEqual(calls, [], "the publish port was never invoked");
 });
 
+// --- the shared budget transition (inspect → commit) -----------------------------------------
+
+test("inspectConflictBudget: under the cap ⇒ available with the next attempt number", () => {
+  for (const n of [0, CONFLICT_RESOLUTION_ATTEMPT_CAP - 1]) {
+    const rec = fakeAttempts({ value: n });
+    assert.deepEqual(inspectConflictBudget(rec.attempts), {
+      kind: "available",
+      next: n + 1,
+      cap: CONFLICT_RESOLUTION_ATTEMPT_CAP,
+    });
+    assert.deepEqual(rec.writes, [], "inspect never writes");
+  }
+});
+
+test("inspectConflictBudget: at (and past) the cap ⇒ exhausted with the observed count", () => {
+  for (const n of [CONFLICT_RESOLUTION_ATTEMPT_CAP, CONFLICT_RESOLUTION_ATTEMPT_CAP + 3]) {
+    const rec = fakeAttempts({ value: n });
+    assert.deepEqual(inspectConflictBudget(rec.attempts), { kind: "exhausted", attempts: n });
+  }
+});
+
+test("commitConflictAttempt: the seam's strict read-back boolean passes through unsoftened", () => {
+  const ok = fakeAttempts({ writeResult: true });
+  assert.equal(commitConflictAttempt(ok.attempts, 1), true);
+  assert.deepEqual(ok.writes, [1]);
+  const miss = fakeAttempts({ writeResult: false });
+  assert.equal(commitConflictAttempt(miss.attempts, 2), false);
+  assert.deepEqual(miss.writes, [2]);
+});
+
 // --- decideConflictFollowUp -----------------------------------------------------------------
 
 test("decideConflictFollowUp: mergeable true/null/absent ⇒ none (no counter activity)", () => {
@@ -174,14 +207,15 @@ test('decideConflictFollowUp: base absent ⇒ ""', () => {
   assert.ok(followUp.kind === "drive" && followUp.base === "");
 });
 
-test("decideConflictFollowUp: an unverified increment write still drives (submit-path parity)", () => {
-  // The deliberately preserved posture: today's drive proceeds when the increment append fails
-  // its read-back — the seam's loud warning is the mitigation (the declined reviewer hardening
-  // is recorded in the plan's Assumptions; the sync path withholds instead).
+test("decideConflictFollowUp: an unpersisted increment withholds the dispatch (no drive)", () => {
+  // The surface-uniform withhold posture: a `false` read-back means the counter is
+  // unverifiable, and an unverifiable counter must never bypass the cap — the decision is
+  // `withheld` (the adapter reports loudly, injects nothing). A THROWING read/write still
+  // propagates — the 7.2-pinned load-bearing failure arm (recorded as unchanged).
   const rec = fakeAttempts({ value: 0, writeResult: false });
   const followUp = decideConflictFollowUp({ ...CHANGE, mergeable: false }, rec.attempts);
-  assert.equal(followUp.kind, "drive");
-  assert.deepEqual(rec.writes, [1], "the write was attempted, its false result not gating");
+  assert.deepEqual(followUp, { kind: "withheld", base: "main" });
+  assert.deepEqual(rec.writes, [1], "the write was attempted; its false result gates the drive");
 });
 
 // --- submitChange ---------------------------------------------------------------------------
