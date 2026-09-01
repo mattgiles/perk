@@ -468,8 +468,9 @@ export const READINESS_PROBE_INTERVAL_MS = 1_000;
  */
 export const READINESS_PROBE_BUDGET_MS = 120_000;
 
-/** Pick a free ephemeral port: `node:net` listen(0) → read → close (injectable for tests). */
-export async function pickFreePort(): Promise<number> {
+/** Pick a free ephemeral port: `node:net` listen(0) → read → close (the internal default —
+ * tests inject through the `deps.pickFreePort` hook instead). */
+async function pickFreePort(): Promise<number> {
   return await new Promise<number>((resolve, reject) => {
     const server = createServer();
     server.once("error", reject);

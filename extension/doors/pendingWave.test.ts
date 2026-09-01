@@ -6,12 +6,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { WaveResult } from "../waves/reportWave.ts";
-import {
-  collectGraceMs,
-  collectPending,
-  type PendingWaveState,
-  WAVE_COLLECT_GRACE_MS,
-} from "./pendingWave.ts";
+import { collectGraceMs, collectPending, type PendingWaveState } from "./pendingWave.ts";
 
 function settled(keys: string[]): WaveResult {
   return {
@@ -89,16 +84,15 @@ test("collectPending: a supersede during the collect's await never erases the NE
 });
 
 test("collectGraceMs: the module default with the env override (invalid values fall back)", () => {
-  assert.equal(WAVE_COLLECT_GRACE_MS, 15_000);
   const prev = process.env.PERK_WAVE_COLLECT_GRACE_MS;
   try {
     delete process.env.PERK_WAVE_COLLECT_GRACE_MS;
-    assert.equal(collectGraceMs(), WAVE_COLLECT_GRACE_MS);
+    assert.equal(collectGraceMs(), 15_000, "the module default is the seam's contract");
     process.env.PERK_WAVE_COLLECT_GRACE_MS = "250";
     assert.equal(collectGraceMs(), 250);
     for (const bad of ["0", "-5", "nope", ""]) {
       process.env.PERK_WAVE_COLLECT_GRACE_MS = bad;
-      assert.equal(collectGraceMs(), WAVE_COLLECT_GRACE_MS, `invalid override falls back: ${bad}`);
+      assert.equal(collectGraceMs(), 15_000, `invalid override falls back: ${bad}`);
     }
   } finally {
     if (prev === undefined) delete process.env.PERK_WAVE_COLLECT_GRACE_MS;

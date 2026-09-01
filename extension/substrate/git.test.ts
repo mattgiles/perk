@@ -11,9 +11,9 @@ import { test } from "node:test";
 import {
   commitsSince,
   headSha,
-  indexHidesChanges,
   revalidationBracket,
   sinceBaseSha,
+  symbolicHead,
   worktreeDirty,
 } from "./git.ts";
 
@@ -74,6 +74,24 @@ test("headSha: the current sha in a repo, null outside one (fail-open)", () => {
   assert.ok(sha !== null && /^[0-9a-f]{40}$/.test(sha), `expected a full sha, got ${sha}`);
   const norepo = mkdtempSync(join(tmpdir(), "perk-git-norepo-"));
   assert.equal(headSha(norepo), null);
+});
+
+test("symbolicHead: a branch pointer resolves (unborn included); detached and non-repo do not", () => {
+  const { cwd, baseSha } = scratchRepo();
+  assert.ok(symbolicHead(cwd)?.startsWith("refs/heads/"), "a born branch pointer resolves");
+  const g = (...args: string[]) =>
+    execFileSync("git", args, { cwd, stdio: ["ignore", "ignore", "ignore"] });
+  g("checkout", "-q", "--detach", baseSha);
+  assert.equal(symbolicHead(cwd), null, "a detached HEAD is not a branch pointer");
+  const unborn = mkdtempSync(join(tmpdir(), "perk-git-unborn-"));
+  execFileSync("git", ["init", "-q"], { cwd: unborn, stdio: "ignore" });
+  assert.ok(
+    symbolicHead(unborn)?.startsWith("refs/heads/"),
+    "an unborn branch pointer resolves — the D1 unborn-vs-unprovable discriminator",
+  );
+  assert.equal(headSha(unborn), null, "sanity: the unborn HEAD has no sha");
+  const norepo = mkdtempSync(join(tmpdir(), "perk-git-norepo-"));
+  assert.equal(symbolicHead(norepo), null);
 });
 
 test("worktreeDirty: false on a clean tree, true when dirty, null outside a repo", () => {
@@ -148,18 +166,21 @@ test("revalidationBracket: an unprovable dirty probe drifts (the second fail-clo
   assert.match(result.detail ?? "", /cleanliness could not be verified/);
 });
 
-test("indexHidesChanges: false on a plain repo, true under skip-worktree/assume-unchanged, null outside a repo", () => {
+test("revalidationBracket: an assume-unchanged flag drifts (the flags arm, through the bracket)", () => {
+  // The privatized index probe is reached through its ONE consumer: a plain repo passes the
+  // bracket, an assume-unchanged flag fails it, and clearing the flag restores the pass.
   const { cwd } = scratchRepo();
+  const sha = headSha(cwd);
+  assert.ok(sha !== null);
   const g = (...args: string[]) =>
     execFileSync("git", args, { cwd, stdio: ["ignore", "ignore", "ignore"] });
-  assert.equal(indexHidesChanges(cwd), false);
-  g("update-index", "--skip-worktree", "seed.txt");
-  assert.equal(indexHidesChanges(cwd), true, "skip-worktree is detected");
-  g("update-index", "--no-skip-worktree", "seed.txt");
+  assert.deepEqual(revalidationBracket(cwd, sha), { ok: true, detail: null });
   g("update-index", "--assume-unchanged", "seed.txt");
-  assert.equal(indexHidesChanges(cwd), true, "assume-unchanged is detected");
-  const norepo = mkdtempSync(join(tmpdir(), "perk-git-norepo-"));
-  assert.equal(indexHidesChanges(norepo), null);
+  const flagged = revalidationBracket(cwd, sha);
+  assert.equal(flagged.ok, false, "assume-unchanged is detected");
+  assert.match(flagged.detail ?? "", /assume-unchanged\/skip-worktree/);
+  g("update-index", "--no-assume-unchanged", "seed.txt");
+  assert.deepEqual(revalidationBracket(cwd, sha), { ok: true, detail: null });
 });
 
 test("revalidationBracket: a flagged index drifts — status can no longer prove cleanliness", () => {

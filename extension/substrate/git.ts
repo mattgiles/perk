@@ -133,9 +133,11 @@ export function worktreeDirty(cwd: string): boolean | null {
  * `git status --porcelain`, so a status-based cleanliness proof over a flagged index is not a
  * proof. **Fail-open to null** on any failure (not a repo, git missing) — callers must NOT
  * conflate null with "no flags". Own `execFileSync` rather than the `git()` helper: `git()`
- * conflates empty output (an empty index — meaningful here) with failure.
+ * conflates empty output (an empty index — meaningful here) with failure. Module-private:
+ * `revalidationBracket`'s default flags probe is the one consumer (tests reach the arms through
+ * the bracket — real-repo flag arms — and its `probes` seam for the null arm).
  */
-export function indexHidesChanges(cwd: string): boolean | null {
+function indexHidesChanges(cwd: string): boolean | null {
   try {
     const out = execFileSync("git", ["ls-files", "-v"], {
       cwd,
