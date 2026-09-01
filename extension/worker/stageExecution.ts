@@ -462,7 +462,7 @@ export function initialPromptFor(stage: DriveStage, planRef: PlanRef | null): st
 
 /**
  * Drive one stage to terminal and return a structured `RunOutcome` — never throws (fail-soft like
- * `submitPr`). Seeds `initialPrompt`, races the driving `prompt()` against the budget watchdog and
+ * the delivery submit operation). Seeds `initialPrompt`, races the driving `prompt()` against the budget watchdog and
  * the external `signal`, classifies the terminal at idle, and disposes the adapter handle in
  * `finally` (guarded — a cleanup error can never replace the computed outcome). All session
  * mechanics go through the adapter's drive-session handle; policy stays here.

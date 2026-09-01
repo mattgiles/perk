@@ -404,7 +404,7 @@ export function scaffoldWorkerWorktree(opts: {
 export function fakePerkRouter(
   cwd: string,
   routes: Record<string, { json: unknown; code?: number }>,
-  opts: { argvFile?: string } = {},
+  opts: { argvFile?: string; fullArgvFile?: string } = {},
 ): string {
   const path = join(cwd, "fake-perk.sh");
   const branches = Object.entries(routes)
@@ -413,9 +413,14 @@ export function fakePerkRouter(
       return `  "${sub}") printf '%s' '${body}'; exit ${code ?? 0} ;;`;
     })
     .join("\n");
-  const capture = opts.argvFile
-    ? `printf '%s\\n' "$key" >> '${opts.argvFile.replace(/'/g, "'\\''")}'\n`
-    : "";
+  // `argvFile` records one routing key per invocation (subcommand-order pins); `fullArgvFile`
+  // records the COMPLETE argv, tab-separated, one invocation per line (wire/channel pins, e.g.
+  // a staged stdin flag + its temp-file path).
+  const capture =
+    (opts.argvFile ? `printf '%s\\n' "$key" >> '${opts.argvFile.replace(/'/g, "'\\''")}'\n` : "") +
+    (opts.fullArgvFile
+      ? `printf '%s\\t' "$@" >> '${opts.fullArgvFile.replace(/'/g, "'\\''")}'\nprintf '\\n' >> '${opts.fullArgvFile.replace(/'/g, "'\\''")}'\n`
+      : "");
   writeFileSync(
     path,
     `#!/usr/bin/env bash\nkey="$1"\nif [ -n "$2" ] && [ "\${2#-}" = "$2" ]; then key="$1 $2"; fi\n${capture}case "$key" in\n${branches}\n  *) >&2 echo "unexpected subcommand: $key"; exit 2 ;;\nesac\n`,

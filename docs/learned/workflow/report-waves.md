@@ -74,7 +74,7 @@ importer set, bans outside edges into `transport.ts`/`memoryAdapter.ts`, and cen
   `start_draft_review_wave`/`collect_draft_review_wave` tool pair
   (`extension/doors/draftReviewWaveTools.ts`), registered and census'd.
 - `reviewClassifierWave.ts` — `/address`'s single-lane classify wave behind the
-  `classify_review_feedback` tool (`extension/doors/address.ts`): ONE `perk.review-classifier`
+  `classify_review_feedback` tool (`extension/pi/v1/delivery/address.ts`): ONE `perk.review-classifier`
   lane, strict completeness, no retry (the flow's posture is "surface the error and stop").
 - `objectiveExplorerWave.ts` — the objective-plan factory's OPTIONAL single-lane explore wave
   behind `explore_objective_node` (`extension/pi/v1/objectivePlanning.ts`): ONE

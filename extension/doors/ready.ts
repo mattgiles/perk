@@ -6,7 +6,8 @@
 // address: it stamps the exact verified published head into the delivery journal (draft AND
 // non-draft PRs — mark-ready mechanics first, then the journal append), and every successful
 // stacked stamp continues into the ready-time reconcile pass (`driveReadyReconcile` — the warm
-// continuation, contracts.md §8.66). Mirrors `submit.ts`: write nothing, delegate via `pi.exec`,
+// continuation, contracts.md §8.66). Mirrors the submit bindings (`pi/v1/delivery/submit.ts`):
+// write nothing, delegate via `pi.exec`,
 // surface the structured result, never throw.
 
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";

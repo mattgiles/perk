@@ -179,6 +179,17 @@ export function openBranchWorkflowSession(
             failure: "last_review read-back failed",
           });
         }
+        case "record-review-batch": {
+          // No pre-read/dedupe by design (the corroborated-success ordering is feature-op
+          // policy upstream): at runtime this yields applied/unverified/rejected only.
+          return appendWorkflowStateClassified(sink, source, {
+            data: { last_review_batch: change.record },
+            field: "last_review_batch",
+            expected: change.record,
+            scope: "address",
+            failure: "last_review_batch read-back failed",
+          });
+        }
         case "append-review-post": {
           // Read-rebuild-append: each write carries the whole ordered list (the resume reader
           // sees every confirmed post); order-sensitive read-back. The rebuild here is

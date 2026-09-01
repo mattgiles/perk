@@ -170,8 +170,8 @@ const APPROVED_REGISTRAR_FILES = ["index.ts", "workerMain.ts"];
 // their approved migration plans (the operator confirmation: the flows' registration sites moved
 // wholesale into the adapter home, swapping their door entries).
 const RPC_ADAPTER_IMPORTERS = [
-  "doors/address.ts",
   "doors/draftReviewWaveTools.ts",
+  "pi/v1/delivery/address.ts",
   "pi/v1/codeReview/automated.ts",
   "pi/v1/codeReview/reviewWave.ts",
   "pi/v1/learning/audit.ts",
@@ -197,7 +197,6 @@ const TRANSPORT_TOKEN = /\bWAVE_RPC_|subagents:rpc:v1/;
 // join it (new registrations go under `pi/`). The three deleted gist factories left the census
 // in the activating change itself — the first burn-down.
 const LEGACY_REGISTRANTS = [
-  "doors/address.ts",
   "doors/commitCompact.ts",
   "doors/draftReviewWaveTools.ts",
   "doors/land.ts",
@@ -207,7 +206,6 @@ const LEGACY_REGISTRANTS = [
   "doors/planReviewBrowser.ts",
   "doors/ready.ts",
   "doors/selfcheck.ts",
-  "doors/submit.ts",
   "substrate/agentScratch.ts",
   "substrate/bindingDelivery.ts",
   "substrate/command.ts",
@@ -1210,8 +1208,8 @@ test("control 13: Rule G mutation fixtures (extra importer; interior edge; token
   // The other direction: a census entry whose live edge died must ALSO break the exact-set.
   const shrunk = new Map([...scan().edges].map(([file, targets]) => [file, [...targets]]));
   shrunk.set(
-    "doors/address.ts",
-    (shrunk.get("doors/address.ts") ?? []).filter((to) => to !== "waves/rpcAdapter.ts"),
+    "pi/v1/delivery/address.ts",
+    (shrunk.get("pi/v1/delivery/address.ts") ?? []).filter((to) => to !== "waves/rpcAdapter.ts"),
   );
   assert.notDeepEqual(
     transportConfinement(shrunk).rpcImporters,

@@ -7,7 +7,6 @@
 import { existsSync, mkdirSync } from "node:fs";
 import { basename, join } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { registerAddress } from "./doors/address.ts";
 import { registerCommitAndCompact } from "./doors/commitCompact.ts";
 import {
   createDraftReviewWaveState,
@@ -24,7 +23,6 @@ import { plannotatorPresent } from "./doors/plannotatorHandoff.ts";
 import { openPlanReviewSurface, registerPlanReviewBrowser } from "./doors/planReviewBrowser.ts";
 import { registerReady } from "./doors/ready.ts";
 import { registerSelfcheck } from "./doors/selfcheck.ts";
-import { registerSubmit } from "./doors/submit.ts";
 import { createHunkFeedbackReceiver } from "./hunkFeedback/receiver.ts";
 import { installAutomatedReviewBindings } from "./pi/v1/codeReview/automated.ts";
 import { installPrReviewBrowserBindings } from "./pi/v1/codeReview/browser.ts";
@@ -32,8 +30,10 @@ import { installReviewWaveBindings } from "./pi/v1/codeReview/reviewWave.ts";
 import { installStackReviewBindings } from "./pi/v1/codeReview/stack.ts";
 import { installCuratedSubmissionBindings } from "./pi/v1/codeReview/submit.ts";
 import { installPrReviewTerminalBindings } from "./pi/v1/codeReview/terminal.ts";
+import { installAddressBindings } from "./pi/v1/delivery/address.ts";
 import { installCiBindings } from "./pi/v1/delivery/ci.ts";
 import { installStackStatusBindings } from "./pi/v1/delivery/stackStatus.ts";
+import { installSubmitBindings } from "./pi/v1/delivery/submit.ts";
 import { installGistBindings } from "./pi/v1/gist.ts";
 import { installAuditBindings } from "./pi/v1/learning/audit.ts";
 import { installDreamBindings } from "./pi/v1/learning/dream.ts";
@@ -477,7 +477,7 @@ export default function (pi: ExtensionAPI) {
   registerLifecycleGates(pi);
 
   // Warm door: the `submit` tool + `/submit` command.
-  registerSubmit(pi);
+  installSubmitBindings(pi);
 
   // The warm `ready` door: the deliberate draft→ready review gate (submit keeps draft).
   // Takes `gating`: the warm ready→reconcile continuation refuses (loudly) to drive the
@@ -502,7 +502,7 @@ export default function (pi: ExtensionAPI) {
   // The warm `/address` review loop: the submit-then-resolve `finalize_address` tool + `/address`
   // command. Classify-then-act (the verbose feedback fetch + classification runs in an isolated
   // spawned child; the parent fixes actionable items and finalizes the committed repairs).
-  registerAddress(pi);
+  installAddressBindings(pi);
 
   // The warm `/pr-review` door: automated code review in a FRESH, isolated subagent that
   // POSTS its review to the PR (the deliberate departure from /address's read-only-child rule).

@@ -188,7 +188,7 @@ Future doors only test their own decode edges.
   previously asserted `exec_failed` + stderr-tail and now asserts the structured
   `error_type`/`message`. Expect one such test rename/flip per migration.
 - **One sibling-standard envelope-aware regression per tool**, modeled on
-  `extension/doors/submit.test.ts`.
+  `extension/pi/v1/delivery/submit.test.ts`.
 - **Strictening a formerly-unchecked `JSON.parse … as X` requires grepping the whole tree** for
   every fake/route emitting that door's payload — door test files, `fakePerkRouter` routes, and
   e2e scenarios (e.g. `extension/worker/workerE2e.test.ts`) — and bringing fixtures up to full contract
@@ -244,7 +244,7 @@ delegating to an existing cold door:
 - `extension/coldDoorGuard.test.ts` — the mandatory-delegation source-scan guard
 - `extension/doors/land.ts` — the advisory-drop + three-way-narrow exemplar
 - `extension/pi/v1/plan.ts` — `decodePlanSave`, the derive-don't-decode exemplar
-- `extension/doors/address.ts` — the fail-arm payload re-narrowing exemplar
+- `extension/pi/v1/delivery/address.ts` — the fail-arm payload re-narrowing exemplar
 - `docs/learned/workflow/warm-door-commands.md` — a warm door must render every cold-door outcome;
   this client is the mechanism
 - `docs/learned/pi/tool-param-decode.md` — the tool boundary's tri-state strict-fail decode (a

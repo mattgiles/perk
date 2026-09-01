@@ -944,6 +944,156 @@ and process mechanics in the Python exterior and adapters.
 >   ("perk CI: all checks passed." + all 8 ✓ rows) — the moved tool's execute/onUpdate/
 >   full-result path exercised end to end, green.
 
+> **Status (Objective #2083, Node 7.2):** slices 3–4 landed — the review-feedback transitions
+> (`classify_review_feedback`, `finalize_address`, `/address`) and submit + publication
+> (`submit`, `/submit`) — realized-shape notes:
+>
+> - **Behavior moved**: both flows out of `extension/doors/` behind two Pi-free feature ops —
+>   `extension/delivery/submit.ts::submitChange` (one entry: external publish → verified-success
+>   session updates → the bounded conflict decision, composable as `publishVerified` +
+>   `decideConflictFollowUp`) and `extension/delivery/address.ts::finalizeAddress` (pre-effect
+>   refusal → publish → resolve → request↔row fate correlation → verified-success recording →
+>   the conflict decision, composing the sibling's internals one-way) — with named installers
+>   `pi/v1/delivery/submit.ts` + `address.ts`. `doors/submit.ts` + `doors/address.ts` (+ both
+>   test suites) deleted whole in the same node (Rule E burn-down ×2; Rule G swapped the
+>   address census entry). Registration surfaces are frozen-baseline pinned byte-identical AND
+>   every load-bearing arm carries a full-details WIRE baseline captured from the OLD doors
+>   pre-deletion (byte-exact `assert.deepEqual` on the JSON round-trip, optional-key absence
+>   semantics included). `toolGating.ts`, `stageExecutionE2e.test.ts`, and
+>   `waves/reviewClassifierWave.test.ts` stayed byte-untouched (parity proofs — all green).
+> - **The conflict-decision timing split is structural**: `/submit` decides immediately after
+>   publish; `finalize_address` decides only after corroborated full resolve success — a
+>   resolve failure never burns an attempt (negative-pinned e2e). Drive translation stays at
+>   each surface (`driveConflictFollowUp`); the command's report-before-drive order is pinned
+>   by a shared-recorder test.
+> - **Action-specific ports, one production composition**: `PublishChange` (production =
+>   `createChangePublisher` — the `perk pr submit --json` cold-door composition, which also
+>   owns `operation.notes` warning reports at publish-success time — pre-resolve on EVERY
+>   published arm, pinned by the notes-on-failure regression), `ResolveThreads` (production =
+>   `perk pr resolve-threads --json --batch`, the fail-arm payload re-narrowing preserved),
+>   the `ConflictAttempts` read/write capability, and `recordImplementationPointer`
+>   (never-throws contract; the production `captureSessionPointer` closure). The address
+>   installer builds `FinalizeAddressDeps` by extending `publishDepsFor(pi, ctx)` — the
+>   one-production-adapter invariant is structural.
+> - **Named interior deltas (the only behavior changes)**: **D1** — the ok-arm corroboration
+>   guard: a nominal-success resolve envelope whose rows fail to corroborate every requested
+>   thread routes to `published_partial` (no `last_review_batch`, no termination); §8.52
+>   amended in the same change ("full success = corroborated per-thread success"). The
+>   module-private ThreadFate fold has two consumers (safe-retry derivation + D1) — the
+>   drop-the-fates simplification stays declined. **D2** — `conflictResolutionAttempts`
+>   narrows a readable-but-malformed persisted value to 0; a THROWING branch read still
+>   propagates (the load-bearing failure path, pinned). **D3** — `issue` decodes via
+>   `stringField` (the opaque string id `PrSubmitOut.issue: str` actually sends; the old
+>   `numberField` never matched — details silently dropped it); one documented baseline delta
+>   with a both-ways regression pair. **D4** — `--run-id` sourcing stays parity via the DIRECT
+>   throwing `rebuildWorkflowState(branchOf(ctx)).run_id` read at the adapter, invoked lazily
+>   at publish time (`PublishDeps.readRunId`): a throwing branch read still fails BEFORE the
+>   external call, while the finalize empty-batch refusal keeps firing first — the
+>   pre-migration order (the review's address pass caught the eager-read regression); recorded
+>   also because review caught the `activeSessionRunId` near-miss (it catches, and would
+>   silently drop the stamp). Post-review hardenings beyond the plan's four: the ok-arm
+>   corroboration guard additionally refuses CONTRADICTORY duplicate rows (rows disagreeing on
+>   `success` never corroborate; the retry strips their replies — last-row precedence remains
+>   only on the partial/retry path), and `setConflictAttempts` refuses a non-integer/negative
+>   write loudly (the reader narrows such values to 0, so persisting one would silently reopen
+>   the budget — invalid counter states are now unrepresentable through the seam).
+> - **Declined hardening (recorded)**: the submit-path drive-despite-unverified-increment
+>   posture is deliberately preserved (parity; the seam's loud warning is the mitigation) —
+>   pinned by the unverified-increment parity test; the sync path's withhold-and-release stays
+>   the stricter posture over the same checked seam (`objectiveStackDrive.test.ts`'s
+>   dropped-increment/lease-release arm survives verbatim). Revisiting the split is 7.4's call.
+> - **Substrate/session moves**: the checked counter seam `conflictResolutionAttempts` +
+>   `setConflictAttempts` (equal-value short-circuit; strict read-back boolean; byte-identical
+>   failure texts) joins `substrate/workflowState.ts` — the counter stays OUT of
+>   `WorkflowSession` (pre-effect bounding state); `CONFLICT_RESOLUTION_ATTEMPT_CAP` lives in
+>   `delivery/submit.ts` (the bound is policy); `doors/objectiveStack.ts` repoints + dedupes
+>   its reset/increment over the seam. `WorkflowSession` grew exactly one variant:
+>   `record-review-batch` (`last_review_batch`, LWW, strict read-back, scope "address",
+>   classification ignored by the op; persisted shape byte-identical; the memory backing
+>   gained a `lastReviewBatchRecord()` observer).
+> - **Accounting ledger** (recomputed after the review-address pass):
+>   - Production LOC: 928 deleted (−373 `doors/submit.ts`, −555 `doors/address.ts`) → 1,264
+>     added (`delivery/submit.ts` 147, `delivery/address.ts` 295, `pi/v1/delivery/submit.ts`
+>     372, `pi/v1/delivery/address.ts` 450) plus seams (+53 substrate, +57 session) − 7
+>     objectiveStack dedupe + 1 comment re-anchor wrap; whole-change production net **+440**
+>     against the ≤ 0 target. **Named excess classes** (each against a plan-named invariant):
+>     the typed outcome unions + action ports + the composition factory across the two feature
+>     modules (+447 feature-tier, of which the adapter tier shrank −106 — the fate
+>     correlation, D1's guard incl. the contradictory-duplicate refusal, retry-unrepresentable
+>     states, and the ordering/atomicity policy now live once, Pi-free, deletion-testable);
+>     the D2 checked counter seam + its invalid-write refusal (+53); the
+>     `record-review-batch` session variant across seam + two backings (+57). Zero new policy
+>     surface beyond the plan's named deltas + the two review-pass hardenings above. The
+>     plan-required operator acceptance of this named ledger rides the PR review gate: the
+>     ledger is posted on PR #2123 (body + review thread) and the human's approval of that PR
+>     IS the recorded acceptance gesture — merge does not proceed without it.
+>   - Test LOC: 1,028 deleted (−547 `doors/submit.test.ts`, −481 `doors/address.test.ts`) →
+>     2,201 added across the four new suites (`delivery/submit.test.ts` 236,
+>     `delivery/address.test.ts` 359, `pi/v1/delivery/submit.test.ts` 789,
+>     `pi/v1/delivery/address.test.ts` 817) + 70 session-suite rows + 93 substrate rows + 5
+>     harness (the `fullArgvFile` wire-pin knob) − 2 guard — net +1,339: the new arms are the
+>     full-details wire baselines, the D1 matrix incl. contradictory duplicates, the
+>     unverified-increment parity pin, the counter narrowing + invalid-write matrix, the
+>     order pins (submit-before-resolve argv; record-before-decision full event traces;
+>     report-before-drive), the resolve `--batch` wire pin (flag adjacency + exact staged
+>     rows), the throwing-run-id-read abort pins (feature + adapter), the notes-on-failure
+>     regression, the never-burn-an-attempt e2e, the both-reports pin, and the
+>     session-recording failure arms.
+>   - Files: +8 / −4; touched: `objectiveStack.ts`, `objectiveStackDrive.test.ts`,
+>     `index.ts`, `importDirectionGuard.test.ts`, the session trio, `workflowState.ts` +
+>     test, four comment re-anchors (`coldDoor.ts`, `plannotatorHandoff.ts`,
+>     `stageExecution.ts`, `ready.ts`).
+>   - Export ledger — **Retired**: `registerSubmit`, `registerAddress`, `submitPr`,
+>     `driveConflictResolution`, `resetConflictAttempts`, `resolveReviewThreads` (+ its dead
+>     standalone empty-batch arm), `SubmitResult`/`SubmitDetails`, `ResolveResult`/
+>     `ResolveOk`/`ResolveFailExtras`, `FinalizeAddressOk`/`FinalizeAddressFailExtras`.
+>     **Renamed**: `SubmitOk` → `PublishedChange` (with D3's field-truth fix).
+>     **Relocated**: `CONFLICT_RESOLUTION_ATTEMPT_CAP`, `ThreadInput`/`ThreadResultRow`,
+>     `decodeResolveParams`, `executeClassifyReviewFeedback` + result types,
+>     `addressGuidance`, `conflictResolutionGuidance`. **Newly introduced**: `PublishChange`/
+>     `PublishAttempt`, `ConflictAttempts`, `ConflictFollowUp`, `PublishDeps`,
+>     `SubmitChangeOutcome`, `publishVerified`, `decideConflictFollowUp`, `submitChange`,
+>     `ResolveThreads`/`ResolveThreadsAttempt`, `AddressFinalization`, `FinalizeAddressDeps`/
+>     `FinalizeAddressOutcome`, `finalizeAddress`, `installSubmitBindings`/
+>     `installAddressBindings`, `publishDepsFor` (carrying the lazy `readRunId` port),
+>     `renderPublishedMessage`, `driveConflictFollowUp`,
+>     `conflictResolutionAttempts`/`setConflictAttempts` (substrate), `ReviewBatchRecord`/
+>     `ReviewBatchCounts` + the `record-review-batch` variant (session). Module-private by
+>     review: `createChangePublisher` + `conflictAttemptsFor` (every production consumer
+>     composes through `publishDepsFor` — the one-composition invariant is structural), the
+>     ThreadFate type, and the completed outcome no longer carries the applied
+>     `ReviewBatchRecord` (no production reader — the memory observer is the test seam).
+>     Every added export has a production importer or is a frozen-baseline/exported-core test
+>     surface.
+>   - Deletion test: gutting the two feature modules hollows both installers — ordering,
+>     atomicity, corroboration, retry derivation, the bounded decision, reset-on-clean,
+>     pointer ordering, and verified-success recording all vanish, leaving registration +
+>     decode + render shells. Verified by the import graph (both installers import the ops,
+>     the unions, and the ports).
+> - **Dogfood (Step-8 protocol)**: live proof #1 observed (2026-08-31): this layer's own
+>   publication rode the MIGRATED `pi/v1/delivery/submit.ts` — a fresh headless session
+>   (`pi --mode json -p`, env-leak guard applied, extension loaded from this worktree at
+>   `32e1a185`) invoked the REGISTERED `submit` tool, which opened draft PR #2123
+>   ("Opened draft PR #2123 → …/pull/2123 (plan embedded) (stack #2093, layer 13/13)",
+>   `base: "plan-2116"`, `mergeable: true`) — and the details carried `issue: "2122"` as the
+>   opaque STRING id: D3 observed live (the retired decode dropped the field). The final-head
+>   re-publish rides the implementing session's terminating `submit` tool — that session's
+>   in-memory binding predates the migration (loaded at session start; a warm session cannot
+>   reload itself), which is exactly the byte-parity the wire baselines pin; the migrated
+>   binding's live publication is proof #1 above. Live proof #2 (2026-08-31, the
+>   review-address pass on PR #2123's 13-thread multi-angle review): the post-address final
+>   head was re-published through the MIGRATED submit binding from a second fresh headless
+>   session — Step 8.4 satisfied on the migrated door. The address loop itself
+>   (classify → fix → finalize) ran live end-to-end in the implementing session, whose
+>   in-memory bindings predate the migration (byte-parity-pinned by the wire baselines); a
+>   live observation of the migrated `pi/v1/delivery/address.ts` bindings stays honestly
+>   unclaimed — it rides a future address pass from a fresh session (or the 7.5 full-phase
+>   dogfood). The PR-body accounting-ledger append + read-back (Step 8.5) was performed in
+>   the address pass after the final-head submit; the terminating `finalize_address`
+>   re-publish that closes the pass regenerates the body (the plan's named residual —
+>   re-append rides the next gesture; this committed note is the durable ledger copy). The
+>   full Phase-7 dogfood gate closes at 7.5.
+
 ### Changes
 
 Migrate in effect-sized slices:

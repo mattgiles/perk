@@ -256,6 +256,59 @@ export function appendWorkflowStateClassified<K extends keyof WorkflowState>(
   }
 }
 
+/**
+ * The rebuilt `conflict_resolution_attempts` counter, read WITHOUT a catch: a throwing
+ * `getBranch()` propagates — unreadable bounding state is never treated as proven zero (the
+ * load-bearing failure path both conflict drives rely on). A READABLE but malformed persisted
+ * value (non-integer, negative, string, object, null, absent) narrows to 0.
+ */
+export function conflictResolutionAttempts(source: BranchSource): number {
+  const value = rebuildWorkflowState(branchOf(source)).conflict_resolution_attempts;
+  if (typeof value === "number" && Number.isInteger(value) && value >= 0) return value;
+  return 0;
+}
+
+/**
+ * The checked `conflict_resolution_attempts` write: a non-integer/negative value is refused
+ * loudly (`false`, no append — the reader narrows such values to 0, so persisting one would
+ * silently reopen the budget); equal-value short-circuit (no append) → `true`; otherwise the
+ * strict-read-back boolean from `appendWorkflowState` (its loud report path is the loudness
+ * channel). The counter is shared across the two warm conflict drives, so
+ * `scope` names the TRUE writing surface for failure reports — `/submit` passes "submit", the
+ * stack door "objective-sync".
+ */
+export function setConflictAttempts(
+  sink: EntrySink,
+  source: BranchSource & ReportTarget,
+  opts: { attempts: number; scope: string },
+): boolean {
+  // The write seam enforces the same invariant the reader narrows by: persisting a value the
+  // reader would coerce to 0 would silently reopen the conflict budget on the next read, so an
+  // invalid write is refused loudly instead of persisted (invalid counter states are
+  // unrepresentable through this seam).
+  if (!Number.isInteger(opts.attempts) || opts.attempts < 0) {
+    report(
+      source,
+      opts.scope,
+      "warning",
+      `refused an invalid conflict_resolution_attempts write (${opts.attempts}) — the counter is a non-negative integer`,
+      { alsoLog: true },
+    );
+    return false;
+  }
+  if (conflictResolutionAttempts(source) === opts.attempts) return true;
+  return appendWorkflowState(sink, source, {
+    data: { conflict_resolution_attempts: opts.attempts },
+    field: "conflict_resolution_attempts",
+    expected: opts.attempts,
+    scope: opts.scope,
+    failure:
+      opts.attempts === 0
+        ? "conflict_resolution_attempts reset read-back failed (expected 0)"
+        : `conflict_resolution_attempts read-back failed (expected ${opts.attempts})`,
+  });
+}
+
 /** The warm node-link carrier's non-null shape (the `objective_node_claim` field). */
 export type ObjectiveNodeClaim = NonNullable<WorkflowState["objective_node_claim"]>;
 

@@ -277,7 +277,8 @@ agents, child-posts-own-mutation vs read-only-child-parent-mutates).
 
 ### Gating the drive on a structured sub-result (and bounding it)
 
-`/submit`'s `driveConflictResolution` reuses the `driveReconcileAfterLand` shape but adds two twists
+`/submit`'s conflict drive (now `decideConflictFollowUp` + `driveConflictFollowUp` across the
+delivery split) reuses the `driveReconcileAfterLand` shape but adds two twists
 that generalize to any **self-healing** drive:
 
 - **Gated on a sub-result, not fired unconditionally.** The drive only fires when the cold door's
@@ -381,4 +382,4 @@ chain.
 - `docs/learned/pi/context-injection.md` — the conditional inject-and-strip lifecycle
 - `docs/learned/pi/subagents.md` — the spawn-fresh-context driving shape `/pr-review` uses
 - `extension/doors/land.ts` — `landPr` (drive-free) + the separate drive helper; the terminating-drive case
-- `docs/learned/workflow/mergeability-and-conflict-resolution.md` — `/submit`'s `driveConflictResolution` (the sub-result-gated + capped reactive drive)
+- `docs/learned/workflow/mergeability-and-conflict-resolution.md` — `/submit`'s conflict drive (the sub-result-gated + capped reactive drive)

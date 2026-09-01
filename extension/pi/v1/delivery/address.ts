@@ -1,30 +1,42 @@
-// The warm `/address` door (the review loop). Classify-then-act: the flow-scoped
+// The review-feedback bindings (the `/address` review loop). Classify-then-act: the flow-scoped
 // `classify_review_feedback` tool runs perk's read-only `perk.review-classifier` child through
 // the report-wave module (ONE lane, engine-validated report schema, the configured
 // `[models.subagents] review-classifier` model read at execute time), so the verbose GitHub
 // JSON never enters this session and nothing schema-shaped is model-transcribed; the PARENT
 // applies fixes (judgment + edits stay here) and finishes through one terminating
-// `finalize_address` tool.
+// `finalize_address` tool adapting the Pi-free finalization operation in `delivery/address.ts`.
 //
-// Finalization is deliberately submit-then-resolve: committed fixes first flow through the normal
-// submit operation (including a stacked suffix cascade), and only a successful publication may
-// reply to and resolve review threads. The mechanical resolve half remains an exported internal
-// seam over `perk pr resolve-threads`; GitHub mutations stay canonical in Python.
+// Finalization is deliberately submit-then-resolve: committed fixes first flow through the
+// normal publish operation (including a stacked suffix cascade), and only a successful
+// publication may reply to and resolve review threads. Both external effects stay canonical in
+// Python (`perk pr submit` / `perk pr resolve-threads`); this adapter owns the wire vocabulary
+// (params decode, rows decode, the Result projection) and the report loudness of each arm.
 
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { bindingSuffix } from "../substrate/bindingDelivery.ts";
-import type { PlanRef } from "../substrate/cache.ts";
+import {
+  type AddressFinalization,
+  type FinalizeAddressDeps,
+  finalizeAddress,
+  type ResolveThreads,
+  type ThreadInput,
+  type ThreadResultRow,
+} from "../../../delivery/address.ts";
+import type { PublishedChange } from "../../../delivery/submit.ts";
+import { planningStageRefusal } from "../../../doors/lifecycleGates.ts";
+import { openBranchWorkflowSession } from "../../../session/branchWorkflowSession.ts";
+import { bindingSuffix } from "../../../substrate/bindingDelivery.ts";
+import type { PlanRef } from "../../../substrate/cache.ts";
 import {
   booleanField,
   type ColdJson,
   nullableStringField,
   runColdDoor,
   stringField,
-} from "../substrate/coldDoor.ts";
-import { registerPerkCommand } from "../substrate/command.ts";
-import { subagentModel } from "../substrate/config.ts";
-import { render } from "../substrate/prompts.ts";
-import { failFor, ok, type Result } from "../substrate/result.ts";
+} from "../../../substrate/coldDoor.ts";
+import { registerPerkCommand } from "../../../substrate/command.ts";
+import { subagentModel } from "../../../substrate/config.ts";
+import { render } from "../../../substrate/prompts.ts";
+import { failFor, ok, type Result } from "../../../substrate/result.ts";
 import {
   arrayParam,
   numberParam,
@@ -32,50 +44,31 @@ import {
   paramsOf,
   stringParam,
   type ToolParams,
-} from "../substrate/toolParams.ts";
-import { activePlanRef, appendWorkflowState } from "../substrate/workflowState.ts";
-import { type ReportTarget, report } from "../surfaces/report.ts";
+} from "../../../substrate/toolParams.ts";
+import { activePlanRef } from "../../../substrate/workflowState.ts";
+import { type ReportTarget, report } from "../../../surfaces/report.ts";
 import {
   toAttemptReceipt,
   type WaveAdapter,
   type WaveAttemptReceipt,
-} from "../waves/reportWave.ts";
+} from "../../../waves/reportWave.ts";
 import {
   CLASSIFY_ASSIGNMENT_KEY,
   REVIEW_CLASSIFIER_FLOW,
   runReviewClassifierWave,
-} from "../waves/reviewClassifierWave.ts";
-import { createRpcWaveAdapter } from "../waves/rpcAdapter.ts";
-import { planningStageRefusal } from "./lifecycleGates.ts";
-import { driveConflictResolution, type SubmitOk, submitPr } from "./submit.ts";
-
-export interface ThreadInput {
-  thread_id: string;
-  comment?: string;
-}
-
-interface ResolveCounts {
-  actionable?: number;
-  informational?: number;
-  praise?: number;
-  question?: number;
-}
-
-interface ResolveParams {
-  threads: ThreadInput[];
-  pr?: number;
-  counts?: ResolveCounts;
-}
+} from "../../../waves/reviewClassifierWave.ts";
+import { createRpcWaveAdapter } from "../../../waves/rpcAdapter.ts";
+import { driveConflictFollowUp, publishDepsFor, renderPublishedMessage } from "./submit.ts";
 
 /** The four known `counts` keys (recorded into workflow-state — strict-decoded). */
 const COUNT_KEYS = ["actionable", "informational", "praise", "question"] as const;
 
 /** Decode the optional `counts` object; null = present-but-mistyped (a key or the object). */
-function decodeCounts(p: ToolParams): ResolveCounts | undefined | null {
+function decodeCounts(p: ToolParams): AddressFinalization["counts"] | null {
   const raw = objectParam(p, "counts");
   if (raw === undefined) return undefined;
   if (raw === null) return null;
-  const counts: ResolveCounts = {};
+  const counts: NonNullable<AddressFinalization["counts"]> = {};
   for (const key of COUNT_KEYS) {
     const value = numberParam(raw, key);
     if (value === null) return null;
@@ -85,12 +78,12 @@ function decodeCounts(p: ToolParams): ResolveCounts | undefined | null {
 }
 
 /**
- * Decode unknown tool-call params into `ResolveParams` (the tool-boundary seam).
- * `threads` absent or non-array decodes to `[]` (so the existing empty-batch `bad_input` arm
- * fires); any malformed ROW → null — whole-batch refusal, since resolving a guessed subset of
- * threads is a durable GitHub mutation. `pr`/`counts` mistyped → null (recorded state).
+ * Decode unknown tool-call params into `AddressFinalization` (the tool-boundary seam).
+ * `threads` absent or non-array decodes to `[]` (so the feature's empty-batch refusal fires);
+ * any malformed ROW → null — whole-batch refusal, since resolving a guessed subset of threads
+ * is a durable GitHub mutation. `pr`/`counts` mistyped → null (recorded state).
  */
-export function decodeResolveParams(params: unknown): ResolveParams | null {
+export function decodeResolveParams(params: unknown): AddressFinalization | null {
   const p = paramsOf(params);
   if (p === null) return null;
   const rawThreads = arrayParam(p, "threads");
@@ -111,41 +104,6 @@ export function decodeResolveParams(params: unknown): ResolveParams | null {
   if (counts === null) return null;
   return { threads, pr, counts };
 }
-
-/** One per-thread outcome row from the cold door's batch result. */
-export interface ThreadResultRow {
-  thread_id: string;
-  success: boolean;
-  comment_added: boolean;
-  error?: string | null;
-}
-
-/** The ok-arm fields. */
-export interface ResolveOk {
-  results: ThreadResultRow[];
-  resolved_thread_ids: string[];
-}
-
-/** The partial-failure branch carries the per-thread detail on the fail arm too. */
-export interface ResolveFailExtras {
-  results?: ThreadResultRow[];
-  resolved_thread_ids?: string[];
-}
-
-export type ResolveResult = Result<ResolveOk, ResolveFailExtras>;
-
-/** The full-success payload returned by the terminating model-facing finalizer. */
-export interface FinalizeAddressOk extends ResolveOk {
-  submit: SubmitOk;
-}
-
-/** A resolve failure after publication carries successful submit facts and safe retry input. */
-export interface FinalizeAddressFailExtras extends ResolveFailExtras {
-  submit?: SubmitOk;
-  retry_threads?: ThreadInput[];
-}
-
-export type FinalizeAddressResult = Result<FinalizeAddressOk, FinalizeAddressFailExtras>;
 
 /**
  * Narrow the cold door's `results` array to per-thread rows. Strict per row on `thread_id`,
@@ -174,175 +132,112 @@ function decodeRows(payload: ColdJson): ThreadResultRow[] | null {
 }
 
 /**
- * Build the only safe automatic retry batch from a partial cold-door report. Successful rows are
- * omitted. A reply is retained only when the row positively reports that it was not posted; an
- * absent result row is outcome-unknown, so its reply is stripped rather than risked twice.
+ * The production `ResolveThreads` port: `perk pr resolve-threads --json --batch` through the
+ * cold-door seam (the temp-file stdin channel). A failure envelope whose payload re-narrows
+ * with the SAME rows decode is a `partial` report (the per-thread detail is trustworthy); an
+ * absent/malformed payload drops the partial detail — `failed` (uncertainty ⇒ no half-rendered
+ * partial table).
  */
-function retryThreads(params: ResolveParams, rows: ThreadResultRow[]): ThreadInput[] {
-  const byId = new Map(rows.map((row) => [row.thread_id, row]));
-  const seen = new Set<string>();
-  const retry: ThreadInput[] = [];
-  for (const input of params.threads) {
-    if (seen.has(input.thread_id)) continue;
-    seen.add(input.thread_id);
-    const row = byId.get(input.thread_id);
-    if (row?.success === true) continue;
-    if (row?.comment_added === false && input.comment !== undefined) {
-      retry.push({ thread_id: input.thread_id, comment: input.comment });
-    } else {
-      retry.push({ thread_id: input.thread_id });
-    }
-  }
-  return retry;
-}
-
-/**
- * Resolve a batch of review threads (the parent's mechanical resolve step). Delegates to the Python
- * cold door; returns a soft result (never throws). On success, records `last_review_batch`.
- */
-export async function resolveReviewThreads(
-  pi: ExtensionAPI,
-  ctx: ExtensionContext,
-  params: ResolveParams,
-): Promise<ResolveResult> {
-  const fail = failFor(ctx, "address", "resolve_review_threads");
-
-  const threads = Array.isArray(params?.threads) ? params.threads : [];
-  if (threads.length === 0) {
-    return fail("no threads to resolve (pass { threads: [{thread_id, comment?}] })", "bad_input");
-  }
-  const batch = threads.map((t) => ({ thread_id: t.thread_id, comment: t.comment ?? null }));
-
-  const r = await runColdDoor<ThreadResultRow[]>(pi, ctx, ["pr", "resolve-threads", "--json"], {
-    label: "perk pr resolve-threads",
-    decode: decodeRows,
-    stdin: {
-      flag: "--batch",
-      content: `${JSON.stringify(batch, null, 2)}\n`,
-      filename: `resolve-batch-${Date.now()}.json`,
-    },
-  });
-
-  if (!r.ok) {
-    // A partial/failed batch is loud-but-soft: surface the per-thread detail, do not throw. The
-    // detail rides the failure envelope's payload; absent/malformed rows ⇒ plain fail (advisory
-    // drop — never a half-rendered partial table).
-    const rows = r.payload !== undefined ? decodeRows(r.payload) : null;
-    if (r.payload === undefined || rows === null) return fail(r.message, r.errorType);
-    const resolvedIds = rows.filter((row) => row.success).map((row) => row.thread_id);
-    const failed = rows.filter((row) => !row.success).length;
-    const error = stringField(r.payload, "message") ?? `${failed} thread(s) did not resolve`;
-    report(ctx, "address", "error", error, { alsoLog: true });
-    return {
-      content: [
-        {
-          type: "text",
-          text: `Resolved ${resolvedIds.length}/${rows.length} thread(s); ${failed} failed.`,
-        },
-      ],
-      details: {
-        ok: false,
-        error,
-        error_type: stringField(r.payload, "error_type") ?? "partial_failure",
-        results: rows,
-        resolved_thread_ids: resolvedIds,
+function createThreadResolver(pi: ExtensionAPI, ctx: ExtensionContext): ResolveThreads {
+  return async (threads) => {
+    const batch = threads.map((t) => ({ thread_id: t.thread_id, comment: t.comment ?? null }));
+    const r = await runColdDoor<ThreadResultRow[]>(pi, ctx, ["pr", "resolve-threads", "--json"], {
+      label: "perk pr resolve-threads",
+      decode: decodeRows,
+      stdin: {
+        flag: "--batch",
+        content: `${JSON.stringify(batch, null, 2)}\n`,
+        filename: `resolve-batch-${Date.now()}.json`,
       },
+    });
+    if (r.ok) return { ok: true, rows: r.data };
+    const rows = r.payload !== undefined ? decodeRows(r.payload) : null;
+    if (r.payload === undefined || rows === null) {
+      return { ok: false, kind: "failed", message: r.message, errorType: r.errorType };
+    }
+    const failed = rows.filter((row) => !row.success).length;
+    return {
+      ok: false,
+      kind: "partial",
+      rows,
+      message: stringField(r.payload, "message") ?? `${failed} thread(s) did not resolve`,
+      errorType: stringField(r.payload, "error_type") ?? "partial_failure",
     };
-  }
-
-  const results = r.data;
-  const resolvedIds = results.filter((row) => row.success).map((row) => row.thread_id);
-
-  // Record the batch (tier-3, best-effort-with-logging, idempotent, headless-safe). Strict
-  // read-back via rebuild — loud-but-non-fatal, the resolve already succeeded.
-  const recordedBatch = {
-    pr: params.pr ?? null,
-    counts: params.counts ?? null,
-    resolved_thread_ids: resolvedIds,
-    at: new Date().toISOString(),
   };
-  appendWorkflowState(pi, ctx, {
-    data: { last_review_batch: recordedBatch },
-    field: "last_review_batch",
-    expected: recordedBatch,
-    scope: "address",
-    failure: "last_review_batch read-back failed",
-  });
-
-  return ok(`Resolved ${resolvedIds.length} review thread(s).`, {
-    results,
-    resolved_thread_ids: resolvedIds,
-  });
 }
 
+/** The full-success payload returned by the terminating model-facing finalizer. */
+interface FinalizeAddressOk {
+  submit: PublishedChange;
+  results: ThreadResultRow[];
+  resolved_thread_ids: string[];
+}
+
+/** A resolve failure after publication carries successful submit facts and safe retry input. */
+interface FinalizeAddressFailExtras {
+  submit?: PublishedChange;
+  results?: ThreadResultRow[];
+  resolved_thread_ids?: string[];
+  retry_threads?: ThreadInput[];
+}
+
+type FinalizeAddressResult = Result<FinalizeAddressOk, FinalizeAddressFailExtras>;
+
 /**
- * Publish committed address fixes, then resolve their review threads. Full success terminates the
- * turn; either failure is non-terminating and explains the safe retry boundary.
+ * The finalize execute core: planning refusal first (a positioned stacked planning session's
+ * cwd binding is the PREDECESSOR), then the feature op over the one production composition —
+ * `publishDepsFor` extended with the resolve port and the branch session — then the outcome →
+ * Result projection. Publish notes were already reported by the shared publisher at publish
+ * time (pre-resolve order preserved on EVERY published arm).
  */
-export async function finalizeAddress(
+async function executeFinalizeAddress(
   pi: ExtensionAPI,
   ctx: ExtensionContext,
-  params: ResolveParams,
+  input: AddressFinalization,
 ): Promise<FinalizeAddressResult> {
   const fail = failFor<FinalizeAddressFailExtras>(ctx, "address", "finalize_address");
-  // Planning sessions never legitimately publish review fixes — the first check (a positioned
-  // stacked planning session's cwd binding is the PREDECESSOR).
   const planningRefusal = planningStageRefusal(ctx, "address");
   if (planningRefusal !== null) return fail(planningRefusal, "planning_session");
-  if (params.threads.length === 0) {
-    return fail("no threads to finalize (pass { threads: [{thread_id, comment?}] })", "bad_input");
-  }
-  const submitted = await submitPr(pi, ctx);
-  if (!submitted.details.ok) {
-    return fail(
-      `propagation failed; threads were NOT resolved — ${submitted.details.error}. ` +
-        "Fix the publication failure, then re-run finalize_address.",
-      submitted.details.error_type,
-    );
-  }
 
-  // Keep the nested payload clean: FinalizeAddressOk already has its own top-level `ok` marker.
-  const { ok: _submittedOk, ...submit } = submitted.details;
-  const resolved = await resolveReviewThreads(pi, ctx, params);
-  if (!resolved.details.ok) {
-    const retryCandidates =
-      resolved.details.results === undefined
-        ? undefined
-        : retryThreads(params, resolved.details.results);
-    const retry =
-      retryCandidates !== undefined && retryCandidates.length > 0 ? retryCandidates : undefined;
-    const extras: FinalizeAddressFailExtras = {
-      submit,
-      ...(resolved.details.results === undefined ? {} : { results: resolved.details.results }),
-      ...(resolved.details.resolved_thread_ids === undefined
-        ? {}
-        : { resolved_thread_ids: resolved.details.resolved_thread_ids }),
-      ...(retry === undefined ? {} : { retry_threads: retry }),
-    };
-    const retryGuidance =
-      retry === undefined
-        ? "Inspect the resolution failure before retrying; omit any reply that may already have posted."
-        : "Re-run finalize_address with only details.retry_threads; successful rows were omitted " +
-          "and replies already reported as posted were stripped.";
-    return fail(
-      `propagation succeeded, but thread resolution failed: ${resolved.details.error}. ` +
-        `The submit already succeeded. ${retryGuidance}`,
-      resolved.details.error_type,
-      extras,
-    );
+  const deps: FinalizeAddressDeps = {
+    ...publishDepsFor(pi, ctx),
+    resolve: createThreadResolver(pi, ctx),
+    session: openBranchWorkflowSession(pi, ctx),
+  };
+  const outcome = await finalizeAddress(deps, input);
+  switch (outcome.kind) {
+    case "empty_batch":
+      return fail(outcome.message, "bad_input");
+    case "not_published":
+      // Today's two-report publish failure: the inner submit-scope report (the raw publisher
+      // failure), then the address-scope finalizer failure.
+      report(ctx, "submit", "error", outcome.publishMessage, { alsoLog: true });
+      return fail(outcome.message, outcome.errorType);
+    case "published_partial":
+      report(ctx, "address", "error", outcome.resolveMessage, { alsoLog: true });
+      return fail(outcome.message, outcome.errorType, {
+        submit: { ...outcome.change },
+        results: outcome.results,
+        resolved_thread_ids: outcome.resolvedThreadIds,
+        ...(outcome.retryThreads.length > 0 ? { retry_threads: outcome.retryThreads } : {}),
+      });
+    case "published_unverified":
+      report(ctx, "address", "error", outcome.resolveMessage, { alsoLog: true });
+      return fail(outcome.message, outcome.errorType, { submit: { ...outcome.change } });
+    case "completed": {
+      driveConflictFollowUp(pi, ctx, outcome.conflict);
+      return ok(
+        `Resolved ${outcome.resolvedThreadIds.length} review thread(s) after ` +
+          renderPublishedMessage(outcome.change),
+        {
+          submit: { ...outcome.change },
+          results: outcome.results,
+          resolved_thread_ids: outcome.resolvedThreadIds,
+        },
+        { terminate: true },
+      );
+    }
   }
-
-  driveConflictResolution(pi, ctx, submitted.details);
-  const submitMessage = submitted.content[0]?.text ?? "Published the addressed fixes.";
-  return ok(
-    `Resolved ${resolved.details.resolved_thread_ids.length} review thread(s) after ${submitMessage}`,
-    {
-      submit,
-      results: resolved.details.results,
-      resolved_thread_ids: resolved.details.resolved_thread_ids,
-    },
-    { terminate: true },
-  );
 }
 
 const TOOL_GUIDELINES = [
@@ -416,7 +311,7 @@ export async function executeClassifyReviewFeedback(
  * reads the configured `[models.subagents] review-classifier` model at execute time.
  *
  * The wording lives in the shared canonical templates `prompts/stages/address/*` rendered via the
- * cross-plane render seam (contracts.md §8.31) — the warm door converges onto the SAME two
+ * cross-plane render seam (contracts.md §8.31) — the warm surface converges onto the SAME two
  * templates as the cold `_address_prompt` and the worker `initialPromptFor("address")`. Branching
  * stays in code: preview/action selects the template. */
 export function addressGuidance(ref: PlanRef, preview: boolean): string {
@@ -428,9 +323,9 @@ export function addressGuidance(ref: PlanRef, preview: boolean): string {
   return render(preview ? "stages/address/preview.md" : "stages/address/action.md", variables);
 }
 
-/** Register the warm door: the `classify_review_feedback` + terminating `finalize_address`
- * tools and the `/address` command. */
-export function registerAddress(pi: ExtensionAPI): void {
+/** Install the review-feedback bindings: the `classify_review_feedback` + terminating
+ * `finalize_address` tools and the `/address` command. */
+export function installAddressBindings(pi: ExtensionAPI): void {
   pi.registerTool({
     name: "classify_review_feedback",
     label: "Classify review feedback",
@@ -510,7 +405,7 @@ export function registerAddress(pi: ExtensionAPI): void {
           "finalize_address",
         )("finalize_address needs { threads: [{thread_id, comment?}] }", "bad_input");
       }
-      return finalizeAddress(pi, ctx, decoded);
+      return executeFinalizeAddress(pi, ctx, decoded);
     },
   });
 

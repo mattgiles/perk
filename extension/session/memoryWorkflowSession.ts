@@ -15,6 +15,7 @@ import {
 import type {
   PrReviewRecord,
   ReadArtifactResult,
+  ReviewBatchRecord,
   ReviewPostRow,
   ReviewSubmissionRecord,
   WorkflowChange,
@@ -47,6 +48,8 @@ export interface MemoryWorkflowSession extends WorkflowSession {
   lastReviewRecord(): ReviewSubmissionRecord | null;
   /** The live `last_pr_review` record (test observation of the `record-pr-review` effect). */
   lastPrReviewRecord(): PrReviewRecord | null;
+  /** The live `last_review_batch` record (test observation of the `record-review-batch` effect). */
+  lastReviewBatchRecord(): ReviewBatchRecord | null;
 }
 
 /**
@@ -69,6 +72,7 @@ export function openMemoryWorkflowSession(opts: {
   let activeObjective = opts.activeObjective ?? null;
   let lastReview: ReviewSubmissionRecord | null = null;
   let lastPrReview: PrReviewRecord | null = null;
+  let lastReviewBatch: ReviewBatchRecord | null = null;
   const reviewPosts: ReviewPostRow[] = [...(opts.reviewPosts ?? [])];
   let failWrite = false;
   let failPointerAppend = false;
@@ -111,6 +115,9 @@ export function openMemoryWorkflowSession(opts: {
     },
     lastPrReviewRecord() {
       return lastPrReview;
+    },
+    lastReviewBatchRecord() {
+      return lastReviewBatch;
     },
     nodeClaim() {
       return claim;
@@ -291,6 +298,19 @@ export function openMemoryWorkflowSession(opts: {
           if (failApplyVerification) {
             failApplyVerification = false;
             return { status: "unverified", problem: "review_posts read-back failed" };
+          }
+          return { status: "applied" };
+        }
+        case "record-review-batch": {
+          // No pre-read/dedupe by design: applied/unverified/rejected only at runtime.
+          if (failApply) {
+            failApply = false;
+            return { status: "rejected", problem: "workflow-state append refused (induced)" };
+          }
+          lastReviewBatch = change.record;
+          if (failApplyVerification) {
+            failApplyVerification = false;
+            return { status: "unverified", problem: "last_review_batch read-back failed" };
           }
           return { status: "applied" };
         }

@@ -26,6 +26,7 @@ import { openBranchWorkflowSession } from "./branchWorkflowSession.ts";
 import { openMemoryWorkflowSession } from "./memoryWorkflowSession.ts";
 import {
   type PrReviewRecord,
+  type ReviewBatchRecord,
   type ReviewPostRow,
   type ReviewSubmissionRecord,
   reviewPostsOf,
@@ -53,6 +54,13 @@ const REVIEW_RECORD: ReviewSubmissionRecord = {
 };
 
 const POST_ROW: ReviewPostRow = { pr: 42, event: "comment", at: "2026-01-01T00:00:00Z" };
+
+const REVIEW_BATCH_RECORD: ReviewBatchRecord = {
+  pr: 42,
+  counts: { actionable: 2, informational: 0, praise: 0, question: 0 },
+  resolved_thread_ids: ["PRRT_1", "PRRT_2"],
+  at: "2026-01-01T00:00:00Z",
+};
 
 const PR_REVIEW_RECORD: PrReviewRecord = {
   pr: 42,
@@ -87,6 +95,8 @@ interface SessionHarness {
   lastReview(): ReviewSubmissionRecord | null;
   /** The rebuilt/live `last_pr_review` record (observation of the record-pr-review effect). */
   lastPrReview(): PrReviewRecord | null;
+  /** The rebuilt/live `last_review_batch` record (observation of the record-review-batch effect). */
+  lastReviewBatch(): ReviewBatchRecord | null;
   dispose(): void;
 }
 
@@ -224,6 +234,12 @@ function branchBacking(): Backing {
           ).last_pr_review;
           return (value ?? null) as PrReviewRecord | null;
         },
+        lastReviewBatch() {
+          const value = rebuildWorkflowState(
+            branch as Parameters<typeof rebuildWorkflowState>[0],
+          ).last_review_batch;
+          return (value ?? null) as ReviewBatchRecord | null;
+        },
         dispose() {
           if (lockedPerkDir) chmodSync(perkDir, 0o755);
           rmSync(cwd, { recursive: true, force: true });
@@ -259,6 +275,7 @@ function memoryBacking(): Backing {
         linkedPlanRef: () => session.linkedPlanRef(),
         lastReview: () => session.lastReviewRecord(),
         lastPrReview: () => session.lastPrReviewRecord(),
+        lastReviewBatch: () => session.lastReviewBatchRecord(),
         dispose() {},
       };
     },
@@ -722,6 +739,54 @@ for (const backing of [branchBacking(), memoryBacking()]) {
     }
   });
 
+  test(`${backing.label}: apply record-review-batch — applied; a repeat identical record applies AGAIN (no unchanged)`, () => {
+    // No pre-read/deep-equal short-circuit by design: the corroborated-success ordering is
+    // feature-op policy upstream, so the seam never emits `unchanged` for this variant.
+    const h = backing.harness("RID");
+    try {
+      assert.deepEqual(
+        h.session.apply({ kind: "record-review-batch", record: REVIEW_BATCH_RECORD }),
+        {
+          status: "applied",
+        },
+      );
+      // The persisted shape is pinned byte-exactly (the wire twin of the recorded batch).
+      assert.deepEqual(h.lastReviewBatch(), {
+        pr: 42,
+        counts: { actionable: 2, informational: 0, praise: 0, question: 0 },
+        resolved_thread_ids: ["PRRT_1", "PRRT_2"],
+        at: "2026-01-01T00:00:00Z",
+      });
+      assert.deepEqual(
+        h.session.apply({ kind: "record-review-batch", record: { ...REVIEW_BATCH_RECORD } }),
+        { status: "applied" },
+      );
+    } finally {
+      h.dispose();
+    }
+  });
+
+  test(`${backing.label}: apply record-review-batch — unverified on a read-back miss; rejected lands nothing`, () => {
+    const h = backing.harness("RID");
+    try {
+      h.induceApplyVerificationFailure();
+      const miss = quietly(() =>
+        h.session.apply({ kind: "record-review-batch", record: REVIEW_BATCH_RECORD }),
+      );
+      assert.equal(miss.status, "unverified");
+      assert.ok(
+        miss.status === "unverified" && /last_review_batch read-back failed/.test(miss.problem),
+      );
+      h.induceApplyRefusal();
+      const refused = quietly(() =>
+        h.session.apply({ kind: "record-review-batch", record: REVIEW_BATCH_RECORD }),
+      );
+      assert.equal(refused.status, "rejected");
+    } finally {
+      h.dispose();
+    }
+  });
+
   test(`${backing.label}: apply append-review-post — unverified on a read-back miss; rejected preserves the ledger`, () => {
     const h = backing.harness("RID", { reviewPosts: [{ pr: 41, event: "comment", at: "t0" }] });
     try {
@@ -964,6 +1029,11 @@ test("branch: a read-back miss reports LOUDLY under each change's seam-owned sco
       seed: null,
       change: { kind: "append-review-post", row: POST_ROW },
       expected: "perk: review — review_posts read-back failed",
+    },
+    {
+      seed: null,
+      change: { kind: "record-review-batch", record: REVIEW_BATCH_RECORD },
+      expected: "perk: address — last_review_batch read-back failed",
     },
   ];
   for (const { seed, change, expected } of cases) {
