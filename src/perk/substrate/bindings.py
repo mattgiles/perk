@@ -40,7 +40,7 @@ MODES: tuple[str, ...] = ("nudge", "transclude")
 # A `command:<id>` outside this set has no delivery surface, so the binding can never fire — the
 # deliverable command triggers are the Mechanism-B call sites (`bindingSuffix` in
 # extension/factories/objectivePlan.ts + extension/doors/land.ts (`command:objective-reconcile`),
-# extension/doors/learnFactory.ts (`command:learn-docs`/`command:learn-code`), and
+# extension/pi/v1/learning/factory.ts (`command:learn-docs`/`command:learn-code`), and
 # extension/pi/v1/codeReview/automated.ts (`command:pr-review`),
 # extension/pi/v1/codeReview/terminal.ts (`command:pr-review-terminal`),
 # extension/pi/v1/codeReview/browser.ts (`command:pr-review-browser`), and

@@ -9,7 +9,7 @@
 // lives here.
 
 import { type ReportTarget, report } from "../surfaces/report.ts";
-import type { PlanRef } from "./cache.ts";
+import { type PlanRef, readPlanRef } from "./cache.ts";
 
 export const WORKFLOW_STATE_TYPE = "perk:workflow-state";
 
@@ -284,6 +284,23 @@ export function readNodeClaim(ctx: BranchSource): ObjectiveNodeClaim | null {
       return claim;
     }
     return null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Resolve the active plan-ref: the worktree's `cache.plan-ref` file first, then the rebuilt
+ * workflow-state's `active_plan_ref` (the branch-carried linkage). The worktree read is itself
+ * null-lenient and runs OUTSIDE the catch (a throw from it propagates); only the branch
+ * rebuild is fail-open → null. Structural + Pi-free: `ExtensionContext` satisfies the slice.
+ */
+export function activePlanRef(source: { cwd: string } & BranchSource): PlanRef | null {
+  const fromWorktree = readPlanRef(source.cwd);
+  if (fromWorktree) return fromWorktree;
+  try {
+    const branch = branchOf(source);
+    return (rebuildWorkflowState(branch).active_plan_ref as PlanRef | null) ?? null;
   } catch {
     return null;
   }

@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- The learn-capture flow and the learn-docs/learn-code routing doors move behind typed feature operations in the Pi-free `extension/learning/` home (`finishLearn`, `runLearnAnalystWave`, `parseAngleSelections`, `decideLearnLaunch`, and the guidance prose) with named `pi/v1/learning/` installers owning the `learn`/`run_learn_wave` tools and the `/learn`, `/learn-docs`, `/learn-code` commands; the shared `activePlanRef` resolution moves to `substrate/workflowState.ts` (deduplicating `/address`'s private copy) — runtime behavior, tool schemas, and result texts are unchanged (96542267)
 - The code-review flows move behind typed feature operations in the Pi-free `extension/codeReview/` home with named `pi/v1/codeReview/` installers (curated submission, fixed automated review, the terminal/browser human doors, and the Delivery-train stack door), and the last two module-global post-state machines — the automated review-pass record and the annotation-push surface/ledger — become per-activation state, so two bound sessions in one process never share or clobber review state; the review posting paths' session records (`last_pr_review`, `last_review`, `review_posts`) now ride the `WorkflowSession` seam — runtime behavior, tool schemas, and result texts are otherwise unchanged (03b5383a)
 
 ### Fixed

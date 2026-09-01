@@ -854,7 +854,7 @@ close_and_label_consolidated{ issue }               -> bool
   `create_learn_issue`, posts a back-link comment on the plan issue (best-effort), stamps the
   canonical `learn_state: captured` (§8.36, strictly — before the marker clear), and clears
   `pending-learn`. The warm `/learn` orchestration, the evidence bundle, and the classification
-  vocabulary are §8.35 (+ `extension/doors/learn.ts`); the canonical skip path is §8.36.
+  vocabulary are §8.35 (+ `extension/pi/v1/learning/learn.ts`); the canonical skip path is §8.36.
 - **The learned-docs/learn-code factories** consume `list_learn_issues` only — `consumed_learn`
   closure happens at land finalization (`delivery/finalize.py::_consume_learn_on_land`); the
   factory contract (partition, inbox, `consumed_learn`) is §8.35 +
@@ -3649,7 +3649,7 @@ scans the issue description, then every comment, returning the first text contai
 plan-body block; `update_plan_issue`/`adopt_issue_as_plan` find a marker-bearing comment or
 create one — on an adopted issue with prior comments the created plan-body comment need not be
 first (`LinearIssueBackend`). Learn prompts
-(`_learn_prompt`, `extension/doors/learn.ts::learnGuidance`) keep the `gh pr list --head plan-<pr_id>
+(`_learn_prompt`, `extension/learning/prose.ts::learnGuidance`) keep the `gh pr list --head plan-<pr_id>
 --state merged` merged-PR derivation under every backend — PRs are GitHub-universal.
 `extension/substrate/toolGating.ts::READ_ONLY_TOOLS` allowlists the 19 read-only `linear_*` tool names
 unconditionally (foreign names are inert when the package is absent); the mutating/sensitive
@@ -3696,8 +3696,8 @@ everywhere — PRs are GitHub-universal. Concretely:
   `issue` but is a string; `pr land`'s `objective` sub-object `number` → **`id`** (string|null)
   and `learn.closed` carries string ids; `objective reconcile`'s `objective`/`comment_id` are
   strings; `learn docs --gather`'s `learn_numbers` carries string ids. TS decoders
-  (`pi/v1/plan.ts`/`learn.ts`/`land.ts`/`pi/v1/objectiveAuthoring.ts`/`learnFactory.ts`) are lockstep-strict on
-  the string shapes, with one tolerance: `learnFactory.ts::decodeGather` accepts legacy numeric
+  (`pi/v1/plan.ts`/`pi/v1/learning/learn.ts`/`land.ts`/`pi/v1/objectiveAuthoring.ts`/`pi/v1/learning/factory.ts`) are lockstep-strict on
+  the string shapes, with one tolerance: `pi/v1/learning/factory.ts::decodeGather` accepts legacy numeric
   `learn_numbers` and normalizes them to strings.
 - CLI plan/objective arguments parse through the shared opaque-id validators
   (`plan_selection.parse_plan_id` / `objective/shared.parse_objective_id`): strip `#`/whitespace;
@@ -5109,7 +5109,7 @@ loader's admission) and reads frontmatter `title`/`description` first with **per
 fallback (first-`# `-heading + first-paragraph — consumer repos without frontmatter keep the
 legacy behavior); `docs_sync.py` — the generated routing/catalog + `docs-check`); the
 angle-agent spec lives in `agents/learn-analyst.md` + `skills/perk-learn/`; the warm orchestrator
-in `extension/doors/learn.ts`.
+in `extension/pi/v1/learning/learn.ts`.
 
 **The evidence bundle (definition + invariants).** The bundle is the full set of session-grounded
 artifacts `/learn` reasons over for a landed plan. Invariants:
@@ -5314,7 +5314,7 @@ a materialized bundle, deterministic (no wall-clock); no write on a skip.
 
 **The analyst wave (the report-wave module).** The multi-angle analyst fan-out runs through the
 Perk-owned report-wave module (`extension/waves/reportWave.ts`) via the flow-scoped
-**`run_learn_wave`** tool (`extension/doors/learn.ts` — non-terminating; the parent continues to
+**`run_learn_wave`** tool (`extension/pi/v1/learning/learn.ts` — non-terminating; the parent continues to
 reconcile): the module renders the tested `workflowScript`, spawns it async over the pi-subagents
 v1 extension RPC (`mission: false`, `context: "fresh"`, and the fixed
 `acceptance: {level: "none", reason}` disable — delivered onto every lane child via pi-subagents'
@@ -5323,7 +5323,7 @@ workflow-defaults spread, suppressing the auto-inferred acceptance contract whos
 report; module-wide, no opt-out), blocks under the module-owned timeout,
 and reads the durable `status.json` aggregate — the wave mechanics are CODE, never model-authored
 prompt mechanics. Analyst reports are **engine-validated structured output** against the TS-owned
-`LEARN_ANALYST_REPORT_SCHEMA` (`extension/waves/learnWave.ts` — closed shape, all-required,
+`LEARN_ANALYST_REPORT_SCHEMA` (`extension/learning/analystWave.ts` — closed shape, all-required,
 `target` required-nullable, deliberately NO verdict↔candidates conditional: the parent derives
 the real verdict from `candidates[]`, so salvaging an inconsistent report beats failing its
 lane) — covered angle ⟺ ok lane ⟺ schema-valid report; no fenced-JSON scraping exists.
@@ -5332,7 +5332,7 @@ failure is an explicitly-reported **skipped angle** (never a failed pass, no ret
 **wave-level** failure is a loud tool soft-failure (`error_type` = the wave failure reason) —
 never a silent fallback to model-authored scripts — and the guidance routes the parent to a
 single-context analysis of the bundle instead. The **angle policy is tool-enforced**
-(`angleSelectionError`): 2–4 angles, no duplicates, only the four known slugs
+(`parseAngleSelections`): 2–4 angles, no duplicates, only the four known slugs
 (`session-deviations` / `plan-vs-implementation` / `existing-docs` / `validation-risk`), and
 `session-deviations` always included; violations are `bad_input`. The tool takes the
 guidance-rendered `bundle_dir` (the model relays it verbatim — the same trust plane as the task

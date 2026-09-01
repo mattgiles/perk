@@ -202,7 +202,7 @@ function assembleLanes(plan: AuditLanePlan, result: WaveResult): AuditVerdictLan
 
 /**
  * The `run_audit_wave` execute core, extracted for testability with the adapter AND the
- * verdicts-write function injected (the `executeLearnWave` pattern; the write default is the
+ * verdicts-write function injected (the `runLearnAnalystWave` pattern; the write default is the
  * writeGuard-sanctioned `atomicWriteFileSync`). Assumes the caller resolved+validated the
  * bundle binding (the registered tool's pre-launch arms). Writes verdicts.json in every arm
  * in which the wave was launched (and the zero-lane arm); a throwing write returns the

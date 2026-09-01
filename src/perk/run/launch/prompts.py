@@ -118,7 +118,8 @@ def _learn_prompt(plan_ref: plan.PlanRef) -> str:
     by both planes via the shared render seam (contracts.md §8.31); the github/linear/other/no-ref
     branching is the template conditional on ``provider`` (+ ``pr_id`` presence), and ``read_cmd``
     is the node-2.1 plan-read instruction. Byte-identical to its TS twin
-    ``lifecycleGates``/``learn.ts::learnGuidance`` (no worker twin — learn has only cold + warm).
+    ``lifecycleGates``/``learning/prose.ts::learnGuidance`` (no worker twin — learn has only
+    cold + warm).
     Four ``learn-*`` golden cases per provider arm replace the dedicated substring parity.
     """
     provider = plan_ref.provider

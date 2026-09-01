@@ -12,7 +12,7 @@
 //
 // A single-lane manifest is refused toward the seed's direct-analysis path — the fallback
 // state table's first row (exactly one lane → direct analysis; multiple lanes → the wave — the
-// `angleSelectionError` tool-enforced-policy precedent); the seed names the wave for
+// `parseAngleSelections` tool-enforced-policy precedent); the seed names the wave for
 // multi-lane manifests. Analyst reports are untrusted DATA and are re-decoded +
 // pointer-stamped in code before they reach the parent.
 
@@ -61,7 +61,7 @@ export type HarvestWaveResult = Result<HarvestWaveOk, { attempts: WaveAttemptRec
 
 /**
  * The `run_harvest_wave` execute core, extracted for testability with the adapter injected (the
- * `executeLearnWave` pattern; the memory adapter in tests, the RPC adapter in production).
+ * `runLearnAnalystWave` (learning/analystWave.ts) pattern; the memory adapter in tests, the RPC adapter in production).
  * Assumes a VALIDATED manifest (the registered tool runs the whole pre-spawn refusal ladder
  * first). Result mapping over `WaveResult`:
  *  - `complete: false` (a wave-level failure under best-effort) → a loud soft-fail whose

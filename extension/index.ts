@@ -18,8 +18,6 @@ import {
 import { registerDreamWave } from "./doors/dreamWaveTools.ts";
 import { registerHarvestWave } from "./doors/harvestWaveTools.ts";
 import { registerLand } from "./doors/land.ts";
-import { registerLearn } from "./doors/learn.ts";
-import { CODE_DOOR, DOCS_DOOR, registerLearnFactoryDoor } from "./doors/learnFactory.ts";
 import { registerLifecycleGates } from "./doors/lifecycleGates.ts";
 import {
   openObjectiveReviewSurface,
@@ -39,6 +37,8 @@ import { installStackReviewBindings } from "./pi/v1/codeReview/stack.ts";
 import { installCuratedSubmissionBindings } from "./pi/v1/codeReview/submit.ts";
 import { installPrReviewTerminalBindings } from "./pi/v1/codeReview/terminal.ts";
 import { installGistBindings } from "./pi/v1/gist.ts";
+import { installLearnFactoryBindings } from "./pi/v1/learning/factory.ts";
+import { installLearnBindings } from "./pi/v1/learning/learn.ts";
 import { installObjectiveBindings } from "./pi/v1/objective.ts";
 import { installObjectiveAuthoringBindings } from "./pi/v1/objectiveAuthoring.ts";
 import { installObjectivePlanningBindings } from "./pi/v1/objectivePlanning.ts";
@@ -483,9 +483,10 @@ export default function (pi: ExtensionAPI) {
   // ready-time pass into a read-only session (contracts.md §8.66).
   registerReady(pi, gating);
 
-  // Warm doors: `land` merges + sets pending-learn; `learn` clears it (TS-only).
+  // Warm doors: `land` merges + sets pending-learn; the v1 learn installer (the `learn` +
+  // `run_learn_wave` tools and the `/learn` command over the `learning/` feature ops) clears it.
   registerLand(pi);
-  registerLearn(pi);
+  installLearnBindings(pi);
 
   // The warm stacked-delivery surface (§8.51): `/objective-stack` (read) +
   // `/objective-sync`/`/objective-recover` (drives) + the four typed stack tools. Takes
@@ -572,15 +573,11 @@ export default function (pi: ExtensionAPI) {
   // handoff; exit stays with plan_save / `/plan` off) — hence `gating`.
   installObjectivePlanningBindings(pi, gating);
 
-  // The learned-docs plan factory's warm surface: the `/learn-docs` command gathers open
-  // perk:learn issues into an inbox (via the `perk learn docs --gather` cold door) and injects the
-  // factory guidance so the model authors a docs/learned consolidation plan (no model tool).
-  registerLearnFactoryDoor(pi, DOCS_DOOR);
-
-  // The learn-code plan factory's warm surface: the `/learn-code` command gathers pre-stamped
-  // SHOULD_BE_CODE perk:learn issues into an inbox (via the `perk learn code --gather` cold door)
-  // and injects the factory guidance so the model authors a code-routing plan (no model tool).
-  registerLearnFactoryDoor(pi, CODE_DOOR);
+  // The two learn plan factories' warm surfaces: `/learn-docs` gathers open perk:learn issues
+  // (via the `perk learn docs --gather` cold door) toward a docs/learned consolidation plan;
+  // `/learn-code` gathers pre-stamped SHOULD_BE_CODE issues (via `perk learn code --gather`)
+  // toward a code-routing plan. Guidance-injection only (no model tool).
+  installLearnFactoryBindings(pi);
 
   // Warm-door skill-binding delivery: Mechanism A's `before_agent_start` injection of
   // the launched stage's user-originated bindings (+ the stale-context strip). Mechanism B (the

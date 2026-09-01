@@ -6,7 +6,7 @@ This is the readable projection of perk's living, workflow-first prose graph. It
 ## Coverage
 
 - **213** canonical source units
-- **723** logical fragments
+- **726** logical fragments
 - **16** session shapes and **10** assemblies
 - **15** explicitly excluded candidates (policy-only; not displayed)
 - **0** validation findings
@@ -1213,13 +1213,13 @@ Capture learnings and route them into documentation, code, or harvested objectiv
 | `markdown:skills/perk-learn/backends/linear.md` | `skill-detail` | `shipped` | [`skills/perk-learn/backends/linear.md`](../../skills/perk-learn/backends/linear.md) · `file` | — |
 | `python-symbol:src/perk/cli/commands/learn/factory_common.py:render_inbox` | `context` | `shipped` | [`src/perk/cli/commands/learn/factory_common.py`](../../src/perk/cli/commands/learn/factory_common.py) · `symbol:render_inbox` | — |
 | `python-symbol:src/perk/learn/normalize.py:_PREAMBLE` | `context` | `shipped` | [`src/perk/learn/normalize.py`](../../src/perk/learn/normalize.py) · `symbol:_PREAMBLE` | — |
-| `typescript-model-call:extension/doors/learn.ts:module:sendUserMessage:0` | `tool-contract` | `shipped` | [`extension/doors/learn.ts`](../../extension/doors/learn.ts) · `symbol:module/call:sendUserMessage/0` | — |
-| `typescript-model-call:extension/doors/learn.ts:module:sendUserMessage:1` | `tool-contract` | `shipped` | [`extension/doors/learn.ts`](../../extension/doors/learn.ts) · `symbol:module/call:sendUserMessage/1` | — |
-| `typescript-model-call:extension/doors/learnFactory.ts:module:sendUserMessage:0` | `tool-contract` | `shipped` | [`extension/doors/learnFactory.ts`](../../extension/doors/learnFactory.ts) · `symbol:module/call:sendUserMessage/0` | — |
-| `typescript-tool:learn` | `tool-contract` | `shipped` | [`extension/doors/learn.ts`](../../extension/doors/learn.ts) · `tool:learn` | — |
+| `typescript-model-call:extension/pi/v1/learning/factory.ts:module:sendUserMessage:0` | `tool-contract` | `shipped` | [`extension/pi/v1/learning/factory.ts`](../../extension/pi/v1/learning/factory.ts) · `symbol:module/call:sendUserMessage/0` | — |
+| `typescript-model-call:extension/pi/v1/learning/learn.ts:module:sendUserMessage:0` | `tool-contract` | `shipped` | [`extension/pi/v1/learning/learn.ts`](../../extension/pi/v1/learning/learn.ts) · `symbol:module/call:sendUserMessage/0` | — |
+| `typescript-model-call:extension/pi/v1/learning/learn.ts:module:sendUserMessage:1` | `tool-contract` | `shipped` | [`extension/pi/v1/learning/learn.ts`](../../extension/pi/v1/learning/learn.ts) · `symbol:module/call:sendUserMessage/1` | — |
+| `typescript-tool:learn` | `tool-contract` | `shipped` | [`extension/pi/v1/learning/learn.ts`](../../extension/pi/v1/learning/learn.ts) · `tool:learn` | — |
 | `typescript-tool:run_dream_wave` | `tool-contract` | `shipped` | [`extension/doors/dreamWaveTools.ts`](../../extension/doors/dreamWaveTools.ts) · `tool:run_dream_wave` | — |
 | `typescript-tool:run_harvest_wave` | `tool-contract` | `shipped` | [`extension/doors/harvestWaveTools.ts`](../../extension/doors/harvestWaveTools.ts) · `tool:run_harvest_wave` | — |
-| `typescript-tool:run_learn_wave` | `tool-contract` | `shipped` | [`extension/doors/learn.ts`](../../extension/doors/learn.ts) · `tool:run_learn_wave` | learn.cold, learn.warm |
+| `typescript-tool:run_learn_wave` | `tool-contract` | `shipped` | [`extension/pi/v1/learning/learn.ts`](../../extension/pi/v1/learning/learn.ts) · `tool:run_learn_wave` | learn.cold, learn.warm |
 
 <details>
 <summary>Logical fragments</summary>
@@ -1297,16 +1297,17 @@ Capture learnings and route them into documentation, code, or harvested objectiv
   - `symbol:render_inbox` — Render inbox (`symbol:render_inbox`)
 - `python-symbol:src/perk/learn/normalize.py:_PREAMBLE`
   - `symbol:_PREAMBLE` — Preamble (`symbol:_PREAMBLE`)
-- `typescript-model-call:extension/doors/learn.ts:module:sendUserMessage:0`
+- `typescript-model-call:extension/pi/v1/learning/factory.ts:module:sendUserMessage:0`
   - `argument:0` — sendUserMessage model-facing argument (`symbol:module/call:sendUserMessage/0/argument:0`)
-- `typescript-model-call:extension/doors/learn.ts:module:sendUserMessage:1`
+- `typescript-model-call:extension/pi/v1/learning/learn.ts:module:sendUserMessage:0`
+  - `argument:0` — sendUserMessage model-facing argument (`symbol:module/call:sendUserMessage/0/argument:0`)
+- `typescript-model-call:extension/pi/v1/learning/learn.ts:module:sendUserMessage:1`
   - `argument:0` — sendUserMessage model-facing argument (`symbol:module/call:sendUserMessage/1/argument:0`)
-- `typescript-model-call:extension/doors/learnFactory.ts:module:sendUserMessage:0`
-  - `argument:0` — sendUserMessage model-facing argument (`symbol:module/call:sendUserMessage/0/argument:0`)
 - `typescript-tool:learn`
   - `description` — description (`tool:learn.description`)
   - `promptSnippet` — promptSnippet (`tool:learn.promptSnippet`)
-  - `promptGuidelines` — promptGuidelines (`tool:learn.promptGuidelines`)
+  - `promptGuidelines.0` — promptGuidelines item 1 (`tool:learn.promptGuidelines.0`)
+  - `promptGuidelines.1` — promptGuidelines item 2 (`tool:learn.promptGuidelines.1`)
   - `parameters.properties.summary.description` — parameters.properties.summary.description (`tool:learn.parameters.properties.summary.description`)
   - `parameters.properties.decision.description` — parameters.properties.decision.description (`tool:learn.parameters.properties.decision.description`)
   - `parameters.properties.target.description` — parameters.properties.target.description (`tool:learn.parameters.properties.target.description`)
@@ -1322,7 +1323,9 @@ Capture learnings and route them into documentation, code, or harvested objectiv
 - `typescript-tool:run_learn_wave`
   - `description` — description (`tool:run_learn_wave.description`)
   - `promptSnippet` — promptSnippet (`tool:run_learn_wave.promptSnippet`)
-  - `promptGuidelines` — promptGuidelines (`tool:run_learn_wave.promptGuidelines`)
+  - `promptGuidelines.0` — promptGuidelines item 1 (`tool:run_learn_wave.promptGuidelines.0`)
+  - `promptGuidelines.1` — promptGuidelines item 2 (`tool:run_learn_wave.promptGuidelines.1`)
+  - `promptGuidelines.2` — promptGuidelines item 3 (`tool:run_learn_wave.promptGuidelines.2`)
   - `parameters.properties.bundle_dir.description` — parameters.properties.bundle_dir.description (`tool:run_learn_wave.parameters.properties.bundle_dir.description`)
   - `parameters.properties.angles.description` — parameters.properties.angles.description (`tool:run_learn_wave.parameters.properties.angles.description`)
   - `parameters.properties.angles.items.properties.emphasis.description` — parameters.properties.angles.items.properties.emphasis.description (`tool:run_learn_wave.parameters.properties.angles.items.properties.emphasis.description`)
