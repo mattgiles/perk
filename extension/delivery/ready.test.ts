@@ -219,6 +219,23 @@ test("drive: the evidence is minted with the exact six fields + the PR number", 
   assert.deepEqual(outcome.facts.handoff, cohort());
 });
 
+test("drive: the evidence snapshots validated primitives — post-mint mutation cannot reach it", async () => {
+  // The caller still holds the handoff object the facts arm carries; mutating it after the
+  // validation passed must NOT change what the drive interpolates (no aliasing).
+  const handoff = cohort();
+  const { deps } = depsFor({
+    ok: true,
+    facts: { route: "stacked", pr: prFacts(), was_draft: true, handoff },
+  });
+  const outcome = await readyChange(deps);
+  assert.ok(outcome.kind === "stamped" && outcome.continuation.kind === "drive");
+  handoff.objective = "666";
+  handoff.stamped_head = "not-a-sha";
+  const evidence = outcome.continuation.evidence;
+  assert.equal(evidence.objective, "500");
+  assert.equal(evidence.stamped_head, SHA_B);
+});
+
 // --- compile-time negatives (type-level pins; runtime bodies are trivially green) ---------------
 
 test("compile-time: a structural ReadyDriveEvidence literal is rejected (mint-only nominality)", () => {

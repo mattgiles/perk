@@ -1135,24 +1135,41 @@ and process mechanics in the Python exterior and adapters.
 >   via `spyInjections`).
 > - **Accounting ledger** (final numbers; operator acceptance rides the PR-approval gesture —
 >   the 7.1/6.3 named-invariant escape hatch):
->   - Production LOC: 281 deleted (`doors/ready.ts`) → 516 added (`delivery/ready.ts` 194,
->     `pi/v1/delivery/ready.ts` 322); whole-change production net **+235** against the plan's
->     ~+110 estimate and its ~+150 re-examination bar — re-examined before submit: the excess
->     is the two named invariant classes, not padding — (1) the correlated facts variants +
->     their outcome-arm constraints + the mint-only nominal evidence class (three variant
->     interfaces, the getter-backed `#private` brand, the double never-checked exhaustive
->     switches); (2) the `MarkReady` port + the wire-identical details rebuild the split
->     itself requires (the door built details implicitly from one decode shape). Zero new
->     policy surface; comment-carried intent preserved per AGENTS.
->   - Test LOC: 492 deleted (`doors/ready.test.ts`) → 761 added (`delivery/ready.test.ts` 252,
->     `pi/v1/delivery/ready.test.ts` 509) — net +269: the new arms are the feature-tier
->     fake-deps suite (ordering, the three throwing-sentinel gate pins, gate-before-evidence,
->     the relocated INVALID_EVIDENCE matrix with per-row retryPlan, evidence minting, the
->     compile-time negatives), the frozen registration baselines, the full-details wire
->     baselines incl. the six-field cohort-drop matrix, the exact refusal-warning bytes through
->     registered surfaces (the read-only arm via a read-only-scaffolded `/ready` — exactly
->     production's gesture), the full-cohort integration pin (ONE injected drive with the
->     pinned range + binding suffix), and the report-before-drive order pin.
+>   - Production LOC (recomputed after the review-address pass): 281 deleted
+>     (`doors/ready.ts`) → 515 added (`delivery/ready.ts` 193, `pi/v1/delivery/ready.ts` 322);
+>     whole-change production net **+234** against the plan's ~+110 estimate and its ~+150
+>     re-examination bar — re-examined before submit: the excess is the two named invariant
+>     classes, not padding — (1) the correlated facts variants + their outcome-arm constraints
+>     + the mint-only nominal evidence class (three variant interfaces, the `#private` brand,
+>     the double never-checked exhaustive switches); (2) the `MarkReady` port + the
+>     wire-identical details rebuild the split itself requires (the door built details
+>     implicitly from one decode shape). Zero new policy surface; comment-carried intent
+>     preserved per AGENTS.
+>   - Test LOC (recomputed): 492 deleted (`doors/ready.test.ts`) → 825 added
+>     (`delivery/ready.test.ts` 269, `pi/v1/delivery/ready.test.ts` 556) — net +333: the new
+>     arms are the feature-tier fake-deps suite (ordering, the three throwing-sentinel gate
+>     pins, gate-before-evidence, the relocated INVALID_EVIDENCE matrix with per-row retryPlan,
+>     evidence minting + the post-mint mutation-immunity pin, the compile-time negatives), the
+>     frozen registration baselines, the full-details wire baselines incl. the six-field
+>     cohort-drop matrix and BOTH incremental forms (the legacy absent-`stacked` form and the
+>     current worker's explicit `stacked: false` + null-cohort form), the
+>     `["pr","ready","--json"]` argv pin, the exact refusal-warning bytes through registered
+>     surfaces (the read-only arm via a read-only-scaffolded `/ready` — exactly production's
+>     gesture), the full-cohort integration pin (ONE injected drive with the pinned range +
+>     binding suffix), and the report-before-drive order pin.
+>   - **Review-address hardening (PR #2125)**: `ReadyDriveEvidence` snapshots the validated
+>     PRIMITIVES at mint time instead of retaining the caller-reachable `ReadyHandoff` object
+>     — post-validation mutation of `facts.handoff` can no longer reach the drive render
+>     (aliasing closed; mutation-immunity pinned in the feature suite).
+>   - **Declined simplifications (recorded, from the ponytail lane)**: (a) deleting
+>     `ReadyDriveEvidence` and driving from the stamped facts — declined: the mint-only
+>     nominal evidence IS the plan-settled resolution of the validated-drive invariant (the
+>     stamped facts carry the RAW decoded cohort, not proof of validation; the snapshot
+>     hardening above strengthens exactly this boundary); (b) collapsing `ReadyOutcome.kind`
+>     into `facts.route` — declined: the outcome vocabulary names transition outcomes (incl.
+>     `failed`, which has no facts route) while the route names the wire's routing facts; the
+>     plan settled the honest-arm vocabulary, and `readyChange`'s classification switch is the
+>     ONE conversion point.
 >   - Files: +4 / −2; touched: `index.ts`, `importDirectionGuard.test.ts` (census burn-down),
 >     `pi/v1/objective.ts` (comment re-anchor), `substrate/stageTools.test.ts` (DRIVE_COVERAGE
 >     label + comment), `shared/contracts.md` (two re-anchors, no behavior amendment),

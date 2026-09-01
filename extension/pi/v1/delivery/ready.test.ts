@@ -9,7 +9,7 @@
 // Python; a fake `perk` (PERK_BIN) stands in for the GitHub mark-ready.
 
 import assert from "node:assert/strict";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
@@ -126,7 +126,7 @@ test("registration parity: ready tool + /ready command match the frozen baseline
 
 // --- full-details wire baselines (captured from the pre-migration door) -----------------------
 
-test("wire baseline: incremental — terminating, no drive", async () => {
+test("wire baseline: incremental, legacy absent-stacked form — terminating, no drive", async () => {
   const r = await invokeReady({ stdout: READY_JSON });
   assert.equal(r.text, "Marked ready: PR #42 is open for review.");
   assert.deepEqual(r.details, {
@@ -136,6 +136,53 @@ test("wire baseline: incremental — terminating, no drive", async () => {
   });
   assert.equal(r.terminate, true);
   assert.deepEqual(r.injected, [], "an incremental ready drives nothing, quietly");
+});
+
+test("wire baseline: incremental, the current worker's explicit stacked:false form", async () => {
+  // The live worker emits `stacked: false` with null continuation fields (ready_cmd.py:
+  // \"stacked=false, rest null\"); the false-vs-absent distinction is wire-visible — the
+  // false value must round-trip while the null cohort fields stay dropped.
+  const r = await invokeReady({
+    stdout: JSON.stringify({
+      success: true,
+      error_type: null,
+      message: null,
+      pr: { number: 42, url: "https://gh/o/r/pull/42" },
+      was_draft: true,
+      dry_run: false,
+      stacked: false,
+      objective: null,
+      node: null,
+      stamped_head: null,
+      stamp_advanced: null,
+      reconcile_notice: null,
+      reconcile_retry: null,
+      plan: null,
+      parent_checkpoint: null,
+    }),
+  });
+  assert.equal(r.text, "Marked ready: PR #42 is open for review.");
+  assert.deepEqual(r.details, {
+    ok: true,
+    pr: { number: 42, url: "https://gh/o/r/pull/42" },
+    was_draft: true,
+    stacked: false,
+  });
+  assert.equal(r.terminate, true);
+  assert.deepEqual(r.injected, [], "an incremental ready drives nothing, quietly");
+});
+
+test('argv: the adapter delegates exactly ["pr", "ready", "--json"]', async () => {
+  const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
+  const argvFile = join(cwd, "argv.txt");
+  const bin = fakePerk(cwd, { stdout: READY_JSON, argvFile });
+  const h = await loadPerkSession({ cwd, env: { PERK_RUN_ID: "01RID", PERK_BIN: bin } });
+  try {
+    await h.invokeTool("ready", {});
+    assert.deepEqual(readFileSync(argvFile, "utf8").trim().split("\n"), ["pr", "ready", "--json"]);
+  } finally {
+    h.dispose();
+  }
 });
 
 test("wire baseline: the FULL stacked cohort — stamp facts + ONE injected drive", async () => {

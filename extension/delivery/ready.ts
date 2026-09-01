@@ -93,34 +93,33 @@ export interface ReadyDeps {
  * The validated drive evidence — NOMINAL and mint-only (the WorkerModelSelection precedent):
  * the `#private` field makes structural forgery impossible, the constructor is unreachable
  * outside this module, and `readyChange` mints it from the SAME facts value the `stamped` arm
- * carries, only after the strict evidence vocabulary passed. The drive template interpolates
- * exclusively from this type, so an unvalidated (or facts-divergent) drive is unrepresentable.
+ * carries, only after the strict evidence vocabulary passed. Every field is a validated
+ * primitive SNAPSHOTTED at mint time — the evidence never aliases the caller-reachable handoff
+ * object, so post-validation mutation of `facts.handoff` cannot reach the drive render. The
+ * drive template interpolates exclusively from this type, so an unvalidated (or
+ * facts-divergent) drive is unrepresentable.
  */
 class ReadyDriveEvidence {
-  // The ONE `#private` field supplies the nominal guarantee; the accessors below read it.
-  readonly #handoff: ReadyHandoff;
+  // The ONE `#private` field supplies the nominal guarantee; the getter below reads it.
+  readonly #objective: string;
+  readonly node: string;
+  readonly plan: string;
+  readonly stamped_head: string;
+  readonly parent_checkpoint: string;
   /** The verified PR number (integer-checked with the evidence). */
   readonly pr: number;
 
   constructor(handoff: ReadyHandoff, pr: number) {
-    this.#handoff = handoff;
+    this.#objective = handoff.objective;
+    this.node = handoff.node;
+    this.plan = handoff.plan;
+    this.stamped_head = handoff.stamped_head;
+    this.parent_checkpoint = handoff.parent_checkpoint;
     this.pr = pr;
   }
 
   get objective(): string {
-    return this.#handoff.objective;
-  }
-  get node(): string {
-    return this.#handoff.node;
-  }
-  get plan(): string {
-    return this.#handoff.plan;
-  }
-  get stamped_head(): string {
-    return this.#handoff.stamped_head;
-  }
-  get parent_checkpoint(): string {
-    return this.#handoff.parent_checkpoint;
+    return this.#objective;
   }
 }
 
