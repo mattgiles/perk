@@ -15,7 +15,7 @@ import type {
 } from "@earendil-works/pi-coding-agent";
 import type { PlanRef } from "../substrate/cache.ts";
 import { registerPerkCommand } from "../substrate/command.ts";
-import { render } from "../substrate/prompts.ts";
+import { planReadInstruction, render } from "../substrate/prompts.ts";
 import { type BranchSource, branchOf, rebuildWorkflowState } from "../substrate/workflowState.ts";
 import { report } from "../surfaces/report.ts";
 
@@ -88,24 +88,6 @@ async function guardTransition(
   if (!gateDecision({ active, dirty }).cancel) return undefined;
   report(ctx, "lifecycle", "warning", DIRTY_MESSAGE); // fail-safe-headless: loud, still cancels
   return { cancel: true };
-}
-
-/**
- * The per-backend plan-read instruction — the prompt SSOT for "how do I read the saved
- * plan". Byte-identical to `perk/run/launch.py::_plan_read_instruction` (the Python twin); drift in
- * either plane fails the paired parity suites. `github` reads via `gh`; `linear` points at the
- * pi-mono-linear tools with an `open <url>` fallback; any other provider falls back to opening
- * the url.
- *
- * The wording now lives in the canonical templates `prompts/common/plan-read/*.md`, rendered
- * identically by both planes via the shared render seam (contracts.md §8.31); branching stays in
- * code — only the arm chosen and the vars passed differ. Golden-fixture parity (the three
- * `plan-read-*` cases) plus a thin per-arm selection test replace the dedicated substring parity.
- */
-export function planReadInstruction(provider: string, prId: string, url: string): string {
-  if (provider === "github") return render("common/plan-read/github.md", { pr_id: prId, url });
-  if (provider === "linear") return render("common/plan-read/linear.md", { pr_id: prId, url });
-  return render("common/plan-read/other.md", { pr_id: prId, url });
 }
 
 /**

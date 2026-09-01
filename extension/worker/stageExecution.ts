@@ -1,4 +1,4 @@
-// The headless stage-drive primitive (`driveStage`).
+// The confined stage-execution seam (`runStage`) — the headless stage-drive primitive.
 //
 // Drives ONE read-write stage (`implement`/`address`) end-to-end on an already-prepared worktree,
 // running the SAME `@mgiles/perk` extension package, with a locked resource set, auto-compaction and
@@ -14,39 +14,44 @@
 //
 // Budget semantics: `budget.tokens` counts FRESH WORK only — assistant `input + output` per
 // `turn_end`. Cache reads/writes and the provider `reasoning` breakdown (a subset of `output` in
-// pi-ai's normalization) are excluded by design; see `applyEvent`.
+// pi-ai's normalization) are excluded by design; see the adapter's `StageEvent.freshTokens`.
 //
-// Inverse of `extension/worker/readOnlySession.ts`: that builds a fully-isolated READ-ONLY child (loads
-// nothing, `["read","grep","find","ls"]`); the worker is the OPPOSITE — read-write defaults + the
-// real perk extension loaded from the worktree's `.pi/settings.json` (disk-layered settings:
-// `SettingsManager.create(worktree, throwawayAgentDir)` resolves the managed project-tier
-// `packages` list — perk + the borrowed set, the same package set as a warm session), with the
-// user-global tier locked out via a throwaway `agentDir`.
+// CONFINEMENT: this seam's caller surface carries no SDK shapes. Every `@earendil-works` import
+// AND the session-drive mechanics (construction, raw events, prompt/abort) live in the private
+// `./sdkAdapter.ts` — the seam drives the session only through the adapter's drive-session
+// handle, whose listener receives the perk-owned `StageEvent` union (the adapter translates raw
+// SDK events at the boundary; ALL policy folding — budget counters, terminal capture, outcome —
+// happens here on perk shapes). The one opaque model input (`StageRunOptions.model`) is the
+// adapter-minted nominal `WorkerModelSelection` (see the adapter header for the exact — narrow —
+// opacity guarantee: an import-edge ban plus nominal minting, nothing stronger). `workerMain.ts`
+// imports ONLY this seam (guard Rule F) and carries zero SDK imports.
 
-import { appendFileSync, mkdtempSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { appendFileSync } from "node:fs";
 import { env } from "node:process";
-// pi-ai's `ModelThinkingLevel` (`"off" | minimal | … | xhigh`) is the union `resolveCliModel`
-// returns and `createAgentSessionFromServices` accepts; the pi-coding-agent root does not
-// re-export a thinking-level type (only `ThinkingLevelChangeEntry`).
-import type { Api, Model, ModelThinkingLevel as ThinkingLevel } from "@earendil-works/pi-ai";
-import {
-  type CreateAgentSessionRuntimeFactory,
-  createAgentSessionFromServices,
-  createAgentSessionRuntime,
-  createAgentSessionServices,
-  ModelRuntime,
-  resolveCliModel,
-  SessionManager,
-  SettingsManager,
-} from "@earendil-works/pi-coding-agent";
-import { planReadInstruction } from "../doors/lifecycleGates.ts";
 import { ensureRunScratch, type PlanRef, readPlanRef, runEventsPath } from "../substrate/cache.ts";
-import { render } from "../substrate/prompts.ts";
+import { capForModel } from "../substrate/modelVisible.ts";
+import { planReadInstruction, render } from "../substrate/prompts.ts";
 import { captureSessionPointer } from "../substrate/sessionPointers.ts";
 import { rebuildWorkflowState } from "../substrate/workflowState.ts";
-import { capForModel } from "./readOnlySession.ts";
+import {
+  createDriveSession,
+  type DriveRuntimeLike,
+  type DriveSessionHandle,
+  defaultCreateRuntime,
+  resolveAuth,
+  type StageEvent,
+  type WorkerModelSelection,
+} from "./sdkAdapter.ts";
+
+export type {
+  DriveEvent,
+  DriveRuntimeLike,
+  DriveSessionLike,
+  StageEvent,
+  WorkerModelSelection,
+} from "./sdkAdapter.ts";
+// Re-exports so `workerMain.ts` (and the harness tier) import ONLY the seam.
+export { resolveWorkerModel } from "./sdkAdapter.ts";
 
 // --- contract types (additive-stable; §B of docs/design/headless-worker.md) ---------------------
 
@@ -74,7 +79,7 @@ export interface DriveBudget {
 
 /**
  * The structured run outcome (audit §B). **Additive-stable**: later fields may be added; existing
- * fields keep their meaning. Never thrown — `driveStage` always resolves with one of these.
+ * fields keep their meaning. Never thrown — `runStage` always resolves with one of these.
  */
 export interface RunOutcome {
   run_id: string;
@@ -121,100 +126,35 @@ type RunEventInput = DistributiveOmit<RunEvent, "seq" | "t">;
 /** Per-event free-text cap (route-don't-relay): events carry the narrative, not raw tool payloads. */
 export const EVENT_SUMMARY_CAP = 2 * 1024;
 
-export interface DriveStageOptions {
+export interface StageRunOptions {
   /** Absolute path to the already-positioned worktree (Gap 7). */
   worktree: string;
   stage: DriveStage;
   /** The seeded first prompt (see `initialPromptFor`). */
   initialPrompt: string;
   /**
-   * Explicit model; else the SDK's own default resolution picks one at session creation
-   * (settings `defaultModel` → pi's per-provider defaults → first available — Gap 5). Never
-   * pre-pinned here: `getAvailable()` sorts alphabetically, so `[0]` is the *oldest* model of
-   * the first provider (a since-removed `claude-3-5-haiku` date-pin 404'd a whole remote drive).
+   * The one opaque model input: an adapter-minted nominal `WorkerModelSelection` (from
+   * `resolveWorkerModel`). Absent ⇒ the adapter builds a default-runtime selection and the SDK's
+   * own default resolution picks the model at session creation (settings `defaultModel` → pi's
+   * per-provider defaults → first available — Gap 5). Never pre-pinned here: `getAvailable()`
+   * sorts alphabetically, so `[0]` is the *oldest* model of the first provider (a since-removed
+   * `claude-3-5-haiku` date-pin 404'd a whole remote drive).
    */
-  model?: Model<Api>;
-  /**
-   * Thinking level parsed from the `--model <pattern>:<level>` suffix (`resolveWorkerModel`).
-   * `undefined` ⇒ the SDK's settings-default resolution — unchanged behavior.
-   */
-  thinkingLevel?: ThinkingLevel;
-  /** The canonical model/auth runtime (pi 0.84 `ModelRuntime`); default-created when absent. */
-  modelRuntime?: ModelRuntime;
+  model?: WorkerModelSelection;
   budget: DriveBudget;
   /** External cancellation; OR'd with the budget watchdog. */
   signal?: AbortSignal;
 }
 
 /**
- * The offline seam (mirrors `readOnlySession.test.ts`'s `runTask` injection). `createRuntime`
- * overrides the production runtime factory so tests drive synthetic sessions; `now` injects the
- * clock for deterministic `elapsed_ms`.
+ * The offline seam. `createRuntime` overrides the production runtime factory so tests drive
+ * synthetic sessions; `now` injects the clock for deterministic `elapsed_ms`.
  */
-export interface DriveStageDeps {
-  createRuntime?: (opts: DriveStageOptions) => Promise<DriveRuntimeLike>;
+export interface StageRunDeps {
+  createRuntime?: (opts: StageRunOptions) => Promise<DriveRuntimeLike>;
   now?: () => number;
   /** The structured run-event sink. Absent ⇒ the default run-scoped NDJSON file sink. */
   eventSink?: RunEventSink;
-}
-
-// --- structural shapes (kept minimal so pure helpers stay offline-testable) ---------------------
-
-/** The slice of an agent session event the worker reads (structural — see agent-session.d.ts). */
-export interface DriveEvent {
-  type: string;
-  toolName?: string;
-  result?: unknown;
-  isError?: boolean;
-  message?: {
-    role?: string;
-    stopReason?: string;
-    errorMessage?: string;
-    /**
-     * Assistant token usage. `reasoning` is a provider-reported breakdown that is a **subset of
-     * `output`** on every pi-ai provider that populates it (anthropic `thinking_tokens`, google
-     * `thoughtsTokenCount` folded into `output`, openai `reasoning_tokens` inside completion/
-     * output tokens — verified @ pi-ai 0.80.5), so it is deliberately EXCLUDED from the budget
-     * sum: adding it would double-count.
-     */
-    usage?: { input?: number; output?: number; reasoning?: number };
-  };
-}
-
-/** The session surface the worker drives (structurally satisfied by pi's `AgentSession`). */
-export interface DriveSessionLike {
-  bindExtensions(bindings: unknown): Promise<void>;
-  subscribe(listener: (event: DriveEvent) => void): () => void;
-  prompt(text: string): Promise<void>;
-  abort(): Promise<void>;
-  dispose(): void;
-  sessionManager: { getBranch(): unknown[]; getSessionFile?(): string | null };
-  /**
-   * Optional (presence-gated): when the session exposes its extension runner, `driveStage`
-   * preflights the stage's terminating perk tool post-bind and fails fast (zero-turn
-   * `no_extension_tools`) instead of burning the budget on a tool-less session.
-   */
-  extensionRunner?: { getAllRegisteredTools(): { definition: { name: string } }[] };
-}
-
-/** The runtime surface (structurally satisfied by pi's `AgentSessionRuntime`). */
-export interface DriveRuntimeLike {
-  readonly session: DriveSessionLike;
-  dispose(): Promise<void> | void;
-}
-
-/** Mutable counters/captures the subscribe listener accumulates over the drive. */
-export interface DriveCounters {
-  turns: number;
-  tokens: number;
-  /** Latest submit-bearing evidence (standalone submit or the nested finalizer submit). */
-  submitDetails: Record<string, unknown> | null;
-  finalizeDetails: Record<string, unknown> | null;
-  modelError: { message: string } | null;
-}
-
-export function freshCounters(): DriveCounters {
-  return { turns: 0, tokens: 0, submitDetails: null, finalizeDetails: null, modelError: null };
 }
 
 /** The natural-idle terminal classification (before watchdog/abort overrides). */
@@ -228,41 +168,41 @@ export interface TerminalVerdict {
 
 // --- pure helpers (offline-testable) ------------------------------------------------------------
 
-/** Extract a tool's `details` object from a captured `tool_execution_end.result`; null if absent. */
-function detailsOf(result: unknown): Record<string, unknown> | null {
-  if (result && typeof result === "object" && "details" in result) {
-    const details = (result as { details: unknown }).details;
-    if (details && typeof details === "object") return details as Record<string, unknown>;
-  }
-  return null;
+/** Mutable counters/captures the drive's policy fold accumulates over the run. */
+export interface DriveCounters {
+  turns: number;
+  tokens: number;
+  /** Latest submit-bearing evidence (standalone submit or the nested finalizer submit). */
+  submitDetails: Record<string, unknown> | null;
+  finalizeDetails: Record<string, unknown> | null;
+  modelError: { message: string } | null;
+}
+
+export function freshCounters(): DriveCounters {
+  return { turns: 0, tokens: 0, submitDetails: null, finalizeDetails: null, modelError: null };
 }
 
 /**
- * Fold one agent-session event into the running counters (pure). Counts `turn_end` turns, sums
- * assistant token usage (the `sumAssistantTokens` pattern in objective.ts), captures the `submit`
- * /`finalize_address` terminal tool details, and records a post-acceptance model error
- * (assistant `message_end` with `stopReason:"error"`, surfaced with retry off — audit §B #4).
- *
- * The token sum is `input + output` ONLY: `usage.reasoning` is a subset of `output` on every
- * pi-ai provider that reports it (see the `DriveEvent.usage` doc), so summing it would
- * double-count.
+ * Fold one perk-owned drive event into the running counters (pure) — the seam's policy fold over
+ * the adapter's translated `StageEvent` union. Counts turns and fresh-work tokens (the sum is
+ * adapter-computed; see `StageEvent`'s `freshTokens` doc for the reasoning-subset exclusion),
+ * captures the `submit`/`finalize_address` terminal tool details, and records a post-acceptance
+ * model error.
  */
-export function applyEvent(counters: DriveCounters, event: DriveEvent): void {
-  if (event.type === "turn_end") {
+export function applyStageEvent(counters: DriveCounters, event: StageEvent): void {
+  if (event.kind === "turn_ended") {
     counters.turns += 1;
-    const usage = event.message?.usage;
-    if (usage) counters.tokens += Math.max(0, usage.input ?? 0) + Math.max(0, usage.output ?? 0);
+    counters.tokens += event.freshTokens;
     return;
   }
-  if (event.type === "tool_execution_end") {
-    if (event.toolName === "submit") counters.submitDetails = detailsOf(event.result);
-    else if (event.toolName === "finalize_address") {
-      const details = detailsOf(event.result);
-      counters.finalizeDetails = details;
+  if (event.kind === "tool_ended") {
+    if (event.tool === "submit") counters.submitDetails = event.details;
+    else if (event.tool === "finalize_address") {
+      counters.finalizeDetails = event.details;
       // A finalizer carries the submit that immediately preceded resolution. Recording it into the
       // same latest-evidence slot means a later standalone submit naturally supersedes it after a
       // conflict-resolver re-drive.
-      const nestedSubmit = details?.submit;
+      const nestedSubmit = event.details?.submit;
       if (nestedSubmit && typeof nestedSubmit === "object" && !Array.isArray(nestedSubmit)) {
         // The finalizer only exposes this nested block after submit succeeded; restore the
         // success marker stripped from its nested public shape so a later failed standalone
@@ -272,11 +212,7 @@ export function applyEvent(counters: DriveCounters, event: DriveEvent): void {
     }
     return;
   }
-  if (event.type === "message_end") {
-    if (event.message?.role === "assistant" && event.message.stopReason === "error") {
-      counters.modelError = { message: event.message.errorMessage ?? "model error" };
-    }
-  }
+  counters.modelError = { message: event.message };
 }
 
 /** True when the budget watchdog should trip from the current counters. */
@@ -434,32 +370,19 @@ export function assembleOutcome(args: {
 // --- run-event helpers (offline-testable) ---------------------------------------------
 
 /**
- * Compute a `tool_outcome` `{ tool, ok, summary }` from a `tool_execution_end` `DriveEvent` (pure).
- * `ok` = `details.ok === true` when the result carries a `details.ok` boolean, else `!isError`.
- * `summary` is `null` on success and, on failure, a capped (route-don't-relay) synthesis of the
- * tool's error message — never the raw tool result.
+ * Compute a `tool_outcome` `{ tool, ok, summary }` from a translated `tool_ended` event (pure).
+ * `summary` is `null` on success and, on failure, a capped (route-don't-relay) rendering of the
+ * adapter's pre-cap error text — never the raw tool result.
  */
-export function toolOutcomeOf(event: DriveEvent): {
+export function toolOutcomeOf(event: Extract<StageEvent, { kind: "tool_ended" }>): {
   tool: string;
   ok: boolean;
   summary: string | null;
 } {
-  const details = detailsOf(event.result);
-  const ok = typeof details?.ok === "boolean" ? details.ok === true : !event.isError;
-  let summary: string | null = null;
-  if (!ok) {
-    const raw = toolErrorMessage(event);
-    summary = capForModel(raw, EVENT_SUMMARY_CAP).shown;
-  }
-  return { tool: event.toolName ?? "", ok, summary };
-}
-
-/** Best-effort error text for a failed tool (details.error | result string | a generic fallback). */
-function toolErrorMessage(event: DriveEvent): string {
-  const details = detailsOf(event.result);
-  if (details && typeof details.error === "string" && details.error) return details.error;
-  if (typeof event.result === "string" && event.result) return event.result;
-  return `tool ${event.toolName ?? ""} failed`;
+  const summary = event.ok
+    ? null
+    : capForModel(event.errorText ?? `tool ${event.tool} failed`, EVENT_SUMMARY_CAP).shown;
+  return { tool: event.tool, ok: event.ok, summary };
 }
 
 /**
@@ -506,7 +429,7 @@ export function defaultEventSink(worktree: string, runId: string): RunEventSink 
 /**
  * Re-derive the stage's initial prompt from the plan-ref — the TS twin of
  * `perk/run/launch.py._implement_prompt`/`_address_prompt`. INVARIANT: textual parity with the Python
- * plane (asserted reciprocally in `worker.test.ts` + `tests/test_worker_prompt_parity.py`). No
+ * plane (asserted reciprocally in `stageExecution.test.ts` + `tests/test_worker_prompt_parity.py`). No
  * skill-binding suffix is appended here: in the driven session the bindings arrive via Mechanism A
  * (bindingDelivery.ts injects the handoff stage's render because this prompt carries no
  * `BINDING_HEADER`) — content byte-identical to the cold door's suffix (contracts.md §8.38).
@@ -535,184 +458,18 @@ export function initialPromptFor(stage: DriveStage, planRef: PlanRef | null): st
   return render("stages/address/action.md", { provider, pr_id: prId, url });
 }
 
-// --- bind / subscribe management (Gap 1) --------------------------------------------------------
-
-/** The binding the worker applies to every (re)bound session: headless (`hasUI === false`). */
-export function headlessBinding(): {
-  uiContext: undefined;
-  mode: "json";
-  onError: (err: unknown) => void;
-} {
-  return {
-    uiContext: undefined,
-    mode: "json",
-    onError: (err: unknown) => console.error(`perk worker: extension error — ${String(err)}`),
-  };
-}
-
-/**
- * Manage the bind+subscribe lifecycle across session replacement (Gap 1). `bind(target)` binds the
- * perk extension and attaches the terminal/budget listener; calling it again (after a runtime
- * replacement) unsubscribes the prior listener first so events are never double-counted. A mid-drive
- * replacement is not expected on the happy path (the prompt instructs `/submit`, never `/implement`;
- * `lifecycleGates.newSession` is `hasUI`-guarded; objective compaction is inert with no active
- * objective) — so an observed `rebind()` is a loud structured-log error.
- */
-export function createBindManager(binding: unknown, listener: (event: DriveEvent) => void) {
-  let unsubscribe: (() => void) | null = null;
-  return {
-    async bind(target: DriveSessionLike): Promise<void> {
-      if (unsubscribe) unsubscribe();
-      await target.bindExtensions(binding);
-      unsubscribe = target.subscribe(listener);
-    },
-    dispose(): void {
-      if (unsubscribe) {
-        unsubscribe();
-        unsubscribe = null;
-      }
-    },
-  };
-}
-
-// --- the production runtime factory -------------------------------------------------------------
-
-/**
- * Build the asymmetric runtime: `cwd = worktree` (project tier — perk's `@mgiles/perk` extension via the
- * managed `.pi/settings.json`, the managed `AGENTS.md`/`APPEND_SYSTEM.md`) and `agentDir = throwaway`
- * (user-global tier OUT — the throwaway dir has no `settings.json`, so the global tier is empty),
- * env-var/registry auth+model (Gap 5). Settings are DISK-LAYERED (`SettingsManager.create` +
- * `applyOverrides`, the SDK's sanctioned "with overrides" shape — docs/sdk.md "Settings
- * Management"): the project tier resolves the managed `packages` list, while the compaction-off/
- * retry-off determinism overrides ride the merged view only (package resolution reads the
- * per-scope raws — overrides cannot leak into it). Missing `npm:` packages auto-install into
- * `.pi/npm` during the loader's reload (skipped under `PI_OFFLINE`); an install failure throws →
- * `driveStage`'s catch arm → a loud `failed`/`drive_error`. No `tools` allowlist — read-write
- * defaults + extension tools. The `createAgentSessionServices` factory builds the
- * `DefaultResourceLoader` internally from `cwd`/`agentDir` (recipe correction #1).
- */
-async function defaultCreateRuntime(
-  opts: DriveStageOptions,
-  resolved: ResolvedAuth,
-): Promise<DriveRuntimeLike> {
-  const agentDir = mkdtempSync(join(tmpdir(), "perk-worker-agent-"));
-  const settingsManager = SettingsManager.create(opts.worktree, agentDir);
-  settingsManager.applyOverrides({ compaction: { enabled: false }, retry: { enabled: false } });
-  const factory: CreateAgentSessionRuntimeFactory = async (factoryOpts) => {
-    const services = await createAgentSessionServices({
-      cwd: factoryOpts.cwd,
-      agentDir: factoryOpts.agentDir,
-      settingsManager,
-      modelRuntime: resolved.modelRuntime,
-    });
-    const result = await createAgentSessionFromServices({
-      services,
-      sessionManager: factoryOpts.sessionManager,
-      sessionStartEvent: factoryOpts.sessionStartEvent,
-      // `undefined` ⇒ the SDK's initial-model resolution picks the model (see `resolveAuth`);
-      // an `undefined` thinkingLevel likewise defers to the settings default.
-      model: resolved.model,
-      thinkingLevel: opts.thinkingLevel,
-    });
-    // Name the model that will actually drive (the SDK may have picked it) — the remote step
-    // log is otherwise silent about it until a provider error.
-    const chosen = result.session.model;
-    console.error(
-      `perk worker: model ${chosen ? `${chosen.provider}/${chosen.id}` : "unresolved"}`,
-    );
-    // Loud construction diagnostics (the CAUSE behind a later `no_extension_tools` symptom):
-    // settings I/O errors and extension load errors are recorded, not raised, by the SDK —
-    // surfacing them is the app layer's job. Fail-soft reporting only; never throws.
-    for (const entry of result.extensionsResult.errors) {
-      console.error(`perk worker: extension load error — ${entry.path}: ${entry.error}`);
-    }
-    for (const entry of settingsManager.drainErrors()) {
-      console.error(`perk worker: settings error (${entry.scope}) — ${String(entry.error)}`);
-    }
-    return { ...result, services, diagnostics: services.diagnostics };
-  };
-  const runtime = await createAgentSessionRuntime(factory, {
-    cwd: opts.worktree,
-    agentDir,
-    sessionManager: SessionManager.create(opts.worktree),
-  });
-  return runtime as unknown as DriveRuntimeLike;
-}
-
-// --- model/auth resolution (Gap 5) --------------------------------------------------------------
-
-export interface ResolvedAuth {
-  modelRuntime: ModelRuntime;
-  /** The EXPLICIT model only; `undefined` defers the pick to the SDK at session creation. */
-  model: Model<Api> | undefined;
-}
-
-/**
- * Resolve auth; returns null (never throws a domain error) when no model is available at all.
- * The model is NOT pre-pinned from the runtime: an `undefined` model lets `createAgentSession`
- * run its own initial-model resolution (settings `defaultModel` → pi's curated per-provider
- * defaults → first available), which picks a current-generation model instead of the catalogue's
- * alphabetically-first (= oldest) entry. Async because pi 0.84's `ModelRuntime.create` is async
- * (the default creation stays offline — `allowModelNetwork` defaults false).
- */
-export async function resolveAuth(opts: DriveStageOptions): Promise<ResolvedAuth | null> {
-  const modelRuntime = opts.modelRuntime ?? (await ModelRuntime.create());
-  if (!opts.model && modelRuntime.getAvailableSnapshot().length === 0) return null;
-  return { modelRuntime, model: opts.model };
-}
-
-/** What an explicit `--model` flag resolves to (a thin projection of `ResolveCliModelResult`). */
-export interface ResolvedWorkerModel {
-  model: Model<Api> | undefined;
-  thinkingLevel: ThinkingLevel | undefined;
-  /** Non-fatal resolution diagnostic (e.g. an invalid `:thinking` suffix) — surface, continue. */
-  warning: string | undefined;
-  /** Fatal: the pattern resolved to no model — fail fast, never guess. */
-  error: string | undefined;
-}
-
-/**
- * Resolve an explicit `--model` flag with pi's OWN CLI semantics (`resolveCliModel`): fuzzy
- * matching, bare-id resolution, `provider/pattern`, and a `:thinking` suffix — the same chain the
- * flag's string hits in an interactive pi launch, closing the warm/cold parity gap (cf.
- * docs/learned/workflow/execution-path-parity.md). `raw` falsy ⇒ all-undefined (the SDK's own
- * default resolution picks the model at session creation — see `resolveAuth`). A resolution that
- * yields neither a model nor an error is normalized to the worker's not-found error.
- */
-export function resolveWorkerModel(
-  raw: string | undefined,
-  modelRuntime: ModelRuntime,
-): ResolvedWorkerModel {
-  if (!raw) {
-    return { model: undefined, thinkingLevel: undefined, warning: undefined, error: undefined };
-  }
-  const result = resolveCliModel({ cliModel: raw, modelRuntime });
-  if (result.model === undefined && result.error === undefined) {
-    return {
-      model: undefined,
-      thinkingLevel: undefined,
-      warning: result.warning,
-      error: `model '${raw}' not found in the registry.`,
-    };
-  }
-  return {
-    model: result.model,
-    thinkingLevel: result.thinkingLevel,
-    warning: result.warning,
-    error: result.error,
-  };
-}
-
 // --- the drive primitive ------------------------------------------------------------------------
 
 /**
  * Drive one stage to terminal and return a structured `RunOutcome` — never throws (fail-soft like
  * `submitPr`). Seeds `initialPrompt`, races the driving `prompt()` against the budget watchdog and
- * the external `signal`, classifies the terminal at idle, and disposes the runtime in `finally`.
+ * the external `signal`, classifies the terminal at idle, and disposes the adapter handle in
+ * `finally` (guarded — a cleanup error can never replace the computed outcome). All session
+ * mechanics go through the adapter's drive-session handle; policy stays here.
  */
-export async function driveStage(
-  opts: DriveStageOptions,
-  deps: DriveStageDeps = {},
+export async function runStage(
+  opts: StageRunOptions,
+  deps: StageRunDeps = {},
 ): Promise<RunOutcome> {
   const now = deps.now ?? Date.now;
   const startMs = now();
@@ -736,7 +493,7 @@ export async function driveStage(
 
   // Auth/model resolution is a production-path concern only: with an injected runtime factory
   // (tests) the drive never touches the default `ModelRuntime.create` (no host file reads).
-  const resolved = deps.createRuntime ? null : await resolveAuth(opts);
+  const resolved = deps.createRuntime ? null : await resolveAuth(opts.model);
   if (resolved === null && !deps.createRuntime) {
     // A zero-turn run is still observable: emit a `run_started` + `run_finished` pair.
     emitter.emit({ kind: "run_started", run_id: runId, stage: opts.stage });
@@ -751,44 +508,42 @@ export async function driveStage(
 
   let terminationReason: "natural" | "budget" | "abort" = "natural";
   let settled = false;
-  let runtime: DriveRuntimeLike | null = null;
-  const bindManager = createBindManager(headlessBinding(), (event) => {
-    applyEvent(counters, event);
-    if (event.type === "turn_end") {
+  let handle: DriveSessionHandle | null = null;
+  const listener = (event: StageEvent): void => {
+    applyStageEvent(counters, event);
+    if (event.kind === "turn_ended") {
       if (budgetTripped(counters, opts.budget)) trip("budget");
-    } else if (event.type === "tool_execution_end") {
+    } else if (event.kind === "tool_ended") {
       const o = toolOutcomeOf(event);
       emitter.emit({ kind: "tool_outcome", tool: o.tool, ok: o.ok, summary: o.summary });
     }
-  });
+  };
 
   function trip(reason: "budget" | "abort"): void {
     if (settled) return;
     if (terminationReason === "natural") terminationReason = reason;
-    if (runtime) void runtime.session.abort();
+    handle?.abort();
   }
 
   const onSignal = (): void => trip("abort");
 
   try {
-    runtime = deps.createRuntime
+    const runtime = deps.createRuntime
       ? await deps.createRuntime(opts)
       : // biome-ignore lint/style/noNonNullAssertion: resolved is non-null on the production path.
-        await defaultCreateRuntime(opts, resolved!);
-
-    let boundSession = runtime.session;
-    await bindManager.bind(boundSession);
+        await defaultCreateRuntime(opts.worktree, resolved!);
+    handle = createDriveSession(runtime, listener);
+    await handle.bind();
     emitter.emit({ kind: "run_started", run_id: runId, stage: opts.stage });
 
-    // Terminating-tool preflight (presence-gated on `extensionRunner`): disk discovery has a
-    // silent-zero arm — a missing/unparseable `.pi/settings.json` or an unresolvable local-path
-    // package yields ZERO extension tools without throwing — so fail fast (zero turns) instead of
-    // burning the whole budget on a drive that can never call its terminating tool. Reuses the
-    // `model_error` terminal signal with a distinct `error.type` (the `no_model` precedent).
-    if (boundSession.extensionRunner) {
-      const toolNames = boundSession.extensionRunner
-        .getAllRegisteredTools()
-        .map((t) => t.definition.name);
+    // Terminating-tool preflight (presence-gated on the session's extension runner): disk
+    // discovery has a silent-zero arm — a missing/unparseable `.pi/settings.json` or an
+    // unresolvable local-path package yields ZERO extension tools without throwing — so fail
+    // fast (zero turns) instead of burning the whole budget on a drive that can never call its
+    // terminating tool. Reuses the `model_error` terminal signal with a distinct `error.type`
+    // (the `no_model` precedent).
+    const toolNames = handle.registeredToolNames();
+    if (toolNames !== null) {
       const missing = missingTerminatingTool(opts.stage, toolNames);
       if (missing !== null) {
         return finish({
@@ -814,11 +569,11 @@ export async function driveStage(
         runId,
         klass: "implementation",
         site: "worker",
-        sessionFile: boundSession.sessionManager.getSessionFile?.() ?? null,
+        sessionFile: handle.sessionFile(),
       });
     }
 
-    // Budget/abort wiring (Gap 2): wall-clock timer + external signal both trip → session.abort().
+    // Budget/abort wiring (Gap 2): wall-clock timer + external signal both trip → handle.abort().
     const timer = setTimeout(() => trip("budget"), opts.budget.wallClockMs);
     if (opts.signal) {
       if (opts.signal.aborted) onSignal();
@@ -826,7 +581,7 @@ export async function driveStage(
     }
 
     try {
-      await runtime.session.prompt(opts.initialPrompt);
+      await handle.prompt(opts.initialPrompt);
     } finally {
       clearTimeout(timer);
       opts.signal?.removeEventListener("abort", onSignal);
@@ -834,13 +589,11 @@ export async function driveStage(
     }
 
     // Defensive rebind (Gap 1): the happy path never replaces the session; a replacement is loud.
-    if (runtime.session !== boundSession) {
+    if (await handle.rebindIfReplaced()) {
       console.error("perk worker: unexpected mid-drive session replacement — rebinding listener.");
-      boundSession = runtime.session;
-      await bindManager.bind(boundSession);
     }
 
-    const verdict = classify(opts, counters, terminationReason, boundSession);
+    const verdict = classify(opts, counters, terminationReason, () => handle?.workflowBranch());
     return finish(verdict);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
@@ -852,17 +605,19 @@ export async function driveStage(
       errorMessage: `headless drive failed: ${message}`,
     });
   } finally {
-    bindManager.dispose();
-    if (runtime) await runtime.dispose();
+    if (handle) await handle.dispose();
   }
 }
 
-/** Pick the terminal verdict: watchdog/abort override the natural-idle classification. */
+/**
+ * Pick the terminal verdict: watchdog/abort override the natural-idle classification. `branch` is
+ * a thunk so the workflow branch is read only on the natural path (exactly as before the seam).
+ */
 function classify(
-  opts: DriveStageOptions,
+  opts: StageRunOptions,
   counters: DriveCounters,
   terminationReason: "natural" | "budget" | "abort",
-  session: DriveSessionLike,
+  branch: () => unknown[] | undefined,
 ): TerminalVerdict {
   if (terminationReason === "budget") {
     return {
@@ -883,7 +638,7 @@ function classify(
     };
   }
   const lastReviewBatchPresent =
-    rebuildWorkflowState(session.sessionManager.getBranch() as never).last_review_batch != null;
+    rebuildWorkflowState((branch() ?? []) as never).last_review_batch != null;
   return evaluateTerminal({
     stage: opts.stage,
     submitDetails: counters.submitDetails,

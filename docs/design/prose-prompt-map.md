@@ -5,8 +5,8 @@ This is the readable projection of perk's living, workflow-first prose graph. It
 
 ## Coverage
 
-- **220** canonical source units
-- **738** logical fragments
+- **218** canonical source units
+- **736** logical fragments
 - **16** session shapes and **10** assemblies
 - **15** explicitly excluded candidates (policy-only; not displayed)
 - **0** validation findings
@@ -574,8 +574,6 @@ Implement a plan, resolve conflicts, and maintain implementation-session discipl
 | `markdown:skills/perk-implement/backends/linear.md` | `skill-detail` | `shipped` | [`skills/perk-implement/backends/linear.md`](../../skills/perk-implement/backends/linear.md) · `file` | — |
 | `typescript-model-call:extension/hunkFeedback/receiver.ts:module:sendUserMessage:0` | `control-guidance` | `shipped` | [`extension/hunkFeedback/receiver.ts`](../../extension/hunkFeedback/receiver.ts) · `symbol:module/call:sendUserMessage/0` | — |
 | `typescript-model-call:extension/hunkFeedback/receiver.ts:module:sendUserMessage:1` | `control-guidance` | `shipped` | [`extension/hunkFeedback/receiver.ts`](../../extension/hunkFeedback/receiver.ts) · `symbol:module/call:sendUserMessage/1` | — |
-| `typescript-model-call:extension/worker/readOnlySession.ts:module:prompt:0` | `control-guidance` | `shipped` | [`extension/worker/readOnlySession.ts`](../../extension/worker/readOnlySession.ts) · `symbol:module/call:prompt/0` | — |
-| `typescript-model-call:extension/worker/worker.ts:module:prompt:0` | `control-guidance` | `shipped` | [`extension/worker/worker.ts`](../../extension/worker/worker.ts) · `symbol:module/call:prompt/0` | — |
 
 <details>
 <summary>Logical fragments</summary>
@@ -601,10 +599,6 @@ Implement a plan, resolve conflicts, and maintain implementation-session discipl
   - `argument:0` — sendUserMessage model-facing argument (`symbol:module/call:sendUserMessage/0/argument:0`)
 - `typescript-model-call:extension/hunkFeedback/receiver.ts:module:sendUserMessage:1`
   - `argument:0` — sendUserMessage model-facing argument (`symbol:module/call:sendUserMessage/1/argument:0`)
-- `typescript-model-call:extension/worker/readOnlySession.ts:module:prompt:0`
-  - `argument:0` — prompt model-facing argument (`symbol:module/call:prompt/0/argument:0`)
-- `typescript-model-call:extension/worker/worker.ts:module:prompt:0`
-  - `argument:0` — prompt model-facing argument (`symbol:module/call:prompt/0/argument:0`)
 
 </details>
 

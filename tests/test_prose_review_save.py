@@ -389,7 +389,7 @@ def test_typescript_tool_save_writes_exact_complete_buffer_through_fixed_helper(
     assert [(check.id, check.command) for check in result.checks] == [
         ("prose-map", "uv run --no-sync perk-dev prose-map check"),
         ("worker-prompt-pins", "uv run --no-sync pytest tests/test_worker_prompt_parity.py -q"),
-        ("worker-test-pins", "node --test extension/worker/worker.test.ts"),
+        ("worker-test-pins", "node --test extension/worker/stageExecution.test.ts"),
         ("biome", "npx --no-install biome check extension tools"),
         ("tsc", "npx --no-install tsc --noEmit"),
     ]

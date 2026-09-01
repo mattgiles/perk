@@ -443,15 +443,13 @@ parser's structural assumptions.
 
 ### 6. SDK-driven headless workers
 
-[`extension/worker/worker.ts`](../../extension/worker/worker.ts) drives `implement` and `address`
+[`extension/worker/stageExecution.ts`](../../extension/worker/stageExecution.ts) (with its
+private SDK adapter [`extension/worker/sdkAdapter.ts`](../../extension/worker/sdkAdapter.ts))
+drives `implement` and `address`
 without a human TUI. It directly creates coding-agent SDK session services and a model runtime,
 loads extensions, installs a headless binding, prompts the session, listens to events, tracks
 turn/token/wall-clock budgets, aborts on a tripped budget or external signal, checks terminating
 tools, records session pointers, and emits Perk run events.
-
-[`extension/worker/readOnlySession.ts`](../../extension/worker/readOnlySession.ts) creates
-isolated, read-only child SDK sessions for bounded analysis. Perk also uses these sessions as a
-substrate for multi-angle agent waves.
 
 These implementations compensate for current SDK lifecycle gaps in a deliberate, tested way.
 They are also the Perk code most likely to benefit from a stable durable drive API.
@@ -751,8 +749,8 @@ Each depends on a normative or released surface that does not exist at the froze
 | Values can replace some workflow-state patches | `workflowState.ts` | Values reachable from supported extension/host API; fork policy documented | Port one low-risk field with dual-read comparison | Same recovery/fork semantics, simpler reads, acceptable audit | Lost history/fork state, no extension access, weaker diagnostics |
 | Format 4 can be audited without physical parsing | `session_jsonl.py` | Stable export or repository read API | Golden corpus across v3, converted v3, native JSONL, SQLite | Stable normalized entries/branches/custom data/usage | Backend-specific gaps or no offline/partial-file support |
 | `retainedTail` supports Perk's live-context test | `activeContextWindow()` | Stable branch/context projection | Compaction fixtures with quoted custom content | Exact live-entry classification before/after compaction | Summary ambiguity or no access to retained messages |
-| Durable drive can thin the worker | `worker.ts` | Public drive enabled; all WP05 paths complete; green upstream CI | Crash/reopen at provider and tool boundaries | No duplicate unsafe effect; equivalent terminal result and budgets | Missing extension/tool hooks, opaque recovery, incompatible abort |
-| Usage ledger can own raw budget accounting | `worker.ts` counters | Stable ledger query/events | Compare totals through retries, deferred work, compaction, crash | Exact monotonic totals and durable sequence | Missing categories, late projection ambiguity, inaccessible ledger |
+| Durable drive can thin the worker | `stageExecution.ts` (+ `sdkAdapter.ts`) | Public drive enabled; all WP05 paths complete; green upstream CI | Crash/reopen at provider and tool boundaries | No duplicate unsafe effect; equivalent terminal result and budgets | Missing extension/tool hooks, opaque recovery, incompatible abort |
+| Usage ledger can own raw budget accounting | `stageExecution.ts` counters | Stable ledger query/events | Compare totals through retries, deferred work, compaction, crash | Exact monotonic totals and durable sequence | Missing categories, late projection ambiguity, inaccessible ledger |
 | Pi server can host local Perk runs | launch + worker | Experimental gate removed or API declared stable | Start/attach/cancel/restart concurrent sessions | Stable identity, recovery, extension loading, attach semantics | Races, single-user assumptions, missing auth/config isolation |
 | Pi server can replace GHA remote execution | `run_worker.py` + CI | Remote deployment/auth/job contract documented | End-to-end remote worktree run and delivery | Equivalent isolation, logs, cancellation, credentials, artifacts | Server remains local/session-only or lacks delivery integration |
 | Lanes can replace some child sessions | subagent/wave bridge | Concurrent lane drive and isolation normative | Two read-only roles + one tool-using role | Equivalent model/tool/context isolation and better recovery | Shared effects/context leak or no per-lane policy |
@@ -826,9 +824,9 @@ These principles constrain later plans without selecting one now:
   to session-file linkage
 - [`src/perk/learn/session_jsonl.py`](../../src/perk/learn/session_jsonl.py) — independent v3
   session parser
-- [`extension/worker/worker.ts`](../../extension/worker/worker.ts) — bounded SDK headless drive
-- [`extension/worker/readOnlySession.ts`](../../extension/worker/readOnlySession.ts) — isolated
-  read-only child sessions
+- [`extension/worker/stageExecution.ts`](../../extension/worker/stageExecution.ts) +
+  [`extension/worker/sdkAdapter.ts`](../../extension/worker/sdkAdapter.ts) — bounded SDK
+  headless drive
 - [`src/perk/run/run_worker.py`](../../src/perk/run/run_worker.py) — exterior remote worker
 - [`extension/surfaces/`](../../extension/surfaces) — UI/headless boundary
 - [`deepen-headless-execution/memo.md`](deepen-headless-execution/memo.md) — existing headless

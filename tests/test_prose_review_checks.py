@@ -151,7 +151,7 @@ def test_check_commands_table_is_exactly_the_reviewed_allowlist() -> None:
         ),
         "worker-test-pins": (
             "Worker prompt pins (node:test)",
-            ("node", "--test", "extension/worker/worker.test.ts"),
+            ("node", "--test", "extension/worker/stageExecution.test.ts"),
             300,
         ),
         "ruff": (

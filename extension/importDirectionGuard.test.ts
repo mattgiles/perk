@@ -17,7 +17,8 @@
 //      `waves/`, `worker/`) or future (`config/`, `execution/`, `session/` — the
 //      module-contracts ownership map's stable layer) — have no edge into the feature-policy
 //      homes — current (`doors/`, `factories/`, `adapters/`) or future (`authoring/`,
-//      `delivery/`, `codeReview/`, `learning/`) — beyond the one ratcheted allowlist entry.
+//      `delivery/`, `codeReview/`, `learning/`) — beyond the ratcheted allowlist (EMPTY today:
+//      the last entry died when the plan-read gate moved behind the stage-execution seam).
 //      Mechanisms take dependencies as parameters; feature policy calls mechanisms, never the
 //      reverse. (`surfaces/` is the sanctioned rendering seam, not a feature home —
 //      mechanism→surfaces edges stay allowed.)
@@ -44,6 +45,13 @@
 //      activation-day census, shrink-only via the stale arm (the census only burns down as
 //      registrations migrate into `pi/`). A LOCATION ratchet, not a runtime
 //      single-registration proof — the dogfood gate carries the runtime observation.
+//   F. Worker-plane confinement: the only production edge into `worker/` from outside is
+//      `workerMain.ts → worker/stageExecution.ts` (exact-set — doubling as the live-edge
+//      non-vacuity floor); the only production edge into the private `worker/sdkAdapter.ts` is
+//      `worker/stageExecution.ts → worker/sdkAdapter.ts`; and across `workerMain.ts` + every
+//      file under `worker/`, ONLY the adapter may carry an `@earendil-works/*` specifier
+//      (type edges count) — and it must carry ≥ 1 (the positive floor: the SDK vocabulary
+//      provably lives in the adapter and the extractor still sees package specifiers).
 //
 // Test-only `typescript` import: the guard lexes with the exact-pinned `typescript` devDependency;
 // production sources gain no imports (`bareImportGuard.test.ts` scans production files only, and
@@ -84,12 +92,11 @@ const FEATURE_HOMES = [
   "learning/",
 ];
 
-// Confined by Node 3.1 (stage-execution seam; the plan-read gate moves behind it). The stale arm
-// doubles as a live positive control: the scanner MUST see this real cross-directory edge, so an
-// extraction/resolution regression cannot pass silently.
-const MECHANISM_EDGE_ALLOWLIST: Array<{ from: string; to: string }> = [
-  { from: "worker/worker.ts", to: "doors/lifecycleGates.ts" },
-];
+// EMPTY — and ratcheted (shrink-only): the last entry (`worker/worker.ts →
+// doors/lifecycleGates.ts`) died when `planReadInstruction` moved behind the stage-execution
+// seam into `substrate/prompts.ts`. Any future entry requires operator confirmation and names
+// the node that owns its removal.
+const MECHANISM_EDGE_ALLOWLIST: Array<{ from: string; to: string }> = [];
 
 // The FROZEN extension/ top-level directory census — the directories that existed when this
 // guard was born. NEVER append here: ANY new directory fails this guard until the
@@ -392,6 +399,37 @@ function checkRegistrationConfinement(
 }
 
 /**
+ * Worker-plane confinement (Rule F) computations — deliberately Rule-F-specific (no new generic
+ * rule helper: the underlying edge-map/extractor machinery is already control-proven by
+ * controls 1/2), shared by the production assertion and its mutation control so the control
+ * exercises the SAME comparison logic. `inbound` = every production edge into `worker/` from
+ * outside; `adapterEdges` = every production edge into the private `worker/sdkAdapter.ts`;
+ * `sdkCarriers` = the census files (`workerMain.ts` + every `worker/` file) carrying a direct
+ * `@earendil-works/*` specifier (type edges count — same lexer as the edge map).
+ */
+function workerConfinement(
+  files: string[],
+  edges: Map<string, string[]>,
+  read: (file: string) => string,
+): { inbound: string[]; adapterEdges: string[]; sdkCarriers: string[] } {
+  const inbound: string[] = [];
+  const adapterEdges: string[] = [];
+  for (const [from, targets] of edges) {
+    for (const to of targets) {
+      if (to.startsWith("worker/") && !from.startsWith("worker/")) {
+        inbound.push(`${from} → ${to}`);
+      }
+      if (to === "worker/sdkAdapter.ts") adapterEdges.push(`${from} → ${to}`);
+    }
+  }
+  const census = files.filter((file) => file === "workerMain.ts" || file.startsWith("worker/"));
+  const sdkCarriers = census.filter((file) =>
+    extractSpecifiers(read(file)).some((spec) => spec.startsWith("@earendil-works/")),
+  );
+  return { inbound: inbound.sort(), adapterEdges: adapterEdges.sort(), sdkCarriers };
+}
+
+/**
  * Census rule: live top-level dirs must equal `frozen ∪ keys(anchored)` set-exactly; the frozen
  * census and the anchored registrations never overlap (a new directory registers ONLY in
  * `ANCHORED_DIRS` — the frozen list never grows); and every anchored dir carries ≥1 anchor,
@@ -599,6 +637,41 @@ test("Rule E: Pi registration only in approved adapter/composition files (frozen
   );
 });
 
+test("Rule F: worker-plane confinement (exact edges; SDK specifiers only in the adapter)", () => {
+  const { files, edges } = scan();
+  const { inbound, adapterEdges, sdkCarriers } = workerConfinement(
+    files,
+    edges,
+    readProductionFile,
+  );
+  // (1) Exact-set: the ONLY production edge into worker/ from outside is the composition
+  // root → seam edge — which doubles as the live-edge non-vacuity floor (an empty scan or a
+  // dropped edge map could never produce exactly this edge).
+  assert.deepEqual(
+    inbound,
+    ["workerMain.ts → worker/stageExecution.ts"],
+    "the production edges into worker/ from outside must be exactly " +
+      "workerMain.ts → worker/stageExecution.ts — no other production file may import into the " +
+      "worker plane; call the seam through workerMain or move the mechanism into substrate/.",
+  );
+  // (2) Exact-set: the private adapter has exactly one importer — the seam.
+  assert.deepEqual(
+    adapterEdges,
+    ["worker/stageExecution.ts → worker/sdkAdapter.ts"],
+    "worker/sdkAdapter.ts is PRIVATE to the seam: its only production importer is " +
+      "worker/stageExecution.ts (tests may import it deliberately; production never).",
+  );
+  // (3) The SDK-specifier census: only the adapter carries @earendil-works/* — and it MUST
+  // carry ≥ 1 (the positive floor: the SDK vocabulary provably lives in the adapter and the
+  // extractor still sees package specifiers). Covers the seam and any future worker/ file.
+  assert.deepEqual(
+    sdkCarriers,
+    ["worker/sdkAdapter.ts"],
+    "across workerMain.ts + worker/*, only worker/sdkAdapter.ts may carry an " +
+      "@earendil-works/* specifier (type edges count) — and it must carry at least one.",
+  );
+});
+
 // ---------------------------------------------------------------------------------------------
 // Non-vacuity controls (synthetic inputs through the SAME pure functions; no production edits)
 // ---------------------------------------------------------------------------------------------
@@ -610,7 +683,7 @@ test("control 1: corpus + edge-map floors and known anchors", () => {
     "index.ts",
     "substrate/config.ts",
     "waves/reportWave.ts",
-    "worker/worker.ts",
+    "worker/stageExecution.ts",
   ]) {
     assert.ok(files.includes(anchor), `scan missed ${anchor} — guard is misaimed`);
   }
@@ -715,11 +788,13 @@ test("control 6: direction-rule fixtures (violation, allowlisted, stale, future 
   );
   assert.deepEqual(flagged.violations, [{ from: "substrate/x.ts", to: "doors/y.ts" }]);
 
+  // A synthetic allowlist entry (the live allowlist is empty): a matched entry is neither a
+  // violation nor stale.
   const allowlisted = checkDirection(
-    new Map([["worker/worker.ts", ["doors/lifecycleGates.ts"]]]),
+    new Map([["worker/x.ts", ["doors/y.ts"]]]),
     MECHANISM_HOMES,
     FEATURE_HOMES,
-    MECHANISM_EDGE_ALLOWLIST,
+    [{ from: "worker/x.ts", to: "doors/y.ts" }],
   );
   assert.deepEqual(allowlisted.violations, [], "the allowlisted edge shape must not be flagged");
   assert.deepEqual(allowlisted.stale, [], "a matched allowlist entry must not read as stale");
@@ -929,4 +1004,34 @@ test("control 11: registration-confinement fixtures (violation, approved, legacy
     "a registration outside pi//composition/legacy must fail",
   );
   assert.deepEqual(stale, ["doors/gone.ts"], "a legacy entry with no live token must fail");
+});
+
+test("control 12: Rule F mutation fixtures (foreign edge into the seam; a seam SDK specifier)", () => {
+  // A synthetic doors/ → seam edge, threaded through the SAME comparison logic as the
+  // production assertion, must break the exact-set.
+  const mutated = new Map([...scan().edges].map(([file, targets]) => [file, [...targets]]));
+  mutated.set("doors/x.ts", [...(mutated.get("doors/x.ts") ?? []), "worker/stageExecution.ts"]);
+  const { inbound } = workerConfinement(scan().files, mutated, readProductionFile);
+  assert.ok(
+    inbound.includes("doors/x.ts → worker/stageExecution.ts"),
+    "the synthetic foreign edge into the seam was NOT flagged",
+  );
+  assert.notDeepEqual(
+    inbound,
+    ["workerMain.ts → worker/stageExecution.ts"],
+    "the exact-set comparison must fail once a foreign edge exists",
+  );
+
+  // A synthetic seam-file @earendil-works specifier, threaded through the SAME census logic
+  // (extractSpecifiers over fixture text), must join the carrier list — breaking the exact-set.
+  const fixtureRead = (file: string): string =>
+    file === "worker/stageExecution.ts"
+      ? 'import type { Api } from "@earendil-works/pi-ai";'
+      : readProductionFile(file);
+  const { sdkCarriers } = workerConfinement(scan().files, scan().edges, fixtureRead);
+  assert.deepEqual(
+    sdkCarriers,
+    ["worker/sdkAdapter.ts", "worker/stageExecution.ts"],
+    "the synthetic seam SDK specifier was NOT flagged by the census",
+  );
 });

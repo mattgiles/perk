@@ -108,7 +108,7 @@ CHECK_COMMANDS: dict[CheckId, CheckCommand] = {
     ),
     "worker-test-pins": CheckCommand(
         label="Worker prompt pins (node:test)",
-        argv=("node", "--test", "extension/worker/worker.test.ts"),
+        argv=("node", "--test", "extension/worker/stageExecution.test.ts"),
         timeout_seconds=300,
     ),
     "ruff": CheckCommand(

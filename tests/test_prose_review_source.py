@@ -1518,7 +1518,7 @@ def test_every_real_typescript_fragment_is_batch_covered_through_the_python_adap
             selectors.append(routed_fragment.fragment.selector)
             total += 1
 
-    assert total == 291
+    assert total == 289
     adapter = _typescript_adapter()
     for relative, selectors in selectors_by_path.items():
         text = (ROOT / relative).read_text(encoding="utf-8")

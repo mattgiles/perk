@@ -1,7 +1,8 @@
 // End-to-end worker tests: drive a FULL stage headlessly via the REAL runtime factory.
 //
-// Unlike `worker.test.ts` (which injects a hand-rolled `FakeSession` via `deps.createRuntime`), this
-// tier drives a full `implement`/`address` stage through the production `defaultCreateRuntime` —
+// Unlike `stageExecution.test.ts` (which injects a hand-rolled `FakeSession` via
+// `deps.createRuntime`), this tier drives a full `implement`/`address` stage through the
+// production `defaultCreateRuntime` —
 // real Pi session, the real `@mgiles/perk` extension loaded from a temp worktree's `.pi/settings.json`,
 // the real bind/subscribe loop — driven by a FAUX pi-ai model that scripts the terminating tool
 // calls, with NO live GitHub (the terminating tools' Python delegation is stubbed via PERK_BIN).
@@ -9,7 +10,8 @@
 // (§8.11). Test-only: no worker/Python/contract change.
 
 import assert from "node:assert/strict";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import {
@@ -21,7 +23,10 @@ import {
 } from "@earendil-works/pi-ai";
 import { agentScratchDir, type PlanRef, runEventsPath } from "../substrate/cache.ts";
 import { fakePerkRouter, fauxModelRuntime, scaffoldWorkerWorktree } from "../testing/harness.ts";
-import { type DriveStage, driveStage, type RunEvent } from "./worker.ts";
+// Test-side adapter import: the E2E tier mints the nominal selection deliberately (the faux
+// runtime + faux model ride the SAME production `defaultCreateRuntime` path).
+import { WorkerModelSelection } from "./sdkAdapter.ts";
+import { type DriveStage, type RunEvent, runStage } from "./stageExecution.ts";
 
 // Extension delivery is the PRODUCTION load path: `defaultCreateRuntime` layers disk settings
 // (`SettingsManager.create(worktree, throwawayAgentDir)`), so the scaffold's `.pi/settings.json`
@@ -77,13 +82,12 @@ async function runDrive(opts: {
 
   const events: RunEvent[] = [];
   try {
-    const outcome = await driveStage(
+    const outcome = await runStage(
       {
         worktree: cwd,
         stage: opts.stage,
         initialPrompt: opts.initialPrompt ?? `Drive the ${opts.stage} stage.`,
-        model: reg.getModel() as unknown as Model<Api>,
-        modelRuntime: reg.modelRuntime,
+        model: new WorkerModelSelection(reg.modelRuntime, reg.getModel() as unknown as Model<Api>),
         budget: BUDGET,
       },
       // When `fileSink`, omit the array sink so the production default NDJSON file sink runs; then
@@ -137,12 +141,23 @@ const implementHappyResponses = () => [
   idle(),
 ];
 
+/** The throwaway agentDir prefix `defaultCreateRuntime` mints under tmpdir (dispose removes it). */
+function throwawayAgentDirs(): Set<string> {
+  return new Set(readdirSync(tmpdir()).filter((name) => name.startsWith("perk-worker-agent-")));
+}
+
 test("e2e: implement HAPPY — faux model calls submit → completed/submit_tool + full event stream", async () => {
+  const dirsBefore = throwawayAgentDirs();
   const { outcome, events, cwd, runId } = await runDrive({
     stage: "implement",
     routes: implementHappyRoutes,
     responses: implementHappyResponses(),
   });
+
+  // The dispose-time removal: the drive's throwaway agentDir no longer exists afterwards (no
+  // NEW perk-worker-agent-* entry survives the drive; pre-existing entries are outside scope).
+  const leaked = [...throwawayAgentDirs()].filter((name) => !dirsBefore.has(name));
+  assert.deepEqual(leaked, [], "the throwaway agentDir is removed at dispose");
 
   assert.equal(outcome.status, "completed");
   assert.equal(outcome.terminal_signal, "submit_tool");

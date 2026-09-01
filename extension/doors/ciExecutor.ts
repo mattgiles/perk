@@ -11,9 +11,8 @@
 //
 // "Read-only" here is a property of THIS MODULE and its OUTPUT, not a sandbox (see the threat
 // model below). The executor reuses the handoff machinery — `capForModel` + scratch +
-// double-delivery + fail-closed — but NOT the session runner: a configured command is mechanics,
-// not judgment, so there is no LLM turn in this path (that would inject nondeterminism). It also
-// does NOT call `runReadOnlyChild` (whose `success` means "ran", carrying no exit code).
+// double-delivery + fail-closed — but NOT a session runner: a configured command is mechanics,
+// not judgment, so there is no LLM turn in this path (that would inject nondeterminism).
 //
 // Threat model & the safety boundary (read first):
 //   `pi.exec("bash", ["-lc", cmd])` runs whatever the `[[ci.checks]]` command string says, with
@@ -38,10 +37,10 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 import { atomicWriteFileSync, ensureRunScratch, scratchDir } from "../substrate/cache.ts";
 import { registerPerkCommand } from "../substrate/command.ts";
 import { type CiCheck, loadPerkConfig } from "../substrate/config.ts";
+import { capForModel, DEFAULT_MODEL_VISIBLE_CAP } from "../substrate/modelVisible.ts";
 import { paramsOf, stringParam } from "../substrate/toolParams.ts";
 import { branchOf, rebuildWorkflowState } from "../substrate/workflowState.ts";
 import { report } from "../surfaces/report.ts";
-import { capForModel, DEFAULT_MODEL_VISIBLE_CAP } from "../worker/readOnlySession.ts";
 
 /** The result of running one configured check. `passed = exitCode === 0`. */
 export interface CiCheckResult {

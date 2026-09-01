@@ -17,11 +17,10 @@ import { bindingSuffix } from "../substrate/bindingDelivery.ts";
 import type { PlanRef } from "../substrate/cache.ts";
 import { registerPerkCommand } from "../substrate/command.ts";
 import { commitsSince, headSha, worktreeDirty } from "../substrate/git.ts";
-import { render } from "../substrate/prompts.ts";
+import { planReadInstruction, render } from "../substrate/prompts.ts";
 import type { ToolGating } from "../substrate/toolGating.ts";
 import { branchOf, rebuildWorkflowState } from "../substrate/workflowState.ts";
 import { report, type Severity } from "../surfaces/report.ts";
-import { planReadInstruction } from "./lifecycleGates.ts";
 
 /** The driven-commit guidance (pure + exported for offline tests and the drive-coverage guard). */
 export function commitAndCompactGuidance(): string {

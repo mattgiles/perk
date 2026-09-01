@@ -257,8 +257,8 @@ is a storage implementation, not a new definition of Perk workflow semantics.
 
 **Candidate current sources:**
 
-- [`extension/worker/worker.ts`](../../extension/worker/worker.ts)
-- [`extension/worker/readOnlySession.ts`](../../extension/worker/readOnlySession.ts)
+- [`extension/worker/stageExecution.ts`](../../extension/worker/stageExecution.ts) and its
+  private SDK adapter [`extension/worker/sdkAdapter.ts`](../../extension/worker/sdkAdapter.ts)
 - the deep report-wave runner in
   [`extension/waves/reportWave.ts`](../../extension/waves/reportWave.ts)
 - run-event normalization and budget/terminal classification
@@ -307,7 +307,7 @@ memory and RPC adapters plus one shared behavioral suite. Callers should continu
 deep `runReportWave()` interface rather than learning `ping`, `spawn`, completion races, stop,
 and aggregate-file mechanics.
 
-The worker's present `DriveStageDeps` and structural Pi mirrors are useful internal test seams.
+The worker's present `StageRunDeps` and structural Pi mirrors are useful internal test seams.
 They should not become the new library's external interface.
 
 ### 5. TypeScript presentation library

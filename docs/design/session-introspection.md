@@ -48,8 +48,8 @@ The canonical parser is pi's own `SessionManager` (TS): `SessionManager.open(pat
 `listAll()`, `getBranch()`, `buildSessionContext()`. It handles version migration (v1→v3) and the
 tree walk. **Do not re-implement the parser in Python** — it would drift from pi as the format
 evolves. A thin TS worker opens a session and emits a stable JSON **digest**. perk already does
-in-process `SessionManager` work in `extension/readOnlySession.ts`, so this is a natural extension,
-not new machinery.
+in-process `SessionManager` work in the stage-execution seam's private SDK adapter
+(`extension/worker/sdkAdapter.ts`), so this is a natural extension, not new machinery.
 
 ### Layer 2 — the digest schema (the queryable product; perk-owned, deterministic)
 
@@ -158,8 +158,9 @@ Phases 2–4 are each plausible objective nodes; phase 1 is a one-line addition 
 
 - pi: `pi/reference/session-format.md` (entry types, `SessionManager` API), `pi/start-here/sessions.md`,
   `pi/programmatic-usage/sdk.md`.
-- perk: `extension/workflowState.ts` (the live `getBranch` rebuild), `extension/readOnlySession.ts`
-  (in-process `SessionManager` precedent), `extension/index.ts` (`getSessionFile()`),
+- perk: `extension/workflowState.ts` (the live `getBranch` rebuild), `extension/worker/sdkAdapter.ts`
+  (in-process `SessionManager` precedent; the earlier `readOnlySession.ts` runner was deleted as
+  dead code), `extension/index.ts` (`getSessionFile()`),
   the `perk:*` custom entry types (`perk:workflow-state` / `perk:checkpoint` /
   `perk:objective-budget` / `perk:mode-context` / `perk:plan-context`).
 - related perk docs: `docs/bugs/learn-is-a-stub.md` (Tier 3 consumes this),

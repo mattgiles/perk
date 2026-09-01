@@ -4,7 +4,8 @@ The worker-prompt-parity twins: the
 stage dispatcher (:func:`_initial_prompt`), the per-backend plan-read instruction
 (:func:`_plan_read_instruction`), the implement/address/learn primers, and the prompt assembler
 (:func:`_resolve_prompt`) that appends the resolved skill bindings. Each builder is byte-identical
-to its TypeScript twin (``worker.ts`` / ``lifecycleGates.ts``); drift in either plane fails the
+to its TypeScript twin (``stageExecution.ts`` / ``substrate/prompts.ts`` /
+``lifecycleGates.ts``); drift in either plane fails the
 paired parity suites.
 
 The binding suffix is the **cold-local** delivery arm only: warm sessions and the remote worker
@@ -44,7 +45,7 @@ def _initial_prompt(
 
 def _plan_read_instruction(provider: str, pr_id: str, url: str) -> str:
     """The per-backend plan-read instruction — the prompt SSOT for "how do I read the
-    saved plan". Byte-identical to `extension/doors/lifecycleGates.ts::planReadInstruction` (the TS
+    saved plan". Byte-identical to `extension/substrate/prompts.ts::planReadInstruction` (the TS
     twin); drift in either plane fails the paired parity suites. ``github`` reads via `gh`;
     ``linear`` points at the pi-mono-linear tools with an `open <url>` fallback; any other
     provider falls back to opening the url.
@@ -65,7 +66,8 @@ def _implement_prompt(plan_ref: plan.PlanRef) -> str:
     """The implement-stage primer. The wording lives in the canonical template
     ``prompts/stages/implement.md``, rendered identically by both planes via the shared render seam
     (contracts.md §8.31); branching stays in code — only the ``read_cmd`` var (the provider-selected
-    plan-read instruction) differs. Byte-identical to its TS twins ``worker.ts::initialPromptFor``
+    plan-read instruction) differs. Byte-identical to its TS twins
+    ``stageExecution.ts::initialPromptFor``
     and ``lifecycleGates.ts::implementHandoffPrompt`` (the warm handoff now carries the same
     "Progress tracking:" tail — the prior shorter near-copy omission is removed). One golden case
     (`implement-github`) plus the thin per-plane composition tests replace the substring parity.

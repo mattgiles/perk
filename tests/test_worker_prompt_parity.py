@@ -1,13 +1,14 @@
 """Cross-plane prompt-parity invariant.
 
-The headless worker (`extension/worker/worker.ts` `initialPromptFor`) re-derives the
+The headless worker (`extension/worker/stageExecution.ts` `initialPromptFor`) re-derives the
 `implement`/`address` initial prompts in TypeScript, and MUST stay textually in lockstep with the
 Python cold door (`perk/run/launch.py._implement_prompt`/`_address_prompt`). The `implement`
 substrings here are the shared invariant: the SAME literals are asserted from the TS side in
-`extension/worker/worker.test.ts`, so a drift in EITHER plane (someone edits one prompt but not the
-other) fails CI here or there. The `address` body now renders from the canonical templates
-`prompts/stages/address/*` (contracts.md §8.31), so its cross-plane byte-parity is proved by the
-`address-*` live-parity cases; only a thin classify-step shape assertion remains here.
+`extension/worker/stageExecution.test.ts`, so a drift in EITHER plane (someone edits one prompt
+but not the other) fails CI here or there. The `address` body now renders from the canonical
+templates `prompts/stages/address/*` (contracts.md §8.31), so its cross-plane byte-parity is
+proved by the `address-*` live-parity cases; only a thin classify-step shape assertion remains
+here.
 """
 
 from perk import plan
@@ -18,9 +19,9 @@ from perk.run.launch import (
     _plan_read_instruction,
 )
 
-# Keep in lockstep with ADDRESS_SUBSTRINGS in extension/worker/worker.test.ts.
+# Keep in lockstep with ADDRESS_SUBSTRINGS in extension/worker/stageExecution.test.ts.
 # The linear plan-read instruction — keep in lockstep with LINEAR_READ_SUBSTRINGS in
-# extension/worker/worker.test.ts (the literal fragments of the shared linear arm).
+# extension/worker/stageExecution.test.ts (the literal fragments of the shared linear arm).
 LINEAR_READ_SUBSTRINGS = [
     "use the `linear_get_issue` tool",
     "then `linear_list_comments`",
@@ -48,7 +49,7 @@ def test_implement_prompt_composes_template_with_read_cmd() -> None:
 def test_address_prompt_names_the_classify_tool_without_transcribed_mechanics() -> None:
     """The classify step is ONE `classify_review_feedback` call — the tool owns the wave
     mechanics and reads the classifier model at execute time, so nothing schema- or model-shaped
-    rides the prompt (mirrors the TS-side pins in extension/worker/worker.test.ts)."""
+    rides the prompt (mirrors the TS-side pins in extension/worker/stageExecution.test.ts)."""
     prompt = _address_prompt(_PLAN_REF)
     assert "classify_review_feedback" in prompt
     assert "passing `model:" not in prompt
@@ -83,7 +84,7 @@ _LINEAR_PLAN_REF = plan.PlanRef(
 
 def test_implement_prompt_linear_carries_linear_read_substrings() -> None:
     """The linear arm of the implement prompt — the same literals are asserted from
-    the TS side (LINEAR_READ_SUBSTRINGS in extension/worker/worker.test.ts)."""
+    the TS side (LINEAR_READ_SUBSTRINGS in extension/worker/stageExecution.test.ts)."""
     prompt = _implement_prompt(_LINEAR_PLAN_REF)
     for needle in LINEAR_READ_SUBSTRINGS:
         assert needle in prompt, f"linear implement prompt drifted — missing: {needle!r}"
