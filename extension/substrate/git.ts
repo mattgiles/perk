@@ -96,13 +96,9 @@ export function headSha(cwd: string): string | null {
   return git(cwd, ["rev-parse", "HEAD"]);
 }
 
-/**
- * The symbolic branch pointer HEAD names (`git symbolic-ref -q HEAD`, e.g. `refs/heads/main`)
- * — resolvable even for an UNBORN branch (no commits yet), which is what the one caller uses it
- * for: discriminating "unborn" from "unreadable" when `headSha` returns null. A detached HEAD
- * fails here (null), but there `headSha` already succeeds. **Fail-open**: null on any failure
- * (not a repo, git missing), never throws.
- */
+/** The symbolic branch pointer HEAD names (`git symbolic-ref -q HEAD`) — resolvable even for
+ * an UNBORN branch, so callers can discriminate "unborn" from "unreadable" when `headSha` is
+ * null (a detached HEAD fails here, but there `headSha` succeeds). **Fail-open**: null. */
 export function symbolicHead(cwd: string): string | null {
   return git(cwd, ["symbolic-ref", "-q", "HEAD"]);
 }

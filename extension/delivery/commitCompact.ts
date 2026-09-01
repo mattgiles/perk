@@ -1,64 +1,45 @@
-// The commit + compaction feature op (the `/commit-and-compact` policy tier), Pi-free.
-//
-// Owns the invocation arm ORDER (read-only gate → indeterminate-worktree → clean → dirty/drive),
-// the fail-safe posture (never compact without PROOF of a new commit; the skip arms carry typed
-// reasons the adapter turns into loud `/compact`-naming warnings), the observation ordering
-// (the worktree probed only past the gate; the HEAD baseline captured ONLY on the drive arm),
-// the one-shot pending record, and the settle gate. The feature carries no prose and no
-// severity — every outcome is data; rendering, reporting, and Pi delivery live in the adapter
-// (`pi/v1/delivery/commitCompact.ts`).
-//
-// The settle gate proves a NEW COMMIT (HEAD movement as range evidence — `commitsSince`
-// documents "evidence, not proof"), NOT end-state cleanliness: the driven guidance deliberately
-// tells the model to stage selectively, so a still-dirty tree after a real commit compacts BY
-// DESIGN (the continuation's evidence-first reorientation is the designed recovery for leftover
-// work). No ancestry check — range evidence over the baseline is the deliberate posture.
+// The commit + compaction feature op (the `/commit-and-compact` policy tier), Pi-free. Owns the
+// invocation arm ORDER (read-only gate → indeterminate-worktree → clean → dirty/drive), the
+// fail-safe posture (never compact without PROOF of a new commit), the observation ordering
+// (worktree probed only past the gate; HEAD captured ONLY on the drive arm), the pending record,
+// and the settle gate — which proves a NEW COMMIT (HEAD movement as range evidence, NOT
+// end-state cleanliness: the guidance stages selectively, so a still-dirty tree after a real
+// commit compacts BY DESIGN; no ancestry check). The feature carries no prose and no severity —
+// every outcome is data; rendering and Pi delivery live in `pi/v1/delivery/commitCompact.ts`.
 
-/**
- * The discriminated pre-commit HEAD baseline. `unborn` (a resolvable branch pointer with no
+/** The discriminated pre-commit HEAD baseline. `unborn` (a resolvable branch pointer, no
  * commits yet) and `unprovable` (the probe failed outright) are DIFFERENT facts: an unborn
- * baseline lets a readable settle sha prove the first commit, while an unprovable baseline can
- * prove nothing — compacting on it would trust an unverified "HEAD moved" comparison, so the
- * settle arm skips it outright (fail-safe closure).
- */
+ * baseline lets a readable settle sha prove the first commit; an unprovable baseline can prove
+ * nothing, so the settle arm skips it outright (fail-safe closure). */
 export type HeadBaseline =
   | { kind: "sha"; sha: string }
   | { kind: "unborn" }
   | { kind: "unprovable" };
 
-/** The one-shot record the dirty/drive arm mints for the settle gate. */
+/** The one-shot record the dirty/drive arm mints — the settle gate compares against it. */
 export interface PendingCompact {
   cwd: string;
-  /** The pre-commit HEAD baseline — the settle gate compares against this. */
   baseline: HeadBaseline;
 }
-
-/** The completions with nothing to commit (the commit half was vacuous) — the only completions
- * an invocation-time compact may carry. */
-export type ImmediateCompletion = { outcome: "clean" } | { outcome: "read-only" };
 
 /** The typed compaction completion the continuation render keys on. */
 export type CommitCompactCompletion =
   | { outcome: "committed"; commits: string | null }
-  | ImmediateCompletion;
+  | { outcome: "clean" }
+  | { outcome: "read-only" };
 
-/**
- * The git observations the operation consumes — observations ONLY (the read-only gate rides a
- * plain parameter, not a one-implementation callback). ONE production composition exists,
- * module-private in the installer, over `substrate/git.ts`.
- */
+/** The git observations the operation consumes — observations ONLY (the read-only gate rides a
+ * plain parameter); ONE production composition, module-private in the installer, over
+ * `substrate/git.ts`. `commitsSince(cwd, null)` lists everything — the unborn arm. */
 export interface CommitCompactDeps {
-  /** `git status --porcelain` — null when the state cannot be determined (fail-open). */
   worktreeDirty(cwd: string): boolean | null;
-  /** The discriminated HEAD probe (fail-open into `unprovable`, never a throw). */
   headState(cwd: string): HeadBaseline;
-  /** The `--oneline` range listing past `from` (null lists everything — the unborn arm). */
   commitsSince(cwd: string, from: string | null): string | null;
 }
 
 /** The invocation decision — compact now, skip loudly, or drive the commit turn. */
 export type CommitCompactStart =
-  | { kind: "compact-now"; completion: ImmediateCompletion }
+  | { kind: "compact-now"; completion: { outcome: "clean" } | { outcome: "read-only" } }
   | { kind: "skip"; reason: "indeterminate-worktree" }
   | { kind: "drive"; pending: PendingCompact };
 
@@ -67,41 +48,27 @@ export type CommitCompactSettle =
   | { kind: "skip"; reason: "no-commit" | "unprovable-baseline" }
   | { kind: "compact-now"; completion: { outcome: "committed"; commits: string | null } };
 
-/**
- * The invocation arms, in the pinned order: gate (NO git reads) → indeterminate worktree →
- * clean → dirty. Only the dirty arm probes HEAD (`deps.headState`) and mints the pending
- * record — every other arm resolves immediately. An `unprovable` baseline still DRIVES the
- * commit (committing is always safe); the settle gate is where it refuses to compact.
- */
+/** The invocation arms, in the pinned order: gate (NO git reads) → indeterminate worktree →
+ * clean → dirty. Only the dirty arm probes HEAD and mints the pending record. An `unprovable`
+ * baseline still DRIVES (committing is always safe); the settle gate is where it refuses. */
 export function startCommitAndCompact(
   cwd: string,
   gateActive: boolean,
   deps: CommitCompactDeps,
 ): CommitCompactStart {
-  if (gateActive) {
-    return { kind: "compact-now", completion: { outcome: "read-only" } };
-  }
+  if (gateActive) return { kind: "compact-now", completion: { outcome: "read-only" } };
   const dirty = deps.worktreeDirty(cwd);
-  if (dirty === null) {
-    // Fail-safe: never compact when uncommitted work might exist.
-    return { kind: "skip", reason: "indeterminate-worktree" };
-  }
-  if (!dirty) {
-    return { kind: "compact-now", completion: { outcome: "clean" } };
-  }
+  // Fail-safe: never compact when uncommitted work might exist.
+  if (dirty === null) return { kind: "skip", reason: "indeterminate-worktree" };
+  if (!dirty) return { kind: "compact-now", completion: { outcome: "clean" } };
   return { kind: "drive", pending: { cwd, baseline: deps.headState(cwd) } };
 }
 
-/**
- * The settle gate: compact only on PROOF of a new commit against the minted baseline.
- * - `sha` baseline: an unreadable or unchanged settle HEAD skips (`no-commit`); a moved HEAD
- *   compacts with the `commitsSince(sha)` range listing.
- * - `unborn` baseline: a readable settle sha IS the proof of the first commit — compact with
- *   the full listing (`commitsSince(null)`); unreadable skips (`no-commit`).
- * - `unprovable` baseline: skip OUTRIGHT — even a readable settle HEAD proves nothing against a
- *   baseline that was never captured (the fail-safe closure; the adapter's warning names the
- *   `/compact` escape hatch).
- */
+/** The settle gate: compact only on PROOF of a new commit against the minted baseline.
+ * `sha` — an unreadable/unchanged settle HEAD skips; a moved HEAD compacts with the range
+ * listing. `unborn` — a readable settle sha IS the first-commit proof (full listing);
+ * unreadable skips. `unprovable` — skip OUTRIGHT: even a readable settle HEAD proves nothing
+ * against a baseline that was never captured. */
 export function settleCommitAndCompact(
   pending: PendingCompact,
   deps: CommitCompactDeps,
@@ -110,20 +77,13 @@ export function settleCommitAndCompact(
   switch (baseline.kind) {
     case "unprovable":
       return { kind: "skip", reason: "unprovable-baseline" };
-    case "sha": {
-      const settled = deps.headState(pending.cwd);
-      if (settled.kind !== "sha" || settled.sha === baseline.sha) {
-        return { kind: "skip", reason: "no-commit" };
-      }
-      const commits = deps.commitsSince(pending.cwd, baseline.sha);
-      return { kind: "compact-now", completion: { outcome: "committed", commits } };
-    }
+    case "sha":
     case "unborn": {
       const settled = deps.headState(pending.cwd);
-      if (settled.kind !== "sha") {
+      if (settled.kind !== "sha" || (baseline.kind === "sha" && settled.sha === baseline.sha)) {
         return { kind: "skip", reason: "no-commit" };
       }
-      const commits = deps.commitsSince(pending.cwd, null);
+      const commits = deps.commitsSince(pending.cwd, baseline.kind === "sha" ? baseline.sha : null);
       return { kind: "compact-now", completion: { outcome: "committed", commits } };
     }
   }
